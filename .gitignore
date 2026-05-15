@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.tsbuildinfo
+transport-clock*.png
+transport-clock-screenshot*.png
+.env
+.env.*
+!.env.example
