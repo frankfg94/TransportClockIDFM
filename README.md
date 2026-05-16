@@ -17,6 +17,22 @@ Puis ouvrir `http://127.0.0.1:5173`.
 
 La clé PRIM est lue depuis `.env.local` via `IDFM_API_KEY`. Vite proxyfie les appels `"/api/idfm"` vers `https://prim.iledefrance-mobilites.fr/marketplace` et ajoute l'en-tête `apikey` côté serveur de développement.
 
+## Déployer sur Cloudflare Pages
+
+Le proxy Vite ci-dessus ne fonctionne qu'en développement local. En production,
+les appels `"/api/idfm"` sont relayés par la Cloudflare Pages Function
+`functions/api/idfm/[[path]].ts`.
+
+Dans Cloudflare Pages, ajouter une variable d'environnement nommée
+`IDFM_API_KEY` avec la clé PRIM, puis redéployer le site. Le fichier
+`.env.local` reste local à la machine et n'est pas envoyé à Cloudflare.
+
+Configuration conseillée :
+
+- Build command : `npm.cmd run build` ou `npm run build` selon l'environnement.
+- Build output directory : `dist`.
+- Environment variable : `IDFM_API_KEY`.
+
 ## Ajouter une ligne ou un arrêt
 
 Modifier `src/config/transitBoards.ts` et ajouter une entrée dans `transitBoards`.

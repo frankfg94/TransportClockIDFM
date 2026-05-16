@@ -35,6 +35,16 @@ function setOpen(value: boolean): void {
   open.value = value;
 }
 
+function toggleOpen(): void {
+  setOpen(!open.value);
+}
+
+function toggleOpenFromClick(event: MouseEvent): void {
+  if (event.detail === 0) {
+    toggleOpen();
+  }
+}
+
 function scheduleClose(): void {
   if (blurTimer) {
     window.clearTimeout(blurTimer);
@@ -58,7 +68,8 @@ function selectNetwork(network?: TransitFamilyOption): void {
       type="button"
       :disabled="disabled || loading"
       :aria-expanded="open"
-      @click="setOpen(!open)"
+      @pointerdown.prevent="toggleOpen"
+      @click="toggleOpenFromClick"
     >
       {{ loading ? "Chargement..." : buttonLabel }}
     </button>
@@ -160,4 +171,3 @@ function selectNetwork(network?: TransitFamilyOption): void {
   padding: 8px;
 }
 </style>
-
