@@ -19,6 +19,8 @@ import type {
 
 const VIEWBOX_WIDTH = 1080;
 const VIEWBOX_HEIGHT = 620;
+const SVG_PADDING_X = 78;
+const SVG_PADDING_Y = 68;
 const MAP_COORDINATE_PADDING = 0.08;
 const TILE_SERVER_SHARDS = ["a", "b", "c"];
 
@@ -26,10 +28,13 @@ export async function loadDetailedLineMap(
   line: LineSearchOption,
 ): Promise<LineMapViewModel> {
   const sequences = await fetchLineRouteSequences(line);
+  const mapSequences = sequences.filter(
+    (sequence) => !isSupplementalRouteSequence(sequence.label),
+  );
   const stopsById = new Map<string, LineMapStopView>();
   const branches: LineMapBranchView[] = [];
 
-  sequences.forEach((sequence) => {
+  (mapSequences.length > 0 ? mapSequences : sequences).forEach((sequence) => {
     const stopIds = sequence.stops.map((stop) => stop.id);
 
     sequence.stops.forEach((stop) => {
@@ -48,7 +53,7 @@ export async function loadDetailedLineMap(
         routeIds: [sequence.id],
         routeLabels: [sequence.label],
       });
-    });
+  });
 
     branches.push({
       id: sequence.id,
@@ -56,7 +61,7 @@ export async function loadDetailedLineMap(
       direction: sequence.direction,
       stopIds,
     });
-  });
+    });
 
   const stops = applyMapCoordinates(Array.from(stopsById.values()), branches);
 
@@ -231,14 +236,36 @@ function createMapTiles(stops: LineMapStopView[]): MapTile[] {
       const top = tileY / scale;
       const tileSizeX = 1 / scale;
       const tileSizeY = 1 / scale;
+      const normalizedLeft = normalizeProjectedCoordinate(
+        left,
+        bounds.minX,
+        bounds.maxX,
+      );
+      const normalizedTop = normalizeProjectedCoordinate(
+        top,
+        bounds.minY,
+        bounds.maxY,
+      );
+      const normalizedRight = normalizeProjectedCoordinate(
+        left + tileSizeX,
+        bounds.minX,
+        bounds.maxX,
+      );
+      const normalizedBottom = normalizeProjectedCoordinate(
+        top + tileSizeY,
+        bounds.minY,
+        bounds.maxY,
+      );
+      const x = toSvgX(normalizedLeft);
+      const y = toSvgY(normalizedTop);
 
       tiles.push({
         id: `${zoom}/${tileX}/${tileY}`,
         url: `https://${shard}.basemaps.cartocdn.com/light_all/${zoom}/${wrappedTileX}/${tileY}.png`,
-        x: ((left - bounds.minX) / (bounds.maxX - bounds.minX)) * VIEWBOX_WIDTH,
-        y: ((top - bounds.minY) / (bounds.maxY - bounds.minY)) * VIEWBOX_HEIGHT,
-        width: (tileSizeX / (bounds.maxX - bounds.minX)) * VIEWBOX_WIDTH + 1,
-        height: (tileSizeY / (bounds.maxY - bounds.minY)) * VIEWBOX_HEIGHT + 1,
+        x,
+        y,
+        width: toSvgX(normalizedRight) - x + 1,
+        height: toSvgY(normalizedBottom) - y + 1,
       });
     }
   }
@@ -305,7 +332,7 @@ function isExpressChord(
   stopById: Map<string, LineMapStopView>,
   medianLength: number,
 ): boolean {
-  if (!medianLength || segment.length < medianLength * 2.35) {
+  if (!medianLength || segment.length < medianLength * 1.7) {
     return false;
   }
 
@@ -338,7 +365,7 @@ function isStopBetweenSegment(
   }
 
   const distanceToSegment = getDistanceToSegment(stop, fromStop, toStop);
-  const tolerance = Math.max(0.018, Math.min(0.055, segmentLength * 0.12));
+  const tolerance = Math.max(0.018, Math.min(0.055, segmentLength * 0.18));
 
   return distanceToSegment <= tolerance;
 }
@@ -431,6 +458,23 @@ function normalizeProjectedCoordinate(
 
 function normalizeMapRatio(ratio: number): number {
   return MAP_COORDINATE_PADDING + ratio * (1 - MAP_COORDINATE_PADDING * 2);
+}
+
+function toSvgX(value: number): number {
+  return SVG_PADDING_X + value * (VIEWBOX_WIDTH - SVG_PADDING_X * 2);
+}
+
+function toSvgY(value: number): number {
+  return SVG_PADDING_Y + value * (VIEWBOX_HEIGHT - SVG_PADDING_Y * 2);
+}
+
+function isSupplementalRouteSequence(label: string): boolean {
+  const normalizedLabel = normalizeText(label);
+
+  return (
+    normalizedLabel.includes("additional service") ||
+    normalizedLabel.includes("service supplementaire")
+  );
 }
 
 function addUniqueValue(values: string[], value: string): void {

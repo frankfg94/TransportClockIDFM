@@ -6,6 +6,9 @@ export default defineConfig(({ mode }) => {
   const idfmApiKey = env.IDFM_API_KEY ?? "";
 
   return {
+    define: {
+      __IDFM_API_KEY_CONFIGURED__: JSON.stringify(Boolean(idfmApiKey.trim())),
+    },
     plugins: [vue()],
     server: {
       port: 5173,

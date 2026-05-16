@@ -43,7 +43,12 @@ interface BoardState {
 
 const REFRESH_INTERVAL_MS = 30_000;
 const preferences = reactive(createDefaultPreferences(transitBoards));
-
+let activeAlarmAudio:
+  | {
+      audioContext: AudioContext;
+      closeTimer?: number;
+    }
+  | undefined;
 const states = reactive<Record<string, BoardState>>({});
 const refreshing = ref(false);
 const lastRefresh = ref<Date>();
@@ -65,6 +70,7 @@ const patternLoading = ref(false);
 const patternError = ref("");
 const pageVisible = ref(true);
 const nowTick = ref(Date.now());
+const primApiKeyConfigured = __IDFM_API_KEY_CONFIGURED__;
 let refreshTimer: number | undefined;
 const alarmTimers = new Map<string, number>();
 let toastTimer: number | undefined;
@@ -78,13 +84,6 @@ const allBoards = computed(() => [
 const visibleBoards = computed(() =>
   allBoards.value.filter((board) =>
     preferences.visibleBoardIds.includes(board.id),
-  ),
-);
-
-const totalDepartures = computed(() =>
-  visibleBoards.value.reduce(
-    (total, board) => total + (states[board.id]?.departures.length ?? 0),
-    0,
   ),
 );
 
@@ -132,7 +131,7 @@ function ensureBoardState(boardId: string): BoardState {
 }
 
 async function refreshBoard(boardId: string): Promise<void> {
-  if (!isPageVisible()) {
+  if (!primApiKeyConfigured || !isPageVisible()) {
     return;
   }
 
@@ -164,7 +163,7 @@ async function refreshBoard(boardId: string): Promise<void> {
 }
 
 async function refreshAll(): Promise<void> {
-  if (!isPageVisible()) {
+  if (!primApiKeyConfigured || !isPageVisible()) {
     refreshing.value = false;
     return;
   }
@@ -174,6 +173,22 @@ async function refreshAll(): Promise<void> {
   await Promise.all(visibleBoards.value.map((board) => refreshBoard(board.id)));
   lastRefresh.value = new Date();
   refreshing.value = false;
+}
+function stopSoftAlarm(): void {
+  if (!activeAlarmAudio) {
+    return;
+  }
+
+  if (activeAlarmAudio.closeTimer) {
+    window.clearTimeout(activeAlarmAudio.closeTimer);
+  }
+
+  const { audioContext } = activeAlarmAudio;
+  activeAlarmAudio = undefined;
+
+  if (audioContext.state !== "closed") {
+    void audioContext.close().catch(() => undefined);
+  }
 }
 
 function toggleBoardVisibility(boardId: string): void {
@@ -397,19 +412,19 @@ function showAlarmToast(alarm: DepartureAlarm): void {
   }
 
   toastTimer = window.setTimeout(() => {
-    alarmToast.value = undefined;
+    dismissAlarmToast();
   }, 60_000);
 }
 
 function dismissAlarmToast(): void {
   alarmToast.value = undefined;
+  stopSoftAlarm();
 
   if (toastTimer) {
     window.clearTimeout(toastTimer);
     toastTimer = undefined;
   }
 }
-
 function showNativeNotification(alarm: DepartureAlarm): void {
   if (!("Notification" in window) || Notification.permission !== "granted") {
     return;
@@ -433,8 +448,9 @@ async function requestNotificationPermission(): Promise<void> {
 
   await Notification.requestPermission();
 }
-
 function playSoftAlarm(): void {
+  stopSoftAlarm();
+
   const AudioContextClass =
     window.AudioContext ??
     (window as Window & { webkitAudioContext?: typeof AudioContext })
@@ -445,23 +461,64 @@ function playSoftAlarm(): void {
   }
 
   const audioContext = new AudioContextClass();
-  const gain = audioContext.createGain();
-  const oscillator = audioContext.createOscillator();
 
-  oscillator.type = "sine";
-  oscillator.frequency.setValueAtTime(523.25, audioContext.currentTime);
-  oscillator.frequency.setValueAtTime(659.25, audioContext.currentTime + 0.18);
-  oscillator.frequency.setValueAtTime(783.99, audioContext.currentTime + 0.36);
-  gain.gain.setValueAtTime(0.0001, audioContext.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.08, audioContext.currentTime + 0.04);
-  gain.gain.exponentialRampToValueAtTime(
-    0.0001,
-    audioContext.currentTime + 0.85,
+  const masterGain = audioContext.createGain();
+  const alarmVolume = 0.6;
+  const durationSeconds = 30;
+  const patternDuration = 1.2;
+
+  masterGain.gain.setValueAtTime(alarmVolume, audioContext.currentTime);
+  masterGain.connect(audioContext.destination);
+
+  activeAlarmAudio = {
+    audioContext,
+  };
+
+  const notes = [
+    { frequency: 523.25, offset: 0 },
+    { frequency: 659.25, offset: 0.18 },
+    { frequency: 783.99, offset: 0.36 },
+  ];
+
+  const playTone = (frequency: number, startTime: number): void => {
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(frequency, startTime);
+
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.exponentialRampToValueAtTime(1, startTime + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.28);
+
+    oscillator.connect(gain);
+    gain.connect(masterGain);
+
+    oscillator.start(startTime);
+    oscillator.stop(startTime + 0.35);
+  };
+
+  const now = audioContext.currentTime;
+
+  for (let time = 0; time < durationSeconds; time += patternDuration) {
+    for (const note of notes) {
+      const startTime = now + time + note.offset;
+
+      if (startTime < now + durationSeconds) {
+        playTone(note.frequency, startTime);
+      }
+    }
+  }
+
+  masterGain.gain.setValueAtTime(alarmVolume, now);
+  masterGain.gain.exponentialRampToValueAtTime(0.0001, now + durationSeconds);
+
+  activeAlarmAudio.closeTimer = window.setTimeout(
+    () => {
+      stopSoftAlarm();
+    },
+    (durationSeconds + 1) * 1000,
   );
-  oscillator.connect(gain);
-  gain.connect(audioContext.destination);
-  oscillator.start();
-  oscillator.stop(audioContext.currentTime + 0.9);
 }
 
 transitBoards.forEach((board) => ensureBoardState(board.id));
@@ -487,7 +544,7 @@ function stopRefreshTimer(): void {
 }
 
 function refreshOnReturn(): void {
-  if (!isPageVisible()) {
+  if (!primApiKeyConfigured || !isPageVisible()) {
     return;
   }
 
@@ -495,20 +552,6 @@ function refreshOnReturn(): void {
   startRefreshTimer();
   scheduleAlarmTimers();
   void refreshAll();
-}
-
-function handlePatternRequest(event: Event): void {
-  const payload = (
-    event as CustomEvent<{
-      board: TransitBoardConfig;
-      directionGroup: DirectionDepartureGroup;
-      departure: Departure;
-    }>
-  ).detail;
-
-  if (payload?.board && payload.departure) {
-    void openPatternModal(payload);
-  }
 }
 
 function handleVisibilityChange(): void {
@@ -558,14 +601,13 @@ onMounted(() => {
   allBoards.value.forEach((board) => ensureBoardState(board.id));
   pageVisible.value = isPageVisible();
   document.addEventListener("visibilitychange", handleVisibilityChange);
-  window.addEventListener("transport-clock:show-pattern", handlePatternRequest);
   window.addEventListener("focus", refreshOnReturn);
   clockTimer = window.setInterval(() => {
     nowTick.value = Date.now();
   }, 1000);
   scheduleAlarmTimers();
 
-  if (pageVisible.value) {
+  if (primApiKeyConfigured && pageVisible.value) {
     startRefreshTimer();
     void refreshAll();
   }
@@ -581,138 +623,170 @@ onBeforeUnmount(() => {
   if (clockTimer) {
     window.clearInterval(clockTimer);
   }
+  stopSoftAlarm();
   document.removeEventListener("visibilitychange", handleVisibilityChange);
-  window.removeEventListener(
-    "transport-clock:show-pattern",
-    handlePatternRequest,
-  );
   window.removeEventListener("focus", refreshOnReturn);
 });
 </script>
 
 <template>
   <main class="app-shell">
-    <section class="topbar" aria-label="État des prochains passages">
-      <div>
-        <p class="eyebrow">Île-de-France Mobilités</p>
-        <h1>Prochains passages</h1>
-      </div>
+    <div
+      class="app-content"
+      :class="{ 'app-content--locked': !primApiKeyConfigured }"
+      :aria-hidden="!primApiKeyConfigured"
+    >
+      <section class="topbar" aria-label="État des prochains passages">
+        <div>
+          <p class="eyebrow">Île-de-France Mobilités</p>
+          <h1>Prochains passages</h1>
+        </div>
 
-      <div class="topbar__meta">
-        <div v-if="nextAlarmRemaining" class="topbar__alarm">
-          <div class="topbar__alarm_without_icon">
-            <BellRing />
-            <div>
-              <span>{{ nextAlarmRemaining }}</span>
-              <small>avant alarme</small>
+        <div class="topbar__meta">
+          <div v-if="nextAlarmRemaining" class="topbar__alarm">
+            <div class="topbar__alarm_without_icon">
+              <BellRing />
+              <div>
+                <span>{{ nextAlarmRemaining }}</span>
+                <small>avant alarme</small>
+              </div>
             </div>
           </div>
+
+          <div>
+            <span>{{ formatClock(lastRefresh) }}</span>
+            <small>dernière màj</small>
+          </div>
+          <button type="button" :disabled="refreshing" @click="refreshAll">
+            {{ refreshing ? "Actualisation..." : "Actualiser" }}
+          </button>
         </div>
-        <div>
-          <span>{{ totalDepartures }}</span>
-          <small>passages suivis</small>
+
+        <div class="topbar__controls">
+          <BoardVisibilityControls
+            :boards="allBoards"
+            :visible-board-ids="preferences.visibleBoardIds"
+            @toggle="toggleBoardVisibility"
+          />
+          <button
+            class="button-secondary"
+            type="button"
+            @click="stationModalOpen = true"
+          >
+            <span class="button-plus" aria-hidden="true">+</span>
+            Ajouter
+          </button>
         </div>
-        <div>
-          <span>{{ formatClock(lastRefresh) }}</span>
-          <small>dernière màj</small>
-        </div>
-        <button type="button" :disabled="refreshing" @click="refreshAll">
-          {{ refreshing ? "Actualisation..." : "Actualiser" }}
-        </button>
-      </div>
-
-      <div class="topbar__controls">
-        <BoardVisibilityControls
-          :boards="allBoards"
-          :visible-board-ids="preferences.visibleBoardIds"
-          @toggle="toggleBoardVisibility"
-        />
-        <button
-          class="button-secondary"
-          type="button"
-          @click="stationModalOpen = true"
-        >
-          <span class="button-plus" aria-hidden="true">+</span>
-          Ajouter
-        </button>
-      </div>
-    </section>
-
-    <section class="boards-grid" aria-label="Horaires par arrêt">
-      <TransitBoard
-        v-for="board in visibleBoards"
-        :key="board.id"
-        :board="board"
-        :departures="states[board.id].departures"
-        :direction-groups="states[board.id].directionGroups"
-        :collapsed-direction-ids="getBoardCollapsedDirectionIds(board.id)"
-        :loading="states[board.id].loading"
-        :error="states[board.id].error"
-        :updated-at="states[board.id].updatedAt"
-        :removable="isCustomBoard(board.id)"
-        :alarm-departure-ids="getBoardAlarmDepartureIds(board.id)"
-        @remove="removeCustomBoard(board.id)"
-        @schedule-alarm="openAlarmModal"
-        @toggle-direction="toggleDirection(board.id, $event)"
-      />
-    </section>
-
-    <StationBoardModal
-      :open="stationModalOpen"
-      @add="addCustomBoard"
-      @close="stationModalOpen = false"
-    />
-
-    <DepartureAlarmModal
-      :board="alarmTarget?.board"
-      :departure="alarmTarget?.departure"
-      :open="Boolean(alarmTarget)"
-      @cancel="cancelAlarmModal"
-      @confirm="confirmAlarm"
-    />
-
-    <DeparturePatternModal
-      :board="patternTarget?.board"
-      :departure="patternTarget?.departure"
-      :error="patternError"
-      :loading="patternLoading"
-      :open="Boolean(patternTarget)"
-      :pattern="patternData"
-      @close="closePatternModal"
-    />
-
-    <div v-if="alarmToast" class="alarm-alert-backdrop" role="presentation">
-      <section
-        class="alarm-toast"
-        role="dialog"
-        aria-live="assertive"
-        aria-modal="true"
-      >
-        <div
-          class="alarm-toast__line"
-          :style="{ backgroundColor: alarmToast.lineColor }"
-        >
-          {{ alarmToast.lineLabel }}
-        </div>
-        <div>
-          <p class="eyebrow">Alarme de passage</p>
-          <strong>{{ alarmToast.destination }}</strong>
-          <span>
-            {{ alarmToast.boardTitle }} · {{ alarmToast.monitoringLabel }}
-            <template v-if="alarmToast.platform">
-              · Quai {{ alarmToast.platform }}</template
-            >
-          </span>
-        </div>
-        <button
-          class="icon-button"
-          type="button"
-          aria-label="Fermer l'alerte"
-          @click="dismissAlarmToast"
-        >
-          ×
-        </button>
       </section>
+
+      <section class="boards-grid" aria-label="Horaires par arrêt">
+        <TransitBoard
+          v-for="board in visibleBoards"
+          :key="board.id"
+          :board="board"
+          :departures="states[board.id].departures"
+          :direction-groups="states[board.id].directionGroups"
+          :collapsed-direction-ids="getBoardCollapsedDirectionIds(board.id)"
+          :loading="states[board.id].loading"
+          :error="states[board.id].error"
+          :updated-at="states[board.id].updatedAt"
+          :removable="isCustomBoard(board.id)"
+          :alarm-departure-ids="getBoardAlarmDepartureIds(board.id)"
+          @remove="removeCustomBoard(board.id)"
+          @schedule-alarm="openAlarmModal"
+          @show-pattern="openPatternModal"
+          @toggle-direction="toggleDirection(board.id, $event)"
+        />
+      </section>
+
+      <StationBoardModal
+        :open="stationModalOpen"
+        @add="addCustomBoard"
+        @close="stationModalOpen = false"
+      />
+
+      <DepartureAlarmModal
+        :board="alarmTarget?.board"
+        :departure="alarmTarget?.departure"
+        :open="Boolean(alarmTarget)"
+        @cancel="cancelAlarmModal"
+        @confirm="confirmAlarm"
+      />
+
+      <DeparturePatternModal
+        :board="patternTarget?.board"
+        :departure="patternTarget?.departure"
+        :error="patternError"
+        :loading="patternLoading"
+        :open="Boolean(patternTarget)"
+        :pattern="patternData"
+        @close="closePatternModal"
+      />
+
+      <div v-if="alarmToast" class="alarm-alert-backdrop" role="presentation">
+        <section
+          class="alarm-toast"
+          role="dialog"
+          aria-live="assertive"
+          aria-modal="true"
+        >
+          <div
+            class="alarm-toast__line"
+            :style="{ backgroundColor: alarmToast.lineColor }"
+          >
+            {{ alarmToast.lineLabel }}
+          </div>
+          <div>
+            <p class="eyebrow">Alarme de passage</p>
+            <strong>{{ alarmToast.destination }}</strong>
+            <span>
+              {{ alarmToast.boardTitle }} · {{ alarmToast.monitoringLabel }}
+              <template v-if="alarmToast.platform">
+                · Quai {{ alarmToast.platform }}</template
+              >
+            </span>
+          </div>
+          <button
+            class="icon-button"
+            type="button"
+            aria-label="Fermer l'alerte"
+            @click="dismissAlarmToast"
+          >
+            ×
+          </button>
+        </section>
+      </div>
     </div>
+
+    <Transition name="modal-scale">
+      <section
+        v-if="!primApiKeyConfigured"
+        class="api-key-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="api-key-title"
+      >
+        <p class="eyebrow">Configuration PRIM</p>
+        <h2 id="api-key-title">Clé API IDFM PRIM manquante</h2>
+        <p>
+          Ajoute une clé PRIM gratuite dans le fichier d'environnement pour
+          activer les prochains passages.
+        </p>
+        <ol>
+          <li>
+            <a
+              href="https://prim.iledefrance-mobilites.fr/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Create a free PRIM Key
+            </a>
+          </li>
+          <li>Use it to set the <code>IDFM_API_KEY</code> value.</li>
+          <li>Restart the website.</li>
+          <li>Enjoy!</li>
+        </ol>
+      </section>
+    </Transition>
   </main>
 </template>

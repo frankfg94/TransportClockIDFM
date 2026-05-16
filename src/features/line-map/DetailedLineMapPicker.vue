@@ -87,6 +87,10 @@ const svgStyle = computed(() => ({
   width: `${VIEWBOX_WIDTH * zoom.value}px`,
 }));
 
+const stopRadius = computed(() => Math.max(3.4, 7 / zoom.value));
+const stopHaloRadius = computed(() => Math.max(8, 16 / zoom.value));
+const stopStrokeWidth = computed(() => Math.max(1.8, 4 / zoom.value));
+
 const tooltipStyle = computed(() => {
   if (!hoveredStop.value) {
     return {};
@@ -397,6 +401,7 @@ function getStopStyle(stop: LineMapStopView) {
   return {
     fill: isSelected ? color : "#ffffff",
     stroke: color,
+    strokeWidth: `${stopStrokeWidth.value}px`,
   };
 }
 
@@ -551,13 +556,13 @@ function getLabelPriority(stop: LineMapStopView, requiredIds: Set<string>): numb
             class="line-map-stop__halo"
             :cx="toSvgX(stop.x)"
             :cy="toSvgY(stop.y)"
-            r="16"
+            :r="stopHaloRadius"
           />
           <circle
             class="line-map-stop__dot"
             :cx="toSvgX(stop.x)"
             :cy="toSvgY(stop.y)"
-            r="7"
+            :r="stopRadius"
             :style="getStopStyle(stop)"
           />
           <text

@@ -10,6 +10,7 @@ const props = defineProps<{
   disabled?: boolean;
   loading?: boolean;
   placeholder?: string;
+  enableGrid?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -21,7 +22,9 @@ const open = ref(false);
 let blurTimer: number | undefined;
 
 const buttonLabel = computed(() =>
-  props.modelValue ? getLineDisplayName(props.modelValue) : props.placeholder ?? "Sélectionner une ligne",
+  props.modelValue
+    ? getLineDisplayName(props.modelValue)
+    : (props.placeholder ?? "Sélectionner une ligne"),
 );
 
 onBeforeUnmount(() => {
@@ -105,7 +108,7 @@ function getLineDisplayName(line: LineSearchOption): string {
           @mousedown.prevent="selectLine(line)"
         >
           <LineIconBadge :line="line" />
-          <span>{{ getLineDisplayName(line) }}</span>
+          <!-- <span>{{ getLineDisplayName(line) }}</span> -->
         </button>
       </template>
       <div v-if="!loading && options.length === 0" class="rich-combobox__state">
@@ -155,7 +158,8 @@ function getLineDisplayName(line: LineSearchOption): string {
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 18px 45px rgba(16, 35, 63, 0.14);
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   left: 0;
   max-height: 280px;

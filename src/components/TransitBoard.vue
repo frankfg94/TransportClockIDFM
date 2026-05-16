@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Bell, BellRing, ChevronDown, Route } from "lucide-vue-next";
+import { Bell, BellRing, ChevronDown, Route, Trash } from "lucide-vue-next";
+import LineIconBadge from "./LineIconBadge.vue";
 import type {
   Departure,
   DirectionDepartureGroup,
@@ -27,11 +28,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   remove: [];
-  "schedule-alarm": [payload: {
-    board: TransitBoardConfig;
-    directionGroup: DirectionDepartureGroup;
-    departure: Departure;
-  }];
+  "schedule-alarm": [
+    payload: {
+      board: TransitBoardConfig;
+      directionGroup: DirectionDepartureGroup;
+      departure: Departure;
+    },
+  ];
+  "show-pattern": [payload: DeparturePatternPayload];
   toggleDirection: [directionId: string];
 }>();
 
@@ -43,6 +47,7 @@ const displayedDeparturesCount = computed(() =>
 );
 
 const statusLabels: Record<string, string> = {
+  noReport: "À l'heure",
   onTime: "À l'heure",
   delayed: "Retardé",
   early: "En avance",
@@ -84,7 +89,7 @@ function formatWait(value?: string, vehicleAtStop = false): string {
 }
 
 function statusLabel(status?: string): string {
-  return status ? statusLabels[status] ?? status : "";
+  return status ? (statusLabels[status] ?? status) : "";
 }
 
 function isDirectionCollapsed(directionId: string): boolean {
@@ -142,13 +147,11 @@ function formatDepartureMeta(departure: Departure): string {
 }
 
 function canShowPattern(): boolean {
-  return ["metro", "rer", "train"].includes(props.board.line.mode);
+  return true;
 }
 
 function openPatternForDeparture(payload: DeparturePatternPayload): void {
-  window.dispatchEvent(
-    new CustomEvent("transport-clock:show-pattern", { detail: payload }),
-  );
+  emit("show-pattern", payload);
 }
 
 function normalizeText(value?: string): string {
@@ -162,16 +165,11 @@ function normalizeText(value?: string): string {
 <template>
   <article class="board" :style="{ '--line-color': board.line.color }">
     <header class="board__header">
-      <div
-        class="line-badge"
-        :style="{
-          backgroundColor: board.line.color,
-          color: board.line.textColor,
-        }"
+      <LineIconBadge
+        class="board-line-icon"
+        :line="board.line"
         :aria-label="board.line.longName"
-      >
-        {{ board.line.shortName }}
-      </div>
+      />
       <div>
         <p class="board__mode">{{ board.line.longName }}</p>
         <h2>{{ board.title }}</h2>
@@ -184,7 +182,7 @@ function normalizeText(value?: string): string {
         aria-label="Supprimer cette station"
         @click="emit('remove')"
       >
-        Supprimer
+        <Trash />
       </button>
     </header>
 
@@ -201,7 +199,9 @@ function normalizeText(value?: string): string {
         v-for="group in directionGroups"
         :key="group.id"
         class="direction-section"
-        :class="{ 'direction-section--collapsed': isDirectionCollapsed(group.id) }"
+        :class="{
+          'direction-section--collapsed': isDirectionCollapsed(group.id),
+        }"
       >
         <button
           class="direction-section__header"
@@ -211,14 +211,17 @@ function normalizeText(value?: string): string {
         >
           <div class="direction-section__title">
             <p>Direction</p>
-            <h3>{{ group.label }}</h3>
-            <span v-if="group.subtitle">{{ group.subtitle }}</span>
+            <h3 style="font-weight: 600;">{{ group.label }}</h3>
           </div>
 
           <div class="last-service">
-          <span>Dernier passage</span>
+            <span>Dernier passage</span>
             <strong>
-              {{ group.lastDeparture ? formatClock(group.lastDeparture.time) : "--:--" }}
+              {{
+                group.lastDeparture
+                  ? formatClock(group.lastDeparture.time)
+                  : "--:--"
+              }}
             </strong>
             <small v-if="group.lastDeparture">
               {{ formatLastDetail(group) }}
@@ -236,16 +239,50 @@ function normalizeText(value?: string): string {
                 v-for="departure in group.departures"
                 :key="departure.id"
                 class="departure"
-                :class="{ 'departure--cancelled': departure.status === 'cancelled' }"
-                @click="canShowPattern() && openPatternForDeparture({ board, directionGroup: group, departure })"
+                :class="{
+                  'departure--cancelled': departure.status === 'cancelled',
+                }"
+                @click="
+                  canShowPattern() &&
+                  openPatternForDeparture({
+                    board,
+                    directionGroup: group,
+                    departure,
+                  })
+                "
               >
                 <button
                   v-if="canShowPattern()"
                   class="departure__main departure__main-button"
                   type="button"
-                  @keydown.enter.prevent="openPatternForDeparture({ board, directionGroup: group, departure })"
-                  @keydown.space.prevent="openPatternForDeparture({ board, directionGroup: group, departure })"
-                  @pointerdown.prevent="openPatternForDeparture({ board, directionGroup: group, departure })"
+                  @click.stop="
+                    openPatternForDeparture({
+                      board,
+                      directionGroup: group,
+                      departure,
+                    })
+                  "
+                  @keydown.enter.prevent="
+                    openPatternForDeparture({
+                      board,
+                      directionGroup: group,
+                      departure,
+                    })
+                  "
+                  @keydown.space.prevent="
+                    openPatternForDeparture({
+                      board,
+                      directionGroup: group,
+                      departure,
+                    })
+                  "
+                  @pointerdown.stop.prevent="
+                    openPatternForDeparture({
+                      board,
+                      directionGroup: group,
+                      departure,
+                    })
+                  "
                 >
                   <strong>{{ departure.destination }}</strong>
                   <span v-if="formatDepartureMeta(departure)">
@@ -260,8 +297,15 @@ function normalizeText(value?: string): string {
                 </div>
 
                 <div class="departure__time">
-                  <strong>{{ formatWait(departure.expectedDepartureTime, departure.vehicleAtStop) }}</strong>
-                  <span>{{ formatClock(departure.expectedDepartureTime) }}</span>
+                  <strong>{{
+                    formatWait(
+                      departure.expectedDepartureTime,
+                      departure.vehicleAtStop,
+                    )
+                  }}</strong>
+                  <span>{{
+                    formatClock(departure.expectedDepartureTime)
+                  }}</span>
                 </div>
 
                 <div v-if="statusLabel(departure.status)" class="status-pill">
@@ -273,26 +317,59 @@ function normalizeText(value?: string): string {
                   class="departure-pattern-button"
                   type="button"
                   aria-label="Afficher la desserte"
-                  @click.stop="openPatternForDeparture({ board, directionGroup: group, departure })"
+                  @click.stop="
+                    openPatternForDeparture({
+                      board,
+                      directionGroup: group,
+                      departure,
+                    })
+                  "
+                  @pointerdown.stop.prevent="
+                    openPatternForDeparture({
+                      board,
+                      directionGroup: group,
+                      departure,
+                    })
+                  "
                 >
                   <Route :size="18" aria-hidden="true" />
                 </button>
 
                 <button
                   class="departure-alarm-button"
-                  :class="{ 'departure-alarm-button--active': hasAlarm(departure) }"
+                  :class="{
+                    'departure-alarm-button--active': hasAlarm(departure),
+                  }"
                   type="button"
-                  :aria-label="hasAlarm(departure) ? 'Alarme programmée' : 'Programmer une alarme'"
-                  @click.stop="emit('schedule-alarm', { board, directionGroup: group, departure })"
+                  :aria-label="
+                    hasAlarm(departure)
+                      ? 'Alarme programmée'
+                      : 'Programmer une alarme'
+                  "
+                  @click.stop="
+                    emit('schedule-alarm', {
+                      board,
+                      directionGroup: group,
+                      departure,
+                    })
+                  "
                 >
-                  <BellRing v-if="hasAlarm(departure)" :size="18" aria-hidden="true" />
+                  <BellRing
+                    v-if="hasAlarm(departure)"
+                    :size="18"
+                    aria-hidden="true"
+                  />
                   <Bell v-else :size="18" aria-hidden="true" />
                 </button>
               </li>
             </ol>
 
             <div v-else class="notice notice--compact">
-              {{ group.serviceEnded ? "Service terminé" : "Aucun passage imminent" }}
+              {{
+                group.serviceEnded
+                  ? "Service terminé"
+                  : "Aucun passage imminent"
+              }}
             </div>
           </div>
         </div>
@@ -301,7 +378,6 @@ function normalizeText(value?: string): string {
 
     <footer class="board__footer">
       <span>{{ displayedDeparturesCount }} passages</span>
-      <span v-if="updatedAt">Màj {{ formatClock(updatedAt.toISOString()) }}</span>
     </footer>
   </article>
 </template>

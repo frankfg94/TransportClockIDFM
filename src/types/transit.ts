@@ -88,6 +88,7 @@ export interface DepartureCall {
   city?: string;
   time?: string;
   current: boolean;
+  served: boolean;
 }
 
 export interface DepartureCallingPattern {
@@ -95,6 +96,7 @@ export interface DepartureCallingPattern {
   destination: string;
   serviceType: DepartureServiceType;
   calls: DepartureCall[];
+  lineTopology?: LineRouteSequence[];
   error?: string;
 }
 

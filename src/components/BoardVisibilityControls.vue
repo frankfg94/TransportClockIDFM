@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LineIconBadge from "./LineIconBadge.vue";
 import type { TransitBoardConfig } from "../types/transit";
 
 defineProps<{
@@ -27,11 +28,8 @@ function isVisible(boardId: string, visibleBoardIds: string[]): boolean {
       :aria-checked="isVisible(board.id, visibleBoardIds)"
       @click="emit('toggle', board.id)"
     >
-      <span
-        class="switch-control__line"
-        :style="{ backgroundColor: board.line.color, color: board.line.textColor }"
-      >
-        {{ board.line.shortName }}
+      <span class="switch-control__line">
+        <LineIconBadge :line="board.line" compact />
       </span>
       <span class="switch-control__label">{{ board.title }}</span>
       <span class="switch-control__track" aria-hidden="true">

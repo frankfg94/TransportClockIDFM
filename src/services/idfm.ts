@@ -16,6 +16,7 @@
   TransitFamilyOption,
   TransitBoardConfig,
 } from "../types/transit";
+import { createRatpLineIconUrls } from "./lineIcons";
 
 interface SiriTextValue {
   value?: string;
@@ -255,7 +256,7 @@ const familyOrder: TransitFamily[] = [
 
 const MAX_LINE_RESULTS = 1500;
 const MAX_STATION_RESULTS = 500;
-const MAX_MAP_ROUTES = 24;
+const MAX_MAP_ROUTES = 80;
 const MAX_ROUTE_STOPS = 260;
 
 export async function fetchTransitFamilyOptions(): Promise<TransitFamilyOption[]> {
@@ -348,66 +349,39 @@ export async function searchLineStations(
 export async function fetchLineRouteSequences(
   line: LineSearchOption,
 ): Promise<LineRouteSequence[]> {
-  const routes = await fetchLineRoutes(line);
-  const routeStops = await Promise.all(
-    routes.map(async (route) => ({
-      route,
-      stops: await fetchOrderedRouteStops(route),
-    })),
+  const sequences = await fetchLineRouteSequencesByLineId(
+    line.navitiaId,
+    line.label,
   );
-  const sequences: LineRouteSequence[] = [];
-  const seenBranchKeys = new Set<string>();
 
-  routeStops.forEach(({ route, stops }) => {
-    const sequence = dedupeStopSequence(
-      stops
-        .map(mapStopPointToLineRouteStop)
-        .filter((stop): stop is LineRouteStop => Boolean(stop)),
-    );
+  if (sequences.length > 0) {
+    return sequences;
+  }
 
-    if (sequence.length < 2) {
-      return;
-    }
+  const fallbackStations = await searchLineStations(line, "");
 
-    const stopIds = sequence.map((stop) => stop.id);
-    const branchKey = createCanonicalSequenceKey(stopIds);
-
-    if (seenBranchKeys.has(branchKey)) {
-      return;
-    }
-
-    seenBranchKeys.add(branchKey);
-
-    sequences.push({
-      id: route.id,
-      label: route.name ?? route.direction?.name ?? line.label,
-      direction: cleanNavitiaDirection(
-        route.direction?.name ?? route.name ?? line.label,
-      ),
-      stops: sequence,
-    });
-  });
-
-  if (sequences.length === 0) {
-    const fallbackStations = await searchLineStations(line, "");
-
-    if (fallbackStations.length > 1) {
-      sequences.push({
+  if (fallbackStations.length > 1) {
+    return [
+      {
         id: `${line.id}:fallback`,
         label: line.label,
+        direction: line.label,
         stops: fallbackStations.map((station) => ({
-          id: station.id,
+          id: createTopologyStationId(station.label),
           label: station.label,
           city: station.city,
           lon: undefined,
           lat: undefined,
-          station,
+          station: {
+            ...station,
+            id: createTopologyStationId(station.label),
+          },
         })),
-      });
-    }
+      },
+    ];
   }
 
-  return sequences;
+  return [];
 }
 
 export async function fetchLineRouteSummaries(
@@ -465,20 +439,31 @@ export async function fetchDepartureCallingPattern(
   board: TransitBoardConfig,
   departure: Departure,
 ): Promise<DepartureCallingPattern> {
+  const patternDeparture: Departure = {
+    ...departure,
+    stopName: departure.stopName || board.title,
+  };
   const lineId = board.schedule?.lineRef ?? navitiaLineIdFromSiriRef(board.line.ref);
   const routes = await fetchLineRoutesById(lineId);
-  const candidateRoutes = sortRoutesForDeparture(routes, departure);
+  const lineTopologyPromise = fetchLineRouteSequencesByLineId(
+    lineId,
+    board.line.shortName || board.line.longName,
+  ).catch(() => fetchLineTopologyFromRoutes(routes, board.line.shortName || board.line.longName));
+  const candidateRoutes = sortRoutesForDeparture(routes, patternDeparture);
 
   for (const route of candidateRoutes) {
-    const schedules = await fetchRouteSchedulesForDeparture(route, departure).catch(
+    const schedules = await fetchRouteSchedulesForDeparture(route, patternDeparture).catch(
       () => [],
     );
 
     for (const schedule of schedules) {
-      const pattern = mapRouteScheduleToCallingPattern(schedule, departure);
+      const pattern = mapRouteScheduleToCallingPattern(schedule, patternDeparture);
 
-      if (pattern && patternMatchesDepartureDestination(pattern, departure)) {
-        return pattern;
+      if (pattern && patternMatchesDepartureDestination(pattern, patternDeparture)) {
+        return {
+          ...pattern,
+          lineTopology: await lineTopologyPromise,
+        };
       }
     }
   }
@@ -493,12 +478,8 @@ export async function fetchDepartureCallingPattern(
         departureId: departure.id,
         destination: departure.destination,
         serviceType: "inconnu",
-        calls: stops.map((stop) =>
-          mapStopPointToDepartureCall(
-            stop,
-            stopMatchesDepartureStation(stop, departure),
-          ),
-        ),
+        calls: mapFallbackRouteStopsToCalls(stops, patternDeparture),
+        lineTopology: await lineTopologyPromise,
       };
     }
   }
@@ -508,8 +489,324 @@ export async function fetchDepartureCallingPattern(
     destination: departure.destination,
     serviceType: "inconnu",
     calls: [],
+    lineTopology: await lineTopologyPromise,
     error: "Desserte indisponible pour ce passage.",
   };
+}
+
+type RawLineTopologyRoute = {
+  id: string;
+  label: string;
+  stops: LineRouteStop[];
+};
+
+async function fetchLineRouteSequencesByLineId(
+  lineId: string,
+  lineLabel: string,
+): Promise<LineRouteSequence[]> {
+  const scheduleRoutes = await fetchLineScheduleTopologyRoutes(lineId).catch(
+    () => [],
+  );
+  const scheduleSequences = buildLineTopologySequences(
+    scheduleRoutes,
+    lineLabel,
+  );
+
+  if (scheduleSequences.length > 0) {
+    return scheduleSequences;
+  }
+
+  const routes = await fetchLineRoutesById(lineId).catch(() => []);
+
+  return fetchLineTopologyFromRoutes(routes, lineLabel).catch(() => []);
+}
+
+async function fetchLineScheduleTopologyRoutes(
+  lineId: string,
+): Promise<RawLineTopologyRoute[]> {
+  const serviceDay = getParisServiceDayWindow();
+  const searchParams = new URLSearchParams({
+    count: "100",
+    data_freshness: "base_schedule",
+    disable_disruption: "true",
+    disable_geojson: "true",
+    duration: "108000",
+    from_datetime: serviceDay.fromParam,
+    items_per_schedule: "1",
+  });
+
+  const response = await fetch(
+    `${NAVITIA_API_BASE}/lines/${encodeURIComponent(lineId)}/route_schedules?${searchParams}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const payload = (await response.json()) as NavitiaRouteSchedulesResponse;
+
+  return (payload.route_schedules ?? [])
+    .map((schedule, index) => {
+      const stops = dedupeStopSequence(
+        (schedule.table?.rows ?? [])
+          .map((row) => row.stop_point)
+          .filter((stop): stop is NavitiaStopPoint => Boolean(stop))
+          .map(mapStopPointToLineRouteStop)
+          .filter((stop): stop is LineRouteStop => Boolean(stop)),
+      );
+      const first = stops[0]?.label ?? "";
+      const last = stops[stops.length - 1]?.label ?? "";
+      const label = cleanNavitiaDirection(
+        schedule.display_informations?.direction ??
+        (first && last ? `${first} ↔ ${last}` : `Parcours ${index + 1}`),
+      );
+
+      return {
+        id: `schedule:${index}:${createStableId(`${first}-${last}-${label}`)}`,
+        label,
+        stops,
+      };
+    })
+    .filter((route) => route.stops.length >= 2);
+}
+
+async function fetchLineTopologyFromRoutes(
+  routes: NavitiaRoute[],
+  lineLabel: string,
+): Promise<LineRouteSequence[]> {
+  const routeStops = await Promise.all(
+    routes.map(async (route) => {
+      const stops = await fetchOrderedRouteStops(route).catch(() => []);
+      const sequence = dedupeStopSequence(
+        stops
+          .map(mapStopPointToLineRouteStop)
+          .filter((stop): stop is LineRouteStop => Boolean(stop)),
+      );
+
+      return {
+        id: route.id,
+        label: cleanNavitiaDirection(
+          route.name ?? route.direction?.name ?? lineLabel,
+        ),
+        stops: sequence,
+      };
+    }),
+  );
+
+  return buildLineTopologySequences(routeStops, lineLabel);
+}
+
+function buildLineTopologySequences(
+  rawRoutes: RawLineTopologyRoute[],
+  lineLabel: string,
+): LineRouteSequence[] {
+  const routes = dedupeRawTopologyRoutes(
+    rawRoutes
+      .map((route) => ({
+        ...route,
+        stops: dedupeStopSequence(route.stops),
+      }))
+      .filter((route) => route.stops.length >= 2),
+  );
+
+  if (routes.length === 0) {
+    return [];
+  }
+
+  const maxLength = Math.max(...routes.map((route) => route.stops.length));
+  const minimumLongRouteLength = Math.max(2, Math.floor(maxLength * 0.7));
+  const longRoutes = routes.filter(
+    (route) => route.stops.length >= minimumLongRouteLength,
+  );
+  const trunkStops = findCommonOrderedTrunk(longRoutes);
+
+  if (trunkStops.length >= 2 && trunkStops.length < maxLength) {
+    return buildTrunkAndBranchSequences(routes, trunkStops, lineLabel);
+  }
+
+  return routes
+    .sort((left, right) => right.stops.length - left.stops.length)
+    .slice(0, Math.min(routes.length, 12))
+    .map((route, index) => ({
+      id: route.id || `topology:route:${index}`,
+      label: route.label || lineLabel,
+      direction: route.label || lineLabel,
+      stops: route.stops,
+    }));
+}
+
+function findCommonOrderedTrunk(routes: RawLineTopologyRoute[]): LineRouteStop[] {
+  if (routes.length === 0) {
+    return [];
+  }
+
+  const [referenceRoute] = [...routes].sort(
+    (left, right) => right.stops.length - left.stops.length,
+  );
+  const commonStopIds = new Set(referenceRoute.stops.map((stop) => stop.id));
+
+  for (const route of routes) {
+    const routeStopIds = new Set(route.stops.map((stop) => stop.id));
+
+    for (const stopId of Array.from(commonStopIds)) {
+      if (!routeStopIds.has(stopId)) {
+        commonStopIds.delete(stopId);
+      }
+    }
+  }
+
+  const seen = new Set<string>();
+
+  return referenceRoute.stops.filter((stop) => {
+    if (!commonStopIds.has(stop.id) || seen.has(stop.id)) {
+      return false;
+    }
+
+    seen.add(stop.id);
+    return true;
+  });
+}
+
+function buildTrunkAndBranchSequences(
+  routes: RawLineTopologyRoute[],
+  trunkStops: LineRouteStop[],
+  lineLabel: string,
+): LineRouteSequence[] {
+  const trunkStopIds = new Set(trunkStops.map((stop) => stop.id));
+  const branchCandidates = new Map<string, LineRouteStop[]>();
+
+  for (const route of routes) {
+    let firstTrunkIndex = -1;
+    let lastTrunkIndex = -1;
+
+    route.stops.forEach((stop, index) => {
+      if (!trunkStopIds.has(stop.id)) {
+        return;
+      }
+
+      if (firstTrunkIndex === -1) {
+        firstTrunkIndex = index;
+      }
+
+      lastTrunkIndex = index;
+    });
+
+    if (firstTrunkIndex === -1 || lastTrunkIndex === -1) {
+      continue;
+    }
+
+    const startBranch = route.stops.slice(0, firstTrunkIndex);
+    const endBranch = route.stops.slice(lastTrunkIndex + 1);
+    const firstTrunkStop = route.stops[firstTrunkIndex];
+    const lastTrunkStop = route.stops[lastTrunkIndex];
+
+    if (startBranch.length > 0) {
+      upsertBranchCandidate(
+        branchCandidates,
+        [firstTrunkStop, ...startBranch.reverse()],
+      );
+    }
+
+    if (endBranch.length > 0) {
+      upsertBranchCandidate(
+        branchCandidates,
+        [lastTrunkStop, ...endBranch],
+      );
+    }
+  }
+
+  const sequences: LineRouteSequence[] = [
+    {
+      id: `topology:${createStableId(lineLabel)}:trunk`,
+      label: `${lineLabel} · tronc commun`,
+      direction: "Tronc commun",
+      stops: trunkStops,
+    },
+  ];
+
+  Array.from(branchCandidates.values())
+    .sort(compareBranchSequences)
+    .forEach((stops, index) => {
+      const anchor = stops[0];
+      const terminal = stops[stops.length - 1];
+
+      sequences.push({
+        id: `topology:${createStableId(lineLabel)}:branch:${index}:${createStableId(terminal.label)}`,
+        label: `${anchor.label} ↔ ${terminal.label}`,
+        direction: terminal.label,
+        stops,
+      });
+    });
+
+  return sequences;
+}
+
+function upsertBranchCandidate(
+  branches: Map<string, LineRouteStop[]>,
+  stops: LineRouteStop[],
+): void {
+  const cleanStops = dedupeStopSequence(stops).filter(Boolean);
+
+  if (cleanStops.length < 2) {
+    return;
+  }
+
+  const anchor = cleanStops[0];
+  const terminal = cleanStops[cleanStops.length - 1];
+  const key = `${anchor.id}__${terminal.id}`;
+  const existing = branches.get(key);
+
+  if (!existing || cleanStops.length > existing.length) {
+    branches.set(key, cleanStops);
+  }
+}
+
+function compareBranchSequences(
+  left: LineRouteStop[],
+  right: LineRouteStop[],
+): number {
+  const leftAnchor = left[0]?.label ?? "";
+  const rightAnchor = right[0]?.label ?? "";
+  const anchorCompare = leftAnchor.localeCompare(rightAnchor, "fr", {
+    numeric: true,
+    sensitivity: "base",
+  });
+
+  if (anchorCompare !== 0) {
+    return anchorCompare;
+  }
+
+  return (left[left.length - 1]?.label ?? "").localeCompare(
+    right[right.length - 1]?.label ?? "",
+    "fr",
+    {
+      numeric: true,
+      sensitivity: "base",
+    },
+  );
+}
+
+function dedupeRawTopologyRoutes(
+  routes: RawLineTopologyRoute[],
+): RawLineTopologyRoute[] {
+  const bestByCanonicalKey = new Map<string, RawLineTopologyRoute>();
+
+  for (const route of routes) {
+    const uniqueRatio = new Set(route.stops.map((stop) => stop.id)).size / route.stops.length;
+
+    if (uniqueRatio < 0.8) {
+      continue;
+    }
+
+    const key = createCanonicalSequenceKey(route.stops.map((stop) => stop.id));
+    const existing = bestByCanonicalKey.get(key);
+
+    if (!existing || route.stops.length > existing.stops.length) {
+      bestByCanonicalKey.set(key, route);
+    }
+  }
+
+  return Array.from(bestByCanonicalKey.values());
 }
 
 async function fetchLinesForCommercialMode(
@@ -595,12 +892,14 @@ async function fetchOrderedRouteStops(
 async function fetchRouteScheduleStops(
   route: NavitiaRoute,
 ): Promise<NavitiaStopPoint[]> {
+  const serviceDay = getParisServiceDayWindow();
   const searchParams = new URLSearchParams({
     count: "1",
+    data_freshness: "base_schedule",
     disable_disruption: "true",
     disable_geojson: "true",
-    duration: "1",
-    from_datetime: formatParisNavitiaDateTime(new Date()),
+    duration: "108000",
+    from_datetime: serviceDay.fromParam,
     items_per_schedule: "1",
   });
   const response = await fetch(
@@ -669,32 +968,52 @@ function mapRouteScheduleToCallingPattern(
     return null;
   }
 
+  const terminalRowIndex = findDestinationRowIndex(
+    rows,
+    departure,
+    match.rowIndex,
+  );
   const calls = rows
     .map((row, rowIndex) => {
-      const dateTime = findMatchingRowDateTime(row, match);
-
-      if (!dateTime?.date_time || !row.stop_point) {
+      if (!row.stop_point) {
         return null;
       }
 
+      const dateTime = findMatchingRowDateTime(row, match);
+      const served =
+        Boolean(dateTime?.date_time) &&
+        rowMatchesDeparturePath(
+          row,
+          rowIndex,
+          match.rowIndex,
+          terminalRowIndex,
+          departure,
+        );
+
       return mapStopPointToDepartureCall(
         row.stop_point,
-        rowIndex === match.rowIndex,
-        parseNavitiaDateTime(dateTime.date_time),
+        rowIndex === match.rowIndex ||
+        (served && stopMatchesDepartureStation(row.stop_point, departure)),
+        served && dateTime?.date_time
+          ? parseNavitiaDateTime(dateTime.date_time)
+          : undefined,
+        served,
       );
     })
     .filter((call): call is DepartureCall => call !== null);
 
-  if (calls.length === 0) {
+  if (calls.every((call) => !call.served)) {
     return null;
   }
+
+  const servedCalls = calls.filter((call) => call.served);
 
   return {
     departureId: departure.id,
     destination:
       cleanNavitiaDirection(schedule.display_informations?.direction ?? "") ||
       departure.destination,
-    serviceType: getServiceType(calls.length, rows.length),
+    serviceType: getServiceType(servedCalls.length, calls.length),
     calls,
   };
 }
@@ -732,11 +1051,11 @@ function findMatchingScheduleDateTime(
 
   let bestMatch:
     | {
-        dateTimeIndex: number;
-        journeyId?: string;
-        rowIndex: number;
-        delta: number;
-      }
+      dateTimeIndex: number;
+      journeyId?: string;
+      rowIndex: number;
+      delta: number;
+    }
     | undefined;
 
   for (const { row, index } of candidates) {
@@ -848,12 +1167,87 @@ function getDateTimeVehicleJourneyId(dateTime: NavitiaDateTime): string | undefi
   )?.id;
 }
 
+function findDestinationRowIndex(
+  rows: NavitiaRouteScheduleRow[],
+  departure: Departure,
+  currentRowIndex: number,
+): number | undefined {
+  const destinationKey = getDestinationBranchKey(departure.destination);
+  const candidates = rows
+    .map((row, index) => {
+      const label = getStopPointDisplayLabel(row.stop_point);
+      const stopKey = getDestinationBranchKey(label);
+      let score = 0;
+
+      if (destinationKey && stopKey === destinationKey) {
+        score += 80;
+      }
+
+      if (directionMatchesRule(label, departure.destination)) {
+        score += 60;
+      }
+
+      return {
+        index,
+        score,
+        distance: Math.abs(index - currentRowIndex),
+      };
+    })
+    .filter((candidate) => candidate.score > 0)
+    .sort(
+      (left, right) =>
+        right.score - left.score || right.distance - left.distance,
+    );
+
+  return candidates[0]?.index;
+}
+
+function rowMatchesDeparturePath(
+  row: NavitiaRouteScheduleRow,
+  rowIndex: number,
+  currentRowIndex: number,
+  terminalRowIndex: number | undefined,
+  departure: Departure,
+): boolean {
+  const destinationKey = getDestinationBranchKey(departure.destination);
+  const stopKey = getDestinationBranchKey(getStopPointDisplayLabel(row.stop_point));
+
+  if (terminalRowIndex !== undefined) {
+    const minIndex = Math.min(currentRowIndex, terminalRowIndex);
+    const maxIndex = Math.max(currentRowIndex, terminalRowIndex);
+
+    if (rowIndex < minIndex || rowIndex > maxIndex) {
+      return false;
+    }
+  }
+
+  return !(
+    destinationKey &&
+    stopKey &&
+    !branchKeysAreCompatible(destinationKey, stopKey) &&
+    rowIndex !== currentRowIndex &&
+    rowIndex !== terminalRowIndex
+  );
+}
+
+function branchKeysAreCompatible(destinationKey: string, stopKey: string): boolean {
+  return (
+    destinationKey === stopKey ||
+    (destinationKey === "saint-remy" && stopKey === "massy-palaiseau")
+  );
+}
+
+function getStopPointDisplayLabel(stopPoint?: NavitiaStopPoint): string {
+  return cleanStationLabel(stopPoint?.label ?? stopPoint?.name ?? stopPoint?.id ?? "");
+}
+
 function mapStopPointToDepartureCall(
   stopPoint: NavitiaStopPoint,
   current: boolean,
   time?: string,
+  served = true,
 ): DepartureCall {
-  const label = cleanStationLabel(stopPoint.label ?? stopPoint.name ?? stopPoint.id);
+  const label = getStopPointDisplayLabel(stopPoint);
 
   return {
     id: stopPoint.id,
@@ -861,7 +1255,44 @@ function mapStopPointToDepartureCall(
     city: getStopPointCity(stopPoint, label),
     time,
     current,
+    served,
   };
+}
+
+function mapFallbackRouteStopsToCalls(
+  stops: NavitiaStopPoint[],
+  departure: Departure,
+): DepartureCall[] {
+  const rows = stops.map((stop) => ({ stop_point: stop }));
+  const currentRowIndex = Math.max(
+    0,
+    stops.findIndex((stop) => stopMatchesDepartureStation(stop, departure)),
+  );
+  const foundCurrent = stops.some((stop) =>
+    stopMatchesDepartureStation(stop, departure),
+  );
+  const terminalRowIndex = findDestinationRowIndex(
+    rows,
+    departure,
+    currentRowIndex,
+  );
+
+  return stops.map((stop, index) =>
+    mapStopPointToDepartureCall(
+      stop,
+      foundCurrent && index === currentRowIndex,
+      undefined,
+      foundCurrent || terminalRowIndex !== undefined
+        ? rowMatchesDeparturePath(
+          rows[index],
+          index,
+          currentRowIndex,
+          terminalRowIndex,
+          departure,
+        )
+        : true,
+    ),
+  );
 }
 
 function getServiceType(
@@ -971,8 +1402,8 @@ export async function fetchDirectionGroupsForStation(
   for (const schedule of payload.stop_schedules ?? []) {
     const destination = cleanNavitiaDirection(
       schedule.display_informations?.direction ??
-        schedule.display_informations?.headsign ??
-        "",
+      schedule.display_informations?.headsign ??
+      "",
     );
     if (!destination) {
       continue;
@@ -1258,8 +1689,8 @@ function mapScheduleToDepartures(
 ): Departure[] {
   const destination = cleanNavitiaDirection(
     schedule.display_informations?.direction ??
-      schedule.display_informations?.headsign ??
-      group.label,
+    schedule.display_informations?.headsign ??
+    group.label,
   );
 
   return findUpcomingNavitiaTimes(schedule, serviceDay)
@@ -1309,8 +1740,8 @@ function buildBoardDeparturesResult(
         realtimeDepartures.length > 0
           ? realtimeDepartures
           : scheduledDepartures
-              .filter((departure) => findDirectionGroup(board, departure)?.id === group.id)
-              .slice(0, perDirectionLimit);
+            .filter((departure) => findDirectionGroup(board, departure)?.id === group.id)
+            .slice(0, perDirectionLimit);
 
       groupDepartures.forEach((departure) => visibleDepartures.add(departure.id));
 
@@ -1618,7 +2049,11 @@ function mapLineToSearchOption(
   network: TransitFamilyOption,
 ): LineSearchOption {
   const label = line.code ?? line.name ?? line.id;
-  const iconUrls = createRatpLineIconUrls(line, network.family);
+  const iconUrls = createRatpLineIconUrls({
+    code: line.code ?? line.name,
+    family: network.family,
+    id: line.id,
+  });
 
   return {
     family: network.family,
@@ -1638,43 +2073,6 @@ function mapLineToSearchOption(
   };
 }
 
-function createRatpLineIconUrls(
-  line: NavitiaLine,
-  family: TransitFamily,
-): string[] {
-  const lineCode = line.id.split(":").pop();
-
-  if (!lineCode) {
-    return [];
-  }
-
-  const modePathByFamily: Partial<Record<TransitFamily, string>> = {
-    METRO: "metro",
-    RER: "rer",
-    TRAM: "tramway",
-    NOCTILIEN: "noctilien",
-  };
-  const modePath = modePathByFamily[family];
-
-  if (!modePath) {
-    return [];
-  }
-
-  const urls = [
-    `https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/${modePath}/picto-ligne-LIGIDFM${lineCode}.svg`,
-  ];
-
-  if (family === "TRAM") {
-    urls.push(
-      `https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/tramway/picto-ligne-${line.code ?? line.name ?? lineCode}.svg`,
-      `https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/tram/picto-ligne-LIGIDFM${lineCode}.svg`,
-      `https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/tram/picto-ligne-${line.code ?? line.name ?? lineCode}.svg`,
-    );
-  }
-
-  return urls;
-}
-
 function mapLineToTransferOption(line: NavitiaLine): TransferLineOption {
   return {
     id: line.id,
@@ -1688,25 +2086,66 @@ function mapLineToTransferOption(line: NavitiaLine): TransferLineOption {
 function mapStopPointToLineRouteStop(
   stopPoint: NavitiaStopPoint,
 ): LineRouteStop | null {
-  const stopArea = stopPoint.stop_area ?? mapStopPointToStopArea(stopPoint);
+  const rawLabel =
+    stopPoint.stop_area?.label ??
+    stopPoint.stop_area?.name ??
+    stopPoint.label ??
+    stopPoint.name ??
+    stopPoint.id;
 
-  if (!stopArea) {
+  if (!rawLabel) {
     return null;
   }
 
-  const station = mapStopAreaToStation(stopArea);
-  const coord = stopArea.coord ?? stopPoint.coord;
+  const label = cleanTopologyStationLabel(rawLabel);
+  const city = getStopPointCity(stopPoint, label);
+  const topologyId = createTopologyStationId(label);
+  const coord = stopPoint.stop_area?.coord ?? stopPoint.coord;
   const lon = parseCoordinate(coord?.lon);
   const lat = parseCoordinate(coord?.lat);
+  const stationFromStopArea = stopPoint.stop_area
+    ? mapStopAreaToStation(stopPoint.stop_area)
+    : undefined;
 
   return {
-    id: station.id,
-    label: station.label,
-    city: station.city,
+    id: topologyId,
+    label,
+    city,
     lon,
     lat,
-    station,
+    station: {
+      id: topologyId,
+      label,
+      city,
+      monitoringRef:
+        stationFromStopArea?.monitoringRef ??
+        createFallbackMonitoringRefFromStopPoint(stopPoint) ??
+        "",
+      scheduleStopAreaRef:
+        stationFromStopArea?.scheduleStopAreaRef ?? stopPoint.stop_area?.id,
+    },
   };
+}
+
+function createTopologyStationId(label: string): string {
+  return `station:${createStableId(cleanTopologyStationLabel(label))}`;
+}
+
+function cleanTopologyStationLabel(value: string): string {
+  return cleanStationLabel(value)
+    .replace(/\s+/g, " ")
+    .replace(/\s+-\s+/g, " - ")
+    .replace(/[’]/gu, "'")
+    .trim();
+}
+
+function createFallbackMonitoringRefFromStopPoint(
+  stopPoint: NavitiaStopPoint,
+): string | undefined {
+  const rawId = stopPoint.stop_area?.id ?? stopPoint.id;
+  const numericId = rawId.match(/(\d+)$/u)?.[1];
+
+  return numericId ? `STIF:StopArea:SP:${numericId}:` : undefined;
 }
 
 function mapStopPointToStopArea(
@@ -1824,7 +2263,7 @@ function patternMatchesDepartureDestination(
   pattern: DepartureCallingPattern,
   departure: Departure,
 ): boolean {
-  const terminal = pattern.calls[pattern.calls.length - 1]?.label;
+  const terminal = [...pattern.calls].reverse().find((call) => call.served)?.label;
 
   if (!terminal) {
     return false;

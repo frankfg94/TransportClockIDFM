@@ -378,13 +378,14 @@ function normalizeText(value: string): string {
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
-      <section
-        class="modal-panel"
-        :class="{ 'modal-panel--wide': modalWide }"
-        aria-modal="true"
-        role="dialog"
-      >
+    <Transition name="modal-scale">
+      <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
+        <section
+          class="modal-panel"
+          :class="{ 'modal-panel--wide': modalWide }"
+          aria-modal="true"
+          role="dialog"
+        >
         <header class="modal-panel__header">
           <div>
             <p class="eyebrow">Configuration</p>
@@ -485,7 +486,8 @@ function normalizeText(value: string): string {
             {{ adding ? "Ajout..." : "Ajouter" }}
           </button>
         </footer>
-      </section>
-    </div>
+        </section>
+      </div>
+    </Transition>
   </Teleport>
 </template>

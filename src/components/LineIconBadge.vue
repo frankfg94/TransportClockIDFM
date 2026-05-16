@@ -1,18 +1,45 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { LineSearchOption } from "../types/transit";
+import { createRatpLineIconUrls } from "../services/lineIcons";
+import type { TransitFamily, TransitMode } from "../types/transit";
+
+type LineIconLike = {
+  color?: string;
+  family?: TransitFamily;
+  iconUrl?: string;
+  iconUrls?: string[];
+  label?: string;
+  longName?: string;
+  mode?: TransitMode;
+  ref?: string;
+  shortName?: string;
+  textColor?: string;
+};
 
 const props = defineProps<{
-  line: Pick<
-    LineSearchOption,
-    "family" | "label" | "color" | "textColor" | "iconUrl" | "iconUrls"
-  >;
+  line: LineIconLike;
   compact?: boolean;
 }>();
 
 const iconIndex = ref(0);
+const displayLabel = computed(
+  () => props.line.label ?? props.line.shortName ?? "?",
+);
+const resolvedFamily = computed(
+  () => props.line.family ?? transitModeToFamily(props.line.mode),
+);
+const generatedIconUrls = computed(() =>
+  createRatpLineIconUrls({
+    code: displayLabel.value,
+    family: resolvedFamily.value,
+    mode: props.line.mode,
+    ref: props.line.ref,
+  }),
+);
 const iconCandidates = computed(() => {
-  const candidates = props.line.iconUrls ?? [];
+  const candidates = Array.from(
+    new Set([...(props.line.iconUrls ?? []), ...generatedIconUrls.value]),
+  );
 
   if (props.line.iconUrl && !candidates.includes(props.line.iconUrl)) {
     return [props.line.iconUrl, ...candidates];
@@ -23,7 +50,13 @@ const iconCandidates = computed(() => {
 const currentIconUrl = computed(() => iconCandidates.value[iconIndex.value]);
 
 watch(
-  () => [props.line.iconUrl, props.line.iconUrls?.join("|")],
+  () => [
+    props.line.iconUrl,
+    props.line.iconUrls?.join("|"),
+    displayLabel.value,
+    resolvedFamily.value,
+    props.line.ref,
+  ],
   () => {
     iconIndex.value = 0;
   },
@@ -34,15 +67,41 @@ function showNextIconCandidate(): void {
 }
 
 function getLineModeLabel(line: typeof props.line): string {
-  if (line.family === "TRAM") {
+  const family = line.family ?? transitModeToFamily(line.mode);
+
+  if (family === "TRAM") {
     return "TRAM";
   }
 
-  if (line.family === "TRANSILIEN") {
+  if (family === "TRANSILIEN") {
     return "TRAIN";
   }
 
-  return line.family;
+  return family ?? "";
+}
+
+function transitModeToFamily(mode?: TransitMode): TransitFamily | undefined {
+  if (mode === "metro") {
+    return "METRO";
+  }
+
+  if (mode === "rer") {
+    return "RER";
+  }
+
+  if (mode === "tram") {
+    return "TRAM";
+  }
+
+  if (mode === "bus") {
+    return "BUS";
+  }
+
+  if (mode === "train") {
+    return "TRANSILIEN";
+  }
+
+  return undefined;
 }
 </script>
 
@@ -54,7 +113,7 @@ function getLineModeLabel(line: typeof props.line): string {
     <img
       v-if="currentIconUrl"
       :src="currentIconUrl"
-      :alt="`Ligne ${line.label}`"
+      :alt="`Ligne ${displayLabel}`"
       loading="lazy"
       @error="showNextIconCandidate"
     />
@@ -66,8 +125,7 @@ function getLineModeLabel(line: typeof props.line): string {
         '--line-fg': line.textColor ?? '#ffffff',
       }"
     >
-      <span class="line-icon-badge__mode">{{ getLineModeLabel(line) }}</span>
-      <span class="line-icon-badge__label">{{ line.label }}</span>
+      <span class="line-icon-badge__label">{{ displayLabel }}</span>
     </span>
   </span>
 </template>
@@ -95,6 +153,37 @@ function getLineModeLabel(line: typeof props.line): string {
 .line-icon-badge--compact img {
   max-height: 30px;
   max-width: 58px;
+}
+
+.line-icon-badge.board-line-icon {
+  height: 72px;
+  min-width: 76px;
+}
+
+.line-icon-badge.board-line-icon img {
+  max-height: 72px;
+  max-width: 92px;
+}
+
+.line-icon-badge.board-line-icon .line-icon-badge__fallback {
+  height: 72px;
+}
+
+.line-icon-badge.board-line-icon .line-icon-badge__label {
+  font-size: 1.55rem;
+  min-width: 72px;
+}
+
+.line-icon-badge.alarm-summary__line,
+.line-icon-badge.pattern-modal__line {
+  height: 54px;
+  min-width: 58px;
+}
+
+.line-icon-badge.alarm-summary__line img,
+.line-icon-badge.pattern-modal__line img {
+  max-height: 54px;
+  max-width: 78px;
 }
 
 .line-icon-badge__fallback {
