@@ -89,6 +89,8 @@ export interface DepartureCall {
   time?: string;
   current: boolean;
   served: boolean;
+  stopAreaRef?: string;
+  transferLines?: TransferLineOption[];
 }
 
 export interface DepartureCallingPattern {
@@ -157,9 +159,13 @@ export interface TransitFamilyOption {
 export interface TransferLineOption {
   id: string;
   label: string;
+  family?: TransitFamily;
   mode?: string;
   color?: string;
   textColor?: string;
+  iconUrl?: string;
+  iconUrls?: string[];
+  ref?: string;
 }
 
 export interface LineRouteStop {
@@ -169,6 +175,7 @@ export interface LineRouteStop {
   lon?: number;
   lat?: number;
   station: StationSearchOption;
+  transferLines?: TransferLineOption[];
 }
 
 export interface LineRouteSequence {

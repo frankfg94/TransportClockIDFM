@@ -1302,6 +1302,76 @@ h3 {
   font-weight: 900;
 }
 
+.pattern-flow-station__transfers {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: center;
+  max-width: 190px;
+  position: relative;
+  z-index: 2;
+}
+
+.pattern-flow-station__transfer-tooltip {
+  background: #ffffff;
+  border: 1px solid rgba(16, 35, 63, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 16px 36px rgba(16, 35, 63, 0.18);
+  display: grid;
+  gap: 7px;
+  left: 50%;
+  min-width: 150px;
+  opacity: 0;
+  padding: 9px;
+  pointer-events: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  transform: translate(-50%, -4px) scale(0.96);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease,
+    visibility 160ms ease;
+  visibility: hidden;
+  z-index: 12;
+}
+
+.pattern-flow-station:hover .pattern-flow-station__transfer-tooltip,
+.pattern-flow-station:focus-within .pattern-flow-station__transfer-tooltip {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+  visibility: visible;
+}
+
+.pattern-flow-station__transfer-title {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 950;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.pattern-flow-station__transfer.line-icon-badge {
+  height: 22px;
+  min-width: 26px;
+}
+
+.pattern-flow-station__transfer.line-icon-badge img {
+  max-height: 22px;
+  max-width: 44px;
+}
+
+.pattern-flow-station__transfer.line-icon-badge .line-icon-badge__fallback {
+  border-radius: 4px;
+  height: 22px;
+}
+
+.pattern-flow-station__transfer.line-icon-badge .line-icon-badge__label {
+  font-size: 0.66rem;
+  min-width: 26px;
+  padding: 0 6px;
+}
+
 .pattern-flow-station em {
   background: #05070c;
   border-radius: 999px;

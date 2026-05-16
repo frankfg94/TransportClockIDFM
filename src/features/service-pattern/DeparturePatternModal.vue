@@ -12,6 +12,7 @@ import type {
   DepartureServiceType,
   LineRouteSequence,
   LineRouteStop,
+  TransferLineOption,
   TransitBoardConfig,
 } from "../../types/transit";
 
@@ -35,6 +36,8 @@ interface PatternStationNodeData {
   served: boolean;
   branchEnd: boolean;
   branchChip?: string;
+  busTransfers: TransferLineOption[];
+  nonBusTransfers: TransferLineOption[];
 }
 
 interface PatternGraphNode {
@@ -46,6 +49,7 @@ interface PatternGraphNode {
   current: boolean;
   served: boolean;
   time?: string;
+  transfers: TransferLineOption[];
   degree: number;
 }
 
@@ -208,6 +212,8 @@ function createPatternFlow(
         served: node.served,
         branchEnd: isBranchEnd,
         branchChip: getBranchChip(node, activeTerminalIds, departureTimeLabel),
+        busTransfers: node.transfers.filter(isBusTransfer),
+        nonBusTransfers: node.transfers.filter((transfer) => !isBusTransfer(transfer)),
       },
     } satisfies PatternFlowNode;
   });
@@ -956,6 +962,11 @@ function buildPatternGraph(
         current: Boolean(existing?.current || call?.current),
         served: Boolean(existing?.served || call?.served),
         time: existing?.time ?? call?.time,
+        transfers: mergeTransfers(
+          existing?.transfers,
+          stop.transferLines,
+          call?.transferLines,
+        ),
         degree: existing?.degree ?? 0,
       });
     });
@@ -990,9 +1001,10 @@ function buildPatternGraph(
         city: call.city,
         current: call.current,
         served: call.served,
-        time: call.time,
-        degree: 0,
-      });
+          time: call.time,
+          transfers: call.transferLines ?? [],
+          degree: 0,
+        });
     });
     calls.slice(0, -1).forEach((call, index) => {
       const source = createStationKey(call);
@@ -1177,7 +1189,53 @@ function findCallForStop(
   callMap: Map<string, DepartureCall>,
   stop: LineRouteStop,
 ): DepartureCall | undefined {
-  return callMap.get(createStationKey(stop));
+  const stopKey = createStationKey(stop);
+  const exactMatch = callMap.get(stopKey);
+
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  return Array.from(callMap.values()).find((call) =>
+    stationKeysAreCompatible(stopKey, createStationKey(call)),
+  );
+}
+
+function mergeTransfers(
+  ...transferGroups: Array<TransferLineOption[] | undefined>
+): TransferLineOption[] {
+  const transfers = new Map<string, TransferLineOption>();
+
+  transferGroups.flatMap((group) => group ?? []).forEach((transfer) => {
+    const key = `${transfer.family ?? ""}:${transfer.id}:${transfer.label}`;
+
+    if (!transfers.has(key)) {
+      transfers.set(key, transfer);
+    }
+  });
+
+  return Array.from(transfers.values()).slice(0, 40);
+}
+
+function isBusTransfer(transfer: TransferLineOption): boolean {
+  return (
+    transfer.family === "BUS" ||
+    normalizeStationName(transfer.mode ?? "").includes("bus")
+  );
+}
+
+function stationKeysAreCompatible(left: string, right: string): boolean {
+  if (!left || !right) {
+    return false;
+  }
+
+  if (left === right) {
+    return true;
+  }
+
+  const shortestLength = Math.min(left.length, right.length);
+
+  return shortestLength >= 6 && (left.includes(right) || right.includes(left));
 }
 
 function getNodeDistanceKm(
@@ -1403,11 +1461,42 @@ function normalizeStationName(value: string): string {
                           aria-hidden="true"
                         ></span>
                         <strong>{{ data.label }}</strong>
+                        <span
+                          v-if="data.nonBusTransfers.length > 0"
+                          class="pattern-flow-station__transfers pattern-flow-station__transfers--inline"
+                          aria-label="Correspondances hors bus"
+                        >
+                          <LineIconBadge
+                            v-for="transfer in data.nonBusTransfers"
+                            :key="`${data.key}-non-bus-${transfer.id}-${transfer.label}`"
+                            class="pattern-flow-station__transfer"
+                            :line="transfer"
+                            compact
+                          />
+                        </span>
                         <small v-if="data.time">{{
                           formatClock(data.time)
                         }}</small>
                         <small v-else-if="!data.served">Non desservi</small>
                         <em v-if="data.branchChip">{{ data.branchChip }}</em>
+                        <span
+                          v-if="data.busTransfers.length > 0"
+                          class="pattern-flow-station__transfer-tooltip"
+                          role="tooltip"
+                        >
+                          <span class="pattern-flow-station__transfer-title">
+                            Bus
+                          </span>
+                          <span class="pattern-flow-station__transfers">
+                            <LineIconBadge
+                              v-for="transfer in data.busTransfers"
+                              :key="`${data.key}-bus-${transfer.id}-${transfer.label}`"
+                              class="pattern-flow-station__transfer"
+                              :line="transfer"
+                              compact
+                            />
+                          </span>
+                        </span>
                       </div>
                     </template>
                   </VueFlow>

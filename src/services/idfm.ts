@@ -134,6 +134,7 @@ interface NavitiaLinesResponse {
 interface NavitiaPtObject {
   embedded_type?: string;
   line?: NavitiaLine;
+  stop_area?: NavitiaStopArea;
 }
 
 interface NavitiaPtObjectsResponse {
@@ -258,6 +259,10 @@ const MAX_LINE_RESULTS = 1500;
 const MAX_STATION_RESULTS = 500;
 const MAX_MAP_ROUTES = 80;
 const MAX_ROUTE_STOPS = 260;
+const MAX_PATTERN_TRANSFER_STATIONS = 64;
+const PATTERN_TRANSFER_BATCH_SIZE = 2;
+
+const structuralTransferCache = new Map<string, Promise<TransferLineOption[]>>();
 
 export async function fetchTransitFamilyOptions(): Promise<TransitFamilyOption[]> {
   const searchParams = new URLSearchParams({
@@ -314,24 +319,10 @@ export async function searchLineStations(
   line: LineSearchOption,
   query: string,
 ): Promise<StationSearchOption[]> {
-  const searchParams = new URLSearchParams({
-    count: "100",
-    disable_disruption: "true",
-    disable_geojson: "true",
-  });
-  const stopAreas = await fetchPaginatedCollection<
-    NavitiaStopAreasResponse,
-    NavitiaStopArea
-  >(
-    `${NAVITIA_API_BASE}/lines/${encodeURIComponent(line.navitiaId)}/stop_areas`,
-    searchParams,
-    "stop_areas",
-    MAX_STATION_RESULTS,
-  );
-
+  const stations = await fetchLineStationsByLineId(line.navitiaId);
   const normalizedQuery = normalizeText(query.trim());
-  const stations = stopAreas
-    .map(mapStopAreaToStation)
+
+  return stations
     .filter((station) => {
       if (!normalizedQuery) {
         return true;
@@ -342,8 +333,27 @@ export async function searchLineStations(
       );
     })
     .sort((left, right) => left.label.localeCompare(right.label, "fr"));
+}
 
-  return dedupeStations(stations);
+async function fetchLineStationsByLineId(
+  lineId: string,
+): Promise<StationSearchOption[]> {
+  const searchParams = new URLSearchParams({
+    count: "100",
+    disable_disruption: "true",
+    disable_geojson: "true",
+  });
+  const stopAreas = await fetchPaginatedCollection<
+    NavitiaStopAreasResponse,
+    NavitiaStopArea
+  >(
+    `${NAVITIA_API_BASE}/lines/${encodeURIComponent(lineId)}/stop_areas`,
+    searchParams,
+    "stop_areas",
+    MAX_STATION_RESULTS,
+  );
+
+  return dedupeStations(stopAreas.map(mapStopAreaToStation));
 }
 
 export async function fetchLineRouteSequences(
@@ -448,7 +458,12 @@ export async function fetchDepartureCallingPattern(
   const lineTopologyPromise = fetchLineRouteSequencesByLineId(
     lineId,
     board.line.shortName || board.line.longName,
-  ).catch(() => fetchLineTopologyFromRoutes(routes, board.line.shortName || board.line.longName));
+  )
+    .then((sequences) => hydrateLineTopologyTransfers(sequences, lineId))
+    .catch(() =>
+      fetchLineTopologyFromRoutes(routes, board.line.shortName || board.line.longName)
+        .then((sequences) => hydrateLineTopologyTransfers(sequences, lineId)),
+    );
   const candidateRoutes = sortRoutesForDeparture(routes, patternDeparture);
 
   for (const route of candidateRoutes) {
@@ -460,9 +475,15 @@ export async function fetchDepartureCallingPattern(
       const pattern = mapRouteScheduleToCallingPattern(schedule, patternDeparture);
 
       if (pattern && patternMatchesDepartureDestination(pattern, patternDeparture)) {
+        const hydratedPattern = await hydrateCallingPatternTransfers(
+          pattern,
+          lineId,
+        );
+        const lineTopology = await lineTopologyPromise;
+
         return {
-          ...pattern,
-          lineTopology: await lineTopologyPromise,
+          ...mergePatternWithTopologyTransfers(hydratedPattern, lineTopology),
+          lineTopology,
         };
       }
     }
@@ -474,12 +495,20 @@ export async function fetchDepartureCallingPattern(
     const stops = await fetchOrderedRouteStops(fallbackRoute).catch(() => []);
 
     if (stops.length > 0) {
+      const fallbackPattern = await hydrateCallingPatternTransfers(
+        {
+          departureId: departure.id,
+          destination: departure.destination,
+          serviceType: "inconnu",
+          calls: mapFallbackRouteStopsToCalls(stops, patternDeparture),
+        },
+        lineId,
+      );
+      const lineTopology = await lineTopologyPromise;
+
       return {
-        departureId: departure.id,
-        destination: departure.destination,
-        serviceType: "inconnu",
-        calls: mapFallbackRouteStopsToCalls(stops, patternDeparture),
-        lineTopology: await lineTopologyPromise,
+        ...mergePatternWithTopologyTransfers(fallbackPattern, lineTopology),
+        lineTopology,
       };
     }
   }
@@ -492,6 +521,234 @@ export async function fetchDepartureCallingPattern(
     lineTopology: await lineTopologyPromise,
     error: "Desserte indisponible pour ce passage.",
   };
+}
+
+function mergePatternWithTopologyTransfers(
+  pattern: DepartureCallingPattern,
+  lineTopology: LineRouteSequence[],
+): DepartureCallingPattern {
+  const transfersByStationKey = new Map<string, TransferLineOption[]>();
+
+  lineTopology.forEach((sequence) => {
+    sequence.stops.forEach((stop) => {
+      if (!stop.transferLines || stop.transferLines.length === 0) {
+        return;
+      }
+
+      const key = createTopologyTransferStationKey(stop.label);
+      transfersByStationKey.set(
+        key,
+        dedupeTransferOptions([
+          ...(transfersByStationKey.get(key) ?? []),
+          ...stop.transferLines,
+        ]),
+      );
+    });
+  });
+
+  return {
+    ...pattern,
+    calls: pattern.calls.map((call) => ({
+      ...call,
+      transferLines: dedupeTransferOptions([
+        ...(call.transferLines ?? []),
+        ...(transfersByStationKey.get(createTopologyTransferStationKey(call.label)) ?? []),
+      ]),
+    })),
+  };
+}
+
+function createTopologyTransferStationKey(label: string): string {
+  return normalizeText(cleanTopologyStationLabel(label));
+}
+
+async function hydrateLineTopologyTransfers(
+  sequences: LineRouteSequence[],
+  currentLineId: string,
+): Promise<LineRouteSequence[]> {
+  const selectableStations = await fetchLineStationsByLineId(currentLineId).catch(
+    () => [],
+  );
+  const stopsByKey = new Map<string, LineRouteStop>();
+
+  sequences.forEach((sequence) => {
+    sequence.stops.forEach((stop) => {
+      const key = stop.station.scheduleStopAreaRef ?? stop.id;
+
+      if (!stopsByKey.has(key)) {
+        stopsByKey.set(key, stop);
+      }
+    });
+  });
+
+  const transferEntries = new Map<string, TransferLineOption[]>();
+  const stops = Array.from(stopsByKey.entries()).slice(0, MAX_PATTERN_TRANSFER_STATIONS);
+
+  for (let index = 0; index < stops.length; index += PATTERN_TRANSFER_BATCH_SIZE) {
+    const batch = stops.slice(index, index + PATTERN_TRANSFER_BATCH_SIZE);
+    const results = await Promise.all(
+      batch.map(async ([key, stop]) => [
+        key,
+        await fetchTransfersForStationSelection(
+          findMatchingSelectableStation(stop, selectableStations) ?? stop.station,
+          currentLineId,
+        ).catch(() => []),
+      ] as const),
+    );
+
+    results.forEach(([key, transfers]) => {
+      transferEntries.set(key, transfers);
+    });
+  }
+
+  return sequences.map((sequence) => ({
+    ...sequence,
+    stops: sequence.stops.map((stop) => ({
+      ...stop,
+      transferLines:
+        transferEntries.get(stop.station.scheduleStopAreaRef ?? stop.id) ??
+        stop.transferLines,
+    })),
+  }));
+}
+
+function findMatchingSelectableStation(
+  stop: LineRouteStop,
+  stations: StationSearchOption[],
+): StationSearchOption | undefined {
+  const stopLabelKey = normalizeText(stop.label);
+  const stopCityKey = normalizeText(stop.city);
+
+  return stations.find((station) => {
+    const stationLabelKey = normalizeText(station.label);
+    const stationCityKey = normalizeText(station.city);
+
+    return (
+      stationLabelKey === stopLabelKey &&
+      (!stopCityKey || !stationCityKey || stationCityKey === stopCityKey)
+    );
+  });
+}
+
+async function hydrateCallingPatternTransfers(
+  pattern: DepartureCallingPattern,
+  currentLineId: string,
+): Promise<DepartureCallingPattern> {
+  const transferTargets = dedupeDepartureCallsForTransfers(pattern.calls)
+    .map(createStationFromDepartureCall)
+    .filter((station): station is StationSearchOption => Boolean(station))
+    .slice(0, MAX_PATTERN_TRANSFER_STATIONS);
+
+  if (transferTargets.length === 0) {
+    return pattern;
+  }
+
+  const transferEntries = new Map<string, TransferLineOption[]>();
+
+  for (
+    let index = 0;
+    index < transferTargets.length;
+    index += PATTERN_TRANSFER_BATCH_SIZE
+  ) {
+    const batch = transferTargets.slice(index, index + PATTERN_TRANSFER_BATCH_SIZE);
+    const results = await Promise.all(
+      batch.map(async (station) => [
+        createStationTransferKey(station),
+        await fetchTransfersForStationSelection(station, currentLineId).catch(
+          () => [],
+        ),
+      ] as const),
+    );
+
+    results.forEach(([stopAreaRef, transfers]) => {
+      transferEntries.set(stopAreaRef, transfers);
+    });
+  }
+
+  return {
+    ...pattern,
+    calls: pattern.calls.map((call) => ({
+      ...call,
+      transferLines: call.stopAreaRef
+        ? transferEntries.get(call.stopAreaRef) ?? call.transferLines
+        : call.transferLines,
+    })),
+  };
+}
+
+function dedupeDepartureCallsForTransfers(calls: DepartureCall[]): DepartureCall[] {
+  const deduped = new Map<string, DepartureCall>();
+
+  calls.forEach((call) => {
+    deduped.set(createCallTransferKey(call), call);
+  });
+
+  return Array.from(deduped.values());
+}
+
+function createCallTransferKey(call: DepartureCall): string {
+  return call.stopAreaRef ?? `${normalizeText(call.label)}:${normalizeText(call.city)}`;
+}
+
+function createStationFromDepartureCall(
+  call: DepartureCall,
+): StationSearchOption | undefined {
+  if (!call.stopAreaRef) {
+    return undefined;
+  }
+
+  return {
+    id: call.stopAreaRef,
+    label: call.label,
+    city: call.city,
+    monitoringRef: "",
+    scheduleStopAreaRef: call.stopAreaRef,
+  };
+}
+
+function fetchTransfersForStationSelection(
+  station: StationSearchOption,
+  currentLineId: string,
+): Promise<TransferLineOption[]> {
+  const cacheKey = `${currentLineId}::${createStationTransferKey(station)}`;
+  const cached = structuralTransferCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const request = fetchStationTransfersWithRetry(station, currentLineId)
+    .then((transfers) => transfers.slice(0, 40))
+    .catch((error) => {
+      structuralTransferCache.delete(cacheKey);
+      throw error;
+    });
+
+  structuralTransferCache.set(cacheKey, request);
+
+  return request;
+}
+
+async function fetchStationTransfersWithRetry(
+  station: StationSearchOption,
+  currentLineId: string,
+): Promise<TransferLineOption[]> {
+  try {
+    return await fetchStationTransfers(station, currentLineId);
+  } catch (error) {
+    await wait(180);
+    return fetchStationTransfers(station, currentLineId);
+  }
+}
+
+function wait(durationMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, durationMs);
+  });
+}
+
+function createStationTransferKey(station: StationSearchOption): string {
+  return station.scheduleStopAreaRef ?? station.id;
 }
 
 type RawLineTopologyRoute = {
@@ -1256,6 +1513,7 @@ function mapStopPointToDepartureCall(
     time,
     current,
     served,
+    stopAreaRef: stopPoint.stop_area?.id ?? (stopPoint.id.startsWith("stop_area:") ? stopPoint.id : undefined),
   };
 }
 
@@ -2074,12 +2332,25 @@ function mapLineToSearchOption(
 }
 
 function mapLineToTransferOption(line: NavitiaLine): TransferLineOption {
+  const family = familyOrder.find((item) =>
+    commercialModeMatchesFamily(line.commercial_mode?.name ?? line.commercial_mode?.id, item),
+  );
+  const iconUrls = createRatpLineIconUrls({
+    code: line.code ?? line.name,
+    family,
+    id: line.id,
+  });
+
   return {
     id: line.id,
     label: line.code ?? line.name ?? line.id,
+    family,
     mode: line.commercial_mode?.name ?? line.physical_modes?.[0]?.name,
     color: line.color ? `#${line.color}` : undefined,
     textColor: line.text_color ? `#${line.text_color}` : undefined,
+    iconUrl: iconUrls[0],
+    iconUrls,
+    ref: navitiaLineIdToSiriRef(line.id),
   };
 }
 

@@ -6,6 +6,7 @@ import type { TransitFamily, TransitMode } from "../types/transit";
 type LineIconLike = {
   color?: string;
   family?: TransitFamily;
+  id?: string;
   iconUrl?: string;
   iconUrls?: string[];
   label?: string;
@@ -32,6 +33,7 @@ const generatedIconUrls = computed(() =>
   createRatpLineIconUrls({
     code: displayLabel.value,
     family: resolvedFamily.value,
+    id: props.line.id,
     mode: props.line.mode,
     ref: props.line.ref,
   }),
