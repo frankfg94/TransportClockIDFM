@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { Bell, BellRing, ChevronDown, Route, Trash } from "lucide-vue-next";
 import LineIconBadge from "./LineIconBadge.vue";
 import type {
@@ -45,6 +45,8 @@ const displayedDeparturesCount = computed(() =>
     0,
   ),
 );
+const isCompactPatternInteraction = ref(false);
+let compactPatternMediaQuery: MediaQueryList | undefined;
 
 const statusLabels: Record<string, string> = {
   noReport: "À l'heure",
@@ -150,6 +152,10 @@ function canShowPattern(): boolean {
   return true;
 }
 
+function canAutoOpenPattern(): boolean {
+  return canShowPattern() && !isCompactPatternInteraction.value;
+}
+
 function openPatternForDeparture(payload: DeparturePatternPayload): void {
   emit("show-pattern", payload);
 }
@@ -160,6 +166,27 @@ function normalizeText(value?: string): string {
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase();
 }
+
+function syncCompactPatternInteraction(event?: MediaQueryListEvent): void {
+  isCompactPatternInteraction.value =
+    event?.matches ?? compactPatternMediaQuery?.matches ?? false;
+}
+
+onMounted(() => {
+  compactPatternMediaQuery = window.matchMedia("(max-width: 1024px)");
+  syncCompactPatternInteraction();
+  compactPatternMediaQuery.addEventListener(
+    "change",
+    syncCompactPatternInteraction,
+  );
+});
+
+onUnmounted(() => {
+  compactPatternMediaQuery?.removeEventListener(
+    "change",
+    syncCompactPatternInteraction,
+  );
+});
 </script>
 
 <template>
@@ -243,7 +270,7 @@ function normalizeText(value?: string): string {
                   'departure--cancelled': departure.status === 'cancelled',
                 }"
                 @click="
-                  canShowPattern() &&
+                  canAutoOpenPattern() &&
                   openPatternForDeparture({
                     board,
                     directionGroup: group,
@@ -252,7 +279,7 @@ function normalizeText(value?: string): string {
                 "
               >
                 <button
-                  v-if="canShowPattern()"
+                  v-if="canAutoOpenPattern()"
                   class="departure__main departure__main-button"
                   type="button"
                   @click.stop="
@@ -270,13 +297,6 @@ function normalizeText(value?: string): string {
                     })
                   "
                   @keydown.space.prevent="
-                    openPatternForDeparture({
-                      board,
-                      directionGroup: group,
-                      departure,
-                    })
-                  "
-                  @pointerdown.stop.prevent="
                     openPatternForDeparture({
                       board,
                       directionGroup: group,
@@ -318,13 +338,6 @@ function normalizeText(value?: string): string {
                   type="button"
                   aria-label="Afficher la desserte"
                   @click.stop="
-                    openPatternForDeparture({
-                      board,
-                      directionGroup: group,
-                      departure,
-                    })
-                  "
-                  @pointerdown.stop.prevent="
                     openPatternForDeparture({
                       board,
                       directionGroup: group,

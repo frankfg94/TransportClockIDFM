@@ -31,7 +31,7 @@ import type {
   DirectionDepartureGroup,
   TransitBoardConfig,
 } from "./types/transit";
-import { BellRing } from "lucide-vue-next";
+import { BellRing, Plus } from "lucide-vue-next";
 
 interface BoardState {
   departures: Departure[];
@@ -673,7 +673,7 @@ onBeforeUnmount(() => {
             type="button"
             @click="stationModalOpen = true"
           >
-            <span class="button-plus" aria-hidden="true">+</span>
+            <Plus />
             Ajouter
           </button>
         </div>

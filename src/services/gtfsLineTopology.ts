@@ -355,7 +355,7 @@ function getCanonicalStation(
   const displayStop = parentStop ?? rawStop;
   const rawLabel = displayStop.stop_name ?? rawStop.stop_name ?? stopId;
   const label = cleanStationLabel(rawLabel);
-  const id = createTopologyStationId(label);
+  const id = createTopologyStationId(displayStop.stop_id ?? rawStop.stop_id ?? label);
   const lat = parseCoordinate(displayStop.stop_lat ?? rawStop.stop_lat);
   const lon = parseCoordinate(displayStop.stop_lon ?? rawStop.stop_lon);
   const station: StationSearchOption = {
@@ -441,8 +441,8 @@ function normalizeLineLabel(value?: string): string {
   return normalizeText(value).replace(/^rer\s+/u, "").replace(/^metro\s+/u, "").trim();
 }
 
-function createTopologyStationId(label: string): string {
-  return `station:${createStableId(label)}`;
+function createTopologyStationId(value: string): string {
+  return `station:${createStableId(value)}`;
 }
 
 function cleanStationLabel(value: string): string {

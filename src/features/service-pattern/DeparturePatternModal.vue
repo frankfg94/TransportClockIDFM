@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import "@vue-flow/core/dist/style.css";
+import "@vue-flow/controls/dist/style.css";
 import dagre from "@dagrejs/dagre";
 import { computed } from "vue";
-import { Handle, Position, VueFlow } from "@vue-flow/core";
+import { Handle, PanelPosition, Position, VueFlow } from "@vue-flow/core";
 import type { Edge, Node } from "@vue-flow/core";
 import LineIconBadge from "../../components/LineIconBadge.vue";
+import { Controls } from "@vue-flow/controls";
 import type {
   Departure,
   DepartureCall,
@@ -213,15 +215,38 @@ function createPatternFlow(
         branchEnd: isBranchEnd,
         branchChip: getBranchChip(node, activeTerminalIds, departureTimeLabel),
         busTransfers: node.transfers.filter(isBusTransfer),
-        nonBusTransfers: node.transfers.filter((transfer) => !isBusTransfer(transfer)),
+        nonBusTransfers: node.transfers.filter(
+          (transfer) => !isBusTransfer(transfer),
+        ),
       },
     } satisfies PatternFlowNode;
   });
-  const edges = drawableEdges
-    .filter((edge) =>
-      topology.visibleEdges.has(createEdgeKey(edge.source, edge.target)),
-    )
-    .map((edge) => createFlowEdge(edge, topology.positions));
+  const visibleDrawableEdges = drawableEdges.filter((edge) =>
+    topology.visibleEdges.has(createEdgeKey(edge.source, edge.target)),
+  );
+  const activeRouteEdgeOrder = createActiveRouteEdgeOrder(calls, lineTopology);
+  const activeLightEdges = visibleDrawableEdges
+    .filter((edge) => edge.active)
+    .map((edge, fallbackOrder) => ({
+      edge,
+      order:
+        activeRouteEdgeOrder.get(createEdgeKey(edge.source, edge.target)) ??
+        fallbackOrder,
+    }))
+    .sort((left, right) => left.order - right.order);
+  const edges = [
+    ...visibleDrawableEdges.map((edge) =>
+      createFlowEdge(edge, topology.positions),
+    ),
+    ...activeLightEdges.map(({ edge, order }) =>
+      createFlowLightEdge(
+        edge,
+        topology.positions,
+        order,
+        activeLightEdges.length,
+      ),
+    ),
+  ];
 
   return { nodes, edges };
 }
@@ -255,8 +280,32 @@ function createFlowEdge(
       : "pattern-flow-edge--skipped",
     style: {
       stroke: edge.active ? "var(--line-color)" : "#cbd5e1",
-      strokeWidth: edge.active ? 8 : 7,
+      strokeWidth: edge.active ? 10 : 7,
     },
+  };
+}
+
+function createFlowLightEdge(
+  edge: PatternGraphEdge,
+  positions: Map<string, { x: number; y: number }>,
+  order: number,
+  count: number,
+): PatternFlowEdge {
+  const flowEdge = createFlowEdge(edge, positions);
+  const lightCycleSeconds = Math.max(8.5, count * 0.72);
+  const lightDelay = (order * lightCycleSeconds) / Math.max(count, 1);
+
+  return {
+    ...flowEdge,
+    id: `${flowEdge.id}:light`,
+    class: "pattern-flow-edge--light",
+    style: {
+      stroke: "color-mix(in srgb, var(--line-color), white 58%)",
+      strokeOpacity: 0.42,
+      strokeWidth: 14,
+      "--flow-light-cycle": `${lightCycleSeconds.toFixed(2)}s`,
+      "--flow-light-delay": `${lightDelay.toFixed(2)}s`,
+    } as PatternFlowEdge["style"],
   };
 }
 
@@ -276,7 +325,14 @@ function createTopologyLayout(
   const currentKey = calls.find((call) => call.current)
     ? createStationKey(calls.find((call) => call.current)!)
     : undefined;
-  const mainPath = chooseMainPath(nodes, adjacency, activeKeys, currentKey);
+  const destinationKey = getServedDestinationKey(calls);
+  const mainPath = chooseMainPath(
+    nodes,
+    adjacency,
+    activeKeys,
+    currentKey,
+    destinationKey,
+  );
 
   if (mainPath.length < 2) {
     return null;
@@ -307,7 +363,14 @@ function createTopologyLayout(
       break;
     }
 
-    placeBranchPath(branchPath, positions, placed, visibleEdges, laneSteps);
+    placeBranchPath(
+      branchPath,
+      positions,
+      placed,
+      visibleEdges,
+      laneSteps,
+      destinationKey,
+    );
   }
 
   placeRemainingComponents(
@@ -317,6 +380,7 @@ function createTopologyLayout(
     placed,
     visibleEdges,
     laneSteps,
+    destinationKey,
   );
 
   return {
@@ -371,6 +435,7 @@ function chooseMainPath(
   adjacency: Map<string, Set<string>>,
   activeKeys: Set<string>,
   currentKey?: string,
+  destinationKey?: string,
 ): string[] {
   const terminals = nodes
     .filter((node) => (adjacency.get(node.id)?.size ?? 0) <= 1)
@@ -388,7 +453,7 @@ function chooseMainPath(
         return;
       }
 
-      const score = scoreMainPath(path, activeKeys, currentKey);
+      const score = scoreMainPath(path, activeKeys, currentKey, destinationKey);
 
       if (score > bestScore) {
         bestScore = score;
@@ -404,11 +469,22 @@ function scoreMainPath(
   path: string[],
   activeKeys: Set<string>,
   currentKey?: string,
+  destinationKey?: string,
 ): number {
   const activeCount = path.filter((key) => activeKeys.has(key)).length;
   const currentBonus = currentKey && path.includes(currentKey) ? 400 : 0;
+  const destinationIndex = destinationKey ? path.indexOf(destinationKey) : -1;
+  const destinationTerminalBonus =
+    destinationIndex === 0 || destinationIndex === path.length - 1 ? 1200 : 0;
+  const destinationPresenceBonus = destinationIndex >= 0 ? 500 : 0;
 
-  return path.length * 8 + activeCount * 120 + currentBonus;
+  return (
+    path.length * 8 +
+    activeCount * 120 +
+    currentBonus +
+    destinationPresenceBonus +
+    destinationTerminalBonus
+  );
 }
 
 function orientPathTowardDeparture(
@@ -650,6 +726,7 @@ function placeBranchPath(
   placed: Set<string>,
   visibleEdges: Set<string>,
   laneSteps: Generator<number, never, unknown>,
+  destinationKey?: string,
 ): void {
   const anchor = path[0];
   const anchorPosition = positions.get(anchor);
@@ -660,11 +737,20 @@ function placeBranchPath(
 
   const lane = laneSteps.next().value;
   const y = lane * BRANCH_GAP;
+  const destinationPosition = destinationKey
+    ? positions.get(destinationKey)
+    : undefined;
+  const branchDirection =
+    destinationPosition && anchor !== destinationKey
+      ? anchorPosition.x < destinationPosition.x
+        ? -1
+        : 1
+      : 1;
 
   path.slice(1).forEach((key, index) => {
     if (!positions.has(key)) {
       positions.set(key, {
-        x: anchorPosition.x + (index + 1) * STOP_GAP,
+        x: anchorPosition.x + branchDirection * (index + 1) * STOP_GAP,
         y,
       });
     }
@@ -681,9 +767,14 @@ function placeRemainingComponents(
   placed: Set<string>,
   visibleEdges: Set<string>,
   laneSteps: Generator<number, never, unknown>,
+  destinationKey?: string,
 ): void {
   const nodeIds = nodes.map((node) => node.id);
-  let nextBaseX = getMaxPositionX(positions) + STOP_GAP;
+  const keepAfterDestinationClear =
+    destinationKey !== undefined && positions.has(destinationKey);
+  let nextBaseX = keepAfterDestinationClear
+    ? getMinPositionX(positions) - STOP_GAP
+    : getMaxPositionX(positions) + STOP_GAP;
 
   while (true) {
     const start = nodeIds.find((id) => !placed.has(id));
@@ -700,7 +791,9 @@ function placeRemainingComponents(
 
     orderedIds.forEach((id, index) => {
       positions.set(id, {
-        x: nextBaseX + index * STOP_GAP,
+        x: keepAfterDestinationClear
+          ? nextBaseX - index * STOP_GAP
+          : nextBaseX + index * STOP_GAP,
         y,
       });
       placed.add(id);
@@ -717,7 +810,9 @@ function placeRemainingComponents(
 
     addComponentEdges(component, adjacency, visibleEdges);
 
-    nextBaseX += Math.max(orderedIds.length, 1) * STOP_GAP + STOP_GAP;
+    nextBaseX +=
+      (keepAfterDestinationClear ? -1 : 1) *
+      (Math.max(orderedIds.length, 1) * STOP_GAP + STOP_GAP);
   }
 }
 
@@ -872,6 +967,15 @@ function getMaxPositionX(
   );
 }
 
+function getMinPositionX(
+  positions: Map<string, { x: number; y: number }>,
+): number {
+  return Math.min(
+    0,
+    ...Array.from(positions.values()).map((position) => position.x),
+  );
+}
+
 function* createLaneSteps(): Generator<number, never, unknown> {
   let magnitude = 1;
 
@@ -1001,10 +1105,10 @@ function buildPatternGraph(
         city: call.city,
         current: call.current,
         served: call.served,
-          time: call.time,
-          transfers: call.transferLines ?? [],
-          degree: 0,
-        });
+        time: call.time,
+        transfers: call.transferLines ?? [],
+        degree: 0,
+      });
     });
     calls.slice(0, -1).forEach((call, index) => {
       const source = createStationKey(call);
@@ -1077,28 +1181,59 @@ function pruneImplausibleEdges(
 }
 
 function createServedEdgeKeys(calls: DepartureCall[]): Set<string> {
+  return new Set(createServedEdgeKeyList(calls));
+}
+
+function createServedEdgeKeyList(calls: DepartureCall[]): string[] {
   const servedCalls = calls.filter((call) => call.served);
-  const edgeKeys = new Set<string>();
+  const edgeKeys: string[] = [];
 
   servedCalls.slice(0, -1).forEach((call, index) => {
     const source = createStationKey(call);
     const target = createStationKey(servedCalls[index + 1]);
 
     if (source !== target) {
-      edgeKeys.add(createEdgeKey(source, target));
+      edgeKeys.push(createEdgeKey(source, target));
     }
   });
 
   return edgeKeys;
 }
 
+function getServedDestinationKey(calls: DepartureCall[]): string | undefined {
+  const servedCalls = calls.filter((call) => call.served);
+  const destinationCall = servedCalls[servedCalls.length - 1];
+
+  return destinationCall ? createStationKey(destinationCall) : undefined;
+}
+
 function createActiveCorridorEdgeKeys(
   calls: DepartureCall[],
   lineTopology: LineRouteSequence[],
 ): Set<string> {
-  const servedKeys = new Set(
-    calls.filter((call) => call.served).map(createStationKey),
+  return new Set(createActiveRouteEdgeKeyList(calls, lineTopology));
+}
+
+function createActiveRouteEdgeOrder(
+  calls: DepartureCall[],
+  lineTopology: LineRouteSequence[],
+): Map<string, number> {
+  return new Map(
+    createActiveRouteEdgeKeyList(calls, lineTopology).map((key, index) => [
+      key,
+      index,
+    ]),
   );
+}
+
+function createActiveRouteEdgeKeyList(
+  calls: DepartureCall[],
+  lineTopology: LineRouteSequence[],
+): string[] {
+  const servedCallKeys = calls
+    .filter((call) => call.served)
+    .map(createStationKey);
+  const servedKeys = new Set(servedCallKeys);
   const currentKey = calls.find((call) => call.current)
     ? createStationKey(calls.find((call) => call.current)!)
     : undefined;
@@ -1110,28 +1245,70 @@ function createActiveCorridorEdgeKeys(
       scoreSequence(right, servedKeys, currentKey) -
       scoreSequence(left, servedKeys, currentKey),
   )[0];
-  const servedIndexes =
-    sequence
-      ?.map((key, index) => (servedKeys.has(key) ? index : -1))
-      .filter((index) => index >= 0) ?? [];
-  const edgeKeys = new Set<string>();
 
-  if (!sequence || servedIndexes.length < 2) {
-    return edgeKeys;
+  if (!sequence) {
+    return createServedEdgeKeyList(calls);
   }
 
-  const minIndex = Math.min(...servedIndexes);
-  const maxIndex = Math.max(...servedIndexes);
+  const orientedSequence = orientSequenceTowardCalls(sequence, servedCallKeys);
+  const firstServedKey = servedCallKeys.find((key) =>
+    orientedSequence.includes(key),
+  );
+  const lastServedKey = [...servedCallKeys]
+    .reverse()
+    .find((key) => orientedSequence.includes(key));
+  const servedIndexes = orientedSequence
+    .map((key, index) => (servedKeys.has(key) ? index : -1))
+    .filter((index) => index >= 0);
 
-  sequence.slice(minIndex, maxIndex).forEach((source, index) => {
-    const target = sequence[minIndex + index + 1];
+  if (servedIndexes.length < 2) {
+    return createServedEdgeKeyList(calls);
+  }
+
+  const firstIndex =
+    firstServedKey !== undefined
+      ? orientedSequence.indexOf(firstServedKey)
+      : -1;
+  const lastIndex =
+    lastServedKey !== undefined ? orientedSequence.indexOf(lastServedKey) : -1;
+  const startIndex =
+    firstIndex >= 0 && lastIndex >= 0
+      ? Math.min(firstIndex, lastIndex)
+      : Math.min(...servedIndexes);
+  const endIndex =
+    firstIndex >= 0 && lastIndex >= 0
+      ? Math.max(firstIndex, lastIndex)
+      : Math.max(...servedIndexes);
+  const edgeKeys: string[] = [];
+
+  orientedSequence.slice(startIndex, endIndex).forEach((source, index) => {
+    const target = orientedSequence[startIndex + index + 1];
 
     if (source !== target) {
-      edgeKeys.add(createEdgeKey(source, target));
+      edgeKeys.push(createEdgeKey(source, target));
     }
   });
 
   return edgeKeys;
+}
+
+function orientSequenceTowardCalls(
+  sequence: string[],
+  servedCallKeys: string[],
+): string[] {
+  const firstServedKey = servedCallKeys.find((key) => sequence.includes(key));
+  const lastServedKey = [...servedCallKeys]
+    .reverse()
+    .find((key) => sequence.includes(key));
+
+  if (!firstServedKey || !lastServedKey) {
+    return sequence;
+  }
+
+  const firstIndex = sequence.indexOf(firstServedKey);
+  const lastIndex = sequence.indexOf(lastServedKey);
+
+  return lastIndex < firstIndex ? [...sequence].reverse() : sequence;
 }
 
 function getActiveTerminalIds(graph: {
@@ -1206,13 +1383,15 @@ function mergeTransfers(
 ): TransferLineOption[] {
   const transfers = new Map<string, TransferLineOption>();
 
-  transferGroups.flatMap((group) => group ?? []).forEach((transfer) => {
-    const key = `${transfer.family ?? ""}:${transfer.id}:${transfer.label}`;
+  transferGroups
+    .flatMap((group) => group ?? [])
+    .forEach((transfer) => {
+      const key = `${transfer.family ?? ""}:${transfer.id}:${transfer.label}`;
 
-    if (!transfers.has(key)) {
-      transfers.set(key, transfer);
-    }
-  });
+      if (!transfers.has(key)) {
+        transfers.set(key, transfer);
+      }
+    });
 
   return Array.from(transfers.values()).slice(0, 40);
 }
@@ -1306,8 +1485,26 @@ function toRadians(value: number): number {
   return (value * Math.PI) / 180;
 }
 
-function createStationKey(stop: { id?: string; label: string }): string {
-  return normalizeStationName(stop.label || stop.id || "");
+function createStationKey(stop: {
+  id?: string;
+  label: string;
+  station?: { scheduleStopAreaRef?: string };
+  stopAreaRef?: string;
+}): string {
+  return normalizeStationName(
+    stop.station?.scheduleStopAreaRef ??
+      stop.stopAreaRef ??
+      getStableTopologyStopId(stop.id) ??
+      stop.label,
+  );
+}
+
+function getStableTopologyStopId(id?: string): string | undefined {
+  if (!id || id.startsWith("call:")) {
+    return undefined;
+  }
+
+  return id;
 }
 
 function createEdgeKey(source: string, target: string): string {
@@ -1426,6 +1623,7 @@ function normalizeStationName(value: string): string {
                     :zoom-on-pinch="true"
                     :prevent-scrolling="false"
                   >
+                    <Controls :show-interactive="false" :position="PanelPosition.BottomRight" />
                     <template #node-station="{ data }">
                       <div
                         class="pattern-flow-station"

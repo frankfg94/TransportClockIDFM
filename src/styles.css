@@ -1229,7 +1229,68 @@ h3 {
 }
 
 .pattern-flow-edge--active .vue-flow__edge-path {
-  filter: drop-shadow(0 2px 3px rgba(16, 35, 63, 0.16));
+  filter:
+    drop-shadow(0 2px 3px rgba(16, 35, 63, 0.16))
+    drop-shadow(0 0 2px color-mix(in srgb, var(--line-color), transparent 72%));
+}
+
+.pattern-flow-edge--light {
+  opacity: 0.74;
+}
+
+.pattern-flow-edge--light .vue-flow__edge-path {
+  animation: pattern-flow-light-sweep var(--flow-light-cycle, 10s)
+    cubic-bezier(0.45, 0, 0.25, 1) infinite;
+  animation-delay: var(--flow-light-delay, 0s);
+  filter:
+    blur(1.8px)
+    drop-shadow(0 0 8px color-mix(in srgb, var(--line-color), white 46%))
+    drop-shadow(0 0 14px color-mix(in srgb, var(--line-color), transparent 62%));
+  mix-blend-mode: screen;
+  stroke-dasharray: 116 360;
+  stroke-dashoffset: 260;
+  stroke-linecap: round;
+}
+
+.pattern-flow .vue-flow__controls {
+  background: #f8fafc;
+  border: 1px solid rgba(16, 35, 63, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 12px 26px rgba(16, 35, 63, 0.16);
+  overflow: hidden;
+}
+
+.pattern-flow .vue-flow__controls-button {
+  background: #f8fafc;
+  border: 0;
+  border-bottom: 1px solid rgba(16, 35, 63, 0.12);
+  border-radius: 0;
+  color: var(--ink);
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  transform: none;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+  width: 34px;
+}
+
+.pattern-flow .vue-flow__controls-button:last-child {
+  border-bottom: 0;
+}
+
+.pattern-flow .vue-flow__controls-button:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: var(--idfm-blue);
+  transform: none;
+}
+
+.pattern-flow .vue-flow__controls-button svg {
+  fill: currentColor;
+  stroke: currentColor;
+  height: 16px;
+  width: 16px;
 }
 
 .pattern-flow-edge--skipped .vue-flow__edge-path {
@@ -1508,10 +1569,32 @@ h3 {
   }
 }
 
+@keyframes pattern-flow-light-sweep {
+  0% {
+    opacity: 0;
+    stroke-dashoffset: 260;
+  }
+
+  2% {
+    opacity: 0.9;
+  }
+
+  8% {
+    opacity: 0.64;
+  }
+
+  15%,
+  100% {
+    opacity: 0;
+    stroke-dashoffset: -160;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pattern-flow-station--current::before,
   .pattern-flow-station--current::after,
-  .pattern-flow-station--current .pattern-flow-station__dot {
+  .pattern-flow-station--current .pattern-flow-station__dot,
+  .pattern-flow-edge--light .vue-flow__edge-path {
     animation: none;
   }
 }
