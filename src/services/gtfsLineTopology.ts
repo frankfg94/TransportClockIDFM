@@ -1,4 +1,4 @@
-import { strFromU8, unzipSync } from "fflate";
+﻿import { strFromU8, unzipSync } from "fflate";
 import type {
   LineRouteSequence,
   LineRouteStop,
@@ -361,7 +361,7 @@ function getCanonicalStation(
   const station: StationSearchOption = {
     id,
     label,
-    monitoringRef: createStopAreaMonitoringRef(displayStop.stop_id),
+    monitoringRef: createStopAreaMonitoringRef(displayStop.stop_id) ?? "",
     scheduleStopAreaRef: createNavitiaStopAreaRef(displayStop.stop_id),
   };
 
@@ -430,7 +430,9 @@ function extractLineCode(value?: string): string {
     return "";
   }
 
-  return value.match(/C\d+/u)?.[0] ?? value.split(":").filter(Boolean).at(-1) ?? value;
+  const parts = value.split(":").filter(Boolean);
+
+  return value.match(/C\d+/u)?.[0] ?? parts[parts.length - 1] ?? value;
 }
 
 function normalizeComparableId(value?: string): string {
@@ -449,7 +451,7 @@ function cleanStationLabel(value: string): string {
   return value
     .replace(/\s+\([^)]*\)$/u, "")
     .replace(/\s+/g, " ")
-    .replace(/[’]/gu, "'")
+    .replace(/[?]/gu, "'")
     .trim();
 }
 
@@ -490,3 +492,4 @@ function createStableId(value: string): string {
     .replace(/^-|-$/g, "")
     .toLowerCase();
 }
+

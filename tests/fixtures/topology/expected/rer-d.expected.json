@@ -1,0 +1,16 @@
+{
+  "lineId": "line:IDFM:C01798",
+  "requiredStations": ["creil", "chantilly", "orr-la-ville", "gare-du-nord", "chatelet-les-halles", "gare-de-lyon", "maisons-alfort", "villeneuve-saint-georges", "juvisy", "viry-chatillon", "grigny-centre", "ris-orangis", "grand-bourg", "evry-val-de-seine", "orangis-bois-de-epine", "evry-courcouronnes", "bras-de-fer", "corbeil-essonnes", "le-coudray-montceaux", "melun", "moulin-galant", "mennecy", "la-ferte-alais", "malesherbes", "montgeron-crosne", "brunoy", "lieusaint-moissy"],
+  "expectedTerminals": ["creil", "melun", "malesherbes"],
+  "expectedTerminalDegrees": {
+    "melun": 2
+  },
+  "expectedBranchPoints": ["villeneuve-saint-georges", "juvisy", "corbeil-essonnes"],
+  "expectedNeighbors": {
+    "villeneuve-saint-georges": ["maisons-alfort", "juvisy", "montgeron-crosne"],
+    "juvisy": ["villeneuve-saint-georges", "viry-chatillon", "orangis-bois-de-epine"],
+    "corbeil-essonnes": ["evry-val-de-seine", "bras-de-fer", "le-coudray-montceaux", "moulin-galant"],
+    "melun": ["le-coudray-montceaux", "lieusaint-moissy"],
+    "malesherbes": ["la-ferte-alais"]
+  }
+}

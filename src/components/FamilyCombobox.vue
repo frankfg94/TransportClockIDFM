@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from "vue";
 import type { TransitFamilyOption } from "../types/transit";
 
@@ -62,7 +62,11 @@ function selectNetwork(network?: TransitFamilyOption): void {
 </script>
 
 <template>
-  <div class="family-combobox" @focusin="setOpen(true)" @focusout="scheduleClose">
+  <div
+    class="family-combobox"
+    @focusin="setOpen(true)"
+    @focusout="scheduleClose"
+  >
     <button
       class="family-combobox__button"
       type="button"
@@ -171,3 +175,4 @@ function selectNetwork(network?: TransitFamilyOption): void {
   padding: 8px;
 }
 </style>
+

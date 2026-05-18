@@ -1,2 +1,3 @@
-export { default as DeparturePatternModal } from "./DeparturePatternModal.vue";
+﻿export { default as DeparturePatternModal } from "./DeparturePatternModal.vue";
+
 

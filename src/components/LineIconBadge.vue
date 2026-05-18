@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { createRatpLineIconUrls } from "../services/lineIcons";
 import type { TransitFamily, TransitMode } from "../types/transit";
@@ -221,3 +221,4 @@ function transitModeToFamily(mode?: TransitMode): TransitFamily | undefined {
   padding: 0 8px;
 }
 </style>
+

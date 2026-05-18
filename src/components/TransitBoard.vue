@@ -1,6 +1,14 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Bell, BellRing, ChevronDown, Route, Trash } from "lucide-vue-next";
+import {
+  Bell,
+  BellRing,
+  ChevronDown,
+  Map,
+  MoreVertical,
+  Route,
+  Trash,
+} from "lucide-vue-next";
 import LineIconBadge from "./LineIconBadge.vue";
 import type {
   Departure,
@@ -28,6 +36,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   remove: [];
+  "open-line-page": [board: TransitBoardConfig];
   "schedule-alarm": [
     payload: {
       board: TransitBoardConfig;
@@ -46,6 +55,7 @@ const displayedDeparturesCount = computed(() =>
   ),
 );
 const isCompactPatternInteraction = ref(false);
+const actionsOpen = ref(false);
 let compactPatternMediaQuery: MediaQueryList | undefined;
 
 const statusLabels: Record<string, string> = {
@@ -148,6 +158,16 @@ function formatDepartureMeta(departure: Departure): string {
   return parts.join(" · ");
 }
 
+function formatRemainingStopCount(departure: Departure): string {
+  if (typeof departure.remainingStopCount !== "number") {
+    return "";
+  }
+
+  return departure.remainingStopCount > 1
+    ? `${departure.remainingStopCount} arrêts`
+    : `${departure.remainingStopCount} arrêt`;
+}
+
 function canShowPattern(): boolean {
   return true;
 }
@@ -158,6 +178,16 @@ function canAutoOpenPattern(): boolean {
 
 function openPatternForDeparture(payload: DeparturePatternPayload): void {
   emit("show-pattern", payload);
+}
+
+function openLinePage(): void {
+  actionsOpen.value = false;
+  emit("open-line-page", props.board);
+}
+
+function removeBoard(): void {
+  actionsOpen.value = false;
+  emit("remove");
 }
 
 function normalizeText(value?: string): string {
@@ -202,15 +232,32 @@ onUnmounted(() => {
         <h2>{{ board.title }}</h2>
         <p class="board__city">{{ board.city }}</p>
       </div>
-      <button
-        v-if="removable"
-        class="delete-board-button"
-        type="button"
-        aria-label="Supprimer cette station"
-        @click="emit('remove')"
-      >
-        <Trash />
-      </button>
+      <div class="board-actions">
+        <button
+          class="board-actions__trigger"
+          type="button"
+          :aria-expanded="actionsOpen"
+          aria-label="Actions de la station"
+          @click.stop="actionsOpen = !actionsOpen"
+        >
+          <MoreVertical :size="20" aria-hidden="true" />
+        </button>
+        <div v-if="actionsOpen" class="board-actions__menu">
+          <button type="button" @click="openLinePage">
+            <Map :size="17" aria-hidden="true" />
+            Schéma de la ligne
+          </button>
+          <button
+            v-if="removable"
+            class="board-actions__danger"
+            type="button"
+            @click="removeBoard"
+          >
+            <Trash :size="17" aria-hidden="true" />
+            Supprimer
+          </button>
+        </div>
+      </div>
     </header>
 
     <div v-if="error" class="notice notice--error">
@@ -238,7 +285,7 @@ onUnmounted(() => {
         >
           <div class="direction-section__title">
             <p>Direction</p>
-            <h3 style="font-weight: 600;">{{ group.label }}</h3>
+            <h3 style="font-weight: 600">{{ group.label }}</h3>
           </div>
 
           <div class="last-service">
@@ -305,14 +352,36 @@ onUnmounted(() => {
                   "
                 >
                   <strong>{{ departure.destination }}</strong>
-                  <span v-if="formatDepartureMeta(departure)">
-                    {{ formatDepartureMeta(departure) }}
+                  <span
+                    v-if="
+                      formatDepartureMeta(departure) ||
+                      formatRemainingStopCount(departure)
+                    "
+                    class="departure__meta"
+                  >
+                    <span v-if="formatDepartureMeta(departure)">
+                      {{ formatDepartureMeta(departure) }}
+                    </span>
+                    <small v-if="formatRemainingStopCount(departure)">
+                      {{ formatRemainingStopCount(departure) }}
+                    </small>
                   </span>
                 </button>
                 <div v-else class="departure__main">
                   <strong>{{ departure.destination }}</strong>
-                  <span v-if="formatDepartureMeta(departure)">
-                    {{ formatDepartureMeta(departure) }}
+                  <span
+                    v-if="
+                      formatDepartureMeta(departure) ||
+                      formatRemainingStopCount(departure)
+                    "
+                    class="departure__meta"
+                  >
+                    <span v-if="formatDepartureMeta(departure)">
+                      {{ formatDepartureMeta(departure) }}
+                    </span>
+                    <small v-if="formatRemainingStopCount(departure)">
+                      {{ formatRemainingStopCount(departure) }}
+                    </small>
                   </span>
                 </div>
 
@@ -394,3 +463,4 @@ onUnmounted(() => {
     </footer>
   </article>
 </template>
+

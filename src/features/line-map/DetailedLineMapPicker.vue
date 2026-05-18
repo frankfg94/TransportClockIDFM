@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import {
   isBusTransfer,
@@ -6,7 +6,11 @@ import {
   loadStationTransfers,
   loadTransferLineDirections,
 } from "./lineMapData";
-import type { LineSearchOption, StationSearchOption, TransferLineOption } from "../../types/transit";
+import type {
+  LineSearchOption,
+  StationSearchOption,
+  TransferLineOption,
+} from "../../types/transit";
 import type {
   LineMapSegmentView,
   LineMapStopView,
@@ -118,17 +122,21 @@ const visibleLabelIds = computed(() => {
     return new Set(map.stops.map((stop) => stop.id));
   }
 
-  const requiredIds = new Set<string>([
-    ...getTerminalStopIds(map),
-    props.selectedStationId ?? "",
-    hoveredStop.value?.id ?? "",
-  ].filter(Boolean));
+  const requiredIds = new Set<string>(
+    [
+      ...getTerminalStopIds(map),
+      props.selectedStationId ?? "",
+      hoveredStop.value?.id ?? "",
+    ].filter(Boolean),
+  );
   const placedLabels: Array<{ x: number; y: number }> = [];
   const labelIds = new Set<string>();
-  const minimumDistance = zoom.value >= 1.55 ? 62 : zoom.value >= 1.25 ? 78 : 96;
+  const minimumDistance =
+    zoom.value >= 1.55 ? 62 : zoom.value >= 1.25 ? 78 : 96;
   const sortedStops = [...map.stops].sort(
     (left, right) =>
-      getLabelPriority(right, requiredIds) - getLabelPriority(left, requiredIds),
+      getLabelPriority(right, requiredIds) -
+      getLabelPriority(left, requiredIds),
   );
 
   sortedStops.forEach((stop) => {
@@ -370,7 +378,10 @@ function getLabelOffset(
   stop: LineMapStopView,
   index = lineMap.value?.stops.findIndex((item) => item.id === stop.id) ?? 0,
 ): { x: number; y: number } {
-  if (props.selectedStationId === stop.id || hoveredStop.value?.id === stop.id) {
+  if (
+    props.selectedStationId === stop.id ||
+    hoveredStop.value?.id === stop.id
+  ) {
     return { x: 18, y: -18 };
   }
 
@@ -452,7 +463,10 @@ function getTerminalStopIds(map: LineMapViewModel): string[] {
     .map((stop) => stop.id);
 }
 
-function getLabelPriority(stop: LineMapStopView, requiredIds: Set<string>): number {
+function getLabelPriority(
+  stop: LineMapStopView,
+  requiredIds: Set<string>,
+): number {
   if (requiredIds.has(stop.id)) {
     return 100;
   }
@@ -464,7 +478,13 @@ function getLabelPriority(stop: LineMapStopView, requiredIds: Set<string>): numb
 <template>
   <div class="line-map-panel">
     <div class="line-map-panel__bar">
-      <span class="line-map-chip" :style="{ background: props.line?.color ?? '#0064ff', color: props.line?.textColor ?? '#ffffff' }">
+      <span
+        class="line-map-chip"
+        :style="{
+          background: props.line?.color ?? '#0064ff',
+          color: props.line?.textColor ?? '#ffffff',
+        }"
+      >
         {{ props.line?.label }}
       </span>
       <span v-if="selectedStop" class="line-map-selected-pill">
@@ -472,13 +492,27 @@ function getLabelPriority(stop: LineMapStopView, requiredIds: Set<string>): numb
       </span>
       <span v-if="lineMap" class="line-map-stats">{{ mapStats }}</span>
       <div v-if="lineMap" class="line-map-zoom" aria-label="Zoom du plan">
-        <button class="icon-button line-map-zoom__button" type="button" aria-label="Dézoomer" @click="adjustZoom(-ZOOM_STEP)">
+        <button
+          class="icon-button line-map-zoom__button"
+          type="button"
+          aria-label="Dézoomer"
+          @click="adjustZoom(-ZOOM_STEP)"
+        >
           −
         </button>
-        <button class="button-secondary line-map-zoom__reset" type="button" @click="resetZoom">
+        <button
+          class="button-secondary line-map-zoom__reset"
+          type="button"
+          @click="resetZoom"
+        >
           {{ Math.round(zoom * 100) }}%
         </button>
-        <button class="icon-button line-map-zoom__button" type="button" aria-label="Zoomer" @click="adjustZoom(ZOOM_STEP)">
+        <button
+          class="icon-button line-map-zoom__button"
+          type="button"
+          aria-label="Zoomer"
+          @click="adjustZoom(ZOOM_STEP)"
+        >
           +
         </button>
       </div>
@@ -606,11 +640,16 @@ function getLabelPriority(stop: LineMapStopView, requiredIds: Set<string>): numb
             <span aria-hidden="true" class="loader-dot"></span>
             Chargement
           </span>
-          <span v-else-if="hoveredTransferState?.error" class="line-map-tooltip__muted">
+          <span
+            v-else-if="hoveredTransferState?.error"
+            class="line-map-tooltip__muted"
+          >
             Indisponible
           </span>
           <span
-            v-else-if="hoveredTransferState && hoveredTransferState.lines.length === 0"
+            v-else-if="
+              hoveredTransferState && hoveredTransferState.lines.length === 0
+            "
             class="line-map-tooltip__muted"
           >
             Aucune autre ligne
@@ -621,7 +660,9 @@ function getLabelPriority(stop: LineMapStopView, requiredIds: Set<string>): numb
               :key="transfer.id"
               class="transfer-badge"
               type="button"
-              :class="{ 'transfer-badge--active': transfer.id === activeTransfer?.id }"
+              :class="{
+                'transfer-badge--active': transfer.id === activeTransfer?.id,
+              }"
               :style="getTransferStyle(transfer)"
               :title="transfer.mode"
               @click="showTransfer(transfer)"
@@ -646,17 +687,22 @@ function getLabelPriority(stop: LineMapStopView, requiredIds: Set<string>): numb
             <span aria-hidden="true" class="loader-dot"></span>
             Chargement
           </span>
-          <span v-else-if="activeDirectionState?.error" class="line-map-tooltip__muted">
+          <span
+            v-else-if="activeDirectionState?.error"
+            class="line-map-tooltip__muted"
+          >
             Indisponible
           </span>
-          <span v-else-if="activeDirectionState?.directions.length" class="transfer-directions__list">
+          <span
+            v-else-if="activeDirectionState?.directions.length"
+            class="transfer-directions__list"
+          >
             {{ activeDirectionState.directions.join(" · ") }}
           </span>
-          <span v-else class="line-map-tooltip__muted">
-            Aucune direction
-          </span>
+          <span v-else class="line-map-tooltip__muted"> Aucune direction </span>
         </div>
       </div>
     </div>
   </div>
 </template>
+

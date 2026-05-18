@@ -1,4 +1,4 @@
-export { default as DetailedLineMapPicker } from "./DetailedLineMapPicker.vue";
+﻿export { default as DetailedLineMapPicker } from "./DetailedLineMapPicker.vue";
 export type {
   LineMapViewModel,
   LineTransferSummary,
@@ -6,3 +6,4 @@ export type {
   StationListItem,
   TransferLineDirections,
 } from "./types";
+

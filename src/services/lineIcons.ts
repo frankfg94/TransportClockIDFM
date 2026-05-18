@@ -1,4 +1,4 @@
-import type { TransitFamily, TransitMode } from "../types/transit";
+﻿import type { TransitFamily, TransitMode } from "../types/transit";
 
 interface LineIconSource {
   code?: string;
@@ -85,4 +85,5 @@ function getRatpModePaths(family: TransitFamily): string[] {
 
   return [];
 }
+
 

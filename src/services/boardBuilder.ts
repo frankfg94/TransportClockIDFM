@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   DirectionGroupConfig,
   LineSearchOption,
   MonitoringPointConfig,
@@ -126,3 +126,4 @@ function createBoardId(line: LineSearchOption, station: StationSearchOption): st
     .replace(/^-|-$/g, "")
     .toLowerCase();
 }
+

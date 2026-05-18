@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { BellRing, Volume2 } from "lucide-vue-next";
 import { reactive, watch } from "vue";
 import LineIconBadge from "./LineIconBadge.vue";
@@ -145,3 +145,4 @@ function departureTime(departure?: Departure): string | undefined {
     </Transition>
   </Teleport>
 </template>
+

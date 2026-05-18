@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import BoardVisibilityControls from "./components/BoardVisibilityControls.vue";
 import DepartureAlarmModal from "./components/DepartureAlarmModal.vue";
@@ -6,10 +6,7 @@ import StationBoardModal from "./components/StationBoardModal.vue";
 import TransitBoard from "./components/TransitBoard.vue";
 import { transitBoards } from "./config/transitBoards";
 import { DeparturePatternModal } from "./features/service-pattern";
-import {
-  fetchBoardDepartures,
-  fetchDepartureCallingPattern,
-} from "./services/idfm";
+import { fetchBoardDepartures } from "./services/idfm";
 import {
   createDefaultPreferences,
   loadTransitPreferences,
@@ -29,6 +26,7 @@ import type {
   DepartureAlarm,
   DepartureCallingPattern,
   DirectionDepartureGroup,
+  LinePatternViewResponse,
   TransitBoardConfig,
 } from "./types/transit";
 import { BellRing, Plus } from "lucide-vue-next";
@@ -76,7 +74,7 @@ const alarmTimers = new Map<string, number>();
 let toastTimer: number | undefined;
 let clockTimer: number | undefined;
 
-const allBoards = computed(() => [
+const allBoards = computed<TransitBoardConfig[]>(() => [
   ...transitBoards,
   ...preferences.customBoards,
 ]);
@@ -249,6 +247,30 @@ function isCustomBoard(boardId: string): boolean {
   return preferences.customBoards.some((board) => board.id === boardId);
 }
 
+function openLinePage(board: TransitBoardConfig): void {
+  const transportType = board.line.mode === "train" ? "transilien" : board.line.mode;
+  const lineId = board.line.shortName || board.line.ref;
+  const direction = board.directionGroups[0]?.id || board.directionGroups[0]?.label || "";
+  const startStation =
+    board.schedule?.stopAreaRef || board.title;
+  const params = new URLSearchParams();
+
+  if (direction) {
+    params.set("direction", direction);
+  }
+
+  if (startStation) {
+    params.set("startStation", startStation);
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  window.open(
+    `/line/${encodeURIComponent(transportType)}/${encodeURIComponent(lineId)}${suffix}`,
+    "_blank",
+    "noopener,noreferrer",
+  );
+}
+
 function toggleDirection(boardId: string, directionId: string): void {
   const scopedId = getScopedDirectionId(boardId, directionId);
   const collapsedIds = new Set(preferences.collapsedDirectionIds);
@@ -301,10 +323,13 @@ async function openPatternModal(payload: {
   patternLoading.value = true;
 
   try {
-    patternData.value = await fetchDepartureCallingPattern(
+    const patternView = await fetchLinePatternView(
       payload.board,
       payload.departure,
+      payload.directionGroup,
     );
+
+    patternData.value = patternView.pattern;
   } catch (error) {
     patternError.value =
       error instanceof Error
@@ -313,6 +338,45 @@ async function openPatternModal(payload: {
   } finally {
     patternLoading.value = false;
   }
+}
+
+async function fetchLinePatternView(
+  board: TransitBoardConfig,
+  departure: Departure,
+  directionGroup: DirectionDepartureGroup,
+): Promise<LinePatternViewResponse> {
+  const transportType =
+    board.line.mode === "train" ? "transilien" : board.line.mode;
+  const lineId = board.line.shortName || board.line.ref;
+  const direction =
+    departure.destination || directionGroup.id || directionGroup.label;
+  const startStation =
+    board.schedule?.stopAreaRef ||
+    departure.monitoringRef ||
+    departure.stopName ||
+    board.title;
+  const params = new URLSearchParams();
+
+  if (direction) {
+    params.set("direction", direction);
+  }
+
+  if (startStation) {
+    params.set("startStation", startStation);
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(
+    `/api/lines/${encodeURIComponent(transportType)}/${encodeURIComponent(
+      lineId,
+    )}/pattern${suffix}`,
+  );
+
+  if (!response.ok) {
+    throw new Error("Impossible de charger la desserte.");
+  }
+
+  return response.json() as Promise<LinePatternViewResponse>;
 }
 
 function closePatternModal(): void {
@@ -655,7 +719,7 @@ onBeforeUnmount(() => {
 
           <div>
             <span>{{ formatClock(lastRefresh) }}</span>
-            <small>dernière màj</small>
+            <small>dernière mise à jour</small>
           </div>
           <button type="button" :disabled="refreshing" @click="refreshAll">
             {{ refreshing ? "Actualisation..." : "Actualiser" }}
@@ -693,6 +757,7 @@ onBeforeUnmount(() => {
           :removable="isCustomBoard(board.id)"
           :alarm-departure-ids="getBoardAlarmDepartureIds(board.id)"
           @remove="removeCustomBoard(board.id)"
+          @open-line-page="openLinePage"
           @schedule-alarm="openAlarmModal"
           @show-pattern="openPatternModal"
           @toggle-direction="toggleDirection(board.id, $event)"
@@ -769,8 +834,8 @@ onBeforeUnmount(() => {
         <p class="eyebrow">Configuration PRIM</p>
         <h2 id="api-key-title">Clé API IDFM PRIM manquante</h2>
         <p>
-          Ajoute une clé PRIM gratuite dans le fichier d'environnement pour
-          activer les prochains passages.
+          Ajoutez une clé d'API PRIM Île-De-France Mobilités gratuite dans le
+          fichier d'environnement pour activer les prochains passages.
         </p>
         <ol>
           <li>
@@ -779,12 +844,12 @@ onBeforeUnmount(() => {
               target="_blank"
               rel="noreferrer"
             >
-              Create a free PRIM Key
+              Créer votre clé API PRIM
             </a>
           </li>
-          <li>Use it to set the <code>IDFM_API_KEY</code> value.</li>
-          <li>Restart the website.</li>
-          <li>Enjoy!</li>
+          <li>Assignez <code>IDFM_API_KEY</code></li>
+          <li>Redémarrez le serveur</li>
+          <li>Enjoy</li>
         </ol>
       </section>
     </Transition>

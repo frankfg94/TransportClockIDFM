@@ -1,4 +1,4 @@
-import type { StationSearchOption, TransferLineOption } from "../../types/transit";
+﻿import type { StationSearchOption, TransferLineOption } from "../../types/transit";
 
 export interface LineMapStopView {
   id: string;
@@ -61,3 +61,4 @@ export interface TransferLineDirections {
   lineId: string;
   directions: string[];
 }
+

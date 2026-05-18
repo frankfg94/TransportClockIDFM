@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from "vue";
 import LineIconBadge from "./LineIconBadge.vue";
 import type { LineSearchOption } from "../types/transit";
@@ -24,7 +24,7 @@ let blurTimer: number | undefined;
 const buttonLabel = computed(() =>
   props.modelValue
     ? getLineDisplayName(props.modelValue)
-    : (props.placeholder ?? "Sélectionner une ligne"),
+    : (props.placeholder ?? "S\u00e9lectionner une ligne"),
 );
 
 onBeforeUnmount(() => {
@@ -214,3 +214,4 @@ function getLineDisplayName(line: LineSearchOption): string {
   gap: 10px;
 }
 </style>
+

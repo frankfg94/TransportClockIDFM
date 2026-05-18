@@ -1,4 +1,4 @@
-import {
+﻿import {
   fetchLineRouteSequences,
   fetchLineRouteSummaries,
   fetchStationTransfers,
@@ -493,3 +493,4 @@ function normalizeText(value?: string): string {
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase();
 }
+

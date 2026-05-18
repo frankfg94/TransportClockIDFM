@@ -1,12 +1,24 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/controls/dist/style.css";
 import dagre from "@dagrejs/dagre";
-import { computed } from "vue";
-import { Handle, PanelPosition, Position, VueFlow } from "@vue-flow/core";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { Handle, Position, VueFlow } from "@vue-flow/core";
 import type { Edge, Node } from "@vue-flow/core";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import { Controls } from "@vue-flow/controls";
+import { Expand, Minimize2 } from "lucide-vue-next";
+import {
+  createPatternStationKey as createStationKey,
+  normalizePatternStationName as normalizeStationName,
+  patternStationKeysAreCompatible as stationKeysAreCompatible,
+} from "./stationKeys";
+import {
+  getFlowLightEdgeClass,
+  getVisualFlowEdgeEndpoints,
+} from "./flowDirection";
+import { hydrateDeparturePatternTransfers } from "./patternTransfers";
+
 import type {
   Departure,
   DepartureCall,
@@ -89,21 +101,30 @@ const props = defineProps<{
   pattern?: DepartureCallingPattern;
   loading?: boolean;
   error?: string;
+  embedded?: boolean;
 }>();
 
 const emit = defineEmits<{
   close: [];
 }>();
 
+const isPatternFlowFullscreen = ref(false);
+const hydratedPattern = ref<DepartureCallingPattern>();
+let transferHydrationRequest = 0;
+
 const serviceLabel = computed(() =>
-  props.pattern ? formatServiceType(props.pattern.serviceType) : "Desserte",
+  displayPattern.value
+    ? formatServiceType(displayPattern.value.serviceType)
+    : "Desserte",
 );
 const servedCalls = computed(
-  () => props.pattern?.calls.filter((call) => call.served) ?? [],
+  () => displayPattern.value?.calls.filter((call) => call.served) ?? [],
 );
 const destinationLabel = computed(
   () =>
-    props.departure?.destination ?? props.pattern?.destination ?? "Destination",
+    props.departure?.destination ??
+    displayPattern.value?.destination ??
+    "Destination",
 );
 const departureClock = computed(() =>
   formatClock(departureTime(props.departure)),
@@ -111,14 +132,21 @@ const departureClock = computed(() =>
 const servedStopsLabel = computed(() => {
   const count = servedCalls.value.length;
 
-  return count > 1 ? `${count} arrêts desservis` : `${count} arrêt desservi`;
+    return count > 1 ? `${count} arrêts desservis` : `${count} arrêt desservi`;
 });
+const displayPattern = computed(() => hydratedPattern.value ?? props.pattern);
 const flowModel = computed(() =>
   createPatternFlow(
-    props.pattern?.calls ?? [],
-    props.pattern?.lineTopology ?? [],
+    displayPattern.value?.calls ?? [],
+    displayPattern.value?.lineTopology ?? [],
     departureClock.value,
   ),
+);
+const patternFlowKey = computed(
+  () =>
+    `${displayPattern.value?.departureId ?? "empty"}:${
+      isPatternFlowFullscreen.value ? "fullscreen" : "modal"
+    }`,
 );
 const initialViewport = computed(() => {
   const currentNode =
@@ -126,15 +154,32 @@ const initialViewport = computed(() => {
     flowModel.value.nodes.find((node) => node.data?.served) ??
     flowModel.value.nodes[0];
   const nodeCount = flowModel.value.nodes.length;
-  const zoom = nodeCount > 64 ? 0.42 : nodeCount > 42 ? 0.5 : 0.78;
+  const zoom = isPatternFlowFullscreen.value
+    ? nodeCount > 64
+      ? 0.58
+      : nodeCount > 42
+        ? 0.66
+        : 0.92
+    : nodeCount > 64
+      ? 0.42
+      : nodeCount > 42
+        ? 0.5
+        : 0.78;
+  const center = isPatternFlowFullscreen.value
+    ? { x: 560, y: 360 }
+    : { x: 280, y: 230 };
 
   if (!currentNode) {
-    return { x: 24, y: 160, zoom };
+    return {
+      x: isPatternFlowFullscreen.value ? 72 : 24,
+      y: isPatternFlowFullscreen.value ? 240 : 160,
+      zoom,
+    };
   }
 
   return {
-    x: 280 - (currentNode.position.x + NODE_WIDTH / 2) * zoom,
-    y: 230 - (currentNode.position.y + NODE_HEIGHT / 2) * zoom,
+    x: center.x - (currentNode.position.x + NODE_WIDTH / 2) * zoom,
+    y: center.y - (currentNode.position.y + NODE_HEIGHT / 2) * zoom,
     zoom,
   };
 });
@@ -173,6 +218,42 @@ function departureTime(departure?: Departure): string | undefined {
     departure?.expectedArrivalTime ??
     departure?.aimedDepartureTime
   );
+}
+
+watch(
+  [() => props.open, () => props.board, () => props.pattern],
+  () => {
+    void hydratePatternTransfers();
+  },
+  { immediate: true },
+);
+
+async function hydratePatternTransfers(): Promise<void> {
+  const requestId = ++transferHydrationRequest;
+  const pattern = props.pattern;
+  const board = props.board;
+
+  hydratedPattern.value = pattern;
+
+  if (!props.open || !board || !pattern) {
+    return;
+  }
+
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    const enrichedPattern = await hydrateDeparturePatternTransfers(board, pattern);
+
+    if (requestId === transferHydrationRequest) {
+      hydratedPattern.value = enrichedPattern;
+    }
+  } catch {
+    if (requestId === transferHydrationRequest) {
+      hydratedPattern.value = pattern;
+    }
+  }
 }
 
 function createPatternFlow(
@@ -225,10 +306,17 @@ function createPatternFlow(
     topology.visibleEdges.has(createEdgeKey(edge.source, edge.target)),
   );
   const activeRouteEdgeOrder = createActiveRouteEdgeOrder(calls, lineTopology);
+  const activeRouteEdgeDirections = createActiveRouteEdgeDirections(
+    calls,
+    lineTopology,
+  );
   const activeLightEdges = visibleDrawableEdges
     .filter((edge) => edge.active)
     .map((edge, fallbackOrder) => ({
       edge,
+      direction: activeRouteEdgeDirections.get(
+        createEdgeKey(edge.source, edge.target),
+      ),
       order:
         activeRouteEdgeOrder.get(createEdgeKey(edge.source, edge.target)) ??
         fallbackOrder,
@@ -238,10 +326,11 @@ function createPatternFlow(
     ...visibleDrawableEdges.map((edge) =>
       createFlowEdge(edge, topology.positions),
     ),
-    ...activeLightEdges.map(({ edge, order }) =>
+    ...activeLightEdges.map(({ edge, direction, order }) =>
       createFlowLightEdge(
         edge,
         topology.positions,
+        direction,
         order,
         activeLightEdges.length,
       ),
@@ -255,16 +344,7 @@ function createFlowEdge(
   edge: PatternGraphEdge,
   positions: Map<string, { x: number; y: number }>,
 ): PatternFlowEdge {
-  const sourcePosition = positions.get(edge.source);
-  const targetPosition = positions.get(edge.target);
-  const shouldReverse =
-    sourcePosition &&
-    targetPosition &&
-    (sourcePosition.x > targetPosition.x ||
-      (sourcePosition.x === targetPosition.x &&
-        sourcePosition.y > targetPosition.y));
-  const source = shouldReverse ? edge.target : edge.source;
-  const target = shouldReverse ? edge.source : edge.target;
+  const { source, target } = getVisualFlowEdgeEndpoints(edge, positions);
 
   return {
     id: `${edge.id}:${source}:${target}`,
@@ -288,6 +368,7 @@ function createFlowEdge(
 function createFlowLightEdge(
   edge: PatternGraphEdge,
   positions: Map<string, { x: number; y: number }>,
+  direction: { source: string; target: string } | undefined,
   order: number,
   count: number,
 ): PatternFlowEdge {
@@ -298,7 +379,10 @@ function createFlowLightEdge(
   return {
     ...flowEdge,
     id: `${flowEdge.id}:light`,
-    class: "pattern-flow-edge--light",
+    class: getFlowLightEdgeClass({
+      direction,
+      visualEdge: flowEdge,
+    }),
     style: {
       stroke: "color-mix(in srgb, var(--line-color), white 58%)",
       strokeOpacity: 0.42,
@@ -1127,7 +1211,9 @@ function buildPatternGraph(
 
   const servedEdges = createServedEdgeKeys(calls);
   const corridorEdges = createActiveCorridorEdgeKeys(calls, lineTopology);
-  pruneImplausibleEdges(edgeMap, servedEdges, corridorEdges);
+  if (lineTopology.length === 0) {
+    pruneImplausibleEdges(edgeMap, servedEdges, corridorEdges);
+  }
 
   edgeMap.forEach((edge) => {
     const edgeKey = createEdgeKey(edge.source, edge.target);
@@ -1226,10 +1312,31 @@ function createActiveRouteEdgeOrder(
   );
 }
 
+function createActiveRouteEdgeDirections(
+  calls: DepartureCall[],
+  lineTopology: LineRouteSequence[],
+): Map<string, { source: string; target: string }> {
+  return new Map(
+    createActiveRouteDirectedEdges(calls, lineTopology).map((edge) => [
+      createEdgeKey(edge.source, edge.target),
+      edge,
+    ]),
+  );
+}
+
 function createActiveRouteEdgeKeyList(
   calls: DepartureCall[],
   lineTopology: LineRouteSequence[],
 ): string[] {
+  return createActiveRouteDirectedEdges(calls, lineTopology).map((edge) =>
+    createEdgeKey(edge.source, edge.target),
+  );
+}
+
+function createActiveRouteDirectedEdges(
+  calls: DepartureCall[],
+  lineTopology: LineRouteSequence[],
+): Array<{ source: string; target: string }> {
   const servedCallKeys = calls
     .filter((call) => call.served)
     .map(createStationKey);
@@ -1247,7 +1354,7 @@ function createActiveRouteEdgeKeyList(
   )[0];
 
   if (!sequence) {
-    return createServedEdgeKeyList(calls);
+    return createServedDirectedEdges(calls);
   }
 
   const orientedSequence = orientSequenceTowardCalls(sequence, servedCallKeys);
@@ -1262,7 +1369,7 @@ function createActiveRouteEdgeKeyList(
     .filter((index) => index >= 0);
 
   if (servedIndexes.length < 2) {
-    return createServedEdgeKeyList(calls);
+    return createServedDirectedEdges(calls);
   }
 
   const firstIndex =
@@ -1279,17 +1386,35 @@ function createActiveRouteEdgeKeyList(
     firstIndex >= 0 && lastIndex >= 0
       ? Math.max(firstIndex, lastIndex)
       : Math.max(...servedIndexes);
-  const edgeKeys: string[] = [];
+  const directedEdges: Array<{ source: string; target: string }> = [];
 
   orientedSequence.slice(startIndex, endIndex).forEach((source, index) => {
     const target = orientedSequence[startIndex + index + 1];
 
     if (source !== target) {
-      edgeKeys.push(createEdgeKey(source, target));
+      directedEdges.push({ source, target });
     }
   });
 
-  return edgeKeys;
+  return directedEdges;
+}
+
+function createServedDirectedEdges(
+  calls: DepartureCall[],
+): Array<{ source: string; target: string }> {
+  const servedCalls = calls.filter((call) => call.served);
+  const edges: Array<{ source: string; target: string }> = [];
+
+  servedCalls.slice(0, -1).forEach((call, index) => {
+    const source = createStationKey(call);
+    const target = createStationKey(servedCalls[index + 1]);
+
+    if (source !== target) {
+      edges.push({ source, target });
+    }
+  });
+
+  return edges;
 }
 
 function orientSequenceTowardCalls(
@@ -1403,20 +1528,6 @@ function isBusTransfer(transfer: TransferLineOption): boolean {
   );
 }
 
-function stationKeysAreCompatible(left: string, right: string): boolean {
-  if (!left || !right) {
-    return false;
-  }
-
-  if (left === right) {
-    return true;
-  }
-
-  const shortestLength = Math.min(left.length, right.length);
-
-  return shortestLength >= 6 && (left.includes(right) || right.includes(left));
-}
-
 function getNodeDistanceKm(
   sourceNode: PatternGraphNode,
   targetNode: PatternGraphNode,
@@ -1485,51 +1596,70 @@ function toRadians(value: number): number {
   return (value * Math.PI) / 180;
 }
 
-function createStationKey(stop: {
-  id?: string;
-  label: string;
-  station?: { scheduleStopAreaRef?: string };
-  stopAreaRef?: string;
-}): string {
-  return normalizeStationName(
-    stop.station?.scheduleStopAreaRef ??
-      stop.stopAreaRef ??
-      getStableTopologyStopId(stop.id) ??
-      stop.label,
-  );
-}
-
-function getStableTopologyStopId(id?: string): string | undefined {
-  if (!id || id.startsWith("call:")) {
-    return undefined;
-  }
-
-  return id;
-}
-
 function createEdgeKey(source: string, target: string): string {
   return [source, target].sort().join("--");
 }
 
-function normalizeStationName(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, "");
+function togglePatternFlowFullscreen(event: MouseEvent): void {
+  const button =
+    event.currentTarget instanceof HTMLElement
+      ? event.currentTarget
+      : undefined;
+
+  const shell = button?.closest(".pattern-flow-shell");
+
+  if (!(shell instanceof HTMLElement)) {
+    return;
+  }
+
+  if (document.fullscreenElement === shell) {
+    void document.exitFullscreen();
+    return;
+  }
+
+  void shell.requestFullscreen().then(() => {
+    isPatternFlowFullscreen.value = true;
+  });
 }
+
+function syncPatternFlowFullscreenState(): void {
+  isPatternFlowFullscreen.value =
+    document.fullscreenElement?.classList.contains("pattern-flow-shell") ??
+    false;
+  void nextTick();
+}
+
+onMounted(() => {
+  document.addEventListener("fullscreenchange", syncPatternFlowFullscreenState);
+});
+
+onBeforeUnmount(() => {
+  transferHydrationRequest += 1;
+  document.removeEventListener(
+    "fullscreenchange",
+    syncPatternFlowFullscreenState,
+  );
+});
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport to="body" :disabled="embedded">
     <Transition name="modal-scale">
-      <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
+      <div
+        v-if="open"
+        :class="embedded ? 'pattern-page-embed' : 'modal-backdrop'"
+        @click.self="!embedded && emit('close')"
+      >
         <section
-          class="modal-panel modal-panel--wide pattern-modal"
+          :class="
+            embedded
+              ? 'pattern-page-embed__panel pattern-modal'
+              : 'modal-panel modal-panel--wide pattern-modal'
+          "
           aria-modal="true"
           role="dialog"
         >
-          <header class="modal-panel__header">
+          <header v-if="!embedded" class="modal-panel__header">
             <div class="pattern-modal__title">
               <LineIconBadge
                 v-if="board"
@@ -1538,7 +1668,11 @@ function normalizeStationName(value: string): string {
               />
               <div>
                 <p class="eyebrow">{{ serviceLabel }}</p>
-                <h2>{{ departure?.destination ?? "Desserte du passage" }}</h2>
+                <h2>
+                  {{
+                    departure?.destination ? "Desserte du passage" : "Desserte"
+                  }}
+                </h2>
                 <span v-if="board">
                   {{ board.title }}
                   <template v-if="departure?.platform">
@@ -1573,7 +1707,7 @@ function normalizeStationName(value: string): string {
             </div>
 
             <div
-              v-else-if="pattern && pattern.calls.length > 0"
+              v-else-if="displayPattern && displayPattern.calls.length > 0"
               class="pattern-board"
               :style="{ '--line-color': board?.line.color ?? '#0064ff' }"
             >
@@ -1605,9 +1739,28 @@ function normalizeStationName(value: string): string {
                 </div>
 
                 <div class="pattern-flow-shell">
+                  <button
+                    class="pattern-flow-fullscreen-button"
+                    type="button"
+                    :aria-label="
+                      isPatternFlowFullscreen
+                        ? 'Quitter le plein écran'
+                        : 'Afficher la carte en plein écran'
+                    "
+                    @click.stop="togglePatternFlowFullscreen"
+                  >
+                    <Minimize2
+                      v-if="isPatternFlowFullscreen"
+                      aria-hidden="true"
+                    />
+                    <Expand v-else aria-hidden="true" />
+                    <span>
+                      {{ isPatternFlowFullscreen ? "Réduire" : "Plein écran" }}
+                    </span>
+                  </button>
                   <VueFlow
                     pan-on-drag
-                    :key="pattern.departureId"
+                    :key="patternFlowKey"
                     class="pattern-flow"
                     :nodes="flowModel.nodes"
                     :edges="flowModel.edges"
@@ -1618,12 +1771,11 @@ function normalizeStationName(value: string): string {
                     :nodes-draggable="false"
                     :nodes-connectable="false"
                     :elements-selectable="false"
-                    :pan-on-drag="true"
                     :zoom-on-scroll="true"
                     :zoom-on-pinch="true"
                     :prevent-scrolling="false"
                   >
-                    <Controls :show-interactive="false" :position="PanelPosition.BottomRight" />
+                    <Controls :show-interactive="false" />
                     <template #node-station="{ data }">
                       <div
                         class="pattern-flow-station"

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import LineIconBadge from "./LineIconBadge.vue";
 import type { TransitBoardConfig } from "../types/transit";
 
@@ -38,3 +38,4 @@ function isVisible(boardId: string, visibleBoardIds: string[]): boolean {
     </button>
   </div>
 </template>
+

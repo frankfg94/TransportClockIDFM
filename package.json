@@ -4,10 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "tsc": "vue-tsc -b",
-    "build": "vite build",
-    "preview": "vite preview --host 127.0.0.1"
+    "dev": "nuxt dev --dotenv .env.local",
+    "tsc": "nuxt typecheck",
+    "build": "nuxt build",
+    "preview": "nuxt preview --host 127.0.0.1",
+    "test": "vitest run",
+    "download-idfm-fixtures": "tsx scripts/download-idfm-fixtures.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
@@ -15,12 +17,15 @@
     "@vue-flow/core": "^1.48.2",
     "fflate": "^0.8.3",
     "lucide-vue-next": "^1.0.0",
+    "nuxt": "3.20.2",
     "vue": "^3.5.13"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^5.2.1",
+    "@nuxt/test-utils": "3.20.1",
+    "@types/node": "^25.8.0",
+    "tsx": "^4.21.0",
     "typescript": "~5.8.3",
-    "vite": "^6.3.5",
+    "vitest": "^3.2.4",
     "vue-tsc": "^2.2.10"
   },
   "packageManager": "yarn@1.22.19+sha1.4ba7fc5c6e704fce2066ecbfb0b0d8976fe62447"

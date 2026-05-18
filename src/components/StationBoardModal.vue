@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import { DetailedLineMapPicker } from "../features/line-map";
 import FamilyCombobox from "./FamilyCombobox.vue";
@@ -47,7 +47,9 @@ const loadingLines = ref(false);
 const loadingStations = ref(false);
 const adding = ref(false);
 const errorMessage = ref("");
-const canAdd = computed(() => Boolean(draft.family && draft.line && draft.station));
+const canAdd = computed(() =>
+  Boolean(draft.family && draft.line && draft.station),
+);
 const modalWide = computed(
   () => stationSelectionMode.value === "map" && Boolean(draft.line),
 );
@@ -91,7 +93,10 @@ watch(lineQuery, () => {
 });
 
 watch(stationQuery, () => {
-  if (draft.station && !stationMatchesQuery(draft.station, stationQuery.value)) {
+  if (
+    draft.station &&
+    !stationMatchesQuery(draft.station, stationQuery.value)
+  ) {
     draft.station = undefined;
   }
 });
@@ -166,8 +171,8 @@ function selectStationFromMap(station: StationSearchOption): void {
   draft.station = station;
 
   if (!stationOptions.value.some((option) => option.id === station.id)) {
-    stationOptions.value = [...stationOptions.value, station].sort((left, right) =>
-      left.label.localeCompare(right.label, "fr"),
+    stationOptions.value = [...stationOptions.value, station].sort(
+      (left, right) => left.label.localeCompare(right.label, "fr"),
     );
   }
 
@@ -386,108 +391,133 @@ function normalizeText(value: string): string {
           aria-modal="true"
           role="dialog"
         >
-        <header class="modal-panel__header">
-          <div>
-            <p class="eyebrow">Configuration</p>
-            <h2>Nouvelle station</h2>
-          </div>
-          <button class="icon-button" type="button" aria-label="Fermer" @click="emit('close')">
-            ×
-          </button>
-        </header>
+          <header class="modal-panel__header">
+            <div>
+              <p class="eyebrow">Configuration</p>
+              <h2>Nouvelle station</h2>
+            </div>
+            <button
+              class="icon-button"
+              type="button"
+              aria-label="Fermer"
+              @click="emit('close')"
+            >
+              ×
+            </button>
+          </header>
 
-        <div class="station-form">
-          <label>
-            <span>Réseau</span>
-            <FamilyCombobox
-              :model-value="selectedNetwork"
-              :options="familyOptions"
-              :loading="loadingFamilies"
-              @update:model-value="selectFamilyOption"
-            />
-            <span v-if="loadingFamilies" class="field-loader">
-              <span aria-hidden="true" class="loader-dot"></span>
-              Chargement des réseaux
-            </span>
-          </label>
+          <div class="station-form">
+            <label>
+              <span>Réseau</span>
+              <FamilyCombobox
+                :model-value="selectedNetwork"
+                :options="familyOptions"
+                :loading="loadingFamilies"
+                @update:model-value="selectFamilyOption"
+              />
+              <span v-if="loadingFamilies" class="field-loader">
+                <span aria-hidden="true" class="loader-dot"></span>
+                Chargement des réseaux
+              </span>
+            </label>
 
-          <label>
-            <span>Ligne</span>
-            <LineCombobox
-              :model-value="draft.line"
-              :options="lineOptions"
-              :query="lineQuery"
-              :disabled="!selectedNetwork"
-              :loading="loadingLines"
-              placeholder="Sélectionner une ligne"
-              @update:model-value="selectLineOption"
-              @update:query="lineQuery = $event"
-            />
-            <span v-if="loadingLines" class="field-loader">
-              <span aria-hidden="true" class="loader-dot"></span>
-              Chargement des lignes
-            </span>
-          </label>
+            <label>
+              <span>Ligne</span>
+              <LineCombobox
+                :model-value="draft.line"
+                :options="lineOptions"
+                :query="lineQuery"
+                :disabled="!selectedNetwork"
+                :loading="loadingLines"
+                placeholder="Sélectionner une ligne"
+                @update:model-value="selectLineOption"
+                @update:query="lineQuery = $event"
+              />
+              <span v-if="loadingLines" class="field-loader">
+                <span aria-hidden="true" class="loader-dot"></span>
+                Chargement des lignes
+              </span>
+            </label>
 
-          <div class="station-picker">
-            <div class="station-picker__header">
-              <span>Station</span>
-              <button
-                v-if="draft.line"
-                class="button-secondary station-picker__mode"
-                type="button"
-                @click="toggleStationSelectionMode"
+            <div class="station-picker">
+              <div class="station-picker__header">
+                <span>Station</span>
+                <button
+                  v-if="draft.line"
+                  class="button-secondary station-picker__mode"
+                  type="button"
+                  @click="toggleStationSelectionMode"
+                >
+                  {{
+                    stationSelectionMode === "list"
+                      ? "Plan détaillé"
+                      : "Liste simple"
+                  }}
+                </button>
+              </div>
+
+              <div
+                v-if="stationSelectionMode === 'list'"
+                class="station-picker__list"
               >
-                {{ stationSelectionMode === "list" ? "Plan détaillé" : "Liste simple" }}
+                <StationCombobox
+                  :model-value="draft.station"
+                  :options="filteredStationOptions"
+                  :query="stationQuery"
+                  :disabled="!draft.line"
+                  :loading="loadingStations"
+                  :transfer-map="stationTransfers"
+                  :transfer-loading-ids="stationTransferLoadingIds"
+                  @inspect="loadStationTransferBadges"
+                  @update:model-value="selectStationOption"
+                  @update:query="stationQuery = $event"
+                />
+                <span v-if="loadingStations" class="field-loader">
+                  <span aria-hidden="true" class="loader-dot"></span>
+                  Chargement des stations
+                </span>
+              </div>
+
+              <DetailedLineMapPicker
+                v-else
+                :line="draft.line"
+                :selected-station-id="draft.station?.id"
+                @select="selectStationFromMap"
+              />
+            </div>
+
+            <div v-if="errorMessage" class="form-error">
+              <span>{{ errorMessage }}</span>
+              <button
+                class="button-secondary form-retry"
+                type="button"
+                @click="retryCurrentStep"
+              >
+                Réessayer
               </button>
             </div>
-
-            <div v-if="stationSelectionMode === 'list'" class="station-picker__list">
-              <StationCombobox
-                :model-value="draft.station"
-                :options="filteredStationOptions"
-                :query="stationQuery"
-                :disabled="!draft.line"
-                :loading="loadingStations"
-                :transfer-map="stationTransfers"
-                :transfer-loading-ids="stationTransferLoadingIds"
-                @inspect="loadStationTransferBadges"
-                @update:model-value="selectStationOption"
-                @update:query="stationQuery = $event"
-              />
-              <span v-if="loadingStations" class="field-loader">
-                <span aria-hidden="true" class="loader-dot"></span>
-                Chargement des stations
-              </span>
-            </div>
-
-            <DetailedLineMapPicker
-              v-else
-              :line="draft.line"
-              :selected-station-id="draft.station?.id"
-              @select="selectStationFromMap"
-            />
           </div>
 
-          <div v-if="errorMessage" class="form-error">
-            <span>{{ errorMessage }}</span>
-            <button class="button-secondary form-retry" type="button" @click="retryCurrentStep">
-              Réessayer
+          <footer class="modal-panel__footer">
+            <button
+              class="button-secondary"
+              type="button"
+              @click="emit('close')"
+            >
+              Fermer
             </button>
-          </div>
-        </div>
-
-        <footer class="modal-panel__footer">
-          <button class="button-secondary" type="button" @click="emit('close')">
-            Fermer
-          </button>
-          <button type="button" :disabled="!canAdd || adding" @click="addStation">
-            <span class="button-plus" aria-hidden="true">+</span>
-            {{ adding ? "Ajout..." : "Ajouter" }}
-          </button>
-        </footer>
+            <button
+              type="button"
+              :disabled="!canAdd || adding"
+              @click="addStation"
+            >
+              <span class="button-plus" aria-hidden="true">+</span>
+              {{ adding ? "Ajout..." : "Ajouter" }}
+            </button>
+          </footer>
         </section>
       </div>
     </Transition>
   </Teleport>
 </template>
+

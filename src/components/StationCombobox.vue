@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from "vue";
 import type { StationSearchOption, TransferLineOption } from "../types/transit";
 
@@ -79,7 +79,7 @@ function inspectStation(station: StationSearchOption): void {
 }
 
 function formatStationLabel(station: StationSearchOption): string {
-  return station.city ? `${station.label} · ${station.city}` : station.label;
+  return station.city ? `${station.label} ? ${station.city}` : station.label;
 }
 
 function visibleTransfers(station: StationSearchOption): TransferLineOption[] {
@@ -316,3 +316,4 @@ function normalizeText(value?: string): string {
   }
 }
 </style>
+

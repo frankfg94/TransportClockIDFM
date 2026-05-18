@@ -1,4 +1,4 @@
-import type { TransitBoardConfig } from "../types/transit";
+﻿import type { TransitBoardConfig } from "../types/transit";
 
 export const transitBoards: TransitBoardConfig[] = [
   {
@@ -111,3 +111,4 @@ export const transitBoards: TransitBoardConfig[] = [
     maxDepartures: 10,
   },
 ];
+

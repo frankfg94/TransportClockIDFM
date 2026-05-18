@@ -1,10 +1,6 @@
 # Transport Clock GPT
 
-Application Vue 3 + TypeScript + Vite affichant les prochains passages IDFM PRIM pour :
-
-- Tram T10 à Les Peintres, avec les deux quais.
-- RER B à La Croix de Berny.
-- Transilien J à Gare Saint-Lazare.
+Application Nuxt 3 + Vue 3 + TypeScript affichant les prochains passages IDFM PRIM et les schémas de desserte.
 
 ## Lancer le projet
 
@@ -13,84 +9,50 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-Puis ouvrir `http://127.0.0.1:5173`.
+Puis ouvrir `http://127.0.0.1:3000` ou l'URL affichée par Nuxt.
 
-La clé PRIM est lue depuis `.env.local` via `IDFM_API_KEY`. Vite proxyfie les appels `"/api/idfm"` vers `https://prim.iledefrance-mobilites.fr/marketplace` et ajoute l'en-tête `apikey` côté serveur de développement.
+La clé PRIM est lue depuis `.env.local` via `IDFM_API_KEY`. Les appels `"/api/idfm"` passent par la route Nitro `server/api/idfm/[...path].ts`, ce qui évite d'exposer la clé au navigateur.
 
-## Déployer sur Cloudflare Pages
+## Build et déploiement Cloudflare Pages
 
-Le proxy Vite ci-dessus ne fonctionne qu'en développement local. En production,
-les appels `"/api/idfm"` sont relayés par la Cloudflare Pages Function
-`functions/api/idfm/[[path]].ts`.
+```powershell
+npm.cmd run build
+```
 
-Dans Cloudflare Pages, ajouter une variable d'environnement nommée
-`IDFM_API_KEY` avec la clé PRIM, puis redéployer le site. Le fichier
-`.env.local` reste local à la machine et n'est pas envoyé à Cloudflare.
+Nuxt/Nitro génère une sortie Cloudflare Pages dans `dist`.
 
 Configuration conseillée :
 
-- Build command : `npm.cmd run build` ou `npm run build` selon l'environnement.
-- Build output directory : `dist`.
-- Environment variable : `IDFM_API_KEY`.
+- Build command : `npm run build`
+- Build output directory : `dist`
+- Environment variable : `IDFM_API_KEY`
+
+## Topologies hors-ligne
+
+Le backend expose `GET /api/lines/:lineId/topology`.
+
+Les topologies de test sont construites depuis des fixtures JSON versionnées :
+
+- `tests/fixtures/idfm/raw/transilien-j.json`
+- `tests/fixtures/idfm/raw/rer-b.json`
+- `tests/fixtures/idfm/raw/rer-d.json`
+
+Les attendus métier sont dans `tests/fixtures/topology/expected`.
+
+Lancer les tests :
+
+```powershell
+npm.cmd run test
+```
+
+Le script manuel suivant télécharge des snapshots PRIM bruts dans `tests/fixtures/idfm/downloaded`. Il ne remplace pas automatiquement les fixtures validées :
+
+```powershell
+npm.cmd run download-idfm-fixtures
+```
 
 ## Ajouter une ligne ou un arrêt
 
-Modifier `src/config/transitBoards.ts` et ajouter une entrée dans `transitBoards`.
+Les tableaux par défaut sont dans `src/config/transitBoards.ts`.
 
-Chaque tableau contient :
-
-- `line.ref` : identifiant SIRI de la ligne, par exemple `STIF:Line::C02528:`.
-- `monitoringPoints` : un ou plusieurs arrêts/quais à interroger.
-- `directionGroups` : sous-groupes d'affichage, avec les règles de correspondance par quai, destination ou point d'arrêt.
-- `schedule` : références Navitia v2 utilisées pour calculer le dernier passage théorique du jour.
-- `maxDepartures` : nombre de passages affichés.
-
-Exemple :
-
-```ts
-{
-  id: "nouvelle-ligne-mon-arret",
-  title: "Mon arrêt",
-  city: "Ma ville",
-  line: {
-    ref: "STIF:Line::C00000:",
-    shortName: "X",
-    longName: "Ligne X",
-    mode: "tram",
-    color: "#0064ff",
-    textColor: "#ffffff",
-  },
-  monitoringPoints: [
-    {
-      ref: "STIF:StopPoint:Q:000000:",
-      label: "Direction exemple",
-    },
-  ],
-  directionGroups: [
-    {
-      id: "direction-exemple",
-      label: "Exemple",
-      match: {
-        monitoringRefs: ["STIF:StopPoint:Q:000000:"],
-        destinationIncludes: ["Exemple"],
-      },
-    },
-  ],
-  schedule: {
-    lineRef: "line:IDFM:C00000",
-    stopAreaRef: "stop_area:IDFM:00000",
-  },
-  maxDepartures: 8,
-}
-```
-
-Pour une gare RER, un `MonitoringRef` de zone comme `STIF:StopArea:SP:46007:` permet de remonter plusieurs quais.
-
-## Architecture préparée pour l'ajout de stations
-
-- `src/storage/transitPreferences.ts` centralise les préférences persistées en `localStorage`.
-- `visibleBoardIds` permet de masquer ou afficher un tableau sans le supprimer.
-- `collapsedDirectionIds` garde l'état des accordéons par direction.
-- `customBoards` est prêt pour stocker les futurs tableaux ajoutés par l'utilisateur.
-- `src/services/boardBuilder.ts` contient les types et helpers pour transformer une sélection ligne + station en `TransitBoardConfig`.
-- `src/components/StationBoardModal.vue` pilote le parcours complet API : réseau/mode IDFM, lignes associées, stations de la ligne, puis ajout du tableau.
+Pour la modal d'ajout, `src/services/boardBuilder.ts` transforme une sélection ligne + station en `TransitBoardConfig`, puis les préférences sont persistées via `src/storage/transitPreferences.ts`.

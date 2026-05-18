@@ -18,9 +18,11 @@
 } from "../types/transit";
 import { createRatpLineIconUrls } from "./lineIcons";
 
-interface SiriTextValue {
+type SiriTextValue =
+  | string
+  | {
   value?: string;
-}
+};
 
 interface SiriMonitoredCall {
   StopPointName?: SiriTextValue[];
@@ -101,6 +103,30 @@ interface NavitiaStopScheduleResponse {
   stop_schedules?: NavitiaStopSchedule[];
 }
 
+interface NavitiaVehicleJourneyStopTime {
+  stop_point?: {
+    id?: string;
+    name?: string;
+    label?: string;
+  };
+  skipped_stop?: boolean;
+}
+
+interface NavitiaVehicleJourney {
+  id?: string;
+  stop_times?: NavitiaVehicleJourneyStopTime[];
+}
+
+interface NavitiaVehicleJourneyResponse {
+  vehicle_journeys?: NavitiaVehicleJourney[];
+}
+
+interface UpcomingNavitiaTime {
+  time: string;
+  rawTime: string;
+  vehicleJourneyId?: string;
+}
+
 interface NavitiaCommercialMode {
   id: string;
   name: string;
@@ -161,6 +187,37 @@ interface NavitiaStopArea {
 
 interface NavitiaStopAreasResponse {
   stop_areas?: NavitiaStopArea[];
+  pagination?: NavitiaPagination;
+}
+
+interface NavitiaNearbyPlace {
+  id?: string;
+  name?: string;
+  embedded_type?: string;
+  distance?: string | number;
+  stop_area?: NavitiaStopArea;
+}
+
+interface NavitiaPlacesNearbyResponse {
+  places_nearby?: NavitiaNearbyPlace[];
+  pagination?: NavitiaPagination;
+}
+
+interface NavitiaConnectionStopPoint {
+  id?: string;
+  name?: string;
+  label?: string;
+}
+
+interface NavitiaConnection {
+  origin?: NavitiaConnectionStopPoint;
+  destination?: NavitiaConnectionStopPoint;
+  duration?: number;
+  display_duration?: number;
+}
+
+interface NavitiaConnectionsResponse {
+  connections?: NavitiaConnection[];
   pagination?: NavitiaPagination;
 }
 
@@ -232,6 +289,11 @@ interface BoardScheduleInfo {
   scheduledDepartures: Departure[];
 }
 
+interface NavitiaRequestOptions {
+  apiBase?: string;
+  fetcher?: typeof fetch;
+}
+
 const API_BASE = "/api/idfm";
 const NAVITIA_API_BASE = "/api/idfm/v2/navitia";
 
@@ -261,16 +323,67 @@ const MAX_MAP_ROUTES = 80;
 const MAX_ROUTE_STOPS = 260;
 const MAX_PATTERN_TRANSFER_STATIONS = 64;
 const PATTERN_TRANSFER_BATCH_SIZE = 2;
+const MAX_TRANSFER_CONNECTIONS = 140;
+const MAX_TRANSFER_NEARBY_STOP_AREAS = 32;
+const MAX_TRANSFER_STOP_AREA_LINE_LOOKUPS = 14;
+const TRANSFER_NEARBY_DISTANCE_METERS = 650;
+const TRANSFER_CONNECTION_MAX_DISPLAY_DURATION_SECONDS = 430;
+const TRANSFER_CONNECTION_MAX_DURATION_SECONDS = 560;
 
 const structuralTransferCache = new Map<string, Promise<TransferLineOption[]>>();
+const transferStopAreaRefsCache = new Map<string, Promise<string[]>>();
+const stopAreaLinesCache = new Map<string, Promise<NavitiaLine[]>>();
+const vehicleJourneyStopCountCache = new Map<string, Promise<number | undefined>>();
 
-export async function fetchTransitFamilyOptions(): Promise<TransitFamilyOption[]> {
+function navitiaApiBase(options: NavitiaRequestOptions): string {
+  return options.apiBase ?? NAVITIA_API_BASE;
+}
+
+function createNavitiaCacheKey(
+  options: NavitiaRequestOptions,
+  key: string,
+): string {
+  return `${navitiaApiBase(options)}:${key}`;
+}
+
+function navitiaFetch(
+  input: RequestInfo | URL,
+  options: NavitiaRequestOptions,
+  init?: RequestInit,
+): Promise<Response> {
+  return (options.fetcher ?? fetch)(input, init);
+}
+
+async function navitiaFetchWithRetry(
+  input: RequestInfo | URL,
+  options: NavitiaRequestOptions,
+  init?: RequestInit,
+): Promise<Response> {
+  const delays = [220, 620, 1200];
+
+  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+    const response = await navitiaFetch(input, options, init);
+
+    if (response.status !== 429 || attempt === delays.length) {
+      return response;
+    }
+
+    await wait(delays[attempt]);
+  }
+
+  return navitiaFetch(input, options, init);
+}
+
+export async function fetchTransitFamilyOptions(
+  options: NavitiaRequestOptions = {},
+): Promise<TransitFamilyOption[]> {
   const searchParams = new URLSearchParams({
     count: "100",
     disable_disruption: "true",
   });
-  const response = await fetch(
-    `${NAVITIA_API_BASE}/commercial_modes?${searchParams}`,
+  const response = await navitiaFetchWithRetry(
+    `${navitiaApiBase(options)}/commercial_modes?${searchParams}`,
+    options,
   );
 
   if (!response.ok) {
@@ -278,12 +391,12 @@ export async function fetchTransitFamilyOptions(): Promise<TransitFamilyOption[]
   }
 
   const payload = (await response.json()) as NavitiaCommercialModesResponse;
-  const options = (payload.commercial_modes ?? [])
+  const familyOptions = (payload.commercial_modes ?? [])
     .map((mode) => mapCommercialModeToFamily(mode))
     .filter((option): option is TransitFamilyOption => option !== null);
   const dedupedOptions = new Map<TransitFamily, TransitFamilyOption>();
 
-  options.forEach((option) => dedupedOptions.set(option.family, option));
+  familyOptions.forEach((option) => dedupedOptions.set(option.family, option));
 
   return Array.from(dedupedOptions.values()).sort((left, right) =>
     familyOrder.indexOf(left.family) - familyOrder.indexOf(right.family),
@@ -293,13 +406,29 @@ export async function fetchTransitFamilyOptions(): Promise<TransitFamilyOption[]
 export async function searchTransitLines(
   network: TransitFamilyOption,
   query: string,
+  options: NavitiaRequestOptions = {},
 ): Promise<LineSearchOption[]> {
   const trimmedQuery = query.trim();
   const normalizedQuery = normalizeText(trimmedQuery);
-  const lines = trimmedQuery
-    ? await searchLinesWithPtObjects(network, trimmedQuery)
-    : await fetchLinesForCommercialMode(network);
+  const primaryLines = trimmedQuery
+    ? await searchLinesWithPtObjects(network, trimmedQuery, options)
+    : await fetchLinesForCommercialMode(network, options);
+  const primaryResults = mapSearchLines(primaryLines, network, normalizedQuery);
 
+  if (primaryResults.length > 0 || !trimmedQuery) {
+    return primaryResults;
+  }
+
+  const modeLines = await fetchLinesForCommercialMode(network, options);
+
+  return mapSearchLines(modeLines, network, normalizedQuery);
+}
+
+function mapSearchLines(
+  lines: NavitiaLine[],
+  network: TransitFamilyOption,
+  normalizedQuery: string,
+): LineSearchOption[] {
   return dedupeLines(lines)
     .filter((line) => lineMatchesTransitFamily(line, network.family))
     .filter((line) => {
@@ -318,8 +447,9 @@ export async function searchTransitLines(
 export async function searchLineStations(
   line: LineSearchOption,
   query: string,
+  options: NavitiaRequestOptions = {},
 ): Promise<StationSearchOption[]> {
-  const stations = await fetchLineStationsByLineId(line.navitiaId);
+  const stations = await fetchLineStationsByLineId(line.navitiaId, options);
   const normalizedQuery = normalizeText(query.trim());
 
   return stations
@@ -337,6 +467,7 @@ export async function searchLineStations(
 
 async function fetchLineStationsByLineId(
   lineId: string,
+  options: NavitiaRequestOptions = {},
 ): Promise<StationSearchOption[]> {
   const searchParams = new URLSearchParams({
     count: "100",
@@ -347,10 +478,11 @@ async function fetchLineStationsByLineId(
     NavitiaStopAreasResponse,
     NavitiaStopArea
   >(
-    `${NAVITIA_API_BASE}/lines/${encodeURIComponent(lineId)}/stop_areas`,
+    `${navitiaApiBase(options)}/lines/${encodeURIComponent(lineId)}/stop_areas`,
     searchParams,
     "stop_areas",
     MAX_STATION_RESULTS,
+    options,
   );
 
   return dedupeStations(stopAreas.map(mapStopAreaToStation));
@@ -424,19 +556,23 @@ export async function fetchLineStationTransferSummaries(
 export async function fetchStationTransfers(
   station: StationSearchOption,
   currentLineId?: string,
+  options: NavitiaRequestOptions = {},
 ): Promise<TransferLineOption[]> {
   const stopAreaRef = station.scheduleStopAreaRef ?? station.id;
-  const searchParams = new URLSearchParams({
-    count: "80",
-    disable_disruption: "true",
-    disable_geojson: "true",
-  });
-  const lines = await fetchPaginatedCollection<NavitiaLinesResponse, NavitiaLine>(
-    `${NAVITIA_API_BASE}/stop_areas/${encodeURIComponent(stopAreaRef)}/lines`,
-    searchParams,
-    "lines",
-    120,
+  const stopAreaRefs = await resolveTransferStopAreaRefs(
+    station,
+    stopAreaRef,
+    options,
   );
+  const lines: NavitiaLine[] = [];
+
+  for (const ref of stopAreaRefs) {
+    const stopAreaLines = await fetchLinesForStopArea(ref, options).catch(
+      (): NavitiaLine[] => [],
+    );
+
+    lines.push(...stopAreaLines);
+  }
 
   return dedupeTransferOptions(
     dedupeLines(lines)
@@ -445,13 +581,316 @@ export async function fetchStationTransfers(
   ).sort(compareTransferLines);
 }
 
+async function resolveTransferStopAreaRefs(
+  station: StationSearchOption,
+  stopAreaRef: string,
+  options: NavitiaRequestOptions,
+): Promise<string[]> {
+  const cacheKey = createNavitiaCacheKey(
+    options,
+    `transfer-stop-areas:${stopAreaRef}:${station.label}`,
+  );
+  const cached = transferStopAreaRefsCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const request = fetchTransferStopAreaRefs(station, stopAreaRef, options).catch(
+    () => [stopAreaRef],
+  );
+
+  transferStopAreaRefsCache.set(cacheKey, request);
+
+  return request;
+}
+
+async function fetchTransferStopAreaRefs(
+  station: StationSearchOption,
+  stopAreaRef: string,
+  options: NavitiaRequestOptions,
+): Promise<string[]> {
+  if (!isResolvableNavitiaStopAreaRef(stopAreaRef)) {
+    return [stopAreaRef];
+  }
+
+  const refs = new Map<string, number>();
+
+  refs.set(stopAreaRef, 0);
+
+  const [connections, nearbyPlaces] = await Promise.all([
+    fetchTransferConnections(stopAreaRef, options).catch(
+      (): NavitiaConnection[] => [],
+    ),
+    fetchNearbyStopAreas(stopAreaRef, options).catch(
+      (): NavitiaNearbyPlace[] => [],
+    ),
+  ]);
+  const connectedNames = createConnectedTransferNames(connections);
+
+  nearbyPlaces.forEach((place) => {
+    const stopArea = place.stop_area;
+
+    if (!stopArea?.id) {
+      return;
+    }
+
+    if (
+      stopArea.id === stopAreaRef ||
+      stopAreaMatchesConnectedTransferNames(stopArea, connectedNames)
+    ) {
+      refs.set(
+        stopArea.id,
+        Math.min(refs.get(stopArea.id) ?? Number.POSITIVE_INFINITY, parseDistance(place.distance)),
+      );
+    }
+  });
+
+  if (refs.size === 1 && nearbyPlaces.length > 0) {
+    addSameNamedNearbyStopAreas(station, nearbyPlaces, refs);
+  }
+
+  return Array.from(refs.entries())
+    .sort((left, right) => left[1] - right[1])
+    .map(([ref]) => ref)
+    .slice(0, MAX_TRANSFER_STOP_AREA_LINE_LOOKUPS);
+}
+
+async function fetchLinesForStopArea(
+  stopAreaRef: string,
+  options: NavitiaRequestOptions = {},
+): Promise<NavitiaLine[]> {
+  const cacheKey = createNavitiaCacheKey(options, `stop-area-lines:${stopAreaRef}`);
+  const cached = stopAreaLinesCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const searchParams = new URLSearchParams({
+    count: "80",
+    disable_disruption: "true",
+    disable_geojson: "true",
+  });
+  const request = fetchPaginatedCollection<NavitiaLinesResponse, NavitiaLine>(
+    `${navitiaApiBase(options)}/stop_areas/${encodeURIComponent(stopAreaRef)}/lines`,
+    searchParams,
+    "lines",
+    120,
+    options,
+  ).catch((error) => {
+    stopAreaLinesCache.delete(cacheKey);
+    throw error;
+  });
+
+  stopAreaLinesCache.set(cacheKey, request);
+
+  return request;
+}
+
+function fetchTransferConnections(
+  stopAreaRef: string,
+  options: NavitiaRequestOptions,
+): Promise<NavitiaConnection[]> {
+  const searchParams = new URLSearchParams({
+    count: String(MAX_TRANSFER_CONNECTIONS),
+    disable_disruption: "true",
+    disable_geojson: "true",
+  });
+
+  return fetchPaginatedCollection<NavitiaConnectionsResponse, NavitiaConnection>(
+    `${navitiaApiBase(options)}/stop_areas/${encodeURIComponent(stopAreaRef)}/connections`,
+    searchParams,
+    "connections",
+    MAX_TRANSFER_CONNECTIONS,
+    options,
+  );
+}
+
+function fetchNearbyStopAreas(
+  stopAreaRef: string,
+  options: NavitiaRequestOptions,
+): Promise<NavitiaNearbyPlace[]> {
+  const searchParams = new URLSearchParams({
+    count: String(MAX_TRANSFER_NEARBY_STOP_AREAS),
+    disable_disruption: "true",
+    disable_geojson: "true",
+    distance: String(TRANSFER_NEARBY_DISTANCE_METERS),
+  });
+
+  searchParams.append("type[]", "stop_area");
+
+  return fetchPaginatedCollection<NavitiaPlacesNearbyResponse, NavitiaNearbyPlace>(
+    `${navitiaApiBase(options)}/stop_areas/${encodeURIComponent(stopAreaRef)}/places_nearby`,
+    searchParams,
+    "places_nearby",
+    MAX_TRANSFER_NEARBY_STOP_AREAS,
+    options,
+  );
+}
+
+function createConnectedTransferNames(
+  connections: NavitiaConnection[],
+): Set<string> {
+  const names = new Set<string>();
+
+  connections
+    .filter(connectionHasTransferDuration)
+    .forEach((connection) => {
+      [connection.origin, connection.destination].forEach((stopPoint) => {
+        addTransferNameVariants(names, stopPoint?.name);
+        addTransferNameVariants(names, stopPoint?.label);
+      });
+    });
+
+  return names;
+}
+
+function connectionHasTransferDuration(connection: NavitiaConnection): boolean {
+  const displayDuration = Number(connection.display_duration);
+  const duration = Number(connection.duration);
+
+  return (
+    (Number.isFinite(displayDuration) &&
+      displayDuration <= TRANSFER_CONNECTION_MAX_DISPLAY_DURATION_SECONDS) ||
+    (Number.isFinite(duration) &&
+      duration <= TRANSFER_CONNECTION_MAX_DURATION_SECONDS)
+  );
+}
+
+function stopAreaMatchesConnectedTransferNames(
+  stopArea: NavitiaStopArea,
+  connectedNames: Set<string>,
+): boolean {
+  const candidates = createTransferNameVariants(stopArea.name)
+    .concat(createTransferNameVariants(stopArea.label));
+
+  return candidates.some((candidate) =>
+    Array.from(connectedNames).some((connectedName) =>
+      transferNamesAreCompatible(candidate, connectedName),
+    ),
+  );
+}
+
+function addSameNamedNearbyStopAreas(
+  station: StationSearchOption,
+  nearbyPlaces: NavitiaNearbyPlace[],
+  refs: Map<string, number>,
+): void {
+  const stationNames = createTransferNameVariants(station.label);
+
+  nearbyPlaces.forEach((place) => {
+    const stopArea = place.stop_area;
+
+    if (!stopArea?.id) {
+      return;
+    }
+
+    const stopAreaNames = createTransferNameVariants(stopArea.name)
+      .concat(createTransferNameVariants(stopArea.label));
+    const matchesStationName = stopAreaNames.some((stopAreaName) =>
+      stationNames.some((stationName) =>
+        transferNamesAreCompatible(stopAreaName, stationName),
+      ),
+    );
+
+    if (matchesStationName) {
+      refs.set(
+        stopArea.id,
+        Math.min(refs.get(stopArea.id) ?? Number.POSITIVE_INFINITY, parseDistance(place.distance)),
+      );
+    }
+  });
+}
+
+function addTransferNameVariants(
+  names: Set<string>,
+  value: string | undefined,
+): void {
+  createTransferNameVariants(value).forEach((name) => names.add(name));
+}
+
+function createTransferNameVariants(value: string | undefined): string[] {
+  const normalized = normalizeTransferName(value);
+
+  if (!normalized) {
+    return [];
+  }
+
+  const compacted = normalized.replace(/\s+/g, "");
+
+  return Array.from(new Set([normalized, compacted])).filter(
+    (variant) => variant.length >= 3,
+  );
+}
+
+function transferNamesAreCompatible(left: string, right: string): boolean {
+  if (!left || !right) {
+    return false;
+  }
+
+  if (left === right) {
+    return true;
+  }
+
+  if (
+    !left.includes(" ") &&
+    !right.includes(" ") &&
+    (left.includes(right) || right.includes(left))
+  ) {
+    return Math.min(left.length, right.length) >= 8;
+  }
+
+  const leftTokens = createTransferNameTokens(left);
+  const rightTokens = createTransferNameTokens(right);
+  const shortestTokenCount = Math.min(leftTokens.size, rightTokens.size);
+
+  if (shortestTokenCount === 0) {
+    return false;
+  }
+
+  const sharedTokenCount = Array.from(leftTokens).filter((token) =>
+    rightTokens.has(token),
+  ).length;
+
+  return sharedTokenCount >= Math.min(shortestTokenCount, 2);
+}
+
+function createTransferNameTokens(value: string): Set<string> {
+  return new Set(
+    value
+      .split(/\s+/u)
+      .filter((token) => token.length >= 3)
+      .filter((token) => !["gare", "station", "metro", "rer"].includes(token)),
+  );
+}
+
+function normalizeTransferName(value: string | undefined): string {
+  return normalizeText(cleanStationLabel(value ?? ""))
+    .replace(/[’']/gu, " ")
+    .replace(/[^a-z0-9]+/gu, " ")
+    .replace(/\b(paris|metro|metropolitain)\b/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseDistance(value: string | number | undefined): number {
+  const distance = Number(value);
+
+  return Number.isFinite(distance) ? distance : Number.POSITIVE_INFINITY;
+}
+
+function isResolvableNavitiaStopAreaRef(value: string): boolean {
+  return /^stop_area:IDFM:\d+$/u.test(value);
+}
+
 export async function fetchDepartureCallingPattern(
   board: TransitBoardConfig,
   departure: Departure,
 ): Promise<DepartureCallingPattern> {
   const patternDeparture: Departure = {
     ...departure,
-    stopName: departure.stopName || board.title,
+    stopName: board.title || departure.stopName,
   };
   const lineId = board.schedule?.lineRef ?? navitiaLineIdFromSiriRef(board.line.ref);
   const routes = await fetchLineRoutesById(lineId);
@@ -481,8 +920,17 @@ export async function fetchDepartureCallingPattern(
         );
         const lineTopology = await lineTopologyPromise;
 
+        const mergedPattern = mergePatternWithTopologyTransfers(
+          hydratedPattern,
+          lineTopology,
+        );
+
         return {
-          ...mergePatternWithTopologyTransfers(hydratedPattern, lineTopology),
+          ...applyTopologyCorridorFallback(
+            mergedPattern,
+            lineTopology,
+            patternDeparture,
+          ),
           lineTopology,
         };
       }
@@ -506,8 +954,17 @@ export async function fetchDepartureCallingPattern(
       );
       const lineTopology = await lineTopologyPromise;
 
+      const mergedPattern = mergePatternWithTopologyTransfers(
+        fallbackPattern,
+        lineTopology,
+      );
+
       return {
-        ...mergePatternWithTopologyTransfers(fallbackPattern, lineTopology),
+        ...applyTopologyCorridorFallback(
+          mergedPattern,
+          lineTopology,
+          patternDeparture,
+        ),
         lineTopology,
       };
     }
@@ -521,6 +978,143 @@ export async function fetchDepartureCallingPattern(
     lineTopology: await lineTopologyPromise,
     error: "Desserte indisponible pour ce passage.",
   };
+}
+
+function applyTopologyCorridorFallback(
+  pattern: DepartureCallingPattern,
+  lineTopology: LineRouteSequence[],
+  departure: Departure,
+): DepartureCallingPattern {
+  const servedCalls = pattern.calls.filter((call) => call.served);
+  const currentCall = pattern.calls.find((call) => call.current);
+  const currentMatchesDeparture =
+    currentCall !== undefined &&
+    labelsMatchStation(currentCall.label, departure.stopName);
+  const servedDestination = servedCalls[servedCalls.length - 1];
+  const destinationMatches =
+    servedDestination !== undefined &&
+    directionMatchesRule(servedDestination.label, departure.destination);
+
+  if (
+    currentMatchesDeparture &&
+    destinationMatches &&
+    servedCalls.length > 1
+  ) {
+    return pattern;
+  }
+
+  const corridorStops = findTopologyCorridorStops(lineTopology, departure);
+
+  if (!corridorStops || corridorStops.length === 0) {
+    return pattern;
+  }
+
+  const corridorKeys = new Set(corridorStops.map((stop) => stop.id));
+  const callsByStationKey = new Map(
+    pattern.calls.map((call) => [createTopologyTransferStationKey(call.label), call]),
+  );
+  const corridorCalls = corridorStops.map((stop, index) => {
+    const existing = callsByStationKey.get(createTopologyTransferStationKey(stop.label));
+
+    return {
+      id: existing?.id ?? stop.id,
+      label: existing?.label ?? stop.label,
+      city: existing?.city ?? stop.city,
+      current: index === 0,
+      served: true,
+      stopAreaRef: existing?.stopAreaRef ?? stop.station.scheduleStopAreaRef ?? stop.id,
+      time:
+        existing?.time ??
+        (index === 0 ? getDepartureTimeValue(departure) : undefined),
+      transferLines: existing?.transferLines ?? stop.transferLines,
+    } satisfies DepartureCall;
+  });
+  const remainingCalls = pattern.calls
+    .filter((call) => !corridorKeys.has(call.stopAreaRef ?? call.id))
+    .filter(
+      (call) =>
+        !corridorStops.some((stop) => labelsMatchStation(stop.label, call.label)),
+    )
+    .map((call) => ({
+      ...call,
+      current: false,
+      served: false,
+      time: undefined,
+    }));
+
+  return {
+    ...pattern,
+    serviceType: getServiceType(corridorCalls.length, corridorStops.length),
+    calls: [...corridorCalls, ...remainingCalls],
+  };
+}
+
+function findTopologyCorridorStops(
+  lineTopology: LineRouteSequence[],
+  departure: Departure,
+): LineRouteStop[] | undefined {
+  const candidates = lineTopology
+    .map((sequence) => dedupeStopSequence(sequence.stops))
+    .flatMap((stops) => {
+      const startIndex = stops.findIndex((stop) =>
+        lineStopMatchesDepartureStation(stop, departure),
+      );
+      const destinationIndex = stops.findIndex((stop) =>
+        directionMatchesRule(stop.label, departure.destination),
+      );
+
+      if (startIndex < 0 || destinationIndex < 0 || startIndex === destinationIndex) {
+        return [];
+      }
+
+      const minIndex = Math.min(startIndex, destinationIndex);
+      const maxIndex = Math.max(startIndex, destinationIndex);
+      const corridor = stops.slice(minIndex, maxIndex + 1);
+
+      return [
+        {
+          stops: startIndex <= destinationIndex ? corridor : corridor.reverse(),
+          distance: Math.abs(destinationIndex - startIndex),
+        },
+      ];
+    })
+    .sort((left, right) => right.distance - left.distance);
+
+  return candidates[0]?.stops;
+}
+
+function lineStopMatchesDepartureStation(
+  stop: LineRouteStop,
+  departure: Departure,
+): boolean {
+  const refs = [
+    stop.id,
+    stop.station.id,
+    stop.station.scheduleStopAreaRef,
+    departure.monitoringRef,
+    departure.navitiaStopPointRef,
+  ].filter(Boolean);
+
+  if (
+    refs.some((ref) =>
+      refs.some((candidate) => ref !== candidate && ref === candidate),
+    )
+  ) {
+    return true;
+  }
+
+  return labelsMatchStation(stop.label, departure.stopName);
+}
+
+function labelsMatchStation(left: string | undefined, right: string | undefined): boolean {
+  const leftKey = normalizeText(left);
+  const rightKey = normalizeText(right);
+
+  return Boolean(
+    leftKey &&
+      rightKey &&
+      (leftKey.includes(rightKey) || rightKey.includes(leftKey)),
+  );
 }
 
 function mergePatternWithTopologyTransfers(
@@ -743,7 +1337,7 @@ async function fetchStationTransfersWithRetry(
 
 function wait(durationMs: number): Promise<void> {
   return new Promise((resolve) => {
-    window.setTimeout(resolve, durationMs);
+    globalThis.setTimeout(resolve, durationMs);
   });
 }
 
@@ -757,10 +1351,73 @@ type RawLineTopologyRoute = {
   stops: LineRouteStop[];
 };
 
+interface ServerLineTopology {
+  stations: Array<{
+    id: string;
+    name: string;
+    lat?: number;
+    lon?: number;
+  }>;
+  patterns: Array<{
+    id: string;
+    terminalFrom: string;
+    terminalTo: string;
+    stops: string[];
+  }>;
+}
+
+export function convertServerTopologyToLineRouteSequences(
+  topology: ServerLineTopology,
+): LineRouteSequence[] {
+  const stations = new Map(topology.stations.map((station) => [station.id, station]));
+
+  return topology.patterns
+    .map((pattern) => {
+      const stops = pattern.stops.flatMap((stationId) => {
+        const station = stations.get(stationId);
+
+        if (!station) {
+          return [];
+        }
+
+        const searchStation: StationSearchOption = {
+          id: station.id,
+          label: station.name,
+          monitoringRef: "",
+        };
+
+        const stop: LineRouteStop = {
+          id: station.id,
+          label: station.name,
+          lat: station.lat,
+          lon: station.lon,
+          station: searchStation,
+        };
+
+        return [stop];
+      });
+
+      return {
+        id: pattern.id,
+        label: `${pattern.terminalFrom} ↔ ${pattern.terminalTo}`,
+        direction: pattern.terminalTo,
+        topologySource: "server",
+        stops,
+      } satisfies LineRouteSequence;
+    })
+    .filter((sequence) => sequence.stops.length >= 2);
+}
+
 async function fetchLineRouteSequencesByLineId(
   lineId: string,
   lineLabel: string,
 ): Promise<LineRouteSequence[]> {
+  const serverSequences = await fetchServerLineTopology(lineId).catch(() => []);
+
+  if (serverSequences.length > 0) {
+    return serverSequences;
+  }
+
   const scheduleRoutes = await fetchLineScheduleTopologyRoutes(lineId).catch(
     () => [],
   );
@@ -776,6 +1433,21 @@ async function fetchLineRouteSequencesByLineId(
   const routes = await fetchLineRoutesById(lineId).catch(() => []);
 
   return fetchLineTopologyFromRoutes(routes, lineLabel).catch(() => []);
+}
+
+async function fetchServerLineTopology(
+  lineId: string,
+): Promise<LineRouteSequence[]> {
+  const response = await fetch(
+    `/api/lines/${encodeURIComponent(lineId)}/topology`,
+  );
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const topology = (await response.json()) as ServerLineTopology;
+  return convertServerTopologyToLineRouteSequences(topology);
 }
 
 async function fetchLineScheduleTopologyRoutes(
@@ -1068,6 +1740,7 @@ function dedupeRawTopologyRoutes(
 
 async function fetchLinesForCommercialMode(
   network: TransitFamilyOption,
+  options: NavitiaRequestOptions = {},
 ): Promise<NavitiaLine[]> {
   const searchParams = new URLSearchParams({
     count: "100",
@@ -1076,16 +1749,18 @@ async function fetchLinesForCommercialMode(
   });
 
   return fetchPaginatedCollection<NavitiaLinesResponse, NavitiaLine>(
-    `${NAVITIA_API_BASE}/commercial_modes/${encodeURIComponent(network.id)}/lines`,
+    `${navitiaApiBase(options)}/commercial_modes/${encodeURIComponent(network.id)}/lines`,
     searchParams,
     "lines",
     MAX_LINE_RESULTS,
+    options,
   );
 }
 
 async function searchLinesWithPtObjects(
   network: TransitFamilyOption,
   query: string,
+  options: NavitiaRequestOptions = {},
 ): Promise<NavitiaLine[]> {
   const searchParams = new URLSearchParams({
     count: "100",
@@ -1096,7 +1771,10 @@ async function searchLinesWithPtObjects(
 
   searchParams.append("type[]", "line");
 
-  const response = await fetch(`${NAVITIA_API_BASE}/pt_objects?${searchParams}`);
+  const response = await navitiaFetchWithRetry(
+    `${navitiaApiBase(options)}/pt_objects?${searchParams}`,
+    options,
+  );
 
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
@@ -1237,8 +1915,9 @@ function mapRouteScheduleToCallingPattern(
       }
 
       const dateTime = findMatchingRowDateTime(row, match);
+      const isCurrentRow = rowIndex === match.rowIndex;
       const served =
-        Boolean(dateTime?.date_time) &&
+        (Boolean(dateTime?.date_time) || isCurrentRow) &&
         rowMatchesDeparturePath(
           row,
           rowIndex,
@@ -1249,10 +1928,12 @@ function mapRouteScheduleToCallingPattern(
 
       return mapStopPointToDepartureCall(
         row.stop_point,
-        rowIndex === match.rowIndex ||
+        isCurrentRow ||
         (served && stopMatchesDepartureStation(row.stop_point, departure)),
         served && dateTime?.date_time
           ? parseNavitiaDateTime(dateTime.date_time)
+          : isCurrentRow
+            ? getDepartureTimeValue(departure)
           : undefined,
         served,
       );
@@ -1339,6 +2020,13 @@ function findMatchingScheduleDateTime(
   }
 
   if (!bestMatch || bestMatch.delta > 25 * 60_000) {
+    if (currentRows.length > 0) {
+      return {
+        dateTimeIndex: 0,
+        rowIndex: currentRows[0].index,
+      };
+    }
+
     return null;
   }
 
@@ -1590,6 +2278,7 @@ async function fetchPaginatedCollection<TPayload, TItem>(
   baseSearchParams: URLSearchParams,
   collectionKey: keyof TPayload,
   maxResults: number,
+  options: NavitiaRequestOptions = {},
 ): Promise<TItem[]> {
   const items: TItem[] = [];
   let page = 0;
@@ -1599,7 +2288,7 @@ async function fetchPaginatedCollection<TPayload, TItem>(
     const searchParams = new URLSearchParams(baseSearchParams);
     searchParams.set("start_page", String(page));
 
-    const response = await fetch(`${endpoint}?${searchParams}`);
+    const response = await navitiaFetchWithRetry(`${endpoint}?${searchParams}`, options);
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -1805,11 +2494,14 @@ function mapVisitToDeparture(
     firstValue(asArray(journey.TrainNumbers?.TrainNumberRef)) ??
     firstValue(journey.JourneyNote);
   const platform = cleanPlatformName(
-    call.DeparturePlatformName?.value ?? call.ArrivalPlatformName?.value,
+    siriValue(call.DeparturePlatformName) ??
+      siriValue(call.ArrivalPlatformName),
   );
+  const lineRef = siriValue(journey.LineRef) ?? "";
+  const monitoringRef = siriValue(visit.MonitoringRef) ?? point.ref;
   const id = [
     visit.ItemIdentifier,
-    journey.LineRef?.value,
+    lineRef,
     destination,
     expectedDepartureTime,
     platform,
@@ -1819,8 +2511,8 @@ function mapVisitToDeparture(
 
   return {
     id,
-    lineRef: journey.LineRef?.value ?? "",
-    monitoringRef: visit.MonitoringRef?.value ?? point.ref,
+    lineRef,
+    monitoringRef,
     stopName,
     destination,
     direction: firstValue(journey.DirectionName),
@@ -1834,9 +2526,7 @@ function mapVisitToDeparture(
     journeyName,
     journeyRef: journey.FramedVehicleJourneyRef?.DatedVehicleJourneyRef,
     callOrder: call.Order,
-    navitiaStopPointRef: monitoringRefToNavitiaStopPointRef(
-      visit.MonitoringRef?.value ?? point.ref,
-    ),
+    navitiaStopPointRef: monitoringRefToNavitiaStopPointRef(monitoringRef),
   };
 }
 
@@ -1929,7 +2619,7 @@ async function fetchBoardScheduleInfo(
     }
 
     scheduledDepartures.push(
-      ...mapScheduleToDepartures(board, schedule, group, serviceDay),
+      ...(await mapScheduleToDepartures(board, schedule, group, serviceDay)),
     );
   }
 
@@ -1944,27 +2634,35 @@ function mapScheduleToDepartures(
   schedule: NavitiaStopSchedule,
   group: DirectionGroupConfig,
   serviceDay: NavitiaServiceDayWindow,
-): Departure[] {
+): Promise<Departure[]> {
   const destination = cleanNavitiaDirection(
     schedule.display_informations?.direction ??
     schedule.display_informations?.headsign ??
     group.label,
   );
 
-  return findUpcomingNavitiaTimes(schedule, serviceDay)
+  return Promise.all(
+    findUpcomingNavitiaTimeEntries(schedule, serviceDay)
     .slice(0, board.maxDeparturesPerDirection ?? 4)
-    .map((time) => ({
-      id: `schedule|${board.id}|${group.id}|${time}`,
+    .map(async (entry) => ({
+      id: `schedule|${board.id}|${group.id}|${entry.time}`,
       lineRef: board.line.ref,
       monitoringRef: schedule.stop_point?.id ?? board.schedule?.stopAreaRef ?? "",
       stopName: board.title,
       destination,
       monitoringLabel: "Horaire IDFM",
-      expectedDepartureTime: time,
-      aimedDepartureTime: time,
+      expectedDepartureTime: entry.time,
+      aimedDepartureTime: entry.time,
       vehicleAtStop: false,
+      remainingStopCount: entry.vehicleJourneyId
+        ? await fetchRemainingStopCount(
+            entry.vehicleJourneyId,
+            schedule.stop_point?.id,
+          ).catch(() => undefined)
+        : undefined,
       navitiaStopPointRef: schedule.stop_point?.id,
-    }));
+    })),
+  );
 }
 
 function buildBoardDeparturesResult(
@@ -1994,12 +2692,16 @@ function buildBoardDeparturesResult(
   const directionGroups: DirectionDepartureGroup[] = board.directionGroups.map(
     (group) => {
       const realtimeDepartures = realtimeDeparturesByGroup.get(group.id) ?? [];
+      const scheduledGroupDepartures = scheduledDepartures.filter(
+        (departure) => findDirectionGroup(board, departure)?.id === group.id,
+      );
       const groupDepartures =
         realtimeDepartures.length > 0
-          ? realtimeDepartures
-          : scheduledDepartures
-            .filter((departure) => findDirectionGroup(board, departure)?.id === group.id)
-            .slice(0, perDirectionLimit);
+          ? enrichDeparturesWithScheduledStopCounts(
+              realtimeDepartures,
+              scheduledGroupDepartures,
+            )
+          : scheduledGroupDepartures.slice(0, perDirectionLimit);
 
       groupDepartures.forEach((departure) => visibleDepartures.add(departure.id));
 
@@ -2022,6 +2724,60 @@ function buildBoardDeparturesResult(
     departures: visibleFlatDepartures,
     directionGroups,
   };
+}
+
+function enrichDeparturesWithScheduledStopCounts(
+  realtimeDepartures: Departure[],
+  scheduledDepartures: Departure[],
+): Departure[] {
+  return realtimeDepartures.map((departure) => {
+    if (typeof departure.remainingStopCount === "number") {
+      return departure;
+    }
+
+    const scheduledMatch = findScheduledStopCountMatch(
+      departure,
+      scheduledDepartures,
+    );
+
+    return typeof scheduledMatch?.remainingStopCount === "number"
+      ? {
+          ...departure,
+          remainingStopCount: scheduledMatch.remainingStopCount,
+        }
+      : departure;
+  });
+}
+
+function findScheduledStopCountMatch(
+  departure: Departure,
+  scheduledDepartures: Departure[],
+): Departure | undefined {
+  const departureTime = getDepartureTimestamp(departure);
+
+  return scheduledDepartures
+    .filter(
+      (candidate) =>
+        typeof candidate.remainingStopCount === "number" &&
+        directionsAreComparable(candidate.destination, departure.destination),
+    )
+    .map((candidate) => ({
+      departure: candidate,
+      delta: Math.abs(getDepartureTimestamp(candidate) - departureTime),
+    }))
+    .filter(({ delta }) => delta <= 10 * 60 * 1000)
+    .sort((left, right) => left.delta - right.delta)[0]?.departure;
+}
+
+function directionsAreComparable(
+  left: string | undefined,
+  right: string | undefined,
+): boolean {
+  if (!left || !right) {
+    return true;
+  }
+
+  return directionMatchesRule(left, right) || directionMatchesRule(right, left);
 }
 
 function findDirectionGroup(
@@ -2110,29 +2866,120 @@ function findUpcomingNavitiaTimes(
   schedule: NavitiaStopSchedule,
   serviceDay: NavitiaServiceDayWindow,
 ): string[] {
+  return findUpcomingNavitiaTimeEntries(schedule, serviceDay).map(
+    (entry) => entry.time,
+  );
+}
+
+function findUpcomingNavitiaTimeEntries(
+  schedule: NavitiaStopSchedule,
+  serviceDay: NavitiaServiceDayWindow,
+): UpcomingNavitiaTime[] {
   const nowRaw = formatParisNavitiaDateTime(new Date());
   const seen = new Set<string>();
+  const entries: UpcomingNavitiaTime[] = [];
 
-  return asArray(schedule.date_times)
-    .flatMap((value) => [value.date_time, value.base_date_time])
-    .filter(
-      (value): value is string =>
-        typeof value === "string" &&
-        value >= nowRaw &&
-        value >= serviceDay.fromParam &&
-        value < serviceDay.cutoffParam,
-    )
-    .filter((value) => {
-      if (seen.has(value)) {
-        return false;
+  asArray(schedule.date_times).forEach((value) => {
+    const vehicleJourneyId = getVehicleJourneyId(value);
+
+    [value.date_time, value.base_date_time].forEach((rawTime) => {
+      if (
+        typeof rawTime !== "string" ||
+        rawTime < nowRaw ||
+        rawTime < serviceDay.fromParam ||
+        rawTime >= serviceDay.cutoffParam ||
+        seen.has(rawTime)
+      ) {
+        return;
       }
 
-      seen.add(value);
-      return true;
-    })
-    .sort((left, right) => left.localeCompare(right))
-    .map(parseNavitiaDateTime)
-    .filter((value): value is string => Boolean(value));
+      const time = parseNavitiaDateTime(rawTime);
+
+      if (!time) {
+        return;
+      }
+
+      seen.add(rawTime);
+      entries.push({
+        rawTime,
+        time,
+        vehicleJourneyId,
+      });
+    });
+  });
+
+  return entries.sort((left, right) => left.rawTime.localeCompare(right.rawTime));
+}
+
+function getVehicleJourneyId(value: NavitiaDateTime): string | undefined {
+  return asArray(value.links).find((link) => {
+    const comparable = normalizeText(`${link.rel ?? ""} ${link.type ?? ""}`);
+
+    return (
+      comparable.includes("vehicle") &&
+      typeof link.id === "string" &&
+      link.id.startsWith("vehicle_journey:")
+    );
+  })?.id;
+}
+
+function fetchRemainingStopCount(
+  vehicleJourneyId: string,
+  currentStopPointId?: string,
+): Promise<number | undefined> {
+  if (!currentStopPointId) {
+    return Promise.resolve(undefined);
+  }
+
+  const cacheKey = `${vehicleJourneyId}::${currentStopPointId}`;
+  const cached = vehicleJourneyStopCountCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const request = fetchVehicleJourneyRemainingStopCount(
+    vehicleJourneyId,
+    currentStopPointId,
+  ).catch((error) => {
+    vehicleJourneyStopCountCache.delete(cacheKey);
+    throw error;
+  });
+
+  vehicleJourneyStopCountCache.set(cacheKey, request);
+
+  return request;
+}
+
+async function fetchVehicleJourneyRemainingStopCount(
+  vehicleJourneyId: string,
+  currentStopPointId: string,
+): Promise<number | undefined> {
+  const searchParams = new URLSearchParams({
+    disable_disruption: "true",
+    disable_geojson: "true",
+  });
+  const response = await fetch(
+    `${NAVITIA_API_BASE}/vehicle_journeys/${encodeURIComponent(vehicleJourneyId)}?${searchParams}`,
+  );
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const payload = (await response.json()) as NavitiaVehicleJourneyResponse;
+  const stopTimes = payload.vehicle_journeys?.[0]?.stop_times ?? [];
+  const currentIndex = stopTimes.findIndex(
+    (stopTime) => stopTime.stop_point?.id === currentStopPointId,
+  );
+
+  if (currentIndex < 0) {
+    return undefined;
+  }
+
+  return stopTimes
+    .slice(currentIndex + 1)
+    .filter((stopTime) => !stopTime.skipped_stop).length;
 }
 
 function parseNavitiaDateTime(value: string): string | undefined {
@@ -2818,8 +3665,18 @@ function asArray<T>(value: T[] | T | undefined): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
-function firstValue(values?: SiriTextValue[]): string | undefined {
-  return values?.find((item) => item.value)?.value;
+function firstValue(values?: SiriTextValue[] | SiriTextValue): string | undefined {
+  return asArray(values)
+    .map(siriValue)
+    .find((value): value is string => Boolean(value));
+}
+
+function siriValue(value?: SiriTextValue): string | undefined {
+  if (typeof value === "string") {
+    return value || undefined;
+  }
+
+  return value?.value || undefined;
 }
 
 function compareDepartures(left: Departure, right: Departure): number {
@@ -2844,3 +3701,12 @@ function getDepartureTimestamp(departure: Departure): number {
 
   return value ? new Date(value).getTime() : Number.MAX_SAFE_INTEGER;
 }
+
+function getDepartureTimeValue(departure: Departure): string | undefined {
+  return (
+    departure.expectedDepartureTime ??
+    departure.expectedArrivalTime ??
+    departure.aimedDepartureTime
+  );
+}
+

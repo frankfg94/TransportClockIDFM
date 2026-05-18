@@ -1,4 +1,4 @@
-import type { TransitBoardConfig, TransitBoardPreferences } from "../types/transit";
+﻿import type { TransitBoardConfig, TransitBoardPreferences } from "../types/transit";
 
 const STORAGE_KEY = "transport-clock.preferences.v2";
 
@@ -47,3 +47,4 @@ export function saveTransitPreferences(
 ): void {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
 }
+

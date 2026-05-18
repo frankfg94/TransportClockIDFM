@@ -1,4 +1,4 @@
-export type TransitMode = "tram" | "rer" | "metro" | "bus" | "train";
+﻿export type TransitMode = "tram" | "rer" | "metro" | "bus" | "train";
 export type TransitFamily =
   | "METRO"
   | "RER"
@@ -73,6 +73,7 @@ export interface Departure {
   journeyName?: string;
   journeyRef?: string;
   callOrder?: number;
+  remainingStopCount?: number;
   navitiaStopPointRef?: string;
 }
 
@@ -89,9 +90,17 @@ export interface DepartureCall {
   time?: string;
   current: boolean;
   served: boolean;
+  status?: DepartureCallStatus;
   stopAreaRef?: string;
   transferLines?: TransferLineOption[];
 }
+
+export type DepartureCallStatus =
+  | "current"
+  | "served"
+  | "not_served"
+  | "works"
+  | "unknown";
 
 export interface DepartureCallingPattern {
   departureId: string;
@@ -182,6 +191,7 @@ export interface LineRouteSequence {
   id: string;
   label: string;
   direction?: string;
+  topologySource?: "server" | "navitia" | "generated";
   stops: LineRouteStop[];
 }
 
@@ -214,3 +224,25 @@ export interface StationBoardDraft {
   line?: LineSearchOption;
   station?: StationSearchOption;
 }
+
+export interface LinePatternStationStatus {
+  id: string;
+  label: string;
+  status: DepartureCallStatus;
+  current: boolean;
+  served: boolean;
+  order?: number;
+}
+
+export interface LinePatternViewResponse {
+  lineId: string;
+  transportType: string;
+  directionId: string;
+  startStationId?: string;
+  activeSegmentIds: string[];
+  stationStatuses: LinePatternStationStatus[];
+  board: TransitBoardConfig;
+  departure: Departure;
+  pattern: DepartureCallingPattern;
+}
+

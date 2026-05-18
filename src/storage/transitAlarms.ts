@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   AlarmDraft,
   Departure,
   DepartureAlarm,
@@ -212,3 +212,4 @@ function normalizeText(value?: string): string {
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase();
 }
+
