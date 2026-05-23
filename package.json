@@ -8,8 +8,7 @@
     "tsc": "nuxt typecheck",
     "build": "nuxt build",
     "preview": "nuxt preview --host 127.0.0.1",
-    "test": "vitest run",
-    "download-idfm-fixtures": "tsx scripts/download-idfm-fixtures.ts"
+    "test": "vitest run"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",

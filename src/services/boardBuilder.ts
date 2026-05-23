@@ -7,8 +7,8 @@
   TransitBoardConfig,
   TransitFamily,
   TransitFamilyOption,
-  TransitMode,
 } from "../types/transit";
+import { createLinePresentation, transitFamilyToMode } from "./linePresentation";
 
 export const fallbackTransitFamilies: TransitFamily[] = [
   "METRO",
@@ -29,7 +29,17 @@ export function createBoardFromDraft(
   draft: Required<StationBoardDraft>,
   directionGroups: DirectionGroupConfig[],
 ): TransitBoardConfig {
-  const mode = familyToMode(draft.family);
+  const mode = transitFamilyToMode(draft.family);
+  const presentation = createLinePresentation({
+    code: draft.line.label,
+    color: draft.line.color,
+    family: draft.family,
+    id: draft.line.navitiaId ?? draft.line.id,
+    mode,
+    ref: draft.line.ref,
+    shortName: draft.line.label,
+    textColor: draft.line.textColor,
+  });
 
   return {
     id: createBoardId(draft.line, draft.station),
@@ -40,10 +50,10 @@ export function createBoardFromDraft(
       shortName: draft.line.label,
       longName: `${draft.family} ${draft.line.label}`,
       mode,
-      color: draft.line.color ?? "#0064ff",
-      textColor: draft.line.textColor ?? "#ffffff",
-      iconUrl: draft.line.iconUrl,
-      iconUrls: draft.line.iconUrls,
+      color: presentation.color,
+      textColor: presentation.textColor,
+      iconUrl: draft.line.iconUrl ?? presentation.iconUrl,
+      iconUrls: mergeIconUrls(draft.line.iconUrls, presentation.iconUrls),
     },
     monitoringPoints: createMonitoringPoints(draft.station, directionGroups),
     directionGroups,
@@ -55,26 +65,6 @@ export function createBoardFromDraft(
       : undefined,
     maxDepartures: 8,
   };
-}
-
-function familyToMode(family: TransitFamily): TransitMode {
-  if (family === "METRO") {
-    return "metro";
-  }
-
-  if (family === "TRAM") {
-    return "tram";
-  }
-
-  if (family === "RER") {
-    return "rer";
-  }
-
-  if (family === "BUS" || family === "NOCTILIEN") {
-    return "bus";
-  }
-
-  return "train";
 }
 
 function createMonitoringPoints(
@@ -125,5 +115,14 @@ function createBoardId(line: LineSearchOption, station: StationSearchOption): st
     .replace(/[^a-zA-Z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .toLowerCase();
+}
+
+function mergeIconUrls(
+  primary?: string[],
+  fallback?: string[],
+): string[] | undefined {
+  const urls = Array.from(new Set([...(primary ?? []), ...(fallback ?? [])]));
+
+  return urls.length > 0 ? urls : undefined;
 }
 

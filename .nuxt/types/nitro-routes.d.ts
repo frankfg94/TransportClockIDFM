@@ -12,6 +12,9 @@ declare module "nitropack/types" {
     '/api/lines/:transportType/:lineId/pattern': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/lines/[transportType]/[lineId]/pattern.get').default>>>>
     }
+    '/api/netex/status': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/netex/status.get').default>>>>
+    }
     '/__nuxt_error': {
       'default': Simplify<Serialize<Awaited<ReturnType<typeof import('../../node_modules/@nuxt/nitro-server/dist/runtime/handlers/renderer').default>>>>
     }

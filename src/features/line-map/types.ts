@@ -6,6 +6,8 @@ export interface LineMapStopView {
   city?: string;
   lon?: number;
   lat?: number;
+  projectedX?: number;
+  projectedY?: number;
   x: number;
   y: number;
   routeIds: string[];

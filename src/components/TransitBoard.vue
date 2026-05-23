@@ -1,19 +1,32 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import {
   Bell,
   BellRing,
   ChevronDown,
   Map,
+  MapPin,
   MoreVertical,
   Route,
   Trash,
 } from "lucide-vue-next";
+import LineCombobox from "./LineCombobox.vue";
 import LineIconBadge from "./LineIconBadge.vue";
+import StationCombobox from "./StationCombobox.vue";
+import { createBoardFromDraft } from "../services/boardBuilder";
+import {
+  fetchDirectionGroupsForStation,
+  fetchStationTransfers,
+  searchLineStations,
+} from "../services/idfm";
 import type {
   Departure,
   DirectionDepartureGroup,
+  LineSearchOption,
+  StationSearchOption,
   TransitBoardConfig,
+  TransitFamily,
+  TransferLineOption,
 } from "../types/transit";
 
 type DeparturePatternPayload = {
@@ -35,6 +48,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
+  "change-station": [board: TransitBoardConfig];
   remove: [];
   "open-line-page": [board: TransitBoardConfig];
   "schedule-alarm": [
@@ -56,7 +70,46 @@ const displayedDeparturesCount = computed(() =>
 );
 const isCompactPatternInteraction = ref(false);
 const actionsOpen = ref(false);
+const stationEditorOpen = ref(false);
+const stationOptions = ref<StationSearchOption[]>([]);
+const stationTransfers = reactive<Record<string, TransferLineOption[]>>({});
+const stationTransferLoadingIds = ref<string[]>([]);
+const stationQuery = ref("");
+const selectedStation = ref<StationSearchOption>();
+const loadingStations = ref(false);
+const changingStation = ref(false);
+const stationEditorError = ref("");
 let compactPatternMediaQuery: MediaQueryList | undefined;
+let latestStationRequest = 0;
+
+const currentLineOption = computed<LineSearchOption>(() => {
+  const family = transitModeToFamily(props.board.line.mode);
+  const navitiaId = props.board.schedule?.lineRef ?? props.board.line.ref;
+
+  return {
+    family,
+    id: navitiaId,
+    label: props.board.line.shortName,
+    ref: props.board.line.ref,
+    navitiaId,
+    color: props.board.line.color,
+    textColor: props.board.line.textColor,
+    displayName: props.board.line.longName,
+    iconUrl: props.board.line.iconUrl,
+    iconUrls: props.board.line.iconUrls,
+  };
+});
+const lineOptions = computed(() => [currentLineOption.value]);
+const filteredStationOptions = computed(() =>
+  stationOptions.value.filter((station) =>
+    stationMatchesQuery(station, stationQuery.value),
+  ),
+);
+const canConfirmStationChange = computed(
+  () =>
+    Boolean(selectedStation.value) &&
+    selectedStation.value?.label !== props.board.title,
+);
 
 const statusLabels: Record<string, string> = {
   noReport: "À l'heure",
@@ -66,6 +119,22 @@ const statusLabels: Record<string, string> = {
   missed: "Manqué",
   cancelled: "Supprimé",
 };
+
+watch(stationQuery, () => {
+  if (
+    selectedStation.value &&
+    !stationMatchesQuery(selectedStation.value, stationQuery.value)
+  ) {
+    selectedStation.value = undefined;
+  }
+});
+
+watch(
+  () => props.board.id,
+  () => {
+    closeStationEditor();
+  },
+);
 
 function formatClock(value?: string): string {
   if (!value) {
@@ -185,9 +254,131 @@ function openLinePage(): void {
   emit("open-line-page", props.board);
 }
 
+function openStationEditor(): void {
+  actionsOpen.value = false;
+  stationEditorOpen.value = true;
+  stationQuery.value = "";
+  selectedStation.value = undefined;
+  stationEditorError.value = "";
+  void loadStations();
+}
+
 function removeBoard(): void {
   actionsOpen.value = false;
   emit("remove");
+}
+
+function closeStationEditor(): void {
+  stationEditorOpen.value = false;
+  stationOptions.value = [];
+  stationQuery.value = "";
+  selectedStation.value = undefined;
+  stationEditorError.value = "";
+  clearStationTransfers();
+}
+
+async function loadStations(): Promise<void> {
+  const requestId = ++latestStationRequest;
+  loadingStations.value = true;
+  stationEditorError.value = "";
+
+  try {
+    const stations = await searchLineStations(
+      currentLineOption.value,
+      stationQuery.value,
+    );
+
+    if (requestId === latestStationRequest) {
+      stationOptions.value = stations;
+      clearStationTransfers();
+    }
+  } catch {
+    if (requestId === latestStationRequest) {
+      stationOptions.value = [];
+      stationEditorError.value = "Impossible de charger les stations.";
+    }
+  } finally {
+    if (requestId === latestStationRequest) {
+      loadingStations.value = false;
+    }
+  }
+}
+
+function selectStationOption(station?: StationSearchOption): void {
+  selectedStation.value = station;
+
+  if (station) {
+    stationQuery.value = station.label;
+    void loadStationTransferBadges(station);
+  }
+}
+
+async function loadStationTransferBadges(
+  station: StationSearchOption,
+): Promise<void> {
+  if (stationTransfers[station.id]) {
+    return;
+  }
+
+  if (stationTransferLoadingIds.value.includes(station.id)) {
+    return;
+  }
+
+  stationTransferLoadingIds.value = [
+    ...stationTransferLoadingIds.value,
+    station.id,
+  ];
+
+  try {
+    stationTransfers[station.id] = await fetchStationTransfers(
+      station,
+      currentLineOption.value.id,
+    );
+  } catch {
+    stationTransfers[station.id] = [];
+  } finally {
+    stationTransferLoadingIds.value = stationTransferLoadingIds.value.filter(
+      (id) => id !== station.id,
+    );
+  }
+}
+
+async function confirmStationChange(): Promise<void> {
+  if (!selectedStation.value || changingStation.value) {
+    return;
+  }
+
+  changingStation.value = true;
+  stationEditorError.value = "";
+
+  try {
+    const directionGroups = await fetchDirectionGroupsForStation(
+      currentLineOption.value,
+      selectedStation.value,
+    );
+    const nextBoard = createBoardFromDraft(
+      {
+        family: currentLineOption.value.family,
+        line: currentLineOption.value,
+        station: selectedStation.value,
+      },
+      directionGroups,
+    );
+
+    emit("change-station", nextBoard);
+    closeStationEditor();
+  } catch {
+    stationEditorError.value = "Impossible de changer de station.";
+  } finally {
+    changingStation.value = false;
+  }
+}
+
+function clearStationTransfers(): void {
+  Object.keys(stationTransfers).forEach((key) => {
+    delete stationTransfers[key];
+  });
+  stationTransferLoadingIds.value = [];
 }
 
 function normalizeText(value?: string): string {
@@ -195,6 +386,32 @@ function normalizeText(value?: string): string {
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase();
+}
+
+function stationMatchesQuery(
+  station: StationSearchOption,
+  query: string,
+): boolean {
+  const normalizedQuery = normalizeText(query);
+
+  return (
+    !normalizedQuery ||
+    normalizeText(`${station.label} ${station.city ?? ""}`).includes(
+      normalizedQuery,
+    )
+  );
+}
+
+function transitModeToFamily(mode: string): TransitFamily {
+  if (mode === "metro") return "METRO";
+  if (mode === "rer") return "RER";
+  if (mode === "bus") return "BUS";
+  if (mode === "tram") return "TRAM";
+  if (mode === "noctilien") return "NOCTILIEN";
+  if (mode === "train") return "TRANSILIEN";
+  if (mode === "cable") return "CABLE";
+
+  return "BUS";
 }
 
 function syncCompactPatternInteraction(event?: MediaQueryListEvent): void {
@@ -246,6 +463,10 @@ onUnmounted(() => {
           <button type="button" @click="openLinePage">
             <Map :size="17" aria-hidden="true" />
             Schéma de la ligne
+          </button>
+          <button type="button" @click="openStationEditor">
+            <MapPin :size="17" aria-hidden="true" />
+            Changer de station
           </button>
           <button
             v-if="removable"
@@ -462,5 +683,101 @@ onUnmounted(() => {
       <span>{{ displayedDeparturesCount }} passages</span>
     </footer>
   </article>
+
+  <Teleport to="body">
+    <Transition name="modal-scale">
+      <div
+        v-if="stationEditorOpen"
+        class="modal-backdrop"
+        @click.self="closeStationEditor"
+      >
+        <section
+          class="modal-panel board-station-modal"
+          aria-modal="true"
+          role="dialog"
+        >
+          <header class="modal-panel__header">
+            <div>
+              <p class="eyebrow">Station</p>
+              <h2>Changer de station</h2>
+              <span class="board-station-modal__subtitle">
+                {{ board.line.longName }} · {{ board.title }}
+              </span>
+            </div>
+            <button
+              class="icon-button"
+              type="button"
+              aria-label="Fermer"
+              @click="closeStationEditor"
+            >
+              ×
+            </button>
+          </header>
+
+          <div class="station-form board-station-modal__form">
+            <label>
+              <span>Ligne</span>
+              <LineCombobox
+                :model-value="currentLineOption"
+                :options="lineOptions"
+                :query="currentLineOption.displayName ?? currentLineOption.label"
+                disabled
+                placeholder="Ligne"
+                @update:model-value="() => undefined"
+                @update:query="() => undefined"
+              />
+            </label>
+
+            <label>
+              <span>Nouvelle station</span>
+              <StationCombobox
+                :model-value="selectedStation"
+                :options="filteredStationOptions"
+                :query="stationQuery"
+                :loading="loadingStations"
+                :transfer-map="stationTransfers"
+                :transfer-loading-ids="stationTransferLoadingIds"
+                @inspect="loadStationTransferBadges"
+                @update:model-value="selectStationOption"
+                @update:query="stationQuery = $event"
+              />
+              <span v-if="loadingStations" class="field-loader">
+                <span aria-hidden="true" class="loader-dot"></span>
+                Chargement des stations
+              </span>
+            </label>
+
+            <div v-if="stationEditorError" class="form-error">
+              <span>{{ stationEditorError }}</span>
+              <button
+                class="button-secondary form-retry"
+                type="button"
+                @click="loadStations"
+              >
+                Réessayer
+              </button>
+            </div>
+          </div>
+
+          <footer class="modal-panel__footer">
+            <button
+              class="button-secondary"
+              type="button"
+              @click="closeStationEditor"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              :disabled="!canConfirmStationChange || changingStation"
+              @click="confirmStationChange"
+            >
+              {{ changingStation ? "Changement..." : "Changer" }}
+            </button>
+          </footer>
+        </section>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 

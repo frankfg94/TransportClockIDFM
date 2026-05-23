@@ -1,6 +1,7 @@
 ﻿<script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { createRatpLineIconUrls } from "../services/lineIcons";
+import { transitModeToFamily } from "../services/linePresentation";
 import type { TransitFamily, TransitMode } from "../types/transit";
 
 type LineIconLike = {
@@ -82,29 +83,6 @@ function getLineModeLabel(line: typeof props.line): string {
   return family ?? "";
 }
 
-function transitModeToFamily(mode?: TransitMode): TransitFamily | undefined {
-  if (mode === "metro") {
-    return "METRO";
-  }
-
-  if (mode === "rer") {
-    return "RER";
-  }
-
-  if (mode === "tram") {
-    return "TRAM";
-  }
-
-  if (mode === "bus") {
-    return "BUS";
-  }
-
-  if (mode === "train") {
-    return "TRANSILIEN";
-  }
-
-  return undefined;
-}
 </script>
 
 <template>

@@ -14,6 +14,8 @@ import type {
 } from "../../../src/types/transit";
 import { buildNeighborMap, segmentId } from "../topology/buildLineTopology";
 import { getLineTopology } from "../topology/getLineTopology";
+import { resolveKnownLineAlias } from "../topology/netexCache";
+import { createLinePresentation } from "../../../src/services/linePresentation";
 import type {
   LineTopology,
   TopologyPattern,
@@ -35,22 +37,31 @@ interface OrientedPattern {
   sourcePattern: TopologyPattern;
 }
 
-const LINE_COLORS: Record<string, Pick<LineConfig, "color" | "textColor">> = {
-  "rer-a": { color: "#e2231a", textColor: "#ffffff" },
-  "rer-b": { color: "#5291ce", textColor: "#ffffff" },
-  "rer-d": { color: "#008b5b", textColor: "#ffffff" },
-  "transilien-j": { color: "#d6cd00", textColor: "#111827" },
-  "metro-4": { color: "#be418d", textColor: "#ffffff" },
-  t10: { color: "#6e6e00", textColor: "#ffffff" },
-};
+const MAX_PATTERN_VIEW_CACHE_ENTRIES = 512;
+const patternViewCache = new Map<string, Promise<LinePatternViewResponse>>();
 
 export async function buildLinePatternView(
   params: BuildLinePatternViewParams,
 ): Promise<LinePatternViewResponse> {
   const resolvedLineId = resolveHumanLineId(params.transportType, params.lineId);
-  const topology = await getLineTopology(resolvedLineId);
+  const cacheKey = createPatternViewCacheKey(resolvedLineId, params);
+  const cached = patternViewCache.get(cacheKey);
 
-  return buildLinePatternViewFromTopology(params, topology);
+  if (cached) {
+    return cached;
+  }
+
+  const request = getLineTopology(resolvedLineId).then((topology) =>
+    buildLinePatternViewFromTopology(params, topology),
+  );
+
+  patternViewCache.set(cacheKey, request);
+  trimPatternViewCache();
+  request.catch(() => {
+    patternViewCache.delete(cacheKey);
+  });
+
+  return request;
 }
 
 export function buildLinePatternViewFromTopology(
@@ -110,22 +121,32 @@ export function buildLinePatternViewFromTopology(
 }
 
 export function resolveHumanLineId(transportType: string, lineId: string): string {
-  const normalizedType = normalizeId(transportType);
-  const normalizedLine = normalizeId(lineId);
+  return resolveKnownLineAlias(transportType, lineId);
+}
 
-  if (normalizedType === "rer") {
-    return `rer-${normalizedLine}`;
+function createPatternViewCacheKey(
+  resolvedLineId: string,
+  params: BuildLinePatternViewParams,
+): string {
+  return JSON.stringify({
+    lineId: resolvedLineId,
+    transportType: normalizeId(params.transportType),
+    directionId: normalizeId(params.directionId),
+    startStationId: normalizeId(params.startStationId),
+    startStationCandidates: (params.startStationCandidates ?? []).map(normalizeId),
+  });
+}
+
+function trimPatternViewCache(): void {
+  while (patternViewCache.size > MAX_PATTERN_VIEW_CACHE_ENTRIES) {
+    const oldestKey = patternViewCache.keys().next().value;
+
+    if (!oldestKey) {
+      return;
+    }
+
+    patternViewCache.delete(oldestKey);
   }
-
-  if (normalizedType === "metro") {
-    return `metro-${normalizedLine}`;
-  }
-
-  if (normalizedType === "transilien" || normalizedType === "train") {
-    return normalizedLine === "j" ? "transilien-j" : normalizedLine;
-  }
-
-  return normalizedLine;
 }
 
 function resolveOrientedPattern(
@@ -344,6 +365,52 @@ function convertTopologyToLineRouteSequences(
   topology: LineTopology,
 ): LineRouteSequence[] {
   const stations = new Map(topology.stations.map((station) => [station.id, station]));
+  const segmentSequences = topology.segments
+    .map<LineRouteSequence | undefined>((segment) => {
+      const from = stations.get(segment.from);
+      const to = stations.get(segment.to);
+
+      if (!from || !to) {
+        return undefined;
+      }
+
+      return {
+        id: segment.id,
+        label: `${from.name} - ${to.name}`,
+        direction: to.name,
+        topologySource: "server",
+        stops: [from, to].map((station) => createLineRouteStop(station)),
+      } satisfies LineRouteSequence;
+    })
+    .filter((sequence): sequence is LineRouteSequence => Boolean(sequence));
+  const branchSequences = topology.branches
+    .map<LineRouteSequence | undefined>((branch) => {
+      const stops = branch.stops.flatMap((stationId) => {
+        const station = stations.get(stationId);
+
+        return station ? [createLineRouteStop(station)] : [];
+      });
+      const from = stations.get(branch.from);
+      const to = stations.get(branch.to);
+
+      if (!from || !to || stops.length < 2) {
+        return undefined;
+      }
+
+      return {
+        id: branch.id,
+        label: `${from.name} - ${to.name}`,
+        direction: to.name,
+        branchLayout: branch.layout,
+        topologySource: "server",
+        stops,
+      } satisfies LineRouteSequence;
+    })
+    .filter((sequence): sequence is LineRouteSequence => Boolean(sequence));
+
+  if (segmentSequences.length > 0) {
+    return [...segmentSequences, ...branchSequences];
+  }
 
   return topology.patterns
     .map((pattern) => {
@@ -354,22 +421,7 @@ function convertTopologyToLineRouteSequences(
           return [];
         }
 
-        const searchStation: StationSearchOption = {
-          id: station.id,
-          label: station.name,
-          monitoringRef: "",
-          scheduleStopAreaRef: station.id,
-        };
-
-        return [
-          {
-            id: station.id,
-            label: station.name,
-            lat: station.lat,
-            lon: station.lon,
-            station: searchStation,
-          } satisfies LineRouteStop,
-        ];
+        return [createLineRouteStop(station)];
       });
 
       return {
@@ -383,27 +435,47 @@ function convertTopologyToLineRouteSequences(
     .filter((sequence) => sequence.stops.length > 1);
 }
 
+function createLineRouteStop(station: TopologyStation): LineRouteStop {
+  const searchStation: StationSearchOption = {
+    id: station.id,
+    label: station.name,
+    monitoringRef: "",
+    scheduleStopAreaRef: station.id,
+  };
+
+  return {
+    id: station.id,
+    label: station.name,
+    lat: station.lat,
+    lon: station.lon,
+    projectedX: station.projectedX,
+    projectedY: station.projectedY,
+    station: searchStation,
+  };
+}
+
 function createLineConfig(
   topology: LineTopology,
   transportType: string,
 ): LineConfig {
-  const slug = normalizeId(topology.line.aliases.at(-1) ?? topology.line.shortName);
-  const fallbackSlug = normalizeId(`${transportType}-${topology.line.shortName}`);
-  const colors =
-    LINE_COLORS[slug] ??
-    LINE_COLORS[fallbackSlug] ??
-    ({ color: "#0064ff", textColor: "#ffffff" } satisfies Pick<
-      LineConfig,
-      "color" | "textColor"
-    >);
+  const mode = toTransitMode(topology.line.mode);
+  const presentation = createLinePresentation({
+    code: topology.line.shortName,
+    id: topology.line.id,
+    mode,
+    ref: topology.line.id,
+    shortName: topology.line.shortName,
+  });
 
   return {
     ref: topology.line.id,
     shortName: topology.line.shortName,
     longName: topology.line.name,
-    mode: toTransitMode(topology.line.mode),
-    color: colors.color,
-    textColor: colors.textColor,
+    mode,
+    color: presentation.color,
+    textColor: presentation.textColor,
+    iconUrl: presentation.iconUrl,
+    iconUrls: presentation.iconUrls,
   };
 }
 

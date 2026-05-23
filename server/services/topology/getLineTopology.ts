@@ -1,5 +1,4 @@
-import { buildLineTopologyFromFixture } from "./buildLineTopology";
-import { loadRawLineFixture } from "./fixtures";
+import { getLineTopologyFromNetexCache } from "./netexCache";
 import type { LineTopology } from "./types";
 
 const topologyCache = new Map<string, Promise<LineTopology>>();
@@ -11,7 +10,7 @@ export function getLineTopology(lineId: string): Promise<LineTopology> {
     return cached;
   }
 
-  const request = loadRawLineFixture(lineId).then(buildLineTopologyFromFixture);
+  const request = getLineTopologyFromNetexCache(lineId);
   topologyCache.set(lineId, request);
 
   return request;

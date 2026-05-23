@@ -7,7 +7,7 @@ import { Handle, Position, VueFlow } from "@vue-flow/core";
 import type { Edge, Node } from "@vue-flow/core";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import { Controls } from "@vue-flow/controls";
-import { Expand, Minimize2 } from "lucide-vue-next";
+import { Expand, Minimize2, SlidersHorizontal } from "lucide-vue-next";
 import {
   createPatternStationKey as createStationKey,
   normalizePatternStationName as normalizeStationName,
@@ -17,6 +17,10 @@ import {
   getFlowLightEdgeClass,
   getVisualFlowEdgeEndpoints,
 } from "./flowDirection";
+import {
+  countPatternTopologyStations,
+  shouldUseCompactPatternFlow,
+} from "./compactPatternFlow";
 import { hydrateDeparturePatternTransfers } from "./patternTransfers";
 
 import type {
@@ -24,6 +28,7 @@ import type {
   DepartureCall,
   DepartureCallingPattern,
   DepartureServiceType,
+  LineRouteBranchLayout,
   LineRouteSequence,
   LineRouteStop,
   TransferLineOption,
@@ -87,12 +92,21 @@ interface PatternTopologyLayout {
   visibleEdges: Set<string>;
 }
 
-const NODE_WIDTH = 156;
-const NODE_HEIGHT = 82;
-const STOP_GAP = 174;
-const BRANCH_GAP = 122;
-const RANK_SEPARATOR = 96;
-const NODE_SEPARATOR = 54;
+const REGULAR_NODE_WIDTH = 184;
+const REGULAR_NODE_HEIGHT = 104;
+const COMPACT_NODE_WIDTH = 128;
+const COMPACT_NODE_HEIGHT = 150;
+
+type PatternLayoutOptions = {
+  compact: boolean;
+  nodeWidth: number;
+  nodeHeight: number;
+  stopGap: number;
+  branchGap: number;
+  sameDirectionForkGap: number;
+  rankSeparator: number;
+  nodeSeparator: number;
+};
 
 const props = defineProps<{
   open: boolean;
@@ -109,8 +123,10 @@ const emit = defineEmits<{
 }>();
 
 const isPatternFlowFullscreen = ref(false);
+const isCompactPatternFlow = ref(false);
 const hydratedPattern = ref<DepartureCallingPattern>();
 let transferHydrationRequest = 0;
+let compactDecisionKey = "";
 
 const serviceLabel = computed(() =>
   displayPattern.value
@@ -135,18 +151,25 @@ const servedStopsLabel = computed(() => {
     return count > 1 ? `${count} arrêts desservis` : `${count} arrêt desservi`;
 });
 const displayPattern = computed(() => hydratedPattern.value ?? props.pattern);
+const topologyStationCount = computed(() =>
+  countPatternTopologyStations(displayPattern.value?.lineTopology ?? []),
+);
+const currentLayoutOptions = computed(() =>
+  createPatternLayoutOptions(isCompactPatternFlow.value),
+);
 const flowModel = computed(() =>
   createPatternFlow(
     displayPattern.value?.calls ?? [],
     displayPattern.value?.lineTopology ?? [],
     departureClock.value,
+    isCompactPatternFlow.value,
   ),
 );
 const patternFlowKey = computed(
   () =>
     `${displayPattern.value?.departureId ?? "empty"}:${
       isPatternFlowFullscreen.value ? "fullscreen" : "modal"
-    }`,
+    }:${isCompactPatternFlow.value ? "compact" : "comfortable"}`,
 );
 const initialViewport = computed(() => {
   const currentNode =
@@ -154,17 +177,12 @@ const initialViewport = computed(() => {
     flowModel.value.nodes.find((node) => node.data?.served) ??
     flowModel.value.nodes[0];
   const nodeCount = flowModel.value.nodes.length;
-  const zoom = isPatternFlowFullscreen.value
-    ? nodeCount > 64
-      ? 0.58
-      : nodeCount > 42
-        ? 0.66
-        : 0.92
-    : nodeCount > 64
-      ? 0.42
-      : nodeCount > 42
-        ? 0.5
-        : 0.78;
+  const layout = currentLayoutOptions.value;
+  const zoom = createInitialZoom({
+    fullscreen: isPatternFlowFullscreen.value,
+    compact: isCompactPatternFlow.value,
+    nodeCount,
+  });
   const center = isPatternFlowFullscreen.value
     ? { x: 560, y: 360 }
     : { x: 280, y: 230 };
@@ -178,11 +196,82 @@ const initialViewport = computed(() => {
   }
 
   return {
-    x: center.x - (currentNode.position.x + NODE_WIDTH / 2) * zoom,
-    y: center.y - (currentNode.position.y + NODE_HEIGHT / 2) * zoom,
+    x: center.x - (currentNode.position.x + layout.nodeWidth / 2) * zoom,
+    y: center.y - (currentNode.position.y + layout.nodeHeight / 2) * zoom,
     zoom,
   };
 });
+
+watch(
+  () => `${displayPattern.value?.departureId ?? "empty"}:${topologyStationCount.value}`,
+  (key) => {
+    if (key === compactDecisionKey) {
+      return;
+    }
+
+    compactDecisionKey = key;
+    isCompactPatternFlow.value = shouldUseCompactPatternFlow(
+      displayPattern.value?.lineTopology ?? [],
+    );
+  },
+  { immediate: true },
+);
+
+function createPatternLayoutOptions(compact: boolean): PatternLayoutOptions {
+  return compact
+    ? {
+        compact: true,
+        nodeWidth: COMPACT_NODE_WIDTH,
+        nodeHeight: COMPACT_NODE_HEIGHT,
+        stopGap: 138,
+        branchGap: 258,
+        sameDirectionForkGap: 158,
+        rankSeparator: 116,
+        nodeSeparator: 46,
+      }
+    : {
+        compact: false,
+        nodeWidth: REGULAR_NODE_WIDTH,
+        nodeHeight: REGULAR_NODE_HEIGHT,
+        stopGap: 236,
+        branchGap: 184,
+        sameDirectionForkGap: 184 * 0.58,
+        rankSeparator: 96,
+        nodeSeparator: 54,
+      };
+}
+
+function createInitialZoom({
+  fullscreen,
+  compact,
+  nodeCount,
+}: {
+  fullscreen: boolean;
+  compact: boolean;
+  nodeCount: number;
+}): number {
+  if (fullscreen) {
+    if (nodeCount > 64) {
+      return compact ? 0.68 : 0.58;
+    }
+
+    if (nodeCount > 42) {
+      return compact ? 0.78 : 0.66;
+    }
+
+    return compact ? 0.96 : 0.92;
+  }
+
+  if (nodeCount > 64) {
+    return compact ? 0.5 : 0.42;
+  }
+
+  if (nodeCount > 42) {
+    return compact ? 0.6 : 0.5;
+  }
+
+  return compact ? 0.82 : 0.78;
+}
 
 function formatClock(value?: string): string {
   if (!value) {
@@ -260,24 +349,26 @@ function createPatternFlow(
   calls: DepartureCall[],
   lineTopology: LineRouteSequence[],
   departureTimeLabel: string,
+  compact: boolean,
 ): PatternFlowModel {
+  const layout = createPatternLayoutOptions(compact);
   const graph = buildPatternGraph(calls, lineTopology);
   const topology =
-    createTopologyLayout(graph.nodes, graph.edges, calls) ??
-    createFallbackTopologyLayout(graph);
+    createTopologyLayout(graph.nodes, graph.edges, calls, lineTopology, layout) ??
+    createFallbackTopologyLayout(graph, layout);
 
   const activeTerminalIds = getActiveTerminalIds(graph);
   const drawableEdges = [...graph.edges, ...topology.syntheticEdges];
   const nodes = graph.nodes.map((node) => {
     const position = topology.positions.get(node.id) ?? { x: 0, y: 0 };
-    const isBranchEnd = (topology.degrees.get(node.id) ?? 0) <= 1;
+    const isBranchEnd = node.degree <= 1;
 
     return {
       id: node.id,
       type: "station",
       position: {
-        x: position.x - NODE_WIDTH / 2,
-        y: position.y - NODE_HEIGHT / 2,
+        x: position.x - layout.nodeWidth / 2,
+        y: position.y - layout.nodeHeight / 2,
       },
       targetPosition: Position.Left,
       sourcePosition: Position.Right,
@@ -397,6 +488,8 @@ function createTopologyLayout(
   nodes: PatternGraphNode[],
   edges: PatternGraphEdge[],
   calls: DepartureCall[],
+  lineTopology: LineRouteSequence[],
+  layout: PatternLayoutOptions,
 ): PatternTopologyLayout | null {
   if (nodes.length === 0 || edges.length === 0) {
     return null;
@@ -410,12 +503,14 @@ function createTopologyLayout(
     ? createStationKey(calls.find((call) => call.current)!)
     : undefined;
   const destinationKey = getServedDestinationKey(calls);
+  const preferStructuralSpine = graphHasCycle(nodes, edges);
   const mainPath = chooseMainPath(
     nodes,
     adjacency,
     activeKeys,
     currentKey,
     destinationKey,
+    preferStructuralSpine,
   );
 
   if (mainPath.length < 2) {
@@ -428,18 +523,40 @@ function createTopologyLayout(
   const visibleEdges = new Set<string>();
   const syntheticEdges: PatternGraphEdge[] = [];
   const placed = new Set<string>();
+  const branchLayoutHints = createBranchLayoutHints(lineTopology);
 
   mainPath.forEach((key, index) => {
-    positions.set(key, { x: index * STOP_GAP, y: 0 });
+    positions.set(key, { x: index * layout.stopGap, y: 0 });
     placed.add(key);
   });
   addPathEdges(mainPath, visibleEdges);
+  placeSameDirectionForks(
+    branchLayoutHints,
+    positions,
+    placed,
+    visibleEdges,
+    layout,
+  );
 
   const laneSteps = createLaneSteps();
   let guard = 0;
 
   while (placed.size < nodes.length && guard < nodes.length * 2) {
     guard += 1;
+
+    const connectorPath = findBestConnectorPath(nodes, adjacency, placed);
+
+    if (connectorPath) {
+      placeConnectorPath(
+        connectorPath,
+        positions,
+        placed,
+        visibleEdges,
+        laneSteps,
+        layout,
+      );
+      continue;
+    }
 
     const branchPath = findBestBranchPath(nodes, adjacency, placed);
 
@@ -454,6 +571,8 @@ function createTopologyLayout(
       visibleEdges,
       laneSteps,
       destinationKey,
+      branchLayoutHints,
+      layout,
     );
   }
 
@@ -465,26 +584,31 @@ function createTopologyLayout(
     visibleEdges,
     laneSteps,
     destinationKey,
+    layout,
   );
+  addGraphEdges(edges, visibleEdges);
 
   return {
     positions,
     syntheticEdges,
     visibleEdges,
-    degrees: createDegreesFromEdgeKeys(visibleEdges),
+    degrees: createDegreesFromEdges(edges),
   };
 }
 
-function createFallbackTopologyLayout(graph: {
-  nodes: PatternGraphNode[];
-  edges: PatternGraphEdge[];
-}): PatternTopologyLayout {
+function createFallbackTopologyLayout(
+  graph: {
+    nodes: PatternGraphNode[];
+    edges: PatternGraphEdge[];
+  },
+  layout: PatternLayoutOptions,
+): PatternTopologyLayout {
   const visibleEdges = new Set(
     graph.edges.map((edge) => createEdgeKey(edge.source, edge.target)),
   );
 
   return {
-    positions: createDagreLayout(graph),
+    positions: createDagreLayout(graph, layout),
     syntheticEdges: [],
     visibleEdges,
     degrees: createDegreesFromEdgeKeys(visibleEdges),
@@ -520,6 +644,7 @@ function chooseMainPath(
   activeKeys: Set<string>,
   currentKey?: string,
   destinationKey?: string,
+  preferStructuralSpine = false,
 ): string[] {
   const terminals = nodes
     .filter((node) => (adjacency.get(node.id)?.size ?? 0) <= 1)
@@ -537,7 +662,13 @@ function chooseMainPath(
         return;
       }
 
-      const score = scoreMainPath(path, activeKeys, currentKey, destinationKey);
+      const score = scoreMainPath(
+        path,
+        activeKeys,
+        currentKey,
+        destinationKey,
+        preferStructuralSpine,
+      );
 
       if (score > bestScore) {
         bestScore = score;
@@ -554,6 +685,7 @@ function scoreMainPath(
   activeKeys: Set<string>,
   currentKey?: string,
   destinationKey?: string,
+  preferStructuralSpine = false,
 ): number {
   const activeCount = path.filter((key) => activeKeys.has(key)).length;
   const currentBonus = currentKey && path.includes(currentKey) ? 400 : 0;
@@ -562,6 +694,16 @@ function scoreMainPath(
     destinationIndex === 0 || destinationIndex === path.length - 1 ? 1200 : 0;
   const destinationPresenceBonus = destinationIndex >= 0 ? 500 : 0;
 
+  if (preferStructuralSpine) {
+    return (
+      path.length * 90 +
+      activeCount * 20 +
+      currentBonus * 0.1 +
+      destinationPresenceBonus * 0.15 +
+      destinationTerminalBonus * 0.15
+    );
+  }
+
   return (
     path.length * 8 +
     activeCount * 120 +
@@ -569,6 +711,49 @@ function scoreMainPath(
     destinationPresenceBonus +
     destinationTerminalBonus
   );
+}
+
+function graphHasCycle(
+  nodes: PatternGraphNode[],
+  edges: PatternGraphEdge[],
+): boolean {
+  return edges.length - nodes.length + countConnectedComponents(nodes, edges) > 0;
+}
+
+function countConnectedComponents(
+  nodes: PatternGraphNode[],
+  edges: PatternGraphEdge[],
+): number {
+  const adjacency = createAdjacency(edges);
+  const visited = new Set<string>();
+  let components = 0;
+
+  nodes.forEach((node) => {
+    if (visited.has(node.id)) {
+      return;
+    }
+
+    components += 1;
+    const queue = [node.id];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+
+      if (visited.has(current)) {
+        continue;
+      }
+
+      visited.add(current);
+
+      Array.from(adjacency.get(current) ?? []).forEach((neighbor) => {
+        if (!visited.has(neighbor)) {
+          queue.push(neighbor);
+        }
+      });
+    }
+  });
+
+  return components;
 }
 
 function orientPathTowardDeparture(
@@ -594,6 +779,165 @@ function orientPathTowardDeparture(
   if (firstIndex >= 0 && lastIndex >= 0 && lastIndex < firstIndex) {
     path.reverse();
   }
+}
+
+type PatternBranchLayoutHint = LineRouteBranchLayout & {
+  junctionKey: string;
+  terminalKey: string;
+  trunkKey?: string;
+  stationKeys: string[];
+};
+
+function createBranchLayoutHints(
+  lineTopology: LineRouteSequence[],
+): Map<string, PatternBranchLayoutHint> {
+  const hints = new Map<string, PatternBranchLayoutHint>();
+  const stationKeyById = new Map<string, string>();
+
+  lineTopology.forEach((sequence) => {
+    sequence.stops.forEach((stop) => {
+      stationKeyById.set(stop.id, createStationKey(stop));
+    });
+  });
+
+  lineTopology.forEach((sequence) => {
+    if (!sequence.branchLayout || sequence.stops.length < 2) {
+      return;
+    }
+
+    const junction = sequence.stops[0];
+    const terminal = sequence.stops[sequence.stops.length - 1];
+    const junctionKey = createStationKey(junction);
+    const terminalKey = createStationKey(terminal);
+    const stationKeys = sequence.stops.map(createStationKey);
+
+    hints.set(createBranchLayoutHintKey(junctionKey, terminalKey), {
+      ...sequence.branchLayout,
+      junctionKey,
+      terminalKey,
+      trunkKey: sequence.branchLayout.trunkStationId
+        ? stationKeyById.get(sequence.branchLayout.trunkStationId)
+        : undefined,
+      stationKeys,
+    });
+  });
+
+  return hints;
+}
+
+function createBranchLayoutHintKey(junctionKey: string, terminalKey: string): string {
+  return `${junctionKey}::${terminalKey}`;
+}
+
+function placeSameDirectionForks(
+  branchLayoutHints: Map<string, PatternBranchLayoutHint>,
+  positions: Map<string, { x: number; y: number }>,
+  placed: Set<string>,
+  visibleEdges: Set<string>,
+  layout: PatternLayoutOptions,
+): void {
+  const hintsByJunction = new Map<string, PatternBranchLayoutHint[]>();
+
+  branchLayoutHints.forEach((hint) => {
+    if (hint.kind !== "same-direction-fork") {
+      return;
+    }
+
+    const current = hintsByJunction.get(hint.junctionKey) ?? [];
+    current.push(hint);
+    hintsByJunction.set(hint.junctionKey, current);
+  });
+
+  hintsByJunction.forEach((hints, junctionKey) => {
+    const junctionPosition = positions.get(junctionKey);
+    const trunkKey = hints.find((hint) => hint.trunkKey)?.trunkKey;
+    const trunkPosition = trunkKey ? positions.get(trunkKey) : undefined;
+
+    if (!junctionPosition || !trunkPosition || hints.length < 2) {
+      return;
+    }
+
+    const direction = junctionPosition.x <= trunkPosition.x ? -1 : 1;
+
+    hints.forEach((hint) => {
+      const side = hint.side === "upper" ? -1 : hint.side === "lower" ? 1 : 0;
+      const y = junctionPosition.y + side * layout.sameDirectionForkGap;
+
+      hint.stationKeys.slice(1).forEach((key, index) => {
+        positions.set(key, {
+          x: junctionPosition.x + direction * (index + 1) * layout.stopGap,
+          y,
+        });
+        placed.add(key);
+      });
+      addPathEdges(hint.stationKeys, visibleEdges);
+    });
+  });
+}
+
+function findBestConnectorPath(
+  nodes: PatternGraphNode[],
+  adjacency: Map<string, Set<string>>,
+  placed: Set<string>,
+): string[] | null {
+  const placedIds = nodes
+    .map((node) => node.id)
+    .filter((id) => placed.has(id));
+  let bestPath: string[] | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  placedIds.forEach((source) => {
+    const path = findConnectorPathFrom(source, adjacency, placed);
+
+    if (!path || path.length < 3) {
+      return;
+    }
+
+    const internalCount = path.slice(1, -1).filter((id) => !placed.has(id)).length;
+    const score = internalCount * 100 + path.length;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestPath = path;
+    }
+  });
+
+  return bestPath;
+}
+
+function findConnectorPathFrom(
+  source: string,
+  adjacency: Map<string, Set<string>>,
+  placed: Set<string>,
+): string[] | null {
+  const queue: string[][] = [[source]];
+  const visited = new Set<string>([source]);
+
+  while (queue.length > 0) {
+    const path = queue.shift()!;
+    const current = path[path.length - 1];
+
+    for (const neighbor of adjacency.get(current) ?? []) {
+      if (neighbor === source || visited.has(neighbor)) {
+        continue;
+      }
+
+      const nextPath = [...path, neighbor];
+
+      if (placed.has(neighbor)) {
+        if (nextPath.length >= 3) {
+          return nextPath;
+        }
+
+        continue;
+      }
+
+      visited.add(neighbor);
+      queue.push(nextPath);
+    }
+  }
+
+  return null;
 }
 
 function findBestBranchPath(
@@ -804,6 +1148,95 @@ function findShortestPath(
   return null;
 }
 
+function placeConnectorPath(
+  path: string[],
+  positions: Map<string, { x: number; y: number }>,
+  placed: Set<string>,
+  visibleEdges: Set<string>,
+  laneSteps: Generator<number, never, unknown>,
+  layout: PatternLayoutOptions,
+): void {
+  const startKey = path[0];
+  const endKey = path[path.length - 1];
+  let startPosition = positions.get(startKey);
+  let endPosition = positions.get(endKey);
+
+  if (!startPosition || !endPosition) {
+    return;
+  }
+
+  const requiredSpan = (path.length - 1) * layout.stopGap;
+  const actualSpan = Math.abs(endPosition.x - startPosition.x);
+
+  if (actualSpan < requiredSpan) {
+    const direction = endPosition.x >= startPosition.x ? 1 : -1;
+
+    expandConnectorSpan({
+      positions,
+      anchorKey: startKey,
+      endKey,
+      direction,
+      delta: requiredSpan - actualSpan,
+    });
+    startPosition = positions.get(startKey);
+    endPosition = positions.get(endKey);
+
+    if (!startPosition || !endPosition) {
+      return;
+    }
+  }
+
+  const lane = Math.abs(laneSteps.next().value);
+  const baseY = Math.max(startPosition.y, endPosition.y, 0);
+  const y = baseY + lane * layout.branchGap;
+  const denominator = Math.max(path.length - 1, 1);
+
+  path.slice(1, -1).forEach((key, index) => {
+    if (!positions.has(key)) {
+      const ratio = (index + 1) / denominator;
+
+      positions.set(key, {
+        x: startPosition.x + (endPosition.x - startPosition.x) * ratio,
+        y,
+      });
+    }
+
+    placed.add(key);
+  });
+
+  addPathEdges(path, visibleEdges);
+}
+
+function expandConnectorSpan(params: {
+  positions: Map<string, { x: number; y: number }>;
+  anchorKey: string;
+  endKey: string;
+  direction: 1 | -1;
+  delta: number;
+}): void {
+  const anchorPosition = params.positions.get(params.anchorKey);
+
+  if (!anchorPosition || params.delta <= 0) {
+    return;
+  }
+
+  params.positions.forEach((position, key) => {
+    if (key === params.anchorKey) {
+      return;
+    }
+
+    const isOnExpandableSide =
+      key === params.endKey ||
+      (params.direction > 0
+        ? position.x > anchorPosition.x
+        : position.x < anchorPosition.x);
+
+    if (isOnExpandableSide) {
+      position.x += params.direction * params.delta;
+    }
+  });
+}
+
 function placeBranchPath(
   path: string[],
   positions: Map<string, { x: number; y: number }>,
@@ -811,30 +1244,40 @@ function placeBranchPath(
   visibleEdges: Set<string>,
   laneSteps: Generator<number, never, unknown>,
   destinationKey?: string,
+  branchLayoutHints?: Map<string, PatternBranchLayoutHint>,
+  layout?: PatternLayoutOptions,
 ): void {
   const anchor = path[0];
+  const terminal = path[path.length - 1];
   const anchorPosition = positions.get(anchor);
 
   if (!anchorPosition) {
     return;
   }
 
-  const lane = laneSteps.next().value;
-  const y = lane * BRANCH_GAP;
+  const layoutHint = branchLayoutHints?.get(
+    createBranchLayoutHintKey(anchor, terminal),
+  );
+  const spacing = layout ?? createPatternLayoutOptions(false);
+  const lane = createBranchLane(laneSteps, layoutHint);
+  const y = lane * spacing.branchGap;
   const destinationPosition = destinationKey
     ? positions.get(destinationKey)
     : undefined;
-  const branchDirection =
-    destinationPosition && anchor !== destinationKey
-      ? anchorPosition.x < destinationPosition.x
-        ? -1
-        : 1
-      : 1;
+  const branchDirection = resolveBranchDirection({
+    anchor,
+    anchorPosition,
+    path,
+    destinationKey,
+    destinationPosition,
+    positions,
+    layoutHint,
+  });
 
   path.slice(1).forEach((key, index) => {
     if (!positions.has(key)) {
       positions.set(key, {
-        x: anchorPosition.x + branchDirection * (index + 1) * STOP_GAP,
+        x: anchorPosition.x + branchDirection * (index + 1) * spacing.stopGap,
         y,
       });
     }
@@ -842,6 +1285,60 @@ function placeBranchPath(
     placed.add(key);
   });
   addPathEdges(path, visibleEdges);
+}
+
+function createBranchLane(
+  laneSteps: Generator<number, never, unknown>,
+  layoutHint?: PatternBranchLayoutHint,
+): number {
+  const nextLane = laneSteps.next().value;
+
+  if (!layoutHint || layoutHint.kind !== "same-direction-fork") {
+    return nextLane;
+  }
+
+  const lane = Math.abs(nextLane);
+
+  if (layoutHint.side === "upper") {
+    return -lane;
+  }
+
+  if (layoutHint.side === "lower") {
+    return lane;
+  }
+
+  return lane;
+}
+
+function resolveBranchDirection(params: {
+  anchor: string;
+  anchorPosition: { x: number; y: number };
+  path: string[];
+  destinationKey?: string;
+  destinationPosition?: { x: number; y: number };
+  positions: Map<string, { x: number; y: number }>;
+  layoutHint?: PatternBranchLayoutHint;
+}): 1 | -1 {
+  if (params.layoutHint?.kind === "same-direction-fork") {
+    const trunkPosition = params.layoutHint.trunkKey
+      ? params.positions.get(params.layoutHint.trunkKey)
+      : undefined;
+
+    if (trunkPosition) {
+      return params.anchorPosition.x <= trunkPosition.x ? -1 : 1;
+    }
+  }
+
+  if (
+    params.destinationPosition &&
+    typeof params.destinationKey === "string" &&
+    params.anchor !== params.destinationKey &&
+    params.path.includes(params.destinationKey)
+  ) {
+    return params.anchorPosition.x < params.destinationPosition.x ? 1 : -1;
+  }
+
+  return 1;
 }
 
 function placeRemainingComponents(
@@ -852,13 +1349,14 @@ function placeRemainingComponents(
   visibleEdges: Set<string>,
   laneSteps: Generator<number, never, unknown>,
   destinationKey?: string,
+  layout: PatternLayoutOptions = createPatternLayoutOptions(false),
 ): void {
   const nodeIds = nodes.map((node) => node.id);
   const keepAfterDestinationClear =
     destinationKey !== undefined && positions.has(destinationKey);
   let nextBaseX = keepAfterDestinationClear
-    ? getMinPositionX(positions) - STOP_GAP
-    : getMaxPositionX(positions) + STOP_GAP;
+    ? getMinPositionX(positions) - layout.stopGap
+    : getMaxPositionX(positions) + layout.stopGap;
 
   while (true) {
     const start = nodeIds.find((id) => !placed.has(id));
@@ -871,13 +1369,13 @@ function placeRemainingComponents(
     const mainPath = findLongestPathInComponent(component, adjacency);
     const orderedIds = mainPath.length > 0 ? mainPath : Array.from(component);
     const lane = laneSteps.next().value;
-    const y = lane * BRANCH_GAP;
+    const y = lane * layout.branchGap;
 
     orderedIds.forEach((id, index) => {
       positions.set(id, {
         x: keepAfterDestinationClear
-          ? nextBaseX - index * STOP_GAP
-          : nextBaseX + index * STOP_GAP,
+          ? nextBaseX - index * layout.stopGap
+          : nextBaseX + index * layout.stopGap,
         y,
       });
       placed.add(id);
@@ -890,13 +1388,14 @@ function placeRemainingComponents(
       positions,
       placed,
       baseY: y,
+      layout,
     });
 
     addComponentEdges(component, adjacency, visibleEdges);
 
     nextBaseX +=
       (keepAfterDestinationClear ? -1 : 1) *
-      (Math.max(orderedIds.length, 1) * STOP_GAP + STOP_GAP);
+      (Math.max(orderedIds.length, 1) * layout.stopGap + layout.stopGap);
   }
 }
 
@@ -972,8 +1471,10 @@ function placeComponentSideNodes(params: {
   positions: Map<string, { x: number; y: number }>;
   placed: Set<string>;
   baseY: number;
+  layout: PatternLayoutOptions;
 }): void {
-  const { component, orderedIds, adjacency, positions, placed, baseY } = params;
+  const { component, orderedIds, adjacency, positions, placed, baseY, layout } =
+    params;
   const orderedSet = new Set(orderedIds);
 
   Array.from(component).forEach((id) => {
@@ -987,8 +1488,8 @@ function placeComponentSideNodes(params: {
     const anchorPosition = anchorId ? positions.get(anchorId) : undefined;
 
     positions.set(id, {
-      x: anchorPosition?.x ?? getMaxPositionX(positions) + STOP_GAP,
-      y: baseY + BRANCH_GAP,
+      x: anchorPosition?.x ?? getMaxPositionX(positions) + layout.stopGap,
+      y: baseY + layout.branchGap,
     });
     placed.add(id);
   });
@@ -1018,6 +1519,12 @@ function addPathEdges(path: string[], visibleEdges: Set<string>): void {
   });
 }
 
+function addGraphEdges(edges: PatternGraphEdge[], visibleEdges: Set<string>): void {
+  edges.forEach((edge) => {
+    visibleEdges.add(createEdgeKey(edge.source, edge.target));
+  });
+}
+
 function createDegreesFromEdgeKeys(edgeKeys: Set<string>): Map<string, number> {
   const degrees = new Map<string, number>();
 
@@ -1026,6 +1533,17 @@ function createDegreesFromEdgeKeys(edgeKeys: Set<string>): Map<string, number> {
 
     degrees.set(source, (degrees.get(source) ?? 0) + 1);
     degrees.set(target, (degrees.get(target) ?? 0) + 1);
+  });
+
+  return degrees;
+}
+
+function createDegreesFromEdges(edges: PatternGraphEdge[]): Map<string, number> {
+  const degrees = new Map<string, number>();
+
+  edges.forEach((edge) => {
+    degrees.set(edge.source, (degrees.get(edge.source) ?? 0) + 1);
+    degrees.set(edge.target, (degrees.get(edge.target) ?? 0) + 1);
   });
 
   return degrees;
@@ -1073,15 +1591,15 @@ function* createLaneSteps(): Generator<number, never, unknown> {
 function createDagreLayout(graph: {
   nodes: PatternGraphNode[];
   edges: PatternGraphEdge[];
-}): Map<string, { x: number; y: number }> {
+}, layout: PatternLayoutOptions): Map<string, { x: number; y: number }> {
   const layoutGraph = new dagre.graphlib.Graph();
 
   layoutGraph.setDefaultEdgeLabel(() => ({}));
   layoutGraph.setGraph({
     rankdir: "LR",
     align: "UL",
-    ranksep: RANK_SEPARATOR,
-    nodesep: NODE_SEPARATOR,
+    ranksep: layout.rankSeparator,
+    nodesep: layout.nodeSeparator,
     edgesep: 24,
     marginx: 34,
     marginy: 28,
@@ -1089,8 +1607,8 @@ function createDagreLayout(graph: {
 
   graph.nodes.forEach((node) => {
     layoutGraph.setNode(node.id, {
-      width: NODE_WIDTH,
-      height: NODE_HEIGHT,
+      width: layout.nodeWidth,
+      height: layout.nodeHeight,
     });
   });
   graph.edges.forEach((edge) => {
@@ -1465,10 +1983,6 @@ function getBranchChip(
     return node.current ? "Départ" : departureTimeLabel;
   }
 
-  if (!node.served && node.degree <= 1) {
-    return "Non desservi";
-  }
-
   return undefined;
 }
 
@@ -1738,26 +2252,53 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="pattern-flow-shell">
-                  <button
-                    class="pattern-flow-fullscreen-button"
-                    type="button"
-                    :aria-label="
-                      isPatternFlowFullscreen
-                        ? 'Quitter le plein écran'
-                        : 'Afficher la carte en plein écran'
-                    "
-                    @click.stop="togglePatternFlowFullscreen"
-                  >
-                    <Minimize2
-                      v-if="isPatternFlowFullscreen"
-                      aria-hidden="true"
-                    />
-                    <Expand v-else aria-hidden="true" />
-                    <span>
-                      {{ isPatternFlowFullscreen ? "Réduire" : "Plein écran" }}
-                    </span>
-                  </button>
+                <div
+                  class="pattern-flow-shell"
+                  :class="{
+                    'pattern-flow-shell--compact': isCompactPatternFlow,
+                  }"
+                >
+                  <div class="pattern-flow-actions">
+                    <button
+                      class="pattern-flow-action-button"
+                      type="button"
+                      :aria-pressed="isCompactPatternFlow"
+                      aria-label="Basculer la vue compacte"
+                      @click.stop="
+                        isCompactPatternFlow = !isCompactPatternFlow
+                      "
+                    >
+                      <SlidersHorizontal aria-hidden="true" />
+                      <span>
+                        {{
+                          isCompactPatternFlow
+                            ? "Vue compacte"
+                            : "Vue confort"
+                        }}
+                      </span>
+                    </button>
+                    <button
+                      class="pattern-flow-action-button"
+                      type="button"
+                      :aria-label="
+                        isPatternFlowFullscreen
+                          ? 'Quitter le plein écran'
+                          : 'Afficher la carte en plein écran'
+                      "
+                      @click.stop="togglePatternFlowFullscreen"
+                    >
+                      <Minimize2
+                        v-if="isPatternFlowFullscreen"
+                        aria-hidden="true"
+                      />
+                      <Expand v-else aria-hidden="true" />
+                      <span>
+                        {{
+                          isPatternFlowFullscreen ? "Réduire" : "Plein écran"
+                        }}
+                      </span>
+                    </button>
+                  </div>
                   <VueFlow
                     pan-on-drag
                     :key="patternFlowKey"
@@ -1827,7 +2368,9 @@ onBeforeUnmount(() => {
                         <small v-if="data.time">{{
                           formatClock(data.time)
                         }}</small>
-                        <small v-else-if="!data.served">Non desservi</small>
+                        <small v-else-if="!data.served && data.branchEnd">
+                          Non desservi
+                        </small>
                         <em v-if="data.branchChip">{{ data.branchChip }}</em>
                         <span
                           v-if="data.busTransfers.length > 0"

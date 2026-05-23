@@ -143,6 +143,51 @@ function applyMapCoordinates(
     });
   }
 
+  const stopsWithProjectedCoordinates = stops.filter(
+    (stop) =>
+      typeof stop.projectedX === "number" &&
+      typeof stop.projectedY === "number",
+  );
+
+  if (stopsWithProjectedCoordinates.length >= 2) {
+    const minX = Math.min(
+      ...stopsWithProjectedCoordinates.map((stop) => stop.projectedX as number),
+    );
+    const maxX = Math.max(
+      ...stopsWithProjectedCoordinates.map((stop) => stop.projectedX as number),
+    );
+    const minY = Math.min(
+      ...stopsWithProjectedCoordinates.map((stop) => stop.projectedY as number),
+    );
+    const maxY = Math.max(
+      ...stopsWithProjectedCoordinates.map((stop) => stop.projectedY as number),
+    );
+    const bounds = padBounds({ minX, maxX, minY, maxY });
+
+    return stops.map((stop) => {
+      if (
+        typeof stop.projectedX !== "number" ||
+        typeof stop.projectedY !== "number"
+      ) {
+        return stop;
+      }
+
+      return {
+        ...stop,
+        x: normalizeProjectedCoordinate(
+          stop.projectedX,
+          bounds.minX,
+          bounds.maxX,
+        ),
+        y: normalizeProjectedCoordinate(
+          bounds.maxY - (stop.projectedY - bounds.minY),
+          bounds.minY,
+          bounds.maxY,
+        ),
+      };
+    });
+  }
+
   const orderedStopIds = createFallbackMapOrder(stops, branches);
 
   return stops.map((stop) => {

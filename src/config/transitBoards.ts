@@ -1,5 +1,18 @@
 ﻿import type { TransitBoardConfig } from "../types/transit";
 
+import { createLinePresentation } from "../services/linePresentation";
+
+const t10Presentation = createLinePresentation({
+  id: "line:IDFM:C02528",
+  mode: "tram",
+  shortName: "T10",
+});
+const rerBPresentation = createLinePresentation({
+  id: "line:IDFM:C01743",
+  mode: "rer",
+  shortName: "B",
+});
+
 export const transitBoards: TransitBoardConfig[] = [
   {
     id: "t10-les-peintres",
@@ -10,8 +23,7 @@ export const transitBoards: TransitBoardConfig[] = [
       shortName: "T10",
       longName: "Tram T10",
       mode: "tram",
-      color: "#9ACD32",
-      textColor: "#10233f",
+      ...t10Presentation,
     },
     monitoringPoints: [
       {
@@ -70,8 +82,7 @@ export const transitBoards: TransitBoardConfig[] = [
       shortName: "B",
       longName: "RER B",
       mode: "rer",
-      color: "#4A90D9",
-      textColor: "#ffffff",
+      ...rerBPresentation,
     },
     monitoringPoints: [
       {

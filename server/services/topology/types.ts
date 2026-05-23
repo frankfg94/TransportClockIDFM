@@ -15,6 +15,9 @@ export interface RawStation {
   name: string;
   lat?: number;
   lon?: number;
+  projectedX?: number;
+  projectedY?: number;
+  srsName?: string;
   aliases?: string[];
 }
 
@@ -56,6 +59,18 @@ export interface TopologyBranch {
   from: string;
   to: string;
   stops: string[];
+  layout?: TopologyBranchLayout;
+}
+
+export interface TopologyBranchLayout {
+  kind: "same-direction-fork" | "split-fork";
+  junctionStationId: string;
+  terminalStationId: string;
+  trunkStationId?: string;
+  direction: "forward" | "reverse";
+  side: "upper" | "lower" | "center";
+  axisDegrees?: number;
+  angleDegrees?: number;
 }
 
 export interface ExpectedTopologyFixture {

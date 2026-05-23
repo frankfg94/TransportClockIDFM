@@ -16,7 +16,7 @@
   TransitFamilyOption,
   TransitBoardConfig,
 } from "../types/transit";
-import { createRatpLineIconUrls } from "./lineIcons";
+import { createLinePresentation } from "./linePresentation";
 
 type SiriTextValue =
   | string
@@ -1357,6 +1357,13 @@ interface ServerLineTopology {
     name: string;
     lat?: number;
     lon?: number;
+    projectedX?: number;
+    projectedY?: number;
+  }>;
+  segments?: Array<{
+    id: string;
+    from: string;
+    to: string;
   }>;
   patterns: Array<{
     id: string;
@@ -1370,6 +1377,28 @@ export function convertServerTopologyToLineRouteSequences(
   topology: ServerLineTopology,
 ): LineRouteSequence[] {
   const stations = new Map(topology.stations.map((station) => [station.id, station]));
+  const segmentSequences = (topology.segments ?? [])
+    .map<LineRouteSequence | undefined>((segment) => {
+      const from = stations.get(segment.from);
+      const to = stations.get(segment.to);
+
+      if (!from || !to) {
+        return undefined;
+      }
+
+      return {
+        id: segment.id,
+        label: `${from.name} ↔ ${to.name}`,
+        direction: to.name,
+        topologySource: "server",
+        stops: [from, to].map((station) => createServerTopologyRouteStop(station)),
+      } satisfies LineRouteSequence;
+    })
+    .filter((sequence): sequence is LineRouteSequence => Boolean(sequence));
+
+  if (segmentSequences.length > 0) {
+    return segmentSequences;
+  }
 
   return topology.patterns
     .map((pattern) => {
@@ -1380,21 +1409,7 @@ export function convertServerTopologyToLineRouteSequences(
           return [];
         }
 
-        const searchStation: StationSearchOption = {
-          id: station.id,
-          label: station.name,
-          monitoringRef: "",
-        };
-
-        const stop: LineRouteStop = {
-          id: station.id,
-          label: station.name,
-          lat: station.lat,
-          lon: station.lon,
-          station: searchStation,
-        };
-
-        return [stop];
+        return [createServerTopologyRouteStop(station)];
       });
 
       return {
@@ -1408,6 +1423,27 @@ export function convertServerTopologyToLineRouteSequences(
     .filter((sequence) => sequence.stops.length >= 2);
 }
 
+function createServerTopologyRouteStop(
+  station: ServerLineTopology["stations"][number],
+): LineRouteStop {
+  const searchStation: StationSearchOption = {
+    id: station.id,
+    label: station.name,
+    monitoringRef: "",
+    scheduleStopAreaRef: station.id,
+  };
+
+  return {
+    id: station.id,
+    label: station.name,
+    lat: station.lat,
+    lon: station.lon,
+    projectedX: station.projectedX,
+    projectedY: station.projectedY,
+    station: searchStation,
+  };
+}
+
 async function fetchLineRouteSequencesByLineId(
   lineId: string,
   lineLabel: string,
@@ -1418,21 +1454,7 @@ async function fetchLineRouteSequencesByLineId(
     return serverSequences;
   }
 
-  const scheduleRoutes = await fetchLineScheduleTopologyRoutes(lineId).catch(
-    () => [],
-  );
-  const scheduleSequences = buildLineTopologySequences(
-    scheduleRoutes,
-    lineLabel,
-  );
-
-  if (scheduleSequences.length > 0) {
-    return scheduleSequences;
-  }
-
-  const routes = await fetchLineRoutesById(lineId).catch(() => []);
-
-  return fetchLineTopologyFromRoutes(routes, lineLabel).catch(() => []);
+  return [];
 }
 
 async function fetchServerLineTopology(
@@ -3154,10 +3176,13 @@ function mapLineToSearchOption(
   network: TransitFamilyOption,
 ): LineSearchOption {
   const label = line.code ?? line.name ?? line.id;
-  const iconUrls = createRatpLineIconUrls({
+  const presentation = createLinePresentation({
     code: line.code ?? line.name,
+    color: line.color,
     family: network.family,
     id: line.id,
+    shortName: label,
+    textColor: line.text_color,
   });
 
   return {
@@ -3167,10 +3192,10 @@ function mapLineToSearchOption(
     label,
     ref: navitiaLineIdToSiriRef(line.id),
     commercialModeId: network.id,
-    color: line.color ? `#${line.color}` : undefined,
-    textColor: line.text_color ? `#${line.text_color}` : undefined,
-    iconUrl: iconUrls[0],
-    iconUrls,
+    color: presentation.color,
+    textColor: presentation.textColor,
+    iconUrl: presentation.iconUrl,
+    iconUrls: presentation.iconUrls,
     displayName:
       line.name && line.code && line.name !== line.code
         ? `${line.code} · ${line.name}`
@@ -3182,10 +3207,14 @@ function mapLineToTransferOption(line: NavitiaLine): TransferLineOption {
   const family = familyOrder.find((item) =>
     commercialModeMatchesFamily(line.commercial_mode?.name ?? line.commercial_mode?.id, item),
   );
-  const iconUrls = createRatpLineIconUrls({
+  const presentation = createLinePresentation({
     code: line.code ?? line.name,
+    color: line.color,
     family,
     id: line.id,
+    mode: line.commercial_mode?.name ?? line.physical_modes?.[0]?.name,
+    shortName: line.code ?? line.name ?? line.id,
+    textColor: line.text_color,
   });
 
   return {
@@ -3193,10 +3222,10 @@ function mapLineToTransferOption(line: NavitiaLine): TransferLineOption {
     label: line.code ?? line.name ?? line.id,
     family,
     mode: line.commercial_mode?.name ?? line.physical_modes?.[0]?.name,
-    color: line.color ? `#${line.color}` : undefined,
-    textColor: line.text_color ? `#${line.text_color}` : undefined,
-    iconUrl: iconUrls[0],
-    iconUrls,
+    color: presentation.color,
+    textColor: presentation.textColor,
+    iconUrl: presentation.iconUrl,
+    iconUrls: presentation.iconUrls,
     ref: navitiaLineIdToSiriRef(line.id),
   };
 }

@@ -1,197 +1,373 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildLineTopologyFromFixture,
-  buildNeighborMap,
-} from "../server/services/topology/buildLineTopology";
-import {
-  loadExpectedTopologyFixture,
-  loadRawLineFixture,
-} from "../server/services/topology/fixtures";
+import { buildNeighborMap } from "../server/services/topology/buildLineTopology";
 import { getLineTopology } from "../server/services/topology/getLineTopology";
-import { validateLineTopology } from "../server/services/topology/validateLineTopology";
+import { loadNetexLineCache } from "../server/services/topology/netexCache";
+import { createPatternFlowStructure } from "../src/features/service-pattern/patternFlowStructure";
 import { createPatternStationKey } from "../src/features/service-pattern/stationKeys";
 import { convertServerTopologyToLineRouteSequences } from "../src/services/idfm";
 
-const fixtureSlugs = ["transilien-j", "rer-a", "rer-b", "rer-d", "metro-4"] as const;
+const cacheCases = [
+  {
+    id: "line:IDFM:C01743",
+    label: "RER B",
+    stationCount: 47,
+    branchPoints: ["Aulnay-sous-Bois", "Bourg-la-Reine"],
+    terminals: [
+      "Aeroport Charles de Gaulle 2 (Terminal 2)",
+      "Mitry - Claye",
+      "Robinson",
+      "Saint-Rémy-lès-Chevreuse",
+    ],
+  },
+  {
+    id: "rer-d",
+    label: "RER D",
+    stationCount: 59,
+    branchPoints: [
+      "Corbeil-Essonnes",
+      "Le Mée",
+      "Viry-Châtillon",
+      "Villeneuve-Saint-Georges",
+    ],
+    terminals: ["Creil", "Malesherbes", "Melun"],
+  },
+  {
+    id: "transilien-j",
+    label: "Transilien J",
+    stationCount: 54,
+    branchPoints: [
+      "Argenteuil",
+      "Asnières-sur-Seine",
+      "Conflans-Sainte-Honorine",
+      "Mantes Station",
+    ],
+    terminals: ["Ermont - Eaubonne", "Gare Saint-Lazare", "Gisors", "Vernon - Giverny"],
+  },
+  {
+    id: "tram-t10",
+    label: "Tram T10",
+    stationCount: 13,
+    branchPoints: [],
+    terminals: ["Jardin Parisien", "Croix de Berny"],
+  },
+  {
+    id: "metro-4",
+    label: "Metro 4",
+    stationCount: 29,
+    branchPoints: [],
+    terminals: ["Bagneux - Lucie Aubrac", "Porte de Clignancourt"],
+  },
+] as const;
 
-const transilienJBranchNodeNeighbors: Record<string, string[]> = {
-  "asnieres-sur-seine": [
-    "bois-colombes",
-    "houilles-carrieres-sur-seine",
-    "paris-saint-lazare",
-  ],
-  argenteuil: ["le-stade", "sannois", "val-argenteuil"],
-  "conflans-sainte-honorine": [
-    "conflans-fin-oise",
-    "eragny-neuville",
-    "herblay",
-  ],
-  "mantes-station": ["epone-mezieres", "limay", "mantes-la-jolie"],
-  "mantes-la-jolie": ["breval", "mantes-station", "rosny-sur-seine"],
-};
-
-describe("offline IDFM topology builder", () => {
-  it.each(fixtureSlugs)("builds a coherent %s topology", async (slug) => {
-    const raw = await loadRawLineFixture(slug);
-    const expected = await loadExpectedTopologyFixture(slug);
-    const topology = buildLineTopologyFromFixture(raw);
-    const failures = validateLineTopology(topology, expected);
-
-    expect(failures).toEqual([]);
-    expect(topology.stations.map((station) => station.id).sort()).toEqual(
-      expected.requiredStations.sort(),
-    );
-    expect(topology.branchPoints).toEqual(
-      [...expected.expectedBranchPoints].sort(),
-    );
-  });
-
-  it("keeps Argenteuil and Val d'Argenteuil as distinct Transilien J stations", async () => {
-    const topology = await getLineTopology("transilien-j");
-    const argenteuilStations = topology.stations.filter((station) =>
-      station.name.includes("Argenteuil"),
-    );
-
-    expect(argenteuilStations.map((station) => station.id).sort()).toEqual([
-      "argenteuil",
-      "val-argenteuil",
-    ]);
-  });
-
-  it("keeps Gare Saint-Lazare as a served Transilien J terminal", async () => {
-    const topology = await getLineTopology("line:IDFM:C01795");
-    const saintLazare = topology.stations.find(
-      (station) => station.id === "paris-saint-lazare",
-    );
-
-    expect(saintLazare?.degree).toBe(1);
-    expect(topology.patterns.some((pattern) => pattern.stops[0] === "paris-saint-lazare")).toBe(
-      true,
-    );
-  });
-
-  it("keeps the Transilien J Mantes and Vernon branch connected without orphan stations", async () => {
-    const topology = await getLineTopology("transilien-j");
-    const neighbors = buildNeighborMap(
-      topology.stations.map((station) => station.id),
-      topology.segments,
-    );
-    const orphanStationIds = topology.stations
-      .filter((station) => (neighbors.get(station.id)?.size ?? 0) === 0)
-      .map((station) => station.id);
-    const mantesPattern = topology.patterns.find(
-      (pattern) => pattern.id === "j-saint-lazare-mantes-conflans",
-    );
-
-    expect(orphanStationIds).toEqual([]);
-    expect(mantesPattern?.stops).toContain("limay");
-    expect([...neighbors.get("limay")!].sort()).toEqual([
-      "issou-porcheville",
-      "mantes-station",
-    ]);
-    expect(neighbors.get("vernon-giverny")?.has("bonnieres")).toBe(true);
-    expect(neighbors.get("breval")?.has("mantes-la-jolie")).toBe(true);
-  });
-
-
-  it("matches the official Transilien J branch nodes from the line map", async () => {
-    const topology = await getLineTopology("transilien-j");
-    const neighbors = buildNeighborMap(
-      topology.stations.map((station) => station.id),
-      topology.segments,
-    );
-
-    expect(topology.branchPoints).toEqual(
-      Object.keys(transilienJBranchNodeNeighbors).sort(),
-    );
-
-    for (const [branchNode, expectedNeighbors] of Object.entries(
-      transilienJBranchNodeNeighbors,
-    )) {
-      expect([...neighbors.get(branchNode)!].sort()).toEqual(
-        [...expectedNeighbors].sort(),
+describe("NeTEx cache topology adapter", () => {
+  it.each(cacheCases)(
+    "loads $label from the generated backend JSON cache",
+    async ({ id, stationCount, branchPoints, terminals }) => {
+      const topology = await getLineTopology(id);
+      const neighbors = buildNeighborMap(
+        topology.stations.map((station) => station.id),
+        topology.segments,
       );
-    }
+      const orphanStations = topology.stations.filter(
+        (station) => (neighbors.get(station.id)?.size ?? 0) === 0,
+      );
+
+      expect(topology.stations).toHaveLength(stationCount);
+      expect(orphanStations).toEqual([]);
+      expect(namesForIds(topology, topology.branchPoints)).toEqualNames(branchPoints);
+      expect(namesForIds(topology, topology.terminals)).toEqualNames(terminals);
+      expect(countComponents(neighbors)).toBe(1);
+    },
+  );
+
+  it("keeps RER B north and south split points readable for the frontend", async () => {
+    const topology = await getLineTopology("rer-b");
+    const neighbors = buildNeighborMap(
+      topology.stations.map((station) => station.id),
+      topology.segments,
+    );
+
+    expect(neighborNames(topology, neighbors, "Aulnay-sous-Bois")).toEqualNames([
+      "Le Blanc-Mesnil",
+      "Sevran - Livry",
+      "Sevran Beaudottes",
+    ]);
+    expect(neighborNames(topology, neighbors, "Bourg-la-Reine")).toEqualNames([
+      "Bagneux",
+      "Parc de Sceaux",
+      "Sceaux",
+    ]);
   });
 
-  it("keeps validated Transilien J server topology intact for the service pattern modal", async () => {
+  it("exposes RER D lasso and parallel alternatives from schematic JSON", async () => {
+    const cache = await loadNetexLineCache("rer-d");
+    const lasso = cache.schematic.loops.find((loop) => {
+      const names = namesForSchematicIds(cache, loop.anchorStationIds);
+
+      return (
+        loop.kind === "cycle" &&
+        includesName(names, "Villeneuve-Saint-Georges") &&
+        includesName(names, "Viry-Châtillon") &&
+        includesName(names, "Corbeil-Essonnes")
+      );
+    });
+    const southParallel = cache.schematic.parallelGroups.find((group) => {
+      const names = namesForSchematicIds(cache, [group.from, group.to]);
+
+      return (
+        includesName(names, "Viry-Châtillon") &&
+        includesName(names, "Corbeil-Essonnes")
+      );
+    });
+
+    expect(lasso?.segmentIds.length).toBeGreaterThanOrEqual(3);
+    expect(southParallel?.alternatives).toHaveLength(2);
+    expect(
+      southParallel?.alternatives.some((alternative) =>
+        includesName(namesForSchematicIds(cache, alternative.stationIds), "Grigny Centre"),
+      ),
+    ).toBe(true);
+    expect(
+      southParallel?.alternatives.some((alternative) =>
+        includesName(namesForSchematicIds(cache, alternative.stationIds), "Ris-Orangis"),
+      ),
+    ).toBe(true);
+  });
+
+  it("verifies every RER D terminus, branch and loop from the generated cache", async () => {
+    const cache = await loadNetexLineCache("rer-d");
+    const topology = await getLineTopology("rer-d");
+    const sequences = convertServerTopologyToLineRouteSequences(topology);
+    const graph = createPatternFlowStructure(sequences);
+    const terminals = cache.schematic.nodes
+      .filter((node) => node.isTerminal)
+      .map((node) => node.name);
+    const branchTerminalsByJunction = new Map(
+      cache.schematic.branchGroups.map((group) => [
+        normalizeName(namesForSchematicIds(cache, [group.junctionStationId])[0]),
+        group.branches.map((branch) =>
+          namesForSchematicIds(cache, [branch.terminalStationId])[0],
+        ),
+      ]),
+    );
+    const parallelLoop = cache.schematic.loops.find((loop) => {
+      const anchors = namesForSchematicIds(cache, loop.anchorStationIds);
+
+      return (
+        loop.kind === "parallel" &&
+        includesName(anchors, "Viry-Châtillon") &&
+        includesName(anchors, "Corbeil-Essonnes")
+      );
+    });
+    const cycleLoop = cache.schematic.loops.find((loop) => {
+      const anchors = namesForSchematicIds(cache, loop.anchorStationIds);
+
+      return (
+        loop.kind === "cycle" &&
+        includesName(anchors, "Villeneuve-Saint-Georges") &&
+        includesName(anchors, "Viry-Châtillon") &&
+        includesName(anchors, "Corbeil-Essonnes") &&
+        includesName(anchors, "Le Mée")
+      );
+    });
+
+    expect(terminals).toEqualNames(["Creil", "Malesherbes", "Melun"]);
+    expect(graph.terminalKeys).toEqual(
+      [stationKey("Creil"), stationKey("Malesherbes"), stationKey("Melun")].sort(),
+    );
+    expect(graph.terminalKeys).not.toContain(stationKey("Évry - Courcouronnes"));
+    expect(graph.terminalKeys).not.toContain(stationKey("Évry - Val de Seine"));
+    expect(graph.branchKeys).toEqual(
+      [
+        stationKey("Corbeil-Essonnes"),
+        stationKey("Le Mée"),
+        stationKey("Viry-Châtillon"),
+        stationKey("Villeneuve-Saint-Georges"),
+      ].sort(),
+    );
+    expect(graph.degreeByKey[stationKey("Corbeil-Essonnes")]).toBe(4);
+    expect(graph.degreeByKey[stationKey("Le Mée")]).toBe(3);
+    expect(graph.degreeByKey[stationKey("Viry-Châtillon")]).toBe(3);
+    expect(graph.degreeByKey[stationKey("Villeneuve-Saint-Georges")]).toBe(3);
+    expect(branchTerminalsByJunction.get(normalizeName("Villeneuve-Saint-Georges"))).toEqualNames(["Creil"]);
+    expect(branchTerminalsByJunction.get(normalizeName("Corbeil-Essonnes"))).toEqualNames(["Malesherbes"]);
+    expect(branchTerminalsByJunction.get(normalizeName("Le Mée"))).toEqualNames(["Melun"]);
+    expect(parallelLoop, "RER D doit exposer la double boucle Viry / Corbeil").toBeDefined();
+    expect(cycleLoop, "RER D doit exposer le grand cycle sud").toBeDefined();
+    expect(namesForSchematicIds(cache, parallelLoop?.stationIds ?? [])).toEqual(
+      expect.arrayContaining([
+        "Grigny Centre",
+        "Orangis Bois de l'Épine",
+        "Évry - Courcouronnes",
+        "Le Bras de Fer",
+        "Ris-Orangis",
+        "Grand Bourg",
+        "Évry - Val de Seine",
+      ]),
+    );
+    expect(namesForSchematicIds(cache, cycleLoop?.stationIds ?? [])).toEqual(
+      expect.arrayContaining([
+        "Villeneuve-Saint-Georges",
+        "Vigneux-sur-Seine",
+        "Juvisy",
+        "Viry-Châtillon",
+        "Corbeil-Essonnes",
+        "Le Mée",
+        "Montgeron - Crosne",
+      ]),
+    );
+  });
+
+  it("keeps Transilien J multiple branch junctions from the generated cache", async () => {
+    const topology = await getLineTopology("transilien-j");
+    const neighbors = buildNeighborMap(
+      topology.stations.map((station) => station.id),
+      topology.segments,
+    );
+
+    expect(neighborNames(topology, neighbors, "Argenteuil")).toEqualNames([
+      "Le Stade",
+      "Sannois",
+      "Val d'Argenteuil",
+    ]);
+    expect(neighborNames(topology, neighbors, "Conflans-Sainte-Honorine")).toEqualNames([
+      "Conflans Fin d'Oise",
+      "Herblay",
+      "Éragny - Neuville",
+    ]);
+    expect(neighborNames(topology, neighbors, "Mantes Station")).toEqualNames([
+      "Épône - Mézières",
+      "Limay",
+      "Mantes-la-Jolie",
+    ]);
+  });
+
+  it("converts cache topology into VueFlow input without orphan nodes", async () => {
     const topology = await getLineTopology("transilien-j");
     const sequences = convertServerTopologyToLineRouteSequences(topology);
-    const edgeKeys = new Set(
-      sequences.flatMap((sequence) =>
-        sequence.stops.slice(0, -1).map((stop, index) => {
-          const nextStop = sequence.stops[index + 1];
-          return [stop.id, nextStop.id].sort().join("--");
-        }),
-      ),
-    );
+    const graph = createPatternFlowStructure(sequences);
 
-    expect(sequences.every((sequence) => sequence.topologySource === "server")).toBe(
-      true,
+    expect(sequences.every((sequence) => sequence.topologySource === "server")).toBe(true);
+    expect(graph.componentCount).toBe(1);
+    expect(graph.orphanKeys).toEqual([]);
+    expect(graph.branchKeys).toEqual(
+      expect.arrayContaining([
+        stationKey("Argenteuil"),
+        stationKey("Conflans-Sainte-Honorine"),
+        stationKey("Mantes Station"),
+      ]),
     );
-    expect(edgeKeys).toContain("bonnieres--vernon-giverny");
-    expect(edgeKeys).toContain("breval--mantes-la-jolie");
-    expect(edgeKeys).toContain("limay--mantes-station");
-    expect(edgeKeys).toContain("conflans-sainte-honorine--eragny-neuville");
-    expect(edgeKeys).toContain("conflans-fin-oise--conflans-sainte-honorine");
-  });
-
-  it("matches live stop-area calls with validated topology stations by label", () => {
-    expect(
-      createPatternStationKey({
-        id: "vernon-giverny",
-        label: "Vernon - Giverny",
-      }),
-    ).toBe(
-      createPatternStationKey({
-        id: "call:sample",
-        label: "Vernon - Giverny",
-        stopAreaRef: "stop_area:IDFM:74127",
-      }),
-    );
-
-    expect(
-      createPatternStationKey({
-        id: "val-argenteuil",
-        label: "Val d'Argenteuil",
-      }),
-    ).not.toBe(
-      createPatternStationKey({
-        id: "argenteuil",
-        label: "Argenteuil",
-      }),
+    expect(graph.edgeKeys).toEqual(
+      expect.arrayContaining([
+        edgeKey("Bonnières", "Vernon - Giverny"),
+        edgeKey("Limay", "Mantes Station"),
+        edgeKey("Conflans Fin d'Oise", "Conflans-Sainte-Honorine"),
+      ]),
     );
   });
 
-  it("detects the RER B north and south branch split stations", async () => {
-    const topology = await getLineTopology("rer-b");
-
-    expect(topology.branchPoints).toContain("aulnay-sous-bois");
-    expect(topology.branchPoints).toContain("bourg-la-reine");
-  });
-
-  it("detects Corbeil-Essonnes as a complex RER D branch node", async () => {
-    const topology = await getLineTopology("rer-d");
-    const corbeil = topology.stations.find(
-      (station) => station.id === "corbeil-essonnes",
+  it("throws for an unknown line instead of performing a network fallback", async () => {
+    await expect(getLineTopology("line:IDFM:UNKNOWN")).rejects.toThrow(
+      /No stable NeTEx cache line mapping/,
     );
-
-    expect(corbeil?.degree).toBe(4);
-    expect(topology.branchPoints).toContain("corbeil-essonnes");
-  });
-
-  it("keeps Metro 4 as a simple linear line without branch points", async () => {
-    const topology = await getLineTopology("metro-4");
-
-    expect(topology.branchPoints).toEqual([]);
-    expect(topology.terminals.sort()).toEqual([
-      "bagneux-lucie-aubrac",
-      "porte-de-clignancourt",
-    ]);
-    expect(topology.segments).toHaveLength(topology.stations.length - 1);
-  });
-
-  it("throws for an unknown line fixture instead of performing a network call", async () => {
-    await expect(getLineTopology("line:IDFM:UNKNOWN")).rejects.toThrow();
   });
 });
+
+expect.extend({
+  toEqualNames(actual: string[], expected: readonly string[]) {
+    const normalizedActual = actual.map(normalizeName).sort();
+    const normalizedExpected = expected.map(normalizeName).sort();
+    const pass = this.equals(normalizedActual, normalizedExpected);
+
+    return {
+      pass,
+      message: () =>
+        `expected ${JSON.stringify(actual)} to equal names ${JSON.stringify(expected)}`,
+    };
+  },
+});
+
+declare module "vitest" {
+  interface Assertion<T = any> {
+    toEqualNames(expected: readonly string[]): T;
+  }
+}
+
+function namesForIds(topology: Awaited<ReturnType<typeof getLineTopology>>, ids: string[]): string[] {
+  const stationById = new Map(topology.stations.map((station) => [station.id, station.name]));
+
+  return ids.map((id) => stationById.get(id) ?? id);
+}
+
+function neighborNames(
+  topology: Awaited<ReturnType<typeof getLineTopology>>,
+  neighbors: Map<string, Set<string>>,
+  stationName: string,
+): string[] {
+  const station = topology.stations.find(
+    (candidate) => normalizeName(candidate.name) === normalizeName(stationName),
+  );
+
+  expect(station, `Station ${stationName} should exist`).toBeDefined();
+
+  return namesForIds(topology, [...(neighbors.get(station!.id) ?? [])]);
+}
+
+function countComponents(neighbors: Map<string, Set<string>>): number {
+  const remaining = new Set(neighbors.keys());
+  let count = 0;
+
+  while (remaining.size > 0) {
+    count += 1;
+    const [start] = remaining;
+    const queue = [start];
+
+    remaining.delete(start);
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+
+      for (const neighbor of neighbors.get(current) ?? []) {
+        if (remaining.delete(neighbor)) {
+          queue.push(neighbor);
+        }
+      }
+    }
+  }
+
+  return count;
+}
+
+function namesForSchematicIds(
+  cache: Awaited<ReturnType<typeof loadNetexLineCache>>,
+  ids: string[],
+): string[] {
+  const nodeById = new Map(cache.schematic.nodes.map((node) => [node.id, node.name]));
+
+  return ids.map((id) => nodeById.get(id) ?? id);
+}
+
+function includesName(names: string[], expected: string): boolean {
+  const normalizedExpected = normalizeName(expected);
+
+  return names.some((name) => normalizeName(name).includes(normalizedExpected));
+}
+
+function stationKey(label: string): string {
+  return createPatternStationKey({
+    id: `test:${label}`,
+    label,
+  });
+}
+
+function edgeKey(left: string, right: string): string {
+  return [stationKey(left), stationKey(right)].sort().join("--");
+}
+
+function normalizeName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^a-z0-9]+/giu, "")
+    .toLowerCase();
+}

@@ -183,6 +183,8 @@ export interface LineRouteStop {
   city?: string;
   lon?: number;
   lat?: number;
+  projectedX?: number;
+  projectedY?: number;
   station: StationSearchOption;
   transferLines?: TransferLineOption[];
 }
@@ -191,8 +193,20 @@ export interface LineRouteSequence {
   id: string;
   label: string;
   direction?: string;
+  branchLayout?: LineRouteBranchLayout;
   topologySource?: "server" | "navitia" | "generated";
   stops: LineRouteStop[];
+}
+
+export interface LineRouteBranchLayout {
+  kind: "same-direction-fork" | "split-fork";
+  junctionStationId: string;
+  terminalStationId: string;
+  trunkStationId?: string;
+  direction: "forward" | "reverse";
+  side: "upper" | "lower" | "center";
+  axisDegrees?: number;
+  angleDegrees?: number;
 }
 
 export interface DepartureAlarm {

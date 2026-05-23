@@ -1,19 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fetchStationTransfers } from "../src/services/idfm";
 import type { StationSearchOption, TransferLineOption } from "../src/types/transit";
-import expectedTransferHydration from "./fixtures/idfm/expected-transfer-hydration.json";
-
-interface ExpectedTransferHydrationCase {
-  name: string;
-  currentLineId: string;
-  station: StationSearchOption;
-  expectedTransfers: Array<{
-    label: string;
-    mode: string;
-  }>;
-}
-
-const liveCases = expectedTransferHydration as ExpectedTransferHydrationCase[];
 
 describe("station transfer hydration", () => {
   it("hydrates a station from Navitia connection stop areas without station-specific rules", async () => {
@@ -68,25 +55,6 @@ describe("station transfer hydration", () => {
     }
   });
 });
-
-describe.runIf(process.env.LIVE_IDFM_TRANSFER_TESTS === "1")(
-  "live IDFM station transfer hydration",
-  () => {
-    it.each(liveCases)(
-      "hydrates expected transfers for $name",
-      async ({ currentLineId, station, expectedTransfers }) => {
-        const transfers = await fetchStationTransfers(station, currentLineId, {
-          apiBase:
-            process.env.IDFM_TEST_NAVITIA_BASE ??
-            "http://localhost:3000/api/idfm/v2/navitia",
-        });
-
-        expectTransferLabels(transfers, expectedTransfers);
-      },
-      30_000,
-    );
-  },
-);
 
 function expectTransferLabels(
   transfers: TransferLineOption[],

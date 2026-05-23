@@ -3,22 +3,9 @@ import {
   defineEventHandler,
   getQuery,
   getRouterParam,
-  getRequestURL,
   setHeader,
 } from "h3";
 import { buildLinePatternView } from "../../../../services/servicePattern/buildLinePatternView";
-import { buildLiveLinePatternView } from "../../../../services/servicePattern/buildLiveLinePatternView";
-import {
-  getServerIdfmApiKey,
-  resolveStopAreaPatternCandidates,
-} from "../../../../services/idfm/resolveStopArea";
-import { hydrateDeparturePatternTransfers } from "../../../../../src/features/service-pattern/patternTransfers";
-import {
-  fetchStationTransfers,
-  fetchTransitFamilyOptions,
-  searchLineStations,
-  searchTransitLines,
-} from "../../../../../src/services/idfm";
 
 export default defineEventHandler(async (event) => {
   const transportType = getRouterParam(event, "transportType");
@@ -34,37 +21,22 @@ export default defineEventHandler(async (event) => {
 
   try {
     const startStation = firstQueryValue(query.startStation);
-    const apiKey = getServerIdfmApiKey(event);
-    const startStationCandidates = await resolveStopAreaPatternCandidates(
-      startStation,
-      apiKey,
-    );
     const request = {
       transportType,
       lineId,
       directionId: firstQueryValue(query.direction),
       startStationId: startStation,
-      startStationCandidates,
+      startStationCandidates: startStation ? [startStation] : [],
     };
-    const response = await buildLinePatternView(request).catch(() =>
-      buildLiveLinePatternView({
-        ...request,
-        apiKey,
-      }),
+    const response = await buildLinePatternView(request);
+
+    setHeader(
+      event,
+      "Cache-Control",
+      "public, max-age=21600, stale-while-revalidate=86400",
     );
-    const origin = getRequestURL(event).origin;
-    const hydratedPattern = await hydrateDeparturePatternTransfers(
-      response.board,
-      response.pattern,
-      createServerPatternTransferClient(origin),
-    ).catch(() => response.pattern);
 
-    setHeader(event, "Cache-Control", "public, max-age=21600");
-
-    return {
-      ...response,
-      pattern: hydratedPattern,
-    };
+    return response;
   } catch (error) {
     throw createError({
       cause: error,
@@ -80,20 +52,4 @@ function firstQueryValue(value: unknown): string | undefined {
   }
 
   return typeof value === "string" ? value : undefined;
-}
-
-function createServerPatternTransferClient(origin: string) {
-  const navitiaOptions = {
-    apiBase: `${origin}/api/idfm/v2/navitia`,
-  };
-
-  return {
-    getTransitFamilies: () => fetchTransitFamilyOptions(navitiaOptions),
-    searchLines: (network, query) =>
-      searchTransitLines(network, query, navitiaOptions),
-    searchStations: (line, query) =>
-      searchLineStations(line, query, navitiaOptions),
-    fetchTransfers: (station, currentLineId) =>
-      fetchStationTransfers(station, currentLineId, navitiaOptions),
-  } satisfies Parameters<typeof hydrateDeparturePatternTransfers>[2];
 }

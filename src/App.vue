@@ -39,6 +39,18 @@ interface BoardState {
   updatedAt?: Date;
 }
 
+interface NetexCacheStatus {
+  available: boolean;
+  source?: {
+    kind: "remote" | "directory" | "auto";
+    location: string;
+  };
+  generatedAt?: string;
+  lineCount?: number;
+  warning?: string;
+  message?: string;
+}
+
 const REFRESH_INTERVAL_MS = 30_000;
 const preferences = reactive(createDefaultPreferences(transitBoards));
 let activeAlarmAudio:
@@ -68,6 +80,8 @@ const patternLoading = ref(false);
 const patternError = ref("");
 const pageVisible = ref(true);
 const nowTick = ref(Date.now());
+const netexCacheStatus = ref<NetexCacheStatus>();
+const netexCacheStatusLoaded = ref(false);
 const primApiKeyConfigured = __IDFM_API_KEY_CONFIGURED__;
 let refreshTimer: number | undefined;
 const alarmTimers = new Map<string, number>();
@@ -99,6 +113,17 @@ const nextAlarm = computed(
 const nextAlarmRemaining = computed(() =>
   nextAlarm.value ? formatAlarmRemaining(nextAlarm.value, nowTick.value) : "",
 );
+
+const netexCacheAlert = computed(() => {
+  if (!netexCacheStatusLoaded.value || netexCacheStatus.value?.available) {
+    return "";
+  }
+
+  return (
+    netexCacheStatus.value?.message ||
+    "Données NeTEx introuvables. Les plans de ligne et dessertes détaillées peuvent être indisponibles."
+  );
+});
 
 function getBoardAlarmDepartureIds(boardId: string): string[] {
   return departureAlarms.value
@@ -172,6 +197,29 @@ async function refreshAll(): Promise<void> {
   lastRefresh.value = new Date();
   refreshing.value = false;
 }
+
+async function loadNetexCacheStatus(): Promise<void> {
+  try {
+    const response = await fetch("/api/netex/status");
+
+    if (!response.ok) {
+      throw new Error("Impossible de vérifier le cache NeTEx.");
+    }
+
+    netexCacheStatus.value = (await response.json()) as NetexCacheStatus;
+  } catch (error) {
+    netexCacheStatus.value = {
+      available: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : "Données NeTEx introuvables.",
+    };
+  } finally {
+    netexCacheStatusLoaded.value = true;
+  }
+}
+
 function stopSoftAlarm(): void {
   if (!activeAlarmAudio) {
     return;
@@ -228,6 +276,32 @@ function addCustomBoard(board: TransitBoardConfig): void {
   void refreshBoard(board.id);
 }
 
+function changeBoardStation(
+  previousBoard: TransitBoardConfig,
+  nextBoard: TransitBoardConfig,
+): void {
+  preferences.customBoards = preferences.customBoards.filter(
+    (board) => board.id !== previousBoard.id && board.id !== nextBoard.id,
+  );
+  preferences.customBoards.push(nextBoard);
+  preferences.visibleBoardIds = preferences.visibleBoardIds.map((id) =>
+    id === previousBoard.id ? nextBoard.id : id,
+  );
+
+  if (!preferences.visibleBoardIds.includes(nextBoard.id)) {
+    preferences.visibleBoardIds.push(nextBoard.id);
+  }
+
+  preferences.collapsedDirectionIds = preferences.collapsedDirectionIds.filter(
+    (id) => !id.startsWith(`${previousBoard.id}:`),
+  );
+  delete states[previousBoard.id];
+  ensureBoardState(nextBoard.id);
+  saveTransitPreferences(preferences);
+  updateAlarms(removeAlarmsForBoard(previousBoard.id, departureAlarms.value));
+  void refreshBoard(nextBoard.id);
+}
+
 function removeCustomBoard(boardId: string): void {
   preferences.customBoards = preferences.customBoards.filter(
     (board) => board.id !== boardId,
@@ -251,8 +325,7 @@ function openLinePage(board: TransitBoardConfig): void {
   const transportType = board.line.mode === "train" ? "transilien" : board.line.mode;
   const lineId = board.line.shortName || board.line.ref;
   const direction = board.directionGroups[0]?.id || board.directionGroups[0]?.label || "";
-  const startStation =
-    board.schedule?.stopAreaRef || board.title;
+  const startStation = board.title || board.schedule?.stopAreaRef;
   const params = new URLSearchParams();
 
   if (direction) {
@@ -351,10 +424,10 @@ async function fetchLinePatternView(
   const direction =
     departure.destination || directionGroup.id || directionGroup.label;
   const startStation =
-    board.schedule?.stopAreaRef ||
-    departure.monitoringRef ||
     departure.stopName ||
-    board.title;
+    board.title ||
+    board.schedule?.stopAreaRef ||
+    departure.monitoringRef;
   const params = new URLSearchParams();
 
   if (direction) {
@@ -670,6 +743,7 @@ onMounted(() => {
     nowTick.value = Date.now();
   }, 1000);
   scheduleAlarmTimers();
+  void loadNetexCacheStatus();
 
   if (primApiKeyConfigured && pageVisible.value) {
     startRefreshTimer();
@@ -743,6 +817,20 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
+      <section
+        v-if="netexCacheAlert"
+        class="netex-cache-alert"
+        role="status"
+        aria-live="polite"
+      >
+        <strong>Données NeTEx introuvables</strong>
+        <span>
+          {{ netexCacheAlert }}
+          Configurez <code>IDFM_NETEX_CACHE_DIR</code> avec une URL R2 ou un
+          dossier local contenant <code>index.json</code>.
+        </span>
+      </section>
+
       <section class="boards-grid" aria-label="Horaires par arrêt">
         <TransitBoard
           v-for="board in visibleBoards"
@@ -756,6 +844,7 @@ onBeforeUnmount(() => {
           :updated-at="states[board.id].updatedAt"
           :removable="isCustomBoard(board.id)"
           :alarm-departure-ids="getBoardAlarmDepartureIds(board.id)"
+          @change-station="changeBoardStation(board, $event)"
           @remove="removeCustomBoard(board.id)"
           @open-line-page="openLinePage"
           @schedule-alarm="openAlarmModal"

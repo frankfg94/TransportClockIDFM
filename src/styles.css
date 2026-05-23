@@ -248,6 +248,38 @@ h3 {
   justify-content: space-between;
 }
 
+.netex-cache-alert {
+  background: #fffbeb;
+  border: 1px solid rgba(245, 158, 11, 0.34);
+  border-left: 6px solid #f59e0b;
+  border-radius: 8px;
+  color: #92400e;
+  display: grid;
+  gap: 5px;
+  margin: -4px auto 24px;
+  max-width: 1180px;
+  padding: 14px 18px;
+}
+
+.netex-cache-alert strong {
+  color: #78350f;
+  font-size: 0.92rem;
+  font-weight: 900;
+}
+
+.netex-cache-alert span {
+  font-size: 0.86rem;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.netex-cache-alert code {
+  background: rgba(255, 255, 255, 0.68);
+  border-radius: 5px;
+  color: #78350f;
+  padding: 1px 5px;
+}
+
 .board-toggles {
   display: flex;
   flex-wrap: wrap;
@@ -437,6 +469,22 @@ h3 {
 
 .board-actions__menu .board-actions__danger {
   color: #8f1d1d;
+}
+
+.board-station-modal {
+  max-width: 560px;
+}
+
+.board-station-modal__subtitle {
+  color: var(--muted);
+  display: block;
+  font-size: 0.86rem;
+  font-weight: 800;
+  margin-top: 4px;
+}
+
+.board-station-modal__form {
+  padding-top: 18px;
 }
 
 @media (hover: none) {
@@ -1290,7 +1338,17 @@ h3 {
   width: 100vw;
 }
 
-.pattern-flow-fullscreen-button {
+.pattern-flow-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  z-index: 20;
+}
+
+.pattern-flow-action-button {
   align-items: center;
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid rgba(16, 35, 63, 0.12);
@@ -1304,29 +1362,30 @@ h3 {
   gap: 8px;
   min-height: 38px;
   padding: 0 13px;
-  position: absolute;
-  right: 14px;
-  top: 14px;
   transition:
     background 160ms ease,
     box-shadow 160ms ease,
     transform 160ms ease;
-  z-index: 20;
 }
 
-.pattern-flow-fullscreen-button:hover,
-.pattern-flow-fullscreen-button:focus-visible {
+.pattern-flow-action-button:hover,
+.pattern-flow-action-button:focus-visible {
   background: #ffffff;
   box-shadow: 0 16px 38px rgba(16, 35, 63, 0.22);
   transform: translateY(-1px);
 }
 
-.pattern-flow-fullscreen-button svg {
+.pattern-flow-action-button[aria-pressed="true"] {
+  background: #05070c;
+  color: #ffffff;
+}
+
+.pattern-flow-action-button svg {
   height: 17px;
   width: 17px;
 }
 
-.pattern-flow-shell:fullscreen .pattern-flow-fullscreen-button {
+.pattern-flow-shell:fullscreen .pattern-flow-actions {
   right: 22px;
   top: 22px;
 }
@@ -1409,7 +1468,7 @@ h3 {
   pointer-events: auto;
   position: relative;
   text-align: center;
-  width: 156px;
+  width: 184px;
   isolation: isolate;
   overflow: visible;
   --station-dot-size: 34px;
@@ -1449,10 +1508,12 @@ h3 {
 
 .pattern-flow-station strong {
   color: var(--ink);
-  font-size: 0.82rem;
+  display: block;
+  font-size: 0.78rem;
   font-weight: 950;
   line-height: 1.12;
-  max-width: 150px;
+  max-width: 174px;
+  overflow-wrap: anywhere;
   text-shadow:
     0 1px 0 #ffffff,
     1px 0 0 #ffffff,
@@ -1470,9 +1531,9 @@ h3 {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 4px;
   justify-content: center;
-  max-width: 190px;
+  max-width: 174px;
   position: relative;
   z-index: 2;
 }
@@ -1632,6 +1693,7 @@ h3 {
   );
   border-radius: 999px;
   color: #ffffff;
+  max-width: 180px;
   padding: 5px 10px;
   text-shadow: none;
   box-shadow:
@@ -1725,6 +1787,101 @@ h3 {
 .pattern-flow-station--terminal .pattern-flow-station__dot {
   height: 38px;
   width: 38px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station {
+  height: 150px;
+  min-height: 150px;
+  --station-dot-size: 30px;
+  width: 128px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station__handle {
+  top: 15px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station__handle--target {
+  left: calc(50% - 15px);
+}
+
+.pattern-flow-shell--compact .pattern-flow-station__handle--source {
+  right: calc(50% - 15px);
+}
+
+.pattern-flow-shell--compact .pattern-flow-station__dot {
+  border-width: 4px;
+  height: 30px;
+  margin: 0 auto;
+  width: 30px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station--terminal .pattern-flow-station__dot {
+  height: 34px;
+  width: 34px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station--current {
+  transform: none;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station__dot {
+  left: 50%;
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+}
+
+.pattern-flow-shell--compact .pattern-flow-station strong {
+  font-size: 0.74rem;
+  left: 100%;
+  line-height: 1.08;
+  margin-top: 0;
+  max-width: 154px;
+  min-height: 0;
+  overflow-wrap: normal;
+  position: absolute;
+  text-align: left;
+  top: -70px;
+  transform: translateX(-50%) rotate(-32deg);
+  transform-origin: bottom center;
+  width: 154px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station--current strong {
+  border-radius: 8px;
+  max-width: 160px;
+  padding: 5px 8px;
+  top: -96px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station small,
+.pattern-flow-shell--compact .pattern-flow-station em {
+  font-size: 0.66rem;
+  margin-top: 42px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station__transfers {
+  max-width: 120px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station__transfer.line-icon-badge {
+  height: 18px;
+  min-width: 22px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station__transfer.line-icon-badge img {
+  max-height: 18px;
+  max-width: 38px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station__transfer.line-icon-badge .line-icon-badge__fallback {
+  height: 18px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station__transfer.line-icon-badge .line-icon-badge__label {
+  font-size: 0.58rem;
+  min-width: 22px;
+  padding: 0 5px;
 }
 
 .pattern-board__map {
@@ -1861,6 +2018,7 @@ h3 {
 .line-pattern-page {
   min-height: 100vh;
   background: #f4f7fb;
+  width: 100%;
 }
 
 .line-pattern-page__fallback {
@@ -1872,18 +2030,24 @@ h3 {
 .pattern-page-embed {
   min-height: 100vh;
   padding: 0;
+  max-width: none;
   width: 100vw;
 }
 
 .pattern-page-embed__panel {
   border-radius: 0;
+  max-height: none;
+  max-width: none;
   min-height: 100vh;
+  overflow: hidden;
   width: 100vw;
 }
 
 .pattern-page-embed .pattern-modal__body {
   height: 100vh;
+  max-width: none;
   padding: 0;
+  width: 100%;
 }
 
 .pattern-page-embed .pattern-board {
@@ -1891,6 +2055,13 @@ h3 {
   border-radius: 0;
   height: 100%;
   min-height: 100vh;
+  width: 100%;
+}
+
+.pattern-page-embed .pattern-board__display,
+.pattern-page-embed .pattern-flow-shell,
+.pattern-page-embed .pattern-flow {
+  width: 100%;
 }
 
 .pattern-page-embed .pattern-flow-shell {
@@ -2324,6 +2495,27 @@ h3 {
   .pattern-flow-station strong {
     font-size: 0.76rem;
     max-width: 136px;
+  }
+
+  .pattern-flow-actions {
+    left: 12px;
+    right: 12px;
+    top: 12px;
+  }
+
+  .pattern-flow-action-button {
+    flex: 1;
+    justify-content: center;
+    padding: 0 10px;
+  }
+
+  .pattern-flow-shell--compact .pattern-flow-station {
+    width: 122px;
+  }
+
+  .pattern-flow-shell--compact .pattern-flow-station strong {
+    max-width: 146px;
+    width: 146px;
   }
 
   .pattern-board-track {
