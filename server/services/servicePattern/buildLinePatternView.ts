@@ -43,7 +43,31 @@ interface OrientedPattern {
 }
 
 const MAX_PATTERN_VIEW_CACHE_ENTRIES = 512;
+const IDFM_MARKETPLACE_BASE =
+  "https://prim.iledefrance-mobilites.fr/marketplace";
 const patternViewCache = new Map<string, Promise<LinePatternViewResponse>>();
+const navitiaLinePresentationCache = new Map<
+  string,
+  Promise<Pick<LineConfig, "color" | "iconUrl" | "iconUrls" | "textColor"> | undefined>
+>();
+
+interface NavitiaLineResponse {
+  lines?: NavitiaLinePresentation[];
+}
+
+interface NavitiaLinePresentation {
+  id: string;
+  code?: string;
+  name?: string;
+  color?: string;
+  text_color?: string;
+  commercial_mode?: {
+    name?: string;
+  };
+  physical_modes?: Array<{
+    name?: string;
+  }>;
+}
 
 export async function buildLinePatternView(
   params: BuildLinePatternViewParams,
@@ -56,9 +80,12 @@ export async function buildLinePatternView(
     return cached;
   }
 
-  const request = getLineTopology(resolvedLineId, params.runtimeEnv).then((topology) =>
-    buildLinePatternViewFromTopology(params, topology),
-  );
+  const request = (async () => {
+    const topology = await getLineTopology(resolvedLineId, params.runtimeEnv);
+    const response = buildLinePatternViewFromTopology(params, topology);
+
+    return applyNavitiaLinePresentation(response, topology, params);
+  })();
 
   patternViewCache.set(cacheKey, request);
   trimPatternViewCache();
@@ -136,6 +163,7 @@ function createPatternViewCacheKey(
   return JSON.stringify({
     lineId: resolvedLineId,
     netexCache: createNetexCacheEnvironmentKey(params.runtimeEnv),
+    presentation: getRuntimeIdfmApiKey(params.runtimeEnv) ? "idfm" : "fallback",
     transportType: normalizeId(params.transportType),
     directionId: normalizeId(params.directionId),
     startStationId: normalizeId(params.startStationId),
@@ -464,7 +492,7 @@ function createLineConfig(
   topology: LineTopology,
   transportType: string,
 ): LineConfig {
-  const mode = toTransitMode(topology.line.mode);
+  const mode = toTransitMode(transportType) ?? toTransitMode(topology.line.mode) ?? "train";
   const presentation = createLinePresentation({
     code: topology.line.shortName,
     id: topology.line.id,
@@ -476,13 +504,142 @@ function createLineConfig(
   return {
     ref: topology.line.id,
     shortName: topology.line.shortName,
-    longName: topology.line.name,
+    longName: createDisplayLineName(mode, topology.line.shortName, topology.line.name),
     mode,
     color: presentation.color,
     textColor: presentation.textColor,
     iconUrl: presentation.iconUrl,
     iconUrls: presentation.iconUrls,
   };
+}
+
+async function applyNavitiaLinePresentation(
+  response: LinePatternViewResponse,
+  topology: LineTopology,
+  params: BuildLinePatternViewParams,
+): Promise<LinePatternViewResponse> {
+  const presentation = await fetchNavitiaLinePresentation(
+    topology.line.id,
+    params,
+  ).catch(() => undefined);
+
+  if (!presentation) {
+    return response;
+  }
+
+  return {
+    ...response,
+    board: {
+      ...response.board,
+      line: {
+        ...response.board.line,
+        ...presentation,
+      },
+    },
+  };
+}
+
+async function fetchNavitiaLinePresentation(
+  lineId: string,
+  params: BuildLinePatternViewParams,
+): Promise<Pick<LineConfig, "color" | "iconUrl" | "iconUrls" | "textColor"> | undefined> {
+  const apiKey = getRuntimeIdfmApiKey(params.runtimeEnv);
+
+  if (!apiKey) {
+    return undefined;
+  }
+
+  const cacheKey = `${lineId}:${normalizeId(params.transportType)}`;
+  const cached = navitiaLinePresentationCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const request = fetchNavitiaLine(lineId, apiKey).then((line) => {
+    if (!line) {
+      return undefined;
+    }
+
+    return createLinePresentation({
+      code: line.code ?? line.name,
+      color: line.color,
+      id: line.id,
+      mode:
+        toTransitMode(params.transportType) ??
+        toTransitMode(line.commercial_mode?.name) ??
+        toTransitMode(line.physical_modes?.[0]?.name),
+      ref: line.id,
+      shortName: line.code ?? line.name,
+      textColor: line.text_color,
+    });
+  });
+
+  navitiaLinePresentationCache.set(cacheKey, request);
+
+  request.catch(() => {
+    navitiaLinePresentationCache.delete(cacheKey);
+  });
+
+  return request;
+}
+
+async function fetchNavitiaLine(
+  lineId: string,
+  apiKey: string,
+): Promise<NavitiaLinePresentation | undefined> {
+  const url = new URL(
+    `${IDFM_MARKETPLACE_BASE}/v2/navitia/lines/${encodeURIComponent(lineId)}`,
+  );
+
+  url.searchParams.set("disable_disruption", "true");
+  url.searchParams.set("disable_geojson", "true");
+
+  const response = await fetch(url, {
+    headers: {
+      apikey: apiKey,
+    },
+  });
+
+  if (!response.ok) {
+    return undefined;
+  }
+
+  const payload = (await response.json()) as NavitiaLineResponse;
+
+  return payload.lines?.[0];
+}
+
+function getRuntimeIdfmApiKey(runtimeEnv?: NetexRuntimeEnv): string {
+  return (
+    runtimeEnv?.NUXT_IDFM_API_KEY ??
+    runtimeEnv?.IDFM_API_KEY ??
+    ""
+  ).trim();
+}
+
+function createDisplayLineName(
+  mode: TransitMode,
+  shortName: string,
+  fallback: string,
+): string {
+  if (mode === "metro") {
+    return `Metro ${shortName}`;
+  }
+
+  if (mode === "rer") {
+    return `RER ${shortName}`;
+  }
+
+  if (mode === "tram") {
+    return `Tram ${shortName}`;
+  }
+
+  if (mode === "train") {
+    return `Transilien ${shortName}`;
+  }
+
+  return fallback;
 }
 
 function createBoard(
@@ -527,7 +684,7 @@ function createDeparture(
   };
 }
 
-function toTransitMode(mode: string): TransitMode {
+function toTransitMode(mode: string | undefined): TransitMode | undefined {
   const normalized = normalizeId(mode);
 
   if (normalized.includes("metro")) {
@@ -546,7 +703,11 @@ function toTransitMode(mode: string): TransitMode {
     return "bus";
   }
 
-  return "train";
+  if (normalized.includes("rail") || normalized.includes("train") || normalized.includes("transilien")) {
+    return "train";
+  }
+
+  return undefined;
 }
 
 function normalizeId(value: string | undefined): string {

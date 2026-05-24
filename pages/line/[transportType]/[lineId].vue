@@ -3,6 +3,7 @@
     <DeparturePatternModal
       embedded
       open
+      wheel-zoom
       :board="patternView?.board"
       :departure="patternView?.departure"
       :pattern="patternView?.pattern"

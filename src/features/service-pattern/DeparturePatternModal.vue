@@ -116,6 +116,7 @@ const props = defineProps<{
   loading?: boolean;
   error?: string;
   embedded?: boolean;
+  wheelZoom?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -125,6 +126,7 @@ const emit = defineEmits<{
 const isPatternFlowFullscreen = ref(false);
 const isCompactPatternFlow = ref(false);
 const hydratedPattern = ref<DepartureCallingPattern>();
+const transferHydrationLoading = ref(false);
 let transferHydrationRequest = 0;
 let compactDecisionKey = "";
 
@@ -157,6 +159,7 @@ const topologyStationCount = computed(() =>
 const currentLayoutOptions = computed(() =>
   createPatternLayoutOptions(isCompactPatternFlow.value),
 );
+const shouldZoomOnWheel = computed(() => Boolean(props.wheelZoom));
 const flowModel = computed(() =>
   createPatternFlow(
     displayPattern.value?.calls ?? [],
@@ -325,12 +328,16 @@ async function hydratePatternTransfers(): Promise<void> {
   hydratedPattern.value = pattern;
 
   if (!props.open || !board || !pattern) {
+    transferHydrationLoading.value = false;
     return;
   }
 
   if (typeof window === "undefined") {
+    transferHydrationLoading.value = false;
     return;
   }
+
+  transferHydrationLoading.value = true;
 
   try {
     const enrichedPattern = await hydrateDeparturePatternTransfers(board, pattern);
@@ -341,6 +348,10 @@ async function hydratePatternTransfers(): Promise<void> {
   } catch {
     if (requestId === transferHydrationRequest) {
       hydratedPattern.value = pattern;
+    }
+  } finally {
+    if (requestId === transferHydrationRequest) {
+      transferHydrationLoading.value = false;
     }
   }
 }
@@ -2252,12 +2263,21 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div
+                  <div
                   class="pattern-flow-shell"
                   :class="{
                     'pattern-flow-shell--compact': isCompactPatternFlow,
                   }"
                 >
+                  <div
+                    v-if="embedded && transferHydrationLoading"
+                    class="pattern-flow-transfer-loader"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span aria-hidden="true"></span>
+                    <strong>Chargement des correspondances</strong>
+                  </div>
                   <div class="pattern-flow-actions">
                     <button
                       class="pattern-flow-action-button"
@@ -2312,9 +2332,10 @@ onBeforeUnmount(() => {
                     :nodes-draggable="false"
                     :nodes-connectable="false"
                     :elements-selectable="false"
-                    :zoom-on-scroll="true"
+                    :zoom-on-scroll="shouldZoomOnWheel"
                     :zoom-on-pinch="true"
-                    :prevent-scrolling="false"
+                    :pan-on-scroll="false"
+                    :prevent-scrolling="shouldZoomOnWheel"
                   >
                     <Controls :show-interactive="false" />
                     <template #node-station="{ data }">

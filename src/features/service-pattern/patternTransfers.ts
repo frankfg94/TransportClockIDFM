@@ -90,26 +90,15 @@ export async function hydrateDeparturePatternTransfers(
           return [target.key, [] as TransferLineOption[]] as const;
         }
 
-        // Pattern maps can contain dozens of stations. Direct stop-area transfers
-        // are the fast pass; structural hubs get a second connected pass because
-        // Navitia can split a single interchange across several nearby stop areas.
-        const directTransfers = await fetchCachedTransfers(
+        // A line map needs the full interchange cluster, not only the current
+        // stop_area. Navitia can split a single station complex across nearby
+        // stop areas, so every node uses the connected transfer resolver.
+        const transfers = await fetchCachedTransfers(
           station,
           line.id,
           client,
-          "direct",
+          "connected",
         ).catch((): TransferLineOption[] => []);
-        const transfers = shouldHydrateConnectedTransfers(directTransfers)
-          ? mergeTransferOptions(
-              directTransfers,
-              await fetchCachedTransfers(
-                station,
-                line.id,
-                client,
-                "connected",
-              ).catch((): TransferLineOption[] => []),
-            )
-          : directTransfers;
 
         return [target.key, transfers] as const;
       }),
@@ -358,25 +347,6 @@ function fetchCachedTransfers(
   stationTransferCache.set(cacheKey, request);
 
   return request;
-}
-
-function shouldHydrateConnectedTransfers(
-  transfers: TransferLineOption[],
-): boolean {
-  return transfers.some((transfer) => !isBusLikeTransfer(transfer));
-}
-
-function isBusLikeTransfer(transfer: TransferLineOption): boolean {
-  const normalizedValues = [transfer.family, transfer.mode, transfer.label]
-    .filter((value): value is string => Boolean(value))
-    .map(normalizePatternStationName);
-
-  return normalizedValues.some(
-    (value) =>
-      value.includes("bus") ||
-      value.includes("noctilien") ||
-      /^n\d+/u.test(value),
-  );
 }
 
 function enrichCallTransfers(

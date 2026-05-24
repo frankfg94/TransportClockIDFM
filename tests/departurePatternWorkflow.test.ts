@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createBoardFromDraft } from "../src/services/boardBuilder";
 import { createPatternFlowStructure } from "../src/features/service-pattern/patternFlowStructure";
 import { createPatternStationKey } from "../src/features/service-pattern/stationKeys";
@@ -117,10 +117,75 @@ describe("station add to service-pattern modal workflow", () => {
 
     expect(response.lineId).toBe("line:IDFM:C01729");
     expect(response.board.line.shortName).toBe("E");
+    expect(response.board.line.longName).toBe("RER E");
+    expect(response.board.line.mode).toBe("rer");
+    expect(response.board.line.iconUrls).toEqual(
+      expect.arrayContaining([
+        "https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/rer/picto-ligne-LIGIDFMC01729.svg",
+      ]),
+    );
     expectCurrentCall(response.pattern, "Gagny");
     expect(servedLabels[0]).toBe("Gagny");
     expect(servedLabels).toContain("Chelles - Gournay");
     expect(assertPatternHasNoOrphanStations(response)).toEqual([]);
+  });
+
+  it("uses Navitia line metadata to color cached RER patterns like the home page", async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+
+      if (!url.includes("/v2/navitia/lines/line%3AIDFM%3AC01729")) {
+        throw new Error(`Unexpected line presentation fetch: ${url}`);
+      }
+
+      return new Response(
+        JSON.stringify({
+          lines: [
+            {
+              id: "line:IDFM:C01729",
+              code: "E",
+              color: "B94E9A",
+              text_color: "FFFFFF",
+              commercial_mode: {
+                name: "RER",
+              },
+            },
+          ],
+        }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+          status: 200,
+        },
+      );
+    });
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      const response = await buildLinePatternView({
+        transportType: "rer",
+        lineId: "E",
+        directionId: "all-directions",
+        startStationId: "Gagny",
+        runtimeEnv: {
+          IDFM_API_KEY: "test-key",
+        },
+      });
+
+      expect(response.board.line.color).toBe("#b94e9a");
+      expect(response.board.line.textColor).toBe("#ffffff");
+      expect(response.board.line.iconUrls).toEqual(
+        expect.arrayContaining([
+          "https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/rer/picto-ligne-LIGIDFMC01729.svg",
+        ]),
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("keeps T10 as a linear cached pattern from Les Peintres", async () => {
@@ -215,9 +280,11 @@ describe("station add to service-pattern modal workflow", () => {
           transferScopes.push(options?.transferScope);
 
           if (station.label === "Montparnasse-Bienvenue") {
-            return options?.transferScope === "connected"
-              ? [createTransfer("12", "METRO"), createTransfer("13", "METRO")]
-              : [createTransfer("6", "METRO")];
+            return [
+              createTransfer("6", "METRO"),
+              createTransfer("12", "METRO"),
+              createTransfer("13", "METRO"),
+            ];
           }
 
           return [];
@@ -230,7 +297,7 @@ describe("station add to service-pattern modal workflow", () => {
 
     expect(searches).toEqual([]);
     expect(transferLookups).toContain("Montparnasse-Bienvenue");
-    expect(new Set(transferScopes)).toEqual(new Set(["direct", "connected"]));
+    expect(new Set(transferScopes)).toEqual(new Set(["connected"]));
     expect(montparnasseCall?.transferLines?.map((line) => line.label)).toEqual(
       expect.arrayContaining(["6", "12", "13"]),
     );

@@ -1390,6 +1390,37 @@ h3 {
   top: 22px;
 }
 
+.pattern-flow-transfer-loader {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(16, 35, 63, 0.12);
+  border-radius: 999px;
+  box-shadow: 0 14px 32px rgba(16, 35, 63, 0.12);
+  color: var(--ink);
+  display: inline-flex;
+  gap: 8px;
+  left: 14px;
+  padding: 8px 12px;
+  position: absolute;
+  top: 14px;
+  z-index: 20;
+}
+
+.pattern-flow-transfer-loader span {
+  animation: pattern-flow-loader-spin 720ms linear infinite;
+  border: 2px solid rgba(16, 35, 63, 0.14);
+  border-radius: 999px;
+  border-top-color: var(--line-color);
+  height: 16px;
+  width: 16px;
+}
+
+.pattern-flow-transfer-loader strong {
+  font-size: 0.76rem;
+  font-weight: 950;
+  letter-spacing: 0;
+}
+
 .pattern-flow .vue-flow__controls {
   background: rgba(248, 250, 252, 0.96);
   border: 1px solid rgba(16, 35, 63, 0.12);
@@ -1623,6 +1654,7 @@ h3 {
   --station-dot-size: 38px;
 }
 
+
 .pattern-flow-station__dot {
   position: relative;
   z-index: 2;
@@ -1755,6 +1787,12 @@ h3 {
   }
 }
 
+@keyframes pattern-flow-loader-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pattern-flow-station--current::before,
   .pattern-flow-station--current::after,
@@ -1862,6 +1900,15 @@ h3 {
 
 .pattern-flow-shell--compact .pattern-flow-station__transfers {
   max-width: 120px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station__transfers--inline {
+  left: 50%;
+  max-width: 120px;
+  position: absolute;
+  top: 38px;
+  transform: translateX(-50%);
+  width: 120px;
 }
 
 .pattern-flow-shell--compact .pattern-flow-station__transfer.line-icon-badge {
