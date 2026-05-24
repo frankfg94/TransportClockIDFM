@@ -184,6 +184,7 @@ describe("station add to service-pattern modal workflow", () => {
     });
     const searches: Array<{ family: string; query: string }> = [];
     const transferLookups: string[] = [];
+    const transferScopes: Array<string | undefined> = [];
     const hydrated = await hydrateDeparturePatternTransfers(
       response.board,
       response.pattern,
@@ -209,15 +210,14 @@ describe("station add to service-pattern modal workflow", () => {
             createPatternStationOption("Bagneux - Lucie Aubrac", "71592"),
           ];
         },
-        async fetchTransfers(station) {
+        async fetchTransfers(station, _currentLineId, options) {
           transferLookups.push(station.label);
+          transferScopes.push(options?.transferScope);
 
           if (station.label === "Montparnasse-Bienvenue") {
-            return [
-              createTransfer("6", "METRO"),
-              createTransfer("12", "METRO"),
-              createTransfer("13", "METRO"),
-            ];
+            return options?.transferScope === "connected"
+              ? [createTransfer("12", "METRO"), createTransfer("13", "METRO")]
+              : [createTransfer("6", "METRO")];
           }
 
           return [];
@@ -230,6 +230,7 @@ describe("station add to service-pattern modal workflow", () => {
 
     expect(searches).toEqual([]);
     expect(transferLookups).toContain("Montparnasse-Bienvenue");
+    expect(new Set(transferScopes)).toEqual(new Set(["direct", "connected"]));
     expect(montparnasseCall?.transferLines?.map((line) => line.label)).toEqual(
       expect.arrayContaining(["6", "12", "13"]),
     );

@@ -54,6 +54,48 @@ describe("station transfer hydration", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("can hydrate only direct stop-area lines for dense pattern maps", async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+
+      if (url.includes("/connections") || url.includes("/places_nearby")) {
+        throw new Error(`Direct transfer hydration should not fetch ${url}`);
+      }
+
+      if (url.includes("/stop_areas/stop_area%3AIDFM%3A71410/lines")) {
+        return jsonResponse({
+          lines: [
+            createLine("line:IDFM:C01743", "B", "RER"),
+            createLine("line:IDFM:C01374", "4", "MÃ©tro"),
+            createLine("line:IDFM:C01728", "D", "RER"),
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected direct transfer hydration fetch: ${url}`);
+    });
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      const transfers = await fetchStationTransfers(
+        createStation("stop_area:IDFM:71410", "Gare du Nord", "Paris"),
+        "line:IDFM:C01743",
+        { transferScope: "direct" },
+      );
+
+      expectTransferLabels(transfers, [
+        { label: "4", mode: "MÃ©tro" },
+        { label: "D", mode: "RER" },
+      ]);
+      expect(transfers.map((transfer) => transfer.label)).not.toContain("B");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 function expectTransferLabels(
@@ -137,12 +179,34 @@ function createLine(id: string, label: string, mode: string) {
 }
 
 function jsonResponse(payload: unknown): Response {
-  return new Response(JSON.stringify(payload), {
+  const responsePayload =
+    typeof payload === "object" && payload !== null && !("pagination" in payload)
+      ? {
+          ...payload,
+          pagination: createPagination(payload),
+        }
+      : payload;
+
+  return new Response(JSON.stringify(responsePayload), {
     headers: {
       "Content-Type": "application/json",
     },
     status: 200,
   });
+}
+
+function createPagination(payload: unknown) {
+  const firstCollection = Object.values(payload as Record<string, unknown>).find(
+    (value): value is unknown[] => Array.isArray(value),
+  );
+  const itemCount = firstCollection?.length ?? 0;
+
+  return {
+    start_page: 0,
+    items_per_page: itemCount,
+    items_on_page: itemCount,
+    total_result: itemCount,
+  };
 }
 
 function createTestId(value: string): string {

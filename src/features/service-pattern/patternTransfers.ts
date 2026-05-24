@@ -36,6 +36,7 @@ interface PatternTransferHydrationClient {
   fetchTransfers(
     station: StationSearchOption,
     currentLineId?: string,
+    options?: { transferScope?: "connected" | "direct" },
   ): Promise<TransferLineOption[]>;
 }
 
@@ -47,7 +48,7 @@ interface TransferTarget {
 }
 
 const MAX_TRANSFER_STATIONS = 64;
-const TRANSFER_BATCH_SIZE = 1;
+const TRANSFER_BATCH_SIZE = 8;
 const liveClient: PatternTransferHydrationClient = {
   getTransitFamilies: fetchTransitFamilyOptions,
   searchLines: searchTransitLines,
@@ -89,9 +90,26 @@ export async function hydrateDeparturePatternTransfers(
           return [target.key, [] as TransferLineOption[]] as const;
         }
 
-        const transfers = await fetchCachedTransfers(station, line.id, client).catch(
-          (): TransferLineOption[] => [],
-        );
+        // Pattern maps can contain dozens of stations. Direct stop-area transfers
+        // are the fast pass; structural hubs get a second connected pass because
+        // Navitia can split a single interchange across several nearby stop areas.
+        const directTransfers = await fetchCachedTransfers(
+          station,
+          line.id,
+          client,
+          "direct",
+        ).catch((): TransferLineOption[] => []);
+        const transfers = shouldHydrateConnectedTransfers(directTransfers)
+          ? mergeTransferOptions(
+              directTransfers,
+              await fetchCachedTransfers(
+                station,
+                line.id,
+                client,
+                "connected",
+              ).catch((): TransferLineOption[] => []),
+            )
+          : directTransfers;
 
         return [target.key, transfers] as const;
       }),
@@ -325,20 +343,40 @@ function fetchCachedTransfers(
   station: StationSearchOption,
   lineId: string,
   client: PatternTransferHydrationClient,
+  transferScope: "connected" | "direct",
 ): Promise<TransferLineOption[]> {
   const stationId = station.scheduleStopAreaRef ?? station.id;
-  const cacheKey = `${lineId}:${stationId}`;
+  const cacheKey = `${transferScope}:${lineId}:${stationId}`;
   const cached = stationTransferCache.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const request = client.fetchTransfers(station, lineId);
+  const request = client.fetchTransfers(station, lineId, { transferScope });
 
   stationTransferCache.set(cacheKey, request);
 
   return request;
+}
+
+function shouldHydrateConnectedTransfers(
+  transfers: TransferLineOption[],
+): boolean {
+  return transfers.some((transfer) => !isBusLikeTransfer(transfer));
+}
+
+function isBusLikeTransfer(transfer: TransferLineOption): boolean {
+  const normalizedValues = [transfer.family, transfer.mode, transfer.label]
+    .filter((value): value is string => Boolean(value))
+    .map(normalizePatternStationName);
+
+  return normalizedValues.some(
+    (value) =>
+      value.includes("bus") ||
+      value.includes("noctilien") ||
+      /^n\d+/u.test(value),
+  );
 }
 
 function enrichCallTransfers(

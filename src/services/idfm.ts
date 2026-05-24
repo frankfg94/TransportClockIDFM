@@ -273,6 +273,7 @@ interface BoardScheduleInfo {
 interface NavitiaRequestOptions {
   apiBase?: string;
   fetcher?: typeof fetch;
+  transferScope?: "connected" | "direct";
 }
 
 const API_BASE = "/api/idfm";
@@ -566,6 +567,12 @@ async function resolveTransferStopAreaRefs(
   stopAreaRef: string,
   options: NavitiaRequestOptions,
 ): Promise<string[]> {
+  if (options.transferScope === "direct") {
+    // Dense line diagrams need stable interchange badges quickly; the wider
+    // walking-radius search is reserved for station-selection surfaces.
+    return [stopAreaRef];
+  }
+
   const cacheKey = createNavitiaCacheKey(
     options,
     `transfer-stop-areas:${stopAreaRef}:${station.label}`,
