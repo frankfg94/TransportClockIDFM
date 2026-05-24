@@ -1290,6 +1290,13 @@ h3 {
   line-height: 1.05;
 }
 
+.pattern-board__direction-picker {
+  display: block;
+  margin-top: 4px;
+  max-width: min(560px, 52vw);
+  min-width: min(360px, 52vw);
+}
+
 .pattern-board__meta {
   background: #05070c;
   border-radius: 6px;

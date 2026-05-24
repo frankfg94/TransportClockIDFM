@@ -6,6 +6,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { Handle, Position, VueFlow } from "@vue-flow/core";
 import type { Edge, Node } from "@vue-flow/core";
 import LineIconBadge from "../../components/LineIconBadge.vue";
+import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import { Controls } from "@vue-flow/controls";
 import { Expand, Minimize2, SlidersHorizontal } from "lucide-vue-next";
 import {
@@ -31,6 +32,7 @@ import type {
   LineRouteBranchLayout,
   LineRouteSequence,
   LineRouteStop,
+  LinePatternDirectionOption,
   TransferLineOption,
   TransitBoardConfig,
 } from "../../types/transit";
@@ -117,10 +119,14 @@ const props = defineProps<{
   error?: string;
   embedded?: boolean;
   wheelZoom?: boolean;
+  fullLine?: boolean;
+  directionOptions?: LinePatternDirectionOption[];
+  selectedDirectionId?: string;
 }>();
 
 const emit = defineEmits<{
   close: [];
+  directionChange: [directionId: string];
 }>();
 
 const isPatternFlowFullscreen = ref(false);
@@ -144,10 +150,18 @@ const destinationLabel = computed(
     displayPattern.value?.destination ??
     "Destination",
 );
+const hasDirectionPicker = computed(
+  () => props.embedded && (props.directionOptions?.length ?? 0) > 1,
+);
+const isFullLineMode = computed(() => Boolean(props.embedded && props.fullLine));
 const departureClock = computed(() =>
   formatClock(departureTime(props.departure)),
 );
 const servedStopsLabel = computed(() => {
+  if (isFullLineMode.value) {
+    return "Ligne complète";
+  }
+
   const count = servedCalls.value.length;
 
     return count > 1 ? `${count} arrêts desservis` : `${count} arrêt desservi`;
@@ -166,13 +180,16 @@ const flowModel = computed(() =>
     displayPattern.value?.lineTopology ?? [],
     departureClock.value,
     isCompactPatternFlow.value,
+    isFullLineMode.value,
   ),
 );
 const patternFlowKey = computed(
   () =>
     `${displayPattern.value?.departureId ?? "empty"}:${
       isPatternFlowFullscreen.value ? "fullscreen" : "modal"
-    }:${isCompactPatternFlow.value ? "compact" : "comfortable"}`,
+    }:${isCompactPatternFlow.value ? "compact" : "comfortable"}:${
+      isFullLineMode.value ? "full" : "route"
+    }`,
 );
 const initialViewport = computed(() => {
   const currentNode =
@@ -361,9 +378,10 @@ function createPatternFlow(
   lineTopology: LineRouteSequence[],
   departureTimeLabel: string,
   compact: boolean,
+  fullLine: boolean,
 ): PatternFlowModel {
   const layout = createPatternLayoutOptions(compact);
-  const graph = buildPatternGraph(calls, lineTopology);
+  const graph = buildPatternGraph(calls, lineTopology, fullLine);
   const topology =
     createTopologyLayout(graph.nodes, graph.edges, calls, lineTopology, layout) ??
     createFallbackTopologyLayout(graph, layout);
@@ -396,7 +414,9 @@ function createPatternFlow(
         current: node.current,
         served: node.served,
         branchEnd: isBranchEnd,
-        branchChip: getBranchChip(node, activeTerminalIds, departureTimeLabel),
+        branchChip: fullLine
+          ? undefined
+          : getBranchChip(node, activeTerminalIds, departureTimeLabel),
         busTransfers: node.transfers.filter(isBusTransfer),
         nonBusTransfers: node.transfers.filter(
           (transfer) => !isBusTransfer(transfer),
@@ -407,23 +427,26 @@ function createPatternFlow(
   const visibleDrawableEdges = drawableEdges.filter((edge) =>
     topology.visibleEdges.has(createEdgeKey(edge.source, edge.target)),
   );
-  const activeRouteEdgeOrder = createActiveRouteEdgeOrder(calls, lineTopology);
-  const activeRouteEdgeDirections = createActiveRouteEdgeDirections(
-    calls,
-    lineTopology,
-  );
-  const activeLightEdges = visibleDrawableEdges
-    .filter((edge) => edge.active)
-    .map((edge, fallbackOrder) => ({
-      edge,
-      direction: activeRouteEdgeDirections.get(
-        createEdgeKey(edge.source, edge.target),
-      ),
-      order:
-        activeRouteEdgeOrder.get(createEdgeKey(edge.source, edge.target)) ??
-        fallbackOrder,
-    }))
-    .sort((left, right) => left.order - right.order);
+  const activeRouteEdgeOrder = fullLine
+    ? new Map<string, number>()
+    : createActiveRouteEdgeOrder(calls, lineTopology);
+  const activeRouteEdgeDirections = fullLine
+    ? new Map<string, { source: string; target: string }>()
+    : createActiveRouteEdgeDirections(calls, lineTopology);
+  const activeLightEdges = fullLine
+    ? []
+    : visibleDrawableEdges
+        .filter((edge) => edge.active)
+        .map((edge, fallbackOrder) => ({
+          edge,
+          direction: activeRouteEdgeDirections.get(
+            createEdgeKey(edge.source, edge.target),
+          ),
+          order:
+            activeRouteEdgeOrder.get(createEdgeKey(edge.source, edge.target)) ??
+            fallbackOrder,
+        }))
+        .sort((left, right) => left.order - right.order);
   const edges = [
     ...visibleDrawableEdges.map((edge) =>
       createFlowEdge(edge, topology.positions),
@@ -1649,6 +1672,7 @@ function createDagreLayout(graph: {
 function buildPatternGraph(
   calls: DepartureCall[],
   lineTopology: LineRouteSequence[],
+  fullLine = false,
 ): {
   nodes: PatternGraphNode[];
   edges: PatternGraphEdge[];
@@ -1676,9 +1700,9 @@ function buildPatternGraph(
         city: existing?.city ?? call?.city ?? stop.city,
         lon: existing?.lon ?? stop.lon,
         lat: existing?.lat ?? stop.lat,
-        current: Boolean(existing?.current || call?.current),
-        served: Boolean(existing?.served || call?.served),
-        time: existing?.time ?? call?.time,
+        current: fullLine ? false : Boolean(existing?.current || call?.current),
+        served: fullLine ? true : Boolean(existing?.served || call?.served),
+        time: fullLine ? undefined : existing?.time ?? call?.time,
         transfers: mergeTransfers(
           existing?.transfers,
           stop.transferLines,
@@ -1716,9 +1740,9 @@ function buildPatternGraph(
         id: key,
         label: call.label,
         city: call.city,
-        current: call.current,
-        served: call.served,
-        time: call.time,
+        current: fullLine ? false : call.current,
+        served: fullLine ? true : call.served,
+        time: fullLine ? undefined : call.time,
         transfers: call.transferLines ?? [],
         degree: 0,
       });
@@ -1738,8 +1762,10 @@ function buildPatternGraph(
     });
   }
 
-  const servedEdges = createServedEdgeKeys(calls);
-  const corridorEdges = createActiveCorridorEdgeKeys(calls, lineTopology);
+  const servedEdges = fullLine ? new Set<string>() : createServedEdgeKeys(calls);
+  const corridorEdges = fullLine
+    ? new Set<string>()
+    : createActiveCorridorEdgeKeys(calls, lineTopology);
   if (lineTopology.length === 0) {
     pruneImplausibleEdges(edgeMap, servedEdges, corridorEdges);
   }
@@ -1747,7 +1773,8 @@ function buildPatternGraph(
   edgeMap.forEach((edge) => {
     const edgeKey = createEdgeKey(edge.source, edge.target);
 
-    edge.active = servedEdges.has(edgeKey) || corridorEdges.has(edgeKey);
+    edge.active =
+      fullLine || servedEdges.has(edgeKey) || corridorEdges.has(edgeKey);
     nodeMap.get(edge.source)!.degree += 1;
     nodeMap.get(edge.target)!.degree += 1;
   });
@@ -2255,7 +2282,18 @@ onBeforeUnmount(() => {
                 <div class="pattern-board__top-strip">
                   <div>
                     <span>Direction</span>
-                    <strong>{{ destinationLabel }}</strong>
+                    <label
+                      v-if="hasDirectionPicker"
+                      class="pattern-board__direction-picker"
+                    >
+                      <MaterialCombobox
+                        :model-value="selectedDirectionId ?? ''"
+                        :options="directionOptions ?? []"
+                        aria-label="Changer de direction"
+                        @update:model-value="emit('directionChange', $event)"
+                      />
+                    </label>
+                    <strong v-else>{{ destinationLabel }}</strong>
                   </div>
                   <div class="pattern-board__meta">
                     <span>{{ servedStopsLabel }}</span>

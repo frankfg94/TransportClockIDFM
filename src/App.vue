@@ -360,13 +360,8 @@ function isCustomBoard(boardId: string): boolean {
 function openLinePage(board: TransitBoardConfig): void {
   const transportType = board.line.mode === "train" ? "transilien" : board.line.mode;
   const lineId = board.line.shortName || board.line.ref;
-  const direction = board.directionGroups[0]?.id || board.directionGroups[0]?.label || "";
   const startStation = board.title || board.schedule?.stopAreaRef;
   const params = new URLSearchParams();
-
-  if (direction) {
-    params.set("direction", direction);
-  }
 
   if (startStation) {
     params.set("startStation", startStation);

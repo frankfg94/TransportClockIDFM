@@ -4,6 +4,7 @@ import type {
   DepartureCallStatus,
   DepartureCallingPattern,
   LineConfig,
+  LinePatternDirectionOption,
   LinePatternStationStatus,
   LinePatternViewResponse,
   LineRouteSequence,
@@ -143,6 +144,7 @@ export function buildLinePatternViewFromTopology(
     lineId: topology.line.id,
     transportType: params.transportType,
     directionId: orientedPattern.directionId,
+    directionOptions: createDirectionOptions(topology),
     startStationId: startStation.id,
     activeSegmentIds,
     stationStatuses,
@@ -150,6 +152,32 @@ export function buildLinePatternViewFromTopology(
     departure,
     pattern,
   };
+}
+
+function createDirectionOptions(
+  topology: LineTopology,
+): LinePatternDirectionOption[] {
+  const stations = new Map(topology.stations.map((station) => [station.id, station]));
+  const directions = new Map<string, LinePatternDirectionOption>();
+
+  topology.patterns.forEach((pattern) => {
+    [pattern.stops[0], pattern.stops[pattern.stops.length - 1]].forEach(
+      (stationId) => {
+        const station = stations.get(stationId);
+
+        if (station) {
+          directions.set(station.id, {
+            id: station.id,
+            label: station.name,
+          });
+        }
+      },
+    );
+  });
+
+  return Array.from(directions.values()).sort((left, right) =>
+    left.label.localeCompare(right.label, "fr"),
+  );
 }
 
 export function resolveHumanLineId(transportType: string, lineId: string): string {

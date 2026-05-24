@@ -2998,6 +2998,7 @@ function normalizeText(value?: string): string {
 function normalizeDirectionName(value?: string): string {
   return normalizeText(cleanNavitiaDirection(value ?? ""))
     .replace(/\b(gare|paris|terminus)\b/gu, " ")
+    .replace(/[^a-z0-9]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

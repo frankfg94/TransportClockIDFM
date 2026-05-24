@@ -7,9 +7,13 @@
       :board="patternView?.board"
       :departure="patternView?.departure"
       :pattern="patternView?.pattern"
+      :direction-options="directionOptions"
+      :selected-direction-id="selectedDirectionId"
+      :full-line="isFullLineSelected"
       :loading="pending"
       :error="errorMessage"
       @close="navigateHome"
+      @direction-change="changeDirection"
     />
 
     <section
@@ -31,13 +35,14 @@ import { useFetch, useRoute, navigateTo } from "#imports";
 import { DeparturePatternModal } from "../../../src/features/service-pattern";
 import type { LinePatternViewResponse } from "../../../src/types/transit";
 
+const LINE_COMPLETE_DIRECTION_ID = "line-complete";
 const route = useRoute();
 const apiUrl = computed(() => {
   const params = new URLSearchParams();
   const direction = firstRouteQuery(route.query.direction);
   const startStation = firstRouteQuery(route.query.startStation);
 
-  if (direction) {
+  if (direction && direction !== LINE_COMPLETE_DIRECTION_ID) {
     params.set("direction", direction);
   }
 
@@ -53,6 +58,19 @@ const apiUrl = computed(() => {
 });
 const { data: patternView, pending, error } =
   useFetch<LinePatternViewResponse>(apiUrl);
+const selectedDirectionId = computed(
+  () => firstRouteQuery(route.query.direction) ?? LINE_COMPLETE_DIRECTION_ID,
+);
+const isFullLineSelected = computed(
+  () => selectedDirectionId.value === LINE_COMPLETE_DIRECTION_ID,
+);
+const directionOptions = computed(() => [
+  {
+    id: LINE_COMPLETE_DIRECTION_ID,
+    label: "Ligne complète",
+  },
+  ...(patternView.value?.directionOptions ?? []),
+]);
 
 const errorMessage = computed(() =>
   error.value ? "Impossible de charger ce schéma de ligne." : "",
@@ -67,6 +85,22 @@ const pageTitle = computed(() => {
 
 function navigateHome(): void {
   void navigateTo("/");
+}
+
+function changeDirection(directionId: string): void {
+  const query: Record<string, string> = {
+    direction: directionId,
+  };
+  const startStation = firstRouteQuery(route.query.startStation);
+
+  if (startStation) {
+    query.startStation = startStation;
+  }
+
+  void navigateTo({
+    path: route.path,
+    query,
+  });
 }
 
 function firstRouteQuery(value: unknown): string | undefined {

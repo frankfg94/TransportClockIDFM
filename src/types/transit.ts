@@ -252,11 +252,17 @@ export interface LinePatternViewResponse {
   lineId: string;
   transportType: string;
   directionId: string;
+  directionOptions?: LinePatternDirectionOption[];
   startStationId?: string;
   activeSegmentIds: string[];
   stationStatuses: LinePatternStationStatus[];
   board: TransitBoardConfig;
   departure: Departure;
   pattern: DepartureCallingPattern;
+}
+
+export interface LinePatternDirectionOption {
+  id: string;
+  label: string;
 }
 
