@@ -2,8 +2,11 @@
   fetchLineRouteSequences,
   fetchLineRouteSummaries,
   fetchStationTransfers,
+  searchLineStations,
 } from "../../services/idfm";
 import type {
+  LineRouteSequence,
+  LineRouteStop,
   LineSearchOption,
   StationSearchOption,
   TransferLineOption,
@@ -23,15 +26,38 @@ const SVG_PADDING_X = 78;
 const SVG_PADDING_Y = 68;
 const MAP_COORDINATE_PADDING = 0.08;
 const TILE_SERVER_SHARDS = ["a", "b", "c"];
+const LAMBERT93_E = 0.0818191910428158;
+const LAMBERT93_N = 0.725607765053267;
+const LAMBERT93_C = 11754255.426096;
+const LAMBERT93_XS = 700000;
+const LAMBERT93_YS = 12655612.049876;
+const LAMBERT93_LON0_RAD = (3 * Math.PI) / 180;
+
+interface CanonicalStationLookup {
+  byLabel: Map<string, StationSearchOption[]>;
+}
 
 export async function loadDetailedLineMap(
   line: LineSearchOption,
 ): Promise<LineMapViewModel> {
-  const sequences = await fetchLineRouteSequences(line);
+  const [sequences, stationCatalog] = await Promise.all([
+    fetchLineRouteSequences(line),
+    searchLineStations(line, "").catch((): StationSearchOption[] => []),
+  ]);
+
+  return createDetailedLineMapViewModel(line, sequences, stationCatalog);
+}
+
+export function createDetailedLineMapViewModel(
+  line: LineSearchOption,
+  sequences: LineRouteSequence[],
+  stationCatalog: StationSearchOption[] = [],
+): LineMapViewModel {
   const mapSequences = sequences.filter(
     (sequence) => !isSupplementalRouteSequence(sequence.label),
   );
   const stopsById = new Map<string, LineMapStopView>();
+  const canonicalStations = createCanonicalStationLookup(stationCatalog);
   const branches: LineMapBranchView[] = [];
 
   (mapSequences.length > 0 ? mapSequences : sequences).forEach((sequence) => {
@@ -46,14 +72,19 @@ export async function loadDetailedLineMap(
         return;
       }
 
+      const mapStop = enrichStopCoordinates(
+        stop,
+        findCanonicalStationForStop(stop, canonicalStations),
+      );
+
       stopsById.set(stop.id, {
-        ...stop,
+        ...mapStop,
         x: 0.5,
         y: 0.5,
         routeIds: [sequence.id],
         routeLabels: [sequence.label],
       });
-  });
+    });
 
     branches.push({
       id: sequence.id,
@@ -61,7 +92,7 @@ export async function loadDetailedLineMap(
       direction: sequence.direction,
       stopIds,
     });
-    });
+  });
 
   const stops = applyMapCoordinates(Array.from(stopsById.values()), branches);
 
@@ -88,17 +119,63 @@ export async function loadTransferLineDirections(
   lineId: string,
 ): Promise<TransferLineDirections> {
   const routes = await fetchLineRouteSummaries(lineId);
-  const directions = routes
-    .flatMap((route) => [route.direction, route.label])
-    .filter((value): value is string => Boolean(value))
-    .map(cleanNavitiaDirection)
-    .map((value) => value.replace(/\s+\([^)]*\)$/u, ""))
-    .filter(Boolean);
+  const directions = createTransferDirectionList(
+    routes.flatMap((route) => [route.direction, route.label]),
+  );
 
   return {
     lineId,
-    directions: Array.from(new Set(directions)).slice(0, 6),
+    directions: directions.slice(0, 6),
   };
+}
+
+export function createTransferDirectionList(
+  values: Array<string | undefined>,
+): string[] {
+  const candidates = values
+    .filter((value): value is string => Boolean(value?.trim()))
+    .map(cleanTransferDirectionDisplay)
+    .filter(Boolean);
+  const canonicalDirections = candidates.map((direction) => ({
+    direction,
+    key: createTransferDirectionKey(direction),
+    tokens: createTransferDirectionTokens(direction),
+  }));
+  const removedIndexes = new Set<number>();
+
+  canonicalDirections.forEach((left, leftIndex) => {
+    canonicalDirections.forEach((right, rightIndex) => {
+      if (leftIndex === rightIndex || removedIndexes.has(leftIndex)) {
+        return;
+      }
+
+      if (!transferDirectionCovers(left.tokens, right.tokens)) {
+        return;
+      }
+
+      if (scoreDirectionDisplay(right.direction) >= scoreDirectionDisplay(left.direction)) {
+        removedIndexes.add(leftIndex);
+      }
+    });
+  });
+
+  const directionsByKey = new Map<string, string>();
+
+  canonicalDirections
+    .filter((_, index) => !removedIndexes.has(index))
+    .forEach((direction) => {
+      const key = direction.key;
+      const existing = directionsByKey.get(key);
+
+      if (
+        !existing ||
+        scoreDirectionDisplay(direction.direction) > scoreDirectionDisplay(existing)
+      ) {
+        directionsByKey.set(key, direction.direction);
+      }
+    });
+
+  return Array.from(directionsByKey.values());
 }
 
 export function isBusTransfer(transfer: TransferLineOption): boolean {
@@ -107,6 +184,146 @@ export function isBusTransfer(transfer: TransferLineOption): boolean {
 
 export function isStructuralTransfer(transfer: TransferLineOption): boolean {
   return !isBusTransfer(transfer);
+}
+
+function createCanonicalStationLookup(
+  stations: StationSearchOption[],
+): CanonicalStationLookup {
+  const byLabel = new Map<string, StationSearchOption[]>();
+
+  stations.forEach((station) => {
+    createStationLookupKeys(station.label).forEach((key) => {
+      const existing = byLabel.get(key) ?? [];
+
+      existing.push(station);
+      byLabel.set(key, existing);
+    });
+  });
+
+  return { byLabel };
+}
+
+function findCanonicalStationForStop(
+  stop: LineRouteStop,
+  lookup: CanonicalStationLookup,
+): StationSearchOption | undefined {
+  const candidates = createStationLookupKeys(stop.label)
+    .flatMap((key) => lookup.byLabel.get(key) ?? []);
+  const uniqueCandidates = Array.from(
+    new Map(candidates.map((station) => [station.id, station])).values(),
+  );
+
+  if (uniqueCandidates.length === 0) {
+    return undefined;
+  }
+
+  if (uniqueCandidates.length === 1) {
+    return uniqueCandidates[0];
+  }
+
+  const stopLon = stop.lon;
+  const stopLat = stop.lat;
+
+  if (typeof stopLon === "number" && typeof stopLat === "number") {
+    return uniqueCandidates
+      .filter(
+        (station) =>
+          typeof station.lon === "number" && typeof station.lat === "number",
+      )
+      .sort(
+        (left, right) =>
+          getCoordinateDistance(stopLon, stopLat, left) -
+          getCoordinateDistance(stopLon, stopLat, right),
+      )[0] ?? uniqueCandidates[0];
+  }
+
+  return uniqueCandidates[0];
+}
+
+function createStationLookupKeys(value: string): string[] {
+  const normalized = normalizeStationLookupLabel(value);
+
+  if (!normalized) {
+    return [];
+  }
+
+  const withoutParenthesis = normalizeStationLookupLabel(
+    value.replace(/\s*\([^)]*\)\s*/gu, " "),
+  );
+  const withoutGarePrefix = normalizeStationLookupLabel(
+    value.replace(/^gare\s+(de|d'|du|des)\s+/iu, ""),
+  );
+  const withoutLeadingArticle = normalizeStationLookupLabel(
+    normalized.replace(/^(la|le|les|l)\s+/u, ""),
+  );
+
+  return Array.from(
+    new Set(
+      [
+        normalized,
+        withoutParenthesis,
+        withoutGarePrefix,
+        withoutLeadingArticle,
+      ].filter(Boolean),
+    ),
+  );
+}
+
+function normalizeStationLookupLabel(value: string): string {
+  return normalizeText(value)
+    .replace(/[’']/gu, " ")
+    .replace(/[^a-z0-9]+/gu, " ")
+    .replace(/\b(gare|metro|rer|tram|station)\b/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getCoordinateDistance(
+  lon: number,
+  lat: number,
+  station: StationSearchOption,
+): number {
+  return Math.hypot(lon - (station.lon ?? lon), lat - (station.lat ?? lat));
+}
+
+function enrichStopCoordinates(
+  stop: LineRouteSequence["stops"][number],
+  canonicalStation?: StationSearchOption,
+) {
+  const station = canonicalStation ?? stop.station;
+
+  if (typeof stop.lon === "number" && typeof stop.lat === "number") {
+    return {
+      ...stop,
+      station,
+      coordinateSource: "wgs84" as const,
+    };
+  }
+
+  if (
+    typeof stop.projectedX === "number" &&
+    typeof stop.projectedY === "number"
+  ) {
+    const converted = convertLambert93ToWgs84(
+      stop.projectedX,
+      stop.projectedY,
+    );
+
+    if (converted) {
+      return {
+        ...stop,
+        station,
+        lon: converted.lon,
+        lat: converted.lat,
+        coordinateSource: "lambert93" as const,
+      };
+    }
+  }
+
+  return {
+    ...stop,
+    station,
+  };
 }
 
 function applyMapCoordinates(
@@ -197,6 +414,7 @@ function applyMapCoordinates(
 
     return {
       ...stop,
+      coordinateSource: stop.coordinateSource ?? "fallback",
       x: normalizeMapRatio(index >= 0 ? ratio : 0.5),
       y: 0.5,
     };
@@ -352,6 +570,45 @@ function projectLonLat(lon: number, lat: number): { x: number; y: number } {
         Math.log(Math.tan(latRadians) + 1 / Math.cos(latRadians)) / Math.PI) /
       2,
   };
+}
+
+function convertLambert93ToWgs84(
+  x: number,
+  y: number,
+): { lon: number; lat: number } | undefined {
+  if (!isLikelyLambert93Coordinate(x, y)) {
+    return undefined;
+  }
+
+  const radius = Math.hypot(x - LAMBERT93_XS, y - LAMBERT93_YS);
+  const gamma = Math.atan2(x - LAMBERT93_XS, LAMBERT93_YS - y);
+  const latIso = -(1 / LAMBERT93_N) * Math.log(radius / LAMBERT93_C);
+  const lonRad = LAMBERT93_LON0_RAD + gamma / LAMBERT93_N;
+  let latRad = 2 * Math.atan(Math.exp(latIso)) - Math.PI / 2;
+
+  for (let index = 0; index < 6; index += 1) {
+    const eSinLat = LAMBERT93_E * Math.sin(latRad);
+    latRad =
+      2 *
+        Math.atan(
+          Math.pow((1 + eSinLat) / (1 - eSinLat), LAMBERT93_E / 2) *
+            Math.exp(latIso),
+        ) -
+      Math.PI / 2;
+  }
+
+  const lon = (lonRad * 180) / Math.PI;
+  const lat = (latRad * 180) / Math.PI;
+
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+    return undefined;
+  }
+
+  return { lon, lat };
+}
+
+function isLikelyLambert93Coordinate(x: number, y: number): boolean {
+  return x >= 100000 && x <= 1300000 && y >= 6000000 && y <= 7200000;
 }
 
 function padBounds(bounds: {
@@ -530,6 +787,60 @@ function addUniqueValue(values: string[], value: string): void {
 
 function cleanNavitiaDirection(value: string): string {
   return value.replace(/\s+\([^)]*\)$/u, "");
+}
+
+function cleanTransferDirectionDisplay(value: string): string {
+  return cleanNavitiaDirection(value)
+    .replace(/\s+\([^)]*\)$/gu, "")
+    .replace(/\s*[-–—]\s*/gu, " - ")
+    .replace(
+      /(?:\s+-\s+|\s+)(?:m[ée]tro|rer|tram(?:way)?|bus|train|transilien|ter|tgv|noctilien)$/iu,
+      "",
+    )
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function createTransferDirectionKey(value: string): string {
+  return createTransferDirectionTokens(value).join(" ");
+}
+
+function createTransferDirectionTokens(value: string): string[] {
+  return Array.from(new Set(normalizeText(value)
+    .replace(
+      /\b(?:metro|rer|tram(?:way)?|bus|train|transilien|ter|tgv|noctilien|gare|station|terminus)\b/gu,
+      " ",
+    )
+    .replace(/\bportes\b/gu, "porte")
+    .replace(/\b([a-z]{4,})s\b/gu, "$1")
+    .replace(/[^a-z0-9]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean)
+    .sort()));
+}
+
+function transferDirectionCovers(left: string[], right: string[]): boolean {
+  if (left.length <= right.length) {
+    return false;
+  }
+
+  const rightTokens = new Set(right);
+
+  return right.length > 0 && right.every((token) => rightTokens.has(token)) &&
+    right.every((token) => left.includes(token));
+}
+
+function scoreDirectionDisplay(value: string): number {
+  const normalized = normalizeText(value);
+  let score = 1000 - value.length;
+
+  if (/\b(metro|rer|tram|tramway|bus|train|ter|tgv)\b/u.test(normalized)) {
+    score -= 120;
+  }
+
+  return score;
 }
 
 function normalizeText(value?: string): string {

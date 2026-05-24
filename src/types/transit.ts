@@ -155,6 +155,8 @@ export interface StationSearchOption {
   id: string;
   label: string;
   city?: string;
+  lon?: number;
+  lat?: number;
   monitoringRef: string;
   scheduleStopAreaRef?: string;
 }

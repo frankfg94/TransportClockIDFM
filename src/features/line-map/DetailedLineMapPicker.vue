@@ -34,6 +34,8 @@ interface DirectionState {
 const props = defineProps<{
   line?: LineSearchOption;
   selectedStationId?: string;
+  mode?: "picker" | "explorer";
+  selectable?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -79,6 +81,8 @@ const hoveredTransferState = computed(() =>
 const activeDirectionState = computed(() =>
   activeTransfer.value ? directionStates[activeTransfer.value.id] : undefined,
 );
+const isExplorerMode = computed(() => props.mode === "explorer");
+const canSelectStops = computed(() => props.selectable !== false);
 
 const mapStats = computed(() => {
   const stopCount = lineMap.value?.stops.length ?? 0;
@@ -196,7 +200,7 @@ async function loadMap(): Promise<void> {
 
     if (requestId === latestMapRequest) {
       lineMap.value = map;
-      zoom.value = map.stops.length > 45 ? 1.22 : 1.12;
+      zoom.value = getDefaultZoom(map);
     }
   } catch (error) {
     if (requestId === latestMapRequest) {
@@ -213,7 +217,10 @@ async function loadMap(): Promise<void> {
 
 function selectStop(stop: LineMapStopView): void {
   showStop(stop);
-  emit("select", stop.station);
+
+  if (canSelectStops.value) {
+    emit("select", stop.station);
+  }
 }
 
 function showStop(stop: LineMapStopView): void {
@@ -432,6 +439,12 @@ function getHitTargetStyle(stop: LineMapStopView) {
   };
 }
 
+function getStopActionLabel(stop: LineMapStopView): string {
+  return canSelectStops.value
+    ? `Sélectionner ${stop.label}`
+    : `Afficher ${stop.label}`;
+}
+
 function getTransferStyle(line: TransferLineOption) {
   return {
     background: line.color ?? "#eef3fb",
@@ -447,7 +460,20 @@ function adjustZoom(delta: number): void {
 }
 
 function resetZoom(): void {
-  zoom.value = (lineMap.value?.stops.length ?? 0) > 45 ? 1.22 : 1.12;
+  if (!lineMap.value) {
+    zoom.value = 1.12;
+    return;
+  }
+
+  zoom.value = getDefaultZoom(lineMap.value);
+}
+
+function getDefaultZoom(map: LineMapViewModel): number {
+  if (isExplorerMode.value) {
+    return map.stops.length > 55 ? 1.02 : 1;
+  }
+
+  return map.stops.length > 45 ? 1.22 : 1.12;
 }
 
 function getTerminalStopIds(map: LineMapViewModel): string[] {
@@ -476,7 +502,10 @@ function getLabelPriority(
 </script>
 
 <template>
-  <div class="line-map-panel">
+  <div
+    class="line-map-panel"
+    :class="{ 'line-map-panel--explorer': isExplorerMode }"
+  >
     <div class="line-map-panel__bar">
       <span
         class="line-map-chip"
@@ -617,7 +646,7 @@ function getLabelPriority(
         :key="`${stop.id}:hit-target`"
         class="line-map-hit-target"
         type="button"
-        :aria-label="`Sélectionner ${stop.label}`"
+        :aria-label="getStopActionLabel(stop)"
         :style="getHitTargetStyle(stop)"
         @click="selectStop(stop)"
         @focus="showStop(stop)"

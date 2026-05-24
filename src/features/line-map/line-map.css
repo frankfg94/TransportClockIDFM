@@ -6,6 +6,13 @@
   overflow: hidden;
 }
 
+.line-map-panel--explorer {
+  border: 0;
+  border-radius: 0;
+  height: 100%;
+  min-height: 560px;
+}
+
 .line-map-panel__bar {
   align-items: center;
   background: #f8fafc;
@@ -76,6 +83,12 @@
   max-height: min(68vh, 660px);
   overflow: auto;
   position: relative;
+}
+
+.line-map-panel--explorer .line-map-canvas {
+  height: calc(100% - 50px);
+  max-height: none;
+  min-height: 520px;
 }
 
 .line-map-svg {

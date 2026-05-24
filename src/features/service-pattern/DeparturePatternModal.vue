@@ -2,13 +2,22 @@
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/controls/dist/style.css";
 import dagre from "@dagrejs/dagre";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 import { Handle, Position, VueFlow } from "@vue-flow/core";
 import type { Edge, Node } from "@vue-flow/core";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import { Controls } from "@vue-flow/controls";
 import { Expand, Minimize2, SlidersHorizontal } from "lucide-vue-next";
+import PatternFlowMiniMap from "./PatternFlowMiniMap.vue";
 import {
   createPatternStationKey as createStationKey,
   normalizePatternStationName as normalizeStationName,
@@ -23,6 +32,7 @@ import {
   shouldUseCompactPatternFlow,
 } from "./compactPatternFlow";
 import { hydrateDeparturePatternTransfers } from "./patternTransfers";
+import { loadTransferLineDirections } from "../line-map/lineMapData";
 
 import type {
   Departure,
@@ -59,6 +69,21 @@ interface PatternStationNodeData {
   branchChip?: string;
   busTransfers: TransferLineOption[];
   nonBusTransfers: TransferLineOption[];
+  transferGroups: PatternTransferGroup[];
+}
+
+interface PatternTransferGroup {
+  key: string;
+  label: string;
+  countLabel: string;
+  iconLabel: string;
+  transfers: TransferLineOption[];
+}
+
+interface TransferDirectionState {
+  loading: boolean;
+  directions: string[];
+  error?: boolean;
 }
 
 interface PatternGraphNode {
@@ -85,6 +110,29 @@ interface PatternGraphEdge {
 interface PatternFlowModel {
   nodes: PatternFlowNode[];
   edges: PatternFlowEdge[];
+}
+
+interface PatternViewport {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+interface PatternFlowViewportController {
+  setViewport?: (
+    viewport: PatternViewport,
+    options?: { duration?: number },
+  ) => unknown;
+}
+
+interface PatternViewportPoint {
+  x: number;
+  y: number;
+}
+
+interface PatternViewportSize {
+  width: number;
+  height: number;
 }
 
 interface PatternTopologyLayout {
@@ -131,8 +179,17 @@ const emit = defineEmits<{
 
 const isPatternFlowFullscreen = ref(false);
 const isCompactPatternFlow = ref(false);
+const patternFlowShell = ref<HTMLElement>();
+const patternFlowViewport = ref<PatternViewport>({ x: 0, y: 0, zoom: 1 });
+const patternFlowViewportController = ref<PatternFlowViewportController>();
+const patternFlowViewportSize = ref<PatternViewportSize>({
+  width: 0,
+  height: 0,
+});
 const hydratedPattern = ref<DepartureCallingPattern>();
 const transferHydrationLoading = ref(false);
+const activeTransfer = ref<TransferLineOption>();
+const transferDirectionStates = reactive<Record<string, TransferDirectionState>>({});
 let transferHydrationRequest = 0;
 let compactDecisionKey = "";
 
@@ -153,7 +210,9 @@ const destinationLabel = computed(
 const hasDirectionPicker = computed(
   () => props.embedded && (props.directionOptions?.length ?? 0) > 1,
 );
-const isFullLineMode = computed(() => Boolean(props.embedded && props.fullLine));
+const isFullLineMode = computed(() =>
+  Boolean(props.embedded && props.fullLine),
+);
 const departureClock = computed(() =>
   formatClock(departureTime(props.departure)),
 );
@@ -164,7 +223,7 @@ const servedStopsLabel = computed(() => {
 
   const count = servedCalls.value.length;
 
-    return count > 1 ? `${count} arrêts desservis` : `${count} arrêt desservi`;
+  return count > 1 ? `${count} arrêts desservis` : `${count} arrêt desservi`;
 });
 const displayPattern = computed(() => hydratedPattern.value ?? props.pattern);
 const topologyStationCount = computed(() =>
@@ -174,6 +233,9 @@ const currentLayoutOptions = computed(() =>
   createPatternLayoutOptions(isCompactPatternFlow.value),
 );
 const shouldZoomOnWheel = computed(() => Boolean(props.wheelZoom));
+const activeTransferDirectionState = computed(() =>
+  activeTransfer.value ? transferDirectionStates[activeTransfer.value.id] : undefined,
+);
 const flowModel = computed(() =>
   createPatternFlow(
     displayPattern.value?.calls ?? [],
@@ -223,7 +285,39 @@ const initialViewport = computed(() => {
 });
 
 watch(
-  () => `${displayPattern.value?.departureId ?? "empty"}:${topologyStationCount.value}`,
+  initialViewport,
+  (viewport) => {
+    patternFlowViewport.value = {
+      x: viewport.x,
+      y: viewport.y,
+      zoom: viewport.zoom,
+    };
+  },
+  { immediate: true },
+);
+
+watch(
+  patternFlowShell,
+  (element, _previousElement, onCleanup) => {
+    if (!element || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const resizeObserver = new ResizeObserver(syncPatternFlowViewportSize);
+
+    resizeObserver.observe(element);
+    void nextTick(syncPatternFlowViewportSize);
+
+    onCleanup(() => {
+      resizeObserver.disconnect();
+    });
+  },
+  { flush: "post" },
+);
+
+watch(
+  () =>
+    `${displayPattern.value?.departureId ?? "empty"}:${topologyStationCount.value}`,
   (key) => {
     if (key === compactDecisionKey) {
       return;
@@ -293,6 +387,48 @@ function createInitialZoom({
   return compact ? 0.82 : 0.78;
 }
 
+function handlePatternFlowReady(instance: PatternFlowViewportController): void {
+  patternFlowViewportController.value = instance;
+  void nextTick(syncPatternFlowViewportSize);
+}
+
+function handlePatternFlowViewportChange(viewport: PatternViewport): void {
+  patternFlowViewport.value = {
+    x: viewport.x,
+    y: viewport.y,
+    zoom: viewport.zoom,
+  };
+}
+
+function syncPatternFlowViewportSize(): void {
+  const flowElement =
+    patternFlowShell.value?.querySelector<HTMLElement>(".pattern-flow") ??
+    patternFlowShell.value;
+
+  if (!flowElement) {
+    return;
+  }
+
+  patternFlowViewportSize.value = {
+    width: flowElement.clientWidth,
+    height: flowElement.clientHeight,
+  };
+}
+
+function focusPatternFlowOn(point: PatternViewportPoint): void {
+  const zoom = patternFlowViewport.value.zoom;
+  const viewport = {
+    x: patternFlowViewportSize.value.width / 2 - point.x * zoom,
+    y: patternFlowViewportSize.value.height / 2 - point.y * zoom,
+    zoom,
+  };
+
+  patternFlowViewport.value = viewport;
+  patternFlowViewportController.value?.setViewport?.(viewport, {
+    duration: 220,
+  });
+}
+
 function formatClock(value?: string): string {
   if (!value) {
     return "";
@@ -357,7 +493,10 @@ async function hydratePatternTransfers(): Promise<void> {
   transferHydrationLoading.value = true;
 
   try {
-    const enrichedPattern = await hydrateDeparturePatternTransfers(board, pattern);
+    const enrichedPattern = await hydrateDeparturePatternTransfers(
+      board,
+      pattern,
+    );
 
     if (requestId === transferHydrationRequest) {
       hydratedPattern.value = enrichedPattern;
@@ -383,8 +522,13 @@ function createPatternFlow(
   const layout = createPatternLayoutOptions(compact);
   const graph = buildPatternGraph(calls, lineTopology, fullLine);
   const topology =
-    createTopologyLayout(graph.nodes, graph.edges, calls, lineTopology, layout) ??
-    createFallbackTopologyLayout(graph, layout);
+    createTopologyLayout(
+      graph.nodes,
+      graph.edges,
+      calls,
+      lineTopology,
+      layout,
+    ) ?? createFallbackTopologyLayout(graph, layout);
 
   const activeTerminalIds = getActiveTerminalIds(graph);
   const drawableEdges = [...graph.edges, ...topology.syntheticEdges];
@@ -421,6 +565,7 @@ function createPatternFlow(
         nonBusTransfers: node.transfers.filter(
           (transfer) => !isBusTransfer(transfer),
         ),
+        transferGroups: createTransferGroups(node.transfers),
       },
     } satisfies PatternFlowNode;
   });
@@ -751,7 +896,9 @@ function graphHasCycle(
   nodes: PatternGraphNode[],
   edges: PatternGraphEdge[],
 ): boolean {
-  return edges.length - nodes.length + countConnectedComponents(nodes, edges) > 0;
+  return (
+    edges.length - nodes.length + countConnectedComponents(nodes, edges) > 0
+  );
 }
 
 function countConnectedComponents(
@@ -859,7 +1006,10 @@ function createBranchLayoutHints(
   return hints;
 }
 
-function createBranchLayoutHintKey(junctionKey: string, terminalKey: string): string {
+function createBranchLayoutHintKey(
+  junctionKey: string,
+  terminalKey: string,
+): string {
   return `${junctionKey}::${terminalKey}`;
 }
 
@@ -914,9 +1064,7 @@ function findBestConnectorPath(
   adjacency: Map<string, Set<string>>,
   placed: Set<string>,
 ): string[] | null {
-  const placedIds = nodes
-    .map((node) => node.id)
-    .filter((id) => placed.has(id));
+  const placedIds = nodes.map((node) => node.id).filter((id) => placed.has(id));
   let bestPath: string[] | null = null;
   let bestScore = Number.NEGATIVE_INFINITY;
 
@@ -927,7 +1075,9 @@ function findBestConnectorPath(
       return;
     }
 
-    const internalCount = path.slice(1, -1).filter((id) => !placed.has(id)).length;
+    const internalCount = path
+      .slice(1, -1)
+      .filter((id) => !placed.has(id)).length;
     const score = internalCount * 100 + path.length;
 
     if (score > bestScore) {
@@ -1553,7 +1703,10 @@ function addPathEdges(path: string[], visibleEdges: Set<string>): void {
   });
 }
 
-function addGraphEdges(edges: PatternGraphEdge[], visibleEdges: Set<string>): void {
+function addGraphEdges(
+  edges: PatternGraphEdge[],
+  visibleEdges: Set<string>,
+): void {
   edges.forEach((edge) => {
     visibleEdges.add(createEdgeKey(edge.source, edge.target));
   });
@@ -1572,7 +1725,9 @@ function createDegreesFromEdgeKeys(edgeKeys: Set<string>): Map<string, number> {
   return degrees;
 }
 
-function createDegreesFromEdges(edges: PatternGraphEdge[]): Map<string, number> {
+function createDegreesFromEdges(
+  edges: PatternGraphEdge[],
+): Map<string, number> {
   const degrees = new Map<string, number>();
 
   edges.forEach((edge) => {
@@ -1622,10 +1777,13 @@ function* createLaneSteps(): Generator<number, never, unknown> {
   }
 }
 
-function createDagreLayout(graph: {
-  nodes: PatternGraphNode[];
-  edges: PatternGraphEdge[];
-}, layout: PatternLayoutOptions): Map<string, { x: number; y: number }> {
+function createDagreLayout(
+  graph: {
+    nodes: PatternGraphNode[];
+    edges: PatternGraphEdge[];
+  },
+  layout: PatternLayoutOptions,
+): Map<string, { x: number; y: number }> {
   const layoutGraph = new dagre.graphlib.Graph();
 
   layoutGraph.setDefaultEdgeLabel(() => ({}));
@@ -1702,7 +1860,7 @@ function buildPatternGraph(
         lat: existing?.lat ?? stop.lat,
         current: fullLine ? false : Boolean(existing?.current || call?.current),
         served: fullLine ? true : Boolean(existing?.served || call?.served),
-        time: fullLine ? undefined : existing?.time ?? call?.time,
+        time: fullLine ? undefined : (existing?.time ?? call?.time),
         transfers: mergeTransfers(
           existing?.transfers,
           stop.transferLines,
@@ -1762,7 +1920,9 @@ function buildPatternGraph(
     });
   }
 
-  const servedEdges = fullLine ? new Set<string>() : createServedEdgeKeys(calls);
+  const servedEdges = fullLine
+    ? new Set<string>()
+    : createServedEdgeKeys(calls);
   const corridorEdges = fullLine
     ? new Set<string>()
     : createActiveCorridorEdgeKeys(calls, lineTopology);
@@ -2080,6 +2240,127 @@ function isBusTransfer(transfer: TransferLineOption): boolean {
   );
 }
 
+function showTransferDetails(transfer: TransferLineOption): void {
+  activeTransfer.value = transfer;
+
+  if (isBusTransfer(transfer)) {
+    void loadTransferDirections(transfer);
+  }
+}
+
+async function loadTransferDirections(
+  transfer: TransferLineOption,
+): Promise<void> {
+  if (transferDirectionStates[transfer.id]) {
+    return;
+  }
+
+  transferDirectionStates[transfer.id] = {
+    loading: true,
+    directions: [],
+  };
+
+  try {
+    const result = await loadTransferLineDirections(transfer.id);
+
+    transferDirectionStates[transfer.id] = {
+      loading: false,
+      directions: result.directions,
+    };
+  } catch {
+    transferDirectionStates[transfer.id] = {
+      loading: false,
+      directions: [],
+      error: true,
+    };
+  }
+}
+
+function getTransferDetailTitle(transfer: TransferLineOption): string {
+  const family = getTransferFamilyKey(transfer);
+  const label = TRANSFER_GROUP_METADATA[family].label;
+
+  return `${label} ${transfer.label}`.trim();
+}
+
+function createTransferGroups(
+  transfers: TransferLineOption[],
+): PatternTransferGroup[] {
+  const groups = new Map<string, TransferLineOption[]>();
+
+  transfers.forEach((transfer) => {
+    const key = getTransferFamilyKey(transfer);
+    const group = groups.get(key) ?? [];
+
+    group.push(transfer);
+    groups.set(key, group);
+  });
+
+  return TRANSFER_GROUP_ORDER.flatMap((key) => {
+    const groupTransfers = groups.get(key);
+
+    if (!groupTransfers || groupTransfers.length === 0) {
+      return [];
+    }
+
+    const metadata = TRANSFER_GROUP_METADATA[key];
+
+    return [
+      {
+        key,
+        label: metadata.label,
+        countLabel:
+          groupTransfers.length > 1
+            ? `${groupTransfers.length} lignes`
+            : "1 ligne",
+        iconLabel: metadata.iconLabel,
+        transfers: groupTransfers,
+      },
+    ];
+  });
+}
+
+const TRANSFER_GROUP_ORDER = [
+  "METRO",
+  "RER",
+  "TRANSILIEN",
+  "TRAM",
+  "BUS",
+  "OTHER",
+] as const;
+
+const TRANSFER_GROUP_METADATA: Record<
+  (typeof TRANSFER_GROUP_ORDER)[number],
+  { label: string; iconLabel: string }
+> = {
+  METRO: { label: "Métro", iconLabel: "M" },
+  RER: { label: "RER", iconLabel: "RER" },
+  TRANSILIEN: { label: "Train", iconLabel: "TER" },
+  TRAM: { label: "Tram", iconLabel: "T" },
+  BUS: { label: "Bus", iconLabel: "BUS" },
+  OTHER: { label: "Autres correspondances", iconLabel: "+" },
+};
+
+function getTransferFamilyKey(
+  transfer: TransferLineOption,
+): (typeof TRANSFER_GROUP_ORDER)[number] {
+  if (transfer.family === "METRO") return "METRO";
+  if (transfer.family === "RER") return "RER";
+  if (transfer.family === "TRANSILIEN") return "TRANSILIEN";
+  if (transfer.family === "TRAM") return "TRAM";
+  if (transfer.family === "BUS") return "BUS";
+
+  const mode = normalizeStationName(transfer.mode ?? "");
+
+  if (mode.includes("metro")) return "METRO";
+  if (mode.includes("rer")) return "RER";
+  if (mode.includes("tram")) return "TRAM";
+  if (mode.includes("bus")) return "BUS";
+  if (mode.includes("train") || mode.includes("rail")) return "TRANSILIEN";
+
+  return "OTHER";
+}
+
 function getNodeDistanceKm(
   sourceNode: PatternGraphNode,
   targetNode: PatternGraphNode,
@@ -2301,7 +2582,8 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                  <div
+                <div
+                  ref="patternFlowShell"
                   class="pattern-flow-shell"
                   :class="{
                     'pattern-flow-shell--compact': isCompactPatternFlow,
@@ -2317,21 +2599,18 @@ onBeforeUnmount(() => {
                     <strong>Chargement des correspondances</strong>
                   </div>
                   <div class="pattern-flow-actions">
+                    <slot name="flow-actions-prefix"></slot>
                     <button
                       class="pattern-flow-action-button"
                       type="button"
                       :aria-pressed="isCompactPatternFlow"
                       aria-label="Basculer la vue compacte"
-                      @click.stop="
-                        isCompactPatternFlow = !isCompactPatternFlow
-                      "
+                      @click.stop="isCompactPatternFlow = !isCompactPatternFlow"
                     >
                       <SlidersHorizontal aria-hidden="true" />
                       <span>
                         {{
-                          isCompactPatternFlow
-                            ? "Vue compacte"
-                            : "Vue confort"
+                          isCompactPatternFlow ? "Vue compacte" : "Vue confort"
                         }}
                       </span>
                     </button>
@@ -2374,6 +2653,8 @@ onBeforeUnmount(() => {
                     :zoom-on-pinch="true"
                     :pan-on-scroll="false"
                     :prevent-scrolling="shouldZoomOnWheel"
+                    @pane-ready="handlePatternFlowReady"
+                    @viewport-change="handlePatternFlowViewportChange"
                   >
                     <Controls :show-interactive="false" />
                     <template #node-station="{ data }">
@@ -2431,27 +2712,111 @@ onBeforeUnmount(() => {
                           Non desservi
                         </small>
                         <em v-if="data.branchChip">{{ data.branchChip }}</em>
-                        <span
-                          v-if="data.busTransfers.length > 0"
+                        <article
+                          v-if="data.transferGroups.length > 0"
                           class="pattern-flow-station__transfer-tooltip"
                           role="tooltip"
                         >
-                          <span class="pattern-flow-station__transfer-title">
-                            Bus
-                          </span>
-                          <span class="pattern-flow-station__transfers">
-                            <LineIconBadge
-                              v-for="transfer in data.busTransfers"
-                              :key="`${data.key}-bus-${transfer.id}-${transfer.label}`"
-                              class="pattern-flow-station__transfer"
-                              :line="transfer"
-                              compact
-                            />
-                          </span>
-                        </span>
+                          <header class="pattern-flow-station__tooltip-header">
+                            <span aria-hidden="true"></span>
+                            <div>
+                              <strong>{{ data.label }}</strong>
+                              <small>Correspondances</small>
+                            </div>
+                          </header>
+                          <section
+                            v-for="group in data.transferGroups"
+                            :key="`${data.key}-transfer-group-${group.key}`"
+                            class="pattern-flow-station__transfer-group"
+                          >
+                            <div class="pattern-flow-station__transfer-group-title">
+                              <span aria-hidden="true">{{ group.iconLabel }}</span>
+                              <strong>{{ group.label }}</strong>
+                              <small>{{ group.countLabel }}</small>
+                            </div>
+                            <div class="pattern-flow-station__transfer-list">
+                              <span
+                                v-for="transfer in group.transfers"
+                                :key="`${data.key}-${group.key}-${transfer.id}-${transfer.label}`"
+                                class="pattern-flow-station__transfer-item"
+                                :class="{
+                                  'pattern-flow-station__transfer-item--active':
+                                    activeTransfer?.id === transfer.id,
+                                }"
+                                role="button"
+                                tabindex="0"
+                                @focus="showTransferDetails(transfer)"
+                                @mouseenter="showTransferDetails(transfer)"
+                              >
+                                <LineIconBadge
+                                  class="pattern-flow-station__transfer"
+                                  :line="transfer"
+                                  compact
+                                />
+                              </span>
+                            </div>
+                          </section>
+                          <aside
+                            v-if="activeTransfer"
+                            class="pattern-flow-station__transfer-detail"
+                          >
+                            <strong>{{ getTransferDetailTitle(activeTransfer) }}</strong>
+                            <span
+                              v-if="isBusTransfer(activeTransfer)"
+                              class="pattern-flow-station__transfer-detail-kicker"
+                            >
+                              Directions possibles
+                            </span>
+                            <span
+                              v-if="
+                                isBusTransfer(activeTransfer) &&
+                                activeTransferDirectionState?.loading
+                              "
+                              class="pattern-flow-station__transfer-detail-muted"
+                            >
+                              Chargement...
+                            </span>
+                            <span
+                              v-else-if="
+                                isBusTransfer(activeTransfer) &&
+                                activeTransferDirectionState?.directions.length
+                              "
+                              class="pattern-flow-station__transfer-directions"
+                            >
+                              <span
+                                v-for="direction in activeTransferDirectionState.directions"
+                                :key="`${activeTransfer.id}-${direction}`"
+                              >
+                                {{ direction }}
+                              </span>
+                            </span>
+                            <span
+                              v-else-if="isBusTransfer(activeTransfer)"
+                              class="pattern-flow-station__transfer-detail-muted"
+                            >
+                              Directions indisponibles
+                            </span>
+                            <span
+                              v-else
+                              class="pattern-flow-station__transfer-detail-muted"
+                            >
+                              {{ activeTransfer.label }}
+                            </span>
+                          </aside>
+                        </article>
                       </div>
                     </template>
                   </VueFlow>
+                  <PatternFlowMiniMap
+                    :nodes="flowModel.nodes"
+                    :edges="flowModel.edges"
+                    :node-width="currentLayoutOptions.nodeWidth"
+                    :node-height="currentLayoutOptions.nodeHeight"
+                    :viewport="patternFlowViewport"
+                    :viewport-size="patternFlowViewportSize"
+                    :line-color="board?.line.color ?? '#0064ff'"
+                    @focus="focusPatternFlowOn"
+                  />
                 </div>
               </div>
             </div>

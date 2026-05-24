@@ -3227,11 +3227,15 @@ function mapStopAreaToStation(stopArea: NavitiaStopArea): StationSearchOption {
   const rawLabel = stopArea.label ?? stopArea.name ?? navitiaId;
   const stopAreaId = getStopAreaReferentialId(stopArea) ?? navitiaId.split(":").pop();
   const city = getStopAreaCity(stopArea, rawLabel);
+  const lon = parseCoordinate(stopArea.coord?.lon);
+  const lat = parseCoordinate(stopArea.coord?.lat);
 
   return {
     id: navitiaId,
     label: rawLabel.replace(/\s+\([^)]*\)$/u, ""),
     city,
+    lon,
+    lat,
     monitoringRef: `STIF:StopArea:SP:${stopAreaId ?? navitiaId}:`,
     scheduleStopAreaRef: navitiaId,
   };

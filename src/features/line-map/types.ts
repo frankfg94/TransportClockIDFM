@@ -8,6 +8,7 @@ export interface LineMapStopView {
   lat?: number;
   projectedX?: number;
   projectedY?: number;
+  coordinateSource?: "wgs84" | "lambert93" | "fallback";
   x: number;
   y: number;
   routeIds: string[];
