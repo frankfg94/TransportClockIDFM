@@ -6,6 +6,7 @@ import {
   setHeader,
 } from "h3";
 import { buildLinePatternView } from "../../../../services/servicePattern/buildLinePatternView";
+import { getNetexRuntimeEnv } from "../../../../services/topology/netexCache";
 
 export default defineEventHandler(async (event) => {
   const transportType = getRouterParam(event, "transportType");
@@ -25,6 +26,7 @@ export default defineEventHandler(async (event) => {
       transportType,
       lineId,
       directionId: firstQueryValue(query.direction),
+      runtimeEnv: getNetexRuntimeEnv(event),
       startStationId: startStation,
       startStationCandidates: startStation ? [startStation] : [],
     };

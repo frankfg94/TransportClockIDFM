@@ -1,4 +1,9 @@
 import { defineEventHandler } from "h3";
-import { getNetexCacheStatus } from "../../services/topology/netexCache";
+import {
+  getNetexCacheStatus,
+  getNetexRuntimeEnv,
+} from "../../services/topology/netexCache";
 
-export default defineEventHandler(async () => getNetexCacheStatus());
+export default defineEventHandler(async (event) =>
+  getNetexCacheStatus(getNetexRuntimeEnv(event)),
+);

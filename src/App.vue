@@ -165,6 +165,11 @@ async function refreshBoard(boardId: string): Promise<void> {
   }
 
   const state = ensureBoardState(board.id);
+
+  if (state.loading) {
+    return;
+  }
+
   state.loading = true;
   state.error = undefined;
 
@@ -191,11 +196,42 @@ async function refreshAll(): Promise<void> {
     return;
   }
 
+  if (refreshing.value) {
+    return;
+  }
+
   refreshing.value = true;
 
-  await Promise.all(visibleBoards.value.map((board) => refreshBoard(board.id)));
-  lastRefresh.value = new Date();
-  refreshing.value = false;
+  try {
+    await runWithConcurrency(visibleBoards.value, 3, (board) =>
+      refreshBoard(board.id),
+    );
+    lastRefresh.value = new Date();
+  } finally {
+    refreshing.value = false;
+  }
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  const queue = [...items];
+  const workers = Array.from(
+    { length: Math.min(limit, queue.length) },
+    async () => {
+      while (queue.length > 0) {
+        const item = queue.shift();
+
+        if (item) {
+          await worker(item);
+        }
+      }
+    },
+  );
+
+  await Promise.all(workers);
 }
 
 async function loadNetexCacheStatus(): Promise<void> {
@@ -826,8 +862,9 @@ onBeforeUnmount(() => {
         <strong>Données NeTEx introuvables</strong>
         <span>
           {{ netexCacheAlert }}
-          Configurez <code>IDFM_NETEX_CACHE_DIR</code> avec une URL R2 ou un
-          dossier local contenant <code>index.json</code>.
+          Configurez <code>IDFM_NETEX_CACHE_REMOTE</code> avec une URL R2/HTTP
+          ou <code>IDFM_NETEX_CACHE_LOCAL</code> avec un dossier contenant
+          <code>index.json</code>.
         </span>
       </section>
 

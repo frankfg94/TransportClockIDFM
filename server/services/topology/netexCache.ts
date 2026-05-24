@@ -24,10 +24,28 @@ interface NetexCacheIndexLine {
 }
 
 interface NetexCacheSource {
-  kind: "remote" | "directory";
+  kind: "remote" | "directory" | "r2";
   root: string;
+  bucket?: string;
+  env?: NetexRuntimeEnv;
+  prefix?: string;
   warning?: string;
 }
+
+interface NetexCacheConfig {
+  kind: "remote" | "local" | "auto";
+  value?: string;
+}
+
+export type NetexRuntimeEnv = Record<string, string | undefined>;
+
+type CloudflareEventLike = {
+  context?: {
+    cloudflare?: {
+      env?: NetexRuntimeEnv;
+    };
+  };
+};
 
 export interface NetexCacheStatus {
   available: boolean;
@@ -153,6 +171,7 @@ const cacheSourcePromise = new Map<string, Promise<NetexCacheSource>>();
 const indexCache = new Map<string, Promise<NetexCacheIndex>>();
 const lineCache = new Map<string, Promise<LineTopology>>();
 let warnedLocalOnlyCache = false;
+const announcedCacheSources = new Set<string>();
 
 const KNOWN_LINE_CODES: Record<string, string> = {
   "metro-4": "C01374",
@@ -186,8 +205,9 @@ const MODE_BY_CODE: Record<string, string> = {
 
 export async function getLineTopologyFromNetexCache(
   lineId: string,
+  runtimeEnv?: NetexRuntimeEnv,
 ): Promise<LineTopology> {
-  const source = await resolveNetexCacheSource();
+  const source = await resolveNetexCacheSource(runtimeEnv);
   const sourceId = createSourceId(source);
   const index = await loadNetexIndex(source);
   const code = resolveLineCode(lineId, index);
@@ -209,17 +229,20 @@ export async function getLineTopologyFromNetexCache(
 
 export async function loadNetexLineCache(
   lineId: string,
+  runtimeEnv?: NetexRuntimeEnv,
 ): Promise<NetexLineCache> {
-  const source = await resolveNetexCacheSource();
+  const source = await resolveNetexCacheSource(runtimeEnv);
   const index = await loadNetexIndex(source);
   const code = resolveLineCode(lineId, index);
 
   return loadNetexLineByCode(source, code, index);
 }
 
-export async function getNetexCacheStatus(): Promise<NetexCacheStatus> {
+export async function getNetexCacheStatus(
+  runtimeEnv?: NetexRuntimeEnv,
+): Promise<NetexCacheStatus> {
   try {
-    const source = await resolveNetexCacheSource();
+    const source = await resolveNetexCacheSource(runtimeEnv);
     const index = await loadNetexIndex(source);
 
     return {
@@ -235,13 +258,33 @@ export async function getNetexCacheStatus(): Promise<NetexCacheStatus> {
   } catch (error) {
     return {
       available: false,
-      source: getConfiguredCacheSourceHint(),
+      source: getConfiguredCacheSourceHint(runtimeEnv),
       message:
         error instanceof Error
           ? error.message
           : "NeTEx cache could not be loaded.",
     };
   }
+}
+
+export function getNetexRuntimeEnv(event?: unknown): NetexRuntimeEnv {
+  const nodeEnv = (globalThis as { process?: { env?: NetexRuntimeEnv } }).process
+    ?.env;
+  const cfEnv = (event as CloudflareEventLike | undefined)?.context?.cloudflare
+    ?.env;
+
+  return {
+    ...(nodeEnv ?? {}),
+    ...(cfEnv ?? {}),
+  };
+}
+
+export function createNetexCacheEnvironmentKey(
+  runtimeEnv?: NetexRuntimeEnv,
+): string {
+  const config = getConfiguredCacheConfig(runtimeEnv);
+
+  return `${config.kind}:${config.value ?? "__auto__"}`;
 }
 
 export function resolveKnownLineAlias(
@@ -271,37 +314,62 @@ export function resolveKnownLineAlias(
   return normalizedType ? `${normalizedType}-${normalizedLine}` : normalizedLine;
 }
 
-async function resolveNetexCacheSource(): Promise<NetexCacheSource> {
-  const configured = getConfiguredCacheRoot();
-
-  const cacheKey = configured || "__auto__";
+async function resolveNetexCacheSource(
+  runtimeEnv?: NetexRuntimeEnv,
+): Promise<NetexCacheSource> {
+  const config = getConfiguredCacheConfig(runtimeEnv);
+  const cacheKey = createNetexCacheEnvironmentKey(runtimeEnv);
   const cached = cacheSourcePromise.get(cacheKey);
 
   if (cached) {
     return cached;
   }
 
-  const request = findNetexCacheSource(configured);
+  const request = findNetexCacheSource(config, getRuntimeEnv(runtimeEnv)).then(
+    (source) => {
+      announceNetexCacheSource(source, config);
+
+      return source;
+    },
+  );
   cacheSourcePromise.set(cacheKey, request);
 
   return request;
 }
 
 async function findNetexCacheSource(
-  configured?: string,
+  config: NetexCacheConfig,
+  runtimeEnv?: NetexRuntimeEnv,
 ): Promise<NetexCacheSource> {
-  if (configured && isHttpUrl(configured)) {
-    return {
-      kind: "remote",
-      root: trimTrailingSlashes(configured),
-    };
+  if (config.kind === "remote") {
+    const remote = config.value ?? "";
+
+    if (isR2Url(remote)) {
+      const r2Source = parseR2CacheSource(remote, runtimeEnv);
+
+      validateR2Config(runtimeEnv);
+
+      return r2Source;
+    }
+
+    if (isHttpUrl(remote)) {
+      return {
+        kind: "remote",
+        root: trimTrailingSlashes(remote),
+      };
+    }
+
+    throw new Error(
+      `Invalid IDFM_NETEX_CACHE_REMOTE value "${remote}". Expected an r2:// or HTTP(S) cache URL.`,
+    );
   }
 
-  warnLocalOnlyCache(configured);
+  warnLocalOnlyCache(config.kind === "local" ? config.value : undefined);
 
-  const candidates = configured
-    ? [configured]
-    : await getDefaultLocalCacheCandidates();
+  const candidates =
+    config.kind === "local" && config.value
+      ? [config.value]
+      : await getDefaultLocalCacheCandidates();
 
   for (const candidate of candidates) {
     const stat = await statLocalCacheIndex(candidate);
@@ -311,13 +379,13 @@ async function findNetexCacheSource(
         kind: "directory",
         root: candidate,
         warning:
-          "IDFM_NETEX_CACHE_DIR is using a local filesystem path. This works locally, but production should use an HTTP/R2 cache URL.",
+          "IDFM_NETEX_CACHE_LOCAL is using a local filesystem path. This works locally, but production should use IDFM_NETEX_CACHE_REMOTE.",
       };
     }
   }
 
   throw new Error(
-    `NeTEx cache not found. Set IDFM_NETEX_CACHE_DIR to an R2/HTTP base URL or a folder containing index.json.`,
+    `NeTEx cache not found. Set IDFM_NETEX_CACHE_REMOTE to an r2:// or HTTP(S) cache URL, or IDFM_NETEX_CACHE_LOCAL to a folder containing index.json.`,
   );
 }
 
@@ -367,6 +435,18 @@ async function readCacheJson<T>(
     return response.json() as Promise<T>;
   }
 
+  if (source.kind === "r2") {
+    const response = await fetchSignedR2Object(source, safePath);
+
+    if (!response.ok) {
+      throw new Error(
+        `NeTEx R2 cache request failed for ${safePath}: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    return response.json() as Promise<T>;
+  }
+
   const fs = await import("node:fs/promises");
   const path = await import("node:path");
 
@@ -375,29 +455,54 @@ async function readCacheJson<T>(
   ) as T;
 }
 
-function getConfiguredCacheRoot(): string | undefined {
-  return [
-    process.env.NUXT_IDFM_NETEX_CACHE_DIR,
-    process.env.IDFM_NETEX_CACHE_DIR,
-    process.env.NETEX_CACHE_DIR,
-  ]
-    .map((value) => value?.trim())
-    .find((value): value is string => Boolean(value));
+function getConfiguredCacheConfig(runtimeEnv?: NetexRuntimeEnv): NetexCacheConfig {
+  const env = getRuntimeEnv(runtimeEnv);
+  const remote = env.IDFM_NETEX_CACHE_REMOTE?.trim();
+  const local = env.IDFM_NETEX_CACHE_LOCAL?.trim();
+
+  if (remote) {
+    return {
+      kind: "remote",
+      value: remote,
+    };
+  }
+
+  if (local) {
+    return {
+      kind: "local",
+      value: local,
+    };
+  }
+
+  return {
+    kind: "auto",
+  };
 }
 
-function getConfiguredCacheSourceHint(): NetexCacheStatus["source"] {
-  const configured = getConfiguredCacheRoot();
+function getConfiguredCacheSourceHint(
+  runtimeEnv?: NetexRuntimeEnv,
+): NetexCacheStatus["source"] {
+  const config = getConfiguredCacheConfig(runtimeEnv);
 
-  if (!configured) {
+  if (config.kind === "auto") {
     return {
       kind: "auto",
       location: "public/data/netex or ../idfm-node-backend/public/data/netex",
     };
   }
 
+  const kind =
+    config.kind === "local"
+      ? "directory"
+      : isR2Url(config.value ?? "")
+        ? "r2"
+        : isHttpUrl(config.value ?? "")
+          ? "remote"
+          : "directory";
+
   return {
-    kind: isHttpUrl(configured) ? "remote" : "directory",
-    location: configured,
+    kind,
+    location: config.value ?? "",
   };
 }
 
@@ -411,10 +516,35 @@ function warnLocalOnlyCache(configured?: string): void {
     : "automatic local cache search";
 
   console.warn(
-    `[netex-cache] IDFM_NETEX_CACHE_DIR is not an R2/HTTP URL; using ${localTarget}. ` +
+    `[netex-cache] IDFM_NETEX_CACHE_REMOTE is not configured; using ${localTarget}. ` +
       "This will only work locally or if the NeTEx cache files are packaged with the Nuxt server.",
   );
   warnedLocalOnlyCache = true;
+}
+
+function announceNetexCacheSource(
+  source: NetexCacheSource,
+  config: NetexCacheConfig,
+): void {
+  const sourceKey = createSourceId(source);
+
+  if (announcedCacheSources.has(sourceKey)) {
+    return;
+  }
+
+  if (source.kind === "r2") {
+    console.info(
+      `[netex-cache] Using remote R2 cache bucket=${source.bucket} prefix=${source.prefix || "(root)"}`,
+    );
+  } else if (source.kind === "remote") {
+    console.info(`[netex-cache] Using remote HTTP cache ${source.root}`);
+  } else if (config.kind === "auto") {
+    console.info(`[netex-cache] Using auto-discovered local cache ${source.root}`);
+  } else {
+    console.info(`[netex-cache] Using local cache ${source.root}`);
+  }
+
+  announcedCacheSources.add(sourceKey);
 }
 
 function createSourceId(source: NetexCacheSource): string {
@@ -423,6 +553,10 @@ function createSourceId(source: NetexCacheSource): string {
 
 function isHttpUrl(value: string): boolean {
   return /^https?:\/\//iu.test(value);
+}
+
+function isR2Url(value: string): boolean {
+  return /^r2:\/\//iu.test(value);
 }
 
 function trimTrailingSlashes(value: string): string {
@@ -440,6 +574,209 @@ function normalizeCachePath(value: string): string {
   }
 
   return normalized;
+}
+
+function parseR2CacheSource(
+  value: string,
+  runtimeEnv?: NetexRuntimeEnv,
+): NetexCacheSource {
+  const url = new URL(value);
+  const bucket = url.hostname;
+  const prefix = normalizeR2Prefix(url.pathname);
+
+  if (!bucket) {
+    throw new Error(
+      `Invalid R2 cache URL "${value}". Expected r2://bucket/path/to/netex-cache.`,
+    );
+  }
+
+  return {
+    kind: "r2",
+    root: `r2://${bucket}${prefix ? `/${prefix}` : ""}`,
+    bucket,
+    env: getRuntimeEnv(runtimeEnv),
+    prefix,
+  };
+}
+
+function normalizeR2Prefix(value: string): string {
+  return value.replace(/^\/+|\/+$/gu, "");
+}
+
+function validateR2Config(runtimeEnv?: NetexRuntimeEnv): void {
+  const env = getRuntimeEnv(runtimeEnv);
+  const missing = [
+    ["R2_ACCOUNT_ID", env.R2_ACCOUNT_ID],
+    ["R2_ACCESS_KEY_ID", env.R2_ACCESS_KEY_ID],
+    ["R2_SECRET_ACCESS_KEY", env.R2_SECRET_ACCESS_KEY],
+  ]
+    .filter(([, value]) => !value?.trim())
+    .map(([name]) => name);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `R2 NeTEx cache is configured but missing ${missing.join(", ")}.`,
+    );
+  }
+}
+
+async function fetchSignedR2Object(
+  source: NetexCacheSource,
+  relativePath: string,
+): Promise<Response> {
+  if (!source.bucket) {
+    throw new Error("R2 cache source is missing its bucket name.");
+  }
+
+  const objectKey = [source.prefix, relativePath].filter(Boolean).join("/");
+  const endpoint =
+    source.env?.R2_ENDPOINT?.replace(/\/+$/u, "") ||
+    `https://${requiredEnv("R2_ACCOUNT_ID", source.env)}.r2.cloudflarestorage.com`;
+  const requestUrl = new URL(
+    `${endpoint}/${encodePathSegment(source.bucket)}/${encodeObjectKey(objectKey)}`,
+  );
+  const headers = await createR2SignedHeaders(requestUrl, source.env);
+  const response = await fetch(requestUrl, {
+    headers,
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    console.warn(
+      `[netex-cache] R2 GET failed bucket=${source.bucket} key=${objectKey} status=${response.status} ${response.statusText}`,
+    );
+  }
+
+  return response;
+}
+
+async function createR2SignedHeaders(
+  url: URL,
+  runtimeEnv?: NetexRuntimeEnv,
+): Promise<Headers> {
+  const env = getRuntimeEnv(runtimeEnv);
+  const now = new Date();
+  const amzDate = formatAmzDate(now);
+  const dateScope = amzDate.slice(0, 8);
+  const host = url.host;
+  const payloadHash = "UNSIGNED-PAYLOAD";
+  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
+  const canonicalHeaders =
+    `host:${host}\n` +
+    `x-amz-content-sha256:${payloadHash}\n` +
+    `x-amz-date:${amzDate}\n`;
+  const canonicalRequest = [
+    "GET",
+    url.pathname,
+    url.searchParams.toString(),
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash,
+  ].join("\n");
+  const credentialScope = `${dateScope}/auto/s3/aws4_request`;
+  const stringToSign = [
+    "AWS4-HMAC-SHA256",
+    amzDate,
+    credentialScope,
+    await sha256Hex(canonicalRequest),
+  ].join("\n");
+  const signature = await signR2Request(
+    requiredEnv("R2_SECRET_ACCESS_KEY", env),
+    dateScope,
+    stringToSign,
+  );
+  const authorization =
+    `AWS4-HMAC-SHA256 Credential=${requiredEnv("R2_ACCESS_KEY_ID", env)}/${credentialScope}, ` +
+    `SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  return new Headers({
+    Authorization: authorization,
+    "x-amz-content-sha256": payloadHash,
+    "x-amz-date": amzDate,
+  });
+}
+
+async function signR2Request(
+  secretAccessKey: string,
+  dateScope: string,
+  stringToSign: string,
+): Promise<string> {
+  const dateKey = await hmac(`AWS4${secretAccessKey}`, dateScope);
+  const regionKey = await hmac(dateKey, "auto");
+  const serviceKey = await hmac(regionKey, "s3");
+  const signingKey = await hmac(serviceKey, "aws4_request");
+  const signature = await hmac(signingKey, stringToSign);
+
+  return toHex(signature);
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+
+  return toHex(digest);
+}
+
+async function hmac(
+  key: string | ArrayBuffer,
+  value: string,
+): Promise<ArrayBuffer> {
+  const rawKey =
+    typeof key === "string" ? new TextEncoder().encode(key) : new Uint8Array(key);
+  const cryptoKey = await globalThis.crypto.subtle.importKey(
+    "raw",
+    rawKey,
+    { hash: "SHA-256", name: "HMAC" },
+    false,
+    ["sign"],
+  );
+
+  return globalThis.crypto.subtle.sign(
+    "HMAC",
+    cryptoKey,
+    new TextEncoder().encode(value),
+  );
+}
+
+function toHex(buffer: ArrayBuffer): string {
+  return [...new Uint8Array(buffer)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function formatAmzDate(date: Date): string {
+  return date.toISOString().replace(/[:-]|\.\d{3}/gu, "");
+}
+
+function encodePathSegment(value: string): string {
+  return encodeURIComponent(value);
+}
+
+function encodeObjectKey(value: string): string {
+  return value
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+}
+
+function requiredEnv(name: string, runtimeEnv?: NetexRuntimeEnv): string {
+  const value = getRuntimeEnv(runtimeEnv)[name]?.trim();
+
+  if (!value) {
+    throw new Error(`Missing required R2 environment variable ${name}.`);
+  }
+
+  return value;
+}
+
+function getRuntimeEnv(runtimeEnv?: NetexRuntimeEnv): NetexRuntimeEnv {
+  if (runtimeEnv) {
+    return runtimeEnv;
+  }
+
+  return (
+    (globalThis as { process?: { env?: NetexRuntimeEnv } }).process?.env ?? {}
+  );
 }
 
 async function getDefaultLocalCacheCandidates(): Promise<string[]> {

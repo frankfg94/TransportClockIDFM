@@ -1,6 +1,8 @@
 # Transport Clock GPT
 
 Application Nuxt 3 + Vue 3 + TypeScript affichant les prochains passages IDFM PRIM et les schemas de desserte.
+Données PRIM IDFM pour l'affichage des prochains horaires.
+Données NETEX pour la génération dynamique des plans de chaque ligne.
 
 ## Lancer le projet
 
@@ -26,7 +28,8 @@ Configuration conseillee :
 - Build command : `npm run build`
 - Build output directory : `dist`
 - Environment variable : `IDFM_API_KEY`
-- Optional cache variable : `IDFM_NETEX_CACHE_DIR`
+- Optional remote cache variable : `IDFM_NETEX_CACHE_REMOTE`
+- Optional local cache variable : `IDFM_NETEX_CACHE_LOCAL`
 
 ## Cache NeTEx hors-ligne
 
@@ -37,10 +40,35 @@ En local, il cherche automatiquement :
 ../idfm-node-backend/public/data/netex
 ```
 
-Tu peux forcer le chemin avec :
+Les données Netex ne sont pas obligatoires pour faire fonctionner l'application mais affichera un warning, il sera impossible de faire afficher le plan des lignes sans ce cache.
+
+Pour mettre à jour le cache netex :
+
+```
+rclone copy . <Votre remote cache Netex formatté>:idfm-backend-netex-cache/netex/current --progress --transfers 16 --checkers 32 --fast-list
+```
+
+Tu peux indiquer explicitement le cache netex avec deux variables separees.
+`IDFM_NETEX_CACHE_REMOTE` est prioritaire et force un cache distant R2 prive ou HTTP(S).
+`IDFM_NETEX_CACHE_LOCAL` force un dossier local. Si aucune des deux variables n'est definie, Nuxt cherche automatiquement le cache local de developpement.
 
 ```powershell
-$env:IDFM_NETEX_CACHE_DIR="C:\Users\franc\AndroidStudioProjects\VibeIDFM\idfm-node-backend\public\data\netex"
+$env:IDFM_NETEX_CACHE_LOCAL="C:\Users\franc\AndroidStudioProjects\VibeIDFM\idfm-node-backend\public\data\netex"
+```
+
+Exemple R2 prive, recommande en production :
+```powershell
+$env:IDFM_NETEX_CACHE_REMOTE="r2://idfm-backend-netex-cache/netex/current"
+$env:R2_ACCOUNT_ID="<cloudflare-account-id>"
+$env:R2_ACCESS_KEY_ID="<r2-access-key-id>"
+$env:R2_SECRET_ACCESS_KEY="<r2-secret-access-key>"
+```
+
+Avec `r2://`, les fichiers JSON restent prives : le navigateur ne recoit jamais les credentials R2 et ne peut pas lire le bucket directement. Seul le backend Nitro de Nuxt signe les requetes R2 serveur-a-serveur.
+
+Exemple HTTP public, utile seulement pour tester rapidement :
+```powershell
+$env:IDFM_NETEX_CACHE_REMOTE="https://pub-xxxxx.r2.dev/netex/current"
 ```
 
 L'endpoint Nuxt `GET /api/lines/:lineId/topology` adapte ces JSON au modele UI.

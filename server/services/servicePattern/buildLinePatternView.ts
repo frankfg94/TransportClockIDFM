@@ -14,7 +14,11 @@ import type {
 } from "../../../src/types/transit";
 import { buildNeighborMap, segmentId } from "../topology/buildLineTopology";
 import { getLineTopology } from "../topology/getLineTopology";
-import { resolveKnownLineAlias } from "../topology/netexCache";
+import {
+  createNetexCacheEnvironmentKey,
+  resolveKnownLineAlias,
+  type NetexRuntimeEnv,
+} from "../topology/netexCache";
 import { createLinePresentation } from "../../../src/services/linePresentation";
 import type {
   LineTopology,
@@ -26,6 +30,7 @@ interface BuildLinePatternViewParams {
   transportType: string;
   lineId: string;
   directionId?: string;
+  runtimeEnv?: NetexRuntimeEnv;
   startStationId?: string;
   startStationCandidates?: string[];
 }
@@ -51,7 +56,7 @@ export async function buildLinePatternView(
     return cached;
   }
 
-  const request = getLineTopology(resolvedLineId).then((topology) =>
+  const request = getLineTopology(resolvedLineId, params.runtimeEnv).then((topology) =>
     buildLinePatternViewFromTopology(params, topology),
   );
 
@@ -130,6 +135,7 @@ function createPatternViewCacheKey(
 ): string {
   return JSON.stringify({
     lineId: resolvedLineId,
+    netexCache: createNetexCacheEnvironmentKey(params.runtimeEnv),
     transportType: normalizeId(params.transportType),
     directionId: normalizeId(params.directionId),
     startStationId: normalizeId(params.startStationId),

@@ -1,5 +1,6 @@
 import { createError, defineEventHandler, getRouterParam, setHeader } from "h3";
 import { getLineTopology } from "../../../services/topology/getLineTopology";
+import { getNetexRuntimeEnv } from "../../../services/topology/netexCache";
 
 export default defineEventHandler(async (event) => {
   const lineId = getRouterParam(event, "lineId");
@@ -12,7 +13,7 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const topology = await getLineTopology(lineId);
+    const topology = await getLineTopology(lineId, getNetexRuntimeEnv(event));
     setHeader(event, "Cache-Control", "public, max-age=21600");
 
     return topology;

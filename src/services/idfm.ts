@@ -103,28 +103,9 @@ interface NavitiaStopScheduleResponse {
   stop_schedules?: NavitiaStopSchedule[];
 }
 
-interface NavitiaVehicleJourneyStopTime {
-  stop_point?: {
-    id?: string;
-    name?: string;
-    label?: string;
-  };
-  skipped_stop?: boolean;
-}
-
-interface NavitiaVehicleJourney {
-  id?: string;
-  stop_times?: NavitiaVehicleJourneyStopTime[];
-}
-
-interface NavitiaVehicleJourneyResponse {
-  vehicle_journeys?: NavitiaVehicleJourney[];
-}
-
 interface UpcomingNavitiaTime {
   time: string;
   rawTime: string;
-  vehicleJourneyId?: string;
 }
 
 interface NavitiaCommercialMode {
@@ -333,7 +314,6 @@ const TRANSFER_CONNECTION_MAX_DURATION_SECONDS = 560;
 const structuralTransferCache = new Map<string, Promise<TransferLineOption[]>>();
 const transferStopAreaRefsCache = new Map<string, Promise<string[]>>();
 const stopAreaLinesCache = new Map<string, Promise<NavitiaLine[]>>();
-const vehicleJourneyStopCountCache = new Map<string, Promise<number | undefined>>();
 
 function navitiaApiBase(options: NavitiaRequestOptions): string {
   return options.apiBase ?? NAVITIA_API_BASE;
@@ -2656,17 +2636,16 @@ function mapScheduleToDepartures(
   schedule: NavitiaStopSchedule,
   group: DirectionGroupConfig,
   serviceDay: NavitiaServiceDayWindow,
-): Promise<Departure[]> {
+): Departure[] {
   const destination = cleanNavitiaDirection(
     schedule.display_informations?.direction ??
     schedule.display_informations?.headsign ??
     group.label,
   );
 
-  return Promise.all(
-    findUpcomingNavitiaTimeEntries(schedule, serviceDay)
+  return findUpcomingNavitiaTimeEntries(schedule, serviceDay)
     .slice(0, board.maxDeparturesPerDirection ?? 4)
-    .map(async (entry) => ({
+    .map((entry) => ({
       id: `schedule|${board.id}|${group.id}|${entry.time}`,
       lineRef: board.line.ref,
       monitoringRef: schedule.stop_point?.id ?? board.schedule?.stopAreaRef ?? "",
@@ -2676,15 +2655,8 @@ function mapScheduleToDepartures(
       expectedDepartureTime: entry.time,
       aimedDepartureTime: entry.time,
       vehicleAtStop: false,
-      remainingStopCount: entry.vehicleJourneyId
-        ? await fetchRemainingStopCount(
-            entry.vehicleJourneyId,
-            schedule.stop_point?.id,
-          ).catch(() => undefined)
-        : undefined,
       navitiaStopPointRef: schedule.stop_point?.id,
-    })),
-  );
+    }));
 }
 
 function buildBoardDeparturesResult(
@@ -2902,8 +2874,6 @@ function findUpcomingNavitiaTimeEntries(
   const entries: UpcomingNavitiaTime[] = [];
 
   asArray(schedule.date_times).forEach((value) => {
-    const vehicleJourneyId = getVehicleJourneyId(value);
-
     [value.date_time, value.base_date_time].forEach((rawTime) => {
       if (
         typeof rawTime !== "string" ||
@@ -2925,83 +2895,11 @@ function findUpcomingNavitiaTimeEntries(
       entries.push({
         rawTime,
         time,
-        vehicleJourneyId,
       });
     });
   });
 
   return entries.sort((left, right) => left.rawTime.localeCompare(right.rawTime));
-}
-
-function getVehicleJourneyId(value: NavitiaDateTime): string | undefined {
-  return asArray(value.links).find((link) => {
-    const comparable = normalizeText(`${link.rel ?? ""} ${link.type ?? ""}`);
-
-    return (
-      comparable.includes("vehicle") &&
-      typeof link.id === "string" &&
-      link.id.startsWith("vehicle_journey:")
-    );
-  })?.id;
-}
-
-function fetchRemainingStopCount(
-  vehicleJourneyId: string,
-  currentStopPointId?: string,
-): Promise<number | undefined> {
-  if (!currentStopPointId) {
-    return Promise.resolve(undefined);
-  }
-
-  const cacheKey = `${vehicleJourneyId}::${currentStopPointId}`;
-  const cached = vehicleJourneyStopCountCache.get(cacheKey);
-
-  if (cached) {
-    return cached;
-  }
-
-  const request = fetchVehicleJourneyRemainingStopCount(
-    vehicleJourneyId,
-    currentStopPointId,
-  ).catch((error) => {
-    vehicleJourneyStopCountCache.delete(cacheKey);
-    throw error;
-  });
-
-  vehicleJourneyStopCountCache.set(cacheKey, request);
-
-  return request;
-}
-
-async function fetchVehicleJourneyRemainingStopCount(
-  vehicleJourneyId: string,
-  currentStopPointId: string,
-): Promise<number | undefined> {
-  const searchParams = new URLSearchParams({
-    disable_disruption: "true",
-    disable_geojson: "true",
-  });
-  const response = await fetch(
-    `${NAVITIA_API_BASE}/vehicle_journeys/${encodeURIComponent(vehicleJourneyId)}?${searchParams}`,
-  );
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  const payload = (await response.json()) as NavitiaVehicleJourneyResponse;
-  const stopTimes = payload.vehicle_journeys?.[0]?.stop_times ?? [];
-  const currentIndex = stopTimes.findIndex(
-    (stopTime) => stopTime.stop_point?.id === currentStopPointId,
-  );
-
-  if (currentIndex < 0) {
-    return undefined;
-  }
-
-  return stopTimes
-    .slice(currentIndex + 1)
-    .filter((stopTime) => !stopTime.skipped_stop).length;
 }
 
 function parseNavitiaDateTime(value: string): string | undefined {
