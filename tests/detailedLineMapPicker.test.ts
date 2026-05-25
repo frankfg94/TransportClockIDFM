@@ -30,7 +30,7 @@ describe("detailed station picker line map model", () => {
     const xs = model.stops.map((stop) => stop.x);
     const ys = model.stops.map((stop) => stop.y);
 
-    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(0.55);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(0.42);
     expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(0.25);
     expect(model.stops[0].x).toBeLessThan(model.stops[2].x);
   });

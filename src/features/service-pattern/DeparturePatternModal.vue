@@ -86,6 +86,27 @@ interface TransferDirectionState {
   error?: boolean;
 }
 
+const TRANSFER_GROUP_ORDER = [
+  "METRO",
+  "RER",
+  "TRANSILIEN",
+  "TRAM",
+  "BUS",
+  "OTHER",
+] as const;
+
+const TRANSFER_GROUP_METADATA: Record<
+  (typeof TRANSFER_GROUP_ORDER)[number],
+  { label: string; iconLabel: string }
+> = {
+  METRO: { label: "Métro", iconLabel: "M" },
+  RER: { label: "RER", iconLabel: "RER" },
+  TRANSILIEN: { label: "Train", iconLabel: "TER" },
+  TRAM: { label: "Tram", iconLabel: "T" },
+  BUS: { label: "Bus", iconLabel: "BUS" },
+  OTHER: { label: "Autres correspondances", iconLabel: "+" },
+};
+
 interface PatternGraphNode {
   id: string;
   label: string;
@@ -188,10 +209,14 @@ const patternFlowViewportSize = ref<PatternViewportSize>({
 });
 const hydratedPattern = ref<DepartureCallingPattern>();
 const transferHydrationLoading = ref(false);
+const activeStationTooltipKey = ref<string>();
 const activeTransfer = ref<TransferLineOption>();
-const transferDirectionStates = reactive<Record<string, TransferDirectionState>>({});
+const transferDirectionStates = reactive<
+  Record<string, TransferDirectionState>
+>({});
 let transferHydrationRequest = 0;
 let compactDecisionKey = "";
+let stationTooltipHideTimer: number | undefined;
 
 const serviceLabel = computed(() =>
   displayPattern.value
@@ -234,7 +259,9 @@ const currentLayoutOptions = computed(() =>
 );
 const shouldZoomOnWheel = computed(() => Boolean(props.wheelZoom));
 const activeTransferDirectionState = computed(() =>
-  activeTransfer.value ? transferDirectionStates[activeTransfer.value.id] : undefined,
+  activeTransfer.value
+    ? transferDirectionStates[activeTransfer.value.id]
+    : undefined,
 );
 const flowModel = computed(() =>
   createPatternFlow(
@@ -549,7 +576,7 @@ function createPatternFlow(
       selectable: false,
       connectable: false,
       class: node.current ? "pattern-flow-node--current" : undefined,
-      zIndex: node.current ? 30 : undefined,
+      zIndex: node.current ? 80 : node.transfers.length > 0 ? 60 : undefined,
       data: {
         key: node.id,
         label: node.label,
@@ -2248,6 +2275,34 @@ function showTransferDetails(transfer: TransferLineOption): void {
   }
 }
 
+function showStationTooltip(stationKey: string): void {
+  if (stationTooltipHideTimer !== undefined) {
+    window.clearTimeout(stationTooltipHideTimer);
+    stationTooltipHideTimer = undefined;
+  }
+
+  if (activeStationTooltipKey.value !== stationKey) {
+    activeTransfer.value = undefined;
+  }
+
+  activeStationTooltipKey.value = stationKey;
+}
+
+function scheduleHideStationTooltip(stationKey: string): void {
+  if (stationTooltipHideTimer !== undefined) {
+    window.clearTimeout(stationTooltipHideTimer);
+  }
+
+  stationTooltipHideTimer = window.setTimeout(() => {
+    if (activeStationTooltipKey.value === stationKey) {
+      activeStationTooltipKey.value = undefined;
+      activeTransfer.value = undefined;
+    }
+
+    stationTooltipHideTimer = undefined;
+  }, 500);
+}
+
 async function loadTransferDirections(
   transfer: TransferLineOption,
 ): Promise<void> {
@@ -2319,27 +2374,6 @@ function createTransferGroups(
     ];
   });
 }
-
-const TRANSFER_GROUP_ORDER = [
-  "METRO",
-  "RER",
-  "TRANSILIEN",
-  "TRAM",
-  "BUS",
-  "OTHER",
-] as const;
-
-const TRANSFER_GROUP_METADATA: Record<
-  (typeof TRANSFER_GROUP_ORDER)[number],
-  { label: string; iconLabel: string }
-> = {
-  METRO: { label: "Métro", iconLabel: "M" },
-  RER: { label: "RER", iconLabel: "RER" },
-  TRANSILIEN: { label: "Train", iconLabel: "TER" },
-  TRAM: { label: "Tram", iconLabel: "T" },
-  BUS: { label: "Bus", iconLabel: "BUS" },
-  OTHER: { label: "Autres correspondances", iconLabel: "+" },
-};
 
 function getTransferFamilyKey(
   transfer: TransferLineOption,
@@ -2468,6 +2502,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   transferHydrationRequest += 1;
+  if (stationTooltipHideTimer !== undefined) {
+    window.clearTimeout(stationTooltipHideTimer);
+  }
+
   document.removeEventListener(
     "fullscreenchange",
     syncPatternFlowFullscreenState,
@@ -2643,7 +2681,7 @@ onBeforeUnmount(() => {
                     :nodes="flowModel.nodes"
                     :edges="flowModel.edges"
                     :default-viewport="initialViewport"
-                    :fit-view-on-init="false"
+                    :fit-view-on-init="isFullLineMode"
                     :min-zoom="0.34"
                     :max-zoom="1.7"
                     :nodes-draggable="false"
@@ -2668,12 +2706,18 @@ onBeforeUnmount(() => {
                           'pattern-flow-station--current': data.current,
                           'pattern-flow-station--skipped': !data.served,
                           'pattern-flow-station--terminal': data.branchEnd,
+                          'pattern-flow-station--tooltip-open':
+                            activeStationTooltipKey === data.key,
                         }"
                         :title="
                           data.served
                             ? undefined
                             : 'Non desservi pour ce trajet'
                         "
+                        @focusin="showStationTooltip(data.key)"
+                        @focusout="scheduleHideStationTooltip(data.key)"
+                        @mouseenter="showStationTooltip(data.key)"
+                        @mouseleave="scheduleHideStationTooltip(data.key)"
                       >
                         <Handle
                           id="station-target"
@@ -2712,13 +2756,16 @@ onBeforeUnmount(() => {
                           Non desservi
                         </small>
                         <em v-if="data.branchChip">{{ data.branchChip }}</em>
-                        <article
-                          v-if="data.transferGroups.length > 0"
-                          class="pattern-flow-station__transfer-tooltip"
-                          role="tooltip"
-                        >
+                        <Transition name="pattern-flow-tooltip-open" appear>
+                          <article
+                            v-if="
+                              data.transferGroups.length > 0 &&
+                              activeStationTooltipKey === data.key
+                            "
+                            class="pattern-flow-station__transfer-tooltip"
+                            role="tooltip"
+                          >
                           <header class="pattern-flow-station__tooltip-header">
-                            <span aria-hidden="true"></span>
                             <div>
                               <strong>{{ data.label }}</strong>
                               <small>Correspondances</small>
@@ -2729,8 +2776,12 @@ onBeforeUnmount(() => {
                             :key="`${data.key}-transfer-group-${group.key}`"
                             class="pattern-flow-station__transfer-group"
                           >
-                            <div class="pattern-flow-station__transfer-group-title">
-                              <span aria-hidden="true">{{ group.iconLabel }}</span>
+                            <div
+                              class="pattern-flow-station__transfer-group-title"
+                            >
+                              <span aria-hidden="true">{{
+                                group.iconLabel
+                              }}</span>
                               <strong>{{ group.label }}</strong>
                               <small>{{ group.countLabel }}</small>
                             </div>
@@ -2760,7 +2811,9 @@ onBeforeUnmount(() => {
                             v-if="activeTransfer"
                             class="pattern-flow-station__transfer-detail"
                           >
-                            <strong>{{ getTransferDetailTitle(activeTransfer) }}</strong>
+                            <strong>{{
+                              getTransferDetailTitle(activeTransfer)
+                            }}</strong>
                             <span
                               v-if="isBusTransfer(activeTransfer)"
                               class="pattern-flow-station__transfer-detail-kicker"
@@ -2803,7 +2856,8 @@ onBeforeUnmount(() => {
                               {{ activeTransfer.label }}
                             </span>
                           </aside>
-                        </article>
+                          </article>
+                        </Transition>
                       </div>
                     </template>
                   </VueFlow>

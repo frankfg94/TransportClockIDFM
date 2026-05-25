@@ -37,6 +37,18 @@ interface CanonicalStationLookup {
   byLabel: Map<string, StationSearchOption[]>;
 }
 
+interface ProjectedBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+interface ProjectedViewport {
+  bounds: ProjectedBounds;
+  project(point: { x: number; y: number }): { x: number; y: number };
+}
+
 export async function loadDetailedLineMap(
   line: LineSearchOption,
 ): Promise<LineMapViewModel> {
@@ -339,11 +351,12 @@ function applyMapCoordinates(
       stop,
       point: projectLonLat(stop.lon as number, stop.lat as number),
     }));
-    const minX = Math.min(...projectedStops.map((item) => item.point.x));
-    const maxX = Math.max(...projectedStops.map((item) => item.point.x));
-    const minY = Math.min(...projectedStops.map((item) => item.point.y));
-    const maxY = Math.max(...projectedStops.map((item) => item.point.y));
-    const bounds = padBounds({ minX, maxX, minY, maxY });
+    const viewport = createProjectedViewport({
+      minX: Math.min(...projectedStops.map((item) => item.point.x)),
+      maxX: Math.max(...projectedStops.map((item) => item.point.x)),
+      minY: Math.min(...projectedStops.map((item) => item.point.y)),
+      maxY: Math.max(...projectedStops.map((item) => item.point.y)),
+    });
 
     return stops.map((stop) => {
       if (typeof stop.lon !== "number" || typeof stop.lat !== "number") {
@@ -351,11 +364,12 @@ function applyMapCoordinates(
       }
 
       const point = projectLonLat(stop.lon, stop.lat);
+      const normalizedPoint = viewport.project(point);
 
       return {
         ...stop,
-        x: normalizeProjectedCoordinate(point.x, bounds.minX, bounds.maxX),
-        y: normalizeProjectedCoordinate(point.y, bounds.minY, bounds.maxY),
+        x: normalizedPoint.x,
+        y: normalizedPoint.y,
       };
     });
   }
@@ -477,12 +491,13 @@ function createMapTiles(stops: LineMapStopView[]): MapTile[] {
   const projectedStops = stopsWithCoordinates.map((stop) =>
     projectLonLat(stop.lon as number, stop.lat as number),
   );
-  const bounds = padBounds({
+  const viewport = createProjectedViewport({
     minX: Math.min(...projectedStops.map((point) => point.x)),
     maxX: Math.max(...projectedStops.map((point) => point.x)),
     minY: Math.min(...projectedStops.map((point) => point.y)),
     maxY: Math.max(...projectedStops.map((point) => point.y)),
   });
+  const bounds = viewport.bounds;
   const zoom = chooseTileZoom(bounds);
   const scale = 2 ** zoom;
   const minTileX = Math.floor(bounds.minX * scale);
@@ -499,26 +514,15 @@ function createMapTiles(stops: LineMapStopView[]): MapTile[] {
       const top = tileY / scale;
       const tileSizeX = 1 / scale;
       const tileSizeY = 1 / scale;
-      const normalizedLeft = normalizeProjectedCoordinate(
-        left,
-        bounds.minX,
-        bounds.maxX,
-      );
-      const normalizedTop = normalizeProjectedCoordinate(
-        top,
-        bounds.minY,
-        bounds.maxY,
-      );
-      const normalizedRight = normalizeProjectedCoordinate(
-        left + tileSizeX,
-        bounds.minX,
-        bounds.maxX,
-      );
-      const normalizedBottom = normalizeProjectedCoordinate(
-        top + tileSizeY,
-        bounds.minY,
-        bounds.maxY,
-      );
+      const normalizedTopLeft = viewport.project({ x: left, y: top });
+      const normalizedBottomRight = viewport.project({
+        x: left + tileSizeX,
+        y: top + tileSizeY,
+      });
+      const normalizedLeft = normalizedTopLeft.x;
+      const normalizedTop = normalizedTopLeft.y;
+      const normalizedRight = normalizedBottomRight.x;
+      const normalizedBottom = normalizedBottomRight.y;
       const x = toSvgX(normalizedLeft);
       const y = toSvgY(normalizedTop);
 
@@ -557,6 +561,36 @@ function chooseTileZoom(bounds: {
   }
 
   return 13;
+}
+
+function createProjectedViewport(bounds: ProjectedBounds): ProjectedViewport {
+  const paddedBounds = padBounds(bounds);
+  const innerWidth = VIEWBOX_WIDTH - SVG_PADDING_X * 2;
+  const innerHeight = VIEWBOX_HEIGHT - SVG_PADDING_Y * 2;
+  const spanX = Math.max(paddedBounds.maxX - paddedBounds.minX, 0.000001);
+  const spanY = Math.max(paddedBounds.maxY - paddedBounds.minY, 0.000001);
+  const centerX = (paddedBounds.minX + paddedBounds.maxX) / 2;
+  const centerY = (paddedBounds.minY + paddedBounds.maxY) / 2;
+  const availableX = innerWidth * (1 - MAP_COORDINATE_PADDING * 2);
+  const availableY = innerHeight * (1 - MAP_COORDINATE_PADDING * 2);
+  const scale = Math.min(availableX / spanX, availableY / spanY);
+  const visibleWidth = innerWidth / scale;
+  const visibleHeight = innerHeight / scale;
+
+  return {
+    bounds: {
+      minX: centerX - visibleWidth / 2,
+      maxX: centerX + visibleWidth / 2,
+      minY: centerY - visibleHeight / 2,
+      maxY: centerY + visibleHeight / 2,
+    },
+    project(point) {
+      return {
+        x: 0.5 + ((point.x - centerX) * scale) / innerWidth,
+        y: 0.5 + ((point.y - centerY) * scale) / innerHeight,
+      };
+    },
+  };
 }
 
 function projectLonLat(lon: number, lat: number): { x: number; y: number } {
