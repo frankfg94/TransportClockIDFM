@@ -890,6 +890,7 @@ function normalizeText(value: string): string {
 
 .traffic-ratp-line:hover,
 .traffic-ratp-line:focus-visible {
+  background: #ffffff !important;
   box-shadow: 0 0 0 3px rgba(51, 47, 159, 0.12);
   transform: none;
 }
