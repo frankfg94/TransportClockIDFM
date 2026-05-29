@@ -275,7 +275,7 @@ const rainDroplets = [
 
 function alertTitle(value: WeatherAlert): string {
   if (value.kind === "heat") {
-    return `Canicule prévue dans ${value.startsInMinutes} min`;
+    return `Canicule aujourd'hui`;
   }
 
   if (value.kind === "snow") {
