@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import {
   Cloud,
   CloudFog,
@@ -30,12 +30,20 @@ const emit = defineEmits<{
 
 type ForecastMetric = "temperature" | "precipitation" | "wind";
 
+const CHART_MIN_WIDTH = 560;
+const CHART_POINT_SPACING = 72;
+const CHART_HORIZONTAL_PADDING = 28;
+const CHART_HEIGHT = 140;
+const CHART_BASELINE_Y = 126;
+
 const { settings } = useAppSettings();
+
 const weather = ref<WeatherResponse>();
 const loading = ref(false);
 const error = ref("");
 const activeMetric = ref<ForecastMetric>("temperature");
-const selectedDay = ref("");
+const selectedDayIndex = ref(0);
+const chartScrollElement = ref<HTMLElement>();
 
 const location = computed(() =>
   resolveWeatherLocation(
@@ -43,30 +51,35 @@ const location = computed(() =>
     settings.value.weatherCustomLocation,
   ),
 );
+
 const current = computed(() => weather.value?.forecast?.current);
 const daily = computed(() => weather.value?.forecast?.daily.slice(0, 8) ?? []);
-const selectedDayForecast = computed(() =>
-  daily.value.find((day) => getDateKey(day.date) === selectedDay.value),
-);
+const selectedDayForecast = computed(() => daily.value[selectedDayIndex.value]);
+
 const hourly = computed(() => {
   const hours = weather.value?.forecast?.hourly ?? [];
+  const selectedDay = selectedDayForecast.value;
 
-  if (!selectedDay.value) {
-    return hours.slice(0, 9);
+  if (!selectedDay) {
+    return hours;
   }
 
+  const selectedDayKey = getDateKey(selectedDay.date);
   const selectedHours = hours.filter(
-    (hour) => getDateKey(hour.time) === selectedDay.value,
+    (hour) => getDateKey(hour.time) === selectedDayKey,
   );
 
-  return selectedHours.length > 0 ? selectedHours.slice(0, 9) : hours.slice(0, 9);
+  return selectedHours.length > 0 ? selectedHours : hours;
 });
+
 const currentIcon = computed(() => weatherIcon(current.value?.weatherCode));
+
 const modalTitleTime = computed(() =>
   selectedDayForecast.value
     ? formatDayTitle(selectedDayForecast.value.date)
     : `${formatDay(current.value?.time)} ${formatHour(current.value?.time)}`,
 );
+
 const modalTitleLabel = computed(
   () =>
     selectedDayForecast.value?.label ??
@@ -74,6 +87,7 @@ const modalTitleLabel = computed(
     weather.value?.condition.label ??
     "Prévision",
 );
+
 const chartValues = computed(() =>
   hourly.value
     .map((hour) => ({
@@ -85,6 +99,15 @@ const chartValues = computed(() =>
         typeof point.value === "number",
     ),
 );
+
+const chartWidth = computed(() =>
+  Math.max(
+    CHART_MIN_WIDTH,
+    CHART_HORIZONTAL_PADDING * 2 +
+      Math.max(0, chartValues.value.length - 1) * CHART_POINT_SPACING,
+  ),
+);
+
 const chartPoints = computed(() => {
   const values = chartValues.value;
 
@@ -104,7 +127,10 @@ const chartPoints = computed(() => {
   const range = Math.max(1, max - min);
 
   return values.map((point, index) => {
-    const x = values.length === 1 ? 280 : 24 + (index * 512) / (values.length - 1);
+    const x =
+      values.length === 1
+        ? chartWidth.value / 2
+        : CHART_HORIZONTAL_PADDING + index * CHART_POINT_SPACING;
     const y = 112 - ((point.value - min) / range) * 74;
 
     return {
@@ -115,11 +141,13 @@ const chartPoints = computed(() => {
     };
   });
 });
+
 const chartLine = computed(() =>
   chartPoints.value
     .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
     .join(" "),
 );
+
 const chartArea = computed(() => {
   const points = chartPoints.value;
 
@@ -130,7 +158,7 @@ const chartArea = computed(() => {
   const first = points[0];
   const last = points[points.length - 1];
 
-  return `${chartLine.value} L ${last.x} 126 L ${first.x} 126 Z`;
+  return `${chartLine.value} L ${last.x} ${CHART_BASELINE_Y} L ${first.x} ${CHART_BASELINE_Y} Z`;
 });
 
 watch(
@@ -170,7 +198,8 @@ async function loadWeather(): Promise<void> {
     }
 
     weather.value = (await response.json()) as WeatherResponse;
-    selectedDay.value = getDefaultSelectedDay();
+    selectDefaultDay();
+    scrollChartToStart();
   } catch (fetchError) {
     error.value =
       fetchError instanceof Error
@@ -181,19 +210,29 @@ async function loadWeather(): Promise<void> {
   }
 }
 
-function selectDay(day: WeatherForecastDay): void {
-  selectedDay.value = getDateKey(day.date);
+function selectDay(index: number): void {
+  selectedDayIndex.value = index;
+  scrollChartToStart();
 }
 
-function isSelectedDay(day: WeatherForecastDay): boolean {
-  return getDateKey(day.date) === selectedDay.value;
+function isSelectedDay(index: number): boolean {
+  return selectedDayIndex.value === index;
 }
 
-function getDefaultSelectedDay(): string {
+function selectDefaultDay(): void {
+  const days = daily.value;
+
+  if (days.length === 0) {
+    selectedDayIndex.value = 0;
+    return;
+  }
+
   const currentDateKey = getDateKey(current.value?.time);
-  const firstDailyKey = getDateKey(daily.value[0]?.date);
+  const currentDayIndex = days.findIndex(
+    (day) => getDateKey(day.date) === currentDateKey,
+  );
 
-  return currentDateKey || firstDailyKey;
+  selectedDayIndex.value = currentDayIndex >= 0 ? currentDayIndex : 0;
 }
 
 function getDateKey(value?: string): string {
@@ -201,9 +240,23 @@ function getDateKey(value?: string): string {
     return "";
   }
 
+  const datePrefix = value.match(/^(\d{4}-\d{2}-\d{2})/);
+
+  if (datePrefix) {
+    return datePrefix[1];
+  }
+
   const date = new Date(value);
 
-  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
 }
 
 function getMetricValue(
@@ -292,6 +345,47 @@ function formatDayTitle(value?: string): string {
       }).format(date);
 }
 
+function handleChartWheel(event: WheelEvent): void {
+  const element = chartScrollElement.value;
+
+  if (!element || element.scrollWidth <= element.clientWidth) {
+    return;
+  }
+
+  const delta =
+    Math.abs(event.deltaX) > Math.abs(event.deltaY)
+      ? event.deltaX
+      : event.deltaY;
+
+  if (delta === 0) {
+    return;
+  }
+
+  const maxScrollLeft = element.scrollWidth - element.clientWidth;
+  const nextScrollLeft = Math.min(
+    maxScrollLeft,
+    Math.max(0, element.scrollLeft + delta),
+  );
+
+  if (nextScrollLeft === element.scrollLeft) {
+    return;
+  }
+
+  event.preventDefault();
+  element.scrollLeft = nextScrollLeft;
+}
+
+function scrollChartToStart(): void {
+  void nextTick(() => {
+    window.requestAnimationFrame(() => {
+      chartScrollElement.value?.scrollTo({
+        left: 0,
+        behavior: "smooth",
+      });
+    });
+  });
+}
+
 function dayIcon(day: WeatherForecastDay) {
   return weatherIcon(day.weatherCode);
 }
@@ -359,6 +453,7 @@ function weatherIcon(code?: number) {
               <strong>{{ formatTemperature(current?.temperatureC) }}</strong>
               <span>°C | °F</span>
             </div>
+
             <dl class="weather-modal__stats">
               <div>
                 <dt>Précipitations</dt>
@@ -385,17 +480,25 @@ function weatherIcon(code?: number) {
           </div>
         </div>
 
-        <div class="weather-modal__tabs" role="tablist" aria-label="Données météo">
+        <div
+          class="weather-modal__tabs"
+          role="tablist"
+          aria-label="Données météo"
+        >
           <button
             type="button"
-            :class="{ 'weather-modal__tab--active': activeMetric === 'temperature' }"
+            :class="{
+              'weather-modal__tab--active': activeMetric === 'temperature',
+            }"
             @click="activeMetric = 'temperature'"
           >
             Température
           </button>
           <button
             type="button"
-            :class="{ 'weather-modal__tab--active': activeMetric === 'precipitation' }"
+            :class="{
+              'weather-modal__tab--active': activeMetric === 'precipitation',
+            }"
             @click="activeMetric = 'precipitation'"
           >
             Précipitations
@@ -412,36 +515,71 @@ function weatherIcon(code?: number) {
         <div v-if="loading" class="weather-modal__state">
           Chargement de la météo...
         </div>
-        <div v-else-if="error" class="weather-modal__state weather-modal__state--error">
+
+        <div
+          v-else-if="error"
+          class="weather-modal__state weather-modal__state--error"
+        >
           {{ error }}
         </div>
+
         <template v-else>
           <div class="weather-modal__chart">
-            <svg viewBox="0 0 560 140" role="img" aria-label="Prévisions horaires">
-              <path v-if="chartArea" :d="chartArea" class="weather-modal__area" />
-              <path v-if="chartLine" :d="chartLine" class="weather-modal__line" />
-              <g v-for="point in chartPoints" :key="point.hour.time">
-                <text :x="point.x" :y="Math.max(18, point.y - 10)">
-                  {{ point.label }}
-                </text>
-              </g>
-            </svg>
-            <div class="weather-modal__hours">
-              <span v-for="hour in hourly" :key="hour.time">
-                {{ formatHour(hour.time) }}
-              </span>
+            <div
+              ref="chartScrollElement"
+              class="weather-modal__chart-scroll"
+              tabindex="0"
+              aria-label="Prévisions horaires défilables horizontalement"
+              @wheel="handleChartWheel"
+            >
+              <div
+                class="weather-modal__chart-inner"
+                :style="{ width: `${chartWidth}px` }"
+              >
+                <svg
+                  :viewBox="`0 0 ${chartWidth} ${CHART_HEIGHT}`"
+                  role="img"
+                  aria-label="Prévisions horaires"
+                >
+                  <path
+                    v-if="chartArea"
+                    :d="chartArea"
+                    class="weather-modal__area"
+                  />
+                  <path
+                    v-if="chartLine"
+                    :d="chartLine"
+                    class="weather-modal__line"
+                  />
+                  <g v-for="point in chartPoints" :key="point.hour.time">
+                    <text :x="point.x" :y="Math.max(18, point.y - 10)">
+                      {{ point.label }}
+                    </text>
+                  </g>
+                </svg>
+
+                <div class="weather-modal__hours">
+                  <span
+                    v-for="point in chartPoints"
+                    :key="point.hour.time"
+                    :style="{ left: `${point.x}px` }"
+                  >
+                    {{ formatHour(point.hour.time) }}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 
           <div class="weather-modal__days">
             <button
-              v-for="day in daily"
+              v-for="(day, index) in daily"
               :key="day.date"
               class="weather-modal__day"
-              :class="{ 'weather-modal__day--selected': isSelectedDay(day) }"
+              :class="{ 'weather-modal__day--selected': isSelectedDay(index) }"
               type="button"
-              :aria-pressed="isSelectedDay(day)"
-              @click="selectDay(day)"
+              :aria-pressed="isSelectedDay(index)"
+              @click="selectDay(index)"
             >
               <span>{{ formatDay(day.date) }}</span>
               <component :is="dayIcon(day)" />
@@ -641,6 +779,36 @@ function weatherIcon(code?: number) {
   margin-top: 16px;
 }
 
+.weather-modal__chart-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 10px;
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+
+.weather-modal__chart-scroll:focus-visible {
+  outline: 2px solid rgba(242, 194, 0, 0.75);
+  outline-offset: 4px;
+}
+
+.weather-modal__chart-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.weather-modal__chart-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.weather-modal__chart-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.weather-modal__chart-inner {
+  min-width: 100%;
+}
+
 .weather-modal__chart svg {
   display: block;
   height: 150px;
@@ -668,11 +836,18 @@ function weatherIcon(code?: number) {
 
 .weather-modal__hours {
   color: #5f6368;
-  display: grid;
   font-size: 0.86rem;
-  grid-template-columns: repeat(9, 1fr);
+  height: 22px;
   margin-top: -10px;
+  position: relative;
   text-align: center;
+}
+
+.weather-modal__hours span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
 }
 
 .weather-modal__days {
