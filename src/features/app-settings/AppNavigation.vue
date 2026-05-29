@@ -12,6 +12,8 @@ import { useAppSettings } from "./appSettings";
 
 const AUTO_HIDE_MS = 60_000;
 
+type NavigationSlot = "stations" | "traffic" | "more";
+
 const route = useRoute();
 const { settings } = useAppSettings();
 const hidden = ref(false);
@@ -19,9 +21,19 @@ const menuOpen = ref(false);
 const navigationRoot = ref<HTMLElement>();
 let hideTimer: number | undefined;
 
-const primaryLinks = [
-  { to: "/", label: "Stations", icon: Home },
-  { to: "/traffic", label: "Info trafic", icon: TriangleAlert },
+const primaryLinks: {
+  to: string;
+  label: string;
+  icon: typeof Home;
+  slot: Exclude<NavigationSlot, "more">;
+}[] = [
+  { to: "/", label: "Stations", icon: Home, slot: "stations" },
+  {
+    to: "/traffic",
+    label: "Info trafic",
+    icon: TriangleAlert,
+    slot: "traffic",
+  },
 ];
 
 const secondaryLinks = [
@@ -32,9 +44,29 @@ const secondaryLinks = [
 const shouldAutoHide = computed(
   () => settings.value.navigationAutoHide === "1m",
 );
+
 const secondaryActive = computed(() =>
   secondaryLinks.some((link) => isActive(link.to)),
 );
+
+const activeNavigationSlot = computed<NavigationSlot>(() => {
+  if (menuOpen.value || secondaryActive.value) {
+    return "more";
+  }
+
+  if (isActive("/traffic")) {
+    return "traffic";
+  }
+
+  return "stations";
+});
+
+const navigationClasses = computed(() => [
+  {
+    "app-navigation--hidden": hidden.value && shouldAutoHide.value,
+  },
+  `app-navigation--active-${activeNavigationSlot.value}`,
+]);
 
 onMounted(() => {
   registerActivityListeners();
@@ -52,6 +84,13 @@ watch(shouldAutoHide, () => {
   hidden.value = false;
   resetAutoHideTimer();
 });
+
+watch(
+  () => route.path,
+  () => {
+    closeMenu();
+  },
+);
 
 function isActive(path: string): boolean {
   return path === "/" ? route.path === "/" : route.path.startsWith(path);
@@ -127,7 +166,7 @@ function handleVisibilityChange(): void {
   <nav
     ref="navigationRoot"
     class="app-navigation"
-    :class="{ 'app-navigation--hidden': hidden && shouldAutoHide }"
+    :class="navigationClasses"
     aria-label="Navigation principale"
     @focusin="revealNavigation"
     @pointerenter="revealNavigation"
@@ -136,8 +175,14 @@ function handleVisibilityChange(): void {
       v-for="link in primaryLinks"
       :key="link.to"
       class="app-navigation__link"
-      :class="{ 'app-navigation__link--active': isActive(link.to) }"
+      :class="[
+        `app-navigation__link--${link.slot}`,
+        {
+          'app-navigation__link--active': activeNavigationSlot === link.slot,
+        },
+      ]"
       :to="link.to"
+      @click="closeMenu"
     >
       <component :is="link.icon" aria-hidden="true" />
       <span>{{ link.label }}</span>
@@ -146,7 +191,10 @@ function handleVisibilityChange(): void {
     <div class="app-navigation__menu">
       <button
         class="app-navigation__menu-button"
-        :class="{ 'app-navigation__menu-button--active': secondaryActive }"
+        :class="{
+          'app-navigation__menu-button--active':
+            activeNavigationSlot === 'more',
+        }"
         type="button"
         :aria-expanded="menuOpen"
         aria-label="Ouvrir les pages secondaires"
@@ -182,6 +230,17 @@ function handleVisibilityChange(): void {
 
 <style scoped>
 .app-navigation {
+  --nav-padding: 7px;
+  --nav-gap: 6px;
+  --nav-height: 42px;
+
+  --nav-stations-w: 116px;
+  --nav-traffic-w: 136px;
+  --nav-more-w: 42px;
+
+  --indicator-x: var(--nav-padding);
+  --indicator-w: var(--nav-stations-w);
+
   align-items: center;
   backdrop-filter: blur(18px);
   background: rgba(255, 255, 255, 0.88);
@@ -192,15 +251,56 @@ function handleVisibilityChange(): void {
     0 22px 50px rgba(16, 35, 63, 0.16),
     0 2px 10px rgba(16, 35, 63, 0.08);
   display: inline-flex;
-  gap: 6px;
+  gap: var(--nav-gap);
+  isolation: isolate;
   left: 50%;
-  padding: 7px;
+  padding: var(--nav-padding);
   position: fixed;
   transform: translateX(-50%);
   transition:
     opacity 220ms ease,
     transform 220ms ease;
   z-index: 9000;
+}
+
+.app-navigation::before {
+  background: #111827;
+  border-radius: 999px;
+  box-shadow:
+    0 10px 24px rgba(17, 24, 39, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  content: "";
+  height: var(--nav-height);
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  top: var(--nav-padding);
+  transform: translateX(var(--indicator-x));
+  transition:
+    transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  width: var(--indicator-w);
+  z-index: 0;
+}
+
+.app-navigation--active-stations {
+  --indicator-x: var(--nav-padding);
+  --indicator-w: var(--nav-stations-w);
+}
+
+.app-navigation--active-traffic {
+  --indicator-x: calc(
+    var(--nav-padding) + var(--nav-stations-w) + var(--nav-gap)
+  );
+  --indicator-w: var(--nav-traffic-w);
+}
+
+.app-navigation--active-more {
+  --indicator-x: calc(
+    var(--nav-padding) + var(--nav-stations-w) + var(--nav-gap) +
+      var(--nav-traffic-w) + var(--nav-gap)
+  );
+  --indicator-w: var(--nav-more-w);
 }
 
 .app-navigation--hidden {
@@ -211,17 +311,30 @@ function handleVisibilityChange(): void {
 
 .app-navigation__link {
   align-items: center;
+  background: transparent;
   border-radius: 999px;
   color: var(--muted);
   display: inline-flex;
   font-weight: 900;
   gap: 8px;
-  min-height: 42px;
-  padding: 0 16px;
+  height: var(--nav-height);
+  justify-content: center;
+  min-height: var(--nav-height);
+  padding: 0 14px;
+  position: relative;
   text-decoration: none;
   transition:
     background 160ms ease,
     color 160ms ease;
+  z-index: 1;
+}
+
+.app-navigation__link--stations {
+  width: var(--nav-stations-w);
+}
+
+.app-navigation__link--traffic {
+  width: var(--nav-traffic-w);
 }
 
 .app-navigation__link svg {
@@ -229,14 +342,20 @@ function handleVisibilityChange(): void {
   width: 18px;
 }
 
-.app-navigation__link:hover,
-.app-navigation__link--active {
-  background: #111827;
+.app-navigation__link:hover {
+  background: rgba(17, 24, 39, 0.06);
+  color: #111827;
+}
+
+.app-navigation__link--active,
+.app-navigation__link--active:hover {
+  background: transparent;
   color: #ffffff;
 }
 
 .app-navigation__menu {
   position: relative;
+  z-index: 2;
 }
 
 .app-navigation__menu-button {
@@ -245,17 +364,29 @@ function handleVisibilityChange(): void {
   border-radius: 999px;
   color: var(--muted);
   display: inline-flex;
-  height: 42px;
+  height: var(--nav-height);
   justify-content: center;
-  min-height: 42px;
+  min-height: var(--nav-height);
   padding: 0;
-  width: 42px;
+  position: relative;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+  width: var(--nav-more-w);
+  z-index: 1;
 }
 
-.app-navigation__menu-button:hover,
+.app-navigation__menu-button:hover {
+  background: rgba(17, 24, 39, 0.06);
+  color: #111827;
+  transform: none;
+}
+
+.app-navigation__menu-button--active,
+.app-navigation__menu-button--active:hover,
 .app-navigation__menu-button[aria-expanded="true"],
-.app-navigation__menu-button--active {
-  background: #111827;
+.app-navigation__menu-button[aria-expanded="true"]:hover {
+  background: transparent;
   color: #ffffff;
   transform: none;
 }
@@ -279,6 +410,7 @@ function handleVisibilityChange(): void {
   padding: 8px;
   position: absolute;
   right: 0;
+  z-index: 10;
 }
 
 .app-navigation__menu-link {
@@ -291,6 +423,9 @@ function handleVisibilityChange(): void {
   min-height: 42px;
   padding: 0 12px;
   text-decoration: none;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
 }
 
 .app-navigation__menu-link:hover,
@@ -319,14 +454,25 @@ function handleVisibilityChange(): void {
 
 @media (max-width: 640px) {
   .app-navigation {
+    --nav-padding: 7px;
+    --nav-gap: 4px;
+    --nav-stations-w: 100px;
+    --nav-traffic-w: 118px;
+    --nav-more-w: 42px;
+
     bottom: 10px;
-    gap: 4px;
     max-width: calc(100vw - 20px);
   }
 
   .app-navigation__link {
     font-size: 0.82rem;
-    padding: 0 11px;
+    gap: 6px;
+    padding: 0 10px;
+  }
+
+  .app-navigation__link svg {
+    height: 17px;
+    width: 17px;
   }
 }
 </style>

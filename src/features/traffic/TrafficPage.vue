@@ -131,15 +131,12 @@ function getLineReport(line: ActiveTrafficLine): TrafficLineReport {
 }
 
 function toggleLine(lineRef: string): void {
-  const next = new Set(expandedLineRefs.value);
-
-  if (next.has(lineRef)) {
-    next.delete(lineRef);
-  } else {
-    next.add(lineRef);
+  if (expandedLineRefs.value.has(lineRef)) {
+    expandedLineRefs.value = new Set();
+    return;
   }
 
-  expandedLineRefs.value = next;
+  expandedLineRefs.value = new Set([lineRef]);
 }
 
 function selectTimingTab(lineRef: string, tab: TrafficTimingTab): void {
@@ -404,11 +401,7 @@ function normalizeText(value: string): string {
               </button>
             </div>
 
-            <TransitionGroup
-              name="traffic-expand"
-              tag="div"
-              class="traffic-ratp-row-details"
-            >
+            <div class="traffic-ratp-row-details">
               <article
                 v-for="line in getExpandedLines(group.lines)"
                 :key="line.navitiaLineRef"
@@ -418,9 +411,7 @@ function normalizeText(value: string): string {
                   <LineIconBadge :line="line.line" compact />
                   <div>
                     <strong>{{ line.line.longName }}</strong>
-                    <span>{{
-                      getStatusLabel(getLineReport(line).status)
-                    }}</span>
+                    <span>{{ getLineStatusLabel(getLineReport(line)) }}</span>
                   </div>
                 </header>
                 <p
@@ -499,7 +490,7 @@ function normalizeText(value: string): string {
                   </article>
                 </template>
               </article>
-            </TransitionGroup>
+            </div>
           </article>
 
           <div class="traffic-ratp-row traffic-ratp-row--bus">
@@ -1461,19 +1452,6 @@ function normalizeText(value: string): string {
 
 .traffic-state--error {
   color: #b91c1c;
-}
-
-.traffic-expand-enter-active,
-.traffic-expand-leave-active {
-  transition:
-    opacity 150ms ease,
-    transform 150ms ease;
-}
-
-.traffic-expand-enter-from,
-.traffic-expand-leave-to {
-  opacity: 0;
-  transform: translateY(-4px);
 }
 
 @keyframes traffic-spin {

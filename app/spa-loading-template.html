@@ -1,0 +1,564 @@
+<div class="initial-loader">
+    <div class="initial-loader__background">
+        <span class="orb orb--blue"></span>
+        <span class="orb orb--cyan"></span>
+        <span class="orb orb--mint"></span>
+    </div>
+
+    <div class="initial-loader__card">
+        <div class="metro-map" aria-hidden="true">
+            <div class="metro-line metro-line--a"></div>
+            <div class="metro-line metro-line--b"></div>
+            <div class="metro-line metro-line--c"></div>
+
+            <span class="station station--a"></span>
+            <span class="station station--b"></span>
+            <span class="station station--c"></span>
+            <span class="station station--d"></span>
+            <span class="station station--e"></span>
+
+            <div class="train-path train-path--a">
+                <img class="train-image train-image--a" src="/images/mp14_train_top.png" alt="" />
+            </div>
+
+            <div class="train-path train-path--b">
+                <img class="train-image train-image--b" src="/images/mp14_train_top.png" alt="" />
+            </div>
+            <div class="train-path train-path--c">
+                <img class="train-image train-image--b" src="/images/mp14_train_top.png" alt="" />
+            </div>
+        </div>
+
+        <div class="initial-loader__content">
+            <p class="initial-loader__eyebrow">IDFM Dashboard</p>
+            <p>Préparation des prochains passages, météo et info trafic…</p>
+        </div>
+
+        <div class="initial-loader__progress">
+            <span></span>
+        </div>
+    </div>
+</div>
+
+<style>
+    :root {
+        color-scheme: light;
+
+        --idfm-blue: #66deff;
+        --idfm-blue-strong: #0f8ed8;
+        --idfm-cyan: #38c8ff;
+        --idfm-mint: #66d6c2;
+        --idfm-anthracite: #14202a;
+        --idfm-navy: #0f2f57;
+        --idfm-white: #ffffff;
+
+        --loader-text: #18324a;
+        --loader-muted: #5d7286;
+    }
+
+    .initial-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 999999;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background:
+            radial-gradient(circle at 18% 18%,
+                rgba(102, 222, 255, 0.2),
+                transparent 30%),
+            radial-gradient(circle at 82% 12%,
+                rgba(56, 200, 255, 0.16),
+                transparent 32%),
+            radial-gradient(circle at 50% 95%,
+                rgba(102, 214, 194, 0.16),
+                transparent 34%),
+            linear-gradient(135deg, #f5f9fd 0%, #edf6fb 45%, #ffffff 100%);
+        font-family:
+            Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+            "Segoe UI", sans-serif;
+        color: var(--loader-text);
+    }
+
+    .initial-loader::before {
+        content: "";
+        position: absolute;
+        inset: -40%;
+        background-image:
+            linear-gradient(rgba(15, 47, 87, 0.045) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(15, 47, 87, 0.045) 1px, transparent 1px);
+        background-size: 58px 58px;
+        transform: rotate(-7deg);
+        animation: grid-drift 16s linear infinite;
+    }
+
+    .initial-loader__background {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+    }
+
+    .orb {
+        position: absolute;
+        width: 290px;
+        height: 290px;
+        border-radius: 999px;
+        filter: blur(16px);
+        opacity: 0.74;
+        animation: orb-float 7s ease-in-out infinite;
+    }
+
+    .orb--blue {
+        left: 8%;
+        top: 14%;
+        background: rgba(102, 222, 255, 0.22);
+    }
+
+    .orb--cyan {
+        right: 8%;
+        top: 10%;
+        background: rgba(56, 200, 255, 0.18);
+        animation-delay: -2s;
+    }
+
+    .orb--mint {
+        left: 42%;
+        bottom: 2%;
+        background: rgba(102, 214, 194, 0.16);
+        animation-delay: -4s;
+    }
+
+    .initial-loader__card {
+        position: relative;
+        width: min(560px, calc(100vw - 40px));
+        padding: 34px;
+        border: 1px solid rgba(15, 47, 87, 0.1);
+        border-radius: 34px;
+        background:
+            linear-gradient(180deg,
+                rgba(255, 255, 255, 0.97),
+                rgba(247, 251, 253, 0.94));
+        box-shadow:
+            0 28px 90px rgba(15, 47, 87, 0.15),
+            0 8px 24px rgba(15, 47, 87, 0.08),
+            inset 0 1px 0 rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(22px);
+        overflow: hidden;
+    }
+
+    .initial-loader__card::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(120deg,
+                transparent 0%,
+                rgba(102, 222, 255, 0.06) 34%,
+                rgba(56, 200, 255, 0.14) 45%,
+                transparent 58%);
+        transform: translateX(-125%);
+        animation: card-shine 3s ease-in-out infinite;
+    }
+
+    .metro-map {
+        position: relative;
+        height: 174px;
+        margin-bottom: 28px;
+        border-radius: 26px;
+        background:
+            radial-gradient(circle at 50% 50%,
+                rgba(102, 222, 255, 0.12),
+                transparent 56%),
+            linear-gradient(180deg, #ffffff 0%, #f2f8fb 100%);
+        box-shadow:
+            inset 0 0 0 1px rgba(15, 47, 87, 0.08),
+            inset 0 -22px 44px rgba(102, 222, 255, 0.08);
+        overflow: hidden;
+    }
+
+    .metro-map::before {
+        content: "";
+        position: absolute;
+        inset: -30%;
+        background-image:
+            linear-gradient(rgba(15, 47, 87, 0.04) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(15, 47, 87, 0.04) 1px, transparent 1px);
+        background-size: 36px 36px;
+        transform: rotate(-5deg);
+    }
+
+    .metro-line {
+        position: absolute;
+        height: 8px;
+        border-radius: 999px;
+        box-shadow:
+            0 8px 18px rgba(15, 47, 87, 0.12),
+            0 0 12px rgba(102, 222, 255, 0.28);
+    }
+
+    .metro-line--a {
+        left: 44px;
+        right: 54px;
+        top: 54px;
+        background: linear-gradient(90deg,
+                var(--idfm-blue),
+                var(--idfm-blue-strong));
+        transform: rotate(-7deg);
+        transform-origin: center;
+    }
+
+    .metro-line--b {
+        left: 44px;
+        right: 44px;
+        top: 118px;
+        background: linear-gradient(90deg,
+                var(--idfm-blue),
+                var(--idfm-cyan));
+        transform: rotate(-2deg);
+        transform-origin: center;
+    }
+
+    .metro-line--c {
+        left: 56px;
+        right: 82px;
+        top: 84px;
+        background: linear-gradient(90deg,
+                rgba(15, 47, 87, 0.86),
+                var(--idfm-mint));
+        opacity: 0.7;
+        transform: rotate(8deg);
+        transform-origin: center;
+    }
+
+    .station {
+        position: absolute;
+        z-index: 2;
+        width: 19px;
+        height: 19px;
+        border: 5px solid var(--idfm-white);
+        border-radius: 999px;
+        background: var(--idfm-anthracite);
+        box-shadow:
+            0 0 0 2px rgba(15, 47, 87, 0.1),
+            0 8px 16px rgba(15, 47, 87, 0.16);
+    }
+
+    .station--a {
+        left: 88px;
+        top: 39px;
+    }
+
+    .station--b {
+        left: 242px;
+        top: 72px;
+    }
+
+    .station--c {
+        left: 174px;
+        top: 104px;
+    }
+
+    .station--d {
+        right: 96px;
+        top: 48px;
+    }
+
+    .station--e {
+        right: 138px;
+        top: 132px;
+    }
+
+    .train-path {
+        position: absolute;
+        z-index: 3;
+        height: 30px;
+        pointer-events: none;
+    }
+
+    .train-path--a {
+        left: 50px;
+        right: 74px;
+        top: 43px;
+        transform: rotate(-7deg);
+        transform-origin: center;
+        --travel: 320px;
+    }
+
+    .train-path--b {
+        left: 174px;
+        right: 64px;
+        top: 107px;
+        transform: rotate(-2deg);
+        transform-origin: center;
+        --travel: 325px;
+    }
+
+    .train-path--c {
+        left: -20px;
+        right: 64px;
+        top: 70px;
+        transform: rotate(188deg);
+        transform-origin: center;
+        --travel: 325px;
+    }
+
+
+    .train-image {
+        position: absolute;
+        left: 0;
+        top: 50%;
+        width: 92px;
+        height: auto;
+        transform: translateY(-50%);
+        pointer-events: none;
+        user-select: none;
+        -webkit-user-drag: none;
+        filter:
+            drop-shadow(0 4px 8px rgba(15, 47, 87, 0.18)) drop-shadow(0 0 8px rgba(102, 222, 255, 0.26));
+    }
+
+    .train-image--a {
+        animation: train-image-forward 2.6s ease-in-out infinite;
+    }
+
+    .train-image--b {
+        animation: train-image-forward 3s ease-in-out infinite reverse;
+    }
+
+    .initial-loader__content {
+        position: relative;
+        text-align: center;
+    }
+
+    .initial-loader__eyebrow {
+        margin: 0 0 10px;
+        color: var(--idfm-navy);
+        font-size: 0.76rem;
+        font-weight: 850;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+    }
+
+    .initial-loader h1 {
+        margin: 0;
+        color: var(--loader-text);
+        font-size: clamp(1.7rem, 4vw, 2.45rem);
+        line-height: 1.05;
+        font-weight: 850;
+        letter-spacing: -0.045em;
+    }
+
+    .initial-loader p {
+        margin: 13px 0 0;
+        color: var(--loader-muted);
+        font-size: 0.98rem;
+    }
+
+    .initial-loader__progress {
+        position: relative;
+        height: 8px;
+        margin-top: 30px;
+        border-radius: 999px;
+        background: rgba(15, 47, 87, 0.08);
+        overflow: hidden;
+        box-shadow: inset 0 0 0 1px rgba(15, 47, 87, 0.06);
+    }
+
+    .initial-loader__progress span {
+        position: absolute;
+        inset: 0;
+        width: 42%;
+        border-radius: inherit;
+        background: linear-gradient(90deg,
+                var(--idfm-navy),
+                var(--idfm-blue),
+                var(--idfm-cyan));
+        box-shadow: 0 0 18px rgba(56, 200, 255, 0.24);
+        animation: progress-slide 1.15s ease-in-out infinite;
+    }
+
+    @keyframes grid-drift {
+        from {
+            transform: rotate(-7deg) translate3d(0, 0, 0);
+        }
+
+        to {
+            transform: rotate(-7deg) translate3d(58px, 58px, 0);
+        }
+    }
+
+    @keyframes orb-float {
+
+        0%,
+        100% {
+            transform: translate3d(0, 0, 0) scale(1);
+        }
+
+        50% {
+            transform: translate3d(22px, -18px, 0) scale(1.08);
+        }
+    }
+
+    @keyframes card-shine {
+        0% {
+            transform: translateX(-130%);
+        }
+
+        46%,
+        100% {
+            transform: translateX(130%);
+        }
+    }
+
+    @keyframes train-image-forward {
+        0% {
+            transform: translateX(0) translateY(-50%);
+            opacity: 0;
+        }
+
+        14% {
+            opacity: 1;
+        }
+
+        84% {
+            opacity: 1;
+        }
+
+        100% {
+            transform: translateX(var(--travel)) translateY(-50%);
+            opacity: 0;
+        }
+    }
+
+    @keyframes progress-slide {
+        0% {
+            transform: translateX(-110%);
+        }
+
+        55% {
+            transform: translateX(85%);
+        }
+
+        100% {
+            transform: translateX(250%);
+        }
+    }
+
+    @media (max-width: 520px) {
+        .initial-loader__card {
+            width: min(420px, calc(100vw - 32px));
+            padding: 24px;
+            border-radius: 28px;
+        }
+
+        .metro-map {
+            height: 145px;
+            margin-bottom: 24px;
+        }
+
+        .metro-line {
+            height: 7px;
+        }
+
+        .metro-line--a {
+            left: 30px;
+            right: 38px;
+            top: 46px;
+        }
+
+        .metro-line--b {
+            left: 30px;
+            right: 32px;
+            top: 100px;
+        }
+
+        .metro-line--c {
+            left: 38px;
+            right: 48px;
+            top: 72px;
+        }
+
+        .station {
+            width: 17px;
+            height: 17px;
+            border-width: 4px;
+        }
+
+        .station--a {
+            left: 56px;
+            top: 33px;
+        }
+
+        .station--b {
+            left: 154px;
+            top: 62px;
+        }
+
+        .station--c {
+            left: 112px;
+            top: 88px;
+        }
+
+        .station--d {
+            right: 62px;
+            top: 42px;
+        }
+
+        .station--e {
+            right: 88px;
+            top: 112px;
+        }
+
+        .train-path--a {
+            left: 36px;
+            right: 54px;
+            top: 36px;
+            --travel: 205px;
+        }
+
+        .train-path--b {
+            left: 38px;
+            right: 48px;
+            top: 90px;
+            --travel: 210px;
+        }
+
+        .train-image {
+            width: 72px;
+        }
+
+        .initial-loader h1 {
+            font-size: 1.72rem;
+        }
+
+        .initial-loader p {
+            font-size: 0.92rem;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+        .initial-loader::before,
+        .orb,
+        .initial-loader__card::before,
+        .train-image,
+        .initial-loader__progress span {
+            animation: none;
+        }
+
+        .train-image--a {
+            transform: translateX(36%) translateY(-50%);
+            opacity: 1;
+        }
+
+        .train-image--b {
+            transform: translateX(64%) translateY(-50%);
+            opacity: 1;
+        }
+
+        .initial-loader__progress span {
+            width: 100%;
+            opacity: 0.75;
+        }
+    }
+</style>
