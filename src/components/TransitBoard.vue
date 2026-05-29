@@ -35,20 +35,42 @@ type DeparturePatternPayload = {
   departure: Departure;
 };
 
-const props = defineProps<{
-  board: TransitBoardConfig;
-  departures: Departure[];
-  directionGroups: DirectionDepartureGroup[];
-  collapsedDirectionIds: string[];
-  loading: boolean;
-  error?: string;
-  updatedAt?: Date;
-  removable?: boolean;
-  alarmDepartureIds?: string[];
-}>();
+type ClosedSummaryMode = "last" | "next";
+type TrafficAlertTone = "orange" | "red";
+
+interface BoardTrafficAlert {
+  label: "Perturbation" | "Interruption";
+  tone: TrafficAlertTone;
+}
+
+interface DirectionSummary {
+  label: string;
+  time?: string;
+  detail: string;
+}
+
+const props = withDefaults(
+  defineProps<{
+    board: TransitBoardConfig;
+    departures: Departure[];
+    directionGroups: DirectionDepartureGroup[];
+    collapsedDirectionIds: string[];
+    loading: boolean;
+    error?: string;
+    updatedAt?: Date;
+    removable?: boolean;
+    alarmDepartureIds?: string[];
+    closedSummaryMode?: ClosedSummaryMode;
+    trafficAlert?: BoardTrafficAlert;
+  }>(),
+  {
+    closedSummaryMode: "last",
+  },
+);
 
 const emit = defineEmits<{
   "change-station": [board: TransitBoardConfig];
+  "open-traffic": [];
   remove: [];
   "open-line-page": [board: TransitBoardConfig];
   "schedule-alarm": [
@@ -188,6 +210,36 @@ function formatLastDetail(group: DirectionDepartureGroup): string {
       : "Après minuit";
 
   return `${dayHint} · ${group.lastDeparture.destination}`;
+}
+
+function getDirectionSummary(group: DirectionDepartureGroup): DirectionSummary {
+  if (props.closedSummaryMode === "next") {
+    const nextDeparture = group.departures[0];
+    const nextTime = getDepartureTime(nextDeparture);
+
+    return {
+      label: "Prochain passage",
+      time: nextTime,
+      detail: nextDeparture
+        ? formatWait(nextTime, nextDeparture.vehicleAtStop) ||
+          formatDepartureMeta(nextDeparture)
+        : "",
+    };
+  }
+
+  return {
+    label: "Dernier passage",
+    time: group.lastDeparture?.time,
+    detail: formatLastDetail(group),
+  };
+}
+
+function getDepartureTime(departure?: Departure): string | undefined {
+  return (
+    departure?.expectedDepartureTime ??
+    departure?.aimedDepartureTime ??
+    departure?.expectedArrivalTime
+  );
 }
 
 function getParisDateKey(value: string | Date): string {
@@ -446,7 +498,18 @@ onUnmounted(() => {
       />
       <div>
         <p class="board__mode">{{ board.line.longName }}</p>
-        <h2>{{ board.title }}</h2>
+        <div class="board__title-row">
+          <h2>{{ board.title }}</h2>
+          <button
+            v-if="trafficAlert"
+            class="board-traffic-chip"
+            :class="`board-traffic-chip--${trafficAlert.tone}`"
+            type="button"
+            @click.stop="emit('open-traffic')"
+          >
+            {{ trafficAlert.label }}
+          </button>
+        </div>
         <p class="board__city">{{ board.city }}</p>
       </div>
       <div class="board-actions">
@@ -510,16 +573,10 @@ onUnmounted(() => {
           </div>
 
           <div class="last-service">
-            <span>Dernier passage</span>
-            <strong>
-              {{
-                group.lastDeparture
-                  ? formatClock(group.lastDeparture.time)
-                  : "--:--"
-              }}
-            </strong>
-            <small v-if="group.lastDeparture">
-              {{ formatLastDetail(group) }}
+            <span>{{ getDirectionSummary(group).label }}</span>
+            <strong>{{ formatClock(getDirectionSummary(group).time) }}</strong>
+            <small v-if="getDirectionSummary(group).detail">
+              {{ getDirectionSummary(group).detail }}
             </small>
           </div>
           <span class="accordion-chevron" aria-hidden="true">

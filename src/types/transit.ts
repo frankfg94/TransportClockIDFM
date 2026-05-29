@@ -37,6 +37,7 @@ export interface DirectionGroupConfig {
   label: string;
   subtitle?: string;
   match: DirectionGroupMatchConfig;
+  isTerminal?: boolean;
 }
 
 export interface TheoreticalScheduleConfig {
@@ -121,6 +122,7 @@ export interface DirectionDepartureGroup {
   id: string;
   label: string;
   subtitle?: string;
+  isTerminal?: boolean;
   departures: Departure[];
   lastDeparture?: LastDeparture;
   serviceEnded: boolean;
@@ -266,5 +268,6 @@ export interface LinePatternViewResponse {
 export interface LinePatternDirectionOption {
   id: string;
   label: string;
+  isTerminal?: boolean;
 }
 

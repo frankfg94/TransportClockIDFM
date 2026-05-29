@@ -86,6 +86,8 @@ interface TransferDirectionState {
   error?: boolean;
 }
 
+type PatternCompactMode = "auto" | "comfort" | "compact";
+
 const TRANSFER_GROUP_ORDER = [
   "METRO",
   "RER",
@@ -179,19 +181,31 @@ type PatternLayoutOptions = {
   nodeSeparator: number;
 };
 
-const props = defineProps<{
-  open: boolean;
-  board?: TransitBoardConfig;
-  departure?: Departure;
-  pattern?: DepartureCallingPattern;
-  loading?: boolean;
-  error?: string;
-  embedded?: boolean;
-  wheelZoom?: boolean;
-  fullLine?: boolean;
-  directionOptions?: LinePatternDirectionOption[];
-  selectedDirectionId?: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    open: boolean;
+    board?: TransitBoardConfig;
+    departure?: Departure;
+    pattern?: DepartureCallingPattern;
+    loading?: boolean;
+    error?: string;
+    embedded?: boolean;
+    wheelZoom?: boolean;
+    fullLine?: boolean;
+    directionOptions?: LinePatternDirectionOption[];
+    selectedDirectionId?: string;
+    showMiniMap?: boolean;
+    compactMode?: PatternCompactMode;
+    richTransferTooltips?: boolean;
+    reduceMotion?: boolean;
+  }>(),
+  {
+    showMiniMap: true,
+    compactMode: "auto",
+    richTransferTooltips: true,
+    reduceMotion: false,
+  },
+);
 
 const emit = defineEmits<{
   close: [];
@@ -344,19 +358,29 @@ watch(
 
 watch(
   () =>
-    `${displayPattern.value?.departureId ?? "empty"}:${topologyStationCount.value}`,
+    `${displayPattern.value?.departureId ?? "empty"}:${topologyStationCount.value}:${props.compactMode}`,
   (key) => {
     if (key === compactDecisionKey) {
       return;
     }
 
     compactDecisionKey = key;
-    isCompactPatternFlow.value = shouldUseCompactPatternFlow(
-      displayPattern.value?.lineTopology ?? [],
-    );
+    isCompactPatternFlow.value = resolveInitialCompactPatternFlow();
   },
   { immediate: true },
 );
+
+function resolveInitialCompactPatternFlow(): boolean {
+  if (props.compactMode === "compact") {
+    return true;
+  }
+
+  if (props.compactMode === "comfort") {
+    return false;
+  }
+
+  return shouldUseCompactPatternFlow(displayPattern.value?.lineTopology ?? []);
+}
 
 function createPatternLayoutOptions(compact: boolean): PatternLayoutOptions {
   return compact
@@ -2625,6 +2649,7 @@ onBeforeUnmount(() => {
                   class="pattern-flow-shell"
                   :class="{
                     'pattern-flow-shell--compact': isCompactPatternFlow,
+                    'pattern-flow-shell--reduce-motion': reduceMotion,
                   }"
                 >
                   <div
@@ -2808,7 +2833,7 @@ onBeforeUnmount(() => {
                             </div>
                           </section>
                           <aside
-                            v-if="activeTransfer"
+                            v-if="richTransferTooltips && activeTransfer"
                             class="pattern-flow-station__transfer-detail"
                           >
                             <strong>{{
@@ -2862,6 +2887,7 @@ onBeforeUnmount(() => {
                     </template>
                   </VueFlow>
                   <PatternFlowMiniMap
+                    v-if="showMiniMap"
                     :nodes="flowModel.nodes"
                     :edges="flowModel.edges"
                     :node-width="currentLayoutOptions.nodeWidth"

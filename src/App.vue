@@ -6,6 +6,16 @@ import StationBoardModal from "./components/StationBoardModal.vue";
 import TransitBoard from "./components/TransitBoard.vue";
 import { transitBoards } from "./config/transitBoards";
 import { DeparturePatternModal } from "./features/service-pattern";
+import {
+  filterTerminalOnly,
+  requestTemporaryAlarmWakeLock,
+  useAppSettings,
+} from "./features/app-settings";
+import { WeatherExperience, WeatherForecastModal } from "./features/weather";
+import {
+  getCurrentTrafficDisruptions,
+  normalizeTrafficLineRef,
+} from "./features/traffic";
 import { fetchBoardDepartures } from "./services/idfm";
 import {
   createDefaultPreferences,
@@ -29,7 +39,23 @@ import type {
   LinePatternViewResponse,
   TransitBoardConfig,
 } from "./types/transit";
-import { BellRing, Plus } from "lucide-vue-next";
+import type {
+  TrafficLineReport,
+  TrafficResponse,
+} from "./features/traffic/types";
+import {
+  BellRing,
+  CloudSun,
+  MoreVertical,
+  Plus,
+  RefreshCw,
+} from "lucide-vue-next";
+import { useRouter } from "nuxt/app";
+
+type BoardTrafficAlert = {
+  label: "Perturbation" | "Interruption";
+  tone: "orange" | "red";
+};
 
 interface BoardState {
   departures: Departure[];
@@ -53,6 +79,7 @@ interface NetexCacheStatus {
 
 const REFRESH_INTERVAL_MS = 30_000;
 const preferences = reactive(createDefaultPreferences(transitBoards));
+const { settings, effectiveMaxDeparturesPerDirection } = useAppSettings();
 let activeAlarmAudio:
   | {
       audioContext: AudioContext;
@@ -63,6 +90,8 @@ const states = reactive<Record<string, BoardState>>({});
 const refreshing = ref(false);
 const lastRefresh = ref<Date>();
 const stationModalOpen = ref(false);
+const topbarMenuOpen = ref(false);
+const weatherModalOpen = ref(false);
 const alarmTarget = ref<{
   board: TransitBoardConfig;
   directionGroup: DirectionDepartureGroup;
@@ -82,6 +111,7 @@ const pageVisible = ref(true);
 const nowTick = ref(Date.now());
 const netexCacheStatus = ref<NetexCacheStatus>();
 const netexCacheStatusLoaded = ref(false);
+const trafficReports = ref<TrafficLineReport[]>([]);
 const primApiKeyConfigured = __IDFM_API_KEY_CONFIGURED__;
 let refreshTimer: number | undefined;
 const alarmTimers = new Map<string, number>();
@@ -124,6 +154,9 @@ const netexCacheAlert = computed(() => {
     "Données NeTEx introuvables. Les plans de ligne et dessertes détaillées peuvent être indisponibles."
   );
 });
+const trafficReportByLineRef = computed(
+  () => new Map(trafficReports.value.map((report) => [report.lineRef, report])),
+);
 
 function getBoardAlarmDepartureIds(boardId: string): string[] {
   return departureAlarms.value
@@ -144,6 +177,7 @@ function ensureBoardState(boardId: string): BoardState {
       id: group.id,
       label: group.label,
       subtitle: group.subtitle,
+      isTerminal: group.isTerminal,
       departures: [],
       serviceEnded: false,
     })),
@@ -174,7 +208,9 @@ async function refreshBoard(boardId: string): Promise<void> {
   state.error = undefined;
 
   try {
-    const result = await fetchBoardDepartures(board);
+    const result = await fetchBoardDepartures(
+      createBoardRequestForSettings(board),
+    );
 
     state.departures = result.departures;
     state.directionGroups = result.directionGroups;
@@ -206,10 +242,86 @@ async function refreshAll(): Promise<void> {
     await runWithConcurrency(visibleBoards.value, 3, (board) =>
       refreshBoard(board.id),
     );
+    void refreshTrafficSummary();
     lastRefresh.value = new Date();
   } finally {
     refreshing.value = false;
   }
+}
+
+async function refreshTrafficSummary(): Promise<void> {
+  if (!primApiKeyConfigured || !isPageVisible()) {
+    return;
+  }
+
+  const lineRefs = Array.from(
+    new Set(
+      visibleBoards.value
+        .filter((board) => board.line.mode !== "bus")
+        .map(resolveBoardTrafficLineRef),
+    ),
+  );
+
+  if (lineRefs.length === 0) {
+    trafficReports.value = [];
+    return;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      lineRefs: lineRefs.join(","),
+    });
+    const response = await fetch(`/api/traffic?${params}`);
+
+    if (!response.ok) {
+      throw new Error("Impossible de charger l'info trafic.");
+    }
+
+    const payload = (await response.json()) as TrafficResponse;
+    trafficReports.value = payload.lines;
+  } catch {
+    trafficReports.value = [];
+  }
+}
+
+function toggleTopbarMenu(): void {
+  topbarMenuOpen.value = !topbarMenuOpen.value;
+}
+
+function closeTopbarMenu(): void {
+  topbarMenuOpen.value = false;
+}
+
+function refreshFromTopbarMenu(): void {
+  closeTopbarMenu();
+  void refreshAll();
+}
+
+function openWeatherModal(): void {
+  closeTopbarMenu();
+  weatherModalOpen.value = true;
+}
+
+function createBoardRequestForSettings(
+  board: TransitBoardConfig,
+): TransitBoardConfig {
+  const maxDeparturesPerDirection = effectiveMaxDeparturesPerDirection.value;
+
+  return typeof maxDeparturesPerDirection === "number"
+    ? {
+        ...board,
+        maxDeparturesPerDirection,
+      }
+    : board;
+}
+
+function getVisibleDirectionGroupsForBoard(
+  boardId: string,
+): DirectionDepartureGroup[] {
+  return filterTerminalOnly(
+    states[boardId]?.directionGroups ?? [],
+    settings.value.terminalDirectionsOnly,
+  );
 }
 
 async function runWithConcurrency<T>(
@@ -247,9 +359,7 @@ async function loadNetexCacheStatus(): Promise<void> {
     netexCacheStatus.value = {
       available: false,
       message:
-        error instanceof Error
-          ? error.message
-          : "Données NeTEx introuvables.",
+        error instanceof Error ? error.message : "Données NeTEx introuvables.",
     };
   } finally {
     netexCacheStatusLoaded.value = true;
@@ -358,7 +468,8 @@ function isCustomBoard(boardId: string): boolean {
 }
 
 function openLinePage(board: TransitBoardConfig): void {
-  const transportType = board.line.mode === "train" ? "transilien" : board.line.mode;
+  const transportType =
+    board.line.mode === "train" ? "transilien" : board.line.mode;
   const lineId = board.line.shortName || board.line.ref;
   const startStation = board.title || board.schedule?.stopAreaRef;
   const params = new URLSearchParams();
@@ -373,6 +484,68 @@ function openLinePage(board: TransitBoardConfig): void {
     "_blank",
     "noopener,noreferrer",
   );
+}
+
+function openTrafficPage(): void {
+  const router = useRouter();
+  router.push("/traffic");
+}
+
+function getBoardTrafficAlert(
+  board: TransitBoardConfig,
+): BoardTrafficAlert | undefined {
+  if (board.line.mode === "bus") {
+    return undefined;
+  }
+
+  const report = trafficReportByLineRef.value.get(
+    resolveBoardTrafficLineRef(board),
+  );
+  const currentDisruptions = report
+    ? getCurrentTrafficDisruptions(report.disruptions)
+    : [];
+
+  if (
+    !report ||
+    currentDisruptions.length === 0 ||
+    ["normal", "unknown", "error"].includes(report.status)
+  ) {
+    return undefined;
+  }
+
+  return isTrafficInterruption(currentDisruptions)
+    ? { label: "Interruption", tone: "red" }
+    : { label: "Perturbation", tone: "orange" };
+}
+
+function isTrafficInterruption(
+  disruptions: TrafficLineReport["disruptions"],
+): boolean {
+  return disruptions.some((disruption) => {
+    const searchable = normalizeTrafficText(
+      `${disruption.title} ${disruption.message ?? ""} ${disruption.severity ?? ""}`,
+    );
+
+    return [
+      "interrompu",
+      "interruption",
+      "no service",
+      "no-service",
+      "bloquant",
+      "bloquante",
+    ].some((needle) => searchable.includes(needle));
+  });
+}
+
+function resolveBoardTrafficLineRef(board: TransitBoardConfig): string {
+  return normalizeTrafficLineRef(board.schedule?.lineRef ?? board.line.ref);
+}
+
+function normalizeTrafficText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
 }
 
 function toggleDirection(boardId: string, directionId: string): void {
@@ -566,6 +739,9 @@ async function triggerAlarm(alarm: DepartureAlarm): Promise<void> {
   updateAlarms(markAlarmNotified(alarm.id, departureAlarms.value));
   showAlarmToast(alarm);
   showNativeNotification(alarm);
+  if (settings.value.wakeDeviceOnAlarm) {
+    void requestTemporaryAlarmWakeLock("1m");
+  }
 
   if (alarm.soundEnabled) {
     playSoftAlarm();
@@ -826,9 +1002,36 @@ onBeforeUnmount(() => {
             <span>{{ formatClock(lastRefresh) }}</span>
             <small>dernière mise à jour</small>
           </div>
-          <button type="button" :disabled="refreshing" @click="refreshAll">
-            {{ refreshing ? "Actualisation..." : "Actualiser" }}
-          </button>
+          <div class="topbar-actions" @keydown.esc="closeTopbarMenu">
+            <button
+              class="topbar-actions__trigger icon-button"
+              type="button"
+              aria-label="Ouvrir les actions du dashboard"
+              :aria-expanded="topbarMenuOpen"
+              aria-haspopup="menu"
+              @click="toggleTopbarMenu"
+            >
+              <MoreVertical aria-hidden="true" />
+            </button>
+            <div v-if="topbarMenuOpen" class="topbar-actions__menu" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                :disabled="refreshing"
+                @click="refreshFromTopbarMenu"
+              >
+                <RefreshCw
+                  aria-hidden="true"
+                  :class="{ 'topbar-actions__spin': refreshing }"
+                />
+                {{ refreshing ? "Actualisation..." : "Actualiser" }}
+              </button>
+              <button type="button" role="menuitem" @click="openWeatherModal">
+                <CloudSun aria-hidden="true" />
+                Météo
+              </button>
+            </div>
+          </div>
         </div>
 
         <div class="topbar__controls">
@@ -847,6 +1050,12 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </section>
+
+      <WeatherExperience />
+      <WeatherForecastModal
+        :open="weatherModalOpen"
+        @close="weatherModalOpen = false"
+      />
 
       <section
         v-if="netexCacheAlert"
@@ -869,14 +1078,17 @@ onBeforeUnmount(() => {
           :key="board.id"
           :board="board"
           :departures="states[board.id].departures"
-          :direction-groups="states[board.id].directionGroups"
+          :direction-groups="getVisibleDirectionGroupsForBoard(board.id)"
           :collapsed-direction-ids="getBoardCollapsedDirectionIds(board.id)"
           :loading="states[board.id].loading"
           :error="states[board.id].error"
           :updated-at="states[board.id].updatedAt"
           :removable="isCustomBoard(board.id)"
           :alarm-departure-ids="getBoardAlarmDepartureIds(board.id)"
+          :closed-summary-mode="settings.closedDirectionSummaryMode"
+          :traffic-alert="getBoardTrafficAlert(board)"
           @change-station="changeBoardStation(board, $event)"
+          @open-traffic="openTrafficPage"
           @remove="removeCustomBoard(board.id)"
           @open-line-page="openLinePage"
           @schedule-alarm="openAlarmModal"
@@ -906,6 +1118,9 @@ onBeforeUnmount(() => {
         :loading="patternLoading"
         :open="Boolean(patternTarget)"
         :pattern="patternData"
+        :show-mini-map="settings.showPatternMiniMap"
+        :compact-mode="settings.compactLinePlanMode"
+        :rich-transfer-tooltips="settings.richTransferTooltips"
         @close="closePatternModal"
       />
 

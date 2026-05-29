@@ -2710,6 +2710,7 @@ function buildBoardDeparturesResult(
         id: group.id,
         label: group.label,
         subtitle: group.subtitle,
+        isTerminal: group.isTerminal,
         departures: groupDepartures,
         lastDeparture: lastDeparturesByGroup.get(group.id),
         serviceEnded: hasServiceEnded(lastDeparturesByGroup.get(group.id)),

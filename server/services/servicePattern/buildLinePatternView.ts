@@ -169,6 +169,7 @@ function createDirectionOptions(
           directions.set(station.id, {
             id: station.id,
             label: station.name,
+            isTerminal: true,
           });
         }
       },

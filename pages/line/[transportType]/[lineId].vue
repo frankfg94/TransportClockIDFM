@@ -34,6 +34,10 @@
       :full-line="isFullLineSelected"
       :loading="pending"
       :error="errorMessage"
+      :show-mini-map="settings.showPatternMiniMap"
+      :compact-mode="settings.compactLinePlanMode"
+      :rich-transfer-tooltips="settings.richTransferTooltips"
+      :reduce-motion="settings.reduceMotion"
       @close="navigateHome"
       @direction-change="changeDirection"
     >
@@ -92,6 +96,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useFetch, useRoute, navigateTo } from "#imports";
+import {
+  filterTerminalOnly,
+  useAppSettings,
+} from "../../../src/features/app-settings";
 import { DeparturePatternModal } from "../../../src/features/service-pattern";
 import { DetailedLineMapPicker } from "../../../src/features/line-map";
 import { createLinePresentation, transitModeToFamily } from "../../../src/services/linePresentation";
@@ -105,6 +113,7 @@ const LINE_COMPLETE_DIRECTION_ID = "line-complete";
 type LinePageView = "schema" | "map";
 
 const route = useRoute();
+const { settings } = useAppSettings();
 const apiUrl = computed(() => {
   const params = new URLSearchParams();
   const direction = firstRouteQuery(route.query.direction);
@@ -139,8 +148,12 @@ const directionOptions = computed(() => [
   {
     id: LINE_COMPLETE_DIRECTION_ID,
     label: "Ligne complète",
+    isTerminal: true,
   },
-  ...(patternView.value?.directionOptions ?? []),
+  ...filterTerminalOnly(
+    patternView.value?.directionOptions ?? [],
+    settings.value.terminalDirectionsOnly,
+  ),
 ]);
 
 const errorMessage = computed(() =>
