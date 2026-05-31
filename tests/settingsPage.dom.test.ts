@@ -47,6 +47,10 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Défaut actuel");
     expect(wrapper.text()).toContain("Apparence info trafic");
     expect(wrapper.text()).toContain("Style RATP compact");
+    expect(wrapper.text()).toContain("Page info trafic");
+    expect(wrapper.text()).toContain("Mode par défaut");
+    expect(wrapper.text()).toContain("Optimisé");
+    expect(wrapper.text()).toContain("Toutes les lignes");
     expect(wrapper.text()).toContain("Météo dynamique");
     expect(wrapper.text()).toContain("Alertes avec fond d'écran animé");
     expect(wrapper.text()).toContain("Mode test");

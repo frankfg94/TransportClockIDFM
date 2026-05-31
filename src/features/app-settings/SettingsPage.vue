@@ -7,6 +7,7 @@ import {
   navigationAutoHideOptions,
   parseMaxDeparturesPerDirection,
   parseWeatherLookaheadMinutes,
+  trafficInfoDefaultScopeOptions,
   trafficInfoDesignOptions,
   useAppSettings,
   wakeLockDurationOptions,
@@ -16,6 +17,7 @@ import {
   type ClosedDirectionSummaryMode,
   type CompactLinePlanMode,
   type NavigationAutoHide,
+  type TrafficInfoDefaultScope,
   type TrafficInfoDesign,
   type WakeLockDuration,
   type WeatherMode,
@@ -54,6 +56,10 @@ function updateCompactMode(value: string): void {
 
 function updateTrafficInfoDesign(value: string): void {
   updateSettings({ trafficInfoDesign: value as TrafficInfoDesign });
+}
+
+function updateTrafficInfoDefaultScope(value: string): void {
+  updateSettings({ trafficInfoDefaultScope: value as TrafficInfoDefaultScope });
 }
 
 function updateWeatherMode(value: string): void {
@@ -122,7 +128,9 @@ function updateWeatherCustomLocation(
       <div class="settings-row">
         <div>
           <strong>Prochains passages par direction</strong>
-          <span>La valeur par défaut conserve la limite actuelle du tableau.</span>
+          <span
+            >La valeur par défaut conserve la limite actuelle du tableau.</span
+          >
         </div>
         <MaterialCombobox
           :model-value="String(settings.maxDeparturesPerDirection)"
@@ -163,6 +171,31 @@ function updateWeatherCustomLocation(
           :options="[...trafficInfoDesignOptions]"
           aria-label="Apparence de la page info trafic"
           @update:model-value="updateTrafficInfoDesign"
+        />
+      </div>
+    </section>
+
+    <section class="settings-panel" aria-labelledby="settings-traffic-title">
+      <div class="settings-panel__heading">
+        <div>
+          <p class="eyebrow">Info trafic</p>
+          <h2 id="settings-traffic-title">Page info trafic</h2>
+        </div>
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <strong>Mode par défaut</strong>
+          <span>
+            Optimisé affiche uniquement les lignes des stations ajoutées. Toutes
+            les lignes affiche l'info traffic pour toutes les lignes.
+          </span>
+        </div>
+        <MaterialCombobox
+          :model-value="settings.trafficInfoDefaultScope"
+          :options="[...trafficInfoDefaultScopeOptions]"
+          aria-label="Mode par défaut info trafic"
+          @update:model-value="updateTrafficInfoDefaultScope"
         />
       </div>
     </section>
@@ -208,7 +241,9 @@ function updateWeatherCustomLocation(
       <div class="settings-row">
         <div>
           <strong>Prévenir à l'avance</strong>
-          <span>Fenêtre de prévision utilisée avant d'afficher une alerte.</span>
+          <span
+            >Fenêtre de prévision utilisée avant d'afficher une alerte.</span
+          >
         </div>
         <MaterialCombobox
           :model-value="String(settings.weatherLookaheadMinutes)"
@@ -312,7 +347,10 @@ function updateWeatherCustomLocation(
       <div class="settings-row">
         <div>
           <strong>Vue compacte du plan</strong>
-          <span>Automatique active la vue compacte uniquement sur les lignes denses.</span>
+          <span
+            >Automatique active la vue compacte uniquement sur les lignes
+            denses.</span
+          >
         </div>
         <MaterialCombobox
           :model-value="settings.compactLinePlanMode"
@@ -335,7 +373,10 @@ function updateWeatherCustomLocation(
         <span></span>
         <div>
           <strong>Tooltips riches de correspondances</strong>
-          <small>Affiche les groupes de transport et les directions bus au survol.</small>
+          <small
+            >Affiche les groupes de transport et les directions bus au
+            survol.</small
+          >
         </div>
       </label>
 
@@ -352,7 +393,10 @@ function updateWeatherCustomLocation(
         <span></span>
         <div>
           <strong>Réduire les animations</strong>
-          <small>Conserve les interactions, mais limite les effets visuels secondaires.</small>
+          <small
+            >Conserve les interactions, mais limite les effets visuels
+            secondaires.</small
+          >
         </div>
       </label>
     </section>
@@ -368,7 +412,10 @@ function updateWeatherCustomLocation(
       <div class="settings-row">
         <div>
           <strong>Wake lock</strong>
-          <span>Demande au navigateur de garder l'écran actif pendant la durée choisie.</span>
+          <span
+            >Demande au navigateur de garder l'écran actif pendant la durée
+            choisie.</span
+          >
         </div>
         <MaterialCombobox
           :model-value="settings.wakeLockDuration"
@@ -401,7 +448,10 @@ function updateWeatherCustomLocation(
       <div class="settings-row">
         <div>
           <strong>Masquer la navigation</strong>
-          <span>Le menu réapparaît au toucher, au focus ou au retour sur l'onglet.</span>
+          <span
+            >Le menu réapparaît au toucher, au focus ou au retour sur
+            l'onglet.</span
+          >
         </div>
         <MaterialCombobox
           :model-value="settings.navigationAutoHide"

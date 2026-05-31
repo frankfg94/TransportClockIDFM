@@ -28,6 +28,7 @@ export type WakeLockDuration =
 export type NavigationAutoHide = "none" | "1m";
 export type CompactLinePlanMode = "auto" | "comfort" | "compact";
 export type TrafficInfoDesign = "ratp" | "cards";
+export type TrafficInfoDefaultScope = "optimized" | "all";
 export type WeatherMode = "animated" | "static" | "alerts_only" | "disabled";
 export type WeatherLookaheadMinutes = 60 | 120 | 240 | 480 | 720 | 1440;
 export type WeatherTestMode = "off" | "rain" | "storm" | "snow" | "heat";
@@ -45,6 +46,7 @@ export interface AppSettings {
   compactLinePlanMode: CompactLinePlanMode;
   richTransferTooltips: boolean;
   trafficInfoDesign: TrafficInfoDesign;
+  trafficInfoDefaultScope: TrafficInfoDefaultScope;
   weatherMode: WeatherMode;
   weatherLookaheadMinutes: WeatherLookaheadMinutes;
   weatherLocationPreset: WeatherLocationPreset;
@@ -103,6 +105,11 @@ export const trafficInfoDesignOptions = [
   { id: "cards", label: "Cartes détaillées" },
 ] as const;
 
+export const trafficInfoDefaultScopeOptions = [
+  { id: "optimized", label: "Optimisé" },
+  { id: "all", label: "Toutes les lignes" },
+] as const;
+
 export const weatherModeOptions = [
   { id: "animated", label: "Alertes avec fond d'écran animé" },
   { id: "static", label: "Alertes avec fond d'écran statique" },
@@ -154,6 +161,7 @@ export function createDefaultAppSettings(): AppSettings {
     compactLinePlanMode: "auto",
     richTransferTooltips: true,
     trafficInfoDesign: "ratp",
+    trafficInfoDefaultScope: "optimized",
     weatherMode: "animated",
     weatherLookaheadMinutes: 1440,
     weatherLocationPreset: "paris",
@@ -212,6 +220,11 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     trafficInfoDesign: isTrafficInfoDesign(value.trafficInfoDesign)
       ? value.trafficInfoDesign
       : defaults.trafficInfoDesign,
+    trafficInfoDefaultScope: isTrafficInfoDefaultScope(
+      value.trafficInfoDefaultScope,
+    )
+      ? value.trafficInfoDefaultScope
+      : defaults.trafficInfoDefaultScope,
     weatherMode: isWeatherMode(value.weatherMode)
       ? value.weatherMode
       : defaults.weatherMode,
@@ -399,6 +412,12 @@ function isCompactLinePlanMode(value: unknown): value is CompactLinePlanMode {
 
 function isTrafficInfoDesign(value: unknown): value is TrafficInfoDesign {
   return value === "ratp" || value === "cards";
+}
+
+function isTrafficInfoDefaultScope(
+  value: unknown,
+): value is TrafficInfoDefaultScope {
+  return value === "optimized" || value === "all";
 }
 
 function isWeatherMode(value: unknown): value is WeatherMode {

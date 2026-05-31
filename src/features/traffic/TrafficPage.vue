@@ -10,11 +10,20 @@ import {
 } from "../app-settings";
 import { getActiveTrafficLines } from "./activeTrafficLines";
 import {
+  fetchTransitFamilyOptions,
+  searchTransitLines,
+} from "../../services/idfm";
+import {
+  createLinePresentation,
+  transitFamilyToMode,
+} from "../../services/linePresentation";
+import {
   getCurrentTrafficDisruptions,
   getUpcomingTrafficDisruptions,
   parseTrafficDate,
   type TrafficTimingTab,
 } from "./trafficTiming";
+import type { LineSearchOption, TransitFamily } from "../../types/transit";
 import type {
   ActiveTrafficLine,
   TrafficDisruption,
@@ -27,13 +36,17 @@ type TrafficTone = "orange" | "red";
 type TrafficLineSymbol = "!" | "x" | "roadwork" | "";
 
 const activeLines = ref<ActiveTrafficLine[]>([]);
+const allTrafficLines = ref<ActiveTrafficLine[]>([]);
 const reports = ref<TrafficLineReport[]>([]);
 const generatedAt = ref("");
 const loading = ref(false);
+const loadingAllLines = ref(false);
 const errorMessage = ref("");
+const allLinesError = ref("");
 const configured = ref(true);
 const expandedLineRefs = ref(new Set<string>());
 const selectedTimingTabs = ref<Record<string, TrafficTimingTab>>({});
+const allLinesMode = ref(false);
 const { settings, updateSettings } = useAppSettings();
 
 const reportByLineRef = computed(
@@ -42,10 +55,13 @@ const reportByLineRef = computed(
 const isRatpDesign = computed(
   () => settings.value.trafficInfoDesign === "ratp",
 );
+const displayedLines = computed(() =>
+  allLinesMode.value ? allTrafficLines.value : activeLines.value,
+);
 const groupedLines = computed(() => {
   const groups = new Map<string, ActiveTrafficLine[]>();
 
-  activeLines.value.forEach((line) => {
+  displayedLines.value.forEach((line) => {
     const key = getFamilyLabel(line);
     groups.set(key, [...(groups.get(key) ?? []), line]);
   });
@@ -83,22 +99,37 @@ const firstTrafficDisruption = computed(
 
 onMounted(() => {
   activeLines.value = getActiveTrafficLines();
-  void loadTraffic();
+  allLinesMode.value = settings.value.trafficInfoDefaultScope === "all";
+  void initializeTrafficPage();
 });
+
+async function initializeTrafficPage(): Promise<void> {
+  if (allLinesMode.value) {
+    const isLoaded = await ensureAllTrafficLinesLoaded();
+
+    if (!isLoaded) {
+      return;
+    }
+  }
+
+  await loadTraffic();
+}
 
 async function loadTraffic(): Promise<void> {
   loading.value = true;
   errorMessage.value = "";
 
   try {
-    if (activeLines.value.length === 0) {
+    if (displayedLines.value.length === 0) {
       reports.value = [];
       generatedAt.value = new Date().toISOString();
       return;
     }
 
     const params = new URLSearchParams({
-      lineRefs: activeLines.value.map((line) => line.navitiaLineRef).join(","),
+      lineRefs: displayedLines.value
+        .map((line) => line.navitiaLineRef)
+        .join(","),
     });
     const response = await fetch(`/api/traffic?${params}`);
 
@@ -118,6 +149,98 @@ async function loadTraffic(): Promise<void> {
   } finally {
     loading.value = false;
   }
+}
+
+async function toggleAllLinesMode(): Promise<void> {
+  const nextMode = !allLinesMode.value;
+
+  allLinesError.value = "";
+
+  if (nextMode) {
+    const isLoaded = await ensureAllTrafficLinesLoaded();
+
+    if (!isLoaded) {
+      return;
+    }
+  }
+
+  allLinesMode.value = nextMode;
+  expandedLineRefs.value = new Set();
+  selectedTimingTabs.value = {};
+  void loadTraffic();
+}
+
+async function ensureAllTrafficLinesLoaded(): Promise<boolean> {
+  if (allTrafficLines.value.length > 0) {
+    return true;
+  }
+
+  loadingAllLines.value = true;
+
+  try {
+    allTrafficLines.value = await loadAllTrafficLines();
+    return true;
+  } catch (error) {
+    allLinesError.value =
+      error instanceof Error
+        ? error.message
+        : "Impossible de charger toutes les lignes.";
+    return false;
+  } finally {
+    loadingAllLines.value = false;
+  }
+}
+
+async function loadAllTrafficLines(): Promise<ActiveTrafficLine[]> {
+  const families = await fetchTransitFamilyOptions();
+  const railwayFamilies = families.filter((family) =>
+    isTrafficFamilySupported(family.family),
+  );
+  const linesByRef = new Map<string, ActiveTrafficLine>();
+
+  const groups = await Promise.all(
+    railwayFamilies.map(async (family) => {
+      const lines = await searchTransitLines(family, "");
+
+      return lines.map((line) => createActiveLineFromSearchOption(line));
+    }),
+  );
+
+  groups.flat().forEach((line) => {
+    linesByRef.set(line.navitiaLineRef, line);
+  });
+
+  return Array.from(linesByRef.values()).sort(compareTrafficLines);
+}
+
+function createActiveLineFromSearchOption(
+  line: LineSearchOption,
+): ActiveTrafficLine {
+  const mode = transitFamilyToMode(line.family);
+  const presentation = createLinePresentation({
+    family: line.family,
+    id: line.navitiaId,
+    mode,
+    ref: line.ref,
+    shortName: line.label,
+  });
+
+  return {
+    boardIds: [],
+    boardTitles: [],
+    family: line.family,
+    line: {
+      ref: line.ref || line.navitiaId,
+      shortName: line.label,
+      longName: line.displayName ?? `${formatFamilyDisplayName(line.family)} ${line.label}`,
+      mode,
+      color: line.color ?? presentation.color,
+      textColor: line.textColor ?? presentation.textColor,
+      iconUrl: line.iconUrl ?? presentation.iconUrl,
+      iconUrls: line.iconUrls ?? presentation.iconUrls,
+    },
+    navitiaLineRef: line.navitiaId,
+  };
 }
 
 function getLineReport(line: ActiveTrafficLine): TrafficLineReport {
@@ -189,6 +312,58 @@ function getFamilyOrder(label: string): number {
   };
 
   return order[label] ?? 99;
+}
+
+function isTrafficFamilySupported(family: TransitFamily): boolean {
+  return ["METRO", "RER", "TRANSILIEN", "TRAM", "CABLE"].includes(family);
+}
+
+function formatFamilyDisplayName(family: TransitFamily): string {
+  if (family === "METRO") return "Métro";
+  if (family === "TRAM") return "Tram";
+  if (family === "RER") return "RER";
+  if (family === "CABLE") return "Câble";
+
+  return "Train";
+}
+
+function compareTrafficLines(
+  left: ActiveTrafficLine,
+  right: ActiveTrafficLine,
+): number {
+  const familyDelta =
+    getFamilyOrder(getFamilyLabel(left)) - getFamilyOrder(getFamilyLabel(right));
+
+  if (familyDelta !== 0) {
+    return familyDelta;
+  }
+
+  return compareLineLabels(left.line.shortName, right.line.shortName);
+}
+
+function compareLineLabels(left: string, right: string): number {
+  const leftParts = splitLineLabel(left);
+  const rightParts = splitLineLabel(right);
+  const prefixDelta = leftParts.prefix.localeCompare(rightParts.prefix);
+
+  if (prefixDelta !== 0) {
+    return prefixDelta;
+  }
+
+  if (leftParts.number !== rightParts.number) {
+    return leftParts.number - rightParts.number;
+  }
+
+  return left.localeCompare(right, "fr", { numeric: true });
+}
+
+function splitLineLabel(label: string): { prefix: string; number: number } {
+  const match = label.match(/^([A-Za-z]*)(\d+)/u);
+
+  return {
+    prefix: match?.[1] ?? label,
+    number: match ? Number.parseInt(match[2], 10) : Number.MAX_SAFE_INTEGER,
+  };
 }
 
 function getStatusLabel(status: TrafficLineStatus): string {
@@ -331,14 +506,33 @@ function normalizeText(value: string): string {
             <h1>Votre traffic à {{ informationTime }}</h1>
           </div>
 
-          <div class="traffic-style-control">
-            <span>Style</span>
-            <MaterialCombobox
-              :model-value="settings.trafficInfoDesign"
-              :options="[...trafficInfoDesignOptions]"
-              aria-label="Style info trafic"
-              @update:model-value="updateTrafficInfoDesign"
-            />
+          <div class="traffic-toolbar-controls">
+            <button
+              class="traffic-scope-toggle"
+              type="button"
+              :aria-pressed="allLinesMode"
+              :disabled="loadingAllLines"
+              @click="toggleAllLinesMode"
+            >
+              <span>Mode</span>
+              <strong>{{
+                loadingAllLines
+                  ? "Chargement..."
+                  : allLinesMode
+                    ? "Toutes les lignes"
+                    : "Optimisé"
+              }}</strong>
+            </button>
+
+            <div class="traffic-style-control">
+              <span>Style</span>
+              <MaterialCombobox
+                :model-value="settings.trafficInfoDesign"
+                :options="[...trafficInfoDesignOptions]"
+                aria-label="Style info trafic"
+                @update:model-value="updateTrafficInfoDesign"
+              />
+            </div>
           </div>
         </header>
 
@@ -346,7 +540,11 @@ function normalizeText(value: string): string {
           {{ errorMessage }}
         </section>
 
-        <section v-else-if="activeLines.length === 0" class="traffic-state">
+        <section v-else-if="allLinesError" class="traffic-state traffic-state--error">
+          {{ allLinesError }}
+        </section>
+
+        <section v-else-if="displayedLines.length === 0" class="traffic-state">
           Aucune ligne ferrée active sur le tableau.
         </section>
 
@@ -515,6 +713,23 @@ function normalizeText(value: string): string {
         </div>
 
         <div class="traffic-hero__actions">
+          <button
+            class="traffic-scope-toggle traffic-scope-toggle--cards"
+            type="button"
+            :aria-pressed="allLinesMode"
+            :disabled="loadingAllLines"
+            @click="toggleAllLinesMode"
+          >
+            <span>Mode</span>
+            <strong>{{
+              loadingAllLines
+                ? "Chargement..."
+                : allLinesMode
+                  ? "Toutes les lignes"
+                  : "Optimisé"
+            }}</strong>
+          </button>
+
           <div class="traffic-style-control traffic-style-control--cards">
             <span>Style</span>
             <MaterialCombobox
@@ -551,7 +766,11 @@ function normalizeText(value: string): string {
         {{ errorMessage }}
       </section>
 
-      <section v-else-if="activeLines.length === 0" class="traffic-state">
+      <section v-else-if="allLinesError" class="traffic-state traffic-state--error">
+        {{ allLinesError }}
+      </section>
+
+      <section v-else-if="displayedLines.length === 0" class="traffic-state">
         Aucune ligne ferrée active sur le tableau.
       </section>
 
@@ -782,6 +1001,61 @@ function normalizeText(value: string): string {
   font-weight: 920;
   letter-spacing: 0;
   margin: 0;
+}
+
+.traffic-toolbar-controls {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+}
+
+.traffic-scope-toggle {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e3e5ec;
+  border-radius: 999px;
+  color: var(--ink);
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 9px;
+  min-height: 40px;
+  padding: 0 13px;
+}
+
+.traffic-scope-toggle:hover:not(:disabled) {
+  border-color: #332f9f;
+  transform: none;
+}
+
+.traffic-scope-toggle[aria-pressed="true"] {
+  background: #111827;
+  border-color: #111827;
+  color: #ffffff;
+}
+
+.traffic-scope-toggle:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.traffic-scope-toggle span {
+  color: inherit;
+  font-size: 0.72rem;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  opacity: 0.72;
+  text-transform: uppercase;
+}
+
+.traffic-scope-toggle strong {
+  font-size: 0.92rem;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.traffic-scope-toggle--cards {
+  min-height: 46px;
 }
 
 .traffic-style-control {
@@ -1476,6 +1750,15 @@ function normalizeText(value: string): string {
 
   .traffic-hero__actions {
     display: grid;
+  }
+
+  .traffic-toolbar-controls {
+    align-items: stretch;
+    display: grid;
+  }
+
+  .traffic-scope-toggle {
+    justify-content: space-between;
   }
 
   .traffic-style-control {

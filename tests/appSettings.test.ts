@@ -21,6 +21,7 @@ describe("app settings", () => {
       compactLinePlanMode: "auto",
       richTransferTooltips: true,
       trafficInfoDesign: "ratp",
+      trafficInfoDefaultScope: "optimized",
       weatherMode: "animated",
       weatherLookaheadMinutes: 1440,
       weatherLocationPreset: "paris",
@@ -43,6 +44,7 @@ describe("app settings", () => {
       navigationAutoHide: "always",
       compactLinePlanMode: "tiny",
       trafficInfoDesign: "dense",
+      trafficInfoDefaultScope: "everything",
       weatherMode: "cinematic",
       weatherLookaheadMinutes: "9999",
       weatherLocationPreset: "moon",
@@ -62,6 +64,7 @@ describe("app settings", () => {
     expect(settings.navigationAutoHide).toBe("none");
     expect(settings.compactLinePlanMode).toBe("auto");
     expect(settings.trafficInfoDesign).toBe("ratp");
+    expect(settings.trafficInfoDefaultScope).toBe("optimized");
     expect(settings.weatherMode).toBe("animated");
     expect(settings.weatherLookaheadMinutes).toBe(1440);
     expect(settings.weatherLocationPreset).toBe("paris");
