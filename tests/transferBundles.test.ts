@@ -1,15 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearTransferBundles,
   collectTransferBundleTargets,
   deleteTransferBundle,
   isCompleteTransferBundleResponse,
   listTransferBundles,
+  loadTransferBundleForPattern,
   pruneExpiredTransferBundles,
   saveTransferBundle,
   type TransferBundleStorage,
 } from "../src/features/service-pattern/transferBundles";
-import type { DepartureCallingPattern } from "../src/types/transit";
+import type { DepartureCallingPattern, TransitBoardConfig } from "../src/types/transit";
 
 class MemoryStorage implements TransferBundleStorage {
   private readonly values = new Map<string, string>();
@@ -28,6 +29,10 @@ class MemoryStorage implements TransferBundleStorage {
 }
 
 describe("transfer bundles", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("collects unique stop-area refs from calls and topology", () => {
     const pattern: DepartureCallingPattern = {
       departureId: "test",
@@ -85,7 +90,7 @@ describe("transfer bundles", () => {
     ]);
   });
 
-  it("rejects incomplete bundle responses before they can be stored", () => {
+  it("detects incomplete bundle responses without forcing a slow fallback", () => {
     expect(
       isCompleteTransferBundleResponse(
         [
@@ -103,6 +108,76 @@ describe("transfer bundles", () => {
         },
       ),
     ).toBe(false);
+  });
+
+  it("accepts partial bundle responses so unresolved stations do not block display", async () => {
+    const storage = new MemoryStorage();
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          version: 1,
+          generatedAt: "2026-06-02T10:00:00.000Z",
+          lineId: "line:IDFM:C01794",
+          lineLabel: "Tram T6",
+          transfersByStopAreaRef: {
+            "FR::Quay:50149051:FR1": [
+              {
+                id: "line:IDFM:C01383",
+                label: "13",
+                family: "METRO",
+                mode: "metro",
+              },
+            ],
+          },
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      ),
+    );
+    const pattern: DepartureCallingPattern = {
+      departureId: "t6",
+      destination: "Viroflay",
+      serviceType: "omnibus",
+      calls: [
+        {
+          id: "call-chatillon",
+          label: "Chatillon - Montrouge",
+          current: true,
+          served: true,
+          stopAreaRef: "FR::Quay:50149051:FR1",
+        },
+        {
+          id: "call-unresolved",
+          label: "Station non resolue",
+          current: false,
+          served: true,
+          stopAreaRef: "FR::Quay:missing:FR1",
+        },
+      ],
+    };
+
+    vi.stubGlobal("window", { localStorage: storage });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const transfers = await loadTransferBundleForPattern(
+      createBoard("line:IDFM:C01794", "Tram T6"),
+      pattern,
+      15,
+    );
+
+    expect(transfers["FR::Quay:50149051:FR1"]?.map((line) => line.label)).toEqual([
+      "13",
+    ]);
+    expect(transfers["FR::Quay:missing:FR1"]).toBeUndefined();
+    expect(listTransferBundles(storage)).toMatchObject([
+      {
+        lineLabel: "Tram T6",
+        stopAreaCount: 1,
+        transferCount: 1,
+      },
+    ]);
   });
 
   it("saves, lists, merges and deletes local bundles", () => {
@@ -203,4 +278,22 @@ function createStop(label: string, stopAreaRef: string) {
       scheduleStopAreaRef: stopAreaRef,
     },
   };
+}
+
+function createBoard(lineRef: string, longName: string): TransitBoardConfig {
+  return {
+    id: lineRef,
+    title: longName,
+    line: {
+      color: "#0064ff",
+      longName,
+      mode: "tram",
+      ref: lineRef,
+      shortName: longName.replace(/^Tram\s+/u, ""),
+      textColor: "#ffffff",
+    },
+    schedule: {
+      lineRef,
+    },
+  } as TransitBoardConfig;
 }

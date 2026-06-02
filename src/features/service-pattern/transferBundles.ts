@@ -118,10 +118,6 @@ export async function loadTransferBundleForPattern(
       retentionDays,
     });
 
-    if (!isCompleteTransferBundleResponse(requestedTargets, response)) {
-      throw new Error("Incomplete transfer bundle response.");
-    }
-
     const merged = saveTransferBundle(response, retentionDays, storage);
 
     return merged.transfersByStopAreaRef;
@@ -130,7 +126,7 @@ export async function loadTransferBundleForPattern(
       return existing.transfersByStopAreaRef;
     }
 
-    throw error;
+    return {};
   }
 }
 

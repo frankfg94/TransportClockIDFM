@@ -21,7 +21,7 @@ interface TransferBundleRequestBody {
 
 type CachedTransferRequest = {
   expiresAt: number;
-  promise: Promise<TransferLineOption[]>;
+  promise: Promise<TransferLineOption[] | undefined>;
 };
 
 type CachedLineStationsRequest = {
@@ -156,7 +156,7 @@ function getCachedTransfers(
     currentLineLabel,
     retentionDays,
     fetcher,
-  );
+  ).catch(() => undefined);
 
   return stationPromise.then((station) => {
     if (!station?.scheduleStopAreaRef?.startsWith("stop_area:")) {
@@ -174,7 +174,7 @@ function getCachedTransfers(
       apiBase: MARKETPLACE_NAVITIA_BASE,
       fetcher,
       transferScope: "connected",
-    });
+    }).catch(() => undefined);
 
     transferCache.set(cacheKey, {
       expiresAt: now + retentionDays * DAY_MS,
