@@ -69,7 +69,9 @@ export default defineEventHandler(async (event): Promise<TransferBundleResponse>
     );
 
     entries.forEach(([stopAreaRef, transfers]) => {
-      transfersByStopAreaRef[stopAreaRef] = transfers;
+      if (transfers !== undefined) {
+        transfersByStopAreaRef[stopAreaRef] = transfers;
+      }
     });
   }
 
@@ -146,39 +148,9 @@ function getCachedTransfers(
   currentLineLabel: string,
   retentionDays: number,
   fetcher: typeof fetch,
-): Promise<TransferLineOption[]> {
+): Promise<TransferLineOption[] | undefined> {
   const now = Date.now();
-  const cacheKey = `${currentLineId}:${target.stopAreaRef}`;
-  const cached = transferCache.get(cacheKey);
-
-  if (cached && cached.expiresAt > now) {
-    return cached.promise;
-  }
-
-  const request = fetchTransfersForTarget(
-    target,
-    currentLineId,
-    currentLineLabel,
-    retentionDays,
-    fetcher,
-  ).catch((): TransferLineOption[] => []);
-
-  transferCache.set(cacheKey, {
-    expiresAt: now + retentionDays * DAY_MS,
-    promise: request,
-  });
-
-  return request;
-}
-
-function fetchTransfersForTarget(
-  target: TransferBundleTarget,
-  currentLineId: string,
-  currentLineLabel: string,
-  retentionDays: number,
-  fetcher: typeof fetch,
-): Promise<TransferLineOption[]> {
-  const station = resolveStationForTarget(
+  const stationPromise = resolveStationForTarget(
     target,
     currentLineId,
     currentLineLabel,
@@ -186,13 +158,31 @@ function fetchTransfersForTarget(
     fetcher,
   );
 
-  return station.then((resolvedStation) =>
-    fetchStationTransfers(resolvedStation, currentLineId, {
+  return stationPromise.then((station) => {
+    if (!station?.scheduleStopAreaRef?.startsWith("stop_area:")) {
+      return undefined;
+    }
+
+    const cacheKey = `${currentLineId}:${station.scheduleStopAreaRef}`;
+    const cached = transferCache.get(cacheKey);
+
+    if (cached && cached.expiresAt > now) {
+      return cached.promise;
+    }
+
+    const request = fetchStationTransfers(station, currentLineId, {
       apiBase: MARKETPLACE_NAVITIA_BASE,
       fetcher,
       transferScope: "connected",
-    }),
-  );
+    });
+
+    transferCache.set(cacheKey, {
+      expiresAt: now + retentionDays * DAY_MS,
+      promise: request,
+    });
+
+    return request;
+  });
 }
 
 async function resolveStationForTarget(
@@ -201,7 +191,7 @@ async function resolveStationForTarget(
   currentLineLabel: string,
   retentionDays: number,
   fetcher: typeof fetch,
-): Promise<StationSearchOption> {
+): Promise<StationSearchOption | undefined> {
   if (target.stopAreaRef.startsWith("stop_area:")) {
     return createStationOptionForTarget(target, target.stopAreaRef);
   }
@@ -212,13 +202,8 @@ async function resolveStationForTarget(
     retentionDays,
     fetcher,
   );
-  const station = findMatchingLineStation(target, stations);
 
-  if (station) {
-    return station;
-  }
-
-  return createStationOptionForTarget(target, target.stopAreaRef);
+  return findMatchingLineStation(target, stations);
 }
 
 function createStationOptionForTarget(
@@ -302,20 +287,76 @@ function findMatchingLineStation(
   stations: StationSearchOption[],
 ): StationSearchOption | undefined {
   const normalizedTarget = normalizeBundleStationName(target.label);
+  const targetTokens = createBundleStationTokens(normalizedTarget);
 
   return (
     stations.find(
       (station) => normalizeBundleStationName(station.label) === normalizedTarget,
     ) ??
-    stations.find((station) => {
-      const normalizedStation = normalizeBundleStationName(station.label);
-
-      return (
-        normalizedStation.includes(normalizedTarget) ||
-        normalizedTarget.includes(normalizedStation)
-      );
-    })
+    stations
+      .map((station) => ({
+        score: scoreStationNameMatch(
+          normalizedTarget,
+          targetTokens,
+          normalizeBundleStationName(`${station.label} ${station.city ?? ""}`),
+        ),
+        station,
+      }))
+      .filter(({ score }) => score > 0)
+      .sort((left, right) => right.score - left.score)[0]?.station
   );
+}
+
+function scoreStationNameMatch(
+  normalizedTarget: string,
+  targetTokens: string[],
+  normalizedStation: string,
+): number {
+  if (!normalizedTarget || !normalizedStation) {
+    return 0;
+  }
+
+  if (
+    normalizedStation.includes(normalizedTarget) ||
+    normalizedTarget.includes(normalizedStation)
+  ) {
+    return Math.min(normalizedTarget.length, normalizedStation.length) >= 6 ? 80 : 0;
+  }
+
+  const stationTokens = new Set(createBundleStationTokens(normalizedStation));
+  const sharedTokenCount = targetTokens.filter((token) =>
+    stationTokens.has(token),
+  ).length;
+
+  if (sharedTokenCount === 0) {
+    return 0;
+  }
+
+  return sharedTokenCount >= Math.min(targetTokens.length, 2)
+    ? 40 + sharedTokenCount
+    : 0;
+}
+
+function createBundleStationTokens(value: string): string[] {
+  return value
+    .split(/\s+/u)
+    .filter((token) => token.length >= 3)
+    .filter(
+      (token) =>
+        ![
+          "gare",
+          "station",
+          "metro",
+          "rer",
+          "tram",
+          "bus",
+          "sur",
+          "sous",
+          "les",
+          "des",
+          "aux",
+        ].includes(token),
+    );
 }
 
 function normalizeBundleStationName(value: string | undefined): string {

@@ -3,6 +3,7 @@ import {
   clearTransferBundles,
   collectTransferBundleTargets,
   deleteTransferBundle,
+  isCompleteTransferBundleResponse,
   listTransferBundles,
   pruneExpiredTransferBundles,
   saveTransferBundle,
@@ -82,6 +83,26 @@ describe("transfer bundles", () => {
         city: undefined,
       },
     ]);
+  });
+
+  it("rejects incomplete bundle responses before they can be stored", () => {
+    expect(
+      isCompleteTransferBundleResponse(
+        [
+          {
+            stopAreaRef: "FR::Quay:50149051:FR1",
+            label: "Chatillon - Montrouge",
+          },
+        ],
+        {
+          version: 1,
+          generatedAt: "2026-06-02T10:00:00.000Z",
+          lineId: "line:IDFM:C01794",
+          lineLabel: "Tram T6",
+          transfersByStopAreaRef: {},
+        },
+      ),
+    ).toBe(false);
   });
 
   it("saves, lists, merges and deletes local bundles", () => {

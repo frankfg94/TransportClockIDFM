@@ -50,7 +50,7 @@ export interface TransferBundleStorage {
   removeItem(key: string): void;
 }
 
-const TRANSFER_BUNDLE_STORAGE_KEY = "transport-clock.transfer-bundles.v1";
+const TRANSFER_BUNDLE_STORAGE_KEY = "transport-clock.transfer-bundles.v2";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function collectTransferBundleTargets(
@@ -110,12 +110,18 @@ export async function loadTransferBundleForPattern(
   }
 
   try {
+    const requestedTargets = missingTargets.length > 0 ? missingTargets : targets;
     const response = await fetchTransferBundle({
       lineId,
       lineLabel,
-      targets: missingTargets.length > 0 ? missingTargets : targets,
+      targets: requestedTargets,
       retentionDays,
     });
+
+    if (!isCompleteTransferBundleResponse(requestedTargets, response)) {
+      throw new Error("Incomplete transfer bundle response.");
+    }
+
     const merged = saveTransferBundle(response, retentionDays, storage);
 
     return merged.transfersByStopAreaRef;
@@ -227,6 +233,18 @@ export function saveTransferBundle(
   }
 
   return record;
+}
+
+export function isCompleteTransferBundleResponse(
+  targets: TransferBundleTarget[],
+  response: TransferBundleResponse,
+): boolean {
+  return targets.every((target) =>
+    Object.prototype.hasOwnProperty.call(
+      response.transfersByStopAreaRef,
+      target.stopAreaRef,
+    ),
+  );
 }
 
 function readTransferBundleRecord(
