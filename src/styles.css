@@ -1511,9 +1511,10 @@ h3 {
   box-shadow: 0 14px 32px rgba(16, 35, 63, 0.12);
   color: var(--ink);
   display: inline-flex;
-  gap: 8px;
+  gap: 10px;
   left: 14px;
-  padding: 8px 12px;
+  min-width: 240px;
+  padding: 9px 12px;
   position: absolute;
   top: 14px;
   z-index: 20;
@@ -1532,6 +1533,50 @@ h3 {
   font-size: 0.76rem;
   font-weight: 950;
   letter-spacing: 0;
+}
+
+.pattern-flow-transfer-loader__content {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+
+.pattern-flow-transfer-loader__label {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.pattern-flow-transfer-loader__label small {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 950;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.pattern-flow-transfer-loader__track {
+  background: rgba(16, 35, 63, 0.1);
+  border-radius: 999px;
+  height: 5px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.pattern-flow-transfer-loader__track i {
+  background: linear-gradient(
+    90deg,
+    var(--line-color),
+    color-mix(in srgb, var(--line-color) 58%, #ffffff)
+  );
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  transition: width 180ms ease;
+  width: 0%;
 }
 
 .pattern-flow .vue-flow__controls {

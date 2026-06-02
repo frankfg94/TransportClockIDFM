@@ -31,7 +31,10 @@ import {
   countPatternTopologyStations,
   shouldUseCompactPatternFlow,
 } from "./compactPatternFlow";
-import { hydrateDeparturePatternTransfers } from "./patternTransfers";
+import {
+  hydrateDeparturePatternTransfers,
+  type PatternTransferHydrationProgress,
+} from "./patternTransfers";
 import { loadTransferLineDirections } from "../line-map/lineMapData";
 
 import type {
@@ -225,6 +228,12 @@ const patternFlowViewportSize = ref<PatternViewportSize>({
 });
 const hydratedPattern = ref<DepartureCallingPattern>();
 const transferHydrationLoading = ref(false);
+const transferHydrationProgress = ref<PatternTransferHydrationProgress>({
+  completed: 0,
+  failed: 0,
+  pending: 0,
+  total: 0,
+});
 const activeStationTooltipKey = ref<string>();
 const activeTransfer = ref<TransferLineOption>();
 const transferDirectionStates = reactive<
@@ -239,6 +248,29 @@ const serviceLabel = computed(() =>
     ? formatServiceType(displayPattern.value.serviceType)
     : "Desserte",
 );
+
+const transferHydrationProgressPercent = computed(() => {
+  const total = transferHydrationProgress.value.total;
+
+  if (total <= 0) {
+    return 0;
+  }
+
+  return Math.min(
+    100,
+    Math.max(0, (transferHydrationProgress.value.completed / total) * 100),
+  );
+});
+
+const transferHydrationProgressLabel = computed(() => {
+  const total = transferHydrationProgress.value.total;
+
+  if (total <= 0) {
+    return "Préparation";
+  }
+
+  return `${transferHydrationProgress.value.completed}/${total}`;
+});
 const servedCalls = computed(
   () => displayPattern.value?.calls.filter((call) => call.served) ?? [],
 );
@@ -532,6 +564,12 @@ async function hydratePatternTransfers(): Promise<void> {
   const board = props.board;
 
   hydratedPattern.value = pattern;
+  transferHydrationProgress.value = {
+    completed: 0,
+    failed: 0,
+    pending: 0,
+    total: 0,
+  };
 
   if (!props.open || !board || !pattern) {
     transferHydrationLoading.value = false;
@@ -550,7 +588,14 @@ async function hydratePatternTransfers(): Promise<void> {
       board,
       pattern,
       undefined,
-      { retentionDays: props.transferBundleRetentionDays },
+      {
+        onProgress(progress) {
+          if (requestId === transferHydrationRequest) {
+            transferHydrationProgress.value = progress;
+          }
+        },
+        retentionDays: props.transferBundleRetentionDays,
+      },
     );
 
     if (requestId === transferHydrationRequest) {
@@ -2663,7 +2708,22 @@ onBeforeUnmount(() => {
                     aria-live="polite"
                   >
                     <span aria-hidden="true"></span>
-                    <strong>Chargement des correspondances</strong>
+                    <div class="pattern-flow-transfer-loader__content">
+                      <div class="pattern-flow-transfer-loader__label">
+                        <strong>Chargement des correspondances</strong>
+                        <small>{{ transferHydrationProgressLabel }}</small>
+                      </div>
+                      <div
+                        class="pattern-flow-transfer-loader__track"
+                        aria-hidden="true"
+                      >
+                        <i
+                          :style="{
+                            width: `${transferHydrationProgressPercent}%`,
+                          }"
+                        ></i>
+                      </div>
+                    </div>
                   </div>
                   <div class="pattern-flow-actions">
                     <slot name="flow-actions-prefix"></slot>

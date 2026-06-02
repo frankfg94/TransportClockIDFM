@@ -265,6 +265,136 @@ describe("transfer bundles", () => {
     clearTransferBundles(storage);
     expect(listTransferBundles(storage)).toEqual([]);
   });
+
+  it("clears legacy bundle stores and sends a cache-buster on the next request", async () => {
+    const storage = new MemoryStorage();
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          version: 1,
+          generatedAt: "2026-06-02T10:00:00.000Z",
+          lineId: "line:IDFM:C01727",
+          lineLabel: "RER B",
+          transfersByStopAreaRef: {},
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      ),
+    );
+
+    saveTransferBundle(
+      {
+        version: 1,
+        generatedAt: "2026-06-02T10:00:00.000Z",
+        lineId: "line:IDFM:C01727",
+        lineLabel: "RER B",
+        transfersByStopAreaRef: {
+          "stop_area:IDFM:A": [{ id: "line:IDFM:C01371", label: "1" }],
+        },
+      },
+      15,
+      storage,
+    );
+    storage.setItem(
+      "transport-clock.transfer-bundles.v1",
+      JSON.stringify({
+        version: 1,
+        bundles: [
+          {
+            id: "legacy",
+            lineId: "legacy",
+            lineLabel: "Legacy",
+            generatedAt: "2026-06-02T10:00:00.000Z",
+            createdAt: "2026-06-02T10:00:00.000Z",
+            updatedAt: "2026-06-02T10:00:00.000Z",
+            expiresAt: "2026-06-17T10:00:00.000Z",
+            retentionDays: 15,
+            transfersByStopAreaRef: {},
+          },
+        ],
+      }),
+    );
+    storage.setItem(
+      "transport-clock.transfer-bundles.v2",
+      JSON.stringify({
+        version: 1,
+        bundles: [
+          {
+            id: "legacy-v2",
+            lineId: "legacy-v2",
+            lineLabel: "Legacy v2",
+            generatedAt: "2026-06-02T10:00:00.000Z",
+            createdAt: "2026-06-02T10:00:00.000Z",
+            updatedAt: "2026-06-02T10:00:00.000Z",
+            expiresAt: "2026-06-17T10:00:00.000Z",
+            retentionDays: 15,
+            transfersByStopAreaRef: {},
+          },
+        ],
+      }),
+    );
+
+    clearTransferBundles(storage);
+    expect(listTransferBundles(storage)).toEqual([]);
+
+    vi.stubGlobal("window", { localStorage: storage });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadTransferBundleForPattern(
+      createBoard("line:IDFM:C01727", "RER B"),
+      {
+        departureId: "rer-b",
+        destination: "Saint-Remy",
+        serviceType: "omnibus",
+        calls: [
+          {
+            id: "call-a",
+            label: "Station A",
+            current: true,
+            served: true,
+            stopAreaRef: "stop_area:IDFM:A",
+          },
+        ],
+      },
+      15,
+    );
+
+    const payload = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string) as {
+      cacheBust?: string;
+    };
+
+    expect(payload.cacheBust).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
+  });
+
+  it("does not reuse legacy bundle stores after transfer matching changes", () => {
+    const storage = new MemoryStorage();
+
+    storage.setItem(
+      "transport-clock.transfer-bundles.v2",
+      JSON.stringify({
+        version: 1,
+        bundles: [
+          {
+            id: "stale-metro-13",
+            lineId: "line:IDFM:C01383",
+            lineLabel: "Metro 13",
+            generatedAt: "2026-06-02T10:00:00.000Z",
+            createdAt: "2026-06-02T10:00:00.000Z",
+            updatedAt: "2026-06-02T10:00:00.000Z",
+            expiresAt: "2026-06-17T10:00:00.000Z",
+            retentionDays: 15,
+            transfersByStopAreaRef: {
+              "FR::Quay:50026786:FR1": [],
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(listTransferBundles(storage)).toEqual([]);
+  });
 });
 
 function createStop(label: string, stopAreaRef: string) {

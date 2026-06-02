@@ -39,6 +39,20 @@ export interface TransferBundleSummary {
   transferCount: number;
 }
 
+export interface TransferBundleLoadResult {
+  complete: boolean;
+  missingTargetRefs: string[];
+  targetCount: number;
+  transfersByStopAreaRef: Record<string, TransferLineOption[]>;
+}
+
+export interface TransferBundleLoadProgress {
+  completed: number;
+  failed: number;
+  pending: number;
+  total: number;
+}
+
 interface TransferBundleStore {
   version: 1;
   bundles: TransferBundleRecord[];
@@ -50,7 +64,17 @@ export interface TransferBundleStorage {
   removeItem(key: string): void;
 }
 
-const TRANSFER_BUNDLE_STORAGE_KEY = "transport-clock.transfer-bundles.v2";
+const TRANSFER_BUNDLE_STORAGE_KEY = "transport-clock.transfer-bundles.v3";
+const LEGACY_TRANSFER_BUNDLE_STORAGE_KEYS = [
+  "transport-clock.transfer-bundles.v2",
+  "transport-clock.transfer-bundles.v1",
+];
+const TRANSFER_BUNDLE_STORAGE_KEYS = [
+  TRANSFER_BUNDLE_STORAGE_KEY,
+  ...LEGACY_TRANSFER_BUNDLE_STORAGE_KEYS,
+];
+const TRANSFER_BUNDLE_RESET_KEY = "transport-clock.transfer-bundles.resetAt";
+const TRANSFER_BUNDLE_REQUEST_BATCH_SIZE = 10;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function collectTransferBundleTargets(
@@ -84,13 +108,28 @@ export async function loadTransferBundleForPattern(
   pattern: DepartureCallingPattern,
   retentionDays: number,
 ): Promise<Record<string, TransferLineOption[]>> {
+  const result = await loadTransferBundleResultForPattern(
+    board,
+    pattern,
+    retentionDays,
+  );
+
+  return result.transfersByStopAreaRef;
+}
+
+export async function loadTransferBundleResultForPattern(
+  board: TransitBoardConfig,
+  pattern: DepartureCallingPattern,
+  retentionDays: number,
+  options: { onProgress?: (progress: TransferBundleLoadProgress) => void } = {},
+): Promise<TransferBundleLoadResult> {
   const storage = getBrowserStorage();
   const lineId = getBundleLineId(board);
   const lineLabel = getBundleLineLabel(board);
   const targets = collectTransferBundleTargets(pattern);
 
   if (!storage || targets.length === 0) {
-    return {};
+    return createBundleLoadResult({}, targets);
   }
 
   pruneExpiredTransferBundles(storage);
@@ -105,28 +144,46 @@ export async function loadTransferBundleForPattern(
       ),
   );
 
+  const existingIsUsable = Boolean(existing && !isTransferBundleExpired(existing));
+
+  reportBundleProgress(
+    targets,
+    existingIsUsable ? existing?.transfersByStopAreaRef ?? {} : {},
+    options.onProgress,
+  );
+
   if (existing && missingTargets.length === 0 && !isTransferBundleExpired(existing)) {
-    return existing.transfersByStopAreaRef;
+    return createBundleLoadResult(existing.transfersByStopAreaRef, targets);
   }
 
   try {
     const requestedTargets = missingTargets.length > 0 ? missingTargets : targets;
-    const response = await fetchTransferBundle({
-      lineId,
-      lineLabel,
-      targets: requestedTargets,
-      retentionDays,
-    });
+    let merged: TransferBundleRecord | undefined;
 
-    const merged = saveTransferBundle(response, retentionDays, storage);
+    for (
+      let index = 0;
+      index < requestedTargets.length;
+      index += TRANSFER_BUNDLE_REQUEST_BATCH_SIZE
+    ) {
+      const response = await fetchTransferBundle({
+        lineId,
+        lineLabel,
+        cacheBust: getTransferBundleCacheBust(storage),
+        targets: requestedTargets.slice(index, index + TRANSFER_BUNDLE_REQUEST_BATCH_SIZE),
+        retentionDays,
+      });
 
-    return merged.transfersByStopAreaRef;
-  } catch (error) {
-    if (existing) {
-      return existing.transfersByStopAreaRef;
+      merged = saveTransferBundle(response, retentionDays, storage);
+      reportBundleProgress(targets, merged.transfersByStopAreaRef, options.onProgress);
     }
 
-    return {};
+    return createBundleLoadResult(merged?.transfersByStopAreaRef ?? {}, targets);
+  } catch (error) {
+    if (existing) {
+      return createBundleLoadResult(existing.transfersByStopAreaRef, targets);
+    }
+
+    return createBundleLoadResult({}, targets);
   }
 }
 
@@ -157,7 +214,12 @@ export function listTransferBundles(
 }
 
 export function clearTransferBundles(storage = getBrowserStorage()): void {
-  storage?.removeItem(TRANSFER_BUNDLE_STORAGE_KEY);
+  if (!storage) {
+    return;
+  }
+
+  TRANSFER_BUNDLE_STORAGE_KEYS.forEach((key) => storage.removeItem(key));
+  bumpTransferBundleCacheBust(storage);
 }
 
 export function deleteTransferBundle(
@@ -177,6 +239,7 @@ export function deleteTransferBundle(
     },
     storage,
   );
+  bumpTransferBundleCacheBust(storage);
 }
 
 export function pruneExpiredTransferBundles(
@@ -255,6 +318,7 @@ function readTransferBundleRecord(
 }
 
 function fetchTransferBundle(payload: {
+  cacheBust?: string;
   lineId: string;
   lineLabel: string;
   retentionDays: number;
@@ -302,6 +366,7 @@ function writeTransferBundleStore(
   store: TransferBundleStore,
   storage: TransferBundleStorage,
 ): void {
+  LEGACY_TRANSFER_BUNDLE_STORAGE_KEYS.forEach((key) => storage.removeItem(key));
   storage.setItem(TRANSFER_BUNDLE_STORAGE_KEY, JSON.stringify(store));
 }
 
@@ -310,6 +375,60 @@ function createEmptyStore(): TransferBundleStore {
     version: 1,
     bundles: [],
   };
+}
+
+function createBundleLoadResult(
+  transfersByStopAreaRef: Record<string, TransferLineOption[]>,
+  targets: TransferBundleTarget[],
+): TransferBundleLoadResult {
+  const missingTargetRefs = targets
+    .filter(
+      (target) =>
+        !Object.prototype.hasOwnProperty.call(
+          transfersByStopAreaRef,
+          target.stopAreaRef,
+        ),
+    )
+    .map((target) => target.stopAreaRef);
+
+  return {
+    complete: missingTargetRefs.length === 0,
+    missingTargetRefs,
+    targetCount: targets.length,
+    transfersByStopAreaRef,
+  };
+}
+
+function reportBundleProgress(
+  targets: TransferBundleTarget[],
+  transfersByStopAreaRef: Record<string, TransferLineOption[]>,
+  onProgress: ((progress: TransferBundleLoadProgress) => void) | undefined,
+): void {
+  if (!onProgress || targets.length === 0) {
+    return;
+  }
+
+  const completed = targets.filter((target) =>
+    Object.prototype.hasOwnProperty.call(
+      transfersByStopAreaRef,
+      target.stopAreaRef,
+    ),
+  ).length;
+
+  onProgress({
+    completed,
+    failed: 0,
+    pending: Math.max(0, targets.length - completed),
+    total: targets.length,
+  });
+}
+
+function bumpTransferBundleCacheBust(storage: TransferBundleStorage): void {
+  storage.setItem(TRANSFER_BUNDLE_RESET_KEY, new Date().toISOString());
+}
+
+function getTransferBundleCacheBust(storage: TransferBundleStorage): string | undefined {
+  return storage.getItem(TRANSFER_BUNDLE_RESET_KEY) ?? undefined;
 }
 
 function createTransferBundleId(lineId: string): string {

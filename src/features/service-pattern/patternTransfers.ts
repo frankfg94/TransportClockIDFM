@@ -22,7 +22,10 @@ import {
   patternStationKeysAreCompatible,
   type PatternStationKeySource,
 } from "./stationKeys";
-import { loadTransferBundleForPattern } from "./transferBundles";
+import {
+  loadTransferBundleResultForPattern,
+  type TransferBundleLoadProgress,
+} from "./transferBundles";
 
 interface PatternTransferHydrationClient {
   getTransitFamilies?(): Promise<TransitFamilyOption[]>;
@@ -48,6 +51,19 @@ interface TransferTarget {
   stopAreaRef?: string;
 }
 
+export interface PatternTransferHydrationProgress {
+  completed: number;
+  failed: number;
+  pending: number;
+  total: number;
+}
+
+interface PatternTransferHydrationOptions {
+  onProgress?: (progress: PatternTransferHydrationProgress) => void;
+  preferBundle?: boolean;
+  retentionDays?: number;
+}
+
 const MAX_TRANSFER_STATIONS = 64;
 const TRANSFER_BATCH_SIZE = 8;
 const liveClient: PatternTransferHydrationClient = {
@@ -65,31 +81,84 @@ export async function hydrateDeparturePatternTransfers(
   board: TransitBoardConfig,
   pattern: DepartureCallingPattern,
   client: PatternTransferHydrationClient = liveClient,
-  options: { retentionDays?: number; preferBundle?: boolean } = {},
+  options: PatternTransferHydrationOptions = {},
 ): Promise<DepartureCallingPattern> {
+  let hydrationBasePattern = pattern;
+  let targetFilter: ((target: TransferTarget) => boolean) | undefined;
+  let overallTotal = 0;
+  let overallCompleted = 0;
+  let overallFailed = 0;
+
   if (options.preferBundle !== false && client === liveClient) {
-    const bundledPattern = await hydratePatternTransfersFromBundle(
+    const bundledResult = await hydratePatternTransfersFromBundle(
       board,
       pattern,
       options.retentionDays ?? 15,
+      (progress) => {
+        overallTotal = progress.total;
+        overallCompleted = progress.completed;
+        overallFailed = progress.failed;
+        reportTransferHydrationProgress(options.onProgress, {
+          completed: overallCompleted,
+          failed: overallFailed,
+          total: overallTotal,
+        });
+      },
     ).catch(() => undefined);
 
-    if (bundledPattern) {
-      return bundledPattern;
+    if (bundledResult?.complete) {
+      reportTransferHydrationProgress(options.onProgress, {
+        completed: bundledResult.targetCount,
+        failed: 0,
+        total: bundledResult.targetCount,
+      });
+      return bundledResult.pattern;
+    }
+
+    if (bundledResult) {
+      hydrationBasePattern = bundledResult.pattern;
+      const missingRefs = new Set(bundledResult.missingTargetRefs);
+      overallTotal = bundledResult.targetCount;
+      overallCompleted = Math.max(
+        0,
+        bundledResult.targetCount - bundledResult.missingTargetRefs.length,
+      );
+      overallFailed = 0;
+      reportTransferHydrationProgress(options.onProgress, {
+        completed: overallCompleted,
+        failed: overallFailed,
+        total: overallTotal,
+      });
+
+      targetFilter = (target) =>
+        Boolean(target.stopAreaRef && missingRefs.has(target.stopAreaRef));
     }
   }
 
   const line = await resolveLineOption(board, client);
 
   if (!line) {
-    return pattern;
+    return hydrationBasePattern;
   }
 
   const stations = await resolveLineStations(line, client);
-  const targets = createTransferTargets(pattern).slice(0, MAX_TRANSFER_STATIONS);
+  const targets = createTransferTargets(hydrationBasePattern)
+    .filter((target) => (targetFilter ? targetFilter(target) : true))
+    .slice(0, MAX_TRANSFER_STATIONS);
 
   if (targets.length === 0 || stations.length === 0) {
-    return pattern;
+    return hydrationBasePattern;
+  }
+
+  if (overallTotal === 0) {
+    overallTotal = targets.length;
+    overallCompleted = 0;
+    overallFailed = 0;
+    reportTransferHydrationProgress(options.onProgress, {
+      completed: overallCompleted,
+      failed: overallFailed,
+      total: overallTotal,
+    });
   }
 
   const transfersByKey = new Map<string, TransferLineOption[]>();
@@ -101,18 +170,41 @@ export async function hydrateDeparturePatternTransfers(
         const station = findMatchingStation(target, stations);
 
         if (!station) {
+          overallFailed += 1;
+          overallCompleted += 1;
+          reportTransferHydrationProgress(options.onProgress, {
+            completed: overallCompleted,
+            failed: overallFailed,
+            total: overallTotal,
+          });
+
           return [target.key, [] as TransferLineOption[]] as const;
         }
 
         // A line map needs the full interchange cluster, not only the current
         // stop_area. Navitia can split a single station complex across nearby
         // stop areas, so every node uses the connected transfer resolver.
+        let failed = false;
         const transfers = await fetchCachedTransfers(
           station,
           line.id,
           client,
           "connected",
-        ).catch((): TransferLineOption[] => []);
+        ).catch((): TransferLineOption[] => {
+          failed = true;
+
+          return [];
+        });
+
+        if (failed) {
+          overallFailed += 1;
+        }
+        overallCompleted += 1;
+        reportTransferHydrationProgress(options.onProgress, {
+          completed: overallCompleted,
+          failed: overallFailed,
+          total: overallTotal,
+        });
 
         return [target.key, transfers] as const;
       }),
@@ -124,11 +216,11 @@ export async function hydrateDeparturePatternTransfers(
   }
 
   return {
-    ...pattern,
-    calls: pattern.calls.map((call) =>
+    ...hydrationBasePattern,
+    calls: hydrationBasePattern.calls.map((call) =>
       enrichCallTransfers(call, transfersByKey),
     ),
-    lineTopology: pattern.lineTopology?.map((sequence) => ({
+    lineTopology: hydrationBasePattern.lineTopology?.map((sequence) => ({
       ...sequence,
       stops: sequence.stops.map((stop) =>
         enrichStopTransfers(stop, transfersByKey),
@@ -141,33 +233,56 @@ async function hydratePatternTransfersFromBundle(
   board: TransitBoardConfig,
   pattern: DepartureCallingPattern,
   retentionDays: number,
-): Promise<DepartureCallingPattern> {
-  const transfersByStopAreaRef = await loadTransferBundleForPattern(
+  onProgress?: (progress: TransferBundleLoadProgress) => void,
+): Promise<{
+  complete: boolean;
+  missingTargetRefs: string[];
+  targetCount: number;
+  pattern: DepartureCallingPattern;
+}> {
+  const bundleResult = await loadTransferBundleResultForPattern(
     board,
     pattern,
     retentionDays,
+    { onProgress },
   );
+  const transfersByStopAreaRef = bundleResult.transfersByStopAreaRef;
+
+  if (Object.keys(transfersByStopAreaRef).length === 0) {
+    throw new Error("Transfer bundle is empty.");
+  }
 
   return {
-    ...pattern,
-    calls: pattern.calls.map((call) => ({
-      ...call,
-      transferLines: mergeTransferOptions(
-        call.transferLines,
-        getBundledTransfers(call, transfersByStopAreaRef),
-      ),
-    })),
-    lineTopology: pattern.lineTopology?.map((sequence) => ({
-      ...sequence,
-      stops: sequence.stops.map((stop) => ({
-        ...stop,
+    complete: bundleResult.complete,
+    missingTargetRefs: bundleResult.missingTargetRefs,
+    targetCount: bundleResult.targetCount,
+    pattern: {
+      ...pattern,
+      calls: pattern.calls.map((call) => ({
+        ...call,
         transferLines: mergeTransferOptions(
-          stop.transferLines,
-          getBundledTransfers(stop, transfersByStopAreaRef),
+          call.transferLines,
+          getBundledTransfers(call, transfersByStopAreaRef),
         ),
       })),
-    })),
+      lineTopology: pattern.lineTopology?.map((sequence) => ({
+        ...sequence,
+        stops: sequence.stops.map((stop) => ({
+          ...stop,
+          transferLines: mergeTransferOptions(
+            stop.transferLines,
+            getBundledTransfers(stop, transfersByStopAreaRef),
+          ),
+        })),
+      })),
+    },
   };
+}
+
+export function clearPatternTransferRuntimeCaches(): void {
+  resolvedLineCache.clear();
+  lineStationsCache.clear();
+  stationTransferCache.clear();
 }
 
 function createTransferTargets(pattern: DepartureCallingPattern): TransferTarget[] {
@@ -394,6 +509,25 @@ function fetchCachedTransfers(
   stationTransferCache.set(cacheKey, request);
 
   return request;
+}
+
+function reportTransferHydrationProgress(
+  onProgress: ((progress: PatternTransferHydrationProgress) => void) | undefined,
+  progress: Omit<PatternTransferHydrationProgress, "pending">,
+): void {
+  if (!onProgress || progress.total <= 0) {
+    return;
+  }
+
+  const completed = Math.min(progress.total, Math.max(0, progress.completed));
+  const failed = Math.min(completed, Math.max(0, progress.failed));
+
+  onProgress({
+    completed,
+    failed,
+    pending: Math.max(0, progress.total - completed),
+    total: progress.total,
+  });
 }
 
 function enrichCallTransfers(

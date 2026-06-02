@@ -633,7 +633,12 @@ async function fetchTransferStopAreaRefs(
     }
   });
 
-  if (refs.size === 1 && nearbyPlaces.length > 0) {
+  if (nearbyPlaces.length > 0) {
+    // Large interchanges can already expose a few connected stop areas through
+    // Navitia while still omitting same-pole stop areas from another mode. Run
+    // the station-name pass every time so "Chatelet - Les Halles" also pulls
+    // nearby "Chatelet" / "Les Halles" metro stop areas instead of stopping at
+    // the directly connected RER stop areas.
     addSameNamedNearbyStopAreas(station, nearbyPlaces, refs);
   }
 

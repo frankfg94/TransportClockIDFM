@@ -96,6 +96,89 @@ describe("station transfer hydration", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("keeps expanding a large same-name interchange after connection matches", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+
+      if (url.includes("/stop_areas/stop_area%3AIDFM%3A90001/connections")) {
+        return jsonResponse({
+          connections: [
+            createConnection("RER Central Hub", "RER Central Hall", 260),
+          ],
+        });
+      }
+
+      if (url.includes("/stop_areas/stop_area%3AIDFM%3A90001/places_nearby")) {
+        return jsonResponse({
+          places_nearby: [
+            createNearbyStopArea("stop_area:IDFM:90001", "Chatelet - Les Halles", 0),
+            createNearbyStopArea("stop_area:IDFM:90002", "RER Central Hall", 60),
+            createNearbyStopArea("stop_area:IDFM:90003", "Chatelet", 120),
+            createNearbyStopArea("stop_area:IDFM:90004", "Les Halles", 140),
+          ],
+        });
+      }
+
+      if (url.includes("/stop_areas/stop_area%3AIDFM%3A90001/lines")) {
+        return jsonResponse({
+          lines: [
+            createLine("line:IDFM:C01743", "B", "RER"),
+            createLine("line:IDFM:C01742", "A", "RER"),
+            createLine("line:IDFM:C01728", "D", "RER"),
+          ],
+        });
+      }
+
+      if (url.includes("/stop_areas/stop_area%3AIDFM%3A90002/lines")) {
+        return jsonResponse({
+          lines: [
+            createLine("line:IDFM:C01742", "A", "RER"),
+            createLine("line:IDFM:C01728", "D", "RER"),
+          ],
+        });
+      }
+
+      if (url.includes("/stop_areas/stop_area%3AIDFM%3A90003/lines")) {
+        return jsonResponse({
+          lines: [
+            createLine("line:IDFM:C01371", "1", "Metro"),
+            createLine("line:IDFM:C01374", "4", "Metro"),
+            createLine("line:IDFM:C01377", "7", "Metro"),
+            createLine("line:IDFM:C01381", "11", "Metro"),
+            createLine("line:IDFM:C01384", "14", "Metro"),
+          ],
+        });
+      }
+
+      if (url.includes("/stop_areas/stop_area%3AIDFM%3A90004/lines")) {
+        return jsonResponse({
+          lines: [createLine("line:IDFM:C01374", "4", "Metro")],
+        });
+      }
+
+      throw new Error(`Unexpected interchange transfer hydration fetch: ${url}`);
+    });
+
+    const transfers = await fetchStationTransfers(
+      createStation("stop_area:IDFM:90001", "Chatelet - Les Halles", "Paris"),
+      "line:IDFM:C01743",
+      {
+        apiBase: "https://unit.test/v2/navitia",
+        fetcher: fetchMock as unknown as typeof fetch,
+      },
+    );
+
+    expectTransferLabels(transfers, [
+      { label: "1", mode: "Metro" },
+      { label: "4", mode: "Metro" },
+      { label: "7", mode: "Metro" },
+      { label: "11", mode: "Metro" },
+      { label: "14", mode: "Metro" },
+      { label: "A", mode: "RER" },
+      { label: "D", mode: "RER" },
+    ]);
+  });
 });
 
 function expectTransferLabels(

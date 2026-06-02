@@ -13,6 +13,7 @@ import type {
 } from "../../src/features/service-pattern/transferBundles";
 
 interface TransferBundleRequestBody {
+  cacheBust?: string;
   lineId?: string;
   lineLabel?: string;
   retentionDays?: number;
@@ -61,6 +62,7 @@ export default defineEventHandler(async (event): Promise<TransferBundleResponse>
         await getCachedTransfers(
           target,
           body.lineId,
+          body.cacheBust,
           body.lineLabel,
           body.retentionDays,
           fetcher,
@@ -92,6 +94,8 @@ function normalizeRequestBody(body: TransferBundleRequestBody): Required<Transfe
     typeof body.lineLabel === "string" && body.lineLabel.trim()
       ? body.lineLabel.trim()
       : lineId;
+  const cacheBust =
+    typeof body.cacheBust === "string" ? body.cacheBust.trim() : "";
   const retentionDays = normalizeRetentionDays(body.retentionDays);
   const targets = (Array.isArray(body.targets) ? body.targets : [])
     .map(normalizeTarget)
@@ -107,6 +111,7 @@ function normalizeRequestBody(body: TransferBundleRequestBody): Required<Transfe
 
   return {
     lineId,
+    cacheBust,
     lineLabel,
     retentionDays,
     targets,
@@ -145,6 +150,7 @@ function normalizeRetentionDays(value: unknown): number {
 function getCachedTransfers(
   target: TransferBundleTarget,
   currentLineId: string,
+  cacheBust: string,
   currentLineLabel: string,
   retentionDays: number,
   fetcher: typeof fetch,
@@ -163,7 +169,7 @@ function getCachedTransfers(
       return undefined;
     }
 
-    const cacheKey = `${currentLineId}:${station.scheduleStopAreaRef}`;
+    const cacheKey = `${currentLineId}:${station.scheduleStopAreaRef}:${cacheBust}`;
     const cached = transferCache.get(cacheKey);
 
     if (cached && cached.expiresAt > now) {
@@ -370,8 +376,8 @@ function normalizeBundleStationName(value: string | undefined): string {
     .trim();
 }
 
-function isSupportedTransferTargetRef(value: string): boolean {
-  return /^(stop_area:|FR::(?:Quay|StopPlace):)/u.test(value);
+export function isSupportedTransferTargetRef(value: string): boolean {
+  return /^(stop_area:|FR::(?:Quay|StopPlace|mono(?:modal)?StopPlace|multi(?:modal)?StopPlace):)/u.test(value);
 }
 
 function createServerNavitiaFetcher(apiKey: string): typeof fetch {

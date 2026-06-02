@@ -32,6 +32,7 @@ import {
   listTransferBundles,
   type TransferBundleSummary,
 } from "../service-pattern/transferBundles";
+import { clearPatternTransferRuntimeCaches } from "../service-pattern/patternTransfers";
 import {
   weatherLocationOptions,
   type WeatherLocationPreset,
@@ -91,11 +92,13 @@ function refreshBundleSummaries(): void {
 
 function clearBundles(): void {
   clearTransferBundles();
+  clearPatternTransferRuntimeCaches();
   refreshBundleSummaries();
 }
 
 function deleteBundle(id: string): void {
   deleteTransferBundle(id);
+  clearPatternTransferRuntimeCaches();
   refreshBundleSummaries();
 }
 
