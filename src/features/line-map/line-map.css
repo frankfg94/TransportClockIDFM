@@ -80,9 +80,15 @@
     linear-gradient(90deg, rgba(0, 100, 255, 0.04) 1px, transparent 1px),
     #f7fafc;
   background-size: 36px 36px;
+  cursor: grab;
   max-height: min(68vh, 660px);
   overflow: auto;
   position: relative;
+  user-select: none;
+}
+
+.line-map-canvas--dragging {
+  cursor: grabbing;
 }
 
 .line-map-panel--explorer .line-map-canvas {

@@ -5,6 +5,7 @@ import {
   getEffectiveMaxDeparturesPerDirection,
   normalizeAppSettings,
   parseMaxDeparturesPerDirection,
+  parseTransferBundleRetentionDays,
   parseWeatherLookaheadMinutes,
 } from "../src/features/app-settings/appSettings";
 
@@ -22,6 +23,7 @@ describe("app settings", () => {
       richTransferTooltips: true,
       trafficInfoDesign: "ratp",
       trafficInfoDefaultScope: "optimized",
+      transferBundleRetentionDays: 15,
       weatherMode: "animated",
       weatherLookaheadMinutes: 1440,
       weatherLocationPreset: "paris",
@@ -45,6 +47,7 @@ describe("app settings", () => {
       compactLinePlanMode: "tiny",
       trafficInfoDesign: "dense",
       trafficInfoDefaultScope: "everything",
+      transferBundleRetentionDays: "999",
       weatherMode: "cinematic",
       weatherLookaheadMinutes: "9999",
       weatherLocationPreset: "moon",
@@ -65,6 +68,7 @@ describe("app settings", () => {
     expect(settings.compactLinePlanMode).toBe("auto");
     expect(settings.trafficInfoDesign).toBe("ratp");
     expect(settings.trafficInfoDefaultScope).toBe("optimized");
+    expect(settings.transferBundleRetentionDays).toBe(15);
     expect(settings.weatherMode).toBe("animated");
     expect(settings.weatherLookaheadMinutes).toBe(1440);
     expect(settings.weatherLocationPreset).toBe("paris");
@@ -88,6 +92,8 @@ describe("app settings", () => {
     expect(getEffectiveMaxDeparturesPerDirection(custom)).toBe(6);
     expect(parseWeatherLookaheadMinutes("120")).toBe(120);
     expect(parseWeatherLookaheadMinutes("999")).toBe(1440);
+    expect(parseTransferBundleRetentionDays("30")).toBe(30);
+    expect(parseTransferBundleRetentionDays("999")).toBe(15);
   });
 
   it("only hides directions that are explicitly marked as non-terminal", () => {

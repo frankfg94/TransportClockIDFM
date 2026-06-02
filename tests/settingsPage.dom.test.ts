@@ -42,6 +42,11 @@ describe("SettingsPage", () => {
     const wrapper = mount(SettingsPage);
 
     expect(wrapper.text()).toContain("Personnalisation du dashboard");
+    expect(wrapper.text()).toContain("Expiration des bundles");
+    expect(wrapper.text()).toContain("15 jours");
+    expect(wrapper.text()).toContain("Bundles de correspondances");
+    expect(wrapper.text()).toContain("View bundles");
+    expect(wrapper.text()).toContain("Clear bundles");
     expect(wrapper.text()).toContain("Accordion fermé");
     expect(wrapper.text()).toContain("Dernier passage");
     expect(wrapper.text()).toContain("Défaut actuel");

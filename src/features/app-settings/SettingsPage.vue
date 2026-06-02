@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref } from "vue";
 import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import {
   closedDirectionSummaryOptions,
@@ -6,7 +7,9 @@ import {
   maxDeparturesPerDirectionOptions,
   navigationAutoHideOptions,
   parseMaxDeparturesPerDirection,
+  parseTransferBundleRetentionDays,
   parseWeatherLookaheadMinutes,
+  transferBundleRetentionOptions,
   trafficInfoDefaultScopeOptions,
   trafficInfoDesignOptions,
   useAppSettings,
@@ -24,11 +27,20 @@ import {
   type WeatherTestMode,
 } from "./appSettings";
 import {
+  clearTransferBundles,
+  deleteTransferBundle,
+  listTransferBundles,
+  type TransferBundleSummary,
+} from "../service-pattern/transferBundles";
+import {
   weatherLocationOptions,
   type WeatherLocationPreset,
 } from "../weather/weatherLocations";
 
 const { settings, updateSettings, resetSettings } = useAppSettings();
+const bundlesModalOpen = ref(false);
+const bundleSummaries = ref<TransferBundleSummary[]>([]);
+const bundleCount = computed(() => bundleSummaries.value.length);
 
 function updateClosedSummaryMode(value: string): void {
   updateSettings({
@@ -60,6 +72,42 @@ function updateTrafficInfoDesign(value: string): void {
 
 function updateTrafficInfoDefaultScope(value: string): void {
   updateSettings({ trafficInfoDefaultScope: value as TrafficInfoDefaultScope });
+}
+
+function updateTransferBundleRetention(value: string): void {
+  updateSettings({
+    transferBundleRetentionDays: parseTransferBundleRetentionDays(value),
+  });
+}
+
+function openBundlesModal(): void {
+  refreshBundleSummaries();
+  bundlesModalOpen.value = true;
+}
+
+function refreshBundleSummaries(): void {
+  bundleSummaries.value = listTransferBundles();
+}
+
+function clearBundles(): void {
+  clearTransferBundles();
+  refreshBundleSummaries();
+}
+
+function deleteBundle(id: string): void {
+  deleteTransferBundle(id);
+  refreshBundleSummaries();
+}
+
+function formatBundleDate(value: string): string {
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat("fr-FR", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(date);
 }
 
 function updateWeatherMode(value: string): void {
@@ -197,6 +245,40 @@ function updateWeatherCustomLocation(
           aria-label="Mode par défaut info trafic"
           @update:model-value="updateTrafficInfoDefaultScope"
         />
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <strong>Expiration des bundles</strong>
+          <span>
+            Les correspondances pre-calculees sont supprimees automatiquement
+            apres ce delai.
+          </span>
+        </div>
+        <MaterialCombobox
+          :model-value="String(settings.transferBundleRetentionDays)"
+          :options="[...transferBundleRetentionOptions]"
+          aria-label="Expiration des bundles de correspondances"
+          @update:model-value="updateTransferBundleRetention"
+        />
+      </div>
+
+      <div class="settings-bundle-actions">
+        <div>
+          <strong>Bundles de correspondances</strong>
+          <span>
+            Consulte ou supprime le cache local utilise pour accelerer les
+            schemas de ligne.
+          </span>
+        </div>
+        <div class="settings-bundle-actions__buttons">
+          <button class="button-secondary" type="button" @click="openBundlesModal">
+            View bundles
+          </button>
+          <button class="button-secondary" type="button" @click="clearBundles">
+            Clear bundles
+          </button>
+        </div>
       </div>
     </section>
 
@@ -467,6 +549,70 @@ function updateWeatherCustomLocation(
         Réinitialiser
       </button>
     </footer>
+
+    <Teleport to="body">
+      <div
+        v-if="bundlesModalOpen"
+        class="settings-bundle-modal-backdrop"
+        role="presentation"
+        @click.self="bundlesModalOpen = false"
+      >
+        <section
+          class="settings-bundle-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-bundles-title"
+        >
+          <header>
+            <div>
+              <p class="eyebrow">Correspondances</p>
+              <h2 id="settings-bundles-title">Bundles enregistres</h2>
+            </div>
+            <button
+              class="button-secondary"
+              type="button"
+              aria-label="Fermer"
+              @click="bundlesModalOpen = false"
+            >
+              x
+            </button>
+          </header>
+
+          <p class="settings-bundle-modal__summary">
+            {{ bundleCount }} bundle{{ bundleCount > 1 ? "s" : "" }} en cache
+            local.
+          </p>
+
+          <div v-if="bundleSummaries.length" class="settings-bundle-list">
+            <article
+              v-for="bundle in bundleSummaries"
+              :key="bundle.id"
+              class="settings-bundle-item"
+            >
+              <div>
+                <strong>{{ bundle.lineLabel }}</strong>
+                <span>
+                  {{ bundle.stopAreaCount }} stations -
+                  {{ bundle.transferCount }} correspondances
+                </span>
+                <small>Expire le {{ formatBundleDate(bundle.expiresAt) }}</small>
+              </div>
+              <button
+                class="button-secondary"
+                type="button"
+                @click="deleteBundle(bundle.id)"
+              >
+                Supprimer
+              </button>
+            </article>
+          </div>
+
+          <p v-else class="settings-bundle-modal__empty">
+            Aucun bundle enregistre pour l'instant.
+          </p>
+        </section>
+      </div>
+    </Teleport>
   </main>
 </template>
 
@@ -544,6 +690,114 @@ function updateWeatherCustomLocation(
   font-weight: 720;
   line-height: 1.45;
   margin-top: 4px;
+}
+
+.settings-bundle-actions {
+  align-items: center;
+  background: #f7f9fe;
+  border: 1px solid rgba(16, 35, 63, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 16px;
+}
+
+.settings-bundle-actions strong {
+  display: block;
+  font-size: 1.02rem;
+  font-weight: 950;
+}
+
+.settings-bundle-actions span {
+  color: var(--muted);
+  display: block;
+  font-weight: 720;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+
+.settings-bundle-actions__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.settings-bundle-modal-backdrop {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 22px;
+  position: fixed;
+  z-index: 10000;
+}
+
+.settings-bundle-modal {
+  background: #ffffff;
+  border: 1px solid rgba(16, 35, 63, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 24px 70px rgba(16, 35, 63, 0.22);
+  color: var(--ink);
+  display: grid;
+  gap: 16px;
+  max-height: min(720px, calc(100vh - 44px));
+  overflow: auto;
+  padding: 22px;
+  width: min(720px, 100%);
+}
+
+.settings-bundle-modal header {
+  align-items: center;
+  border-bottom: 1px solid rgba(16, 35, 63, 0.1);
+  display: flex;
+  justify-content: space-between;
+  padding-bottom: 14px;
+}
+
+.settings-bundle-modal h2 {
+  margin: 0;
+}
+
+.settings-bundle-modal__summary,
+.settings-bundle-modal__empty {
+  color: var(--muted);
+  font-weight: 850;
+  margin: 0;
+}
+
+.settings-bundle-list {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-bundle-item {
+  align-items: center;
+  border: 1px solid rgba(16, 35, 63, 0.1);
+  border-radius: 8px;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 14px;
+}
+
+.settings-bundle-item strong,
+.settings-bundle-item span,
+.settings-bundle-item small {
+  display: block;
+}
+
+.settings-bundle-item strong {
+  font-weight: 950;
+}
+
+.settings-bundle-item span,
+.settings-bundle-item small {
+  color: var(--muted);
+  font-weight: 780;
+  margin-top: 3px;
 }
 
 .settings-custom-location {

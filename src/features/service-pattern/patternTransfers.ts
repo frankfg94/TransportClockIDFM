@@ -22,6 +22,7 @@ import {
   patternStationKeysAreCompatible,
   type PatternStationKeySource,
 } from "./stationKeys";
+import { loadTransferBundleForPattern } from "./transferBundles";
 
 interface PatternTransferHydrationClient {
   getTransitFamilies?(): Promise<TransitFamilyOption[]>;
@@ -64,7 +65,20 @@ export async function hydrateDeparturePatternTransfers(
   board: TransitBoardConfig,
   pattern: DepartureCallingPattern,
   client: PatternTransferHydrationClient = liveClient,
+  options: { retentionDays?: number; preferBundle?: boolean } = {},
 ): Promise<DepartureCallingPattern> {
+  if (options.preferBundle !== false && client === liveClient) {
+    const bundledPattern = await hydratePatternTransfersFromBundle(
+      board,
+      pattern,
+      options.retentionDays ?? 15,
+    ).catch(() => undefined);
+
+    if (bundledPattern) {
+      return bundledPattern;
+    }
+  }
+
   const line = await resolveLineOption(board, client);
 
   if (!line) {
@@ -119,6 +133,39 @@ export async function hydrateDeparturePatternTransfers(
       stops: sequence.stops.map((stop) =>
         enrichStopTransfers(stop, transfersByKey),
       ),
+    })),
+  };
+}
+
+async function hydratePatternTransfersFromBundle(
+  board: TransitBoardConfig,
+  pattern: DepartureCallingPattern,
+  retentionDays: number,
+): Promise<DepartureCallingPattern> {
+  const transfersByStopAreaRef = await loadTransferBundleForPattern(
+    board,
+    pattern,
+    retentionDays,
+  );
+
+  return {
+    ...pattern,
+    calls: pattern.calls.map((call) => ({
+      ...call,
+      transferLines: mergeTransferOptions(
+        call.transferLines,
+        getBundledTransfers(call, transfersByStopAreaRef),
+      ),
+    })),
+    lineTopology: pattern.lineTopology?.map((sequence) => ({
+      ...sequence,
+      stops: sequence.stops.map((stop) => ({
+        ...stop,
+        transferLines: mergeTransferOptions(
+          stop.transferLines,
+          getBundledTransfers(stop, transfersByStopAreaRef),
+        ),
+      })),
     })),
   };
 }
@@ -379,6 +426,17 @@ function enrichStopTransfers(
     ...stop,
     transferLines: mergeTransferOptions(stop.transferLines, transfers),
   };
+}
+
+function getBundledTransfers(
+  source: DepartureCall | LineRouteStop,
+  transfersByStopAreaRef: Record<string, TransferLineOption[]>,
+): TransferLineOption[] {
+  const stopAreaRef =
+    source.stopAreaRef ??
+    ("station" in source ? source.station.scheduleStopAreaRef : undefined);
+
+  return stopAreaRef ? transfersByStopAreaRef[stopAreaRef] ?? [] : [];
 }
 
 function mergeTransferOptions(

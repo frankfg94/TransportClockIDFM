@@ -1121,6 +1121,7 @@ onBeforeUnmount(() => {
         :show-mini-map="settings.showPatternMiniMap"
         :compact-mode="settings.compactLinePlanMode"
         :rich-transfer-tooltips="settings.richTransferTooltips"
+        :transfer-bundle-retention-days="settings.transferBundleRetentionDays"
         @close="closePatternModal"
       />
 

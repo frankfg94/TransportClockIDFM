@@ -38,6 +38,7 @@
       :compact-mode="settings.compactLinePlanMode"
       :rich-transfer-tooltips="settings.richTransferTooltips"
       :reduce-motion="settings.reduceMotion"
+      :transfer-bundle-retention-days="settings.transferBundleRetentionDays"
       @close="navigateHome"
       @direction-change="changeDirection"
     >

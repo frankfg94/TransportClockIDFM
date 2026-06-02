@@ -31,6 +31,16 @@ interface DirectionState {
   error?: string;
 }
 
+interface MapDragState {
+  active: boolean;
+  dragging: boolean;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  scrollLeft: number;
+  scrollTop: number;
+}
+
 const props = defineProps<{
   line?: LineSearchOption;
   selectedStationId?: string;
@@ -55,6 +65,17 @@ const loadingMap = ref(false);
 const errorMessage = ref("");
 const hoveredStop = ref<LineMapStopView>();
 const zoom = ref(1.12);
+const mapCanvas = ref<HTMLDivElement>();
+const suppressNextCanvasClick = ref(false);
+const mapDrag = reactive<MapDragState>({
+  active: false,
+  dragging: false,
+  pointerId: -1,
+  scrollLeft: 0,
+  scrollTop: 0,
+  startX: 0,
+  startY: 0,
+});
 const activeTransfer = ref<TransferLineOption>();
 const transferStates = reactive<Record<string, TransferState>>({});
 const directionStates = reactive<Record<string, DirectionState>>({});
@@ -83,6 +104,7 @@ const activeDirectionState = computed(() =>
 );
 const isExplorerMode = computed(() => props.mode === "explorer");
 const canSelectStops = computed(() => props.selectable !== false);
+const isMapDragging = computed(() => mapDrag.dragging);
 
 const mapStats = computed(() => {
   const stopCount = lineMap.value?.stops.length ?? 0;
@@ -459,6 +481,115 @@ function adjustZoom(delta: number): void {
   );
 }
 
+function zoomAtCanvasPoint(delta: number, clientX: number, clientY: number): void {
+  const canvas = mapCanvas.value;
+
+  if (!canvas) {
+    adjustZoom(delta);
+    return;
+  }
+
+  const previousZoom = zoom.value;
+  const nextZoom = clampZoom(previousZoom + delta);
+
+  if (nextZoom === previousZoom) {
+    return;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  const anchorX = clientX - rect.left + canvas.scrollLeft;
+  const anchorY = clientY - rect.top + canvas.scrollTop;
+  const ratio = nextZoom / previousZoom;
+
+  zoom.value = nextZoom;
+
+  requestAnimationFrame(() => {
+    canvas.scrollLeft = anchorX * ratio - (clientX - rect.left);
+    canvas.scrollTop = anchorY * ratio - (clientY - rect.top);
+  });
+}
+
+function clampZoom(value: number): number {
+  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Number(value.toFixed(2))));
+}
+
+function handleCanvasWheel(event: WheelEvent): void {
+  if (!lineMap.value) {
+    return;
+  }
+
+  event.preventDefault();
+  const delta = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+
+  zoomAtCanvasPoint(delta, event.clientX, event.clientY);
+}
+
+function startMapDrag(event: PointerEvent): void {
+  if (event.button !== 0 || !mapCanvas.value) {
+    return;
+  }
+
+  mapDrag.active = true;
+  mapDrag.dragging = false;
+  mapDrag.pointerId = event.pointerId;
+  mapDrag.scrollLeft = mapCanvas.value.scrollLeft;
+  mapDrag.scrollTop = mapCanvas.value.scrollTop;
+  mapDrag.startX = event.clientX;
+  mapDrag.startY = event.clientY;
+  mapCanvas.value.setPointerCapture(event.pointerId);
+}
+
+function moveMapDrag(event: PointerEvent): void {
+  if (!mapDrag.active || event.pointerId !== mapDrag.pointerId || !mapCanvas.value) {
+    return;
+  }
+
+  const deltaX = event.clientX - mapDrag.startX;
+  const deltaY = event.clientY - mapDrag.startY;
+
+  if (!mapDrag.dragging && Math.hypot(deltaX, deltaY) < 4) {
+    return;
+  }
+
+  mapDrag.dragging = true;
+  mapCanvas.value.scrollLeft = mapDrag.scrollLeft - deltaX;
+  mapCanvas.value.scrollTop = mapDrag.scrollTop - deltaY;
+}
+
+function stopMapDrag(event?: PointerEvent): void {
+  const wasDragging = mapDrag.dragging;
+
+  if (
+    event &&
+    mapCanvas.value?.hasPointerCapture(event.pointerId)
+  ) {
+    mapCanvas.value.releasePointerCapture(event.pointerId);
+  }
+
+  mapDrag.active = false;
+  mapDrag.dragging = false;
+  mapDrag.pointerId = -1;
+
+  if (wasDragging) {
+    suppressNextCanvasClick.value = true;
+  }
+}
+
+function handleCanvasMouseLeave(): void {
+  scheduleHideStop();
+  stopMapDrag();
+}
+
+function handleCanvasClick(event: MouseEvent): void {
+  if (!suppressNextCanvasClick.value) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  suppressNextCanvasClick.value = false;
+}
+
 function resetZoom(): void {
   if (!lineMap.value) {
     zoom.value = 1.12;
@@ -566,7 +697,15 @@ function getLabelPriority(
     <div
       v-else-if="lineMap"
       class="line-map-canvas"
-      @mouseleave="scheduleHideStop"
+      :class="{ 'line-map-canvas--dragging': isMapDragging }"
+      ref="mapCanvas"
+      @pointerdown="startMapDrag"
+      @pointermove="moveMapDrag"
+      @pointerup="stopMapDrag"
+      @pointercancel="stopMapDrag"
+      @mouseleave="handleCanvasMouseLeave"
+      @wheel="handleCanvasWheel"
+      @click.capture="handleCanvasClick"
     >
       <svg
         class="line-map-svg"

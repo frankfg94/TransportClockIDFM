@@ -16,6 +16,8 @@ const baseSettings: AppSettings = {
   compactLinePlanMode: "auto",
   richTransferTooltips: true,
   trafficInfoDesign: "ratp",
+  trafficInfoDefaultScope: "optimized",
+  transferBundleRetentionDays: 15,
   weatherMode: "animated",
   weatherLookaheadMinutes: 1440,
   weatherLocationPreset: "paris",

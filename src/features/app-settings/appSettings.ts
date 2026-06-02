@@ -29,6 +29,7 @@ export type NavigationAutoHide = "none" | "1m";
 export type CompactLinePlanMode = "auto" | "comfort" | "compact";
 export type TrafficInfoDesign = "ratp" | "cards";
 export type TrafficInfoDefaultScope = "optimized" | "all";
+export type TransferBundleRetentionDays = 1 | 3 | 7 | 15 | 30 | 60;
 export type WeatherMode = "animated" | "static" | "alerts_only" | "disabled";
 export type WeatherLookaheadMinutes = 60 | 120 | 240 | 480 | 720 | 1440;
 export type WeatherTestMode = "off" | "rain" | "storm" | "snow" | "heat";
@@ -47,6 +48,7 @@ export interface AppSettings {
   richTransferTooltips: boolean;
   trafficInfoDesign: TrafficInfoDesign;
   trafficInfoDefaultScope: TrafficInfoDefaultScope;
+  transferBundleRetentionDays: TransferBundleRetentionDays;
   weatherMode: WeatherMode;
   weatherLookaheadMinutes: WeatherLookaheadMinutes;
   weatherLocationPreset: WeatherLocationPreset;
@@ -110,6 +112,15 @@ export const trafficInfoDefaultScopeOptions = [
   { id: "all", label: "Toutes les lignes" },
 ] as const;
 
+export const transferBundleRetentionOptions = [
+  { id: "1", label: "1 jour" },
+  { id: "3", label: "3 jours" },
+  { id: "7", label: "7 jours" },
+  { id: "15", label: "15 jours" },
+  { id: "30", label: "30 jours" },
+  { id: "60", label: "60 jours" },
+] as const;
+
 export const weatherModeOptions = [
   { id: "animated", label: "Alertes avec fond d'écran animé" },
   { id: "static", label: "Alertes avec fond d'écran statique" },
@@ -162,6 +173,7 @@ export function createDefaultAppSettings(): AppSettings {
     richTransferTooltips: true,
     trafficInfoDesign: "ratp",
     trafficInfoDefaultScope: "optimized",
+    transferBundleRetentionDays: 15,
     weatherMode: "animated",
     weatherLookaheadMinutes: 1440,
     weatherLocationPreset: "paris",
@@ -225,6 +237,9 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     )
       ? value.trafficInfoDefaultScope
       : defaults.trafficInfoDefaultScope,
+    transferBundleRetentionDays: parseTransferBundleRetentionDays(
+      value.transferBundleRetentionDays,
+    ),
     weatherMode: isWeatherMode(value.weatherMode)
       ? value.weatherMode
       : defaults.weatherMode,
@@ -276,6 +291,21 @@ export function parseWeatherLookaheadMinutes(
   return [60, 120, 240, 480, 720, 1440].includes(numericValue)
     ? (numericValue as WeatherLookaheadMinutes)
     : 1440;
+}
+
+export function parseTransferBundleRetentionDays(
+  value: unknown,
+): TransferBundleRetentionDays {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseInt(value, 10)
+        : Number.NaN;
+
+  return [1, 3, 7, 15, 30, 60].includes(numericValue)
+    ? (numericValue as TransferBundleRetentionDays)
+    : 15;
 }
 
 export function getEffectiveMaxDeparturesPerDirection(

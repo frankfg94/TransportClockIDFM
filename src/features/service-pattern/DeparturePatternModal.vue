@@ -198,12 +198,14 @@ const props = withDefaults(
     compactMode?: PatternCompactMode;
     richTransferTooltips?: boolean;
     reduceMotion?: boolean;
+    transferBundleRetentionDays?: number;
   }>(),
   {
     showMiniMap: true,
     compactMode: "auto",
     richTransferTooltips: true,
     reduceMotion: false,
+    transferBundleRetentionDays: 15,
   },
 );
 
@@ -547,6 +549,8 @@ async function hydratePatternTransfers(): Promise<void> {
     const enrichedPattern = await hydrateDeparturePatternTransfers(
       board,
       pattern,
+      undefined,
+      { retentionDays: props.transferBundleRetentionDays },
     );
 
     if (requestId === transferHydrationRequest) {
