@@ -1579,6 +1579,28 @@ h3 {
   width: 0%;
 }
 
+.pattern-flow-transfer-loader__retry {
+  align-items: center;
+  background: #05070c;
+  border: 0;
+  border-radius: 999px;
+  color: #ffffff;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 950;
+  justify-content: center;
+  letter-spacing: 0;
+  padding: 7px 12px;
+  width: fit-content;
+}
+
+.pattern-flow-transfer-loader__retry:hover,
+.pattern-flow-transfer-loader__retry:focus-visible {
+  background: color-mix(in srgb, var(--line-color) 76%, #05070c);
+}
+
 .pattern-flow .vue-flow__controls {
   background: rgba(248, 250, 252, 0.96);
   border: 1px solid rgba(16, 35, 63, 0.12);

@@ -2,13 +2,20 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { nextTick } from "vue";
 import DeparturePatternModal from "../src/features/service-pattern/DeparturePatternModal.vue";
+import { hydrateDeparturePatternTransfers } from "../src/features/service-pattern/patternTransfers";
 import type {
   DepartureCallingPattern,
   TransitBoardConfig,
 } from "../src/types/transit";
 
 const hydrationMockState = vi.hoisted(() => ({
-  resolve: undefined as (() => void) | undefined,
+  progress: {
+    completed: 2,
+    failed: 0,
+    pending: 3,
+    total: 5,
+  },
+  resolves: [] as Array<() => void>,
 }));
 
 vi.mock("../src/features/service-pattern/patternTransfers", () => ({
@@ -26,15 +33,10 @@ vi.mock("../src/features/service-pattern/patternTransfers", () => ({
         }) => void;
       },
     ) => {
-      options?.onProgress?.({
-        completed: 2,
-        failed: 0,
-        pending: 3,
-        total: 5,
-      });
+      options?.onProgress?.(hydrationMockState.progress);
 
       await new Promise<void>((resolve) => {
-        hydrationMockState.resolve = resolve;
+        hydrationMockState.resolves.push(resolve);
       });
 
       return pattern;
@@ -80,8 +82,14 @@ const pattern: DepartureCallingPattern = {
 };
 
 afterEach(() => {
-  hydrationMockState.resolve?.();
-  hydrationMockState.resolve = undefined;
+  hydrationMockState.resolves.splice(0).forEach((resolve) => resolve());
+  hydrationMockState.progress = {
+    completed: 2,
+    failed: 0,
+    pending: 3,
+    total: 5,
+  };
+  vi.useRealTimers();
 });
 
 describe("DeparturePatternModal transfer progress", () => {
@@ -119,7 +127,65 @@ describe("DeparturePatternModal transfer progress", () => {
         .attributes("style"),
     ).toContain("width: 40%");
 
-    hydrationMockState.resolve?.();
+    hydrationMockState.resolves.splice(0).forEach((resolve) => resolve());
+    await flushPromises();
+    wrapper.unmount();
+  });
+
+  it("offers a retry when transfer loading stays at zero for thirty seconds", async () => {
+    vi.useFakeTimers();
+    hydrationMockState.progress = {
+      completed: 0,
+      failed: 0,
+      pending: 13,
+      total: 13,
+    };
+    const hydrateMock = vi.mocked(hydrateDeparturePatternTransfers);
+    hydrateMock.mockClear();
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        embedded: true,
+        open: true,
+        board,
+        pattern,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: {
+            template: '<div class="vue-flow"><slot /></div>',
+          },
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+    await nextTick();
+
+    expect(wrapper.text()).toContain("Chargement des correspondances");
+    expect(wrapper.text()).toContain("0/13");
+    expect(wrapper.text()).not.toContain("Réessayer");
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await nextTick();
+
+    expect(wrapper.text()).toContain("Correspondances bloquées");
+    expect(wrapper.text()).toContain("Réessayer");
+
+    await wrapper
+      .find(".pattern-flow-transfer-loader__retry")
+      .trigger("click");
+    await flushPromises();
+
+    expect(hydrateMock).toHaveBeenCalledTimes(2);
+
+    hydrationMockState.resolves.splice(0).forEach((resolve) => resolve());
     await flushPromises();
     wrapper.unmount();
   });

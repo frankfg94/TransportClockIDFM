@@ -324,6 +324,17 @@ export function deleteTransferBundle(
   bumpTransferBundleCacheBust(storage);
 }
 
+export function clearTransferBundleForBoard(
+  board: TransitBoardConfig,
+  storage = getBrowserStorage(),
+): void {
+  if (!storage) {
+    return;
+  }
+
+  deleteTransferBundle(createTransferBundleId(getBundleLineId(board)), storage);
+}
+
 export function pruneExpiredTransferBundles(
   storage = getBrowserStorage(),
   now = Date.now(),

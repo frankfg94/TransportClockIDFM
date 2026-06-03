@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearPendingTransferBundleRequestsForTests,
+  clearTransferBundleForBoard,
   clearTransferBundles,
   collectTransferBundleTargets,
   deleteTransferBundle,
@@ -280,6 +281,46 @@ describe("transfer bundles", () => {
 
     deleteTransferBundle("line:idfm:c00004", storage);
     expect(listTransferBundles(storage)).toEqual([]);
+  });
+
+  it("clears only the bundle for a board line before a retry", () => {
+    const storage = new MemoryStorage();
+    const now = Date.parse("2026-06-02T10:00:00.000Z");
+
+    saveTransferBundle(
+      {
+        version: 1,
+        generatedAt: new Date(now).toISOString(),
+        lineId: "line:IDFM:C01727",
+        lineLabel: "RER B",
+        transfersByStopAreaRef: {
+          "stop_area:IDFM:A": [],
+        },
+      },
+      15,
+      storage,
+      now,
+    );
+    saveTransferBundle(
+      {
+        version: 1,
+        generatedAt: new Date(now).toISOString(),
+        lineId: "line:IDFM:C00013",
+        lineLabel: "Ligne 13",
+        transfersByStopAreaRef: {
+          "stop_area:IDFM:B": [],
+        },
+      },
+      15,
+      storage,
+      now,
+    );
+
+    clearTransferBundleForBoard(createBoard("line:IDFM:C01727", "RER B"), storage);
+
+    expect(listTransferBundles(storage).map((bundle) => bundle.lineLabel)).toEqual([
+      "Ligne 13",
+    ]);
   });
 
   it("prunes expired bundles and can clear every bundle", () => {

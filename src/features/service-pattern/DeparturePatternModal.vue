@@ -35,6 +35,7 @@ import {
   hydrateDeparturePatternTransfers,
   type PatternTransferHydrationProgress,
 } from "./patternTransfers";
+import { clearTransferBundleForBoard } from "./transferBundles";
 import { loadTransferLineDirections } from "../line-map/lineMapData";
 
 import type {
@@ -172,6 +173,7 @@ const REGULAR_NODE_WIDTH = 184;
 const REGULAR_NODE_HEIGHT = 104;
 const COMPACT_NODE_WIDTH = 128;
 const COMPACT_NODE_HEIGHT = 150;
+const TRANSFER_HYDRATION_STALLED_RETRY_MS = 30_000;
 
 type PatternLayoutOptions = {
   compact: boolean;
@@ -234,12 +236,14 @@ const transferHydrationProgress = ref<PatternTransferHydrationProgress>({
   pending: 0,
   total: 0,
 });
+const transferHydrationRetryVisible = ref(false);
 const activeStationTooltipKey = ref<string>();
 const activeTransfer = ref<TransferLineOption>();
 const transferDirectionStates = reactive<
   Record<string, TransferDirectionState>
 >({});
 let transferHydrationRequest = 0;
+let transferHydrationStalledTimer: number | undefined;
 let compactDecisionKey = "";
 let stationTooltipHideTimer: number | undefined;
 
@@ -271,6 +275,11 @@ const transferHydrationProgressLabel = computed(() => {
 
   return `${transferHydrationProgress.value.completed}/${total}`;
 });
+const transferHydrationStatusLabel = computed(() =>
+  transferHydrationRetryVisible.value
+    ? "Correspondances bloquées"
+    : "Chargement des correspondances",
+);
 const servedCalls = computed(
   () => displayPattern.value?.calls.filter((call) => call.served) ?? [],
 );
@@ -564,6 +573,7 @@ async function hydratePatternTransfers(): Promise<void> {
   const board = props.board;
 
   hydratedPattern.value = pattern;
+  transferHydrationRetryVisible.value = false;
   transferHydrationProgress.value = {
     completed: 0,
     failed: 0,
@@ -573,15 +583,18 @@ async function hydratePatternTransfers(): Promise<void> {
 
   if (!props.open || !board || !pattern) {
     transferHydrationLoading.value = false;
+    resetTransferHydrationStallState();
     return;
   }
 
   if (typeof window === "undefined") {
     transferHydrationLoading.value = false;
+    resetTransferHydrationStallState();
     return;
   }
 
   transferHydrationLoading.value = true;
+  syncTransferHydrationStallTimer(requestId);
 
   try {
     const enrichedPattern = await hydrateDeparturePatternTransfers(
@@ -592,6 +605,7 @@ async function hydratePatternTransfers(): Promise<void> {
         onProgress(progress) {
           if (requestId === transferHydrationRequest) {
             transferHydrationProgress.value = progress;
+            syncTransferHydrationStallTimer(requestId);
           }
         },
         retentionDays: props.transferBundleRetentionDays,
@@ -608,8 +622,58 @@ async function hydratePatternTransfers(): Promise<void> {
   } finally {
     if (requestId === transferHydrationRequest) {
       transferHydrationLoading.value = false;
+      resetTransferHydrationStallState();
     }
   }
+}
+
+function retryTransferHydrationFromScratch(): void {
+  if (!props.board) {
+    return;
+  }
+
+  clearTransferBundleForBoard(props.board);
+  transferHydrationRequest += 1;
+  resetTransferHydrationStallState();
+  void hydratePatternTransfers();
+}
+
+function syncTransferHydrationStallTimer(requestId: number): void {
+  clearTransferHydrationStallTimer();
+
+  if (
+    !transferHydrationLoading.value ||
+    transferHydrationProgress.value.completed > 0
+  ) {
+    transferHydrationRetryVisible.value = false;
+    return;
+  }
+
+  transferHydrationStalledTimer = window.setTimeout(() => {
+    transferHydrationStalledTimer = undefined;
+
+    if (
+      requestId === transferHydrationRequest &&
+      transferHydrationLoading.value &&
+      transferHydrationProgress.value.completed === 0
+    ) {
+      transferHydrationRetryVisible.value = true;
+    }
+  }, TRANSFER_HYDRATION_STALLED_RETRY_MS);
+}
+
+function resetTransferHydrationStallState(): void {
+  transferHydrationRetryVisible.value = false;
+  clearTransferHydrationStallTimer();
+}
+
+function clearTransferHydrationStallTimer(): void {
+  if (transferHydrationStalledTimer === undefined) {
+    return;
+  }
+
+  window.clearTimeout(transferHydrationStalledTimer);
+  transferHydrationStalledTimer = undefined;
 }
 
 function createPatternFlow(
@@ -2575,6 +2639,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   transferHydrationRequest += 1;
+  resetTransferHydrationStallState();
   if (stationTooltipHideTimer !== undefined) {
     window.clearTimeout(stationTooltipHideTimer);
   }
@@ -2710,7 +2775,7 @@ onBeforeUnmount(() => {
                     <span aria-hidden="true"></span>
                     <div class="pattern-flow-transfer-loader__content">
                       <div class="pattern-flow-transfer-loader__label">
-                        <strong>Chargement des correspondances</strong>
+                        <strong>{{ transferHydrationStatusLabel }}</strong>
                         <small>{{ transferHydrationProgressLabel }}</small>
                       </div>
                       <div
@@ -2723,6 +2788,14 @@ onBeforeUnmount(() => {
                           }"
                         ></i>
                       </div>
+                      <button
+                        v-if="transferHydrationRetryVisible"
+                        class="pattern-flow-transfer-loader__retry"
+                        type="button"
+                        @click.stop="retryTransferHydrationFromScratch"
+                      >
+                        Réessayer
+                      </button>
                     </div>
                   </div>
                   <div class="pattern-flow-actions">
