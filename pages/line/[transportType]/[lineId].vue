@@ -32,7 +32,7 @@
       :direction-options="directionOptions"
       :selected-direction-id="selectedDirectionId"
       :full-line="isFullLineSelected"
-      :loading="pending"
+      :loading="isPatternRequestPending"
       :error="errorMessage"
       :show-mini-map="settings.showPatternMiniMap"
       :compact-mode="settings.compactLinePlanMode"
@@ -76,26 +76,26 @@
       <div v-else class="line-pattern-page__fallback" aria-live="polite">
         <p class="eyebrow">Carte de ligne</p>
         <h1>{{ pageTitle }}</h1>
-        <p v-if="pending">Chargement de la carte...</p>
+        <p v-if="isPatternRequestPending">Chargement de la carte...</p>
         <p v-else-if="errorMessage">{{ errorMessage }}</p>
       </div>
     </section>
 
     <section
-      v-if="activeView === 'schema' && (pending || errorMessage)"
+      v-if="activeView === 'schema' && (isPatternRequestPending || errorMessage)"
       class="line-pattern-page__fallback"
       aria-live="polite"
     >
       <p class="eyebrow">Schéma de ligne</p>
       <h1>{{ pageTitle }}</h1>
-      <p v-if="pending">Chargement du schéma...</p>
+      <p v-if="isPatternRequestPending">Chargement du schéma...</p>
       <p v-else-if="errorMessage">{{ errorMessage }}</p>
     </section>
   </main>
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useFetch, useRoute, navigateTo } from "#imports";
 import {
   filterTerminalOnly,
@@ -136,8 +136,17 @@ const apiUrl = computed(() => {
 });
 const { data: patternView, pending, error } =
   useFetch<LinePatternViewResponse>(apiUrl);
+const patternRequestTimedOut = ref(false);
+let patternRequestTimeout: ReturnType<typeof setTimeout> | undefined;
 const selectedDirectionId = computed(
   () => firstRouteQuery(route.query.direction) ?? LINE_COMPLETE_DIRECTION_ID,
+);
+const isPatternRequestPending = computed(
+  () =>
+    pending.value &&
+    !patternView.value &&
+    !error.value &&
+    !patternRequestTimedOut.value,
 );
 const isFullLineSelected = computed(
   () => selectedDirectionId.value === LINE_COMPLETE_DIRECTION_ID,
@@ -157,9 +166,17 @@ const directionOptions = computed(() => [
   ),
 ]);
 
-const errorMessage = computed(() =>
-  error.value ? "Impossible de charger ce schéma de ligne." : "",
-);
+const errorMessage = computed(() => {
+  if (error.value) {
+    return "Impossible de charger ce schéma de ligne.";
+  }
+
+  if (patternRequestTimedOut.value && !patternView.value) {
+    return "Le chargement de ce schéma prend trop longtemps. Recharge la page pour réessayer.";
+  }
+
+  return "";
+});
 const pageTitle = computed(() => {
   if (patternView.value) {
     return `${patternView.value.board.line.longName} · ${patternView.value.pattern.destination}`;
@@ -264,6 +281,45 @@ function transportTypeToFamily(value: string): TransitFamily {
 
   return "TRANSILIEN";
 }
+
+watch(
+  apiUrl,
+  () => {
+    patternRequestTimedOut.value = false;
+
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (patternRequestTimeout) {
+      clearTimeout(patternRequestTimeout);
+    }
+
+    patternRequestTimeout = setTimeout(() => {
+      if (pending.value && !patternView.value && !error.value) {
+        patternRequestTimedOut.value = true;
+      }
+    }, 30_000);
+  },
+  { immediate: true },
+);
+
+watch(
+  [patternView, error],
+  () => {
+    if ((patternView.value || error.value) && patternRequestTimeout) {
+      clearTimeout(patternRequestTimeout);
+      patternRequestTimeout = undefined;
+    }
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  if (patternRequestTimeout) {
+    clearTimeout(patternRequestTimeout);
+  }
+});
 </script>
 
 <style scoped>
