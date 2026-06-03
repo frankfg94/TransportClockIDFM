@@ -76,6 +76,10 @@ const TRANSFER_BUNDLE_STORAGE_KEYS = [
 const TRANSFER_BUNDLE_RESET_KEY = "transport-clock.transfer-bundles.resetAt";
 const TRANSFER_BUNDLE_REQUEST_BATCH_SIZE = 10;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const pendingTransferBundleRequests = new Map<
+  string,
+  Promise<TransferBundleResponse>
+>();
 
 export function collectTransferBundleTargets(
   pattern: DepartureCallingPattern,
@@ -184,6 +188,84 @@ export async function loadTransferBundleResultForPattern(
     }
 
     return createBundleLoadResult({}, targets);
+  }
+}
+
+function fetchTransferBundle(payload: {
+  cacheBust?: string;
+  lineId: string;
+  lineLabel: string;
+  retentionDays: number;
+  targets: TransferBundleTarget[];
+}): Promise<TransferBundleResponse> {
+  const requestKey = createTransferBundleRequestKey(payload);
+  const pendingRequest = pendingTransferBundleRequests.get(requestKey);
+
+  if (pendingRequest) {
+    return pendingRequest;
+  }
+
+  const request = fetch("/api/transfer-bundles", {
+    body: JSON.stringify(payload),
+    headers: {
+      "content-type": "application/json",
+    },
+    method: "POST",
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText}`);
+      }
+
+      return (await response.json()) as TransferBundleResponse;
+    })
+    .finally(() => {
+      pendingTransferBundleRequests.delete(requestKey);
+    });
+
+  pendingTransferBundleRequests.set(requestKey, request);
+
+  return request;
+}
+
+function createTransferBundleRequestKey(payload: {
+  cacheBust?: string;
+  lineId: string;
+  retentionDays: number;
+  targets: TransferBundleTarget[];
+}): string {
+  return JSON.stringify({
+    cacheBust: payload.cacheBust ?? "",
+    lineId: payload.lineId,
+    retentionDays: payload.retentionDays,
+    targets: payload.targets.map((target) => target.stopAreaRef).sort(),
+  });
+}
+
+export function clearPendingTransferBundleRequestsForTests(): void {
+  pendingTransferBundleRequests.clear();
+}
+
+function readTransferBundleStore(storage: TransferBundleStorage): TransferBundleStore {
+  try {
+    const rawValue = storage.getItem(TRANSFER_BUNDLE_STORAGE_KEY);
+
+    if (!rawValue) {
+      return createEmptyStore();
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<TransferBundleStore>;
+
+    if (!Array.isArray(parsed.bundles)) {
+      return createEmptyStore();
+    }
+
+    return {
+      version: 1,
+      bundles: parsed.bundles.filter(isTransferBundleRecord),
+    };
+  } catch {
+    return createEmptyStore();
   }
 }
 
@@ -315,51 +397,6 @@ function readTransferBundleRecord(
   return readTransferBundleStore(storage).bundles.find(
     (bundle) => bundle.id === id,
   );
-}
-
-function fetchTransferBundle(payload: {
-  cacheBust?: string;
-  lineId: string;
-  lineLabel: string;
-  retentionDays: number;
-  targets: TransferBundleTarget[];
-}): Promise<TransferBundleResponse> {
-  return fetch("/api/transfer-bundles", {
-    body: JSON.stringify(payload),
-    headers: {
-      "content-type": "application/json",
-    },
-    method: "POST",
-  }).then(async (response) => {
-    if (!response.ok) {
-      throw new Error(`${response.status} ${response.statusText}`);
-    }
-
-    return (await response.json()) as TransferBundleResponse;
-  });
-}
-
-function readTransferBundleStore(storage: TransferBundleStorage): TransferBundleStore {
-  try {
-    const rawValue = storage.getItem(TRANSFER_BUNDLE_STORAGE_KEY);
-
-    if (!rawValue) {
-      return createEmptyStore();
-    }
-
-    const parsed = JSON.parse(rawValue) as Partial<TransferBundleStore>;
-
-    if (!Array.isArray(parsed.bundles)) {
-      return createEmptyStore();
-    }
-
-    return {
-      version: 1,
-      bundles: parsed.bundles.filter(isTransferBundleRecord),
-    };
-  } catch {
-    return createEmptyStore();
-  }
 }
 
 function writeTransferBundleStore(

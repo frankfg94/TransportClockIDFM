@@ -52,7 +52,7 @@ export default defineEventHandler(async (event): Promise<TransferBundleResponse>
 
   const body = normalizeRequestBody(await readBody<TransferBundleRequestBody>(event));
   const fetcher = createServerNavitiaFetcher(apiKey);
-  const transfersByStopAreaRef: Record<string, TransferLineOption[]> = {};
+  const transfersByStopAreaRef = createEmptyTransferBundleMap(body.targets);
 
   for (let index = 0; index < body.targets.length; index += SERVER_BATCH_SIZE) {
     const batch = body.targets.slice(index, index + SERVER_BATCH_SIZE);
@@ -71,9 +71,7 @@ export default defineEventHandler(async (event): Promise<TransferBundleResponse>
     );
 
     entries.forEach(([stopAreaRef, transfers]) => {
-      if (transfers !== undefined) {
-        transfersByStopAreaRef[stopAreaRef] = transfers;
-      }
+      transfersByStopAreaRef[stopAreaRef] = transfers ?? [];
     });
   }
 
@@ -378,6 +376,14 @@ function normalizeBundleStationName(value: string | undefined): string {
 
 export function isSupportedTransferTargetRef(value: string): boolean {
   return /^(stop_area:|FR::(?:Quay|StopPlace|mono(?:modal)?StopPlace|multi(?:modal)?StopPlace):)/u.test(value);
+}
+
+export function createEmptyTransferBundleMap(
+  targets: TransferBundleTarget[],
+): Record<string, TransferLineOption[]> {
+  return Object.fromEntries(
+    targets.map((target) => [target.stopAreaRef, [] as TransferLineOption[]]),
+  );
 }
 
 function createServerNavitiaFetcher(apiKey: string): typeof fetch {

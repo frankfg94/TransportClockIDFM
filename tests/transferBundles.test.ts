@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  clearPendingTransferBundleRequestsForTests,
   clearTransferBundles,
   collectTransferBundleTargets,
   deleteTransferBundle,
@@ -30,6 +31,7 @@ class MemoryStorage implements TransferBundleStorage {
 
 describe("transfer bundles", () => {
   afterEach(() => {
+    clearPendingTransferBundleRequestsForTests();
     vi.unstubAllGlobals();
   });
 
@@ -178,6 +180,60 @@ describe("transfer bundles", () => {
         transferCount: 1,
       },
     ]);
+  });
+
+  it("deduplicates concurrent bundle requests for the same target batch", async () => {
+    const storage = new MemoryStorage();
+    const pattern: DepartureCallingPattern = {
+      departureId: "rer-b",
+      destination: "Saint-Remy",
+      serviceType: "omnibus",
+      calls: [
+        {
+          id: "call-a",
+          label: "Station A",
+          current: true,
+          served: true,
+          stopAreaRef: "stop_area:IDFM:A",
+        },
+      ],
+    };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            version: 1,
+            generatedAt: "2026-06-02T10:00:00.000Z",
+            lineId: "line:IDFM:C01727",
+            lineLabel: "RER B",
+            transfersByStopAreaRef: {
+              "stop_area:IDFM:A": [],
+            },
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+            status: 200,
+          },
+        ),
+    );
+
+    vi.stubGlobal("window", { localStorage: storage });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await Promise.all([
+      loadTransferBundleForPattern(
+        createBoard("line:IDFM:C01727", "RER B"),
+        pattern,
+        15,
+      ),
+      loadTransferBundleForPattern(
+        createBoard("line:IDFM:C01727", "RER B"),
+        pattern,
+        15,
+      ),
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("saves, lists, merges and deletes local bundles", () => {
