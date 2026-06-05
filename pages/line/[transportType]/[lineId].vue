@@ -41,6 +41,7 @@
       :transfer-bundle-retention-days="settings.transferBundleRetentionDays"
       :transfer-bundle-request-concurrency="settings.transferBundleRequestConcurrency"
       :transfer-bundle-request-spacing-ms="settings.transferBundleRequestSpacingMs"
+      :transport-type="transferBundleTransportType"
       :transfer-resolver-mode="settings.transferResolverMode"
       @close="navigateHome"
       @direction-change="changeDirection"
@@ -187,6 +188,10 @@ const pageTitle = computed(() => {
 
   return `${route.params.transportType}/${route.params.lineId}`;
 });
+const transferBundleTransportType = computed(
+  () =>
+    patternView.value?.transportType ?? firstRouteQuery(route.params.transportType),
+);
 const lineMapLine = computed<LineSearchOption | undefined>(() => {
   const view = patternView.value;
   const boardLine = view?.board.line;

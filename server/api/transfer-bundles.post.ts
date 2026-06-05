@@ -26,6 +26,7 @@ export interface TransferBundleRequestBody {
   cacheBust?: string;
   lineId?: string;
   lineLabel?: string;
+  nearbyDistanceMeters?: number;
   requestConcurrency?: number;
   requestSpacingMs?: number;
   retentionDays?: number;
@@ -187,8 +188,9 @@ const DEFAULT_INTERNAL_NAVITIA_SPACING_MS = 120;
 const STOP_POINT_LINE_BATCH_SIZE = 4;
 const NEARBY_STOP_AREA_LINE_BATCH_SIZE = 4;
 const LINE_PRESENTATION_CONCURRENCY = 2;
-// TODO add dynamic system depending on station size
-const TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = 600;
+const DEFAULT_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = 300;
+const MIN_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = 50;
+const MAX_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = 1_200;
 const MAX_TRANSFER_BUNDLE_NEARBY_STOP_AREAS = 100;
 const MAX_LINE_STOP_AREAS = 500;
 const MAX_STOP_AREA_LINES = 160;
@@ -241,6 +243,7 @@ export async function createTransferBundleResponse(
       body.lineId,
       body.transferResolverMode,
       body.requestConcurrency,
+      body.nearbyDistanceMeters,
     );
 
     logTransferBundleDebug(logger, "info", "request:start", {
@@ -248,6 +251,7 @@ export async function createTransferBundleResponse(
       hasFetcher: Boolean(fetcher),
       lineId: body.lineId,
       lineLabel: body.lineLabel,
+      nearbyDistanceMeters: body.nearbyDistanceMeters,
       requestConcurrency: body.requestConcurrency,
       requestSpacingMs: body.requestSpacingMs,
       retentionDays: body.retentionDays,
@@ -283,6 +287,7 @@ export async function createTransferBundleResponse(
           target,
           body.lineId,
           body.lineLabel,
+          body.nearbyDistanceMeters,
           body.requestConcurrency,
           body.requestSpacingMs,
           body.retentionDays,
@@ -307,7 +312,12 @@ export async function createTransferBundleResponse(
       }
     });
 
-    saveServerTransferBundle(body, body.transferResolverMode, bundleId, transfersByStopAreaRef);
+    saveServerTransferBundle(
+      body,
+      body.transferResolverMode,
+      bundleId,
+      transfersByStopAreaRef,
+    );
     trimTransferCache();
 
     logTransferBundleDebug(logger, "info", "request:done", {
@@ -323,6 +333,7 @@ export async function createTransferBundleResponse(
       generatedAt: new Date().toISOString(),
       lineId: body.lineId,
       lineLabel: body.lineLabel,
+      nearbyDistanceMeters: body.nearbyDistanceMeters,
       requestConcurrency: body.requestConcurrency,
       transferResolverMode: body.transferResolverMode,
       transfersByStopAreaRef,
@@ -348,6 +359,9 @@ function normalizeRequestBody(
   const retentionDays = normalizeRetentionDays(body.retentionDays);
   const requestConcurrency = normalizeRequestConcurrency(body.requestConcurrency);
   const requestSpacingMs = normalizeRequestSpacingMs(body.requestSpacingMs);
+  const nearbyDistanceMeters = normalizeNearbyDistanceMeters(
+    body.nearbyDistanceMeters,
+  );
   const transferResolverMode: EffectiveTransferResolverMode = "nearby";
   const targets = (Array.isArray(body.targets) ? body.targets : [])
     .map(normalizeTarget)
@@ -364,6 +378,7 @@ function normalizeRequestBody(
   return {
     lineId,
     lineLabel,
+    nearbyDistanceMeters,
     requestConcurrency,
     requestSpacingMs,
     retentionDays,
@@ -420,10 +435,25 @@ function normalizeRequestSpacingMs(value: unknown): number {
     : DEFAULT_SERVER_REQUEST_SPACING_MS;
 }
 
+function normalizeNearbyDistanceMeters(value: unknown): number {
+  const numericValue = typeof value === "number" ? value : Number(value);
+
+  return Number.isFinite(numericValue)
+    ? Math.min(
+        MAX_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS,
+        Math.max(
+          MIN_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS,
+          Math.trunc(numericValue),
+        ),
+      )
+    : DEFAULT_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS;
+}
+
 function getCachedTransfers(
   target: TransferBundleTarget,
   currentLineId: string,
   currentLineLabel: string,
+  nearbyDistanceMeters: number,
   requestConcurrency: number,
   requestSpacingMs: number,
   retentionDays: number,
@@ -439,7 +469,7 @@ function getCachedTransfers(
     target.stopAreaRef,
     target.label,
     `concurrency:${requestConcurrency}`,
-    `distance:${TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS}`,
+    `distance:${nearbyDistanceMeters}`,
   ].join(":");
   const cached = transferCache.get(cacheKey);
 
@@ -474,6 +504,7 @@ function getCachedTransfers(
       target,
       currentLineId,
       currentLineLabel,
+      nearbyDistanceMeters,
       requestConcurrency,
       requestSpacingMs,
       retentionDays,
@@ -686,6 +717,7 @@ async function resolveNearbyTransfersForTarget(
   target: TransferBundleTarget,
   currentLineId: string,
   currentLineLabel: string,
+  nearbyDistanceMeters: number,
   requestConcurrency: number,
   requestSpacingMs: number,
   retentionDays: number,
@@ -730,6 +762,7 @@ async function resolveNearbyTransfersForTarget(
 
   const nearbyStopAreas = await getCachedNearbyStopAreas(
     stopAreaRef,
+    nearbyDistanceMeters,
     retentionDays,
     fetcher,
     logger,
@@ -1098,17 +1131,18 @@ async function resolveNavitiaLineId(
 
 async function getCachedNearbyStopAreas(
   stopAreaRef: string,
+  nearbyDistanceMeters: number,
   retentionDays: number,
   fetcher: typeof fetch,
   logger?: TransferBundleDebugLogger,
 ): Promise<NearbyStopAreaCandidate[]> {
   const now = Date.now();
-  const cacheKey = `nearby:${stopAreaRef}:d${TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS}`;
+  const cacheKey = `nearby:${stopAreaRef}:d${nearbyDistanceMeters}`;
   const cached = nearbyStopAreasCache.get(cacheKey);
 
   if (cached && cached.expiresAt > now) {
     logTransferBundleDebug(logger, "debug", "nearby:cache-hit", {
-      distanceMeters: TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS,
+      distanceMeters: nearbyDistanceMeters,
       stopAreaRef,
     });
 
@@ -1116,21 +1150,24 @@ async function getCachedNearbyStopAreas(
   }
 
   logTransferBundleDebug(logger, "info", "nearby:fetch", {
-    distanceMeters: TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS,
+    distanceMeters: nearbyDistanceMeters,
     stopAreaRef,
   });
 
-  const request = fetchNearbyStopAreas(stopAreaRef, fetcher, logger).catch(
-    (error): NearbyStopAreaCandidate[] => {
-      logTransferBundleDebug(logger, "warn", "nearby:error", {
-        error: formatTransferBundleError(error),
-        stopAreaRef,
-      });
-      nearbyStopAreasCache.delete(cacheKey);
+  const request = fetchNearbyStopAreas(
+    stopAreaRef,
+    nearbyDistanceMeters,
+    fetcher,
+    logger,
+  ).catch((error): NearbyStopAreaCandidate[] => {
+    logTransferBundleDebug(logger, "warn", "nearby:error", {
+      error: formatTransferBundleError(error),
+      stopAreaRef,
+    });
+    nearbyStopAreasCache.delete(cacheKey);
 
-      return [];
-    },
-  );
+    return [];
+  });
 
   nearbyStopAreasCache.set(cacheKey, {
     expiresAt: now + retentionDays * DAY_MS,
@@ -1142,6 +1179,7 @@ async function getCachedNearbyStopAreas(
 
 async function fetchNearbyStopAreas(
   stopAreaRef: string,
+  nearbyDistanceMeters: number,
   fetcher: typeof fetch,
   logger?: TransferBundleDebugLogger,
 ): Promise<NearbyStopAreaCandidate[]> {
@@ -1150,7 +1188,7 @@ async function fetchNearbyStopAreas(
     depth: "2",
     disable_disruption: "true",
     disable_geojson: "true",
-    distance: String(TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS),
+    distance: String(nearbyDistanceMeters),
   });
 
   searchParams.append("type[]", "stop_area");
@@ -2572,6 +2610,7 @@ export function listServerTransferBundles(): TransferBundleSummary[] {
       expiresAt: bundle.expiresAt,
       retentionDays: bundle.retentionDays,
       requestConcurrency: bundle.requestConcurrency,
+      nearbyDistanceMeters: bundle.nearbyDistanceMeters,
       stopAreaCount: bundle.stopAreaCount,
       transferCount: bundle.transferCount,
       transferResolverMode: bundle.transferResolverMode,
@@ -2641,6 +2680,7 @@ function saveServerTransferBundle(
     expiresAt: new Date(now + body.retentionDays * DAY_MS).toISOString(),
     retentionDays: body.retentionDays,
     requestConcurrency: body.requestConcurrency,
+    nearbyDistanceMeters: body.nearbyDistanceMeters,
     stopAreaCount: Object.keys(mergedTransfers).length,
     transferCount: countTransferLines(mergedTransfers),
     transferResolverMode,
@@ -2652,8 +2692,9 @@ function createServerTransferBundleId(
   lineId: string,
   transferResolverMode: EffectiveTransferResolverMode,
   requestConcurrency: number,
+  nearbyDistanceMeters: number,
 ): string {
-  return `${lineId.trim().toLowerCase()}::${transferResolverMode}::c${requestConcurrency}`;
+  return `${lineId.trim().toLowerCase()}::${transferResolverMode}::d${nearbyDistanceMeters}::c${requestConcurrency}`;
 }
 
 function createTransferBundleDebugLogger(): TransferBundleDebugLogger {

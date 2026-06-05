@@ -137,7 +137,7 @@ describe("pattern transfer bundle fallback", () => {
     expect(idfm.fetchStationTransfers).toHaveBeenCalledWith(
       expect.objectContaining({ label: "Station B" }),
       "line:IDFM:C01727",
-      { currentLineLabel: "B", transferScope: "nearby" },
+      { transferScope: "connected" },
     );
     expect(hydrated.calls[0]?.transferLines?.map((line) => line.label)).toEqual([
       "9",

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 afterEach(() => {
   document.body.innerHTML = "";
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   vi.resetModules();
   vi.doUnmock("../src/features/app-settings/appSettings");
 });
@@ -109,6 +110,10 @@ describe("SettingsPage", () => {
 
     const { default: SettingsPage } = await import(
       "../src/features/app-settings/SettingsPage.vue"
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ bundles: [] }))),
     );
     const wrapper = mount(SettingsPage, { attachTo: document.body });
 

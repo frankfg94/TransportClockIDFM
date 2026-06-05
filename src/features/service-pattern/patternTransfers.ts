@@ -67,6 +67,7 @@ interface PatternTransferHydrationOptions {
   retentionDays?: number;
   transferBundleRequestConcurrency?: number;
   transferBundleRequestSpacingMs?: number;
+  transportType?: string;
   transferResolverMode?: TransferResolverMode;
 }
 
@@ -103,6 +104,7 @@ export async function hydrateDeparturePatternTransfers(
       options.transferResolverMode ?? "auto",
       options.transferBundleRequestConcurrency,
       options.transferBundleRequestSpacingMs,
+      options.transportType,
       (progress) => {
         overallTotal = progress.total;
         overallCompleted = progress.completed;
@@ -242,6 +244,7 @@ async function hydratePatternTransfersFromBundle(
   transferResolverMode: TransferResolverMode,
   requestConcurrency?: number,
   requestSpacingMs?: number,
+  transportType?: string,
   onProgress?: (progress: TransferBundleLoadProgress) => void,
 ): Promise<{
   complete: boolean;
@@ -253,7 +256,13 @@ async function hydratePatternTransfersFromBundle(
     board,
     pattern,
     retentionDays,
-    { onProgress, requestConcurrency, requestSpacingMs, transferResolverMode },
+    {
+      onProgress,
+      requestConcurrency,
+      requestSpacingMs,
+      transportType,
+      transferResolverMode,
+    },
   );
   const transfersByStopAreaRef = bundleResult.transfersByStopAreaRef;
 

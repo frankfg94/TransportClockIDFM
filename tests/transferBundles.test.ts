@@ -10,7 +10,9 @@ import {
   loadTransferBundleForPattern,
   loadTransferBundleResultForPattern,
   pruneExpiredTransferBundles,
+  resolveTransferBundleNearbyDistanceMeters,
   saveTransferBundle,
+  TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS,
   type TransferBundleStorage,
 } from "../src/features/service-pattern/transferBundles";
 import type { DepartureCallingPattern, TransitBoardConfig } from "../src/types/transit";
@@ -67,6 +69,17 @@ describe("transfer bundles", () => {
       { stopAreaRef: "stop_area:IDFM:A", label: "Station A", city: undefined },
       { stopAreaRef: "stop_area:IDFM:B", label: "Station B", city: undefined },
     ]);
+  });
+
+  it("uses a nearby radius tuned for each transport type", () => {
+    expect(resolveTransferBundleNearbyDistanceMeters("metro")).toBe(
+      TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS.metro,
+    );
+    expect(resolveTransferBundleNearbyDistanceMeters("rer")).toBe(600);
+    expect(resolveTransferBundleNearbyDistanceMeters("transilien")).toBe(600);
+    expect(resolveTransferBundleNearbyDistanceMeters("tram")).toBe(350);
+    expect(resolveTransferBundleNearbyDistanceMeters("bus")).toBe(200);
+    expect(resolveTransferBundleNearbyDistanceMeters("unknown")).toBe(300);
   });
 
   it("keeps NeTEx quay refs so the server can resolve them to stop areas", () => {
@@ -299,10 +312,12 @@ describe("transfer bundles", () => {
     let maxInFlight = 0;
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const payload = JSON.parse(String(init?.body)) as {
+        nearbyDistanceMeters: number;
         requestConcurrency: number;
         targets: Array<{ stopAreaRef: string }>;
       };
 
+      expect(payload.nearbyDistanceMeters).toBe(600);
       expect(payload.requestConcurrency).toBe(2);
 
       inFlight += 1;
@@ -371,10 +386,12 @@ describe("transfer bundles", () => {
     let maxInFlight = 0;
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const payload = JSON.parse(String(init?.body)) as {
+        nearbyDistanceMeters: number;
         requestConcurrency: number;
         targets: Array<{ stopAreaRef: string }>;
       };
 
+      expect(payload.nearbyDistanceMeters).toBe(600);
       expect(payload.requestConcurrency).toBe(1);
 
       inFlight += 1;

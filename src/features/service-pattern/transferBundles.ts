@@ -4,6 +4,7 @@ import type {
   LineRouteStop,
   TransferLineOption,
   TransitBoardConfig,
+  TransitMode,
 } from "../../types/transit";
 import {
   resolveEffectiveTransferResolverMode,
@@ -22,6 +23,7 @@ export interface TransferBundleResponse {
   generatedAt: string;
   lineId: string;
   lineLabel: string;
+  nearbyDistanceMeters?: number;
   requestConcurrency?: number;
   transferResolverMode?: EffectiveTransferResolverMode;
   transfersByStopAreaRef: Record<string, TransferLineOption[]>;
@@ -48,6 +50,7 @@ export interface TransferBundleSummary {
   stopAreaCount: number;
   transferCount: number;
   transferResolverMode: EffectiveTransferResolverMode;
+  nearbyDistanceMeters?: number;
 }
 
 export interface TransferBundleLoadResult {
@@ -98,11 +101,29 @@ const TRANSFER_BUNDLE_STORAGE_KEYS = [
   ...LEGACY_TRANSFER_BUNDLE_AUXILIARY_STORAGE_KEYS,
 ];
 const DEFAULT_TRANSFER_BUNDLE_REQUEST_CONCURRENCY = 1;
+const DEFAULT_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = 300;
+const MIN_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = 50;
+const MAX_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = 1_200;
+export const TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = {
+  bus: 200,
+  cable: 350,
+  metro: 450,
+  noctilien: 200,
+  rer: 600,
+  train: 600,
+  tram: 350,
+  transilien: 600,
+} as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const pendingTransferBundleRequests = new Map<
   string,
   Promise<TransferBundleResponse>
 >();
+
+type TransferBundleNearbyDistanceTransport =
+  | TransitMode
+  | keyof typeof TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS
+  | string;
 
 export function collectTransferBundleTargets(
   pattern: DepartureCallingPattern,
@@ -149,9 +170,11 @@ export async function loadTransferBundleResultForPattern(
   pattern: DepartureCallingPattern,
   retentionDays: number,
   options: {
+    nearbyDistanceMeters?: number;
     onProgress?: (progress: TransferBundleLoadProgress) => void;
     requestConcurrency?: number;
     requestSpacingMs?: number;
+    transportType?: TransferBundleNearbyDistanceTransport;
     transferResolverMode?: TransferResolverMode;
   } = {},
 ): Promise<TransferBundleLoadResult> {
@@ -173,6 +196,12 @@ export async function loadTransferBundleResultForPattern(
   const requestSpacingMs = normalizeTransferBundleRequestSpacingMs(
     options.requestSpacingMs,
   );
+  const nearbyDistanceMeters = normalizeTransferBundleNearbyDistanceMeters(
+    options.nearbyDistanceMeters ??
+    resolveTransferBundleNearbyDistanceMeters(
+      options.transportType ?? board.line.mode,
+    ),
+  );
   const transfersByStopAreaRef: Record<string, TransferLineOption[]> = {};
   reportBundleProgress(targets, transfersByStopAreaRef, options.onProgress);
 
@@ -180,6 +209,7 @@ export async function loadTransferBundleResultForPattern(
     const response = await fetchTransferBundle({
       lineId,
       lineLabel,
+      nearbyDistanceMeters,
       requestConcurrency,
       requestSpacingMs,
       targets,
@@ -212,9 +242,52 @@ function normalizeTransferBundleRequestSpacingMs(value: unknown): number {
     : 0;
 }
 
+export function normalizeTransferBundleNearbyDistanceMeters(value: unknown): number {
+  const numericValue = typeof value === "number" ? value : Number(value);
+
+  return Number.isFinite(numericValue)
+    ? Math.min(
+      MAX_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS,
+      Math.max(
+        MIN_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS,
+        Math.trunc(numericValue),
+      ),
+    )
+    : DEFAULT_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS;
+}
+
+export function resolveTransferBundleNearbyDistanceMeters(
+  transportType: TransferBundleNearbyDistanceTransport | undefined,
+): number {
+  const transportKey = normalizeTransferBundleTransportType(transportType);
+
+  return transportKey
+    ? TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS[transportKey]
+    : DEFAULT_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS;
+}
+
+function normalizeTransferBundleTransportType(
+  transportType: TransferBundleNearbyDistanceTransport | undefined,
+): keyof typeof TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS | undefined {
+  const normalized = String(transportType ?? "").trim().toLowerCase();
+
+  if (!normalized) return undefined;
+  if (normalized.includes("metro")) return "metro";
+  if (normalized.includes("rer")) return "rer";
+  if (normalized.includes("tram")) return "tram";
+  if (normalized.includes("noctilien")) return "noctilien";
+  if (normalized.includes("bus")) return "bus";
+  if (normalized.includes("transilien")) return "transilien";
+  if (normalized.includes("train")) return "train";
+  if (normalized.includes("cable")) return "cable";
+
+  return undefined;
+}
+
 function fetchTransferBundle(payload: {
   lineId: string;
   lineLabel: string;
+  nearbyDistanceMeters: number;
   requestConcurrency: number;
   requestSpacingMs: number;
   retentionDays: number;
@@ -244,6 +317,8 @@ function fetchTransferBundle(payload: {
 
       return {
         ...transferBundle,
+        nearbyDistanceMeters:
+          transferBundle.nearbyDistanceMeters ?? payload.nearbyDistanceMeters,
         requestConcurrency:
           transferBundle.requestConcurrency ?? payload.requestConcurrency,
         transferResolverMode:
@@ -311,6 +386,7 @@ async function waitForTransferBundleLaunchSlot(
 
 function createTransferBundleRequestKey(payload: {
   lineId: string;
+  nearbyDistanceMeters: number;
   requestConcurrency: number;
   requestSpacingMs: number;
   retentionDays: number;
@@ -319,6 +395,7 @@ function createTransferBundleRequestKey(payload: {
 }): string {
   return JSON.stringify({
     lineId: payload.lineId,
+    nearbyDistanceMeters: payload.nearbyDistanceMeters,
     requestConcurrency: payload.requestConcurrency,
     requestSpacingMs: payload.requestSpacingMs,
     retentionDays: payload.retentionDays,
@@ -363,7 +440,7 @@ async function requestTransferBundleCacheDelete(payload?: {
     body: payload ? JSON.stringify(payload) : undefined,
     headers: payload ? { "content-type": "application/json" } : undefined,
     method: "DELETE",
-  });
+  }).catch(() => undefined);
 }
 
 export function clearPendingTransferBundleRequestsForTests(): void {
@@ -419,6 +496,7 @@ export function listTransferBundles(
       expiresAt: bundle.expiresAt,
       retentionDays: bundle.retentionDays,
       requestConcurrency: bundle.requestConcurrency,
+      nearbyDistanceMeters: bundle.nearbyDistanceMeters,
       stopAreaCount: Object.keys(bundle.transfersByStopAreaRef).length,
       transferCount: Object.values(bundle.transfersByStopAreaRef).reduce(
         (count, transfers) => count + transfers.length,
@@ -533,16 +611,21 @@ export function saveTransferBundle(
   const requestConcurrency = normalizeTransferBundleRequestConcurrency(
     response.requestConcurrency,
   );
+  const nearbyDistanceMeters = normalizeTransferBundleNearbyDistanceMeters(
+    response.nearbyDistanceMeters,
+  );
   const id = createTransferBundleId(
     response.lineId,
     transferResolverMode,
     requestConcurrency,
+    nearbyDistanceMeters,
   );
   const store = storage ? readTransferBundleStore(storage) : createEmptyStore();
   const existing = store.bundles.find((bundle) => bundle.id === id);
   const createdAt = existing?.createdAt ?? new Date(now).toISOString();
   const record: TransferBundleRecord = {
     ...response,
+    nearbyDistanceMeters,
     requestConcurrency,
     transferResolverMode,
     id,
@@ -653,8 +736,9 @@ function createTransferBundleId(
   lineId: string,
   transferResolverMode: EffectiveTransferResolverMode,
   requestConcurrency: number,
+  nearbyDistanceMeters: number,
 ): string {
-  return `${lineId.trim().toLowerCase()}::${transferResolverMode}::c${requestConcurrency}`;
+  return `${lineId.trim().toLowerCase()}::${transferResolverMode}::d${nearbyDistanceMeters}::c${requestConcurrency}`;
 }
 
 function getBundleLineId(board: TransitBoardConfig): string {
@@ -662,9 +746,8 @@ function getBundleLineId(board: TransitBoardConfig): string {
 }
 
 function getBundleLineLabel(board: TransitBoardConfig): string {
-  return `${board.line.mode === "metro" ? "Ligne" : board.line.longName} ${
-    board.line.mode === "metro" ? board.line.shortName : ""
-  }`
+  return `${board.line.mode === "metro" ? "Ligne" : board.line.longName} ${board.line.mode === "metro" ? board.line.shortName : ""
+    }`
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -692,6 +775,8 @@ function isTransferBundleRecord(value: unknown): value is TransferBundleRecord {
     typeof candidate.expiresAt === "string" &&
     typeof candidate.retentionDays === "number" &&
     typeof candidate.requestConcurrency === "number" &&
+    (candidate.nearbyDistanceMeters === undefined ||
+      typeof candidate.nearbyDistanceMeters === "number") &&
     Boolean(candidate.transfersByStopAreaRef) &&
     typeof candidate.transfersByStopAreaRef === "object"
   );

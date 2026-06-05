@@ -213,6 +213,7 @@ const props = withDefaults(
     transferBundleRetentionDays?: number;
     transferBundleRequestConcurrency?: number;
     transferBundleRequestSpacingMs?: number;
+    transportType?: string;
     transferResolverMode?: TransferResolverMode;
   }>(),
   {
@@ -638,6 +639,7 @@ async function hydratePatternTransfers(): Promise<void> {
         retentionDays: props.transferBundleRetentionDays,
         transferBundleRequestConcurrency: props.transferBundleRequestConcurrency,
         transferBundleRequestSpacingMs: props.transferBundleRequestSpacingMs,
+        transportType: props.transportType,
         transferResolverMode: props.transferResolverMode,
       },
     );

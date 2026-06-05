@@ -103,6 +103,51 @@ describe("transfer bundle endpoint", () => {
     expect(listServerTransferBundles()).toEqual([]);
   });
 
+  it("uses the requested nearby radius in Navitia places_nearby calls", async () => {
+    clearServerTransferBundles();
+    const requestedUrls: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = decodeURIComponent(input.toString());
+
+      requestedUrls.push(url);
+
+      if (url.includes("/lines/line:IDFM:C01742/stop_areas?")) {
+        return jsonResponse({
+          stop_areas: [
+            {
+              id: "stop_area:IDFM:A",
+              label: "Station A",
+              name: "Station A",
+            },
+          ],
+        });
+      }
+
+      if (url.includes("/places_nearby?")) {
+        return jsonResponse({ places_nearby: [] });
+      }
+
+      return jsonResponse({ lines: [] });
+    });
+
+    await createTransferBundleResponse(
+      {
+        lineId: "line:IDFM:C01742",
+        lineLabel: "RER A",
+        nearbyDistanceMeters: 600,
+        targets: [{ stopAreaRef: "stop_area:IDFM:A", label: "Station A" }],
+      },
+      { fetcher: fetcher as unknown as typeof fetch },
+    );
+
+    expect(
+      requestedUrls.some((url) =>
+        url.includes("/places_nearby?") && url.includes("distance=600"),
+      ),
+    ).toBe(true);
+    expect(listServerTransferBundles()[0]?.id).toContain("::d600::");
+  });
+
   it("accepts stop-area and NeTEx stop-place refs produced by the cache", () => {
     expect(isSupportedTransferTargetRef("stop_area:IDFM:46007")).toBe(true);
     expect(isSupportedTransferTargetRef("FR::Quay:50149051:FR1")).toBe(true);

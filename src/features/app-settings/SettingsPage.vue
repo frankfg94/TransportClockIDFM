@@ -117,15 +117,16 @@ async function refreshBundleSummaries(): Promise<void> {
 }
 
 async function clearBundles(): Promise<void> {
-  await clearTransferBundles();
+  const backendClear = clearTransferBundles().catch(() => undefined);
   if (typeof window !== "undefined") {
     clearTransferBundles(window.localStorage);
   }
   clearPatternTransferRuntimeCaches();
-  await refreshBundleSummaries();
   showSettingsNotification(
-    "Bundles backend supprimes. Le prochain plan rechargera les correspondances.",
+    "Bundles supprimés côté backend. Le prochain plan rechargera les correspondances.",
   );
+  await backendClear;
+  await refreshBundleSummaries();
 }
 
 async function deleteBundle(id: string): Promise<void> {
@@ -147,6 +148,14 @@ function formatBundleDate(value: string): string {
 
 function formatTransferResolverMode(_value: TransferBundleSummary["transferResolverMode"]): string {
   return "Nearby";
+}
+
+function formatTransferBundleDistance(
+  value: TransferBundleSummary["nearbyDistanceMeters"],
+): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? `${value} m`
+    : "distance auto";
 }
 
 function updateWeatherMode(value: string): void {
@@ -713,7 +722,7 @@ onBeforeUnmount(() => {
 
           <p class="settings-bundle-modal__summary">
             {{ bundleCount }} bundle{{ bundleCount > 1 ? "s" : "" }} en cache
-            local.
+            backend.
           </p>
 
           <div v-if="bundleSummaries.length" class="settings-bundle-list">
@@ -727,7 +736,8 @@ onBeforeUnmount(() => {
                 <span>
                   {{ bundle.stopAreaCount }} stations -
                   {{ bundle.transferCount }} correspondances -
-                  {{ formatTransferResolverMode(bundle.transferResolverMode) }}
+                  {{ formatTransferResolverMode(bundle.transferResolverMode) }} -
+                  {{ formatTransferBundleDistance(bundle.nearbyDistanceMeters) }}
                 </span>
                 <small>Expire le {{ formatBundleDate(bundle.expiresAt) }}</small>
               </div>
