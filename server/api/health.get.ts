@@ -18,6 +18,13 @@ const MAP_TILE_HEALTH_URL =
   "https://a.basemaps.cartocdn.com/light_all/12/2074/1408.png";
 const OPEN_METEO_HEALTH_URL =
   "https://api.open-meteo.com/v1/forecast?latitude=48.8566&longitude=2.3522&current=temperature_2m,weather_code&forecast_days=1&timezone=Europe%2FParis";
+const BROWSER_LIKE_HEALTH_HEADERS = {
+  accept: "application/json",
+  "accept-language": "fr-FR,fr;q=0.9,en;q=0.8",
+  "user-agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+};
 
 export default defineEventHandler(async (event): Promise<HealthResponse> => {
   const checks = await Promise.all([
@@ -350,3 +357,4 @@ function sanitizeNetexLocation(location?: string): string {
 
   return "Dossier local configuré";
 }
+

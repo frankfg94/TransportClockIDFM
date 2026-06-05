@@ -297,7 +297,7 @@ describe("station add to service-pattern modal workflow", () => {
 
     expect(searches).toEqual([]);
     expect(transferLookups).toContain("Montparnasse-Bienvenue");
-    expect(new Set(transferScopes)).toEqual(new Set(["connected"]));
+    expect(new Set(transferScopes)).toEqual(new Set(["nearby"]));
     expect(montparnasseCall?.transferLines?.map((line) => line.label)).toEqual(
       expect.arrayContaining(["6", "12", "13"]),
     );
@@ -438,3 +438,4 @@ function stationKey(label: string): string {
 function edgeKey(left: string, right: string): string {
   return [stationKey(left), stationKey(right)].sort().join("--");
 }
+

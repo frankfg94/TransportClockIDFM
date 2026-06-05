@@ -5,6 +5,11 @@ import type {
   TransferLineOption,
   TransitBoardConfig,
 } from "../../types/transit";
+import {
+  resolveEffectiveTransferResolverMode,
+  type EffectiveTransferResolverMode,
+  type TransferResolverMode,
+} from "./transferResolverMode";
 
 export interface TransferBundleTarget {
   stopAreaRef: string;
@@ -17,15 +22,19 @@ export interface TransferBundleResponse {
   generatedAt: string;
   lineId: string;
   lineLabel: string;
+  requestConcurrency?: number;
+  transferResolverMode?: EffectiveTransferResolverMode;
   transfersByStopAreaRef: Record<string, TransferLineOption[]>;
 }
 
-export interface TransferBundleRecord extends TransferBundleResponse {
+export interface TransferBundleRecord extends Omit<TransferBundleResponse, "transferResolverMode"> {
   id: string;
   createdAt: string;
   updatedAt: string;
   expiresAt: string;
   retentionDays: number;
+  requestConcurrency: number;
+  transferResolverMode: EffectiveTransferResolverMode;
 }
 
 export interface TransferBundleSummary {
@@ -35,8 +44,10 @@ export interface TransferBundleSummary {
   updatedAt: string;
   expiresAt: string;
   retentionDays: number;
+  requestConcurrency: number;
   stopAreaCount: number;
   transferCount: number;
+  transferResolverMode: EffectiveTransferResolverMode;
 }
 
 export interface TransferBundleLoadResult {
@@ -64,17 +75,29 @@ export interface TransferBundleStorage {
   removeItem(key: string): void;
 }
 
-const TRANSFER_BUNDLE_STORAGE_KEY = "transport-clock.transfer-bundles.v3";
+const TRANSFER_BUNDLE_STORAGE_KEY = "transport-clock.transfer-bundles.v12";
 const LEGACY_TRANSFER_BUNDLE_STORAGE_KEYS = [
+  "transport-clock.transfer-bundles.v11",
+  "transport-clock.transfer-bundles.v10",
+  "transport-clock.transfer-bundles.v9",
+  "transport-clock.transfer-bundles.v8",
+  "transport-clock.transfer-bundles.v7",
+  "transport-clock.transfer-bundles.v6",
+  "transport-clock.transfer-bundles.v5",
+  "transport-clock.transfer-bundles.v4",
+  "transport-clock.transfer-bundles.v3",
   "transport-clock.transfer-bundles.v2",
   "transport-clock.transfer-bundles.v1",
+];
+const LEGACY_TRANSFER_BUNDLE_AUXILIARY_STORAGE_KEYS = [
+  "transport-clock.transfer-bundles.resetAt",
 ];
 const TRANSFER_BUNDLE_STORAGE_KEYS = [
   TRANSFER_BUNDLE_STORAGE_KEY,
   ...LEGACY_TRANSFER_BUNDLE_STORAGE_KEYS,
+  ...LEGACY_TRANSFER_BUNDLE_AUXILIARY_STORAGE_KEYS,
 ];
-const TRANSFER_BUNDLE_RESET_KEY = "transport-clock.transfer-bundles.resetAt";
-const TRANSFER_BUNDLE_REQUEST_BATCH_SIZE = 10;
+const DEFAULT_TRANSFER_BUNDLE_REQUEST_CONCURRENCY = 1;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const pendingTransferBundleRequests = new Map<
   string,
@@ -125,78 +148,78 @@ export async function loadTransferBundleResultForPattern(
   board: TransitBoardConfig,
   pattern: DepartureCallingPattern,
   retentionDays: number,
-  options: { onProgress?: (progress: TransferBundleLoadProgress) => void } = {},
+  options: {
+    onProgress?: (progress: TransferBundleLoadProgress) => void;
+    requestConcurrency?: number;
+    requestSpacingMs?: number;
+    transferResolverMode?: TransferResolverMode;
+  } = {},
 ): Promise<TransferBundleLoadResult> {
-  const storage = getBrowserStorage();
   const lineId = getBundleLineId(board);
   const lineLabel = getBundleLineLabel(board);
+  const transferResolverMode = resolveEffectiveTransferResolverMode(
+    options.transferResolverMode ?? "auto",
+    board.line.mode,
+  );
   const targets = collectTransferBundleTargets(pattern);
 
-  if (!storage || targets.length === 0) {
+  if (targets.length === 0) {
     return createBundleLoadResult({}, targets);
   }
 
-  pruneExpiredTransferBundles(storage);
-
-  const existing = readTransferBundleRecord(lineId, storage);
-  const missingTargets = targets.filter(
-    (target) =>
-      !existing ||
-      !Object.prototype.hasOwnProperty.call(
-        existing.transfersByStopAreaRef,
-        target.stopAreaRef,
-      ),
+  const requestConcurrency = normalizeTransferBundleRequestConcurrency(
+    options.requestConcurrency,
   );
-
-  const existingIsUsable = Boolean(existing && !isTransferBundleExpired(existing));
-
-  reportBundleProgress(
-    targets,
-    existingIsUsable ? existing?.transfersByStopAreaRef ?? {} : {},
-    options.onProgress,
+  const requestSpacingMs = normalizeTransferBundleRequestSpacingMs(
+    options.requestSpacingMs,
   );
-
-  if (existing && missingTargets.length === 0 && !isTransferBundleExpired(existing)) {
-    return createBundleLoadResult(existing.transfersByStopAreaRef, targets);
-  }
+  const transfersByStopAreaRef: Record<string, TransferLineOption[]> = {};
+  reportBundleProgress(targets, transfersByStopAreaRef, options.onProgress);
 
   try {
-    const requestedTargets = missingTargets.length > 0 ? missingTargets : targets;
-    let merged: TransferBundleRecord | undefined;
+    const response = await fetchTransferBundle({
+      lineId,
+      lineLabel,
+      requestConcurrency,
+      requestSpacingMs,
+      targets,
+      transferResolverMode,
+      retentionDays,
+    }).catch(() => undefined);
 
-    for (
-      let index = 0;
-      index < requestedTargets.length;
-      index += TRANSFER_BUNDLE_REQUEST_BATCH_SIZE
-    ) {
-      const response = await fetchTransferBundle({
-        lineId,
-        lineLabel,
-        cacheBust: getTransferBundleCacheBust(storage),
-        targets: requestedTargets.slice(index, index + TRANSFER_BUNDLE_REQUEST_BATCH_SIZE),
-        retentionDays,
-      });
-
-      merged = saveTransferBundle(response, retentionDays, storage);
-      reportBundleProgress(targets, merged.transfersByStopAreaRef, options.onProgress);
+    if (!response || !transferBundleResponseHasRequestedTarget(targets, response)) {
+      return createBundleLoadResult(transfersByStopAreaRef, targets);
     }
 
-    return createBundleLoadResult(merged?.transfersByStopAreaRef ?? {}, targets);
-  } catch (error) {
-    if (existing) {
-      return createBundleLoadResult(existing.transfersByStopAreaRef, targets);
-    }
-
-    return createBundleLoadResult({}, targets);
+    Object.assign(transfersByStopAreaRef, response.transfersByStopAreaRef);
+    reportBundleProgress(targets, transfersByStopAreaRef, options.onProgress);
+  } catch {
+    return createBundleLoadResult(transfersByStopAreaRef, targets);
   }
+
+  return createBundleLoadResult(transfersByStopAreaRef, targets);
+}
+
+function normalizeTransferBundleRequestConcurrency(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(4, Math.max(1, Math.trunc(value)))
+    : DEFAULT_TRANSFER_BUNDLE_REQUEST_CONCURRENCY;
+}
+
+function normalizeTransferBundleRequestSpacingMs(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(2_000, Math.max(0, Math.trunc(value)))
+    : 0;
 }
 
 function fetchTransferBundle(payload: {
-  cacheBust?: string;
   lineId: string;
   lineLabel: string;
+  requestConcurrency: number;
+  requestSpacingMs: number;
   retentionDays: number;
   targets: TransferBundleTarget[];
+  transferResolverMode: EffectiveTransferResolverMode;
 }): Promise<TransferBundleResponse> {
   const requestKey = createTransferBundleRequestKey(payload);
   const pendingRequest = pendingTransferBundleRequests.get(requestKey);
@@ -217,7 +240,15 @@ function fetchTransferBundle(payload: {
         throw new Error(`${response.status} ${response.statusText}`);
       }
 
-      return (await response.json()) as TransferBundleResponse;
+      const transferBundle = (await response.json()) as TransferBundleResponse;
+
+      return {
+        ...transferBundle,
+        requestConcurrency:
+          transferBundle.requestConcurrency ?? payload.requestConcurrency,
+        transferResolverMode:
+          transferBundle.transferResolverMode ?? payload.transferResolverMode,
+      };
     })
     .finally(() => {
       pendingTransferBundleRequests.delete(requestKey);
@@ -228,17 +259,110 @@ function fetchTransferBundle(payload: {
   return request;
 }
 
+async function mapTransferBundleItemsWithConcurrency<TItem>(
+  items: TItem[],
+  concurrency: number,
+  spacingMs: number,
+  mapper: (item: TItem, index: number) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0;
+  let nextStartAt = Date.now();
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+  const normalizedSpacingMs = normalizeTransferBundleRequestSpacingMs(spacingMs);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+
+        nextIndex += 1;
+        await waitForTransferBundleLaunchSlot(
+          normalizedSpacingMs,
+          () => nextStartAt,
+          (value) => {
+            nextStartAt = value;
+          },
+        );
+        await mapper(items[currentIndex]!, currentIndex);
+      }
+    }),
+  );
+}
+
+async function waitForTransferBundleLaunchSlot(
+  spacingMs: number,
+  getNextStartAt: () => number,
+  setNextStartAt: (value: number) => void,
+): Promise<void> {
+  if (spacingMs <= 0) {
+    return;
+  }
+
+  const now = Date.now();
+  const scheduledAt = Math.max(now, getNextStartAt());
+  const delayMs = Math.max(0, scheduledAt - now);
+
+  setNextStartAt(scheduledAt + spacingMs);
+
+  if (delayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+}
+
 function createTransferBundleRequestKey(payload: {
-  cacheBust?: string;
   lineId: string;
+  requestConcurrency: number;
+  requestSpacingMs: number;
   retentionDays: number;
   targets: TransferBundleTarget[];
+  transferResolverMode: EffectiveTransferResolverMode;
 }): string {
   return JSON.stringify({
-    cacheBust: payload.cacheBust ?? "",
     lineId: payload.lineId,
+    requestConcurrency: payload.requestConcurrency,
+    requestSpacingMs: payload.requestSpacingMs,
     retentionDays: payload.retentionDays,
+    transferResolverMode: payload.transferResolverMode,
     targets: payload.targets.map((target) => target.stopAreaRef).sort(),
+  });
+}
+
+function transferBundleResponseHasRequestedTarget(
+  targets: TransferBundleTarget[],
+  response: TransferBundleResponse,
+): boolean {
+  return targets.some((target) =>
+    Object.prototype.hasOwnProperty.call(
+      response.transfersByStopAreaRef,
+      target.stopAreaRef,
+    ),
+  );
+}
+
+async function fetchTransferBundleSummaries(): Promise<TransferBundleSummary[]> {
+  const response = await fetch("/api/transfer-bundles", {
+    method: "GET",
+  }).catch(() => undefined);
+
+  if (!response?.ok) {
+    return [];
+  }
+
+  const payload = (await response.json().catch(() => ({}))) as {
+    bundles?: TransferBundleSummary[];
+  };
+
+  return Array.isArray(payload.bundles) ? payload.bundles : [];
+}
+
+async function requestTransferBundleCacheDelete(payload?: {
+  id?: string;
+  lineId?: string;
+}): Promise<void> {
+  await fetch("/api/transfer-bundles", {
+    body: payload ? JSON.stringify(payload) : undefined,
+    headers: payload ? { "content-type": "application/json" } : undefined,
+    method: "DELETE",
   });
 }
 
@@ -270,8 +394,16 @@ function readTransferBundleStore(storage: TransferBundleStorage): TransferBundle
 }
 
 export function listTransferBundles(
-  storage = getBrowserStorage(),
-): TransferBundleSummary[] {
+  storage: TransferBundleStorage,
+): TransferBundleSummary[];
+export function listTransferBundles(): Promise<TransferBundleSummary[]>;
+export function listTransferBundles(
+  storage?: TransferBundleStorage,
+): TransferBundleSummary[] | Promise<TransferBundleSummary[]> {
+  if (!storage) {
+    return fetchTransferBundleSummaries();
+  }
+
   if (!storage) {
     return [];
   }
@@ -286,28 +418,46 @@ export function listTransferBundles(
       updatedAt: bundle.updatedAt,
       expiresAt: bundle.expiresAt,
       retentionDays: bundle.retentionDays,
+      requestConcurrency: bundle.requestConcurrency,
       stopAreaCount: Object.keys(bundle.transfersByStopAreaRef).length,
       transferCount: Object.values(bundle.transfersByStopAreaRef).reduce(
         (count, transfers) => count + transfers.length,
         0,
       ),
+      transferResolverMode: bundle.transferResolverMode,
     }))
     .sort((left, right) => left.lineLabel.localeCompare(right.lineLabel, "fr"));
 }
 
-export function clearTransferBundles(storage = getBrowserStorage()): void {
+export function clearTransferBundles(storage: TransferBundleStorage): void;
+export function clearTransferBundles(): Promise<void>;
+export function clearTransferBundles(
+  storage?: TransferBundleStorage,
+): void | Promise<void> {
+  if (!storage) {
+    return requestTransferBundleCacheDelete();
+  }
+
   if (!storage) {
     return;
   }
 
   TRANSFER_BUNDLE_STORAGE_KEYS.forEach((key) => storage.removeItem(key));
-  bumpTransferBundleCacheBust(storage);
 }
 
 export function deleteTransferBundle(
   id: string,
-  storage = getBrowserStorage(),
-): void {
+  storage: TransferBundleStorage,
+): void;
+export function deleteTransferBundle(id: string): Promise<void>;
+export function deleteTransferBundle(
+  id: string,
+  storage?: TransferBundleStorage,
+): void | Promise<void> {
+  if (!storage) {
+    return requestTransferBundleCacheDelete({ id });
+  }
+
   if (!storage) {
     return;
   }
@@ -321,18 +471,38 @@ export function deleteTransferBundle(
     },
     storage,
   );
-  bumpTransferBundleCacheBust(storage);
 }
 
 export function clearTransferBundleForBoard(
   board: TransitBoardConfig,
-  storage = getBrowserStorage(),
-): void {
+  storage: TransferBundleStorage,
+): void;
+export function clearTransferBundleForBoard(
+  board: TransitBoardConfig,
+): Promise<void>;
+export function clearTransferBundleForBoard(
+  board: TransitBoardConfig,
+  storage?: TransferBundleStorage,
+): void | Promise<void> {
+  const lineId = getBundleLineId(board);
+
+  if (!storage) {
+    return requestTransferBundleCacheDelete({ lineId });
+  }
+
   if (!storage) {
     return;
   }
 
-  deleteTransferBundle(createTransferBundleId(getBundleLineId(board)), storage);
+  const store = readTransferBundleStore(storage);
+
+  writeTransferBundleStore(
+    {
+      ...store,
+      bundles: store.bundles.filter((bundle) => bundle.lineId !== lineId),
+    },
+    storage,
+  );
 }
 
 export function pruneExpiredTransferBundles(
@@ -359,12 +529,22 @@ export function saveTransferBundle(
   storage = getBrowserStorage(),
   now = Date.now(),
 ): TransferBundleRecord {
-  const id = createTransferBundleId(response.lineId);
+  const transferResolverMode = response.transferResolverMode ?? "nearby";
+  const requestConcurrency = normalizeTransferBundleRequestConcurrency(
+    response.requestConcurrency,
+  );
+  const id = createTransferBundleId(
+    response.lineId,
+    transferResolverMode,
+    requestConcurrency,
+  );
   const store = storage ? readTransferBundleStore(storage) : createEmptyStore();
   const existing = store.bundles.find((bundle) => bundle.id === id);
   const createdAt = existing?.createdAt ?? new Date(now).toISOString();
   const record: TransferBundleRecord = {
     ...response,
+    requestConcurrency,
+    transferResolverMode,
     id,
     createdAt,
     updatedAt: new Date(now).toISOString(),
@@ -399,22 +579,20 @@ export function isCompleteTransferBundleResponse(
   );
 }
 
-function readTransferBundleRecord(
-  lineId: string,
-  storage: TransferBundleStorage,
-): TransferBundleRecord | undefined {
-  const id = createTransferBundleId(lineId);
-
-  return readTransferBundleStore(storage).bundles.find(
-    (bundle) => bundle.id === id,
-  );
-}
-
 function writeTransferBundleStore(
   store: TransferBundleStore,
   storage: TransferBundleStorage,
 ): void {
-  LEGACY_TRANSFER_BUNDLE_STORAGE_KEYS.forEach((key) => storage.removeItem(key));
+  [
+    ...LEGACY_TRANSFER_BUNDLE_STORAGE_KEYS,
+    ...LEGACY_TRANSFER_BUNDLE_AUXILIARY_STORAGE_KEYS,
+  ].forEach((key) => storage.removeItem(key));
+
+  if (store.bundles.length === 0) {
+    storage.removeItem(TRANSFER_BUNDLE_STORAGE_KEY);
+    return;
+  }
+
   storage.setItem(TRANSFER_BUNDLE_STORAGE_KEY, JSON.stringify(store));
 }
 
@@ -471,16 +649,12 @@ function reportBundleProgress(
   });
 }
 
-function bumpTransferBundleCacheBust(storage: TransferBundleStorage): void {
-  storage.setItem(TRANSFER_BUNDLE_RESET_KEY, new Date().toISOString());
-}
-
-function getTransferBundleCacheBust(storage: TransferBundleStorage): string | undefined {
-  return storage.getItem(TRANSFER_BUNDLE_RESET_KEY) ?? undefined;
-}
-
-function createTransferBundleId(lineId: string): string {
-  return lineId.trim().toLowerCase();
+function createTransferBundleId(
+  lineId: string,
+  transferResolverMode: EffectiveTransferResolverMode,
+  requestConcurrency: number,
+): string {
+  return `${lineId.trim().toLowerCase()}::${transferResolverMode}::c${requestConcurrency}`;
 }
 
 function getBundleLineId(board: TransitBoardConfig): string {
@@ -502,10 +676,6 @@ function getStopAreaRef(source: DepartureCall | LineRouteStop): string | undefin
   );
 }
 
-function isTransferBundleExpired(bundle: TransferBundleRecord): boolean {
-  return Date.parse(bundle.expiresAt) <= Date.now();
-}
-
 function isTransferBundleRecord(value: unknown): value is TransferBundleRecord {
   if (!value || typeof value !== "object") {
     return false;
@@ -517,9 +687,11 @@ function isTransferBundleRecord(value: unknown): value is TransferBundleRecord {
     typeof candidate.id === "string" &&
     typeof candidate.lineId === "string" &&
     typeof candidate.lineLabel === "string" &&
+    candidate.transferResolverMode === "nearby" &&
     typeof candidate.updatedAt === "string" &&
     typeof candidate.expiresAt === "string" &&
     typeof candidate.retentionDays === "number" &&
+    typeof candidate.requestConcurrency === "number" &&
     Boolean(candidate.transfersByStopAreaRef) &&
     typeof candidate.transfersByStopAreaRef === "object"
   );

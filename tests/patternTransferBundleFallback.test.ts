@@ -85,7 +85,10 @@ describe("pattern transfer bundle fallback", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/transfer-bundles",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        body: expect.stringContaining('"transferResolverMode":"nearby"'),
+        method: "POST",
+      }),
     );
     expect(hydrated.calls[0]?.transferLines?.map((line) => line.label)).toEqual([
       "1",
@@ -134,7 +137,7 @@ describe("pattern transfer bundle fallback", () => {
     expect(idfm.fetchStationTransfers).toHaveBeenCalledWith(
       expect.objectContaining({ label: "Station B" }),
       "line:IDFM:C01727",
-      { transferScope: "connected" },
+      { currentLineLabel: "B", transferScope: "nearby" },
     );
     expect(hydrated.calls[0]?.transferLines?.map((line) => line.label)).toEqual([
       "9",
@@ -177,3 +180,4 @@ function createPattern(labels = ["Station A"]): DepartureCallingPattern {
     serviceType: "omnibus",
   };
 }
+

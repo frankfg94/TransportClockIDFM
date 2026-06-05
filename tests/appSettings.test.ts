@@ -6,7 +6,10 @@ import {
   normalizeAppSettings,
   parseMaxDeparturesPerDirection,
   parseTransferBundleRetentionDays,
+  parseTransferBundleRequestConcurrency,
+  parseTransferBundleRequestSpacingMs,
   parseWeatherLookaheadMinutes,
+  transferResolverModeOptions,
 } from "../src/features/app-settings/appSettings";
 
 describe("app settings", () => {
@@ -23,7 +26,10 @@ describe("app settings", () => {
       richTransferTooltips: true,
       trafficInfoDesign: "ratp",
       trafficInfoDefaultScope: "optimized",
+      transferResolverMode: "auto",
       transferBundleRetentionDays: 15,
+      transferBundleRequestConcurrency: 1,
+      transferBundleRequestSpacingMs: 0,
       weatherMode: "animated",
       weatherLookaheadMinutes: 1440,
       weatherLocationPreset: "paris",
@@ -47,7 +53,10 @@ describe("app settings", () => {
       compactLinePlanMode: "tiny",
       trafficInfoDesign: "dense",
       trafficInfoDefaultScope: "everything",
+      transferResolverMode: "telepathy",
       transferBundleRetentionDays: "999",
+      transferBundleRequestConcurrency: "999",
+      transferBundleRequestSpacingMs: "999999",
       weatherMode: "cinematic",
       weatherLookaheadMinutes: "9999",
       weatherLocationPreset: "moon",
@@ -68,7 +77,10 @@ describe("app settings", () => {
     expect(settings.compactLinePlanMode).toBe("auto");
     expect(settings.trafficInfoDesign).toBe("ratp");
     expect(settings.trafficInfoDefaultScope).toBe("optimized");
+    expect(settings.transferResolverMode).toBe("auto");
     expect(settings.transferBundleRetentionDays).toBe(15);
+    expect(settings.transferBundleRequestConcurrency).toBe(1);
+    expect(settings.transferBundleRequestSpacingMs).toBe(0);
     expect(settings.weatherMode).toBe("animated");
     expect(settings.weatherLookaheadMinutes).toBe(1440);
     expect(settings.weatherLocationPreset).toBe("paris");
@@ -94,6 +106,17 @@ describe("app settings", () => {
     expect(parseWeatherLookaheadMinutes("999")).toBe(1440);
     expect(parseTransferBundleRetentionDays("30")).toBe(30);
     expect(parseTransferBundleRetentionDays("999")).toBe(15);
+    expect(parseTransferBundleRequestConcurrency("3")).toBe(3);
+    expect(parseTransferBundleRequestConcurrency("999")).toBe(1);
+    expect(parseTransferBundleRequestSpacingMs("1000")).toBe(1000);
+    expect(parseTransferBundleRequestSpacingMs("999999")).toBe(0);
+  });
+
+  it("exposes every transfer resolver mode option", () => {
+    expect(transferResolverModeOptions.map((option) => option.id)).toEqual([
+      "auto",
+      "nearby",
+    ]);
   });
 
   it("only hides directions that are explicitly marked as non-terminal", () => {
@@ -110,3 +133,4 @@ describe("app settings", () => {
     expect(filterTerminalOnly(items, false)).toEqual(items);
   });
 });
+

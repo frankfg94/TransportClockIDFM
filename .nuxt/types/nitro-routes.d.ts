@@ -18,10 +18,15 @@ declare module "nitropack/types" {
     '/api/netex/status': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/netex/status.get').default>>>>
     }
+    '/api/opendata/arrets-lignes/records': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/opendata/arrets-lignes/records.get').default>>>>
+    }
     '/api/traffic': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/traffic.get').default>>>>
     }
     '/api/transfer-bundles': {
+      'delete': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/transfer-bundles.delete').default>>>>
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/transfer-bundles.get').default>>>>
       'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/transfer-bundles.post').default>>>>
     }
     '/api/weather': {

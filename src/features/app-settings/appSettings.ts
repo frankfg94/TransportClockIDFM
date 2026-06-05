@@ -6,6 +6,14 @@ import type {
 import type {
   WeatherSettingsLocation,
 } from "../weather/types";
+import {
+  isTransferResolverMode,
+  transferResolverModeOptions,
+  type TransferResolverMode,
+} from "../service-pattern/transferResolverMode";
+
+export { transferResolverModeOptions };
+export type { TransferResolverMode };
 
 export type ClosedDirectionSummaryMode = "last" | "next";
 export type MaxDeparturesPerDirectionSetting =
@@ -30,6 +38,8 @@ export type CompactLinePlanMode = "auto" | "comfort" | "compact";
 export type TrafficInfoDesign = "ratp" | "cards";
 export type TrafficInfoDefaultScope = "optimized" | "all";
 export type TransferBundleRetentionDays = 1 | 3 | 7 | 15 | 30 | 60;
+export type TransferBundleRequestConcurrency = 1 | 2 | 3 | 4;
+export type TransferBundleRequestSpacingMs = 0 | 250 | 500 | 1000 | 1500 | 2000;
 export type WeatherMode = "animated" | "static" | "alerts_only" | "disabled";
 export type WeatherLookaheadMinutes = 60 | 120 | 240 | 480 | 720 | 1440;
 export type WeatherTestMode = "off" | "rain" | "storm" | "snow" | "heat";
@@ -48,7 +58,10 @@ export interface AppSettings {
   richTransferTooltips: boolean;
   trafficInfoDesign: TrafficInfoDesign;
   trafficInfoDefaultScope: TrafficInfoDefaultScope;
+  transferResolverMode: TransferResolverMode;
   transferBundleRetentionDays: TransferBundleRetentionDays;
+  transferBundleRequestConcurrency: TransferBundleRequestConcurrency;
+  transferBundleRequestSpacingMs: TransferBundleRequestSpacingMs;
   weatherMode: WeatherMode;
   weatherLookaheadMinutes: WeatherLookaheadMinutes;
   weatherLocationPreset: WeatherLocationPreset;
@@ -121,6 +134,22 @@ export const transferBundleRetentionOptions = [
   { id: "60", label: "60 jours" },
 ] as const;
 
+export const transferBundleRequestConcurrencyOptions = [
+  { id: "1", label: "1 appel à la fois" },
+  { id: "2", label: "2 appels simultanés" },
+  { id: "3", label: "3 appels simultanés" },
+  { id: "4", label: "4 appels simultanés" },
+] as const;
+
+export const transferBundleRequestSpacingOptions = [
+  { id: "0", label: "Aucun delai" },
+  { id: "250", label: "250 ms" },
+  { id: "500", label: "500 ms" },
+  { id: "1000", label: "1 s" },
+  { id: "1500", label: "1,5 s" },
+  { id: "2000", label: "2 s" },
+] as const;
+
 export const weatherModeOptions = [
   { id: "animated", label: "Alertes avec fond d'écran animé" },
   { id: "static", label: "Alertes avec fond d'écran statique" },
@@ -173,7 +202,10 @@ export function createDefaultAppSettings(): AppSettings {
     richTransferTooltips: true,
     trafficInfoDesign: "ratp",
     trafficInfoDefaultScope: "optimized",
+    transferResolverMode: "auto",
     transferBundleRetentionDays: 15,
+    transferBundleRequestConcurrency: 1,
+    transferBundleRequestSpacingMs: 0,
     weatherMode: "animated",
     weatherLookaheadMinutes: 1440,
     weatherLocationPreset: "paris",
@@ -237,8 +269,17 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     )
       ? value.trafficInfoDefaultScope
       : defaults.trafficInfoDefaultScope,
+    transferResolverMode: isTransferResolverMode(value.transferResolverMode)
+      ? value.transferResolverMode
+      : defaults.transferResolverMode,
     transferBundleRetentionDays: parseTransferBundleRetentionDays(
       value.transferBundleRetentionDays,
+    ),
+    transferBundleRequestConcurrency: parseTransferBundleRequestConcurrency(
+      value.transferBundleRequestConcurrency,
+    ),
+    transferBundleRequestSpacingMs: parseTransferBundleRequestSpacingMs(
+      value.transferBundleRequestSpacingMs,
     ),
     weatherMode: isWeatherMode(value.weatherMode)
       ? value.weatherMode
@@ -306,6 +347,36 @@ export function parseTransferBundleRetentionDays(
   return [1, 3, 7, 15, 30, 60].includes(numericValue)
     ? (numericValue as TransferBundleRetentionDays)
     : 15;
+}
+
+export function parseTransferBundleRequestConcurrency(
+  value: unknown,
+): TransferBundleRequestConcurrency {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseInt(value, 10)
+        : Number.NaN;
+
+  return [1, 2, 3, 4].includes(numericValue)
+    ? (numericValue as TransferBundleRequestConcurrency)
+    : 1;
+}
+
+export function parseTransferBundleRequestSpacingMs(
+  value: unknown,
+): TransferBundleRequestSpacingMs {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseInt(value, 10)
+        : Number.NaN;
+
+  return [0, 250, 500, 1000, 1500, 2000].includes(numericValue)
+    ? (numericValue as TransferBundleRequestSpacingMs)
+    : 0;
 }
 
 export function getEffectiveMaxDeparturesPerDirection(

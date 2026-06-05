@@ -1,0 +1,30 @@
+yarn run v1.22.19
+$ nuxt dev --dotenv .env.local
+|
+•  [32mNuxt [1m3.20.2[22m[39m[90m (with [39m[90mNitro [1m2.13.4[22m[39m[90m, Vite [1m7.3.3[22m[39m[90m and Vue [1m3.5.34[22m[39m[90m)[39m
+[get-port] Unable to find an available port (tried 3000 on host "localhost"). Using alternative port 3001.
+
+[32m  ➜ Local:   [39m [36m[4mhttp://localhost:[1m3001[22m/[24m[39m
+[90m  ➜ Network:  use [37m--host[90m to expose[39m
+
+[32m√[39m Vite client built in 48ms
+[32m√[39m Vite server built in 456ms
+[90m[[90mnitro[90m][39m [32m√[39m Nuxt Nitro server built in 3435ms
+[36mi[39m Vite client warmed up in 2ms
+[90m[[90mnitro[90m][39m [32m√[39m Nuxt Nitro server built in 1764ms
+[90m[[90mnitro[90m][39m [32m√[39m Nuxt Nitro server built in 967ms
+[90m[[90mnitro[90m][39m [32m√[39m Nuxt Nitro server built in 1767ms
+[90m[[90mnitro[90m][39m [32m√[39m Nuxt Nitro server built in 1039ms
+[90m[[90mnitro[90m][39m [32m√[39m Nuxt Nitro server built in 1583ms
+[36mi[39m .nuxt/dist directory has been removed. Restarting Nuxt...
+[32m√[39m Vite client built in 141ms
+[32m√[39m Vite server built in 937ms
+[90m[[90mnitro[90m][39m [32m√[39m Nuxt Nitro server built in 3868ms
+[36mi[39m Vite client warmed up in 4ms
+[90m[[90mnitro[90m][39m [32m√[39m Nuxt Nitro server built in 1794ms
+[36mi[39m .nuxt/dist directory has been removed. Restarting Nuxt...
+[32m√[39m Vite client built in 69ms
+[32m√[39m Vite server built in 852ms
+[90m[[90mnitro[90m][39m [32m√[39m Nuxt Nitro server built in 4078ms
+[36mi[39m Vite client warmed up in 2ms
+info Visit https://yarnpkg.com/en/docs/cli/run for documentation about this command.

@@ -1520,6 +1520,12 @@ h3 {
   z-index: 20;
 }
 
+.pattern-flow-transfer-loader--rate-limited {
+  border-color: rgba(220, 38, 38, 0.28);
+  box-shadow: 0 14px 32px rgba(127, 29, 29, 0.14);
+  min-width: 360px;
+}
+
 .pattern-flow-transfer-loader span {
   animation: pattern-flow-loader-spin 720ms linear infinite;
   border: 2px solid rgba(16, 35, 63, 0.14);
@@ -1527,6 +1533,15 @@ h3 {
   border-top-color: var(--line-color);
   height: 16px;
   width: 16px;
+}
+
+.pattern-flow-transfer-loader--rate-limited span {
+  animation: none;
+  background:
+    linear-gradient(#dc2626, #dc2626) center / 8px 2px no-repeat,
+    linear-gradient(#dc2626, #dc2626) center / 2px 8px no-repeat;
+  border-color: rgba(220, 38, 38, 0.3);
+  border-top-color: rgba(220, 38, 38, 0.3);
 }
 
 .pattern-flow-transfer-loader strong {
@@ -1550,12 +1565,23 @@ h3 {
   min-width: 0;
 }
 
+.pattern-flow-transfer-loader--rate-limited .pattern-flow-transfer-loader__label {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .pattern-flow-transfer-loader__label small {
   color: #64748b;
   font-size: 0.72rem;
   font-weight: 950;
   letter-spacing: 0;
   white-space: nowrap;
+}
+
+.pattern-flow-transfer-loader--rate-limited .pattern-flow-transfer-loader__label small {
+  color: #7f1d1d;
+  white-space: normal;
 }
 
 .pattern-flow-transfer-loader__track {

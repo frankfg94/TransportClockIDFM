@@ -26,6 +26,7 @@ import {
   loadTransferBundleResultForPattern,
   type TransferBundleLoadProgress,
 } from "./transferBundles";
+import type { TransferResolverMode } from "./transferResolverMode";
 
 interface PatternTransferHydrationClient {
   getTransitFamilies?(): Promise<TransitFamilyOption[]>;
@@ -40,7 +41,9 @@ interface PatternTransferHydrationClient {
   fetchTransfers(
     station: StationSearchOption,
     currentLineId?: string,
-    options?: { transferScope?: "connected" | "direct" },
+    options?: {
+      transferScope?: "connected" | "direct";
+    },
   ): Promise<TransferLineOption[]>;
 }
 
@@ -62,6 +65,9 @@ interface PatternTransferHydrationOptions {
   onProgress?: (progress: PatternTransferHydrationProgress) => void;
   preferBundle?: boolean;
   retentionDays?: number;
+  transferBundleRequestConcurrency?: number;
+  transferBundleRequestSpacingMs?: number;
+  transferResolverMode?: TransferResolverMode;
 }
 
 const MAX_TRANSFER_STATIONS = 64;
@@ -94,6 +100,9 @@ export async function hydrateDeparturePatternTransfers(
       board,
       pattern,
       options.retentionDays ?? 15,
+      options.transferResolverMode ?? "auto",
+      options.transferBundleRequestConcurrency,
+      options.transferBundleRequestSpacingMs,
       (progress) => {
         overallTotal = progress.total;
         overallCompleted = progress.completed;
@@ -181,9 +190,6 @@ export async function hydrateDeparturePatternTransfers(
           return [target.key, [] as TransferLineOption[]] as const;
         }
 
-        // A line map needs the full interchange cluster, not only the current
-        // stop_area. Navitia can split a single station complex across nearby
-        // stop areas, so every node uses the connected transfer resolver.
         let failed = false;
         const transfers = await fetchCachedTransfers(
           station,
@@ -233,6 +239,9 @@ async function hydratePatternTransfersFromBundle(
   board: TransitBoardConfig,
   pattern: DepartureCallingPattern,
   retentionDays: number,
+  transferResolverMode: TransferResolverMode,
+  requestConcurrency?: number,
+  requestSpacingMs?: number,
   onProgress?: (progress: TransferBundleLoadProgress) => void,
 ): Promise<{
   complete: boolean;
@@ -244,7 +253,7 @@ async function hydratePatternTransfersFromBundle(
     board,
     pattern,
     retentionDays,
-    { onProgress },
+    { onProgress, requestConcurrency, requestSpacingMs, transferResolverMode },
   );
   const transfersByStopAreaRef = bundleResult.transfersByStopAreaRef;
 

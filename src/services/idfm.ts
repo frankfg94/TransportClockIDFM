@@ -17,6 +17,10 @@
   TransitBoardConfig,
 } from "../types/transit";
 import { createLinePresentation } from "./linePresentation";
+import {
+  createTransferLineOption,
+  dedupeTransferLineOptions,
+} from "./transferLineOptions";
 
 type SiriTextValue =
   | string
@@ -3119,27 +3123,17 @@ function mapLineToTransferOption(line: NavitiaLine): TransferLineOption {
   const family = familyOrder.find((item) =>
     commercialModeMatchesFamily(line.commercial_mode?.name ?? line.commercial_mode?.id, item),
   );
-  const presentation = createLinePresentation({
-    code: line.code ?? line.name,
+
+  return createTransferLineOption({
+    code: line.code,
     color: line.color,
     family,
     id: line.id,
     mode: line.commercial_mode?.name ?? line.physical_modes?.[0]?.name,
-    shortName: line.code ?? line.name ?? line.id,
+    name: line.name,
+    ref: navitiaLineIdToSiriRef(line.id),
     textColor: line.text_color,
   });
-
-  return {
-    id: line.id,
-    label: line.code ?? line.name ?? line.id,
-    family,
-    mode: line.commercial_mode?.name ?? line.physical_modes?.[0]?.name,
-    color: presentation.color,
-    textColor: presentation.textColor,
-    iconUrl: presentation.iconUrl,
-    iconUrls: presentation.iconUrls,
-    ref: navitiaLineIdToSiriRef(line.id),
-  };
 }
 
 function mapStopPointToLineRouteStop(
@@ -3499,20 +3493,7 @@ function dedupeLines(lines: NavitiaLine[]): NavitiaLine[] {
 function dedupeTransferOptions(
   transfers: TransferLineOption[],
 ): TransferLineOption[] {
-  const deduped = new Map<string, TransferLineOption>();
-
-  transfers.forEach((transfer) => {
-    const key = [
-      normalizeText(transfer.mode),
-      normalizeText(transfer.label || transfer.id.split(":").pop()),
-    ].join("|");
-
-    if (!deduped.has(key)) {
-      deduped.set(key, transfer);
-    }
-  });
-
-  return Array.from(deduped.values());
+  return dedupeTransferLineOptions(transfers);
 }
 
 function dedupeStations(

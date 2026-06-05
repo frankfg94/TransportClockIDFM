@@ -36,7 +36,13 @@ import {
   type PatternTransferHydrationProgress,
 } from "./patternTransfers";
 import { clearTransferBundleForBoard } from "./transferBundles";
+import {
+  isBusLikeTransfer,
+  isVisiblePatternPlanTransfer,
+} from "./transferVisibility";
 import { loadTransferLineDirections } from "../line-map/lineMapData";
+import type { TransferResolverMode } from "./transferResolverMode";
+import type { HealthCheck, HealthResponse } from "../health/types";
 
 import type {
   Departure,
@@ -174,6 +180,7 @@ const REGULAR_NODE_HEIGHT = 104;
 const COMPACT_NODE_WIDTH = 128;
 const COMPACT_NODE_HEIGHT = 150;
 const TRANSFER_HYDRATION_STALLED_RETRY_MS = 30_000;
+const TRANSFER_HYDRATION_RATE_LIMIT_CHECK_MS = 1_200;
 
 type PatternLayoutOptions = {
   compact: boolean;
@@ -204,6 +211,9 @@ const props = withDefaults(
     richTransferTooltips?: boolean;
     reduceMotion?: boolean;
     transferBundleRetentionDays?: number;
+    transferBundleRequestConcurrency?: number;
+    transferBundleRequestSpacingMs?: number;
+    transferResolverMode?: TransferResolverMode;
   }>(),
   {
     showMiniMap: true,
@@ -211,6 +221,9 @@ const props = withDefaults(
     richTransferTooltips: true,
     reduceMotion: false,
     transferBundleRetentionDays: 15,
+    transferBundleRequestConcurrency: 1,
+    transferBundleRequestSpacingMs: 0,
+    transferResolverMode: "auto",
   },
 );
 
@@ -237,12 +250,14 @@ const transferHydrationProgress = ref<PatternTransferHydrationProgress>({
   total: 0,
 });
 const transferHydrationRetryVisible = ref(false);
+const transferHydrationRateLimited = ref(false);
 const activeStationTooltipKey = ref<string>();
 const activeTransfer = ref<TransferLineOption>();
 const transferDirectionStates = reactive<
   Record<string, TransferDirectionState>
 >({});
 let transferHydrationRequest = 0;
+let transferHydrationRateLimitTimer: number | undefined;
 let transferHydrationStalledTimer: number | undefined;
 let compactDecisionKey = "";
 let stationTooltipHideTimer: number | undefined;
@@ -276,9 +291,16 @@ const transferHydrationProgressLabel = computed(() => {
   return `${transferHydrationProgress.value.completed}/${total}`;
 });
 const transferHydrationStatusLabel = computed(() =>
-  transferHydrationRetryVisible.value
+  transferHydrationRateLimited.value
+    ? "Limite API quotidienne atteinte"
+    : transferHydrationRetryVisible.value
     ? "Correspondances bloquées"
     : "Chargement des correspondances",
+);
+const transferHydrationDetailLabel = computed(() =>
+  transferHydrationRateLimited.value
+    ? "Les correspondances sont temporairement indisponibles"
+    : transferHydrationProgressLabel.value,
 );
 const servedCalls = computed(
   () => displayPattern.value?.calls.filter((call) => call.served) ?? [],
@@ -574,6 +596,7 @@ async function hydratePatternTransfers(): Promise<void> {
 
   hydratedPattern.value = pattern;
   transferHydrationRetryVisible.value = false;
+  transferHydrationRateLimited.value = false;
   transferHydrationProgress.value = {
     completed: 0,
     failed: 0,
@@ -584,17 +607,20 @@ async function hydratePatternTransfers(): Promise<void> {
   if (!props.open || !board || !pattern) {
     transferHydrationLoading.value = false;
     resetTransferHydrationStallState();
+    clearTransferHydrationRateLimitTimer();
     return;
   }
 
   if (typeof window === "undefined") {
     transferHydrationLoading.value = false;
     resetTransferHydrationStallState();
+    clearTransferHydrationRateLimitTimer();
     return;
   }
 
   transferHydrationLoading.value = true;
   syncTransferHydrationStallTimer(requestId);
+  syncTransferHydrationRateLimitCheck(requestId);
 
   try {
     const enrichedPattern = await hydrateDeparturePatternTransfers(
@@ -606,9 +632,13 @@ async function hydratePatternTransfers(): Promise<void> {
           if (requestId === transferHydrationRequest) {
             transferHydrationProgress.value = progress;
             syncTransferHydrationStallTimer(requestId);
+            syncTransferHydrationRateLimitCheck(requestId);
           }
         },
         retentionDays: props.transferBundleRetentionDays,
+        transferBundleRequestConcurrency: props.transferBundleRequestConcurrency,
+        transferBundleRequestSpacingMs: props.transferBundleRequestSpacingMs,
+        transferResolverMode: props.transferResolverMode,
       },
     );
 
@@ -621,20 +651,28 @@ async function hydratePatternTransfers(): Promise<void> {
     }
   } finally {
     if (requestId === transferHydrationRequest) {
-      transferHydrationLoading.value = false;
-      resetTransferHydrationStallState();
+      if (!transferHydrationRateLimited.value) {
+        transferHydrationLoading.value = false;
+        resetTransferHydrationStallState();
+      } else {
+        transferHydrationRetryVisible.value = true;
+        clearTransferHydrationStallTimer();
+      }
+      clearTransferHydrationRateLimitTimer();
     }
   }
 }
 
-function retryTransferHydrationFromScratch(): void {
+async function retryTransferHydrationFromScratch(): Promise<void> {
   if (!props.board) {
     return;
   }
 
-  clearTransferBundleForBoard(props.board);
+  await clearTransferBundleForBoard(props.board);
   transferHydrationRequest += 1;
+  transferHydrationRateLimited.value = false;
   resetTransferHydrationStallState();
+  clearTransferHydrationRateLimitTimer();
   void hydratePatternTransfers();
 }
 
@@ -658,8 +696,87 @@ function syncTransferHydrationStallTimer(requestId: number): void {
       transferHydrationProgress.value.completed === 0
     ) {
       transferHydrationRetryVisible.value = true;
+      void checkTransferHydrationRateLimit(requestId);
     }
   }, TRANSFER_HYDRATION_STALLED_RETRY_MS);
+}
+
+function syncTransferHydrationRateLimitCheck(requestId: number): void {
+  clearTransferHydrationRateLimitTimer();
+
+  if (
+    !transferHydrationLoading.value ||
+    transferHydrationRateLimited.value ||
+    transferHydrationProgress.value.completed > 0
+  ) {
+    return;
+  }
+
+  transferHydrationRateLimitTimer = window.setTimeout(() => {
+    transferHydrationRateLimitTimer = undefined;
+    void checkTransferHydrationRateLimit(requestId);
+  }, TRANSFER_HYDRATION_RATE_LIMIT_CHECK_MS);
+}
+
+async function checkTransferHydrationRateLimit(requestId: number): Promise<void> {
+  if (
+    requestId !== transferHydrationRequest ||
+    !transferHydrationLoading.value ||
+    transferHydrationProgress.value.completed > 0
+  ) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/health");
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as HealthResponse;
+
+    if (
+      requestId === transferHydrationRequest &&
+      transferHydrationLoading.value &&
+      transferHydrationProgress.value.completed === 0 &&
+      healthChecksIndicateMarketplaceRateLimit(payload.checks)
+    ) {
+      transferHydrationRateLimited.value = true;
+      transferHydrationRetryVisible.value = true;
+      clearTransferHydrationStallTimer();
+    }
+  } catch {
+    // Health is best-effort here: the loader must keep its normal behavior if
+    // the health endpoint itself is unavailable.
+  }
+}
+
+function healthChecksIndicateMarketplaceRateLimit(checks: HealthCheck[]): boolean {
+  return checks
+    .filter((check) =>
+      ["prim", "navitia", "prim-traffic"].includes(check.id),
+    )
+    .some(healthCheckIndicatesRateLimit);
+}
+
+function healthCheckIndicatesRateLimit(check: HealthCheck): boolean {
+  const remaining = check.quota?.remaining;
+  const numericRemaining =
+    remaining === undefined || remaining === "" ? undefined : Number(remaining);
+
+  if (Number.isFinite(numericRemaining) && numericRemaining <= 0) {
+    return true;
+  }
+
+  const text = `${check.message} ${check.detail ?? ""}`.toLowerCase();
+
+  return (
+    text.includes("429") ||
+    text.includes("rate limit") ||
+    text.includes("ratelimit") ||
+    text.includes("quota")
+  );
 }
 
 function resetTransferHydrationStallState(): void {
@@ -674,6 +791,15 @@ function clearTransferHydrationStallTimer(): void {
 
   window.clearTimeout(transferHydrationStalledTimer);
   transferHydrationStalledTimer = undefined;
+}
+
+function clearTransferHydrationRateLimitTimer(): void {
+  if (transferHydrationRateLimitTimer === undefined) {
+    return;
+  }
+
+  window.clearTimeout(transferHydrationRateLimitTimer);
+  transferHydrationRateLimitTimer = undefined;
 }
 
 function createPatternFlow(
@@ -726,9 +852,7 @@ function createPatternFlow(
           ? undefined
           : getBranchChip(node, activeTerminalIds, departureTimeLabel),
         busTransfers: node.transfers.filter(isBusTransfer),
-        nonBusTransfers: node.transfers.filter(
-          (transfer) => !isBusTransfer(transfer),
-        ),
+        nonBusTransfers: node.transfers.filter(isVisiblePatternPlanTransfer),
         transferGroups: createTransferGroups(node.transfers),
       },
     } satisfies PatternFlowNode;
@@ -2398,10 +2522,7 @@ function mergeTransfers(
 }
 
 function isBusTransfer(transfer: TransferLineOption): boolean {
-  return (
-    transfer.family === "BUS" ||
-    normalizeStationName(transfer.mode ?? "").includes("bus")
-  );
+  return isBusLikeTransfer(transfer);
 }
 
 function showTransferDetails(transfer: TransferLineOption): void {
@@ -2519,14 +2640,14 @@ function getTransferFamilyKey(
   if (transfer.family === "RER") return "RER";
   if (transfer.family === "TRANSILIEN") return "TRANSILIEN";
   if (transfer.family === "TRAM") return "TRAM";
-  if (transfer.family === "BUS") return "BUS";
+  if (transfer.family === "BUS" || transfer.family === "NOCTILIEN") return "BUS";
 
   const mode = normalizeStationName(transfer.mode ?? "");
 
   if (mode.includes("metro")) return "METRO";
   if (mode.includes("rer")) return "RER";
   if (mode.includes("tram")) return "TRAM";
-  if (mode.includes("bus")) return "BUS";
+  if (mode.includes("bus") || mode.includes("noctilien")) return "BUS";
   if (mode.includes("train") || mode.includes("rail")) return "TRANSILIEN";
 
   return "OTHER";
@@ -2640,6 +2761,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   transferHydrationRequest += 1;
   resetTransferHydrationStallState();
+  clearTransferHydrationRateLimitTimer();
   if (stationTooltipHideTimer !== undefined) {
     window.clearTimeout(stationTooltipHideTimer);
   }
@@ -2769,6 +2891,10 @@ onBeforeUnmount(() => {
                   <div
                     v-if="embedded && transferHydrationLoading"
                     class="pattern-flow-transfer-loader"
+                    :class="{
+                      'pattern-flow-transfer-loader--rate-limited':
+                        transferHydrationRateLimited,
+                    }"
                     role="status"
                     aria-live="polite"
                   >
@@ -2776,9 +2902,10 @@ onBeforeUnmount(() => {
                     <div class="pattern-flow-transfer-loader__content">
                       <div class="pattern-flow-transfer-loader__label">
                         <strong>{{ transferHydrationStatusLabel }}</strong>
-                        <small>{{ transferHydrationProgressLabel }}</small>
+                        <small>{{ transferHydrationDetailLabel }}</small>
                       </div>
                       <div
+                        v-if="!transferHydrationRateLimited"
                         class="pattern-flow-transfer-loader__track"
                         aria-hidden="true"
                       >
@@ -2901,7 +3028,7 @@ onBeforeUnmount(() => {
                         <span
                           v-if="data.nonBusTransfers.length > 0"
                           class="pattern-flow-station__transfers pattern-flow-station__transfers--inline"
-                          aria-label="Correspondances hors bus"
+                          aria-label="Correspondances principales"
                         >
                           <LineIconBadge
                             v-for="transfer in data.nonBusTransfers"

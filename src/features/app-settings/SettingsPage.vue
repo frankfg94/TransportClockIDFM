@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import {
   closedDirectionSummaryOptions,
@@ -8,7 +8,11 @@ import {
   navigationAutoHideOptions,
   parseMaxDeparturesPerDirection,
   parseTransferBundleRetentionDays,
+  parseTransferBundleRequestConcurrency,
+  parseTransferBundleRequestSpacingMs,
   parseWeatherLookaheadMinutes,
+  transferBundleRequestConcurrencyOptions,
+  transferBundleRequestSpacingOptions,
   transferBundleRetentionOptions,
   trafficInfoDefaultScopeOptions,
   trafficInfoDesignOptions,
@@ -22,6 +26,8 @@ import {
   type NavigationAutoHide,
   type TrafficInfoDefaultScope,
   type TrafficInfoDesign,
+  type TransferBundleRequestConcurrency,
+  type TransferBundleRequestSpacingMs,
   type WakeLockDuration,
   type WeatherMode,
   type WeatherTestMode,
@@ -41,7 +47,9 @@ import {
 const { settings, updateSettings, resetSettings } = useAppSettings();
 const bundlesModalOpen = ref(false);
 const bundleSummaries = ref<TransferBundleSummary[]>([]);
+const settingsNotification = ref("");
 const bundleCount = computed(() => bundleSummaries.value.length);
+let settingsNotificationTimer: ReturnType<typeof setTimeout> | undefined;
 
 function updateClosedSummaryMode(value: string): void {
   updateSettings({
@@ -81,25 +89,49 @@ function updateTransferBundleRetention(value: string): void {
   });
 }
 
-function openBundlesModal(): void {
-  refreshBundleSummaries();
+function updateTransferBundleRequestConcurrency(value: string): void {
+  updateSettings({
+    transferBundleRequestConcurrency:
+      parseTransferBundleRequestConcurrency(
+        value,
+      ) as TransferBundleRequestConcurrency,
+  });
+}
+
+function updateTransferBundleRequestSpacing(value: string): void {
+  updateSettings({
+    transferBundleRequestSpacingMs:
+      parseTransferBundleRequestSpacingMs(
+        value,
+      ) as TransferBundleRequestSpacingMs,
+  });
+}
+
+async function openBundlesModal(): Promise<void> {
+  await refreshBundleSummaries();
   bundlesModalOpen.value = true;
 }
 
-function refreshBundleSummaries(): void {
-  bundleSummaries.value = listTransferBundles();
+async function refreshBundleSummaries(): Promise<void> {
+  bundleSummaries.value = await listTransferBundles();
 }
 
-function clearBundles(): void {
-  clearTransferBundles();
+async function clearBundles(): Promise<void> {
+  await clearTransferBundles();
+  if (typeof window !== "undefined") {
+    clearTransferBundles(window.localStorage);
+  }
   clearPatternTransferRuntimeCaches();
-  refreshBundleSummaries();
+  await refreshBundleSummaries();
+  showSettingsNotification(
+    "Bundles backend supprimes. Le prochain plan rechargera les correspondances.",
+  );
 }
 
-function deleteBundle(id: string): void {
-  deleteTransferBundle(id);
+async function deleteBundle(id: string): Promise<void> {
+  await deleteTransferBundle(id);
   clearPatternTransferRuntimeCaches();
-  refreshBundleSummaries();
+  await refreshBundleSummaries();
 }
 
 function formatBundleDate(value: string): string {
@@ -111,6 +143,10 @@ function formatBundleDate(value: string): string {
         dateStyle: "medium",
         timeStyle: "short",
       }).format(date);
+}
+
+function formatTransferResolverMode(_value: TransferBundleSummary["transferResolverMode"]): string {
+  return "Nearby";
 }
 
 function updateWeatherMode(value: string): void {
@@ -142,6 +178,30 @@ function updateWeatherCustomLocation(
     },
   });
 }
+
+function resetSettingsWithNotification(): void {
+  resetSettings();
+  showSettingsNotification("Paramètres réinitialisés.");
+}
+
+function showSettingsNotification(message: string): void {
+  settingsNotification.value = message;
+
+  if (settingsNotificationTimer) {
+    clearTimeout(settingsNotificationTimer);
+  }
+
+  settingsNotificationTimer = setTimeout(() => {
+    settingsNotification.value = "";
+    settingsNotificationTimer = undefined;
+  }, 5_000);
+}
+
+onBeforeUnmount(() => {
+  if (settingsNotificationTimer) {
+    clearTimeout(settingsNotificationTimer);
+  }
+});
 </script>
 
 <template>
@@ -263,6 +323,61 @@ function updateWeatherCustomLocation(
           :options="[...transferBundleRetentionOptions]"
           aria-label="Expiration des bundles de correspondances"
           @update:model-value="updateTransferBundleRetention"
+        />
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <strong>Chargement des correspondances</strong>
+          <span>
+            Les bundles utilisent uniquement la recherche nearby optimisee cote backend.
+          </span>
+        </div>
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <strong>Concurrence des bundles</strong>
+          <span>
+            1 est le mode le plus fiable. Augmente seulement pour tester un
+            chargement plus rapide sur les APIs externes.
+          </span>
+          <small
+            v-if="settings.transferBundleRequestConcurrency > 1"
+            class="settings-inline-warning"
+          >
+            Attention : au-dessus de 1, certaines APIs peuvent répondre de façon
+            partielle ou limiter le débit.
+          </small>
+        </div>
+        <MaterialCombobox
+          :model-value="String(settings.transferBundleRequestConcurrency)"
+          :options="[...transferBundleRequestConcurrencyOptions]"
+          aria-label="Niveau de concurrence des bundles de correspondances"
+          @update:model-value="updateTransferBundleRequestConcurrency"
+        />
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <strong>Espacement des appels bundles</strong>
+          <span>
+            Ajoute un delai entre deux departs d'appels pour reduire le risque
+            de reponses 429 quand l'API limite le debit.
+          </span>
+          <small
+            v-if="settings.transferBundleRequestSpacingMs > 0"
+            class="settings-inline-warning"
+          >
+            Le chargement initial sera plus lent, mais les bundles deja en cache
+            restent instantanes.
+          </small>
+        </div>
+        <MaterialCombobox
+          :model-value="String(settings.transferBundleRequestSpacingMs)"
+          :options="[...transferBundleRequestSpacingOptions]"
+          aria-label="Espacement des appels bundles de correspondances"
+          @update:model-value="updateTransferBundleRequestSpacing"
         />
       </div>
 
@@ -548,12 +663,27 @@ function updateWeatherCustomLocation(
     </section>
 
     <footer class="settings-page__footer">
-      <button class="button-secondary" type="button" @click="resetSettings">
+      <button
+        class="button-secondary"
+        type="button"
+        @click="resetSettingsWithNotification"
+      >
         Réinitialiser
       </button>
     </footer>
 
     <Teleport to="body">
+      <Transition name="settings-notification">
+        <aside
+          v-if="settingsNotification"
+          class="settings-notification"
+          role="status"
+          aria-live="polite"
+        >
+          {{ settingsNotification }}
+        </aside>
+      </Transition>
+
       <div
         v-if="bundlesModalOpen"
         class="settings-bundle-modal-backdrop"
@@ -596,7 +726,8 @@ function updateWeatherCustomLocation(
                 <strong>{{ bundle.lineLabel }}</strong>
                 <span>
                   {{ bundle.stopAreaCount }} stations -
-                  {{ bundle.transferCount }} correspondances
+                  {{ bundle.transferCount }} correspondances -
+                  {{ formatTransferResolverMode(bundle.transferResolverMode) }}
                 </span>
                 <small>Expire le {{ formatBundleDate(bundle.expiresAt) }}</small>
               </div>
@@ -693,6 +824,19 @@ function updateWeatherCustomLocation(
   font-weight: 720;
   line-height: 1.45;
   margin-top: 4px;
+}
+
+.settings-inline-warning {
+  background: #fff7ed;
+  border: 1px solid rgba(234, 88, 12, 0.2);
+  border-radius: 8px;
+  color: #9a3412;
+  display: inline-block;
+  font-size: 0.82rem;
+  font-weight: 850;
+  line-height: 1.35;
+  margin-top: 10px;
+  padding: 8px 10px;
 }
 
 .settings-bundle-actions {
@@ -900,6 +1044,34 @@ function updateWeatherCustomLocation(
   margin-top: 22px;
 }
 
+.settings-notification {
+  background: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  bottom: 24px;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.24);
+  color: #000000;
+  font-weight: 900;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 14px 16px;
+  position: fixed;
+  right: 24px;
+  z-index: 11000;
+}
+
+.settings-notification-enter-active,
+.settings-notification-leave-active {
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.settings-notification-enter-from,
+.settings-notification-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
 .eyebrow {
   color: #5136ff;
   font-size: 0.8rem;
@@ -916,3 +1088,4 @@ function updateWeatherCustomLocation(
   }
 }
 </style>
+

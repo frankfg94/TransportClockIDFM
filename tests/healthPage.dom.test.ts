@@ -57,6 +57,16 @@ const healthResponse: HealthResponse = {
       quota: { exposed: false },
     },
     {
+      id: "idfm-arrets-lignes",
+      label: "IDFM Open Data arrets-lignes",
+      category: "DonnÃ©es",
+      required: false,
+      status: "ok",
+      latencyMs: 28,
+      message: "Dataset joignable",
+      quota: { exposed: false },
+    },
+    {
       id: "map-tiles",
       label: "Carte vectorielle",
       category: "Carte",
@@ -104,6 +114,7 @@ describe("HealthPage", () => {
     expect(wrapper.text()).toContain("PRIM live API");
     expect(wrapper.text()).toContain("Navitia API");
     expect(wrapper.text()).toContain("PRIM info trafic");
+    expect(wrapper.text()).toContain("IDFM Open Data arrets-lignes");
     expect(wrapper.text()).toContain("Open-Meteo météo");
     expect(wrapper.text()).toContain("Carte vectorielle");
     expect(wrapper.text()).toContain("Quota");

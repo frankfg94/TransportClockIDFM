@@ -8,6 +8,7 @@ import {
   isCompleteTransferBundleResponse,
   listTransferBundles,
   loadTransferBundleForPattern,
+  loadTransferBundleResultForPattern,
   pruneExpiredTransferBundles,
   saveTransferBundle,
   type TransferBundleStorage,
@@ -174,13 +175,55 @@ describe("transfer bundles", () => {
       "13",
     ]);
     expect(transfers["FR::Quay:missing:FR1"]).toBeUndefined();
-    expect(listTransferBundles(storage)).toMatchObject([
-      {
-        lineLabel: "Tram T6",
-        stopAreaCount: 1,
-        transferCount: 1,
-      },
-    ]);
+    expect(listTransferBundles(storage)).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not persist a bundle response that contains none of the requested targets", async () => {
+    const storage = new MemoryStorage();
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          version: 1,
+          generatedAt: "2026-06-02T10:00:00.000Z",
+          lineId: "line:IDFM:C01742",
+          lineLabel: "RER A",
+          transfersByStopAreaRef: {},
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      ),
+    );
+    const pattern: DepartureCallingPattern = {
+      departureId: "rer-a",
+      destination: "Poissy",
+      serviceType: "omnibus",
+      calls: [
+        {
+          id: "call-auber",
+          label: "Auber",
+          current: true,
+          served: true,
+          stopAreaRef: "FR::monomodalStopPlace:45873:FR1",
+        },
+      ],
+    };
+
+    vi.stubGlobal("window", { localStorage: storage });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await loadTransferBundleResultForPattern(
+      createBoard("line:IDFM:C01742", "RER A"),
+      pattern,
+      15,
+      { transferResolverMode: "nearby" },
+    );
+
+    expect(result.complete).toBe(false);
+    expect(result.missingTargetRefs).toEqual(["FR::monomodalStopPlace:45873:FR1"]);
+    expect(listTransferBundles(storage)).toEqual([]);
   });
 
   it("deduplicates concurrent bundle requests for the same target batch", async () => {
@@ -237,6 +280,278 @@ describe("transfer bundles", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("sends every transfer target in a single backend bundle request", async () => {
+    const storage = new MemoryStorage();
+    const calls = Array.from({ length: 25 }, (_, index) => ({
+      current: index === 0,
+      id: `call-${index}`,
+      label: `Station ${index}`,
+      served: true,
+      stopAreaRef: `stop_area:IDFM:${index}`,
+    }));
+    const pattern: DepartureCallingPattern = {
+      departureId: "rer-a",
+      destination: "Terminus",
+      serviceType: "omnibus",
+      calls,
+    };
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as {
+        requestConcurrency: number;
+        targets: Array<{ stopAreaRef: string }>;
+      };
+
+      expect(payload.requestConcurrency).toBe(2);
+
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      inFlight -= 1;
+
+      return new Response(
+        JSON.stringify({
+          version: 1,
+          generatedAt: "2026-06-02T10:00:00.000Z",
+          lineId: "line:IDFM:C01742",
+          lineLabel: "RER A",
+          transferResolverMode: "nearby",
+          transfersByStopAreaRef: Object.fromEntries(
+            payload.targets.map((target) => [
+              target.stopAreaRef,
+              [{ id: "line:IDFM:C01371", label: "1" }],
+            ]),
+          ),
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    });
+
+    vi.stubGlobal("window", { localStorage: storage });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await loadTransferBundleResultForPattern(
+      createBoard("line:IDFM:C01742", "RER A", "rer"),
+      pattern,
+      15,
+      { requestConcurrency: 2, transferResolverMode: "nearby" },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(maxInFlight).toBe(1);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).targets).toHaveLength(
+      25,
+    );
+    expect(result.complete).toBe(true);
+    expect(Object.keys(result.transfersByStopAreaRef)).toHaveLength(25);
+  });
+
+  it("sends one complete backend bundle request by default", async () => {
+    const storage = new MemoryStorage();
+    const calls = Array.from({ length: 21 }, (_, index) => ({
+      current: index === 0,
+      id: `call-${index}`,
+      label: `Station ${index}`,
+      served: true,
+      stopAreaRef: `stop_area:IDFM:${index}`,
+    }));
+    const pattern: DepartureCallingPattern = {
+      departureId: "rer-a",
+      destination: "Terminus",
+      serviceType: "omnibus",
+      calls,
+    };
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as {
+        requestConcurrency: number;
+        targets: Array<{ stopAreaRef: string }>;
+      };
+
+      expect(payload.requestConcurrency).toBe(1);
+
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      inFlight -= 1;
+
+      return new Response(
+        JSON.stringify({
+          version: 1,
+          generatedAt: "2026-06-02T10:00:00.000Z",
+          lineId: "line:IDFM:C01742",
+          lineLabel: "RER A",
+          transferResolverMode: "nearby",
+          transfersByStopAreaRef: Object.fromEntries(
+            payload.targets.map((target) => [
+              target.stopAreaRef,
+              [{ id: "line:IDFM:C01371", label: "1" }],
+            ]),
+          ),
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    });
+
+    vi.stubGlobal("window", { localStorage: storage });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await loadTransferBundleResultForPattern(
+      createBoard("line:IDFM:C01742", "RER A", "rer"),
+      pattern,
+      15,
+      { transferResolverMode: "nearby" },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(maxInFlight).toBe(1);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)).targets).toHaveLength(
+      21,
+    );
+    expect(result.complete).toBe(true);
+  });
+
+  it("sends the configured request spacing to the transfer bundle endpoint", async () => {
+    const storage = new MemoryStorage();
+    const pattern: DepartureCallingPattern = {
+      departureId: "rer-a",
+      destination: "Terminus",
+      serviceType: "omnibus",
+      calls: [
+        {
+          current: true,
+          id: "call-a",
+          label: "Station A",
+          served: true,
+          stopAreaRef: "stop_area:IDFM:A",
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as {
+        requestSpacingMs: number;
+        targets: Array<{ stopAreaRef: string }>;
+      };
+
+      expect(payload.requestSpacingMs).toBe(1000);
+
+      return new Response(
+        JSON.stringify({
+          version: 1,
+          generatedAt: "2026-06-02T10:00:00.000Z",
+          lineId: "line:IDFM:C01742",
+          lineLabel: "RER A",
+          transferResolverMode: "nearby",
+          transfersByStopAreaRef: Object.fromEntries(
+            payload.targets.map((target) => [
+              target.stopAreaRef,
+              [{ id: "line:IDFM:C01371", label: "1" }],
+            ]),
+          ),
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    });
+
+    vi.stubGlobal("window", { localStorage: storage });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await loadTransferBundleResultForPattern(
+      createBoard("line:IDFM:C01742", "RER A", "rer"),
+      pattern,
+      15,
+      {
+        requestSpacingMs: 1000,
+        transferResolverMode: "nearby",
+      },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.complete).toBe(true);
+  });
+
+  it("normalizes every resolver request to the nearby backend strategy", async () => {
+    const storage = new MemoryStorage();
+    const pattern: DepartureCallingPattern = {
+      departureId: "rer-b",
+      destination: "Saint-Remy",
+      serviceType: "omnibus",
+      calls: [
+        {
+          id: "call-a",
+          label: "Station A",
+          current: true,
+          served: true,
+          stopAreaRef: "stop_area:IDFM:A",
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as {
+        transferResolverMode: "nearby";
+      };
+
+      return new Response(
+        JSON.stringify({
+          version: 1,
+          generatedAt: "2026-06-02T10:00:00.000Z",
+          lineId: "line:IDFM:C01727",
+          lineLabel: "RER B",
+          transferResolverMode: payload.transferResolverMode,
+          transfersByStopAreaRef: {
+            "stop_area:IDFM:A": [
+              {
+                id: `line:${payload.transferResolverMode}`,
+                label: payload.transferResolverMode,
+              },
+            ],
+          },
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    });
+
+    vi.stubGlobal("window", { localStorage: storage });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadTransferBundleResultForPattern(
+      createBoard("line:IDFM:C01727", "RER B", "rer"),
+      pattern,
+      15,
+      { transferResolverMode: "auto" },
+    );
+    await loadTransferBundleResultForPattern(
+      createBoard("line:IDFM:C01727", "RER B", "rer"),
+      pattern,
+      15,
+      { transferResolverMode: "nearby" },
+    );
+
+    expect(
+      fetchMock.mock.calls
+        .map((call) => JSON.parse(String(call[1]?.body)).transferResolverMode)
+        .sort(),
+    ).toEqual(["nearby", "nearby"]);
+  });
+
   it("saves, lists, merges and deletes local bundles", () => {
     const storage = new MemoryStorage();
     const now = Date.parse("2026-06-02T10:00:00.000Z");
@@ -279,7 +594,9 @@ describe("transfer bundles", () => {
       },
     ]);
 
-    deleteTransferBundle("line:idfm:c00004", storage);
+    const [savedBundle] = listTransferBundles(storage);
+
+    deleteTransferBundle(savedBundle?.id ?? "", storage);
     expect(listTransferBundles(storage)).toEqual([]);
   });
 
@@ -361,9 +678,10 @@ describe("transfer bundles", () => {
     );
     clearTransferBundles(storage);
     expect(listTransferBundles(storage)).toEqual([]);
+    expect(storage.getItem("transport-clock.transfer-bundles.v12")).toBeNull();
   });
 
-  it("clears legacy bundle stores and sends a cache-buster on the next request", async () => {
+  it("clears legacy bundle stores without leaving a local cache-buster", async () => {
     const storage = new MemoryStorage();
     const fetchMock = vi.fn(async () =>
       new Response(
@@ -432,9 +750,17 @@ describe("transfer bundles", () => {
         ],
       }),
     );
+    storage.setItem(
+      "transport-clock.transfer-bundles.resetAt",
+      "2026-06-02T10:00:00.000Z",
+    );
 
     clearTransferBundles(storage);
     expect(listTransferBundles(storage)).toEqual([]);
+    expect(storage.getItem("transport-clock.transfer-bundles.v12")).toBeNull();
+    expect(storage.getItem("transport-clock.transfer-bundles.v1")).toBeNull();
+    expect(storage.getItem("transport-clock.transfer-bundles.v2")).toBeNull();
+    expect(storage.getItem("transport-clock.transfer-bundles.resetAt")).toBeNull();
 
     vi.stubGlobal("window", { localStorage: storage });
     vi.stubGlobal("fetch", fetchMock);
@@ -458,36 +784,40 @@ describe("transfer bundles", () => {
       15,
     );
 
-    const payload = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string) as {
-      cacheBust?: string;
-    };
+    const payload = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string) as Record<string, unknown>;
 
-    expect(payload.cacheBust).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
+    expect(payload).not.toHaveProperty("cacheBust");
   });
 
   it("does not reuse legacy bundle stores after transfer matching changes", () => {
     const storage = new MemoryStorage();
 
-    storage.setItem(
-      "transport-clock.transfer-bundles.v2",
-      JSON.stringify({
-        version: 1,
-        bundles: [
-          {
-            id: "stale-metro-13",
-            lineId: "line:IDFM:C01383",
-            lineLabel: "Metro 13",
-            generatedAt: "2026-06-02T10:00:00.000Z",
-            createdAt: "2026-06-02T10:00:00.000Z",
-            updatedAt: "2026-06-02T10:00:00.000Z",
-            expiresAt: "2026-06-17T10:00:00.000Z",
-            retentionDays: 15,
-            transfersByStopAreaRef: {
-              "FR::Quay:50026786:FR1": [],
-            },
-          },
-        ],
-      }),
+    ["transport-clock.transfer-bundles.v11", "transport-clock.transfer-bundles.v4"].forEach(
+      (key) => {
+        storage.setItem(
+          key,
+          JSON.stringify({
+            version: 1,
+            bundles: [
+              {
+                id: `stale-${key}`,
+                lineId: "line:IDFM:C01383",
+                lineLabel: "Metro 13",
+                generatedAt: "2026-06-02T10:00:00.000Z",
+                createdAt: "2026-06-02T10:00:00.000Z",
+                updatedAt: "2026-06-02T10:00:00.000Z",
+                expiresAt: "2026-06-17T10:00:00.000Z",
+                retentionDays: 15,
+                requestConcurrency: 1,
+                transferResolverMode: "nearby",
+                transfersByStopAreaRef: {
+                  "FR::Quay:50026786:FR1": [],
+                },
+              },
+            ],
+          }),
+        );
+      },
     );
 
     expect(listTransferBundles(storage)).toEqual([]);
@@ -507,14 +837,18 @@ function createStop(label: string, stopAreaRef: string) {
   };
 }
 
-function createBoard(lineRef: string, longName: string): TransitBoardConfig {
+function createBoard(
+  lineRef: string,
+  longName: string,
+  mode: TransitBoardConfig["line"]["mode"] = "tram",
+): TransitBoardConfig {
   return {
     id: lineRef,
     title: longName,
     line: {
       color: "#0064ff",
       longName,
-      mode: "tram",
+      mode,
       ref: lineRef,
       shortName: longName.replace(/^Tram\s+/u, ""),
       textColor: "#ffffff",
@@ -524,3 +858,4 @@ function createBoard(lineRef: string, longName: string): TransitBoardConfig {
     },
   } as TransitBoardConfig;
 }
+

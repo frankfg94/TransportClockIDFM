@@ -39,6 +39,9 @@
       :rich-transfer-tooltips="settings.richTransferTooltips"
       :reduce-motion="settings.reduceMotion"
       :transfer-bundle-retention-days="settings.transferBundleRetentionDays"
+      :transfer-bundle-request-concurrency="settings.transferBundleRequestConcurrency"
+      :transfer-bundle-request-spacing-ms="settings.transferBundleRequestSpacingMs"
+      :transfer-resolver-mode="settings.transferResolverMode"
       @close="navigateHome"
       @direction-change="changeDirection"
     >
