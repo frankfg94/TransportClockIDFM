@@ -449,7 +449,7 @@ function normalizeNearbyDistanceMeters(value: unknown): number {
     : DEFAULT_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS;
 }
 
-function getCachedTransfers(
+async function getCachedTransfers(
   target: TransferBundleTarget,
   currentLineId: string,
   currentLineLabel: string,
@@ -474,24 +474,28 @@ function getCachedTransfers(
   const cached = transferCache.get(cacheKey);
 
   if (cached && cached.expiresAt > now) {
-    logTransferBundleDebug(logger, "info", "cache:hit", {
+    const transfers = await cached.promise;
+
+    if (transfers !== undefined) {
+      logTransferBundleDebug(logger, "info", "cache:hit", {
+        bundleId: cached.bundleId,
+        expiresInMs: cached.expiresAt - now,
+        resolverMode: "nearby",
+        target: summarizeTransferTarget(target),
+      });
+
+      return transfers;
+    }
+
+    logTransferBundleDebug(logger, "warn", "cache:hit-undefined-evicted", {
       bundleId: cached.bundleId,
       expiresInMs: cached.expiresAt - now,
       resolverMode: "nearby",
       target: summarizeTransferTarget(target),
     });
-
-    return cached.promise.then((transfers) => {
-      if (transfers === undefined) {
-        logTransferBundleDebug(logger, "warn", "cache:hit-undefined-evicted", {
-          resolverMode: "nearby",
-          target: summarizeTransferTarget(target),
-        });
-        transferCache.delete(cacheKey);
-      }
-
-      return transfers;
-    });
+    if (transferCache.get(cacheKey) === cached) {
+      transferCache.delete(cacheKey);
+    }
   }
 
   logTransferBundleDebug(logger, "info", "cache:miss", {
@@ -519,6 +523,12 @@ function getCachedTransfers(
         transfers: summarizeTransferLines(transfers),
       });
 
+      if (transfers === undefined) {
+        if (transferCache.get(cacheKey)?.promise === request) {
+          transferCache.delete(cacheKey);
+        }
+      }
+
       return transfers;
     })
     .catch((error) => {
@@ -528,7 +538,9 @@ function getCachedTransfers(
         resolverMode: "nearby",
         target: summarizeTransferTarget(target),
       });
-      transferCache.delete(cacheKey);
+      if (transferCache.get(cacheKey)?.promise === request) {
+        transferCache.delete(cacheKey);
+      }
 
       return undefined;
     });
