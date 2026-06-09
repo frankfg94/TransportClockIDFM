@@ -79,7 +79,8 @@ interface NetexCacheStatus {
 
 const REFRESH_INTERVAL_MS = 30_000;
 const preferences = reactive(createDefaultPreferences(transitBoards));
-const { settings, effectiveMaxDeparturesPerDirection } = useAppSettings();
+const { settings, effectiveMaxDeparturesPerDirection, updateSettings } =
+  useAppSettings();
 let activeAlarmAudio:
   | {
       audioContext: AudioContext;
@@ -122,6 +123,25 @@ const allBoards = computed<TransitBoardConfig[]>(() => [
   ...transitBoards,
   ...preferences.customBoards,
 ]);
+
+function updateHiddenDirectionIdsForBoard(
+  boardId: string,
+  directionIds: string[],
+): void {
+  const nextHiddenDirectionIdsByBoardId = {
+    ...settings.value.hiddenDirectionIdsByBoardId,
+  };
+
+  if (directionIds.length > 0) {
+    nextHiddenDirectionIdsByBoardId[boardId] = directionIds;
+  } else {
+    delete nextHiddenDirectionIdsByBoardId[boardId];
+  }
+
+  updateSettings({
+    hiddenDirectionIdsByBoardId: nextHiddenDirectionIdsByBoardId,
+  });
+}
 
 const visibleBoards = computed(() =>
   allBoards.value.filter((board) =>
@@ -1080,6 +1100,9 @@ onBeforeUnmount(() => {
           :departures="states[board.id].departures"
           :direction-groups="getVisibleDirectionGroupsForBoard(board.id)"
           :collapsed-direction-ids="getBoardCollapsedDirectionIds(board.id)"
+          :hidden-direction-ids="
+            settings.hiddenDirectionIdsByBoardId[board.id] ?? []
+          "
           :loading="states[board.id].loading"
           :error="states[board.id].error"
           :updated-at="states[board.id].updatedAt"
@@ -1087,6 +1110,9 @@ onBeforeUnmount(() => {
           :alarm-departure-ids="getBoardAlarmDepartureIds(board.id)"
           :closed-summary-mode="settings.closedDirectionSummaryMode"
           :traffic-alert="getBoardTrafficAlert(board)"
+          @update:hidden-direction-ids="
+            updateHiddenDirectionIdsForBoard(board.id, $event)
+          "
           @change-station="changeBoardStation(board, $event)"
           @open-traffic="openTrafficPage"
           @remove="removeCustomBoard(board.id)"
@@ -1122,8 +1148,12 @@ onBeforeUnmount(() => {
         :compact-mode="settings.compactLinePlanMode"
         :rich-transfer-tooltips="settings.richTransferTooltips"
         :transfer-bundle-retention-days="settings.transferBundleRetentionDays"
-        :transfer-bundle-request-concurrency="settings.transferBundleRequestConcurrency"
-        :transfer-bundle-request-spacing-ms="settings.transferBundleRequestSpacingMs"
+        :transfer-bundle-request-concurrency="
+          settings.transferBundleRequestConcurrency
+        "
+        :transfer-bundle-request-spacing-ms="
+          settings.transferBundleRequestSpacingMs
+        "
         :transfer-resolver-mode="settings.transferResolverMode"
         @close="closePatternModal"
       />

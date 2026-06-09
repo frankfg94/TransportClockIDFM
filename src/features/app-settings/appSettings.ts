@@ -50,6 +50,7 @@ export interface AppSettings {
   maxDeparturesPerDirection: MaxDeparturesPerDirectionSetting;
   showPatternMiniMap: boolean;
   terminalDirectionsOnly: boolean;
+  hiddenDirectionIdsByBoardId: Record<string, string[]>;
   wakeLockDuration: WakeLockDuration;
   wakeDeviceOnAlarm: boolean;
   navigationAutoHide: NavigationAutoHide;
@@ -197,6 +198,7 @@ export function createDefaultAppSettings(): AppSettings {
     wakeLockDuration: "none",
     wakeDeviceOnAlarm: true,
     navigationAutoHide: "none",
+    hiddenDirectionIdsByBoardId: {},
     reduceMotion: false,
     compactLinePlanMode: "auto",
     richTransferTooltips: true,
@@ -227,6 +229,9 @@ export function normalizeAppSettings(value: unknown): AppSettings {
 
   return {
     version: 1,
+    hiddenDirectionIdsByBoardId: parseHiddenDirectionIdsByBoardId(
+      value.hiddenDirectionIdsByBoardId,
+    ),
     closedDirectionSummaryMode: isClosedDirectionSummaryMode(
       value.closedDirectionSummaryMode,
     )
@@ -362,6 +367,33 @@ export function parseTransferBundleRequestConcurrency(
   return [1, 2, 3, 4].includes(numericValue)
     ? (numericValue as TransferBundleRequestConcurrency)
     : 1;
+}
+
+function parseHiddenDirectionIdsByBoardId(
+  value: unknown,
+): Record<string, string[]> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([boardId, directionIds]) => {
+      if (!Array.isArray(directionIds)) {
+        return [];
+      }
+
+      const normalizedIds = [
+        ...new Set(
+          directionIds.filter(
+            (directionId): directionId is string =>
+              typeof directionId === "string" && directionId.length > 0,
+          ),
+        ),
+      ];
+
+      return normalizedIds.length > 0 ? [[boardId, normalizedIds]] : [];
+    }),
+  );
 }
 
 export function parseTransferBundleRequestSpacingMs(

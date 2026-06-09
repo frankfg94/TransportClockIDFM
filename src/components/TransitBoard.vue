@@ -54,6 +54,7 @@ const props = withDefaults(
     board: TransitBoardConfig;
     departures: Departure[];
     directionGroups: DirectionDepartureGroup[];
+    hiddenDirectionIds?: string[];
     collapsedDirectionIds: string[];
     loading: boolean;
     error?: string;
@@ -65,6 +66,7 @@ const props = withDefaults(
   }>(),
   {
     closedSummaryMode: "last",
+    hiddenDirectionIds: () => [],
   },
 );
 
@@ -80,16 +82,39 @@ const emit = defineEmits<{
       departure: Departure;
     },
   ];
+  "update:hiddenDirectionIds": [directionIds: string[]];
   "show-pattern": [payload: DeparturePatternPayload];
   toggleDirection: [directionId: string];
 }>();
 
-const displayedDeparturesCount = computed(() =>
+const directionFilterOpen = ref(false);
+
+const hiddenDirectionIdSet = computed(() => new Set(props.hiddenDirectionIds));
+
+const visibleDirectionGroups = computed(() =>
+  props.directionGroups.filter(
+    (group) => !hiddenDirectionIdSet.value.has(group.id),
+  ),
+);
+
+const totalDeparturesCount = computed(() =>
   props.directionGroups.reduce(
     (total, group) => total + group.departures.length,
     0,
   ),
 );
+
+const displayedDeparturesCount = computed(() =>
+  visibleDirectionGroups.value.reduce(
+    (total, group) => total + group.departures.length,
+    0,
+  ),
+);
+
+const hiddenDirectionsCount = computed(
+  () => props.directionGroups.length - visibleDirectionGroups.value.length,
+);
+
 const isCompactPatternInteraction = ref(false);
 const actionsOpen = ref(false);
 const stationEditorOpen = ref(false);
@@ -121,12 +146,15 @@ const currentLineOption = computed<LineSearchOption>(() => {
     iconUrls: props.board.line.iconUrls,
   };
 });
+
 const lineOptions = computed(() => [currentLineOption.value]);
+
 const filteredStationOptions = computed(() =>
   stationOptions.value.filter((station) =>
     stationMatchesQuery(station, stationQuery.value),
   ),
 );
+
 const canConfirmStationChange = computed(
   () =>
     Boolean(selectedStation.value) &&
@@ -155,6 +183,7 @@ watch(
   () => props.board.id,
   () => {
     closeStationEditor();
+    closeDirectionFilter();
   },
 );
 
@@ -168,6 +197,45 @@ function formatClock(value?: string): string {
     minute: "2-digit",
     timeZone: "Europe/Paris",
   }).format(new Date(value));
+}
+
+function openDirectionFilter(): void {
+  actionsOpen.value = false;
+  directionFilterOpen.value = true;
+}
+
+function closeDirectionFilter(): void {
+  directionFilterOpen.value = false;
+}
+
+function isDirectionVisible(directionId: string): boolean {
+  return !hiddenDirectionIdSet.value.has(directionId);
+}
+
+function setDirectionVisibility(directionId: string, event: Event): void {
+  const checked = (event.target as HTMLInputElement | null)?.checked ?? true;
+
+  const nextHiddenIds = checked
+    ? props.hiddenDirectionIds.filter((id) => id !== directionId)
+    : [...new Set([...props.hiddenDirectionIds, directionId])];
+
+  emit("update:hiddenDirectionIds", pruneDirectionIds(nextHiddenIds));
+}
+
+function showAllDirections(): void {
+  emit("update:hiddenDirectionIds", []);
+}
+
+function pruneDirectionIds(directionIds: string[]): string[] {
+  const knownDirectionIds = new Set(
+    props.directionGroups.map((group) => group.id),
+  );
+
+  return [
+    ...new Set(
+      directionIds.filter((directionId) => knownDirectionIds.has(directionId)),
+    ),
+  ];
 }
 
 function formatWait(value?: string, vehicleAtStop = false): string {
@@ -496,10 +564,13 @@ onUnmounted(() => {
         :line="board.line"
         :aria-label="board.line.longName"
       />
+
       <div>
         <p class="board__mode">{{ board.line.longName }}</p>
+
         <div class="board__title-row">
           <h2>{{ board.title }}</h2>
+
           <button
             v-if="trafficAlert"
             class="board-traffic-chip"
@@ -510,8 +581,10 @@ onUnmounted(() => {
             {{ trafficAlert.label }}
           </button>
         </div>
+
         <p class="board__city">{{ board.city }}</p>
       </div>
+
       <div class="board-actions">
         <button
           class="board-actions__trigger"
@@ -522,15 +595,30 @@ onUnmounted(() => {
         >
           <MoreVertical :size="20" aria-hidden="true" />
         </button>
+
         <div v-if="actionsOpen" class="board-actions__menu">
           <button type="button" @click="openLinePage">
             <Map :size="17" aria-hidden="true" />
             Schéma de la ligne
           </button>
+
           <button type="button" @click="openStationEditor">
             <MapPin :size="17" aria-hidden="true" />
             Changer de station
           </button>
+
+          <button
+            v-if="directionGroups.length > 0"
+            type="button"
+            @click="openDirectionFilter"
+          >
+            <Route :size="17" aria-hidden="true" />
+            Filtrer les directions
+            <span v-if="hiddenDirectionsCount > 0">
+              · {{ hiddenDirectionsCount }}
+            </span>
+          </button>
+
           <button
             v-if="removable"
             class="board-actions__danger"
@@ -548,13 +636,26 @@ onUnmounted(() => {
       {{ error }}
     </div>
 
-    <div v-else-if="loading && displayedDeparturesCount === 0" class="notice">
+    <div v-else-if="loading && totalDeparturesCount === 0" class="notice">
       Chargement des passages...
+    </div>
+
+    <div
+      v-else-if="
+        directionGroups.length > 0 && visibleDirectionGroups.length === 0
+      "
+      class="notice notice--direction-filter-empty"
+    >
+      <span>Toutes les directions sont masquées.</span>
+
+      <button type="button" class="button-secondary" @click="showAllDirections">
+        Tout afficher
+      </button>
     </div>
 
     <div v-else class="direction-groups">
       <section
-        v-for="group in directionGroups"
+        v-for="group in visibleDirectionGroups"
         :key="group.id"
         class="direction-section"
         :class="{
@@ -579,6 +680,7 @@ onUnmounted(() => {
               {{ getDirectionSummary(group).detail }}
             </small>
           </div>
+
           <span class="accordion-chevron" aria-hidden="true">
             <ChevronDown :size="20" stroke-width="2.8" />
           </span>
@@ -630,6 +732,7 @@ onUnmounted(() => {
                   "
                 >
                   <strong>{{ departure.destination }}</strong>
+
                   <span
                     v-if="
                       formatDepartureMeta(departure) ||
@@ -640,13 +743,16 @@ onUnmounted(() => {
                     <span v-if="formatDepartureMeta(departure)">
                       {{ formatDepartureMeta(departure) }}
                     </span>
+
                     <small v-if="formatRemainingStopCount(departure)">
                       {{ formatRemainingStopCount(departure) }}
                     </small>
                   </span>
                 </button>
+
                 <div v-else class="departure__main">
                   <strong>{{ departure.destination }}</strong>
+
                   <span
                     v-if="
                       formatDepartureMeta(departure) ||
@@ -657,6 +763,7 @@ onUnmounted(() => {
                     <span v-if="formatDepartureMeta(departure)">
                       {{ formatDepartureMeta(departure) }}
                     </span>
+
                     <small v-if="formatRemainingStopCount(departure)">
                       {{ formatRemainingStopCount(departure) }}
                     </small>
@@ -664,15 +771,18 @@ onUnmounted(() => {
                 </div>
 
                 <div class="departure__time">
-                  <strong>{{
-                    formatWait(
-                      departure.expectedDepartureTime,
-                      departure.vehicleAtStop,
-                    )
-                  }}</strong>
-                  <span>{{
-                    formatClock(departure.expectedDepartureTime)
-                  }}</span>
+                  <strong>
+                    {{
+                      formatWait(
+                        departure.expectedDepartureTime,
+                        departure.vehicleAtStop,
+                      )
+                    }}
+                  </strong>
+
+                  <span>
+                    {{ formatClock(departure.expectedDepartureTime) }}
+                  </span>
                 </div>
 
                 <div v-if="statusLabel(departure.status)" class="status-pill">
@@ -761,6 +871,7 @@ onUnmounted(() => {
                 {{ board.line.longName }} · {{ board.title }}
               </span>
             </div>
+
             <button
               class="icon-button"
               type="button"
@@ -774,10 +885,13 @@ onUnmounted(() => {
           <div class="station-form board-station-modal__form">
             <label>
               <span>Ligne</span>
+
               <LineCombobox
                 :model-value="currentLineOption"
                 :options="lineOptions"
-                :query="currentLineOption.displayName ?? currentLineOption.label"
+                :query="
+                  currentLineOption.displayName ?? currentLineOption.label
+                "
                 disabled
                 placeholder="Ligne"
                 @update:model-value="() => undefined"
@@ -787,6 +901,7 @@ onUnmounted(() => {
 
             <label>
               <span>Nouvelle station</span>
+
               <StationCombobox
                 :model-value="selectedStation"
                 :options="filteredStationOptions"
@@ -798,6 +913,7 @@ onUnmounted(() => {
                 @update:model-value="selectStationOption"
                 @update:query="stationQuery = $event"
               />
+
               <span v-if="loadingStations" class="field-loader">
                 <span aria-hidden="true" class="loader-dot"></span>
                 Chargement des stations
@@ -806,6 +922,7 @@ onUnmounted(() => {
 
             <div v-if="stationEditorError" class="form-error">
               <span>{{ stationEditorError }}</span>
+
               <button
                 class="button-secondary form-retry"
                 type="button"
@@ -824,6 +941,7 @@ onUnmounted(() => {
             >
               Annuler
             </button>
+
             <button
               type="button"
               :disabled="!canConfirmStationChange || changingStation"
@@ -835,6 +953,303 @@ onUnmounted(() => {
         </section>
       </div>
     </Transition>
+
+    <Transition name="modal-scale">
+      <div
+        v-if="directionFilterOpen"
+        class="modal-backdrop"
+        @click.self="closeDirectionFilter"
+      >
+        <section
+          class="modal-panel board-direction-filter-modal"
+          :style="{ '--line-color': board.line.color }"
+          aria-modal="true"
+          role="dialog"
+          aria-labelledby="direction-filter-title"
+        >
+          <header
+            class="modal-panel__header board-direction-filter-modal__header"
+          >
+            <div>
+              <p class="eyebrow">Directions</p>
+              <h2 id="direction-filter-title">Filtrer les directions</h2>
+              <span class="board-station-modal__subtitle">
+                {{ board.line.longName }} · {{ board.title }}
+              </span>
+            </div>
+
+            <button
+              class="icon-button"
+              type="button"
+              aria-label="Fermer"
+              @click="closeDirectionFilter"
+            >
+              ×
+            </button>
+          </header>
+
+          <div class="direction-filter-summary">
+            <strong>
+              {{ visibleDirectionGroups.length }} / {{ directionGroups.length }}
+              directions affichées
+            </strong>
+
+            <span v-if="hiddenDirectionsCount > 0">
+              {{ hiddenDirectionsCount }} masquée{{
+                hiddenDirectionsCount > 1 ? "s" : ""
+              }}
+            </span>
+          </div>
+
+          <div class="direction-filter-list">
+            <label
+              v-for="group in directionGroups"
+              :key="group.id"
+              class="direction-filter-option"
+              :class="{
+                'direction-filter-option--hidden': !isDirectionVisible(
+                  group.id,
+                ),
+              }"
+            >
+              <input
+                type="checkbox"
+                :checked="isDirectionVisible(group.id)"
+                @change="setDirectionVisibility(group.id, $event)"
+              />
+
+              <span
+                class="direction-filter-option__check"
+                aria-hidden="true"
+              ></span>
+
+              <span class="direction-filter-option__content">
+                <strong>{{ group.label }}</strong>
+
+                <small>
+                  <span v-if="group.subtitle">{{ group.subtitle }} · </span>
+                  {{ group.departures.length }} passage{{
+                    group.departures.length > 1 ? "s" : ""
+                  }}
+                </small>
+              </span>
+            </label>
+          </div>
+
+          <footer
+            class="modal-panel__footer board-direction-filter-modal__footer"
+          >
+            <button
+              class="button-secondary"
+              type="button"
+              :disabled="hiddenDirectionsCount === 0"
+              @click="showAllDirections"
+            >
+              Tout afficher
+            </button>
+
+            <button type="button" @click="closeDirectionFilter">OK</button>
+          </footer>
+        </section>
+      </div>
+    </Transition>
   </Teleport>
 </template>
 
+<style scoped>
+.notice--direction-filter-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.board-direction-filter-modal {
+  width: min(460px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: hidden;
+  padding: 0;
+}
+
+.board-direction-filter-modal__header {
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.board-direction-filter-modal__header .eyebrow {
+  color: var(--line-color);
+}
+
+.direction-filter-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 20px 0;
+  padding: 12px 14px;
+  border-radius: 16px;
+}
+
+.direction-filter-summary strong {
+  min-width: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.direction-filter-summary span {
+  flex-shrink: 0;
+  color: rgba(226, 232, 240, 0.72);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.direction-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(420px, 52vh);
+  overflow-y: auto;
+  padding: 18px 20px 20px;
+}
+
+.direction-filter-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.direction-filter-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28);
+}
+
+.direction-filter-option {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 13px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 18px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.06),
+    rgba(255, 255, 255, 0.025)
+  );
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.direction-filter-option:hover {
+  border-color: color-mix(
+    in srgb,
+    var(--line-color) 42%,
+    rgba(148, 163, 184, 0.22)
+  );
+}
+
+.direction-filter-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.direction-filter-option__check {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(148, 163, 184, 0.48);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.72);
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.direction-filter-option input:focus-visible + .direction-filter-option__check {
+  outline: 2px solid color-mix(in srgb, var(--line-color) 70%, white);
+  outline-offset: 3px;
+}
+
+.direction-filter-option input:checked + .direction-filter-option__check {
+  border-color: var(--line-color);
+  background: var(--line-color);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--line-color) 18%, transparent);
+}
+
+.direction-filter-option
+  input:checked
+  + .direction-filter-option__check::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 3px;
+  width: 6px;
+  height: 12px;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  color: white;
+  transform: rotate(45deg);
+}
+
+.direction-filter-option__content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.direction-filter-option__content strong {
+  overflow: hidden;
+  color: var(--line-color);
+  font-size: 0.98rem;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.direction-filter-option__content small {
+  overflow: hidden;
+  color: rgba(203, 213, 225, 0.68);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-direction-filter-modal__footer {
+  padding: 16px 20px 20px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+@media (max-width: 560px) {
+  .notice--direction-filter-empty {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .board-direction-filter-modal {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 24px);
+  }
+
+  .direction-filter-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .direction-filter-option {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .direction-filter-option__state {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+</style>
