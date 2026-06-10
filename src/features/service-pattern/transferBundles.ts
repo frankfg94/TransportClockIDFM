@@ -95,6 +95,7 @@ export interface TransferBundleClearOptions extends TransferBundleLocalCacheOpti
 }
 
 const TRANSFER_BUNDLE_STORAGE_KEY = "transport-clock.transfer-bundles.v14";
+const TRANSFER_BUNDLE_DEBUG_STORAGE_KEY = "transport-clock.debug.transfer-bundles";
 const LEGACY_TRANSFER_BUNDLE_STORAGE_KEYS = [
   "transport-clock.transfer-bundles.v13",
   "transport-clock.transfer-bundles.v12",
@@ -208,8 +209,23 @@ function readReusableLocalTransferBundleEntries(params: {
     params.transferResolverMode,
     params.nearbyDistanceMeters,
   );
-  const store = readTransferBundleStore(params.storage);
+  const store = readTransferBundleStore(params.storage, {
+    removeCorruptedStore: true,
+    rewriteSanitizedStore: true,
+  });
   const bundle = store.bundles.find((candidate) => candidate.id === id);
+
+  logTransferBundleClientDebug("local-cache:lookup", {
+    expectedId: id,
+    found: Boolean(bundle),
+    lineId: params.lineId,
+    nearbyDistanceMeters: params.nearbyDistanceMeters,
+    requestConcurrency: params.requestConcurrency,
+    storedBundleCount: store.bundles.length,
+    storedBundleIds: store.bundles.map((storedBundle) => storedBundle.id),
+    targetCount: params.targets.length,
+    transferResolverMode: params.transferResolverMode,
+  });
 
   if (!bundle) {
     return {};
@@ -217,8 +233,8 @@ function readReusableLocalTransferBundleEntries(params: {
 
   // Only reuse entries explicitly present in the local bundle.
   // An empty array is valid and means "resolved with no transfer".
-  // A missing key means "not resolved yet".
-  return Object.fromEntries(
+  // A missing key means "not resolved yet" and must still go through backend/live resolving.
+  const entries = Object.fromEntries(
     params.targets.flatMap((target) =>
       Object.prototype.hasOwnProperty.call(
         bundle.transfersByStopAreaRef,
@@ -233,6 +249,33 @@ function readReusableLocalTransferBundleEntries(params: {
         : [],
     ),
   );
+
+  const requestedStopAreaRefs = params.targets.map((target) => target.stopAreaRef);
+  const storedStopAreaRefs = Object.keys(bundle.transfersByStopAreaRef);
+  const missingStopAreaRefs = requestedStopAreaRefs.filter(
+    (stopAreaRef) =>
+      !Object.prototype.hasOwnProperty.call(
+        bundle.transfersByStopAreaRef,
+        stopAreaRef,
+      ),
+  );
+
+  logTransferBundleClientDebug("local-cache:entries", {
+    bundleId: bundle.id,
+    complete: missingStopAreaRefs.length === 0,
+    firstRequestedStopAreaRefs: requestedStopAreaRefs.slice(0, 10),
+    firstStoredStopAreaRefs: storedStopAreaRefs.slice(0, 10),
+    missingStopAreaRefs: missingStopAreaRefs.slice(0, 20),
+    reusableTargetCount: Object.keys(entries).length,
+    storedStopAreaCount: storedStopAreaRefs.length,
+    targetCount: params.targets.length,
+    transferCount: Object.values(entries).reduce(
+      (count, transfers) => count + transfers.length,
+      0,
+    ),
+  });
+
+  return entries;
 }
 
 function transferBundleMapHasRequestedTargets(
@@ -292,27 +335,69 @@ export async function loadTransferBundleResultForPattern(
       ? options.localCacheStorage ?? getBrowserStorage()
       : undefined;
 
+  logTransferBundleClientDebug("start", {
+    hasStorage: Boolean(storage),
+    lineId,
+    lineLabel,
+    localCacheEnabled: options.localCacheEnabled === true,
+    nearbyDistanceMeters,
+    requestConcurrency,
+    requestSpacingMs,
+    retentionDays,
+    targetCount: targets.length,
+    transferResolverMode,
+  });
+
   const transfersByStopAreaRef: Record<string, TransferLineOption[]> = {};
 
   if (storage) {
-    pruneExpiredTransferBundles(storage);
+    const expiredBundleIds = pruneExpiredTransferBundles(storage);
 
-    Object.assign(
-      transfersByStopAreaRef,
-      readReusableLocalTransferBundleEntries({
-        lineId,
-        transferResolverMode,
-        requestConcurrency,
-        nearbyDistanceMeters,
-        targets,
-        storage,
-      }),
-    );
+    if (expiredBundleIds.length > 0) {
+      logTransferBundleClientDebug("local-cache:expired-pruned", {
+        expiredBundleIds,
+      });
+    }
+
+    const localEntries = readReusableLocalTransferBundleEntries({
+      lineId,
+      transferResolverMode,
+      requestConcurrency,
+      nearbyDistanceMeters,
+      targets,
+      storage,
+    });
+
+    Object.assign(transfersByStopAreaRef, localEntries);
+
+    logTransferBundleClientDebug("local-cache:read", {
+      hit: Object.keys(localEntries).length > 0,
+      missingTargetCount: targets.length - Object.keys(localEntries).length,
+      reusableTargetCount: Object.keys(localEntries).length,
+      targetCount: targets.length,
+    });
+  } else {
+    logTransferBundleClientDebug("local-cache:disabled", {
+      localCacheEnabled: options.localCacheEnabled,
+      reason:
+        options.localCacheEnabled === true
+          ? "storage-unavailable"
+          : "setting-disabled",
+    });
   }
 
   reportBundleProgress(targets, transfersByStopAreaRef, options.onProgress);
 
   if (transferBundleMapHasRequestedTargets(targets, transfersByStopAreaRef)) {
+    logTransferBundleClientDebug("local-cache:hit-complete", {
+      lineId,
+      targetCount: targets.length,
+      transferCount: Object.values(transfersByStopAreaRef).reduce(
+        (count, transfers) => count + transfers.length,
+        0,
+      ),
+    });
+
     return createBundleLoadResult(transfersByStopAreaRef, targets);
   }
 
@@ -324,6 +409,17 @@ export async function loadTransferBundleResultForPattern(
       ),
   );
 
+  logTransferBundleClientDebug("backend:request", {
+    frontendResolvedTargetCount: Object.keys(transfersByStopAreaRef).length,
+    lineId,
+    missingTargetCount: missingTargets.length,
+    missingTargets: missingTargets.slice(0, 20).map((target) => ({
+      label: target.label,
+      stopAreaRef: target.stopAreaRef,
+    })),
+    targetCount: targets.length,
+  });
+
   try {
     const response = await fetchTransferBundle({
       lineId,
@@ -334,19 +430,47 @@ export async function loadTransferBundleResultForPattern(
       targets: missingTargets,
       transferResolverMode,
       retentionDays,
-    }).catch(() => undefined);
+    }).catch((error) => {
+      logTransferBundleClientDebug("backend:error", {
+        error: formatTransferBundleClientDebugError(error),
+        lineId,
+        missingTargetCount: missingTargets.length,
+      });
+
+      return undefined;
+    });
 
     if (
       !response ||
       !transferBundleResponseHasRequestedTarget(missingTargets, response)
     ) {
+      logTransferBundleClientDebug("backend:empty-or-incomplete", {
+        hasResponse: Boolean(response),
+        lineId,
+        returnedTargetCount: response
+          ? Object.keys(response.transfersByStopAreaRef).length
+          : 0,
+        requestedMissingTargetCount: missingTargets.length,
+      });
+
       return createBundleLoadResult(transfersByStopAreaRef, targets);
     }
 
     Object.assign(transfersByStopAreaRef, response.transfersByStopAreaRef);
 
+    logTransferBundleClientDebug("backend:response", {
+      backendTargetCount: Object.keys(response.transfersByStopAreaRef).length,
+      complete: transferBundleMapHasRequestedTargets(
+        targets,
+        transfersByStopAreaRef,
+      ),
+      lineId,
+      targetCount: targets.length,
+      totalResolvedTargetCount: Object.keys(transfersByStopAreaRef).length,
+    });
+
     if (storage) {
-      saveTransferBundle(
+      const savedBundle = saveTransferBundle(
         {
           ...response,
           lineId,
@@ -359,10 +483,25 @@ export async function loadTransferBundleResultForPattern(
         retentionDays,
         storage,
       );
+
+      logTransferBundleClientDebug("local-cache:write", {
+        bundleId: savedBundle.id,
+        expiresAt: savedBundle.expiresAt,
+        stopAreaCount: Object.keys(savedBundle.transfersByStopAreaRef).length,
+        transferCount: Object.values(savedBundle.transfersByStopAreaRef).reduce(
+          (count, transfers) => count + transfers.length,
+          0,
+        ),
+      });
     }
 
     reportBundleProgress(targets, transfersByStopAreaRef, options.onProgress);
-  } catch {
+  } catch (error) {
+    logTransferBundleClientDebug("load:error", {
+      error: formatTransferBundleClientDebugError(error),
+      lineId,
+    });
+
     return createBundleLoadResult(transfersByStopAreaRef, targets);
   }
 
@@ -445,8 +584,22 @@ function fetchTransferBundle(payload: {
   const pendingRequest = pendingTransferBundleRequests.get(requestKey);
 
   if (pendingRequest) {
+    logTransferBundleClientDebug("backend:pending-hit", {
+      lineId: payload.lineId,
+      targetCount: payload.targets.length,
+    });
+
     return pendingRequest;
   }
+
+  logTransferBundleClientDebug("backend:fetch-start", {
+    lineId: payload.lineId,
+    nearbyDistanceMeters: payload.nearbyDistanceMeters,
+    requestConcurrency: payload.requestConcurrency,
+    requestSpacingMs: payload.requestSpacingMs,
+    targetCount: payload.targets.length,
+    transferResolverMode: payload.transferResolverMode,
+  });
 
   const request = fetch("/api/transfer-bundles", {
     body: JSON.stringify(payload),
@@ -465,6 +618,12 @@ function fetchTransferBundle(payload: {
       if (!isTransferBundleResponse(transferBundle)) {
         throw new Error("Invalid transfer bundle response.");
       }
+
+      logTransferBundleClientDebug("backend:fetch-success", {
+        lineId: payload.lineId,
+        status: response.status,
+        targetCount: Object.keys(transferBundle.transfersByStopAreaRef).length,
+      });
 
       return {
         ...transferBundle,
@@ -908,9 +1067,13 @@ function writeTransferBundleStore(
 
   try {
     storage.setItem(TRANSFER_BUNDLE_STORAGE_KEY, JSON.stringify(store));
-  } catch {
+  } catch (error) {
     // localStorage can be unavailable or full. Transfer bundles are only an
     // optimization layer, so the app must continue with backend/live resolving.
+    logTransferBundleClientDebug("local-cache:write-error", {
+      error: formatTransferBundleClientDebugError(error),
+      storageKey: TRANSFER_BUNDLE_STORAGE_KEY,
+    });
   }
 }
 
@@ -1192,6 +1355,48 @@ function isTransferBundleStorage(
 
 function normalizeBundleComparableText(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function transferBundleClientDebugEnabled(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    const value = window.localStorage.getItem(TRANSFER_BUNDLE_DEBUG_STORAGE_KEY);
+    //  TODO : At the moment, always debug
+    return true;
+    // return value === "1" || value === "true";
+  } catch {
+    return false;
+  }
+}
+
+function logTransferBundleClientDebug(
+  step: string,
+  details: Record<string, unknown> = {},
+): void {
+  if (!transferBundleClientDebugEnabled()) {
+    return;
+  }
+
+  console.info(`[transfer-bundles:client] ${step}`, details);
+}
+
+function formatTransferBundleClientDebugError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
 }
 
 function getBrowserStorage(): TransferBundleStorage | undefined {
