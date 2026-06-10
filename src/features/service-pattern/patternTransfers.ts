@@ -267,9 +267,14 @@ async function hydratePatternTransfersFromBundle(
   const transfersByStopAreaRef = bundleResult.transfersByStopAreaRef;
 
   if (Object.keys(transfersByStopAreaRef).length === 0) {
-    throw new Error("Transfer bundle is empty.");
-  }
+    return {
+      complete: bundleResult.complete,
+      missingTargetRefs: bundleResult.missingTargetRefs,
+      targetCount: bundleResult.targetCount,
+      pattern,
+    };
 
+  }
   return {
     complete: bundleResult.complete,
     missingTargetRefs: bundleResult.missingTargetRefs,
