@@ -47,8 +47,13 @@ import {
 const { settings, updateSettings, resetSettings } = useAppSettings();
 const bundlesModalOpen = ref(false);
 const bundleSummaries = ref<TransferBundleSummary[]>([]);
+const localBundleSummaries = ref<TransferBundleSummary[]>([]);
 const settingsNotification = ref("");
-const bundleCount = computed(() => bundleSummaries.value.length);
+const backendBundleCount = computed(() => bundleSummaries.value.length);
+const localBundleCount = computed(() => localBundleSummaries.value.length);
+const bundleCount = computed(
+  () => backendBundleCount.value + localBundleCount.value,
+);
 let settingsNotificationTimer: ReturnType<typeof setTimeout> | undefined;
 
 function updateClosedSummaryMode(value: string): void {
@@ -91,19 +96,17 @@ function updateTransferBundleRetention(value: string): void {
 
 function updateTransferBundleRequestConcurrency(value: string): void {
   updateSettings({
-    transferBundleRequestConcurrency:
-      parseTransferBundleRequestConcurrency(
-        value,
-      ) as TransferBundleRequestConcurrency,
+    transferBundleRequestConcurrency: parseTransferBundleRequestConcurrency(
+      value,
+    ) as TransferBundleRequestConcurrency,
   });
 }
 
 function updateTransferBundleRequestSpacing(value: string): void {
   updateSettings({
-    transferBundleRequestSpacingMs:
-      parseTransferBundleRequestSpacingMs(
-        value,
-      ) as TransferBundleRequestSpacingMs,
+    transferBundleRequestSpacingMs: parseTransferBundleRequestSpacingMs(
+      value,
+    ) as TransferBundleRequestSpacingMs,
   });
 }
 
@@ -113,25 +116,43 @@ async function openBundlesModal(): Promise<void> {
 }
 
 async function refreshBundleSummaries(): Promise<void> {
-  bundleSummaries.value = await listTransferBundles();
+  // Backend bundles can disappear on Cloudflare Pages, while local bundles are
+  // tied to the current browser. Showing both makes cache debugging clearer.
+  const backendSummaries = await listTransferBundles();
+
+  bundleSummaries.value = backendSummaries;
+  localBundleSummaries.value =
+    typeof window === "undefined"
+      ? []
+      : listTransferBundles(window.localStorage);
 }
 
 async function clearBundles(): Promise<void> {
+  // Clear both cache layers. The backend request is allowed to fail because the
+  // local cache cleanup should still happen in offline/serverless edge cases.
   const backendClear = clearTransferBundles().catch(() => undefined);
+
   if (typeof window !== "undefined") {
     clearTransferBundles(window.localStorage);
   }
+
   clearPatternTransferRuntimeCaches();
   showSettingsNotification(
-    "Bundles supprimés côté backend. Le prochain plan rechargera les correspondances.",
+    "Bundles supprimés côté navigateur et backend. Le prochain plan rechargera les correspondances.",
   );
   await backendClear;
   await refreshBundleSummaries();
 }
 
 async function deleteBundle(id: string): Promise<void> {
-  await deleteTransferBundle(id);
+  const backendDelete = deleteTransferBundle(id).catch(() => undefined);
+
+  if (typeof window !== "undefined") {
+    deleteTransferBundle(id, window.localStorage);
+  }
+
   clearPatternTransferRuntimeCaches();
+  await backendDelete;
   await refreshBundleSummaries();
 }
 
@@ -146,7 +167,9 @@ function formatBundleDate(value: string): string {
       }).format(date);
 }
 
-function formatTransferResolverMode(_value: TransferBundleSummary["transferResolverMode"]): string {
+function formatTransferResolverMode(
+  _value: TransferBundleSummary["transferResolverMode"],
+): string {
   return "Nearby";
 }
 
@@ -319,6 +342,28 @@ onBeforeUnmount(() => {
         />
       </div>
 
+      <label class="settings-toggle">
+        <input
+          type="checkbox"
+          :checked="settings.transferBundleLocalCacheEnabled"
+          @change="
+            updateSettings({
+              transferBundleLocalCacheEnabled: (
+                $event.target as HTMLInputElement
+              ).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>Cache navigateur des bundles</strong>
+          <small>
+            Utilise localStorage avant le cache backend pour éviter de
+            recalculer les correspondances après un reload sur Cloudflare Pages.
+          </small>
+        </div>
+      </label>
+
       <div class="settings-row">
         <div>
           <strong>Expiration des bundles</strong>
@@ -339,7 +384,8 @@ onBeforeUnmount(() => {
         <div>
           <strong>Chargement des correspondances</strong>
           <span>
-            Les bundles utilisent uniquement la recherche nearby optimisee cote backend.
+            Les bundles utilisent uniquement la recherche nearby optimisee cote
+            backend.
           </span>
         </div>
       </div>
@@ -394,12 +440,16 @@ onBeforeUnmount(() => {
         <div>
           <strong>Bundles de correspondances</strong>
           <span>
-            Consulte ou supprime le cache local utilise pour accelerer les
-            schemas de ligne.
+            Consulte ou supprime le cache navigateur et backend utilise pour
+            accelerer les schemas de ligne.
           </span>
         </div>
         <div class="settings-bundle-actions__buttons">
-          <button class="button-secondary" type="button" @click="openBundlesModal">
+          <button
+            class="button-secondary"
+            type="button"
+            @click="openBundlesModal"
+          >
             View bundles
           </button>
           <button class="button-secondary" type="button" @click="clearBundles">
@@ -721,37 +771,89 @@ onBeforeUnmount(() => {
           </header>
 
           <p class="settings-bundle-modal__summary">
-            {{ bundleCount }} bundle{{ bundleCount > 1 ? "s" : "" }} en cache
-            backend.
+            {{ bundleCount }} bundle{{ bundleCount > 1 ? "s" : "" }} en cache :
+            {{ backendBundleCount }} backend, {{ localBundleCount }} navigateur.
           </p>
 
-          <div v-if="bundleSummaries.length" class="settings-bundle-list">
-            <article
-              v-for="bundle in bundleSummaries"
-              :key="bundle.id"
-              class="settings-bundle-item"
-            >
-              <div>
-                <strong>{{ bundle.lineLabel }}</strong>
-                <span>
-                  {{ bundle.stopAreaCount }} stations -
-                  {{ bundle.transferCount }} correspondances -
-                  {{ formatTransferResolverMode(bundle.transferResolverMode) }} -
-                  {{ formatTransferBundleDistance(bundle.nearbyDistanceMeters) }}
-                </span>
-                <small>Expire le {{ formatBundleDate(bundle.expiresAt) }}</small>
-              </div>
-              <button
-                class="button-secondary"
-                type="button"
-                @click="deleteBundle(bundle.id)"
+          <section
+            v-if="bundleSummaries.length"
+            class="settings-bundle-section"
+          >
+            <h3>Backend</h3>
+            <div class="settings-bundle-list">
+              <article
+                v-for="bundle in bundleSummaries"
+                :key="bundle.id"
+                class="settings-bundle-item"
               >
-                Supprimer
-              </button>
-            </article>
-          </div>
+                <div>
+                  <strong>{{ bundle.lineLabel }}</strong>
+                  <span>
+                    {{ bundle.stopAreaCount }} stations -
+                    {{ bundle.transferCount }} correspondances -
+                    {{
+                      formatTransferResolverMode(bundle.transferResolverMode)
+                    }}
+                    -
+                    {{
+                      formatTransferBundleDistance(bundle.nearbyDistanceMeters)
+                    }}
+                  </span>
+                  <small
+                    >Expire le {{ formatBundleDate(bundle.expiresAt) }}</small
+                  >
+                </div>
+                <button
+                  class="button-secondary"
+                  type="button"
+                  @click="deleteBundle(bundle.id)"
+                >
+                  Supprimer
+                </button>
+              </article>
+            </div>
+          </section>
 
-          <p v-else class="settings-bundle-modal__empty">
+          <section
+            v-if="localBundleSummaries.length"
+            class="settings-bundle-section"
+          >
+            <h3>Navigateur</h3>
+            <div class="settings-bundle-list">
+              <article
+                v-for="bundle in localBundleSummaries"
+                :key="`local-${bundle.id}`"
+                class="settings-bundle-item"
+              >
+                <div>
+                  <strong>{{ bundle.lineLabel }}</strong>
+                  <span>
+                    {{ bundle.stopAreaCount }} stations -
+                    {{ bundle.transferCount }} correspondances -
+                    {{
+                      formatTransferResolverMode(bundle.transferResolverMode)
+                    }}
+                    -
+                    {{
+                      formatTransferBundleDistance(bundle.nearbyDistanceMeters)
+                    }}
+                  </span>
+                  <small
+                    >Expire le {{ formatBundleDate(bundle.expiresAt) }}</small
+                  >
+                </div>
+                <button
+                  class="button-secondary"
+                  type="button"
+                  @click="deleteBundle(bundle.id)"
+                >
+                  Supprimer
+                </button>
+              </article>
+            </div>
+          </section>
+
+          <p v-if="!bundleCount" class="settings-bundle-modal__empty">
             Aucun bundle enregistre pour l'instant.
           </p>
         </section>
@@ -923,6 +1025,18 @@ onBeforeUnmount(() => {
   color: var(--muted);
   font-weight: 850;
   margin: 0;
+}
+
+.settings-bundle-section {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-bundle-section h3 {
+  font-size: 0.95rem;
+  font-weight: 950;
+  margin: 0;
+  text-transform: uppercase;
 }
 
 .settings-bundle-list {
@@ -1098,4 +1212,3 @@ onBeforeUnmount(() => {
   }
 }
 </style>
-

@@ -29,7 +29,8 @@ export interface TransferBundleResponse {
   transfersByStopAreaRef: Record<string, TransferLineOption[]>;
 }
 
-export interface TransferBundleRecord extends Omit<TransferBundleResponse, "transferResolverMode"> {
+export interface TransferBundleRecord
+  extends Omit<TransferBundleResponse, "transferResolverMode"> {
   id: string;
   createdAt: string;
   updatedAt: string;
@@ -78,8 +79,24 @@ export interface TransferBundleStorage {
   removeItem(key: string): void;
 }
 
-const TRANSFER_BUNDLE_STORAGE_KEY = "transport-clock.transfer-bundles.v12";
+export interface TransferBundleLocalCacheOptions {
+  /** Enables the browser cache layer before the backend bundle fallback. */
+  localCacheEnabled?: boolean;
+  /** Injectable storage used by tests. Defaults to window.localStorage in the browser. */
+  localCacheStorage?: TransferBundleStorage;
+}
+
+export interface TransferBundleClearOptions extends TransferBundleLocalCacheOptions {
+  /** Optional filter used only for local cleanup. Remote cleanup still accepts lineId/id. */
+  nearbyDistanceMeters?: number;
+  requestConcurrency?: number;
+  transportType?: TransferBundleNearbyDistanceTransport;
+  transferResolverMode?: TransferResolverMode;
+}
+
+const TRANSFER_BUNDLE_STORAGE_KEY = "transport-clock.transfer-bundles.v13";
 const LEGACY_TRANSFER_BUNDLE_STORAGE_KEYS = [
+  "transport-clock.transfer-bundles.v12",
   "transport-clock.transfer-bundles.v11",
   "transport-clock.transfer-bundles.v10",
   "transport-clock.transfer-bundles.v9",
@@ -102,6 +119,7 @@ const TRANSFER_BUNDLE_STORAGE_KEYS = [
 ];
 const DEFAULT_TRANSFER_BUNDLE_REQUEST_CONCURRENCY = 1;
 const DEFAULT_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = 300;
+const DEFAULT_TRANSFER_BUNDLE_RETENTION_DAYS = 15;
 const MIN_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = 50;
 const MAX_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = 1_200;
 export const TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = {
@@ -155,11 +173,22 @@ export async function loadTransferBundleForPattern(
   board: TransitBoardConfig,
   pattern: DepartureCallingPattern,
   retentionDays: number,
+  options: {
+    localCacheEnabled?: boolean;
+    localCacheStorage?: TransferBundleStorage;
+    nearbyDistanceMeters?: number;
+    onProgress?: (progress: TransferBundleLoadProgress) => void;
+    requestConcurrency?: number;
+    requestSpacingMs?: number;
+    transportType?: TransferBundleNearbyDistanceTransport;
+    transferResolverMode?: TransferResolverMode;
+  } = {},
 ): Promise<Record<string, TransferLineOption[]>> {
   const result = await loadTransferBundleResultForPattern(
     board,
     pattern,
     retentionDays,
+    options,
   );
 
   return result.transfersByStopAreaRef;
@@ -170,6 +199,8 @@ export async function loadTransferBundleResultForPattern(
   pattern: DepartureCallingPattern,
   retentionDays: number,
   options: {
+    localCacheEnabled?: boolean;
+    localCacheStorage?: TransferBundleStorage;
     nearbyDistanceMeters?: number;
     onProgress?: (progress: TransferBundleLoadProgress) => void;
     requestConcurrency?: number;
@@ -196,6 +227,7 @@ export async function loadTransferBundleResultForPattern(
   const requestSpacingMs = normalizeTransferBundleRequestSpacingMs(
     options.requestSpacingMs,
   );
+  const normalizedRetentionDays = normalizeTransferBundleRetentionDays(retentionDays);
   const nearbyDistanceMeters = normalizeTransferBundleNearbyDistanceMeters(
     options.nearbyDistanceMeters ??
     resolveTransferBundleNearbyDistanceMeters(
@@ -203,7 +235,46 @@ export async function loadTransferBundleResultForPattern(
     ),
   );
   const transfersByStopAreaRef: Record<string, TransferLineOption[]> = {};
+  const localCacheStorage = resolveLocalTransferBundleStorage(options);
+  const bundleId = createTransferBundleId(
+    lineId,
+    transferResolverMode,
+    nearbyDistanceMeters,
+  );
+
   reportBundleProgress(targets, transfersByStopAreaRef, options.onProgress);
+
+  if (localCacheStorage) {
+    const deletedLocalBundleIds = pruneExpiredTransferBundles(
+      localCacheStorage,
+      Date.now(),
+      normalizedRetentionDays,
+    );
+
+    // Keep the temporary browser cache and the backend cache in sync when the
+    // frontend is the first layer to notice that a bundle expired.
+    if (deletedLocalBundleIds.includes(bundleId)) {
+      void requestTransferBundleCacheDelete({ id: bundleId });
+    }
+
+    const localRecord = readCompleteLocalTransferBundle({
+      bundleId,
+      lineId,
+      nearbyDistanceMeters,
+      retentionDays: normalizedRetentionDays,
+      requestConcurrency,
+      storage: localCacheStorage,
+      targets,
+      transferResolverMode,
+    });
+
+    if (localRecord) {
+      Object.assign(transfersByStopAreaRef, localRecord.transfersByStopAreaRef);
+      reportBundleProgress(targets, transfersByStopAreaRef, options.onProgress);
+
+      return createBundleLoadResult(transfersByStopAreaRef, targets);
+    }
+  }
 
   try {
     const response = await fetchTransferBundle({
@@ -214,7 +285,7 @@ export async function loadTransferBundleResultForPattern(
       requestSpacingMs,
       targets,
       transferResolverMode,
-      retentionDays,
+      retentionDays: normalizedRetentionDays,
     }).catch(() => undefined);
 
     if (!response || !transferBundleResponseHasRequestedTarget(targets, response)) {
@@ -222,6 +293,17 @@ export async function loadTransferBundleResultForPattern(
     }
 
     Object.assign(transfersByStopAreaRef, response.transfersByStopAreaRef);
+
+    if (localCacheStorage) {
+      // Saving partial backend responses is safe because reads require all
+      // requested target stop areas to be present before the local cache is used.
+      saveTransferBundle(
+        response,
+        normalizedRetentionDays,
+        localCacheStorage,
+      );
+    }
+
     reportBundleProgress(targets, transfersByStopAreaRef, options.onProgress);
   } catch {
     return createBundleLoadResult(transfersByStopAreaRef, targets);
@@ -240,6 +322,14 @@ function normalizeTransferBundleRequestSpacingMs(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.min(2_000, Math.max(0, Math.trunc(value)))
     : 0;
+}
+
+function normalizeTransferBundleRetentionDays(value: unknown): number {
+  const numericValue = typeof value === "number" ? value : Number(value);
+
+  return Number.isFinite(numericValue)
+    ? Math.min(365, Math.max(1, Math.trunc(numericValue)))
+    : DEFAULT_TRANSFER_BUNDLE_RETENTION_DAYS;
 }
 
 export function normalizeTransferBundleNearbyDistanceMeters(value: unknown): number {
@@ -314,6 +404,10 @@ function fetchTransferBundle(payload: {
       }
 
       const transferBundle = (await response.json()) as TransferBundleResponse;
+
+      if (!isTransferBundleResponse(transferBundle)) {
+        throw new Error("Invalid transfer bundle response.");
+      }
 
       return {
         ...transferBundle,
@@ -447,7 +541,13 @@ export function clearPendingTransferBundleRequestsForTests(): void {
   pendingTransferBundleRequests.clear();
 }
 
-function readTransferBundleStore(storage: TransferBundleStorage): TransferBundleStore {
+function readTransferBundleStore(
+  storage: TransferBundleStorage,
+  options: {
+    removeCorruptedStore?: boolean;
+    rewriteSanitizedStore?: boolean;
+  } = {},
+): TransferBundleStore {
   try {
     const rawValue = storage.getItem(TRANSFER_BUNDLE_STORAGE_KEY);
 
@@ -458,14 +558,31 @@ function readTransferBundleStore(storage: TransferBundleStorage): TransferBundle
     const parsed = JSON.parse(rawValue) as Partial<TransferBundleStore>;
 
     if (!Array.isArray(parsed.bundles)) {
+      if (options.removeCorruptedStore) {
+        storage.removeItem(TRANSFER_BUNDLE_STORAGE_KEY);
+      }
+
       return createEmptyStore();
+    }
+
+    const bundles = parsed.bundles.filter(isTransferBundleRecord);
+
+    if (
+      options.rewriteSanitizedStore &&
+      bundles.length !== parsed.bundles.length
+    ) {
+      writeTransferBundleStore({ version: 1, bundles }, storage);
     }
 
     return {
       version: 1,
-      bundles: parsed.bundles.filter(isTransferBundleRecord),
+      bundles,
     };
   } catch {
+    if (options.removeCorruptedStore) {
+      storage.removeItem(TRANSFER_BUNDLE_STORAGE_KEY);
+    }
+
     return createEmptyStore();
   }
 }
@@ -481,124 +598,120 @@ export function listTransferBundles(
     return fetchTransferBundleSummaries();
   }
 
-  if (!storage) {
-    return [];
-  }
-
   pruneExpiredTransferBundles(storage);
 
   return readTransferBundleStore(storage).bundles
-    .map((bundle) => ({
-      id: bundle.id,
-      lineId: bundle.lineId,
-      lineLabel: bundle.lineLabel,
-      updatedAt: bundle.updatedAt,
-      expiresAt: bundle.expiresAt,
-      retentionDays: bundle.retentionDays,
-      requestConcurrency: bundle.requestConcurrency,
-      nearbyDistanceMeters: bundle.nearbyDistanceMeters,
-      stopAreaCount: Object.keys(bundle.transfersByStopAreaRef).length,
-      transferCount: Object.values(bundle.transfersByStopAreaRef).reduce(
-        (count, transfers) => count + transfers.length,
-        0,
-      ),
-      transferResolverMode: bundle.transferResolverMode,
-    }))
+    .map((bundle) => createTransferBundleSummary(bundle))
     .sort((left, right) => left.lineLabel.localeCompare(right.lineLabel, "fr"));
 }
 
 export function clearTransferBundles(storage: TransferBundleStorage): void;
+export function clearTransferBundles(options: TransferBundleClearOptions): Promise<void>;
 export function clearTransferBundles(): Promise<void>;
 export function clearTransferBundles(
-  storage?: TransferBundleStorage,
+  input?: TransferBundleStorage | TransferBundleClearOptions,
 ): void | Promise<void> {
-  if (!storage) {
-    return requestTransferBundleCacheDelete();
-  }
-
-  if (!storage) {
+  if (isTransferBundleStorage(input)) {
+    TRANSFER_BUNDLE_STORAGE_KEYS.forEach((key) => input.removeItem(key));
     return;
   }
 
-  TRANSFER_BUNDLE_STORAGE_KEYS.forEach((key) => storage.removeItem(key));
+  const localStorage = resolveLocalTransferBundleStorage(input);
+
+  if (localStorage) {
+    TRANSFER_BUNDLE_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+  }
+
+  return requestTransferBundleCacheDelete();
 }
 
 export function deleteTransferBundle(
   id: string,
   storage: TransferBundleStorage,
 ): void;
+export function deleteTransferBundle(
+  id: string,
+  options: TransferBundleClearOptions,
+): Promise<void>;
 export function deleteTransferBundle(id: string): Promise<void>;
 export function deleteTransferBundle(
   id: string,
-  storage?: TransferBundleStorage,
+  input?: TransferBundleStorage | TransferBundleClearOptions,
 ): void | Promise<void> {
-  if (!storage) {
-    return requestTransferBundleCacheDelete({ id });
-  }
-
-  if (!storage) {
+  if (isTransferBundleStorage(input)) {
+    deleteLocalTransferBundleById(id, input);
     return;
   }
 
-  const store = readTransferBundleStore(storage);
+  const localStorage = resolveLocalTransferBundleStorage(input);
 
-  writeTransferBundleStore(
-    {
-      ...store,
-      bundles: store.bundles.filter((bundle) => bundle.id !== id),
-    },
-    storage,
-  );
+  if (localStorage) {
+    deleteLocalTransferBundleById(id, localStorage);
+  }
+
+  return requestTransferBundleCacheDelete({ id });
 }
 
 export function clearTransferBundleForBoard(
   board: TransitBoardConfig,
   storage: TransferBundleStorage,
 ): void;
+export function clearTransferBundleForBoard(
+  board: TransitBoardConfig,
+  options: TransferBundleClearOptions,
+): Promise<void>;
 export function clearTransferBundleForBoard(
   board: TransitBoardConfig,
 ): Promise<void>;
 export function clearTransferBundleForBoard(
   board: TransitBoardConfig,
-  storage?: TransferBundleStorage,
+  input?: TransferBundleStorage | TransferBundleClearOptions,
 ): void | Promise<void> {
   const lineId = getBundleLineId(board);
 
-  if (!storage) {
-    return requestTransferBundleCacheDelete({ lineId });
-  }
-
-  if (!storage) {
+  if (isTransferBundleStorage(input)) {
+    deleteLocalTransferBundlesForLine(lineId, input);
     return;
   }
 
-  const store = readTransferBundleStore(storage);
+  const localStorage = resolveLocalTransferBundleStorage(input);
 
-  writeTransferBundleStore(
-    {
-      ...store,
-      bundles: store.bundles.filter((bundle) => bundle.lineId !== lineId),
-    },
-    storage,
-  );
+  if (localStorage) {
+    deleteLocalTransferBundlesForLine(lineId, localStorage, input, board);
+  }
+
+  return requestTransferBundleCacheDelete({ lineId });
 }
 
 export function pruneExpiredTransferBundles(
   storage = getBrowserStorage(),
   now = Date.now(),
-): void {
+  retentionDays?: number,
+): string[] {
   if (!storage) {
-    return;
+    return [];
   }
 
-  const store = readTransferBundleStore(storage);
-  const bundles = store.bundles.filter(
-    (bundle) => Date.parse(bundle.expiresAt) > now,
-  );
+  const store = readTransferBundleStore(storage, {
+    removeCorruptedStore: true,
+    rewriteSanitizedStore: true,
+  });
+  const expiredBundleIds: string[] = [];
+  const bundles = store.bundles.filter((bundle) => {
+    const fresh = isTransferBundleRecordFresh(bundle, now, retentionDays);
+
+    if (!fresh) {
+      expiredBundleIds.push(bundle.id);
+    }
+
+    return fresh;
+  });
 
   if (bundles.length !== store.bundles.length) {
     writeTransferBundleStore({ ...store, bundles }, storage);
   }
+
+  return expiredBundleIds;
 }
 
 export function saveTransferBundle(
@@ -614,13 +727,18 @@ export function saveTransferBundle(
   const nearbyDistanceMeters = normalizeTransferBundleNearbyDistanceMeters(
     response.nearbyDistanceMeters,
   );
+  const normalizedRetentionDays = normalizeTransferBundleRetentionDays(retentionDays);
   const id = createTransferBundleId(
     response.lineId,
     transferResolverMode,
-    requestConcurrency,
     nearbyDistanceMeters,
   );
-  const store = storage ? readTransferBundleStore(storage) : createEmptyStore();
+  const store = storage
+    ? readTransferBundleStore(storage, {
+      removeCorruptedStore: true,
+      rewriteSanitizedStore: true,
+    })
+    : createEmptyStore();
   const existing = store.bundles.find((bundle) => bundle.id === id);
   const createdAt = existing?.createdAt ?? new Date(now).toISOString();
   const record: TransferBundleRecord = {
@@ -631,8 +749,8 @@ export function saveTransferBundle(
     id,
     createdAt,
     updatedAt: new Date(now).toISOString(),
-    expiresAt: new Date(now + retentionDays * DAY_MS).toISOString(),
-    retentionDays,
+    expiresAt: new Date(now + normalizedRetentionDays * DAY_MS).toISOString(),
+    retentionDays: normalizedRetentionDays,
     transfersByStopAreaRef: {
       ...(existing?.transfersByStopAreaRef ?? {}),
       ...response.transfersByStopAreaRef,
@@ -662,6 +780,61 @@ export function isCompleteTransferBundleResponse(
   );
 }
 
+function readCompleteLocalTransferBundle(params: {
+  bundleId: string;
+  lineId: string;
+  nearbyDistanceMeters: number;
+  requestConcurrency: number;
+  retentionDays: number;
+  storage: TransferBundleStorage;
+  targets: TransferBundleTarget[];
+  transferResolverMode: EffectiveTransferResolverMode;
+}): TransferBundleRecord | undefined {
+  const store = readTransferBundleStore(params.storage, {
+    removeCorruptedStore: true,
+    rewriteSanitizedStore: true,
+  });
+  const bundle = store.bundles.find((record) => record.id === params.bundleId);
+
+  if (!bundle) {
+    return undefined;
+  }
+
+  // A localStorage hit is trusted only if it matches the current resolver inputs
+  // and contains an explicit entry for every requested stop area. Empty arrays are
+  // valid because they mean "resolved successfully with no transfer".
+  if (
+    !transferBundleRecordMatchesRequest(bundle, {
+      lineId: params.lineId,
+      nearbyDistanceMeters: params.nearbyDistanceMeters,
+      transferResolverMode: params.transferResolverMode,
+    }) ||
+    !isTransferBundleRecordFresh(bundle, Date.now(), params.retentionDays) ||
+    !isCompleteTransferBundleResponse(params.targets, bundle)
+  ) {
+    return undefined;
+  }
+
+  return bundle;
+}
+
+function transferBundleRecordMatchesRequest(
+  bundle: TransferBundleRecord,
+  request: {
+    lineId: string;
+    nearbyDistanceMeters: number;
+    transferResolverMode: EffectiveTransferResolverMode;
+  },
+): boolean {
+  return (
+    normalizeBundleComparableText(bundle.lineId) ===
+    normalizeBundleComparableText(request.lineId) &&
+    bundle.transferResolverMode === request.transferResolverMode &&
+    normalizeTransferBundleNearbyDistanceMeters(bundle.nearbyDistanceMeters) ===
+    request.nearbyDistanceMeters
+  );
+}
+
 function writeTransferBundleStore(
   store: TransferBundleStore,
   storage: TransferBundleStorage,
@@ -676,7 +849,12 @@ function writeTransferBundleStore(
     return;
   }
 
-  storage.setItem(TRANSFER_BUNDLE_STORAGE_KEY, JSON.stringify(store));
+  try {
+    storage.setItem(TRANSFER_BUNDLE_STORAGE_KEY, JSON.stringify(store));
+  } catch {
+    // localStorage can be unavailable or full. Transfer bundles are only an
+    // optimization layer, so the app must continue with backend/live resolving.
+  }
 }
 
 function createEmptyStore(): TransferBundleStore {
@@ -735,10 +913,12 @@ function reportBundleProgress(
 function createTransferBundleId(
   lineId: string,
   transferResolverMode: EffectiveTransferResolverMode,
-  requestConcurrency: number,
   nearbyDistanceMeters: number,
 ): string {
-  return `${lineId.trim().toLowerCase()}::${transferResolverMode}::d${nearbyDistanceMeters}::c${requestConcurrency}`;
+  // Concurrency and spacing only change how fast the bundle is built. They must
+  // not create different cache keys because the expected transfer content is the
+  // same for the same line, resolver mode and distance.
+  return `${lineId.trim().toLowerCase()}::${transferResolverMode}::d${nearbyDistanceMeters}`;
 }
 
 function getBundleLineId(board: TransitBoardConfig): string {
@@ -777,9 +957,184 @@ function isTransferBundleRecord(value: unknown): value is TransferBundleRecord {
     typeof candidate.requestConcurrency === "number" &&
     (candidate.nearbyDistanceMeters === undefined ||
       typeof candidate.nearbyDistanceMeters === "number") &&
-    Boolean(candidate.transfersByStopAreaRef) &&
-    typeof candidate.transfersByStopAreaRef === "object"
+    isTransferMap(candidate.transfersByStopAreaRef)
   );
+}
+
+function isTransferBundleResponse(value: unknown): value is TransferBundleResponse {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<TransferBundleResponse>;
+
+  return (
+    candidate.version === 1 &&
+    typeof candidate.generatedAt === "string" &&
+    typeof candidate.lineId === "string" &&
+    typeof candidate.lineLabel === "string" &&
+    isTransferMap(candidate.transfersByStopAreaRef) &&
+    (candidate.nearbyDistanceMeters === undefined ||
+      typeof candidate.nearbyDistanceMeters === "number") &&
+    (candidate.requestConcurrency === undefined ||
+      typeof candidate.requestConcurrency === "number") &&
+    (candidate.transferResolverMode === undefined ||
+      candidate.transferResolverMode === "nearby")
+  );
+}
+
+function isTransferMap(value: unknown): value is Record<string, TransferLineOption[]> {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.values(value as Record<string, unknown>).every(Array.isArray)
+  );
+}
+
+function isTransferBundleRecordFresh(
+  bundle: TransferBundleRecord,
+  now: number,
+  requestedRetentionDays?: number,
+): boolean {
+  const expiresAt = Date.parse(bundle.expiresAt);
+
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+    return false;
+  }
+
+  if (requestedRetentionDays === undefined) {
+    return true;
+  }
+
+  const updatedAt = Date.parse(bundle.updatedAt);
+
+  if (!Number.isFinite(updatedAt)) {
+    return false;
+  }
+
+  return updatedAt + normalizeTransferBundleRetentionDays(requestedRetentionDays) * DAY_MS > now;
+}
+
+function createTransferBundleSummary(bundle: TransferBundleRecord): TransferBundleSummary {
+  return {
+    id: bundle.id,
+    lineId: bundle.lineId,
+    lineLabel: bundle.lineLabel,
+    updatedAt: bundle.updatedAt,
+    expiresAt: bundle.expiresAt,
+    retentionDays: bundle.retentionDays,
+    requestConcurrency: bundle.requestConcurrency,
+    nearbyDistanceMeters: bundle.nearbyDistanceMeters,
+    stopAreaCount: Object.keys(bundle.transfersByStopAreaRef).length,
+    transferCount: Object.values(bundle.transfersByStopAreaRef).reduce(
+      (count, transfers) => count + transfers.length,
+      0,
+    ),
+    transferResolverMode: bundle.transferResolverMode,
+  };
+}
+
+function deleteLocalTransferBundleById(
+  id: string,
+  storage: TransferBundleStorage,
+): void {
+  const store = readTransferBundleStore(storage, {
+    removeCorruptedStore: true,
+    rewriteSanitizedStore: true,
+  });
+
+  writeTransferBundleStore(
+    {
+      ...store,
+      bundles: store.bundles.filter((bundle) => bundle.id !== id),
+    },
+    storage,
+  );
+}
+
+function deleteLocalTransferBundlesForLine(
+  lineId: string,
+  storage: TransferBundleStorage,
+  options?: TransferBundleClearOptions,
+  board?: TransitBoardConfig,
+): void {
+  const store = readTransferBundleStore(storage, {
+    removeCorruptedStore: true,
+    rewriteSanitizedStore: true,
+  });
+  const expectedResolverMode = board
+    ? resolveEffectiveTransferResolverMode(
+      options?.transferResolverMode ?? "auto",
+      board.line.mode,
+    )
+    : undefined;
+  const expectedDistance = board
+    ? normalizeTransferBundleNearbyDistanceMeters(
+      options?.nearbyDistanceMeters ??
+      resolveTransferBundleNearbyDistanceMeters(
+        options?.transportType ?? board.line.mode,
+      ),
+    )
+    : undefined;
+
+  writeTransferBundleStore(
+    {
+      ...store,
+      bundles: store.bundles.filter((bundle) => {
+        if (
+          normalizeBundleComparableText(bundle.lineId) !==
+          normalizeBundleComparableText(lineId)
+        ) {
+          return true;
+        }
+
+        if (
+          expectedResolverMode !== undefined &&
+          bundle.transferResolverMode !== expectedResolverMode
+        ) {
+          return true;
+        }
+
+        if (
+          expectedDistance !== undefined &&
+          normalizeTransferBundleNearbyDistanceMeters(bundle.nearbyDistanceMeters) !==
+          expectedDistance
+        ) {
+          return true;
+        }
+
+        return false;
+      }),
+    },
+    storage,
+  );
+}
+
+function resolveLocalTransferBundleStorage(
+  options?: TransferBundleLocalCacheOptions,
+): TransferBundleStorage | undefined {
+  if (!options?.localCacheEnabled) {
+    return undefined;
+  }
+
+  return options.localCacheStorage ?? getBrowserStorage();
+}
+
+function isTransferBundleStorage(
+  value: unknown,
+): value is TransferBundleStorage {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    typeof (value as Partial<TransferBundleStorage>).getItem === "function" &&
+    typeof (value as Partial<TransferBundleStorage>).setItem === "function" &&
+    typeof (value as Partial<TransferBundleStorage>).removeItem === "function"
+  );
+}
+
+function normalizeBundleComparableText(value: string): string {
+  return value.trim().toLowerCase();
 }
 
 function getBrowserStorage(): TransferBundleStorage | undefined {

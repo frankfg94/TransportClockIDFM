@@ -53,6 +53,8 @@ export interface AppSettings {
   hiddenDirectionIdsByBoardId: Record<string, string[]>;
   wakeLockDuration: WakeLockDuration;
   wakeDeviceOnAlarm: boolean;
+  // Browser-side cache layer used before the backend bundle fallback.
+  transferBundleLocalCacheEnabled: boolean;
   navigationAutoHide: NavigationAutoHide;
   reduceMotion: boolean;
   compactLinePlanMode: CompactLinePlanMode;
@@ -205,6 +207,8 @@ export function createDefaultAppSettings(): AppSettings {
     trafficInfoDesign: "ratp",
     trafficInfoDefaultScope: "optimized",
     transferResolverMode: "auto",
+    // Enabled by default to use a frontend cache only if possible
+    transferBundleLocalCacheEnabled: true,
     transferBundleRetentionDays: 15,
     transferBundleRequestConcurrency: 1,
     transferBundleRequestSpacingMs: 0,
@@ -277,6 +281,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     transferResolverMode: isTransferResolverMode(value.transferResolverMode)
       ? value.transferResolverMode
       : defaults.transferResolverMode,
+    transferBundleLocalCacheEnabled: readBoolean(
+      value.transferBundleLocalCacheEnabled,
+      defaults.transferBundleLocalCacheEnabled,
+    ),
     transferBundleRetentionDays: parseTransferBundleRetentionDays(
       value.transferBundleRetentionDays,
     ),

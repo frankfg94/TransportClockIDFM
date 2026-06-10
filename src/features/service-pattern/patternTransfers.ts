@@ -69,6 +69,7 @@ interface PatternTransferHydrationOptions {
   transferBundleRequestSpacingMs?: number;
   transportType?: string;
   transferResolverMode?: TransferResolverMode;
+  localCacheEnabled?: boolean,
 }
 
 const MAX_TRANSFER_STATIONS = 64;
@@ -105,6 +106,7 @@ export async function hydrateDeparturePatternTransfers(
       options.transferBundleRequestConcurrency,
       options.transferBundleRequestSpacingMs,
       options.transportType,
+      options.localCacheEnabled,
       (progress) => {
         overallTotal = progress.total;
         overallCompleted = progress.completed;
@@ -262,6 +264,7 @@ async function hydratePatternTransfersFromBundle(
       requestSpacingMs,
       transportType,
       transferResolverMode,
+      localCacheEnabled,
     },
   );
   const transfersByStopAreaRef = bundleResult.transfersByStopAreaRef;

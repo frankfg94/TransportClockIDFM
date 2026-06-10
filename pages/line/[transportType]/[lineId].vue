@@ -39,8 +39,15 @@
       :rich-transfer-tooltips="settings.richTransferTooltips"
       :reduce-motion="settings.reduceMotion"
       :transfer-bundle-retention-days="settings.transferBundleRetentionDays"
-      :transfer-bundle-request-concurrency="settings.transferBundleRequestConcurrency"
-      :transfer-bundle-request-spacing-ms="settings.transferBundleRequestSpacingMs"
+      :transfer-bundle-request-concurrency="
+        settings.transferBundleRequestConcurrency
+      "
+      :transfer-bundle-request-spacing-ms="
+        settings.transferBundleRequestSpacingMs
+      "
+      :transfer-bundle-local-cache-enabled="
+        settings.transferBundleLocalCacheEnabled
+      "
       :transport-type="transferBundleTransportType"
       :transfer-resolver-mode="settings.transferResolverMode"
       @close="navigateHome"
@@ -86,7 +93,9 @@
     </section>
 
     <section
-      v-if="activeView === 'schema' && (isPatternRequestPending || errorMessage)"
+      v-if="
+        activeView === 'schema' && (isPatternRequestPending || errorMessage)
+      "
       class="line-pattern-page__fallback"
       aria-live="polite"
     >
@@ -107,7 +116,10 @@ import {
 } from "../../../src/features/app-settings";
 import { DeparturePatternModal } from "../../../src/features/service-pattern";
 import { DetailedLineMapPicker } from "../../../src/features/line-map";
-import { createLinePresentation, transitModeToFamily } from "../../../src/services/linePresentation";
+import {
+  createLinePresentation,
+  transitModeToFamily,
+} from "../../../src/services/linePresentation";
 import type {
   LinePatternViewResponse,
   LineSearchOption,
@@ -138,8 +150,11 @@ const apiUrl = computed(() => {
     route.params.lineId as string,
   )}/pattern${suffix}`;
 });
-const { data: patternView, pending, error } =
-  useFetch<LinePatternViewResponse>(apiUrl);
+const {
+  data: patternView,
+  pending,
+  error,
+} = useFetch<LinePatternViewResponse>(apiUrl);
 const patternRequestTimedOut = ref(false);
 let patternRequestTimeout: ReturnType<typeof setTimeout> | undefined;
 const selectedDirectionId = computed(
@@ -190,7 +205,8 @@ const pageTitle = computed(() => {
 });
 const transferBundleTransportType = computed(
   () =>
-    patternView.value?.transportType ?? firstRouteQuery(route.params.transportType),
+    patternView.value?.transportType ??
+    firstRouteQuery(route.params.transportType),
 );
 const lineMapLine = computed<LineSearchOption | undefined>(() => {
   const view = patternView.value;

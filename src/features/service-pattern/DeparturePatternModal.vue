@@ -295,8 +295,8 @@ const transferHydrationStatusLabel = computed(() =>
   transferHydrationRateLimited.value
     ? "Limite API quotidienne atteinte"
     : transferHydrationRetryVisible.value
-    ? "Correspondances bloquées"
-    : "Chargement des correspondances",
+      ? "Correspondances bloquées"
+      : "Chargement des correspondances",
 );
 const transferHydrationDetailLabel = computed(() =>
   transferHydrationRateLimited.value
@@ -636,8 +636,10 @@ async function hydratePatternTransfers(): Promise<void> {
             syncTransferHydrationRateLimitCheck(requestId);
           }
         },
+        localCacheEnabled: props.transferBundleLocalCacheEnabled,
         retentionDays: props.transferBundleRetentionDays,
-        transferBundleRequestConcurrency: props.transferBundleRequestConcurrency,
+        transferBundleRequestConcurrency:
+          props.transferBundleRequestConcurrency,
         transferBundleRequestSpacingMs: props.transferBundleRequestSpacingMs,
         transportType: props.transportType,
         transferResolverMode: props.transferResolverMode,
@@ -720,7 +722,9 @@ function syncTransferHydrationRateLimitCheck(requestId: number): void {
   }, TRANSFER_HYDRATION_RATE_LIMIT_CHECK_MS);
 }
 
-async function checkTransferHydrationRateLimit(requestId: number): Promise<void> {
+async function checkTransferHydrationRateLimit(
+  requestId: number,
+): Promise<void> {
   if (
     requestId !== transferHydrationRequest ||
     !transferHydrationLoading.value ||
@@ -754,11 +758,11 @@ async function checkTransferHydrationRateLimit(requestId: number): Promise<void>
   }
 }
 
-function healthChecksIndicateMarketplaceRateLimit(checks: HealthCheck[]): boolean {
+function healthChecksIndicateMarketplaceRateLimit(
+  checks: HealthCheck[],
+): boolean {
   return checks
-    .filter((check) =>
-      ["prim", "navitia", "prim-traffic"].includes(check.id),
-    )
+    .filter((check) => ["prim", "navitia", "prim-traffic"].includes(check.id))
     .some(healthCheckIndicatesRateLimit);
 }
 
@@ -2642,7 +2646,8 @@ function getTransferFamilyKey(
   if (transfer.family === "RER") return "RER";
   if (transfer.family === "TRANSILIEN") return "TRANSILIEN";
   if (transfer.family === "TRAM") return "TRAM";
-  if (transfer.family === "BUS" || transfer.family === "NOCTILIEN") return "BUS";
+  if (transfer.family === "BUS" || transfer.family === "NOCTILIEN")
+    return "BUS";
 
   const mode = normalizeStationName(transfer.mode ?? "");
 
@@ -3056,97 +3061,100 @@ onBeforeUnmount(() => {
                             class="pattern-flow-station__transfer-tooltip"
                             role="tooltip"
                           >
-                          <header class="pattern-flow-station__tooltip-header">
-                            <div>
-                              <strong>{{ data.label }}</strong>
-                              <small>Correspondances</small>
-                            </div>
-                          </header>
-                          <section
-                            v-for="group in data.transferGroups"
-                            :key="`${data.key}-transfer-group-${group.key}`"
-                            class="pattern-flow-station__transfer-group"
-                          >
-                            <div
-                              class="pattern-flow-station__transfer-group-title"
+                            <header
+                              class="pattern-flow-station__tooltip-header"
                             >
-                              <span aria-hidden="true">{{
-                                group.iconLabel
-                              }}</span>
-                              <strong>{{ group.label }}</strong>
-                              <small>{{ group.countLabel }}</small>
-                            </div>
-                            <div class="pattern-flow-station__transfer-list">
-                              <span
-                                v-for="transfer in group.transfers"
-                                :key="`${data.key}-${group.key}-${transfer.id}-${transfer.label}`"
-                                class="pattern-flow-station__transfer-item"
-                                :class="{
-                                  'pattern-flow-station__transfer-item--active':
-                                    activeTransfer?.id === transfer.id,
-                                }"
-                                role="button"
-                                tabindex="0"
-                                @focus="showTransferDetails(transfer)"
-                                @mouseenter="showTransferDetails(transfer)"
+                              <div>
+                                <strong>{{ data.label }}</strong>
+                                <small>Correspondances</small>
+                              </div>
+                            </header>
+                            <section
+                              v-for="group in data.transferGroups"
+                              :key="`${data.key}-transfer-group-${group.key}`"
+                              class="pattern-flow-station__transfer-group"
+                            >
+                              <div
+                                class="pattern-flow-station__transfer-group-title"
                               >
-                                <LineIconBadge
-                                  class="pattern-flow-station__transfer"
-                                  :line="transfer"
-                                  compact
-                                />
-                              </span>
-                            </div>
-                          </section>
-                          <aside
-                            v-if="richTransferTooltips && activeTransfer"
-                            class="pattern-flow-station__transfer-detail"
-                          >
-                            <strong>{{
-                              getTransferDetailTitle(activeTransfer)
-                            }}</strong>
-                            <span
-                              v-if="isBusTransfer(activeTransfer)"
-                              class="pattern-flow-station__transfer-detail-kicker"
+                                <span aria-hidden="true">{{
+                                  group.iconLabel
+                                }}</span>
+                                <strong>{{ group.label }}</strong>
+                                <small>{{ group.countLabel }}</small>
+                              </div>
+                              <div class="pattern-flow-station__transfer-list">
+                                <span
+                                  v-for="transfer in group.transfers"
+                                  :key="`${data.key}-${group.key}-${transfer.id}-${transfer.label}`"
+                                  class="pattern-flow-station__transfer-item"
+                                  :class="{
+                                    'pattern-flow-station__transfer-item--active':
+                                      activeTransfer?.id === transfer.id,
+                                  }"
+                                  role="button"
+                                  tabindex="0"
+                                  @focus="showTransferDetails(transfer)"
+                                  @mouseenter="showTransferDetails(transfer)"
+                                >
+                                  <LineIconBadge
+                                    class="pattern-flow-station__transfer"
+                                    :line="transfer"
+                                    compact
+                                  />
+                                </span>
+                              </div>
+                            </section>
+                            <aside
+                              v-if="richTransferTooltips && activeTransfer"
+                              class="pattern-flow-station__transfer-detail"
                             >
-                              Directions possibles
-                            </span>
-                            <span
-                              v-if="
-                                isBusTransfer(activeTransfer) &&
-                                activeTransferDirectionState?.loading
-                              "
-                              class="pattern-flow-station__transfer-detail-muted"
-                            >
-                              Chargement...
-                            </span>
-                            <span
-                              v-else-if="
-                                isBusTransfer(activeTransfer) &&
-                                activeTransferDirectionState?.directions.length
-                              "
-                              class="pattern-flow-station__transfer-directions"
-                            >
+                              <strong>{{
+                                getTransferDetailTitle(activeTransfer)
+                              }}</strong>
                               <span
-                                v-for="direction in activeTransferDirectionState.directions"
-                                :key="`${activeTransfer.id}-${direction}`"
+                                v-if="isBusTransfer(activeTransfer)"
+                                class="pattern-flow-station__transfer-detail-kicker"
                               >
-                                {{ direction }}
+                                Directions possibles
                               </span>
-                            </span>
-                            <span
-                              v-else-if="isBusTransfer(activeTransfer)"
-                              class="pattern-flow-station__transfer-detail-muted"
-                            >
-                              Directions indisponibles
-                            </span>
-                            <span
-                              v-else
-                              class="pattern-flow-station__transfer-detail-muted"
-                            >
-                              {{ activeTransfer.label }}
-                            </span>
-                          </aside>
+                              <span
+                                v-if="
+                                  isBusTransfer(activeTransfer) &&
+                                  activeTransferDirectionState?.loading
+                                "
+                                class="pattern-flow-station__transfer-detail-muted"
+                              >
+                                Chargement...
+                              </span>
+                              <span
+                                v-else-if="
+                                  isBusTransfer(activeTransfer) &&
+                                  activeTransferDirectionState?.directions
+                                    .length
+                                "
+                                class="pattern-flow-station__transfer-directions"
+                              >
+                                <span
+                                  v-for="direction in activeTransferDirectionState.directions"
+                                  :key="`${activeTransfer.id}-${direction}`"
+                                >
+                                  {{ direction }}
+                                </span>
+                              </span>
+                              <span
+                                v-else-if="isBusTransfer(activeTransfer)"
+                                class="pattern-flow-station__transfer-detail-muted"
+                              >
+                                Directions indisponibles
+                              </span>
+                              <span
+                                v-else
+                                class="pattern-flow-station__transfer-detail-muted"
+                              >
+                                {{ activeTransfer.label }}
+                              </span>
+                            </aside>
                           </article>
                         </Transition>
                       </div>

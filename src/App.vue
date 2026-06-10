@@ -1154,6 +1154,9 @@ onBeforeUnmount(() => {
         :transfer-bundle-request-spacing-ms="
           settings.transferBundleRequestSpacingMs
         "
+        :transfer-bundle-local-cache-enabled="
+          settings.transferBundleLocalCacheEnabled
+        "
         :transfer-resolver-mode="settings.transferResolverMode"
         @close="closePatternModal"
       />

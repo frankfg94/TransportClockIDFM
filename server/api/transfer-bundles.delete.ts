@@ -14,14 +14,14 @@ export default defineEventHandler(async (event) => {
   const lineId = typeof body?.lineId === "string" ? body.lineId.trim() : "";
 
   if (id) {
-    deleteServerTransferBundle(id);
+    await deleteServerTransferBundle(id);
   } else if (lineId) {
-    deleteServerTransferBundlesForLine(lineId);
+    await deleteServerTransferBundlesForLine(lineId);
   } else {
-    clearServerTransferBundles();
+    await clearServerTransferBundles();
   }
 
   return {
-    bundles: listServerTransferBundles(),
+    bundles: await listServerTransferBundles(),
   };
 });
