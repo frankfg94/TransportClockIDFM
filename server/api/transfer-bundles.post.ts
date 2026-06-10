@@ -1,4 +1,5 @@
 import { createError, defineEventHandler, readBody } from "h3";
+import { useStorage } from "nitropack/runtime";
 import { getServerIdfmApiKey } from "../services/idfm/resolveStopArea";
 import {
   createTransferLineOption,
@@ -61,7 +62,7 @@ type CachedNearbyStopAreasRequest = {
 
 type CachedStopAreaLinesRequest = {
   expiresAt: number;
-  promise: Promise<NavitiaLineForTransfer[]>;
+  promise: Promise<NavitiaLineForTransfer[] | undefined>;
 };
 
 type CachedStopPointStructuralRequest = {
@@ -202,6 +203,10 @@ const DEFAULT_RETENTION_DAYS = 30;
 const MAX_SERVER_RETRY_AFTER_DELAY_MS = 5_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// Nitro storage gives us a read-through bundle cache that can survive page reloads
+// and, when a persistent driver is configured, serverless cold starts as well.
+const TRANSFER_BUNDLE_STORAGE_BASE = "transfer-bundles";
+
 const transferCache = new Map<string, CachedTransferRequest>();
 const serverTransferBundles = new Map<string, ServerTransferBundleRecord>();
 const lineStopAreasCache = new Map<string, CachedLineStopAreasRequest>();
@@ -242,7 +247,6 @@ export async function createTransferBundleResponse(
     const bundleId = createServerTransferBundleId(
       body.lineId,
       body.transferResolverMode,
-      body.requestConcurrency,
       body.nearbyDistanceMeters,
     );
 
@@ -260,8 +264,46 @@ export async function createTransferBundleResponse(
       targets: body.targets.map((target) => summarizeTransferTarget(target)),
     });
 
+    trimTransferCache();
+
+    const existingBundle = await readServerTransferBundle(bundleId, logger);
+    const reusableTransfersByStopAreaRef = getReusableTransferBundleEntries(
+      existingBundle,
+      body.targets,
+    );
+    const missingTargets = body.targets.filter(
+      (target) =>
+        !Object.prototype.hasOwnProperty.call(
+          reusableTransfersByStopAreaRef,
+          target.stopAreaRef,
+        ),
+    );
+
+    if (existingBundle && missingTargets.length === 0) {
+      logTransferBundleDebug(logger, "info", "bundle:hit-complete", {
+        bundleId,
+        durationMs: Date.now() - logger.startedAt,
+        targetCount: body.targets.length,
+        transferCount: countTransferLines(reusableTransfersByStopAreaRef),
+      });
+
+      return createTransferBundleResponseFromStoredBundle(
+        body,
+        existingBundle,
+        reusableTransfersByStopAreaRef,
+      );
+    }
+
+    logTransferBundleDebug(logger, existingBundle ? "info" : "debug", existingBundle ? "bundle:hit-partial" : "bundle:miss", {
+      bundleId,
+      missingTargetCount: missingTargets.length,
+      reusableTargetCount: Object.keys(reusableTransfersByStopAreaRef).length,
+      targetCount: body.targets.length,
+    });
+
     if (!fetcher) {
       logTransferBundleDebug(logger, "error", "request:missing-api-key", {
+        missingTargetCount: missingTargets.length,
         resolverMode: body.transferResolverMode,
       });
 
@@ -271,10 +313,12 @@ export async function createTransferBundleResponse(
       });
     }
 
-    const transfersByStopAreaRef: Record<string, TransferLineOption[]> = {};
+    const transfersByStopAreaRef: Record<string, TransferLineOption[]> = {
+      ...reusableTransfersByStopAreaRef,
+    };
 
     const entries = await mapBundleItemsWithConcurrency(
-      body.targets,
+      missingTargets,
       body.requestConcurrency,
       body.requestSpacingMs,
       async (target, index) => {
@@ -307,12 +351,14 @@ export async function createTransferBundleResponse(
     );
 
     entries.forEach(([stopAreaRef, transfers]) => {
+      // undefined means that the target was not reliably resolved, usually due to
+      // a transient upstream failure. [] is different: it means "resolved, but no transfers".
       if (transfers !== undefined) {
-        getCachedStopAreaLines;
+        transfersByStopAreaRef[stopAreaRef] = transfers;
       }
     });
 
-    saveServerTransferBundle(
+    const savedBundle = await saveServerTransferBundle(
       body,
       body.transferResolverMode,
       bundleId,
@@ -323,21 +369,17 @@ export async function createTransferBundleResponse(
     logTransferBundleDebug(logger, "info", "request:done", {
       durationMs: Date.now() - logger.startedAt,
       bundleId,
+      missingTargetCount: missingTargets.length,
       resolvedTargetCount: Object.keys(transfersByStopAreaRef).length,
       targetCount: body.targets.length,
       transferCount: countTransferLines(transfersByStopAreaRef),
     });
 
-    return {
-      version: 1,
-      generatedAt: new Date().toISOString(),
-      lineId: body.lineId,
-      lineLabel: body.lineLabel,
-      nearbyDistanceMeters: body.nearbyDistanceMeters,
-      requestConcurrency: body.requestConcurrency,
-      transferResolverMode: body.transferResolverMode,
-      transfersByStopAreaRef,
-    };
+    return createTransferBundleResponseFromStoredBundle(
+      body,
+      savedBundle,
+      getReusableTransferBundleEntries(savedBundle, body.targets),
+    );
   } catch (error) {
     logTransferBundleDebug(logger, "error", "request:error", {
       durationMs: Date.now() - logger.startedAt,
@@ -866,11 +908,15 @@ async function resolveTransferLinesForNearbyStopAreas(
   );
 
   if (linesByStopArea.some((lines) => lines === undefined)) {
+    logTransferBundleDebug(logger, "warn", "nearby-lines:incomplete", {
+      currentLineId,
+      stopAreaLookupCount: nearbyStopAreas.length,
+    });
+
     return undefined;
   }
 
   const currentLineKey = normalizeBundleLineId(currentLineId);
-
   const transfers = linesByStopArea
     .flatMap((lines) => lines ?? [])
     .filter((line) => normalizeBundleLineId(line.id) !== currentLineKey)
@@ -1280,8 +1326,16 @@ async function getCachedStopAreaLines(
   const cached = stopAreaLinesCache.get(cacheKey);
 
   if (cached && cached.expiresAt > now) {
+    logTransferBundleDebug(logger, "debug", "stop-area-lines:cache-hit", {
+      stopAreaRef,
+    });
+
     return cached.promise;
   }
+
+  logTransferBundleDebug(logger, "debug", "stop-area-lines:fetch", {
+    stopAreaRef,
+  });
 
   const request = fetchStopAreaLines(stopAreaRef, fetcher, logger).catch(
     (error): NavitiaLineForTransfer[] | undefined => {
@@ -1289,16 +1343,12 @@ async function getCachedStopAreaLines(
         error: formatTransferBundleError(error),
         stopAreaRef,
       });
-
       stopAreaLinesCache.delete(cacheKey);
 
-      // 404 peut vouloir dire "pas de lignes pour cette stop_area"
-      if (isTransferBundleHttpStatus(error, 404)) {
-        return [];
-      }
-
-      // 429 / 5xx / timeout => non résolu, ne pas cacher comme []
-      return undefined;
+      // 404 is the only case where an empty array is a reliable answer. For 429,
+      // 5xx or network errors, return undefined so the bundle is not poisoned by
+      // a fake "no transfer" result.
+      return isTransferBundleHttpStatus(error, 404) ? [] : undefined;
     },
   );
 
@@ -2615,8 +2665,9 @@ export function createEmptyTransferBundleMap(
   );
 }
 
-export function listServerTransferBundles(): TransferBundleSummary[] {
+export async function listServerTransferBundles(): Promise<TransferBundleSummary[]> {
   trimTransferCache();
+  await hydrateServerTransferBundlesFromStorage();
 
   return Array.from(serverTransferBundles.values())
     .map((bundle) => ({
@@ -2635,7 +2686,7 @@ export function listServerTransferBundles(): TransferBundleSummary[] {
     .sort((left, right) => left.lineLabel.localeCompare(right.lineLabel, "fr"));
 }
 
-export function clearServerTransferBundles(): void {
+export async function clearServerTransferBundles(): Promise<void> {
   transferCache.clear();
   serverTransferBundles.clear();
   lineStopAreasCache.clear();
@@ -2643,10 +2694,17 @@ export function clearServerTransferBundles(): void {
   stopAreaLinesCache.clear();
   stopPointStructuralCache.clear();
   linePresentationCache.clear();
+
+  const storage = getTransferBundleStorage();
+
+  await storage.clear().catch(() => undefined);
 }
 
-export function deleteServerTransferBundle(id: string): void {
+export async function deleteServerTransferBundle(id: string): Promise<void> {
   serverTransferBundles.delete(id);
+  await getTransferBundleStorage()
+    .removeItem(createStoredTransferBundleKey(id))
+    .catch(() => undefined);
 
   Array.from(transferCache.entries()).forEach(([key, cached]) => {
     if (cached.bundleId === id) {
@@ -2655,9 +2713,11 @@ export function deleteServerTransferBundle(id: string): void {
   });
 }
 
-export function deleteServerTransferBundlesForLine(lineId: string): void {
+export async function deleteServerTransferBundlesForLine(lineId: string): Promise<void> {
   const normalizedLineId = lineId.trim().toLowerCase();
   const deletedBundleIds = new Set<string>();
+
+  await hydrateServerTransferBundlesFromStorage();
 
   Array.from(serverTransferBundles.entries()).forEach(([id, bundle]) => {
     if (bundle.lineId.trim().toLowerCase() === normalizedLineId) {
@@ -2666,6 +2726,14 @@ export function deleteServerTransferBundlesForLine(lineId: string): void {
     }
   });
 
+  await Promise.all(
+    Array.from(deletedBundleIds).map((id) =>
+      getTransferBundleStorage()
+        .removeItem(createStoredTransferBundleKey(id))
+        .catch(() => undefined),
+    ),
+  );
+
   Array.from(transferCache.entries()).forEach(([key, cached]) => {
     if (deletedBundleIds.has(cached.bundleId)) {
       transferCache.delete(key);
@@ -2673,21 +2741,20 @@ export function deleteServerTransferBundlesForLine(lineId: string): void {
   });
 }
 
-function saveServerTransferBundle(
+async function saveServerTransferBundle(
   body: NormalizedTransferBundleRequestBody,
   transferResolverMode: EffectiveTransferResolverMode,
   bundleId: string,
   transfersByStopAreaRef: Record<string, TransferLineOption[]>,
-): void {
-  const existing = serverTransferBundles.get(bundleId);
+): Promise<ServerTransferBundleRecord> {
+  const existing = await readServerTransferBundle(bundleId);
   const mergedTransfers = {
     ...(existing?.transfersByStopAreaRef ?? {}),
     ...transfersByStopAreaRef,
   };
   const now = Date.now();
   const updatedAt = new Date(now).toISOString();
-
-  serverTransferBundles.set(bundleId, {
+  const bundle: ServerTransferBundleRecord = {
     id: bundleId,
     lineId: body.lineId,
     lineLabel: body.lineLabel,
@@ -2702,16 +2769,146 @@ function saveServerTransferBundle(
     transferCount: countTransferLines(mergedTransfers),
     transferResolverMode,
     transfersByStopAreaRef: mergedTransfers,
-  });
+  };
+
+  serverTransferBundles.set(bundleId, bundle);
+  await writeServerTransferBundle(bundle);
+
+  return bundle;
 }
 
 function createServerTransferBundleId(
   lineId: string,
   transferResolverMode: EffectiveTransferResolverMode,
-  requestConcurrency: number,
   nearbyDistanceMeters: number,
 ): string {
-  return `${lineId.trim().toLowerCase()}::${transferResolverMode}::d${nearbyDistanceMeters}::c${requestConcurrency}`;
+  // Concurrency and spacing only affect how the bundle is built. They should not
+  // create a different cache key because the expected transfer content is identical.
+  return `${lineId.trim().toLowerCase()}::${transferResolverMode}::d${nearbyDistanceMeters}`;
+}
+
+function createTransferBundleResponseFromStoredBundle(
+  body: NormalizedTransferBundleRequestBody,
+  bundle: ServerTransferBundleRecord,
+  transfersByStopAreaRef: Record<string, TransferLineOption[]>,
+): TransferBundleResponse {
+  return {
+    version: 1,
+    generatedAt: bundle.generatedAt,
+    lineId: body.lineId,
+    lineLabel: body.lineLabel,
+    nearbyDistanceMeters: body.nearbyDistanceMeters,
+    requestConcurrency: body.requestConcurrency,
+    transferResolverMode: body.transferResolverMode,
+    transfersByStopAreaRef,
+  };
+}
+
+function getReusableTransferBundleEntries(
+  bundle: ServerTransferBundleRecord | undefined,
+  targets: TransferBundleTarget[],
+): Record<string, TransferLineOption[]> {
+  if (!bundle) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    targets.flatMap((target) =>
+      Object.prototype.hasOwnProperty.call(
+        bundle.transfersByStopAreaRef,
+        target.stopAreaRef,
+      )
+        ? [[target.stopAreaRef, bundle.transfersByStopAreaRef[target.stopAreaRef] ?? []]]
+        : [],
+    ),
+  );
+}
+
+async function readServerTransferBundle(
+  bundleId: string,
+  logger?: TransferBundleDebugLogger,
+): Promise<ServerTransferBundleRecord | undefined> {
+  const memoryBundle = serverTransferBundles.get(bundleId);
+
+  if (memoryBundle && !serverTransferBundleIsExpired(memoryBundle)) {
+    return memoryBundle;
+  }
+
+  if (memoryBundle) {
+    serverTransferBundles.delete(bundleId);
+  }
+
+  const storage = getTransferBundleStorage();
+  const storedBundle = await storage
+    .getItem(createStoredTransferBundleKey(bundleId))
+    .catch((error): ServerTransferBundleRecord | null => {
+      logTransferBundleDebug(logger, "warn", "storage:read-error", {
+        bundleId,
+        error: formatTransferBundleError(error),
+      });
+
+      return null;
+    });
+
+  if (!storedBundle) {
+    return undefined;
+  }
+
+  if (serverTransferBundleIsExpired(storedBundle)) {
+    await storage.removeItem(createStoredTransferBundleKey(bundleId)).catch(() => undefined);
+    return undefined;
+  }
+
+  serverTransferBundles.set(bundleId, storedBundle);
+
+  return storedBundle;
+}
+
+async function writeServerTransferBundle(
+  bundle: ServerTransferBundleRecord,
+): Promise<void> {
+  await getTransferBundleStorage()
+    .setItem(createStoredTransferBundleKey(bundle.id), bundle)
+    .catch((error) => {
+      console.warn("[transfer-bundles] storage:write-error", {
+        bundleId: bundle.id,
+        error: formatTransferBundleError(error),
+      });
+    });
+}
+
+async function hydrateServerTransferBundlesFromStorage(): Promise<void> {
+  const storage = getTransferBundleStorage();
+  const keys = await storage.getKeys().catch((): string[] => []);
+
+  await Promise.all(
+    keys.map(async (key) => {
+      const bundle = await storage.getItem(key).catch(() => null);
+
+      if (!bundle) {
+        return;
+      }
+
+      if (serverTransferBundleIsExpired(bundle)) {
+        await storage.removeItem(key).catch(() => undefined);
+        return;
+      }
+
+      serverTransferBundles.set(bundle.id, bundle);
+    }),
+  );
+}
+
+function getTransferBundleStorage() {
+  return useStorage<ServerTransferBundleRecord>(TRANSFER_BUNDLE_STORAGE_BASE);
+}
+
+function createStoredTransferBundleKey(bundleId: string): string {
+  return encodeURIComponent(bundleId);
+}
+
+function serverTransferBundleIsExpired(bundle: ServerTransferBundleRecord): boolean {
+  return Date.parse(bundle.expiresAt) <= Date.now();
 }
 
 function createTransferBundleDebugLogger(): TransferBundleDebugLogger {
