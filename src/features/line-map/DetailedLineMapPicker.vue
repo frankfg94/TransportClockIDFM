@@ -57,7 +57,7 @@ const VIEWBOX_HEIGHT = 620;
 const SVG_PADDING_X = 78;
 const SVG_PADDING_Y = 68;
 const MIN_ZOOM = 0.9;
-const MAX_ZOOM = 2.6;
+const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.22;
 
 const lineMap = ref<LineMapViewModel>();
@@ -481,7 +481,11 @@ function adjustZoom(delta: number): void {
   );
 }
 
-function zoomAtCanvasPoint(delta: number, clientX: number, clientY: number): void {
+function zoomAtCanvasPoint(
+  delta: number,
+  clientX: number,
+  clientY: number,
+): void {
   const canvas = mapCanvas.value;
 
   if (!canvas) {
@@ -540,7 +544,11 @@ function startMapDrag(event: PointerEvent): void {
 }
 
 function moveMapDrag(event: PointerEvent): void {
-  if (!mapDrag.active || event.pointerId !== mapDrag.pointerId || !mapCanvas.value) {
+  if (
+    !mapDrag.active ||
+    event.pointerId !== mapDrag.pointerId ||
+    !mapCanvas.value
+  ) {
     return;
   }
 
@@ -559,10 +567,7 @@ function moveMapDrag(event: PointerEvent): void {
 function stopMapDrag(event?: PointerEvent): void {
   const wasDragging = mapDrag.dragging;
 
-  if (
-    event &&
-    mapCanvas.value?.hasPointerCapture(event.pointerId)
-  ) {
+  if (event && mapCanvas.value?.hasPointerCapture(event.pointerId)) {
     mapCanvas.value.releasePointerCapture(event.pointerId);
   }
 
@@ -873,4 +878,3 @@ function getLabelPriority(
     </div>
   </div>
 </template>
-
