@@ -308,7 +308,7 @@ export async function createTransferBundleResponse(
 
     entries.forEach(([stopAreaRef, transfers]) => {
       if (transfers !== undefined) {
-        transfersByStopAreaRef[stopAreaRef] = transfers;
+        getCachedStopAreaLines;
       }
     });
 
@@ -429,9 +429,9 @@ function normalizeRequestSpacingMs(value: unknown): number {
 
   return Number.isFinite(numericValue)
     ? Math.min(
-        MAX_SERVER_REQUEST_SPACING_MS,
-        Math.max(DEFAULT_SERVER_REQUEST_SPACING_MS, Math.trunc(numericValue)),
-      )
+      MAX_SERVER_REQUEST_SPACING_MS,
+      Math.max(DEFAULT_SERVER_REQUEST_SPACING_MS, Math.trunc(numericValue)),
+    )
     : DEFAULT_SERVER_REQUEST_SPACING_MS;
 }
 
@@ -440,12 +440,12 @@ function normalizeNearbyDistanceMeters(value: unknown): number {
 
   return Number.isFinite(numericValue)
     ? Math.min(
-        MAX_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS,
-        Math.max(
-          MIN_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS,
-          Math.trunc(numericValue),
-        ),
-      )
+      MAX_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS,
+      Math.max(
+        MIN_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS,
+        Math.trunc(numericValue),
+      ),
+    )
     : DEFAULT_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS;
 }
 
@@ -505,16 +505,16 @@ async function getCachedTransfers(
   });
 
   const request = resolveNearbyTransfersForTarget(
-      target,
-      currentLineId,
-      currentLineLabel,
-      nearbyDistanceMeters,
-      requestConcurrency,
-      requestSpacingMs,
-      retentionDays,
-      fetcher,
-      logger,
-    )
+    target,
+    currentLineId,
+    currentLineLabel,
+    nearbyDistanceMeters,
+    requestConcurrency,
+    requestSpacingMs,
+    retentionDays,
+    fetcher,
+    logger,
+  )
     .then(async (transfers) => {
       logTransferBundleDebug(logger, transfers === undefined ? "warn" : "info", "resolver:done", {
         durationMs: Date.now() - targetStartedAt,
@@ -675,15 +675,15 @@ async function getCachedNavitiaLinePresentation(
     fetcher,
     logger,
   ).catch((error) => {
-      if (logger) {
-        logTransferBundleDebug(logger, "warn", "line-presentation:error", {
-          error: formatTransferBundleError(error),
-          lineId: normalizedLineId,
-        });
-      }
+    if (logger) {
+      logTransferBundleDebug(logger, "warn", "line-presentation:error", {
+        error: formatTransferBundleError(error),
+        lineId: normalizedLineId,
+      });
+    }
 
-      return undefined;
-    });
+    return undefined;
+  });
 
   linePresentationCache.set(cacheKey, {
     expiresAt: now + retentionDays * DAY_MS,
@@ -850,7 +850,7 @@ async function resolveTransferLinesForNearbyStopAreas(
   retentionDays: number,
   fetcher: typeof fetch,
   logger?: TransferBundleDebugLogger,
-): Promise<TransferLineOption[]> {
+): Promise<TransferLineOption[] | undefined> {
   const linesByStopArea = await mapBundleItemsWithConcurrency(
     nearbyStopAreas,
     Math.min(
@@ -864,9 +864,15 @@ async function resolveTransferLinesForNearbyStopAreas(
     async ({ stopArea }) =>
       getCachedStopAreaLines(stopArea.id ?? "", retentionDays, fetcher, logger),
   );
+
+  if (linesByStopArea.some((lines) => lines === undefined)) {
+    return undefined;
+  }
+
   const currentLineKey = normalizeBundleLineId(currentLineId);
+
   const transfers = linesByStopArea
-    .flat()
+    .flatMap((lines) => lines ?? [])
     .filter((line) => normalizeBundleLineId(line.id) !== currentLineKey)
     .map(mapNavitiaLineToTransferOption);
 
@@ -1264,7 +1270,7 @@ async function getCachedStopAreaLines(
   retentionDays: number,
   fetcher: typeof fetch,
   logger?: TransferBundleDebugLogger,
-): Promise<NavitiaLineForTransfer[]> {
+): Promise<NavitiaLineForTransfer[] | undefined> {
   if (!stopAreaRef) {
     return [];
   }
@@ -1274,26 +1280,25 @@ async function getCachedStopAreaLines(
   const cached = stopAreaLinesCache.get(cacheKey);
 
   if (cached && cached.expiresAt > now) {
-    logTransferBundleDebug(logger, "debug", "stop-area-lines:cache-hit", {
-      stopAreaRef,
-    });
-
     return cached.promise;
   }
 
-  logTransferBundleDebug(logger, "debug", "stop-area-lines:fetch", {
-    stopAreaRef,
-  });
-
   const request = fetchStopAreaLines(stopAreaRef, fetcher, logger).catch(
-    (error): NavitiaLineForTransfer[] => {
+    (error): NavitiaLineForTransfer[] | undefined => {
       logTransferBundleDebug(logger, "warn", "stop-area-lines:error", {
         error: formatTransferBundleError(error),
         stopAreaRef,
       });
+
       stopAreaLinesCache.delete(cacheKey);
 
-      return [];
+      // 404 peut vouloir dire "pas de lignes pour cette stop_area"
+      if (isTransferBundleHttpStatus(error, 404)) {
+        return [];
+      }
+
+      // 429 / 5xx / timeout => non résolu, ne pas cacher comme []
+      return undefined;
     },
   );
 
@@ -1670,12 +1675,12 @@ export async function fetchOfficialConnectionStopNames(
   const shouldResolveStopPoints = nearbyNames.length < 2;
   const stopPointNames = shouldResolveStopPoints
     ? await fetchStructuralConnectionStopPointNames(
-        unresolvedCandidates,
-        currentLineId,
-        fetcher,
-        logger,
-        requestSpacingMs,
-      )
+      unresolvedCandidates,
+      currentLineId,
+      fetcher,
+      logger,
+      requestSpacingMs,
+    )
     : [];
 
   if (!shouldResolveStopPoints) {
@@ -1810,7 +1815,7 @@ async function fetchPaginatedNavitiaCollection<
 
     const loadedCount =
       (pagination?.start_page ?? page) *
-        (pagination?.items_per_page ?? pageItems.length) +
+      (pagination?.items_per_page ?? pageItems.length) +
       (pagination?.items_on_page ?? pageItems.length);
 
     if (
@@ -1900,8 +1905,8 @@ async function fetchNearbyStructuralStopAreaNames(
   searchParams.append("type[]", "stop_area");
 
   const url = `${MARKETPLACE_NAVITIA_BASE}/stop_areas/${encodeURIComponent(
-      stopAreaRef,
-    )}/places_nearby?${searchParams}`;
+    stopAreaRef,
+  )}/places_nearby?${searchParams}`;
   logTransferBundleDebug(logger, "info", "nearby-structural:fetch", {
     officialConnectionNameCount: officialConnectionNames.length,
     stopAreaRef,

@@ -1026,12 +1026,6 @@ onUnmounted(() => {
               <span class="direction-filter-option__content">
                 <strong>{{ group.label }}</strong>
 
-                <small>
-                  <span v-if="group.subtitle">{{ group.subtitle }} · </span>
-                  {{ group.departures.length }} passage{{
-                    group.departures.length > 1 ? "s" : ""
-                  }}
-                </small>
               </span>
             </label>
           </div>
