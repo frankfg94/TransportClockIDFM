@@ -881,7 +881,27 @@ function resolveTargetStopAreaFromLine(
     }
   }
 
+  const targetNumericId = extractNetexNumericId(target.stopAreaRef);
+
+  if (targetNumericId) {
+    const stationByNumericId = stations.find((station) =>
+      [station.id, station.scheduleStopAreaRef]
+        .filter((value): value is string => typeof value === "string")
+        .some((value) => value.includes(targetNumericId)),
+    );
+
+    if (stationByNumericId) {
+      return stationByNumericId;
+    }
+  }
+
   return findMatchingLineStation(target, stations);
+}
+
+function extractNetexNumericId(value: string): string | undefined {
+  const match = value.trim().match(/^FR::[^:]+:(\d+):FR1$/u);
+
+  return match?.[1];
 }
 
 async function resolveTransferLinesForNearbyStopAreas(
@@ -1005,8 +1025,10 @@ function createStationOptionForTarget(
 function convertNetexStopPlaceRefToNavitiaStopAreaRef(
   stopAreaRef: string,
 ): string | undefined {
-  const match = stopAreaRef.match(
-    /^FR::(?:mono|multi)modalStopPlace:(\d+):FR1$/u,
+  const normalized = stopAreaRef.trim();
+
+  const match = normalized.match(
+    /^FR::(?:(?:mono|multi)(?:modal)?StopPlace|StopPlace):(\d+):FR1$/u,
   );
 
   return match?.[1] ? `stop_area:IDFM:${match[1]}` : undefined;
@@ -2654,7 +2676,17 @@ function compareBundleTransfers(
 }
 
 export function isSupportedTransferTargetRef(value: string): boolean {
-  return /^(stop_area:|FR::(?:Quay|StopPlace|mono(?:modal)?StopPlace|multi(?:modal)?StopPlace):)/u.test(value);
+  return isDirectTransferTargetRef(value) || isResolvableTransferTargetRef(value);
+}
+
+function isDirectTransferTargetRef(value: string): boolean {
+  return /^stop_area:/u.test(value.trim());
+}
+
+function isResolvableTransferTargetRef(value: string): boolean {
+  return /^FR::(?:Quay|StopPlace|mono(?:modal)?StopPlace|multi(?:modal)?StopPlace):/u.test(
+    value.trim(),
+  );
 }
 
 export function createEmptyTransferBundleMap(
