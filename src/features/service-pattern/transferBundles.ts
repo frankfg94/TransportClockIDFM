@@ -94,8 +94,9 @@ export interface TransferBundleClearOptions extends TransferBundleLocalCacheOpti
   transferResolverMode?: TransferResolverMode;
 }
 
-const TRANSFER_BUNDLE_STORAGE_KEY = "transport-clock.transfer-bundles.v13";
+const TRANSFER_BUNDLE_STORAGE_KEY = "transport-clock.transfer-bundles.v14";
 const LEGACY_TRANSFER_BUNDLE_STORAGE_KEYS = [
+  "transport-clock.transfer-bundles.v13",
   "transport-clock.transfer-bundles.v12",
   "transport-clock.transfer-bundles.v11",
   "transport-clock.transfer-bundles.v10",
@@ -194,6 +195,58 @@ export async function loadTransferBundleForPattern(
   return result.transfersByStopAreaRef;
 }
 
+function readReusableLocalTransferBundleEntries(params: {
+  lineId: string;
+  transferResolverMode: EffectiveTransferResolverMode;
+  requestConcurrency: number;
+  nearbyDistanceMeters: number;
+  targets: TransferBundleTarget[];
+  storage: TransferBundleStorage;
+}): Record<string, TransferLineOption[]> {
+  const id = createTransferBundleId(
+    params.lineId,
+    params.transferResolverMode,
+    params.nearbyDistanceMeters,
+  );
+  const store = readTransferBundleStore(params.storage);
+  const bundle = store.bundles.find((candidate) => candidate.id === id);
+
+  if (!bundle) {
+    return {};
+  }
+
+  // Only reuse entries explicitly present in the local bundle.
+  // An empty array is valid and means "resolved with no transfer".
+  // A missing key means "not resolved yet".
+  return Object.fromEntries(
+    params.targets.flatMap((target) =>
+      Object.prototype.hasOwnProperty.call(
+        bundle.transfersByStopAreaRef,
+        target.stopAreaRef,
+      )
+        ? [
+          [
+            target.stopAreaRef,
+            bundle.transfersByStopAreaRef[target.stopAreaRef] ?? [],
+          ],
+        ]
+        : [],
+    ),
+  );
+}
+
+function transferBundleMapHasRequestedTargets(
+  targets: TransferBundleTarget[],
+  transfersByStopAreaRef: Record<string, TransferLineOption[]>,
+): boolean {
+  return targets.every((target) =>
+    Object.prototype.hasOwnProperty.call(
+      transfersByStopAreaRef,
+      target.stopAreaRef,
+    ),
+  );
+}
+
 export async function loadTransferBundleResultForPattern(
   board: TransitBoardConfig,
   pattern: DepartureCallingPattern,
@@ -227,54 +280,49 @@ export async function loadTransferBundleResultForPattern(
   const requestSpacingMs = normalizeTransferBundleRequestSpacingMs(
     options.requestSpacingMs,
   );
-  const normalizedRetentionDays = normalizeTransferBundleRetentionDays(retentionDays);
   const nearbyDistanceMeters = normalizeTransferBundleNearbyDistanceMeters(
     options.nearbyDistanceMeters ??
     resolveTransferBundleNearbyDistanceMeters(
       options.transportType ?? board.line.mode,
     ),
   );
+
+  const storage =
+    options.localCacheEnabled === true
+      ? options.localCacheStorage ?? getBrowserStorage()
+      : undefined;
+
   const transfersByStopAreaRef: Record<string, TransferLineOption[]> = {};
-  const localCacheStorage = resolveLocalTransferBundleStorage(options);
-  const bundleId = createTransferBundleId(
-    lineId,
-    transferResolverMode,
-    nearbyDistanceMeters,
-  );
+
+  if (storage) {
+    pruneExpiredTransferBundles(storage);
+
+    Object.assign(
+      transfersByStopAreaRef,
+      readReusableLocalTransferBundleEntries({
+        lineId,
+        transferResolverMode,
+        requestConcurrency,
+        nearbyDistanceMeters,
+        targets,
+        storage,
+      }),
+    );
+  }
 
   reportBundleProgress(targets, transfersByStopAreaRef, options.onProgress);
 
-  if (localCacheStorage) {
-    const deletedLocalBundleIds = pruneExpiredTransferBundles(
-      localCacheStorage,
-      Date.now(),
-      normalizedRetentionDays,
-    );
-
-    // Keep the temporary browser cache and the backend cache in sync when the
-    // frontend is the first layer to notice that a bundle expired.
-    if (deletedLocalBundleIds.includes(bundleId)) {
-      void requestTransferBundleCacheDelete({ id: bundleId });
-    }
-
-    const localRecord = readCompleteLocalTransferBundle({
-      bundleId,
-      lineId,
-      nearbyDistanceMeters,
-      retentionDays: normalizedRetentionDays,
-      requestConcurrency,
-      storage: localCacheStorage,
-      targets,
-      transferResolverMode,
-    });
-
-    if (localRecord) {
-      Object.assign(transfersByStopAreaRef, localRecord.transfersByStopAreaRef);
-      reportBundleProgress(targets, transfersByStopAreaRef, options.onProgress);
-
-      return createBundleLoadResult(transfersByStopAreaRef, targets);
-    }
+  if (transferBundleMapHasRequestedTargets(targets, transfersByStopAreaRef)) {
+    return createBundleLoadResult(transfersByStopAreaRef, targets);
   }
+
+  const missingTargets = targets.filter(
+    (target) =>
+      !Object.prototype.hasOwnProperty.call(
+        transfersByStopAreaRef,
+        target.stopAreaRef,
+      ),
+  );
 
   try {
     const response = await fetchTransferBundle({
@@ -283,24 +331,33 @@ export async function loadTransferBundleResultForPattern(
       nearbyDistanceMeters,
       requestConcurrency,
       requestSpacingMs,
-      targets,
+      targets: missingTargets,
       transferResolverMode,
-      retentionDays: normalizedRetentionDays,
+      retentionDays,
     }).catch(() => undefined);
 
-    if (!response || !transferBundleResponseHasRequestedTarget(targets, response)) {
+    if (
+      !response ||
+      !transferBundleResponseHasRequestedTarget(missingTargets, response)
+    ) {
       return createBundleLoadResult(transfersByStopAreaRef, targets);
     }
 
     Object.assign(transfersByStopAreaRef, response.transfersByStopAreaRef);
 
-    if (localCacheStorage) {
-      // Saving partial backend responses is safe because reads require all
-      // requested target stop areas to be present before the local cache is used.
+    if (storage) {
       saveTransferBundle(
-        response,
-        normalizedRetentionDays,
-        localCacheStorage,
+        {
+          ...response,
+          lineId,
+          lineLabel,
+          nearbyDistanceMeters,
+          requestConcurrency,
+          transferResolverMode,
+          transfersByStopAreaRef,
+        },
+        retentionDays,
+        storage,
       );
     }
 

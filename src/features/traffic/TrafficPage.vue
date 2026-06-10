@@ -47,6 +47,8 @@ const configured = ref(true);
 const expandedLineRefs = ref(new Set<string>());
 const selectedTimingTabs = ref<Record<string, TrafficTimingTab>>({});
 const allLinesMode = ref(false);
+const scopeBurstKey = ref(0);
+const scopeBurstKind = ref<"optimized" | "all">("optimized");
 const { settings, updateSettings } = useAppSettings();
 
 const reportByLineRef = computed(
@@ -165,9 +167,16 @@ async function toggleAllLinesMode(): Promise<void> {
   }
 
   allLinesMode.value = nextMode;
+  triggerScopeBurst(nextMode);
+
   expandedLineRefs.value = new Set();
   selectedTimingTabs.value = {};
   void loadTraffic();
+}
+
+function triggerScopeBurst(nextMode: boolean): void {
+  scopeBurstKind.value = nextMode ? "all" : "optimized";
+  scopeBurstKey.value += 1;
 }
 
 async function ensureAllTrafficLinesLoaded(): Promise<boolean> {
@@ -232,7 +241,9 @@ function createActiveLineFromSearchOption(
     line: {
       ref: line.ref || line.navitiaId,
       shortName: line.label,
-      longName: line.displayName ?? `${formatFamilyDisplayName(line.family)} ${line.label}`,
+      longName:
+        line.displayName ??
+        `${formatFamilyDisplayName(line.family)} ${line.label}`,
       mode,
       color: line.color ?? presentation.color,
       textColor: line.textColor ?? presentation.textColor,
@@ -332,7 +343,8 @@ function compareTrafficLines(
   right: ActiveTrafficLine,
 ): number {
   const familyDelta =
-    getFamilyOrder(getFamilyLabel(left)) - getFamilyOrder(getFamilyLabel(right));
+    getFamilyOrder(getFamilyLabel(left)) -
+    getFamilyOrder(getFamilyLabel(right));
 
   if (familyDelta !== 0) {
     return familyDelta;
@@ -522,6 +534,17 @@ function normalizeText(value: string): string {
                     ? "Toutes les lignes"
                     : "Optimisé"
               }}</strong>
+
+              <Transition name="traffic-scope-burst">
+                <span
+                  v-if="scopeBurstKey > 0"
+                  :key="scopeBurstKey"
+                  class="traffic-scope-toggle__burst"
+                  aria-hidden="true"
+                >
+                  {{ scopeBurstKind === "all" ? "＋" : "✓" }}
+                </span>
+              </Transition>
             </button>
 
             <div class="traffic-style-control">
@@ -540,7 +563,10 @@ function normalizeText(value: string): string {
           {{ errorMessage }}
         </section>
 
-        <section v-else-if="allLinesError" class="traffic-state traffic-state--error">
+        <section
+          v-else-if="allLinesError"
+          class="traffic-state traffic-state--error"
+        >
           {{ allLinesError }}
         </section>
 
@@ -562,7 +588,11 @@ function normalizeText(value: string): string {
               <span>{{ group.label }}</span>
             </div>
 
-            <div class="traffic-ratp-lines">
+            <TransitionGroup
+              name="traffic-line-pop"
+              tag="div"
+              class="traffic-ratp-lines"
+            >
               <button
                 v-for="line in group.lines"
                 :key="line.navitiaLineRef"
@@ -597,7 +627,7 @@ function normalizeText(value: string): string {
                   </template>
                 </span>
               </button>
-            </div>
+            </TransitionGroup>
 
             <div class="traffic-ratp-row-details">
               <article
@@ -728,6 +758,17 @@ function normalizeText(value: string): string {
                   ? "Toutes les lignes"
                   : "Optimisé"
             }}</strong>
+
+            <Transition name="traffic-scope-burst">
+              <span
+                v-if="scopeBurstKey > 0"
+                :key="scopeBurstKey"
+                class="traffic-scope-toggle__burst"
+                aria-hidden="true"
+              >
+                {{ scopeBurstKind === "all" ? "＋" : "✓" }}
+              </span>
+            </Transition>
           </button>
 
           <div class="traffic-style-control traffic-style-control--cards">
@@ -766,7 +807,10 @@ function normalizeText(value: string): string {
         {{ errorMessage }}
       </section>
 
-      <section v-else-if="allLinesError" class="traffic-state traffic-state--error">
+      <section
+        v-else-if="allLinesError"
+        class="traffic-state traffic-state--error"
+      >
         {{ allLinesError }}
       </section>
 
@@ -793,7 +837,11 @@ function normalizeText(value: string): string {
             >
           </header>
 
-          <div class="traffic-line-grid">
+          <TransitionGroup
+            name="traffic-card-pop"
+            tag="div"
+            class="traffic-line-grid"
+          >
             <article
               v-for="line in group.lines"
               :key="line.navitiaLineRef"
@@ -906,7 +954,7 @@ function normalizeText(value: string): string {
                 </div>
               </Transition>
             </article>
-          </div>
+          </TransitionGroup>
         </article>
       </section>
     </template>
@@ -1020,7 +1068,39 @@ function normalizeText(value: string): string {
   flex: 0 0 auto;
   gap: 9px;
   min-height: 40px;
+  overflow: visible;
   padding: 0 13px;
+  position: relative;
+}
+
+.traffic-scope-toggle .traffic-scope-toggle__burst {
+  align-items: center;
+  background: rgba(17, 24, 39, 0.92);
+  border-radius: 999px;
+  color: #ffffff;
+  display: inline-flex;
+  font-size: 1.45rem;
+  font-weight: 950;
+  height: 42px;
+  justify-content: center;
+  left: 50%;
+  letter-spacing: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  text-transform: none;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.35);
+  width: 42px;
+  z-index: 10;
+}
+
+.traffic-scope-burst-enter-active {
+  animation: traffic-scope-burst 720ms ease-in forwards;
+}
+
+.traffic-scope-burst-leave-active {
+  display: none;
 }
 
 .traffic-scope-toggle:hover:not(:disabled) {
@@ -1146,6 +1226,7 @@ function normalizeText(value: string): string {
   flex-wrap: wrap;
   gap: 6px 9px;
   min-height: 46px;
+  position: relative;
 }
 
 .traffic-ratp-line {
@@ -1463,6 +1544,7 @@ function normalizeText(value: string): string {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  position: relative;
 }
 
 .traffic-line-card {
@@ -1727,6 +1809,67 @@ function normalizeText(value: string): string {
 
 .traffic-state--error {
   color: #b91c1c;
+}
+
+@keyframes traffic-scope-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.35);
+  }
+
+  18% {
+    opacity: 0.85;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(2.7);
+  }
+}
+
+.traffic-line-pop-move,
+.traffic-card-pop-move {
+  transition: transform 360ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.traffic-line-pop-enter-active,
+.traffic-line-pop-leave-active,
+.traffic-card-pop-enter-active,
+.traffic-card-pop-leave-active {
+  transition:
+    opacity 260ms ease,
+    transform 360ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.traffic-line-pop-enter-from,
+.traffic-card-pop-enter-from {
+  opacity: 0;
+  transform: scale(0.72);
+}
+
+.traffic-line-pop-leave-to,
+.traffic-card-pop-leave-to {
+  opacity: 0;
+  transform: scale(1.35);
+}
+
+.traffic-line-pop-leave-active,
+.traffic-card-pop-leave-active {
+  position: absolute;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .traffic-scope-burst-enter-active,
+  .traffic-line-pop-move,
+  .traffic-card-pop-move,
+  .traffic-line-pop-enter-active,
+  .traffic-line-pop-leave-active,
+  .traffic-card-pop-enter-active,
+  .traffic-card-pop-leave-active {
+    animation: none;
+    transition: none;
+  }
 }
 
 @keyframes traffic-spin {

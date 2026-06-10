@@ -213,6 +213,7 @@ const props = withDefaults(
     transferBundleRetentionDays?: number;
     transferBundleRequestConcurrency?: number;
     transferBundleRequestSpacingMs?: number;
+    transferBundleLocalCacheEnabled?: boolean;
     transportType?: string;
     transferResolverMode?: TransferResolverMode;
   }>(),
@@ -221,6 +222,7 @@ const props = withDefaults(
     compactMode: "auto",
     richTransferTooltips: true,
     reduceMotion: false,
+    transferBundleLocalCacheEnabled: true,
     transferBundleRetentionDays: 15,
     transferBundleRequestConcurrency: 1,
     transferBundleRequestSpacingMs: 0,
@@ -583,7 +585,15 @@ function departureTime(departure?: Departure): string | undefined {
 }
 
 watch(
-  [() => props.open, () => props.board, () => props.pattern],
+  [
+    () => props.open,
+    () => props.board?.id,
+    () => props.pattern?.departureId,
+    () => props.transportType,
+    () => props.transferResolverMode,
+    () => props.transferBundleRetentionDays,
+    () => props.transferBundleLocalCacheEnabled,
+  ],
   () => {
     void hydratePatternTransfers();
   },
