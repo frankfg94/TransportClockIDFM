@@ -1,5 +1,4 @@
 import { createError, defineEventHandler, readBody } from "h3";
-import { useStorage } from "nitropack/runtime";
 import { getServerIdfmApiKey } from "../services/idfm/resolveStopArea";
 import {
   createTransferLineOption,
@@ -21,6 +20,8 @@ import type {
   TransferBundleSummary,
   TransferBundleTarget,
 } from "../../src/features/service-pattern/transferBundles";
+
+declare const useStorage: typeof import("nitropack/runtime/internal/storage").useStorage;
 
 export interface TransferBundleRequestBody {
   /** Legacy clients may still send this; server-side bundle results are no longer cached by version. */
@@ -174,6 +175,14 @@ type ServerTransferBundleRecord = TransferBundleSummary & {
   transfersByStopAreaRef: Record<string, TransferLineOption[]>;
 };
 
+type TransferBundleStorageDriver = {
+  clear(): Promise<void>;
+  getItem(key: string): Promise<ServerTransferBundleRecord | null>;
+  getKeys(): Promise<string[]>;
+  removeItem(key: string): Promise<void>;
+  setItem(key: string, value: ServerTransferBundleRecord): Promise<void>;
+};
+
 type NearbyStopAreaCandidate = {
   distance: number;
   stopArea: NonNullable<NavitiaNearbyPlace["stop_area"]>;
@@ -214,6 +223,10 @@ const nearbyStopAreasCache = new Map<string, CachedNearbyStopAreasRequest>();
 const stopAreaLinesCache = new Map<string, CachedStopAreaLinesRequest>();
 const stopPointStructuralCache = new Map<string, CachedStopPointStructuralRequest>();
 const linePresentationCache = new Map<string, CachedLinePresentationRequest>();
+const fallbackTransferBundleStorage = new Map<
+  string,
+  ServerTransferBundleRecord
+>();
 
 const bundleTransferFamilyPriority: Record<TransitFamily, number> = {
   METRO: 0,
@@ -2931,8 +2944,30 @@ async function hydrateServerTransferBundlesFromStorage(): Promise<void> {
   );
 }
 
-function getTransferBundleStorage() {
-  return useStorage<ServerTransferBundleRecord>(TRANSFER_BUNDLE_STORAGE_BASE);
+function getTransferBundleStorage(): TransferBundleStorageDriver {
+  if (typeof useStorage === "function") {
+    return useStorage<ServerTransferBundleRecord>(
+      TRANSFER_BUNDLE_STORAGE_BASE,
+    ) as TransferBundleStorageDriver;
+  }
+
+  return {
+    async clear() {
+      fallbackTransferBundleStorage.clear();
+    },
+    async getItem(key) {
+      return fallbackTransferBundleStorage.get(key) ?? null;
+    },
+    async getKeys() {
+      return Array.from(fallbackTransferBundleStorage.keys());
+    },
+    async removeItem(key) {
+      fallbackTransferBundleStorage.delete(key);
+    },
+    async setItem(key, value) {
+      fallbackTransferBundleStorage.set(key, value);
+    },
+  };
 }
 
 function createStoredTransferBundleKey(bundleId: string): string {

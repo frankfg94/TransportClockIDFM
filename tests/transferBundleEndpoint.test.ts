@@ -12,7 +12,7 @@ import {
 
 describe("transfer bundle endpoint", () => {
   it("caches generated bundles on the Nuxt backend until the backend cache is cleared", async () => {
-    clearServerTransferBundles();
+    await clearServerTransferBundles();
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = decodeURIComponent(input.toString());
 
@@ -71,7 +71,7 @@ describe("transfer bundle endpoint", () => {
       { fetcher: fetcher as unknown as typeof fetch },
     );
 
-    expect(listServerTransferBundles()).toMatchObject([
+    expect(await listServerTransferBundles()).toMatchObject([
       {
         lineId: "line:IDFM:C01742",
         lineLabel: "RER A",
@@ -99,12 +99,12 @@ describe("transfer bundle endpoint", () => {
       ),
     ).toHaveLength(1);
 
-    clearServerTransferBundles();
-    expect(listServerTransferBundles()).toEqual([]);
+    await clearServerTransferBundles();
+    expect(await listServerTransferBundles()).toEqual([]);
   });
 
   it("uses the requested nearby radius in Navitia places_nearby calls", async () => {
-    clearServerTransferBundles();
+    await clearServerTransferBundles();
     const requestedUrls: string[] = [];
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = decodeURIComponent(input.toString());
@@ -145,7 +145,7 @@ describe("transfer bundle endpoint", () => {
         url.includes("/places_nearby?") && url.includes("distance=600"),
       ),
     ).toBe(true);
-    expect(listServerTransferBundles()[0]?.id).toContain("::d600::");
+    expect((await listServerTransferBundles())[0]?.id).toContain("::d600");
   });
 
   it("accepts stop-area and NeTEx stop-place refs produced by the cache", () => {

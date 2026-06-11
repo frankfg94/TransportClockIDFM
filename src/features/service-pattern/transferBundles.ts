@@ -124,6 +124,7 @@ const DEFAULT_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = 300;
 const DEFAULT_TRANSFER_BUNDLE_RETENTION_DAYS = 15;
 const MIN_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = 50;
 const MAX_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = 1_200;
+const MAX_TRANSFER_BUNDLE_BACKEND_PASSES = 24;
 export const TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS = {
   bus: 200,
   cable: 350,
@@ -401,7 +402,7 @@ export async function loadTransferBundleResultForPattern(
     return createBundleLoadResult(transfersByStopAreaRef, targets);
   }
 
-  const missingTargets = targets.filter(
+  let missingTargets = targets.filter(
     (target) =>
       !Object.prototype.hasOwnProperty.call(
         transfersByStopAreaRef,
@@ -409,93 +410,142 @@ export async function loadTransferBundleResultForPattern(
       ),
   );
 
-  logTransferBundleClientDebug("backend:request", {
-    frontendResolvedTargetCount: Object.keys(transfersByStopAreaRef).length,
-    lineId,
-    missingTargetCount: missingTargets.length,
-    missingTargets: missingTargets.slice(0, 20).map((target) => ({
-      label: target.label,
-      stopAreaRef: target.stopAreaRef,
-    })),
-    targetCount: targets.length,
-  });
-
   try {
-    const response = await fetchTransferBundle({
-      lineId,
-      lineLabel,
-      nearbyDistanceMeters,
-      requestConcurrency,
-      requestSpacingMs,
-      targets: missingTargets,
-      transferResolverMode,
-      retentionDays,
-    }).catch((error) => {
-      logTransferBundleClientDebug("backend:error", {
-        error: formatTransferBundleClientDebugError(error),
+    for (
+      let pass = 1;
+      missingTargets.length > 0 && pass <= MAX_TRANSFER_BUNDLE_BACKEND_PASSES;
+      pass += 1
+    ) {
+      logTransferBundleClientDebug("backend:request", {
+        frontendResolvedTargetCount: Object.keys(transfersByStopAreaRef).length,
         lineId,
         missingTargetCount: missingTargets.length,
+        missingTargets: missingTargets.slice(0, 20).map((target) => ({
+          label: target.label,
+          stopAreaRef: target.stopAreaRef,
+        })),
+        pass,
+        targetCount: targets.length,
       });
 
-      return undefined;
-    });
-
-    if (
-      !response ||
-      !transferBundleResponseHasRequestedTarget(missingTargets, response)
-    ) {
-      logTransferBundleClientDebug("backend:empty-or-incomplete", {
-        hasResponse: Boolean(response),
+      const response = await fetchTransferBundle({
         lineId,
-        returnedTargetCount: response
-          ? Object.keys(response.transfersByStopAreaRef).length
-          : 0,
-        requestedMissingTargetCount: missingTargets.length,
-      });
-
-      return createBundleLoadResult(transfersByStopAreaRef, targets);
-    }
-
-    Object.assign(transfersByStopAreaRef, response.transfersByStopAreaRef);
-
-    logTransferBundleClientDebug("backend:response", {
-      backendTargetCount: Object.keys(response.transfersByStopAreaRef).length,
-      complete: transferBundleMapHasRequestedTargets(
-        targets,
-        transfersByStopAreaRef,
-      ),
-      lineId,
-      targetCount: targets.length,
-      totalResolvedTargetCount: Object.keys(transfersByStopAreaRef).length,
-    });
-
-    if (storage) {
-      const savedBundle = saveTransferBundle(
-        {
-          ...response,
-          lineId,
-          lineLabel,
-          nearbyDistanceMeters,
-          requestConcurrency,
-          transferResolverMode,
-          transfersByStopAreaRef,
-        },
+        lineLabel,
+        nearbyDistanceMeters,
+        requestConcurrency,
+        requestSpacingMs,
+        targets: missingTargets,
+        transferResolverMode,
         retentionDays,
-        storage,
-      );
+      }).catch((error) => {
+        logTransferBundleClientDebug("backend:error", {
+          error: formatTransferBundleClientDebugError(error),
+          lineId,
+          missingTargetCount: missingTargets.length,
+          pass,
+        });
 
-      logTransferBundleClientDebug("local-cache:write", {
-        bundleId: savedBundle.id,
-        expiresAt: savedBundle.expiresAt,
-        stopAreaCount: Object.keys(savedBundle.transfersByStopAreaRef).length,
-        transferCount: Object.values(savedBundle.transfersByStopAreaRef).reduce(
-          (count, transfers) => count + transfers.length,
-          0,
-        ),
+        return undefined;
       });
+
+      if (
+        !response ||
+        !transferBundleResponseHasRequestedTarget(missingTargets, response)
+      ) {
+        logTransferBundleClientDebug("backend:no-progress", {
+          hasResponse: Boolean(response),
+          lineId,
+          pass,
+          returnedTargetCount: response
+            ? Object.keys(response.transfersByStopAreaRef).length
+            : 0,
+          requestedMissingTargetCount: missingTargets.length,
+        });
+
+        break;
+      }
+
+      const previousResolvedTargetCount = Object.keys(
+        transfersByStopAreaRef,
+      ).length;
+
+      Object.assign(transfersByStopAreaRef, response.transfersByStopAreaRef);
+
+      const resolvedTargetCount = Object.keys(transfersByStopAreaRef).length;
+      const addedTargetCount =
+        resolvedTargetCount - previousResolvedTargetCount;
+
+      logTransferBundleClientDebug("backend:response", {
+        addedTargetCount,
+        backendTargetCount: Object.keys(response.transfersByStopAreaRef).length,
+        complete: transferBundleMapHasRequestedTargets(
+          targets,
+          transfersByStopAreaRef,
+        ),
+        lineId,
+        pass,
+        targetCount: targets.length,
+        totalResolvedTargetCount: resolvedTargetCount,
+      });
+
+      if (storage) {
+        const savedBundle = saveTransferBundle(
+          {
+            ...response,
+            lineId,
+            lineLabel,
+            nearbyDistanceMeters,
+            requestConcurrency,
+            transferResolverMode,
+            transfersByStopAreaRef,
+          },
+          retentionDays,
+          storage,
+        );
+
+        logTransferBundleClientDebug("local-cache:write", {
+          bundleId: savedBundle.id,
+          expiresAt: savedBundle.expiresAt,
+          pass,
+          stopAreaCount: Object.keys(savedBundle.transfersByStopAreaRef).length,
+          transferCount: Object.values(savedBundle.transfersByStopAreaRef).reduce(
+            (count, transfers) => count + transfers.length,
+            0,
+          ),
+        });
+      }
+
+      reportBundleProgress(targets, transfersByStopAreaRef, options.onProgress);
+
+      if (addedTargetCount <= 0) {
+        logTransferBundleClientDebug("backend:no-progress", {
+          lineId,
+          missingTargetCount: missingTargets.length,
+          pass,
+        });
+        break;
+      }
+
+      missingTargets = targets.filter(
+        (target) =>
+          !Object.prototype.hasOwnProperty.call(
+            transfersByStopAreaRef,
+            target.stopAreaRef,
+          ),
+      );
     }
 
-    reportBundleProgress(targets, transfersByStopAreaRef, options.onProgress);
+    if (missingTargets.length > 0) {
+      logTransferBundleClientDebug("backend:passes-finished", {
+        complete: transferBundleMapHasRequestedTargets(
+          targets,
+          transfersByStopAreaRef,
+        ),
+        lineId,
+        missingTargetCount: missingTargets.length,
+        resolvedTargetCount: Object.keys(transfersByStopAreaRef).length,
+      });
+    }
   } catch (error) {
     logTransferBundleClientDebug("load:error", {
       error: formatTransferBundleClientDebugError(error),

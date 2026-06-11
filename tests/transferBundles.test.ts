@@ -189,7 +189,7 @@ describe("transfer bundles", () => {
     ]);
     expect(transfers["FR::Quay:missing:FR1"]).toBeUndefined();
     expect(listTransferBundles(storage)).toEqual([]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("does not persist a bundle response that contains none of the requested targets", async () => {
@@ -438,6 +438,96 @@ describe("transfer bundles", () => {
       21,
     );
     expect(result.complete).toBe(true);
+  });
+
+  it("progressively completes a Cloudflare-partial bundle and reuses it after refresh", async () => {
+    const storage = new MemoryStorage();
+    const calls = Array.from({ length: 21 }, (_, index) => ({
+      current: index === 0,
+      id: `call-${index}`,
+      label: `Station ${index}`,
+      served: true,
+      stopAreaRef: `FR::Quay:${50000000 + index}:FR1`,
+    }));
+    const pattern: DepartureCallingPattern = {
+      departureId: "metro-14",
+      destination: "Aeroport d'Orly",
+      serviceType: "omnibus",
+      calls,
+    };
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as {
+        targets: Array<{ stopAreaRef: string }>;
+      };
+      const resolvedTargets = payload.targets.slice(0, 6);
+
+      return new Response(
+        JSON.stringify({
+          version: 1,
+          generatedAt: "2026-06-11T10:00:00.000Z",
+          lineId: "line:IDFM:C01384",
+          lineLabel: "Ligne 14",
+          nearbyDistanceMeters: 450,
+          requestConcurrency: 1,
+          transferResolverMode: "nearby",
+          transfersByStopAreaRef: Object.fromEntries(
+            resolvedTargets.map((target) => [
+              target.stopAreaRef,
+              [{ id: "line:IDFM:C01371", label: "1" }],
+            ]),
+          ),
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    });
+
+    vi.stubGlobal("window", { localStorage: storage });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const board = createBoard("line:IDFM:C01384", "Ligne 14", "metro");
+    const firstLoad = await loadTransferBundleResultForPattern(
+      board,
+      pattern,
+      15,
+      {
+        localCacheEnabled: true,
+        localCacheStorage: storage,
+        transferResolverMode: "nearby",
+      },
+    );
+
+    expect(firstLoad.complete).toBe(true);
+    expect(Object.keys(firstLoad.transfersByStopAreaRef)).toHaveLength(21);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(
+      fetchMock.mock.calls.map((call) =>
+        JSON.parse(String(call[1]?.body)).targets.length,
+      ),
+    ).toEqual([21, 15, 9, 3]);
+    expect(listTransferBundles(storage)).toMatchObject([
+      {
+        lineId: "line:IDFM:C01384",
+        stopAreaCount: 21,
+      },
+    ]);
+
+    const refreshedLoad = await loadTransferBundleResultForPattern(
+      board,
+      pattern,
+      15,
+      {
+        localCacheEnabled: true,
+        localCacheStorage: storage,
+        transferResolverMode: "nearby",
+      },
+    );
+
+    expect(refreshedLoad.complete).toBe(true);
+    expect(Object.keys(refreshedLoad.transfersByStopAreaRef)).toHaveLength(21);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("sends the configured request spacing to the transfer bundle endpoint", async () => {
