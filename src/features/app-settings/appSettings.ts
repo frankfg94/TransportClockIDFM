@@ -55,6 +55,8 @@ export interface AppSettings {
   wakeDeviceOnAlarm: boolean;
   // Browser-side cache layer used before the backend bundle fallback.
   transferBundleLocalCacheEnabled: boolean;
+  // Nuxt-side bundle cache shared by successive transfer requests.
+  transferBundleBackendCacheEnabled: boolean;
   navigationAutoHide: NavigationAutoHide;
   reduceMotion: boolean;
   compactLinePlanMode: CompactLinePlanMode;
@@ -209,6 +211,7 @@ export function createDefaultAppSettings(): AppSettings {
     transferResolverMode: "auto",
     // Enabled by default to use a frontend cache only if possible
     transferBundleLocalCacheEnabled: true,
+    transferBundleBackendCacheEnabled: true,
     transferBundleRetentionDays: 15,
     transferBundleRequestConcurrency: 1,
     transferBundleRequestSpacingMs: 0,
@@ -284,6 +287,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     transferBundleLocalCacheEnabled: readBoolean(
       value.transferBundleLocalCacheEnabled,
       defaults.transferBundleLocalCacheEnabled,
+    ),
+    transferBundleBackendCacheEnabled: readBoolean(
+      value.transferBundleBackendCacheEnabled,
+      defaults.transferBundleBackendCacheEnabled,
     ),
     transferBundleRetentionDays: parseTransferBundleRetentionDays(
       value.transferBundleRetentionDays,

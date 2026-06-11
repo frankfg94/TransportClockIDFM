@@ -214,6 +214,7 @@ const props = withDefaults(
     transferBundleRequestConcurrency?: number;
     transferBundleRequestSpacingMs?: number;
     transferBundleLocalCacheEnabled?: boolean;
+    transferBundleBackendCacheEnabled?: boolean;
     transportType?: string;
     transferResolverMode?: TransferResolverMode;
   }>(),
@@ -223,6 +224,7 @@ const props = withDefaults(
     richTransferTooltips: true,
     reduceMotion: false,
     transferBundleLocalCacheEnabled: true,
+    transferBundleBackendCacheEnabled: true,
     transferBundleRetentionDays: 15,
     transferBundleRequestConcurrency: 1,
     transferBundleRequestSpacingMs: 0,
@@ -593,6 +595,7 @@ watch(
     () => props.transferResolverMode,
     () => props.transferBundleRetentionDays,
     () => props.transferBundleLocalCacheEnabled,
+    () => props.transferBundleBackendCacheEnabled,
   ],
   () => {
     void hydratePatternTransfers();
@@ -647,6 +650,7 @@ async function hydratePatternTransfers(): Promise<void> {
           }
         },
         localCacheEnabled: props.transferBundleLocalCacheEnabled,
+        backendCacheEnabled: props.transferBundleBackendCacheEnabled,
         retentionDays: props.transferBundleRetentionDays,
         transferBundleRequestConcurrency:
           props.transferBundleRequestConcurrency,

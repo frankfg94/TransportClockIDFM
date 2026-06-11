@@ -26,6 +26,7 @@ declare const useStorage: typeof import("nitropack/runtime/internal/storage").us
 export interface TransferBundleRequestBody {
   /** Legacy clients may still send this; server-side bundle results are no longer cached by version. */
   cacheBust?: string;
+  backendCacheEnabled?: boolean;
   lineId?: string;
   lineLabel?: string;
   nearbyDistanceMeters?: number;
@@ -266,6 +267,7 @@ export async function createTransferBundleResponse(
     );
 
     logTransferBundleDebug(logger, "info", "request:start", {
+      backendCacheEnabled: body.backendCacheEnabled,
       bundleId,
       hasFetcher: Boolean(fetcher),
       lineId: body.lineId,
@@ -279,9 +281,15 @@ export async function createTransferBundleResponse(
       targets: body.targets.map((target) => summarizeTransferTarget(target)),
     });
 
-    trimTransferCache();
+    if (body.backendCacheEnabled) {
+      trimTransferCache();
+    } else {
+      clearTransferResolutionRuntimeCaches();
+    }
 
-    const existingBundle = await readServerTransferBundle(bundleId, logger);
+    const existingBundle = body.backendCacheEnabled
+      ? await readServerTransferBundle(bundleId, logger)
+      : undefined;
     const reusableTransfersByStopAreaRef = getReusableTransferBundleEntries(
       existingBundle,
       body.targets,
@@ -333,6 +341,10 @@ export async function createTransferBundleResponse(
       MAX_SERVER_TRANSFER_TARGETS_PER_INVOCATION,
     );
     let savedBundle = existingBundle;
+    const uncachedTransfersByStopAreaRef: Record<
+      string,
+      TransferLineOption[]
+    > = {};
 
     logTransferBundleDebug(logger, "info", "bundle:batch", {
       batchTargetCount: invocationTargets.length,
@@ -381,21 +393,48 @@ export async function createTransferBundleResponse(
       // undefined means that the target was not reliably resolved, usually due to
       // a transient upstream failure. [] is different: it means "resolved, but no transfers".
       if (transfers !== undefined) {
-        savedBundle = await saveServerTransferBundle(
-          body,
-          body.transferResolverMode,
-          bundleId,
-          {
-            [target.stopAreaRef]: transfers,
-          },
-        );
+        if (body.backendCacheEnabled) {
+          savedBundle = await saveServerTransferBundle(
+            body,
+            body.transferResolverMode,
+            bundleId,
+            {
+              [target.stopAreaRef]: transfers,
+            },
+          );
 
-        logTransferBundleDebug(logger, "info", "target:persisted", {
-          bundleId,
-          persistedTargetCount: savedBundle.stopAreaCount,
-          target: summarizeTransferTarget(target),
-        });
+          logTransferBundleDebug(logger, "info", "target:persisted", {
+            bundleId,
+            persistedTargetCount: savedBundle.stopAreaCount,
+            target: summarizeTransferTarget(target),
+          });
+        } else {
+          uncachedTransfersByStopAreaRef[target.stopAreaRef] = transfers;
+        }
       }
+    }
+
+    if (!body.backendCacheEnabled) {
+      clearTransferResolutionRuntimeCaches();
+
+      logTransferBundleDebug(logger, "info", "request:done-uncached", {
+        durationMs: Date.now() - logger.startedAt,
+        bundleId,
+        resolvedTargetCount: Object.keys(uncachedTransfersByStopAreaRef).length,
+        targetCount: body.targets.length,
+        transferCount: countTransferLines(uncachedTransfersByStopAreaRef),
+      });
+
+      return {
+        version: 1,
+        generatedAt: new Date().toISOString(),
+        lineId: body.lineId,
+        lineLabel: body.lineLabel,
+        nearbyDistanceMeters: body.nearbyDistanceMeters,
+        requestConcurrency: body.requestConcurrency,
+        transferResolverMode: body.transferResolverMode,
+        transfersByStopAreaRef: uncachedTransfersByStopAreaRef,
+      };
     }
 
     savedBundle ??= await saveServerTransferBundle(
@@ -445,6 +484,7 @@ function normalizeRequestBody(
   const retentionDays = normalizeRetentionDays(body.retentionDays);
   const requestConcurrency = normalizeRequestConcurrency(body.requestConcurrency);
   const requestSpacingMs = normalizeRequestSpacingMs(body.requestSpacingMs);
+  const backendCacheEnabled = body.backendCacheEnabled !== false;
   const nearbyDistanceMeters = normalizeNearbyDistanceMeters(
     body.nearbyDistanceMeters,
   );
@@ -462,6 +502,7 @@ function normalizeRequestBody(
   }
 
   return {
+    backendCacheEnabled,
     lineId,
     lineLabel,
     nearbyDistanceMeters,
@@ -3311,4 +3352,13 @@ function trimTransferCache(): void {
       linePresentationCache.delete(key);
     }
   });
+}
+
+function clearTransferResolutionRuntimeCaches(): void {
+  transferCache.clear();
+  lineStopAreasCache.clear();
+  nearbyStopAreasCache.clear();
+  stopAreaLinesCache.clear();
+  stopPointStructuralCache.clear();
+  linePresentationCache.clear();
 }

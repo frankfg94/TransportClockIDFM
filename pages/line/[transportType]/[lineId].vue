@@ -48,6 +48,9 @@
       :transfer-bundle-local-cache-enabled="
         settings.transferBundleLocalCacheEnabled
       "
+      :transfer-bundle-backend-cache-enabled="
+        settings.transferBundleBackendCacheEnabled
+      "
       :transport-type="transferBundleTransportType"
       :transfer-resolver-mode="settings.transferResolverMode"
       @close="navigateHome"

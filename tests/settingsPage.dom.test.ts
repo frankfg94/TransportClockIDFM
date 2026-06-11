@@ -46,6 +46,7 @@ describe("SettingsPage", () => {
 
     expect(wrapper.text()).toContain("Personnalisation du dashboard");
     expect(wrapper.text()).toContain("Expiration des bundles");
+    expect(wrapper.text()).toContain("Activer le cache backend");
     expect(wrapper.text()).toContain("15 jours");
     expect(wrapper.text()).toContain("Chargement des correspondances");
     expect(wrapper.text()).toContain("Auto");
@@ -76,6 +77,18 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Afficher la minimap");
     expect(wrapper.text()).toContain("Wake lock");
     expect(wrapper.text()).toContain("Masquer la navigation");
+
+    const backendCacheToggle = wrapper
+      .findAll("label.settings-toggle")
+      .find((label) => label.text().includes("Activer le cache backend"));
+
+    expect(backendCacheToggle?.text()).not.toContain(
+      "Le chargement des correspondances sera très lent",
+    );
+    await backendCacheToggle?.find("input").setValue(false);
+    expect(backendCacheToggle?.text()).toContain(
+      "Le chargement des correspondances sera très lent tant que le cache backend est désactivé.",
+    );
   });
 
   it("shows a temporary notification after clearing bundles or resetting settings", async () => {

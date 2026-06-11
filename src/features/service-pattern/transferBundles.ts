@@ -177,6 +177,7 @@ export async function loadTransferBundleForPattern(
   pattern: DepartureCallingPattern,
   retentionDays: number,
   options: {
+    backendCacheEnabled?: boolean;
     localCacheEnabled?: boolean;
     localCacheStorage?: TransferBundleStorage;
     nearbyDistanceMeters?: number;
@@ -296,6 +297,7 @@ export async function loadTransferBundleResultForPattern(
   pattern: DepartureCallingPattern,
   retentionDays: number,
   options: {
+    backendCacheEnabled?: boolean;
     localCacheEnabled?: boolean;
     localCacheStorage?: TransferBundleStorage;
     nearbyDistanceMeters?: number;
@@ -429,6 +431,7 @@ export async function loadTransferBundleResultForPattern(
       });
 
       const response = await fetchTransferBundle({
+        backendCacheEnabled: options.backendCacheEnabled !== false,
         lineId,
         lineLabel,
         nearbyDistanceMeters,
@@ -621,6 +624,7 @@ function normalizeTransferBundleTransportType(
 }
 
 function fetchTransferBundle(payload: {
+  backendCacheEnabled: boolean;
   lineId: string;
   lineLabel: string;
   nearbyDistanceMeters: number;
@@ -643,6 +647,7 @@ function fetchTransferBundle(payload: {
   }
 
   logTransferBundleClientDebug("backend:fetch-start", {
+    backendCacheEnabled: payload.backendCacheEnabled,
     lineId: payload.lineId,
     nearbyDistanceMeters: payload.nearbyDistanceMeters,
     requestConcurrency: payload.requestConcurrency,
@@ -745,6 +750,7 @@ async function waitForTransferBundleLaunchSlot(
 }
 
 function createTransferBundleRequestKey(payload: {
+  backendCacheEnabled: boolean;
   lineId: string;
   nearbyDistanceMeters: number;
   requestConcurrency: number;
@@ -754,6 +760,7 @@ function createTransferBundleRequestKey(payload: {
   transferResolverMode: EffectiveTransferResolverMode;
 }): string {
   return JSON.stringify({
+    backendCacheEnabled: payload.backendCacheEnabled,
     lineId: payload.lineId,
     nearbyDistanceMeters: payload.nearbyDistanceMeters,
     requestConcurrency: payload.requestConcurrency,

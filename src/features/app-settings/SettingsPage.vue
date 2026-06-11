@@ -356,10 +356,40 @@ onBeforeUnmount(() => {
         />
         <span></span>
         <div>
-          <strong>Cache navigateur des bundles</strong>
+          <strong>Activer le cache navigateur</strong>
           <small>
             Utilise localStorage avant le cache backend pour éviter de
             recalculer les correspondances après un reload sur Cloudflare Pages.
+          </small>
+        </div>
+      </label>
+
+      <label class="settings-toggle">
+        <input
+          type="checkbox"
+          :checked="settings.transferBundleBackendCacheEnabled"
+          @change="
+            updateSettings({
+              transferBundleBackendCacheEnabled: (
+                $event.target as HTMLInputElement
+              ).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>Activer le cache backend</strong>
+          <small>
+            Conserve les bundles de correspondances dans le cache serveur Nuxt
+            entre deux chargements.
+          </small>
+          <small
+            v-if="!settings.transferBundleBackendCacheEnabled"
+            class="settings-inline-warning"
+            role="alert"
+          >
+            Le chargement des correspondances sera très lent tant que le cache
+            backend est désactivé.
           </small>
         </div>
       </label>
@@ -938,7 +968,7 @@ onBeforeUnmount(() => {
   margin-top: 4px;
 }
 
-.settings-inline-warning {
+.settings-toggle .settings-inline-warning {
   background: #fff7ed;
   border: 1px solid rgba(234, 88, 12, 0.2);
   border-radius: 8px;

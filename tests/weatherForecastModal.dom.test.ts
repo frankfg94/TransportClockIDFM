@@ -18,6 +18,8 @@ const baseSettings: AppSettings = {
   trafficInfoDesign: "ratp",
   trafficInfoDefaultScope: "optimized",
   transferResolverMode: "auto",
+  transferBundleBackendCacheEnabled: true,
+  transferBundleLocalCacheEnabled: true,
   transferBundleRetentionDays: 15,
   transferBundleRequestConcurrency: 1,
   transferBundleRequestSpacingMs: 0,

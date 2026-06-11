@@ -1157,6 +1157,9 @@ onBeforeUnmount(() => {
         :transfer-bundle-local-cache-enabled="
           settings.transferBundleLocalCacheEnabled
         "
+        :transfer-bundle-backend-cache-enabled="
+          settings.transferBundleBackendCacheEnabled
+        "
         :transfer-resolver-mode="settings.transferResolverMode"
         @close="closePatternModal"
       />

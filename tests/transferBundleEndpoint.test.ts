@@ -166,6 +166,61 @@ describe("transfer bundle endpoint", () => {
     expect(fetcher).toHaveBeenCalledTimes(fetchCountAfterCompletion);
   });
 
+  it("bypasses backend bundle and runtime caches when disabled", async () => {
+    await clearServerTransferBundles();
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = decodeURIComponent(input.toString());
+
+      if (url.includes("/lines/line:IDFM:C01384/stop_areas?")) {
+        return jsonResponse({
+          stop_areas: [
+            {
+              id: "stop_area:IDFM:A",
+              label: "Station A",
+              name: "Station A",
+            },
+          ],
+        });
+      }
+
+      if (url.includes("/places_nearby?")) {
+        return jsonResponse({ places_nearby: [] });
+      }
+
+      return jsonResponse({ lines: [] });
+    });
+    const request = {
+      backendCacheEnabled: false,
+      lineId: "line:IDFM:C01384",
+      lineLabel: "Métro 14",
+      nearbyDistanceMeters: 450,
+      targets: [{ label: "Station A", stopAreaRef: "stop_area:IDFM:A" }],
+      transferResolverMode: "nearby" as const,
+    };
+
+    const first = await createTransferBundleResponse(request, {
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+    const second = await createTransferBundleResponse(request, {
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+
+    expect(Object.keys(first.transfersByStopAreaRef)).toEqual([
+      "stop_area:IDFM:A",
+    ]);
+    expect(Object.keys(second.transfersByStopAreaRef)).toEqual([
+      "stop_area:IDFM:A",
+    ]);
+    expect(
+      fetcher.mock.calls.filter((call) =>
+        decodeURIComponent(String(call[0])).includes(
+          "/lines/line:IDFM:C01384/stop_areas?",
+        ),
+      ),
+    ).toHaveLength(2);
+    expect(await listServerTransferBundles()).toEqual([]);
+  });
+
   it("merges concurrent backend progress without losing resolved stations", async () => {
     await clearServerTransferBundles();
     const targets = [

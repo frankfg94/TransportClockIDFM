@@ -27,6 +27,8 @@ describe("app settings", () => {
       trafficInfoDesign: "ratp",
       trafficInfoDefaultScope: "optimized",
       transferResolverMode: "auto",
+      transferBundleBackendCacheEnabled: true,
+      transferBundleLocalCacheEnabled: true,
       transferBundleRetentionDays: 15,
       transferBundleRequestConcurrency: 1,
       transferBundleRequestSpacingMs: 0,
@@ -54,6 +56,7 @@ describe("app settings", () => {
       trafficInfoDesign: "dense",
       trafficInfoDefaultScope: "everything",
       transferResolverMode: "telepathy",
+      transferBundleBackendCacheEnabled: "no",
       transferBundleRetentionDays: "999",
       transferBundleRequestConcurrency: "999",
       transferBundleRequestSpacingMs: "999999",
@@ -78,6 +81,7 @@ describe("app settings", () => {
     expect(settings.trafficInfoDesign).toBe("ratp");
     expect(settings.trafficInfoDefaultScope).toBe("optimized");
     expect(settings.transferResolverMode).toBe("auto");
+    expect(settings.transferBundleBackendCacheEnabled).toBe(true);
     expect(settings.transferBundleRetentionDays).toBe(15);
     expect(settings.transferBundleRequestConcurrency).toBe(1);
     expect(settings.transferBundleRequestSpacingMs).toBe(0);
