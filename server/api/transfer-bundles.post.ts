@@ -191,6 +191,7 @@ type NearbyStopAreaCandidate = {
 const MARKETPLACE_NAVITIA_BASE =
   "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia";
 const MAX_TRANSFER_TARGETS = 96;
+const MAX_SERVER_TRANSFER_TARGETS_PER_INVOCATION = 4;
 const DEFAULT_SERVER_TARGET_CONCURRENCY = 1;
 const DEFAULT_SERVER_REQUEST_SPACING_MS = 0;
 const MAX_SERVER_REQUEST_SPACING_MS = 2_000;
@@ -218,6 +219,7 @@ const TRANSFER_BUNDLE_STORAGE_BASE = "transfer-bundles";
 
 const transferCache = new Map<string, CachedTransferRequest>();
 const serverTransferBundles = new Map<string, ServerTransferBundleRecord>();
+const serverTransferBundleWriteQueues = new Map<string, Promise<void>>();
 const lineStopAreasCache = new Map<string, CachedLineStopAreasRequest>();
 const nearbyStopAreasCache = new Map<string, CachedNearbyStopAreasRequest>();
 const stopAreaLinesCache = new Map<string, CachedStopAreaLinesRequest>();
@@ -326,66 +328,95 @@ export async function createTransferBundleResponse(
       });
     }
 
-    const transfersByStopAreaRef: Record<string, TransferLineOption[]> = {
-      ...reusableTransfersByStopAreaRef,
-    };
+    const invocationTargets = missingTargets.slice(
+      0,
+      MAX_SERVER_TRANSFER_TARGETS_PER_INVOCATION,
+    );
+    let savedBundle = existingBundle;
 
-    const entries = await mapBundleItemsWithConcurrency(
-      missingTargets,
-      body.requestConcurrency,
-      body.requestSpacingMs,
-      async (target, index) => {
-        logTransferBundleDebug(logger, "info", "target:queued", {
-          index,
-          target: summarizeTransferTarget(target),
-        });
+    logTransferBundleDebug(logger, "info", "bundle:batch", {
+      batchTargetCount: invocationTargets.length,
+      bundleId,
+      deferredTargetCount: Math.max(
+        0,
+        missingTargets.length - invocationTargets.length,
+      ),
+      missingTargetCount: missingTargets.length,
+    });
 
-        const transfers = await getCachedTransfers(
-          target,
-          body.lineId,
-          body.lineLabel,
-          body.nearbyDistanceMeters,
-          body.requestConcurrency,
-          body.requestSpacingMs,
-          body.retentionDays,
-          bundleId,
-          fetcher,
-          logger,
-        );
+    for (const [index, target] of invocationTargets.entries()) {
+      if (index > 0 && body.requestSpacingMs > 0) {
+        await waitForTransferBundleRetry(body.requestSpacingMs);
+      }
 
-        logTransferBundleDebug(logger, transfers === undefined ? "warn" : "info", "target:resolved", {
+      logTransferBundleDebug(logger, "info", "target:queued", {
+        index,
+        target: summarizeTransferTarget(target),
+      });
+
+      const transfers = await getCachedTransfers(
+        target,
+        body.lineId,
+        body.lineLabel,
+        body.nearbyDistanceMeters,
+        body.requestConcurrency,
+        body.requestSpacingMs,
+        body.retentionDays,
+        bundleId,
+        fetcher,
+        logger,
+      );
+
+      logTransferBundleDebug(
+        logger,
+        transfers === undefined ? "warn" : "info",
+        "target:resolved",
+        {
           index,
           target: summarizeTransferTarget(target),
           transfers: summarizeTransferLines(transfers),
-        });
+        },
+      );
 
-        return [target.stopAreaRef, transfers] as const;
-      },
-    );
-
-    entries.forEach(([stopAreaRef, transfers]) => {
       // undefined means that the target was not reliably resolved, usually due to
       // a transient upstream failure. [] is different: it means "resolved, but no transfers".
       if (transfers !== undefined) {
-        transfersByStopAreaRef[stopAreaRef] = transfers;
-      }
-    });
+        savedBundle = await saveServerTransferBundle(
+          body,
+          body.transferResolverMode,
+          bundleId,
+          {
+            [target.stopAreaRef]: transfers,
+          },
+        );
 
-    const savedBundle = await saveServerTransferBundle(
+        logTransferBundleDebug(logger, "info", "target:persisted", {
+          bundleId,
+          persistedTargetCount: savedBundle.stopAreaCount,
+          target: summarizeTransferTarget(target),
+        });
+      }
+    }
+
+    savedBundle ??= await saveServerTransferBundle(
       body,
       body.transferResolverMode,
       bundleId,
-      transfersByStopAreaRef,
+      {},
     );
     trimTransferCache();
 
     logTransferBundleDebug(logger, "info", "request:done", {
       durationMs: Date.now() - logger.startedAt,
       bundleId,
+      deferredTargetCount: Math.max(
+        0,
+        missingTargets.length - invocationTargets.length,
+      ),
       missingTargetCount: missingTargets.length,
-      resolvedTargetCount: Object.keys(transfersByStopAreaRef).length,
+      resolvedTargetCount: savedBundle.stopAreaCount,
       targetCount: body.targets.length,
-      transferCount: countTransferLines(transfersByStopAreaRef),
+      transferCount: savedBundle.transferCount,
     });
 
     return createTransferBundleResponseFromStoredBundle(
@@ -2792,34 +2823,61 @@ async function saveServerTransferBundle(
   bundleId: string,
   transfersByStopAreaRef: Record<string, TransferLineOption[]>,
 ): Promise<ServerTransferBundleRecord> {
-  const existing = await readServerTransferBundle(bundleId);
-  const mergedTransfers = {
-    ...(existing?.transfersByStopAreaRef ?? {}),
-    ...transfersByStopAreaRef,
-  };
-  const now = Date.now();
-  const updatedAt = new Date(now).toISOString();
-  const bundle: ServerTransferBundleRecord = {
-    id: bundleId,
-    lineId: body.lineId,
-    lineLabel: body.lineLabel,
-    generatedAt: existing?.generatedAt ?? updatedAt,
-    createdAt: existing?.createdAt ?? updatedAt,
-    updatedAt,
-    expiresAt: new Date(now + body.retentionDays * DAY_MS).toISOString(),
-    retentionDays: body.retentionDays,
-    requestConcurrency: body.requestConcurrency,
-    nearbyDistanceMeters: body.nearbyDistanceMeters,
-    stopAreaCount: Object.keys(mergedTransfers).length,
-    transferCount: countTransferLines(mergedTransfers),
-    transferResolverMode,
-    transfersByStopAreaRef: mergedTransfers,
-  };
+  return queueServerTransferBundleWrite(bundleId, async () => {
+    const existing = await readServerTransferBundle(bundleId);
+    const mergedTransfers = {
+      ...(existing?.transfersByStopAreaRef ?? {}),
+      ...transfersByStopAreaRef,
+    };
+    const now = Date.now();
+    const updatedAt = new Date(now).toISOString();
+    const bundle: ServerTransferBundleRecord = {
+      id: bundleId,
+      lineId: body.lineId,
+      lineLabel: body.lineLabel,
+      generatedAt: existing?.generatedAt ?? updatedAt,
+      createdAt: existing?.createdAt ?? updatedAt,
+      updatedAt,
+      expiresAt: new Date(now + body.retentionDays * DAY_MS).toISOString(),
+      retentionDays: body.retentionDays,
+      requestConcurrency: body.requestConcurrency,
+      nearbyDistanceMeters: body.nearbyDistanceMeters,
+      stopAreaCount: Object.keys(mergedTransfers).length,
+      transferCount: countTransferLines(mergedTransfers),
+      transferResolverMode,
+      transfersByStopAreaRef: mergedTransfers,
+    };
 
-  serverTransferBundles.set(bundleId, bundle);
-  await writeServerTransferBundle(bundle);
+    serverTransferBundles.set(bundleId, bundle);
+    await writeServerTransferBundle(bundle);
 
-  return bundle;
+    return bundle;
+  });
+}
+
+async function queueServerTransferBundleWrite<TResult>(
+  bundleId: string,
+  write: () => Promise<TResult>,
+): Promise<TResult> {
+  const previousWrite =
+    serverTransferBundleWriteQueues.get(bundleId) ?? Promise.resolve();
+  let result!: TResult;
+  const currentWrite = previousWrite
+    .catch(() => undefined)
+    .then(async () => {
+      result = await write();
+    });
+
+  serverTransferBundleWriteQueues.set(bundleId, currentWrite);
+
+  try {
+    await currentWrite;
+    return result;
+  } finally {
+    if (serverTransferBundleWriteQueues.get(bundleId) === currentWrite) {
+      serverTransferBundleWriteQueues.delete(bundleId);
+    }
+  }
 }
 
 function createServerTransferBundleId(

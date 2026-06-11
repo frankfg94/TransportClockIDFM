@@ -103,6 +103,122 @@ describe("transfer bundle endpoint", () => {
     expect(await listServerTransferBundles()).toEqual([]);
   });
 
+  it("progressively completes a backend bundle across bounded invocations", async () => {
+    await clearServerTransferBundles();
+    const targets = Array.from({ length: 9 }, (_, index) => ({
+      label: `Station ${index}`,
+      stopAreaRef: `stop_area:IDFM:S${index}`,
+    }));
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = decodeURIComponent(input.toString());
+
+      if (url.includes("/lines/line:IDFM:C01384/stop_areas?")) {
+        return jsonResponse({
+          stop_areas: targets.map((target) => ({
+            id: target.stopAreaRef,
+            label: target.label,
+            name: target.label,
+          })),
+        });
+      }
+
+      if (url.includes("/places_nearby?")) {
+        return jsonResponse({ places_nearby: [] });
+      }
+
+      return jsonResponse({ lines: [] });
+    });
+    const request = {
+      lineId: "line:IDFM:C01384",
+      lineLabel: "Métro 14",
+      nearbyDistanceMeters: 450,
+      targets,
+      transferResolverMode: "nearby" as const,
+    };
+
+    const first = await createTransferBundleResponse(request, {
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+
+    expect(Object.keys(first.transfersByStopAreaRef)).toHaveLength(4);
+    expect((await listServerTransferBundles())[0]?.stopAreaCount).toBe(4);
+
+    const second = await createTransferBundleResponse(request, {
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+
+    expect(Object.keys(second.transfersByStopAreaRef)).toHaveLength(8);
+    expect((await listServerTransferBundles())[0]?.stopAreaCount).toBe(8);
+
+    const third = await createTransferBundleResponse(request, {
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+    const fetchCountAfterCompletion = fetcher.mock.calls.length;
+
+    expect(Object.keys(third.transfersByStopAreaRef)).toHaveLength(9);
+    expect((await listServerTransferBundles())[0]?.stopAreaCount).toBe(9);
+
+    const cached = await createTransferBundleResponse(request, {
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+
+    expect(Object.keys(cached.transfersByStopAreaRef)).toHaveLength(9);
+    expect(fetcher).toHaveBeenCalledTimes(fetchCountAfterCompletion);
+  });
+
+  it("merges concurrent backend progress without losing resolved stations", async () => {
+    await clearServerTransferBundles();
+    const targets = [
+      { label: "Station A", stopAreaRef: "stop_area:IDFM:A" },
+      { label: "Station B", stopAreaRef: "stop_area:IDFM:B" },
+    ];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = decodeURIComponent(input.toString());
+
+      if (url.includes("/lines/line:IDFM:C01727/stop_areas?")) {
+        return jsonResponse({
+          stop_areas: targets.map((target) => ({
+            id: target.stopAreaRef,
+            label: target.label,
+            name: target.label,
+          })),
+        });
+      }
+
+      if (url.includes("/places_nearby?")) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return jsonResponse({ places_nearby: [] });
+      }
+
+      return jsonResponse({ lines: [] });
+    });
+    const requestBase = {
+      lineId: "line:IDFM:C01727",
+      lineLabel: "RER B",
+      nearbyDistanceMeters: 600,
+      transferResolverMode: "nearby" as const,
+    };
+
+    await Promise.all(
+      targets.map((target) =>
+        createTransferBundleResponse(
+          {
+            ...requestBase,
+            targets: [target],
+          },
+          { fetcher: fetcher as unknown as typeof fetch },
+        ),
+      ),
+    );
+
+    expect(await listServerTransferBundles()).toMatchObject([
+      {
+        lineId: "line:IDFM:C01727",
+        stopAreaCount: 2,
+      },
+    ]);
+  });
+
   it("uses the requested nearby radius in Navitia places_nearby calls", async () => {
     await clearServerTransferBundles();
     const requestedUrls: string[] = [];
