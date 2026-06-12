@@ -37,6 +37,7 @@ import {
 } from "./patternTransfers";
 import { clearTransferBundleForBoard } from "./transferBundles";
 import {
+  filterDuplicateBusTransfers,
   isBusLikeTransfer,
   isVisiblePatternPlanTransfer,
 } from "./transferVisibility";
@@ -845,6 +846,7 @@ function createPatternFlow(
   const nodes = graph.nodes.map((node) => {
     const position = topology.positions.get(node.id) ?? { x: 0, y: 0 };
     const isBranchEnd = node.degree <= 1;
+    const visibleTransfers = filterDuplicateBusTransfers(node.transfers);
 
     return {
       id: node.id,
@@ -871,9 +873,11 @@ function createPatternFlow(
         branchChip: fullLine
           ? undefined
           : getBranchChip(node, activeTerminalIds, departureTimeLabel),
-        busTransfers: node.transfers.filter(isBusTransfer),
-        nonBusTransfers: node.transfers.filter(isVisiblePatternPlanTransfer),
-        transferGroups: createTransferGroups(node.transfers),
+        busTransfers: visibleTransfers.filter(isBusTransfer),
+        nonBusTransfers: visibleTransfers.filter(
+          isVisiblePatternPlanTransfer,
+        ),
+        transferGroups: createTransferGroups(visibleTransfers),
       },
     } satisfies PatternFlowNode;
   });
