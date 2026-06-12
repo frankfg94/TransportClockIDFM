@@ -20,6 +20,7 @@ import { createLinePresentation } from "./linePresentation";
 import {
   createTransferLineOption,
   dedupeTransferLineOptions,
+  normalizeTransferLineId,
 } from "./transferLineOptions";
 
 type SiriTextValue =
@@ -543,6 +544,7 @@ export async function fetchStationTransfers(
   currentLineId?: string,
   options: NavitiaRequestOptions = {},
 ): Promise<TransferLineOption[]> {
+  const normalizedCurrentLineId = normalizeTransferLineId(currentLineId);
   const stopAreaRef = station.scheduleStopAreaRef ?? station.id;
   const stopAreaRefs = await resolveTransferStopAreaRefs(
     station,
@@ -561,7 +563,11 @@ export async function fetchStationTransfers(
 
   return dedupeTransferOptions(
     dedupeLines(lines)
-      .filter((line) => line.id !== currentLineId)
+      .filter(
+        (line) =>
+          !normalizedCurrentLineId ||
+          normalizeTransferLineId(line.id) !== normalizedCurrentLineId,
+      )
       .map(mapLineToTransferOption),
   ).sort(compareTransferLines);
 }

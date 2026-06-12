@@ -12,7 +12,7 @@ type LineIconLike = {
   iconUrls?: string[];
   label?: string;
   longName?: string;
-  mode?: TransitMode;
+  mode?: TransitMode | string;
   ref?: string;
   shortName?: string;
   textColor?: string;
@@ -30,12 +30,20 @@ const displayLabel = computed(
 const resolvedFamily = computed(
   () => props.line.family ?? transitModeToFamily(props.line.mode),
 );
+const resolvedMode = computed<TransitMode | undefined>(() => {
+  const mode = props.line.mode;
+
+  return mode &&
+    ["tram", "rer", "metro", "bus", "train"].includes(mode)
+    ? (mode as TransitMode)
+    : undefined;
+});
 const generatedIconUrls = computed(() =>
   createRatpLineIconUrls({
     code: displayLabel.value,
     family: resolvedFamily.value,
     id: props.line.id,
-    mode: props.line.mode,
+    mode: resolvedMode.value,
     ref: props.line.ref,
   }),
 );

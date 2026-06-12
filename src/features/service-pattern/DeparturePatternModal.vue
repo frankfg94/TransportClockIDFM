@@ -7,7 +7,6 @@ import {
   nextTick,
   onBeforeUnmount,
   onMounted,
-  reactive,
   ref,
   watch,
 } from "vue";
@@ -15,12 +14,13 @@ import { Handle, Position, VueFlow } from "@vue-flow/core";
 import type { Edge, Node } from "@vue-flow/core";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import MaterialCombobox from "../../components/MaterialCombobox.vue";
+import StationTransferDetails from "../../components/StationTransferDetails.vue";
+import { transitModeToFamily } from "../../services/linePresentation";
 import { Controls } from "@vue-flow/controls";
 import { Expand, Minimize2, SlidersHorizontal } from "lucide-vue-next";
 import PatternFlowMiniMap from "./PatternFlowMiniMap.vue";
 import {
   createPatternStationKey as createStationKey,
-  normalizePatternStationName as normalizeStationName,
   patternStationKeysAreCompatible as stationKeysAreCompatible,
 } from "./stationKeys";
 import {
@@ -37,11 +37,12 @@ import {
 } from "./patternTransfers";
 import { clearTransferBundleForBoard } from "./transferBundles";
 import {
+  filterCurrentLineTransfers,
   filterDuplicateBusTransfers,
   isBusLikeTransfer,
   isVisiblePatternPlanTransfer,
+  type CurrentLineIdentity,
 } from "./transferVisibility";
-import { loadTransferLineDirections } from "../line-map/lineMapData";
 import type { TransferResolverMode } from "./transferResolverMode";
 import type { HealthCheck, HealthResponse } from "../health/types";
 
@@ -80,45 +81,10 @@ interface PatternStationNodeData {
   branchChip?: string;
   busTransfers: TransferLineOption[];
   nonBusTransfers: TransferLineOption[];
-  transferGroups: PatternTransferGroup[];
-}
-
-interface PatternTransferGroup {
-  key: string;
-  label: string;
-  countLabel: string;
-  iconLabel: string;
   transfers: TransferLineOption[];
 }
 
-interface TransferDirectionState {
-  loading: boolean;
-  directions: string[];
-  error?: boolean;
-}
-
 type PatternCompactMode = "auto" | "comfort" | "compact";
-
-const TRANSFER_GROUP_ORDER = [
-  "METRO",
-  "RER",
-  "TRANSILIEN",
-  "TRAM",
-  "BUS",
-  "OTHER",
-] as const;
-
-const TRANSFER_GROUP_METADATA: Record<
-  (typeof TRANSFER_GROUP_ORDER)[number],
-  { label: string; iconLabel: string }
-> = {
-  METRO: { label: "Métro", iconLabel: "M" },
-  RER: { label: "RER", iconLabel: "RER" },
-  TRANSILIEN: { label: "Train", iconLabel: "TER" },
-  TRAM: { label: "Tram", iconLabel: "T" },
-  BUS: { label: "Bus", iconLabel: "BUS" },
-  OTHER: { label: "Autres correspondances", iconLabel: "+" },
-};
 
 interface PatternGraphNode {
   id: string;
@@ -258,10 +224,6 @@ const transferHydrationProgress = ref<PatternTransferHydrationProgress>({
 const transferHydrationRetryVisible = ref(false);
 const transferHydrationRateLimited = ref(false);
 const activeStationTooltipKey = ref<string>();
-const activeTransfer = ref<TransferLineOption>();
-const transferDirectionStates = reactive<
-  Record<string, TransferDirectionState>
->({});
 let transferHydrationRequest = 0;
 let transferHydrationRateLimitTimer: number | undefined;
 let transferHydrationStalledTimer: number | undefined;
@@ -343,11 +305,19 @@ const currentLayoutOptions = computed(() =>
   createPatternLayoutOptions(isCompactPatternFlow.value),
 );
 const shouldZoomOnWheel = computed(() => Boolean(props.wheelZoom));
-const activeTransferDirectionState = computed(() =>
-  activeTransfer.value
-    ? transferDirectionStates[activeTransfer.value.id]
-    : undefined,
-);
+const currentLineIdentity = computed<CurrentLineIdentity | undefined>(() => {
+  const board = props.board;
+
+  if (!board) {
+    return undefined;
+  }
+
+  return {
+    family: transitModeToFamily(board.line.mode),
+    ids: [board.schedule?.lineRef, board.line.ref, props.departure?.lineRef],
+    labels: [board.line.shortName, board.line.longName],
+  };
+});
 const flowModel = computed(() =>
   createPatternFlow(
     displayPattern.value?.calls ?? [],
@@ -355,6 +325,7 @@ const flowModel = computed(() =>
     departureClock.value,
     isCompactPatternFlow.value,
     isFullLineMode.value,
+    currentLineIdentity.value,
   ),
 );
 const patternFlowKey = computed(
@@ -786,7 +757,11 @@ function healthCheckIndicatesRateLimit(check: HealthCheck): boolean {
   const numericRemaining =
     remaining === undefined || remaining === "" ? undefined : Number(remaining);
 
-  if (Number.isFinite(numericRemaining) && numericRemaining <= 0) {
+  if (
+    numericRemaining !== undefined &&
+    Number.isFinite(numericRemaining) &&
+    numericRemaining <= 0
+  ) {
     return true;
   }
 
@@ -829,6 +804,7 @@ function createPatternFlow(
   departureTimeLabel: string,
   compact: boolean,
   fullLine: boolean,
+  currentLine?: CurrentLineIdentity,
 ): PatternFlowModel {
   const layout = createPatternLayoutOptions(compact);
   const graph = buildPatternGraph(calls, lineTopology, fullLine);
@@ -846,7 +822,9 @@ function createPatternFlow(
   const nodes = graph.nodes.map((node) => {
     const position = topology.positions.get(node.id) ?? { x: 0, y: 0 };
     const isBranchEnd = node.degree <= 1;
-    const visibleTransfers = filterDuplicateBusTransfers(node.transfers);
+    const visibleTransfers = filterDuplicateBusTransfers(
+      filterCurrentLineTransfers(node.transfers, currentLine),
+    );
 
     return {
       id: node.id,
@@ -877,7 +855,7 @@ function createPatternFlow(
         nonBusTransfers: visibleTransfers.filter(
           isVisiblePatternPlanTransfer,
         ),
-        transferGroups: createTransferGroups(visibleTransfers),
+        transfers: visibleTransfers,
       },
     } satisfies PatternFlowNode;
   });
@@ -2549,22 +2527,10 @@ function isBusTransfer(transfer: TransferLineOption): boolean {
   return isBusLikeTransfer(transfer);
 }
 
-function showTransferDetails(transfer: TransferLineOption): void {
-  activeTransfer.value = transfer;
-
-  if (isBusTransfer(transfer)) {
-    void loadTransferDirections(transfer);
-  }
-}
-
 function showStationTooltip(stationKey: string): void {
   if (stationTooltipHideTimer !== undefined) {
     window.clearTimeout(stationTooltipHideTimer);
     stationTooltipHideTimer = undefined;
-  }
-
-  if (activeStationTooltipKey.value !== stationKey) {
-    activeTransfer.value = undefined;
   }
 
   activeStationTooltipKey.value = stationKey;
@@ -2578,104 +2544,10 @@ function scheduleHideStationTooltip(stationKey: string): void {
   stationTooltipHideTimer = window.setTimeout(() => {
     if (activeStationTooltipKey.value === stationKey) {
       activeStationTooltipKey.value = undefined;
-      activeTransfer.value = undefined;
     }
 
     stationTooltipHideTimer = undefined;
   }, 500);
-}
-
-async function loadTransferDirections(
-  transfer: TransferLineOption,
-): Promise<void> {
-  if (transferDirectionStates[transfer.id]) {
-    return;
-  }
-
-  transferDirectionStates[transfer.id] = {
-    loading: true,
-    directions: [],
-  };
-
-  try {
-    const result = await loadTransferLineDirections(transfer.id);
-
-    transferDirectionStates[transfer.id] = {
-      loading: false,
-      directions: result.directions,
-    };
-  } catch {
-    transferDirectionStates[transfer.id] = {
-      loading: false,
-      directions: [],
-      error: true,
-    };
-  }
-}
-
-function getTransferDetailTitle(transfer: TransferLineOption): string {
-  const family = getTransferFamilyKey(transfer);
-  const label = TRANSFER_GROUP_METADATA[family].label;
-
-  return `${label} ${transfer.label}`.trim();
-}
-
-function createTransferGroups(
-  transfers: TransferLineOption[],
-): PatternTransferGroup[] {
-  const groups = new Map<string, TransferLineOption[]>();
-
-  transfers.forEach((transfer) => {
-    const key = getTransferFamilyKey(transfer);
-    const group = groups.get(key) ?? [];
-
-    group.push(transfer);
-    groups.set(key, group);
-  });
-
-  return TRANSFER_GROUP_ORDER.flatMap((key) => {
-    const groupTransfers = groups.get(key);
-
-    if (!groupTransfers || groupTransfers.length === 0) {
-      return [];
-    }
-
-    const metadata = TRANSFER_GROUP_METADATA[key];
-
-    return [
-      {
-        key,
-        label: metadata.label,
-        countLabel:
-          groupTransfers.length > 1
-            ? `${groupTransfers.length} lignes`
-            : "1 ligne",
-        iconLabel: metadata.iconLabel,
-        transfers: groupTransfers,
-      },
-    ];
-  });
-}
-
-function getTransferFamilyKey(
-  transfer: TransferLineOption,
-): (typeof TRANSFER_GROUP_ORDER)[number] {
-  if (transfer.family === "METRO") return "METRO";
-  if (transfer.family === "RER") return "RER";
-  if (transfer.family === "TRANSILIEN") return "TRANSILIEN";
-  if (transfer.family === "TRAM") return "TRAM";
-  if (transfer.family === "BUS" || transfer.family === "NOCTILIEN")
-    return "BUS";
-
-  const mode = normalizeStationName(transfer.mode ?? "");
-
-  if (mode.includes("metro")) return "METRO";
-  if (mode.includes("rer")) return "RER";
-  if (mode.includes("tram")) return "TRAM";
-  if (mode.includes("bus") || mode.includes("noctilien")) return "BUS";
-  if (mode.includes("train") || mode.includes("rail")) return "TRANSILIEN";
-
-  return "OTHER";
 }
 
 function getNodeDistanceKm(
@@ -3073,106 +2945,19 @@ onBeforeUnmount(() => {
                         <Transition name="pattern-flow-tooltip-open" appear>
                           <article
                             v-if="
-                              data.transferGroups.length > 0 &&
+                              data.transfers.length > 0 &&
                               activeStationTooltipKey === data.key
                             "
                             class="pattern-flow-station__transfer-tooltip"
                             role="tooltip"
                           >
-                            <header
-                              class="pattern-flow-station__tooltip-header"
-                            >
-                              <div>
-                                <strong>{{ data.label }}</strong>
-                                <small>Correspondances</small>
-                              </div>
-                            </header>
-                            <section
-                              v-for="group in data.transferGroups"
-                              :key="`${data.key}-transfer-group-${group.key}`"
-                              class="pattern-flow-station__transfer-group"
-                            >
-                              <div
-                                class="pattern-flow-station__transfer-group-title"
-                              >
-                                <span aria-hidden="true">{{
-                                  group.iconLabel
-                                }}</span>
-                                <strong>{{ group.label }}</strong>
-                                <small>{{ group.countLabel }}</small>
-                              </div>
-                              <div class="pattern-flow-station__transfer-list">
-                                <span
-                                  v-for="transfer in group.transfers"
-                                  :key="`${data.key}-${group.key}-${transfer.id}-${transfer.label}`"
-                                  class="pattern-flow-station__transfer-item"
-                                  :class="{
-                                    'pattern-flow-station__transfer-item--active':
-                                      activeTransfer?.id === transfer.id,
-                                  }"
-                                  role="button"
-                                  tabindex="0"
-                                  @focus="showTransferDetails(transfer)"
-                                  @mouseenter="showTransferDetails(transfer)"
-                                >
-                                  <LineIconBadge
-                                    class="pattern-flow-station__transfer"
-                                    :line="transfer"
-                                    compact
-                                  />
-                                </span>
-                              </div>
-                            </section>
-                            <aside
-                              v-if="richTransferTooltips && activeTransfer"
-                              class="pattern-flow-station__transfer-detail"
-                            >
-                              <strong>{{
-                                getTransferDetailTitle(activeTransfer)
-                              }}</strong>
-                              <span
-                                v-if="isBusTransfer(activeTransfer)"
-                                class="pattern-flow-station__transfer-detail-kicker"
-                              >
-                                Directions possibles
-                              </span>
-                              <span
-                                v-if="
-                                  isBusTransfer(activeTransfer) &&
-                                  activeTransferDirectionState?.loading
-                                "
-                                class="pattern-flow-station__transfer-detail-muted"
-                              >
-                                Chargement...
-                              </span>
-                              <span
-                                v-else-if="
-                                  isBusTransfer(activeTransfer) &&
-                                  activeTransferDirectionState?.directions
-                                    .length
-                                "
-                                class="pattern-flow-station__transfer-directions"
-                              >
-                                <span
-                                  v-for="direction in activeTransferDirectionState.directions"
-                                  :key="`${activeTransfer.id}-${direction}`"
-                                >
-                                  {{ direction }}
-                                </span>
-                              </span>
-                              <span
-                                v-else-if="isBusTransfer(activeTransfer)"
-                                class="pattern-flow-station__transfer-detail-muted"
-                              >
-                                Directions indisponibles
-                              </span>
-                              <span
-                                v-else
-                                class="pattern-flow-station__transfer-detail-muted"
-                              >
-                                {{ activeTransfer.label }}
-                              </span>
-                            </aside>
+                            <StationTransferDetails
+                              :station-label="data.label"
+                              :city="data.city"
+                              :transfers="data.transfers"
+                              :rich-details="richTransferTooltips"
+                              :line-color="board?.line.color ?? '#0064ff'"
+                            />
                           </article>
                         </Transition>
                       </div>

@@ -152,20 +152,20 @@ function familyToDisplayMode(family: TransitFamily): string {
   return "Bus";
 }
 
-function normalizeTransferLineId(value?: string): string | undefined {
+export function normalizeTransferLineId(value?: string): string | undefined {
   const trimmed = value?.trim();
 
   if (!trimmed) {
     return undefined;
   }
 
-  if (trimmed.startsWith("line:")) {
-    return trimmed;
-  }
-
   const idfmMatch = trimmed.match(/C\d{5}/iu)?.[0];
 
-  return idfmMatch ? `line:IDFM:${idfmMatch.toUpperCase()}` : undefined;
+  if (idfmMatch) {
+    return `line:IDFM:${idfmMatch.toUpperCase()}`;
+  }
+
+  return trimmed.toLowerCase().startsWith("line:") ? trimmed : undefined;
 }
 
 function normalizeTransferLabel(value?: string): string {

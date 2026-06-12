@@ -18,6 +18,8 @@ import {
 } from "./features/traffic";
 import { fetchBoardDepartures } from "./services/idfm";
 import {
+  TRANSIT_PREFERENCES_CHANGED_EVENT,
+  TRANSIT_PREFERENCES_STORAGE_KEY,
   createDefaultPreferences,
   loadTransitPreferences,
   saveTransitPreferences,
@@ -959,6 +961,29 @@ function formatAlarmRemaining(alarm: DepartureAlarm, now: number): string {
   return restMinutes ? `${hours} h ${restMinutes}` : `${hours} h`;
 }
 
+function syncTransitPreferences(event?: Event): void {
+  if (
+    event instanceof StorageEvent &&
+    event.key !== null &&
+    event.key !== TRANSIT_PREFERENCES_STORAGE_KEY
+  ) {
+    return;
+  }
+
+  const previousVisibleIds = new Set(preferences.visibleBoardIds);
+  const nextPreferences = loadTransitPreferences(transitBoards);
+
+  Object.assign(preferences, nextPreferences);
+
+  visibleBoards.value.forEach((board) => {
+    ensureBoardState(board.id);
+
+    if (!previousVisibleIds.has(board.id)) {
+      void refreshBoard(board.id);
+    }
+  });
+}
+
 onMounted(() => {
   Object.assign(preferences, loadTransitPreferences(transitBoards));
   departureAlarms.value = loadDepartureAlarms();
@@ -966,6 +991,11 @@ onMounted(() => {
   pageVisible.value = isPageVisible();
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("focus", refreshOnReturn);
+  window.addEventListener("storage", syncTransitPreferences);
+  window.addEventListener(
+    TRANSIT_PREFERENCES_CHANGED_EVENT,
+    syncTransitPreferences,
+  );
   clockTimer = window.setInterval(() => {
     nowTick.value = Date.now();
   }, 1000);
@@ -991,6 +1021,11 @@ onBeforeUnmount(() => {
   stopSoftAlarm();
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   window.removeEventListener("focus", refreshOnReturn);
+  window.removeEventListener("storage", syncTransitPreferences);
+  window.removeEventListener(
+    TRANSIT_PREFERENCES_CHANGED_EVENT,
+    syncTransitPreferences,
+  );
 });
 </script>
 

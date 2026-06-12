@@ -1,26 +1,5 @@
 <template>
   <main class="line-pattern-page">
-    <nav
-      v-if="activeView === 'map'"
-      class="line-pattern-page__view-tabs line-pattern-page__view-tabs--map"
-      aria-label="Changer de vue du plan"
-    >
-      <button
-        type="button"
-        :aria-pressed="activeView === 'schema'"
-        @click="changeView('schema')"
-      >
-        Schéma
-      </button>
-      <button
-        type="button"
-        :aria-pressed="activeView === 'map'"
-        @click="changeView('map')"
-      >
-        Carte
-      </button>
-    </nav>
-
     <DeparturePatternModal
       v-if="activeView === 'schema'"
       embedded
@@ -85,7 +64,29 @@
         mode="explorer"
         :line="lineMapLine"
         :selectable="false"
-      />
+      >
+        <template #bar-before-stats>
+          <nav
+            class="line-pattern-page__view-tabs line-pattern-page__view-tabs--map"
+            aria-label="Changer de vue du plan"
+          >
+            <button
+              type="button"
+              :aria-pressed="activeView === 'schema'"
+              @click.stop="changeView('schema')"
+            >
+              Schéma
+            </button>
+            <button
+              type="button"
+              :aria-pressed="activeView === 'map'"
+              @click.stop="changeView('map')"
+            >
+              Carte
+            </button>
+          </nav>
+        </template>
+      </DetailedLineMapPicker>
 
       <div v-else class="line-pattern-page__fallback" aria-live="polite">
         <p class="eyebrow">Carte de ligne</p>
@@ -367,10 +368,7 @@ onBeforeUnmount(() => {
 }
 
 .line-pattern-page__view-tabs--map {
-  position: fixed;
-  right: 22px;
-  top: 18px;
-  z-index: 40;
+  box-shadow: none;
 }
 
 .line-pattern-page__view-tabs button {
@@ -392,18 +390,15 @@ onBeforeUnmount(() => {
 .line-pattern-page__map-view {
   background: #eef3f8;
   height: 100vh;
-  padding-top: 64px;
 }
 
 .line-pattern-page__map-view :deep(.line-map-panel) {
-  height: calc(100vh - 64px);
+  height: 100vh;
 }
 
 @media (max-width: 720px) {
   .line-pattern-page__view-tabs--map {
-    left: 50%;
-    right: auto;
-    transform: translateX(-50%);
+    order: -1;
   }
 }
 </style>

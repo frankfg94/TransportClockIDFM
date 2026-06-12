@@ -1,9 +1,19 @@
-import type { TransferLineOption } from "../../types/transit";
+import type {
+  TransferLineOption,
+  TransitFamily,
+} from "../../types/transit";
 import { normalizePatternStationName } from "./stationKeys";
+
+export interface CurrentLineIdentity {
+  family?: TransitFamily;
+  ids?: Array<string | undefined>;
+  labels?: Array<string | undefined>;
+}
 
 const HIGH_SERVICE_BUS_PATTERNS = [
   /\bt\s*zen\b/u,
   /\btzen\b/u,
+  /\borlyval\b/u,
   /\btvm\b/u,
   /\bbhns\b/u,
   /\bbus\s+a\s+haut\s+niveau\b/u,
@@ -12,14 +22,14 @@ const HIGH_SERVICE_BUS_PATTERNS = [
 
 export function isBusLikeTransfer(transfer: TransferLineOption): boolean {
   const family = transfer.family;
+
+  if (family) {
+    return family === "BUS" || family === "NOCTILIEN";
+  }
+
   const mode = normalizePatternStationName(transfer.mode ?? "");
 
-  return (
-    family === "BUS" ||
-    family === "NOCTILIEN" ||
-    mode.includes("bus") ||
-    mode.includes("noctilien")
-  );
+  return mode.includes("bus") || mode.includes("noctilien");
 }
 
 export function isHighServiceBusTransfer(
@@ -68,6 +78,41 @@ export function filterDuplicateBusTransfers(
   );
 }
 
+export function filterCurrentLineTransfers(
+  transfers: TransferLineOption[],
+  currentLine?: CurrentLineIdentity,
+): TransferLineOption[] {
+  if (!currentLine) {
+    return transfers;
+  }
+
+  const currentIds = createIdentityKeys(currentLine.ids ?? []);
+  const currentLabels = new Set(
+    (currentLine.labels ?? [])
+      .map((label) => normalizeLineLabel(label ?? ""))
+      .filter(Boolean),
+  );
+
+  return transfers.filter((transfer) => {
+    const transferIds = createIdentityKeys([transfer.id, transfer.ref]);
+
+    if (
+      Array.from(transferIds).some((identity) => currentIds.has(identity))
+    ) {
+      return false;
+    }
+
+    if (
+      !currentLine.family ||
+      !familiesMatch(transfer.family, currentLine.family)
+    ) {
+      return true;
+    }
+
+    return !currentLabels.has(normalizeLineLabel(transfer.label));
+  });
+}
+
 function transfersShareIdentity(
   busTransfer: TransferLineOption,
   nonBusTransfer: TransferLineOption,
@@ -89,16 +134,51 @@ function transfersShareIdentity(
 function createTransferIdentityKeys(
   transfer: TransferLineOption,
 ): string[] {
-  return [transfer.id, transfer.ref]
-    .flatMap((value) => {
-      const normalized = normalizeTransferSearchText(value ?? "");
-      const idfmCode = normalized.match(/\bc\d{5}\b/u)?.[0];
+  return Array.from(createIdentityKeys([transfer.id, transfer.ref]));
+}
 
-      return [normalized, idfmCode].filter(
-        (identity): identity is string => Boolean(identity),
-      );
-    })
-    .filter((value, index, identities) => identities.indexOf(value) === index);
+function createIdentityKeys(
+  values: Array<string | undefined>,
+): Set<string> {
+  const identities = new Set<string>();
+
+  values.forEach((value) => {
+    const normalized = normalizeTransferSearchText(value ?? "");
+    const idfmCode = normalized.match(/\bc\d{5}\b/u)?.[0];
+
+    if (normalized) {
+      identities.add(normalized);
+    }
+
+    if (idfmCode) {
+      identities.add(idfmCode);
+    }
+  });
+
+  return identities;
+}
+
+function familiesMatch(
+  transferFamily: TransitFamily | undefined,
+  currentFamily: TransitFamily,
+): boolean {
+  if (transferFamily === currentFamily) {
+    return true;
+  }
+
+  return (
+    (transferFamily === "BUS" || transferFamily === "NOCTILIEN") &&
+    (currentFamily === "BUS" || currentFamily === "NOCTILIEN")
+  );
+}
+
+function normalizeLineLabel(value: string): string {
+  return normalizeTransferSearchText(value)
+    .replace(
+      /^(?:ligne|metro|rer|tram|tramway|train|transilien|bus|noctilien)\s+/u,
+      "",
+    )
+    .replace(/\s+/gu, "");
 }
 
 function transfersSharePresentation(

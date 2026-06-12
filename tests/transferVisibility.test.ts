@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  filterCurrentLineTransfers,
   filterDuplicateBusTransfers,
   isBusLikeTransfer,
   isHighServiceBusTransfer,
   isVisiblePatternPlanTransfer,
 } from "../src/features/service-pattern/transferVisibility";
+import { normalizeTransferLineId } from "../src/services/transferLineOptions";
 import type { TransferLineOption } from "../src/types/transit";
 
 describe("pattern transfer visibility", () => {
@@ -28,6 +30,24 @@ describe("pattern transfer visibility", () => {
     expect(isVisiblePatternPlanTransfer(transfer("A", "RER", "RER"))).toBe(true);
     expect(isVisiblePatternPlanTransfer(transfer("T3a", "TRAM", "Tram"))).toBe(true);
     expect(isVisiblePatternPlanTransfer(transfer("L", "TRANSILIEN", "Train"))).toBe(true);
+  });
+
+  it("keeps T4 visible when its explicit tram family conflicts with a bus mode", () => {
+    const t4 = transfer("T4", "TRAM", "Bus");
+
+    expect(isBusLikeTransfer(t4)).toBe(false);
+    expect(isVisiblePatternPlanTransfer(t4)).toBe(true);
+  });
+
+  it("uses the mode as a fallback when the transfer family is missing", () => {
+    const busWithoutFamily: TransferLineOption = {
+      id: "line:test:bus:74",
+      label: "74",
+      mode: "Bus",
+    };
+
+    expect(isBusLikeTransfer(busWithoutFamily)).toBe(true);
+    expect(isVisiblePatternPlanTransfer(busWithoutFamily)).toBe(false);
   });
 
   it("removes only the bus duplicate when a structural transfer has the same line id", () => {
@@ -91,6 +111,46 @@ describe("pattern transfer visibility", () => {
     };
 
     expect(filterDuplicateBusTransfers([metro, bus])).toEqual([metro, bus]);
+  });
+
+  it("removes the current RER line across equivalent IDFM identifiers", () => {
+    const rerB = {
+      ...transfer("B", "RER", "RER"),
+      id: "line:IDFM:C01743",
+    };
+    const rerD = {
+      ...transfer("D", "RER", "RER"),
+      id: "line:IDFM:C01728",
+    };
+
+    expect(
+      filterCurrentLineTransfers([rerB, rerD], {
+        family: "RER",
+        ids: ["STIF:Line::C01743:"],
+        labels: ["RER B"],
+      }),
+    ).toEqual([rerD]);
+  });
+
+  it("uses the line label only inside the same transit family", () => {
+    const rerB = transfer("RER B", "RER", "RER");
+    const busB = transfer("B", "BUS", "Bus");
+
+    expect(
+      filterCurrentLineTransfers([rerB, busB], {
+        family: "RER",
+        labels: ["B"],
+      }),
+    ).toEqual([busB]);
+  });
+
+  it("normalizes Navitia and STIF forms to the same IDFM line id", () => {
+    expect(normalizeTransferLineId("line:idfm:C01743")).toBe(
+      "line:IDFM:C01743",
+    );
+    expect(normalizeTransferLineId("STIF:Line::C01743:")).toBe(
+      "line:IDFM:C01743",
+    );
   });
 });
 

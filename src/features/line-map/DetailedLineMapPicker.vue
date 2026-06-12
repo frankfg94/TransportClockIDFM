@@ -1,11 +1,11 @@
 ﻿<script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
-import {
-  isBusTransfer,
-  loadDetailedLineMap,
-  loadStationTransfers,
-  loadTransferLineDirections,
-} from "./lineMapData";
+import { computed, reactive, ref, watch } from "vue";
+import { loadDetailedLineMap, loadStationTransfers } from "./lineMapData";
+import DetailedLineMapPickerSideBar from "./DetailedLineMapPickerSideBar.vue";
+import { transitBoards } from "../../config/transitBoards";
+import { createBoardFromDraft } from "../../services/boardBuilder";
+import { fetchDirectionGroupsForStation } from "../../services/idfm";
+import { addBoardToTransitPreferences } from "../../storage/transitPreferences";
 import type {
   LineSearchOption,
   StationSearchOption,
@@ -15,19 +15,12 @@ import type {
   LineMapSegmentView,
   LineMapStopView,
   LineMapViewModel,
-  TransferLineDirections,
 } from "./types";
 import "./line-map.css";
 
 interface TransferState {
   loading: boolean;
   lines: TransferLineOption[];
-  error?: string;
-}
-
-interface DirectionState {
-  loading: boolean;
-  directions: string[];
   error?: string;
 }
 
@@ -41,12 +34,18 @@ interface MapDragState {
   scrollTop: number;
 }
 
-const props = defineProps<{
-  line?: LineSearchOption;
-  selectedStationId?: string;
-  mode?: "picker" | "explorer";
-  selectable?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    line?: LineSearchOption;
+    selectedStationId?: string;
+    mode?: "picker" | "explorer";
+    selectable?: boolean;
+  }>(),
+  {
+    mode: "picker",
+    selectable: true,
+  },
+);
 
 const emit = defineEmits<{
   select: [station: StationSearchOption];
@@ -64,9 +63,13 @@ const lineMap = ref<LineMapViewModel>();
 const loadingMap = ref(false);
 const errorMessage = ref("");
 const hoveredStop = ref<LineMapStopView>();
+const activeStop = ref<LineMapStopView>();
 const zoom = ref(1.12);
 const mapCanvas = ref<HTMLDivElement>();
 const suppressNextCanvasClick = ref(false);
+const favoriteLoading = ref(false);
+const favoriteError = ref("");
+const favoriteConfirmationOpen = ref(false);
 const mapDrag = reactive<MapDragState>({
   active: false,
   dragging: false,
@@ -76,12 +79,8 @@ const mapDrag = reactive<MapDragState>({
   startX: 0,
   startY: 0,
 });
-const activeTransfer = ref<TransferLineOption>();
 const transferStates = reactive<Record<string, TransferState>>({});
-const directionStates = reactive<Record<string, DirectionState>>({});
 let latestMapRequest = 0;
-let clearHoverTimer: number | undefined;
-let clearTransferTimer: number | undefined;
 
 const stopById = computed(() => {
   const stops = new Map<string, LineMapStopView>();
@@ -95,21 +94,34 @@ const selectedStop = computed(() =>
   lineMap.value?.stops.find((stop) => stop.id === props.selectedStationId),
 );
 
-const hoveredTransferState = computed(() =>
-  hoveredStop.value ? transferStates[hoveredStop.value.id] : undefined,
-);
-
-const activeDirectionState = computed(() =>
-  activeTransfer.value ? directionStates[activeTransfer.value.id] : undefined,
+const activeTransferState = computed(() =>
+  activeStop.value ? transferStates[activeStop.value.id] : undefined,
 );
 const isExplorerMode = computed(() => props.mode === "explorer");
-const canSelectStops = computed(() => props.selectable !== false);
+const canSelectStops = computed(() => props.selectable);
 const isMapDragging = computed(() => mapDrag.dragging);
 
 const mapStats = computed(() => {
   const stopCount = lineMap.value?.stops.length ?? 0;
 
   return `${stopCount} stations`;
+});
+
+const renderedStops = computed(() => {
+  const activeStopId = activeStop.value?.id;
+  const stops = (lineMap.value?.stops ?? []).map((stop, index) => ({
+    index,
+    stop,
+  }));
+
+  if (!activeStopId) {
+    return stops;
+  }
+
+  return [
+    ...stops.filter(({ stop }) => stop.id !== activeStopId),
+    ...stops.filter(({ stop }) => stop.id === activeStopId),
+  ];
 });
 
 const svgStyle = computed(() => ({
@@ -119,23 +131,7 @@ const svgStyle = computed(() => ({
 
 const stopRadius = computed(() => Math.max(3.4, 7 / zoom.value));
 const stopHaloRadius = computed(() => Math.max(8, 16 / zoom.value));
-const stopStrokeWidth = computed(() => Math.max(1.8, 4 / zoom.value));
-
-const tooltipStyle = computed(() => {
-  if (!hoveredStop.value) {
-    return {};
-  }
-
-  const x = toScreenX(hoveredStop.value.x);
-  const y = toScreenY(hoveredStop.value.y);
-  const horizontalOffset = hoveredStop.value.x > 0.68 ? -278 : 22;
-  const verticalOffset = hoveredStop.value.y > 0.72 ? -146 : -30;
-
-  return {
-    left: `${x + horizontalOffset}px`,
-    top: `${y + verticalOffset}px`,
-  };
-});
+const stopStrokeWidth = computed(() => Math.max(2 / zoom.value));
 
 const visibleLabelIds = computed(() => {
   const map = lineMap.value;
@@ -153,6 +149,7 @@ const visibleLabelIds = computed(() => {
       ...getTerminalStopIds(map),
       props.selectedStationId ?? "",
       hoveredStop.value?.id ?? "",
+      activeStop.value?.id ?? "",
     ].filter(Boolean),
   );
   const placedLabels: Array<{ x: number; y: number }> = [];
@@ -187,6 +184,9 @@ const visibleLabelIds = computed(() => {
 watch(
   () => props.line?.id,
   () => {
+    closeSidebar();
+    clearTransferStates();
+
     if (props.line) {
       void loadMap();
       return;
@@ -197,16 +197,6 @@ watch(
   { immediate: true },
 );
 
-onBeforeUnmount(() => {
-  if (clearHoverTimer) {
-    window.clearTimeout(clearHoverTimer);
-  }
-
-  if (clearTransferTimer) {
-    window.clearTimeout(clearTransferTimer);
-  }
-});
-
 async function loadMap(): Promise<void> {
   if (!props.line) {
     return;
@@ -216,6 +206,7 @@ async function loadMap(): Promise<void> {
   loadingMap.value = true;
   errorMessage.value = "";
   hoveredStop.value = undefined;
+  activeStop.value = undefined;
 
   try {
     const map = await loadDetailedLineMap(props.line);
@@ -238,33 +229,39 @@ async function loadMap(): Promise<void> {
 }
 
 function selectStop(stop: LineMapStopView): void {
-  showStop(stop);
+  toggleStopDetails(stop);
 
   if (canSelectStops.value) {
     emit("select", stop.station);
   }
 }
 
-function showStop(stop: LineMapStopView): void {
-  if (clearHoverTimer) {
-    window.clearTimeout(clearHoverTimer);
-    clearHoverTimer = undefined;
+function showStopHover(stop: LineMapStopView): void {
+  hoveredStop.value = stop;
+}
+
+function hideStopHover(stop?: LineMapStopView): void {
+  if (!stop || hoveredStop.value?.id === stop.id) {
+    hoveredStop.value = undefined;
+  }
+}
+
+function toggleStopDetails(stop: LineMapStopView): void {
+  favoriteError.value = "";
+
+  if (activeStop.value?.id === stop.id) {
+    closeSidebar();
+    return;
   }
 
-  hoveredStop.value = stop;
-  activeTransfer.value = undefined;
+  activeStop.value = stop;
   void loadTransfers(stop);
 }
 
-function scheduleHideStop(): void {
-  if (clearHoverTimer) {
-    window.clearTimeout(clearHoverTimer);
-  }
-
-  clearHoverTimer = window.setTimeout(() => {
-    hoveredStop.value = undefined;
-    activeTransfer.value = undefined;
-  }, 140);
+function closeSidebar(): void {
+  activeStop.value = undefined;
+  favoriteError.value = "";
+  favoriteLoading.value = false;
 }
 
 async function loadTransfers(stop: LineMapStopView): Promise<void> {
@@ -293,55 +290,63 @@ async function loadTransfers(stop: LineMapStopView): Promise<void> {
   }
 }
 
-function showTransfer(transfer: TransferLineOption): void {
-  if (clearTransferTimer) {
-    window.clearTimeout(clearTransferTimer);
-    clearTransferTimer = undefined;
-  }
-
-  activeTransfer.value = transfer;
-
-  if (isBusTransfer(transfer)) {
-    void loadBusDirections(transfer);
-  }
+function clearTransferStates(): void {
+  Object.keys(transferStates).forEach((key) => {
+    delete transferStates[key];
+  });
 }
 
-function scheduleHideTransfer(): void {
-  if (clearTransferTimer) {
-    window.clearTimeout(clearTransferTimer);
-  }
+async function addActiveStopToFavorites(): Promise<void> {
+  const line = props.line;
+  const stop = activeStop.value;
 
-  clearTransferTimer = window.setTimeout(() => {
-    activeTransfer.value = undefined;
-  }, 140);
-}
-
-async function loadBusDirections(transfer: TransferLineOption): Promise<void> {
-  if (directionStates[transfer.id]) {
+  if (!line || !stop || favoriteLoading.value) {
     return;
   }
 
-  directionStates[transfer.id] = {
-    loading: true,
-    directions: [],
-  };
+  favoriteLoading.value = true;
+  favoriteError.value = "";
 
   try {
-    const result: TransferLineDirections = await loadTransferLineDirections(
-      transfer.id,
+    const directionGroups = await fetchDirectionGroupsForStation(
+      line,
+      stop.station,
+    );
+    const board = createBoardFromDraft(
+      {
+        family: line.family,
+        line,
+        station: stop.station,
+      },
+      directionGroups,
     );
 
-    directionStates[transfer.id] = {
-      loading: false,
-      directions: result.directions,
-    };
+    addBoardToTransitPreferences(board, transitBoards);
+    favoriteConfirmationOpen.value = true;
   } catch {
-    directionStates[transfer.id] = {
-      loading: false,
-      directions: [],
-      error: "Directions indisponibles",
-    };
+    favoriteError.value =
+      "Impossible d'ajouter cette station à l'écran d'accueil.";
+  } finally {
+    favoriteLoading.value = false;
   }
+}
+
+function openActiveStopInGoogleMaps(): void {
+  const stop = activeStop.value;
+
+  if (!stop) {
+    return;
+  }
+
+  const lon = stop.lon ?? stop.station.lon;
+  const lat = stop.lat ?? stop.station.lat;
+  const query =
+    typeof lon === "number" && typeof lat === "number"
+      ? `${lat},${lon}`
+      : [stop.label, stop.city].filter(Boolean).join(", ");
+  const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function getSegmentStop(
@@ -409,7 +414,8 @@ function getLabelOffset(
 ): { x: number; y: number } {
   if (
     props.selectedStationId === stop.id ||
-    hoveredStop.value?.id === stop.id
+    hoveredStop.value?.id === stop.id ||
+    activeStop.value?.id === stop.id
   ) {
     return { x: 18, y: -18 };
   }
@@ -436,11 +442,12 @@ function getLineStyle() {
 
 function getStopStyle(stop: LineMapStopView) {
   const color = lineMap.value?.lineColor ?? props.line?.color ?? "#0064ff";
-  const isSelected = stop.id === props.selectedStationId;
+  const isActive = stop.id === activeStop.value?.id;
+  const isSelected = stop.id === props.selectedStationId || isActive;
 
   return {
     fill: isSelected ? color : "#ffffff",
-    stroke: color,
+    stroke: isActive ? "#ffffff" : color,
     strokeWidth: `${stopStrokeWidth.value}px`,
   };
 }
@@ -449,6 +456,27 @@ function getLabelStyle() {
   return {
     fontSize: `${12.5 / zoom.value}px`,
     strokeWidth: `${5 / zoom.value}px`,
+  };
+}
+
+function getActiveLabelBackground(stop: LineMapStopView, index: number) {
+  const paddingX = 8 / zoom.value;
+  const height = 24 / zoom.value;
+  const width = Math.max(42, stop.label.length * 7.2) / zoom.value + paddingX * 2;
+  const labelX = getLabelX(stop, index);
+  const anchor = getLabelAnchor(stop);
+
+  return {
+    x:
+      anchor === "end"
+        ? labelX - width
+        : anchor === "middle"
+          ? labelX - width / 2
+          : labelX - paddingX,
+    y: getLabelY(stop, index) - 17 / zoom.value,
+    width,
+    height,
+    rx: height / 2,
   };
 }
 
@@ -465,13 +493,6 @@ function getStopActionLabel(stop: LineMapStopView): string {
   return canSelectStops.value
     ? `Sélectionner ${stop.label}`
     : `Afficher ${stop.label}`;
-}
-
-function getTransferStyle(line: TransferLineOption) {
-  return {
-    background: line.color ?? "#eef3fb",
-    color: line.textColor ?? "#10233f",
-  };
 }
 
 function adjustZoom(delta: number): void {
@@ -529,7 +550,12 @@ function handleCanvasWheel(event: WheelEvent): void {
 }
 
 function startMapDrag(event: PointerEvent): void {
-  if (event.button !== 0 || !mapCanvas.value) {
+  if (
+    event.button !== 0 ||
+    !mapCanvas.value ||
+    (event.target instanceof Element &&
+      event.target.closest(".line-map-hit-target"))
+  ) {
     return;
   }
 
@@ -581,7 +607,7 @@ function stopMapDrag(event?: PointerEvent): void {
 }
 
 function handleCanvasMouseLeave(): void {
-  scheduleHideStop();
+  hideStopHover();
   stopMapDrag();
 }
 
@@ -655,31 +681,34 @@ function getLabelPriority(
       <span v-if="selectedStop" class="line-map-selected-pill">
         {{ selectedStop.label }}
       </span>
-      <span v-if="lineMap" class="line-map-stats">{{ mapStats }}</span>
-      <div v-if="lineMap" class="line-map-zoom" aria-label="Zoom du plan">
-        <button
-          class="icon-button line-map-zoom__button"
-          type="button"
-          aria-label="Dézoomer"
-          @click="adjustZoom(-ZOOM_STEP)"
-        >
-          −
-        </button>
-        <button
-          class="button-secondary line-map-zoom__reset"
-          type="button"
-          @click="resetZoom"
-        >
-          {{ Math.round(zoom * 100) }}%
-        </button>
-        <button
-          class="icon-button line-map-zoom__button"
-          type="button"
-          aria-label="Zoomer"
-          @click="adjustZoom(ZOOM_STEP)"
-        >
-          +
-        </button>
+      <div v-if="lineMap" class="line-map-panel__tools">
+        <slot name="bar-before-stats"></slot>
+        <span class="line-map-stats">{{ mapStats }}</span>
+        <div class="line-map-zoom" aria-label="Zoom du plan">
+          <button
+            class="icon-button line-map-zoom__button"
+            type="button"
+            aria-label="Dézoomer"
+            @click="adjustZoom(-ZOOM_STEP)"
+          >
+            −
+          </button>
+          <button
+            class="button-secondary line-map-zoom__reset"
+            type="button"
+            @click="resetZoom"
+          >
+            {{ Math.round(zoom * 100) }}%
+          </button>
+          <button
+            class="icon-button line-map-zoom__button"
+            type="button"
+            aria-label="Zoomer"
+            @click="adjustZoom(ZOOM_STEP)"
+          >
+            +
+          </button>
+        </div>
       </div>
       <span v-if="loadingMap" class="field-loader">
         <span aria-hidden="true" class="loader-dot"></span>
@@ -699,182 +728,172 @@ function getLabelPriority(
       </button>
     </div>
 
-    <div
-      v-else-if="lineMap"
-      class="line-map-canvas"
-      :class="{ 'line-map-canvas--dragging': isMapDragging }"
-      ref="mapCanvas"
-      @pointerdown="startMapDrag"
-      @pointermove="moveMapDrag"
-      @pointerup="stopMapDrag"
-      @pointercancel="stopMapDrag"
-      @mouseleave="handleCanvasMouseLeave"
-      @wheel="handleCanvasWheel"
-      @click.capture="handleCanvasClick"
-    >
-      <svg
-        class="line-map-svg"
-        role="img"
-        :style="svgStyle"
-        :viewBox="`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`"
-        data-testid="line-map"
-      >
-        <g class="line-map-tiles" aria-hidden="true">
-          <image
-            v-for="tile in lineMap.tiles"
-            :key="tile.id"
-            class="line-map-tile"
-            :href="tile.url"
-            :x="tile.x"
-            :y="tile.y"
-            :width="tile.width"
-            :height="tile.height"
-            preserveAspectRatio="none"
-          />
-        </g>
-
-        <g class="line-map-map-mask" aria-hidden="true">
-          <rect x="0" y="0" :width="VIEWBOX_WIDTH" :height="VIEWBOX_HEIGHT" />
-        </g>
-
-        <g class="line-map-segments">
-          <line
-            v-for="segment in lineMap.segments"
-            :key="segment.id"
-            class="line-map-segment"
-            :x1="getSegmentX(segment, 'from')"
-            :y1="getSegmentY(segment, 'from')"
-            :x2="getSegmentX(segment, 'to')"
-            :y2="getSegmentY(segment, 'to')"
-            :style="getLineStyle()"
-          />
-        </g>
-
-        <g
-          v-for="(stop, index) in lineMap.stops"
-          :key="stop.id"
-          class="line-map-stop"
-          :class="{
-            'line-map-stop--selected': stop.id === selectedStationId,
-            'line-map-stop--hovered': stop.id === hoveredStop?.id,
-          }"
-        >
-          <circle
-            class="line-map-stop__halo"
-            :cx="toSvgX(stop.x)"
-            :cy="toSvgY(stop.y)"
-            :r="stopHaloRadius"
-          />
-          <circle
-            class="line-map-stop__dot"
-            :cx="toSvgX(stop.x)"
-            :cy="toSvgY(stop.y)"
-            :r="stopRadius"
-            :style="getStopStyle(stop)"
-          />
-          <text
-            v-if="shouldShowLabel(stop)"
-            class="line-map-stop__label"
-            :x="getLabelX(stop, index)"
-            :y="getLabelY(stop, index)"
-            :style="getLabelStyle()"
-            :text-anchor="getLabelAnchor(stop)"
-          >
-            {{ stop.label }}
-          </text>
-        </g>
-      </svg>
-
-      <button
-        v-for="stop in lineMap.stops"
-        :key="`${stop.id}:hit-target`"
-        class="line-map-hit-target"
-        type="button"
-        :aria-label="getStopActionLabel(stop)"
-        :style="getHitTargetStyle(stop)"
-        @click="selectStop(stop)"
-        @focus="showStop(stop)"
-        @mouseenter="showStop(stop)"
-        @mouseleave="scheduleHideStop"
-      ></button>
-
+    <div v-else-if="lineMap" class="line-map-panel__main">
       <div
-        v-if="hoveredStop"
-        class="line-map-tooltip"
-        :style="tooltipStyle"
-        @mouseenter="showStop(hoveredStop)"
-        @mouseleave="scheduleHideStop"
+        ref="mapCanvas"
+        class="line-map-canvas"
+        :class="{ 'line-map-canvas--dragging': isMapDragging }"
+        @pointerdown="startMapDrag"
+        @pointermove="moveMapDrag"
+        @pointerup="stopMapDrag"
+        @pointercancel="stopMapDrag"
+        @mouseleave="handleCanvasMouseLeave"
+        @wheel="handleCanvasWheel"
+        @click.capture="handleCanvasClick"
       >
-        <strong>{{ hoveredStop.label }}</strong>
-        <span v-if="hoveredStop.city">{{ hoveredStop.city }}</span>
-        <div class="line-map-tooltip__transfers">
-          <small>Correspondances</small>
-          <span v-if="hoveredTransferState?.loading" class="field-loader">
-            <span aria-hidden="true" class="loader-dot"></span>
-            Chargement
-          </span>
-          <span
-            v-else-if="hoveredTransferState?.error"
-            class="line-map-tooltip__muted"
-          >
-            Indisponible
-          </span>
-          <span
-            v-else-if="
-              hoveredTransferState && hoveredTransferState.lines.length === 0
-            "
-            class="line-map-tooltip__muted"
-          >
-            Aucune autre ligne
-          </span>
-          <span v-else class="transfer-badges">
-            <button
-              v-for="transfer in hoveredTransferState?.lines.slice(0, 12)"
-              :key="transfer.id"
-              class="transfer-badge"
-              type="button"
-              :class="{
-                'transfer-badge--active': transfer.id === activeTransfer?.id,
-              }"
-              :style="getTransferStyle(transfer)"
-              :title="transfer.mode"
-              @click="showTransfer(transfer)"
-              @focus="showTransfer(transfer)"
-              @blur="scheduleHideTransfer"
-              @mouseenter="showTransfer(transfer)"
-              @mouseleave="scheduleHideTransfer"
-            >
-              {{ transfer.label }}
-            </button>
-          </span>
-        </div>
-
-        <div
-          v-if="activeTransfer && isBusTransfer(activeTransfer)"
-          class="transfer-directions"
-          @mouseenter="showTransfer(activeTransfer)"
-          @mouseleave="scheduleHideTransfer"
+        <svg
+          class="line-map-svg"
+          role="img"
+          :style="svgStyle"
+          :viewBox="`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`"
+          data-testid="line-map"
         >
-          <small>Directions {{ activeTransfer.label }}</small>
-          <span v-if="activeDirectionState?.loading" class="field-loader">
-            <span aria-hidden="true" class="loader-dot"></span>
-            Chargement
-          </span>
-          <span
-            v-else-if="activeDirectionState?.error"
-            class="line-map-tooltip__muted"
+          <g class="line-map-tiles" aria-hidden="true">
+            <image
+              v-for="tile in lineMap.tiles"
+              :key="tile.id"
+              class="line-map-tile"
+              :href="tile.url"
+              :x="tile.x"
+              :y="tile.y"
+              :width="tile.width"
+              :height="tile.height"
+              preserveAspectRatio="none"
+            />
+          </g>
+
+          <g class="line-map-map-mask" aria-hidden="true">
+            <rect x="0" y="0" :width="VIEWBOX_WIDTH" :height="VIEWBOX_HEIGHT" />
+          </g>
+
+          <g class="line-map-segments">
+            <line
+              v-for="segment in lineMap.segments"
+              :key="segment.id"
+              class="line-map-segment"
+              :x1="getSegmentX(segment, 'from')"
+              :y1="getSegmentY(segment, 'from')"
+              :x2="getSegmentX(segment, 'to')"
+              :y2="getSegmentY(segment, 'to')"
+              :style="getLineStyle()"
+            />
+          </g>
+
+          <g
+            v-for="{ stop, index } in renderedStops"
+            :key="stop.id"
+            class="line-map-stop"
+            :class="{
+              'line-map-stop--selected':
+                stop.id === selectedStationId || stop.id === activeStop?.id,
+              'line-map-stop--active': stop.id === activeStop?.id,
+              'line-map-stop--hovered': stop.id === hoveredStop?.id,
+            }"
+            :style="{ '--line-map-stop-color': lineMap.lineColor }"
           >
-            Indisponible
-          </span>
-          <span
-            v-else-if="activeDirectionState?.directions.length"
-            class="transfer-directions__list"
-          >
-            {{ activeDirectionState.directions.join(" · ") }}
-          </span>
-          <span v-else class="line-map-tooltip__muted"> Aucune direction </span>
-        </div>
+            <circle
+              class="line-map-stop__ripple line-map-stop__ripple--delayed"
+              :cx="toSvgX(stop.x)"
+              :cy="toSvgY(stop.y)"
+              :r="stopHaloRadius"
+            />
+            <circle
+              class="line-map-stop__ripple"
+              :cx="toSvgX(stop.x)"
+              :cy="toSvgY(stop.y)"
+              :r="stopHaloRadius"
+            />
+            <circle
+              class="line-map-stop__halo"
+              :cx="toSvgX(stop.x)"
+              :cy="toSvgY(stop.y)"
+              :r="stopHaloRadius"
+            />
+            <circle
+              class="line-map-stop__dot"
+              :cx="toSvgX(stop.x)"
+              :cy="toSvgY(stop.y)"
+              :r="stopRadius"
+              :style="getStopStyle(stop)"
+            />
+            <rect
+              v-if="shouldShowLabel(stop) && stop.id === activeStop?.id"
+              class="line-map-stop__label-background"
+              v-bind="getActiveLabelBackground(stop, index)"
+            />
+            <text
+              v-if="shouldShowLabel(stop)"
+              class="line-map-stop__label"
+              :class="{
+                'line-map-stop__label--active': stop.id === activeStop?.id,
+              }"
+              :x="getLabelX(stop, index)"
+              :y="getLabelY(stop, index)"
+              :style="getLabelStyle()"
+              :text-anchor="getLabelAnchor(stop)"
+            >
+              {{ stop.label }}
+            </text>
+          </g>
+        </svg>
+
+        <button
+          v-for="stop in lineMap.stops"
+          :key="`${stop.id}:hit-target`"
+          class="line-map-hit-target"
+          type="button"
+          :aria-label="getStopActionLabel(stop)"
+          :aria-pressed="stop.id === activeStop?.id"
+          :style="getHitTargetStyle(stop)"
+          @pointerdown.stop
+          @click="selectStop(stop)"
+          @focus="showStopHover(stop)"
+          @blur="hideStopHover(stop)"
+          @mouseenter="showStopHover(stop)"
+          @mouseleave="hideStopHover(stop)"
+        ></button>
       </div>
     </div>
+
+    <Transition name="line-map-sidebar-slide">
+      <DetailedLineMapPickerSideBar
+        v-if="lineMap && activeStop"
+        :stop="activeStop"
+        :transfers="activeTransferState?.lines ?? []"
+        :transfers-loading="activeTransferState?.loading ?? true"
+        :transfers-error="activeTransferState?.error"
+        :line-color="lineMap.lineColor"
+        :show-actions="isExplorerMode"
+        :favorite-loading="favoriteLoading"
+        :favorite-error="favoriteError"
+        @close="closeSidebar"
+        @add-favorite="addActiveStopToFavorites"
+        @open-google-maps="openActiveStopInGoogleMaps"
+      />
+    </Transition>
   </div>
+
+  <Teleport to="body">
+    <Transition name="modal-scale">
+      <div
+        v-if="favoriteConfirmationOpen"
+        class="line-map-confirmation-backdrop"
+        role="presentation"
+      >
+        <section
+          class="line-map-confirmation"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="line-map-confirmation-title"
+        >
+          <strong id="line-map-confirmation-title">
+            Station ajoutée à l'écran d'accueil
+          </strong>
+          <button type="button" @click="favoriteConfirmationOpen = false">
+            OK
+          </button>
+        </section>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
