@@ -1,4 +1,15 @@
-﻿import type { StationSearchOption, TransferLineOption } from "../../types/transit";
+import type { StationSearchOption, TransferLineOption } from "../../types/transit";
+import type { GeographicViewport } from "../network-ghost/geoProjection";
+
+export interface LineMapQuayView {
+  id: string;
+  name: string;
+  lon?: number;
+  lat?: number;
+  projectedX?: number;
+  projectedY?: number;
+  srsName?: string;
+}
 
 export interface LineMapStopView {
   id: string;
@@ -13,6 +24,7 @@ export interface LineMapStopView {
   y: number;
   routeIds: string[];
   routeLabels: string[];
+  quays?: LineMapQuayView[];
   station: StationSearchOption;
 }
 
@@ -47,6 +59,7 @@ export interface LineMapViewModel {
   segments: LineMapSegmentView[];
   branches: LineMapBranchView[];
   tiles: MapTile[];
+  viewport?: GeographicViewport;
 }
 
 export interface LineTransferSummary {
@@ -64,4 +77,3 @@ export interface TransferLineDirections {
   lineId: string;
   directions: string[];
 }
-

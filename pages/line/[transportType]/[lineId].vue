@@ -64,6 +64,11 @@
         mode="explorer"
         :line="lineMapLine"
         :selectable="false"
+        ghost-network-enabled
+        :ghost-network-scope="
+          settings.ghostNetworkStructuralOnly ? 'structural' : 'all'
+        "
+        :reduce-motion="settings.reduceMotion"
       >
         <template #bar-before-stats>
           <nav

@@ -75,6 +75,9 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Lieu météo");
     expect(wrapper.text()).toContain("Paris");
     expect(wrapper.text()).toContain("Afficher la minimap");
+    expect(wrapper.text()).toContain(
+      "Limiter les lignes fantômes aux modes structurants",
+    );
     expect(wrapper.text()).toContain("Wake lock");
     expect(wrapper.text()).toContain("Masquer la navigation");
 

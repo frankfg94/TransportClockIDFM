@@ -11,9 +11,20 @@ import type {
 
 describe("detailed station picker line map model", () => {
   it("creates a map with background tiles from projected NeTEx coordinates", () => {
+    const chatelet = createProjectedStop("Chatelet", 652146, 6862288);
+
+    chatelet.quays = [
+      {
+        id: "quay:1",
+        name: "Quai 1",
+        projectedX: 652150,
+        projectedY: 6862292,
+        srsName: "EPSG:2154",
+      },
+    ];
     const model = createDetailedLineMapViewModel(createLine(), [
       createSequence("main", [
-        createProjectedStop("Chatelet", 652146, 6862288),
+        chatelet,
         createProjectedStop("Republique", 653275, 6863211),
         createProjectedStop("Belleville", 654283, 6863727),
       ]),
@@ -26,6 +37,10 @@ describe("detailed station picker line map model", () => {
       .toBe(true);
     expect(model.stops.every((stop) => Number.isFinite(stop.lon))).toBe(true);
     expect(model.stops.every((stop) => Number.isFinite(stop.lat))).toBe(true);
+    expect(model.viewport).toBeDefined();
+    expect(model.stops[0].quays?.[0]).toMatchObject({ id: "quay:1" });
+    expect(model.stops[0].quays?.[0].lon).toBeTypeOf("number");
+    expect(model.stops[0].quays?.[0].lat).toBeTypeOf("number");
 
     const xs = model.stops.map((stop) => stop.x);
     const ys = model.stops.map((stop) => stop.y);

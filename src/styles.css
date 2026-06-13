@@ -1974,6 +1974,7 @@ h3 {
   display: grid;
   gap: 7px;
   padding: 10px;
+      align-content: start;
 }
 
 .pattern-flow-station__transfer-detail strong {

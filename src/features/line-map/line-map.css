@@ -75,6 +75,16 @@
   white-space: nowrap;
 }
 
+.line-map-network-progress {
+  background: rgba(0, 100, 255, 0.08);
+  border-radius: 999px;
+  color: var(--idfm-blue);
+  font-size: 0.72rem;
+  font-weight: 900;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+
 .line-map-selected-pill {
   background: rgba(0, 100, 255, 0.1);
   border-radius: 999px;
@@ -130,6 +140,95 @@
   cursor: grabbing;
 }
 
+.line-map-display-panel {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 12px;
+  bottom: 14px;
+  box-shadow: 0 12px 34px rgba(15, 23, 42, 0.18);
+  color: var(--ink);
+  left: 14px;
+  min-width: 190px;
+  overflow: hidden;
+  position: absolute;
+  z-index: 6;
+}
+
+.line-map-display-panel--collapsed {
+  min-width: 138px;
+}
+
+.line-map-display-panel__header {
+  align-items: center;
+  background: transparent;
+  color: var(--ink);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 1fr auto;
+  min-height: 38px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.line-map-display-panel__header:hover:not(:disabled),
+.line-map-display-panel__header:focus-visible {
+  background: #f8fafc;
+  color: var(--ink);
+  transform: none;
+}
+
+.line-map-display-panel__header svg {
+  height: 16px;
+  width: 16px;
+}
+
+.line-map-display-panel__header strong {
+  font-size: 0.76rem;
+  font-weight: 950;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.line-map-display-panel__content {
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.line-map-display-panel label {
+  align-items: center;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  font-size: 0.74rem;
+  font-weight: 800;
+  gap: 7px;
+}
+
+.line-map-display-panel label:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.line-map-display-panel input {
+  accent-color: var(--idfm-blue);
+  height: 15px;
+  margin: 0;
+  width: 15px;
+}
+
+.line-map-display-panel__main-toggle {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  padding-bottom: 9px;
+}
+
+.line-map-display-panel__modes {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
 .line-map-panel--explorer .line-map-panel__main {
   min-height: 520px;
 }
@@ -143,6 +242,7 @@
   display: block;
   height: auto;
   min-width: 880px;
+  overflow: hidden;
   width: 1080px;
 }
 

@@ -1,24 +1,36 @@
 ﻿import {
+  fetchLineFrequencyProfile,
   fetchLineRouteSequences,
   fetchLineRouteSummaries,
   fetchStationTransfers,
   searchLineStations,
 } from "../../services/idfm";
 import type {
+  LineFrequencyProfile,
   LineRouteSequence,
   LineRouteStop,
   LineSearchOption,
   StationSearchOption,
+  TransitQuay,
   TransferLineOption,
 } from "../../types/transit";
 import type {
   LineMapBranchView,
+  LineMapQuayView,
   LineMapSegmentView,
   LineMapStopView,
   LineMapViewModel,
   MapTile,
   TransferLineDirections,
 } from "./types";
+import {
+  convertLambert93ToWgs84,
+  createGeographicViewport,
+  projectMercatorPointToViewport,
+  projectTransitCoordinate,
+  resolveTransitLonLat,
+  type GeographicViewport,
+} from "../network-ghost/geoProjection";
 
 const VIEWBOX_WIDTH = 1080;
 const VIEWBOX_HEIGHT = 620;
@@ -26,27 +38,14 @@ const SVG_PADDING_X = 78;
 const SVG_PADDING_Y = 68;
 const MAP_COORDINATE_PADDING = 0.08;
 const TILE_SERVER_SHARDS = ["a", "b", "c"];
-const LAMBERT93_E = 0.0818191910428158;
-const LAMBERT93_N = 0.725607765053267;
-const LAMBERT93_C = 11754255.426096;
-const LAMBERT93_XS = 700000;
-const LAMBERT93_YS = 12655612.049876;
-const LAMBERT93_LON0_RAD = (3 * Math.PI) / 180;
 
 interface CanonicalStationLookup {
   byLabel: Map<string, StationSearchOption[]>;
 }
 
-interface ProjectedBounds {
-  minX: number;
-  maxX: number;
-  minY: number;
-  maxY: number;
-}
-
-interface ProjectedViewport {
-  bounds: ProjectedBounds;
-  project(point: { x: number; y: number }): { x: number; y: number };
+interface PositionedLineMap {
+  stops: LineMapStopView[];
+  viewport?: GeographicViewport;
 }
 
 export async function loadDetailedLineMap(
@@ -81,6 +80,10 @@ export function createDetailedLineMapViewModel(
       if (existingStop) {
         addUniqueValue(existingStop.routeIds, sequence.id);
         addUniqueValue(existingStop.routeLabels, sequence.label);
+        existingStop.quays = mergeQuays(
+          existingStop.quays,
+          enrichQuays(stop.quays),
+        );
         return;
       }
 
@@ -106,7 +109,11 @@ export function createDetailedLineMapViewModel(
     });
   });
 
-  const stops = applyMapCoordinates(Array.from(stopsById.values()), branches);
+  const positionedMap = applyMapCoordinates(
+    Array.from(stopsById.values()),
+    branches,
+  );
+  const stops = positionedMap.stops;
 
   return {
     lineId: line.id,
@@ -116,7 +123,8 @@ export function createDetailedLineMapViewModel(
     stops,
     segments: createLineMapSegments(stops, branches),
     branches,
-    tiles: createMapTiles(stops),
+    tiles: createMapTiles(positionedMap.viewport),
+    viewport: positionedMap.viewport,
   };
 }
 
@@ -139,6 +147,13 @@ export async function loadTransferLineDirections(
     lineId,
     directions: directions.slice(0, 6),
   };
+}
+
+export function loadTransferLineFrequency(
+  lineId: string,
+  station: StationSearchOption,
+): Promise<LineFrequencyProfile> {
+  return fetchLineFrequencyProfile(lineId, station);
 }
 
 export function createTransferDirectionList(
@@ -303,11 +318,13 @@ function enrichStopCoordinates(
   canonicalStation?: StationSearchOption,
 ) {
   const station = canonicalStation ?? stop.station;
+  const quays = enrichQuays(stop.quays);
 
   if (typeof stop.lon === "number" && typeof stop.lat === "number") {
     return {
       ...stop,
       station,
+      quays,
       coordinateSource: "wgs84" as const,
     };
   }
@@ -325,6 +342,7 @@ function enrichStopCoordinates(
       return {
         ...stop,
         station,
+        quays,
         lon: converted.lon,
         lat: converted.lat,
         coordinateSource: "lambert93" as const,
@@ -335,43 +353,67 @@ function enrichStopCoordinates(
   return {
     ...stop,
     station,
+    quays,
   };
+}
+
+function enrichQuays(quays?: TransitQuay[]): LineMapQuayView[] | undefined {
+  return quays?.map((quay) => {
+    const lonLat = resolveTransitLonLat(quay);
+
+    return {
+      ...quay,
+      ...(lonLat ? lonLat : {}),
+    };
+  });
+}
+
+function mergeQuays(
+  current?: LineMapQuayView[],
+  incoming?: LineMapQuayView[],
+): LineMapQuayView[] | undefined {
+  const quays = new Map(
+    [...(current ?? []), ...(incoming ?? [])].map((quay) => [quay.id, quay]),
+  );
+
+  return quays.size > 0 ? Array.from(quays.values()) : undefined;
 }
 
 function applyMapCoordinates(
   stops: LineMapStopView[],
   branches: LineMapBranchView[],
-): LineMapStopView[] {
+): PositionedLineMap {
   const stopsWithCoordinates = stops.filter(
     (stop) => typeof stop.lon === "number" && typeof stop.lat === "number",
   );
 
   if (stopsWithCoordinates.length >= 2) {
-    const projectedStops = stopsWithCoordinates.map((stop) => ({
-      stop,
-      point: projectLonLat(stop.lon as number, stop.lat as number),
-    }));
-    const viewport = createProjectedViewport({
-      minX: Math.min(...projectedStops.map((item) => item.point.x)),
-      maxX: Math.max(...projectedStops.map((item) => item.point.x)),
-      minY: Math.min(...projectedStops.map((item) => item.point.y)),
-      maxY: Math.max(...projectedStops.map((item) => item.point.y)),
+    const viewport = createGeographicViewport(stopsWithCoordinates, {
+      viewBoxWidth: VIEWBOX_WIDTH,
+      viewBoxHeight: VIEWBOX_HEIGHT,
+      paddingX: SVG_PADDING_X,
+      paddingY: SVG_PADDING_Y,
+      coordinatePadding: MAP_COORDINATE_PADDING,
     });
 
-    return stops.map((stop) => {
-      if (typeof stop.lon !== "number" || typeof stop.lat !== "number") {
-        return stop;
-      }
-
-      const point = projectLonLat(stop.lon, stop.lat);
-      const normalizedPoint = viewport.project(point);
-
+    if (viewport) {
       return {
-        ...stop,
-        x: normalizedPoint.x,
-        y: normalizedPoint.y,
+        viewport,
+        stops: stops.map((stop) => {
+          const normalizedPoint = projectTransitCoordinate(stop, viewport);
+
+          if (!normalizedPoint) {
+            return stop;
+          }
+
+          return {
+            ...stop,
+            x: normalizedPoint.x,
+            y: normalizedPoint.y,
+          };
+        }),
       };
-    });
+    }
   }
 
   const stopsWithProjectedCoordinates = stops.filter(
@@ -395,44 +437,48 @@ function applyMapCoordinates(
     );
     const bounds = padBounds({ minX, maxX, minY, maxY });
 
-    return stops.map((stop) => {
-      if (
-        typeof stop.projectedX !== "number" ||
-        typeof stop.projectedY !== "number"
-      ) {
-        return stop;
-      }
+    return {
+      stops: stops.map((stop) => {
+        if (
+          typeof stop.projectedX !== "number" ||
+          typeof stop.projectedY !== "number"
+        ) {
+          return stop;
+        }
 
-      return {
-        ...stop,
-        x: normalizeProjectedCoordinate(
-          stop.projectedX,
-          bounds.minX,
-          bounds.maxX,
-        ),
-        y: normalizeProjectedCoordinate(
-          bounds.maxY - (stop.projectedY - bounds.minY),
-          bounds.minY,
-          bounds.maxY,
-        ),
-      };
-    });
+        return {
+          ...stop,
+          x: normalizeProjectedCoordinate(
+            stop.projectedX,
+            bounds.minX,
+            bounds.maxX,
+          ),
+          y: normalizeProjectedCoordinate(
+            bounds.maxY - (stop.projectedY - bounds.minY),
+            bounds.minY,
+            bounds.maxY,
+          ),
+        };
+      }),
+    };
   }
 
   const orderedStopIds = createFallbackMapOrder(stops, branches);
 
-  return stops.map((stop) => {
-    const index = orderedStopIds.indexOf(stop.id);
-    const ratio =
-      orderedStopIds.length > 1 ? index / (orderedStopIds.length - 1) : 0.5;
+  return {
+    stops: stops.map((stop) => {
+      const index = orderedStopIds.indexOf(stop.id);
+      const ratio =
+        orderedStopIds.length > 1 ? index / (orderedStopIds.length - 1) : 0.5;
 
-    return {
-      ...stop,
-      coordinateSource: stop.coordinateSource ?? "fallback",
-      x: normalizeMapRatio(index >= 0 ? ratio : 0.5),
-      y: 0.5,
-    };
-  });
+      return {
+        ...stop,
+        coordinateSource: stop.coordinateSource ?? "fallback",
+        x: normalizeMapRatio(index >= 0 ? ratio : 0.5),
+        y: 0.5,
+      };
+    }),
+  };
 }
 
 function createLineMapSegments(
@@ -479,31 +525,17 @@ function createLineMapSegments(
     .map(({ id, fromStopId, toStopId }) => ({ id, fromStopId, toStopId }));
 }
 
-function createMapTiles(stops: LineMapStopView[]): MapTile[] {
-  const stopsWithCoordinates = stops.filter(
-    (stop) => typeof stop.lon === "number" && typeof stop.lat === "number",
-  );
-
-  if (stopsWithCoordinates.length < 2) {
+function createMapTiles(viewport?: GeographicViewport): MapTile[] {
+  if (!viewport) {
     return [];
   }
 
-  const projectedStops = stopsWithCoordinates.map((stop) =>
-    projectLonLat(stop.lon as number, stop.lat as number),
-  );
-  const viewport = createProjectedViewport({
-    minX: Math.min(...projectedStops.map((point) => point.x)),
-    maxX: Math.max(...projectedStops.map((point) => point.x)),
-    minY: Math.min(...projectedStops.map((point) => point.y)),
-    maxY: Math.max(...projectedStops.map((point) => point.y)),
-  });
-  const bounds = viewport.bounds;
-  const zoom = chooseTileZoom(bounds);
+  const zoom = chooseTileZoom(viewport);
   const scale = 2 ** zoom;
-  const minTileX = Math.floor(bounds.minX * scale);
-  const maxTileX = Math.floor(bounds.maxX * scale);
-  const minTileY = Math.floor(bounds.minY * scale);
-  const maxTileY = Math.floor(bounds.maxY * scale);
+  const minTileX = Math.floor(viewport.minX * scale);
+  const maxTileX = Math.floor(viewport.maxX * scale);
+  const minTileY = Math.floor(viewport.minY * scale);
+  const maxTileY = Math.floor(viewport.maxY * scale);
   const tiles: MapTile[] = [];
 
   for (let tileX = minTileX; tileX <= maxTileX; tileX += 1) {
@@ -514,11 +546,17 @@ function createMapTiles(stops: LineMapStopView[]): MapTile[] {
       const top = tileY / scale;
       const tileSizeX = 1 / scale;
       const tileSizeY = 1 / scale;
-      const normalizedTopLeft = viewport.project({ x: left, y: top });
-      const normalizedBottomRight = viewport.project({
-        x: left + tileSizeX,
-        y: top + tileSizeY,
-      });
+      const normalizedTopLeft = projectMercatorPointToViewport(
+        { x: left, y: top },
+        viewport,
+      );
+      const normalizedBottomRight = projectMercatorPointToViewport(
+        {
+          x: left + tileSizeX,
+          y: top + tileSizeY,
+        },
+        viewport,
+      );
       const normalizedLeft = normalizedTopLeft.x;
       const normalizedTop = normalizedTopLeft.y;
       const normalizedRight = normalizedBottomRight.x;
@@ -561,88 +599,6 @@ function chooseTileZoom(bounds: {
   }
 
   return 13;
-}
-
-function createProjectedViewport(bounds: ProjectedBounds): ProjectedViewport {
-  const paddedBounds = padBounds(bounds);
-  const innerWidth = VIEWBOX_WIDTH - SVG_PADDING_X * 2;
-  const innerHeight = VIEWBOX_HEIGHT - SVG_PADDING_Y * 2;
-  const spanX = Math.max(paddedBounds.maxX - paddedBounds.minX, 0.000001);
-  const spanY = Math.max(paddedBounds.maxY - paddedBounds.minY, 0.000001);
-  const centerX = (paddedBounds.minX + paddedBounds.maxX) / 2;
-  const centerY = (paddedBounds.minY + paddedBounds.maxY) / 2;
-  const availableX = innerWidth * (1 - MAP_COORDINATE_PADDING * 2);
-  const availableY = innerHeight * (1 - MAP_COORDINATE_PADDING * 2);
-  const scale = Math.min(availableX / spanX, availableY / spanY);
-  const visibleWidth = innerWidth / scale;
-  const visibleHeight = innerHeight / scale;
-
-  return {
-    bounds: {
-      minX: centerX - visibleWidth / 2,
-      maxX: centerX + visibleWidth / 2,
-      minY: centerY - visibleHeight / 2,
-      maxY: centerY + visibleHeight / 2,
-    },
-    project(point) {
-      return {
-        x: 0.5 + ((point.x - centerX) * scale) / innerWidth,
-        y: 0.5 + ((point.y - centerY) * scale) / innerHeight,
-      };
-    },
-  };
-}
-
-function projectLonLat(lon: number, lat: number): { x: number; y: number } {
-  const boundedLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
-  const latRadians = (boundedLat * Math.PI) / 180;
-
-  return {
-    x: (lon + 180) / 360,
-    y:
-      (1 -
-        Math.log(Math.tan(latRadians) + 1 / Math.cos(latRadians)) / Math.PI) /
-      2,
-  };
-}
-
-function convertLambert93ToWgs84(
-  x: number,
-  y: number,
-): { lon: number; lat: number } | undefined {
-  if (!isLikelyLambert93Coordinate(x, y)) {
-    return undefined;
-  }
-
-  const radius = Math.hypot(x - LAMBERT93_XS, y - LAMBERT93_YS);
-  const gamma = Math.atan2(x - LAMBERT93_XS, LAMBERT93_YS - y);
-  const latIso = -(1 / LAMBERT93_N) * Math.log(radius / LAMBERT93_C);
-  const lonRad = LAMBERT93_LON0_RAD + gamma / LAMBERT93_N;
-  let latRad = 2 * Math.atan(Math.exp(latIso)) - Math.PI / 2;
-
-  for (let index = 0; index < 6; index += 1) {
-    const eSinLat = LAMBERT93_E * Math.sin(latRad);
-    latRad =
-      2 *
-        Math.atan(
-          Math.pow((1 + eSinLat) / (1 - eSinLat), LAMBERT93_E / 2) *
-            Math.exp(latIso),
-        ) -
-      Math.PI / 2;
-  }
-
-  const lon = (lonRad * 180) / Math.PI;
-  const lat = (latRad * 180) / Math.PI;
-
-  if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
-    return undefined;
-  }
-
-  return { lon, lat };
-}
-
-function isLikelyLambert93Coordinate(x: number, y: number): boolean {
-  return x >= 100000 && x <= 1300000 && y >= 6000000 && y <= 7200000;
 }
 
 function padBounds(bounds: {

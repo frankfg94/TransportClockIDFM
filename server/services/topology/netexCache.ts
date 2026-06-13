@@ -4,6 +4,7 @@ import type {
   RawStation,
   TopologyBranchLayout,
   TopologyBranch,
+  TopologyQuay,
   TopologySegment,
   TopologyStation,
 } from "./types";
@@ -846,16 +847,28 @@ function adaptNetexLineToTopology(cache: NetexLineCache): LineTopology {
   const nodes = cache.schematic.nodes;
   const stationById = new Map(nodes.map((node) => [node.id, node]));
   const rawToSchematicId = buildRawToSchematicMap(cache, stationById);
+  const quaysByStationId = buildTopologyQuaysByStationId(
+    cache,
+    rawToSchematicId,
+    stationById,
+  );
   const stations: TopologyStation[] = nodes
-    .map((node) => ({
-      id: node.id,
-      name: decodeMojibake(node.name),
-      degree: node.degree,
-      aliases: [node.name].filter((alias) => alias !== decodeMojibake(node.name)),
-      projectedX: node.x,
-      projectedY: node.y,
-      srsName: node.srsName,
-    }))
+    .map((node) => {
+      const quays = quaysByStationId.get(node.id);
+
+      return {
+        id: node.id,
+        name: decodeMojibake(node.name),
+        degree: node.degree,
+        aliases: [node.name].filter(
+          (alias) => alias !== decodeMojibake(node.name),
+        ),
+        projectedX: node.x,
+        projectedY: node.y,
+        srsName: node.srsName,
+        ...(quays?.length ? { quays } : {}),
+      };
+    })
     .sort((left, right) => left.name.localeCompare(right.name, "fr"));
   const segments = buildTopologySegmentsFromSchematic(cache);
   const patterns = buildTopologyPatternsFromNetex(cache, rawToSchematicId, stationById);
@@ -934,6 +947,47 @@ function buildRawToSchematicMap(
   }
 
   return rawToSchematicId;
+}
+
+function buildTopologyQuaysByStationId(
+  cache: NetexLineCache,
+  rawToSchematicId: Map<string, string>,
+  stationById: Map<string, NetexSchematicNode>,
+): Map<string, TopologyQuay[]> {
+  const quaysByStationId = new Map<string, Map<string, TopologyQuay>>();
+
+  for (const station of cache.stations ?? []) {
+    if (!isFiniteNumber(station.x) || !isFiniteNumber(station.y)) {
+      continue;
+    }
+
+    const schematicId = rawToSchematicId.get(station.id);
+
+    if (!schematicId || !stationById.has(schematicId)) {
+      continue;
+    }
+
+    const quays =
+      quaysByStationId.get(schematicId) ?? new Map<string, TopologyQuay>();
+
+    quays.set(station.id, {
+      id: station.id,
+      name: decodeMojibake(station.name),
+      projectedX: station.x,
+      projectedY: station.y,
+      srsName: station.srsName,
+    });
+    quaysByStationId.set(schematicId, quays);
+  }
+
+  return new Map(
+    Array.from(quaysByStationId, ([stationId, quays]) => [
+      stationId,
+      Array.from(quays.values()).sort((left, right) =>
+        left.id.localeCompare(right.id),
+      ),
+    ]),
+  );
 }
 
 function chooseNearestNode(

@@ -181,6 +181,15 @@ export interface TransferLineOption {
   ref?: string;
 }
 
+export interface LineFrequencyProfile {
+  lineId: string;
+  stationId: string;
+  serviceDate: string;
+  peakMinutes?: number;
+  offPeakMinutes?: number;
+  nightMinutes?: number;
+}
+
 export interface LineRouteStop {
   id: string;
   label: string;
@@ -189,8 +198,19 @@ export interface LineRouteStop {
   lat?: number;
   projectedX?: number;
   projectedY?: number;
+  quays?: TransitQuay[];
   station: StationSearchOption;
   transferLines?: TransferLineOption[];
+}
+
+export interface TransitQuay {
+  id: string;
+  name: string;
+  lon?: number;
+  lat?: number;
+  projectedX?: number;
+  projectedY?: number;
+  srsName?: string;
 }
 
 export interface LineRouteSequence {
@@ -270,4 +290,3 @@ export interface LinePatternDirectionOption {
   label: string;
   isTerminal?: boolean;
 }
-

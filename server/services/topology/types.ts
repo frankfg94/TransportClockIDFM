@@ -41,6 +41,15 @@ export interface LineTopology {
 
 export interface TopologyStation extends RawStation {
   degree: number;
+  quays?: TopologyQuay[];
+}
+
+export interface TopologyQuay {
+  id: string;
+  name: string;
+  projectedX: number;
+  projectedY: number;
+  srsName?: string;
 }
 
 export interface TopologySegment {

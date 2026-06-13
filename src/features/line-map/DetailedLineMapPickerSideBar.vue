@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { ExternalLink, MapIcon, MapPinned, Star, X } from "lucide-vue-next";
+import LineIconBadge from "../../components/LineIconBadge.vue";
 import StationTransferDetails from "../../components/StationTransferDetails.vue";
-import type { TransferLineOption } from "../../types/transit";
+import type { NetworkGhostLineView } from "../network-ghost";
+import type {
+  LineFrequencyProfile,
+  TransferLineOption,
+} from "../../types/transit";
 import type { LineMapStopView } from "./types";
 
 defineProps<{
@@ -13,6 +18,13 @@ defineProps<{
   showActions?: boolean;
   favoriteLoading?: boolean;
   favoriteError?: string;
+  activeGhostLine?: NetworkGhostLineView;
+  ghostDirections?: string[];
+  ghostDirectionsLoading?: boolean;
+  ghostDirectionsError?: boolean;
+  ghostFrequency?: LineFrequencyProfile;
+  ghostFrequencyLoading?: boolean;
+  ghostFrequencyError?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -20,6 +32,22 @@ const emit = defineEmits<{
   addFavorite: [];
   openGoogleMaps: [];
 }>();
+
+function isNoctilienLine(line: NetworkGhostLineView): boolean {
+  return (
+    line.family === "NOCTILIEN" ||
+    line.mode.toLowerCase().includes("noctilien") ||
+    /^n[\s_-]*\d{1,3}[a-z]?$/iu.test(line.label.trim())
+  );
+}
+
+function hasDayFrequency(profile?: LineFrequencyProfile): boolean {
+  return Boolean(profile?.peakMinutes || profile?.offPeakMinutes);
+}
+
+function formatFrequency(minutes?: number): string {
+  return minutes ? `≈ ${minutes} min` : "Indisponible";
+}
 </script>
 
 <template>
@@ -41,6 +69,97 @@ const emit = defineEmits<{
     </header>
 
     <div class="line-map-sidebar__content">
+      <section
+        v-if="activeGhostLine"
+        class="line-map-sidebar__ghost-detail"
+        data-testid="line-map-sidebar-ghost-detail"
+      >
+        <header>
+          <LineIconBadge :line="activeGhostLine" compact />
+          <div>
+            <small>Ligne survolée</small>
+            <strong>{{ activeGhostLine.label }}</strong>
+            <span>{{ activeGhostLine.mode }}</span>
+          </div>
+        </header>
+
+        <div class="line-map-sidebar__ghost-directions">
+          <small>Directions de la ligne</small>
+          <span
+            v-if="ghostDirectionsLoading"
+            class="line-map-sidebar__ghost-muted"
+          >
+            Chargement...
+          </span>
+          <div v-else-if="ghostDirections?.length">
+            <span
+              v-for="direction in ghostDirections"
+              :key="`${activeGhostLine.id}-${direction}`"
+            >
+              {{ direction }}
+            </span>
+          </div>
+          <span v-else class="line-map-sidebar__ghost-muted">
+            {{
+              ghostDirectionsError
+                ? "Directions indisponibles"
+                : "Aucune direction renseignée"
+            }}
+          </span>
+        </div>
+
+        <div class="line-map-sidebar__ghost-frequency">
+          <small>Fréquence théorique à cette station</small>
+          <span
+            v-if="ghostFrequencyLoading"
+            class="line-map-sidebar__ghost-muted"
+          >
+            Calcul en cours...
+          </span>
+          <div
+            v-else-if="
+              ghostFrequency &&
+              (hasDayFrequency(ghostFrequency) ||
+                ghostFrequency.nightMinutes)
+            "
+            class="line-map-sidebar__ghost-frequency-grid"
+          >
+            <template v-if="isNoctilienLine(activeGhostLine)">
+              <div class="line-map-sidebar__ghost-frequency-card">
+                <span>Nuit</span>
+                <strong>
+                  {{ formatFrequency(ghostFrequency.nightMinutes) }}
+                </strong>
+                <small>23h30–5h</small>
+              </div>
+            </template>
+            <template v-else>
+              <div class="line-map-sidebar__ghost-frequency-card">
+                <span>Heures de pointe</span>
+                <strong>
+                  {{ formatFrequency(ghostFrequency.peakMinutes) }}
+                </strong>
+                <small>7h–9h30 · 17h30–19h</small>
+              </div>
+              <div class="line-map-sidebar__ghost-frequency-card">
+                <span>Heures creuses</span>
+                <strong>
+                  {{ formatFrequency(ghostFrequency.offPeakMinutes) }}
+                </strong>
+                <small>Hors pointe, de 5h à 23h30</small>
+              </div>
+            </template>
+          </div>
+          <span v-else class="line-map-sidebar__ghost-muted">
+            {{
+              ghostFrequencyError
+                ? "Fréquence indisponible"
+                : "Pas assez d’horaires pour calculer la fréquence"
+            }}
+          </span>
+        </div>
+      </section>
+
       <StationTransferDetails
         :station-label="stop.label"
         :city="stop.city"
@@ -115,9 +234,117 @@ const emit = defineEmits<{
 }
 
 .line-map-sidebar__content {
+  display: grid;
+  gap: 16px;
   min-height: 0;
   overflow: auto;
   padding: 20px;
+}
+
+.line-map-sidebar__ghost-detail {
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  align-items: start;
+  align-content: baseline;
+}
+
+.line-map-sidebar__ghost-detail header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.line-map-sidebar__ghost-detail header div {
+  display: grid;
+  gap: 2px;
+}
+
+.line-map-sidebar__ghost-detail header small,
+.line-map-sidebar__ghost-directions > small,
+.line-map-sidebar__ghost-frequency > small {
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.line-map-sidebar__ghost-detail header strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.line-map-sidebar__ghost-detail header span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.line-map-sidebar__ghost-directions {
+  display: grid;
+  gap: 7px;
+}
+
+.line-map-sidebar__ghost-frequency {
+  display: grid;
+  gap: 7px;
+}
+
+.line-map-sidebar__ghost-frequency-grid {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.line-map-sidebar__ghost-frequency-card {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 9px;
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+}
+
+.line-map-sidebar__ghost-frequency-card > span {
+  color: var(--muted);
+  font-size: 0.63rem;
+  font-weight: 850;
+}
+
+.line-map-sidebar__ghost-frequency-card > strong {
+  color: var(--ink);
+  font-size: 0.84rem;
+}
+
+.line-map-sidebar__ghost-frequency-card > small {
+  color: var(--muted);
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.line-map-sidebar__ghost-directions > div {
+  display: grid;
+  gap: 5px;
+}
+
+.line-map-sidebar__ghost-directions > div span {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 7px;
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 850;
+  padding: 6px 8px;
+}
+
+.line-map-sidebar__ghost-muted {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 750;
 }
 
 .line-map-sidebar__actions {

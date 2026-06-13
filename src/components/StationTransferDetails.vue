@@ -166,8 +166,7 @@ async function loadTransferDirections(
         </span>
         <span
           v-if="
-            isBusLikeTransfer(activeTransfer) &&
-            activeDirectionState?.loading
+            isBusLikeTransfer(activeTransfer) && activeDirectionState?.loading
           "
           class="station-transfer-details__detail-muted"
         >
@@ -257,6 +256,7 @@ async function loadTransferDirections(
 .station-transfer-details__group {
   display: grid;
   gap: 9px;
+  align-content: start;
 }
 
 .station-transfer-details__group + .station-transfer-details__group {
@@ -265,7 +265,7 @@ async function loadTransferDirections(
 }
 
 .station-transfer-details__group-title {
-  align-items: center;
+  align-items: start;
   display: grid;
   gap: 8px;
   grid-template-columns: auto 1fr auto;
@@ -273,8 +273,7 @@ async function loadTransferDirections(
 
 .station-transfer-details__group-title > span {
   align-items: center;
-  border: 2px solid
-    color-mix(in srgb, var(--station-line-color), #0f172a 18%);
+  border: 2px solid color-mix(in srgb, var(--station-line-color), #0f172a 18%);
   border-radius: 999px;
   color: color-mix(in srgb, var(--station-line-color), #0f172a 22%);
   display: inline-flex;
@@ -302,7 +301,7 @@ async function loadTransferDirections(
 }
 
 .station-transfer-details__list {
-  align-items: center;
+  align-items: start;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -335,6 +334,7 @@ async function loadTransferDirections(
   display: grid;
   gap: 7px;
   padding: 10px;
+  align-content: baseline;
 }
 
 .station-transfer-details__detail strong {

@@ -1,12 +1,28 @@
 ﻿<script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import { loadDetailedLineMap, loadStationTransfers } from "./lineMapData";
+import { Eye, Minus, Plus } from "lucide-vue-next";
+import {
+  loadDetailedLineMap,
+  loadStationTransfers,
+  loadTransferLineDirections,
+  loadTransferLineFrequency,
+} from "./lineMapData";
 import DetailedLineMapPickerSideBar from "./DetailedLineMapPickerSideBar.vue";
+import {
+  filterNetworkGhostTransfersByModes,
+  TransitNetworkGhostLayer,
+  useNetworkGhost,
+  type GhostNetworkModeVisibility,
+  type GhostNetworkScope,
+  type NetworkGhostAnchor,
+  type NetworkGhostLineView,
+} from "../network-ghost";
 import { transitBoards } from "../../config/transitBoards";
 import { createBoardFromDraft } from "../../services/boardBuilder";
 import { fetchDirectionGroupsForStation } from "../../services/idfm";
 import { addBoardToTransitPreferences } from "../../storage/transitPreferences";
 import type {
+  LineFrequencyProfile,
   LineSearchOption,
   StationSearchOption,
   TransferLineOption,
@@ -22,6 +38,18 @@ interface TransferState {
   loading: boolean;
   lines: TransferLineOption[];
   error?: string;
+}
+
+interface GhostDirectionState {
+  loading: boolean;
+  directions: string[];
+  error?: boolean;
+}
+
+interface GhostFrequencyState {
+  loading: boolean;
+  profile?: LineFrequencyProfile;
+  error?: boolean;
 }
 
 interface MapDragState {
@@ -40,10 +68,16 @@ const props = withDefaults(
     selectedStationId?: string;
     mode?: "picker" | "explorer";
     selectable?: boolean;
+    ghostNetworkEnabled?: boolean;
+    ghostNetworkScope?: GhostNetworkScope;
+    reduceMotion?: boolean;
   }>(),
   {
     mode: "picker",
     selectable: true,
+    ghostNetworkEnabled: false,
+    ghostNetworkScope: "all",
+    reduceMotion: false,
   },
 );
 
@@ -56,8 +90,9 @@ const VIEWBOX_HEIGHT = 620;
 const SVG_PADDING_X = 78;
 const SVG_PADDING_Y = 68;
 const MIN_ZOOM = 0.9;
-const MAX_ZOOM = 4;
-const ZOOM_STEP = 0.22;
+const MAX_ZOOM = 20;
+const ZOOM_FACTOR = 1.24;
+const GHOST_TOOLTIP_TARGET = "#line-map-network-ghost-tooltip-layer";
 
 const lineMap = ref<LineMapViewModel>();
 const loadingMap = ref(false);
@@ -67,6 +102,10 @@ const activeStop = ref<LineMapStopView>();
 const zoom = ref(1.12);
 const mapCanvas = ref<HTMLDivElement>();
 const suppressNextCanvasClick = ref(false);
+const ghostResetKey = ref(0);
+const ghostDisplayExpanded = ref(true);
+const ghostDisplayEnabled = ref(true);
+const activeGhostLine = ref<NetworkGhostLineView>();
 const favoriteLoading = ref(false);
 const favoriteError = ref("");
 const favoriteConfirmationOpen = ref(false);
@@ -80,6 +119,15 @@ const mapDrag = reactive<MapDragState>({
   startY: 0,
 });
 const transferStates = reactive<Record<string, TransferState>>({});
+const ghostDirectionStates = reactive<Record<string, GhostDirectionState>>({});
+const ghostFrequencyStates = reactive<Record<string, GhostFrequencyState>>({});
+const ghostModeVisibility = reactive<GhostNetworkModeVisibility>({
+  bus: props.ghostNetworkScope !== "structural",
+  metro: true,
+  tram: true,
+  noctilien: props.ghostNetworkScope !== "structural",
+  rer: true,
+});
 let latestMapRequest = 0;
 
 const stopById = computed(() => {
@@ -97,9 +145,68 @@ const selectedStop = computed(() =>
 const activeTransferState = computed(() =>
   activeStop.value ? transferStates[activeStop.value.id] : undefined,
 );
+const ghostAnchor = computed<NetworkGhostAnchor | undefined>(() => {
+  const stop = activeStop.value;
+
+  if (!stop) {
+    return undefined;
+  }
+
+  return {
+    id: stop.id,
+    label: stop.label,
+    lon: stop.lon ?? stop.station.lon,
+    lat: stop.lat ?? stop.station.lat,
+    projectedX: stop.projectedX,
+    projectedY: stop.projectedY,
+    mapX: stop.x,
+    mapY: stop.y,
+    quays: stop.quays,
+  };
+});
+const ghostTransfers = computed(
+  () => activeTransferState.value?.lines ?? [],
+);
+const visibleGhostTransfers = computed(() =>
+  ghostDisplayEnabled.value
+    ? filterNetworkGhostTransfersByModes(
+        ghostTransfers.value,
+        ghostModeVisibility,
+      )
+    : [],
+);
+const activeGhostDirectionState = computed(() =>
+  activeGhostLine.value
+    ? ghostDirectionStates[activeGhostLine.value.id]
+    : undefined,
+);
+const activeGhostFrequencyState = computed(() => {
+  const line = activeGhostLine.value;
+  const stop = activeStop.value;
+
+  return line && stop
+    ? ghostFrequencyStates[createGhostFrequencyKey(line.id, stop)]
+    : undefined;
+});
 const isExplorerMode = computed(() => props.mode === "explorer");
 const canSelectStops = computed(() => props.selectable);
 const isMapDragging = computed(() => mapDrag.dragging);
+const {
+  lines: ghostLines,
+  progress: ghostProgress,
+  quays: ghostQuays,
+} = useNetworkGhost({
+  anchor: ghostAnchor,
+  enabled: computed(
+    () =>
+      props.ghostNetworkEnabled &&
+      isExplorerMode.value &&
+      ghostDisplayEnabled.value,
+  ),
+  scope: computed(() => props.ghostNetworkScope),
+  transfers: visibleGhostTransfers,
+  viewport: computed(() => lineMap.value?.viewport),
+});
 
 const mapStats = computed(() => {
   const stopCount = lineMap.value?.stops.length ?? 0;
@@ -129,9 +236,9 @@ const svgStyle = computed(() => ({
   width: `${VIEWBOX_WIDTH * zoom.value}px`,
 }));
 
-const stopRadius = computed(() => Math.max(3.4, 7 / zoom.value));
-const stopHaloRadius = computed(() => Math.max(8, 16 / zoom.value));
-const stopStrokeWidth = computed(() => Math.max(2 / zoom.value));
+const stopRadius = computed(() => 7 / zoom.value);
+const stopHaloRadius = computed(() => 16 / zoom.value);
+const stopStrokeWidth = computed(() => 2 / zoom.value);
 
 const visibleLabelIds = computed(() => {
   const map = lineMap.value;
@@ -197,6 +304,23 @@ watch(
   { immediate: true },
 );
 
+watch(
+  () => props.ghostNetworkScope,
+  (scope) => {
+    if (scope === "structural") {
+      ghostModeVisibility.bus = false;
+      ghostModeVisibility.noctilien = false;
+    }
+  },
+);
+
+watch(ghostDisplayEnabled, (enabled) => {
+  if (!enabled) {
+    activeGhostLine.value = undefined;
+    ghostResetKey.value += 1;
+  }
+});
+
 async function loadMap(): Promise<void> {
   if (!props.line) {
     return;
@@ -254,14 +378,92 @@ function toggleStopDetails(stop: LineMapStopView): void {
     return;
   }
 
+  ghostResetKey.value += 1;
+  activeGhostLine.value = undefined;
   activeStop.value = stop;
   void loadTransfers(stop);
 }
 
 function closeSidebar(): void {
   activeStop.value = undefined;
+  activeGhostLine.value = undefined;
+  ghostResetKey.value += 1;
   favoriteError.value = "";
   favoriteLoading.value = false;
+}
+
+function handleGhostActiveLineChange(
+  line: NetworkGhostLineView | undefined,
+): void {
+  activeGhostLine.value = line;
+
+  if (line) {
+    void loadGhostDirections(line);
+
+    if (activeStop.value) {
+      void loadGhostFrequency(line, activeStop.value);
+    }
+  }
+}
+
+async function loadGhostDirections(line: NetworkGhostLineView): Promise<void> {
+  if (ghostDirectionStates[line.id]) {
+    return;
+  }
+
+  ghostDirectionStates[line.id] = {
+    loading: true,
+    directions: [],
+  };
+
+  try {
+    const result = await loadTransferLineDirections(line.id);
+
+    ghostDirectionStates[line.id] = {
+      loading: false,
+      directions: result.directions,
+    };
+  } catch {
+    ghostDirectionStates[line.id] = {
+      loading: false,
+      directions: [],
+      error: true,
+    };
+  }
+}
+
+async function loadGhostFrequency(
+  line: NetworkGhostLineView,
+  stop: LineMapStopView,
+): Promise<void> {
+  const key = createGhostFrequencyKey(line.id, stop);
+
+  if (ghostFrequencyStates[key]) {
+    return;
+  }
+
+  ghostFrequencyStates[key] = {
+    loading: true,
+  };
+
+  try {
+    ghostFrequencyStates[key] = {
+      loading: false,
+      profile: await loadTransferLineFrequency(line.id, stop.station),
+    };
+  } catch {
+    ghostFrequencyStates[key] = {
+      loading: false,
+      error: true,
+    };
+  }
+}
+
+function createGhostFrequencyKey(
+  lineId: string,
+  stop: LineMapStopView,
+): string {
+  return `${lineId}:${stop.station.scheduleStopAreaRef ?? stop.station.id}`;
 }
 
 async function loadTransfers(stop: LineMapStopView): Promise<void> {
@@ -495,27 +697,27 @@ function getStopActionLabel(stop: LineMapStopView): string {
     : `Afficher ${stop.label}`;
 }
 
-function adjustZoom(delta: number): void {
-  zoom.value = Math.max(
-    MIN_ZOOM,
-    Math.min(MAX_ZOOM, Number((zoom.value + delta).toFixed(2))),
-  );
+function adjustZoom(direction: number): void {
+  const factor = direction > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
+
+  zoom.value = clampZoom(zoom.value * factor);
 }
 
 function zoomAtCanvasPoint(
-  delta: number,
+  direction: number,
   clientX: number,
   clientY: number,
 ): void {
   const canvas = mapCanvas.value;
 
   if (!canvas) {
-    adjustZoom(delta);
+    adjustZoom(direction);
     return;
   }
 
   const previousZoom = zoom.value;
-  const nextZoom = clampZoom(previousZoom + delta);
+  const factor = direction > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
+  const nextZoom = clampZoom(previousZoom * factor);
 
   if (nextZoom === previousZoom) {
     return;
@@ -544,9 +746,9 @@ function handleCanvasWheel(event: WheelEvent): void {
   }
 
   event.preventDefault();
-  const delta = event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
+  const direction = event.deltaY > 0 ? -1 : 1;
 
-  zoomAtCanvasPoint(delta, event.clientX, event.clientY);
+  zoomAtCanvasPoint(direction, event.clientX, event.clientY);
 }
 
 function startMapDrag(event: PointerEvent): void {
@@ -554,7 +756,9 @@ function startMapDrag(event: PointerEvent): void {
     event.button !== 0 ||
     !mapCanvas.value ||
     (event.target instanceof Element &&
-      event.target.closest(".line-map-hit-target"))
+      event.target.closest(
+        ".line-map-hit-target, .network-ghost-line__hit-target",
+      ))
   ) {
     return;
   }
@@ -612,13 +816,22 @@ function handleCanvasMouseLeave(): void {
 }
 
 function handleCanvasClick(event: MouseEvent): void {
+  if (
+    event.target instanceof Element &&
+    event.target.closest(".network-ghost-line__hit-target")
+  ) {
+    return;
+  }
+
   if (!suppressNextCanvasClick.value) {
+    ghostResetKey.value += 1;
     return;
   }
 
   event.preventDefault();
   event.stopPropagation();
   suppressNextCanvasClick.value = false;
+  ghostResetKey.value += 1;
 }
 
 function resetZoom(): void {
@@ -684,12 +897,19 @@ function getLabelPriority(
       <div v-if="lineMap" class="line-map-panel__tools">
         <slot name="bar-before-stats"></slot>
         <span class="line-map-stats">{{ mapStats }}</span>
+        <span
+          v-if="ghostNetworkEnabled && ghostProgress.total > 0"
+          class="line-map-network-progress"
+          role="status"
+        >
+          Réseau {{ ghostProgress.completed }}/{{ ghostProgress.total }}
+        </span>
         <div class="line-map-zoom" aria-label="Zoom du plan">
           <button
             class="icon-button line-map-zoom__button"
             type="button"
             aria-label="Dézoomer"
-            @click="adjustZoom(-ZOOM_STEP)"
+            @click="adjustZoom(-1)"
           >
             −
           </button>
@@ -704,7 +924,7 @@ function getLabelPriority(
             class="icon-button line-map-zoom__button"
             type="button"
             aria-label="Zoomer"
-            @click="adjustZoom(ZOOM_STEP)"
+            @click="adjustZoom(1)"
           >
             +
           </button>
@@ -765,6 +985,29 @@ function getLabelPriority(
           <g class="line-map-map-mask" aria-hidden="true">
             <rect x="0" y="0" :width="VIEWBOX_WIDTH" :height="VIEWBOX_HEIGHT" />
           </g>
+
+          <TransitNetworkGhostLayer
+            v-if="
+              ghostNetworkEnabled &&
+              ghostDisplayEnabled &&
+              isExplorerMode &&
+              activeStop &&
+              lineMap.viewport
+            "
+            :lines="ghostLines"
+            :quays="ghostQuays"
+            :anchor-x="activeStop.x"
+            :anchor-y="activeStop.y"
+            :view-box-width="VIEWBOX_WIDTH"
+            :view-box-height="VIEWBOX_HEIGHT"
+            :padding-x="SVG_PADDING_X"
+            :padding-y="SVG_PADDING_Y"
+            :zoom="zoom"
+            :tooltip-target="GHOST_TOOLTIP_TARGET"
+            :reduce-motion="reduceMotion"
+            :reset-key="ghostResetKey"
+            @active-line-change="handleGhostActiveLineChange"
+          />
 
           <g class="line-map-segments">
             <line
@@ -835,6 +1078,12 @@ function getLabelPriority(
               {{ stop.label }}
             </text>
           </g>
+
+          <g
+            id="line-map-network-ghost-tooltip-layer"
+            class="line-map-network-ghost-tooltip-layer"
+            aria-hidden="true"
+          ></g>
         </svg>
 
         <button
@@ -853,6 +1102,70 @@ function getLabelPriority(
           @mouseleave="hideStopHover(stop)"
         ></button>
       </div>
+
+      <aside
+        v-if="ghostNetworkEnabled && isExplorerMode"
+        class="line-map-display-panel"
+        :class="{
+          'line-map-display-panel--collapsed': !ghostDisplayExpanded,
+        }"
+        data-testid="line-map-display-panel"
+        @pointerdown.stop
+        @click.stop
+      >
+        <button
+          class="line-map-display-panel__header"
+          type="button"
+          :aria-expanded="ghostDisplayExpanded"
+          @click="ghostDisplayExpanded = !ghostDisplayExpanded"
+        >
+          <Eye aria-hidden="true" />
+          <strong>Affichage</strong>
+          <Minus v-if="ghostDisplayExpanded" aria-hidden="true" />
+          <Plus v-else aria-hidden="true" />
+        </button>
+
+        <div
+          v-if="ghostDisplayExpanded"
+          class="line-map-display-panel__content"
+        >
+          <label class="line-map-display-panel__main-toggle">
+            <input v-model="ghostDisplayEnabled" type="checkbox" />
+            <span>Correspondances</span>
+          </label>
+
+          <div class="line-map-display-panel__modes">
+            <label>
+              <input
+                v-model="ghostModeVisibility.bus"
+                type="checkbox"
+                :disabled="ghostNetworkScope === 'structural'"
+              />
+              <span>Bus</span>
+            </label>
+            <label>
+              <input v-model="ghostModeVisibility.metro" type="checkbox" />
+              <span>Métro</span>
+            </label>
+            <label>
+              <input v-model="ghostModeVisibility.tram" type="checkbox" />
+              <span>Tramway</span>
+            </label>
+            <label>
+              <input
+                v-model="ghostModeVisibility.noctilien"
+                type="checkbox"
+                :disabled="ghostNetworkScope === 'structural'"
+              />
+              <span>Noctilien</span>
+            </label>
+            <label>
+              <input v-model="ghostModeVisibility.rer" type="checkbox" />
+              <span>RER</span>
+            </label>
+          </div>
+        </div>
+      </aside>
     </div>
 
     <Transition name="line-map-sidebar-slide">
@@ -866,6 +1179,17 @@ function getLabelPriority(
         :show-actions="isExplorerMode"
         :favorite-loading="favoriteLoading"
         :favorite-error="favoriteError"
+        :active-ghost-line="activeGhostLine"
+        :ghost-directions="activeGhostDirectionState?.directions ?? []"
+        :ghost-directions-loading="
+          activeGhostDirectionState?.loading ?? false
+        "
+        :ghost-directions-error="activeGhostDirectionState?.error"
+        :ghost-frequency="activeGhostFrequencyState?.profile"
+        :ghost-frequency-loading="
+          activeGhostFrequencyState?.loading ?? false
+        "
+        :ghost-frequency-error="activeGhostFrequencyState?.error"
         @close="closeSidebar"
         @add-favorite="addActiveStopToFavorites"
         @open-google-maps="openActiveStopInGoogleMaps"

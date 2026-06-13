@@ -304,6 +304,30 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
+      <label class="settings-toggle">
+        <input
+          type="checkbox"
+          :checked="settings.ghostNetworkStructuralOnly"
+          @change="
+            updateSettings({
+              ghostNetworkStructuralOnly: (
+                $event.target as HTMLInputElement
+              ).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>
+            Limiter les lignes fantômes aux modes structurants
+          </strong>
+          <small>
+            Masque les bus sur la carte détaillée et conserve métro, RER,
+            train, tram, câble et funiculaire.
+          </small>
+        </div>
+      </label>
+
       <div class="settings-row">
         <div>
           <strong>Apparence info trafic</strong>

@@ -24,6 +24,7 @@ describe("app settings", () => {
       navigationAutoHide: "none",
       compactLinePlanMode: "auto",
       richTransferTooltips: true,
+      ghostNetworkStructuralOnly: false,
       trafficInfoDesign: "ratp",
       trafficInfoDefaultScope: "optimized",
       transferResolverMode: "auto",
@@ -53,6 +54,7 @@ describe("app settings", () => {
       wakeLockDuration: "forever",
       navigationAutoHide: "always",
       compactLinePlanMode: "tiny",
+      ghostNetworkStructuralOnly: "yes",
       trafficInfoDesign: "dense",
       trafficInfoDefaultScope: "everything",
       transferResolverMode: "telepathy",
@@ -78,6 +80,7 @@ describe("app settings", () => {
     expect(settings.wakeLockDuration).toBe("none");
     expect(settings.navigationAutoHide).toBe("none");
     expect(settings.compactLinePlanMode).toBe("auto");
+    expect(settings.ghostNetworkStructuralOnly).toBe(false);
     expect(settings.trafficInfoDesign).toBe("ratp");
     expect(settings.trafficInfoDefaultScope).toBe("optimized");
     expect(settings.transferResolverMode).toBe("auto");

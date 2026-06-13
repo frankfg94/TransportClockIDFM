@@ -61,6 +61,7 @@ export interface AppSettings {
   reduceMotion: boolean;
   compactLinePlanMode: CompactLinePlanMode;
   richTransferTooltips: boolean;
+  ghostNetworkStructuralOnly: boolean;
   trafficInfoDesign: TrafficInfoDesign;
   trafficInfoDefaultScope: TrafficInfoDefaultScope;
   transferResolverMode: TransferResolverMode;
@@ -206,6 +207,7 @@ export function createDefaultAppSettings(): AppSettings {
     reduceMotion: false,
     compactLinePlanMode: "auto",
     richTransferTooltips: true,
+    ghostNetworkStructuralOnly: false,
     trafficInfoDesign: "ratp",
     trafficInfoDefaultScope: "optimized",
     transferResolverMode: "auto",
@@ -272,6 +274,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     richTransferTooltips: readBoolean(
       value.richTransferTooltips,
       defaults.richTransferTooltips,
+    ),
+    ghostNetworkStructuralOnly: readBoolean(
+      value.ghostNetworkStructuralOnly,
+      defaults.ghostNetworkStructuralOnly,
     ),
     trafficInfoDesign: isTrafficInfoDesign(value.trafficInfoDesign)
       ? value.trafficInfoDesign

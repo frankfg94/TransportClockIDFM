@@ -242,6 +242,28 @@ describe("NeTEx cache topology adapter", () => {
     ]);
   });
 
+  it("attaches raw NeTEx quays to their consolidated station", async () => {
+    const topology = await getLineTopology("line:IDFM:C00025");
+    const beauregard = topology.stations.find(
+      (station) => normalizeName(station.name) === normalizeName("Beauregard"),
+    );
+
+    expect(beauregard?.quays).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "FR::Quay:50187203:FR1",
+          projectedX: 692475,
+          projectedY: 6850339,
+        }),
+        expect.objectContaining({
+          id: "FR::Quay:50187204:FR1",
+          projectedX: 692518,
+          projectedY: 6850363,
+        }),
+      ]),
+    );
+  });
+
   it("converts cache topology into VueFlow input without orphan nodes", async () => {
     const topology = await getLineTopology("transilien-j");
     const sequences = convertServerTopologyToLineRouteSequences(topology);

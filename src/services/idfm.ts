@@ -6,6 +6,7 @@
   DirectionDepartureGroup,
   DirectionGroupConfig,
   LastDeparture,
+  LineFrequencyProfile,
   LineRouteSequence,
   LineRouteStop,
   LineSearchOption,
@@ -283,6 +284,33 @@ interface NavitiaRequestOptions {
 
 const API_BASE = "/api/idfm";
 const NAVITIA_API_BASE = "/api/idfm/v2/navitia";
+const MINUTES_PER_HOUR = 60;
+const SECONDS_PER_MINUTE = 60;
+const MILLISECONDS_PER_SECOND = 1_000;
+const MILLISECONDS_PER_MINUTE =
+  SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND;
+const FREQUENCY_SCHEDULE_DURATION_HOURS = 30;
+const FREQUENCY_SCHEDULE_DURATION_SECONDS =
+  FREQUENCY_SCHEDULE_DURATION_HOURS *
+  MINUTES_PER_HOUR *
+  SECONDS_PER_MINUTE;
+const FREQUENCY_ITEMS_PER_SCHEDULE = 200;
+const MAX_FREQUENCY_INTERVAL_HOURS = 3;
+const MAX_FREQUENCY_INTERVAL_MINUTES =
+  MAX_FREQUENCY_INTERVAL_HOURS * MINUTES_PER_HOUR;
+const PEAK_FREQUENCY_WINDOWS: Array<[number, number]> = [
+  [timeToMinutes(7), timeToMinutes(9, 30)],
+  [timeToMinutes(17, 30), timeToMinutes(19)],
+];
+const OFF_PEAK_FREQUENCY_WINDOWS: Array<[number, number]> = [
+  [timeToMinutes(5), timeToMinutes(7)],
+  [timeToMinutes(9, 30), timeToMinutes(17, 30)],
+  [timeToMinutes(19), timeToMinutes(23, 30)],
+];
+const lineFrequencyProfileCache = new Map<
+  string,
+  Promise<LineFrequencyProfile>
+>();
 
 const familyMatchers: Record<TransitFamily, string[]> = {
   METRO: ["metro", "métro"],
@@ -1361,6 +1389,13 @@ interface ServerLineTopology {
     lon?: number;
     projectedX?: number;
     projectedY?: number;
+    quays?: Array<{
+      id: string;
+      name: string;
+      projectedX: number;
+      projectedY: number;
+      srsName?: string;
+    }>;
   }>;
   segments?: Array<{
     id: string;
@@ -1442,6 +1477,7 @@ function createServerTopologyRouteStop(
     lon: station.lon,
     projectedX: station.projectedX,
     projectedY: station.projectedY,
+    quays: station.quays,
     station: searchStation,
   };
 }
@@ -2397,6 +2433,68 @@ export async function fetchDirectionGroupsForStation(
   return groups.size > 0 ? Array.from(groups.values()) : [createFallbackDirectionGroup(station.label)];
 }
 
+export function fetchLineFrequencyProfile(
+  lineId: string,
+  station: StationSearchOption,
+): Promise<LineFrequencyProfile> {
+  const serviceDay = getNextParisWeekdayServiceDayWindow();
+  const serviceDate = serviceDay.fromParam.slice(0, 8);
+  const stopAreaRef = station.scheduleStopAreaRef;
+
+  if (!stopAreaRef) {
+    return Promise.resolve({
+      lineId,
+      stationId: station.id,
+      serviceDate,
+    });
+  }
+
+  const cacheKey = `${lineId}:${stopAreaRef}:${serviceDate}`;
+  const cached = lineFrequencyProfileCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const searchParams = new URLSearchParams({
+    data_freshness: "base_schedule",
+    disable_disruption: "true",
+    from_datetime: serviceDay.fromParam,
+    duration: String(FREQUENCY_SCHEDULE_DURATION_SECONDS),
+    items_per_schedule: String(FREQUENCY_ITEMS_PER_SCHEDULE),
+  });
+  const request = fetch(
+    `${NAVITIA_API_BASE}/lines/${encodeURIComponent(lineId)}/stop_areas/${encodeURIComponent(stopAreaRef)}/stop_schedules?${searchParams}`,
+  )
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const payload = (await response.json()) as NavitiaStopScheduleResponse;
+
+      return createLineFrequencyProfile(
+        lineId,
+        station.id,
+        serviceDate,
+        payload.stop_schedules ?? [],
+        serviceDay,
+      );
+    })
+    .catch((error) => {
+      lineFrequencyProfileCache.delete(cacheKey);
+      throw error;
+    });
+
+  lineFrequencyProfileCache.set(cacheKey, request);
+
+  return request;
+}
+
+export function clearLineFrequencyProfileCache(): void {
+  lineFrequencyProfileCache.clear();
+}
+
 export async function fetchBoardDepartures(
   board: TransitBoardConfig,
 ): Promise<BoardDeparturesResult> {
@@ -2879,6 +2977,140 @@ function findLatestNavitiaTime(
   return latestRawTime ? parseNavitiaDateTime(latestRawTime) : undefined;
 }
 
+function createLineFrequencyProfile(
+  lineId: string,
+  stationId: string,
+  serviceDate: string,
+  schedules: NavitiaStopSchedule[],
+  serviceDay: NavitiaServiceDayWindow,
+): LineFrequencyProfile {
+  const peakIntervals: number[] = [];
+  const offPeakIntervals: number[] = [];
+  const nightIntervals: number[] = [];
+  const rawTimesByDirection = new Map<string, Set<string>>();
+
+  for (const schedule of schedules) {
+    const directionKey = createFrequencyDirectionKey(schedule);
+    const rawTimes =
+      rawTimesByDirection.get(directionKey) ?? new Set<string>();
+
+    asArray(schedule.date_times)
+      .map((value) => value.base_date_time ?? value.date_time)
+      .filter(
+        (value): value is string =>
+          typeof value === "string" &&
+          value >= serviceDay.fromParam &&
+          value < serviceDay.cutoffParam,
+      )
+      .forEach((rawTime) => rawTimes.add(rawTime));
+
+    rawTimesByDirection.set(directionKey, rawTimes);
+  }
+
+  for (const directionRawTimes of rawTimesByDirection.values()) {
+    const rawTimes = Array.from(directionRawTimes).sort();
+
+    rawTimes.slice(0, -1).forEach((rawTime, index) => {
+      const nextRawTime = rawTimes[index + 1];
+      const intervalMinutes =
+        (parseNavitiaRawDateTime(nextRawTime) -
+          parseNavitiaRawDateTime(rawTime)) /
+        MILLISECONDS_PER_MINUTE;
+
+      if (
+        !Number.isFinite(intervalMinutes) ||
+        intervalMinutes <= 0 ||
+        intervalMinutes > MAX_FREQUENCY_INTERVAL_MINUTES
+      ) {
+        return;
+      }
+
+      const minuteOfDay = getNavitiaMinuteOfDay(rawTime);
+
+      if (isMinuteInWindows(minuteOfDay, PEAK_FREQUENCY_WINDOWS)) {
+        peakIntervals.push(intervalMinutes);
+      } else if (isMinuteInWindows(minuteOfDay, OFF_PEAK_FREQUENCY_WINDOWS)) {
+        offPeakIntervals.push(intervalMinutes);
+      } else {
+        nightIntervals.push(intervalMinutes);
+      }
+    });
+  }
+
+  return {
+    lineId,
+    stationId,
+    serviceDate,
+    peakMinutes: medianMinutes(peakIntervals),
+    offPeakMinutes: medianMinutes(offPeakIntervals),
+    nightMinutes: medianMinutes(nightIntervals),
+  };
+}
+
+function createFrequencyDirectionKey(schedule: NavitiaStopSchedule): string {
+  const stopPointId = schedule.stop_point?.id ?? "unknown-stop-point";
+  const direction = normalizeDirectionName(
+    schedule.display_informations?.direction ??
+      schedule.display_informations?.headsign,
+  );
+
+  return `${stopPointId}:${direction || "unknown-direction"}`;
+}
+
+function parseNavitiaRawDateTime(value: string): number {
+  const match = value.match(
+    /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/,
+  );
+
+  if (!match) {
+    return Number.NaN;
+  }
+
+  const [, year, month, day, hour, minute, second] = match;
+
+  return Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+  );
+}
+
+function getNavitiaMinuteOfDay(value: string): number {
+  const hour = Number(value.slice(9, 11));
+  const minute = Number(value.slice(11, 13));
+
+  return timeToMinutes(hour, minute);
+}
+
+function timeToMinutes(hour: number, minute = 0): number {
+  return hour * MINUTES_PER_HOUR + minute;
+}
+
+function isMinuteInWindows(
+  minute: number,
+  windows: Array<[number, number]>,
+): boolean {
+  return windows.some(([start, end]) => minute >= start && minute < end);
+}
+
+function medianMinutes(values: number[]): number | undefined {
+  if (values.length === 0) {
+    return undefined;
+  }
+
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  const median =
+    sorted.length % 2 === 0
+      ? (sorted[middle - 1] + sorted[middle]) / 2
+      : sorted[middle];
+
+  return Math.max(1, Math.round(median));
+}
+
 function findUpcomingNavitiaTimes(
   schedule: NavitiaStopSchedule,
   serviceDay: NavitiaServiceDayWindow,
@@ -2972,6 +3204,46 @@ function getParisServiceDayWindow(): NavitiaServiceDayWindow {
       serviceStart.getUTCDate() + 1,
     ),
   );
+  const pad = (value: number) => value.toString().padStart(2, "0");
+  const formatDate = (date: Date) =>
+    [
+      date.getUTCFullYear(),
+      pad(date.getUTCMonth() + 1),
+      pad(date.getUTCDate()),
+    ].join("");
+
+  return {
+    fromParam: `${formatDate(serviceStart)}T000000`,
+    cutoffParam: `${formatDate(cutoff)}T030000`,
+  };
+}
+
+function getNextParisWeekdayServiceDayWindow(): NavitiaServiceDayWindow {
+  const parts = new Intl.DateTimeFormat("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Europe/Paris",
+    year: "numeric",
+  }).formatToParts(new Date());
+  const partMap = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
+  const serviceStart = new Date(
+    Date.UTC(
+      Number(partMap.year),
+      Number(partMap.month) - 1,
+      Number(partMap.day),
+    ),
+  );
+
+  while ([0, 6].includes(serviceStart.getUTCDay())) {
+    serviceStart.setUTCDate(serviceStart.getUTCDate() + 1);
+  }
+
+  const cutoff = new Date(serviceStart);
+
+  cutoff.setUTCDate(cutoff.getUTCDate() + 1);
+
   const pad = (value: number) => value.toString().padStart(2, "0");
   const formatDate = (date: Date) =>
     [
