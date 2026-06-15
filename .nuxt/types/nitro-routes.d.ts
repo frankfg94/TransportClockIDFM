@@ -3,6 +3,24 @@ import type { Serialize, Simplify } from "nitropack/types";
 declare module "nitropack/types" {
   type Awaited<T> = T extends PromiseLike<infer U> ? Awaited<U> : T
   interface InternalApi {
+    '/api/ha/v1/boards': {
+      'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/ha/v1/boards.post').default>>>>
+    }
+    '/api/ha/v1/catalog/directions': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/ha/v1/catalog/directions.get').default>>>>
+    }
+    '/api/ha/v1/catalog/families': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/ha/v1/catalog/families.get').default>>>>
+    }
+    '/api/ha/v1/catalog/lines': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/ha/v1/catalog/lines.get').default>>>>
+    }
+    '/api/ha/v1/catalog/stations': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/ha/v1/catalog/stations.get').default>>>>
+    }
+    '/api/ha/v1/info': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/ha/v1/info.get').default>>>>
+    }
     '/api/health': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/health.get').default>>>>
     }

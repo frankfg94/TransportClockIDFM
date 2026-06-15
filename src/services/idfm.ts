@@ -276,9 +276,10 @@ interface BoardScheduleInfo {
   scheduledDepartures: Departure[];
 }
 
-interface NavitiaRequestOptions {
+export interface NavitiaRequestOptions {
   apiBase?: string;
   fetcher?: typeof fetch;
+  siriApiBase?: string;
   transferScope?: "connected" | "direct";
 }
 
@@ -351,6 +352,10 @@ const stopAreaLinesCache = new Map<string, Promise<NavitiaLine[]>>();
 
 function navitiaApiBase(options: NavitiaRequestOptions): string {
   return options.apiBase ?? NAVITIA_API_BASE;
+}
+
+function siriApiBase(options: NavitiaRequestOptions): string {
+  return options.siriApiBase ?? API_BASE;
 }
 
 function createNavitiaCacheKey(
@@ -2383,6 +2388,7 @@ async function fetchPaginatedCollection<TPayload, TItem>(
 export async function fetchDirectionGroupsForStation(
   line: LineSearchOption,
   station: StationSearchOption,
+  options: NavitiaRequestOptions = {},
 ): Promise<DirectionGroupConfig[]> {
   if (!station.scheduleStopAreaRef) {
     return [createFallbackDirectionGroup(station.label)];
@@ -2395,8 +2401,9 @@ export async function fetchDirectionGroupsForStation(
     duration: "108000",
     items_per_schedule: "8",
   });
-  const response = await fetch(
-    `${NAVITIA_API_BASE}/lines/${encodeURIComponent(line.navitiaId)}/stop_areas/${encodeURIComponent(station.scheduleStopAreaRef)}/stop_schedules?${searchParams}`,
+  const response = await navitiaFetchWithRetry(
+    `${navitiaApiBase(options)}/lines/${encodeURIComponent(line.navitiaId)}/stop_areas/${encodeURIComponent(station.scheduleStopAreaRef)}/stop_schedules?${searchParams}`,
+    options,
   );
 
   if (!response.ok) {
@@ -2497,14 +2504,15 @@ export function clearLineFrequencyProfileCache(): void {
 
 export async function fetchBoardDepartures(
   board: TransitBoardConfig,
+  options: NavitiaRequestOptions = {},
 ): Promise<BoardDeparturesResult> {
   const [batches, scheduleInfo] = await Promise.all([
     Promise.all(
       getEffectiveMonitoringPoints(board).map((point) =>
-        fetchMonitoringPoint(board, point).catch(() => []),
+        fetchMonitoringPoint(board, point, options).catch(() => []),
       ),
     ),
-    fetchBoardScheduleInfo(board).catch(() => ({
+    fetchBoardScheduleInfo(board, options).catch(() => ({
       lastDepartures: [],
       scheduledDepartures: [],
     })),
@@ -2568,13 +2576,17 @@ function navitiaStopPointToMonitoringRef(
 async function fetchMonitoringPoint(
   board: TransitBoardConfig,
   point: MonitoringPointConfig,
+  options: NavitiaRequestOptions,
 ): Promise<Departure[]> {
   const searchParams = new URLSearchParams({
     MonitoringRef: point.ref,
     LineRef: board.line.ref,
   });
 
-  const response = await fetch(`${API_BASE}/stop-monitoring?${searchParams}`);
+  const response = await navitiaFetchWithRetry(
+    `${siriApiBase(options)}/stop-monitoring?${searchParams}`,
+    options,
+  );
 
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
@@ -2680,6 +2692,7 @@ function cleanPlatformName(value?: string): string | undefined {
 
 async function fetchBoardScheduleInfo(
   board: TransitBoardConfig,
+  options: NavitiaRequestOptions,
 ): Promise<BoardScheduleInfo> {
   if (!board.schedule) {
     return {
@@ -2698,8 +2711,9 @@ async function fetchBoardScheduleInfo(
     items_per_schedule: "12",
   });
 
-  const response = await fetch(
-    `${NAVITIA_API_BASE}/lines/${lineRef}/stop_areas/${stopAreaRef}/stop_schedules?${searchParams}`,
+  const response = await navitiaFetchWithRetry(
+    `${navitiaApiBase(options)}/lines/${lineRef}/stop_areas/${stopAreaRef}/stop_schedules?${searchParams}`,
+    options,
   );
 
   if (!response.ok) {

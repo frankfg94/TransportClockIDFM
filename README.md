@@ -80,6 +80,27 @@ Lancer les tests :
 npm.cmd run test
 ```
 
+## API Home Assistant
+
+L'integration Home Assistant utilise une API serveur versionnee et stateless :
+
+- `GET /api/ha/v1/info`
+- `GET /api/ha/v1/catalog/families`
+- `GET /api/ha/v1/catalog/lines?family=&q=`
+- `GET /api/ha/v1/catalog/stations?family=&lineId=&q=`
+- `GET /api/ha/v1/catalog/directions?family=&lineId=&stationId=`
+- `POST /api/ha/v1/boards`
+
+Le token Bearer est optionnel. Pour le rendre obligatoire :
+
+```powershell
+$env:TRANSPORT_CLOCK_HA_TOKEN="<token>"
+$env:TRANSPORT_CLOCK_INSTANCE_ID="<identifiant-stable>"
+```
+
+`TRANSPORT_CLOCK_INSTANCE_ID` doit rester stable entre les deploiements afin que
+Home Assistant reconnaisse toujours la meme instance.
+
 ## Ajouter une ligne ou un arret
 
 Les tableaux par defaut sont dans `src/config/transitBoards.ts`.
