@@ -319,6 +319,10 @@ h3 {
   justify-content: space-between;
 }
 
+.topbar__controls--menu-toggles {
+  justify-content: flex-end;
+}
+
 .netex-cache-alert {
   background: #fffbeb;
   border: 1px solid rgba(245, 158, 11, 0.34);
@@ -420,6 +424,39 @@ h3 {
 
 .switch-control--active .switch-control__thumb {
   transform: translateX(16px);
+}
+
+.board-display-modal {
+  max-width: 720px;
+  width: min(100%, 720px);
+}
+
+.board-display-modal__body {
+  display: grid;
+  gap: 14px;
+  overflow: auto;
+  padding: 20px;
+}
+
+.board-display-modal .board-toggles {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+}
+
+.board-display-modal .switch-control {
+  justify-content: stretch;
+  width: 100%;
+}
+
+.board-display-modal .switch-control__label {
+  max-width: none;
+}
+
+.board-display-modal__summary {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 850;
 }
 
 .boards-grid {
@@ -1696,6 +1733,87 @@ h3 {
   stroke-dasharray: 0;
 }
 
+.pattern-flow-edge--distance .vue-flow__edge-text {
+  animation: distance-label-pop 520ms linear both;
+  fill: #0f172a;
+  font-size: 12px;
+  font-weight: 950;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.pattern-flow-edge--distance .vue-flow__edge-textbg {
+  animation: distance-label-pop 520ms linear both;
+  fill: rgba(255, 255, 255, 0.96);
+  stroke: rgba(15, 23, 42, 0.14);
+  stroke-width: 1px;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.pattern-flow-edge--distance-leave .vue-flow__edge-text,
+.pattern-flow-edge--distance-leave .vue-flow__edge-textbg {
+  animation: distance-label-dismiss 240ms ease-in both;
+}
+
+.pattern-flow-shell--reduce-motion .pattern-flow-edge--distance .vue-flow__edge-text,
+.pattern-flow-shell--reduce-motion .pattern-flow-edge--distance .vue-flow__edge-textbg {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pattern-flow-edge--distance .vue-flow__edge-text,
+  .pattern-flow-edge--distance .vue-flow__edge-textbg {
+    animation: none;
+  }
+}
+
+@keyframes distance-label-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.58);
+  }
+
+  32% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+
+  56% {
+    transform: scale(0.94);
+  }
+
+  76% {
+    transform: scale(1.035);
+  }
+
+  90% {
+    transform: scale(0.99);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes distance-label-dismiss {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  36% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(0.68);
+  }
+}
+
 .pattern-flow-station {
   align-items: center;
   color: var(--ink);
@@ -1823,6 +1941,15 @@ h3 {
 
 .vue-flow__node:has(.pattern-flow-station--tooltip-open) .pattern-flow-station {
   z-index: 500;
+}
+
+.vue-flow__node:has(.pattern-flow-station__transfer:hover) {
+  z-index: 600 !important;
+}
+
+.vue-flow__node:has(.pattern-flow-station__transfer:hover)
+  .pattern-flow-station {
+  z-index: 600;
 }
 
 .pattern-flow-tooltip-open-enter-active.pattern-flow-station__transfer-tooltip,
@@ -2027,6 +2154,12 @@ h3 {
 .pattern-flow-station__transfer.line-icon-badge {
   height: 22px;
   min-width: 26px;
+  position: relative;
+  z-index: 1;
+}
+
+.pattern-flow-station__transfer.line-icon-badge:hover {
+  z-index: 10;
 }
 
 .pattern-flow-station__transfer.line-icon-badge img {

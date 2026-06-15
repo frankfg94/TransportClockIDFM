@@ -83,6 +83,7 @@ interface SiriStopMonitoringResponse {
 interface NavitiaDateTime {
   date_time?: string;
   base_date_time?: string;
+  data_freshness?: string;
   links?: NavitiaLink[];
 }
 
@@ -2440,20 +2441,22 @@ export async function fetchDirectionGroupsForStation(
   return groups.size > 0 ? Array.from(groups.values()) : [createFallbackDirectionGroup(station.label)];
 }
 
-export function fetchLineFrequencyProfile(
+export async function fetchLineFrequencyProfile(
   lineId: string,
   station: StationSearchOption,
 ): Promise<LineFrequencyProfile> {
   const serviceDay = getNextParisWeekdayServiceDayWindow();
   const serviceDate = serviceDay.fromParam.slice(0, 8);
-  const stopAreaRef = station.scheduleStopAreaRef;
+  const stopAreaRef =
+    station.scheduleStopAreaRef ??
+    (isResolvableNavitiaStopAreaRef(station.id) ? station.id : undefined);
 
   if (!stopAreaRef) {
-    return Promise.resolve({
+    return {
       lineId,
       stationId: station.id,
       serviceDate,
-    });
+    };
   }
 
   const cacheKey = `${lineId}:${stopAreaRef}:${serviceDate}`;
@@ -2463,31 +2466,21 @@ export function fetchLineFrequencyProfile(
     return cached;
   }
 
-  const searchParams = new URLSearchParams({
-    data_freshness: "base_schedule",
-    disable_disruption: "true",
-    from_datetime: serviceDay.fromParam,
-    duration: String(FREQUENCY_SCHEDULE_DURATION_SECONDS),
-    items_per_schedule: String(FREQUENCY_ITEMS_PER_SCHEDULE),
-  });
-  const request = fetch(
-    `${NAVITIA_API_BASE}/lines/${encodeURIComponent(lineId)}/stop_areas/${encodeURIComponent(stopAreaRef)}/stop_schedules?${searchParams}`,
+  const request = loadLineFrequencySchedules(
+    lineId,
+    station,
+    stopAreaRef,
+    serviceDay,
   )
-    .then(async (response) => {
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const payload = (await response.json()) as NavitiaStopScheduleResponse;
-
-      return createLineFrequencyProfile(
+    .then((schedules) =>
+      createLineFrequencyProfile(
         lineId,
         station.id,
         serviceDate,
-        payload.stop_schedules ?? [],
+        schedules,
         serviceDay,
-      );
-    })
+      ),
+    )
     .catch((error) => {
       lineFrequencyProfileCache.delete(cacheKey);
       throw error;
@@ -2496,6 +2489,99 @@ export function fetchLineFrequencyProfile(
   lineFrequencyProfileCache.set(cacheKey, request);
 
   return request;
+}
+
+async function loadLineFrequencySchedules(
+  lineId: string,
+  station: StationSearchOption,
+  stopAreaRef: string,
+  serviceDay: NavitiaServiceDayWindow,
+): Promise<NavitiaStopSchedule[]> {
+  const directSchedules = await fetchFrequencySchedulesForStopArea(
+    lineId,
+    stopAreaRef,
+    serviceDay,
+  );
+
+  if (hasTheoreticalScheduleTimes(directSchedules)) {
+    return directSchedules;
+  }
+
+  const relatedStopAreaRefs = await resolveTransferStopAreaRefs(
+    station,
+    stopAreaRef,
+    {},
+  );
+  const normalizedLineId = normalizeTransferLineId(lineId);
+
+  for (const relatedStopAreaRef of relatedStopAreaRefs) {
+    if (relatedStopAreaRef === stopAreaRef) {
+      continue;
+    }
+
+    const lines = await fetchLinesForStopArea(relatedStopAreaRef).catch(
+      (): NavitiaLine[] => [],
+    );
+
+    if (
+      !lines.some(
+        (line) => normalizeTransferLineId(line.id) === normalizedLineId,
+      )
+    ) {
+      continue;
+    }
+
+    const relatedSchedules = await fetchFrequencySchedulesForStopArea(
+      lineId,
+      relatedStopAreaRef,
+      serviceDay,
+    );
+
+    if (hasTheoreticalScheduleTimes(relatedSchedules)) {
+      return relatedSchedules;
+    }
+  }
+
+  return directSchedules;
+}
+
+async function fetchFrequencySchedulesForStopArea(
+  lineId: string,
+  stopAreaRef: string,
+  serviceDay: NavitiaServiceDayWindow,
+): Promise<NavitiaStopSchedule[]> {
+  const searchParams = new URLSearchParams({
+    data_freshness: "base_schedule",
+    disable_disruption: "true",
+    from_datetime: serviceDay.fromParam,
+    duration: String(FREQUENCY_SCHEDULE_DURATION_SECONDS),
+    items_per_schedule: String(FREQUENCY_ITEMS_PER_SCHEDULE),
+  });
+  const response = await fetch(
+    `${NAVITIA_API_BASE}/lines/${encodeURIComponent(lineId)}/stop_areas/${encodeURIComponent(stopAreaRef)}/stop_schedules?${searchParams}`,
+  );
+
+  if (response.status === 404) {
+    return [];
+  }
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const payload = (await response.json()) as NavitiaStopScheduleResponse;
+
+  return payload.stop_schedules ?? [];
+}
+
+function hasTheoreticalScheduleTimes(
+  schedules: NavitiaStopSchedule[],
+): boolean {
+  return schedules.some((schedule) =>
+    asArray(schedule.date_times).some((value) =>
+      Boolean(getTheoreticalNavitiaRawTime(value)),
+    ),
+  );
 }
 
 export function clearLineFrequencyProfileCache(): void {
@@ -3009,7 +3095,7 @@ function createLineFrequencyProfile(
       rawTimesByDirection.get(directionKey) ?? new Set<string>();
 
     asArray(schedule.date_times)
-      .map((value) => value.base_date_time ?? value.date_time)
+      .map(getTheoreticalNavitiaRawTime)
       .filter(
         (value): value is string =>
           typeof value === "string" &&
@@ -3062,13 +3148,24 @@ function createLineFrequencyProfile(
 }
 
 function createFrequencyDirectionKey(schedule: NavitiaStopSchedule): string {
-  const stopPointId = schedule.stop_point?.id ?? "unknown-stop-point";
   const direction = normalizeDirectionName(
     schedule.display_informations?.direction ??
       schedule.display_informations?.headsign,
   );
 
-  return `${stopPointId}:${direction || "unknown-direction"}`;
+  return direction || `unknown-direction:${schedule.stop_point?.id ?? "unknown-stop-point"}`;
+}
+
+function getTheoreticalNavitiaRawTime(
+  value: NavitiaDateTime,
+): string | undefined {
+  if (value.base_date_time) {
+    return value.base_date_time;
+  }
+
+  return value.data_freshness === "base_schedule"
+    ? value.date_time
+    : undefined;
 }
 
 function parseNavitiaRawDateTime(value: string): number {

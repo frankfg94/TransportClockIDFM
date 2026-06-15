@@ -32,6 +32,7 @@ export interface LineMapSegmentView {
   id: string;
   fromStopId: string;
   toStopId: string;
+  distanceKm?: number;
 }
 
 export interface LineMapBranchView {

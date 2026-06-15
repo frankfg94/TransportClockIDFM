@@ -57,6 +57,11 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Bundles de correspondances");
     expect(wrapper.text()).toContain("View bundles");
     expect(wrapper.text()).toContain("Clear bundles");
+    expect(wrapper.text()).toContain("Affichage des stations");
+    expect(wrapper.text()).toContain("Visible directement");
+
+    await wrapper.find(".material-combobox__trigger").trigger("click");
+    expect(wrapper.text()).toContain("Dans le menu contextuel");
     expect(wrapper.text()).toContain("Accordion fermé");
     expect(wrapper.text()).toContain("Dernier passage");
     expect(wrapper.text()).toContain("Défaut actuel");

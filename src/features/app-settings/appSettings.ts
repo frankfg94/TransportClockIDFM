@@ -34,6 +34,7 @@ export type WakeLockDuration =
   | "24h"
   | "unlimited";
 export type NavigationAutoHide = "none" | "1m";
+export type BoardTogglesPlacement = "inline" | "context-menu";
 export type CompactLinePlanMode = "auto" | "comfort" | "compact";
 export type TrafficInfoDesign = "ratp" | "cards";
 export type TrafficInfoDefaultScope = "optimized" | "all";
@@ -53,6 +54,7 @@ export interface AppSettings {
   hiddenDirectionIdsByBoardId: Record<string, string[]>;
   wakeLockDuration: WakeLockDuration;
   wakeDeviceOnAlarm: boolean;
+  boardTogglesPlacement: BoardTogglesPlacement;
   // Browser-side cache layer used before the backend bundle fallback.
   transferBundleLocalCacheEnabled: boolean;
   // Nuxt-side bundle cache shared by successive transfer requests.
@@ -113,6 +115,11 @@ export const wakeLockDurationOptions = [
 export const navigationAutoHideOptions = [
   { id: "none", label: "Aucun" },
   { id: "1m", label: "1 min" },
+] as const;
+
+export const boardTogglesPlacementOptions = [
+  { id: "inline", label: "Visible directement (sauf mobile)" },
+  { id: "context-menu", label: "Dans le menu contextuel" },
 ] as const;
 
 export const compactLinePlanOptions = [
@@ -202,6 +209,7 @@ export function createDefaultAppSettings(): AppSettings {
     terminalDirectionsOnly: false,
     wakeLockDuration: "none",
     wakeDeviceOnAlarm: true,
+    boardTogglesPlacement: "inline",
     navigationAutoHide: "none",
     hiddenDirectionIdsByBoardId: {},
     reduceMotion: false,
@@ -264,6 +272,11 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       value.wakeDeviceOnAlarm,
       defaults.wakeDeviceOnAlarm,
     ),
+    boardTogglesPlacement: isBoardTogglesPlacement(
+      value.boardTogglesPlacement,
+    )
+      ? value.boardTogglesPlacement
+      : defaults.boardTogglesPlacement,
     navigationAutoHide: isNavigationAutoHide(value.navigationAutoHide)
       ? value.navigationAutoHide
       : defaults.navigationAutoHide,
@@ -558,6 +571,12 @@ function isWakeLockDuration(value: unknown): value is WakeLockDuration {
 
 function isNavigationAutoHide(value: unknown): value is NavigationAutoHide {
   return value === "none" || value === "1m";
+}
+
+function isBoardTogglesPlacement(
+  value: unknown,
+): value is BoardTogglesPlacement {
+  return value === "inline" || value === "context-menu";
 }
 
 function isCompactLinePlanMode(value: unknown): value is CompactLinePlanMode {

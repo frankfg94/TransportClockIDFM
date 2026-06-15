@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref } from "vue";
 import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import {
+  boardTogglesPlacementOptions,
   closedDirectionSummaryOptions,
   compactLinePlanOptions,
   maxDeparturesPerDirectionOptions,
@@ -21,6 +22,7 @@ import {
   weatherLookaheadOptions,
   weatherModeOptions,
   weatherTestModeOptions,
+  type BoardTogglesPlacement,
   type ClosedDirectionSummaryMode,
   type CompactLinePlanMode,
   type NavigationAutoHide,
@@ -74,6 +76,10 @@ function updateWakeLock(value: string): void {
 
 function updateAutoHide(value: string): void {
   updateSettings({ navigationAutoHide: value as NavigationAutoHide });
+}
+
+function updateBoardTogglesPlacement(value: string): void {
+  updateSettings({ boardTogglesPlacement: value as BoardTogglesPlacement });
 }
 
 function updateCompactMode(value: string): void {
@@ -253,6 +259,22 @@ onBeforeUnmount(() => {
           <p class="eyebrow">Affichage</p>
           <h2 id="settings-display-title">Tableaux et prochains passages</h2>
         </div>
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <strong>Affichage des stations</strong>
+          <span>
+            Garde les boutons de stations visibles ou les range dans le menu
+            contextuel du dashboard.
+          </span>
+        </div>
+        <MaterialCombobox
+          :model-value="settings.boardTogglesPlacement"
+          :options="[...boardTogglesPlacementOptions]"
+          aria-label="Emplacement des boutons de stations"
+          @update:model-value="updateBoardTogglesPlacement"
+        />
       </div>
 
       <div class="settings-row">

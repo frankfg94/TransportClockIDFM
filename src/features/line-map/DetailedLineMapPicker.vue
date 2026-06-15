@@ -1,6 +1,7 @@
 ﻿<script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import { Eye, Minus, Plus } from "lucide-vue-next";
+import DistanceToggle from "../../components/DistanceToggle.vue";
 import {
   loadDetailedLineMap,
   loadStationTransfers,
@@ -21,6 +22,7 @@ import { transitBoards } from "../../config/transitBoards";
 import { createBoardFromDraft } from "../../services/boardBuilder";
 import { fetchDirectionGroupsForStation } from "../../services/idfm";
 import { addBoardToTransitPreferences } from "../../storage/transitPreferences";
+import { formatTransitDistance } from "../../services/distance";
 import type {
   LineFrequencyProfile,
   LineSearchOption,
@@ -60,6 +62,15 @@ interface MapDragState {
   startY: number;
   scrollLeft: number;
   scrollTop: number;
+}
+
+interface SegmentDistanceLabel {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 const props = withDefaults(
@@ -109,6 +120,7 @@ const activeGhostLine = ref<NetworkGhostLineView>();
 const favoriteLoading = ref(false);
 const favoriteError = ref("");
 const favoriteConfirmationOpen = ref(false);
+const showDistances = ref(false);
 const mapDrag = reactive<MapDragState>({
   active: false,
   dragging: false,
@@ -214,6 +226,37 @@ const mapStats = computed(() => {
   return `${stopCount} stations`;
 });
 
+const segmentDistanceLabels = computed<SegmentDistanceLabel[]>(() => {
+  const map = lineMap.value;
+
+  if (!map || !showDistances.value) {
+    return [];
+  }
+
+  return map.segments.flatMap((segment) => {
+    if (segment.distanceKm === undefined) {
+      return [];
+    }
+
+    const label = formatTransitDistance(segment.distanceKm);
+    const height = 22 / zoom.value;
+    const width = Math.max(42, label.length * 6.6 + 14) / zoom.value;
+
+    return [
+      {
+        id: segment.id,
+        label,
+        x:
+          (getSegmentX(segment, "from") + getSegmentX(segment, "to")) / 2,
+        y:
+          (getSegmentY(segment, "from") + getSegmentY(segment, "to")) / 2,
+        width,
+        height,
+      },
+    ];
+  });
+});
+
 const renderedStops = computed(() => {
   const activeStopId = activeStop.value?.id;
   const stops = (lineMap.value?.stops ?? []).map((stop, index) => ({
@@ -293,6 +336,7 @@ watch(
   () => {
     closeSidebar();
     clearTransferStates();
+    showDistances.value = false;
 
     if (props.line) {
       void loadMap();
@@ -879,7 +923,13 @@ function getLabelPriority(
 <template>
   <div
     class="line-map-panel"
-    :class="{ 'line-map-panel--explorer': isExplorerMode }"
+    :class="{
+      'line-map-panel--explorer': isExplorerMode,
+      'line-map-panel--reduce-motion': reduceMotion,
+    }"
+    :style="{
+      '--line-color': lineMap?.lineColor ?? props.line?.color ?? '#0064ff',
+    }"
   >
     <div class="line-map-panel__bar">
       <span
@@ -896,6 +946,11 @@ function getLabelPriority(
       </span>
       <div v-if="lineMap" class="line-map-panel__tools">
         <slot name="bar-before-stats"></slot>
+        <DistanceToggle
+          v-model="showDistances"
+          class="pattern-flow-action-button line-map-distance-toggle"
+          :reduce-motion="reduceMotion"
+        />
         <span class="line-map-stats">{{ mapStats }}</span>
         <span
           v-if="ghostNetworkEnabled && ghostProgress.total > 0"
@@ -1021,6 +1076,36 @@ function getLabelPriority(
               :style="getLineStyle()"
             />
           </g>
+
+          <TransitionGroup
+            tag="g"
+            name="line-map-distance-pop"
+            class="line-map-segment-distances"
+          >
+            <g
+              v-for="distance in segmentDistanceLabels"
+              :key="`${distance.id}:distance`"
+              class="line-map-segment-distance"
+              :transform="`translate(${distance.x} ${distance.y})`"
+            >
+              <g class="line-map-segment-distance__bubble">
+                <rect
+                  :x="-distance.width / 2"
+                  :y="-distance.height / 2"
+                  :width="distance.width"
+                  :height="distance.height"
+                  :rx="distance.height / 2"
+                />
+                <text
+                  text-anchor="middle"
+                  dominant-baseline="central"
+                  :style="{ fontSize: `${11.5 / zoom}px` }"
+                >
+                  {{ distance.label }}
+                </text>
+              </g>
+            </g>
+          </TransitionGroup>
 
           <g
             v-for="{ stop, index } in renderedStops"

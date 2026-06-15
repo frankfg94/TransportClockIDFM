@@ -619,7 +619,7 @@ function weatherIcon(code?: number) {
 }
 
 .weather-modal {
-  background: rgba(255, 255, 255, 0.96);
+  background: rgba(255, 255, 255, 1);
   border: 1px solid rgba(16, 35, 63, 0.12);
   border-radius: 8px;
   box-shadow: 0 28px 90px rgba(15, 23, 42, 0.28);

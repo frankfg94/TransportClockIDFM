@@ -12,6 +12,7 @@ const baseSettings: AppSettings = {
   hiddenDirectionIdsByBoardId: {},
   wakeLockDuration: "none",
   wakeDeviceOnAlarm: true,
+  boardTogglesPlacement: "inline",
   navigationAutoHide: "none",
   reduceMotion: false,
   compactLinePlanMode: "auto",

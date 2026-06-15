@@ -56,6 +56,11 @@
   margin-left: auto;
 }
 
+.line-map-distance-toggle {
+  box-shadow: 0 8px 22px rgba(16, 35, 63, 0.12);
+  min-height: 34px;
+}
+
 .line-map-chip {
   align-items: center;
   border-radius: 8px;
@@ -280,6 +285,41 @@
   stroke-linejoin: round;
   stroke-width: 10;
   vector-effect: non-scaling-stroke;
+}
+
+.line-map-segment-distance {
+  pointer-events: none;
+}
+
+.line-map-segment-distance__bubble {
+  animation: distance-label-pop 520ms linear both;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.line-map-segment-distance rect {
+  fill: rgba(255, 255, 255, 0.96);
+  stroke: rgba(15, 23, 42, 0.15);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.line-map-segment-distance text {
+  fill: #0f172a;
+  font-weight: 950;
+  user-select: none;
+}
+
+.line-map-distance-pop-enter-active .line-map-segment-distance__bubble {
+  animation: distance-label-pop 520ms linear both;
+}
+
+.line-map-distance-pop-leave-active .line-map-segment-distance__bubble {
+  animation: distance-label-dismiss 240ms ease-in both;
+}
+
+.line-map-panel--reduce-motion .line-map-segment-distance__bubble {
+  animation: none;
 }
 
 .line-map-stop {
@@ -589,6 +629,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .line-map-segment-distance__bubble,
   .line-map-stop--active .line-map-stop__ripple,
   .line-map-stop--active .line-map-stop__dot {
     animation: none;

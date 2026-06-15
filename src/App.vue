@@ -51,6 +51,7 @@ import {
   MoreVertical,
   Plus,
   RefreshCw,
+  SlidersHorizontal,
 } from "lucide-vue-next";
 import { useRouter } from "nuxt/app";
 
@@ -80,6 +81,7 @@ interface NetexCacheStatus {
 }
 
 const REFRESH_INTERVAL_MS = 30_000;
+const MOBILE_BREAKPOINT_QUERY = "(max-width: 760px)";
 const preferences = reactive(createDefaultPreferences(transitBoards));
 const { settings, effectiveMaxDeparturesPerDirection, updateSettings } =
   useAppSettings();
@@ -95,6 +97,7 @@ const lastRefresh = ref<Date>();
 const stationModalOpen = ref(false);
 const topbarMenuOpen = ref(false);
 const weatherModalOpen = ref(false);
+const boardDisplayModalOpen = ref(false);
 const alarmTarget = ref<{
   board: TransitBoardConfig;
   directionGroup: DirectionDepartureGroup;
@@ -115,11 +118,13 @@ const nowTick = ref(Date.now());
 const netexCacheStatus = ref<NetexCacheStatus>();
 const netexCacheStatusLoaded = ref(false);
 const trafficReports = ref<TrafficLineReport[]>([]);
+const mobileBoardTogglesInContextMenu = ref(false);
 const primApiKeyConfigured = __IDFM_API_KEY_CONFIGURED__;
 let refreshTimer: number | undefined;
 const alarmTimers = new Map<string, number>();
 let toastTimer: number | undefined;
 let clockTimer: number | undefined;
+let mobileBreakpointQuery: MediaQueryList | undefined;
 
 const allBoards = computed<TransitBoardConfig[]>(() => [
   ...transitBoards,
@@ -149,6 +154,12 @@ const visibleBoards = computed(() =>
   allBoards.value.filter((board) =>
     preferences.visibleBoardIds.includes(board.id),
   ),
+);
+
+const boardTogglesInContextMenu = computed(
+  () =>
+    mobileBoardTogglesInContextMenu.value ||
+    settings.value.boardTogglesPlacement === "context-menu",
 );
 
 const nextAlarm = computed(
@@ -322,6 +333,15 @@ function refreshFromTopbarMenu(): void {
 function openWeatherModal(): void {
   closeTopbarMenu();
   weatherModalOpen.value = true;
+}
+
+function openBoardDisplayModal(): void {
+  closeTopbarMenu();
+  boardDisplayModalOpen.value = true;
+}
+
+function handleMobileBreakpointChange(event: MediaQueryListEvent): void {
+  mobileBoardTogglesInContextMenu.value = event.matches;
 }
 
 function createBoardRequestForSettings(
@@ -996,6 +1016,12 @@ onMounted(() => {
     TRANSIT_PREFERENCES_CHANGED_EVENT,
     syncTransitPreferences,
   );
+  mobileBreakpointQuery = window.matchMedia(MOBILE_BREAKPOINT_QUERY);
+  mobileBoardTogglesInContextMenu.value = mobileBreakpointQuery.matches;
+  mobileBreakpointQuery.addEventListener(
+    "change",
+    handleMobileBreakpointChange,
+  );
   clockTimer = window.setInterval(() => {
     nowTick.value = Date.now();
   }, 1000);
@@ -1026,6 +1052,11 @@ onBeforeUnmount(() => {
     TRANSIT_PREFERENCES_CHANGED_EVENT,
     syncTransitPreferences,
   );
+  mobileBreakpointQuery?.removeEventListener(
+    "change",
+    handleMobileBreakpointChange,
+  );
+  mobileBreakpointQuery = undefined;
 });
 </script>
 
@@ -1057,6 +1088,14 @@ onBeforeUnmount(() => {
             <span>{{ formatClock(lastRefresh) }}</span>
             <small>dernière mise à jour</small>
           </div>
+          <button
+            class="button-secondary"
+            type="button"
+            @click="stationModalOpen = true"
+          >
+            <Plus />
+            Ajouter
+          </button>
           <div class="topbar-actions" @keydown.esc="closeTopbarMenu">
             <button
               class="topbar-actions__trigger icon-button"
@@ -1085,24 +1124,30 @@ onBeforeUnmount(() => {
                 <CloudSun aria-hidden="true" />
                 Météo
               </button>
+              <button
+                type="button"
+                role="menuitem"
+                @click="openBoardDisplayModal"
+              >
+                <SlidersHorizontal aria-hidden="true" />
+                Gérer l'affichage
+              </button>
             </div>
           </div>
         </div>
 
-        <div class="topbar__controls">
+        <div
+          class="topbar__controls"
+          :class="{
+            'topbar__controls--menu-toggles': boardTogglesInContextMenu,
+          }"
+        >
           <BoardVisibilityControls
+            v-if="!boardTogglesInContextMenu"
             :boards="allBoards"
             :visible-board-ids="preferences.visibleBoardIds"
             @toggle="toggleBoardVisibility"
           />
-          <button
-            class="button-secondary"
-            type="button"
-            @click="stationModalOpen = true"
-          >
-            <Plus />
-            Ajouter
-          </button>
         </div>
       </section>
 
@@ -1111,6 +1156,59 @@ onBeforeUnmount(() => {
         :open="weatherModalOpen"
         @close="weatherModalOpen = false"
       />
+
+      <Transition name="modal-scale">
+        <div
+          v-if="boardDisplayModalOpen"
+          class="modal-backdrop"
+          role="presentation"
+          @click.self="boardDisplayModalOpen = false"
+        >
+          <section
+            class="modal-panel board-display-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="board-display-title"
+          >
+            <header class="modal-panel__header">
+              <div>
+                <p class="eyebrow">Affichage</p>
+                <h2 id="board-display-title">Stations visibles</h2>
+              </div>
+              <button
+                class="icon-button"
+                type="button"
+                aria-label="Fermer la gestion de l'affichage"
+                @click="boardDisplayModalOpen = false"
+              >
+                ×
+              </button>
+            </header>
+            <div class="board-display-modal__body">
+              <BoardVisibilityControls
+                :boards="allBoards"
+                :visible-board-ids="preferences.visibleBoardIds"
+                @toggle="toggleBoardVisibility"
+              />
+            </div>
+            <footer class="modal-panel__footer">
+              <span class="board-display-modal__summary">
+                {{ visibleBoards.length }} station{{
+                  visibleBoards.length > 1 ? "s" : ""
+                }}
+                affichée{{ visibleBoards.length > 1 ? "s" : "" }}
+              </span>
+              <button
+                class="button-secondary"
+                type="button"
+                @click="boardDisplayModalOpen = false"
+              >
+                Fermer
+              </button>
+            </footer>
+          </section>
+        </div>
+      </Transition>
 
       <section
         v-if="netexCacheAlert"

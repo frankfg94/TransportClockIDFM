@@ -21,6 +21,7 @@ describe("app settings", () => {
       terminalDirectionsOnly: false,
       wakeLockDuration: "none",
       wakeDeviceOnAlarm: true,
+      boardTogglesPlacement: "inline",
       navigationAutoHide: "none",
       compactLinePlanMode: "auto",
       richTransferTooltips: true,
@@ -51,6 +52,7 @@ describe("app settings", () => {
       maxDeparturesPerDirection: "999",
       showPatternMiniMap: "yes",
       terminalDirectionsOnly: true,
+      boardTogglesPlacement: "drawer",
       wakeLockDuration: "forever",
       navigationAutoHide: "always",
       compactLinePlanMode: "tiny",
@@ -77,6 +79,7 @@ describe("app settings", () => {
     expect(settings.maxDeparturesPerDirection).toBe("default");
     expect(settings.showPatternMiniMap).toBe(true);
     expect(settings.terminalDirectionsOnly).toBe(true);
+    expect(settings.boardTogglesPlacement).toBe("inline");
     expect(settings.wakeLockDuration).toBe("none");
     expect(settings.navigationAutoHide).toBe("none");
     expect(settings.compactLinePlanMode).toBe("auto");

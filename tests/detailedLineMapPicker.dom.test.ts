@@ -81,6 +81,34 @@ beforeEach(() => {
 });
 
 describe("DetailedLineMapPicker sidebar", () => {
+  it("shows segment distances with animated distance labels", async () => {
+    loadDetailedLineMap.mockResolvedValueOnce(createDistanceMap());
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: { line, mode: "explorer", selectable: false },
+    });
+    await flushPromises();
+
+    const distanceSwitch = wrapper.get(
+      '[role="switch"][aria-label="Afficher les distances entre les stations"]',
+    );
+
+    expect(distanceSwitch.attributes("aria-checked")).toBe("false");
+    expect(wrapper.find(".line-map-segment-distance").exists()).toBe(false);
+
+    await distanceSwitch.trigger("click");
+
+    expect(distanceSwitch.attributes("aria-checked")).toBe("true");
+    expect(wrapper.get(".line-map-segment-distance").text()).toContain("500 m");
+    expect(wrapper.get(".line-map-segment-distance__bubble").exists()).toBe(
+      true,
+    );
+
+    await distanceSwitch.trigger("click");
+
+    expect(distanceSwitch.attributes("aria-checked")).toBe("false");
+    expect(wrapper.find(".line-map-segment-distance").exists()).toBe(false);
+  });
+
   it("opens only on click, toggles closed and replaces the active station", async () => {
     const wrapper = mount(DetailedLineMapPicker, {
       props: { line, mode: "explorer", selectable: false },
@@ -508,6 +536,14 @@ function createMap(): LineMapViewModel {
       },
     ),
   };
+}
+
+function createDistanceMap(): LineMapViewModel {
+  const map = createMap();
+
+  map.segments[0].distanceKm = 0.5;
+
+  return map;
 }
 
 function readPreferences(): {

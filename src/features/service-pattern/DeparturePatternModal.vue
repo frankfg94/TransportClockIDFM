@@ -17,8 +17,18 @@ import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import StationTransferDetails from "../../components/StationTransferDetails.vue";
 import { transitModeToFamily } from "../../services/linePresentation";
 import { Controls } from "@vue-flow/controls";
-import { Expand, Minimize2, SlidersHorizontal } from "lucide-vue-next";
+import {
+  Expand,
+  Minimize2,
+  SlidersHorizontal,
+} from "lucide-vue-next";
+import DistanceToggle from "../../components/DistanceToggle.vue";
 import PatternFlowMiniMap from "./PatternFlowMiniMap.vue";
+import { resolveTransitLonLat } from "../network-ghost/geoProjection";
+import {
+  formatTransitDistance,
+  getCoordinatesDistanceKm,
+} from "../../services/distance";
 import {
   createPatternStationKey as createStationKey,
   patternStationKeysAreCompatible as stationKeysAreCompatible,
@@ -92,6 +102,7 @@ interface PatternGraphNode {
   city?: string;
   lon?: number;
   lat?: number;
+  coordinatePriority: number;
   current: boolean;
   served: boolean;
   time?: string;
@@ -146,9 +157,9 @@ const REGULAR_NODE_WIDTH = 184;
 const REGULAR_NODE_HEIGHT = 104;
 const COMPACT_NODE_WIDTH = 128;
 const COMPACT_NODE_HEIGHT = 150;
+const DISTANCE_LABEL_EXIT_MS = 240;
 const TRANSFER_HYDRATION_STALLED_RETRY_MS = 60_000;
 const TRANSFER_HYDRATION_RATE_LIMIT_CHECK_MS = 1_200;
-
 type PatternLayoutOptions = {
   compact: boolean;
   nodeWidth: number;
@@ -206,6 +217,9 @@ const emit = defineEmits<{
 
 const isPatternFlowFullscreen = ref(false);
 const isCompactPatternFlow = ref(false);
+const showPatternDistances = ref(false);
+const patternDistanceLabelsVisible = ref(false);
+const patternDistanceLabelsLeaving = ref(false);
 const patternFlowShell = ref<HTMLElement>();
 const patternFlowViewport = ref<PatternViewport>({ x: 0, y: 0, zoom: 1 });
 const patternFlowViewportController = ref<PatternFlowViewportController>();
@@ -225,6 +239,7 @@ const transferHydrationRetryVisible = ref(false);
 const transferHydrationRateLimited = ref(false);
 const activeStationTooltipKey = ref<string>();
 let transferHydrationRequest = 0;
+let patternDistanceLabelHideTimer: number | undefined;
 let transferHydrationRateLimitTimer: number | undefined;
 let transferHydrationStalledTimer: number | undefined;
 let compactDecisionKey = "";
@@ -326,6 +341,8 @@ const flowModel = computed(() =>
     isCompactPatternFlow.value,
     isFullLineMode.value,
     currentLineIdentity.value,
+    patternDistanceLabelsVisible.value,
+    patternDistanceLabelsLeaving.value,
   ),
 );
 const patternFlowKey = computed(
@@ -378,6 +395,33 @@ watch(
   },
   { immediate: true },
 );
+
+watch(showPatternDistances, (visible) => {
+  clearPatternDistanceLabelHideTimer();
+
+  if (visible) {
+    patternDistanceLabelsVisible.value = true;
+    patternDistanceLabelsLeaving.value = false;
+    return;
+  }
+
+  if (!patternDistanceLabelsVisible.value) {
+    return;
+  }
+
+  if (props.reduceMotion || typeof window === "undefined") {
+    patternDistanceLabelsVisible.value = false;
+    patternDistanceLabelsLeaving.value = false;
+    return;
+  }
+
+  patternDistanceLabelsLeaving.value = true;
+  patternDistanceLabelHideTimer = window.setTimeout(() => {
+    patternDistanceLabelHideTimer = undefined;
+    patternDistanceLabelsVisible.value = false;
+    patternDistanceLabelsLeaving.value = false;
+  }, DISTANCE_LABEL_EXIT_MS);
+});
 
 watch(
   patternFlowShell,
@@ -798,6 +842,15 @@ function clearTransferHydrationRateLimitTimer(): void {
   transferHydrationRateLimitTimer = undefined;
 }
 
+function clearPatternDistanceLabelHideTimer(): void {
+  if (patternDistanceLabelHideTimer === undefined) {
+    return;
+  }
+
+  window.clearTimeout(patternDistanceLabelHideTimer);
+  patternDistanceLabelHideTimer = undefined;
+}
+
 function createPatternFlow(
   calls: DepartureCall[],
   lineTopology: LineRouteSequence[],
@@ -805,6 +858,8 @@ function createPatternFlow(
   compact: boolean,
   fullLine: boolean,
   currentLine?: CurrentLineIdentity,
+  showDistances = false,
+  distanceLabelsLeaving = false,
 ): PatternFlowModel {
   const layout = createPatternLayoutOptions(compact);
   const graph = buildPatternGraph(calls, lineTopology, fullLine);
@@ -884,7 +939,12 @@ function createPatternFlow(
         .sort((left, right) => left.order - right.order);
   const edges = [
     ...visibleDrawableEdges.map((edge) =>
-      createFlowEdge(edge, topology.positions),
+      createFlowEdge(
+        edge,
+        topology.positions,
+        showDistances,
+        distanceLabelsLeaving,
+      ),
     ),
     ...activeLightEdges.map(({ edge, direction, order }) =>
       createFlowLightEdge(
@@ -903,8 +963,14 @@ function createPatternFlow(
 function createFlowEdge(
   edge: PatternGraphEdge,
   positions: Map<string, { x: number; y: number }>,
+  showDistance = false,
+  distanceLabelsLeaving = false,
 ): PatternFlowEdge {
   const { source, target } = getVisualFlowEdgeEndpoints(edge, positions);
+  const distanceLabel =
+    showDistance && edge.distanceKm !== undefined
+      ? formatTransitDistance(edge.distanceKm)
+      : undefined;
 
   return {
     id: `${edge.id}:${source}:${target}`,
@@ -915,9 +981,19 @@ function createFlowEdge(
     type: "straight",
     selectable: false,
     focusable: false,
-    class: edge.active
-      ? "pattern-flow-edge--active"
-      : "pattern-flow-edge--skipped",
+    class: [
+      edge.active
+        ? "pattern-flow-edge--active"
+        : "pattern-flow-edge--skipped",
+      distanceLabel ? "pattern-flow-edge--distance" : "",
+      distanceLabel && distanceLabelsLeaving
+        ? "pattern-flow-edge--distance-leave"
+        : "",
+    ],
+    label: distanceLabel,
+    labelShowBg: Boolean(distanceLabel),
+    labelBgPadding: [7, 5],
+    labelBgBorderRadius: 7,
     style: {
       stroke: edge.active ? "var(--line-color)" : "#cbd5e1",
       strokeWidth: edge.active ? 10 : 7,
@@ -2136,18 +2212,34 @@ function buildPatternGraph(
 
   lineTopology.forEach((sequence) => {
     const stops = dedupeRouteStops(sequence.stops);
+    const coordinatePriority = getTopologyCoordinatePriority(
+      sequence.topologySource,
+    );
 
     stops.forEach((stop) => {
       const call = findCallForStop(callMap, stop);
       const key = createStationKey(stop);
       const existing = nodeMap.get(key);
+      const stopCoordinates = resolveTransitLonLat(stop);
+      const shouldUseStopCoordinates =
+        stopCoordinates !== undefined &&
+        (existing?.lat === undefined ||
+          existing?.lon === undefined ||
+          coordinatePriority > existing.coordinatePriority);
 
       nodeMap.set(key, {
         id: key,
         label: existing?.label ?? call?.label ?? stop.label,
         city: existing?.city ?? call?.city ?? stop.city,
-        lon: existing?.lon ?? stop.lon,
-        lat: existing?.lat ?? stop.lat,
+        lon: shouldUseStopCoordinates
+          ? stopCoordinates.lon
+          : existing?.lon,
+        lat: shouldUseStopCoordinates
+          ? stopCoordinates.lat
+          : existing?.lat,
+        coordinatePriority: shouldUseStopCoordinates
+          ? coordinatePriority
+          : (existing?.coordinatePriority ?? -1),
         current: fullLine ? false : Boolean(existing?.current || call?.current),
         served: fullLine ? true : Boolean(existing?.served || call?.served),
         time: fullLine ? undefined : (existing?.time ?? call?.time),
@@ -2165,8 +2257,21 @@ function buildPatternGraph(
       const source = createStationKey(sourceStop);
       const target = createStationKey(targetStop);
       const edgeKey = createEdgeKey(source, target);
+      const distanceKm = getStopDistanceKm(sourceStop, targetStop);
+      const existingEdge = edgeMap.get(edgeKey);
 
-      if (source === target || edgeMap.has(edgeKey)) {
+      if (source === target) {
+        return;
+      }
+
+      if (existingEdge) {
+        if (
+          distanceKm !== undefined &&
+          (existingEdge.distanceKm === undefined ||
+            sequence.topologySource === "server")
+        ) {
+          existingEdge.distanceKm = distanceKm;
+        }
         return;
       }
 
@@ -2175,7 +2280,7 @@ function buildPatternGraph(
         source,
         target,
         active: false,
-        distanceKm: getStopDistanceKm(sourceStop, targetStop),
+        distanceKm,
       });
     });
   });
@@ -2188,6 +2293,7 @@ function buildPatternGraph(
         id: key,
         label: call.label,
         city: call.city,
+        coordinatePriority: -1,
         current: fullLine ? false : call.current,
         served: fullLine ? true : call.served,
         time: fullLine ? undefined : call.time,
@@ -2575,47 +2681,33 @@ function getStopDistanceKm(
   sourceStop: LineRouteStop,
   targetStop: LineRouteStop,
 ): number | undefined {
-  if (
-    sourceStop.lat === undefined ||
-    sourceStop.lon === undefined ||
-    targetStop.lat === undefined ||
-    targetStop.lon === undefined
-  ) {
+  const sourceCoordinates = resolveTransitLonLat(sourceStop);
+  const targetCoordinates = resolveTransitLonLat(targetStop);
+
+  if (!sourceCoordinates || !targetCoordinates) {
     return undefined;
   }
 
   return getCoordinatesDistanceKm(
-    sourceStop.lat,
-    sourceStop.lon,
-    targetStop.lat,
-    targetStop.lon,
+    sourceCoordinates.lat,
+    sourceCoordinates.lon,
+    targetCoordinates.lat,
+    targetCoordinates.lon,
   );
 }
 
-function getCoordinatesDistanceKm(
-  sourceLatValue: number,
-  sourceLonValue: number,
-  targetLatValue: number,
-  targetLonValue: number,
+function getTopologyCoordinatePriority(
+  source: LineRouteSequence["topologySource"],
 ): number {
-  const earthRadiusKm = 6371;
-  const sourceLat = toRadians(sourceLatValue);
-  const targetLat = toRadians(targetLatValue);
-  const deltaLat = toRadians(targetLatValue - sourceLatValue);
-  const deltaLon = toRadians(targetLonValue - sourceLonValue);
-  const haversine =
-    Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(sourceLat) * Math.cos(targetLat) * Math.sin(deltaLon / 2) ** 2;
+  if (source === "server") {
+    return 2;
+  }
 
-  return (
-    2 *
-    earthRadiusKm *
-    Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
-  );
-}
+  if (source === "navitia") {
+    return 1;
+  }
 
-function toRadians(value: number): number {
-  return (value * Math.PI) / 180;
+  return 0;
 }
 
 function createEdgeKey(source: string, target: string): string {
@@ -2657,6 +2749,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   transferHydrationRequest += 1;
+  clearPatternDistanceLabelHideTimer();
   resetTransferHydrationStallState();
   clearTransferHydrationRateLimitTimer();
   if (stationTooltipHideTimer !== undefined) {
@@ -2824,6 +2917,11 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="pattern-flow-actions">
                     <slot name="flow-actions-prefix"></slot>
+                    <DistanceToggle
+                      v-model="showPatternDistances"
+                      class="pattern-flow-action-button"
+                      :reduce-motion="reduceMotion"
+                    />
                     <button
                       class="pattern-flow-action-button"
                       type="button"

@@ -31,6 +31,7 @@ import {
   resolveTransitLonLat,
   type GeographicViewport,
 } from "../network-ghost/geoProjection";
+import { getCoordinatesDistanceKm } from "../../services/distance";
 
 const VIEWBOX_WIDTH = 1080;
 const VIEWBOX_HEIGHT = 620;
@@ -505,6 +506,7 @@ function createLineMapSegments(
           id: key,
           fromStopId,
           toStopId,
+          distanceKm: getStopDistanceKm(fromStop, toStop),
           length: getNormalizedDistance(fromStop, toStop),
         });
       }
@@ -522,7 +524,33 @@ function createLineMapSegments(
     .filter((segment) =>
       !isExpressChord(segment, stops, stopById, medianLength),
     )
-    .map(({ id, fromStopId, toStopId }) => ({ id, fromStopId, toStopId }));
+    .map(({ id, fromStopId, toStopId, distanceKm }) => ({
+      id,
+      fromStopId,
+      toStopId,
+      distanceKm,
+    }));
+}
+
+function getStopDistanceKm(
+  fromStop: LineMapStopView,
+  toStop: LineMapStopView,
+): number | undefined {
+  if (
+    typeof fromStop.lat !== "number" ||
+    typeof fromStop.lon !== "number" ||
+    typeof toStop.lat !== "number" ||
+    typeof toStop.lon !== "number"
+  ) {
+    return undefined;
+  }
+
+  return getCoordinatesDistanceKm(
+    fromStop.lat,
+    fromStop.lon,
+    toStop.lat,
+    toStop.lon,
+  );
 }
 
 function createMapTiles(viewport?: GeographicViewport): MapTile[] {
