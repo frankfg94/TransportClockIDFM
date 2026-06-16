@@ -193,6 +193,7 @@ function createPatternViewCacheKey(
     lineId: resolvedLineId,
     netexCache: createNetexCacheEnvironmentKey(params.runtimeEnv),
     presentation: getRuntimeIdfmApiKey(params.runtimeEnv) ? "idfm" : "fallback",
+    citySource: "netex-town-v1",
     transportType: normalizeId(params.transportType),
     directionId: normalizeId(params.directionId),
     startStationId: normalizeId(params.startStationId),
@@ -409,6 +410,7 @@ function createPatternCalls(
       {
         id: `call:${resolvedStation.id}`,
         label: resolvedStation.name,
+        city: resolvedStation.city,
         current: Boolean(status?.current),
         served: Boolean(status?.served),
         status: status?.status ?? "unknown",
@@ -502,6 +504,7 @@ function createLineRouteStop(station: TopologyStation): LineRouteStop {
   const searchStation: StationSearchOption = {
     id: station.id,
     label: station.name,
+    city: station.city,
     monitoringRef: "",
     scheduleStopAreaRef: station.id,
   };
@@ -509,6 +512,7 @@ function createLineRouteStop(station: TopologyStation): LineRouteStop {
   return {
     id: station.id,
     label: station.name,
+    city: station.city,
     lat: station.lat,
     lon: station.lon,
     projectedX: station.projectedX,
@@ -540,6 +544,24 @@ function createLineConfig(
     iconUrl: presentation.iconUrl,
     iconUrls: presentation.iconUrls,
   };
+}
+
+function decodeMojibake(value: string): string {
+  if (!/[ÃÂâ€]/u.test(value)) {
+    return value;
+  }
+
+  try {
+    return decodeURIComponent(
+      Array.from(value)
+        .map((character) =>
+          `%${character.charCodeAt(0).toString(16).padStart(2, "0")}`,
+        )
+        .join(""),
+    );
+  } catch {
+    return value;
+  }
 }
 
 async function applyNavitiaLinePresentation(
@@ -679,7 +701,7 @@ function createBoard(
   return {
     id: `line-pattern:${topology.line.id}:${startStation.id}`,
     title: startStation.name,
-    city: startStation.name,
+    city: startStation.city ?? startStation.name,
     line,
     monitoringPoints: [
       {

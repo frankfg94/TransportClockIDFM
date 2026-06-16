@@ -1372,9 +1372,73 @@ h3 {
   background: #ffffff;
   border-radius: 8px;
   display: inline-flex;
+  gap: 8px;
   min-height: 66px;
   padding: 8px;
   width: max-content;
+}
+
+.pattern-board__mode-icon {
+  align-items: center;
+  background:
+    linear-gradient(180deg, #ffffff, #f8fafc);
+  border: 2px solid #2d2e97;
+  border-radius: 6px;
+  color: #2d2e97;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.58rem;
+  font-weight: 950;
+  height: 42px;
+  justify-content: center;
+  letter-spacing: 0;
+  min-width: 42px;
+  overflow: hidden;
+  padding: 0 7px;
+  position: relative;
+  text-transform: uppercase;
+}
+
+.pattern-board__mode-icon span {
+  position: relative;
+  z-index: 1;
+}
+
+.pattern-board__mode-icon::before {
+  background: currentColor;
+  bottom: 5px;
+  content: "";
+  height: 3px;
+  left: 7px;
+  opacity: 0.9;
+  position: absolute;
+  right: 7px;
+}
+
+.pattern-board__mode-icon::after {
+  background: currentColor;
+  content: "";
+  height: 3px;
+  left: 7px;
+  opacity: 0.9;
+  position: absolute;
+  right: 7px;
+  top: 5px;
+}
+
+.pattern-board__mode-icon--rer,
+.pattern-board__mode-icon--train {
+  border-color: #243c8f;
+  color: #243c8f;
+}
+
+.pattern-board__mode-icon--bus {
+  border-color: #1f7a4d;
+  color: #1f7a4d;
+}
+
+.pattern-board__mode-icon--metro {
+  border-radius: 999px;
 }
 
 .pattern-board__summary p {
@@ -1692,6 +1756,50 @@ h3 {
   border: 0;
   box-shadow: none;
   padding: 0;
+}
+
+.pattern-flow .pattern-flow-city-zone-node {
+  pointer-events: none;
+}
+
+.pattern-flow-city-zone {
+  align-items: center;
+  border-left: 1px dashed rgba(100, 116, 139, 0.38);
+  border-right: 1px dashed rgba(100, 116, 139, 0.38);
+  color: #64748b;
+  display: flex;
+  font-size: 0.68rem;
+  font-weight: 950;
+  height: 32px;
+  justify-content: center;
+  letter-spacing: 0;
+  min-width: 92px;
+  pointer-events: none;
+  position: relative;
+  text-align: center;
+  text-transform: uppercase;
+  width: var(--city-zone-width);
+}
+
+.pattern-flow-city-zone::before {
+  border-top: 1px dashed rgba(100, 116, 139, 0.32);
+  content: "";
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 50%;
+}
+
+.pattern-flow-city-zone span {
+  background: rgba(248, 251, 255, 0.96);
+  border-radius: 999px;
+  box-shadow: 0 0 0 4px rgba(248, 251, 255, 0.96);
+  max-width: calc(var(--city-zone-width) - 14px);
+  overflow: hidden;
+  padding: 0 5px;
+  position: relative;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pattern-flow .vue-flow__edge {
@@ -2479,6 +2587,23 @@ h3 {
   font-size: 0.58rem;
   min-width: 22px;
   padding: 0 5px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-city-zone {
+  align-items: flex-start;
+  color: #7b8190;
+  font-size: 0.6rem;
+  height: 52px;
+  padding-top: 4px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-city-zone::before {
+  top: 24px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-city-zone span {
+  background: rgba(248, 251, 255, 0.98);
+  box-shadow: 0 0 0 3px rgba(248, 251, 255, 0.98);
 }
 
 .pattern-board__map {

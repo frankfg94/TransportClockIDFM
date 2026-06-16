@@ -14,6 +14,7 @@
       :loading="isPatternRequestPending"
       :error="errorMessage"
       :show-mini-map="settings.showPatternMiniMap"
+      :show-city-zones="settings.showPatternCityZones"
       :compact-mode="settings.compactLinePlanMode"
       :rich-transfer-tooltips="settings.richTransferTooltips"
       :reduce-motion="settings.reduceMotion"

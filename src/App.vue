@@ -1278,6 +1278,7 @@ onBeforeUnmount(() => {
         :open="Boolean(patternTarget)"
         :pattern="patternData"
         :show-mini-map="settings.showPatternMiniMap"
+        :show-city-zones="settings.showPatternCityZones"
         :compact-mode="settings.compactLinePlanMode"
         :rich-transfer-tooltips="settings.richTransferTooltips"
         :transfer-bundle-retention-days="settings.transferBundleRetentionDays"

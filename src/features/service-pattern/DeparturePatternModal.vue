@@ -69,11 +69,17 @@ import type {
   TransitBoardConfig,
 } from "../../types/transit";
 
-type PatternFlowNode = Node<
+type PatternStationFlowNode = Node<
   PatternStationNodeData,
   Record<string, never>,
   "station"
 >;
+type PatternCityZoneFlowNode = Node<
+  PatternCityZoneNodeData,
+  Record<string, never>,
+  "city-zone"
+>;
+type PatternFlowNode = PatternStationFlowNode | PatternCityZoneFlowNode;
 type PatternFlowEdge = Edge<
   Record<string, never>,
   Record<string, never>,
@@ -92,6 +98,13 @@ interface PatternStationNodeData {
   busTransfers: TransferLineOption[];
   nonBusTransfers: TransferLineOption[];
   transfers: TransferLineOption[];
+}
+
+interface PatternCityZoneNodeData {
+  key: string;
+  city: string;
+  width: number;
+  stationCount: number;
 }
 
 type PatternCompactMode = "auto" | "comfort" | "compact";
@@ -120,7 +133,19 @@ interface PatternGraphEdge {
 
 interface PatternFlowModel {
   nodes: PatternFlowNode[];
+  stationNodes: PatternStationFlowNode[];
   edges: PatternFlowEdge[];
+}
+
+interface PatternCityZoneGroup {
+  city: string;
+  stationKeys: string[];
+}
+
+interface TransportModeIcon {
+  key: string;
+  label: string;
+  title: string;
 }
 
 interface PatternViewport {
@@ -185,6 +210,7 @@ const props = withDefaults(
     directionOptions?: LinePatternDirectionOption[];
     selectedDirectionId?: string;
     showMiniMap?: boolean;
+    showCityZones?: boolean;
     compactMode?: PatternCompactMode;
     richTransferTooltips?: boolean;
     reduceMotion?: boolean;
@@ -198,6 +224,7 @@ const props = withDefaults(
   }>(),
   {
     showMiniMap: true,
+    showCityZones: true,
     compactMode: "auto",
     richTransferTooltips: true,
     reduceMotion: false,
@@ -244,6 +271,7 @@ let transferHydrationRateLimitTimer: number | undefined;
 let transferHydrationStalledTimer: number | undefined;
 let compactDecisionKey = "";
 let stationTooltipHideTimer: number | undefined;
+const missingNetexTownWarningKeys = new Set<string>();
 
 const serviceLabel = computed(() =>
   displayPattern.value
@@ -316,6 +344,19 @@ const displayPattern = computed(() => hydratedPattern.value ?? props.pattern);
 const topologyStationCount = computed(() =>
   countPatternTopologyStations(displayPattern.value?.lineTopology ?? []),
 );
+
+watch(
+  () => ({
+    departureId: displayPattern.value?.departureId,
+    lineTopology: displayPattern.value?.lineTopology,
+    showCityZones: props.showCityZones,
+  }),
+  () => {
+    warnMissingNetexTown(displayPattern.value, props.showCityZones);
+  },
+  { immediate: true },
+);
+
 const currentLayoutOptions = computed(() =>
   createPatternLayoutOptions(isCompactPatternFlow.value),
 );
@@ -333,6 +374,9 @@ const currentLineIdentity = computed<CurrentLineIdentity | undefined>(() => {
     labels: [board.line.shortName, board.line.longName],
   };
 });
+const transportModeIcon = computed(() =>
+  createTransportModeIcon(props.board?.line.mode),
+);
 const flowModel = computed(() =>
   createPatternFlow(
     displayPattern.value?.calls ?? [],
@@ -343,6 +387,7 @@ const flowModel = computed(() =>
     currentLineIdentity.value,
     patternDistanceLabelsVisible.value,
     patternDistanceLabelsLeaving.value,
+    props.showCityZones,
   ),
 );
 const patternFlowKey = computed(
@@ -351,14 +396,16 @@ const patternFlowKey = computed(
       isPatternFlowFullscreen.value ? "fullscreen" : "modal"
     }:${isCompactPatternFlow.value ? "compact" : "comfortable"}:${
       isFullLineMode.value ? "full" : "route"
+    }:${props.showCityZones ? "cities" : "no-cities"}${
+      props.board?.line.mode ? `:${props.board.line.mode}` : ""
     }`,
 );
 const initialViewport = computed(() => {
   const currentNode =
-    flowModel.value.nodes.find((node) => node.data?.current) ??
-    flowModel.value.nodes.find((node) => node.data?.served) ??
-    flowModel.value.nodes[0];
-  const nodeCount = flowModel.value.nodes.length;
+    flowModel.value.stationNodes.find((node) => node.data?.current) ??
+    flowModel.value.stationNodes.find((node) => node.data?.served) ??
+    flowModel.value.stationNodes[0];
+  const nodeCount = flowModel.value.stationNodes.length;
   const layout = currentLayoutOptions.value;
   const zoom = createInitialZoom({
     fullscreen: isPatternFlowFullscreen.value,
@@ -592,6 +639,32 @@ function formatServiceType(type: DepartureServiceType): string {
   }
 
   return "Desserte";
+}
+
+function createTransportModeIcon(mode?: string): TransportModeIcon {
+  const family = transitModeToFamily(mode);
+
+  if (family === "TRAM") {
+    return { key: "tram", label: "TRAM", title: "Tramway" };
+  }
+
+  if (family === "METRO") {
+    return { key: "metro", label: "M", title: "Métro" };
+  }
+
+  if (family === "RER") {
+    return { key: "rer", label: "RER", title: "RER" };
+  }
+
+  if (family === "TRANSILIEN") {
+    return { key: "train", label: "TRAIN", title: "Train" };
+  }
+
+  if (family === "BUS" || family === "NOCTILIEN") {
+    return { key: "bus", label: "BUS", title: "Bus" };
+  }
+
+  return { key: "line", label: "LIGNE", title: "Ligne" };
 }
 
 function departureTime(departure?: Departure): string | undefined {
@@ -860,6 +933,7 @@ function createPatternFlow(
   currentLine?: CurrentLineIdentity,
   showDistances = false,
   distanceLabelsLeaving = false,
+  showCityZones = true,
 ): PatternFlowModel {
   const layout = createPatternLayoutOptions(compact);
   const graph = buildPatternGraph(calls, lineTopology, fullLine);
@@ -874,7 +948,7 @@ function createPatternFlow(
 
   const activeTerminalIds = getActiveTerminalIds(graph);
   const drawableEdges = [...graph.edges, ...topology.syntheticEdges];
-  const nodes = graph.nodes.map((node) => {
+  const stationNodes = graph.nodes.map((node) => {
     const position = topology.positions.get(node.id) ?? { x: 0, y: 0 };
     const isBranchEnd = node.degree <= 1;
     const visibleTransfers = filterDuplicateBusTransfers(
@@ -912,8 +986,18 @@ function createPatternFlow(
         ),
         transfers: visibleTransfers,
       },
-    } satisfies PatternFlowNode;
+    } satisfies PatternStationFlowNode;
   });
+  const cityZoneNodes = showCityZones
+    ? createCityZoneFlowNodes({
+        graphNodes: graph.nodes,
+        graphEdges: graph.edges,
+        positions: topology.positions,
+        layout,
+        compact,
+      })
+    : [];
+  const nodes: PatternFlowNode[] = [...cityZoneNodes, ...stationNodes];
   const visibleDrawableEdges = drawableEdges.filter((edge) =>
     topology.visibleEdges.has(createEdgeKey(edge.source, edge.target)),
   );
@@ -957,7 +1041,211 @@ function createPatternFlow(
     ),
   ];
 
-  return { nodes, edges };
+  return { nodes, stationNodes, edges };
+}
+
+function createCityZoneFlowNodes({
+  graphNodes,
+  graphEdges,
+  positions,
+  layout,
+  compact,
+}: {
+  graphNodes: PatternGraphNode[];
+  graphEdges: PatternGraphEdge[];
+  positions: Map<string, { x: number; y: number }>;
+  layout: PatternLayoutOptions;
+  compact: boolean;
+}): PatternCityZoneFlowNode[] {
+  const groups = createCityZoneGroups(graphNodes, graphEdges);
+  const minWidth = compact ? 92 : 118;
+  const zonePadding = compact ? 70 : 96;
+  const topOffset = compact ? 112 : 34;
+
+  return groups
+    .map((group, index): PatternCityZoneFlowNode | undefined => {
+      const stationPositions = group.stationKeys
+        .map((key) => positions.get(key))
+        .filter((position): position is { x: number; y: number } =>
+          Boolean(position),
+        );
+
+      if (stationPositions.length === 0) {
+        return undefined;
+      }
+
+      const minX = Math.min(...stationPositions.map((position) => position.x));
+      const maxX = Math.max(...stationPositions.map((position) => position.x));
+      const minY = Math.min(...stationPositions.map((position) => position.y));
+      const width = Math.max(minWidth, maxX - minX + zonePadding);
+      const x = (minX + maxX) / 2 - width / 2;
+      const y = minY - layout.nodeHeight / 2 - topOffset;
+
+      return {
+        id: `city-zone:${index}:${normalizeCityZoneKey(group.city)}:${group.stationKeys.join("|")}`,
+        type: "city-zone",
+        position: { x, y },
+        draggable: false,
+        selectable: false,
+        connectable: false,
+        focusable: false,
+        class: "pattern-flow-city-zone-node",
+        zIndex: 4,
+        data: {
+          key: group.stationKeys.join("|"),
+          city: group.city,
+          width,
+          stationCount: new Set(group.stationKeys).size,
+        },
+      };
+    })
+    .filter((node): node is PatternCityZoneFlowNode => Boolean(node));
+}
+
+function createCityZoneGroups(
+  graphNodes: PatternGraphNode[],
+  graphEdges: PatternGraphEdge[],
+): PatternCityZoneGroup[] {
+  const nodeById = new Map(graphNodes.map((node) => [node.id, node]));
+  const nodeOrder = new Map(graphNodes.map((node, index) => [node.id, index]));
+  const adjacency = new Map<string, Set<string>>();
+  const groups: PatternCityZoneGroup[] = [];
+
+  graphNodes.forEach((node) => {
+    adjacency.set(node.id, new Set());
+  });
+
+  graphEdges.forEach((edge) => {
+    const source = nodeById.get(edge.source);
+    const target = nodeById.get(edge.target);
+    const sourceCityKey = normalizeCityZoneKey(source?.city);
+    const targetCityKey = normalizeCityZoneKey(target?.city);
+
+    if (!source || !target || !sourceCityKey || sourceCityKey !== targetCityKey) {
+      return;
+    }
+
+    adjacency.get(source.id)?.add(target.id);
+    adjacency.get(target.id)?.add(source.id);
+  });
+
+  const visited = new Set<string>();
+
+  graphNodes.forEach((node) => {
+    const city = normalizeCityLabel(node.city);
+
+    if (!city || visited.has(node.id)) {
+      return;
+    }
+
+    const cityKey = normalizeCityZoneKey(city);
+    const stationKeys: string[] = [];
+    const queue = [node.id];
+    visited.add(node.id);
+
+    while (queue.length > 0) {
+      const stationKey = queue.shift()!;
+      const station = nodeById.get(stationKey);
+
+      if (!station || normalizeCityZoneKey(station.city) !== cityKey) {
+        continue;
+      }
+
+      stationKeys.push(stationKey);
+
+      (adjacency.get(stationKey) ?? new Set()).forEach((nextStationKey) => {
+        if (!visited.has(nextStationKey)) {
+          visited.add(nextStationKey);
+          queue.push(nextStationKey);
+        }
+      });
+    }
+
+    stationKeys.sort(
+      (left, right) =>
+        (nodeOrder.get(left) ?? Number.MAX_SAFE_INTEGER) -
+        (nodeOrder.get(right) ?? Number.MAX_SAFE_INTEGER),
+    );
+
+    groups.push({
+      city,
+      stationKeys,
+    });
+  });
+
+  return groups.sort(
+    (left, right) =>
+      Math.min(
+        ...left.stationKeys.map(
+          (stationKey) => nodeOrder.get(stationKey) ?? Number.MAX_SAFE_INTEGER,
+        ),
+      ) -
+      Math.min(
+        ...right.stationKeys.map(
+          (stationKey) => nodeOrder.get(stationKey) ?? Number.MAX_SAFE_INTEGER,
+        ),
+      ),
+  );
+}
+
+function normalizeCityLabel(value?: string): string | undefined {
+  const normalized = value?.replace(/\s+/gu, " ").trim();
+
+  return normalized || undefined;
+}
+
+function warnMissingNetexTown(
+  pattern: DepartureCallingPattern | undefined,
+  showCityZones: boolean,
+): void {
+  if (!showCityZones || !pattern?.lineTopology?.length) {
+    return;
+  }
+
+  const missing = new Map<string, LineRouteStop>();
+
+  pattern.lineTopology.forEach((sequence) => {
+    sequence.stops.forEach((stop) => {
+      const city = normalizeCityLabel(stop.city ?? stop.station.city);
+
+      if (!city) {
+        missing.set(stop.id, stop);
+      }
+    });
+  });
+
+  if (missing.size === 0) {
+    return;
+  }
+
+  const warningKey = [
+    pattern.departureId,
+    ...Array.from(missing.keys()).sort(),
+  ].join("|");
+
+  if (missingNetexTownWarningKeys.has(warningKey)) {
+    return;
+  }
+
+  missingNetexTownWarningKeys.add(warningKey);
+
+  const sample = Array.from(missing.values())
+    .slice(0, 5)
+    .map((stop) => `${stop.label} (${stop.id})`);
+
+  console.warn(
+    "[DeparturePatternModal] NeTEx Town manquant pour certaines stations; les zones de ville les ignoreront.",
+    { count: missing.size, sample },
+  );
+}
+
+function normalizeCityZoneKey(value?: string): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function createFlowEdge(
@@ -2834,6 +3122,15 @@ onBeforeUnmount(() => {
             >
               <aside class="pattern-board__summary">
                 <div class="pattern-board__line">
+                  <span
+                    v-if="board"
+                    class="pattern-board__mode-icon"
+                    :class="`pattern-board__mode-icon--${transportModeIcon.key}`"
+                    :aria-label="transportModeIcon.title"
+                    :title="transportModeIcon.title"
+                  >
+                    <span aria-hidden="true">{{ transportModeIcon.label }}</span>
+                  </span>
                   <LineIconBadge v-if="board" :line="board.line" />
                   <span v-else>{{ departure?.lineRef ?? "" }}</span>
                 </div>
@@ -2979,6 +3276,17 @@ onBeforeUnmount(() => {
                     @viewport-change="handlePatternFlowViewportChange"
                   >
                     <Controls :show-interactive="false" />
+                    <template #node-city-zone="{ data }">
+                      <div
+                        class="pattern-flow-city-zone"
+                        :style="{
+                          '--city-zone-width': `${data.width}px`,
+                        }"
+                        aria-hidden="true"
+                      >
+                        <span>{{ data.city }}</span>
+                      </div>
+                    </template>
                     <template #node-station="{ data }">
                       <div
                         class="pattern-flow-station"
@@ -3063,7 +3371,7 @@ onBeforeUnmount(() => {
                   </VueFlow>
                   <PatternFlowMiniMap
                     v-if="showMiniMap"
-                    :nodes="flowModel.nodes"
+                    :nodes="flowModel.stationNodes"
                     :edges="flowModel.edges"
                     :node-width="currentLayoutOptions.nodeWidth"
                     :node-height="currentLayoutOptions.nodeHeight"

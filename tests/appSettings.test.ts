@@ -18,6 +18,7 @@ describe("app settings", () => {
       closedDirectionSummaryMode: "last",
       maxDeparturesPerDirection: "default",
       showPatternMiniMap: true,
+      showPatternCityZones: true,
       terminalDirectionsOnly: false,
       wakeLockDuration: "none",
       wakeDeviceOnAlarm: true,
@@ -51,6 +52,7 @@ describe("app settings", () => {
       closedDirectionSummaryMode: "future",
       maxDeparturesPerDirection: "999",
       showPatternMiniMap: "yes",
+      showPatternCityZones: "yes",
       terminalDirectionsOnly: true,
       boardTogglesPlacement: "drawer",
       wakeLockDuration: "forever",
@@ -78,6 +80,7 @@ describe("app settings", () => {
     expect(settings.closedDirectionSummaryMode).toBe("last");
     expect(settings.maxDeparturesPerDirection).toBe("default");
     expect(settings.showPatternMiniMap).toBe(true);
+    expect(settings.showPatternCityZones).toBe(true);
     expect(settings.terminalDirectionsOnly).toBe(true);
     expect(settings.boardTogglesPlacement).toBe("inline");
     expect(settings.wakeLockDuration).toBe("none");

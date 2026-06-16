@@ -13,6 +13,7 @@ export interface RawLineFixture {
 export interface RawStation {
   id: string;
   name: string;
+  city?: string;
   lat?: number;
   lon?: number;
   projectedX?: number;

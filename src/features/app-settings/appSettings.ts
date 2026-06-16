@@ -50,6 +50,7 @@ export interface AppSettings {
   closedDirectionSummaryMode: ClosedDirectionSummaryMode;
   maxDeparturesPerDirection: MaxDeparturesPerDirectionSetting;
   showPatternMiniMap: boolean;
+  showPatternCityZones: boolean;
   terminalDirectionsOnly: boolean;
   hiddenDirectionIdsByBoardId: Record<string, string[]>;
   wakeLockDuration: WakeLockDuration;
@@ -206,6 +207,7 @@ export function createDefaultAppSettings(): AppSettings {
     closedDirectionSummaryMode: "last",
     maxDeparturesPerDirection: "default",
     showPatternMiniMap: true,
+    showPatternCityZones: true,
     terminalDirectionsOnly: false,
     wakeLockDuration: "none",
     wakeDeviceOnAlarm: true,
@@ -260,6 +262,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     showPatternMiniMap: readBoolean(
       value.showPatternMiniMap,
       defaults.showPatternMiniMap,
+    ),
+    showPatternCityZones: readBoolean(
+      value.showPatternCityZones,
+      defaults.showPatternCityZones,
     ),
     terminalDirectionsOnly: readBoolean(
       value.terminalDirectionsOnly,

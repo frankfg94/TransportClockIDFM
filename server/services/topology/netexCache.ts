@@ -93,10 +93,17 @@ export interface NetexLineCache {
 export interface NetexRawStation {
   id: string;
   name: string;
+  city?: string;
   x?: number;
   y?: number;
   srsName?: string;
   rawRefs?: string[];
+}
+
+interface NetexStationSummary {
+  id: string;
+  name: string;
+  city?: string;
 }
 
 export interface NetexPattern {
@@ -104,13 +111,14 @@ export interface NetexPattern {
   destination?: string | null;
   direction?: string | null;
   stopIds?: string[];
-  stops?: Array<{ id: string; name: string }>;
+  stops?: NetexStationSummary[];
   serviceCount?: number;
 }
 
 export interface NetexSchematicNode {
   id: string;
   name: string;
+  city?: string;
   x?: number;
   y?: number;
   srsName?: string;
@@ -124,16 +132,17 @@ export interface NetexSchematicSegment {
   from: string;
   to: string;
   stationIds: string[];
-  stations?: Array<{ id: string; name: string }>;
+  stations?: NetexStationSummary[];
 }
 
 export interface NetexBranchGroup {
   id: string;
   junctionStationId: string;
-  junction?: { id: string; name: string };
+  junction?: NetexStationSummary;
   layout?: {
     kind: "same-direction-fork" | "split-fork";
     trunkStationId?: string;
+    trunk?: NetexStationSummary;
     axisDegrees?: number;
     branches: Array<{
       branchId: string;
@@ -146,7 +155,10 @@ export interface NetexBranchGroup {
   branches: Array<{
     id: string;
     terminalStationId: string;
+    terminal?: NetexStationSummary;
+    segmentIds?: string[];
     stationIds: string[];
+    stations?: NetexStationSummary[];
   }>;
 }
 
@@ -157,6 +169,8 @@ export interface NetexParallelGroup {
   alternatives: Array<{
     segmentId: string;
     stationIds: string[];
+    viaStationIds?: string[];
+    stations?: NetexStationSummary[];
   }>;
 }
 
@@ -164,8 +178,10 @@ export interface NetexLoop {
   id: string;
   kind: "cycle" | "parallel";
   anchorStationIds: string[];
+  anchors?: NetexStationSummary[];
   segmentIds: string[];
   stationIds: string[];
+  stations?: NetexStationSummary[];
 }
 
 const cacheSourcePromise = new Map<string, Promise<NetexCacheSource>>();
@@ -859,6 +875,7 @@ function adaptNetexLineToTopology(cache: NetexLineCache): LineTopology {
       return {
         id: node.id,
         name: decodeMojibake(node.name),
+        city: normalizeCacheCity(node.city),
         degree: node.degree,
         aliases: [node.name].filter(
           (alias) => alias !== decodeMojibake(node.name),
@@ -1208,6 +1225,11 @@ function normalizeStationName(value: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/giu, "")
     .toLowerCase();
+}
+
+function normalizeCacheCity(value: string | null | undefined): string | undefined {
+  const city = decodeMojibake(value).replace(/\s+/g, " ").trim();
+  return city || undefined;
 }
 
 function decodeMojibake(value: string | null | undefined): string {

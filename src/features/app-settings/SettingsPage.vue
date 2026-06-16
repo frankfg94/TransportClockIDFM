@@ -679,6 +679,25 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
+      <label class="settings-toggle">
+        <input
+          type="checkbox"
+          :checked="settings.showPatternCityZones"
+          @change="
+            updateSettings({
+              showPatternCityZones: ($event.target as HTMLInputElement).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>Afficher les villes du plan</strong>
+          <small
+            >Regroupe les stations voisines par commune sur le schema.</small
+          >
+        </div>
+      </label>
+
       <div class="settings-row">
         <div>
           <strong>Vue compacte du plan</strong>

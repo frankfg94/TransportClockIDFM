@@ -15,7 +15,9 @@ import type {
 import {
   assertPatternHasNoOrphanStations,
   buildLinePatternView,
+  buildLinePatternViewFromTopology,
 } from "../server/services/servicePattern/buildLinePatternView";
+import type { LineTopology } from "../server/services/topology/types";
 
 describe("station add to service-pattern modal workflow", () => {
   it("adds Transilien J / Cormeilles-en-Parisis from the NeTEx cache", async () => {
@@ -135,6 +137,15 @@ describe("station add to service-pattern modal workflow", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = input.toString();
 
+      if (url.includes("/datasets/arrets-lignes/records")) {
+        return new Response(JSON.stringify({ results: [] }), {
+          headers: {
+            "Content-Type": "application/json",
+          },
+          status: 200,
+        });
+      }
+
       if (!url.includes("/v2/navitia/lines/line%3AIDFM%3AC01729")) {
         throw new Error(`Unexpected line presentation fetch: ${url}`);
       }
@@ -186,6 +197,41 @@ describe("station add to service-pattern modal workflow", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it("uses NeTEx Town city names from the line topology", () => {
+    const topology = createCityTopologyFixture();
+    const response = buildLinePatternViewFromTopology(
+      {
+        transportType: "tram",
+        lineId: "T6",
+        directionId: "Viroflay - Rive Droite",
+        startStationId: "Chatillon - Montrouge",
+      },
+      topology,
+    );
+    const callsByLabel = new Map(
+      response.pattern.calls.map((call) => [call.label, call]),
+    );
+    const stopsByLabel = new Map(
+      response.pattern.lineTopology
+        ?.flatMap((sequence) => sequence.stops)
+        .map((stop) => [stop.label, stop]),
+    );
+
+    expect(response.board.city).toBe("Chatillon");
+    expect(callsByLabel.get("Louvois")?.city).toBe(
+      "Vélizy-Villacoublay",
+    );
+    expect(callsByLabel.get("Pavé Blanc (Parc Novéos)")?.city).toBe(
+      "Clamart",
+    );
+    expect(stopsByLabel.get("Louvois")?.city).toBe(
+      "Vélizy-Villacoublay",
+    );
+    expect(stopsByLabel.get("Pavé Blanc (Parc Novéos)")?.station.city).toBe(
+      "Clamart",
+    );
   });
 
   it("keeps T10 as a linear cached pattern from Les Peintres", async () => {
@@ -297,7 +343,7 @@ describe("station add to service-pattern modal workflow", () => {
 
     expect(searches).toEqual([]);
     expect(transferLookups).toContain("Montparnasse-Bienvenue");
-    expect(new Set(transferScopes)).toEqual(new Set(["nearby"]));
+    expect(new Set(transferScopes)).toEqual(new Set(["connected"]));
     expect(montparnasseCall?.transferLines?.map((line) => line.label)).toEqual(
       expect.arrayContaining(["6", "12", "13"]),
     );
@@ -366,6 +412,76 @@ function createCormeillesDirectionGroups(): DirectionGroupConfig[] {
       },
     },
   ];
+}
+
+function createCityTopologyFixture(): LineTopology {
+  return {
+    line: {
+      id: "line:IDFM:C01794",
+      aliases: ["T6", "tram-t6"],
+      name: "Tram T6",
+      shortName: "T6",
+      mode: "tram",
+    },
+    stations: [
+      {
+        id: "chatillon",
+        name: "Chatillon - Montrouge",
+        city: "Chatillon",
+        degree: 1,
+      },
+      {
+        id: "louvois",
+        name: "Louvois",
+        city: "Vélizy-Villacoublay",
+        degree: 2,
+      },
+      {
+        id: "pave-blanc",
+        name: "Pavé Blanc (Parc Novéos)",
+        city: "Clamart",
+        degree: 2,
+      },
+      {
+        id: "viroflay",
+        name: "Viroflay - Rive Droite",
+        city: "Viroflay",
+        degree: 1,
+      },
+    ],
+    segments: [
+      {
+        id: "chatillon__louvois",
+        from: "chatillon",
+        to: "louvois",
+        patterns: ["pattern:t6"],
+      },
+      {
+        id: "louvois__pave-blanc",
+        from: "louvois",
+        to: "pave-blanc",
+        patterns: ["pattern:t6"],
+      },
+      {
+        id: "pave-blanc__viroflay",
+        from: "pave-blanc",
+        to: "viroflay",
+        patterns: ["pattern:t6"],
+      },
+    ],
+    patterns: [
+      {
+        id: "pattern:t6",
+        terminalFrom: "Chatillon - Montrouge",
+        terminalTo: "Viroflay - Rive Droite",
+        stops: ["chatillon", "louvois", "pave-blanc", "viroflay"],
+        tripCount: 1,
+      },
+    ],
+    branches: [],
+    branchPoints: [],
+    terminals: ["chatillon", "viroflay"],
+  };
 }
 
 function createPatternStationOption(
