@@ -88,6 +88,7 @@ describe("station add to service-pattern modal workflow", () => {
     const graph = createPatternFlowStructure(response.pattern.lineTopology ?? []);
 
     expect(response.board.line.shortName).toBe("B");
+    expect(response.pattern.serviceType).toBe("semi-direct");
     expect(response.pattern.destination).toBe("Saint-Rémy-lès-Chevreuse");
     expectCurrentCall(response.pattern, "La Croix de Berny");
     expect(servedLabels[0]).toBe("La Croix de Berny");
@@ -106,6 +107,31 @@ describe("station add to service-pattern modal workflow", () => {
       visualSourceX: 0,
       visualTargetX: 100,
     });
+  });
+
+  it("marks topology patterns with skipped corridor stops as semi-direct", () => {
+    const response = buildLinePatternViewFromTopology(
+      {
+        transportType: "rer",
+        lineId: "X",
+        directionId: "Echo",
+        startStationId: "Alpha",
+      },
+      createSkippedStopTopologyFixture(),
+    );
+
+    expect(response.pattern.serviceType).toBe("semi-direct");
+    expect(servedCallLabels(response.pattern)).toEqual([
+      "Alpha",
+      "Delta",
+      "Echo",
+    ]);
+    expect(
+      response.pattern.calls.find((call) => call.label === "Bravo")?.served,
+    ).toBe(false);
+    expect(
+      response.pattern.calls.find((call) => call.label === "Charlie")?.served,
+    ).toBe(false);
   });
 
   it("resolves RER E by transport family and line letter from the generated cache", async () => {
@@ -481,6 +507,83 @@ function createCityTopologyFixture(): LineTopology {
     branches: [],
     branchPoints: [],
     terminals: ["chatillon", "viroflay"],
+  };
+}
+
+function createSkippedStopTopologyFixture(): LineTopology {
+  return {
+    line: {
+      id: "line:IDFM:test-express",
+      aliases: ["X"],
+      name: "RER X",
+      shortName: "X",
+      mode: "rer",
+    },
+    stations: [
+      {
+        id: "alpha",
+        name: "Alpha",
+        degree: 1,
+      },
+      {
+        id: "bravo",
+        name: "Bravo",
+        degree: 2,
+      },
+      {
+        id: "charlie",
+        name: "Charlie",
+        degree: 2,
+      },
+      {
+        id: "delta",
+        name: "Delta",
+        degree: 2,
+      },
+      {
+        id: "echo",
+        name: "Echo",
+        degree: 1,
+      },
+    ],
+    segments: [
+      {
+        id: "alpha__bravo",
+        from: "alpha",
+        to: "bravo",
+        patterns: ["pattern:x"],
+      },
+      {
+        id: "bravo__charlie",
+        from: "bravo",
+        to: "charlie",
+        patterns: ["pattern:x"],
+      },
+      {
+        id: "charlie__delta",
+        from: "charlie",
+        to: "delta",
+        patterns: ["pattern:x"],
+      },
+      {
+        id: "delta__echo",
+        from: "delta",
+        to: "echo",
+        patterns: ["pattern:x"],
+      },
+    ],
+    patterns: [
+      {
+        id: "pattern:x",
+        terminalFrom: "Alpha",
+        terminalTo: "Echo",
+        stops: ["alpha", "delta", "echo"],
+        tripCount: 1,
+      },
+    ],
+    branches: [],
+    branchPoints: [],
+    terminals: ["alpha", "echo"],
   };
 }
 

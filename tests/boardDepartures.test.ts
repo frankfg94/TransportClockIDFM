@@ -46,9 +46,53 @@ describe("board departures", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("infers the platform from a single-platform direction when SIRI only reports all platforms", async () => {
+    const originalFetch = globalThis.fetch;
+    const departureTime = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+
+      if (url.includes("/stop-monitoring")) {
+        return jsonResponse(createStopMonitoringPayload(departureTime, null));
+      }
+
+      if (url.includes("/stop_schedules")) {
+        return jsonResponse({
+          stop_schedules: [
+            {
+              display_informations: {
+                direction: "Massy - Palaiseau (Massy)",
+              },
+              stop_point: {
+                id: "stop_point:IDFM:monomodalStopPlace:46007",
+              },
+              date_times: [],
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected board departures fetch: ${url}`);
+    });
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      const result = await fetchBoardDepartures(createRerBBoard(["1"]));
+      const massyGroup = result.directionGroups.find(
+        (group) => group.id === "massy-palaiseau",
+      );
+
+      expect(massyGroup?.departures[0].platform).toBe("1");
+      expect(result.departures[0].platform).toBe("1");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
-function createRerBBoard(): TransitBoardConfig {
+function createRerBBoard(platforms?: string[]): TransitBoardConfig {
   return {
     id: "rer-b-croix-de-berny-test",
     title: "La Croix de Berny",
@@ -73,6 +117,7 @@ function createRerBBoard(): TransitBoardConfig {
         label: "Massy - Palaiseau",
         match: {
           destinationIncludes: ["Massy - Palaiseau"],
+          ...(platforms ? { platforms } : {}),
         },
       },
     ],
@@ -84,7 +129,10 @@ function createRerBBoard(): TransitBoardConfig {
   };
 }
 
-function createStopMonitoringPayload(departureTime: string) {
+function createStopMonitoringPayload(
+  departureTime: string,
+  platform: string | null = "1",
+) {
   return {
     Siri: {
       ServiceDelivery: {
@@ -122,9 +170,13 @@ function createStopMonitoringPayload(departureTime: string) {
                       },
                     ],
                     ExpectedDepartureTime: departureTime,
-                    DeparturePlatformName: {
-                      value: "1",
-                    },
+                    ...(platform
+                      ? {
+                          DeparturePlatformName: {
+                            value: platform,
+                          },
+                        }
+                      : {}),
                   },
                 },
               },

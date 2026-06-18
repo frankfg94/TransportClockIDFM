@@ -3,6 +3,7 @@ import type {
   DepartureCall,
   DepartureCallStatus,
   DepartureCallingPattern,
+  DepartureServiceType,
   LineConfig,
   LinePatternDirectionOption,
   LinePatternStationStatus,
@@ -135,7 +136,7 @@ export function buildLinePatternViewFromTopology(
   const pattern: DepartureCallingPattern = {
     departureId: departure.id,
     destination: orientedPattern.destination.name,
-    serviceType: "omnibus",
+    serviceType: inferPatternServiceType(activeStops, lineTopology),
     calls,
     lineTopology,
   };
@@ -179,6 +180,139 @@ function createDirectionOptions(
   return Array.from(directions.values()).sort((left, right) =>
     left.label.localeCompare(right.label, "fr"),
   );
+}
+
+function inferPatternServiceType(
+  activeStops: TopologyStation[],
+  lineTopology: LineRouteSequence[],
+): DepartureServiceType {
+  const servedStopsCount = activeStops.length;
+  const routeStopsCount =
+    countTopologyCorridorStops(activeStops, lineTopology) ?? servedStopsCount;
+
+  return getServiceType(servedStopsCount, routeStopsCount);
+}
+
+function getServiceType(
+  servedStopsCount: number,
+  routeStopsCount: number,
+): DepartureServiceType {
+  if (servedStopsCount <= 2 && routeStopsCount > 2) {
+    return "direct";
+  }
+
+  if (servedStopsCount < Math.max(2, routeStopsCount - 1)) {
+    return "semi-direct";
+  }
+
+  return "omnibus";
+}
+
+function countTopologyCorridorStops(
+  activeStops: TopologyStation[],
+  lineTopology: LineRouteSequence[],
+): number | undefined {
+  if (activeStops.length <= 1) {
+    return activeStops.length;
+  }
+
+  const firstStopId = activeStops[0]?.id;
+  const lastStopId = activeStops[activeStops.length - 1]?.id;
+
+  if (!firstStopId || !lastStopId) {
+    return undefined;
+  }
+
+  const activeIds = new Set(activeStops.map((station) => station.id));
+  const sameSequenceCandidate = lineTopology
+    .map((sequence) => sequence.stops.map((stop) => stop.id))
+    .flatMap((stationIds) => {
+      const firstIndex = stationIds.indexOf(firstStopId);
+      const lastIndex = stationIds.indexOf(lastStopId);
+
+      if (firstIndex < 0 || lastIndex < 0 || firstIndex === lastIndex) {
+        return [];
+      }
+
+      const startIndex = Math.min(firstIndex, lastIndex);
+      const endIndex = Math.max(firstIndex, lastIndex);
+      const corridor = stationIds.slice(startIndex, endIndex + 1);
+
+      return [
+        {
+          count: corridor.length,
+          activeMatches: corridor.filter((stationId) => activeIds.has(stationId))
+            .length,
+        },
+      ];
+    })
+    .sort(
+      (left, right) =>
+        right.activeMatches - left.activeMatches || right.count - left.count,
+    )[0];
+
+  if (sameSequenceCandidate) {
+    return sameSequenceCandidate.count;
+  }
+
+  return findShortestTopologyPathLength(firstStopId, lastStopId, lineTopology);
+}
+
+function findShortestTopologyPathLength(
+  source: string,
+  target: string,
+  lineTopology: LineRouteSequence[],
+): number | undefined {
+  if (source === target) {
+    return 1;
+  }
+
+  const neighbors = new Map<string, Set<string>>();
+
+  lineTopology.forEach((sequence) => {
+    sequence.stops.slice(0, -1).forEach((stop, index) => {
+      addTopologyNeighbor(neighbors, stop.id, sequence.stops[index + 1].id);
+      addTopologyNeighbor(neighbors, sequence.stops[index + 1].id, stop.id);
+    });
+  });
+
+  const queue: Array<{ stationId: string; distance: number }> = [
+    { stationId: source, distance: 1 },
+  ];
+  const visited = new Set<string>([source]);
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+
+    for (const neighbor of neighbors.get(current.stationId) ?? []) {
+      if (visited.has(neighbor)) {
+        continue;
+      }
+
+      const distance = current.distance + 1;
+
+      if (neighbor === target) {
+        return distance;
+      }
+
+      visited.add(neighbor);
+      queue.push({ stationId: neighbor, distance });
+    }
+  }
+
+  return undefined;
+}
+
+function addTopologyNeighbor(
+  neighbors: Map<string, Set<string>>,
+  source: string,
+  target: string,
+): void {
+  if (!neighbors.has(source)) {
+    neighbors.set(source, new Set<string>());
+  }
+
+  neighbors.get(source)!.add(target);
 }
 
 export function resolveHumanLineId(transportType: string, lineId: string): string {

@@ -627,7 +627,7 @@ function formatClock(value?: string): string {
 
 function formatServiceType(type: DepartureServiceType): string {
   if (type === "semi-direct") {
-    return "Semi-direct";
+    return "Semi direct";
   }
 
   if (type === "direct") {
@@ -635,7 +635,7 @@ function formatServiceType(type: DepartureServiceType): string {
   }
 
   if (type === "omnibus") {
-    return "Omnibus";
+    return "Toutes stations";
   }
 
   return "Desserte";

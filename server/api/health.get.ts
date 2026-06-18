@@ -25,6 +25,14 @@ const BROWSER_LIKE_HEALTH_HEADERS = {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
     "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
 };
+const NETEX_UPDATE_RECOMMENDED_AFTER_MONTHS = 6;
+const NETEX_OUTDATED_AFTER_MONTHS = 12;
+
+type NetexDatasetFreshness = {
+  status: "warning" | "error";
+  message: string;
+  detail: string;
+};
 
 export default defineEventHandler(async (event): Promise<HealthResponse> => {
   const checks = await Promise.all([
@@ -70,12 +78,20 @@ async function checkNetexCache(event: H3Event): Promise<HealthCheck> {
       };
     }
 
+    const freshness = getNetexDatasetFreshness(status.generatedAt);
+
     return {
-      status: status.warning ? "warning" : "ok",
-      message: `${status.lineCount ?? 0} lignes chargées`,
+      status: freshness?.status ?? (status.warning ? "warning" : "ok"),
+      message: [
+        `${status.lineCount ?? 0} lignes chargées`,
+        freshness?.message,
+      ]
+        .filter(Boolean)
+        .join(" · "),
       detail: [
         `Source ${formatNetexSource(status.source?.kind)}`,
         status.generatedAt ? `générée le ${formatDate(status.generatedAt)}` : "",
+        freshness?.detail,
         status.warning,
       ]
         .filter(Boolean)
@@ -320,6 +336,61 @@ function formatNetexSource(kind?: string): string {
   }
 
   return kind === "directory" ? "locale" : kind.toUpperCase();
+}
+
+export function getNetexDatasetFreshness(
+  generatedAt?: string,
+  now = new Date(),
+): NetexDatasetFreshness | undefined {
+  if (!generatedAt) {
+    return undefined;
+  }
+
+  const generatedDate = new Date(generatedAt);
+
+  if (Number.isNaN(generatedDate.getTime()) || Number.isNaN(now.getTime())) {
+    return undefined;
+  }
+
+  if (
+    now.getTime() >
+    addUtcMonths(generatedDate, NETEX_OUTDATED_AFTER_MONTHS).getTime()
+  ) {
+    return {
+      status: "error",
+      message: "dataset outdated",
+      detail: "Dataset NeTEx de plus d'un an, il doit être régénéré.",
+    };
+  }
+
+  if (
+    now.getTime() >
+    addUtcMonths(generatedDate, NETEX_UPDATE_RECOMMENDED_AFTER_MONTHS).getTime()
+  ) {
+    return {
+      status: "warning",
+      message: "mise à jour conseillée",
+      detail: "Dataset NeTEx de plus de 6 mois, mieux vaut le mettre à jour.",
+    };
+  }
+
+  return undefined;
+}
+
+function addUtcMonths(date: Date, months: number): Date {
+  const next = new Date(date.getTime());
+  const originalDay = next.getUTCDate();
+
+  next.setUTCDate(1);
+  next.setUTCMonth(next.getUTCMonth() + months);
+
+  const lastDayInTargetMonth = new Date(
+    Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+
+  next.setUTCDate(Math.min(originalDay, lastDayInTargetMonth));
+
+  return next;
 }
 
 function formatDate(value: string): string {

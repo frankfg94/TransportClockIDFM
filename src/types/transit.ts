@@ -75,6 +75,7 @@ export interface Departure {
   journeyRef?: string;
   callOrder?: number;
   remainingStopCount?: number;
+  serviceType?: DepartureServiceType;
   navitiaStopPointRef?: string;
 }
 

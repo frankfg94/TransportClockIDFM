@@ -21,6 +21,7 @@ import {
 } from "../services/idfm";
 import type {
   Departure,
+  DepartureServiceType,
   DirectionDepartureGroup,
   LineSearchOption,
   StationSearchOption,
@@ -327,6 +328,7 @@ function formatDepartureMeta(departure: Departure): string {
   const normalizedLabel = normalizeText(departure.monitoringLabel);
   const normalizedDestination = normalizeText(departure.destination);
   const parts: string[] = [];
+  const serviceLabel = formatDepartureServiceType(departure.serviceType);
 
   if (
     departure.monitoringLabel &&
@@ -338,13 +340,29 @@ function formatDepartureMeta(departure: Departure): string {
     parts.push(departure.monitoringLabel);
   }
 
-  if (departure.platform) {
-    parts.push(`Quai ${departure.platform}`);
-  } else if (normalizedLabel === "tous quais") {
-    parts.push("Tous quais");
+  if (serviceLabel) {
+    parts.push(serviceLabel);
   }
 
   return parts.join(" · ");
+}
+
+function formatDepartureServiceType(
+  serviceType?: DepartureServiceType,
+): string {
+  if (serviceType === "direct") {
+    return "Direct";
+  }
+
+  if (serviceType === "semi-direct") {
+    return "Semi direct";
+  }
+
+  if (serviceType === "omnibus") {
+    return "Toutes stations";
+  }
+
+  return "";
 }
 
 function formatRemainingStopCount(departure: Departure): string {

@@ -34,9 +34,11 @@ import {
 } from "./storage/transitAlarms";
 import type {
   AlarmDraft,
+  BoardDeparturesResult,
   Departure,
   DepartureAlarm,
   DepartureCallingPattern,
+  DepartureServiceType,
   DirectionDepartureGroup,
   LinePatternViewResponse,
   TransitBoardConfig,
@@ -125,6 +127,10 @@ const alarmTimers = new Map<string, number>();
 let toastTimer: number | undefined;
 let clockTimer: number | undefined;
 let mobileBreakpointQuery: MediaQueryList | undefined;
+const departureServiceTypeCache = new Map<
+  string,
+  Promise<DepartureServiceType | undefined>
+>();
 
 const allBoards = computed<TransitBoardConfig[]>(() => [
   ...transitBoards,
@@ -244,12 +250,20 @@ async function refreshBoard(boardId: string): Promise<void> {
     const result = await fetchBoardDepartures(
       createBoardRequestForSettings(board),
     );
+    const enrichedResult = await enrichBoardDeparturesWithServiceTypes(
+      board,
+      result,
+    );
 
-    state.departures = result.departures;
-    state.directionGroups = result.directionGroups;
+    state.departures = enrichedResult.departures;
+    state.directionGroups = enrichedResult.directionGroups;
     state.updatedAt = new Date();
     updateAlarms(
-      reconcileBoardAlarms(board, result.departures, departureAlarms.value),
+      reconcileBoardAlarms(
+        board,
+        enrichedResult.departures,
+        departureAlarms.value,
+      ),
     );
   } catch (error) {
     state.error =
@@ -257,6 +271,88 @@ async function refreshBoard(boardId: string): Promise<void> {
   } finally {
     state.loading = false;
   }
+}
+
+async function enrichBoardDeparturesWithServiceTypes(
+  board: TransitBoardConfig,
+  result: BoardDeparturesResult,
+): Promise<BoardDeparturesResult> {
+  if (board.line.mode === "bus") {
+    return result;
+  }
+
+  const departuresById = new Map<string, Departure>();
+  const entries = result.directionGroups.flatMap((group) =>
+    group.departures.map((departure) => ({ departure, group })),
+  );
+
+  await Promise.all(
+    entries.map(async ({ departure, group }) => {
+      const serviceType = await fetchCachedDepartureServiceType(
+        board,
+        group,
+        departure,
+      );
+
+      departuresById.set(
+        departure.id,
+        serviceType ? { ...departure, serviceType } : departure,
+      );
+    }),
+  );
+
+  return {
+    departures: result.departures.map(
+      (departure) => departuresById.get(departure.id) ?? departure,
+    ),
+    directionGroups: result.directionGroups.map((group) => ({
+      ...group,
+      departures: group.departures.map(
+        (departure) => departuresById.get(departure.id) ?? departure,
+      ),
+    })),
+  };
+}
+
+async function fetchCachedDepartureServiceType(
+  board: TransitBoardConfig,
+  directionGroup: DirectionDepartureGroup,
+  departure: Departure,
+): Promise<DepartureServiceType | undefined> {
+  const cacheKey = createDepartureServiceTypeCacheKey(
+    board,
+    directionGroup,
+    departure,
+  );
+  let request = departureServiceTypeCache.get(cacheKey);
+
+  if (!request) {
+    request = fetchLinePatternView(board, departure, directionGroup)
+      .then((patternView) => patternView.pattern.serviceType)
+      .catch(() => undefined);
+    departureServiceTypeCache.set(cacheKey, request);
+    request.then((serviceType) => {
+      if (!serviceType) {
+        departureServiceTypeCache.delete(cacheKey);
+      }
+    });
+  }
+
+  return request;
+}
+
+function createDepartureServiceTypeCacheKey(
+  board: TransitBoardConfig,
+  directionGroup: DirectionDepartureGroup,
+  departure: Departure,
+): string {
+  return [
+    board.line.mode,
+    board.schedule?.lineRef ?? board.line.ref,
+    board.title,
+    directionGroup.id,
+    departure.destination,
+  ].join("|");
 }
 
 async function refreshAll(): Promise<void> {

@@ -2891,7 +2891,7 @@ function buildBoardDeparturesResult(
   const lastDeparturesByGroup = new Map(
     lastDepartures.map((departure) => [departure.groupId, departure]),
   );
-  const visibleDepartures = new Set<string>();
+  const visibleDepartures = new Map<string, Departure>();
   const realtimeDeparturesByGroup = new Map<string, Departure[]>();
 
   board.directionGroups.forEach((group) => {
@@ -2910,14 +2910,17 @@ function buildBoardDeparturesResult(
         (departure) => findDirectionGroup(board, departure)?.id === group.id,
       );
       const groupDepartures =
-        realtimeDepartures.length > 0
+        (realtimeDepartures.length > 0
           ? enrichDeparturesWithScheduledStopCounts(
               realtimeDepartures,
               scheduledGroupDepartures,
             )
-          : scheduledGroupDepartures.slice(0, perDirectionLimit);
+          : scheduledGroupDepartures.slice(0, perDirectionLimit)
+        ).map((departure) => inferDeparturePlatformForGroup(departure, group));
 
-      groupDepartures.forEach((departure) => visibleDepartures.add(departure.id));
+      groupDepartures.forEach((departure) =>
+        visibleDepartures.set(departure.id, departure),
+      );
 
       return {
         id: group.id,
@@ -2931,13 +2934,29 @@ function buildBoardDeparturesResult(
     },
   );
 
-  const visibleFlatDepartures = [...departures, ...scheduledDepartures].filter(
-    (departure) => visibleDepartures.has(departure.id),
+  const visibleFlatDepartures = Array.from(visibleDepartures.values()).sort(
+    compareDepartures,
   );
 
   return {
     departures: visibleFlatDepartures,
     directionGroups,
+  };
+}
+
+function inferDeparturePlatformForGroup(
+  departure: Departure,
+  group: DirectionGroupConfig,
+): Departure {
+  const platforms = group.match.platforms ?? [];
+
+  if (departure.platform || platforms.length !== 1 || !platforms[0]) {
+    return departure;
+  }
+
+  return {
+    ...departure,
+    platform: platforms[0],
   };
 }
 
