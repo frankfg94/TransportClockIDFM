@@ -1,0 +1,53 @@
+﻿/* Shared button primitives used across the app. */
+
+button {
+  align-items: center;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--idfm-blue);
+  color: white;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-weight: 700;
+  gap: var(--space-2);
+  justify-content: center;
+  min-height: var(--control-height);
+  padding: 0 18px;
+  transition:
+    background var(--motion-fast),
+    transform var(--motion-fast);
+}
+
+button:hover:not(:disabled) {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.button-secondary {
+  background: var(--surface-muted);
+  color: var(--idfm-blue);
+}
+
+.button-secondary:hover:not(:disabled) {
+  background: var(--surface-muted-hover);
+}
+
+.icon-button {
+  align-items: center;
+  background: var(--surface-muted);
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 1.25rem;
+  height: 42px;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0;
+  width: 42px;
+}
+
