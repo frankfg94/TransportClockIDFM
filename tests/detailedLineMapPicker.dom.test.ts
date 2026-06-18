@@ -47,6 +47,7 @@ const line: LineSearchOption = {
 };
 
 beforeEach(() => {
+  document.body.innerHTML = "";
   window.localStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -189,6 +190,116 @@ describe("DetailedLineMapPicker sidebar", () => {
 
     expect(wrapper.get('[data-testid="line-map-sidebar"]').text()).toContain(
       "Station A",
+    );
+
+    wrapper.unmount();
+  });
+
+  it("opens the mobile station sheet on one touch pointerup and ignores the synthetic click", async () => {
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: { line, mode: "explorer", selectable: false },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const target = wrapper.findAll(".line-map-hit-target")[0];
+
+    await target.trigger("pointerup", {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+      pointerId: 7,
+      pointerType: "touch",
+    });
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="line-map-sidebar"]').text()).toContain(
+      "Station A",
+    );
+    expect(loadStationTransfers).toHaveBeenCalledTimes(1);
+
+    await target.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="line-map-sidebar"]').exists()).toBe(
+      true,
+    );
+    expect(loadStationTransfers).toHaveBeenCalledTimes(1);
+
+    wrapper.unmount();
+  });
+
+  it("toggles the mobile sheet with the handle and closes after dragging down from peek", async () => {
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: { line, mode: "explorer", selectable: false },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    await wrapper.findAll(".line-map-hit-target")[0].trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="line-map-sidebar"]').classes()).toContain(
+      "line-map-sidebar--mobile-mid",
+    );
+
+    await wrapper.get('[data-testid="line-map-sidebar-drag-handle"]').trigger(
+      "click",
+    );
+    expect(wrapper.get('[data-testid="line-map-sidebar"]').classes()).toContain(
+      "line-map-sidebar--mobile-full",
+    );
+
+    await wrapper.get('[data-testid="line-map-sidebar-drag-handle"]').trigger(
+      "click",
+    );
+    expect(wrapper.get('[data-testid="line-map-sidebar"]').classes()).toContain(
+      "line-map-sidebar--mobile-mid",
+    );
+
+    let handle = wrapper.get('[data-testid="line-map-sidebar-drag-handle"]');
+    await handle.trigger("pointerdown", {
+      button: 0,
+      clientY: 100,
+      pointerId: 3,
+      pointerType: "touch",
+    });
+    await handle.trigger("pointermove", {
+      clientY: 205,
+      pointerId: 3,
+      pointerType: "touch",
+    });
+    await handle.trigger("pointerup", {
+      clientY: 205,
+      pointerId: 3,
+      pointerType: "touch",
+    });
+    await flushPromises();
+    expect(wrapper.get('[data-testid="line-map-sidebar"]').classes()).toContain(
+      "line-map-sidebar--mobile-peek",
+    );
+
+    handle = wrapper.get('[data-testid="line-map-sidebar-drag-handle"]');
+    await handle.trigger("pointerdown", {
+      button: 0,
+      clientY: 100,
+      pointerId: 4,
+      pointerType: "touch",
+    });
+    await handle.trigger("pointermove", {
+      clientY: 205,
+      pointerId: 4,
+      pointerType: "touch",
+    });
+    await handle.trigger("pointerup", {
+      clientY: 205,
+      pointerId: 4,
+      pointerType: "touch",
+    });
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="line-map-sidebar"]').exists()).toBe(
+      false,
     );
 
     wrapper.unmount();
@@ -374,6 +485,82 @@ describe("DetailedLineMapPicker sidebar", () => {
     expect(wrapper.find('[data-testid="network-ghost-layer"]').exists()).toBe(
       false,
     );
+
+    wrapper.unmount();
+  });
+
+  it("opens the mobile display modal and keeps the ghost controls wired", async () => {
+    loadStationTransfers.mockResolvedValueOnce([
+      {
+        id: "line:IDFM:C01743",
+        label: "B",
+        family: "RER",
+        mode: "RER",
+        color: "#4b92db",
+      },
+    ]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            stations: [
+              { id: "ghost:a", name: "Station A", lon: 2.35, lat: 48.85 },
+              { id: "ghost:b", name: "Station Ghost", lon: 2.365, lat: 48.86 },
+            ],
+            segments: [{ id: "ghost:a-b", from: "ghost:a", to: "ghost:b" }],
+            patterns: [],
+          }),
+        ),
+      ),
+    );
+
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: {
+        line,
+        mode: "explorer",
+        selectable: false,
+        ghostNetworkEnabled: true,
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    await wrapper.findAll(".line-map-hit-target")[0].trigger("click");
+    await flushPromises();
+    await flushPromises();
+    expect(wrapper.find('[data-testid="network-ghost-layer"]').exists()).toBe(
+      true,
+    );
+
+    await wrapper.get('[data-testid="line-map-mobile-display-button"]').trigger(
+      "click",
+    );
+    await flushPromises();
+
+    const modal = document.body.querySelector(
+      '[data-testid="line-map-display-modal"]',
+    );
+    expect(modal?.textContent).toContain("Affichage");
+    const input = modal?.querySelector(
+      'input[type="checkbox"]',
+    ) as HTMLInputElement;
+    input.checked = false;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="network-ghost-layer"]').exists()).toBe(
+      false,
+    );
+
+    const backdrop = document.body.querySelector(
+      ".line-map-display-modal-backdrop",
+    );
+    backdrop?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+    expect(
+      document.body.querySelector('[data-testid="line-map-display-modal"]'),
+    ).toBeNull();
 
     wrapper.unmount();
   });

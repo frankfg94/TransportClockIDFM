@@ -1,6 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import { Eye, Minus, Plus } from "lucide-vue-next";
+import { Eye, Minus, Plus, Settings, X } from "lucide-vue-next";
 import DistanceToggle from "../../components/DistanceToggle.vue";
 import {
   loadDetailedLineMap,
@@ -9,6 +9,7 @@ import {
   loadTransferLineFrequency,
 } from "./lineMapData";
 import DetailedLineMapPickerSideBar from "./DetailedLineMapPickerSideBar.vue";
+import LineMapDisplayControls from "./LineMapDisplayControls.vue";
 import {
   filterNetworkGhostTransfersByModes,
   TransitNetworkGhostLayer,
@@ -73,6 +74,13 @@ interface SegmentDistanceLabel {
   height: number;
 }
 
+type MobileSheetStage = "peek" | "mid" | "full";
+
+interface TouchStopClickGuard {
+  stopId: string;
+  handledAt: number;
+}
+
 const props = withDefaults(
   defineProps<{
     line?: LineSearchOption;
@@ -121,6 +129,9 @@ const favoriteLoading = ref(false);
 const favoriteError = ref("");
 const favoriteConfirmationOpen = ref(false);
 const showDistances = ref(false);
+const mobileDisplayOpen = ref(false);
+const mobileSheetStage = ref<MobileSheetStage>("mid");
+const touchStopClickGuard = ref<TouchStopClickGuard>();
 const mapDrag = reactive<MapDragState>({
   active: false,
   dragging: false,
@@ -404,6 +415,32 @@ function selectStop(stop: LineMapStopView): void {
   }
 }
 
+function selectStopFromPointer(stop: LineMapStopView, event: PointerEvent): void {
+  if (event.pointerType !== "touch" && event.pointerType !== "pen") {
+    return;
+  }
+
+  event.preventDefault();
+  touchStopClickGuard.value = {
+    stopId: stop.id,
+    handledAt: Date.now(),
+  };
+  selectStop(stop);
+}
+
+function selectStopFromClick(stop: LineMapStopView, event: MouseEvent): void {
+  const guard = touchStopClickGuard.value;
+
+  if (guard?.stopId === stop.id && Date.now() - guard.handledAt < 900) {
+    event.preventDefault();
+    touchStopClickGuard.value = undefined;
+    return;
+  }
+
+  touchStopClickGuard.value = undefined;
+  selectStop(stop);
+}
+
 function showStopHover(stop: LineMapStopView): void {
   hoveredStop.value = stop;
 }
@@ -425,6 +462,7 @@ function toggleStopDetails(stop: LineMapStopView): void {
   ghostResetKey.value += 1;
   activeGhostLine.value = undefined;
   activeStop.value = stop;
+  mobileSheetStage.value = "mid";
   void loadTransfers(stop);
 }
 
@@ -434,6 +472,25 @@ function closeSidebar(): void {
   ghostResetKey.value += 1;
   favoriteError.value = "";
   favoriteLoading.value = false;
+  mobileSheetStage.value = "mid";
+}
+
+function setMobileSheetStage(stage: MobileSheetStage): void {
+  mobileSheetStage.value = stage;
+}
+
+function setGhostModeVisibility(
+  visibility: GhostNetworkModeVisibility,
+): void {
+  Object.assign(ghostModeVisibility, visibility);
+}
+
+function openMobileDisplayModal(): void {
+  mobileDisplayOpen.value = true;
+}
+
+function closeMobileDisplayModal(): void {
+  mobileDisplayOpen.value = false;
 }
 
 function handleGhostActiveLineChange(
@@ -728,10 +785,10 @@ function getActiveLabelBackground(stop: LineMapStopView, index: number) {
 
 function getHitTargetStyle(stop: LineMapStopView) {
   return {
-    height: `${34}px`,
+    height: "var(--line-map-hit-target-size, 34px)",
     left: `${toScreenX(stop.x)}px`,
     top: `${toScreenY(stop.y)}px`,
-    width: `${34}px`,
+    width: "var(--line-map-hit-target-size, 34px)",
   };
 }
 
@@ -951,6 +1008,16 @@ function getLabelPriority(
           class="pattern-flow-action-button line-map-distance-toggle"
           :reduce-motion="reduceMotion"
         />
+        <button
+          v-if="ghostNetworkEnabled && isExplorerMode"
+          class="icon-button line-map-mobile-settings-button"
+          type="button"
+          aria-label="Ouvrir les options d'affichage"
+          data-testid="line-map-mobile-display-button"
+          @click="openMobileDisplayModal"
+        >
+          <Settings aria-hidden="true" />
+        </button>
         <span class="line-map-stats">{{ mapStats }}</span>
         <span
           v-if="ghostNetworkEnabled && ghostProgress.total > 0"
@@ -1180,7 +1247,8 @@ function getLabelPriority(
           :aria-pressed="stop.id === activeStop?.id"
           :style="getHitTargetStyle(stop)"
           @pointerdown.stop
-          @click="selectStop(stop)"
+          @pointerup.stop="selectStopFromPointer(stop, $event)"
+          @click="selectStopFromClick(stop, $event)"
           @focus="showStopHover(stop)"
           @blur="hideStopHover(stop)"
           @mouseenter="showStopHover(stop)"
@@ -1210,46 +1278,14 @@ function getLabelPriority(
           <Plus v-else aria-hidden="true" />
         </button>
 
-        <div
+        <LineMapDisplayControls
           v-if="ghostDisplayExpanded"
-          class="line-map-display-panel__content"
-        >
-          <label class="line-map-display-panel__main-toggle">
-            <input v-model="ghostDisplayEnabled" type="checkbox" />
-            <span>Correspondances</span>
-          </label>
-
-          <div class="line-map-display-panel__modes">
-            <label>
-              <input
-                v-model="ghostModeVisibility.bus"
-                type="checkbox"
-                :disabled="ghostNetworkScope === 'structural'"
-              />
-              <span>Bus</span>
-            </label>
-            <label>
-              <input v-model="ghostModeVisibility.metro" type="checkbox" />
-              <span>Métro</span>
-            </label>
-            <label>
-              <input v-model="ghostModeVisibility.tram" type="checkbox" />
-              <span>Tramway</span>
-            </label>
-            <label>
-              <input
-                v-model="ghostModeVisibility.noctilien"
-                type="checkbox"
-                :disabled="ghostNetworkScope === 'structural'"
-              />
-              <span>Noctilien</span>
-            </label>
-            <label>
-              <input v-model="ghostModeVisibility.rer" type="checkbox" />
-              <span>RER</span>
-            </label>
-          </div>
-        </div>
+          :model-value="ghostDisplayEnabled"
+          :visibility="ghostModeVisibility"
+          :ghost-network-scope="ghostNetworkScope"
+          @update:model-value="ghostDisplayEnabled = $event"
+          @update:visibility="setGhostModeVisibility"
+        />
       </aside>
     </div>
 
@@ -1275,12 +1311,56 @@ function getLabelPriority(
           activeGhostFrequencyState?.loading ?? false
         "
         :ghost-frequency-error="activeGhostFrequencyState?.error"
+        :mobile-stage="mobileSheetStage"
         @close="closeSidebar"
+        @mobile-stage-change="setMobileSheetStage"
         @add-favorite="addActiveStopToFavorites"
         @open-google-maps="openActiveStopInGoogleMaps"
       />
     </Transition>
   </div>
+
+  <Teleport to="body">
+    <Transition name="line-map-display-modal-fade">
+      <div
+        v-if="ghostNetworkEnabled && isExplorerMode && mobileDisplayOpen"
+        class="line-map-display-modal-backdrop"
+        role="presentation"
+        @click.self="closeMobileDisplayModal"
+      >
+        <section
+          class="line-map-display-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="line-map-display-modal-title"
+          data-testid="line-map-display-modal"
+          tabindex="-1"
+          @keydown.esc="closeMobileDisplayModal"
+        >
+          <header class="line-map-display-modal__header">
+            <Eye aria-hidden="true" />
+            <strong id="line-map-display-modal-title">Affichage</strong>
+            <button
+              class="icon-button line-map-display-modal__close"
+              type="button"
+              aria-label="Fermer les options d'affichage"
+              @click="closeMobileDisplayModal"
+            >
+              <X aria-hidden="true" />
+            </button>
+          </header>
+
+          <LineMapDisplayControls
+            :model-value="ghostDisplayEnabled"
+            :visibility="ghostModeVisibility"
+            :ghost-network-scope="ghostNetworkScope"
+            @update:model-value="ghostDisplayEnabled = $event"
+            @update:visibility="setGhostModeVisibility"
+          />
+        </section>
+      </div>
+    </Transition>
+  </Teleport>
 
   <Teleport to="body">
     <Transition name="modal-scale">

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ExternalLink, MapIcon, MapPinned, Star, X } from "lucide-vue-next";
+import { computed, reactive, ref } from "vue";
+import { ExternalLink, MapIcon, Star, X } from "lucide-vue-next";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import StationTransferDetails from "../../components/StationTransferDetails.vue";
 import type { NetworkGhostLineView } from "../network-ghost";
@@ -9,7 +10,9 @@ import type {
 } from "../../types/transit";
 import type { LineMapStopView } from "./types";
 
-defineProps<{
+type MobileSheetStage = "peek" | "mid" | "full";
+
+const props = withDefaults(defineProps<{
   stop: LineMapStopView;
   transfers: TransferLineOption[];
   transfersLoading: boolean;
@@ -25,13 +28,110 @@ defineProps<{
   ghostFrequency?: LineFrequencyProfile;
   ghostFrequencyLoading?: boolean;
   ghostFrequencyError?: boolean;
-}>();
+  mobileStage?: MobileSheetStage;
+}>(), {
+  mobileStage: "mid",
+});
 
 const emit = defineEmits<{
   close: [];
+  mobileStageChange: [stage: MobileSheetStage];
   addFavorite: [];
   openGoogleMaps: [];
 }>();
+
+const mobileDrag = reactive({
+  active: false,
+  currentY: 0,
+  pointerId: -1,
+  startY: 0,
+});
+const suppressHandleClick = ref(false);
+
+const sidebarStyle = computed(() => ({
+  "--line-map-sidebar-drag-offset": mobileDrag.active
+    ? `${Math.max(-90, Math.min(220, mobileDrag.currentY - mobileDrag.startY))}px`
+    : "0px",
+}));
+
+function toggleMobileSheetFromHandle(): void {
+  if (suppressHandleClick.value) {
+    suppressHandleClick.value = false;
+    return;
+  }
+
+  emit("mobileStageChange", props.mobileStage === "full" ? "mid" : "full");
+}
+
+function startMobileSheetDrag(event: PointerEvent): void {
+  if (event.button !== 0 && event.pointerType === "mouse") {
+    return;
+  }
+
+  mobileDrag.active = true;
+  mobileDrag.pointerId = event.pointerId;
+  mobileDrag.startY = event.clientY;
+  mobileDrag.currentY = event.clientY;
+
+  if (event.currentTarget instanceof HTMLElement) {
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+}
+
+function moveMobileSheetDrag(event: PointerEvent): void {
+  if (!mobileDrag.active || event.pointerId !== mobileDrag.pointerId) {
+    return;
+  }
+
+  mobileDrag.currentY = event.clientY;
+}
+
+function finishMobileSheetDrag(event: PointerEvent): void {
+  if (!mobileDrag.active || event.pointerId !== mobileDrag.pointerId) {
+    return;
+  }
+
+  mobileDrag.currentY = event.clientY;
+  const deltaY = mobileDrag.currentY - mobileDrag.startY;
+
+  mobileDrag.active = false;
+  mobileDrag.pointerId = -1;
+
+  if (event.currentTarget instanceof HTMLElement) {
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
+  if (Math.abs(deltaY) < 60) {
+    return;
+  }
+
+  suppressHandleClick.value = true;
+  window.setTimeout(() => {
+    suppressHandleClick.value = false;
+  }, 120);
+
+  if (deltaY < 0) {
+    emit("mobileStageChange", props.mobileStage === "peek" ? "mid" : "full");
+    return;
+  }
+
+  if (props.mobileStage === "full") {
+    emit("mobileStageChange", "mid");
+  } else if (props.mobileStage === "mid") {
+    emit("mobileStageChange", "peek");
+  } else {
+    emit("close");
+  }
+}
+
+function cancelMobileSheetDrag(event: PointerEvent): void {
+  if (!mobileDrag.active || event.pointerId !== mobileDrag.pointerId) {
+    return;
+  }
+
+  mobileDrag.active = false;
+  mobileDrag.pointerId = -1;
+}
 
 function isNoctilienLine(line: NetworkGhostLineView): boolean {
   return (
@@ -53,9 +153,28 @@ function formatFrequency(minutes?: number): string {
 <template>
   <aside
     class="line-map-sidebar"
+    :class="[
+      `line-map-sidebar--mobile-${mobileStage}`,
+      { 'line-map-sidebar--mobile-dragging': mobileDrag.active },
+    ]"
+    :style="sidebarStyle"
     aria-label="Détails de la station"
     data-testid="line-map-sidebar"
   >
+    <button
+      class="line-map-sidebar__drag-handle"
+      type="button"
+      aria-label="Agrandir ou réduire le panneau de station"
+      data-testid="line-map-sidebar-drag-handle"
+      @click="toggleMobileSheetFromHandle"
+      @pointerdown.prevent="startMobileSheetDrag"
+      @pointermove.prevent="moveMobileSheetDrag"
+      @pointerup.prevent="finishMobileSheetDrag"
+      @pointercancel.prevent="cancelMobileSheetDrag"
+    >
+      <span aria-hidden="true"></span>
+    </button>
+
     <header class="line-map-sidebar__topbar">
       <span>Détails de la station</span>
       <button
@@ -207,6 +326,30 @@ function formatFrequency(minutes?: number): string {
   min-height: 0;
   width: clamp(320px, 30vw, 400px);
   z-index: 8;
+}
+
+.line-map-sidebar__drag-handle {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  cursor: grab;
+  display: none;
+  justify-content: center;
+  padding: 10px 0 6px;
+  touch-action: none;
+}
+
+.line-map-sidebar__drag-handle:active {
+  cursor: grabbing;
+}
+
+.line-map-sidebar__drag-handle span {
+  background: rgba(100, 116, 139, 0.42);
+  border-radius: 999px;
+  display: block;
+  height: 5px;
+  width: 48px;
 }
 
 .line-map-sidebar__topbar {
@@ -385,8 +528,58 @@ function formatFrequency(minutes?: number): string {
 
 @media (max-width: 720px) {
   .line-map-sidebar {
-    inset: 0;
+    border-radius: 24px 24px 0 0;
+    box-shadow: 0 -24px 70px rgba(15, 23, 42, 0.24);
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    height: 52dvh;
+    inset: auto 0 0;
+    max-height: calc(100dvh - 10px);
+    min-height: 180px;
+    overflow: hidden;
+    position: fixed;
+    transform: translateY(var(--line-map-sidebar-drag-offset, 0px));
+    transition:
+      height 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 180ms ease;
     width: 100%;
+    z-index: 9100;
+  }
+
+  .line-map-sidebar--mobile-peek {
+    height: 28dvh;
+  }
+
+  .line-map-sidebar--mobile-mid {
+    height: 52dvh;
+  }
+
+  .line-map-sidebar--mobile-full {
+    height: 92dvh;
+  }
+
+  .line-map-sidebar--mobile-dragging {
+    transition: none;
+  }
+
+  .line-map-sidebar__drag-handle {
+    display: flex;
+  }
+
+  .line-map-sidebar__topbar {
+    min-height: 42px;
+    padding: 2px 12px 10px 18px;
+  }
+
+  .line-map-sidebar__content {
+    overscroll-behavior: contain;
+    padding: 14px 18px 18px;
+  }
+
+  .line-map-sidebar__actions {
+    bottom: 0;
+    padding: 14px 18px calc(16px + env(safe-area-inset-bottom));
+    position: sticky;
   }
 }
 </style>

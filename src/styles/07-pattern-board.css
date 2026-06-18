@@ -266,6 +266,10 @@
   z-index: 20;
 }
 
+.pattern-flow-mobile-actions {
+  display: none;
+}
+
 .pattern-flow-action-button {
   align-items: center;
   background: rgba(255, 255, 255, 0.94);
@@ -306,6 +310,95 @@
 .pattern-flow-shell:fullscreen .pattern-flow-actions {
   right: 22px;
   top: 22px;
+}
+
+.pattern-flow-shell:fullscreen .pattern-flow-mobile-actions {
+  right: 22px;
+  top: 22px;
+}
+
+.pattern-flow-mobile-actions__trigger {
+  align-items: center;
+  background: #05070c;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  box-shadow: 0 16px 38px rgba(16, 35, 63, 0.22);
+  color: #ffffff;
+  display: inline-flex;
+  height: 46px;
+  justify-content: center;
+  min-height: 46px;
+  padding: 0;
+  width: 46px;
+}
+
+.pattern-flow-mobile-actions__trigger:hover,
+.pattern-flow-mobile-actions__trigger:focus-visible,
+.pattern-flow-mobile-actions__trigger[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--line-color) 76%, #05070c);
+  box-shadow: 0 18px 42px rgba(16, 35, 63, 0.28);
+  transform: translateY(-1px);
+}
+
+.pattern-flow-mobile-actions__trigger svg {
+  height: 20px;
+  width: 20px;
+}
+
+.pattern-flow-mobile-actions__menu {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(16, 35, 63, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 20px 48px rgba(16, 35, 63, 0.22);
+  display: grid;
+  gap: 8px;
+  max-width: calc(100vw - 24px);
+  min-width: 228px;
+  padding: 8px;
+  position: absolute;
+  right: 0;
+  top: 54px;
+}
+
+.pattern-flow-mobile-actions__menu .pattern-flow-action-button {
+  border-radius: 8px;
+  box-shadow: none;
+  justify-content: flex-start;
+  min-height: 42px;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.pattern-flow-mobile-actions__menu .distance-toggle__track {
+  margin-left: auto;
+}
+
+.pattern-flow-mobile-actions__menu .line-pattern-page__view-tabs {
+  border-radius: 8px;
+  box-shadow: none;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 4px;
+  width: 100%;
+}
+
+.pattern-flow-mobile-actions__menu .line-pattern-page__view-tabs button {
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+.pattern-flow-mobile-actions-menu-enter-active,
+.pattern-flow-mobile-actions-menu-leave-active {
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.pattern-flow-mobile-actions-menu-enter-from,
+.pattern-flow-mobile-actions-menu-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
 }
 
 .pattern-flow-transfer-loader {

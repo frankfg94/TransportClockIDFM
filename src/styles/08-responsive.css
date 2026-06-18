@@ -214,39 +214,51 @@
   .pattern-board {
     grid-template-columns: 1fr;
     min-height: min(70vh, 560px);
+    box-shadow: none;
   }
 
   .pattern-board__summary {
     align-items: center;
     display: grid;
-    gap: 10px;
+    gap: 6px 12px;
     grid-template-columns: auto minmax(0, 1fr);
-    grid-template-rows: auto auto;
-    padding: 14px;
+    grid-template-rows: auto auto auto;
+    padding: 12px 14px;
   }
 
   .pattern-board__line {
     grid-row: 1 / -1;
-    min-height: 54px;
+    min-height: 50px;
+    padding: 6px;
+  }
+
+  .pattern-board__mode-icon {
+    font-size: 0.5rem;
+    height: 36px;
+    min-width: 36px;
   }
 
   .pattern-board__summary p {
+    font-size: 0.68rem;
     margin-top: 0;
   }
 
   .pattern-board__summary strong {
-    font-size: 1.18rem;
+    font-size: 1.12rem;
   }
 
   .pattern-board__summary small {
     align-self: auto;
     grid-column: 2;
+    font-size: 0.76rem;
   }
 
   .pattern-board__top-strip {
-    align-items: stretch;
-    display: grid;
-    padding: 12px;
+    display: none;
+  }
+
+  .pattern-board__display {
+    grid-template-rows: minmax(0, 1fr);
   }
 
   .pattern-board__meta {
@@ -265,6 +277,56 @@
     height: 420px;
   }
 
+  .pattern-page-embed,
+  .pattern-page-embed__panel,
+  .pattern-page-embed .pattern-modal__body,
+  .pattern-page-embed .pattern-board {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+
+  .pattern-page-embed .pattern-board {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .pattern-page-embed .pattern-board__display {
+    display: grid;
+    min-height: 0;
+  }
+
+  .pattern-page-embed .pattern-flow-shell,
+  .pattern-page-embed .pattern-flow {
+    height: 100%;
+    min-height: 420px;
+  }
+
+  .pattern-flow .vue-flow__controls,
+  .pattern-flow-minimap {
+    display: none;
+  }
+
+  .pattern-flow-transfer-loader {
+    left: 12px;
+    max-width: calc(100% - 82px);
+    min-width: 0;
+    right: 70px;
+    top: 12px;
+  }
+
+  .pattern-flow-transfer-loader--rate-limited {
+    min-width: 0;
+  }
+
+  .pattern-flow-transfer-loader__label {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .pattern-flow-transfer-loader__label small {
+    white-space: normal;
+  }
+
   .pattern-flow-station {
     width: 142px;
   }
@@ -275,15 +337,15 @@
   }
 
   .pattern-flow-actions {
-    left: 12px;
-    right: 12px;
-    top: 12px;
+    display: none;
   }
 
-  .pattern-flow-action-button {
-    flex: 1;
-    justify-content: center;
-    padding: 0 10px;
+  .pattern-flow-mobile-actions {
+    display: block;
+    position: absolute;
+    right: 12px;
+    top: 12px;
+    z-index: 30;
   }
 
   .pattern-flow-shell--compact .pattern-flow-station {

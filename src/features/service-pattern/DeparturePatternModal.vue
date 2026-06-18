@@ -18,6 +18,7 @@ import StationTransferDetails from "../../components/StationTransferDetails.vue"
 import { transitModeToFamily } from "../../services/linePresentation";
 import { Controls } from "@vue-flow/controls";
 import {
+  EllipsisVertical,
   Expand,
   Minimize2,
   SlidersHorizontal,
@@ -254,6 +255,7 @@ const patternFlowViewportSize = ref<PatternViewportSize>({
   width: 0,
   height: 0,
 });
+const mobileFlowActionsOpen = ref(false);
 const hydratedPattern = ref<DepartureCallingPattern>();
 const transferHydrationLoading = ref(false);
 const transferHydrationProgress = ref<PatternTransferHydrationProgress>({
@@ -641,6 +643,14 @@ function formatServiceType(type: DepartureServiceType): string {
   return "Desserte";
 }
 
+function toggleMobileFlowActions(): void {
+  mobileFlowActionsOpen.value = !mobileFlowActionsOpen.value;
+}
+
+function closeMobileFlowActions(): void {
+  mobileFlowActionsOpen.value = false;
+}
+
 function createTransportModeIcon(mode?: string): TransportModeIcon {
   const family = transitModeToFamily(mode);
 
@@ -690,6 +700,15 @@ watch(
     void hydratePatternTransfers();
   },
   { immediate: true },
+);
+
+watch(
+  () => props.open,
+  (open) => {
+    if (!open) {
+      closeMobileFlowActions();
+    }
+  },
 );
 
 async function hydratePatternTransfers(): Promise<void> {
@@ -3174,6 +3193,7 @@ onBeforeUnmount(() => {
                     'pattern-flow-shell--compact': isCompactPatternFlow,
                     'pattern-flow-shell--reduce-motion': reduceMotion,
                   }"
+                  @click="closeMobileFlowActions"
                 >
                   <div
                     v-if="embedded && transferHydrationLoading"
@@ -3212,7 +3232,7 @@ onBeforeUnmount(() => {
                       </button>
                     </div>
                   </div>
-                  <div class="pattern-flow-actions">
+                  <div class="pattern-flow-actions pattern-flow-actions--desktop">
                     <slot name="flow-actions-prefix"></slot>
                     <DistanceToggle
                       v-model="showPatternDistances"
@@ -3254,6 +3274,86 @@ onBeforeUnmount(() => {
                         }}
                       </span>
                     </button>
+                  </div>
+                  <div
+                    class="pattern-flow-mobile-actions"
+                    :class="{
+                      'pattern-flow-mobile-actions--open':
+                        mobileFlowActionsOpen,
+                    }"
+                    @click.stop
+                    @keydown.esc.stop="closeMobileFlowActions"
+                  >
+                    <button
+                      class="pattern-flow-mobile-actions__trigger"
+                      type="button"
+                      :aria-expanded="mobileFlowActionsOpen"
+                      aria-controls="pattern-flow-mobile-actions-menu"
+                      aria-label="Options du plan"
+                      @click.stop="toggleMobileFlowActions"
+                    >
+                      <EllipsisVertical aria-hidden="true" />
+                    </button>
+                    <Transition name="pattern-flow-mobile-actions-menu">
+                      <div
+                        v-if="mobileFlowActionsOpen"
+                        id="pattern-flow-mobile-actions-menu"
+                        class="pattern-flow-mobile-actions__menu"
+                      >
+                        <slot name="flow-actions-prefix"></slot>
+                        <DistanceToggle
+                          v-model="showPatternDistances"
+                          class="pattern-flow-action-button"
+                          :reduce-motion="reduceMotion"
+                          @click="closeMobileFlowActions"
+                        />
+                        <button
+                          class="pattern-flow-action-button"
+                          type="button"
+                          :aria-pressed="isCompactPatternFlow"
+                          aria-label="Basculer la vue compacte"
+                          @click.stop="
+                            isCompactPatternFlow = !isCompactPatternFlow;
+                            closeMobileFlowActions();
+                          "
+                        >
+                          <SlidersHorizontal aria-hidden="true" />
+                          <span>
+                            {{
+                              isCompactPatternFlow
+                                ? "Vue compacte"
+                                : "Vue confort"
+                            }}
+                          </span>
+                        </button>
+                        <button
+                          class="pattern-flow-action-button"
+                          type="button"
+                          :aria-label="
+                            isPatternFlowFullscreen
+                              ? 'Quitter le plein écran'
+                              : 'Afficher la carte en plein écran'
+                          "
+                          @click.stop="
+                            togglePatternFlowFullscreen($event);
+                            closeMobileFlowActions();
+                          "
+                        >
+                          <Minimize2
+                            v-if="isPatternFlowFullscreen"
+                            aria-hidden="true"
+                          />
+                          <Expand v-else aria-hidden="true" />
+                          <span>
+                            {{
+                              isPatternFlowFullscreen
+                                ? "Réduire"
+                                : "Plein écran"
+                            }}
+                          </span>
+                        </button>
+                      </div>
+                    </Transition>
                   </div>
                   <VueFlow
                     pan-on-drag
