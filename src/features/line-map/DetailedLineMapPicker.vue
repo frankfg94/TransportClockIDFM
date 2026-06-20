@@ -65,6 +65,11 @@ interface MapDragState {
   scrollTop: number;
 }
 
+interface MapPinchState {
+  active: boolean;
+  distance: number;
+}
+
 interface SegmentDistanceLabel {
   id: string;
   label: string;
@@ -140,6 +145,10 @@ const mapDrag = reactive<MapDragState>({
   scrollTop: 0,
   startX: 0,
   startY: 0,
+});
+const mapPinch = reactive<MapPinchState>({
+  active: false,
+  distance: 0,
 });
 const transferStates = reactive<Record<string, TransferState>>({});
 const ghostDirectionStates = reactive<Record<string, GhostDirectionState>>({});
@@ -809,15 +818,26 @@ function zoomAtCanvasPoint(
   clientX: number,
   clientY: number,
 ): void {
+  zoomAtCanvasPointByFactor(
+    direction > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR,
+    clientX,
+    clientY,
+  );
+}
+
+function zoomAtCanvasPointByFactor(
+  factor: number,
+  clientX: number,
+  clientY: number,
+): void {
   const canvas = mapCanvas.value;
 
   if (!canvas) {
-    adjustZoom(direction);
+    zoom.value = clampZoom(zoom.value * factor);
     return;
   }
 
   const previousZoom = zoom.value;
-  const factor = direction > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
   const nextZoom = clampZoom(previousZoom * factor);
 
   if (nextZoom === previousZoom) {
@@ -854,6 +874,7 @@ function handleCanvasWheel(event: WheelEvent): void {
 
 function startMapDrag(event: PointerEvent): void {
   if (
+    mapPinch.active ||
     event.button !== 0 ||
     !mapCanvas.value ||
     (event.target instanceof Element &&
@@ -876,6 +897,7 @@ function startMapDrag(event: PointerEvent): void {
 
 function moveMapDrag(event: PointerEvent): void {
   if (
+    mapPinch.active ||
     !mapDrag.active ||
     event.pointerId !== mapDrag.pointerId ||
     !mapCanvas.value
@@ -897,9 +919,10 @@ function moveMapDrag(event: PointerEvent): void {
 
 function stopMapDrag(event?: PointerEvent): void {
   const wasDragging = mapDrag.dragging;
+  const pointerId = event?.pointerId ?? mapDrag.pointerId;
 
-  if (event && mapCanvas.value?.hasPointerCapture(event.pointerId)) {
-    mapCanvas.value.releasePointerCapture(event.pointerId);
+  if (pointerId >= 0 && mapCanvas.value?.hasPointerCapture(pointerId)) {
+    mapCanvas.value.releasePointerCapture(pointerId);
   }
 
   mapDrag.active = false;
@@ -909,6 +932,80 @@ function stopMapDrag(event?: PointerEvent): void {
   if (wasDragging) {
     suppressNextCanvasClick.value = true;
   }
+}
+
+function handleCanvasTouchStart(event: TouchEvent): void {
+  if (event.touches.length !== 2) {
+    return;
+  }
+
+  const distance = getTouchDistance(event.touches);
+  if (!distance) {
+    return;
+  }
+
+  event.preventDefault();
+  stopMapDrag();
+  mapPinch.active = true;
+  mapPinch.distance = distance;
+}
+
+function handleCanvasTouchMove(event: TouchEvent): void {
+  if (!mapPinch.active || event.touches.length !== 2) {
+    return;
+  }
+
+  const distance = getTouchDistance(event.touches);
+  const center = getTouchCenter(event.touches);
+
+  if (!distance || !center || mapPinch.distance <= 0) {
+    return;
+  }
+
+  event.preventDefault();
+  zoomAtCanvasPointByFactor(
+    distance / mapPinch.distance,
+    center.x,
+    center.y,
+  );
+  mapPinch.distance = distance;
+}
+
+function handleCanvasTouchEnd(event: TouchEvent): void {
+  if (event.touches.length < 2) {
+    mapPinch.active = false;
+    mapPinch.distance = 0;
+  }
+}
+
+function getTouchDistance(touches: TouchList): number | undefined {
+  const firstTouch = touches[0];
+  const secondTouch = touches[1];
+
+  if (!firstTouch || !secondTouch) {
+    return undefined;
+  }
+
+  return Math.hypot(
+    secondTouch.clientX - firstTouch.clientX,
+    secondTouch.clientY - firstTouch.clientY,
+  );
+}
+
+function getTouchCenter(
+  touches: TouchList,
+): { x: number; y: number } | undefined {
+  const firstTouch = touches[0];
+  const secondTouch = touches[1];
+
+  if (!firstTouch || !secondTouch) {
+    return undefined;
+  }
+
+  return {
+    x: (firstTouch.clientX + secondTouch.clientX) / 2,
+    y: (firstTouch.clientY + secondTouch.clientY) / 2,
+  };
 }
 
 function handleCanvasMouseLeave(): void {
@@ -1081,6 +1178,10 @@ function getLabelPriority(
         @pointercancel="stopMapDrag"
         @mouseleave="handleCanvasMouseLeave"
         @wheel="handleCanvasWheel"
+        @touchstart="handleCanvasTouchStart"
+        @touchmove="handleCanvasTouchMove"
+        @touchend="handleCanvasTouchEnd"
+        @touchcancel="handleCanvasTouchEnd"
         @click.capture="handleCanvasClick"
       >
         <svg
