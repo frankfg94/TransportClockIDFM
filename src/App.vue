@@ -136,6 +136,9 @@ const allBoards = computed<TransitBoardConfig[]>(() => [
   ...transitBoards,
   ...preferences.customBoards,
 ]);
+const stationModalMode = computed<"dropdown" | "multistep">(() =>
+  mobileBoardTogglesInContextMenu.value ? "multistep" : "dropdown",
+);
 
 function updateHiddenDirectionIdsForBoard(
   boardId: string,
@@ -1354,6 +1357,7 @@ onBeforeUnmount(() => {
 
       <StationBoardModal
         :open="stationModalOpen"
+        :mode="stationModalMode"
         @add="addCustomBoard"
         @close="stationModalOpen = false"
       />

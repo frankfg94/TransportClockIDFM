@@ -15,7 +15,10 @@ import type { Edge, Node } from "@vue-flow/core";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import StationTransferDetails from "../../components/StationTransferDetails.vue";
-import { transitModeToFamily } from "../../services/linePresentation";
+import {
+  createTransportModeIcon,
+  transitModeToFamily,
+} from "../../services/linePresentation";
 import { Controls } from "@vue-flow/controls";
 import {
   EllipsisVertical,
@@ -141,12 +144,6 @@ interface PatternFlowModel {
 interface PatternCityZoneGroup {
   city: string;
   stationKeys: string[];
-}
-
-interface TransportModeIcon {
-  key: string;
-  label: string;
-  title: string;
 }
 
 interface PatternViewport {
@@ -649,32 +646,6 @@ function toggleMobileFlowActions(): void {
 
 function closeMobileFlowActions(): void {
   mobileFlowActionsOpen.value = false;
-}
-
-function createTransportModeIcon(mode?: string): TransportModeIcon {
-  const family = transitModeToFamily(mode);
-
-  if (family === "TRAM") {
-    return { key: "tram", label: "TRAM", title: "Tramway" };
-  }
-
-  if (family === "METRO") {
-    return { key: "metro", label: "M", title: "Métro" };
-  }
-
-  if (family === "RER") {
-    return { key: "rer", label: "RER", title: "RER" };
-  }
-
-  if (family === "TRANSILIEN") {
-    return { key: "train", label: "TRAIN", title: "Train" };
-  }
-
-  if (family === "BUS" || family === "NOCTILIEN") {
-    return { key: "bus", label: "BUS", title: "Bus" };
-  }
-
-  return { key: "line", label: "LIGNE", title: "Ligne" };
 }
 
 function departureTime(departure?: Departure): string | undefined {

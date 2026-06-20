@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from "vue";
+import { createTransportModeIcon } from "../services/linePresentation";
 import type { TransitFamilyOption } from "../types/transit";
 
 const props = defineProps<{
@@ -7,6 +8,7 @@ const props = defineProps<{
   modelValue?: TransitFamilyOption;
   disabled?: boolean;
   loading?: boolean;
+  inline?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -64,10 +66,12 @@ function selectNetwork(network?: TransitFamilyOption): void {
 <template>
   <div
     class="family-combobox"
+    :class="{ 'family-combobox--inline': inline }"
     @focusin="setOpen(true)"
     @focusout="scheduleClose"
   >
     <button
+      v-if="!inline"
       class="family-combobox__button"
       type="button"
       :disabled="disabled || loading"
@@ -78,13 +82,19 @@ function selectNetwork(network?: TransitFamilyOption): void {
       {{ loading ? "Chargement..." : buttonLabel }}
     </button>
 
-    <div v-if="open && !disabled" class="family-combobox__menu" role="listbox">
+    <div
+      v-if="(inline || open) && !disabled"
+      class="family-combobox__menu"
+      :class="{ 'family-combobox__menu--inline': inline }"
+      role="listbox"
+    >
       <div v-if="loading" class="family-combobox__state">
         <span aria-hidden="true" class="loader-dot"></span>
         Chargement
       </div>
       <template v-else>
         <button
+          v-if="!inline"
           class="family-combobox__option"
           type="button"
           role="option"
@@ -96,13 +106,25 @@ function selectNetwork(network?: TransitFamilyOption): void {
         <button
           v-for="option in options"
           :key="option.id"
-          class="family-combobox__option"
+          class="family-combobox__option family-combobox__option--with-icon"
           type="button"
           role="option"
           :aria-selected="option.id === modelValue?.id"
           @mousedown.prevent="selectNetwork(option)"
         >
-          {{ option.label }}
+          <span
+            class="pattern-board__mode-icon family-combobox__mode-icon"
+            :class="`pattern-board__mode-icon--${
+              createTransportModeIcon(option.family).key
+            }`"
+            :aria-label="createTransportModeIcon(option.family).title"
+            :title="createTransportModeIcon(option.family).title"
+          >
+            <span aria-hidden="true">
+              {{ createTransportModeIcon(option.family).label }}
+            </span>
+          </span>
+          <span>{{ option.label }}</span>
         </button>
       </template>
     </div>
@@ -147,6 +169,40 @@ function selectNetwork(network?: TransitFamilyOption): void {
   z-index: 9;
 }
 
+.family-combobox--inline {
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.family-combobox__menu--inline {
+  align-content: start;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  display: flex;
+  flex-wrap: wrap;
+  max-height: none;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0;
+  position: static;
+  width: 100%;
+  z-index: auto;
+}
+
+.family-combobox__menu--inline .family-combobox__option {
+  align-items: center;
+  display: flex;
+  flex: 1 1 150px;
+  gap: 10px;
+}
+
+.family-combobox__mode-icon {
+  height: 32px;
+  min-width: 32px;
+}
+
 .family-combobox__option {
   background: #f8fafc;
   border-radius: 6px;
@@ -155,6 +211,18 @@ function selectNetwork(network?: TransitFamilyOption): void {
   min-height: 42px;
   padding: 7px 10px;
   transform: none;
+}
+
+.family-combobox__option--with-icon {
+  align-items: center;
+  justify-items: start;
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 50px 1fr;
+}
+
+.family-combobox__option--with-icon .family-combobox__mode-icon {
+  justify-self: flex-start;
 }
 
 .family-combobox__option:hover,
@@ -175,4 +243,3 @@ function selectNetwork(network?: TransitFamilyOption): void {
   padding: 8px;
 }
 </style>
-

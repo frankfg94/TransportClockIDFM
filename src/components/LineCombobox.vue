@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import LineIconBadge from "./LineIconBadge.vue";
 import type { LineSearchOption } from "../types/transit";
 
@@ -11,6 +11,8 @@ const props = defineProps<{
   loading?: boolean;
   placeholder?: string;
   enableGrid?: boolean;
+  compact?: boolean;
+  inline?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -19,6 +21,8 @@ const emit = defineEmits<{
 }>();
 
 const open = ref(false);
+const editing = ref(false);
+const searchInput = ref<HTMLInputElement>();
 let blurTimer: number | undefined;
 
 const buttonLabel = computed(() =>
@@ -26,6 +30,10 @@ const buttonLabel = computed(() =>
     ? getLineDisplayName(props.modelValue)
     : (props.placeholder ?? "S\u00e9lectionner une ligne"),
 );
+const compactSelection = computed(
+  () => props.compact && Boolean(props.modelValue) && !editing.value,
+);
+const showSearch = computed(() => props.inline || !compactSelection.value);
 
 onBeforeUnmount(() => {
   if (blurTimer) {
@@ -46,12 +54,6 @@ function toggleOpen(): void {
   setOpen(!open.value);
 }
 
-function toggleOpenFromClick(event: MouseEvent): void {
-  if (event.detail === 0) {
-    toggleOpen();
-  }
-}
-
 function scheduleClose(): void {
   if (blurTimer) {
     window.clearTimeout(blurTimer);
@@ -65,6 +67,7 @@ function scheduleClose(): void {
 function selectLine(line: LineSearchOption): void {
   emit("update:modelValue", line);
   emit("update:query", getLineDisplayName(line));
+  editing.value = false;
   open.value = false;
 }
 
@@ -74,14 +77,52 @@ function updateQuery(event: Event): void {
   setOpen(true);
 }
 
+function beginEditing(): void {
+  editing.value = true;
+  void nextTick(() => {
+    searchInput.value?.focus();
+  });
+}
+
+function handleButtonPointerDown(event: PointerEvent): void {
+  event.preventDefault();
+
+  if (compactSelection.value) {
+    beginEditing();
+    return;
+  }
+
+  toggleOpen();
+}
+
+function handleButtonClick(event: MouseEvent): void {
+  if (event.detail !== 0) {
+    return;
+  }
+
+  if (compactSelection.value) {
+    beginEditing();
+    return;
+  }
+
+  toggleOpen();
+}
+
 function getLineDisplayName(line: LineSearchOption): string {
   return line.displayName ?? line.label;
 }
 </script>
 
 <template>
-  <div class="rich-combobox" @focusin="setOpen(true)" @focusout="scheduleClose">
+  <div
+    class="rich-combobox"
+    :class="{ 'rich-combobox--inline': inline }"
+    @focusin="setOpen(true)"
+    @focusout="scheduleClose"
+  >
     <input
+      v-if="showSearch"
+      ref="searchInput"
       :value="query"
       :disabled="disabled"
       class="rich-combobox__input"
@@ -92,18 +133,27 @@ function getLineDisplayName(line: LineSearchOption): string {
     />
 
     <button
+      v-if="!inline"
       class="rich-combobox__button"
       type="button"
       :disabled="disabled || loading"
       :aria-expanded="open"
-      @pointerdown.prevent="toggleOpen"
-      @click="toggleOpenFromClick"
+      @pointerdown="handleButtonPointerDown"
+      @click="handleButtonClick"
     >
       <LineIconBadge v-if="modelValue" :line="modelValue" />
       <span v-else class="rich-combobox__placeholder">{{ buttonLabel }}</span>
+      <span v-if="compactSelection" class="rich-combobox__edit">
+        Modifier
+      </span>
     </button>
 
-    <div v-if="open && !disabled" class="rich-combobox__menu" role="listbox">
+    <div
+      v-if="(inline || open) && !disabled"
+      class="rich-combobox__menu"
+      :class="{ 'rich-combobox__menu--inline': inline }"
+      role="listbox"
+    >
       <div v-if="loading" class="rich-combobox__state">
         <span aria-hidden="true" class="loader-dot"></span>
         Chargement
@@ -164,6 +214,13 @@ function getLineDisplayName(line: LineSearchOption): string {
   font-weight: 750;
 }
 
+.rich-combobox__edit {
+  color: var(--idfm-blue);
+  font-size: 0.76rem;
+  font-weight: 850;
+  margin-left: auto;
+}
+
 .rich-combobox__menu {
   background: #ffffff;
   border: 1px solid var(--border);
@@ -180,6 +237,34 @@ function getLineDisplayName(line: LineSearchOption): string {
   right: 0;
   top: calc(100% + 6px);
   z-index: 8;
+}
+
+.rich-combobox--inline {
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.rich-combobox__menu--inline {
+  align-content: start;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  max-height: none;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0;
+  position: static;
+  width: 100%;
+  z-index: auto;
+}
+
+.rich-combobox__menu--inline .rich-combobox__option {
+  align-items: center;
+  flex: 0 0 76px;
+  height: 76px;
+  justify-content: center;
+  padding: 6px;
 }
 
 .rich-combobox__option {
@@ -214,4 +299,3 @@ function getLineDisplayName(line: LineSearchOption): string {
   gap: 10px;
 }
 </style>
-

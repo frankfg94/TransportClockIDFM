@@ -18,6 +18,12 @@ type LinePresentation = Pick<
   "color" | "iconUrl" | "iconUrls" | "textColor"
 >;
 
+export interface TransportModeIcon {
+  key: string;
+  label: string;
+  title: string;
+}
+
 const OFFICIAL_LINE_PRESENTATION: Record<
   string,
   Pick<LineConfig, "color" | "textColor">
@@ -88,6 +94,56 @@ export function transitFamilyToMode(family: TransitFamily): TransitMode {
   if (family === "BUS" || family === "NOCTILIEN") return "bus";
 
   return "train";
+}
+
+export function createTransportModeIcon(
+  mode?: TransitMode | TransitFamily | string,
+): TransportModeIcon {
+  const family = resolveTransitFamily(mode);
+
+  if (family === "TRAM") {
+    return { key: "tram", label: "TRAM", title: "Tramway" };
+  }
+
+  if (family === "METRO") {
+    return { key: "metro", label: "M", title: "Métro" };
+  }
+
+  if (family === "RER") {
+    return { key: "rer", label: "RER", title: "RER" };
+  }
+
+  if (family === "TRANSILIEN") {
+    return { key: "train", label: "TRAIN", title: "Train" };
+  }
+
+  if (family === "BUS" || family === "NOCTILIEN") {
+    return { key: "bus", label: "BUS", title: "Bus" };
+  }
+
+  if (family === "CABLE") {
+    return { key: "line", label: "CÂBLE", title: "Câble" };
+  }
+
+  return { key: "line", label: "LIGNE", title: "Ligne" };
+}
+
+function resolveTransitFamily(
+  mode?: TransitMode | TransitFamily | string,
+): TransitFamily | undefined {
+  if (
+    mode === "METRO" ||
+    mode === "RER" ||
+    mode === "BUS" ||
+    mode === "TRAM" ||
+    mode === "NOCTILIEN" ||
+    mode === "TRANSILIEN" ||
+    mode === "CABLE"
+  ) {
+    return mode;
+  }
+
+  return transitModeToFamily(mode);
 }
 
 function resolveOfficialLinePresentation(

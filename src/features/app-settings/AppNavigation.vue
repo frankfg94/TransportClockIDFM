@@ -309,6 +309,13 @@ function handleVisibilityChange(): void {
   transform: translate(-50%, 18px);
 }
 
+:global(body:has(.modal-backdrop) .app-navigation) {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 18px);
+  visibility: hidden;
+}
+
 .app-navigation__link {
   align-items: center;
   background: transparent;

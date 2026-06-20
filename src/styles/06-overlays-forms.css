@@ -166,6 +166,124 @@
   gap: 7px;
 }
 
+.station-board-modal--dropdown .station-form {
+  gap: 12px;
+}
+
+.station-board-modal--dropdown .station-form label {
+  gap: 5px;
+}
+
+.station-board-modal--dropdown .station-picker {
+  gap: 8px;
+}
+
+.station-multistep__form {
+  align-content: start;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.station-multistep__form > label,
+.station-multistep__form > .station-picker {
+  min-height: 0;
+}
+
+.station-multistep__form > label {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.station-multistep__form > .station-picker {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.station-multistep__form .station-picker__list {
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+}
+
+.station-multistep__footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+
+.station-multistep__footer > :last-child {
+  justify-self: end;
+}
+
+.station-multistep__steps {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+  justify-content: center;
+}
+
+.station-multistep__step {
+  background: color-mix(in srgb, var(--muted) 30%, transparent);
+  border-radius: 999px;
+  display: block;
+  height: 5px;
+  transition: background 160ms ease, transform 160ms ease;
+  width: 5px;
+}
+
+.station-multistep__step--active {
+  background: var(--idfm-blue);
+  transform: scale(1.3);
+}
+
+.station-step-forward-enter-active,
+.station-step-forward-leave-active,
+.station-step-backward-enter-active,
+.station-step-backward-leave-active {
+  transition:
+    opacity 180ms ease,
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.station-step-forward-enter-from,
+.station-step-backward-leave-to {
+  opacity: 0;
+  transform: translateX(28px);
+}
+
+.station-step-forward-leave-to,
+.station-step-backward-enter-from {
+  opacity: 0;
+  transform: translateX(-28px);
+}
+
+@media (max-width: 760px) {
+  .modal-backdrop.station-board-modal-backdrop--multistep {
+    padding: 0;
+  }
+
+  .modal-panel.station-board-modal--multistep {
+    border-radius: 0;
+    height: 100dvh;
+    margin: 0;
+    max-height: 100dvh;
+    max-width: none;
+    width: 100vw;
+  }
+
+  .station-board-modal--multistep .station-form {
+    padding: 20px 18px;
+  }
+
+  .station-board-modal--multistep .station-picker__header {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .station-board-modal--multistep .station-picker__mode {
+    width: auto;
+  }
+
+  .station-multistep__footer {
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+}
+
 .station-form select,
 .station-form input {
   appearance: none;

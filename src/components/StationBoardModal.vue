@@ -22,10 +22,18 @@ import type {
 } from "../types/transit";
 
 type StationSelectionMode = "list" | "map";
+type StationBoardModalMode = "dropdown" | "multistep";
+type StepTransitionDirection = "forward" | "backward";
 
-const props = defineProps<{
-  open: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    open: boolean;
+    mode?: StationBoardModalMode;
+  }>(),
+  {
+    mode: "dropdown",
+  },
+);
 
 const emit = defineEmits<{
   add: [board: TransitBoardConfig];
@@ -47,9 +55,12 @@ const loadingLines = ref(false);
 const loadingStations = ref(false);
 const adding = ref(false);
 const errorMessage = ref("");
+const currentStep = ref(1);
+const stepTransitionName = ref("station-step-forward");
 const canAdd = computed(() =>
   Boolean(draft.family && draft.line && draft.station),
 );
+const isMultiStep = computed(() => props.mode === "multistep");
 const modalWide = computed(
   () => stationSelectionMode.value === "map" && Boolean(draft.line),
 );
@@ -63,15 +74,29 @@ let latestFamilyRequest = 0;
 let latestLineRequest = 0;
 let latestStationRequest = 0;
 let suppressLineQueryWatcher = false;
+let swipeStartPoint: { x: number; y: number } | undefined;
 
 watch(
   () => props.open,
   (open) => {
     if (open) {
+      resetDraft();
       void loadFamilies();
+      return;
     }
+
+    resetDraft();
   },
   { immediate: true },
+);
+
+watch(
+  () => props.mode,
+  () => {
+    if (props.open) {
+      resetDraft();
+    }
+  },
 );
 
 watch(lineQuery, () => {
@@ -138,6 +163,9 @@ function selectFamilyOption(network?: TransitFamilyOption): void {
 
   if (selectedNetwork.value) {
     void loadLines();
+    if (isMultiStep.value) {
+      setCurrentStep(2, "forward");
+    }
   }
 }
 
@@ -156,13 +184,19 @@ function selectLineOption(line?: LineSearchOption): void {
   suppressLineQueryWatcher = true;
   lineQuery.value = line.displayName ?? line.label;
   void loadStations();
+
+  if (isMultiStep.value) {
+    setCurrentStep(3, "forward");
+  }
 }
 
 function selectStationOption(station?: StationSearchOption): void {
   draft.station = station;
 
   if (station) {
-    stationQuery.value = station.label;
+    if (!isMultiStep.value) {
+      stationQuery.value = station.label;
+    }
     void loadStationTransferBadges(station);
   }
 }
@@ -305,6 +339,14 @@ async function addStation(): Promise<void> {
 }
 
 function resetDraft(): void {
+  latestFamilyRequest += 1;
+  latestLineRequest += 1;
+  latestStationRequest += 1;
+  if (lineSearchTimer) {
+    window.clearTimeout(lineSearchTimer);
+    lineSearchTimer = undefined;
+  }
+
   selectedNetwork.value = undefined;
   draft.family = undefined;
   draft.line = undefined;
@@ -315,6 +357,79 @@ function resetDraft(): void {
   stationQuery.value = "";
   clearStationTransfers();
   stationSelectionMode.value = "list";
+  currentStep.value = 1;
+  stepTransitionName.value = "station-step-forward";
+  errorMessage.value = "";
+}
+
+function setCurrentStep(
+  step: number,
+  direction: StepTransitionDirection,
+): void {
+  if (step === currentStep.value) {
+    return;
+  }
+
+  stepTransitionName.value = `station-step-${direction}`;
+  currentStep.value = step;
+}
+
+function canAdvanceStep(): boolean {
+  if (currentStep.value === 1) {
+    return Boolean(selectedNetwork.value);
+  }
+
+  return currentStep.value === 2 ? Boolean(draft.line) : canAdd.value;
+}
+
+function goToPreviousStep(): void {
+  setCurrentStep(Math.max(1, currentStep.value - 1), "backward");
+}
+
+function goToNextStep(): void {
+  if (canAdvanceStep()) {
+    setCurrentStep(Math.min(3, currentStep.value + 1), "forward");
+  }
+}
+
+function handleSwipeStart(event: TouchEvent): void {
+  if (!isMultiStep.value) {
+    return;
+  }
+
+  const touch = event.touches[0];
+  if (touch) {
+    swipeStartPoint = { x: touch.clientX, y: touch.clientY };
+  }
+}
+
+function handleSwipeEnd(event: TouchEvent): void {
+  const start = swipeStartPoint;
+  const touch = event.changedTouches[0];
+  swipeStartPoint = undefined;
+
+  if (!start || !touch || !isMultiStep.value) {
+    return;
+  }
+
+  const horizontalDistance = touch.clientX - start.x;
+  const verticalDistance = touch.clientY - start.y;
+
+  if (
+    Math.abs(horizontalDistance) < 64 ||
+    Math.abs(horizontalDistance) <= Math.abs(verticalDistance)
+  ) {
+    return;
+  }
+
+  if (horizontalDistance < 0 && currentStep.value < 3) {
+    goToNextStep();
+    return;
+  }
+
+  if (horizontalDistance > 0) {
+    goToPreviousStep();
+  }
 }
 
 function clearStationTransfers(): void {
@@ -384,12 +499,25 @@ function normalizeText(value: string): string {
 <template>
   <Teleport to="body">
     <Transition name="modal-scale">
-      <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
+      <div
+        v-if="open"
+        class="modal-backdrop"
+        :class="{
+          'station-board-modal-backdrop--multistep': isMultiStep,
+        }"
+        @click.self="emit('close')"
+      >
         <section
           class="modal-panel"
-          :class="{ 'modal-panel--wide': modalWide }"
+          :class="{
+            'modal-panel--wide': modalWide,
+            'station-board-modal--dropdown': !isMultiStep,
+            'station-board-modal--multistep': isMultiStep,
+          }"
           aria-modal="true"
           role="dialog"
+          @touchstart.passive="handleSwipeStart"
+          @touchend="handleSwipeEnd"
         >
           <header class="modal-panel__header">
             <div>
@@ -406,13 +534,101 @@ function normalizeText(value: string): string {
             </button>
           </header>
 
-          <div class="station-form">
-            <label>
+          <div
+            class="station-form"
+            :class="{ 'station-multistep__form': isMultiStep }"
+          >
+            <template v-if="!isMultiStep">
+              <label>
+                <span>Réseau</span>
+                <FamilyCombobox
+                  :model-value="selectedNetwork"
+                  :options="familyOptions"
+                  :loading="loadingFamilies"
+                  @update:model-value="selectFamilyOption"
+                />
+                <span v-if="loadingFamilies" class="field-loader">
+                  <span aria-hidden="true" class="loader-dot"></span>
+                  Chargement des réseaux
+                </span>
+              </label>
+
+              <label>
+                <span>Ligne</span>
+                <LineCombobox
+                  :model-value="draft.line"
+                  :options="lineOptions"
+                  :query="lineQuery"
+                  :disabled="!selectedNetwork"
+                  :loading="loadingLines"
+                  :compact="true"
+                  placeholder="Sélectionner une ligne"
+                  @update:model-value="selectLineOption"
+                  @update:query="lineQuery = $event"
+                />
+                <span v-if="loadingLines" class="field-loader">
+                  <span aria-hidden="true" class="loader-dot"></span>
+                  Chargement des lignes
+                </span>
+              </label>
+
+              <div class="station-picker">
+                <div class="station-picker__header">
+                  <span>Station</span>
+                  <button
+                    v-if="draft.line"
+                    class="button-secondary station-picker__mode"
+                    type="button"
+                    @click="toggleStationSelectionMode"
+                  >
+                    {{
+                      stationSelectionMode === "list"
+                        ? "Plan détaillé"
+                        : "Liste simple"
+                    }}
+                  </button>
+                </div>
+
+                <div
+                  v-if="stationSelectionMode === 'list'"
+                  class="station-picker__list"
+                >
+                  <StationCombobox
+                    :model-value="draft.station"
+                    :options="filteredStationOptions"
+                  :query="stationQuery"
+                  :disabled="!draft.line"
+                  :loading="loadingStations"
+                  :compact="true"
+                  :transfer-map="stationTransfers"
+                    :transfer-loading-ids="stationTransferLoadingIds"
+                    @inspect="loadStationTransferBadges"
+                    @update:model-value="selectStationOption"
+                    @update:query="stationQuery = $event"
+                  />
+                  <span v-if="loadingStations" class="field-loader">
+                    <span aria-hidden="true" class="loader-dot"></span>
+                    Chargement des stations
+                  </span>
+                </div>
+
+                <DetailedLineMapPicker
+                  v-else
+                  :line="draft.line"
+                  :selected-station-id="draft.station?.id"
+                  @select="selectStationFromMap"
+                />
+              </div>
+            </template>
+
+            <Transition v-else :name="stepTransitionName" mode="out-in">
+              <label v-if="currentStep === 1" key="network">
               <span>Réseau</span>
               <FamilyCombobox
                 :model-value="selectedNetwork"
                 :options="familyOptions"
                 :loading="loadingFamilies"
+                :inline="true"
                 @update:model-value="selectFamilyOption"
               />
               <span v-if="loadingFamilies" class="field-loader">
@@ -421,7 +637,7 @@ function normalizeText(value: string): string {
               </span>
             </label>
 
-            <label>
+              <label v-else-if="currentStep === 2" key="line">
               <span>Ligne</span>
               <LineCombobox
                 :model-value="draft.line"
@@ -429,6 +645,7 @@ function normalizeText(value: string): string {
                 :query="lineQuery"
                 :disabled="!selectedNetwork"
                 :loading="loadingLines"
+                :inline="true"
                 placeholder="Sélectionner une ligne"
                 @update:model-value="selectLineOption"
                 @update:query="lineQuery = $event"
@@ -439,7 +656,7 @@ function normalizeText(value: string): string {
               </span>
             </label>
 
-            <div class="station-picker">
+              <div v-else key="station" class="station-picker">
               <div class="station-picker__header">
                 <span>Station</span>
                 <button
@@ -466,6 +683,7 @@ function normalizeText(value: string): string {
                   :query="stationQuery"
                   :disabled="!draft.line"
                   :loading="loadingStations"
+                  :inline="true"
                   :transfer-map="stationTransfers"
                   :transfer-loading-ids="stationTransferLoadingIds"
                   @inspect="loadStationTransferBadges"
@@ -482,9 +700,10 @@ function normalizeText(value: string): string {
                 v-else
                 :line="draft.line"
                 :selected-station-id="draft.station?.id"
-                @select="selectStationFromMap"
-              />
-            </div>
+                  @select="selectStationFromMap"
+                />
+              </div>
+            </Transition>
 
             <div v-if="errorMessage" class="form-error">
               <span>{{ errorMessage }}</span>
@@ -498,7 +717,10 @@ function normalizeText(value: string): string {
             </div>
           </div>
 
-          <footer class="modal-panel__footer">
+          <footer
+            v-if="!isMultiStep"
+            class="modal-panel__footer"
+          >
             <button
               class="button-secondary"
               type="button"
@@ -507,6 +729,48 @@ function normalizeText(value: string): string {
               Fermer
             </button>
             <button
+              type="button"
+              :disabled="!canAdd || adding"
+              @click="addStation"
+            >
+              <span class="button-plus" aria-hidden="true">+</span>
+              {{ adding ? "Ajout..." : "Ajouter" }}
+            </button>
+          </footer>
+
+          <footer v-else class="modal-panel__footer station-multistep__footer">
+            <button
+              class="button-secondary"
+              type="button"
+              :disabled="currentStep === 1"
+              @click="goToPreviousStep"
+            >
+              Précédent
+            </button>
+
+            <div
+              class="station-multistep__steps"
+              aria-label="Progression : 3 étapes"
+            >
+              <span
+                v-for="step in 3"
+                :key="step"
+                class="station-multistep__step"
+                :class="{ 'station-multistep__step--active': step === currentStep }"
+                :aria-current="step === currentStep ? 'step' : undefined"
+              ></span>
+            </div>
+
+            <button
+              v-if="currentStep < 3"
+              type="button"
+              :disabled="!canAdvanceStep()"
+              @click="goToNextStep"
+            >
+              Suivant
+            </button>
+            <button
+              v-else
               type="button"
               :disabled="!canAdd || adding"
               @click="addStation"
