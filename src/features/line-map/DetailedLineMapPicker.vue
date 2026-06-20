@@ -86,6 +86,11 @@ interface TouchStopClickGuard {
   handledAt: number;
 }
 
+interface PendingStopTap {
+  pointerId: number;
+  stop: LineMapStopView;
+}
+
 const props = withDefaults(
   defineProps<{
     line?: LineSearchOption;
@@ -137,6 +142,7 @@ const showDistances = ref(false);
 const mobileDisplayOpen = ref(false);
 const mobileSheetStage = ref<MobileSheetStage>("mid");
 const touchStopClickGuard = ref<TouchStopClickGuard>();
+const pendingStopTap = ref<PendingStopTap>();
 const mapDrag = reactive<MapDragState>({
   active: false,
   dragging: false,
@@ -424,17 +430,15 @@ function selectStop(stop: LineMapStopView): void {
   }
 }
 
-function selectStopFromPointer(stop: LineMapStopView, event: PointerEvent): void {
-  if (event.pointerType !== "touch" && event.pointerType !== "pen") {
+function beginStopTap(stop: LineMapStopView, event: PointerEvent): void {
+  if (event.button !== 0 || mapPinch.active) {
     return;
   }
 
-  event.preventDefault();
-  touchStopClickGuard.value = {
-    stopId: stop.id,
-    handledAt: Date.now(),
+  pendingStopTap.value = {
+    pointerId: event.pointerId,
+    stop,
   };
-  selectStop(stop);
 }
 
 function selectStopFromClick(stop: LineMapStopView, event: MouseEvent): void {
@@ -878,9 +882,7 @@ function startMapDrag(event: PointerEvent): void {
     event.button !== 0 ||
     !mapCanvas.value ||
     (event.target instanceof Element &&
-      event.target.closest(
-        ".line-map-hit-target, .network-ghost-line__hit-target",
-      ))
+      event.target.closest(".network-ghost-line__hit-target"))
   ) {
     return;
   }
@@ -929,9 +931,38 @@ function stopMapDrag(event?: PointerEvent): void {
   mapDrag.dragging = false;
   mapDrag.pointerId = -1;
 
+  completeStopTap(event, wasDragging);
+
   if (wasDragging) {
     suppressNextCanvasClick.value = true;
   }
+}
+
+function completeStopTap(event: PointerEvent | undefined, wasDragging: boolean): void {
+  const pendingTap = pendingStopTap.value;
+
+  if (!event || event.type !== "pointerup" || !pendingTap) {
+    if (event?.type === "pointercancel") {
+      pendingStopTap.value = undefined;
+    }
+    return;
+  }
+
+  if (pendingTap.pointerId !== event.pointerId) {
+    return;
+  }
+
+  pendingStopTap.value = undefined;
+
+  if (wasDragging || mapPinch.active) {
+    return;
+  }
+
+  touchStopClickGuard.value = {
+    stopId: pendingTap.stop.id,
+    handledAt: Date.now(),
+  };
+  selectStop(pendingTap.stop);
 }
 
 function handleCanvasTouchStart(event: TouchEvent): void {
@@ -946,6 +977,7 @@ function handleCanvasTouchStart(event: TouchEvent): void {
 
   event.preventDefault();
   stopMapDrag();
+  pendingStopTap.value = undefined;
   mapPinch.active = true;
   mapPinch.distance = distance;
 }
@@ -1347,8 +1379,7 @@ function getLabelPriority(
           :aria-label="getStopActionLabel(stop)"
           :aria-pressed="stop.id === activeStop?.id"
           :style="getHitTargetStyle(stop)"
-          @pointerdown.stop
-          @pointerup.stop="selectStopFromPointer(stop, $event)"
+          @pointerdown="beginStopTap(stop, $event)"
           @click="selectStopFromClick(stop, $event)"
           @focus="showStopHover(stop)"
           @blur="hideStopHover(stop)"

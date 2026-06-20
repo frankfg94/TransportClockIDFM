@@ -165,7 +165,7 @@ describe("DetailedLineMapPicker sidebar", () => {
     wrapper.unmount();
   });
 
-  it("does not let the map drag capture a station pointer gesture", async () => {
+  it("opens a station after a stationary pointer tap", async () => {
     const wrapper = mount(DetailedLineMapPicker, {
       props: { line, mode: "explorer", selectable: false },
       attachTo: document.body,
@@ -195,7 +195,7 @@ describe("DetailedLineMapPicker sidebar", () => {
     wrapper.unmount();
   });
 
-  it("opens the mobile station sheet on one touch pointerup and ignores the synthetic click", async () => {
+  it("keeps panning when a pointer gesture starts on a station", async () => {
     const wrapper = mount(DetailedLineMapPicker, {
       props: { line, mode: "explorer", selectable: false },
       attachTo: document.body,
@@ -204,6 +204,48 @@ describe("DetailedLineMapPicker sidebar", () => {
 
     const target = wrapper.findAll(".line-map-hit-target")[0];
 
+    await target.trigger("pointerdown", {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+      pointerId: 2,
+    });
+    await target.trigger("pointermove", {
+      clientX: 140,
+      clientY: 120,
+      pointerId: 2,
+    });
+    await target.trigger("pointerup", {
+      button: 0,
+      clientX: 140,
+      clientY: 120,
+      pointerId: 2,
+    });
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="line-map-sidebar"]').exists()).toBe(
+      false,
+    );
+
+    wrapper.unmount();
+  });
+
+  it("opens the mobile station sheet on a touch tap and ignores the synthetic click", async () => {
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: { line, mode: "explorer", selectable: false },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const target = wrapper.findAll(".line-map-hit-target")[0];
+
+    await target.trigger("pointerdown", {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+      pointerId: 7,
+      pointerType: "touch",
+    });
     await target.trigger("pointerup", {
       button: 0,
       clientX: 100,
