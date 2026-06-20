@@ -92,6 +92,20 @@ interface PendingStopTap {
   stop: LineMapStopView;
 }
 
+interface PendingGhostTap {
+  pointerId: number;
+  lineId: string;
+}
+
+interface GhostTapRequest {
+  id: number;
+  lineId: string;
+}
+
+interface GhostGestureClickGuard {
+  handledAt: number;
+}
+
 const props = withDefaults(
   defineProps<{
     line?: LineSearchOption;
@@ -144,6 +158,10 @@ const mobileDisplayOpen = ref(false);
 const mobileSheetStage = ref<MobileSheetStage>("mid");
 const touchStopClickGuard = ref<TouchStopClickGuard>();
 const pendingStopTap = ref<PendingStopTap>();
+const pendingGhostTap = ref<PendingGhostTap>();
+const ghostTapRequest = ref<GhostTapRequest>();
+const ghostGestureClickGuard = ref<GhostGestureClickGuard>();
+let ghostTapRequestId = 0;
 const mapDrag = reactive<MapDragState>({
   active: false,
   dragging: false,
@@ -521,6 +539,17 @@ function handleGhostActiveLineChange(
   }
 }
 
+function beginGhostTap(line: NetworkGhostLineView, event: PointerEvent): void {
+  if (event.button !== 0 || mapPinch.active) {
+    return;
+  }
+
+  pendingGhostTap.value = {
+    pointerId: event.pointerId,
+    lineId: line.id,
+  };
+}
+
 async function loadGhostDirections(line: NetworkGhostLineView): Promise<void> {
   if (ghostDirectionStates[line.id]) {
     return;
@@ -881,9 +910,7 @@ function startMapDrag(event: PointerEvent): void {
   if (
     mapPinch.active ||
     event.button !== 0 ||
-    !mapCanvas.value ||
-    (event.target instanceof Element &&
-      event.target.closest(".network-ghost-line__hit-target"))
+    !mapCanvas.value
   ) {
     return;
   }
@@ -933,10 +960,46 @@ function stopMapDrag(event?: PointerEvent): void {
   mapDrag.pointerId = -1;
 
   completeStopTap(event, wasDragging);
+  completeGhostTap(event, wasDragging);
 
   if (wasDragging) {
     suppressNextCanvasClick.value = true;
   }
+}
+
+function completeGhostTap(
+  event: PointerEvent | undefined,
+  wasDragging: boolean,
+): void {
+  const pendingTap = pendingGhostTap.value;
+
+  if (!event || !pendingTap) {
+    if (event?.type === "pointercancel") {
+      pendingGhostTap.value = undefined;
+    }
+    return;
+  }
+
+  if (pendingTap.pointerId !== event.pointerId) {
+    return;
+  }
+
+  pendingGhostTap.value = undefined;
+
+  if (event.type !== "pointerup") {
+    return;
+  }
+
+  ghostGestureClickGuard.value = { handledAt: Date.now() };
+
+  if (wasDragging || mapPinch.active) {
+    return;
+  }
+
+  ghostTapRequest.value = {
+    id: ++ghostTapRequestId,
+    lineId: pendingTap.lineId,
+  };
 }
 
 function completeStopTap(event: PointerEvent | undefined, wasDragging: boolean): void {
@@ -979,6 +1042,7 @@ function handleCanvasTouchStart(event: TouchEvent): void {
   event.preventDefault();
   stopMapDrag();
   pendingStopTap.value = undefined;
+  pendingGhostTap.value = undefined;
   mapPinch.active = true;
   mapPinch.distance = distance;
 }
@@ -1047,6 +1111,18 @@ function handleCanvasMouseLeave(): void {
 }
 
 function handleCanvasClick(event: MouseEvent): void {
+  const ghostGesture = ghostGestureClickGuard.value;
+
+  if (ghostGesture) {
+    ghostGestureClickGuard.value = undefined;
+
+    if (Date.now() - ghostGesture.handledAt < 500) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+  }
+
   if (
     event.target instanceof Element &&
     event.target.closest(".network-ghost-line__hit-target")
@@ -1319,7 +1395,9 @@ function getLabelPriority(
             :tooltip-target="GHOST_TOOLTIP_TARGET"
             :reduce-motion="reduceMotion"
             :reset-key="ghostResetKey"
+            :tap-request="ghostTapRequest"
             @active-line-change="handleGhostActiveLineChange"
+            @line-pointer-down="beginGhostTap"
           />
 
           <g class="line-map-segments">

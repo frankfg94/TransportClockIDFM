@@ -5,6 +5,11 @@ import type {
   NetworkGhostQuayView,
 } from "./types";
 
+interface GhostTapRequest {
+  id: number;
+  lineId: string;
+}
+
 const props = withDefaults(
   defineProps<{
     lines: NetworkGhostLineView[];
@@ -19,6 +24,7 @@ const props = withDefaults(
     tooltipTarget?: string;
     reduceMotion?: boolean;
     resetKey?: number;
+    tapRequest?: GhostTapRequest;
   }>(),
   {
     quays: () => [],
@@ -35,6 +41,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   activeLineChange: [line: NetworkGhostLineView | undefined];
+  linePointerDown: [line: NetworkGhostLineView, event: PointerEvent];
 }>();
 
 const hoveredLineId = ref("");
@@ -122,6 +129,23 @@ watch(
 );
 
 watch(
+  () => props.tapRequest?.id,
+  () => {
+    const request = props.tapRequest;
+
+    if (!request) {
+      return;
+    }
+
+    const line = props.lines.find((item) => item.id === request.lineId);
+
+    if (line) {
+      togglePinnedLine(line);
+    }
+  },
+);
+
+watch(
   activeLine,
   (line) => {
     emit("activeLineChange", line);
@@ -138,6 +162,10 @@ function toSvgY(value: number): number {
 }
 
 function showLine(line: NetworkGhostLineView, event: PointerEvent): void {
+  if (event.pointerType === "touch") {
+    return;
+  }
+
   hoveredLineId.value = line.id;
   updatePointer(event, line);
 }
@@ -247,6 +275,7 @@ function getQuayRadius(): number {
         :aria-label="
           segmentIndex === 0 ? `Afficher la ligne ${line.label}` : undefined
         "
+        @pointerdown="emit('linePointerDown', line, $event)"
         @pointerenter="showLine(line, $event)"
         @pointermove="moveLine(line, $event)"
         @pointerleave="hideLine(line)"

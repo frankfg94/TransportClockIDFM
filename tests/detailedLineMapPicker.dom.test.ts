@@ -492,9 +492,50 @@ describe("DetailedLineMapPicker sidebar", () => {
 
     expect(loadTransferLineFrequency).not.toHaveBeenCalled();
 
-    await wrapper
-      .get(".network-ghost-line__hit-target")
-      .trigger("pointerenter", { clientX: 120, clientY: 120 });
+    const ghostTarget = wrapper.get(".network-ghost-line__hit-target");
+    const canvas = wrapper.get(".line-map-canvas");
+    const initialScrollLeft = (canvas.element as HTMLDivElement).scrollLeft;
+
+    await ghostTarget.trigger("pointerdown", {
+      button: 0,
+      clientX: 160,
+      clientY: 160,
+      pointerId: 71,
+      pointerType: "touch",
+    });
+    await canvas.trigger("pointermove", {
+      clientX: 112,
+      clientY: 160,
+      pointerId: 71,
+      pointerType: "touch",
+    });
+    await canvas.trigger("pointerup", {
+      clientX: 112,
+      clientY: 160,
+      pointerId: 71,
+      pointerType: "touch",
+    });
+    await flushPromises();
+
+    expect((canvas.element as HTMLDivElement).scrollLeft).toBeGreaterThan(
+      initialScrollLeft,
+    );
+    expect(wrapper.find(".network-ghost-line--active").exists()).toBe(false);
+    expect(loadTransferLineDirections).not.toHaveBeenCalled();
+
+    await ghostTarget.trigger("pointerdown", {
+      button: 0,
+      clientX: 120,
+      clientY: 120,
+      pointerId: 72,
+      pointerType: "touch",
+    });
+    await canvas.trigger("pointerup", {
+      clientX: 120,
+      clientY: 120,
+      pointerId: 72,
+      pointerType: "touch",
+    });
     await flushPromises();
 
     expect(loadTransferLineDirections).toHaveBeenCalledWith(
