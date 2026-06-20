@@ -575,9 +575,12 @@ describe("DetailedLineMapPicker sidebar", () => {
       true,
     );
 
-    await wrapper.get('[data-testid="line-map-mobile-display-button"]').trigger(
-      "click",
-    );
+    await wrapper
+      .get('.line-map-mobile-actions .pattern-flow-mobile-actions__trigger')
+      .trigger("click");
+    await wrapper
+      .get('[data-testid="line-map-mobile-display-button"]')
+      .trigger("click");
     await flushPromises();
 
     const modal = document.body.querySelector(

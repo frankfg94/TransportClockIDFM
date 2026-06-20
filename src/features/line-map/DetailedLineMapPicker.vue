@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import { Eye, Minus, Plus, Settings, X } from "lucide-vue-next";
 import DistanceToggle from "../../components/DistanceToggle.vue";
+import MobileActionsMenu from "../../components/MobileActionsMenu.vue";
 import {
   loadDetailedLineMap,
   loadStationTransfers,
@@ -1130,23 +1131,16 @@ function getLabelPriority(
       <span v-if="selectedStop" class="line-map-selected-pill">
         {{ selectedStop.label }}
       </span>
-      <div v-if="lineMap" class="line-map-panel__tools">
+      <div
+        v-if="lineMap"
+        class="line-map-panel__tools line-map-panel__tools--desktop"
+      >
         <slot name="bar-before-stats"></slot>
         <DistanceToggle
           v-model="showDistances"
           class="pattern-flow-action-button line-map-distance-toggle"
           :reduce-motion="reduceMotion"
         />
-        <button
-          v-if="ghostNetworkEnabled && isExplorerMode"
-          class="icon-button line-map-mobile-settings-button"
-          type="button"
-          aria-label="Ouvrir les options d'affichage"
-          data-testid="line-map-mobile-display-button"
-          @click="openMobileDisplayModal"
-        >
-          <Settings aria-hidden="true" />
-        </button>
         <span class="line-map-stats">{{ mapStats }}</span>
         <span
           v-if="ghostNetworkEnabled && ghostProgress.total > 0"
@@ -1181,6 +1175,70 @@ function getLabelPriority(
           </button>
         </div>
       </div>
+      <MobileActionsMenu
+        v-if="lineMap"
+        class="line-map-mobile-actions"
+        aria-label="Options de la carte"
+      >
+        <template #default="{ close }">
+          <slot name="bar-before-stats"></slot>
+          <DistanceToggle
+            v-model="showDistances"
+            class="pattern-flow-action-button line-map-distance-toggle"
+            :reduce-motion="reduceMotion"
+            @click="close"
+          />
+          <button
+            v-if="ghostNetworkEnabled && isExplorerMode"
+            class="pattern-flow-action-button"
+            type="button"
+            data-testid="line-map-mobile-display-button"
+            @click.stop="
+              openMobileDisplayModal();
+              close();
+            "
+          >
+            <Settings aria-hidden="true" />
+            <span>Affichage</span>
+          </button>
+          <span class="line-map-mobile-action-summary">{{ mapStats }}</span>
+          <span
+            v-if="ghostNetworkEnabled && ghostProgress.total > 0"
+            class="line-map-network-progress line-map-network-progress--mobile"
+            role="status"
+          >
+            Réseau {{ ghostProgress.completed }}/{{ ghostProgress.total }}
+          </span>
+          <div
+            class="line-map-zoom line-map-zoom--mobile"
+            aria-label="Zoom du plan"
+          >
+            <button
+              class="icon-button line-map-zoom__button"
+              type="button"
+              aria-label="Dézoomer"
+              @click="adjustZoom(-1)"
+            >
+              −
+            </button>
+            <button
+              class="button-secondary line-map-zoom__reset"
+              type="button"
+              @click="resetZoom"
+            >
+              {{ Math.round(zoom * 100) }}%
+            </button>
+            <button
+              class="icon-button line-map-zoom__button"
+              type="button"
+              aria-label="Zoomer"
+              @click="adjustZoom(1)"
+            >
+              +
+            </button>
+          </div>
+        </template>
+      </MobileActionsMenu>
       <span v-if="loadingMap" class="field-loader">
         <span aria-hidden="true" class="loader-dot"></span>
         Chargement du plan
