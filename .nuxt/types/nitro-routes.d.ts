@@ -33,6 +33,12 @@ declare module "nitropack/types" {
     '/api/lines/:transportType/:lineId/pattern': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/lines/[transportType]/[lineId]/pattern.get').default>>>>
     }
+    '/api/mobile/android/release': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/mobile/android/release.get').default>>>>
+    }
+    '/api/mobile/android/release/download': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/mobile/android/release/download.get').default>>>>
+    }
     '/api/netex/status': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/netex/status.get').default>>>>
     }

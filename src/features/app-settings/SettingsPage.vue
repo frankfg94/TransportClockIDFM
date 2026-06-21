@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from "vue";
 import MaterialCombobox from "../../components/MaterialCombobox.vue";
+import { MobileReleaseCard } from "../mobile-release";
 import {
   boardTogglesPlacementOptions,
   closedDirectionSummaryOptions,
@@ -775,6 +776,8 @@ onBeforeUnmount(() => {
         </div>
       </label>
     </section>
+
+    <MobileReleaseCard />
 
     <section class="settings-panel" aria-labelledby="settings-device-title">
       <div class="settings-panel__heading">

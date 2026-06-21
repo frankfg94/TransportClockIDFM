@@ -1,5 +1,7 @@
 # Transport Clock GPT
 
+La procédure de distribution APK Android est documentée dans [docs/mobile-release.md](docs/mobile-release.md).
+
 Application Nuxt 3 + Vue 3 + TypeScript affichant les prochains passages IDFM PRIM et les schemas de desserte.
 Données PRIM IDFM pour l'affichage des prochains horaires.
 Données NETEX pour la génération dynamique des plans de chaque ligne.

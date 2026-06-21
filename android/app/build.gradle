@@ -1,5 +1,21 @@
 apply plugin: 'com.android.application'
 
+def mobileReleaseProperty = { name ->
+    project.findProperty(name)?.toString() ?: System.getenv(name)
+}
+def mobileReleaseVersionCode = mobileReleaseProperty('MOBILE_RELEASE_VERSION_CODE')
+def mobileReleaseVersionName = mobileReleaseProperty('MOBILE_RELEASE_VERSION_NAME')
+def mobileReleaseKeystorePath = mobileReleaseProperty('MOBILE_RELEASE_KEYSTORE_PATH')
+def mobileReleaseKeystorePassword = mobileReleaseProperty('MOBILE_RELEASE_KEYSTORE_PASSWORD')
+def mobileReleaseKeyAlias = mobileReleaseProperty('MOBILE_RELEASE_KEY_ALIAS')
+def mobileReleaseKeyPassword = mobileReleaseProperty('MOBILE_RELEASE_KEY_PASSWORD')
+def hasMobileReleaseSigning = [
+    mobileReleaseKeystorePath,
+    mobileReleaseKeystorePassword,
+    mobileReleaseKeyAlias,
+    mobileReleaseKeyPassword,
+].every { it }
+
 android {
     namespace = "fr.vibeidfm.transportclock"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +23,8 @@ android {
         applicationId "fr.vibeidfm.transportclock"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode mobileReleaseVersionCode ? Integer.parseInt(mobileReleaseVersionCode) : 1
+        versionName mobileReleaseVersionName ?: "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +32,27 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasMobileReleaseSigning) {
+                storeFile file(mobileReleaseKeystorePath)
+                storePassword mobileReleaseKeystorePassword
+                keyAlias mobileReleaseKeyAlias
+                keyPassword mobileReleaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
+            def requestsReleaseBuild = gradle.startParameter.taskNames.any {
+                it.toLowerCase().contains('release')
+            }
+            if (!hasMobileReleaseSigning && requestsReleaseBuild) {
+                throw new GradleException('Une signature release est requise. Utilisez npm run apk:build avec les variables MOBILE_RELEASE_KEYSTORE_*.')
+            }
+            if (hasMobileReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

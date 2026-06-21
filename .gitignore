@@ -11,3 +11,4 @@ transport-clock-screenshot*.png
 .env.*
 !.env.example
 !.env.capacitor.example
+!.env.mobile-release.example
