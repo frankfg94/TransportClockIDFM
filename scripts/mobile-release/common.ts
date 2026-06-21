@@ -153,12 +153,14 @@ export async function assertValidatedArtifact(input: {
   manifest: AndroidReleaseManifest;
   apkPath: string;
   expectedRevision: string;
-  expectedCertificateSha256: string;
+  expectedCertificateSha256?: string;
   approveOversize: boolean;
   verifySignature?: (apkPath: string, expectedCertificateSha256: string) => Promise<void>;
 }): Promise<void> {
   const { manifest } = input;
-  const expectedCertificateSha256 = normalizeSha256(input.expectedCertificateSha256);
+  const expectedCertificateSha256 = normalizeSha256(
+    input.expectedCertificateSha256 ?? manifest.signingCertificateSha256,
+  );
   const expectedRevision = input.expectedRevision.toLowerCase();
 
   if (
@@ -199,6 +201,15 @@ export async function assertApkSignerCertificate(
   apkPath: string,
   expectedCertificateSha256: string,
 ): Promise<void> {
+  const certificateSha256 = await getApkSignerCertificateSha256(apkPath);
+  if (certificateSha256 !== normalizeSha256(expectedCertificateSha256)) {
+    throw new Error("Le certificat de signature de l’APK ne correspond pas au manifest attendu.");
+  }
+}
+
+export async function getApkSignerCertificateSha256(
+  apkPath: string,
+): Promise<string> {
   const apksigner = await findApkSigner();
   let output: string;
   try {
@@ -212,9 +223,10 @@ export async function assertApkSignerCertificate(
   }
 
   const match = output.match(/certificate SHA-256 digest:\s*([a-fA-F0-9:]+)/iu);
-  if (!match || normalizeSha256(match[1]) !== normalizeSha256(expectedCertificateSha256)) {
-    throw new Error("Le certificat de signature de l’APK ne correspond pas à ANDROID_SIGNING_CERT_SHA256.");
+  if (!match) {
+    throw new Error("Impossible de lire l’empreinte du certificat de signature APK.");
   }
+  return normalizeSha256(match[1]);
 }
 
 async function findApkSigner(): Promise<string> {

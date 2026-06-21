@@ -21,7 +21,6 @@ Ajoutez les secrets GitHub suivants :
 
 - `ANDROID_KEYSTORE_BASE64` : fichier `.jks` release encodé en Base64 ;
 - `MOBILE_RELEASE_KEYSTORE_PASSWORD`, `MOBILE_RELEASE_KEY_ALIAS`, `MOBILE_RELEASE_KEY_PASSWORD` ;
-- `ANDROID_SIGNING_CERT_SHA256` : empreinte SHA-256 du certificat release ;
 - `MOBILE_RELEASE_R2_ACCESS_KEY_ID`, `MOBILE_RELEASE_R2_SECRET_ACCESS_KEY` : token R2 avec accès au seul bucket APK.
 
 Ajoutez les variables GitHub non secrètes suivantes :
@@ -30,7 +29,7 @@ Ajoutez les variables GitHub non secrètes suivantes :
 - `MOBILE_RELEASE_R2_ENDPOINT` : `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` ;
 - `MOBILE_RELEASE_R2_BUCKET` : nom du bucket privé.
 
-Le numéro de run GitHub devient `versionCode`, donc il augmente à chaque release. L'APK est vérifiée par `apksigner`, puis son SHA-256 et sa taille sont inscrits au manifest. Au-delà de 25 Mio, la publication échoue ; seul un lancement manuel avec `approve_oversize=true` autorise l'exception. La publication conserve les dix releases R2 les plus récentes.
+Le numéro de run GitHub devient `versionCode`, donc il augmente à chaque release. L'APK est vérifiée par `apksigner` et l'empreinte de son certificat est extraite automatiquement ; le SHA-256 du fichier et sa taille sont ensuite inscrits au manifest. Au-delà de 25 Mio, la publication échoue ; seul un lancement manuel avec `approve_oversize=true` autorise l'exception. La publication conserve les dix releases R2 les plus récentes.
 
 ## Publication locale
 

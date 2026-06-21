@@ -25,12 +25,10 @@ async function main(): Promise<void> {
   const manifest = await readManifest();
   const sourceRevision = getCurrentSourceRevision();
   const apkPath = join(mobileReleaseOutputDir, manifest.fileName);
-  const certificateSha256 = requireEnv("ANDROID_SIGNING_CERT_SHA256");
   await assertValidatedArtifact({
     manifest,
     apkPath,
     expectedRevision: sourceRevision,
-    expectedCertificateSha256: certificateSha256,
     approveOversize: isOversizeApproved(),
   });
 

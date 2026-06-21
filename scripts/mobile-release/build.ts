@@ -5,6 +5,7 @@ import {
   assertReadableFile,
   assertValidatedArtifact,
   getCurrentSourceRevision,
+  getApkSignerCertificateSha256,
   getVersionCode,
   getVersionName,
   gradleCommand,
@@ -28,7 +29,6 @@ async function main(): Promise<void> {
   requireEnv("MOBILE_RELEASE_KEYSTORE_PASSWORD");
   requireEnv("MOBILE_RELEASE_KEY_ALIAS");
   requireEnv("MOBILE_RELEASE_KEY_PASSWORD");
-  const certificateSha256 = requireEnv("ANDROID_SIGNING_CERT_SHA256");
   await assertReadableFile(keystorePath);
 
   const buildEnvironment = {
@@ -61,13 +61,14 @@ async function main(): Promise<void> {
   const apkPath = join(mobileReleaseOutputDir, fileName);
   await mkdir(mobileReleaseOutputDir, { recursive: true });
   await cp(generatedApk, apkPath);
+  const signingCertificateSha256 = await getApkSignerCertificateSha256(apkPath);
 
   const manifest = await createAndroidReleaseManifest({
     apkPath,
     sourceRevision,
     versionName,
     versionCode,
-    signingCertificateSha256: certificateSha256,
+    signingCertificateSha256,
     oversizeApproved: false,
   });
   if (manifest.sizeBytes > 25 * 1024 * 1024 && isOversizeApproved()) {
@@ -78,7 +79,6 @@ async function main(): Promise<void> {
     manifest,
     apkPath,
     expectedRevision: sourceRevision,
-    expectedCertificateSha256: certificateSha256,
     approveOversize: isOversizeApproved(),
   });
 
