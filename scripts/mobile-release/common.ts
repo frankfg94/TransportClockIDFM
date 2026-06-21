@@ -55,9 +55,14 @@ export function requireEnv(name: string): string {
   return value;
 }
 
-export function run(command: string, args: string[], environment?: NodeJS.ProcessEnv): void {
+export function run(
+  command: string,
+  args: string[],
+  environment?: NodeJS.ProcessEnv,
+  cwd = projectRoot,
+): void {
   execFileSync(command, args, {
-    cwd: projectRoot,
+    cwd,
     env: environment ?? process.env,
     stdio: "inherit",
     shell: isWindowsBatchFile(command),

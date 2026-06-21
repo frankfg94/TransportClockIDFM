@@ -43,7 +43,7 @@ async function main(): Promise<void> {
     "assembleRelease",
     `-PMOBILE_RELEASE_VERSION_CODE=${versionCode}`,
     `-PMOBILE_RELEASE_VERSION_NAME=${versionName}`,
-  ]);
+  ], undefined, join(projectRoot, "android"));
 
   const generatedApk = join(
     projectRoot,
