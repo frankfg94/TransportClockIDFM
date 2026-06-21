@@ -34,14 +34,14 @@ Le numéro de run GitHub devient `versionCode`, donc il augmente à chaque relea
 
 ## Publication locale
 
-Copiez `.env.mobile-release.example` dans un fichier local ignoré par Git, chargez ses variables dans votre shell puis exécutez :
+Copiez `.env.mobile-release.example` dans `.env.mobile-release`, renseignez ses variables puis exécutez :
 
 ```powershell
 npm run apk:build
 npm run apk:publish
 ```
 
-`apk:build` génère `dist/mobile-release/manifest.json` et l'APK signée. `apk:publish` relit et revalide l'APK avant tout upload. Les deux commandes refusent une arborescence Git modifiée, un SHA de commit incohérent, une empreinte de certificat différente ou une APK au-dessus de 25 Mio. Pour l'exception de taille seulement :
+Les scripts chargent automatiquement `.env.mobile-release`, sans écraser une variable explicitement fournie dans le terminal ou dans GitHub Actions. `apk:build` génère `dist/mobile-release/manifest.json` et l'APK signée. `apk:publish` relit et revalide l'APK avant tout upload. Les deux commandes refusent une arborescence Git modifiée, un SHA de commit incohérent, une empreinte de certificat différente ou une APK au-dessus de 25 Mio. Pour l'exception de taille seulement :
 
 ```powershell
 npm run apk:build -- --approve-oversize

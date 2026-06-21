@@ -7,6 +7,7 @@ import {
   assertApkSize,
   assertCleanGitStatus,
   assertValidatedArtifact,
+  loadMobileReleaseEnvironment,
 } from "../scripts/mobile-release/common";
 import {
   MAX_ANDROID_APK_BYTES,
@@ -59,6 +60,23 @@ describe("mobile release validation", () => {
 
   it("refuses a dirty worktree before a build or upload", () => {
     expect(() => assertCleanGitStatus(" M package.json")).toThrow("arborescence Git propre");
+  });
+
+  it("loads the local release file without overriding CI or shell variables", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "mobile-release-env-"));
+    const envPath = join(directory, ".env.mobile-release");
+    try {
+      await writeFile(envPath, "MOBILE_RELEASE_VERSION_CODE=1001\nEXTRA_VALUE='with spaces'\n");
+      const target: NodeJS.ProcessEnv = { MOBILE_RELEASE_VERSION_CODE: "2000" };
+      loadMobileReleaseEnvironment(envPath, target);
+
+      expect(target).toMatchObject({
+        MOBILE_RELEASE_VERSION_CODE: "2000",
+        EXTRA_VALUE: "with spaces",
+      });
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
   });
 
   it("rejects an APK whose manifest SHA or commit is inconsistent", async () => {

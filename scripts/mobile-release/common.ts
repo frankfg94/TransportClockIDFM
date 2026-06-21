@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { access, readFile, stat } from "node:fs/promises";
-import { constants, readFileSync } from "node:fs";
+import { constants, existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -16,6 +16,34 @@ import {
 export const projectRoot = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 export const mobileReleaseOutputDir = join(projectRoot, "dist", "mobile-release");
 export const mobileReleaseManifestPath = join(mobileReleaseOutputDir, "manifest.json");
+export const mobileReleaseEnvPath = join(projectRoot, ".env.mobile-release");
+
+// Local publishing should be as ergonomic as the CI workflow. Environment
+// variables explicitly supplied by the shell or GitHub Actions always win.
+loadMobileReleaseEnvironment();
+
+export function loadMobileReleaseEnvironment(
+  path = mobileReleaseEnvPath,
+  target: NodeJS.ProcessEnv = process.env,
+): void {
+  if (!existsSync(path)) return;
+
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/u)) {
+    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/u);
+    if (!match || target[match[1]] !== undefined) continue;
+
+    let value = match[2].trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    } else {
+      value = value.replace(/\s+#.*$/u, "").trim();
+    }
+    target[match[1]] = value;
+  }
+}
 
 export function getArgument(name: string): boolean {
   return process.argv.includes(name);
