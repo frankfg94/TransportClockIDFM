@@ -205,7 +205,7 @@ let storageWatcherRegistered = false;
 export function createDefaultAppSettings(): AppSettings {
   return {
     version: 1,
-    closedDirectionSummaryMode: "last",
+    closedDirectionSummaryMode: "next",
     maxDeparturesPerDirection: "default",
     showPatternMiniMap: true,
     showPatternCityZones: true,

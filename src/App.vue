@@ -1,5 +1,13 @@
 ﻿<script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
+import Draggable from "vuedraggable";
 import BoardVisibilityControls from "./components/BoardVisibilityControls.vue";
 import DepartureAlarmModal from "./components/DepartureAlarmModal.vue";
 import StationBoardModal from "./components/StationBoardModal.vue";
@@ -16,13 +24,18 @@ import {
   getCurrentTrafficDisruptions,
   normalizeTrafficLineRef,
 } from "./features/traffic";
-import { fetchBoardDepartures } from "./services/idfm";
+import { transitModeToFamily } from "./services/linePresentation";
+import {
+  fetchBoardDepartures,
+  fetchDirectionGroupsForStation,
+} from "./services/idfm";
 import { toServerApiUrl } from "./services/serverApi";
 import {
   TRANSIT_PREFERENCES_CHANGED_EVENT,
   TRANSIT_PREFERENCES_STORAGE_KEY,
   createDefaultPreferences,
   loadTransitPreferences,
+  migrateCustomBoardDirectionGroups,
   saveTransitPreferences,
 } from "./storage/transitPreferences";
 import {
@@ -41,7 +54,10 @@ import type {
   DepartureCallingPattern,
   DepartureServiceType,
   DirectionDepartureGroup,
+  LineSearchOption,
   LinePatternViewResponse,
+  StationSearchOption,
+  TransitBoardPreferences,
   TransitBoardConfig,
 } from "./types/transit";
 import type {
@@ -51,6 +67,8 @@ import type {
 import {
   BellRing,
   CloudSun,
+  LayoutGrid,
+  List,
   MoreVertical,
   Plus,
   RefreshCw,
@@ -85,6 +103,8 @@ interface NetexCacheStatus {
 
 const REFRESH_INTERVAL_MS = 30_000;
 const MOBILE_BREAKPOINT_QUERY = "(max-width: 760px)";
+const DESKTOP_DRAG_BREAKPOINT_QUERY =
+  "(min-width: 761px) and (hover: hover) and (pointer: fine)";
 const preferences = reactive(createDefaultPreferences(transitBoards));
 const { settings, effectiveMaxDeparturesPerDirection, updateSettings } =
   useAppSettings();
@@ -122,12 +142,16 @@ const netexCacheStatus = ref<NetexCacheStatus>();
 const netexCacheStatusLoaded = ref(false);
 const trafficReports = ref<TrafficLineReport[]>([]);
 const mobileBoardTogglesInContextMenu = ref(false);
+const desktopDragEnabled = ref(false);
+const draggingBoards = ref(false);
+const draggableBoards = ref<TransitBoardConfig[]>([]);
 const primApiKeyConfigured = __IDFM_API_KEY_CONFIGURED__;
 let refreshTimer: number | undefined;
 const alarmTimers = new Map<string, number>();
 let toastTimer: number | undefined;
 let clockTimer: number | undefined;
 let mobileBreakpointQuery: MediaQueryList | undefined;
+let desktopDragBreakpointQuery: MediaQueryList | undefined;
 const departureServiceTypeCache = new Map<
   string,
   Promise<DepartureServiceType | undefined>
@@ -137,6 +161,19 @@ const allBoards = computed<TransitBoardConfig[]>(() => [
   ...transitBoards,
   ...preferences.customBoards,
 ]);
+
+const orderedBoards = computed<TransitBoardConfig[]>(() => {
+  const orderById = new Map(
+    preferences.boardOrderIds.map((boardId, index) => [boardId, index]),
+  );
+
+  return [...allBoards.value].sort((left, right) => {
+    const leftIndex = orderById.get(left.id) ?? Number.MAX_SAFE_INTEGER;
+    const rightIndex = orderById.get(right.id) ?? Number.MAX_SAFE_INTEGER;
+
+    return leftIndex - rightIndex;
+  });
+});
 const stationModalMode = computed<"dropdown" | "multistep">(() =>
   mobileBoardTogglesInContextMenu.value ? "multistep" : "dropdown",
 );
@@ -161,9 +198,19 @@ function updateHiddenDirectionIdsForBoard(
 }
 
 const visibleBoards = computed(() =>
-  allBoards.value.filter((board) =>
+  orderedBoards.value.filter((board) =>
     preferences.visibleBoardIds.includes(board.id),
   ),
+);
+
+watch(
+  visibleBoards,
+  (boards) => {
+    if (!draggingBoards.value) {
+      draggableBoards.value = [...boards];
+    }
+  },
+  { immediate: true },
 );
 
 const boardTogglesInContextMenu = computed(
@@ -444,6 +491,28 @@ function handleMobileBreakpointChange(event: MediaQueryListEvent): void {
   mobileBoardTogglesInContextMenu.value = event.matches;
 }
 
+function handleDesktopDragBreakpointChange(event: MediaQueryListEvent): void {
+  desktopDragEnabled.value = event.matches;
+}
+
+function startBoardDrag(): void {
+  draggingBoards.value = true;
+}
+
+function saveBoardOrderAfterDrag(): void {
+  const visibleBoardIds = new Set(visibleBoards.value.map((board) => board.id));
+  const draggedBoardIds = draggableBoards.value.map((board) => board.id);
+  let draggedBoardIndex = 0;
+
+  preferences.boardOrderIds = orderedBoards.value.map((board) =>
+    visibleBoardIds.has(board.id)
+      ? (draggedBoardIds[draggedBoardIndex++] ?? board.id)
+      : board.id,
+  );
+  draggingBoards.value = false;
+  saveTransitPreferences(preferences);
+}
+
 function createBoardRequestForSettings(
   board: TransitBoardConfig,
 ): TransitBoardConfig {
@@ -534,7 +603,7 @@ function toggleBoardVisibility(boardId: string): void {
     visibleIds.add(boardId);
   }
 
-  preferences.visibleBoardIds = allBoards.value
+  preferences.visibleBoardIds = orderedBoards.value
     .map((board) => board.id)
     .filter((id) => visibleIds.has(id));
   saveTransitPreferences(preferences);
@@ -558,6 +627,9 @@ function addCustomBoard(board: TransitBoardConfig): void {
   if (!preferences.visibleBoardIds.includes(board.id)) {
     preferences.visibleBoardIds.push(board.id);
   }
+  if (!preferences.boardOrderIds.includes(board.id)) {
+    preferences.boardOrderIds.push(board.id);
+  }
 
   ensureBoardState(board.id);
   saveTransitPreferences(preferences);
@@ -575,9 +647,15 @@ function changeBoardStation(
   preferences.visibleBoardIds = preferences.visibleBoardIds.map((id) =>
     id === previousBoard.id ? nextBoard.id : id,
   );
+  preferences.boardOrderIds = preferences.boardOrderIds.map((id) =>
+    id === previousBoard.id ? nextBoard.id : id,
+  );
 
   if (!preferences.visibleBoardIds.includes(nextBoard.id)) {
     preferences.visibleBoardIds.push(nextBoard.id);
+  }
+  if (!preferences.boardOrderIds.includes(nextBoard.id)) {
+    preferences.boardOrderIds.push(nextBoard.id);
   }
 
   preferences.collapsedDirectionIds = preferences.collapsedDirectionIds.filter(
@@ -597,6 +675,9 @@ function removeCustomBoard(boardId: string): void {
   preferences.visibleBoardIds = preferences.visibleBoardIds.filter(
     (id) => id !== boardId,
   );
+  preferences.boardOrderIds = preferences.boardOrderIds.filter(
+    (id) => id !== boardId,
+  );
   preferences.collapsedDirectionIds = preferences.collapsedDirectionIds.filter(
     (id) => !id.startsWith(`${boardId}:`),
   );
@@ -607,6 +688,19 @@ function removeCustomBoard(boardId: string): void {
 
 function isCustomBoard(boardId: string): boolean {
   return preferences.customBoards.some((board) => board.id === boardId);
+}
+
+function setBoardDisplayMode(
+  displayMode: TransitBoardPreferences["boardDisplayMode"],
+): void {
+  if (preferences.boardDisplayMode === displayMode) {
+    closeTopbarMenu();
+    return;
+  }
+
+  preferences.boardDisplayMode = displayMode;
+  saveTransitPreferences(preferences);
+  closeTopbarMenu();
 }
 
 function openLinePage(board: TransitBoardConfig): void {
@@ -1083,6 +1177,68 @@ function formatAlarmRemaining(alarm: DepartureAlarm, now: number): string {
   return restMinutes ? `${hours} h ${restMinutes}` : `${hours} h`;
 }
 
+async function migrateStoredCustomBoardDirections(): Promise<void> {
+  const migration = await migrateCustomBoardDirectionGroups(
+    preferences,
+    async (board) => {
+      const input = createDirectionDiscoveryInput(board);
+
+      if (!input) {
+        return undefined;
+      }
+
+      const directionGroups = await fetchDirectionGroupsForStation(
+        input.line,
+        input.station,
+      );
+
+      return directionGroups.some((group) => group.id === "all-directions")
+        ? undefined
+        : directionGroups;
+    },
+  );
+
+  migration.updatedBoardIds.forEach((boardId) => {
+    delete states[boardId];
+    ensureBoardState(boardId);
+  });
+
+  if (migration.completed || migration.updatedBoardIds.length > 0) {
+    saveTransitPreferences(preferences);
+  }
+}
+
+function createDirectionDiscoveryInput(
+  board: TransitBoardConfig,
+): { line: LineSearchOption; station: StationSearchOption } | undefined {
+  const lineRef = board.schedule?.lineRef;
+  const stopAreaRef = board.schedule?.stopAreaRef;
+  const family = transitModeToFamily(board.line.mode);
+
+  if (!lineRef || !stopAreaRef || !family) {
+    return undefined;
+  }
+
+  return {
+    line: {
+      family,
+      id: lineRef,
+      label: board.line.shortName,
+      ref: board.line.ref,
+      navitiaId: lineRef,
+      color: board.line.color,
+      textColor: board.line.textColor,
+    },
+    station: {
+      id: stopAreaRef,
+      label: board.title,
+      city: board.city,
+      monitoringRef: board.monitoringPoints[0]?.ref ?? stopAreaRef,
+      scheduleStopAreaRef: stopAreaRef,
+    },
+  };
+}
+
 function syncTransitPreferences(event?: Event): void {
   if (
     event instanceof StorageEvent &&
@@ -1124,6 +1280,12 @@ onMounted(() => {
     "change",
     handleMobileBreakpointChange,
   );
+  desktopDragBreakpointQuery = window.matchMedia(DESKTOP_DRAG_BREAKPOINT_QUERY);
+  desktopDragEnabled.value = desktopDragBreakpointQuery.matches;
+  desktopDragBreakpointQuery.addEventListener(
+    "change",
+    handleDesktopDragBreakpointChange,
+  );
   clockTimer = window.setInterval(() => {
     nowTick.value = Date.now();
   }, 1000);
@@ -1132,7 +1294,9 @@ onMounted(() => {
 
   if (primApiKeyConfigured && pageVisible.value) {
     startRefreshTimer();
-    void refreshAll();
+    void migrateStoredCustomBoardDirections().finally(() => {
+      void refreshAll();
+    });
   }
 });
 
@@ -1159,6 +1323,11 @@ onBeforeUnmount(() => {
     handleMobileBreakpointChange,
   );
   mobileBreakpointQuery = undefined;
+  desktopDragBreakpointQuery?.removeEventListener(
+    "change",
+    handleDesktopDragBreakpointChange,
+  );
+  desktopDragBreakpointQuery = undefined;
 });
 </script>
 
@@ -1231,6 +1400,32 @@ onBeforeUnmount(() => {
                   <CloudSun aria-hidden="true" />
                   Météo
                 </button>
+                <div
+                  class="topbar-actions__display"
+                  aria-label="Mode d'affichage des stations"
+                  role="group"
+                >
+                  <button
+                    class="topbar-actions__display-button"
+                    :aria-pressed="preferences.boardDisplayMode === 'grid'"
+                    aria-label="Affichage en tuiles"
+                    title="Affichage en tuiles"
+                    type="button"
+                    @click="setBoardDisplayMode('grid')"
+                  >
+                    <LayoutGrid aria-hidden="true" />
+                  </button>
+                  <button
+                    class="topbar-actions__display-button"
+                    :aria-pressed="preferences.boardDisplayMode === 'list'"
+                    aria-label="Affichage liste compacte"
+                    title="Affichage liste compacte"
+                    type="button"
+                    @click="setBoardDisplayMode('list')"
+                  >
+                    <List aria-hidden="true" />
+                  </button>
+                </div>
                 <button
                   type="button"
                   role="menuitem"
@@ -1333,36 +1528,60 @@ onBeforeUnmount(() => {
         </span>
       </section>
 
-      <section class="boards-grid" aria-label="Horaires par arrêt">
-        <TransitBoard
-          v-for="board in visibleBoards"
-          :key="board.id"
-          :board="board"
-          :departures="states[board.id].departures"
-          :direction-groups="getVisibleDirectionGroupsForBoard(board.id)"
-          :collapsed-direction-ids="getBoardCollapsedDirectionIds(board.id)"
-          :hidden-direction-ids="
-            settings.hiddenDirectionIdsByBoardId[board.id] ?? []
-          "
-          :loading="states[board.id].loading"
-          :error="states[board.id].error"
-          :updated-at="states[board.id].updatedAt"
-          :removable="isCustomBoard(board.id)"
-          :alarm-departure-ids="getBoardAlarmDepartureIds(board.id)"
-          :closed-summary-mode="settings.closedDirectionSummaryMode"
-          :traffic-alert="getBoardTrafficAlert(board)"
-          @update:hidden-direction-ids="
-            updateHiddenDirectionIdsForBoard(board.id, $event)
-          "
-          @change-station="changeBoardStation(board, $event)"
-          @open-traffic="openTrafficPage"
-          @remove="removeCustomBoard(board.id)"
-          @open-line-page="openLinePage"
-          @schedule-alarm="openAlarmModal"
-          @show-pattern="openPatternModal"
-          @toggle-direction="toggleDirection(board.id, $event)"
-        />
-      </section>
+      <Draggable
+        v-model="draggableBoards"
+        tag="section"
+        class="boards-grid"
+        :class="{
+          'boards-grid--list': preferences.boardDisplayMode === 'list',
+          'boards-grid--draggable': desktopDragEnabled,
+        }"
+        aria-label="Horaires par arrêt"
+        item-key="id"
+        :animation="220"
+        :disabled="!desktopDragEnabled"
+        :filter="'.board button, .board input, .board select, .board textarea, .board a'"
+        :prevent-on-filter="false"
+        chosen-class="board--drag-chosen"
+        drag-class="board--dragging"
+        ghost-class="board--drag-ghost"
+        @start="startBoardDrag"
+        @end="saveBoardOrderAfterDrag"
+      >
+        <template #item="{ element: board }">
+          <div class="board-drag-item">
+            <TransitBoard
+              :board="board"
+              :departures="states[board.id].departures"
+              :direction-groups="getVisibleDirectionGroupsForBoard(board.id)"
+              :collapsed-direction-ids="
+                getBoardCollapsedDirectionIds(board.id)
+              "
+              :hidden-direction-ids="
+                settings.hiddenDirectionIdsByBoardId[board.id] ?? []
+              "
+              :loading="states[board.id].loading"
+              :error="states[board.id].error"
+              :updated-at="states[board.id].updatedAt"
+              :removable="isCustomBoard(board.id)"
+              :alarm-departure-ids="getBoardAlarmDepartureIds(board.id)"
+              :closed-summary-mode="settings.closedDirectionSummaryMode"
+              :traffic-alert="getBoardTrafficAlert(board)"
+              :display-mode="preferences.boardDisplayMode"
+              @update:hidden-direction-ids="
+                updateHiddenDirectionIdsForBoard(board.id, $event)
+              "
+              @change-station="changeBoardStation(board, $event)"
+              @open-traffic="openTrafficPage"
+              @remove="removeCustomBoard(board.id)"
+              @open-line-page="openLinePage"
+              @schedule-alarm="openAlarmModal"
+              @show-pattern="openPatternModal"
+              @toggle-direction="toggleDirection(board.id, $event)"
+            />
+          </div>
+        </template>
+      </Draggable>
 
       <StationBoardModal
         :open="stationModalOpen"

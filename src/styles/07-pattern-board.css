@@ -71,6 +71,10 @@
   padding: 22px;
 }
 
+.pattern-board__summary-heading {
+  display: block;
+}
+
 .pattern-board__line {
   align-items: center;
   background: #ffffff;
@@ -206,6 +210,21 @@
   margin-top: 4px;
   max-width: min(560px, 52vw);
   min-width: min(360px, 52vw);
+}
+
+.pattern-board__top-strip-direction {
+  min-width: 0;
+}
+
+.pattern-board__direction-controls {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pattern-board__direction-controls .pattern-board__direction-picker {
+  min-width: min(280px, 42vw);
 }
 
 .pattern-board__meta {

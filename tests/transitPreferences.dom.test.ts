@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   TRANSIT_PREFERENCES_CHANGED_EVENT,
+  TRANSIT_PREFERENCES_STORAGE_KEY,
   addBoardToTransitPreferences,
   createDefaultPreferences,
+  loadTransitPreferences,
   saveTransitPreferences,
 } from "../src/storage/transitPreferences";
 import type { TransitBoardConfig } from "../src/types/transit";
@@ -14,6 +16,26 @@ beforeEach(() => {
 });
 
 describe("transit preferences favorites", () => {
+  it("migrates the display mode and board order without losing existing preferences", () => {
+    const secondBoard = createBoard("second-board", "stop_area:second");
+    window.localStorage.setItem(
+      TRANSIT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        visibleBoardIds: ["default-board", "second-board"],
+        boardDisplayMode: "list",
+        boardOrderIds: ["second-board", "unknown-board"],
+        collapsedDirectionIds: [],
+        customBoards: [],
+      }),
+    );
+
+    expect(loadTransitPreferences([defaultBoard, secondBoard])).toMatchObject({
+      boardDisplayMode: "list",
+      boardOrderIds: ["second-board", "default-board"],
+      visibleBoardIds: ["default-board", "second-board"],
+    });
+  });
+
   it("reactivates a matching default board instead of creating a custom one", () => {
     saveTransitPreferences({
       ...createDefaultPreferences([defaultBoard]),

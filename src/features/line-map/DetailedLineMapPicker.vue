@@ -1195,6 +1195,7 @@ function getLabelPriority(
     }"
   >
     <div class="line-map-panel__bar">
+      <slot name="bar-before-chip"></slot>
       <span
         class="line-map-chip"
         :style="{

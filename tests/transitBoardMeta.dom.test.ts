@@ -8,6 +8,38 @@ import type {
 } from "../src/types/transit";
 
 describe("TransitBoard departure metadata", () => {
+  it("keeps the imminent label in expanded rows while the summary shows zero", () => {
+    const departure: Departure = {
+      id: "departure-now",
+      lineRef: "line:test",
+      monitoringRef: "stop:test",
+      stopName: "Station test",
+      destination: "Saint-Remy",
+      monitoringLabel: "Tous quais",
+      expectedDepartureTime: new Date().toISOString(),
+      vehicleAtStop: false,
+    };
+    const wrapper = mount(TransitBoard, {
+      props: {
+        board: createBoard(),
+        collapsedDirectionIds: [],
+        departures: [departure],
+        directionGroups: [createDirectionGroup(departure)],
+        loading: false,
+      },
+      global: {
+        stubs: {
+          LineIconBadge: true,
+        },
+      },
+    });
+
+    expect(wrapper.find(".last-service__time strong").text()).toBe("0");
+    expect(wrapper.find(".departure__time strong").text()).toBe("Imminent");
+
+    wrapper.unmount();
+  });
+
   it("shows the service pattern instead of platform metadata", () => {
     const departure: Departure = {
       id: "departure-1",

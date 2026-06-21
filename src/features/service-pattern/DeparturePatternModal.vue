@@ -21,11 +21,7 @@ import {
   transitModeToFamily,
 } from "../../services/linePresentation";
 import { Controls } from "@vue-flow/controls";
-import {
-  Expand,
-  Minimize2,
-  SlidersHorizontal,
-} from "lucide-vue-next";
+import { Expand, Minimize2, SlidersHorizontal } from "lucide-vue-next";
 import DistanceToggle from "../../components/DistanceToggle.vue";
 import PatternFlowMiniMap from "./PatternFlowMiniMap.vue";
 import { resolveTransitLonLat } from "../network-ghost/geoProjection";
@@ -954,9 +950,7 @@ function createPatternFlow(
           ? undefined
           : getBranchChip(node, activeTerminalIds, departureTimeLabel),
         busTransfers: visibleTransfers.filter(isBusTransfer),
-        nonBusTransfers: visibleTransfers.filter(
-          isVisiblePatternPlanTransfer,
-        ),
+        nonBusTransfers: visibleTransfers.filter(isVisiblePatternPlanTransfer),
         transfers: visibleTransfers,
       },
     } satisfies PatternStationFlowNode;
@@ -1094,7 +1088,12 @@ function createCityZoneGroups(
     const sourceCityKey = normalizeCityZoneKey(source?.city);
     const targetCityKey = normalizeCityZoneKey(target?.city);
 
-    if (!source || !target || !sourceCityKey || sourceCityKey !== targetCityKey) {
+    if (
+      !source ||
+      !target ||
+      !sourceCityKey ||
+      sourceCityKey !== targetCityKey
+    ) {
       return;
     }
 
@@ -1243,9 +1242,7 @@ function createFlowEdge(
     selectable: false,
     focusable: false,
     class: [
-      edge.active
-        ? "pattern-flow-edge--active"
-        : "pattern-flow-edge--skipped",
+      edge.active ? "pattern-flow-edge--active" : "pattern-flow-edge--skipped",
       distanceLabel ? "pattern-flow-edge--distance" : "",
       distanceLabel && distanceLabelsLeaving
         ? "pattern-flow-edge--distance-leave"
@@ -2492,12 +2489,8 @@ function buildPatternGraph(
         id: key,
         label: existing?.label ?? call?.label ?? stop.label,
         city: existing?.city ?? call?.city ?? stop.city,
-        lon: shouldUseStopCoordinates
-          ? stopCoordinates.lon
-          : existing?.lon,
-        lat: shouldUseStopCoordinates
-          ? stopCoordinates.lat
-          : existing?.lat,
+        lon: shouldUseStopCoordinates ? stopCoordinates.lon : existing?.lon,
+        lat: shouldUseStopCoordinates ? stopCoordinates.lat : existing?.lat,
         coordinatePriority: shouldUseStopCoordinates
           ? coordinatePriority
           : (existing?.coordinatePriority ?? -1),
@@ -3094,18 +3087,23 @@ onBeforeUnmount(() => {
               :style="{ '--line-color': board?.line.color ?? '#0064ff' }"
             >
               <aside class="pattern-board__summary">
-                <div class="pattern-board__line">
-                  <span
-                    v-if="board"
-                    class="pattern-board__mode-icon"
-                    :class="`pattern-board__mode-icon--${transportModeIcon.key}`"
-                    :aria-label="transportModeIcon.title"
-                    :title="transportModeIcon.title"
-                  >
-                    <span aria-hidden="true">{{ transportModeIcon.label }}</span>
-                  </span>
-                  <LineIconBadge v-if="board" :line="board.line" />
-                  <span v-else>{{ departure?.lineRef ?? "" }}</span>
+                <div class="pattern-board__summary-heading">
+                  <div class="pattern-board__line">
+                    <span
+                      v-if="board"
+                      class="pattern-board__mode-icon"
+                      :class="`pattern-board__mode-icon--${transportModeIcon.key}`"
+                      :aria-label="transportModeIcon.title"
+                      :title="transportModeIcon.title"
+                    >
+                      <span aria-hidden="true">{{
+                        transportModeIcon.label
+                      }}</span>
+                    </span>
+                    <LineIconBadge v-if="board" :line="board.line" />
+                    <span v-else>{{ departure?.lineRef ?? "" }}</span>
+                  </div>
+                  <slot name="summary-action"></slot>
                 </div>
                 <p>{{ serviceLabel }}</p>
                 <strong>{{ destinationLabel }}</strong>
@@ -3119,25 +3117,28 @@ onBeforeUnmount(() => {
 
               <div class="pattern-board__display">
                 <div class="pattern-board__top-strip">
-                  <div>
+                  <div class="pattern-board__top-strip-direction">
                     <span>Direction</span>
-                    <label
-                      v-if="hasDirectionPicker"
-                      class="pattern-board__direction-picker"
-                    >
-                      <MaterialCombobox
-                        :model-value="selectedDirectionId ?? ''"
-                        :options="directionOptions ?? []"
-                        aria-label="Changer de direction"
-                        @update:model-value="emit('directionChange', $event)"
-                      />
-                    </label>
-                    <strong v-else>{{ destinationLabel }}</strong>
+                    <div class="pattern-board__direction-controls">
+                      <label
+                        v-if="hasDirectionPicker"
+                        class="pattern-board__direction-picker"
+                      >
+                        <MaterialCombobox
+                          :model-value="selectedDirectionId ?? ''"
+                          :options="directionOptions ?? []"
+                          aria-label="Changer de direction"
+                          @update:model-value="emit('directionChange', $event)"
+                        />
+                      </label>
+                      <strong v-else>{{ destinationLabel }}</strong>
+                    </div>
                   </div>
                   <div class="pattern-board__meta">
                     <span>{{ servedStopsLabel }}</span>
                     <strong>{{ departureClock || "--:--" }}</strong>
                   </div>
+                  <slot name="top-strip-direction-action"></slot>
                 </div>
 
                 <div
@@ -3185,7 +3186,9 @@ onBeforeUnmount(() => {
                       </button>
                     </div>
                   </div>
-                  <div class="pattern-flow-actions pattern-flow-actions--desktop">
+                  <div
+                    class="pattern-flow-actions pattern-flow-actions--desktop"
+                  >
                     <slot name="flow-actions-prefix"></slot>
                     <DistanceToggle
                       v-model="showPatternDistances"
@@ -3276,9 +3279,7 @@ onBeforeUnmount(() => {
                         <Expand v-else aria-hidden="true" />
                         <span>
                           {{
-                            isPatternFlowFullscreen
-                              ? "Réduire"
-                              : "Plein écran"
+                            isPatternFlowFullscreen ? "Réduire" : "Plein écran"
                           }}
                         </span>
                       </button>

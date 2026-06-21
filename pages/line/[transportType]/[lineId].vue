@@ -36,6 +36,31 @@
       @close="navigateHome"
       @direction-change="changeDirection"
     >
+      <template #top-strip-direction-action>
+        <button
+          class="line-pattern-page__back line-pattern-page__back--desktop"
+          type="button"
+          aria-label="Retour à l'écran précédent"
+          title="Retour"
+          @click="goBack"
+        >
+          <ArrowLeft aria-hidden="true" />
+          <span>Retour</span>
+        </button>
+      </template>
+
+      <template #summary-action>
+        <button
+          class="line-pattern-page__back line-pattern-page__back--mobile"
+          type="button"
+          aria-label="Retour à l'écran précédent"
+          title="Retour"
+          @click="goBack"
+        >
+          <ArrowLeft aria-hidden="true" />
+        </button>
+      </template>
+
       <template #flow-actions-prefix>
         <nav
           class="line-pattern-page__view-tabs"
@@ -71,6 +96,18 @@
         "
         :reduce-motion="settings.reduceMotion"
       >
+        <template #bar-before-chip>
+          <button
+            class="line-pattern-page__back line-pattern-page__back--map-mobile"
+            type="button"
+            aria-label="Retour à l'écran précédent"
+            title="Retour"
+            @click="goBack"
+          >
+            <ArrowLeft aria-hidden="true" />
+          </button>
+        </template>
+
         <template #bar-before-stats>
           <nav
             class="line-pattern-page__view-tabs line-pattern-page__view-tabs--map"
@@ -91,6 +128,16 @@
               Carte
             </button>
           </nav>
+          <button
+            class="line-pattern-page__back line-pattern-page__back--map-desktop"
+            type="button"
+            aria-label="Retour à l'écran précédent"
+            title="Retour"
+            @click="goBack"
+          >
+            <ArrowLeft aria-hidden="true" />
+            <span>Retour</span>
+          </button>
         </template>
       </DetailedLineMapPicker>
 
@@ -119,7 +166,8 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { useFetch, useRoute, navigateTo } from "#imports";
+import { ArrowLeft } from "lucide-vue-next";
+import { useFetch, useRoute, useRouter, navigateTo } from "#imports";
 import {
   filterTerminalOnly,
   useAppSettings,
@@ -141,6 +189,7 @@ const LINE_COMPLETE_DIRECTION_ID = "line-complete";
 type LinePageView = "schema" | "map";
 
 const route = useRoute();
+const router = useRouter();
 const { settings } = useAppSettings();
 const apiUrl = computed(() => {
   const params = new URLSearchParams();
@@ -261,6 +310,15 @@ function navigateHome(): void {
   void navigateTo("/");
 }
 
+function goBack(): void {
+  if (typeof window !== "undefined" && window.history.state?.back) {
+    router.back();
+    return;
+  }
+
+  navigateHome();
+}
+
 function changeDirection(directionId: string): void {
   const query: Record<string, string> = {
     direction: directionId,
@@ -364,6 +422,43 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
+.line-pattern-page__back {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  box-shadow: 0 10px 26px rgba(16, 35, 63, 0.24);
+  color: #ffffff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.82rem;
+  font-weight: 900;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 15px 0 12px;
+  transition:
+    background 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.line-pattern-page__back:hover,
+.line-pattern-page__back:focus-visible {
+  background: #0064ff;
+  box-shadow: 0 14px 32px rgba(0, 100, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.line-pattern-page__back svg {
+  height: 18px;
+  width: 18px;
+}
+
+.line-pattern-page__back--mobile,
+.line-pattern-page__back--map-mobile {
+  display: none;
+}
+
 .line-pattern-page__view-tabs {
   align-items: center;
   background: rgba(255, 255, 255, 0.92);
@@ -406,6 +501,19 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 720px) {
+  .line-pattern-page__back--desktop,
+  .line-pattern-page__back--map-desktop {
+    display: none;
+  }
+
+  .line-pattern-page__back--mobile,
+  .line-pattern-page__back--map-mobile {
+    display: inline-flex;
+    justify-content: center;
+    padding: 0;
+    width: 44px;
+  }
+
   .line-pattern-page__view-tabs--map {
     order: -1;
   }

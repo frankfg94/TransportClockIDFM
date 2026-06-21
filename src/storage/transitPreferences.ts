@@ -1,17 +1,28 @@
 ﻿import type { TransitBoardConfig, TransitBoardPreferences } from "../types/transit";
 
+import type { DirectionGroupConfig } from "../types/transit";
+
 export const TRANSIT_PREFERENCES_STORAGE_KEY =
   "transport-clock.preferences.v2";
 export const TRANSIT_PREFERENCES_CHANGED_EVENT =
   "transport-clock:preferences-changed";
+const DIRECTION_GROUP_DISCOVERY_VERSION = 1;
+
+export interface DirectionGroupMigrationResult {
+  updatedBoardIds: string[];
+  completed: boolean;
+}
 
 export function createDefaultPreferences(
   boards: TransitBoardConfig[],
 ): TransitBoardPreferences {
   return {
     visibleBoardIds: boards.map((board) => board.id),
+    boardOrderIds: boards.map((board) => board.id),
+    boardDisplayMode: "grid",
     collapsedDirectionIds: [],
     customBoards: [],
+    directionGroupDiscoveryVersion: DIRECTION_GROUP_DISCOVERY_VERSION,
   };
 }
 
@@ -29,18 +40,29 @@ export function loadTransitPreferences(
 
   try {
     const parsedValue = JSON.parse(rawValue) as Partial<TransitBoardPreferences>;
-    const knownBoardIds = new Set([
+    const customBoards = parsedValue.customBoards ?? [];
+    const knownBoardIds = [
       ...defaultBoards.map((board) => board.id),
-      ...(parsedValue.customBoards ?? []).map((board) => board.id),
-    ]);
+      ...customBoards.map((board) => board.id),
+    ];
+    const knownBoardIdSet = new Set(knownBoardIds);
     const visibleBoardIds =
-      parsedValue.visibleBoardIds?.filter((id) => knownBoardIds.has(id)) ??
+      parsedValue.visibleBoardIds?.filter((id) => knownBoardIdSet.has(id)) ??
       defaults.visibleBoardIds;
 
     return {
       visibleBoardIds,
+      boardOrderIds: normalizeBoardOrderIds(
+        parsedValue.boardOrderIds,
+        knownBoardIds,
+      ),
+      boardDisplayMode:
+        parsedValue.boardDisplayMode === "list" ? "list" : "grid",
       collapsedDirectionIds: parsedValue.collapsedDirectionIds ?? [],
-      customBoards: parsedValue.customBoards ?? [],
+      customBoards,
+      directionGroupDiscoveryVersion: readDirectionGroupDiscoveryVersion(
+        parsedValue.directionGroupDiscoveryVersion,
+      ),
     };
   } catch {
     return defaults;
@@ -57,6 +79,56 @@ export function saveTransitPreferences(
   window.dispatchEvent(new Event(TRANSIT_PREFERENCES_CHANGED_EVENT));
 }
 
+export async function migrateCustomBoardDirectionGroups(
+  preferences: TransitBoardPreferences,
+  discoverDirectionGroups: (
+    board: TransitBoardConfig,
+  ) => Promise<DirectionGroupConfig[] | undefined>,
+): Promise<DirectionGroupMigrationResult> {
+  if (
+    preferences.directionGroupDiscoveryVersion >=
+    DIRECTION_GROUP_DISCOVERY_VERSION
+  ) {
+    return { updatedBoardIds: [], completed: true };
+  }
+
+  const candidates = preferences.customBoards.filter(
+    (board) => Boolean(board.schedule) && board.directionGroups.length === 1,
+  );
+  const updatedBoardIds: string[] = [];
+  let completed = true;
+
+  for (const board of candidates) {
+    try {
+      const directionGroups = await discoverDirectionGroups(board);
+
+      if (!directionGroups) {
+        completed = false;
+        continue;
+      }
+
+      if (!haveSameDirectionGroups(board.directionGroups, directionGroups)) {
+        preferences.customBoards = preferences.customBoards.map((candidate) =>
+          candidate.id === board.id
+            ? { ...candidate, directionGroups }
+            : candidate,
+        );
+        updatedBoardIds.push(board.id);
+      }
+    } catch {
+      // Leave the migration pending so a transient API failure is retried.
+      completed = false;
+    }
+  }
+
+  if (completed) {
+    preferences.directionGroupDiscoveryVersion =
+      DIRECTION_GROUP_DISCOVERY_VERSION;
+  }
+
+  return { updatedBoardIds, completed };
+}
+
 export function addBoardToTransitPreferences(
   board: TransitBoardConfig,
   defaultBoards: TransitBoardConfig[],
@@ -69,6 +141,10 @@ export function addBoardToTransitPreferences(
   if (defaultBoard) {
     preferences.visibleBoardIds = addUniqueId(
       preferences.visibleBoardIds,
+      defaultBoard.id,
+    );
+    preferences.boardOrderIds = addUniqueId(
+      preferences.boardOrderIds,
       defaultBoard.id,
     );
     saveTransitPreferences(preferences);
@@ -91,10 +167,18 @@ export function addBoardToTransitPreferences(
       preferences.visibleBoardIds,
       existingId,
     );
+    preferences.boardOrderIds = addUniqueId(
+      preferences.boardOrderIds,
+      existingId,
+    );
   } else {
     preferences.customBoards.push(board);
     preferences.visibleBoardIds = addUniqueId(
       preferences.visibleBoardIds,
+      board.id,
+    );
+    preferences.boardOrderIds = addUniqueId(
+      preferences.boardOrderIds,
       board.id,
     );
   }
@@ -136,11 +220,45 @@ function addUniqueId(ids: string[], id: string): string[] {
   return ids.includes(id) ? ids : [...ids, id];
 }
 
+function normalizeBoardOrderIds(
+  value: unknown,
+  knownBoardIds: string[],
+): string[] {
+  const knownBoardIdSet = new Set(knownBoardIds);
+  const savedIds = Array.isArray(value)
+    ? value.filter(
+        (id): id is string =>
+          typeof id === "string" && knownBoardIdSet.has(id),
+      )
+    : [];
+
+  return [...new Set([...savedIds, ...knownBoardIds])];
+}
+
 function normalizeIdentity(value?: string): string {
   return (value ?? "")
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
     .replace(/[^a-z0-9]+/giu, "")
     .toLowerCase();
+}
+
+function readDirectionGroupDiscoveryVersion(value: unknown): number {
+  return typeof value === "number" && value >= 0 ? value : 0;
+}
+
+function haveSameDirectionGroups(
+  left: DirectionGroupConfig[],
+  right: DirectionGroupConfig[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (group, index) =>
+        group.id === right[index]?.id &&
+        group.label === right[index]?.label &&
+        JSON.stringify(group.match) === JSON.stringify(right[index]?.match),
+    )
+  );
 }
 

@@ -7,7 +7,9 @@ import {
   Map,
   MapPin,
   MoreVertical,
+  Radio,
   Route,
+  Rss,
   Trash,
 } from "lucide-vue-next";
 import LineCombobox from "./LineCombobox.vue";
@@ -44,12 +46,6 @@ interface BoardTrafficAlert {
   tone: TrafficAlertTone;
 }
 
-interface DirectionSummary {
-  label: string;
-  time?: string;
-  detail: string;
-}
-
 const props = withDefaults(
   defineProps<{
     board: TransitBoardConfig;
@@ -64,9 +60,11 @@ const props = withDefaults(
     alarmDepartureIds?: string[];
     closedSummaryMode?: ClosedSummaryMode;
     trafficAlert?: BoardTrafficAlert;
+    displayMode?: "grid" | "list";
   }>(),
   {
     closedSummaryMode: "last",
+    displayMode: "grid",
     hiddenDirectionIds: () => [],
   },
 );
@@ -254,10 +252,16 @@ function formatWait(value?: string, vehicleAtStop = false): string {
   );
 
   if (minutes === 0) {
-    return "Maintenant";
+    return "Imminent";
   }
 
-  return `${minutes} min`;
+  return `${minutes}`;
+}
+
+function formatSummaryWait(value?: string, vehicleAtStop = false): string {
+  const wait = formatWait(value, vehicleAtStop);
+
+  return wait === "Imminent" ? "0" : wait;
 }
 
 function statusLabel(status?: string): string {
@@ -268,41 +272,6 @@ function isDirectionCollapsed(directionId: string): boolean {
   return props.collapsedDirectionIds.includes(directionId);
 }
 
-function formatLastDetail(group: DirectionDepartureGroup): string {
-  if (!group.lastDeparture) {
-    return "";
-  }
-
-  const dayHint =
-    getParisDateKey(group.lastDeparture.time) === getParisDateKey(new Date())
-      ? "Aujourd'hui"
-      : "Après minuit";
-
-  return `${dayHint} · ${group.lastDeparture.destination}`;
-}
-
-function getDirectionSummary(group: DirectionDepartureGroup): DirectionSummary {
-  if (props.closedSummaryMode === "next") {
-    const nextDeparture = group.departures[0];
-    const nextTime = getDepartureTime(nextDeparture);
-
-    return {
-      label: "Prochain passage",
-      time: nextTime,
-      detail: nextDeparture
-        ? formatWait(nextTime, nextDeparture.vehicleAtStop) ||
-          formatDepartureMeta(nextDeparture)
-        : "",
-    };
-  }
-
-  return {
-    label: "Dernier passage",
-    time: group.lastDeparture?.time,
-    detail: formatLastDetail(group),
-  };
-}
-
 function getDepartureTime(departure?: Departure): string | undefined {
   return (
     departure?.expectedDepartureTime ??
@@ -311,13 +280,15 @@ function getDepartureTime(departure?: Departure): string | undefined {
   );
 }
 
-function getParisDateKey(value: string | Date): string {
-  return new Intl.DateTimeFormat("fr-CA", {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: "Europe/Paris",
-    year: "numeric",
-  }).format(new Date(value));
+function getNextDepartures(group: DirectionDepartureGroup): Departure[] {
+  return group.departures.slice(0, 2);
+}
+
+function formatNextDepartureLabel(departure: Departure): string {
+  return `${departure.destination} · ${
+    formatSummaryWait(getDepartureTime(departure), departure.vehicleAtStop) ||
+    "Horaire indisponible"
+  }`;
 }
 
 function hasAlarm(departure: Departure): boolean {
@@ -575,7 +546,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <article class="board" :style="{ '--line-color': board.line.color }">
+  <article
+    class="board"
+    :class="{ 'board--list': displayMode === 'list' }"
+    :style="{ '--line-color': board.line.color }"
+  >
     <header class="board__header">
       <LineIconBadge
         class="board-line-icon"
@@ -691,12 +666,31 @@ onUnmounted(() => {
             <h3 style="font-weight: 600">{{ group.label }}</h3>
           </div>
 
-          <div class="last-service">
-            <span>{{ getDirectionSummary(group).label }}</span>
-            <strong>{{ formatClock(getDirectionSummary(group).time) }}</strong>
-            <small v-if="getDirectionSummary(group).detail">
-              {{ getDirectionSummary(group).detail }}
-            </small>
+          <div class="last-service" aria-label="Prochains passages">
+            <div
+              v-if="getNextDepartures(group).length > 0"
+              class="last-service__times"
+            >
+              <span
+                v-for="departure in getNextDepartures(group)"
+                :key="departure.id"
+                class="last-service__time"
+                :aria-label="formatNextDepartureLabel(departure)"
+              >
+                <Rss :size="16" aria-hidden="true" />
+                <strong>
+                  {{
+                    formatSummaryWait(
+                      getDepartureTime(departure),
+                      departure.vehicleAtStop,
+                    ) || "--"
+                  }}
+                </strong>
+              </span>
+            </div>
+            <span v-else class="last-service__empty">
+              {{ group.serviceEnded ? "Terminé" : "—" }}
+            </span>
           </div>
 
           <span class="accordion-chevron" aria-hidden="true">
@@ -1043,7 +1037,6 @@ onUnmounted(() => {
 
               <span class="direction-filter-option__content">
                 <strong>{{ group.label }}</strong>
-
               </span>
             </label>
           </div>

@@ -136,8 +136,11 @@ export interface BoardDeparturesResult {
 
 export interface TransitBoardPreferences {
   visibleBoardIds: string[];
+  boardOrderIds: string[];
+  boardDisplayMode: "grid" | "list";
   collapsedDirectionIds: string[];
   customBoards: TransitBoardConfig[];
+  directionGroupDiscoveryVersion: number;
 }
 
 export interface LineSearchOption {

@@ -337,6 +337,7 @@ const familyOrder: TransitFamily[] = [
 
 const MAX_LINE_RESULTS = 1500;
 const MAX_STATION_RESULTS = 500;
+const MAX_DIRECTION_SCHEDULES = 500;
 const MAX_MAP_ROUTES = 80;
 const MAX_ROUTE_STOPS = 260;
 const MAX_PATTERN_TRANSFER_STATIONS = 64;
@@ -2401,21 +2402,31 @@ export async function fetchDirectionGroupsForStation(
     data_freshness: "base_schedule",
     from_datetime: serviceDay.fromParam,
     duration: "108000",
+    // The API defaults to 10 schedule rows. They are not ordered by
+    // direction, so a busy direction can otherwise hide the opposite one.
+    count: "100",
     items_per_schedule: "8",
   });
-  const response = await navitiaFetchWithRetry(
-    `${navitiaApiBase(options)}/lines/${encodeURIComponent(line.navitiaId)}/stop_areas/${encodeURIComponent(station.scheduleStopAreaRef)}/stop_schedules?${searchParams}`,
-    options,
-  );
 
-  if (!response.ok) {
+  let schedules: NavitiaStopSchedule[];
+
+  try {
+    schedules = await fetchPaginatedCollection<
+      NavitiaStopScheduleResponse,
+      NavitiaStopSchedule
+    >(
+      `${navitiaApiBase(options)}/lines/${encodeURIComponent(line.navitiaId)}/stop_areas/${encodeURIComponent(station.scheduleStopAreaRef)}/stop_schedules`,
+      searchParams,
+      "stop_schedules",
+      MAX_DIRECTION_SCHEDULES,
+      options,
+    );
+  } catch {
     return [createFallbackDirectionGroup(station.label)];
   }
-
-  const payload = (await response.json()) as NavitiaStopScheduleResponse;
   const groups = new Map<string, DirectionGroupConfig>();
 
-  for (const schedule of payload.stop_schedules ?? []) {
+  for (const schedule of schedules) {
     const destination = cleanNavitiaDirection(
       schedule.display_informations?.direction ??
       schedule.display_informations?.headsign ??

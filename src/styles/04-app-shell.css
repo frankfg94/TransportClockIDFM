@@ -232,6 +232,37 @@ h3 {
   width: 18px;
 }
 
+.topbar-actions__display {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 6px;
+  margin: 2px 4px 6px;
+  padding: 2px 0 8px;
+}
+
+.topbar-actions__display-button {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  height: 36px;
+  justify-content: center;
+  min-height: 36px !important;
+  padding: 0 !important;
+  width: 42px !important;
+}
+
+.topbar-actions__display-button[aria-pressed="true"] {
+  background: rgba(0, 100, 255, 0.12);
+  border-color: rgba(0, 100, 255, 0.2);
+  color: var(--idfm-blue);
+}
+
+.topbar-actions__display-button[aria-pressed="true"] svg {
+  color: currentColor;
+}
+
 .topbar-actions__spin {
   animation: topbar-spin 800ms linear infinite;
 }
