@@ -80,6 +80,32 @@ Lancer les tests :
 npm.cmd run test
 ```
 
+## Version mobile Capacitor
+
+Le front Nuxt est embarquÃ© en statique ; les routes Nitro `/api/*` restent
+sur le dÃ©ploiement Cloudflare. Copier `.env.capacitor.example` vers
+`.env.capacitor` (il est ignorÃ© par Git) et renseigner l'URL publique du
+backend :
+
+```txt
+CAPACITOR_BUILD=true
+NUXT_PUBLIC_API_BASE_URL=https://votre-deploiement.pages.dev
+```
+
+Puis gÃ©nÃ©rer et synchroniser l'application Android :
+
+```powershell
+npm.cmd run build:capacitor
+npm.cmd run capacitor:sync
+npm.cmd run capacitor:android
+```
+
+DÃ©ployer d'abord cette version du backend Nuxt : elle ajoute les en-tÃªtes
+CORS nÃ©cessaires aux appels depuis le WebView mobile.
+
+Le mÃªme front pourra ensuite recevoir la plateforme iOS sur un Mac via
+`npx cap add ios`.
+
 ## API Home Assistant
 
 L'integration Home Assistant utilise une API serveur versionnee et stateless :

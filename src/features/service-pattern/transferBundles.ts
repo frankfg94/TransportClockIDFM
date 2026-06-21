@@ -11,6 +11,7 @@ import {
   type EffectiveTransferResolverMode,
   type TransferResolverMode,
 } from "./transferResolverMode";
+import { toServerApiUrl } from "../../services/serverApi";
 
 export interface TransferBundleTarget {
   stopAreaRef: string;
@@ -656,7 +657,7 @@ function fetchTransferBundle(payload: {
     transferResolverMode: payload.transferResolverMode,
   });
 
-  const request = fetch("/api/transfer-bundles", {
+  const request = fetch(toServerApiUrl("/api/transfer-bundles"), {
     body: JSON.stringify(payload),
     headers: {
       "content-type": "application/json",
@@ -784,7 +785,7 @@ function transferBundleResponseHasRequestedTarget(
 }
 
 async function fetchTransferBundleSummaries(): Promise<TransferBundleSummary[]> {
-  const response = await fetch("/api/transfer-bundles", {
+  const response = await fetch(toServerApiUrl("/api/transfer-bundles"), {
     method: "GET",
   }).catch(() => undefined);
 
@@ -803,7 +804,7 @@ async function requestTransferBundleCacheDelete(payload?: {
   id?: string;
   lineId?: string;
 }): Promise<void> {
-  await fetch("/api/transfer-bundles", {
+  await fetch(toServerApiUrl("/api/transfer-bundles"), {
     body: payload ? JSON.stringify(payload) : undefined,
     headers: payload ? { "content-type": "application/json" } : undefined,
     method: "DELETE",

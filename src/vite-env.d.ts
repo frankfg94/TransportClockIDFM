@@ -2,6 +2,7 @@
 /// <reference types="nuxt" />
 
 declare const __IDFM_API_KEY_CONFIGURED__: boolean;
+declare const __SERVER_API_BASE_URL__: string;
 
 declare module "#imports" {
   import type { Ref } from "vue";

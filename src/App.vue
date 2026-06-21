@@ -17,6 +17,7 @@ import {
   normalizeTrafficLineRef,
 } from "./features/traffic";
 import { fetchBoardDepartures } from "./services/idfm";
+import { toServerApiUrl } from "./services/serverApi";
 import {
   TRANSIT_PREFERENCES_CHANGED_EVENT,
   TRANSIT_PREFERENCES_STORAGE_KEY,
@@ -403,7 +404,7 @@ async function refreshTrafficSummary(): Promise<void> {
     const params = new URLSearchParams({
       lineRefs: lineRefs.join(","),
     });
-    const response = await fetch(`/api/traffic?${params}`);
+    const response = await fetch(toServerApiUrl(`/api/traffic?${params}`));
 
     if (!response.ok) {
       throw new Error("Impossible de charger l'info trafic.");
@@ -489,7 +490,7 @@ async function runWithConcurrency<T>(
 
 async function loadNetexCacheStatus(): Promise<void> {
   try {
-    const response = await fetch("/api/netex/status");
+    const response = await fetch(toServerApiUrl("/api/netex/status"));
 
     if (!response.ok) {
       throw new Error("Impossible de vérifier le cache NeTEx.");
@@ -785,9 +786,11 @@ async function fetchLinePatternView(
 
   const suffix = params.toString() ? `?${params.toString()}` : "";
   const response = await fetch(
-    `/api/lines/${encodeURIComponent(transportType)}/${encodeURIComponent(
-      lineId,
-    )}/pattern${suffix}`,
+    toServerApiUrl(
+      `/api/lines/${encodeURIComponent(transportType)}/${encodeURIComponent(
+        lineId,
+      )}/pattern${suffix}`,
+    ),
   );
 
   if (!response.ok) {
@@ -1187,50 +1190,56 @@ onBeforeUnmount(() => {
             <span>{{ formatClock(lastRefresh) }}</span>
             <small>dernière mise à jour</small>
           </div>
-          <button
-            class="button-secondary"
-            type="button"
-            @click="stationModalOpen = true"
-          >
-            <Plus />
-            Ajouter
-          </button>
-          <div class="topbar-actions" @keydown.esc="closeTopbarMenu">
+          <div class="topbar-inline-buttons">
             <button
-              class="topbar-actions__trigger icon-button"
+              class="button-secondary"
               type="button"
-              aria-label="Ouvrir les actions du dashboard"
-              :aria-expanded="topbarMenuOpen"
-              aria-haspopup="menu"
-              @click="toggleTopbarMenu"
+              @click="stationModalOpen = true"
             >
-              <MoreVertical aria-hidden="true" />
+              <Plus />
+              Ajouter
             </button>
-            <div v-if="topbarMenuOpen" class="topbar-actions__menu" role="menu">
+            <div class="topbar-actions" @keydown.esc="closeTopbarMenu">
               <button
+                class="topbar-actions__trigger icon-button"
                 type="button"
-                role="menuitem"
-                :disabled="refreshing"
-                @click="refreshFromTopbarMenu"
+                aria-label="Ouvrir les actions du dashboard"
+                :aria-expanded="topbarMenuOpen"
+                aria-haspopup="menu"
+                @click="toggleTopbarMenu"
               >
-                <RefreshCw
-                  aria-hidden="true"
-                  :class="{ 'topbar-actions__spin': refreshing }"
-                />
-                {{ refreshing ? "Actualisation..." : "Actualiser" }}
+                <MoreVertical aria-hidden="true" />
               </button>
-              <button type="button" role="menuitem" @click="openWeatherModal">
-                <CloudSun aria-hidden="true" />
-                Météo
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                @click="openBoardDisplayModal"
+              <div
+                v-if="topbarMenuOpen"
+                class="topbar-actions__menu"
+                role="menu"
               >
-                <SlidersHorizontal aria-hidden="true" />
-                Gérer l'affichage
-              </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  :disabled="refreshing"
+                  @click="refreshFromTopbarMenu"
+                >
+                  <RefreshCw
+                    aria-hidden="true"
+                    :class="{ 'topbar-actions__spin': refreshing }"
+                  />
+                  {{ refreshing ? "Actualisation..." : "Actualiser" }}
+                </button>
+                <button type="button" role="menuitem" @click="openWeatherModal">
+                  <CloudSun aria-hidden="true" />
+                  Météo
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  @click="openBoardDisplayModal"
+                >
+                  <SlidersHorizontal aria-hidden="true" />
+                  Gérer l'affichage
+                </button>
+              </div>
             </div>
           </div>
         </div>

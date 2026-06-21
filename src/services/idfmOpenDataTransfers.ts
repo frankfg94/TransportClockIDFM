@@ -7,6 +7,7 @@ import {
   createTransferLineOption,
   dedupeTransferLineOptions,
 } from "./transferLineOptions";
+import { toServerApiUrl } from "./serverApi";
 
 interface ArretsLignesRecord {
   id?: string;
@@ -170,7 +171,7 @@ export function resolveArretsLignesRecordsUrl(apiBase?: string): string {
   }
 
   return isBrowserRuntime()
-    ? ARRETS_LIGNES_PROXY_RECORDS_URL
+    ? toServerApiUrl(ARRETS_LIGNES_PROXY_RECORDS_URL)
     : ARRETS_LIGNES_RECORDS_URL;
 }
 

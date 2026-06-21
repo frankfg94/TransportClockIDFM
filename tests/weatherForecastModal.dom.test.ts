@@ -8,6 +8,7 @@ const baseSettings: AppSettings = {
   closedDirectionSummaryMode: "last",
   maxDeparturesPerDirection: "default",
   showPatternMiniMap: true,
+  showPatternCityZones: true,
   terminalDirectionsOnly: false,
   hiddenDirectionIdsByBoardId: {},
   wakeLockDuration: "none",
@@ -28,6 +29,7 @@ const baseSettings: AppSettings = {
   transferBundleRequestSpacingMs: 0,
   weatherMode: "animated",
   weatherLookaheadMinutes: 1440,
+  weatherShowApparentTemperature: true,
   weatherLocationPreset: "paris",
   weatherCustomLocation: {
     label: "Paris",

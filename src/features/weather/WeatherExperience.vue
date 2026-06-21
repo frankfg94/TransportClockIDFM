@@ -312,8 +312,26 @@ function formatEnd(value: WeatherAlert): string {
 }
 
 function formatTemperature(value: WeatherAlert): string {
-  const temperature = value.apparentTemperatureC ?? value.temperatureC;
-  return typeof temperature === "number" ? `${Math.round(temperature)} °C` : "";
+  const temperature = value.temperatureC;
+  const apparentTemperature = value.apparentTemperatureC;
+
+  if (typeof temperature !== "number") {
+    return typeof apparentTemperature === "number"
+      ? formatDegrees(apparentTemperature)
+      : "";
+  }
+
+  const formattedTemperature = formatDegrees(temperature);
+
+  return settings.value.weatherShowApparentTemperature &&
+    typeof apparentTemperature === "number" &&
+    Math.round(apparentTemperature) !== Math.round(temperature)
+    ? `${formattedTemperature} \u00B7 ressenti ${formatDegrees(apparentTemperature)}`
+    : formattedTemperature;
+}
+
+function formatDegrees(value: number): string {
+  return `${Math.round(value)} \u00B0C`;
 }
 
 function formatTime(value: string): string {

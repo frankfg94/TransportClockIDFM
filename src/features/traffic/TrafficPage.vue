@@ -17,6 +17,7 @@ import {
   createLinePresentation,
   transitFamilyToMode,
 } from "../../services/linePresentation";
+import { toServerApiUrl } from "../../services/serverApi";
 import {
   getCurrentTrafficDisruptions,
   getUpcomingTrafficDisruptions,
@@ -133,7 +134,7 @@ async function loadTraffic(): Promise<void> {
         .map((line) => line.navitiaLineRef)
         .join(","),
     });
-    const response = await fetch(`/api/traffic?${params}`);
+    const response = await fetch(toServerApiUrl(`/api/traffic?${params}`));
 
     if (!response.ok) {
       throw new Error(`${response.status} ${response.statusText}`);

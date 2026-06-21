@@ -33,6 +33,7 @@ import {
   formatTransitDistance,
   getCoordinatesDistanceKm,
 } from "../../services/distance";
+import { toServerApiUrl } from "../../services/serverApi";
 import {
   createPatternStationKey as createStationKey,
   patternStationKeysAreCompatible as stationKeysAreCompatible,
@@ -809,7 +810,7 @@ async function checkTransferHydrationRateLimit(
   }
 
   try {
-    const response = await fetch("/api/health");
+    const response = await fetch(toServerApiUrl("/api/health"));
 
     if (!response.ok) {
       return;

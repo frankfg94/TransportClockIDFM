@@ -37,7 +37,7 @@ describe("AppNavigation", () => {
     });
 
     const { default: AppNavigation } = await import(
-      "../src/features/app-settings/AppNavigation.vue"
+      "../src/features/app-settings/AppNavigationMenu.vue"
     );
     const wrapper = mount(AppNavigation, {
       global: {

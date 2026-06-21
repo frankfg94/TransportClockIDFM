@@ -8,6 +8,7 @@ const baseSettings: AppSettings = {
   closedDirectionSummaryMode: "last",
   maxDeparturesPerDirection: "default",
   showPatternMiniMap: true,
+  showPatternCityZones: true,
   terminalDirectionsOnly: false,
   hiddenDirectionIdsByBoardId: {},
   wakeLockDuration: "none",
@@ -28,6 +29,7 @@ const baseSettings: AppSettings = {
   transferBundleRequestSpacingMs: 0,
   weatherMode: "animated",
   weatherLookaheadMinutes: 1440,
+  weatherShowApparentTemperature: true,
   weatherLocationPreset: "paris",
   weatherCustomLocation: {
     label: "Paris",
@@ -59,6 +61,28 @@ const rainResponse: WeatherResponse = {
     intensity: 2,
     temperatureC: 8,
     apparentTemperatureC: 5,
+  },
+};
+
+const heatResponse: WeatherResponse = {
+  generatedAt: "2026-06-21T10:00:00.000Z",
+  source: "open-meteo",
+  location: baseSettings.weatherCustomLocation,
+  condition: {
+    kind: "heat",
+    label: "Canicule",
+    intensity: 2,
+    temperatureC: 37,
+    apparentTemperatureC: 39,
+  },
+  alert: {
+    kind: "heat",
+    label: "Canicule",
+    startsAt: "2026-06-21T10:00:00.000Z",
+    startsInMinutes: 0,
+    intensity: 2,
+    temperatureC: 37,
+    apparentTemperatureC: 39,
   },
 };
 
@@ -163,5 +187,38 @@ describe("WeatherExperience", () => {
     expect(wrapper.get(".weather-backdrop").classes()).toContain(
       "weather-backdrop--storm",
     );
+  });
+
+  it("shows the measured maximum and apparent temperature for heat alerts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => heatResponse,
+      })),
+    );
+
+    const wrapper = await mountWeatherExperience({});
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("37 \u00B0C \u00B7 ressenti 39 \u00B0C");
+  });
+
+  it("can hide the apparent temperature in heat alerts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => heatResponse,
+      })),
+    );
+
+    const wrapper = await mountWeatherExperience({
+      weatherShowApparentTemperature: false,
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("37 \u00B0C");
+    expect(wrapper.text()).not.toContain("ressenti");
   });
 });

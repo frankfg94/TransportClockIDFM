@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .nuxt/
+.nuxt-capacitor/
+.output/
 .wrangler/
 *.tsbuildinfo
 transport-clock*.png
@@ -8,3 +10,4 @@ transport-clock-screenshot*.png
 .env
 .env.*
 !.env.example
+!.env.capacitor.example

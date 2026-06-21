@@ -79,6 +79,7 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Toute la journée");
     expect(wrapper.text()).toContain("Lieu météo");
     expect(wrapper.text()).toContain("Paris");
+    expect(wrapper.text()).toContain("Afficher le ressenti");
     expect(wrapper.text()).toContain("Afficher la minimap");
     expect(wrapper.text()).toContain(
       "Limiter les lignes fantômes aux modes structurants",
@@ -94,6 +95,23 @@ describe("SettingsPage", () => {
       "Le chargement des correspondances sera très lent",
     );
     await backendCacheToggle?.find("input").setValue(false);
+
+    const apparentTemperatureToggle = wrapper
+      .findAll("label.settings-toggle")
+      .find((label) => label.text().includes("Afficher le ressenti"));
+
+    if (!apparentTemperatureToggle) {
+      throw new Error("Missing apparent temperature setting");
+    }
+
+    const apparentTemperatureInput = apparentTemperatureToggle.find("input");
+    expect(
+      (apparentTemperatureInput.element as HTMLInputElement).checked,
+    ).toBe(true);
+    await apparentTemperatureInput.setValue(false);
+    expect(
+      (apparentTemperatureInput.element as HTMLInputElement).checked,
+    ).toBe(false);
     expect(backendCacheToggle?.text()).toContain(
       "Le chargement des correspondances sera très lent tant que le cache backend est désactivé.",
     );

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { toServerApiUrl } from "../../services/serverApi";
 import type { HealthCheck, HealthResponse, HealthStatus } from "./types";
 
 const checks = ref<HealthCheck[]>([]);
@@ -32,7 +33,7 @@ async function loadHealth(): Promise<void> {
   errorMessage.value = "";
 
   try {
-    const response = await fetch("/api/health");
+    const response = await fetch(toServerApiUrl("/api/health"));
 
     if (!response.ok) {
       throw new Error(`${response.status} ${response.statusText}`);

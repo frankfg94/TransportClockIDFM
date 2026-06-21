@@ -73,6 +73,7 @@ export interface AppSettings {
   transferBundleRequestSpacingMs: TransferBundleRequestSpacingMs;
   weatherMode: WeatherMode;
   weatherLookaheadMinutes: WeatherLookaheadMinutes;
+  weatherShowApparentTemperature: boolean;
   weatherLocationPreset: WeatherLocationPreset;
   weatherCustomLocation: WeatherSettingsLocation;
   weatherTestMode: WeatherTestMode;
@@ -229,6 +230,7 @@ export function createDefaultAppSettings(): AppSettings {
     transferBundleRequestSpacingMs: 0,
     weatherMode: "animated",
     weatherLookaheadMinutes: 1440,
+    weatherShowApparentTemperature: true,
     weatherLocationPreset: "paris",
     weatherCustomLocation: {
       label: "Paris",
@@ -331,6 +333,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       : defaults.weatherMode,
     weatherLookaheadMinutes: parseWeatherLookaheadMinutes(
       value.weatherLookaheadMinutes,
+    ),
+    weatherShowApparentTemperature: readBoolean(
+      value.weatherShowApparentTemperature,
+      defaults.weatherShowApparentTemperature,
     ),
     weatherLocationPreset: isWeatherLocationPreset(value.weatherLocationPreset)
       ? value.weatherLocationPreset

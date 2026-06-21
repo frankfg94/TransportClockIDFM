@@ -588,6 +588,27 @@ onBeforeUnmount(() => {
         />
       </div>
 
+      <label class="settings-toggle">
+        <input
+          type="checkbox"
+          :checked="settings.weatherShowApparentTemperature"
+          @change="
+            updateSettings({
+              weatherShowApparentTemperature: (
+                $event.target as HTMLInputElement
+              ).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>Afficher le ressenti</strong>
+          <small>
+            Ajoute la temp&eacute;rature ressentie apr&egrave;s la temp&eacute;rature du jour.
+          </small>
+        </div>
+      </label>
+
       <div class="settings-row">
         <div>
           <strong>Lieu météo</strong>

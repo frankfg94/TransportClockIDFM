@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-vue-next";
 import { useAppSettings } from "../app-settings";
+import { toServerApiUrl } from "../../services/serverApi";
 import { resolveWeatherLocation } from "./weatherLocations";
 import type {
   WeatherForecastDay,
@@ -191,7 +192,7 @@ async function loadWeather(): Promise<void> {
       locationLabel: location.value.label,
       lookaheadMinutes: String(settings.value.weatherLookaheadMinutes),
     });
-    const response = await fetch(`/api/weather?${params}`);
+    const response = await fetch(toServerApiUrl(`/api/weather?${params}`));
 
     if (!response.ok) {
       throw new Error(`${response.status} ${response.statusText}`);

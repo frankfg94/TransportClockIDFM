@@ -1,4 +1,5 @@
 ﻿import { strFromU8, unzipSync } from "fflate";
+import { toServerApiUrl } from "./serverApi";
 import type {
   LineRouteSequence,
   LineRouteStop,
@@ -110,8 +111,9 @@ async function getGtfsIndex(): Promise<GtfsIndex> {
 }
 
 async function loadGtfsIndex(): Promise<GtfsIndex> {
-  const gtfsUrl =
-    import.meta.env.VITE_IDFM_GTFS_ZIP_URL ?? DEFAULT_GTFS_ZIP_URL;
+  const gtfsUrl = toServerApiUrl(
+    import.meta.env.VITE_IDFM_GTFS_ZIP_URL ?? DEFAULT_GTFS_ZIP_URL,
+  );
   const response = await fetch(gtfsUrl);
 
   if (!response.ok) {

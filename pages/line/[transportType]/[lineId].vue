@@ -130,6 +130,7 @@ import {
   createLinePresentation,
   transitModeToFamily,
 } from "../../../src/services/linePresentation";
+import { toServerApiUrl } from "../../../src/services/serverApi";
 import type {
   LinePatternViewResponse,
   LineSearchOption,
@@ -156,9 +157,11 @@ const apiUrl = computed(() => {
 
   const suffix = params.toString() ? `?${params.toString()}` : "";
 
-  return `/api/lines/${encodeURIComponent(route.params.transportType as string)}/${encodeURIComponent(
-    route.params.lineId as string,
-  )}/pattern${suffix}`;
+  return toServerApiUrl(
+    `/api/lines/${encodeURIComponent(route.params.transportType as string)}/${encodeURIComponent(
+      route.params.lineId as string,
+    )}/pattern${suffix}`,
+  );
 });
 const {
   data: patternView,

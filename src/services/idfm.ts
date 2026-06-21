@@ -18,6 +18,7 @@
   TransitBoardConfig,
 } from "../types/transit";
 import { createLinePresentation } from "./linePresentation";
+import { toServerApiUrl } from "./serverApi";
 import {
   createTransferLineOption,
   dedupeTransferLineOptions,
@@ -284,8 +285,8 @@ export interface NavitiaRequestOptions {
   transferScope?: "connected" | "direct";
 }
 
-const API_BASE = "/api/idfm";
-const NAVITIA_API_BASE = "/api/idfm/v2/navitia";
+const API_BASE = toServerApiUrl("/api/idfm");
+const NAVITIA_API_BASE = toServerApiUrl("/api/idfm/v2/navitia");
 const MINUTES_PER_HOUR = 60;
 const SECONDS_PER_MINUTE = 60;
 const MILLISECONDS_PER_SECOND = 1_000;
@@ -1505,7 +1506,7 @@ async function fetchServerLineTopology(
   lineId: string,
 ): Promise<LineRouteSequence[]> {
   const response = await fetch(
-    `/api/lines/${encodeURIComponent(lineId)}/topology`,
+    toServerApiUrl(`/api/lines/${encodeURIComponent(lineId)}/topology`),
   );
 
   if (!response.ok) {

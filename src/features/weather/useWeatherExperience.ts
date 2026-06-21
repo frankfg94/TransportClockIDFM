@@ -1,6 +1,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useAppSettings, type WeatherTestMode } from "../app-settings";
 import { resolveWeatherLocation } from "./weatherLocations";
+import { toServerApiUrl } from "../../services/serverApi";
 import type {
   WeatherAlert,
   WeatherCondition,
@@ -80,7 +81,7 @@ export function useWeatherExperience() {
         locationLabel: location.value.label,
         lookaheadMinutes: String(settings.value.weatherLookaheadMinutes),
       });
-      const response = await fetch(`/api/weather?${params}`);
+      const response = await fetch(toServerApiUrl(`/api/weather?${params}`));
 
       if (!response.ok) {
         throw new Error(`${response.status} ${response.statusText}`);

@@ -7,10 +7,17 @@
     "dev": "nuxt dev --dotenv .env.local",
     "tsc": "nuxt typecheck",
     "build": "nuxt build",
+    "build:capacitor": "nuxt generate --dotenv .env.capacitor",
+    "dev:capacitor": "nuxt dev --dotenv .env.capacitor --host 0.0.0.0 --port 5173",
+    "capacitor:sync": "npx cap sync",
+    "capacitor:sync:android:live": "set \"CAPACITOR_LIVE_RELOAD=true\" && npx cap sync android",
+    "capacitor:android": "npx cap open android",
+    "capacitor:ios": "npx cap open ios",
     "preview": "nuxt preview --host 127.0.0.1",
     "test": "vitest run"
   },
   "dependencies": {
+    "@capacitor/core": "^6.2.1",
     "@dagrejs/dagre": "^3.0.0",
     "@tsparticles/slim": "^4.0.5",
     "@tsparticles/vue3": "^4.0.5",
@@ -23,6 +30,9 @@
     "vue": "^3.5.13"
   },
   "devDependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/cli": "^6.2.1",
+    "@capacitor/ios": "^6.2.1",
     "@nuxt/test-utils": "3.20.1",
     "@types/node": "^25.8.0",
     "@vitejs/plugin-vue": "^6.0.7",

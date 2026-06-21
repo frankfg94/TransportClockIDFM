@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {
-  AppNavigation,
+  AppNavigationMenu,
   AppSettingsRuntime,
 } from "../src/features/app-settings";
 </script>
@@ -8,5 +8,5 @@ import {
 <template>
   <AppSettingsRuntime />
   <slot />
-  <AppNavigation />
+  <AppNavigationMenu />
 </template>

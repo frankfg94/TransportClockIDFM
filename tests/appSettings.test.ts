@@ -37,6 +37,7 @@ describe("app settings", () => {
       transferBundleRequestSpacingMs: 0,
       weatherMode: "animated",
       weatherLookaheadMinutes: 1440,
+      weatherShowApparentTemperature: true,
       weatherLocationPreset: "paris",
       weatherCustomLocation: {
         label: "Paris",
@@ -96,6 +97,7 @@ describe("app settings", () => {
     expect(settings.transferBundleRequestSpacingMs).toBe(0);
     expect(settings.weatherMode).toBe("animated");
     expect(settings.weatherLookaheadMinutes).toBe(1440);
+    expect(settings.weatherShowApparentTemperature).toBe(true);
     expect(settings.weatherLocationPreset).toBe("paris");
     expect(settings.weatherTestMode).toBe("off");
     expect(settings.weatherCustomLocation).toEqual({

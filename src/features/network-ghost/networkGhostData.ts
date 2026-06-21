@@ -1,6 +1,7 @@
 import { isBusLikeTransfer } from "../service-pattern/transferVisibility";
 import type { TransferLineOption } from "../../types/transit";
 import { createLinePresentation } from "../../services/linePresentation";
+import { toServerApiUrl } from "../../services/serverApi";
 import {
   projectTransitCoordinate,
   resolveTransitLonLat,
@@ -134,7 +135,9 @@ export function loadNetworkGhostTopology(
     return cached;
   }
 
-  const request = fetch(`/api/lines/${encodeURIComponent(lineId)}/topology`)
+  const request = fetch(
+    toServerApiUrl(`/api/lines/${encodeURIComponent(lineId)}/topology`),
+  )
     .then(async (response) => {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
