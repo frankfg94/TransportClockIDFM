@@ -75,6 +75,7 @@ describe("Android mobile release runtime", () => {
       available: true,
       versionCode: 42,
       minSdk: 24,
+      selection: "matching-source",
       downloadUrl: expect.stringContaining(`revision=${revision}`),
     });
     expect(getAndroidDownloadHeaders(manifest(), 1_024)).toEqual({
@@ -83,6 +84,34 @@ describe("Android mobile release runtime", () => {
       "Content-Length": 1_024,
       "Content-Disposition": 'attachment; filename="transport-clock-idfm.apk"',
       "X-Content-Type-Options": "nosniff",
+    });
+  });
+
+  it("falls back to the latest valid release when the page commit has no APK", async () => {
+    const current = manifest();
+    const bucket: R2BucketLike = {
+      async get(key) {
+        if (key.endsWith("manifest.json")) {
+          return {
+            body: new ReadableStream(),
+            size: 1_024,
+            text: async () => JSON.stringify(current),
+          };
+        }
+        return null;
+      },
+      async list() {
+        return { objects: [{ key: `mobile-releases/android/${revision}/manifest.json` }] };
+      },
+    };
+    const event = {
+      context: { cloudflare: { env: { MOBILE_RELEASES_BUCKET: bucket } } },
+    } as never;
+
+    await expect(getAndroidReleaseStatus(event, otherRevision)).resolves.toMatchObject({
+      available: true,
+      selection: "latest",
+      sourceRevision: revision,
     });
   });
 });

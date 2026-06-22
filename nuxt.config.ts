@@ -2,6 +2,8 @@ import { defineNuxtConfig } from "nuxt/config";
 
 const isCapacitorBuild = process.env.CAPACITOR_BUILD === "true";
 const serverApiBaseUrl = process.env.NUXT_PUBLIC_API_BASE_URL ?? "";
+const mobileReleasePublicBaseUrl =
+  process.env.NUXT_PUBLIC_MOBILE_RELEASE_BASE_URL ?? "";
 const appSourceRevision =
   process.env.CF_PAGES_COMMIT_SHA ??
   process.env.NUXT_PUBLIC_APP_SOURCE_REVISION ??
@@ -79,6 +81,7 @@ export default defineNuxtConfig({
     define: {
       __IDFM_API_KEY_CONFIGURED__: JSON.stringify(idfmApiKeyConfigured),
       __SERVER_API_BASE_URL__: JSON.stringify(serverApiBaseUrl),
+      __MOBILE_RELEASE_PUBLIC_BASE_URL__: JSON.stringify(mobileReleasePublicBaseUrl),
       __APP_SOURCE_REVISION__: JSON.stringify(appSourceRevision),
     },
   },

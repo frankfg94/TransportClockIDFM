@@ -2,7 +2,8 @@ export type AndroidReleaseUnavailableReason =
   | "not-configured"
   | "not-found"
   | "source-revision-mismatch"
-  | "invalid-release";
+  | "invalid-release"
+  | "request-failed";
 
 export interface AndroidReleaseAvailable {
   available: true;
@@ -13,6 +14,7 @@ export interface AndroidReleaseAvailable {
   sizeBytes: number;
   sha256: string;
   minSdk: number;
+  selection: "latest" | "matching-source";
   downloadUrl: string;
 }
 

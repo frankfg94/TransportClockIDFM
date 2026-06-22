@@ -3,6 +3,7 @@
 
 declare const __IDFM_API_KEY_CONFIGURED__: boolean;
 declare const __SERVER_API_BASE_URL__: string;
+declare const __MOBILE_RELEASE_PUBLIC_BASE_URL__: string;
 declare const __APP_SOURCE_REVISION__: string;
 
 declare module "#imports" {

@@ -57,6 +57,13 @@ async function main(): Promise<void> {
     ContentType: "application/json; charset=utf-8",
     CacheControl: "no-store",
   }));
+  await client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: `${MOBILE_RELEASES_PREFIX}/latest.json`,
+    Body: JSON.stringify(manifest, null, 2),
+    ContentType: "application/json; charset=utf-8",
+    CacheControl: "no-store",
+  }));
 
   await pruneOldReleases(client, bucket);
   console.log(`APK publiée dans R2 : ${manifest.objectKey}`);

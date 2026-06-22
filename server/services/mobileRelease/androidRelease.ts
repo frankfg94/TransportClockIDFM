@@ -17,6 +17,9 @@ interface R2ObjectBodyLike {
 
 export interface R2BucketLike {
   get(key: string): Promise<R2ObjectBodyLike | null>;
+  list?(options: { prefix: string }): Promise<{
+    objects: Array<{ key: string; uploaded?: Date }>;
+  }>;
 }
 
 interface MobileReleaseCloudflareEnv {
@@ -87,14 +90,53 @@ export async function findAndroidRelease(
   return { available: true, manifest };
 }
 
+export async function findLatestAndroidRelease(
+  bucket: R2BucketLike | undefined,
+): Promise<AndroidReleaseLookup> {
+  if (!bucket) return { available: false, reason: "not-configured" };
+  if (!bucket.list) return { available: false, reason: "not-found" };
+
+  const objects = await bucket.list({ prefix: `${MOBILE_RELEASES_PREFIX}/` });
+  const manifestKeys = objects.objects
+    .map((object) => object.key)
+    .filter((key) => /^mobile-releases\/android\/([a-f0-9]{40})\/manifest\.json$/iu.test(key));
+  const releases = await Promise.all(
+    manifestKeys.map(async (key) => {
+      const revision = key.match(/([a-f0-9]{40})\/manifest\.json$/iu)?.[1]?.toLowerCase();
+      if (!revision) return undefined;
+      const object = await bucket.get(key);
+      if (!object) return undefined;
+      try {
+        return parseAndroidReleaseManifest(JSON.parse(await object.text()), revision);
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+  const validReleases = releases.filter(
+    (release): release is AndroidReleaseManifest => Boolean(release),
+  );
+  if (!validReleases.length) {
+    return { available: false, reason: manifestKeys.length ? "invalid-release" : "not-found" };
+  }
+
+  validReleases.sort((left, right) =>
+    Date.parse(right.builtAt) - Date.parse(left.builtAt) || right.versionCode - left.versionCode,
+  );
+  return { available: true, manifest: validReleases[0] };
+}
+
 export async function getAndroidReleaseStatus(
   event: H3Event,
   requestedRevision: string,
 ): Promise<AndroidReleaseStatus> {
-  const result = await findAndroidRelease(
-    getMobileReleasesBucket(event),
-    requestedRevision,
-  );
+  const bucket = getMobileReleasesBucket(event);
+  const exactMatch = isSourceRevision(requestedRevision)
+    ? await findAndroidRelease(bucket, requestedRevision)
+    : undefined;
+  const result = exactMatch?.available
+    ? exactMatch
+    : await findLatestAndroidRelease(bucket);
   if (!result.available) return result;
 
   const { manifest } = result;
@@ -107,6 +149,7 @@ export async function getAndroidReleaseStatus(
     sizeBytes: manifest.sizeBytes,
     sha256: manifest.sha256,
     minSdk: manifest.minSdk,
+    selection: exactMatch?.available ? "matching-source" : "latest",
     downloadUrl: `/api/mobile/android/release/download?revision=${encodeURIComponent(manifest.sourceRevision)}`,
   } satisfies AndroidReleaseAvailable;
 }

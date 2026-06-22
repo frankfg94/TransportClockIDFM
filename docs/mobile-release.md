@@ -1,21 +1,33 @@
 # Distribution APK Android
 
 Cette feature est isolée dans `src/features/mobile-release`, `server/services/mobileRelease` et `scripts/mobile-release`.
-Elle ne propose une APK que lorsque le manifest R2 est associé au SHA Git injecté par Cloudflare Pages (`CF_PAGES_COMMIT_SHA`). Entre le déploiement web et le build Android du même commit, la carte Paramètres reste volontairement désactivée.
+Par défaut, elle propose la dernière APK Android valide publiée. Elle ne dépend donc ni de `CF_PAGES_COMMIT_SHA`, ni d’un déploiement Pages effectué au même moment que le build Android.
+
+Si `CF_PAGES_COMMIT_SHA` est disponible, l’application préfère l’APK du même commit. C’est une vérification supplémentaire optionnelle : si elle ne trouve pas cette APK, la dernière release valide reste téléchargeable.
 
 ## Stockage R2 et Cloudflare Pages
 
-1. Créez un bucket R2 privé, par exemple `transport-clock-mobile-releases`. Ne le rendez pas public.
-2. Dans **Cloudflare Pages > Settings > Bindings**, ajoutez le bucket avec le nom `MOBILE_RELEASES_BUCKET`. Le binding ne sert qu'en lecture depuis les routes Nitro.
-3. Déployez l'application. Les routes suivantes seront alors disponibles :
-   - `GET /api/mobile/android/release?revision=<sha>` retourne l'état et les métadonnées ;
+1. Créez un bucket R2, par exemple `transport-clock-mobile-releases`.
+2. Le mode privé recommandé utilise un binding Pages **optionnel** nommé `MOBILE_RELEASES_BUCKET`, en lecture seule depuis les routes Nitro.
+3. Déployez l'application. En mode privé, les routes suivantes seront disponibles :
+   - `GET /api/mobile/android/release` retourne la dernière release valide ; `?revision=<sha>` préfère la release de ce commit lorsqu’elle existe ;
    - `GET /api/mobile/android/release/download?revision=<sha>` télécharge l'APK validée avec `Content-Disposition`.
 
-Les objets sont écrits sous `mobile-releases/android/<commit-sha>/`. Le serveur vérifie le schéma du manifest, la taille, les SHA-256 et le chemin attendu avant de proposer le téléchargement. Le binding Pages ne contient aucun identifiant R2 d'écriture.
+Les objets sont écrits sous `mobile-releases/android/<commit-sha>/`, avec un manifest `mobile-releases/android/latest.json` mis à jour à chaque publication. Le serveur vérifie le schéma du manifest, la taille, les SHA-256 et le chemin attendu avant de proposer le téléchargement. Le binding Pages ne contient aucun identifiant R2 d'écriture.
+
+### Accès public sans serveur Pages (optionnel)
+
+Pour ne pas dépendre du serveur Pages, associez un domaine public au bucket R2 puis définissez, au build Nuxt/Capacitor :
+
+```env
+NUXT_PUBLIC_MOBILE_RELEASE_BASE_URL=https://downloads.example.com
+```
+
+L’application lira alors directement `https://downloads.example.com/mobile-releases/android/latest.json` et téléchargera l’APK depuis ce même domaine. En l’absence de cette variable, elle utilise automatiquement l’API Pages et son binding R2 privé.
 
 ## Configuration GitHub Actions
 
-Le workflow `.github/workflows/mobile-release.yml` tourne à chaque push sur `main` et peut aussi être lancé manuellement. Il construit l'APK à partir du checkout, donc de la même révision que celle injectée à la compilation Nuxt.
+Le workflow `.github/workflows/mobile-release.yml` tourne à chaque push sur `main` et peut aussi être lancé manuellement. Il construit et publie une release versionnée par le commit du checkout, sans attendre le déploiement Pages correspondant.
 
 Ajoutez les secrets GitHub suivants :
 
@@ -26,6 +38,7 @@ Ajoutez les secrets GitHub suivants :
 Ajoutez les variables GitHub non secrètes suivantes :
 
 - `NUXT_PUBLIC_API_BASE_URL` : URL HTTPS de l'API Nuxt déployée ;
+- `NUXT_PUBLIC_MOBILE_RELEASE_BASE_URL` : domaine public R2, uniquement pour le mode sans serveur Pages ;
 - `MOBILE_RELEASE_R2_ENDPOINT` : `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` ;
 - `MOBILE_RELEASE_R2_BUCKET` : nom du bucket privé.
 
@@ -40,7 +53,7 @@ npm run apk:build
 npm run apk:publish
 ```
 
-Les scripts chargent automatiquement `.env.mobile-release`, sans écraser une variable explicitement fournie dans le terminal ou dans GitHub Actions. `apk:build` génère `dist/mobile-release/manifest.json` et l'APK signée. `apk:publish` relit et revalide l'APK avant tout upload. Les deux commandes refusent une arborescence Git modifiée, un SHA de commit incohérent, une empreinte de certificat différente ou une APK au-dessus de 25 Mio. Pour l'exception de taille seulement :
+Les scripts chargent automatiquement `.env.mobile-release`, sans écraser une variable explicitement fournie dans le terminal ou dans GitHub Actions. `apk:build` génère `dist/mobile-release/manifest.json` et l'APK signée. `apk:publish` relit et revalide l'APK avant tout upload. Les deux commandes refusent une arborescence Git modifiée, un SHA de commit incohérent ou une APK au-dessus de 25 Mio. Pour l'exception de taille seulement :
 
 ```powershell
 npm run apk:build -- --approve-oversize
