@@ -15,7 +15,8 @@
     "capacitor:ios": "npx cap open ios",
     "apk:build": "tsx scripts/mobile-release/build.ts",
     "apk:publish": "tsx scripts/mobile-release/publish.ts",
-    "preview": "nuxt preview --host 127.0.0.1",
+    "preview": "wrangler pages dev dist --ip 127.0.0.1 --port 3000",
+    "unlighthouse": "unlighthouse --site http://localhost:3000  --urls /,/traffic,/settings,/health,/line/metro/1 --enable-javascript --output-path .unlighthouse",
     "test": "vitest run"
   },
   "dependencies": {
@@ -44,8 +45,10 @@
     "happy-dom": "^20.9.0",
     "tsx": "^4.21.0",
     "typescript": "~5.8.3",
+    "unlighthouse": "0.17.0",
     "vitest": "^3.2.4",
-    "vue-tsc": "^2.2.10"
+    "vue-tsc": "^2.2.10",
+    "wrangler": "4.104.0"
   },
   "packageManager": "yarn@1.22.19+sha1.4ba7fc5c6e704fce2066ecbfb0b0d8976fe62447"
 }

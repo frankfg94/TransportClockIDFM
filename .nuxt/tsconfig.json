@@ -157,15 +157,15 @@
     "../**/*",
     "../.config/nuxt.*",
     "./nuxt.d.ts",
-    "../node_modules/runtime",
-    "../node_modules/dist/runtime",
+    "../node_modules/nuxt/node_modules/runtime",
+    "../node_modules/nuxt/node_modules/dist/runtime",
     ".."
   ],
   "exclude": [
     "../dist",
     "../.data",
-    "../node_modules/runtime/server",
-    "../node_modules/dist/runtime/server",
+    "../node_modules/nuxt/node_modules/runtime/server",
+    "../node_modules/nuxt/node_modules/dist/runtime/server",
     "dev"
   ]
 }

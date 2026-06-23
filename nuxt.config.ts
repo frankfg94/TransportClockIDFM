@@ -26,8 +26,6 @@ export default defineNuxtConfig({
   buildDir: isCapacitorBuild ? ".nuxt-capacitor" : undefined,
   compatibilityDate: "2026-05-17",
   css: [
-    "@vue-flow/core/dist/style.css",
-    "@vue-flow/controls/dist/style.css",
     "~/src/styles.css",
   ],
   devtools: { enabled: false },

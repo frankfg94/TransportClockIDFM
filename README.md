@@ -13,9 +13,32 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-Puis ouvrir `http://127.0.0.1:3000` ou l'URL affichee par Nuxt.
+Puis ouvrir `http://localhost:3000` ou l'URL affichee par Nuxt.
 
 La cle PRIM est lue depuis `.env.local` via `IDFM_API_KEY`. Les appels `"/api/idfm"` passent par la route Nitro `server/api/idfm/[...path].ts`, ce qui evite d'exposer la cle au navigateur.
+
+## Diagnostic Unlighthouse
+
+Construisez puis lancez la version Cloudflare Pages dans un terminal :
+
+```powershell
+yarn.cmd build
+yarn.cmd preview
+```
+
+Puis, dans un second terminal, lancez l'exploration et l'audit mobile par defaut :
+
+```powershell
+yarn.cmd unlighthouse
+```
+
+Unlighthouse explore les routes de l'application, affiche l'URL locale de son
+tableau de bord et ecrit son cache et ses rapports dans `.unlighthouse/`. Pour
+un audit desktop, ajoutez l'option :
+
+```powershell
+yarn.cmd unlighthouse --desktop
+```
 
 ## Build et deploiement Cloudflare Pages
 

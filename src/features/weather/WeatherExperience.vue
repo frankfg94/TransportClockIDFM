@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, getCurrentInstance, ref, watch } from "vue";
 import {
   CloudLightning,
   CloudRain,
@@ -44,6 +44,16 @@ const showAlert = computed(
 const backgroundKind = computed<WeatherConditionKind>(
   () => weather.value?.condition.kind ?? "normal",
 );
+const needsParticleRenderer = computed(
+  () =>
+    showAnimation.value &&
+    (backgroundKind.value === "rain" ||
+      backgroundKind.value === "storm" ||
+      backgroundKind.value === "snow"),
+);
+const particlesReady = ref(false);
+const app = getCurrentInstance()?.appContext.app;
+let particlePluginLoading: Promise<void> | undefined;
 const showRainDroplets = computed(
   () =>
     showAnimation.value &&
@@ -51,12 +61,44 @@ const showRainDroplets = computed(
 );
 const showRainParticles = computed(
   () =>
-    showAnimation.value &&
+    particlesReady.value &&
     (backgroundKind.value === "rain" || backgroundKind.value === "storm"),
 );
 const showSnowParticles = computed(
-  () => showAnimation.value && backgroundKind.value === "snow",
+  () => particlesReady.value && backgroundKind.value === "snow",
 );
+
+watch(
+  needsParticleRenderer,
+  (shouldLoadParticles) => {
+    if (shouldLoadParticles) {
+      void loadParticleRenderer();
+    }
+  },
+  { immediate: true },
+);
+
+async function loadParticleRenderer(): Promise<void> {
+  if (particlesReady.value || !app) {
+    return;
+  }
+
+  particlePluginLoading ??= (async () => {
+    try {
+      const [{ default: Particles }, { loadSlim }] = await Promise.all([
+        import("@tsparticles/vue3"),
+        import("@tsparticles/slim"),
+      ]);
+
+      app.use(Particles, { init: loadSlim });
+      particlesReady.value = true;
+    } catch {
+      particlePluginLoading = undefined;
+    }
+  })();
+
+  await particlePluginLoading;
+}
 const rainParticleOptions = computed(() => {
   const storm = backgroundKind.value === "storm";
 

@@ -1,6 +1,7 @@
 ﻿<script setup lang="ts">
 import {
   computed,
+  defineAsyncComponent,
   onBeforeUnmount,
   onMounted,
   reactive,
@@ -9,17 +10,14 @@ import {
 } from "vue";
 import Draggable from "vuedraggable";
 import BoardVisibilityControls from "./components/BoardVisibilityControls.vue";
-import DepartureAlarmModal from "./components/DepartureAlarmModal.vue";
-import StationBoardModal from "./components/StationBoardModal.vue";
 import TransitBoard from "./components/TransitBoard.vue";
 import { transitBoards } from "./config/transitBoards";
-import { DeparturePatternModal } from "./features/service-pattern";
 import {
   filterTerminalOnly,
   requestTemporaryAlarmWakeLock,
   useAppSettings,
 } from "./features/app-settings";
-import { WeatherExperience, WeatherForecastModal } from "./features/weather";
+import { WeatherExperience } from "./features/weather";
 import {
   getCurrentTrafficDisruptions,
   normalizeTrafficLineRef,
@@ -75,6 +73,19 @@ import {
   SlidersHorizontal,
 } from "lucide-vue-next";
 import { useRouter } from "nuxt/app";
+
+const DepartureAlarmModal = defineAsyncComponent(
+  () => import("./components/DepartureAlarmModal.vue"),
+);
+const DeparturePatternModal = defineAsyncComponent(
+  () => import("./features/service-pattern/DeparturePatternModal.vue"),
+);
+const StationBoardModal = defineAsyncComponent(
+  () => import("./components/StationBoardModal.vue"),
+);
+const WeatherForecastModal = defineAsyncComponent(
+  () => import("./features/weather/WeatherForecastModal.vue"),
+);
 
 type BoardTrafficAlert = {
   label: "Perturbation" | "Interruption";
@@ -1456,6 +1467,7 @@ onBeforeUnmount(() => {
 
       <WeatherExperience />
       <WeatherForecastModal
+        v-if="weatherModalOpen"
         :open="weatherModalOpen"
         @close="weatherModalOpen = false"
       />
@@ -1584,6 +1596,7 @@ onBeforeUnmount(() => {
       </Draggable>
 
       <StationBoardModal
+        v-if="stationModalOpen"
         :open="stationModalOpen"
         :mode="stationModalMode"
         @add="addCustomBoard"
@@ -1591,6 +1604,7 @@ onBeforeUnmount(() => {
       />
 
       <DepartureAlarmModal
+        v-if="alarmTarget"
         :board="alarmTarget?.board"
         :departure="alarmTarget?.departure"
         :open="Boolean(alarmTarget)"
@@ -1599,6 +1613,7 @@ onBeforeUnmount(() => {
       />
 
       <DeparturePatternModal
+        v-if="patternTarget"
         :board="patternTarget?.board"
         :departure="patternTarget?.departure"
         :error="patternError"

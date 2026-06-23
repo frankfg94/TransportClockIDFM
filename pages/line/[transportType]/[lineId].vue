@@ -165,15 +165,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
 import { ArrowLeft } from "lucide-vue-next";
 import { useFetch, useRoute, useRouter, navigateTo } from "#imports";
 import {
   filterTerminalOnly,
   useAppSettings,
 } from "../../../src/features/app-settings";
-import { DeparturePatternModal } from "../../../src/features/service-pattern";
-import { DetailedLineMapPicker } from "../../../src/features/line-map";
 import {
   createLinePresentation,
   transitModeToFamily,
@@ -184,6 +182,13 @@ import type {
   LineSearchOption,
   TransitFamily,
 } from "../../../src/types/transit";
+
+const DeparturePatternModal = defineAsyncComponent(
+  () => import("../../../src/features/service-pattern/DeparturePatternModal.vue"),
+);
+const DetailedLineMapPicker = defineAsyncComponent(
+  () => import("../../../src/features/line-map/DetailedLineMapPicker.vue"),
+);
 
 const LINE_COMPLETE_DIRECTION_ID = "line-complete";
 type LinePageView = "schema" | "map";

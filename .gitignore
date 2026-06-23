@@ -7,6 +7,8 @@ dist/
 *.tsbuildinfo
 transport-clock*.png
 transport-clock-screenshot*.png
+.unlighthouse/
+reports/
 .env
 .env.*
 !.env.example

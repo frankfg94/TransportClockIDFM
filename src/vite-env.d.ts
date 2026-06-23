@@ -6,6 +6,8 @@ declare const __SERVER_API_BASE_URL__: string;
 declare const __MOBILE_RELEASE_PUBLIC_BASE_URL__: string;
 declare const __APP_SOURCE_REVISION__: string;
 
+declare module "@tsparticles/vue3";
+
 declare module "#imports" {
   import type { Ref } from "vue";
 
