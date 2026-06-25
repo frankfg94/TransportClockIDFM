@@ -67,6 +67,7 @@ export interface AppSettings {
   ghostNetworkStructuralOnly: boolean;
   trafficInfoDesign: TrafficInfoDesign;
   trafficInfoDefaultScope: TrafficInfoDefaultScope;
+  smartTrafficDetection: boolean;
   transferResolverMode: TransferResolverMode;
   transferBundleRetentionDays: TransferBundleRetentionDays;
   transferBundleRequestConcurrency: TransferBundleRequestConcurrency;
@@ -221,6 +222,7 @@ export function createDefaultAppSettings(): AppSettings {
     ghostNetworkStructuralOnly: false,
     trafficInfoDesign: "ratp",
     trafficInfoDefaultScope: "optimized",
+    smartTrafficDetection: true,
     transferResolverMode: "auto",
     // Enabled by default to use a frontend cache only if possible
     transferBundleLocalCacheEnabled: true,
@@ -308,6 +310,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     )
       ? value.trafficInfoDefaultScope
       : defaults.trafficInfoDefaultScope,
+    smartTrafficDetection: readBoolean(
+      value.smartTrafficDetection,
+      defaults.smartTrafficDetection,
+    ),
     transferResolverMode: isTransferResolverMode(value.transferResolverMode)
       ? value.transferResolverMode
       : defaults.transferResolverMode,

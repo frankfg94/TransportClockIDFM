@@ -15,7 +15,7 @@ import {
 describe("app settings", () => {
   it("keeps current behaviour as the default", () => {
     expect(createDefaultAppSettings()).toMatchObject({
-      closedDirectionSummaryMode: "last",
+      closedDirectionSummaryMode: "next",
       maxDeparturesPerDirection: "default",
       showPatternMiniMap: true,
       showPatternCityZones: true,
@@ -29,6 +29,7 @@ describe("app settings", () => {
       ghostNetworkStructuralOnly: false,
       trafficInfoDesign: "ratp",
       trafficInfoDefaultScope: "optimized",
+      smartTrafficDetection: true,
       transferResolverMode: "auto",
       transferBundleBackendCacheEnabled: true,
       transferBundleLocalCacheEnabled: true,
@@ -62,6 +63,7 @@ describe("app settings", () => {
       ghostNetworkStructuralOnly: "yes",
       trafficInfoDesign: "dense",
       trafficInfoDefaultScope: "everything",
+      smartTrafficDetection: "sometimes",
       transferResolverMode: "telepathy",
       transferBundleBackendCacheEnabled: "no",
       transferBundleRetentionDays: "999",
@@ -78,7 +80,7 @@ describe("app settings", () => {
       },
     });
 
-    expect(settings.closedDirectionSummaryMode).toBe("last");
+    expect(settings.closedDirectionSummaryMode).toBe("next");
     expect(settings.maxDeparturesPerDirection).toBe("default");
     expect(settings.showPatternMiniMap).toBe(true);
     expect(settings.showPatternCityZones).toBe(true);
@@ -90,6 +92,7 @@ describe("app settings", () => {
     expect(settings.ghostNetworkStructuralOnly).toBe(false);
     expect(settings.trafficInfoDesign).toBe("ratp");
     expect(settings.trafficInfoDefaultScope).toBe("optimized");
+    expect(settings.smartTrafficDetection).toBe(true);
     expect(settings.transferResolverMode).toBe("auto");
     expect(settings.transferBundleBackendCacheEnabled).toBe(true);
     expect(settings.transferBundleRetentionDays).toBe(15);

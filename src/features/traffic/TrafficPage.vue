@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { ChevronDown, Info, RefreshCw, TrafficCone } from "lucide-vue-next";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import MaterialCombobox from "../../components/MaterialCombobox.vue";
+import TrafficDisruptionCard from "./TrafficDisruptionCard.vue";
 import {
   trafficInfoDesignOptions,
   useAppSettings,
@@ -21,9 +22,12 @@ import { toServerApiUrl } from "../../services/serverApi";
 import {
   getCurrentTrafficDisruptions,
   getUpcomingTrafficDisruptions,
-  parseTrafficDate,
   type TrafficTimingTab,
 } from "./trafficTiming";
+import {
+  getDisruptionTone,
+  type TrafficTone,
+} from "./trafficPresentation";
 import type { LineSearchOption, TransitFamily } from "../../types/transit";
 import type {
   ActiveTrafficLine,
@@ -33,7 +37,6 @@ import type {
   TrafficResponse,
 } from "./types";
 
-type TrafficTone = "orange" | "red";
 type TrafficLineSymbol = "!" | "x" | "roadwork" | "";
 
 const activeLines = ref<ActiveTrafficLine[]>([]);
@@ -431,23 +434,6 @@ function getExpandedLines(lines: ActiveTrafficLine[]): ActiveTrafficLine[] {
   );
 }
 
-function getDisruptionTone(disruption: TrafficDisruption): TrafficTone {
-  const searchable = normalizeText(
-    `${disruption.title} ${disruption.message ?? ""} ${disruption.severity ?? ""} ${disruption.cause ?? ""}`,
-  );
-
-  return [
-    "interrompu",
-    "interruption",
-    "no service",
-    "no-service",
-    "bloquant",
-    "bloquante",
-  ].some((needle) => searchable.includes(needle))
-    ? "red"
-    : "orange";
-}
-
 function getReportTone(report: TrafficLineReport): TrafficTone {
   return report.disruptions.some(
     (disruption) => getDisruptionTone(disruption) === "red",
@@ -456,48 +442,6 @@ function getReportTone(report: TrafficLineReport): TrafficTone {
     : "orange";
 }
 
-function getDisruptionIcon(disruption: TrafficDisruption): string {
-  return getDisruptionTone(disruption) === "red" ? "x" : "!";
-}
-
-function formatPeriod(disruption: TrafficDisruption): string {
-  const period = disruption.applicationPeriods[0];
-
-  if (!period) {
-    return "";
-  }
-
-  const begin = formatDate(period.begin);
-  const end = formatDate(period.end);
-
-  if (begin && end) {
-    return `${begin} → ${end}`;
-  }
-
-  return begin ? `À partir du ${begin}` : `Jusqu'au ${end}`;
-}
-
-function formatDate(value?: string): string {
-  if (!value) {
-    return "";
-  }
-
-  const date = parseTrafficDate(value);
-
-  return !date || Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat("fr-FR", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(date);
-}
-
-function normalizeText(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
-}
 </script>
 
 <template>
@@ -694,29 +638,15 @@ function normalizeText(value: string): string {
                   >
                     Aucune annonce dans cette catégorie.
                   </p>
-                  <article
+                  <TrafficDisruptionCard
                     v-for="disruption in getVisibleDisruptions(
                       getLineReport(line),
                     )"
                     :key="disruption.id"
-                    class="traffic-disruption traffic-disruption--compact"
-                    :class="`traffic-disruption--${getDisruptionTone(disruption)}`"
-                  >
-                    <div class="traffic-disruption__title">
-                      <span class="traffic-disruption__icon">
-                        {{ getDisruptionIcon(disruption) }}
-                      </span>
-                      <h3>{{ disruption.title }}</h3>
-                    </div>
-                    <p v-if="disruption.message">{{ disruption.message }}</p>
-                    <small v-if="formatPeriod(disruption)">
-                      {{ formatPeriod(disruption) }}
-                    </small>
-                    <small v-if="disruption.impactedStopNames.length">
-                      Arrêts concernés:
-                      {{ disruption.impactedStopNames.slice(0, 8).join(", ") }}
-                    </small>
-                  </article>
+                    :disruption="disruption"
+                    compact
+                    :show-header="false"
+                  />
                 </template>
               </article>
             </div>
@@ -921,36 +851,14 @@ function normalizeText(value: string): string {
                     >
                       Aucune annonce dans cette catégorie.
                     </p>
-                    <article
+                    <TrafficDisruptionCard
                       v-for="disruption in getVisibleDisruptions(
                         getLineReport(line),
                       )"
                       :key="disruption.id"
-                      class="traffic-disruption"
-                      :class="`traffic-disruption--${getDisruptionTone(disruption)}`"
-                    >
-                      <header>
-                        <span>{{
-                          getStatusLabel(getLineReport(line).status)
-                        }}</span>
-                        <small v-if="formatPeriod(disruption)">
-                          {{ formatPeriod(disruption) }}
-                        </small>
-                      </header>
-                      <div class="traffic-disruption__title">
-                        <span class="traffic-disruption__icon">
-                          {{ getDisruptionIcon(disruption) }}
-                        </span>
-                        <h3>{{ disruption.title }}</h3>
-                      </div>
-                      <p v-if="disruption.message">{{ disruption.message }}</p>
-                      <small v-if="disruption.impactedStopNames.length">
-                        Arrêts concernés:
-                        {{
-                          disruption.impactedStopNames.slice(0, 8).join(", ")
-                        }}
-                      </small>
-                    </article>
+                      :disruption="disruption"
+                      :status-label="getStatusLabel(getLineReport(line).status)"
+                    />
                   </template>
                 </div>
               </Transition>

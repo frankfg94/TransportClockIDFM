@@ -6,6 +6,7 @@ import type {
   DepartureCallingPattern,
   TransitBoardConfig,
 } from "../src/types/transit";
+import type { TrafficResponse } from "../src/features/traffic";
 
 const board: TransitBoardConfig = {
   id: "rer-test",
@@ -65,6 +66,42 @@ const VueFlowNodeStub = defineComponent({
           (node) => slots[`node-${node.type}`]?.({ data: node.data }) ?? [],
         ),
       );
+  },
+});
+
+const VueFlowTrafficStub = defineComponent({
+  name: "VueFlow",
+  props: {
+    edges: {
+      type: Array,
+      default: () => [],
+    },
+    nodes: {
+      type: Array,
+      default: () => [],
+    },
+  },
+  emits: ["edge-click"],
+  setup(props, { emit, slots }) {
+    return () =>
+      h("div", { class: "vue-flow" }, [
+        ...(props.nodes as Array<{ data?: unknown; type?: string }>).flatMap(
+          (node) => slots[`node-${node.type}`]?.({ data: node.data }) ?? [],
+        ),
+        ...(props.edges as Array<{ id: string; class?: unknown }>).map(
+          (edge) =>
+            h(
+              "button",
+              {
+                class: ["edge-button", edge.class],
+                "data-edge-id": edge.id,
+                type: "button",
+                onClick: () => emit("edge-click", { edge }),
+              },
+              edge.id,
+            ),
+        ),
+      ]);
   },
 });
 
@@ -550,6 +587,181 @@ describe("DeparturePatternModal settings", () => {
     expect(children[1]?.tagName.toLowerCase()).toBe("line-icon-badge-stub");
 
     await flushPromises();
+    wrapper.unmount();
+  });
+
+  it("loads smart traffic by default and opens the disruption popup from an impacted edge", async () => {
+    const trafficPattern: DepartureCallingPattern = {
+      ...pattern,
+      calls: [
+        createCall("station-a", "Station A", "Paris", true),
+        createCall("station-b", "Station B", "Paris"),
+        createCall("station-c", "Station C", "Paris"),
+      ],
+      lineTopology: [
+        {
+          id: "traffic-sequence",
+          label: "Traffic sequence",
+          stops: [
+            createRouteStop("station-a", "Station A", 652146, 6862288),
+            createRouteStop("station-b", "Station B", 652646, 6862288),
+            createRouteStop("station-c", "Station C", 653146, 6862288),
+          ],
+        },
+      ],
+    };
+    const trafficResponse: TrafficResponse = {
+      configured: true,
+      generatedAt: "2026-06-25T12:00:00.000Z",
+      source: "prim-line-reports",
+      lines: [
+        {
+          lineRef: "line:test",
+          status: "disrupted",
+          disruptions: [
+            {
+              id: "traffic-a-b",
+              title: "Trafic interrompu",
+              message:
+                "Trafic interrompu entre Station A et Station B et perturbe sur le reste de la ligne. Reprise estimee : 00:00.",
+              kind: "incident",
+              applicationPeriods: [],
+              impactedLineRefs: ["line:test"],
+              impactedStopNames: [],
+            },
+          ],
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/traffic")) {
+        return {
+          ok: true,
+          json: async () => trafficResponse,
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ places: [], records: [] }),
+      };
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: trafficPattern,
+        showMiniMap: false,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowTrafficStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/traffic"),
+    );
+    expect(
+      wrapper.find(".pattern-flow-edge--traffic-interruption").exists(),
+    ).toBe(true);
+    expect(
+      wrapper.find(".pattern-flow-edge--traffic-disturbance").exists(),
+    ).toBe(true);
+    expect(
+      wrapper.find(".pattern-flow-station--traffic-interruption").exists(),
+    ).toBe(true);
+
+    await wrapper
+      .get(".pattern-flow-edge--traffic-interruption")
+      .trigger("click");
+
+    expect(wrapper.text()).toContain("Trafic interrompu");
+    expect(wrapper.text()).toContain("Reprise estimee");
+
+    wrapper.unmount();
+  });
+
+  it("keeps disturbed traffic visible when reduceMotion disables animation", async () => {
+    const trafficPattern: DepartureCallingPattern = {
+      ...pattern,
+      calls: [
+        createCall("station-a", "Station A", "Paris", true),
+        createCall("station-b", "Station B", "Paris"),
+      ],
+      lineTopology: [
+        {
+          id: "disturbed-sequence",
+          label: "Disturbed sequence",
+          stops: [
+            createRouteStop("station-a", "Station A", 652146, 6862288),
+            createRouteStop("station-b", "Station B", 652646, 6862288),
+          ],
+        },
+      ],
+    };
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: trafficPattern,
+        reduceMotion: true,
+        showMiniMap: false,
+        trafficReport: {
+          lineRef: "line:test",
+          status: "disrupted",
+          disruptions: [
+            {
+              id: "disturbed-a-b",
+              title: "Service perturbe",
+              message: "Service perturbe entre Station A et Station B.",
+              kind: "incident",
+              applicationPeriods: [],
+              impactedLineRefs: ["line:test"],
+              impactedStopNames: [],
+            },
+          ],
+        },
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowTrafficStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    expect(wrapper.find(".pattern-flow-shell--reduce-motion").exists()).toBe(
+      true,
+    );
+    expect(
+      wrapper.find(".pattern-flow-edge--traffic-disturbance").exists(),
+    ).toBe(true);
+
     wrapper.unmount();
   });
 });

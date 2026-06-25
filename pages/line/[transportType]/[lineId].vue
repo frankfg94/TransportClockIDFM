@@ -18,6 +18,7 @@
       :compact-mode="settings.compactLinePlanMode"
       :rich-transfer-tooltips="settings.richTransferTooltips"
       :reduce-motion="settings.reduceMotion"
+      :smart-traffic-detection="settings.smartTrafficDetection"
       :transfer-bundle-retention-days="settings.transferBundleRetentionDays"
       :transfer-bundle-request-concurrency="
         settings.transferBundleRequestConcurrency

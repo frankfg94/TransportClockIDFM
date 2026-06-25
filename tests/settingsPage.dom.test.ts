@@ -63,7 +63,7 @@ describe("SettingsPage", () => {
     await wrapper.find(".material-combobox__trigger").trigger("click");
     expect(wrapper.text()).toContain("Dans le menu contextuel");
     expect(wrapper.text()).toContain("Accordion fermé");
-    expect(wrapper.text()).toContain("Dernier passage");
+    expect(wrapper.text()).toContain("Prochain passage");
     expect(wrapper.text()).toContain("Défaut actuel");
     expect(wrapper.text()).toContain("Apparence info trafic");
     expect(wrapper.text()).toContain("Style RATP compact");
@@ -71,6 +71,7 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Mode par défaut");
     expect(wrapper.text()).toContain("Optimisé");
     expect(wrapper.text()).toContain("Toutes les lignes");
+    expect(wrapper.text()).toContain("Détection intelligente sur le schéma");
     expect(wrapper.text()).toContain("Météo dynamique");
     expect(wrapper.text()).toContain("Alertes avec fond d'écran animé");
     expect(wrapper.text()).toContain("Mode test");

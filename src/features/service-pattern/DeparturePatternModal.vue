@@ -21,7 +21,13 @@ import {
   transitModeToFamily,
 } from "../../services/linePresentation";
 import { Controls } from "@vue-flow/controls";
-import { Expand, Minimize2, SlidersHorizontal } from "lucide-vue-next";
+import {
+  Bus,
+  Expand,
+  Minimize2,
+  SlidersHorizontal,
+  TriangleAlert,
+} from "lucide-vue-next";
 import DistanceToggle from "../../components/DistanceToggle.vue";
 import PatternFlowMiniMap from "./PatternFlowMiniMap.vue";
 import { resolveTransitLonLat } from "../network-ghost/geoProjection";
@@ -56,6 +62,17 @@ import {
 } from "./transferVisibility";
 import type { TransferResolverMode } from "./transferResolverMode";
 import type { HealthCheck, HealthResponse } from "../health/types";
+import TrafficDisruptionCard from "../traffic/TrafficDisruptionCard.vue";
+import type { TrafficLineReport } from "../traffic";
+import {
+  type PatternTrafficImpact,
+  type PatternTrafficImpactAnalysis,
+  type PatternTrafficImpactSegment,
+} from "./trafficImpactAnalysis";
+import {
+  useDeparturePatternTraffic,
+  type DeparturePatternTrafficAnalyzer,
+} from "./useDeparturePatternTraffic";
 
 import type {
   Departure,
@@ -80,9 +97,17 @@ type PatternCityZoneFlowNode = Node<
   Record<string, never>,
   "city-zone"
 >;
-type PatternFlowNode = PatternStationFlowNode | PatternCityZoneFlowNode;
-type PatternFlowEdge = Edge<
+type PatternTrafficMarkerFlowNode = Node<
+  PatternTrafficMarkerNodeData,
   Record<string, never>,
+  "traffic-marker"
+>;
+type PatternFlowNode =
+  | PatternStationFlowNode
+  | PatternCityZoneFlowNode
+  | PatternTrafficMarkerFlowNode;
+type PatternFlowEdge = Edge<
+  PatternFlowEdgeData,
   Record<string, never>,
   "straight"
 >;
@@ -99,6 +124,7 @@ interface PatternStationNodeData {
   busTransfers: TransferLineOption[];
   nonBusTransfers: TransferLineOption[];
   transfers: TransferLineOption[];
+  trafficImpact?: PatternTrafficImpact;
 }
 
 interface PatternCityZoneNodeData {
@@ -106,6 +132,18 @@ interface PatternCityZoneNodeData {
   city: string;
   width: number;
   stationCount: number;
+}
+
+interface PatternTrafficMarkerNodeData {
+  key: string;
+  kind: PatternTrafficImpact["kind"];
+  restartTimeLabel?: string;
+  replacementBus: boolean;
+  trafficImpact: PatternTrafficImpact;
+}
+
+interface PatternFlowEdgeData {
+  trafficImpact?: PatternTrafficImpact;
 }
 
 type PatternCompactMode = "auto" | "comfort" | "compact";
@@ -136,6 +174,7 @@ interface PatternFlowModel {
   nodes: PatternFlowNode[];
   stationNodes: PatternStationFlowNode[];
   edges: PatternFlowEdge[];
+  trafficAnalysis: PatternTrafficImpactAnalysis;
 }
 
 interface PatternCityZoneGroup {
@@ -209,6 +248,8 @@ const props = withDefaults(
     compactMode?: PatternCompactMode;
     richTransferTooltips?: boolean;
     reduceMotion?: boolean;
+    smartTrafficDetection?: boolean;
+    trafficReport?: TrafficLineReport;
     transferBundleRetentionDays?: number;
     transferBundleRequestConcurrency?: number;
     transferBundleRequestSpacingMs?: number;
@@ -223,6 +264,7 @@ const props = withDefaults(
     compactMode: "auto",
     richTransferTooltips: true,
     reduceMotion: false,
+    smartTrafficDetection: true,
     transferBundleLocalCacheEnabled: true,
     transferBundleBackendCacheEnabled: true,
     transferBundleRetentionDays: 15,
@@ -369,6 +411,18 @@ const currentLineIdentity = computed<CurrentLineIdentity | undefined>(() => {
     labels: [board.line.shortName, board.line.longName],
   };
 });
+const {
+  activeTrafficImpact,
+  analyzeCurrentTrafficImpacts,
+  closeTrafficImpactPopup,
+  showTrafficImpactPopup,
+  trafficImpactKey,
+} = useDeparturePatternTraffic({
+  open: computed(() => props.open),
+  board: computed(() => props.board),
+  smartTrafficDetection: computed(() => props.smartTrafficDetection),
+  trafficReport: computed(() => props.trafficReport),
+});
 const transportModeIcon = computed(() =>
   createTransportModeIcon(props.board?.line.mode),
 );
@@ -383,6 +437,7 @@ const flowModel = computed(() =>
     patternDistanceLabelsVisible.value,
     patternDistanceLabelsLeaving.value,
     props.showCityZones,
+    analyzeCurrentTrafficImpacts,
   ),
 );
 const patternFlowKey = computed(
@@ -393,7 +448,7 @@ const patternFlowKey = computed(
       isFullLineMode.value ? "full" : "route"
     }:${props.showCityZones ? "cities" : "no-cities"}${
       props.board?.line.mode ? `:${props.board.line.mode}` : ""
-    }`,
+    }:traffic:${props.smartTrafficDetection ? trafficImpactKey.value : "off"}`,
 );
 const initialViewport = computed(() => {
   const currentNode =
@@ -606,6 +661,12 @@ function focusPatternFlowOn(point: PatternViewportPoint): void {
   patternFlowViewportController.value?.setViewport?.(viewport, {
     duration: 220,
   });
+}
+
+function handlePatternEdgeClick(event: {
+  edge?: { data?: PatternFlowEdgeData };
+}): void {
+  showTrafficImpactPopup(event.edge?.data?.trafficImpact);
 }
 
 function formatClock(value?: string): string {
@@ -903,6 +964,7 @@ function createPatternFlow(
   showDistances = false,
   distanceLabelsLeaving = false,
   showCityZones = true,
+  analyzeTraffic: DeparturePatternTrafficAnalyzer = createEmptyTrafficImpactAnalysis,
 ): PatternFlowModel {
   const layout = createPatternLayoutOptions(compact);
   const graph = buildPatternGraph(calls, lineTopology, fullLine);
@@ -917,6 +979,17 @@ function createPatternFlow(
 
   const activeTerminalIds = getActiveTerminalIds(graph);
   const drawableEdges = [...graph.edges, ...topology.syntheticEdges];
+  const visibleDrawableEdges = drawableEdges.filter((edge) =>
+    topology.visibleEdges.has(createEdgeKey(edge.source, edge.target)),
+  );
+  const trafficAnalysis = analyzeTraffic(
+    graph.nodes.map((node) => ({ key: node.id, label: node.label })),
+    visibleDrawableEdges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+    })),
+  );
   const stationNodes = graph.nodes.map((node) => {
     const position = topology.positions.get(node.id) ?? { x: 0, y: 0 };
     const isBranchEnd = node.degree <= 1;
@@ -952,6 +1025,7 @@ function createPatternFlow(
         busTransfers: visibleTransfers.filter(isBusTransfer),
         nonBusTransfers: visibleTransfers.filter(isVisiblePatternPlanTransfer),
         transfers: visibleTransfers,
+        trafficImpact: trafficAnalysis.stationImpacts[node.id],
       },
     } satisfies PatternStationFlowNode;
   });
@@ -964,10 +1038,18 @@ function createPatternFlow(
         compact,
       })
     : [];
-  const nodes: PatternFlowNode[] = [...cityZoneNodes, ...stationNodes];
-  const visibleDrawableEdges = drawableEdges.filter((edge) =>
-    topology.visibleEdges.has(createEdgeKey(edge.source, edge.target)),
-  );
+  const trafficMarkerNodes = createTrafficMarkerFlowNodes({
+    segments: trafficAnalysis.segments,
+    edges: visibleDrawableEdges,
+    positions: topology.positions,
+    layout,
+    compact,
+  });
+  const nodes: PatternFlowNode[] = [
+    ...cityZoneNodes,
+    ...stationNodes,
+    ...trafficMarkerNodes,
+  ];
   const activeRouteEdgeOrder = fullLine
     ? new Map<string, number>()
     : createActiveRouteEdgeOrder(calls, lineTopology);
@@ -977,7 +1059,11 @@ function createPatternFlow(
   const activeLightEdges = fullLine
     ? []
     : visibleDrawableEdges
-        .filter((edge) => edge.active)
+        .filter(
+          (edge) =>
+            edge.active &&
+            !trafficAnalysis.edgeImpacts[createEdgeKey(edge.source, edge.target)],
+        )
         .map((edge, fallbackOrder) => ({
           edge,
           direction: activeRouteEdgeDirections.get(
@@ -995,6 +1081,7 @@ function createPatternFlow(
         topology.positions,
         showDistances,
         distanceLabelsLeaving,
+        trafficAnalysis.edgeImpacts[createEdgeKey(edge.source, edge.target)],
       ),
     ),
     ...activeLightEdges.map(({ edge, direction, order }) =>
@@ -1008,7 +1095,112 @@ function createPatternFlow(
     ),
   ];
 
-  return { nodes, stationNodes, edges };
+  return { nodes, stationNodes, edges, trafficAnalysis };
+}
+
+function createEmptyTrafficImpactAnalysis(): PatternTrafficImpactAnalysis {
+  return {
+    segments: [],
+    stationImpacts: {},
+    edgeImpacts: {},
+  };
+}
+
+function createTrafficMarkerFlowNodes({
+  segments,
+  edges,
+  positions,
+  layout,
+  compact,
+}: {
+  segments: PatternTrafficImpactSegment[];
+  edges: PatternGraphEdge[];
+  positions: Map<string, { x: number; y: number }>;
+  layout: PatternLayoutOptions;
+  compact: boolean;
+}): PatternTrafficMarkerFlowNode[] {
+  const edgeByKey = new Map(
+    edges.map((edge) => [createEdgeKey(edge.source, edge.target), edge]),
+  );
+  const markerWidth = compact ? 120 : 156;
+  const markerOffset = compact ? 58 : 52;
+
+  return segments
+    .map((segment): PatternTrafficMarkerFlowNode | undefined => {
+      const anchor = getTrafficSegmentAnchor(segment, edgeByKey, positions);
+
+      if (!anchor) {
+        return undefined;
+      }
+
+      return {
+        id: `traffic-marker:${segment.id}`,
+        type: "traffic-marker",
+        position: {
+          x: anchor.x - markerWidth / 2,
+          y: anchor.y + markerOffset,
+        },
+        draggable: false,
+        selectable: false,
+        connectable: false,
+        focusable: false,
+        class: `pattern-flow-traffic-marker-node pattern-flow-traffic-marker-node--${segment.kind}`,
+        zIndex: 92,
+        data: {
+          key: segment.id,
+          kind: segment.kind,
+          restartTimeLabel: segment.restartTimeLabel,
+          replacementBus: segment.replacementBus,
+          trafficImpact: segment,
+        },
+      };
+    })
+    .filter((node): node is PatternTrafficMarkerFlowNode => Boolean(node));
+}
+
+function getTrafficSegmentAnchor(
+  segment: PatternTrafficImpactSegment,
+  edgeByKey: Map<string, PatternGraphEdge>,
+  positions: Map<string, { x: number; y: number }>,
+): { x: number; y: number } | undefined {
+  const edgeMidpoints = segment.edgeKeys
+    .map((edgeKey) => edgeByKey.get(edgeKey))
+    .filter((edge): edge is PatternGraphEdge => Boolean(edge))
+    .map((edge) => {
+      const source = positions.get(edge.source);
+      const target = positions.get(edge.target);
+
+      if (!source || !target) {
+        return undefined;
+      }
+
+      return {
+        x: (source.x + target.x) / 2,
+        y: (source.y + target.y) / 2,
+      };
+    })
+    .filter((point): point is { x: number; y: number } => Boolean(point));
+
+  if (edgeMidpoints.length > 0) {
+    return averagePatternPoints(edgeMidpoints);
+  }
+
+  const stationPoints = segment.stationKeys
+    .map((stationKey) => positions.get(stationKey))
+    .filter((point): point is { x: number; y: number } => Boolean(point));
+
+  return stationPoints.length > 0
+    ? averagePatternPoints(stationPoints)
+    : undefined;
+}
+
+function averagePatternPoints(
+  points: Array<{ x: number; y: number }>,
+): { x: number; y: number } {
+  return {
+    x: points.reduce((total, point) => total + point.x, 0) / points.length,
+    y: points.reduce((total, point) => total + point.y, 0) / points.length,
+  };
 }
 
 function createCityZoneFlowNodes({
@@ -1225,6 +1417,7 @@ function createFlowEdge(
   positions: Map<string, { x: number; y: number }>,
   showDistance = false,
   distanceLabelsLeaving = false,
+  trafficImpact?: PatternTrafficImpact,
 ): PatternFlowEdge {
   const { source, target } = getVisualFlowEdgeEndpoints(edge, positions);
   const distanceLabel =
@@ -1240,23 +1433,51 @@ function createFlowEdge(
     targetHandle: "station-target",
     type: "straight",
     selectable: false,
-    focusable: false,
+    focusable: Boolean(trafficImpact),
+    interactionWidth: trafficImpact ? 26 : undefined,
     class: [
       edge.active ? "pattern-flow-edge--active" : "pattern-flow-edge--skipped",
       distanceLabel ? "pattern-flow-edge--distance" : "",
       distanceLabel && distanceLabelsLeaving
         ? "pattern-flow-edge--distance-leave"
         : "",
+      trafficImpact ? "pattern-flow-edge--traffic" : "",
+      trafficImpact?.kind === "interruption"
+        ? "pattern-flow-edge--traffic-interruption"
+        : "",
+      trafficImpact?.kind === "disturbance"
+        ? "pattern-flow-edge--traffic-disturbance"
+        : "",
     ],
     label: distanceLabel,
     labelShowBg: Boolean(distanceLabel),
     labelBgPadding: [7, 5],
     labelBgBorderRadius: 7,
+    data: {
+      trafficImpact,
+    },
     style: {
-      stroke: edge.active ? "var(--line-color)" : "#cbd5e1",
-      strokeWidth: edge.active ? 10 : 7,
+      stroke: getPatternFlowEdgeStroke(edge, trafficImpact),
+      strokeOpacity:
+        trafficImpact?.kind === "interruption" ? 0.42 : undefined,
+      strokeWidth: edge.active || trafficImpact ? 10 : 7,
     },
   };
+}
+
+function getPatternFlowEdgeStroke(
+  edge: PatternGraphEdge,
+  trafficImpact?: PatternTrafficImpact,
+): string {
+  if (trafficImpact?.kind === "interruption") {
+    return "#ef4444";
+  }
+
+  if (trafficImpact?.kind === "disturbance") {
+    return "#f59e0b";
+  }
+
+  return edge.active ? "var(--line-color)" : "#cbd5e1";
 }
 
 function createFlowLightEdge(
@@ -3304,6 +3525,7 @@ onBeforeUnmount(() => {
                     :prevent-scrolling="shouldZoomOnWheel"
                     @pane-ready="handlePatternFlowReady"
                     @viewport-change="handlePatternFlowViewportChange"
+                    @edge-click="handlePatternEdgeClick"
                   >
                     <Controls :show-interactive="false" />
                     <template #node-city-zone="{ data }">
@@ -3316,6 +3538,38 @@ onBeforeUnmount(() => {
                       >
                         <span>{{ data.city }}</span>
                       </div>
+                    </template>
+                    <template #node-traffic-marker="{ data }">
+                      <button
+                        class="pattern-flow-traffic-marker"
+                        :class="`pattern-flow-traffic-marker--${data.kind}`"
+                        type="button"
+                        @click.stop="showTrafficImpactPopup(data.trafficImpact)"
+                      >
+                        <span
+                          v-if="data.replacementBus"
+                          class="pattern-flow-traffic-marker__icon"
+                          aria-hidden="true"
+                        >
+                          <Bus />
+                        </span>
+                        <span
+                          v-else
+                          class="pattern-flow-traffic-marker__icon"
+                          aria-hidden="true"
+                        >
+                          <TriangleAlert />
+                        </span>
+                        <strong v-if="data.restartTimeLabel">
+                          Reprise à {{ data.restartTimeLabel }}
+                        </strong>
+                        <strong v-else-if="data.replacementBus">
+                          Bus de remplacement
+                        </strong>
+                        <strong v-else>
+                          Trafic perturbé
+                        </strong>
+                      </button>
                     </template>
                     <template #node-station="{ data }">
                       <div
@@ -3330,6 +3584,10 @@ onBeforeUnmount(() => {
                           'pattern-flow-station--terminal': data.branchEnd,
                           'pattern-flow-station--tooltip-open':
                             activeStationTooltipKey === data.key,
+                          'pattern-flow-station--traffic-interruption':
+                            data.trafficImpact?.kind === 'interruption',
+                          'pattern-flow-station--traffic-disturbance':
+                            data.trafficImpact?.kind === 'disturbance',
                         }"
                         :title="
                           data.served
@@ -3340,6 +3598,7 @@ onBeforeUnmount(() => {
                         @focusout="scheduleHideStationTooltip(data.key)"
                         @mouseenter="showStationTooltip(data.key)"
                         @mouseleave="scheduleHideStationTooltip(data.key)"
+                        @click.stop="showTrafficImpactPopup(data.trafficImpact)"
                       >
                         <Handle
                           id="station-target"
@@ -3410,6 +3669,28 @@ onBeforeUnmount(() => {
                     :line-color="board?.line.color ?? '#0064ff'"
                     @focus="focusPatternFlowOn"
                   />
+                  <Transition name="pattern-flow-traffic-popup">
+                    <aside
+                      v-if="activeTrafficImpact"
+                      class="pattern-flow-traffic-popup"
+                      role="dialog"
+                      aria-label="Détail de l'information trafic"
+                    >
+                      <button
+                        class="pattern-flow-traffic-popup__close"
+                        type="button"
+                        aria-label="Fermer l'information trafic"
+                        @click="closeTrafficImpactPopup"
+                      >
+                        ×
+                      </button>
+                      <TrafficDisruptionCard
+                        :disruption="activeTrafficImpact.disruption"
+                        compact
+                        :show-header="false"
+                      />
+                    </aside>
+                  </Transition>
                 </div>
               </div>
             </div>

@@ -19,6 +19,7 @@ import {
 } from "./features/app-settings";
 import { WeatherExperience } from "./features/weather";
 import {
+  getDisruptionTone,
   getCurrentTrafficDisruptions,
   normalizeTrafficLineRef,
 } from "./features/traffic";
@@ -768,31 +769,13 @@ function getBoardTrafficAlert(
 function isTrafficInterruption(
   disruptions: TrafficLineReport["disruptions"],
 ): boolean {
-  return disruptions.some((disruption) => {
-    const searchable = normalizeTrafficText(
-      `${disruption.title} ${disruption.message ?? ""} ${disruption.severity ?? ""}`,
-    );
-
-    return [
-      "interrompu",
-      "interruption",
-      "no service",
-      "no-service",
-      "bloquant",
-      "bloquante",
-    ].some((needle) => searchable.includes(needle));
-  });
+  return disruptions.some(
+    (disruption) => getDisruptionTone(disruption) === "red",
+  );
 }
 
 function resolveBoardTrafficLineRef(board: TransitBoardConfig): string {
   return normalizeTrafficLineRef(board.schedule?.lineRef ?? board.line.ref);
-}
-
-function normalizeTrafficText(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
 }
 
 function toggleDirection(boardId: string, directionId: string): void {
@@ -1624,6 +1607,14 @@ onBeforeUnmount(() => {
         :show-city-zones="settings.showPatternCityZones"
         :compact-mode="settings.compactLinePlanMode"
         :rich-transfer-tooltips="settings.richTransferTooltips"
+        :smart-traffic-detection="settings.smartTrafficDetection"
+        :traffic-report="
+          patternTarget?.board
+            ? trafficReportByLineRef.get(
+                resolveBoardTrafficLineRef(patternTarget.board),
+              )
+            : undefined
+        "
         :transfer-bundle-retention-days="settings.transferBundleRetentionDays"
         :transfer-bundle-request-concurrency="
           settings.transferBundleRequestConcurrency

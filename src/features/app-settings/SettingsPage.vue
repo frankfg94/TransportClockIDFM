@@ -392,6 +392,27 @@ onBeforeUnmount(() => {
       <label class="settings-toggle">
         <input
           type="checkbox"
+          :checked="settings.smartTrafficDetection"
+          @change="
+            updateSettings({
+              smartTrafficDetection: ($event.target as HTMLInputElement)
+                .checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>Détection intelligente sur le schéma</strong>
+          <small>
+            Analyse les annonces trafic et colore automatiquement les tronçons
+            interrompus ou perturbés dans le schéma de ligne.
+          </small>
+        </div>
+      </label>
+
+      <label class="settings-toggle">
+        <input
+          type="checkbox"
           :checked="settings.transferBundleLocalCacheEnabled"
           @change="
             updateSettings({

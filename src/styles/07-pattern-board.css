@@ -656,6 +656,31 @@
   stroke-dasharray: 0;
 }
 
+.pattern-flow .vue-flow__edge.pattern-flow-edge--traffic {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.pattern-flow-edge--traffic .vue-flow__edge-path {
+  pointer-events: stroke;
+}
+
+.pattern-flow-edge--traffic-interruption .vue-flow__edge-path {
+  filter: drop-shadow(0 1px 4px rgba(239, 68, 68, 0.28));
+  stroke-dasharray: 10 10;
+}
+
+.pattern-flow-edge--traffic-disturbance .vue-flow__edge-path {
+  animation: pattern-flow-traffic-pulse 2s ease-in-out infinite;
+  filter: drop-shadow(0 1px 4px rgba(245, 158, 11, 0.26));
+}
+
+.pattern-flow-shell--reduce-motion
+  .pattern-flow-edge--traffic-disturbance
+  .vue-flow__edge-path {
+  animation: none;
+}
+
 .pattern-flow-edge--distance .vue-flow__edge-text {
   animation: distance-label-pop 520ms linear both;
   fill: #0f172a;
@@ -734,6 +759,17 @@
   100% {
     opacity: 0;
     transform: scale(0.68);
+  }
+}
+
+@keyframes pattern-flow-traffic-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
   }
 }
 
@@ -1273,7 +1309,8 @@
   .pattern-flow-station--current::before,
   .pattern-flow-station--current::after,
   .pattern-flow-station--current .pattern-flow-station__dot,
-  .pattern-flow-edge--light .vue-flow__edge-path {
+  .pattern-flow-edge--light .vue-flow__edge-path,
+  .pattern-flow-edge--traffic-disturbance .vue-flow__edge-path {
     animation: none;
   }
 }
@@ -1296,6 +1333,152 @@
 .pattern-flow-station--skipped em {
   background: #e2e8f0;
   color: #64748b;
+}
+
+.pattern-flow-station--traffic-interruption {
+  cursor: pointer;
+  opacity: 1;
+}
+
+.pattern-flow-station--traffic-interruption .pattern-flow-station__dot {
+  background: rgba(255, 255, 255, 0.64);
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+}
+
+.pattern-flow-station--traffic-interruption .pattern-flow-station__dot::before,
+.pattern-flow-station--traffic-interruption .pattern-flow-station__dot::after {
+  background: #ef4444;
+  border-radius: 999px;
+  content: "";
+  height: 4px;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(45deg);
+  width: 18px;
+}
+
+.pattern-flow-station--traffic-interruption .pattern-flow-station__dot::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.pattern-flow-station--traffic-disturbance {
+  cursor: pointer;
+}
+
+.pattern-flow-station--traffic-disturbance .pattern-flow-station__dot {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12);
+}
+
+.pattern-flow-traffic-marker {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(16, 35, 63, 0.1);
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(16, 35, 63, 0.14);
+  color: #1f2937;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-weight: 950;
+  gap: 6px;
+  justify-content: center;
+  line-height: 1.1;
+  min-height: 32px;
+  padding: 6px 9px;
+  position: relative;
+  width: 156px;
+}
+
+.pattern-flow-traffic-marker::before {
+  background: currentColor;
+  bottom: 100%;
+  content: "";
+  height: 20px;
+  left: 50%;
+  opacity: 0.58;
+  position: absolute;
+  transform: translateX(-50%);
+  width: 2px;
+}
+
+.pattern-flow-traffic-marker--interruption {
+  border-color: rgba(239, 68, 68, 0.62);
+  color: #dc2626;
+}
+
+.pattern-flow-traffic-marker--disturbance {
+  border-color: rgba(245, 158, 11, 0.7);
+  color: #b45309;
+}
+
+.pattern-flow-traffic-marker__icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.pattern-flow-traffic-marker__icon svg {
+  height: 16px;
+  width: 16px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-traffic-marker {
+  font-size: 0.68rem;
+  min-height: 30px;
+  width: 120px;
+}
+
+.pattern-flow-traffic-popup {
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(16, 35, 63, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 24px 68px rgba(16, 35, 63, 0.24);
+  max-width: min(420px, calc(100% - 32px));
+  padding: 10px;
+  position: absolute;
+  right: 16px;
+  top: 66px;
+  width: 420px;
+  z-index: 120;
+}
+
+.pattern-flow-traffic-popup__close {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid rgba(16, 35, 63, 0.12);
+  border-radius: 8px;
+  color: #334155;
+  display: inline-flex;
+  font-size: 1.1rem;
+  font-weight: 950;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 30px;
+  z-index: 2;
+}
+
+.pattern-flow-traffic-popup .traffic-disruption {
+  padding-right: 36px;
+}
+
+.pattern-flow-traffic-popup-enter-active,
+.pattern-flow-traffic-popup-leave-active {
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.pattern-flow-traffic-popup-enter-from,
+.pattern-flow-traffic-popup-leave-to {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
 }
 
 .pattern-flow-station--terminal .pattern-flow-station__dot {

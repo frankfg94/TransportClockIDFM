@@ -12,6 +12,14 @@ export {
   parseTrafficDate,
   type TrafficTimingTab,
 } from "./trafficTiming";
+export {
+  formatTrafficDate,
+  formatTrafficDisruptionPeriod,
+  getDisruptionIcon,
+  getDisruptionTone,
+  normalizeTrafficText,
+  type TrafficTone,
+} from "./trafficPresentation";
 export type {
   ActiveTrafficLine,
   TrafficDisruption,

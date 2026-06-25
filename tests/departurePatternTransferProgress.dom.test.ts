@@ -100,6 +100,7 @@ describe("DeparturePatternModal transfer progress", () => {
         open: true,
         board,
         pattern,
+        smartTrafficDetection: false,
       },
       global: {
         stubs: {
@@ -149,6 +150,7 @@ describe("DeparturePatternModal transfer progress", () => {
         open: true,
         board,
         pattern,
+        smartTrafficDetection: false,
       },
       global: {
         stubs: {
