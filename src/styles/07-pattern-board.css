@@ -644,8 +644,7 @@
     drop-shadow(0 0 5px color-mix(in srgb, var(--line-color), white 42%))
     drop-shadow(0 0 13px rgba(255, 255, 255, 0.82));
   mix-blend-mode: screen;
-  stroke-dasharray: 92 360;
-  stroke-dashoffset: 260;
+  stroke-dasharray: none;
   stroke-linecap: round;
 }
 
@@ -752,10 +751,9 @@
   overflow: visible;
   --station-dot-size: 34px;
   --station-dot-center-y: calc(var(--station-dot-size) / 2);
-  overflow: visible;
 }
 
-.pattern-flow-station__handle {
+.pattern-flow .vue-flow__handle.pattern-flow-station__handle {
   background: transparent;
   border: 0;
   height: 1px;
@@ -763,16 +761,20 @@
   min-width: 1px;
   opacity: 0;
   pointer-events: none;
-  top: 17px;
+  top: var(--station-dot-center-y);
   width: 1px;
 }
 
-.pattern-flow-station__handle--target {
-  left: calc(50% - 17px);
+.pattern-flow
+  .vue-flow__handle-left.pattern-flow-station__handle--target {
+  left: calc(50% - var(--station-dot-size) / 2);
+  right: auto;
 }
 
-.pattern-flow-station__handle--source {
-  right: calc(50% - 17px);
+.pattern-flow
+  .vue-flow__handle-right.pattern-flow-station__handle--source {
+  left: auto;
+  right: calc(50% - var(--station-dot-size) / 2);
 }
 
 .pattern-flow-station__dot {
@@ -1308,23 +1310,15 @@
   width: 128px;
 }
 
-.pattern-flow-shell--compact .pattern-flow-station__handle {
-  top: 15px;
-}
-
-.pattern-flow-shell--compact .pattern-flow-station__handle--target {
-  left: calc(50% - 15px);
-}
-
-.pattern-flow-shell--compact .pattern-flow-station__handle--source {
-  right: calc(50% - 15px);
-}
-
 .pattern-flow-shell--compact .pattern-flow-station__dot {
   border-width: 4px;
   height: 30px;
   margin: 0 auto;
   width: 30px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-station--terminal {
+  --station-dot-size: 34px;
 }
 
 .pattern-flow-shell--compact .pattern-flow-station--terminal .pattern-flow-station__dot {
