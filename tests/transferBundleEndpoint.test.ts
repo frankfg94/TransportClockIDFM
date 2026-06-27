@@ -103,6 +103,91 @@ describe("transfer bundle endpoint", () => {
     expect(await listServerTransferBundles()).toEqual([]);
   });
 
+  it("reuses a backend bundle for a fresh browser without creating a separate cache", async () => {
+    await clearServerTransferBundles();
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = decodeURIComponent(input.toString());
+
+      if (url.includes("/lines/line:IDFM:C01742/stop_areas?")) {
+        return jsonResponse({
+          stop_areas: [
+            {
+              id: "stop_area:IDFM:A",
+              label: "Station A",
+              name: "Station A",
+            },
+          ],
+        });
+      }
+
+      if (url.includes("/places_nearby?")) {
+        return jsonResponse({
+          places_nearby: [
+            {
+              embedded_type: "stop_area",
+              distance: 120,
+              stop_area: {
+                id: "stop_area:IDFM:B",
+                label: "Station B",
+                name: "Station B",
+              },
+            },
+          ],
+        });
+      }
+
+      if (url.includes("/stop_areas/stop_area:IDFM:B/lines?")) {
+        return jsonResponse({
+          lines: [
+            {
+              id: "line:IDFM:C01371",
+              code: "1",
+              commercial_mode: { id: "commercial_mode:Metro", name: "Metro" },
+              name: "Metro 1",
+              physical_modes: [{ id: "physical_mode:Metro", name: "Metro" }],
+            },
+          ],
+        });
+      }
+
+      return jsonResponse({ lines: [] });
+    });
+    const request = {
+      lineId: "line:IDFM:C01742",
+      lineLabel: "RER A",
+      targets: [{ stopAreaRef: "stop_area:IDFM:A", label: "Station A" }],
+      transferResolverMode: "nearby" as const,
+    };
+
+    const first = await createTransferBundleResponse(
+      {
+        ...request,
+        cacheBust: "browser-a",
+      },
+      { fetcher: fetcher as unknown as typeof fetch },
+    );
+
+    fetcher.mockClear();
+
+    const second = await createTransferBundleResponse(
+      {
+        ...request,
+        cacheBust: "browser-b",
+      },
+      { fetcher: fetcher as unknown as typeof fetch },
+    );
+
+    expect(second.generatedAt).toBe(first.generatedAt);
+    expect(second.transfersByStopAreaRef).toEqual(first.transfersByStopAreaRef);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await listServerTransferBundles()).toMatchObject([
+      {
+        lineId: "line:IDFM:C01742",
+        stopAreaCount: 1,
+      },
+    ]);
+  });
+
   it("progressively completes a backend bundle across bounded invocations", async () => {
     await clearServerTransferBundles();
     const targets = Array.from({ length: 9 }, (_, index) => ({

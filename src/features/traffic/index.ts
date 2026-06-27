@@ -18,7 +18,11 @@ export {
   formatTrafficDisruptionPeriod,
   getDisruptionIcon,
   getDisruptionTone,
+  getTrafficAlertPresentation,
+  getTrafficDisruptionsTone,
   normalizeTrafficText,
+  type TrafficAlertPresentation,
+  type TrafficAlertSymbol,
   type TrafficTone,
 } from "./trafficPresentation";
 export type {

@@ -127,6 +127,12 @@ describe("TrafficPage", () => {
 
     expect(futureOnlyButton).toBeTruthy();
     expect(futureOnlyButton!.classes()).toContain("traffic-ratp-line--normal");
+    expect(futureOnlyButton!.classes()).not.toContain(
+      "traffic-ratp-line--tone-orange",
+    );
+    expect(futureOnlyButton!.classes()).not.toContain(
+      "traffic-ratp-line--tone-red",
+    );
 
     await wrapper.get('[aria-label="Style info trafic"]').trigger("click");
     expect(wrapper.text()).toContain("Cartes détaillées");
@@ -136,6 +142,8 @@ describe("TrafficPage", () => {
       .find((button) => button.attributes("aria-label")?.includes("RER B"));
 
     expect(rerButton).toBeTruthy();
+    expect(rerButton!.classes()).toContain("traffic-ratp-line--tone-red");
+    expect(rerButton!.get(".traffic-ratp-line__status").text()).toBe("x");
     await rerButton!.trigger("click");
     expect(wrapper.text()).toContain("RER B");
     expect(wrapper.text()).toContain("En cours");

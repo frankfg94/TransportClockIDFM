@@ -661,7 +661,7 @@ describe("transfer bundles", () => {
 
   it("saves, lists, merges and deletes local bundles", () => {
     const storage = new MemoryStorage();
-    const now = Date.parse("2026-06-02T10:00:00.000Z");
+    const now = Date.now();
 
     saveTransferBundle(
       {
@@ -709,7 +709,7 @@ describe("transfer bundles", () => {
 
   it("clears only the bundle for a board line before a retry", () => {
     const storage = new MemoryStorage();
-    const now = Date.parse("2026-06-02T10:00:00.000Z");
+    const now = Date.now();
 
     saveTransferBundle(
       {
@@ -894,6 +894,85 @@ describe("transfer bundles", () => {
     const payload = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string) as Record<string, unknown>;
 
     expect(payload).not.toHaveProperty("cacheBust");
+  });
+
+  it("asks the shared backend cache when a different browser has empty local storage", async () => {
+    const firstBrowserStorage = new MemoryStorage();
+    const secondBrowserStorage = new MemoryStorage();
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as {
+        targets: Array<{ stopAreaRef: string }>;
+      };
+
+      return new Response(
+        JSON.stringify({
+          version: 1,
+          generatedAt: "2026-06-02T10:00:00.000Z",
+          lineId: "line:IDFM:C01742",
+          lineLabel: "RER A",
+          nearbyDistanceMeters: 600,
+          requestConcurrency: 1,
+          transferResolverMode: "nearby",
+          transfersByStopAreaRef: Object.fromEntries(
+            payload.targets.map((target) => [
+              target.stopAreaRef,
+              [{ id: "line:IDFM:C01371", label: "1" }],
+            ]),
+          ),
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    });
+    const board = createBoard("line:IDFM:C01742", "RER A", "rer");
+    const pattern: DepartureCallingPattern = {
+      departureId: "rer-a",
+      destination: "Poissy",
+      serviceType: "omnibus",
+      calls: [
+        {
+          id: "call-a",
+          label: "Station A",
+          current: true,
+          served: true,
+          stopAreaRef: "stop_area:IDFM:A",
+        },
+      ],
+    };
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadTransferBundleResultForPattern(board, pattern, 15, {
+      localCacheEnabled: true,
+      localCacheStorage: firstBrowserStorage,
+      transferResolverMode: "nearby",
+    });
+    await loadTransferBundleResultForPattern(board, pattern, 15, {
+      localCacheEnabled: true,
+      localCacheStorage: secondBrowserStorage,
+      transferResolverMode: "nearby",
+    });
+
+    const payloads = fetchMock.mock.calls.map((call) =>
+      JSON.parse(String(call[1]?.body)) as Record<string, unknown>,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(payloads).toEqual([
+      expect.objectContaining({
+        backendCacheEnabled: true,
+        lineId: "line:IDFM:C01742",
+      }),
+      expect.objectContaining({
+        backendCacheEnabled: true,
+        lineId: "line:IDFM:C01742",
+      }),
+    ]);
+    expect(payloads.every((payload) => !("cacheBust" in payload))).toBe(true);
+    expect(listTransferBundles(firstBrowserStorage)).toHaveLength(1);
+    expect(listTransferBundles(secondBrowserStorage)).toHaveLength(1);
   });
 
   it("does not reuse legacy bundle stores after transfer matching changes", () => {

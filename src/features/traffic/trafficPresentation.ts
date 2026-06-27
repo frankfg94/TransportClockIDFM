@@ -5,6 +5,13 @@ import {
 import type { TrafficDisruption } from "./types";
 
 export type TrafficTone = "orange" | "red";
+export type TrafficAlertSymbol = "!" | "x";
+
+export interface TrafficAlertPresentation {
+  label: "Perturbation" | "Interruption";
+  symbol: TrafficAlertSymbol;
+  tone: TrafficTone;
+}
 
 const RED_TRAFFIC_KEYWORDS = [
   "interrompu",
@@ -38,6 +45,32 @@ export function getDisruptionTone(
 
 export function getDisruptionIcon(disruption: TrafficDisruption): string {
   return getDisruptionTone(disruption) === "red" ? "x" : "!";
+}
+
+export function getTrafficDisruptionsTone(
+  disruptions: TrafficDisruption[],
+): TrafficTone | undefined {
+  if (disruptions.length === 0) {
+    return undefined;
+  }
+
+  return disruptions.some((disruption) => getDisruptionTone(disruption) === "red")
+    ? "red"
+    : "orange";
+}
+
+export function getTrafficAlertPresentation(
+  disruptions: TrafficDisruption[],
+): TrafficAlertPresentation | undefined {
+  const tone = getTrafficDisruptionsTone(disruptions);
+
+  if (!tone) {
+    return undefined;
+  }
+
+  return tone === "red"
+    ? { label: "Interruption", symbol: "x", tone }
+    : { label: "Perturbation", symbol: "!", tone };
 }
 
 export function formatTrafficDisruptionPeriod(

@@ -23,9 +23,10 @@ import {
 } from "./features/app-settings";
 import { WeatherExperience } from "./features/weather";
 import {
-  getDisruptionTone,
+  getTrafficAlertPresentation,
   getCurrentTrafficDisruptions,
   normalizeTrafficLineRef,
+  type TrafficAlertPresentation,
 } from "./features/traffic";
 import { transitModeToFamily } from "./services/linePresentation";
 import {
@@ -104,8 +105,8 @@ const WeatherForecastModal = defineAsyncComponent(
 );
 
 type BoardTrafficAlert = {
-  label: "Perturbation" | "Interruption";
-  tone: "orange" | "red";
+  label: TrafficAlertPresentation["label"];
+  tone: TrafficAlertPresentation["tone"];
 };
 
 interface BoardState {
@@ -914,17 +915,9 @@ function getBoardTrafficAlert(
     return undefined;
   }
 
-  return isTrafficInterruption(currentDisruptions)
-    ? { label: "Interruption", tone: "red" }
-    : { label: "Perturbation", tone: "orange" };
-}
+  const alert = getTrafficAlertPresentation(currentDisruptions);
 
-function isTrafficInterruption(
-  disruptions: TrafficLineReport["disruptions"],
-): boolean {
-  return disruptions.some(
-    (disruption) => getDisruptionTone(disruption) === "red",
-  );
+  return alert ? { label: alert.label, tone: alert.tone } : undefined;
 }
 
 function resolveBoardTrafficLineRef(board: TransitBoardConfig): string {

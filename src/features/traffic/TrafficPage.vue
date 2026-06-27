@@ -26,8 +26,8 @@ import {
   type TrafficTimingTab,
 } from "./trafficTiming";
 import {
-  getDisruptionTone,
-  type TrafficTone,
+  getTrafficAlertPresentation,
+  type TrafficAlertPresentation,
 } from "./trafficPresentation";
 import type { LineSearchOption, TransitFamily } from "../../types/transit";
 import type {
@@ -38,7 +38,7 @@ import type {
   TrafficResponse,
 } from "./types";
 
-type TrafficLineSymbol = "!" | "x" | "roadwork" | "";
+type TrafficLineSymbol = TrafficAlertPresentation["symbol"] | "roadwork" | "";
 
 const activeLines = ref<ActiveTrafficLine[]>([]);
 const allTrafficLines = ref<ActiveTrafficLine[]>([]);
@@ -413,6 +413,12 @@ function getLineDisplayStatus(report: TrafficLineReport): TrafficLineStatus {
 }
 
 function getLineStatusSymbol(report: TrafficLineReport): TrafficLineSymbol {
+  const currentAlert = getCurrentTrafficAlert(report);
+
+  if (currentAlert) {
+    return currentAlert.symbol;
+  }
+
   if (hasOnlyUpcomingDisruptions(report)) {
     return "roadwork";
   }
@@ -443,12 +449,21 @@ function getExpandedLines(lines: ActiveTrafficLine[]): ActiveTrafficLine[] {
   );
 }
 
-function getReportTone(report: TrafficLineReport): TrafficTone {
-  return report.disruptions.some(
-    (disruption) => getDisruptionTone(disruption) === "red",
-  )
-    ? "red"
-    : "orange";
+function getCurrentTrafficAlert(
+  report: TrafficLineReport,
+): TrafficAlertPresentation | undefined {
+  return getTrafficAlertPresentation(getCurrentDisruptions(report));
+}
+
+function getLineToneClass(
+  report: TrafficLineReport,
+  classPrefix: "traffic-ratp-line" | "traffic-line-card",
+): string | undefined {
+  const currentAlert = getCurrentTrafficAlert(report);
+
+  return currentAlert
+    ? `${classPrefix}--tone-${currentAlert.tone}`
+    : undefined;
 }
 
 </script>
@@ -553,7 +568,7 @@ function getReportTone(report: TrafficLineReport): TrafficTone {
                 class="traffic-ratp-line"
                 :class="[
                   `traffic-ratp-line--${getLineDisplayStatus(getLineReport(line))}`,
-                  `traffic-ratp-line--tone-${getReportTone(getLineReport(line))}`,
+                  getLineToneClass(getLineReport(line), 'traffic-ratp-line'),
                 ]"
                 type="button"
                 :aria-label="`${line.line.longName}: ${getLineStatusLabel(getLineReport(line))}`"
@@ -788,7 +803,7 @@ function getReportTone(report: TrafficLineReport): TrafficTone {
               class="traffic-line-card"
               :class="[
                 `traffic-line-card--${getLineDisplayStatus(getLineReport(line))}`,
-                `traffic-line-card--tone-${getReportTone(getLineReport(line))}`,
+                getLineToneClass(getLineReport(line), 'traffic-line-card'),
               ]"
             >
               <button type="button" @click="toggleLine(line.navitiaLineRef)">
@@ -1181,15 +1196,14 @@ function getReportTone(report: TrafficLineReport): TrafficTone {
   }
 }
 
-.traffic-ratp-line--tone-orange.traffic-ratp-line--disrupted {
+.traffic-ratp-line--tone-orange {
   border-color: #f59e0b;
   &:hover {
     background: #f59e0b;
   }
 }
 
-.traffic-ratp-line--tone-red.traffic-ratp-line--disrupted,
-.traffic-ratp-line--tone-red.traffic-ratp-line--error {
+.traffic-ratp-line--tone-red {
   border-color: #e63214;
 }
 
@@ -1259,9 +1273,12 @@ function getReportTone(report: TrafficLineReport): TrafficTone {
   color: #ffffff;
 }
 
-.traffic-ratp-line--tone-orange.traffic-ratp-line--disrupted
-  .traffic-ratp-line__status {
+.traffic-ratp-line--tone-orange .traffic-ratp-line__status {
   background: #f59e0b;
+}
+
+.traffic-ratp-line--tone-red .traffic-ratp-line__status {
+  background: #e63214;
 }
 
 .traffic-ratp-row-details {
@@ -1486,12 +1503,11 @@ function getReportTone(report: TrafficLineReport): TrafficTone {
   border-left-color: #ef4444;
 }
 
-.traffic-line-card--tone-orange.traffic-line-card--disrupted {
+.traffic-line-card--tone-orange {
   border-left-color: #f59e0b;
 }
 
-.traffic-line-card--tone-red.traffic-line-card--disrupted,
-.traffic-line-card--tone-red.traffic-line-card--error {
+.traffic-line-card--tone-red {
   border-left-color: #ef4444;
 }
 
@@ -1562,10 +1578,14 @@ function getReportTone(report: TrafficLineReport): TrafficTone {
   color: #b91c1c;
 }
 
-.traffic-line-card--tone-orange.traffic-line-card--disrupted
-  .traffic-line-card__status {
+.traffic-line-card--tone-orange .traffic-line-card__status {
   background: #ffedd5;
   color: #9a3412;
+}
+
+.traffic-line-card--tone-red .traffic-line-card__status {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .traffic-details {
