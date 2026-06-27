@@ -7,6 +7,7 @@ export {
 } from "./trafficNormalization";
 export {
   getCurrentTrafficDisruptions,
+  getTrafficDisruptionDisplayPeriod,
   getTrafficDisruptionTiming,
   getUpcomingTrafficDisruptions,
   parseTrafficDate,

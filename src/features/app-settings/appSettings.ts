@@ -35,6 +35,7 @@ export type WakeLockDuration =
   | "unlimited";
 export type NavigationAutoHide = "none" | "1m";
 export type BoardTogglesPlacement = "inline" | "context-menu";
+export type PlacePresetNavigationMode = "dropdown-swipe" | "dropdown" | "swipe";
 export type CompactLinePlanMode = "auto" | "comfort" | "compact";
 export type TrafficInfoDesign = "ratp" | "cards";
 export type TrafficInfoDefaultScope = "optimized" | "all";
@@ -56,6 +57,7 @@ export interface AppSettings {
   wakeLockDuration: WakeLockDuration;
   wakeDeviceOnAlarm: boolean;
   boardTogglesPlacement: BoardTogglesPlacement;
+  placePresetNavigationMode: PlacePresetNavigationMode;
   // Browser-side cache layer used before the backend bundle fallback.
   transferBundleLocalCacheEnabled: boolean;
   // Nuxt-side bundle cache shared by successive transfer requests.
@@ -123,6 +125,12 @@ export const navigationAutoHideOptions = [
 export const boardTogglesPlacementOptions = [
   { id: "inline", label: "Visible directement (sauf mobile)" },
   { id: "context-menu", label: "Dans le menu contextuel" },
+] as const;
+
+export const placePresetNavigationModeOptions = [
+  { id: "dropdown-swipe", label: "Dropdown + swipe" },
+  { id: "dropdown", label: "Dropdown seulement" },
+  { id: "swipe", label: "Swipe seulement" },
 ] as const;
 
 export const compactLinePlanOptions = [
@@ -214,6 +222,7 @@ export function createDefaultAppSettings(): AppSettings {
     wakeLockDuration: "none",
     wakeDeviceOnAlarm: true,
     boardTogglesPlacement: "inline",
+    placePresetNavigationMode: "dropdown-swipe",
     navigationAutoHide: "none",
     hiddenDirectionIdsByBoardId: {},
     reduceMotion: false,
@@ -287,6 +296,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     )
       ? value.boardTogglesPlacement
       : defaults.boardTogglesPlacement,
+    placePresetNavigationMode: parsePlacePresetNavigationMode(
+      value.placePresetNavigationMode,
+      value.placeSwipeNavigationEnabled,
+    ),
     navigationAutoHide: isNavigationAutoHide(value.navigationAutoHide)
       ? value.navigationAutoHide
       : defaults.navigationAutoHide,
@@ -595,6 +608,25 @@ function isBoardTogglesPlacement(
   value: unknown,
 ): value is BoardTogglesPlacement {
   return value === "inline" || value === "context-menu";
+}
+
+function parsePlacePresetNavigationMode(
+  value: unknown,
+  legacySwipeEnabled: unknown,
+): PlacePresetNavigationMode {
+  if (isPlacePresetNavigationMode(value)) {
+    return value;
+  }
+
+  return legacySwipeEnabled === false ? "dropdown" : "dropdown-swipe";
+}
+
+function isPlacePresetNavigationMode(
+  value: unknown,
+): value is PlacePresetNavigationMode {
+  return (
+    value === "dropdown-swipe" || value === "dropdown" || value === "swipe"
+  );
 }
 
 function isCompactLinePlanMode(value: unknown): value is CompactLinePlanMode {

@@ -64,6 +64,74 @@ describe("traffic impact analysis", () => {
     expect(analysis.segments[0].replacementBus).toBe(true);
   });
 
+  it("extracts repeated interrupted sections and bidirectional title alternatives", () => {
+    const stations = createStations([
+      "Port Royal",
+      "Denfert-Rochereau",
+      "Cite Universitaire",
+      "Gentilly",
+      "Laplace",
+      "Arcueil - Cachan",
+      "Bagneux",
+      "Bourg-la-Reine",
+      "Parc de Sceaux",
+      "La Croix de Berny",
+      "Sceaux",
+      "Fontenay-aux-Roses",
+      "Robinson",
+    ]);
+    const edge = (source: string, target: string) => ({
+      source: normalizePatternStationName(source),
+      target: normalizePatternStationName(target),
+    });
+    const edges = [
+      edge("Port Royal", "Denfert-Rochereau"),
+      edge("Denfert-Rochereau", "Cite Universitaire"),
+      edge("Cite Universitaire", "Gentilly"),
+      edge("Gentilly", "Laplace"),
+      edge("Laplace", "Arcueil - Cachan"),
+      edge("Arcueil - Cachan", "Bagneux"),
+      edge("Bagneux", "Bourg-la-Reine"),
+      edge("Bourg-la-Reine", "Parc de Sceaux"),
+      edge("Parc de Sceaux", "La Croix de Berny"),
+      edge("Bourg-la-Reine", "Sceaux"),
+      edge("Sceaux", "Fontenay-aux-Roses"),
+      edge("Fontenay-aux-Roses", "Robinson"),
+    ];
+    const disruption = createDisruption({
+      id: "rer-b-denfert-south",
+      title: "RER B : Denfert Rochereau <-> La Croix de Berny/Robinson 27-28/06",
+      message:
+        "Le trafic est interrompu entre Denfert Rochereau et La Croix de Berny et entre Denfert Rochereau et Robinson.\nUn service de bus de remplacement est mis en place.",
+    });
+
+    const analysis = analyzeTrafficImpacts([disruption], stations, edges);
+    const interrupted = getInterruptedStations(analysis);
+
+    expect(analysis.segments).toHaveLength(2);
+    expect(interrupted).toContain(
+      normalizePatternStationName("Denfert-Rochereau"),
+    );
+    expect(interrupted).toContain(
+      normalizePatternStationName("La Croix de Berny"),
+    );
+    expect(interrupted).toContain(normalizePatternStationName("Robinson"));
+    expect(interrupted).not.toContain(normalizePatternStationName("Port Royal"));
+    expect(
+      analysis.edgeImpacts[
+        getPatternTrafficEdgeKey(edge("Bourg-la-Reine", "Parc de Sceaux"))
+      ]?.kind,
+    ).toBe("interruption");
+    expect(
+      analysis.edgeImpacts[
+        getPatternTrafficEdgeKey(edge("Bourg-la-Reine", "Sceaux"))
+      ]?.kind,
+    ).toBe("interruption");
+    expect(analysis.segments.every((segment) => segment.replacementBus)).toBe(
+      true,
+    );
+  });
+
   it("recognizes disturbed service sections", () => {
     const stations = createStations([
       "Saint-Michel",

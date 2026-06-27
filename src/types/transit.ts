@@ -141,6 +141,11 @@ export interface TransitBoardPreferences {
   collapsedDirectionIds: string[];
   customBoards: TransitBoardConfig[];
   directionGroupDiscoveryVersion: number;
+  closedDirectionSummaryMode: "last" | "next";
+  maxDeparturesPerDirection: "default" | 1 | 2 | 3 | 4 | 6 | 8 | 10;
+  terminalDirectionsOnly: boolean;
+  hiddenDirectionIdsByBoardId: Record<string, string[]>;
+  boardTogglesPlacement: "inline" | "context-menu";
 }
 
 export interface LineSearchOption {

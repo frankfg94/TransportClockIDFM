@@ -8,11 +8,11 @@ import type { TransitBoardConfig } from "../../types/transit";
 import { normalizeTrafficLineRef } from "./trafficNormalization";
 import type { ActiveTrafficLine } from "./types";
 
-export function getActiveTrafficLines(): ActiveTrafficLine[] {
+export function getActiveTrafficLines(placeId?: string): ActiveTrafficLine[] {
   const preferences =
     typeof window === "undefined"
       ? createDefaultPreferences(transitBoards)
-      : loadTransitPreferences(transitBoards);
+      : loadTransitPreferences(transitBoards, placeId);
   const boards = [...transitBoards, ...preferences.customBoards].filter(
     (board) => preferences.visibleBoardIds.includes(board.id),
   );

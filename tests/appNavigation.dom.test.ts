@@ -44,7 +44,8 @@ describe("AppNavigation", () => {
         stubs: {
           NuxtLink: {
             props: ["to"],
-            template: '<a :href="to"><slot /></a>',
+            template:
+              '<a :href="typeof to === \'string\' ? to : to.path"><slot /></a>',
           },
         },
       },
@@ -67,5 +68,52 @@ describe("AppNavigation", () => {
     window.dispatchEvent(new Event("pointermove"));
     await wrapper.vm.$nextTick();
     expect(wrapper.classes()).not.toContain("app-navigation--hidden");
+  });
+
+  it("shows the active place context on the Stations button", async () => {
+    vi.doMock("#imports", () => ({
+      useRoute: () => ({ path: "/", query: { place: "work" } }),
+    }));
+    vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
+      const actual =
+        await importActual<
+          typeof import("../src/features/app-settings/appSettings")
+        >();
+      const { ref } = await import("vue");
+      const settings = ref(actual.createDefaultAppSettings());
+
+      return {
+        ...actual,
+        useAppSettings: () => ({
+          settings,
+          effectiveMaxDeparturesPerDirection: ref(undefined),
+          updateSettings: vi.fn(),
+          resetSettings: vi.fn(),
+        }),
+      };
+    });
+
+    const { default: AppNavigation } = await import(
+      "../src/features/app-settings/AppNavigationMenu.vue"
+    );
+    const wrapper = mount(AppNavigation, {
+      global: {
+        stubs: {
+          NuxtLink: {
+            props: ["to"],
+            template:
+              '<a class="nuxt-link" :aria-label="$attrs[\'aria-label\']" :href="typeof to === \'string\' ? to : to.path"><slot /></a>',
+          },
+        },
+      },
+    });
+
+    const stationsLink = wrapper.get(".app-navigation__link--stations");
+
+    expect(stationsLink.attributes("aria-label")).toBe("Stations - Travail");
+    expect(wrapper.findAll(".app-navigation__place-dot")).toHaveLength(2);
+    expect(wrapper.findAll(".app-navigation__place-dot--active")).toHaveLength(
+      1,
+    );
   });
 });

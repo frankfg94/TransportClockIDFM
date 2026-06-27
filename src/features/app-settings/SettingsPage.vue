@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { Pencil, Plus, Trash2 } from "lucide-vue-next";
+import AppModal from "../../components/AppModal.vue";
 import MaterialCombobox from "../../components/MaterialCombobox.vue";
+import PlaceNameModal from "../../components/PlaceNameModal.vue";
+import { transitBoards } from "../../config/transitBoards";
 import { MobileReleaseCard } from "../mobile-release";
 import {
   boardTogglesPlacementOptions,
@@ -8,6 +12,7 @@ import {
   compactLinePlanOptions,
   maxDeparturesPerDirectionOptions,
   navigationAutoHideOptions,
+  placePresetNavigationModeOptions,
   parseMaxDeparturesPerDirection,
   parseTransferBundleRetentionDays,
   parseTransferBundleRequestConcurrency,
@@ -27,6 +32,7 @@ import {
   type ClosedDirectionSummaryMode,
   type CompactLinePlanMode,
   type NavigationAutoHide,
+  type PlacePresetNavigationMode,
   type TrafficInfoDefaultScope,
   type TrafficInfoDesign,
   type TransferBundleRequestConcurrency,
@@ -46,9 +52,36 @@ import {
   weatherLocationOptions,
   type WeatherLocationPreset,
 } from "../weather/weatherLocations";
+import {
+  DEFAULT_TRANSIT_PLACE_ID,
+  createDefaultTransitPresetState,
+  createTransitPlace,
+  deleteTransitPlace,
+  getTransitPlaceById,
+  isTransitBuiltinPlace,
+  loadTransitPresetState,
+  renameTransitPlace,
+  resolveTransitPlaceId,
+  saveTransitPresetState,
+  setDefaultTransitPlace,
+  updateTransitPlacePreferences,
+  type TransitPlacePreset,
+  type TransitPresetState,
+} from "../../storage/transitPreferences";
+import type { TransitBoardPreferences } from "../../types/transit";
 
 const { settings, updateSettings, resetSettings } = useAppSettings();
+const presetState = ref<TransitPresetState>(
+  createDefaultTransitPresetState(transitBoards),
+);
 const bundlesModalOpen = ref(false);
+const presetsModalOpen = ref(false);
+const placeNameModalOpen = ref(false);
+const placeNameMode = ref<"create" | "rename">("create");
+const placeNameInitialValue = ref("");
+const placeNameTargetId = ref("");
+const placeNameError = ref("");
+const selectedDisplayPlaceId = ref(DEFAULT_TRANSIT_PLACE_ID);
 const bundleSummaries = ref<TransferBundleSummary[]>([]);
 const localBundleSummaries = ref<TransferBundleSummary[]>([]);
 const settingsNotification = ref("");
@@ -57,16 +90,30 @@ const localBundleCount = computed(() => localBundleSummaries.value.length);
 const bundleCount = computed(
   () => backendBundleCount.value + localBundleCount.value,
 );
+const placeOptions = computed(() =>
+  presetState.value.places.map((place) => ({
+    id: place.id,
+    label: place.label,
+  })),
+);
+const selectedDisplayPlace = computed(
+  () =>
+    getTransitPlaceById(presetState.value, selectedDisplayPlaceId.value) ??
+    presetState.value.places[0],
+);
+const selectedDisplayPreferences = computed(
+  () => selectedDisplayPlace.value?.preferences,
+);
 let settingsNotificationTimer: ReturnType<typeof setTimeout> | undefined;
 
 function updateClosedSummaryMode(value: string): void {
-  updateSettings({
+  updateSelectedDisplayPreferences({
     closedDirectionSummaryMode: value as ClosedDirectionSummaryMode,
   });
 }
 
 function updateMaxDepartures(value: string): void {
-  updateSettings({
+  updateSelectedDisplayPreferences({
     maxDeparturesPerDirection: parseMaxDeparturesPerDirection(value),
   });
 }
@@ -80,11 +127,147 @@ function updateAutoHide(value: string): void {
 }
 
 function updateBoardTogglesPlacement(value: string): void {
-  updateSettings({ boardTogglesPlacement: value as BoardTogglesPlacement });
+  updateSelectedDisplayPreferences({
+    boardTogglesPlacement: value as BoardTogglesPlacement,
+  });
+}
+
+function updatePlacePresetNavigationMode(value: string): void {
+  updateSettings({
+    placePresetNavigationMode: value as PlacePresetNavigationMode,
+  });
 }
 
 function updateCompactMode(value: string): void {
   updateSettings({ compactLinePlanMode: value as CompactLinePlanMode });
+}
+
+function updateSelectedDisplayPlace(value: string): void {
+  selectedDisplayPlaceId.value = resolveTransitPlaceId(
+    presetState.value,
+    value,
+  );
+}
+
+function updateDefaultPlace(value: string): void {
+  try {
+    presetState.value = setDefaultTransitPlace(presetState.value, value);
+    persistPresetState();
+  } catch (error) {
+    showSettingsNotification(
+      error instanceof Error ? error.message : "Lieu introuvable.",
+    );
+  }
+}
+
+function updateSelectedDisplayPreferences(
+  patch: Partial<TransitBoardPreferences>,
+): void {
+  const place = selectedDisplayPlace.value;
+
+  if (!place) {
+    return;
+  }
+
+  presetState.value = updateTransitPlacePreferences(presetState.value, place.id, {
+    ...place.preferences,
+    ...patch,
+  });
+  persistPresetState();
+}
+
+function openPresetsModal(): void {
+  presetsModalOpen.value = true;
+}
+
+function openCreatePlaceModal(): void {
+  placeNameMode.value = "create";
+  placeNameTargetId.value = "";
+  placeNameInitialValue.value = "";
+  placeNameError.value = "";
+  placeNameModalOpen.value = true;
+}
+
+function openRenamePlaceModal(place: TransitPlacePreset): void {
+  placeNameMode.value = "rename";
+  placeNameTargetId.value = place.id;
+  placeNameInitialValue.value = place.label;
+  placeNameError.value = "";
+  placeNameModalOpen.value = true;
+}
+
+function closePlaceNameModal(): void {
+  placeNameModalOpen.value = false;
+  placeNameError.value = "";
+}
+
+function submitPlaceName(name: string): void {
+  try {
+    if (placeNameMode.value === "create") {
+      const result = createTransitPlace(presetState.value, name, transitBoards);
+
+      presetState.value = result.state;
+      selectedDisplayPlaceId.value = result.place.id;
+    } else {
+      const previousTargetId = placeNameTargetId.value;
+      const nextState = renameTransitPlace(
+        presetState.value,
+        previousTargetId,
+        name,
+      );
+      const renamedPlace =
+        getTransitPlaceById(nextState, previousTargetId) ??
+        nextState.places.find((place) => place.label === name);
+
+      presetState.value = nextState;
+      selectedDisplayPlaceId.value = resolveTransitPlaceId(
+        nextState,
+        renamedPlace?.id ?? previousTargetId,
+      );
+    }
+
+    persistPresetState();
+    closePlaceNameModal();
+  } catch (error) {
+    placeNameError.value =
+      error instanceof Error ? error.message : "Impossible d'enregistrer.";
+  }
+}
+
+function removePlace(place: TransitPlacePreset): void {
+  try {
+    presetState.value = deleteTransitPlace(presetState.value, place.id);
+    selectedDisplayPlaceId.value = resolveTransitPlaceId(
+      presetState.value,
+      selectedDisplayPlaceId.value,
+    );
+    persistPresetState();
+  } catch (error) {
+    showSettingsNotification(
+      error instanceof Error ? error.message : "Impossible de supprimer.",
+    );
+  }
+}
+
+function persistPresetState(): void {
+  saveTransitPresetState(presetState.value);
+}
+
+function getPlaceStationNames(place: TransitPlacePreset): string[] {
+  const boards = [...transitBoards, ...place.preferences.customBoards];
+  const visibleIds = new Set(place.preferences.visibleBoardIds);
+
+  return place.preferences.boardOrderIds.flatMap((boardId) => {
+    const board = boards.find((candidate) => candidate.id === boardId);
+
+    return board && visibleIds.has(board.id) ? [board.title] : [];
+  });
+}
+
+function getPlaceStationSummary(place: TransitPlacePreset): string {
+  const count = getPlaceStationNames(place).length;
+
+  return `${count} station${count > 1 ? "s" : ""}`;
 }
 
 function updateTrafficInfoDesign(value: string): void {
@@ -236,6 +419,14 @@ function showSettingsNotification(message: string): void {
   }, 5_000);
 }
 
+onMounted(() => {
+  presetState.value = loadTransitPresetState(transitBoards);
+  selectedDisplayPlaceId.value = resolveTransitPlaceId(
+    presetState.value,
+    selectedDisplayPlaceId.value,
+  );
+});
+
 onBeforeUnmount(() => {
   if (settingsNotificationTimer) {
     clearTimeout(settingsNotificationTimer);
@@ -254,12 +445,69 @@ onBeforeUnmount(() => {
       </p>
     </header>
 
+    <section class="settings-panel" aria-labelledby="settings-places-title">
+      <div class="settings-panel__heading">
+        <div>
+          <p class="eyebrow">Lieux</p>
+          <h2 id="settings-places-title">Dashboards enregistrés</h2>
+        </div>
+        <button class="button-secondary" type="button" @click="openPresetsModal">
+          Gérer les lieux
+        </button>
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <strong>Lieu par défaut</strong>
+          <span>
+            Utilisé quand la page d'accueil est ouverte sans paramètre
+            <code>place</code>.
+          </span>
+        </div>
+        <MaterialCombobox
+          :model-value="presetState.defaultPlaceId"
+          :options="placeOptions"
+          aria-label="Lieu par défaut"
+          @update:model-value="updateDefaultPlace"
+        />
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <strong>Sélecteur de lieux</strong>
+          <span>
+            Choisit comment naviguer entre Maison, Travail et les lieux
+            personnalisés.
+          </span>
+        </div>
+        <MaterialCombobox
+          :model-value="settings.placePresetNavigationMode"
+          :options="[...placePresetNavigationModeOptions]"
+          aria-label="Mode du sélecteur de lieux"
+          @update:model-value="updatePlacePresetNavigationMode"
+        />
+      </div>
+    </section>
+
     <section class="settings-panel" aria-labelledby="settings-display-title">
       <div class="settings-panel__heading">
         <div>
           <p class="eyebrow">Affichage</p>
           <h2 id="settings-display-title">Tableaux et prochains passages</h2>
         </div>
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <strong>Lieu à configurer</strong>
+          <span>Ces réglages d'affichage sont propres à chaque dashboard.</span>
+        </div>
+        <MaterialCombobox
+          :model-value="selectedDisplayPlaceId"
+          :options="placeOptions"
+          aria-label="Lieu à configurer"
+          @update:model-value="updateSelectedDisplayPlace"
+        />
       </div>
 
       <div class="settings-row">
@@ -271,7 +519,9 @@ onBeforeUnmount(() => {
           </span>
         </div>
         <MaterialCombobox
-          :model-value="settings.boardTogglesPlacement"
+          :model-value="
+            selectedDisplayPreferences?.boardTogglesPlacement ?? 'inline'
+          "
           :options="[...boardTogglesPlacementOptions]"
           aria-label="Emplacement des boutons de stations"
           @update:model-value="updateBoardTogglesPlacement"
@@ -284,7 +534,9 @@ onBeforeUnmount(() => {
           <span>Choisit le résumé visible sans ouvrir une direction.</span>
         </div>
         <MaterialCombobox
-          :model-value="settings.closedDirectionSummaryMode"
+          :model-value="
+            selectedDisplayPreferences?.closedDirectionSummaryMode ?? 'next'
+          "
           :options="[...closedDirectionSummaryOptions]"
           aria-label="Affichage accordion fermé"
           @update:model-value="updateClosedSummaryMode"
@@ -299,7 +551,12 @@ onBeforeUnmount(() => {
           >
         </div>
         <MaterialCombobox
-          :model-value="String(settings.maxDeparturesPerDirection)"
+          :model-value="
+            String(
+              selectedDisplayPreferences?.maxDeparturesPerDirection ??
+                'default',
+            )
+          "
           :options="[...maxDeparturesPerDirectionOptions]"
           aria-label="Nombre maximum de prochains passages"
           @update:model-value="updateMaxDepartures"
@@ -309,9 +566,9 @@ onBeforeUnmount(() => {
       <label class="settings-toggle">
         <input
           type="checkbox"
-          :checked="settings.terminalDirectionsOnly"
+          :checked="selectedDisplayPreferences?.terminalDirectionsOnly ?? false"
           @change="
-            updateSettings({
+            updateSelectedDisplayPreferences({
               terminalDirectionsOnly: ($event.target as HTMLInputElement)
                 .checked,
             })
@@ -871,6 +1128,84 @@ onBeforeUnmount(() => {
       </button>
     </footer>
 
+    <AppModal
+      :open="presetsModalOpen"
+      eyebrow="Dashboard"
+      title="Lieux enregistrés"
+      panel-class="settings-presets-modal"
+      @close="presetsModalOpen = false"
+    >
+      <div class="settings-presets-list">
+        <article
+          v-for="place in presetState.places"
+          :key="place.id"
+          class="settings-preset-item"
+        >
+          <div class="settings-preset-item__content">
+            <strong>{{ place.label }}</strong>
+            <span>{{ getPlaceStationSummary(place) }}</span>
+            <ul v-if="getPlaceStationNames(place).length">
+              <li
+                v-for="stationName in getPlaceStationNames(place)"
+                :key="`${place.id}-${stationName}`"
+              >
+                {{ stationName }}
+              </li>
+            </ul>
+            <small v-else>Aucune station suivie.</small>
+          </div>
+          <div class="settings-preset-item__actions">
+            <button
+              class="icon-button"
+              type="button"
+              :aria-label="`Renommer ${place.label}`"
+              title="Renommer"
+              @click="openRenamePlaceModal(place)"
+            >
+              <Pencil :size="18" aria-hidden="true" />
+            </button>
+            <button
+              v-if="!isTransitBuiltinPlace(place)"
+              class="icon-button settings-preset-item__delete"
+              type="button"
+              :aria-label="`Supprimer ${place.label}`"
+              title="Supprimer"
+              @click="removePlace(place)"
+            >
+              <Trash2 :size="18" aria-hidden="true" />
+            </button>
+          </div>
+        </article>
+      </div>
+
+      <template #footer>
+        <button
+          class="button-secondary"
+          type="button"
+          @click="openCreatePlaceModal"
+        >
+          <Plus :size="18" aria-hidden="true" />
+          Ajouter un lieu
+        </button>
+        <button
+          class="button-secondary"
+          type="button"
+          @click="presetsModalOpen = false"
+        >
+          Fermer
+        </button>
+      </template>
+    </AppModal>
+
+    <PlaceNameModal
+      :error="placeNameError"
+      :initial-name="placeNameInitialValue"
+      :mode="placeNameMode"
+      :open="placeNameModalOpen"
+      @close="closePlaceNameModal"
+      @submit="submitPlaceName"
+    />
+
     <Teleport to="body">
       <Transition name="settings-notification">
         <aside
@@ -1121,6 +1456,62 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
+}
+
+.settings-presets-modal {
+  max-width: 720px;
+  width: min(100%, 720px);
+}
+
+.settings-presets-list {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-preset-item {
+  align-items: start;
+  border: 1px solid rgba(16, 35, 63, 0.1);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 14px;
+}
+
+.settings-preset-item__content {
+  display: grid;
+  gap: 5px;
+}
+
+.settings-preset-item__content strong {
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 950;
+}
+
+.settings-preset-item__content span,
+.settings-preset-item__content small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.settings-preset-item__content ul {
+  color: var(--ink);
+  display: grid;
+  gap: 4px;
+  font-weight: 760;
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.settings-preset-item__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-preset-item__delete {
+  color: var(--danger);
 }
 
 .settings-bundle-modal-backdrop {

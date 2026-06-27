@@ -1,16 +1,26 @@
 import { mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { defineComponent } from "vue";
+import { transitBoards } from "../src/config/transitBoards";
+import {
+  createDefaultTransitPresetState,
+  createTransitPlace,
+  saveTransitPresetState,
+} from "../src/storage/transitPreferences";
 
 afterEach(() => {
   document.body.innerHTML = "";
+  window.localStorage.clear();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.resetModules();
   vi.doUnmock("../src/features/app-settings/appSettings");
+  vi.doUnmock("../src/features/mobile-release");
 });
 
 describe("SettingsPage", () => {
   it("renders the global feature flag controls with default values", async () => {
+    mockMobileReleaseCard();
     vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
       const actual =
         await importActual<
@@ -57,10 +67,17 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Bundles de correspondances");
     expect(wrapper.text()).toContain("View bundles");
     expect(wrapper.text()).toContain("Clear bundles");
+    expect(wrapper.text()).toContain("Dashboards enregistrés");
+    expect(wrapper.text()).toContain("Lieu par défaut");
+    expect(wrapper.text()).toContain("Sélecteur de lieux");
+    expect(wrapper.text()).toContain("Lieu à configurer");
+    expect(wrapper.text()).toContain("Maison");
     expect(wrapper.text()).toContain("Affichage des stations");
     expect(wrapper.text()).toContain("Visible directement");
 
-    await wrapper.find(".material-combobox__trigger").trigger("click");
+    await wrapper
+      .get('[aria-label="Emplacement des boutons de stations"]')
+      .trigger("click");
     expect(wrapper.text()).toContain("Dans le menu contextuel");
     expect(wrapper.text()).toContain("Accordion fermé");
     expect(wrapper.text()).toContain("Prochain passage");
@@ -113,6 +130,11 @@ describe("SettingsPage", () => {
     expect(
       (apparentTemperatureInput.element as HTMLInputElement).checked,
     ).toBe(false);
+
+    await wrapper.get('[aria-label="Mode du sélecteur de lieux"]').trigger("click");
+    expect(wrapper.text()).toContain("Dropdown + swipe");
+    expect(wrapper.text()).toContain("Dropdown seulement");
+    expect(wrapper.text()).toContain("Swipe seulement");
     expect(backendCacheToggle?.text()).toContain(
       "Le chargement des correspondances sera très lent tant que le cache backend est désactivé.",
     );
@@ -120,6 +142,7 @@ describe("SettingsPage", () => {
 
   it("shows a temporary notification after clearing bundles or resetting settings", async () => {
     vi.useFakeTimers();
+    mockMobileReleaseCard();
     vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
       const actual =
         await importActual<
@@ -176,4 +199,96 @@ describe("SettingsPage", () => {
     await resetButton?.trigger("click");
     expect(document.body.textContent).toContain("Paramètres réinitialisés");
   });
+
+  it("manages presets from the settings modal", async () => {
+    mockMobileReleaseCard();
+    vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
+      const actual =
+        await importActual<
+          typeof import("../src/features/app-settings/appSettings")
+        >();
+      const { computed, ref } = await import("vue");
+      const settings = ref(actual.createDefaultAppSettings());
+
+      return {
+        ...actual,
+        useAppSettings: () => ({
+          settings,
+          effectiveMaxDeparturesPerDirection: computed(() =>
+            actual.getEffectiveMaxDeparturesPerDirection(settings.value),
+          ),
+          updateSettings: (patch: Partial<typeof settings.value>) => {
+            settings.value = actual.normalizeAppSettings({
+              ...settings.value,
+              ...patch,
+            });
+          },
+          resetSettings: () => {
+            settings.value = actual.createDefaultAppSettings();
+          },
+        }),
+      };
+    });
+
+    const initialState = createTransitPlace(
+      createDefaultTransitPresetState(transitBoards),
+      "Studio",
+      transitBoards,
+    ).state;
+    saveTransitPresetState(initialState);
+
+    const { default: SettingsPage } = await import(
+      "../src/features/app-settings/SettingsPage.vue"
+    );
+    const wrapper = mount(SettingsPage, { attachTo: document.body });
+
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Gérer les lieux"))
+      ?.trigger("click");
+
+    expect(document.body.textContent).toContain("Lieux enregistrés");
+    expect(document.body.textContent).toContain("Studio");
+    expect(
+      document.body.querySelector('[aria-label="Supprimer Maison"]'),
+    ).toBeNull();
+
+    document
+      .body
+      .querySelector<HTMLButtonElement>('[aria-label="Renommer Studio"]')
+      ?.click();
+    await wrapper.vm.$nextTick();
+
+    const input = document.body.querySelector<HTMLInputElement>(
+      ".place-name-form input",
+    );
+    expect(input).toBeTruthy();
+    input!.value = "Sport";
+    input!.dispatchEvent(new Event("input"));
+    await wrapper.vm.$nextTick();
+
+    Array.from(document.body.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("Renommer"))
+      ?.click();
+    await wrapper.vm.$nextTick();
+
+    expect(document.body.textContent).toContain("Sport");
+    expect(document.body.textContent).not.toContain("Studio");
+
+    document
+      .body
+      .querySelector<HTMLButtonElement>('[aria-label="Supprimer Sport"]')
+      ?.click();
+    await wrapper.vm.$nextTick();
+
+    expect(document.body.textContent).not.toContain("Sport");
+  });
 });
+
+function mockMobileReleaseCard(): void {
+  vi.doMock("../src/features/mobile-release", () => ({
+    MobileReleaseCard: defineComponent({
+      template: "<section />",
+    }),
+  }));
+}

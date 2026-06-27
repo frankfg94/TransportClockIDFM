@@ -23,6 +23,7 @@ describe("app settings", () => {
       wakeLockDuration: "none",
       wakeDeviceOnAlarm: true,
       boardTogglesPlacement: "inline",
+      placePresetNavigationMode: "dropdown-swipe",
       navigationAutoHide: "none",
       compactLinePlanMode: "auto",
       richTransferTooltips: true,
@@ -57,6 +58,7 @@ describe("app settings", () => {
       showPatternCityZones: "yes",
       terminalDirectionsOnly: true,
       boardTogglesPlacement: "drawer",
+      placePresetNavigationMode: "future",
       wakeLockDuration: "forever",
       navigationAutoHide: "always",
       compactLinePlanMode: "tiny",
@@ -86,6 +88,7 @@ describe("app settings", () => {
     expect(settings.showPatternCityZones).toBe(true);
     expect(settings.terminalDirectionsOnly).toBe(true);
     expect(settings.boardTogglesPlacement).toBe("inline");
+    expect(settings.placePresetNavigationMode).toBe("dropdown-swipe");
     expect(settings.wakeLockDuration).toBe("none");
     expect(settings.navigationAutoHide).toBe("none");
     expect(settings.compactLinePlanMode).toBe("auto");
@@ -128,6 +131,21 @@ describe("app settings", () => {
     expect(parseTransferBundleRequestConcurrency("999")).toBe(1);
     expect(parseTransferBundleRequestSpacingMs("1000")).toBe(1000);
     expect(parseTransferBundleRequestSpacingMs("999999")).toBe(0);
+  });
+
+  it("migrates the previous place swipe toggle to the new selector mode", () => {
+    expect(
+      normalizeAppSettings({ placeSwipeNavigationEnabled: false })
+        .placePresetNavigationMode,
+    ).toBe("dropdown");
+    expect(
+      normalizeAppSettings({ placeSwipeNavigationEnabled: true })
+        .placePresetNavigationMode,
+    ).toBe("dropdown-swipe");
+    expect(
+      normalizeAppSettings({ placePresetNavigationMode: "swipe" })
+        .placePresetNavigationMode,
+    ).toBe("swipe");
   });
 
   it("exposes every transfer resolver mode option", () => {

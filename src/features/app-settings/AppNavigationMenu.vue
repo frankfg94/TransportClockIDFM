@@ -2,39 +2,90 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   Activity,
+  Briefcase,
   Home,
+  MapPin,
   MoreVertical,
   SlidersHorizontal,
   TriangleAlert,
 } from "lucide-vue-next";
 import { useRoute } from "#imports";
 import { useAppSettings } from "./appSettings";
+import { transitBoards } from "../../config/transitBoards";
+import {
+  TRANSIT_PREFERENCES_CHANGED_EVENT,
+  TRANSIT_PREFERENCES_STORAGE_KEY,
+  DEFAULT_TRANSIT_PLACE_ID,
+  WORK_TRANSIT_PLACE_ID,
+  createDefaultTransitPresetState,
+  getTransitPlaceById,
+  loadTransitPresetState,
+  resolveTransitPlaceId,
+  type TransitPlacePreset,
+  type TransitPresetState,
+} from "../../storage/transitPreferences";
 
 const AUTO_HIDE_MS = 60_000;
 
 type NavigationSlot = "stations" | "traffic" | "more";
+type NavigationIcon = typeof Home;
+type NavigationTarget = string | { path: string; query?: Record<string, string> };
+type PrimaryNavigationLink = {
+  to: NavigationTarget;
+  label: string;
+  icon: NavigationIcon;
+  slot: Exclude<NavigationSlot, "more">;
+};
 
 const route = useRoute();
 const { settings } = useAppSettings();
 const hidden = ref(false);
 const menuOpen = ref(false);
 const navigationRoot = ref<HTMLElement>();
+const presetState = ref<TransitPresetState>(
+  createDefaultTransitPresetState(transitBoards),
+);
 let hideTimer: number | undefined;
 
-const primaryLinks: {
-  to: string;
-  label: string;
-  icon: typeof Home;
-  slot: Exclude<NavigationSlot, "more">;
-}[] = [
-  { to: "/", label: "Stations", icon: Home, slot: "stations" },
+const activeStationPlaceId = computed(() =>
+  resolveTransitPlaceId(presetState.value, getRoutePlaceId()),
+);
+const activeStationPlace = computed(() =>
+  getTransitPlaceById(presetState.value, activeStationPlaceId.value),
+);
+const stationPlaceIcon = computed(() =>
+  getPlaceNavigationIcon(activeStationPlace.value),
+);
+const stationPlaceDots = computed(() =>
+  settings.value.placePresetNavigationMode !== "dropdown" &&
+  presetState.value.places.length > 1
+    ? presetState.value.places
+    : [],
+);
+const primaryLinks = computed<PrimaryNavigationLink[]>(() => [
   {
-    to: "/traffic",
+    to: {
+      path: "/",
+      query: {
+        place: activeStationPlaceId.value,
+      },
+    },
+    label: "Stations",
+    icon: stationPlaceIcon.value,
+    slot: "stations",
+  },
+  {
+    to: {
+      path: "/traffic",
+      query: {
+        place: activeStationPlaceId.value,
+      },
+    },
     label: "Info trafic",
     icon: TriangleAlert,
     slot: "traffic",
   },
-];
+]);
 
 const secondaryLinks = [
   { to: "/settings", label: "Paramètres", icon: SlidersHorizontal },
@@ -69,14 +120,19 @@ const navigationClasses = computed(() => [
 ]);
 
 onMounted(() => {
+  refreshPresetState();
   registerActivityListeners();
   document.addEventListener("pointerdown", closeMenuOnOutsidePointer);
+  window.addEventListener("storage", syncPresetState);
+  window.addEventListener(TRANSIT_PREFERENCES_CHANGED_EVENT, syncPresetState);
   resetAutoHideTimer();
 });
 
 onBeforeUnmount(() => {
   unregisterActivityListeners();
   document.removeEventListener("pointerdown", closeMenuOnOutsidePointer);
+  window.removeEventListener("storage", syncPresetState);
+  window.removeEventListener(TRANSIT_PREFERENCES_CHANGED_EVENT, syncPresetState);
   clearAutoHideTimer();
 });
 
@@ -94,6 +150,44 @@ watch(
 
 function isActive(path: string): boolean {
   return path === "/" ? route.path === "/" : route.path.startsWith(path);
+}
+
+function getRoutePlaceId(): string | undefined {
+  const routeWithQuery = route as {
+    query?: Record<string, string | string[] | undefined>;
+  };
+  const value = routeWithQuery.query?.place;
+  const placeId = Array.isArray(value) ? value[0] : value;
+
+  return typeof placeId === "string" ? placeId : undefined;
+}
+
+function getPlaceNavigationIcon(place?: TransitPlacePreset): NavigationIcon {
+  if (place?.id === WORK_TRANSIT_PLACE_ID) {
+    return Briefcase;
+  }
+
+  if (place?.id === DEFAULT_TRANSIT_PLACE_ID) {
+    return Home;
+  }
+
+  return MapPin;
+}
+
+function refreshPresetState(): void {
+  presetState.value = loadTransitPresetState(transitBoards);
+}
+
+function syncPresetState(event?: Event): void {
+  if (
+    event instanceof StorageEvent &&
+    event.key !== null &&
+    event.key !== TRANSIT_PREFERENCES_STORAGE_KEY
+  ) {
+    return;
+  }
+
+  refreshPresetState();
 }
 
 function revealNavigation(): void {
@@ -173,7 +267,7 @@ function handleVisibilityChange(): void {
   >
     <NuxtLink
       v-for="link in primaryLinks"
-      :key="link.to"
+      :key="link.slot"
       class="app-navigation__link"
       :class="[
         `app-navigation__link--${link.slot}`,
@@ -181,11 +275,31 @@ function handleVisibilityChange(): void {
           'app-navigation__link--active': activeNavigationSlot === link.slot,
         },
       ]"
+      :aria-label="
+        link.slot === 'stations'
+          ? `Stations - ${activeStationPlace?.label ?? 'Lieu'}`
+          : undefined
+      "
       :to="link.to"
       @click="closeMenu"
     >
       <component :is="link.icon" aria-hidden="true" />
       <span>{{ link.label }}</span>
+      <span
+        v-if="link.slot === 'stations' && stationPlaceDots.length > 1"
+        class="app-navigation__place-dots"
+        aria-hidden="true"
+      >
+        <span
+          v-for="place in stationPlaceDots"
+          :key="place.id"
+          :class="{
+            'app-navigation__place-dot--active':
+              place.id === activeStationPlaceId,
+          }"
+          class="app-navigation__place-dot"
+        ></span>
+      </span>
     </NuxtLink>
 
     <div class="app-navigation__menu">
@@ -337,6 +451,7 @@ function handleVisibilityChange(): void {
 }
 
 .app-navigation__link--stations {
+  padding-bottom: 7px;
   width: var(--nav-stations-w);
 }
 
@@ -358,6 +473,46 @@ function handleVisibilityChange(): void {
 .app-navigation__link--active:hover {
   background: transparent;
   color: #ffffff;
+}
+
+.app-navigation__place-dots {
+  align-items: center;
+  bottom: 5px;
+  display: inline-flex;
+  gap: 3px;
+  height: 8px;
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.app-navigation__place-dot {
+  background: transparent;
+  height: 8px;
+  position: relative;
+  width: 10px;
+}
+
+.app-navigation__place-dot::before {
+  background: currentColor;
+  border-radius: 999px;
+  content: "";
+  height: 4px;
+  left: 50%;
+  opacity: 0.32;
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+  transition:
+    opacity 160ms ease,
+    width 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  width: 4px;
+  will-change: width, opacity;
+}
+
+.app-navigation__place-dot--active::before {
+  opacity: 0.95;
+  width: 10px;
 }
 
 .app-navigation__menu {

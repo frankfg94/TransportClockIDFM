@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { ChevronDown, Info, RefreshCw, TrafficCone } from "lucide-vue-next";
+import { useRoute } from "#imports";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import TrafficDisruptionCard from "./TrafficDisruptionCard.vue";
@@ -54,6 +55,7 @@ const allLinesMode = ref(false);
 const scopeBurstKey = ref(0);
 const scopeBurstKind = ref<"optimized" | "all">("optimized");
 const { settings, updateSettings } = useAppSettings();
+const route = useRoute();
 
 const reportByLineRef = computed(
   () => new Map(reports.value.map((report) => [report.lineRef, report])),
@@ -104,10 +106,17 @@ const firstTrafficDisruption = computed(
 );
 
 onMounted(() => {
-  activeLines.value = getActiveTrafficLines();
+  activeLines.value = getActiveTrafficLines(getRoutePlaceId());
   allLinesMode.value = settings.value.trafficInfoDefaultScope === "all";
   void initializeTrafficPage();
 });
+
+function getRoutePlaceId(): string | undefined {
+  const value = route.query.place;
+  const placeId = Array.isArray(value) ? value[0] : value;
+
+  return typeof placeId === "string" ? placeId : undefined;
+}
 
 async function initializeTrafficPage(): Promise<void> {
   if (allLinesMode.value) {

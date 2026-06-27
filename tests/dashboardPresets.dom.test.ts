@@ -1,0 +1,306 @@
+import { flushPromises, mount } from "@vue/test-utils";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { defineComponent, reactive } from "vue";
+import {
+  createDefaultTransitPresetState,
+  createTransitPlace,
+  loadTransitPresetState,
+  saveTransitPresetState,
+} from "../src/storage/transitPreferences";
+import { transitBoards } from "../src/config/transitBoards";
+import type { TransitBoardConfig } from "../src/types/transit";
+
+let route: {
+  path: string;
+  query: Record<string, string | undefined>;
+};
+let router: {
+  push: ReturnType<typeof vi.fn>;
+  replace: ReturnType<typeof vi.fn>;
+};
+
+afterEach(() => {
+  document.body.innerHTML = "";
+  window.localStorage.clear();
+  vi.unstubAllGlobals();
+  vi.resetModules();
+  vi.doUnmock("nuxt/app");
+  vi.doUnmock("vuedraggable");
+  vi.doUnmock("../src/components/TransitBoard.vue");
+  vi.doUnmock("../src/features/app-settings");
+  vi.doUnmock("../src/features/weather");
+  vi.doUnmock("../src/services/idfm");
+});
+
+describe("dashboard presets", () => {
+  it("normalizes the home URL and switches to an empty work dashboard", async () => {
+    installDashboardMocks({});
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+
+    await flushPromises();
+
+    expect(router.replace).toHaveBeenCalled();
+    expect(route.query.place).toBe("home");
+
+    await wrapper.get(".place-switcher__trigger").trigger("click");
+    const workButton = wrapper
+      .findAll(".place-switcher__item")
+      .find((button) => button.text().includes("Travail"));
+
+    expect(workButton).toBeTruthy();
+    await workButton?.trigger("click");
+    await flushPromises();
+
+    expect(router.push).toHaveBeenCalled();
+    expect(route.query.place).toBe("work");
+    expect(wrapper.text()).toContain("Aucune station suivie pour le moment");
+  });
+
+  it("switches places with desktop arrows and horizontal swipe", async () => {
+    installDashboardMocks({});
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+
+    await flushPromises();
+    expect(wrapper.find(".place-swipe-arrow--previous").exists()).toBe(false);
+    expect(wrapper.find(".place-swipe-arrow--next").exists()).toBe(true);
+
+    await wrapper.get(".place-swipe-arrow--next").trigger("click");
+    await flushPromises();
+
+    expect(route.query.place).toBe("work");
+    expect(wrapper.find(".place-swipe-arrow--previous").exists()).toBe(true);
+    expect(wrapper.find(".place-swipe-arrow--next").exists()).toBe(false);
+
+    const shell = wrapper.get(".place-swipe-shell");
+    await shell.trigger("pointerdown", {
+      button: 0,
+      clientX: 340,
+      clientY: 20,
+      pointerId: 1,
+    });
+    await shell.trigger("pointermove", {
+      clientX: 80,
+      clientY: 22,
+      pointerId: 1,
+    });
+    await shell.trigger("pointerup", {
+      clientX: 80,
+      clientY: 22,
+      pointerId: 1,
+    });
+    await flushPromises();
+
+    expect(route.query.place).toBe("work");
+
+    await shell.trigger("pointerdown", {
+      button: 0,
+      clientX: 80,
+      clientY: 20,
+      pointerId: 1,
+    });
+    await shell.trigger("pointermove", {
+      clientX: 340,
+      clientY: 22,
+      pointerId: 1,
+    });
+    await shell.trigger("pointerup", {
+      clientX: 340,
+      clientY: 22,
+      pointerId: 1,
+    });
+    await flushPromises();
+
+    expect(route.query.place).toBe("home");
+  });
+
+  it("keeps custom presets between home and work for arrow navigation", async () => {
+    const state = createTransitPlace(
+      createDefaultTransitPresetState(transitBoards),
+      "Sport",
+      transitBoards,
+    ).state;
+    saveTransitPresetState(state);
+    installDashboardMocks({});
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+
+    await flushPromises();
+    await wrapper.get(".place-swipe-arrow--next").trigger("click");
+    await flushPromises();
+
+    expect(route.query.place).toBe("sport");
+    expect(wrapper.find(".place-swipe-arrow--previous").exists()).toBe(true);
+    expect(wrapper.find(".place-swipe-arrow--next").exists()).toBe(true);
+
+    await wrapper.get(".place-swipe-arrow--next").trigger("click");
+    await flushPromises();
+
+    expect(route.query.place).toBe("work");
+    expect(wrapper.find(".place-swipe-arrow--previous").exists()).toBe(true);
+    expect(wrapper.find(".place-swipe-arrow--next").exists()).toBe(false);
+  });
+
+  it("uses dropdown-only mode without swipe controls", async () => {
+    installDashboardMocks({}, { placePresetNavigationMode: "dropdown" });
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+
+    await flushPromises();
+
+    expect(wrapper.find(".place-switcher__trigger").exists()).toBe(true);
+    expect(wrapper.find(".place-swipe-arrow--next").exists()).toBe(false);
+    expect(wrapper.find(".place-swipe-shell--enabled").exists()).toBe(false);
+  });
+
+  it("uses swipe-only mode without the topbar dropdown", async () => {
+    installDashboardMocks({}, { placePresetNavigationMode: "swipe" });
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+
+    await flushPromises();
+
+    expect(wrapper.find(".place-switcher__trigger").exists()).toBe(false);
+    expect(wrapper.find(".place-swipe-arrow--next").exists()).toBe(true);
+    expect(wrapper.find(".place-swipe-shell--enabled").exists()).toBe(true);
+  });
+
+  it("creates a custom place from the switcher and navigates to it", async () => {
+    installDashboardMocks({});
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+
+    await flushPromises();
+    await wrapper.get(".place-switcher__trigger").trigger("click");
+    await wrapper.get(".place-switcher__item--add").trigger("click");
+    await flushPromises();
+
+    const input = document.body.querySelector<HTMLInputElement>(
+      ".place-name-form input",
+    );
+    expect(input).toBeTruthy();
+    input!.value = "Studio";
+    input!.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    const createButton = Array.from(document.body.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("Créer"));
+    expect(createButton).toBeTruthy();
+    createButton!.dispatchEvent(new Event("click"));
+    await flushPromises();
+
+    expect(route.query.place).toBe("studio");
+    const state = loadTransitPresetState([]);
+    expect(state.places.some((place) => place.id === "studio")).toBe(true);
+    expect(wrapper.text()).toContain("Aucune station suivie pour le moment");
+  });
+
+});
+
+function installDashboardMocks(
+  query: Record<string, string | undefined>,
+  appSettings: Record<string, unknown> = {},
+): void {
+  route = reactive({
+    path: "/",
+    query: { ...query },
+  });
+  router = {
+    push: vi.fn(async (location: { query?: Record<string, string> }) => {
+      route.query = { ...(location.query ?? {}) };
+    }),
+    replace: vi.fn(async (location: { query?: Record<string, string> }) => {
+      route.query = { ...(location.query ?? {}) };
+    }),
+  };
+
+  vi.stubGlobal("__IDFM_API_KEY_CONFIGURED__", false);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ available: true }))),
+  );
+  vi.doMock("nuxt/app", () => ({
+    useRoute: () => route,
+    useRouter: () => router,
+  }));
+  vi.doMock("vuedraggable", () => ({
+    default: defineComponent({
+      props: ["modelValue"],
+      template:
+        '<section class="boards-grid"><div v-for="element in modelValue" :key="element.id"><slot name="item" :element="element" /></div></section>',
+    }),
+  }));
+  vi.doMock("../src/features/weather", () => ({
+    WeatherExperience: defineComponent({
+      template: "<div />",
+    }),
+  }));
+  vi.doMock("../src/features/app-settings", () => ({
+    filterTerminalOnly: <T,>(items: T[]) => items,
+    requestTemporaryAlarmWakeLock: vi.fn(),
+    useAppSettings: () => ({
+      settings: {
+        value: {
+          wakeDeviceOnAlarm: false,
+          showPatternMiniMap: true,
+          showPatternCityZones: true,
+          compactLinePlanMode: "auto",
+          richTransferTooltips: true,
+          smartTrafficDetection: true,
+          transferBundleRetentionDays: 15,
+          transferBundleRequestConcurrency: 1,
+          transferBundleRequestSpacingMs: 0,
+          transferBundleLocalCacheEnabled: true,
+          transferBundleBackendCacheEnabled: true,
+          transferResolverMode: "auto",
+          placePresetNavigationMode: "dropdown-swipe",
+          reduceMotion: false,
+          ...appSettings,
+        },
+      },
+    }),
+  }));
+  vi.doMock("../src/components/TransitBoard.vue", () => ({
+    default: defineComponent({
+      props: ["board"],
+      template: '<article class="mock-board">{{ board.title }}</article>',
+    }),
+  }));
+  vi.doMock("../src/services/idfm", () => ({
+    fetchBoardDepartures: vi.fn(async (board: TransitBoardConfig) => ({
+      departures: [],
+      directionGroups: board.directionGroups.map((group) => ({
+        id: group.id,
+        label: group.label,
+        subtitle: group.subtitle,
+        departures: [],
+        serviceEnded: false,
+      })),
+    })),
+    fetchDirectionGroupsForStation: vi.fn(async () => []),
+  }));
+}
+
+function createBoard(id: string, stopAreaRef: string): TransitBoardConfig {
+  return {
+    id,
+    title: "Station test",
+    city: "Test",
+    line: {
+      ref: "line:test",
+      shortName: "T",
+      longName: "Ligne test",
+      mode: "tram",
+      color: "#0064ff",
+      textColor: "#ffffff",
+    },
+    monitoringPoints: [{ ref: "stop:test", label: "Tous quais" }],
+    directionGroups: [],
+    schedule: {
+      lineRef: "line:test",
+      stopAreaRef,
+    },
+    maxDepartures: 8,
+  };
+}

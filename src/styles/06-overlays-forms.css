@@ -102,6 +102,13 @@ body:has(.modal-backdrop) {
   width: min(100%, 1120px);
 }
 
+.app-modal__body {
+  display: grid;
+  gap: 16px;
+  overflow: auto;
+  padding: 20px;
+}
+
 .modal-scale-enter-active,
 .modal-scale-leave-active {
   transition:
@@ -330,6 +337,23 @@ body:has(.modal-backdrop) {
   font-weight: 800;
   gap: 12px;
   justify-content: space-between;
+}
+
+.place-name-modal {
+  max-width: 500px;
+}
+
+.place-name-form {
+  display: grid;
+  gap: 12px;
+}
+
+.place-name-form label {
+  color: var(--ink);
+  display: grid;
+  font-size: 0.86rem;
+  font-weight: 800;
+  gap: 7px;
 }
 
 .form-retry {

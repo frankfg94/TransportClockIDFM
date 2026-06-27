@@ -1,4 +1,7 @@
-import { parseTrafficDate } from "./trafficTiming";
+import {
+  getTrafficDisruptionDisplayPeriod,
+  parseTrafficDate,
+} from "./trafficTiming";
 import type { TrafficDisruption } from "./types";
 
 export type TrafficTone = "orange" | "red";
@@ -40,7 +43,7 @@ export function getDisruptionIcon(disruption: TrafficDisruption): string {
 export function formatTrafficDisruptionPeriod(
   disruption: TrafficDisruption,
 ): string {
-  const period = disruption.applicationPeriods[0];
+  const period = getTrafficDisruptionDisplayPeriod(disruption);
 
   if (!period) {
     return "";

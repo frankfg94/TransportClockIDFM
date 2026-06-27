@@ -14,6 +14,7 @@ const baseSettings: AppSettings = {
   wakeLockDuration: "none",
   wakeDeviceOnAlarm: true,
   boardTogglesPlacement: "inline",
+  placePresetNavigationMode: "dropdown-swipe",
   navigationAutoHide: "none",
   reduceMotion: false,
   compactLinePlanMode: "auto",

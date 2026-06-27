@@ -84,7 +84,9 @@ const REPLACEMENT_BUS_KEYWORDS = [
 ];
 
 const SECTION_END_PATTERN =
-  String.raw`(?=(?:\s+(?:et\s+(?:perturb|ralenti|interrompu|suspendu)|sur\s+le\s+reste|en\s+raison|suite|a\s+la\s+suite|pour\s+cause|toute\s+la|tous\s+les|du\s+\d|jusqu|reprise|veuillez)|[.;,\n]|$))`;
+  String.raw`(?=(?:\s+(?:(?:et|ou)\s+entre\b|et\s+(?:perturb|ralenti|interrompu|suspendu)|sur\s+le\s+reste|en\s+raison|suite|a\s+la\s+suite|pour\s+cause|toute\s+la|tous\s+les|du\s+\d|jusqu|reprise|veuillez)|[.;,\n]|$))`;
+const BIDIRECTIONAL_SECTION_END_PATTERN =
+  String.raw`(?=(?:\s+(?:periode|p[ée]riode|dates?|arr[êe]t|motif|travaux|incident)|[.;,\n]|$))`;
 
 export function analyzeTrafficImpacts(
   disruptions: TrafficDisruption[],
@@ -348,6 +350,10 @@ function extractTrafficSections(
   const sections: Array<{ from: string; to: string }> = [];
   const regexes = [
     new RegExp(
+      String.raw`(?:^|[\n:])\s*([^:\n]+?)\s*(?:<->|\u2194|\u21c4)\s+(.+?)${BIDIRECTIONAL_SECTION_END_PATTERN}`,
+      "giu",
+    ),
+    new RegExp(
       String.raw`\bentre\s+(.+?)\s+et\s+(.+?)${SECTION_END_PATTERN}`,
       "giu",
     ),
@@ -363,21 +369,68 @@ function extractTrafficSections(
 
   regexes.forEach((regex) => {
     for (const match of text.matchAll(regex)) {
-      const from = cleanSectionStationLabel(match[1]);
-      const to = cleanSectionStationLabel(match[2]);
-
-      if (from && to) {
-        sections.push({ from, to });
-      }
+      addTrafficSections(sections, match[1], match[2]);
     }
   });
 
   return sections;
 }
 
+function addTrafficSections(
+  sections: Array<{ from: string; to: string }>,
+  fromValue?: string,
+  toValue?: string,
+): void {
+  const fromOptions = splitSectionStationAlternatives(fromValue);
+  const toOptions = splitSectionStationAlternatives(toValue);
+
+  fromOptions.forEach((from) => {
+    toOptions.forEach((to) => {
+      if (!from || !to || sectionAlreadyExists(sections, from, to)) {
+        return;
+      }
+
+      sections.push({ from, to });
+    });
+  });
+}
+
+function splitSectionStationAlternatives(value?: string): string[] {
+  const cleaned = cleanSectionStationLabel(value);
+
+  if (!cleaned) {
+    return [];
+  }
+
+  return cleaned
+    .split(/\s*\/\s*/gu)
+    .map(cleanSectionStationLabel)
+    .filter((label): label is string => Boolean(label));
+}
+
+function sectionAlreadyExists(
+  sections: Array<{ from: string; to: string }>,
+  from: string,
+  to: string,
+): boolean {
+  const nextKey = createSectionKey(from, to);
+
+  return sections.some(
+    (section) => createSectionKey(section.from, section.to) === nextKey,
+  );
+}
+
+function createSectionKey(from: string, to: string): string {
+  return [normalizePatternStationName(from), normalizePatternStationName(to)]
+    .sort()
+    .join("--");
+}
+
 function cleanSectionStationLabel(value?: string): string {
   return (value ?? "")
     .replace(/\s+/gu, " ")
+    .replace(/\s+\d{1,2}\s*-\s*\d{1,2}\/\d{1,2}(?:\/\d{2,4})?$/gu, "")
+    .replace(/\s+\d{1,2}\/\d{1,2}(?:\/\d{2,4})?$/gu, "")
     .replace(/^[\s:,-]+|[\s:,-]+$/gu, "")
     .trim();
 }

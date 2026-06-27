@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getCurrentTrafficDisruptions,
+  getTrafficDisruptionDisplayPeriod,
+  getTrafficDisruptionTiming,
   getUpcomingTrafficDisruptions,
   parseTrafficDate,
 } from "../src/features/traffic";
@@ -33,18 +35,66 @@ describe("traffic timing", () => {
       "future",
     ]);
   });
+
+  it("uses every application period instead of only the first one", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-27T12:00:00+02:00"));
+
+    const weekendWork = createDisruption("rer-b-weekend-work", [
+      {
+        begin: "20260628T030000",
+        end: "20260629T030000",
+      },
+      {
+        begin: "20260627T030000",
+        end: "20260628T030000",
+      },
+    ]);
+
+    expect(getTrafficDisruptionTiming(weekendWork)).toBe("current");
+    expect(getCurrentTrafficDisruptions([weekendWork])).toEqual([
+      weekendWork,
+    ]);
+    expect(getUpcomingTrafficDisruptions([weekendWork])).toEqual([]);
+  });
+
+  it("displays the active period when Navitia returns periods out of order", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-27T12:00:00+02:00"));
+
+    const weekendWork = createDisruption("rer-b-weekend-work", [
+      {
+        begin: "20260628T030000",
+        end: "20260629T030000",
+      },
+      {
+        begin: "20260627T030000",
+        end: "20260628T030000",
+      },
+    ]);
+
+    expect(getTrafficDisruptionDisplayPeriod(weekendWork)).toEqual({
+      begin: "20260627T030000",
+      end: "20260628T030000",
+    });
+  });
 });
 
 function createDisruption(
   id: string,
-  begin: string,
-  end: string,
+  beginOrPeriods: string | TrafficDisruption["applicationPeriods"],
+  end?: string,
 ): TrafficDisruption {
+  const applicationPeriods =
+    typeof beginOrPeriods === "string"
+      ? [{ begin: beginOrPeriods, end }]
+      : beginOrPeriods;
+
   return {
     id,
     title: id,
     kind: "works",
-    applicationPeriods: [{ begin, end }],
+    applicationPeriods,
     impactedLineRefs: ["line:IDFM:C01371"],
     impactedStopNames: [],
   };

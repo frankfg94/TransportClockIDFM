@@ -10,7 +10,11 @@ import {
 } from "vue";
 import Draggable from "vuedraggable";
 import BoardVisibilityControls from "./components/BoardVisibilityControls.vue";
+import EmptyStationsState from "./components/EmptyStationsState.vue";
+import PlaceNameModal from "./components/PlaceNameModal.vue";
+import PlaceSwitcher from "./components/PlaceSwitcher.vue";
 import TransitBoard from "./components/TransitBoard.vue";
+import { usePlaceSwipeNavigation } from "./composables/usePlaceSwipeNavigation";
 import { transitBoards } from "./config/transitBoards";
 import {
   filterTerminalOnly,
@@ -32,10 +36,19 @@ import { toServerApiUrl } from "./services/serverApi";
 import {
   TRANSIT_PREFERENCES_CHANGED_EVENT,
   TRANSIT_PREFERENCES_STORAGE_KEY,
+  DEFAULT_TRANSIT_PLACE_ID,
+  cloneTransitBoardPreferences,
+  createDefaultTransitPresetState,
   createDefaultPreferences,
-  loadTransitPreferences,
+  createTransitPlace,
+  getTransitPlaceById,
+  loadTransitPresetState,
   migrateCustomBoardDirectionGroups,
-  saveTransitPreferences,
+  resolveTransitPlaceId,
+  saveTransitPresetState,
+  updateTransitPlacePreferences,
+  type TransitPlacePreset,
+  type TransitPresetState,
 } from "./storage/transitPreferences";
 import {
   createDepartureAlarm,
@@ -65,6 +78,8 @@ import type {
 } from "./features/traffic/types";
 import {
   BellRing,
+  ChevronLeft,
+  ChevronRight,
   CloudSun,
   LayoutGrid,
   List,
@@ -73,7 +88,7 @@ import {
   RefreshCw,
   SlidersHorizontal,
 } from "lucide-vue-next";
-import { useRouter } from "nuxt/app";
+import { useRoute, useRouter } from "nuxt/app";
 
 const DepartureAlarmModal = defineAsyncComponent(
   () => import("./components/DepartureAlarmModal.vue"),
@@ -117,9 +132,13 @@ const REFRESH_INTERVAL_MS = 30_000;
 const MOBILE_BREAKPOINT_QUERY = "(max-width: 760px)";
 const DESKTOP_DRAG_BREAKPOINT_QUERY =
   "(min-width: 761px) and (hover: hover) and (pointer: fine)";
+const route = useRoute();
+const router = useRouter();
+const presetState = reactive<TransitPresetState>(
+  createDefaultTransitPresetState(transitBoards),
+);
 const preferences = reactive(createDefaultPreferences(transitBoards));
-const { settings, effectiveMaxDeparturesPerDirection, updateSettings } =
-  useAppSettings();
+const { settings } = useAppSettings();
 let activeAlarmAudio:
   | {
       audioContext: AudioContext;
@@ -129,7 +148,10 @@ let activeAlarmAudio:
 const states = reactive<Record<string, BoardState>>({});
 const refreshing = ref(false);
 const lastRefresh = ref<Date>();
+const activePlaceId = ref(DEFAULT_TRANSIT_PLACE_ID);
 const stationModalOpen = ref(false);
+const placeNameModalOpen = ref(false);
+const placeNameError = ref("");
 const topbarMenuOpen = ref(false);
 const weatherModalOpen = ref(false);
 const boardDisplayModalOpen = ref(false);
@@ -169,6 +191,31 @@ const departureServiceTypeCache = new Map<
   Promise<DepartureServiceType | undefined>
 >();
 
+const placeOptions = computed(() =>
+  presetState.places.map((place) => ({
+    id: place.id,
+    kind: place.kind,
+    label: place.label,
+  })),
+);
+const activePlace = computed<TransitPlacePreset | undefined>(() =>
+  getTransitPlaceById(presetState, activePlaceId.value),
+);
+const activePlaceLabel = computed(() => activePlace.value?.label ?? "Maison");
+const placeDropdownEnabled = computed(
+  () => settings.value.placePresetNavigationMode !== "swipe",
+);
+const placeSwipeEnabled = computed(
+  () => settings.value.placePresetNavigationMode !== "dropdown",
+);
+const placeSwipe = usePlaceSwipeNavigation({
+  places: placeOptions,
+  activePlaceId,
+  enabled: placeSwipeEnabled,
+  reduceMotion: computed(() => settings.value.reduceMotion),
+  selectPlace: selectTransitPlace,
+});
+
 const allBoards = computed<TransitBoardConfig[]>(() => [
   ...transitBoards,
   ...preferences.customBoards,
@@ -190,12 +237,108 @@ const stationModalMode = computed<"dropdown" | "multistep">(() =>
   mobileBoardTogglesInContextMenu.value ? "multistep" : "dropdown",
 );
 
+function syncActivePreferencesFromState(): void {
+  const resolvedPlaceId = resolveTransitPlaceId(
+    presetState,
+    activePlaceId.value,
+  );
+  const place = getTransitPlaceById(presetState, resolvedPlaceId);
+
+  if (!place) {
+    return;
+  }
+
+  activePlaceId.value = resolvedPlaceId;
+  Object.assign(preferences, cloneTransitBoardPreferences(place.preferences));
+  allBoards.value.forEach((board) => ensureBoardState(board.id));
+}
+
+function saveActiveTransitPreferences(): void {
+  const nextState = updateTransitPlacePreferences(
+    presetState,
+    activePlaceId.value,
+    preferences,
+  );
+
+  Object.assign(presetState, nextState);
+  saveTransitPresetState(nextState);
+}
+
+function getRoutePlaceId(): string | undefined {
+  const value = route.query.place;
+  const placeId = Array.isArray(value) ? value[0] : value;
+
+  return typeof placeId === "string" ? placeId : undefined;
+}
+
+function replaceRoutePlace(placeId: string): void {
+  void router.replace({
+    path: route.path,
+    query: {
+      ...route.query,
+      place: placeId,
+    },
+  });
+}
+
+function syncActivePlaceFromRoute(options?: { refresh: boolean }): void {
+  const requestedPlaceId = getRoutePlaceId();
+  const resolvedPlaceId = resolveTransitPlaceId(presetState, requestedPlaceId);
+  const placeChanged = activePlaceId.value !== resolvedPlaceId;
+
+  if (requestedPlaceId !== resolvedPlaceId) {
+    replaceRoutePlace(resolvedPlaceId);
+  }
+
+  activePlaceId.value = resolvedPlaceId;
+  syncActivePreferencesFromState();
+  closeTopbarMenu();
+
+  if (placeChanged && options?.refresh !== false) {
+    void refreshAll();
+  }
+}
+
+function selectTransitPlace(placeId: string): void {
+  void router.push({
+    path: route.path,
+    query: {
+      ...route.query,
+      place: placeId,
+    },
+  });
+}
+
+function openPlaceNameModal(): void {
+  placeNameError.value = "";
+  placeNameModalOpen.value = true;
+}
+
+function closePlaceNameModal(): void {
+  placeNameModalOpen.value = false;
+  placeNameError.value = "";
+}
+
+function createPlaceFromName(label: string): void {
+  try {
+    const result = createTransitPlace(presetState, label, transitBoards);
+
+    Object.assign(presetState, result.state);
+    saveTransitPresetState(result.state);
+    closePlaceNameModal();
+    selectTransitPlace(result.place.id);
+  } catch (error) {
+    placeNameError.value =
+      error instanceof Error ? error.message : "Impossible d'ajouter ce lieu.";
+  }
+}
+
 function updateHiddenDirectionIdsForBoard(
   boardId: string,
   directionIds: string[],
 ): void {
   const nextHiddenDirectionIdsByBoardId = {
-    ...settings.value.hiddenDirectionIdsByBoardId,
+    ...preferences.hiddenDirectionIdsByBoardId,
   };
 
   if (directionIds.length > 0) {
@@ -204,9 +347,8 @@ function updateHiddenDirectionIdsForBoard(
     delete nextHiddenDirectionIdsByBoardId[boardId];
   }
 
-  updateSettings({
-    hiddenDirectionIdsByBoardId: nextHiddenDirectionIdsByBoardId,
-  });
+  preferences.hiddenDirectionIdsByBoardId = nextHiddenDirectionIdsByBoardId;
+  saveActiveTransitPreferences();
 }
 
 const visibleBoards = computed(() =>
@@ -225,10 +367,17 @@ watch(
   { immediate: true },
 );
 
+watch(
+  () => route.query.place,
+  () => {
+    syncActivePlaceFromRoute();
+  },
+);
+
 const boardTogglesInContextMenu = computed(
   () =>
     mobileBoardTogglesInContextMenu.value ||
-    settings.value.boardTogglesPlacement === "context-menu",
+    preferences.boardTogglesPlacement === "context-menu",
 );
 
 const nextAlarm = computed(
@@ -522,13 +671,13 @@ function saveBoardOrderAfterDrag(): void {
       : board.id,
   );
   draggingBoards.value = false;
-  saveTransitPreferences(preferences);
+  saveActiveTransitPreferences();
 }
 
 function createBoardRequestForSettings(
   board: TransitBoardConfig,
 ): TransitBoardConfig {
-  const maxDeparturesPerDirection = effectiveMaxDeparturesPerDirection.value;
+  const maxDeparturesPerDirection = preferences.maxDeparturesPerDirection;
 
   return typeof maxDeparturesPerDirection === "number"
     ? {
@@ -543,7 +692,7 @@ function getVisibleDirectionGroupsForBoard(
 ): DirectionDepartureGroup[] {
   return filterTerminalOnly(
     states[boardId]?.directionGroups ?? [],
-    settings.value.terminalDirectionsOnly,
+    preferences.terminalDirectionsOnly,
   );
 }
 
@@ -618,7 +767,7 @@ function toggleBoardVisibility(boardId: string): void {
   preferences.visibleBoardIds = orderedBoards.value
     .map((board) => board.id)
     .filter((id) => visibleIds.has(id));
-  saveTransitPreferences(preferences);
+  saveActiveTransitPreferences();
 
   if (visibleIds.has(boardId)) {
     void refreshBoard(boardId);
@@ -644,7 +793,7 @@ function addCustomBoard(board: TransitBoardConfig): void {
   }
 
   ensureBoardState(board.id);
-  saveTransitPreferences(preferences);
+  saveActiveTransitPreferences();
   void refreshBoard(board.id);
 }
 
@@ -675,7 +824,7 @@ function changeBoardStation(
   );
   delete states[previousBoard.id];
   ensureBoardState(nextBoard.id);
-  saveTransitPreferences(preferences);
+  saveActiveTransitPreferences();
   updateAlarms(removeAlarmsForBoard(previousBoard.id, departureAlarms.value));
   void refreshBoard(nextBoard.id);
 }
@@ -694,7 +843,7 @@ function removeCustomBoard(boardId: string): void {
     (id) => !id.startsWith(`${boardId}:`),
   );
   delete states[boardId];
-  saveTransitPreferences(preferences);
+  saveActiveTransitPreferences();
   updateAlarms(removeAlarmsForBoard(boardId, departureAlarms.value));
 }
 
@@ -711,7 +860,7 @@ function setBoardDisplayMode(
   }
 
   preferences.boardDisplayMode = displayMode;
-  saveTransitPreferences(preferences);
+  saveActiveTransitPreferences();
   closeTopbarMenu();
 }
 
@@ -735,8 +884,12 @@ function openLinePage(board: TransitBoardConfig): void {
 }
 
 function openTrafficPage(): void {
-  const router = useRouter();
-  router.push("/traffic");
+  router.push({
+    path: "/traffic",
+    query: {
+      place: activePlaceId.value,
+    },
+  });
 }
 
 function getBoardTrafficAlert(
@@ -789,7 +942,7 @@ function toggleDirection(boardId: string, directionId: string): void {
   }
 
   preferences.collapsedDirectionIds = Array.from(collapsedIds);
-  saveTransitPreferences(preferences);
+  saveActiveTransitPreferences();
 }
 
 function getBoardCollapsedDirectionIds(boardId: string): string[] {
@@ -1198,7 +1351,7 @@ async function migrateStoredCustomBoardDirections(): Promise<void> {
   });
 
   if (migration.completed || migration.updatedBoardIds.length > 0) {
-    saveTransitPreferences(preferences);
+    saveActiveTransitPreferences();
   }
 }
 
@@ -1243,9 +1396,8 @@ function syncTransitPreferences(event?: Event): void {
   }
 
   const previousVisibleIds = new Set(preferences.visibleBoardIds);
-  const nextPreferences = loadTransitPreferences(transitBoards);
-
-  Object.assign(preferences, nextPreferences);
+  Object.assign(presetState, loadTransitPresetState(transitBoards));
+  syncActivePlaceFromRoute({ refresh: false });
 
   visibleBoards.value.forEach((board) => {
     ensureBoardState(board.id);
@@ -1257,7 +1409,8 @@ function syncTransitPreferences(event?: Event): void {
 }
 
 onMounted(() => {
-  Object.assign(preferences, loadTransitPreferences(transitBoards));
+  Object.assign(presetState, loadTransitPresetState(transitBoards));
+  syncActivePlaceFromRoute({ refresh: false });
   departureAlarms.value = loadDepartureAlarms();
   allBoards.value.forEach((board) => ensureBoardState(board.id));
   pageVisible.value = isPageVisible();
@@ -1348,6 +1501,14 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
+
+          <PlaceSwitcher
+            v-if="placeDropdownEnabled"
+            :active-place-id="activePlaceId"
+            :places="placeOptions"
+            @add="openPlaceNameModal"
+            @select="selectTransitPlace"
+          />
 
           <div>
             <span>{{ formatClock(lastRefresh) }}</span>
@@ -1440,7 +1601,7 @@ onBeforeUnmount(() => {
           }"
         >
           <BoardVisibilityControls
-            v-if="!boardTogglesInContextMenu"
+            v-if="!boardTogglesInContextMenu && visibleBoards.length > 0"
             :boards="allBoards"
             :visible-board-ids="preferences.visibleBoardIds"
             @toggle="toggleBoardVisibility"
@@ -1509,74 +1670,130 @@ onBeforeUnmount(() => {
       </Transition>
 
       <section
-        v-if="netexCacheAlert"
-        class="netex-cache-alert"
-        role="status"
+        class="place-swipe-shell"
+        :class="{
+          'place-swipe-shell--enabled': placeSwipe.canNavigate.value,
+          'place-swipe-shell--dragging': placeSwipe.isDragging.value,
+        }"
         aria-live="polite"
+        @pointerdown="placeSwipe.onPointerDown"
+        @pointermove="placeSwipe.onPointerMove"
+        @pointerup="placeSwipe.onPointerUp"
+        @pointercancel="placeSwipe.onPointerCancel"
+        @lostpointercapture="placeSwipe.onPointerCancel"
       >
-        <strong>Données NeTEx introuvables</strong>
-        <span>
-          {{ netexCacheAlert }}
-          Configurez <code>IDFM_NETEX_CACHE_REMOTE</code> avec une URL R2/HTTP
-          ou <code>IDFM_NETEX_CACHE_LOCAL</code> avec un dossier contenant
-          <code>index.json</code>.
-        </span>
+        <button
+          v-if="placeSwipe.canGoPrevious.value"
+          class="place-swipe-arrow place-swipe-arrow--previous"
+          type="button"
+          :aria-label="`Afficher le lieu précédent avant ${activePlaceLabel}`"
+          @click="placeSwipe.goToPreviousPlace"
+        >
+          <ChevronLeft aria-hidden="true" />
+        </button>
+        <button
+          v-if="placeSwipe.canGoNext.value"
+          class="place-swipe-arrow place-swipe-arrow--next"
+          type="button"
+          :aria-label="`Afficher le lieu suivant après ${activePlaceLabel}`"
+          @click="placeSwipe.goToNextPlace"
+        >
+          <ChevronRight aria-hidden="true" />
+        </button>
+
+        <Transition :name="placeSwipe.transitionName.value">
+          <div
+            :key="activePlaceId"
+            class="place-swipe-page"
+            :style="placeSwipe.pageStyle.value"
+          >
+            <section
+              v-if="netexCacheAlert"
+              class="netex-cache-alert"
+              role="status"
+            >
+              <strong>Données NeTEx introuvables</strong>
+              <span>
+                {{ netexCacheAlert }}
+                Configurez <code>IDFM_NETEX_CACHE_REMOTE</code> avec une URL
+                R2/HTTP ou <code>IDFM_NETEX_CACHE_LOCAL</code> avec un dossier
+                contenant <code>index.json</code>.
+              </span>
+            </section>
+
+            <EmptyStationsState
+              v-if="visibleBoards.length === 0"
+              :place-label="activePlaceLabel"
+              @add-station="stationModalOpen = true"
+            />
+
+            <Draggable
+              v-else
+              v-model="draggableBoards"
+              tag="section"
+              class="boards-grid"
+              :class="{
+                'boards-grid--list': preferences.boardDisplayMode === 'list',
+                'boards-grid--draggable': desktopDragEnabled,
+              }"
+              aria-label="Horaires par arrêt"
+              item-key="id"
+              :animation="220"
+              :disabled="!desktopDragEnabled"
+              :filter="'.board button, .board input, .board select, .board textarea, .board a'"
+              :prevent-on-filter="false"
+              chosen-class="board--drag-chosen"
+              drag-class="board--dragging"
+              ghost-class="board--drag-ghost"
+              @start="startBoardDrag"
+              @end="saveBoardOrderAfterDrag"
+            >
+              <template #item="{ element: board }">
+                <div class="board-drag-item">
+                  <TransitBoard
+                    :board="board"
+                    :departures="states[board.id].departures"
+                    :direction-groups="
+                      getVisibleDirectionGroupsForBoard(board.id)
+                    "
+                    :collapsed-direction-ids="
+                      getBoardCollapsedDirectionIds(board.id)
+                    "
+                    :hidden-direction-ids="
+                      preferences.hiddenDirectionIdsByBoardId[board.id] ?? []
+                    "
+                    :loading="states[board.id].loading"
+                    :error="states[board.id].error"
+                    :updated-at="states[board.id].updatedAt"
+                    :removable="isCustomBoard(board.id)"
+                    :alarm-departure-ids="getBoardAlarmDepartureIds(board.id)"
+                    :closed-summary-mode="preferences.closedDirectionSummaryMode"
+                    :traffic-alert="getBoardTrafficAlert(board)"
+                    :display-mode="preferences.boardDisplayMode"
+                    @update:hidden-direction-ids="
+                      updateHiddenDirectionIdsForBoard(board.id, $event)
+                    "
+                    @change-station="changeBoardStation(board, $event)"
+                    @open-traffic="openTrafficPage"
+                    @remove="removeCustomBoard(board.id)"
+                    @open-line-page="openLinePage"
+                    @schedule-alarm="openAlarmModal"
+                    @show-pattern="openPatternModal"
+                    @toggle-direction="toggleDirection(board.id, $event)"
+                  />
+                </div>
+              </template>
+            </Draggable>
+          </div>
+        </Transition>
       </section>
 
-      <Draggable
-        v-model="draggableBoards"
-        tag="section"
-        class="boards-grid"
-        :class="{
-          'boards-grid--list': preferences.boardDisplayMode === 'list',
-          'boards-grid--draggable': desktopDragEnabled,
-        }"
-        aria-label="Horaires par arrêt"
-        item-key="id"
-        :animation="220"
-        :disabled="!desktopDragEnabled"
-        :filter="'.board button, .board input, .board select, .board textarea, .board a'"
-        :prevent-on-filter="false"
-        chosen-class="board--drag-chosen"
-        drag-class="board--dragging"
-        ghost-class="board--drag-ghost"
-        @start="startBoardDrag"
-        @end="saveBoardOrderAfterDrag"
-      >
-        <template #item="{ element: board }">
-          <div class="board-drag-item">
-            <TransitBoard
-              :board="board"
-              :departures="states[board.id].departures"
-              :direction-groups="getVisibleDirectionGroupsForBoard(board.id)"
-              :collapsed-direction-ids="
-                getBoardCollapsedDirectionIds(board.id)
-              "
-              :hidden-direction-ids="
-                settings.hiddenDirectionIdsByBoardId[board.id] ?? []
-              "
-              :loading="states[board.id].loading"
-              :error="states[board.id].error"
-              :updated-at="states[board.id].updatedAt"
-              :removable="isCustomBoard(board.id)"
-              :alarm-departure-ids="getBoardAlarmDepartureIds(board.id)"
-              :closed-summary-mode="settings.closedDirectionSummaryMode"
-              :traffic-alert="getBoardTrafficAlert(board)"
-              :display-mode="preferences.boardDisplayMode"
-              @update:hidden-direction-ids="
-                updateHiddenDirectionIdsForBoard(board.id, $event)
-              "
-              @change-station="changeBoardStation(board, $event)"
-              @open-traffic="openTrafficPage"
-              @remove="removeCustomBoard(board.id)"
-              @open-line-page="openLinePage"
-              @schedule-alarm="openAlarmModal"
-              @show-pattern="openPatternModal"
-              @toggle-direction="toggleDirection(board.id, $event)"
-            />
-          </div>
-        </template>
-      </Draggable>
+      <PlaceNameModal
+        :error="placeNameError"
+        :open="placeNameModalOpen"
+        @close="closePlaceNameModal"
+        @submit="createPlaceFromName"
+      />
 
       <StationBoardModal
         v-if="stationModalOpen"
