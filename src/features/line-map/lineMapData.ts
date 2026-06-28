@@ -106,6 +106,7 @@ export function createDetailedLineMapViewModel(
       id: sequence.id,
       label: sequence.label,
       direction: sequence.direction,
+      topologySource: sequence.topologySource,
       stopIds,
     });
   });
@@ -487,9 +488,14 @@ function createLineMapSegments(
   branches: LineMapBranchView[],
 ): LineMapSegmentView[] {
   const stopById = new Map(stops.map((stop) => [stop.id, stop]));
-  const segments = new Map<string, LineMapSegmentView & { length: number }>();
+  const segments = new Map<
+    string,
+    LineMapSegmentView & { authoritative: boolean; length: number }
+  >();
 
   branches.forEach((branch) => {
+    const isAuthoritative = branch.topologySource === "server";
+
     branch.stopIds.slice(0, -1).forEach((fromStopId, index) => {
       const toStopId = branch.stopIds[index + 1];
       const fromStop = stopById.get(fromStopId);
@@ -506,9 +512,19 @@ function createLineMapSegments(
           id: key,
           fromStopId,
           toStopId,
+          authoritative: isAuthoritative,
           distanceKm: getStopDistanceKm(fromStop, toStop),
           length: getNormalizedDistance(fromStop, toStop),
         });
+        return;
+      }
+
+      if (isAuthoritative) {
+        const existing = segments.get(key);
+
+        if (existing) {
+          existing.authoritative = true;
+        }
       }
     });
   });
@@ -522,6 +538,7 @@ function createLineMapSegments(
 
   return segmentValues
     .filter((segment) =>
+      segment.authoritative ||
       !isExpressChord(segment, stops, stopById, medianLength),
     )
     .map(({ id, fromStopId, toStopId, distanceKm }) => ({

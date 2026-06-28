@@ -182,7 +182,7 @@ function iconForPlace(place: PlaceOption) {
   box-shadow: var(--shadow-menu);
   display: grid;
   gap: 4px;
-  min-width: 220px;
+  min-width: 250px;
   padding: 8px;
   position: absolute;
   right: 0;

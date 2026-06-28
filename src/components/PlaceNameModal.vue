@@ -67,7 +67,7 @@ function submit(): void {
           v-model="name"
           autocomplete="off"
           class="form-input"
-          maxlength="40"
+          maxlength="20"
           placeholder="Ex. Sport, École, Studio"
           type="text"
         />
@@ -86,3 +86,12 @@ function submit(): void {
     </template>
   </AppModal>
 </template>
+<style lang="css" scoped>
+.place-name-form {
+  display: flex;
+  align-items: start;
+}
+.form-input {
+  max-height: 20px;
+}
+</style>

@@ -75,4 +75,59 @@ describe("StationTransferDetails", () => {
     await wrapper.setProps({ error: false });
     expect(wrapper.text()).toContain("Aucune autre ligne");
   });
+
+  it("emits selected transfers on click and highlights the externally active transfer", async () => {
+    const wrapper = mount(StationTransferDetails, {
+      props: {
+        stationLabel: "ChÃ¢telet",
+        transfers,
+        activeTransferId: "rer:b",
+      },
+      global: {
+        stubs: {
+          LineIconBadge: {
+            props: ["line"],
+            template: '<span class="line-stub">{{ line.label }}</span>',
+          },
+        },
+      },
+    });
+
+    const items = wrapper.findAll(".station-transfer-details__item");
+    expect(items[1].classes()).toContain(
+      "station-transfer-details__item--active",
+    );
+
+    await items[0].trigger("click");
+
+    expect(wrapper.emitted("selectTransfer")?.[0]?.[0]).toMatchObject({
+      id: "metro:4",
+    });
+  });
+
+  it("loads hover details without emitting a map selection", async () => {
+    const wrapper = mount(StationTransferDetails, {
+      props: {
+        stationLabel: "ChÃ¢telet",
+        transfers,
+      },
+      global: {
+        stubs: {
+          LineIconBadge: {
+            props: ["line"],
+            template: '<span class="line-stub">{{ line.label }}</span>',
+          },
+        },
+      },
+    });
+
+    await wrapper
+      .findAll(".station-transfer-details__item")
+      .at(2)
+      ?.trigger("mouseenter");
+    await flushPromises();
+
+    expect(loadTransferLineDirections).toHaveBeenCalledWith("bus:91");
+    expect(wrapper.emitted("selectTransfer")).toBeUndefined();
+  });
 });

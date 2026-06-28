@@ -1,8 +1,9 @@
 ﻿<script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
-import { Eye, Minus, Plus, Settings, X } from "lucide-vue-next";
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { CircleCheck, Eye, Minus, Plus, Settings, X } from "lucide-vue-next";
 import DistanceToggle from "../../components/DistanceToggle.vue";
 import MobileActionsMenu from "../../components/MobileActionsMenu.vue";
+import StationBoardModal from "../../components/StationBoardModal.vue";
 import {
   loadDetailedLineMap,
   loadStationTransfers,
@@ -13,6 +14,7 @@ import DetailedLineMapPickerSideBar from "./DetailedLineMapPickerSideBar.vue";
 import LineMapDisplayControls from "./LineMapDisplayControls.vue";
 import {
   filterNetworkGhostTransfersByModes,
+  getNetworkGhostModeKey,
   TransitNetworkGhostLayer,
   useNetworkGhost,
   type GhostNetworkModeVisibility,
@@ -23,14 +25,36 @@ import {
 import { transitBoards } from "../../config/transitBoards";
 import { createBoardFromDraft } from "../../services/boardBuilder";
 import { fetchDirectionGroupsForStation } from "../../services/idfm";
-import { addBoardToTransitPreferences } from "../../storage/transitPreferences";
+import {
+  addBoardToTransitPreferences,
+  cloneTransitBoardPreferences,
+  DEFAULT_TRANSIT_PLACE_ID,
+  getTransitPlaceById,
+  loadTransitPresetState,
+  resolveTransitPlaceId,
+  saveTransitPresetState,
+  updateTransitPlacePreferences,
+} from "../../storage/transitPreferences";
 import { formatTransitDistance } from "../../services/distance";
 import type {
   LineFrequencyProfile,
   LineSearchOption,
   StationSearchOption,
+  TransitBoardConfig,
+  TransitBoardPreferences,
+  TransitFamily,
   TransferLineOption,
 } from "../../types/transit";
+import type { TrafficLineReport } from "../traffic/types";
+import {
+  getPatternTrafficEdgeKey,
+  type PatternTrafficImpact,
+} from "../service-pattern/trafficImpactAnalysis";
+import { useDeparturePatternTraffic } from "../service-pattern/useDeparturePatternTraffic";
+import {
+  TRAFFIC_DISTURBANCE_COLOR,
+  TRAFFIC_INTERRUPTION_COLOR,
+} from "../service-pattern/trafficImpactStyles";
 import type {
   LineMapSegmentView,
   LineMapStopView,
@@ -100,10 +124,16 @@ interface PendingGhostTap {
 interface GhostTapRequest {
   id: number;
   lineId: string;
+  mode?: "select" | "toggle";
 }
 
 interface GhostGestureClickGuard {
   handledAt: number;
+}
+
+interface FavoriteUndoSnapshot {
+  placeId: string;
+  preferences: TransitBoardPreferences;
 }
 
 const props = withDefaults(
@@ -115,6 +145,8 @@ const props = withDefaults(
     ghostNetworkEnabled?: boolean;
     ghostNetworkScope?: GhostNetworkScope;
     reduceMotion?: boolean;
+    smartTrafficDetection?: boolean;
+    trafficReport?: TrafficLineReport;
   }>(),
   {
     mode: "picker",
@@ -122,6 +154,7 @@ const props = withDefaults(
     ghostNetworkEnabled: false,
     ghostNetworkScope: "all",
     reduceMotion: false,
+    smartTrafficDetection: false,
   },
 );
 
@@ -153,6 +186,15 @@ const activeGhostLine = ref<NetworkGhostLineView>();
 const favoriteLoading = ref(false);
 const favoriteError = ref("");
 const favoriteConfirmationOpen = ref(false);
+const favoriteDashboardSelectorOpen = ref(false);
+const favoriteDashboardId = ref(DEFAULT_TRANSIT_PLACE_ID);
+const favoriteDashboardAlertOpen = ref(false);
+const favoriteDashboardAlertLabel = ref("");
+const favoriteAlertProgressKey = ref(0);
+const favoriteUndoSnapshot = ref<FavoriteUndoSnapshot>();
+const ghostLineStationModalOpen = ref(false);
+const ghostLineStationLine = ref<LineSearchOption>();
+const ghostLineStationFamily = ref<TransitFamily>();
 const showDistances = ref(false);
 const mobileDisplayOpen = ref(false);
 const mobileSheetStage = ref<MobileSheetStage>("mid");
@@ -160,6 +202,7 @@ const touchStopClickGuard = ref<TouchStopClickGuard>();
 const pendingStopTap = ref<PendingStopTap>();
 const pendingGhostTap = ref<PendingGhostTap>();
 const ghostTapRequest = ref<GhostTapRequest>();
+const pendingGhostLineSelectionId = ref<string>();
 const ghostGestureClickGuard = ref<GhostGestureClickGuard>();
 let ghostTapRequestId = 0;
 const mapDrag = reactive<MapDragState>({
@@ -186,6 +229,7 @@ const ghostModeVisibility = reactive<GhostNetworkModeVisibility>({
   rer: true,
 });
 let latestMapRequest = 0;
+let favoriteAlertTimeout: ReturnType<typeof window.setTimeout> | undefined;
 
 const stopById = computed(() => {
   const stops = new Map<string, LineMapStopView>();
@@ -245,6 +289,16 @@ const activeGhostFrequencyState = computed(() => {
     ? ghostFrequencyStates[createGhostFrequencyKey(line.id, stop)]
     : undefined;
 });
+const stationBoardDashboardOptions = computed(() =>
+  typeof window === "undefined"
+    ? []
+    : loadTransitPresetState(transitBoards).places,
+);
+const favoriteDashboardAlertMessage = computed(() =>
+  favoriteDashboardAlertLabel.value
+    ? `Station ajoutée au dashboard ${favoriteDashboardAlertLabel.value}`
+    : "Station ajoutée au dashboard",
+);
 const isExplorerMode = computed(() => props.mode === "explorer");
 const canSelectStops = computed(() => props.selectable);
 const isMapDragging = computed(() => mapDrag.dragging);
@@ -263,6 +317,25 @@ const {
   scope: computed(() => props.ghostNetworkScope),
   transfers: visibleGhostTransfers,
   viewport: computed(() => lineMap.value?.viewport),
+});
+const { analyzeCurrentTrafficImpacts } = useDeparturePatternTraffic({
+  open: computed(() => Boolean(props.line)),
+  line: computed(() => props.line),
+  smartTrafficDetection: computed(() => props.smartTrafficDetection),
+  trafficReport: computed(() => props.trafficReport),
+});
+
+const lineTrafficAnalysis = computed(() => {
+  const map = lineMap.value;
+
+  return analyzeCurrentTrafficImpacts(
+    map?.stops.map((stop) => ({ key: stop.id, label: stop.label })) ?? [],
+    map?.segments.map((segment) => ({
+      id: segment.id,
+      source: segment.fromStopId,
+      target: segment.toStopId,
+    })) ?? [],
+  );
 });
 
 const mapStats = computed(() => {
@@ -327,6 +400,8 @@ const svgStyle = computed(() => ({
 const stopRadius = computed(() => 7 / zoom.value);
 const stopHaloRadius = computed(() => 16 / zoom.value);
 const stopStrokeWidth = computed(() => 2 / zoom.value);
+const stopTrafficCrossRadius = computed(() => 5.2 / zoom.value);
+const stopTrafficCrossStrokeWidth = computed(() => 2.4 / zoom.value);
 
 const visibleLabelIds = computed(() => {
   const map = lineMap.value;
@@ -409,6 +484,13 @@ watch(ghostDisplayEnabled, (enabled) => {
     ghostResetKey.value += 1;
   }
 });
+
+watch(
+  () => ghostLines.value.map((line) => line.id).join("|"),
+  () => {
+    applyPendingGhostLineSelection();
+  },
+);
 
 async function loadMap(): Promise<void> {
   if (!props.line) {
@@ -493,6 +575,7 @@ function toggleStopDetails(stop: LineMapStopView): void {
 
   ghostResetKey.value += 1;
   activeGhostLine.value = undefined;
+  favoriteDashboardSelectorOpen.value = false;
   activeStop.value = stop;
   mobileSheetStage.value = "mid";
   void loadTransfers(stop);
@@ -504,7 +587,9 @@ function closeSidebar(): void {
   ghostResetKey.value += 1;
   favoriteError.value = "";
   favoriteLoading.value = false;
+  favoriteDashboardSelectorOpen.value = false;
   mobileSheetStage.value = "mid";
+  closeGhostLineStationModal();
 }
 
 function setMobileSheetStage(stage: MobileSheetStage): void {
@@ -537,6 +622,146 @@ function handleGhostActiveLineChange(
       void loadGhostFrequency(line, activeStop.value);
     }
   }
+}
+
+function selectTransferLineOnMap(transfer: TransferLineOption): void {
+  ghostDisplayEnabled.value = true;
+
+  const mode = getNetworkGhostModeKey(transfer);
+
+  if (mode) {
+    ghostModeVisibility[mode] = true;
+  }
+
+  if (ghostLines.value.some((line) => line.id === transfer.id)) {
+    requestSelectGhostLine(transfer.id);
+    return;
+  }
+
+  pendingGhostLineSelectionId.value = transfer.id;
+  applyPendingGhostLineSelection();
+}
+
+function applyPendingGhostLineSelection(): void {
+  const lineId = pendingGhostLineSelectionId.value;
+
+  if (!lineId || !ghostLines.value.some((line) => line.id === lineId)) {
+    return;
+  }
+
+  pendingGhostLineSelectionId.value = undefined;
+  requestSelectGhostLine(lineId);
+}
+
+function requestSelectGhostLine(lineId: string): void {
+  ghostTapRequest.value = {
+    id: ++ghostTapRequestId,
+    lineId,
+    mode: "select",
+  };
+}
+
+function openGhostLineStationModal(): void {
+  const line = activeGhostLine.value;
+
+  if (!line) {
+    return;
+  }
+
+  const family = inferGhostLineFamily(line);
+
+  ghostLineStationLine.value = createLineSearchOptionFromGhostLine(
+    line,
+    family,
+  );
+  ghostLineStationFamily.value = family;
+  ghostLineStationModalOpen.value = true;
+}
+
+function closeGhostLineStationModal(): void {
+  ghostLineStationModalOpen.value = false;
+  ghostLineStationLine.value = undefined;
+  ghostLineStationFamily.value = undefined;
+}
+
+function addGhostLineStationBoard(
+  board: TransitBoardConfig,
+  dashboardId?: string,
+): void {
+  addBoardToTransitPreferences(
+    board,
+    transitBoards,
+    dashboardId ?? DEFAULT_TRANSIT_PLACE_ID,
+  );
+  favoriteConfirmationOpen.value = true;
+  closeGhostLineStationModal();
+}
+
+function createLineSearchOptionFromGhostLine(
+  line: NetworkGhostLineView,
+  family: TransitFamily,
+): LineSearchOption {
+  return {
+    family,
+    id: line.id,
+    label: line.label,
+    ref: line.ref ?? line.id,
+    navitiaId: line.id,
+    color: line.color,
+    textColor: line.textColor,
+    displayName: line.label,
+    iconUrl: line.iconUrl,
+    iconUrls: line.iconUrls,
+  };
+}
+
+function inferGhostLineFamily(line: NetworkGhostLineView): TransitFamily {
+  if (line.family) {
+    return line.family;
+  }
+
+  const identity = normalizeGhostLineIdentity(
+    [line.mode, line.label, line.ref, line.id, line.iconUrl]
+      .filter(Boolean)
+      .join(" "),
+  );
+  const compactLabel = normalizeGhostLineIdentity(line.label).replace(
+    /[\s_-]+/gu,
+    "",
+  );
+
+  if (identity.includes("noctilien") || /^n\d{1,3}[a-z]?$/u.test(compactLabel)) {
+    return "NOCTILIEN";
+  }
+
+  if (identity.includes("metro")) {
+    return "METRO";
+  }
+
+  if (identity.includes("tram")) {
+    return "TRAM";
+  }
+
+  if (identity.includes("rer")) {
+    return "RER";
+  }
+
+  if (identity.includes("train") || identity.includes("transilien")) {
+    return "TRANSILIEN";
+  }
+
+  if (identity.includes("cable")) {
+    return "CABLE";
+  }
+
+  return "BUS";
+}
+
+function normalizeGhostLineIdentity(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
 }
 
 function beginGhostTap(line: NetworkGhostLineView, event: PointerEvent): void {
@@ -642,7 +867,82 @@ function clearTransferStates(): void {
   });
 }
 
-async function addActiveStopToFavorites(): Promise<void> {
+function resolveFavoriteDashboardId(requestedId?: string): string {
+  if (typeof window === "undefined") {
+    return DEFAULT_TRANSIT_PLACE_ID;
+  }
+
+  return resolveTransitPlaceId(
+    loadTransitPresetState(transitBoards),
+    requestedId ?? favoriteDashboardId.value,
+  );
+}
+
+function openActiveStopFavoriteSelector(): void {
+  if (!activeStop.value || !props.line || favoriteLoading.value) {
+    return;
+  }
+
+  favoriteDashboardId.value = resolveFavoriteDashboardId();
+  favoriteError.value = "";
+  favoriteDashboardSelectorOpen.value = true;
+}
+
+function closeActiveStopFavoriteSelector(): void {
+  if (favoriteLoading.value) {
+    return;
+  }
+
+  favoriteDashboardSelectorOpen.value = false;
+  favoriteError.value = "";
+}
+
+function clearFavoriteAlertTimeout(): void {
+  if (favoriteAlertTimeout !== undefined) {
+    window.clearTimeout(favoriteAlertTimeout);
+    favoriteAlertTimeout = undefined;
+  }
+}
+
+function showFavoriteDashboardAlert(placeId: string): void {
+  const state = loadTransitPresetState(transitBoards);
+  const place = getTransitPlaceById(state, placeId);
+
+  favoriteDashboardAlertLabel.value = place?.label ?? "";
+  favoriteDashboardAlertOpen.value = true;
+  favoriteAlertProgressKey.value += 1;
+  clearFavoriteAlertTimeout();
+  favoriteAlertTimeout = window.setTimeout(() => {
+    hideFavoriteDashboardAlert();
+  }, 5000);
+}
+
+function hideFavoriteDashboardAlert(): void {
+  clearFavoriteAlertTimeout();
+  favoriteDashboardAlertOpen.value = false;
+  favoriteUndoSnapshot.value = undefined;
+}
+
+function undoLastFavoriteAdd(): void {
+  const snapshot = favoriteUndoSnapshot.value;
+
+  if (!snapshot) {
+    hideFavoriteDashboardAlert();
+    return;
+  }
+
+  const state = loadTransitPresetState(transitBoards);
+  saveTransitPresetState(
+    updateTransitPlacePreferences(
+      state,
+      snapshot.placeId,
+      snapshot.preferences,
+    ),
+  );
+  hideFavoriteDashboardAlert();
+}
+
+async function confirmActiveStopFavoriteDashboard(): Promise<void> {
   const line = props.line;
   const stop = activeStop.value;
 
@@ -654,6 +954,12 @@ async function addActiveStopToFavorites(): Promise<void> {
   favoriteError.value = "";
 
   try {
+    const stateBeforeAdd = loadTransitPresetState(transitBoards);
+    const dashboardId = resolveTransitPlaceId(
+      stateBeforeAdd,
+      favoriteDashboardId.value,
+    );
+    const placeBeforeAdd = getTransitPlaceById(stateBeforeAdd, dashboardId);
     const directionGroups = await fetchDirectionGroupsForStation(
       line,
       stop.station,
@@ -667,8 +973,19 @@ async function addActiveStopToFavorites(): Promise<void> {
       directionGroups,
     );
 
-    addBoardToTransitPreferences(board, transitBoards);
-    favoriteConfirmationOpen.value = true;
+    if (placeBeforeAdd) {
+      favoriteUndoSnapshot.value = {
+        placeId: dashboardId,
+        preferences: cloneTransitBoardPreferences(placeBeforeAdd.preferences),
+      };
+    } else {
+      favoriteUndoSnapshot.value = undefined;
+    }
+
+    addBoardToTransitPreferences(board, transitBoards, dashboardId);
+    favoriteDashboardId.value = dashboardId;
+    favoriteDashboardSelectorOpen.value = false;
+    showFavoriteDashboardAlert(dashboardId);
   } catch {
     favoriteError.value =
       "Impossible d'ajouter cette station à l'écran d'accueil.";
@@ -676,6 +993,10 @@ async function addActiveStopToFavorites(): Promise<void> {
     favoriteLoading.value = false;
   }
 }
+
+onBeforeUnmount(() => {
+  clearFavoriteAlertTimeout();
+});
 
 function openActiveStopInGoogleMaps(): void {
   const stop = activeStop.value;
@@ -778,8 +1099,59 @@ function getLabelOffset(
   return offsets[index % offsets.length];
 }
 
-function getLineStyle() {
+function getSegmentTrafficImpact(
+  segment: LineMapSegmentView,
+): PatternTrafficImpact | undefined {
+  return lineTrafficAnalysis.value.edgeImpacts[
+    getPatternTrafficEdgeKey({
+      source: segment.fromStopId,
+      target: segment.toStopId,
+    })
+  ];
+}
+
+function getStopTrafficImpact(
+  stop: LineMapStopView,
+): PatternTrafficImpact | undefined {
+  return lineTrafficAnalysis.value.stationImpacts[stop.id];
+}
+
+function getSegmentTrafficClass(segment: LineMapSegmentView) {
+  const impact = getSegmentTrafficImpact(segment);
+
+  return {
+    "line-map-segment--traffic": Boolean(impact),
+    "line-map-segment--traffic-interruption":
+      impact?.kind === "interruption",
+    "line-map-segment--traffic-disturbance": impact?.kind === "disturbance",
+  };
+}
+
+function getStopTrafficClass(stop: LineMapStopView) {
+  const impact = getStopTrafficImpact(stop);
+
+  return {
+    "line-map-stop--traffic-interruption": impact?.kind === "interruption",
+    "line-map-stop--traffic-disturbance": impact?.kind === "disturbance",
+  };
+}
+
+function getLineStyle(segment?: LineMapSegmentView) {
   const color = lineMap.value?.lineColor ?? props.line?.color ?? "#0064ff";
+  const impact = segment ? getSegmentTrafficImpact(segment) : undefined;
+
+  if (impact?.kind === "interruption") {
+    return {
+      stroke: TRAFFIC_INTERRUPTION_COLOR,
+      strokeOpacity: 0.42,
+    };
+  }
+
+  if (impact?.kind === "disturbance") {
+    return {
+      stroke: TRAFFIC_DISTURBANCE_COLOR,
+    };
+  }
 
   return {
     stroke: color,
@@ -790,6 +1162,23 @@ function getStopStyle(stop: LineMapStopView) {
   const color = lineMap.value?.lineColor ?? props.line?.color ?? "#0064ff";
   const isActive = stop.id === activeStop.value?.id;
   const isSelected = stop.id === props.selectedStationId || isActive;
+  const impact = getStopTrafficImpact(stop);
+
+  if (impact?.kind === "interruption") {
+    return {
+      fill: "rgba(255, 255, 255, 0.64)",
+      stroke: TRAFFIC_INTERRUPTION_COLOR,
+      strokeWidth: `${stopStrokeWidth.value}px`,
+    };
+  }
+
+  if (impact?.kind === "disturbance") {
+    return {
+      fill: isSelected ? TRAFFIC_DISTURBANCE_COLOR : "#ffffff",
+      stroke: isActive ? "#ffffff" : TRAFFIC_DISTURBANCE_COLOR,
+      strokeWidth: `${stopStrokeWidth.value}px`,
+    };
+  }
 
   return {
     fill: isSelected ? color : "#ffffff",
@@ -999,6 +1388,7 @@ function completeGhostTap(
   ghostTapRequest.value = {
     id: ++ghostTapRequestId,
     lineId: pendingTap.lineId,
+    mode: "toggle",
   };
 }
 
@@ -1335,6 +1725,30 @@ function getLabelPriority(
     </div>
 
     <div v-else-if="lineMap" class="line-map-panel__main">
+      <Transition name="line-map-info-alert">
+        <div
+          v-if="favoriteDashboardAlertOpen"
+          class="line-map-info-alert"
+          role="status"
+          aria-live="polite"
+          data-testid="line-map-favorite-alert"
+        >
+          <CircleCheck aria-hidden="true" />
+          <span>{{ favoriteDashboardAlertMessage }}</span>
+          <button
+            class="line-map-info-alert__undo"
+            type="button"
+            @click="undoLastFavoriteAdd"
+          >
+            Annuler
+          </button>
+          <span
+            :key="favoriteAlertProgressKey"
+            class="line-map-info-alert__progress"
+            aria-hidden="true"
+          ></span>
+        </div>
+      </Transition>
       <div
         ref="mapCanvas"
         class="line-map-canvas"
@@ -1406,11 +1820,12 @@ function getLabelPriority(
               v-for="segment in lineMap.segments"
               :key="segment.id"
               class="line-map-segment"
+              :class="getSegmentTrafficClass(segment)"
               :x1="getSegmentX(segment, 'from')"
               :y1="getSegmentY(segment, 'from')"
               :x2="getSegmentX(segment, 'to')"
               :y2="getSegmentY(segment, 'to')"
-              :style="getLineStyle()"
+              :style="getLineStyle(segment)"
             />
           </g>
 
@@ -1453,6 +1868,7 @@ function getLabelPriority(
                 stop.id === selectedStationId || stop.id === activeStop?.id,
               'line-map-stop--active': stop.id === activeStop?.id,
               'line-map-stop--hovered': stop.id === hoveredStop?.id,
+              ...getStopTrafficClass(stop),
             }"
             :style="{ '--line-map-stop-color': lineMap.lineColor }"
           >
@@ -1481,6 +1897,26 @@ function getLabelPriority(
               :r="stopRadius"
               :style="getStopStyle(stop)"
             />
+            <g
+              v-if="getStopTrafficImpact(stop)?.kind === 'interruption'"
+              class="line-map-stop__traffic-cross"
+              aria-hidden="true"
+            >
+              <line
+                :x1="toSvgX(stop.x) - stopTrafficCrossRadius"
+                :y1="toSvgY(stop.y) - stopTrafficCrossRadius"
+                :x2="toSvgX(stop.x) + stopTrafficCrossRadius"
+                :y2="toSvgY(stop.y) + stopTrafficCrossRadius"
+                :style="{ strokeWidth: `${stopTrafficCrossStrokeWidth}px` }"
+              />
+              <line
+                :x1="toSvgX(stop.x) - stopTrafficCrossRadius"
+                :y1="toSvgY(stop.y) + stopTrafficCrossRadius"
+                :x2="toSvgX(stop.x) + stopTrafficCrossRadius"
+                :y2="toSvgY(stop.y) - stopTrafficCrossRadius"
+                :style="{ strokeWidth: `${stopTrafficCrossStrokeWidth}px` }"
+              />
+            </g>
             <rect
               v-if="shouldShowLabel(stop) && stop.id === activeStop?.id"
               class="line-map-stop__label-background"
@@ -1569,6 +2005,9 @@ function getLabelPriority(
         :show-actions="isExplorerMode"
         :favorite-loading="favoriteLoading"
         :favorite-error="favoriteError"
+        :favorite-dashboard-selector-open="favoriteDashboardSelectorOpen"
+        :favorite-dashboard-id="favoriteDashboardId"
+        :favorite-dashboard-options="stationBoardDashboardOptions"
         :active-ghost-line="activeGhostLine"
         :ghost-directions="activeGhostDirectionState?.directions ?? []"
         :ghost-directions-loading="
@@ -1583,8 +2022,13 @@ function getLabelPriority(
         :mobile-stage="mobileSheetStage"
         @close="closeSidebar"
         @mobile-stage-change="setMobileSheetStage"
-        @add-favorite="addActiveStopToFavorites"
+        @add-favorite="openActiveStopFavoriteSelector"
+        @update:favorite-dashboard-id="favoriteDashboardId = $event"
+        @confirm-favorite-dashboard="confirmActiveStopFavoriteDashboard"
+        @cancel-favorite-dashboard="closeActiveStopFavoriteSelector"
+        @add-ghost-line-station="openGhostLineStationModal"
         @open-google-maps="openActiveStopInGoogleMaps"
+        @select-transfer="selectTransferLineOnMap"
       />
     </Transition>
   </div>
@@ -1630,6 +2074,18 @@ function getLabelPriority(
       </div>
     </Transition>
   </Teleport>
+
+  <StationBoardModal
+    v-if="ghostLineStationModalOpen && ghostLineStationLine && ghostLineStationFamily"
+    :open="ghostLineStationModalOpen"
+    :initial-line="ghostLineStationLine"
+    :initial-family="ghostLineStationFamily"
+    :show-dashboard-selector="true"
+    :dashboard-options="stationBoardDashboardOptions"
+    :default-dashboard-id="DEFAULT_TRANSIT_PLACE_ID"
+    @add="addGhostLineStationBoard"
+    @close="closeGhostLineStationModal"
+  />
 
   <Teleport to="body">
     <Transition name="modal-scale">

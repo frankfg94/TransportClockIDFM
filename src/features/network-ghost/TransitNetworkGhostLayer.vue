@@ -8,6 +8,7 @@ import type {
 interface GhostTapRequest {
   id: number;
   lineId: string;
+  mode?: "select" | "toggle";
 }
 
 const props = withDefaults(
@@ -140,7 +141,11 @@ watch(
     const line = props.lines.find((item) => item.id === request.lineId);
 
     if (line) {
-      togglePinnedLine(line);
+      if (request.mode === "select") {
+        pinnedLineId.value = line.id;
+      } else {
+        togglePinnedLine(line);
+      }
     }
   },
 );

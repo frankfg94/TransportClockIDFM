@@ -1,4 +1,8 @@
-import type { StationSearchOption, TransferLineOption } from "../../types/transit";
+import type {
+  LineRouteSequence,
+  StationSearchOption,
+  TransferLineOption,
+} from "../../types/transit";
 import type { GeographicViewport } from "../network-ghost/geoProjection";
 
 export interface LineMapQuayView {
@@ -39,6 +43,7 @@ export interface LineMapBranchView {
   id: string;
   label: string;
   direction?: string;
+  topologySource?: LineRouteSequence["topologySource"];
   stopIds: string[];
 }
 

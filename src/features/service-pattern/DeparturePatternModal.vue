@@ -73,6 +73,10 @@ import {
   useDeparturePatternTraffic,
   type DeparturePatternTrafficAnalyzer,
 } from "./useDeparturePatternTraffic";
+import {
+  TRAFFIC_DISTURBANCE_COLOR,
+  TRAFFIC_INTERRUPTION_COLOR,
+} from "./trafficImpactStyles";
 
 import type {
   Departure,
@@ -1470,11 +1474,11 @@ function getPatternFlowEdgeStroke(
   trafficImpact?: PatternTrafficImpact,
 ): string {
   if (trafficImpact?.kind === "interruption") {
-    return "#ef4444";
+    return TRAFFIC_INTERRUPTION_COLOR;
   }
 
   if (trafficImpact?.kind === "disturbance") {
-    return "#f59e0b";
+    return TRAFFIC_DISTURBANCE_COLOR;
   }
 
   return edge.active ? "var(--line-color)" : "#cbd5e1";

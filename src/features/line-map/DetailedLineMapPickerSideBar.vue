@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
-import { ExternalLink, MapIcon, Star, X } from "lucide-vue-next";
+import { ExternalLink, MapIcon, Plus, Star, X } from "lucide-vue-next";
 import LineIconBadge from "../../components/LineIconBadge.vue";
+import StationBoardSelector from "../../components/StationBoardSelector.vue";
 import StationTransferDetails from "../../components/StationTransferDetails.vue";
 import type { NetworkGhostLineView } from "../network-ghost";
+import type { TransitPlacePreset } from "../../storage/transitPreferences";
 import type {
   LineFrequencyProfile,
   TransferLineOption,
@@ -12,32 +14,45 @@ import type { LineMapStopView } from "./types";
 
 type MobileSheetStage = "peek" | "mid" | "full";
 
-const props = withDefaults(defineProps<{
-  stop: LineMapStopView;
-  transfers: TransferLineOption[];
-  transfersLoading: boolean;
-  transfersError?: string;
-  lineColor?: string;
-  showActions?: boolean;
-  favoriteLoading?: boolean;
-  favoriteError?: string;
-  activeGhostLine?: NetworkGhostLineView;
-  ghostDirections?: string[];
-  ghostDirectionsLoading?: boolean;
-  ghostDirectionsError?: boolean;
-  ghostFrequency?: LineFrequencyProfile;
-  ghostFrequencyLoading?: boolean;
-  ghostFrequencyError?: boolean;
-  mobileStage?: MobileSheetStage;
-}>(), {
-  mobileStage: "mid",
-});
+const props = withDefaults(
+  defineProps<{
+    stop: LineMapStopView;
+    transfers: TransferLineOption[];
+    transfersLoading: boolean;
+    transfersError?: string;
+    lineColor?: string;
+    showActions?: boolean;
+    favoriteLoading?: boolean;
+    favoriteError?: string;
+    favoriteDashboardSelectorOpen?: boolean;
+    favoriteDashboardId?: string;
+    favoriteDashboardOptions?: TransitPlacePreset[];
+    activeGhostLine?: NetworkGhostLineView;
+    ghostDirections?: string[];
+    ghostDirectionsLoading?: boolean;
+    ghostDirectionsError?: boolean;
+    ghostFrequency?: LineFrequencyProfile;
+    ghostFrequencyLoading?: boolean;
+    ghostFrequencyError?: boolean;
+    mobileStage?: MobileSheetStage;
+  }>(),
+  {
+    favoriteDashboardOptions: () => [],
+    favoriteDashboardSelectorOpen: false,
+    mobileStage: "mid",
+  },
+);
 
 const emit = defineEmits<{
   close: [];
   mobileStageChange: [stage: MobileSheetStage];
   addFavorite: [];
+  cancelFavoriteDashboard: [];
+  confirmFavoriteDashboard: [];
+  addGhostLineStation: [];
   openGoogleMaps: [];
+  selectTransfer: [transfer: TransferLineOption];
+  "update:favoriteDashboardId": [placeId: string];
 }>();
 
 const mobileDrag = reactive({
@@ -200,6 +215,16 @@ function formatFrequency(minutes?: number): string {
             <strong>{{ activeGhostLine.label }}</strong>
             <span>{{ activeGhostLine.mode }}</span>
           </div>
+          <button
+            class="button-secondary line-map-sidebar__ghost-add"
+            type="button"
+            aria-label="Ajouter une station de cette ligne"
+            data-testid="line-map-sidebar-ghost-add"
+            @click="emit('addGhostLineStation')"
+          >
+            <Plus aria-hidden="true" />
+            Ajouter
+          </button>
         </header>
 
         <div class="line-map-sidebar__ghost-directions">
@@ -238,8 +263,7 @@ function formatFrequency(minutes?: number): string {
           <div
             v-else-if="
               ghostFrequency &&
-              (hasDayFrequency(ghostFrequency) ||
-                ghostFrequency.nightMinutes)
+              (hasDayFrequency(ghostFrequency) || ghostFrequency.nightMinutes)
             "
             class="line-map-sidebar__ghost-frequency-grid"
           >
@@ -286,22 +310,61 @@ function formatFrequency(minutes?: number): string {
         :loading="transfersLoading"
         :error="transfersError"
         :line-color="lineColor"
+        :active-transfer-id="activeGhostLine?.id"
+        @select-transfer="emit('selectTransfer', $event)"
       />
     </div>
 
     <footer v-if="showActions" class="line-map-sidebar__actions">
-      <p v-if="favoriteError" class="line-map-sidebar__error" role="alert">
-        {{ favoriteError }}
-      </p>
-      <button
-        class="line-map-sidebar__favorite"
-        type="button"
-        :disabled="favoriteLoading"
-        @click="emit('addFavorite')"
+      <section
+        v-if="favoriteDashboardSelectorOpen"
+        class="line-map-sidebar__favorite-selector"
+        data-testid="line-map-sidebar-favorite-selector"
+        aria-label="Choix du dashboard"
       >
-        <Star aria-hidden="true" />
-        {{ favoriteLoading ? "Ajout en cours..." : "Ajouter aux favoris" }}
-      </button>
+        <StationBoardSelector
+          :model-value="favoriteDashboardId"
+          :places="favoriteDashboardOptions"
+          :disabled="favoriteLoading"
+          @update:model-value="emit('update:favoriteDashboardId', $event)"
+        />
+        <p v-if="favoriteError" class="line-map-sidebar__error" role="alert">
+          {{ favoriteError }}
+        </p>
+        <div class="line-map-sidebar__favorite-selector-actions">
+          <button
+            class="button-secondary"
+            type="button"
+            :disabled="favoriteLoading"
+            @click="emit('cancelFavoriteDashboard')"
+          >
+            Annuler
+          </button>
+          <button
+            class="line-map-sidebar__favorite"
+            type="button"
+            :disabled="favoriteLoading || !favoriteDashboardId"
+            @click="emit('confirmFavoriteDashboard')"
+          >
+            <Star aria-hidden="true" />
+            {{ favoriteLoading ? "Ajout en cours..." : "Ajouter" }}
+          </button>
+        </div>
+      </section>
+      <template v-else>
+        <p v-if="favoriteError" class="line-map-sidebar__error" role="alert">
+          {{ favoriteError }}
+        </p>
+        <button
+          class="line-map-sidebar__favorite"
+          type="button"
+          :disabled="favoriteLoading"
+          @click="emit('addFavorite')"
+        >
+          <Star aria-hidden="true" />
+          {{ favoriteLoading ? "Ajout en cours..." : "Ajouter aux favoris" }}
+        </button>
+      </template>
       <button
         class="button-secondary line-map-sidebar__maps"
         type="button"
@@ -397,13 +460,19 @@ function formatFrequency(minutes?: number): string {
 
 .line-map-sidebar__ghost-detail header {
   align-items: center;
-  display: flex;
+  display: grid;
   gap: 10px;
+  grid-template-columns: auto 1fr auto;
 }
 
 .line-map-sidebar__ghost-detail header div {
   display: grid;
   gap: 2px;
+}
+
+.line-map-sidebar__ghost-directions {
+  height: 120px;
+  overflow: auto;
 }
 
 .line-map-sidebar__ghost-detail header small,
@@ -424,6 +493,22 @@ function formatFrequency(minutes?: number): string {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 800;
+}
+
+.line-map-sidebar__ghost-add {
+  align-items: center;
+  align-self: start;
+  display: inline-flex;
+  font-size: 0.72rem;
+  gap: 5px;
+  min-height: 32px;
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.line-map-sidebar__ghost-add svg {
+  height: 15px;
+  width: 15px;
 }
 
 .line-map-sidebar__ghost-directions {
@@ -504,6 +589,25 @@ function formatFrequency(minutes?: number): string {
 
 .line-map-sidebar__favorite {
   box-shadow: 0 10px 24px rgba(0, 100, 255, 0.18);
+}
+
+.line-map-sidebar__favorite-selector {
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 14px;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.line-map-sidebar__favorite-selector-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 0.82fr 1.18fr;
+}
+
+.line-map-sidebar__favorite-selector-actions button {
+  min-height: 40px;
 }
 
 .line-map-sidebar__maps svg:last-child {

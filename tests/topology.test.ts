@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import { buildNeighborMap } from "../server/services/topology/buildLineTopology";
 import { getLineTopology } from "../server/services/topology/getLineTopology";
 import { loadNetexLineCache } from "../server/services/topology/netexCache";
+import { createDetailedLineMapViewModel } from "../src/features/line-map/lineMapData";
+import type { LineMapViewModel } from "../src/features/line-map/types";
 import { createPatternFlowStructure } from "../src/features/service-pattern/patternFlowStructure";
 import { createPatternStationKey } from "../src/features/service-pattern/stationKeys";
 import { convertServerTopologyToLineRouteSequences } from "../src/services/idfm";
+import type { LineSearchOption } from "../src/types/transit";
 
 const cacheCases = [
   {
@@ -59,6 +62,16 @@ const cacheCases = [
   },
 ] as const;
 
+const RER_B_LINE: LineSearchOption = {
+  family: "RER",
+  id: "line:IDFM:C01743",
+  label: "B",
+  navitiaId: "line:IDFM:C01743",
+  ref: "line:IDFM:C01743",
+  color: "#4b65c8",
+  textColor: "#ffffff",
+};
+
 describe("NeTEx cache topology adapter", () => {
   it.each(cacheCases)(
     "loads $label from the generated backend JSON cache",
@@ -97,6 +110,24 @@ describe("NeTEx cache topology adapter", () => {
       "Parc de Sceaux",
       "Sceaux",
     ]);
+  });
+
+  it("keeps the RER B airport branch connected on the detailed map model", async () => {
+    const topology = await getLineTopology("rer-b");
+    const sequences = convertServerTopologyToLineRouteSequences(topology);
+    const map = createDetailedLineMapViewModel(RER_B_LINE, sequences);
+
+    expect(
+      topologyHasEdge(topology, "Parc des Expositions", "Aéroport CDG 1"),
+    ).toBe(true);
+    expect(mapHasSegment(map, "Parc des Expositions", "Aéroport CDG 1")).toBe(true);
+    expect(
+      mapHasSegment(
+        map,
+        "Aéroport CDG 1",
+        "Aéroport Charles de Gaulle 2 (Terminal 2)",
+      ),
+    ).toBe(true);
   });
 
   it("exposes RER D lasso and parallel alternatives from schematic JSON", async () => {
@@ -316,7 +347,9 @@ declare module "vitest" {
 }
 
 function namesForIds(topology: Awaited<ReturnType<typeof getLineTopology>>, ids: string[]): string[] {
-  const stationById = new Map(topology.stations.map((station) => [station.id, station.name]));
+  const stationById = new Map(
+    topology.stations.map((station) => [station.id, station.name]),
+  );
 
   return ids.map((id) => stationById.get(id) ?? id);
 }
@@ -333,6 +366,59 @@ function neighborNames(
   expect(station, `Station ${stationName} should exist`).toBeDefined();
 
   return namesForIds(topology, [...(neighbors.get(station!.id) ?? [])]);
+}
+
+function topologyHasEdge(
+  topology: Awaited<ReturnType<typeof getLineTopology>>,
+  leftName: string,
+  rightName: string,
+): boolean {
+  const stationById = new Map(topology.stations.map((station) => [station.id, station.name]));
+
+  return topology.segments.some((segment) =>
+    namesMatchEdge(
+      stationById.get(segment.from) ?? "",
+      stationById.get(segment.to) ?? "",
+      leftName,
+      rightName,
+    ),
+  );
+}
+
+function mapHasSegment(
+  map: LineMapViewModel,
+  leftName: string,
+  rightName: string,
+): boolean {
+  const stopById = new Map(map.stops.map((stop) => [stop.id, stop.label]));
+
+  return map.segments.some((segment) =>
+    namesMatchEdge(
+      stopById.get(segment.fromStopId) ?? "",
+      stopById.get(segment.toStopId) ?? "",
+      leftName,
+      rightName,
+    ),
+  );
+}
+
+function namesMatchEdge(
+  actualLeft: string,
+  actualRight: string,
+  expectedLeft: string,
+  expectedRight: string,
+): boolean {
+  return (
+    stationNameMatches(actualLeft, expectedLeft) &&
+    stationNameMatches(actualRight, expectedRight)
+  ) || (
+    stationNameMatches(actualLeft, expectedRight) &&
+    stationNameMatches(actualRight, expectedLeft)
+  );
+}
+
+function stationNameMatches(actual: string, expected: string): boolean {
+  return normalizeName(actual).includes(normalizeName(expected));
 }
 
 function countComponents(neighbors: Map<string, Set<string>>): number {

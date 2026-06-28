@@ -17,12 +17,20 @@ const {
   loadTransferLineDirections,
   loadTransferLineFrequency,
   fetchDirectionGroupsForStation,
+  fetchStationTransfers,
+  fetchTransitFamilyOptions,
+  searchLineStations,
+  searchTransitLines,
 } = vi.hoisted(() => ({
   loadDetailedLineMap: vi.fn(),
   loadStationTransfers: vi.fn(),
   loadTransferLineDirections: vi.fn(),
   loadTransferLineFrequency: vi.fn(),
   fetchDirectionGroupsForStation: vi.fn(),
+  fetchStationTransfers: vi.fn(),
+  fetchTransitFamilyOptions: vi.fn(),
+  searchLineStations: vi.fn(),
+  searchTransitLines: vi.fn(),
 }));
 
 vi.mock("../src/features/line-map/lineMapData", () => ({
@@ -34,6 +42,10 @@ vi.mock("../src/features/line-map/lineMapData", () => ({
 
 vi.mock("../src/services/idfm", () => ({
   fetchDirectionGroupsForStation,
+  fetchStationTransfers,
+  fetchTransitFamilyOptions,
+  searchLineStations,
+  searchTransitLines,
 }));
 
 const line: LineSearchOption = {
@@ -47,6 +59,7 @@ const line: LineSearchOption = {
 };
 
 beforeEach(() => {
+  vi.useRealTimers();
   document.body.innerHTML = "";
   window.localStorage.clear();
   vi.restoreAllMocks();
@@ -57,6 +70,10 @@ beforeEach(() => {
   loadTransferLineDirections.mockReset();
   loadTransferLineFrequency.mockReset();
   fetchDirectionGroupsForStation.mockReset();
+  fetchStationTransfers.mockReset();
+  fetchTransitFamilyOptions.mockReset();
+  searchLineStations.mockReset();
+  searchTransitLines.mockReset();
   loadDetailedLineMap.mockResolvedValue(createMap());
   loadStationTransfers.mockResolvedValue([
     { id: "rer:b", label: "B", family: "RER" },
@@ -79,6 +96,18 @@ beforeEach(() => {
       match: {},
     },
   ]);
+  fetchStationTransfers.mockResolvedValue([]);
+  fetchTransitFamilyOptions.mockResolvedValue([]);
+  searchLineStations.mockResolvedValue([
+    {
+      id: "station:c",
+      label: "Station C",
+      city: "Paris",
+      monitoringRef: "stop:c",
+      scheduleStopAreaRef: "stop_area:c",
+    },
+  ]);
+  searchTransitLines.mockResolvedValue([]);
 });
 
 describe("DetailedLineMapPicker sidebar", () => {
@@ -407,6 +436,70 @@ describe("DetailedLineMapPicker sidebar", () => {
     );
   });
 
+  it("colors interrupted and disturbed traffic on the detailed line map", async () => {
+    loadDetailedLineMap.mockResolvedValueOnce(createTrafficMap());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            generatedAt: "2026-06-28T08:00:00Z",
+            source: "prim-line-reports",
+            configured: true,
+            lines: [
+              {
+                lineRef: line.ref,
+                status: "disrupted",
+                disruptions: [
+                  {
+                    id: "traffic-a-b",
+                    title: "Trafic interrompu",
+                    message:
+                      "Le trafic est interrompu entre Station A et Station B et perturbe sur le reste de la ligne.",
+                    kind: "incident",
+                    applicationPeriods: [],
+                    impactedLineRefs: [line.ref],
+                    impactedStopNames: [],
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: {
+        line,
+        mode: "explorer",
+        selectable: false,
+        smartTrafficDetection: true,
+      },
+    });
+    await flushPromises();
+    await flushPromises();
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/traffic"),
+    );
+    expect(wrapper.find(".line-map-segment--traffic-interruption").exists()).toBe(
+      true,
+    );
+    expect(wrapper.find(".line-map-segment--traffic-disturbance").exists()).toBe(
+      true,
+    );
+    expect(wrapper.find(".line-map-stop--traffic-interruption").exists()).toBe(
+      true,
+    );
+    expect(wrapper.find(".line-map-stop__traffic-cross").exists()).toBe(true);
+    expect(wrapper.find(".line-map-stop--traffic-disturbance").exists()).toBe(
+      true,
+    );
+
+    wrapper.unmount();
+  });
+
   it("loads ghost correspondences progressively and keeps active quays visible", async () => {
     loadStationTransfers.mockResolvedValueOnce([
       {
@@ -572,6 +665,131 @@ describe("DetailedLineMapPicker sidebar", () => {
     wrapper.unmount();
   });
 
+  it("selects a ghost line from a transfer icon without toggling it off", async () => {
+    loadStationTransfers.mockResolvedValueOnce([
+      {
+        id: "line:IDFM:C01743",
+        label: "B",
+        family: "RER",
+        mode: "RER",
+        color: "#4b92db",
+      },
+    ]);
+    stubGhostTopologyFetch();
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: {
+        line,
+        mode: "explorer",
+        selectable: false,
+        ghostNetworkEnabled: true,
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    await wrapper.findAll(".line-map-hit-target")[0].trigger("click");
+    await flushPromises();
+    await flushPromises();
+
+    const transferButton = wrapper.get(".station-transfer-details__item");
+    await transferButton.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get(".network-ghost-line--active").attributes()).toMatchObject(
+      {
+        "data-network-ghost-line-id": "line:IDFM:C01743",
+      },
+    );
+    expect(wrapper.get(".station-transfer-details__item").classes()).toContain(
+      "station-transfer-details__item--active",
+    );
+
+    await transferButton.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".network-ghost-line--active").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("opens a station-only modal from the ghost detail and adds it to the selected dashboard", async () => {
+    loadStationTransfers.mockResolvedValueOnce([
+      {
+        id: "line:IDFM:C01743",
+        label: "B",
+        family: "RER",
+        mode: "RER",
+        color: "#4b92db",
+      },
+    ]);
+    stubGhostTopologyFetch();
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: {
+        line,
+        mode: "explorer",
+        selectable: false,
+        ghostNetworkEnabled: true,
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    await wrapper.findAll(".line-map-hit-target")[0].trigger("click");
+    await flushPromises();
+    await flushPromises();
+    await wrapper.get(".station-transfer-details__item").trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-testid="line-map-sidebar-ghost-add"]').trigger(
+      "click",
+    );
+    await flushPromises();
+    await flushPromises();
+
+    expect(document.body.querySelector("[data-testid='station-board-selector']")).toBeTruthy();
+    expect(document.body.textContent).toContain("Ligne sélectionnée");
+    expect(document.body.textContent).not.toContain("Sélectionner une ligne");
+
+    const workInput = Array.from(
+      document.body.querySelectorAll<HTMLInputElement>(
+        "[data-testid='station-board-selector'] input",
+      ),
+    ).find((input) => input.value === "work");
+    expect(workInput).toBeTruthy();
+    workInput!.checked = true;
+    workInput!.dispatchEvent(new Event("change", { bubbles: true }));
+    await flushPromises();
+
+    const stationButton = document.body.querySelector(
+      ".station-combobox__button",
+    ) as HTMLButtonElement;
+    stationButton.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    await flushPromises();
+    const stationOption = document.body.querySelector(
+      ".station-combobox__option",
+    ) as HTMLButtonElement;
+    stationOption.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await flushPromises();
+
+    const addButton = Array.from(document.body.querySelectorAll("button")).find(
+      (button) =>
+        button.closest(".modal-panel") &&
+        button.textContent?.includes("Ajouter"),
+    ) as HTMLButtonElement;
+    addButton.click();
+    await flushPromises();
+
+    const workPreferences = readPreferences("work");
+    expect(workPreferences.customBoards).toHaveLength(1);
+    expect(workPreferences.visibleBoardIds).toContain(
+      workPreferences.customBoards[0].id,
+    );
+    expect(readPreferences("home").customBoards ?? []).toHaveLength(0);
+    expect(document.body.textContent).toContain(
+      "Station ajoutée à l'écran d'accueil",
+    );
+
+    wrapper.unmount();
+  });
+
   it("opens the mobile display modal and keeps the ghost controls wired", async () => {
     loadStationTransfers.mockResolvedValueOnce([
       {
@@ -660,14 +878,22 @@ describe("DetailedLineMapPicker sidebar", () => {
     await wrapper.findAll(".line-map-hit-target")[0].trigger("click");
     await flushPromises();
 
+    await wrapper.get(".line-map-sidebar__favorite").trigger("click");
+    await flushPromises();
+
+    expect(
+      wrapper.find('[data-testid="line-map-sidebar-favorite-selector"]').exists(),
+    ).toBe(true);
+
     await wrapper
-      .get(".line-map-sidebar__favorite")
+      .get(
+        '[data-testid="line-map-sidebar-favorite-selector"] .line-map-sidebar__favorite',
+      )
       .trigger("click");
     await flushPromises();
 
-    expect(document.body.textContent).toContain(
-      "Station ajoutée à l'écran d'accueil",
-    );
+    expect(wrapper.text()).toContain("Station ajoutée au dashboard Maison");
+    expect(wrapper.find(".line-map-info-alert__progress").exists()).toBe(true);
 
     const firstPreferences = readPreferences();
     expect(firstPreferences.customBoards).toHaveLength(1);
@@ -675,13 +901,83 @@ describe("DetailedLineMapPicker sidebar", () => {
       firstPreferences.customBoards[0].id,
     );
 
+    await wrapper.get(".line-map-sidebar__favorite").trigger("click");
+    await flushPromises();
     await wrapper
-      .get(".line-map-sidebar__favorite")
+      .get(
+        '[data-testid="line-map-sidebar-favorite-selector"] .line-map-sidebar__favorite',
+      )
       .trigger("click");
     await flushPromises();
 
     expect(readPreferences().customBoards).toHaveLength(1);
     wrapper.unmount();
+  });
+
+  it("adds a favorite to the selected dashboard and can undo it", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: { line, mode: "explorer", selectable: false },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    await wrapper.findAll(".line-map-hit-target")[0].trigger("click");
+    await flushPromises();
+
+    await wrapper.get(".line-map-sidebar__favorite").trigger("click");
+    await flushPromises();
+    await wrapper
+      .get(
+        '[data-testid="line-map-sidebar-favorite-selector"] input[value="work"]',
+      )
+      .setValue();
+    await flushPromises();
+    await wrapper
+      .get(
+        '[data-testid="line-map-sidebar-favorite-selector"] .line-map-sidebar__favorite',
+      )
+      .trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Station ajoutée au dashboard Travail");
+    expect(readPreferences("work").customBoards).toHaveLength(1);
+    expect(
+      wrapper.find('[data-testid="line-map-sidebar-favorite-selector"]').exists(),
+    ).toBe(false);
+
+    await wrapper.get(".line-map-info-alert__undo").trigger("click");
+    await flushPromises();
+
+    expect(readPreferences("work").customBoards).toHaveLength(0);
+    expect(wrapper.find('[data-testid="line-map-favorite-alert"]').exists()).toBe(
+      false,
+    );
+
+    await wrapper.get(".line-map-sidebar__favorite").trigger("click");
+    await flushPromises();
+    await wrapper
+      .get(
+        '[data-testid="line-map-sidebar-favorite-selector"] input[value="work"]',
+      )
+      .setValue();
+    await wrapper
+      .get(
+        '[data-testid="line-map-sidebar-favorite-selector"] .line-map-sidebar__favorite',
+      )
+      .trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="line-map-favorite-alert"]').exists()).toBe(
+      true,
+    );
+    vi.advanceTimersByTime(5000);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="line-map-favorite-alert"]').exists()).toBe(
+      false,
+    );
+
+    wrapper.unmount();
+    vi.useRealTimers();
   });
 
   it("shows favorite errors and opens Google Maps with coordinates or name", async () => {
@@ -696,6 +992,12 @@ describe("DetailedLineMapPicker sidebar", () => {
     await targets[0].trigger("click");
     await flushPromises();
     await wrapper.get(".line-map-sidebar__favorite").trigger("click");
+    await flushPromises();
+    await wrapper
+      .get(
+        '[data-testid="line-map-sidebar-favorite-selector"] .line-map-sidebar__favorite',
+      )
+      .trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain(
       "Impossible d'ajouter cette station à l'écran d'accueil.",
@@ -819,11 +1121,88 @@ function createDistanceMap(): LineMapViewModel {
   return map;
 }
 
-function readPreferences(): {
+function createTrafficMap(): LineMapViewModel {
+  const map = createMap();
+  const stationC: LineMapStopView = {
+    id: "station:c",
+    label: "Station C",
+    city: "Paris",
+    x: 0.9,
+    y: 0.5,
+    coordinateSource: "fallback",
+    routeIds: ["main"],
+    routeLabels: ["Main"],
+    station: {
+      id: "station:c",
+      label: "Station C",
+      city: "Paris",
+      monitoringRef: "stop:c",
+      scheduleStopAreaRef: "stop_area:c",
+    },
+  };
+
+  map.stops = [...map.stops, stationC];
+  map.segments = [
+    map.segments[0],
+    {
+      id: "b-c",
+      fromStopId: "station:b",
+      toStopId: "station:c",
+    },
+  ];
+  map.branches = [
+    {
+      id: "main",
+      label: "Main",
+      stopIds: map.stops.map((stop) => stop.id),
+    },
+  ];
+
+  return map;
+}
+
+function stubGhostTopologyFetch(): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          stations: [
+            {
+              id: "ghost:a",
+              name: "Station A",
+              lon: 2.35,
+              lat: 48.85,
+            },
+            {
+              id: "ghost:b",
+              name: "Station Ghost",
+              lon: 2.365,
+              lat: 48.86,
+            },
+          ],
+          segments: [
+            {
+              id: "ghost:a-b",
+              from: "ghost:a",
+              to: "ghost:b",
+            },
+          ],
+          patterns: [],
+        }),
+      ),
+    ),
+  );
+}
+
+function readPreferences(placeId = "home"): {
   visibleBoardIds: string[];
   customBoards: Array<{ id: string }>;
 } {
-  return JSON.parse(
+  const value = JSON.parse(
     window.localStorage.getItem("transport-clock.preferences.v2") ?? "{}",
   );
+
+  return value.places?.find((place: { id: string }) => place.id === placeId)
+    ?.preferences ?? value;
 }

@@ -96,6 +96,7 @@
           settings.ghostNetworkStructuralOnly ? 'structural' : 'all'
         "
         :reduce-motion="settings.reduceMotion"
+        :smart-traffic-detection="settings.smartTrafficDetection"
       >
         <template #bar-before-chip>
           <button

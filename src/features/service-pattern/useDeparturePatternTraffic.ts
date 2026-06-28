@@ -6,13 +6,10 @@ import {
   type ComputedRef,
 } from "vue";
 import { toServerApiUrl } from "../../services/serverApi";
-import type { TransitBoardConfig } from "../../types/transit";
-import {
-  getCurrentTrafficDisruptions,
-  normalizeTrafficLineRef,
-  type TrafficLineReport,
-  type TrafficResponse,
-} from "../traffic";
+import type { LineSearchOption, TransitBoardConfig } from "../../types/transit";
+import { normalizeTrafficLineRef } from "../traffic/trafficNormalization";
+import { getCurrentTrafficDisruptions } from "../traffic/trafficTiming";
+import type { TrafficLineReport, TrafficResponse } from "../traffic/types";
 import {
   analyzeTrafficImpacts,
   type PatternTrafficEdge,
@@ -28,7 +25,8 @@ export type DeparturePatternTrafficAnalyzer = (
 
 interface UseDeparturePatternTrafficOptions {
   open: ComputedRef<boolean>;
-  board: ComputedRef<TransitBoardConfig | undefined>;
+  board?: ComputedRef<TransitBoardConfig | undefined>;
+  line?: ComputedRef<LineSearchOption | undefined>;
   smartTrafficDetection: ComputedRef<boolean>;
   trafficReport: ComputedRef<TrafficLineReport | undefined>;
 }
@@ -36,6 +34,7 @@ interface UseDeparturePatternTrafficOptions {
 export function useDeparturePatternTraffic({
   open,
   board,
+  line,
   smartTrafficDetection,
   trafficReport,
 }: UseDeparturePatternTrafficOptions) {
@@ -44,13 +43,24 @@ export function useDeparturePatternTraffic({
   let trafficReportRequest = 0;
 
   const patternTrafficLineRef = computed(() => {
-    const currentBoard = board.value;
+    const currentBoard = board?.value;
+    const currentLine = line?.value;
 
-    return currentBoard && currentBoard.line.mode !== "bus"
-      ? normalizeTrafficLineRef(
-          currentBoard.schedule?.lineRef ?? currentBoard.line.ref,
-        )
-      : undefined;
+    if (currentBoard) {
+      return currentBoard.line.mode !== "bus"
+        ? normalizeTrafficLineRef(
+            currentBoard.schedule?.lineRef ?? currentBoard.line.ref,
+          )
+        : undefined;
+    }
+
+    if (!currentLine || isBusLikeTrafficLine(currentLine)) {
+      return undefined;
+    }
+
+    return normalizeTrafficLineRef(
+      currentLine.ref || currentLine.navitiaId || currentLine.id,
+    );
   });
 
   const resolvedTrafficReport = computed(
@@ -157,6 +167,10 @@ export function useDeparturePatternTraffic({
     showTrafficImpactPopup,
     trafficImpactKey,
   };
+}
+
+function isBusLikeTrafficLine(line: LineSearchOption): boolean {
+  return line.family === "BUS" || line.family === "NOCTILIEN";
 }
 
 function createEmptyDeparturePatternTrafficAnalysis(): PatternTrafficImpactAnalysis {

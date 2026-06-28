@@ -24,6 +24,7 @@ const props = withDefaults(
     error?: string | boolean;
     richDetails?: boolean;
     lineColor?: string;
+    activeTransferId?: string;
   }>(),
   {
     transfers: () => [],
@@ -33,6 +34,10 @@ const props = withDefaults(
     lineColor: "#0064ff",
   },
 );
+
+const emit = defineEmits<{
+  selectTransfer: [transfer: TransferLineOption];
+}>();
 
 const activeTransfer = ref<TransferLineOption>();
 const directionStates = reactive<Record<string, TransferDirectionState>>({});
@@ -58,6 +63,11 @@ function showTransferDetails(transfer: TransferLineOption): void {
   if (isBusLikeTransfer(transfer)) {
     void loadTransferDirections(transfer);
   }
+}
+
+function selectTransfer(transfer: TransferLineOption): void {
+  showTransferDetails(transfer);
+  emit("selectTransfer", transfer);
 }
 
 async function loadTransferDirections(
@@ -140,13 +150,14 @@ async function loadTransferDirections(
             class="station-transfer-details__item"
             :class="{
               'station-transfer-details__item--active':
-                activeTransfer?.id === transfer.id,
+                activeTransfer?.id === transfer.id ||
+                activeTransferId === transfer.id,
             }"
             type="button"
             :aria-label="`Afficher les détails de la ligne ${transfer.label}`"
             @focus="showTransferDetails(transfer)"
             @mouseenter="showTransferDetails(transfer)"
-            @click="showTransferDetails(transfer)"
+            @click="selectTransfer(transfer)"
           >
             <LineIconBadge :line="transfer" compact />
           </button>
@@ -162,7 +173,7 @@ async function loadTransferDirections(
           v-if="isBusLikeTransfer(activeTransfer)"
           class="station-transfer-details__detail-kicker"
         >
-          Directions possibles
+          Directions
         </span>
         <span
           v-if="
@@ -322,17 +333,29 @@ async function loadTransferDirections(
 .station-transfer-details__item:focus-visible,
 .station-transfer-details__item--active {
   background: transparent;
-  box-shadow: 0 0 0 3px rgba(16, 35, 63, 0.1);
   outline: 0;
   transform: translateY(-1px);
 }
-
+.station-transfer-details__item--active::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: inherit;
+  background: inherit;
+  filter: blur(18px);
+  opacity: 0.55;
+  transform: translateY(8px);
+  z-index: -1;
+  pointer-events: none;
+}
 .station-transfer-details__detail {
   background: rgba(248, 250, 252, 0.96);
   border: 1px solid rgba(16, 35, 63, 0.12);
   border-radius: 10px;
   display: grid;
   gap: 7px;
+  height: 140px;
+  overflow: auto;
   padding: 10px;
   align-content: baseline;
 }

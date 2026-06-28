@@ -1,10 +1,16 @@
 ﻿<script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import { DetailedLineMapPicker } from "../features/line-map";
+import { useAppSettings } from "../features/app-settings/appSettings";
 import FamilyCombobox from "./FamilyCombobox.vue";
 import LineCombobox from "./LineCombobox.vue";
+import StationBoardSelector from "./StationBoardSelector.vue";
 import StationCombobox from "./StationCombobox.vue";
 import { createBoardFromDraft } from "../services/boardBuilder";
+import {
+  DEFAULT_TRANSIT_PLACE_ID,
+  type TransitPlacePreset,
+} from "../storage/transitPreferences";
 import {
   fetchDirectionGroupsForStation,
   fetchStationTransfers,
@@ -17,6 +23,7 @@ import type {
   StationBoardDraft,
   StationSearchOption,
   TransitBoardConfig,
+  TransitFamily,
   TransitFamilyOption,
   TransferLineOption,
 } from "../types/transit";
@@ -29,17 +36,26 @@ const props = withDefaults(
   defineProps<{
     open: boolean;
     mode?: StationBoardModalMode;
+    initialLine?: LineSearchOption;
+    initialFamily?: TransitFamily;
+    showDashboardSelector?: boolean;
+    dashboardOptions?: TransitPlacePreset[];
+    defaultDashboardId?: string;
   }>(),
   {
     mode: "dropdown",
+    showDashboardSelector: false,
+    dashboardOptions: () => [],
+    defaultDashboardId: DEFAULT_TRANSIT_PLACE_ID,
   },
 );
 
 const emit = defineEmits<{
-  add: [board: TransitBoardConfig];
+  add: [board: TransitBoardConfig, dashboardId?: string];
   close: [];
 }>();
 
+const { settings } = useAppSettings();
 const draft = reactive<StationBoardDraft>({});
 const selectedNetwork = ref<TransitFamilyOption>();
 const familyOptions = ref<TransitFamilyOption[]>([]);
@@ -57,10 +73,24 @@ const adding = ref(false);
 const errorMessage = ref("");
 const currentStep = ref(1);
 const stepTransitionName = ref("station-step-forward");
+const selectedDashboardId = ref(DEFAULT_TRANSIT_PLACE_ID);
 const canAdd = computed(() =>
-  Boolean(draft.family && draft.line && draft.station),
+  Boolean(
+    draft.family &&
+      draft.line &&
+      draft.station &&
+      (!props.showDashboardSelector ||
+        props.dashboardOptions.some(
+          (place) => place.id === selectedDashboardId.value,
+        )),
+  ),
 );
-const isMultiStep = computed(() => props.mode === "multistep");
+const hasInitialLine = computed(() =>
+  Boolean(props.initialLine && props.initialFamily),
+);
+const isMultiStep = computed(
+  () => props.mode === "multistep" && !hasInitialLine.value,
+);
 const modalWide = computed(
   () => stationSelectionMode.value === "map" && Boolean(draft.line),
 );
@@ -81,7 +111,7 @@ watch(
   (open) => {
     if (open) {
       resetDraft();
-      void loadFamilies();
+      initializeDraft();
       return;
     }
 
@@ -95,6 +125,30 @@ watch(
   () => {
     if (props.open) {
       resetDraft();
+      initializeDraft();
+    }
+  },
+);
+
+watch(
+  () => [
+    props.initialLine?.id,
+    props.initialFamily,
+    props.showDashboardSelector,
+  ],
+  () => {
+    if (props.open) {
+      resetDraft();
+      initializeDraft();
+    }
+  },
+);
+
+watch(
+  () => [props.dashboardOptions.map((place) => place.id).join("|"), props.defaultDashboardId],
+  () => {
+    if (props.showDashboardSelector) {
+      selectedDashboardId.value = resolveDefaultDashboardId();
     }
   },
 );
@@ -125,6 +179,36 @@ watch(stationQuery, () => {
     draft.station = undefined;
   }
 });
+
+function initializeDraft(): void {
+  selectedDashboardId.value = resolveDefaultDashboardId();
+
+  if (props.initialLine && props.initialFamily) {
+    selectedNetwork.value = {
+      id: props.initialFamily.toLowerCase(),
+      label: props.initialFamily,
+      family: props.initialFamily,
+    };
+    draft.family = props.initialFamily;
+    draft.line = props.initialLine;
+    lineQuery.value = props.initialLine.displayName ?? props.initialLine.label;
+    currentStep.value = 3;
+    void loadStations();
+    return;
+  }
+
+  void loadFamilies();
+}
+
+function resolveDefaultDashboardId(): string {
+  const places = props.dashboardOptions;
+
+  if (places.some((place) => place.id === props.defaultDashboardId)) {
+    return props.defaultDashboardId;
+  }
+
+  return places[0]?.id ?? props.defaultDashboardId;
+}
 
 async function loadFamilies(): Promise<void> {
   const requestId = ++latestFamilyRequest;
@@ -328,7 +412,11 @@ async function addStation(): Promise<void> {
       directionGroups,
     );
 
-    emit("add", board);
+    emit(
+      "add",
+      board,
+      props.showDashboardSelector ? selectedDashboardId.value : undefined,
+    );
     resetDraft();
     emit("close");
   } catch {
@@ -360,6 +448,7 @@ function resetDraft(): void {
   currentStep.value = 1;
   stepTransitionName.value = "station-step-forward";
   errorMessage.value = "";
+  selectedDashboardId.value = resolveDefaultDashboardId();
 }
 
 function setCurrentStep(
@@ -538,7 +627,71 @@ function normalizeText(value: string): string {
             class="station-form"
             :class="{ 'station-multistep__form': isMultiStep }"
           >
-            <template v-if="!isMultiStep">
+            <template v-if="hasInitialLine">
+              <div class="station-board-modal__line-summary">
+                <span>Ligne sélectionnée</span>
+                <strong>{{ draft.line?.label }}</strong>
+                <small>{{ draft.family }}</small>
+              </div>
+
+              <div class="station-picker">
+                <div class="station-picker__header">
+                  <span>Station</span>
+                  <button
+                    v-if="draft.line"
+                    class="button-secondary station-picker__mode"
+                    type="button"
+                    @click="toggleStationSelectionMode"
+                  >
+                    {{
+                      stationSelectionMode === "list"
+                        ? "Plan détaillé"
+                        : "Liste simple"
+                    }}
+                  </button>
+                </div>
+
+                <div
+                  v-if="stationSelectionMode === 'list'"
+                  class="station-picker__list"
+                >
+                  <StationCombobox
+                    :model-value="draft.station"
+                    :options="filteredStationOptions"
+                    :query="stationQuery"
+                    :disabled="!draft.line"
+                    :loading="loadingStations"
+                    :compact="true"
+                    :transfer-map="stationTransfers"
+                    :transfer-loading-ids="stationTransferLoadingIds"
+                    @inspect="loadStationTransferBadges"
+                    @update:model-value="selectStationOption"
+                    @update:query="stationQuery = $event"
+                  />
+                  <span v-if="loadingStations" class="field-loader">
+                    <span aria-hidden="true" class="loader-dot"></span>
+                    Chargement des stations
+                  </span>
+                </div>
+
+                <DetailedLineMapPicker
+                  v-else
+                  :line="draft.line"
+                  :selected-station-id="draft.station?.id"
+                  :smart-traffic-detection="settings.smartTrafficDetection"
+                  @select="selectStationFromMap"
+                />
+              </div>
+
+              <StationBoardSelector
+                v-if="showDashboardSelector"
+                v-model="selectedDashboardId"
+                :places="dashboardOptions"
+                :disabled="adding"
+              />
+            </template>
+
+            <template v-else-if="!isMultiStep">
               <label>
                 <span>Réseau</span>
                 <FamilyCombobox
@@ -616,6 +769,7 @@ function normalizeText(value: string): string {
                   v-else
                   :line="draft.line"
                   :selected-station-id="draft.station?.id"
+                  :smart-traffic-detection="settings.smartTrafficDetection"
                   @select="selectStationFromMap"
                 />
               </div>
@@ -700,6 +854,7 @@ function normalizeText(value: string): string {
                   v-else
                   :line="draft.line"
                   :selected-station-id="draft.station?.id"
+                  :smart-traffic-detection="settings.smartTrafficDetection"
                   @select="selectStationFromMap"
                 />
               </div>
@@ -783,3 +938,28 @@ function normalizeText(value: string): string {
     </Transition>
   </Teleport>
 </template>
+
+<style scoped>
+.station-board-modal__line-summary {
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 12px;
+  display: grid;
+  gap: 3px;
+  padding: 12px;
+}
+
+.station-board-modal__line-summary span,
+.station-board-modal__line-summary small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.station-board-modal__line-summary strong {
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1.12;
+}
+</style>
