@@ -597,6 +597,7 @@ describe("DeparturePatternModal settings", () => {
         createCall("station-a", "Station A", "Paris", true),
         createCall("station-b", "Station B", "Paris"),
         createCall("station-c", "Station C", "Paris"),
+        createCall("station-d", "Station D", "Paris"),
       ],
       lineTopology: [
         {
@@ -606,6 +607,7 @@ describe("DeparturePatternModal settings", () => {
             createRouteStop("station-a", "Station A", 652146, 6862288),
             createRouteStop("station-b", "Station B", 652646, 6862288),
             createRouteStop("station-c", "Station C", 653146, 6862288),
+            createRouteStop("station-d", "Station D", 653646, 6862288),
           ],
         },
       ],
@@ -623,7 +625,7 @@ describe("DeparturePatternModal settings", () => {
               id: "traffic-a-b",
               title: "Trafic interrompu",
               message:
-                "Trafic interrompu entre Station A et Station B et perturbe sur le reste de la ligne. Reprise estimee : 00:00.",
+                "Trafic interrompu entre Station A et Station C et perturbe sur le reste de la ligne. Reprise estimee : 00:00.",
               kind: "incident",
               applicationPeriods: [],
               impactedLineRefs: ["line:test"],

@@ -39,6 +39,10 @@ export type PlacePresetNavigationMode = "dropdown-swipe" | "dropdown" | "swipe";
 export type CompactLinePlanMode = "auto" | "comfort" | "compact";
 export type TrafficInfoDesign = "ratp" | "cards";
 export type TrafficInfoDefaultScope = "optimized" | "all";
+export type FullscreenStationPanelDesign =
+  | "all-directions"
+  | "double-stop"
+  | "home-card";
 export type TransferBundleRetentionDays = 1 | 3 | 7 | 15 | 30 | 60;
 export type TransferBundleRequestConcurrency = 1 | 2 | 3 | 4;
 export type TransferBundleRequestSpacingMs = 0 | 250 | 500 | 1000 | 1500 | 2000;
@@ -69,6 +73,8 @@ export interface AppSettings {
   ghostNetworkStructuralOnly: boolean;
   trafficInfoDesign: TrafficInfoDesign;
   trafficInfoDefaultScope: TrafficInfoDefaultScope;
+  fullscreenStationPanelDesign: FullscreenStationPanelDesign;
+  fullscreenStationPanelDarkTheme: boolean;
   smartTrafficDetection: boolean;
   transferResolverMode: TransferResolverMode;
   transferBundleRetentionDays: TransferBundleRetentionDays;
@@ -147,6 +153,12 @@ export const trafficInfoDesignOptions = [
 export const trafficInfoDefaultScopeOptions = [
   { id: "optimized", label: "Optimisé" },
   { id: "all", label: "Toutes les lignes" },
+] as const;
+
+export const fullscreenStationPanelDesignOptions = [
+  { id: "all-directions", label: "Toutes directions" },
+  { id: "double-stop", label: "Double arret" },
+  { id: "home-card", label: "Carte station" },
 ] as const;
 
 export const transferBundleRetentionOptions = [
@@ -231,6 +243,8 @@ export function createDefaultAppSettings(): AppSettings {
     ghostNetworkStructuralOnly: false,
     trafficInfoDesign: "ratp",
     trafficInfoDefaultScope: "optimized",
+    fullscreenStationPanelDesign: "all-directions",
+    fullscreenStationPanelDarkTheme: false,
     smartTrafficDetection: true,
     transferResolverMode: "auto",
     // Enabled by default to use a frontend cache only if possible
@@ -323,6 +337,15 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     )
       ? value.trafficInfoDefaultScope
       : defaults.trafficInfoDefaultScope,
+    fullscreenStationPanelDesign: isFullscreenStationPanelDesign(
+      value.fullscreenStationPanelDesign,
+    )
+      ? value.fullscreenStationPanelDesign
+      : defaults.fullscreenStationPanelDesign,
+    fullscreenStationPanelDarkTheme: readBoolean(
+      value.fullscreenStationPanelDarkTheme,
+      defaults.fullscreenStationPanelDarkTheme,
+    ),
     smartTrafficDetection: readBoolean(
       value.smartTrafficDetection,
       defaults.smartTrafficDetection,
@@ -641,6 +664,16 @@ function isTrafficInfoDefaultScope(
   value: unknown,
 ): value is TrafficInfoDefaultScope {
   return value === "optimized" || value === "all";
+}
+
+function isFullscreenStationPanelDesign(
+  value: unknown,
+): value is FullscreenStationPanelDesign {
+  return (
+    value === "all-directions" ||
+    value === "double-stop" ||
+    value === "home-card"
+  );
 }
 
 function isWeatherMode(value: unknown): value is WeatherMode {

@@ -455,7 +455,7 @@ describe("DetailedLineMapPicker sidebar", () => {
                     id: "traffic-a-b",
                     title: "Trafic interrompu",
                     message:
-                      "Le trafic est interrompu entre Station A et Station B et perturbe sur le reste de la ligne.",
+                      "Le trafic est interrompu entre Station A et Station C et perturbe sur le reste de la ligne.",
                     kind: "incident",
                     applicationPeriods: [],
                     impactedLineRefs: [line.ref],
@@ -1140,14 +1140,36 @@ function createTrafficMap(): LineMapViewModel {
       scheduleStopAreaRef: "stop_area:c",
     },
   };
+  const stationD: LineMapStopView = {
+    id: "station:d",
+    label: "Station D",
+    city: "Paris",
+    x: 0.98,
+    y: 0.5,
+    coordinateSource: "fallback",
+    routeIds: ["main"],
+    routeLabels: ["Main"],
+    station: {
+      id: "station:d",
+      label: "Station D",
+      city: "Paris",
+      monitoringRef: "stop:d",
+      scheduleStopAreaRef: "stop_area:d",
+    },
+  };
 
-  map.stops = [...map.stops, stationC];
+  map.stops = [...map.stops, stationC, stationD];
   map.segments = [
     map.segments[0],
     {
       id: "b-c",
       fromStopId: "station:b",
       toStopId: "station:c",
+    },
+    {
+      id: "c-d",
+      fromStopId: "station:c",
+      toStopId: "station:d",
     },
   ];
   map.branches = [

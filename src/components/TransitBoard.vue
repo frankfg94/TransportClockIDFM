@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Map,
   MapPin,
+  Maximize2,
   MoreVertical,
   Radio,
   Route,
@@ -74,6 +75,7 @@ const emit = defineEmits<{
   "open-traffic": [];
   remove: [];
   "open-line-page": [board: TransitBoardConfig];
+  "open-fullscreen-panel": [board: TransitBoardConfig];
   "schedule-alarm": [
     payload: {
       board: TransitBoardConfig;
@@ -372,6 +374,11 @@ function openStationEditor(): void {
   void loadStations();
 }
 
+function openFullscreenPanel(): void {
+  actionsOpen.value = false;
+  emit("open-fullscreen-panel", props.board);
+}
+
 function removeBoard(): void {
   actionsOpen.value = false;
   emit("remove");
@@ -598,6 +605,11 @@ onUnmounted(() => {
           <button type="button" @click="openStationEditor">
             <MapPin :size="17" aria-hidden="true" />
             Changer de station
+          </button>
+
+          <button type="button" @click="openFullscreenPanel">
+            <Maximize2 :size="17" aria-hidden="true" />
+            Affichage panneau
           </button>
 
           <button

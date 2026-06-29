@@ -196,6 +196,69 @@ describe("dashboard presets", () => {
     expect(wrapper.text()).toContain("Aucune station suivie pour le moment");
   });
 
+  it("opens the fullscreen station panel from a station name and display query", async () => {
+    installDashboardMocks({
+      display: "home-card",
+      fullscreen: "La Croix de Berny",
+    });
+    const { default: App } = await import("../src/App.vue");
+    mount(App, { attachTo: document.body });
+
+    await flushPromises();
+
+    const panel = document.body.querySelector(".fullscreen-station-panel");
+
+    expect(panel).toBeTruthy();
+    expect(panel?.classList.contains("fullscreen-station-panel--home-card")).toBe(
+      true,
+    );
+    expect(panel?.textContent).toContain("La Croix de Berny");
+  });
+
+  it("opens the fullscreen station panel from a station id query", async () => {
+    installDashboardMocks({
+      fullscreen: "stop_area:IDFM:69813",
+      fullscreenDisplay: "double-stop",
+    });
+    const { default: App } = await import("../src/App.vue");
+    mount(App, { attachTo: document.body });
+
+    await flushPromises();
+
+    const panel = document.body.querySelector(".fullscreen-station-panel");
+
+    expect(panel).toBeTruthy();
+    expect(
+      panel?.classList.contains("fullscreen-station-panel--double-stop"),
+    ).toBe(true);
+    expect(panel?.textContent).toContain("La Croix de Berny");
+  });
+
+  it("syncs fullscreen panel open and close actions with the route query", async () => {
+    installDashboardMocks({});
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+
+    await flushPromises();
+    await wrapper.get(".mock-fullscreen").trigger("click");
+    await flushPromises();
+
+    expect(route.query.fullscreen).toBe("t10-les-peintres");
+    expect(route.query.fullscreenDisplay).toBe("all-directions");
+    expect(document.body.querySelector(".fullscreen-station-panel")).toBeTruthy();
+
+    const closeButton = Array.from(document.body.querySelectorAll("button")).find(
+      (button) => button.getAttribute("aria-label") === "Fermer le panneau",
+    );
+
+    expect(closeButton).toBeTruthy();
+    closeButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+
+    expect(route.query.fullscreen).toBeUndefined();
+    expect(route.query.fullscreenDisplay).toBeUndefined();
+    expect(document.body.querySelector(".fullscreen-station-panel")).toBeFalsy();
+  });
 });
 
 function installDashboardMocks(
@@ -238,9 +301,14 @@ function installDashboardMocks(
   }));
   vi.doMock("../src/features/app-settings", () => ({
     filterTerminalOnly: <T,>(items: T[]) => items,
+    fullscreenStationPanelDesignOptions: [
+      { id: "all-directions", label: "Toutes directions" },
+      { id: "double-stop", label: "Double arret" },
+      { id: "home-card", label: "Carte station" },
+    ],
     requestTemporaryAlarmWakeLock: vi.fn(),
-    useAppSettings: () => ({
-      settings: {
+    useAppSettings: () => {
+      const settings = reactive({
         value: {
           wakeDeviceOnAlarm: false,
           showPatternMiniMap: true,
@@ -256,15 +324,38 @@ function installDashboardMocks(
           transferResolverMode: "auto",
           placePresetNavigationMode: "dropdown-swipe",
           reduceMotion: false,
+          fullscreenStationPanelDesign: "all-directions",
+          fullscreenStationPanelDarkTheme: false,
           ...appSettings,
         },
-      },
-    }),
+      });
+
+      return {
+        settings,
+        updateSettings: vi.fn((patch: Record<string, unknown>) => {
+          Object.assign(settings.value, patch);
+        }),
+        resetSettings: vi.fn(),
+        effectiveMaxDeparturesPerDirection: { value: undefined },
+      };
+    },
   }));
   vi.doMock("../src/components/TransitBoard.vue", () => ({
     default: defineComponent({
       props: ["board"],
-      template: '<article class="mock-board">{{ board.title }}</article>',
+      emits: ["open-fullscreen-panel"],
+      template: `
+        <article class="mock-board">
+          {{ board.title }}
+          <button
+            class="mock-fullscreen"
+            type="button"
+            @click="$emit('open-fullscreen-panel', board)"
+          >
+            Plein ecran
+          </button>
+        </article>
+      `,
     }),
   }));
   vi.doMock("../src/services/idfm", () => ({

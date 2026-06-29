@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createDefaultAppSettings,
   filterTerminalOnly,
+  fullscreenStationPanelDesignOptions,
   getEffectiveMaxDeparturesPerDirection,
   normalizeAppSettings,
   parseMaxDeparturesPerDirection,
@@ -30,6 +31,8 @@ describe("app settings", () => {
       ghostNetworkStructuralOnly: false,
       trafficInfoDesign: "ratp",
       trafficInfoDefaultScope: "optimized",
+      fullscreenStationPanelDesign: "all-directions",
+      fullscreenStationPanelDarkTheme: false,
       smartTrafficDetection: true,
       transferResolverMode: "auto",
       transferBundleBackendCacheEnabled: true,
@@ -65,6 +68,8 @@ describe("app settings", () => {
       ghostNetworkStructuralOnly: "yes",
       trafficInfoDesign: "dense",
       trafficInfoDefaultScope: "everything",
+      fullscreenStationPanelDesign: "cinema",
+      fullscreenStationPanelDarkTheme: "yes",
       smartTrafficDetection: "sometimes",
       transferResolverMode: "telepathy",
       transferBundleBackendCacheEnabled: "no",
@@ -95,6 +100,8 @@ describe("app settings", () => {
     expect(settings.ghostNetworkStructuralOnly).toBe(false);
     expect(settings.trafficInfoDesign).toBe("ratp");
     expect(settings.trafficInfoDefaultScope).toBe("optimized");
+    expect(settings.fullscreenStationPanelDesign).toBe("all-directions");
+    expect(settings.fullscreenStationPanelDarkTheme).toBe(false);
     expect(settings.smartTrafficDetection).toBe(true);
     expect(settings.transferResolverMode).toBe("auto");
     expect(settings.transferBundleBackendCacheEnabled).toBe(true);
@@ -153,6 +160,12 @@ describe("app settings", () => {
       "auto",
       "nearby",
     ]);
+  });
+
+  it("exposes every fullscreen station panel design option", () => {
+    expect(
+      fullscreenStationPanelDesignOptions.map((option) => option.id),
+    ).toEqual(["all-directions", "double-stop", "home-card"]);
   });
 
   it("only hides directions that are explicitly marked as non-terminal", () => {

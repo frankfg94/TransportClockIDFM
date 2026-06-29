@@ -22,6 +22,8 @@ const baseSettings: AppSettings = {
   ghostNetworkStructuralOnly: false,
   trafficInfoDesign: "ratp",
   trafficInfoDefaultScope: "optimized",
+  fullscreenStationPanelDesign: "all-directions",
+  fullscreenStationPanelDarkTheme: false,
   smartTrafficDetection: true,
   transferResolverMode: "auto",
   transferBundleBackendCacheEnabled: true,

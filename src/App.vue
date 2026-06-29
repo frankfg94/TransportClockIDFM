@@ -2,6 +2,7 @@
 import {
   computed,
   defineAsyncComponent,
+  nextTick,
   onBeforeUnmount,
   onMounted,
   reactive,
@@ -11,6 +12,8 @@ import {
 import Draggable from "vuedraggable";
 import BoardVisibilityControls from "./components/BoardVisibilityControls.vue";
 import EmptyStationsState from "./components/EmptyStationsState.vue";
+import FullscreenStationPanel from "./components/FullscreenStationPanel.vue";
+import LineIconBadge from "./components/LineIconBadge.vue";
 import PlaceNameModal from "./components/PlaceNameModal.vue";
 import PlaceSwitcher from "./components/PlaceSwitcher.vue";
 import TransitBoard from "./components/TransitBoard.vue";
@@ -18,8 +21,10 @@ import { usePlaceSwipeNavigation } from "./composables/usePlaceSwipeNavigation";
 import { transitBoards } from "./config/transitBoards";
 import {
   filterTerminalOnly,
+  fullscreenStationPanelDesignOptions,
   requestTemporaryAlarmWakeLock,
   useAppSettings,
+  type FullscreenStationPanelDesign,
 } from "./features/app-settings";
 import { WeatherExperience } from "./features/weather";
 import {
@@ -109,6 +114,22 @@ type BoardTrafficAlert = {
   tone: TrafficAlertPresentation["tone"];
 };
 
+interface FullscreenPanelDeparture {
+  id: string;
+  waitLabel: string;
+  destination?: string;
+  meta?: string;
+  statusLabel?: string;
+}
+
+interface FullscreenPanelDirection {
+  id: string;
+  label: string;
+  subtitle?: string;
+  serviceEnded?: boolean;
+  departures: FullscreenPanelDeparture[];
+}
+
 interface BoardState {
   departures: Departure[];
   directionGroups: DirectionDepartureGroup[];
@@ -139,7 +160,7 @@ const presetState = reactive<TransitPresetState>(
   createDefaultTransitPresetState(transitBoards),
 );
 const preferences = reactive(createDefaultPreferences(transitBoards));
-const { settings } = useAppSettings();
+const { settings, updateSettings } = useAppSettings();
 let activeAlarmAudio:
   | {
       audioContext: AudioContext;
@@ -156,6 +177,10 @@ const placeNameError = ref("");
 const topbarMenuOpen = ref(false);
 const weatherModalOpen = ref(false);
 const boardDisplayModalOpen = ref(false);
+const fullscreenPanelBoard = ref<TransitBoardConfig>();
+const fullscreenPanelPanamDirectionId = ref<string>();
+const fullscreenPanelRouteDesignOverride = ref<FullscreenStationPanelDesign>();
+const fullscreenPanelEnteredNativeFullscreen = ref(false);
 const alarmTarget = ref<{
   board: TransitBoardConfig;
   directionGroup: DirectionDepartureGroup;
@@ -191,6 +216,12 @@ const departureServiceTypeCache = new Map<
   string,
   Promise<DepartureServiceType | undefined>
 >();
+const isFullscreenPanelOpen = computed(() => Boolean(fullscreenPanelBoard.value));
+const fullscreenPanelDesign = computed<FullscreenStationPanelDesign>(
+  () =>
+    fullscreenPanelRouteDesignOverride.value ??
+    settings.value.fullscreenStationPanelDesign,
+);
 
 const placeOptions = computed(() =>
   presetState.places.map((place) => ({
@@ -266,10 +297,168 @@ function saveActiveTransitPreferences(): void {
 }
 
 function getRoutePlaceId(): string | undefined {
-  const value = route.query.place;
-  const placeId = Array.isArray(value) ? value[0] : value;
+  return getFirstRouteQueryValue(route.query.place);
+}
 
-  return typeof placeId === "string" ? placeId : undefined;
+function getFirstRouteQueryValue(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    return value.find((item): item is string => typeof item === "string");
+  }
+
+  return typeof value === "string" ? value : undefined;
+}
+
+function getRouteQueryParam(name: string): string | undefined {
+  return getFirstRouteQueryValue(route.query[name]);
+}
+
+function getRouteFullscreenStationRequest(): string | undefined {
+  return getRouteQueryParam("fullscreen");
+}
+
+function getRouteFullscreenPanelDesign():
+  | FullscreenStationPanelDesign
+  | undefined {
+  const value =
+    getRouteQueryParam("fullscreenDisplay") ??
+    getRouteQueryParam("fullscreenDesign") ??
+    getRouteQueryParam("display");
+
+  return isFullscreenStationPanelDesign(value) ? value : undefined;
+}
+
+function isFullscreenStationPanelDesign(
+  value: unknown,
+): value is FullscreenStationPanelDesign {
+  return fullscreenStationPanelDesignOptions.some(
+    (option) => option.id === value,
+  );
+}
+
+function normalizeFullscreenStationToken(value: string | undefined): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, " ")
+    .trim()
+    .replace(/\s+/gu, " ");
+}
+
+function getFullscreenBoardMatchTokens(board: TransitBoardConfig): string[] {
+  return [
+    board.id,
+    board.title,
+    `${board.title} ${board.line.shortName}`,
+    `${board.line.shortName} ${board.title}`,
+    board.schedule?.stopAreaRef,
+    board.schedule?.lineRef,
+    ...board.monitoringPoints.map((point) => point.ref),
+    ...board.monitoringPoints.map((point) => point.label),
+  ]
+    .map(normalizeFullscreenStationToken)
+    .filter(Boolean);
+}
+
+function getFullscreenBoardCandidates(): TransitBoardConfig[] {
+  const candidates = new Map<string, TransitBoardConfig>();
+
+  for (const board of visibleBoards.value) {
+    candidates.set(board.id, board);
+  }
+
+  for (const board of orderedBoards.value) {
+    candidates.set(board.id, board);
+  }
+
+  return Array.from(candidates.values());
+}
+
+function resolveFullscreenPanelBoard(
+  stationRequest: string | undefined,
+): TransitBoardConfig | undefined {
+  const requestedToken = normalizeFullscreenStationToken(stationRequest);
+
+  if (!requestedToken) {
+    return undefined;
+  }
+
+  return getFullscreenBoardCandidates().find((board) =>
+    getFullscreenBoardMatchTokens(board).includes(requestedToken),
+  );
+}
+
+function replaceRouteFullscreenPanel(
+  board: TransitBoardConfig,
+  design: FullscreenStationPanelDesign = fullscreenPanelDesign.value,
+): void {
+  void router.replace({
+    path: route.path,
+    query: {
+      ...route.query,
+      fullscreen: board.id,
+      fullscreenDisplay: design,
+    },
+  });
+}
+
+function removeRouteFullscreenPanel(): void {
+  const {
+    fullscreen: _fullscreen,
+    fullscreenDisplay: _fullscreenDisplay,
+    fullscreenDesign: _fullscreenDesign,
+    display: _display,
+    ...query
+  } = route.query;
+
+  void router.replace({
+    path: route.path,
+    query,
+  });
+}
+
+function syncFullscreenPanelFromRoute(options?: {
+  requestNativeFullscreen?: boolean;
+  refresh?: boolean;
+}): void {
+  const stationRequest = getRouteFullscreenStationRequest();
+  const routeDesign = getRouteFullscreenPanelDesign();
+
+  fullscreenPanelRouteDesignOverride.value = stationRequest
+    ? routeDesign
+    : undefined;
+
+  if (!stationRequest) {
+    if (fullscreenPanelBoard.value) {
+      void closeFullscreenPanel({ syncRoute: false });
+    }
+
+    return;
+  }
+
+  const board = resolveFullscreenPanelBoard(stationRequest);
+
+  if (!board) {
+    if (fullscreenPanelBoard.value) {
+      void closeFullscreenPanel({ syncRoute: false });
+    }
+
+    return;
+  }
+
+  if (fullscreenPanelBoard.value?.id === board.id) {
+    if (options?.refresh) {
+      void refreshBoard(board.id);
+    }
+
+    return;
+  }
+
+  void openFullscreenPanel(board, {
+    refresh: options?.refresh,
+    requestNativeFullscreen: options?.requestNativeFullscreen ?? false,
+    syncRoute: false,
+  });
 }
 
 function replaceRoutePlace(placeId: string): void {
@@ -298,6 +487,8 @@ function syncActivePlaceFromRoute(options?: { refresh: boolean }): void {
   if (placeChanged && options?.refresh !== false) {
     void refreshAll();
   }
+
+  syncFullscreenPanelFromRoute({ refresh: false });
 }
 
 function selectTransitPlace(placeId: string): void {
@@ -375,6 +566,18 @@ watch(
   },
 );
 
+watch(
+  () => [
+    getRouteFullscreenStationRequest(),
+    getRouteQueryParam("fullscreenDisplay"),
+    getRouteQueryParam("fullscreenDesign"),
+    getRouteQueryParam("display"),
+  ],
+  () => {
+    syncFullscreenPanelFromRoute({ refresh: true });
+  },
+);
+
 const boardTogglesInContextMenu = computed(
   () =>
     mobileBoardTogglesInContextMenu.value ||
@@ -409,6 +612,25 @@ const netexCacheAlert = computed(() => {
 const trafficReportByLineRef = computed(
   () => new Map(trafficReports.value.map((report) => [report.lineRef, report])),
 );
+const fullscreenPanelDirections = computed<FullscreenPanelDirection[]>(() =>
+  fullscreenPanelBoard.value
+    ? getFullscreenPanelDirections(fullscreenPanelBoard.value)
+    : [],
+);
+const fullscreenPanelTrafficAlert = computed(() =>
+  fullscreenPanelBoard.value
+    ? getBoardTrafficAlert(fullscreenPanelBoard.value)
+    : undefined,
+);
+const fullscreenPanelUpdatedAtLabel = computed(() => {
+  const board = fullscreenPanelBoard.value;
+
+  if (!board || !states[board.id]?.updatedAt) {
+    return "";
+  }
+
+  return `Mis a jour ${formatClock(states[board.id].updatedAt)}`;
+});
 
 function getBoardAlarmDepartureIds(boardId: string): string[] {
   return departureAlarms.value
@@ -569,7 +791,7 @@ function createDepartureServiceTypeCacheKey(
 }
 
 async function refreshAll(): Promise<void> {
-  if (!primApiKeyConfigured || !isPageVisible()) {
+  if (!primApiKeyConfigured || !isPageVisible() || isFullscreenPanelOpen.value) {
     refreshing.value = false;
     return;
   }
@@ -649,6 +871,114 @@ function openBoardDisplayModal(): void {
   boardDisplayModalOpen.value = true;
 }
 
+async function openFullscreenPanel(
+  board: TransitBoardConfig,
+  options: {
+    refresh?: boolean;
+    requestNativeFullscreen?: boolean;
+    syncRoute?: boolean;
+  } = {},
+): Promise<void> {
+  stopRefreshTimer();
+  fullscreenPanelBoard.value = board;
+  fullscreenPanelPanamDirectionId.value = undefined;
+
+  if (options.syncRoute !== false) {
+    replaceRouteFullscreenPanel(board);
+  }
+
+  if (options.refresh) {
+    void refreshBoard(board.id);
+  }
+
+  await nextTick();
+
+  if (options.requestNativeFullscreen !== false) {
+    await requestFullscreenPanelMode();
+  }
+}
+
+async function requestFullscreenPanelMode(): Promise<void> {
+  if (!import.meta.client || document.fullscreenElement) {
+    fullscreenPanelEnteredNativeFullscreen.value = false;
+    return;
+  }
+
+  try {
+    await document.documentElement.requestFullscreen();
+    fullscreenPanelEnteredNativeFullscreen.value =
+      document.fullscreenElement === document.documentElement;
+  } catch {
+    fullscreenPanelEnteredNativeFullscreen.value = false;
+  }
+}
+
+async function closeFullscreenPanel(
+  options: { syncRoute?: boolean; resumeRefresh?: boolean } = {},
+): Promise<void> {
+  const shouldExitFullscreen =
+    fullscreenPanelEnteredNativeFullscreen.value &&
+    Boolean(document.fullscreenElement);
+
+  if (options.syncRoute !== false) {
+    removeRouteFullscreenPanel();
+  }
+
+  fullscreenPanelBoard.value = undefined;
+  fullscreenPanelPanamDirectionId.value = undefined;
+  fullscreenPanelRouteDesignOverride.value = undefined;
+  fullscreenPanelEnteredNativeFullscreen.value = false;
+
+  if (shouldExitFullscreen) {
+    try {
+      await document.exitFullscreen();
+    } catch {
+      // Browser fullscreen can already be gone after ESC or platform gestures.
+    }
+  }
+
+  if (options.resumeRefresh !== false) {
+    resumeHomeRefreshAfterFullscreenPanel();
+  }
+}
+
+function resumeHomeRefreshAfterFullscreenPanel(): void {
+  if (!primApiKeyConfigured || !isPageVisible()) {
+    return;
+  }
+
+  pageVisible.value = true;
+  startRefreshTimer();
+  void refreshAll();
+}
+
+function updateFullscreenPanelDesign(payload: {
+  design: FullscreenStationPanelDesign;
+  panamDirectionId?: string;
+}): void {
+  updateSettings({ fullscreenStationPanelDesign: payload.design });
+  fullscreenPanelRouteDesignOverride.value = getRouteFullscreenStationRequest()
+    ? payload.design
+    : undefined;
+  fullscreenPanelPanamDirectionId.value = payload.panamDirectionId;
+
+  if (fullscreenPanelBoard.value && getRouteFullscreenStationRequest()) {
+    replaceRouteFullscreenPanel(fullscreenPanelBoard.value, payload.design);
+  }
+}
+
+function updateFullscreenPanelTheme(darkTheme: boolean): void {
+  updateSettings({ fullscreenStationPanelDarkTheme: darkTheme });
+}
+
+function refreshFullscreenPanel(): void {
+  if (!fullscreenPanelBoard.value) {
+    return;
+  }
+
+  void refreshBoard(fullscreenPanelBoard.value.id);
+}
+
 function handleMobileBreakpointChange(event: MediaQueryListEvent): void {
   mobileBoardTogglesInContextMenu.value = event.matches;
 }
@@ -695,6 +1025,152 @@ function getVisibleDirectionGroupsForBoard(
     states[boardId]?.directionGroups ?? [],
     preferences.terminalDirectionsOnly,
   );
+}
+
+function getFullscreenPanelDirections(
+  board: TransitBoardConfig,
+): FullscreenPanelDirection[] {
+  const hiddenDirectionIds = new Set(
+    preferences.hiddenDirectionIdsByBoardId[board.id] ?? [],
+  );
+
+  return getVisibleDirectionGroupsForBoard(board.id)
+    .filter((direction) => !hiddenDirectionIds.has(direction.id))
+    .map((direction) => ({
+      id: direction.id,
+      label: direction.label,
+      subtitle: direction.subtitle,
+      serviceEnded: direction.serviceEnded,
+      departures: direction.departures.slice(0, 2).map((departure) => ({
+        id: departure.id,
+        waitLabel: formatPanelWait(departure),
+        destination: departure.destination,
+        meta: formatPanelDepartureMeta(departure),
+        statusLabel: statusLabel(departure.status),
+      })),
+    }));
+}
+
+function formatPanelWait(departure?: Departure): string {
+  if (!departure) {
+    return "--";
+  }
+
+  if (departure.vehicleAtStop) {
+    return "A quai";
+  }
+
+  const time = getDepartureTime(departure);
+
+  if (!time) {
+    return "--";
+  }
+
+  const minutes = Math.max(
+    0,
+    Math.round((new Date(time).getTime() - Date.now()) / 60000),
+  );
+
+  return minutes === 0 ? "0" : String(minutes);
+}
+
+function getDepartureTime(departure: Departure): string | undefined {
+  return (
+    departure.expectedDepartureTime ??
+    departure.aimedDepartureTime ??
+    departure.expectedArrivalTime
+  );
+}
+
+function formatPanelDepartureMeta(departure: Departure): string {
+  const parts = [
+    getDepartureMonitoringLabel(departure),
+    formatDepartureServiceType(departure.serviceType),
+    formatRemainingStopCount(departure),
+  ].filter(Boolean);
+
+  return parts.join(" - ");
+}
+
+function getDepartureMonitoringLabel(departure: Departure): string {
+  const normalizedLabel = normalizeText(departure.monitoringLabel);
+  const normalizedDestination = normalizeText(departure.destination);
+
+  if (
+    !departure.monitoringLabel ||
+    normalizedLabel === "tous quais" ||
+    normalizedLabel === "tous quais." ||
+    normalizedLabel === "horaire idfm" ||
+    normalizedLabel === normalizedDestination
+  ) {
+    return "";
+  }
+
+  return departure.monitoringLabel;
+}
+
+function formatDepartureServiceType(
+  serviceType?: DepartureServiceType,
+): string {
+  if (serviceType === "direct") {
+    return "Direct";
+  }
+
+  if (serviceType === "semi-direct") {
+    return "Semi direct";
+  }
+
+  if (serviceType === "omnibus") {
+    return "Toutes stations";
+  }
+
+  return "";
+}
+
+function formatRemainingStopCount(departure: Departure): string {
+  if (typeof departure.remainingStopCount !== "number") {
+    return "";
+  }
+
+  return departure.remainingStopCount > 1
+    ? `${departure.remainingStopCount} arrets`
+    : `${departure.remainingStopCount} arret`;
+}
+
+function statusLabel(status?: string): string {
+  const labels: Record<string, string> = {
+    noReport: "A l'heure",
+    onTime: "A l'heure",
+    delayed: "Retarde",
+    early: "En avance",
+    missed: "Manque",
+    cancelled: "Supprime",
+  };
+
+  return status ? (labels[status] ?? status) : "";
+}
+
+function normalizeText(value?: string): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+}
+
+function getTransportTypeLabel(board: TransitBoardConfig): string {
+  if (board.line.mode === "metro") {
+    return "metro";
+  }
+
+  if (board.line.mode === "rer") {
+    return "RER";
+  }
+
+  if (board.line.mode === "train") {
+    return "train";
+  }
+
+  return board.line.mode;
 }
 
 async function runWithConcurrency<T>(
@@ -1253,6 +1729,11 @@ function isPageVisible(): boolean {
 
 function startRefreshTimer(): void {
   stopRefreshTimer();
+
+  if (isFullscreenPanelOpen.value) {
+    return;
+  }
+
   refreshTimer = window.setInterval(() => {
     void refreshAll();
   }, REFRESH_INTERVAL_MS);
@@ -1271,8 +1752,13 @@ function refreshOnReturn(): void {
   }
 
   pageVisible.value = true;
-  startRefreshTimer();
   scheduleAlarmTimers();
+
+  if (isFullscreenPanelOpen.value) {
+    return;
+  }
+
+  startRefreshTimer();
   void refreshAll();
 }
 
@@ -1404,9 +1890,11 @@ function syncTransitPreferences(event?: Event): void {
 onMounted(() => {
   Object.assign(presetState, loadTransitPresetState(transitBoards));
   syncActivePlaceFromRoute({ refresh: false });
+  syncFullscreenPanelFromRoute({ refresh: false });
   departureAlarms.value = loadDepartureAlarms();
   allBoards.value.forEach((board) => ensureBoardState(board.id));
   pageVisible.value = isPageVisible();
+  syncFullscreenPanelFromRoute({ requestNativeFullscreen: true, refresh: true });
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("focus", refreshOnReturn);
   window.addEventListener("storage", syncTransitPreferences);
@@ -1770,6 +2258,7 @@ onBeforeUnmount(() => {
                     @open-traffic="openTrafficPage"
                     @remove="removeCustomBoard(board.id)"
                     @open-line-page="openLinePage"
+                    @open-fullscreen-panel="openFullscreenPanel"
                     @schedule-alarm="openAlarmModal"
                     @show-pattern="openPatternModal"
                     @toggle-direction="toggleDirection(board.id, $event)"
@@ -1780,6 +2269,38 @@ onBeforeUnmount(() => {
           </div>
         </Transition>
       </section>
+
+      <Teleport to="body">
+        <FullscreenStationPanel
+          v-if="fullscreenPanelBoard"
+          :station-name="fullscreenPanelBoard.title"
+          :city="fullscreenPanelBoard.city"
+          :line-name="fullscreenPanelBoard.line.longName"
+          :line-short-name="fullscreenPanelBoard.line.shortName"
+          :line-color="fullscreenPanelBoard.line.color"
+          :line-text-color="fullscreenPanelBoard.line.textColor"
+          :transport-type-label="getTransportTypeLabel(fullscreenPanelBoard)"
+          :directions="fullscreenPanelDirections"
+          :design="fullscreenPanelDesign"
+          :dark-theme="settings.fullscreenStationPanelDarkTheme"
+          :panam-direction-id="fullscreenPanelPanamDirectionId"
+          :traffic-alert="fullscreenPanelTrafficAlert"
+          :loading="states[fullscreenPanelBoard.id]?.loading ?? false"
+          :error="states[fullscreenPanelBoard.id]?.error"
+          :updated-at-label="fullscreenPanelUpdatedAtLabel"
+          @change-design="updateFullscreenPanelDesign"
+          @change-theme="updateFullscreenPanelTheme"
+          @refresh="refreshFullscreenPanel"
+          @close="closeFullscreenPanel"
+        >
+          <template #line-logo>
+            <LineIconBadge
+              class="fullscreen-panel-line-icon"
+              :line="fullscreenPanelBoard.line"
+            />
+          </template>
+        </FullscreenStationPanel>
+      </Teleport>
 
       <PlaceNameModal
         :error="placeNameError"

@@ -75,6 +75,48 @@ describe("TransitBoard departure metadata", () => {
 
     wrapper.unmount();
   });
+
+  it("emits fullscreen panel opening from the station actions menu", async () => {
+    const departure: Departure = {
+      id: "departure-panel",
+      lineRef: "line:test",
+      monitoringRef: "stop:test",
+      stopName: "Station test",
+      destination: "Saint-Remy",
+      monitoringLabel: "Tous quais",
+      expectedDepartureTime: new Date(Date.now() + 5 * 60_000).toISOString(),
+      vehicleAtStop: false,
+    };
+    const wrapper = mount(TransitBoard, {
+      props: {
+        board: createBoard(),
+        collapsedDirectionIds: [],
+        departures: [departure],
+        directionGroups: [createDirectionGroup(departure)],
+        loading: false,
+      },
+      global: {
+        stubs: {
+          LineIconBadge: true,
+        },
+      },
+    });
+
+    await wrapper.find('[aria-label="Actions de la station"]').trigger("click");
+
+    const fullscreenButton = wrapper
+      .findAll(".board-actions__menu button")
+      .find((button) => button.text().includes("Affichage panneau"));
+
+    expect(fullscreenButton).toBeTruthy();
+    await fullscreenButton?.trigger("click");
+
+    expect(wrapper.emitted("open-fullscreen-panel")?.[0]).toEqual([
+      createBoard(),
+    ]);
+
+    wrapper.unmount();
+  });
 });
 
 function createBoard(): TransitBoardConfig {

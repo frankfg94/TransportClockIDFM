@@ -10,6 +10,7 @@ import {
   boardTogglesPlacementOptions,
   closedDirectionSummaryOptions,
   compactLinePlanOptions,
+  fullscreenStationPanelDesignOptions,
   maxDeparturesPerDirectionOptions,
   navigationAutoHideOptions,
   placePresetNavigationModeOptions,
@@ -31,6 +32,7 @@ import {
   type BoardTogglesPlacement,
   type ClosedDirectionSummaryMode,
   type CompactLinePlanMode,
+  type FullscreenStationPanelDesign,
   type NavigationAutoHide,
   type PlacePresetNavigationMode,
   type TrafficInfoDefaultScope,
@@ -140,6 +142,12 @@ function updatePlacePresetNavigationMode(value: string): void {
 
 function updateCompactMode(value: string): void {
   updateSettings({ compactLinePlanMode: value as CompactLinePlanMode });
+}
+
+function updateFullscreenStationPanelDesign(value: string): void {
+  updateSettings({
+    fullscreenStationPanelDesign: value as FullscreenStationPanelDesign,
+  });
 }
 
 function updateSelectedDisplayPlace(value: string): void {
@@ -527,6 +535,43 @@ onBeforeUnmount(() => {
           @update:model-value="updateBoardTogglesPlacement"
         />
       </div>
+
+      <div class="settings-row">
+        <div>
+          <strong>Design panneau plein ecran</strong>
+          <span>
+            Choisit l'apparence utilisee par defaut pour l'affichage panneau.
+          </span>
+        </div>
+        <MaterialCombobox
+          :model-value="settings.fullscreenStationPanelDesign"
+          :options="[...fullscreenStationPanelDesignOptions]"
+          aria-label="Design panneau plein ecran"
+          @update:model-value="updateFullscreenStationPanelDesign"
+        />
+      </div>
+
+      <label class="settings-toggle">
+        <input
+          type="checkbox"
+          :checked="settings.fullscreenStationPanelDarkTheme"
+          @change="
+            updateSettings({
+              fullscreenStationPanelDarkTheme: (
+                $event.target as HTMLInputElement
+              ).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>Theme sombre du panneau</strong>
+          <small>
+            Active une lecture plus proche des panneaux PANAM, y compris sur la
+            carte station.
+          </small>
+        </div>
+      </label>
 
       <div class="settings-row">
         <div>

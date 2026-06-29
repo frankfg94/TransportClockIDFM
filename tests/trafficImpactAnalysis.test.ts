@@ -31,8 +31,10 @@ describe("traffic impact analysis", () => {
     const disturbed = getDisturbedStations(analysis);
 
     expect(interrupted).toEqual(
-      stations.slice(0, 5).map((station) => station.key),
+      stations.slice(1, 4).map((station) => station.key),
     );
+    expect(interrupted).not.toContain(stations[0].key);
+    expect(interrupted).not.toContain(stations[4].key);
     expect(disturbed).toContain(stations[5].key);
     expect(
       analysis.edgeImpacts[getPatternTrafficEdgeKey(edges[0])]?.kind,
@@ -58,9 +60,7 @@ describe("traffic impact analysis", () => {
       createSequentialEdges(stations),
     );
 
-    expect(getInterruptedStations(analysis)).toEqual(
-      stations.map((station) => station.key),
-    );
+    expect(getInterruptedStations(analysis)).toEqual([stations[1].key]);
     expect(analysis.segments[0].replacementBus).toBe(true);
   });
 
@@ -110,12 +110,17 @@ describe("traffic impact analysis", () => {
 
     expect(analysis.segments).toHaveLength(2);
     expect(interrupted).toContain(
+      normalizePatternStationName("Cite Universitaire"),
+    );
+    expect(interrupted).toContain(normalizePatternStationName("Parc de Sceaux"));
+    expect(interrupted).toContain(normalizePatternStationName("Sceaux"));
+    expect(interrupted).not.toContain(
       normalizePatternStationName("Denfert-Rochereau"),
     );
-    expect(interrupted).toContain(
+    expect(interrupted).not.toContain(
       normalizePatternStationName("La Croix de Berny"),
     );
-    expect(interrupted).toContain(normalizePatternStationName("Robinson"));
+    expect(interrupted).not.toContain(normalizePatternStationName("Robinson"));
     expect(interrupted).not.toContain(normalizePatternStationName("Port Royal"));
     expect(
       analysis.edgeImpacts[
@@ -130,6 +135,62 @@ describe("traffic impact analysis", () => {
     expect(analysis.segments.every((segment) => segment.replacementBus)).toBe(
       true,
     );
+  });
+
+  it("matches Pte and fuzzy endpoint names without interrupting endpoints", () => {
+    const stations = createStations([
+      "Chatillon - Montrouge",
+      "Malakoff - Rue Etienne Dolet",
+      "Malakoff - Plateau de Vanves",
+      "Porte de Vanves",
+      "Plaisance",
+    ]);
+    const edges = createSequentialEdges(stations);
+    const disruption = createDisruption({
+      id: "metro-13-signalisation",
+      title: "Metro 13 : Panne de signalisation - Trafic interrompu",
+      message:
+        "Trafic interrompu entre Chatilon et Pte de Vanves et perturbe sur le reste de la ligne en raison d'une panne signalisation a Chatillon.\nReprise estimee : 11:00.",
+    });
+
+    const analysis = analyzeTrafficImpacts([disruption], stations, edges);
+    const interrupted = getInterruptedStations(analysis);
+    const disturbed = getDisturbedStations(analysis);
+
+    expect(interrupted).toEqual([
+      normalizePatternStationName("Malakoff - Rue Etienne Dolet"),
+      normalizePatternStationName("Malakoff - Plateau de Vanves"),
+    ]);
+    expect(interrupted).not.toContain(
+      normalizePatternStationName("Chatillon - Montrouge"),
+    );
+    expect(interrupted).not.toContain(
+      normalizePatternStationName("Porte de Vanves"),
+    );
+    expect(disturbed).toContain(normalizePatternStationName("Plaisance"));
+    expect(
+      analysis.edgeImpacts[getPatternTrafficEdgeKey(edges[0])]?.kind,
+    ).toBe("interruption");
+    expect(
+      analysis.edgeImpacts[getPatternTrafficEdgeKey(edges[3])]?.kind,
+    ).toBe("disturbance");
+    expect(analysis.segments[0].restartTimeLabel).toBe("11:00");
+
+    const prteAnalysis = analyzeTrafficImpacts(
+      [
+        createDisruption({
+          id: "metro-13-prte",
+          title: "Trafic interrompu",
+          message: "Trafic interrompu entre Chatillon et Prte de Vanves.",
+        }),
+      ],
+      stations,
+      edges,
+    );
+
+    expect(
+      prteAnalysis.edgeImpacts[getPatternTrafficEdgeKey(edges[0])]?.kind,
+    ).toBe("interruption");
   });
 
   it("recognizes disturbed service sections", () => {
@@ -183,12 +244,8 @@ describe("traffic impact analysis", () => {
       edges,
     );
 
-    expect(getInterruptedStations(deAAnalysis)).toEqual(
-      stations.map((station) => station.key),
-    );
-    expect(getInterruptedStations(depuisAnalysis)).toEqual(
-      stations.map((station) => station.key),
-    );
+    expect(getInterruptedStations(deAAnalysis)).toEqual([stations[1].key]);
+    expect(getInterruptedStations(depuisAnalysis)).toEqual([stations[1].key]);
   });
 
   it("matches station names without accents or exact punctuation", () => {
@@ -209,9 +266,12 @@ describe("traffic impact analysis", () => {
       createSequentialEdges(stations),
     );
 
-    expect(getInterruptedStations(analysis)).toEqual(
-      stations.map((station) => station.key),
-    );
+    expect(getInterruptedStations(analysis)).toEqual([]);
+    expect(
+      analysis.edgeImpacts[
+        getPatternTrafficEdgeKey(createSequentialEdges(stations)[0])
+      ]?.kind,
+    ).toBe("interruption");
   });
 
   it("falls back to impacted stop names when no section text is available", () => {

@@ -87,6 +87,20 @@ const SECTION_END_PATTERN =
   String.raw`(?=(?:\s+(?:(?:et|ou)\s+entre\b|et\s+(?:perturb|ralenti|interrompu|suspendu)|sur\s+le\s+reste|en\s+raison|suite|a\s+la\s+suite|pour\s+cause|toute\s+la|tous\s+les|du\s+\d|jusqu|reprise|veuillez)|[.;,\n]|$))`;
 const BIDIRECTIONAL_SECTION_END_PATTERN =
   String.raw`(?=(?:\s+(?:periode|p[ée]riode|dates?|arr[êe]t|motif|travaux|incident)|[.;,\n]|$))`;
+const FUZZY_STATION_MATCH_MIN_SCORE = 0.72;
+const FUZZY_STATION_MATCH_MIN_MARGIN = 0.08;
+const STATION_MATCH_IGNORED_TOKENS = new Set([
+  "gare",
+  "metro",
+  "porte",
+  "portes",
+  "prte",
+  "pte",
+  "rer",
+  "station",
+  "train",
+  "tram",
+]);
 
 export function analyzeTrafficImpacts(
   disruptions: TrafficDisruption[],
@@ -210,8 +224,12 @@ function createResolvedSegments({
 }): PatternTrafficImpactSegment[] {
   const segments = parsed.sections
     .map((section, index) => {
-      const source = resolveStationKey(section.from, stations);
-      const target = resolveStationKey(section.to, stations);
+      const source = resolveStationKey(section.from, stations, {
+        allowFuzzy: kind === "interruption",
+      });
+      const target = resolveStationKey(section.to, stations, {
+        allowFuzzy: kind === "interruption",
+      });
 
       if (!source || !target) {
         return undefined;
@@ -236,7 +254,11 @@ function createResolvedSegments({
   }
 
   const impactedStationKeys = disruption.impactedStopNames
-    .map((name) => resolveStationKey(name, stations))
+    .map((name) =>
+      resolveStationKey(name, stations, {
+        allowFuzzy: kind === "interruption",
+      }),
+    )
     .filter((key): key is string => Boolean(key));
 
   if (impactedStationKeys.length >= 2) {
@@ -284,8 +306,12 @@ function createSegmentFromEndpoints({
   target: string;
   index: number;
 }): PatternTrafficImpactSegment {
-  const stationKeys = findStationPath(source, target, edges);
-  const edgeKeys = getEdgeKeysForStationPath(stationKeys);
+  const stationPath = findStationPath(source, target, edges);
+  const edgeKeys = getEdgeKeysForStationPath(stationPath);
+  const stationKeys =
+    kind === "interruption" && stationPath.length > 1
+      ? stationPath.slice(1, -1)
+      : stationPath;
 
   return {
     ...createImpact(disruption, parsed, kind),
@@ -480,26 +506,185 @@ function formatRestartTimeLabel(value: string): string {
 function resolveStationKey(
   label: string,
   stations: PatternTrafficStation[],
+  options: { allowFuzzy?: boolean } = {},
 ): string | undefined {
-  const labelKey = normalizePatternStationName(label);
+  const labelKeys = createStationMatchKeys(label);
 
-  if (!labelKey) {
+  if (labelKeys.length === 0) {
     return undefined;
   }
 
   const candidates = stations
-    .map((station) => ({
-      station,
-      stationKey: normalizePatternStationName(station.label),
-    }))
-    .filter(({ stationKey }) =>
-      stationKey === labelKey ||
-      stationKey.includes(labelKey) ||
-      labelKey.includes(stationKey),
+    .flatMap((station) =>
+      createStationMatchKeys(station.label).map((stationKey) => ({
+        station,
+        score: getDirectStationMatchScore(labelKeys, stationKey),
+        stationKey,
+      })),
     )
-    .sort((left, right) => right.stationKey.length - left.stationKey.length);
+    .filter((candidate) => candidate.score > 0)
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        right.stationKey.length - left.stationKey.length,
+    );
 
-  return candidates[0]?.station.key;
+  if (candidates[0]) {
+    return candidates[0].station.key;
+  }
+
+  return options.allowFuzzy
+    ? resolveFuzzyStationKey(labelKeys, stations)
+    : undefined;
+}
+
+function createStationMatchKeys(value: string): string[] {
+  const variants = new Set<string>();
+  const trimmed = value.replace(/\s+/gu, " ").trim();
+
+  if (!trimmed) {
+    return [];
+  }
+
+  variants.add(trimmed);
+  variants.add(expandPorteAbbreviation(trimmed, "porte"));
+  variants.add(expandPorteAbbreviation(trimmed, "portes"));
+  variants.add(abbreviatePorteLabel(trimmed, "pte"));
+  variants.add(abbreviatePorteLabel(trimmed, "prte"));
+
+  const keys = new Set<string>();
+
+  variants.forEach((variant) => {
+    const key = normalizePatternStationName(variant);
+
+    if (key) {
+      keys.add(key);
+    }
+
+    normalizeTrafficText(variant)
+      .replace(/[^a-z0-9]+/gu, " ")
+      .split(" ")
+      .filter(
+        (token) =>
+          token.length >= 5 && !STATION_MATCH_IGNORED_TOKENS.has(token),
+      )
+      .forEach((token) => keys.add(normalizePatternStationName(token)));
+  });
+
+  return Array.from(keys);
+}
+
+function expandPorteAbbreviation(value: string, replacement: string): string {
+  return value.replace(/\b(?:pte|prte)\.?\b/giu, replacement);
+}
+
+function abbreviatePorteLabel(value: string, replacement: string): string {
+  return value.replace(/\bportes?\b/giu, replacement);
+}
+
+function getDirectStationMatchScore(
+  labelKeys: string[],
+  stationKey: string,
+): number {
+  return Math.max(
+    ...labelKeys.map((labelKey) => {
+      if (stationKey === labelKey) {
+        return 4;
+      }
+
+      if (stationKey.includes(labelKey)) {
+        return 3 + labelKey.length / stationKey.length;
+      }
+
+      if (labelKey.includes(stationKey)) {
+        return 2 + stationKey.length / labelKey.length;
+      }
+
+      return 0;
+    }),
+  );
+}
+
+function resolveFuzzyStationKey(
+  labelKeys: string[],
+  stations: PatternTrafficStation[],
+): string | undefined {
+  const candidates = stations
+    .map((station) => {
+      const stationKeys = createStationMatchKeys(station.label);
+      const score = Math.max(
+        ...labelKeys.flatMap((labelKey) =>
+          stationKeys.map((stationKey) =>
+            getFuzzyStationMatchScore(labelKey, stationKey),
+          ),
+        ),
+      );
+
+      return { station, score };
+    })
+    .sort((left, right) => right.score - left.score);
+  const best = candidates[0];
+  const next = candidates[1];
+
+  if (!best || best.score < FUZZY_STATION_MATCH_MIN_SCORE) {
+    return undefined;
+  }
+
+  if (
+    next &&
+    best.score < 0.9 &&
+    best.score - next.score < FUZZY_STATION_MATCH_MIN_MARGIN
+  ) {
+    return undefined;
+  }
+
+  return best.station.key;
+}
+
+function getFuzzyStationMatchScore(
+  labelKey: string,
+  stationKey: string,
+): number {
+  if (!labelKey || !stationKey) {
+    return 0;
+  }
+
+  if (stationKey === labelKey) {
+    return 1;
+  }
+
+  if (stationKey.includes(labelKey) || labelKey.includes(stationKey)) {
+    return 0.92;
+  }
+
+  const distance = getLevenshteinDistance(labelKey, stationKey);
+
+  return 1 - distance / Math.max(labelKey.length, stationKey.length);
+}
+
+function getLevenshteinDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  const current = Array<number>(right.length + 1).fill(0);
+
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    current[0] = leftIndex;
+
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const cost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + cost,
+      );
+    }
+
+    for (let index = 0; index < previous.length; index += 1) {
+      previous[index] = current[index];
+    }
+  }
+
+  return previous[right.length];
 }
 
 function findStationPath(
