@@ -39,15 +39,29 @@ export interface PatternTrafficImpactAnalysis {
 
 interface ParsedTrafficDisruption {
   kind: PatternTrafficImpactKind | undefined;
-  sections: Array<{ from: string; to: string }>;
+  sections: ParsedTrafficSection[];
   restartTimeLabel?: string;
   replacementBus: boolean;
   disturbsRestOfLine: boolean;
 }
 
+interface ParsedTrafficSection {
+  from: string;
+  to: string;
+  kind?: PatternTrafficImpactKind;
+}
+
+interface TrafficSectionMatch extends ParsedTrafficSection {
+  index: number;
+  endIndex: number;
+  requiresTrafficContext: boolean;
+}
+
 const DISTURBANCE_KEYWORDS = [
   "trafic perturbe",
+  "trafic perturb",
   "perturbe",
+  "perturb",
   "perturbation",
   "ralenti",
   "retard",
@@ -63,6 +77,7 @@ const DISTURBANCE_KEYWORDS = [
 
 const INTERRUPTION_KEYWORDS = [
   "trafic interrompu",
+  "interrompu",
   "interruption",
   "aucun train",
   "aucune circulation",
@@ -79,12 +94,10 @@ const REPLACEMENT_BUS_KEYWORDS = [
   "bus de remplacement",
   "bus relais",
   "bus de substitution",
-  "navette",
-  "navettes",
 ];
 
 const SECTION_END_PATTERN =
-  String.raw`(?=(?:\s+(?:(?:et|ou)\s+entre\b|et\s+(?:perturb|ralenti|interrompu|suspendu)|sur\s+le\s+reste|en\s+raison|suite|a\s+la\s+suite|pour\s+cause|toute\s+la|tous\s+les|du\s+\d|jusqu|reprise|veuillez)|[.;,\n]|$))`;
+  String.raw`(?=(?:\s+(?:(?:et|ou)\s+entre\b|et\s+(?:perturb|ralenti|interrompu|suspendu)|sur\s+le\s+reste|en\s+raison|suite|a\s+la\s+suite|pour\s+cause|toute\s+la|tous\s+les|dans\s+les?\s+(?:2|deux)\s+sens|du\s+\d|jusqu|reprise|veuillez)|[.;,\n]|$))`;
 const BIDIRECTIONAL_SECTION_END_PATTERN =
   String.raw`(?=(?:\s+(?:periode|p[ée]riode|dates?|arr[êe]t|motif|travaux|incident)|[.;,\n]|$))`;
 const FUZZY_STATION_MATCH_MIN_SCORE = 0.72;
@@ -200,9 +213,7 @@ function parseTrafficDisruption(
         : undefined,
     sections: extractTrafficSections(text),
     restartTimeLabel: extractRestartTimeLabel(text),
-    replacementBus: REPLACEMENT_BUS_KEYWORDS.some((keyword) =>
-      searchable.includes(keyword),
-    ),
+    replacementBus: hasReplacementBus(searchable),
     disturbsRestOfLine:
       isDisturbance &&
       /\b(?:reste|restant|restante)\s+de\s+la\s+ligne\b/u.test(searchable),
@@ -224,11 +235,12 @@ function createResolvedSegments({
 }): PatternTrafficImpactSegment[] {
   const segments = parsed.sections
     .map((section, index) => {
+      const segmentKind = section.kind ?? kind;
       const source = resolveStationKey(section.from, stations, {
-        allowFuzzy: kind === "interruption",
+        allowFuzzy: segmentKind === "interruption",
       });
       const target = resolveStationKey(section.to, stations, {
-        allowFuzzy: kind === "interruption",
+        allowFuzzy: segmentKind === "interruption",
       });
 
       if (!source || !target) {
@@ -239,7 +251,7 @@ function createResolvedSegments({
         disruption,
         parsed,
         edges,
-        kind,
+        kind: segmentKind,
         source,
         target,
         index,
@@ -327,7 +339,7 @@ function createImpact(
   fallbackKind: PatternTrafficImpactKind | undefined,
 ): PatternTrafficImpact {
   return {
-    kind: parsed.kind ?? fallbackKind ?? "disturbance",
+    kind: fallbackKind ?? parsed.kind ?? "disturbance",
     disruption,
     restartTimeLabel: parsed.restartTimeLabel,
     replacementBus: parsed.replacementBus,
@@ -370,10 +382,16 @@ function getImpactPriority(impact: PatternTrafficImpact): number {
   return impact.kind === "interruption" ? 2 : 1;
 }
 
-function extractTrafficSections(
-  text: string,
-): Array<{ from: string; to: string }> {
-  const sections: Array<{ from: string; to: string }> = [];
+function hasReplacementBus(searchable: string): boolean {
+  return (
+    REPLACEMENT_BUS_KEYWORDS.some((keyword) => searchable.includes(keyword)) ||
+    /\bnavettes?\b(?!\s+ferroviaires?\b)/u.test(searchable)
+  );
+}
+
+function extractTrafficSections(text: string): ParsedTrafficSection[] {
+  const sections: ParsedTrafficSection[] = [];
+  const matches: TrafficSectionMatch[] = [];
   const regexes = [
     new RegExp(
       String.raw`(?:^|[\n:])\s*([^:\n]+?)\s*(?:<->|\u2194|\u21c4)\s+(.+?)${BIDIRECTIONAL_SECTION_END_PATTERN}`,
@@ -393,30 +411,83 @@ function extractTrafficSections(
     ),
   ];
 
-  regexes.forEach((regex) => {
+  regexes.forEach((regex, regexIndex) => {
     for (const match of text.matchAll(regex)) {
-      addTrafficSections(sections, match[1], match[2]);
+      const index = match.index ?? 0;
+
+      matches.push({
+        index,
+        endIndex: index + match[0].length,
+        from: match[1],
+        to: match[2],
+        kind: inferTrafficSectionKind(text, index, match[0]),
+        requiresTrafficContext: regexIndex > 0,
+      });
     }
   });
+
+  matches
+    .sort((left, right) => left.index - right.index)
+    .reduce<TrafficSectionMatch | undefined>((previousMatch, match) => {
+      const inheritedKind =
+        previousMatch && canInheritTrafficSectionKind(text, previousMatch, match)
+          ? previousMatch.kind
+          : undefined;
+      const kind = match.kind ?? inheritedKind;
+
+      if (!match.requiresTrafficContext || kind) {
+        addTrafficSections(sections, match.from, match.to, kind);
+      }
+
+      return { ...match, kind };
+    }, undefined);
 
   return sections;
 }
 
+function canInheritTrafficSectionKind(
+  text: string,
+  previousMatch: TrafficSectionMatch,
+  match: TrafficSectionMatch,
+): boolean {
+  if (!previousMatch.kind || match.index <= previousMatch.endIndex) {
+    return false;
+  }
+
+  const between = normalizeSearchText(
+    text.slice(previousMatch.endIndex, match.index),
+  );
+
+  return (
+    between.length <= 40 &&
+    /\b(?:et|ou)\b/u.test(between) &&
+    !/[.;\n]/u.test(text.slice(previousMatch.endIndex, match.index))
+  );
+}
+
 function addTrafficSections(
-  sections: Array<{ from: string; to: string }>,
+  sections: ParsedTrafficSection[],
   fromValue?: string,
   toValue?: string,
+  kind?: PatternTrafficImpactKind,
 ): void {
   const fromOptions = splitSectionStationAlternatives(fromValue);
   const toOptions = splitSectionStationAlternatives(toValue);
 
   fromOptions.forEach((from) => {
     toOptions.forEach((to) => {
-      if (!from || !to || sectionAlreadyExists(sections, from, to)) {
+      if (!from || !to) {
         return;
       }
 
-      sections.push({ from, to });
+      const existing = findExistingSection(sections, from, to);
+
+      if (existing) {
+        existing.kind = chooseStrongerImpactKind(existing.kind, kind);
+        return;
+      }
+
+      sections.push({ from, to, kind });
     });
   });
 }
@@ -434,16 +505,75 @@ function splitSectionStationAlternatives(value?: string): string[] {
     .filter((label): label is string => Boolean(label));
 }
 
-function sectionAlreadyExists(
-  sections: Array<{ from: string; to: string }>,
+function findExistingSection(
+  sections: ParsedTrafficSection[],
   from: string,
   to: string,
-): boolean {
+): ParsedTrafficSection | undefined {
   const nextKey = createSectionKey(from, to);
 
-  return sections.some(
+  return sections.find(
     (section) => createSectionKey(section.from, section.to) === nextKey,
   );
+}
+
+function chooseStrongerImpactKind(
+  existing: PatternTrafficImpactKind | undefined,
+  next: PatternTrafficImpactKind | undefined,
+): PatternTrafficImpactKind | undefined {
+  if (
+    !existing ||
+    (next && getImpactKindPriority(next) > getImpactKindPriority(existing))
+  ) {
+    return next;
+  }
+
+  return existing;
+}
+
+function getImpactKindPriority(kind: PatternTrafficImpactKind): number {
+  return kind === "interruption" ? 2 : 1;
+}
+
+function inferTrafficSectionKind(
+  text: string,
+  matchIndex: number,
+  rawMatch: string,
+): PatternTrafficImpactKind | undefined {
+  const contextStart = Math.max(
+    findLastTrafficContextBoundary(text, matchIndex) + 1,
+    matchIndex - 180,
+    0,
+  );
+  const searchable = normalizeSearchText(
+    `${text.slice(contextStart, matchIndex)} ${rawMatch.slice(0, 120)}`,
+  );
+  const interruptionIndex = getLastKeywordIndex(
+    searchable,
+    INTERRUPTION_KEYWORDS,
+  );
+  const disturbanceIndex = getLastKeywordIndex(
+    searchable,
+    DISTURBANCE_KEYWORDS,
+  );
+
+  if (interruptionIndex === -1 && disturbanceIndex === -1) {
+    return undefined;
+  }
+
+  return interruptionIndex > disturbanceIndex ? "interruption" : "disturbance";
+}
+
+function findLastTrafficContextBoundary(text: string, index: number): number {
+  return Math.max(
+    text.lastIndexOf(".", index),
+    text.lastIndexOf(";", index),
+    text.lastIndexOf("\n", index),
+  );
+}
+
+function getLastKeywordIndex(text: string, keywords: string[]): number {
+  return Math.max(...keywords.map((keyword) => text.lastIndexOf(keyword)));
 }
 
 function createSectionKey(from: string, to: string): string {
@@ -455,6 +585,10 @@ function createSectionKey(from: string, to: string): string {
 function cleanSectionStationLabel(value?: string): string {
   return (value ?? "")
     .replace(/\s+/gu, " ")
+    .replace(/\s+dans\s+les?\s+(?:2|deux)\s+sens\b.*$/giu, "")
+    .replace(/\s+jusqu(?:'|’)?(?:a|à|au)\b.*$/giu, "")
+    .replace(/\s+trafic\s+(?:interrompu|perturb[eé]|ralenti|suspendu)\b.*$/giu, "")
+    .replace(/\s+(?:fortement\s+)?perturb[eé]\b.*$/giu, "")
     .replace(/\s+\d{1,2}\s*-\s*\d{1,2}\/\d{1,2}(?:\/\d{2,4})?$/gu, "")
     .replace(/\s+\d{1,2}\/\d{1,2}(?:\/\d{2,4})?$/gu, "")
     .replace(/^[\s:,-]+|[\s:,-]+$/gu, "")

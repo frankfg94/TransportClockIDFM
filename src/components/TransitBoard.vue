@@ -13,6 +13,7 @@ import {
   Rss,
   Trash,
 } from "lucide-vue-next";
+import ContextMenu from "./ContextMenu.vue";
 import LineCombobox from "./LineCombobox.vue";
 import LineIconBadge from "./LineIconBadge.vue";
 import StationCombobox from "./StationCombobox.vue";
@@ -118,6 +119,7 @@ const hiddenDirectionsCount = computed(
 
 const isCompactPatternInteraction = ref(false);
 const actionsOpen = ref(false);
+const actionsTrigger = ref<HTMLElement>();
 const stationEditorOpen = ref(false);
 const stationOptions = ref<StationSearchOption[]>([]);
 const stationTransfers = reactive<Record<string, TransferLineOption[]>>({});
@@ -183,6 +185,7 @@ watch(stationQuery, () => {
 watch(
   () => props.board.id,
   () => {
+    actionsOpen.value = false;
     closeStationEditor();
     closeDirectionFilter();
   },
@@ -587,6 +590,7 @@ onUnmounted(() => {
 
       <div class="board-actions">
         <button
+          ref="actionsTrigger"
           class="board-actions__trigger"
           type="button"
           :aria-expanded="actionsOpen"
@@ -596,7 +600,12 @@ onUnmounted(() => {
           <MoreVertical :size="20" aria-hidden="true" />
         </button>
 
-        <div v-if="actionsOpen" class="board-actions__menu">
+        <ContextMenu
+          v-model:open="actionsOpen"
+          :anchor="actionsTrigger"
+          class="board-actions__menu"
+          close-on-outside-click
+        >
           <button type="button" @click="openLinePage">
             <Map :size="17" aria-hidden="true" />
             Schéma de la ligne
@@ -633,7 +642,7 @@ onUnmounted(() => {
             <Trash :size="17" aria-hidden="true" />
             Supprimer
           </button>
-        </div>
+        </ContextMenu>
       </div>
     </header>
 

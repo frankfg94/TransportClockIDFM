@@ -1436,7 +1436,9 @@
   border: 1px solid rgba(16, 35, 63, 0.12);
   border-radius: 10px;
   box-shadow: 0 24px 68px rgba(16, 35, 63, 0.24);
+  max-height: calc(100dvh - 188px);
   max-width: min(420px, calc(100% - 32px));
+  overflow: hidden;
   padding: 10px;
   position: absolute;
   right: 16px;
@@ -1465,7 +1467,11 @@
 }
 
 .pattern-flow-traffic-popup .traffic-disruption {
+  max-height: calc(70vh - 66px - 20px);
+  overscroll-behavior: contain;
+  overflow-y: auto;
   padding-right: 36px;
+  scrollbar-gutter: stable;
 }
 
 .pattern-flow-traffic-popup-enter-active,

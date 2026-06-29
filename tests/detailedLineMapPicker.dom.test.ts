@@ -417,6 +417,78 @@ describe("DetailedLineMapPicker sidebar", () => {
     );
   });
 
+  it("keeps the visible center anchored when zooming with controls", async () => {
+    const requestAnimationFrame = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        callback(0);
+        return 1;
+      });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: { line, mode: "explorer", selectable: false },
+    });
+    await flushPromises();
+
+    const canvas = wrapper.get(".line-map-canvas")
+      .element as HTMLDivElement;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
+      createDomRect({ left: 10, top: 20, width: 300, height: 200 }),
+    );
+    canvas.scrollLeft = 400;
+    canvas.scrollTop = 200;
+
+    await wrapper.findAll(".line-map-zoom__button")[1].trigger("click");
+
+    expect(requestAnimationFrame).toHaveBeenCalled();
+    expect(canvas.scrollLeft).toBeCloseTo(532, 5);
+    expect(canvas.scrollTop).toBeCloseTo(272, 5);
+  });
+
+  it("uses pending scroll as the anchor during rapid pinch zoom moves", async () => {
+    const animationFrames = new Map<number, FrameRequestCallback>();
+    let nextAnimationFrame = 0;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      nextAnimationFrame += 1;
+      animationFrames.set(nextAnimationFrame, callback);
+      return nextAnimationFrame;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((handle) => {
+      animationFrames.delete(handle);
+    });
+
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: { line, mode: "explorer", selectable: false },
+    });
+    await flushPromises();
+
+    const canvas = wrapper.get(".line-map-canvas")
+      .element as HTMLDivElement;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
+      createDomRect({ left: 0, top: 0, width: 320, height: 220 }),
+    );
+    canvas.scrollLeft = 400;
+    canvas.scrollTop = 200;
+
+    await wrapper.get(".line-map-canvas").trigger("touchstart", {
+      touches: [createTouchPoint(140, 100), createTouchPoint(180, 100)],
+    });
+    await wrapper.get(".line-map-canvas").trigger("touchmove", {
+      touches: [createTouchPoint(130, 100), createTouchPoint(190, 100)],
+    });
+    await wrapper.get(".line-map-canvas").trigger("touchmove", {
+      touches: [createTouchPoint(120, 100), createTouchPoint(200, 100)],
+    });
+
+    expect(canvas.scrollLeft).toBe(400);
+
+    animationFrames.forEach((callback) => callback(0));
+
+    expect(canvas.scrollLeft).toBeCloseTo(960, 5);
+    expect(canvas.scrollTop).toBeCloseTo(500, 5);
+  });
+
   it("keeps picker selection and hides explorer-only actions", async () => {
     const wrapper = mount(DetailedLineMapPicker, {
       props: { line },
@@ -711,6 +783,86 @@ describe("DetailedLineMapPicker sidebar", () => {
     wrapper.unmount();
   });
 
+  it("keeps the ghost selection when closing the mobile sheet by dragging down", async () => {
+    loadStationTransfers.mockResolvedValueOnce([
+      {
+        id: "line:IDFM:C01743",
+        label: "B",
+        family: "RER",
+        mode: "RER",
+        color: "#4b92db",
+      },
+    ]);
+    stubGhostTopologyFetch();
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: {
+        line,
+        mode: "explorer",
+        selectable: false,
+        ghostNetworkEnabled: true,
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    await wrapper.findAll(".line-map-hit-target")[0].trigger("click");
+    await flushPromises();
+    await flushPromises();
+    await wrapper.get(".station-transfer-details__item").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".network-ghost-line--active").exists()).toBe(true);
+
+    let handle = wrapper.get('[data-testid="line-map-sidebar-drag-handle"]');
+    await handle.trigger("pointerdown", {
+      button: 0,
+      clientY: 100,
+      pointerId: 81,
+      pointerType: "touch",
+    });
+    await handle.trigger("pointermove", {
+      clientY: 205,
+      pointerId: 81,
+      pointerType: "touch",
+    });
+    await handle.trigger("pointerup", {
+      clientY: 205,
+      pointerId: 81,
+      pointerType: "touch",
+    });
+    await flushPromises();
+
+    handle = wrapper.get('[data-testid="line-map-sidebar-drag-handle"]');
+    await handle.trigger("pointerdown", {
+      button: 0,
+      clientY: 100,
+      pointerId: 82,
+      pointerType: "touch",
+    });
+    await handle.trigger("pointermove", {
+      clientY: 205,
+      pointerId: 82,
+      pointerType: "touch",
+    });
+    await handle.trigger("pointerup", {
+      clientY: 205,
+      pointerId: 82,
+      pointerType: "touch",
+    });
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="line-map-sidebar"]').exists()).toBe(
+      false,
+    );
+    expect(wrapper.find('[data-testid="network-ghost-layer"]').exists()).toBe(
+      true,
+    );
+    expect(wrapper.find(".network-ghost-line--active").exists()).toBe(true);
+    expect(wrapper.find(".line-map-stop--active").exists()).toBe(true);
+
+    wrapper.unmount();
+  });
+
   it("opens a station-only modal from the ghost detail and adds it to the selected dashboard", async () => {
     loadStationTransfers.mockResolvedValueOnce([
       {
@@ -748,14 +900,13 @@ describe("DetailedLineMapPicker sidebar", () => {
     expect(document.body.textContent).toContain("Ligne sélectionnée");
     expect(document.body.textContent).not.toContain("Sélectionner une ligne");
 
-    const workInput = Array.from(
-      document.body.querySelectorAll<HTMLInputElement>(
-        "[data-testid='station-board-selector'] input",
+    const workChoice = Array.from(
+      document.body.querySelectorAll<HTMLElement>(
+        "[data-testid='station-board-selector'] .station-board-selector__item",
       ),
-    ).find((input) => input.value === "work");
-    expect(workInput).toBeTruthy();
-    workInput!.checked = true;
-    workInput!.dispatchEvent(new Event("change", { bubbles: true }));
+    ).find((item) => item.textContent?.includes("Travail"));
+    expect(workChoice).toBeTruthy();
+    workChoice!.click();
     await flushPromises();
 
     const stationButton = document.body.querySelector(
@@ -926,11 +1077,11 @@ describe("DetailedLineMapPicker sidebar", () => {
 
     await wrapper.get(".line-map-sidebar__favorite").trigger("click");
     await flushPromises();
-    await wrapper
-      .get(
-        '[data-testid="line-map-sidebar-favorite-selector"] input[value="work"]',
-      )
-      .setValue();
+    const workChoice = wrapper.findAll(
+      '[data-testid="line-map-sidebar-favorite-selector"] .station-board-selector__item',
+    ).find((item) => item.text().includes("Travail"));
+    expect(workChoice).toBeTruthy();
+    await workChoice!.trigger("click");
     await flushPromises();
     await wrapper
       .get(
@@ -955,11 +1106,11 @@ describe("DetailedLineMapPicker sidebar", () => {
 
     await wrapper.get(".line-map-sidebar__favorite").trigger("click");
     await flushPromises();
-    await wrapper
-      .get(
-        '[data-testid="line-map-sidebar-favorite-selector"] input[value="work"]',
-      )
-      .setValue();
+    const secondWorkChoice = wrapper.findAll(
+      '[data-testid="line-map-sidebar-favorite-selector"] .station-board-selector__item',
+    ).find((item) => item.text().includes("Travail"));
+    expect(secondWorkChoice).toBeTruthy();
+    await secondWorkChoice!.trigger("click");
     await wrapper
       .get(
         '[data-testid="line-map-sidebar-favorite-selector"] .line-map-sidebar__favorite',
@@ -1181,6 +1332,37 @@ function createTrafficMap(): LineMapViewModel {
   ];
 
   return map;
+}
+
+function createDomRect({
+  left,
+  top,
+  width,
+  height,
+}: {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}): DOMRect {
+  return {
+    bottom: top + height,
+    height,
+    left,
+    right: left + width,
+    toJSON: () => ({}),
+    top,
+    width,
+    x: left,
+    y: top,
+  };
+}
+
+function createTouchPoint(clientX: number, clientY: number): Touch {
+  return {
+    clientX,
+    clientY,
+  } as Touch;
 }
 
 function stubGhostTopologyFetch(): void {

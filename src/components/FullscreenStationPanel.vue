@@ -8,6 +8,7 @@ import {
   RefreshCw,
   X,
 } from "lucide-vue-next";
+import ContextMenu from "./ContextMenu.vue";
 import type { FullscreenStationPanelDesign } from "../features/app-settings";
 
 type TrafficAlertTone = "orange" | "red";
@@ -84,7 +85,11 @@ const emit = defineEmits<{
 
 const controlsVisible = ref(true);
 const menuOpen = ref(false);
+const menuTrigger = ref<HTMLElement>();
 let hideTimer: number | undefined;
+let previousHtmlOverflow = "";
+let previousBodyOverflow = "";
+let previousHtmlScrollbarGutter = "";
 
 const panelClasses = computed(() => [
   `fullscreen-station-panel--${props.design}`,
@@ -163,6 +168,22 @@ function clearControlsHideTimer(): void {
   }
 }
 
+function lockDocumentScroll(): void {
+  previousHtmlOverflow = document.documentElement.style.overflow;
+  previousBodyOverflow = document.body.style.overflow;
+  previousHtmlScrollbarGutter = document.documentElement.style.scrollbarGutter;
+
+  document.documentElement.style.overflow = "hidden";
+  document.documentElement.style.scrollbarGutter = "auto";
+  document.body.style.overflow = "hidden";
+}
+
+function restoreDocumentScroll(): void {
+  document.documentElement.style.overflow = previousHtmlOverflow;
+  document.documentElement.style.scrollbarGutter = previousHtmlScrollbarGutter;
+  document.body.style.overflow = previousBodyOverflow;
+}
+
 function toggleMenu(): void {
   controlsVisible.value = true;
   menuOpen.value = !menuOpen.value;
@@ -231,11 +252,13 @@ watch(menuOpen, (open) => {
 });
 
 onMounted(() => {
+  lockDocumentScroll();
   scheduleControlsHide();
 });
 
 onBeforeUnmount(() => {
   clearControlsHideTimer();
+  restoreDocumentScroll();
 });
 </script>
 
@@ -272,6 +295,7 @@ onBeforeUnmount(() => {
 
       <div class="fullscreen-station-panel__menu-wrap">
         <button
+          ref="menuTrigger"
           class="fullscreen-station-panel__icon-button"
           type="button"
           aria-label="Options du panneau"
@@ -281,7 +305,14 @@ onBeforeUnmount(() => {
           <EllipsisVertical aria-hidden="true" />
         </button>
 
-        <div v-if="menuOpen" class="fullscreen-station-panel__menu" role="menu">
+        <ContextMenu
+          v-model:open="menuOpen"
+          :anchor="menuTrigger"
+          class="fullscreen-station-panel__menu"
+          close-on-outside-click
+          :teleport="false"
+          :z-index="12050"
+        >
           <label class="fullscreen-station-panel__theme-toggle">
             <input
               type="checkbox"
@@ -353,7 +384,7 @@ onBeforeUnmount(() => {
             <span v-else aria-hidden="true"></span>
             Carte station
           </button>
-        </div>
+        </ContextMenu>
       </div>
 
       <button
@@ -575,7 +606,8 @@ onBeforeUnmount(() => {
     sans-serif;
   inset: 0;
   min-height: 100dvh;
-  overflow: hidden;
+  overflow: auto;
+  overscroll-behavior: contain;
   position: fixed;
   z-index: 12000;
 }
@@ -635,7 +667,7 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-.fullscreen-station-panel__menu {
+:global(.fullscreen-station-panel__menu) {
   background: rgba(255, 255, 255, 0.98);
   border: 1px solid rgba(16, 35, 63, 0.16);
   border-radius: 8px;
@@ -650,13 +682,13 @@ onBeforeUnmount(() => {
   top: calc(100% + 10px);
 }
 
-.fullscreen-station-panel--dark .fullscreen-station-panel__menu {
+:global(.fullscreen-station-panel--dark .fullscreen-station-panel__menu) {
   background: rgba(14, 14, 14, 0.98);
   border-color: rgba(255, 255, 255, 0.18);
   color: #f8fafc;
 }
 
-.fullscreen-station-panel__menu button {
+:global(.fullscreen-station-panel__menu button) {
   align-items: center;
   background: transparent;
   border: 0;
@@ -673,11 +705,11 @@ onBeforeUnmount(() => {
   text-align: left;
 }
 
-.fullscreen-station-panel__menu button:hover {
+:global(.fullscreen-station-panel__menu button:hover) {
   background: rgba(0, 100, 255, 0.09);
 }
 
-.fullscreen-station-panel__menu-heading {
+:global(.fullscreen-station-panel__menu-heading) {
   border-top: 1px solid rgba(148, 163, 184, 0.24);
   color: #64748b;
   font-size: 0.78rem;
@@ -687,7 +719,7 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
-.fullscreen-station-panel__theme-toggle {
+:global(.fullscreen-station-panel__theme-toggle) {
   align-items: center;
   cursor: pointer;
   display: grid;
@@ -697,7 +729,7 @@ onBeforeUnmount(() => {
   padding: 8px 10px;
 }
 
-.fullscreen-station-panel__theme-toggle input {
+:global(.fullscreen-station-panel__theme-toggle input) {
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
   height: 1px;
@@ -707,7 +739,7 @@ onBeforeUnmount(() => {
   width: 1px;
 }
 
-.fullscreen-station-panel__theme-toggle > span {
+:global(.fullscreen-station-panel__theme-toggle > span) {
   background: #d8dee8;
   border-radius: 999px;
   display: block;
@@ -716,7 +748,7 @@ onBeforeUnmount(() => {
   width: 48px;
 }
 
-.fullscreen-station-panel__theme-toggle > span::after {
+:global(.fullscreen-station-panel__theme-toggle > span::after) {
   background: #ffffff;
   border-radius: 999px;
   box-shadow: 0 3px 8px rgba(15, 23, 42, 0.24);
@@ -729,11 +761,11 @@ onBeforeUnmount(() => {
   width: 22px;
 }
 
-.fullscreen-station-panel__theme-toggle input:checked + span {
+:global(.fullscreen-station-panel__theme-toggle input:checked + span) {
   background: #ffe600;
 }
 
-.fullscreen-station-panel__theme-toggle input:checked + span::after {
+:global(.fullscreen-station-panel__theme-toggle input:checked + span::after) {
   transform: translateX(20px);
 }
 
@@ -1034,7 +1066,6 @@ onBeforeUnmount(() => {
   align-items: stretch;
   background: #dfe7f6;
   display: grid;
-  padding: 30px;
 }
 
 .fullscreen-station-panel__home-card {
@@ -1287,7 +1318,7 @@ onBeforeUnmount(() => {
     width: 46px;
   }
 
-  .fullscreen-station-panel__menu {
+  :global(.fullscreen-station-panel__menu) {
     min-width: min(270px, calc(100vw - 24px));
   }
 

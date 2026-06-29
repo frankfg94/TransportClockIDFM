@@ -38,28 +38,57 @@
       @direction-change="changeDirection"
     >
       <template #top-strip-direction-action>
-        <button
-          class="line-pattern-page__back line-pattern-page__back--desktop"
-          type="button"
-          aria-label="Retour à l'écran précédent"
-          title="Retour"
-          @click="goBack"
-        >
-          <ArrowLeft aria-hidden="true" />
-          <span>Retour</span>
-        </button>
+        <div class="line-pattern-page__top-actions">
+          <button
+            class="
+              line-pattern-page__line-switch
+              line-pattern-page__line-switch--desktop
+            "
+            type="button"
+            aria-label="Changer de ligne"
+            title="Changer de ligne"
+            @click="openLineSelector"
+          >
+            <RefreshCw aria-hidden="true" />
+            <span>Changer</span>
+          </button>
+          <button
+            class="line-pattern-page__back line-pattern-page__back--desktop"
+            type="button"
+            aria-label="Retour à l'écran précédent"
+            title="Retour"
+            @click="goBack"
+          >
+            <ArrowLeft aria-hidden="true" />
+            <span>Retour</span>
+          </button>
+        </div>
       </template>
 
       <template #summary-action>
-        <button
-          class="line-pattern-page__back line-pattern-page__back--mobile"
-          type="button"
-          aria-label="Retour à l'écran précédent"
-          title="Retour"
-          @click="goBack"
-        >
-          <ArrowLeft aria-hidden="true" />
-        </button>
+        <div class="line-pattern-page__summary-actions">
+          <button
+            class="line-pattern-page__back line-pattern-page__back--mobile"
+            type="button"
+            aria-label="Retour à l'écran précédent"
+            title="Retour"
+            @click="goBack"
+          >
+            <ArrowLeft aria-hidden="true" />
+          </button>
+          <button
+            class="
+              line-pattern-page__line-switch
+              line-pattern-page__line-switch--mobile
+            "
+            type="button"
+            aria-label="Changer de ligne"
+            title="Changer de ligne"
+            @click="openLineSelector"
+          >
+            <RefreshCw aria-hidden="true" />
+          </button>
+        </div>
       </template>
 
       <template #flow-actions-prefix>
@@ -99,15 +128,29 @@
         :smart-traffic-detection="settings.smartTrafficDetection"
       >
         <template #bar-before-chip>
-          <button
-            class="line-pattern-page__back line-pattern-page__back--map-mobile"
-            type="button"
-            aria-label="Retour à l'écran précédent"
-            title="Retour"
-            @click="goBack"
-          >
-            <ArrowLeft aria-hidden="true" />
-          </button>
+          <div class="line-pattern-page__summary-actions">
+            <button
+              class="line-pattern-page__back line-pattern-page__back--map-mobile"
+              type="button"
+              aria-label="Retour à l'écran précédent"
+              title="Retour"
+              @click="goBack"
+            >
+              <ArrowLeft aria-hidden="true" />
+            </button>
+            <button
+              class="
+                line-pattern-page__line-switch
+                line-pattern-page__line-switch--mobile
+              "
+              type="button"
+              aria-label="Changer de ligne"
+              title="Changer de ligne"
+              @click="openLineSelector"
+            >
+              <RefreshCw aria-hidden="true" />
+            </button>
+          </div>
         </template>
 
         <template #bar-before-stats>
@@ -130,6 +173,19 @@
               Carte
             </button>
           </nav>
+          <button
+            class="
+              line-pattern-page__line-switch
+              line-pattern-page__line-switch--map-desktop
+            "
+            type="button"
+            aria-label="Changer de ligne"
+            title="Changer de ligne"
+            @click="openLineSelector"
+          >
+            <RefreshCw aria-hidden="true" />
+            <span>Changer</span>
+          </button>
           <button
             class="line-pattern-page__back line-pattern-page__back--map-desktop"
             type="button"
@@ -163,12 +219,28 @@
       <p v-if="isPatternRequestPending">Chargement du schéma...</p>
       <p v-else-if="errorMessage">{{ errorMessage }}</p>
     </section>
+
+    <StationBoardModal
+      v-if="lineSelectorOpen"
+      :open="lineSelectorOpen"
+      line-only
+      :initial-line="lineMapLine"
+      :initial-family="lineSelectorInitialFamily"
+      @select-line="selectLineFromModal"
+      @close="lineSelectorOpen = false"
+    />
   </main>
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
-import { ArrowLeft } from "lucide-vue-next";
+import {
+  computed,
+  defineAsyncComponent,
+  onBeforeUnmount,
+  ref,
+  watch,
+} from "vue";
+import { ArrowLeft, RefreshCw } from "lucide-vue-next";
 import { useFetch, useRoute, useRouter, navigateTo } from "#imports";
 import {
   filterTerminalOnly,
@@ -190,6 +262,9 @@ const DeparturePatternModal = defineAsyncComponent(
 );
 const DetailedLineMapPicker = defineAsyncComponent(
   () => import("../../../src/features/line-map/DetailedLineMapPicker.vue"),
+);
+const StationBoardModal = defineAsyncComponent(
+  () => import("../../../src/components/StationBoardModal.vue"),
 );
 
 const LINE_COMPLETE_DIRECTION_ID = "line-complete";
@@ -225,6 +300,7 @@ const {
   error,
 } = useFetch<LinePatternViewResponse>(apiUrl);
 const patternRequestTimedOut = ref(false);
+const lineSelectorOpen = ref(false);
 let patternRequestTimeout: ReturnType<typeof setTimeout> | undefined;
 const selectedDirectionId = computed(
   () => firstRouteQuery(route.query.direction) ?? LINE_COMPLETE_DIRECTION_ID,
@@ -312,6 +388,11 @@ const lineMapLine = computed<LineSearchOption | undefined>(() => {
     iconUrls: presentation.iconUrls,
   };
 });
+const lineSelectorInitialFamily = computed<TransitFamily | undefined>(
+  () =>
+    lineMapLine.value?.family ??
+    transportTypeToFamily(firstRouteQuery(route.params.transportType) ?? ""),
+);
 
 function navigateHome(): void {
   void navigateTo("/");
@@ -324,6 +405,26 @@ function goBack(): void {
   }
 
   navigateHome();
+}
+
+function openLineSelector(): void {
+  lineSelectorOpen.value = true;
+}
+
+function selectLineFromModal(line: LineSearchOption): void {
+  const query: Record<string, string> = {};
+
+  if (activeView.value === "map") {
+    query.view = "map";
+  }
+
+  lineSelectorOpen.value = false;
+  void navigateTo({
+    path: `/line/${encodeURIComponent(
+      lineFamilyToTransportType(line.family),
+    )}/${encodeURIComponent(resolveLineRouteId(line))}`,
+    query,
+  });
 }
 
 function changeDirection(directionId: string): void {
@@ -379,9 +480,35 @@ function transportTypeToFamily(value: string): TransitFamily {
   if (normalized.includes("metro")) return "METRO";
   if (normalized.includes("rer")) return "RER";
   if (normalized.includes("tram")) return "TRAM";
+  if (normalized.includes("noctilien")) return "NOCTILIEN";
   if (normalized.includes("bus")) return "BUS";
+  if (normalized.includes("cable")) return "CABLE";
 
   return "TRANSILIEN";
+}
+
+function lineFamilyToTransportType(family: TransitFamily): string {
+  switch (family) {
+    case "METRO":
+      return "metro";
+    case "RER":
+      return "rer";
+    case "TRAM":
+      return "tram";
+    case "BUS":
+      return "bus";
+    case "NOCTILIEN":
+      return "noctilien";
+    case "CABLE":
+      return "cable";
+    case "TRANSILIEN":
+    default:
+      return "transilien";
+  }
+}
+
+function resolveLineRouteId(line: LineSearchOption): string {
+  return line.navitiaId || line.id || line.label;
 }
 
 watch(
@@ -466,6 +593,52 @@ onBeforeUnmount(() => {
   display: none;
 }
 
+.line-pattern-page__top-actions,
+.line-pattern-page__summary-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.line-pattern-page__line-switch {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 999px;
+  color: #0f172a;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.8rem;
+  font-weight: 900;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 13px 0 11px;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.line-pattern-page__line-switch:hover,
+.line-pattern-page__line-switch:focus-visible {
+  background: #ffffff;
+  border-color: rgba(0, 100, 255, 0.28);
+  box-shadow: 0 12px 26px rgba(16, 35, 63, 0.14);
+  color: #0064ff;
+  transform: translateY(-1px);
+}
+
+.line-pattern-page__line-switch svg {
+  height: 16px;
+  width: 16px;
+}
+
+.line-pattern-page__line-switch--mobile {
+  display: none;
+}
+
 .line-pattern-page__view-tabs {
   align-items: center;
   background: rgba(255, 255, 255, 0.92);
@@ -509,7 +682,9 @@ onBeforeUnmount(() => {
 
 @media (max-width: 720px) {
   .line-pattern-page__back--desktop,
-  .line-pattern-page__back--map-desktop {
+  .line-pattern-page__back--map-desktop,
+  .line-pattern-page__line-switch--desktop,
+  .line-pattern-page__line-switch--map-desktop {
     display: none;
   }
 
@@ -519,6 +694,13 @@ onBeforeUnmount(() => {
     justify-content: center;
     padding: 0;
     width: 44px;
+  }
+
+  .line-pattern-page__line-switch--mobile {
+    display: inline-flex;
+    justify-content: center;
+    padding: 0;
+    width: 40px;
   }
 
   .line-pattern-page__view-tabs--map {

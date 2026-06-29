@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { Briefcase, ChevronDown, Home, MapPin, Plus } from "lucide-vue-next";
+import ContextMenu from "./ContextMenu.vue";
 import {
   DEFAULT_TRANSIT_PLACE_ID,
   WORK_TRANSIT_PLACE_ID,
@@ -24,21 +25,13 @@ const emit = defineEmits<{
 }>();
 
 const open = ref(false);
-const root = ref<HTMLElement>();
+const trigger = ref<HTMLElement>();
 
 const activePlace = computed(
   () =>
     props.places.find((place) => place.id === props.activePlaceId) ??
     props.places[0],
 );
-
-onMounted(() => {
-  document.addEventListener("pointerdown", closeOnOutsidePointer);
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener("pointerdown", closeOnOutsidePointer);
-});
 
 watch(
   () => props.activePlaceId,
@@ -61,12 +54,6 @@ function addPlace(): void {
   open.value = false;
 }
 
-function closeOnOutsidePointer(event: PointerEvent): void {
-  if (!root.value?.contains(event.target as Node)) {
-    open.value = false;
-  }
-}
-
 function iconForPlace(place: PlaceOption) {
   if (place.id === DEFAULT_TRANSIT_PLACE_ID) {
     return Home;
@@ -81,8 +68,9 @@ function iconForPlace(place: PlaceOption) {
 </script>
 
 <template>
-  <div ref="root" class="place-switcher" @keydown.esc="open = false">
+  <div class="place-switcher" @keydown.esc="open = false">
     <button
+      ref="trigger"
       class="place-switcher__trigger"
       type="button"
       aria-haspopup="menu"
@@ -101,38 +89,38 @@ function iconForPlace(place: PlaceOption) {
       />
     </button>
 
-    <Transition name="place-switcher-menu">
-      <div
-        v-if="open"
-        class="place-switcher__menu"
-        role="menu"
-        aria-label="Choisir un lieu"
+    <ContextMenu
+      v-model:open="open"
+      aria-label="Choisir un lieu"
+      :anchor="trigger"
+      class="place-switcher__menu"
+      close-on-outside-click
+      :teleport="false"
+    >
+      <button
+        v-for="place in places"
+        :key="place.id"
+        class="place-switcher__item"
+        :class="{
+          'place-switcher__item--active': place.id === activePlaceId,
+        }"
+        type="button"
+        role="menuitem"
+        @click="selectPlace(place.id)"
       >
-        <button
-          v-for="place in places"
-          :key="place.id"
-          class="place-switcher__item"
-          :class="{
-            'place-switcher__item--active': place.id === activePlaceId,
-          }"
-          type="button"
-          role="menuitem"
-          @click="selectPlace(place.id)"
-        >
-          <component :is="iconForPlace(place)" aria-hidden="true" />
-          <span>{{ place.label }}</span>
-        </button>
-        <button
-          class="place-switcher__item place-switcher__item--add"
-          type="button"
-          role="menuitem"
-          @click="addPlace"
-        >
-          <Plus aria-hidden="true" />
-          <span>Ajouter un lieu</span>
-        </button>
-      </div>
-    </Transition>
+        <component :is="iconForPlace(place)" aria-hidden="true" />
+        <span>{{ place.label }}</span>
+      </button>
+      <button
+        class="place-switcher__item place-switcher__item--add"
+        type="button"
+        role="menuitem"
+        @click="addPlace"
+      >
+        <Plus aria-hidden="true" />
+        <span>Ajouter un lieu</span>
+      </button>
+    </ContextMenu>
   </div>
 </template>
 
@@ -175,7 +163,7 @@ function iconForPlace(place: PlaceOption) {
   transform: rotate(180deg);
 }
 
-.place-switcher__menu {
+:global(.place-switcher__menu) {
   background: rgba(255, 255, 255, 0.98);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -237,7 +225,7 @@ function iconForPlace(place: PlaceOption) {
     width: 100%;
   }
 
-  .place-switcher__menu {
+  :global(.place-switcher__menu) {
     left: 0;
     right: auto;
     width: 100%;

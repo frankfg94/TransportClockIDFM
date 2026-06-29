@@ -90,7 +90,9 @@ describe("StationBoardModal", () => {
     await flushPromises();
 
     expect(fetchTransitFamilyOptions).toHaveBeenCalled();
-    expect(document.body.querySelector("[data-testid='station-board-selector']")).toBeNull();
+    expect(
+      document.body.querySelector("[data-testid='station-board-selector']"),
+    ).toBeNull();
     expect(document.body.textContent).toContain("Réseau");
     expect(document.body.textContent).toContain("Ligne");
   });
@@ -113,7 +115,9 @@ describe("StationBoardModal", () => {
     expect(fetchTransitFamilyOptions).not.toHaveBeenCalled();
     expect(searchTransitLines).not.toHaveBeenCalled();
     expect(searchLineStations).toHaveBeenCalledWith(initialLine, "");
-    expect(document.body.querySelector("[data-testid='station-board-selector']")).toBeTruthy();
+    expect(
+      document.body.querySelector("[data-testid='station-board-selector']"),
+    ).toBeTruthy();
     expect(document.body.textContent).toContain("Ligne sélectionnée");
     expect(document.body.textContent).not.toContain("Sélectionner une ligne");
 
@@ -143,5 +147,44 @@ describe("StationBoardModal", () => {
       },
     });
     expect(wrapper.emitted("add")?.[0]?.[1]).toBe("work");
+  });
+
+  it("can be used as a line-only selector without loading station choices", async () => {
+    const wrapper = mount(StationBoardModal, {
+      props: {
+        open: true,
+        lineOnly: true,
+        initialFamily: "RER",
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    await flushPromises();
+
+    expect(document.body.textContent).toContain("Changer de ligne");
+    expect(document.body.textContent).not.toContain("Station");
+    expect(searchTransitLines).toHaveBeenCalledWith(
+      { id: "rer", label: "RER", family: "RER" },
+      "",
+    );
+
+    const lineOption = document.body.querySelector(
+      ".rich-combobox__option",
+    ) as HTMLButtonElement;
+    lineOption.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await flushPromises();
+
+    const changeButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (button) =>
+        button.closest(".modal-panel") &&
+        button.textContent?.includes("Changer"),
+    ) as HTMLButtonElement;
+    changeButton.click();
+    await flushPromises();
+
+    expect(searchLineStations).not.toHaveBeenCalled();
+    expect(wrapper.emitted("select-line")?.[0]).toEqual([initialLine, "RER"]);
   });
 });

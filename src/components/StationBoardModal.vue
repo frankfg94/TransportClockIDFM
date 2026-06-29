@@ -38,6 +38,7 @@ const props = withDefaults(
     mode?: StationBoardModalMode;
     initialLine?: LineSearchOption;
     initialFamily?: TransitFamily;
+    lineOnly?: boolean;
     showDashboardSelector?: boolean;
     dashboardOptions?: TransitPlacePreset[];
     defaultDashboardId?: string;
@@ -52,6 +53,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   add: [board: TransitBoardConfig, dashboardId?: string];
+  "select-line": [line: LineSearchOption, family: TransitFamily];
   close: [];
 }>();
 
@@ -85,14 +87,26 @@ const canAdd = computed(() =>
         )),
   ),
 );
+const canSelectLine = computed(() => Boolean(draft.family && draft.line));
 const hasInitialLine = computed(() =>
-  Boolean(props.initialLine && props.initialFamily),
+  Boolean(!props.lineOnly && props.initialLine && props.initialFamily),
 );
 const isMultiStep = computed(
-  () => props.mode === "multistep" && !hasInitialLine.value,
+  () =>
+    props.lineOnly || (props.mode === "multistep" && !hasInitialLine.value),
 );
+const stepCount = computed(() => (props.lineOnly ? 2 : 3));
 const modalWide = computed(
-  () => stationSelectionMode.value === "map" && Boolean(draft.line),
+  () =>
+    !props.lineOnly &&
+    stationSelectionMode.value === "map" &&
+    Boolean(draft.line),
+);
+const modalEyebrow = computed(() =>
+  props.lineOnly ? "Navigation" : "Configuration",
+);
+const modalTitle = computed(() =>
+  props.lineOnly ? "Changer de ligne" : "Nouvelle station",
 );
 const filteredStationOptions = computed(() =>
   stationOptions.value.filter((station) =>
@@ -121,7 +135,7 @@ watch(
 );
 
 watch(
-  () => props.mode,
+  () => [props.mode, props.lineOnly],
   () => {
     if (props.open) {
       resetDraft();
@@ -183,6 +197,11 @@ watch(stationQuery, () => {
 function initializeDraft(): void {
   selectedDashboardId.value = resolveDefaultDashboardId();
 
+  if (props.lineOnly && props.initialFamily) {
+    void initializeLineOnlyDraft();
+    return;
+  }
+
   if (props.initialLine && props.initialFamily) {
     selectedNetwork.value = {
       id: props.initialFamily.toLowerCase(),
@@ -198,6 +217,29 @@ function initializeDraft(): void {
   }
 
   void loadFamilies();
+}
+
+async function initializeLineOnlyDraft(): Promise<void> {
+  await loadFamilies();
+
+  if (!props.open || !props.lineOnly || !props.initialFamily) {
+    return;
+  }
+
+  const initialNetwork = familyOptions.value.find(
+    (option) => option.family === props.initialFamily,
+  );
+
+  if (!initialNetwork) {
+    return;
+  }
+
+  selectedNetwork.value = initialNetwork;
+  draft.family = initialNetwork.family;
+  draft.line = props.initialLine;
+  lineQuery.value = "";
+  currentStep.value = 2;
+  void loadLines();
 }
 
 function resolveDefaultDashboardId(): string {
@@ -267,9 +309,12 @@ function selectLineOption(line?: LineSearchOption): void {
 
   suppressLineQueryWatcher = true;
   lineQuery.value = line.displayName ?? line.label;
-  void loadStations();
 
-  if (isMultiStep.value) {
+  if (!props.lineOnly) {
+    void loadStations();
+  }
+
+  if (isMultiStep.value && !props.lineOnly) {
     setCurrentStep(3, "forward");
   }
 }
@@ -471,13 +516,23 @@ function canAdvanceStep(): boolean {
   return currentStep.value === 2 ? Boolean(draft.line) : canAdd.value;
 }
 
+function selectCurrentLine(): void {
+  if (!draft.family || !draft.line) {
+    return;
+  }
+
+  emit("select-line", draft.line, draft.family);
+  resetDraft();
+  emit("close");
+}
+
 function goToPreviousStep(): void {
   setCurrentStep(Math.max(1, currentStep.value - 1), "backward");
 }
 
 function goToNextStep(): void {
   if (canAdvanceStep()) {
-    setCurrentStep(Math.min(3, currentStep.value + 1), "forward");
+    setCurrentStep(Math.min(stepCount.value, currentStep.value + 1), "forward");
   }
 }
 
@@ -511,7 +566,7 @@ function handleSwipeEnd(event: TouchEvent): void {
     return;
   }
 
-  if (horizontalDistance < 0 && currentStep.value < 3) {
+  if (horizontalDistance < 0 && currentStep.value < stepCount.value) {
     goToNextStep();
     return;
   }
@@ -610,8 +665,8 @@ function normalizeText(value: string): string {
         >
           <header class="modal-panel__header">
             <div>
-              <p class="eyebrow">Configuration</p>
-              <h2>Nouvelle station</h2>
+              <p class="eyebrow">{{ modalEyebrow }}</p>
+              <h2>{{ modalTitle }}</h2>
             </div>
             <button
               class="icon-button"
@@ -902,10 +957,10 @@ function normalizeText(value: string): string {
 
             <div
               class="station-multistep__steps"
-              aria-label="Progression : 3 étapes"
+              :aria-label="`Progression : ${stepCount} étapes`"
             >
               <span
-                v-for="step in 3"
+                v-for="step in stepCount"
                 :key="step"
                 class="station-multistep__step"
                 :class="{
@@ -916,7 +971,7 @@ function normalizeText(value: string): string {
             </div>
 
             <button
-              v-if="currentStep < 3"
+              v-if="currentStep < stepCount"
               type="button"
               :disabled="!canAdvanceStep()"
               @click="goToNextStep"
@@ -926,11 +981,13 @@ function normalizeText(value: string): string {
             <button
               v-else
               type="button"
-              :disabled="!canAdd || adding"
-              @click="addStation"
+              :disabled="lineOnly ? !canSelectLine : !canAdd || adding"
+              @click="lineOnly ? selectCurrentLine() : addStation()"
             >
-              <span class="button-plus" aria-hidden="true">+</span>
-              {{ adding ? "Ajout..." : "Ajouter" }}
+              <span v-if="!lineOnly" class="button-plus" aria-hidden="true">
+                +
+              </span>
+              {{ lineOnly ? "Changer" : adding ? "Ajout..." : "Ajouter" }}
             </button>
           </footer>
         </section>

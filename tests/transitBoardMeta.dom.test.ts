@@ -1,4 +1,5 @@
 import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 import { describe, expect, it } from "vitest";
 import TransitBoard from "../src/components/TransitBoard.vue";
 import type {
@@ -103,13 +104,17 @@ describe("TransitBoard departure metadata", () => {
     });
 
     await wrapper.find('[aria-label="Actions de la station"]').trigger("click");
+    await nextTick();
 
-    const fullscreenButton = wrapper
-      .findAll(".board-actions__menu button")
-      .find((button) => button.text().includes("Affichage panneau"));
+    const fullscreenButton = Array.from(
+      document.body.querySelectorAll<HTMLButtonElement>(
+        ".board-actions__menu button",
+      ),
+    ).find((button) => button.textContent?.includes("Affichage panneau"));
 
     expect(fullscreenButton).toBeTruthy();
-    await fullscreenButton?.trigger("click");
+    fullscreenButton?.click();
+    await nextTick();
 
     expect(wrapper.emitted("open-fullscreen-panel")?.[0]).toEqual([
       createBoard(),

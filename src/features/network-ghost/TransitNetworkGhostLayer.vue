@@ -50,7 +50,7 @@ const pinnedLineId = ref("");
 const pointerX = ref(0);
 const pointerY = ref(0);
 const activeLineId = computed(
-  () => hoveredLineId.value || pinnedLineId.value,
+  () => pinnedLineId.value || hoveredLineId.value,
 );
 const activeLine = computed(() =>
   props.lines.find((line) => line.id === activeLineId.value),
@@ -143,6 +143,7 @@ watch(
     if (line) {
       if (request.mode === "select") {
         pinnedLineId.value = line.id;
+        hoveredLineId.value = "";
       } else {
         togglePinnedLine(line);
       }
@@ -189,6 +190,7 @@ function hideLine(line: NetworkGhostLineView): void {
 
 function togglePinnedLine(line: NetworkGhostLineView): void {
   pinnedLineId.value = pinnedLineId.value === line.id ? "" : line.id;
+  hoveredLineId.value = "";
 }
 
 function updatePointer(

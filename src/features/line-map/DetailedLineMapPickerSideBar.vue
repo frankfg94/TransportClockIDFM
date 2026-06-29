@@ -14,6 +14,10 @@ import type { LineMapStopView } from "./types";
 
 type MobileSheetStage = "peek" | "mid" | "full";
 
+interface CloseSidebarOptions {
+  preserveSelection?: boolean;
+}
+
 const props = withDefaults(
   defineProps<{
     stop: LineMapStopView;
@@ -44,7 +48,7 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
-  close: [];
+  close: [options?: CloseSidebarOptions];
   mobileStageChange: [stage: MobileSheetStage];
   addFavorite: [];
   cancelFavoriteDashboard: [];
@@ -135,7 +139,7 @@ function finishMobileSheetDrag(event: PointerEvent): void {
   } else if (props.mobileStage === "mid") {
     emit("mobileStageChange", "peek");
   } else {
-    emit("close");
+    emit("close", { preserveSelection: true });
   }
 }
 

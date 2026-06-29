@@ -92,6 +92,8 @@ interface MapDragState {
 
 interface MapPinchState {
   active: boolean;
+  centerX: number;
+  centerY: number;
   distance: number;
 }
 
@@ -136,6 +138,10 @@ interface FavoriteUndoSnapshot {
   preferences: TransitBoardPreferences;
 }
 
+interface CloseSidebarOptions {
+  preserveSelection?: boolean;
+}
+
 const props = withDefaults(
   defineProps<{
     line?: LineSearchOption;
@@ -176,6 +182,7 @@ const loadingMap = ref(false);
 const errorMessage = ref("");
 const hoveredStop = ref<LineMapStopView>();
 const activeStop = ref<LineMapStopView>();
+const stationDetailsPanelOpen = ref(false);
 const zoom = ref(1.12);
 const mapCanvas = ref<HTMLDivElement>();
 const suppressNextCanvasClick = ref(false);
@@ -216,6 +223,8 @@ const mapDrag = reactive<MapDragState>({
 });
 const mapPinch = reactive<MapPinchState>({
   active: false,
+  centerX: 0,
+  centerY: 0,
   distance: 0,
 });
 const transferStates = reactive<Record<string, TransferState>>({});
@@ -230,6 +239,9 @@ const ghostModeVisibility = reactive<GhostNetworkModeVisibility>({
 });
 let latestMapRequest = 0;
 let favoriteAlertTimeout: ReturnType<typeof window.setTimeout> | undefined;
+let zoomScrollAnimationFrame: number | undefined;
+let pendingZoomScrollLeft: number | undefined;
+let pendingZoomScrollTop: number | undefined;
 
 const stopById = computed(() => {
   const stops = new Map<string, LineMapStopView>();
@@ -502,6 +514,7 @@ async function loadMap(): Promise<void> {
   errorMessage.value = "";
   hoveredStop.value = undefined;
   activeStop.value = undefined;
+  stationDetailsPanelOpen.value = false;
 
   try {
     const map = await loadDetailedLineMap(props.line);
@@ -569,6 +582,12 @@ function toggleStopDetails(stop: LineMapStopView): void {
   favoriteError.value = "";
 
   if (activeStop.value?.id === stop.id) {
+    if (!stationDetailsPanelOpen.value) {
+      stationDetailsPanelOpen.value = true;
+      mobileSheetStage.value = "mid";
+      return;
+    }
+
     closeSidebar();
     return;
   }
@@ -577,14 +596,20 @@ function toggleStopDetails(stop: LineMapStopView): void {
   activeGhostLine.value = undefined;
   favoriteDashboardSelectorOpen.value = false;
   activeStop.value = stop;
+  stationDetailsPanelOpen.value = true;
   mobileSheetStage.value = "mid";
   void loadTransfers(stop);
 }
 
-function closeSidebar(): void {
-  activeStop.value = undefined;
-  activeGhostLine.value = undefined;
-  ghostResetKey.value += 1;
+function closeSidebar(options: CloseSidebarOptions = {}): void {
+  stationDetailsPanelOpen.value = false;
+
+  if (!options.preserveSelection) {
+    activeStop.value = undefined;
+    activeGhostLine.value = undefined;
+    ghostResetKey.value += 1;
+  }
+
   favoriteError.value = "";
   favoriteLoading.value = false;
   favoriteDashboardSelectorOpen.value = false;
@@ -996,6 +1021,7 @@ async function confirmActiveStopFavoriteDashboard(): Promise<void> {
 
 onBeforeUnmount(() => {
   clearFavoriteAlertTimeout();
+  cancelPendingZoomScroll();
 });
 
 function openActiveStopInGoogleMaps(): void {
@@ -1233,7 +1259,7 @@ function getStopActionLabel(stop: LineMapStopView): string {
 function adjustZoom(direction: number): void {
   const factor = direction > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
 
-  zoom.value = clampZoom(zoom.value * factor);
+  zoomAtCanvasCenter(clampZoom(zoom.value * factor));
 }
 
 function zoomAtCanvasPoint(
@@ -1253,31 +1279,148 @@ function zoomAtCanvasPointByFactor(
   clientX: number,
   clientY: number,
 ): void {
+  zoomAtCanvasPointToZoom(clampZoom(zoom.value * factor), clientX, clientY);
+}
+
+function zoomAtCanvasCenter(nextZoom: number): void {
   const canvas = mapCanvas.value;
 
   if (!canvas) {
-    zoom.value = clampZoom(zoom.value * factor);
+    zoom.value = nextZoom;
+    return;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+
+  zoomAtCanvasPointToZoom(
+    nextZoom,
+    rect.left + rect.width / 2,
+    rect.top + rect.height / 2,
+  );
+}
+
+function zoomAtCanvasPointToZoom(
+  nextZoom: number,
+  clientX: number,
+  clientY: number,
+): void {
+  const canvas = mapCanvas.value;
+
+  if (!canvas) {
+    zoom.value = nextZoom;
     return;
   }
 
   const previousZoom = zoom.value;
-  const nextZoom = clampZoom(previousZoom * factor);
 
   if (nextZoom === previousZoom) {
     return;
   }
 
   const rect = canvas.getBoundingClientRect();
-  const anchorX = clientX - rect.left + canvas.scrollLeft;
-  const anchorY = clientY - rect.top + canvas.scrollTop;
+  const localX = clientX - rect.left;
+  const localY = clientY - rect.top;
+  const anchorX = localX + getCurrentCanvasScrollLeft(canvas);
+  const anchorY = localY + getCurrentCanvasScrollTop(canvas);
   const ratio = nextZoom / previousZoom;
 
   zoom.value = nextZoom;
+  scheduleCanvasScroll(
+    canvas,
+    clampCanvasScroll(
+      anchorX * ratio - localX,
+      VIEWBOX_WIDTH * nextZoom,
+      canvas.clientWidth || rect.width,
+    ),
+    clampCanvasScroll(
+      anchorY * ratio - localY,
+      VIEWBOX_HEIGHT * nextZoom,
+      canvas.clientHeight || rect.height,
+    ),
+  );
+}
 
-  requestAnimationFrame(() => {
-    canvas.scrollLeft = anchorX * ratio - (clientX - rect.left);
-    canvas.scrollTop = anchorY * ratio - (clientY - rect.top);
+function panCanvasByViewportDelta(deltaX: number, deltaY: number): void {
+  const canvas = mapCanvas.value;
+
+  if (!canvas || (deltaX === 0 && deltaY === 0)) {
+    return;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+
+  scheduleCanvasScroll(
+    canvas,
+    clampCanvasScroll(
+      getCurrentCanvasScrollLeft(canvas) - deltaX,
+      VIEWBOX_WIDTH * zoom.value,
+      canvas.clientWidth || rect.width,
+    ),
+    clampCanvasScroll(
+      getCurrentCanvasScrollTop(canvas) - deltaY,
+      VIEWBOX_HEIGHT * zoom.value,
+      canvas.clientHeight || rect.height,
+    ),
+  );
+}
+
+function getCurrentCanvasScrollLeft(canvas: HTMLDivElement): number {
+  return pendingZoomScrollLeft ?? canvas.scrollLeft;
+}
+
+function getCurrentCanvasScrollTop(canvas: HTMLDivElement): number {
+  return pendingZoomScrollTop ?? canvas.scrollTop;
+}
+
+function clampCanvasScroll(
+  value: number,
+  contentSize: number,
+  viewportSize: number,
+): number {
+  const maxScroll = Math.max(0, contentSize - viewportSize);
+
+  return Math.max(0, Math.min(maxScroll, value));
+}
+
+function scheduleCanvasScroll(
+  canvas: HTMLDivElement,
+  scrollLeft: number,
+  scrollTop: number,
+): void {
+  pendingZoomScrollLeft = scrollLeft;
+  pendingZoomScrollTop = scrollTop;
+
+  if (zoomScrollAnimationFrame !== undefined) {
+    window.cancelAnimationFrame(zoomScrollAnimationFrame);
+  }
+
+  zoomScrollAnimationFrame = window.requestAnimationFrame(() => {
+    zoomScrollAnimationFrame = undefined;
+
+    const nextScrollLeft = pendingZoomScrollLeft;
+    const nextScrollTop = pendingZoomScrollTop;
+
+    pendingZoomScrollLeft = undefined;
+    pendingZoomScrollTop = undefined;
+
+    if (nextScrollLeft !== undefined) {
+      canvas.scrollLeft = nextScrollLeft;
+    }
+
+    if (nextScrollTop !== undefined) {
+      canvas.scrollTop = nextScrollTop;
+    }
   });
+}
+
+function cancelPendingZoomScroll(): void {
+  if (zoomScrollAnimationFrame !== undefined) {
+    window.cancelAnimationFrame(zoomScrollAnimationFrame);
+    zoomScrollAnimationFrame = undefined;
+  }
+
+  pendingZoomScrollLeft = undefined;
+  pendingZoomScrollTop = undefined;
 }
 
 function clampZoom(value: number): number {
@@ -1425,7 +1568,8 @@ function handleCanvasTouchStart(event: TouchEvent): void {
   }
 
   const distance = getTouchDistance(event.touches);
-  if (!distance) {
+  const center = getTouchCenter(event.touches);
+  if (!distance || !center) {
     return;
   }
 
@@ -1434,6 +1578,8 @@ function handleCanvasTouchStart(event: TouchEvent): void {
   pendingStopTap.value = undefined;
   pendingGhostTap.value = undefined;
   mapPinch.active = true;
+  mapPinch.centerX = center.x;
+  mapPinch.centerY = center.y;
   mapPinch.distance = distance;
 }
 
@@ -1450,17 +1596,25 @@ function handleCanvasTouchMove(event: TouchEvent): void {
   }
 
   event.preventDefault();
+  panCanvasByViewportDelta(
+    center.x - mapPinch.centerX,
+    center.y - mapPinch.centerY,
+  );
   zoomAtCanvasPointByFactor(
     distance / mapPinch.distance,
     center.x,
     center.y,
   );
+  mapPinch.centerX = center.x;
+  mapPinch.centerY = center.y;
   mapPinch.distance = distance;
 }
 
 function handleCanvasTouchEnd(event: TouchEvent): void {
   if (event.touches.length < 2) {
     mapPinch.active = false;
+    mapPinch.centerX = 0;
+    mapPinch.centerY = 0;
     mapPinch.distance = 0;
   }
 }
@@ -1533,11 +1687,11 @@ function handleCanvasClick(event: MouseEvent): void {
 
 function resetZoom(): void {
   if (!lineMap.value) {
-    zoom.value = 1.12;
+    zoomAtCanvasCenter(1.12);
     return;
   }
 
-  zoom.value = getDefaultZoom(lineMap.value);
+  zoomAtCanvasCenter(getDefaultZoom(lineMap.value));
 }
 
 function getDefaultZoom(map: LineMapViewModel): number {
@@ -1996,7 +2150,7 @@ function getLabelPriority(
 
     <Transition name="line-map-sidebar-slide">
       <DetailedLineMapPickerSideBar
-        v-if="lineMap && activeStop"
+        v-if="lineMap && activeStop && stationDetailsPanelOpen"
         :stop="activeStop"
         :transfers="activeTransferState?.lines ?? []"
         :transfers-loading="activeTransferState?.loading ?? true"

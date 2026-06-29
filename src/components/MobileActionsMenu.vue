@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, useId } from "vue";
+import { computed, ref, useId } from "vue";
 import { EllipsisVertical } from "lucide-vue-next";
+import ContextMenu from "./ContextMenu.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -12,7 +13,7 @@ const props = withDefaults(
   },
 );
 
-const root = ref<HTMLElement>();
+const trigger = ref<HTMLElement>();
 const isOpen = ref(false);
 const generatedId = useId();
 const resolvedMenuId = computed(
@@ -27,34 +28,17 @@ function toggle(): void {
   isOpen.value = !isOpen.value;
 }
 
-function closeOnOutsidePointer(event: PointerEvent): void {
-  if (!isOpen.value || !(event.target instanceof Node)) {
-    return;
-  }
-
-  if (!root.value?.contains(event.target)) {
-    close();
-  }
-}
-
-onMounted(() => {
-  document.addEventListener("pointerdown", closeOnOutsidePointer);
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener("pointerdown", closeOnOutsidePointer);
-});
 </script>
 
 <template>
   <div
-    ref="root"
     class="pattern-flow-mobile-actions"
     :class="{ 'pattern-flow-mobile-actions--open': isOpen }"
     @click.stop
     @keydown.esc.stop="close"
   >
     <button
+      ref="trigger"
       class="pattern-flow-mobile-actions__trigger"
       type="button"
       :aria-expanded="isOpen"
@@ -64,14 +48,17 @@ onBeforeUnmount(() => {
     >
       <EllipsisVertical aria-hidden="true" />
     </button>
-    <Transition name="pattern-flow-mobile-actions-menu">
-      <div
-        v-if="isOpen"
-        :id="resolvedMenuId"
-        class="pattern-flow-mobile-actions__menu"
-      >
-        <slot :close="close"></slot>
-      </div>
-    </Transition>
+    <ContextMenu
+      :id="resolvedMenuId"
+      v-model:open="isOpen"
+      :anchor="trigger"
+      class="pattern-flow-mobile-actions__menu"
+      close-on-outside-click
+      :teleport="false"
+    >
+      <template #default="{ close: closeMenu }">
+        <slot :close="closeMenu"></slot>
+      </template>
+    </ContextMenu>
   </div>
 </template>

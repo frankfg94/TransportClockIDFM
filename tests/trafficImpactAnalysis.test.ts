@@ -216,6 +216,106 @@ describe("traffic impact analysis", () => {
     );
   });
 
+  it("keeps mixed interrupted and disturbed sections from the same message separate", () => {
+    const stations = createStations([
+      "Paris-Saint-Lazare",
+      "Asnieres-sur-Seine",
+      "Argenteuil",
+      "Cormeilles-en-Parisis",
+      "La Frette-Montigny",
+      "Herblay",
+      "Conflans-Sainte-Honorine",
+      "Triel-sur-Seine",
+      "Vaux-sur-Seine",
+      "Meulan-Hardricourt",
+      "Juziers",
+      "Gargenville",
+      "Issou - Porcheville",
+      "Limay",
+      "Mantes Station",
+      "Mantes-la-Jolie",
+      "Epone Mezieres",
+      "Aubergenville-Elisabethville",
+      "Les Mureaux",
+      "Les Clairieres de Verneuil",
+      "Vernouillet-Verneuil",
+      "Villennes-sur-Seine",
+      "Poissy",
+    ]);
+    const edge = (source: string, target: string) => ({
+      source: normalizePatternStationName(source),
+      target: normalizePatternStationName(target),
+    });
+    const edges = [
+      edge("Paris-Saint-Lazare", "Asnieres-sur-Seine"),
+      edge("Asnieres-sur-Seine", "Argenteuil"),
+      edge("Argenteuil", "Cormeilles-en-Parisis"),
+      edge("Cormeilles-en-Parisis", "La Frette-Montigny"),
+      edge("La Frette-Montigny", "Herblay"),
+      edge("Herblay", "Conflans-Sainte-Honorine"),
+      edge("Conflans-Sainte-Honorine", "Triel-sur-Seine"),
+      edge("Triel-sur-Seine", "Vaux-sur-Seine"),
+      edge("Vaux-sur-Seine", "Meulan-Hardricourt"),
+      edge("Meulan-Hardricourt", "Juziers"),
+      edge("Juziers", "Gargenville"),
+      edge("Gargenville", "Issou - Porcheville"),
+      edge("Issou - Porcheville", "Limay"),
+      edge("Limay", "Mantes Station"),
+      edge("Mantes Station", "Mantes-la-Jolie"),
+      edge("Mantes-la-Jolie", "Epone Mezieres"),
+      edge("Epone Mezieres", "Aubergenville-Elisabethville"),
+      edge("Aubergenville-Elisabethville", "Les Mureaux"),
+      edge("Les Mureaux", "Les Clairieres de Verneuil"),
+      edge("Les Clairieres de Verneuil", "Vernouillet-Verneuil"),
+      edge("Vernouillet-Verneuil", "Villennes-sur-Seine"),
+      edge("Villennes-sur-Seine", "Poissy"),
+    ];
+    const disruption = createDisruption({
+      id: "ligne-j-mixed-impact",
+      title: "Ligne J : Les Mureaux <-> Poissy trafic interrompu jusqu'au 06/07",
+      message:
+        "Le trafic est interrompu entre Les Mureaux et Poissy dans les 2 sens jusqu'au 06 juillet 23h00 et fortement perturbé entre Mantes-la-Jolie et Les Mureaux dans les 2 sens. Les voyageurs en provenance de Les Mureaux, Aubergenville-Elisabethville, Epône Mézières et Mantes doivent rejoindre Mantes-la-Jolie par les navettes ferroviaires mises en place afin d'emprunter un train de l'axe Paris-Saint-Lazare / Mantes-la-Jolie via Conflans. Nous vous déconseillons d'emprunter les bus des lignes régulières pour le parcours Les Mureaux / Poissy. Les voyageurs des gares non desservies de Villennes-sur-Seine, Vernouillet-Verneuil, Les Clairières de Verneuil sont invités à rejoindre la gare la plus proche de l'axe Paris-Saint-Lazare / Mantes-la-Jolie via Conflans.",
+    });
+
+    const analysis = analyzeTrafficImpacts([disruption], stations, edges);
+    const interrupted = getInterruptedStations(analysis);
+    const disturbed = getDisturbedStations(analysis);
+
+    expect(analysis.segments).toHaveLength(2);
+    expect(interrupted).toEqual([
+      normalizePatternStationName("Les Clairieres de Verneuil"),
+      normalizePatternStationName("Vernouillet-Verneuil"),
+      normalizePatternStationName("Villennes-sur-Seine"),
+    ]);
+    expect(interrupted).not.toContain(normalizePatternStationName("Les Mureaux"));
+    expect(interrupted).not.toContain(normalizePatternStationName("Poissy"));
+    expect(interrupted).not.toContain(
+      normalizePatternStationName("Cormeilles-en-Parisis"),
+    );
+    expect(disturbed).toEqual([
+      normalizePatternStationName("Mantes-la-Jolie"),
+      normalizePatternStationName("Epone Mezieres"),
+      normalizePatternStationName("Aubergenville-Elisabethville"),
+      normalizePatternStationName("Les Mureaux"),
+    ]);
+    expect(disturbed).not.toContain(
+      normalizePatternStationName("Cormeilles-en-Parisis"),
+    );
+    expect(
+      analysis.edgeImpacts[
+        getPatternTrafficEdgeKey(edge("Les Mureaux", "Les Clairieres de Verneuil"))
+      ]?.kind,
+    ).toBe("interruption");
+    expect(
+      analysis.edgeImpacts[
+        getPatternTrafficEdgeKey(edge("Aubergenville-Elisabethville", "Les Mureaux"))
+      ]?.kind,
+    ).toBe("disturbance");
+    expect(analysis.segments.every((segment) => !segment.replacementBus)).toBe(
+      true,
+    );
+  });
+
   it("extracts de-a and depuis-jusqua section variants", () => {
     const stations = createStations(["Station A", "Station B", "Station C"]);
     const edges = createSequentialEdges(stations);

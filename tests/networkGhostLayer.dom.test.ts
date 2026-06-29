@@ -84,11 +84,102 @@ describe("TransitNetworkGhostLayer", () => {
     expect(wrapper.find(".network-ghost-line__station").exists()).toBe(false);
     wrapper.unmount();
   });
+
+  it("gives click and parent selection priority over a hovered line", async () => {
+    const Host = defineComponent({
+      components: { TransitNetworkGhostLayer },
+      props: {
+        tapRequest: {
+          type: Object,
+          default: undefined,
+        },
+      },
+      setup() {
+        return {
+          lines: [
+            createLine(),
+            createLine({
+              id: "tram:t4",
+              label: "T4",
+              mode: "Tram",
+              color: "#e3b300",
+              anchorX: 0.45,
+              anchorY: 0.62,
+            }),
+          ],
+        };
+      },
+      template: `
+        <svg viewBox="0 0 1080 620">
+          <TransitNetworkGhostLayer
+            :lines="lines"
+            :anchor-x="0.5"
+            :anchor-y="0.5"
+            :tap-request="tapRequest"
+          />
+        </svg>
+      `,
+    });
+    const wrapper = mount(Host, {
+      attachTo: document.body,
+    });
+
+    await wrapper
+      .get('[data-network-ghost-line="rer:b"]')
+      .trigger("pointerenter", { clientX: 100, clientY: 100 });
+    expect(wrapper.get(".network-ghost-line--active").attributes()).toMatchObject(
+      {
+        "data-network-ghost-line-id": "rer:b",
+      },
+    );
+
+    await wrapper.setProps({
+      tapRequest: { id: 1, lineId: "tram:t4", mode: "select" },
+    });
+
+    expect(wrapper.get(".network-ghost-line--active").attributes()).toMatchObject(
+      {
+        "data-network-ghost-line-id": "tram:t4",
+      },
+    );
+    expect(
+      wrapper
+        .get('[data-network-ghost-line-id="rer:b"]')
+        .classes(),
+    ).not.toContain("network-ghost-line--hovered");
+
+    await wrapper
+      .get('[data-network-ghost-line="rer:b"]')
+      .trigger("pointerenter", { clientX: 110, clientY: 100 });
+    expect(wrapper.get(".network-ghost-line--active").attributes()).toMatchObject(
+      {
+        "data-network-ghost-line-id": "tram:t4",
+      },
+    );
+
+    await wrapper.get('[data-network-ghost-line="rer:b"]').trigger("click");
+    expect(wrapper.get(".network-ghost-line--active").attributes()).toMatchObject(
+      {
+        "data-network-ghost-line-id": "rer:b",
+      },
+    );
+
+    await wrapper.get('[data-network-ghost-line="rer:b"]').trigger("click");
+    expect(wrapper.find(".network-ghost-line--active").exists()).toBe(false);
+
+    wrapper.unmount();
+  });
 });
 
-function createLine(): NetworkGhostLineView {
+function createLine(
+  overrides: Partial<NetworkGhostLineView> = {},
+): NetworkGhostLineView {
+  const id = overrides.id ?? "rer:b";
+  const anchorX = overrides.anchorX ?? 0.4;
+  const anchorY = overrides.anchorY ?? 0.5;
+
   return {
-    id: "rer:b",
+    id,
     label: "Ligne B",
     mode: "RER",
     color: "#4b92db",
@@ -96,24 +187,25 @@ function createLine(): NetworkGhostLineView {
     iconUrl: "https://example.test/rer-b.svg",
     isBus: false,
     anchorStationId: "a",
-    anchorX: 0.4,
-    anchorY: 0.5,
+    anchorX,
+    anchorY,
     loadOrder: 0,
     stations: [
-      { id: "a", label: "Alpha", x: 0.4, y: 0.5 },
-      { id: "b", label: "Beta", x: 0.6, y: 0.5 },
+      { id: `${id}:a`, label: "Alpha", x: anchorX, y: anchorY },
+      { id: `${id}:b`, label: "Beta", x: anchorX + 0.2, y: anchorY },
     ],
     segments: [
       {
         id: "a-b",
-        fromStationId: "a",
-        toStationId: "b",
-        fromX: 0.4,
-        fromY: 0.5,
-        toX: 0.6,
-        toY: 0.5,
+        fromStationId: `${id}:a`,
+        toStationId: `${id}:b`,
+        fromX: anchorX,
+        fromY: anchorY,
+        toX: anchorX + 0.2,
+        toY: anchorY,
         level: 0,
       },
     ],
+    ...overrides,
   };
 }

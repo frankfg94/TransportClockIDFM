@@ -11,6 +11,7 @@ import {
 } from "vue";
 import Draggable from "vuedraggable";
 import BoardVisibilityControls from "./components/BoardVisibilityControls.vue";
+import ContextMenu from "./components/ContextMenu.vue";
 import EmptyStationsState from "./components/EmptyStationsState.vue";
 import FullscreenStationPanel from "./components/FullscreenStationPanel.vue";
 import LineIconBadge from "./components/LineIconBadge.vue";
@@ -175,6 +176,7 @@ const stationModalOpen = ref(false);
 const placeNameModalOpen = ref(false);
 const placeNameError = ref("");
 const topbarMenuOpen = ref(false);
+const topbarMenuTrigger = ref<HTMLElement>();
 const weatherModalOpen = ref(false);
 const boardDisplayModalOpen = ref(false);
 const fullscreenPanelBoard = ref<TransitBoardConfig>();
@@ -2036,6 +2038,7 @@ onBeforeUnmount(() => {
             </button>
             <div class="topbar-actions" @keydown.esc="closeTopbarMenu">
               <button
+                ref="topbarMenuTrigger"
                 class="topbar-actions__trigger icon-button"
                 type="button"
                 aria-label="Ouvrir les actions du dashboard"
@@ -2045,10 +2048,12 @@ onBeforeUnmount(() => {
               >
                 <MoreVertical aria-hidden="true" />
               </button>
-              <div
-                v-if="topbarMenuOpen"
+              <ContextMenu
+                v-model:open="topbarMenuOpen"
+                aria-label="Actions du dashboard"
+                :anchor="topbarMenuTrigger"
                 class="topbar-actions__menu"
-                role="menu"
+                close-on-outside-click
               >
                 <button
                   type="button"
@@ -2100,7 +2105,7 @@ onBeforeUnmount(() => {
                   <SlidersHorizontal aria-hidden="true" />
                   Gérer l'affichage
                 </button>
-              </div>
+              </ContextMenu>
             </div>
           </div>
         </div>

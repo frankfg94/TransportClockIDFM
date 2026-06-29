@@ -30,6 +30,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  document.documentElement.removeAttribute("style");
+  document.body.removeAttribute("style");
 });
 
 describe("FullscreenStationPanel", () => {
@@ -171,6 +173,24 @@ describe("FullscreenStationPanel", () => {
     expect(wrapper.text()).toContain("Sortir du plein ecran");
 
     wrapper.unmount();
+  });
+
+  it("locks the page scroll while mounted and restores it on unmount", () => {
+    document.documentElement.style.overflow = "auto";
+    document.documentElement.style.scrollbarGutter = "stable";
+    document.body.style.overflow = "auto";
+
+    const wrapper = mountPanel();
+
+    expect(document.documentElement.style.overflow).toBe("hidden");
+    expect(document.documentElement.style.scrollbarGutter).toBe("auto");
+    expect(document.body.style.overflow).toBe("hidden");
+
+    wrapper.unmount();
+
+    expect(document.documentElement.style.overflow).toBe("auto");
+    expect(document.documentElement.style.scrollbarGutter).toBe("stable");
+    expect(document.body.style.overflow).toBe("auto");
   });
 });
 

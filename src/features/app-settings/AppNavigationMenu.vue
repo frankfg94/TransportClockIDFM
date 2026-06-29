@@ -10,6 +10,7 @@ import {
   TriangleAlert,
 } from "lucide-vue-next";
 import { useRoute } from "#imports";
+import ContextMenu from "../../components/ContextMenu.vue";
 import { useAppSettings } from "./appSettings";
 import { transitBoards } from "../../config/transitBoards";
 import {
@@ -42,6 +43,7 @@ const { settings } = useAppSettings();
 const hidden = ref(false);
 const menuOpen = ref(false);
 const navigationRoot = ref<HTMLElement>();
+const menuTrigger = ref<HTMLElement>();
 const presetState = ref<TransitPresetState>(
   createDefaultTransitPresetState(transitBoards),
 );
@@ -122,7 +124,6 @@ const navigationClasses = computed(() => [
 onMounted(() => {
   refreshPresetState();
   registerActivityListeners();
-  document.addEventListener("pointerdown", closeMenuOnOutsidePointer);
   window.addEventListener("storage", syncPresetState);
   window.addEventListener(TRANSIT_PREFERENCES_CHANGED_EVENT, syncPresetState);
   resetAutoHideTimer();
@@ -130,7 +131,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   unregisterActivityListeners();
-  document.removeEventListener("pointerdown", closeMenuOnOutsidePointer);
   window.removeEventListener("storage", syncPresetState);
   window.removeEventListener(TRANSIT_PREFERENCES_CHANGED_EVENT, syncPresetState);
   clearAutoHideTimer();
@@ -202,12 +202,6 @@ function toggleMenu(): void {
 
 function closeMenu(): void {
   menuOpen.value = false;
-}
-
-function closeMenuOnOutsidePointer(event: PointerEvent): void {
-  if (!navigationRoot.value?.contains(event.target as Node)) {
-    closeMenu();
-  }
 }
 
 function resetAutoHideTimer(): void {
@@ -304,6 +298,7 @@ function handleVisibilityChange(): void {
 
     <div class="app-navigation__menu">
       <button
+        ref="menuTrigger"
         class="app-navigation__menu-button"
         :class="{
           'app-navigation__menu-button--active':
@@ -311,33 +306,36 @@ function handleVisibilityChange(): void {
         }"
         type="button"
         :aria-expanded="menuOpen"
+        aria-haspopup="menu"
         aria-label="Ouvrir les pages secondaires"
         @click="toggleMenu"
       >
         <MoreVertical aria-hidden="true" />
       </button>
 
-      <Transition name="app-navigation-menu">
-        <div
-          v-if="menuOpen"
-          class="app-navigation__menu-panel"
-          role="menu"
-          aria-label="Pages secondaires"
+      <ContextMenu
+        v-model:open="menuOpen"
+        aria-label="Pages secondaires"
+        :anchor="menuTrigger"
+        class="app-navigation__menu-panel"
+        close-on-outside-click
+        placement="top-end"
+        :teleport="false"
+        :z-index="9500"
+      >
+        <NuxtLink
+          v-for="link in secondaryLinks"
+          :key="link.to"
+          class="app-navigation__menu-link"
+          :class="{ 'app-navigation__menu-link--active': isActive(link.to) }"
+          :to="link.to"
+          role="menuitem"
+          @click="closeMenu"
         >
-          <NuxtLink
-            v-for="link in secondaryLinks"
-            :key="link.to"
-            class="app-navigation__menu-link"
-            :class="{ 'app-navigation__menu-link--active': isActive(link.to) }"
-            :to="link.to"
-            role="menuitem"
-            @click="closeMenu"
-          >
-            <component :is="link.icon" aria-hidden="true" />
-            <span>{{ link.label }}</span>
-          </NuxtLink>
-        </div>
-      </Transition>
+          <component :is="link.icon" aria-hidden="true" />
+          <span>{{ link.label }}</span>
+        </NuxtLink>
+      </ContextMenu>
     </div>
   </nav>
 </template>
@@ -558,7 +556,7 @@ function handleVisibilityChange(): void {
   width: 20px;
 }
 
-.app-navigation__menu-panel {
+:global(.app-navigation__menu-panel) {
   background: #ffffff;
   border: 1px solid rgba(16, 35, 63, 0.1);
   border-radius: 8px;
