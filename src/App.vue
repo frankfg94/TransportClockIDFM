@@ -913,6 +913,31 @@ async function requestFullscreenPanelMode(): Promise<void> {
   }
 }
 
+async function toggleFullscreenPanelMode(): Promise<void> {
+  if (!import.meta.client) {
+    return;
+  }
+
+  if (document.fullscreenElement) {
+    try {
+      await document.exitFullscreen();
+    } catch {
+      // Fullscreen state can change while the menu is open.
+    } finally {
+      fullscreenPanelEnteredNativeFullscreen.value = false;
+    }
+    return;
+  }
+
+  await requestFullscreenPanelMode();
+}
+
+function syncFullscreenPanelNativeState(): void {
+  fullscreenPanelEnteredNativeFullscreen.value =
+    isFullscreenPanelOpen.value &&
+    document.fullscreenElement === document.documentElement;
+}
+
 async function closeFullscreenPanel(
   options: { syncRoute?: boolean; resumeRefresh?: boolean } = {},
 ): Promise<void> {
@@ -1896,6 +1921,7 @@ onMounted(() => {
   pageVisible.value = isPageVisible();
   syncFullscreenPanelFromRoute({ requestNativeFullscreen: true, refresh: true });
   document.addEventListener("visibilitychange", handleVisibilityChange);
+  document.addEventListener("fullscreenchange", syncFullscreenPanelNativeState);
   window.addEventListener("focus", refreshOnReturn);
   window.addEventListener("storage", syncTransitPreferences);
   window.addEventListener(
@@ -1940,6 +1966,10 @@ onBeforeUnmount(() => {
   }
   stopSoftAlarm();
   document.removeEventListener("visibilitychange", handleVisibilityChange);
+  document.removeEventListener(
+    "fullscreenchange",
+    syncFullscreenPanelNativeState,
+  );
   window.removeEventListener("focus", refreshOnReturn);
   window.removeEventListener("storage", syncTransitPreferences);
   window.removeEventListener(
@@ -2288,9 +2318,11 @@ onBeforeUnmount(() => {
           :loading="states[fullscreenPanelBoard.id]?.loading ?? false"
           :error="states[fullscreenPanelBoard.id]?.error"
           :updated-at-label="fullscreenPanelUpdatedAtLabel"
+          :browser-fullscreen-active="fullscreenPanelEnteredNativeFullscreen"
           @change-design="updateFullscreenPanelDesign"
           @change-theme="updateFullscreenPanelTheme"
           @refresh="refreshFullscreenPanel"
+          @toggle-fullscreen="toggleFullscreenPanelMode"
           @close="closeFullscreenPanel"
         >
           <template #line-logo>

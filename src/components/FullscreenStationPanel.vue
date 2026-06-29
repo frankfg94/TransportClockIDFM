@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Check, EllipsisVertical, RefreshCw, X } from "lucide-vue-next";
+import {
+  Check,
+  EllipsisVertical,
+  Maximize2,
+  Minimize2,
+  RefreshCw,
+  X,
+} from "lucide-vue-next";
 import type { FullscreenStationPanelDesign } from "../features/app-settings";
 
 type TrafficAlertTone = "orange" | "red";
@@ -43,6 +50,7 @@ const props = withDefaults(
     loading?: boolean;
     error?: string;
     updatedAtLabel?: string;
+    browserFullscreenActive?: boolean;
   }>(),
   {
     city: "",
@@ -57,6 +65,7 @@ const props = withDefaults(
     loading: false,
     error: "",
     updatedAtLabel: "",
+    browserFullscreenActive: false,
   },
 );
 
@@ -70,6 +79,7 @@ const emit = defineEmits<{
   ];
   "change-theme": [darkTheme: boolean];
   refresh: [];
+  "toggle-fullscreen": [];
 }>();
 
 const controlsVisible = ref(true);
@@ -281,6 +291,24 @@ onBeforeUnmount(() => {
             <span aria-hidden="true"></span>
             <strong>Theme sombre</strong>
           </label>
+
+          <button
+            type="button"
+            role="menuitem"
+            @click="emit('toggle-fullscreen')"
+          >
+            <Minimize2
+              v-if="browserFullscreenActive"
+              :size="17"
+              aria-hidden="true"
+            />
+            <Maximize2 v-else :size="17" aria-hidden="true" />
+            {{
+              browserFullscreenActive
+                ? "Sortir du plein ecran"
+                : "Plein ecran"
+            }}
+          </button>
 
           <div class="fullscreen-station-panel__menu-heading">
             Changer le design

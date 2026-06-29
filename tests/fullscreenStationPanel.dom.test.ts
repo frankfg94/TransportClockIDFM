@@ -152,6 +152,26 @@ describe("FullscreenStationPanel", () => {
 
     wrapper.unmount();
   });
+
+  it("emits fullscreen toggles with the contextual menu label", async () => {
+    const wrapper = mountPanel({ browserFullscreenActive: false });
+
+    await wrapper.find('[aria-label="Options du panneau"]').trigger("click");
+
+    const fullscreenButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Plein ecran"));
+
+    expect(fullscreenButton).toBeTruthy();
+    await fullscreenButton?.trigger("click");
+    expect(wrapper.emitted("toggle-fullscreen")).toHaveLength(1);
+
+    await wrapper.setProps({ browserFullscreenActive: true });
+
+    expect(wrapper.text()).toContain("Sortir du plein ecran");
+
+    wrapper.unmount();
+  });
 });
 
 function mountPanel(
