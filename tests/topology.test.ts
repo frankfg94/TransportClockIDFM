@@ -354,6 +354,40 @@ describe("NeTEx cache topology adapter", () => {
     ]);
   });
 
+  it("orients the Transilien J cycle around the long Asnieres / Mantes corridor", async () => {
+    const cache = await loadNetexLineCache("transilien-j");
+    const cycle = cache.schematic.loops.find((loop) => {
+      const anchors = namesForSchematicIds(cache, loop.anchorStationIds);
+
+      return (
+        loop.kind === "cycle" &&
+        includesName(anchors, "Asnieres-sur-Seine") &&
+        includesName(anchors, "Mantes Station") &&
+        includesName(anchors, "Conflans-Sainte-Honorine") &&
+        includesName(anchors, "Argenteuil")
+      );
+    });
+    const laneHints = cycle?.laneHints ?? [];
+    const common = laneHints.find((hint) => hint.role === "common");
+    const alternative = laneHints.find((hint) => hint.role === "alternative");
+
+    expect(cycle).toBeDefined();
+    expect(namesForSchematicIds(cache, common?.anchorStationIds ?? [])).toEqualNames([
+      "Asnieres-sur-Seine",
+      "Mantes Station",
+    ]);
+    expect(namesForSchematicIds(cache, alternative?.anchorStationIds ?? [])).toEqualNames([
+      "Asnieres-sur-Seine",
+      "Mantes Station",
+    ]);
+    expect(namesForSchematicIds(cache, common?.stationIds ?? [])).toEqual(
+      expect.arrayContaining(["Poissy", "Les Mureaux"]),
+    );
+    expect(namesForSchematicIds(cache, alternative?.stationIds ?? [])).toEqual(
+      expect.arrayContaining(["Argenteuil", "Conflans-Sainte-Honorine"]),
+    );
+  });
+
   it("attaches raw NeTEx quays to their consolidated station", async () => {
     const topology = await getLineTopology("line:IDFM:C00025");
     const beauregard = topology.stations.find(

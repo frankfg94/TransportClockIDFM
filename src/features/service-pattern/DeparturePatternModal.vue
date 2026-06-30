@@ -184,6 +184,7 @@ interface PatternLoopLayoutHint {
   stationKeys: string[];
   anchorKeys: string[];
   lane: number;
+  explicitLane?: boolean;
 }
 
 interface PatternFlowModel {
@@ -2118,6 +2119,7 @@ function createLoopLayoutHints(
             stationKeys,
             anchorKeys,
             lane: laneHint.lane,
+            explicitLane: true,
             averageLatitude: getAverageLoopLatitude(stationKeys, nodeByKey),
             index: index * 100 + laneHintIndex,
           }];
@@ -2169,7 +2171,7 @@ function createLoopLayoutHints(
 
   return candidates.map(({ averageLatitude, index, ...hint }, laneIndex) => ({
     ...hint,
-    lane: hint.lane || createLoopLane(laneIndex),
+    lane: hint.explicitLane ? hint.lane : createLoopLane(laneIndex),
   }));
 }
 
