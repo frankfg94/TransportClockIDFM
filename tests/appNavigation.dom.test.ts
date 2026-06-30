@@ -1,4 +1,4 @@
-import { mount } from "@vue/test-utils";
+import { DOMWrapper, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => {
@@ -6,6 +6,7 @@ afterEach(() => {
   vi.resetModules();
   vi.doUnmock("#imports");
   vi.doUnmock("../src/features/app-settings/appSettings");
+  document.body.innerHTML = "";
 });
 
 describe("AppNavigation", () => {
@@ -53,21 +54,37 @@ describe("AppNavigation", () => {
 
     expect(wrapper.text()).toContain("Stations");
     expect(wrapper.text()).toContain("Info trafic");
-    expect(wrapper.text()).not.toContain("Paramètres");
     expect(wrapper.text()).not.toContain("Health");
+    expect(document.body.querySelector(".app-navigation__menu-panel")).toBeNull();
 
     await wrapper.get("button.app-navigation__menu-button").trigger("click");
+    await wrapper.vm.$nextTick();
+
+    const menuPanel = document.body.querySelector<HTMLElement>(
+      ".app-navigation__menu-panel",
+    );
+
+    expect(menuPanel).toBeTruthy();
+    const menuPanelWrapper = new DOMWrapper(menuPanel as HTMLElement);
+
+    expect(document.body.contains(menuPanel)).toBe(true);
+    expect(wrapper.element.contains(menuPanel)).toBe(false);
+    expect(menuPanelWrapper.isVisible()).toBe(true);
+    expect(menuPanel?.style.position).toBe("fixed");
     expect(wrapper.text()).toContain("Info trafic");
-    expect(wrapper.text()).toContain("Paramètres");
-    expect(wrapper.text()).toContain("Health");
+    expect(menuPanel?.querySelector('a[href="/settings"]')).toBeTruthy();
+    expect(menuPanel?.querySelector('a[href="/health"]')).toBeTruthy();
+    expect(menuPanel?.textContent).toContain("Health");
 
     await vi.advanceTimersByTimeAsync(60_000);
     expect(wrapper.classes()).toContain("app-navigation--hidden");
-    expect(wrapper.text()).not.toContain("Health");
+    expect(document.body.querySelector(".app-navigation__menu-panel")).toBeNull();
 
     window.dispatchEvent(new Event("pointermove"));
     await wrapper.vm.$nextTick();
     expect(wrapper.classes()).not.toContain("app-navigation--hidden");
+
+    wrapper.unmount();
   });
 
   it("shows the active place context on the Stations button", async () => {
@@ -115,5 +132,7 @@ describe("AppNavigation", () => {
     expect(wrapper.findAll(".app-navigation__place-dot--active")).toHaveLength(
       1,
     );
+
+    wrapper.unmount();
   });
 });

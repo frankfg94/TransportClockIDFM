@@ -505,6 +505,7 @@ function createCityTopologyFixture(): LineTopology {
       },
     ],
     branches: [],
+    loops: [],
     branchPoints: [],
     terminals: ["chatillon", "viroflay"],
   };
@@ -582,6 +583,7 @@ function createSkippedStopTopologyFixture(): LineTopology {
       },
     ],
     branches: [],
+    loops: [],
     branchPoints: [],
     terminals: ["alpha", "echo"],
   };

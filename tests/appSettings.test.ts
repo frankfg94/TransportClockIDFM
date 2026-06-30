@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createDefaultAppSettings,
+  compactLinePlanOptions,
   filterTerminalOnly,
   fullscreenStationPanelDesignOptions,
   getEffectiveMaxDeparturesPerDirection,
@@ -118,6 +119,17 @@ describe("app settings", () => {
       latitude: 90,
       longitude: -180,
     });
+  });
+
+  it("accepts the realistic line plan mode", () => {
+    expect(compactLinePlanOptions).toContainEqual({
+      id: "realistic",
+      label: "Vue réaliste",
+    });
+    expect(
+      normalizeAppSettings({ compactLinePlanMode: "realistic" })
+        .compactLinePlanMode,
+    ).toBe("realistic");
   });
 
   it("applies fixed max departure settings without changing the default", () => {

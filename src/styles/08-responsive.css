@@ -349,8 +349,11 @@
     width: 142px;
   }
 
-  .pattern-flow-station strong {
-    font-size: 0.76rem;
+  .pattern-flow-shell--comfort {
+    --station-name-font-size: 0.76rem;
+  }
+
+  .pattern-flow-station .station-name {
     max-width: 136px;
   }
 
@@ -366,11 +369,13 @@
     z-index: 30;
   }
 
-  .pattern-flow-shell--compact .pattern-flow-station {
+  .pattern-flow-shell--compact .pattern-flow-station,
+  .pattern-flow-shell--realistic .pattern-flow-station {
     width: 122px;
   }
 
-  .pattern-flow-shell--compact .pattern-flow-station > strong {
+  .pattern-flow-shell--compact .pattern-flow-station > .station-name,
+  .pattern-flow-shell--realistic .pattern-flow-station > .station-name {
     max-width: 146px;
     width: 146px;
   }

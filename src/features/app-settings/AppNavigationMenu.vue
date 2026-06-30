@@ -320,7 +320,6 @@ function handleVisibilityChange(): void {
         class="app-navigation__menu-panel"
         close-on-outside-click
         placement="top-end"
-        :teleport="false"
         :z-index="9500"
       >
         <NuxtLink

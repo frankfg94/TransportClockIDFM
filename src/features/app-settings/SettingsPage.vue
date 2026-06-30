@@ -1045,16 +1045,16 @@ onBeforeUnmount(() => {
 
       <div class="settings-row">
         <div>
-          <strong>Vue compacte du plan</strong>
+          <strong>Mode visuel du plan</strong>
           <span
-            >Automatique active la vue compacte uniquement sur les lignes
-            denses.</span
+            >Automatique choisit entre confort et compact selon la densité de
+            la ligne.</span
           >
         </div>
         <MaterialCombobox
           :model-value="settings.compactLinePlanMode"
           :options="[...compactLinePlanOptions]"
-          aria-label="Mode compact du plan"
+          aria-label="Mode visuel du plan"
           @update:model-value="updateCompactMode"
         />
       </div>

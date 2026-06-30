@@ -245,6 +245,471 @@ describe("DeparturePatternModal settings", () => {
     wrapper.unmount();
   });
 
+  it("spaces realistic mode stations from NeTEx distances without forcing labels", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+    const VueFlowPositionStub = defineComponent({
+      name: "VueFlow",
+      props: {
+        edges: {
+          type: Array,
+          default: () => [],
+        },
+        nodes: {
+          type: Array,
+          default: () => [],
+        },
+      },
+      setup(props) {
+        return () =>
+          h("div", { class: "vue-flow" }, [
+            ...(props.nodes as Array<{
+              data?: { label?: string };
+              position?: { x: number };
+              type?: string;
+            }>)
+              .filter((node) => node.type === "station")
+              .map((node) =>
+                h(
+                  "span",
+                  {
+                    class: "station-position",
+                    "data-label": node.data?.label,
+                    "data-x": String(node.position?.x ?? 0),
+                  },
+                  node.data?.label,
+                ),
+              ),
+            ...(props.edges as Array<{ id: string; label?: string }>).map(
+              (edge) =>
+                h(
+                  "span",
+                  { key: edge.id, class: "edge-label" },
+                  edge.label ?? "",
+                ),
+            ),
+          ]);
+      },
+    });
+    const geocodedPattern: DepartureCallingPattern = {
+      ...pattern,
+      calls: [
+        ...pattern.calls,
+        {
+          id: "station-c",
+          label: "Station C",
+          current: false,
+          served: true,
+        },
+      ],
+      lineTopology: [
+        {
+          id: "netex-sequence",
+          label: "Séquence NeTEx",
+          topologySource: "server",
+          stops: [
+            createRouteStop("station-a", "Station A", 652146, 6862288),
+            createRouteStop("station-b", "Station B", 652646, 6862288),
+            createRouteStop("station-c", "Station C", 653846, 6862288),
+          ],
+        },
+      ],
+    };
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: geocodedPattern,
+        compactMode: "realistic",
+        showMiniMap: false,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowPositionStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+    const positionByLabel = new Map(
+      wrapper.findAll(".station-position").map((station) => [
+        station.attributes("data-label"),
+        Number(station.attributes("data-x")),
+      ]),
+    );
+    const shortGap =
+      (positionByLabel.get("Station B") ?? 0) -
+      (positionByLabel.get("Station A") ?? 0);
+    const longGap =
+      (positionByLabel.get("Station C") ?? 0) -
+      (positionByLabel.get("Station B") ?? 0);
+
+    expect(wrapper.find(".pattern-flow-shell--realistic").exists()).toBe(true);
+    expect(wrapper.find(".pattern-flow-shell--compact").exists()).toBe(false);
+    expect(wrapper.findAll(".edge-label").every((label) => !label.text())).toBe(
+      true,
+    );
+    expect(longGap).toBeGreaterThan(shortGap);
+    expect(longGap / shortGap).toBeGreaterThan(2.2);
+    expect(longGap / shortGap).toBeLessThan(2.6);
+
+    await flushPromises();
+    wrapper.unmount();
+  });
+
+  it("orients nested off-route branches away from the served terminus", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+    const VueFlowPositionStub = defineComponent({
+      name: "VueFlow",
+      props: {
+        nodes: {
+          type: Array,
+          default: () => [],
+        },
+      },
+      setup(props) {
+        return () =>
+          h(
+            "div",
+            { class: "vue-flow" },
+            (props.nodes as Array<{
+              data?: { label?: string };
+              position?: { x: number; y: number };
+              type?: string;
+            }>)
+              .filter((node) => node.type === "station")
+              .map((node) =>
+                h(
+                  "span",
+                  {
+                    class: "station-position",
+                    "data-label": node.data?.label,
+                    "data-x": String(node.position?.x ?? 0),
+                    "data-y": String(node.position?.y ?? 0),
+                  },
+                  node.data?.label,
+                ),
+              ),
+          );
+      },
+    });
+    const branchPattern: DepartureCallingPattern = {
+      ...pattern,
+      destination: "Montparnasse",
+      calls: [
+        createCall("rambouillet", "Rambouillet", "Rambouillet", true),
+        createCall("saint-cyr", "Saint-Cyr", "Saint-Cyr"),
+        createCall("montparnasse", "Montparnasse", "Paris"),
+      ],
+      lineTopology: [
+        {
+          id: "active-spine",
+          label: "Active spine",
+          topologySource: "server",
+          stops: [
+            createRouteStop("rambouillet", "Rambouillet", 0, 0),
+            createRouteStop("saint-cyr", "Saint-Cyr", 1, 0),
+            createRouteStop("montparnasse", "Montparnasse", 2, 0),
+          ],
+        },
+        {
+          id: "secondary-trunk",
+          label: "Secondary trunk",
+          topologySource: "server",
+          stops: [
+            createRouteStop("saint-cyr", "Saint-Cyr", 1, 0),
+            createRouteStop("fontenay", "Fontenay", 0, 0),
+            createRouteStop("plaisir-les-clayes", "Plaisir Les Clayes", -1, 0),
+            createRouteStop("plaisir-grignon", "Plaisir - Grignon", -2, 0),
+          ],
+        },
+        {
+          id: "plaisir-dreux",
+          label: "Plaisir - Dreux",
+          branchLayout: {
+            kind: "same-direction-fork",
+            junctionStationId: "plaisir-grignon",
+            terminalStationId: "dreux",
+            trunkStationId: "plaisir-les-clayes",
+            direction: "forward",
+            side: "upper",
+          },
+          topologySource: "server",
+          stops: [
+            createRouteStop("plaisir-grignon", "Plaisir - Grignon", -2, 0),
+            createRouteStop("dreux", "Dreux", -3, -1),
+          ],
+        },
+        {
+          id: "plaisir-mantes",
+          label: "Plaisir - Mantes",
+          branchLayout: {
+            kind: "same-direction-fork",
+            junctionStationId: "plaisir-grignon",
+            terminalStationId: "mantes",
+            trunkStationId: "plaisir-les-clayes",
+            direction: "forward",
+            side: "lower",
+          },
+          topologySource: "server",
+          stops: [
+            createRouteStop("plaisir-grignon", "Plaisir - Grignon", -2, 0),
+            createRouteStop("mantes", "Mantes-la-Jolie", -3, 1),
+          ],
+        },
+      ],
+    };
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: branchPattern,
+        showMiniMap: false,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowPositionStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+    const positionByLabel = new Map(
+      wrapper.findAll(".station-position").map((station) => [
+        station.attributes("data-label"),
+        {
+          x: Number(station.attributes("data-x")),
+          y: Number(station.attributes("data-y")),
+        },
+      ]),
+    );
+    const saintCyr = positionByLabel.get("Saint-Cyr");
+    const montparnasse = positionByLabel.get("Montparnasse");
+    const plaisir = positionByLabel.get("Plaisir - Grignon");
+    const dreux = positionByLabel.get("Dreux");
+    const mantes = positionByLabel.get("Mantes-la-Jolie");
+
+    expect(saintCyr).toBeDefined();
+    expect(montparnasse).toBeDefined();
+    expect(plaisir).toBeDefined();
+    expect(dreux).toBeDefined();
+    expect(mantes).toBeDefined();
+    expect(montparnasse!.x).toBeGreaterThan(saintCyr!.x);
+    expect(plaisir!.x).toBeLessThan(saintCyr!.x);
+    expect(dreux!.x).toBeLessThan(plaisir!.x);
+    expect(mantes!.x).toBeLessThan(plaisir!.x);
+    expect(dreux!.y).not.toBe(mantes!.y);
+
+    await flushPromises();
+    wrapper.unmount();
+  });
+
+  it("places topology loop corridors as parallel lanes between placed anchors", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+    const VueFlowPositionStub = defineComponent({
+      name: "VueFlow",
+      props: {
+        nodes: {
+          type: Array,
+          default: () => [],
+        },
+      },
+      setup(props) {
+        return () =>
+          h(
+            "div",
+            { class: "vue-flow" },
+            (props.nodes as Array<{
+              data?: { label?: string };
+              position?: { x: number; y: number };
+              type?: string;
+            }>)
+              .filter((node) => node.type === "station")
+              .map((node) =>
+                h(
+                  "span",
+                  {
+                    class: "station-position",
+                    "data-label": node.data?.label,
+                    "data-x": String(node.position?.x ?? 0),
+                    "data-y": String(node.position?.y ?? 0),
+                  },
+                  node.data?.label,
+                ),
+              ),
+          );
+      },
+    });
+    const loopPattern: DepartureCallingPattern = {
+      ...pattern,
+      destination: "Anchor D",
+      calls: [
+        createCall("anchor-a", "Anchor A", "City", true),
+        createCall("spine-b", "Spine B", "City"),
+        createCall("spine-c", "Spine C", "City"),
+        createCall("anchor-d", "Anchor D", "City"),
+      ],
+      lineTopology: [
+        {
+          id: "main-spine",
+          label: "Main spine",
+          topologySource: "server",
+          stops: [
+            createRouteStop("anchor-a", "Anchor A", 0, 0),
+            createRouteStop("spine-b", "Spine B", 1, 0),
+            createRouteStop("spine-c", "Spine C", 2, 0),
+            createRouteStop("anchor-d", "Anchor D", 3, 0),
+          ],
+        },
+        {
+          id: "upper-loop-corridor",
+          label: "Upper loop corridor",
+          topologySource: "server",
+          stops: [
+            createRouteStop("anchor-a", "Anchor A", 0, 0),
+            createRouteStop("upper-1", "Upper 1", 1, 1),
+            createRouteStop("upper-2", "Upper 2", 2, 1),
+            createRouteStop("anchor-d", "Anchor D", 3, 0),
+          ],
+        },
+        {
+          id: "lower-loop-corridor",
+          label: "Lower loop corridor",
+          topologySource: "server",
+          stops: [
+            createRouteStop("anchor-a", "Anchor A", 0, 0),
+            createRouteStop("lower-1", "Lower 1", 1, -1),
+            createRouteStop("lower-2", "Lower 2", 2, -1),
+            createRouteStop("anchor-d", "Anchor D", 3, 0),
+          ],
+        },
+      ],
+      lineTopologyLayout: {
+        loops: [
+          {
+            id: "loop:upper",
+            kind: "cycle",
+            anchorStationIds: ["anchor-a", "anchor-d"],
+            segmentIds: ["upper-loop-corridor"],
+            stationIds: [
+              "anchor-a",
+              "upper-1",
+              "upper-2",
+              "anchor-d",
+              "spine-c",
+              "spine-b",
+            ],
+          },
+          {
+            id: "loop:lower",
+            kind: "cycle",
+            anchorStationIds: ["anchor-a", "anchor-d"],
+            segmentIds: ["lower-loop-corridor"],
+            stationIds: [
+              "anchor-a",
+              "lower-1",
+              "lower-2",
+              "anchor-d",
+              "spine-c",
+              "spine-b",
+            ],
+          },
+        ],
+      },
+    };
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: loopPattern,
+        showMiniMap: false,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowPositionStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+    const positionByLabel = new Map(
+      wrapper.findAll(".station-position").map((station) => [
+        station.attributes("data-label"),
+        {
+          x: Number(station.attributes("data-x")),
+          y: Number(station.attributes("data-y")),
+        },
+      ]),
+    );
+    const anchorA = positionByLabel.get("Anchor A");
+    const spineB = positionByLabel.get("Spine B");
+    const anchorD = positionByLabel.get("Anchor D");
+    const upperOne = positionByLabel.get("Upper 1");
+    const upperTwo = positionByLabel.get("Upper 2");
+    const lowerOne = positionByLabel.get("Lower 1");
+    const lowerTwo = positionByLabel.get("Lower 2");
+
+    expect(anchorA).toBeDefined();
+    expect(spineB).toBeDefined();
+    expect(anchorD).toBeDefined();
+    expect(upperOne).toBeDefined();
+    expect(upperTwo).toBeDefined();
+    expect(lowerOne).toBeDefined();
+    expect(lowerTwo).toBeDefined();
+    expect(upperOne!.y).toBeLessThan(spineB!.y);
+    expect(upperTwo!.y).toBeLessThan(spineB!.y);
+    expect(lowerOne!.y).toBeGreaterThan(spineB!.y);
+    expect(lowerTwo!.y).toBeGreaterThan(spineB!.y);
+    expect(upperOne!.x).toBeGreaterThan(anchorA!.x);
+    expect(upperTwo!.x).toBeLessThan(anchorD!.x);
+    expect(lowerOne!.x).toBeGreaterThan(anchorA!.x);
+    expect(lowerTwo!.x).toBeLessThan(anchorD!.x);
+
+    await flushPromises();
+    wrapper.unmount();
+  });
+
   it("renders grouped city zones from line topology", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,

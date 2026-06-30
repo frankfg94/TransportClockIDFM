@@ -6,6 +6,8 @@ import type {
   DepartureServiceType,
   LineConfig,
   LinePatternDirectionOption,
+  LineTopologyLayout,
+  LineTopologyLoopLayout,
   LinePatternStationStatus,
   LinePatternViewResponse,
   LineRouteSequence,
@@ -139,6 +141,7 @@ export function buildLinePatternViewFromTopology(
     serviceType: inferPatternServiceType(activeStops, lineTopology),
     calls,
     lineTopology,
+    lineTopologyLayout: createLineTopologyLayout(topology),
   };
 
   return {
@@ -152,6 +155,32 @@ export function buildLinePatternViewFromTopology(
     board,
     departure,
     pattern,
+  };
+}
+
+function createLineTopologyLayout(topology: LineTopology): LineTopologyLayout {
+  return {
+    loops: topology.loops.map(
+      (loop): LineTopologyLoopLayout => ({
+        id: loop.id,
+        kind: loop.kind,
+        anchorStationIds: [...loop.anchorStationIds],
+        segmentIds: [...loop.segmentIds],
+        stationIds: [...loop.stationIds],
+        orderedAnchorStationIds: [...loop.orderedAnchorStationIds],
+        orderedSegmentIds: [...loop.orderedSegmentIds],
+        orderedStationIds: [...loop.orderedStationIds],
+        laneHints: loop.laneHints.map((hint) => ({
+          id: hint.id,
+          role: hint.role,
+          anchorStationIds: [...hint.anchorStationIds],
+          segmentIds: [...hint.segmentIds],
+          stationIds: [...hint.stationIds],
+          lane: hint.lane,
+          side: hint.side,
+        })),
+      }),
+    ),
   };
 }
 

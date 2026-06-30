@@ -25,7 +25,6 @@ import {
   Bus,
   Expand,
   Minimize2,
-  SlidersHorizontal,
   TriangleAlert,
 } from "lucide-vue-next";
 import DistanceToggle from "../../components/DistanceToggle.vue";
@@ -86,6 +85,8 @@ import type {
   LineRouteBranchLayout,
   LineRouteSequence,
   LineRouteStop,
+  LineTopologyLayout,
+  LineTopologyLoopLayout,
   LinePatternDirectionOption,
   TransferLineOption,
   TransitBoardConfig,
@@ -150,7 +151,8 @@ interface PatternFlowEdgeData {
   trafficImpact?: PatternTrafficImpact;
 }
 
-type PatternCompactMode = "auto" | "comfort" | "compact";
+type PatternVisualMode = "comfort" | "compact" | "realistic";
+type PatternCompactMode = "auto" | PatternVisualMode;
 
 interface PatternGraphNode {
   id: string;
@@ -172,6 +174,16 @@ interface PatternGraphEdge {
   target: string;
   active: boolean;
   distanceKm?: number;
+}
+
+interface PatternLoopLayoutHint {
+  id: string;
+  kind: LineTopologyLoopLayout["kind"];
+  role?: "common" | "alternative";
+  side?: "upper" | "lower" | "center";
+  stationKeys: string[];
+  anchorKeys: string[];
+  lane: number;
 }
 
 interface PatternFlowModel {
@@ -220,19 +232,34 @@ const REGULAR_NODE_WIDTH = 184;
 const REGULAR_NODE_HEIGHT = 104;
 const COMPACT_NODE_WIDTH = 128;
 const COMPACT_NODE_HEIGHT = 150;
+const COMFORT_STOP_GAP = 236;
+const COMPACT_STOP_GAP = 138;
+const REALISTIC_MIN_STOP_GAP = COMFORT_STOP_GAP * 0.5;
+const REALISTIC_MAX_STOP_GAP = COMFORT_STOP_GAP * 5;
 const DISTANCE_LABEL_EXIT_MS = 240;
 const TRANSFER_HYDRATION_STALLED_RETRY_MS = 60_000;
 const TRANSFER_HYDRATION_RATE_LIMIT_CHECK_MS = 1_200;
 type PatternLayoutOptions = {
+  mode: PatternVisualMode;
   compact: boolean;
   nodeWidth: number;
   nodeHeight: number;
   stopGap: number;
+  edgeGapByKey?: Map<string, number>;
   branchGap: number;
   sameDirectionForkGap: number;
   rankSeparator: number;
   nodeSeparator: number;
 };
+
+const PATTERN_VISUAL_MODE_OPTIONS: Array<{
+  id: PatternVisualMode;
+  label: string;
+}> = [
+  { id: "comfort", label: "Vue confort" },
+  { id: "compact", label: "Vue compacte" },
+  { id: "realistic", label: "Vue réaliste" },
+];
 
 const props = withDefaults(
   defineProps<{
@@ -284,7 +311,7 @@ const emit = defineEmits<{
 }>();
 
 const isPatternFlowFullscreen = ref(false);
-const isCompactPatternFlow = ref(false);
+const patternVisualMode = ref<PatternVisualMode>("comfort");
 const showPatternDistances = ref(false);
 const patternDistanceLabelsVisible = ref(false);
 const patternDistanceLabelsLeaving = ref(false);
@@ -310,7 +337,7 @@ let transferHydrationRequest = 0;
 let patternDistanceLabelHideTimer: number | undefined;
 let transferHydrationRateLimitTimer: number | undefined;
 let transferHydrationStalledTimer: number | undefined;
-let compactDecisionKey = "";
+let visualModeDecisionKey = "";
 let stationTooltipHideTimer: number | undefined;
 const missingNetexTownWarningKeys = new Set<string>();
 
@@ -398,8 +425,22 @@ watch(
   { immediate: true },
 );
 
+const isComfortPatternFlow = computed(
+  () => patternVisualMode.value === "comfort",
+);
+const isCompactPatternFlow = computed(
+  () => patternVisualMode.value === "compact",
+);
+const isRealisticPatternFlow = computed(
+  () => patternVisualMode.value === "realistic",
+);
+const usesCompactPatternFlowLayout = computed(
+  () =>
+    patternVisualMode.value === "compact" ||
+    patternVisualMode.value === "realistic",
+);
 const currentLayoutOptions = computed(() =>
-  createPatternLayoutOptions(isCompactPatternFlow.value),
+  createPatternLayoutOptions(patternVisualMode.value),
 );
 const shouldZoomOnWheel = computed(() => Boolean(props.wheelZoom));
 const currentLineIdentity = computed<CurrentLineIdentity | undefined>(() => {
@@ -434,8 +475,9 @@ const flowModel = computed(() =>
   createPatternFlow(
     displayPattern.value?.calls ?? [],
     displayPattern.value?.lineTopology ?? [],
+    displayPattern.value?.lineTopologyLayout,
     departureClock.value,
-    isCompactPatternFlow.value,
+    patternVisualMode.value,
     isFullLineMode.value,
     currentLineIdentity.value,
     patternDistanceLabelsVisible.value,
@@ -448,7 +490,7 @@ const patternFlowKey = computed(
   () =>
     `${displayPattern.value?.departureId ?? "empty"}:${
       isPatternFlowFullscreen.value ? "fullscreen" : "modal"
-    }:${isCompactPatternFlow.value ? "compact" : "comfortable"}:${
+    }:${patternVisualMode.value}:${
       isFullLineMode.value ? "full" : "route"
     }:${props.showCityZones ? "cities" : "no-cities"}${
       props.board?.line.mode ? `:${props.board.line.mode}` : ""
@@ -463,7 +505,7 @@ const initialViewport = computed(() => {
   const layout = currentLayoutOptions.value;
   const zoom = createInitialZoom({
     fullscreen: isPatternFlowFullscreen.value,
-    compact: isCompactPatternFlow.value,
+    compact: usesCompactPatternFlowLayout.value,
     nodeCount,
   });
   const center = isPatternFlowFullscreen.value
@@ -547,50 +589,143 @@ watch(
   () =>
     `${displayPattern.value?.departureId ?? "empty"}:${topologyStationCount.value}:${props.compactMode}`,
   (key) => {
-    if (key === compactDecisionKey) {
+    if (key === visualModeDecisionKey) {
       return;
     }
 
-    compactDecisionKey = key;
-    isCompactPatternFlow.value = resolveInitialCompactPatternFlow();
+    visualModeDecisionKey = key;
+    patternVisualMode.value = resolveInitialPatternVisualMode();
   },
   { immediate: true },
 );
 
-function resolveInitialCompactPatternFlow(): boolean {
+function resolveInitialPatternVisualMode(): PatternVisualMode {
   if (props.compactMode === "compact") {
-    return true;
+    return "compact";
   }
 
   if (props.compactMode === "comfort") {
-    return false;
+    return "comfort";
   }
 
-  return shouldUseCompactPatternFlow(displayPattern.value?.lineTopology ?? []);
+  if (props.compactMode === "realistic") {
+    return "realistic";
+  }
+
+  return shouldUseCompactPatternFlow(displayPattern.value?.lineTopology ?? [])
+    ? "compact"
+    : "comfort";
 }
 
-function createPatternLayoutOptions(compact: boolean): PatternLayoutOptions {
-  return compact
+function createPatternLayoutOptions(
+  mode: PatternVisualMode,
+): PatternLayoutOptions {
+  return mode === "compact" || mode === "realistic"
     ? {
+        mode,
         compact: true,
         nodeWidth: COMPACT_NODE_WIDTH,
         nodeHeight: COMPACT_NODE_HEIGHT,
-        stopGap: 138,
+        stopGap: mode === "realistic" ? COMFORT_STOP_GAP : COMPACT_STOP_GAP,
         branchGap: 258,
         sameDirectionForkGap: 158,
         rankSeparator: 116,
         nodeSeparator: 46,
       }
     : {
+        mode,
         compact: false,
         nodeWidth: REGULAR_NODE_WIDTH,
         nodeHeight: REGULAR_NODE_HEIGHT,
-        stopGap: 236,
+        stopGap: COMFORT_STOP_GAP,
         branchGap: 184,
         sameDirectionForkGap: 184 * 0.58,
         rankSeparator: 96,
         nodeSeparator: 54,
       };
+}
+
+function createResolvedPatternLayoutOptions(
+  mode: PatternVisualMode,
+  edges: PatternGraphEdge[],
+): PatternLayoutOptions {
+  const layout = createPatternLayoutOptions(mode);
+
+  if (mode !== "realistic") {
+    return layout;
+  }
+
+  return {
+    ...layout,
+    edgeGapByKey: createRealisticEdgeGapByKey(edges),
+  };
+}
+
+function createRealisticEdgeGapByKey(
+  edges: PatternGraphEdge[],
+): Map<string, number> {
+  const distances = edges
+    .map((edge) => edge.distanceKm)
+    .filter(isPositiveFiniteNumber)
+    .sort((left, right) => left - right);
+
+  if (distances.length < 2) {
+    return new Map();
+  }
+
+  const medianDistance = getSortedMedian(distances);
+
+  if (!isPositiveFiniteNumber(medianDistance)) {
+    return new Map();
+  }
+
+  return new Map(
+    edges.flatMap((edge): Array<[string, number]> => {
+      if (!isPositiveFiniteNumber(edge.distanceKm)) {
+        return [];
+      }
+
+      const gap = clampNumber(
+        (edge.distanceKm / medianDistance) * COMFORT_STOP_GAP,
+        REALISTIC_MIN_STOP_GAP,
+        REALISTIC_MAX_STOP_GAP,
+      );
+
+      return [[createEdgeKey(edge.source, edge.target), gap]];
+    }),
+  );
+}
+
+function getSortedMedian(values: number[]): number {
+  if (values.length === 0) {
+    return values[0] ?? 0;
+  }
+
+  const middleIndex = Math.floor(values.length / 2);
+
+  if (values.length % 2 === 1) {
+    return values[middleIndex] ?? 0;
+  }
+
+  return ((values[middleIndex - 1] ?? 0) + (values[middleIndex] ?? 0)) / 2;
+}
+
+function isPositiveFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function selectPatternVisualMode(mode: string): void {
+  if (isPatternVisualMode(mode)) {
+    patternVisualMode.value = mode;
+  }
+}
+
+function isPatternVisualMode(value: string): value is PatternVisualMode {
+  return value === "comfort" || value === "compact" || value === "realistic";
 }
 
 function createInitialZoom({
@@ -961,8 +1096,9 @@ function clearPatternDistanceLabelHideTimer(): void {
 function createPatternFlow(
   calls: DepartureCall[],
   lineTopology: LineRouteSequence[],
+  lineTopologyLayout: LineTopologyLayout | undefined,
   departureTimeLabel: string,
-  compact: boolean,
+  visualMode: PatternVisualMode,
   fullLine: boolean,
   currentLine?: CurrentLineIdentity,
   showDistances = false,
@@ -970,14 +1106,15 @@ function createPatternFlow(
   showCityZones = true,
   analyzeTraffic: DeparturePatternTrafficAnalyzer = createEmptyTrafficImpactAnalysis,
 ): PatternFlowModel {
-  const layout = createPatternLayoutOptions(compact);
   const graph = buildPatternGraph(calls, lineTopology, fullLine);
+  const layout = createResolvedPatternLayoutOptions(visualMode, graph.edges);
   const topology =
     createTopologyLayout(
       graph.nodes,
       graph.edges,
       calls,
       lineTopology,
+      lineTopologyLayout,
       layout,
     ) ?? createFallbackTopologyLayout(graph, layout);
 
@@ -1039,7 +1176,7 @@ function createPatternFlow(
         graphEdges: graph.edges,
         positions: topology.positions,
         layout,
-        compact,
+        compact: layout.compact,
       })
     : [];
   const trafficMarkerNodes = createTrafficMarkerFlowNodes({
@@ -1047,7 +1184,7 @@ function createPatternFlow(
     edges: visibleDrawableEdges,
     positions: topology.positions,
     layout,
-    compact,
+    compact: layout.compact,
   });
   const nodes: PatternFlowNode[] = [
     ...cityZoneNodes,
@@ -1517,6 +1654,7 @@ function createTopologyLayout(
   edges: PatternGraphEdge[],
   calls: DepartureCall[],
   lineTopology: LineRouteSequence[],
+  lineTopologyLayout: LineTopologyLayout | undefined,
   layout: PatternLayoutOptions,
 ): PatternTopologyLayout | null {
   if (nodes.length === 0 || edges.length === 0) {
@@ -1552,10 +1690,23 @@ function createTopologyLayout(
   const syntheticEdges: PatternGraphEdge[] = [];
   const placed = new Set<string>();
   const branchLayoutHints = createBranchLayoutHints(lineTopology);
+  const loopLayoutHints = createLoopLayoutHints(
+    lineTopology,
+    lineTopologyLayout,
+    nodes,
+  );
+
+  let mainPathX = 0;
 
   mainPath.forEach((key, index) => {
-    positions.set(key, { x: index * layout.stopGap, y: 0 });
+    positions.set(key, { x: mainPathX, y: 0 });
     placed.add(key);
+
+    const nextKey = mainPath[index + 1];
+
+    if (nextKey) {
+      mainPathX += getLayoutStopGap(layout, key, nextKey);
+    }
   });
   addPathEdges(mainPath, visibleEdges);
   placeSameDirectionForks(
@@ -1572,6 +1723,25 @@ function createTopologyLayout(
   while (placed.size < nodes.length && guard < nodes.length * 2) {
     guard += 1;
 
+    if (
+      placeLoopCorridor(
+        loopLayoutHints,
+        positions,
+        placed,
+        visibleEdges,
+        layout,
+      )
+    ) {
+      placeSameDirectionForks(
+        branchLayoutHints,
+        positions,
+        placed,
+        visibleEdges,
+        layout,
+      );
+      continue;
+    }
+
     const connectorPath = findBestConnectorPath(nodes, adjacency, placed);
 
     if (connectorPath) {
@@ -1581,6 +1751,13 @@ function createTopologyLayout(
         placed,
         visibleEdges,
         laneSteps,
+        layout,
+      );
+      placeSameDirectionForks(
+        branchLayoutHints,
+        positions,
+        placed,
+        visibleEdges,
         layout,
       );
       continue;
@@ -1600,6 +1777,13 @@ function createTopologyLayout(
       laneSteps,
       destinationKey,
       branchLayoutHints,
+      layout,
+    );
+    placeSameDirectionForks(
+      branchLayoutHints,
+      positions,
+      placed,
+      visibleEdges,
       layout,
     );
   }
@@ -1652,6 +1836,36 @@ function createAdjacency(edges: PatternGraphEdge[]): Map<string, Set<string>> {
   });
 
   return adjacency;
+}
+
+function getLayoutStopGap(
+  layout: PatternLayoutOptions,
+  source?: string,
+  target?: string,
+): number {
+  if (!source || !target) {
+    return layout.stopGap;
+  }
+
+  return (
+    layout.edgeGapByKey?.get(createEdgeKey(source, target)) ?? layout.stopGap
+  );
+}
+
+function getPathSpan(path: string[], layout: PatternLayoutOptions): number {
+  return path.slice(0, -1).reduce((span, source, index) => {
+    const target = path[index + 1];
+
+    return span + getLayoutStopGap(layout, source, target);
+  }, 0);
+}
+
+function getPathOffsetToIndex(
+  path: string[],
+  targetIndex: number,
+  layout: PatternLayoutOptions,
+): number {
+  return getPathSpan(path.slice(0, targetIndex + 1), layout);
 }
 
 function addNeighbor(
@@ -1855,6 +2069,143 @@ function createBranchLayoutHints(
   return hints;
 }
 
+function createLoopLayoutHints(
+  lineTopology: LineRouteSequence[],
+  lineTopologyLayout: LineTopologyLayout | undefined,
+  nodes: PatternGraphNode[],
+): PatternLoopLayoutHint[] {
+  if (!lineTopologyLayout?.loops.length) {
+    return [];
+  }
+
+  const stationKeyById = new Map<string, string>();
+
+  lineTopology.forEach((sequence) => {
+    sequence.stops.forEach((stop) => {
+      stationKeyById.set(stop.id, createStationKey(stop));
+    });
+  });
+
+  const nodeByKey = new Map(nodes.map((node) => [node.id, node]));
+  const candidates: Array<
+    PatternLoopLayoutHint & {
+      averageLatitude: number | undefined;
+      index: number;
+    }
+  > = lineTopologyLayout.loops
+    .flatMap((loop, index) => {
+      if (loop.laneHints?.length) {
+        return loop.laneHints.flatMap((laneHint, laneHintIndex) => {
+          const stationKeys = normalizeLoopStationKeys(
+            laneHint.stationIds.flatMap((stationId) => stationKeyById.get(stationId) ?? []),
+          );
+          const anchorKeySet = new Set(
+            laneHint.anchorStationIds.flatMap(
+              (stationId) => stationKeyById.get(stationId) ?? [],
+            ),
+          );
+          const anchorKeys = stationKeys.filter((key) => anchorKeySet.has(key));
+
+          if (stationKeys.length < 2 || new Set(anchorKeys).size < 2) {
+            return [];
+          }
+
+          return [{
+            id: `${loop.id}:${laneHint.id}`,
+            kind: loop.kind,
+            role: laneHint.role,
+            side: laneHint.side,
+            stationKeys,
+            anchorKeys,
+            lane: laneHint.lane,
+            averageLatitude: getAverageLoopLatitude(stationKeys, nodeByKey),
+            index: index * 100 + laneHintIndex,
+          }];
+        });
+      }
+
+      const stationKeys = normalizeLoopStationKeys(
+        ((loop.orderedStationIds?.length ? loop.orderedStationIds : loop.stationIds))
+          .flatMap((stationId) => stationKeyById.get(stationId) ?? []),
+      );
+      const anchorKeySet = new Set(
+        ((loop.orderedAnchorStationIds?.length ? loop.orderedAnchorStationIds : loop.anchorStationIds))
+          .flatMap((stationId) => stationKeyById.get(stationId) ?? []),
+      );
+      const anchorKeys = stationKeys.filter((key) => anchorKeySet.has(key));
+
+      if (stationKeys.length < 3 || new Set(anchorKeys).size < 2) {
+        return [];
+      }
+
+      return [{
+        id: loop.id,
+        kind: loop.kind,
+        stationKeys,
+        anchorKeys,
+        lane: 0,
+        averageLatitude: getAverageLoopLatitude(stationKeys, nodeByKey),
+        index,
+      }];
+    })
+    .sort((left, right) => {
+      if (
+        left.averageLatitude !== undefined &&
+        right.averageLatitude !== undefined
+      ) {
+        return right.averageLatitude - left.averageLatitude;
+      }
+
+      if (left.averageLatitude !== undefined) {
+        return -1;
+      }
+
+      if (right.averageLatitude !== undefined) {
+        return 1;
+      }
+
+      return left.index - right.index;
+    });
+
+  return candidates.map(({ averageLatitude, index, ...hint }, laneIndex) => ({
+    ...hint,
+    lane: hint.lane || createLoopLane(laneIndex),
+  }));
+}
+
+function normalizeLoopStationKeys(stationKeys: string[]): string[] {
+  const normalized = stationKeys.filter(
+    (key, index) => index === 0 || key !== stationKeys[index - 1],
+  );
+
+  if (normalized.length > 1 && normalized[0] === normalized[normalized.length - 1]) {
+    normalized.pop();
+  }
+
+  return normalized;
+}
+
+function getAverageLoopLatitude(
+  stationKeys: string[],
+  nodeByKey: Map<string, PatternGraphNode>,
+): number | undefined {
+  const latitudes = stationKeys
+    .map((key) => nodeByKey.get(key)?.lat)
+    .filter((latitude): latitude is number => Number.isFinite(latitude));
+
+  if (latitudes.length === 0) {
+    return undefined;
+  }
+
+  return latitudes.reduce((total, latitude) => total + latitude, 0) / latitudes.length;
+}
+
+function createLoopLane(index: number): number {
+  const magnitude = Math.floor(index / 2) + 1;
+
+  return index % 2 === 0 ? -magnitude : magnitude;
+}
+
 function createBranchLayoutHintKey(
   junctionKey: string,
   terminalKey: string,
@@ -1896,9 +2247,13 @@ function placeSameDirectionForks(
       const side = hint.side === "upper" ? -1 : hint.side === "lower" ? 1 : 0;
       const y = junctionPosition.y + side * layout.sameDirectionForkGap;
 
+      let branchOffset = 0;
+
       hint.stationKeys.slice(1).forEach((key, index) => {
+        branchOffset += getLayoutStopGap(layout, hint.stationKeys[index], key);
+
         positions.set(key, {
-          x: junctionPosition.x + direction * (index + 1) * layout.stopGap,
+          x: junctionPosition.x + direction * branchOffset,
           y,
         });
         placed.add(key);
@@ -1906,6 +2261,149 @@ function placeSameDirectionForks(
       addPathEdges(hint.stationKeys, visibleEdges);
     });
   });
+}
+
+function placeLoopCorridor(
+  loopLayoutHints: PatternLoopLayoutHint[],
+  positions: Map<string, { x: number; y: number }>,
+  placed: Set<string>,
+  visibleEdges: Set<string>,
+  layout: PatternLayoutOptions,
+): boolean {
+  const candidates = loopLayoutHints.flatMap((hint) =>
+    createLoopPlacementCandidates(hint, positions, placed),
+  );
+  const selected = candidates.sort(
+    (left, right) =>
+      right.unplacedCount - left.unplacedCount ||
+      right.path.length - left.path.length ||
+      Math.abs(left.hint.lane) - Math.abs(right.hint.lane),
+  )[0];
+
+  if (!selected) {
+    return false;
+  }
+
+  placeLoopPath(selected.path, selected.hint, positions, placed, visibleEdges, layout);
+  return true;
+}
+
+function createLoopPlacementCandidates(
+  hint: PatternLoopLayoutHint,
+  positions: Map<string, { x: number; y: number }>,
+  placed: Set<string>,
+): Array<{
+  hint: PatternLoopLayoutHint;
+  path: string[];
+  unplacedCount: number;
+}> {
+  const anchorSet = new Set(hint.anchorKeys);
+  const placedAnchorIndexes = hint.stationKeys
+    .map((key, index) => (anchorSet.has(key) && positions.has(key) ? index : -1))
+    .filter((index) => index >= 0);
+
+  if (placedAnchorIndexes.length < 2) {
+    return [];
+  }
+
+  return placedAnchorIndexes.flatMap((startIndex, index) => {
+    const endIndex =
+      placedAnchorIndexes[(index + 1) % placedAnchorIndexes.length];
+    const path = createLoopPathBetweenAnchors(
+      hint.stationKeys,
+      startIndex,
+      endIndex,
+    );
+    const internalKeys = path.slice(1, -1);
+    const unplacedCount = internalKeys.filter((key) => !placed.has(key)).length;
+
+    if (
+      path.length < 3 ||
+      unplacedCount === 0 ||
+      !positions.has(path[0]) ||
+      !positions.has(path[path.length - 1])
+    ) {
+      return [];
+    }
+
+    return [{ hint, path, unplacedCount }];
+  });
+}
+
+function createLoopPathBetweenAnchors(
+  stationKeys: string[],
+  startIndex: number,
+  endIndex: number,
+): string[] {
+  if (startIndex < endIndex) {
+    return stationKeys.slice(startIndex, endIndex + 1);
+  }
+
+  return [...stationKeys.slice(startIndex), ...stationKeys.slice(0, endIndex + 1)];
+}
+
+function placeLoopPath(
+  path: string[],
+  hint: PatternLoopLayoutHint,
+  positions: Map<string, { x: number; y: number }>,
+  placed: Set<string>,
+  visibleEdges: Set<string>,
+  layout: PatternLayoutOptions,
+): void {
+  const startKey = path[0];
+  const endKey = path[path.length - 1];
+  let startPosition = positions.get(startKey);
+  let endPosition = positions.get(endKey);
+
+  if (!startPosition || !endPosition) {
+    return;
+  }
+
+  const requiredSpan = getPathSpan(path, layout);
+  const actualSpan = Math.abs(endPosition.x - startPosition.x);
+
+  if (actualSpan < requiredSpan) {
+    const direction = endPosition.x >= startPosition.x ? 1 : -1;
+
+    expandConnectorSpan({
+      positions,
+      anchorKey: startKey,
+      endKey,
+      direction,
+      delta: requiredSpan - actualSpan,
+    });
+    startPosition = positions.get(startKey);
+    endPosition = positions.get(endKey);
+
+    if (!startPosition || !endPosition) {
+      return;
+    }
+  }
+
+  const baseY =
+    hint.lane < 0
+      ? Math.min(startPosition.y, endPosition.y, 0)
+      : Math.max(startPosition.y, endPosition.y, 0);
+  const y = baseY + hint.lane * layout.branchGap;
+  const denominator = Math.max(path.length - 1, 1);
+
+  path.slice(1, -1).forEach((key, index) => {
+    if (!positions.has(key)) {
+      const realisticOffset = getPathOffsetToIndex(path, index + 1, layout);
+      const ratio =
+        requiredSpan > 0
+          ? realisticOffset / requiredSpan
+          : (index + 1) / denominator;
+
+      positions.set(key, {
+        x: startPosition.x + (endPosition.x - startPosition.x) * ratio,
+        y,
+      });
+    }
+
+    placed.add(key);
+  });
+  addPathEdges(path, visibleEdges);
 }
 
 function findBestConnectorPath(
@@ -2198,7 +2696,7 @@ function placeConnectorPath(
     return;
   }
 
-  const requiredSpan = (path.length - 1) * layout.stopGap;
+  const requiredSpan = getPathSpan(path, layout);
   const actualSpan = Math.abs(endPosition.x - startPosition.x);
 
   if (actualSpan < requiredSpan) {
@@ -2226,7 +2724,11 @@ function placeConnectorPath(
 
   path.slice(1, -1).forEach((key, index) => {
     if (!positions.has(key)) {
-      const ratio = (index + 1) / denominator;
+      const realisticOffset = getPathOffsetToIndex(path, index + 1, layout);
+      const ratio =
+        requiredSpan > 0
+          ? realisticOffset / requiredSpan
+          : (index + 1) / denominator;
 
       positions.set(key, {
         x: startPosition.x + (endPosition.x - startPosition.x) * ratio,
@@ -2291,7 +2793,7 @@ function placeBranchPath(
   const layoutHint = branchLayoutHints?.get(
     createBranchLayoutHintKey(anchor, terminal),
   );
-  const spacing = layout ?? createPatternLayoutOptions(false);
+  const spacing = layout ?? createPatternLayoutOptions("comfort");
   const lane = createBranchLane(laneSteps, layoutHint);
   const y = lane * spacing.branchGap;
   const destinationPosition = destinationKey
@@ -2307,10 +2809,14 @@ function placeBranchPath(
     layoutHint,
   });
 
+  let branchOffset = 0;
+
   path.slice(1).forEach((key, index) => {
+    branchOffset += getLayoutStopGap(spacing, path[index], key);
+
     if (!positions.has(key)) {
       positions.set(key, {
-        x: anchorPosition.x + branchDirection * (index + 1) * spacing.stopGap,
+        x: anchorPosition.x + branchDirection * branchOffset,
         y,
       });
     }
@@ -2371,6 +2877,14 @@ function resolveBranchDirection(params: {
     return params.anchorPosition.x < params.destinationPosition.x ? 1 : -1;
   }
 
+  if (
+    params.destinationPosition &&
+    typeof params.destinationKey === "string" &&
+    params.anchor !== params.destinationKey
+  ) {
+    return params.anchorPosition.x < params.destinationPosition.x ? -1 : 1;
+  }
+
   return 1;
 }
 
@@ -2382,7 +2896,7 @@ function placeRemainingComponents(
   visibleEdges: Set<string>,
   laneSteps: Generator<number, never, unknown>,
   destinationKey?: string,
-  layout: PatternLayoutOptions = createPatternLayoutOptions(false),
+  layout: PatternLayoutOptions = createPatternLayoutOptions("comfort"),
 ): void {
   const nodeIds = nodes.map((node) => node.id);
   const keepAfterDestinationClear =
@@ -2404,11 +2918,17 @@ function placeRemainingComponents(
     const lane = laneSteps.next().value;
     const y = lane * layout.branchGap;
 
+    let componentOffset = 0;
+
     orderedIds.forEach((id, index) => {
+      if (index > 0) {
+        componentOffset += getLayoutStopGap(layout, orderedIds[index - 1], id);
+      }
+
       positions.set(id, {
         x: keepAfterDestinationClear
-          ? nextBaseX - index * layout.stopGap
-          : nextBaseX + index * layout.stopGap,
+          ? nextBaseX - componentOffset
+          : nextBaseX + componentOffset,
         y,
       });
       placed.add(id);
@@ -2428,7 +2948,7 @@ function placeRemainingComponents(
 
     nextBaseX +=
       (keepAfterDestinationClear ? -1 : 1) *
-      (Math.max(orderedIds.length, 1) * layout.stopGap + layout.stopGap);
+      (getPathSpan(orderedIds, layout) + layout.stopGap * 2);
   }
 }
 
@@ -3370,7 +3890,9 @@ onBeforeUnmount(() => {
                   ref="patternFlowShell"
                   class="pattern-flow-shell"
                   :class="{
+                    'pattern-flow-shell--comfort': isComfortPatternFlow,
                     'pattern-flow-shell--compact': isCompactPatternFlow,
+                    'pattern-flow-shell--realistic': isRealisticPatternFlow,
                     'pattern-flow-shell--reduce-motion': reduceMotion,
                   }"
                 >
@@ -3420,20 +3942,13 @@ onBeforeUnmount(() => {
                       class="pattern-flow-action-button"
                       :reduce-motion="reduceMotion"
                     />
-                    <button
-                      class="pattern-flow-action-button"
-                      type="button"
-                      :aria-pressed="isCompactPatternFlow"
-                      aria-label="Basculer la vue compacte"
-                      @click.stop="isCompactPatternFlow = !isCompactPatternFlow"
-                    >
-                      <SlidersHorizontal aria-hidden="true" />
-                      <span>
-                        {{
-                          isCompactPatternFlow ? "Vue compacte" : "Vue confort"
-                        }}
-                      </span>
-                    </button>
+                    <MaterialCombobox
+                      class="pattern-flow-mode-combobox"
+                      :model-value="patternVisualMode"
+                      :options="PATTERN_VISUAL_MODE_OPTIONS"
+                      aria-label="Mode visuel du plan"
+                      @update:model-value="selectPatternVisualMode"
+                    />
                     <button
                       class="pattern-flow-action-button"
                       type="button"
@@ -3465,25 +3980,14 @@ onBeforeUnmount(() => {
                         :reduce-motion="reduceMotion"
                         @click="close"
                       />
-                      <button
-                        class="pattern-flow-action-button"
-                        type="button"
-                        :aria-pressed="isCompactPatternFlow"
-                        aria-label="Basculer la vue compacte"
-                        @click.stop="
-                          isCompactPatternFlow = !isCompactPatternFlow;
-                          close();
-                        "
-                      >
-                        <SlidersHorizontal aria-hidden="true" />
-                        <span>
-                          {{
-                            isCompactPatternFlow
-                              ? "Vue compacte"
-                              : "Vue confort"
-                          }}
-                        </span>
-                      </button>
+                      <MaterialCombobox
+                        class="pattern-flow-mode-combobox"
+                        :model-value="patternVisualMode"
+                        :options="PATTERN_VISUAL_MODE_OPTIONS"
+                        aria-label="Mode visuel du plan"
+                        @update:model-value="selectPatternVisualMode"
+                        @change="close"
+                      />
                       <button
                         class="pattern-flow-action-button"
                         type="button"
@@ -3620,7 +4124,7 @@ onBeforeUnmount(() => {
                           class="pattern-flow-station__dot"
                           aria-hidden="true"
                         ></span>
-                        <strong>{{ data.label }}</strong>
+                        <span class="station-name">{{ data.label }}</span>
                         <span
                           v-if="data.nonBusTransfers.length > 0"
                           class="pattern-flow-station__transfers pattern-flow-station__transfers--inline"

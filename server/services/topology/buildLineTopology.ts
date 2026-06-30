@@ -66,6 +66,7 @@ export function buildLineTopologyFromFixture(raw: RawLineFixture): LineTopology 
     segments,
     patterns,
     branches: buildBranches(neighbors, branchPoints, terminals),
+    loops: [],
     branchPoints,
     terminals,
   };

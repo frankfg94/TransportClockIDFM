@@ -36,7 +36,7 @@ export type WakeLockDuration =
 export type NavigationAutoHide = "none" | "1m";
 export type BoardTogglesPlacement = "inline" | "context-menu";
 export type PlacePresetNavigationMode = "dropdown-swipe" | "dropdown" | "swipe";
-export type CompactLinePlanMode = "auto" | "comfort" | "compact";
+export type CompactLinePlanMode = "auto" | "comfort" | "compact" | "realistic";
 export type TrafficInfoDesign = "ratp" | "cards";
 export type TrafficInfoDefaultScope = "optimized" | "all";
 export type FullscreenStationPanelDesign =
@@ -143,6 +143,7 @@ export const compactLinePlanOptions = [
   { id: "auto", label: "Automatique" },
   { id: "comfort", label: "Vue confort" },
   { id: "compact", label: "Vue compacte" },
+  { id: "realistic", label: "Vue réaliste" },
 ] as const;
 
 export const trafficInfoDesignOptions = [
@@ -238,7 +239,7 @@ export function createDefaultAppSettings(): AppSettings {
     navigationAutoHide: "none",
     hiddenDirectionIdsByBoardId: {},
     reduceMotion: false,
-    compactLinePlanMode: "auto",
+    compactLinePlanMode: "compact",
     richTransferTooltips: true,
     ghostNetworkStructuralOnly: false,
     trafficInfoDesign: "ratp",
@@ -653,7 +654,12 @@ function isPlacePresetNavigationMode(
 }
 
 function isCompactLinePlanMode(value: unknown): value is CompactLinePlanMode {
-  return value === "auto" || value === "comfort" || value === "compact";
+  return (
+    value === "auto" ||
+    value === "comfort" ||
+    value === "compact" ||
+    value === "realistic"
+  );
 }
 
 function isTrafficInfoDesign(value: unknown): value is TrafficInfoDesign {

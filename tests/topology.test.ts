@@ -249,6 +249,87 @@ describe("NeTEx cache topology adapter", () => {
     );
   });
 
+  it("exposes Transilien H cycle loops for schematic corridor layout", async () => {
+    const topology = await getLineTopology("transilien-h");
+    const cycleLoops = topology.loops.filter((loop) => loop.kind === "cycle");
+    const findAnchoredLoop = (expectedAnchors: string[], rejectedAnchors: string[] = []) =>
+      cycleLoops.find((loop) => {
+        const anchors = namesForIds(topology, loop.anchorStationIds);
+
+        return (
+          expectedAnchors.every((anchor) => includesName(anchors, anchor)) &&
+          rejectedAnchors.every((anchor) => !includesName(anchors, anchor))
+        );
+      });
+    const northLoop = findAnchoredLoop([
+      "Ermont - Eaubonne",
+      "Epinay - Villetaneuse",
+      "Montsoult - Maffliers",
+      "Persan - Beaumont",
+      "Valmondois",
+    ], ["Saint-Ouen-l'Aumone"]);
+    const pontoiseLoop = findAnchoredLoop([
+      "Ermont - Eaubonne",
+      "Saint-Ouen-l'Aumone",
+      "Valmondois",
+    ]);
+    const chordedLoop = findAnchoredLoop([
+      "Epinay - Villetaneuse",
+      "Montsoult - Maffliers",
+      "Persan - Beaumont",
+      "Saint-Ouen-l'Aumone",
+    ]);
+    const hasAnchoredLoop = (expectedAnchors: string[]) =>
+      expectedAnchors.length > 5 ? chordedLoop === undefined : Boolean(northLoop);
+
+    expect(cycleLoops).toHaveLength(2);
+    expect(northLoop).toBeDefined();
+    expect(pontoiseLoop).toBeDefined();
+    expect(chordedLoop).toBeUndefined();
+
+    for (const loop of [northLoop, pontoiseLoop]) {
+      expect(loop?.orderedAnchorStationIds).toEqual(loop?.anchorStationIds);
+      expect(loop?.orderedSegmentIds).toEqual(loop?.segmentIds);
+      expect(loop?.orderedStationIds).toEqual(loop?.stationIds);
+      expect(loop?.laneHints).toHaveLength(2);
+
+      const common = loop?.laneHints.find((hint) => hint.role === "common");
+      const alternative = loop?.laneHints.find((hint) => hint.role === "alternative");
+
+      expect(common?.lane).toBe(0);
+      expect(namesForIds(topology, common?.anchorStationIds ?? [])).toEqualNames([
+        "Ermont - Eaubonne",
+        "Valmondois",
+      ]);
+      expect(namesForIds(topology, common?.stationIds ?? [])).toEqual(
+        expect.arrayContaining(["Taverny"]),
+      );
+      expect(alternative?.lane).not.toBe(0);
+      expect(alternative?.segmentIds.length).toBeGreaterThanOrEqual(2);
+    }
+    expect(
+      hasAnchoredLoop([
+        "Ermont - Eaubonne",
+        "Épinay - Villetaneuse",
+        "Montsoult - Maffliers",
+        "Persan - Beaumont",
+        "Valmondois",
+      ]),
+    ).toBe(true);
+    expect(
+      hasAnchoredLoop([
+        "Ermont - Eaubonne",
+        "Épinay - Villetaneuse",
+        "Montsoult - Maffliers",
+        "Persan - Beaumont",
+        "Valmondois",
+        "Saint-Ouen-l'Aumône",
+      ]),
+    ).toBe(true);
+    expect(cycleLoops.every((loop) => loop.stationIds.length > 6)).toBe(true);
+    expect(cycleLoops.every((loop) => loop.segmentIds.length > 0)).toBe(true);
+  });
+
   it("keeps Transilien J multiple branch junctions from the generated cache", async () => {
     const topology = await getLineTopology("transilien-j");
     const neighbors = buildNeighborMap(

@@ -36,6 +36,7 @@ export interface LineTopology {
   segments: TopologySegment[];
   patterns: TopologyPattern[];
   branches: TopologyBranch[];
+  loops: TopologyLoop[];
   branchPoints: string[];
   terminals: string[];
 }
@@ -81,6 +82,28 @@ export interface TopologyBranchLayout {
   side: "upper" | "lower" | "center";
   axisDegrees?: number;
   angleDegrees?: number;
+}
+
+export interface TopologyLoop {
+  id: string;
+  kind: "cycle" | "parallel";
+  anchorStationIds: string[];
+  segmentIds: string[];
+  stationIds: string[];
+  orderedAnchorStationIds: string[];
+  orderedSegmentIds: string[];
+  orderedStationIds: string[];
+  laneHints: TopologyLoopLaneHint[];
+}
+
+export interface TopologyLoopLaneHint {
+  id: string;
+  role: "common" | "alternative";
+  anchorStationIds: string[];
+  segmentIds: string[];
+  stationIds: string[];
+  lane: number;
+  side: "upper" | "lower" | "center";
 }
 
 export interface ExpectedTopologyFixture {

@@ -4,6 +4,7 @@ import type {
   RawStation,
   TopologyBranchLayout,
   TopologyBranch,
+  TopologyLoop,
   TopologyQuay,
   TopologySegment,
   TopologyStation,
@@ -122,6 +123,7 @@ export interface NetexSchematicNode {
   x?: number;
   y?: number;
   srsName?: string;
+  rawRefs?: string[];
   degree: number;
   isTerminal: boolean;
   isJunction: boolean;
@@ -171,7 +173,10 @@ export interface NetexParallelGroup {
     stationIds: string[];
     viaStationIds?: string[];
     stations?: NetexStationSummary[];
+    lane?: number;
+    side?: NetexLaneSide;
   }>;
+  laneHints?: NetexLaneHint[];
 }
 
 export interface NetexLoop {
@@ -182,6 +187,24 @@ export interface NetexLoop {
   segmentIds: string[];
   stationIds: string[];
   stations?: NetexStationSummary[];
+  orderedAnchorStationIds?: string[];
+  orderedSegmentIds?: string[];
+  orderedStationIds?: string[];
+  laneHints?: NetexLaneHint[];
+}
+
+export type NetexLaneSide = "upper" | "lower" | "center";
+
+export interface NetexLaneHint {
+  id: string;
+  role: "common" | "alternative";
+  anchorStationIds: string[];
+  anchors?: NetexStationSummary[];
+  segmentIds: string[];
+  stationIds: string[];
+  stations?: NetexStationSummary[];
+  lane: number;
+  side: NetexLaneSide;
 }
 
 const cacheSourcePromise = new Map<string, Promise<NetexCacheSource>>();
@@ -890,6 +913,7 @@ function adaptNetexLineToTopology(cache: NetexLineCache): LineTopology {
   const segments = buildTopologySegmentsFromSchematic(cache);
   const patterns = buildTopologyPatternsFromNetex(cache, rawToSchematicId, stationById);
   const branches = buildTopologyBranchesFromSchematic(cache);
+  const loops = buildTopologyLoopsFromSchematic(cache);
   const branchPoints = nodes
     .filter((node) => node.isJunction || node.degree >= 3)
     .map((node) => node.id)
@@ -927,6 +951,7 @@ function adaptNetexLineToTopology(cache: NetexLineCache): LineTopology {
     segments,
     patterns,
     branches,
+    loops,
     branchPoints,
     terminals,
   };
@@ -936,13 +961,17 @@ function buildRawToSchematicMap(
   cache: NetexLineCache,
   stationById: Map<string, NetexSchematicNode>,
 ): Map<string, string> {
-  const byName = new Map<string, NetexSchematicNode[]>();
   const rawToSchematicId = new Map<string, string>();
+  const hasSchematicRawRefs = Array.from(stationById.values()).some(
+    (node) => (node.rawRefs?.length ?? 0) > 0,
+  );
 
   for (const node of stationById.values()) {
-    const key = normalizeStationName(node.name);
-    byName.set(key, [...(byName.get(key) ?? []), node]);
     rawToSchematicId.set(node.id, node.id);
+
+    for (const rawRef of node.rawRefs ?? []) {
+      rawToSchematicId.set(rawRef, node.id);
+    }
   }
 
   for (const station of cache.stations ?? []) {
@@ -951,19 +980,55 @@ function buildRawToSchematicMap(
       continue;
     }
 
-    const candidates = byName.get(normalizeStationName(station.name)) ?? [];
-    const match = chooseNearestNode(station, candidates);
-
-    if (match) {
-      rawToSchematicId.set(station.id, match.id);
-    }
-
     for (const rawRef of station.rawRefs ?? []) {
-      rawToSchematicId.set(rawRef, match?.id ?? station.id);
+      const schematicId = rawToSchematicId.get(rawRef);
+
+      if (schematicId) {
+        rawToSchematicId.set(station.id, schematicId);
+        rawToSchematicId.set(rawRef, schematicId);
+      }
     }
   }
 
+  if (!hasSchematicRawRefs) {
+    addLegacyRawToSchematicNameFallback(cache, stationById, rawToSchematicId);
+  }
+
   return rawToSchematicId;
+}
+
+function addLegacyRawToSchematicNameFallback(
+  cache: NetexLineCache,
+  stationById: Map<string, NetexSchematicNode>,
+  rawToSchematicId: Map<string, string>,
+): void {
+  const byName = new Map<string, NetexSchematicNode[]>();
+
+  for (const node of stationById.values()) {
+    const key = normalizeStationName(node.name);
+    byName.set(key, [...(byName.get(key) ?? []), node]);
+  }
+
+  for (const station of cache.stations ?? []) {
+    if (rawToSchematicId.has(station.id)) {
+      continue;
+    }
+
+    const candidates = byName.get(normalizeStationName(station.name)) ?? [];
+    const match = chooseNearestNode(station, candidates);
+
+    if (!match) {
+      continue;
+    }
+
+    rawToSchematicId.set(station.id, match.id);
+
+    for (const rawRef of station.rawRefs ?? []) {
+      if (!rawToSchematicId.has(rawRef)) {
+        rawToSchematicId.set(rawRef, match.id);
+      }
+    }
+  }
 }
 
 function buildTopologyQuaysByStationId(
@@ -1072,6 +1137,32 @@ function buildTopologyBranchesFromSchematic(cache: NetexLineCache): TopologyBran
         };
       }),
     )
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function buildTopologyLoopsFromSchematic(cache: NetexLineCache): TopologyLoop[] {
+  return cache.schematic.loops
+    .map((loop) => ({
+      id: loop.id,
+      kind: loop.kind,
+      anchorStationIds: dedupeConsecutive(loop.anchorStationIds),
+      segmentIds: dedupeConsecutive(loop.segmentIds),
+      stationIds: dedupeConsecutive(loop.stationIds),
+      orderedAnchorStationIds: dedupeConsecutive(
+        loop.orderedAnchorStationIds ?? loop.anchorStationIds,
+      ),
+      orderedSegmentIds: dedupeConsecutive(loop.orderedSegmentIds ?? loop.segmentIds),
+      orderedStationIds: dedupeConsecutive(loop.orderedStationIds ?? loop.stationIds),
+      laneHints: (loop.laneHints ?? []).map((hint) => ({
+        id: hint.id,
+        role: hint.role,
+        anchorStationIds: dedupeConsecutive(hint.anchorStationIds),
+        segmentIds: dedupeConsecutive(hint.segmentIds),
+        stationIds: dedupeConsecutive(hint.stationIds),
+        lane: hint.lane,
+        side: hint.side,
+      })),
+    }))
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 

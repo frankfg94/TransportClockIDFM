@@ -110,6 +110,7 @@ export interface DepartureCallingPattern {
   serviceType: DepartureServiceType;
   calls: DepartureCall[];
   lineTopology?: LineRouteSequence[];
+  lineTopologyLayout?: LineTopologyLayout;
   error?: string;
 }
 
@@ -240,6 +241,32 @@ export interface LineRouteBranchLayout {
   side: "upper" | "lower" | "center";
   axisDegrees?: number;
   angleDegrees?: number;
+}
+
+export interface LineTopologyLayout {
+  loops: LineTopologyLoopLayout[];
+}
+
+export interface LineTopologyLoopLayout {
+  id: string;
+  kind: "cycle" | "parallel";
+  anchorStationIds: string[];
+  segmentIds: string[];
+  stationIds: string[];
+  orderedAnchorStationIds?: string[];
+  orderedSegmentIds?: string[];
+  orderedStationIds?: string[];
+  laneHints?: LineTopologyLoopLaneHint[];
+}
+
+export interface LineTopologyLoopLaneHint {
+  id: string;
+  role: "common" | "alternative";
+  anchorStationIds: string[];
+  segmentIds: string[];
+  stationIds: string[];
+  lane: number;
+  side: "upper" | "lower" | "center";
 }
 
 export interface DepartureAlarm {
