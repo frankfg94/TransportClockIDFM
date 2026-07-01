@@ -531,6 +531,185 @@ describe("DeparturePatternModal settings", () => {
     wrapper.unmount();
   });
 
+  it("extends a full-line common spine before parallel alternatives", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+    const VueFlowPositionStub = defineComponent({
+      name: "VueFlow",
+      props: {
+        nodes: {
+          type: Array,
+          default: () => [],
+        },
+      },
+      setup(props) {
+        return () =>
+          h(
+            "div",
+            { class: "vue-flow" },
+            (props.nodes as Array<{
+              data?: { label?: string };
+              position?: { x: number; y: number };
+              type?: string;
+            }>)
+              .filter((node) => node.type === "station")
+              .map((node) =>
+                h(
+                  "span",
+                  {
+                    class: "station-position",
+                    "data-label": node.data?.label,
+                    "data-x": String(node.position?.x ?? 0),
+                    "data-y": String(node.position?.y ?? 0),
+                  },
+                  node.data?.label,
+                ),
+              ),
+          );
+      },
+    });
+    const fullLinePattern: DepartureCallingPattern = {
+      ...pattern,
+      destination: "Gare Saint-Lazare",
+      calls: [
+        createCall("asnieres", "Asnieres-sur-Seine", "City", true),
+        createCall("houilles", "Houilles - Carrieres-sur-Seine", "City"),
+        createCall("sartrouville", "Sartrouville", "City"),
+        createCall("right-d", "Right D", "City"),
+        createCall("bois-colombes", "Bois-Colombes", "City"),
+        createCall("colombes", "Colombes", "City"),
+        createCall("saint-lazare", "Gare Saint-Lazare", "Paris"),
+      ],
+      lineTopology: [
+        {
+          id: "structural-trunk",
+          label: "Structural trunk",
+          topologySource: "server",
+          stops: [
+            createRouteStop("asnieres", "Asnieres-sur-Seine", 2, 0),
+            createRouteStop("houilles", "Houilles - Carrieres-sur-Seine", 3, 0),
+            createRouteStop("sartrouville", "Sartrouville", 4, 0),
+            createRouteStop("right-c", "Right C", 4, 0),
+            createRouteStop("right-d", "Right D", 5, 0),
+          ],
+        },
+        {
+          id: "terminal-branch",
+          label: "Terminal branch",
+          topologySource: "server",
+          stops: [
+            createRouteStop("asnieres", "Asnieres-sur-Seine", 2, 0),
+            createRouteStop("saint-lazare", "Gare Saint-Lazare", 3, 1),
+          ],
+        },
+        {
+          id: "parallel-alternative",
+          label: "Parallel alternative",
+          topologySource: "server",
+          stops: [
+            createRouteStop("asnieres", "Asnieres-sur-Seine", 2, 0),
+            createRouteStop("bois-colombes", "Bois-Colombes", 2, -1),
+            createRouteStop("colombes", "Colombes", 2, -2),
+            createRouteStop("houilles", "Houilles - Carrieres-sur-Seine", 3, 0),
+          ],
+        },
+      ],
+      lineTopologyLayout: {
+        loops: [
+          {
+            id: "loop:common-spine",
+            kind: "cycle",
+            anchorStationIds: ["asnieres", "houilles"],
+            segmentIds: [],
+            stationIds: ["asnieres", "houilles", "sartrouville", "right-c", "right-d"],
+            laneHints: [
+              {
+                id: "common",
+                role: "common",
+                anchorStationIds: ["asnieres", "houilles"],
+                segmentIds: [],
+                stationIds: ["asnieres", "houilles", "sartrouville", "right-c", "right-d"],
+                lane: 0,
+                side: "center",
+              },
+              {
+                id: "alternative",
+                role: "alternative",
+                anchorStationIds: ["asnieres", "houilles"],
+                segmentIds: [],
+                stationIds: ["asnieres", "bois-colombes", "colombes", "houilles"],
+                lane: 1,
+                side: "lower",
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        embedded: true,
+        fullLine: true,
+        open: true,
+        board,
+        pattern: fullLinePattern,
+        showMiniMap: false,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowPositionStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+    const positionByLabel = new Map(
+      wrapper.findAll(".station-position").map((station) => [
+        station.attributes("data-label"),
+        {
+          x: Number(station.attributes("data-x")),
+          y: Number(station.attributes("data-y")),
+        },
+      ]),
+    );
+    const asnieres = positionByLabel.get("Asnieres-sur-Seine");
+    const houilles = positionByLabel.get("Houilles - Carrieres-sur-Seine");
+    const sartrouville = positionByLabel.get("Sartrouville");
+    const boisColombes = positionByLabel.get("Bois-Colombes");
+    const saintLazare = positionByLabel.get("Gare Saint-Lazare");
+
+    expect(asnieres).toBeDefined();
+    expect(houilles).toBeDefined();
+    expect(sartrouville).toBeDefined();
+    expect(boisColombes).toBeDefined();
+    expect(saintLazare).toBeDefined();
+    expect(saintLazare!.x).toBeLessThan(asnieres!.x);
+    expect(asnieres!.x).toBeLessThan(houilles!.x);
+    expect(houilles!.x).toBeLessThan(sartrouville!.x);
+    expect(saintLazare!.y).toBe(asnieres!.y);
+    expect(asnieres!.y).toBe(houilles!.y);
+    expect(houilles!.y).toBe(sartrouville!.y);
+    expect(boisColombes!.x).toBeGreaterThan(asnieres!.x);
+    expect(boisColombes!.x).toBeLessThan(houilles!.x);
+    expect(boisColombes!.y).toBeGreaterThan(asnieres!.y);
+
+    await flushPromises();
+    wrapper.unmount();
+  });
+
   it("places topology loop corridors as parallel lanes between placed anchors", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,

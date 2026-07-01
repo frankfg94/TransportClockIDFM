@@ -1116,6 +1116,7 @@ function createPatternFlow(
       calls,
       lineTopology,
       lineTopologyLayout,
+      fullLine,
       layout,
     ) ?? createFallbackTopologyLayout(graph, layout);
 
@@ -1656,6 +1657,7 @@ function createTopologyLayout(
   calls: DepartureCall[],
   lineTopology: LineRouteSequence[],
   lineTopologyLayout: LineTopologyLayout | undefined,
+  fullLine: boolean,
   layout: PatternLayoutOptions,
 ): PatternTopologyLayout | null {
   if (nodes.length === 0 || edges.length === 0) {
@@ -1663,14 +1665,22 @@ function createTopologyLayout(
   }
 
   const adjacency = createAdjacency(edges);
-  const activeKeys = new Set(
-    calls.filter((call) => call.served).map(createStationKey),
-  );
-  const currentKey = calls.find((call) => call.current)
-    ? createStationKey(calls.find((call) => call.current)!)
-    : undefined;
-  const destinationKey = getServedDestinationKey(calls);
+  const activeKeys = fullLine
+    ? new Set<string>()
+    : new Set(calls.filter((call) => call.served).map(createStationKey));
+  const currentKey = fullLine
+    ? undefined
+    : calls.find((call) => call.current)
+      ? createStationKey(calls.find((call) => call.current)!)
+      : undefined;
+  const destinationKey = fullLine ? undefined : getServedDestinationKey(calls);
   const preferStructuralSpine = graphHasCycle(nodes, edges);
+  const topologyStationKeyById = createTopologyStationKeyById(lineTopology);
+  const preferredMainPaths = createPreferredMainPaths(
+    lineTopologyLayout,
+    topologyStationKeyById,
+    adjacency,
+  );
   const mainPath = chooseMainPath(
     nodes,
     adjacency,
@@ -1678,13 +1688,16 @@ function createTopologyLayout(
     currentKey,
     destinationKey,
     preferStructuralSpine,
+    preferredMainPaths,
   );
 
   if (mainPath.length < 2) {
     return null;
   }
 
-  orientPathTowardDeparture(mainPath, calls);
+  if (!fullLine && preferredMainPaths.length === 0) {
+    orientPathTowardDeparture(mainPath, calls);
+  }
 
   const positions = new Map<string, { x: number; y: number }>();
   const visibleEdges = new Set<string>();
@@ -1692,8 +1705,8 @@ function createTopologyLayout(
   const placed = new Set<string>();
   const branchLayoutHints = createBranchLayoutHints(lineTopology);
   const loopLayoutHints = createLoopLayoutHints(
-    lineTopology,
     lineTopologyLayout,
+    topologyStationKeyById,
     nodes,
   );
 
@@ -1888,6 +1901,7 @@ function chooseMainPath(
   currentKey?: string,
   destinationKey?: string,
   preferStructuralSpine = false,
+  preferredMainPaths: string[][] = [],
 ): string[] {
   const terminals = nodes
     .filter((node) => (adjacency.get(node.id)?.size ?? 0) <= 1)
@@ -1897,6 +1911,28 @@ function chooseMainPath(
   let bestPath: string[] = [];
   let bestScore = Number.NEGATIVE_INFINITY;
 
+  const evaluatePath = (path: string[], preferred: boolean) => {
+    const score =
+      scoreMainPath(
+        path,
+        activeKeys,
+        currentKey,
+        destinationKey,
+        preferStructuralSpine,
+      ) + (preferred ? 1_000_000 + path.length * 120 : 0);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestPath = path;
+    }
+  };
+
+  preferredMainPaths.forEach((path) => {
+    if (path.length >= 3) {
+      evaluatePath(path, true);
+    }
+  });
+
   candidates.forEach((source, sourceIndex) => {
     candidates.slice(sourceIndex + 1).forEach((target) => {
       const path = findShortestPath(source, (key) => key === target, adjacency);
@@ -1905,18 +1941,7 @@ function chooseMainPath(
         return;
       }
 
-      const score = scoreMainPath(
-        path,
-        activeKeys,
-        currentKey,
-        destinationKey,
-        preferStructuralSpine,
-      );
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestPath = path;
-      }
+      evaluatePath(path, false);
     });
   });
 
@@ -2070,15 +2095,9 @@ function createBranchLayoutHints(
   return hints;
 }
 
-function createLoopLayoutHints(
+function createTopologyStationKeyById(
   lineTopology: LineRouteSequence[],
-  lineTopologyLayout: LineTopologyLayout | undefined,
-  nodes: PatternGraphNode[],
-): PatternLoopLayoutHint[] {
-  if (!lineTopologyLayout?.loops.length) {
-    return [];
-  }
-
+): Map<string, string> {
   const stationKeyById = new Map<string, string>();
 
   lineTopology.forEach((sequence) => {
@@ -2086,6 +2105,145 @@ function createLoopLayoutHints(
       stationKeyById.set(stop.id, createStationKey(stop));
     });
   });
+
+  return stationKeyById;
+}
+
+function createPreferredMainPaths(
+  lineTopologyLayout: LineTopologyLayout | undefined,
+  stationKeyById: Map<string, string>,
+  adjacency: Map<string, Set<string>>,
+): string[][] {
+  if (!lineTopologyLayout?.loops.length) {
+    return [];
+  }
+
+  return lineTopologyLayout.loops.flatMap((loop) =>
+    (loop.laneHints ?? [])
+      .filter((hint) => hint.role === "common")
+      .map((hint) =>
+        extendPreferredMainPath(
+          normalizeLoopStationKeys(
+            hint.stationIds.flatMap((stationId) => stationKeyById.get(stationId) ?? []),
+          ),
+          adjacency,
+        ),
+      )
+      .filter(
+        (path) =>
+          path.length >= 3 &&
+          path.every((key, index) => {
+            const nextKey = path[index + 1];
+
+            return !nextKey || adjacency.get(key)?.has(nextKey);
+          }),
+      ),
+  );
+}
+
+function extendPreferredMainPath(
+  path: string[],
+  adjacency: Map<string, Set<string>>,
+): string[] {
+  if (path.length < 2) {
+    return path;
+  }
+
+  const pathSet = new Set(path);
+  const startArm = findSimpleTerminalArm({
+    anchor: path[0],
+    blockedNeighbor: path[1],
+    pathSet,
+    adjacency,
+  });
+  const endArm = findSimpleTerminalArm({
+    anchor: path[path.length - 1],
+    blockedNeighbor: path[path.length - 2],
+    pathSet,
+    adjacency,
+  });
+
+  return [
+    ...startArm.slice(1).reverse(),
+    ...path,
+    ...endArm.slice(1),
+  ];
+}
+
+function findSimpleTerminalArm(params: {
+  anchor: string;
+  blockedNeighbor: string;
+  pathSet: Set<string>;
+  adjacency: Map<string, Set<string>>;
+}): string[] {
+  let bestArm = [params.anchor];
+
+  Array.from(params.adjacency.get(params.anchor) ?? []).forEach((neighbor) => {
+    if (neighbor === params.blockedNeighbor || params.pathSet.has(neighbor)) {
+      return;
+    }
+
+    const arm = walkSimpleTerminalArm({
+      anchor: params.anchor,
+      first: neighbor,
+      pathSet: params.pathSet,
+      adjacency: params.adjacency,
+    });
+
+    if (arm && arm.length > bestArm.length) {
+      bestArm = arm;
+    }
+  });
+
+  return bestArm;
+}
+
+function walkSimpleTerminalArm(params: {
+  anchor: string;
+  first: string;
+  pathSet: Set<string>;
+  adjacency: Map<string, Set<string>>;
+}): string[] | undefined {
+  const path = [params.anchor];
+  let previous = params.anchor;
+  let current = params.first;
+
+  while (true) {
+    if (params.pathSet.has(current)) {
+      return undefined;
+    }
+
+    path.push(current);
+
+    const neighbors = Array.from(params.adjacency.get(current) ?? []);
+
+    if (neighbors.length <= 1) {
+      return path;
+    }
+
+    if (neighbors.length !== 2) {
+      return undefined;
+    }
+
+    const next = neighbors.find((neighbor) => neighbor !== previous);
+
+    if (!next) {
+      return undefined;
+    }
+
+    previous = current;
+    current = next;
+  }
+}
+
+function createLoopLayoutHints(
+  lineTopologyLayout: LineTopologyLayout | undefined,
+  stationKeyById: Map<string, string>,
+  nodes: PatternGraphNode[],
+): PatternLoopLayoutHint[] {
+  if (!lineTopologyLayout?.loops.length) {
+    return [];
+  }
 
   const nodeByKey = new Map(nodes.map((node) => [node.id, node]));
   const candidates: Array<
