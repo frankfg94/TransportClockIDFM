@@ -99,6 +99,14 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Paris");
     expect(wrapper.text()).toContain("Afficher le ressenti");
     expect(wrapper.text()).toContain("Afficher la minimap");
+    expect(wrapper.text()).toContain("Espacement vertical compact");
+    expect(wrapper.text()).toContain("258 px");
+    expect(wrapper.text()).toContain("Courbes arrondies");
+    expect(wrapper.text()).toContain("Ecart des fourches compactes");
+    expect(wrapper.text()).toContain("158 px");
+    expect(wrapper.text()).toContain("Espacement realiste");
+    expect(wrapper.text()).toContain("Coefficient min");
+    expect(wrapper.text()).toContain("Coefficient max");
     expect(wrapper.text()).toContain(
       "Limiter les lignes fantômes aux modes structurants",
     );

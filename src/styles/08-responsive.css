@@ -1,6 +1,8 @@
 ﻿/* Responsive adaptations for the global app surfaces. */
 
-@media (max-width: 720px) {
+@media (max-width: 720px),
+  (orientation: landscape) and (max-width: 1180px) and (max-height: 560px),
+  (orientation: landscape) and (max-width: 1360px) and (max-height: 700px) and (pointer: coarse) {
   .app-shell {
     padding: 14px;
   }
@@ -386,5 +388,63 @@
 
   .pattern-board-stop {
     min-width: 112px;
+  }
+}
+
+@media (orientation: landscape) and (max-width: 1180px) and (max-height: 560px),
+  (orientation: landscape) and (max-width: 1360px) and (max-height: 700px) and (pointer: coarse) {
+  .pattern-page-embed .pattern-board__summary {
+    gap: 4px 10px;
+    padding: 8px 12px;
+  }
+
+  .pattern-page-embed .pattern-board__summary-heading {
+    gap: 6px;
+  }
+
+  .pattern-page-embed .pattern-board__line {
+    min-height: 46px;
+    padding: 5px;
+  }
+
+  .pattern-page-embed .pattern-board__mode-icon {
+    font-size: 0.46rem;
+    height: 32px;
+    min-width: 32px;
+    padding: 0 5px;
+  }
+
+  .pattern-page-embed .pattern-board__mode-icon::before,
+  .pattern-page-embed .pattern-board__mode-icon::after {
+    left: 5px;
+    right: 5px;
+  }
+
+  .pattern-page-embed .pattern-board__summary p {
+    font-size: 0.62rem;
+  }
+
+  .pattern-page-embed .pattern-board__summary strong {
+    font-size: 1.02rem;
+    max-width: 100%;
+  }
+
+  .pattern-page-embed .pattern-board__summary small {
+    font-size: 0.7rem;
+  }
+
+  .pattern-page-embed .pattern-board__display,
+  .pattern-page-embed .pattern-flow-shell,
+  .pattern-page-embed .pattern-flow {
+    min-height: 0;
+  }
+
+  .pattern-page-embed .pattern-flow-shell,
+  .pattern-page-embed .pattern-flow {
+    height: 100%;
+  }
+
+  .pattern-page-embed .pattern-flow-transfer-loader {
+    top: 8px;
   }
 }

@@ -1,7 +1,9 @@
-import { flushPromises, mount } from "@vue/test-utils";
+import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { defineComponent, h } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import DeparturePatternModal from "../src/features/service-pattern/DeparturePatternModal.vue";
+import { buildLinePatternViewFromTopology } from "../server/services/servicePattern/buildLinePatternView";
+import { getLineTopology } from "../server/services/topology/getLineTopology";
 import type {
   DepartureCallingPattern,
   TransitBoardConfig,
@@ -105,11 +107,462 @@ const VueFlowTrafficStub = defineComponent({
   },
 });
 
+const VueFlowGeometryStub = defineComponent({
+  name: "VueFlow",
+  props: {
+    edges: {
+      type: Array,
+      default: () => [],
+    },
+    nodes: {
+      type: Array,
+      default: () => [],
+    },
+  },
+  setup(props, { slots }) {
+    return () =>
+      h("div", { class: "vue-flow" }, [
+        ...(props.nodes as Array<{ data?: unknown; type?: string }>).flatMap(
+          (node) => slots[`node-${node.type}`]?.({ data: node.data }) ?? [],
+        ),
+        ...(props.edges as Array<{ id: string; source: string; target: string }>).map(
+          (edge) =>
+            h("span", {
+              class: "flow-geometry-edge",
+              "data-edge-id": edge.id,
+              "data-source": edge.source,
+              "data-target": edge.target,
+            }),
+        ),
+      ]);
+  },
+});
+
+interface StationGeometry {
+  key: string;
+  label: string;
+  city: string;
+  x: number;
+  y: number;
+  nodeY: number;
+}
+
+interface CityZoneGeometry {
+  city: string;
+  width: number;
+  layoutX: number;
+  layoutY: number;
+  nodeX: number;
+  nodeY: number;
+}
+
+interface EdgeGeometry {
+  id: string;
+  source: string;
+  target: string;
+}
+
+const CITY_ZONE_MATCHING_X_TOLERANCE = 8;
+const COMPACT_STATION_NAME_TOP_OFFSET = 70;
+const CITY_ZONE_STATION_NAME_MIN_VERTICAL_GAP = 36;
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+async function mountRealLineGeometry(
+  lineId: string,
+  transportType = "train",
+): Promise<VueWrapper> {
+  const topology = await getLineTopology(lineId);
+  const view = buildLinePatternViewFromTopology({ lineId, transportType }, topology);
+  const fetchMock = vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ places: [], records: [] }),
+  }));
+
+  vi.stubGlobal("fetch", fetchMock);
+  Object.defineProperty(window, "fetch", {
+    configurable: true,
+    value: fetchMock,
+  });
+
+  const wrapper = mount(DeparturePatternModal, {
+    props: {
+      embedded: true,
+      fullLine: true,
+      open: true,
+      pattern: view.pattern,
+      showMiniMap: false,
+      transferBundleBackendCacheEnabled: false,
+      transferBundleLocalCacheEnabled: false,
+    },
+    global: {
+      stubs: {
+        Teleport: true,
+        VueFlow: VueFlowGeometryStub,
+        Controls: true,
+        PatternFlowMiniMap: true,
+        LineIconBadge: true,
+        MaterialCombobox: true,
+        Handle: true,
+      },
+    },
+  });
+
+  await flushPromises();
+
+  return wrapper;
+}
+
+function readStationGeometry(wrapper: VueWrapper): StationGeometry[] {
+  return wrapper.findAll(".pattern-flow-station").map((station) => ({
+    key: station.attributes("data-station-key") ?? "",
+    label: station.attributes("data-station-label") ?? "",
+    city: station.attributes("data-station-city") ?? "",
+    x: Number(station.attributes("data-layout-x")),
+    y: Number(station.attributes("data-layout-y")),
+    nodeY: Number(station.attributes("data-node-y")),
+  }));
+}
+
+function readEdgeGeometry(wrapper: VueWrapper): EdgeGeometry[] {
+  return wrapper.findAll(".flow-geometry-edge").map((edge) => ({
+    id: edge.attributes("data-edge-id") ?? "",
+    source: edge.attributes("data-source") ?? "",
+    target: edge.attributes("data-target") ?? "",
+  }));
+}
+
+function readCityZoneGeometry(wrapper: VueWrapper): CityZoneGeometry[] {
+  return wrapper.findAll(".pattern-flow-city-zone").map((zone) => ({
+    city: zone.text(),
+    width: Number(zone.attributes("data-city-zone-width")),
+    layoutX: Number(zone.attributes("data-layout-x")),
+    layoutY: Number(zone.attributes("data-layout-y")),
+    nodeX: Number(zone.attributes("data-node-x")),
+    nodeY: Number(zone.attributes("data-node-y")),
+  }));
+}
+
+function expectReadableStationCoordinates(stations: StationGeometry[]): void {
+  expect(stations.length).toBeGreaterThan(0);
+  stations.forEach((station) => {
+    expect(station.key).not.toBe("");
+    expect(station.label).not.toBe("");
+    expect(station.city).not.toBe("");
+    expect(Number.isFinite(station.x)).toBe(true);
+    expect(Number.isFinite(station.y)).toBe(true);
+    expect(Number.isFinite(station.nodeY)).toBe(true);
+  });
+}
+
+function findStationGeometry(
+  stations: StationGeometry[],
+  label: string,
+): StationGeometry {
+  const station = stations.find((candidate) => candidate.label === label);
+
+  if (!station) {
+    throw new Error(`Station ${label} not found`);
+  }
+
+  return station;
+}
+
+function expectCityZonesDoNotShareStationNameCoordinates(params: {
+  label: string;
+  cityZones: CityZoneGeometry[];
+  stations: StationGeometry[];
+}): void {
+  expect(
+    params.cityZones.length,
+    `${params.label}: expected city zones to be available`,
+  ).toBeGreaterThan(0);
+
+  params.cityZones.forEach((zone) => {
+    const matchingStations = params.stations.filter(
+      (station) =>
+        normalizeGeometryLabel(station.city) ===
+          normalizeGeometryLabel(zone.city) &&
+        Math.abs(station.y - zone.layoutY) <= 0.1 &&
+        station.x >= zone.nodeX - CITY_ZONE_MATCHING_X_TOLERANCE &&
+        station.x <=
+          zone.nodeX + zone.width + CITY_ZONE_MATCHING_X_TOLERANCE,
+    );
+
+    expect(
+      matchingStations.length,
+      `${params.label}: expected city zone ${zone.city} to match at least one station on its row`,
+    ).toBeGreaterThan(0);
+
+    matchingStations.forEach((station) => {
+      const stationNameLaneY =
+        station.nodeY - COMPACT_STATION_NAME_TOP_OFFSET;
+      const verticalGap = Math.abs(zone.nodeY - stationNameLaneY);
+
+      expect(
+        verticalGap,
+        `${params.label}: city zone ${zone.city} at y=${zone.nodeY} is too close to station label ${station.label} at y=${stationNameLaneY}`,
+      ).toBeGreaterThanOrEqual(CITY_ZONE_STATION_NAME_MIN_VERTICAL_GAP);
+    });
+  });
+}
+
+function normalizeGeometryLabel(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLocaleLowerCase("fr-FR");
+}
+
+function expectBalancedFork(params: {
+  junction: StationGeometry;
+  upper: StationGeometry;
+  lower: StationGeometry;
+  label: string;
+}): void {
+  const upperOffset = Math.abs(params.upper.y - params.junction.y);
+  const lowerOffset = Math.abs(params.lower.y - params.junction.y);
+
+  expect(
+    params.upper.y,
+    `${params.label}: expected ${params.upper.label} to be above ${params.junction.label}`,
+  ).toBeLessThan(params.junction.y);
+  expect(
+    params.lower.y,
+    `${params.label}: expected ${params.lower.label} to be below ${params.junction.label}`,
+  ).toBeGreaterThan(params.junction.y);
+  expect(
+    Math.abs(upperOffset - lowerOffset),
+    `${params.label}: expected balanced offsets around ${params.junction.label}, got ${upperOffset} and ${lowerOffset}`,
+  ).toBeLessThanOrEqual(1);
+}
+
+function getClosestStationPair(stations: StationGeometry[]): {
+  left: StationGeometry;
+  right: StationGeometry;
+  distance: number;
+} {
+  let closest:
+    | { left: StationGeometry; right: StationGeometry; distance: number }
+    | undefined;
+
+  stations.forEach((left, leftIndex) => {
+    stations.slice(leftIndex + 1).forEach((right) => {
+      const distance = getPointDistance(left, right);
+
+      if (!closest || distance < closest.distance) {
+        closest = { left, right, distance };
+      }
+    });
+  });
+
+  if (!closest) {
+    throw new Error("No station pair available");
+  }
+
+  return closest;
+}
+
+function getPointDistance(
+  left: Pick<StationGeometry, "x" | "y">,
+  right: Pick<StationGeometry, "x" | "y">,
+): number {
+  return Math.hypot(left.x - right.x, left.y - right.y);
+}
+
+function findNonAdjacentEdgeCrossings(
+  stations: StationGeometry[],
+  edges: EdgeGeometry[],
+): Array<{
+  left: EdgeGeometry;
+  right: EdgeGeometry;
+}> {
+  const stationByKey = new Map(stations.map((station) => [station.key, station]));
+  const drawableEdges = edges.filter(
+    (edge) => stationByKey.has(edge.source) && stationByKey.has(edge.target),
+  );
+  const crossings: Array<{ left: EdgeGeometry; right: EdgeGeometry }> = [];
+
+  drawableEdges.forEach((left, leftIndex) => {
+    drawableEdges.slice(leftIndex + 1).forEach((right) => {
+      if (
+        left.source === right.source ||
+        left.source === right.target ||
+        left.target === right.source ||
+        left.target === right.target
+      ) {
+        return;
+      }
+
+      const leftSource = stationByKey.get(left.source)!;
+      const leftTarget = stationByKey.get(left.target)!;
+      const rightSource = stationByKey.get(right.source)!;
+      const rightTarget = stationByKey.get(right.target)!;
+
+      if (segmentsStrictlyCross(leftSource, leftTarget, rightSource, rightTarget)) {
+        crossings.push({ left, right });
+      }
+    });
+  });
+
+  return crossings;
+}
+
+function segmentsStrictlyCross(
+  a: Pick<StationGeometry, "x" | "y">,
+  b: Pick<StationGeometry, "x" | "y">,
+  c: Pick<StationGeometry, "x" | "y">,
+  d: Pick<StationGeometry, "x" | "y">,
+): boolean {
+  const abC = crossProduct(a, b, c);
+  const abD = crossProduct(a, b, d);
+  const cdA = crossProduct(c, d, a);
+  const cdB = crossProduct(c, d, b);
+  const epsilon = 0.0001;
+
+  if (
+    Math.abs(abC) <= epsilon ||
+    Math.abs(abD) <= epsilon ||
+    Math.abs(cdA) <= epsilon ||
+    Math.abs(cdB) <= epsilon
+  ) {
+    return false;
+  }
+
+  return abC * abD < 0 && cdA * cdB < 0;
+}
+
+function crossProduct(
+  origin: Pick<StationGeometry, "x" | "y">,
+  target: Pick<StationGeometry, "x" | "y">,
+  point: Pick<StationGeometry, "x" | "y">,
+): number {
+  return (
+    (target.x - origin.x) * (point.y - origin.y) -
+    (target.y - origin.y) * (point.x - origin.x)
+  );
+}
+
 describe("DeparturePatternModal settings", () => {
+  it.each([
+    { lineId: "line:IDFM:C01737", label: "Transilien H", transportType: "train" },
+    { lineId: "line:IDFM:C01731", label: "Transilien R", transportType: "train" },
+    { lineId: "line:IDFM:C01739", label: "Transilien J", transportType: "train" },
+    { lineId: "line:IDFM:C01730", label: "Transilien P", transportType: "train" },
+    { lineId: "line:IDFM:C01742", label: "RER A", transportType: "rer" },
+  ])(
+    "keeps $label full-line geometry readable from VueFlow node coordinates",
+    async ({ lineId, label, transportType }) => {
+      const wrapper = await mountRealLineGeometry(lineId, transportType);
+      const stations = readStationGeometry(wrapper);
+      const cityZones = readCityZoneGeometry(wrapper);
+      const edges = readEdgeGeometry(wrapper);
+      const closest = getClosestStationPair(stations);
+      const crossings = findNonAdjacentEdgeCrossings(stations, edges);
+
+      expectReadableStationCoordinates(stations);
+      expectCityZonesDoNotShareStationNameCoordinates({
+        label,
+        cityZones,
+        stations,
+      });
+      expect(
+        closest.distance,
+        `${label}: closest stations are ${closest.left.label} (${closest.left.x}, ${closest.left.y}) and ${closest.right.label} (${closest.right.x}, ${closest.right.y})`,
+      ).toBeGreaterThanOrEqual(86);
+      expect(
+        crossings.map(
+          ({ left, right }) => {
+            const leftSource = stations.find((station) => station.key === left.source);
+            const leftTarget = stations.find((station) => station.key === left.target);
+            const rightSource = stations.find((station) => station.key === right.source);
+            const rightTarget = stations.find((station) => station.key === right.target);
+
+            return `${label}: ${left.source} (${leftSource?.x}, ${leftSource?.y})->${left.target} (${leftTarget?.x}, ${leftTarget?.y}) crosses ${right.source} (${rightSource?.x}, ${rightSource?.y})->${right.target} (${rightTarget?.x}, ${rightTarget?.y})`;
+          },
+        ),
+      ).toEqual([]);
+
+      wrapper.unmount();
+    },
+    20000,
+  );
+
+  it("keeps Transilien P nested mini-forks readable", async () => {
+    const wrapper = await mountRealLineGeometry("line:IDFM:C01730", "train");
+    const stations = readStationGeometry(wrapper);
+    const changis = findStationGeometry(stations, "Changis - Saint-Jean");
+    const isles = findStationGeometry(stations, "Isles - Armentières - Congis");
+    const miniForkGap = Math.abs(isles.y - changis.y);
+
+    expect(
+      isles.y,
+      "Transilien P: La Ferté-Milon mini branch should sit below the Château-Thierry branch",
+    ).toBeGreaterThan(changis.y);
+    expect(
+      miniForkGap,
+      `Transilien P: nested mini-fork gap should leave room for station labels, got ${miniForkGap}`,
+    ).toBeGreaterThanOrEqual(120);
+
+    wrapper.unmount();
+  });
+
+  it("places simple RER A forks as balanced opposite branches", async () => {
+    const wrapper = await mountRealLineGeometry("line:IDFM:C01742", "rer");
+    const stations = readStationGeometry(wrapper);
+    const nanterrePrefecture = findStationGeometry(stations, "Nanterre Préfecture");
+    const houilles = findStationGeometry(stations, "Houilles - Carrières-sur-Seine");
+    const nanterreUniversite = findStationGeometry(stations, "Nanterre Université");
+    const saintGermain = findStationGeometry(stations, "Saint-Germain-en-Laye");
+    const cergyPrefecture = findStationGeometry(stations, "Cergy Préfecture");
+    const poissy = findStationGeometry(stations, "Poissy");
+    const vincennes = findStationGeometry(stations, "Vincennes");
+    const valDeFontenay = findStationGeometry(stations, "Val de Fontenay");
+    const fontenaySousBois = findStationGeometry(stations, "Fontenay-sous-Bois");
+    const westForkOffset = Math.abs(houilles.y - nanterrePrefecture.y);
+    const eastForkOffset = Math.abs(valDeFontenay.y - vincennes.y);
+    const poissyOffsetFromUpper = Math.abs(poissy.y - cergyPrefecture.y);
+
+    expect(
+      saintGermain.x,
+      "RER A: Saint-Germain-en-Laye branch should extend left from Nanterre Préfecture",
+    ).toBeLessThan(nanterrePrefecture.x);
+    expectBalancedFork({
+      label: "RER A west fork",
+      junction: nanterrePrefecture,
+      upper: houilles,
+      lower: nanterreUniversite,
+    });
+    expect(
+      westForkOffset,
+      `RER A: west fork offset should stay close to the east fork proportion, got west=${westForkOffset} east=${eastForkOffset}`,
+    ).toBeLessThanOrEqual(eastForkOffset + 1);
+    expect(
+      poissyOffsetFromUpper,
+      `RER A: Poissy branch should be lower than the upper branch enough for labels, got offset=${poissyOffsetFromUpper}`,
+    ).toBeGreaterThanOrEqual(westForkOffset * 0.45);
+    expect(
+      poissyOffsetFromUpper,
+      `RER A: Poissy branch should remain a nested upper derivation, got offset=${poissyOffsetFromUpper} west=${westForkOffset}`,
+    ).toBeLessThan(westForkOffset);
+    expect(
+      Math.abs(poissy.y - cergyPrefecture.y),
+      "RER A: Poissy branch should stay visually closer to the upper Cergy branch than to the lower Saint-Germain branch",
+    ).toBeLessThan(Math.abs(poissy.y - saintGermain.y));
+    expectBalancedFork({
+      label: "RER A east fork",
+      junction: vincennes,
+      upper: valDeFontenay,
+      lower: fontenaySousBois,
+    });
+
+    wrapper.unmount();
+  });
+
   it("hides the minimap when showMiniMap is false", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
@@ -147,6 +600,76 @@ describe("DeparturePatternModal settings", () => {
     });
 
     expect(wrapper.find('[data-testid="pattern-minimap"]').exists()).toBe(false);
+    await flushPromises();
+    wrapper.unmount();
+  });
+
+  it("uses rounded curve edges when the setting is enabled", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+    const VueFlowEdgeTypeStub = defineComponent({
+      name: "VueFlow",
+      props: {
+        edges: {
+          type: Array,
+          default: () => [],
+        },
+      },
+      setup(props) {
+        return () =>
+          h(
+            "div",
+            { class: "vue-flow" },
+            (props.edges as Array<{ id: string; type?: string }>).map((edge) =>
+              h(
+                "span",
+                {
+                  class: "flow-edge-type",
+                  "data-edge-id": edge.id,
+                  "data-type": edge.type,
+                },
+                edge.type,
+              ),
+            ),
+          );
+      },
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern,
+        patternRoundedCurves: true,
+        showMiniMap: false,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowEdgeTypeStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    expect(
+      wrapper
+        .findAll(".flow-edge-type")
+        .map((edge) => edge.attributes("data-type")),
+    ).toEqual(expect.arrayContaining(["default"]));
+
     await flushPromises();
     wrapper.unmount();
   });
@@ -487,6 +1010,8 @@ describe("DeparturePatternModal settings", () => {
         open: true,
         board,
         pattern: branchPattern,
+        compactMode: "compact",
+        patternCompactForkGap: 220,
         showMiniMap: false,
       },
       global: {
@@ -526,6 +1051,7 @@ describe("DeparturePatternModal settings", () => {
     expect(dreux!.x).toBeLessThan(plaisir!.x);
     expect(mantes!.x).toBeLessThan(plaisir!.x);
     expect(dreux!.y).not.toBe(mantes!.y);
+    expect(Math.abs(dreux!.y - mantes!.y)).toBe(220);
 
     await flushPromises();
     wrapper.unmount();

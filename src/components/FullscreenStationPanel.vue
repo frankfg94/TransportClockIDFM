@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import type { Directive } from "vue";
 import {
   Check,
   EllipsisVertical,
@@ -32,6 +33,11 @@ interface FullscreenPanelDirection {
 interface FullscreenPanelTrafficAlert {
   label: string;
   tone: TrafficAlertTone;
+}
+
+interface FitTextOptions {
+  min?: number;
+  max?: number;
 }
 
 const props = withDefaults(
@@ -86,6 +92,8 @@ const emit = defineEmits<{
 const controlsVisible = ref(true);
 const menuOpen = ref(false);
 const menuTrigger = ref<HTMLElement>();
+const fitTextFrames = new WeakMap<HTMLElement, number>();
+const fitTextObservers = new WeakMap<HTMLElement, ResizeObserver>();
 let hideTimer: number | undefined;
 let previousHtmlOverflow = "";
 let previousBodyOverflow = "";
@@ -114,6 +122,106 @@ const selectedDoubleStopDirection = computed(
 
 const hasDirections = computed(() => props.directions.length > 0);
 
+function scheduleFitText(
+  element: HTMLElement,
+  options?: FitTextOptions,
+): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const pendingFrame = fitTextFrames.get(element);
+
+  if (pendingFrame !== undefined) {
+    window.cancelAnimationFrame(pendingFrame);
+  }
+
+  const frame = window.requestAnimationFrame(() => {
+    fitTextFrames.delete(element);
+    fitTextToAvailableWidth(element, options);
+  });
+
+  fitTextFrames.set(element, frame);
+}
+
+function fitTextToAvailableWidth(
+  element: HTMLElement,
+  options: FitTextOptions = {},
+): void {
+  const availableWidth = element.clientWidth;
+
+  if (availableWidth <= 0 || !element.textContent?.trim()) {
+    return;
+  }
+
+  element.style.fontSize = "";
+
+  const computedStyle = window.getComputedStyle(element);
+  const computedFontSize = Number.parseFloat(computedStyle.fontSize);
+  const maxFontSize =
+    options.max ?? (Number.isFinite(computedFontSize) ? computedFontSize : 16);
+  const minFontSize = options.min ?? 12;
+
+  element.style.fontSize = `${maxFontSize}px`;
+
+  if (element.scrollWidth <= availableWidth + 1) {
+    return;
+  }
+
+  let low = minFontSize;
+  let high = maxFontSize;
+  let best = minFontSize;
+
+  for (let step = 0; step < 14; step += 1) {
+    const middle = (low + high) / 2;
+    element.style.fontSize = `${middle}px`;
+
+    if (element.scrollWidth <= availableWidth + 1) {
+      best = middle;
+      low = middle;
+    } else {
+      high = middle;
+    }
+  }
+
+  element.style.fontSize = `${Math.max(minFontSize, best).toFixed(1)}px`;
+}
+
+const vFitText: Directive<HTMLElement, FitTextOptions | undefined> = {
+  mounted(element, binding) {
+    scheduleFitText(element, binding.value);
+
+    if (typeof ResizeObserver !== "undefined") {
+      const resizeTarget = element.parentElement ?? element;
+      const observer = new ResizeObserver(() => {
+        scheduleFitText(element, binding.value);
+      });
+      observer.observe(resizeTarget);
+      fitTextObservers.set(element, observer);
+    }
+
+    void document.fonts?.ready.then(() => {
+      scheduleFitText(element, binding.value);
+    });
+  },
+  updated(element, binding) {
+    void nextTick(() => {
+      scheduleFitText(element, binding.value);
+    });
+  },
+  beforeUnmount(element) {
+    const pendingFrame = fitTextFrames.get(element);
+
+    if (pendingFrame !== undefined) {
+      window.cancelAnimationFrame(pendingFrame);
+      fitTextFrames.delete(element);
+    }
+
+    fitTextObservers.get(element)?.disconnect();
+    fitTextObservers.delete(element);
+  },
+};
+
 function getDeparture(
   direction: FullscreenPanelDirection | undefined,
   index: number,
@@ -134,6 +242,32 @@ function getWaitLabel(
   }
 
   return departure?.waitLabel || "--";
+}
+
+function isDockedWaitLabel(label: string): boolean {
+  return (
+    label
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/gu, "")
+      .toLowerCase()
+      .trim() === "a quai"
+  );
+}
+
+function getWaitLabelLines(
+  direction: FullscreenPanelDirection | undefined,
+  departure: FullscreenPanelDeparture | undefined,
+): string[] {
+  const label = getWaitLabel(direction, departure);
+
+  return isDockedWaitLabel(label) ? ["À", "quai"] : [label];
+}
+
+function isStackedWaitLabel(
+  direction: FullscreenPanelDirection | undefined,
+  departure: FullscreenPanelDeparture | undefined,
+): boolean {
+  return getWaitLabelLines(direction, departure).length > 1;
 }
 
 function getDestinationLabel(
@@ -411,7 +545,9 @@ onBeforeUnmount(() => {
         </div>
         <div class="fullscreen-station-panel__heading">
           <p>{{ lineName }}</p>
-          <h1 id="fullscreen-station-panel-title">{{ stationName }}</h1>
+          <h1 id="fullscreen-station-panel-title" v-fit-text="{ min: 12 }">
+            {{ stationName }}
+          </h1>
           <span v-if="city">{{ city }}</span>
         </div>
         <button
@@ -439,13 +575,45 @@ onBeforeUnmount(() => {
           :key="direction.id"
           class="fullscreen-station-panel__direction"
         >
-          <h2>{{ direction.label }}</h2>
+          <h2 v-fit-text="{ min: 15 }">{{ direction.label }}</h2>
           <p v-if="direction.subtitle">{{ direction.subtitle }}</p>
-          <strong class="fullscreen-station-panel__giant-time">
-            {{ getWaitLabel(direction, getDeparture(direction, 0)) }}
+          <strong
+            class="fullscreen-station-panel__giant-time"
+            :class="{
+              'fullscreen-station-panel__wait-label--stacked':
+                isStackedWaitLabel(direction, getDeparture(direction, 0)),
+            }"
+            v-fit-text="{ min: 38 }"
+          >
+            <span
+              v-for="line in getWaitLabelLines(
+                direction,
+                getDeparture(direction, 0),
+              )"
+              :key="line"
+              class="fullscreen-station-panel__wait-label-line"
+            >
+              {{ line }}
+            </span>
           </strong>
-          <span class="fullscreen-station-panel__next-time">
-            {{ getWaitLabel(direction, getDeparture(direction, 1)) }}
+          <span
+            class="fullscreen-station-panel__next-time"
+            :class="{
+              'fullscreen-station-panel__wait-label--stacked':
+                isStackedWaitLabel(direction, getDeparture(direction, 1)),
+            }"
+            v-fit-text="{ min: 24 }"
+          >
+            <span
+              v-for="line in getWaitLabelLines(
+                direction,
+                getDeparture(direction, 1),
+              )"
+              :key="line"
+              class="fullscreen-station-panel__wait-label-line"
+            >
+              {{ line }}
+            </span>
           </span>
           <small>
             {{ getDestinationLabel(direction, getDeparture(direction, 0)) }}
@@ -471,7 +639,9 @@ onBeforeUnmount(() => {
           </slot>
         </div>
         <div class="fullscreen-station-panel__panam-title">
-          <h1 id="fullscreen-station-panel-title">{{ stationName }}</h1>
+          <h1 id="fullscreen-station-panel-title" v-fit-text="{ min: 12 }">
+            {{ stationName }}
+          </h1>
           <span class="direction-label">
             {{ selectedDoubleStopDirection?.label ?? "Direction" }}
           </span>
@@ -489,26 +659,52 @@ onBeforeUnmount(() => {
             <span class="transport-cell-title-text first">
               1er {{ transportTypeLabel }}
             </span>
-            <strong>
-              {{
-                getWaitLabel(
+            <strong
+              :class="{
+                'fullscreen-station-panel__wait-label--stacked':
+                  isStackedWaitLabel(
+                    selectedDoubleStopDirection,
+                    getDeparture(selectedDoubleStopDirection, 0),
+                  ),
+              }"
+              v-fit-text="{ min: 34 }"
+            >
+              <span
+                v-for="line in getWaitLabelLines(
                   selectedDoubleStopDirection,
                   getDeparture(selectedDoubleStopDirection, 0),
-                )
-              }}
+                )"
+                :key="line"
+                class="fullscreen-station-panel__wait-label-line"
+              >
+                {{ line }}
+              </span>
             </strong>
           </div>
           <div>
             <span class="transport-cell-title-text second">
               2e {{ transportTypeLabel }}
             </span>
-            <strong>
-              {{
-                getWaitLabel(
+            <strong
+              :class="{
+                'fullscreen-station-panel__wait-label--stacked':
+                  isStackedWaitLabel(
+                    selectedDoubleStopDirection,
+                    getDeparture(selectedDoubleStopDirection, 1),
+                  ),
+              }"
+              v-fit-text="{ min: 34 }"
+            >
+              <span
+                v-for="line in getWaitLabelLines(
                   selectedDoubleStopDirection,
                   getDeparture(selectedDoubleStopDirection, 1),
-                )
-              }}
+                )"
+                :key="line"
+                class="fullscreen-station-panel__wait-label-line"
+              >
+                {{ line }}
+              </span>
             </strong>
           </div>
         </section>
@@ -537,9 +733,11 @@ onBeforeUnmount(() => {
               </span>
             </slot>
           </div>
-          <div>
+          <div class="fullscreen-station-panel__heading">
             <p>{{ lineName }}</p>
-            <h1 id="fullscreen-station-panel-title">{{ stationName }}</h1>
+            <h1 id="fullscreen-station-panel-title" v-fit-text="{ min: 12 }">
+              {{ stationName }}
+            </h1>
             <span v-if="city">{{ city }}</span>
           </div>
           <button
@@ -563,14 +761,44 @@ onBeforeUnmount(() => {
           >
             <div>
               <p>DIRECTION</p>
-              <strong>{{ direction.label }}</strong>
+              <strong v-fit-text="{ min: 16 }">{{ direction.label }}</strong>
             </div>
             <div class="fullscreen-station-panel__home-times">
-              <span>
-                {{ getWaitLabel(direction, getDeparture(direction, 0)) }}
+              <span
+                :class="{
+                  'fullscreen-station-panel__wait-label--stacked':
+                    isStackedWaitLabel(direction, getDeparture(direction, 0)),
+                }"
+                v-fit-text="{ min: 28 }"
+              >
+                <span
+                  v-for="line in getWaitLabelLines(
+                    direction,
+                    getDeparture(direction, 0),
+                  )"
+                  :key="line"
+                  class="fullscreen-station-panel__wait-label-line"
+                >
+                  {{ line }}
+                </span>
               </span>
-              <span>
-                {{ getWaitLabel(direction, getDeparture(direction, 1)) }}
+              <span
+                :class="{
+                  'fullscreen-station-panel__wait-label--stacked':
+                    isStackedWaitLabel(direction, getDeparture(direction, 1)),
+                }"
+                v-fit-text="{ min: 28 }"
+              >
+                <span
+                  v-for="line in getWaitLabelLines(
+                    direction,
+                    getDeparture(direction, 1),
+                  )"
+                  :key="line"
+                  class="fullscreen-station-panel__wait-label-line"
+                >
+                  {{ line }}
+                </span>
               </span>
             </div>
           </section>
@@ -842,6 +1070,7 @@ onBeforeUnmount(() => {
 }
 
 .fullscreen-station-panel__heading {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -972,6 +1201,7 @@ onBeforeUnmount(() => {
 .fullscreen-station-panel__panam-title {
   align-items: baseline;
   display: flex;
+  flex: 1 1 auto;
   flex-wrap: wrap;
   gap: 18px;
   min-width: 0;
@@ -1015,7 +1245,7 @@ onBeforeUnmount(() => {
   border-left: 4px solid currentColor;
 }
 
-.fullscreen-station-panel__panam-times span {
+.fullscreen-station-panel__panam-times > div > span {
   font-size: 1.45rem;
   font-weight: 920;
 }
@@ -1026,9 +1256,15 @@ onBeforeUnmount(() => {
 
 .fullscreen-station-panel__panam-times strong {
   color: var(--panel-line-color);
+  display: block;
   font-size: 13rem;
   font-weight: 950;
   line-height: 0.85;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .fullscreen-station-panel__panam-side {
@@ -1108,8 +1344,12 @@ onBeforeUnmount(() => {
 
 .fullscreen-station-panel__home-direction strong {
   color: #192342;
+  display: block;
   font-size: 2.4rem;
   line-height: 1.04;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .fullscreen-station-panel__home-times {
@@ -1117,7 +1357,7 @@ onBeforeUnmount(() => {
   gap: 24px;
 }
 
-.fullscreen-station-panel__home-times span {
+.fullscreen-station-panel__home-times > span {
   align-items: center;
   background: #191919;
   border-radius: 6px;
@@ -1126,9 +1366,42 @@ onBeforeUnmount(() => {
   font-size: 5rem;
   font-weight: 950;
   justify-content: center;
+  max-width: 100%;
   min-height: 62px;
   min-width: 118px;
+  overflow: hidden;
   padding: 0 18px;
+  white-space: nowrap;
+}
+
+.fullscreen-station-panel__giant-time,
+.fullscreen-station-panel__next-time {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.fullscreen-station-panel__wait-label-line {
+  display: block;
+  font-size: inherit;
+  font-weight: inherit;
+  min-width: 0;
+}
+
+.fullscreen-station-panel__wait-label--stacked {
+  line-height: 0.78;
+  white-space: normal;
+}
+
+.fullscreen-station-panel__wait-label--stacked
+  .fullscreen-station-panel__wait-label-line {
+  line-height: 0.78;
+}
+
+.fullscreen-station-panel__home-times
+  span.fullscreen-station-panel__wait-label--stacked {
+  flex-direction: column;
 }
 
 .fullscreen-station-panel__home-card footer {
@@ -1244,7 +1517,7 @@ onBeforeUnmount(() => {
   border-color: rgba(255, 255, 255, 0.14);
 }
 
-.fullscreen-station-panel--dark .fullscreen-station-panel__home-times span {
+.fullscreen-station-panel--dark .fullscreen-station-panel__home-times > span {
   background: #181818;
   color: #f3f000;
 }
@@ -1267,6 +1540,29 @@ onBeforeUnmount(() => {
     max-width: 100px;
   }
 
+  .fullscreen-station-panel__logo {
+    min-width: 78px;
+  }
+
+  .fullscreen-station-panel__logo :deep(.line-icon-badge) {
+    height: 68px;
+    min-width: 78px;
+  }
+
+  .fullscreen-station-panel__logo :deep(.line-icon-badge img) {
+    max-height: 68px;
+    max-width: 100px;
+  }
+
+  .fullscreen-station-panel__logo :deep(.line-icon-badge__fallback) {
+    height: 68px;
+  }
+
+  .fullscreen-station-panel__logo :deep(.line-icon-badge__label) {
+    font-size: 1.9rem;
+    min-width: 68px;
+  }
+
   .fullscreen-station-panel__line-fallback {
     font-size: 1.9rem;
     min-height: 68px;
@@ -1274,19 +1570,23 @@ onBeforeUnmount(() => {
   }
 
   .fullscreen-station-panel h1 {
-    font-size: 3rem;
+    font-size: clamp(2rem, 7vw, 3rem);
+    overflow-wrap: normal;
+    white-space: nowrap;
   }
 
   .fullscreen-station-panel__direction h2 {
-    font-size: 2.2rem;
+    font-size: clamp(1.75rem, 5.5vw, 2.2rem);
+    overflow-wrap: normal;
+    white-space: nowrap;
   }
 
   .fullscreen-station-panel__giant-time {
-    font-size: 7rem;
+    font-size: clamp(5rem, 22vw, 7rem);
   }
 
   .fullscreen-station-panel__next-time {
-    font-size: 2.5rem;
+    font-size: clamp(2rem, 9vw, 2.5rem);
   }
 
   .fullscreen-station-panel__panam-body {
@@ -1299,7 +1599,8 @@ onBeforeUnmount(() => {
   }
 
   .fullscreen-station-panel__panam-times strong {
-    font-size: 8rem;
+    font-size: clamp(6rem, 26vw, 10rem);
+    width: 100%;
   }
 
   .fullscreen-station-panel__home-direction {
@@ -1310,12 +1611,18 @@ onBeforeUnmount(() => {
 
 @media (max-width: 560px) {
   .fullscreen-station-panel__controls {
-    padding: 12px;
+    gap: 6px;
+    padding: 8px;
   }
 
   .fullscreen-station-panel__icon-button {
-    height: 46px;
-    width: 46px;
+    height: 38px;
+    width: 38px;
+  }
+
+  .fullscreen-station-panel__icon-button svg {
+    height: 22px;
+    width: 22px;
   }
 
   :global(.fullscreen-station-panel__menu) {
@@ -1325,13 +1632,118 @@ onBeforeUnmount(() => {
   .fullscreen-station-panel__header,
   .fullscreen-station-panel__panam-header,
   .fullscreen-station-panel__home-card header {
-    align-items: flex-start;
-    flex-direction: column;
-    padding-right: 72px;
+    align-items: center;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 142px 8px 10px;
+  }
+
+  .fullscreen-station-panel__header {
+    border-bottom-width: 5px;
+  }
+
+  .fullscreen-station-panel__panam-header {
+    min-height: 70px;
+  }
+
+  .fullscreen-station-panel__home-card header {
+    padding-bottom: 10px;
+  }
+
+  .fullscreen-station-panel__logo {
+    min-width: 46px;
+  }
+
+  :slotted(.line-icon-badge) {
+    height: 46px;
+    min-width: 46px;
+  }
+
+  :slotted(.line-icon-badge img) {
+    max-height: 46px;
+    max-width: 64px;
+  }
+
+  .fullscreen-station-panel__logo :deep(.line-icon-badge) {
+    height: 46px;
+    min-width: 46px;
+  }
+
+  .fullscreen-station-panel__logo :deep(.line-icon-badge img) {
+    max-height: 46px;
+    max-width: 64px;
+  }
+
+  .fullscreen-station-panel__logo :deep(.line-icon-badge__fallback) {
+    height: 46px;
+  }
+
+  .fullscreen-station-panel__logo :deep(.line-icon-badge__label) {
+    font-size: 1.25rem;
+    min-width: 46px;
+  }
+
+  .fullscreen-station-panel__line-fallback {
+    border-radius: 7px;
+    font-size: 1.3rem;
+    min-height: 46px;
+    min-width: 50px;
+    padding: 0 10px;
+  }
+
+  .fullscreen-station-panel__heading,
+  .fullscreen-station-panel__panam-title {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .fullscreen-station-panel__panam-title {
+    align-items: start;
+    display: grid;
+    gap: 2px;
+  }
+
+  .fullscreen-station-panel__heading p,
+  .fullscreen-station-panel__home-card header p {
+    font-size: clamp(0.62rem, 2.6vw, 0.78rem);
+    margin-bottom: 1px;
+  }
+
+  .fullscreen-station-panel h1 {
+    font-size: clamp(0.85rem, 4.85vw, 1.55rem);
+    line-height: 1;
+    max-width: 100%;
+  }
+
+  .fullscreen-station-panel__heading span,
+  .fullscreen-station-panel__home-card header span {
+    font-size: clamp(0.68rem, 3vw, 0.9rem);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+
+  .direction-label {
+    font-size: clamp(0.7rem, 3vw, 0.9rem);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: clip;
+    white-space: nowrap;
   }
 
   .fullscreen-station-panel__alert {
+    flex: 0 1 auto;
+    font-size: 0.7rem;
     margin-left: 0;
+    min-height: 26px;
+    order: 3;
+    padding: 0 9px;
+  }
+
+  .fullscreen-station-panel__surface--all {
+    border-bottom-width: 12px;
   }
 
   .fullscreen-station-panel__all-grid {
@@ -1342,11 +1754,217 @@ onBeforeUnmount(() => {
   .fullscreen-station-panel__direction {
     border-bottom: 1px solid rgba(15, 23, 42, 0.14);
     border-right: 0;
-    min-height: 310px;
+    gap: 6px;
+    min-height: 238px;
+    padding: 18px 18px 20px;
+  }
+
+  .fullscreen-station-panel__direction h2 {
+    font-size: clamp(1.25rem, 7vw, 2rem);
+  }
+
+  .fullscreen-station-panel__direction p,
+  .fullscreen-station-panel__direction small {
+    font-size: 0.82rem;
+    overflow-wrap: anywhere;
+  }
+
+  .fullscreen-station-panel__giant-time {
+    font-size: clamp(3.6rem, 24vw, 6.2rem);
+    margin-top: 8px;
+  }
+
+  .fullscreen-station-panel__next-time {
+    font-size: clamp(1.6rem, 9vw, 2.2rem);
+    justify-self: center;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .fullscreen-station-panel__footer {
+    font-size: 0.78rem;
+    min-height: 24px;
+    padding: 0 18px 8px;
+  }
+
+  .fullscreen-station-panel__panam-times {
+    align-items: stretch;
+  }
+
+  .fullscreen-station-panel__panam-times > div {
+    gap: 8px;
+    min-width: 0;
+    overflow: hidden;
+    padding: 14px 10px;
+  }
+
+  .fullscreen-station-panel__panam-times > div + div {
+    border-left-width: 3px;
+  }
+
+  .fullscreen-station-panel__panam-times > div > span {
+    font-size: clamp(0.82rem, 3.5vw, 1rem);
+    line-height: 1.05;
+    white-space: nowrap;
+  }
+
+  .fullscreen-station-panel__panam-times strong {
+    font-size: clamp(5rem, 42vw, 10rem);
+    line-height: 0.9;
+  }
+
+  .fullscreen-station-panel__panam-times
+    strong.fullscreen-station-panel__wait-label--stacked {
+    font-size: clamp(3.8rem, 20vw, 5rem);
+    line-height: 0.76;
+  }
+
+  .fullscreen-station-panel__panam-side {
+    gap: 8px;
+    padding: 18px 16px;
+  }
+
+  .fullscreen-station-panel__panam-side strong {
+    font-size: 1.25rem;
+  }
+
+  .fullscreen-station-panel__panam-side p {
+    font-size: 0.92rem;
+    padding: 10px 12px;
+  }
+
+  .fullscreen-station-panel__home-card {
+    border-radius: 0;
+    border-top-width: 8px;
+  }
+
+  .fullscreen-station-panel__home-directions {
+    overflow: auto;
+  }
+
+  .fullscreen-station-panel__home-direction {
+    gap: 12px;
+    min-height: 102px;
+    padding: 16px;
+  }
+
+  .fullscreen-station-panel__home-direction p {
+    font-size: 0.75rem;
+    margin-bottom: 4px;
+  }
+
+  .fullscreen-station-panel__home-direction strong {
+    font-size: clamp(1.2rem, 6vw, 2rem);
+    white-space: nowrap;
   }
 
   .fullscreen-station-panel__home-times {
-    flex-wrap: wrap;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .fullscreen-station-panel__home-times > span {
+    font-size: clamp(2rem, 12vw, 3.2rem);
+    min-height: 48px;
+    min-width: 0;
+    padding: 0 8px;
+    width: 100%;
+  }
+
+  .fullscreen-station-panel__home-card footer {
+    font-size: 0.78rem;
+    min-height: 42px;
+    padding: 0 16px;
+  }
+
+  .fullscreen-station-panel__notice {
+    font-size: clamp(1.2rem, 5vw, 2rem);
+    padding: 20px;
+    text-align: center;
+  }
+}
+
+@media (max-width: 380px) {
+  .fullscreen-station-panel__controls {
+    gap: 5px;
+    padding: 7px;
+  }
+
+  .fullscreen-station-panel__icon-button {
+    height: 36px;
+    width: 36px;
+  }
+
+  .fullscreen-station-panel__icon-button svg {
+    height: 20px;
+    width: 20px;
+  }
+
+  .fullscreen-station-panel__header,
+  .fullscreen-station-panel__panam-header,
+  .fullscreen-station-panel__home-card header {
+    gap: 7px;
+    padding: 8px 132px 7px 8px;
+  }
+
+  .fullscreen-station-panel__logo {
+    min-width: 40px;
+  }
+
+  :slotted(.line-icon-badge) {
+    height: 40px;
+    min-width: 40px;
+  }
+
+  :slotted(.line-icon-badge img) {
+    max-height: 40px;
+    max-width: 58px;
+  }
+
+  .fullscreen-station-panel__logo :deep(.line-icon-badge) {
+    height: 40px;
+    min-width: 40px;
+  }
+
+  .fullscreen-station-panel__logo :deep(.line-icon-badge img) {
+    max-height: 40px;
+    max-width: 58px;
+  }
+
+  .fullscreen-station-panel__logo :deep(.line-icon-badge__fallback) {
+    height: 40px;
+  }
+
+  .fullscreen-station-panel__logo :deep(.line-icon-badge__label) {
+    font-size: 1.08rem;
+    min-width: 40px;
+  }
+
+  .fullscreen-station-panel__line-fallback {
+    font-size: 1.12rem;
+    min-height: 40px;
+    min-width: 42px;
+    padding: 0 8px;
+  }
+
+  .fullscreen-station-panel h1 {
+    font-size: clamp(0.75rem, 4.7vw, 1.18rem);
+  }
+
+  .fullscreen-station-panel__heading span,
+  .fullscreen-station-panel__home-card header span,
+  .direction-label {
+    font-size: clamp(0.64rem, 2.9vw, 0.78rem);
+  }
+
+  .fullscreen-station-panel__panam-times > div {
+    padding: 12px 7px;
+  }
+
+  .fullscreen-station-panel__panam-times strong {
+    font-size: clamp(4.6rem, 40vw, 9rem);
   }
 }
 </style>

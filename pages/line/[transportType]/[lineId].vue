@@ -16,6 +16,15 @@
       :show-mini-map="settings.showPatternMiniMap"
       :show-city-zones="settings.showPatternCityZones"
       :compact-mode="settings.compactLinePlanMode"
+      :pattern-rounded-curves="settings.patternRoundedCurves"
+      :pattern-compact-branch-gap="settings.patternCompactBranchGap"
+      :pattern-compact-fork-gap="settings.patternCompactForkGap"
+      :pattern-realistic-min-gap-coefficient="
+        settings.patternRealisticMinGapCoefficient
+      "
+      :pattern-realistic-max-gap-coefficient="
+        settings.patternRealisticMaxGapCoefficient
+      "
       :rich-transfer-tooltips="settings.richTransferTooltips"
       :reduce-motion="settings.reduceMotion"
       :smart-traffic-detection="settings.smartTrafficDetection"
@@ -680,7 +689,9 @@ onBeforeUnmount(() => {
   height: 100vh;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 720px),
+  (orientation: landscape) and (max-width: 1180px) and (max-height: 560px),
+  (orientation: landscape) and (max-width: 1360px) and (max-height: 700px) and (pointer: coarse) {
   .line-pattern-page__back--desktop,
   .line-pattern-page__back--map-desktop,
   .line-pattern-page__line-switch--desktop,

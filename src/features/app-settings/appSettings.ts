@@ -50,6 +50,19 @@ export type WeatherMode = "animated" | "static" | "alerts_only" | "disabled";
 export type WeatherLookaheadMinutes = 60 | 120 | 240 | 480 | 720 | 1440;
 export type WeatherTestMode = "off" | "rain" | "storm" | "snow" | "heat";
 
+export const PATTERN_COMPACT_BRANCH_GAP_DEFAULT = 258;
+export const PATTERN_COMPACT_BRANCH_GAP_MIN = 180;
+export const PATTERN_COMPACT_BRANCH_GAP_MAX = 360;
+export const PATTERN_COMPACT_FORK_GAP_DEFAULT = 158;
+export const PATTERN_COMPACT_FORK_GAP_MIN = 110;
+export const PATTERN_COMPACT_FORK_GAP_MAX = 260;
+export const PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_DEFAULT = 0.5;
+export const PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MIN = 0.25;
+export const PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MAX = 1.25;
+export const PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_DEFAULT = 5;
+export const PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MIN = 1.25;
+export const PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MAX = 8;
+
 export interface AppSettings {
   version: 1;
   closedDirectionSummaryMode: ClosedDirectionSummaryMode;
@@ -69,6 +82,11 @@ export interface AppSettings {
   navigationAutoHide: NavigationAutoHide;
   reduceMotion: boolean;
   compactLinePlanMode: CompactLinePlanMode;
+  patternRoundedCurves: boolean;
+  patternCompactBranchGap: number;
+  patternCompactForkGap: number;
+  patternRealisticMinGapCoefficient: number;
+  patternRealisticMaxGapCoefficient: number;
   richTransferTooltips: boolean;
   ghostNetworkStructuralOnly: boolean;
   trafficInfoDesign: TrafficInfoDesign;
@@ -240,6 +258,13 @@ export function createDefaultAppSettings(): AppSettings {
     hiddenDirectionIdsByBoardId: {},
     reduceMotion: false,
     compactLinePlanMode: "compact",
+    patternRoundedCurves: true,
+    patternCompactBranchGap: PATTERN_COMPACT_BRANCH_GAP_DEFAULT,
+    patternCompactForkGap: PATTERN_COMPACT_FORK_GAP_DEFAULT,
+    patternRealisticMinGapCoefficient:
+      PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_DEFAULT,
+    patternRealisticMaxGapCoefficient:
+      PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_DEFAULT,
     richTransferTooltips: true,
     ghostNetworkStructuralOnly: false,
     trafficInfoDesign: "ratp",
@@ -273,6 +298,11 @@ export function normalizeAppSettings(value: unknown): AppSettings {
   if (!isRecord(value)) {
     return defaults;
   }
+
+  const patternRealisticMinGapCoefficient =
+    parsePatternRealisticMinGapCoefficient(
+      value.patternRealisticMinGapCoefficient,
+    );
 
   return {
     version: 1,
@@ -322,6 +352,22 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     compactLinePlanMode: isCompactLinePlanMode(value.compactLinePlanMode)
       ? value.compactLinePlanMode
       : defaults.compactLinePlanMode,
+    patternRoundedCurves: readBoolean(
+      value.patternRoundedCurves,
+      defaults.patternRoundedCurves,
+    ),
+    patternCompactBranchGap: parsePatternCompactBranchGap(
+      value.patternCompactBranchGap,
+    ),
+    patternCompactForkGap: parsePatternCompactForkGap(
+      value.patternCompactForkGap,
+    ),
+    patternRealisticMinGapCoefficient,
+    patternRealisticMaxGapCoefficient:
+      parsePatternRealisticMaxGapCoefficient(
+        value.patternRealisticMaxGapCoefficient,
+        patternRealisticMinGapCoefficient,
+      ),
     richTransferTooltips: readBoolean(
       value.richTransferTooltips,
       defaults.richTransferTooltips,
@@ -500,6 +546,49 @@ export function parseTransferBundleRequestSpacingMs(
     : 0;
 }
 
+export function parsePatternCompactBranchGap(value: unknown): number {
+  return parseBoundedNumber(
+    value,
+    PATTERN_COMPACT_BRANCH_GAP_DEFAULT,
+    PATTERN_COMPACT_BRANCH_GAP_MIN,
+    PATTERN_COMPACT_BRANCH_GAP_MAX,
+    0,
+  );
+}
+
+export function parsePatternCompactForkGap(value: unknown): number {
+  return parseBoundedNumber(
+    value,
+    PATTERN_COMPACT_FORK_GAP_DEFAULT,
+    PATTERN_COMPACT_FORK_GAP_MIN,
+    PATTERN_COMPACT_FORK_GAP_MAX,
+    0,
+  );
+}
+
+export function parsePatternRealisticMinGapCoefficient(value: unknown): number {
+  return parseBoundedNumber(
+    value,
+    PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_DEFAULT,
+    PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MIN,
+    PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MAX,
+    2,
+  );
+}
+
+export function parsePatternRealisticMaxGapCoefficient(
+  value: unknown,
+  minCoefficient = PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_DEFAULT,
+): number {
+  return parseBoundedNumber(
+    value,
+    PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_DEFAULT,
+    Math.max(PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MIN, minCoefficient),
+    PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MAX,
+    2,
+  );
+}
+
 export function getEffectiveMaxDeparturesPerDirection(
   settings: AppSettings,
 ): number | undefined {
@@ -604,6 +693,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function parseBoundedNumber(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+  precision: number,
+): number {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseFloat(value)
+        : Number.NaN;
+
+  if (!Number.isFinite(numericValue)) {
+    return fallback;
+  }
+
+  const clampedValue = Math.min(max, Math.max(min, numericValue));
+
+  return Number(clampedValue.toFixed(precision));
 }
 
 function isClosedDirectionSummaryMode(

@@ -114,13 +114,18 @@ type PatternFlowNode =
 type PatternFlowEdge = Edge<
   PatternFlowEdgeData,
   Record<string, never>,
-  "straight"
+  PatternFlowEdgeType
 >;
+type PatternFlowEdgeType = "straight" | "default";
 
 interface PatternStationNodeData {
   key: string;
   label: string;
   city?: string;
+  layoutX: number;
+  layoutY: number;
+  nodeX: number;
+  nodeY: number;
   time?: string;
   current: boolean;
   served: boolean;
@@ -137,6 +142,10 @@ interface PatternCityZoneNodeData {
   city: string;
   width: number;
   stationCount: number;
+  layoutX: number;
+  layoutY: number;
+  nodeX: number;
+  nodeY: number;
 }
 
 interface PatternTrafficMarkerNodeData {
@@ -229,17 +238,41 @@ interface PatternTopologyLayout {
   visibleEdges: Set<string>;
 }
 
+type PatternLayoutPosition = { x: number; y: number };
+type PatternPlacementProposal = {
+  key: string;
+  position: PatternLayoutPosition;
+};
+
 const REGULAR_NODE_WIDTH = 184;
 const REGULAR_NODE_HEIGHT = 104;
 const COMPACT_NODE_WIDTH = 128;
 const COMPACT_NODE_HEIGHT = 150;
 const COMFORT_STOP_GAP = 236;
 const COMPACT_STOP_GAP = 138;
-const REALISTIC_MIN_STOP_GAP = COMFORT_STOP_GAP * 0.5;
-const REALISTIC_MAX_STOP_GAP = COMFORT_STOP_GAP * 5;
+const MIN_STATION_LAYOUT_SEPARATION = 86;
+const MAX_LAYOUT_LANE_COLLISION_ATTEMPTS = 12;
+const DEFAULT_COMPACT_BRANCH_GAP = 258;
+const DEFAULT_COMPACT_FORK_GAP = 158;
+const DEFAULT_REALISTIC_MIN_STOP_GAP_COEFFICIENT = 0.5;
+const DEFAULT_REALISTIC_MAX_STOP_GAP_COEFFICIENT = 5;
+const MIN_COMPACT_BRANCH_GAP = 180;
+const MAX_COMPACT_BRANCH_GAP = 360;
+const MIN_COMPACT_FORK_GAP = 110;
+const MAX_COMPACT_FORK_GAP = 260;
+const MIN_REALISTIC_STOP_GAP_COEFFICIENT = 0.25;
+const MAX_REALISTIC_MIN_STOP_GAP_COEFFICIENT = 1.25;
+const MIN_REALISTIC_MAX_STOP_GAP_COEFFICIENT = 1.25;
+const MAX_REALISTIC_STOP_GAP_COEFFICIENT = 8;
 const DISTANCE_LABEL_EXIT_MS = 240;
 const TRANSFER_HYDRATION_STALLED_RETRY_MS = 60_000;
 const TRANSFER_HYDRATION_RATE_LIMIT_CHECK_MS = 1_200;
+type PatternSpacingOptions = {
+  compactBranchGap: number;
+  compactForkGap: number;
+  realisticMinGapCoefficient: number;
+  realisticMaxGapCoefficient: number;
+};
 type PatternLayoutOptions = {
   mode: PatternVisualMode;
   compact: boolean;
@@ -278,6 +311,11 @@ const props = withDefaults(
     showMiniMap?: boolean;
     showCityZones?: boolean;
     compactMode?: PatternCompactMode;
+    patternRoundedCurves?: boolean;
+    patternCompactBranchGap?: number;
+    patternCompactForkGap?: number;
+    patternRealisticMinGapCoefficient?: number;
+    patternRealisticMaxGapCoefficient?: number;
     richTransferTooltips?: boolean;
     reduceMotion?: boolean;
     smartTrafficDetection?: boolean;
@@ -294,6 +332,13 @@ const props = withDefaults(
     showMiniMap: true,
     showCityZones: true,
     compactMode: "auto",
+    patternRoundedCurves: false,
+    patternCompactBranchGap: DEFAULT_COMPACT_BRANCH_GAP,
+    patternCompactForkGap: DEFAULT_COMPACT_FORK_GAP,
+    patternRealisticMinGapCoefficient:
+      DEFAULT_REALISTIC_MIN_STOP_GAP_COEFFICIENT,
+    patternRealisticMaxGapCoefficient:
+      DEFAULT_REALISTIC_MAX_STOP_GAP_COEFFICIENT,
     richTransferTooltips: true,
     reduceMotion: false,
     smartTrafficDetection: true,
@@ -443,6 +488,16 @@ const usesCompactPatternFlowLayout = computed(
 const currentLayoutOptions = computed(() =>
   createPatternLayoutOptions(patternVisualMode.value),
 );
+const patternSpacingKey = computed(() => {
+  const spacing = getPatternSpacingOptions();
+
+  return [
+    spacing.compactBranchGap,
+    spacing.compactForkGap,
+    spacing.realisticMinGapCoefficient,
+    spacing.realisticMaxGapCoefficient,
+  ].join(":");
+});
 const shouldZoomOnWheel = computed(() => Boolean(props.wheelZoom));
 const currentLineIdentity = computed<CurrentLineIdentity | undefined>(() => {
   const board = props.board;
@@ -484,6 +539,7 @@ const flowModel = computed(() =>
     patternDistanceLabelsVisible.value,
     patternDistanceLabelsLeaving.value,
     props.showCityZones,
+    props.patternRoundedCurves,
     analyzeCurrentTrafficImpacts,
   ),
 );
@@ -493,7 +549,11 @@ const patternFlowKey = computed(
       isPatternFlowFullscreen.value ? "fullscreen" : "modal"
     }:${patternVisualMode.value}:${
       isFullLineMode.value ? "full" : "route"
-    }:${props.showCityZones ? "cities" : "no-cities"}${
+    }:${props.showCityZones ? "cities" : "no-cities"}:curves:${
+      props.patternRoundedCurves ? "rounded" : "straight"
+    }:spacing:${
+      patternSpacingKey.value
+    }${
       props.board?.line.mode ? `:${props.board.line.mode}` : ""
     }:traffic:${props.smartTrafficDetection ? trafficImpactKey.value : "off"}`,
 );
@@ -621,6 +681,8 @@ function resolveInitialPatternVisualMode(): PatternVisualMode {
 function createPatternLayoutOptions(
   mode: PatternVisualMode,
 ): PatternLayoutOptions {
+  const spacing = getPatternSpacingOptions();
+
   return mode === "compact" || mode === "realistic"
     ? {
         mode,
@@ -628,8 +690,8 @@ function createPatternLayoutOptions(
         nodeWidth: COMPACT_NODE_WIDTH,
         nodeHeight: COMPACT_NODE_HEIGHT,
         stopGap: mode === "realistic" ? COMFORT_STOP_GAP : COMPACT_STOP_GAP,
-        branchGap: 258,
-        sameDirectionForkGap: 158,
+        branchGap: spacing.compactBranchGap,
+        sameDirectionForkGap: spacing.compactForkGap,
         rankSeparator: 116,
         nodeSeparator: 46,
       }
@@ -658,12 +720,13 @@ function createResolvedPatternLayoutOptions(
 
   return {
     ...layout,
-    edgeGapByKey: createRealisticEdgeGapByKey(edges),
+    edgeGapByKey: createRealisticEdgeGapByKey(edges, getPatternSpacingOptions()),
   };
 }
 
 function createRealisticEdgeGapByKey(
   edges: PatternGraphEdge[],
+  spacing: PatternSpacingOptions,
 ): Map<string, number> {
   const distances = edges
     .map((edge) => edge.distanceKm)
@@ -688,8 +751,8 @@ function createRealisticEdgeGapByKey(
 
       const gap = clampNumber(
         (edge.distanceKm / medianDistance) * COMFORT_STOP_GAP,
-        REALISTIC_MIN_STOP_GAP,
-        REALISTIC_MAX_STOP_GAP,
+        COMFORT_STOP_GAP * spacing.realisticMinGapCoefficient,
+        COMFORT_STOP_GAP * spacing.realisticMaxGapCoefficient,
       );
 
       return [[createEdgeKey(edge.source, edge.target), gap]];
@@ -1105,6 +1168,7 @@ function createPatternFlow(
   showDistances = false,
   distanceLabelsLeaving = false,
   showCityZones = true,
+  roundedCurves = false,
   analyzeTraffic: DeparturePatternTrafficAnalyzer = createEmptyTrafficImpactAnalysis,
 ): PatternFlowModel {
   const graph = buildPatternGraph(calls, lineTopology, fullLine);
@@ -1135,6 +1199,10 @@ function createPatternFlow(
   );
   const stationNodes = graph.nodes.map((node) => {
     const position = topology.positions.get(node.id) ?? { x: 0, y: 0 };
+    const nodePosition = {
+      x: position.x - layout.nodeWidth / 2,
+      y: position.y - layout.nodeHeight / 2,
+    };
     const isBranchEnd = node.degree <= 1;
     const visibleTransfers = filterDuplicateBusTransfers(
       filterCurrentLineTransfers(node.transfers, currentLine),
@@ -1143,10 +1211,7 @@ function createPatternFlow(
     return {
       id: node.id,
       type: "station",
-      position: {
-        x: position.x - layout.nodeWidth / 2,
-        y: position.y - layout.nodeHeight / 2,
-      },
+      position: nodePosition,
       targetPosition: Position.Left,
       sourcePosition: Position.Right,
       draggable: false,
@@ -1158,6 +1223,10 @@ function createPatternFlow(
         key: node.id,
         label: node.label,
         city: node.city,
+        layoutX: position.x,
+        layoutY: position.y,
+        nodeX: nodePosition.x,
+        nodeY: nodePosition.y,
         time: node.time,
         current: node.current,
         served: node.served,
@@ -1225,6 +1294,7 @@ function createPatternFlow(
         showDistances,
         distanceLabelsLeaving,
         trafficAnalysis.edgeImpacts[createEdgeKey(edge.source, edge.target)],
+        roundedCurves,
       ),
     ),
     ...activeLightEdges.map(({ edge, direction, order }) =>
@@ -1234,6 +1304,7 @@ function createPatternFlow(
         direction,
         order,
         activeLightEdges.length,
+        roundedCurves,
       ),
     ),
   ];
@@ -1398,6 +1469,10 @@ function createCityZoneFlowNodes({
           city: group.city,
           width,
           stationCount: new Set(group.stationKeys).size,
+          layoutX: (minX + maxX) / 2,
+          layoutY: minY,
+          nodeX: x,
+          nodeY: y,
         },
       };
     })
@@ -1561,6 +1636,7 @@ function createFlowEdge(
   showDistance = false,
   distanceLabelsLeaving = false,
   trafficImpact?: PatternTrafficImpact,
+  roundedCurves = false,
 ): PatternFlowEdge {
   const { source, target } = getVisualFlowEdgeEndpoints(edge, positions);
   const distanceLabel =
@@ -1574,7 +1650,8 @@ function createFlowEdge(
     target,
     sourceHandle: "station-source",
     targetHandle: "station-target",
-    type: "straight",
+    type: roundedCurves ? "default" : "straight",
+    pathOptions: roundedCurves ? { curvature: 0.32 } : undefined,
     selectable: false,
     focusable: Boolean(trafficImpact),
     interactionWidth: trafficImpact ? 26 : undefined,
@@ -1591,6 +1668,7 @@ function createFlowEdge(
       trafficImpact?.kind === "disturbance"
         ? "pattern-flow-edge--traffic-disturbance"
         : "",
+      roundedCurves ? "pattern-flow-edge--rounded-curves" : "",
     ],
     label: distanceLabel,
     labelShowBg: Boolean(distanceLabel),
@@ -1629,8 +1707,16 @@ function createFlowLightEdge(
   direction: { source: string; target: string } | undefined,
   order: number,
   count: number,
+  roundedCurves = false,
 ): PatternFlowEdge {
-  const flowEdge = createFlowEdge(edge, positions);
+  const flowEdge = createFlowEdge(
+    edge,
+    positions,
+    false,
+    false,
+    undefined,
+    roundedCurves,
+  );
   const lightCycleSeconds = Math.max(8.5, count * 0.72);
   const lightDelay = (order * lightCycleSeconds) / Math.max(count, 1);
 
@@ -1680,6 +1766,11 @@ function createTopologyLayout(
     lineTopologyLayout,
     topologyStationKeyById,
     adjacency,
+    new Set(
+      nodes
+        .filter((node) => (adjacency.get(node.id)?.size ?? 0) <= 1)
+        .map((node) => node.id),
+    ),
   );
   const mainPath = chooseMainPath(
     nodes,
@@ -1723,6 +1814,17 @@ function createTopologyLayout(
     }
   });
   addPathEdges(mainPath, visibleEdges);
+  if ((lineTopologyLayout?.loops.length ?? 0) === 0) {
+    placeSimpleTerminalForks({
+      nodes,
+      adjacency,
+      mainPath,
+      positions,
+      placed,
+      visibleEdges,
+      layout,
+    });
+  }
   placeSameDirectionForks(
     branchLayoutHints,
     positions,
@@ -2113,6 +2215,7 @@ function createPreferredMainPaths(
   lineTopologyLayout: LineTopologyLayout | undefined,
   stationKeyById: Map<string, string>,
   adjacency: Map<string, Set<string>>,
+  terminalKeys: Set<string>,
 ): string[][] {
   if (!lineTopologyLayout?.loops.length) {
     return [];
@@ -2132,6 +2235,7 @@ function createPreferredMainPaths(
       .filter(
         (path) =>
           path.length >= 3 &&
+          countPathTerminals(path, terminalKeys) >= 2 &&
           path.every((key, index) => {
             const nextKey = path[index + 1];
 
@@ -2139,6 +2243,55 @@ function createPreferredMainPaths(
           }),
       ),
   );
+}
+
+function getPatternSpacingOptions(): PatternSpacingOptions {
+  const realisticMinGapCoefficient = clampFiniteNumber(
+    props.patternRealisticMinGapCoefficient,
+    DEFAULT_REALISTIC_MIN_STOP_GAP_COEFFICIENT,
+    MIN_REALISTIC_STOP_GAP_COEFFICIENT,
+    MAX_REALISTIC_MIN_STOP_GAP_COEFFICIENT,
+  );
+
+  return {
+    compactBranchGap: clampFiniteNumber(
+      props.patternCompactBranchGap,
+      DEFAULT_COMPACT_BRANCH_GAP,
+      MIN_COMPACT_BRANCH_GAP,
+      MAX_COMPACT_BRANCH_GAP,
+    ),
+    compactForkGap: clampFiniteNumber(
+      props.patternCompactForkGap,
+      DEFAULT_COMPACT_FORK_GAP,
+      MIN_COMPACT_FORK_GAP,
+      MAX_COMPACT_FORK_GAP,
+    ),
+    realisticMinGapCoefficient,
+    realisticMaxGapCoefficient: clampFiniteNumber(
+      props.patternRealisticMaxGapCoefficient,
+      DEFAULT_REALISTIC_MAX_STOP_GAP_COEFFICIENT,
+      Math.max(
+        MIN_REALISTIC_MAX_STOP_GAP_COEFFICIENT,
+        realisticMinGapCoefficient,
+      ),
+      MAX_REALISTIC_STOP_GAP_COEFFICIENT,
+    ),
+  };
+}
+
+function clampFiniteNumber(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? clampNumber(value, min, max)
+    : fallback;
+}
+
+function countPathTerminals(path: string[], terminalKeys: Set<string>): number {
+  return path.filter((key) => terminalKeys.has(key)).length;
 }
 
 function extendPreferredMainPath(
@@ -2402,25 +2555,471 @@ function placeSameDirectionForks(
     }
 
     const direction = junctionPosition.x <= trunkPosition.x ? -1 : 1;
+    const forkLaneCountBySide = new Map<number, number>();
 
-    hints.forEach((hint) => {
-      const side = hint.side === "upper" ? -1 : hint.side === "lower" ? 1 : 0;
-      const y = junctionPosition.y + side * layout.sameDirectionForkGap;
-
-      let branchOffset = 0;
-
-      hint.stationKeys.slice(1).forEach((key, index) => {
-        branchOffset += getLayoutStopGap(layout, hint.stationKeys[index], key);
-
-        positions.set(key, {
-          x: junctionPosition.x + direction * branchOffset,
-          y,
-        });
-        placed.add(key);
+    hints.forEach((hint, hintIndex) => {
+      const side = resolveForkSide(hint, hintIndex);
+      const laneCount = forkLaneCountBySide.get(side) ?? 0;
+      const initialMagnitude = laneCount + 1;
+      const y = findClearSameDirectionForkY({
+        path: hint.stationKeys,
+        junctionPosition,
+        direction,
+        side,
+        initialMagnitude,
+        positions,
+        layout,
       });
+      const laneMagnitude =
+        Math.max(
+          1,
+          Math.round(
+            Math.abs(y - junctionPosition.y) / layout.sameDirectionForkGap,
+          ),
+        ) || initialMagnitude;
+
+      forkLaneCountBySide.set(side, Math.max(laneCount + 1, laneMagnitude));
+
+      createDirectionalPathPlacementProposals({
+        path: hint.stationKeys,
+        anchorPosition: junctionPosition,
+        direction,
+        y,
+        positions,
+        layout,
+      }).forEach(({ key, position }) => {
+        positions.set(key, position);
+      });
+      hint.stationKeys.slice(1).forEach((key) => placed.add(key));
       addPathEdges(hint.stationKeys, visibleEdges);
     });
   });
+}
+
+function resolveForkSide(
+  hint: PatternBranchLayoutHint,
+  index: number,
+): 1 | -1 {
+  if (hint.side === "upper") {
+    return -1;
+  }
+
+  if (hint.side === "lower") {
+    return 1;
+  }
+
+  return index % 2 === 0 ? -1 : 1;
+}
+
+function placeSimpleTerminalForks(params: {
+  nodes: PatternGraphNode[];
+  adjacency: Map<string, Set<string>>;
+  mainPath: string[];
+  positions: Map<string, PatternLayoutPosition>;
+  placed: Set<string>;
+  visibleEdges: Set<string>;
+  layout: PatternLayoutOptions;
+}): void {
+  const nodeByKey = new Map(params.nodes.map((node) => [node.id, node]));
+  const terminalKeys = new Set(
+    params.nodes
+      .filter((node) => (params.adjacency.get(node.id)?.size ?? 0) <= 1)
+      .map((node) => node.id),
+  );
+
+  for (let pass = 0; pass < 2; pass += 1) {
+    params.mainPath.forEach((junctionKey, mainPathIndex) => {
+      const previousMainKey = params.mainPath[mainPathIndex - 1];
+      const nextMainKey = params.mainPath[mainPathIndex + 1];
+
+      if (!previousMainKey || !nextMainKey) {
+        return;
+      }
+
+      const neighbors = Array.from(params.adjacency.get(junctionKey) ?? []);
+      const offMainNeighbors = neighbors.filter(
+        (neighbor) => neighbor !== previousMainKey && neighbor !== nextMainKey,
+      );
+
+      if (neighbors.length !== 3 || offMainNeighbors.length !== 1) {
+        return;
+      }
+
+      const offMainPath = findTerminalArmPath({
+        junctionKey,
+        firstKey: offMainNeighbors[0],
+        adjacency: params.adjacency,
+        terminalKeys,
+      });
+
+      if (!offMainPath || offMainPath.length < 3) {
+        return;
+      }
+
+      const previousMainPath = params.mainPath
+        .slice(0, mainPathIndex + 1)
+        .reverse();
+      const nextMainPath = params.mainPath.slice(mainPathIndex);
+      const siblingMainPath = chooseSameSideMainArm({
+        junctionKey,
+        offMainPath,
+        previousMainPath,
+        nextMainPath,
+        nodeByKey,
+      });
+
+      if (!siblingMainPath) {
+        return;
+      }
+
+      const junctionPosition = params.positions.get(junctionKey);
+
+      if (!junctionPosition) {
+        return;
+      }
+
+      const branchDirection =
+        (params.positions.get(siblingMainPath[siblingMainPath.length - 1])?.x ??
+          junctionPosition.x) >= junctionPosition.x
+          ? 1
+          : -1;
+      const [upperPath, lowerPath] = orderForkArmsByLatitude(
+        siblingMainPath,
+        offMainPath,
+        nodeByKey,
+      );
+
+      if (Math.abs(junctionPosition.y) >= MIN_STATION_LAYOUT_SEPARATION) {
+        placeNestedSimpleTerminalFork({
+          junctionPosition,
+          siblingMainPath,
+          offMainPath,
+          direction: branchDirection,
+          positions: params.positions,
+          placed: params.placed,
+          visibleEdges: params.visibleEdges,
+          layout: params.layout,
+        });
+        return;
+      }
+
+      const forkLaneMagnitude = 1;
+
+      applyDirectionalPathPositions({
+        path: upperPath,
+        anchorPosition: junctionPosition,
+        direction: branchDirection,
+        y:
+          junctionPosition.y -
+          params.layout.sameDirectionForkGap * forkLaneMagnitude,
+        positions: params.positions,
+        layout: params.layout,
+        overwriteExisting: true,
+      });
+      applyDirectionalPathPositions({
+        path: lowerPath,
+        anchorPosition: junctionPosition,
+        direction: branchDirection,
+        y:
+          junctionPosition.y +
+          params.layout.sameDirectionForkGap * forkLaneMagnitude,
+        positions: params.positions,
+        layout: params.layout,
+        overwriteExisting: true,
+      });
+      upperPath.slice(1).forEach((key) => params.placed.add(key));
+      lowerPath.slice(1).forEach((key) => params.placed.add(key));
+      addPathEdges(upperPath, params.visibleEdges);
+      addPathEdges(lowerPath, params.visibleEdges);
+    });
+  }
+}
+
+function placeNestedSimpleTerminalFork(params: {
+  junctionPosition: PatternLayoutPosition;
+  siblingMainPath: string[];
+  offMainPath: string[];
+  direction: 1 | -1;
+  positions: Map<string, PatternLayoutPosition>;
+  placed: Set<string>;
+  visibleEdges: Set<string>;
+  layout: PatternLayoutOptions;
+}): void {
+  const branchY = findClearNestedForkY({
+    junctionPosition: params.junctionPosition,
+    path: params.offMainPath,
+    direction: params.direction,
+    positions: params.positions,
+    layout: params.layout,
+  });
+
+  applyDirectionalPathPositions({
+    path: params.siblingMainPath,
+    anchorPosition: params.junctionPosition,
+    direction: params.direction,
+    y: params.junctionPosition.y,
+    positions: params.positions,
+    layout: params.layout,
+    overwriteExisting: true,
+  });
+  applyDirectionalPathPositions({
+    path: params.offMainPath,
+    anchorPosition: params.junctionPosition,
+    direction: params.direction,
+    y: branchY,
+    positions: params.positions,
+    layout: params.layout,
+    overwriteExisting: true,
+  });
+  params.siblingMainPath.slice(1).forEach((key) => params.placed.add(key));
+  params.offMainPath.slice(1).forEach((key) => params.placed.add(key));
+  addPathEdges(params.siblingMainPath, params.visibleEdges);
+  addPathEdges(params.offMainPath, params.visibleEdges);
+}
+
+function findClearNestedForkY(params: {
+  junctionPosition: PatternLayoutPosition;
+  path: string[];
+  direction: 1 | -1;
+  positions: Map<string, PatternLayoutPosition>;
+  layout: PatternLayoutOptions;
+}): number {
+  const towardCenter = params.junctionPosition.y < 0 ? 1 : -1;
+  const nestedGap = Math.max(
+    MIN_STATION_LAYOUT_SEPARATION * 1.4,
+    params.layout.sameDirectionForkGap * 0.78,
+  );
+  const ignoredKeys = new Set(params.path);
+
+  for (
+    let magnitude = 1;
+    magnitude <= MAX_LAYOUT_LANE_COLLISION_ATTEMPTS;
+    magnitude += 1
+  ) {
+    const y = params.junctionPosition.y + towardCenter * nestedGap * magnitude;
+    const proposals = createDirectionalPathOverwriteProposals({
+      path: params.path,
+      anchorPosition: params.junctionPosition,
+      direction: params.direction,
+      y,
+      layout: params.layout,
+    });
+
+    if (!hasLayoutPlacementCollision(proposals, params.positions, ignoredKeys)) {
+      return y;
+    }
+  }
+
+  return (
+    params.junctionPosition.y +
+    towardCenter * nestedGap * (MAX_LAYOUT_LANE_COLLISION_ATTEMPTS + 1)
+  );
+}
+
+function findTerminalArmPath(params: {
+  junctionKey: string;
+  firstKey: string;
+  adjacency: Map<string, Set<string>>;
+  terminalKeys: Set<string>;
+}): string[] | undefined {
+  const allowed = collectArmComponent(
+    params.firstKey,
+    params.junctionKey,
+    params.adjacency,
+  );
+  let bestPath: string[] | undefined;
+
+  allowed.forEach((key) => {
+    if (!params.terminalKeys.has(key)) {
+      return;
+    }
+
+    const path = findShortestPathRestricted(
+      params.firstKey,
+      (candidate) => candidate === key,
+      params.adjacency,
+      allowed,
+    );
+
+    if (path && (!bestPath || path.length > bestPath.length)) {
+      bestPath = path;
+    }
+  });
+
+  return bestPath ? [params.junctionKey, ...bestPath] : undefined;
+}
+
+function collectArmComponent(
+  startKey: string,
+  blockedKey: string,
+  adjacency: Map<string, Set<string>>,
+): Set<string> {
+  const component = new Set<string>();
+  const queue = [startKey];
+
+  while (queue.length > 0) {
+    const key = queue.shift()!;
+
+    if (key === blockedKey || component.has(key)) {
+      continue;
+    }
+
+    component.add(key);
+    Array.from(adjacency.get(key) ?? []).forEach((neighbor) => {
+      if (neighbor !== blockedKey && !component.has(neighbor)) {
+        queue.push(neighbor);
+      }
+    });
+  }
+
+  return component;
+}
+
+function chooseSameSideMainArm(params: {
+  junctionKey: string;
+  offMainPath: string[];
+  previousMainPath: string[];
+  nextMainPath: string[];
+  nodeByKey: Map<string, PatternGraphNode>;
+}): string[] | undefined {
+  const offVector = createGeoVector(
+    params.nodeByKey,
+    params.junctionKey,
+    params.offMainPath[params.offMainPath.length - 1],
+  );
+  const previousVector = createGeoVector(
+    params.nodeByKey,
+    params.junctionKey,
+    params.previousMainPath[params.previousMainPath.length - 1],
+  );
+  const nextVector = createGeoVector(
+    params.nodeByKey,
+    params.junctionKey,
+    params.nextMainPath[params.nextMainPath.length - 1],
+  );
+
+  if (!offVector || !previousVector || !nextVector) {
+    return undefined;
+  }
+
+  const previousDot = dotGeoVector(offVector, previousVector);
+  const nextDot = dotGeoVector(offVector, nextVector);
+
+  if (previousDot <= 0 && nextDot <= 0) {
+    return undefined;
+  }
+
+  if (previousDot > nextDot) {
+    return params.previousMainPath;
+  }
+
+  if (nextDot > previousDot) {
+    return params.nextMainPath;
+  }
+
+  return undefined;
+}
+
+function orderForkArmsByLatitude(
+  firstPath: string[],
+  secondPath: string[],
+  nodeByKey: Map<string, PatternGraphNode>,
+): [string[], string[]] {
+  const firstLatitude = getAveragePathLatitude(firstPath, nodeByKey);
+  const secondLatitude = getAveragePathLatitude(secondPath, nodeByKey);
+
+  if (firstLatitude === undefined || secondLatitude === undefined) {
+    return [firstPath, secondPath];
+  }
+
+  return firstLatitude >= secondLatitude
+    ? [firstPath, secondPath]
+    : [secondPath, firstPath];
+}
+
+function getAveragePathLatitude(
+  path: string[],
+  nodeByKey: Map<string, PatternGraphNode>,
+): number | undefined {
+  const latitudes = path
+    .slice(1)
+    .map((key) => nodeByKey.get(key)?.lat)
+    .filter((latitude): latitude is number => Number.isFinite(latitude));
+
+  if (latitudes.length === 0) {
+    return undefined;
+  }
+
+  return latitudes.reduce((total, latitude) => total + latitude, 0) / latitudes.length;
+}
+
+function createGeoVector(
+  nodeByKey: Map<string, PatternGraphNode>,
+  sourceKey: string,
+  targetKey: string,
+): { x: number; y: number } | undefined {
+  const source = nodeByKey.get(sourceKey);
+  const target = nodeByKey.get(targetKey);
+
+  if (
+    !source ||
+    !target ||
+    !Number.isFinite(source.lon) ||
+    !Number.isFinite(source.lat) ||
+    !Number.isFinite(target.lon) ||
+    !Number.isFinite(target.lat)
+  ) {
+    return undefined;
+  }
+
+  return {
+    x: target.lon! - source.lon!,
+    y: target.lat! - source.lat!,
+  };
+}
+
+function dotGeoVector(
+  left: { x: number; y: number },
+  right: { x: number; y: number },
+): number {
+  return left.x * right.x + left.y * right.y;
+}
+
+function findClearSameDirectionForkY(params: {
+  path: string[];
+  junctionPosition: PatternLayoutPosition;
+  direction: 1 | -1;
+  side: 1 | -1;
+  initialMagnitude: number;
+  positions: Map<string, PatternLayoutPosition>;
+  layout: PatternLayoutOptions;
+}): number {
+  let laneMagnitude = Math.max(1, params.initialMagnitude);
+
+  for (let attempt = 0; attempt < MAX_LAYOUT_LANE_COLLISION_ATTEMPTS; attempt += 1) {
+    const y =
+      params.junctionPosition.y +
+      params.side * params.layout.sameDirectionForkGap * laneMagnitude;
+    const proposals = createDirectionalPathPlacementProposals({
+      path: params.path,
+      anchorPosition: params.junctionPosition,
+      direction: params.direction,
+      y,
+      positions: params.positions,
+      layout: params.layout,
+    });
+
+    if (!hasLayoutPlacementCollision(proposals, params.positions)) {
+      return y;
+    }
+
+    laneMagnitude += 1;
+  }
+
+  return (
+    params.junctionPosition.y +
+    params.side * params.layout.sameDirectionForkGap * laneMagnitude
+  );
 }
 
 function placeLoopCorridor(
@@ -2544,25 +3143,31 @@ function placeLoopPath(
     hint.lane < 0
       ? Math.min(startPosition.y, endPosition.y, 0)
       : Math.max(startPosition.y, endPosition.y, 0);
-  const y = baseY + hint.lane * layout.branchGap;
-  const denominator = Math.max(path.length - 1, 1);
-
-  path.slice(1, -1).forEach((key, index) => {
-    if (!positions.has(key)) {
-      const realisticOffset = getPathOffsetToIndex(path, index + 1, layout);
-      const ratio =
-        requiredSpan > 0
-          ? realisticOffset / requiredSpan
-          : (index + 1) / denominator;
-
-      positions.set(key, {
-        x: startPosition.x + (endPosition.x - startPosition.x) * ratio,
-        y,
-      });
-    }
-
-    placed.add(key);
+  const y = findClearInterpolatedPathY({
+    path,
+    startPosition,
+    endPosition,
+    requiredSpan,
+    initialLane: hint.lane,
+    baseY,
+    laneGap: layout.branchGap,
+    positions,
+    layout,
   });
+  const proposals = createInterpolatedPathPlacementProposals({
+    path,
+    startPosition,
+    endPosition,
+    requiredSpan,
+    y,
+    positions,
+    layout,
+  });
+
+  proposals.forEach(({ key, position }) => {
+    positions.set(key, position);
+  });
+  path.slice(1, -1).forEach((key) => placed.add(key));
   addPathEdges(path, visibleEdges);
 }
 
@@ -2877,27 +3482,33 @@ function placeConnectorPath(
     }
   }
 
-  const lane = Math.abs(laneSteps.next().value);
   const baseY = Math.max(startPosition.y, endPosition.y, 0);
-  const y = baseY + lane * layout.branchGap;
-  const denominator = Math.max(path.length - 1, 1);
-
-  path.slice(1, -1).forEach((key, index) => {
-    if (!positions.has(key)) {
-      const realisticOffset = getPathOffsetToIndex(path, index + 1, layout);
-      const ratio =
-        requiredSpan > 0
-          ? realisticOffset / requiredSpan
-          : (index + 1) / denominator;
-
-      positions.set(key, {
-        x: startPosition.x + (endPosition.x - startPosition.x) * ratio,
-        y,
-      });
-    }
-
-    placed.add(key);
+  const lane = Math.abs(laneSteps.next().value);
+  const y = findClearInterpolatedPathY({
+    path,
+    startPosition,
+    endPosition,
+    requiredSpan,
+    initialLane: lane,
+    baseY,
+    laneGap: layout.branchGap,
+    positions,
+    layout,
   });
+  const proposals = createInterpolatedPathPlacementProposals({
+    path,
+    startPosition,
+    endPosition,
+    requiredSpan,
+    y,
+    positions,
+    layout,
+  });
+
+  proposals.forEach(({ key, position }) => {
+    positions.set(key, position);
+  });
+  path.slice(1, -1).forEach((key) => placed.add(key));
 
   addPathEdges(path, visibleEdges);
 }
@@ -2954,8 +3565,6 @@ function placeBranchPath(
     createBranchLayoutHintKey(anchor, terminal),
   );
   const spacing = layout ?? createPatternLayoutOptions("comfort");
-  const lane = createBranchLane(laneSteps, layoutHint);
-  const y = lane * spacing.branchGap;
   const destinationPosition = destinationKey
     ? positions.get(destinationKey)
     : undefined;
@@ -2968,22 +3577,264 @@ function placeBranchPath(
     positions,
     layoutHint,
   });
+  const lane = findClearBranchLane({
+    path,
+    anchorPosition,
+    branchDirection,
+    initialLane: createBranchLane(laneSteps, layoutHint),
+    positions,
+    layout: spacing,
+  });
+  const y = lane * spacing.branchGap;
+  const proposals = createDirectionalPathPlacementProposals({
+    path,
+    anchorPosition,
+    direction: branchDirection,
+    y,
+    positions,
+    layout: spacing,
+  });
 
-  let branchOffset = 0;
+  proposals.forEach(({ key, position }) => {
+    positions.set(key, position);
+  });
+  path.slice(1).forEach((key) => placed.add(key));
+  addPathEdges(path, visibleEdges);
+}
 
-  path.slice(1).forEach((key, index) => {
-    branchOffset += getLayoutStopGap(spacing, path[index], key);
+function findClearBranchLane(params: {
+  path: string[];
+  anchorPosition: PatternLayoutPosition;
+  branchDirection: 1 | -1;
+  initialLane: number;
+  positions: Map<string, PatternLayoutPosition>;
+  layout: PatternLayoutOptions;
+}): number {
+  const anchorSide =
+    Math.abs(params.anchorPosition.y) >= MIN_STATION_LAYOUT_SEPARATION
+      ? params.anchorPosition.y < 0
+        ? -1
+        : 1
+      : undefined;
+  const side = anchorSide ?? (params.initialLane < 0 ? -1 : 1);
+  let magnitude = Math.max(
+    1,
+    Math.abs(params.initialLane),
+    anchorSide
+      ? Math.ceil(Math.abs(params.anchorPosition.y) / params.layout.branchGap)
+      : 1,
+  );
 
-    if (!positions.has(key)) {
-      positions.set(key, {
-        x: anchorPosition.x + branchDirection * branchOffset,
-        y,
-      });
+  for (let attempt = 0; attempt < MAX_LAYOUT_LANE_COLLISION_ATTEMPTS; attempt += 1) {
+    const lane = side * magnitude;
+    const proposals = createDirectionalPathPlacementProposals({
+      path: params.path,
+      anchorPosition: params.anchorPosition,
+      direction: params.branchDirection,
+      y: lane * params.layout.branchGap,
+      positions: params.positions,
+      layout: params.layout,
+    });
+
+    if (!hasLayoutPlacementCollision(proposals, params.positions)) {
+      return lane;
     }
 
-    placed.add(key);
+    magnitude += 1;
+  }
+
+  return side * magnitude;
+}
+
+function findClearInterpolatedPathY(params: {
+  path: string[];
+  startPosition: PatternLayoutPosition;
+  endPosition: PatternLayoutPosition;
+  requiredSpan: number;
+  initialLane: number;
+  baseY: number;
+  laneGap: number;
+  positions: Map<string, PatternLayoutPosition>;
+  layout: PatternLayoutOptions;
+}): number {
+  const side = params.initialLane < 0 ? -1 : 1;
+  let magnitude = Math.max(1, Math.abs(params.initialLane));
+
+  for (let attempt = 0; attempt < MAX_LAYOUT_LANE_COLLISION_ATTEMPTS; attempt += 1) {
+    const y = params.baseY + side * magnitude * params.laneGap;
+    const proposals = createInterpolatedPathPlacementProposals({
+      path: params.path,
+      startPosition: params.startPosition,
+      endPosition: params.endPosition,
+      requiredSpan: params.requiredSpan,
+      y,
+      positions: params.positions,
+      layout: params.layout,
+    });
+
+    if (!hasLayoutPlacementCollision(proposals, params.positions)) {
+      return y;
+    }
+
+    magnitude += 1;
+  }
+
+  return params.baseY + side * magnitude * params.laneGap;
+}
+
+function createDirectionalPathPlacementProposals(params: {
+  path: string[];
+  anchorPosition: PatternLayoutPosition;
+  direction: 1 | -1;
+  y: number;
+  positions: Map<string, PatternLayoutPosition>;
+  layout: PatternLayoutOptions;
+}): PatternPlacementProposal[] {
+  let branchOffset = 0;
+
+  return params.path.slice(1).flatMap((key, index) => {
+    branchOffset += getLayoutStopGap(params.layout, params.path[index], key);
+
+    if (params.positions.has(key)) {
+      return [];
+    }
+
+    return [
+      {
+        key,
+        position: {
+          x: params.anchorPosition.x + params.direction * branchOffset,
+          y: params.y,
+        },
+      },
+    ];
   });
-  addPathEdges(path, visibleEdges);
+}
+
+function createDirectionalPathOverwriteProposals(params: {
+  path: string[];
+  anchorPosition: PatternLayoutPosition;
+  direction: 1 | -1;
+  y: number;
+  layout: PatternLayoutOptions;
+}): PatternPlacementProposal[] {
+  let branchOffset = 0;
+
+  return params.path.slice(1).map((key, index) => {
+    branchOffset += getLayoutStopGap(params.layout, params.path[index], key);
+
+    return {
+      key,
+      position: {
+        x: params.anchorPosition.x + params.direction * branchOffset,
+        y: params.y,
+      },
+    };
+  });
+}
+
+function applyDirectionalPathPositions(params: {
+  path: string[];
+  anchorPosition: PatternLayoutPosition;
+  direction: 1 | -1;
+  y: number;
+  positions: Map<string, PatternLayoutPosition>;
+  layout: PatternLayoutOptions;
+  overwriteExisting: boolean;
+}): void {
+  let branchOffset = 0;
+
+  params.path.slice(1).forEach((key, index) => {
+    branchOffset += getLayoutStopGap(params.layout, params.path[index], key);
+
+    if (!params.overwriteExisting && params.positions.has(key)) {
+      return;
+    }
+
+    params.positions.set(key, {
+      x: params.anchorPosition.x + params.direction * branchOffset,
+      y: params.y,
+    });
+  });
+}
+
+function createInterpolatedPathPlacementProposals(params: {
+  path: string[];
+  startPosition: PatternLayoutPosition;
+  endPosition: PatternLayoutPosition;
+  requiredSpan: number;
+  y: number;
+  positions: Map<string, PatternLayoutPosition>;
+  layout: PatternLayoutOptions;
+}): PatternPlacementProposal[] {
+  const denominator = Math.max(params.path.length - 1, 1);
+
+  return params.path.slice(1, -1).flatMap((key, index) => {
+    if (params.positions.has(key)) {
+      return [];
+    }
+
+    const realisticOffset = getPathOffsetToIndex(params.path, index + 1, params.layout);
+    const ratio =
+      params.requiredSpan > 0
+        ? realisticOffset / params.requiredSpan
+        : (index + 1) / denominator;
+
+    return [
+      {
+        key,
+        position: {
+          x:
+            params.startPosition.x +
+            (params.endPosition.x - params.startPosition.x) * ratio,
+          y: params.y,
+        },
+      },
+    ];
+  });
+}
+
+function hasLayoutPlacementCollision(
+  proposals: PatternPlacementProposal[],
+  positions: Map<string, PatternLayoutPosition>,
+  ignoredExistingKeys = new Set<string>(),
+): boolean {
+  const minimumDistance = MIN_STATION_LAYOUT_SEPARATION;
+
+  if (proposals.length === 0) {
+    return false;
+  }
+
+  if (
+    proposals.some(({ key, position }) =>
+      Array.from(positions.entries()).some(
+        ([existingKey, existingPosition]) =>
+          !ignoredExistingKeys.has(existingKey) &&
+          existingKey !== key &&
+          getLayoutDistance(position, existingPosition) < minimumDistance,
+      ),
+    )
+  ) {
+    return true;
+  }
+
+  return proposals.some((proposal, index) =>
+    proposals
+      .slice(index + 1)
+      .some(
+        (otherProposal) =>
+          proposal.key !== otherProposal.key &&
+          getLayoutDistance(proposal.position, otherProposal.position) <
+            minimumDistance,
+      ),
+  );
+}
+
+function getLayoutDistance(
+  left: PatternLayoutPosition,
+  right: PatternLayoutPosition,
+): number {
+  return Math.hypot(left.x - right.x, left.y - right.y);
 }
 
 function createBranchLane(
@@ -3189,6 +4040,7 @@ function placeComponentSideNodes(params: {
   const { component, orderedIds, adjacency, positions, placed, baseY, layout } =
     params;
   const orderedSet = new Set(orderedIds);
+  const sideNodeCountByAnchor = new Map<string, number>();
 
   Array.from(component).forEach((id) => {
     if (placed.has(id)) {
@@ -3199,9 +4051,14 @@ function placeComponentSideNodes(params: {
       orderedSet.has(neighbor),
     );
     const anchorPosition = anchorId ? positions.get(anchorId) : undefined;
+    const sideNodeIndex = sideNodeCountByAnchor.get(anchorId ?? "") ?? 0;
+
+    sideNodeCountByAnchor.set(anchorId ?? "", sideNodeIndex + 1);
 
     positions.set(id, {
-      x: anchorPosition?.x ?? getMaxPositionX(positions) + layout.stopGap,
+      x: anchorPosition
+        ? anchorPosition.x + sideNodeIndex * layout.stopGap
+        : getMaxPositionX(positions) + layout.stopGap,
       y: baseY + layout.branchGap,
     });
     placed.add(id);
@@ -4199,6 +5056,11 @@ onBeforeUnmount(() => {
                     <template #node-city-zone="{ data }">
                       <div
                         class="pattern-flow-city-zone"
+                        :data-city-zone-width="data.width"
+                        :data-layout-x="data.layoutX"
+                        :data-layout-y="data.layoutY"
+                        :data-node-x="data.nodeX"
+                        :data-node-y="data.nodeY"
                         :style="{
                           '--city-zone-width': `${data.width}px`,
                         }"
@@ -4244,6 +5106,11 @@ onBeforeUnmount(() => {
                         class="pattern-flow-station"
                         :data-station-key="data.key"
                         :data-station-label="data.label"
+                        :data-station-city="data.city ?? ''"
+                        :data-layout-x="data.layoutX"
+                        :data-layout-y="data.layoutY"
+                        :data-node-x="data.nodeX"
+                        :data-node-y="data.nodeY"
                         :data-served="data.served ? 'true' : 'false'"
                         :data-current="data.current ? 'true' : 'false'"
                         :class="{

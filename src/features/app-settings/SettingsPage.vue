@@ -15,10 +15,22 @@ import {
   navigationAutoHideOptions,
   placePresetNavigationModeOptions,
   parseMaxDeparturesPerDirection,
+  parsePatternCompactBranchGap,
+  parsePatternCompactForkGap,
+  parsePatternRealisticMaxGapCoefficient,
+  parsePatternRealisticMinGapCoefficient,
   parseTransferBundleRetentionDays,
   parseTransferBundleRequestConcurrency,
   parseTransferBundleRequestSpacingMs,
   parseWeatherLookaheadMinutes,
+  PATTERN_COMPACT_BRANCH_GAP_MAX,
+  PATTERN_COMPACT_BRANCH_GAP_MIN,
+  PATTERN_COMPACT_FORK_GAP_MAX,
+  PATTERN_COMPACT_FORK_GAP_MIN,
+  PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MAX,
+  PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MIN,
+  PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MAX,
+  PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MIN,
   transferBundleRequestConcurrencyOptions,
   transferBundleRequestSpacingOptions,
   transferBundleRetentionOptions,
@@ -142,6 +154,35 @@ function updatePlacePresetNavigationMode(value: string): void {
 
 function updateCompactMode(value: string): void {
   updateSettings({ compactLinePlanMode: value as CompactLinePlanMode });
+}
+
+function updatePatternCompactBranchGap(value: string): void {
+  updateSettings({
+    patternCompactBranchGap: parsePatternCompactBranchGap(value),
+  });
+}
+
+function updatePatternCompactForkGap(value: string): void {
+  updateSettings({
+    patternCompactForkGap: parsePatternCompactForkGap(value),
+  });
+}
+
+function updatePatternRealisticMinGapCoefficient(value: string): void {
+  updateSettings({
+    patternRealisticMinGapCoefficient:
+      parsePatternRealisticMinGapCoefficient(value),
+  });
+}
+
+function updatePatternRealisticMaxGapCoefficient(value: string): void {
+  updateSettings({
+    patternRealisticMaxGapCoefficient:
+      parsePatternRealisticMaxGapCoefficient(
+        value,
+        settings.value.patternRealisticMinGapCoefficient,
+      ),
+  });
 }
 
 function updateFullscreenStationPanelDesign(value: string): void {
@@ -377,6 +418,17 @@ function formatTransferBundleDistance(
   return typeof value === "number" && Number.isFinite(value)
     ? `${value} m`
     : "distance auto";
+}
+
+function formatPixels(value: number): string {
+  return `${Math.round(value)} px`;
+}
+
+function formatCoefficient(value: number): string {
+  return `${value.toLocaleString("fr-FR", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 0,
+  })}x`;
 }
 
 function updateWeatherMode(value: string): void {
@@ -1059,6 +1111,131 @@ onBeforeUnmount(() => {
         />
       </div>
 
+      <div class="settings-row settings-row--range">
+        <div>
+          <strong>Espacement vertical compact</strong>
+          <span>
+            Augmente l'ecart entre les lignes de branches dans la vue compacte.
+          </span>
+        </div>
+        <label class="settings-range">
+          <span>{{ formatPixels(settings.patternCompactBranchGap) }}</span>
+          <input
+            :max="PATTERN_COMPACT_BRANCH_GAP_MAX"
+            :min="PATTERN_COMPACT_BRANCH_GAP_MIN"
+            :value="settings.patternCompactBranchGap"
+            aria-label="Espacement vertical compact du plan"
+            step="4"
+            type="range"
+            @input="
+              updatePatternCompactBranchGap(
+                ($event.target as HTMLInputElement).value,
+              )
+            "
+          />
+        </label>
+      </div>
+
+      <label class="settings-toggle">
+        <input
+          type="checkbox"
+          :checked="settings.patternRoundedCurves"
+          @change="
+            updateSettings({
+              patternRoundedCurves: ($event.target as HTMLInputElement)
+                .checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>Courbes arrondies</strong>
+          <small>
+            Remplace les pentes droites du schema par des courbes plus douces.
+          </small>
+        </div>
+      </label>
+
+      <div class="settings-row settings-row--range">
+        <div>
+          <strong>Ecart des fourches compactes</strong>
+          <span>
+            Separe les petites branches horizontales des branches principales
+            quand elles partent dans le meme sens.
+          </span>
+        </div>
+        <label class="settings-range">
+          <span>{{ formatPixels(settings.patternCompactForkGap) }}</span>
+          <input
+            :max="PATTERN_COMPACT_FORK_GAP_MAX"
+            :min="PATTERN_COMPACT_FORK_GAP_MIN"
+            :value="settings.patternCompactForkGap"
+            aria-label="Espacement vertical des fourches compactes"
+            step="2"
+            type="range"
+            @input="
+              updatePatternCompactForkGap(
+                ($event.target as HTMLInputElement).value,
+              )
+            "
+          />
+        </label>
+      </div>
+
+      <div class="settings-range-pair">
+        <div>
+          <strong>Espacement realiste</strong>
+          <span>
+            Borne les distances NeTEx converties en pixels dans la vue
+            realiste.
+          </span>
+        </div>
+        <div class="settings-range-pair__controls">
+          <label class="settings-range">
+            <small>Coefficient min</small>
+            <span>
+              {{
+                formatCoefficient(settings.patternRealisticMinGapCoefficient)
+              }}
+            </span>
+            <input
+              :max="PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MAX"
+              :min="PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MIN"
+              :value="settings.patternRealisticMinGapCoefficient"
+              aria-label="Coefficient minimum de l'espacement realiste"
+              step="0.05"
+              type="range"
+              @input="
+                updatePatternRealisticMinGapCoefficient(
+                  ($event.target as HTMLInputElement).value,
+                )
+              "
+            />
+          </label>
+          <label class="settings-range">
+            <small>Coefficient max</small>
+            <span>
+              {{
+                formatCoefficient(settings.patternRealisticMaxGapCoefficient)
+              }}
+            </span>
+            <input
+              :max="PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MAX"
+              :min="PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MIN"
+              :value="settings.patternRealisticMaxGapCoefficient"
+              aria-label="Coefficient maximum de l'espacement realiste"
+              step="0.25"
+              type="range"
+              @input="
+                updatePatternRealisticMaxGapCoefficient(
+                  ($event.target as HTMLInputElement).value,
+                )
+              "
+            />
+          </label>
+        </div>
+      </div>
+
       <label class="settings-toggle">
         <input
           type="checkbox"
@@ -1458,6 +1635,71 @@ onBeforeUnmount(() => {
   margin-top: 4px;
 }
 
+.settings-row--range {
+  align-items: start;
+}
+
+.settings-range,
+.settings-range-pair {
+  background: #f7f9fe;
+  border: 1px solid rgba(16, 35, 63, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.settings-range {
+  min-width: 0;
+}
+
+.settings-range span {
+  color: var(--ink);
+  display: block;
+  font-size: 1rem;
+  font-weight: 950;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.settings-range small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 950;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.settings-range input[type="range"] {
+  accent-color: var(--idfm-blue);
+  width: 100%;
+}
+
+.settings-range-pair {
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
+}
+
+.settings-range-pair > div:first-child strong {
+  display: block;
+  font-size: 1.02rem;
+  font-weight: 950;
+}
+
+.settings-range-pair > div:first-child span {
+  color: var(--muted);
+  display: block;
+  font-weight: 720;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+
+.settings-range-pair__controls {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .settings-toggle .settings-inline-warning {
   background: #fff7ed;
   border: 1px solid rgba(234, 88, 12, 0.2);
@@ -1783,7 +2025,12 @@ onBeforeUnmount(() => {
 
 @media (max-width: 760px) {
   .settings-row,
+  .settings-range-pair,
   .settings-custom-location {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-range-pair__controls {
     grid-template-columns: 1fr;
   }
 }

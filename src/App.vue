@@ -2374,6 +2374,15 @@ onBeforeUnmount(() => {
         :show-mini-map="settings.showPatternMiniMap"
         :show-city-zones="settings.showPatternCityZones"
         :compact-mode="settings.compactLinePlanMode"
+        :pattern-rounded-curves="settings.patternRoundedCurves"
+        :pattern-compact-branch-gap="settings.patternCompactBranchGap"
+        :pattern-compact-fork-gap="settings.patternCompactForkGap"
+        :pattern-realistic-min-gap-coefficient="
+          settings.patternRealisticMinGapCoefficient
+        "
+        :pattern-realistic-max-gap-coefficient="
+          settings.patternRealisticMaxGapCoefficient
+        "
         :rich-transfer-tooltips="settings.richTransferTooltips"
         :smart-traffic-detection="settings.smartTrafficDetection"
         :traffic-report="

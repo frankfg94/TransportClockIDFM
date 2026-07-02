@@ -7,6 +7,10 @@ import {
   getEffectiveMaxDeparturesPerDirection,
   normalizeAppSettings,
   parseMaxDeparturesPerDirection,
+  parsePatternCompactBranchGap,
+  parsePatternCompactForkGap,
+  parsePatternRealisticMaxGapCoefficient,
+  parsePatternRealisticMinGapCoefficient,
   parseTransferBundleRetentionDays,
   parseTransferBundleRequestConcurrency,
   parseTransferBundleRequestSpacingMs,
@@ -27,7 +31,12 @@ describe("app settings", () => {
       boardTogglesPlacement: "inline",
       placePresetNavigationMode: "dropdown-swipe",
       navigationAutoHide: "none",
-      compactLinePlanMode: "auto",
+      compactLinePlanMode: "compact",
+      patternRoundedCurves: false,
+      patternCompactBranchGap: 258,
+      patternCompactForkGap: 158,
+      patternRealisticMinGapCoefficient: 0.5,
+      patternRealisticMaxGapCoefficient: 5,
       richTransferTooltips: true,
       ghostNetworkStructuralOnly: false,
       trafficInfoDesign: "ratp",
@@ -66,6 +75,11 @@ describe("app settings", () => {
       wakeLockDuration: "forever",
       navigationAutoHide: "always",
       compactLinePlanMode: "tiny",
+      patternRoundedCurves: "yes",
+      patternCompactBranchGap: "9999",
+      patternCompactForkGap: "-999",
+      patternRealisticMinGapCoefficient: "2",
+      patternRealisticMaxGapCoefficient: "0.5",
       ghostNetworkStructuralOnly: "yes",
       trafficInfoDesign: "dense",
       trafficInfoDefaultScope: "everything",
@@ -97,7 +111,12 @@ describe("app settings", () => {
     expect(settings.placePresetNavigationMode).toBe("dropdown-swipe");
     expect(settings.wakeLockDuration).toBe("none");
     expect(settings.navigationAutoHide).toBe("none");
-    expect(settings.compactLinePlanMode).toBe("auto");
+    expect(settings.compactLinePlanMode).toBe("compact");
+    expect(settings.patternRoundedCurves).toBe(false);
+    expect(settings.patternCompactBranchGap).toBe(360);
+    expect(settings.patternCompactForkGap).toBe(110);
+    expect(settings.patternRealisticMinGapCoefficient).toBe(1.25);
+    expect(settings.patternRealisticMaxGapCoefficient).toBe(1.25);
     expect(settings.ghostNetworkStructuralOnly).toBe(false);
     expect(settings.trafficInfoDesign).toBe("ratp");
     expect(settings.trafficInfoDefaultScope).toBe("optimized");
@@ -150,6 +169,14 @@ describe("app settings", () => {
     expect(parseTransferBundleRequestConcurrency("999")).toBe(1);
     expect(parseTransferBundleRequestSpacingMs("1000")).toBe(1000);
     expect(parseTransferBundleRequestSpacingMs("999999")).toBe(0);
+    expect(parsePatternCompactBranchGap("300")).toBe(300);
+    expect(parsePatternCompactBranchGap("9999")).toBe(360);
+    expect(parsePatternCompactForkGap("180")).toBe(180);
+    expect(parsePatternCompactForkGap("-1")).toBe(110);
+    expect(parsePatternRealisticMinGapCoefficient("0.75")).toBe(0.75);
+    expect(parsePatternRealisticMinGapCoefficient("9")).toBe(1.25);
+    expect(parsePatternRealisticMaxGapCoefficient("3", 0.75)).toBe(3);
+    expect(parsePatternRealisticMaxGapCoefficient("0.5", 1.25)).toBe(1.25);
   });
 
   it("migrates the previous place swipe toggle to the new selector mode", () => {
