@@ -1,11 +1,17 @@
 import {
   createNetexCacheEnvironmentKey,
   getLineTopologyFromNetexCache,
+  getNetexMemoryCacheTtlMs,
   type NetexRuntimeEnv,
 } from "./netexCache";
 import type { LineTopology } from "./types";
 
-const topologyCache = new Map<string, Promise<LineTopology>>();
+type TimedTopologyCacheEntry = {
+  expiresAt: number;
+  promise: Promise<LineTopology>;
+};
+
+const topologyCache = new Map<string, TimedTopologyCacheEntry>();
 
 export function getLineTopology(
   lineId: string,
@@ -14,12 +20,24 @@ export function getLineTopology(
   const cacheKey = `${createNetexCacheEnvironmentKey(runtimeEnv)}:${lineId}`;
   const cached = topologyCache.get(cacheKey);
 
+  if (cached && Date.now() <= cached.expiresAt) {
+    return cached.promise;
+  }
+
   if (cached) {
-    return cached;
+    topologyCache.delete(cacheKey);
   }
 
   const request = getLineTopologyFromNetexCache(lineId, runtimeEnv);
-  topologyCache.set(cacheKey, request);
+  topologyCache.set(cacheKey, {
+    expiresAt: Date.now() + getNetexMemoryCacheTtlMs(runtimeEnv),
+    promise: request,
+  });
+  request.catch(() => {
+    if (topologyCache.get(cacheKey)?.promise === request) {
+      topologyCache.delete(cacheKey);
+    }
+  });
 
   return request;
 }

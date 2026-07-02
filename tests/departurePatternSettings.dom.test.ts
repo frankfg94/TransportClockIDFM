@@ -454,6 +454,7 @@ describe("DeparturePatternModal settings", () => {
     { lineId: "line:IDFM:C01739", label: "Transilien J", transportType: "train" },
     { lineId: "line:IDFM:C01730", label: "Transilien P", transportType: "train" },
     { lineId: "line:IDFM:C01742", label: "RER A", transportType: "rer" },
+    { lineId: "line:IDFM:C01728", label: "RER D", transportType: "rer" },
   ])(
     "keeps $label full-line geometry readable from VueFlow node coordinates",
     async ({ lineId, label, transportType }) => {
@@ -507,6 +508,40 @@ describe("DeparturePatternModal settings", () => {
       miniForkGap,
       `Transilien P: nested mini-fork gap should leave room for station labels, got ${miniForkGap}`,
     ).toBeGreaterThanOrEqual(120);
+
+    wrapper.unmount();
+  });
+
+  it("keeps RER D lasso alternatives inside the southern corridor", async () => {
+    const wrapper = await mountRealLineGeometry("line:IDFM:C01728", "rer");
+    const stations = readStationGeometry(wrapper);
+    const villeneuve = findStationGeometry(stations, "Villeneuve-Saint-Georges");
+    const risOrangis = findStationGeometry(stations, "Ris-Orangis");
+    const grandBourg = findStationGeometry(stations, "Grand Bourg");
+    const evryValDeSeine = findStationGeometry(stations, "Évry - Val de Seine");
+    const viryChatillon = findStationGeometry(stations, "Viry-Châtillon");
+    const corbeil = findStationGeometry(stations, "Corbeil-Essonnes");
+
+    expect(
+      risOrangis.y,
+      "RER D: Ris-Orangis should stay below the main trunk instead of crossing over it",
+    ).toBeGreaterThan(villeneuve.y);
+    expect(
+      evryValDeSeine.y,
+      "RER D: Évry - Val de Seine should stay below the main trunk instead of crossing over it",
+    ).toBeGreaterThan(villeneuve.y);
+    expect(
+      risOrangis.y,
+      "RER D: Ris-Orangis should stay on the lower Viry-Corbeil corridor",
+    ).toBeGreaterThanOrEqual(viryChatillon.y);
+    expect(
+      grandBourg.y,
+      "RER D: Grand Bourg should stay on the lower Viry-Corbeil corridor",
+    ).toBeGreaterThanOrEqual(viryChatillon.y);
+    expect(
+      evryValDeSeine.y,
+      "RER D: Evry - Val de Seine should stay on the lower Viry-Corbeil corridor",
+    ).toBeGreaterThanOrEqual(corbeil.y);
 
     wrapper.unmount();
   });

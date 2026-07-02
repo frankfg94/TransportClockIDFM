@@ -243,6 +243,11 @@ type PatternPlacementProposal = {
   key: string;
   position: PatternLayoutPosition;
 };
+type InterpolatedPathLane = {
+  baseY: number;
+  initialLane: number;
+  laneGap: number;
+};
 
 const REGULAR_NODE_WIDTH = 184;
 const REGULAR_NODE_HEIGHT = 104;
@@ -3139,18 +3144,20 @@ function placeLoopPath(
     }
   }
 
-  const baseY =
-    hint.lane < 0
-      ? Math.min(startPosition.y, endPosition.y, 0)
-      : Math.max(startPosition.y, endPosition.y, 0);
+  const lane = resolveLoopInterpolatedPathLane({
+    hint,
+    startPosition,
+    endPosition,
+    layout,
+  });
   const y = findClearInterpolatedPathY({
     path,
     startPosition,
     endPosition,
     requiredSpan,
-    initialLane: hint.lane,
-    baseY,
-    laneGap: layout.branchGap,
+    initialLane: lane.initialLane,
+    baseY: lane.baseY,
+    laneGap: lane.laneGap,
     positions,
     layout,
   });
@@ -3169,6 +3176,62 @@ function placeLoopPath(
   });
   path.slice(1, -1).forEach((key) => placed.add(key));
   addPathEdges(path, visibleEdges);
+}
+
+function resolveLoopInterpolatedPathLane({
+  hint,
+  startPosition,
+  endPosition,
+  layout,
+}: {
+  hint: PatternLoopLayoutHint;
+  startPosition: PatternLayoutPosition;
+  endPosition: PatternLayoutPosition;
+  layout: PatternLayoutOptions;
+}): InterpolatedPathLane {
+  const hintSide = hint.lane < 0 ? -1 : 1;
+  const startSide = getPositionSide(startPosition.y);
+  const endSide = getPositionSide(endPosition.y);
+
+  if (startSide !== 0 && startSide === endSide && hintSide !== startSide) {
+    const corridorHeight = Math.min(
+      Math.abs(startPosition.y),
+      Math.abs(endPosition.y),
+    );
+
+    if (corridorHeight >= MIN_STATION_LAYOUT_SEPARATION * 2) {
+      return {
+        baseY: 0,
+        initialLane: startSide,
+        laneGap: corridorHeight / 2,
+      };
+    }
+
+    return {
+      baseY:
+        startSide *
+        Math.max(Math.abs(startPosition.y), Math.abs(endPosition.y), 0),
+      initialLane: startSide,
+      laneGap: layout.sameDirectionForkGap,
+    };
+  }
+
+  return {
+    baseY:
+      hint.lane < 0
+        ? Math.min(startPosition.y, endPosition.y, 0)
+        : Math.max(startPosition.y, endPosition.y, 0),
+    initialLane: hint.lane,
+    laneGap: layout.branchGap,
+  };
+}
+
+function getPositionSide(y: number): -1 | 0 | 1 {
+  if (Math.abs(y) < MIN_STATION_LAYOUT_SEPARATION) {
+    return 0;
+  }
+
+  return y < 0 ? -1 : 1;
 }
 
 function findBestConnectorPath(

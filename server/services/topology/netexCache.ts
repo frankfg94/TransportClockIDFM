@@ -207,9 +207,16 @@ export interface NetexLaneHint {
   side: NetexLaneSide;
 }
 
+const DEFAULT_NETEX_MEMORY_CACHE_TTL_MS = 300_000;
+
+type TimedPromiseCacheEntry<T> = {
+  expiresAt: number;
+  promise: Promise<T>;
+};
+
 const cacheSourcePromise = new Map<string, Promise<NetexCacheSource>>();
-const indexCache = new Map<string, Promise<NetexCacheIndex>>();
-const lineCache = new Map<string, Promise<LineTopology>>();
+const indexCache = new Map<string, TimedPromiseCacheEntry<NetexCacheIndex>>();
+const lineCache = new Map<string, TimedPromiseCacheEntry<LineTopology>>();
 let warnedLocalOnlyCache = false;
 const announcedCacheSources = new Set<string>();
 
@@ -243,6 +250,52 @@ const MODE_BY_CODE: Record<string, string> = {
   C02528: "tram",
 };
 
+export function getNetexMemoryCacheTtlMs(runtimeEnv?: NetexRuntimeEnv): number {
+  const configured = getRuntimeEnv(runtimeEnv).IDFM_NETEX_CACHE_MEMORY_TTL_MS;
+  const parsed = configured ? Number(configured) : Number.NaN;
+
+  return Number.isFinite(parsed) && parsed >= 0
+    ? parsed
+    : DEFAULT_NETEX_MEMORY_CACHE_TTL_MS;
+}
+
+function getTimedCacheEntry<T>(
+  cache: Map<string, TimedPromiseCacheEntry<T>>,
+  key: string,
+): Promise<T> | undefined {
+  const entry = cache.get(key);
+
+  if (!entry) {
+    return undefined;
+  }
+
+  if (Date.now() <= entry.expiresAt) {
+    return entry.promise;
+  }
+
+  cache.delete(key);
+  return undefined;
+}
+
+function setTimedCacheEntry<T>(
+  cache: Map<string, TimedPromiseCacheEntry<T>>,
+  key: string,
+  promise: Promise<T>,
+  ttlMs: number,
+): void {
+  const entry = {
+    expiresAt: Date.now() + ttlMs,
+    promise,
+  };
+
+  cache.set(key, entry);
+  promise.catch(() => {
+    if (cache.get(key)?.promise === promise) {
+      cache.delete(key);
+    }
+  });
+}
+
 export async function getLineTopologyFromNetexCache(
   lineId: string,
   runtimeEnv?: NetexRuntimeEnv,
@@ -252,7 +305,7 @@ export async function getLineTopologyFromNetexCache(
   const index = await loadNetexIndex(source);
   const code = resolveLineCode(lineId, index);
   const cacheKey = `${sourceId}:${code}`;
-  const cached = lineCache.get(cacheKey);
+  const cached = getTimedCacheEntry(lineCache, cacheKey);
 
   if (cached) {
     return cached;
@@ -262,7 +315,12 @@ export async function getLineTopologyFromNetexCache(
     adaptNetexLineToTopology,
   );
 
-  lineCache.set(cacheKey, request);
+  setTimedCacheEntry(
+    lineCache,
+    cacheKey,
+    request,
+    getNetexMemoryCacheTtlMs(runtimeEnv),
+  );
 
   return request;
 }
@@ -431,14 +489,19 @@ async function findNetexCacheSource(
 
 async function loadNetexIndex(source: NetexCacheSource): Promise<NetexCacheIndex> {
   const cacheKey = createSourceId(source);
-  const cached = indexCache.get(cacheKey);
+  const cached = getTimedCacheEntry(indexCache, cacheKey);
 
   if (cached) {
     return cached;
   }
 
   const request = readCacheJson<NetexCacheIndex>(source, "index.json");
-  indexCache.set(cacheKey, request);
+  setTimedCacheEntry(
+    indexCache,
+    cacheKey,
+    request,
+    getNetexMemoryCacheTtlMs(source.env),
+  );
 
   return request;
 }

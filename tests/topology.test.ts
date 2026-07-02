@@ -225,6 +225,27 @@ describe("NeTEx cache topology adapter", () => {
     expect(branchTerminalsByJunction.get(normalizeName("Le Mée"))).toEqualNames(["Melun"]);
     expect(parallelLoop, "RER D doit exposer la double boucle Viry / Corbeil").toBeDefined();
     expect(cycleLoop, "RER D doit exposer le grand cycle sud").toBeDefined();
+    const commonLane = parallelLoop?.laneHints?.find((hint) => hint.role === "common");
+    const lowerLane = parallelLoop?.laneHints?.find(
+      (hint) => hint.role === "alternative" && hint.side === "lower",
+    );
+    const commonLaneNames = namesForSchematicIds(cache, commonLane?.stationIds ?? []);
+    const lowerLaneNames = namesForSchematicIds(cache, lowerLane?.stationIds ?? []);
+    const cycleNames = namesForSchematicIds(cache, cycleLoop?.orderedStationIds ?? []);
+
+    expect(commonLane?.lane).toBe(0);
+    expect(commonLane?.side).toBe("center");
+    expect(includesName(commonLaneNames, "Grand Bourg")).toBe(true);
+    expect(includesName(commonLaneNames, "Ris-Orangis")).toBe(true);
+    expect(includesName(commonLaneNames, "Evry - Val de Seine")).toBe(true);
+    expect(includesName(commonLaneNames, "Grigny Centre")).toBe(false);
+    expect(lowerLane?.lane).toBeGreaterThan(0);
+    expect(includesName(lowerLaneNames, "Grigny Centre")).toBe(true);
+    expect(includesName(lowerLaneNames, "Le Bras de Fer")).toBe(true);
+    expect(includesName(lowerLaneNames, "Grand Bourg")).toBe(false);
+    expect(includesName(cycleNames, "Grand Bourg")).toBe(true);
+    expect(includesName(cycleNames, "Grigny Centre")).toBe(false);
+    expect(includesName(cycleNames, "Le Bras de Fer")).toBe(false);
     expect(namesForSchematicIds(cache, parallelLoop?.stationIds ?? [])).toEqual(
       expect.arrayContaining([
         "Grigny Centre",
