@@ -44,7 +44,7 @@ const props = withDefaults(
     defaultDashboardId?: string;
   }>(),
   {
-    mode: "dropdown",
+    mode: "multistep",
     showDashboardSelector: false,
     dashboardOptions: () => [],
     defaultDashboardId: DEFAULT_TRANSIT_PLACE_ID,
@@ -91,11 +91,15 @@ const canSelectLine = computed(() => Boolean(draft.family && draft.line));
 const hasInitialLine = computed(() =>
   Boolean(!props.lineOnly && props.initialLine && props.initialFamily),
 );
-const isMultiStep = computed(
-  () =>
-    props.lineOnly || (props.mode === "multistep" && !hasInitialLine.value),
-);
+const isMultiStep = computed(() => true);
+const firstStep = computed(() => (hasInitialLine.value ? 3 : 1));
 const stepCount = computed(() => (props.lineOnly ? 2 : 3));
+const visibleSteps = computed(() =>
+  Array.from(
+    { length: stepCount.value - firstStep.value + 1 },
+    (_, index) => firstStep.value + index,
+  ),
+);
 const modalWide = computed(
   () =>
     !props.lineOnly &&
@@ -527,7 +531,7 @@ function selectCurrentLine(): void {
 }
 
 function goToPreviousStep(): void {
-  setCurrentStep(Math.max(1, currentStep.value - 1), "backward");
+  setCurrentStep(Math.max(firstStep.value, currentStep.value - 1), "backward");
 }
 
 function goToNextStep(): void {
@@ -682,7 +686,7 @@ function normalizeText(value: string): string {
             class="station-form"
             :class="{ 'station-multistep__form': isMultiStep }"
           >
-            <template v-if="hasInitialLine">
+            <template v-if="!isMultiStep && hasInitialLine">
               <div class="station-board-modal__line-summary">
                 <span>Ligne sélectionnée</span>
                 <strong>{{ draft.line?.label }}</strong>
@@ -865,52 +869,70 @@ function normalizeText(value: string): string {
                 </span>
               </label>
 
-              <div v-else key="station" class="station-picker">
-                <div class="station-picker__header">
-                  <span>Station</span>
-                  <button
-                    v-if="draft.line"
-                    class="button-secondary station-picker__mode"
-                    type="button"
-                    @click="toggleStationSelectionMode"
-                  >
-                    {{
-                      stationSelectionMode === "list"
-                        ? "Plan détaillé"
-                        : "Liste simple"
-                    }}
-                  </button>
-                </div>
-
+              <div v-else key="station" class="station-multistep__station-step">
                 <div
-                  v-if="stationSelectionMode === 'list'"
-                  class="station-picker__list"
+                  v-if="hasInitialLine"
+                  class="station-board-modal__line-summary"
                 >
-                  <StationCombobox
-                    :model-value="draft.station"
-                    :options="filteredStationOptions"
-                    :query="stationQuery"
-                    :disabled="!draft.line"
-                    :loading="loadingStations"
-                    :inline="true"
-                    :transfer-map="stationTransfers"
-                    :transfer-loading-ids="stationTransferLoadingIds"
-                    @inspect="loadStationTransferBadges"
-                    @update:model-value="selectStationOption"
-                    @update:query="stationQuery = $event"
-                  />
-                  <span v-if="loadingStations" class="field-loader">
-                    <span aria-hidden="true" class="loader-dot"></span>
-                    Chargement des stations
-                  </span>
+                  <span>Ligne sélectionnée</span>
+                  <strong>{{ draft.line?.label }}</strong>
+                  <small>{{ draft.family }}</small>
                 </div>
 
-                <DetailedLineMapPicker
-                  v-else
-                  :line="draft.line"
-                  :selected-station-id="draft.station?.id"
-                  :smart-traffic-detection="settings.smartTrafficDetection"
-                  @select="selectStationFromMap"
+                <div class="station-picker">
+                  <div class="station-picker__header">
+                    <span>Station</span>
+                    <button
+                      v-if="draft.line"
+                      class="button-secondary station-picker__mode"
+                      type="button"
+                      @click="toggleStationSelectionMode"
+                    >
+                      {{
+                        stationSelectionMode === "list"
+                          ? "Plan détaillé"
+                          : "Liste simple"
+                      }}
+                    </button>
+                  </div>
+
+                  <div
+                    v-if="stationSelectionMode === 'list'"
+                    class="station-picker__list"
+                  >
+                    <StationCombobox
+                      :model-value="draft.station"
+                      :options="filteredStationOptions"
+                      :query="stationQuery"
+                      :disabled="!draft.line"
+                      :loading="loadingStations"
+                      :inline="true"
+                      :transfer-map="stationTransfers"
+                      :transfer-loading-ids="stationTransferLoadingIds"
+                      @inspect="loadStationTransferBadges"
+                      @update:model-value="selectStationOption"
+                      @update:query="stationQuery = $event"
+                    />
+                    <span v-if="loadingStations" class="field-loader">
+                      <span aria-hidden="true" class="loader-dot"></span>
+                      Chargement des stations
+                    </span>
+                  </div>
+
+                  <DetailedLineMapPicker
+                    v-else
+                    :line="draft.line"
+                    :selected-station-id="draft.station?.id"
+                    :smart-traffic-detection="settings.smartTrafficDetection"
+                    @select="selectStationFromMap"
+                  />
+                </div>
+
+                <StationBoardSelector
+                  v-if="showDashboardSelector"
+                  v-model="selectedDashboardId"
+                  :places="dashboardOptions"
+                  :disabled="adding"
                 />
               </div>
             </Transition>
@@ -949,7 +971,7 @@ function normalizeText(value: string): string {
             <button
               class="button-secondary"
               type="button"
-              :disabled="currentStep === 1"
+              :disabled="currentStep === firstStep"
               @click="goToPreviousStep"
             >
               Précédent
@@ -957,10 +979,10 @@ function normalizeText(value: string): string {
 
             <div
               class="station-multistep__steps"
-              :aria-label="`Progression : ${stepCount} étapes`"
+              :aria-label="`Progression : ${visibleSteps.length} étapes`"
             >
               <span
-                v-for="step in stepCount"
+                v-for="step in visibleSteps"
                 :key="step"
                 class="station-multistep__step"
                 :class="{
@@ -1018,5 +1040,31 @@ function normalizeText(value: string): string {
   color: var(--ink);
   font-size: 1rem;
   line-height: 1.12;
+}
+
+.station-multistep__station-step {
+  display: grid;
+  gap: 12px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+}
+
+.station-multistep__station-step > .station-board-modal__line-summary {
+  grid-row: 1;
+}
+
+.station-multistep__station-step > .station-picker {
+  grid-row: 2;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.station-multistep__station-step > .station-board-selector {
+  grid-row: 3;
+}
+
+.station-multistep__station-step .station-picker__list {
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
 }
 </style>

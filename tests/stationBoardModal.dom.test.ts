@@ -80,10 +80,11 @@ beforeEach(() => {
 });
 
 describe("StationBoardModal", () => {
-  it("keeps the normal modal flow unchanged", async () => {
+  it("always uses the multi-step flow, even when dropdown mode is requested", async () => {
     mount(StationBoardModal, {
       props: {
         open: true,
+        mode: "dropdown",
       },
       attachTo: document.body,
     });
@@ -93,8 +94,19 @@ describe("StationBoardModal", () => {
     expect(
       document.body.querySelector("[data-testid='station-board-selector']"),
     ).toBeNull();
-    expect(document.body.textContent).toContain("Réseau");
-    expect(document.body.textContent).toContain("Ligne");
+    expect(
+      document.body.querySelector(".station-board-modal--multistep"),
+    ).toBeTruthy();
+    expect(
+      document.body.querySelector(".station-board-modal--dropdown"),
+    ).toBeNull();
+    expect(
+      document.body.querySelector(".family-combobox__menu--inline"),
+    ).toBeTruthy();
+    expect(
+      document.body.querySelector(".rich-combobox__menu--inline"),
+    ).toBeNull();
+    expect(document.body.textContent).toContain("Suivant");
   });
 
   it("starts directly on station selection with an initial line and emits the selected dashboard", async () => {
@@ -121,11 +133,6 @@ describe("StationBoardModal", () => {
     expect(document.body.textContent).toContain("Ligne sélectionnée");
     expect(document.body.textContent).not.toContain("Sélectionner une ligne");
 
-    const stationButton = document.body.querySelector(
-      ".station-combobox__button",
-    ) as HTMLButtonElement;
-    stationButton.dispatchEvent(new Event("pointerdown", { bubbles: true }));
-    await flushPromises();
     const stationOption = document.body.querySelector(
       ".station-combobox__option",
     ) as HTMLButtonElement;
