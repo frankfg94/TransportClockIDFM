@@ -26,6 +26,7 @@ afterEach(() => {
   vi.resetModules();
   vi.doUnmock("nuxt/app");
   vi.doUnmock("vuedraggable");
+  vi.doUnmock("../src/components/StationBoardModal.vue");
   vi.doUnmock("../src/components/TransitBoard.vue");
   vi.doUnmock("../src/features/app-settings");
   vi.doUnmock("../src/features/weather");
@@ -259,7 +260,81 @@ describe("dashboard presets", () => {
     expect(route.query.fullscreenDisplay).toBeUndefined();
     expect(document.body.querySelector(".fullscreen-station-panel")).toBeFalsy();
   });
+
+  it("scrolls to the newly added station and highlights its card", async () => {
+    const scrollIntoView = vi.fn();
+    const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    Object.defineProperty(window, "requestAnimationFrame", {
+      configurable: true,
+      writable: true,
+      value: requestAnimationFrame,
+    });
+    const addedBoard = createBoard("added-board", "stop_area:added");
+
+    installDashboardMocks({});
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+
+    await flushPromises();
+
+    (
+      wrapper.vm as unknown as {
+        addCustomBoard: (board: TransitBoardConfig) => void;
+      }
+    ).addCustomBoard(addedBoard);
+    await flushPromises();
+    await wait(450);
+    await wrapper.vm.$nextTick();
+
+    expect(scrollIntoView).toHaveBeenCalledWith(
+      expect.objectContaining({
+        behavior: "smooth",
+        block: "end",
+        inline: "nearest",
+      }),
+    );
+    expect(
+      wrapper.get('[data-board-id="added-board"]').classes(),
+    ).toContain("board-drag-item--new");
+
+    await wait(500);
+    await wrapper.vm.$nextTick();
+
+    expect(
+      wrapper.get('[data-board-id="added-board"]').classes(),
+    ).not.toContain("board-drag-item--new");
+
+    if (originalScrollIntoView) {
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+        configurable: true,
+        value: originalScrollIntoView,
+      });
+    } else {
+      delete (HTMLElement.prototype as { scrollIntoView?: unknown })
+        .scrollIntoView;
+    }
+    Object.defineProperty(window, "requestAnimationFrame", {
+      configurable: true,
+      writable: true,
+      value: originalRequestAnimationFrame,
+    });
+  });
 });
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
+}
 
 function installDashboardMocks(
   query: Record<string, string | undefined>,

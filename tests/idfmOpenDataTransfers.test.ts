@@ -8,7 +8,6 @@ import {
   normalizeArretsLignesTransfers,
   resolveArretsLignesRecordsUrl,
 } from "../src/services/idfmOpenDataTransfers";
-import { fetchStationTransfers } from "../src/services/idfm";
 import type { StationSearchOption } from "../src/types/transit";
 
 afterEach(() => {
@@ -182,7 +181,8 @@ describe("IDFM arrets-lignes transfers", () => {
       { fetcher: fetchMock as unknown as typeof fetch },
     );
 
-    const requestedUrl = fetchMock.mock.calls[0]?.[0]?.toString() ?? "";
+    const firstCall = fetchMock.mock.calls[0] as unknown[] | undefined;
+    const requestedUrl = firstCall?.[0]?.toString() ?? "";
 
     expect(requestedUrl).toContain("data.iledefrance.fr");
     expect(requestedUrl).toContain("arrets-lignes");
@@ -974,7 +974,7 @@ describe("IDFM arrets-lignes transfers", () => {
         }),
       );
 
-    const transfers = await fetchStationTransfers(
+    const transfers = await fetchStationTransfersFromArretsLignes(
       {
         id: "FR::monomodalStopPlace:478044:FR1",
         label: "Vincennes",
@@ -986,7 +986,6 @@ describe("IDFM arrets-lignes transfers", () => {
         compatibleStopNames: ["Ch\u00e2teau de Vincennes"],
         currentLineLabel: "RER A",
         fetcher: fetchMock as unknown as typeof fetch,
-        transferScope: "per_station",
       },
     );
 
@@ -1024,8 +1023,10 @@ describe("IDFM arrets-lignes transfers", () => {
       { fetcher: fetchMock as unknown as typeof fetch },
     );
 
-    const exactUrl = fetchMock.mock.calls[0]?.[0]?.toString() ?? "";
-    const fallbackUrl = fetchMock.mock.calls[1]?.[0]?.toString() ?? "";
+    const exactCall = fetchMock.mock.calls[0] as unknown[] | undefined;
+    const fallbackCall = fetchMock.mock.calls[1] as unknown[] | undefined;
+    const exactUrl = exactCall?.[0]?.toString() ?? "";
+    const fallbackUrl = fallbackCall?.[0]?.toString() ?? "";
 
     expect(new URL(exactUrl).searchParams.get("where")).toBe(
       'stop_name = "Bry-sur-Marne"',

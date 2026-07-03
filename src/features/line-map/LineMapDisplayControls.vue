@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type {
-  GhostNetworkMode,
+  GhostNetworkModeKey,
   GhostNetworkModeVisibility,
   GhostNetworkScope,
 } from "../network-ghost";
@@ -16,7 +16,7 @@ const emit = defineEmits<{
   "update:visibility": [value: GhostNetworkModeVisibility];
 }>();
 
-const modeLabels: Record<GhostNetworkMode, string> = {
+const modeLabels: Record<GhostNetworkModeKey, string> = {
   bus: "Bus",
   metro: "Métro",
   tram: "Tramway",
@@ -24,20 +24,26 @@ const modeLabels: Record<GhostNetworkMode, string> = {
   rer: "RER",
 };
 
-const modes: GhostNetworkMode[] = ["bus", "metro", "tram", "noctilien", "rer"];
+const modes: GhostNetworkModeKey[] = [
+  "bus",
+  "metro",
+  "tram",
+  "noctilien",
+  "rer",
+];
 
 function updateMainVisibility(event: Event): void {
   emit("update:modelValue", (event.target as HTMLInputElement).checked);
 }
 
-function updateModeVisibility(mode: GhostNetworkMode, event: Event): void {
+function updateModeVisibility(mode: GhostNetworkModeKey, event: Event): void {
   emit("update:visibility", {
     ...props.visibility,
     [mode]: (event.target as HTMLInputElement).checked,
   });
 }
 
-function isModeDisabled(mode: GhostNetworkMode): boolean {
+function isModeDisabled(mode: GhostNetworkModeKey): boolean {
   return (
     props.ghostNetworkScope === "structural" &&
     (mode === "bus" || mode === "noctilien")

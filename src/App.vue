@@ -1,6 +1,7 @@
 ﻿<script setup lang="ts">
 import {
   computed,
+  type ComponentPublicInstance,
   defineAsyncComponent,
   nextTick,
   onBeforeUnmount,
@@ -155,6 +156,8 @@ const REFRESH_INTERVAL_MS = 30_000;
 const MOBILE_BREAKPOINT_QUERY = "(max-width: 760px)";
 const DESKTOP_DRAG_BREAKPOINT_QUERY =
   "(min-width: 761px) and (hover: hover) and (pointer: fine)";
+const NEW_BOARD_SCROLL_FALLBACK_MS = 420;
+const NEW_BOARD_HIGHLIGHT_MS = 500;
 const route = useRoute();
 const router = useRouter();
 const presetState = reactive<TransitPresetState>(
@@ -207,11 +210,16 @@ const mobileBoardTogglesInContextMenu = ref(false);
 const desktopDragEnabled = ref(false);
 const draggingBoards = ref(false);
 const draggableBoards = ref<TransitBoardConfig[]>([]);
+const highlightedBoardId = ref<string>();
 const primApiKeyConfigured = __IDFM_API_KEY_CONFIGURED__;
 let refreshTimer: number | undefined;
 const alarmTimers = new Map<string, number>();
+const boardCardElements = new Map<string, HTMLElement>();
 let toastTimer: number | undefined;
 let clockTimer: number | undefined;
+let boardRevealTimer: number | undefined;
+let boardHighlightTimer: number | undefined;
+let boardRevealCleanup: (() => void) | undefined;
 let mobileBreakpointQuery: MediaQueryList | undefined;
 let desktopDragBreakpointQuery: MediaQueryList | undefined;
 const departureServiceTypeCache = new Map<
@@ -1019,17 +1027,21 @@ function startBoardDrag(): void {
 }
 
 function saveBoardOrderAfterDrag(): void {
+  preferences.boardOrderIds = mergeDraggedVisibleBoardOrder();
+  draggingBoards.value = false;
+  saveActiveTransitPreferences();
+}
+
+function mergeDraggedVisibleBoardOrder(): string[] {
   const visibleBoardIds = new Set(visibleBoards.value.map((board) => board.id));
   const draggedBoardIds = draggableBoards.value.map((board) => board.id);
   let draggedBoardIndex = 0;
 
-  preferences.boardOrderIds = orderedBoards.value.map((board) =>
+  return orderedBoards.value.map((board) =>
     visibleBoardIds.has(board.id)
       ? (draggedBoardIds[draggedBoardIndex++] ?? board.id)
       : board.id,
   );
-  draggingBoards.value = false;
-  saveActiveTransitPreferences();
 }
 
 function createBoardRequestForSettings(
@@ -1279,26 +1291,30 @@ function toggleBoardVisibility(boardId: string): void {
 }
 
 function addCustomBoard(board: TransitBoardConfig): void {
+  upsertCustomBoard(board);
+  ensureBoardVisible(board.id);
+  ensureBoardState(board.id);
+  saveActiveTransitPreferences();
+  void refreshBoard(board.id);
+  void revealBoardAfterRender(board.id);
+}
+
+function upsertCustomBoard(board: TransitBoardConfig): void {
   const existingBoardIndex = preferences.customBoards.findIndex(
     (item) => item.id === board.id,
   );
 
-  if (existingBoardIndex >= 0) {
-    preferences.customBoards[existingBoardIndex] = board;
-  } else {
-    preferences.customBoards.push(board);
-  }
+  preferences.customBoards =
+    existingBoardIndex >= 0
+      ? preferences.customBoards.map((item, index) =>
+          index === existingBoardIndex ? board : item,
+        )
+      : [...preferences.customBoards, board];
+}
 
-  if (!preferences.visibleBoardIds.includes(board.id)) {
-    preferences.visibleBoardIds.push(board.id);
-  }
-  if (!preferences.boardOrderIds.includes(board.id)) {
-    preferences.boardOrderIds.push(board.id);
-  }
-
-  ensureBoardState(board.id);
-  saveActiveTransitPreferences();
-  void refreshBoard(board.id);
+function ensureBoardVisible(boardId: string): void {
+  preferences.visibleBoardIds = addBoardId(preferences.visibleBoardIds, boardId);
+  preferences.boardOrderIds = addBoardId(preferences.boardOrderIds, boardId);
 }
 
 function changeBoardStation(
@@ -1309,19 +1325,14 @@ function changeBoardStation(
     (board) => board.id !== previousBoard.id && board.id !== nextBoard.id,
   );
   preferences.customBoards.push(nextBoard);
-  preferences.visibleBoardIds = preferences.visibleBoardIds.map((id) =>
-    id === previousBoard.id ? nextBoard.id : id,
+  preferences.visibleBoardIds = addBoardId(
+    replaceBoardId(preferences.visibleBoardIds, previousBoard.id, nextBoard.id),
+    nextBoard.id,
   );
-  preferences.boardOrderIds = preferences.boardOrderIds.map((id) =>
-    id === previousBoard.id ? nextBoard.id : id,
+  preferences.boardOrderIds = addBoardId(
+    replaceBoardId(preferences.boardOrderIds, previousBoard.id, nextBoard.id),
+    nextBoard.id,
   );
-
-  if (!preferences.visibleBoardIds.includes(nextBoard.id)) {
-    preferences.visibleBoardIds.push(nextBoard.id);
-  }
-  if (!preferences.boardOrderIds.includes(nextBoard.id)) {
-    preferences.boardOrderIds.push(nextBoard.id);
-  }
 
   preferences.collapsedDirectionIds = preferences.collapsedDirectionIds.filter(
     (id) => !id.startsWith(`${previousBoard.id}:`),
@@ -1331,6 +1342,150 @@ function changeBoardStation(
   saveActiveTransitPreferences();
   updateAlarms(removeAlarmsForBoard(previousBoard.id, departureAlarms.value));
   void refreshBoard(nextBoard.id);
+}
+
+function addBoardId(boardIds: string[], boardId: string): string[] {
+  return boardIds.includes(boardId) ? boardIds : [...boardIds, boardId];
+}
+
+function replaceBoardId(
+  boardIds: string[],
+  previousBoardId: string,
+  nextBoardId: string,
+): string[] {
+  return dedupeBoardIds(
+    boardIds.map((boardId) =>
+      boardId === previousBoardId ? nextBoardId : boardId,
+    ),
+  );
+}
+
+function dedupeBoardIds(boardIds: string[]): string[] {
+  return [...new Set(boardIds)];
+}
+
+function setBoardCardElement(
+  boardId: string,
+  value: Element | ComponentPublicInstance | null,
+): void {
+  if (typeof HTMLElement !== "undefined" && value instanceof HTMLElement) {
+    boardCardElements.set(boardId, value);
+    return;
+  }
+
+  boardCardElements.delete(boardId);
+}
+
+async function revealBoardAfterRender(boardId: string): Promise<void> {
+  clearBoardRevealTimers();
+  highlightedBoardId.value = undefined;
+
+  // New cards are produced by Draggable after Vue updates the list, so wait
+  // for both the reactive flush and a frame before reading the DOM ref.
+  await nextTick();
+  await waitForNextFrame();
+
+  const element = boardCardElements.get(boardId);
+
+  if (!element) {
+    return;
+  }
+
+  scrollBoardIntoView(element);
+  await waitForBoardScroll();
+  highlightBoard(boardId);
+}
+
+function scrollBoardIntoView(element: HTMLElement): void {
+  if (typeof element.scrollIntoView !== "function") {
+    return;
+  }
+
+  element.scrollIntoView({
+    behavior: settings.value.reduceMotion ? "auto" : "smooth",
+    block: "end",
+    inline: "nearest",
+  });
+}
+
+function waitForBoardScroll(): Promise<void> {
+  if (settings.value.reduceMotion) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    const complete = (): void => {
+      if (resolved) {
+        return;
+      }
+
+      resolved = true;
+      clearBoardRevealTimer();
+      boardRevealCleanup?.();
+      boardRevealCleanup = undefined;
+      resolve();
+    };
+
+    if ("onscrollend" in window) {
+      window.addEventListener("scrollend", complete, { once: true });
+      boardRevealCleanup = () =>
+        window.removeEventListener("scrollend", complete);
+    }
+
+    boardRevealTimer = window.setTimeout(
+      complete,
+      NEW_BOARD_SCROLL_FALLBACK_MS,
+    );
+  });
+}
+
+function highlightBoard(boardId: string): void {
+  if (settings.value.reduceMotion) {
+    return;
+  }
+
+  highlightedBoardId.value = boardId;
+  boardHighlightTimer = window.setTimeout(() => {
+    if (highlightedBoardId.value === boardId) {
+      highlightedBoardId.value = undefined;
+    }
+
+    boardHighlightTimer = undefined;
+  }, NEW_BOARD_HIGHLIGHT_MS);
+}
+
+function clearBoardRevealTimers(): void {
+  clearBoardRevealTimer();
+
+  if (boardHighlightTimer !== undefined) {
+    window.clearTimeout(boardHighlightTimer);
+    boardHighlightTimer = undefined;
+  }
+
+  boardRevealCleanup?.();
+  boardRevealCleanup = undefined;
+}
+
+function clearBoardRevealTimer(): void {
+  if (boardRevealTimer !== undefined) {
+    window.clearTimeout(boardRevealTimer);
+    boardRevealTimer = undefined;
+  }
+}
+
+function waitForNextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    if (
+      typeof window === "undefined" ||
+      typeof window.requestAnimationFrame !== "function"
+    ) {
+      resolve();
+      return;
+    }
+
+    window.requestAnimationFrame(() => resolve());
+  });
 }
 
 function removeCustomBoard(boardId: string): void {
@@ -1966,6 +2121,7 @@ onBeforeUnmount(() => {
   if (clockTimer) {
     window.clearInterval(clockTimer);
   }
+  clearBoardRevealTimers();
   stopSoftAlarm();
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   document.removeEventListener(
@@ -2265,7 +2421,14 @@ onBeforeUnmount(() => {
               @end="saveBoardOrderAfterDrag"
             >
               <template #item="{ element: board }">
-                <div class="board-drag-item">
+                <div
+                  :ref="(element) => setBoardCardElement(board.id, element)"
+                  class="board-drag-item"
+                  :class="{
+                    'board-drag-item--new': highlightedBoardId === board.id,
+                  }"
+                  :data-board-id="board.id"
+                >
                   <TransitBoard
                     :board="board"
                     :departures="states[board.id].departures"

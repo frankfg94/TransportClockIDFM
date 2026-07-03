@@ -52,20 +52,27 @@ const needsParticleRenderer = computed(
       backgroundKind.value === "snow"),
 );
 const particlesReady = ref(false);
-const app = getCurrentInstance()?.appContext.app;
+const appContext = getCurrentInstance()?.appContext;
+const app = appContext?.app;
 let particlePluginLoading: Promise<void> | undefined;
+const isRainLikeBackground = computed(
+  () => backgroundKind.value === "rain" || backgroundKind.value === "storm",
+);
+const isSnowBackground = computed(() => backgroundKind.value === "snow");
+const showRainParticleLayer = computed(
+  () => showAnimation.value && isRainLikeBackground.value,
+);
+const showSnowParticleLayer = computed(
+  () => showAnimation.value && isSnowBackground.value,
+);
 const showRainDroplets = computed(
-  () =>
-    showAnimation.value &&
-    (backgroundKind.value === "rain" || backgroundKind.value === "storm"),
+  () => showAnimation.value && isRainLikeBackground.value,
 );
 const showRainParticles = computed(
-  () =>
-    particlesReady.value &&
-    (backgroundKind.value === "rain" || backgroundKind.value === "storm"),
+  () => particlesReady.value && showRainParticleLayer.value,
 );
 const showSnowParticles = computed(
-  () => particlesReady.value && backgroundKind.value === "snow",
+  () => particlesReady.value && showSnowParticleLayer.value,
 );
 
 watch(
@@ -80,6 +87,11 @@ watch(
 
 async function loadParticleRenderer(): Promise<void> {
   if (particlesReady.value || !app) {
+    return;
+  }
+
+  if (appContext?.components.VueParticles) {
+    particlesReady.value = true;
     return;
   }
 
@@ -425,12 +437,22 @@ function alertIcon(value: WeatherAlert) {
       class="weather-backdrop__particles weather-backdrop__particles--rain"
       :options="rainParticleOptions"
     />
+    <span
+      v-else-if="showRainParticleLayer"
+      id="weather-rain-particles"
+      class="weather-backdrop__particles weather-backdrop__particles--rain"
+    ></span>
     <VueParticles
       v-if="showSnowParticles"
       id="weather-snow-particles"
       class="weather-backdrop__particles weather-backdrop__particles--snow"
       :options="snowParticleOptions"
     />
+    <span
+      v-else-if="showSnowParticleLayer"
+      id="weather-snow-particles"
+      class="weather-backdrop__particles weather-backdrop__particles--snow"
+    ></span>
     <span v-if="showRainDroplets" class="weather-backdrop__glass"></span>
     <template v-if="showRainDroplets">
       <span

@@ -238,7 +238,7 @@ const ghostModeVisibility = reactive<GhostNetworkModeVisibility>({
   rer: true,
 });
 let latestMapRequest = 0;
-let favoriteAlertTimeout: ReturnType<typeof window.setTimeout> | undefined;
+let favoriteAlertTimeout: number | undefined;
 let zoomScrollAnimationFrame: number | undefined;
 let pendingZoomScrollLeft: number | undefined;
 let pendingZoomScrollTop: number | undefined;

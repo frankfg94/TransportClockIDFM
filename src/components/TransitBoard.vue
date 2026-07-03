@@ -8,7 +8,6 @@ import {
   MapPin,
   Maximize2,
   MoreVertical,
-  Radio,
   Route,
   Rss,
   Trash,
@@ -118,6 +117,9 @@ const hiddenDirectionsCount = computed(
 );
 
 const isCompactPatternInteraction = ref(false);
+const canOpenPatternFromRow = computed(
+  () => !isCompactPatternInteraction.value,
+);
 const actionsOpen = ref(false);
 const actionsTrigger = ref<HTMLElement>();
 const stationEditorOpen = ref(false);
@@ -349,14 +351,6 @@ function formatRemainingStopCount(departure: Departure): string {
   return departure.remainingStopCount > 1
     ? `${departure.remainingStopCount} arrêts`
     : `${departure.remainingStopCount} arrêt`;
-}
-
-function canShowPattern(): boolean {
-  return true;
-}
-
-function canAutoOpenPattern(): boolean {
-  return canShowPattern() && !isCompactPatternInteraction.value;
 }
 
 function openPatternForDeparture(payload: DeparturePatternPayload): void {
@@ -730,7 +724,7 @@ onUnmounted(() => {
                   'departure--cancelled': departure.status === 'cancelled',
                 }"
                 @click="
-                  canAutoOpenPattern() &&
+                  canOpenPatternFromRow &&
                   openPatternForDeparture({
                     board,
                     directionGroup: group,
@@ -739,7 +733,7 @@ onUnmounted(() => {
                 "
               >
                 <button
-                  v-if="canAutoOpenPattern()"
+                  v-if="canOpenPatternFromRow"
                   class="departure__main departure__main-button"
                   type="button"
                   @click.stop="
@@ -823,7 +817,6 @@ onUnmounted(() => {
                 </div>
 
                 <button
-                  v-if="canShowPattern()"
                   class="departure-pattern-button"
                   type="button"
                   aria-label="Afficher la desserte"

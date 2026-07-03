@@ -89,6 +89,7 @@ afterEach(() => {
     pending: 3,
     total: 5,
   };
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -143,6 +144,13 @@ describe("DeparturePatternModal transfer progress", () => {
     };
     const hydrateMock = vi.mocked(hydrateDeparturePatternTransfers);
     hydrateMock.mockClear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ checks: [] }),
+      })),
+    );
 
     const wrapper = mount(DeparturePatternModal, {
       props: {

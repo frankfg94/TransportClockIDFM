@@ -88,6 +88,8 @@ export interface TransferBundleLocalCacheOptions {
 }
 
 export interface TransferBundleClearOptions extends TransferBundleLocalCacheOptions {
+  /** Controls whether the shared backend cache should also be cleared. */
+  backendCacheEnabled?: boolean;
   /** Optional filter used only for local cleanup. Remote cleanup still accepts lineId/id. */
   nearbyDistanceMeters?: number;
   requestConcurrency?: number;
@@ -811,6 +813,12 @@ async function requestTransferBundleCacheDelete(payload?: {
   }).catch(() => undefined);
 }
 
+function shouldClearBackendTransferBundleCache(
+  options?: TransferBundleClearOptions,
+): boolean {
+  return options?.backendCacheEnabled !== false;
+}
+
 export function clearPendingTransferBundleRequestsForTests(): void {
   pendingTransferBundleRequests.clear();
 }
@@ -896,6 +904,10 @@ export function clearTransferBundles(
     TRANSFER_BUNDLE_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
   }
 
+  if (!shouldClearBackendTransferBundleCache(input)) {
+    return Promise.resolve();
+  }
+
   return requestTransferBundleCacheDelete();
 }
 
@@ -921,6 +933,10 @@ export function deleteTransferBundle(
 
   if (localStorage) {
     deleteLocalTransferBundleById(id, localStorage);
+  }
+
+  if (!shouldClearBackendTransferBundleCache(input)) {
+    return Promise.resolve();
   }
 
   return requestTransferBundleCacheDelete({ id });
@@ -952,6 +968,10 @@ export function clearTransferBundleForBoard(
 
   if (localStorage) {
     deleteLocalTransferBundlesForLine(lineId, localStorage, input, board);
+  }
+
+  if (!shouldClearBackendTransferBundleCache(input)) {
+    return Promise.resolve();
   }
 
   return requestTransferBundleCacheDelete({ lineId });
@@ -1211,10 +1231,11 @@ function getBundleLineLabel(board: TransitBoardConfig): string {
 }
 
 function getStopAreaRef(source: DepartureCall | LineRouteStop): string | undefined {
-  return (
-    source.stopAreaRef ??
-    ("station" in source ? source.station.scheduleStopAreaRef : undefined)
-  );
+  if ("stopAreaRef" in source && source.stopAreaRef) {
+    return source.stopAreaRef;
+  }
+
+  return "station" in source ? source.station.scheduleStopAreaRef : undefined;
 }
 
 function isTransferBundleRecord(value: unknown): value is TransferBundleRecord {

@@ -21,6 +21,22 @@
   height: 100%;
 }
 
+.board-drag-item--new > .board {
+  animation: board-new-card-settle 500ms ease-in-out;
+  transform-origin: center;
+}
+
+@keyframes board-new-card-settle {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  45% {
+    transform: scale(1.025);
+  }
+}
+
 .boards-grid--draggable .board {
   cursor: grab;
 }
@@ -258,6 +274,12 @@
 @media (hover: none) {
   .board-actions__trigger {
     opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-drag-item--new > .board {
+    animation: none;
   }
 }
 

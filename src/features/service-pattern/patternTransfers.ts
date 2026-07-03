@@ -598,8 +598,11 @@ function getBundledTransfers(
   transfersByStopAreaRef: Record<string, TransferLineOption[]>,
 ): TransferLineOption[] {
   const stopAreaRef =
-    source.stopAreaRef ??
-    ("station" in source ? source.station.scheduleStopAreaRef : undefined);
+    "stopAreaRef" in source && source.stopAreaRef
+      ? source.stopAreaRef
+      : "station" in source
+        ? source.station.scheduleStopAreaRef
+        : undefined;
 
   return stopAreaRef ? transfersByStopAreaRef[stopAreaRef] ?? [] : [];
 }

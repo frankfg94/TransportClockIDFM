@@ -270,8 +270,9 @@ const MAX_REALISTIC_MIN_STOP_GAP_COEFFICIENT = 1.25;
 const MIN_REALISTIC_MAX_STOP_GAP_COEFFICIENT = 1.25;
 const MAX_REALISTIC_STOP_GAP_COEFFICIENT = 8;
 const DISTANCE_LABEL_EXIT_MS = 240;
-const TRANSFER_HYDRATION_STALLED_RETRY_MS = 60_000;
+const TRANSFER_HYDRATION_STALLED_RETRY_MS = 30_000;
 const TRANSFER_HYDRATION_RATE_LIMIT_CHECK_MS = 1_200;
+const TRANSFER_HYDRATION_HEALTH_CHECK_TIMEOUT_MS = 2_500;
 type PatternSpacingOptions = {
   compactBranchGap: number;
   compactForkGap: number;
@@ -383,6 +384,7 @@ const transferHydrationProgress = ref<PatternTransferHydrationProgress>({
 });
 const transferHydrationRetryVisible = ref(false);
 const transferHydrationRateLimited = ref(false);
+const forceFreshTransferHydration = ref(false);
 const activeStationTooltipKey = ref<string>();
 let transferHydrationRequest = 0;
 let patternDistanceLabelHideTimer: number | undefined;
@@ -934,6 +936,8 @@ async function hydratePatternTransfers(): Promise<void> {
   const requestId = ++transferHydrationRequest;
   const pattern = props.pattern;
   const board = props.board;
+  const bypassBackendBundleCache = forceFreshTransferHydration.value;
+  forceFreshTransferHydration.value = false;
 
   hydratedPattern.value = pattern;
   transferHydrationRetryVisible.value = false;
@@ -977,7 +981,8 @@ async function hydratePatternTransfers(): Promise<void> {
           }
         },
         localCacheEnabled: props.transferBundleLocalCacheEnabled,
-        backendCacheEnabled: props.transferBundleBackendCacheEnabled,
+        backendCacheEnabled:
+          props.transferBundleBackendCacheEnabled && !bypassBackendBundleCache,
         retentionDays: props.transferBundleRetentionDays,
         transferBundleRequestConcurrency:
           props.transferBundleRequestConcurrency,
@@ -1013,8 +1018,16 @@ async function retryTransferHydrationFromScratch(): Promise<void> {
     return;
   }
 
-  await clearTransferBundleForBoard(props.board);
+  // Local cache is cleared synchronously; backend cleanup is best-effort so the
+  // retry action does not wait on network availability before restarting.
+  void Promise.resolve(
+    clearTransferBundleForBoard(props.board, {
+      backendCacheEnabled: false,
+      localCacheEnabled: props.transferBundleLocalCacheEnabled,
+    }),
+  ).catch(() => undefined);
   transferHydrationRequest += 1;
+  forceFreshTransferHydration.value = true;
   transferHydrationRateLimited.value = false;
   resetTransferHydrationStallState();
   clearTransferHydrationRateLimitTimer();
@@ -1075,9 +1088,9 @@ async function checkTransferHydrationRateLimit(
   }
 
   try {
-    const response = await fetch(toServerApiUrl("/api/health"));
+    const response = await fetchTransferHydrationHealth();
 
-    if (!response.ok) {
+    if (!response?.ok) {
       return;
     }
 
@@ -1096,6 +1109,30 @@ async function checkTransferHydrationRateLimit(
   } catch {
     // Health is best-effort here: the loader must keep its normal behavior if
     // the health endpoint itself is unavailable.
+  }
+}
+
+async function fetchTransferHydrationHealth(): Promise<Response | undefined> {
+  const controller =
+    typeof AbortController === "undefined" ? undefined : new AbortController();
+  const timeout =
+    controller && typeof window !== "undefined"
+      ? window.setTimeout(
+          () => controller.abort(),
+          TRANSFER_HYDRATION_HEALTH_CHECK_TIMEOUT_MS,
+        )
+      : undefined;
+
+  try {
+    return await fetch(toServerApiUrl("/api/health"), {
+      signal: controller?.signal,
+    });
+  } catch {
+    return undefined;
+  } finally {
+    if (timeout !== undefined) {
+      window.clearTimeout(timeout);
+    }
   }
 }
 

@@ -423,7 +423,7 @@ describe("transfer bundle endpoint", () => {
   });
 
   it("resolves NeTEx StopPlace refs directly to Navitia stop-area refs", async () => {
-    const fetcher = vi.fn(async () =>
+    const fetcher = vi.fn(async (_input: RequestInfo | URL) =>
       jsonResponse({
         connections: [],
         places_nearby: [],
@@ -439,6 +439,7 @@ describe("transfer bundle endpoint", () => {
         currentLineId: "line:IDFM:C01742",
         currentLineLabel: "RER A",
         fetcher: fetcher as unknown as typeof fetch,
+        requestSpacingMs: 0,
         retentionDays: 15,
       },
     );
@@ -510,6 +511,7 @@ describe("transfer bundle endpoint", () => {
           currentLineId: "line:IDFM:C01742",
           currentLineLabel: "RER A",
           fetcher: fetcher as unknown as typeof fetch,
+          requestSpacingMs: 0,
           retentionDays: 15,
         },
       ),

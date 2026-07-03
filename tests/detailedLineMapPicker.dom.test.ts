@@ -129,7 +129,7 @@ describe("DetailedLineMapPicker sidebar", () => {
 
     expect(distanceSwitch.attributes("aria-checked")).toBe("true");
     expect(wrapper.get(".line-map-segment-distance").text()).toContain("500 m");
-    expect(wrapper.get(".line-map-segment-distance__bubble").exists()).toBe(
+    expect(wrapper.find(".line-map-segment-distance__bubble").exists()).toBe(
       true,
     );
 

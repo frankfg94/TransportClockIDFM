@@ -891,7 +891,13 @@ describe("transfer bundles", () => {
       15,
     );
 
-    const payload = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string) as Record<string, unknown>;
+    const firstCall = fetchMock.mock.calls[0] as unknown as
+      | [RequestInfo | URL, RequestInit?]
+      | undefined;
+    const payload = JSON.parse(String(firstCall?.[1]?.body ?? "{}")) as Record<
+      string,
+      unknown
+    >;
 
     expect(payload).not.toHaveProperty("cacheBust");
   });
