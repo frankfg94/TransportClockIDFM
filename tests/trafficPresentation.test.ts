@@ -31,6 +31,19 @@ describe("traffic presentation", () => {
       symbol: "x",
       tone: "red",
     });
+
+    expect(
+      getTrafficAlertPresentation([
+        createDisruption({
+          id: "non-served",
+          message: "La gare de Champigny n'est pas desservie.",
+        }),
+      ]),
+    ).toEqual({
+      label: "Interruption",
+      symbol: "x",
+      tone: "red",
+    });
   });
 });
 

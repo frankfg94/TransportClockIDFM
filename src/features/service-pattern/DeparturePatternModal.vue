@@ -24,6 +24,7 @@ import { Controls } from "@vue-flow/controls";
 import {
   Bus,
   Expand,
+  Info,
   Minimize2,
   TriangleAlert,
 } from "lucide-vue-next";
@@ -45,7 +46,6 @@ import {
 } from "./flowDirection";
 import {
   countPatternTopologyStations,
-  shouldUseCompactPatternFlow,
 } from "./compactPatternFlow";
 import {
   hydrateDeparturePatternTransfers,
@@ -62,6 +62,10 @@ import {
 import type { TransferResolverMode } from "./transferResolverMode";
 import type { HealthCheck, HealthResponse } from "../health/types";
 import TrafficDisruptionCard from "../traffic/TrafficDisruptionCard.vue";
+import {
+  getTrafficDisruptionDisplayPeriod,
+  parseTrafficDate,
+} from "../traffic/trafficTiming";
 import type { TrafficLineReport } from "../traffic";
 import {
   type PatternTrafficImpact,
@@ -151,7 +155,8 @@ interface PatternCityZoneNodeData {
 interface PatternTrafficMarkerNodeData {
   key: string;
   kind: PatternTrafficImpact["kind"];
-  restartTimeLabel?: string;
+  statusLabel: string;
+  detailLabel?: string;
   replacementBus: boolean;
   trafficImpact: PatternTrafficImpact;
 }
@@ -337,7 +342,7 @@ const props = withDefaults(
   {
     showMiniMap: true,
     showCityZones: true,
-    compactMode: "auto",
+    compactMode: "compact",
     patternRoundedCurves: false,
     patternCompactBranchGap: DEFAULT_COMPACT_BRANCH_GAP,
     patternCompactForkGap: DEFAULT_COMPACT_FORK_GAP,
@@ -363,7 +368,7 @@ const emit = defineEmits<{
 }>();
 
 const isPatternFlowFullscreen = ref(false);
-const patternVisualMode = ref<PatternVisualMode>("comfort");
+const patternVisualMode = ref<PatternVisualMode>("compact");
 const showPatternDistances = ref(false);
 const patternDistanceLabelsVisible = ref(false);
 const patternDistanceLabelsLeaving = ref(false);
@@ -680,9 +685,7 @@ function resolveInitialPatternVisualMode(): PatternVisualMode {
     return "realistic";
   }
 
-  return shouldUseCompactPatternFlow(displayPattern.value?.lineTopology ?? [])
-    ? "compact"
-    : "comfort";
+  return "compact";
 }
 
 function createPatternLayoutOptions(
@@ -1378,9 +1381,6 @@ function createTrafficMarkerFlowNodes({
   const edgeByKey = new Map(
     edges.map((edge) => [createEdgeKey(edge.source, edge.target), edge]),
   );
-  const markerWidth = compact ? 120 : 156;
-  const markerOffset = compact ? 58 : 52;
-
   return segments
     .map((segment): PatternTrafficMarkerFlowNode | undefined => {
       const anchor = getTrafficSegmentAnchor(segment, edgeByKey, positions);
@@ -1388,6 +1388,9 @@ function createTrafficMarkerFlowNodes({
       if (!anchor) {
         return undefined;
       }
+
+      const markerWidth = getTrafficMarkerWidth(segment, compact);
+      const markerOffset = getTrafficMarkerOffset(segment, compact);
 
       return {
         id: `traffic-marker:${segment.id}`,
@@ -1405,13 +1408,140 @@ function createTrafficMarkerFlowNodes({
         data: {
           key: segment.id,
           kind: segment.kind,
-          restartTimeLabel: segment.restartTimeLabel,
+          statusLabel: getTrafficMarkerStatusLabel(segment),
+          detailLabel: getTrafficMarkerDetailLabel(segment),
           replacementBus: segment.replacementBus,
           trafficImpact: segment,
         },
       };
     })
     .filter((node): node is PatternTrafficMarkerFlowNode => Boolean(node));
+}
+
+function getTrafficMarkerWidth(
+  segment: PatternTrafficImpact,
+  compact: boolean,
+): number {
+  if (segment.kind === "interruption") {
+    return compact ? 340 : 420;
+  }
+
+  return compact ? 120 : 156;
+}
+
+function getTrafficMarkerOffset(
+  segment: PatternTrafficImpact,
+  compact: boolean,
+): number {
+  if (segment.kind === "interruption") {
+    return compact ? 74 : 66;
+  }
+
+  return compact ? 58 : 52;
+}
+
+function getTrafficMarkerStatusLabel(segment: PatternTrafficImpact): string {
+  if (segment.replacementBus) {
+    return "Bus de remplacement";
+  }
+
+  return segment.kind === "interruption"
+    ? "Trafic interrompu"
+    : "Trafic perturbé";
+}
+
+function getTrafficMarkerDetailLabel(
+  segment: PatternTrafficImpact,
+): string | undefined {
+  const relativeRestartLabel = getTodayRestartRelativeLabel(segment);
+
+  if (relativeRestartLabel) {
+    return relativeRestartLabel;
+  }
+
+  if (segment.restartTimeLabel) {
+    return `Reprise à ${segment.restartTimeLabel}`;
+  }
+
+  return segment.endDateLabel ? `Reprise le ${segment.endDateLabel}` : undefined;
+}
+
+function getTodayRestartRelativeLabel(
+  segment: PatternTrafficImpact,
+): string | undefined {
+  const now = new Date();
+  const restartDate =
+    getTodayRestartDateFromTimeLabel(segment.restartTimeLabel, now) ??
+    (segment.endDateLabelSource === "text"
+      ? undefined
+      : parseTrafficDate(
+          getTrafficDisruptionDisplayPeriod(segment.disruption)?.end,
+        ));
+
+  if (!restartDate || !isSameLocalDay(restartDate, now)) {
+    return undefined;
+  }
+
+  const remainingMinutes = Math.ceil(
+    (restartDate.getTime() - now.getTime()) / 60_000,
+  );
+
+  if (remainingMinutes <= 0) {
+    return undefined;
+  }
+
+  const restartTimeLabel = formatTrafficRestartTime(restartDate);
+
+  if (remainingMinutes < 60) {
+    const unit = remainingMinutes === 1 ? "minute" : "minutes";
+
+    return `Reprise dans ${remainingMinutes} ${unit} (${restartTimeLabel})`;
+  }
+
+  const remainingHours = Math.ceil(remainingMinutes / 60);
+  const unit = remainingHours === 1 ? "heure" : "heures";
+
+  return `Reprise dans ${remainingHours} ${unit} (${restartTimeLabel})`;
+}
+
+function getTodayRestartDateFromTimeLabel(
+  timeLabel: string | undefined,
+  now: Date,
+): Date | undefined {
+  if (!timeLabel) {
+    return undefined;
+  }
+
+  const match = timeLabel.match(/^(\d{2}):(\d{2})$/u);
+
+  if (!match) {
+    return undefined;
+  }
+
+  const [, hourText, minuteText] = match;
+  const restartDate = new Date(now);
+
+  restartDate.setHours(Number(hourText), Number(minuteText), 0, 0);
+
+  return restartDate;
+}
+
+function isSameLocalDay(left: Date, right: Date): boolean {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
+}
+
+function formatTrafficRestartTime(date: Date): string {
+  return new Intl.DateTimeFormat("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+    .format(date)
+    .replace(":", "h");
 }
 
 function getTrafficSegmentAnchor(
@@ -5170,11 +5300,9 @@ onBeforeUnmount(() => {
                       </div>
                     </template>
                     <template #node-traffic-marker="{ data }">
-                      <button
+                      <div
                         class="pattern-flow-traffic-marker"
                         :class="`pattern-flow-traffic-marker--${data.kind}`"
-                        type="button"
-                        @click.stop="showTrafficImpactPopup(data.trafficImpact)"
                       >
                         <span
                           v-if="data.replacementBus"
@@ -5190,16 +5318,28 @@ onBeforeUnmount(() => {
                         >
                           <TriangleAlert />
                         </span>
-                        <strong v-if="data.restartTimeLabel">
-                          Reprise à {{ data.restartTimeLabel }}
-                        </strong>
-                        <strong v-else-if="data.replacementBus">
-                          Bus de remplacement
-                        </strong>
-                        <strong v-else>
-                          Trafic perturbé
-                        </strong>
-                      </button>
+                        <span class="pattern-flow-traffic-marker__content">
+                          <span class="pattern-flow-traffic-marker__copy">
+                            <strong>{{ data.statusLabel }}</strong>
+                            <small v-if="data.detailLabel">
+                              {{ data.detailLabel }}
+                            </small>
+                          </span>
+                          <button
+                            class="pattern-flow-traffic-marker__details"
+                            type="button"
+                            @pointerdown.stop="
+                              showTrafficImpactPopup(data.trafficImpact)
+                            "
+                            @click.stop="
+                              showTrafficImpactPopup(data.trafficImpact)
+                            "
+                          >
+                            <Info aria-hidden="true" />
+                            <span>Details</span>
+                          </button>
+                        </span>
+                      </div>
                     </template>
                     <template #node-station="{ data }">
                       <div
@@ -5304,6 +5444,7 @@ onBeforeUnmount(() => {
                     :line-color="board?.line.color ?? '#0064ff'"
                     @focus="focusPatternFlowOn"
                   />
+                  <!-- Affiche le tooltip d'information trafic, notamment pour un trafic interrompu. -->
                   <Transition name="pattern-flow-traffic-popup">
                     <aside
                       v-if="activeTrafficImpact"

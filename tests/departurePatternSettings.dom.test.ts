@@ -167,6 +167,7 @@ const COMPACT_STATION_NAME_TOP_OFFSET = 70;
 const CITY_ZONE_STATION_NAME_MIN_VERTICAL_GAP = 36;
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -1828,9 +1829,9 @@ describe("DeparturePatternModal settings", () => {
           disruptions: [
             {
               id: "traffic-a-b",
-              title: "Trafic interrompu",
-              message:
-                "Trafic interrompu entre Station A et Station C et perturbe sur le reste de la ligne. Reprise estimee : 00:00.",
+              title:
+                "Jusqu'au 24 juillet inclus, le trafic est interrompu entre Station A et Station C.",
+              message: "Le trafic est perturbe sur le reste de la ligne.",
               kind: "incident",
               applicationPeriods: [],
               impactedLineRefs: ["line:test"],
@@ -1895,12 +1896,254 @@ describe("DeparturePatternModal settings", () => {
       wrapper.find(".pattern-flow-station--traffic-interruption").exists(),
     ).toBe(true);
 
+    const interruptionMarker = wrapper.get(
+      ".pattern-flow-traffic-marker--interruption",
+    );
+
+    expect(interruptionMarker.text()).toContain("Trafic interrompu");
+    expect(interruptionMarker.text()).toContain("Reprise le 24 juillet");
+    expect(interruptionMarker.text()).not.toContain("Trafic perturbé");
+
+    expect(interruptionMarker.element.tagName.toLowerCase()).toBe("div");
+    expect(wrapper.find(".pattern-flow-traffic-popup").exists()).toBe(false);
+
+    await interruptionMarker.trigger("click");
+
+    expect(wrapper.find(".pattern-flow-traffic-popup").exists()).toBe(false);
+
+    const detailsButton = interruptionMarker.get(
+      ".pattern-flow-traffic-marker__details",
+    );
+
+    expect(detailsButton.element.tagName.toLowerCase()).toBe("button");
+    expect(detailsButton.text()).toContain("Details");
+
+    await detailsButton.trigger("click");
+
+    expect(wrapper.find(".pattern-flow-traffic-popup").exists()).toBe(true);
+    expect(wrapper.text()).toContain("Jusqu'au 24 juillet inclus");
+
+    await wrapper.get(".pattern-flow-traffic-popup__close").trigger("click");
+
+    expect(wrapper.find(".pattern-flow-traffic-popup").exists()).toBe(false);
+
     await wrapper
       .get(".pattern-flow-edge--traffic-interruption")
       .trigger("click");
 
-    expect(wrapper.text()).toContain("Trafic interrompu");
-    expect(wrapper.text()).toContain("Reprise estimee");
+    expect(wrapper.text()).toContain("Jusqu'au 24 juillet inclus");
+    expect(wrapper.text()).toContain("Le trafic est perturbe");
+
+    wrapper.unmount();
+  });
+
+  it("shows same-day traffic restart as a relative delay", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 8, 1, 50, 0));
+
+    const trafficPattern: DepartureCallingPattern = {
+      ...pattern,
+      calls: [
+        createCall("station-a", "Station A", "Paris", true),
+        createCall("champigny", "Champigny", "Saint-Maur-des-Fosses"),
+        createCall("station-c", "Station C", "Paris"),
+      ],
+      lineTopology: [
+        {
+          id: "traffic-sequence",
+          label: "Traffic sequence",
+          stops: [
+            createRouteStop("station-a", "Station A", 652146, 6862288),
+            createRouteStop("champigny", "Champigny", 652646, 6862288),
+            createRouteStop("station-c", "Station C", 653146, 6862288),
+          ],
+        },
+      ],
+    };
+    const trafficResponse: TrafficResponse = {
+      configured: true,
+      generatedAt: "2026-07-08T00:00:00.000Z",
+      source: "prim-line-reports",
+      lines: [
+        {
+          lineRef: "line:test",
+          status: "disrupted",
+          disruptions: [
+            {
+              id: "champigny-non-served",
+              title: "Arret(s) non desservi(s)",
+              message:
+                "La gare de Champigny n'est pas desservie jusqu'a 02h45 et le trafic est perturbe sur le reste de la ligne.",
+              kind: "incident",
+              applicationPeriods: [
+                {
+                  begin: "20260708T002400",
+                  end: "20260708T030000",
+                },
+              ],
+              impactedLineRefs: ["line:test"],
+              impactedStopNames: [],
+            },
+          ],
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/traffic")) {
+        return {
+          ok: true,
+          json: async () => trafficResponse,
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ places: [], records: [] }),
+      };
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: trafficPattern,
+        showMiniMap: false,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowTrafficStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    const interruptionMarker = wrapper.get(
+      ".pattern-flow-traffic-marker--interruption",
+    );
+
+    expect(interruptionMarker.text()).toContain("Trafic interrompu");
+    expect(interruptionMarker.text()).toContain(
+      "Reprise dans 55 minutes (02h45)",
+    );
+    expect(interruptionMarker.text()).not.toContain("Reprise le 8 juillet");
+
+    wrapper.unmount();
+  });
+
+  it("keeps textual traffic ranges above daily technical periods", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 7, 4, 0, 0));
+
+    const trafficPattern: DepartureCallingPattern = {
+      ...pattern,
+      calls: [
+        createCall("gare-de-lyon", "Gare de Lyon", "Paris", true),
+        createCall("nation", "Nation", "Paris"),
+        createCall("vincennes", "Vincennes", "Vincennes"),
+      ],
+      lineTopology: [
+        {
+          id: "traffic-sequence",
+          label: "Traffic sequence",
+          stops: [
+            createRouteStop("gare-de-lyon", "Gare de Lyon", 652146, 6862288),
+            createRouteStop("nation", "Nation", 652646, 6862288),
+            createRouteStop("vincennes", "Vincennes", 653146, 6862288),
+          ],
+        },
+      ],
+    };
+    const trafficResponse: TrafficResponse = {
+      configured: true,
+      generatedAt: "2026-07-07T00:00:00.000Z",
+      source: "prim-line-reports",
+      lines: [
+        {
+          lineRef: "line:test",
+          status: "disrupted",
+          disruptions: [
+            {
+              id: "nation-long-works",
+              title: "RER A : Nation du 29/06 au 30/08",
+              message:
+                "Periode : toute la journee. Dates : du lundi 29 juin au dimanche 30 aout. La gare de Nation n'est pas desservie. Elle restera accessible via les lignes de metro. Motif : travaux.",
+              kind: "works",
+              applicationPeriods: [
+                {
+                  begin: "20260707T030000",
+                  end: "20260708T030000",
+                },
+              ],
+              impactedLineRefs: ["line:test"],
+              impactedStopNames: [],
+            },
+          ],
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/traffic")) {
+        return {
+          ok: true,
+          json: async () => trafficResponse,
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ places: [], records: [] }),
+      };
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: trafficPattern,
+        showMiniMap: false,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowTrafficStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    const interruptionMarker = wrapper.get(
+      ".pattern-flow-traffic-marker--interruption",
+    );
+
+    expect(interruptionMarker.text()).toContain("Trafic interrompu");
+    expect(interruptionMarker.text()).toContain("Reprise le 31 août");
+    expect(interruptionMarker.text()).not.toContain("Reprise dans");
+    expect(interruptionMarker.text()).not.toContain("03h00");
 
     wrapper.unmount();
   });

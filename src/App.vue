@@ -158,6 +158,7 @@ const DESKTOP_DRAG_BREAKPOINT_QUERY =
   "(min-width: 761px) and (hover: hover) and (pointer: fine)";
 const NEW_BOARD_SCROLL_FALLBACK_MS = 420;
 const NEW_BOARD_HIGHLIGHT_MS = 500;
+const NEW_BOARD_BOTTOM_INSET_PX = 104;
 const route = useRoute();
 const router = useRouter();
 const presetState = reactive<TransitPresetState>(
@@ -220,6 +221,7 @@ let clockTimer: number | undefined;
 let boardRevealTimer: number | undefined;
 let boardHighlightTimer: number | undefined;
 let boardRevealCleanup: (() => void) | undefined;
+let boardRevealRequest = 0;
 let mobileBreakpointQuery: MediaQueryList | undefined;
 let desktopDragBreakpointQuery: MediaQueryList | undefined;
 const departureServiceTypeCache = new Map<
@@ -1295,8 +1297,8 @@ function addCustomBoard(board: TransitBoardConfig): void {
   ensureBoardVisible(board.id);
   ensureBoardState(board.id);
   saveActiveTransitPreferences();
-  void refreshBoard(board.id);
-  void revealBoardAfterRender(board.id);
+  const refreshPromise = refreshBoard(board.id);
+  void revealBoardAfterRender(board.id, refreshPromise);
 }
 
 function upsertCustomBoard(board: TransitBoardConfig): void {
@@ -1376,7 +1378,11 @@ function setBoardCardElement(
   boardCardElements.delete(boardId);
 }
 
-async function revealBoardAfterRender(boardId: string): Promise<void> {
+async function revealBoardAfterRender(
+  boardId: string,
+  settlePromise?: Promise<void>,
+): Promise<void> {
+  const requestId = ++boardRevealRequest;
   clearBoardRevealTimers();
   highlightedBoardId.value = undefined;
 
@@ -1385,27 +1391,84 @@ async function revealBoardAfterRender(boardId: string): Promise<void> {
   await nextTick();
   await waitForNextFrame();
 
-  const element = boardCardElements.get(boardId);
+  if (requestId !== boardRevealRequest) {
+    return;
+  }
+
+  let element = boardCardElements.get(boardId);
 
   if (!element) {
     return;
   }
 
   scrollBoardIntoView(element);
+
+  if (settlePromise) {
+    await settlePromise.catch(() => undefined);
+    await nextTick();
+    await waitForNextFrame();
+
+    if (requestId !== boardRevealRequest) {
+      return;
+    }
+
+    element = boardCardElements.get(boardId);
+
+    if (!element) {
+      return;
+    }
+
+    scrollBoardIntoView(element);
+  }
+
   await waitForBoardScroll();
+
+  if (requestId !== boardRevealRequest) {
+    return;
+  }
+
   highlightBoard(boardId);
 }
 
 function scrollBoardIntoView(element: HTMLElement): void {
-  if (typeof element.scrollIntoView !== "function") {
+  const behavior = settings.value.reduceMotion ? "auto" : "smooth";
+
+  if (typeof window.scrollTo === "function") {
+    window.scrollTo({
+      behavior,
+      top: getBoardBottomScrollTop(element),
+    });
     return;
   }
 
-  element.scrollIntoView({
-    behavior: settings.value.reduceMotion ? "auto" : "smooth",
-    block: "end",
-    inline: "nearest",
-  });
+  element.scrollIntoView?.({ behavior, block: "end", inline: "nearest" });
+}
+
+function getBoardBottomScrollTop(element: HTMLElement): number {
+  const rect = element.getBoundingClientRect();
+  const currentScrollTop =
+    window.scrollY ??
+    window.pageYOffset ??
+    document.documentElement.scrollTop ??
+    0;
+  const targetScrollTop =
+    currentScrollTop +
+    rect.bottom -
+    window.innerHeight +
+    NEW_BOARD_BOTTOM_INSET_PX;
+
+  return Math.min(
+    getMaxWindowScrollTop(),
+    Math.max(0, Math.ceil(targetScrollTop)),
+  );
+}
+
+function getMaxWindowScrollTop(): number {
+  return Math.max(
+    0,
+    Math.max(document.documentElement.scrollHeight, document.body.scrollHeight) -
+      window.innerHeight,
+  );
 }
 
 function waitForBoardScroll(): Promise<void> {

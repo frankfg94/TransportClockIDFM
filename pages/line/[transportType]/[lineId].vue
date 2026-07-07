@@ -49,16 +49,13 @@
       <template #top-strip-direction-action>
         <div class="line-pattern-page__top-actions">
           <button
-            class="
-              line-pattern-page__line-switch
-              line-pattern-page__line-switch--desktop
-            "
+            class="line-pattern-page__line-switch line-pattern-page__line-switch--desktop"
             type="button"
             aria-label="Changer de ligne"
             title="Changer de ligne"
             @click="openLineSelector"
           >
-            <RefreshCw aria-hidden="true" />
+            <Edit2 aria-hidden="true" />
             <span>Changer</span>
           </button>
           <button
@@ -86,16 +83,13 @@
             <ArrowLeft aria-hidden="true" />
           </button>
           <button
-            class="
-              line-pattern-page__line-switch
-              line-pattern-page__line-switch--mobile
-            "
+            class="line-pattern-page__line-switch line-pattern-page__line-switch--mobile"
             type="button"
             aria-label="Changer de ligne"
             title="Changer de ligne"
             @click="openLineSelector"
           >
-            <RefreshCw aria-hidden="true" />
+            <Edit2 aria-hidden="true" />
           </button>
         </div>
       </template>
@@ -148,16 +142,13 @@
               <ArrowLeft aria-hidden="true" />
             </button>
             <button
-              class="
-                line-pattern-page__line-switch
-                line-pattern-page__line-switch--mobile
-              "
+              class="line-pattern-page__line-switch line-pattern-page__line-switch--mobile"
               type="button"
               aria-label="Changer de ligne"
               title="Changer de ligne"
               @click="openLineSelector"
             >
-              <RefreshCw aria-hidden="true" />
+              <Edit2 aria-hidden="true" />
             </button>
           </div>
         </template>
@@ -183,16 +174,13 @@
             </button>
           </nav>
           <button
-            class="
-              line-pattern-page__line-switch
-              line-pattern-page__line-switch--map-desktop
-            "
+            class="line-pattern-page__line-switch line-pattern-page__line-switch--map-desktop"
             type="button"
             aria-label="Changer de ligne"
             title="Changer de ligne"
             @click="openLineSelector"
           >
-            <RefreshCw aria-hidden="true" />
+            <Edit2 aria-hidden="true" />
             <span>Changer</span>
           </button>
           <button
@@ -249,7 +237,7 @@ import {
   ref,
   watch,
 } from "vue";
-import { ArrowLeft, RefreshCw } from "lucide-vue-next";
+import { ArrowLeft, Edit2 } from "lucide-vue-next";
 import { useFetch, useRoute, useRouter, navigateTo } from "#imports";
 import {
   filterTerminalOnly,
@@ -267,7 +255,8 @@ import type {
 } from "../../../src/types/transit";
 
 const DeparturePatternModal = defineAsyncComponent(
-  () => import("../../../src/features/service-pattern/DeparturePatternModal.vue"),
+  () =>
+    import("../../../src/features/service-pattern/DeparturePatternModal.vue"),
 );
 const DetailedLineMapPicker = defineAsyncComponent(
   () => import("../../../src/features/line-map/DetailedLineMapPicker.vue"),

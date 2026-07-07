@@ -1435,7 +1435,6 @@
   border-radius: 8px;
   box-shadow: 0 12px 28px rgba(16, 35, 63, 0.14);
   color: #1f2937;
-  cursor: pointer;
   display: inline-flex;
   font-size: 0.72rem;
   font-weight: 950;
@@ -1444,6 +1443,7 @@
   line-height: 1.1;
   min-height: 32px;
   padding: 6px 9px;
+  pointer-events: auto;
   position: relative;
   width: 156px;
 }
@@ -1461,8 +1461,38 @@
 }
 
 .pattern-flow-traffic-marker--interruption {
-  border-color: rgba(239, 68, 68, 0.62);
-  color: #dc2626;
+  align-items: center;
+  background: #ffffff;
+  border-color: rgba(185, 42, 34, 0.16);
+  border-top: 3px solid #bd332b;
+  box-shadow:
+    0 22px 46px rgba(31, 36, 55, 0.17),
+    0 8px 16px rgba(31, 36, 55, 0.08);
+  color: #bd332b;
+  gap: 22px;
+  justify-content: flex-start;
+  min-height: 126px;
+  padding: 26px 30px 26px 24px;
+  width: 420px;
+}
+
+.pattern-flow-traffic-marker--interruption::before {
+  background: #bd332b;
+  bottom: calc(100% + 2px);
+  height: 54px;
+  opacity: 1;
+}
+
+.pattern-flow-traffic-marker--interruption::after {
+  background: #bd332b;
+  border-radius: 50%;
+  bottom: calc(100% + 54px);
+  content: "";
+  height: 7px;
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+  width: 7px;
 }
 
 .pattern-flow-traffic-marker--disturbance {
@@ -1481,11 +1511,231 @@
   width: 16px;
 }
 
+.pattern-flow-traffic-marker__content {
+  align-items: center;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pattern-flow-traffic-marker__copy {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pattern-flow-traffic-marker__copy strong,
+.pattern-flow-traffic-marker__copy small {
+  overflow-wrap: anywhere;
+}
+
+.pattern-flow-traffic-marker__copy small {
+  font-size: 0.64rem;
+  font-weight: 850;
+  line-height: 1.05;
+}
+
+.pattern-flow-traffic-marker__details {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: currentColor;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.62rem;
+  font-weight: 900;
+  gap: 4px;
+  line-height: 1;
+  min-height: auto;
+  opacity: 0.82;
+  padding: 0;
+  pointer-events: auto;
+  transform: none;
+  transition:
+    background 140ms ease,
+    opacity 140ms ease;
+}
+
+.pattern-flow-traffic-marker__details:hover:not(:disabled),
+.pattern-flow-traffic-marker__details:focus-visible {
+  background: rgba(16, 35, 63, 0.06);
+  transform: none;
+}
+
+.pattern-flow-traffic-marker__details svg {
+  height: 12px;
+  stroke-width: 2.2;
+  width: 12px;
+}
+
+.pattern-flow-traffic-marker--interruption .pattern-flow-traffic-marker__icon {
+  align-items: center;
+  background: rgba(185, 42, 34, 0.1);
+  border-radius: 50%;
+  color: #bd332b;
+  height: 76px;
+  justify-content: center;
+  width: 76px;
+}
+
+.pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__icon
+  svg {
+  height: 42px;
+  stroke-width: 1.8;
+  width: 42px;
+}
+
+.pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__content {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.pattern-flow-traffic-marker--interruption .pattern-flow-traffic-marker__copy {
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+}
+
+.pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__copy
+  strong {
+  color: #1f2437;
+  font-size: 1.6rem;
+  font-weight: 950;
+  line-height: 1.05;
+}
+
+.pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__copy
+  small {
+  color: #6f6b86;
+  font-size: 1.04rem;
+  font-weight: 760;
+  line-height: 1.2;
+}
+
+.pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__details {
+  background: rgba(185, 42, 34, 0.08);
+  border: 1px solid rgba(185, 42, 34, 0.14);
+  color: #bd332b;
+  font-size: 0.82rem;
+  font-weight: 850;
+  padding: 6px 9px;
+}
+
+.pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__details:hover:not(:disabled),
+.pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__details:focus-visible {
+  background: rgba(185, 42, 34, 0.14);
+}
+
+.pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__details
+  svg {
+  height: 15px;
+  width: 15px;
+}
+
 .pattern-flow-shell--compact .pattern-flow-traffic-marker,
 .pattern-flow-shell--realistic .pattern-flow-traffic-marker {
   font-size: 0.68rem;
   min-height: 30px;
   width: 120px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-traffic-marker__copy small,
+.pattern-flow-shell--realistic .pattern-flow-traffic-marker__copy small {
+  font-size: 0.58rem;
+}
+
+.pattern-flow-shell--compact .pattern-flow-traffic-marker--interruption,
+.pattern-flow-shell--realistic .pattern-flow-traffic-marker--interruption {
+  gap: 16px;
+  min-height: 104px;
+  padding: 20px 24px 20px 20px;
+  width: 340px;
+}
+
+.pattern-flow-shell--compact
+  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__icon,
+.pattern-flow-shell--realistic
+  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__icon {
+  height: 62px;
+  width: 62px;
+}
+
+.pattern-flow-shell--compact
+  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__icon
+  svg,
+.pattern-flow-shell--realistic
+  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__icon
+  svg {
+  height: 34px;
+  width: 34px;
+}
+
+.pattern-flow-shell--compact
+  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__copy
+  strong,
+.pattern-flow-shell--realistic
+  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__copy
+  strong {
+  font-size: 1.25rem;
+}
+
+.pattern-flow-shell--compact
+  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__copy
+  small,
+.pattern-flow-shell--realistic
+  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__copy
+  small {
+  font-size: 0.86rem;
+}
+
+.pattern-flow-shell--compact
+  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__content,
+.pattern-flow-shell--realistic
+  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__content {
+  gap: 9px;
+}
+
+.pattern-flow-shell--compact
+  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__details,
+.pattern-flow-shell--realistic
+  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__details {
+  font-size: 0.72rem;
+  padding: 5px 8px;
+}
+
+.pattern-flow-shell--compact
+  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__details
+  svg,
+.pattern-flow-shell--realistic
+  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker__details
+  svg {
+  height: 13px;
+  width: 13px;
 }
 
 .pattern-flow-traffic-popup {

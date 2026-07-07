@@ -3,6 +3,10 @@ import {
   normalizeTrafficText,
 } from "../traffic/trafficPresentation";
 import type { TrafficDisruption } from "../traffic/types";
+import {
+  getTrafficDisruptionDisplayPeriod,
+  parseTrafficDate,
+} from "../traffic/trafficTiming";
 import { normalizePatternStationName } from "./stationKeys";
 
 export type PatternTrafficImpactKind = "interruption" | "disturbance";
@@ -22,6 +26,8 @@ export interface PatternTrafficImpact {
   kind: PatternTrafficImpactKind;
   disruption: TrafficDisruption;
   restartTimeLabel?: string;
+  endDateLabel?: string;
+  endDateLabelSource?: "text" | "application-period";
   replacementBus: boolean;
 }
 
@@ -41,6 +47,8 @@ interface ParsedTrafficDisruption {
   kind: PatternTrafficImpactKind | undefined;
   sections: ParsedTrafficSection[];
   restartTimeLabel?: string;
+  endDateLabel?: string;
+  endDateLabelSource?: "text" | "application-period";
   replacementBus: boolean;
   disturbsRestOfLine: boolean;
 }
@@ -75,6 +83,8 @@ const DISTURBANCE_KEYWORDS = [
   "reduced service",
 ];
 
+const NON_SERVED_INTERRUPTION_KEYWORDS = ["non desservi", "pas desservi"];
+
 const INTERRUPTION_KEYWORDS = [
   "trafic interrompu",
   "interrompu",
@@ -86,6 +96,7 @@ const INTERRUPTION_KEYWORDS = [
   "trafic suspendu",
   "service suspendu",
   "fermeture",
+  ...NON_SERVED_INTERRUPTION_KEYWORDS,
   "no service",
   "no-service",
 ];
@@ -95,6 +106,38 @@ const REPLACEMENT_BUS_KEYWORDS = [
   "bus relais",
   "bus de substitution",
 ];
+const TRAFFIC_END_MONTH_PATTERN =
+  "janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre";
+const TRAFFIC_END_WEEKDAY_PATTERN =
+  String.raw`(?:(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+)?`;
+const TRAFFIC_END_MONTH_LABELS: Record<string, string> = {
+  janvier: "janvier",
+  fevrier: "février",
+  mars: "mars",
+  avril: "avril",
+  mai: "mai",
+  juin: "juin",
+  juillet: "juillet",
+  aout: "août",
+  septembre: "septembre",
+  octobre: "octobre",
+  novembre: "novembre",
+  decembre: "décembre",
+};
+const TRAFFIC_END_MONTH_INDEXES: Record<string, number> = {
+  janvier: 0,
+  fevrier: 1,
+  mars: 2,
+  avril: 3,
+  mai: 4,
+  juin: 5,
+  juillet: 6,
+  aout: 7,
+  septembre: 8,
+  octobre: 9,
+  novembre: 10,
+  decembre: 11,
+};
 
 const SECTION_END_PATTERN =
   String.raw`(?=(?:\s+(?:(?:et|ou)\s+entre\b|et\s+(?:perturb|ralenti|interrompu|suspendu)|sur\s+le\s+reste|en\s+raison|suite|a\s+la\s+suite|pour\s+cause|toute\s+la|tous\s+les|dans\s+les?\s+(?:2|deux)\s+sens|du\s+\d|jusqu|reprise|veuillez)|[.;,\n]|$))`;
@@ -142,10 +185,14 @@ export function analyzeTrafficImpacts(
       edges,
       kind: parsed.kind ?? "disturbance",
     });
+    const interruptionSegments = resolvedSegments.filter(
+      (segment) => segment.kind === "interruption",
+    );
     const interruptionEdgeKeys = new Set(
-      resolvedSegments
-        .filter((segment) => segment.kind === "interruption")
-        .flatMap((segment) => segment.edgeKeys),
+      interruptionSegments.flatMap((segment) => segment.edgeKeys),
+    );
+    const interruptionStationKeys = new Set(
+      interruptionSegments.flatMap((segment) => segment.stationKeys),
     );
 
     resolvedSegments.forEach((segment) => {
@@ -156,7 +203,9 @@ export function analyzeTrafficImpacts(
       const restEdgeKeys = edgeKeys.filter(
         (edgeKey) => !interruptionEdgeKeys.has(edgeKey),
       );
-      const restStationKeys = getStationKeysForEdges(restEdgeKeys, edges);
+      const restStationKeys = getStationKeysForEdges(restEdgeKeys, edges).filter(
+        (stationKey) => !interruptionStationKeys.has(stationKey),
+      );
 
       if (restEdgeKeys.length > 0 || restStationKeys.length > 0) {
         applySegment(analysis, {
@@ -198,6 +247,12 @@ function parseTrafficDisruption(
 ): ParsedTrafficDisruption {
   const text = getDisruptionText(disruption);
   const searchable = normalizeSearchText(text);
+  const textIntervalEndDateLabel = extractTextTrafficIntervalEndDateLabel(text);
+  const applicationPeriodEndDateLabel =
+    extractApplicationPeriodEndDateLabel(disruption);
+  const textEndDateLabel = extractTextTrafficEndDateLabel(text);
+  const endDateLabel =
+    textIntervalEndDateLabel ?? applicationPeriodEndDateLabel ?? textEndDateLabel;
   const isInterruption =
     getDisruptionTone(disruption) === "red" ||
     INTERRUPTION_KEYWORDS.some((keyword) => searchable.includes(keyword));
@@ -213,6 +268,14 @@ function parseTrafficDisruption(
         : undefined,
     sections: extractTrafficSections(text),
     restartTimeLabel: extractRestartTimeLabel(text),
+    endDateLabel,
+    endDateLabelSource: textIntervalEndDateLabel
+      ? "text"
+      : applicationPeriodEndDateLabel
+        ? "application-period"
+        : textEndDateLabel
+          ? "text"
+          : undefined,
     replacementBus: hasReplacementBus(searchable),
     disturbsRestOfLine:
       isDisturbance &&
@@ -265,6 +328,24 @@ function createResolvedSegments({
     return segments;
   }
 
+  const nonServedStationKeys =
+    kind === "interruption"
+      ? extractNonServedStationKeysFromText(
+          getDisruptionText(disruption),
+          stations,
+        )
+      : [];
+
+  if (nonServedStationKeys.length > 0) {
+    return createStationOnlySegments({
+      disruption,
+      parsed,
+      kind,
+      stationKeys: nonServedStationKeys,
+      idPrefix: "non-served-station",
+    });
+  }
+
   const impactedStationKeys = disruption.impactedStopNames
     .map((name) =>
       resolveStationKey(name, stations, {
@@ -288,17 +369,37 @@ function createResolvedSegments({
   }
 
   if (impactedStationKeys.length === 1) {
-    return [
-      {
-        ...createImpact(disruption, parsed, kind),
-        id: `${disruption.id}:station:${impactedStationKeys[0]}`,
-        stationKeys: impactedStationKeys,
-        edgeKeys: [],
-      },
-    ];
+    return createStationOnlySegments({
+      disruption,
+      parsed,
+      kind,
+      stationKeys: impactedStationKeys,
+      idPrefix: "station",
+    });
   }
 
   return [];
+}
+
+function createStationOnlySegments({
+  disruption,
+  parsed,
+  kind,
+  stationKeys,
+  idPrefix,
+}: {
+  disruption: TrafficDisruption;
+  parsed: ParsedTrafficDisruption;
+  kind: PatternTrafficImpactKind;
+  stationKeys: string[];
+  idPrefix: string;
+}): PatternTrafficImpactSegment[] {
+  return Array.from(new Set(stationKeys)).map((stationKey) => ({
+    ...createImpact(disruption, parsed, kind),
+    id: `${disruption.id}:${idPrefix}:${stationKey}`,
+    stationKeys: [stationKey],
+    edgeKeys: [],
+  }));
 }
 
 function createSegmentFromEndpoints({
@@ -342,6 +443,8 @@ function createImpact(
     kind: fallbackKind ?? parsed.kind ?? "disturbance",
     disruption,
     restartTimeLabel: parsed.restartTimeLabel,
+    endDateLabel: parsed.endDateLabel,
+    endDateLabelSource: parsed.endDateLabelSource,
     replacementBus: parsed.replacementBus,
   };
 }
@@ -598,7 +701,7 @@ function cleanSectionStationLabel(value?: string): string {
 function extractRestartTimeLabel(text: string): string | undefined {
   const normalized = normalizeTrafficText(text);
   const match = normalized.match(
-    /(?:reprise|retablissement|retour a la normale|fin)\s+(?:estimee|prevue)?\s*(?::|a|vers|pour)?\s*(minuit|midi|\d{1,2}(?::|h)\d{2}|\d{1,2}h)\b/u,
+    /(?:(?:reprise|retablissement|retour a la normale|fin)\s+(?:estimee|prevue)?\s*(?::|a|vers|pour)?\s*|jusqu(?:['’]\s*|\s*)a\s+)(minuit|midi|\d{1,2}(?::|h)\d{2}|\d{1,2}h)\b/u,
   );
 
   if (!match) {
@@ -637,6 +740,221 @@ function formatRestartTimeLabel(value: string): string {
     .padStart(2, "0")}`;
 }
 
+function extractTextTrafficIntervalEndDateLabel(
+  text: string,
+): string | undefined {
+  const searchable = normalizeTrafficText(text)
+    .replace(/[â€™']/gu, " ")
+    .replace(/\s+/gu, " ");
+  const fullDayInclusive = isFullDayTextRange(searchable);
+  const namedDateRangePattern = new RegExp(
+    String.raw`\b(?:dates?\s*:?\s*)?(?:du|de)\s+${TRAFFIC_END_WEEKDAY_PATTERN}(\d{1,2})\s+(${TRAFFIC_END_MONTH_PATTERN})(?:\s+(\d{4}))?\s+(?:au|a)\s+${TRAFFIC_END_WEEKDAY_PATTERN}(\d{1,2})\s+(${TRAFFIC_END_MONTH_PATTERN})(?:\s+(\d{4}))?\b`,
+    "u",
+  );
+  const namedDateRangeMatch = searchable.match(namedDateRangePattern);
+
+  if (namedDateRangeMatch) {
+    const [, , , , endDayText, endMonthKey, endYearText] =
+      namedDateRangeMatch;
+    const endDay = Number.parseInt(endDayText, 10);
+    const endMonth = TRAFFIC_END_MONTH_LABELS[endMonthKey];
+
+    if (fullDayInclusive) {
+      return formatNextTrafficDateLabel({
+        day: endDay,
+        monthIndex: TRAFFIC_END_MONTH_INDEXES[endMonthKey],
+        year: endYearText,
+      });
+    }
+
+    return Number.isFinite(endDay) && endMonth
+      ? formatTrafficEndDateParts({
+          day: endDay,
+          month: endMonth,
+          year: endYearText,
+        })
+      : undefined;
+  }
+
+  const numericDateRangeMatch = searchable.match(
+    /\b(?:dates?\s*:?\s*)?(?:du|de)\s+\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\s+(?:au|a)\s+(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/u,
+  );
+
+  if (!numericDateRangeMatch) {
+    return undefined;
+  }
+
+  const [, endDayText, endMonthText, endYearText] = numericDateRangeMatch;
+  const endDay = Number.parseInt(endDayText, 10);
+  const endMonthIndex = Number.parseInt(endMonthText, 10) - 1;
+  const monthFormatter = new Intl.DateTimeFormat("fr-FR", { month: "long" });
+  const endMonth =
+    Number.isFinite(endMonthIndex) && endMonthIndex >= 0 && endMonthIndex < 12
+      ? monthFormatter.format(new Date(2000, endMonthIndex, 1))
+      : undefined;
+
+  if (fullDayInclusive) {
+    return formatNextTrafficDateLabel({
+      day: endDay,
+      monthIndex: endMonthIndex,
+      year: endYearText,
+    });
+  }
+
+  return Number.isFinite(endDay) && endMonth
+    ? formatTrafficEndDateParts({
+        day: endDay,
+        month: endMonth,
+        year: endYearText,
+      })
+    : undefined;
+}
+
+function isFullDayTextRange(searchable: string): boolean {
+  return /\b(?:toute\s+la\s+journee|journee\s+entiere)\b/u.test(searchable);
+}
+
+function formatNextTrafficDateLabel({
+  day,
+  monthIndex,
+  year,
+}: {
+  day: number;
+  monthIndex: number | undefined;
+  year?: string;
+}): string | undefined {
+  if (
+    !Number.isFinite(day) ||
+    typeof monthIndex !== "number" ||
+    monthIndex < 0 ||
+    monthIndex > 11
+  ) {
+    return undefined;
+  }
+
+  const fullYear = normalizeTrafficYear(year) ?? 2000;
+  const date = new Date(fullYear, monthIndex, day + 1);
+
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "numeric",
+    month: "long",
+    ...(year ? { year: "numeric" } : {}),
+  }).format(date);
+}
+
+function normalizeTrafficYear(year?: string): number | undefined {
+  if (!year) {
+    return undefined;
+  }
+
+  const parsedYear = Number.parseInt(year, 10);
+
+  if (!Number.isFinite(parsedYear)) {
+    return undefined;
+  }
+
+  return parsedYear < 100 ? 2000 + parsedYear : parsedYear;
+}
+
+function extractTextTrafficEndDateLabel(text: string): string | undefined {
+  const searchable = normalizeTrafficText(text)
+    .replace(/[’']/gu, " ")
+    .replace(/\s+/gu, " ");
+  const namedDateMatch = searchable.match(
+    /\bjusqu\s+au\s+(\d{1,2})\s+(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)(?:\s+(\d{4}))?(?:\s+(?:a\s+)?(\d{1,2})(?::|h)(\d{2})?)?\s*(?:inclus)?\b/u,
+  );
+
+  if (namedDateMatch) {
+    const [, dayText, monthKey, yearText, hourText, minuteText] =
+      namedDateMatch;
+    const day = Number.parseInt(dayText, 10);
+    const month = TRAFFIC_END_MONTH_LABELS[monthKey];
+
+    if (Number.isFinite(day) && month) {
+      return formatTrafficEndDateParts({
+        day,
+        month,
+        year: yearText,
+        hour: hourText,
+        minute: minuteText,
+      });
+    }
+  }
+
+  const numericDateMatch = searchable.match(
+    /\bjusqu\s+au\s+(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?(?:\s+(?:a\s+)?(\d{1,2})(?::|h)(\d{2})?)?\s*(?:inclus)?\b/u,
+  );
+
+  if (!numericDateMatch) {
+    return undefined;
+  }
+
+  const [, dayText, monthText, yearText, hourText, minuteText] =
+    numericDateMatch;
+  const day = Number.parseInt(dayText, 10);
+  const monthIndex = Number.parseInt(monthText, 10) - 1;
+  const monthFormatter = new Intl.DateTimeFormat("fr-FR", { month: "long" });
+  const month =
+    Number.isFinite(monthIndex) && monthIndex >= 0 && monthIndex < 12
+      ? monthFormatter.format(new Date(2000, monthIndex, 1))
+      : undefined;
+
+  return Number.isFinite(day) && month
+    ? formatTrafficEndDateParts({
+        day,
+        month,
+        year: yearText,
+        hour: hourText,
+        minute: minuteText,
+      })
+    : undefined;
+}
+
+function extractApplicationPeriodEndDateLabel(
+  disruption: TrafficDisruption,
+): string | undefined {
+  const end = getTrafficDisruptionDisplayPeriod(disruption)?.end;
+
+  if (!end) {
+    return undefined;
+  }
+
+  const date = parseTrafficDate(end);
+
+  if (!date || Number.isNaN(date.getTime())) {
+    return end;
+  }
+
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "numeric",
+    month: "long",
+  }).format(date);
+}
+
+function formatTrafficEndDateParts({
+  day,
+  month,
+  year,
+  hour,
+  minute,
+}: {
+  day: number;
+  month: string;
+  year?: string;
+  hour?: string;
+  minute?: string;
+}): string {
+  const dateLabel = [String(day), month, year].filter(Boolean).join(" ");
+
+  if (!hour) {
+    return dateLabel;
+  }
+
+  const minuteLabel = minute?.padStart(2, "0") ?? "00";
+
+  return `${dateLabel} ${hour.padStart(2, "0")}:${minuteLabel}`;
+}
+
 function resolveStationKey(
   label: string,
   stations: PatternTrafficStation[],
@@ -670,6 +988,56 @@ function resolveStationKey(
   return options.allowFuzzy
     ? resolveFuzzyStationKey(labelKeys, stations)
     : undefined;
+}
+
+function extractNonServedStationKeysFromText(
+  text: string,
+  stations: PatternTrafficStation[],
+): string[] {
+  const stationKeys = new Set<string>();
+
+  splitTrafficSentences(text).forEach((sentence) => {
+    const searchable = normalizeSearchText(sentence);
+
+    if (
+      !NON_SERVED_INTERRUPTION_KEYWORDS.some((keyword) =>
+        searchable.includes(keyword),
+      )
+    ) {
+      return;
+    }
+
+    stations.forEach((station) => {
+      const matchKeys = createStationMatchKeys(station.label);
+
+      if (
+        matchKeys.some((matchKey) =>
+          containsNormalizedPhrase(searchable, matchKey),
+        )
+      ) {
+        stationKeys.add(station.key);
+      }
+    });
+  });
+
+  return Array.from(stationKeys);
+}
+
+function splitTrafficSentences(text: string): string[] {
+  return text.split(/[.;\n]+/gu).map((sentence) => sentence.trim());
+}
+
+function containsNormalizedPhrase(searchable: string, phrase: string): boolean {
+  if (!phrase) {
+    return false;
+  }
+
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const pattern = escaped.replace(/\s+/gu, String.raw`\s+`);
+
+  return new RegExp(String.raw`(?:^|\s)${pattern}(?:\s|$)`, "u").test(
+    searchable,
+  );
 }
 
 function createStationMatchKeys(value: string): string[] {

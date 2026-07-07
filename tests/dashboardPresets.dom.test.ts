@@ -262,71 +262,125 @@ describe("dashboard presets", () => {
   });
 
   it("scrolls to the newly added station and highlights its card", async () => {
-    const scrollIntoView = vi.fn();
+    const scrollTo = vi.fn();
     const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
       callback(0);
       return 1;
     });
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    const originalRequestAnimationFrame = window.requestAnimationFrame;
-    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
-      configurable: true,
-      value: scrollIntoView,
+    const getBoundingClientRect = vi.fn(function (this: HTMLElement) {
+      if (this.dataset.boardId === "added-board") {
+        return {
+          bottom: 2_200,
+          height: 600,
+          left: 0,
+          right: 520,
+          top: 1_600,
+          width: 520,
+          x: 0,
+          y: 1_600,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+
+      return {
+        bottom: 0,
+        height: 0,
+        left: 0,
+        right: 0,
+        top: 0,
+        width: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
     });
-    Object.defineProperty(window, "requestAnimationFrame", {
+    const originalGetBoundingClientRect =
+      HTMLElement.prototype.getBoundingClientRect;
+    const originalDocumentScrollHeight = Object.getOwnPropertyDescriptor(
+      document.documentElement,
+      "scrollHeight",
+    );
+    const originalBodyScrollHeight = Object.getOwnPropertyDescriptor(
+      document.body,
+      "scrollHeight",
+    );
+    vi.stubGlobal("scrollTo", scrollTo);
+    vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
+    vi.stubGlobal("innerHeight", 800);
+    vi.stubGlobal("scrollY", 120);
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
       configurable: true,
-      writable: true,
-      value: requestAnimationFrame,
+      value: getBoundingClientRect,
+    });
+    Object.defineProperty(document.documentElement, "scrollHeight", {
+      configurable: true,
+      value: 2_600,
+    });
+    Object.defineProperty(document.body, "scrollHeight", {
+      configurable: true,
+      value: 2_600,
     });
     const addedBoard = createBoard("added-board", "stop_area:added");
 
-    installDashboardMocks({});
-    const { default: App } = await import("../src/App.vue");
-    const wrapper = mount(App, { attachTo: document.body });
+    try {
+      installDashboardMocks({});
+      const { default: App } = await import("../src/App.vue");
+      const wrapper = mount(App, { attachTo: document.body });
 
-    await flushPromises();
+      await flushPromises();
 
-    (
-      wrapper.vm as unknown as {
-        addCustomBoard: (board: TransitBoardConfig) => void;
-      }
-    ).addCustomBoard(addedBoard);
-    await flushPromises();
-    await wait(450);
-    await wrapper.vm.$nextTick();
+      (
+        wrapper.vm as unknown as {
+          addCustomBoard: (board: TransitBoardConfig) => void;
+        }
+      ).addCustomBoard(addedBoard);
+      await flushPromises();
+      await wait(450);
+      await wrapper.vm.$nextTick();
 
-    expect(scrollIntoView).toHaveBeenCalledWith(
-      expect.objectContaining({
-        behavior: "smooth",
-        block: "end",
-        inline: "nearest",
-      }),
-    );
-    expect(
-      wrapper.get('[data-board-id="added-board"]').classes(),
-    ).toContain("board-drag-item--new");
+      expect(scrollTo).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          behavior: "smooth",
+          top: 1_624,
+        }),
+      );
+      expect(
+        wrapper.get('[data-board-id="added-board"]').classes(),
+      ).toContain("board-drag-item--new");
 
-    await wait(500);
-    await wrapper.vm.$nextTick();
+      await wait(500);
+      await wrapper.vm.$nextTick();
 
-    expect(
-      wrapper.get('[data-board-id="added-board"]').classes(),
-    ).not.toContain("board-drag-item--new");
-
-    if (originalScrollIntoView) {
-      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      expect(
+        wrapper.get('[data-board-id="added-board"]').classes(),
+      ).not.toContain("board-drag-item--new");
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
         configurable: true,
-        value: originalScrollIntoView,
+        value: originalGetBoundingClientRect,
       });
-    } else {
-      delete (HTMLElement.prototype as { scrollIntoView?: unknown })
-        .scrollIntoView;
+
+      if (originalDocumentScrollHeight) {
+        Object.defineProperty(
+          document.documentElement,
+          "scrollHeight",
+          originalDocumentScrollHeight,
+        );
+      } else {
+        delete (document.documentElement as { scrollHeight?: unknown })
+          .scrollHeight;
+      }
+
+      if (originalBodyScrollHeight) {
+        Object.defineProperty(
+          document.body,
+          "scrollHeight",
+          originalBodyScrollHeight,
+        );
+      } else {
+        delete (document.body as { scrollHeight?: unknown }).scrollHeight;
+      }
     }
-    Object.defineProperty(window, "requestAnimationFrame", {
-      configurable: true,
-      writable: true,
-      value: originalRequestAnimationFrame,
-    });
   });
 });
 

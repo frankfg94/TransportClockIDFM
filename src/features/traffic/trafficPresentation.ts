@@ -23,6 +23,8 @@ const RED_TRAFFIC_KEYWORDS = [
   "trafic suspendu",
   "service suspendu",
   "fermeture",
+  "non desservi",
+  "pas desservi",
   "no service",
   "no-service",
   "bloquant",

@@ -64,6 +64,132 @@ describe("traffic impact analysis", () => {
     expect(analysis.segments[0].replacementBus).toBe(true);
   });
 
+  it("keeps the textual end date for interrupted section markers", () => {
+    const stations = createStations([
+      "Montparnasse Bienvenue",
+      "Saint-Placide",
+      "Saint-Sulpice",
+      "Saint-Germain-des-Pres",
+      "Odeon",
+      "Saint-Michel",
+      "Cite",
+      "Chatelet",
+      "Les Halles",
+    ]);
+    const disruption = createDisruption({
+      id: "metro-4-works-end-date",
+      title:
+        "Jusqu'au 24 juillet inclus, le trafic est interrompu entre Montparnasse Bienvenue et Les Halles en raison de travaux.",
+    });
+
+    const analysis = analyzeTrafficImpacts(
+      [disruption],
+      stations,
+      createSequentialEdges(stations),
+    );
+
+    expect(analysis.segments[0].kind).toBe("interruption");
+    expect(analysis.segments[0].endDateLabel).toBe("24 juillet");
+    expect(
+      analysis.edgeImpacts[
+        getPatternTrafficEdgeKey(createSequentialEdges(stations)[0])
+      ]?.kind,
+    ).toBe("interruption");
+  });
+
+  it("uses the application period end date for reprise labels", () => {
+    const stations = createStations([
+      "Chatillon - Montrouge",
+      "Malakoff - Rue Etienne Dolet",
+      "Malakoff - Plateau de Vanves",
+    ]);
+    const disruption = createDisruption({
+      id: "metro-13-works-end-date",
+      title:
+        "Jusqu'au 26 juillet inclus, le trafic est interrompu entre Chatillon - Montrouge et Malakoff - Rue Etienne Dolet en raison de travaux.",
+      applicationPeriods: [
+        {
+          begin: "20260706T044500",
+          end: "20260727T043000",
+        },
+      ],
+    });
+
+    const analysis = analyzeTrafficImpacts(
+      [disruption],
+      stations,
+      createSequentialEdges(stations),
+    );
+
+    expect(analysis.segments[0].kind).toBe("interruption");
+    expect(analysis.segments[0].endDateLabel).toBe("27 juillet");
+  });
+
+  it("keeps a non-served station interrupted when the rest of the line is disturbed", () => {
+    const stations = createStations([
+      "Joinville-le-Pont",
+      "Saint-Maur - Creteil",
+      "Le Parc de Saint-Maur",
+      "Champigny",
+      "La Varenne - Chennevieres",
+    ]);
+    const disruption = createDisruption({
+      id: "rer-a-champigny-non-served",
+      title: "Arret(s) non desservi(s)",
+      message:
+        "La gare de Champigny n'est pas desservie jusqu'a 02h45 et le trafic est perturbe sur le reste de la ligne.\nMotif : accident de personne a Champigny.\nRER A : Champigny non desservie",
+      impactedStopNames: [],
+    });
+
+    const analysis = analyzeTrafficImpacts(
+      [disruption],
+      stations,
+      createSequentialEdges(stations),
+    );
+    const interrupted = getInterruptedStations(analysis);
+    const disturbed = getDisturbedStations(analysis);
+    const champignyKey = normalizePatternStationName("Champigny");
+
+    expect(interrupted).toContain(champignyKey);
+    expect(disturbed).not.toContain(champignyKey);
+    expect(analysis.stationImpacts[champignyKey]?.kind).toBe("interruption");
+    expect(analysis.stationImpacts[champignyKey]?.restartTimeLabel).toBe(
+      "02:45",
+    );
+    expect(disturbed).toContain(normalizePatternStationName("Joinville-le-Pont"));
+    expect(disturbed).toContain(
+      normalizePatternStationName("La Varenne - Chennevieres"),
+    );
+  });
+
+  it("prefers textual date ranges over daily technical periods", () => {
+    const stations = createStations(["Gare de Lyon", "Nation", "Vincennes"]);
+    const disruption = createDisruption({
+      id: "rer-a-nation-long-works",
+      title: "RER A : Nation du 29/06 au 30/08",
+      message:
+        "Periode : toute la journee. Dates : du lundi 29 juin au dimanche 30 aout. La gare de Nation n'est pas desservie. Elle restera accessible via les lignes de metro. Motif : travaux.",
+      applicationPeriods: [
+        {
+          begin: "20260707T030000",
+          end: "20260708T030000",
+        },
+      ],
+      impactedStopNames: [],
+    });
+
+    const analysis = analyzeTrafficImpacts(
+      [disruption],
+      stations,
+      createSequentialEdges(stations),
+    );
+    const nationKey = normalizePatternStationName("Nation");
+
+    expect(analysis.stationImpacts[nationKey]?.kind).toBe("interruption");
+    expect(analysis.stationImpacts[nationKey]?.endDateLabel).toBe("31 août");
+    expect(analysis.stationImpacts[nationKey]?.endDateLabelSource).toBe("text");
+  });
+
   it("extracts repeated interrupted sections and bidirectional title alternatives", () => {
     const stations = createStations([
       "Port Royal",
