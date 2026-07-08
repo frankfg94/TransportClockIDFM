@@ -1937,6 +1937,206 @@ describe("DeparturePatternModal settings", () => {
     wrapper.unmount();
   });
 
+  it("shows upcoming traffic warning markers ten days before the work starts", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0));
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: createThreeStationTrafficPattern(),
+        showMiniMap: false,
+        trafficReport: {
+          lineRef: "line:test",
+          status: "planned",
+          disruptions: [
+            {
+              id: "upcoming-a-c",
+              title: "Travaux prevus",
+              message:
+                "Le trafic sera interrompu entre Station A et Station C.",
+              kind: "works",
+              applicationPeriods: [
+                {
+                  begin: "20260710T120000",
+                  end: "20260711T120000",
+                },
+              ],
+              impactedLineRefs: ["line:test"],
+              impactedStopNames: [],
+            },
+          ],
+        },
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowTrafficStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    const marker = wrapper.get(".pattern-flow-traffic-marker--interruption");
+
+    expect(marker.text()).toContain("Interruption prevue");
+    expect(marker.text()).toContain("Debute le");
+    expect(marker.text()).not.toContain("Trafic interrompu");
+    expect(
+      wrapper.find(".pattern-flow-edge--traffic-interruption").exists(),
+    ).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it("keeps traffic warnings hidden before the ten-day window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0));
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: createThreeStationTrafficPattern(),
+        showMiniMap: false,
+        trafficReport: {
+          lineRef: "line:test",
+          status: "planned",
+          disruptions: [
+            {
+              id: "later-a-c",
+              title: "Travaux prevus",
+              message:
+                "Le trafic sera interrompu entre Station A et Station C.",
+              kind: "works",
+              applicationPeriods: [
+                {
+                  begin: "20260712T120000",
+                  end: "20260713T120000",
+                },
+              ],
+              impactedLineRefs: ["line:test"],
+              impactedStopNames: [],
+            },
+          ],
+        },
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowTrafficStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    expect(wrapper.find(".pattern-flow-traffic-marker").exists()).toBe(false);
+    expect(wrapper.find(".pattern-flow-edge--traffic").exists()).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it("honors a custom traffic warning lookahead on the pattern modal", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0));
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: createThreeStationTrafficPattern(),
+        showMiniMap: false,
+        trafficWarningLookaheadDays: 14,
+        trafficReport: {
+          lineRef: "line:test",
+          status: "planned",
+          disruptions: [
+            {
+              id: "custom-lookahead-a-c",
+              title: "Travaux prevus",
+              message:
+                "Le trafic sera interrompu entre Station A et Station C.",
+              kind: "works",
+              applicationPeriods: [
+                {
+                  begin: "20260712T120000",
+                  end: "20260713T120000",
+                },
+              ],
+              impactedLineRefs: ["line:test"],
+              impactedStopNames: [],
+            },
+          ],
+        },
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowTrafficStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    expect(wrapper.get(".pattern-flow-traffic-marker").text()).toContain(
+      "Interruption prevue",
+    );
+
+    wrapper.unmount();
+  });
+
   it("shows same-day traffic restart as a relative delay", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 8, 1, 50, 0));
@@ -2215,6 +2415,28 @@ describe("DeparturePatternModal settings", () => {
     wrapper.unmount();
   });
 });
+
+function createThreeStationTrafficPattern(): DepartureCallingPattern {
+  return {
+    ...pattern,
+    calls: [
+      createCall("station-a", "Station A", "Paris", true),
+      createCall("station-b", "Station B", "Paris"),
+      createCall("station-c", "Station C", "Paris"),
+    ],
+    lineTopology: [
+      {
+        id: "traffic-sequence",
+        label: "Traffic sequence",
+        stops: [
+          createRouteStop("station-a", "Station A", 652146, 6862288),
+          createRouteStop("station-b", "Station B", 652646, 6862288),
+          createRouteStop("station-c", "Station C", 653146, 6862288),
+        ],
+      },
+    ],
+  };
+}
 
 function createCall(
   id: string,

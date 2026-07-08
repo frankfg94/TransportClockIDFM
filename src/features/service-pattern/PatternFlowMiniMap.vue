@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useI18n } from "../../i18n";
 
 interface MiniMapNode {
   id: string;
@@ -66,6 +67,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   focus: [point: MiniMapPoint];
 }>();
+const { t } = useI18n();
 
 const padding = 12;
 const visibleNodes = computed(() => props.nodes.filter((node) => !node.hidden));
@@ -257,7 +259,7 @@ function handlePointerDown(event: PointerEvent): void {
 </script>
 
 <template>
-  <div class="pattern-flow-minimap" aria-label="Aperçu de la ligne">
+  <div class="pattern-flow-minimap" :aria-label="t('lineMap.minimapAria')">
     <svg
       :width="width"
       :height="height"

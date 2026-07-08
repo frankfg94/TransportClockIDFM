@@ -719,7 +719,7 @@ describe("DetailedLineMapPicker sidebar", () => {
 
     expect(
       wrapper.get('[data-testid="line-map-sidebar-ghost-detail"]').text(),
-    ).toContain("≈ 5 min");
+    ).toContain("~ 5 min");
 
     const displayInputs = wrapper.findAll(
       ".line-map-display-panel input[type='checkbox']",
@@ -897,8 +897,8 @@ describe("DetailedLineMapPicker sidebar", () => {
     await flushPromises();
 
     expect(document.body.querySelector("[data-testid='station-board-selector']")).toBeTruthy();
-    expect(document.body.textContent).toContain("Ligne sélectionnée");
-    expect(document.body.textContent).not.toContain("Sélectionner une ligne");
+    expect(document.body.textContent).toContain("Ligne selectionnee");
+    expect(document.body.textContent).not.toContain("Selectionner une ligne");
 
     const workChoice = Array.from(
       document.body.querySelectorAll<HTMLElement>(
@@ -909,22 +909,14 @@ describe("DetailedLineMapPicker sidebar", () => {
     workChoice!.click();
     await flushPromises();
 
-    const stationButton = document.body.querySelector(
-      ".station-combobox__button",
-    ) as HTMLButtonElement;
-    stationButton.dispatchEvent(new Event("pointerdown", { bubbles: true }));
-    await flushPromises();
-    const stationOption = document.body.querySelector(
-      ".station-combobox__option",
-    ) as HTMLButtonElement;
-    stationOption.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-    await flushPromises();
+    const addButton = document.body.querySelector<HTMLButtonElement>(
+      ".modal-panel .modal-panel__footer button:not(.button-secondary)",
+    );
+    if (!addButton) {
+      throw new Error("Expected the station modal add button to exist.");
+    }
 
-    const addButton = Array.from(document.body.querySelectorAll("button")).find(
-      (button) =>
-        button.closest(".modal-panel") &&
-        button.textContent?.includes("Ajouter"),
-    ) as HTMLButtonElement;
+    expect(addButton.disabled).toBe(false);
     addButton.click();
     await flushPromises();
 
@@ -935,7 +927,7 @@ describe("DetailedLineMapPicker sidebar", () => {
     );
     expect(readPreferences("home").customBoards ?? []).toHaveLength(0);
     expect(document.body.textContent).toContain(
-      "Station ajoutée à l'écran d'accueil",
+      "Station ajoutee a l'ecran d'accueil",
     );
 
     wrapper.unmount();
@@ -1043,7 +1035,7 @@ describe("DetailedLineMapPicker sidebar", () => {
       .trigger("click");
     await flushPromises();
 
-    expect(wrapper.text()).toContain("Station ajoutée au dashboard Maison");
+    expect(wrapper.text()).toContain("Station ajoutee au dashboard Maison");
     expect(wrapper.find(".line-map-info-alert__progress").exists()).toBe(true);
 
     const firstPreferences = readPreferences();
@@ -1090,7 +1082,7 @@ describe("DetailedLineMapPicker sidebar", () => {
       .trigger("click");
     await flushPromises();
 
-    expect(wrapper.text()).toContain("Station ajoutée au dashboard Travail");
+    expect(wrapper.text()).toContain("Station ajoutee au dashboard Travail");
     expect(readPreferences("work").customBoards).toHaveLength(1);
     expect(
       wrapper.find('[data-testid="line-map-sidebar-favorite-selector"]').exists(),
@@ -1151,7 +1143,7 @@ describe("DetailedLineMapPicker sidebar", () => {
       .trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain(
-      "Impossible d'ajouter cette station à l'écran d'accueil.",
+      "Impossible d'ajouter cette station a l'ecran d'accueil.",
     );
 
     await wrapper.get(".line-map-sidebar__maps").trigger("click");

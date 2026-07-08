@@ -27,7 +27,10 @@ describe("SettingsPage", () => {
           typeof import("../src/features/app-settings/appSettings")
         >();
       const { computed, ref } = await import("vue");
-      const settings = ref(actual.createDefaultAppSettings());
+      const settings = ref(actual.normalizeAppSettings({
+        ...actual.createDefaultAppSettings(),
+        language: "fr",
+      }));
 
       return {
         ...actual,
@@ -43,7 +46,10 @@ describe("SettingsPage", () => {
             });
           },
           resetSettings: () => {
-            settings.value = actual.createDefaultAppSettings();
+            settings.value = actual.normalizeAppSettings({
+              ...actual.createDefaultAppSettings(),
+              language: "fr",
+            });
           },
         }),
       };
@@ -61,16 +67,16 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Chargement des correspondances");
     expect(wrapper.text()).toContain("Auto");
     expect(wrapper.text()).toContain("Concurrence des bundles");
-    expect(wrapper.text()).toContain("1 appel à la fois");
+    expect(wrapper.text()).toContain("1 appel a la fois");
     expect(wrapper.text()).toContain("Espacement des appels bundles");
     expect(wrapper.text()).toContain("Aucun delai");
     expect(wrapper.text()).toContain("Bundles de correspondances");
-    expect(wrapper.text()).toContain("View bundles");
-    expect(wrapper.text()).toContain("Clear bundles");
-    expect(wrapper.text()).toContain("Dashboards enregistrés");
-    expect(wrapper.text()).toContain("Lieu par défaut");
-    expect(wrapper.text()).toContain("Sélecteur de lieux");
-    expect(wrapper.text()).toContain("Lieu à configurer");
+    expect(wrapper.text()).toContain("Voir les bundles");
+    expect(wrapper.text()).toContain("Vider les bundles");
+    expect(wrapper.text()).toContain("Dashboards enregistres");
+    expect(wrapper.text()).toContain("Lieu par defaut");
+    expect(wrapper.text()).toContain("Selecteur de lieux");
+    expect(wrapper.text()).toContain("Lieu a configurer");
     expect(wrapper.text()).toContain("Maison");
     expect(wrapper.text()).toContain("Affichage des stations");
     expect(wrapper.text()).toContain("Visible directement");
@@ -79,23 +85,31 @@ describe("SettingsPage", () => {
       .get('[aria-label="Emplacement des boutons de stations"]')
       .trigger("click");
     expect(wrapper.text()).toContain("Dans le menu contextuel");
-    expect(wrapper.text()).toContain("Accordion fermé");
+    expect(wrapper.text()).toContain("Accordion ferme");
     expect(wrapper.text()).toContain("Prochain passage");
-    expect(wrapper.text()).toContain("Défaut actuel");
+    expect(wrapper.text()).toContain("Defaut actuel");
     expect(wrapper.text()).toContain("Apparence info trafic");
     expect(wrapper.text()).toContain("Style RATP compact");
     expect(wrapper.text()).toContain("Page info trafic");
-    expect(wrapper.text()).toContain("Mode par défaut");
-    expect(wrapper.text()).toContain("Optimisé");
+    expect(wrapper.text()).toContain("Mode par defaut");
+    expect(wrapper.text()).toContain("Optimise");
+    await wrapper.get('[aria-label="Mode par defaut info trafic"]').trigger("click");
     expect(wrapper.text()).toContain("Toutes les lignes");
-    expect(wrapper.text()).toContain("Détection intelligente sur le schéma");
-    expect(wrapper.text()).toContain("Météo dynamique");
-    expect(wrapper.text()).toContain("Alertes avec fond d'écran animé");
+    expect(wrapper.text()).toContain("Detection intelligente sur le schema");
+    expect(wrapper.text()).toContain("Avertissement travaux sur le schema");
+    expect(wrapper.text()).toContain("10 jours");
+    const trafficWarningSlider = wrapper.get(
+      '[aria-label="Delai d\'avertissement travaux sur le schema"]',
+    );
+    await trafficWarningSlider.setValue("3");
+    expect(wrapper.text()).toContain("3 jours");
+    expect(wrapper.text()).toContain("Meteo dynamique");
+    expect(wrapper.text()).toContain("Alertes avec fond d'ecran anime");
     expect(wrapper.text()).toContain("Mode test");
     expect(wrapper.text()).toContain("Aucun test");
-    expect(wrapper.text()).toContain("Prévenir à l'avance");
-    expect(wrapper.text()).toContain("Toute la journée");
-    expect(wrapper.text()).toContain("Lieu météo");
+    expect(wrapper.text()).toContain("Prevenir a l'avance");
+    expect(wrapper.text()).toContain("Toute la journee");
+    expect(wrapper.text()).toContain("Lieu meteo");
     expect(wrapper.text()).toContain("Paris");
     expect(wrapper.text()).toContain("Afficher le ressenti");
     expect(wrapper.text()).toContain("Afficher la minimap");
@@ -108,7 +122,7 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Coefficient min");
     expect(wrapper.text()).toContain("Coefficient max");
     expect(wrapper.text()).toContain(
-      "Limiter les lignes fantômes aux modes structurants",
+      "Limiter les lignes fantomes aux modes structurants",
     );
     expect(wrapper.text()).toContain("Wake lock");
     expect(wrapper.text()).toContain("Masquer la navigation");
@@ -118,7 +132,7 @@ describe("SettingsPage", () => {
       .find((label) => label.text().includes("Activer le cache backend"));
 
     expect(backendCacheToggle?.text()).not.toContain(
-      "Le chargement des correspondances sera très lent",
+      "Le chargement des correspondances sera tres lent",
     );
     await backendCacheToggle?.find("input").setValue(false);
 
@@ -139,17 +153,16 @@ describe("SettingsPage", () => {
       (apparentTemperatureInput.element as HTMLInputElement).checked,
     ).toBe(false);
 
-    await wrapper.get('[aria-label="Mode du sélecteur de lieux"]').trigger("click");
+    await wrapper.get('[aria-label="Mode du selecteur de lieux"]').trigger("click");
     expect(wrapper.text()).toContain("Dropdown + swipe");
     expect(wrapper.text()).toContain("Dropdown seulement");
     expect(wrapper.text()).toContain("Swipe seulement");
     expect(backendCacheToggle?.text()).toContain(
-      "Le chargement des correspondances sera très lent tant que le cache backend est désactivé.",
+      "Le chargement des correspondances sera tres lent tant que le cache backend est desactive.",
     );
   });
 
-  it("shows a temporary notification after clearing bundles or resetting settings", async () => {
-    vi.useFakeTimers();
+  it("switches the settings UI language from French to English", async () => {
     mockMobileReleaseCard();
     vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
       const actual =
@@ -157,7 +170,10 @@ describe("SettingsPage", () => {
           typeof import("../src/features/app-settings/appSettings")
         >();
       const { computed, ref } = await import("vue");
-      const settings = ref(actual.createDefaultAppSettings());
+      const settings = ref(actual.normalizeAppSettings({
+        ...actual.createDefaultAppSettings(),
+        language: "fr",
+      }));
 
       return {
         ...actual,
@@ -173,7 +189,66 @@ describe("SettingsPage", () => {
             });
           },
           resetSettings: () => {
-            settings.value = actual.createDefaultAppSettings();
+            settings.value = actual.normalizeAppSettings({
+              ...actual.createDefaultAppSettings(),
+              language: "fr",
+            });
+          },
+        }),
+      };
+    });
+
+    const { default: SettingsPage } = await import(
+      "../src/features/app-settings/SettingsPage.vue"
+    );
+    const wrapper = mount(SettingsPage, { attachTo: document.body });
+
+    expect(wrapper.text()).toContain("Langue de l'application");
+    await wrapper.get('[aria-label="Langue de l\'application"]').trigger("click");
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "English")
+      ?.trigger("mousedown");
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.text()).toContain("Application language");
+    expect(wrapper.text()).toContain("Dashboard customization");
+    expect(wrapper.text()).toContain("Saved dashboards");
+    expect(wrapper.text()).not.toContain("Personnalisation du dashboard");
+  });
+
+  it("shows a temporary notification after clearing bundles or resetting settings", async () => {
+    vi.useFakeTimers();
+    mockMobileReleaseCard();
+    vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
+      const actual =
+        await importActual<
+          typeof import("../src/features/app-settings/appSettings")
+        >();
+      const { computed, ref } = await import("vue");
+      const settings = ref(actual.normalizeAppSettings({
+        ...actual.createDefaultAppSettings(),
+        language: "fr",
+      }));
+
+      return {
+        ...actual,
+        useAppSettings: () => ({
+          settings,
+          effectiveMaxDeparturesPerDirection: computed(() =>
+            actual.getEffectiveMaxDeparturesPerDirection(settings.value),
+          ),
+          updateSettings: (patch: Partial<typeof settings.value>) => {
+            settings.value = actual.normalizeAppSettings({
+              ...settings.value,
+              ...patch,
+            });
+          },
+          resetSettings: () => {
+            settings.value = actual.normalizeAppSettings({
+              ...actual.createDefaultAppSettings(),
+              language: "fr",
+            });
           },
         }),
       };
@@ -190,14 +265,14 @@ describe("SettingsPage", () => {
 
     const clearBundlesButton = wrapper
       .findAll("button")
-      .find((button) => button.text() === "Clear bundles");
+      .find((button) => button.text() === "Vider les bundles");
 
     expect(clearBundlesButton).toBeTruthy();
     await clearBundlesButton?.trigger("click");
-    expect(document.body.textContent).toContain("Bundles supprimés");
+    expect(document.body.textContent).toContain("Bundles supprimes");
 
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(document.body.textContent).not.toContain("Bundles supprimés");
+    expect(document.body.textContent).not.toContain("Bundles supprimes");
 
     const resetButton = wrapper
       .findAll("button")
@@ -205,7 +280,7 @@ describe("SettingsPage", () => {
 
     expect(resetButton).toBeTruthy();
     await resetButton?.trigger("click");
-    expect(document.body.textContent).toContain("Paramètres réinitialisés");
+    expect(document.body.textContent).toContain("Parametres reinitialises");
   });
 
   it("manages presets from the settings modal", async () => {
@@ -216,7 +291,10 @@ describe("SettingsPage", () => {
           typeof import("../src/features/app-settings/appSettings")
         >();
       const { computed, ref } = await import("vue");
-      const settings = ref(actual.createDefaultAppSettings());
+      const settings = ref(actual.normalizeAppSettings({
+        ...actual.createDefaultAppSettings(),
+        language: "fr",
+      }));
 
       return {
         ...actual,
@@ -232,7 +310,10 @@ describe("SettingsPage", () => {
             });
           },
           resetSettings: () => {
-            settings.value = actual.createDefaultAppSettings();
+            settings.value = actual.normalizeAppSettings({
+              ...actual.createDefaultAppSettings(),
+              language: "fr",
+            });
           },
         }),
       };
@@ -252,10 +333,10 @@ describe("SettingsPage", () => {
 
     await wrapper
       .findAll("button")
-      .find((button) => button.text().includes("Gérer les lieux"))
+      .find((button) => button.text().includes("Gerer les lieux"))
       ?.trigger("click");
 
-    expect(document.body.textContent).toContain("Lieux enregistrés");
+    expect(document.body.textContent).toContain("Dashboards enregistres");
     expect(document.body.textContent).toContain("Studio");
     expect(
       document.body.querySelector('[aria-label="Supprimer Maison"]'),

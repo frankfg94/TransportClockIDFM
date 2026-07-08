@@ -67,14 +67,16 @@ export default defineEventHandler(async (event): Promise<HealthResponse> => {
 });
 
 async function checkNetexCache(event: H3Event): Promise<HealthCheck> {
-  return timedCheck("netex", "Données NeTEx", "Données", true, async () => {
+  return timedCheck("netex", "NeTEx data", "Data", true, async () => {
     const status = await getNetexCacheStatus(getNetexRuntimeEnv(event));
 
     if (!status.available) {
       return {
         status: "error",
-        message: "Cache NeTEx introuvable",
-        detail: status.message ?? "Aucun index NeTEx chargé.",
+        message: "NeTEx cache not found",
+        messageKey: "health.messages.netexMissing",
+        detail: status.message ?? "No NeTEx index loaded.",
+        detailKey: status.message ? undefined : "health.messages.netexIndexMissing",
       };
     }
 
@@ -83,14 +85,14 @@ async function checkNetexCache(event: H3Event): Promise<HealthCheck> {
     return {
       status: freshness?.status ?? (status.warning ? "warning" : "ok"),
       message: [
-        `${status.lineCount ?? 0} lignes chargées`,
+        `${status.lineCount ?? 0} lines loaded`,
         freshness?.message,
       ]
         .filter(Boolean)
         .join(" · "),
       detail: [
         `Source ${formatNetexSource(status.source?.kind)}`,
-        status.generatedAt ? `générée le ${formatDate(status.generatedAt)}` : "",
+        status.generatedAt ? `generated at ${formatDate(status.generatedAt)}` : "",
         freshness?.detail,
         status.warning,
       ]
@@ -101,16 +103,18 @@ async function checkNetexCache(event: H3Event): Promise<HealthCheck> {
 }
 
 async function checkR2Cache(event: H3Event): Promise<HealthCheck> {
-  return timedCheck("r2", "Cloudflare R2", "Stockage", false, async () => {
+  return timedCheck("r2", "Cloudflare R2", "Storage", false, async () => {
     const runtimeEnv = getNetexRuntimeEnv(event);
     const remote = runtimeEnv.IDFM_NETEX_CACHE_REMOTE?.trim();
 
     if (!remote || !remote.startsWith("r2://")) {
       return {
         status: "not_configured",
-        message: "R2 non configuré",
+        message: "R2 not configured",
+        messageKey: "health.messages.r2NotConfigured",
         detail:
-          "IDFM_NETEX_CACHE_REMOTE ne pointe pas vers une source r2:// pour ce déploiement.",
+          "IDFM_NETEX_CACHE_REMOTE does not point to an r2:// source for this deployment.",
+        detailKey: "health.messages.r2NotConfiguredDetail",
       };
     }
 
@@ -119,8 +123,11 @@ async function checkR2Cache(event: H3Event): Promise<HealthCheck> {
     if (missing.length > 0) {
       return {
         status: "error",
-        message: "Identifiants R2 incomplets",
-        detail: `Variables manquantes: ${missing.join(", ")}`,
+        message: "Incomplete R2 credentials",
+        messageKey: "health.messages.r2MissingCredentials",
+        detail: `Missing variables: ${missing.join(", ")}`,
+        detailKey: "health.messages.missingVariables",
+        detailParams: { variables: missing.join(", ") },
       };
     }
 
@@ -129,14 +136,17 @@ async function checkR2Cache(event: H3Event): Promise<HealthCheck> {
     if (!status.available) {
       return {
         status: "error",
-        message: "Lecture R2 impossible",
-        detail: status.message ?? "Le fichier index.json n'a pas pu être lu.",
+        message: "Unable to read R2",
+        messageKey: "health.messages.r2ReadFailed",
+        detail: status.message ?? "The index.json file could not be read.",
+        detailKey: status.message ? undefined : "health.messages.indexReadFailed",
       };
     }
 
     return {
       status: "ok",
-      message: "Bucket R2 accessible",
+      message: "R2 bucket accessible",
+      messageKey: "health.messages.r2Accessible",
       detail: sanitizeNetexLocation(status.source?.location),
     };
   });
@@ -148,14 +158,16 @@ async function checkMarketplaceApi(
   label: string,
   path: string,
 ): Promise<HealthCheck> {
-  return timedCheck(id, label, "Temps réel", true, async () => {
+  return timedCheck(id, label, "Realtime", true, async () => {
     const apiKey = getServerIdfmApiKey(event);
 
     if (!apiKey) {
       return {
         status: "error",
-        message: "Clé API absente",
-        detail: "Configurez IDFM_API_KEY ou NUXT_IDFM_API_KEY côté serveur.",
+        message: "Missing API key",
+        messageKey: "health.messages.missingApiKey",
+        detail: "Configure IDFM_API_KEY or NUXT_IDFM_API_KEY on the server.",
+        detailKey: "health.messages.missingApiKeyDetail",
         quota: { exposed: false },
       };
     }
@@ -172,15 +184,18 @@ async function checkMarketplaceApi(
       return {
         status: "error",
         message: `${response.status} ${response.statusText}`,
-        detail: "L'endpoint IDFM a répondu mais pas avec un statut OK.",
+        detail: "The IDFM endpoint responded without an OK status.",
+        detailKey: "health.messages.idfmEndpointBadStatus",
         quota,
       };
     }
 
     return {
       status: "ok",
-      message: "Endpoint joignable",
-      detail: "Test court via le proxy marketplace IDFM.",
+      message: "Endpoint reachable",
+      messageKey: "health.messages.endpointReachable",
+      detail: "Short test through the IDFM marketplace proxy.",
+      detailKey: "health.messages.idfmProxyTest",
       quota,
     };
   });
@@ -189,8 +204,8 @@ async function checkMarketplaceApi(
 async function checkOpenMeteoWeather(): Promise<HealthCheck> {
   return timedCheck(
     "open-meteo",
-    "Open-Meteo météo",
-    "Météo",
+    "Open-Meteo weather",
+    "Weather",
     false,
     async () => {
       const response = await fetchWithTimeout(OPEN_METEO_HEALTH_URL, {
@@ -203,15 +218,18 @@ async function checkOpenMeteoWeather(): Promise<HealthCheck> {
         return {
           status: "warning",
           message: `${response.status} ${response.statusText}`,
-          detail: "L'API météo a répondu mais pas avec un statut OK.",
+          detail: "The weather API responded without an OK status.",
+          detailKey: "health.messages.weatherBadStatus",
           quota: extractQuota(response.headers),
         };
       }
 
       return {
         status: "ok",
-        message: "Prévisions météo joignables",
-        detail: "Test court Open-Meteo sur Paris, sans clé API.",
+        message: "Weather forecast reachable",
+        messageKey: "health.messages.weatherReachable",
+        detail: "Short Open-Meteo test on Paris, without an API key.",
+        detailKey: "health.messages.weatherTest",
         quota: extractQuota(response.headers),
       };
     },
@@ -219,7 +237,7 @@ async function checkOpenMeteoWeather(): Promise<HealthCheck> {
 }
 
 async function checkMapTiles(): Promise<HealthCheck> {
-  return timedCheck("map-tiles", "Carte vectorielle", "Carte", false, async () => {
+  return timedCheck("map-tiles", "Vector map", "Map", false, async () => {
     const response = await fetchWithTimeout(MAP_TILE_HEALTH_URL, {
       headers: {
         accept: "image/png,image/*;q=0.8,*/*;q=0.5",
@@ -230,15 +248,18 @@ async function checkMapTiles(): Promise<HealthCheck> {
       return {
         status: "warning",
         message: `${response.status} ${response.statusText}`,
-        detail: "Le fond Carto basemap ne répond pas correctement.",
+        detail: "The Carto basemap did not respond correctly.",
+        detailKey: "health.messages.mapBadStatus",
         quota: extractQuota(response.headers),
       };
     }
 
     return {
       status: "ok",
-      message: "Fond de carte joignable",
-      detail: "Carto basemap light_all répond correctement.",
+      message: "Map background reachable",
+      messageKey: "health.messages.mapReachable",
+      detail: "Carto basemap light_all responds correctly.",
+      detailKey: "health.messages.mapTest",
       quota: extractQuota(response.headers),
     };
   });
@@ -259,7 +280,9 @@ async function timedCheck(
     return {
       id,
       label,
+      labelKey: getHealthCheckLabelKey(id),
       category,
+      categoryKey: getHealthCategoryKey(category),
       required,
       latencyMs: Math.round(performance.now() - startedAt),
       ...result,
@@ -269,15 +292,42 @@ async function timedCheck(
     return {
       id,
       label,
+      labelKey: getHealthCheckLabelKey(id),
       category,
+      categoryKey: getHealthCategoryKey(category),
       required,
       status: required ? "error" : "warning",
       latencyMs: Math.round(performance.now() - startedAt),
-      message: "Service injoignable",
-      detail: error instanceof Error ? error.message : "Erreur inconnue",
+      message: "Service unreachable",
+      messageKey: "health.messages.serviceUnreachable",
+      detail: error instanceof Error ? error.message : "Unknown error",
+      detailKey:
+        error instanceof Error ? undefined : "health.messages.unknownError",
       quota: { exposed: false },
     };
   }
+}
+
+function getHealthCheckLabelKey(id: string): HealthCheck["labelKey"] {
+  return {
+    netex: "health.checks.netex",
+    r2: "health.checks.r2",
+    prim: "health.checks.prim",
+    navitia: "health.checks.navitia",
+    "prim-traffic": "health.checks.primTraffic",
+    "open-meteo": "health.checks.openMeteo",
+    "map-tiles": "health.checks.mapTiles",
+  }[id] as HealthCheck["labelKey"];
+}
+
+function getHealthCategoryKey(category: string): HealthCheck["categoryKey"] {
+  return {
+    Data: "health.categories.data",
+    Storage: "health.categories.storage",
+    Realtime: "health.categories.realtime",
+    Weather: "health.categories.weather",
+    Map: "health.categories.map",
+  }[category] as HealthCheck["categoryKey"];
 }
 
 async function fetchWithTimeout(
@@ -332,10 +382,10 @@ function getMissingR2Variables(runtimeEnv: NetexRuntimeEnv): string[] {
 
 function formatNetexSource(kind?: string): string {
   if (!kind) {
-    return "inconnue";
+    return "unknown";
   }
 
-  return kind === "directory" ? "locale" : kind.toUpperCase();
+  return kind === "directory" ? "local" : kind.toUpperCase();
 }
 
 export function getNetexDatasetFreshness(
@@ -359,7 +409,7 @@ export function getNetexDatasetFreshness(
     return {
       status: "error",
       message: "dataset outdated",
-      detail: "Dataset NeTEx de plus d'un an, il doit être régénéré.",
+      detail: "NeTEx dataset is over one year old and must be regenerated.",
     };
   }
 
@@ -369,8 +419,8 @@ export function getNetexDatasetFreshness(
   ) {
     return {
       status: "warning",
-      message: "mise à jour conseillée",
-      detail: "Dataset NeTEx de plus de 6 mois, mieux vaut le mettre à jour.",
+      message: "update recommended",
+      detail: "NeTEx dataset is over six months old; updating it is recommended.",
     };
   }
 
@@ -406,7 +456,7 @@ function formatDate(value: string): string {
 
 function sanitizeNetexLocation(location?: string): string {
   if (!location) {
-    return "Source configurée";
+    return "Source configured";
   }
 
   if (location.startsWith("r2://")) {
@@ -422,10 +472,10 @@ function sanitizeNetexLocation(location?: string): string {
       const parsed = new URL(location);
       return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
     } catch {
-      return "URL distante configurée";
+      return "Remote URL configured";
     }
   }
 
-  return "Dossier local configuré";
+  return "Local folder configured";
 }
 

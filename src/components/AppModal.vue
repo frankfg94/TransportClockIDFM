@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { computed } from "vue";
+import { useI18n } from "../i18n";
+
 withDefaults(
   defineProps<{
     open: boolean;
@@ -10,13 +13,15 @@ withDefaults(
   {
     eyebrow: "",
     panelClass: "",
-    closeLabel: "Fermer",
+    closeLabel: "",
   },
 );
 
 const emit = defineEmits<{
   close: [];
 }>();
+const { t } = useI18n();
+const resolvedCloseLabel = computed(() => t("common.actions.close"));
 </script>
 
 <template>
@@ -40,7 +45,7 @@ const emit = defineEmits<{
             <button
               class="icon-button"
               type="button"
-              :aria-label="closeLabel"
+              :aria-label="closeLabel || resolvedCloseLabel"
               @click="emit('close')"
             >
               ×

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useI18n } from "../../i18n";
 import { toServerApiUrl } from "../../services/serverApi";
 import type { HealthCheck, HealthResponse, HealthStatus } from "./types";
 
@@ -7,6 +8,7 @@ const checks = ref<HealthCheck[]>([]);
 const generatedAt = ref("");
 const loading = ref(true);
 const errorMessage = ref("");
+const { d, t } = useI18n();
 
 const overallStatus = computed<HealthStatus>(() => {
   if (checks.value.some((check) => check.status === "error" && check.required)) {
@@ -46,7 +48,7 @@ async function loadHealth(): Promise<void> {
     errorMessage.value =
       error instanceof Error
         ? error.message
-        : "Impossible de charger le health check.";
+        : t("health.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -58,13 +60,19 @@ function formatLatency(check: HealthCheck): string {
 
 function formatQuota(check: HealthCheck): string {
   if (!check.quota?.exposed) {
-    return "Non exposé";
+    return t("health.quotaNotExposed");
   }
 
   return [
-    check.quota.remaining ? `Restant ${check.quota.remaining}` : "",
-    check.quota.limit ? `Limite ${check.quota.limit}` : "",
-    check.quota.reset ? `Reset ${check.quota.reset}` : "",
+    check.quota.remaining
+      ? t("health.quotaRemaining", { value: check.quota.remaining })
+      : "",
+    check.quota.limit
+      ? t("health.quotaLimit", { value: check.quota.limit })
+      : "",
+    check.quota.reset
+      ? t("health.quotaReset", { value: check.quota.reset })
+      : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -72,23 +80,47 @@ function formatQuota(check: HealthCheck): string {
 
 function statusLabel(status: HealthStatus): string {
   return {
-    ok: "OK",
-    warning: "Avertissement",
-    error: "Erreur",
-    not_configured: "Non configuré",
+    ok: t("health.status.ok"),
+    warning: t("health.status.warning"),
+    error: t("health.status.error"),
+    not_configured: t("health.status.not_configured"),
   }[status];
+}
+
+function formatCheckLabel(check: HealthCheck): string {
+  return check.labelKey ? t(check.labelKey) : check.label;
+}
+
+function formatCheckCategory(check: HealthCheck): string {
+  return check.categoryKey ? t(check.categoryKey) : check.category;
+}
+
+function formatCheckMessage(check: HealthCheck): string {
+  return check.messageKey
+    ? t(check.messageKey, check.messageParams)
+    : check.message;
+}
+
+function formatCheckDetail(check: HealthCheck): string {
+  return check.detailKey
+    ? t(check.detailKey, check.detailParams)
+    : (check.detail ?? "");
+}
+
+function formatGeneratedAt(value: string): string {
+  return d(new Date(value), {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 </script>
 
 <template>
   <main class="health-page">
     <header class="health-page__hero">
-      <p class="eyebrow">Health</p>
-      <h1>État des services</h1>
-      <p>
-        Vérification courte des dépendances principales. Les secrets et URLs
-        sensibles ne sont jamais affichés.
-      </p>
+      <p class="eyebrow">{{ t("health.eyebrow") }}</p>
+      <h1>{{ t("health.title") }}</h1>
+      <p>{{ t("health.body") }}</p>
     </header>
 
     <section
@@ -98,23 +130,25 @@ function statusLabel(status: HealthStatus): string {
     >
       <div>
         <strong>{{ statusLabel(overallStatus) }}</strong>
-        <span v-if="generatedAt">Dernière vérification {{ generatedAt }}</span>
-        <span v-else>Vérification en attente</span>
+        <span v-if="generatedAt">
+          {{ t("health.lastCheck", { date: formatGeneratedAt(generatedAt) }) }}
+        </span>
+        <span v-else>{{ t("health.pending") }}</span>
       </div>
       <button class="button-secondary" type="button" @click="loadHealth">
-        Rafraîchir
+        {{ t("common.actions.refresh") }}
       </button>
     </section>
 
     <section v-if="loading" class="health-state" role="status">
-      Vérification des services...
+      {{ t("health.loading") }}
     </section>
 
     <section v-else-if="errorMessage" class="health-state health-state--error">
       {{ errorMessage }}
     </section>
 
-    <section v-else class="health-grid" aria-label="Services vérifiés">
+    <section v-else class="health-grid" :aria-label="t('health.servicesAria')">
       <article
         v-for="check in checks"
         :key="check.id"
@@ -123,27 +157,35 @@ function statusLabel(status: HealthStatus): string {
       >
         <header>
           <div>
-            <span>{{ check.category }}</span>
-            <h2>{{ check.label }}</h2>
+            <span>{{ formatCheckCategory(check) }}</span>
+            <h2>{{ formatCheckLabel(check) }}</h2>
           </div>
           <strong>{{ statusLabel(check.status) }}</strong>
         </header>
-        <p>{{ check.message }}</p>
+        <p>{{ formatCheckMessage(check) }}</p>
         <dl>
           <div>
-            <dt>Latence</dt>
+            <dt>{{ t("health.latency") }}</dt>
             <dd>{{ formatLatency(check) }}</dd>
           </div>
           <div>
-            <dt>Quota</dt>
+            <dt>{{ t("health.quota") }}</dt>
             <dd>{{ formatQuota(check) }}</dd>
           </div>
           <div>
-            <dt>Critique</dt>
-            <dd>{{ check.required ? "Oui" : "Optionnel" }}</dd>
+            <dt>{{ t("health.critical") }}</dt>
+            <dd>
+              {{
+                check.required
+                  ? t("common.booleans.yes")
+                  : t("common.booleans.optional")
+              }}
+            </dd>
           </div>
         </dl>
-        <small v-if="check.detail">{{ check.detail }}</small>
+        <small v-if="formatCheckDetail(check)">
+          {{ formatCheckDetail(check) }}
+        </small>
       </article>
     </section>
   </main>

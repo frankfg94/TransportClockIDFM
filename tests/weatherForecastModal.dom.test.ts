@@ -5,6 +5,7 @@ import type { WeatherResponse } from "../src/features/weather/types";
 
 const baseSettings: AppSettings = {
   version: 1,
+  language: "fr",
   closedDirectionSummaryMode: "last",
   maxDeparturesPerDirection: "default",
   showPatternMiniMap: true,
@@ -27,6 +28,7 @@ const baseSettings: AppSettings = {
   ghostNetworkStructuralOnly: false,
   trafficInfoDesign: "ratp",
   trafficInfoDefaultScope: "optimized",
+  trafficWarningLookaheadDays: 10,
   fullscreenStationPanelDesign: "all-directions",
   fullscreenStationPanelDarkTheme: false,
   smartTrafficDetection: true,
@@ -159,10 +161,10 @@ describe("WeatherForecastModal", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/weather?"),
     );
-    expect(wrapper.text()).toContain("Météo");
+    expect(wrapper.text()).toContain("Meteo");
     expect(wrapper.text()).toContain("31°");
-    expect(wrapper.text()).toContain("Précipitations");
-    expect(wrapper.text()).toContain("Humidité");
+    expect(wrapper.text()).toContain("Precipitations");
+    expect(wrapper.text()).toContain("Humidite");
     expect(wrapper.text()).toContain("Vent");
     expect(wrapper.text()).toContain("Open-Meteo");
   });

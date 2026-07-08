@@ -1,3 +1,5 @@
+import type { TranslationKey, TranslationParams } from "../../i18n";
+
 export type HealthStatus = "ok" | "warning" | "error" | "not_configured";
 
 export interface HealthQuota {
@@ -10,12 +12,18 @@ export interface HealthQuota {
 export interface HealthCheck {
   id: string;
   label: string;
+  labelKey?: TranslationKey;
   category: string;
+  categoryKey?: TranslationKey;
   required: boolean;
   status: HealthStatus;
   latencyMs?: number;
   message: string;
+  messageKey?: TranslationKey;
+  messageParams?: TranslationParams;
   detail?: string;
+  detailKey?: TranslationKey;
+  detailParams?: TranslationParams;
   quota?: HealthQuota;
 }
 

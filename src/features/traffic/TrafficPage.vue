@@ -4,6 +4,7 @@ import { ChevronDown, Info, RefreshCw, TrafficCone } from "lucide-vue-next";
 import { useRoute } from "#imports";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import MaterialCombobox from "../../components/MaterialCombobox.vue";
+import { useI18n } from "../../i18n";
 import TrafficDisruptionCard from "./TrafficDisruptionCard.vue";
 import {
   trafficInfoDesignOptions,
@@ -56,6 +57,7 @@ const scopeBurstKey = ref(0);
 const scopeBurstKind = ref<"optimized" | "all">("optimized");
 const { settings, updateSettings } = useAppSettings();
 const route = useRoute();
+const { d, t } = useI18n();
 
 const reportByLineRef = computed(
   () => new Map(reports.value.map((report) => [report.lineRef, report])),
@@ -90,10 +92,10 @@ const informationTime = computed(() => {
 
   return Number.isNaN(date.getTime())
     ? "--:--"
-    : new Intl.DateTimeFormat("fr-FR", {
+    : d(date, {
         hour: "2-digit",
         minute: "2-digit",
-      }).format(date);
+      });
 });
 const disruptedLineCount = computed(
   () =>
@@ -103,6 +105,15 @@ const disruptedLineCount = computed(
 );
 const firstTrafficDisruption = computed(
   () => reports.value.flatMap((report) => report.disruptions)[0] ?? undefined,
+);
+const trafficInfoDesignLocalizedOptions = computed(() =>
+  trafficInfoDesignOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "ratp"
+        ? t("settings.options.trafficDesign.ratp")
+        : t("settings.options.trafficDesign.cards"),
+  })),
 );
 
 onMounted(() => {
@@ -160,7 +171,7 @@ async function loadTraffic(): Promise<void> {
     errorMessage.value =
       error instanceof Error
         ? error.message
-        : "Impossible de charger l'information trafic.";
+        : t("traffic.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -206,7 +217,7 @@ async function ensureAllTrafficLinesLoaded(): Promise<boolean> {
     allLinesError.value =
       error instanceof Error
         ? error.message
-        : "Impossible de charger toutes les lignes.";
+        : t("traffic.allLinesLoadFailed");
     return false;
   } finally {
     loadingAllLines.value = false;
@@ -319,20 +330,20 @@ function updateTrafficInfoDesign(value: string): void {
 
 function getFamilyLabel(line: ActiveTrafficLine): string {
   if (line.family === "RER") return "RER";
-  if (line.family === "TRAM") return "Tram";
-  if (line.family === "TRANSILIEN") return "Train";
-  if (line.family === "METRO") return "Métro";
+  if (line.family === "TRAM") return t("traffic.family.tram");
+  if (line.family === "TRANSILIEN") return t("traffic.family.train");
+  if (line.family === "METRO") return t("traffic.family.metro");
 
-  return "Autres lignes";
+  return t("traffic.family.other");
 }
 
 function getFamilyOrder(label: string): number {
   const order: Record<string, number> = {
-    RER: 0,
-    Métro: 1,
-    Tram: 2,
-    Train: 3,
-    "Autres lignes": 4,
+    [t("traffic.family.rer")]: 0,
+    [t("traffic.family.metro")]: 1,
+    [t("traffic.family.tram")]: 2,
+    [t("traffic.family.train")]: 3,
+    [t("traffic.family.other")]: 4,
   };
 
   return order[label] ?? 99;
@@ -343,12 +354,18 @@ function isTrafficFamilySupported(family: TransitFamily): boolean {
 }
 
 function formatFamilyDisplayName(family: TransitFamily): string {
-  if (family === "METRO") return "Métro";
-  if (family === "TRAM") return "Tram";
-  if (family === "RER") return "RER";
-  if (family === "CABLE") return "Câble";
+  if (family === "METRO") return t("traffic.family.metro");
+  if (family === "TRAM") return t("traffic.family.tram");
+  if (family === "RER") return t("traffic.family.rer");
+  if (family === "CABLE") return t("traffic.family.cable");
 
-  return "Train";
+  return t("traffic.family.train");
+}
+
+function formatGroupLineCount(count: number): string {
+  return count === 1
+    ? t("traffic.groupLineOne", { count })
+    : t("traffic.groupLineOther", { count });
 }
 
 function compareTrafficLines(
@@ -393,18 +410,18 @@ function splitLineLabel(label: string): { prefix: string; number: number } {
 
 function getStatusLabel(status: TrafficLineStatus): string {
   return {
-    normal: "Trafic normal",
-    information: "Information",
-    planned: "Travaux",
-    disrupted: "Perturbé",
-    unknown: "Chargement",
-    error: "Indisponible",
+    normal: t("traffic.normal"),
+    information: t("traffic.information"),
+    planned: t("traffic.planned"),
+    disrupted: t("traffic.disrupted"),
+    unknown: t("traffic.unknown"),
+    error: t("traffic.error"),
   }[status];
 }
 
 function getLineStatusLabel(report: TrafficLineReport): string {
   return hasOnlyUpcomingDisruptions(report)
-    ? "Travaux à venir"
+    ? t("traffic.upcomingRoadwork")
     : getStatusLabel(report.status);
 }
 
@@ -482,9 +499,9 @@ function getLineToneClass(
               <RefreshCw
                 :class="{ 'traffic-refresh__icon--spinning': loading }"
               />
-              <span class="sr-only">Rafraîchir</span>
+              <span class="sr-only">{{ t("traffic.refreshSr") }}</span>
             </button>
-            <h1>Votre traffic à {{ informationTime }}</h1>
+            <h1>{{ t("traffic.headingAt", { time: informationTime }) }}</h1>
           </div>
 
           <div class="traffic-toolbar-controls">
@@ -495,13 +512,13 @@ function getLineToneClass(
               :disabled="loadingAllLines"
               @click="toggleAllLinesMode"
             >
-              <span>Mode</span>
+              <span>{{ t("traffic.mode") }}</span>
               <strong>{{
                 loadingAllLines
-                  ? "Chargement..."
+                  ? t("traffic.loading")
                   : allLinesMode
-                    ? "Toutes les lignes"
-                    : "Optimisé"
+                    ? t("traffic.allLines")
+                    : t("traffic.optimized")
               }}</strong>
 
               <Transition name="traffic-scope-burst">
@@ -517,11 +534,11 @@ function getLineToneClass(
             </button>
 
             <div class="traffic-style-control">
-              <span>Style</span>
+              <span>{{ t("traffic.style") }}</span>
               <MaterialCombobox
                 :model-value="settings.trafficInfoDesign"
-                :options="[...trafficInfoDesignOptions]"
-                aria-label="Style info trafic"
+                :options="trafficInfoDesignLocalizedOptions"
+                :aria-label="t('traffic.styleAria')"
                 @update:model-value="updateTrafficInfoDesign"
               />
             </div>
@@ -540,13 +557,13 @@ function getLineToneClass(
         </section>
 
         <section v-else-if="displayedLines.length === 0" class="traffic-state">
-          Aucune ligne ferrée active sur le tableau.
+          {{ t("traffic.noActiveRail") }}
         </section>
 
         <section
           v-else
           class="traffic-ratp-groups"
-          aria-label="Information trafic compact par ligne active"
+          :aria-label="t('traffic.compactAria')"
         >
           <article
             v-for="group in groupedLines"
@@ -621,7 +638,7 @@ function getLineToneClass(
                   v-else-if="getLineReport(line).disruptions.length === 0"
                   class="traffic-details__normal"
                 >
-                  Aucun aléa ou travaux signalé pour cette ligne.
+                  {{ t("traffic.noDisruption") }}
                 </p>
                 <template v-else>
                   <div class="traffic-timing-tabs" role="tablist">
@@ -634,7 +651,7 @@ function getLineToneClass(
                       }"
                       @click="selectTimingTab(line.navitiaLineRef, 'current')"
                     >
-                      En cours
+                      {{ t("traffic.current") }}
                       <span>{{
                         getCurrentDisruptions(getLineReport(line)).length
                       }}</span>
@@ -648,7 +665,7 @@ function getLineToneClass(
                       }"
                       @click="selectTimingTab(line.navitiaLineRef, 'upcoming')"
                     >
-                      À venir
+                      {{ t("traffic.upcoming") }}
                       <span>{{
                         getUpcomingDisruptions(getLineReport(line)).length
                       }}</span>
@@ -660,7 +677,7 @@ function getLineToneClass(
                     "
                     class="traffic-details__normal"
                   >
-                    Aucune annonce dans cette catégorie.
+                    {{ t("traffic.emptyCategory") }}
                   </p>
                   <TrafficDisruptionCard
                     v-for="disruption in getVisibleDisruptions(
@@ -680,7 +697,7 @@ function getLineToneClass(
             <div class="traffic-ratp-family" aria-hidden="true">
               <span>BUS</span>
             </div>
-            <p>Les bus ne sont pas affichés pour le moment.</p>
+            <p>{{ t("traffic.noBus") }}</p>
           </div>
         </section>
       </section>
@@ -689,12 +706,9 @@ function getLineToneClass(
     <template v-else>
       <header class="traffic-hero">
         <div>
-          <p class="eyebrow">Info trafic</p>
-          <h1>Information trafic à {{ informationTime }}</h1>
-          <p>
-            Lignes suivies sur le tableau uniquement. Les bus restent exclus
-            pour cette première version.
-          </p>
+          <p class="eyebrow">{{ t("traffic.cardsEyebrow") }}</p>
+          <h1>{{ t("traffic.cardsHeadingAt", { time: informationTime }) }}</h1>
+          <p>{{ t("traffic.cardsBody") }}</p>
         </div>
 
         <div class="traffic-hero__actions">
@@ -705,13 +719,13 @@ function getLineToneClass(
             :disabled="loadingAllLines"
             @click="toggleAllLinesMode"
           >
-            <span>Mode</span>
+            <span>{{ t("traffic.mode") }}</span>
             <strong>{{
               loadingAllLines
-                ? "Chargement..."
+                ? t("traffic.loading")
                 : allLinesMode
-                  ? "Toutes les lignes"
-                  : "Optimisé"
+                  ? t("traffic.allLines")
+                  : t("traffic.optimized")
             }}</strong>
 
             <Transition name="traffic-scope-burst">
@@ -727,11 +741,11 @@ function getLineToneClass(
           </button>
 
           <div class="traffic-style-control traffic-style-control--cards">
-            <span>Style</span>
+            <span>{{ t("traffic.style") }}</span>
             <MaterialCombobox
               :model-value="settings.trafficInfoDesign"
-              :options="[...trafficInfoDesignOptions]"
-              aria-label="Style info trafic"
+              :options="trafficInfoDesignLocalizedOptions"
+              :aria-label="t('traffic.styleAria')"
               @update:model-value="updateTrafficInfoDesign"
             />
           </div>
@@ -740,7 +754,7 @@ function getLineToneClass(
             <RefreshCw
               :class="{ 'traffic-refresh__icon--spinning': loading }"
             />
-            <span>Rafraîchir</span>
+            <span>{{ t("common.actions.refresh") }}</span>
           </button>
         </div>
       </header>
@@ -750,12 +764,12 @@ function getLineToneClass(
         <span>
           {{
             disruptedLineCount > 1
-              ? "lignes avec info trafic"
-              : "ligne avec info trafic"
+              ? t("traffic.summaryOther", { count: disruptedLineCount })
+              : t("traffic.summaryOne", { count: disruptedLineCount })
           }}
         </span>
-        <small v-if="!configured">Clé PRIM absente côté serveur</small>
-        <small v-else>Source PRIM Navitia line_reports</small>
+        <small v-if="!configured">{{ t("traffic.missingServerKey") }}</small>
+        <small v-else>{{ t("traffic.source") }}</small>
       </section>
 
       <section v-if="errorMessage" class="traffic-state traffic-state--error">
@@ -770,13 +784,13 @@ function getLineToneClass(
       </section>
 
       <section v-else-if="displayedLines.length === 0" class="traffic-state">
-        Aucune ligne ferrée active sur le tableau.
+        {{ t("traffic.noActiveRail") }}
       </section>
 
       <section
         v-else
         class="traffic-groups"
-        aria-label="Information trafic par ligne active"
+        :aria-label="t('traffic.cardsAria')"
       >
         <article
           v-for="group in groupedLines"
@@ -785,11 +799,7 @@ function getLineToneClass(
         >
           <header>
             <h2>{{ group.label }}</h2>
-            <span
-              >{{ group.lines.length }} ligne{{
-                group.lines.length > 1 ? "s" : ""
-              }}</span
-            >
+            <span>{{ formatGroupLineCount(group.lines.length) }}</span>
           </header>
 
           <TransitionGroup
@@ -832,7 +842,7 @@ function getLineToneClass(
                     v-else-if="getLineReport(line).disruptions.length === 0"
                     class="traffic-details__normal"
                   >
-                    Aucun aléa ou travaux signalé pour cette ligne.
+                    {{ t("traffic.noDisruption") }}
                   </p>
                   <template v-else>
                     <div class="traffic-timing-tabs" role="tablist">
@@ -845,7 +855,7 @@ function getLineToneClass(
                         }"
                         @click="selectTimingTab(line.navitiaLineRef, 'current')"
                       >
-                        En cours
+                        {{ t("traffic.current") }}
                         <span>{{
                           getCurrentDisruptions(getLineReport(line)).length
                         }}</span>
@@ -861,7 +871,7 @@ function getLineToneClass(
                           selectTimingTab(line.navitiaLineRef, 'upcoming')
                         "
                       >
-                        À venir
+                        {{ t("traffic.upcoming") }}
                         <span>{{
                           getUpcomingDisruptions(getLineReport(line)).length
                         }}</span>
@@ -873,7 +883,7 @@ function getLineToneClass(
                       "
                       class="traffic-details__normal"
                     >
-                      Aucune annonce dans cette catégorie.
+                      {{ t("traffic.emptyCategory") }}
                     </p>
                     <TrafficDisruptionCard
                       v-for="disruption in getVisibleDisruptions(

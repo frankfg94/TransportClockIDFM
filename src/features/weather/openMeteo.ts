@@ -592,46 +592,46 @@ function getHeatIntensity(temperatureC: number): WeatherIntensity {
 
 function getWeatherLabel(kind: WeatherConditionKind): string {
   return {
-    normal: "Temps calme",
-    rain: "Pluie",
-    storm: "Orage",
-    snow: "Neige",
-    heat: "Canicule",
+    normal: "Calm weather",
+    rain: "Rain",
+    storm: "Storm",
+    snow: "Snow",
+    heat: "Heatwave",
   }[kind];
 }
 
 function getWeatherCodeLabel(code?: number): string {
   if (typeof code !== "number") {
-    return "Météo indisponible";
+    return "Weather unavailable";
   }
 
   if (code === 0) {
-    return "Ciel dégagé";
+    return "Clear sky";
   }
 
   if ([1, 2, 3].includes(code)) {
-    return "Nuageux dans l'ensemble";
+    return "Mostly cloudy";
   }
 
   if ([45, 48].includes(code)) {
-    return "Brouillard";
+    return "Fog";
   }
 
   if ([51, 53, 55, 56, 57].includes(code)) {
-    return "Bruine";
+    return "Drizzle";
   }
 
   if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) {
-    return "Pluie";
+    return "Rain";
   }
 
   if ([71, 73, 75, 77, 85, 86].includes(code)) {
-    return "Neige";
+    return "Snow";
   }
 
   if ([95, 96, 99].includes(code)) {
-    return "Orage";
+    return "Storm";
   }
 
-  return "Météo variable";
+  return "Variable weather";
 }

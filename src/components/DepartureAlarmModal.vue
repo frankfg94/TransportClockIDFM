@@ -2,6 +2,7 @@
 import { BellRing, Volume2 } from "lucide-vue-next";
 import { reactive, watch } from "vue";
 import LineIconBadge from "./LineIconBadge.vue";
+import { useI18n } from "../i18n";
 import type {
   AlarmDraft,
   Departure,
@@ -23,6 +24,7 @@ const draft = reactive<AlarmDraft>({
   minutesBefore: 5,
   soundEnabled: true,
 });
+const { d, t } = useI18n();
 
 watch(
   () => props.open,
@@ -46,11 +48,11 @@ function formatClock(value?: string): string {
     return "--:--";
   }
 
-  return new Intl.DateTimeFormat("fr-FR", {
+  return d(new Date(value), {
     hour: "2-digit",
     minute: "2-digit",
     timeZone: "Europe/Paris",
-  }).format(new Date(value));
+  });
 }
 
 function departureTime(departure?: Departure): string | undefined {
@@ -73,13 +75,13 @@ function departureTime(departure?: Departure): string | undefined {
         >
           <header class="modal-panel__header">
             <div>
-              <p class="eyebrow">Alarme</p>
-              <h2>Prévenir avant le passage</h2>
+              <p class="eyebrow">{{ t("alarm.eyebrow") }}</p>
+              <h2>{{ t("alarm.title") }}</h2>
             </div>
             <button
               class="icon-button"
               type="button"
-              aria-label="Fermer"
+              :aria-label="t('common.actions.close')"
               @click="emit('cancel')"
             >
               ×
@@ -94,11 +96,13 @@ function departureTime(departure?: Departure): string | undefined {
                 :line="board.line"
               />
               <div>
-                <strong>{{ departure?.destination ?? "Passage" }}</strong>
+                <strong>
+                  {{ departure?.destination ?? t("alarm.fallbackDeparture") }}
+                </strong>
                 <span>
                   {{ departure?.monitoringLabel }}
                   <template v-if="departure?.platform">
-                    · Quai {{ departure.platform }}</template
+                    · {{ t("app.platform", { platform: departure.platform }) }}</template
                   >
                   · {{ formatClock(departureTime(departure)) }}
                 </span>
@@ -106,7 +110,7 @@ function departureTime(departure?: Departure): string | undefined {
             </div>
 
             <label>
-              <span>Lancer l'alarme combien de minutes avant le passage</span>
+              <span>{{ t("alarm.minutesLabel") }}</span>
               <input
                 v-model.number="draft.minutesBefore"
                 inputmode="numeric"
@@ -122,7 +126,7 @@ function departureTime(departure?: Departure): string | undefined {
               <input v-model="draft.soundEnabled" type="checkbox" />
               <span>
                 <Volume2 :size="18" aria-hidden="true" />
-                Activer le son
+                {{ t("alarm.sound") }}
               </span>
             </label>
           </div>
@@ -133,11 +137,11 @@ function departureTime(departure?: Departure): string | undefined {
               type="button"
               @click="emit('cancel')"
             >
-              Annuler
+              {{ t("common.actions.cancel") }}
             </button>
             <button type="button" @click="confirmAlarm">
               <BellRing :size="18" aria-hidden="true" />
-              Confirmer
+              {{ t("common.actions.confirm") }}
             </button>
           </footer>
         </section>

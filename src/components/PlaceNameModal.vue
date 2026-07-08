@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { Check } from "lucide-vue-next";
 import AppModal from "./AppModal.vue";
+import { useI18n } from "../i18n";
 
 const props = withDefaults(
   defineProps<{
@@ -23,15 +24,16 @@ const emit = defineEmits<{
 }>();
 
 const name = ref("");
+const { t } = useI18n();
 
 const title = computed(() =>
-  props.mode === "rename" ? "Renommer le lieu" : "Nouveau lieu",
+  props.mode === "rename" ? t("placeName.titleRename") : t("placeName.titleCreate"),
 );
 const eyebrow = computed(() =>
-  props.mode === "rename" ? "Dashboard" : "Configuration",
+  props.mode === "rename" ? t("placeName.eyebrowRename") : t("placeName.eyebrowCreate"),
 );
 const submitLabel = computed(() =>
-  props.mode === "rename" ? "Renommer" : "Créer",
+  props.mode === "rename" ? t("common.actions.rename") : t("common.actions.create"),
 );
 const canSubmit = computed(() => name.value.trim().length > 0);
 
@@ -62,13 +64,13 @@ function submit(): void {
   >
     <form class="place-name-form" @submit.prevent="submit">
       <label>
-        <span>Nom du lieu</span>
+        <span>{{ t("placeName.nameLabel") }}</span>
         <input
           v-model="name"
           autocomplete="off"
           class="form-input"
           maxlength="20"
-          placeholder="Ex. Sport, École, Studio"
+          :placeholder="t('placeName.placeholder')"
           type="text"
         />
       </label>
@@ -77,7 +79,7 @@ function submit(): void {
 
     <template #footer>
       <button class="button-secondary" type="button" @click="emit('close')">
-        Annuler
+        {{ t("common.actions.cancel") }}
       </button>
       <button type="button" :disabled="!canSubmit" @click="submit">
         <Check :size="18" aria-hidden="true" />

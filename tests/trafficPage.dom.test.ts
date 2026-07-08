@@ -113,7 +113,7 @@ describe("TrafficPage", () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain("C01743");
     expect(String(fetchMock.mock.calls[0][0])).toContain("C02528");
     expect(String(fetchMock.mock.calls[0][0])).not.toContain("C01074");
-    expect(wrapper.text()).toContain("Votre traffic");
+    expect(wrapper.text()).toContain("Votre trafic");
     expect(wrapper.text()).toContain("Style RATP compact");
     expect(wrapper.text()).toContain("RER");
     expect(wrapper.text()).toContain("Tram");
@@ -122,7 +122,7 @@ describe("TrafficPage", () => {
     const futureOnlyButton = wrapper
       .findAll(".traffic-ratp-line")
       .find((button) =>
-        button.attributes("aria-label")?.includes("Travaux à venir"),
+        button.attributes("aria-label")?.includes("Travaux a venir"),
       );
 
     expect(futureOnlyButton).toBeTruthy();
@@ -135,7 +135,7 @@ describe("TrafficPage", () => {
     );
 
     await wrapper.get('[aria-label="Style info trafic"]').trigger("click");
-    expect(wrapper.text()).toContain("Cartes détaillées");
+    expect(wrapper.text()).toContain("Cartes detaillees");
 
     const rerButton = wrapper
       .findAll(".traffic-ratp-line")
@@ -147,13 +147,13 @@ describe("TrafficPage", () => {
     await rerButton!.trigger("click");
     expect(wrapper.text()).toContain("RER B");
     expect(wrapper.text()).toContain("En cours");
-    expect(wrapper.text()).toContain("À venir");
+    expect(wrapper.text()).toContain("A venir");
     expect(wrapper.text()).toContain("Travaux nocturnes");
     expect(wrapper.text()).toContain("La Croix de Berny");
 
     const upcomingTab = wrapper
       .findAll(".traffic-timing-tabs button")
-      .find((button) => button.text().includes("À venir"));
+      .find((button) => button.text().includes("A venir"));
 
     expect(upcomingTab).toBeTruthy();
     await upcomingTab!.trigger("click");

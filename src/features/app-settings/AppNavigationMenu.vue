@@ -12,6 +12,7 @@ import {
 import { useRoute } from "#imports";
 import ContextMenu from "../../components/ContextMenu.vue";
 import { useAppSettings } from "./appSettings";
+import { useI18n } from "../../i18n";
 import { transitBoards } from "../../config/transitBoards";
 import {
   TRANSIT_PREFERENCES_CHANGED_EVENT,
@@ -40,6 +41,7 @@ type PrimaryNavigationLink = {
 
 const route = useRoute();
 const { settings } = useAppSettings();
+const { t } = useI18n();
 const hidden = ref(false);
 const menuOpen = ref(false);
 const navigationRoot = ref<HTMLElement>();
@@ -72,7 +74,7 @@ const primaryLinks = computed<PrimaryNavigationLink[]>(() => [
         place: activeStationPlaceId.value,
       },
     },
-    label: "Stations",
+    label: t("common.labels.stations"),
     icon: stationPlaceIcon.value,
     slot: "stations",
   },
@@ -83,23 +85,23 @@ const primaryLinks = computed<PrimaryNavigationLink[]>(() => [
         place: activeStationPlaceId.value,
       },
     },
-    label: "Info trafic",
+    label: t("common.labels.traffic"),
     icon: TriangleAlert,
     slot: "traffic",
   },
 ]);
 
-const secondaryLinks = [
-  { to: "/settings", label: "Paramètres", icon: SlidersHorizontal },
-  { to: "/health", label: "Health", icon: Activity },
-];
+const localizedSecondaryLinks = computed(() => [
+  { to: "/settings", label: t("common.labels.settings"), icon: SlidersHorizontal },
+  { to: "/health", label: t("common.labels.health"), icon: Activity },
+]);
 
 const shouldAutoHide = computed(
   () => settings.value.navigationAutoHide === "1m",
 );
 
 const secondaryActive = computed(() =>
-  secondaryLinks.some((link) => isActive(link.to)),
+  localizedSecondaryLinks.value.some((link) => isActive(link.to)),
 );
 
 const activeNavigationSlot = computed<NavigationSlot>(() => {
@@ -172,6 +174,18 @@ function getPlaceNavigationIcon(place?: TransitPlacePreset): NavigationIcon {
   }
 
   return MapPin;
+}
+
+function getPlaceNavigationLabel(place?: TransitPlacePreset): string {
+  if (place?.id === WORK_TRANSIT_PLACE_ID) {
+    return t("places.work");
+  }
+
+  if (place?.id === DEFAULT_TRANSIT_PLACE_ID) {
+    return t("places.home");
+  }
+
+  return place?.label ?? t("settings.places.defaultLabel");
 }
 
 function refreshPresetState(): void {
@@ -255,7 +269,7 @@ function handleVisibilityChange(): void {
     ref="navigationRoot"
     class="app-navigation"
     :class="navigationClasses"
-    aria-label="Navigation principale"
+    :aria-label="t('navigation.mainAria')"
     @focusin="revealNavigation"
     @pointerenter="revealNavigation"
   >
@@ -271,7 +285,9 @@ function handleVisibilityChange(): void {
       ]"
       :aria-label="
         link.slot === 'stations'
-          ? `Stations - ${activeStationPlace?.label ?? 'Lieu'}`
+          ? t('navigation.stationWithPlace', {
+              place: getPlaceNavigationLabel(activeStationPlace),
+            })
           : undefined
       "
       :to="link.to"
@@ -307,7 +323,7 @@ function handleVisibilityChange(): void {
         type="button"
         :aria-expanded="menuOpen"
         aria-haspopup="menu"
-        aria-label="Ouvrir les pages secondaires"
+        :aria-label="t('navigation.moreAria')"
         @click="toggleMenu"
       >
         <MoreVertical aria-hidden="true" />
@@ -315,7 +331,7 @@ function handleVisibilityChange(): void {
 
       <ContextMenu
         v-model:open="menuOpen"
-        aria-label="Pages secondaires"
+        :aria-label="t('navigation.secondaryAria')"
         :anchor="menuTrigger"
         class="app-navigation__menu-panel"
         close-on-outside-click
@@ -323,7 +339,7 @@ function handleVisibilityChange(): void {
         :z-index="9500"
       >
         <NuxtLink
-          v-for="link in secondaryLinks"
+          v-for="link in localizedSecondaryLinks"
           :key="link.to"
           class="app-navigation__menu-link"
           :class="{ 'app-navigation__menu-link--active': isActive(link.to) }"

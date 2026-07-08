@@ -28,7 +28,7 @@ describe("transfer groups", () => {
       "OTHER",
     ]);
     expect(groups.find((group) => group.key === "BUS")?.countLabel).toBe(
-      "2 lignes",
+      "2 lines",
     );
     expect(getTransferFamilyKey(transfers[6])).toBe("BUS");
   });

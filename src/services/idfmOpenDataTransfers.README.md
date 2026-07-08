@@ -1,97 +1,97 @@
 # `idfmOpenDataTransfers.ts`
 
-Ce fichier resout les correspondances affichees sous les stations du schema de ligne a partir du dataset Open Data IDFM `arrets-lignes`.
+This file resolves the transfers displayed under line-diagram stations from the IDFM Open Data `arrets-lignes` dataset.
 
-L'objectif est de remplacer les recherches geographiques approximatives par une resolution plus stricte: une station recoit les lignes qui desservent son arret, ou les arrets officiellement connectes a elle. Le code ne contient pas de regle du type `si la station est X alors ajouter Y`.
+The goal is to replace approximate geographic searches with stricter resolution: a station receives the lines serving its stop, or the stops officially connected to it. Production code must not contain rules such as `if the station is X then add Y`.
 
-## Flux de donnees
+## Data Flow
 
-1. La page ligne envoie une liste de stations a `/api/transfer-bundles`.
-2. Le backend Nuxt utilise maintenant uniquement la resolution nearby optimisee.
-3. Le cache actif vit cote serveur Nuxt: stop areas de ligne, nearby par rayon, lignes par stop area.
-4. `fetchStationTransfersFromArretsLignes()` reste un ancien utilitaire de reference/test, mais il n'est plus branche dans les bundles de correspondances.
+1. The line page sends a station list to `/api/transfer-bundles`.
+2. The Nuxt backend now uses only the optimized nearby resolution.
+3. The active cache lives on the Nuxt server: line stop areas, nearby stop areas by radius, and lines by stop area.
+4. `fetchStationTransfersFromArretsLignes()` remains an old reference/test helper, but it is no longer wired into transfer bundles.
 
-## Pourquoi ne pas chercher simplement par coordonnees ?
+## Why Not Search Only by Coordinates?
 
-Les recherches par rayon sont rapides a ecrire mais pas assez fiables pour un plan de ligne:
+Radius searches are quick to write but not reliable enough for a line diagram:
 
-- `Liege` peut recuperer des correspondances de `Saint-Lazare`, trop proche geographiquement.
-- `Maisons-Laffitte` peut etre confondu avec `Maisons-Alfort - Alfortville` si on cherche trop largement sur les tokens.
-- Les poles complexes comme `Auber`, `Chatelet - Les Halles`, `La Defense` ou `Nanterre Prefecture` ont besoin d'un contexte officiel de correspondance, pas d'une supposition spatiale.
+- `Liege` may pick up transfers from `Saint-Lazare`, which is geographically close.
+- `Maisons-Laffitte` may be confused with `Maisons-Alfort - Alfortville` if token search is too broad.
+- Complex hubs such as `Auber`, `Chatelet - Les Halles`, `La Defense`, or `Nanterre Prefecture` need official transfer context, not a spatial guess.
 
-La regle du service est donc: exact d'abord, noms compatibles officiels ensuite, fallback limite seulement quand il n'y a pas de correspondance trouvee.
+The service rule is therefore: exact first, official compatible names next, and a limited fallback only when no transfer was found.
 
-## Plans de requetes
+## Query Plans
 
-Pour une station `X`, le service construit plusieurs requetes possibles:
+For a station `X`, the service builds several possible queries:
 
-- `stop_name = "X"`: le cas ideal, exact et sans ambiguite.
-- Pour les stations composees avec ` - ` ou ` / `: requete exacte sur chaque morceau, par exemple `Chatelet` et `Les Halles`.
-- `compatibleStopNames`: noms fournis par le backend depuis les connexions officielles Navitia. Exemple: `Auber` peut recevoir `Opera`, `Havre-Caumartin`, `Haussmann Saint-Lazare`, `Saint-Lazare`.
-- Fallback `search(stop_name, "...")`: utilise seulement des alias coherents, pas une fusion large de tokens.
+- `stop_name = "X"`: the ideal exact, unambiguous case.
+- For compound stations with ` - ` or ` / `: exact query on each part, for example `Chatelet` and `Les Halles`.
+- `compatibleStopNames`: names supplied by the backend from official Navitia connections. Example: `Auber` may receive `Opera`, `Havre-Caumartin`, `Haussmann Saint-Lazare`, and `Saint-Lazare`.
+- Fallback `search(stop_name, "...")`: uses only coherent aliases, not broad token merging.
 
-Le fallback reste volontairement prudent. Il accepte par exemple `Chateau de Vincennes` pour `Vincennes`, mais il ne doit pas accepter `Porte de Vincennes` ou `Mairie de Vincennes` comme correspondance structurelle de la gare RER.
+The fallback stays intentionally conservative. It may accept `Chateau de Vincennes` for `Vincennes`, but it must not accept `Porte de Vincennes` or `Mairie de Vincennes` as a structural transfer for the RER station.
 
-Les noms compatibles ont aussi une petite expansion generique avant requete:
+Compatible names also receive a small generic expansion before querying:
 
-- `Gare Saint-Lazare` cherche aussi `Saint-Lazare`, parce que `Gare` est ici un prefixe descriptif non geographique.
-- `Havre - Caumartin` cherche aussi `Havre-Caumartin`, car OpenData et Navitia ne gardent pas toujours le meme espacement autour du tiret.
-- `Gare Saint-Lazare - Havre` peut produire `Gare Saint-Lazare` puis `Saint-Lazare`, mais seulement parce que ces morceaux gardent assez de tokens distinctifs.
-- `Gare de Lyon` ne cherche pas `Lyon`: les prefixes `Gare de`, `Gare du`, `Gare des` et `Gare d'` sont conserves pour eviter des faux positifs massifs.
+- `Gare Saint-Lazare` also searches `Saint-Lazare`, because `Gare` is a descriptive non-geographic prefix here.
+- `Havre - Caumartin` also searches `Havre-Caumartin`, because Open Data and Navitia do not always preserve the same spacing around the dash.
+- `Gare Saint-Lazare - Havre` may produce `Gare Saint-Lazare`, then `Saint-Lazare`, but only because those parts retain enough distinctive tokens.
+- `Gare de Lyon` does not search `Lyon`: prefixes such as `Gare de`, `Gare du`, `Gare des`, and `Gare d'` are kept to avoid massive false positives.
 
-Cote backend, `/api/transfer-bundles` complete ces noms avec les `stop_area` proches uniquement quand ils restent coherents avec les connexions officielles Navitia. La coherence est verifiee par cles normalisees et, pour les grands poles, par partage d'au moins deux tokens distinctifs. C'est ce qui permet `Haussmann Saint-Lazare` -> `Saint-Lazare` sans accepter une station simplement proche comme `Madeleine`.
+On the backend, `/api/transfer-bundles` completes these names with nearby `stop_area` values only when they remain coherent with official Navitia connections. Coherence is checked with normalized keys and, for large hubs, by sharing at least two distinctive tokens. This allows `Haussmann Saint-Lazare` -> `Saint-Lazare` without accepting a merely nearby station such as `Madeleine`.
 
-Attention aux parentheses: les labels `stop_area` Navitia finissent souvent par une ville, par exemple `La Defense (Puteaux)`, et cette partie peut etre nettoyee pour l'affichage. Les noms de `stop_point` issus des `connections`, eux, peuvent contenir une vraie sous-station, par exemple `La Defense (Grande Arche)`. Dans ce cas, les parentheses doivent etre conservees, sinon OpenData ne peut plus retrouver les lignes 1 et T2.
+Be careful with parentheses: Navitia `stop_area` labels often end with a city, for example `La Defense (Puteaux)`, and that part can be cleaned for display. `stop_point` names from `connections` may contain a real sub-station, for example `La Defense (Grande Arche)`. In that case, parentheses must be kept, otherwise Open Data can no longer find lines 1 and T2.
 
-Le backend retente aussi les appels Navitia temporaires (`429` et erreurs serveur). Sans ce retry, une limite de debit ponctuelle etait traitee comme "ce stop-point n'a pas de ligne structurelle", ce qui creait des omissions aleatoires dans les bundles.
+The backend also retries temporary Navitia calls (`429` and server errors). Without this retry, a short rate limit could be treated as "this stop point has no structural line", creating random omissions in bundles.
 
-## Normalisation
+## Normalization
 
-Le dataset a connu plusieurs schemas. Le code accepte les deux familles de champs:
+The dataset has had several schemas. The code accepts both field families:
 
-- ancien style GTFS: `route_id`, `route_short_name`, `route_long_name`, `route_type`;
-- style actuel IDFM: `id`, `shortname`, `route_long_name`, `mode`.
+- old GTFS style: `route_id`, `route_short_name`, `route_long_name`, `route_type`;
+- current IDFM style: `id`, `shortname`, `route_long_name`, `mode`.
 
-Les familles de transport sont inferees depuis `mode`, `route_type` et `route_long_name`, sans table de noms de lignes:
+Transport families are inferred from `mode`, `route_type`, and `route_long_name`, without a line-name table:
 
 - `Metro` -> `METRO`;
-- `RapidTransit` ou libelle RER -> `RER`;
+- `RapidTransit` or RER label -> `RER`;
 - `LocalTrain` / train -> `TRANSILIEN`;
 - `Tramway` / tram -> `TRAM`;
 - `Bus` -> `BUS`;
-- cable/funiculaire -> `CABLE`.
+- cable/funicular -> `CABLE`.
 
-## Dedupe et filtrage
+## Deduplication and Filtering
 
-Chaque ligne est identifiee par son id quand il existe, sinon par `famille + label`. La ligne courante est retiree avec:
+Each line is identified by its id when available, otherwise by `family + label`. The current line is removed with:
 
-- son id Navitia/IDFM, par exemple `line:IDFM:C01742`;
-- son libelle, par exemple `RER A` ou `A`.
+- its Navitia/IDFM id, for example `line:IDFM:C01742`;
+- its label, for example `RER A` or `A`.
 
-Les resultats sont ensuite tries par famille de transport puis par label pour garder un affichage stable.
+Results are then sorted by transport family and label for stable display.
 
-## Garde-fous importants
+## Important Guardrails
 
-- Ne pas reintroduire de recherche large du type "meme premier token" ou "token commun". C'est la source des faux positifs `Maisons-Laffitte` / `Maisons-Alfort`.
-- Ne pas ajouter de table de correspondances dans le code de production. Si une station doit fusionner avec un autre nom, ce nom doit venir d'une source officielle ou d'un test fixture.
-- Les bus peuvent etre plus ambigus que metro/RER/tram/train. Si une station porte un nom tres commun, garder une strategie plus prudente ou geographique filtree.
-- Les tests peuvent contenir des attentes de regression, mais l'algorithme doit rester data-driven.
+- Do not reintroduce broad searches such as "same first token" or "shared token". They cause false positives such as `Maisons-Laffitte` / `Maisons-Alfort`.
+- Do not add transfer tables in production code. If a station must merge with another name, that name must come from an official source or a test fixture.
+- Buses can be more ambiguous than metro/RER/tram/train. If a station has a very common name, keep a more conservative or geographically filtered strategy.
+- Tests may contain regression expectations, but the algorithm must stay data-driven.
 
-## Debug rapide
+## Quick Debugging
 
-Quand une correspondance manque:
+When a transfer is missing:
 
-1. Regarder `/api/transfer-bundles` dans Chrome Network.
-2. Verifier que le bundle annonce `transferResolverMode: "nearby"`.
-3. Ouvrir les appels `/api/opendata/arrets-lignes/records`.
-4. Verifier que la station exacte ou un `compatibleStopNames` renvoie bien les lignes attendues.
-5. Si le navigateur affiche `403`, `400` ou CORS, l'appel ne doit pas partir directement vers `data.iledefrance.fr`; il doit passer par le proxy Nuxt `/api/opendata/arrets-lignes/records`.
-6. Si une mauvaise station apparait, verifier que le fallback n'accepte pas un alias trop large.
+1. Inspect `/api/transfer-bundles` in Chrome Network.
+2. Verify that the bundle reports `transferResolverMode: "nearby"`.
+3. Open the `/api/opendata/arrets-lignes/records` calls.
+4. Verify that the exact station or a `compatibleStopNames` value returns the expected lines.
+5. If the browser shows `403`, `400`, or CORS, the call must not go directly to `data.iledefrance.fr`; it must go through the Nuxt proxy `/api/opendata/arrets-lignes/records`.
+6. If a wrong station appears, verify that the fallback does not accept an overly broad alias.
 
-## Tests de regression
+## Regression Tests
 
-- `idfmOpenDataTransfers.test.ts` couvre les cas unitaires sensibles: schema courant, host Open Data, filtrage de la ligne courante, `Vincennes`, `La Defense`, `Nanterre Prefecture`, faux positif `Maisons-Laffitte`.
-- `rerAOpenDataTransfers.test.ts` passe toutes les stations du RER A dans le meme resolver et verifie les correspondances minimales attendues.
-- `rerALiveTransferHydration.test.ts` est un test reseau reel: il recupere les stations de la ligne A via Navitia, resout les noms compatibles officiels, interroge OpenData et verifie les correspondances minimales attendues pour chaque station.
+- `idfmOpenDataTransfers.test.ts` covers sensitive unit cases: current schema, Open Data host, current-line filtering, `Vincennes`, `La Defense`, `Nanterre Prefecture`, and the `Maisons-Laffitte` false positive.
+- `rerAOpenDataTransfers.test.ts` sends every RER A station through the same resolver and verifies minimum expected transfers.
+- `rerALiveTransferHydration.test.ts` is a real network test: it fetches RER A stations through Navitia, resolves official compatible names, queries Open Data, and verifies minimum expected transfers for each station.
 
-Pour ajouter une nouvelle ligne critique, creer une fixture similaire: toutes les stations de la ligne, les lignes minimum attendues, puis quelques faux positifs connus a exclure.
+To add a new critical line, create a similar fixture: every station on the line, the minimum expected lines, then a few known false positives to exclude.

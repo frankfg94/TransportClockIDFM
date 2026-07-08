@@ -130,8 +130,8 @@ describe("StationBoardModal", () => {
     expect(
       document.body.querySelector("[data-testid='station-board-selector']"),
     ).toBeTruthy();
-    expect(document.body.textContent).toContain("Ligne sélectionnée");
-    expect(document.body.textContent).not.toContain("Sélectionner une ligne");
+    expect(document.body.textContent).toContain("Ligne selectionnee");
+    expect(document.body.textContent).not.toContain("Selectionner une ligne");
 
     const stationOption = document.body.querySelector(
       ".station-combobox__option",

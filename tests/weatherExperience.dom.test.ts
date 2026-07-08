@@ -5,6 +5,7 @@ import type { WeatherResponse } from "../src/features/weather/types";
 
 const baseSettings: AppSettings = {
   version: 1,
+  language: "fr",
   closedDirectionSummaryMode: "last",
   maxDeparturesPerDirection: "default",
   showPatternMiniMap: true,
@@ -27,6 +28,7 @@ const baseSettings: AppSettings = {
   ghostNetworkStructuralOnly: false,
   trafficInfoDesign: "ratp",
   trafficInfoDefaultScope: "optimized",
+  trafficWarningLookaheadDays: 10,
   fullscreenStationPanelDesign: "all-directions",
   fullscreenStationPanelDarkTheme: false,
   smartTrafficDetection: true,
@@ -158,14 +160,14 @@ describe("WeatherExperience", () => {
     await flushPromises();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(wrapper.text()).toContain("Pluie prévue dans 14 min");
+    expect(wrapper.text()).toContain("Pluie prevue dans 14 min");
     expect(wrapper.text()).toContain("Prends un parapluie");
     expect(wrapper.text()).toContain("fin dans 90 min");
     expect(wrapper.findAll(".weather-alert__icon span")).toHaveLength(2);
     expect(wrapper.find("#weather-rain-particles").exists()).toBe(true);
 
     await wrapper.get(".weather-alert__close").trigger("click");
-    expect(wrapper.text()).not.toContain("Pluie prévue dans 14 min");
+    expect(wrapper.text()).not.toContain("Pluie prevue dans 14 min");
   });
 
   it("forces a static background when reduced motion is enabled", async () => {
@@ -191,7 +193,7 @@ describe("WeatherExperience", () => {
     await flushPromises();
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain("Orage prévu dans 14 min");
+    expect(wrapper.text()).toContain("Orage prevu dans 14 min");
     expect(wrapper.text()).toContain("fin dans 94 min");
     expect(wrapper.get(".weather-backdrop").classes()).toContain(
       "weather-backdrop--storm",

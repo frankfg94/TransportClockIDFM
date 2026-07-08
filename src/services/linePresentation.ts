@@ -106,7 +106,7 @@ export function createTransportModeIcon(
   }
 
   if (family === "METRO") {
-    return { key: "metro", label: "M", title: "Métro" };
+    return { key: "metro", label: "M", title: "Metro" };
   }
 
   if (family === "RER") {
@@ -122,10 +122,10 @@ export function createTransportModeIcon(
   }
 
   if (family === "CABLE") {
-    return { key: "line", label: "CÂBLE", title: "Câble" };
+    return { key: "line", label: "CABLE", title: "Cable" };
   }
 
-  return { key: "line", label: "LIGNE", title: "Ligne" };
+  return { key: "line", label: "LINE", title: "Line" };
 }
 
 function resolveTransitFamily(

@@ -28,6 +28,7 @@
       :rich-transfer-tooltips="settings.richTransferTooltips"
       :reduce-motion="settings.reduceMotion"
       :smart-traffic-detection="settings.smartTrafficDetection"
+      :traffic-warning-lookahead-days="settings.trafficWarningLookaheadDays"
       :transfer-bundle-retention-days="settings.transferBundleRetentionDays"
       :transfer-bundle-request-concurrency="
         settings.transferBundleRequestConcurrency
@@ -51,22 +52,22 @@
           <button
             class="line-pattern-page__line-switch line-pattern-page__line-switch--desktop"
             type="button"
-            aria-label="Changer de ligne"
-            title="Changer de ligne"
+            :aria-label="t('linePage.changeLineAria')"
+            :title="t('linePage.changeLineAria')"
             @click="openLineSelector"
           >
             <Edit2 aria-hidden="true" />
-            <span>Changer</span>
+            <span>{{ t("linePage.changeLine") }}</span>
           </button>
           <button
             class="line-pattern-page__back line-pattern-page__back--desktop"
             type="button"
-            aria-label="Retour à l'écran précédent"
-            title="Retour"
+            :aria-label="t('linePage.backAria')"
+            :title="t('linePage.back')"
             @click="goBack"
           >
             <ArrowLeft aria-hidden="true" />
-            <span>Retour</span>
+            <span>{{ t("linePage.back") }}</span>
           </button>
         </div>
       </template>
@@ -76,8 +77,8 @@
           <button
             class="line-pattern-page__back line-pattern-page__back--mobile"
             type="button"
-            aria-label="Retour à l'écran précédent"
-            title="Retour"
+            :aria-label="t('linePage.backAria')"
+            :title="t('linePage.back')"
             @click="goBack"
           >
             <ArrowLeft aria-hidden="true" />
@@ -85,8 +86,8 @@
           <button
             class="line-pattern-page__line-switch line-pattern-page__line-switch--mobile"
             type="button"
-            aria-label="Changer de ligne"
-            title="Changer de ligne"
+            :aria-label="t('linePage.changeLineAria')"
+            :title="t('linePage.changeLineAria')"
             @click="openLineSelector"
           >
             <Edit2 aria-hidden="true" />
@@ -97,21 +98,21 @@
       <template #flow-actions-prefix>
         <nav
           class="line-pattern-page__view-tabs"
-          aria-label="Changer de vue du plan"
+          :aria-label="t('linePage.viewTabsAria')"
         >
           <button
             type="button"
             :aria-pressed="activeView === 'schema'"
             @click.stop="changeView('schema')"
           >
-            Schéma
+            {{ t("linePage.schema") }}
           </button>
           <button
             type="button"
             :aria-pressed="activeView === 'map'"
             @click.stop="changeView('map')"
           >
-            Carte
+            {{ t("linePage.map") }}
           </button>
         </nav>
       </template>
@@ -135,8 +136,8 @@
             <button
               class="line-pattern-page__back line-pattern-page__back--map-mobile"
               type="button"
-              aria-label="Retour à l'écran précédent"
-              title="Retour"
+              :aria-label="t('linePage.backAria')"
+              :title="t('linePage.back')"
               @click="goBack"
             >
               <ArrowLeft aria-hidden="true" />
@@ -144,8 +145,8 @@
             <button
               class="line-pattern-page__line-switch line-pattern-page__line-switch--mobile"
               type="button"
-              aria-label="Changer de ligne"
-              title="Changer de ligne"
+              :aria-label="t('linePage.changeLineAria')"
+              :title="t('linePage.changeLineAria')"
               @click="openLineSelector"
             >
               <Edit2 aria-hidden="true" />
@@ -156,50 +157,50 @@
         <template #bar-before-stats>
           <nav
             class="line-pattern-page__view-tabs line-pattern-page__view-tabs--map"
-            aria-label="Changer de vue du plan"
+            :aria-label="t('linePage.viewTabsAria')"
           >
             <button
               type="button"
               :aria-pressed="activeView === 'schema'"
               @click.stop="changeView('schema')"
             >
-              Schéma
+              {{ t("linePage.schema") }}
             </button>
             <button
               type="button"
               :aria-pressed="activeView === 'map'"
               @click.stop="changeView('map')"
             >
-              Carte
+              {{ t("linePage.map") }}
             </button>
           </nav>
           <button
             class="line-pattern-page__line-switch line-pattern-page__line-switch--map-desktop"
             type="button"
-            aria-label="Changer de ligne"
-            title="Changer de ligne"
+            :aria-label="t('linePage.changeLineAria')"
+            :title="t('linePage.changeLineAria')"
             @click="openLineSelector"
           >
             <Edit2 aria-hidden="true" />
-            <span>Changer</span>
+            <span>{{ t("linePage.changeLine") }}</span>
           </button>
           <button
             class="line-pattern-page__back line-pattern-page__back--map-desktop"
             type="button"
-            aria-label="Retour à l'écran précédent"
-            title="Retour"
+            :aria-label="t('linePage.backAria')"
+            :title="t('linePage.back')"
             @click="goBack"
           >
             <ArrowLeft aria-hidden="true" />
-            <span>Retour</span>
+            <span>{{ t("linePage.back") }}</span>
           </button>
         </template>
       </DetailedLineMapPicker>
 
       <div v-else class="line-pattern-page__fallback" aria-live="polite">
-        <p class="eyebrow">Carte de ligne</p>
+        <p class="eyebrow">{{ t("linePage.mapEyebrow") }}</p>
         <h1>{{ pageTitle }}</h1>
-        <p v-if="isPatternRequestPending">Chargement de la carte...</p>
+        <p v-if="isPatternRequestPending">{{ t("linePage.loadingMap") }}</p>
         <p v-else-if="errorMessage">{{ errorMessage }}</p>
       </div>
     </section>
@@ -211,9 +212,9 @@
       class="line-pattern-page__fallback"
       aria-live="polite"
     >
-      <p class="eyebrow">Schéma de ligne</p>
+      <p class="eyebrow">{{ t("linePage.diagramEyebrow") }}</p>
       <h1>{{ pageTitle }}</h1>
-      <p v-if="isPatternRequestPending">Chargement du schéma...</p>
+      <p v-if="isPatternRequestPending">{{ t("linePage.loadingDiagram") }}</p>
       <p v-else-if="errorMessage">{{ errorMessage }}</p>
     </section>
 
@@ -253,6 +254,7 @@ import type {
   LineSearchOption,
   TransitFamily,
 } from "../../../src/types/transit";
+import { useI18n } from "../../../src/i18n";
 
 const DeparturePatternModal = defineAsyncComponent(
   () =>
@@ -271,6 +273,7 @@ type LinePageView = "schema" | "map";
 const route = useRoute();
 const router = useRouter();
 const { settings } = useAppSettings();
+const { t } = useI18n();
 const apiUrl = computed(() => {
   const params = new URLSearchParams();
   const direction = firstRouteQuery(route.query.direction);
@@ -319,7 +322,7 @@ const activeView = computed<LinePageView>(() =>
 const directionOptions = computed(() => [
   {
     id: LINE_COMPLETE_DIRECTION_ID,
-    label: "Ligne complète",
+    label: t("linePage.fullLine"),
     isTerminal: true,
   },
   ...filterTerminalOnly(
@@ -330,11 +333,11 @@ const directionOptions = computed(() => [
 
 const errorMessage = computed(() => {
   if (error.value) {
-    return "Impossible de charger ce schéma de ligne.";
+    return t("linePage.loadError");
   }
 
   if (patternRequestTimedOut.value && !patternView.value) {
-    return "Le chargement de ce schéma prend trop longtemps. Recharge la page pour réessayer.";
+    return t("linePage.timeoutError");
   }
 
   return "";

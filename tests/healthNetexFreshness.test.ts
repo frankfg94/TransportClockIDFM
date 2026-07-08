@@ -15,8 +15,8 @@ describe("getNetexDatasetFreshness", () => {
       getNetexDatasetFreshness("2025-12-17T12:00:00.000Z", now),
     ).toEqual({
       status: "warning",
-      message: "mise à jour conseillée",
-      detail: "Dataset NeTEx de plus de 6 mois, mieux vaut le mettre à jour.",
+      message: "update recommended",
+      detail: "NeTEx dataset is over six months old; updating it is recommended.",
     });
   });
 
@@ -26,7 +26,7 @@ describe("getNetexDatasetFreshness", () => {
     ).toEqual({
       status: "error",
       message: "dataset outdated",
-      detail: "Dataset NeTEx de plus d'un an, il doit être régénéré.",
+      detail: "NeTEx dataset is over one year old and must be regenerated.",
     });
   });
 

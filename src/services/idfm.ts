@@ -3465,7 +3465,7 @@ function mapCommercialModeToFamily(
 
 function formatFamilyLabel(family: TransitFamily): string {
   if (family === "METRO") {
-    return "Métro";
+    return "Metro";
   }
 
   if (family === "TRAM") {
@@ -3473,7 +3473,7 @@ function formatFamilyLabel(family: TransitFamily): string {
   }
 
   if (family === "CABLE") {
-    return "Câble";
+    return "Cable";
   }
 
   return family.charAt(0) + family.slice(1).toLowerCase();
@@ -3988,7 +3988,7 @@ function navitiaLineIdFromSiriRef(ref: string): string {
 function createFallbackDirectionGroup(label: string): DirectionGroupConfig {
   return {
     id: "all-directions",
-    label: "Toutes directions",
+    label: "All directions",
     subtitle: label,
     match: {},
   };

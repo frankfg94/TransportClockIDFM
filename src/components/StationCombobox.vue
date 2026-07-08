@@ -8,6 +8,7 @@ import {
   watch,
 } from "vue";
 import { Check } from "lucide-vue-next";
+import { useI18n } from "../i18n";
 import type { StationSearchOption, TransferLineOption } from "../types/transit";
 
 const props = defineProps<{
@@ -34,13 +35,14 @@ const combobox = ref<HTMLElement>();
 const menu = ref<HTMLElement>();
 const menuStyle = ref<Record<string, string>>({});
 const searchInput = ref<HTMLInputElement>();
+const { t } = useI18n();
 let blurTimer: number | undefined;
 let inlineStationObserver: IntersectionObserver | undefined;
 
 const buttonLabel = computed(() =>
   props.modelValue
     ? formatStationLabel(props.modelValue)
-    : "Sélectionner une station",
+    : t("board.stationModal.selectStationPlaceholder"),
 );
 const compactSelection = computed(
   () => props.compact && Boolean(props.modelValue) && !editing.value,
@@ -270,7 +272,7 @@ function normalizeText(value?: string): string {
       :value="query"
       :disabled="disabled"
       class="station-combobox__input"
-      placeholder="Filtrer les stations"
+      :placeholder="t('board.stationModal.searchStationPlaceholder')"
       type="search"
       @input="updateQuery"
       @click="setOpen(true)"
@@ -304,7 +306,7 @@ function normalizeText(value?: string): string {
           <span
             v-if="isLoadingTransfers(modelValue)"
             class="station-combobox__mini-loader"
-            aria-label="Chargement des correspondances"
+            :aria-label="t('board.stationModal.loadingTransfers')"
           ></span>
           <span
             v-for="transfer in visibleTransfers(modelValue).slice(0, 6)"
@@ -318,7 +320,7 @@ function normalizeText(value?: string): string {
             {{ transfer.label }}
           </span>
         </span>
-        <span class="station-combobox__edit">Modifier</span>
+        <span class="station-combobox__edit">{{ t("common.actions.change") }}</span>
       </span>
     </button>
 
@@ -333,7 +335,7 @@ function normalizeText(value?: string): string {
     >
       <div v-if="loading" class="station-combobox__state">
         <span aria-hidden="true" class="loader-dot"></span>
-        Chargement
+        {{ t("common.states.loading") }}
       </div>
       <template v-else>
         <button
@@ -356,7 +358,7 @@ function normalizeText(value?: string): string {
             <span
               v-if="isLoadingTransfers(station)"
               class="station-combobox__mini-loader"
-              aria-label="Chargement des correspondances"
+              :aria-label="t('board.stationModal.loadingTransfers')"
             ></span>
             <span
               v-for="transfer in visibleTransfers(station).slice(0, 6)"
@@ -373,7 +375,7 @@ function normalizeText(value?: string): string {
           <Check
             v-if="station.id === modelValue?.id && inline"
             class="station-combobox__selected-check"
-            aria-label="Station sélectionnée"
+            :aria-label="t('board.stationModal.stationSelected')"
           />
         </button>
       </template>
@@ -381,7 +383,7 @@ function normalizeText(value?: string): string {
         v-if="!loading && options.length === 0"
         class="station-combobox__state"
       >
-        Aucune station
+        {{ t("board.stationModal.noStation") }}
       </div>
     </div>
     </Teleport>

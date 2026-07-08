@@ -63,11 +63,11 @@ describe("transit preferences favorites", () => {
     const state = loadTransitPresetState([defaultBoard]);
 
     expect(state.defaultPlaceId).toBe(DEFAULT_TRANSIT_PLACE_ID);
-    expect(state.places[0].label).toBe("Maison");
+    expect(state.places[0].label).toBe("Home");
     expect(state.places[0].preferences.visibleBoardIds).toEqual([
       "default-board",
     ]);
-    expect(state.places[1].label).toBe("Travail");
+    expect(state.places[1].label).toBe("Work");
     expect(state.places[1].preferences.visibleBoardIds).toEqual([]);
   });
 
@@ -169,14 +169,14 @@ describe("transit preferences favorites", () => {
         .closedDirectionSummaryMode,
     ).toBe("last");
     expect(() => createTransitPlace(renamed, "Home", [defaultBoard])).toThrow(
-      "réservé",
+      "reserved",
     );
     expect(() => createTransitPlace(renamed, "Studio", [defaultBoard])).toThrow(
-      "existe",
+      "already exists",
     );
     expect(() =>
       deleteTransitPlace(renamed, DEFAULT_TRANSIT_PLACE_ID),
-    ).toThrow("ne peuvent pas être supprimés");
+    ).toThrow("cannot be deleted");
 
     const withoutCustom = deleteTransitPlace(renamed, "studio");
     expect(withoutCustom.places.map((place) => place.id)).toEqual([

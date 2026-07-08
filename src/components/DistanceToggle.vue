@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Ruler } from "lucide-vue-next";
+import { useI18n } from "../i18n";
 
 const props = withDefaults(
   defineProps<{
@@ -15,6 +16,8 @@ const emit = defineEmits<{
   "update:modelValue": [value: boolean];
 }>();
 
+const { t } = useI18n();
+
 function toggle(): void {
   emit("update:modelValue", !props.modelValue);
 }
@@ -26,11 +29,11 @@ function toggle(): void {
     type="button"
     role="switch"
     :aria-checked="modelValue"
-    aria-label="Afficher les distances entre les stations"
+    :aria-label="t('lineMap.distancesAria')"
     @click.stop="toggle"
   >
     <Ruler aria-hidden="true" />
-    <span>Distances</span>
+    <span>{{ t("lineMap.distances") }}</span>
     <i class="distance-toggle__track" aria-hidden="true"></i>
   </button>
 </template>

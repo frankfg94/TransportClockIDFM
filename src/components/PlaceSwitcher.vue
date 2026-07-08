@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { Briefcase, ChevronDown, Home, MapPin, Plus } from "lucide-vue-next";
 import ContextMenu from "./ContextMenu.vue";
+import { useI18n } from "../i18n";
 import {
   DEFAULT_TRANSIT_PLACE_ID,
   WORK_TRANSIT_PLACE_ID,
@@ -26,6 +27,7 @@ const emit = defineEmits<{
 
 const open = ref(false);
 const trigger = ref<HTMLElement>();
+const { t } = useI18n();
 
 const activePlace = computed(
   () =>
@@ -81,7 +83,7 @@ function iconForPlace(place: PlaceOption) {
         :is="activePlace ? iconForPlace(activePlace) : MapPin"
         aria-hidden="true"
       />
-      <span class="place-label">{{ activePlace?.label ?? "Lieu" }}</span>
+      <span class="place-label">{{ activePlace?.label ?? t("places.fallback") }}</span>
       <ChevronDown
         class="place-switcher__chevron"
         :class="{ 'place-switcher__chevron--open': open }"
@@ -91,7 +93,7 @@ function iconForPlace(place: PlaceOption) {
 
     <ContextMenu
       v-model:open="open"
-      aria-label="Choisir un lieu"
+      :aria-label="t('places.chooseAria')"
       :anchor="trigger"
       class="place-switcher__menu"
       close-on-outside-click
@@ -118,7 +120,7 @@ function iconForPlace(place: PlaceOption) {
         @click="addPlace"
       >
         <Plus aria-hidden="true" />
-        <span>Ajouter un lieu</span>
+        <span>{{ t("settings.places.addPlace") }}</span>
       </button>
     </ContextMenu>
   </div>

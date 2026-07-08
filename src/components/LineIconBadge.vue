@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useI18n } from "../i18n";
 import { createRatpLineIconUrls } from "../services/lineIcons";
 import { transitModeToFamily } from "../services/linePresentation";
 import type { TransitFamily, TransitMode } from "../types/transit";
@@ -22,6 +23,7 @@ const props = defineProps<{
   line: LineIconLike;
   compact?: boolean;
 }>();
+const { t } = useI18n();
 
 const iconIndex = ref(0);
 const displayLabel = computed(
@@ -101,7 +103,7 @@ function getLineModeLabel(line: typeof props.line): string {
     <img
       v-if="currentIconUrl"
       :src="currentIconUrl"
-      :alt="`Ligne ${displayLabel}`"
+      :alt="t('lineMap.lineAlt', { line: displayLabel })"
       loading="lazy"
       @error="showNextIconCandidate"
     />

@@ -1,6 +1,7 @@
 ﻿<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import LineIconBadge from "./LineIconBadge.vue";
+import { useI18n } from "../i18n";
 import type { LineSearchOption } from "../types/transit";
 
 const props = defineProps<{
@@ -23,12 +24,13 @@ const emit = defineEmits<{
 const open = ref(false);
 const editing = ref(false);
 const searchInput = ref<HTMLInputElement>();
+const { t } = useI18n();
 let blurTimer: number | undefined;
 
 const buttonLabel = computed(() =>
   props.modelValue
     ? getLineDisplayName(props.modelValue)
-    : (props.placeholder ?? "S\u00e9lectionner une ligne"),
+    : (props.placeholder ?? t("board.stationModal.selectLinePlaceholder")),
 );
 const compactSelection = computed(
   () => props.compact && Boolean(props.modelValue) && !editing.value,
@@ -126,7 +128,7 @@ function getLineDisplayName(line: LineSearchOption): string {
       :value="query"
       :disabled="disabled"
       class="rich-combobox__input"
-      placeholder="Rechercher une ligne"
+      :placeholder="t('board.stationModal.searchLinePlaceholder')"
       type="search"
       @input="updateQuery"
       @click="setOpen(true)"
@@ -144,7 +146,7 @@ function getLineDisplayName(line: LineSearchOption): string {
       <LineIconBadge v-if="modelValue" :line="modelValue" />
       <span v-else class="rich-combobox__placeholder">{{ buttonLabel }}</span>
       <span v-if="compactSelection" class="rich-combobox__edit">
-        Modifier
+        {{ t("common.actions.change") }}
       </span>
     </button>
 
@@ -156,7 +158,7 @@ function getLineDisplayName(line: LineSearchOption): string {
     >
       <div v-if="loading" class="rich-combobox__state">
         <span aria-hidden="true" class="loader-dot"></span>
-        Chargement
+        {{ t("common.states.loading") }}
       </div>
       <template v-else>
         <button
@@ -173,7 +175,7 @@ function getLineDisplayName(line: LineSearchOption): string {
         </button>
       </template>
       <div v-if="!loading && options.length === 0" class="rich-combobox__state">
-        Aucune ligne
+        {{ t("board.stationModal.noLine") }}
       </div>
     </div>
   </div>

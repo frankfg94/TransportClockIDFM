@@ -2,7 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { Pencil, Plus, Trash2 } from "lucide-vue-next";
 import AppModal from "../../components/AppModal.vue";
-import MaterialCombobox from "../../components/MaterialCombobox.vue";
+import MaterialCombobox, {
+  type MaterialComboboxOption,
+} from "../../components/MaterialCombobox.vue";
 import PlaceNameModal from "../../components/PlaceNameModal.vue";
 import { transitBoards } from "../../config/transitBoards";
 import { MobileReleaseCard } from "../mobile-release";
@@ -19,6 +21,7 @@ import {
   parsePatternCompactForkGap,
   parsePatternRealisticMaxGapCoefficient,
   parsePatternRealisticMinGapCoefficient,
+  parseTrafficWarningLookaheadDays,
   parseTransferBundleRetentionDays,
   parseTransferBundleRequestConcurrency,
   parseTransferBundleRequestSpacingMs,
@@ -31,6 +34,8 @@ import {
   PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MIN,
   PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MAX,
   PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MIN,
+  TRAFFIC_WARNING_LOOKAHEAD_DAYS_MAX,
+  TRAFFIC_WARNING_LOOKAHEAD_DAYS_MIN,
   transferBundleRequestConcurrencyOptions,
   transferBundleRequestSpacingOptions,
   transferBundleRetentionOptions,
@@ -68,6 +73,7 @@ import {
 } from "../weather/weatherLocations";
 import {
   DEFAULT_TRANSIT_PLACE_ID,
+  WORK_TRANSIT_PLACE_ID,
   createDefaultTransitPresetState,
   createTransitPlace,
   deleteTransitPlace,
@@ -82,9 +88,11 @@ import {
   type TransitPlacePreset,
   type TransitPresetState,
 } from "../../storage/transitPreferences";
+import { useI18n, type LanguagePreference } from "../../i18n";
 import type { TransitBoardPreferences } from "../../types/transit";
 
 const { settings, updateSettings, resetSettings } = useAppSettings();
+const { d, n, t } = useI18n();
 const presetState = ref<TransitPresetState>(
   createDefaultTransitPresetState(transitBoards),
 );
@@ -107,7 +115,192 @@ const bundleCount = computed(
 const placeOptions = computed(() =>
   presetState.value.places.map((place) => ({
     id: place.id,
-    label: place.label,
+    label: getPlaceLabel(place),
+  })),
+);
+const languageOptions = computed<MaterialComboboxOption[]>(() => [
+  { id: "auto", label: t("settings.options.language.auto") },
+  { id: "fr", label: t("settings.options.language.fr") },
+  { id: "en", label: t("settings.options.language.en") },
+]);
+const closedDirectionSummaryLocalizedOptions = computed(() =>
+  closedDirectionSummaryOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "last"
+        ? t("settings.options.closedSummary.last")
+        : t("settings.options.closedSummary.next"),
+  })),
+);
+const maxDeparturesLocalizedOptions = computed(() =>
+  maxDeparturesPerDirectionOptions.map((option) => {
+    if (option.id === "default") {
+      return {
+        id: option.id,
+        label: t("settings.options.maxDepartures.default"),
+      };
+    }
+
+    return {
+      id: option.id,
+      label:
+        option.id === "1"
+          ? t("settings.options.maxDepartures.one")
+          : t("settings.options.maxDepartures.other", { count: option.id }),
+    };
+  }),
+);
+const wakeLockLocalizedOptions = computed(() =>
+  wakeLockDurationOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "none"
+        ? t("settings.options.wakeLock.none")
+        : option.id === "unlimited"
+          ? t("settings.options.wakeLock.unlimited")
+          : option.label,
+  })),
+);
+const navigationAutoHideLocalizedOptions = computed(() =>
+  navigationAutoHideOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "none" ? t("settings.options.autoHide.none") : option.label,
+  })),
+);
+const boardTogglesPlacementLocalizedOptions = computed(() =>
+  boardTogglesPlacementOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "inline"
+        ? t("settings.options.boardToggles.inline")
+        : t("settings.options.boardToggles.contextMenu"),
+  })),
+);
+const placePresetNavigationModeLocalizedOptions = computed(() =>
+  placePresetNavigationModeOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "dropdown-swipe"
+        ? t("settings.options.placeNavigation.dropdownSwipe")
+        : option.id === "dropdown"
+          ? t("settings.options.placeNavigation.dropdown")
+          : t("settings.options.placeNavigation.swipe"),
+  })),
+);
+const compactLinePlanLocalizedOptions = computed(() =>
+  compactLinePlanOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "auto"
+        ? t("settings.options.compactLinePlan.auto")
+        : option.id === "comfort"
+          ? t("settings.options.compactLinePlan.comfort")
+          : option.id === "compact"
+            ? t("settings.options.compactLinePlan.compact")
+            : t("settings.options.compactLinePlan.realistic"),
+  })),
+);
+const trafficInfoDesignLocalizedOptions = computed(() =>
+  trafficInfoDesignOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "ratp"
+        ? t("settings.options.trafficDesign.ratp")
+        : t("settings.options.trafficDesign.cards"),
+  })),
+);
+const trafficInfoDefaultScopeLocalizedOptions = computed(() =>
+  trafficInfoDefaultScopeOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "optimized"
+        ? t("settings.options.trafficScope.optimized")
+        : t("settings.options.trafficScope.all"),
+  })),
+);
+const fullscreenStationPanelDesignLocalizedOptions = computed(() =>
+  fullscreenStationPanelDesignOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "all-directions"
+        ? t("settings.options.fullscreenPanel.allDirections")
+        : option.id === "double-stop"
+          ? t("settings.options.fullscreenPanel.doubleStop")
+          : t("settings.options.fullscreenPanel.homeCard"),
+  })),
+);
+const transferBundleRetentionLocalizedOptions = computed(() =>
+  transferBundleRetentionOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "1"
+        ? t("settings.options.transferBundle.oneDay")
+        : t("settings.options.transferBundle.days", { count: option.id }),
+  })),
+);
+const transferBundleRequestConcurrencyLocalizedOptions = computed(() =>
+  transferBundleRequestConcurrencyOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "1"
+        ? t("settings.options.transferBundle.oneCall")
+        : t("settings.options.transferBundle.calls", { count: option.id }),
+  })),
+);
+const transferBundleRequestSpacingLocalizedOptions = computed(() =>
+  transferBundleRequestSpacingOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "0"
+        ? t("settings.options.transferBundle.noDelay")
+        : option.label,
+  })),
+);
+const weatherModeLocalizedOptions = computed(() =>
+  weatherModeOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "animated"
+        ? t("settings.options.weatherMode.animated")
+        : option.id === "static"
+          ? t("settings.options.weatherMode.static")
+          : option.id === "alerts_only"
+            ? t("settings.options.weatherMode.alertsOnly")
+            : t("settings.options.weatherMode.disabled"),
+  })),
+);
+const weatherTestModeLocalizedOptions = computed(() =>
+  weatherTestModeOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "off"
+        ? t("settings.options.weatherTest.off")
+        : option.id === "rain"
+          ? t("settings.options.weatherTest.rain")
+          : option.id === "storm"
+            ? t("settings.options.weatherTest.storm")
+            : option.id === "snow"
+              ? t("settings.options.weatherTest.snow")
+              : t("settings.options.weatherTest.heat"),
+  })),
+);
+const weatherLookaheadLocalizedOptions = computed(() =>
+  weatherLookaheadOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "1440"
+        ? t("settings.options.weatherLookahead.allDay")
+        : option.label,
+  })),
+);
+const weatherLocationLocalizedOptions = computed(() =>
+  weatherLocationOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "custom"
+        ? t("settings.options.weatherLocation.custom")
+        : option.label,
   })),
 );
 const selectedDisplayPlace = computed(
@@ -130,6 +323,10 @@ function updateMaxDepartures(value: string): void {
   updateSelectedDisplayPreferences({
     maxDeparturesPerDirection: parseMaxDeparturesPerDirection(value),
   });
+}
+
+function updateLanguage(value: string): void {
+  updateSettings({ language: value as LanguagePreference });
 }
 
 function updateWakeLock(value: string): void {
@@ -204,7 +401,7 @@ function updateDefaultPlace(value: string): void {
     persistPresetState();
   } catch (error) {
     showSettingsNotification(
-      error instanceof Error ? error.message : "Lieu introuvable.",
+      error instanceof Error ? error.message : t("settings.notifications.notFoundPlace"),
     );
   }
 }
@@ -279,7 +476,7 @@ function submitPlaceName(name: string): void {
     closePlaceNameModal();
   } catch (error) {
     placeNameError.value =
-      error instanceof Error ? error.message : "Impossible d'enregistrer.";
+      error instanceof Error ? error.message : t("settings.notifications.saveFailed");
   }
 }
 
@@ -293,13 +490,25 @@ function removePlace(place: TransitPlacePreset): void {
     persistPresetState();
   } catch (error) {
     showSettingsNotification(
-      error instanceof Error ? error.message : "Impossible de supprimer.",
+      error instanceof Error ? error.message : t("settings.notifications.deleteFailed"),
     );
   }
 }
 
 function persistPresetState(): void {
   saveTransitPresetState(presetState.value);
+}
+
+function getPlaceLabel(place: TransitPlacePreset): string {
+  if (place.id === DEFAULT_TRANSIT_PLACE_ID) {
+    return t("places.home");
+  }
+
+  if (place.id === WORK_TRANSIT_PLACE_ID) {
+    return t("places.work");
+  }
+
+  return place.label;
 }
 
 function getPlaceStationNames(place: TransitPlacePreset): string[] {
@@ -316,7 +525,9 @@ function getPlaceStationNames(place: TransitPlacePreset): string[] {
 function getPlaceStationSummary(place: TransitPlacePreset): string {
   const count = getPlaceStationNames(place).length;
 
-  return `${count} station${count > 1 ? "s" : ""}`;
+  return count === 1
+    ? t("settings.places.stationSummaryOne", { count })
+    : t("settings.places.stationSummaryOther", { count });
 }
 
 function updateTrafficInfoDesign(value: string): void {
@@ -325,6 +536,12 @@ function updateTrafficInfoDesign(value: string): void {
 
 function updateTrafficInfoDefaultScope(value: string): void {
   updateSettings({ trafficInfoDefaultScope: value as TrafficInfoDefaultScope });
+}
+
+function updateTrafficWarningLookaheadDays(value: string): void {
+  updateSettings({
+    trafficWarningLookaheadDays: parseTrafficWarningLookaheadDays(value),
+  });
 }
 
 function updateTransferBundleRetention(value: string): void {
@@ -377,7 +594,7 @@ async function clearBundles(): Promise<void> {
 
   clearPatternTransferRuntimeCaches();
   showSettingsNotification(
-    "Bundles supprimés côté navigateur et backend. Le prochain plan rechargera les correspondances.",
+    t("settings.bundles.cleared"),
   );
   await backendClear;
   await refreshBundleSummaries();
@@ -400,10 +617,10 @@ function formatBundleDate(value: string): string {
 
   return Number.isNaN(date.getTime())
     ? value
-    : new Intl.DateTimeFormat("fr-FR", {
+    : d(date, {
         dateStyle: "medium",
         timeStyle: "short",
-      }).format(date);
+      });
 }
 
 function formatTransferResolverMode(
@@ -417,7 +634,7 @@ function formatTransferBundleDistance(
 ): string {
   return typeof value === "number" && Number.isFinite(value)
     ? `${value} m`
-    : "distance auto";
+    : t("settings.bundles.autoDistance");
 }
 
 function formatPixels(value: number): string {
@@ -425,10 +642,16 @@ function formatPixels(value: number): string {
 }
 
 function formatCoefficient(value: number): string {
-  return `${value.toLocaleString("fr-FR", {
+  return `${n(value, {
     maximumFractionDigits: 2,
     minimumFractionDigits: 0,
   })}x`;
+}
+
+function formatDays(value: number): string {
+  return value === 1
+    ? t("settings.options.trafficWarning.oneDay")
+    : t("settings.options.trafficWarning.days", { count: value });
 }
 
 function updateWeatherMode(value: string): void {
@@ -463,7 +686,7 @@ function updateWeatherCustomLocation(
 
 function resetSettingsWithNotification(): void {
   resetSettings();
-  showSettingsNotification("Paramètres réinitialisés.");
+  showSettingsNotification(t("settings.notifications.reset"));
 }
 
 function showSettingsNotification(message: string): void {
@@ -497,53 +720,68 @@ onBeforeUnmount(() => {
 <template>
   <main class="settings-page">
     <header class="settings-page__hero">
-      <p class="eyebrow">Paramètres</p>
-      <h1>Personnalisation du dashboard</h1>
-      <p>
-        Ces réglages restent sur cette tablette ou ce navigateur. Les valeurs
-        par défaut gardent l'apparence actuelle de l'application.
-      </p>
+      <p class="eyebrow">{{ t("settings.hero.eyebrow") }}</p>
+      <h1>{{ t("settings.hero.title") }}</h1>
+      <p>{{ t("settings.hero.body") }}</p>
     </header>
+
+    <section class="settings-panel" aria-labelledby="settings-language-title">
+      <div class="settings-panel__heading">
+        <div>
+          <p class="eyebrow">{{ t("settings.language.eyebrow") }}</p>
+          <h2 id="settings-language-title">{{ t("settings.language.title") }}</h2>
+        </div>
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <strong>{{ t("settings.language.label") }}</strong>
+          <span>{{ t("settings.language.description") }}</span>
+        </div>
+        <MaterialCombobox
+          :model-value="settings.language"
+          :options="languageOptions"
+          :aria-label="t('settings.language.aria')"
+          @update:model-value="updateLanguage"
+        />
+      </div>
+    </section>
 
     <section class="settings-panel" aria-labelledby="settings-places-title">
       <div class="settings-panel__heading">
         <div>
-          <p class="eyebrow">Lieux</p>
-          <h2 id="settings-places-title">Dashboards enregistrés</h2>
+          <p class="eyebrow">{{ t("settings.places.eyebrow") }}</p>
+          <h2 id="settings-places-title">{{ t("settings.places.title") }}</h2>
         </div>
         <button class="button-secondary" type="button" @click="openPresetsModal">
-          Gérer les lieux
+          {{ t("settings.places.manage") }}
         </button>
       </div>
 
       <div class="settings-row">
         <div>
-          <strong>Lieu par défaut</strong>
+          <strong>{{ t("settings.places.defaultLabel") }}</strong>
           <span>
-            Utilisé quand la page d'accueil est ouverte sans paramètre
-            <code>place</code>.
+            {{ t("settings.places.defaultDescription") }}
           </span>
         </div>
         <MaterialCombobox
           :model-value="presetState.defaultPlaceId"
           :options="placeOptions"
-          aria-label="Lieu par défaut"
+          :aria-label="t('settings.places.defaultAria')"
           @update:model-value="updateDefaultPlace"
         />
       </div>
 
       <div class="settings-row">
         <div>
-          <strong>Sélecteur de lieux</strong>
-          <span>
-            Choisit comment naviguer entre Maison, Travail et les lieux
-            personnalisés.
-          </span>
+          <strong>{{ t("settings.places.navigationLabel") }}</strong>
+          <span>{{ t("settings.places.navigationDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="settings.placePresetNavigationMode"
-          :options="[...placePresetNavigationModeOptions]"
-          aria-label="Mode du sélecteur de lieux"
+          :options="placePresetNavigationModeLocalizedOptions"
+          :aria-label="t('settings.places.navigationAria')"
           @update:model-value="updatePlacePresetNavigationMode"
         />
       </div>
@@ -552,53 +790,48 @@ onBeforeUnmount(() => {
     <section class="settings-panel" aria-labelledby="settings-display-title">
       <div class="settings-panel__heading">
         <div>
-          <p class="eyebrow">Affichage</p>
-          <h2 id="settings-display-title">Tableaux et prochains passages</h2>
+          <p class="eyebrow">{{ t("settings.display.eyebrow") }}</p>
+          <h2 id="settings-display-title">{{ t("settings.display.title") }}</h2>
         </div>
       </div>
 
       <div class="settings-row">
         <div>
-          <strong>Lieu à configurer</strong>
-          <span>Ces réglages d'affichage sont propres à chaque dashboard.</span>
+          <strong>{{ t("settings.places.displayPlaceLabel") }}</strong>
+          <span>{{ t("settings.places.displayPlaceDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="selectedDisplayPlaceId"
           :options="placeOptions"
-          aria-label="Lieu à configurer"
+          :aria-label="t('settings.places.displayPlaceAria')"
           @update:model-value="updateSelectedDisplayPlace"
         />
       </div>
 
       <div class="settings-row">
         <div>
-          <strong>Affichage des stations</strong>
-          <span>
-            Garde les boutons de stations visibles ou les range dans le menu
-            contextuel du dashboard.
-          </span>
+          <strong>{{ t("settings.display.stationButtons") }}</strong>
+          <span>{{ t("settings.display.stationButtonsDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="
             selectedDisplayPreferences?.boardTogglesPlacement ?? 'inline'
           "
-          :options="[...boardTogglesPlacementOptions]"
-          aria-label="Emplacement des boutons de stations"
+          :options="boardTogglesPlacementLocalizedOptions"
+          :aria-label="t('settings.display.stationButtonsAria')"
           @update:model-value="updateBoardTogglesPlacement"
         />
       </div>
 
       <div class="settings-row">
         <div>
-          <strong>Design panneau plein ecran</strong>
-          <span>
-            Choisit l'apparence utilisee par defaut pour l'affichage panneau.
-          </span>
+          <strong>{{ t("settings.display.panelDesign") }}</strong>
+          <span>{{ t("settings.display.panelDesignDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="settings.fullscreenStationPanelDesign"
-          :options="[...fullscreenStationPanelDesignOptions]"
-          aria-label="Design panneau plein ecran"
+          :options="fullscreenStationPanelDesignLocalizedOptions"
+          :aria-label="t('settings.display.panelDesignAria')"
           @update:model-value="updateFullscreenStationPanelDesign"
         />
       </div>
@@ -617,35 +850,30 @@ onBeforeUnmount(() => {
         />
         <span></span>
         <div>
-          <strong>Theme sombre du panneau</strong>
-          <small>
-            Active une lecture plus proche des panneaux PANAM, y compris sur la
-            carte station.
-          </small>
+          <strong>{{ t("settings.display.panelDarkTheme") }}</strong>
+          <small>{{ t("settings.display.panelDarkThemeDescription") }}</small>
         </div>
       </label>
 
       <div class="settings-row">
         <div>
-          <strong>Accordion fermé</strong>
-          <span>Choisit le résumé visible sans ouvrir une direction.</span>
+          <strong>{{ t("settings.display.closedAccordion") }}</strong>
+          <span>{{ t("settings.display.closedAccordionDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="
             selectedDisplayPreferences?.closedDirectionSummaryMode ?? 'next'
           "
-          :options="[...closedDirectionSummaryOptions]"
-          aria-label="Affichage accordion fermé"
+          :options="closedDirectionSummaryLocalizedOptions"
+          :aria-label="t('settings.display.closedAccordionAria')"
           @update:model-value="updateClosedSummaryMode"
         />
       </div>
 
       <div class="settings-row">
         <div>
-          <strong>Prochains passages par direction</strong>
-          <span
-            >La valeur par défaut conserve la limite actuelle du tableau.</span
-          >
+          <strong>{{ t("settings.display.maxDepartures") }}</strong>
+          <span>{{ t("settings.display.maxDeparturesDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="
@@ -654,8 +882,8 @@ onBeforeUnmount(() => {
                 'default',
             )
           "
-          :options="[...maxDeparturesPerDirectionOptions]"
-          aria-label="Nombre maximum de prochains passages"
+          :options="maxDeparturesLocalizedOptions"
+          :aria-label="t('settings.display.maxDeparturesAria')"
           @update:model-value="updateMaxDepartures"
         />
       </div>
@@ -673,10 +901,9 @@ onBeforeUnmount(() => {
         />
         <span></span>
         <div>
-          <strong>Afficher uniquement les directions terminus</strong>
+          <strong>{{ t("settings.display.terminalOnly") }}</strong>
           <small>
-            Les directions au statut inconnu restent visibles pour éviter de
-            masquer des données utiles.
+            {{ t("settings.display.terminalOnlyDescription") }}
           </small>
         </div>
       </label>
@@ -695,25 +922,22 @@ onBeforeUnmount(() => {
         />
         <span></span>
         <div>
-          <strong>
-            Limiter les lignes fantômes aux modes structurants
-          </strong>
+          <strong>{{ t("settings.display.structuralGhostLines") }}</strong>
           <small>
-            Masque les bus sur la carte détaillée et conserve métro, RER,
-            train, tram, câble et funiculaire.
+            {{ t("settings.display.structuralGhostLinesDescription") }}
           </small>
         </div>
       </label>
 
       <div class="settings-row">
         <div>
-          <strong>Apparence info trafic</strong>
-          <span>Le style RATP compact est le mode par défaut.</span>
+          <strong>{{ t("settings.display.trafficDesign") }}</strong>
+          <span>{{ t("settings.display.trafficDesignDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="settings.trafficInfoDesign"
-          :options="[...trafficInfoDesignOptions]"
-          aria-label="Apparence de la page info trafic"
+          :options="trafficInfoDesignLocalizedOptions"
+          :aria-label="t('settings.display.trafficDesignAria')"
           @update:model-value="updateTrafficInfoDesign"
         />
       </div>
@@ -722,23 +946,20 @@ onBeforeUnmount(() => {
     <section class="settings-panel" aria-labelledby="settings-traffic-title">
       <div class="settings-panel__heading">
         <div>
-          <p class="eyebrow">Info trafic</p>
-          <h2 id="settings-traffic-title">Page info trafic</h2>
+          <p class="eyebrow">{{ t("common.labels.traffic") }}</p>
+          <h2 id="settings-traffic-title">{{ t("settings.display.trafficScope") }}</h2>
         </div>
       </div>
 
       <div class="settings-row">
         <div>
-          <strong>Mode par défaut</strong>
-          <span>
-            Optimisé affiche uniquement les lignes des stations ajoutées. Toutes
-            les lignes affiche l'info traffic pour toutes les lignes.
-          </span>
+          <strong>{{ t("settings.display.trafficScope") }}</strong>
+          <span>{{ t("settings.display.trafficScopeDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="settings.trafficInfoDefaultScope"
-          :options="[...trafficInfoDefaultScopeOptions]"
-          aria-label="Mode par défaut info trafic"
+          :options="trafficInfoDefaultScopeLocalizedOptions"
+          :aria-label="t('settings.display.trafficScopeAria')"
           @update:model-value="updateTrafficInfoDefaultScope"
         />
       </div>
@@ -756,13 +977,33 @@ onBeforeUnmount(() => {
         />
         <span></span>
         <div>
-          <strong>Détection intelligente sur le schéma</strong>
-          <small>
-            Analyse les annonces trafic et colore automatiquement les tronçons
-            interrompus ou perturbés dans le schéma de ligne.
-          </small>
+          <strong>{{ t("settings.display.smartTraffic") }}</strong>
+          <small>{{ t("settings.display.smartTrafficDescription") }}</small>
         </div>
       </label>
+
+      <div class="settings-row settings-row--range">
+        <div>
+          <strong>{{ t("settings.display.trafficWarningLookahead") }}</strong>
+          <span>{{ t("settings.display.trafficWarningLookaheadDescription") }}</span>
+        </div>
+        <label class="settings-range">
+          <span>{{ formatDays(settings.trafficWarningLookaheadDays) }}</span>
+          <input
+            :max="TRAFFIC_WARNING_LOOKAHEAD_DAYS_MAX"
+            :min="TRAFFIC_WARNING_LOOKAHEAD_DAYS_MIN"
+            :value="settings.trafficWarningLookaheadDays"
+            :aria-label="t('settings.display.trafficWarningLookaheadAria')"
+            step="1"
+            type="range"
+            @input="
+              updateTrafficWarningLookaheadDays(
+                ($event.target as HTMLInputElement).value,
+              )
+            "
+          />
+        </label>
+      </div>
 
       <label class="settings-toggle">
         <input
@@ -778,11 +1019,8 @@ onBeforeUnmount(() => {
         />
         <span></span>
         <div>
-          <strong>Activer le cache navigateur</strong>
-          <small>
-            Utilise localStorage avant le cache backend pour éviter de
-            recalculer les correspondances après un reload sur Cloudflare Pages.
-          </small>
+          <strong>{{ t("settings.bundles.enableLocalCache") }}</strong>
+          <small>{{ t("settings.display.transferLocalCacheDescription") }}</small>
         </div>
       </label>
 
@@ -800,101 +1038,80 @@ onBeforeUnmount(() => {
         />
         <span></span>
         <div>
-          <strong>Activer le cache backend</strong>
-          <small>
-            Conserve les bundles de correspondances dans le cache serveur Nuxt
-            entre deux chargements.
-          </small>
+          <strong>{{ t("settings.bundles.enableBackendCache") }}</strong>
+          <small>{{ t("settings.display.transferBackendCacheDescription") }}</small>
           <small
             v-if="!settings.transferBundleBackendCacheEnabled"
             class="settings-inline-warning"
             role="alert"
           >
-            Le chargement des correspondances sera très lent tant que le cache
-            backend est désactivé.
+            {{ t("settings.bundles.slowWarning") }}
           </small>
         </div>
       </label>
 
       <div class="settings-row">
         <div>
-          <strong>Expiration des bundles</strong>
-          <span>
-            Les correspondances pre-calculees sont supprimees automatiquement
-            apres ce delai.
-          </span>
+          <strong>{{ t("settings.bundles.expiration") }}</strong>
+          <span>{{ t("settings.display.transferExpirationDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="String(settings.transferBundleRetentionDays)"
-          :options="[...transferBundleRetentionOptions]"
-          aria-label="Expiration des bundles de correspondances"
+          :options="transferBundleRetentionLocalizedOptions"
+          :aria-label="t('settings.display.transferExpirationAria')"
           @update:model-value="updateTransferBundleRetention"
         />
       </div>
 
       <div class="settings-row">
         <div>
-          <strong>Chargement des correspondances</strong>
-          <span>
-            Les bundles utilisent uniquement la recherche nearby optimisee cote
-            backend.
-          </span>
+          <strong>{{ t("settings.bundles.loading") }}</strong>
+          <span>{{ t("settings.display.transferLoadingDescription") }}</span>
         </div>
       </div>
 
       <div class="settings-row">
         <div>
-          <strong>Concurrence des bundles</strong>
-          <span>
-            1 est le mode le plus fiable. Augmente seulement pour tester un
-            chargement plus rapide sur les APIs externes.
-          </span>
+          <strong>{{ t("settings.bundles.concurrency") }}</strong>
+          <span>{{ t("settings.display.transferConcurrencyDescription") }}</span>
           <small
             v-if="settings.transferBundleRequestConcurrency > 1"
             class="settings-inline-warning"
           >
-            Attention : au-dessus de 1, certaines APIs peuvent répondre de façon
-            partielle ou limiter le débit.
+            {{ t("settings.display.transferConcurrencyWarning") }}
           </small>
         </div>
         <MaterialCombobox
           :model-value="String(settings.transferBundleRequestConcurrency)"
-          :options="[...transferBundleRequestConcurrencyOptions]"
-          aria-label="Niveau de concurrence des bundles de correspondances"
+          :options="transferBundleRequestConcurrencyLocalizedOptions"
+          :aria-label="t('settings.display.transferConcurrencyAria')"
           @update:model-value="updateTransferBundleRequestConcurrency"
         />
       </div>
 
       <div class="settings-row">
         <div>
-          <strong>Espacement des appels bundles</strong>
-          <span>
-            Ajoute un delai entre deux departs d'appels pour reduire le risque
-            de reponses 429 quand l'API limite le debit.
-          </span>
+          <strong>{{ t("settings.bundles.spacing") }}</strong>
+          <span>{{ t("settings.display.transferSpacingDescription") }}</span>
           <small
             v-if="settings.transferBundleRequestSpacingMs > 0"
             class="settings-inline-warning"
           >
-            Le chargement initial sera plus lent, mais les bundles deja en cache
-            restent instantanes.
+            {{ t("settings.display.transferSpacingWarning") }}
           </small>
         </div>
         <MaterialCombobox
           :model-value="String(settings.transferBundleRequestSpacingMs)"
-          :options="[...transferBundleRequestSpacingOptions]"
-          aria-label="Espacement des appels bundles de correspondances"
+          :options="transferBundleRequestSpacingLocalizedOptions"
+          :aria-label="t('settings.display.transferSpacingAria')"
           @update:model-value="updateTransferBundleRequestSpacing"
         />
       </div>
 
       <div class="settings-bundle-actions">
         <div>
-          <strong>Bundles de correspondances</strong>
-          <span>
-            Consulte ou supprime le cache navigateur et backend utilise pour
-            accelerer les schemas de ligne.
-          </span>
+          <strong>{{ t("settings.bundles.title") }}</strong>
+          <span>{{ t("settings.display.transferCacheDescription") }}</span>
         </div>
         <div class="settings-bundle-actions__buttons">
           <button
@@ -902,10 +1119,10 @@ onBeforeUnmount(() => {
             type="button"
             @click="openBundlesModal"
           >
-            View bundles
+            {{ t("settings.bundles.view") }}
           </button>
           <button class="button-secondary" type="button" @click="clearBundles">
-            Clear bundles
+            {{ t("settings.bundles.clear") }}
           </button>
         </div>
       </div>
@@ -914,52 +1131,46 @@ onBeforeUnmount(() => {
     <section class="settings-panel" aria-labelledby="settings-weather-title">
       <div class="settings-panel__heading">
         <div>
-          <p class="eyebrow">Météo</p>
-          <h2 id="settings-weather-title">Météo dynamique</h2>
+          <p class="eyebrow">{{ t("weather.title") }}</p>
+          <h2 id="settings-weather-title">{{ t("settings.display.weather") }}</h2>
         </div>
       </div>
 
       <div class="settings-row">
         <div>
-          <strong>Météo dynamique</strong>
-          <span>
-            Le mode animé affiche un fond météo uniquement en cas d'intempérie.
-          </span>
+          <strong>{{ t("settings.display.weather") }}</strong>
+          <span>{{ t("settings.display.weatherDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="settings.weatherMode"
-          :options="[...weatherModeOptions]"
-          aria-label="Mode météo dynamique"
+          :options="weatherModeLocalizedOptions"
+          :aria-label="t('settings.display.weatherModeAria')"
           @update:model-value="updateWeatherMode"
         />
       </div>
 
       <div class="settings-row">
         <div>
-          <strong>Mode test</strong>
-          <span>
-            Force une fausse alerte météo locale pour prévisualiser le rendu.
-          </span>
+          <strong>{{ t("settings.display.weatherTestMode") }}</strong>
+          <span>{{ t("settings.display.weatherTestDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="settings.weatherTestMode"
-          :options="[...weatherTestModeOptions]"
-          aria-label="Mode test météo"
+          :options="weatherTestModeLocalizedOptions"
+          :aria-label="t('settings.display.weatherTestAria')"
           @update:model-value="updateWeatherTestMode"
         />
       </div>
 
       <div class="settings-row">
         <div>
-          <strong>Prévenir à l'avance</strong>
-          <span
-            >Fenêtre de prévision utilisée avant d'afficher une alerte.</span
-          >
+          <strong>{{ t("settings.display.weatherLookahead") }}</strong>
+          <span>{{ t("settings.display.weatherLookaheadDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="String(settings.weatherLookaheadMinutes)"
-          :options="[...weatherLookaheadOptions]"
-          aria-label="Fenêtre de prévision météo"
+          :options="weatherLookaheadLocalizedOptions"
+          :aria-label="t('settings.display.weatherLookaheadAria')"
           @update:model-value="updateWeatherLookahead"
         />
       </div>
@@ -978,22 +1189,20 @@ onBeforeUnmount(() => {
         />
         <span></span>
         <div>
-          <strong>Afficher le ressenti</strong>
-          <small>
-            Ajoute la temp&eacute;rature ressentie apr&egrave;s la temp&eacute;rature du jour.
-          </small>
+          <strong>{{ t("settings.display.weatherApparent") }}</strong>
+          <small>{{ t("settings.display.weatherApparentDescription") }}</small>
         </div>
       </label>
 
       <div class="settings-row">
         <div>
-          <strong>Lieu météo</strong>
-          <span>Paris est utilisé par défaut, avec quelques presets IDF.</span>
+          <strong>{{ t("settings.display.weatherLocation") }}</strong>
+          <span>{{ t("settings.display.weatherLocationDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="settings.weatherLocationPreset"
-          :options="[...weatherLocationOptions]"
-          aria-label="Lieu météo"
+          :options="weatherLocationLocalizedOptions"
+          :aria-label="t('settings.display.weatherLocationAria')"
           @update:model-value="updateWeatherLocationPreset"
         />
       </div>
@@ -1003,7 +1212,7 @@ onBeforeUnmount(() => {
         class="settings-custom-location"
       >
         <label>
-          <span>Nom</span>
+          <span>{{ t("settings.display.weatherCustomName") }}</span>
           <input
             class="settings-input"
             :value="settings.weatherCustomLocation.label"
@@ -1017,7 +1226,7 @@ onBeforeUnmount(() => {
           />
         </label>
         <label>
-          <span>Latitude</span>
+          <span>{{ t("settings.display.weatherCustomLatitude") }}</span>
           <input
             class="settings-input"
             :value="settings.weatherCustomLocation.latitude"
@@ -1033,7 +1242,7 @@ onBeforeUnmount(() => {
           />
         </label>
         <label>
-          <span>Longitude</span>
+          <span>{{ t("settings.display.weatherCustomLongitude") }}</span>
           <input
             class="settings-input"
             :value="settings.weatherCustomLocation.longitude"
@@ -1054,8 +1263,8 @@ onBeforeUnmount(() => {
     <section class="settings-panel" aria-labelledby="settings-map-title">
       <div class="settings-panel__heading">
         <div>
-          <p class="eyebrow">Plans</p>
-          <h2 id="settings-map-title">Schémas de ligne</h2>
+          <p class="eyebrow">{{ t("settings.display.mapEyebrow") }}</p>
+          <h2 id="settings-map-title">{{ t("settings.display.mapTitle") }}</h2>
         </div>
       </div>
 
@@ -1071,8 +1280,8 @@ onBeforeUnmount(() => {
         />
         <span></span>
         <div>
-          <strong>Afficher la minimap</strong>
-          <small>Visible dans le schéma détaillé d'une ligne.</small>
+          <strong>{{ t("settings.display.showMiniMap") }}</strong>
+          <small>{{ t("settings.display.showMiniMapDescription") }}</small>
         </div>
       </label>
 
@@ -1088,35 +1297,28 @@ onBeforeUnmount(() => {
         />
         <span></span>
         <div>
-          <strong>Afficher les villes du plan</strong>
-          <small
-            >Regroupe les stations voisines par commune sur le schema.</small
-          >
+          <strong>{{ t("settings.display.showCityZones") }}</strong>
+          <small>{{ t("settings.display.showCityZonesDescription") }}</small>
         </div>
       </label>
 
       <div class="settings-row">
         <div>
-          <strong>Mode visuel du plan</strong>
-          <span
-            >Automatique choisit entre confort et compact selon la densité de
-            la ligne.</span
-          >
+          <strong>{{ t("settings.display.compactMode") }}</strong>
+          <span>{{ t("settings.display.compactModeDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="settings.compactLinePlanMode"
-          :options="[...compactLinePlanOptions]"
-          aria-label="Mode visuel du plan"
+          :options="compactLinePlanLocalizedOptions"
+          :aria-label="t('settings.display.compactModeAria')"
           @update:model-value="updateCompactMode"
         />
       </div>
 
       <div class="settings-row settings-row--range">
         <div>
-          <strong>Espacement vertical compact</strong>
-          <span>
-            Augmente l'ecart entre les lignes de branches dans la vue compacte.
-          </span>
+          <strong>{{ t("settings.display.compactVerticalSpacing") }}</strong>
+          <span>{{ t("settings.display.compactVerticalSpacingDescription") }}</span>
         </div>
         <label class="settings-range">
           <span>{{ formatPixels(settings.patternCompactBranchGap) }}</span>
@@ -1124,7 +1326,7 @@ onBeforeUnmount(() => {
             :max="PATTERN_COMPACT_BRANCH_GAP_MAX"
             :min="PATTERN_COMPACT_BRANCH_GAP_MIN"
             :value="settings.patternCompactBranchGap"
-            aria-label="Espacement vertical compact du plan"
+            :aria-label="t('settings.display.compactVerticalSpacingAria')"
             step="4"
             type="range"
             @input="
@@ -1149,20 +1351,15 @@ onBeforeUnmount(() => {
         />
         <span></span>
         <div>
-          <strong>Courbes arrondies</strong>
-          <small>
-            Remplace les pentes droites du schema par des courbes plus douces.
-          </small>
+          <strong>{{ t("settings.display.roundedCurves") }}</strong>
+          <small>{{ t("settings.display.roundedCurvesDescription") }}</small>
         </div>
       </label>
 
       <div class="settings-row settings-row--range">
         <div>
-          <strong>Ecart des fourches compactes</strong>
-          <span>
-            Separe les petites branches horizontales des branches principales
-            quand elles partent dans le meme sens.
-          </span>
+          <strong>{{ t("settings.display.compactForkGap") }}</strong>
+          <span>{{ t("settings.display.compactForkGapDescription") }}</span>
         </div>
         <label class="settings-range">
           <span>{{ formatPixels(settings.patternCompactForkGap) }}</span>
@@ -1170,7 +1367,7 @@ onBeforeUnmount(() => {
             :max="PATTERN_COMPACT_FORK_GAP_MAX"
             :min="PATTERN_COMPACT_FORK_GAP_MIN"
             :value="settings.patternCompactForkGap"
-            aria-label="Espacement vertical des fourches compactes"
+            :aria-label="t('settings.display.compactForkGapAria')"
             step="2"
             type="range"
             @input="
@@ -1184,15 +1381,12 @@ onBeforeUnmount(() => {
 
       <div class="settings-range-pair">
         <div>
-          <strong>Espacement realiste</strong>
-          <span>
-            Borne les distances NeTEx converties en pixels dans la vue
-            realiste.
-          </span>
+          <strong>{{ t("settings.display.realisticSpacing") }}</strong>
+          <span>{{ t("settings.display.realisticSpacingDescription") }}</span>
         </div>
         <div class="settings-range-pair__controls">
           <label class="settings-range">
-            <small>Coefficient min</small>
+            <small>{{ t("settings.display.minCoefficient") }}</small>
             <span>
               {{
                 formatCoefficient(settings.patternRealisticMinGapCoefficient)
@@ -1202,7 +1396,7 @@ onBeforeUnmount(() => {
               :max="PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MAX"
               :min="PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MIN"
               :value="settings.patternRealisticMinGapCoefficient"
-              aria-label="Coefficient minimum de l'espacement realiste"
+              :aria-label="t('settings.display.minCoefficientAria')"
               step="0.05"
               type="range"
               @input="
@@ -1213,7 +1407,7 @@ onBeforeUnmount(() => {
             />
           </label>
           <label class="settings-range">
-            <small>Coefficient max</small>
+            <small>{{ t("settings.display.maxCoefficient") }}</small>
             <span>
               {{
                 formatCoefficient(settings.patternRealisticMaxGapCoefficient)
@@ -1223,7 +1417,7 @@ onBeforeUnmount(() => {
               :max="PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MAX"
               :min="PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MIN"
               :value="settings.patternRealisticMaxGapCoefficient"
-              aria-label="Coefficient maximum de l'espacement realiste"
+              :aria-label="t('settings.display.maxCoefficientAria')"
               step="0.25"
               type="range"
               @input="
@@ -1248,11 +1442,8 @@ onBeforeUnmount(() => {
         />
         <span></span>
         <div>
-          <strong>Tooltips riches de correspondances</strong>
-          <small
-            >Affiche les groupes de transport et les directions bus au
-            survol.</small
-          >
+          <strong>{{ t("settings.display.richTransferTooltips") }}</strong>
+          <small>{{ t("settings.display.richTransferTooltipsDescription") }}</small>
         </div>
       </label>
 
@@ -1268,11 +1459,8 @@ onBeforeUnmount(() => {
         />
         <span></span>
         <div>
-          <strong>Réduire les animations</strong>
-          <small
-            >Conserve les interactions, mais limite les effets visuels
-            secondaires.</small
-          >
+          <strong>{{ t("settings.display.reduceMotion") }}</strong>
+          <small>{{ t("settings.display.reduceMotionDescription") }}</small>
         </div>
       </label>
     </section>
@@ -1282,23 +1470,20 @@ onBeforeUnmount(() => {
     <section class="settings-panel" aria-labelledby="settings-device-title">
       <div class="settings-panel__heading">
         <div>
-          <p class="eyebrow">Tablette</p>
-          <h2 id="settings-device-title">Écran et navigation</h2>
+          <p class="eyebrow">{{ t("settings.device.eyebrow") }}</p>
+          <h2 id="settings-device-title">{{ t("settings.device.title") }}</h2>
         </div>
       </div>
 
       <div class="settings-row">
         <div>
-          <strong>Wake lock</strong>
-          <span
-            >Demande au navigateur de garder l'écran actif pendant la durée
-            choisie.</span
-          >
+          <strong>{{ t("settings.device.wakeLock") }}</strong>
+          <span>{{ t("settings.device.wakeLockDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="settings.wakeLockDuration"
-          :options="[...wakeLockDurationOptions]"
-          aria-label="Durée du wake lock"
+          :options="wakeLockLocalizedOptions"
+          :aria-label="t('settings.device.wakeLockAria')"
           @update:model-value="updateWakeLock"
         />
       </div>
@@ -1315,26 +1500,20 @@ onBeforeUnmount(() => {
         />
         <span></span>
         <div>
-          <strong>Wake device on alarm</strong>
-          <small>
-            Réactive le wake lock ou la notification quand le navigateur le
-            permet, sans promettre de réveiller un OS endormi.
-          </small>
+          <strong>{{ t("settings.device.wakeDeviceOnAlarm") }}</strong>
+          <small>{{ t("settings.device.wakeDeviceOnAlarmDescription") }}</small>
         </div>
       </label>
 
       <div class="settings-row">
         <div>
-          <strong>Masquer la navigation</strong>
-          <span
-            >Le menu réapparaît au toucher, au focus ou au retour sur
-            l'onglet.</span
-          >
+          <strong>{{ t("settings.device.navigationAutoHide") }}</strong>
+          <span>{{ t("settings.device.navigationAutoHideDescription") }}</span>
         </div>
         <MaterialCombobox
           :model-value="settings.navigationAutoHide"
-          :options="[...navigationAutoHideOptions]"
-          aria-label="Masquage automatique de la navigation"
+          :options="navigationAutoHideLocalizedOptions"
+          :aria-label="t('settings.device.navigationAutoHideAria')"
           @update:model-value="updateAutoHide"
         />
       </div>
@@ -1346,14 +1525,14 @@ onBeforeUnmount(() => {
         type="button"
         @click="resetSettingsWithNotification"
       >
-        Réinitialiser
+        {{ t("common.actions.reset") }}
       </button>
     </footer>
 
     <AppModal
       :open="presetsModalOpen"
-      eyebrow="Dashboard"
-      title="Lieux enregistrés"
+      :eyebrow="t('placeName.eyebrowRename')"
+      :title="t('settings.places.title')"
       panel-class="settings-presets-modal"
       @close="presetsModalOpen = false"
     >
@@ -1364,7 +1543,7 @@ onBeforeUnmount(() => {
           class="settings-preset-item"
         >
           <div class="settings-preset-item__content">
-            <strong>{{ place.label }}</strong>
+            <strong>{{ getPlaceLabel(place) }}</strong>
             <span>{{ getPlaceStationSummary(place) }}</span>
             <ul v-if="getPlaceStationNames(place).length">
               <li
@@ -1374,14 +1553,14 @@ onBeforeUnmount(() => {
                 {{ stationName }}
               </li>
             </ul>
-            <small v-else>Aucune station suivie.</small>
+            <small v-else>{{ t("settings.places.noStations") }}</small>
           </div>
           <div class="settings-preset-item__actions">
             <button
               class="icon-button"
               type="button"
-              :aria-label="`Renommer ${place.label}`"
-              title="Renommer"
+              :aria-label="t('settings.places.renameAria', { place: getPlaceLabel(place) })"
+              :title="t('common.actions.rename')"
               @click="openRenamePlaceModal(place)"
             >
               <Pencil :size="18" aria-hidden="true" />
@@ -1390,8 +1569,8 @@ onBeforeUnmount(() => {
               v-if="!isTransitBuiltinPlace(place)"
               class="icon-button settings-preset-item__delete"
               type="button"
-              :aria-label="`Supprimer ${place.label}`"
-              title="Supprimer"
+              :aria-label="t('settings.places.deleteAria', { place: getPlaceLabel(place) })"
+              :title="t('common.actions.delete')"
               @click="removePlace(place)"
             >
               <Trash2 :size="18" aria-hidden="true" />
@@ -1407,14 +1586,14 @@ onBeforeUnmount(() => {
           @click="openCreatePlaceModal"
         >
           <Plus :size="18" aria-hidden="true" />
-          Ajouter un lieu
+          {{ t("settings.places.addPlace") }}
         </button>
         <button
           class="button-secondary"
           type="button"
           @click="presetsModalOpen = false"
         >
-          Fermer
+          {{ t("common.actions.close") }}
         </button>
       </template>
     </AppModal>
@@ -1454,13 +1633,13 @@ onBeforeUnmount(() => {
         >
           <header>
             <div>
-              <p class="eyebrow">Correspondances</p>
-              <h2 id="settings-bundles-title">Bundles enregistres</h2>
+              <p class="eyebrow">{{ t("settings.bundles.modalEyebrow") }}</p>
+              <h2 id="settings-bundles-title">{{ t("settings.bundles.modalTitle") }}</h2>
             </div>
             <button
               class="button-secondary"
               type="button"
-              aria-label="Fermer"
+              :aria-label="t('common.actions.close')"
               @click="bundlesModalOpen = false"
             >
               x
@@ -1468,15 +1647,21 @@ onBeforeUnmount(() => {
           </header>
 
           <p class="settings-bundle-modal__summary">
-            {{ bundleCount }} bundle{{ bundleCount > 1 ? "s" : "" }} en cache :
-            {{ backendBundleCount }} backend, {{ localBundleCount }} navigateur.
+            {{
+              t("settings.bundles.summary", {
+                total: bundleCount,
+                plural: bundleCount > 1 ? "s" : "",
+                backend: backendBundleCount,
+                local: localBundleCount,
+              })
+            }}
           </p>
 
           <section
             v-if="bundleSummaries.length"
             class="settings-bundle-section"
           >
-            <h3>Backend</h3>
+            <h3>{{ t("settings.bundles.backend") }}</h3>
             <div class="settings-bundle-list">
               <article
                 v-for="bundle in bundleSummaries"
@@ -1486,8 +1671,18 @@ onBeforeUnmount(() => {
                 <div>
                   <strong>{{ bundle.lineLabel }}</strong>
                   <span>
-                    {{ bundle.stopAreaCount }} stations -
-                    {{ bundle.transferCount }} correspondances -
+                    {{
+                      t("settings.bundles.stations", {
+                        count: bundle.stopAreaCount,
+                      })
+                    }}
+                    -
+                    {{
+                      t("settings.bundles.transfers", {
+                        count: bundle.transferCount,
+                      })
+                    }}
+                    -
                     {{
                       formatTransferResolverMode(bundle.transferResolverMode)
                     }}
@@ -1496,16 +1691,20 @@ onBeforeUnmount(() => {
                       formatTransferBundleDistance(bundle.nearbyDistanceMeters)
                     }}
                   </span>
-                  <small
-                    >Expire le {{ formatBundleDate(bundle.expiresAt) }}</small
-                  >
+                  <small>
+                    {{
+                      t("settings.bundles.expiresAt", {
+                        date: formatBundleDate(bundle.expiresAt),
+                      })
+                    }}
+                  </small>
                 </div>
                 <button
                   class="button-secondary"
                   type="button"
                   @click="deleteBundle(bundle.id)"
                 >
-                  Supprimer
+                  {{ t("common.actions.delete") }}
                 </button>
               </article>
             </div>
@@ -1515,7 +1714,7 @@ onBeforeUnmount(() => {
             v-if="localBundleSummaries.length"
             class="settings-bundle-section"
           >
-            <h3>Navigateur</h3>
+            <h3>{{ t("settings.bundles.browser") }}</h3>
             <div class="settings-bundle-list">
               <article
                 v-for="bundle in localBundleSummaries"
@@ -1525,8 +1724,18 @@ onBeforeUnmount(() => {
                 <div>
                   <strong>{{ bundle.lineLabel }}</strong>
                   <span>
-                    {{ bundle.stopAreaCount }} stations -
-                    {{ bundle.transferCount }} correspondances -
+                    {{
+                      t("settings.bundles.stations", {
+                        count: bundle.stopAreaCount,
+                      })
+                    }}
+                    -
+                    {{
+                      t("settings.bundles.transfers", {
+                        count: bundle.transferCount,
+                      })
+                    }}
+                    -
                     {{
                       formatTransferResolverMode(bundle.transferResolverMode)
                     }}
@@ -1535,23 +1744,27 @@ onBeforeUnmount(() => {
                       formatTransferBundleDistance(bundle.nearbyDistanceMeters)
                     }}
                   </span>
-                  <small
-                    >Expire le {{ formatBundleDate(bundle.expiresAt) }}</small
-                  >
+                  <small>
+                    {{
+                      t("settings.bundles.expiresAt", {
+                        date: formatBundleDate(bundle.expiresAt),
+                      })
+                    }}
+                  </small>
                 </div>
                 <button
                   class="button-secondary"
                   type="button"
                   @click="deleteBundle(bundle.id)"
                 >
-                  Supprimer
+                  {{ t("common.actions.delete") }}
                 </button>
               </article>
             </div>
           </section>
 
           <p v-if="!bundleCount" class="settings-bundle-modal__empty">
-            Aucun bundle enregistre pour l'instant.
+            {{ t("settings.bundles.empty") }}
           </p>
         </section>
       </div>

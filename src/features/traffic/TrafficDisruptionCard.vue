@@ -1,10 +1,14 @@
   <script setup lang="ts">
   import { computed } from "vue";
+  import { useI18n } from "../../i18n";
   import {
-    formatTrafficDisruptionPeriod,
     getDisruptionIcon,
     getDisruptionTone,
   } from "./trafficPresentation";
+  import {
+    getTrafficDisruptionDisplayPeriod,
+    parseTrafficDate,
+  } from "./trafficTiming";
   import type { TrafficDisruption } from "./types";
 
   const props = withDefaults(
@@ -25,12 +29,49 @@
 
   const tone = computed(() => getDisruptionTone(props.disruption));
   const icon = computed(() => getDisruptionIcon(props.disruption));
+  const { d, t } = useI18n();
   const periodLabel = computed(() =>
-    formatTrafficDisruptionPeriod(props.disruption),
+    formatTrafficDisruptionPeriodLabel(props.disruption),
   );
   const impactedStopNames = computed(() =>
     props.disruption.impactedStopNames.slice(0, props.impactedStopLimit),
   );
+
+  function formatTrafficDisruptionPeriodLabel(
+    disruption: TrafficDisruption,
+  ): string {
+    const period = getTrafficDisruptionDisplayPeriod(disruption);
+
+    if (!period) {
+      return "";
+    }
+
+    const begin = formatTrafficDateLabel(period.begin);
+    const end = formatTrafficDateLabel(period.end);
+
+    if (begin && end) {
+      return t("traffic.period.range", { begin, end });
+    }
+
+    return begin
+      ? t("traffic.period.from", { date: begin })
+      : t("traffic.period.until", { date: end });
+  }
+
+  function formatTrafficDateLabel(value?: string): string {
+    if (!value) {
+      return "";
+    }
+
+    const date = parseTrafficDate(value);
+
+    return !date || Number.isNaN(date.getTime())
+      ? value
+      : d(date, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        });
+  }
   </script>
 
   <template>
@@ -59,7 +100,7 @@
         {{ periodLabel }}
       </small>
       <small v-if="impactedStopNames.length">
-        Arrêts concernés:
+        {{ t("traffic.affectedStops") }}
         {{ impactedStopNames.join(", ") }}
       </small>
     </article>

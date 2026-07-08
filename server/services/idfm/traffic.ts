@@ -87,7 +87,7 @@ async function fetchLineReport(
       error:
         error instanceof Error
           ? error.message
-          : "Impossible de charger l'information trafic.",
+          : "Unable to load traffic information.",
       lineRef,
       status: "error",
     };

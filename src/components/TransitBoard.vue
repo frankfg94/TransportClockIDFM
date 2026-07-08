@@ -16,6 +16,7 @@ import ContextMenu from "./ContextMenu.vue";
 import LineCombobox from "./LineCombobox.vue";
 import LineIconBadge from "./LineIconBadge.vue";
 import StationCombobox from "./StationCombobox.vue";
+import { useI18n } from "../i18n";
 import { createBoardFromDraft } from "../services/boardBuilder";
 import {
   fetchDirectionGroupsForStation,
@@ -43,7 +44,7 @@ type ClosedSummaryMode = "last" | "next";
 type TrafficAlertTone = "orange" | "red";
 
 interface BoardTrafficAlert {
-  label: "Perturbation" | "Interruption";
+  label: string;
   tone: TrafficAlertTone;
 }
 
@@ -89,6 +90,7 @@ const emit = defineEmits<{
 }>();
 
 const directionFilterOpen = ref(false);
+const { d, t } = useI18n();
 
 const hiddenDirectionIdSet = computed(() => new Set(props.hiddenDirectionIds));
 
@@ -166,15 +168,6 @@ const canConfirmStationChange = computed(
     selectedStation.value?.label !== props.board.title,
 );
 
-const statusLabels: Record<string, string> = {
-  noReport: "À l'heure",
-  onTime: "À l'heure",
-  delayed: "Retardé",
-  early: "En avance",
-  missed: "Manqué",
-  cancelled: "Supprimé",
-};
-
 watch(stationQuery, () => {
   if (
     selectedStation.value &&
@@ -198,11 +191,11 @@ function formatClock(value?: string): string {
     return "--:--";
   }
 
-  return new Intl.DateTimeFormat("fr-FR", {
+  return d(new Date(value), {
     hour: "2-digit",
     minute: "2-digit",
     timeZone: "Europe/Paris",
-  }).format(new Date(value));
+  });
 }
 
 function openDirectionFilter(): void {
@@ -246,7 +239,7 @@ function pruneDirectionIds(directionIds: string[]): string[] {
 
 function formatWait(value?: string, vehicleAtStop = false): string {
   if (vehicleAtStop) {
-    return "À quai";
+    return t("board.docked");
   }
 
   if (!value) {
@@ -259,7 +252,7 @@ function formatWait(value?: string, vehicleAtStop = false): string {
   );
 
   if (minutes === 0) {
-    return "Imminent";
+    return t("board.imminent");
   }
 
   return `${minutes}`;
@@ -268,11 +261,22 @@ function formatWait(value?: string, vehicleAtStop = false): string {
 function formatSummaryWait(value?: string, vehicleAtStop = false): string {
   const wait = formatWait(value, vehicleAtStop);
 
-  return wait === "Imminent" ? "0" : wait;
+  return wait === t("board.imminent") ? "0" : wait;
 }
 
 function statusLabel(status?: string): string {
-  return status ? (statusLabels[status] ?? status) : "";
+  if (!status) {
+    return "";
+  }
+
+  return {
+    noReport: t("board.status.noReport"),
+    onTime: t("board.status.onTime"),
+    delayed: t("board.status.delayed"),
+    early: t("board.status.early"),
+    missed: t("board.status.missed"),
+    cancelled: t("board.status.cancelled"),
+  }[status] ?? status;
 }
 
 function isDirectionCollapsed(directionId: string): boolean {
@@ -294,7 +298,7 @@ function getNextDepartures(group: DirectionDepartureGroup): Departure[] {
 function formatNextDepartureLabel(departure: Departure): string {
   return `${departure.destination} · ${
     formatSummaryWait(getDepartureTime(departure), departure.vehicleAtStop) ||
-    "Horaire indisponible"
+    t("board.unavailableSchedule")
   }`;
 }
 
@@ -329,15 +333,15 @@ function formatDepartureServiceType(
   serviceType?: DepartureServiceType,
 ): string {
   if (serviceType === "direct") {
-    return "Direct";
+    return t("board.serviceType.direct");
   }
 
   if (serviceType === "semi-direct") {
-    return "Semi direct";
+    return t("board.serviceType.semiDirect");
   }
 
   if (serviceType === "omnibus") {
-    return "Toutes stations";
+    return t("board.serviceType.omnibus");
   }
 
   return "";
@@ -349,8 +353,8 @@ function formatRemainingStopCount(departure: Departure): string {
   }
 
   return departure.remainingStopCount > 1
-    ? `${departure.remainingStopCount} arrêts`
-    : `${departure.remainingStopCount} arrêt`;
+    ? t("board.remainingStopsOther", { count: departure.remainingStopCount })
+    : t("board.remainingStopsOne", { count: departure.remainingStopCount });
 }
 
 function openPatternForDeparture(payload: DeparturePatternPayload): void {
@@ -408,7 +412,7 @@ async function loadStations(): Promise<void> {
   } catch {
     if (requestId === latestStationRequest) {
       stationOptions.value = [];
-      stationEditorError.value = "Impossible de charger les stations.";
+      stationEditorError.value = t("board.stationModal.loadFailed");
     }
   } finally {
     if (requestId === latestStationRequest) {
@@ -481,7 +485,7 @@ async function confirmStationChange(): Promise<void> {
     emit("change-station", nextBoard);
     closeStationEditor();
   } catch {
-    stationEditorError.value = "Impossible de changer de station.";
+    stationEditorError.value = t("board.stationModal.changeFailed");
   } finally {
     changingStation.value = false;
   }
@@ -588,7 +592,7 @@ onUnmounted(() => {
           class="board-actions__trigger"
           type="button"
           :aria-expanded="actionsOpen"
-          aria-label="Actions de la station"
+          :aria-label="t('board.actionsAria')"
           @click.stop="actionsOpen = !actionsOpen"
         >
           <MoreVertical :size="20" aria-hidden="true" />
@@ -602,17 +606,17 @@ onUnmounted(() => {
         >
           <button type="button" @click="openLinePage">
             <Map :size="17" aria-hidden="true" />
-            Schéma de la ligne
+            {{ t("board.lineMap") }}
           </button>
 
           <button type="button" @click="openStationEditor">
             <MapPin :size="17" aria-hidden="true" />
-            Changer de station
+            {{ t("board.changeStation") }}
           </button>
 
           <button type="button" @click="openFullscreenPanel">
             <Maximize2 :size="17" aria-hidden="true" />
-            Affichage panneau
+            {{ t("board.panelDisplay") }}
           </button>
 
           <button
@@ -621,7 +625,7 @@ onUnmounted(() => {
             @click="openDirectionFilter"
           >
             <Route :size="17" aria-hidden="true" />
-            Filtrer les directions
+            {{ t("board.filterDirections") }}
             <span v-if="hiddenDirectionsCount > 0">
               · {{ hiddenDirectionsCount }}
             </span>
@@ -634,7 +638,7 @@ onUnmounted(() => {
             @click="removeBoard"
           >
             <Trash :size="17" aria-hidden="true" />
-            Supprimer
+            {{ t("common.actions.delete") }}
           </button>
         </ContextMenu>
       </div>
@@ -645,7 +649,7 @@ onUnmounted(() => {
     </div>
 
     <div v-else-if="loading && totalDeparturesCount === 0" class="notice">
-      Chargement des passages...
+      {{ t("board.loadingDepartures") }}
     </div>
 
     <div
@@ -654,10 +658,10 @@ onUnmounted(() => {
       "
       class="notice notice--direction-filter-empty"
     >
-      <span>Toutes les directions sont masquées.</span>
+      <span>{{ t("board.allDirectionsHidden") }}</span>
 
       <button type="button" class="button-secondary" @click="showAllDirections">
-        Tout afficher
+        {{ t("common.actions.showAll") }}
       </button>
     </div>
 
@@ -677,11 +681,11 @@ onUnmounted(() => {
           @click="emit('toggleDirection', group.id)"
         >
           <div class="direction-section__title">
-            <p>Direction</p>
+            <p>{{ t("board.direction") }}</p>
             <h3 style="font-weight: 600">{{ group.label }}</h3>
           </div>
 
-          <div class="last-service" aria-label="Prochains passages">
+          <div class="last-service" :aria-label="t('board.nextDeparturesAria')">
             <div
               v-if="getNextDepartures(group).length > 0"
               class="last-service__times"
@@ -704,7 +708,7 @@ onUnmounted(() => {
               </span>
             </div>
             <span v-else class="last-service__empty">
-              {{ group.serviceEnded ? "Terminé" : "—" }}
+              {{ group.serviceEnded ? t("board.finished") : "—" }}
             </span>
           </div>
 
@@ -819,7 +823,7 @@ onUnmounted(() => {
                 <button
                   class="departure-pattern-button"
                   type="button"
-                  aria-label="Afficher la desserte"
+                  :aria-label="t('board.showPatternAria')"
                   @click.stop="
                     openPatternForDeparture({
                       board,
@@ -839,8 +843,8 @@ onUnmounted(() => {
                   type="button"
                   :aria-label="
                     hasAlarm(departure)
-                      ? 'Alarme programmée'
-                      : 'Programmer une alarme'
+                      ? t('board.alarmSetAria')
+                      : t('board.alarmScheduleAria')
                   "
                   @click.stop="
                     emit('schedule-alarm', {
@@ -863,8 +867,8 @@ onUnmounted(() => {
             <div v-else class="notice notice--compact">
               {{
                 group.serviceEnded
-                  ? "Service terminé"
-                  : "Aucun passage imminent"
+                  ? t("board.serviceEnded")
+                  : t("board.noUpcoming")
               }}
             </div>
           </div>
@@ -873,7 +877,7 @@ onUnmounted(() => {
     </div>
 
     <footer class="board__footer">
-      <span>{{ displayedDeparturesCount }} passages</span>
+      <span>{{ t("board.departures", { count: displayedDeparturesCount }) }}</span>
     </footer>
   </article>
 
@@ -891,8 +895,8 @@ onUnmounted(() => {
         >
           <header class="modal-panel__header">
             <div>
-              <p class="eyebrow">Station</p>
-              <h2>Changer de station</h2>
+              <p class="eyebrow">{{ t("board.stationModal.eyebrow") }}</p>
+              <h2>{{ t("board.stationModal.title") }}</h2>
               <span class="board-station-modal__subtitle">
                 {{ board.line.longName }} · {{ board.title }}
               </span>
@@ -901,7 +905,7 @@ onUnmounted(() => {
             <button
               class="icon-button"
               type="button"
-              aria-label="Fermer"
+              :aria-label="t('common.actions.close')"
               @click="closeStationEditor"
             >
               ×
@@ -910,7 +914,7 @@ onUnmounted(() => {
 
           <div class="station-form board-station-modal__form">
             <label>
-              <span>Ligne</span>
+              <span>{{ t("board.stationModal.line") }}</span>
 
               <LineCombobox
                 :model-value="currentLineOption"
@@ -919,14 +923,14 @@ onUnmounted(() => {
                   currentLineOption.displayName ?? currentLineOption.label
                 "
                 disabled
-                placeholder="Ligne"
+                :placeholder="t('board.stationModal.line')"
                 @update:model-value="() => undefined"
                 @update:query="() => undefined"
               />
             </label>
 
             <label>
-              <span>Nouvelle station</span>
+              <span>{{ t("board.stationModal.newStation") }}</span>
 
               <StationCombobox
                 :model-value="selectedStation"
@@ -942,7 +946,7 @@ onUnmounted(() => {
 
               <span v-if="loadingStations" class="field-loader">
                 <span aria-hidden="true" class="loader-dot"></span>
-                Chargement des stations
+                {{ t("board.stationModal.loading") }}
               </span>
             </label>
 
@@ -954,7 +958,7 @@ onUnmounted(() => {
                 type="button"
                 @click="loadStations"
               >
-                Réessayer
+                {{ t("common.actions.retry") }}
               </button>
             </div>
           </div>
@@ -965,7 +969,7 @@ onUnmounted(() => {
               type="button"
               @click="closeStationEditor"
             >
-              Annuler
+              {{ t("common.actions.cancel") }}
             </button>
 
             <button
@@ -973,7 +977,11 @@ onUnmounted(() => {
               :disabled="!canConfirmStationChange || changingStation"
               @click="confirmStationChange"
             >
-              {{ changingStation ? "Changement..." : "Changer" }}
+              {{
+                changingStation
+                  ? t("common.actions.changing")
+                  : t("common.actions.change")
+              }}
             </button>
           </footer>
         </section>
@@ -997,8 +1005,10 @@ onUnmounted(() => {
             class="modal-panel__header board-direction-filter-modal__header"
           >
             <div>
-              <p class="eyebrow">Directions</p>
-              <h2 id="direction-filter-title">Filtrer les directions</h2>
+              <p class="eyebrow">{{ t("board.directionFilter.eyebrow") }}</p>
+              <h2 id="direction-filter-title">
+                {{ t("board.directionFilter.title") }}
+              </h2>
               <span class="board-station-modal__subtitle">
                 {{ board.line.longName }} · {{ board.title }}
               </span>
@@ -1007,7 +1017,7 @@ onUnmounted(() => {
             <button
               class="icon-button"
               type="button"
-              aria-label="Fermer"
+              :aria-label="t('common.actions.close')"
               @click="closeDirectionFilter"
             >
               ×
@@ -1016,13 +1026,23 @@ onUnmounted(() => {
 
           <div class="direction-filter-summary">
             <strong>
-              {{ visibleDirectionGroups.length }} / {{ directionGroups.length }}
-              directions affichées
+              {{
+                t("board.directionFilter.summary", {
+                  visible: visibleDirectionGroups.length,
+                  total: directionGroups.length,
+                })
+              }}
             </strong>
 
             <span v-if="hiddenDirectionsCount > 0">
-              {{ hiddenDirectionsCount }} masquée{{
-                hiddenDirectionsCount > 1 ? "s" : ""
+              {{
+                hiddenDirectionsCount === 1
+                  ? t("board.directionFilter.hiddenOne", {
+                      count: hiddenDirectionsCount,
+                    })
+                  : t("board.directionFilter.hiddenOther", {
+                      count: hiddenDirectionsCount,
+                    })
               }}
             </span>
           </div>
@@ -1064,7 +1084,7 @@ onUnmounted(() => {
               :disabled="hiddenDirectionsCount === 0"
               @click="showAllDirections"
             >
-              Tout afficher
+              {{ t("common.actions.showAll") }}
             </button>
 
             <button type="button" @click="closeDirectionFilter">OK</button>

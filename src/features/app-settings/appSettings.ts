@@ -11,6 +11,10 @@ import {
   transferResolverModeOptions,
   type TransferResolverMode,
 } from "../service-pattern/transferResolverMode";
+import {
+  isLanguagePreference,
+  type LanguagePreference,
+} from "../../i18n/types";
 
 export { transferResolverModeOptions };
 export type { TransferResolverMode };
@@ -46,9 +50,11 @@ export type FullscreenStationPanelDesign =
 export type TransferBundleRetentionDays = 1 | 3 | 7 | 15 | 30 | 60;
 export type TransferBundleRequestConcurrency = 1 | 2 | 3 | 4;
 export type TransferBundleRequestSpacingMs = 0 | 250 | 500 | 1000 | 1500 | 2000;
+export type TrafficWarningLookaheadDays = number;
 export type WeatherMode = "animated" | "static" | "alerts_only" | "disabled";
 export type WeatherLookaheadMinutes = 60 | 120 | 240 | 480 | 720 | 1440;
 export type WeatherTestMode = "off" | "rain" | "storm" | "snow" | "heat";
+export type AppLanguageSetting = LanguagePreference;
 
 export const PATTERN_COMPACT_BRANCH_GAP_DEFAULT = 258;
 export const PATTERN_COMPACT_BRANCH_GAP_MIN = 180;
@@ -62,9 +68,13 @@ export const PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MAX = 1.25;
 export const PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_DEFAULT = 5;
 export const PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MIN = 1.25;
 export const PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MAX = 8;
+export const TRAFFIC_WARNING_LOOKAHEAD_DAYS_DEFAULT = 10;
+export const TRAFFIC_WARNING_LOOKAHEAD_DAYS_MIN = 0;
+export const TRAFFIC_WARNING_LOOKAHEAD_DAYS_MAX = 30;
 
 export interface AppSettings {
   version: 1;
+  language: AppLanguageSetting;
   closedDirectionSummaryMode: ClosedDirectionSummaryMode;
   maxDeparturesPerDirection: MaxDeparturesPerDirectionSetting;
   showPatternMiniMap: boolean;
@@ -91,6 +101,7 @@ export interface AppSettings {
   ghostNetworkStructuralOnly: boolean;
   trafficInfoDesign: TrafficInfoDesign;
   trafficInfoDefaultScope: TrafficInfoDefaultScope;
+  trafficWarningLookaheadDays: TrafficWarningLookaheadDays;
   fullscreenStationPanelDesign: FullscreenStationPanelDesign;
   fullscreenStationPanelDarkTheme: boolean;
   smartTrafficDetection: boolean;
@@ -116,68 +127,68 @@ export interface AppSettingsApi {
 export const APP_SETTINGS_STORAGE_KEY = "transport-clock.app-settings.v1";
 
 export const closedDirectionSummaryOptions = [
-  { id: "last", label: "Dernier passage" },
-  { id: "next", label: "Prochain passage" },
+  { id: "last", label: "Last departure" },
+  { id: "next", label: "Next departure" },
 ] as const;
 
 export const maxDeparturesPerDirectionOptions = [
-  { id: "default", label: "Défaut actuel" },
-  { id: "1", label: "1 passage" },
-  { id: "2", label: "2 passages" },
-  { id: "3", label: "3 passages" },
-  { id: "4", label: "4 passages" },
-  { id: "6", label: "6 passages" },
-  { id: "8", label: "8 passages" },
-  { id: "10", label: "10 passages" },
+  { id: "default", label: "Current default" },
+  { id: "1", label: "1 departure" },
+  { id: "2", label: "2 departures" },
+  { id: "3", label: "3 departures" },
+  { id: "4", label: "4 departures" },
+  { id: "6", label: "6 departures" },
+  { id: "8", label: "8 departures" },
+  { id: "10", label: "10 departures" },
 ] as const;
 
 export const wakeLockDurationOptions = [
-  { id: "none", label: "Aucun" },
+  { id: "none", label: "None" },
   { id: "1m", label: "1 min" },
   { id: "30m", label: "30 min" },
   { id: "1h", label: "1 h" },
   { id: "3h", label: "3 h" },
   { id: "24h", label: "24 h" },
-  { id: "unlimited", label: "Illimité" },
+  { id: "unlimited", label: "Unlimited" },
 ] as const;
 
 export const navigationAutoHideOptions = [
-  { id: "none", label: "Aucun" },
+  { id: "none", label: "None" },
   { id: "1m", label: "1 min" },
 ] as const;
 
 export const boardTogglesPlacementOptions = [
-  { id: "inline", label: "Visible directement (sauf mobile)" },
-  { id: "context-menu", label: "Dans le menu contextuel" },
+  { id: "inline", label: "Visible directly (except mobile)" },
+  { id: "context-menu", label: "In the context menu" },
 ] as const;
 
 export const placePresetNavigationModeOptions = [
   { id: "dropdown-swipe", label: "Dropdown + swipe" },
-  { id: "dropdown", label: "Dropdown seulement" },
-  { id: "swipe", label: "Swipe seulement" },
+  { id: "dropdown", label: "Dropdown only" },
+  { id: "swipe", label: "Swipe only" },
 ] as const;
 
 export const compactLinePlanOptions = [
-  { id: "auto", label: "Automatique" },
-  { id: "comfort", label: "Vue confort" },
-  { id: "compact", label: "Vue compacte" },
-  { id: "realistic", label: "Vue réaliste" },
+  { id: "auto", label: "Automatic" },
+  { id: "comfort", label: "Comfort view" },
+  { id: "compact", label: "Compact view" },
+  { id: "realistic", label: "Realistic view" },
 ] as const;
 
 export const trafficInfoDesignOptions = [
-  { id: "ratp", label: "Style RATP compact" },
-  { id: "cards", label: "Cartes détaillées" },
+  { id: "ratp", label: "Compact RATP style" },
+  { id: "cards", label: "Detailed cards" },
 ] as const;
 
 export const trafficInfoDefaultScopeOptions = [
-  { id: "optimized", label: "Optimisé" },
-  { id: "all", label: "Toutes les lignes" },
+  { id: "optimized", label: "Optimized" },
+  { id: "all", label: "All lines" },
 ] as const;
 
 export const fullscreenStationPanelDesignOptions = [
-  { id: "all-directions", label: "Toutes directions" },
-  { id: "double-stop", label: "Double arret" },
-  { id: "home-card", label: "Carte station" },
+  { id: "all-directions", label: "All directions" },
+  { id: "double-stop", label: "Double stop" },
+  { id: "home-card", label: "Station card" },
 ] as const;
 
 export const transferBundleRetentionOptions = [
@@ -190,14 +201,14 @@ export const transferBundleRetentionOptions = [
 ] as const;
 
 export const transferBundleRequestConcurrencyOptions = [
-  { id: "1", label: "1 appel à la fois" },
-  { id: "2", label: "2 appels simultanés" },
-  { id: "3", label: "3 appels simultanés" },
-  { id: "4", label: "4 appels simultanés" },
+  { id: "1", label: "1 call at a time" },
+  { id: "2", label: "2 simultaneous calls" },
+  { id: "3", label: "3 simultaneous calls" },
+  { id: "4", label: "4 simultaneous calls" },
 ] as const;
 
 export const transferBundleRequestSpacingOptions = [
-  { id: "0", label: "Aucun delai" },
+  { id: "0", label: "No delay" },
   { id: "250", label: "250 ms" },
   { id: "500", label: "500 ms" },
   { id: "1000", label: "1 s" },
@@ -206,18 +217,18 @@ export const transferBundleRequestSpacingOptions = [
 ] as const;
 
 export const weatherModeOptions = [
-  { id: "animated", label: "Alertes avec fond d'écran animé" },
-  { id: "static", label: "Alertes avec fond d'écran statique" },
-  { id: "alerts_only", label: "Alertes seulement" },
-  { id: "disabled", label: "Désactivé" },
+  { id: "animated", label: "Alerts with animated background" },
+  { id: "static", label: "Alerts with static background" },
+  { id: "alerts_only", label: "Alerts only" },
+  { id: "disabled", label: "Disabled" },
 ] as const;
 
 export const weatherTestModeOptions = [
-  { id: "off", label: "Aucun test" },
-  { id: "rain", label: "Test pluie" },
-  { id: "storm", label: "Test orage" },
-  { id: "snow", label: "Test neige" },
-  { id: "heat", label: "Test canicule" },
+  { id: "off", label: "No test" },
+  { id: "rain", label: "Rain test" },
+  { id: "storm", label: "Storm test" },
+  { id: "snow", label: "Snow test" },
+  { id: "heat", label: "Heatwave test" },
 ] as const;
 
 export const weatherLookaheadOptions = [
@@ -226,7 +237,7 @@ export const weatherLookaheadOptions = [
   { id: "240", label: "4 h" },
   { id: "480", label: "8 h" },
   { id: "720", label: "12 h" },
-  { id: "1440", label: "Toute la journée" },
+  { id: "1440", label: "All day" },
 ] as const;
 
 const wakeLockDurationMs: Record<WakeLockDuration, number | undefined> = {
@@ -245,6 +256,7 @@ let storageWatcherRegistered = false;
 export function createDefaultAppSettings(): AppSettings {
   return {
     version: 1,
+    language: "auto",
     closedDirectionSummaryMode: "next",
     maxDeparturesPerDirection: "default",
     showPatternMiniMap: true,
@@ -269,6 +281,7 @@ export function createDefaultAppSettings(): AppSettings {
     ghostNetworkStructuralOnly: false,
     trafficInfoDesign: "ratp",
     trafficInfoDefaultScope: "optimized",
+    trafficWarningLookaheadDays: TRAFFIC_WARNING_LOOKAHEAD_DAYS_DEFAULT,
     fullscreenStationPanelDesign: "all-directions",
     fullscreenStationPanelDarkTheme: false,
     smartTrafficDetection: true,
@@ -306,6 +319,9 @@ export function normalizeAppSettings(value: unknown): AppSettings {
 
   return {
     version: 1,
+    language: isLanguagePreference(value.language)
+      ? value.language
+      : defaults.language,
     hiddenDirectionIdsByBoardId: parseHiddenDirectionIdsByBoardId(
       value.hiddenDirectionIdsByBoardId,
     ),
@@ -384,6 +400,9 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     )
       ? value.trafficInfoDefaultScope
       : defaults.trafficInfoDefaultScope,
+    trafficWarningLookaheadDays: parseTrafficWarningLookaheadDays(
+      value.trafficWarningLookaheadDays,
+    ),
     fullscreenStationPanelDesign: isFullscreenStationPanelDesign(
       value.fullscreenStationPanelDesign,
     )
@@ -544,6 +563,18 @@ export function parseTransferBundleRequestSpacingMs(
   return [0, 250, 500, 1000, 1500, 2000].includes(numericValue)
     ? (numericValue as TransferBundleRequestSpacingMs)
     : 0;
+}
+
+export function parseTrafficWarningLookaheadDays(
+  value: unknown,
+): TrafficWarningLookaheadDays {
+  return parseBoundedNumber(
+    value,
+    TRAFFIC_WARNING_LOOKAHEAD_DAYS_DEFAULT,
+    TRAFFIC_WARNING_LOOKAHEAD_DAYS_MIN,
+    TRAFFIC_WARNING_LOOKAHEAD_DAYS_MAX,
+    0,
+  );
 }
 
 export function parsePatternCompactBranchGap(value: unknown): number {

@@ -23,12 +23,12 @@ const TRANSFER_GROUP_METADATA: Record<
   TransferGroupKey,
   { label: string; iconLabel: string }
 > = {
-  METRO: { label: "Métro", iconLabel: "M" },
+  METRO: { label: "Metro", iconLabel: "M" },
   RER: { label: "RER", iconLabel: "RER" },
   TRANSILIEN: { label: "Train", iconLabel: "TER" },
   TRAM: { label: "Tram", iconLabel: "T" },
   BUS: { label: "Bus", iconLabel: "BUS" },
-  OTHER: { label: "Autres correspondances", iconLabel: "+" },
+  OTHER: { label: "Other transfers", iconLabel: "+" },
 };
 
 export function createTransferGroups(
@@ -59,8 +59,8 @@ export function createTransferGroups(
         label: metadata.label,
         countLabel:
           groupTransfers.length > 1
-            ? `${groupTransfers.length} lignes`
-            : "1 ligne",
+            ? `${groupTransfers.length} lines`
+            : "1 line",
         iconLabel: metadata.iconLabel,
         transfers: groupTransfers,
       },

@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-vue-next";
 import { useAppSettings } from "../app-settings";
+import { useI18n } from "../../i18n";
 import { toServerApiUrl } from "../../services/serverApi";
 import { resolveWeatherLocation } from "./weatherLocations";
 import type {
@@ -38,6 +39,7 @@ const CHART_HEIGHT = 140;
 const CHART_BASELINE_Y = 126;
 
 const { settings } = useAppSettings();
+const { d, t } = useI18n();
 
 const weather = ref<WeatherResponse>();
 const loading = ref(false);
@@ -50,6 +52,7 @@ const location = computed(() =>
   resolveWeatherLocation(
     settings.value.weatherLocationPreset,
     settings.value.weatherCustomLocation,
+    t("settings.options.weatherLocation.custom"),
   ),
 );
 
@@ -81,13 +84,26 @@ const modalTitleTime = computed(() =>
     : `${formatDay(current.value?.time)} ${formatHour(current.value?.time)}`,
 );
 
-const modalTitleLabel = computed(
-  () =>
-    selectedDayForecast.value?.label ??
-    current.value?.label ??
-    weather.value?.condition.label ??
-    "Prévision",
-);
+const modalTitleLabel = computed(() => {
+  const selectedDay = selectedDayForecast.value;
+
+  if (selectedDay) {
+    return formatWeatherCodeLabel(selectedDay.weatherCode, selectedDay.label);
+  }
+
+  if (current.value) {
+    return formatWeatherCodeLabel(
+      current.value.weatherCode,
+      current.value.label,
+    );
+  }
+
+  const condition = weather.value?.condition;
+
+  return condition
+    ? t(`weather.condition.${condition.kind}`)
+    : t("weather.forecastFallback");
+});
 
 const chartValues = computed(() =>
   hourly.value
@@ -205,7 +221,7 @@ async function loadWeather(): Promise<void> {
     error.value =
       fetchError instanceof Error
         ? fetchError.message
-        : "Impossible de charger la météo.";
+        : t("weather.loadFailed");
   } finally {
     loading.value = false;
   }
@@ -308,10 +324,10 @@ function formatHour(value?: string): string {
 
   return Number.isNaN(date.getTime())
     ? "--:--"
-    : new Intl.DateTimeFormat("fr-FR", {
+    : d(date, {
         hour: "2-digit",
         minute: "2-digit",
-      }).format(date);
+      });
 }
 
 function formatDay(value?: string): string {
@@ -323,11 +339,9 @@ function formatDay(value?: string): string {
 
   return Number.isNaN(date.getTime())
     ? "--"
-    : new Intl.DateTimeFormat("fr-FR", {
+    : d(date, {
         weekday: "short",
-      })
-        .format(date)
-        .replace(".", "");
+      }).replace(".", "");
 }
 
 function formatDayTitle(value?: string): string {
@@ -339,11 +353,11 @@ function formatDayTitle(value?: string): string {
 
   return Number.isNaN(date.getTime())
     ? "--"
-    : new Intl.DateTimeFormat("fr-FR", {
+    : d(date, {
         weekday: "long",
         day: "2-digit",
         month: "long",
-      }).format(date);
+      });
 }
 
 function handleChartWheel(event: WheelEvent): void {
@@ -389,6 +403,42 @@ function scrollChartToStart(): void {
 
 function dayIcon(day: WeatherForecastDay) {
   return weatherIcon(day.weatherCode);
+}
+
+function formatWeatherCodeLabel(code?: number, fallback?: string): string {
+  if (typeof code !== "number") {
+    return fallback ?? t("weather.code.unavailable");
+  }
+
+  if (code === 0) {
+    return t("weather.code.clear");
+  }
+
+  if ([1, 2, 3].includes(code)) {
+    return t("weather.code.cloudy");
+  }
+
+  if ([45, 48].includes(code)) {
+    return t("weather.code.fog");
+  }
+
+  if ([51, 53, 55, 56, 57].includes(code)) {
+    return t("weather.code.drizzle");
+  }
+
+  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) {
+    return t("weather.condition.rain");
+  }
+
+  if ([71, 73, 75, 77, 85, 86].includes(code)) {
+    return t("weather.condition.snow");
+  }
+
+  if ([95, 96, 99].includes(code)) {
+    return t("weather.condition.storm");
+  }
+
+  return fallback ?? t("weather.code.variable");
 }
 
 function weatherIcon(code?: number) {
@@ -441,7 +491,7 @@ function weatherIcon(code?: number) {
         <button
           class="weather-modal__close icon-button"
           type="button"
-          aria-label="Fermer la météo"
+          :aria-label="t('weather.closeAria')"
           @click="emit('close')"
         >
           <X aria-hidden="true" />
@@ -457,24 +507,24 @@ function weatherIcon(code?: number) {
 
             <dl class="weather-modal__stats">
               <div>
-                <dt>Précipitations</dt>
+                <dt>{{ t("weather.precipitation") }}</dt>
                 <dd>
                   {{ formatPercent(current?.precipitationProbabilityPercent) }}
                 </dd>
               </div>
               <div>
-                <dt>Humidité</dt>
+                <dt>{{ t("weather.humidity") }}</dt>
                 <dd>{{ formatPercent(current?.humidityPercent) }}</dd>
               </div>
               <div>
-                <dt>Vent</dt>
+                <dt>{{ t("weather.wind") }}</dt>
                 <dd>{{ formatWind(current?.windSpeedKmh) }}</dd>
               </div>
             </dl>
           </div>
 
           <div class="weather-modal__title">
-            <h2 id="weather-modal-title">Météo</h2>
+            <h2 id="weather-modal-title">{{ t("weather.title") }}</h2>
             <p>{{ modalTitleTime }}</p>
             <strong>{{ modalTitleLabel }}</strong>
             <span>{{ location.label }}</span>
@@ -484,7 +534,7 @@ function weatherIcon(code?: number) {
         <div
           class="weather-modal__tabs"
           role="tablist"
-          aria-label="Données météo"
+          :aria-label="t('weather.dataAria')"
         >
           <button
             type="button"
@@ -493,7 +543,7 @@ function weatherIcon(code?: number) {
             }"
             @click="activeMetric = 'temperature'"
           >
-            Température
+            {{ t("weather.temperature") }}
           </button>
           <button
             type="button"
@@ -502,19 +552,19 @@ function weatherIcon(code?: number) {
             }"
             @click="activeMetric = 'precipitation'"
           >
-            Précipitations
+            {{ t("weather.precipitation") }}
           </button>
           <button
             type="button"
             :class="{ 'weather-modal__tab--active': activeMetric === 'wind' }"
             @click="activeMetric = 'wind'"
           >
-            Vent
+            {{ t("weather.wind") }}
           </button>
         </div>
 
         <div v-if="loading" class="weather-modal__state">
-          Chargement de la météo...
+          {{ t("weather.loading") }}
         </div>
 
         <div
@@ -530,7 +580,7 @@ function weatherIcon(code?: number) {
               ref="chartScrollElement"
               class="weather-modal__chart-scroll"
               tabindex="0"
-              aria-label="Prévisions horaires défilables horizontalement"
+              :aria-label="t('weather.hourlyAria')"
               @wheel="handleChartWheel"
             >
               <div
@@ -540,7 +590,7 @@ function weatherIcon(code?: number) {
                 <svg
                   :viewBox="`0 0 ${chartWidth} ${CHART_HEIGHT}`"
                   role="img"
-                  aria-label="Prévisions horaires"
+                  :aria-label="t('weather.hourlyImageAria')"
                 >
                   <path
                     v-if="chartArea"
@@ -595,11 +645,15 @@ function weatherIcon(code?: number) {
         <div class="weather-modal__footer">
           <span>
             <Droplets aria-hidden="true" />
-            {{ weather?.source === "test" ? "Mode test" : "Open-Meteo" }}
+            {{ weather?.source === "test" ? t("weather.testMode") : "Open-Meteo" }}
           </span>
           <span>
             <Wind aria-hidden="true" />
-            Mise à jour {{ formatHour(weather?.generatedAt) }}
+            {{
+              t("weather.updatedAt", {
+                time: formatHour(weather?.generatedAt),
+              })
+            }}
           </span>
         </div>
       </section>

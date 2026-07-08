@@ -11,6 +11,7 @@ import {
   parsePatternCompactForkGap,
   parsePatternRealisticMaxGapCoefficient,
   parsePatternRealisticMinGapCoefficient,
+  parseTrafficWarningLookaheadDays,
   parseTransferBundleRetentionDays,
   parseTransferBundleRequestConcurrency,
   parseTransferBundleRequestSpacingMs,
@@ -21,6 +22,7 @@ import {
 describe("app settings", () => {
   it("keeps current behaviour as the default", () => {
     expect(createDefaultAppSettings()).toMatchObject({
+      language: "auto",
       closedDirectionSummaryMode: "next",
       maxDeparturesPerDirection: "default",
       showPatternMiniMap: true,
@@ -32,7 +34,7 @@ describe("app settings", () => {
       placePresetNavigationMode: "dropdown-swipe",
       navigationAutoHide: "none",
       compactLinePlanMode: "compact",
-      patternRoundedCurves: false,
+      patternRoundedCurves: true,
       patternCompactBranchGap: 258,
       patternCompactForkGap: 158,
       patternRealisticMinGapCoefficient: 0.5,
@@ -41,6 +43,7 @@ describe("app settings", () => {
       ghostNetworkStructuralOnly: false,
       trafficInfoDesign: "ratp",
       trafficInfoDefaultScope: "optimized",
+      trafficWarningLookaheadDays: 10,
       fullscreenStationPanelDesign: "all-directions",
       fullscreenStationPanelDarkTheme: false,
       smartTrafficDetection: true,
@@ -83,6 +86,7 @@ describe("app settings", () => {
       ghostNetworkStructuralOnly: "yes",
       trafficInfoDesign: "dense",
       trafficInfoDefaultScope: "everything",
+      trafficWarningLookaheadDays: "999",
       fullscreenStationPanelDesign: "cinema",
       fullscreenStationPanelDarkTheme: "yes",
       smartTrafficDetection: "sometimes",
@@ -95,6 +99,7 @@ describe("app settings", () => {
       weatherLookaheadMinutes: "9999",
       weatherLocationPreset: "moon",
       weatherTestMode: "hail",
+      language: "de",
       weatherCustomLocation: {
         label: "",
         latitude: "999",
@@ -102,6 +107,7 @@ describe("app settings", () => {
       },
     });
 
+    expect(settings.language).toBe("auto");
     expect(settings.closedDirectionSummaryMode).toBe("next");
     expect(settings.maxDeparturesPerDirection).toBe("default");
     expect(settings.showPatternMiniMap).toBe(true);
@@ -112,7 +118,7 @@ describe("app settings", () => {
     expect(settings.wakeLockDuration).toBe("none");
     expect(settings.navigationAutoHide).toBe("none");
     expect(settings.compactLinePlanMode).toBe("compact");
-    expect(settings.patternRoundedCurves).toBe(false);
+    expect(settings.patternRoundedCurves).toBe(true);
     expect(settings.patternCompactBranchGap).toBe(360);
     expect(settings.patternCompactForkGap).toBe(110);
     expect(settings.patternRealisticMinGapCoefficient).toBe(1.25);
@@ -120,6 +126,7 @@ describe("app settings", () => {
     expect(settings.ghostNetworkStructuralOnly).toBe(false);
     expect(settings.trafficInfoDesign).toBe("ratp");
     expect(settings.trafficInfoDefaultScope).toBe("optimized");
+    expect(settings.trafficWarningLookaheadDays).toBe(30);
     expect(settings.fullscreenStationPanelDesign).toBe("all-directions");
     expect(settings.fullscreenStationPanelDarkTheme).toBe(false);
     expect(settings.smartTrafficDetection).toBe(true);
@@ -143,7 +150,7 @@ describe("app settings", () => {
   it("accepts the realistic line plan mode", () => {
     expect(compactLinePlanOptions).toContainEqual({
       id: "realistic",
-      label: "Vue réaliste",
+      label: "Realistic view",
     });
     expect(
       normalizeAppSettings({ compactLinePlanMode: "realistic" })
@@ -169,6 +176,9 @@ describe("app settings", () => {
     expect(parseTransferBundleRequestConcurrency("999")).toBe(1);
     expect(parseTransferBundleRequestSpacingMs("1000")).toBe(1000);
     expect(parseTransferBundleRequestSpacingMs("999999")).toBe(0);
+    expect(parseTrafficWarningLookaheadDays("0")).toBe(0);
+    expect(parseTrafficWarningLookaheadDays("14")).toBe(14);
+    expect(parseTrafficWarningLookaheadDays("999")).toBe(30);
     expect(parsePatternCompactBranchGap("300")).toBe(300);
     expect(parsePatternCompactBranchGap("9999")).toBe(360);
     expect(parsePatternCompactForkGap("180")).toBe(180);

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useI18n } from "../i18n";
 
 export interface MaterialComboboxOption {
   id: string;
@@ -16,8 +17,8 @@ const props = withDefaults(
     disabled?: boolean;
   }>(),
   {
-    placeholder: "Sélectionner",
-    ariaLabel: "Sélectionner une option",
+    placeholder: "",
+    ariaLabel: "",
   },
 );
 
@@ -29,12 +30,19 @@ const emit = defineEmits<{
 const root = ref<HTMLElement>();
 const open = ref(false);
 const activeIndex = ref(-1);
+const { t } = useI18n();
 
 const selectedOption = computed(() =>
   props.options.find((option) => option.id === props.modelValue),
 );
+const resolvedPlaceholder = computed(
+  () => props.placeholder || t("common.actions.select"),
+);
+const resolvedAriaLabel = computed(
+  () => props.ariaLabel || t("common.actions.selectOption"),
+);
 const displayLabel = computed(
-  () => selectedOption.value?.label ?? props.placeholder,
+  () => selectedOption.value?.label ?? resolvedPlaceholder.value,
 );
 const enabledOptions = computed(() =>
   props.options.filter((option) => !option.disabled),
@@ -165,7 +173,7 @@ function handleKeydown(event: KeyboardEvent): void {
       class="material-combobox__trigger"
       type="button"
       role="combobox"
-      :aria-label="ariaLabel"
+      :aria-label="resolvedAriaLabel"
       :aria-expanded="open"
       :disabled="disabled"
       @click="toggleOpen"

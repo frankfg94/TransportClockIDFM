@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useI18n } from "../../i18n";
 import type {
   NetworkGhostLineView,
   NetworkGhostQuayView,
@@ -45,6 +46,7 @@ const emit = defineEmits<{
   linePointerDown: [line: NetworkGhostLineView, event: PointerEvent];
 }>();
 
+const { t } = useI18n();
 const hoveredLineId = ref("");
 const pinnedLineId = ref("");
 const pointerX = ref(0);
@@ -280,7 +282,9 @@ function getQuayRadius(): number {
         :role="segmentIndex === 0 ? 'button' : undefined"
         :tabindex="segmentIndex === 0 ? 0 : -1"
         :aria-label="
-          segmentIndex === 0 ? `Afficher la ligne ${line.label}` : undefined
+          segmentIndex === 0
+            ? t('lineMap.ghostLineAria', { line: line.label })
+            : undefined
         "
         @pointerdown="emit('linePointerDown', line, $event)"
         @pointerenter="showLine(line, $event)"

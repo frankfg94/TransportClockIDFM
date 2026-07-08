@@ -1,5 +1,6 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useAppSettings, type WeatherTestMode } from "../app-settings";
+import { useI18n } from "../../i18n";
 import { resolveWeatherLocation } from "./weatherLocations";
 import { toServerApiUrl } from "../../services/serverApi";
 import type {
@@ -12,6 +13,7 @@ import type {
 
 export function useWeatherExperience() {
   const { settings } = useAppSettings();
+  const { t } = useI18n();
   const weather = ref<WeatherResponse>();
   const loading = ref(false);
   const error = ref("");
@@ -21,6 +23,7 @@ export function useWeatherExperience() {
     resolveWeatherLocation(
       settings.value.weatherLocationPreset,
       settings.value.weatherCustomLocation,
+      t("settings.options.weatherLocation.custom"),
     ),
   );
   const enabled = computed(() => settings.value.weatherMode !== "disabled");
@@ -92,7 +95,7 @@ export function useWeatherExperience() {
       error.value =
         fetchError instanceof Error
           ? fetchError.message
-          : "Impossible de charger la météo.";
+          : t("weather.loadFailed");
     } finally {
       loading.value = false;
     }
@@ -145,25 +148,25 @@ function createTestCondition(
     >
   > = {
     rain: {
-      label: "Pluie",
+      label: "Rain",
       intensity: 2,
       temperatureC: 8,
       apparentTemperatureC: 5,
     },
     storm: {
-      label: "Orage",
+      label: "Storm",
       intensity: 3,
       temperatureC: 13,
       apparentTemperatureC: 11,
     },
     snow: {
-      label: "Neige",
+      label: "Snow",
       intensity: 2,
       temperatureC: 1,
       apparentTemperatureC: -2,
     },
     heat: {
-      label: "Canicule",
+      label: "Heatwave",
       intensity: 3,
       temperatureC: 36,
       apparentTemperatureC: 39,

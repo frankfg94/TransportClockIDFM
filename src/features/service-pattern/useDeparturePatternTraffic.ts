@@ -8,7 +8,11 @@ import {
 import { toServerApiUrl } from "../../services/serverApi";
 import type { LineSearchOption, TransitBoardConfig } from "../../types/transit";
 import { normalizeTrafficLineRef } from "../traffic/trafficNormalization";
-import { getCurrentTrafficDisruptions } from "../traffic/trafficTiming";
+import {
+  getCurrentAndUpcomingTrafficWarningDisruptions,
+  getCurrentTrafficDisruptions,
+  getUpcomingTrafficWarningStart,
+} from "../traffic/trafficTiming";
 import type { TrafficLineReport, TrafficResponse } from "../traffic/types";
 import {
   analyzeTrafficImpacts,
@@ -29,6 +33,8 @@ interface UseDeparturePatternTrafficOptions {
   line?: ComputedRef<LineSearchOption | undefined>;
   smartTrafficDetection: ComputedRef<boolean>;
   trafficReport: ComputedRef<TrafficLineReport | undefined>;
+  includeUpcomingWarnings?: ComputedRef<boolean>;
+  warningLookaheadDays?: ComputedRef<number>;
 }
 
 export function useDeparturePatternTraffic({
@@ -37,10 +43,14 @@ export function useDeparturePatternTraffic({
   line,
   smartTrafficDetection,
   trafficReport,
+  includeUpcomingWarnings,
+  warningLookaheadDays,
 }: UseDeparturePatternTrafficOptions) {
   const fetchedTrafficReport = ref<TrafficLineReport>();
   const activeTrafficImpact = ref<PatternTrafficImpact>();
+  const trafficTimingNow = ref(Date.now());
   let trafficReportRequest = 0;
+  let trafficTimingTimer: number | undefined;
 
   const patternTrafficLineRef = computed(() => {
     const currentBoard = board?.value;
@@ -66,18 +76,45 @@ export function useDeparturePatternTraffic({
   const resolvedTrafficReport = computed(
     () => trafficReport.value ?? fetchedTrafficReport.value,
   );
-
-  const currentTrafficDisruptions = computed(() =>
-    smartTrafficDetection.value && patternTrafficLineRef.value
-      ? getCurrentTrafficDisruptions(
-          resolvedTrafficReport.value?.disruptions ?? [],
-        )
-      : [],
+  const includeUpcomingTrafficWarnings = computed(
+    () => includeUpcomingWarnings?.value ?? false,
   );
+  const upcomingWarningLookaheadDays = computed(
+    () => warningLookaheadDays?.value ?? 10,
+  );
+
+  const currentTrafficDisruptions = computed(() => {
+    const now = trafficTimingNow.value;
+    const disruptions = resolvedTrafficReport.value?.disruptions ?? [];
+
+    if (!smartTrafficDetection.value || !patternTrafficLineRef.value) {
+      return [];
+    }
+
+    return includeUpcomingTrafficWarnings.value
+      ? getCurrentAndUpcomingTrafficWarningDisruptions(
+          disruptions,
+          now,
+          upcomingWarningLookaheadDays.value,
+        )
+      : getCurrentTrafficDisruptions(disruptions, now);
+  });
 
   const trafficImpactKey = computed(() =>
     [patternTrafficLineRef.value ?? "none"]
-      .concat(currentTrafficDisruptions.value.map((disruption) => disruption.id))
+      .concat(
+        currentTrafficDisruptions.value.map((disruption) => {
+          const warningStart = getUpcomingTrafficWarningStart(
+            disruption,
+            trafficTimingNow.value,
+            upcomingWarningLookaheadDays.value,
+          );
+
+          return warningStart
+            ? `${disruption.id}:${warningStart.toISOString()}`
+            : `${disruption.id}:current`;
+        }),
+      )
       .join("|"),
   );
 
@@ -97,12 +134,24 @@ export function useDeparturePatternTraffic({
     { immediate: true },
   );
 
+  watch(
+    [
+      open,
+      smartTrafficDetection,
+      includeUpcomingTrafficWarnings,
+      upcomingWarningLookaheadDays,
+    ],
+    syncTrafficTimingTimer,
+    { immediate: true },
+  );
+
   watch([open, patternTrafficLineRef, trafficImpactKey], () => {
     activeTrafficImpact.value = undefined;
   });
 
   onBeforeUnmount(() => {
     trafficReportRequest += 1;
+    stopTrafficTimingTimer();
   });
 
   function showTrafficImpactPopup(impact?: PatternTrafficImpact): void {
@@ -153,6 +202,32 @@ export function useDeparturePatternTraffic({
       if (requestId === trafficReportRequest) {
         fetchedTrafficReport.value = undefined;
       }
+    }
+  }
+
+  function syncTrafficTimingTimer(): void {
+    stopTrafficTimingTimer();
+    trafficTimingNow.value = Date.now();
+
+    if (
+      !open.value ||
+      !smartTrafficDetection.value ||
+      !includeUpcomingTrafficWarnings.value ||
+      upcomingWarningLookaheadDays.value <= 0 ||
+      typeof window === "undefined"
+    ) {
+      return;
+    }
+
+    trafficTimingTimer = window.setInterval(() => {
+      trafficTimingNow.value = Date.now();
+    }, 60_000);
+  }
+
+  function stopTrafficTimingTimer(): void {
+    if (trafficTimingTimer !== undefined) {
+      window.clearInterval(trafficTimingTimer);
+      trafficTimingTimer = undefined;
     }
   }
 

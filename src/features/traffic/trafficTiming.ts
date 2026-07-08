@@ -4,6 +4,9 @@ export type TrafficTimingTab = "current" | "upcoming";
 
 type TrafficPeriodTiming = TrafficTimingTab | "expired";
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_UPCOMING_TRAFFIC_WARNING_LOOKAHEAD_DAYS = 10;
+
 interface TrafficPeriodState {
   begin?: number;
   end?: number;
@@ -13,28 +16,30 @@ interface TrafficPeriodState {
 
 export function getCurrentTrafficDisruptions(
   disruptions: TrafficDisruption[],
+  now = Date.now(),
 ): TrafficDisruption[] {
   return disruptions.filter(
-    (disruption) => getTrafficDisruptionTiming(disruption) === "current",
+    (disruption) => getTrafficDisruptionTiming(disruption, now) === "current",
   );
 }
 
 export function getUpcomingTrafficDisruptions(
   disruptions: TrafficDisruption[],
+  now = Date.now(),
 ): TrafficDisruption[] {
   return disruptions.filter(
-    (disruption) => getTrafficDisruptionTiming(disruption) === "upcoming",
+    (disruption) => getTrafficDisruptionTiming(disruption, now) === "upcoming",
   );
 }
 
 export function getTrafficDisruptionTiming(
   disruption: TrafficDisruption,
+  now = Date.now(),
 ): TrafficPeriodTiming {
   if (disruption.applicationPeriods.length === 0) {
     return "current";
   }
 
-  const now = Date.now();
   const timings = disruption.applicationPeriods.map(
     (period) => getTrafficPeriodTiming(period, now),
   );
@@ -50,14 +55,59 @@ export function getTrafficDisruptionTiming(
   return "expired";
 }
 
+export function getCurrentAndUpcomingTrafficWarningDisruptions(
+  disruptions: TrafficDisruption[],
+  now = Date.now(),
+  lookaheadDays = DEFAULT_UPCOMING_TRAFFIC_WARNING_LOOKAHEAD_DAYS,
+): TrafficDisruption[] {
+  return disruptions.filter(
+    (disruption) =>
+      getTrafficDisruptionTiming(disruption, now) === "current" ||
+      Boolean(getUpcomingTrafficWarningStart(disruption, now, lookaheadDays)),
+  );
+}
+
+export function getUpcomingTrafficWarningStart(
+  disruption: TrafficDisruption,
+  now = Date.now(),
+  lookaheadDays = DEFAULT_UPCOMING_TRAFFIC_WARNING_LOOKAHEAD_DAYS,
+): Date | undefined {
+  if (lookaheadDays <= 0) {
+    return undefined;
+  }
+
+  if (getTrafficDisruptionTiming(disruption, now) === "current") {
+    return undefined;
+  }
+
+  const lookaheadMs = lookaheadDays * DAY_MS;
+
+  return disruption.applicationPeriods
+    .map((period) => parseTrafficDate(period.begin))
+    .filter((date): date is Date => {
+      if (!date || Number.isNaN(date.getTime())) {
+        return false;
+      }
+
+      const timeUntilStart = date.getTime() - now;
+
+      return (
+        timeUntilStart > 0 &&
+        timeUntilStart <= lookaheadMs
+      );
+    })
+    .sort((left, right) => left.getTime() - right.getTime())
+    .at(0);
+}
+
 export function getTrafficDisruptionDisplayPeriod(
   disruption: TrafficDisruption,
+  now = Date.now(),
 ): TrafficPeriod | undefined {
   if (disruption.applicationPeriods.length === 0) {
     return undefined;
   }
 
-  const now = Date.now();
   const periodStates = disruption.applicationPeriods.map((period) =>
     createTrafficPeriodState(period, now),
   );

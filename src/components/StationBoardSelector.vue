@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import type { Component } from "vue";
 import { Briefcase, Home, LayoutDashboard, MapPin } from "lucide-vue-next";
+import { useI18n } from "../i18n";
 import type { TransitPlacePreset } from "../storage/transitPreferences";
 
 const props = withDefaults(
@@ -19,6 +20,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   "update:modelValue": [placeId: string];
 }>();
+const { t } = useI18n();
 
 const selectedPlaceId = computed({
   get: () => props.modelValue ?? "",
@@ -60,8 +62,8 @@ function selectPlace(placeId: string): void {
     data-testid="station-board-selector"
     :disabled="disabled"
   >
-    <legend>Dashboard</legend>
-    <p>Choisis l'écran d'accueil dans lequel ajouter cette station.</p>
+    <legend>{{ t("stationBoardSelector.title") }}</legend>
+    <p>{{ t("stationBoardSelector.description") }}</p>
 
     <div class="station-board-selector__list" role="radiogroup">
       <label
@@ -81,7 +83,11 @@ function selectPlace(placeId: string): void {
         <span class="station-board-selector__content">
           <strong>{{ place.label }}</strong>
           <small>
-            {{ place.kind === "builtin" ? "Preset" : "Personnalisé" }}
+            {{
+              place.kind === "builtin"
+                ? t("stationBoardSelector.builtin")
+                : t("stationBoardSelector.custom")
+            }}
           </small>
         </span>
       </label>

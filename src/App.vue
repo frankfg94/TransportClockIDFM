@@ -45,6 +45,7 @@ import {
   TRANSIT_PREFERENCES_CHANGED_EVENT,
   TRANSIT_PREFERENCES_STORAGE_KEY,
   DEFAULT_TRANSIT_PLACE_ID,
+  WORK_TRANSIT_PLACE_ID,
   cloneTransitBoardPreferences,
   createDefaultTransitPresetState,
   createDefaultPreferences,
@@ -97,6 +98,7 @@ import {
   SlidersHorizontal,
 } from "lucide-vue-next";
 import { useRoute, useRouter } from "nuxt/app";
+import { useI18n } from "./i18n";
 
 const DepartureAlarmModal = defineAsyncComponent(
   () => import("./components/DepartureAlarmModal.vue"),
@@ -112,7 +114,7 @@ const WeatherForecastModal = defineAsyncComponent(
 );
 
 type BoardTrafficAlert = {
-  label: TrafficAlertPresentation["label"];
+  label: string;
   tone: TrafficAlertPresentation["tone"];
 };
 
@@ -166,6 +168,7 @@ const presetState = reactive<TransitPresetState>(
 );
 const preferences = reactive(createDefaultPreferences(transitBoards));
 const { settings, updateSettings } = useAppSettings();
+const { d, t } = useI18n();
 let activeAlarmAudio:
   | {
       audioContext: AudioContext;
@@ -239,13 +242,13 @@ const placeOptions = computed(() =>
   presetState.places.map((place) => ({
     id: place.id,
     kind: place.kind,
-    label: place.label,
+    label: getPlaceLabel(place),
   })),
 );
 const activePlace = computed<TransitPlacePreset | undefined>(() =>
   getTransitPlaceById(presetState, activePlaceId.value),
 );
-const activePlaceLabel = computed(() => activePlace.value?.label ?? "Maison");
+const activePlaceLabel = computed(() => getPlaceLabel(activePlace.value));
 const placeDropdownEnabled = computed(
   () => settings.value.placePresetNavigationMode !== "swipe",
 );
@@ -259,6 +262,18 @@ const placeSwipe = usePlaceSwipeNavigation({
   reduceMotion: computed(() => settings.value.reduceMotion),
   selectPlace: selectTransitPlace,
 });
+
+function getPlaceLabel(place?: TransitPlacePreset): string {
+  if (place?.id === WORK_TRANSIT_PLACE_ID) {
+    return t("places.work");
+  }
+
+  if (place?.id === DEFAULT_TRANSIT_PLACE_ID) {
+    return t("places.home");
+  }
+
+  return place?.label ?? t("places.home");
+}
 
 const allBoards = computed<TransitBoardConfig[]>(() => [
   ...transitBoards,
@@ -533,7 +548,7 @@ function createPlaceFromName(label: string): void {
     selectTransitPlace(result.place.id);
   } catch (error) {
     placeNameError.value =
-      error instanceof Error ? error.message : "Impossible d'ajouter ce lieu.";
+      error instanceof Error ? error.message : t("app.errors.addPlace");
   }
 }
 
@@ -618,7 +633,7 @@ const netexCacheAlert = computed(() => {
 
   return (
     netexCacheStatus.value?.message ||
-    "Données NeTEx introuvables. Les plans de ligne et dessertes détaillées peuvent être indisponibles."
+    t("app.netexMissingBody")
   );
 });
 const trafficReportByLineRef = computed(
@@ -641,7 +656,9 @@ const fullscreenPanelUpdatedAtLabel = computed(() => {
     return "";
   }
 
-  return `Mis a jour ${formatClock(states[board.id].updatedAt)}`;
+  return t("weather.updatedAt", {
+    time: formatClock(states[board.id].updatedAt),
+  });
 });
 
 function getBoardAlarmDepartureIds(boardId: string): string[] {
@@ -654,7 +671,7 @@ function ensureBoardState(boardId: string): BoardState {
   const board = allBoards.value.find((item) => item.id === boardId);
 
   if (!board) {
-    throw new Error(`Tableau inconnu: ${boardId}`);
+    throw new Error(t("app.errors.unknownBoard", { boardId }));
   }
 
   states[board.id] ??= {
@@ -713,8 +730,7 @@ async function refreshBoard(boardId: string): Promise<void> {
       ),
     );
   } catch (error) {
-    state.error =
-      error instanceof Error ? error.message : "Erreur de récupération";
+    state.error = error instanceof Error ? error.message : t("app.errors.fetch");
   } finally {
     state.loading = false;
   }
@@ -850,7 +866,7 @@ async function refreshTrafficSummary(): Promise<void> {
     const response = await fetch(toServerApiUrl(`/api/traffic?${params}`));
 
     if (!response.ok) {
-      throw new Error("Impossible de charger l'info trafic.");
+      throw new Error(t("app.errors.traffic"));
     }
 
     const payload = (await response.json()) as TrafficResponse;
@@ -1154,15 +1170,15 @@ function formatDepartureServiceType(
   serviceType?: DepartureServiceType,
 ): string {
   if (serviceType === "direct") {
-    return "Direct";
+    return t("board.serviceType.direct");
   }
 
   if (serviceType === "semi-direct") {
-    return "Semi direct";
+    return t("board.serviceType.semiDirect");
   }
 
   if (serviceType === "omnibus") {
-    return "Toutes stations";
+    return t("board.serviceType.omnibus");
   }
 
   return "";
@@ -1174,18 +1190,18 @@ function formatRemainingStopCount(departure: Departure): string {
   }
 
   return departure.remainingStopCount > 1
-    ? `${departure.remainingStopCount} arrets`
-    : `${departure.remainingStopCount} arret`;
+    ? t("board.remainingStopsOther", { count: departure.remainingStopCount })
+    : t("board.remainingStopsOne", { count: departure.remainingStopCount });
 }
 
 function statusLabel(status?: string): string {
   const labels: Record<string, string> = {
-    noReport: "A l'heure",
-    onTime: "A l'heure",
-    delayed: "Retarde",
-    early: "En avance",
-    missed: "Manque",
-    cancelled: "Supprime",
+    noReport: t("board.status.onTime"),
+    onTime: t("board.status.onTime"),
+    delayed: t("board.status.delayed"),
+    early: t("board.status.early"),
+    missed: t("board.status.missed"),
+    cancelled: t("board.status.cancelled"),
   };
 
   return status ? (labels[status] ?? status) : "";
@@ -1241,7 +1257,7 @@ async function loadNetexCacheStatus(): Promise<void> {
     const response = await fetch(toServerApiUrl("/api/netex/status"));
 
     if (!response.ok) {
-      throw new Error("Impossible de vérifier le cache NeTEx.");
+      throw new Error(t("app.errors.netex"));
     }
 
     netexCacheStatus.value = (await response.json()) as NetexCacheStatus;
@@ -1249,7 +1265,7 @@ async function loadNetexCacheStatus(): Promise<void> {
     netexCacheStatus.value = {
       available: false,
       message:
-        error instanceof Error ? error.message : "Données NeTEx introuvables.",
+        error instanceof Error ? error.message : t("app.netexMissingBody"),
     };
   } finally {
     netexCacheStatusLoaded.value = true;
@@ -1638,7 +1654,15 @@ function getBoardTrafficAlert(
 
   const alert = getTrafficAlertPresentation(currentDisruptions);
 
-  return alert ? { label: alert.label, tone: alert.tone } : undefined;
+  return alert
+    ? {
+        label:
+          alert.tone === "red"
+            ? t("board.traffic.interruption")
+            : t("board.traffic.disruption"),
+        tone: alert.tone,
+      }
+    : undefined;
 }
 
 function resolveBoardTrafficLineRef(board: TransitBoardConfig): string {
@@ -1708,7 +1732,7 @@ async function openPatternModal(payload: {
     patternError.value =
       error instanceof Error
         ? error.message
-        : "Impossible de charger la desserte.";
+        : t("app.errors.pattern");
   } finally {
     patternLoading.value = false;
   }
@@ -1749,7 +1773,7 @@ async function fetchLinePatternView(
   );
 
   if (!response.ok) {
-    throw new Error("Impossible de charger la desserte.");
+    throw new Error(t("app.errors.pattern"));
   }
 
   return response.json() as Promise<LinePatternViewResponse>;
@@ -1874,11 +1898,16 @@ function showNativeNotification(alarm: DepartureAlarm): void {
   }
 
   const body = [
-    `${alarm.lineLabel} vers ${alarm.destination}`,
-    `${alarm.monitoringLabel}${alarm.platform ? ` · Quai ${alarm.platform}` : ""}`,
+    t("app.alarmNotificationLine", {
+      line: alarm.lineLabel,
+      destination: alarm.destination,
+    }),
+    `${alarm.monitoringLabel}${
+      alarm.platform ? ` · ${t("app.platform", { platform: alarm.platform })}` : ""
+    }`,
   ].join("\n");
 
-  new Notification(`Il est temps de partir pour ${alarm.boardTitle}`, {
+  new Notification(t("app.alarmNotificationTitle", { station: alarm.boardTitle }), {
     body,
     tag: alarm.id,
   });
@@ -2022,11 +2051,11 @@ function formatClock(date?: Date): string {
     return "--:--";
   }
 
-  return new Intl.DateTimeFormat("fr-FR", {
+  return d(date, {
     hour: "2-digit",
     minute: "2-digit",
     timeZone: "Europe/Paris",
-  }).format(date);
+  });
 }
 
 function formatAlarmRemaining(alarm: DepartureAlarm, now: number): string {
@@ -2217,10 +2246,10 @@ onBeforeUnmount(() => {
       :class="{ 'app-content--locked': !primApiKeyConfigured }"
       :aria-hidden="!primApiKeyConfigured"
     >
-      <section class="topbar" aria-label="État des prochains passages">
+      <section class="topbar" :aria-label="t('app.title')">
         <div>
           <p class="eyebrow">Île-de-France Mobilités</p>
-          <h1>Prochains passages</h1>
+          <h1>{{ t("app.title") }}</h1>
         </div>
 
         <div class="topbar__meta">
@@ -2229,7 +2258,7 @@ onBeforeUnmount(() => {
               <BellRing />
               <div>
                 <span>{{ nextAlarmRemaining }}</span>
-                <small>avant alarme</small>
+                <small>{{ t("app.alarmRemainingLabel") }}</small>
               </div>
             </div>
           </div>
@@ -2244,7 +2273,7 @@ onBeforeUnmount(() => {
 
           <div>
             <span>{{ formatClock(lastRefresh) }}</span>
-            <small>dernière mise à jour</small>
+            <small>{{ t("app.lastUpdated") }}</small>
           </div>
           <div class="topbar-inline-buttons">
             <button
@@ -2253,14 +2282,14 @@ onBeforeUnmount(() => {
               @click="stationModalOpen = true"
             >
               <Plus />
-              Ajouter
+              {{ t("app.addBoard") }}
             </button>
             <div class="topbar-actions" @keydown.esc="closeTopbarMenu">
               <button
                 ref="topbarMenuTrigger"
                 class="topbar-actions__trigger icon-button"
                 type="button"
-                aria-label="Ouvrir les actions du dashboard"
+                :aria-label="t('navigation.moreAria')"
                 :aria-expanded="topbarMenuOpen"
                 aria-haspopup="menu"
                 @click="toggleTopbarMenu"
@@ -2269,7 +2298,7 @@ onBeforeUnmount(() => {
               </button>
               <ContextMenu
                 v-model:open="topbarMenuOpen"
-                aria-label="Actions du dashboard"
+                :aria-label="t('navigation.secondaryAria')"
                 :anchor="topbarMenuTrigger"
                 class="topbar-actions__menu"
                 close-on-outside-click
@@ -2284,22 +2313,22 @@ onBeforeUnmount(() => {
                     aria-hidden="true"
                     :class="{ 'topbar-actions__spin': refreshing }"
                   />
-                  {{ refreshing ? "Actualisation..." : "Actualiser" }}
+                  {{ refreshing ? t("app.refreshing") : t("app.refresh") }}
                 </button>
                 <button type="button" role="menuitem" @click="openWeatherModal">
                   <CloudSun aria-hidden="true" />
-                  Météo
+                  {{ t("app.weather") }}
                 </button>
                 <div
                   class="topbar-actions__display"
-                  aria-label="Mode d'affichage des stations"
+                  :aria-label="t('settings.display.stationButtons')"
                   role="group"
                 >
                   <button
                     class="topbar-actions__display-button"
                     :aria-pressed="preferences.boardDisplayMode === 'grid'"
-                    aria-label="Affichage en tuiles"
-                    title="Affichage en tuiles"
+                    :aria-label="t('app.tileViewAria')"
+                    :title="t('app.tileViewAria')"
                     type="button"
                     @click="setBoardDisplayMode('grid')"
                   >
@@ -2308,8 +2337,8 @@ onBeforeUnmount(() => {
                   <button
                     class="topbar-actions__display-button"
                     :aria-pressed="preferences.boardDisplayMode === 'list'"
-                    aria-label="Affichage liste compacte"
-                    title="Affichage liste compacte"
+                    :aria-label="t('app.compactListAria')"
+                    :title="t('app.compactListAria')"
                     type="button"
                     @click="setBoardDisplayMode('list')"
                   >
@@ -2322,7 +2351,7 @@ onBeforeUnmount(() => {
                   @click="openBoardDisplayModal"
                 >
                   <SlidersHorizontal aria-hidden="true" />
-                  Gérer l'affichage
+                  {{ t("settings.display.eyebrow") }}
                 </button>
               </ContextMenu>
             </div>
@@ -2366,13 +2395,13 @@ onBeforeUnmount(() => {
           >
             <header class="modal-panel__header">
               <div>
-                <p class="eyebrow">Affichage</p>
-                <h2 id="board-display-title">Stations visibles</h2>
+                <p class="eyebrow">{{ t("app.displayEyebrow") }}</p>
+                <h2 id="board-display-title">{{ t("app.visibleStations") }}</h2>
               </div>
               <button
                 class="icon-button"
                 type="button"
-                aria-label="Fermer la gestion de l'affichage"
+                :aria-label="t('app.closeDisplayAria')"
                 @click="boardDisplayModalOpen = false"
               >
                 ×
@@ -2387,17 +2416,18 @@ onBeforeUnmount(() => {
             </div>
             <footer class="modal-panel__footer">
               <span class="board-display-modal__summary">
-                {{ visibleBoards.length }} station{{
-                  visibleBoards.length > 1 ? "s" : ""
+                {{
+                  visibleBoards.length === 1
+                    ? t("app.displaySummaryOne", { count: visibleBoards.length })
+                    : t("app.displaySummaryOther", { count: visibleBoards.length })
                 }}
-                affichée{{ visibleBoards.length > 1 ? "s" : "" }}
               </span>
               <button
                 class="button-secondary"
                 type="button"
                 @click="boardDisplayModalOpen = false"
               >
-                Fermer
+                {{ t("common.actions.close") }}
               </button>
             </footer>
           </section>
@@ -2421,7 +2451,7 @@ onBeforeUnmount(() => {
           v-if="placeSwipe.canGoPrevious.value"
           class="place-swipe-arrow place-swipe-arrow--previous"
           type="button"
-          :aria-label="`Afficher le lieu précédent avant ${activePlaceLabel}`"
+          :aria-label="t('app.previousPlaceAria', { place: activePlaceLabel })"
           @click="placeSwipe.goToPreviousPlace"
         >
           <ChevronLeft aria-hidden="true" />
@@ -2430,7 +2460,7 @@ onBeforeUnmount(() => {
           v-if="placeSwipe.canGoNext.value"
           class="place-swipe-arrow place-swipe-arrow--next"
           type="button"
-          :aria-label="`Afficher le lieu suivant après ${activePlaceLabel}`"
+          :aria-label="t('app.nextPlaceAria', { place: activePlaceLabel })"
           @click="placeSwipe.goToNextPlace"
         >
           <ChevronRight aria-hidden="true" />
@@ -2447,12 +2477,10 @@ onBeforeUnmount(() => {
               class="netex-cache-alert"
               role="status"
             >
-              <strong>Données NeTEx introuvables</strong>
+              <strong>{{ t("app.netexMissingTitle") }}</strong>
               <span>
                 {{ netexCacheAlert }}
-                Configurez <code>IDFM_NETEX_CACHE_REMOTE</code> avec une URL
-                R2/HTTP ou <code>IDFM_NETEX_CACHE_LOCAL</code> avec un dossier
-                contenant <code>index.json</code>.
+                {{ t("app.netexMissingInstruction") }}
               </span>
             </section>
 
@@ -2471,7 +2499,7 @@ onBeforeUnmount(() => {
                 'boards-grid--list': preferences.boardDisplayMode === 'list',
                 'boards-grid--draggable': desktopDragEnabled,
               }"
-              aria-label="Horaires par arrêt"
+              :aria-label="t('app.schedulesAria')"
               item-key="id"
               :animation="220"
               :disabled="!desktopDragEnabled"
@@ -2611,6 +2639,9 @@ onBeforeUnmount(() => {
         "
         :rich-transfer-tooltips="settings.richTransferTooltips"
         :smart-traffic-detection="settings.smartTrafficDetection"
+        :traffic-warning-lookahead-days="
+          settings.trafficWarningLookaheadDays
+        "
         :traffic-report="
           patternTarget?.board
             ? trafficReportByLineRef.get(
@@ -2649,19 +2680,19 @@ onBeforeUnmount(() => {
             {{ alarmToast.lineLabel }}
           </div>
           <div>
-            <p class="eyebrow">Alarme de passage</p>
+            <p class="eyebrow">{{ t("app.alarmToastEyebrow") }}</p>
             <strong>{{ alarmToast.destination }}</strong>
             <span>
               {{ alarmToast.boardTitle }} · {{ alarmToast.monitoringLabel }}
               <template v-if="alarmToast.platform">
-                · Quai {{ alarmToast.platform }}</template
+                · {{ t("app.platform", { platform: alarmToast.platform }) }}</template
               >
             </span>
           </div>
           <button
             class="icon-button"
             type="button"
-            aria-label="Fermer l'alerte"
+            :aria-label="t('app.closeAlertAria')"
             @click="dismissAlarmToast"
           >
             ×
@@ -2678,11 +2709,10 @@ onBeforeUnmount(() => {
         aria-modal="true"
         aria-labelledby="api-key-title"
       >
-        <p class="eyebrow">Configuration PRIM</p>
-        <h2 id="api-key-title">Clé API IDFM PRIM manquante</h2>
+        <p class="eyebrow">{{ t("app.apiKeyEyebrow") }}</p>
+        <h2 id="api-key-title">{{ t("app.apiKeyTitle") }}</h2>
         <p>
-          Ajoutez une clé d'API PRIM Île-De-France Mobilités gratuite dans le
-          fichier d'environnement pour activer les prochains passages.
+          {{ t("app.apiKeyBody") }}
         </p>
         <ol>
           <li>
@@ -2691,12 +2721,12 @@ onBeforeUnmount(() => {
               target="_blank"
               rel="noreferrer"
             >
-              Créer votre clé API PRIM
+              {{ t("app.createApiKey") }}
             </a>
           </li>
-          <li>Assignez <code>IDFM_API_KEY</code></li>
-          <li>Redémarrez le serveur</li>
-          <li>Enjoy</li>
+          <li>{{ t("app.assignApiKey") }}</li>
+          <li>{{ t("app.restartServer") }}</li>
+          <li>{{ t("app.enjoy") }}</li>
         </ol>
       </section>
     </Transition>

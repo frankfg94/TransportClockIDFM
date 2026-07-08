@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  getCurrentAndUpcomingTrafficWarningDisruptions,
   getCurrentTrafficDisruptions,
   getTrafficDisruptionDisplayPeriod,
   getTrafficDisruptionTiming,
   getUpcomingTrafficDisruptions,
+  getUpcomingTrafficWarningStart,
   parseTrafficDate,
 } from "../src/features/traffic";
 import type { TrafficDisruption } from "../src/features/traffic";
@@ -34,6 +36,81 @@ describe("traffic timing", () => {
     expect(getUpcomingTrafficDisruptions(disruptions).map((item) => item.id)).toEqual([
       "future",
     ]);
+  });
+
+  it("includes current and J-10 upcoming disruptions for pattern warnings", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0));
+
+    const disruptions: TrafficDisruption[] = [
+      createDisruption("beyond-window", "20260712T120000", "20260713T120000"),
+      createDisruption("inside-window", "20260710T120000", "20260711T120000"),
+      createDisruption("current", "20260630T120000", "20260702T120000"),
+    ];
+
+    expect(
+      getCurrentAndUpcomingTrafficWarningDisruptions(disruptions).map(
+        (item) => item.id,
+      ),
+    ).toEqual(["inside-window", "current"]);
+  });
+
+  it("includes an upcoming pattern warning exactly ten days before start", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0));
+
+    const disruption = createDisruption(
+      "exact-window",
+      "20260711T120000",
+      "20260712T120000",
+    );
+
+    expect(
+      getCurrentAndUpcomingTrafficWarningDisruptions([disruption]).map(
+        (item) => item.id,
+      ),
+    ).toEqual(["exact-window"]);
+  });
+
+  it("uses a custom pattern warning lookahead window", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0));
+
+    const disruption = createDisruption(
+      "custom-window",
+      "20260705T120000",
+      "20260706T120000",
+    );
+
+    expect(
+      getCurrentAndUpcomingTrafficWarningDisruptions([disruption], Date.now(), 3),
+    ).toEqual([]);
+    expect(
+      getCurrentAndUpcomingTrafficWarningDisruptions([disruption], Date.now(), 4),
+    ).toEqual([disruption]);
+    expect(
+      getCurrentAndUpcomingTrafficWarningDisruptions([disruption], Date.now(), 0),
+    ).toEqual([]);
+  });
+
+  it("returns the next J-10 warning start", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0));
+
+    const disruption = createDisruption("multi-period-work", [
+      {
+        begin: "20260709T180000",
+        end: "20260710T030000",
+      },
+      {
+        begin: "20260708T180000",
+        end: "20260709T030000",
+      },
+    ]);
+
+    expect(getUpcomingTrafficWarningStart(disruption)?.toISOString()).toBe(
+      new Date(2026, 6, 8, 18, 0, 0).toISOString(),
+    );
   });
 
   it("uses every application period instead of only the first one", () => {

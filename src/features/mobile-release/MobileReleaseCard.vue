@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useI18n } from "../../i18n";
 import { getAndroidRelease, getAppSourceRevision } from "./client";
 import type { AndroidReleaseStatus } from "./types";
 
@@ -7,6 +8,7 @@ const release = ref<AndroidReleaseStatus | null>(null);
 const loading = ref(true);
 const pageRevision = getAppSourceRevision();
 const hasPageRevision = /^[a-f0-9]{40}$/iu.test(pageRevision);
+const { d, n, t } = useI18n();
 
 type ChecklistState = "ready" | "waiting" | "blocked";
 
@@ -17,24 +19,24 @@ interface ChecklistItem {
 }
 
 const statusCopy = computed(() => {
-  if (loading.value) return "Vérification de l’APK disponible…";
+  if (loading.value) return t("mobileRelease.status.checking");
   if (release.value?.available) {
     return release.value.selection === "matching-source"
-      ? "APK signée correspondant à cette version de la page."
-      : "Dernière APK signée disponible au téléchargement.";
+      ? t("mobileRelease.status.matching")
+      : t("mobileRelease.status.latest");
   }
 
   switch (release.value?.reason) {
     case "source-revision-mismatch":
-      return "L’APK correspondante est encore en cours de génération.";
+      return t("mobileRelease.status.sourceMismatch");
     case "invalid-release":
-      return "Une APK existe, mais sa vérification a échoué.";
+      return t("mobileRelease.status.invalidRelease");
     case "not-configured":
-      return "La distribution Android n’est pas encore configurée.";
+      return t("mobileRelease.status.notConfigured");
     case "request-failed":
-      return "Le serveur de distribution Android est actuellement injoignable.";
+      return t("mobileRelease.status.requestFailed");
     default:
-      return "Aucune APK Android valide n’a été détectée pour le moment.";
+      return t("mobileRelease.status.none");
   }
 });
 
@@ -45,34 +47,39 @@ const checklist = computed<ChecklistItem[]>(() => {
 
   return [
     {
-      label: "APK Android publiée",
+      label: t("mobileRelease.checklist.apkPublished"),
       detail: waiting
-        ? "Recherche de la dernière release valide…"
+        ? t("mobileRelease.checklist.searching")
         : releaseState?.available
-          ? `Version ${releaseState.versionName} (${releaseState.versionCode}) détectée.`
+          ? t("mobileRelease.checklist.versionDetected", {
+              versionName: releaseState.versionName,
+              versionCode: releaseState.versionCode,
+            })
           : releaseState?.reason === "not-configured"
-            ? "Le stockage de releases n’est pas encore accessible depuis le serveur."
+            ? t("mobileRelease.checklist.storageMissing")
             : releaseState?.reason === "request-failed"
-              ? "Le service de distribution ne répond pas."
-              : "Aucune release Android valide n’a été trouvée.",
+              ? t("mobileRelease.checklist.serviceDown")
+              : t("mobileRelease.checklist.noRelease"),
       state: apkState,
     },
     {
-      label: "Manifest et intégrité vérifiés",
+      label: t("mobileRelease.checklist.manifest"),
       detail: waiting
-        ? "Validation du manifest en cours…"
+        ? t("mobileRelease.checklist.manifestChecking")
         : releaseState?.available
-          ? "Taille, SHA-256 et signature ont été validés avant publication."
-          : "Cette vérification sera effectuée dès qu’une release sera détectée.",
+          ? t("mobileRelease.checklist.manifestReady")
+          : t("mobileRelease.checklist.manifestWaiting"),
       state: apkState,
     },
     {
-      label: "Correspondance avec la page (optionnel)",
+      label: t("mobileRelease.checklist.pageMatch"),
       detail: !hasPageRevision
-        ? "Non activée : la dernière APK valide reste téléchargeable."
+        ? t("mobileRelease.checklist.pageMatchDisabled")
         : releaseState?.available && releaseState.selection === "matching-source"
-          ? `Le commit ${pageRevision.slice(0, 12)} correspond également à l’APK.`
-          : "La dernière APK valide est proposée sans bloquer sur le commit de la page.",
+          ? t("mobileRelease.checklist.pageMatchReady", {
+              commit: pageRevision.slice(0, 12),
+            })
+          : t("mobileRelease.checklist.pageMatchWaiting"),
       state: releaseState?.available && releaseState.selection === "matching-source" ? "ready" : "waiting",
     },
   ];
@@ -80,15 +87,20 @@ const checklist = computed<ChecklistItem[]>(() => {
 
 const formattedDate = computed(() => {
   if (!release.value?.available) return "—";
-  return new Intl.DateTimeFormat("fr-FR", {
+  return d(new Date(release.value.builtAt), {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(new Date(release.value.builtAt));
+  });
 });
 
 const formattedSize = computed(() => {
   if (!release.value?.available) return "—";
-  return `${(release.value.sizeBytes / 1024 / 1024).toFixed(1)} Mo`;
+  return t("mobileRelease.sizeMegabytes", {
+    size: n(release.value.sizeBytes / 1024 / 1024, {
+      maximumFractionDigits: 1,
+      minimumFractionDigits: 1,
+    }),
+  });
 });
 
 onMounted(async () => {
@@ -101,21 +113,28 @@ onMounted(async () => {
   <section class="settings-panel mobile-release-card" aria-labelledby="settings-android-title">
     <div class="settings-panel__heading">
       <div>
-        <p class="settings-panel__eyebrow">Application mobile</p>
-        <h2 id="settings-android-title">Application Android</h2>
-        <p>Téléchargez l’APK signée correspondant exactement à cette version.</p>
+        <p class="settings-panel__eyebrow">{{ t("mobileRelease.eyebrow") }}</p>
+        <h2 id="settings-android-title">{{ t("mobileRelease.title") }}</h2>
+        <p>{{ t("mobileRelease.body") }}</p>
       </div>
       <span
         class="mobile-release-card__status"
         :class="{ 'mobile-release-card__status--ready': release?.available }"
       >
-        {{ release?.available ? "Disponible" : "En attente" }}
+        {{
+          release?.available
+            ? t("mobileRelease.available")
+            : t("mobileRelease.waiting")
+        }}
       </span>
     </div>
 
     <div class="mobile-release-card__details" :aria-busy="loading">
       <p class="mobile-release-card__message">{{ statusCopy }}</p>
-      <ul class="mobile-release-card__checklist" aria-label="Conditions de disponibilité de l’APK">
+      <ul
+        class="mobile-release-card__checklist"
+        :aria-label="t('mobileRelease.checklist.aria')"
+      >
         <li
           v-for="item in checklist"
           :key="item.label"
@@ -131,10 +150,10 @@ onMounted(async () => {
         </li>
       </ul>
       <dl v-if="release?.available" class="mobile-release-card__metadata">
-        <div><dt>Version</dt><dd>{{ release.versionName }} ({{ release.versionCode }})</dd></div>
-        <div><dt>Générée le</dt><dd>{{ formattedDate }}</dd></div>
-        <div><dt>Taille</dt><dd>{{ formattedSize }}</dd></div>
-        <div><dt>Compatibilité</dt><dd>Android {{ release.minSdk === 24 ? "7+" : `${release.minSdk}+` }}</dd></div>
+        <div><dt>{{ t("mobileRelease.version") }}</dt><dd>{{ release.versionName }} ({{ release.versionCode }})</dd></div>
+        <div><dt>{{ t("mobileRelease.builtAt") }}</dt><dd>{{ formattedDate }}</dd></div>
+        <div><dt>{{ t("mobileRelease.size") }}</dt><dd>{{ formattedSize }}</dd></div>
+        <div><dt>{{ t("mobileRelease.compatibility") }}</dt><dd>{{ t("mobileRelease.androidCompatibility", { version: release.minSdk === 24 ? "7+" : `${release.minSdk}+` }) }}</dd></div>
         <div class="mobile-release-card__fingerprint"><dt>SHA-256</dt><dd>{{ release.sha256 }}</dd></div>
       </dl>
     </div>
@@ -145,10 +164,10 @@ onMounted(async () => {
       :href="release.downloadUrl"
       download
     >
-      Télécharger l’APK
+      {{ t("mobileRelease.download") }}
     </a>
     <button v-else class="button-primary mobile-release-card__download" type="button" disabled>
-      APK indisponible
+      {{ t("mobileRelease.unavailable") }}
     </button>
   </section>
 </template>

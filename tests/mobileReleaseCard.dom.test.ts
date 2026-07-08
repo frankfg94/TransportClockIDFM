@@ -33,7 +33,7 @@ describe("MobileReleaseCard", () => {
     expect(wrapper.text()).toContain("Disponible");
     expect(wrapper.text()).toContain("0.1.0+42 (42)");
     expect(wrapper.text()).toContain("Android 7+");
-    expect(wrapper.text()).toContain("APK Android publiée");
+    expect(wrapper.text()).toContain("APK Android publiee");
     expect(wrapper.text()).toContain("Correspondance avec la page (optionnel)");
     expect(wrapper.find("a").attributes("href")).toContain("example.test");
   });
@@ -49,8 +49,8 @@ describe("MobileReleaseCard", () => {
     const wrapper = mount(MobileReleaseCard);
     await flushPromises();
 
-    expect(wrapper.text()).toContain("Aucune APK Android valide n’a été détectée");
-    expect(wrapper.text()).toContain("Aucune release Android valide n’a été trouvée");
+    expect(wrapper.text()).toContain("Aucune APK Android valide n'a ete detectee");
+    expect(wrapper.text()).toContain("Aucune release Android valide n'a ete trouvee");
     expect(wrapper.find("button").attributes("disabled")).toBeDefined();
   });
 });

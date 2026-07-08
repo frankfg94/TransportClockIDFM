@@ -12,7 +12,7 @@ export const weatherLocationOptions = [
   { id: "la-defense", label: "La Défense" },
   { id: "saint-denis", label: "Saint-Denis" },
   { id: "versailles", label: "Versailles" },
-  { id: "custom", label: "Personnalisé" },
+  { id: "custom", label: "Custom" },
 ] as const;
 
 export const weatherLocationPresets: Record<
@@ -44,6 +44,7 @@ export const weatherLocationPresets: Record<
 export function resolveWeatherLocation(
   preset: WeatherLocationPreset,
   customLocation?: Partial<WeatherSettingsLocation>,
+  customFallbackLabel = "Custom location",
 ): WeatherSettingsLocation {
   if (preset !== "custom") {
     return weatherLocationPresets[preset];
@@ -54,7 +55,7 @@ export function resolveWeatherLocation(
   const label =
     typeof customLocation?.label === "string" && customLocation.label.trim()
       ? customLocation.label.trim()
-      : "Lieu personnalisé";
+      : customFallbackLabel;
 
   return {
     label,

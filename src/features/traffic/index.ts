@@ -6,16 +6,16 @@ export {
   normalizeTrafficLineRef,
 } from "./trafficNormalization";
 export {
+  getCurrentAndUpcomingTrafficWarningDisruptions,
   getCurrentTrafficDisruptions,
   getTrafficDisruptionDisplayPeriod,
   getTrafficDisruptionTiming,
   getUpcomingTrafficDisruptions,
+  getUpcomingTrafficWarningStart,
   parseTrafficDate,
   type TrafficTimingTab,
 } from "./trafficTiming";
 export {
-  formatTrafficDate,
-  formatTrafficDisruptionPeriod,
   getDisruptionIcon,
   getDisruptionTone,
   getTrafficAlertPresentation,

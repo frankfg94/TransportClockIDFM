@@ -2,6 +2,7 @@
 import { computed, ref, useId } from "vue";
 import { EllipsisVertical } from "lucide-vue-next";
 import ContextMenu from "./ContextMenu.vue";
+import { useI18n } from "../i18n";
 
 const props = withDefaults(
   defineProps<{
@@ -9,15 +10,19 @@ const props = withDefaults(
     menuId?: string;
   }>(),
   {
-    ariaLabel: "Options",
+    ariaLabel: "",
   },
 );
 
 const trigger = ref<HTMLElement>();
 const isOpen = ref(false);
 const generatedId = useId();
+const { t } = useI18n();
 const resolvedMenuId = computed(
   () => props.menuId ?? `mobile-actions-menu-${generatedId}`,
+);
+const resolvedAriaLabel = computed(
+  () => props.ariaLabel || t("common.actions.selectOption"),
 );
 
 function close(): void {
@@ -43,7 +48,7 @@ function toggle(): void {
       type="button"
       :aria-expanded="isOpen"
       :aria-controls="resolvedMenuId"
-      :aria-label="ariaLabel"
+      :aria-label="resolvedAriaLabel"
       @click.stop="toggle"
     >
       <EllipsisVertical aria-hidden="true" />

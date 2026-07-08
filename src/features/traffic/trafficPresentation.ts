@@ -1,7 +1,3 @@
-import {
-  getTrafficDisruptionDisplayPeriod,
-  parseTrafficDate,
-} from "./trafficTiming";
 import type { TrafficDisruption } from "./types";
 
 export type TrafficTone = "orange" | "red";
@@ -73,40 +69,6 @@ export function getTrafficAlertPresentation(
   return tone === "red"
     ? { label: "Interruption", symbol: "x", tone }
     : { label: "Perturbation", symbol: "!", tone };
-}
-
-export function formatTrafficDisruptionPeriod(
-  disruption: TrafficDisruption,
-): string {
-  const period = getTrafficDisruptionDisplayPeriod(disruption);
-
-  if (!period) {
-    return "";
-  }
-
-  const begin = formatTrafficDate(period.begin);
-  const end = formatTrafficDate(period.end);
-
-  if (begin && end) {
-    return `${begin} -> ${end}`;
-  }
-
-  return begin ? `A partir du ${begin}` : `Jusqu'au ${end}`;
-}
-
-export function formatTrafficDate(value?: string): string {
-  if (!value) {
-    return "";
-  }
-
-  const date = parseTrafficDate(value);
-
-  return !date || Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat("fr-FR", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(date);
 }
 
 export function normalizeTrafficText(value: string): string {

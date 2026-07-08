@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-vue-next";
 import ContextMenu from "./ContextMenu.vue";
+import { useI18n } from "../i18n";
 import type { FullscreenStationPanelDesign } from "../features/app-settings";
 
 type TrafficAlertTone = "orange" | "red";
@@ -88,6 +89,7 @@ const emit = defineEmits<{
   refresh: [];
   "toggle-fullscreen": [];
 }>();
+const { t } = useI18n();
 
 const controlsVisible = ref(true);
 const menuOpen = ref(false);
@@ -238,7 +240,7 @@ function getWaitLabel(
   }
 
   if (direction?.serviceEnded) {
-    return "Termine";
+    return t("board.finished");
   }
 
   return departure?.waitLabel || "--";
@@ -260,7 +262,9 @@ function getWaitLabelLines(
 ): string[] {
   const label = getWaitLabel(direction, departure);
 
-  return isDockedWaitLabel(label) ? ["À", "quai"] : [label];
+  return isDockedWaitLabel(label)
+    ? t("board.docked").split(" ")
+    : [label];
 }
 
 function isStackedWaitLabel(
@@ -432,7 +436,7 @@ onBeforeUnmount(() => {
           ref="menuTrigger"
           class="fullscreen-station-panel__icon-button"
           type="button"
-          aria-label="Options du panneau"
+          :aria-label="t('app.panelOptionsAria')"
           :aria-expanded="menuOpen"
           @click="toggleMenu"
         >
@@ -454,7 +458,7 @@ onBeforeUnmount(() => {
               @change="toggleDarkTheme"
             />
             <span aria-hidden="true"></span>
-            <strong>Theme sombre</strong>
+            <strong>{{ t("settings.display.panelDarkTheme") }}</strong>
           </label>
 
           <button
@@ -470,13 +474,13 @@ onBeforeUnmount(() => {
             <Maximize2 v-else :size="17" aria-hidden="true" />
             {{
               browserFullscreenActive
-                ? "Sortir du plein ecran"
-                : "Plein ecran"
+                ? t("app.exitFullscreen")
+                : t("app.enterFullscreen")
             }}
           </button>
 
           <div class="fullscreen-station-panel__menu-heading">
-            Changer le design
+            {{ t("app.changeDesign") }}
           </div>
 
           <button
@@ -490,7 +494,7 @@ onBeforeUnmount(() => {
               aria-hidden="true"
             />
             <span v-else aria-hidden="true"></span>
-            Toutes directions
+            {{ t("settings.options.fullscreenPanel.allDirections") }}
           </button>
 
           <button
@@ -506,7 +510,7 @@ onBeforeUnmount(() => {
               aria-hidden="true"
             />
             <span v-else aria-hidden="true"></span>
-            Double arret - {{ direction.label }}
+            {{ t("app.doubleStopWithDirection", { direction: direction.label }) }}
           </button>
 
           <button type="button" role="menuitem" @click="selectHomeCardDesign">
@@ -516,7 +520,7 @@ onBeforeUnmount(() => {
               aria-hidden="true"
             />
             <span v-else aria-hidden="true"></span>
-            Carte station
+            {{ t("settings.options.fullscreenPanel.homeCard") }}
           </button>
         </ContextMenu>
       </div>
@@ -524,7 +528,7 @@ onBeforeUnmount(() => {
       <button
         class="fullscreen-station-panel__icon-button"
         type="button"
-        aria-label="Fermer le panneau"
+        :aria-label="t('app.closePanelAria')"
         @click="emit('close')"
       >
         <X aria-hidden="true" />
@@ -567,7 +571,7 @@ onBeforeUnmount(() => {
         v-else-if="loading && !hasDirections"
         class="fullscreen-station-panel__notice"
       >
-        Chargement
+        {{ t("common.states.loading") }}
       </div>
       <div v-else class="fullscreen-station-panel__all-grid">
         <section

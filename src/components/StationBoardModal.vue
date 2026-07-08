@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import { DetailedLineMapPicker } from "../features/line-map";
 import { useAppSettings } from "../features/app-settings/appSettings";
+import { useI18n } from "../i18n";
 import FamilyCombobox from "./FamilyCombobox.vue";
 import LineCombobox from "./LineCombobox.vue";
 import StationBoardSelector from "./StationBoardSelector.vue";
@@ -38,6 +39,7 @@ const props = withDefaults(
     mode?: StationBoardModalMode;
     initialLine?: LineSearchOption;
     initialFamily?: TransitFamily;
+    initialStation?: StationSearchOption;
     lineOnly?: boolean;
     showDashboardSelector?: boolean;
     dashboardOptions?: TransitPlacePreset[];
@@ -58,6 +60,7 @@ const emit = defineEmits<{
 }>();
 
 const { settings } = useAppSettings();
+const { t } = useI18n();
 const draft = reactive<StationBoardDraft>({});
 const selectedNetwork = ref<TransitFamilyOption>();
 const familyOptions = ref<TransitFamilyOption[]>([]);
@@ -107,10 +110,14 @@ const modalWide = computed(
     Boolean(draft.line),
 );
 const modalEyebrow = computed(() =>
-  props.lineOnly ? "Navigation" : "Configuration",
+  props.lineOnly
+    ? t("board.stationModal.navigationEyebrow")
+    : t("board.stationModal.configurationEyebrow"),
 );
 const modalTitle = computed(() =>
-  props.lineOnly ? "Changer de ligne" : "Nouvelle station",
+  props.lineOnly
+    ? t("board.stationModal.changeLineTitle")
+    : t("board.stationModal.newStationTitle"),
 );
 const filteredStationOptions = computed(() =>
   stationOptions.value.filter((station) =>
@@ -152,6 +159,7 @@ watch(
   () => [
     props.initialLine?.id,
     props.initialFamily,
+    props.initialStation?.id,
     props.showDashboardSelector,
   ],
   () => {
@@ -214,9 +222,14 @@ function initializeDraft(): void {
     };
     draft.family = props.initialFamily;
     draft.line = props.initialLine;
+    draft.station = props.initialStation;
     lineQuery.value = props.initialLine.displayName ?? props.initialLine.label;
+    stationQuery.value = props.initialStation?.label ?? "";
     currentStep.value = 3;
     void loadStations();
+    if (props.initialStation) {
+      void loadStationTransferBadges(props.initialStation);
+    }
     return;
   }
 
@@ -270,7 +283,10 @@ async function loadFamilies(): Promise<void> {
   } catch (error) {
     if (requestId === latestFamilyRequest) {
       familyOptions.value = [];
-      errorMessage.value = formatLoadError(error, "réseaux");
+      errorMessage.value = formatLoadError(
+        error,
+        t("board.stationModal.resources.networks"),
+      );
     }
   } finally {
     if (requestId === latestFamilyRequest) {
@@ -372,7 +388,10 @@ async function loadLines(): Promise<void> {
   } catch (error) {
     if (requestId === latestLineRequest) {
       lineOptions.value = [];
-      errorMessage.value = formatLoadError(error, "lignes");
+      errorMessage.value = formatLoadError(
+        error,
+        t("board.stationModal.resources.lines"),
+      );
     }
   } finally {
     if (requestId === latestLineRequest) {
@@ -400,7 +419,10 @@ async function loadStations(): Promise<void> {
   } catch (error) {
     if (requestId === latestStationRequest) {
       stationOptions.value = [];
-      errorMessage.value = formatLoadError(error, "stations");
+      errorMessage.value = formatLoadError(
+        error,
+        t("board.stationModal.resources.stations"),
+      );
     }
   } finally {
     if (requestId === latestStationRequest) {
@@ -469,7 +491,7 @@ async function addStation(): Promise<void> {
     resetDraft();
     emit("close");
   } catch {
-    errorMessage.value = "Impossible d'ajouter cette station.";
+    errorMessage.value = t("board.stationModal.addFailed");
   } finally {
     adding.value = false;
   }
@@ -630,10 +652,10 @@ function formatLoadError(error: unknown, resource: string): string {
     error instanceof Error && error.message.toLowerCase().includes("429");
 
   if (isRateLimit) {
-    return `L'API IDFM limite les appels pour le moment. Réessaie le chargement des ${resource}.`;
+    return t("board.stationModal.loadRateLimited", { resource });
   }
 
-  return `Impossible de charger les ${resource} depuis l'API IDFM.`;
+  return t("board.stationModal.loadFailedResource", { resource });
 }
 
 function normalizeText(value: string): string {
@@ -675,7 +697,7 @@ function normalizeText(value: string): string {
             <button
               class="icon-button"
               type="button"
-              aria-label="Fermer"
+              :aria-label="t('common.actions.close')"
               @click="emit('close')"
             >
               ×
@@ -688,14 +710,14 @@ function normalizeText(value: string): string {
           >
             <template v-if="!isMultiStep && hasInitialLine">
               <div class="station-board-modal__line-summary">
-                <span>Ligne sélectionnée</span>
+                <span>{{ t("board.stationModal.selectedLine") }}</span>
                 <strong>{{ draft.line?.label }}</strong>
                 <small>{{ draft.family }}</small>
               </div>
 
               <div class="station-picker">
                 <div class="station-picker__header">
-                  <span>Station</span>
+                  <span>{{ t("common.labels.station") }}</span>
                   <button
                     v-if="draft.line"
                     class="button-secondary station-picker__mode"
@@ -704,8 +726,8 @@ function normalizeText(value: string): string {
                   >
                     {{
                       stationSelectionMode === "list"
-                        ? "Plan détaillé"
-                        : "Liste simple"
+                        ? t("board.stationModal.detailedMap")
+                        : t("board.stationModal.simpleList")
                     }}
                   </button>
                 </div>
@@ -729,7 +751,7 @@ function normalizeText(value: string): string {
                   />
                   <span v-if="loadingStations" class="field-loader">
                     <span aria-hidden="true" class="loader-dot"></span>
-                    Chargement des stations
+                    {{ t("board.stationModal.loading") }}
                   </span>
                 </div>
 
@@ -752,7 +774,7 @@ function normalizeText(value: string): string {
 
             <template v-else-if="!isMultiStep">
               <label>
-                <span>Réseau</span>
+                <span>{{ t("common.labels.network") }}</span>
                 <FamilyCombobox
                   :model-value="selectedNetwork"
                   :options="familyOptions"
@@ -761,12 +783,12 @@ function normalizeText(value: string): string {
                 />
                 <span v-if="loadingFamilies" class="field-loader">
                   <span aria-hidden="true" class="loader-dot"></span>
-                  Chargement des réseaux
+                  {{ t("board.stationModal.loadingNetworks") }}
                 </span>
               </label>
 
               <label>
-                <span>Ligne</span>
+                <span>{{ t("common.labels.line") }}</span>
                 <LineCombobox
                   :model-value="draft.line"
                   :options="lineOptions"
@@ -774,19 +796,19 @@ function normalizeText(value: string): string {
                   :disabled="!selectedNetwork"
                   :loading="loadingLines"
                   :compact="true"
-                  placeholder="Sélectionner une ligne"
+                  :placeholder="t('board.stationModal.selectLinePlaceholder')"
                   @update:model-value="selectLineOption"
                   @update:query="lineQuery = $event"
                 />
                 <span v-if="loadingLines" class="field-loader">
                   <span aria-hidden="true" class="loader-dot"></span>
-                  Chargement des lignes
+                  {{ t("board.stationModal.loadingLines") }}
                 </span>
               </label>
 
               <div class="station-picker">
                 <div class="station-picker__header">
-                  <span>Station</span>
+                  <span>{{ t("common.labels.station") }}</span>
                   <button
                     v-if="draft.line"
                     class="button-secondary station-picker__mode"
@@ -795,8 +817,8 @@ function normalizeText(value: string): string {
                   >
                     {{
                       stationSelectionMode === "list"
-                        ? "Plan détaillé"
-                        : "Liste simple"
+                        ? t("board.stationModal.detailedMap")
+                        : t("board.stationModal.simpleList")
                     }}
                   </button>
                 </div>
@@ -820,7 +842,7 @@ function normalizeText(value: string): string {
                   />
                   <span v-if="loadingStations" class="field-loader">
                     <span aria-hidden="true" class="loader-dot"></span>
-                    Chargement des stations
+                    {{ t("board.stationModal.loading") }}
                   </span>
                 </div>
 
@@ -836,7 +858,7 @@ function normalizeText(value: string): string {
 
             <Transition v-else :name="stepTransitionName" mode="out-in">
               <label v-if="currentStep === 1" key="network">
-                <span>Réseau</span>
+                <span>{{ t("common.labels.network") }}</span>
                 <FamilyCombobox
                   :model-value="selectedNetwork"
                   :options="familyOptions"
@@ -846,12 +868,12 @@ function normalizeText(value: string): string {
                 />
                 <span v-if="loadingFamilies" class="field-loader">
                   <span aria-hidden="true" class="loader-dot"></span>
-                  Chargement des réseaux
+                  {{ t("board.stationModal.loadingNetworks") }}
                 </span>
               </label>
 
               <label v-else-if="currentStep === 2" key="line">
-                <span>Ligne</span>
+                <span>{{ t("common.labels.line") }}</span>
                 <LineCombobox
                   :model-value="draft.line"
                   :options="lineOptions"
@@ -859,13 +881,13 @@ function normalizeText(value: string): string {
                   :disabled="!selectedNetwork"
                   :loading="loadingLines"
                   :inline="true"
-                  placeholder="Sélectionner une ligne"
+                  :placeholder="t('board.stationModal.selectLinePlaceholder')"
                   @update:model-value="selectLineOption"
                   @update:query="lineQuery = $event"
                 />
                 <span v-if="loadingLines" class="field-loader">
                   <span aria-hidden="true" class="loader-dot"></span>
-                  Chargement des lignes
+                  {{ t("board.stationModal.loadingLines") }}
                 </span>
               </label>
 
@@ -874,14 +896,14 @@ function normalizeText(value: string): string {
                   v-if="hasInitialLine"
                   class="station-board-modal__line-summary"
                 >
-                  <span>Ligne sélectionnée</span>
+                  <span>{{ t("board.stationModal.selectedLine") }}</span>
                   <strong>{{ draft.line?.label }}</strong>
                   <small>{{ draft.family }}</small>
                 </div>
 
                 <div class="station-picker">
                   <div class="station-picker__header">
-                    <span>Station</span>
+                    <span>{{ t("common.labels.station") }}</span>
                     <button
                       v-if="draft.line"
                       class="button-secondary station-picker__mode"
@@ -890,8 +912,8 @@ function normalizeText(value: string): string {
                     >
                       {{
                         stationSelectionMode === "list"
-                          ? "Plan détaillé"
-                          : "Liste simple"
+                          ? t("board.stationModal.detailedMap")
+                          : t("board.stationModal.simpleList")
                       }}
                     </button>
                   </div>
@@ -915,7 +937,7 @@ function normalizeText(value: string): string {
                     />
                     <span v-if="loadingStations" class="field-loader">
                       <span aria-hidden="true" class="loader-dot"></span>
-                      Chargement des stations
+                      {{ t("board.stationModal.loading") }}
                     </span>
                   </div>
 
@@ -944,7 +966,7 @@ function normalizeText(value: string): string {
                 type="button"
                 @click="retryCurrentStep"
               >
-                Réessayer
+                {{ t("common.actions.retry") }}
               </button>
             </div>
           </div>
@@ -955,7 +977,7 @@ function normalizeText(value: string): string {
               type="button"
               @click="emit('close')"
             >
-              Fermer
+              {{ t("common.actions.close") }}
             </button>
             <button
               type="button"
@@ -963,7 +985,7 @@ function normalizeText(value: string): string {
               @click="addStation"
             >
               <span class="button-plus" aria-hidden="true">+</span>
-              {{ adding ? "Ajout..." : "Ajouter" }}
+              {{ adding ? t("board.stationModal.adding") : t("common.actions.add") }}
             </button>
           </footer>
 
@@ -974,12 +996,16 @@ function normalizeText(value: string): string {
               :disabled="currentStep === firstStep"
               @click="goToPreviousStep"
             >
-              Précédent
+              {{ t("common.actions.previous") }}
             </button>
 
             <div
               class="station-multistep__steps"
-              :aria-label="`Progression : ${visibleSteps.length} étapes`"
+              :aria-label="
+                t('board.stationModal.progressAria', {
+                  count: visibleSteps.length,
+                })
+              "
             >
               <span
                 v-for="step in visibleSteps"
@@ -998,7 +1024,7 @@ function normalizeText(value: string): string {
               :disabled="!canAdvanceStep()"
               @click="goToNextStep"
             >
-              Suivant
+              {{ t("common.actions.next") }}
             </button>
             <button
               v-else
@@ -1009,7 +1035,13 @@ function normalizeText(value: string): string {
               <span v-if="!lineOnly" class="button-plus" aria-hidden="true">
                 +
               </span>
-              {{ lineOnly ? "Changer" : adding ? "Ajout..." : "Ajouter" }}
+              {{
+                lineOnly
+                  ? t("common.actions.change")
+                  : adding
+                    ? t("board.stationModal.adding")
+                    : t("common.actions.add")
+              }}
             </button>
           </footer>
         </section>

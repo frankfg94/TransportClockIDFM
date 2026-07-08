@@ -4,6 +4,7 @@ import type {
   GhostNetworkModeVisibility,
   GhostNetworkScope,
 } from "../network-ghost";
+import { useI18n } from "../../i18n";
 
 const props = defineProps<{
   modelValue: boolean;
@@ -15,14 +16,7 @@ const emit = defineEmits<{
   "update:modelValue": [value: boolean];
   "update:visibility": [value: GhostNetworkModeVisibility];
 }>();
-
-const modeLabels: Record<GhostNetworkModeKey, string> = {
-  bus: "Bus",
-  metro: "Métro",
-  tram: "Tramway",
-  noctilien: "Noctilien",
-  rer: "RER",
-};
+const { t } = useI18n();
 
 const modes: GhostNetworkModeKey[] = [
   "bus",
@@ -49,13 +43,21 @@ function isModeDisabled(mode: GhostNetworkModeKey): boolean {
     (mode === "bus" || mode === "noctilien")
   );
 }
+
+function getModeLabel(mode: GhostNetworkModeKey): string {
+  if (mode === "metro") return t("traffic.family.metro");
+  if (mode === "tram") return t("traffic.family.tram");
+  if (mode === "rer") return t("traffic.family.rer");
+
+  return mode === "bus" ? "Bus" : "Noctilien";
+}
 </script>
 
 <template>
   <div class="line-map-display-panel__content">
     <label class="line-map-display-panel__main-toggle">
       <input :checked="modelValue" type="checkbox" @change="updateMainVisibility" />
-      <span>Correspondances</span>
+      <span>{{ t("transfers.title") }}</span>
     </label>
 
     <div class="line-map-display-panel__modes">
@@ -66,7 +68,7 @@ function isModeDisabled(mode: GhostNetworkModeKey): boolean {
           type="checkbox"
           @change="updateModeVisibility(mode, $event)"
         />
-        <span>{{ modeLabels[mode] }}</span>
+        <span>{{ getModeLabel(mode) }}</span>
       </label>
     </div>
   </div>

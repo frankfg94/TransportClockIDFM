@@ -22,7 +22,7 @@ export default defineEventHandler(async (event): Promise<TrafficResponse> => {
       generatedAt: new Date().toISOString(),
       lines: lineRefs.map((lineRef) => ({
         disruptions: [],
-        error: "IDFM_API_KEY ou NUXT_IDFM_API_KEY absent côté serveur.",
+        error: "IDFM_API_KEY or NUXT_IDFM_API_KEY is missing on the server.",
         lineRef,
         status: "error",
       })),

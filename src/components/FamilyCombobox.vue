@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from "vue";
+import { useI18n } from "../i18n";
 import { createTransportModeIcon } from "../services/linePresentation";
 import type { TransitFamilyOption } from "../types/transit";
 
@@ -16,10 +17,11 @@ const emit = defineEmits<{
 }>();
 
 const open = ref(false);
+const { t } = useI18n();
 let blurTimer: number | undefined;
 
 const buttonLabel = computed(() =>
-  props.modelValue ? props.modelValue.label : "Sélectionner",
+  props.modelValue ? props.modelValue.label : t("common.actions.select"),
 );
 
 onBeforeUnmount(() => {
@@ -79,7 +81,7 @@ function selectNetwork(network?: TransitFamilyOption): void {
       @pointerdown.prevent="toggleOpen"
       @click="toggleOpenFromClick"
     >
-      {{ loading ? "Chargement..." : buttonLabel }}
+      {{ loading ? t("common.states.loading") : buttonLabel }}
     </button>
 
     <div
@@ -90,7 +92,7 @@ function selectNetwork(network?: TransitFamilyOption): void {
     >
       <div v-if="loading" class="family-combobox__state">
         <span aria-hidden="true" class="loader-dot"></span>
-        Chargement
+        {{ t("common.states.loading") }}
       </div>
       <template v-else>
         <button
@@ -101,7 +103,7 @@ function selectNetwork(network?: TransitFamilyOption): void {
           :aria-selected="!modelValue"
           @mousedown.prevent="selectNetwork(undefined)"
         >
-          Sélectionner
+          {{ t("common.actions.select") }}
         </button>
         <button
           v-for="option in options"

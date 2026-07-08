@@ -6,13 +6,13 @@ The app settings system is designed around one simple flow:
 
 ```txt
 localStorage
-  ↓
+  ->
 loadSettingsFromLocalStorage()
-  ↓
+  ->
 useAppSettings()
-  ↓
+  ->
 App.vue
-  ↓
+  ->
 child components
 ```
 
@@ -258,13 +258,13 @@ This keeps the architecture clean:
 
 ```txt
 TransitBoard emits an update
-  ↓
+  ->
 App.vue receives the update
-  ↓
+  ->
 App.vue calls updateSettings()
-  ↓
+  ->
 useAppSettings persists the setting
-  ↓
+  ->
 localStorage is updated
 ```
 

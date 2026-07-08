@@ -186,7 +186,7 @@ describe("dashboard presets", () => {
     await flushPromises();
 
     const createButton = Array.from(document.body.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("Créer"));
+      .find((button) => button.textContent?.includes("Creer"));
     expect(createButton).toBeTruthy();
     createButton!.dispatchEvent(new Event("click"));
     await flushPromises();

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import LineIconBadge from "./LineIconBadge.vue";
+import { useI18n } from "../i18n";
 import { loadTransferLineDirections } from "../features/line-map/lineMapData";
 import { isBusLikeTransfer } from "../features/service-pattern/transferVisibility";
 import {
   createTransferGroups,
-  getTransferDetailTitle,
+  getTransferFamilyKey,
+  type TransferGroup,
 } from "../services/transferGroups";
 import type { TransferLineOption } from "../types/transit";
 
@@ -40,6 +42,7 @@ const emit = defineEmits<{
 }>();
 
 const activeTransfer = ref<TransferLineOption>();
+const { t } = useI18n();
 const directionStates = reactive<Record<string, TransferDirectionState>>({});
 const transferGroups = computed(() => createTransferGroups(props.transfers));
 const activeDirectionState = computed(() =>
@@ -97,6 +100,46 @@ async function loadTransferDirections(
     };
   }
 }
+
+function formatTransferGroupLabel(group: TransferGroup): string {
+  return formatTransferFamilyLabel(group.key);
+}
+
+function formatTransferDetailTitle(transfer: TransferLineOption): string {
+  return `${formatTransferFamilyLabel(getTransferFamilyKey(transfer))} ${
+    transfer.label
+  }`.trim();
+}
+
+function formatTransferCount(count: number): string {
+  return count === 1
+    ? t("transfers.groups.countOne")
+    : t("transfers.groups.countOther", { count });
+}
+
+function formatTransferFamilyLabel(key: TransferGroup["key"]): string {
+  if (key === "METRO") {
+    return t("transfers.groups.metro");
+  }
+
+  if (key === "RER") {
+    return t("transfers.groups.rer");
+  }
+
+  if (key === "TRANSILIEN") {
+    return t("transfers.groups.transilien");
+  }
+
+  if (key === "TRAM") {
+    return t("transfers.groups.tram");
+  }
+
+  if (key === "BUS") {
+    return t("transfers.groups.bus");
+  }
+
+  return t("transfers.groups.other");
+}
 </script>
 
 <template>
@@ -108,27 +151,27 @@ async function loadTransferDirections(
       <div>
         <strong>{{ stationLabel }}</strong>
         <span v-if="city">{{ city }}</span>
-        <small>Correspondances</small>
+        <small>{{ t("transfers.title") }}</small>
       </div>
     </header>
 
     <div v-if="loading" class="station-transfer-details__state" role="status">
       <span aria-hidden="true" class="loader-dot"></span>
-      Chargement des correspondances
+      {{ t("transfers.loading") }}
     </div>
 
     <div
       v-else-if="error"
       class="station-transfer-details__state station-transfer-details__state--error"
     >
-      Correspondances indisponibles
+      {{ t("transfers.unavailable") }}
     </div>
 
     <div
       v-else-if="transferGroups.length === 0"
       class="station-transfer-details__state"
     >
-      Aucune autre ligne
+      {{ t("transfers.none") }}
     </div>
 
     <template v-else>
@@ -140,8 +183,8 @@ async function loadTransferDirections(
       >
         <div class="station-transfer-details__group-title">
           <span aria-hidden="true">{{ group.iconLabel }}</span>
-          <strong>{{ group.label }}</strong>
-          <small>{{ group.countLabel }}</small>
+          <strong>{{ formatTransferGroupLabel(group) }}</strong>
+          <small>{{ formatTransferCount(group.transfers.length) }}</small>
         </div>
         <div class="station-transfer-details__list">
           <button
@@ -154,7 +197,9 @@ async function loadTransferDirections(
                 activeTransferId === transfer.id,
             }"
             type="button"
-            :aria-label="`Afficher les détails de la ligne ${transfer.label}`"
+            :aria-label="
+              t('transfers.showLineDetailsAria', { line: transfer.label })
+            "
             @focus="showTransferDetails(transfer)"
             @mouseenter="showTransferDetails(transfer)"
             @click="selectTransfer(transfer)"
@@ -168,12 +213,12 @@ async function loadTransferDirections(
         v-if="richDetails && activeTransfer"
         class="station-transfer-details__detail"
       >
-        <strong>{{ getTransferDetailTitle(activeTransfer) }}</strong>
+        <strong>{{ formatTransferDetailTitle(activeTransfer) }}</strong>
         <span
           v-if="isBusLikeTransfer(activeTransfer)"
           class="station-transfer-details__detail-kicker"
         >
-          Directions
+          {{ t("transfers.directions") }}
         </span>
         <span
           v-if="
@@ -181,7 +226,7 @@ async function loadTransferDirections(
           "
           class="station-transfer-details__detail-muted"
         >
-          Chargement...
+          {{ t("common.states.loading") }}
         </span>
         <span
           v-else-if="
@@ -201,7 +246,7 @@ async function loadTransferDirections(
           v-else-if="isBusLikeTransfer(activeTransfer)"
           class="station-transfer-details__detail-muted"
         >
-          Directions indisponibles
+          {{ t("transfers.directionsUnavailable") }}
         </span>
         <span v-else class="station-transfer-details__detail-muted">
           {{ activeTransfer.label }}

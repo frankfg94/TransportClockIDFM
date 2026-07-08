@@ -4,6 +4,7 @@ import { ExternalLink, MapIcon, Plus, Star, X } from "lucide-vue-next";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import StationBoardSelector from "../../components/StationBoardSelector.vue";
 import StationTransferDetails from "../../components/StationTransferDetails.vue";
+import { useI18n } from "../../i18n";
 import type { NetworkGhostLineView } from "../network-ghost";
 import type { TransitPlacePreset } from "../../storage/transitPreferences";
 import type {
@@ -66,6 +67,7 @@ const mobileDrag = reactive({
   startY: 0,
 });
 const suppressHandleClick = ref(false);
+const { t } = useI18n();
 
 const sidebarStyle = computed(() => ({
   "--line-map-sidebar-drag-offset": mobileDrag.active
@@ -165,7 +167,7 @@ function hasDayFrequency(profile?: LineFrequencyProfile): boolean {
 }
 
 function formatFrequency(minutes?: number): string {
-  return minutes ? `≈ ${minutes} min` : "Indisponible";
+  return minutes ? `~ ${minutes} min` : t("common.states.unavailable");
 }
 </script>
 
@@ -177,13 +179,13 @@ function formatFrequency(minutes?: number): string {
       { 'line-map-sidebar--mobile-dragging': mobileDrag.active },
     ]"
     :style="sidebarStyle"
-    aria-label="Détails de la station"
+    :aria-label="t('lineMap.sidebar.detailsAria')"
     data-testid="line-map-sidebar"
   >
     <button
       class="line-map-sidebar__drag-handle"
       type="button"
-      aria-label="Agrandir ou réduire le panneau de station"
+      :aria-label="t('lineMap.sidebar.resizeAria')"
       data-testid="line-map-sidebar-drag-handle"
       @click="toggleMobileSheetFromHandle"
       @pointerdown.prevent="startMobileSheetDrag"
@@ -195,11 +197,11 @@ function formatFrequency(minutes?: number): string {
     </button>
 
     <header class="line-map-sidebar__topbar">
-      <span>Détails de la station</span>
+      <span>{{ t("lineMap.sidebar.stationDetails") }}</span>
       <button
         class="icon-button line-map-sidebar__close"
         type="button"
-        aria-label="Fermer les détails de la station"
+        :aria-label="t('lineMap.sidebar.closeAria')"
         @click="emit('close')"
       >
         <X aria-hidden="true" />
@@ -215,29 +217,29 @@ function formatFrequency(minutes?: number): string {
         <header>
           <LineIconBadge :line="activeGhostLine" compact />
           <div>
-            <small>Ligne survolée</small>
+            <small>{{ t("lineMap.sidebar.hoveredLine") }}</small>
             <strong>{{ activeGhostLine.label }}</strong>
             <span>{{ activeGhostLine.mode }}</span>
           </div>
           <button
             class="button-secondary line-map-sidebar__ghost-add"
             type="button"
-            aria-label="Ajouter une station de cette ligne"
+            :aria-label="t('lineMap.sidebar.addLineStation')"
             data-testid="line-map-sidebar-ghost-add"
             @click="emit('addGhostLineStation')"
           >
             <Plus aria-hidden="true" />
-            Ajouter
+            {{ t("common.actions.add") }}
           </button>
         </header>
 
         <div class="line-map-sidebar__ghost-directions">
-          <small>Directions de la ligne</small>
+          <small>{{ t("lineMap.sidebar.lineDirections") }}</small>
           <span
             v-if="ghostDirectionsLoading"
             class="line-map-sidebar__ghost-muted"
           >
-            Chargement...
+            {{ t("common.states.loading") }}
           </span>
           <div v-else-if="ghostDirections?.length">
             <span
@@ -250,19 +252,19 @@ function formatFrequency(minutes?: number): string {
           <span v-else class="line-map-sidebar__ghost-muted">
             {{
               ghostDirectionsError
-                ? "Directions indisponibles"
-                : "Aucune direction renseignée"
+                ? t("lineMap.sidebar.directionsUnavailable")
+                : t("lineMap.sidebar.noDirections")
             }}
           </span>
         </div>
 
         <div class="line-map-sidebar__ghost-frequency">
-          <small>Fréquence théorique à cette station</small>
+          <small>{{ t("lineMap.sidebar.theoreticalFrequency") }}</small>
           <span
             v-if="ghostFrequencyLoading"
             class="line-map-sidebar__ghost-muted"
           >
-            Calcul en cours...
+            {{ t("lineMap.sidebar.calculating") }}
           </span>
           <div
             v-else-if="
@@ -273,35 +275,35 @@ function formatFrequency(minutes?: number): string {
           >
             <template v-if="isNoctilienLine(activeGhostLine)">
               <div class="line-map-sidebar__ghost-frequency-card">
-                <span>Nuit</span>
+                <span>{{ t("lineMap.sidebar.night") }}</span>
                 <strong>
                   {{ formatFrequency(ghostFrequency.nightMinutes) }}
                 </strong>
-                <small>23h30–5h</small>
+                <small>{{ t("lineMap.sidebar.nightRange") }}</small>
               </div>
             </template>
             <template v-else>
               <div class="line-map-sidebar__ghost-frequency-card">
-                <span>Heures de pointe</span>
+                <span>{{ t("lineMap.sidebar.peakHours") }}</span>
                 <strong>
                   {{ formatFrequency(ghostFrequency.peakMinutes) }}
                 </strong>
-                <small>7h–9h30 · 17h30–19h</small>
+                <small>{{ t("lineMap.sidebar.peakRange") }}</small>
               </div>
               <div class="line-map-sidebar__ghost-frequency-card">
-                <span>Heures creuses</span>
+                <span>{{ t("lineMap.sidebar.offPeakHours") }}</span>
                 <strong>
                   {{ formatFrequency(ghostFrequency.offPeakMinutes) }}
                 </strong>
-                <small>Hors pointe, de 5h à 23h30</small>
+                <small>{{ t("lineMap.sidebar.offPeakRange") }}</small>
               </div>
             </template>
           </div>
           <span v-else class="line-map-sidebar__ghost-muted">
             {{
               ghostFrequencyError
-                ? "Fréquence indisponible"
-                : "Pas assez d’horaires pour calculer la fréquence"
+                ? t("lineMap.sidebar.frequencyUnavailable")
+                : t("lineMap.sidebar.insufficientSchedules")
             }}
           </span>
         </div>
@@ -324,7 +326,7 @@ function formatFrequency(minutes?: number): string {
         v-if="favoriteDashboardSelectorOpen"
         class="line-map-sidebar__favorite-selector"
         data-testid="line-map-sidebar-favorite-selector"
-        aria-label="Choix du dashboard"
+        :aria-label="t('lineMap.sidebar.dashboardChoiceAria')"
       >
         <StationBoardSelector
           :model-value="favoriteDashboardId"
@@ -342,7 +344,7 @@ function formatFrequency(minutes?: number): string {
             :disabled="favoriteLoading"
             @click="emit('cancelFavoriteDashboard')"
           >
-            Annuler
+            {{ t("common.actions.cancel") }}
           </button>
           <button
             class="line-map-sidebar__favorite"
@@ -351,7 +353,11 @@ function formatFrequency(minutes?: number): string {
             @click="emit('confirmFavoriteDashboard')"
           >
             <Star aria-hidden="true" />
-            {{ favoriteLoading ? "Ajout en cours..." : "Ajouter" }}
+            {{
+              favoriteLoading
+                ? t("lineMap.sidebar.adding")
+                : t("common.actions.add")
+            }}
           </button>
         </div>
       </section>
@@ -366,7 +372,11 @@ function formatFrequency(minutes?: number): string {
           @click="emit('addFavorite')"
         >
           <Star aria-hidden="true" />
-          {{ favoriteLoading ? "Ajout en cours..." : "Ajouter aux favoris" }}
+          {{
+            favoriteLoading
+              ? t("lineMap.sidebar.adding")
+              : t("lineMap.sidebar.addToFavorites")
+          }}
         </button>
       </template>
       <button
@@ -375,7 +385,7 @@ function formatFrequency(minutes?: number): string {
         @click="emit('openGoogleMaps')"
       >
         <MapIcon aria-hidden="true" />
-        Voir sur Google Maps
+        {{ t("lineMap.sidebar.openInGoogleMaps") }}
         <ExternalLink aria-hidden="true" />
       </button>
     </footer>

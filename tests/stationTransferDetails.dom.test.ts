@@ -50,7 +50,7 @@ describe("StationTransferDetails", () => {
     ).toEqual(["METRO", "RER", "BUS"]);
 
     await wrapper
-      .get('button[aria-label="Afficher les détails de la ligne 91"]')
+      .get('button[aria-label="Afficher les details de la ligne 91"]')
       .trigger("click");
     await flushPromises();
 

@@ -64,6 +64,7 @@ import type { HealthCheck, HealthResponse } from "../health/types";
 import TrafficDisruptionCard from "../traffic/TrafficDisruptionCard.vue";
 import {
   getTrafficDisruptionDisplayPeriod,
+  getUpcomingTrafficWarningStart,
   parseTrafficDate,
 } from "../traffic/trafficTiming";
 import type { TrafficLineReport } from "../traffic";
@@ -80,6 +81,7 @@ import {
   TRAFFIC_DISTURBANCE_COLOR,
   TRAFFIC_INTERRUPTION_COLOR,
 } from "./trafficImpactStyles";
+import { useI18n } from "../../i18n";
 
 import type {
   Departure,
@@ -301,9 +303,9 @@ const PATTERN_VISUAL_MODE_OPTIONS: Array<{
   id: PatternVisualMode;
   label: string;
 }> = [
-  { id: "comfort", label: "Vue confort" },
-  { id: "compact", label: "Vue compacte" },
-  { id: "realistic", label: "Vue réaliste" },
+  { id: "comfort", label: "Comfort view" },
+  { id: "compact", label: "Compact view" },
+  { id: "realistic", label: "Realistic view" },
 ];
 
 const props = withDefaults(
@@ -330,6 +332,7 @@ const props = withDefaults(
     richTransferTooltips?: boolean;
     reduceMotion?: boolean;
     smartTrafficDetection?: boolean;
+    trafficWarningLookaheadDays?: number;
     trafficReport?: TrafficLineReport;
     transferBundleRetentionDays?: number;
     transferBundleRequestConcurrency?: number;
@@ -353,6 +356,7 @@ const props = withDefaults(
     richTransferTooltips: true,
     reduceMotion: false,
     smartTrafficDetection: true,
+    trafficWarningLookaheadDays: 10,
     transferBundleLocalCacheEnabled: true,
     transferBundleBackendCacheEnabled: true,
     transferBundleRetentionDays: 15,
@@ -366,6 +370,7 @@ const emit = defineEmits<{
   close: [];
   directionChange: [directionId: string];
 }>();
+const { d, locale, t } = useI18n();
 
 const isPatternFlowFullscreen = ref(false);
 const patternVisualMode = ref<PatternVisualMode>("compact");
@@ -402,7 +407,18 @@ const missingNetexTownWarningKeys = new Set<string>();
 const serviceLabel = computed(() =>
   displayPattern.value
     ? formatServiceType(displayPattern.value.serviceType)
-    : "Desserte",
+    : t("pattern.service"),
+);
+const patternVisualModeOptions = computed(() =>
+  PATTERN_VISUAL_MODE_OPTIONS.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "comfort"
+        ? t("settings.options.compactLinePlan.comfort")
+        : option.id === "compact"
+          ? t("settings.options.compactLinePlan.compact")
+          : t("settings.options.compactLinePlan.realistic"),
+  })),
 );
 
 const transferHydrationProgressPercent = computed(() => {
@@ -422,21 +438,21 @@ const transferHydrationProgressLabel = computed(() => {
   const total = transferHydrationProgress.value.total;
 
   if (total <= 0) {
-    return "Préparation";
+    return t("pattern.preparing");
   }
 
   return `${transferHydrationProgress.value.completed}/${total}`;
 });
 const transferHydrationStatusLabel = computed(() =>
   transferHydrationRateLimited.value
-    ? "Limite API quotidienne atteinte"
+    ? t("pattern.apiRateLimit")
     : transferHydrationRetryVisible.value
-      ? "Correspondances bloquées"
-      : "Chargement des correspondances",
+      ? t("pattern.transfersBlocked")
+      : t("pattern.loadingTransfers"),
 );
 const transferHydrationDetailLabel = computed(() =>
   transferHydrationRateLimited.value
-    ? "Les correspondances sont temporairement indisponibles"
+    ? t("pattern.transfersTemporarilyUnavailable")
     : transferHydrationProgressLabel.value,
 );
 const servedCalls = computed(
@@ -446,7 +462,7 @@ const destinationLabel = computed(
   () =>
     props.departure?.destination ??
     displayPattern.value?.destination ??
-    "Destination",
+    t("pattern.destination"),
 );
 const hasDirectionPicker = computed(
   () => props.embedded && (props.directionOptions?.length ?? 0) > 1,
@@ -459,12 +475,14 @@ const departureClock = computed(() =>
 );
 const servedStopsLabel = computed(() => {
   if (isFullLineMode.value) {
-    return "Ligne complète";
+    return t("pattern.fullLine");
   }
 
   const count = servedCalls.value.length;
 
-  return count > 1 ? `${count} arrêts desservis` : `${count} arrêt desservi`;
+  return count > 1
+    ? t("pattern.servedStopsOther", { count })
+    : t("pattern.servedStopsOne", { count });
 });
 const displayPattern = computed(() => hydratedPattern.value ?? props.pattern);
 const topologyStationCount = computed(() =>
@@ -535,6 +553,8 @@ const {
   board: computed(() => props.board),
   smartTrafficDetection: computed(() => props.smartTrafficDetection),
   trafficReport: computed(() => props.trafficReport),
+  includeUpcomingWarnings: computed(() => true),
+  warningLookaheadDays: computed(() => props.trafficWarningLookaheadDays),
 });
 const transportModeIcon = computed(() =>
   createTransportModeIcon(props.board?.line.mode),
@@ -887,27 +907,27 @@ function formatClock(value?: string): string {
     return "";
   }
 
-  return new Intl.DateTimeFormat("fr-FR", {
+  return d(new Date(value), {
     hour: "2-digit",
     minute: "2-digit",
     timeZone: "Europe/Paris",
-  }).format(new Date(value));
+  });
 }
 
 function formatServiceType(type: DepartureServiceType): string {
   if (type === "semi-direct") {
-    return "Semi direct";
+    return t("board.serviceType.semiDirect");
   }
 
   if (type === "direct") {
-    return "Direct";
+    return t("board.serviceType.direct");
   }
 
   if (type === "omnibus") {
-    return "Toutes stations";
+    return t("board.serviceType.omnibus");
   }
 
-  return "Desserte";
+  return t("pattern.service");
 }
 
 function departureTime(departure?: Departure): string | undefined {
@@ -1441,18 +1461,40 @@ function getTrafficMarkerOffset(
 }
 
 function getTrafficMarkerStatusLabel(segment: PatternTrafficImpact): string {
+  if (isUpcomingTrafficWarning(segment)) {
+    if (segment.replacementBus) {
+      return t("pattern.trafficReplacementBusPlanned");
+    }
+
+    return segment.kind === "interruption"
+      ? t("pattern.trafficInterruptionPlanned")
+      : t("pattern.trafficDisturbancePlanned");
+  }
+
   if (segment.replacementBus) {
-    return "Bus de remplacement";
+    return t("pattern.trafficReplacementBus");
   }
 
   return segment.kind === "interruption"
-    ? "Trafic interrompu"
-    : "Trafic perturbé";
+    ? t("pattern.trafficInterrupted")
+    : t("pattern.trafficDisrupted");
 }
 
 function getTrafficMarkerDetailLabel(
   segment: PatternTrafficImpact,
 ): string | undefined {
+  const warningStart = getUpcomingTrafficWarningStart(
+    segment.disruption,
+    Date.now(),
+    props.trafficWarningLookaheadDays,
+  );
+
+  if (warningStart) {
+    return t("pattern.startsOn", {
+      date: formatTrafficStartDate(warningStart),
+    });
+  }
+
   const relativeRestartLabel = getTodayRestartRelativeLabel(segment);
 
   if (relativeRestartLabel) {
@@ -1460,10 +1502,22 @@ function getTrafficMarkerDetailLabel(
   }
 
   if (segment.restartTimeLabel) {
-    return `Reprise à ${segment.restartTimeLabel}`;
+    return t("pattern.resumesAt", { time: segment.restartTimeLabel });
   }
 
-  return segment.endDateLabel ? `Reprise le ${segment.endDateLabel}` : undefined;
+  return segment.endDateLabel
+    ? t("pattern.resumesOn", { date: segment.endDateLabel })
+    : undefined;
+}
+
+function isUpcomingTrafficWarning(segment: PatternTrafficImpact): boolean {
+  return Boolean(
+    getUpcomingTrafficWarningStart(
+      segment.disruption,
+      Date.now(),
+      props.trafficWarningLookaheadDays,
+    ),
+  );
 }
 
 function getTodayRestartRelativeLabel(
@@ -1493,15 +1547,28 @@ function getTodayRestartRelativeLabel(
   const restartTimeLabel = formatTrafficRestartTime(restartDate);
 
   if (remainingMinutes < 60) {
-    const unit = remainingMinutes === 1 ? "minute" : "minutes";
-
-    return `Reprise dans ${remainingMinutes} ${unit} (${restartTimeLabel})`;
+    return remainingMinutes === 1
+      ? t("pattern.resumesInMinute", {
+          count: remainingMinutes,
+          time: restartTimeLabel,
+        })
+      : t("pattern.resumesInMinutes", {
+          count: remainingMinutes,
+          time: restartTimeLabel,
+        });
   }
 
   const remainingHours = Math.ceil(remainingMinutes / 60);
-  const unit = remainingHours === 1 ? "heure" : "heures";
 
-  return `Reprise dans ${remainingHours} ${unit} (${restartTimeLabel})`;
+  return remainingHours === 1
+    ? t("pattern.resumesInHour", {
+        count: remainingHours,
+        time: restartTimeLabel,
+      })
+    : t("pattern.resumesInHours", {
+        count: remainingHours,
+        time: restartTimeLabel,
+      });
 }
 
 function getTodayRestartDateFromTimeLabel(
@@ -1534,14 +1601,20 @@ function isSameLocalDay(left: Date, right: Date): boolean {
   );
 }
 
+function formatTrafficStartDate(date: Date): string {
+  return d(date, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
 function formatTrafficRestartTime(date: Date): string {
-  return new Intl.DateTimeFormat("fr-FR", {
+  const formatted = d(date, {
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
-  })
-    .format(date)
-    .replace(":", "h");
+  });
+
+  return locale.value === "fr" ? formatted.replace(":", "h") : formatted;
 }
 
 function getTrafficSegmentAnchor(
@@ -1788,7 +1861,7 @@ function warnMissingNetexTown(
     .map((stop) => `${stop.label} (${stop.id})`);
 
   console.warn(
-    "[DeparturePatternModal] NeTEx Town manquant pour certaines stations; les zones de ville les ignoreront.",
+    "[DeparturePatternModal] NeTEx Town is missing for some stations; city zones will ignore them.",
     { count: missing.size, sample },
   );
 }
@@ -4820,7 +4893,7 @@ function getBranchChip(
   departureTimeLabel: string,
 ): string | undefined {
   if (activeTerminalIds.has(node.id) && departureTimeLabel) {
-    return node.current ? "Départ" : departureTimeLabel;
+    return node.current ? t("alarm.fallbackDeparture") : departureTimeLabel;
   }
 
   return undefined;
@@ -5037,13 +5110,15 @@ onBeforeUnmount(() => {
                 <p class="eyebrow">{{ serviceLabel }}</p>
                 <h2>
                   {{
-                    departure?.destination ? "Desserte du passage" : "Desserte"
+                    departure?.destination
+                      ? t("pattern.passageService")
+                      : t("pattern.service")
                   }}
                 </h2>
                 <span v-if="board">
                   {{ board.title }}
                   <template v-if="departure?.platform">
-                    · Quai {{ departure.platform }}</template
+                    - {{ t("app.platform", { platform: departure.platform }) }}</template
                   >
                 </span>
               </div>
@@ -5051,7 +5126,7 @@ onBeforeUnmount(() => {
             <button
               class="icon-button"
               type="button"
-              aria-label="Fermer"
+              :aria-label="t('common.actions.close')"
               @click="emit('close')"
             >
               ×
@@ -5061,7 +5136,7 @@ onBeforeUnmount(() => {
           <div class="pattern-modal__body">
             <div v-if="loading" class="pattern-modal__state">
               <span aria-hidden="true" class="loader-dot"></span>
-              Chargement de la desserte
+              {{ t("pattern.loadingPattern") }}
             </div>
 
             <div
@@ -5069,7 +5144,7 @@ onBeforeUnmount(() => {
               class="pattern-modal__state pattern-modal__state--error"
             >
               {{
-                error || pattern?.error || "Impossible de charger la desserte."
+                error || pattern?.error || t("pattern.loadFailed")
               }}
             </div>
 
@@ -5102,7 +5177,7 @@ onBeforeUnmount(() => {
                 <small v-if="board">
                   {{ board.title }}
                   <template v-if="departure?.platform">
-                    · Quai {{ departure.platform }}</template
+                    - {{ t("app.platform", { platform: departure.platform }) }}</template
                   >
                 </small>
               </aside>
@@ -5110,7 +5185,7 @@ onBeforeUnmount(() => {
               <div class="pattern-board__display">
                 <div class="pattern-board__top-strip">
                   <div class="pattern-board__top-strip-direction">
-                    <span>Direction</span>
+                    <span>{{ t("pattern.direction") }}</span>
                     <div class="pattern-board__direction-controls">
                       <label
                         v-if="hasDirectionPicker"
@@ -5119,7 +5194,7 @@ onBeforeUnmount(() => {
                         <MaterialCombobox
                           :model-value="selectedDirectionId ?? ''"
                           :options="directionOptions ?? []"
-                          aria-label="Changer de direction"
+                          :aria-label="t('pattern.changeDirectionAria')"
                           @update:model-value="emit('directionChange', $event)"
                         />
                       </label>
@@ -5176,7 +5251,7 @@ onBeforeUnmount(() => {
                         type="button"
                         @click.stop="retryTransferHydrationFromScratch"
                       >
-                        Réessayer
+                        {{ t("common.actions.retry") }}
                       </button>
                     </div>
                   </div>
@@ -5192,8 +5267,8 @@ onBeforeUnmount(() => {
                     <MaterialCombobox
                       class="pattern-flow-mode-combobox"
                       :model-value="patternVisualMode"
-                      :options="PATTERN_VISUAL_MODE_OPTIONS"
-                      aria-label="Mode visuel du plan"
+                      :options="patternVisualModeOptions"
+                      :aria-label="t('pattern.visualModeAria')"
                       @update:model-value="selectPatternVisualMode"
                     />
                     <button
@@ -5201,8 +5276,8 @@ onBeforeUnmount(() => {
                       type="button"
                       :aria-label="
                         isPatternFlowFullscreen
-                          ? 'Quitter le plein écran'
-                          : 'Afficher la carte en plein écran'
+                          ? t('pattern.exitFullscreenAria')
+                          : t('pattern.enterFullscreenAria')
                       "
                       @click.stop="togglePatternFlowFullscreen"
                     >
@@ -5213,12 +5288,14 @@ onBeforeUnmount(() => {
                       <Expand v-else aria-hidden="true" />
                       <span>
                         {{
-                          isPatternFlowFullscreen ? "Réduire" : "Plein écran"
+                          isPatternFlowFullscreen
+                            ? t("pattern.collapse")
+                            : t("pattern.fullscreen")
                         }}
                       </span>
                     </button>
                   </div>
-                  <MobileActionsMenu aria-label="Options du plan">
+                  <MobileActionsMenu :aria-label="t('pattern.optionsAria')">
                     <template #default="{ close }">
                       <slot name="flow-actions-prefix"></slot>
                       <DistanceToggle
@@ -5230,8 +5307,8 @@ onBeforeUnmount(() => {
                       <MaterialCombobox
                         class="pattern-flow-mode-combobox"
                         :model-value="patternVisualMode"
-                        :options="PATTERN_VISUAL_MODE_OPTIONS"
-                        aria-label="Mode visuel du plan"
+                        :options="patternVisualModeOptions"
+                        :aria-label="t('pattern.visualModeAria')"
                         @update:model-value="selectPatternVisualMode"
                         @change="close"
                       />
@@ -5240,8 +5317,8 @@ onBeforeUnmount(() => {
                         type="button"
                         :aria-label="
                           isPatternFlowFullscreen
-                            ? 'Quitter le plein écran'
-                            : 'Afficher la carte en plein écran'
+                            ? t('pattern.exitFullscreenAria')
+                            : t('pattern.enterFullscreenAria')
                         "
                         @click.stop="
                           togglePatternFlowFullscreen($event);
@@ -5255,7 +5332,9 @@ onBeforeUnmount(() => {
                         <Expand v-else aria-hidden="true" />
                         <span>
                           {{
-                            isPatternFlowFullscreen ? "Réduire" : "Plein écran"
+                            isPatternFlowFullscreen
+                              ? t("pattern.collapse")
+                              : t("pattern.fullscreen")
                           }}
                         </span>
                       </button>
@@ -5336,7 +5415,7 @@ onBeforeUnmount(() => {
                             "
                           >
                             <Info aria-hidden="true" />
-                            <span>Details</span>
+                            <span>{{ t("pattern.details") }}</span>
                           </button>
                         </span>
                       </div>
@@ -5367,7 +5446,7 @@ onBeforeUnmount(() => {
                         :title="
                           data.served
                             ? undefined
-                            : 'Non desservi pour ce trajet'
+                            : t('pattern.skippedTitle')
                         "
                         @focusin="showStationTooltip(data.key)"
                         @focusout="scheduleHideStationTooltip(data.key)"
@@ -5395,7 +5474,7 @@ onBeforeUnmount(() => {
                         <span
                           v-if="data.nonBusTransfers.length > 0"
                           class="pattern-flow-station__transfers pattern-flow-station__transfers--inline"
-                          aria-label="Correspondances principales"
+                          :aria-label="t('pattern.mainTransfersAria')"
                         >
                           <LineIconBadge
                             v-for="transfer in data.nonBusTransfers"
@@ -5409,7 +5488,7 @@ onBeforeUnmount(() => {
                           formatClock(data.time)
                         }}</small>
                         <small v-else-if="!data.served && data.branchEnd">
-                          Non desservi
+                          {{ t("pattern.skipped") }}
                         </small>
                         <em v-if="data.branchChip">{{ data.branchChip }}</em>
                         <Transition name="pattern-flow-tooltip-open" appear>
@@ -5444,18 +5523,18 @@ onBeforeUnmount(() => {
                     :line-color="board?.line.color ?? '#0064ff'"
                     @focus="focusPatternFlowOn"
                   />
-                  <!-- Affiche le tooltip d'information trafic, notamment pour un trafic interrompu. -->
+                  <!-- Shows the traffic information tooltip, including interrupted service cases. -->
                   <Transition name="pattern-flow-traffic-popup">
                     <aside
                       v-if="activeTrafficImpact"
                       class="pattern-flow-traffic-popup"
                       role="dialog"
-                      aria-label="Détail de l'information trafic"
+                      :aria-label="t('pattern.trafficDetailsAria')"
                     >
                       <button
                         class="pattern-flow-traffic-popup__close"
                         type="button"
-                        aria-label="Fermer l'information trafic"
+                        :aria-label="t('pattern.closeTrafficAria')"
                         @click="closeTrafficImpactPopup"
                       >
                         ×
@@ -5472,7 +5551,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-else class="pattern-modal__state">
-              Desserte indisponible pour ce passage.
+              {{ t("pattern.unavailableForDeparture") }}
             </div>
           </div>
         </section>

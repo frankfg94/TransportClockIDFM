@@ -62,13 +62,13 @@ export function createDefaultTransitPresetState(
       {
         id: DEFAULT_TRANSIT_PLACE_ID,
         kind: "builtin",
-        label: "Maison",
+        label: "Home",
         preferences: createDefaultPreferences(boards),
       },
       {
         id: WORK_TRANSIT_PLACE_ID,
         kind: "builtin",
-        label: "Travail",
+        label: "Work",
         preferences: createEmptyTransitPreferences(boards),
       },
     ],
@@ -166,7 +166,7 @@ export function setDefaultTransitPlace(
   placeId: string,
 ): TransitPresetState {
   if (!getTransitPlaceById(state, placeId)) {
-    throw new Error("Lieu introuvable.");
+    throw new Error("Place not found.");
   }
 
   return normalizeTransitPresetState(
@@ -217,7 +217,7 @@ export function renameTransitPlace(
   const normalizedLabel = normalizeTransitPlaceLabel(label);
 
   if (!place) {
-    throw new Error("Lieu introuvable.");
+    throw new Error("Place not found.");
   }
 
   if (place.kind === "builtin") {
@@ -262,11 +262,11 @@ export function deleteTransitPlace(
   const place = getTransitPlaceById(state, placeId);
 
   if (!place) {
-    throw new Error("Lieu introuvable.");
+    throw new Error("Place not found.");
   }
 
   if (place.kind === "builtin") {
-    throw new Error("Maison et Travail ne peuvent pas être supprimés.");
+    throw new Error("Built-in places cannot be deleted.");
   }
 
   const places = state.places.filter((candidate) => candidate.id !== placeId);
@@ -291,7 +291,7 @@ export function updateTransitPlacePreferences(
   preferences: TransitBoardPreferences,
 ): TransitPresetState {
   if (!getTransitPlaceById(state, placeId)) {
-    throw new Error("Lieu introuvable.");
+    throw new Error("Place not found.");
   }
 
   return normalizeTransitPresetState(
@@ -480,13 +480,13 @@ function migrateLegacyPreferences(
         {
           id: DEFAULT_TRANSIT_PLACE_ID,
           kind: "builtin",
-          label: "Maison",
+          label: "Home",
           preferences: value,
         },
         {
           id: WORK_TRANSIT_PLACE_ID,
           kind: "builtin",
-          label: "Travail",
+          label: "Work",
           preferences: createEmptyTransitPreferences(defaultBoards),
         },
       ],
@@ -551,8 +551,8 @@ function normalizeTransitPlace(
         typeof value.label === "string" && value.label.trim()
           ? value.label.trim()
           : value.id === WORK_TRANSIT_PLACE_ID
-            ? "Travail"
-            : "Maison",
+            ? "Work"
+            : "Home",
       preferences: normalizeTransitBoardPreferences(
         value.preferences,
         defaultBoards,
@@ -724,7 +724,7 @@ function createCustomPlaceId(label: string): string {
     .replace(/[^a-z0-9]+/gu, "-")
     .replace(/^-|-$/gu, "");
 
-  return slug || "lieu";
+  return slug || "place";
 }
 
 function assertCustomPlaceIdAvailable(
@@ -732,11 +732,11 @@ function assertCustomPlaceIdAvailable(
   placeId: string,
 ): void {
   if (BUILTIN_PLACE_IDS.includes(placeId)) {
-    throw new Error("Ce nom est réservé.");
+    throw new Error("This name is reserved.");
   }
 
   if (getTransitPlaceById(state, placeId)) {
-    throw new Error("Un lieu avec ce nom existe déjà.");
+    throw new Error("A place with this name already exists.");
   }
 }
 
@@ -744,7 +744,7 @@ function normalizeTransitPlaceLabel(label: string): string {
   const normalizedLabel = label.trim().replace(/\s+/gu, " ");
 
   if (!normalizedLabel) {
-    throw new Error("Le nom du lieu est requis.");
+    throw new Error("The place name is required.");
   }
 
   return normalizedLabel;

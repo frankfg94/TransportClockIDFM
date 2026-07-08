@@ -34,6 +34,8 @@ import {
   resolveTransitPlaceId,
   saveTransitPresetState,
   updateTransitPlacePreferences,
+  WORK_TRANSIT_PLACE_ID,
+  type TransitPlacePreset,
 } from "../../storage/transitPreferences";
 import { formatTransitDistance } from "../../services/distance";
 import type {
@@ -51,6 +53,7 @@ import {
   type PatternTrafficImpact,
 } from "../service-pattern/trafficImpactAnalysis";
 import { useDeparturePatternTraffic } from "../service-pattern/useDeparturePatternTraffic";
+import { useI18n } from "../../i18n";
 import {
   TRAFFIC_DISTURBANCE_COLOR,
   TRAFFIC_INTERRUPTION_COLOR,
@@ -167,6 +170,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   select: [station: StationSearchOption];
 }>();
+const { t } = useI18n();
 
 const VIEWBOX_WIDTH = 1080;
 const VIEWBOX_HEIGHT = 620;
@@ -202,6 +206,7 @@ const favoriteUndoSnapshot = ref<FavoriteUndoSnapshot>();
 const ghostLineStationModalOpen = ref(false);
 const ghostLineStationLine = ref<LineSearchOption>();
 const ghostLineStationFamily = ref<TransitFamily>();
+const ghostLineStationStation = ref<StationSearchOption>();
 const showDistances = ref(false);
 const mobileDisplayOpen = ref(false);
 const mobileSheetStage = ref<MobileSheetStage>("mid");
@@ -304,15 +309,29 @@ const activeGhostFrequencyState = computed(() => {
 const stationBoardDashboardOptions = computed(() =>
   typeof window === "undefined"
     ? []
-    : loadTransitPresetState(transitBoards).places,
+    : loadTransitPresetState(transitBoards).places.map(localizeTransitPlace),
 );
 const favoriteDashboardAlertMessage = computed(() =>
   favoriteDashboardAlertLabel.value
-    ? `Station ajoutée au dashboard ${favoriteDashboardAlertLabel.value}`
-    : "Station ajoutée au dashboard",
+    ? t("lineMap.picker.favoriteAddedToDashboard", {
+        dashboard: favoriteDashboardAlertLabel.value,
+      })
+    : t("lineMap.picker.favoriteAdded"),
 );
 const isExplorerMode = computed(() => props.mode === "explorer");
 const canSelectStops = computed(() => props.selectable);
+
+function localizeTransitPlace(place: TransitPlacePreset): TransitPlacePreset {
+  if (place.id === DEFAULT_TRANSIT_PLACE_ID) {
+    return { ...place, label: t("places.home") };
+  }
+
+  if (place.id === WORK_TRANSIT_PLACE_ID) {
+    return { ...place, label: t("places.work") };
+  }
+
+  return place;
+}
 const isMapDragging = computed(() => mapDrag.dragging);
 const {
   lines: ghostLines,
@@ -353,7 +372,9 @@ const lineTrafficAnalysis = computed(() => {
 const mapStats = computed(() => {
   const stopCount = lineMap.value?.stops.length ?? 0;
 
-  return `${stopCount} stations`;
+  return stopCount === 1
+    ? t("lineMap.picker.stationCountOne", { count: stopCount })
+    : t("lineMap.picker.stationCountOther", { count: stopCount });
 });
 
 const segmentDistanceLabels = computed<SegmentDistanceLabel[]>(() => {
@@ -700,6 +721,7 @@ function openGhostLineStationModal(): void {
     family,
   );
   ghostLineStationFamily.value = family;
+  ghostLineStationStation.value = activeStop.value?.station;
   ghostLineStationModalOpen.value = true;
 }
 
@@ -707,6 +729,7 @@ function closeGhostLineStationModal(): void {
   ghostLineStationModalOpen.value = false;
   ghostLineStationLine.value = undefined;
   ghostLineStationFamily.value = undefined;
+  ghostLineStationStation.value = undefined;
 }
 
 function addGhostLineStationBoard(
@@ -933,7 +956,9 @@ function showFavoriteDashboardAlert(placeId: string): void {
   const state = loadTransitPresetState(transitBoards);
   const place = getTransitPlaceById(state, placeId);
 
-  favoriteDashboardAlertLabel.value = place?.label ?? "";
+  favoriteDashboardAlertLabel.value = place
+    ? localizeTransitPlace(place).label
+    : "";
   favoriteDashboardAlertOpen.value = true;
   favoriteAlertProgressKey.value += 1;
   clearFavoriteAlertTimeout();
@@ -1012,8 +1037,7 @@ async function confirmActiveStopFavoriteDashboard(): Promise<void> {
     favoriteDashboardSelectorOpen.value = false;
     showFavoriteDashboardAlert(dashboardId);
   } catch {
-    favoriteError.value =
-      "Impossible d'ajouter cette station à l'écran d'accueil.";
+    favoriteError.value = t("lineMap.picker.addFavoriteFailed");
   } finally {
     favoriteLoading.value = false;
   }
@@ -1252,8 +1276,8 @@ function getHitTargetStyle(stop: LineMapStopView) {
 
 function getStopActionLabel(stop: LineMapStopView): string {
   return canSelectStops.value
-    ? `Sélectionner ${stop.label}`
-    : `Afficher ${stop.label}`;
+    ? t("lineMap.picker.selectStopAria", { stop: stop.label })
+    : t("lineMap.picker.showStopAria", { stop: stop.label });
 }
 
 function adjustZoom(direction: number): void {
@@ -1768,13 +1792,18 @@ function getLabelPriority(
           class="line-map-network-progress"
           role="status"
         >
-          Réseau {{ ghostProgress.completed }}/{{ ghostProgress.total }}
+          {{
+            t("lineMap.picker.networkProgress", {
+              completed: ghostProgress.completed,
+              total: ghostProgress.total,
+            })
+          }}
         </span>
-        <div class="line-map-zoom" aria-label="Zoom du plan">
+        <div class="line-map-zoom" :aria-label="t('lineMap.picker.zoomAria')">
           <button
             class="icon-button line-map-zoom__button"
             type="button"
-            aria-label="Dézoomer"
+            :aria-label="t('lineMap.picker.zoomOutAria')"
             @click="adjustZoom(-1)"
           >
             −
@@ -1789,7 +1818,7 @@ function getLabelPriority(
           <button
             class="icon-button line-map-zoom__button"
             type="button"
-            aria-label="Zoomer"
+            :aria-label="t('lineMap.picker.zoomInAria')"
             @click="adjustZoom(1)"
           >
             +
@@ -1799,7 +1828,7 @@ function getLabelPriority(
       <MobileActionsMenu
         v-if="lineMap"
         class="line-map-mobile-actions"
-        aria-label="Options de la carte"
+        :aria-label="t('lineMap.picker.mapOptionsAria')"
       >
         <template #default="{ close }">
           <slot name="bar-before-stats"></slot>
@@ -1820,7 +1849,7 @@ function getLabelPriority(
             "
           >
             <Settings aria-hidden="true" />
-            <span>Affichage</span>
+            <span>{{ t("lineMap.picker.display") }}</span>
           </button>
           <span class="line-map-mobile-action-summary">{{ mapStats }}</span>
           <span
@@ -1828,16 +1857,21 @@ function getLabelPriority(
             class="line-map-network-progress line-map-network-progress--mobile"
             role="status"
           >
-            Réseau {{ ghostProgress.completed }}/{{ ghostProgress.total }}
+            {{
+              t("lineMap.picker.networkProgress", {
+                completed: ghostProgress.completed,
+                total: ghostProgress.total,
+              })
+            }}
           </span>
           <div
             class="line-map-zoom line-map-zoom--mobile"
-            aria-label="Zoom du plan"
+            :aria-label="t('lineMap.picker.zoomAria')"
           >
             <button
               class="icon-button line-map-zoom__button"
               type="button"
-              aria-label="Dézoomer"
+              :aria-label="t('lineMap.picker.zoomOutAria')"
               @click="adjustZoom(-1)"
             >
               −
@@ -1852,7 +1886,7 @@ function getLabelPriority(
             <button
               class="icon-button line-map-zoom__button"
               type="button"
-              aria-label="Zoomer"
+              :aria-label="t('lineMap.picker.zoomInAria')"
               @click="adjustZoom(1)"
             >
               +
@@ -1862,19 +1896,19 @@ function getLabelPriority(
       </MobileActionsMenu>
       <span v-if="loadingMap" class="field-loader">
         <span aria-hidden="true" class="loader-dot"></span>
-        Chargement du plan
+        {{ t("lineMap.picker.loadingMap") }}
       </span>
     </div>
 
     <div v-if="loadingMap" class="line-map-state">
       <span aria-hidden="true" class="loader-dot line-map-state__loader"></span>
-      <strong>Plan en cours de chargement</strong>
+      <strong>{{ t("lineMap.picker.loadingMapTitle") }}</strong>
     </div>
 
     <div v-else-if="errorMessage" class="line-map-state line-map-state--error">
       <strong>{{ errorMessage }}</strong>
       <button class="button-secondary" type="button" @click="loadMap">
-        Réessayer
+        {{ t("common.actions.retry") }}
       </button>
     </div>
 
@@ -1894,7 +1928,7 @@ function getLabelPriority(
             type="button"
             @click="undoLastFavoriteAdd"
           >
-            Annuler
+            {{ t("common.actions.cancel") }}
           </button>
           <span
             :key="favoriteAlertProgressKey"
@@ -2132,7 +2166,7 @@ function getLabelPriority(
           @click="ghostDisplayExpanded = !ghostDisplayExpanded"
         >
           <Eye aria-hidden="true" />
-          <strong>Affichage</strong>
+          <strong>{{ t("lineMap.picker.display") }}</strong>
           <Minus v-if="ghostDisplayExpanded" aria-hidden="true" />
           <Plus v-else aria-hidden="true" />
         </button>
@@ -2206,11 +2240,13 @@ function getLabelPriority(
         >
           <header class="line-map-display-modal__header">
             <Eye aria-hidden="true" />
-            <strong id="line-map-display-modal-title">Affichage</strong>
+            <strong id="line-map-display-modal-title">
+              {{ t("lineMap.picker.display") }}
+            </strong>
             <button
               class="icon-button line-map-display-modal__close"
               type="button"
-              aria-label="Fermer les options d'affichage"
+              :aria-label="t('lineMap.picker.closeDisplayOptionsAria')"
               @click="closeMobileDisplayModal"
             >
               <X aria-hidden="true" />
@@ -2234,6 +2270,7 @@ function getLabelPriority(
     :open="ghostLineStationModalOpen"
     :initial-line="ghostLineStationLine"
     :initial-family="ghostLineStationFamily"
+    :initial-station="ghostLineStationStation"
     :show-dashboard-selector="true"
     :dashboard-options="stationBoardDashboardOptions"
     :default-dashboard-id="DEFAULT_TRANSIT_PLACE_ID"
@@ -2255,7 +2292,7 @@ function getLabelPriority(
           aria-labelledby="line-map-confirmation-title"
         >
           <strong id="line-map-confirmation-title">
-            Station ajoutée à l'écran d'accueil
+            {{ t("lineMap.picker.favoriteConfirmationTitle") }}
           </strong>
           <button type="button" @click="favoriteConfirmationOpen = false">
             OK

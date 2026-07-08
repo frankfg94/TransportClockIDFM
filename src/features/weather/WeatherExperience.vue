@@ -7,6 +7,7 @@ import {
   Flame,
   X,
 } from "lucide-vue-next";
+import { useI18n } from "../../i18n";
 import { useWeatherExperience } from "./useWeatherExperience";
 import type { WeatherAlert, WeatherConditionKind } from "./types";
 
@@ -18,6 +19,7 @@ const {
   dismissedAlertKey,
   dismissAlert,
 } = useWeatherExperience();
+const { d, t } = useI18n();
 
 const alert = computed(() => weather.value?.alert);
 const effectiveMode = computed(() =>
@@ -329,39 +331,43 @@ const rainDroplets = [
 
 function alertTitle(value: WeatherAlert): string {
   if (value.kind === "heat") {
-    return `Canicule aujourd'hui`;
+    return t("weather.alert.heatToday");
   }
 
   if (value.kind === "snow") {
-    return `Neige prévue dans ${value.startsInMinutes} min`;
+    return t("weather.alert.snowIn", { minutes: value.startsInMinutes });
   }
 
   if (value.kind === "storm") {
-    return `Orage prévu dans ${value.startsInMinutes} min`;
+    return t("weather.alert.stormIn", { minutes: value.startsInMinutes });
   }
 
-  return `Pluie prévue dans ${value.startsInMinutes} min`;
+  return t("weather.alert.rainIn", { minutes: value.startsInMinutes });
 }
 
 function alertAdvice(value: WeatherAlert): string {
   if (value.kind === "heat") {
-    return "Prends de l'eau et évite les trajets exposés.";
+    return t("weather.alert.heatAdvice");
   }
 
   if (value.kind === "snow") {
-    return "Prévois plus de marge pour rejoindre la station.";
+    return t("weather.alert.snowAdvice");
   }
 
   if (value.kind === "storm") {
-    return `Prends un parapluie si tu pars après ${formatTime(value.umbrellaAfter ?? value.startsAt)}.`;
+    return t("weather.alert.umbrellaAdvice", {
+      time: formatTime(value.umbrellaAfter ?? value.startsAt),
+    });
   }
 
-  return `Prends un parapluie si tu pars après ${formatTime(value.umbrellaAfter ?? value.startsAt)}.`;
+  return t("weather.alert.umbrellaAdvice", {
+    time: formatTime(value.umbrellaAfter ?? value.startsAt),
+  });
 }
 
 function formatEnd(value: WeatherAlert): string {
   return typeof value.endsInMinutes === "number"
-    ? `fin dans ${value.endsInMinutes} min`
+    ? t("weather.alert.endsIn", { minutes: value.endsInMinutes })
     : "";
 }
 
@@ -380,7 +386,9 @@ function formatTemperature(value: WeatherAlert): string {
   return settings.value.weatherShowApparentTemperature &&
     typeof apparentTemperature === "number" &&
     Math.round(apparentTemperature) !== Math.round(temperature)
-    ? `${formattedTemperature} \u00B7 ressenti ${formatDegrees(apparentTemperature)}`
+    ? `${formattedTemperature} \u00B7 ${t("weather.apparent", {
+        temperature: formatDegrees(apparentTemperature),
+      })}`
     : formattedTemperature;
 }
 
@@ -393,10 +401,10 @@ function formatTime(value: string): string {
 
   return Number.isNaN(date.getTime())
     ? "--:--"
-    : new Intl.DateTimeFormat("fr-FR", {
+    : d(date, {
         hour: "2-digit",
         minute: "2-digit",
-      }).format(date);
+      });
 }
 
 function intensityDrops(value: WeatherAlert): string[] {
@@ -499,7 +507,7 @@ function alertIcon(value: WeatherAlert) {
       <button
         class="weather-alert__close"
         type="button"
-        aria-label="Masquer l'alerte météo"
+        :aria-label="t('weather.hideAlertAria')"
         @click="dismissAlert"
       >
         <X aria-hidden="true" />

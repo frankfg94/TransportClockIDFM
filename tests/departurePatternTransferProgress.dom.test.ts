@@ -180,13 +180,13 @@ describe("DeparturePatternModal transfer progress", () => {
 
     expect(wrapper.text()).toContain("Chargement des correspondances");
     expect(wrapper.text()).toContain("0/13");
-    expect(wrapper.text()).not.toContain("Réessayer");
+    expect(wrapper.text()).not.toContain("Reessayer");
 
     await vi.advanceTimersByTimeAsync(30_000);
     await nextTick();
 
-    expect(wrapper.text()).toContain("Correspondances bloquées");
-    expect(wrapper.text()).toContain("Réessayer");
+    expect(wrapper.text()).toContain("Correspondances bloquees");
+    expect(wrapper.text()).toContain("Reessayer");
 
     await wrapper
       .find(".pattern-flow-transfer-loader__retry")
