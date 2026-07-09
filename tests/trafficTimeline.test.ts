@@ -91,11 +91,38 @@ describe("pattern traffic timeline", () => {
       "future",
     ]);
   });
+
+  it("uses the textual interruption date instead of technical padding", () => {
+    const now = new Date(2026, 6, 9, 12, 0, 0).getTime();
+    const [item] = createPatternTrafficTimelineItems(
+      [
+        createDisruption(
+          "rer-a-cdg-etoile-july-14",
+          [{ begin: "20260708T030000", end: "20260715T030000" }],
+          {
+            message:
+              "Periode : toute la journee. Date : Le 14 juillet. La gare de Charles de Gaulle - Etoile ne sera pas desservie.",
+            title: "RER A : 14/7 Charles de Gaulle-Etoile non desservie",
+          },
+        ),
+      ],
+      stations,
+      edges,
+      now,
+    );
+
+    expect(item.dateKey).toBe("2026-07-14");
+    expect(item.start.toISOString()).toBe(new Date(2026, 6, 14).toISOString());
+    expect(item.end?.toISOString()).toBe(
+      new Date(2026, 6, 14, 23, 59, 59, 999).toISOString(),
+    );
+  });
 });
 
 function createDisruption(
   id: string,
   applicationPeriods: TrafficDisruption["applicationPeriods"],
+  overrides: Partial<TrafficDisruption> = {},
 ): TrafficDisruption {
   return {
     id,
@@ -104,5 +131,6 @@ function createDisruption(
     applicationPeriods,
     impactedLineRefs: ["line:test"],
     impactedStopNames: [],
+    ...overrides,
   };
 }

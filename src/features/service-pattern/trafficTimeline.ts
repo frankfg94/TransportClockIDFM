@@ -1,5 +1,8 @@
 import { getDisruptionTone, type TrafficTone } from "../traffic/trafficPresentation";
-import { parseTrafficDate } from "../traffic/trafficTiming";
+import {
+  getTrafficDisruptionTextPeriod,
+  parseTrafficDate,
+} from "../traffic/trafficTiming";
 import type { TrafficDisruption, TrafficPeriod } from "../traffic/types";
 import {
   analyzeTrafficImpacts,
@@ -64,7 +67,10 @@ export function getDaysUntilTrafficTimelineItem(
   item: PatternTrafficTimelineItem,
   now = Date.now(),
 ): number {
-  return Math.max(0, Math.ceil((item.start.getTime() - now) / (24 * 60 * MINUTE_MS)));
+  return Math.max(
+    0,
+    Math.ceil((item.start.getTime() - now) / (24 * 60 * MINUTE_MS)),
+  );
 }
 
 function createFutureTimelineDisruptions(
@@ -73,46 +79,49 @@ function createFutureTimelineDisruptions(
   edges: PatternTrafficEdge[],
   now: number,
 ): PatternTrafficTimelineDisruption[] {
-  return disruption.applicationPeriods.flatMap((period) => {
-      const start = parseTrafficDate(period.begin);
+  const textPeriod = getTrafficDisruptionTextPeriod(disruption, now);
+  const periods = textPeriod ? [textPeriod] : disruption.applicationPeriods;
 
-      if (!start || Number.isNaN(start.getTime()) || start.getTime() <= now) {
-        return [];
-      }
+  return periods.flatMap((period) => {
+    const start = parseTrafficDate(period.begin);
 
-      const end = parseTrafficDate(period.end);
-      const impactAnalysis = analyzeTrafficImpacts([disruption], stations, edges);
-      const impactedStationCount = getImpactedStationCount(
-        disruption,
-        impactAnalysis,
-      );
-      const interruptedSegmentCount = impactAnalysis.segments.filter(
-        (segment) => segment.kind === "interruption",
-      ).length;
-      const durationMinutes =
-        end && !Number.isNaN(end.getTime()) && end.getTime() > start.getTime()
-          ? Math.round((end.getTime() - start.getTime()) / MINUTE_MS)
-          : undefined;
-      const item: PatternTrafficTimelineDisruption = {
-        disruption,
-        period,
-        start,
-        impactAnalysis,
-        impactedStationCount,
-        interruptedSegmentCount,
-        tone: getDisruptionTone(disruption),
-      };
+    if (!start || Number.isNaN(start.getTime()) || start.getTime() <= now) {
+      return [];
+    }
 
-      if (end && !Number.isNaN(end.getTime())) {
-        item.end = end;
-      }
+    const end = parseTrafficDate(period.end);
+    const impactAnalysis = analyzeTrafficImpacts([disruption], stations, edges);
+    const impactedStationCount = getImpactedStationCount(
+      disruption,
+      impactAnalysis,
+    );
+    const interruptedSegmentCount = impactAnalysis.segments.filter(
+      (segment) => segment.kind === "interruption",
+    ).length;
+    const durationMinutes =
+      end && !Number.isNaN(end.getTime()) && end.getTime() > start.getTime()
+        ? Math.round((end.getTime() - start.getTime()) / MINUTE_MS)
+        : undefined;
+    const item: PatternTrafficTimelineDisruption = {
+      disruption,
+      period,
+      start,
+      impactAnalysis,
+      impactedStationCount,
+      interruptedSegmentCount,
+      tone: getDisruptionTone(disruption),
+    };
 
-      if (durationMinutes !== undefined) {
-        item.durationMinutes = durationMinutes;
-      }
+    if (end && !Number.isNaN(end.getTime())) {
+      item.end = end;
+    }
 
-      return [item];
-    });
+    if (durationMinutes !== undefined) {
+      item.durationMinutes = durationMinutes;
+    }
+
+    return [item];
+  });
 }
 
 function createTimelineItem(

@@ -17,6 +17,7 @@ export {
   getCurrentAndUpcomingTrafficWarningDisruptions,
   getCurrentTrafficDisruptions,
   getTrafficDisruptionDisplayPeriod,
+  getTrafficDisruptionTextPeriod,
   getTrafficDisruptionTiming,
   getUpcomingTrafficDisruptions,
   getUpcomingTrafficWarningStart,
