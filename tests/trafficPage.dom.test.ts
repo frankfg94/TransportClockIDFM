@@ -1,6 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import TrafficPage from "../src/features/traffic/TrafficPage.vue";
 import type { TrafficResponse } from "../src/features/traffic/types";
 
 const trafficResponse: TrafficResponse = {
@@ -56,12 +55,29 @@ const trafficResponse: TrafficResponse = {
         },
       ],
     },
+    {
+      lineRef: "line:IDFM:C01074",
+      status: "disrupted",
+      disruptions: [
+        {
+          id: "bus-74-incident",
+          title: "Incident bus",
+          message: "Le trafic est perturbe sur la ligne 74.",
+          kind: "incident",
+          applicationPeriods: [],
+          impactedLineRefs: ["line:IDFM:C01074"],
+          impactedStopNames: ["La Fourche"],
+        },
+      ],
+    },
   ],
 };
 
 afterEach(() => {
   window.localStorage.clear();
   vi.unstubAllGlobals();
+  vi.resetModules();
+  vi.doUnmock("#imports");
 });
 
 describe("TrafficPage", () => {
@@ -106,8 +122,7 @@ describe("TrafficPage", () => {
       value: fetchMock,
     });
 
-    const wrapper = mount(TrafficPage);
-    await flushPromises();
+    const wrapper = await mountTrafficPage();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toContain("C01743");
@@ -161,4 +176,89 @@ describe("TrafficPage", () => {
     expect(wrapper.text()).toContain("1 sept. 2026");
     expect(wrapper.text()).not.toContain("20260901T044500");
   });
+
+  it("opens and highlights a shared upcoming disruption from the URL", async () => {
+    const fetchMock = installTrafficFetchMock();
+    const wrapper = await mountTrafficPage({
+      alertId: "rer-b-upcoming-work",
+      lineRef: "line:IDFM:C01743",
+      trafficTab: "upcoming",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain("RER B");
+    expect(wrapper.text()).toContain("Travaux planifies");
+    expect(
+      wrapper
+        .get('[data-traffic-alert-id="rer-b-upcoming-work"]')
+        .classes(),
+    ).toContain("traffic-disruption--target");
+
+    const activeTab = wrapper.get(".traffic-timing-tabs__button--active");
+    expect(activeTab.text()).toContain("A venir");
+  });
+
+  it("opens a shared bus disruption without adding buses to normal traffic mode", async () => {
+    const fetchMock = installTrafficFetchMock();
+    const wrapper = await mountTrafficPage({
+      alertId: "bus-74-incident",
+      boardTitle: "La Fourche",
+      lineColor: "#6b7280",
+      lineMode: "bus",
+      lineName: "Bus 74",
+      lineRef: "line:IDFM:C01074",
+      lineShortName: "74",
+      lineTextColor: "#ffffff",
+      trafficTab: "current",
+    });
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain("C01074");
+    expect(wrapper.text()).toContain("BUS");
+    expect(wrapper.text()).toContain("Bus 74");
+    expect(wrapper.text()).toContain("Incident bus");
+    expect(
+      wrapper.get('[data-traffic-alert-id="bus-74-incident"]').classes(),
+    ).toContain("traffic-disruption--target");
+  });
 });
+
+function installTrafficFetchMock(): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL) => ({
+    ok: true,
+    json: async () => trafficResponse,
+  }));
+
+  vi.stubGlobal("fetch", fetchMock);
+  Object.defineProperty(window, "fetch", {
+    configurable: true,
+    value: fetchMock,
+  });
+
+  return fetchMock;
+}
+
+async function mountTrafficPage(
+  query: Record<string, string | undefined> = {},
+) {
+  vi.doMock("#imports", async (importOriginal) => {
+    const actual = await importOriginal<Record<string, unknown>>();
+
+    return {
+      ...actual,
+      useRoute: () => ({
+        params: {},
+        path: "/traffic",
+        query,
+      }),
+    };
+  });
+
+  const { default: TrafficPage } = await import(
+    "../src/features/traffic/TrafficPage.vue"
+  );
+  const wrapper = mount(TrafficPage);
+
+  await flushPromises();
+
+  return wrapper;
+}

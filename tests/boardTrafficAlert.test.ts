@@ -19,6 +19,46 @@ const messages: BoardTrafficAlertMessages = {
 };
 
 describe("board traffic alert", () => {
+  it("targets the current red interruption", () => {
+    const now = new Date(2026, 6, 9, 12, 0, 0).getTime();
+
+    expect(
+      getBoardTrafficAlertForReport(createReport([createCurrentInterruption()]), {
+        lookaheadDays: 10,
+        messages,
+        now,
+      }),
+    ).toEqual({
+      label: "Interruption",
+      target: {
+        alertId: "current-interruption",
+        lineRef: "line:IDFM:C01727",
+        trafficTab: "current",
+      },
+      tone: "red",
+    });
+  });
+
+  it("targets the current orange perturbation", () => {
+    const now = new Date(2026, 6, 9, 12, 0, 0).getTime();
+
+    expect(
+      getBoardTrafficAlertForReport(createReport([createReducedOfferDisruption()]), {
+        lookaheadDays: 10,
+        messages,
+        now,
+      }),
+    ).toEqual({
+      label: "Perturbation",
+      target: {
+        alertId: "rer-b-reduced-offer",
+        lineRef: "line:IDFM:C01727",
+        trafficTab: "current",
+      },
+      tone: "orange",
+    });
+  });
+
   it("uses the RER B textual same-day start instead of the PRIM midnight technical period", () => {
     const now = new Date(2026, 6, 9, 12, 0, 0).getTime();
     const disruption = createRerBEveningWork();
@@ -35,6 +75,11 @@ describe("board traffic alert", () => {
       }),
     ).toEqual({
       label: "Interruption a partir de 22h45",
+      target: {
+        alertId: "rer-b-evening-work",
+        lineRef: "line:IDFM:C01727",
+        trafficTab: "upcoming",
+      },
       tone: "upcoming",
     });
   });
@@ -53,6 +98,11 @@ describe("board traffic alert", () => {
       ),
     ).toEqual({
       label: "Perturbation - interruption a partir de 22h45",
+      target: {
+        alertId: "rer-b-evening-work",
+        lineRef: "line:IDFM:C01727",
+        trafficTab: "upcoming",
+      },
       tone: "upcoming",
     });
   });
@@ -71,6 +121,11 @@ describe("board traffic alert", () => {
       }),
     ).toEqual({
       label: "Interruption",
+      target: {
+        alertId: "rer-b-evening-work",
+        lineRef: "line:IDFM:C01727",
+        trafficTab: "upcoming",
+      },
       tone: "red",
     });
   });
@@ -113,6 +168,23 @@ function createRerBEveningWork(
     message:
       "Période : en semaine à partir de 22h45. Dates : du lundi 1er juin au jeudi 31 décembre. Le trafic est interrompu entre Châtelet Les Halles et Aérop. C De Gaulle 2 et entre Châtelet Les Halles et Mitry - Claye.",
     title: "RER B : Châtelet <-> Aéroport CDG2 - Mitry - Claye 01/06-31/12",
+  };
+}
+
+function createCurrentInterruption(): TrafficDisruption {
+  return {
+    applicationPeriods: [
+      {
+        begin: "20260709T030000",
+        end: "20260710T030000",
+      },
+    ],
+    id: "current-interruption",
+    impactedLineRefs: ["line:IDFM:C01727"],
+    impactedStopNames: [],
+    kind: "works",
+    message: "Le trafic est interrompu entre deux gares.",
+    title: "Interruption de trafic",
   };
 }
 

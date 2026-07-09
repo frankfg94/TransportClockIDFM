@@ -10,6 +10,7 @@ export {
   type BoardTrafficAlert,
   type BoardTrafficAlertMessages,
   type BoardTrafficAlertOptions,
+  type BoardTrafficAlertTarget,
   type BoardTrafficAlertTone,
 } from "./boardTrafficAlert";
 export {

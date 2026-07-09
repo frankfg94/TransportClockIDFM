@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { ChevronDown, Info, RefreshCw, TrafficCone } from "lucide-vue-next";
 import { useRoute } from "#imports";
 import LineIconBadge from "../../components/LineIconBadge.vue";
@@ -18,6 +18,7 @@ import {
 } from "../../services/idfm";
 import {
   createLinePresentation,
+  transitModeToFamily,
   transitFamilyToMode,
 } from "../../services/linePresentation";
 import { toServerApiUrl } from "../../services/serverApi";
@@ -31,6 +32,7 @@ import {
   type TrafficAlertPresentation,
 } from "./trafficPresentation";
 import type { LineSearchOption, TransitFamily } from "../../types/transit";
+import type { TransitMode } from "../../types/transit";
 import type {
   ActiveTrafficLine,
   TrafficDisruption,
@@ -38,6 +40,7 @@ import type {
   TrafficLineStatus,
   TrafficResponse,
 } from "./types";
+import { normalizeTrafficLineRef } from "./trafficNormalization";
 
 type TrafficLineSymbol = TrafficAlertPresentation["symbol"] | "roadwork" | "";
 
@@ -51,6 +54,7 @@ const errorMessage = ref("");
 const allLinesError = ref("");
 const configured = ref(true);
 const expandedLineRefs = ref(new Set<string>());
+const highlightedTrafficAlertId = ref("");
 const selectedTimingTabs = ref<Record<string, TrafficTimingTab>>({});
 const allLinesMode = ref(false);
 const scopeBurstKey = ref(0);
@@ -65,8 +69,28 @@ const reportByLineRef = computed(
 const isRatpDesign = computed(
   () => settings.value.trafficInfoDesign === "ratp",
 );
+const routeTrafficLineRef = computed(() => {
+  const lineRef = getRouteQueryValue("lineRef");
+
+  return lineRef ? normalizeTrafficLineRef(lineRef) : "";
+});
+const routeTrafficAlertId = computed(() => getRouteQueryValue("alertId") ?? "");
+const routeTrafficTab = computed<TrafficTimingTab>(() =>
+  getRouteQueryValue("trafficTab") === "upcoming" ? "upcoming" : "current",
+);
+const deepLinkedTrafficLine = computed(() => createDeepLinkedTrafficLine());
 const displayedLines = computed(() =>
-  allLinesMode.value ? allTrafficLines.value : activeLines.value,
+  includeDeepLinkedTrafficLine(
+    allLinesMode.value ? allTrafficLines.value : activeLines.value,
+  ),
+);
+const hasDisplayedBusLine = computed(() =>
+  displayedLines.value.some(
+    (line) =>
+      line.line.mode === "bus" ||
+      line.family === "BUS" ||
+      line.family === "NOCTILIEN",
+  ),
 );
 const groupedLines = computed(() => {
   const groups = new Map<string, ActiveTrafficLine[]>();
@@ -122,11 +146,23 @@ onMounted(() => {
   void initializeTrafficPage();
 });
 
-function getRoutePlaceId(): string | undefined {
-  const value = route.query.place;
-  const placeId = Array.isArray(value) ? value[0] : value;
+watch([routeTrafficLineRef, routeTrafficAlertId, routeTrafficTab], () => {
+  void nextTick(() => {
+    applyTrafficDeepLink();
+  });
+});
 
-  return typeof placeId === "string" ? placeId : undefined;
+function getRoutePlaceId(): string | undefined {
+  return getRouteQueryValue("place");
+}
+
+function getRouteQueryValue(name: string): string | undefined {
+  const value = route.query[name];
+  const firstValue = Array.isArray(value) ? value[0] : value;
+
+  return typeof firstValue === "string" && firstValue.trim()
+    ? firstValue
+    : undefined;
 }
 
 async function initializeTrafficPage(): Promise<void> {
@@ -167,6 +203,8 @@ async function loadTraffic(): Promise<void> {
     reports.value = payload.lines;
     generatedAt.value = payload.generatedAt;
     configured.value = payload.configured;
+    await nextTick();
+    applyTrafficDeepLink();
   } catch (error) {
     errorMessage.value =
       error instanceof Error
@@ -175,6 +213,77 @@ async function loadTraffic(): Promise<void> {
   } finally {
     loading.value = false;
   }
+}
+
+function includeDeepLinkedTrafficLine(lines: ActiveTrafficLine[]): ActiveTrafficLine[] {
+  const deepLine = deepLinkedTrafficLine.value;
+
+  if (!deepLine || lines.some((line) => line.navitiaLineRef === deepLine.navitiaLineRef)) {
+    return lines;
+  }
+
+  return [...lines, deepLine];
+}
+
+function createDeepLinkedTrafficLine(): ActiveTrafficLine | undefined {
+  const lineRef = routeTrafficLineRef.value;
+
+  if (!lineRef) {
+    return undefined;
+  }
+
+  const knownLine = [...activeLines.value, ...allTrafficLines.value].find(
+    (line) => line.navitiaLineRef === lineRef,
+  );
+
+  if (knownLine) {
+    return knownLine;
+  }
+
+  const mode = parseTrafficRouteMode(getRouteQueryValue("lineMode")) ?? "train";
+  const shortName = getRouteQueryValue("lineShortName") ?? getFallbackLineLabel(lineRef);
+  const longName = getRouteQueryValue("lineName") ?? shortName;
+  const presentation = createLinePresentation({
+    color: getRouteQueryValue("lineColor"),
+    id: lineRef,
+    longName,
+    mode,
+    ref: lineRef,
+    shortName,
+    textColor: getRouteQueryValue("lineTextColor"),
+  });
+  const boardTitle = getRouteQueryValue("boardTitle");
+
+  return {
+    boardIds: [],
+    boardTitles: boardTitle ? [boardTitle] : [],
+    family: transitModeToFamily(mode),
+    line: {
+      ref: lineRef,
+      shortName,
+      longName,
+      mode,
+      color: presentation.color,
+      textColor: presentation.textColor,
+      iconUrl: presentation.iconUrl,
+      iconUrls: presentation.iconUrls,
+    },
+    navitiaLineRef: lineRef,
+  };
+}
+
+function parseTrafficRouteMode(value?: string): TransitMode | undefined {
+  return value === "tram" ||
+    value === "rer" ||
+    value === "metro" ||
+    value === "bus" ||
+    value === "train"
+    ? value
+    : undefined;
+}
+
+function getFallbackLineLabel(lineRef: string): string {
+  return lineRef.match(/C\d{5}/iu)?.[0]?.replace(/^C/u, "") ?? lineRef;
 }
 
 async function toggleAllLinesMode(): Promise<void> {
@@ -314,6 +423,81 @@ function getVisibleDisruptions(report: TrafficLineReport): TrafficDisruption[] {
     : getCurrentDisruptions(report);
 }
 
+function applyTrafficDeepLink(): void {
+  const lineRef = routeTrafficLineRef.value;
+
+  if (!lineRef) {
+    highlightedTrafficAlertId.value = "";
+    return;
+  }
+
+  if (!displayedLines.value.some((line) => line.navitiaLineRef === lineRef)) {
+    return;
+  }
+
+  const report = reportByLineRef.value.get(lineRef);
+  const alertId = routeTrafficAlertId.value;
+  const trafficTab = report && alertId
+    ? resolveTrafficDeepLinkTab(report, alertId, routeTrafficTab.value)
+    : routeTrafficTab.value;
+
+  expandedLineRefs.value = new Set([lineRef]);
+  selectedTimingTabs.value = {
+    ...selectedTimingTabs.value,
+    [lineRef]: trafficTab,
+  };
+  highlightedTrafficAlertId.value = alertId;
+
+  if (alertId) {
+    void nextTick(() => {
+      scrollToHighlightedTrafficAlert();
+    });
+  }
+}
+
+function resolveTrafficDeepLinkTab(
+  report: TrafficLineReport,
+  alertId: string,
+  requestedTab: TrafficTimingTab,
+): TrafficTimingTab {
+  const requestedDisruptions =
+    requestedTab === "upcoming"
+      ? getUpcomingDisruptions(report)
+      : getCurrentDisruptions(report);
+
+  if (requestedDisruptions.some((disruption) => disruption.id === alertId)) {
+    return requestedTab;
+  }
+
+  if (getCurrentDisruptions(report).some((disruption) => disruption.id === alertId)) {
+    return "current";
+  }
+
+  if (getUpcomingDisruptions(report).some((disruption) => disruption.id === alertId)) {
+    return "upcoming";
+  }
+
+  return requestedTab;
+}
+
+function scrollToHighlightedTrafficAlert(): void {
+  const alertId = highlightedTrafficAlertId.value;
+
+  if (!alertId || typeof document === "undefined") {
+    return;
+  }
+
+  const element = Array.from(
+    document.querySelectorAll<HTMLElement>("[data-traffic-alert-id]"),
+  ).find((candidate) => candidate.dataset.trafficAlertId === alertId);
+
+  element?.scrollIntoView?.({
+    behavior: "smooth",
+    block: "center",
+    inline: "nearest",
+  });
+}
+
 function getCurrentDisruptions(report: TrafficLineReport): TrafficDisruption[] {
   return getCurrentTrafficDisruptions(report.disruptions);
 }
@@ -333,6 +517,8 @@ function getFamilyLabel(line: ActiveTrafficLine): string {
   if (line.family === "TRAM") return t("traffic.family.tram");
   if (line.family === "TRANSILIEN") return t("traffic.family.train");
   if (line.family === "METRO") return t("traffic.family.metro");
+  if (line.family === "BUS") return "BUS";
+  if (line.family === "NOCTILIEN") return "Noctilien";
 
   return t("traffic.family.other");
 }
@@ -684,6 +870,11 @@ function getLineToneClass(
                       getLineReport(line),
                     )"
                     :key="disruption.id"
+                    :class="{
+                      'traffic-disruption--target':
+                        highlightedTrafficAlertId === disruption.id,
+                    }"
+                    :data-traffic-alert-id="disruption.id"
                     :disruption="disruption"
                     compact
                     :show-header="false"
@@ -693,7 +884,10 @@ function getLineToneClass(
             </div>
           </article>
 
-          <div class="traffic-ratp-row traffic-ratp-row--bus">
+          <div
+            v-if="!hasDisplayedBusLine"
+            class="traffic-ratp-row traffic-ratp-row--bus"
+          >
             <div class="traffic-ratp-family" aria-hidden="true">
               <span>BUS</span>
             </div>
@@ -890,6 +1084,11 @@ function getLineToneClass(
                         getLineReport(line),
                       )"
                       :key="disruption.id"
+                      :class="{
+                        'traffic-disruption--target':
+                          highlightedTrafficAlertId === disruption.id,
+                      }"
+                      :data-traffic-alert-id="disruption.id"
                       :disruption="disruption"
                       :status-label="getStatusLabel(getLineReport(line).status)"
                     />
@@ -1333,6 +1532,14 @@ function getLineToneClass(
 .traffic-disruption--compact {
   background: #f8f9fc;
   box-shadow: none;
+}
+
+.traffic-disruption--target {
+  outline: 3px solid rgba(176, 0, 103, 0.38);
+  outline-offset: 3px;
+  box-shadow:
+    0 0 0 7px rgba(176, 0, 103, 0.08),
+    0 18px 44px rgba(16, 35, 63, 0.16);
 }
 
 .traffic-ratp-row--bus {

@@ -1613,13 +1613,39 @@ function openLinePage(board: TransitBoardConfig): void {
   );
 }
 
-function openTrafficPage(): void {
+function openTrafficPage(
+  board: TransitBoardConfig,
+  alert?: BoardTrafficAlert,
+): void {
   router.push({
     path: "/traffic",
-    query: {
-      place: activePlaceId.value,
-    },
+    query: createTrafficPageQuery(board, alert),
   });
+}
+
+function createTrafficPageQuery(
+  board: TransitBoardConfig,
+  alert?: BoardTrafficAlert,
+): Record<string, string> {
+  const query: Record<string, string> = {
+    place: activePlaceId.value,
+  };
+
+  if (!alert?.target) {
+    return query;
+  }
+
+  query.lineRef = alert.target.lineRef;
+  query.alertId = alert.target.alertId;
+  query.trafficTab = alert.target.trafficTab;
+  query.lineShortName = board.line.shortName;
+  query.lineName = board.line.longName;
+  query.lineMode = board.line.mode;
+  query.lineColor = board.line.color;
+  query.lineTextColor = board.line.textColor;
+  query.boardTitle = board.title;
+
+  return query;
 }
 
 function getBoardTrafficAlert(
@@ -2530,7 +2556,7 @@ onBeforeUnmount(() => {
                       updateHiddenDirectionIdsForBoard(board.id, $event)
                     "
                     @change-station="changeBoardStation(board, $event)"
-                    @open-traffic="openTrafficPage"
+                    @open-traffic="(alert) => openTrafficPage(board, alert)"
                     @remove="removeCustomBoard(board.id)"
                     @open-line-page="openLinePage"
                     @open-fullscreen-panel="openFullscreenPanel"

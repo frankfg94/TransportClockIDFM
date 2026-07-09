@@ -13,7 +13,14 @@ export type BoardTrafficAlertTone = "orange" | "red" | "upcoming";
 
 export interface BoardTrafficAlert {
   label: string;
+  target: BoardTrafficAlertTarget;
   tone: BoardTrafficAlertTone;
+}
+
+export interface BoardTrafficAlertTarget {
+  alertId: string;
+  lineRef: string;
+  trafficTab: "current" | "upcoming";
 }
 
 export interface BoardTrafficAlertMessages {
@@ -30,6 +37,16 @@ export interface BoardTrafficAlertOptions {
   lookaheadDays: number;
   messages: BoardTrafficAlertMessages;
   now?: number;
+}
+
+interface BoardScheduledTrafficInterruption {
+  disruption: TrafficLineReport["disruptions"][number];
+  scheduled: ScheduledTrafficInterruption;
+}
+
+interface BoardUpcomingTrafficInterruption {
+  disruption: TrafficLineReport["disruptions"][number];
+  start: Date;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -53,8 +70,21 @@ export function getBoardTrafficAlertForReport(
   if (
     currentDisruptions.some((disruption) => getDisruptionTone(disruption) === "red")
   ) {
+    const disruption = currentDisruptions.find(
+      (item) => getDisruptionTone(item) === "red",
+    );
+
+    if (!disruption) {
+      return undefined;
+    }
+
     return {
       label: options.messages.interruption,
+      target: createBoardTrafficAlertTarget(
+        report.lineRef,
+        disruption.id,
+        "current",
+      ),
       tone: "red",
     };
   }
@@ -68,6 +98,11 @@ export function getBoardTrafficAlertForReport(
   if (activeScheduledInterruption) {
     return {
       label: options.messages.interruption,
+      target: createBoardTrafficAlertTarget(
+        report.lineRef,
+        activeScheduledInterruption.disruption.id,
+        "upcoming",
+      ),
       tone: "red",
     };
   }
@@ -79,35 +114,58 @@ export function getBoardTrafficAlertForReport(
   );
 
   if (upcomingScheduledInterruption) {
-    const time = formatBoardTrafficStartTime(upcomingScheduledInterruption.start);
+    const time = formatBoardTrafficStartTime(
+      upcomingScheduledInterruption.scheduled.start,
+    );
 
     return {
       label: hasCurrentDisruption
         ? options.messages.disruptionAndInterruptionAt(time)
         : options.messages.interruptionAt(time),
+      target: createBoardTrafficAlertTarget(
+        report.lineRef,
+        upcomingScheduledInterruption.disruption.id,
+        "upcoming",
+      ),
       tone: "upcoming",
     };
   }
 
   if (hasCurrentDisruption) {
+    const disruption = currentDisruptions[0];
+
+    if (!disruption) {
+      return undefined;
+    }
+
     return {
       label: options.messages.disruption,
+      target: createBoardTrafficAlertTarget(
+        report.lineRef,
+        disruption.id,
+        "current",
+      ),
       tone: "orange",
     };
   }
 
-  const upcomingInterruptionStart = getNextBoardUpcomingInterruptionStart(
+  const upcomingInterruption = getNextBoardUpcomingInterruption(
     report.disruptions,
     now,
     options.lookaheadDays,
   );
 
-  return upcomingInterruptionStart
+  return upcomingInterruption
     ? {
         label: formatUpcomingBoardInterruptionLabel(
-          upcomingInterruptionStart,
+          upcomingInterruption.start,
           now,
           options.messages,
+        ),
+        target: createBoardTrafficAlertTarget(
+          report.lineRef,
+          upcomingInterruption.disruption.id,
+          "upcoming",
         ),
         tone: "upcoming",
       }
@@ -118,31 +176,63 @@ function getTodayScheduledBoardInterruption(
   disruptions: TrafficLineReport["disruptions"],
   now: number,
   active: boolean,
-): ScheduledTrafficInterruption | undefined {
+): BoardScheduledTrafficInterruption | undefined {
   return disruptions
     .filter((disruption) => getDisruptionTone(disruption) === "red")
-    .map((disruption) => getTodayScheduledTrafficInterruption(disruption, now))
+    .map((disruption) => {
+      const scheduled = getTodayScheduledTrafficInterruption(disruption, now);
+
+      return scheduled ? { disruption, scheduled } : undefined;
+    })
     .filter(
-      (scheduled): scheduled is ScheduledTrafficInterruption =>
-        scheduled !== undefined && scheduled.active === active,
+      (
+        scheduled,
+      ): scheduled is BoardScheduledTrafficInterruption =>
+        scheduled !== undefined && scheduled.scheduled.active === active,
+    )
+    .sort(
+      (left, right) =>
+        left.scheduled.start.getTime() - right.scheduled.start.getTime(),
+    )
+    .at(0);
+}
+
+function getNextBoardUpcomingInterruption(
+  disruptions: TrafficLineReport["disruptions"],
+  now: number,
+  lookaheadDays: number,
+): BoardUpcomingTrafficInterruption | undefined {
+  return disruptions
+    .filter((disruption) => getDisruptionTone(disruption) === "red")
+    .map((disruption) => {
+      const start = getUpcomingTrafficWarningStart(
+        disruption,
+        now,
+        lookaheadDays,
+      );
+
+      return start ? { disruption, start } : undefined;
+    })
+    .filter(
+      (
+        interruption,
+      ): interruption is BoardUpcomingTrafficInterruption =>
+        interruption !== undefined,
     )
     .sort((left, right) => left.start.getTime() - right.start.getTime())
     .at(0);
 }
 
-function getNextBoardUpcomingInterruptionStart(
-  disruptions: TrafficLineReport["disruptions"],
-  now: number,
-  lookaheadDays: number,
-): Date | undefined {
-  return disruptions
-    .filter((disruption) => getDisruptionTone(disruption) === "red")
-    .map((disruption) =>
-      getUpcomingTrafficWarningStart(disruption, now, lookaheadDays),
-    )
-    .filter((date): date is Date => Boolean(date))
-    .sort((left, right) => left.getTime() - right.getTime())
-    .at(0);
+function createBoardTrafficAlertTarget(
+  lineRef: string,
+  alertId: string,
+  trafficTab: BoardTrafficAlertTarget["trafficTab"],
+): BoardTrafficAlertTarget {
+  return {
+    alertId,
+    lineRef,
+    trafficTab,
+  };
 }
 
 function formatUpcomingBoardInterruptionLabel(

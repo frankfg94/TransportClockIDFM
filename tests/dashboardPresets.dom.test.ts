@@ -213,6 +213,70 @@ describe("dashboard presets", () => {
     wrapper.unmount();
   });
 
+  it("routes a home traffic chip to the precise shared alert URL", async () => {
+    installDashboardMocks({});
+    vi.stubGlobal("__IDFM_API_KEY_CONFIGURED__", true);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/traffic")) {
+        return {
+          ok: true,
+          json: async () => ({
+            configured: true,
+            generatedAt: "2026-07-09T08:00:00.000Z",
+            lines: [
+              {
+                lineRef: "line:IDFM:C01743",
+                status: "disrupted",
+                disruptions: [
+                  {
+                    id: "rer-b-work",
+                    title: "Travaux nocturnes",
+                    message: "Le trafic est interrompu entre deux gares.",
+                    kind: "works",
+                    applicationPeriods: [],
+                    impactedLineRefs: ["line:IDFM:C01743"],
+                    impactedStopNames: [],
+                  },
+                ],
+              },
+            ],
+            source: "prim-line-reports",
+          }),
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ available: true }),
+      };
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+
+    await vi.waitFor(() => {
+      expect(wrapper.find(".mock-traffic").exists()).toBe(true);
+    });
+
+    await wrapper.get(".mock-traffic").trigger("click");
+
+    expect(router.push).toHaveBeenLastCalledWith({
+      path: "/traffic",
+      query: expect.objectContaining({
+        alertId: "rer-b-work",
+        lineName: "RER B",
+        lineRef: "line:IDFM:C01743",
+        lineShortName: "B",
+        place: "home",
+        trafficTab: "current",
+      }),
+    });
+
+    wrapper.unmount();
+  });
+
   it("creates a custom place from the switcher and navigates to it", async () => {
     installDashboardMocks({});
     const { default: App } = await import("../src/App.vue");
@@ -517,11 +581,19 @@ function installDashboardMocks(
   }));
   vi.doMock("../src/components/TransitBoard.vue", () => ({
     default: defineComponent({
-      props: ["board"],
-      emits: ["open-fullscreen-panel"],
+      props: ["board", "trafficAlert"],
+      emits: ["open-fullscreen-panel", "open-traffic"],
       template: `
         <article class="mock-board">
           {{ board.title }}
+          <button
+            v-if="trafficAlert"
+            class="mock-traffic"
+            type="button"
+            @click="$emit('open-traffic', trafficAlert)"
+          >
+            {{ trafficAlert.label }}
+          </button>
           <button
             class="mock-fullscreen"
             type="button"

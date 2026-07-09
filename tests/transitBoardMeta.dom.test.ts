@@ -133,6 +133,11 @@ describe("TransitBoard departure metadata", () => {
         loading: false,
         trafficAlert: {
           label: "Interruption dans 4 jours",
+          target: {
+            alertId: "future-work",
+            lineRef: "line:test",
+            trafficTab: "upcoming",
+          },
           tone: "upcoming",
         },
       },
@@ -150,7 +155,17 @@ describe("TransitBoard departure metadata", () => {
 
     await chip.trigger("click");
 
-    expect(wrapper.emitted("open-traffic")).toHaveLength(1);
+    expect(wrapper.emitted("open-traffic")?.[0]).toEqual([
+      {
+        label: "Interruption dans 4 jours",
+        target: {
+          alertId: "future-work",
+          lineRef: "line:test",
+          trafficTab: "upcoming",
+        },
+        tone: "upcoming",
+      },
+    ]);
 
     wrapper.unmount();
   });

@@ -23,6 +23,7 @@ import {
   fetchStationTransfers,
   searchLineStations,
 } from "../services/idfm";
+import type { BoardTrafficAlert } from "../features/traffic";
 import type {
   Departure,
   DepartureServiceType,
@@ -41,12 +42,6 @@ type DeparturePatternPayload = {
 };
 
 type ClosedSummaryMode = "last" | "next";
-type TrafficAlertTone = "orange" | "red" | "upcoming";
-
-interface BoardTrafficAlert {
-  label: string;
-  tone: TrafficAlertTone;
-}
 
 const props = withDefaults(
   defineProps<{
@@ -73,7 +68,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   "change-station": [board: TransitBoardConfig];
-  "open-traffic": [];
+  "open-traffic": [alert: BoardTrafficAlert];
   remove: [];
   "open-line-page": [board: TransitBoardConfig];
   "open-fullscreen-panel": [board: TransitBoardConfig];
@@ -577,7 +572,7 @@ onUnmounted(() => {
             class="board-traffic-chip"
             :class="`board-traffic-chip--${trafficAlert.tone}`"
             type="button"
-            @click.stop="emit('open-traffic')"
+            @click.stop="emit('open-traffic', trafficAlert)"
           >
             {{ trafficAlert.label }}
           </button>
