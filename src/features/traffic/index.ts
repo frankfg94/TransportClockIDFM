@@ -6,6 +6,13 @@ export {
   normalizeTrafficLineRef,
 } from "./trafficNormalization";
 export {
+  getBoardTrafficAlertForReport,
+  type BoardTrafficAlert,
+  type BoardTrafficAlertMessages,
+  type BoardTrafficAlertOptions,
+  type BoardTrafficAlertTone,
+} from "./boardTrafficAlert";
+export {
   getCurrentAndUpcomingTrafficWarningDisruptions,
   getCurrentTrafficDisruptions,
   getTrafficDisruptionDisplayPeriod,
@@ -25,6 +32,11 @@ export {
   type TrafficAlertSymbol,
   type TrafficTone,
 } from "./trafficPresentation";
+export {
+  getTodayScheduledTrafficInterruption,
+  getTodayScheduledTrafficStart,
+  type ScheduledTrafficInterruption,
+} from "./trafficScheduledWarnings";
 export type {
   ActiveTrafficLine,
   TrafficDisruption,

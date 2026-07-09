@@ -188,6 +188,44 @@
   background: #ef4444;
 }
 
+.board-traffic-chip--upcoming {
+  animation: board-traffic-border-wave 2.8s linear infinite;
+  background:
+    linear-gradient(#ffffff, #ffffff) padding-box,
+    linear-gradient(
+        120deg,
+        rgba(176, 0, 103, 0.28),
+        rgba(255, 212, 0, 0.9),
+        rgba(37, 99, 235, 0.48),
+        rgba(176, 0, 103, 0.28)
+      )
+      border-box;
+  background-size: 100% 100%, 240% 240%;
+  border: 1px solid transparent;
+  color: #18142f;
+  box-shadow: 0 0 0 4px rgba(255, 212, 0, 0.08);
+}
+
+@keyframes board-traffic-border-wave {
+  0% {
+    background-position:
+      0 0,
+      0% 50%;
+  }
+
+  100% {
+    background-position:
+      0 0,
+      240% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-traffic-chip--upcoming {
+    animation: none;
+  }
+}
+
 .board__city {
   margin-top: 7px;
 }

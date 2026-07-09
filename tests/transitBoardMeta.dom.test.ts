@@ -122,6 +122,38 @@ describe("TransitBoard departure metadata", () => {
 
     wrapper.unmount();
   });
+
+  it("renders the upcoming interruption traffic chip", async () => {
+    const wrapper = mount(TransitBoard, {
+      props: {
+        board: createBoard(),
+        collapsedDirectionIds: [],
+        departures: [],
+        directionGroups: [],
+        loading: false,
+        trafficAlert: {
+          label: "Interruption dans 4 jours",
+          tone: "upcoming",
+        },
+      },
+      global: {
+        stubs: {
+          LineIconBadge: true,
+        },
+      },
+    });
+
+    const chip = wrapper.get(".board-traffic-chip");
+
+    expect(chip.text()).toBe("Interruption dans 4 jours");
+    expect(chip.classes()).toContain("board-traffic-chip--upcoming");
+
+    await chip.trigger("click");
+
+    expect(wrapper.emitted("open-traffic")).toHaveLength(1);
+
+    wrapper.unmount();
+  });
 });
 
 function createBoard(): TransitBoardConfig {

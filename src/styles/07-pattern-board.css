@@ -430,6 +430,14 @@
   width: 100%;
 }
 
+.pattern-flow-mobile-actions__menu .pattern-traffic-timeline-toggle {
+  border-radius: 8px;
+  box-shadow: none;
+  justify-content: flex-start;
+  min-height: 42px;
+  width: 100%;
+}
+
 .pattern-flow-mobile-actions__menu
   .pattern-flow-mode-combobox.material-combobox {
   min-width: 0;

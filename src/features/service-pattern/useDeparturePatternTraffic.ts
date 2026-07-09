@@ -34,6 +34,8 @@ interface UseDeparturePatternTrafficOptions {
   smartTrafficDetection: ComputedRef<boolean>;
   trafficReport: ComputedRef<TrafficLineReport | undefined>;
   includeUpcomingWarnings?: ComputedRef<boolean>;
+  selectedTrafficDisruptionIds?: ComputedRef<string[] | undefined>;
+  trafficEvaluationTimestamp?: ComputedRef<number | undefined>;
   warningLookaheadDays?: ComputedRef<number>;
 }
 
@@ -44,6 +46,8 @@ export function useDeparturePatternTraffic({
   smartTrafficDetection,
   trafficReport,
   includeUpcomingWarnings,
+  selectedTrafficDisruptionIds,
+  trafficEvaluationTimestamp,
   warningLookaheadDays,
 }: UseDeparturePatternTrafficOptions) {
   const fetchedTrafficReport = ref<TrafficLineReport>();
@@ -82,13 +86,33 @@ export function useDeparturePatternTraffic({
   const upcomingWarningLookaheadDays = computed(
     () => warningLookaheadDays?.value ?? 10,
   );
+  const selectedTrafficEvaluationTimestamp = computed(
+    () => trafficEvaluationTimestamp?.value,
+  );
+  const forcedTrafficDisruptionIds = computed(
+    () => selectedTrafficDisruptionIds?.value ?? [],
+  );
 
   const currentTrafficDisruptions = computed(() => {
-    const now = trafficTimingNow.value;
+    const selectedNow = selectedTrafficEvaluationTimestamp.value;
+    const now =
+      typeof selectedNow === "number" && Number.isFinite(selectedNow)
+        ? selectedNow
+        : trafficTimingNow.value;
     const disruptions = resolvedTrafficReport.value?.disruptions ?? [];
 
     if (!smartTrafficDetection.value || !patternTrafficLineRef.value) {
       return [];
+    }
+
+    if (forcedTrafficDisruptionIds.value.length > 0) {
+      const forcedIds = new Set(forcedTrafficDisruptionIds.value);
+
+      return disruptions.filter((disruption) => forcedIds.has(disruption.id));
+    }
+
+    if (typeof selectedNow === "number" && Number.isFinite(selectedNow)) {
+      return getCurrentTrafficDisruptions(disruptions, now);
     }
 
     return includeUpcomingTrafficWarnings.value
@@ -101,7 +125,13 @@ export function useDeparturePatternTraffic({
   });
 
   const trafficImpactKey = computed(() =>
-    [patternTrafficLineRef.value ?? "none"]
+    [
+      patternTrafficLineRef.value ?? "none",
+      selectedTrafficEvaluationTimestamp.value === undefined
+        ? "today"
+        : `at:${selectedTrafficEvaluationTimestamp.value}`,
+      forcedTrafficDisruptionIds.value.join(","),
+    ]
       .concat(
         currentTrafficDisruptions.value.map((disruption) => {
           const warningStart = getUpcomingTrafficWarningStart(
@@ -240,6 +270,7 @@ export function useDeparturePatternTraffic({
     refreshPatternTrafficReport,
     resolvedTrafficReport,
     showTrafficImpactPopup,
+    trafficTimingNow,
     trafficImpactKey,
   };
 }

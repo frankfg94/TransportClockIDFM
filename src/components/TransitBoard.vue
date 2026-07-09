@@ -41,7 +41,7 @@ type DeparturePatternPayload = {
 };
 
 type ClosedSummaryMode = "last" | "next";
-type TrafficAlertTone = "orange" | "red";
+type TrafficAlertTone = "orange" | "red" | "upcoming";
 
 interface BoardTrafficAlert {
   label: string;

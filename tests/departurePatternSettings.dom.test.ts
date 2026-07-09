@@ -1,5 +1,5 @@
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
-import { defineComponent, h } from "vue";
+import { defineComponent, h, nextTick, onMounted } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import DeparturePatternModal from "../src/features/service-pattern/DeparturePatternModal.vue";
 import { buildLinePatternViewFromTopology } from "../server/services/servicePattern/buildLinePatternView";
@@ -71,6 +71,9 @@ const VueFlowNodeStub = defineComponent({
   },
 });
 
+const vueFlowFitViewMock = vi.fn();
+const vueFlowSetViewportMock = vi.fn();
+
 const VueFlowTrafficStub = defineComponent({
   name: "VueFlow",
   props: {
@@ -83,8 +86,15 @@ const VueFlowTrafficStub = defineComponent({
       default: () => [],
     },
   },
-  emits: ["edge-click"],
+  emits: ["edge-click", "pane-ready"],
   setup(props, { emit, slots }) {
+    onMounted(() => {
+      emit("pane-ready", {
+        fitView: vueFlowFitViewMock,
+        setViewport: vueFlowSetViewportMock,
+      });
+    });
+
     return () =>
       h("div", { class: "vue-flow" }, [
         ...(props.nodes as Array<{ data?: unknown; type?: string }>).flatMap(
@@ -167,6 +177,8 @@ const COMPACT_STATION_NAME_TOP_OFFSET = 70;
 const CITY_ZONE_STATION_NAME_MIN_VERTICAL_GAP = 36;
 
 afterEach(() => {
+  vueFlowFitViewMock.mockReset();
+  vueFlowSetViewportMock.mockReset();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -1937,7 +1949,7 @@ describe("DeparturePatternModal settings", () => {
     wrapper.unmount();
   });
 
-  it("shows upcoming traffic warning markers ten days before the work starts", async () => {
+  it("keeps future interruptions out of the current line state before the work starts", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0));
 
@@ -1995,14 +2007,19 @@ describe("DeparturePatternModal settings", () => {
 
     await flushPromises();
 
-    const marker = wrapper.get(".pattern-flow-traffic-marker--interruption");
-
-    expect(marker.text()).toContain("Interruption prevue");
-    expect(marker.text()).toContain("Debute le");
-    expect(marker.text()).not.toContain("Trafic interrompu");
+    expect(wrapper.find(".pattern-flow-traffic-marker--interruption").exists()).toBe(
+      false,
+    );
     expect(
       wrapper.find(".pattern-flow-edge--traffic-interruption").exists(),
-    ).toBe(true);
+    ).toBe(false);
+
+    const toggle = wrapper.get(".pattern-traffic-timeline-toggle");
+    expect(toggle.text()).toContain("Trafic");
+    expect(toggle.text()).toContain("1");
+    expect(toggle.classes()).not.toContain(
+      "pattern-traffic-timeline-toggle--urgent",
+    );
 
     wrapper.unmount();
   });
@@ -2067,6 +2084,7 @@ describe("DeparturePatternModal settings", () => {
 
     expect(wrapper.find(".pattern-flow-traffic-marker").exists()).toBe(false);
     expect(wrapper.find(".pattern-flow-edge--traffic").exists()).toBe(false);
+    expect(wrapper.find(".pattern-traffic-timeline-toggle").exists()).toBe(true);
 
     wrapper.unmount();
   });
@@ -2130,9 +2148,193 @@ describe("DeparturePatternModal settings", () => {
 
     await flushPromises();
 
-    expect(wrapper.get(".pattern-flow-traffic-marker").text()).toContain(
-      "Interruption prevue",
+    expect(wrapper.find(".pattern-flow-traffic-marker").exists()).toBe(false);
+    expect(wrapper.find(".pattern-flow-edge--traffic").exists()).toBe(false);
+    expect(wrapper.get(".pattern-traffic-timeline-toggle").text()).toContain(
+      "J-11",
     );
+
+    wrapper.unmount();
+  });
+
+  it("opens the future traffic timeline and focuses the selected interrupted zone", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0));
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: createThreeStationTrafficPattern(),
+        showMiniMap: false,
+        trafficReport: {
+          lineRef: "line:test",
+          status: "planned",
+          disruptions: [
+            {
+              id: "future-a-c",
+              title: "Travaux prevus",
+              message:
+                "Le trafic sera interrompu entre Station A et Station C.",
+              kind: "works",
+              applicationPeriods: [
+                {
+                  begin: "20260720T120000",
+                  end: "20260721T120000",
+                },
+              ],
+              impactedLineRefs: ["line:test"],
+              impactedStopNames: [],
+            },
+          ],
+        },
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowTrafficStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    expect(wrapper.find(".pattern-flow-traffic-marker").exists()).toBe(false);
+
+    const toggle = wrapper.get(".pattern-traffic-timeline-toggle");
+    expect(toggle.text()).toContain("Trafic");
+    expect(toggle.text()).toContain("1");
+    expect(toggle.text()).toContain("J-19");
+    expect(toggle.classes()).not.toContain(
+      "pattern-traffic-timeline-toggle--urgent",
+    );
+
+    await toggle.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='pattern-traffic-timeline']").text()).toContain(
+      "1 station",
+    );
+
+    await wrapper.get(".pattern-traffic-timeline__item").trigger("click");
+    await nextTick();
+
+    expect(wrapper.find(".pattern-traffic-timeline__loader").exists()).toBe(true);
+
+    await flushPromises();
+
+    expect(wrapper.get(".pattern-flow-traffic-marker").text()).toContain(
+      "Trafic interrompu",
+    );
+    expect(vueFlowSetViewportMock).toHaveBeenCalled();
+    expect(vueFlowFitViewMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ padding: 0.18 }),
+    );
+    vi.advanceTimersByTime(240);
+    await nextTick();
+
+    expect(wrapper.find(".pattern-traffic-timeline__loader").exists()).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it("fits the whole VueFlow line when one timeline date has multiple interrupted zones", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0));
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: createFourStationTrafficPattern(),
+        showMiniMap: false,
+        trafficReport: {
+          lineRef: "line:test",
+          status: "planned",
+          disruptions: [
+            {
+              id: "future-a-b",
+              title: "Travaux secteur ouest",
+              message:
+                "Le trafic sera interrompu entre Station A et Station B.",
+              kind: "works",
+              applicationPeriods: [
+                {
+                  begin: "20260720T120000",
+                  end: "20260721T120000",
+                },
+              ],
+              impactedLineRefs: ["line:test"],
+              impactedStopNames: [],
+            },
+            {
+              id: "future-c-d",
+              title: "Travaux secteur est",
+              message:
+                "Le trafic sera interrompu entre Station C et Station D.",
+              kind: "works",
+              applicationPeriods: [
+                {
+                  begin: "20260720T180000",
+                  end: "20260721T120000",
+                },
+              ],
+              impactedLineRefs: ["line:test"],
+              impactedStopNames: [],
+            },
+          ],
+        },
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowTrafficStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+    await wrapper.get(".pattern-traffic-timeline-toggle").trigger("click");
+    await flushPromises();
+    await wrapper.get(".pattern-traffic-timeline__item").trigger("click");
+    await flushPromises();
+
+    expect(vueFlowFitViewMock).toHaveBeenCalledWith(
+      expect.objectContaining({ padding: 0.18 }),
+    );
+    expect(vueFlowSetViewportMock).not.toHaveBeenCalled();
 
     wrapper.unmount();
   });
@@ -2432,6 +2634,30 @@ function createThreeStationTrafficPattern(): DepartureCallingPattern {
           createRouteStop("station-a", "Station A", 652146, 6862288),
           createRouteStop("station-b", "Station B", 652646, 6862288),
           createRouteStop("station-c", "Station C", 653146, 6862288),
+        ],
+      },
+    ],
+  };
+}
+
+function createFourStationTrafficPattern(): DepartureCallingPattern {
+  return {
+    ...pattern,
+    calls: [
+      createCall("station-a", "Station A", "Paris", true),
+      createCall("station-b", "Station B", "Paris"),
+      createCall("station-c", "Station C", "Paris"),
+      createCall("station-d", "Station D", "Paris"),
+    ],
+    lineTopology: [
+      {
+        id: "traffic-sequence",
+        label: "Traffic sequence",
+        stops: [
+          createRouteStop("station-a", "Station A", 652146, 6862288),
+          createRouteStop("station-b", "Station B", 652646, 6862288),
+          createRouteStop("station-c", "Station C", 653146, 6862288),
+          createRouteStop("station-d", "Station D", 653646, 6862288),
         ],
       },
     ],

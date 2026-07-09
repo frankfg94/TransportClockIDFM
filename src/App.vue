@@ -30,10 +30,9 @@ import {
 } from "./features/app-settings";
 import { WeatherExperience } from "./features/weather";
 import {
-  getTrafficAlertPresentation,
-  getCurrentTrafficDisruptions,
+  getBoardTrafficAlertForReport,
   normalizeTrafficLineRef,
-  type TrafficAlertPresentation,
+  type BoardTrafficAlert,
 } from "./features/traffic";
 import { transitModeToFamily } from "./services/linePresentation";
 import {
@@ -112,11 +111,6 @@ const StationBoardModal = defineAsyncComponent(
 const WeatherForecastModal = defineAsyncComponent(
   () => import("./features/weather/WeatherForecastModal.vue"),
 );
-
-type BoardTrafficAlert = {
-  label: string;
-  tone: TrafficAlertPresentation["tone"];
-};
 
 interface FullscreenPanelDeparture {
   id: string;
@@ -848,9 +842,7 @@ async function refreshTrafficSummary(): Promise<void> {
 
   const lineRefs = Array.from(
     new Set(
-      visibleBoards.value
-        .filter((board) => board.line.mode !== "bus")
-        .map(resolveBoardTrafficLineRef),
+      visibleBoards.value.map(resolveBoardTrafficLineRef),
     ),
   );
 
@@ -1633,36 +1625,30 @@ function openTrafficPage(): void {
 function getBoardTrafficAlert(
   board: TransitBoardConfig,
 ): BoardTrafficAlert | undefined {
-  if (board.line.mode === "bus") {
-    return undefined;
-  }
-
   const report = trafficReportByLineRef.value.get(
     resolveBoardTrafficLineRef(board),
   );
-  const currentDisruptions = report
-    ? getCurrentTrafficDisruptions(report.disruptions)
-    : [];
 
-  if (
-    !report ||
-    currentDisruptions.length === 0 ||
-    ["normal", "unknown", "error"].includes(report.status)
-  ) {
+  if (!report) {
     return undefined;
   }
 
-  const alert = getTrafficAlertPresentation(currentDisruptions);
-
-  return alert
-    ? {
-        label:
-          alert.tone === "red"
-            ? t("board.traffic.interruption")
-            : t("board.traffic.disruption"),
-        tone: alert.tone,
-      }
-    : undefined;
+  return getBoardTrafficAlertForReport(report, {
+    lookaheadDays: settings.value.trafficWarningLookaheadDays,
+    messages: {
+      disruption: t("board.traffic.disruption"),
+      disruptionAndInterruptionAt: (time) =>
+        t("board.traffic.disruptionAndInterruptionAt", { time }),
+      interruption: t("board.traffic.interruption"),
+      interruptionAt: (time) =>
+        t("board.traffic.interruptionAt", { time }),
+      interruptionInDay: (count) =>
+        t("board.traffic.interruptionInDay", { count }),
+      interruptionInDays: (count) =>
+        t("board.traffic.interruptionInDays", { count }),
+      interruptionToday: t("board.traffic.interruptionToday"),
+    },
+  });
 }
 
 function resolveBoardTrafficLineRef(board: TransitBoardConfig): string {

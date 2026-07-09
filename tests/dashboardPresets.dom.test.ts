@@ -167,6 +167,52 @@ describe("dashboard presets", () => {
     expect(wrapper.find(".place-swipe-shell--enabled").exists()).toBe(true);
   });
 
+  it("loads home traffic chips for custom bus boards without adding them to the traffic page", async () => {
+    const state = createDefaultTransitPresetState(transitBoards);
+    const busBoard = createBusBoard();
+    const home = state.places.find((place) => place.id === "home");
+
+    home?.preferences.customBoards.push(busBoard);
+    home?.preferences.visibleBoardIds.push(busBoard.id);
+    saveTransitPresetState(state);
+    installDashboardMocks({});
+    vi.stubGlobal("__IDFM_API_KEY_CONFIGURED__", true);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/traffic")) {
+        return {
+          ok: true,
+          json: async () => ({
+            configured: true,
+            generatedAt: "2026-07-09T08:00:00.000Z",
+            lines: [],
+            source: "prim-line-reports",
+          }),
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ available: true }),
+      };
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+
+    await vi.waitFor(() => {
+      const trafficCall = fetchMock.mock.calls.find(([input]) =>
+        String(input).includes("/api/traffic"),
+      );
+
+      expect(trafficCall).toBeTruthy();
+      expect(String(trafficCall?.[0])).toContain("C01074");
+    });
+
+    wrapper.unmount();
+  });
+
   it("creates a custom place from the switcher and navigates to it", async () => {
     installDashboardMocks({});
     const { default: App } = await import("../src/App.vue");
@@ -520,6 +566,29 @@ function createBoard(id: string, stopAreaRef: string): TransitBoardConfig {
     schedule: {
       lineRef: "line:test",
       stopAreaRef,
+    },
+    maxDepartures: 8,
+  };
+}
+
+function createBusBoard(): TransitBoardConfig {
+  return {
+    id: "bus-74-la-fourche",
+    title: "La Fourche",
+    city: "Paris",
+    line: {
+      ref: "line:IDFM:C01074",
+      shortName: "74",
+      longName: "Bus 74",
+      mode: "bus",
+      color: "#6b7280",
+      textColor: "#ffffff",
+    },
+    monitoringPoints: [{ ref: "stop_area:IDFM:bus-74", label: "La Fourche" }],
+    directionGroups: [],
+    schedule: {
+      lineRef: "line:IDFM:C01074",
+      stopAreaRef: "stop_area:IDFM:bus-74",
     },
     maxDepartures: 8,
   };

@@ -13,7 +13,7 @@ import ContextMenu from "./ContextMenu.vue";
 import { useI18n } from "../i18n";
 import type { FullscreenStationPanelDesign } from "../features/app-settings";
 
-type TrafficAlertTone = "orange" | "red";
+type TrafficAlertTone = "orange" | "red" | "upcoming";
 
 interface FullscreenPanelDeparture {
   id: string;
@@ -1121,6 +1121,43 @@ onBeforeUnmount(() => {
 
 .fullscreen-station-panel__alert--red {
   background: #ef4444;
+}
+
+.fullscreen-station-panel__alert--upcoming {
+  animation: fullscreen-traffic-border-wave 2.8s linear infinite;
+  background:
+    linear-gradient(#ffffff, #ffffff) padding-box,
+    linear-gradient(
+        120deg,
+        rgba(176, 0, 103, 0.28),
+        rgba(255, 212, 0, 0.9),
+        rgba(37, 99, 235, 0.48),
+        rgba(176, 0, 103, 0.28)
+      )
+      border-box;
+  background-size: 100% 100%, 240% 240%;
+  border: 1px solid transparent;
+  color: #18142f;
+}
+
+@keyframes fullscreen-traffic-border-wave {
+  0% {
+    background-position:
+      0 0,
+      0% 50%;
+  }
+
+  100% {
+    background-position:
+      0 0,
+      240% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fullscreen-station-panel__alert--upcoming {
+    animation: none;
+  }
 }
 
 .fullscreen-station-panel__all-grid {

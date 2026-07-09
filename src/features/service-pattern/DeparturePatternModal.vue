@@ -72,11 +72,20 @@ import {
   type PatternTrafficImpact,
   type PatternTrafficImpactAnalysis,
   type PatternTrafficImpactSegment,
+  type PatternTrafficEdge,
+  type PatternTrafficStation,
 } from "./trafficImpactAnalysis";
 import {
   useDeparturePatternTraffic,
   type DeparturePatternTrafficAnalyzer,
 } from "./useDeparturePatternTraffic";
+import PatternTrafficTimeline from "./PatternTrafficTimeline.vue";
+import PatternTrafficTimelineToggle from "./PatternTrafficTimelineToggle.vue";
+import {
+  createPatternTrafficTimelineItems,
+  getDaysUntilTrafficTimelineItem,
+  type PatternTrafficTimelineItem,
+} from "./trafficTimeline";
 import {
   TRAFFIC_DISTURBANCE_COLOR,
   TRAFFIC_INTERRUPTION_COLOR,
@@ -170,6 +179,15 @@ interface PatternFlowEdgeData {
 type PatternVisualMode = "comfort" | "compact" | "realistic";
 type PatternCompactMode = "auto" | PatternVisualMode;
 
+interface PatternTrafficTimelineDisplayItem {
+  active: boolean;
+  dateLabel: string;
+  durationLabel?: string;
+  id: string;
+  severity: PatternTrafficTimelineItem["severity"];
+  stationCountLabel: string;
+}
+
 interface PatternGraphNode {
   id: string;
   label: string;
@@ -207,6 +225,9 @@ interface PatternFlowModel {
   nodes: PatternFlowNode[];
   stationNodes: PatternStationFlowNode[];
   edges: PatternFlowEdge[];
+  trafficEdges: PatternTrafficEdge[];
+  trafficPositions: Map<string, PatternLayoutPosition>;
+  trafficStations: PatternTrafficStation[];
   trafficAnalysis: PatternTrafficImpactAnalysis;
 }
 
@@ -222,6 +243,7 @@ interface PatternViewport {
 }
 
 interface PatternFlowViewportController {
+  fitView?: (options?: { duration?: number; padding?: number }) => unknown;
   setViewport?: (
     viewport: PatternViewport,
     options?: { duration?: number },
@@ -384,6 +406,11 @@ const patternFlowViewportSize = ref<PatternViewportSize>({
   width: 0,
   height: 0,
 });
+const trafficTimelineOpen = ref(false);
+const trafficTimelineLoadingItemId = ref<string>();
+const selectedTrafficTimelineItemId = ref<string>();
+const selectedTrafficDisruptionIds = ref<string[]>([]);
+const selectedTrafficTimestamp = ref<number>();
 const hydratedPattern = ref<DepartureCallingPattern>();
 const transferHydrationLoading = ref(false);
 const transferHydrationProgress = ref<PatternTransferHydrationProgress>({
@@ -402,6 +429,7 @@ let transferHydrationRateLimitTimer: number | undefined;
 let transferHydrationStalledTimer: number | undefined;
 let visualModeDecisionKey = "";
 let stationTooltipHideTimer: number | undefined;
+let trafficTimelineLoadingTimer: number | undefined;
 const missingNetexTownWarningKeys = new Set<string>();
 
 const serviceLabel = computed(() =>
@@ -546,14 +574,18 @@ const {
   activeTrafficImpact,
   analyzeCurrentTrafficImpacts,
   closeTrafficImpactPopup,
+  resolvedTrafficReport,
   showTrafficImpactPopup,
+  trafficTimingNow,
   trafficImpactKey,
 } = useDeparturePatternTraffic({
   open: computed(() => props.open),
   board: computed(() => props.board),
   smartTrafficDetection: computed(() => props.smartTrafficDetection),
   trafficReport: computed(() => props.trafficReport),
-  includeUpcomingWarnings: computed(() => true),
+  includeUpcomingWarnings: computed(() => false),
+  selectedTrafficDisruptionIds: computed(() => selectedTrafficDisruptionIds.value),
+  trafficEvaluationTimestamp: computed(() => selectedTrafficTimestamp.value),
   warningLookaheadDays: computed(() => props.trafficWarningLookaheadDays),
 });
 const transportModeIcon = computed(() =>
@@ -575,6 +607,85 @@ const flowModel = computed(() =>
     analyzeCurrentTrafficImpacts,
   ),
 );
+const trafficTimelineItems = computed(() => {
+  const report = resolvedTrafficReport.value;
+
+  if (!report || !props.smartTrafficDetection) {
+    return [];
+  }
+
+  return createPatternTrafficTimelineItems(
+    report.disruptions,
+    flowModel.value.trafficStations,
+    flowModel.value.trafficEdges,
+    trafficTimingNow.value,
+  );
+});
+const trafficTimelineItemCount = computed(() => trafficTimelineItems.value.length);
+const selectedTrafficTimelineItem = computed(() =>
+  selectedTrafficTimelineItemId.value
+    ? trafficTimelineItems.value.find(
+        (item) => item.id === selectedTrafficTimelineItemId.value,
+      )
+    : undefined,
+);
+const selectedTrafficTimelineIndex = computed(() =>
+  selectedTrafficTimelineItemId.value
+    ? trafficTimelineItems.value.findIndex(
+        (item) => item.id === selectedTrafficTimelineItemId.value,
+      )
+    : -1,
+);
+const nextTrafficTimelineItem = computed(() => trafficTimelineItems.value[0]);
+const trafficTimelineNextDelayLabel = computed(() =>
+  nextTrafficTimelineItem.value
+    ? formatTrafficTimelineDelay(nextTrafficTimelineItem.value)
+    : "",
+);
+const trafficTimelineDisplayItems = computed<PatternTrafficTimelineDisplayItem[]>(
+  () =>
+    trafficTimelineItems.value.map((item) => ({
+      active: item.id === selectedTrafficTimelineItemId.value,
+      dateLabel: formatTrafficTimelineDate(item.start),
+      durationLabel: formatTrafficTimelineDuration(item.durationMinutes),
+      id: item.id,
+      severity: item.severity,
+      stationCountLabel: formatTrafficTimelineStationCount(
+        item.impactedStationCount,
+      ),
+    })),
+);
+const selectedTrafficTimelineDisruptions = computed(
+  () =>
+    selectedTrafficTimelineItem.value?.disruptions.map(
+      (item) => item.disruption,
+    ) ?? [],
+);
+const hasPreviousTrafficTimelineItem = computed(
+  () => selectedTrafficTimelineIndex.value > 0,
+);
+const hasNextTrafficTimelineItem = computed(() => {
+  if (trafficTimelineItems.value.length === 0) {
+    return false;
+  }
+
+  return selectedTrafficTimelineIndex.value < trafficTimelineItems.value.length - 1;
+});
+
+watch(trafficTimelineItems, (items) => {
+  if (items.length === 0) {
+    trafficTimelineOpen.value = false;
+    clearSelectedTrafficTimeline();
+    return;
+  }
+
+  if (
+    selectedTrafficTimelineItemId.value &&
+    !items.some((item) => item.id === selectedTrafficTimelineItemId.value)
+  ) {
+    clearSelectedTrafficTimeline();
+  }
+});
 const patternFlowKey = computed(
   () =>
     `${displayPattern.value?.departureId ?? "empty"}:${
@@ -882,8 +993,11 @@ function syncPatternFlowViewportSize(): void {
   };
 }
 
-function focusPatternFlowOn(point: PatternViewportPoint): void {
-  const zoom = patternFlowViewport.value.zoom;
+function focusPatternFlowOn(
+  point: PatternViewportPoint,
+  preferredZoom?: number,
+): void {
+  const zoom = preferredZoom ?? patternFlowViewport.value.zoom;
   const viewport = {
     x: patternFlowViewportSize.value.width / 2 - point.x * zoom,
     y: patternFlowViewportSize.value.height / 2 - point.y * zoom,
@@ -894,6 +1008,196 @@ function focusPatternFlowOn(point: PatternViewportPoint): void {
   patternFlowViewportController.value?.setViewport?.(viewport, {
     duration: 220,
   });
+}
+
+function toggleTrafficTimeline(): void {
+  trafficTimelineOpen.value = !trafficTimelineOpen.value;
+}
+
+async function selectTrafficTimelineItem(itemId: string): Promise<void> {
+  const item = trafficTimelineItems.value.find((candidate) => candidate.id === itemId);
+
+  if (!item) {
+    return;
+  }
+
+  showTrafficTimelineLoading(item.id);
+  selectedTrafficTimelineItemId.value = item.id;
+  selectedTrafficDisruptionIds.value = item.disruptions.map(
+    (entry) => entry.disruption.id,
+  );
+  selectedTrafficTimestamp.value = item.start.getTime();
+  closeTrafficImpactPopup();
+
+  await nextTick();
+  focusTrafficTimelineSelection();
+  scheduleClearTrafficTimelineLoading(item.id);
+}
+
+async function resetTrafficTimelineToday(): Promise<void> {
+  clearTrafficTimelineLoading();
+  clearSelectedTrafficTimeline();
+  closeTrafficImpactPopup();
+
+  await nextTick();
+  patternFlowViewportController.value?.fitView?.({
+    duration: 240,
+    padding: 0.16,
+  });
+}
+
+function clearSelectedTrafficTimeline(): void {
+  clearTrafficTimelineLoading();
+
+  if (
+    selectedTrafficTimelineItemId.value === undefined &&
+    selectedTrafficTimestamp.value === undefined &&
+    selectedTrafficDisruptionIds.value.length === 0
+  ) {
+    return;
+  }
+
+  selectedTrafficTimelineItemId.value = undefined;
+  selectedTrafficDisruptionIds.value = [];
+  selectedTrafficTimestamp.value = undefined;
+}
+
+function showTrafficTimelineLoading(itemId: string): void {
+  clearTrafficTimelineLoadingTimer();
+  trafficTimelineLoadingItemId.value = itemId;
+}
+
+function scheduleClearTrafficTimelineLoading(itemId: string): void {
+  clearTrafficTimelineLoadingTimer();
+
+  if (typeof window === "undefined") {
+    if (trafficTimelineLoadingItemId.value === itemId) {
+      trafficTimelineLoadingItemId.value = undefined;
+    }
+    return;
+  }
+
+  trafficTimelineLoadingTimer = window.setTimeout(() => {
+    trafficTimelineLoadingTimer = undefined;
+
+    if (trafficTimelineLoadingItemId.value === itemId) {
+      trafficTimelineLoadingItemId.value = undefined;
+    }
+  }, 220);
+}
+
+function clearTrafficTimelineLoading(): void {
+  clearTrafficTimelineLoadingTimer();
+  trafficTimelineLoadingItemId.value = undefined;
+}
+
+function clearTrafficTimelineLoadingTimer(): void {
+  if (trafficTimelineLoadingTimer !== undefined) {
+    window.clearTimeout(trafficTimelineLoadingTimer);
+    trafficTimelineLoadingTimer = undefined;
+  }
+}
+
+function selectPreviousTrafficTimelineItem(): void {
+  const index = selectedTrafficTimelineIndex.value;
+
+  if (index <= 0) {
+    return;
+  }
+
+  void selectTrafficTimelineItem(trafficTimelineItems.value[index - 1].id);
+}
+
+function selectNextTrafficTimelineItem(): void {
+  const nextIndex =
+    selectedTrafficTimelineIndex.value < 0
+      ? 0
+      : selectedTrafficTimelineIndex.value + 1;
+  const nextItem = trafficTimelineItems.value[nextIndex];
+
+  if (!nextItem) {
+    return;
+  }
+
+  void selectTrafficTimelineItem(nextItem.id);
+}
+
+function focusTrafficTimelineSelection(): void {
+  const selectedItem = selectedTrafficTimelineItem.value;
+
+  if (!selectedItem) {
+    return;
+  }
+
+  const selectedDisruptionIds = new Set(
+    selectedItem.disruptions.map((item) => item.disruption.id),
+  );
+  const selectedSegments = flowModel.value.trafficAnalysis.segments.filter(
+    (segment) => selectedDisruptionIds.has(segment.disruption.id),
+  );
+  const interruptedSegments = selectedSegments.filter(
+    (segment) => segment.kind === "interruption",
+  );
+  const focusSegments =
+    interruptedSegments.length > 0 ? interruptedSegments : selectedSegments;
+
+  if (focusSegments.length !== 1) {
+    if (focusSegments.length > 1) {
+      patternFlowViewportController.value?.fitView?.({
+        duration: 260,
+        padding: 0.18,
+      });
+    }
+    return;
+  }
+
+  const focusPoint = getTrafficSegmentFocusPoint(focusSegments[0]);
+
+  if (!focusPoint) {
+    return;
+  }
+
+  focusPatternFlowOn(focusPoint, getTrafficTimelineFocusZoom());
+}
+
+function getTrafficSegmentFocusPoint(
+  segment: PatternTrafficImpactSegment,
+): PatternViewportPoint | undefined {
+  const stationPoints = segment.stationKeys
+    .map((stationKey) => flowModel.value.trafficPositions.get(stationKey))
+    .filter((point): point is PatternLayoutPosition => Boolean(point));
+  const points =
+    stationPoints.length > 0 ? stationPoints : getTrafficEdgeFocusPoints(segment);
+
+  if (points.length === 0) {
+    return undefined;
+  }
+
+  return {
+    x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+    y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+  };
+}
+
+function getTrafficEdgeFocusPoints(
+  segment: PatternTrafficImpactSegment,
+): PatternLayoutPosition[] {
+  return segment.edgeKeys.flatMap((edgeKey) => {
+    const [source, target] = edgeKey.split("--");
+
+    return [source, target]
+      .map((stationKey) =>
+        stationKey ? flowModel.value.trafficPositions.get(stationKey) : undefined,
+      )
+      .filter((point): point is PatternLayoutPosition => Boolean(point));
+  });
+}
+
+function getTrafficTimelineFocusZoom(): number {
+  const currentZoom = patternFlowViewport.value.zoom;
+  const minimumZoom = isPatternFlowFullscreen.value ? 0.78 : 0.72;
+
+  return Math.min(1.08, Math.max(currentZoom, minimumZoom));
 }
 
 function handlePatternEdgeClick(event: {
@@ -1254,14 +1558,16 @@ function createPatternFlow(
   const visibleDrawableEdges = drawableEdges.filter((edge) =>
     topology.visibleEdges.has(createEdgeKey(edge.source, edge.target)),
   );
-  const trafficAnalysis = analyzeTraffic(
-    graph.nodes.map((node) => ({ key: node.id, label: node.label })),
-    visibleDrawableEdges.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-    })),
-  );
+  const trafficStations = graph.nodes.map((node) => ({
+    key: node.id,
+    label: node.label,
+  }));
+  const trafficEdges = visibleDrawableEdges.map((edge) => ({
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+  }));
+  const trafficAnalysis = analyzeTraffic(trafficStations, trafficEdges);
   const stationNodes = graph.nodes.map((node) => {
     const position = topology.positions.get(node.id) ?? { x: 0, y: 0 };
     const nodePosition = {
@@ -1374,7 +1680,15 @@ function createPatternFlow(
     ),
   ];
 
-  return { nodes, stationNodes, edges, trafficAnalysis };
+  return {
+    nodes,
+    stationNodes,
+    edges,
+    trafficEdges,
+    trafficPositions: topology.positions,
+    trafficStations,
+    trafficAnalysis,
+  };
 }
 
 function createEmptyTrafficImpactAnalysis(): PatternTrafficImpactAnalysis {
@@ -1483,22 +1797,40 @@ function getTrafficMarkerStatusLabel(segment: PatternTrafficImpact): string {
 function getTrafficMarkerDetailLabel(
   segment: PatternTrafficImpact,
 ): string | undefined {
+  const selectedNow = selectedTrafficTimestamp.value;
+  const timingNow =
+    typeof selectedNow === "number" && Number.isFinite(selectedNow)
+      ? selectedNow
+      : Date.now();
   const warningStart = getUpcomingTrafficWarningStart(
     segment.disruption,
-    Date.now(),
+    timingNow,
     props.trafficWarningLookaheadDays,
   );
 
-  if (warningStart) {
+  if (warningStart && selectedNow === undefined) {
     return t("pattern.startsOn", {
       date: formatTrafficStartDate(warningStart),
     });
   }
 
-  const relativeRestartLabel = getTodayRestartRelativeLabel(segment);
+  const relativeRestartLabel =
+    selectedNow === undefined ? getTodayRestartRelativeLabel(segment) : undefined;
 
   if (relativeRestartLabel) {
     return relativeRestartLabel;
+  }
+
+  if (selectedNow !== undefined) {
+    const selectedPeriodEnd = parseTrafficDate(
+      getTrafficDisruptionDisplayPeriod(segment.disruption, selectedNow)?.end,
+    );
+
+    if (selectedPeriodEnd && !Number.isNaN(selectedPeriodEnd.getTime())) {
+      return t("pattern.resumesOn", {
+        date: formatTrafficStartDate(selectedPeriodEnd),
+      });
+    }
   }
 
   if (segment.restartTimeLabel) {
@@ -1511,6 +1843,10 @@ function getTrafficMarkerDetailLabel(
 }
 
 function isUpcomingTrafficWarning(segment: PatternTrafficImpact): boolean {
+  if (selectedTrafficTimestamp.value !== undefined) {
+    return false;
+  }
+
   return Boolean(
     getUpcomingTrafficWarningStart(
       segment.disruption,
@@ -1518,6 +1854,60 @@ function isUpcomingTrafficWarning(segment: PatternTrafficImpact): boolean {
       props.trafficWarningLookaheadDays,
     ),
   );
+}
+
+function formatTrafficTimelineDelay(item: PatternTrafficTimelineItem): string {
+  const days = getDaysUntilTrafficTimelineItem(item, trafficTimingNow.value);
+
+  return days <= 0 ? "J" : `J-${days}`;
+}
+
+function formatTrafficTimelineDate(date: Date): string {
+  return d(date, {
+    day: "numeric",
+    month: "short",
+    weekday: "short",
+  });
+}
+
+function formatTrafficTimelineStationCount(count: number): string {
+  return count > 1
+    ? t("pattern.trafficTimelineStationsOther", { count })
+    : t("pattern.trafficTimelineStationsOne", { count });
+}
+
+function formatTrafficTimelineDuration(minutes?: number): string | undefined {
+  if (minutes === undefined || minutes <= 0) {
+    return undefined;
+  }
+
+  if (minutes < 60) {
+    return minutes > 1
+      ? t("pattern.trafficTimelineDurationMinutes", { count: minutes })
+      : t("pattern.trafficTimelineDurationMinute", { count: minutes });
+  }
+
+  const hours = Math.ceil(minutes / 60);
+
+  if (hours < 48) {
+    return hours > 1
+      ? t("pattern.trafficTimelineDurationHours", { count: hours })
+      : t("pattern.trafficTimelineDurationHour", { count: hours });
+  }
+
+  const days = Math.ceil(hours / 24);
+
+  if (days < 60) {
+    return days > 1
+      ? t("pattern.trafficTimelineDurationDays", { count: days })
+      : t("pattern.trafficTimelineDurationDay", { count: days });
+  }
+
+  const months = Math.ceil(days / 30);
+
+  return months > 1
+    ? t("pattern.trafficTimelineDurationMonths", { count: months })
+    : t("pattern.trafficTimelineDurationMonth", { count: months });
 }
 
 function getTodayRestartRelativeLabel(
@@ -5069,6 +5459,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   transferHydrationRequest += 1;
   clearPatternDistanceLabelHideTimer();
+  clearTrafficTimelineLoadingTimer();
   resetTransferHydrationStallState();
   clearTransferHydrationRateLimitTimer();
   if (stationTooltipHideTimer !== undefined) {
@@ -5259,6 +5650,14 @@ onBeforeUnmount(() => {
                     class="pattern-flow-actions pattern-flow-actions--desktop"
                   >
                     <slot name="flow-actions-prefix"></slot>
+                    <PatternTrafficTimelineToggle
+                      v-if="trafficTimelineItemCount > 0"
+                      :active="trafficTimelineOpen"
+                      :count="trafficTimelineItemCount"
+                      :next-delay-label="trafficTimelineNextDelayLabel"
+                      :reduce-motion="reduceMotion"
+                      @toggle="toggleTrafficTimeline"
+                    />
                     <DistanceToggle
                       v-model="showPatternDistances"
                       class="pattern-flow-action-button"
@@ -5298,6 +5697,17 @@ onBeforeUnmount(() => {
                   <MobileActionsMenu :aria-label="t('pattern.optionsAria')">
                     <template #default="{ close }">
                       <slot name="flow-actions-prefix"></slot>
+                      <PatternTrafficTimelineToggle
+                        v-if="trafficTimelineItemCount > 0"
+                        :active="trafficTimelineOpen"
+                        :count="trafficTimelineItemCount"
+                        :next-delay-label="trafficTimelineNextDelayLabel"
+                        :reduce-motion="reduceMotion"
+                        @toggle="
+                          toggleTrafficTimeline();
+                          close();
+                        "
+                      />
                       <DistanceToggle
                         v-model="showPatternDistances"
                         class="pattern-flow-action-button"
@@ -5545,6 +5955,21 @@ onBeforeUnmount(() => {
                         :show-header="false"
                       />
                     </aside>
+                  </Transition>
+                  <Transition name="pattern-flow-traffic-popup">
+                    <PatternTrafficTimeline
+                      v-if="trafficTimelineOpen && trafficTimelineItemCount > 0"
+                      :has-next="hasNextTrafficTimelineItem"
+                      :has-previous="hasPreviousTrafficTimelineItem"
+                      :items="trafficTimelineDisplayItems"
+                      :loading-item-id="trafficTimelineLoadingItemId"
+                      :selected-disruptions="selectedTrafficTimelineDisruptions"
+                      :today-active="selectedTrafficTimelineItemId === undefined"
+                      @next="selectNextTrafficTimelineItem"
+                      @previous="selectPreviousTrafficTimelineItem"
+                      @reset-today="resetTrafficTimelineToday"
+                      @select="selectTrafficTimelineItem"
+                    />
                   </Transition>
                 </div>
               </div>
