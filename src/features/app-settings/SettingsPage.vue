@@ -1356,6 +1356,24 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
+      <label class="settings-toggle">
+        <input
+          type="checkbox"
+          :checked="settings.showInterruptionWalkingTimes"
+          @change="
+            updateSettings({
+              showInterruptionWalkingTimes: ($event.target as HTMLInputElement)
+                .checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>{{ t("settings.display.interruptionWalkingTimes") }}</strong>
+          <small>{{ t("settings.display.interruptionWalkingTimesDescription") }}</small>
+        </div>
+      </label>
+
       <div class="settings-row settings-row--range">
         <div>
           <strong>{{ t("settings.display.compactForkGap") }}</strong>

@@ -1460,7 +1460,7 @@
   background: currentColor;
   bottom: 100%;
   content: "";
-  height: 20px;
+  height: var(--traffic-marker-connector-height, 20px);
   left: 50%;
   opacity: 0.58;
   position: absolute;
@@ -1487,20 +1487,54 @@
 .pattern-flow-traffic-marker--interruption::before {
   background: #bd332b;
   bottom: calc(100% + 2px);
-  height: 54px;
+  height: var(--traffic-marker-connector-height, 54px);
   opacity: 1;
 }
 
 .pattern-flow-traffic-marker--interruption::after {
   background: #bd332b;
   border-radius: 50%;
-  bottom: calc(100% + 54px);
+  bottom: calc(100% + var(--traffic-marker-connector-height, 54px));
   content: "";
   height: 7px;
   left: 50%;
   position: absolute;
   transform: translateX(-50%);
   width: 7px;
+}
+
+.pattern-flow-traffic-walking {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(100, 116, 139, 0.22);
+  border-radius: 999px;
+  box-shadow: 0 4px 12px rgba(16, 35, 63, 0.1);
+  color: #64748b;
+  display: inline-flex;
+  font-size: 0.7rem;
+  font-weight: 850;
+  gap: 4px;
+  justify-content: center;
+  min-height: 26px;
+  padding: 4px 8px;
+  pointer-events: none;
+  position: relative;
+  width: 96px;
+}
+
+.pattern-flow-traffic-walking::before {
+  border-left: 1px dotted rgba(100, 116, 139, 0.64);
+  bottom: 100%;
+  content: "";
+  height: 18px;
+  left: 50%;
+  position: absolute;
+}
+
+.pattern-flow-traffic-walking svg {
+  height: 14px;
+  stroke-width: 2.25;
+  width: 14px;
 }
 
 .pattern-flow-traffic-marker--disturbance {
@@ -1744,6 +1778,19 @@
   svg {
   height: 13px;
   width: 13px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-traffic-walking,
+.pattern-flow-shell--realistic .pattern-flow-traffic-walking {
+  font-size: 0.62rem;
+  min-height: 24px;
+  padding: 3px 6px;
+  width: 84px;
+}
+
+.pattern-flow-shell--compact .pattern-flow-traffic-walking::before,
+.pattern-flow-shell--realistic .pattern-flow-traffic-walking::before {
+  height: 14px;
 }
 
 .pattern-flow-traffic-popup {

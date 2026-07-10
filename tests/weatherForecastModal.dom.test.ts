@@ -20,6 +20,7 @@ const baseSettings: AppSettings = {
   reduceMotion: false,
   compactLinePlanMode: "auto",
   patternRoundedCurves: false,
+  showInterruptionWalkingTimes: true,
   patternCompactBranchGap: 258,
   patternCompactForkGap: 158,
   patternRealisticMinGapCoefficient: 0.5,

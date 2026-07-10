@@ -35,6 +35,7 @@ describe("app settings", () => {
       navigationAutoHide: "none",
       compactLinePlanMode: "compact",
       patternRoundedCurves: true,
+      showInterruptionWalkingTimes: true,
       patternCompactBranchGap: 258,
       patternCompactForkGap: 158,
       patternRealisticMinGapCoefficient: 0.5,
@@ -79,6 +80,7 @@ describe("app settings", () => {
       navigationAutoHide: "always",
       compactLinePlanMode: "tiny",
       patternRoundedCurves: "yes",
+      showInterruptionWalkingTimes: "yes",
       patternCompactBranchGap: "9999",
       patternCompactForkGap: "-999",
       patternRealisticMinGapCoefficient: "2",
@@ -119,6 +121,7 @@ describe("app settings", () => {
     expect(settings.navigationAutoHide).toBe("none");
     expect(settings.compactLinePlanMode).toBe("compact");
     expect(settings.patternRoundedCurves).toBe(true);
+    expect(settings.showInterruptionWalkingTimes).toBe(true);
     expect(settings.patternCompactBranchGap).toBe(360);
     expect(settings.patternCompactForkGap).toBe(110);
     expect(settings.patternRealisticMinGapCoefficient).toBe(1.25);
@@ -145,6 +148,13 @@ describe("app settings", () => {
       latitude: 90,
       longitude: -180,
     });
+  });
+
+  it("preserves the interruption walking time preference", () => {
+    expect(
+      normalizeAppSettings({ showInterruptionWalkingTimes: false })
+        .showInterruptionWalkingTimes,
+    ).toBe(false);
   });
 
   it("accepts the realistic line plan mode", () => {

@@ -17,6 +17,7 @@
       :show-city-zones="settings.showPatternCityZones"
       :compact-mode="settings.compactLinePlanMode"
       :pattern-rounded-curves="settings.patternRoundedCurves"
+      :show-interruption-walking-times="settings.showInterruptionWalkingTimes"
       :pattern-compact-branch-gap="settings.patternCompactBranchGap"
       :pattern-compact-fork-gap="settings.patternCompactForkGap"
       :pattern-realistic-min-gap-coefficient="

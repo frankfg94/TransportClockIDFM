@@ -116,6 +116,7 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Espacement vertical compact");
     expect(wrapper.text()).toContain("258 px");
     expect(wrapper.text()).toContain("Courbes arrondies");
+    expect(wrapper.text()).toContain("Temps de marche lors d'une interruption");
     expect(wrapper.text()).toContain("Ecart des fourches compactes");
     expect(wrapper.text()).toContain("158 px");
     expect(wrapper.text()).toContain("Espacement realiste");
@@ -151,6 +152,27 @@ describe("SettingsPage", () => {
     await apparentTemperatureInput.setValue(false);
     expect(
       (apparentTemperatureInput.element as HTMLInputElement).checked,
+    ).toBe(false);
+
+    const interruptionWalkingTimesToggle = wrapper
+      .findAll("label.settings-toggle")
+      .find((label) =>
+        label.text().includes("Temps de marche lors d'une interruption"),
+      );
+
+    if (!interruptionWalkingTimesToggle) {
+      throw new Error("Missing interruption walking times setting");
+    }
+
+    const interruptionWalkingTimesInput = interruptionWalkingTimesToggle.find(
+      "input",
+    );
+    expect(
+      (interruptionWalkingTimesInput.element as HTMLInputElement).checked,
+    ).toBe(true);
+    await interruptionWalkingTimesInput.setValue(false);
+    expect(
+      (interruptionWalkingTimesInput.element as HTMLInputElement).checked,
     ).toBe(false);
 
     await wrapper.get('[aria-label="Mode du selecteur de lieux"]').trigger("click");

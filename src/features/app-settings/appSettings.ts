@@ -93,6 +93,7 @@ export interface AppSettings {
   reduceMotion: boolean;
   compactLinePlanMode: CompactLinePlanMode;
   patternRoundedCurves: boolean;
+  showInterruptionWalkingTimes: boolean;
   patternCompactBranchGap: number;
   patternCompactForkGap: number;
   patternRealisticMinGapCoefficient: number;
@@ -271,6 +272,7 @@ export function createDefaultAppSettings(): AppSettings {
     reduceMotion: false,
     compactLinePlanMode: "compact",
     patternRoundedCurves: true,
+    showInterruptionWalkingTimes: true,
     patternCompactBranchGap: PATTERN_COMPACT_BRANCH_GAP_DEFAULT,
     patternCompactForkGap: PATTERN_COMPACT_FORK_GAP_DEFAULT,
     patternRealisticMinGapCoefficient:
@@ -371,6 +373,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     patternRoundedCurves: readBoolean(
       value.patternRoundedCurves,
       defaults.patternRoundedCurves,
+    ),
+    showInterruptionWalkingTimes: readBoolean(
+      value.showInterruptionWalkingTimes,
+      defaults.showInterruptionWalkingTimes,
     ),
     patternCompactBranchGap: parsePatternCompactBranchGap(
       value.patternCompactBranchGap,

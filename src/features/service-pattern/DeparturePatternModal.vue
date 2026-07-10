@@ -24,6 +24,7 @@ import { Controls } from "@vue-flow/controls";
 import {
   Bus,
   Expand,
+  Footprints,
   Info,
   Minimize2,
   TriangleAlert,
@@ -90,6 +91,7 @@ import {
   TRAFFIC_DISTURBANCE_COLOR,
   TRAFFIC_INTERRUPTION_COLOR,
 } from "./trafficImpactStyles";
+import { createInterruptionWalkingTimes } from "./interruptionWalkingTimes";
 import { useI18n } from "../../i18n";
 
 import type {
@@ -122,10 +124,16 @@ type PatternTrafficMarkerFlowNode = Node<
   Record<string, never>,
   "traffic-marker"
 >;
+type PatternTrafficWalkingFlowNode = Node<
+  PatternTrafficWalkingNodeData,
+  Record<string, never>,
+  "traffic-walking"
+>;
 type PatternFlowNode =
   | PatternStationFlowNode
   | PatternCityZoneFlowNode
-  | PatternTrafficMarkerFlowNode;
+  | PatternTrafficMarkerFlowNode
+  | PatternTrafficWalkingFlowNode;
 type PatternFlowEdge = Edge<
   PatternFlowEdgeData,
   Record<string, never>,
@@ -164,12 +172,18 @@ interface PatternCityZoneNodeData {
 }
 
 interface PatternTrafficMarkerNodeData {
+  connectorHeight: number;
   key: string;
   kind: PatternTrafficImpact["kind"];
   statusLabel: string;
   detailLabel?: string;
   replacementBus: boolean;
   trafficImpact: PatternTrafficImpact;
+}
+
+interface PatternTrafficWalkingNodeData {
+  durationLabel: string;
+  edgeKey: string;
 }
 
 interface PatternFlowEdgeData {
@@ -347,6 +361,7 @@ const props = withDefaults(
     showCityZones?: boolean;
     compactMode?: PatternCompactMode;
     patternRoundedCurves?: boolean;
+    showInterruptionWalkingTimes?: boolean;
     patternCompactBranchGap?: number;
     patternCompactForkGap?: number;
     patternRealisticMinGapCoefficient?: number;
@@ -369,6 +384,7 @@ const props = withDefaults(
     showCityZones: true,
     compactMode: "compact",
     patternRoundedCurves: false,
+    showInterruptionWalkingTimes: true,
     patternCompactBranchGap: DEFAULT_COMPACT_BRANCH_GAP,
     patternCompactForkGap: DEFAULT_COMPACT_FORK_GAP,
     patternRealisticMinGapCoefficient:
@@ -604,6 +620,7 @@ const flowModel = computed(() =>
     patternDistanceLabelsLeaving.value,
     props.showCityZones,
     props.patternRoundedCurves,
+    props.showInterruptionWalkingTimes,
     analyzeCurrentTrafficImpacts,
   ),
 );
@@ -1538,6 +1555,7 @@ function createPatternFlow(
   distanceLabelsLeaving = false,
   showCityZones = true,
   roundedCurves = false,
+  showInterruptionWalkingTimes = true,
   analyzeTraffic: DeparturePatternTrafficAnalyzer = createEmptyTrafficImpactAnalysis,
 ): PatternFlowModel {
   const graph = buildPatternGraph(calls, lineTopology, fullLine);
@@ -1621,16 +1639,30 @@ function createPatternFlow(
         compact: layout.compact,
       })
     : [];
+  const trafficWalkingNodes = showInterruptionWalkingTimes
+    ? createTrafficWalkingFlowNodes({
+        segments: trafficAnalysis.segments,
+        edges: visibleDrawableEdges,
+        positions: topology.positions,
+        layout,
+      })
+    : [];
   const trafficMarkerNodes = createTrafficMarkerFlowNodes({
     segments: trafficAnalysis.segments,
     edges: visibleDrawableEdges,
     positions: topology.positions,
     layout,
     compact: layout.compact,
+    walkingEdgeKeys: new Set(
+      trafficWalkingNodes.flatMap((node) =>
+        node.data ? [node.data.edgeKey] : [],
+      ),
+    ),
   });
   const nodes: PatternFlowNode[] = [
     ...cityZoneNodes,
     ...stationNodes,
+    ...trafficWalkingNodes,
     ...trafficMarkerNodes,
   ];
   const activeRouteEdgeOrder = fullLine
@@ -1705,12 +1737,14 @@ function createTrafficMarkerFlowNodes({
   positions,
   layout,
   compact,
+  walkingEdgeKeys,
 }: {
   segments: PatternTrafficImpactSegment[];
   edges: PatternGraphEdge[];
   positions: Map<string, { x: number; y: number }>;
   layout: PatternLayoutOptions;
   compact: boolean;
+  walkingEdgeKeys: Set<string>;
 }): PatternTrafficMarkerFlowNode[] {
   const edgeByKey = new Map(
     edges.map((edge) => [createEdgeKey(edge.source, edge.target), edge]),
@@ -1723,8 +1757,15 @@ function createTrafficMarkerFlowNodes({
         return undefined;
       }
 
+      const hasWalkingTimes =
+        segment.kind === "interruption" &&
+        segment.edgeKeys.some((edgeKey) => walkingEdgeKeys.has(edgeKey));
       const markerWidth = getTrafficMarkerWidth(segment, compact);
-      const markerOffset = getTrafficMarkerOffset(segment, compact);
+      const markerOffset = getTrafficMarkerOffset(
+        segment,
+        compact,
+        hasWalkingTimes,
+      );
 
       return {
         id: `traffic-marker:${segment.id}`,
@@ -1740,6 +1781,8 @@ function createTrafficMarkerFlowNodes({
         class: `pattern-flow-traffic-marker-node pattern-flow-traffic-marker-node--${segment.kind}`,
         zIndex: 92,
         data: {
+          connectorHeight:
+            segment.kind === "interruption" ? markerOffset - 12 : 20,
           key: segment.id,
           kind: segment.kind,
           statusLabel: getTrafficMarkerStatusLabel(segment),
@@ -1766,12 +1809,83 @@ function getTrafficMarkerWidth(
 function getTrafficMarkerOffset(
   segment: PatternTrafficImpact,
   compact: boolean,
+  hasWalkingTimes = false,
 ): number {
   if (segment.kind === "interruption") {
+    if (hasWalkingTimes) {
+      return compact ? 188 : 164;
+    }
+
     return compact ? 74 : 66;
   }
 
   return compact ? 58 : 52;
+}
+
+function createTrafficWalkingFlowNodes({
+  segments,
+  edges,
+  positions,
+  layout,
+}: {
+  segments: PatternTrafficImpactSegment[];
+  edges: PatternGraphEdge[];
+  positions: Map<string, { x: number; y: number }>;
+  layout: PatternLayoutOptions;
+}): PatternTrafficWalkingFlowNode[] {
+  const edgeByKey = new Map(
+    edges.map((edge) => [createEdgeKey(edge.source, edge.target), edge]),
+  );
+  const width = layout.compact ? 84 : 96;
+
+  return createInterruptionWalkingTimes(segments, edges).flatMap((walkingTime) => {
+    const edge = edgeByKey.get(walkingTime.edgeKey);
+    const source = edge ? positions.get(edge.source) : undefined;
+    const target = edge ? positions.get(edge.target) : undefined;
+
+    if (!source || !target) {
+      return [];
+    }
+
+    return [
+      {
+        id: `traffic-walking:${walkingTime.edgeKey}`,
+        type: "traffic-walking",
+        position: {
+          x: (source.x + target.x) / 2 - width / 2,
+          y: Math.max(source.y, target.y) + layout.nodeHeight / 2 + 12,
+        },
+        draggable: false,
+        selectable: false,
+        connectable: false,
+        focusable: false,
+        class: "pattern-flow-traffic-walking-node",
+        zIndex: 94,
+        data: {
+          durationLabel: formatInterruptionWalkingDuration(walkingTime.minutes),
+          edgeKey: walkingTime.edgeKey,
+        },
+      } satisfies PatternTrafficWalkingFlowNode,
+    ];
+  });
+}
+
+function formatInterruptionWalkingDuration(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  if (hours === 0) {
+    return t("pattern.walkingDurationMinutes", { minutes });
+  }
+
+  if (remainingMinutes === 0) {
+    return t("pattern.walkingDurationHours", { hours });
+  }
+
+  return t("pattern.walkingDurationHoursMinutes", {
+    hours,
+    minutes: remainingMinutes,
+  });
 }
 
 function getTrafficMarkerStatusLabel(segment: PatternTrafficImpact): string {
@@ -5792,6 +5906,9 @@ onBeforeUnmount(() => {
                       <div
                         class="pattern-flow-traffic-marker"
                         :class="`pattern-flow-traffic-marker--${data.kind}`"
+                        :style="{
+                          '--traffic-marker-connector-height': `${data.connectorHeight}px`,
+                        }"
                       >
                         <span
                           v-if="data.replacementBus"
@@ -5828,6 +5945,20 @@ onBeforeUnmount(() => {
                             <span>{{ t("pattern.details") }}</span>
                           </button>
                         </span>
+                      </div>
+                    </template>
+                    <template #node-traffic-walking="{ data }">
+                      <div
+                        class="pattern-flow-traffic-walking"
+                        role="note"
+                        :aria-label="
+                          t('pattern.walkingTimeAria', {
+                            time: data.durationLabel,
+                          })
+                        "
+                      >
+                        <Footprints aria-hidden="true" />
+                        <span>{{ data.durationLabel }}</span>
                       </div>
                     </template>
                     <template #node-station="{ data }">
