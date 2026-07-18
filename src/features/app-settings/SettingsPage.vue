@@ -2,10 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { Pencil, Plus, Trash2 } from "lucide-vue-next";
 import AppModal from "../../components/AppModal.vue";
+import AppNotification, {
+  type AppNotificationTone,
+} from "../../components/AppNotification.vue";
 import MaterialCombobox, {
   type MaterialComboboxOption,
 } from "../../components/MaterialCombobox.vue";
 import PlaceNameModal from "../../components/PlaceNameModal.vue";
+import PluginViewer from "./PluginViewer.vue";
 import { transitBoards } from "../../config/transitBoards";
 import { MobileReleaseCard } from "../mobile-release";
 import {
@@ -40,6 +44,7 @@ import {
   transferBundleRequestSpacingOptions,
   transferBundleRetentionOptions,
   trafficInfoDefaultScopeOptions,
+  trafficCalendarImpactScopeOptions,
   trafficInfoDesignOptions,
   useAppSettings,
   wakeLockDurationOptions,
@@ -53,6 +58,7 @@ import {
   type NavigationAutoHide,
   type PlacePresetNavigationMode,
   type TrafficInfoDefaultScope,
+  type TrafficCalendarImpactScope,
   type TrafficInfoDesign,
   type TransferBundleRequestConcurrency,
   type TransferBundleRequestSpacingMs,
@@ -90,6 +96,11 @@ import {
 } from "../../storage/transitPreferences";
 import { useI18n, type LanguagePreference } from "../../i18n";
 import type { TransitBoardPreferences } from "../../types/transit";
+import {
+  calculateTrafficImpactSeverity,
+  calculateTrafficImpactTemporalMultiplier,
+  TRAFFIC_IMPACT_SEVERITY_MODEL,
+} from "../traffic/trafficImpactSeverity";
 
 const { settings, updateSettings, resetSettings } = useAppSettings();
 const { d, n, t } = useI18n();
@@ -106,7 +117,10 @@ const placeNameError = ref("");
 const selectedDisplayPlaceId = ref(DEFAULT_TRANSIT_PLACE_ID);
 const bundleSummaries = ref<TransferBundleSummary[]>([]);
 const localBundleSummaries = ref<TransferBundleSummary[]>([]);
-const settingsNotification = ref("");
+const settingsNotification = ref<{
+  message: string;
+  tone: AppNotificationTone;
+}>({ message: "", tone: "info" });
 const backendBundleCount = computed(() => bundleSummaries.value.length);
 const localBundleCount = computed(() => localBundleSummaries.value.length);
 const bundleCount = computed(
@@ -201,6 +215,76 @@ const compactLinePlanLocalizedOptions = computed(() =>
             : t("settings.options.compactLinePlan.realistic"),
   })),
 );
+const trafficCalendarImpactScopeLocalizedOptions = computed(() =>
+  trafficCalendarImpactScopeOptions.map((option) => ({
+    id: option.id,
+    label:
+      option.id === "interruptions-only"
+        ? t("settings.options.trafficCalendarScope.interruptionsOnly")
+        : t("settings.options.trafficCalendarScope.allImpacts"),
+  })),
+);
+const trafficTransferLabelKeys = {
+  RER: "settings.trafficCalendarEquation.transferModes.RER",
+  TRANSILIEN: "settings.trafficCalendarEquation.transferModes.TRANSILIEN",
+  METRO: "settings.trafficCalendarEquation.transferModes.METRO",
+  TRAM: "settings.trafficCalendarEquation.transferModes.TRAM",
+  CABLE: "settings.trafficCalendarEquation.transferModes.CABLE",
+  BUS: "settings.trafficCalendarEquation.transferModes.BUS",
+  NOCTILIEN: "settings.trafficCalendarEquation.transferModes.NOCTILIEN",
+} as const;
+const trafficTopologyLabelKeys = {
+  "small-branch": "settings.trafficCalendarEquation.topologyRoles.small-branch",
+  "major-branch": "settings.trafficCalendarEquation.topologyRoles.major-branch",
+  "trunk-end": "settings.trafficCalendarEquation.topologyRoles.trunk-end",
+  "trunk-core": "settings.trafficCalendarEquation.topologyRoles.trunk-core",
+} as const;
+const trafficImpactTransferRows = computed(() =>
+  Object.entries(TRAFFIC_IMPACT_SEVERITY_MODEL.transferWeights).map(
+    ([mode, weight]) => ({
+      id: mode,
+      label: t(trafficTransferLabelKeys[mode as keyof typeof trafficTransferLabelKeys]),
+      weight,
+    }),
+  ),
+);
+const trafficImpactTopologyRows = computed(() =>
+  Object.entries(TRAFFIC_IMPACT_SEVERITY_MODEL.topologyMultipliers).map(
+    ([role, multiplier]) => ({
+      id: role,
+      label: t(trafficTopologyLabelKeys[role as keyof typeof trafficTopologyLabelKeys]),
+      multiplier,
+    }),
+  ),
+);
+const trafficImpactEveningExampleWindow = {
+  startMinute: 22 * 60 + 45,
+  endMinute: 3 * 60,
+};
+const trafficImpactEveningExample = calculateTrafficImpactTemporalMultiplier([
+  trafficImpactEveningExampleWindow,
+]);
+const trafficImpactExampleScore = calculateTrafficImpactSeverity({
+  affectedStationKeys: ["example"],
+  stations: [
+    {
+      key: "example",
+      label: "Example",
+      transfers: [{ id: "rer-example", label: "RER", family: "RER" }],
+    },
+  ],
+  edges: [],
+  temporalMultipliersByStationKey: new Map([
+    ["example", trafficImpactEveningExample.multiplier],
+  ]),
+}).score;
+
+function formatTrafficMinuteOfDay(value: number): string {
+  const hour = Math.floor(value / 60) % 24;
+  const minute = value % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
 const trafficInfoDesignLocalizedOptions = computed(() =>
   trafficInfoDesignOptions.map((option) => ({
     id: option.id,
@@ -530,6 +614,12 @@ function getPlaceStationSummary(place: TransitPlacePreset): string {
     : t("settings.places.stationSummaryOther", { count });
 }
 
+function updateTrafficCalendarImpactScope(value: string): void {
+  updateSettings({
+    trafficCalendarImpactScope: value as TrafficCalendarImpactScope,
+  });
+}
+
 function updateTrafficInfoDesign(value: string): void {
   updateSettings({ trafficInfoDesign: value as TrafficInfoDesign });
 }
@@ -689,15 +779,18 @@ function resetSettingsWithNotification(): void {
   showSettingsNotification(t("settings.notifications.reset"));
 }
 
-function showSettingsNotification(message: string): void {
-  settingsNotification.value = message;
+function showSettingsNotification(
+  message: string,
+  tone: AppNotificationTone = "info",
+): void {
+  settingsNotification.value = { message, tone };
 
   if (settingsNotificationTimer) {
     clearTimeout(settingsNotificationTimer);
   }
 
   settingsNotificationTimer = setTimeout(() => {
-    settingsNotification.value = "";
+    settingsNotification.value = { message: "", tone: "info" };
     settingsNotificationTimer = undefined;
   }, 5_000);
 }
@@ -963,6 +1056,184 @@ onBeforeUnmount(() => {
           @update:model-value="updateTrafficInfoDefaultScope"
         />
       </div>
+      <div class="settings-row">
+        <div>
+          <strong>{{ t("settings.display.trafficCalendarScope") }}</strong>
+          <span>{{ t("settings.display.trafficCalendarScopeDescription") }}</span>
+        </div>
+        <MaterialCombobox
+          :model-value="settings.trafficCalendarImpactScope"
+          :options="trafficCalendarImpactScopeLocalizedOptions"
+          :aria-label="t('settings.display.trafficCalendarScopeAria')"
+          @update:model-value="updateTrafficCalendarImpactScope"
+        />
+      </div>
+
+      <article
+        class="traffic-impact-equation"
+        aria-labelledby="traffic-impact-equation-title"
+        data-testid="traffic-impact-equation"
+      >
+        <header>
+          <p class="eyebrow">{{ t("settings.trafficCalendarEquation.eyebrow") }}</p>
+          <h3 id="traffic-impact-equation-title">
+            {{ t("settings.trafficCalendarEquation.title") }}
+          </h3>
+          <p>{{ t("settings.trafficCalendarEquation.description") }}</p>
+        </header>
+
+        <code>{{ t("settings.trafficCalendarEquation.formula") }}</code>
+
+        <div class="traffic-impact-equation__tables">
+          <section>
+            <h4>{{ t("settings.trafficCalendarEquation.transferWeights") }}</h4>
+            <table>
+              <tbody>
+                <tr v-for="row in trafficImpactTransferRows" :key="row.id">
+                  <th scope="row">{{ row.label }}</th>
+                  <td>+{{ n(row.weight) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section>
+            <h4>{{ t("settings.trafficCalendarEquation.topology") }}</h4>
+            <table>
+              <tbody>
+                <tr v-for="row in trafficImpactTopologyRows" :key="row.id">
+                  <th scope="row">{{ row.label }}</th>
+                  <td>? {{ n(row.multiplier) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section>
+            <h4>{{ t("settings.trafficCalendarEquation.temporal") }}</h4>
+            <table>
+              <tbody>
+                <tr>
+                  <th scope="row">
+                    {{ t("settings.trafficCalendarEquation.temporalCoverage") }}
+                  </th>
+                  <td>
+                    {{ t("settings.trafficCalendarEquation.temporalCoverageValue", {
+                      minutes: n(
+                        TRAFFIC_IMPACT_SEVERITY_MODEL.temporal.minutesPerDay,
+                      ),
+                    }) }}
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">
+                    {{ t("settings.trafficCalendarEquation.offPeak") }}
+                  </th>
+                  <td>
+                    {{
+                      t("settings.trafficCalendarEquation.offPeakValue", {
+                        start: formatTrafficMinuteOfDay(
+                          TRAFFIC_IMPACT_SEVERITY_MODEL.temporal
+                            .offPeakStartMinute,
+                        ),
+                        end: formatTrafficMinuteOfDay(
+                          TRAFFIC_IMPACT_SEVERITY_MODEL.temporal
+                            .offPeakEndMinute,
+                        ),
+                        coefficient: n(
+                          TRAFFIC_IMPACT_SEVERITY_MODEL.temporal
+                            .offPeakMultiplier,
+                        ),
+                      })
+                    }}
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">
+                    {{ t("settings.trafficCalendarEquation.unspecifiedTime") }}
+                  </th>
+                  <td>
+                    &times;
+                    {{
+                      n(
+                        TRAFFIC_IMPACT_SEVERITY_MODEL.temporal
+                          .unspecifiedMultiplier,
+                      )
+                    }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section>
+            <h4>{{ t("settings.trafficCalendarEquation.thresholds") }}</h4>
+            <table>
+              <tbody>
+                <tr>
+                  <th scope="row">{{ t("pattern.trafficCalendarSeverity.low") }}</th>
+                  <td>
+                    &lt; {{ n(TRAFFIC_IMPACT_SEVERITY_MODEL.thresholds.medium) }}
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">
+                    {{ t("pattern.trafficCalendarSeverity.medium") }}
+                  </th>
+                  <td>
+                    {{ n(TRAFFIC_IMPACT_SEVERITY_MODEL.thresholds.medium) }}
+                    ? score &lt;
+                    {{ n(TRAFFIC_IMPACT_SEVERITY_MODEL.thresholds.high) }}
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">{{ t("pattern.trafficCalendarSeverity.high") }}</th>
+                  <td>
+                    ? {{ n(TRAFFIC_IMPACT_SEVERITY_MODEL.thresholds.high) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        </div>
+
+        <p class="traffic-impact-equation__topology-note">
+          {{
+            t("settings.trafficCalendarEquation.topologyDeduction", {
+              ratio: n(
+                TRAFFIC_IMPACT_SEVERITY_MODEL.smallBranchRatio * 100,
+              ),
+            })
+          }}
+        </p>
+        <p class="traffic-impact-equation__example">
+          {{
+            t("settings.trafficCalendarEquation.example", {
+              base: n(TRAFFIC_IMPACT_SEVERITY_MODEL.baseStationScore),
+              transfer: n(
+                TRAFFIC_IMPACT_SEVERITY_MODEL.transferWeights.RER,
+              ),
+              coefficient: n(
+                TRAFFIC_IMPACT_SEVERITY_MODEL.topologyMultipliers[
+                  "trunk-core"
+                ],
+              ),
+              temporal: n(trafficImpactEveningExample.multiplier),
+              start: formatTrafficMinuteOfDay(
+                trafficImpactEveningExampleWindow.startMinute,
+              ),
+              end: formatTrafficMinuteOfDay(
+                trafficImpactEveningExampleWindow.endMinute,
+              ),
+              score: n(trafficImpactExampleScore),
+            })
+          }}
+        </p>
+        <p class="traffic-impact-equation__note">
+          {{ t("settings.trafficCalendarEquation.exclusions") }}
+        </p>
+      </article>
+
 
       <label class="settings-toggle">
         <input
@@ -1481,7 +1752,12 @@ onBeforeUnmount(() => {
           <small>{{ t("settings.display.reduceMotionDescription") }}</small>
         </div>
       </label>
+
     </section>
+
+    <PluginViewer
+      @notify="showSettingsNotification($event.message, $event.tone)"
+    />
 
     <MobileReleaseCard />
 
@@ -1625,18 +1901,12 @@ onBeforeUnmount(() => {
       @submit="submitPlaceName"
     />
 
-    <Teleport to="body">
-      <Transition name="settings-notification">
-        <aside
-          v-if="settingsNotification"
-          class="settings-notification"
-          role="status"
-          aria-live="polite"
-        >
-          {{ settingsNotification }}
-        </aside>
-      </Transition>
+    <AppNotification
+      :message="settingsNotification.message"
+      :tone="settingsNotification.tone"
+    />
 
+    <Teleport to="body">
       <div
         v-if="bundlesModalOpen"
         class="settings-bundle-modal-backdrop"
@@ -2217,34 +2487,6 @@ onBeforeUnmount(() => {
   margin-top: 22px;
 }
 
-.settings-notification {
-  background: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  bottom: 24px;
-  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.24);
-  color: #000000;
-  font-weight: 900;
-  max-width: min(420px, calc(100vw - 32px));
-  padding: 14px 16px;
-  position: fixed;
-  right: 24px;
-  z-index: 11000;
-}
-
-.settings-notification-enter-active,
-.settings-notification-leave-active {
-  transition:
-    opacity 180ms ease,
-    transform 180ms ease;
-}
-
-.settings-notification-enter-from,
-.settings-notification-leave-to {
-  opacity: 0;
-  transform: translateY(10px);
-}
-
 .eyebrow {
   color: #5136ff;
   font-size: 0.8rem;
@@ -2252,6 +2494,104 @@ onBeforeUnmount(() => {
   letter-spacing: 0.04em;
   margin: 0 0 7px;
   text-transform: uppercase;
+}
+
+.traffic-impact-equation {
+  background:
+    linear-gradient(135deg, rgba(245, 243, 255, 0.92), rgba(255, 247, 251, 0.92));
+  border: 1px solid rgba(109, 40, 217, 0.14);
+  border-radius: 16px;
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.traffic-impact-equation header {
+  display: grid;
+  gap: 5px;
+}
+
+.traffic-impact-equation h3,
+.traffic-impact-equation h4,
+.traffic-impact-equation p {
+  margin: 0;
+}
+
+.traffic-impact-equation h3 {
+  font-size: 1.02rem;
+}
+
+.traffic-impact-equation header > p:last-child,
+.traffic-impact-equation__topology-note,
+.traffic-impact-equation__note {
+  color: #69657d;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.traffic-impact-equation > code {
+  background: #17132e;
+  border-radius: 10px;
+  color: #ffffff;
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.78rem;
+  overflow-x: auto;
+  padding: 11px 13px;
+  white-space: nowrap;
+}
+
+.traffic-impact-equation__tables {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.traffic-impact-equation__tables section {
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid rgba(16, 35, 63, 0.08);
+  border-radius: 11px;
+  min-width: 0;
+  padding: 11px;
+}
+
+.traffic-impact-equation h4 {
+  font-size: 0.77rem;
+  margin-bottom: 7px;
+}
+
+.traffic-impact-equation table {
+  border-collapse: collapse;
+  font-size: 0.72rem;
+  width: 100%;
+}
+
+.traffic-impact-equation th,
+.traffic-impact-equation td {
+  border-top: 1px solid rgba(16, 35, 63, 0.07);
+  padding: 5px 0;
+  text-align: left;
+}
+
+.traffic-impact-equation th {
+  font-weight: 700;
+}
+
+.traffic-impact-equation td {
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.traffic-impact-equation__example {
+  background: #ffffff;
+  border-left: 3px solid #7c3aed;
+  border-radius: 5px 10px 10px 5px;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.45;
+  padding: 10px 12px;
 }
 
 @media (max-width: 760px) {
@@ -2262,6 +2602,9 @@ onBeforeUnmount(() => {
   }
 
   .settings-range-pair__controls {
+    grid-template-columns: 1fr;
+  }
+  .traffic-impact-equation__tables {
     grid-template-columns: 1fr;
   }
 }

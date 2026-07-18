@@ -7,6 +7,18 @@ export default defineConfig({
   resolve: {
     alias: {
       "#imports": path.resolve(__dirname, "tests/nuxtImportsStub.ts"),
+      "#transport-clock/plugins": path.resolve(
+        __dirname,
+        "tests/pluginRegistryStub.ts",
+      ),
+      "#transport-clock/plugin-server-registry": path.resolve(
+        __dirname,
+        "tests/pluginServerRegistryStub.ts",
+      ),
+      "#transport-clock/plugin-server": path.resolve(
+        __dirname,
+        "server/services/pluginHost.ts",
+      ),
     },
   },
   test: {

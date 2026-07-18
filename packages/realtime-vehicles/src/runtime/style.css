@@ -1,0 +1,72 @@
+.pattern-flow .pattern-flow-vehicle-node {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  height: 28px !important;
+  overflow: visible !important;
+  padding: 0 !important;
+  pointer-events: none !important;
+  width: 72px !important;
+  z-index: 50 !important;
+}
+
+.pattern-flow-vehicle {
+  align-items: center;
+  display: flex;
+  height: 28px;
+  justify-content: center;
+  pointer-events: none;
+  width: 72px;
+}
+
+.pattern-flow-vehicle__visual {
+  align-items: center;
+  display: flex;
+  filter: drop-shadow(0 5px 7px rgba(16, 35, 63, 0.34));
+  justify-content: center;
+  transform: rotate(var(--pattern-vehicle-angle, 0deg));
+  transform-origin: center;
+  transition: filter 180ms ease;
+}
+
+.pattern-flow-vehicle__visual img {
+  display: block;
+  height: auto;
+  max-width: none;
+  user-select: none;
+  width: 82px;
+}
+
+.pattern-flow-vehicle__fallback {
+  align-items: center;
+  background: color-mix(in srgb, var(--line-color) 82%, #05070c);
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  color: #ffffff;
+  display: inline-flex;
+  font-size: 0.62rem;
+  font-weight: 950;
+  height: 26px;
+  justify-content: center;
+  min-width: 42px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.pattern-flow-vehicle--at_stop .pattern-flow-vehicle__visual {
+  filter: drop-shadow(0 3px 5px rgba(16, 35, 63, 0.26));
+}
+
+.pattern-flow-vehicle--correcting .pattern-flow-vehicle__visual {
+  filter:
+    drop-shadow(0 5px 7px rgba(16, 35, 63, 0.34))
+    drop-shadow(0 0 8px color-mix(in srgb, var(--line-color), transparent 35%));
+}
+
+.pattern-flow-vehicle--confidence-medium {
+  opacity: 0.88;
+}
+
+.pattern-flow-vehicle--confidence-low {
+  opacity: 0.68;
+}

@@ -4,7 +4,7 @@ import type { AppSettings } from "../src/features/app-settings/appSettings";
 import type { WeatherResponse } from "../src/features/weather/types";
 
 const baseSettings: AppSettings = {
-  version: 1,
+  version: 2,
   language: "fr",
   closedDirectionSummaryMode: "last",
   maxDeparturesPerDirection: "default",
@@ -18,6 +18,9 @@ const baseSettings: AppSettings = {
   placePresetNavigationMode: "dropdown-swipe",
   navigationAutoHide: "none",
   reduceMotion: false,
+  pluginViewerMode: "grid",
+  plugins: {},
+  legacyPluginData: {},
   compactLinePlanMode: "auto",
   patternRoundedCurves: false,
   showInterruptionWalkingTimes: true,
@@ -27,6 +30,7 @@ const baseSettings: AppSettings = {
   patternRealisticMaxGapCoefficient: 5,
   richTransferTooltips: true,
   ghostNetworkStructuralOnly: false,
+  trafficCalendarImpactScope: "all-impacts",
   trafficInfoDesign: "ratp",
   trafficInfoDefaultScope: "optimized",
   trafficWarningLookaheadDays: 10,

@@ -8,6 +8,7 @@
   TransitFamily,
   TransitFamilyOption,
 } from "../types/transit";
+import { navitiaStopPointToMonitoringRef } from "./idfmStopReferences";
 import { createLinePresentation, transitFamilyToMode } from "./linePresentation";
 
 export const fallbackTransitFamilies: TransitFamily[] = [
@@ -94,18 +95,6 @@ function createMonitoringPoints(
           label: "Tous quais",
         },
       ];
-}
-
-function navitiaStopPointToMonitoringRef(
-  stopPointRef: string,
-): string | undefined {
-  if (stopPointRef.includes("monomodalStopPlace")) {
-    return undefined;
-  }
-
-  const stopPointId = stopPointRef.match(/(\d+)$/u)?.[1];
-
-  return stopPointId ? `STIF:StopPoint:Q:${stopPointId}:` : undefined;
 }
 
 function createBoardId(line: LineSearchOption, station: StationSearchOption): string {

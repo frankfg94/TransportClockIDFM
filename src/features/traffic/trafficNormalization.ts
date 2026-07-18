@@ -268,6 +268,20 @@ function extractImpactedStopNames(disruption: JsonRecord): string[] {
     if (name && embeddedType !== "line") {
       names.add(name);
     }
+
+    const impactedSection =
+      asOptionalRecord(object.impacted_section) ??
+      asOptionalRecord(object.impactedSection);
+
+    for (const endpointKey of ["from", "to"]) {
+      const endpoint = asOptionalRecord(impactedSection?.[endpointKey]);
+      const stopArea = asOptionalRecord(endpoint?.stop_area);
+      const endpointName = asText(endpoint?.name) ?? asText(stopArea?.name);
+
+      if (endpointName) {
+        names.add(endpointName);
+      }
+    }
   });
 
   return Array.from(names);

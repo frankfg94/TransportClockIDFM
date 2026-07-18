@@ -1,3 +1,5 @@
+import type { TransferLineOption } from "../../types/transit";
+import { getTrafficDisruptionRestartClockTime } from "../traffic/trafficTextTimes";
 import {
   getDisruptionTone,
   normalizeTrafficText,
@@ -14,6 +16,7 @@ export type PatternTrafficImpactKind = "interruption" | "disturbance";
 export interface PatternTrafficStation {
   key: string;
   label: string;
+  transfers?: TransferLineOption[];
 }
 
 export interface PatternTrafficEdge {
@@ -140,7 +143,7 @@ const TRAFFIC_END_MONTH_INDEXES: Record<string, number> = {
 };
 
 const SECTION_END_PATTERN =
-  String.raw`(?=(?:\s+(?:(?:et|ou)\s+entre\b|et\s+(?:perturb|ralenti|interrompu|suspendu)|sur\s+le\s+reste|en\s+raison|suite|a\s+la\s+suite|pour\s+cause|toute\s+la|tous\s+les|dans\s+les?\s+(?:2|deux)\s+sens|du\s+\d|jusqu|reprise|veuillez)|[.;,\n]|$))`;
+  String.raw`(?=(?:\s+(?:(?:et|ou)\s+entre\b|et\s+(?:perturb|ralenti|interrompu|suspendu)|sur\s+le\s+reste|en\s+(?:raison|r\u00e9percussion)|suite|a\s+la\s+suite|pour\s+cause|toute\s+la|tous\s+les|dans\s+les?\s+(?:2|deux)\s+sens|du\s+\d|jusqu|reprise|veuillez)|[.;,\n]|$))`;
 const BIDIRECTIONAL_SECTION_END_PATTERN =
   String.raw`(?=(?:\s+(?:periode|p[ée]riode|dates?|arr[êe]t|motif|travaux|incident)|[.;,\n]|$))`;
 const FUZZY_STATION_MATCH_MIN_SCORE = 0.72;
@@ -153,6 +156,7 @@ const STATION_MATCH_IGNORED_TOKENS = new Set([
   "prte",
   "pte",
   "rer",
+  "saint",
   "station",
   "train",
   "tram",
@@ -267,7 +271,7 @@ function parseTrafficDisruption(
         ? "disturbance"
         : undefined,
     sections: extractTrafficSections(text),
-    restartTimeLabel: extractRestartTimeLabel(text),
+    restartTimeLabel: getTrafficDisruptionRestartClockTime(disruption)?.label,
     endDateLabel,
     endDateLabelSource: textIntervalEndDateLabel
       ? "text"
@@ -961,6 +965,20 @@ function resolveStationKey(
   options: { allowFuzzy?: boolean } = {},
 ): string | undefined {
   const labelKeys = createStationMatchKeys(label);
+  const exactStationKey = normalizePatternStationName(
+    removeStationLocationQualifier(label),
+  );
+  const exactStation = stations.find(
+    (station) =>
+      normalizePatternStationName(
+        removeStationLocationQualifier(station.label),
+      ) === exactStationKey,
+  );
+
+  if (exactStationKey && exactStation) {
+    return exactStation.key;
+  }
+
 
   if (labelKeys.length === 0) {
     return undefined;
@@ -988,6 +1006,13 @@ function resolveStationKey(
   return options.allowFuzzy
     ? resolveFuzzyStationKey(labelKeys, stations)
     : undefined;
+}
+
+function removeStationLocationQualifier(value: string): string {
+  return value
+    .replace(/\s*\([^)]*\)\s*/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
 }
 
 function extractNonServedStationKeysFromText(
@@ -1024,7 +1049,9 @@ function extractNonServedStationKeysFromText(
 }
 
 function splitTrafficSentences(text: string): string[] {
-  return text.split(/[.;\n]+/gu).map((sentence) => sentence.trim());
+  return text
+    .split(/;|\n|(?<!\b[A-Z])\./gu)
+    .map((sentence) => sentence.trim());
 }
 
 function containsNormalizedPhrase(searchable: string, phrase: string): boolean {

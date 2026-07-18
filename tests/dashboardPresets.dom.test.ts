@@ -20,6 +20,7 @@ let router: {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   document.body.innerHTML = "";
   window.localStorage.clear();
   vi.unstubAllGlobals();
@@ -371,6 +372,62 @@ describe("dashboard presets", () => {
     expect(document.body.querySelector(".fullscreen-station-panel")).toBeFalsy();
   });
 
+  it("pauses home refreshes and refreshes only the fullscreen station every 30 seconds", async () => {
+    vi.useFakeTimers();
+    installDashboardMocks({}, {}, { apiConfigured: true });
+    const { fetchBoardDepartures } = await import("../src/services/idfm");
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+    const fetchBoardDeparturesMock = vi.mocked(fetchBoardDepartures);
+
+    await flushPromises();
+    fetchBoardDeparturesMock.mockClear();
+
+    await wrapper.get(".mock-fullscreen").trigger("click");
+    await flushPromises();
+    fetchBoardDeparturesMock.mockClear();
+
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(fetchBoardDeparturesMock).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await flushPromises();
+
+    expect(fetchBoardDeparturesMock).toHaveBeenCalledTimes(1);
+    expect(fetchBoardDeparturesMock.mock.calls[0]?.[0].id).toBe(
+      "t10-les-peintres",
+    );
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flushPromises();
+
+    expect(fetchBoardDeparturesMock).toHaveBeenCalledTimes(2);
+    expect(
+      fetchBoardDeparturesMock.mock.calls.every(
+        ([board]) => board.id === "t10-les-peintres",
+      ),
+    ).toBe(true);
+
+    const closeButton = Array.from(document.body.querySelectorAll("button")).find(
+      (button) => button.getAttribute("aria-label") === "Fermer le panneau",
+    );
+    closeButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+    fetchBoardDeparturesMock.mockClear();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flushPromises();
+
+    expect(fetchBoardDeparturesMock.mock.calls.length).toBeGreaterThan(1);
+    expect(
+      fetchBoardDeparturesMock.mock.calls.some(
+        ([board]) => board.id !== "t10-les-peintres",
+      ),
+    ).toBe(true);
+
+    wrapper.unmount();
+  });
+
   it("scrolls to the newly added station and highlights its card", async () => {
     const scrollTo = vi.fn();
     const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
@@ -503,6 +560,7 @@ function wait(milliseconds: number): Promise<void> {
 function installDashboardMocks(
   query: Record<string, string | undefined>,
   appSettings: Record<string, unknown> = {},
+  options: { apiConfigured?: boolean } = {},
 ): void {
   route = reactive({
     path: "/",
@@ -517,10 +575,21 @@ function installDashboardMocks(
     }),
   };
 
-  vi.stubGlobal("__IDFM_API_KEY_CONFIGURED__", false);
+  vi.stubGlobal(
+    "__IDFM_API_KEY_CONFIGURED__",
+    options.apiConfigured ?? false,
+  );
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => new Response(JSON.stringify({ available: true }))),
+    vi.fn(async (input: RequestInfo | URL) =>
+      new Response(
+        JSON.stringify(
+          String(input).includes("/api/traffic?")
+            ? { configured: true, generatedAt: "", lines: [] }
+            : { available: true },
+        ),
+      ),
+    ),
   );
   vi.doMock("nuxt/app", () => ({
     useRoute: () => route,

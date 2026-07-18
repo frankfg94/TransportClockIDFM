@@ -1,7 +1,8 @@
 ﻿<script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { CircleCheck, Eye, Minus, Plus, Settings, X } from "lucide-vue-next";
 import DistanceToggle from "../../components/DistanceToggle.vue";
+import AppRightPanel from "../../components/AppRightPanel.vue";
 import MobileActionsMenu from "../../components/MobileActionsMenu.vue";
 import StationBoardModal from "../../components/StationBoardModal.vue";
 import {
@@ -47,12 +48,19 @@ import type {
   TransitFamily,
   TransferLineOption,
 } from "../../types/transit";
-import type { TrafficLineReport } from "../traffic/types";
+import type {
+  TrafficCalendarImpactScope,
+  TrafficLineReport,
+} from "../traffic/types";
 import {
   getPatternTrafficEdgeKey,
   type PatternTrafficImpact,
 } from "../service-pattern/trafficImpactAnalysis";
+import PatternTrafficCalendarSurface from "../service-pattern/PatternTrafficCalendarSurface.vue";
+import PatternTrafficCalendarToggle from "../service-pattern/PatternTrafficCalendarToggle.vue";
 import { useDeparturePatternTraffic } from "../service-pattern/useDeparturePatternTraffic";
+import { usePatternTrafficCalendar } from "../service-pattern/usePatternTrafficCalendar";
+import type { PatternTrafficCalendarDay } from "../service-pattern/trafficCalendar";
 import { useI18n } from "../../i18n";
 import {
   TRAFFIC_DISTURBANCE_COLOR,
@@ -109,7 +117,7 @@ interface SegmentDistanceLabel {
   height: number;
 }
 
-type MobileSheetStage = "peek" | "mid" | "full";
+type LineMapRightPanelContent = "station" | "traffic";
 
 interface TouchStopClickGuard {
   stopId: string;
@@ -156,6 +164,7 @@ const props = withDefaults(
     reduceMotion?: boolean;
     smartTrafficDetection?: boolean;
     trafficReport?: TrafficLineReport;
+    trafficCalendarImpactScope?: TrafficCalendarImpactScope;
   }>(),
   {
     mode: "picker",
@@ -164,6 +173,7 @@ const props = withDefaults(
     ghostNetworkScope: "all",
     reduceMotion: false,
     smartTrafficDetection: false,
+    trafficCalendarImpactScope: "all-impacts",
   },
 );
 
@@ -186,7 +196,7 @@ const loadingMap = ref(false);
 const errorMessage = ref("");
 const hoveredStop = ref<LineMapStopView>();
 const activeStop = ref<LineMapStopView>();
-const stationDetailsPanelOpen = ref(false);
+const activeRightPanel = ref<LineMapRightPanelContent>();
 const zoom = ref(1.12);
 const mapCanvas = ref<HTMLDivElement>();
 const suppressNextCanvasClick = ref(false);
@@ -209,7 +219,8 @@ const ghostLineStationFamily = ref<TransitFamily>();
 const ghostLineStationStation = ref<StationSearchOption>();
 const showDistances = ref(false);
 const mobileDisplayOpen = ref(false);
-const mobileSheetStage = ref<MobileSheetStage>("mid");
+const selectedTrafficDisruptionIds = ref<string[]>([]);
+const selectedTrafficTimestamp = ref<number>();
 const touchStopClickGuard = ref<TouchStopClickGuard>();
 const pendingStopTap = ref<PendingStopTap>();
 const pendingGhostTap = ref<PendingGhostTap>();
@@ -349,11 +360,19 @@ const {
   transfers: visibleGhostTransfers,
   viewport: computed(() => lineMap.value?.viewport),
 });
-const { analyzeCurrentTrafficImpacts } = useDeparturePatternTraffic({
+const {
+  analyzeCurrentTrafficImpacts,
+  resolvedTrafficReport,
+  trafficTimingNow,
+} = useDeparturePatternTraffic({
   open: computed(() => Boolean(props.line)),
   line: computed(() => props.line),
   smartTrafficDetection: computed(() => props.smartTrafficDetection),
   trafficReport: computed(() => props.trafficReport),
+  selectedTrafficDisruptionIds: computed(
+    () => selectedTrafficDisruptionIds.value,
+  ),
+  trafficEvaluationTimestamp: computed(() => selectedTrafficTimestamp.value),
 });
 
 const lineTrafficAnalysis = computed(() => {
@@ -368,6 +387,62 @@ const lineTrafficAnalysis = computed(() => {
     })) ?? [],
   );
 });
+
+const trafficCalendarStations = computed(() =>
+  (lineMap.value?.stops ?? []).map((stop) => ({
+    key: stop.id,
+    label: stop.label,
+    transfers: transferStates[stop.id]?.lines ?? [],
+  })),
+);
+const trafficCalendarEdges = computed(() =>
+  (lineMap.value?.segments ?? []).map((segment) => ({
+    id: segment.id,
+    source: segment.fromStopId,
+    target: segment.toStopId,
+  })),
+);
+const {
+  calendar: trafficCalendar,
+  close: closePatternTrafficCalendar,
+  closeExpanded: closeExpandedTrafficCalendar,
+  eventCount: trafficCalendarEventCount,
+  events: trafficCalendarEvents,
+  expand: expandTrafficCalendar,
+  expanded: trafficCalendarExpanded,
+  hasNext: hasNextTrafficCalendarMonth,
+  hasPrevious: hasPreviousTrafficCalendarMonth,
+  loadingDateKey: trafficCalendarLoadingDateKey,
+  loadingDirection: trafficCalendarLoadingDirection,
+  nextDelayLabel: trafficCalendarNextDelayLabel,
+  nextMonth: selectNextTrafficCalendarMonth,
+  open: trafficCalendarOpen,
+  previousMonth: selectPreviousTrafficCalendarMonth,
+  resetSelection: resetTrafficCalendarSelection,
+  resetToday: resetPatternTrafficCalendarToday,
+  selectDay: selectPatternTrafficCalendarDay,
+  selectedDateKey: selectedTrafficCalendarDateKey,
+  selectedDay: selectedTrafficCalendarDay,
+  selectedDisruptions: selectedTrafficCalendarDisruptions,
+  toggle: togglePatternTrafficCalendar,
+} = usePatternTrafficCalendar({
+  report: computed(() =>
+    props.smartTrafficDetection ? resolvedTrafficReport.value : undefined,
+  ),
+  stations: trafficCalendarStations,
+  edges: trafficCalendarEdges,
+  impactScope: computed(() => props.trafficCalendarImpactScope),
+  now: trafficTimingNow,
+  reduceMotion: computed(() => props.reduceMotion),
+  selectedDisruptionIds: selectedTrafficDisruptionIds,
+  selectedTimestamp: selectedTrafficTimestamp,
+});
+const stationDetailsPanelOpen = computed(
+  () => activeRightPanel.value === "station",
+);
+const trafficCalendarPanelOpen = computed(
+  () => activeRightPanel.value === "traffic" && trafficCalendarOpen.value,
+);
 
 const mapStats = computed(() => {
   const stopCount = lineMap.value?.stops.length ?? 0;
@@ -488,6 +563,8 @@ watch(
   () => props.line?.id,
   () => {
     closeSidebar();
+    closePatternTrafficCalendar();
+    resetTrafficCalendarSelection();
     clearTransferStates();
     showDistances.value = false;
 
@@ -535,7 +612,7 @@ async function loadMap(): Promise<void> {
   errorMessage.value = "";
   hoveredStop.value = undefined;
   activeStop.value = undefined;
-  stationDetailsPanelOpen.value = false;
+  activeRightPanel.value = undefined;
 
   try {
     const map = await loadDetailedLineMap(props.line);
@@ -604,8 +681,7 @@ function toggleStopDetails(stop: LineMapStopView): void {
 
   if (activeStop.value?.id === stop.id) {
     if (!stationDetailsPanelOpen.value) {
-      stationDetailsPanelOpen.value = true;
-      mobileSheetStage.value = "mid";
+      activeRightPanel.value = "station";
       return;
     }
 
@@ -617,13 +693,12 @@ function toggleStopDetails(stop: LineMapStopView): void {
   activeGhostLine.value = undefined;
   favoriteDashboardSelectorOpen.value = false;
   activeStop.value = stop;
-  stationDetailsPanelOpen.value = true;
-  mobileSheetStage.value = "mid";
+  activeRightPanel.value = "station";
   void loadTransfers(stop);
 }
 
 function closeSidebar(options: CloseSidebarOptions = {}): void {
-  stationDetailsPanelOpen.value = false;
+  activeRightPanel.value = undefined;
 
   if (!options.preserveSelection) {
     activeStop.value = undefined;
@@ -634,12 +709,65 @@ function closeSidebar(options: CloseSidebarOptions = {}): void {
   favoriteError.value = "";
   favoriteLoading.value = false;
   favoriteDashboardSelectorOpen.value = false;
-  mobileSheetStage.value = "mid";
   closeGhostLineStationModal();
 }
 
-function setMobileSheetStage(stage: MobileSheetStage): void {
-  mobileSheetStage.value = stage;
+async function toggleTrafficCalendarPanel(): Promise<void> {
+  if (activeRightPanel.value === "traffic") {
+    activeRightPanel.value = undefined;
+    closePatternTrafficCalendar();
+    return;
+  }
+
+  if (!trafficCalendarOpen.value) {
+    togglePatternTrafficCalendar();
+  }
+  activeRightPanel.value = "traffic";
+  await nextTick();
+  void hydrateTrafficCalendarTransfers();
+}
+
+function closeTrafficCalendarPanel(): void {
+  if (activeRightPanel.value === "traffic") {
+    activeRightPanel.value = undefined;
+  }
+  closePatternTrafficCalendar();
+}
+
+async function selectTrafficCalendarDay(
+  day: PatternTrafficCalendarDay,
+): Promise<void> {
+  await selectPatternTrafficCalendarDay(day);
+}
+
+async function resetTrafficCalendarToday(): Promise<void> {
+  await resetPatternTrafficCalendarToday();
+}
+
+async function hydrateTrafficCalendarTransfers(): Promise<void> {
+  const map = lineMap.value;
+  if (!map) return;
+
+  const affectedKeys = new Set(
+    trafficCalendarEvents.value.flatMap((event) => [
+      ...event.interruptedStationKeys,
+      ...event.disturbedStationKeys,
+      ...event.fallbackStationKeys,
+    ]),
+  );
+  const queue = map.stops.filter(
+    (stop) => affectedKeys.has(stop.id) && !transferStates[stop.id],
+  );
+  const workerCount = Math.min(4, queue.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (queue.length > 0) {
+        const stop = queue.shift();
+        if (stop) await loadTransfers(stop);
+      }
+    }),
+  );
 }
 
 function setGhostModeVisibility(
@@ -1781,6 +1909,14 @@ function getLabelPriority(
         class="line-map-panel__tools line-map-panel__tools--desktop"
       >
         <slot name="bar-before-stats"></slot>
+        <PatternTrafficCalendarToggle
+          v-if="trafficCalendarEventCount > 0"
+          :active="trafficCalendarPanelOpen"
+          :count="trafficCalendarEventCount"
+          :next-delay-label="trafficCalendarNextDelayLabel"
+          :reduce-motion="reduceMotion"
+          @toggle="toggleTrafficCalendarPanel"
+        />
         <DistanceToggle
           v-model="showDistances"
           class="pattern-flow-action-button line-map-distance-toggle"
@@ -1832,6 +1968,17 @@ function getLabelPriority(
       >
         <template #default="{ close }">
           <slot name="bar-before-stats"></slot>
+          <PatternTrafficCalendarToggle
+            v-if="trafficCalendarEventCount > 0"
+            :active="trafficCalendarPanelOpen"
+            :count="trafficCalendarEventCount"
+            :next-delay-label="trafficCalendarNextDelayLabel"
+            :reduce-motion="reduceMotion"
+            @toggle="
+              toggleTrafficCalendarPanel();
+              close();
+            "
+          />
           <DistanceToggle
             v-model="showDistances"
             class="pattern-flow-action-button line-map-distance-toggle"
@@ -2182,9 +2329,13 @@ function getLabelPriority(
       </aside>
     </div>
 
-    <Transition name="line-map-sidebar-slide">
+    <AppRightPanel
+      v-if="lineMap && activeStop && stationDetailsPanelOpen"
+      :open="stationDetailsPanelOpen"
+      :title="t('lineMap.sidebar.stationDetails')"
+      @close="closeSidebar"
+    >
       <DetailedLineMapPickerSideBar
-        v-if="lineMap && activeStop && stationDetailsPanelOpen"
         :stop="activeStop"
         :transfers="activeTransferState?.lines ?? []"
         :transfers-loading="activeTransferState?.loading ?? true"
@@ -2207,9 +2358,6 @@ function getLabelPriority(
           activeGhostFrequencyState?.loading ?? false
         "
         :ghost-frequency-error="activeGhostFrequencyState?.error"
-        :mobile-stage="mobileSheetStage"
-        @close="closeSidebar"
-        @mobile-stage-change="setMobileSheetStage"
         @add-favorite="openActiveStopFavoriteSelector"
         @update:favorite-dashboard-id="favoriteDashboardId = $event"
         @confirm-favorite-dashboard="confirmActiveStopFavoriteDashboard"
@@ -2218,7 +2366,29 @@ function getLabelPriority(
         @open-google-maps="openActiveStopInGoogleMaps"
         @select-transfer="selectTransferLineOnMap"
       />
-    </Transition>
+    </AppRightPanel>
+
+    <PatternTrafficCalendarSurface
+      v-if="trafficCalendarEventCount > 0"
+      id-prefix="line-map-traffic-calendar"
+      :open="trafficCalendarPanelOpen"
+      :expanded="trafficCalendarExpanded"
+      :has-next="hasNextTrafficCalendarMonth"
+      :has-previous="hasPreviousTrafficCalendarMonth"
+      :calendar="trafficCalendar"
+      :selected-date-key="selectedTrafficCalendarDateKey"
+      :selected-day="selectedTrafficCalendarDay"
+      :selected-disruptions="selectedTrafficCalendarDisruptions"
+      :loading-date-key="trafficCalendarLoadingDateKey"
+      :loading-direction="trafficCalendarLoadingDirection"
+      @close="closeTrafficCalendarPanel"
+      @close-expanded="closeExpandedTrafficCalendar"
+      @next="selectNextTrafficCalendarMonth"
+      @previous="selectPreviousTrafficCalendarMonth"
+      @reset-today="resetTrafficCalendarToday"
+      @select="selectTrafficCalendarDay"
+      @expand="expandTrafficCalendar"
+    />
   </div>
 
   <Teleport to="body">

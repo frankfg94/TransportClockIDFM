@@ -9,9 +9,10 @@ import {
   setResponseHeaders,
 } from "h3";
 import { getServerIdfmApiKey } from "../../services/idfm/resolveStopArea";
-
-const IDFM_MARKETPLACE_BASE =
-  "https://prim.iledefrance-mobilites.fr/marketplace";
+import {
+  fetchIdfmMarketplaceWithRetry,
+  IDFM_MARKETPLACE_BASE_URL,
+} from "../../services/idfm/marketplaceClient";
 const GET_CACHE_MAX_ENTRIES = 2200;
 const GET_CACHE_DEFAULT_TTL_MS = 60_000;
 const GET_CACHE_STRUCTURAL_TTL_MS = 6 * 60 * 60_000;
@@ -53,7 +54,9 @@ export default defineEventHandler(async (event) => {
 
   const sourceUrl = getRequestURL(event);
   const upstreamPath = getRouterParam(event, "path") ?? "";
-  const upstreamUrl = new URL(`${IDFM_MARKETPLACE_BASE}/${upstreamPath}`);
+  const upstreamUrl = new URL(
+    `${IDFM_MARKETPLACE_BASE_URL}/${upstreamPath}`,
+  );
   upstreamUrl.search = sourceUrl.search;
 
   const headers = new Headers();
@@ -84,7 +87,7 @@ export default defineEventHandler(async (event) => {
     return createResponseFromCache(cachedResponse);
   }
 
-  const response = await fetchWithRetry(upstreamUrl, {
+  const response = await fetchIdfmMarketplaceWithRetry(upstreamUrl, {
     body: await readRawBody(event),
     headers,
     method,
@@ -129,7 +132,7 @@ async function fetchAndCacheGetResponse(
   headers: Headers,
   method: "GET" | "HEAD",
 ): Promise<CachedProxyResponse> {
-  const response = await fetchWithRetry(upstreamUrl, {
+  const response = await fetchIdfmMarketplaceWithRetry(upstreamUrl, {
     headers,
     method,
     redirect: "follow",
@@ -145,25 +148,6 @@ async function fetchAndCacheGetResponse(
   }
 
   return cachedResponse;
-}
-
-async function fetchWithRetry(
-  upstreamUrl: URL,
-  init: RequestInit,
-): Promise<Response> {
-  const delays = [260, 760, 1_500];
-
-  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
-    const response = await fetch(upstreamUrl, init);
-
-    if (response.status !== 429 || attempt === delays.length) {
-      return response;
-    }
-
-    await wait(getRetryDelayMs(response, delays[attempt]));
-  }
-
-  return fetch(upstreamUrl, init);
 }
 
 async function createCachedResponse(response: Response): Promise<CachedProxyResponse> {
@@ -236,17 +220,6 @@ function getCacheTtl(upstreamUrl: URL): number {
   return GET_CACHE_DEFAULT_TTL_MS;
 }
 
-function getRetryDelayMs(response: Response, fallbackMs: number): number {
-  const retryAfter = response.headers.get("retry-after");
-  const retryAfterSeconds = retryAfter ? Number(retryAfter) : Number.NaN;
-
-  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
-    return Math.min(retryAfterSeconds * 1_000, 4_000);
-  }
-
-  return fallbackMs;
-}
-
 function trimGetResponseCache(): void {
   while (getResponseCache.size > GET_CACHE_MAX_ENTRIES) {
     const oldestKey = getResponseCache.keys().next().value;
@@ -257,10 +230,4 @@ function trimGetResponseCache(): void {
 
     getResponseCache.delete(oldestKey);
   }
-}
-
-function wait(durationMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, durationMs);
-  });
 }

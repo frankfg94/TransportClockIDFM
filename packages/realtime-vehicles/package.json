@@ -1,0 +1,16 @@
+{
+  "name": "@transport-clock/realtime-vehicles",
+  "version": "1.0.0",
+  "private": false,
+  "type": "module",
+  "exports": { ".": "./src/module.ts" },
+  "files": ["src", "README.md"],
+  "peerDependencies": {
+    "@transport-clock/nuxt-plugin-host": "^1.0.0",
+    "@vue-flow/core": "^1.48.2",
+    "lucide-vue-next": "^1.0.0",
+    "nuxt": "^3.20.2",
+    "vue": "^3.5.13"
+  },
+  "publishConfig": { "access": "restricted" }
+}

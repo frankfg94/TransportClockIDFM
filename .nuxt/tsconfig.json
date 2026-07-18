@@ -103,6 +103,12 @@
       "vue-demi": [
         "../node_modules/nuxt/dist/app/compat/vue-demi"
       ],
+      "#transport-clock/plugins": [
+        "./transport-clock/plugins.client.mjs"
+      ],
+      "#transport-clock/plugin-server": [
+        "../server/services/pluginHost"
+      ],
       "#vue-router": [
         "../node_modules/vue-router"
       ],
@@ -157,15 +163,18 @@
     "../**/*",
     "../.config/nuxt.*",
     "./nuxt.d.ts",
-    "../node_modules/nuxt/node_modules/runtime",
-    "../node_modules/nuxt/node_modules/dist/runtime",
+    "../packages/nuxt-plugin-host/src/runtime",
+    "../packages/nuxt-plugin-host/src/dist/runtime",
+    "../node_modules/runtime",
+    "../node_modules/dist/runtime",
     ".."
   ],
   "exclude": [
     "../dist",
     "../.data",
-    "../node_modules/nuxt/node_modules/runtime/server",
-    "../node_modules/nuxt/node_modules/dist/runtime/server",
-    "dev"
+    "../packages/nuxt-plugin-host/src/runtime/server",
+    "../packages/nuxt-plugin-host/src/dist/runtime/server",
+    "../node_modules/runtime/server",
+    "../node_modules/dist/runtime/server"
   ]
 }

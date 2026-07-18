@@ -10,6 +10,7 @@ import {
   getNetexRuntimeEnv,
   type NetexRuntimeEnv,
 } from "../services/topology/netexCache";
+import { transportClockPluginHealthChecks } from "#transport-clock/plugin-server-registry";
 
 const MARKETPLACE_ROOT =
   "https://prim.iledefrance-mobilites.fr/marketplace";
@@ -18,6 +19,9 @@ const MAP_TILE_HEALTH_URL =
   "https://a.basemaps.cartocdn.com/light_all/12/2074/1408.png";
 const OPEN_METEO_HEALTH_URL =
   "https://api.open-meteo.com/v1/forecast?latitude=48.8566&longitude=2.3522&current=temperature_2m,weather_code&forecast_days=1&timezone=Europe%2FParis";
+const PRIM_API_STATUS_URL =
+  "https://prim.iledefrance-mobilites.fr/fr/etat-des-api";
+const PRIM_API_STATUS_CACHE_TTL_MS = 10 * 60_000;
 const BROWSER_LIKE_HEALTH_HEADERS = {
   accept: "application/json",
   "accept-language": "fr-FR,fr;q=0.9,en;q=0.8",
@@ -28,6 +32,20 @@ const BROWSER_LIKE_HEALTH_HEADERS = {
 const NETEX_UPDATE_RECOMMENDED_AFTER_MONTHS = 6;
 const NETEX_OUTDATED_AFTER_MONTHS = 12;
 
+type PrimGlobalStatusPageSnapshot = {
+  responseOk: boolean;
+  status: number;
+  statusText: string;
+  availability?: number;
+};
+
+let primGlobalStatusPageCache:
+  | { expiresAt: number; snapshot: PrimGlobalStatusPageSnapshot }
+  | undefined;
+let primGlobalStatusPageRequest:
+  | Promise<PrimGlobalStatusPageSnapshot>
+  | undefined;
+
 type NetexDatasetFreshness = {
   status: "warning" | "error";
   message: string;
@@ -37,6 +55,9 @@ type NetexDatasetFreshness = {
 export default defineEventHandler(async (event): Promise<HealthResponse> => {
   const checks = await Promise.all([
     checkNetexCache(event),
+    ...(transportClockPluginHealthChecks as Array<
+      (event: H3Event) => HealthCheck | Promise<HealthCheck>
+    >).map((check) => check(event)),
     checkR2Cache(event),
     checkMarketplaceApi(
       event,
@@ -56,6 +77,7 @@ export default defineEventHandler(async (event): Promise<HealthResponse> => {
       "PRIM info trafic",
       "/v2/navitia/line_reports/lines/line%3AIDFM%3AC01743/line_reports?count=1&disable_geojson=true",
     ),
+    checkPrimGlobalStatus(),
     checkOpenMeteoWeather(),
     checkMapTiles(),
   ]);
@@ -65,6 +87,164 @@ export default defineEventHandler(async (event): Promise<HealthResponse> => {
     checks,
   };
 });
+
+export async function checkPrimGlobalStatus(): Promise<HealthCheck> {
+  return timedCheck(
+    "prim-global-status",
+    "PRIM global request status",
+    "Realtime",
+    false,
+    async () => {
+      const snapshot = await loadPrimGlobalStatusPage();
+
+      if (!snapshot.responseOk) {
+        return {
+          status: "warning",
+          message: `${snapshot.status} ${snapshot.statusText}`.trim(),
+          detail: "The official PRIM status page responded without an OK status.",
+          detailKey: "health.messages.primGlobalStatusBadStatus",
+        };
+      }
+
+      if (snapshot.availability === undefined) {
+        return {
+          status: "warning",
+          message: "Unable to parse global request availability",
+          messageKey: "health.messages.primGlobalStatusParseFailed",
+          detail: "Official PRIM status page, cached for 10 minutes.",
+          detailKey: "health.messages.primGlobalStatusDetail",
+        };
+      }
+
+      const available = snapshot.availability >= 99.5;
+
+      return {
+        status: available ? "ok" : "warning",
+        message: available
+          ? `Global request service available at ${snapshot.availability}%`
+          : `Global request service degraded: ${snapshot.availability}% availability`,
+        messageKey: available
+          ? "health.messages.primGlobalStatusAvailable"
+          : "health.messages.primGlobalStatusDegraded",
+        messageParams: { value: snapshot.availability },
+        detail: "Official PRIM status page, cached for 10 minutes.",
+        detailKey: "health.messages.primGlobalStatusDetail",
+      };
+    },
+  );
+}
+
+async function loadPrimGlobalStatusPage(): Promise<PrimGlobalStatusPageSnapshot> {
+  const now = Date.now();
+
+  if (primGlobalStatusPageCache && primGlobalStatusPageCache.expiresAt > now) {
+    return primGlobalStatusPageCache.snapshot;
+  }
+
+  if (primGlobalStatusPageRequest) {
+    return primGlobalStatusPageRequest;
+  }
+
+  primGlobalStatusPageRequest = (async () => {
+    const response = await fetchWithTimeout(PRIM_API_STATUS_URL, {
+      headers: {
+        ...BROWSER_LIKE_HEALTH_HEADERS,
+        accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+      },
+    });
+    const snapshot: PrimGlobalStatusPageSnapshot = {
+      responseOk: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      availability: response.ok
+        ? parsePrimGlobalRequestAvailability(await response.text())
+        : undefined,
+    };
+
+    primGlobalStatusPageCache = {
+      expiresAt: Date.now() + PRIM_API_STATUS_CACHE_TTL_MS,
+      snapshot,
+    };
+
+    return snapshot;
+  })();
+
+  try {
+    return await primGlobalStatusPageRequest;
+  } finally {
+    primGlobalStatusPageRequest = undefined;
+  }
+}
+
+export function parsePrimGlobalRequestAvailability(
+  html: string,
+): number | undefined {
+  const text = decodeHealthStatusHtml(html)
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  const headingMatch = /prochains passages(?:\s|[-–—:|/])*requete globale/.exec(
+    text,
+  );
+
+  if (!headingMatch) {
+    return undefined;
+  }
+
+  const match = text
+    .slice(
+      headingMatch.index + headingMatch[0].length,
+      headingMatch.index + headingMatch[0].length + 450,
+    )
+    .match(/disponibilite actuelle\s*(\d+(?:[.,]\d+)?)\s*%/);
+
+  if (!match) {
+    return undefined;
+  }
+
+  const availability = Number.parseFloat(match[1].replace(",", "."));
+
+  return Number.isFinite(availability) && availability >= 0 && availability <= 100
+    ? availability
+    : undefined;
+}
+
+function decodeHealthStatusHtml(value: string): string {
+  const namedEntities: Record<string, string> = {
+    amp: "&",
+    apos: "'",
+    ccedil: "ç",
+    eacute: "é",
+    ecirc: "ê",
+    egrave: "è",
+    gt: ">",
+    laquo: "«",
+    lt: "<",
+    nbsp: " ",
+    quot: '"',
+    raquo: "»",
+  };
+
+  return value.replace(
+    /&(#x[0-9a-f]+|#\d+|[a-z]+);/gi,
+    (entity, code: string) => {
+      if (code.startsWith("#x")) {
+        return String.fromCodePoint(Number.parseInt(code.slice(2), 16));
+      }
+
+      if (code.startsWith("#")) {
+        return String.fromCodePoint(Number.parseInt(code.slice(1), 10));
+      }
+
+      return namedEntities[code.toLowerCase()] ?? entity;
+    },
+  );
+}
 
 async function checkNetexCache(event: H3Event): Promise<HealthCheck> {
   return timedCheck("netex", "NeTEx data", "Data", true, async () => {
@@ -315,6 +495,7 @@ function getHealthCheckLabelKey(id: string): HealthCheck["labelKey"] {
     prim: "health.checks.prim",
     navitia: "health.checks.navitia",
     "prim-traffic": "health.checks.primTraffic",
+    "prim-global-status": "health.checks.primGlobalStatus",
     "open-meteo": "health.checks.openMeteo",
     "map-tiles": "health.checks.mapTiles",
   }[id] as HealthCheck["labelKey"];

@@ -85,6 +85,71 @@ describe("FullscreenStationPanel", () => {
     wrapper.unmount();
   });
 
+  it("opens a scrollable traffic modal from an alert and closes it without leaving", async () => {
+    const message = Array.from({ length: 40 }, (_, index) =>
+      `Detail trafic ${index + 1}`,
+    ).join("\n");
+    const wrapper = mountPanel({
+      trafficAlert: {
+        label: "Interruption",
+        tone: "red",
+        title: "Trafic interrompu entre deux stations",
+        message,
+      },
+    });
+
+    await wrapper
+      .get('[aria-label="Afficher le detail de l\'information trafic"]')
+      .trigger("click");
+
+    const modal = wrapper.get(".fullscreen-station-panel__traffic-modal");
+    expect(modal.attributes("role")).toBe("dialog");
+    expect(modal.text()).toContain("Trafic interrompu entre deux stations");
+    expect(modal.text()).toContain("Detail trafic 40");
+    expect(
+      wrapper.find(".fullscreen-station-panel__traffic-modal-body").exists(),
+    ).toBe(true);
+
+    await wrapper
+      .get('[aria-label="Fermer l\'information trafic"]')
+      .trigger("click");
+
+    expect(
+      wrapper.find(".fullscreen-station-panel__traffic-modal").exists(),
+    ).toBe(false);
+    expect(wrapper.classes()).toContain("fullscreen-station-panel--light");
+
+    wrapper.unmount();
+  });
+
+  it("opens the traffic modal from the PANAM side panel with the keyboard", async () => {
+    const wrapper = mountPanel({
+      design: "double-stop",
+      trafficAlert: {
+        label: "Perturbation",
+        tone: "orange",
+        title: "Service ralenti",
+        message: "Prevoir un temps de trajet supplementaire.",
+      },
+    });
+
+    await wrapper
+      .get(".fullscreen-station-panel__panam-side")
+      .trigger("keydown", { key: "Enter" });
+
+    expect(wrapper.get(".fullscreen-station-panel__traffic-modal").text()).toContain(
+      "Prevoir un temps de trajet supplementaire.",
+    );
+
+    await wrapper.trigger("keydown", { key: "Escape" });
+    expect(
+      wrapper.find(".fullscreen-station-panel__traffic-modal").exists(),
+    ).toBe(false);
+    expect(wrapper.emitted("close")).toBeUndefined();
+
+    wrapper.unmount();
+  });
+
   it("applies the dark theme to the home-card design", () => {
     const wrapper = mountPanel({
       design: "home-card",
@@ -171,6 +236,75 @@ describe("FullscreenStationPanel", () => {
     await wrapper.setProps({ browserFullscreenActive: true });
 
     expect(wrapper.text()).toContain("Sortir du plein ecran");
+
+    wrapper.unmount();
+  });
+
+  it.each([
+    ["all-directions", 4],
+    ["double-stop", 2],
+    ["home-card", 4],
+  ] as const)(
+    "renders contextual alarm buttons in the %s design",
+    async (design, expectedCount) => {
+      const wrapper = mountPanel({
+        design,
+        alarmDepartureIds: ["jardin-1"],
+      });
+      const buttons = wrapper.findAll(
+        ".fullscreen-station-panel__alarm-button",
+      );
+
+      expect(buttons).toHaveLength(expectedCount);
+      expect(
+        buttons.filter((button) =>
+          button.classes().includes(
+            "fullscreen-station-panel__alarm-button--active",
+          ),
+        ),
+      ).toHaveLength(1);
+
+      await buttons[0]?.trigger("click");
+      expect(wrapper.emitted("schedule-alarm")?.[0]).toEqual([
+        {
+          directionId: "jardin",
+          departureId: "jardin-1",
+        },
+      ]);
+
+      wrapper.unmount();
+    },
+  );
+
+  it("hides alarm buttons with the controls and reveals both together", async () => {
+    const wrapper = mountPanel();
+    const controls = wrapper.get(".fullscreen-station-panel__controls");
+    const alarmButtons = wrapper.findAll(
+      ".fullscreen-station-panel__alarm-button",
+    );
+
+    vi.advanceTimersByTime(10_000);
+    await nextTick();
+
+    expect(controls.classes()).toContain(
+      "fullscreen-station-panel__controls--hidden",
+    );
+    expect(
+      alarmButtons.every((button) =>
+        button.classes().includes(
+          "fullscreen-station-panel__alarm-button--hidden",
+        ),
+      ),
+    ).toBe(true);
+
+    await wrapper.trigger("pointermove");
+    expect(
+      alarmButtons.some((button) =>
+        button.classes().includes(
+          "fullscreen-station-panel__alarm-button--hidden",
+        ),
+      ),
+    ).toBe(false);
 
     wrapper.unmount();
   });

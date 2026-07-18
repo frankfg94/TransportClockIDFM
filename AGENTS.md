@@ -18,11 +18,11 @@ Read these first:
 
 Ignore generated or noisy context unless explicitly needed:
 
-- `node_modules/`, `dist/`, `.nuxt/`, `.nuxt-capacitor/`, `.output/`, `.wrangler/`, `.unlighthouse/`, `reports/`, `graphify-out/`
+- `node_modules/`, `dist/`, `.nuxt/`, `.nuxt-capacitor/`, `.output/`, `.wrangler/`, `.unlighthouse/`, `reports/`
 - `android/app/src/main/assets/public/` when present; it is generated web output copied into Android.
 - `*.tsbuildinfo`, `replay_*.log`, screenshots such as `transport-clock*.png`
 
-`graphify-out/graph.json` exists but was built with generated Nuxt/Android assets included, so it is noisy for source architecture. Prefer current source files and targeted `rg`.
+You must use Graphify whenever a change may affect many files or requires understanding non-obvious dependencies or architectural edits.
 
 ## Common Commands
 

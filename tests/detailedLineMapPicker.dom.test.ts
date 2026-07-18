@@ -300,7 +300,7 @@ describe("DetailedLineMapPicker sidebar", () => {
     wrapper.unmount();
   });
 
-  it("toggles the mobile sheet with the handle and closes after dragging down from peek", async () => {
+  it("uses the generic right panel without a bottom-sheet drag handle", async () => {
     const wrapper = mount(DetailedLineMapPicker, {
       props: { line, mode: "explorer", selectable: false },
       attachTo: document.body,
@@ -310,63 +310,12 @@ describe("DetailedLineMapPicker sidebar", () => {
     await wrapper.findAll(".line-map-hit-target")[0].trigger("click");
     await flushPromises();
 
-    expect(wrapper.get('[data-testid="line-map-sidebar"]').classes()).toContain(
-      "line-map-sidebar--mobile-mid",
-    );
+    expect(wrapper.find('[data-testid="app-right-panel"]').exists()).toBe(true);
+    expect(
+      wrapper.find('[data-testid="line-map-sidebar-drag-handle"]').exists(),
+    ).toBe(false);
 
-    await wrapper.get('[data-testid="line-map-sidebar-drag-handle"]').trigger(
-      "click",
-    );
-    expect(wrapper.get('[data-testid="line-map-sidebar"]').classes()).toContain(
-      "line-map-sidebar--mobile-full",
-    );
-
-    await wrapper.get('[data-testid="line-map-sidebar-drag-handle"]').trigger(
-      "click",
-    );
-    expect(wrapper.get('[data-testid="line-map-sidebar"]').classes()).toContain(
-      "line-map-sidebar--mobile-mid",
-    );
-
-    let handle = wrapper.get('[data-testid="line-map-sidebar-drag-handle"]');
-    await handle.trigger("pointerdown", {
-      button: 0,
-      clientY: 100,
-      pointerId: 3,
-      pointerType: "touch",
-    });
-    await handle.trigger("pointermove", {
-      clientY: 205,
-      pointerId: 3,
-      pointerType: "touch",
-    });
-    await handle.trigger("pointerup", {
-      clientY: 205,
-      pointerId: 3,
-      pointerType: "touch",
-    });
-    await flushPromises();
-    expect(wrapper.get('[data-testid="line-map-sidebar"]').classes()).toContain(
-      "line-map-sidebar--mobile-peek",
-    );
-
-    handle = wrapper.get('[data-testid="line-map-sidebar-drag-handle"]');
-    await handle.trigger("pointerdown", {
-      button: 0,
-      clientY: 100,
-      pointerId: 4,
-      pointerType: "touch",
-    });
-    await handle.trigger("pointermove", {
-      clientY: 205,
-      pointerId: 4,
-      pointerType: "touch",
-    });
-    await handle.trigger("pointerup", {
-      clientY: 205,
-      pointerId: 4,
-      pointerType: "touch",
-    });
+    await wrapper.get('[data-testid="app-right-panel-close"]').trigger("click");
     await flushPromises();
 
     expect(wrapper.find('[data-testid="line-map-sidebar"]').exists()).toBe(
@@ -570,6 +519,80 @@ describe("DetailedLineMapPicker sidebar", () => {
     );
 
     wrapper.unmount();
+  });
+
+  it("opens the shared traffic calendar, time-travels the map and yields to station details", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0));
+
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: {
+        line,
+        mode: "explorer",
+        selectable: false,
+        smartTrafficDetection: true,
+        trafficReport: {
+          lineRef: line.ref,
+          status: "planned",
+          disruptions: [
+            {
+              id: "future-a-b",
+              title: "Travaux prévus",
+              message:
+                "Le trafic sera interrompu entre Station A et Station B.",
+              kind: "works",
+              applicationPeriods: [
+                {
+                  begin: "20260720T000000",
+                  end: "20260721T000000",
+                },
+              ],
+              impactedLineRefs: [line.ref],
+              impactedStopNames: [],
+            },
+          ],
+        },
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    expect(wrapper.find(".line-map-segment--traffic-interruption").exists()).toBe(
+      false,
+    );
+    await wrapper.get(".pattern-traffic-calendar-toggle").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="app-right-panel"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="pattern-traffic-calendar"]').exists()).toBe(
+      true,
+    );
+    expect(loadStationTransfers).toHaveBeenCalledTimes(2);
+
+    await wrapper.get('[data-date="2026-07-20"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".line-map-segment--traffic-interruption").exists()).toBe(
+      true,
+    );
+
+    await wrapper.get(".pattern-traffic-calendar__today").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".line-map-segment--traffic-interruption").exists()).toBe(
+      false,
+    );
+
+    await wrapper.findAll(".line-map-hit-target")[0].trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-testid="pattern-traffic-calendar"]').exists()).toBe(
+      false,
+    );
+    expect(wrapper.get('[data-testid="line-map-sidebar"]').text()).toContain(
+      "Station A",
+    );
+    expect(wrapper.findAll('[data-testid="app-right-panel"]')).toHaveLength(1);
+
+    wrapper.unmount();
+    vi.useRealTimers();
   });
 
   it("loads ghost correspondences progressively and keeps active quays visible", async () => {
@@ -783,7 +806,7 @@ describe("DetailedLineMapPicker sidebar", () => {
     wrapper.unmount();
   });
 
-  it("keeps the ghost selection when closing the mobile sheet by dragging down", async () => {
+  it("closes station details through the generic panel action", async () => {
     loadStationTransfers.mockResolvedValueOnce([
       {
         id: "line:IDFM:C01743",
@@ -813,52 +836,17 @@ describe("DetailedLineMapPicker sidebar", () => {
 
     expect(wrapper.find(".network-ghost-line--active").exists()).toBe(true);
 
-    let handle = wrapper.get('[data-testid="line-map-sidebar-drag-handle"]');
-    await handle.trigger("pointerdown", {
-      button: 0,
-      clientY: 100,
-      pointerId: 81,
-      pointerType: "touch",
-    });
-    await handle.trigger("pointermove", {
-      clientY: 205,
-      pointerId: 81,
-      pointerType: "touch",
-    });
-    await handle.trigger("pointerup", {
-      clientY: 205,
-      pointerId: 81,
-      pointerType: "touch",
-    });
-    await flushPromises();
-
-    handle = wrapper.get('[data-testid="line-map-sidebar-drag-handle"]');
-    await handle.trigger("pointerdown", {
-      button: 0,
-      clientY: 100,
-      pointerId: 82,
-      pointerType: "touch",
-    });
-    await handle.trigger("pointermove", {
-      clientY: 205,
-      pointerId: 82,
-      pointerType: "touch",
-    });
-    await handle.trigger("pointerup", {
-      clientY: 205,
-      pointerId: 82,
-      pointerType: "touch",
-    });
+    await wrapper.get('[data-testid="app-right-panel-close"]').trigger("click");
     await flushPromises();
 
     expect(wrapper.find('[data-testid="line-map-sidebar"]').exists()).toBe(
       false,
     );
     expect(wrapper.find('[data-testid="network-ghost-layer"]').exists()).toBe(
-      true,
+      false,
     );
-    expect(wrapper.find(".network-ghost-line--active").exists()).toBe(true);
-    expect(wrapper.find(".line-map-stop--active").exists()).toBe(true);
+    expect(wrapper.find(".network-ghost-line--active").exists()).toBe(false);
+    expect(wrapper.find(".line-map-stop--active").exists()).toBe(false);
 
     wrapper.unmount();
   });

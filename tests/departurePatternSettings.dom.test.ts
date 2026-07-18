@@ -1,5 +1,5 @@
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
-import { defineComponent, h, nextTick, onMounted } from "vue";
+import { defineComponent, h, nextTick, onMounted, ref } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import DeparturePatternModal from "../src/features/service-pattern/DeparturePatternModal.vue";
 import { buildLinePatternViewFromTopology } from "../server/services/servicePattern/buildLinePatternView";
@@ -649,6 +649,242 @@ describe("DeparturePatternModal settings", () => {
 
     expect(wrapper.find('[data-testid="pattern-minimap"]').exists()).toBe(false);
     await flushPromises();
+    wrapper.unmount();
+  });
+
+  it("renders estimated metro vehicles on the pattern without adding them to the minimap", async () => {
+    const now = Date.now();
+    const vehiclePattern: DepartureCallingPattern = {
+      ...pattern,
+      lineTopology: [
+        {
+          id: "pattern-main",
+          label: "Station A - Station B",
+          topologySource: "server",
+          stops: [
+            {
+              id: "station-a",
+              label: "Station A",
+              station: {
+                id: "station-a",
+                label: "Station A",
+                monitoringRef: "STIF:StopPoint:Q:1:",
+                scheduleStopAreaRef: "station-a",
+              },
+            },
+            {
+              id: "station-b",
+              label: "Station B",
+              station: {
+                id: "station-b",
+                label: "Station B",
+                monitoringRef: "STIF:StopPoint:Q:2:",
+                scheduleStopAreaRef: "station-b",
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/vehicles")) {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => ({
+            available: true,
+            lineId: "line:IDFM:C01384",
+            source: "idfm-siri-estimated-timetable",
+            positionKind: "estimated",
+            generatedAt: new Date(now).toISOString(),
+            complete: true,
+            pollAfterMs: 60_000,
+            journeys: [
+              {
+                snapshotId: "metro-14-estimate-1",
+                identityQuality: "inferred",
+                confidence: "medium",
+                patternId: "pattern-main",
+                destination: "Station B",
+                calls: [
+                  {
+                    stationId: "station-a",
+                    order: 1,
+                    departureAt: new Date(now - 30_000).toISOString(),
+                    timeQuality: "estimated",
+                    vehicleAtStop: false,
+                    cancelled: false,
+                  },
+                  {
+                    stationId: "station-b",
+                    order: 2,
+                    arrivalAt: new Date(now + 30_000).toISOString(),
+                    timeQuality: "estimated",
+                    vehicleAtStop: false,
+                    cancelled: false,
+                  },
+                ],
+              },
+            ],
+          }),
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({ places: [], records: [] }),
+      } as Response;
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const metroBoard: TransitBoardConfig = {
+      ...board,
+      line: {
+        ...board.line,
+        ref: "STIF:Line::C01384:",
+        shortName: "14",
+        longName: "Métro 14",
+        mode: "metro",
+      },
+    };
+    const minimapNodeCount = ref(0);
+    let renderedFlowNodes: Array<{
+      type?: string;
+      position?: { x: number; y: number };
+      zIndex?: number;
+      data?: { layoutX?: number; layoutY?: number };
+    }> = [];
+    const VehicleGeometryFlowStub = defineComponent({
+      name: "VueFlow",
+      props: {
+        nodes: { type: Array, default: () => [] },
+        nodeTypes: { type: Object, default: () => ({}) },
+      },
+      setup(props, { slots }) {
+        return () => {
+          renderedFlowNodes = props.nodes as typeof renderedFlowNodes;
+          return h(
+            "div",
+            { class: "vue-flow" },
+            renderedFlowNodes.flatMap((node) => {
+              const nodeComponent = (
+                props.nodeTypes as Record<string, Parameters<typeof h>[0]>
+              )[node.type ?? ""];
+              return nodeComponent
+                ? [h(nodeComponent, { data: node.data })]
+                : slots[`node-${node.type}`]?.({ data: node.data }) ?? [];
+            }),
+          );
+        };
+      },
+    });
+    const PatternFlowMiniMapStub = defineComponent({
+      name: "PatternFlowMiniMap",
+      props: { nodes: { type: Array, default: () => [] } },
+      setup(props) {
+        minimapNodeCount.value = (props.nodes as unknown[]).length;
+        return () => h("div", { "data-testid": "pattern-minimap" });
+      },
+    });
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board: metroBoard,
+        pattern: vehiclePattern,
+        lineId: "14",
+        transportType: "metro",
+        realtimeVehicleVisualizationEnabled: true,
+        showMiniMap: true,
+        smartTrafficDetection: false,
+        transferBundleBackendCacheEnabled: false,
+        transferBundleLocalCacheEnabled: false,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VehicleGeometryFlowStub,
+          Controls: true,
+          PatternFlowMiniMap: PatternFlowMiniMapStub,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+    await nextTick();
+
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("/api/lines/metro/14/vehicles"),
+      ),
+    ).toBe(true);
+    expect(wrapper.get(".pattern-flow-vehicle img").attributes("src")).toBe(
+      "/images/mp14_train_top.webp",
+    );
+
+    await wrapper.setProps({
+      board: {
+        ...metroBoard,
+        line: { ...metroBoard.line, mode: "rer" },
+      },
+      transportType: "rer",
+    });
+    await flushPromises();
+    await nextTick();
+    expect(
+      wrapper.get(".pattern-flow-vehicle img").attributes("src"),
+    ).toContain("rer_mi84.webp");
+
+    await wrapper.setProps({
+      board: {
+        ...metroBoard,
+        line: { ...metroBoard.line, mode: "tram" },
+      },
+      transportType: "tram",
+    });
+    await flushPromises();
+    await nextTick();
+    expect(wrapper.get(".pattern-flow-vehicle img").attributes("src")).toBe(
+      "/images/mp14_train_top.webp",
+    );
+    expect(wrapper.find(".pattern-flow-plugin-status--live").exists()).toBe(
+      true,
+    );
+    expect(minimapNodeCount.value).toBe(2);
+    const vehicleNode = renderedFlowNodes.find(
+      (node) => node.type === "idfm-realtime-vehicles:vehicle",
+    );
+    const stationNodes = renderedFlowNodes.filter(
+      (node) => node.type === "station",
+    );
+    expect(vehicleNode?.zIndex).toBeGreaterThan(0);
+    expect((vehicleNode?.position?.y ?? 0) + 14).toBeCloseTo(
+      (stationNodes[0]?.position?.y ?? Number.NaN) + 15,
+      5,
+    );
+    expect((vehicleNode?.position?.x ?? 0) + 36).toBeGreaterThan(
+      Math.min(
+        stationNodes[0]?.data?.layoutX ?? Number.NaN,
+        stationNodes[1]?.data?.layoutX ?? Number.NaN,
+      ),
+    );
+    expect((vehicleNode?.position?.x ?? 0) + 36).toBeLessThan(
+      Math.max(
+        stationNodes[0]?.data?.layoutX ?? Number.NaN,
+        stationNodes[1]?.data?.layoutX ?? Number.NaN,
+      ),
+    );
+
     wrapper.unmount();
   });
 
@@ -2014,11 +2250,11 @@ describe("DeparturePatternModal settings", () => {
       wrapper.find(".pattern-flow-edge--traffic-interruption").exists(),
     ).toBe(false);
 
-    const toggle = wrapper.get(".pattern-traffic-timeline-toggle");
+    const toggle = wrapper.get(".pattern-traffic-calendar-toggle");
     expect(toggle.text()).toContain("Trafic");
     expect(toggle.text()).toContain("1");
     expect(toggle.classes()).not.toContain(
-      "pattern-traffic-timeline-toggle--urgent",
+      "pattern-traffic-calendar-toggle--urgent",
     );
 
     wrapper.unmount();
@@ -2084,7 +2320,7 @@ describe("DeparturePatternModal settings", () => {
 
     expect(wrapper.find(".pattern-flow-traffic-marker").exists()).toBe(false);
     expect(wrapper.find(".pattern-flow-edge--traffic").exists()).toBe(false);
-    expect(wrapper.find(".pattern-traffic-timeline-toggle").exists()).toBe(true);
+    expect(wrapper.find(".pattern-traffic-calendar-toggle").exists()).toBe(true);
 
     wrapper.unmount();
   });
@@ -2150,14 +2386,14 @@ describe("DeparturePatternModal settings", () => {
 
     expect(wrapper.find(".pattern-flow-traffic-marker").exists()).toBe(false);
     expect(wrapper.find(".pattern-flow-edge--traffic").exists()).toBe(false);
-    expect(wrapper.get(".pattern-traffic-timeline-toggle").text()).toContain(
+    expect(wrapper.get(".pattern-traffic-calendar-toggle").text()).toContain(
       "J-11",
     );
 
     wrapper.unmount();
   });
 
-  it("opens the future traffic timeline and focuses the selected interrupted zone", async () => {
+  it("opens the future traffic calendar and focuses the selected interrupted zone", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0));
 
@@ -2217,25 +2453,55 @@ describe("DeparturePatternModal settings", () => {
 
     expect(wrapper.find(".pattern-flow-traffic-marker").exists()).toBe(false);
 
-    const toggle = wrapper.get(".pattern-traffic-timeline-toggle");
+    const toggle = wrapper.get(".pattern-traffic-calendar-toggle");
     expect(toggle.text()).toContain("Trafic");
     expect(toggle.text()).toContain("1");
     expect(toggle.text()).toContain("J-19");
     expect(toggle.classes()).not.toContain(
-      "pattern-traffic-timeline-toggle--urgent",
+      "pattern-traffic-calendar-toggle--urgent",
     );
 
     await toggle.trigger("click");
     await flushPromises();
 
-    expect(wrapper.get("[data-testid='pattern-traffic-timeline']").text()).toContain(
-      "1 station",
+    await wrapper.get("[data-tooltip-date='2026-07-20']").trigger("focusin");
+    await nextTick();
+    expect(wrapper.get("[data-testid='pattern-traffic-calendar-tooltip']").text())
+      .toContain("Station B");
+    expect(
+      wrapper.findAll("[data-testid='pattern-traffic-calendar']"),
+    ).toHaveLength(1);
+    await wrapper
+      .get("[data-testid='pattern-traffic-calendar-expand']")
+      .trigger("click");
+    await flushPromises();
+    expect(
+      wrapper.findAll("[data-testid='pattern-traffic-calendar']"),
+    ).toHaveLength(1);
+    expect(wrapper.find(".pattern-traffic-calendar--expanded").exists()).toBe(
+      true,
+    );
+    await wrapper
+      .get(".pattern-traffic-calendar-modal .icon-button")
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".pattern-traffic-calendar--expanded").exists()).toBe(
+      false,
+    );
+    expect(
+      wrapper.findAll("[data-testid='pattern-traffic-calendar']"),
+    ).toHaveLength(1);
+    expect(
+      wrapper.get("[data-testid='pattern-traffic-calendar']").classes(),
+    ).not.toContain(
+      "pattern-traffic-calendar--expanded",
     );
 
-    await wrapper.get(".pattern-traffic-timeline__item").trigger("click");
+
+    await wrapper.get("[data-date='2026-07-20']").trigger("click");
     await nextTick();
 
-    expect(wrapper.find(".pattern-traffic-timeline__loader").exists()).toBe(true);
+    expect(wrapper.find(".loading-clock").exists()).toBe(true);
 
     await flushPromises();
 
@@ -2246,15 +2512,22 @@ describe("DeparturePatternModal settings", () => {
     expect(vueFlowFitViewMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ padding: 0.18 }),
     );
-    vi.advanceTimersByTime(240);
+    vi.advanceTimersByTime(700);
     await nextTick();
 
-    expect(wrapper.find(".pattern-traffic-timeline__loader").exists()).toBe(false);
+    expect(wrapper.find(".loading-clock").exists()).toBe(false);
+    await wrapper.get(".pattern-traffic-calendar__today").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".pattern-flow-traffic-marker").exists()).toBe(false);
+    expect(
+      wrapper.get("[data-date='2026-07-01']").attributes("aria-selected"),
+    ).toBe("true");
+
 
     wrapper.unmount();
   });
 
-  it("fits the whole VueFlow line when one timeline date has multiple interrupted zones", async () => {
+  it("fits the whole VueFlow line when one calendar day has multiple interrupted zones", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0));
 
@@ -2326,9 +2599,9 @@ describe("DeparturePatternModal settings", () => {
     });
 
     await flushPromises();
-    await wrapper.get(".pattern-traffic-timeline-toggle").trigger("click");
+    await wrapper.get(".pattern-traffic-calendar-toggle").trigger("click");
     await flushPromises();
-    await wrapper.get(".pattern-traffic-timeline__item").trigger("click");
+    await wrapper.get("[data-date='2026-07-20']").trigger("click");
     await flushPromises();
 
     expect(vueFlowFitViewMock).toHaveBeenCalledWith(

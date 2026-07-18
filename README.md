@@ -1,5 +1,10 @@
 # Transport Clock GPT
 
+Optional extensions are documented in the
+[plugin architecture guide](docs/plugins.md). The published host module also
+ships a [standalone authoring and activation guide](packages/nuxt-plugin-host/README.md),
+with installation, development, publication, toggles, and core-only builds.
+
 [![FR](https://img.shields.io/badge/lang-FR-blue.svg)](README.md)
 [![EN](https://img.shields.io/badge/lang-EN-lightgrey.svg)](README.en.md)
 

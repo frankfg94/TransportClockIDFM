@@ -125,6 +125,42 @@ describe("traffic impact analysis", () => {
     expect(analysis.segments[0].endDateLabel).toBe("27 juillet");
   });
 
+  it("resolves a relocated Metro 13 terminus before a shared locality token", () => {
+    const [chatillon, rueEtienneDolet, plateauDeVanves, porteDeVanves] =
+      createStations([
+        "Chatillon - Montrouge",
+        "Malakoff - Rue Etienne Dolet",
+        "Malakoff - Plateau de Vanves",
+        "Porte de Vanves",
+      ]);
+    // The topology node order is intentionally different from the route order.
+    const stations = [chatillon, plateauDeVanves, rueEtienneDolet, porteDeVanves];
+    const edges = [
+      { source: chatillon.key, target: rueEtienneDolet.key },
+      { source: rueEtienneDolet.key, target: plateauDeVanves.key },
+      { source: plateauDeVanves.key, target: porteDeVanves.key },
+    ];
+    const disruption = createDisruption({
+      id: "metro-13-relocated-terminus",
+      title: "Metro 13 : Travaux de renovation - Trafic interrompu",
+      message:
+        "Jusqu'au dimanche 26 juillet inclus, le terminus sud de la ligne 13 est reporte a Malakoff - Rue Etienne Dolet en raison de travaux de renovation.",
+      impactedStopNames: [
+        "Malakoff - Rue Etienne Dolet (Malakoff)",
+        "Chatillon - Montrouge (Bagneux)",
+      ],
+    });
+
+    const analysis = analyzeTrafficImpacts([disruption], stations, edges);
+
+    expect(analysis.segments[0].stationKeys).toEqual([]);
+    expect(analysis.stationImpacts).toEqual({});
+    expect(
+      analysis.edgeImpacts[getPatternTrafficEdgeKey(edges[0])]?.kind,
+    ).toBe("interruption");
+    expect(analysis.edgeImpacts[getPatternTrafficEdgeKey(edges[1])]).toBeUndefined();
+  });
+
   it("keeps a non-served station interrupted when the rest of the line is disturbed", () => {
     const stations = createStations([
       "Joinville-le-Pont",
@@ -160,6 +196,50 @@ describe("traffic impact analysis", () => {
     expect(disturbed).toContain(
       normalizePatternStationName("La Varenne - Chennevieres"),
     );
+  });
+
+  it("marks only the Metro 13 stations affected by the July 14 sports event as interrupted", () => {
+    const stations = createStations([
+      "Asnières - Gennevilliers - Les Courtilles",
+      "Les Agnettes",
+      "Gabriel Péri",
+      "Porte de Clichy",
+      "Place de Clichy",
+      "Liège",
+      "Saint-Lazare",
+      "Miromesnil",
+      "Champs-Élysées - Clemenceau",
+      "Invalides",
+      "Varenne",
+      "Saint-François-Xavier",
+      "Duroc",
+      "Montparnasse - Bienvenüe",
+    ]);
+    const disruption = createDisruption({
+      id: "metro-13-july-14-sports-event",
+      title: "Métro 13 / 12 / 9 / 8 / 2 : Manifestation sportive - Arrêts non desservis",
+      message:
+        "Le 14 juillet, les arrêts ne sont pas desservis à Ternes, Charles de Gaulle – Étoile, Concorde, Alma - Marceau, Franklin D. Roosevelt, Saint-Philippe-du-Roule, Miromesnil et Champs-Élysées – Clemenceau en raison d'une manifestation sportive.\nArrêts concernés : Ternes (Paris), Saint-Philippe-du-Roule (Paris), Alma - Marceau (Paris), Miromesnil (Paris), Charles de Gaulle - Étoile (Paris), Franklin D. Roosevelt (Paris), Champs-Élysées - Clemenceau (Paris), Concorde (Paris)",
+    });
+
+    const analysis = analyzeTrafficImpacts(
+      [disruption],
+      stations,
+      createSequentialEdges(stations),
+    );
+
+    expect(getInterruptedStations(analysis)).toEqual([
+      normalizePatternStationName("Miromesnil"),
+      normalizePatternStationName("Champs-Élysées - Clemenceau"),
+    ]);
+    expect(analysis.stationImpacts[normalizePatternStationName("Miromesnil")]?.kind).toBe(
+      "interruption",
+    );
+    expect(
+      analysis.stationImpacts[
+        normalizePatternStationName("Champs-Élysées - Clemenceau")
+      ]?.kind,
+    ).toBe("interruption");
   });
 
   it("prefers textual date ranges over daily technical periods", () => {
@@ -342,6 +422,47 @@ describe("traffic impact analysis", () => {
     );
   });
 
+
+  it("keeps the Metro 13 disturbance extent when the cause follows en r\u00e9percussion", () => {
+    const stations = createStations([
+      "Chatillon - Montrouge",
+      "Malakoff - Rue Etienne Dolet",
+      "Malakoff - Plateau de Vanves",
+      "Porte de Vanves",
+      "Plaisance",
+      "Pernety",
+      "Gaite",
+      "Montparnasse - Bienvenue",
+      "Duroc",
+      "Saint-Francois-Xavier",
+      "Varenne",
+      "Invalides",
+      "Champs-Elysees - Clemenceau",
+      "Miromesnil",
+      "Saint-Lazare",
+      "Liege",
+      "Place de Clichy",
+      "La Fourche",
+    ]);
+    const edges = createSequentialEdges(stations);
+    const disruption = createDisruption({
+      id: "metro-13-bagage-oublie",
+      title: "Metro 13 : Bagage oublie dans un train - Trafic perturbe",
+      message:
+        "Le trafic est perturbe entre Chatillon - Montrouge et La Fourche en r\u00e9percussion d'un bagage oublie dans un train a Malakoff - Rue Etienne Dolet.",
+      impactedStopNames: [
+        "La Fourche (Paris)",
+        "Chatillon - Montrouge (Bagneux)",
+      ],
+    });
+
+    const analysis = analyzeTrafficImpacts([disruption], stations, edges);
+
+    expect(getDisturbedStations(analysis)).toEqual(
+      stations.map((station) => station.key),
+    );
+    expect(Object.keys(analysis.edgeImpacts)).toHaveLength(edges.length);
+  });
   it("keeps mixed interrupted and disturbed sections from the same message separate", () => {
     const stations = createStations([
       "Paris-Saint-Lazare",

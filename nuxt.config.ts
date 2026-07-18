@@ -14,6 +14,13 @@ const idfmApiKeyConfigured =
   Boolean(
     (process.env.NUXT_IDFM_API_KEY ?? process.env.IDFM_API_KEY)?.trim(),
   );
+const disallowPlugins = ["1", "true", "yes", "on"].includes(
+  (process.env.DISALLOW_PLUGINS ?? "").trim().toLowerCase(),
+);
+const enabledPluginPackages = (process.env.ENABLED_PLUGINS ?? "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 
 if (isCapacitorBuild && !serverApiBaseUrl.trim()) {
   throw new Error(
@@ -22,6 +29,15 @@ if (isCapacitorBuild && !serverApiBaseUrl.trim()) {
 }
 
 export default defineNuxtConfig({
+  modules: [
+    [
+      "@transport-clock/nuxt-plugin-host",
+      {
+        disallow: disallowPlugins,
+        plugins: enabledPluginPackages,
+      },
+    ],
+  ],
   // Keep the native build independent from a concurrently running `nuxt dev`.
   buildDir: isCapacitorBuild ? ".nuxt-capacitor" : undefined,
   compatibilityDate: "2026-05-17",
@@ -73,7 +89,13 @@ export default defineNuxtConfig({
     },
     server: {
       watch: {
-        ignored: ["**/dist/**", "**/.nuxt/**", "**/.nuxt-capacitor/**"],
+        ignored: [
+          "**/dist/**",
+          "**/.nuxt/**",
+          "**/.nuxt-capacitor/**",
+          "**/.unlighthouse/**",
+          "**/android/**",
+        ],
       },
     },
     define: {

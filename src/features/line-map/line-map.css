@@ -33,20 +33,20 @@
   flex-wrap: wrap;
   gap: 10px;
   justify-content: space-between;
-  grid-column: 1;
+  grid-column: 1 / -1;
   grid-row: 1;
   min-height: 50px;
   padding: 10px 12px;
 }
 
 .line-map-panel > .line-map-state {
-  grid-column: 1;
+  grid-column: 1 / -1;
   grid-row: 2;
 }
 
-.line-map-panel > .line-map-sidebar {
+.line-map-panel > .app-right-panel {
   grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-row: 2;
 }
 
 .line-map-panel__tools {

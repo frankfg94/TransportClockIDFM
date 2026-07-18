@@ -15,9 +15,21 @@ export function loadDepartureAlarms(): DepartureAlarm[] {
   }
 
   try {
-    const parsedValue = JSON.parse(rawValue) as DepartureAlarm[];
+    const parsedValue = JSON.parse(rawValue) as Partial<DepartureAlarm>[];
+    const validAlarms = parsedValue.filter(isValidAlarm);
+    const migratedAlarms = assignUniqueNativeNotificationIds(validAlarms);
 
-    return parsedValue.filter(isValidAlarm);
+    if (
+      migratedAlarms.some(
+        (alarm, index) =>
+          alarm.nativeNotificationId !==
+          validAlarms[index]?.nativeNotificationId,
+      )
+    ) {
+      saveDepartureAlarms(migratedAlarms);
+    }
+
+    return migratedAlarms;
   } catch {
     return [];
   }
@@ -31,12 +43,15 @@ export function createDepartureAlarm(
   board: TransitBoardConfig,
   departure: Departure,
   draft: AlarmDraft,
+  existingAlarms: DepartureAlarm[] = [],
 ): DepartureAlarm {
   const scheduledDepartureTime = getDepartureTime(departure) ?? new Date().toISOString();
   const alarmTime = getAlarmTime(scheduledDepartureTime, draft.minutesBefore);
+  const id = createAlarmId(board.id, departure);
 
   return {
-    id: createAlarmId(board.id, departure),
+    id,
+    nativeNotificationId: createUniqueNativeNotificationId(id, existingAlarms),
     boardId: board.id,
     boardTitle: board.title,
     lineLabel: board.line.shortName,
@@ -124,6 +139,37 @@ export function hasActiveAlarmForDeparture(
   });
 }
 
+export function findActiveAlarmForDeparture(
+  boardId: string,
+  departure: Departure,
+  alarms: DepartureAlarm[],
+): DepartureAlarm | undefined {
+  return alarms.find((alarm) => {
+    if (alarm.boardId !== boardId || alarm.notified) {
+      return false;
+    }
+
+    return (
+      alarm.departureId === departure.id ||
+      (Boolean(alarm.journeyName) && alarm.journeyName === departure.journeyName)
+    );
+  });
+}
+
+export function findDepartureAlarmById(
+  alarmId: string,
+  alarms: DepartureAlarm[],
+): DepartureAlarm | undefined {
+  return alarms.find((alarm) => alarm.id === alarmId);
+}
+
+export function removeDepartureAlarmById(
+  alarmId: string,
+  alarms: DepartureAlarm[],
+): DepartureAlarm[] {
+  return alarms.filter((alarm) => alarm.id !== alarmId);
+}
+
 export function markAlarmNotified(
   alarmId: string,
   alarms: DepartureAlarm[],
@@ -196,7 +242,66 @@ function createAlarmId(boardId: string, departure: Departure): string {
     .toLowerCase();
 }
 
-function isValidAlarm(value: Partial<DepartureAlarm>): value is DepartureAlarm {
+function assignUniqueNativeNotificationIds(
+  alarms: DepartureAlarm[],
+): DepartureAlarm[] {
+  const usedIds = new Set<number>();
+
+  return alarms.map((alarm) => {
+    const currentId = alarm.nativeNotificationId;
+    const nativeNotificationId =
+      isValidNativeNotificationId(currentId) && !usedIds.has(currentId)
+        ? currentId
+        : createUniqueNativeNotificationId(alarm.id, [], usedIds);
+
+    usedIds.add(nativeNotificationId);
+    return currentId === nativeNotificationId
+      ? alarm
+      : { ...alarm, nativeNotificationId };
+  });
+}
+
+function createUniqueNativeNotificationId(
+  alarmId: string,
+  existingAlarms: DepartureAlarm[],
+  additionalUsedIds = new Set<number>(),
+): number {
+  const usedIds = new Set([
+    ...existingAlarms.map((alarm) => alarm.nativeNotificationId),
+    ...additionalUsedIds,
+  ]);
+  let candidate = hashAlarmId(alarmId);
+
+  while (usedIds.has(candidate)) {
+    candidate = candidate >= 2_147_483_646 ? 1 : candidate + 1;
+  }
+
+  return candidate;
+}
+
+function hashAlarmId(value: string): number {
+  let hash = 2_166_136_261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+
+  return (hash >>> 0) % 2_147_483_646 + 1;
+}
+
+function isValidNativeNotificationId(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value > 0 &&
+    value <= 2_147_483_647
+  );
+}
+
+function isValidAlarm(
+  value: Partial<DepartureAlarm>,
+): value is DepartureAlarm {
   return Boolean(
     value.id &&
       value.boardId &&

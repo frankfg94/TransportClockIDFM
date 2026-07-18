@@ -17,6 +17,10 @@
   TransitFamilyOption,
   TransitBoardConfig,
 } from "../types/transit";
+import {
+  monitoringRefToNavitiaStopPointRef,
+  navitiaStopPointToMonitoringRef,
+} from "./idfmStopReferences";
 import { createLinePresentation } from "./linePresentation";
 import { toServerApiUrl } from "./serverApi";
 import {
@@ -2659,18 +2663,6 @@ function getEffectiveMonitoringPoints(
     : board.monitoringPoints;
 }
 
-function navitiaStopPointToMonitoringRef(
-  stopPointRef: string,
-): string | undefined {
-  if (stopPointRef.includes("monomodalStopPlace")) {
-    return undefined;
-  }
-
-  const stopPointId = stopPointRef.match(/(\d+)$/u)?.[1];
-
-  return stopPointId ? `STIF:StopPoint:Q:${stopPointId}:` : undefined;
-}
-
 async function fetchMonitoringPoint(
   board: TransitBoardConfig,
   point: MonitoringPointConfig,
@@ -2760,12 +2752,6 @@ function mapVisitToDeparture(
     callOrder: call.Order,
     navitiaStopPointRef: monitoringRefToNavitiaStopPointRef(monitoringRef),
   };
-}
-
-function monitoringRefToNavitiaStopPointRef(value?: string): string | undefined {
-  const stopPointId = value?.match(/StopPoint:Q:(\d+):/u)?.[1];
-
-  return stopPointId ? `stop_point:IDFM:${stopPointId}` : undefined;
 }
 
 function cleanPlatformName(value?: string): string | undefined {

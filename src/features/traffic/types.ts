@@ -14,6 +14,10 @@ export type TrafficLineStatus =
   | "unknown"
   | "error";
 
+export type TrafficCalendarImpactScope =
+  | "interruptions-only"
+  | "all-impacts";
+
 export interface TrafficPeriod {
   begin?: string;
   end?: string;

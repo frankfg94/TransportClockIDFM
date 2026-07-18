@@ -107,6 +107,12 @@
       "#internal/nuxt/paths": [
         "../node_modules/@nuxt/nitro-server/dist/runtime/utils/paths"
       ],
+      "#transport-clock/plugins": [
+        "./transport-clock/plugins.client.mjs"
+      ],
+      "#transport-clock/plugin-server": [
+        "../server/services/pluginHost"
+      ],
       "#unhead/composables": [
         "../node_modules/nuxt/dist/head/runtime/composables/v3"
       ]
@@ -119,8 +125,10 @@
   },
   "include": [
     "./types/nitro-nuxt.d.ts",
-    "../node_modules/nuxt/node_modules/runtime/server",
-    "../node_modules/nuxt/node_modules/dist/runtime/server",
+    "../packages/nuxt-plugin-host/src/runtime/server",
+    "../packages/nuxt-plugin-host/src/dist/runtime/server",
+    "../node_modules/runtime/server",
+    "../node_modules/dist/runtime/server",
     "../server/**/*",
     "../shared/**/*.d.ts",
     "./types/nitro.d.ts",
@@ -129,7 +137,8 @@
   "exclude": [
     "../node_modules",
     "../node_modules/nuxt/node_modules",
-    "../node_modules/nuxt/node_modules/@nuxt/telemetry/node_modules",
+    "../packages/nuxt-plugin-host/node_modules",
+    "../node_modules/@nuxt/telemetry/node_modules",
     "../dist"
   ]
 }

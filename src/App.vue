@@ -41,6 +41,18 @@ import {
 } from "./services/idfm";
 import { toServerApiUrl } from "./services/serverApi";
 import {
+  cancelDepartureAlarm,
+  getDepartureAlarmCapability,
+  initializeDepartureAlarmRuntime,
+  isNativeDepartureAlarmPlatform,
+  removeDepartureAlarmNotification,
+  requestDepartureAlarmPermissions,
+  scheduleDepartureAlarm,
+  stopDepartureAlarmSound,
+  synchronizeDepartureAlarms,
+  type DepartureAlarmNotificationCopy,
+} from "./services/departureAlarmRuntime";
+import {
   TRANSIT_PREFERENCES_CHANGED_EVENT,
   TRANSIT_PREFERENCES_STORAGE_KEY,
   DEFAULT_TRANSIT_PLACE_ID,
@@ -62,9 +74,12 @@ import {
   createDepartureAlarm,
   loadDepartureAlarms,
   markAlarmNotified,
+  findActiveAlarmForDeparture,
+  findDepartureAlarmById,
   reconcileBoardAlarms,
   removeAlarmsForBoard,
   saveDepartureAlarms,
+  removeDepartureAlarmById,
 } from "./storage/transitAlarms";
 import type {
   AlarmDraft,
@@ -163,12 +178,6 @@ const presetState = reactive<TransitPresetState>(
 const preferences = reactive(createDefaultPreferences(transitBoards));
 const { settings, updateSettings } = useAppSettings();
 const { d, t } = useI18n();
-let activeAlarmAudio:
-  | {
-      audioContext: AudioContext;
-      closeTimer?: number;
-    }
-  | undefined;
 const states = reactive<Record<string, BoardState>>({});
 const refreshing = ref(false);
 const lastRefresh = ref<Date>();
@@ -188,9 +197,16 @@ const alarmTarget = ref<{
   board: TransitBoardConfig;
   directionGroup: DirectionDepartureGroup;
   departure: Departure;
+  activeAlarm?: DepartureAlarm;
 }>();
 const alarmToast = ref<DepartureAlarm>();
 const departureAlarms = ref<DepartureAlarm[]>([]);
+const nativeAlarmPlatform = isNativeDepartureAlarmPlatform();
+const alarmNativePermissionState = ref<"ready" | "required" | "checking">(
+  nativeAlarmPlatform ? "checking" : "ready",
+);
+const alarmModalBusy = ref(false);
+const alarmModalError = ref("");
 const patternTarget = ref<{
   board: TransitBoardConfig;
   directionGroup: DirectionDepartureGroup;
@@ -211,12 +227,14 @@ const draggableBoards = ref<TransitBoardConfig[]>([]);
 const highlightedBoardId = ref<string>();
 const primApiKeyConfigured = __IDFM_API_KEY_CONFIGURED__;
 let refreshTimer: number | undefined;
-const alarmTimers = new Map<string, number>();
 const boardCardElements = new Map<string, HTMLElement>();
 let toastTimer: number | undefined;
 let clockTimer: number | undefined;
 let boardRevealTimer: number | undefined;
 let boardHighlightTimer: number | undefined;
+let alarmTriggerElement: HTMLElement | undefined;
+let disposeAlarmRuntime: (() => Promise<void>) | undefined;
+let alarmSyncRequest = 0;
 let boardRevealCleanup: (() => void) | undefined;
 let boardRevealRequest = 0;
 let mobileBreakpointQuery: MediaQueryList | undefined;
@@ -638,11 +656,31 @@ const fullscreenPanelDirections = computed<FullscreenPanelDirection[]>(() =>
     ? getFullscreenPanelDirections(fullscreenPanelBoard.value)
     : [],
 );
-const fullscreenPanelTrafficAlert = computed(() =>
-  fullscreenPanelBoard.value
-    ? getBoardTrafficAlert(fullscreenPanelBoard.value)
-    : undefined,
-);
+const fullscreenPanelTrafficAlert = computed(() => {
+  const board = fullscreenPanelBoard.value;
+
+  if (!board) {
+    return undefined;
+  }
+
+  const report = trafficReportByLineRef.value.get(
+    resolveBoardTrafficLineRef(board),
+  );
+  const alert = getBoardTrafficAlert(board);
+
+  if (!alert) {
+    return undefined;
+  }
+
+  const disruption = report?.disruptions.find(
+    (item) => item.id === alert.target.alertId,
+  );
+
+  return {
+    ...alert,
+    disruption,
+  };
+});
 const fullscreenPanelUpdatedAtLabel = computed(() => {
   const board = fullscreenPanelBoard.value;
 
@@ -902,6 +940,7 @@ async function openFullscreenPanel(
   stopRefreshTimer();
   fullscreenPanelBoard.value = board;
   fullscreenPanelPanamDirectionId.value = undefined;
+  startFullscreenRefreshTimer();
 
   if (options.syncRoute !== false) {
     replaceRouteFullscreenPanel(board);
@@ -969,6 +1008,7 @@ async function closeFullscreenPanel(
     removeRouteFullscreenPanel();
   }
 
+  stopRefreshTimer();
   fullscreenPanelBoard.value = undefined;
   fullscreenPanelPanamDirectionId.value = undefined;
   fullscreenPanelRouteDesignOverride.value = undefined;
@@ -1261,23 +1301,6 @@ async function loadNetexCacheStatus(): Promise<void> {
     };
   } finally {
     netexCacheStatusLoaded.value = true;
-  }
-}
-
-function stopSoftAlarm(): void {
-  if (!activeAlarmAudio) {
-    return;
-  }
-
-  if (activeAlarmAudio.closeTimer) {
-    window.clearTimeout(activeAlarmAudio.closeTimer);
-  }
-
-  const { audioContext } = activeAlarmAudio;
-  activeAlarmAudio = undefined;
-
-  if (audioContext.state !== "closed") {
-    void audioContext.close().catch(() => undefined);
   }
 }
 
@@ -1712,7 +1735,88 @@ function openAlarmModal(payload: {
   directionGroup: DirectionDepartureGroup;
   departure: Departure;
 }): void {
-  alarmTarget.value = payload;
+  alarmTriggerElement =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : undefined;
+  alarmModalError.value = "";
+  alarmModalBusy.value = false;
+  alarmTarget.value = {
+    ...payload,
+    activeAlarm: findActiveAlarmForDeparture(
+      payload.board.id,
+      payload.departure,
+      departureAlarms.value,
+    ),
+  };
+
+  if (nativeAlarmPlatform && !alarmTarget.value.activeAlarm) {
+    void refreshNativeAlarmPermissionState();
+  }
+}
+
+function openFullscreenAlarmModal(payload: {
+  directionId: string;
+  departureId: string;
+}): void {
+  const board = fullscreenPanelBoard.value;
+  if (!board) {
+    return;
+  }
+
+  const directionGroup = states[board.id]?.directionGroups.find(
+    (direction) => direction.id === payload.directionId,
+  );
+  const departure = directionGroup?.departures.find(
+    (item) => item.id === payload.departureId,
+  );
+
+  if (!directionGroup || !departure) {
+    return;
+  }
+
+  openAlarmModal({
+    board,
+    directionGroup,
+    departure,
+  });
+}
+
+async function refreshNativeAlarmPermissionState(): Promise<void> {
+  if (!nativeAlarmPlatform) {
+    alarmNativePermissionState.value = "ready";
+    return;
+  }
+
+  alarmNativePermissionState.value = "checking";
+
+  try {
+    const capability = await getDepartureAlarmCapability();
+    alarmNativePermissionState.value = capability.ready ? "ready" : "required";
+  } catch {
+    alarmNativePermissionState.value = "required";
+    alarmModalError.value = t("alarm.errors.permissionCheck");
+  }
+}
+
+async function requestAlarmNativePermissions(): Promise<void> {
+  alarmModalBusy.value = true;
+  alarmModalError.value = "";
+  alarmNativePermissionState.value = "checking";
+
+  try {
+    const capability = await requestDepartureAlarmPermissions();
+    alarmNativePermissionState.value = capability.ready ? "ready" : "required";
+
+    if (!capability.ready) {
+      alarmModalError.value = t("alarm.errors.permissionRequired");
+    }
+  } catch {
+    alarmNativePermissionState.value = "required";
+    alarmModalError.value = t("alarm.errors.permissionRequest");
+  } finally {
+    alarmModalBusy.value = false;
+  }
 }
 
 async function openPatternModal(payload: {
@@ -1799,88 +1903,195 @@ function closePatternModal(): void {
 }
 
 async function confirmAlarm(draft: AlarmDraft): Promise<void> {
-  if (!alarmTarget.value) {
+  const target = alarmTarget.value;
+  if (!target || target.activeAlarm || alarmModalBusy.value) {
     return;
   }
 
-  await requestNotificationPermission();
+  alarmModalBusy.value = true;
+  alarmModalError.value = "";
 
-  const alarm = createDepartureAlarm(
-    alarmTarget.value.board,
-    alarmTarget.value.departure,
-    draft,
-  );
-  const nextAlarms = departureAlarms.value.filter(
-    (item) =>
-      !(
-        item.boardId === alarm.boardId &&
-        item.departureId === alarm.departureId &&
-        !item.notified
-      ),
-  );
+  try {
+    const capability = await getDepartureAlarmCapability();
+    if (nativeAlarmPlatform) {
+      alarmNativePermissionState.value = capability.ready ? "ready" : "required";
 
-  updateAlarms([...nextAlarms, alarm]);
-  alarmTarget.value = undefined;
+      if (!capability.ready) {
+        alarmModalError.value = t("alarm.errors.permissionRequired");
+        return;
+      }
+    } else {
+      await requestDepartureAlarmPermissions();
+    }
+
+    const alarm = createDepartureAlarm(
+      target.board,
+      target.departure,
+      {
+        ...draft,
+        soundEnabled: nativeAlarmPlatform ? true : draft.soundEnabled,
+      },
+      departureAlarms.value,
+    );
+
+    await scheduleDepartureAlarm(alarm, getAlarmNotificationCopy(alarm));
+
+    const nextAlarms = departureAlarms.value.filter(
+      (item) =>
+        !(
+          item.boardId === alarm.boardId &&
+          item.departureId === alarm.departureId &&
+          !item.notified
+        ),
+    );
+    updateAlarms([...nextAlarms, alarm]);
+    closeAlarmModal();
+  } catch (error) {
+    alarmModalError.value =
+      error instanceof Error && error.message === "departure-alarm-time-passed"
+        ? t("alarm.errors.timePassed")
+        : t("alarm.errors.schedule");
+  } finally {
+    alarmModalBusy.value = false;
+  }
 }
 
 function cancelAlarmModal(): void {
+  if (!alarmModalBusy.value) {
+    closeAlarmModal();
+  }
+}
+
+async function removeAlarm(): Promise<void> {
+  const alarm = alarmTarget.value?.activeAlarm;
+  if (!alarm || alarmModalBusy.value) {
+    return;
+  }
+
+  alarmModalBusy.value = true;
+  alarmModalError.value = "";
+
+  try {
+    await cancelDepartureAlarm(alarm);
+
+    updateAlarms(
+      removeDepartureAlarmById(alarm.id, departureAlarms.value),
+    );
+    closeAlarmModal();
+  } catch {
+    alarmModalError.value = t("alarm.errors.cancel");
+  } finally {
+    alarmModalBusy.value = false;
+  }
+}
+
+function closeAlarmModal(): void {
   alarmTarget.value = undefined;
+  alarmModalError.value = "";
+  void nextTick(() => {
+    if (alarmTriggerElement?.isConnected) {
+      alarmTriggerElement.focus();
+    }
+
+    alarmTriggerElement = undefined;
+  });
+}
+
+function getAlarmNotificationCopy(alarm: DepartureAlarm): DepartureAlarmNotificationCopy {
+  const details = [
+    t("app.alarmNotificationLine", {
+      line: alarm.lineLabel,
+      destination: alarm.destination,
+    }),
+    alarm.platform
+      ? t("alarm.notificationDetailsWithPlatform", {
+          monitoring: alarm.monitoringLabel,
+          platform: alarm.platform,
+        })
+      : alarm.monitoringLabel,
+  ];
+
+  return {
+    title: t("app.alarmNotificationTitle", { station: alarm.boardTitle }),
+    body: details.filter(Boolean).join("\n"),
+  };
 }
 
 function updateAlarms(alarms: DepartureAlarm[]): void {
   departureAlarms.value = alarms;
   saveDepartureAlarms(departureAlarms.value);
-  scheduleAlarmTimers();
+
+  void synchronizeAlarmState();
 }
 
-function scheduleAlarmTimers(): void {
-  alarmTimers.forEach((timer) => window.clearTimeout(timer));
-  alarmTimers.clear();
 
-  const dueAlarms: DepartureAlarm[] = [];
+async function synchronizeAlarmState(): Promise<void> {
+  const request = ++alarmSyncRequest;
 
-  departureAlarms.value
-    .filter((alarm) => !alarm.notified)
-    .forEach((alarm) => {
-      const delay = new Date(alarm.alarmTime).getTime() - Date.now();
+  try {
+    const capability = await getDepartureAlarmCapability();
+    alarmNativePermissionState.value = capability.ready ? "ready" : "required";
 
-      if (delay <= 0) {
-        dueAlarms.push(alarm);
-        return;
-      }
+    if (nativeAlarmPlatform && !capability.ready) {
+      return;
+    }
 
-      const timer = window.setTimeout(
-        () => {
-          void triggerAlarm(alarm);
-        },
-        Math.min(delay, 2_147_483_647),
+    const result = await synchronizeDepartureAlarms(
+      departureAlarms.value,
+      getAlarmNotificationCopy,
+    );
+
+    if (request !== alarmSyncRequest) {
+      return;
+    }
+
+    const notifiedIds = new Set([
+      ...result.expiredAlarmIds,
+      ...result.deliveredAlarmIds,
+    ]);
+    if (notifiedIds.size > 0) {
+      departureAlarms.value = departureAlarms.value.map((alarm) =>
+        notifiedIds.has(alarm.id) ? { ...alarm, notified: true } : alarm,
       );
+      saveDepartureAlarms(departureAlarms.value);
+    }
 
-      alarmTimers.set(alarm.id, timer);
-    });
-
-  dueAlarms.forEach((alarm) => {
-    window.setTimeout(() => {
-      void triggerAlarm(alarm);
-    }, 0);
-  });
+    for (const alarmId of result.deliveredAlarmIds) {
+      const alarm = findDepartureAlarmById(alarmId, departureAlarms.value);
+      if (alarm) {
+        showAlarmToast(alarm);
+        await removeDepartureAlarmNotification(alarm);
+      }
+    }
+  } catch (error) {
+    console.error("Unable to synchronize departure alarms", error);
+  }
 }
 
-async function triggerAlarm(alarm: DepartureAlarm): Promise<void> {
-  if (departureAlarms.value.find((item) => item.id === alarm.id)?.notified) {
-    return;
+async function handleAlarmDelivered(alarmId: string): Promise<boolean> {
+  const alarm = findDepartureAlarmById(alarmId, departureAlarms.value);
+  if (!alarm || alarm.notified) {
+    return false;
   }
 
   updateAlarms(markAlarmNotified(alarm.id, departureAlarms.value));
   showAlarmToast(alarm);
-  showNativeNotification(alarm);
+
   if (settings.value.wakeDeviceOnAlarm) {
     void requestTemporaryAlarmWakeLock("1m");
   }
 
-  if (alarm.soundEnabled) {
-    playSoftAlarm();
+  return true;
+}
+
+async function handleAlarmAction(alarmId: string): Promise<void> {
+  const alarm = findDepartureAlarmById(alarmId, departureAlarms.value);
+  if (!alarm) {
+    return;
   }
+
+  await removeDepartureAlarmNotification(alarm);
+  await handleAlarmDelivered(alarmId);
 }
 
 function showAlarmToast(alarm: DepartureAlarm): void {
@@ -1891,118 +2102,26 @@ function showAlarmToast(alarm: DepartureAlarm): void {
   }
 
   toastTimer = window.setTimeout(() => {
-    dismissAlarmToast();
+    void dismissAlarmToast();
   }, 60_000);
 }
 
-function dismissAlarmToast(): void {
-  alarmToast.value = undefined;
-  stopSoftAlarm();
+async function dismissAlarmToast(): Promise<void> {
+  const alarm = alarmToast.value;
 
-  if (toastTimer) {
-    window.clearTimeout(toastTimer);
-    toastTimer = undefined;
-  }
-}
-function showNativeNotification(alarm: DepartureAlarm): void {
-  if (!("Notification" in window) || Notification.permission !== "granted") {
-    return;
-  }
+  try {
+    if (alarm) {
+      await removeDepartureAlarmNotification(alarm);
+    }
+  } finally {
+    alarmToast.value = undefined;
+    stopDepartureAlarmSound();
 
-  const body = [
-    t("app.alarmNotificationLine", {
-      line: alarm.lineLabel,
-      destination: alarm.destination,
-    }),
-    `${alarm.monitoringLabel}${
-      alarm.platform ? ` · ${t("app.platform", { platform: alarm.platform })}` : ""
-    }`,
-  ].join("\n");
-
-  new Notification(t("app.alarmNotificationTitle", { station: alarm.boardTitle }), {
-    body,
-    tag: alarm.id,
-  });
-}
-
-async function requestNotificationPermission(): Promise<void> {
-  if (!("Notification" in window) || Notification.permission !== "default") {
-    return;
-  }
-
-  await Notification.requestPermission();
-}
-function playSoftAlarm(): void {
-  stopSoftAlarm();
-
-  const AudioContextClass =
-    window.AudioContext ??
-    (window as Window & { webkitAudioContext?: typeof AudioContext })
-      .webkitAudioContext;
-
-  if (!AudioContextClass) {
-    return;
-  }
-
-  const audioContext = new AudioContextClass();
-
-  const masterGain = audioContext.createGain();
-  const alarmVolume = 0.6;
-  const durationSeconds = 30;
-  const patternDuration = 1.2;
-
-  masterGain.gain.setValueAtTime(alarmVolume, audioContext.currentTime);
-  masterGain.connect(audioContext.destination);
-
-  activeAlarmAudio = {
-    audioContext,
-  };
-
-  const notes = [
-    { frequency: 523.25, offset: 0 },
-    { frequency: 659.25, offset: 0.18 },
-    { frequency: 783.99, offset: 0.36 },
-  ];
-
-  const playTone = (frequency: number, startTime: number): void => {
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(frequency, startTime);
-
-    gain.gain.setValueAtTime(0.0001, startTime);
-    gain.gain.exponentialRampToValueAtTime(1, startTime + 0.03);
-    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.28);
-
-    oscillator.connect(gain);
-    gain.connect(masterGain);
-
-    oscillator.start(startTime);
-    oscillator.stop(startTime + 0.35);
-  };
-
-  const now = audioContext.currentTime;
-
-  for (let time = 0; time < durationSeconds; time += patternDuration) {
-    for (const note of notes) {
-      const startTime = now + time + note.offset;
-
-      if (startTime < now + durationSeconds) {
-        playTone(note.frequency, startTime);
-      }
+    if (toastTimer) {
+      window.clearTimeout(toastTimer);
+      toastTimer = undefined;
     }
   }
-
-  masterGain.gain.setValueAtTime(alarmVolume, now);
-  masterGain.gain.exponentialRampToValueAtTime(0.0001, now + durationSeconds);
-
-  activeAlarmAudio.closeTimer = window.setTimeout(
-    () => {
-      stopSoftAlarm();
-    },
-    (durationSeconds + 1) * 1000,
-  );
 }
 
 transitBoards.forEach((board) => ensureBoardState(board.id));
@@ -2025,6 +2144,18 @@ function startRefreshTimer(): void {
   }, REFRESH_INTERVAL_MS);
 }
 
+function startFullscreenRefreshTimer(): void {
+  stopRefreshTimer();
+
+  if (!fullscreenPanelBoard.value) {
+    return;
+  }
+
+  refreshTimer = window.setInterval(() => {
+    refreshFullscreenPanel();
+  }, REFRESH_INTERVAL_MS);
+}
+
 function stopRefreshTimer(): void {
   if (refreshTimer) {
     window.clearInterval(refreshTimer);
@@ -2038,9 +2169,11 @@ function refreshOnReturn(): void {
   }
 
   pageVisible.value = true;
-  scheduleAlarmTimers();
+  void synchronizeAlarmState();
 
   if (isFullscreenPanelOpen.value) {
+    startFullscreenRefreshTimer();
+    refreshFullscreenPanel();
     return;
   }
 
@@ -2178,6 +2311,17 @@ onMounted(() => {
   syncActivePlaceFromRoute({ refresh: false });
   syncFullscreenPanelFromRoute({ refresh: false });
   departureAlarms.value = loadDepartureAlarms();
+  void initializeDepartureAlarmRuntime({
+    onAlarmDelivered: handleAlarmDelivered,
+    onAlarmAction: handleAlarmAction,
+    onResume: async () => {
+      await refreshNativeAlarmPermissionState();
+      await synchronizeAlarmState();
+    },
+  }).then((dispose) => {
+    disposeAlarmRuntime = dispose;
+    void synchronizeAlarmState();
+  });
   allBoards.value.forEach((board) => ensureBoardState(board.id));
   pageVisible.value = isPageVisible();
   syncFullscreenPanelFromRoute({ requestNativeFullscreen: true, refresh: true });
@@ -2204,7 +2348,7 @@ onMounted(() => {
   clockTimer = window.setInterval(() => {
     nowTick.value = Date.now();
   }, 1000);
-  scheduleAlarmTimers();
+  void synchronizeAlarmState();
   void loadNetexCacheStatus();
 
   if (primApiKeyConfigured && pageVisible.value) {
@@ -2217,16 +2361,18 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopRefreshTimer();
-  alarmTimers.forEach((timer) => window.clearTimeout(timer));
-  alarmTimers.clear();
   if (toastTimer) {
     window.clearTimeout(toastTimer);
   }
   if (clockTimer) {
     window.clearInterval(clockTimer);
   }
+  if (disposeAlarmRuntime) {
+    void disposeAlarmRuntime();
+    disposeAlarmRuntime = undefined;
+  }
   clearBoardRevealTimers();
-  stopSoftAlarm();
+  stopDepartureAlarmSound();
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   document.removeEventListener(
     "fullscreenchange",
@@ -2590,11 +2736,16 @@ onBeforeUnmount(() => {
           :error="states[fullscreenPanelBoard.id]?.error"
           :updated-at-label="fullscreenPanelUpdatedAtLabel"
           :browser-fullscreen-active="fullscreenPanelEnteredNativeFullscreen"
+          :alarm-departure-ids="
+            getBoardAlarmDepartureIds(fullscreenPanelBoard.id)
+          "
+          :inert="Boolean(alarmTarget)"
           @change-design="updateFullscreenPanelDesign"
           @change-theme="updateFullscreenPanelTheme"
           @refresh="refreshFullscreenPanel"
           @toggle-fullscreen="toggleFullscreenPanelMode"
           @close="closeFullscreenPanel"
+          @schedule-alarm="openFullscreenAlarmModal"
         >
           <template #line-logo>
             <LineIconBadge
@@ -2625,8 +2776,16 @@ onBeforeUnmount(() => {
         :board="alarmTarget?.board"
         :departure="alarmTarget?.departure"
         :open="Boolean(alarmTarget)"
+        :active-alarm="alarmTarget?.activeAlarm"
+        :native-sound-required="nativeAlarmPlatform"
+        :native-permission-state="alarmNativePermissionState"
+        :busy="alarmModalBusy"
+        :error="alarmModalError"
+        :above-fullscreen="Boolean(fullscreenPanelBoard)"
         @cancel="cancelAlarmModal"
         @confirm="confirmAlarm"
+        @remove="removeAlarm"
+        @request-native-permissions="requestAlarmNativePermissions"
       />
 
       <DeparturePatternModal
@@ -2637,6 +2796,15 @@ onBeforeUnmount(() => {
         :loading="patternLoading"
         :open="Boolean(patternTarget)"
         :pattern="patternData"
+        :line-id="
+          patternTarget?.board.line.shortName || patternTarget?.board.line.ref
+        "
+        :transport-type="
+          patternTarget?.board.line.mode === 'train'
+            ? 'transilien'
+            : patternTarget?.board.line.mode
+        "
+        :reduce-motion="settings.reduceMotion"
         :show-mini-map="settings.showPatternMiniMap"
         :show-city-zones="settings.showPatternCityZones"
         :compact-mode="settings.compactLinePlanMode"
@@ -2654,6 +2822,7 @@ onBeforeUnmount(() => {
         "
         :rich-transfer-tooltips="settings.richTransferTooltips"
         :smart-traffic-detection="settings.smartTrafficDetection"
+        :traffic-calendar-impact-scope="settings.trafficCalendarImpactScope"
         :traffic-warning-lookahead-days="
           settings.trafficWarningLookaheadDays
         "

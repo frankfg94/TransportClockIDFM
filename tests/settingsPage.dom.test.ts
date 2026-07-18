@@ -96,6 +96,23 @@ describe("SettingsPage", () => {
     await wrapper.get('[aria-label="Mode par defaut info trafic"]').trigger("click");
     expect(wrapper.text()).toContain("Toutes les lignes");
     expect(wrapper.text()).toContain("Detection intelligente sur le schema");
+    expect(wrapper.text()).toContain("Impacts affichés dans le calendrier");
+    expect(wrapper.text()).toContain("Interruptions et perturbations");
+    expect(wrapper.text()).toContain("Comment le niveau est calculé");
+    expect(wrapper.text()).toContain(
+      "score = Σ((1 + poids des correspondances) × coefficient topologique × coefficient temporel)",
+    );
+    expect(wrapper.text()).toContain("+4");
+    expect(wrapper.text()).toContain("× 1,4");
+    expect(wrapper.text()).toContain("? 12");
+    expect(wrapper.text()).toContain("Coefficient temporel");
+    expect(wrapper.text()).toContain("21:30–06:30");
+    expect(wrapper.text()).toContain("22:45");
+    await wrapper
+      .get('[aria-label="Impacts du calendrier trafic"]')
+      .trigger("click");
+    expect(wrapper.text()).toContain("Interruptions uniquement");
+
     expect(wrapper.text()).toContain("Avertissement travaux sur le schema");
     expect(wrapper.text()).toContain("10 jours");
     const trafficWarningSlider = wrapper.get(
@@ -122,11 +139,43 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Espacement realiste");
     expect(wrapper.text()).toContain("Coefficient min");
     expect(wrapper.text()).toContain("Coefficient max");
+    expect(wrapper.text()).toContain("Plugins installés");
+    expect(wrapper.text()).toContain(
+      "Visualisation des transports en temps reel",
+    );
+    expect(wrapper.text()).not.toContain("Distance suivant le trace");
+    const customizePluginButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Personnaliser"));
+    expect(customizePluginButton).toBeTruthy();
+    await customizePluginButton?.trigger("click");
+    expect(document.body.textContent).toContain("Distance suivant le trace");
+    expect(document.body.textContent).toContain("Rafraichissement reseau");
+    document.body
+      .querySelector<HTMLButtonElement>('[aria-label="Fermer"]')
+      ?.click();
+    await wrapper.vm.$nextTick();
+    expect(document.body.textContent).not.toContain("Distance suivant le trace");
     expect(wrapper.text()).toContain(
       "Limiter les lignes fantomes aux modes structurants",
     );
     expect(wrapper.text()).toContain("Wake lock");
     expect(wrapper.text()).toContain("Masquer la navigation");
+
+    const realtimeVehicleToggle = wrapper.get(
+      'input[aria-label="Activer ou désactiver Visualisation des transports en temps reel"]',
+    );
+
+    expect(
+      (realtimeVehicleToggle.element as HTMLInputElement).checked,
+    ).toBe(true);
+    await realtimeVehicleToggle.setValue(false);
+    expect(
+      (realtimeVehicleToggle.element as HTMLInputElement).checked,
+    ).toBe(false);
+    expect(document.body.textContent).toContain(
+      "Visualisation des transports en temps reel désactivé",
+    );
 
     const backendCacheToggle = wrapper
       .findAll("label.settings-toggle")

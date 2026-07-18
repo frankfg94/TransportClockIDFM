@@ -53,6 +53,45 @@ describe("traffic normalization", () => {
     expect(getTrafficLineStatus(disruptions)).toBe("planned");
   });
 
+  it("keeps both endpoints of a Navitia impacted_section", () => {
+    const [disruption] = normalizeNavitiaLineReportPayload(
+      {
+        disruptions: [
+          {
+            id: "metro-13-south-works",
+            status: "active",
+            severity: { effect: "NO_SERVICE", name: "bloquante" },
+            messages: [{ text: "Trafic interrompu" }],
+            impacted_objects: [
+              {
+                pt_object: {
+                  embedded_type: "line",
+                  id: "line:IDFM:C01383",
+                },
+                impacted_section: {
+                  from: {
+                    name: "Malakoff - Rue Étienne Dolet (Malakoff)",
+                    stop_area: { name: "Malakoff - Rue Étienne Dolet" },
+                  },
+                  to: {
+                    name: "Châtillon - Montrouge (Bagneux)",
+                    stop_area: { name: "Châtillon - Montrouge" },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      "line:IDFM:C01383",
+    );
+
+    expect(disruption.impactedStopNames).toEqual([
+      "Malakoff - Rue Étienne Dolet (Malakoff)",
+      "Châtillon - Montrouge (Bagneux)",
+    ]);
+  });
+
   it("keeps root disruptions when Navitia line_reports only link them", () => {
     const disruptions = normalizeNavitiaLineReportPayload(
       {

@@ -1,5 +1,6 @@
 import { normalizeTrafficText } from "./trafficPresentation";
 import { parseTrafficDate } from "./trafficTiming";
+import { getTrafficDisruptionStartClockTime } from "./trafficTextTimes";
 import type { TrafficDisruption, TrafficPeriod } from "./types";
 
 export interface ScheduledTrafficInterruption {
@@ -22,7 +23,7 @@ export function getTodayScheduledTrafficInterruption(
   const text = normalizeTrafficText(
     `${disruption.title} ${disruption.message ?? ""}`,
   );
-  const startTime = extractTrafficStartTime(text);
+  const startTime = getTrafficDisruptionStartClockTime(disruption);
 
   if (!startTime) {
     return undefined;
@@ -71,34 +72,6 @@ export function getTodayScheduledTrafficStart(
   const scheduled = getTodayScheduledTrafficInterruption(disruption, now);
 
   return scheduled && !scheduled.active ? scheduled.start : undefined;
-}
-
-function extractTrafficStartTime(
-  text: string,
-): { hour: number; minute: number } | undefined {
-  const match = text.match(
-    /\b(?:a partir de|des)\s+(\d{1,2})\s*h\s*(\d{2})?\b/u,
-  );
-
-  if (!match) {
-    return undefined;
-  }
-
-  const hour = Number(match[1]);
-  const minute = Number(match[2] ?? "0");
-
-  if (
-    !Number.isInteger(hour) ||
-    !Number.isInteger(minute) ||
-    hour < 0 ||
-    hour > 23 ||
-    minute < 0 ||
-    minute > 59
-  ) {
-    return undefined;
-  }
-
-  return { hour, minute };
 }
 
 function findMatchingScheduledPeriod(

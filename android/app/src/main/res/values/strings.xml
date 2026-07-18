@@ -4,4 +4,6 @@
     <string name="title_activity_main">Transport Clock IDFM</string>
     <string name="package_name">fr.vibeidfm.transportclock</string>
     <string name="custom_url_scheme">fr.vibeidfm.transportclock</string>
+    <string name="departure_alarm_channel_name">Alarmes de d?part</string>
+    <string name="departure_alarm_channel_description">Alarmes sonores avant les prochains d?parts</string>
 </resources>

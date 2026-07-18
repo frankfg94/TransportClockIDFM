@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
-import { ExternalLink, MapIcon, Plus, Star, X } from "lucide-vue-next";
+import { ExternalLink, MapIcon, Plus, Star } from "lucide-vue-next";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import StationBoardSelector from "../../components/StationBoardSelector.vue";
 import StationTransferDetails from "../../components/StationTransferDetails.vue";
@@ -12,12 +11,6 @@ import type {
   TransferLineOption,
 } from "../../types/transit";
 import type { LineMapStopView } from "./types";
-
-type MobileSheetStage = "peek" | "mid" | "full";
-
-interface CloseSidebarOptions {
-  preserveSelection?: boolean;
-}
 
 const props = withDefaults(
   defineProps<{
@@ -39,18 +32,14 @@ const props = withDefaults(
     ghostFrequency?: LineFrequencyProfile;
     ghostFrequencyLoading?: boolean;
     ghostFrequencyError?: boolean;
-    mobileStage?: MobileSheetStage;
   }>(),
   {
     favoriteDashboardOptions: () => [],
     favoriteDashboardSelectorOpen: false,
-    mobileStage: "mid",
   },
 );
 
 const emit = defineEmits<{
-  close: [options?: CloseSidebarOptions];
-  mobileStageChange: [stage: MobileSheetStage];
   addFavorite: [];
   cancelFavoriteDashboard: [];
   confirmFavoriteDashboard: [];
@@ -60,99 +49,7 @@ const emit = defineEmits<{
   "update:favoriteDashboardId": [placeId: string];
 }>();
 
-const mobileDrag = reactive({
-  active: false,
-  currentY: 0,
-  pointerId: -1,
-  startY: 0,
-});
-const suppressHandleClick = ref(false);
 const { t } = useI18n();
-
-const sidebarStyle = computed(() => ({
-  "--line-map-sidebar-drag-offset": mobileDrag.active
-    ? `${Math.max(-90, Math.min(220, mobileDrag.currentY - mobileDrag.startY))}px`
-    : "0px",
-}));
-
-function toggleMobileSheetFromHandle(): void {
-  if (suppressHandleClick.value) {
-    suppressHandleClick.value = false;
-    return;
-  }
-
-  emit("mobileStageChange", props.mobileStage === "full" ? "mid" : "full");
-}
-
-function startMobileSheetDrag(event: PointerEvent): void {
-  if (event.button !== 0 && event.pointerType === "mouse") {
-    return;
-  }
-
-  mobileDrag.active = true;
-  mobileDrag.pointerId = event.pointerId;
-  mobileDrag.startY = event.clientY;
-  mobileDrag.currentY = event.clientY;
-
-  if (event.currentTarget instanceof HTMLElement) {
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-  }
-}
-
-function moveMobileSheetDrag(event: PointerEvent): void {
-  if (!mobileDrag.active || event.pointerId !== mobileDrag.pointerId) {
-    return;
-  }
-
-  mobileDrag.currentY = event.clientY;
-}
-
-function finishMobileSheetDrag(event: PointerEvent): void {
-  if (!mobileDrag.active || event.pointerId !== mobileDrag.pointerId) {
-    return;
-  }
-
-  mobileDrag.currentY = event.clientY;
-  const deltaY = mobileDrag.currentY - mobileDrag.startY;
-
-  mobileDrag.active = false;
-  mobileDrag.pointerId = -1;
-
-  if (event.currentTarget instanceof HTMLElement) {
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-  }
-
-  if (Math.abs(deltaY) < 60) {
-    return;
-  }
-
-  suppressHandleClick.value = true;
-  window.setTimeout(() => {
-    suppressHandleClick.value = false;
-  }, 120);
-
-  if (deltaY < 0) {
-    emit("mobileStageChange", props.mobileStage === "peek" ? "mid" : "full");
-    return;
-  }
-
-  if (props.mobileStage === "full") {
-    emit("mobileStageChange", "mid");
-  } else if (props.mobileStage === "mid") {
-    emit("mobileStageChange", "peek");
-  } else {
-    emit("close", { preserveSelection: true });
-  }
-}
-
-function cancelMobileSheetDrag(event: PointerEvent): void {
-  if (!mobileDrag.active || event.pointerId !== mobileDrag.pointerId) {
-    return;
-  }
-
-  mobileDrag.active = false;
-  mobileDrag.pointerId = -1;
-}
 
 function isNoctilienLine(line: NetworkGhostLineView): boolean {
   return (
@@ -172,42 +69,11 @@ function formatFrequency(minutes?: number): string {
 </script>
 
 <template>
-  <aside
+  <div
     class="line-map-sidebar"
-    :class="[
-      `line-map-sidebar--mobile-${mobileStage}`,
-      { 'line-map-sidebar--mobile-dragging': mobileDrag.active },
-    ]"
-    :style="sidebarStyle"
     :aria-label="t('lineMap.sidebar.detailsAria')"
     data-testid="line-map-sidebar"
   >
-    <button
-      class="line-map-sidebar__drag-handle"
-      type="button"
-      :aria-label="t('lineMap.sidebar.resizeAria')"
-      data-testid="line-map-sidebar-drag-handle"
-      @click="toggleMobileSheetFromHandle"
-      @pointerdown.prevent="startMobileSheetDrag"
-      @pointermove.prevent="moveMobileSheetDrag"
-      @pointerup.prevent="finishMobileSheetDrag"
-      @pointercancel.prevent="cancelMobileSheetDrag"
-    >
-      <span aria-hidden="true"></span>
-    </button>
-
-    <header class="line-map-sidebar__topbar">
-      <span>{{ t("lineMap.sidebar.stationDetails") }}</span>
-      <button
-        class="icon-button line-map-sidebar__close"
-        type="button"
-        :aria-label="t('lineMap.sidebar.closeAria')"
-        @click="emit('close')"
-      >
-        <X aria-hidden="true" />
-      </button>
-    </header>
-
     <div class="line-map-sidebar__content">
       <section
         v-if="activeGhostLine"
@@ -389,65 +255,19 @@ function formatFrequency(minutes?: number): string {
         <ExternalLink aria-hidden="true" />
       </button>
     </footer>
-  </aside>
+  </div>
 </template>
 
 <style scoped>
 .line-map-sidebar {
-  background: var(--surface);
-  box-shadow: -18px 0 46px rgba(16, 35, 63, 0.2);
   color: var(--ink);
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
   min-height: 0;
-  width: clamp(320px, 30vw, 400px);
-  z-index: 8;
+  width: 100%;
 }
 
-.line-map-sidebar__drag-handle {
-  align-items: center;
-  appearance: none;
-  background: transparent;
-  border: 0;
-  cursor: grab;
-  display: none;
-  justify-content: center;
-  padding: 10px 0 6px;
-  touch-action: none;
-}
-
-.line-map-sidebar__drag-handle:active {
-  cursor: grabbing;
-}
-
-.line-map-sidebar__drag-handle span {
-  background: rgba(100, 116, 139, 0.42);
-  border-radius: 999px;
-  display: block;
-  height: 5px;
-  width: 48px;
-}
-
-.line-map-sidebar__topbar {
-  align-items: center;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  font-size: 0.78rem;
-  font-weight: 950;
-  justify-content: space-between;
-  min-height: 50px;
-  padding: 8px 12px 8px 18px;
-  text-transform: uppercase;
-}
-
-.line-map-sidebar__close {
-  height: 36px;
-  min-height: 36px;
-  width: 36px;
-}
-
-.line-map-sidebar__close svg,
 .line-map-sidebar__actions svg {
   height: 18px;
   width: 18px;
@@ -637,58 +457,7 @@ function formatFrequency(minutes?: number): string {
   margin: 0;
 }
 
-@media (max-width: 1024px) {
-  .line-map-sidebar {
-    inset: 0 0 0 auto;
-    position: absolute;
-  }
-}
-
 @media (max-width: 720px) {
-  .line-map-sidebar {
-    border-radius: 24px 24px 0 0;
-    box-shadow: 0 -24px 70px rgba(15, 23, 42, 0.24);
-    display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
-    height: 52dvh;
-    inset: auto 0 0;
-    max-height: calc(100dvh - 10px);
-    min-height: 180px;
-    overflow: hidden;
-    position: fixed;
-    transform: translateY(var(--line-map-sidebar-drag-offset, 0px));
-    transition:
-      height 220ms cubic-bezier(0.22, 1, 0.36, 1),
-      transform 180ms ease;
-    width: 100%;
-    z-index: 9100;
-  }
-
-  .line-map-sidebar--mobile-peek {
-    height: 28dvh;
-  }
-
-  .line-map-sidebar--mobile-mid {
-    height: 52dvh;
-  }
-
-  .line-map-sidebar--mobile-full {
-    height: 92dvh;
-  }
-
-  .line-map-sidebar--mobile-dragging {
-    transition: none;
-  }
-
-  .line-map-sidebar__drag-handle {
-    display: flex;
-  }
-
-  .line-map-sidebar__topbar {
-    min-height: 42px;
-    padding: 2px 12px 10px 18px;
-  }
-
   .line-map-sidebar__content {
     overscroll-behavior: contain;
     padding: 14px 18px 18px;

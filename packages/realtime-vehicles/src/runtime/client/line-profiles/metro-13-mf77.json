@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "id": "metro-13-mf77-2026",
+  "lineRefs": ["line:IDFM:C01383", "STIF:Line::C01383:", "13"],
+  "label": "Métro 13 · MF77",
+  "rollingStock": {
+    "model": "MF77",
+    "maxOperatingSpeedKph": 70,
+    "accelerationMps2": null,
+    "serviceBrakingMps2": null,
+    "doorCloseSeconds": null,
+    "provenance": "Le MF77 en service sur la ligne 13 est confirmé par Alstom. Le plafond de 70 km/h est une borne d'exploitation prudente pour un métro urbain ferré, pas une mesure embarquée du MF77. Les valeurs dynamiques non publiées restent nulles et n'écrasent pas le moteur générique.",
+    "sourceUrls": [
+      "https://www.alstom.com/fr/press-releases-news/2025/2/le-mf19-le-metro-ferre-nouvelle-generation-se-devoile",
+      "https://www.legifrance.gouv.fr/loda/id/LEGITEXT000006074549"
+    ]
+  },
+  "schedule": {
+    "kind": "idfm_navitia_theoretical_stop_times",
+    "generatedAt": "2026-07-15T18:00:00.000Z",
+    "vehicleJourneySampleCount": 7697,
+    "sourceUrlTemplate": "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/lines/line%3AIDFM%3AC01383/vehicle_journeys",
+    "notes": "Médiane par sens des stop_times officiels IDFM. Ce sont des temps planifiés, pas des chronométrages de positions réelles. PRIM reste prioritaire à chaque rafraîchissement."
+  },
+  "segments": [
+    { "sourceStationId": "FR::Quay:50088159:FR1", "sourceName": "Saint-Denis-Université", "targetStationId": "FR::Quay:50026783:FR1", "targetName": "Basilique de Saint-Denis", "distanceMeters": 1285, "sourceToTargetRuntimeSeconds": 100, "targetToSourceRuntimeSeconds": 110 },
+    { "sourceStationId": "FR::Quay:50026783:FR1", "sourceName": "Basilique de Saint-Denis", "targetStationId": "FR::Quay:50104295:FR1", "targetName": "Saint-Denis - Porte de Paris", "distanceMeters": 774, "sourceToTargetRuntimeSeconds": 82, "targetToSourceRuntimeSeconds": 75 },
+    { "sourceStationId": "FR::Quay:50104295:FR1", "sourceName": "Saint-Denis - Porte de Paris", "targetStationId": "FR::Quay:50239727:FR1", "targetName": "Carrefour-Pleyel", "distanceMeters": 1596, "sourceToTargetRuntimeSeconds": 133, "targetToSourceRuntimeSeconds": 125 },
+    { "sourceStationId": "FR::Quay:50239727:FR1", "sourceName": "Carrefour-Pleyel", "targetStationId": "FR::Quay:50026949:FR1", "targetName": "Mairie de Saint-Ouen", "distanceMeters": 1043, "sourceToTargetRuntimeSeconds": 94, "targetToSourceRuntimeSeconds": 97 },
+    { "sourceStationId": "FR::Quay:50026949:FR1", "sourceName": "Mairie de Saint-Ouen", "targetStationId": "FR::Quay:50025773:FR1", "targetName": "Garibaldi", "distanceMeters": 730, "sourceToTargetRuntimeSeconds": 81, "targetToSourceRuntimeSeconds": 80 },
+    { "sourceStationId": "FR::Quay:50025773:FR1", "sourceName": "Garibaldi", "targetStationId": "FR::Quay:50026779:FR1", "targetName": "Porte de Saint-Ouen", "distanceMeters": 880, "sourceToTargetRuntimeSeconds": 89, "targetToSourceRuntimeSeconds": 97 },
+    { "sourceStationId": "FR::Quay:50026779:FR1", "sourceName": "Porte de Saint-Ouen", "targetStationId": "FR::Quay:50026613:FR1", "targetName": "Guy-Môquet", "distanceMeters": 509, "sourceToTargetRuntimeSeconds": 61, "targetToSourceRuntimeSeconds": 61 },
+    { "sourceStationId": "FR::Quay:50026613:FR1", "sourceName": "Guy-Môquet", "targetStationId": "FR::Quay:50161686:FR1", "targetName": "La Fourche", "distanceMeters": 692, "sourceToTargetRuntimeSeconds": 74, "targetToSourceRuntimeSeconds": 89 },
+    { "sourceStationId": "FR::Quay:50161686:FR1", "sourceName": "La Fourche", "targetStationId": "FR::Quay:50026612:FR1", "targetName": "Place de Clichy", "distanceMeters": 431, "sourceToTargetRuntimeSeconds": 58, "targetToSourceRuntimeSeconds": 45 },
+    { "sourceStationId": "FR::Quay:50026612:FR1", "sourceName": "Place de Clichy", "targetStationId": "FR::Quay:50025935:FR1", "targetName": "Liège", "distanceMeters": 452, "sourceToTargetRuntimeSeconds": 64, "targetToSourceRuntimeSeconds": 69 },
+    { "sourceStationId": "FR::Quay:50025935:FR1", "sourceName": "Liège", "targetStationId": "FR::Quay:50025774:FR1", "targetName": "Saint-Lazare", "distanceMeters": 545, "sourceToTargetRuntimeSeconds": 89, "targetToSourceRuntimeSeconds": 65 },
+    { "sourceStationId": "FR::Quay:50025774:FR1", "sourceName": "Saint-Lazare", "targetStationId": "FR::Quay:50026444:FR1", "targetName": "Miromesnil", "distanceMeters": 947, "sourceToTargetRuntimeSeconds": 103, "targetToSourceRuntimeSeconds": 104 },
+    { "sourceStationId": "FR::Quay:50026444:FR1", "sourceName": "Miromesnil", "targetStationId": "FR::Quay:50026077:FR1", "targetName": "Champs-Élysées-Clémenceau", "distanceMeters": 731, "sourceToTargetRuntimeSeconds": 86, "targetToSourceRuntimeSeconds": 75 },
+    { "sourceStationId": "FR::Quay:50026077:FR1", "sourceName": "Champs-Élysées-Clémenceau", "targetStationId": "FR::Quay:50026261:FR1", "targetName": "Invalides", "distanceMeters": 821, "sourceToTargetRuntimeSeconds": 84, "targetToSourceRuntimeSeconds": 83 },
+    { "sourceStationId": "FR::Quay:50026261:FR1", "sourceName": "Invalides", "targetStationId": "FR::Quay:50026076:FR1", "targetName": "Varenne", "distanceMeters": 409, "sourceToTargetRuntimeSeconds": 55, "targetToSourceRuntimeSeconds": 59 },
+    { "sourceStationId": "FR::Quay:50026076:FR1", "sourceName": "Varenne", "targetStationId": "FR::Quay:50088156:FR1", "targetName": "Saint-François-Xavier", "distanceMeters": 496, "sourceToTargetRuntimeSeconds": 57, "targetToSourceRuntimeSeconds": 56 },
+    { "sourceStationId": "FR::Quay:50088156:FR1", "sourceName": "Saint-François-Xavier", "targetStationId": "FR::Quay:50026436:FR1", "targetName": "Duroc", "distanceMeters": 479, "sourceToTargetRuntimeSeconds": 54, "targetToSourceRuntimeSeconds": 54 },
+    { "sourceStationId": "FR::Quay:50026436:FR1", "sourceName": "Duroc", "targetStationId": "FR::Quay:50026085:FR1", "targetName": "Montparnasse-Bienvenue", "distanceMeters": 762, "sourceToTargetRuntimeSeconds": 75, "targetToSourceRuntimeSeconds": 71 },
+    { "sourceStationId": "FR::Quay:50026085:FR1", "sourceName": "Montparnasse-Bienvenue", "targetStationId": "FR::Quay:50088154:FR1", "targetName": "Gaîté", "distanceMeters": 391, "sourceToTargetRuntimeSeconds": 64, "targetToSourceRuntimeSeconds": 75 },
+    { "sourceStationId": "FR::Quay:50088154:FR1", "sourceName": "Gaîté", "targetStationId": "FR::Quay:50026432:FR1", "targetName": "Pernety", "distanceMeters": 727, "sourceToTargetRuntimeSeconds": 75, "targetToSourceRuntimeSeconds": 71 },
+    { "sourceStationId": "FR::Quay:50026432:FR1", "sourceName": "Pernety", "targetStationId": "FR::Quay:50026262:FR1", "targetName": "Plaisance", "distanceMeters": 377, "sourceToTargetRuntimeSeconds": 58, "targetToSourceRuntimeSeconds": 56 },
+    { "sourceStationId": "FR::Quay:50026262:FR1", "sourceName": "Plaisance", "targetStationId": "FR::Quay:50026786:FR1", "targetName": "Porte de Vanves", "distanceMeters": 830, "sourceToTargetRuntimeSeconds": 76, "targetToSourceRuntimeSeconds": 69 },
+    { "sourceStationId": "FR::Quay:50026786:FR1", "sourceName": "Porte de Vanves", "targetStationId": "FR::Quay:50026951:FR1", "targetName": "Malakoff-Plateau de Vanves", "distanceMeters": 745, "sourceToTargetRuntimeSeconds": 74, "targetToSourceRuntimeSeconds": 83 },
+    { "sourceStationId": "FR::Quay:50026951:FR1", "sourceName": "Malakoff-Plateau de Vanves", "targetStationId": "FR::Quay:50026260:FR1", "targetName": "Malakoff-Rue Étienne Dolet", "distanceMeters": 873, "sourceToTargetRuntimeSeconds": 86, "targetToSourceRuntimeSeconds": 98 },
+    { "sourceStationId": "FR::Quay:50026260:FR1", "sourceName": "Malakoff-Rue Étienne Dolet", "targetStationId": "FR::Quay:50239724:FR1", "targetName": "Châtillon Montrouge", "distanceMeters": 603, "sourceToTargetRuntimeSeconds": 80, "targetToSourceRuntimeSeconds": 68 },
+    { "sourceStationId": "FR::Quay:50161686:FR1", "sourceName": "La Fourche", "targetStationId": "FR::Quay:50026265:FR1", "targetName": "Brochant", "distanceMeters": 586, "sourceToTargetRuntimeSeconds": 89, "targetToSourceRuntimeSeconds": 75 },
+    { "sourceStationId": "FR::Quay:50026265:FR1", "sourceName": "Brochant", "targetStationId": "FR::Quay:50026610:FR1", "targetName": "Porte de Clichy", "distanceMeters": 642, "sourceToTargetRuntimeSeconds": 81, "targetToSourceRuntimeSeconds": 74 },
+    { "sourceStationId": "FR::Quay:50026610:FR1", "sourceName": "Porte de Clichy", "targetStationId": "FR::Quay:50025937:FR1", "targetName": "Mairie de Clichy", "distanceMeters": 1233, "sourceToTargetRuntimeSeconds": 97, "targetToSourceRuntimeSeconds": 100 },
+    { "sourceStationId": "FR::Quay:50025937:FR1", "sourceName": "Mairie de Clichy", "targetStationId": "FR::Quay:50025775:FR1", "targetName": "Gabriel-Péri", "distanceMeters": 1647, "sourceToTargetRuntimeSeconds": 150, "targetToSourceRuntimeSeconds": 147 },
+    { "sourceStationId": "FR::Quay:50025775:FR1", "sourceName": "Gabriel-Péri", "targetStationId": "FR::Quay:50026434:FR1", "targetName": "Les Agnettes", "distanceMeters": 941, "sourceToTargetRuntimeSeconds": 86, "targetToSourceRuntimeSeconds": 93 },
+    { "sourceStationId": "FR::Quay:50026434:FR1", "sourceName": "Les Agnettes", "targetStationId": "FR::Quay:50088163:FR1", "targetName": "Asnières-Gennevilliers Les Courtilles", "distanceMeters": 882, "sourceToTargetRuntimeSeconds": 86, "targetToSourceRuntimeSeconds": 73 }
+  ]
+}

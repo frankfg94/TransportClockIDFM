@@ -28,6 +28,7 @@ import {
   Info,
   Minimize2,
   TriangleAlert,
+  X,
 } from "lucide-vue-next";
 import DistanceToggle from "../../components/DistanceToggle.vue";
 import PatternFlowMiniMap from "./PatternFlowMiniMap.vue";
@@ -68,7 +69,10 @@ import {
   getUpcomingTrafficWarningStart,
   parseTrafficDate,
 } from "../traffic/trafficTiming";
-import type { TrafficLineReport } from "../traffic";
+import type {
+  TrafficCalendarImpactScope,
+  TrafficLineReport,
+} from "../traffic";
 import {
   type PatternTrafficImpact,
   type PatternTrafficImpactAnalysis,
@@ -80,19 +84,19 @@ import {
   useDeparturePatternTraffic,
   type DeparturePatternTrafficAnalyzer,
 } from "./useDeparturePatternTraffic";
-import PatternTrafficTimeline from "./PatternTrafficTimeline.vue";
-import PatternTrafficTimelineToggle from "./PatternTrafficTimelineToggle.vue";
-import {
-  createPatternTrafficTimelineItems,
-  getDaysUntilTrafficTimelineItem,
-  type PatternTrafficTimelineItem,
-} from "./trafficTimeline";
+import PatternTrafficCalendarSurface from "./PatternTrafficCalendarSurface.vue";
+import PatternTrafficCalendarToggle from "./PatternTrafficCalendarToggle.vue";
+import type { PatternTrafficCalendarDay } from "./trafficCalendar";
+import { usePatternTrafficCalendar } from "./usePatternTrafficCalendar";
 import {
   TRAFFIC_DISTURBANCE_COLOR,
   TRAFFIC_INTERRUPTION_COLOR,
 } from "./trafficImpactStyles";
 import { createInterruptionWalkingTimes } from "./interruptionWalkingTimes";
 import { useI18n } from "../../i18n";
+import { useAppSettings } from "../app-settings/appSettings";
+import { transportClockPlugins } from "#transport-clock/plugins";
+import { translatePluginMessage } from "../plugins/pluginRuntime";
 
 import type {
   Departure,
@@ -192,15 +196,6 @@ interface PatternFlowEdgeData {
 
 type PatternVisualMode = "comfort" | "compact" | "realistic";
 type PatternCompactMode = "auto" | PatternVisualMode;
-
-interface PatternTrafficTimelineDisplayItem {
-  active: boolean;
-  dateLabel: string;
-  durationLabel?: string;
-  id: string;
-  severity: PatternTrafficTimelineItem["severity"];
-  stationCountLabel: string;
-}
 
 interface PatternGraphNode {
   id: string;
@@ -316,6 +311,9 @@ const DISTANCE_LABEL_EXIT_MS = 240;
 const TRANSFER_HYDRATION_STALLED_RETRY_MS = 30_000;
 const TRANSFER_HYDRATION_RATE_LIMIT_CHECK_MS = 1_200;
 const TRANSFER_HYDRATION_HEALTH_CHECK_TIMEOUT_MS = 2_500;
+const REGULAR_STATION_RAIL_CENTER_Y = 17;
+const REGULAR_TERMINAL_RAIL_CENTER_Y = 19;
+const COMPACT_STATION_RAIL_CENTER_Y = 15;
 type PatternSpacingOptions = {
   compactBranchGap: number;
   compactForkGap: number;
@@ -368,7 +366,9 @@ const props = withDefaults(
     patternRealisticMaxGapCoefficient?: number;
     richTransferTooltips?: boolean;
     reduceMotion?: boolean;
+    lineId?: string;
     smartTrafficDetection?: boolean;
+    trafficCalendarImpactScope?: TrafficCalendarImpactScope;
     trafficWarningLookaheadDays?: number;
     trafficReport?: TrafficLineReport;
     transferBundleRetentionDays?: number;
@@ -394,6 +394,7 @@ const props = withDefaults(
     richTransferTooltips: true,
     reduceMotion: false,
     smartTrafficDetection: true,
+    trafficCalendarImpactScope: "all-impacts",
     trafficWarningLookaheadDays: 10,
     transferBundleLocalCacheEnabled: true,
     transferBundleBackendCacheEnabled: true,
@@ -409,6 +410,7 @@ const emit = defineEmits<{
   directionChange: [directionId: string];
 }>();
 const { d, locale, t } = useI18n();
+const { settings: appSettings } = useAppSettings();
 
 const isPatternFlowFullscreen = ref(false);
 const patternVisualMode = ref<PatternVisualMode>("compact");
@@ -422,9 +424,6 @@ const patternFlowViewportSize = ref<PatternViewportSize>({
   width: 0,
   height: 0,
 });
-const trafficTimelineOpen = ref(false);
-const trafficTimelineLoadingItemId = ref<string>();
-const selectedTrafficTimelineItemId = ref<string>();
 const selectedTrafficDisruptionIds = ref<string[]>([]);
 const selectedTrafficTimestamp = ref<number>();
 const hydratedPattern = ref<DepartureCallingPattern>();
@@ -445,7 +444,6 @@ let transferHydrationRateLimitTimer: number | undefined;
 let transferHydrationStalledTimer: number | undefined;
 let visualModeDecisionKey = "";
 let stationTooltipHideTimer: number | undefined;
-let trafficTimelineLoadingTimer: number | undefined;
 const missingNetexTownWarningKeys = new Set<string>();
 
 const serviceLabel = computed(() =>
@@ -624,85 +622,156 @@ const flowModel = computed(() =>
     analyzeCurrentTrafficImpacts,
   ),
 );
-const trafficTimelineItems = computed(() => {
-  const report = resolvedTrafficReport.value;
+const topologyStationKeyById = computed(() => {
+  const keys = new Map<string, string>();
 
-  if (!report || !props.smartTrafficDetection) {
-    return [];
+  for (const sequence of displayPattern.value?.lineTopology ?? []) {
+    for (const stop of sequence.stops) {
+      const stationKey = createStationKey(stop);
+
+      [stop.id, stop.station.id, stop.station.scheduleStopAreaRef]
+        .filter((value): value is string => Boolean(value))
+        .forEach((value) => keys.set(value, stationKey));
+    }
   }
 
-  return createPatternTrafficTimelineItems(
-    report.disruptions,
-    flowModel.value.trafficStations,
-    flowModel.value.trafficEdges,
-    trafficTimingNow.value,
+  return keys;
+});
+const vehicleRailPositions = computed(() => {
+  const compact = usesCompactPatternFlowLayout.value;
+
+  return new Map(
+    flowModel.value.stationNodes.map((node) => [
+      node.id,
+      {
+        x:
+          node.data?.layoutX ??
+          node.position.x + currentLayoutOptions.value.nodeWidth / 2,
+        y:
+          node.position.y +
+          (compact
+            ? COMPACT_STATION_RAIL_CENTER_Y
+            : node.data?.branchEnd
+              ? REGULAR_TERMINAL_RAIL_CENTER_Y
+              : REGULAR_STATION_RAIL_CENTER_Y),
+      },
+    ]),
   );
 });
-const trafficTimelineItemCount = computed(() => trafficTimelineItems.value.length);
-const selectedTrafficTimelineItem = computed(() =>
-  selectedTrafficTimelineItemId.value
-    ? trafficTimelineItems.value.find(
-        (item) => item.id === selectedTrafficTimelineItemId.value,
-      )
-    : undefined,
-);
-const selectedTrafficTimelineIndex = computed(() =>
-  selectedTrafficTimelineItemId.value
-    ? trafficTimelineItems.value.findIndex(
-        (item) => item.id === selectedTrafficTimelineItemId.value,
-      )
-    : -1,
-);
-const nextTrafficTimelineItem = computed(() => trafficTimelineItems.value[0]);
-const trafficTimelineNextDelayLabel = computed(() =>
-  nextTrafficTimelineItem.value
-    ? formatTrafficTimelineDelay(nextTrafficTimelineItem.value)
-    : "",
-);
-const trafficTimelineDisplayItems = computed<PatternTrafficTimelineDisplayItem[]>(
-  () =>
-    trafficTimelineItems.value.map((item) => ({
-      active: item.id === selectedTrafficTimelineItemId.value,
-      dateLabel: formatTrafficTimelineDate(item.start),
-      durationLabel: formatTrafficTimelineDuration(item.durationMinutes),
-      id: item.id,
-      severity: item.severity,
-      stationCountLabel: formatTrafficTimelineStationCount(
-        item.impactedStationCount,
-      ),
+const patternPluginExtensions = transportClockPlugins.flatMap((plugin) => {
+  const definition = plugin.servicePattern;
+  if (!definition) {
+    return [];
+  }
+  const enabled = computed(
+    () =>
+      appSettings.value.plugins[plugin.id]?.enabled ??
+      plugin.defaultEnabled,
+  );
+  const extension = definition.setup({
+    active: computed(
+      () =>
+        props.open &&
+        enabled.value &&
+        Boolean(displayPattern.value?.lineTopology?.length),
+    ),
+    destinationLabel,
+    fallbackVehicleLabel: computed(() => transportModeIcon.value.label),
+    formatClock,
+    isSegmentVisible(sourceId, targetId) {
+      if (sourceId === targetId) {
+        return true;
+      }
+      const edgeKey = createEdgeKey(sourceId, targetId);
+      return flowModel.value.trafficEdges.some(
+        (edge) => createEdgeKey(edge.source, edge.target) === edgeKey,
+      );
+    },
+    line: computed(() => ({
+      id:
+        props.lineId ??
+        props.board?.line.shortName ??
+        props.board?.line.ref,
+      mode: props.board?.line.mode,
+      ref: props.board?.line.ref,
+      shortName: props.board?.line.shortName,
+      transportType: props.transportType,
     })),
+    patternRoundedCurves: computed(() => props.patternRoundedCurves),
+    reduceMotion: computed(() => props.reduceMotion),
+    resolveServerApiUrl: toServerApiUrl,
+    resolveStationKey(stationId) {
+      return (
+        topologyStationKeyById.value.get(stationId) ??
+        (vehicleRailPositions.value.has(stationId) ? stationId : undefined)
+      );
+    },
+    settings: computed(
+      () =>
+        appSettings.value.plugins[plugin.id]?.value ??
+        plugin.settings?.defaultValue,
+    ),
+    stationPositions: vehicleRailPositions,
+    t: (key, params) =>
+      translatePluginMessage(plugin, locale.value, key, params),
+  });
+  return [{ enabled, extension, plugin }];
+});
+const pluginFlowNodes = computed<Node[]>(() =>
+  patternPluginExtensions.flatMap(({ enabled, extension }) =>
+    enabled.value ? extension.nodes.value : [],
+  ),
 );
-const selectedTrafficTimelineDisruptions = computed(
-  () =>
-    selectedTrafficTimelineItem.value?.disruptions.map(
-      (item) => item.disruption,
-    ) ?? [],
+const pluginNodeTypes = computed(() =>
+  Object.assign(
+    {},
+    ...patternPluginExtensions.map(({ extension }) => extension.nodeTypes),
+  ),
 );
-const hasPreviousTrafficTimelineItem = computed(
-  () => selectedTrafficTimelineIndex.value > 0,
+const pluginStatuses = computed(() =>
+  patternPluginExtensions.flatMap(({ enabled, extension }) => {
+    const status = enabled.value ? extension.status?.value : undefined;
+    return status ? [status] : [];
+  }),
 );
-const hasNextTrafficTimelineItem = computed(() => {
-  if (trafficTimelineItems.value.length === 0) {
-    return false;
-  }
-
-  return selectedTrafficTimelineIndex.value < trafficTimelineItems.value.length - 1;
+const allFlowNodes = computed<Node[]>(() => [
+  ...flowModel.value.nodes,
+  ...pluginFlowNodes.value,
+]);
+const {
+  calendar: trafficCalendar,
+  close: closeTrafficCalendar,
+  closeExpanded: closeExpandedTrafficCalendar,
+  eventCount: trafficCalendarEventCount,
+  expand: expandTrafficCalendar,
+  expanded: trafficCalendarExpanded,
+  hasNext: hasNextTrafficCalendarMonth,
+  hasPrevious: hasPreviousTrafficCalendarMonth,
+  loadingDateKey: trafficCalendarLoadingDateKey,
+  loadingDirection: trafficCalendarLoadingDirection,
+  nextDelayLabel: trafficCalendarNextDelayLabel,
+  nextMonth: selectNextTrafficCalendarMonth,
+  open: trafficCalendarOpen,
+  previousMonth: selectPreviousTrafficCalendarMonth,
+  resetToday: resetPatternTrafficCalendarToday,
+  selectDay: selectPatternTrafficCalendarDay,
+  selectedDateKey: selectedTrafficCalendarDateKey,
+  selectedDay: selectedTrafficCalendarDay,
+  selectedDisruptions: selectedTrafficCalendarDisruptions,
+  toggle: toggleTrafficCalendar,
+} = usePatternTrafficCalendar({
+  report: computed(() =>
+    props.smartTrafficDetection ? resolvedTrafficReport.value : undefined,
+  ),
+  stations: computed(() => flowModel.value.trafficStations),
+  edges: computed(() => flowModel.value.trafficEdges),
+  impactScope: computed(() => props.trafficCalendarImpactScope),
+  now: trafficTimingNow,
+  reduceMotion: computed(() => props.reduceMotion),
+  selectedDisruptionIds: selectedTrafficDisruptionIds,
+  selectedTimestamp: selectedTrafficTimestamp,
 });
 
-watch(trafficTimelineItems, (items) => {
-  if (items.length === 0) {
-    trafficTimelineOpen.value = false;
-    clearSelectedTrafficTimeline();
-    return;
-  }
-
-  if (
-    selectedTrafficTimelineItemId.value &&
-    !items.some((item) => item.id === selectedTrafficTimelineItemId.value)
-  ) {
-    clearSelectedTrafficTimeline();
-  }
-});
 const patternFlowKey = computed(
   () =>
     `${displayPattern.value?.departureId ?? "empty"}:${
@@ -1027,130 +1096,31 @@ function focusPatternFlowOn(
   });
 }
 
-function toggleTrafficTimeline(): void {
-  trafficTimelineOpen.value = !trafficTimelineOpen.value;
+async function selectTrafficCalendarDay(
+  day: PatternTrafficCalendarDay,
+): Promise<void> {
+  const selection = await selectPatternTrafficCalendarDay(day);
+  if (!selection) return;
+  closeTrafficImpactPopup();
+  focusTrafficCalendarSelection();
 }
 
-async function selectTrafficTimelineItem(itemId: string): Promise<void> {
-  const item = trafficTimelineItems.value.find((candidate) => candidate.id === itemId);
-
-  if (!item) {
-    return;
-  }
-
-  showTrafficTimelineLoading(item.id);
-  selectedTrafficTimelineItemId.value = item.id;
-  selectedTrafficDisruptionIds.value = item.disruptions.map(
-    (entry) => entry.disruption.id,
-  );
-  selectedTrafficTimestamp.value = item.start.getTime();
+async function resetTrafficCalendarToday(): Promise<void> {
+  await resetPatternTrafficCalendarToday();
   closeTrafficImpactPopup();
-
-  await nextTick();
-  focusTrafficTimelineSelection();
-  scheduleClearTrafficTimelineLoading(item.id);
-}
-
-async function resetTrafficTimelineToday(): Promise<void> {
-  clearTrafficTimelineLoading();
-  clearSelectedTrafficTimeline();
-  closeTrafficImpactPopup();
-
-  await nextTick();
   patternFlowViewportController.value?.fitView?.({
     duration: 240,
     padding: 0.16,
   });
 }
 
-function clearSelectedTrafficTimeline(): void {
-  clearTrafficTimelineLoading();
-
-  if (
-    selectedTrafficTimelineItemId.value === undefined &&
-    selectedTrafficTimestamp.value === undefined &&
-    selectedTrafficDisruptionIds.value.length === 0
-  ) {
-    return;
-  }
-
-  selectedTrafficTimelineItemId.value = undefined;
-  selectedTrafficDisruptionIds.value = [];
-  selectedTrafficTimestamp.value = undefined;
-}
-
-function showTrafficTimelineLoading(itemId: string): void {
-  clearTrafficTimelineLoadingTimer();
-  trafficTimelineLoadingItemId.value = itemId;
-}
-
-function scheduleClearTrafficTimelineLoading(itemId: string): void {
-  clearTrafficTimelineLoadingTimer();
-
-  if (typeof window === "undefined") {
-    if (trafficTimelineLoadingItemId.value === itemId) {
-      trafficTimelineLoadingItemId.value = undefined;
-    }
-    return;
-  }
-
-  trafficTimelineLoadingTimer = window.setTimeout(() => {
-    trafficTimelineLoadingTimer = undefined;
-
-    if (trafficTimelineLoadingItemId.value === itemId) {
-      trafficTimelineLoadingItemId.value = undefined;
-    }
-  }, 220);
-}
-
-function clearTrafficTimelineLoading(): void {
-  clearTrafficTimelineLoadingTimer();
-  trafficTimelineLoadingItemId.value = undefined;
-}
-
-function clearTrafficTimelineLoadingTimer(): void {
-  if (trafficTimelineLoadingTimer !== undefined) {
-    window.clearTimeout(trafficTimelineLoadingTimer);
-    trafficTimelineLoadingTimer = undefined;
-  }
-}
-
-function selectPreviousTrafficTimelineItem(): void {
-  const index = selectedTrafficTimelineIndex.value;
-
-  if (index <= 0) {
-    return;
-  }
-
-  void selectTrafficTimelineItem(trafficTimelineItems.value[index - 1].id);
-}
-
-function selectNextTrafficTimelineItem(): void {
-  const nextIndex =
-    selectedTrafficTimelineIndex.value < 0
-      ? 0
-      : selectedTrafficTimelineIndex.value + 1;
-  const nextItem = trafficTimelineItems.value[nextIndex];
-
-  if (!nextItem) {
-    return;
-  }
-
-  void selectTrafficTimelineItem(nextItem.id);
-}
-
-function focusTrafficTimelineSelection(): void {
-  const selectedItem = selectedTrafficTimelineItem.value;
-
-  if (!selectedItem) {
-    return;
-  }
-
-  const selectedDisruptionIds = new Set(
-    selectedItem.disruptions.map((item) => item.disruption.id),
+function focusTrafficCalendarSelection(): void {
+  const selectedDay = selectedTrafficCalendarDay.value;
+  const selectedIds = new Set(
+    (selectedDay?.events ?? []).map((event) => event.disruption.id),
   );
   const selectedSegments = flowModel.value.trafficAnalysis.segments.filter(
-    (segment) => selectedDisruptionIds.has(segment.disruption.id),
+    (segment) => selectedIds.has(segment.disruption.id),
   );
   const interruptedSegments = selectedSegments.filter(
     (segment) => segment.kind === "interruption",
@@ -1159,22 +1129,17 @@ function focusTrafficTimelineSelection(): void {
     interruptedSegments.length > 0 ? interruptedSegments : selectedSegments;
 
   if (focusSegments.length !== 1) {
-    if (focusSegments.length > 1) {
-      patternFlowViewportController.value?.fitView?.({
-        duration: 260,
-        padding: 0.18,
-      });
-    }
+    patternFlowViewportController.value?.fitView?.({
+      duration: 260,
+      padding: 0.18,
+    });
     return;
   }
 
   const focusPoint = getTrafficSegmentFocusPoint(focusSegments[0]);
-
-  if (!focusPoint) {
-    return;
+  if (focusPoint) {
+    focusPatternFlowOn(focusPoint, getTrafficCalendarFocusZoom());
   }
-
-  focusPatternFlowOn(focusPoint, getTrafficTimelineFocusZoom());
 }
 
 function getTrafficSegmentFocusPoint(
@@ -1210,7 +1175,7 @@ function getTrafficEdgeFocusPoints(
   });
 }
 
-function getTrafficTimelineFocusZoom(): number {
+function getTrafficCalendarFocusZoom(): number {
   const currentZoom = patternFlowViewport.value.zoom;
   const minimumZoom = isPatternFlowFullscreen.value ? 0.78 : 0.72;
 
@@ -1579,6 +1544,7 @@ function createPatternFlow(
   const trafficStations = graph.nodes.map((node) => ({
     key: node.id,
     label: node.label,
+    transfers: filterCurrentLineTransfers(node.transfers, currentLine),
   }));
   const trafficEdges = visibleDrawableEdges.map((edge) => ({
     id: edge.id,
@@ -1853,7 +1819,7 @@ function createTrafficWalkingFlowNodes({
         type: "traffic-walking",
         position: {
           x: (source.x + target.x) / 2 - width / 2,
-          y: Math.max(source.y, target.y) + layout.nodeHeight / 2 + 12,
+          y: (source.y + target.y) / 2 + 10,
         },
         draggable: false,
         selectable: false,
@@ -1968,60 +1934,6 @@ function isUpcomingTrafficWarning(segment: PatternTrafficImpact): boolean {
       props.trafficWarningLookaheadDays,
     ),
   );
-}
-
-function formatTrafficTimelineDelay(item: PatternTrafficTimelineItem): string {
-  const days = getDaysUntilTrafficTimelineItem(item, trafficTimingNow.value);
-
-  return days <= 0 ? "J" : `J-${days}`;
-}
-
-function formatTrafficTimelineDate(date: Date): string {
-  return d(date, {
-    day: "numeric",
-    month: "short",
-    weekday: "short",
-  });
-}
-
-function formatTrafficTimelineStationCount(count: number): string {
-  return count > 1
-    ? t("pattern.trafficTimelineStationsOther", { count })
-    : t("pattern.trafficTimelineStationsOne", { count });
-}
-
-function formatTrafficTimelineDuration(minutes?: number): string | undefined {
-  if (minutes === undefined || minutes <= 0) {
-    return undefined;
-  }
-
-  if (minutes < 60) {
-    return minutes > 1
-      ? t("pattern.trafficTimelineDurationMinutes", { count: minutes })
-      : t("pattern.trafficTimelineDurationMinute", { count: minutes });
-  }
-
-  const hours = Math.ceil(minutes / 60);
-
-  if (hours < 48) {
-    return hours > 1
-      ? t("pattern.trafficTimelineDurationHours", { count: hours })
-      : t("pattern.trafficTimelineDurationHour", { count: hours });
-  }
-
-  const days = Math.ceil(hours / 24);
-
-  if (days < 60) {
-    return days > 1
-      ? t("pattern.trafficTimelineDurationDays", { count: days })
-      : t("pattern.trafficTimelineDurationDay", { count: days });
-  }
-
-  const months = Math.ceil(days / 30);
-
-  return months > 1
-    ? t("pattern.trafficTimelineDurationMonths", { count: months })
-    : t("pattern.trafficTimelineDurationMonth", { count: months });
 }
 
 function getTodayRestartRelativeLabel(
@@ -5573,7 +5485,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   transferHydrationRequest += 1;
   clearPatternDistanceLabelHideTimer();
-  clearTrafficTimelineLoadingTimer();
   resetTransferHydrationStallState();
   clearTransferHydrationRateLimitTimer();
   if (stationTooltipHideTimer !== undefined) {
@@ -5713,16 +5624,17 @@ onBeforeUnmount(() => {
                   <slot name="top-strip-direction-action"></slot>
                 </div>
 
-                <div
-                  ref="patternFlowShell"
-                  class="pattern-flow-shell"
-                  :class="{
+                <div class="pattern-board__workspace">
+                  <div
+                    ref="patternFlowShell"
+                    class="pattern-flow-shell"
+                    :class="{
                     'pattern-flow-shell--comfort': isComfortPatternFlow,
                     'pattern-flow-shell--compact': isCompactPatternFlow,
                     'pattern-flow-shell--realistic': isRealisticPatternFlow,
                     'pattern-flow-shell--reduce-motion': reduceMotion,
-                  }"
-                >
+                    }"
+                  >
                   <div
                     v-if="embedded && transferHydrationLoading"
                     class="pattern-flow-transfer-loader"
@@ -5761,16 +5673,34 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
                   <div
+                    v-for="(status, statusIndex) in pluginStatuses"
+                    :key="status.id"
+                    class="pattern-flow-plugin-status"
+                    :class="'pattern-flow-plugin-status--' + status.state"
+                    :style="{ bottom: 14 + statusIndex * 52 + 'px' }"
+                    :title="status.tooltip"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span aria-hidden="true"></span>
+                    <div>
+                      <strong>{{ status.label }}</strong>
+                      <small v-if="status.detail">
+                        {{ status.detail }}
+                      </small>
+                    </div>
+                  </div>
+                  <div
                     class="pattern-flow-actions pattern-flow-actions--desktop"
                   >
                     <slot name="flow-actions-prefix"></slot>
-                    <PatternTrafficTimelineToggle
-                      v-if="trafficTimelineItemCount > 0"
-                      :active="trafficTimelineOpen"
-                      :count="trafficTimelineItemCount"
-                      :next-delay-label="trafficTimelineNextDelayLabel"
+                    <PatternTrafficCalendarToggle
+                      v-if="trafficCalendarEventCount > 0"
+                      :active="trafficCalendarOpen"
+                      :count="trafficCalendarEventCount"
+                      :next-delay-label="trafficCalendarNextDelayLabel"
                       :reduce-motion="reduceMotion"
-                      @toggle="toggleTrafficTimeline"
+                      @toggle="toggleTrafficCalendar"
                     />
                     <DistanceToggle
                       v-model="showPatternDistances"
@@ -5811,14 +5741,14 @@ onBeforeUnmount(() => {
                   <MobileActionsMenu :aria-label="t('pattern.optionsAria')">
                     <template #default="{ close }">
                       <slot name="flow-actions-prefix"></slot>
-                      <PatternTrafficTimelineToggle
-                        v-if="trafficTimelineItemCount > 0"
-                        :active="trafficTimelineOpen"
-                        :count="trafficTimelineItemCount"
-                        :next-delay-label="trafficTimelineNextDelayLabel"
+                      <PatternTrafficCalendarToggle
+                        v-if="trafficCalendarEventCount > 0"
+                        :active="trafficCalendarOpen"
+                        :count="trafficCalendarEventCount"
+                        :next-delay-label="trafficCalendarNextDelayLabel"
                         :reduce-motion="reduceMotion"
                         @toggle="
-                          toggleTrafficTimeline();
+                          toggleTrafficCalendar();
                           close();
                         "
                       />
@@ -5868,7 +5798,8 @@ onBeforeUnmount(() => {
                     pan-on-drag
                     :key="patternFlowKey"
                     class="pattern-flow"
-                    :nodes="flowModel.nodes"
+                    :nodes="allFlowNodes"
+                    :node-types="pluginNodeTypes"
                     :edges="flowModel.edges"
                     :default-viewport="initialViewport"
                     :fit-view-on-init="isFullLineMode"
@@ -6087,21 +6018,27 @@ onBeforeUnmount(() => {
                       />
                     </aside>
                   </Transition>
-                  <Transition name="pattern-flow-traffic-popup">
-                    <PatternTrafficTimeline
-                      v-if="trafficTimelineOpen && trafficTimelineItemCount > 0"
-                      :has-next="hasNextTrafficTimelineItem"
-                      :has-previous="hasPreviousTrafficTimelineItem"
-                      :items="trafficTimelineDisplayItems"
-                      :loading-item-id="trafficTimelineLoadingItemId"
-                      :selected-disruptions="selectedTrafficTimelineDisruptions"
-                      :today-active="selectedTrafficTimelineItemId === undefined"
-                      @next="selectNextTrafficTimelineItem"
-                      @previous="selectPreviousTrafficTimelineItem"
-                      @reset-today="resetTrafficTimelineToday"
-                      @select="selectTrafficTimelineItem"
-                    />
-                  </Transition>
+                  </div>
+                  <PatternTrafficCalendarSurface
+                    v-if="trafficCalendarEventCount > 0"
+                    :open="trafficCalendarOpen"
+                    :expanded="trafficCalendarExpanded"
+                    :has-next="hasNextTrafficCalendarMonth"
+                    :has-previous="hasPreviousTrafficCalendarMonth"
+                    :calendar="trafficCalendar"
+                    :selected-date-key="selectedTrafficCalendarDateKey"
+                    :selected-day="selectedTrafficCalendarDay"
+                    :selected-disruptions="selectedTrafficCalendarDisruptions"
+                    :loading-date-key="trafficCalendarLoadingDateKey"
+                    :loading-direction="trafficCalendarLoadingDirection"
+                    @close="closeTrafficCalendar"
+                    @close-expanded="closeExpandedTrafficCalendar"
+                    @next="selectNextTrafficCalendarMonth"
+                    @previous="selectPreviousTrafficCalendarMonth"
+                    @reset-today="resetTrafficCalendarToday"
+                    @select="selectTrafficCalendarDay"
+                    @expand="expandTrafficCalendar"
+                  />
                 </div>
               </div>
             </div>

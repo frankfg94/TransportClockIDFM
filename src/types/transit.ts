@@ -271,6 +271,7 @@ export interface LineTopologyLoopLaneHint {
 
 export interface DepartureAlarm {
   id: string;
+  nativeNotificationId: number;
   boardId: string;
   boardTitle: string;
   lineLabel: string;

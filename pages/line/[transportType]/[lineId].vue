@@ -13,6 +13,7 @@
       :full-line="isFullLineSelected"
       :loading="isPatternRequestPending"
       :error="errorMessage"
+      :line-id="firstRouteQuery(route.params.lineId)"
       :show-mini-map="settings.showPatternMiniMap"
       :show-city-zones="settings.showPatternCityZones"
       :compact-mode="settings.compactLinePlanMode"
@@ -29,6 +30,7 @@
       :rich-transfer-tooltips="settings.richTransferTooltips"
       :reduce-motion="settings.reduceMotion"
       :smart-traffic-detection="settings.smartTrafficDetection"
+      :traffic-calendar-impact-scope="settings.trafficCalendarImpactScope"
       :traffic-warning-lookahead-days="settings.trafficWarningLookaheadDays"
       :transfer-bundle-retention-days="settings.transferBundleRetentionDays"
       :transfer-bundle-request-concurrency="
@@ -131,6 +133,7 @@
         "
         :reduce-motion="settings.reduceMotion"
         :smart-traffic-detection="settings.smartTrafficDetection"
+        :traffic-calendar-impact-scope="settings.trafficCalendarImpactScope"
       >
         <template #bar-before-chip>
           <div class="line-pattern-page__summary-actions">
@@ -240,7 +243,7 @@ import {
   watch,
 } from "vue";
 import { ArrowLeft, Edit2 } from "lucide-vue-next";
-import { useFetch, useRoute, useRouter, navigateTo } from "#imports";
+import { useFetch, useRoute, navigateTo } from "#imports";
 import {
   filterTerminalOnly,
   useAppSettings,
@@ -272,7 +275,6 @@ const LINE_COMPLETE_DIRECTION_ID = "line-complete";
 type LinePageView = "schema" | "map";
 
 const route = useRoute();
-const router = useRouter();
 const { settings } = useAppSettings();
 const { t } = useI18n();
 const apiUrl = computed(() => {
@@ -401,11 +403,6 @@ function navigateHome(): void {
 }
 
 function goBack(): void {
-  if (typeof window !== "undefined" && window.history.state?.back) {
-    router.back();
-    return;
-  }
-
   navigateHome();
 }
 

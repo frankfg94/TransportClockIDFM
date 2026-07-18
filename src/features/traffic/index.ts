@@ -41,8 +41,29 @@ export {
 } from "./trafficScheduledWarnings";
 export type {
   ActiveTrafficLine,
+  TrafficCalendarImpactScope,
   TrafficDisruption,
   TrafficLineReport,
   TrafficLineStatus,
   TrafficResponse,
 } from "./types";
+export {
+  calculateTrafficImpactTemporalMultiplier,
+  calculateTrafficImpactSeverity,
+  classifyTrafficTopology,
+  getTrafficImpactSeverityLevel,
+  getTrafficTransferScore,
+  TRAFFIC_IMPACT_SEVERITY_MODEL,
+  type TrafficImpactSeverity,
+  type TrafficImpactSeverityResult,
+  type TrafficImpactTemporalMultiplierResult,
+  type TrafficImpactTimeWindow,
+  type TrafficImpactStationContribution,
+  type TrafficTopologyRole,
+} from "./trafficImpactSeverity";
+export {
+  getTrafficDisruptionRestartClockTime,
+  getTrafficClockMinuteOfDay,
+  getTrafficDisruptionStartClockTime,
+  type TrafficClockTime,
+} from "./trafficTextTimes";

@@ -339,6 +339,9 @@ function alertTitle(value: WeatherAlert): string {
   }
 
   if (value.kind === "storm") {
+    if(value.startsInMinutes === 0) {
+      return t("weather.alert.stormNow");
+    }
     return t("weather.alert.stormIn", { minutes: value.startsInMinutes });
   }
 

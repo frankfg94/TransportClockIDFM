@@ -3,6 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import type { Directive } from "vue";
 import {
   Check,
+  Bell,
+  BellRing,
   EllipsisVertical,
   Maximize2,
   Minimize2,
@@ -12,6 +14,12 @@ import {
 import ContextMenu from "./ContextMenu.vue";
 import { useI18n } from "../i18n";
 import type { FullscreenStationPanelDesign } from "../features/app-settings";
+import type { TrafficDisruption } from "../features/traffic/types";
+import {
+  classifyPatternTrafficIncident,
+  getPatternTrafficSummaryTitle,
+} from "../features/service-pattern/trafficCalendarSummary";
+import PatternTrafficIncidentSummaryItem from "../features/service-pattern/PatternTrafficIncidentSummaryItem.vue";
 
 type TrafficAlertTone = "orange" | "red" | "upcoming";
 
@@ -33,7 +41,10 @@ interface FullscreenPanelDirection {
 
 interface FullscreenPanelTrafficAlert {
   label: string;
+  message?: string;
   tone: TrafficAlertTone;
+  title?: string;
+  disruption?: TrafficDisruption;
 }
 
 interface FitTextOptions {
@@ -59,6 +70,8 @@ const props = withDefaults(
     error?: string;
     updatedAtLabel?: string;
     browserFullscreenActive?: boolean;
+    alarmDepartureIds?: string[];
+    inert?: boolean;
   }>(),
   {
     city: "",
@@ -74,6 +87,8 @@ const props = withDefaults(
     error: "",
     updatedAtLabel: "",
     browserFullscreenActive: false,
+    alarmDepartureIds: () => [],
+    inert: false,
   },
 );
 
@@ -88,15 +103,21 @@ const emit = defineEmits<{
   "change-theme": [darkTheme: boolean];
   refresh: [];
   "toggle-fullscreen": [];
+  "schedule-alarm": [
+    payload: { directionId: string; departureId: string },
+  ];
 }>();
 const { t } = useI18n();
 
 const controlsVisible = ref(true);
 const menuOpen = ref(false);
 const menuTrigger = ref<HTMLElement>();
+const trafficModalOpen = ref(false);
+const trafficModalDialog = ref<HTMLElement>();
 const fitTextFrames = new WeakMap<HTMLElement, number>();
 const fitTextObservers = new WeakMap<HTMLElement, ResizeObserver>();
 let hideTimer: number | undefined;
+let trafficModalPreviousFocus: HTMLElement | undefined;
 let previousHtmlOverflow = "";
 let previousBodyOverflow = "";
 let previousHtmlScrollbarGutter = "";
@@ -123,6 +144,31 @@ const selectedDoubleStopDirection = computed(
 );
 
 const hasDirections = computed(() => props.directions.length > 0);
+const alarmDepartureIdSet = computed(
+  () => new Set(props.alarmDepartureIds),
+);
+const trafficModalTitle = computed(() => {
+  const alert = props.trafficAlert;
+  if (!alert) return "";
+
+  return (
+    (alert.disruption && getPatternTrafficSummaryTitle(alert.disruption)) ||
+    alert.title ||
+    alert.label
+  );
+});
+const trafficModalIncidentType = computed(() => {
+  const alert = props.trafficAlert;
+  if (!alert?.disruption) {
+    return alert?.tone === "red" ? "interruption" : "incident";
+  }
+
+  return classifyPatternTrafficIncident(alert.disruption);
+});
+
+const trafficModalMessage = computed(
+  () => props.trafficAlert?.disruption?.message || props.trafficAlert?.message || "",
+);
 
 function scheduleFitText(
   element: HTMLElement,
@@ -229,6 +275,26 @@ function getDeparture(
   index: number,
 ): FullscreenPanelDeparture | undefined {
   return direction?.departures[index];
+}
+
+function hasAlarm(
+  departure: FullscreenPanelDeparture | undefined,
+): boolean {
+  return Boolean(departure && alarmDepartureIdSet.value.has(departure.id));
+}
+
+function requestAlarm(
+  direction: FullscreenPanelDirection | undefined,
+  departure: FullscreenPanelDeparture | undefined,
+): void {
+  if (!direction || !departure) {
+    return;
+  }
+
+  emit("schedule-alarm", {
+    directionId: direction.id,
+    departureId: departure.id,
+  });
 }
 
 function getWaitLabel(
@@ -363,6 +429,33 @@ function toggleDarkTheme(event: Event): void {
   controlsVisible.value = true;
 }
 
+async function openTrafficModal(): Promise<void> {
+  if (!props.trafficAlert) {
+    return;
+  }
+
+  trafficModalPreviousFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : undefined;
+  trafficModalOpen.value = true;
+  clearControlsHideTimer();
+  await nextTick();
+  trafficModalDialog.value?.focus();
+}
+
+function closeTrafficModal(): void {
+  trafficModalOpen.value = false;
+  scheduleControlsHide();
+  void nextTick(() => {
+    if (trafficModalPreviousFocus?.isConnected) {
+      trafficModalPreviousFocus.focus();
+    }
+
+    trafficModalPreviousFocus = undefined;
+  });
+}
+
 function handleKeydown(event: KeyboardEvent): void {
   revealControls();
 
@@ -371,6 +464,11 @@ function handleKeydown(event: KeyboardEvent): void {
   }
 
   event.preventDefault();
+
+  if (trafficModalOpen.value) {
+    closeTrafficModal();
+    return;
+  }
 
   if (menuOpen.value) {
     closeMenu();
@@ -389,6 +487,15 @@ watch(menuOpen, (open) => {
   }
 });
 
+watch(
+  () => props.trafficAlert,
+  (trafficAlert) => {
+    if (!trafficAlert && trafficModalOpen.value) {
+      closeTrafficModal();
+    }
+  },
+);
+
 onMounted(() => {
   lockDocumentScroll();
   scheduleControlsHide();
@@ -406,6 +513,7 @@ onBeforeUnmount(() => {
     :class="panelClasses"
     :style="panelStyle"
     role="dialog"
+    :inert="inert || undefined"
     aria-modal="true"
     aria-labelledby="fullscreen-station-panel-title"
     tabindex="-1"
@@ -425,7 +533,7 @@ onBeforeUnmount(() => {
       <button
         class="fullscreen-station-panel__icon-button"
         type="button"
-        aria-label="Rafraichir le panneau"
+        :aria-label="t('app.refreshPanelAria')"
         @click="emit('refresh')"
       >
         <RefreshCw aria-hidden="true" />
@@ -559,6 +667,8 @@ onBeforeUnmount(() => {
           class="fullscreen-station-panel__alert"
           :class="`fullscreen-station-panel__alert--${trafficAlert.tone}`"
           type="button"
+          :aria-label="t('app.openTrafficDetailsAria')"
+          @click="openTrafficModal"
         >
           {{ trafficAlert.label }}
         </button>
@@ -622,6 +732,31 @@ onBeforeUnmount(() => {
           <small>
             {{ getDestinationLabel(direction, getDeparture(direction, 0)) }}
           </small>
+          <div class="fullscreen-station-panel__alarm-actions fullscreen-station-panel__alarm-actions--all">
+            <button
+              v-for="(departure, departureIndex) in direction.departures.slice(0, 2)"
+              :key="'alarm-' + departure.id"
+              class="fullscreen-station-panel__alarm-button"
+              :class="{
+                'fullscreen-station-panel__alarm-button--active': hasAlarm(departure),
+                'fullscreen-station-panel__alarm-button--hidden':
+                  !controlsVisible && !menuOpen,
+                'fullscreen-station-panel__alarm-button--secondary':
+                  departureIndex === 1,
+              }"
+              type="button"
+              :aria-label="
+                hasAlarm(departure)
+                  ? t('board.alarmSetAria')
+                  : t('board.alarmScheduleAria')
+              "
+              @pointerdown.stop
+              @click.stop="requestAlarm(direction, departure)"
+            >
+              <BellRing v-if="hasAlarm(departure)" aria-hidden="true" />
+              <Bell v-else aria-hidden="true" />
+            </button>
+          </div>
         </section>
       </div>
 
@@ -684,6 +819,27 @@ onBeforeUnmount(() => {
                 {{ line }}
               </span>
             </strong>
+            <button
+              v-if="getDeparture(selectedDoubleStopDirection, 0)"
+              class="fullscreen-station-panel__alarm-button fullscreen-station-panel__alarm-button--cell"
+              :class="{
+                'fullscreen-station-panel__alarm-button--active':
+                  hasAlarm(getDeparture(selectedDoubleStopDirection, 0)),
+                'fullscreen-station-panel__alarm-button--hidden':
+                  !controlsVisible && !menuOpen,
+              }"
+              type="button"
+              :aria-label="
+                hasAlarm(getDeparture(selectedDoubleStopDirection, 0))
+                  ? t('board.alarmSetAria')
+                  : t('board.alarmScheduleAria')
+              "
+              @pointerdown.stop
+              @click.stop="requestAlarm(selectedDoubleStopDirection, getDeparture(selectedDoubleStopDirection, 0))"
+            >
+              <BellRing v-if="hasAlarm(getDeparture(selectedDoubleStopDirection, 0))" aria-hidden="true" />
+              <Bell v-else aria-hidden="true" />
+            </button>
           </div>
           <div>
             <span class="transport-cell-title-text second">
@@ -710,10 +866,40 @@ onBeforeUnmount(() => {
                 {{ line }}
               </span>
             </strong>
+            <button
+              v-if="getDeparture(selectedDoubleStopDirection, 1)"
+              class="fullscreen-station-panel__alarm-button fullscreen-station-panel__alarm-button--cell"
+              :class="{
+                'fullscreen-station-panel__alarm-button--active':
+                  hasAlarm(getDeparture(selectedDoubleStopDirection, 1)),
+                'fullscreen-station-panel__alarm-button--hidden':
+                  !controlsVisible && !menuOpen,
+              }"
+              type="button"
+              :aria-label="
+                hasAlarm(getDeparture(selectedDoubleStopDirection, 1))
+                  ? t('board.alarmSetAria')
+                  : t('board.alarmScheduleAria')
+              "
+              @pointerdown.stop
+              @click.stop="requestAlarm(selectedDoubleStopDirection, getDeparture(selectedDoubleStopDirection, 1))"
+            >
+              <BellRing v-if="hasAlarm(getDeparture(selectedDoubleStopDirection, 1))" aria-hidden="true" />
+              <Bell v-else aria-hidden="true" />
+            </button>
           </div>
         </section>
 
-        <aside v-if="trafficAlert" class="fullscreen-station-panel__panam-side">
+        <aside
+          v-if="trafficAlert"
+          class="fullscreen-station-panel__panam-side"
+          role="button"
+          tabindex="0"
+          :aria-label="t('app.openTrafficDetailsAria')"
+          @click="openTrafficModal"
+          @keydown.enter.prevent="openTrafficModal"
+          @keydown.space.prevent="openTrafficModal"
+        >
           <strong>{{ selectedDoubleStopDirection?.label ?? "Direction" }}</strong>
           <span v-if="selectedDoubleStopDirection?.subtitle">
             {{ selectedDoubleStopDirection.subtitle }}
@@ -749,6 +935,8 @@ onBeforeUnmount(() => {
             class="fullscreen-station-panel__alert"
             :class="`fullscreen-station-panel__alert--${trafficAlert.tone}`"
             type="button"
+            :aria-label="t('app.openTrafficDetailsAria')"
+            @click="openTrafficModal"
           >
             {{ trafficAlert.label }}
           </button>
@@ -804,6 +992,31 @@ onBeforeUnmount(() => {
                   {{ line }}
                 </span>
               </span>
+              <div class="fullscreen-station-panel__alarm-actions fullscreen-station-panel__alarm-actions--home">
+                <button
+                  v-for="(departure, departureIndex) in direction.departures.slice(0, 2)"
+                  :key="'home-alarm-' + departure.id"
+                  class="fullscreen-station-panel__alarm-button"
+                  :class="{
+                    'fullscreen-station-panel__alarm-button--active': hasAlarm(departure),
+                    'fullscreen-station-panel__alarm-button--hidden':
+                      !controlsVisible && !menuOpen,
+                    'fullscreen-station-panel__alarm-button--secondary':
+                      departureIndex === 1,
+                  }"
+                  type="button"
+                  :aria-label="
+                    hasAlarm(departure)
+                      ? t('board.alarmSetAria')
+                      : t('board.alarmScheduleAria')
+                  "
+                  @pointerdown.stop
+                  @click.stop="requestAlarm(direction, departure)"
+                >
+                  <BellRing v-if="hasAlarm(departure)" aria-hidden="true" />
+                  <Bell v-else aria-hidden="true" />
+                </button>
+              </div>
             </div>
           </section>
         </div>
@@ -818,6 +1031,50 @@ onBeforeUnmount(() => {
         </footer>
       </article>
     </div>
+
+    <Transition name="fullscreen-traffic-modal">
+      <div
+        v-if="trafficModalOpen && trafficAlert"
+        class="fullscreen-station-panel__traffic-modal-backdrop"
+        @click.self="closeTrafficModal"
+        @pointerdown.stop
+      >
+        <article
+          ref="trafficModalDialog"
+          class="fullscreen-station-panel__traffic-modal"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="trafficModalTitle"
+          tabindex="-1"
+        >
+          <header class="fullscreen-station-panel__traffic-modal-header">
+            <button
+              class="fullscreen-station-panel__traffic-modal-close"
+              type="button"
+              :aria-label="t('app.closeTrafficModalAria')"
+              @click="closeTrafficModal"
+            >
+              <X aria-hidden="true" />
+            </button>
+          </header>
+          <div class="fullscreen-station-panel__traffic-modal-body">
+            <ul class="fullscreen-station-panel__traffic-modal-summary">
+              <PatternTrafficIncidentSummaryItem
+                :critical="trafficAlert.tone === 'red'"
+                :incident-type="trafficModalIncidentType"
+                :title="trafficModalTitle"
+              />
+            </ul>
+            <p
+              v-if="trafficModalMessage"
+              class="fullscreen-station-panel__traffic-modal-detail"
+            >
+              {{ trafficModalMessage }}
+            </p>
+          </div>
+        </article>
+      </div>
+    </Transition>
   </section>
 </template>
 
@@ -869,6 +1126,104 @@ onBeforeUnmount(() => {
   opacity: 0;
   pointer-events: none;
   transform: translateY(-8px);
+}
+
+.fullscreen-station-panel__direction,
+.fullscreen-station-panel__panam-times > div,
+.fullscreen-station-panel__home-times {
+  position: relative;
+}
+
+.fullscreen-station-panel__alarm-actions {
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+}
+
+.fullscreen-station-panel__alarm-button {
+  align-items: center;
+  backdrop-filter: blur(8px);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(16, 35, 63, 0.2);
+  border-radius: 999px;
+  box-shadow: 0 5px 16px rgba(15, 23, 42, 0.2);
+  color: #17324f;
+  display: inline-flex;
+  height: 44px;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0;
+  pointer-events: auto;
+  position: absolute;
+  right: 14px;
+  top: 42%;
+  transform: translateY(-50%);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    background-color 180ms ease;
+  width: 44px;
+  z-index: 2;
+}
+
+.fullscreen-station-panel__alarm-button svg {
+  height: 21px;
+  width: 21px;
+}
+
+.fullscreen-station-panel__alarm-button--secondary {
+  bottom: 15%;
+  top: auto;
+  transform: none;
+}
+
+.fullscreen-station-panel__alarm-button--cell {
+  bottom: 18px;
+  right: 18px;
+  top: auto;
+  transform: none;
+}
+
+.fullscreen-station-panel__alarm-actions--home
+  .fullscreen-station-panel__alarm-button {
+  left: calc(50% - 56px);
+  right: auto;
+  top: 50%;
+}
+
+.fullscreen-station-panel__alarm-actions--home
+  .fullscreen-station-panel__alarm-button--secondary {
+  bottom: auto;
+  left: auto;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.fullscreen-station-panel__alarm-button--active {
+  background: var(--panel-line-color);
+  border-color: color-mix(in srgb, var(--panel-line-color) 72%, #000000);
+  color: var(--panel-line-text);
+}
+
+.fullscreen-station-panel__alarm-button--hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+}
+
+.fullscreen-station-panel--dark .fullscreen-station-panel__alarm-button {
+  background: rgba(20, 20, 20, 0.92);
+  border-color: rgba(255, 255, 255, 0.24);
+  color: #f8fafc;
+}
+
+.fullscreen-station-panel--dark
+  .fullscreen-station-panel__alarm-button--active {
+  background: var(--panel-line-color);
+  color: var(--panel-line-text);
 }
 
 .fullscreen-station-panel__icon-button {
@@ -1119,6 +1474,19 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
+.fullscreen-station-panel__alert:hover,
+.fullscreen-station-panel__alert:focus-visible,
+.fullscreen-station-panel__panam-side:hover,
+.fullscreen-station-panel__panam-side:focus-visible {
+  filter: brightness(0.96);
+}
+
+.fullscreen-station-panel__alert:focus-visible,
+.fullscreen-station-panel__panam-side:focus-visible {
+  outline: 4px solid #2563eb;
+  outline-offset: 3px;
+}
+
 .fullscreen-station-panel__alert--red {
   background: #ef4444;
 }
@@ -1315,6 +1683,7 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 12px;
   padding: 32px 28px;
+  cursor: pointer;
 }
 
 .fullscreen-station-panel__panam-side strong {
@@ -1337,6 +1706,90 @@ onBeforeUnmount(() => {
   line-height: 1.25;
   margin: 8px 0 0;
   padding: 14px 16px;
+}
+
+.fullscreen-station-panel__traffic-modal-backdrop {
+  align-items: center;
+  background: rgba(2, 6, 23, 0.74);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: clamp(16px, 4vw, 48px);
+  position: fixed;
+  z-index: 20;
+}
+
+.fullscreen-station-panel__traffic-modal {
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.42);
+  color: #0f172a;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: min(72dvh, 640px);
+  max-width: 660px;
+  overflow: hidden;
+  width: min(100%, 660px);
+}
+
+.fullscreen-station-panel__traffic-modal-header {
+  display: flex;
+  justify-content: flex-end;
+  padding: 14px 16px 0;
+}
+
+.fullscreen-station-panel__traffic-modal-close {
+  align-items: center;
+  background: #f1f5f9;
+  border: 0;
+  border-radius: 999px;
+  color: #0f172a;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 44px;
+  justify-content: center;
+  padding: 0;
+  width: 44px;
+}
+
+.fullscreen-station-panel__traffic-modal-close svg {
+  height: 22px;
+  width: 22px;
+}
+
+.fullscreen-station-panel__traffic-modal-body {
+  display: grid;
+  gap: 22px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px clamp(20px, 4vw, 32px) clamp(20px, 4vw, 32px);
+}
+
+.fullscreen-station-panel__traffic-modal-summary {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.fullscreen-station-panel__traffic-modal-detail {
+  border-top: 1px solid #e2e8f0;
+  color: #0f172a;
+  font-size: clamp(1rem, 2.4vw, 1.2rem);
+  line-height: 1.65;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding-top: 20px;
+  white-space: pre-line;
+}
+.fullscreen-traffic-modal-enter-active,
+.fullscreen-traffic-modal-leave-active {
+  transition: opacity 160ms ease;
+}
+
+.fullscreen-traffic-modal-enter-from,
+.fullscreen-traffic-modal-leave-to {
+  opacity: 0;
 }
 
 .fullscreen-station-panel__surface--home {
@@ -1651,6 +2104,17 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 560px) {
+  .fullscreen-station-panel__traffic-modal-backdrop {
+    padding: 0;
+  }
+
+  .fullscreen-station-panel__traffic-modal {
+    border-radius: 0;
+    max-height: 100dvh;
+    max-width: none;
+    width: 100%;
+  }
+
   .fullscreen-station-panel__controls {
     gap: 6px;
     padding: 8px;

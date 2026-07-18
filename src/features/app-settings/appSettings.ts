@@ -15,9 +15,11 @@ import {
   isLanguagePreference,
   type LanguagePreference,
 } from "../../i18n/types";
+import { transportClockPlugins } from "#transport-clock/plugins";
+import type { TrafficCalendarImpactScope } from "../traffic/types";
 
 export { transferResolverModeOptions };
-export type { TransferResolverMode };
+export type { TrafficCalendarImpactScope, TransferResolverMode };
 
 export type ClosedDirectionSummaryMode = "last" | "next";
 export type MaxDeparturesPerDirectionSetting =
@@ -55,6 +57,7 @@ export type WeatherMode = "animated" | "static" | "alerts_only" | "disabled";
 export type WeatherLookaheadMinutes = 60 | 120 | 240 | 480 | 720 | 1440;
 export type WeatherTestMode = "off" | "rain" | "storm" | "snow" | "heat";
 export type AppLanguageSetting = LanguagePreference;
+export type PluginViewerMode = "grid" | "list";
 
 export const PATTERN_COMPACT_BRANCH_GAP_DEFAULT = 258;
 export const PATTERN_COMPACT_BRANCH_GAP_MIN = 180;
@@ -73,7 +76,7 @@ export const TRAFFIC_WARNING_LOOKAHEAD_DAYS_MIN = 0;
 export const TRAFFIC_WARNING_LOOKAHEAD_DAYS_MAX = 30;
 
 export interface AppSettings {
-  version: 1;
+  version: 2;
   language: AppLanguageSetting;
   closedDirectionSummaryMode: ClosedDirectionSummaryMode;
   maxDeparturesPerDirection: MaxDeparturesPerDirectionSetting;
@@ -91,6 +94,9 @@ export interface AppSettings {
   transferBundleBackendCacheEnabled: boolean;
   navigationAutoHide: NavigationAutoHide;
   reduceMotion: boolean;
+  pluginViewerMode: PluginViewerMode;
+  plugins: Record<string, AppPluginSettingsEntry>;
+  legacyPluginData: Record<string, unknown>;
   compactLinePlanMode: CompactLinePlanMode;
   patternRoundedCurves: boolean;
   showInterruptionWalkingTimes: boolean;
@@ -100,6 +106,7 @@ export interface AppSettings {
   patternRealisticMaxGapCoefficient: number;
   richTransferTooltips: boolean;
   ghostNetworkStructuralOnly: boolean;
+  trafficCalendarImpactScope: TrafficCalendarImpactScope;
   trafficInfoDesign: TrafficInfoDesign;
   trafficInfoDefaultScope: TrafficInfoDefaultScope;
   trafficWarningLookaheadDays: TrafficWarningLookaheadDays;
@@ -116,6 +123,12 @@ export interface AppSettings {
   weatherLocationPreset: WeatherLocationPreset;
   weatherCustomLocation: WeatherSettingsLocation;
   weatherTestMode: WeatherTestMode;
+}
+
+export interface AppPluginSettingsEntry {
+  enabled: boolean;
+  value: unknown;
+  version: number;
 }
 
 export interface AppSettingsApi {
@@ -175,6 +188,11 @@ export const compactLinePlanOptions = [
   { id: "compact", label: "Compact view" },
   { id: "realistic", label: "Realistic view" },
 ] as const;
+export const trafficCalendarImpactScopeOptions = [
+  { id: "interruptions-only", label: "Interruptions only" },
+  { id: "all-impacts", label: "Interruptions and disruptions" },
+] as const;
+
 
 export const trafficInfoDesignOptions = [
   { id: "ratp", label: "Compact RATP style" },
@@ -256,7 +274,7 @@ let storageWatcherRegistered = false;
 
 export function createDefaultAppSettings(): AppSettings {
   return {
-    version: 1,
+    version: 2,
     language: "auto",
     closedDirectionSummaryMode: "next",
     maxDeparturesPerDirection: "default",
@@ -270,6 +288,9 @@ export function createDefaultAppSettings(): AppSettings {
     navigationAutoHide: "none",
     hiddenDirectionIdsByBoardId: {},
     reduceMotion: false,
+    pluginViewerMode: "grid",
+    plugins: createDefaultPluginSettings(),
+    legacyPluginData: {},
     compactLinePlanMode: "compact",
     patternRoundedCurves: true,
     showInterruptionWalkingTimes: true,
@@ -281,6 +302,7 @@ export function createDefaultAppSettings(): AppSettings {
       PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_DEFAULT,
     richTransferTooltips: true,
     ghostNetworkStructuralOnly: false,
+    trafficCalendarImpactScope: "all-impacts",
     trafficInfoDesign: "ratp",
     trafficInfoDefaultScope: "optimized",
     trafficWarningLookaheadDays: TRAFFIC_WARNING_LOOKAHEAD_DAYS_DEFAULT,
@@ -318,9 +340,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     parsePatternRealisticMinGapCoefficient(
       value.patternRealisticMinGapCoefficient,
     );
+  const pluginState = normalizePluginSettings(value, defaults);
 
   return {
-    version: 1,
+    version: 2,
     language: isLanguagePreference(value.language)
       ? value.language
       : defaults.language,
@@ -367,6 +390,11 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       ? value.navigationAutoHide
       : defaults.navigationAutoHide,
     reduceMotion: readBoolean(value.reduceMotion, defaults.reduceMotion),
+    pluginViewerMode: isPluginViewerMode(value.pluginViewerMode)
+      ? value.pluginViewerMode
+      : defaults.pluginViewerMode,
+    plugins: pluginState.plugins,
+    legacyPluginData: pluginState.legacyPluginData,
     compactLinePlanMode: isCompactLinePlanMode(value.compactLinePlanMode)
       ? value.compactLinePlanMode
       : defaults.compactLinePlanMode,
@@ -390,6 +418,11 @@ export function normalizeAppSettings(value: unknown): AppSettings {
         value.patternRealisticMaxGapCoefficient,
         patternRealisticMinGapCoefficient,
       ),
+    trafficCalendarImpactScope: isTrafficCalendarImpactScope(
+      value.trafficCalendarImpactScope,
+    )
+      ? value.trafficCalendarImpactScope
+      : defaults.trafficCalendarImpactScope,
     richTransferTooltips: readBoolean(
       value.richTransferTooltips,
       defaults.richTransferTooltips,
@@ -666,7 +699,7 @@ export function useAppSettings(): AppSettingsApi {
     settings.value = normalizeAppSettings({
       ...settings.value,
       ...patch,
-      version: 1,
+      version: 2,
     });
   }
 
@@ -728,6 +761,97 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function createDefaultPluginSettings(): Record<string, AppPluginSettingsEntry> {
+  return Object.fromEntries(
+    transportClockPlugins.map((plugin) => [
+      plugin.id,
+      {
+        enabled: plugin.defaultEnabled,
+        value: plugin.settings?.normalize(plugin.settings.defaultValue) ?? null,
+        version: plugin.settings?.version ?? 1,
+      },
+    ]),
+  );
+}
+
+function normalizePluginSettings(
+  rawSettings: Record<string, unknown>,
+  defaults: AppSettings,
+): Pick<AppSettings, "plugins" | "legacyPluginData"> {
+  const storedPlugins = isRecord(rawSettings.plugins) ? rawSettings.plugins : {};
+  const preservedLegacy = isRecord(rawSettings.legacyPluginData)
+    ? rawSettings.legacyPluginData
+    : {};
+  const knownKeys = new Set(Object.keys(defaults));
+  const legacyPluginData: Record<string, unknown> = {
+    ...preservedLegacy,
+    ...Object.fromEntries(
+      Object.entries(rawSettings).filter(([key]) => !knownKeys.has(key)),
+    ),
+  };
+  const migrationSource = { ...legacyPluginData, ...rawSettings };
+  const claimedKeys = new Set<string>();
+  const installedPluginIds = new Set(
+    transportClockPlugins.map((plugin) => plugin.id),
+  );
+  const unavailablePlugins = Object.fromEntries(
+    Object.entries(storedPlugins).flatMap(([id, value]) => {
+      if (installedPluginIds.has(id) || !isRecord(value)) {
+        return [];
+      }
+
+      return [[
+        id,
+        {
+          enabled: readBoolean(value.enabled, false),
+          value: "value" in value ? value.value : null,
+          version:
+            typeof value.version === "number" &&
+            Number.isInteger(value.version) &&
+            value.version > 0
+              ? value.version
+              : 1,
+        } satisfies AppPluginSettingsEntry,
+      ]];
+    }),
+  );
+  const plugins = {
+    ...unavailablePlugins,
+    ...Object.fromEntries(
+      transportClockPlugins.map((plugin) => {
+        const storedValue = storedPlugins[plugin.id];
+        const stored: Record<string, unknown> = isRecord(storedValue)
+          ? storedValue
+          : {};
+        const migration = plugin.settings?.migrateLegacy?.(migrationSource);
+        migration?.claimedKeys?.forEach((key) => claimedKeys.add(key));
+        const defaultEntry = defaults.plugins[plugin.id];
+        const rawValue =
+          "value" in stored
+            ? stored.value
+            : migration && "value" in migration
+              ? migration.value
+              : defaultEntry.value;
+
+        return [
+          plugin.id,
+          {
+            enabled: readBoolean(
+              stored.enabled,
+              migration?.enabled ?? defaultEntry.enabled,
+            ),
+            value: plugin.settings?.normalize(rawValue) ?? null,
+            version: plugin.settings?.version ?? defaultEntry.version,
+          },
+        ];
+      }),
+    ),
+  };
+
+  claimedKeys.forEach((key) => delete legacyPluginData[key]);
+  return { plugins, legacyPluginData };
+}
+
 function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
@@ -777,6 +901,10 @@ function isNavigationAutoHide(value: unknown): value is NavigationAutoHide {
   return value === "none" || value === "1m";
 }
 
+function isPluginViewerMode(value: unknown): value is PluginViewerMode {
+  return value === "grid" || value === "list";
+}
+
 function isBoardTogglesPlacement(
   value: unknown,
 ): value is BoardTogglesPlacement {
@@ -809,6 +937,12 @@ function isCompactLinePlanMode(value: unknown): value is CompactLinePlanMode {
     value === "compact" ||
     value === "realistic"
   );
+}
+
+function isTrafficCalendarImpactScope(
+  value: unknown,
+): value is TrafficCalendarImpactScope {
+  return value === "interruptions-only" || value === "all-impacts";
 }
 
 function isTrafficInfoDesign(value: unknown): value is TrafficInfoDesign {

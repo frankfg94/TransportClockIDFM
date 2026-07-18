@@ -17,6 +17,7 @@ import {
   parseTransferBundleRequestSpacingMs,
   parseWeatherLookaheadMinutes,
   transferResolverModeOptions,
+  trafficCalendarImpactScopeOptions,
 } from "../src/features/app-settings/appSettings";
 
 describe("app settings", () => {
@@ -33,6 +34,19 @@ describe("app settings", () => {
       boardTogglesPlacement: "inline",
       placePresetNavigationMode: "dropdown-swipe",
       navigationAutoHide: "none",
+      pluginViewerMode: "grid",
+      plugins: {
+        "idfm-realtime-vehicles": {
+          enabled: true,
+          version: 1,
+          value: {
+            trackDistance: { enabled: true, source: "auto" },
+            speed: { enabled: true },
+            crowding: { enabled: true },
+          },
+        },
+      },
+      legacyPluginData: {},
       compactLinePlanMode: "compact",
       patternRoundedCurves: true,
       showInterruptionWalkingTimes: true,
@@ -42,6 +56,7 @@ describe("app settings", () => {
       patternRealisticMaxGapCoefficient: 5,
       richTransferTooltips: true,
       ghostNetworkStructuralOnly: false,
+      trafficCalendarImpactScope: "all-impacts",
       trafficInfoDesign: "ratp",
       trafficInfoDefaultScope: "optimized",
       trafficWarningLookaheadDays: 10,
@@ -78,6 +93,8 @@ describe("app settings", () => {
       placePresetNavigationMode: "future",
       wakeLockDuration: "forever",
       navigationAutoHide: "always",
+      pluginViewerMode: "tiles",
+      experimentalRealtimeVehicleVisualization: "sometimes",
       compactLinePlanMode: "tiny",
       patternRoundedCurves: "yes",
       showInterruptionWalkingTimes: "yes",
@@ -86,6 +103,7 @@ describe("app settings", () => {
       patternRealisticMinGapCoefficient: "2",
       patternRealisticMaxGapCoefficient: "0.5",
       ghostNetworkStructuralOnly: "yes",
+      trafficCalendarImpactScope: "everything",
       trafficInfoDesign: "dense",
       trafficInfoDefaultScope: "everything",
       trafficWarningLookaheadDays: "999",
@@ -119,6 +137,8 @@ describe("app settings", () => {
     expect(settings.placePresetNavigationMode).toBe("dropdown-swipe");
     expect(settings.wakeLockDuration).toBe("none");
     expect(settings.navigationAutoHide).toBe("none");
+    expect(settings.pluginViewerMode).toBe("grid");
+    expect(settings.plugins["idfm-realtime-vehicles"].enabled).toBe(true);
     expect(settings.compactLinePlanMode).toBe("compact");
     expect(settings.patternRoundedCurves).toBe(true);
     expect(settings.showInterruptionWalkingTimes).toBe(true);
@@ -127,6 +147,7 @@ describe("app settings", () => {
     expect(settings.patternRealisticMinGapCoefficient).toBe(1.25);
     expect(settings.patternRealisticMaxGapCoefficient).toBe(1.25);
     expect(settings.ghostNetworkStructuralOnly).toBe(false);
+    expect(settings.trafficCalendarImpactScope).toBe("all-impacts");
     expect(settings.trafficInfoDesign).toBe("ratp");
     expect(settings.trafficInfoDefaultScope).toBe("optimized");
     expect(settings.trafficWarningLookaheadDays).toBe(30);
@@ -150,11 +171,92 @@ describe("app settings", () => {
     });
   });
 
+  it("normalizes and exposes the calendar impact scope", () => {
+    expect(
+      normalizeAppSettings({
+        trafficCalendarImpactScope: "interruptions-only",
+      }).trafficCalendarImpactScope,
+    ).toBe("interruptions-only");
+    expect(trafficCalendarImpactScopeOptions.map((option) => option.id)).toEqual([
+      "interruptions-only",
+      "all-impacts",
+    ]);
+  });
+
   it("preserves the interruption walking time preference", () => {
     expect(
       normalizeAppSettings({ showInterruptionWalkingTimes: false })
         .showInterruptionWalkingTimes,
     ).toBe(false);
+  });
+
+  it("preserves the experimental realtime vehicle visualization preference", () => {
+    expect(
+      normalizeAppSettings({ experimentalRealtimeVehicleVisualization: false })
+        .plugins["idfm-realtime-vehicles"].enabled,
+    ).toBe(false);
+  });
+
+  it("preserves a valid plugin viewer mode", () => {
+    expect(
+      normalizeAppSettings({ pluginViewerMode: "list" }).pluginViewerMode,
+    ).toBe("list");
+  });
+
+  it("preserves settings for plugins missing from the current build", () => {
+    expect(
+      normalizeAppSettings({
+        plugins: {
+          "private-plugin": {
+            enabled: false,
+            value: { displayMode: "compact" },
+            version: 4,
+          },
+        },
+      }).plugins["private-plugin"],
+    ).toEqual({
+      enabled: false,
+      value: { displayMode: "compact" },
+      version: 4,
+    });
+  });
+
+  it("normalizes every realtime position parameter and its options", () => {
+    const settings = normalizeAppSettings({
+      experimentalRealtimeVehicleParameters: {
+        trackDistance: {
+          enabled: false,
+          source: "gtfs",
+          maxProjectionErrorMeters: 99_999,
+        },
+        speed: {
+          enabled: true,
+          smoothing: -2,
+          maxPlausibleKph: 500,
+          longSegmentMeters: 50,
+        },
+        crowding: { enabled: false },
+      },
+    }).plugins["idfm-realtime-vehicles"].value as {
+      trackDistance: Record<string, unknown>;
+      speed: Record<string, unknown>;
+      crowding: { enabled: boolean };
+      trafficState: { enabled: boolean };
+    };
+
+    expect(settings.trackDistance).toEqual({
+      enabled: false,
+      source: "gtfs",
+      maxProjectionErrorMeters: 1_000,
+    });
+    expect(settings.speed).toMatchObject({
+      enabled: true,
+      smoothing: 0,
+      maxPlausibleKph: 350,
+      longSegmentMeters: 300,
+    });
+    expect(settings.crowding.enabled).toBe(false);
+    expect(settings.trafficState.enabled).toBe(true);
   });
 
   it("accepts the realistic line plan mode", () => {
