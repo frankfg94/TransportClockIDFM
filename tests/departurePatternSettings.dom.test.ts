@@ -1,5 +1,12 @@
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
-import { defineComponent, h, nextTick, onMounted, ref } from "vue";
+import {
+  defineComponent,
+  h,
+  isReactive,
+  nextTick,
+  onMounted,
+  ref,
+} from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import DeparturePatternModal from "../src/features/service-pattern/DeparturePatternModal.vue";
 import { buildLinePatternViewFromTopology } from "../server/services/servicePattern/buildLinePatternView";
@@ -762,6 +769,7 @@ describe("DeparturePatternModal settings", () => {
       zIndex?: number;
       data?: { layoutX?: number; layoutY?: number };
     }> = [];
+    let vehicleNodeComponentIsReactive = true;
     const VehicleGeometryFlowStub = defineComponent({
       name: "VueFlow",
       props: {
@@ -778,6 +786,9 @@ describe("DeparturePatternModal settings", () => {
               const nodeComponent = (
                 props.nodeTypes as Record<string, Parameters<typeof h>[0]>
               )[node.type ?? ""];
+              if (node.type === "idfm-realtime-vehicles:vehicle") {
+                vehicleNodeComponentIsReactive = isReactive(nodeComponent);
+              }
               return nodeComponent
                 ? [h(nodeComponent, { data: node.data })]
                 : slots[`node-${node.type}`]?.({ data: node.data }) ?? [];
@@ -868,6 +879,7 @@ describe("DeparturePatternModal settings", () => {
       (node) => node.type === "station",
     );
     expect(vehicleNode?.zIndex).toBeGreaterThan(0);
+    expect(vehicleNodeComponentIsReactive).toBe(false);
     expect((vehicleNode?.position?.y ?? 0) + 14).toBeCloseTo(
       (stationNodes[0]?.position?.y ?? Number.NaN) + 15,
       5,
@@ -2512,9 +2524,67 @@ describe("DeparturePatternModal settings", () => {
     expect(vueFlowFitViewMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ padding: 0.18 }),
     );
-    vi.advanceTimersByTime(700);
+
+    const incident = wrapper.get(
+      "[data-testid='pattern-traffic-calendar-friendly-incident']",
+    );
+    expect(incident.attributes("role")).toBe("button");
+    vueFlowSetViewportMock.mockClear();
+    await incident.trigger("click");
     await nextTick();
 
+    expect(vueFlowSetViewportMock).toHaveBeenCalledTimes(1);
+    expect(vueFlowSetViewportMock).toHaveBeenCalledWith(
+      expect.objectContaining({ zoom: expect.any(Number) }),
+      { duration: 620 },
+    );
+    expect(wrapper.find(".pattern-flow-station--traffic-focus").exists()).toBe(
+      false,
+    );
+
+    await vi.advanceTimersByTimeAsync(620);
+    await vi.advanceTimersByTimeAsync(499);
+    await nextTick();
+    expect(wrapper.find(".pattern-flow-station--traffic-focus").exists()).toBe(
+      false,
+    );
+
+    await vi.advanceTimersByTimeAsync(1);
+    await nextTick();
+    expect(
+      wrapper
+        .findAll(".pattern-flow-station--traffic-focus")
+        .map((station) => station.attributes("data-station-key"))
+        .sort(),
+    ).toEqual(["stationa", "stationb", "stationc"]);
+
+    await vi.advanceTimersByTimeAsync(900);
+    await nextTick();
+    expect(wrapper.find(".pattern-flow-station--traffic-focus").exists()).toBe(
+      false,
+    );
+
+    await vi.advanceTimersByTimeAsync(599);
+    await nextTick();
+    expect(wrapper.find(".pattern-flow-station--traffic-focus").exists()).toBe(
+      false,
+    );
+
+    await vi.advanceTimersByTimeAsync(1);
+    await nextTick();
+    expect(
+      wrapper
+        .findAll(".pattern-flow-station--traffic-focus")
+        .map((station) => station.attributes("data-station-key"))
+        .sort(),
+    ).toEqual(["stationa", "stationb", "stationc"]);
+
+    await vi.advanceTimersByTimeAsync(900);
+    await nextTick();
+    expect(wrapper.find(".pattern-flow-station--traffic-focus").exists()).toBe(
+      false,
+    );
+    expect(vueFlowSetViewportMock).toHaveBeenCalledTimes(1);
     expect(wrapper.find(".loading-clock").exists()).toBe(false);
     await wrapper.get(".pattern-traffic-calendar__today").trigger("click");
     await flushPromises();

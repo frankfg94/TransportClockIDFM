@@ -1085,14 +1085,7 @@ onBeforeUnmount(() => {
   background: #050505;
   color: #0b2440;
   display: grid;
-  font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  font-family: var(--font-sans);
   inset: 0;
   min-height: 100dvh;
   overflow: auto;

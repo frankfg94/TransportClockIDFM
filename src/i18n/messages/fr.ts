@@ -764,6 +764,10 @@ export const fr = {
     trafficCalendarFriendlyTimeFrom: "À partir de {start}",
     trafficCalendarFriendlyTimeUntil: "Jusqu'à {end}",
     trafficCalendarFriendlyTimeUnknown: "Horaire non communiqué",
+    trafficCalendarFriendlyRemainingDayOne: "1 jour restant",
+    trafficCalendarFriendlyRemainingDayMany: "{count} jours restants",
+    trafficCalendarFocusDisruptionAria:
+      "Afficher la zone concernée par {title}",
     trafficCalendarFriendlyAt: "{type} à {station}",
     trafficCalendarFriendlyBetween: "{type} entre {from} et {to}",
     trafficCalendarFriendlyOnStops: "{type} sur {count} gares",

@@ -1,0 +1,42 @@
+{
+  "editor.codeActionsOnSave": {
+    "source.fixAll": "never",
+    "source.organizeImports": "never"
+  },
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnSave": true,
+  "editor.formatOnSaveMode": "modificationsIfAvailable",
+  "editor.quickSuggestions": {
+    "comments": "off",
+    "other": "on",
+    "strings": "on"
+  },
+  "editor.semanticHighlighting.enabled": true,
+  "files.watcherExclude": {
+    "**/.nuxt-capacitor/**": true,
+    "**/.output/**": true,
+    "**/.unlighthouse/**": true,
+    "**/.wrangler/**": true,
+    "**/--host/**": true,
+    "**/android/.gradle/**": true,
+    "**/android/**/build/**": true,
+    "**/android/app/src/main/assets/public/**": true,
+    "**/dist/**": true,
+    "**/graphify-out/**": true,
+    "**/graphify-web/**": true,
+    "**/node_modules/**": true,
+    "**/reports/**": true
+  },
+  "npm.autoDetect": "off",
+  "prettier.requireConfig": true,
+  "prettier.resolveGlobalModules": false,
+  "search.exclude": {
+    "**/--host/**": true
+  },
+  "typescript.disableAutomaticTypeAcquisition": true,
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "typescript.suggest.autoImports": true,
+  "typescript.suggest.completeFunctionCalls": true,
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.tsserver.maxTsServerMemory": 4096
+}

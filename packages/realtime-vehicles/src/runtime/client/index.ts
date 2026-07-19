@@ -1,4 +1,4 @@
-import { computed } from "vue";
+import { computed, markRaw } from "vue";
 import { Clock3 } from "lucide-vue-next";
 import type { Node } from "@vue-flow/core";
 import type {
@@ -44,11 +44,11 @@ const plugin: TransportClockClientPlugin = {
   },
   presentation: {
     accentColor: "#5136ff",
-    icon: Clock3,
+    icon: markRaw(Clock3),
   },
   messages,
   settings: {
-    component: TransportPositionParameterSettings,
+    component: markRaw(TransportPositionParameterSettings),
     defaultValue: createDefaultTransportPositionParameterSettings(),
     version: 1,
     normalize: normalizeTransportPositionParameterSettings,
@@ -150,7 +150,9 @@ function createServicePatternExtension(
 
   return {
     nodes,
-    nodeTypes: { [PLUGIN_ID + ":vehicle"]: PatternVehicleNode as never },
+    nodeTypes: {
+      [PLUGIN_ID + ":vehicle"]: markRaw(PatternVehicleNode) as never,
+    },
     status: extensionStatus,
   };
 }

@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/controls/dist/style.css";
 import dagre from "@dagrejs/dagre";
@@ -46,9 +46,7 @@ import {
   getFlowLightEdgeClass,
   getVisualFlowEdgeEndpoints,
 } from "./flowDirection";
-import {
-  countPatternTopologyStations,
-} from "./compactPatternFlow";
+import { countPatternTopologyStations } from "./compactPatternFlow";
 import {
   hydrateDeparturePatternTransfers,
   type PatternTransferHydrationProgress,
@@ -69,10 +67,7 @@ import {
   getUpcomingTrafficWarningStart,
   parseTrafficDate,
 } from "../traffic/trafficTiming";
-import type {
-  TrafficCalendarImpactScope,
-  TrafficLineReport,
-} from "../traffic";
+import type { TrafficCalendarImpactScope, TrafficLineReport } from "../traffic";
 import {
   type PatternTrafficImpact,
   type PatternTrafficImpactAnalysis,
@@ -87,6 +82,7 @@ import {
 import PatternTrafficCalendarSurface from "./PatternTrafficCalendarSurface.vue";
 import PatternTrafficCalendarToggle from "./PatternTrafficCalendarToggle.vue";
 import type { PatternTrafficCalendarDay } from "./trafficCalendar";
+import type { PatternTrafficSummaryEntry } from "./trafficCalendarSummary";
 import { usePatternTrafficCalendar } from "./usePatternTrafficCalendar";
 import {
   TRAFFIC_DISTURBANCE_COLOR,
@@ -308,6 +304,10 @@ const MAX_REALISTIC_MIN_STOP_GAP_COEFFICIENT = 1.25;
 const MIN_REALISTIC_MAX_STOP_GAP_COEFFICIENT = 1.25;
 const MAX_REALISTIC_STOP_GAP_COEFFICIENT = 8;
 const DISTANCE_LABEL_EXIT_MS = 240;
+const TRAFFIC_FOCUS_CAMERA_DURATION_MS = 620;
+const TRAFFIC_FOCUS_PULSE_DELAY_MS = 500;
+const TRAFFIC_FOCUS_PULSE_DURATION_MS = 900;
+const TRAFFIC_FOCUS_PULSE_REPEAT_DELAY_MS = 1_500;
 const TRANSFER_HYDRATION_STALLED_RETRY_MS = 30_000;
 const TRANSFER_HYDRATION_RATE_LIMIT_CHECK_MS = 1_200;
 const TRANSFER_HYDRATION_HEALTH_CHECK_TIMEOUT_MS = 2_500;
@@ -424,6 +424,8 @@ const patternFlowViewportSize = ref<PatternViewportSize>({
   width: 0,
   height: 0,
 });
+const trafficPulseStationKeys = ref<Set<string>>(new Set());
+const hiddenTrafficMarkerKeys = ref<Set<string>>(new Set());
 const selectedTrafficDisruptionIds = ref<string[]>([]);
 const selectedTrafficTimestamp = ref<number>();
 const hydratedPattern = ref<DepartureCallingPattern>();
@@ -444,6 +446,10 @@ let transferHydrationRateLimitTimer: number | undefined;
 let transferHydrationStalledTimer: number | undefined;
 let visualModeDecisionKey = "";
 let stationTooltipHideTimer: number | undefined;
+let trafficFocusTimer: number | undefined;
+let trafficFocusTimerResolve: (() => void) | undefined;
+let trafficPulseClearTimer: number | undefined;
+let trafficFocusRequest = 0;
 const missingNetexTownWarningKeys = new Set<string>();
 
 const serviceLabel = computed(() =>
@@ -598,7 +604,9 @@ const {
   smartTrafficDetection: computed(() => props.smartTrafficDetection),
   trafficReport: computed(() => props.trafficReport),
   includeUpcomingWarnings: computed(() => false),
-  selectedTrafficDisruptionIds: computed(() => selectedTrafficDisruptionIds.value),
+  selectedTrafficDisruptionIds: computed(
+    () => selectedTrafficDisruptionIds.value,
+  ),
   trafficEvaluationTimestamp: computed(() => selectedTrafficTimestamp.value),
   warningLookaheadDays: computed(() => props.trafficWarningLookaheadDays),
 });
@@ -665,8 +673,7 @@ const patternPluginExtensions = transportClockPlugins.flatMap((plugin) => {
   }
   const enabled = computed(
     () =>
-      appSettings.value.plugins[plugin.id]?.enabled ??
-      plugin.defaultEnabled,
+      appSettings.value.plugins[plugin.id]?.enabled ?? plugin.defaultEnabled,
   );
   const extension = definition.setup({
     active: computed(
@@ -688,10 +695,7 @@ const patternPluginExtensions = transportClockPlugins.flatMap((plugin) => {
       );
     },
     line: computed(() => ({
-      id:
-        props.lineId ??
-        props.board?.line.shortName ??
-        props.board?.line.ref,
+      id: props.lineId ?? props.board?.line.shortName ?? props.board?.line.ref,
       mode: props.board?.line.mode,
       ref: props.board?.line.ref,
       shortName: props.board?.line.shortName,
@@ -780,9 +784,7 @@ const patternFlowKey = computed(
       isFullLineMode.value ? "full" : "route"
     }:${props.showCityZones ? "cities" : "no-cities"}:curves:${
       props.patternRoundedCurves ? "rounded" : "straight"
-    }:spacing:${
-      patternSpacingKey.value
-    }${
+    }:spacing:${patternSpacingKey.value}${
       props.board?.line.mode ? `:${props.board.line.mode}` : ""
     }:traffic:${props.smartTrafficDetection ? trafficImpactKey.value : "off"}`,
 );
@@ -947,7 +949,10 @@ function createResolvedPatternLayoutOptions(
 
   return {
     ...layout,
-    edgeGapByKey: createRealisticEdgeGapByKey(edges, getPatternSpacingOptions()),
+    edgeGapByKey: createRealisticEdgeGapByKey(
+      edges,
+      getPatternSpacingOptions(),
+    ),
   };
 }
 
@@ -1142,6 +1147,173 @@ function focusTrafficCalendarSelection(): void {
   }
 }
 
+async function focusTrafficDisruption(
+  entry: PatternTrafficSummaryEntry,
+): Promise<void> {
+  const disruptionIds = new Set(entry.disruptionIds);
+  const segments = flowModel.value.trafficAnalysis.segments.filter((segment) =>
+    disruptionIds.has(segment.disruption.id),
+  );
+  const stationKeys = getTrafficFocusStationKeys(segments);
+  const viewport = createTrafficFocusViewport(stationKeys);
+  const controller = patternFlowViewportController.value;
+
+  if (!controller?.setViewport || !viewport || stationKeys.length === 0) return;
+
+  trafficFocusRequest += 1;
+  const request = trafficFocusRequest;
+  resetTrafficFocusTimers();
+  closeTrafficImpactPopup();
+
+  const duration = props.reduceMotion ? 0 : TRAFFIC_FOCUS_CAMERA_DURATION_MS;
+  patternFlowViewport.value = viewport;
+  const transition = controller.setViewport(viewport, { duration });
+
+  if (isPromiseLike(transition)) {
+    await transition;
+  } else {
+    await waitForTrafficFocus(duration);
+  }
+  if (request !== trafficFocusRequest) return;
+
+  await waitForTrafficFocus(TRAFFIC_FOCUS_PULSE_DELAY_MS);
+  if (request !== trafficFocusRequest) return;
+
+  pulseStations(stationKeys);
+  await waitForTrafficFocus(TRAFFIC_FOCUS_PULSE_REPEAT_DELAY_MS);
+  if (request !== trafficFocusRequest) return;
+
+  pulseStations(stationKeys);
+}
+
+function pulseStations(stations: string[]): void {
+  const request = trafficFocusRequest;
+
+  if (trafficPulseClearTimer !== undefined && typeof window !== "undefined") {
+    window.clearTimeout(trafficPulseClearTimer);
+  }
+
+  trafficPulseStationKeys.value = new Set(stations);
+  if (typeof window === "undefined") return;
+
+  trafficPulseClearTimer = window.setTimeout(() => {
+    if (request === trafficFocusRequest) {
+      trafficPulseStationKeys.value = new Set();
+    }
+    trafficPulseClearTimer = undefined;
+  }, TRAFFIC_FOCUS_PULSE_DURATION_MS);
+}
+
+function getTrafficFocusStationKeys(
+  segments: PatternTrafficImpactSegment[],
+): string[] {
+  const stationKeys = new Set<string>();
+
+  segments.forEach((segment) => {
+    segment.stationKeys.forEach((stationKey) => stationKeys.add(stationKey));
+    segment.edgeKeys.forEach((edgeKey) => {
+      const [source, target] = edgeKey.split("--");
+      if (source) stationKeys.add(source);
+      if (target) stationKeys.add(target);
+    });
+  });
+
+  return Array.from(stationKeys).filter((stationKey) =>
+    flowModel.value.trafficPositions.has(stationKey),
+  );
+}
+
+function createTrafficFocusViewport(
+  stationKeys: string[],
+): PatternViewport | undefined {
+  syncPatternFlowViewportSize();
+  const points = stationKeys
+    .map((stationKey) => flowModel.value.trafficPositions.get(stationKey))
+    .filter((point): point is PatternLayoutPosition => Boolean(point));
+  const measuredViewport = patternFlowViewportSize.value;
+  const width =
+    measuredViewport.width ||
+    (isPatternFlowFullscreen.value && typeof window !== "undefined"
+      ? window.innerWidth
+      : 960);
+  const height =
+    measuredViewport.height ||
+    (isPatternFlowFullscreen.value && typeof window !== "undefined"
+      ? window.innerHeight
+      : 470);
+
+  if (points.length === 0) return undefined;
+
+  const minX = Math.min(...points.map((point) => point.x));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxY = Math.max(...points.map((point) => point.y));
+  const layout = currentLayoutOptions.value;
+  const boundsWidth = Math.max(
+    layout.nodeWidth,
+    maxX - minX + layout.nodeWidth,
+  );
+  const boundsHeight = Math.max(
+    layout.nodeHeight,
+    maxY - minY + layout.nodeHeight,
+  );
+  const paddingX = Math.min(180, width * 0.2);
+  const paddingY = Math.min(130, height * 0.2);
+  const fitZoom = Math.min(
+    (width - paddingX * 2) / boundsWidth,
+    (height - paddingY * 2) / boundsHeight,
+  );
+  const minimumZoom = isPatternFlowFullscreen.value ? 0.56 : 0.48;
+  const zoom =
+    points.length === 1
+      ? getTrafficCalendarFocusZoom()
+      : Math.min(1.08, Math.max(minimumZoom, fitZoom));
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+
+  return {
+    x: width / 2 - centerX * zoom,
+    y: height / 2 - centerY * zoom,
+    zoom,
+  };
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    (typeof value === "object" || typeof value === "function") &&
+    value !== null &&
+    "then" in value
+  );
+}
+
+function waitForTrafficFocus(duration: number): Promise<void> {
+  if (duration <= 0 || typeof window === "undefined") return Promise.resolve();
+
+  return new Promise((resolve) => {
+    trafficFocusTimerResolve = resolve;
+    trafficFocusTimer = window.setTimeout(() => {
+      trafficFocusTimer = undefined;
+      trafficFocusTimerResolve = undefined;
+      resolve();
+    }, duration);
+  });
+}
+
+function resetTrafficFocusTimers(): void {
+  if (trafficFocusTimer !== undefined && typeof window !== "undefined") {
+    window.clearTimeout(trafficFocusTimer);
+    trafficFocusTimer = undefined;
+  }
+  const resolve = trafficFocusTimerResolve;
+  trafficFocusTimerResolve = undefined;
+  resolve?.();
+
+  if (trafficPulseClearTimer !== undefined && typeof window !== "undefined") {
+    window.clearTimeout(trafficPulseClearTimer);
+    trafficPulseClearTimer = undefined;
+  }
+  trafficPulseStationKeys.value = new Set();
+}
 function getTrafficSegmentFocusPoint(
   segment: PatternTrafficImpactSegment,
 ): PatternViewportPoint | undefined {
@@ -1149,7 +1321,9 @@ function getTrafficSegmentFocusPoint(
     .map((stationKey) => flowModel.value.trafficPositions.get(stationKey))
     .filter((point): point is PatternLayoutPosition => Boolean(point));
   const points =
-    stationPoints.length > 0 ? stationPoints : getTrafficEdgeFocusPoints(segment);
+    stationPoints.length > 0
+      ? stationPoints
+      : getTrafficEdgeFocusPoints(segment);
 
   if (points.length === 0) {
     return undefined;
@@ -1169,7 +1343,9 @@ function getTrafficEdgeFocusPoints(
 
     return [source, target]
       .map((stationKey) =>
-        stationKey ? flowModel.value.trafficPositions.get(stationKey) : undefined,
+        stationKey
+          ? flowModel.value.trafficPositions.get(stationKey)
+          : undefined,
       )
       .filter((point): point is PatternLayoutPosition => Boolean(point));
   });
@@ -1186,6 +1362,13 @@ function handlePatternEdgeClick(event: {
   edge?: { data?: PatternFlowEdgeData };
 }): void {
   showTrafficImpactPopup(event.edge?.data?.trafficImpact);
+}
+
+function hideTrafficMarker(key: string): void {
+  hiddenTrafficMarkerKeys.value = new Set([
+    ...hiddenTrafficMarkerKeys.value,
+    key,
+  ]);
 }
 
 function formatClock(value?: string): string {
@@ -1614,7 +1797,9 @@ function createPatternFlow(
       })
     : [];
   const trafficMarkerNodes = createTrafficMarkerFlowNodes({
-    segments: trafficAnalysis.segments,
+    segments: trafficAnalysis.segments.filter(
+      (segment) => !hiddenTrafficMarkerKeys.value.has(segment.id),
+    ),
     edges: visibleDrawableEdges,
     positions: topology.positions,
     layout,
@@ -1643,7 +1828,9 @@ function createPatternFlow(
         .filter(
           (edge) =>
             edge.active &&
-            !trafficAnalysis.edgeImpacts[createEdgeKey(edge.source, edge.target)],
+            !trafficAnalysis.edgeImpacts[
+              createEdgeKey(edge.source, edge.target)
+            ],
         )
         .map((edge, fallbackOrder) => ({
           edge,
@@ -1804,36 +1991,40 @@ function createTrafficWalkingFlowNodes({
   );
   const width = layout.compact ? 84 : 96;
 
-  return createInterruptionWalkingTimes(segments, edges).flatMap((walkingTime) => {
-    const edge = edgeByKey.get(walkingTime.edgeKey);
-    const source = edge ? positions.get(edge.source) : undefined;
-    const target = edge ? positions.get(edge.target) : undefined;
+  return createInterruptionWalkingTimes(segments, edges).flatMap(
+    (walkingTime) => {
+      const edge = edgeByKey.get(walkingTime.edgeKey);
+      const source = edge ? positions.get(edge.source) : undefined;
+      const target = edge ? positions.get(edge.target) : undefined;
 
-    if (!source || !target) {
-      return [];
-    }
+      if (!source || !target) {
+        return [];
+      }
 
-    return [
-      {
-        id: `traffic-walking:${walkingTime.edgeKey}`,
-        type: "traffic-walking",
-        position: {
-          x: (source.x + target.x) / 2 - width / 2,
-          y: (source.y + target.y) / 2 + 10,
-        },
-        draggable: false,
-        selectable: false,
-        connectable: false,
-        focusable: false,
-        class: "pattern-flow-traffic-walking-node",
-        zIndex: 94,
-        data: {
-          durationLabel: formatInterruptionWalkingDuration(walkingTime.minutes),
-          edgeKey: walkingTime.edgeKey,
-        },
-      } satisfies PatternTrafficWalkingFlowNode,
-    ];
-  });
+      return [
+        {
+          id: `traffic-walking:${walkingTime.edgeKey}`,
+          type: "traffic-walking",
+          position: {
+            x: (source.x + target.x) / 2 - width / 2,
+            y: (source.y + target.y) / 2 + 10,
+          },
+          draggable: false,
+          selectable: false,
+          connectable: false,
+          focusable: false,
+          class: "pattern-flow-traffic-walking-node",
+          zIndex: 94,
+          data: {
+            durationLabel: formatInterruptionWalkingDuration(
+              walkingTime.minutes,
+            ),
+            edgeKey: walkingTime.edgeKey,
+          },
+        } satisfies PatternTrafficWalkingFlowNode,
+      ];
+    },
+  );
 }
 
 function formatInterruptionWalkingDuration(minutes: number): string {
@@ -1895,7 +2086,9 @@ function getTrafficMarkerDetailLabel(
   }
 
   const relativeRestartLabel =
-    selectedNow === undefined ? getTodayRestartRelativeLabel(segment) : undefined;
+    selectedNow === undefined
+      ? getTodayRestartRelativeLabel(segment)
+      : undefined;
 
   if (relativeRestartLabel) {
     return relativeRestartLabel;
@@ -2069,9 +2262,10 @@ function getTrafficSegmentAnchor(
     : undefined;
 }
 
-function averagePatternPoints(
-  points: Array<{ x: number; y: number }>,
-): { x: number; y: number } {
+function averagePatternPoints(points: Array<{ x: number; y: number }>): {
+  x: number;
+  y: number;
+} {
   return {
     x: points.reduce((total, point) => total + point.x, 0) / points.length,
     y: points.reduce((total, point) => total + point.y, 0) / points.length,
@@ -2340,8 +2534,7 @@ function createFlowEdge(
     },
     style: {
       stroke: getPatternFlowEdgeStroke(edge, trafficImpact),
-      strokeOpacity:
-        trafficImpact?.kind === "interruption" ? 0.42 : undefined,
+      strokeOpacity: trafficImpact?.kind === "interruption" ? 0.42 : undefined,
       strokeWidth: edge.active || trafficImpact ? 10 : 7,
     },
   };
@@ -2888,7 +3081,9 @@ function createPreferredMainPaths(
       .map((hint) =>
         extendPreferredMainPath(
           normalizeLoopStationKeys(
-            hint.stationIds.flatMap((stationId) => stationKeyById.get(stationId) ?? []),
+            hint.stationIds.flatMap(
+              (stationId) => stationKeyById.get(stationId) ?? [],
+            ),
           ),
           adjacency,
         ),
@@ -2977,11 +3172,7 @@ function extendPreferredMainPath(
     adjacency,
   });
 
-  return [
-    ...startArm.slice(1).reverse(),
-    ...path,
-    ...endArm.slice(1),
-  ];
+  return [...startArm.slice(1).reverse(), ...path, ...endArm.slice(1)];
 }
 
 function findSimpleTerminalArm(params: {
@@ -3070,7 +3261,9 @@ function createLoopLayoutHints(
       if (loop.laneHints?.length) {
         return loop.laneHints.flatMap((laneHint, laneHintIndex) => {
           const stationKeys = normalizeLoopStationKeys(
-            laneHint.stationIds.flatMap((stationId) => stationKeyById.get(stationId) ?? []),
+            laneHint.stationIds.flatMap(
+              (stationId) => stationKeyById.get(stationId) ?? [],
+            ),
           );
           const anchorKeySet = new Set(
             laneHint.anchorStationIds.flatMap(
@@ -3083,28 +3276,34 @@ function createLoopLayoutHints(
             return [];
           }
 
-          return [{
-            id: `${loop.id}:${laneHint.id}`,
-            kind: loop.kind,
-            role: laneHint.role,
-            side: laneHint.side,
-            stationKeys,
-            anchorKeys,
-            lane: laneHint.lane,
-            explicitLane: true,
-            averageLatitude: getAverageLoopLatitude(stationKeys, nodeByKey),
-            index: index * 100 + laneHintIndex,
-          }];
+          return [
+            {
+              id: `${loop.id}:${laneHint.id}`,
+              kind: loop.kind,
+              role: laneHint.role,
+              side: laneHint.side,
+              stationKeys,
+              anchorKeys,
+              lane: laneHint.lane,
+              explicitLane: true,
+              averageLatitude: getAverageLoopLatitude(stationKeys, nodeByKey),
+              index: index * 100 + laneHintIndex,
+            },
+          ];
         });
       }
 
       const stationKeys = normalizeLoopStationKeys(
-        ((loop.orderedStationIds?.length ? loop.orderedStationIds : loop.stationIds))
-          .flatMap((stationId) => stationKeyById.get(stationId) ?? []),
+        (loop.orderedStationIds?.length
+          ? loop.orderedStationIds
+          : loop.stationIds
+        ).flatMap((stationId) => stationKeyById.get(stationId) ?? []),
       );
       const anchorKeySet = new Set(
-        ((loop.orderedAnchorStationIds?.length ? loop.orderedAnchorStationIds : loop.anchorStationIds))
-          .flatMap((stationId) => stationKeyById.get(stationId) ?? []),
+        (loop.orderedAnchorStationIds?.length
+          ? loop.orderedAnchorStationIds
+          : loop.anchorStationIds
+        ).flatMap((stationId) => stationKeyById.get(stationId) ?? []),
       );
       const anchorKeys = stationKeys.filter((key) => anchorKeySet.has(key));
 
@@ -3112,15 +3311,17 @@ function createLoopLayoutHints(
         return [];
       }
 
-      return [{
-        id: loop.id,
-        kind: loop.kind,
-        stationKeys,
-        anchorKeys,
-        lane: 0,
-        averageLatitude: getAverageLoopLatitude(stationKeys, nodeByKey),
-        index,
-      }];
+      return [
+        {
+          id: loop.id,
+          kind: loop.kind,
+          stationKeys,
+          anchorKeys,
+          lane: 0,
+          averageLatitude: getAverageLoopLatitude(stationKeys, nodeByKey),
+          index,
+        },
+      ];
     })
     .sort((left, right) => {
       if (
@@ -3152,7 +3353,10 @@ function normalizeLoopStationKeys(stationKeys: string[]): string[] {
     (key, index) => index === 0 || key !== stationKeys[index - 1],
   );
 
-  if (normalized.length > 1 && normalized[0] === normalized[normalized.length - 1]) {
+  if (
+    normalized.length > 1 &&
+    normalized[0] === normalized[normalized.length - 1]
+  ) {
     normalized.pop();
   }
 
@@ -3171,7 +3375,10 @@ function getAverageLoopLatitude(
     return undefined;
   }
 
-  return latitudes.reduce((total, latitude) => total + latitude, 0) / latitudes.length;
+  return (
+    latitudes.reduce((total, latitude) => total + latitude, 0) /
+    latitudes.length
+  );
 }
 
 function createLoopLane(index: number): number {
@@ -3257,10 +3464,7 @@ function placeSameDirectionForks(
   });
 }
 
-function resolveForkSide(
-  hint: PatternBranchLayoutHint,
-  index: number,
-): 1 | -1 {
+function resolveForkSide(hint: PatternBranchLayoutHint, index: number): 1 | -1 {
   if (hint.side === "upper") {
     return -1;
   }
@@ -3466,7 +3670,9 @@ function findClearNestedForkY(params: {
       layout: params.layout,
     });
 
-    if (!hasLayoutPlacementCollision(proposals, params.positions, ignoredKeys)) {
+    if (
+      !hasLayoutPlacementCollision(proposals, params.positions, ignoredKeys)
+    ) {
       return y;
     }
   }
@@ -3611,7 +3817,10 @@ function getAveragePathLatitude(
     return undefined;
   }
 
-  return latitudes.reduce((total, latitude) => total + latitude, 0) / latitudes.length;
+  return (
+    latitudes.reduce((total, latitude) => total + latitude, 0) /
+    latitudes.length
+  );
 }
 
 function createGeoVector(
@@ -3657,7 +3866,11 @@ function findClearSameDirectionForkY(params: {
 }): number {
   let laneMagnitude = Math.max(1, params.initialMagnitude);
 
-  for (let attempt = 0; attempt < MAX_LAYOUT_LANE_COLLISION_ATTEMPTS; attempt += 1) {
+  for (
+    let attempt = 0;
+    attempt < MAX_LAYOUT_LANE_COLLISION_ATTEMPTS;
+    attempt += 1
+  ) {
     const y =
       params.junctionPosition.y +
       params.side * params.layout.sameDirectionForkGap * laneMagnitude;
@@ -3704,7 +3917,14 @@ function placeLoopCorridor(
     return false;
   }
 
-  placeLoopPath(selected.path, selected.hint, positions, placed, visibleEdges, layout);
+  placeLoopPath(
+    selected.path,
+    selected.hint,
+    positions,
+    placed,
+    visibleEdges,
+    layout,
+  );
   return true;
 }
 
@@ -3719,7 +3939,9 @@ function createLoopPlacementCandidates(
 }> {
   const anchorSet = new Set(hint.anchorKeys);
   const placedAnchorIndexes = hint.stationKeys
-    .map((key, index) => (anchorSet.has(key) && positions.has(key) ? index : -1))
+    .map((key, index) =>
+      anchorSet.has(key) && positions.has(key) ? index : -1,
+    )
     .filter((index) => index >= 0);
 
   if (placedAnchorIndexes.length < 2) {
@@ -3759,7 +3981,10 @@ function createLoopPathBetweenAnchors(
     return stationKeys.slice(startIndex, endIndex + 1);
   }
 
-  return [...stationKeys.slice(startIndex), ...stationKeys.slice(0, endIndex + 1)];
+  return [
+    ...stationKeys.slice(startIndex),
+    ...stationKeys.slice(0, endIndex + 1),
+  ];
 }
 
 function placeLoopPath(
@@ -4344,7 +4569,11 @@ function findClearBranchLane(params: {
       : 1,
   );
 
-  for (let attempt = 0; attempt < MAX_LAYOUT_LANE_COLLISION_ATTEMPTS; attempt += 1) {
+  for (
+    let attempt = 0;
+    attempt < MAX_LAYOUT_LANE_COLLISION_ATTEMPTS;
+    attempt += 1
+  ) {
     const lane = side * magnitude;
     const proposals = createDirectionalPathPlacementProposals({
       path: params.path,
@@ -4379,7 +4608,11 @@ function findClearInterpolatedPathY(params: {
   const side = params.initialLane < 0 ? -1 : 1;
   let magnitude = Math.max(1, Math.abs(params.initialLane));
 
-  for (let attempt = 0; attempt < MAX_LAYOUT_LANE_COLLISION_ATTEMPTS; attempt += 1) {
+  for (
+    let attempt = 0;
+    attempt < MAX_LAYOUT_LANE_COLLISION_ATTEMPTS;
+    attempt += 1
+  ) {
     const y = params.baseY + side * magnitude * params.laneGap;
     const proposals = createInterpolatedPathPlacementProposals({
       path: params.path,
@@ -4493,7 +4726,11 @@ function createInterpolatedPathPlacementProposals(params: {
       return [];
     }
 
-    const realisticOffset = getPathOffsetToIndex(params.path, index + 1, params.layout);
+    const realisticOffset = getPathOffsetToIndex(
+      params.path,
+      index + 1,
+      params.layout,
+    );
     const ratio =
       params.requiredSpan > 0
         ? realisticOffset / params.requiredSpan
@@ -5487,6 +5724,8 @@ onBeforeUnmount(() => {
   clearPatternDistanceLabelHideTimer();
   resetTransferHydrationStallState();
   clearTransferHydrationRateLimitTimer();
+  trafficFocusRequest += 1;
+  resetTrafficFocusTimers();
   if (stationTooltipHideTimer !== undefined) {
     window.clearTimeout(stationTooltipHideTimer);
   }
@@ -5534,7 +5773,10 @@ onBeforeUnmount(() => {
                 <span v-if="board">
                   {{ board.title }}
                   <template v-if="departure?.platform">
-                    - {{ t("app.platform", { platform: departure.platform }) }}</template
+                    -
+                    {{
+                      t("app.platform", { platform: departure.platform })
+                    }}</template
                   >
                 </span>
               </div>
@@ -5559,9 +5801,7 @@ onBeforeUnmount(() => {
               v-else-if="error || pattern?.error"
               class="pattern-modal__state pattern-modal__state--error"
             >
-              {{
-                error || pattern?.error || t("pattern.loadFailed")
-              }}
+              {{ error || pattern?.error || t("pattern.loadFailed") }}
             </div>
 
             <div
@@ -5593,7 +5833,10 @@ onBeforeUnmount(() => {
                 <small v-if="board">
                   {{ board.title }}
                   <template v-if="departure?.platform">
-                    - {{ t("app.platform", { platform: departure.platform }) }}</template
+                    -
+                    {{
+                      t("app.platform", { platform: departure.platform })
+                    }}</template
                   >
                 </small>
               </aside>
@@ -5629,117 +5872,70 @@ onBeforeUnmount(() => {
                     ref="patternFlowShell"
                     class="pattern-flow-shell"
                     :class="{
-                    'pattern-flow-shell--comfort': isComfortPatternFlow,
-                    'pattern-flow-shell--compact': isCompactPatternFlow,
-                    'pattern-flow-shell--realistic': isRealisticPatternFlow,
-                    'pattern-flow-shell--reduce-motion': reduceMotion,
+                      'pattern-flow-shell--comfort': isComfortPatternFlow,
+                      'pattern-flow-shell--compact': isCompactPatternFlow,
+                      'pattern-flow-shell--realistic': isRealisticPatternFlow,
+                      'pattern-flow-shell--reduce-motion': reduceMotion,
                     }"
                   >
-                  <div
-                    v-if="embedded && transferHydrationLoading"
-                    class="pattern-flow-transfer-loader"
-                    :class="{
-                      'pattern-flow-transfer-loader--rate-limited':
-                        transferHydrationRateLimited,
-                    }"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <span aria-hidden="true"></span>
-                    <div class="pattern-flow-transfer-loader__content">
-                      <div class="pattern-flow-transfer-loader__label">
-                        <strong>{{ transferHydrationStatusLabel }}</strong>
-                        <small>{{ transferHydrationDetailLabel }}</small>
-                      </div>
-                      <div
-                        v-if="!transferHydrationRateLimited"
-                        class="pattern-flow-transfer-loader__track"
-                        aria-hidden="true"
-                      >
-                        <i
-                          :style="{
-                            width: `${transferHydrationProgressPercent}%`,
-                          }"
-                        ></i>
-                      </div>
-                      <button
-                        v-if="transferHydrationRetryVisible"
-                        class="pattern-flow-transfer-loader__retry"
-                        type="button"
-                        @click.stop="retryTransferHydrationFromScratch"
-                      >
-                        {{ t("common.actions.retry") }}
-                      </button>
-                    </div>
-                  </div>
-                  <div
-                    v-for="(status, statusIndex) in pluginStatuses"
-                    :key="status.id"
-                    class="pattern-flow-plugin-status"
-                    :class="'pattern-flow-plugin-status--' + status.state"
-                    :style="{ bottom: 14 + statusIndex * 52 + 'px' }"
-                    :title="status.tooltip"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <span aria-hidden="true"></span>
-                    <div>
-                      <strong>{{ status.label }}</strong>
-                      <small v-if="status.detail">
-                        {{ status.detail }}
-                      </small>
-                    </div>
-                  </div>
-                  <div
-                    class="pattern-flow-actions pattern-flow-actions--desktop"
-                  >
-                    <slot name="flow-actions-prefix"></slot>
-                    <PatternTrafficCalendarToggle
-                      v-if="trafficCalendarEventCount > 0"
-                      :active="trafficCalendarOpen"
-                      :count="trafficCalendarEventCount"
-                      :next-delay-label="trafficCalendarNextDelayLabel"
-                      :reduce-motion="reduceMotion"
-                      @toggle="toggleTrafficCalendar"
-                    />
-                    <DistanceToggle
-                      v-model="showPatternDistances"
-                      class="pattern-flow-action-button"
-                      :reduce-motion="reduceMotion"
-                    />
-                    <MaterialCombobox
-                      class="pattern-flow-mode-combobox"
-                      :model-value="patternVisualMode"
-                      :options="patternVisualModeOptions"
-                      :aria-label="t('pattern.visualModeAria')"
-                      @update:model-value="selectPatternVisualMode"
-                    />
-                    <button
-                      class="pattern-flow-action-button"
-                      type="button"
-                      :aria-label="
-                        isPatternFlowFullscreen
-                          ? t('pattern.exitFullscreenAria')
-                          : t('pattern.enterFullscreenAria')
-                      "
-                      @click.stop="togglePatternFlowFullscreen"
+                    <div
+                      v-if="embedded && transferHydrationLoading"
+                      class="pattern-flow-transfer-loader"
+                      :class="{
+                        'pattern-flow-transfer-loader--rate-limited':
+                          transferHydrationRateLimited,
+                      }"
+                      role="status"
+                      aria-live="polite"
                     >
-                      <Minimize2
-                        v-if="isPatternFlowFullscreen"
-                        aria-hidden="true"
-                      />
-                      <Expand v-else aria-hidden="true" />
-                      <span>
-                        {{
-                          isPatternFlowFullscreen
-                            ? t("pattern.collapse")
-                            : t("pattern.fullscreen")
-                        }}
-                      </span>
-                    </button>
-                  </div>
-                  <MobileActionsMenu :aria-label="t('pattern.optionsAria')">
-                    <template #default="{ close }">
+                      <span aria-hidden="true"></span>
+                      <div class="pattern-flow-transfer-loader__content">
+                        <div class="pattern-flow-transfer-loader__label">
+                          <strong>{{ transferHydrationStatusLabel }}</strong>
+                          <small>{{ transferHydrationDetailLabel }}</small>
+                        </div>
+                        <div
+                          v-if="!transferHydrationRateLimited"
+                          class="pattern-flow-transfer-loader__track"
+                          aria-hidden="true"
+                        >
+                          <i
+                            :style="{
+                              width: `${transferHydrationProgressPercent}%`,
+                            }"
+                          ></i>
+                        </div>
+                        <button
+                          v-if="transferHydrationRetryVisible"
+                          class="pattern-flow-transfer-loader__retry"
+                          type="button"
+                          @click.stop="retryTransferHydrationFromScratch"
+                        >
+                          {{ t("common.actions.retry") }}
+                        </button>
+                      </div>
+                    </div>
+                    <div
+                      v-for="(status, statusIndex) in pluginStatuses"
+                      :key="status.id"
+                      class="pattern-flow-plugin-status"
+                      :class="'pattern-flow-plugin-status--' + status.state"
+                      :style="{ bottom: 14 + statusIndex * 52 + 'px' }"
+                      :title="status.tooltip"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <span aria-hidden="true"></span>
+                      <div>
+                        <strong>{{ status.label }}</strong>
+                        <small v-if="status.detail">
+                          {{ status.detail }}
+                        </small>
+                      </div>
+                    </div>
+                    <div
+                      class="pattern-flow-actions pattern-flow-actions--desktop"
+                    >
                       <slot name="flow-actions-prefix"></slot>
                       <PatternTrafficCalendarToggle
                         v-if="trafficCalendarEventCount > 0"
@@ -5747,16 +5943,12 @@ onBeforeUnmount(() => {
                         :count="trafficCalendarEventCount"
                         :next-delay-label="trafficCalendarNextDelayLabel"
                         :reduce-motion="reduceMotion"
-                        @toggle="
-                          toggleTrafficCalendar();
-                          close();
-                        "
+                        @toggle="toggleTrafficCalendar"
                       />
                       <DistanceToggle
                         v-model="showPatternDistances"
                         class="pattern-flow-action-button"
                         :reduce-motion="reduceMotion"
-                        @click="close"
                       />
                       <MaterialCombobox
                         class="pattern-flow-mode-combobox"
@@ -5764,7 +5956,6 @@ onBeforeUnmount(() => {
                         :options="patternVisualModeOptions"
                         :aria-label="t('pattern.visualModeAria')"
                         @update:model-value="selectPatternVisualMode"
-                        @change="close"
                       />
                       <button
                         class="pattern-flow-action-button"
@@ -5774,10 +5965,7 @@ onBeforeUnmount(() => {
                             ? t('pattern.exitFullscreenAria')
                             : t('pattern.enterFullscreenAria')
                         "
-                        @click.stop="
-                          togglePatternFlowFullscreen($event);
-                          close();
-                        "
+                        @click.stop="togglePatternFlowFullscreen"
                       >
                         <Minimize2
                           v-if="isPatternFlowFullscreen"
@@ -5792,232 +5980,299 @@ onBeforeUnmount(() => {
                           }}
                         </span>
                       </button>
-                    </template>
-                  </MobileActionsMenu>
-                  <VueFlow
-                    pan-on-drag
-                    :key="patternFlowKey"
-                    class="pattern-flow"
-                    :nodes="allFlowNodes"
-                    :node-types="pluginNodeTypes"
-                    :edges="flowModel.edges"
-                    :default-viewport="initialViewport"
-                    :fit-view-on-init="isFullLineMode"
-                    :min-zoom="0.34"
-                    :max-zoom="1.7"
-                    :nodes-draggable="false"
-                    :nodes-connectable="false"
-                    :elements-selectable="false"
-                    :zoom-on-scroll="shouldZoomOnWheel"
-                    :zoom-on-pinch="true"
-                    :pan-on-scroll="false"
-                    :prevent-scrolling="shouldZoomOnWheel"
-                    @pane-ready="handlePatternFlowReady"
-                    @viewport-change="handlePatternFlowViewportChange"
-                    @edge-click="handlePatternEdgeClick"
-                  >
-                    <Controls :show-interactive="false" />
-                    <template #node-city-zone="{ data }">
-                      <div
-                        class="pattern-flow-city-zone"
-                        :data-city-zone-width="data.width"
-                        :data-layout-x="data.layoutX"
-                        :data-layout-y="data.layoutY"
-                        :data-node-x="data.nodeX"
-                        :data-node-y="data.nodeY"
-                        :style="{
-                          '--city-zone-width': `${data.width}px`,
-                        }"
-                        aria-hidden="true"
-                      >
-                        <span>{{ data.city }}</span>
-                      </div>
-                    </template>
-                    <template #node-traffic-marker="{ data }">
-                      <div
-                        class="pattern-flow-traffic-marker"
-                        :class="`pattern-flow-traffic-marker--${data.kind}`"
-                        :style="{
-                          '--traffic-marker-connector-height': `${data.connectorHeight}px`,
-                        }"
-                      >
-                        <span
-                          v-if="data.replacementBus"
-                          class="pattern-flow-traffic-marker__icon"
-                          aria-hidden="true"
-                        >
-                          <Bus />
-                        </span>
-                        <span
-                          v-else
-                          class="pattern-flow-traffic-marker__icon"
-                          aria-hidden="true"
-                        >
-                          <TriangleAlert />
-                        </span>
-                        <span class="pattern-flow-traffic-marker__content">
-                          <span class="pattern-flow-traffic-marker__copy">
-                            <strong>{{ data.statusLabel }}</strong>
-                            <small v-if="data.detailLabel">
-                              {{ data.detailLabel }}
-                            </small>
-                          </span>
-                          <button
-                            class="pattern-flow-traffic-marker__details"
-                            type="button"
-                            @pointerdown.stop="
-                              showTrafficImpactPopup(data.trafficImpact)
-                            "
-                            @click.stop="
-                              showTrafficImpactPopup(data.trafficImpact)
-                            "
-                          >
-                            <Info aria-hidden="true" />
-                            <span>{{ t("pattern.details") }}</span>
-                          </button>
-                        </span>
-                      </div>
-                    </template>
-                    <template #node-traffic-walking="{ data }">
-                      <div
-                        class="pattern-flow-traffic-walking"
-                        role="note"
-                        :aria-label="
-                          t('pattern.walkingTimeAria', {
-                            time: data.durationLabel,
-                          })
-                        "
-                      >
-                        <Footprints aria-hidden="true" />
-                        <span>{{ data.durationLabel }}</span>
-                      </div>
-                    </template>
-                    <template #node-station="{ data }">
-                      <div
-                        class="pattern-flow-station"
-                        :data-station-key="data.key"
-                        :data-station-label="data.label"
-                        :data-station-city="data.city ?? ''"
-                        :data-layout-x="data.layoutX"
-                        :data-layout-y="data.layoutY"
-                        :data-node-x="data.nodeX"
-                        :data-node-y="data.nodeY"
-                        :data-served="data.served ? 'true' : 'false'"
-                        :data-current="data.current ? 'true' : 'false'"
-                        :class="{
-                          'pattern-flow-station--current': data.current,
-                          'pattern-flow-station--skipped': !data.served,
-                          'pattern-flow-station--terminal': data.branchEnd,
-                          'pattern-flow-station--tooltip-open':
-                            activeStationTooltipKey === data.key,
-                          'pattern-flow-station--traffic-interruption':
-                            data.trafficImpact?.kind === 'interruption',
-                          'pattern-flow-station--traffic-disturbance':
-                            data.trafficImpact?.kind === 'disturbance',
-                        }"
-                        :title="
-                          data.served
-                            ? undefined
-                            : t('pattern.skippedTitle')
-                        "
-                        @focusin="showStationTooltip(data.key)"
-                        @focusout="scheduleHideStationTooltip(data.key)"
-                        @mouseenter="showStationTooltip(data.key)"
-                        @mouseleave="scheduleHideStationTooltip(data.key)"
-                        @click.stop="showTrafficImpactPopup(data.trafficImpact)"
-                      >
-                        <Handle
-                          id="station-target"
-                          class="pattern-flow-station__handle pattern-flow-station__handle--target"
-                          type="target"
-                          :position="Position.Left"
+                    </div>
+                    <MobileActionsMenu :aria-label="t('pattern.optionsAria')">
+                      <template #default="{ close }">
+                        <slot name="flow-actions-prefix"></slot>
+                        <PatternTrafficCalendarToggle
+                          v-if="trafficCalendarEventCount > 0"
+                          :active="trafficCalendarOpen"
+                          :count="trafficCalendarEventCount"
+                          :next-delay-label="trafficCalendarNextDelayLabel"
+                          :reduce-motion="reduceMotion"
+                          @toggle="
+                            toggleTrafficCalendar();
+                            close();
+                          "
                         />
-                        <Handle
-                          id="station-source"
-                          class="pattern-flow-station__handle pattern-flow-station__handle--source"
-                          type="source"
-                          :position="Position.Right"
+                        <DistanceToggle
+                          v-model="showPatternDistances"
+                          class="pattern-flow-action-button"
+                          :reduce-motion="reduceMotion"
+                          @click="close"
                         />
-                        <span
-                          class="pattern-flow-station__dot"
-                          aria-hidden="true"
-                        ></span>
-                        <span class="station-name">{{ data.label }}</span>
-                        <span
-                          v-if="data.nonBusTransfers.length > 0"
-                          class="pattern-flow-station__transfers pattern-flow-station__transfers--inline"
-                          :aria-label="t('pattern.mainTransfersAria')"
+                        <MaterialCombobox
+                          class="pattern-flow-mode-combobox"
+                          :model-value="patternVisualMode"
+                          :options="patternVisualModeOptions"
+                          :aria-label="t('pattern.visualModeAria')"
+                          @update:model-value="selectPatternVisualMode"
+                          @change="close"
+                        />
+                        <button
+                          class="pattern-flow-action-button"
+                          type="button"
+                          :aria-label="
+                            isPatternFlowFullscreen
+                              ? t('pattern.exitFullscreenAria')
+                              : t('pattern.enterFullscreenAria')
+                          "
+                          @click.stop="
+                            togglePatternFlowFullscreen($event);
+                            close();
+                          "
                         >
-                          <LineIconBadge
-                            v-for="transfer in data.nonBusTransfers"
-                            :key="`${data.key}-non-bus-${transfer.id}-${transfer.label}`"
-                            class="pattern-flow-station__transfer"
-                            :line="transfer"
-                            compact
+                          <Minimize2
+                            v-if="isPatternFlowFullscreen"
+                            aria-hidden="true"
                           />
-                        </span>
-                        <small v-if="data.time">{{
-                          formatClock(data.time)
-                        }}</small>
-                        <small v-else-if="!data.served && data.branchEnd">
-                          {{ t("pattern.skipped") }}
-                        </small>
-                        <em v-if="data.branchChip">{{ data.branchChip }}</em>
-                        <Transition name="pattern-flow-tooltip-open" appear>
-                          <article
-                            v-if="
-                              data.transfers.length > 0 &&
-                              activeStationTooltipKey === data.key
-                            "
-                            class="pattern-flow-station__transfer-tooltip"
-                            role="tooltip"
-                          >
-                            <StationTransferDetails
-                              :station-label="data.label"
-                              :city="data.city"
-                              :transfers="data.transfers"
-                              :rich-details="richTransferTooltips"
-                              :line-color="board?.line.color ?? '#0064ff'"
-                            />
-                          </article>
-                        </Transition>
-                      </div>
-                    </template>
-                  </VueFlow>
-                  <PatternFlowMiniMap
-                    v-if="showMiniMap"
-                    :nodes="flowModel.stationNodes"
-                    :edges="flowModel.edges"
-                    :node-width="currentLayoutOptions.nodeWidth"
-                    :node-height="currentLayoutOptions.nodeHeight"
-                    :viewport="patternFlowViewport"
-                    :viewport-size="patternFlowViewportSize"
-                    :line-color="board?.line.color ?? '#0064ff'"
-                    @focus="focusPatternFlowOn"
-                  />
-                  <!-- Shows the traffic information tooltip, including interrupted service cases. -->
-                  <Transition name="pattern-flow-traffic-popup">
-                    <aside
-                      v-if="activeTrafficImpact"
-                      class="pattern-flow-traffic-popup"
-                      role="dialog"
-                      :aria-label="t('pattern.trafficDetailsAria')"
+                          <Expand v-else aria-hidden="true" />
+                          <span>
+                            {{
+                              isPatternFlowFullscreen
+                                ? t("pattern.collapse")
+                                : t("pattern.fullscreen")
+                            }}
+                          </span>
+                        </button>
+                      </template>
+                    </MobileActionsMenu>
+                    <VueFlow
+                      pan-on-drag
+                      :key="patternFlowKey"
+                      class="pattern-flow"
+                      :nodes="allFlowNodes"
+                      :node-types="pluginNodeTypes"
+                      :edges="flowModel.edges"
+                      :default-viewport="initialViewport"
+                      :fit-view-on-init="isFullLineMode"
+                      :min-zoom="0.34"
+                      :max-zoom="1.7"
+                      :nodes-draggable="false"
+                      :nodes-connectable="false"
+                      :elements-selectable="false"
+                      :zoom-on-scroll="shouldZoomOnWheel"
+                      :zoom-on-pinch="true"
+                      :pan-on-scroll="false"
+                      :prevent-scrolling="shouldZoomOnWheel"
+                      @pane-ready="handlePatternFlowReady"
+                      @viewport-change="handlePatternFlowViewportChange"
+                      @edge-click="handlePatternEdgeClick"
                     >
-                      <button
-                        class="pattern-flow-traffic-popup__close"
-                        type="button"
-                        :aria-label="t('pattern.closeTrafficAria')"
-                        @click="closeTrafficImpactPopup"
+                      <Controls :show-interactive="false" />
+                      <template #node-city-zone="{ data }">
+                        <div
+                          class="pattern-flow-city-zone"
+                          :data-city-zone-width="data.width"
+                          :data-layout-x="data.layoutX"
+                          :data-layout-y="data.layoutY"
+                          :data-node-x="data.nodeX"
+                          :data-node-y="data.nodeY"
+                          :style="{
+                            '--city-zone-width': `${data.width}px`,
+                          }"
+                          aria-hidden="true"
+                        >
+                          <span>{{ data.city }}</span>
+                        </div>
+                      </template>
+                      <template #node-traffic-marker="{ data }">
+                        <div
+                          class="pattern-flow-traffic-marker"
+                          :class="`pattern-flow-traffic-marker--${data.kind}`"
+                          :style="{
+                            '--traffic-marker-connector-height': `${data.connectorHeight}px`,
+                          }"
+                        >
+                          <button
+                            v-if="data.kind === 'interruption'"
+                            class="pattern-flow-traffic-marker__dismiss"
+                            type="button"
+                            :aria-label="t('pattern.closeTrafficAria')"
+                            @pointerdown.stop="hideTrafficMarker(data.key)"
+                            @click.stop="hideTrafficMarker(data.key)"
+                          >
+                            <X aria-hidden="true" />
+                          </button>
+                          <span
+                            v-if="data.replacementBus"
+                            class="pattern-flow-traffic-marker__icon"
+                            aria-hidden="true"
+                          >
+                            <Bus />
+                          </span>
+                          <span
+                            v-else
+                            class="pattern-flow-traffic-marker__icon"
+                            aria-hidden="true"
+                          >
+                            <TriangleAlert />
+                          </span>
+                          <span class="pattern-flow-traffic-marker__content">
+                            <span class="pattern-flow-traffic-marker__copy">
+                              <strong>{{ data.statusLabel }}</strong>
+                              <small v-if="data.detailLabel">
+                                {{ data.detailLabel }}
+                              </small>
+                            </span>
+                            <button
+                              class="pattern-flow-traffic-marker__details"
+                              type="button"
+                              @pointerdown.stop="
+                                showTrafficImpactPopup(data.trafficImpact)
+                              "
+                              @click.stop="
+                                showTrafficImpactPopup(data.trafficImpact)
+                              "
+                            >
+                              <Info aria-hidden="true" />
+                              <span>{{ t("pattern.details") }}</span>
+                            </button>
+                          </span>
+                        </div>
+                      </template>
+                      <template #node-traffic-walking="{ data }">
+                        <div
+                          class="pattern-flow-traffic-walking"
+                          role="note"
+                          :aria-label="
+                            t('pattern.walkingTimeAria', {
+                              time: data.durationLabel,
+                            })
+                          "
+                        >
+                          <Footprints aria-hidden="true" />
+                          <span>{{ data.durationLabel }}</span>
+                        </div>
+                      </template>
+                      <template #node-station="{ data }">
+                        <div
+                          class="pattern-flow-station"
+                          :data-station-key="data.key"
+                          :data-station-label="data.label"
+                          :data-station-city="data.city ?? ''"
+                          :data-layout-x="data.layoutX"
+                          :data-layout-y="data.layoutY"
+                          :data-node-x="data.nodeX"
+                          :data-node-y="data.nodeY"
+                          :data-served="data.served ? 'true' : 'false'"
+                          :data-current="data.current ? 'true' : 'false'"
+                          :class="{
+                            'pattern-flow-station--current': data.current,
+                            'pattern-flow-station--skipped': !data.served,
+                            'pattern-flow-station--terminal': data.branchEnd,
+                            'pattern-flow-station--tooltip-open':
+                              activeStationTooltipKey === data.key,
+                            'pattern-flow-station--traffic-interruption':
+                              data.trafficImpact?.kind === 'interruption',
+                            'pattern-flow-station--traffic-disturbance':
+                              data.trafficImpact?.kind === 'disturbance',
+                            'pattern-flow-station--traffic-focus':
+                              trafficPulseStationKeys.has(data.key),
+                          }"
+                          :title="
+                            data.served ? undefined : t('pattern.skippedTitle')
+                          "
+                          @focusin="showStationTooltip(data.key)"
+                          @focusout="scheduleHideStationTooltip(data.key)"
+                          @mouseenter="showStationTooltip(data.key)"
+                          @mouseleave="scheduleHideStationTooltip(data.key)"
+                          @click.stop="
+                            showTrafficImpactPopup(data.trafficImpact)
+                          "
+                        >
+                          <Handle
+                            id="station-target"
+                            class="pattern-flow-station__handle pattern-flow-station__handle--target"
+                            type="target"
+                            :position="Position.Left"
+                          />
+                          <Handle
+                            id="station-source"
+                            class="pattern-flow-station__handle pattern-flow-station__handle--source"
+                            type="source"
+                            :position="Position.Right"
+                          />
+                          <span
+                            class="pattern-flow-station__dot"
+                            aria-hidden="true"
+                          ></span>
+                          <span class="station-name">{{ data.label }}</span>
+                          <span
+                            v-if="data.nonBusTransfers.length > 0"
+                            class="pattern-flow-station__transfers pattern-flow-station__transfers--inline"
+                            :aria-label="t('pattern.mainTransfersAria')"
+                          >
+                            <LineIconBadge
+                              v-for="transfer in data.nonBusTransfers"
+                              :key="`${data.key}-non-bus-${transfer.id}-${transfer.label}`"
+                              class="pattern-flow-station__transfer"
+                              :line="transfer"
+                              compact
+                            />
+                          </span>
+                          <small v-if="data.time">{{
+                            formatClock(data.time)
+                          }}</small>
+                          <small v-else-if="!data.served && data.branchEnd">
+                            {{ t("pattern.skipped") }}
+                          </small>
+                          <em v-if="data.branchChip">{{ data.branchChip }}</em>
+                          <Transition name="pattern-flow-tooltip-open" appear>
+                            <article
+                              v-if="
+                                data.transfers.length > 0 &&
+                                activeStationTooltipKey === data.key
+                              "
+                              class="pattern-flow-station__transfer-tooltip"
+                              role="tooltip"
+                            >
+                              <StationTransferDetails
+                                :station-label="data.label"
+                                :city="data.city"
+                                :transfers="data.transfers"
+                                :rich-details="richTransferTooltips"
+                                :line-color="board?.line.color ?? '#0064ff'"
+                              />
+                            </article>
+                          </Transition>
+                        </div>
+                      </template>
+                    </VueFlow>
+                    <PatternFlowMiniMap
+                      v-if="showMiniMap"
+                      :nodes="flowModel.stationNodes"
+                      :edges="flowModel.edges"
+                      :node-width="currentLayoutOptions.nodeWidth"
+                      :node-height="currentLayoutOptions.nodeHeight"
+                      :viewport="patternFlowViewport"
+                      :viewport-size="patternFlowViewportSize"
+                      :line-color="board?.line.color ?? '#0064ff'"
+                      @focus="focusPatternFlowOn"
+                    />
+                    <!-- Shows the traffic information tooltip, including interrupted service cases. -->
+                    <Transition name="pattern-flow-traffic-popup">
+                      <aside
+                        v-if="activeTrafficImpact"
+                        class="pattern-flow-traffic-popup"
+                        role="dialog"
+                        :aria-label="t('pattern.trafficDetailsAria')"
                       >
-                        ×
-                      </button>
-                      <TrafficDisruptionCard
-                        :disruption="activeTrafficImpact.disruption"
-                        compact
-                        :show-header="false"
-                      />
-                    </aside>
-                  </Transition>
+                        <button
+                          class="pattern-flow-traffic-popup__close"
+                          type="button"
+                          :aria-label="t('pattern.closeTrafficAria')"
+                          @click="closeTrafficImpactPopup"
+                        >
+                          ×
+                        </button>
+                        <TrafficDisruptionCard
+                          :disruption="activeTrafficImpact.disruption"
+                          compact
+                          :show-header="false"
+                        />
+                      </aside>
+                    </Transition>
                   </div>
                   <PatternTrafficCalendarSurface
                     v-if="trafficCalendarEventCount > 0"
@@ -6038,6 +6293,7 @@ onBeforeUnmount(() => {
                     @reset-today="resetTrafficCalendarToday"
                     @select="selectTrafficCalendarDay"
                     @expand="expandTrafficCalendar"
+                    @focus-disruption="focusTrafficDisruption"
                   />
                 </div>
               </div>

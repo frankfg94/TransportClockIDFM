@@ -162,7 +162,7 @@ describe("PatternTrafficCalendar", () => {
     expect(wrapper.text()).toContain("Travaux test");
   });
 
-  it("renders a concise user-friendly list for multiple daily incidents", () => {
+  it("renders a concise user-friendly list for multiple daily incidents", async () => {
     const calendar = createCalendar();
     const selectedDay = calendar.days.find(
       (day) => day.dateKey === "2026-07-18",
@@ -181,6 +181,8 @@ describe("PatternTrafficCalendar", () => {
     const signalingWorks = createDisruption({
       id: "signaling-works",
       title: "Travaux de signalisation à Maison Blanche",
+      message:
+        "Motif : Travaux sur le réseau ferré (remise à neuf complète de 13,4 kilomètres de voie)",
       kind: "works",
     });
 
@@ -198,9 +200,13 @@ describe("PatternTrafficCalendar", () => {
       createCalendarEvent(
         signalingWorks,
         new Date(2026, 6, 18, 9),
-        new Date(2026, 6, 18, 16),
+        new Date(2026, 6, 21, 16),
       ),
     ];
+    selectedDay.events[2].impactTimeWindow = {
+      startMinute: 9 * 60,
+      endMinute: 16 * 60,
+    };
     selectedDay.impactCount = 3;
 
     const wrapper = mount(PatternTrafficCalendar, {
@@ -208,6 +214,7 @@ describe("PatternTrafficCalendar", () => {
         calendar,
         selectedDateKey: selectedDay.dateKey,
         userFriendlySummary: true,
+        focusableSummaries: true,
       },
     });
     const summary = wrapper.get(
@@ -221,12 +228,35 @@ describe("PatternTrafficCalendar", () => {
     expect(summary.text()).toContain("3 impacts");
     expect(summary.text()).toContain("Sélectionné");
     expect(incidents).toHaveLength(3);
+    expect(incidents[2].attributes("role")).toBe("button");
+    expect(incidents[2].attributes("tabindex")).toBe("0");
+    expect(incidents[2].attributes("aria-label")).toContain(
+      "Afficher la zone concernée",
+    );
+    await incidents[2].trigger("click");
+    expect(wrapper.emitted("focusDisruption")?.[0]?.[0]).toMatchObject({
+      disruptionIds: ["signaling-works"],
+    });
+    expect(
+      incidents.every((incident) =>
+        incident
+          .get(".pattern-traffic-friendly-summary__copy")
+          .classes()
+          .includes("small-title"),
+      ),
+    ).toBe(true);
     expect(incidents[0].find("svg.lucide-triangle-alert").exists()).toBe(true);
     expect(incidents[1].find("svg.lucide-users-round").exists()).toBe(true);
     expect(incidents[2].find("svg.lucide-wrench").exists()).toBe(true);
     expect(summary.text()).toContain("De 07:00 à 11:00");
     expect(summary.text()).toContain("Toute la journée");
-    expect(summary.text()).toContain("De 09:00 à 16:00");
+    expect(summary.text()).toContain(
+      "De 09:00 à 16:00 (3 jours restants)",
+    );
+    expect(summary.text()).toContain("Travaux sur le réseau ferroviaire");
+    expect(
+      summary.get(".pattern-traffic-friendly-summary__description").text(),
+    ).toBe("Remise à neuf complète de 13,4 kilomètres de voie");
     expect(summary.text()).not.toContain("long message opérationnel");
     expect(summary.find(".traffic-disruption").exists()).toBe(false);
   });

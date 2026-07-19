@@ -10,6 +10,7 @@ import { useI18n } from "../../i18n";
 import TrafficDisruptionCard from "../traffic/TrafficDisruptionCard.vue";
 import type { TrafficDisruption } from "../traffic/types";
 import PatternTrafficCalendarFriendlySummary from "./PatternTrafficCalendarFriendlySummary.vue";
+import type { PatternTrafficSummaryEntry } from "./trafficCalendarSummary";
 import PatternTrafficCalendarTooltip from "./PatternTrafficCalendarTooltip.vue";
 import type {
   PatternTrafficCalendarDay,
@@ -29,6 +30,7 @@ const props = withDefaults(
     showIdentity?: boolean;
     userFriendlySummary?: boolean;
     selectedDisruptions?: TrafficDisruption[];
+    focusableSummaries?: boolean;
   }>(),
   {
     selectedDay: undefined,
@@ -40,6 +42,7 @@ const props = withDefaults(
     showIdentity: true,
     userFriendlySummary: false,
     selectedDisruptions: () => [],
+    focusableSummaries: false,
   },
 );
 
@@ -49,6 +52,7 @@ const emit = defineEmits<{
   resetToday: [];
   select: [day: PatternTrafficCalendarDay];
   expand: [];
+  focusDisruption: [entry: PatternTrafficSummaryEntry];
 }>();
 
 const { d, n, t } = useI18n();
@@ -306,6 +310,8 @@ function getDurationLabel(minutes?: number): string {
       <PatternTrafficCalendarFriendlySummary
         v-if="userFriendlySummary"
         :day="selectedDay"
+        :focusable="focusableSummaries"
+        @focus="emit('focusDisruption', $event)"
       />
       <template v-else>
         <header>
@@ -648,8 +654,12 @@ function getDurationLabel(minutes?: number): string {
 
 .pattern-traffic-calendar__selected-summary--friendly {
   background: #ffffff;
+  box-sizing: border-box;
   border-color: rgba(94, 82, 132, 0.12);
   box-shadow: 0 8px 24px rgba(44, 35, 77, 0.08);
+  max-height: calc(100dvh - 24px);
+  min-height: 0;
+  overflow: hidden;
   padding: 16px 18px;
 }
 

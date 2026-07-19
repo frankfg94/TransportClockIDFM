@@ -11,6 +11,11 @@ import {
 
 const props = defineProps<{
   day: PatternTrafficCalendarDay;
+  focusable?: boolean;
+}>();
+
+const emit = defineEmits<{
+  focus: [entry: PatternTrafficSummaryEntry];
 }>();
 
 const { d, n, t } = useI18n();
@@ -80,6 +85,24 @@ function getTimeWindowLabel(window: PatternTrafficSummaryTimeWindow): string {
       return t("pattern.trafficCalendarFriendlyTimeUnknown");
   }
 }
+
+function getEntryDetails(entry: PatternTrafficSummaryEntry): string[] {
+  const details = entry.timeWindows.map(getTimeWindowLabel);
+  if (entry.remainingDayCount <= 0) return details;
+
+  const remainingDaysLabel = t(
+    entry.remainingDayCount === 1
+      ? "pattern.trafficCalendarFriendlyRemainingDayOne"
+      : "pattern.trafficCalendarFriendlyRemainingDayMany",
+    { count: n(entry.remainingDayCount) },
+  );
+  const parenthetical = `(${remainingDaysLabel})`;
+
+  if (details.length === 0) return [parenthetical];
+  details[details.length - 1] = `${details[details.length - 1]} ${parenthetical}`;
+  return details;
+}
+
 </script>
 
 <template>
@@ -99,12 +122,23 @@ function getTimeWindowLabel(window: PatternTrafficSummaryTimeWindow): string {
     <ul v-if="entries.length > 0" class="pattern-traffic-friendly-summary__list">
       <PatternTrafficIncidentSummaryItem
         v-for="entry in entries"
+        small-title
         :key="entry.id"
         :critical="entry.critical"
-        :details="entry.timeWindows.map(getTimeWindowLabel)"
+        :details="getEntryDetails(entry)"
         :incident-type="entry.incidentType"
+        :interactive="focusable"
+        :action-label="
+          focusable
+            ? t('pattern.trafficCalendarFocusDisruptionAria', {
+                title: getEntryTitle(entry),
+              })
+            : undefined
+        "
+        :subtitle="entry.description"
         :title="getEntryTitle(entry)"
         data-testid="pattern-traffic-calendar-friendly-incident"
+        @activate="emit('focus', entry)"
       />
     </ul>
 
@@ -118,7 +152,10 @@ function getTimeWindowLabel(window: PatternTrafficSummaryTimeWindow): string {
 .pattern-traffic-friendly-summary {
   display: grid;
   gap: 18px;
+  max-height: 100%;
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .pattern-traffic-friendly-summary__header {
@@ -164,9 +201,12 @@ function getTimeWindowLabel(window: PatternTrafficSummaryTimeWindow): string {
   gap: 17px;
   list-style: none;
   margin: 0;
-  max-height: 280px;
-  overflow: auto;
-  padding: 0 4px 0 1px;
+  max-height: min(280px, calc(100dvh - 170px));
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 12px 0 1px;
+  scrollbar-gutter: stable;
 }
 
 .pattern-traffic-friendly-summary__empty {

@@ -1,4 +1,4 @@
-﻿/* Service pattern modal, route graph, station nodes, and line timeline. */
+/* Service pattern modal, route graph, station nodes, and line timeline. */
 
 .pattern-modal {
   max-width: var(--content-max-width);
@@ -1512,6 +1512,60 @@
   box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12);
 }
 
+.pattern-flow-station--traffic-focus {
+  --traffic-focus-color: #7c3aed;
+}
+
+.pattern-flow-station--traffic-focus.pattern-flow-station--traffic-interruption {
+  --traffic-focus-color: #ef4444;
+}
+
+.pattern-flow-station--traffic-focus.pattern-flow-station--traffic-disturbance {
+  --traffic-focus-color: #f59e0b;
+}
+
+.pattern-flow-station--traffic-focus .pattern-flow-station__dot {
+  animation: pattern-flow-station-traffic-focus-pulse 900ms
+    cubic-bezier(0.16, 1, 0.3, 1) 1 !important;
+}
+
+@keyframes pattern-flow-station-traffic-focus-pulse {
+  0% {
+    box-shadow: 0 0 0 3px
+      color-mix(in srgb, var(--traffic-focus-color), transparent 72%);
+  }
+
+  45% {
+    box-shadow:
+      0 0 0 18px
+        color-mix(in srgb, var(--traffic-focus-color), transparent 78%),
+      0 0 30px
+        color-mix(in srgb, var(--traffic-focus-color), transparent 38%);
+  }
+
+  100% {
+    box-shadow:
+      0 0 0 26px transparent,
+      0 0 0 transparent;
+  }
+}
+
+.pattern-flow-shell--reduce-motion
+  .pattern-flow-station--traffic-focus
+  .pattern-flow-station__dot {
+  animation: none !important;
+  box-shadow: 0 0 0 8px
+    color-mix(in srgb, var(--traffic-focus-color), transparent 64%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pattern-flow-station--traffic-focus .pattern-flow-station__dot {
+    animation: none !important;
+    box-shadow: 0 0 0 8px
+      color-mix(in srgb, var(--traffic-focus-color), transparent 64%);
+  }
+}
+
 .pattern-flow-traffic-marker {
   align-items: center;
   background: rgba(255, 255, 255, 0.96);
@@ -1577,6 +1631,44 @@
   position: absolute;
   transform: translateX(-50%);
   width: 7px;
+}
+
+.pattern-flow-traffic-marker__dismiss {
+  align-items: center;
+  background: rgba(31, 36, 55, 0.06);
+  border: 0;
+  border-radius: 50%;
+  color: #6f6b86;
+  cursor: pointer;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 9px;
+  top: 9px;
+  transition: background 140ms ease, color 140ms ease, opacity 140ms ease;
+  width: 26px;
+}
+
+.pattern-flow-traffic-marker--interruption:hover .pattern-flow-traffic-marker__dismiss,
+.pattern-flow-traffic-marker--interruption:focus-within .pattern-flow-traffic-marker__dismiss {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.pattern-flow-traffic-marker__dismiss:hover,
+.pattern-flow-traffic-marker__dismiss:focus-visible {
+  background: rgba(185, 42, 34, 0.14);
+  color: #bd332b;
+}
+
+.pattern-flow-traffic-marker__dismiss svg {
+  height: 15px;
+  stroke-width: 2.5;
+  width: 15px;
 }
 
 .pattern-flow-traffic-walking {
@@ -1857,7 +1949,45 @@
 }
 
 .pattern-flow-shell--compact .pattern-flow-traffic-walking,
-.pattern-flow-shell--realistic .pattern-flow-traffic-walking {
+.pattern-flow-shell--realistic .pattern-flow-traffic-marker__dismiss {
+  align-items: center;
+  background: rgba(31, 36, 55, 0.06);
+  border: 0;
+  border-radius: 50%;
+  color: #6f6b86;
+  cursor: pointer;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 9px;
+  top: 9px;
+  transition: background 140ms ease, color 140ms ease, opacity 140ms ease;
+  width: 26px;
+}
+
+.pattern-flow-traffic-marker--interruption:hover .pattern-flow-traffic-marker__dismiss,
+.pattern-flow-traffic-marker--interruption:focus-within .pattern-flow-traffic-marker__dismiss {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.pattern-flow-traffic-marker__dismiss:hover,
+.pattern-flow-traffic-marker__dismiss:focus-visible {
+  background: rgba(185, 42, 34, 0.14);
+  color: #bd332b;
+}
+
+.pattern-flow-traffic-marker__dismiss svg {
+  height: 15px;
+  stroke-width: 2.5;
+  width: 15px;
+}
+
+.pattern-flow-traffic-walking {
   font-size: 0.62rem;
   min-height: 24px;
   padding: 3px 6px;

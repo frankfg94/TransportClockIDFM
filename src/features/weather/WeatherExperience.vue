@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, getCurrentInstance, ref, watch } from "vue";
+import {
+  computed,
+  getCurrentInstance,
+  markRaw,
+  shallowRef,
+  watch,
+  type Component,
+} from "vue";
 import {
   CloudLightning,
   CloudRain,
@@ -53,7 +60,7 @@ const needsParticleRenderer = computed(
       backgroundKind.value === "storm" ||
       backgroundKind.value === "snow"),
 );
-const particlesReady = ref(false);
+const particleRenderer = shallowRef<Component>();
 const appContext = getCurrentInstance()?.appContext;
 const app = appContext?.app;
 let particlePluginLoading: Promise<void> | undefined;
@@ -71,10 +78,10 @@ const showRainDroplets = computed(
   () => showAnimation.value && isRainLikeBackground.value,
 );
 const showRainParticles = computed(
-  () => particlesReady.value && showRainParticleLayer.value,
+  () => Boolean(particleRenderer.value) && showRainParticleLayer.value,
 );
 const showSnowParticles = computed(
-  () => particlesReady.value && showSnowParticleLayer.value,
+  () => Boolean(particleRenderer.value) && showSnowParticleLayer.value,
 );
 
 watch(
@@ -88,12 +95,13 @@ watch(
 );
 
 async function loadParticleRenderer(): Promise<void> {
-  if (particlesReady.value || !app) {
+  if (particleRenderer.value || !app) {
     return;
   }
 
-  if (appContext?.components.VueParticles) {
-    particlesReady.value = true;
+  const registeredRenderer = appContext?.components.VueParticles;
+  if (registeredRenderer) {
+    particleRenderer.value = markRaw(registeredRenderer);
     return;
   }
 
@@ -105,7 +113,10 @@ async function loadParticleRenderer(): Promise<void> {
       ]);
 
       app.use(Particles, { init: loadSlim });
-      particlesReady.value = true;
+      const renderer = appContext?.components.VueParticles;
+      if (renderer) {
+        particleRenderer.value = markRaw(renderer);
+      }
     } catch {
       particlePluginLoading = undefined;
     }
@@ -442,8 +453,9 @@ function alertIcon(value: WeatherAlert) {
     aria-hidden="true"
   >
     <span v-if="showAnimation" class="weather-backdrop__layer"></span>
-    <VueParticles
+    <component
       v-if="showRainParticles"
+      :is="particleRenderer"
       id="weather-rain-particles"
       class="weather-backdrop__particles weather-backdrop__particles--rain"
       :options="rainParticleOptions"
@@ -453,8 +465,9 @@ function alertIcon(value: WeatherAlert) {
       id="weather-rain-particles"
       class="weather-backdrop__particles weather-backdrop__particles--rain"
     ></span>
-    <VueParticles
+    <component
       v-if="showSnowParticles"
+      :is="particleRenderer"
       id="weather-snow-particles"
       class="weather-backdrop__particles weather-backdrop__particles--snow"
       :options="snowParticleOptions"

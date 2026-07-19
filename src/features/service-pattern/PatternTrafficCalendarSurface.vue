@@ -11,6 +11,7 @@ import type {
   PatternTrafficCalendarDay,
   PatternTrafficCalendarMonth,
 } from "./trafficCalendar";
+import type { PatternTrafficSummaryEntry } from "./trafficCalendarSummary";
 
 withDefaults(
   defineProps<{
@@ -48,6 +49,7 @@ const emit = defineEmits<{
   resetToday: [];
   select: [day: PatternTrafficCalendarDay];
   expand: [];
+  focusDisruption: [entry: PatternTrafficSummaryEntry];
 }>();
 
 const { t } = useI18n();
@@ -71,12 +73,14 @@ const { t } = useI18n();
       :id-prefix="idPrefix"
       :user-friendly-summary="userFriendlySummary"
       mode="panel"
+      focusable-summaries
       :show-identity="false"
       @previous="emit('previous')"
       @next="emit('next')"
       @reset-today="emit('resetToday')"
       @select="emit('select', $event)"
       @expand="emit('expand')"
+      @focus-disruption="emit('focusDisruption', $event)"
     />
   </AppRightPanel>
 

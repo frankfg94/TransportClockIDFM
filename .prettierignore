@@ -1,0 +1,17 @@
+.nuxt/
+.nuxt-capacitor/
+.output/
+.unlighthouse/
+.wrangler/
+--host/
+android/
+coverage/
+dist/
+graphify-out/
+graphify-web/
+node_modules/
+packages/*/dist/
+reports/
+package-lock.json
+*.min.*
+*.tsbuildinfo

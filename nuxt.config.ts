@@ -42,6 +42,7 @@ export default defineNuxtConfig({
   buildDir: isCapacitorBuild ? ".nuxt-capacitor" : undefined,
   compatibilityDate: "2026-05-17",
   css: [
+    "@fontsource-variable/atkinson-hyperlegible-next/wght.css",
     "~/src/styles.css",
   ],
   devtools: { enabled: false },

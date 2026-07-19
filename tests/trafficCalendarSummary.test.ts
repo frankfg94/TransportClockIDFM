@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   classifyPatternTrafficIncident,
   createPatternTrafficSummaryEntries,
+  getPatternTrafficSummaryCopy,
+  getPatternTrafficSummaryRemainingDayCount,
+  getPatternTrafficSummaryTitle,
   getPatternTrafficSummaryTimeWindow,
 } from "../src/features/service-pattern/trafficCalendarSummary";
 import type {
@@ -77,6 +80,114 @@ describe("traffic calendar friendly summary", () => {
     expect(entry.timeWindows).toEqual([{ kind: "from", start: "14:00" }]);
   });
 
+  it("removes the redundant line prefix and generic traffic suffix", () => {
+    const disruption = createDisruption(
+      "Métro 13 : Travaux de rénovation - Trafic interrompu",
+      "works",
+    );
+
+    expect(getPatternTrafficSummaryTitle(disruption)).toBe(
+      "Travaux de rénovation",
+    );
+  });
+
+  it("extracts the cause from an explicit reason when the title is generic", () => {
+    const disruption = createDisruption("Trafic interrompu", "works");
+    disruption.message =
+      "Du 31 juillet au 17 août inclus, le trafic sera interrompu entre Saint-Denis – Université et La Fourche en raison de travaux de modernisation. Bus de remplacement.";
+
+    expect(getPatternTrafficSummaryTitle(disruption)).toBe(
+      "Travaux de modernisation",
+    );
+  });
+
+  it("extracts a labelled motif from IDFM copy", () => {
+    const disruption = createDisruption("Information trafic", "incident");
+    disruption.message =
+      "Période : toute la journée. Motif : panne de signalisation. Reprise estimée à 18:00.";
+
+    expect(getPatternTrafficSummaryTitle(disruption)).toBe(
+      "Panne de signalisation",
+    );
+  });
+
+  it("prioritizes the explicit RER B motif over route-based titles", () => {
+    const disruption = createDisruption(
+      "RER B : Châtelet <-> Aéroport CDG2 - Mitry - Claye 01/06-31/12",
+      "works",
+    );
+    disruption.message =
+      "Période : en semaine à partir de 22h45. Dates : du lundi 1er juin au jeudi 31 décembre. Le trafic est interrompu entre Châtelet Les Halles et Aérop. C De Gaulle 2 et entre Châtelet Les Halles et Mitry - Claye. Un dispositif de bus de remplacement sera mis en place au départ de Gare du Nord. Motif : travaux sur le réseau ferroviaire.";
+
+    expect(getPatternTrafficSummaryTitle(disruption)).toBe(
+      "Travaux sur le réseau ferroviaire",
+    );
+  });
+
+  it("keeps a detailed labelled motif instead of a generic works campaign title", () => {
+    const disruption = createDisruption(
+      "Grands Travaux d’été : du 7 au 16 août",
+      "works",
+    );
+    disruption.message =
+      "Le trafic est interrompu entre Gare du Nord et La Croix-de-Berny. Pour plus d'informations sur ces travaux, consultez le blog du RER B. Motif : Travaux sur le réseau ferré (remplacement de 26 aiguillages dans le secteur de Gare du Nord)";
+
+    expect(getPatternTrafficSummaryCopy(disruption)).toEqual({
+      title: "Travaux sur le réseau ferroviaire",
+      description:
+        "Remplacement de 26 aiguillages dans le secteur de Gare du Nord",
+    });
+  });
+
+  it("preserves decimal commas and moves a long Transilien P detail to the subtitle", () => {
+    const disruption = createDisruption("Trafic perturbé", "works");
+    disruption.message =
+      "Motif : travaux sur le réseau ferré (Remise à neuf complète de 13,4 kilomètres de voie entre Mortcerf et Coulommiers afin d’améliorer le confort à bord et la régularité des trains).";
+
+    expect(getPatternTrafficSummaryCopy(disruption)).toEqual({
+      title: "Travaux sur le réseau ferroviaire",
+      description:
+        "Remise à neuf complète de 13,4 kilomètres de voie entre Mortcerf et Coulommiers afin d’améliorer le confort à bord et la régularité des trains",
+    });
+  });
+
+  it("separates the long RER C engineering detail from its title", () => {
+    const disruption = createDisruption("Arrêt(s) non desservi(s)", "works");
+    disruption.message =
+      "Motif : Travaux sur le réseau ferré (travaux d’envergure pour l’interconnexion avec la ligne 15 et remplacement de 4 km de voie dans le tunnel intramuros)";
+
+    expect(getPatternTrafficSummaryCopy(disruption)).toEqual({
+      title: "Travaux sur le réseau ferroviaire",
+      description:
+        "Travaux d’envergure pour l’interconnexion avec la ligne 15 et remplacement de 4 km de voie dans le tunnel intramuros",
+    });
+  });
+
+  it("summarizes the RER E adapted service instead of keeping a generic severity", () => {
+    const disruption = createDisruption(
+      "Trafic fortement perturbé",
+      "incident",
+    );
+    disruption.cause = "perturbation";
+    disruption.message =
+      "RER E: Pendant les vacances scolaires du samedi 11 juillet jusqu’au dimanche 23 août, l’offre de transport est adaptée sur votre RER E. Certains trains ne circuleront pas.";
+
+    expect(getPatternTrafficSummaryCopy(disruption)).toEqual({
+      title: "Offre de transport adaptée",
+      description: "Certains trains ne circuleront pas.",
+    });
+  });
+
+  it("prefers a labelled motif to an earlier causal phrase", () => {
+    const disruption = createDisruption("Trafic interrompu", "works");
+    disruption.message =
+      "Trafic interrompu en raison de travaux. Motif : renouvellement des aiguillages.";
+
+    expect(getPatternTrafficSummaryTitle(disruption)).toBe(
+      "Renouvellement des aiguillages",
+    );
+  });
+
   it("groups repeated periods of one incident while preserving distinct incidents", () => {
     const repeated = createDisruption("Travaux de nuit", "works", "works");
     const other = createDisruption("Affluence élevée", "incident", "crowding");
@@ -110,8 +221,81 @@ describe("traffic calendar friendly summary", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       incidentType: "works",
+      disruptionIds: ["works-a", "works-b"],
       impactedStopNames: ["Gare du Nord", "Le Bourget"],
     });
+  });
+
+  it("counts distinct affected calendar days remaining after the selected day", () => {
+    const disruption = createDisruption("Travaux test", "works", "multi-day");
+    const event = createEvent(
+      new Date(2026, 6, 18, 22),
+      new Date(2026, 6, 21, 2),
+      disruption,
+    );
+
+    expect(
+      getPatternTrafficSummaryRemainingDayCount(
+        [event],
+        new Date(2026, 6, 18),
+      ),
+    ).toBe(3);
+    expect(
+      getPatternTrafficSummaryRemainingDayCount(
+        [event],
+        new Date(2026, 6, 21),
+      ),
+    ).toBe(0);
+  });
+
+  it("counts future separate application periods of the same disruption", () => {
+    const disruption = createDisruption(
+      "Travaux de nuit",
+      "works",
+      "repeated-nights",
+    );
+    disruption.applicationPeriods = [
+      {
+        begin: "2026-07-18T22:00:00+02:00",
+        end: "2026-07-18T23:30:00+02:00",
+      },
+      {
+        begin: "2026-07-19T22:00:00+02:00",
+        end: "2026-07-19T23:30:00+02:00",
+      },
+      {
+        begin: "2026-07-21T22:00:00+02:00",
+        end: "2026-07-21T23:30:00+02:00",
+      },
+    ];
+    const currentEvent = createEvent(
+      new Date(2026, 6, 18, 22),
+      new Date(2026, 6, 18, 23, 30),
+      disruption,
+    );
+
+    expect(
+      getPatternTrafficSummaryRemainingDayCount(
+        [currentEvent],
+        new Date(2026, 6, 18),
+      ),
+    ).toBe(2);
+  });
+
+  it("does not count an exclusive midnight end as another remaining day", () => {
+    const disruption = createDisruption("Travaux test", "works", "midnight-end");
+    const event = createEvent(
+      new Date(2026, 6, 18, 22),
+      new Date(2026, 6, 20, 0),
+      disruption,
+    );
+
+    expect(
+      getPatternTrafficSummaryRemainingDayCount(
+        [event],
+        new Date(2026, 6, 18),
+      ),
+    ).toBe(1);
   });
 
   it("keeps an explicit service interruption distinct from its works cause", () => {
