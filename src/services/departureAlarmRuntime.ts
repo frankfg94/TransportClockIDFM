@@ -18,8 +18,14 @@ import type { DepartureAlarm } from "../types/transit";
  * reconciliation, native listeners, Web notifications, Web timers and Web
  * audio. UI state and persisted alarm data intentionally remain outside it.
  */
+/**
+ * Bump the channel id whenever the channel sound/importance changes.
+ * Android notification-channel audio settings are immutable once created.
+ */
 export const DEPARTURE_ALARM_CHANNEL_ID =
-  "transport-departure-alarms-v1";
+  "transport-departure-alarms-v2";
+export const DEPARTURE_ALARM_SILENT_CHANNEL_ID =
+  "transport-departure-alarms-silent-v1";
 export const DEPARTURE_ALARM_SOUND_FILE =
   "transport_departure_alarm.wav";
 
@@ -50,6 +56,7 @@ export interface DepartureAlarmSyncResult {
 const listenerHandles: PluginListenerHandle[] = [];
 const webAlarmTimers = new Map<string, number>();
 let runtimeHandlers: DepartureAlarmRuntimeHandlers | undefined;
+let nativeChannelsInitialization: Promise<void> | undefined;
 let activeWebAlarmAudio:
   | {
       audioContext: AudioContext;
@@ -58,7 +65,50 @@ let activeWebAlarmAudio:
   | undefined;
 
 export function isNativeDepartureAlarmPlatform(): boolean {
-  return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+  // getPlatform() is the decisive value here. In an Android Capacitor APK it
+  // returns "android"; in Chrome/PWA it returns "web". Avoid combining it with
+  // isNativePlatform(), because a false negative would silently select the Web
+  // timer/AudioContext implementation, which is suspended when the screen locks.
+  return Capacitor.getPlatform() === "android";
+}
+
+/**
+ * Creates the Android notification channels before any alarm is scheduled.
+ * A notification that references a missing channel may not fire on Android 8+.
+ */
+export async function ensureDepartureAlarmChannels(): Promise<void> {
+  if (!isNativeDepartureAlarmPlatform()) {
+    return;
+  }
+
+  if (!nativeChannelsInitialization) {
+    nativeChannelsInitialization = Promise.all([
+      LocalNotifications.createChannel({
+        id: DEPARTURE_ALARM_CHANNEL_ID,
+        name: "Alarmes de départ",
+        description: "Alarmes sonores pour les prochains départs",
+        importance: 5,
+        visibility: 1,
+        vibration: true,
+        sound: DEPARTURE_ALARM_SOUND_FILE,
+      }),
+      LocalNotifications.createChannel({
+        id: DEPARTURE_ALARM_SILENT_CHANNEL_ID,
+        name: "Rappels de départ silencieux",
+        description: "Rappels silencieux pour les prochains départs",
+        importance: 4,
+        visibility: 1,
+        vibration: false,
+      }),
+    ])
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        nativeChannelsInitialization = undefined;
+        throw error;
+      });
+  }
+
+  await nativeChannelsInitialization;
 }
 
 export async function getDepartureAlarmCapability(): Promise<DepartureAlarmCapability> {
@@ -123,6 +173,8 @@ export async function initializeDepartureAlarmRuntime(
     return disposeDepartureAlarmRuntime;
   }
 
+  await ensureDepartureAlarmChannels();
+
   listenerHandles.push(
     await LocalNotifications.addListener(
       "localNotificationReceived",
@@ -181,6 +233,8 @@ export async function scheduleDepartureAlarm(
     throw new Error("departure-alarm-permission-required");
   }
 
+  await ensureDepartureAlarmChannels();
+
   await LocalNotifications.schedule({
     notifications: [
       {
@@ -188,8 +242,12 @@ export async function scheduleDepartureAlarm(
         title: copy.title,
         body: copy.body,
         largeBody: copy.body,
-        channelId: DEPARTURE_ALARM_CHANNEL_ID,
-        sound: DEPARTURE_ALARM_SOUND_FILE,
+        channelId: alarm.soundEnabled
+          ? DEPARTURE_ALARM_CHANNEL_ID
+          : DEPARTURE_ALARM_SILENT_CHANNEL_ID,
+        ...(alarm.soundEnabled
+          ? { sound: DEPARTURE_ALARM_SOUND_FILE }
+          : {}),
         autoCancel: true,
         schedule: {
           at: alarmDate,
