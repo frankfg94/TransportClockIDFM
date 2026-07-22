@@ -17,6 +17,12 @@ function mockFrenchI18n(): void {
         if (key === "app.trafficModalReplacementBus") {
           return "Bus de remplacement";
         }
+        if (key === "app.trafficModalMultipleInterruptionsAria") {
+          return "Interruptions en cours";
+        }
+        if (key === "app.trafficModalInterruptionStepAria") {
+          return `Afficher interruption ${params?.index} sur ${params?.count}`;
+        }
         if (key === "app.trafficModalEvening") {
           return "En soirée";
         }
@@ -301,6 +307,73 @@ describe("UserFriendlyTrafficModal", () => {
     expect(metroTile.text()).not.toContain("inclus, l'arrêt");
     expect(metroTile.text()).toContain("2026");
     expect(metroTile.text()).toContain("2027");
+
+    wrapper.unmount();
+  });
+  it("steps through every current interruption of the selected line", async () => {
+    mockFrenchI18n();
+    const { default: UserFriendlyTrafficModal } =
+      await import("../src/components/UserFriendlyTrafficModal.vue");
+    const modernization = {
+      id: "tram-t1-modernization",
+      title: "Tramway T1 : Travaux de modernisation - Trafic interrompu",
+      message: [
+        "Jusqu'au 31 août inclus, le trafic est interrompu entre Gare de Noisy-le-Sec et Bobigny - Pablo Picasso en raison de travaux de modernisation.",
+        "Bus de remplacement.",
+      ].join("\n"),
+      kind: "works" as const,
+      applicationPeriods: [{ begin: "20260601T094500", end: "20260831T235900" }],
+      impactedLineRefs: ["line:IDFM:T1"],
+      impactedStopNames: ["Noisy-le-Sec", "Bobigny - Pablo Picasso"],
+    };
+    const thirdPartyDamage = {
+      id: "tram-t1-third-party-damage",
+      title: "Tramway T1 : Mesures de sécurité - Trafic interrompu",
+      message: [
+        "Trafic interrompu entre Asnières - Quatre Routes et Gare de Saint-Denis en raison de dégradations par un tiers.",
+        "Reprise des circulations envisagée en fin d'été 2026.",
+        "Bus de remplacement entre Les Courtilles et Villeneuve-la-Garenne.",
+      ].join("\n"),
+      motif: "Dégradations par un tiers",
+      kind: "incident" as const,
+      applicationPeriods: [{ begin: "20260612T185400", end: "20260831T023000" }],
+      impactedLineRefs: ["line:IDFM:T1"],
+      impactedStopNames: ["Saint-Denis", "Asnières - Quatre Routes"],
+    };
+    const alert: TrafficAlertModalData = {
+      label: "Interruption multiple",
+      tone: "red",
+      disruption: modernization,
+      disruptions: [modernization, thirdPartyDamage],
+    };
+    const wrapper = mount(UserFriendlyTrafficModal, {
+      attachTo: document.body,
+      props: { alert, open: true, smartFormattingEnabled: true },
+    });
+
+    const dots = wrapper.findAll(".traffic-alert-modal__stepper-dot");
+    expect(dots).toHaveLength(2);
+    expect(dots[0].classes()).toContain("traffic-alert-modal__stepper-dot--active");
+    expect(dots[0].attributes("aria-current")).toBe("step");
+    expect(dots[0].attributes("aria-label")).toBe("Afficher interruption 1 sur 2");
+    expect(wrapper.get(".traffic-alert-modal__detail").text()).toContain(
+      "travaux de modernisation",
+    );
+    expect(wrapper.get(".traffic-alert-modal__detail").text()).not.toContain(
+      "dégradations par un tiers",
+    );
+
+    await dots[1].trigger("click");
+
+    const updatedDots = wrapper.findAll(".traffic-alert-modal__stepper-dot");
+    expect(updatedDots[1].classes()).toContain("traffic-alert-modal__stepper-dot--active");
+    expect(updatedDots[1].attributes("aria-current")).toBe("step");
+    expect(wrapper.get(".traffic-alert-modal__detail").text()).toContain(
+      "dégradations par un tiers",
+    );
+    expect(wrapper.get(".traffic-alert-modal__detail").text()).not.toContain(
+      "Gare de Noisy-le-Sec",
+    );
 
     wrapper.unmount();
   });

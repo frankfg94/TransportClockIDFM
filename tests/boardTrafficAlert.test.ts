@@ -12,6 +12,7 @@ const messages: BoardTrafficAlertMessages = {
   disruptionAndInterruptionAt: (time) =>
     `Perturbation - interruption a partir de ${time}`,
   interruption: "Interruption",
+  multipleInterruptions: "Interruption multiple",
   interruptionAt: (time) => `Interruption a partir de ${time}`,
   interruptionInDay: (count) => `Interruption dans ${count} jour`,
   interruptionInDays: (count) => `Interruption dans ${count} jours`,
@@ -39,6 +40,44 @@ describe("board traffic alert", () => {
     });
   });
 
+  it("groups multiple current red interruptions for the same line", () => {
+    const now = new Date(2026, 6, 9, 12, 0, 0).getTime();
+    const first = createCurrentInterruption();
+    const second: TrafficDisruption = {
+      ...createCurrentInterruption(),
+      id: "current-third-party-damage",
+      message: "Dégradations par un tiers entre deux stations.",
+      title: "Mesures de sécurité - Trafic interrompu",
+    };
+
+    expect(
+      getBoardTrafficAlertForReport(createReport([first, second]), {
+        lookaheadDays: 10,
+        messages,
+        now,
+      }),
+    ).toEqual({
+      label: "Interruption multiple",
+      target: {
+        alertId: "current-interruption",
+        lineRef: "line:IDFM:C01727",
+        trafficTab: "current",
+      },
+      targets: [
+        {
+          alertId: "current-interruption",
+          lineRef: "line:IDFM:C01727",
+          trafficTab: "current",
+        },
+        {
+          alertId: "current-third-party-damage",
+          lineRef: "line:IDFM:C01727",
+          trafficTab: "current",
+        },
+      ],
+      tone: "red",
+    });
+  });
   it("targets the current orange perturbation", () => {
     const now = new Date(2026, 6, 9, 12, 0, 0).getTime();
 

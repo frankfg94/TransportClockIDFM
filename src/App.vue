@@ -1642,13 +1642,19 @@ function getTrafficAlertModalData(
   const report = trafficReportByLineRef.value.get(
     resolveBoardTrafficLineRef(board),
   );
-  const disruption = report?.disruptions.find(
-    (item) => item.id === alert.target.alertId,
+  const targets = alert.targets?.length ? alert.targets : [alert.target];
+  const disruptionsById = new Map(
+    report?.disruptions.map((disruption) => [disruption.id, disruption]) ?? [],
   );
+  const disruptions = targets.flatMap((target) => {
+    const disruption = disruptionsById.get(target.alertId);
+    return disruption ? [disruption] : [];
+  });
 
   return {
     ...alert,
-    disruption,
+    disruption: disruptions[0],
+    disruptions,
   };
 }
 
@@ -1729,6 +1735,7 @@ function getBoardTrafficAlert(
       disruptionAndInterruptionAt: (time) =>
         t("board.traffic.disruptionAndInterruptionAt", { time }),
       interruption: t("board.traffic.interruption"),
+      multipleInterruptions: t("board.traffic.multipleInterruptions"),
       interruptionAt: (time) =>
         t("board.traffic.interruptionAt", { time }),
       interruptionInDay: (count) =>

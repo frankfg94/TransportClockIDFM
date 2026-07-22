@@ -46,6 +46,7 @@ export interface TrafficAlertModalData {
   tone: TrafficAlertTone;
   title?: string;
   disruption?: TrafficDisruption;
+  disruptions?: TrafficDisruption[];
 }
 
 export interface TrafficLineReport {

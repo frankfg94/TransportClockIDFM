@@ -59,6 +59,14 @@ describe("SettingsPage", () => {
       "../src/features/app-settings/SettingsPage.vue"
     );
     const wrapper = mount(SettingsPage);
+    expect(
+      wrapper
+        .findAll(".settings-panel__trigger")
+        .every((trigger) => trigger.attributes("aria-expanded") === "false"),
+    ).toBe(true);
+    for (const trigger of wrapper.findAll(".settings-panel__trigger")) {
+      await trigger.trigger("click");
+    }
 
     expect(wrapper.text()).toContain("Personnalisation du dashboard");
     expect(wrapper.text()).toContain("Expiration des bundles");
@@ -299,6 +307,14 @@ describe("SettingsPage", () => {
       "../src/features/app-settings/SettingsPage.vue"
     );
     const wrapper = mount(SettingsPage, { attachTo: document.body });
+    expect(
+      wrapper
+        .findAll(".settings-panel__trigger")
+        .every((trigger) => trigger.attributes("aria-expanded") === "false"),
+    ).toBe(true);
+    for (const trigger of wrapper.findAll(".settings-panel__trigger")) {
+      await trigger.trigger("click");
+    }
 
     expect(wrapper.text()).toContain("Langue de l'application");
     await wrapper.get('[aria-label="Langue de l\'application"]').trigger("click");
@@ -359,6 +375,14 @@ describe("SettingsPage", () => {
       vi.fn(async () => new Response(JSON.stringify({ bundles: [] }))),
     );
     const wrapper = mount(SettingsPage, { attachTo: document.body });
+    expect(
+      wrapper
+        .findAll(".settings-panel__trigger")
+        .every((trigger) => trigger.attributes("aria-expanded") === "false"),
+    ).toBe(true);
+    for (const trigger of wrapper.findAll(".settings-panel__trigger")) {
+      await trigger.trigger("click");
+    }
 
     const clearBundlesButton = wrapper
       .findAll("button")
@@ -427,6 +451,14 @@ describe("SettingsPage", () => {
       "../src/features/app-settings/SettingsPage.vue"
     );
     const wrapper = mount(SettingsPage, { attachTo: document.body });
+    expect(
+      wrapper
+        .findAll(".settings-panel__trigger")
+        .every((trigger) => trigger.attributes("aria-expanded") === "false"),
+    ).toBe(true);
+    for (const trigger of wrapper.findAll(".settings-panel__trigger")) {
+      await trigger.trigger("click");
+    }
 
     await wrapper
       .findAll("button")

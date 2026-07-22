@@ -14,6 +14,7 @@ export type BoardTrafficAlertTone = TrafficAlertTone;
 export interface BoardTrafficAlert {
   label: string;
   target: BoardTrafficAlertTarget;
+  targets?: BoardTrafficAlertTarget[];
   tone: BoardTrafficAlertTone;
 }
 
@@ -27,6 +28,7 @@ export interface BoardTrafficAlertMessages {
   disruption: string;
   disruptionAndInterruptionAt: (time: string) => string;
   interruption: string;
+  multipleInterruptions: string;
   interruptionAt: (time: string) => string;
   interruptionInDay: (count: number) => string;
   interruptionInDays: (count: number) => string;
@@ -67,24 +69,27 @@ export function getBoardTrafficAlertForReport(
   const hasCurrentDisruption =
     currentDisruptions.length > 0 && report.status !== "normal";
 
-  if (
-    currentDisruptions.some((disruption) => getDisruptionTone(disruption) === "red")
-  ) {
-    const disruption = currentDisruptions.find(
-      (item) => getDisruptionTone(item) === "red",
-    );
+  const currentInterruptions = currentDisruptions.filter(
+    (disruption) => getDisruptionTone(disruption) === "red",
+  );
 
-    if (!disruption) {
+  if (currentInterruptions.length > 0) {
+    const targets = currentInterruptions.map((disruption) =>
+      createBoardTrafficAlertTarget(report.lineRef, disruption.id, "current"),
+    );
+    const target = targets[0];
+
+    if (!target) {
       return undefined;
     }
 
     return {
-      label: options.messages.interruption,
-      target: createBoardTrafficAlertTarget(
-        report.lineRef,
-        disruption.id,
-        "current",
-      ),
+      label:
+        targets.length > 1
+          ? options.messages.multipleInterruptions
+          : options.messages.interruption,
+      target,
+      ...(targets.length > 1 ? { targets } : {}),
       tone: "red",
     };
   }

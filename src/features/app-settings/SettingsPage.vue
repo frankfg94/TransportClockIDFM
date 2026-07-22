@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { Pencil, Plus, Trash2 } from "lucide-vue-next";
+import { ChevronDown, Pencil, Plus, Trash2 } from "lucide-vue-next";
 import AppModal from "../../components/AppModal.vue";
 import AppNotification, {
   type AppNotificationTone,
@@ -121,11 +121,28 @@ const settingsNotification = ref<{
   message: string;
   tone: AppNotificationTone;
 }>({ message: "", tone: "info" });
+const openPanelIds = ref(new Set<string>());
 const backendBundleCount = computed(() => bundleSummaries.value.length);
 const localBundleCount = computed(() => localBundleSummaries.value.length);
 const bundleCount = computed(
   () => backendBundleCount.value + localBundleCount.value,
 );
+function isPanelOpen(panelId: string): boolean {
+  return openPanelIds.value.has(panelId);
+}
+
+function togglePanel(panelId: string): void {
+  const nextOpenPanelIds = new Set(openPanelIds.value);
+
+  if (nextOpenPanelIds.has(panelId)) {
+    nextOpenPanelIds.delete(panelId);
+  } else {
+    nextOpenPanelIds.add(panelId);
+  }
+
+  openPanelIds.value = nextOpenPanelIds;
+}
+
 const placeOptions = computed(() =>
   presetState.value.places.map((place) => ({
     id: place.id,
@@ -818,12 +835,24 @@ onBeforeUnmount(() => {
       <p>{{ t("settings.hero.body") }}</p>
     </header>
 
-    <section class="settings-panel" aria-labelledby="settings-language-title">
+    <section
+      class="settings-panel"
+      :class="{ 'settings-panel--open': isPanelOpen('language') }"
+      aria-labelledby="settings-language-title"
+    >
       <div class="settings-panel__heading">
-        <div>
-          <p class="eyebrow">{{ t("settings.language.eyebrow") }}</p>
-          <h2 id="settings-language-title">{{ t("settings.language.title") }}</h2>
-        </div>
+        <button
+          class="settings-panel__trigger"
+          type="button"
+          :aria-expanded="isPanelOpen('language')"
+          @click="togglePanel('language')"
+        >
+          <div>
+            <p class="eyebrow">{{ t("settings.language.eyebrow") }}</p>
+            <h2 id="settings-language-title">{{ t("settings.language.title") }}</h2>
+          </div>
+          <ChevronDown :size="22" aria-hidden="true" />
+        </button>
       </div>
 
       <div class="settings-row">
@@ -840,12 +869,24 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section class="settings-panel" aria-labelledby="settings-places-title">
+    <section
+      class="settings-panel"
+      :class="{ 'settings-panel--open': isPanelOpen('places') }"
+      aria-labelledby="settings-places-title"
+    >
       <div class="settings-panel__heading">
-        <div>
-          <p class="eyebrow">{{ t("settings.places.eyebrow") }}</p>
-          <h2 id="settings-places-title">{{ t("settings.places.title") }}</h2>
-        </div>
+        <button
+          class="settings-panel__trigger"
+          type="button"
+          :aria-expanded="isPanelOpen('places')"
+          @click="togglePanel('places')"
+        >
+          <div>
+            <p class="eyebrow">{{ t("settings.places.eyebrow") }}</p>
+            <h2 id="settings-places-title">{{ t("settings.places.title") }}</h2>
+          </div>
+          <ChevronDown :size="22" aria-hidden="true" />
+        </button>
         <button class="button-secondary" type="button" @click="openPresetsModal">
           {{ t("settings.places.manage") }}
         </button>
@@ -880,12 +921,24 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section class="settings-panel" aria-labelledby="settings-display-title">
+    <section
+      class="settings-panel"
+      :class="{ 'settings-panel--open': isPanelOpen('display') }"
+      aria-labelledby="settings-display-title"
+    >
       <div class="settings-panel__heading">
-        <div>
-          <p class="eyebrow">{{ t("settings.display.eyebrow") }}</p>
-          <h2 id="settings-display-title">{{ t("settings.display.title") }}</h2>
-        </div>
+        <button
+          class="settings-panel__trigger"
+          type="button"
+          :aria-expanded="isPanelOpen('display')"
+          @click="togglePanel('display')"
+        >
+          <div>
+            <p class="eyebrow">{{ t("settings.display.eyebrow") }}</p>
+            <h2 id="settings-display-title">{{ t("settings.display.title") }}</h2>
+          </div>
+          <ChevronDown :size="22" aria-hidden="true" />
+        </button>
       </div>
 
       <div class="settings-row">
@@ -1036,12 +1089,24 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section class="settings-panel" aria-labelledby="settings-traffic-title">
+    <section
+      class="settings-panel"
+      :class="{ 'settings-panel--open': isPanelOpen('traffic') }"
+      aria-labelledby="settings-traffic-title"
+    >
       <div class="settings-panel__heading">
-        <div>
-          <p class="eyebrow">{{ t("common.labels.traffic") }}</p>
-          <h2 id="settings-traffic-title">{{ t("settings.display.trafficScope") }}</h2>
-        </div>
+        <button
+          class="settings-panel__trigger"
+          type="button"
+          :aria-expanded="isPanelOpen('traffic')"
+          @click="togglePanel('traffic')"
+        >
+          <div>
+            <p class="eyebrow">{{ t("common.labels.traffic") }}</p>
+            <h2 id="settings-traffic-title">{{ t("settings.display.trafficScope") }}</h2>
+          </div>
+          <ChevronDown :size="22" aria-hidden="true" />
+        </button>
       </div>
 
       <div class="settings-row">
@@ -1425,12 +1490,24 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section class="settings-panel" aria-labelledby="settings-weather-title">
+    <section
+      class="settings-panel"
+      :class="{ 'settings-panel--open': isPanelOpen('weather') }"
+      aria-labelledby="settings-weather-title"
+    >
       <div class="settings-panel__heading">
-        <div>
-          <p class="eyebrow">{{ t("weather.title") }}</p>
-          <h2 id="settings-weather-title">{{ t("settings.display.weather") }}</h2>
-        </div>
+        <button
+          class="settings-panel__trigger"
+          type="button"
+          :aria-expanded="isPanelOpen('weather')"
+          @click="togglePanel('weather')"
+        >
+          <div>
+            <p class="eyebrow">{{ t("weather.title") }}</p>
+            <h2 id="settings-weather-title">{{ t("settings.display.weather") }}</h2>
+          </div>
+          <ChevronDown :size="22" aria-hidden="true" />
+        </button>
       </div>
 
       <div class="settings-row">
@@ -1557,12 +1634,24 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section class="settings-panel" aria-labelledby="settings-map-title">
+    <section
+      class="settings-panel"
+      :class="{ 'settings-panel--open': isPanelOpen('map') }"
+      aria-labelledby="settings-map-title"
+    >
       <div class="settings-panel__heading">
-        <div>
-          <p class="eyebrow">{{ t("settings.display.mapEyebrow") }}</p>
-          <h2 id="settings-map-title">{{ t("settings.display.mapTitle") }}</h2>
-        </div>
+        <button
+          class="settings-panel__trigger"
+          type="button"
+          :aria-expanded="isPanelOpen('map')"
+          @click="togglePanel('map')"
+        >
+          <div>
+            <p class="eyebrow">{{ t("settings.display.mapEyebrow") }}</p>
+            <h2 id="settings-map-title">{{ t("settings.display.mapTitle") }}</h2>
+          </div>
+          <ChevronDown :size="22" aria-hidden="true" />
+        </button>
       </div>
 
       <label class="settings-toggle">
@@ -1787,12 +1876,24 @@ onBeforeUnmount(() => {
 
     <MobileReleaseCard />
 
-    <section class="settings-panel" aria-labelledby="settings-device-title">
+    <section
+      class="settings-panel"
+      :class="{ 'settings-panel--open': isPanelOpen('device') }"
+      aria-labelledby="settings-device-title"
+    >
       <div class="settings-panel__heading">
-        <div>
-          <p class="eyebrow">{{ t("settings.device.eyebrow") }}</p>
-          <h2 id="settings-device-title">{{ t("settings.device.title") }}</h2>
-        </div>
+        <button
+          class="settings-panel__trigger"
+          type="button"
+          :aria-expanded="isPanelOpen('device')"
+          @click="togglePanel('device')"
+        >
+          <div>
+            <p class="eyebrow">{{ t("settings.device.eyebrow") }}</p>
+            <h2 id="settings-device-title">{{ t("settings.device.title") }}</h2>
+          </div>
+          <ChevronDown :size="22" aria-hidden="true" />
+        </button>
       </div>
 
       <div class="settings-row">
@@ -2131,6 +2232,49 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   padding-bottom: 16px;
+}
+
+.settings-panel:not(.settings-panel--open) > :not(.settings-panel__heading) {
+  display: none;
+}
+
+.settings-panel__trigger {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  gap: 16px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.settings-panel__trigger > div {
+  min-width: 0;
+}
+
+.settings-panel__trigger:hover:not(:disabled) {
+  background: rgba(16, 35, 63, 0.035);
+  color: inherit;
+  transform: none;
+}
+.settings-panel__trigger svg {
+  flex: 0 0 auto;
+  transition: transform 180ms ease;
+}
+
+.settings-panel--open .settings-panel__trigger svg {
+  transform: rotate(180deg);
+}
+
+.settings-panel__trigger:focus-visible {
+  border-radius: 6px;
+  outline: 3px solid color-mix(in srgb, var(--idfm-blue), transparent 35%);
+  outline-offset: 4px;
 }
 
 .settings-panel h2 {

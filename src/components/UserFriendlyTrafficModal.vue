@@ -36,10 +36,29 @@ const emit = defineEmits<{
 
 const { d, t } = useI18n();
 const dialog = ref<HTMLElement>();
+const activeTrafficModalDisruptionIndex = ref(0);
 let previousFocus: HTMLElement | undefined;
 
+const trafficModalDisruptions = computed(() => {
+  const alert = props.alert;
+  if (!alert) return [];
+  if (alert.disruptions?.length) return alert.disruptions;
+
+  return alert.disruption ? [alert.disruption] : [];
+});
+
+const activeTrafficModalDisruption = computed(
+  () =>
+    trafficModalDisruptions.value[activeTrafficModalDisruptionIndex.value] ??
+    trafficModalDisruptions.value[0],
+);
+
+const hasMultipleTrafficModalDisruptions = computed(
+  () => trafficModalDisruptions.value.length > 1,
+);
+
 const trafficModalSummary = computed(() => {
-  const disruption = props.alert?.disruption;
+  const disruption = activeTrafficModalDisruption.value;
   return disruption ? getPatternTrafficSummaryCopy(disruption) : {};
 });
 
@@ -52,15 +71,16 @@ const trafficModalTitle = computed(() => {
 
 const trafficModalIncidentType = computed(() => {
   const alert = props.alert;
-  if (!alert?.disruption) {
+  const disruption = activeTrafficModalDisruption.value;
+  if (!disruption) {
     return alert?.tone === "red" ? "interruption" : "incident";
   }
 
-  return classifyPatternTrafficIncident(alert.disruption);
+  return classifyPatternTrafficIncident(disruption);
 });
 
 const trafficModalDateTiles = computed(() => {
-  const disruption = props.alert?.disruption;
+  const disruption = activeTrafficModalDisruption.value;
   if (!props.smartFormattingEnabled || !disruption) return [];
 
   return extractTrafficModalDateTiles(disruption, trafficModalSummary.value.title);
@@ -68,13 +88,14 @@ const trafficModalDateTiles = computed(() => {
 
 const trafficModalMessage = computed(() => {
   const alert = props.alert;
-  if (!alert?.disruption) return alert?.message || "";
+  const disruption = activeTrafficModalDisruption.value;
+  if (!disruption) return alert?.message || "";
 
   return getDistinctTrafficModalLines([
-    alert.disruption.title,
+    disruption.title,
     trafficModalSummary.value.description,
-    alert.disruption.message,
-    alert.message,
+    disruption.message,
+    alert?.message,
   ]).join("\n");
 });
 
@@ -171,9 +192,20 @@ function closeModal(): void {
   emit("close");
 }
 
+function selectTrafficModalDisruption(index: number): void {
+  if (index < 0 || index >= trafficModalDisruptions.value.length) return;
+
+  activeTrafficModalDisruptionIndex.value = index;
+}
+
 watch(
-  () => [props.open, props.alert?.disruption?.id, props.alert?.label] as const,
+  () => [
+    props.open,
+    trafficModalDisruptions.value.map((disruption) => disruption.id).join("|"),
+    props.alert?.label,
+  ] as const,
   ([open]) => {
+    activeTrafficModalDisruptionIndex.value = 0;
     if (open) {
       openModal();
     } else {
@@ -290,15 +322,44 @@ onBeforeUnmount(() => {
           >
             {{ trafficModalMessage }}
           </p>
-          <div v-if="showGoToTraficPage" class="traffic-alert-modal__actions">
-            <button
-              class="traffic-alert-modal__go-to-traffic"
-              type="button"
-              @click="emit('go-to-traffic-page')"
+          <footer
+            v-if="hasMultipleTrafficModalDisruptions || showGoToTraficPage"
+            class="traffic-alert-modal__footer"
+          >
+            <nav
+              v-if="hasMultipleTrafficModalDisruptions"
+              class="traffic-alert-modal__stepper"
+              :aria-label="t('app.trafficModalMultipleInterruptionsAria')"
             >
-              {{ t("app.openTrafficPage") }}
-            </button>
-          </div>
+              <button
+                v-for="(disruption, index) in trafficModalDisruptions"
+                :key="disruption.id"
+                class="traffic-alert-modal__stepper-dot"
+                :class="{
+                  'traffic-alert-modal__stepper-dot--active':
+                    index === activeTrafficModalDisruptionIndex,
+                }"
+                type="button"
+                :aria-current="index === activeTrafficModalDisruptionIndex ? 'step' : undefined"
+                :aria-label="
+                  t('app.trafficModalInterruptionStepAria', {
+                    index: index + 1,
+                    count: trafficModalDisruptions.length,
+                  })
+                "
+                @click="selectTrafficModalDisruption(index)"
+              />
+            </nav>
+            <div v-if="showGoToTraficPage" class="traffic-alert-modal__actions">
+              <button
+                class="traffic-alert-modal__go-to-traffic"
+                type="button"
+                @click="emit('go-to-traffic-page')"
+              >
+                {{ t("app.openTrafficPage") }}
+              </button>
+            </div>
+          </footer>
         </div>
       </article>
     </div>
@@ -486,11 +547,65 @@ onBeforeUnmount(() => {
   white-space: pre-line;
 }
 
-.traffic-alert-modal__actions {
+.traffic-alert-modal__footer {
+  align-items: center;
   border-top: 1px solid #e2e8f0;
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   padding-top: 20px;
+}
+
+.traffic-alert-modal__stepper {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+  grid-column: 2;
+  justify-content: center;
+}
+
+.traffic-alert-modal__stepper-dot {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  width: 18px;
+}
+
+.traffic-alert-modal__stepper-dot::before {
+  background: #d1d5db;
+  border-radius: 999px;
+  content: "";
+  height: 7px;
+  transition:
+    background-color 140ms ease,
+    transform 140ms ease;
+  width: 7px;
+}
+
+.traffic-alert-modal__stepper-dot:hover::before,
+.traffic-alert-modal__stepper-dot:focus-visible::before {
+  background: #a78bfa;
+}
+
+.traffic-alert-modal__stepper-dot:focus-visible {
+  border-radius: 999px;
+  outline: 2px solid rgba(124, 58, 237, 0.34);
+  outline-offset: 0;
+}
+
+.traffic-alert-modal__stepper-dot--active::before {
+  background: #6d4aff;
+  transform: scale(1.12);
+}
+
+.traffic-alert-modal__actions {
+  display: flex;
+  grid-column: 3;
+  justify-content: flex-end;
 }
 
 .traffic-alert-modal__go-to-traffic {
@@ -541,6 +656,15 @@ onBeforeUnmount(() => {
     font-size: 0.94rem;
     grid-column: 2;
     justify-self: start;
+  }
+
+  .traffic-alert-modal__footer {
+    grid-template-columns: 1fr auto 1fr;
+  }
+
+  .traffic-alert-modal__go-to-traffic {
+    font-size: 0.86rem;
+    padding-inline: 14px;
   }
 }
 </style>

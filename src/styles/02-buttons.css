@@ -20,8 +20,9 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: var(--accent-hover);
-  transform: translateY(-1px);
+  background: var(--surface-muted-hover);
+  color: var(--ink);
+  transform: none;
 }
 
 button:disabled {

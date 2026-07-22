@@ -283,6 +283,79 @@ describe("dashboard presets", () => {
     wrapper.unmount();
   });
 
+  it("opens every active interruption of a line from the home traffic chip", async () => {
+    installDashboardMocks({});
+    vi.stubGlobal("__IDFM_API_KEY_CONFIGURED__", true);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/traffic")) {
+        return {
+          ok: true,
+          json: async () => ({
+            configured: true,
+            generatedAt: "2026-07-22T08:00:00.000Z",
+            lines: [
+              {
+                lineRef: "line:IDFM:C01743",
+                status: "disrupted",
+                disruptions: [
+                  {
+                    id: "line-modernization",
+                    title: "Travaux de modernisation - Trafic interrompu",
+                    message: "Le trafic est interrompu pour travaux de modernisation.",
+                    kind: "works",
+                    applicationPeriods: [],
+                    impactedLineRefs: ["line:IDFM:C01743"],
+                    impactedStopNames: [],
+                  },
+                  {
+                    id: "line-third-party-damage",
+                    title: "Mesures de sécurité - Trafic interrompu",
+                    message: "Le trafic est interrompu en raison de dégradations par un tiers.",
+                    motif: "Dégradations par un tiers",
+                    kind: "incident",
+                    applicationPeriods: [],
+                    impactedLineRefs: ["line:IDFM:C01743"],
+                    impactedStopNames: [],
+                  },
+                ],
+              },
+            ],
+            source: "prim-line-reports",
+          }),
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ available: true }),
+      };
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+
+    await vi.waitFor(() => {
+      expect(wrapper.get(".mock-traffic").text()).toBe("Interruption multiple");
+    });
+
+    await wrapper.get(".mock-traffic").trigger("click");
+
+    const dots = wrapper.findAll(".traffic-alert-modal__stepper-dot");
+    expect(dots).toHaveLength(2);
+    expect(wrapper.get(".traffic-alert-modal__detail").text()).toContain(
+      "travaux de modernisation",
+    );
+
+    await dots[1].trigger("click");
+
+    expect(wrapper.get(".traffic-alert-modal__detail").text()).toContain(
+      "dégradations par un tiers",
+    );
+
+    wrapper.unmount();
+  });
   it("creates a custom place from the switcher and navigates to it", async () => {
     installDashboardMocks({});
     const { default: App } = await import("../src/App.vue");
