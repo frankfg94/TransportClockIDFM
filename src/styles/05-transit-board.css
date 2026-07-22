@@ -206,6 +206,24 @@
   box-shadow: 0 0 0 4px rgba(255, 212, 0, 0.08);
 }
 
+.board-traffic-chip--upcoming:hover:not(:disabled),
+.board-traffic-chip--upcoming:focus-visible {
+  background:
+    linear-gradient(#fff9e6, #fff9e6) padding-box,
+    linear-gradient(
+        120deg,
+        rgba(176, 0, 103, 0.28),
+        rgba(255, 212, 0, 0.9),
+        rgba(37, 99, 235, 0.48),
+        rgba(176, 0, 103, 0.28)
+      )
+      border-box;
+  box-shadow: 0 0 0 4px rgba(255, 212, 0, 0.14);
+  color: #5f4600;
+  outline: 2px solid rgba(245, 158, 11, 0.42);
+  outline-offset: 2px;
+}
+
 @keyframes board-traffic-border-wave {
   0% {
     background-position:

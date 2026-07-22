@@ -1659,10 +1659,13 @@
   pointer-events: auto;
 }
 
-.pattern-flow-traffic-marker__dismiss:hover,
+.pattern-flow-traffic-marker__dismiss:hover:not(:disabled),
 .pattern-flow-traffic-marker__dismiss:focus-visible {
   background: rgba(185, 42, 34, 0.14);
   color: #bd332b;
+  outline: 2px solid rgba(189, 51, 43, 0.28);
+  transform: none;
+  outline-offset: 1px;
 }
 
 .pattern-flow-traffic-marker__dismiss svg {
@@ -1949,45 +1952,7 @@
 }
 
 .pattern-flow-shell--compact .pattern-flow-traffic-walking,
-.pattern-flow-shell--realistic .pattern-flow-traffic-marker__dismiss {
-  align-items: center;
-  background: rgba(31, 36, 55, 0.06);
-  border: 0;
-  border-radius: 50%;
-  color: #6f6b86;
-  cursor: pointer;
-  display: inline-flex;
-  height: 26px;
-  justify-content: center;
-  opacity: 0;
-  padding: 0;
-  pointer-events: none;
-  position: absolute;
-  right: 9px;
-  top: 9px;
-  transition: background 140ms ease, color 140ms ease, opacity 140ms ease;
-  width: 26px;
-}
-
-.pattern-flow-traffic-marker--interruption:hover .pattern-flow-traffic-marker__dismiss,
-.pattern-flow-traffic-marker--interruption:focus-within .pattern-flow-traffic-marker__dismiss {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.pattern-flow-traffic-marker__dismiss:hover,
-.pattern-flow-traffic-marker__dismiss:focus-visible {
-  background: rgba(185, 42, 34, 0.14);
-  color: #bd332b;
-}
-
-.pattern-flow-traffic-marker__dismiss svg {
-  height: 15px;
-  stroke-width: 2.5;
-  width: 15px;
-}
-
-.pattern-flow-traffic-walking {
+.pattern-flow-shell--realistic .pattern-flow-traffic-walking {
   font-size: 0.62rem;
   min-height: 24px;
   padding: 3px 6px;

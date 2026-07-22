@@ -22,8 +22,18 @@ describe("traffic calendar friendly summary", () => {
     ["crowding", "Affluence élevée à Nation", "incident"],
     ["strike", "Mouvement social régional", "incident"],
     ["weather", "Circulation adaptée en raison de la neige", "incident"],
-    ["safety", "Intervention de police à République", "incident"],
-    ["technical", "Panne de signalisation", "incident"],
+    ["concert", "Concert exceptionnel au Stade de France", "information"],
+    ["celebration", "Feu d'artifice du 14 juillet", "information"],
+    ["animal", "Animal sur les voies", "incident"],
+    ["fallen-tree", "Arbre tombé sur les voies", "incident"],
+    ["luggage", "Bagage oublié à Châtelet", "incident"],
+    ["signalling", "Panne de signalisation", "incident"],
+    ["suspicious-package", "Colis suspect à République", "incident"],
+    ["medical", "Malaise voyageur à Nation", "incident"],
+    ["train-breakdown", "Train en panne à Gare du Nord", "incident"],
+    ["police", "Intervention des forces de l'ordre", "incident"],
+    ["safety", "Incident de sécurité à République", "incident"],
+    ["technical", "Incident technique sur la ligne", "incident"],
     ["information", "Conseil aux voyageurs", "information"],
     ["incident", "Obstacle sur la voie", "unknown"],
   ] as const)("classifies %s disruptions with a safe fallback", (expected, title, kind) => {
@@ -31,6 +41,27 @@ describe("traffic calendar friendly summary", () => {
       expected,
     );
   });
+
+  it.each([
+    ["concert", "Interruption en raison d'un concert"],
+    ["celebration", "Interruption en raison d'un feu d'artifice"],
+    ["animal", "Interruption en raison d'un animal sur les voies"],
+    ["fallen-tree", "Interruption en raison d'un arbre tombé sur les voies"],
+    ["luggage", "Interruption en raison d'un bagage oublié"],
+    ["signalling", "Interruption en raison d'une panne de signalisation"],
+    ["suspicious-package", "Interruption en raison d'un colis suspect"],
+    ["medical", "Interruption en raison d'un malaise voyageur"],
+    ["train-breakdown", "Interruption en raison d'un train en panne"],
+    ["police", "Interruption en raison d'une intervention de police"],
+  ] as const)(
+    "keeps the %s cause icon for a generic interruption title",
+    (expected, message) => {
+      const disruption = createDisruption("Trafic interrompu", "incident");
+      disruption.message = message;
+
+      expect(classifyPatternTrafficIncident(disruption)).toBe(expected);
+    },
+  );
 
   it("formats full-day, bounded, starting and ending windows", () => {
     const day = new Date(2026, 6, 18);
@@ -99,6 +130,22 @@ describe("traffic calendar friendly summary", () => {
     expect(getPatternTrafficSummaryTitle(disruption)).toBe(
       "Travaux de modernisation",
     );
+  });
+
+  it("keeps a generic works reason when it is the only useful summary", () => {
+    const disruption = createDisruption(
+      "Jusqu'au 24 juillet inclus, le trafic est interrompu entre Montparnasse Bienvenue et Les Halles en raison de travaux.",
+      "works",
+    );
+    disruption.message =
+      "Trafic interrompu\nMétro 4 : Travaux - Trafic interrompu\nMétro 4 : Travaux - Trafic interrompu";
+
+    expect(getPatternTrafficSummaryCopy(disruption)).toEqual({
+      title: "Travaux",
+      description:
+        "Jusqu'au 24 juillet inclus, le trafic est interrompu entre Montparnasse Bienvenue et Les Halles en raison de travaux",
+    });
+    expect(classifyPatternTrafficIncident(disruption)).toBe("works");
   });
 
   it("extracts a labelled motif from IDFM copy", () => {
@@ -298,14 +345,35 @@ describe("traffic calendar friendly summary", () => {
     ).toBe(1);
   });
 
-  it("keeps an explicit service interruption distinct from its works cause", () => {
+  it("does not extend remaining days with technical padding after an inclusive text end", () => {
+    const disruption = createDisruption("Trafic interrompu", "works");
+    disruption.message =
+      "Jusqu'au 24 juillet inclus, le trafic est interrompu entre Montparnasse Bienvenue et Les Halles en raison de travaux.";
+    disruption.applicationPeriods = [
+      { begin: "20260706T044500", end: "20260725T043000" },
+    ];
+    const event = createEvent(
+      new Date(2026, 6, 6, 4, 45),
+      new Date(2026, 6, 24, 23, 59, 59, 999),
+      disruption,
+    );
+
+    expect(
+      getPatternTrafficSummaryRemainingDayCount(
+        [event],
+        new Date(2026, 6, 22),
+      ),
+    ).toBe(2);
+  });
+
+  it("uses the works category for the icon while severity keeps the interruption critical", () => {
     const closure = createDisruption(
       "Le trafic est interrompu entre Châtelet et Gare du Nord",
       "works",
     );
     closure.message = "Cette interruption est liée à des travaux.";
 
-    expect(classifyPatternTrafficIncident(closure)).toBe("interruption");
+    expect(classifyPatternTrafficIncident(closure)).toBe("works");
   });
 });
 

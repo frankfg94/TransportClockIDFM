@@ -1728,6 +1728,7 @@ function createPatternFlow(
     key: node.id,
     label: node.label,
     transfers: filterCurrentLineTransfers(node.transfers, currentLine),
+    branchEnd: node.degree <= 1,
   }));
   const trafficEdges = visibleDrawableEdges.map((edge) => ({
     id: edge.id,

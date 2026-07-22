@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref } from "vue";
 import { useI18n } from "../i18n";
 import { createTransportModeIcon } from "../services/linePresentation";
-import type { TransitFamilyOption } from "../types/transit";
+import type { TransitFamily, TransitFamilyOption } from "../types/transit";
 
 const props = defineProps<{
   options: TransitFamilyOption[];
@@ -17,6 +17,7 @@ const emit = defineEmits<{
 }>();
 
 const open = ref(false);
+const hoveredFamily = ref<TransitFamily>();
 const { t } = useI18n();
 let blurTimer: number | undefined;
 
@@ -60,8 +61,26 @@ function scheduleClose(): void {
 }
 
 function selectNetwork(network?: TransitFamilyOption): void {
+  hoveredFamily.value = undefined;
   emit("update:modelValue", network);
   open.value = false;
+}
+
+function handleOptionPointerEnter(
+  event: PointerEvent,
+  family: TransitFamily,
+): void {
+  if (event.pointerType === "touch") {
+    return;
+  }
+
+  hoveredFamily.value = family;
+}
+
+function clearHoveredFamily(family: TransitFamily): void {
+  if (hoveredFamily.value === family) {
+    hoveredFamily.value = undefined;
+  }
 }
 </script>
 
@@ -107,12 +126,19 @@ function selectNetwork(network?: TransitFamilyOption): void {
         </button>
         <button
           v-for="option in options"
-          :key="option.id"
+          :key="option.family"
           class="family-combobox__option family-combobox__option--with-icon"
+          :class="{
+            'family-combobox__option--hovered':
+              hoveredFamily === option.family,
+          }"
           type="button"
           role="option"
-          :aria-selected="option.id === modelValue?.id"
+          :aria-selected="option.family === modelValue?.family"
           @mousedown.prevent="selectNetwork(option)"
+          @pointerenter="handleOptionPointerEnter($event, option.family)"
+          @pointerleave="clearHoveredFamily(option.family)"
+          @pointercancel="clearHoveredFamily(option.family)"
         >
           <span
             class="pattern-board__mode-icon family-combobox__mode-icon"
@@ -227,13 +253,27 @@ function selectNetwork(network?: TransitFamilyOption): void {
   justify-self: flex-start;
 }
 
-.family-combobox__option:hover,
+.family-combobox__option:hover {
+  background: #f8fafc;
+  color: #111827;
+  transform: none;
+}
 .family-combobox__option[aria-selected="true"] {
+  background: #f8fafc;
+  box-shadow: inset 0 0 0 2px #d4dce8;
+  color: #111827;
+  transform: none;
+}
+
+.family-combobox__option.family-combobox__option--hovered {
   background: #e8edf4;
   color: #111827;
   transform: none;
 }
 
+.family-combobox__option[aria-selected="true"].family-combobox__option--hovered {
+  box-shadow: inset 0 0 0 2px #c0ccdc;
+}
 .family-combobox__state {
   align-items: center;
   color: var(--muted);

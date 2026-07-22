@@ -37,6 +37,7 @@ const baseSettings: AppSettings = {
   fullscreenStationPanelDesign: "all-directions",
   fullscreenStationPanelDarkTheme: false,
   smartTrafficDetection: true,
+  smartTrafficModalFormatting: true,
   transferResolverMode: "auto",
   transferBundleBackendCacheEnabled: true,
   transferBundleLocalCacheEnabled: true,

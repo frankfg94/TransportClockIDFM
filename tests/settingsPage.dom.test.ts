@@ -96,6 +96,12 @@ describe("SettingsPage", () => {
     await wrapper.get('[aria-label="Mode par defaut info trafic"]').trigger("click");
     expect(wrapper.text()).toContain("Toutes les lignes");
     expect(wrapper.text()).toContain("Detection intelligente sur le schema");
+    expect(wrapper.text()).toContain(
+      "Modale de perturbations et d'interruptions - formatage intelligent",
+    );
+    expect(wrapper.text()).toContain(
+      "Analyse le texte de l'annonce pour extraire les periodes",
+    );
     expect(wrapper.text()).toContain("Impacts affichés dans le calendrier");
     expect(wrapper.text()).toContain("Interruptions et perturbations");
     expect(wrapper.text()).toContain("Comment le niveau est calculé");
@@ -112,6 +118,26 @@ describe("SettingsPage", () => {
       .get('[aria-label="Impacts du calendrier trafic"]')
       .trigger("click");
     expect(wrapper.text()).toContain("Interruptions uniquement");
+
+    const smartModalFormattingToggle = wrapper
+      .findAll("label.settings-toggle")
+      .find((label) =>
+        label.text().includes(
+          "Modale de perturbations et d'interruptions - formatage intelligent",
+        ),
+      );
+    if (!smartModalFormattingToggle) {
+      throw new Error("Missing smart traffic modal formatting setting");
+    }
+    const smartModalFormattingInput =
+      smartModalFormattingToggle.find("input");
+    expect(
+      (smartModalFormattingInput.element as HTMLInputElement).checked,
+    ).toBe(true);
+    await smartModalFormattingInput.setValue(false);
+    expect(
+      (smartModalFormattingInput.element as HTMLInputElement).checked,
+    ).toBe(false);
 
     expect(wrapper.text()).toContain("Avertissement travaux sur le schema");
     expect(wrapper.text()).toContain("10 jours");

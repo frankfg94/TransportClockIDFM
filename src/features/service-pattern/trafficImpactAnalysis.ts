@@ -17,6 +17,7 @@ export interface PatternTrafficStation {
   key: string;
   label: string;
   transfers?: TransferLineOption[];
+  branchEnd?: boolean;
 }
 
 export interface PatternTrafficEdge {
@@ -78,6 +79,8 @@ const DISTURBANCE_KEYWORDS = [
   "retard",
   "retards",
   "service reduit",
+  "offre de transport reduite",
+  "offre reduite",
   "service adapte",
   "frequence reduite",
   "temps d attente allonge",
@@ -317,6 +320,7 @@ function createResolvedSegments({
       return createSegmentFromEndpoints({
         disruption,
         parsed,
+        stations,
         edges,
         kind: segmentKind,
         source,
@@ -363,6 +367,7 @@ function createResolvedSegments({
       createSegmentFromEndpoints({
         disruption,
         parsed,
+        stations,
         edges,
         kind,
         source: impactedStationKeys[0],
@@ -409,6 +414,7 @@ function createStationOnlySegments({
 function createSegmentFromEndpoints({
   disruption,
   parsed,
+  stations,
   edges,
   kind,
   source,
@@ -417,6 +423,7 @@ function createSegmentFromEndpoints({
 }: {
   disruption: TrafficDisruption;
   parsed: ParsedTrafficDisruption;
+  stations: PatternTrafficStation[];
   edges: PatternTrafficEdge[];
   kind: PatternTrafficImpactKind;
   source: string;
@@ -427,7 +434,11 @@ function createSegmentFromEndpoints({
   const edgeKeys = getEdgeKeysForStationPath(stationPath);
   const stationKeys =
     kind === "interruption" && stationPath.length > 1
-      ? stationPath.slice(1, -1)
+      ? stationPath.filter(
+          (stationKey, index) =>
+            (index > 0 && index < stationPath.length - 1) ||
+            stations.find((station) => station.key === stationKey)?.branchEnd,
+        )
       : stationPath;
 
   return {
@@ -501,7 +512,10 @@ function extractTrafficSections(text: string): ParsedTrafficSection[] {
   const matches: TrafficSectionMatch[] = [];
   const regexes = [
     new RegExp(
-      String.raw`(?:^|[\n:])\s*([^:\n]+?)\s*(?:<->|\u2194|\u21c4)\s+(.+?)${BIDIRECTIONAL_SECTION_END_PATTERN}`,
+      String.raw`(?:^|[\n])\s*(?:-|\u2022)\s*([^:\n]+?)\s*(?:<>|<->|\u2194|\u21c4)\s+(.+?)\s*:\s*[^\n]+`,
+      "giu",
+    ),    new RegExp(
+      String.raw`(?:^|[\n:])\s*([^:\n]+?)\s*(?:<>|<->|\u2194|\u21c4)\s+(.+?)${BIDIRECTIONAL_SECTION_END_PATTERN}`,
       "giu",
     ),
     new RegExp(
@@ -1294,6 +1308,7 @@ function getDisruptionText(disruption: TrafficDisruption): string {
   return [
     disruption.title,
     disruption.message,
+    disruption.motif,
     disruption.severity,
     disruption.cause,
     disruption.status,

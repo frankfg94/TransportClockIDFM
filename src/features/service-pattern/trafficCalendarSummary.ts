@@ -1,10 +1,7 @@
 import { getDisruptionTone, normalizeTrafficText } from "../traffic/trafficPresentation";
-import { parseTrafficDate } from "../traffic/trafficTiming";
+import { getTrafficDisruptionEffectivePeriods, parseTrafficDate } from "../traffic/trafficTiming";
 import type { TrafficDisruption } from "../traffic/types";
-import type {
-  PatternTrafficCalendarDay,
-  PatternTrafficCalendarEvent,
-} from "./trafficCalendar";
+import type { PatternTrafficCalendarDay, PatternTrafficCalendarEvent } from "./trafficCalendar";
 
 export type PatternTrafficSummaryIncidentType =
   | "interruption"
@@ -13,6 +10,16 @@ export type PatternTrafficSummaryIncidentType =
   | "crowding"
   | "strike"
   | "weather"
+  | "concert"
+  | "celebration"
+  | "animal"
+  | "fallen-tree"
+  | "luggage"
+  | "signalling"
+  | "suspicious-package"
+  | "medical"
+  | "train-breakdown"
+  | "police"
   | "safety"
   | "technical"
   | "incident"
@@ -64,6 +71,87 @@ const WEATHER_KEYWORDS = [
   "snow",
   "flood",
   "storm",
+];
+const CONCERT_KEYWORDS = ["concert", "festival de musique", "fete de la musique", "music festival"];
+const CELEBRATION_KEYWORDS = [
+  "feu d'artifice",
+  "feu d’artifice",
+  "feux d'artifice",
+  "feux d’artifice",
+  "fete",
+  "festivite",
+  "celebration",
+  "14 juillet",
+  "nouvel an",
+  "fireworks",
+];
+const ANIMAL_KEYWORDS = [
+  "animal sur les voies",
+  "animaux sur les voies",
+  "presence d'un animal",
+  "presence d’un animal",
+  "presence d'animaux",
+  "presence d’animaux",
+  "divagation d'animaux",
+  "divagation d’animaux",
+  "animal on track",
+];
+const FALLEN_TREE_KEYWORDS = [
+  "arbre tombe",
+  "arbre sur les voies",
+  "chute d'arbre",
+  "chute d’arbre",
+  "vegetation sur les voies",
+  "fallen tree",
+];
+const LUGGAGE_KEYWORDS = [
+  "bagage oublie",
+  "bagage abandonne",
+  "valise oubliee",
+  "objet oublie",
+  "forgotten luggage",
+  "unattended luggage",
+];
+const SIGNALLING_KEYWORDS = [
+  "signalisation",
+  "defaut de signal",
+  "panne de signal",
+  "signal failure",
+];
+const SUSPICIOUS_PACKAGE_KEYWORDS = [
+  "colis suspect",
+  "paquet suspect",
+  "objet suspect",
+  "suspicious package",
+];
+const MEDICAL_KEYWORDS = [
+  "malaise voyageur",
+  "malaise d'un voyageur",
+  "malaise d’un voyageur",
+  "malaise d un voyageur",
+  "voyageur malade",
+  "urgence medicale",
+  "medical emergency",
+];
+const TRAIN_BREAKDOWN_KEYWORDS = [
+  "panne de train",
+  "panne d'un train",
+  "panne d’un train",
+  "panne d un train",
+  "train en panne",
+  "avarie de train",
+  "avarie de materiel roulant",
+  "panne de materiel roulant",
+  "train failure",
+  "vehicle failure",
+  "rolling stock failure",
+];
+const POLICE_KEYWORDS = [
+  "police",
+  "forces de l'ordre",
+  "forces de l’ordre",
+  "forces de l ordre",
+  "police activity",
 ];
 const SLOWDOWN_KEYWORDS = [
   "ralentissement",
@@ -137,10 +225,7 @@ export function createPatternTrafficSummaryEntries(
       description: copy.description,
       impactedStopNames: disruption.impactedStopNames,
       timeWindows,
-      remainingDayCount: getPatternTrafficSummaryRemainingDayCount(
-        events,
-        day.date,
-      ),
+      remainingDayCount: getPatternTrafficSummaryRemainingDayCount(events, day.date),
     };
   });
 
@@ -157,7 +242,9 @@ export function getPatternTrafficSummaryRemainingDayCount(
   const periods = events.map((event) => ({ start: event.start, end: event.end }));
 
   events.forEach((event) => {
-    event.disruption.applicationPeriods.forEach((period) => {
+    const sourcePeriods = getTrafficDisruptionEffectivePeriods(event.disruption).periods;
+
+    sourcePeriods.forEach((period) => {
       const start = parseTrafficDate(period.begin);
       const end = parseTrafficDate(period.end);
       if (
@@ -198,9 +285,9 @@ export function classifyPatternTrafficIncident(
   events: PatternTrafficCalendarEvent[] = [],
 ): PatternTrafficSummaryIncidentType {
   const searchable = normalizeTrafficText(
-    `${disruption.title} ${disruption.message ?? ""} ${
-      disruption.cause ?? ""
-    } ${disruption.severity ?? ""}`,
+    [disruption.title, disruption.message, disruption.motif, disruption.cause, disruption.severity]
+      .filter((value): value is string => Boolean(value))
+      .join(" "),
   );
   const title = normalizeTrafficText(disruption.title);
   const worksKeywords = ["travaux", "chantier", "maintenance", "works"];
@@ -217,13 +304,24 @@ export function classifyPatternTrafficIncident(
     "no service",
   ];
 
-  if (containsAny(title, interruptionKeywords)) return "interruption";
-  if (
-    disruption.kind === "works" ||
-    containsAny(title, worksKeywords)
-  ) {
+  if (disruption.kind === "works" || containsAny(title, worksKeywords)) {
     return "works";
   }
+  if (containsAny(searchable, CONCERT_KEYWORDS)) return "concert";
+  if (containsAny(searchable, CELEBRATION_KEYWORDS)) return "celebration";
+  if (containsAny(searchable, ANIMAL_KEYWORDS)) return "animal";
+  if (containsAny(searchable, FALLEN_TREE_KEYWORDS)) return "fallen-tree";
+  if (containsAny(searchable, LUGGAGE_KEYWORDS)) return "luggage";
+  if (containsAny(searchable, SIGNALLING_KEYWORDS)) return "signalling";
+  if (containsAny(searchable, SUSPICIOUS_PACKAGE_KEYWORDS)) {
+    return "suspicious-package";
+  }
+  if (containsAny(searchable, MEDICAL_KEYWORDS)) return "medical";
+  if (containsAny(searchable, TRAIN_BREAKDOWN_KEYWORDS)) {
+    return "train-breakdown";
+  }
+  if (containsAny(searchable, POLICE_KEYWORDS)) return "police";
+  if (containsAny(title, interruptionKeywords)) return "interruption";
   if (containsAny(searchable, CROWDING_KEYWORDS)) return "crowding";
   if (containsAny(searchable, STRIKE_KEYWORDS)) return "strike";
   if (containsAny(searchable, WEATHER_KEYWORDS)) return "weather";
@@ -244,12 +342,19 @@ export function classifyPatternTrafficIncident(
 export function getPatternTrafficSummaryCopy(
   disruption: TrafficDisruption,
 ): PatternTrafficSummaryCopy {
-  const sourceText = [disruption.message, disruption.cause, disruption.title]
+  const sourceText = [disruption.motif, disruption.message, disruption.cause, disruption.title]
     .filter((value): value is string => Boolean(value))
     .join("\n");
   const explicitReason = extractTrafficReason(sourceText);
   if (explicitReason && !isGenericTrafficTitle(explicitReason)) {
     return splitTrafficSummaryCopy(explicitReason);
+  }
+  if (explicitReason && normalizeTrafficText(explicitReason) === "travaux") {
+    const description =
+      extractTrafficReasonContext(disruption.title) ??
+      extractTrafficReasonContext(disruption.message);
+
+    return description ? { title: "Travaux", description } : { title: "Travaux" };
   }
 
   const operationalSummary = extractOperationalTrafficSummary(sourceText);
@@ -271,9 +376,7 @@ export function getPatternTrafficSummaryCopy(
     : {};
 }
 
-export function getPatternTrafficSummaryTitle(
-  disruption: TrafficDisruption,
-): string | undefined {
+export function getPatternTrafficSummaryTitle(disruption: TrafficDisruption): string | undefined {
   return getPatternTrafficSummaryCopy(disruption).title;
 }
 
@@ -286,10 +389,7 @@ function getConciseTrafficTitle(value?: string): string | undefined {
 
   const withoutLinePrefix = lead.replace(LINE_TITLE_PREFIX_PATTERN, "").trim();
   const segments = withoutLinePrefix.split(/\s+[-–—]\s+/u);
-  while (
-    segments.length > 1 &&
-    isGenericTrafficTitle(segments[segments.length - 1])
-  ) {
+  while (segments.length > 1 && isGenericTrafficTitle(segments[segments.length - 1])) {
     segments.pop();
   }
 
@@ -312,13 +412,34 @@ function extractTrafficReason(value: string): string | undefined {
       plainText,
     );
   return reasonMarker
-    ? cleanSummaryText(
-        extractTrafficClause(
-          plainText,
-          reasonMarker.index + reasonMarker[0].length,
-        ),
-      )
+    ? cleanSummaryText(extractTrafficClause(plainText, reasonMarker.index + reasonMarker[0].length))
     : undefined;
+}
+
+function extractTrafficReasonContext(value?: string): string | undefined {
+  if (!value) return undefined;
+
+  const plainText = normalizeMultilineTrafficText(value);
+  const marker =
+    /\b(?:en\s+raison\s+(?:de(?:s)?\s+|d['’])|pour\s+cause\s+de\s+|[àa]\s+cause\s+de\s+|(?:[àa]\s+la\s+)?suite\s+[àa]\s+)/iu.exec(
+      plainText,
+    );
+  if (!marker) return undefined;
+
+  let start = marker.index;
+  while (start > 0 && !/[.!?\n]/u.test(plainText[start - 1])) {
+    start -= 1;
+  }
+
+  let end = marker.index + marker[0].length;
+  while (end < plainText.length && !/[.!?\n]/u.test(plainText[end])) {
+    end += 1;
+  }
+  if (end < plainText.length && /[.!?]/u.test(plainText[end])) {
+    end += 1;
+  }
+
+  return cleanSummaryText(plainText.slice(start, end));
 }
 
 function normalizeMultilineTrafficText(value: string): string {
@@ -413,9 +534,7 @@ function splitTrailingParenthetical(
   return undefined;
 }
 
-function extractOperationalTrafficSummary(
-  value: string,
-): PatternTrafficSummaryCopy | undefined {
+function extractOperationalTrafficSummary(value: string): PatternTrafficSummaryCopy | undefined {
   const plainText = normalizeMultilineTrafficText(value);
   const normalized = normalizeTrafficText(plainText);
 
@@ -449,9 +568,7 @@ function cleanSummaryText(value: string): string | undefined {
 }
 
 function sentenceCase(value: string): string {
-  return value.replace(/^\p{Ll}/u, (letter) =>
-    letter.toLocaleUpperCase("fr-FR"),
-  );
+  return value.replace(/^\p{Ll}/u, (letter) => letter.toLocaleUpperCase("fr-FR"));
 }
 export function getPatternTrafficSummaryTimeWindow(
   event: PatternTrafficCalendarEvent,
@@ -493,8 +610,7 @@ export function getPatternTrafficSummaryTimeWindow(
   const nextDayStart = new Date(dayStart);
   nextDayStart.setDate(nextDayStart.getDate() + 1);
   const startsBeforeDay = event.start.getTime() <= dayStart.getTime();
-  const endsAfterDay =
-    event.end === undefined || event.end.getTime() >= nextDayStart.getTime();
+  const endsAfterDay = event.end === undefined || event.end.getTime() >= nextDayStart.getTime();
 
   if (startsBeforeDay && endsAfterDay) return { kind: "all-day" };
   if (startsBeforeDay && event.end) {
@@ -513,33 +629,31 @@ export function getPatternTrafficSummaryTimeWindow(
   return { kind: "unknown" };
 }
 
-function getConciseTextLead(
-  value?: string,
-  skipScheduleOnly = false,
-): string | undefined {
+function getConciseTextLead(value?: string, skipScheduleOnly = false): string | undefined {
   if (!value) return undefined;
 
   return value
     .replace(/<[^>]+>/gu, " ")
     .split(/\r?\n|(?<=[.!?])\s+/u)
     .map((part) => part.replace(/\s+/gu, " ").trim())
-    .find(
-      (part) =>
-        Boolean(part) && (!skipScheduleOnly || !isScheduleOnlyText(part)),
-    );
+    .find((part) => Boolean(part) && (!skipScheduleOnly || !isScheduleOnlyText(part)));
 }
 function isGenericTrafficTitle(value: string): boolean {
-  const normalized = normalizeTrafficText(value).replace(/[^a-z0-9]+/gu, " ").trim();
-  if ([
-    "information trafic",
-    "info trafic",
-    "traffic information",
-    "perturbation",
-    "incident",
-    "interruption",
-    "travaux",
-    "works",
-  ].includes(normalized)) {
+  const normalized = normalizeTrafficText(value)
+    .replace(/[^a-z0-9]+/gu, " ")
+    .trim();
+  if (
+    [
+      "information trafic",
+      "info trafic",
+      "traffic information",
+      "perturbation",
+      "incident",
+      "interruption",
+      "travaux",
+      "works",
+    ].includes(normalized)
+  ) {
     return true;
   }
 
@@ -550,9 +664,7 @@ function isGenericTrafficTitle(value: string): boolean {
 
 function isScheduleOnlyText(value: string): boolean {
   const normalized = normalizeTrafficText(value);
-  return /^(?:dates?|horaires?|periode|du |de |a partir de|jusqu)/u.test(
-    normalized,
-  );
+  return /^(?:dates?|horaires?|periode|du |de |a partir de|jusqu)/u.test(normalized);
 }
 
 function containsAny(value: string, keywords: string[]): boolean {
@@ -560,9 +672,10 @@ function containsAny(value: string, keywords: string[]): boolean {
 }
 
 function formatClock(date: Date): string {
-  return `${String(date.getHours()).padStart(2, "0")}:${String(
-    date.getMinutes(),
-  ).padStart(2, "0")}`;
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(
+    2,
+    "0",
+  )}`;
 }
 
 function formatMinuteOfDay(value: number): string {
@@ -587,9 +700,9 @@ function mergeEquivalentSummaryEntries(
   const merged = new Map<string, PatternTrafficSummaryEntry>();
 
   entries.forEach((entry) => {
-    const titleKey = normalizeTrafficText(
-      entry.title ?? entry.disruption.title,
-    ).replace(/[^a-z0-9]+/gu, " ").trim();
+    const titleKey = normalizeTrafficText(entry.title ?? entry.disruption.title)
+      .replace(/[^a-z0-9]+/gu, " ")
+      .trim();
     const descriptionKey = normalizeTrafficText(entry.description ?? "")
       .replace(/[^a-z0-9]+/gu, " ")
       .trim();
@@ -608,14 +721,8 @@ function mergeEquivalentSummaryEntries(
     existing.impactedStopNames = Array.from(
       new Set([...existing.impactedStopNames, ...entry.impactedStopNames]),
     );
-    existing.timeWindows = deduplicateTimeWindows([
-      ...existing.timeWindows,
-      ...entry.timeWindows,
-    ]);
-    existing.remainingDayCount = Math.max(
-      existing.remainingDayCount,
-      entry.remainingDayCount,
-    );
+    existing.timeWindows = deduplicateTimeWindows([...existing.timeWindows, ...entry.timeWindows]);
+    existing.remainingDayCount = Math.max(existing.remainingDayCount, entry.remainingDayCount);
   });
 
   return Array.from(merged.values());

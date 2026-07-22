@@ -262,6 +262,11 @@ describe("dashboard presets", () => {
     });
 
     await wrapper.get(".mock-traffic").trigger("click");
+    expect(wrapper.get(".traffic-alert-modal").text()).toContain(
+      "Le trafic est interrompu entre deux gares.",
+    );
+
+    await wrapper.get(".traffic-alert-modal__go-to-traffic").trigger("click");
 
     expect(router.push).toHaveBeenLastCalledWith({
       path: "/traffic",

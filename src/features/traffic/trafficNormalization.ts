@@ -3,6 +3,7 @@ import type {
   TrafficDisruptionKind,
   TrafficLineStatus,
 } from "./types";
+import { parseTrafficDate } from "./trafficTiming";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -31,7 +32,7 @@ export function normalizeNavitiaLineReportPayload(
     }
   });
 
-  return Array.from(disruptionsById.values());
+  return enrichMissingWorkMotifs(Array.from(disruptionsById.values()));
 }
 
 export function getTrafficLineStatus(
@@ -89,7 +90,10 @@ function normalizeDisruption(
     asDisplayText(disruption.message) ??
     asDisplayText(disruption.description) ??
     messages.slice(asText(disruption.title) ? 0 : 1).join("\n");
-  const cause = asText(disruption.cause);
+  const cause =
+    asDisplayText(disruption.cause) ??
+    asDisplayText(disruption.reason) ??
+    asDisplayText(disruption.motif);
   const severity = getSeverityLabel(disruption.severity);
   const impactedLineRefs = extractImpactedLineRefs(
     disruption,
@@ -115,6 +119,85 @@ function normalizeDisruption(
   };
 }
 
+function enrichMissingWorkMotifs(
+  disruptions: TrafficDisruption[],
+): TrafficDisruption[] {
+  const disruptionsWithMotifs = disruptions.flatMap((disruption) => {
+    const motif = extractExplicitTrafficMotif(disruption.message);
+
+    return motif ? [{ disruption, motif }] : [];
+  });
+
+  if (disruptionsWithMotifs.length === 0) {
+    return disruptions;
+  }
+
+  return disruptions.map((disruption) => {
+    if (
+      disruption.kind !== "works" ||
+      extractExplicitTrafficMotif(disruption.message)
+    ) {
+      return disruption;
+    }
+
+    const relatedMotifs = new Set(
+      disruptionsWithMotifs
+        .filter(
+          ({ disruption: candidate }) =>
+            candidate.id !== disruption.id &&
+            candidate.kind === "works" &&
+            hasSameWorkCause(disruption, candidate) &&
+            hasOverlappingApplicationPeriods(disruption, candidate),
+        )
+        .map(({ motif }) => motif),
+    );
+
+    return relatedMotifs.size === 1
+      ? { ...disruption, motif: Array.from(relatedMotifs)[0] }
+      : disruption;
+  });
+}
+
+function extractExplicitTrafficMotif(value?: string): string | undefined {
+  if (!value) return undefined;
+
+  const match = /\bmotif\s*:\s*[^\r\n]+/iu.exec(value);
+  return match?.[0].trim();
+}
+
+function hasSameWorkCause(
+  left: TrafficDisruption,
+  right: TrafficDisruption,
+): boolean {
+  const leftCause = normalizeText(left.cause ?? "");
+  const rightCause = normalizeText(right.cause ?? "");
+
+  return Boolean(leftCause) && leftCause === rightCause;
+}
+
+function hasOverlappingApplicationPeriods(
+  left: TrafficDisruption,
+  right: TrafficDisruption,
+): boolean {
+  return left.applicationPeriods.some((leftPeriod) => {
+    const leftStart = parseTrafficDate(leftPeriod.begin)?.getTime();
+    const leftEnd = parseTrafficDate(leftPeriod.end)?.getTime();
+
+    if (leftStart === undefined || leftEnd === undefined) return false;
+
+    return right.applicationPeriods.some((rightPeriod) => {
+      const rightStart = parseTrafficDate(rightPeriod.begin)?.getTime();
+      const rightEnd = parseTrafficDate(rightPeriod.end)?.getTime();
+
+      return (
+        rightStart !== undefined &&
+        rightEnd !== undefined &&
+        leftStart < rightEnd &&
+        rightStart < leftEnd
+      );
+    });
+  });
+}
 function getDisruptionKind(
   disruption: JsonRecord,
   searchableText: string,

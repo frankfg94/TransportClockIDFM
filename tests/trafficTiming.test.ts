@@ -226,6 +226,41 @@ describe("traffic timing", () => {
     expect(getTrafficDisruptionTiming(disruption)).toBe("expired");
   });
 
+  it("uses an inclusive textual end date over technical service-day padding", () => {
+    const disruption = createDisruption(
+      "metro-4-july-works",
+      "20260706T044500",
+      "20260725T043000",
+      {
+        message:
+          "Jusqu'au 24 juillet inclus, le trafic est interrompu entre Montparnasse Bienvenue et Les Halles en raison de travaux.",
+        title: "Trafic interrompu",
+      },
+    );
+
+    expect(
+      getTrafficDisruptionDisplayPeriod(
+        disruption,
+        new Date(2026, 6, 22, 12).getTime(),
+      ),
+    ).toEqual({
+      begin: new Date(2026, 6, 6, 4, 45).toISOString(),
+      end: new Date(2026, 6, 24, 23, 59, 59, 999).toISOString(),
+    });
+    expect(
+      getTrafficDisruptionTiming(
+        disruption,
+        new Date(2026, 6, 24, 12).getTime(),
+      ),
+    ).toBe("current");
+    expect(
+      getTrafficDisruptionTiming(
+        disruption,
+        new Date(2026, 6, 25, 12).getTime(),
+      ),
+    ).toBe("expired");
+  });
+
   it("keeps time-restricted textual ranges on the technical fallback", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 9, 12, 0, 0));

@@ -553,7 +553,13 @@ function selectCurrentLine(): void {
 }
 
 function goToPreviousStep(): void {
-  setCurrentStep(Math.max(firstStep.value, currentStep.value - 1), "backward");
+  const previousStep = Math.max(firstStep.value, currentStep.value - 1);
+
+  if (previousStep === 1 && previousStep !== currentStep.value) {
+    selectFamilyOption(undefined);
+  }
+
+  setCurrentStep(previousStep, "backward");
 }
 
 function goToNextStep(): void {

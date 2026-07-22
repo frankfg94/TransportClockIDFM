@@ -2156,6 +2156,12 @@ describe("DeparturePatternModal settings", () => {
       wrapper.find(".pattern-flow-station--traffic-interruption").exists(),
     ).toBe(true);
 
+    const walkingTimes = wrapper.findAll(".pattern-flow-traffic-walking");
+    expect(walkingTimes.length).toBeGreaterThan(0);
+    expect(
+      walkingTimes.every((walkingTime) => walkingTime.text().includes("min")),
+    ).toBe(true);
+
     const interruptionMarker = wrapper.get(
       ".pattern-flow-traffic-marker--interruption",
     );

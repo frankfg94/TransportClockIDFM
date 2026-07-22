@@ -113,6 +113,7 @@ export interface AppSettings {
   fullscreenStationPanelDesign: FullscreenStationPanelDesign;
   fullscreenStationPanelDarkTheme: boolean;
   smartTrafficDetection: boolean;
+  smartTrafficModalFormatting: boolean;
   transferResolverMode: TransferResolverMode;
   transferBundleRetentionDays: TransferBundleRetentionDays;
   transferBundleRequestConcurrency: TransferBundleRequestConcurrency;
@@ -309,6 +310,7 @@ export function createDefaultAppSettings(): AppSettings {
     fullscreenStationPanelDesign: "all-directions",
     fullscreenStationPanelDarkTheme: false,
     smartTrafficDetection: true,
+    smartTrafficModalFormatting: true,
     transferResolverMode: "auto",
     // Enabled by default to use a frontend cache only if possible
     transferBundleLocalCacheEnabled: true,
@@ -454,6 +456,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     smartTrafficDetection: readBoolean(
       value.smartTrafficDetection,
       defaults.smartTrafficDetection,
+    ),
+    smartTrafficModalFormatting: readBoolean(
+      value.smartTrafficModalFormatting,
+      defaults.smartTrafficModalFormatting,
     ),
     transferResolverMode: isTransferResolverMode(value.transferResolverMode)
       ? value.transferResolverMode

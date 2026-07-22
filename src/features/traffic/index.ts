@@ -17,11 +17,16 @@ export {
   getCurrentAndUpcomingTrafficWarningDisruptions,
   getCurrentTrafficDisruptions,
   getTrafficDisruptionDisplayPeriod,
+  getTrafficDisruptionEffectivePeriods,
+  getTrafficDisruptionTextDateSets,
   getTrafficDisruptionTextPeriod,
   getTrafficDisruptionTiming,
+  getTrafficTitleWithoutLinePrefix,
   getUpcomingTrafficDisruptions,
   getUpcomingTrafficWarningStart,
   parseTrafficDate,
+  type TrafficTextDateSet,
+  type TrafficTextDateSetKind,
   type TrafficTimingTab,
 } from "./trafficTiming";
 export {
@@ -41,6 +46,8 @@ export {
 } from "./trafficScheduledWarnings";
 export type {
   ActiveTrafficLine,
+  TrafficAlertModalData,
+  TrafficAlertTone,
   TrafficCalendarImpactScope,
   TrafficDisruption,
   TrafficLineReport,

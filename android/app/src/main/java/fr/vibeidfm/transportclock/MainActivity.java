@@ -1,54 +1,57 @@
 package fr.vibeidfm.transportclock;
 
-import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.content.ContentResolver;
-import android.media.AudioAttributes;
-import android.net.Uri;
-import android.os.Build;
+import android.content.Intent;
 import android.os.Bundle;
 
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
-    private static final String DEPARTURE_ALARM_CHANNEL_ID =
-        "transport-departure-alarms-v1";
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        registerPlugin(DepartureAlarmPlugin.class);
         super.onCreate(savedInstanceState);
-        createDepartureAlarmChannel();
+        DepartureAlarmService.ensureChannels(this);
     }
 
-    private void createDepartureAlarmChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleDepartureAlarmIntent(intent);
+    }
+
+    private void handleDepartureAlarmIntent(Intent intent) {
+        if (
+            intent == null ||
+            !DepartureAlarmScheduler.ACTION_STOP.equals(intent.getAction())
+        ) {
             return;
         }
 
-        NotificationManager notificationManager =
-            getSystemService(NotificationManager.class);
-        Uri soundUri = Uri.parse(
-            ContentResolver.SCHEME_ANDROID_RESOURCE
-                + "://"
-                + getPackageName()
-                + "/"
-                + R.raw.transport_departure_alarm
+        int notificationId = intent.getIntExtra(
+            DepartureAlarmScheduler.EXTRA_NOTIFICATION_ID,
+            -1
         );
-        AudioAttributes audioAttributes = new AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_ALARM)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .build();
-        NotificationChannel channel = new NotificationChannel(
-            DEPARTURE_ALARM_CHANNEL_ID,
-            getString(R.string.departure_alarm_channel_name),
-            NotificationManager.IMPORTANCE_HIGH
-        );
+        if (notificationId < 0) {
+            return;
+        }
 
-        channel.setDescription(getString(R.string.departure_alarm_channel_description));
-        channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-        channel.enableVibration(true);
-        channel.setSound(soundUri, audioAttributes);
-        notificationManager.createNotificationChannel(channel);
+        String alarmId = null;
+        for (
+            DepartureAlarmScheduler.AlarmRecord alarm :
+            DepartureAlarmScheduler.getDelivered(this)
+        ) {
+            if (alarm.notificationId == notificationId) {
+                alarmId = alarm.alarmId;
+                break;
+            }
+        }
+
+        DepartureAlarmScheduler.removeDelivered(this, notificationId);
+        if (alarmId != null) {
+            DepartureAlarmPlugin.notifyAlarmAction(alarmId);
+        }
+
+        intent.setAction(null);
+        intent.removeExtra(DepartureAlarmScheduler.EXTRA_NOTIFICATION_ID);
     }
 }

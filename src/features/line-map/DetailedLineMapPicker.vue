@@ -635,7 +635,9 @@ async function loadMap(): Promise<void> {
 }
 
 function selectStop(stop: LineMapStopView): void {
-  toggleStopDetails(stop);
+  if (isExplorerMode.value) {
+    toggleStopDetails(stop);
+  }
 
   if (canSelectStops.value) {
     emit("select", stop.station);
@@ -1886,6 +1888,10 @@ function getLabelPriority(
       'line-map-panel--explorer': isExplorerMode,
       'line-map-panel--reduce-motion': reduceMotion,
     }"
+    @touchstart.stop
+    @touchmove.stop
+    @touchend.stop
+    @touchcancel.stop
     :style="{
       '--line-color': lineMap?.lineColor ?? props.line?.color ?? '#0064ff',
     }"
@@ -2330,7 +2336,7 @@ function getLabelPriority(
     </div>
 
     <AppRightPanel
-      v-if="lineMap && activeStop && stationDetailsPanelOpen"
+      v-if="isExplorerMode && lineMap && activeStop && stationDetailsPanelOpen"
       :open="stationDetailsPanelOpen"
       :title="t('lineMap.sidebar.stationDetails')"
       @close="closeSidebar"

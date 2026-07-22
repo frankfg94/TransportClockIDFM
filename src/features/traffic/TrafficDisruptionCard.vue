@@ -4,6 +4,8 @@
   import {
     getDisruptionIcon,
     getDisruptionTone,
+    getTrafficDisruptionReason,
+    isGenericTrafficWorksReason,
   } from "./trafficPresentation";
   import {
     getTrafficDisruptionDisplayPeriod,
@@ -36,6 +38,64 @@
   const impactedStopNames = computed(() =>
     props.disruption.impactedStopNames.slice(0, props.impactedStopLimit),
   );
+  const reason = computed(() => {
+    const messageReason = getTrafficDisruptionReason(props.disruption.message);
+    if (messageReason && !isGenericTrafficWorksReason(messageReason)) {
+      return messageReason;
+    }
+
+    const cause = props.disruption.cause?.trim();
+    return cause && !isGenericTrafficWorksReason(cause) ? cause : undefined;
+  });
+  const opaqueWorksTitle = computed(() => {
+    if (props.disruption.kind !== "works") {
+      return false;
+    }
+
+    const normalizedTitle = normalizeTrafficTitle(props.disruption.title);
+    return !["travaux", "work", "works", "maintenance", "chantier"].some(
+      (keyword) => normalizedTitle.includes(keyword),
+    );
+  });
+  const displayTitle = computed(() => {
+    if (!opaqueWorksTitle.value) {
+      return props.disruption.title;
+    }
+
+    return reason.value
+      ? t("traffic.worksTitle") + " — " + reason.value
+      : t("traffic.worksTitle");
+  });
+  const displayMessage = computed(() => {
+    if (!opaqueWorksTitle.value) {
+      return props.disruption.message ?? "";
+    }
+
+    const message = props.disruption.message?.trim();
+    if (!message) {
+      return props.disruption.title;
+    }
+
+    return message + "\n" + props.disruption.title;
+  });
+  const displayCause = computed(() => {
+    if (
+      opaqueWorksTitle.value ||
+      !reason.value ||
+      getTrafficDisruptionReason(props.disruption.message)
+    ) {
+      return "";
+    }
+
+    return reason.value;
+  });
+
+  function normalizeTrafficTitle(value: string): string {
+    return value
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .toLowerCase();
+  }
 
   function formatTrafficDisruptionPeriodLabel(
     disruption: TrafficDisruption,
@@ -91,10 +151,13 @@
         <span class="traffic-disruption__icon">
           {{ icon }}
         </span>
-        <h3>{{ disruption.title }}</h3>
+        <h3>{{ displayTitle }}</h3>
       </div>
 
-      <p v-if="disruption.message">{{ disruption.message }}</p>
+      <p v-if="displayMessage">{{ displayMessage }}</p>
+      <small v-if="displayCause">
+        {{ t("traffic.cause") }} {{ displayCause }}
+      </small>
 
       <small v-if="!showHeader && periodLabel">
         {{ periodLabel }}

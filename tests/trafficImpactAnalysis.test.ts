@@ -97,7 +97,7 @@ describe("traffic impact analysis", () => {
     ).toBe("interruption");
   });
 
-  it("uses the application period end date for reprise labels", () => {
+  it("keeps an inclusive textual end date over the following technical reprise", () => {
     const stations = createStations([
       "Chatillon - Montrouge",
       "Malakoff - Rue Etienne Dolet",
@@ -122,7 +122,7 @@ describe("traffic impact analysis", () => {
     );
 
     expect(analysis.segments[0].kind).toBe("interruption");
-    expect(analysis.segments[0].endDateLabel).toBe("27 juillet");
+    expect(analysis.segments[0].endDateLabel).toBe("26 juillet");
   });
 
   it("resolves a relocated Metro 13 terminus before a shared locality token", () => {
@@ -155,10 +155,12 @@ describe("traffic impact analysis", () => {
 
     expect(analysis.segments[0].stationKeys).toEqual([]);
     expect(analysis.stationImpacts).toEqual({});
+    expect(analysis.edgeImpacts[getPatternTrafficEdgeKey(edges[0])]?.kind).toBe(
+      "interruption",
+    );
     expect(
-      analysis.edgeImpacts[getPatternTrafficEdgeKey(edges[0])]?.kind,
-    ).toBe("interruption");
-    expect(analysis.edgeImpacts[getPatternTrafficEdgeKey(edges[1])]).toBeUndefined();
+      analysis.edgeImpacts[getPatternTrafficEdgeKey(edges[1])],
+    ).toBeUndefined();
   });
 
   it("keeps a non-served station interrupted when the rest of the line is disturbed", () => {
@@ -563,6 +565,55 @@ describe("traffic impact analysis", () => {
     );
   });
 
+  it("maps the RER B summer works trunk as interrupted and its northern branches as disturbed", () => {
+    const stations = createStations([
+      "Aéroport CDG 2",
+      "Mitry-Claye",
+      "Gare du Nord",
+      "Cité Universitaire",
+      "Bourg-la-Reine",
+    ]);
+    const edge = (source: string, target: string) => ({
+      source: normalizePatternStationName(source),
+      target: normalizePatternStationName(target),
+    });
+    const edges = [
+      edge("Aéroport CDG 2", "Gare du Nord"),
+      edge("Mitry-Claye", "Gare du Nord"),
+      edge("Gare du Nord", "Cité Universitaire"),
+      edge("Cité Universitaire", "Bourg-la-Reine"),
+    ];
+    const disruption = createDisruption({
+      id: "rer-b-summer-works",
+      title: "Grands Travaux d'été : du 25 juillet au 6 août",
+      message:
+        "Période : toute la journée\nDates : du 25 juillet au 6 août\n\n- Gare du Nord <> Bourg-la-Reine : Trafic interrompu\n- Gare du Nord <> Aéroport CDG 2 / Mitry-Claye : offre de transport réduite (prévoir en moyenne 1 train toutes les 7 minutes)",
+    });
+
+    const analysis = analyzeTrafficImpacts([disruption], stations, edges);
+
+    expect(
+      analysis.edgeImpacts[
+        getPatternTrafficEdgeKey(edge("Gare du Nord", "Cité Universitaire"))
+      ]?.kind,
+    ).toBe("interruption");
+    expect(
+      analysis.edgeImpacts[
+        getPatternTrafficEdgeKey(edge("Cité Universitaire", "Bourg-la-Reine"))
+      ]?.kind,
+    ).toBe("interruption");
+    expect(
+      analysis.edgeImpacts[
+        getPatternTrafficEdgeKey(edge("Gare du Nord", "Aéroport CDG 2"))
+      ]?.kind,
+    ).toBe("disturbance");
+    expect(
+      analysis.edgeImpacts[
+        getPatternTrafficEdgeKey(edge("Gare du Nord", "Mitry-Claye"))
+      ]?.kind,
+    ).toBe("disturbance");
+  });
+
   it("extracts de-a and depuis-jusqua section variants", () => {
     const stations = createStations(["Station A", "Station B", "Station C"]);
     const edges = createSequentialEdges(stations);
@@ -640,12 +691,46 @@ describe("traffic impact analysis", () => {
       stations.map((station) => station.key),
     );
   });
+  it("marks the terminal branch station without interrupting the shared endpoint", () => {
+    const stations = createStations(
+      ["Aéroport CDG Terminal 2", "Gare du Nord", "Châtelet", "Mitry - Claye"],
+      ["Aéroport CDG Terminal 2", "Mitry - Claye"],
+    );
+    const [cdg, gareDuNord, chatelet, mitry] = stations;
+    const edges = [
+      { source: cdg.key, target: gareDuNord.key },
+      { source: gareDuNord.key, target: chatelet.key },
+      { source: mitry.key, target: gareDuNord.key },
+    ];
+    const disruption = createDisruption({
+      id: "rer-b-cdg-chatelet-interruption",
+      title: "Trafic interrompu",
+      message:
+        "Le trafic est interrompu entre Aéroport CDG Terminal 2 et Châtelet.",
+    });
+
+    const analysis = analyzeTrafficImpacts([disruption], stations, edges);
+    const cdgKey = normalizePatternStationName("Aéroport CDG Terminal 2");
+    const chateletKey = normalizePatternStationName("Châtelet");
+
+    expect(analysis.stationImpacts[cdgKey]?.kind).toBe("interruption");
+    expect(analysis.stationImpacts[chateletKey]).toBeUndefined();
+    expect(
+      analysis.edgeImpacts[getPatternTrafficEdgeKey(edges[0])]?.kind,
+    ).toBe("interruption");
+    expect(
+      analysis.edgeImpacts[getPatternTrafficEdgeKey(edges[1])]?.kind,
+    ).toBe("interruption");
+  });
 });
 
-function createStations(labels: string[]) {
+function createStations(labels: string[], branchEnds: string[] = []) {
+  const branchEndKeys = new Set(branchEnds.map(normalizePatternStationName));
+
   return labels.map((label) => ({
     key: normalizePatternStationName(label),
     label,
+    branchEnd: branchEndKeys.has(normalizePatternStationName(label)),
   }));
 }
 

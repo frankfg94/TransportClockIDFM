@@ -4,6 +4,7 @@ import {
   normalizeNavitiaLineReportPayload,
   normalizeTrafficLineRef,
 } from "../src/features/traffic";
+import { getPatternTrafficSummaryCopy } from "../src/features/service-pattern/trafficCalendarSummary";
 
 describe("traffic normalization", () => {
   it("normalizes Navitia line_reports disruptions and impacted lines", () => {
@@ -203,6 +204,64 @@ describe("traffic normalization", () => {
     expect(disruptions[0].title).not.toContain("<p>");
   });
 
+  it("uses the overlapping RER B works campaign motif for the night interruption", () => {
+    const disruptions = normalizeNavitiaLineReportPayload(
+      {
+        disruptions: [
+          {
+            id: "rer-b-night-interruption",
+            category: "Incidents",
+            cause: "travaux",
+            messages: [
+              {
+                text: "RER B : La Croix de Berny/Robinson et Aéroport CDG/Mitry-Claye.",
+                channel: { name: "titre", types: ["title"] },
+              },
+              {
+                text: "<p>Période : de 22h45 à 02h.<br><br>Le trafic est interrompu entre La Croix de Berny et Aérop. C De Gaulle 2/Mitry - Claye et entre Robinson et Aérop. C De Gaulle 2/Mitry - Claye.<br><br>Un dispositif de bus de remplacement sera mis en place au départ de Gare du Nord.</p>",
+                channel: { name: "moteur", types: ["web"] },
+              },
+            ],
+            application_periods: [
+              { begin: "20260724T224500", end: "20260725T020000" },
+            ],
+          },
+          {
+            id: "rer-b-summer-works",
+            category: "Travaux",
+            cause: "travaux",
+            messages: [
+              {
+                text: "Grands Travaux d'été : du 25 juillet au 6 août",
+                channel: { name: "titre", types: ["title"] },
+              },
+              {
+                text: "<p>Période : toute la journée.<br><br>Motif : Travaux sur le réseau ferré (remplacement de 26 aiguillages dans le secteur de Gare du Nord)</p>",
+                channel: { name: "moteur", types: ["web"] },
+              },
+            ],
+            application_periods: [
+              { begin: "20260725T000000", end: "20260725T235000" },
+            ],
+          },
+        ],
+      },
+      "line:IDFM:C01743",
+    );
+
+    const interruption = disruptions.find(
+      (disruption) => disruption.id === "rer-b-night-interruption",
+    );
+
+    expect(interruption?.motif).toBe(
+      "Motif : Travaux sur le réseau ferré (remplacement de 26 aiguillages dans le secteur de Gare du Nord)",
+    );
+    expect(getPatternTrafficSummaryCopy(interruption!)).toEqual({
+      title: "Travaux sur le réseau ferroviaire",
+      description:
+        "Remplacement de 26 aiguillages dans le secteur de Gare du Nord",
+    });
+  });
   it("converts STIF line references to Navitia line references", () => {
     expect(normalizeTrafficLineRef("STIF:Line::C02528:")).toBe(
       "line:IDFM:C02528",

@@ -1316,6 +1316,7 @@ function getLineToneClass(
   box-shadow: 0 1px 2px rgba(16, 35, 63, 0.04);
   color: #c7cbd5;
   display: inline-flex;
+  flex: 0 0 54px;
   height: 54px;
   justify-content: center;
   padding: 0;
@@ -1323,7 +1324,8 @@ function getLineToneClass(
 }
 
 .traffic-ratp-refresh:hover {
-  color: #332f9f;
+  background: #ffffff;
+  color: #7d8798;
   transform: none;
 }
 

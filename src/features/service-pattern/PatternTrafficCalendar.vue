@@ -526,6 +526,8 @@ function getDurationLabel(minutes?: number): string {
   padding: 4px;
   position: relative;
   transition:
+    background 130ms ease,
+    border-color 130ms ease,
     box-shadow 130ms ease,
     transform 130ms ease;
   width: 100%;
@@ -534,7 +536,7 @@ function getDurationLabel(minutes?: number): string {
 .pattern-traffic-calendar__day:hover:not(:disabled),
 .pattern-traffic-calendar__day:focus-visible {
   box-shadow: 0 7px 18px rgba(16, 35, 63, 0.16);
-  outline: 2px solid rgba(37, 99, 235, 0.55);
+  outline: 2px solid rgba(100, 116, 139, 0.36);
   outline-offset: 1px;
   transform: translateY(-1px);
   z-index: 2;
@@ -554,6 +556,13 @@ function getDurationLabel(minutes?: number): string {
 .pattern-traffic-calendar__day--low {
   background: linear-gradient(135deg, #ffe9ec, #ffd7dc);
   border-color: rgba(239, 68, 68, 0.1);
+}
+
+.pattern-traffic-calendar__day--low:hover:not(:disabled),
+.pattern-traffic-calendar__day--low:focus-visible {
+  background: linear-gradient(135deg, #fff5f6, #ffe9ec);
+  border-color: rgba(239, 68, 68, 0.24);
+  outline-color: rgba(239, 68, 68, 0.36);
 }
 
 .pattern-traffic-calendar__day--medium {

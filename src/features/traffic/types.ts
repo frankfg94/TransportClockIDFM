@@ -14,6 +14,8 @@ export type TrafficLineStatus =
   | "unknown"
   | "error";
 
+export type TrafficAlertTone = "orange" | "red" | "upcoming";
+
 export type TrafficCalendarImpactScope =
   | "interruptions-only"
   | "all-impacts";
@@ -30,11 +32,20 @@ export interface TrafficDisruption {
   kind: TrafficDisruptionKind;
   severity?: string;
   cause?: string;
+  motif?: string;
   status?: string;
   updatedAt?: string;
   applicationPeriods: TrafficPeriod[];
   impactedLineRefs: string[];
   impactedStopNames: string[];
+}
+
+export interface TrafficAlertModalData {
+  label: string;
+  message?: string;
+  tone: TrafficAlertTone;
+  title?: string;
+  disruption?: TrafficDisruption;
 }
 
 export interface TrafficLineReport {

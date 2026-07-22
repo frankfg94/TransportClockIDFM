@@ -7,12 +7,17 @@ const mocks = vi.hoisted(() => ({
   requestPermissions: vi.fn(),
   checkExactNotificationSetting: vi.fn(),
   changeExactNotificationSetting: vi.fn(),
-  schedule: vi.fn(),
-  cancel: vi.fn(),
-  getPending: vi.fn(),
-  getDeliveredNotifications: vi.fn(),
-  removeDeliveredNotifications: vi.fn(),
-  addListener: vi.fn(),
+  localCancel: vi.fn(),
+  localGetPending: vi.fn(),
+  localGetDelivered: vi.fn(),
+  localRemoveDelivered: vi.fn(),
+  ensureNativeChannels: vi.fn(),
+  nativeSchedule: vi.fn(),
+  nativeCancel: vi.fn(),
+  nativeRemoveDelivered: vi.fn(),
+  nativeGetPending: vi.fn(),
+  nativeGetDelivered: vi.fn(),
+  nativeAddListener: vi.fn(),
 }));
 
 vi.mock("@capacitor/core", () => ({
@@ -20,6 +25,15 @@ vi.mock("@capacitor/core", () => ({
     isNativePlatform: () => mocks.nativePlatform,
     getPlatform: () => (mocks.nativePlatform ? "android" : "web"),
   },
+  registerPlugin: () => ({
+    ensureChannels: mocks.ensureNativeChannels,
+    schedule: mocks.nativeSchedule,
+    cancel: mocks.nativeCancel,
+    removeDelivered: mocks.nativeRemoveDelivered,
+    getPending: mocks.nativeGetPending,
+    getDelivered: mocks.nativeGetDelivered,
+    addListener: mocks.nativeAddListener,
+  }),
 }));
 
 vi.mock("@capacitor/app", () => ({
@@ -29,11 +43,19 @@ vi.mock("@capacitor/app", () => ({
 }));
 
 vi.mock("@capacitor/local-notifications", () => ({
-  LocalNotifications: mocks,
+  LocalNotifications: {
+    checkPermissions: mocks.checkPermissions,
+    requestPermissions: mocks.requestPermissions,
+    checkExactNotificationSetting: mocks.checkExactNotificationSetting,
+    changeExactNotificationSetting: mocks.changeExactNotificationSetting,
+    cancel: mocks.localCancel,
+    getPending: mocks.localGetPending,
+    getDeliveredNotifications: mocks.localGetDelivered,
+    removeDeliveredNotifications: mocks.localRemoveDelivered,
+  },
 }));
 
 import {
-  DEPARTURE_ALARM_CHANNEL_ID,
   cancelDepartureAlarm,
   disposeDepartureAlarmRuntime,
   initializeDepartureAlarmRuntime,
@@ -68,11 +90,17 @@ beforeEach(() => {
   mocks.checkExactNotificationSetting.mockResolvedValue({
     exact_alarm: "granted",
   });
-  mocks.schedule.mockResolvedValue({ notifications: [] });
-  mocks.cancel.mockResolvedValue(undefined);
-  mocks.getPending.mockResolvedValue({ notifications: [] });
-  mocks.getDeliveredNotifications.mockResolvedValue({ notifications: [] });
-  mocks.removeDeliveredNotifications.mockResolvedValue(undefined);
+  mocks.ensureNativeChannels.mockResolvedValue(undefined);
+  mocks.nativeSchedule.mockResolvedValue(undefined);
+  mocks.nativeCancel.mockResolvedValue(undefined);
+  mocks.nativeRemoveDelivered.mockResolvedValue(undefined);
+  mocks.nativeGetPending.mockResolvedValue({ alarms: [] });
+  mocks.nativeGetDelivered.mockResolvedValue({ alarms: [] });
+  mocks.nativeAddListener.mockResolvedValue({ remove: vi.fn() });
+  mocks.localCancel.mockResolvedValue(undefined);
+  mocks.localGetPending.mockResolvedValue({ notifications: [] });
+  mocks.localGetDelivered.mockResolvedValue({ notifications: [] });
+  mocks.localRemoveDelivered.mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
@@ -81,27 +109,20 @@ afterEach(async () => {
 });
 
 describe("departure alarm runtime", () => {
-  it("schedules an exact allow-while-idle notification on the alarm channel", async () => {
+  it("schedules the native alarm service with the exact alarm time", async () => {
     await scheduleDepartureAlarm(alarm, {
       title: "Alarm title",
       body: "Alarm body",
     });
 
-    expect(mocks.schedule).toHaveBeenCalledOnce();
-    const notification = mocks.schedule.mock.calls[0]?.[0].notifications[0];
-    expect(notification).toMatchObject({
+    expect(mocks.nativeSchedule).toHaveBeenCalledWith({
       id: alarm.nativeNotificationId,
-      channelId: DEPARTURE_ALARM_CHANNEL_ID,
-      sound: "transport_departure_alarm.wav",
-      autoCancel: true,
-      extra: {
-        alarmId: alarm.id,
-        boardId: alarm.boardId,
-        departureId: alarm.departureId,
-      },
+      alarmId: alarm.id,
+      at: Date.parse(alarm.alarmTime),
+      title: "Alarm title",
+      body: "Alarm body",
+      soundEnabled: true,
     });
-    expect(notification.schedule.allowWhileIdle).toBe(true);
-    expect(notification.schedule.at.toISOString()).toBe(alarm.alarmTime);
   });
 
   it("does not schedule when Android capabilities are missing", async () => {
@@ -115,38 +136,24 @@ describe("departure alarm runtime", () => {
         body: "Alarm body",
       }),
     ).rejects.toThrow("departure-alarm-permission-required");
-    expect(mocks.schedule).not.toHaveBeenCalled();
+    expect(mocks.nativeSchedule).not.toHaveBeenCalled();
   });
 
-  it("awaits pending cancellation and delivered notification removal", async () => {
+  it("awaits native cancellation", async () => {
     await cancelDepartureAlarm(alarm);
 
-    expect(mocks.cancel).toHaveBeenCalledWith({
-      notifications: [{ id: alarm.nativeNotificationId }],
+    expect(mocks.nativeCancel).toHaveBeenCalledWith({
+      id: alarm.nativeNotificationId,
     });
-    expect(mocks.removeDeliveredNotifications).toHaveBeenCalledWith({
-      notifications: [
-        {
-          id: alarm.nativeNotificationId,
-          title: "",
-          body: "",
-        },
-      ],
-    });
-    expect(
-      mocks.cancel.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.removeDeliveredNotifications.mock.invocationCallOrder[0]);
   });
 
   it("reschedules the same native id when realtime changes the alarm time", async () => {
-    mocks.getPending.mockResolvedValue({
-      notifications: [
+    mocks.nativeGetPending.mockResolvedValue({
+      alarms: [
         {
           id: alarm.nativeNotificationId,
-          title: "Alarm title",
-          body: "Alarm body",
-          schedule: { at: new Date("2026-07-18T12:10:00.000Z") },
-          extra: { alarmId: alarm.id },
+          alarmId: alarm.id,
+          at: Date.parse("2026-07-18T12:10:00.000Z"),
         },
       ],
     });
@@ -160,13 +167,39 @@ describe("departure alarm runtime", () => {
       expiredAlarmIds: [],
       deliveredAlarmIds: [],
     });
-    expect(mocks.cancel).toHaveBeenCalledWith({
+    expect(mocks.nativeCancel).toHaveBeenCalledWith({
+      id: alarm.nativeNotificationId,
+    });
+    expect(mocks.nativeSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: alarm.nativeNotificationId,
+        alarmId: alarm.id,
+        at: Date.parse(alarm.alarmTime),
+      }),
+    );
+  });
+
+  it("migrates pending notifications from the former native implementation", async () => {
+    mocks.localGetPending.mockResolvedValue({
+      notifications: [
+        {
+          id: alarm.nativeNotificationId,
+          title: "Old alarm",
+          body: "Old body",
+          extra: { alarmId: alarm.id },
+        },
+      ],
+    });
+
+    await scheduleDepartureAlarm(alarm, {
+      title: "Alarm title",
+      body: "Alarm body",
+    });
+
+    expect(mocks.localCancel).toHaveBeenCalledWith({
       notifications: [{ id: alarm.nativeNotificationId }],
     });
-    expect(mocks.schedule).toHaveBeenCalledOnce();
-    expect(
-      mocks.schedule.mock.calls[0]?.[0].notifications[0].id,
-    ).toBe(alarm.nativeNotificationId);
+    expect(mocks.nativeSchedule).toHaveBeenCalledOnce();
   });
 
   it("uses the same runtime to schedule and deliver a Web alarm", async () => {
@@ -192,7 +225,6 @@ describe("departure alarm runtime", () => {
     await vi.advanceTimersByTimeAsync(15 * 60 * 1_000);
 
     expect(onAlarmDelivered).toHaveBeenCalledWith(alarm.id);
-    expect(mocks.schedule).not.toHaveBeenCalled();
+    expect(mocks.nativeSchedule).not.toHaveBeenCalled();
   });
-
 });

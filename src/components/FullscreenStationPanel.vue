@@ -12,16 +12,10 @@ import {
   X,
 } from "lucide-vue-next";
 import ContextMenu from "./ContextMenu.vue";
+import UserFriendlyTrafficModal from "./UserFriendlyTrafficModal.vue";
 import { useI18n } from "../i18n";
 import type { FullscreenStationPanelDesign } from "../features/app-settings";
-import type { TrafficDisruption } from "../features/traffic/types";
-import {
-  classifyPatternTrafficIncident,
-  getPatternTrafficSummaryTitle,
-} from "../features/service-pattern/trafficCalendarSummary";
-import PatternTrafficIncidentSummaryItem from "../features/service-pattern/PatternTrafficIncidentSummaryItem.vue";
-
-type TrafficAlertTone = "orange" | "red" | "upcoming";
+import type { TrafficAlertModalData } from "../features/traffic";
 
 interface FullscreenPanelDeparture {
   id: string;
@@ -37,14 +31,6 @@ interface FullscreenPanelDirection {
   subtitle?: string;
   serviceEnded?: boolean;
   departures: FullscreenPanelDeparture[];
-}
-
-interface FullscreenPanelTrafficAlert {
-  label: string;
-  message?: string;
-  tone: TrafficAlertTone;
-  title?: string;
-  disruption?: TrafficDisruption;
 }
 
 interface FitTextOptions {
@@ -65,7 +51,8 @@ const props = withDefaults(
     design?: FullscreenStationPanelDesign;
     darkTheme?: boolean;
     panamDirectionId?: string;
-    trafficAlert?: FullscreenPanelTrafficAlert;
+    trafficAlert?: TrafficAlertModalData;
+    smartTrafficModalFormatting?: boolean;
     loading?: boolean;
     error?: string;
     updatedAtLabel?: string;
@@ -83,6 +70,7 @@ const props = withDefaults(
     darkTheme: false,
     panamDirectionId: undefined,
     trafficAlert: undefined,
+    smartTrafficModalFormatting: true,
     loading: false,
     error: "",
     updatedAtLabel: "",
@@ -112,12 +100,10 @@ const { t } = useI18n();
 const controlsVisible = ref(true);
 const menuOpen = ref(false);
 const menuTrigger = ref<HTMLElement>();
-const trafficModalOpen = ref(false);
-const trafficModalDialog = ref<HTMLElement>();
 const fitTextFrames = new WeakMap<HTMLElement, number>();
+const trafficModalOpen = ref(false);
 const fitTextObservers = new WeakMap<HTMLElement, ResizeObserver>();
 let hideTimer: number | undefined;
-let trafficModalPreviousFocus: HTMLElement | undefined;
 let previousHtmlOverflow = "";
 let previousBodyOverflow = "";
 let previousHtmlScrollbarGutter = "";
@@ -146,28 +132,6 @@ const selectedDoubleStopDirection = computed(
 const hasDirections = computed(() => props.directions.length > 0);
 const alarmDepartureIdSet = computed(
   () => new Set(props.alarmDepartureIds),
-);
-const trafficModalTitle = computed(() => {
-  const alert = props.trafficAlert;
-  if (!alert) return "";
-
-  return (
-    (alert.disruption && getPatternTrafficSummaryTitle(alert.disruption)) ||
-    alert.title ||
-    alert.label
-  );
-});
-const trafficModalIncidentType = computed(() => {
-  const alert = props.trafficAlert;
-  if (!alert?.disruption) {
-    return alert?.tone === "red" ? "interruption" : "incident";
-  }
-
-  return classifyPatternTrafficIncident(alert.disruption);
-});
-
-const trafficModalMessage = computed(
-  () => props.trafficAlert?.disruption?.message || props.trafficAlert?.message || "",
 );
 
 function scheduleFitText(
@@ -429,31 +393,18 @@ function toggleDarkTheme(event: Event): void {
   controlsVisible.value = true;
 }
 
-async function openTrafficModal(): Promise<void> {
+function openTrafficModal(): void {
   if (!props.trafficAlert) {
     return;
   }
 
-  trafficModalPreviousFocus =
-    document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : undefined;
   trafficModalOpen.value = true;
   clearControlsHideTimer();
-  await nextTick();
-  trafficModalDialog.value?.focus();
 }
 
 function closeTrafficModal(): void {
   trafficModalOpen.value = false;
   scheduleControlsHide();
-  void nextTick(() => {
-    if (trafficModalPreviousFocus?.isConnected) {
-      trafficModalPreviousFocus.focus();
-    }
-
-    trafficModalPreviousFocus = undefined;
-  });
 }
 
 function handleKeydown(event: KeyboardEvent): void {
@@ -1032,49 +983,12 @@ onBeforeUnmount(() => {
       </article>
     </div>
 
-    <Transition name="fullscreen-traffic-modal">
-      <div
-        v-if="trafficModalOpen && trafficAlert"
-        class="fullscreen-station-panel__traffic-modal-backdrop"
-        @click.self="closeTrafficModal"
-        @pointerdown.stop
-      >
-        <article
-          ref="trafficModalDialog"
-          class="fullscreen-station-panel__traffic-modal"
-          role="dialog"
-          aria-modal="true"
-          :aria-label="trafficModalTitle"
-          tabindex="-1"
-        >
-          <header class="fullscreen-station-panel__traffic-modal-header">
-            <button
-              class="fullscreen-station-panel__traffic-modal-close"
-              type="button"
-              :aria-label="t('app.closeTrafficModalAria')"
-              @click="closeTrafficModal"
-            >
-              <X aria-hidden="true" />
-            </button>
-          </header>
-          <div class="fullscreen-station-panel__traffic-modal-body">
-            <ul class="fullscreen-station-panel__traffic-modal-summary">
-              <PatternTrafficIncidentSummaryItem
-                :critical="trafficAlert.tone === 'red'"
-                :incident-type="trafficModalIncidentType"
-                :title="trafficModalTitle"
-              />
-            </ul>
-            <p
-              v-if="trafficModalMessage"
-              class="fullscreen-station-panel__traffic-modal-detail"
-            >
-              {{ trafficModalMessage }}
-            </p>
-          </div>
-        </article>
-      </div>
-    </Transition>
+    <UserFriendlyTrafficModal
+      :open="trafficModalOpen"
+      :alert="trafficAlert"
+      :smart-formatting-enabled="smartTrafficModalFormatting"
+      @close="closeTrafficModal"
+    />
   </section>
 </template>
 
@@ -1701,90 +1615,6 @@ onBeforeUnmount(() => {
   padding: 14px 16px;
 }
 
-.fullscreen-station-panel__traffic-modal-backdrop {
-  align-items: center;
-  background: rgba(2, 6, 23, 0.74);
-  display: flex;
-  inset: 0;
-  justify-content: center;
-  padding: clamp(16px, 4vw, 48px);
-  position: fixed;
-  z-index: 20;
-}
-
-.fullscreen-station-panel__traffic-modal {
-  background: #ffffff;
-  border-radius: 24px;
-  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.42);
-  color: #0f172a;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  max-height: min(72dvh, 640px);
-  max-width: 660px;
-  overflow: hidden;
-  width: min(100%, 660px);
-}
-
-.fullscreen-station-panel__traffic-modal-header {
-  display: flex;
-  justify-content: flex-end;
-  padding: 14px 16px 0;
-}
-
-.fullscreen-station-panel__traffic-modal-close {
-  align-items: center;
-  background: #f1f5f9;
-  border: 0;
-  border-radius: 999px;
-  color: #0f172a;
-  display: inline-flex;
-  flex: 0 0 auto;
-  height: 44px;
-  justify-content: center;
-  padding: 0;
-  width: 44px;
-}
-
-.fullscreen-station-panel__traffic-modal-close svg {
-  height: 22px;
-  width: 22px;
-}
-
-.fullscreen-station-panel__traffic-modal-body {
-  display: grid;
-  gap: 22px;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 16px clamp(20px, 4vw, 32px) clamp(20px, 4vw, 32px);
-}
-
-.fullscreen-station-panel__traffic-modal-summary {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.fullscreen-station-panel__traffic-modal-detail {
-  border-top: 1px solid #e2e8f0;
-  color: #0f172a;
-  font-size: clamp(1rem, 2.4vw, 1.2rem);
-  line-height: 1.65;
-  margin: 0;
-  overflow-wrap: anywhere;
-  padding-top: 20px;
-  white-space: pre-line;
-}
-.fullscreen-traffic-modal-enter-active,
-.fullscreen-traffic-modal-leave-active {
-  transition: opacity 160ms ease;
-}
-
-.fullscreen-traffic-modal-enter-from,
-.fullscreen-traffic-modal-leave-to {
-  opacity: 0;
-}
-
 .fullscreen-station-panel__surface--home {
   align-items: stretch;
   background: #dfe7f6;
@@ -2097,17 +1927,6 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 560px) {
-  .fullscreen-station-panel__traffic-modal-backdrop {
-    padding: 0;
-  }
-
-  .fullscreen-station-panel__traffic-modal {
-    border-radius: 0;
-    max-height: 100dvh;
-    max-width: none;
-    width: 100%;
-  }
-
   .fullscreen-station-panel__controls {
     gap: 6px;
     padding: 8px;

@@ -13,7 +13,11 @@ import {
   getCurrentTrafficDisruptions,
   getUpcomingTrafficWarningStart,
 } from "../traffic/trafficTiming";
-import type { TrafficLineReport, TrafficResponse } from "../traffic/types";
+import type {
+  TrafficDisruption,
+  TrafficLineReport,
+  TrafficResponse,
+} from "../traffic/types";
 import {
   analyzeTrafficImpacts,
   type PatternTrafficEdge,
@@ -27,6 +31,14 @@ export type DeparturePatternTrafficAnalyzer = (
   edges: PatternTrafficEdge[],
 ) => PatternTrafficImpactAnalysis;
 
+export function getSelectedTrafficDisruptions(
+  disruptions: TrafficDisruption[],
+  selectedIds: string[],
+): TrafficDisruption[] {
+  return disruptions.filter((disruption) =>
+    selectedIds.includes(disruption.id),
+  );
+}
 interface UseDeparturePatternTrafficOptions {
   open: ComputedRef<boolean>;
   board?: ComputedRef<TransitBoardConfig | undefined>;
@@ -106,9 +118,10 @@ export function useDeparturePatternTraffic({
     }
 
     if (forcedTrafficDisruptionIds.value.length > 0) {
-      const forcedIds = new Set(forcedTrafficDisruptionIds.value);
-
-      return disruptions.filter((disruption) => forcedIds.has(disruption.id));
+      return getSelectedTrafficDisruptions(
+        disruptions,
+        forcedTrafficDisruptionIds.value,
+      );
     }
 
     if (typeof selectedNow === "number" && Number.isFinite(selectedNow)) {

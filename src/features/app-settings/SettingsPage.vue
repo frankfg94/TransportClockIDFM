@@ -1235,6 +1235,32 @@ onBeforeUnmount(() => {
       </article>
 
 
+      <label
+        class="settings-toggle"
+        :title="t('settings.display.trafficModalSmartFormattingDescription')"
+      >
+        <input
+          type="checkbox"
+          :checked="settings.smartTrafficModalFormatting"
+          @change="
+            updateSettings({
+              smartTrafficModalFormatting: (
+                $event.target as HTMLInputElement
+              ).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>
+            {{ t("settings.display.trafficModalSmartFormatting") }}
+          </strong>
+          <small>
+            {{ t("settings.display.trafficModalSmartFormattingDescription") }}
+          </small>
+        </div>
+      </label>
+
       <label class="settings-toggle">
         <input
           type="checkbox"

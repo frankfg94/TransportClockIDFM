@@ -63,6 +63,7 @@ describe("app settings", () => {
       fullscreenStationPanelDesign: "all-directions",
       fullscreenStationPanelDarkTheme: false,
       smartTrafficDetection: true,
+      smartTrafficModalFormatting: true,
       transferResolverMode: "auto",
       transferBundleBackendCacheEnabled: true,
       transferBundleLocalCacheEnabled: true,
@@ -110,6 +111,7 @@ describe("app settings", () => {
       fullscreenStationPanelDesign: "cinema",
       fullscreenStationPanelDarkTheme: "yes",
       smartTrafficDetection: "sometimes",
+      smartTrafficModalFormatting: "sometimes",
       transferResolverMode: "telepathy",
       transferBundleBackendCacheEnabled: "no",
       transferBundleRetentionDays: "999",
@@ -154,6 +156,7 @@ describe("app settings", () => {
     expect(settings.fullscreenStationPanelDesign).toBe("all-directions");
     expect(settings.fullscreenStationPanelDarkTheme).toBe(false);
     expect(settings.smartTrafficDetection).toBe(true);
+    expect(settings.smartTrafficModalFormatting).toBe(true);
     expect(settings.transferResolverMode).toBe("auto");
     expect(settings.transferBundleBackendCacheEnabled).toBe(true);
     expect(settings.transferBundleRetentionDays).toBe(15);
@@ -181,6 +184,13 @@ describe("app settings", () => {
       "interruptions-only",
       "all-impacts",
     ]);
+  });
+
+  it("preserves the smart traffic modal formatting preference", () => {
+    expect(
+      normalizeAppSettings({ smartTrafficModalFormatting: false })
+        .smartTrafficModalFormatting,
+    ).toBe(false);
   });
 
   it("preserves the interruption walking time preference", () => {

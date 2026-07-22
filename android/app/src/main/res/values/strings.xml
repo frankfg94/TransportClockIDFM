@@ -1,9 +1,12 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Transport Clock IDFM</string>
     <string name="title_activity_main">Transport Clock IDFM</string>
     <string name="package_name">fr.vibeidfm.transportclock</string>
     <string name="custom_url_scheme">fr.vibeidfm.transportclock</string>
-    <string name="departure_alarm_channel_name">Alarmes de d?part</string>
-    <string name="departure_alarm_channel_description">Alarmes sonores avant les prochains d?parts</string>
+    <string name="departure_alarm_channel_name">Alarmes de d&#233;part</string>
+    <string name="departure_alarm_channel_description">Lecture des alarmes sonores de d&#233;part</string>
+    <string name="departure_alarm_silent_channel_name">Rappels de d&#233;part silencieux</string>
+    <string name="departure_alarm_silent_channel_description">Notifications de d&#233;part sans son</string>
+    <string name="departure_alarm_stop_action">Arr&#234;ter</string>
 </resources>

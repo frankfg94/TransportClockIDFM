@@ -109,6 +109,79 @@ describe("StationBoardModal", () => {
     expect(document.body.textContent).toContain("Suivant");
   });
 
+  it("clears the selected network when returning to the first step", async () => {
+    fetchTransitFamilyOptions.mockResolvedValue([
+      { id: "metro", label: "Metro", family: "METRO" },
+      { id: "rer", label: "RER", family: "RER" },
+    ]);
+
+    mount(StationBoardModal, {
+      props: { open: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const metroButton = Array.from(
+      document.body.querySelectorAll(".family-combobox__option"),
+    ).find((button) => button.textContent?.includes("Metro")) as HTMLButtonElement;
+    metroButton.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await flushPromises();
+
+    const previousButton = Array.from(document.body.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("Precedent"),
+    ) as HTMLButtonElement;
+    previousButton.click();
+    await flushPromises();
+
+    expect(
+      document.body.querySelectorAll(
+        '.family-combobox__option[aria-selected="true"]',
+      ),
+    ).toHaveLength(0);
+    expect(
+      Array.from(document.body.querySelectorAll("button")).find((button) =>
+        button.textContent?.includes("Suivant"),
+      ),
+    ).toHaveProperty("disabled", true);
+  });
+
+  it("highlights only the transport option currently under the pointer", async () => {
+    fetchTransitFamilyOptions.mockResolvedValue([
+      { id: "metro", label: "Metro", family: "METRO" },
+      { id: "bus", label: "Bus", family: "BUS" },
+    ]);
+
+    mount(StationBoardModal, {
+      props: { open: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const options = Array.from(
+      document.body.querySelectorAll(".family-combobox__option"),
+    ) as HTMLButtonElement[];
+    const metroButton = options.find((button) =>
+      button.textContent?.includes("Metro"),
+    ) as HTMLButtonElement;
+    const busButton = options.find((button) =>
+      button.textContent?.includes("Bus"),
+    ) as HTMLButtonElement;
+
+    metroButton.dispatchEvent(new Event("pointerenter"));
+    await flushPromises();
+    busButton.dispatchEvent(new Event("pointerenter"));
+    await flushPromises();
+
+    expect(
+      metroButton.classList.contains("family-combobox__option--hovered"),
+    ).toBe(false);
+    expect(
+      busButton.classList.contains("family-combobox__option--hovered"),
+    ).toBe(true);
+    expect(
+      document.body.querySelectorAll(".family-combobox__option--hovered"),
+    ).toHaveLength(1);
+  });
   it("starts directly on station selection with an initial line and emits the selected dashboard", async () => {
     const wrapper = mount(StationBoardModal, {
       props: {

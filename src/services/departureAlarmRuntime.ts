@@ -1,14 +1,11 @@
 import { App } from "@capacitor/app";
 import {
   Capacitor,
+  registerPlugin,
   type PermissionState,
   type PluginListenerHandle,
 } from "@capacitor/core";
-import {
-  LocalNotifications,
-  type DeliveredNotificationSchema,
-  type PendingLocalNotificationSchema,
-} from "@capacitor/local-notifications";
+import { LocalNotifications } from "@capacitor/local-notifications";
 import type { DepartureAlarm } from "../types/transit";
 
 /**
@@ -18,17 +15,6 @@ import type { DepartureAlarm } from "../types/transit";
  * reconciliation, native listeners, Web notifications, Web timers and Web
  * audio. UI state and persisted alarm data intentionally remain outside it.
  */
-/**
- * Bump the channel id whenever the channel sound/importance changes.
- * Android notification-channel audio settings are immutable once created.
- */
-export const DEPARTURE_ALARM_CHANNEL_ID =
-  "transport-departure-alarms-v2";
-export const DEPARTURE_ALARM_SILENT_CHANNEL_ID =
-  "transport-departure-alarms-silent-v1";
-export const DEPARTURE_ALARM_SOUND_FILE =
-  "transport_departure_alarm.wav";
-
 export interface DepartureAlarmNotificationCopy {
   title: string;
   body: string;
@@ -52,6 +38,35 @@ export interface DepartureAlarmSyncResult {
   expiredAlarmIds: string[];
   deliveredAlarmIds: string[];
 }
+
+interface NativeDepartureAlarmRecord {
+  id: number;
+  alarmId: string;
+  at: number;
+}
+
+interface NativeDepartureAlarmPlugin {
+  ensureChannels(): Promise<void>;
+  schedule(options: {
+    id: number;
+    alarmId: string;
+    at: number;
+    title: string;
+    body: string;
+    soundEnabled: boolean;
+  }): Promise<void>;
+  cancel(options: { id: number }): Promise<void>;
+  removeDelivered(options: { id: number }): Promise<void>;
+  getPending(): Promise<{ alarms: NativeDepartureAlarmRecord[] }>;
+  getDelivered(): Promise<{ alarms: NativeDepartureAlarmRecord[] }>;
+  addListener(
+    eventName: "alarmFired" | "alarmAction",
+    listener: (event: { alarmId: string }) => void | Promise<void>,
+  ): Promise<PluginListenerHandle>;
+}
+
+const NativeDepartureAlarm =
+  registerPlugin<NativeDepartureAlarmPlugin>("DepartureAlarm");
 
 const listenerHandles: PluginListenerHandle[] = [];
 const webAlarmTimers = new Map<string, number>();
@@ -82,26 +97,8 @@ export async function ensureDepartureAlarmChannels(): Promise<void> {
   }
 
   if (!nativeChannelsInitialization) {
-    nativeChannelsInitialization = Promise.all([
-      LocalNotifications.createChannel({
-        id: DEPARTURE_ALARM_CHANNEL_ID,
-        name: "Alarmes de départ",
-        description: "Alarmes sonores pour les prochains départs",
-        importance: 5,
-        visibility: 1,
-        vibration: true,
-        sound: DEPARTURE_ALARM_SOUND_FILE,
-      }),
-      LocalNotifications.createChannel({
-        id: DEPARTURE_ALARM_SILENT_CHANNEL_ID,
-        name: "Rappels de départ silencieux",
-        description: "Rappels silencieux pour les prochains départs",
-        importance: 4,
-        visibility: 1,
-        vibration: false,
-      }),
-    ])
-      .then(() => undefined)
+    nativeChannelsInitialization = NativeDepartureAlarm.ensureChannels()
+      .then(cleanupLegacyLocalDepartureAlarms)
       .catch((error: unknown) => {
         nativeChannelsInitialization = undefined;
         throw error;
@@ -176,33 +173,16 @@ export async function initializeDepartureAlarmRuntime(
   await ensureDepartureAlarmChannels();
 
   listenerHandles.push(
-    await LocalNotifications.addListener(
-      "localNotificationReceived",
-      async (notification) => {
-        const alarmId = readAlarmId(notification.extra);
-
-        if (alarmId) {
-          await handlers.onAlarmDelivered(alarmId);
-        }
+    await NativeDepartureAlarm.addListener(
+      "alarmFired",
+      async ({ alarmId }) => {
+        await handlers.onAlarmDelivered(alarmId);
       },
     ),
-    await LocalNotifications.addListener(
-      "localNotificationActionPerformed",
-      async ({ notification }) => {
-        await LocalNotifications.removeDeliveredNotifications({
-          notifications: [
-            {
-              id: notification.id,
-              title: notification.title,
-              body: notification.body,
-            },
-          ],
-        });
-
-        const alarmId = readAlarmId(notification.extra);
-        if (alarmId) {
-          await handlers.onAlarmAction(alarmId);
-        }
+    await NativeDepartureAlarm.addListener(
+      "alarmAction",
+      async ({ alarmId }) => {
+        await handlers.onAlarmAction(alarmId);
       },
     ),
     await App.addListener("appStateChange", async ({ isActive }) => {
@@ -235,31 +215,13 @@ export async function scheduleDepartureAlarm(
 
   await ensureDepartureAlarmChannels();
 
-  await LocalNotifications.schedule({
-    notifications: [
-      {
-        id: alarm.nativeNotificationId,
-        title: copy.title,
-        body: copy.body,
-        largeBody: copy.body,
-        channelId: alarm.soundEnabled
-          ? DEPARTURE_ALARM_CHANNEL_ID
-          : DEPARTURE_ALARM_SILENT_CHANNEL_ID,
-        ...(alarm.soundEnabled
-          ? { sound: DEPARTURE_ALARM_SOUND_FILE }
-          : {}),
-        autoCancel: true,
-        schedule: {
-          at: alarmDate,
-          allowWhileIdle: true,
-        },
-        extra: {
-          alarmId: alarm.id,
-          boardId: alarm.boardId,
-          departureId: alarm.departureId,
-        },
-      },
-    ],
+  await NativeDepartureAlarm.schedule({
+    id: alarm.nativeNotificationId,
+    alarmId: alarm.id,
+    at: alarmDate.getTime(),
+    title: copy.title,
+    body: copy.body,
+    soundEnabled: alarm.soundEnabled,
   });
 }
 
@@ -275,10 +237,8 @@ export async function cancelDepartureAlarm(
     return;
   }
 
-  const notification = { id: alarm.nativeNotificationId };
-  await LocalNotifications.cancel({ notifications: [notification] });
-  await LocalNotifications.removeDeliveredNotifications({
-    notifications: [deliveredNotificationDescriptor(notification.id)],
+  await NativeDepartureAlarm.cancel({
+    id: alarm.nativeNotificationId,
   });
 }
 
@@ -289,8 +249,8 @@ export async function removeDepartureAlarmNotification(
     return;
   }
 
-  await LocalNotifications.removeDeliveredNotifications({
-    notifications: [deliveredNotificationDescriptor(alarm.nativeNotificationId)],
+  await NativeDepartureAlarm.removeDelivered({
+    id: alarm.nativeNotificationId,
   });
 }
 
@@ -304,14 +264,14 @@ export async function synchronizeDepartureAlarms(
   }
 
   const [pendingResult, deliveredResult] = await Promise.all([
-    LocalNotifications.getPending(),
-    LocalNotifications.getDeliveredNotifications(),
+    NativeDepartureAlarm.getPending(),
+    NativeDepartureAlarm.getDelivered(),
   ]);
   const alarmByNotificationId = new Map(
     alarms.map((alarm) => [alarm.nativeNotificationId, alarm]),
   );
   const deliveredIds = new Set(
-    deliveredResult.notifications.map((notification) => notification.id),
+    deliveredResult.alarms.map((alarm) => alarm.id),
   );
   const now = Date.now();
   const deliveredAlarmIds = alarms
@@ -335,26 +295,26 @@ export async function synchronizeDepartureAlarms(
     schedulableAlarms.map((alarm) => alarm.nativeNotificationId),
   );
 
-  const pendingToCancel = pendingResult.notifications.filter(
-    (notification) => !schedulableIds.has(notification.id),
+  const pendingToCancel = pendingResult.alarms.filter(
+    (pendingAlarm) => !schedulableIds.has(pendingAlarm.id),
   );
-  if (pendingToCancel.length > 0) {
-    await LocalNotifications.cancel({
-      notifications: pendingToCancel.map(({ id }) => ({ id })),
-    });
-  }
+  await Promise.all(
+    pendingToCancel.map((pendingAlarm) =>
+      NativeDepartureAlarm.cancel({ id: pendingAlarm.id }),
+    ),
+  );
 
-  const orphanDelivered = deliveredResult.notifications.filter(
-    (notification) => !alarmByNotificationId.has(notification.id),
+  const orphanDelivered = deliveredResult.alarms.filter(
+    (deliveredAlarm) => !alarmByNotificationId.has(deliveredAlarm.id),
   );
-  if (orphanDelivered.length > 0) {
-    await LocalNotifications.removeDeliveredNotifications({
-      notifications: orphanDelivered,
-    });
-  }
+  await Promise.all(
+    orphanDelivered.map((deliveredAlarm) =>
+      NativeDepartureAlarm.removeDelivered({ id: deliveredAlarm.id }),
+    ),
+  );
 
   const pendingById = new Map(
-    pendingResult.notifications.map((notification) => [notification.id, notification]),
+    pendingResult.alarms.map((pendingAlarm) => [pendingAlarm.id, pendingAlarm]),
   );
 
   for (const alarm of schedulableAlarms) {
@@ -364,9 +324,7 @@ export async function synchronizeDepartureAlarms(
     }
 
     if (pending) {
-      await LocalNotifications.cancel({
-        notifications: [{ id: pending.id }],
-      });
+      await NativeDepartureAlarm.cancel({ id: pending.id });
     }
 
     await scheduleDepartureAlarm(alarm, getCopy(alarm));
@@ -379,6 +337,7 @@ export async function disposeDepartureAlarmRuntime(): Promise<void> {
   clearWebAlarmTimers();
   stopDepartureAlarmSound();
   runtimeHandlers = undefined;
+  nativeChannelsInitialization = undefined;
   await disposeNativeDepartureAlarmListeners();
 }
 
@@ -543,30 +502,38 @@ function getWebNotificationPermission(): PermissionState {
     : Notification.permission;
 }
 
-function deliveredNotificationDescriptor(
-  id: number,
-): DeliveredNotificationSchema {
-  return {
-    id,
-    title: "",
-    body: "",
-  };
+async function cleanupLegacyLocalDepartureAlarms(): Promise<void> {
+  const [pendingResult, deliveredResult] = await Promise.all([
+    LocalNotifications.getPending(),
+    LocalNotifications.getDeliveredNotifications(),
+  ]);
+  const legacyPending = pendingResult.notifications.filter((notification) =>
+    Boolean(readAlarmId(notification.extra)),
+  );
+  const legacyDelivered = deliveredResult.notifications.filter((notification) =>
+    Boolean(readAlarmId(notification.extra)),
+  );
+
+  if (legacyPending.length > 0) {
+    await LocalNotifications.cancel({
+      notifications: legacyPending.map(({ id }) => ({ id })),
+    });
+  }
+  if (legacyDelivered.length > 0) {
+    await LocalNotifications.removeDeliveredNotifications({
+      notifications: legacyDelivered,
+    });
+  }
 }
 
 function isPendingAtAlarmTime(
-  pending: PendingLocalNotificationSchema,
+  pending: NativeDepartureAlarmRecord,
   alarm: DepartureAlarm,
 ): boolean {
-  const scheduledAt = pending.schedule?.at;
-  const scheduledTime =
-    scheduledAt instanceof Date
-      ? scheduledAt.getTime()
-      : new Date(scheduledAt as unknown as string).getTime();
-
   return (
-    Number.isFinite(scheduledTime) &&
-    Math.abs(scheduledTime - new Date(alarm.alarmTime).getTime()) < 1_000 &&
-    readAlarmId(pending.extra) === alarm.id
+    Number.isFinite(pending.at) &&
+    Math.abs(pending.at - new Date(alarm.alarmTime).getTime()) < 1_000 &&
+    pending.alarmId === alarm.id
   );
 }
 

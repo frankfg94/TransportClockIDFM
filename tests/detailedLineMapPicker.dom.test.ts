@@ -407,8 +407,14 @@ describe("DetailedLineMapPicker sidebar", () => {
       animationFrames.delete(handle);
     });
 
+    const externalTouchStart = vi.fn();
+    const externalTouchEnd = vi.fn();
+    document.body.addEventListener("touchstart", externalTouchStart);
+    document.body.addEventListener("touchend", externalTouchEnd);
+
     const wrapper = mount(DetailedLineMapPicker, {
-      props: { line, mode: "explorer", selectable: false },
+      props: { line },
+      attachTo: document.body,
     });
     await flushPromises();
 
@@ -429,13 +435,22 @@ describe("DetailedLineMapPicker sidebar", () => {
     await wrapper.get(".line-map-canvas").trigger("touchmove", {
       touches: [createTouchPoint(120, 100), createTouchPoint(200, 100)],
     });
+    await wrapper.get(".line-map-canvas").trigger("touchend", {
+      touches: [],
+    });
 
     expect(canvas.scrollLeft).toBe(400);
+    expect(externalTouchStart).not.toHaveBeenCalled();
+    expect(externalTouchEnd).not.toHaveBeenCalled();
 
     animationFrames.forEach((callback) => callback(0));
 
     expect(canvas.scrollLeft).toBeCloseTo(960, 5);
     expect(canvas.scrollTop).toBeCloseTo(500, 5);
+
+    document.body.removeEventListener("touchstart", externalTouchStart);
+    document.body.removeEventListener("touchend", externalTouchEnd);
+    wrapper.unmount();
   });
 
   it("keeps picker selection and hides explorer-only actions", async () => {
@@ -450,6 +465,10 @@ describe("DetailedLineMapPicker sidebar", () => {
     expect(wrapper.emitted("select")?.[0]?.[0]).toMatchObject({
       id: "station:a",
     });
+    expect(wrapper.find('[data-testid="line-map-sidebar"]').exists()).toBe(
+      false,
+    );
+    expect(loadStationTransfers).not.toHaveBeenCalled();
     expect(wrapper.text()).not.toContain("Ajouter aux favoris");
     expect(wrapper.text()).not.toContain("Voir sur Google Maps");
     expect(wrapper.find('[data-testid="network-ghost-layer"]').exists()).toBe(

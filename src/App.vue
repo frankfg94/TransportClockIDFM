@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import {
   computed,
   type ComponentPublicInstance,
@@ -14,6 +14,7 @@ import Draggable from "vuedraggable";
 import BoardVisibilityControls from "./components/BoardVisibilityControls.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import EmptyStationsState from "./components/EmptyStationsState.vue";
+import UserFriendlyTrafficModal from "./components/UserFriendlyTrafficModal.vue";
 import FullscreenStationPanel from "./components/FullscreenStationPanel.vue";
 import LineIconBadge from "./components/LineIconBadge.vue";
 import PlaceNameModal from "./components/PlaceNameModal.vue";
@@ -97,6 +98,7 @@ import type {
 } from "./types/transit";
 import type {
   TrafficLineReport,
+  TrafficAlertModalData,
   TrafficResponse,
 } from "./features/traffic/types";
 import {
@@ -193,6 +195,11 @@ const fullscreenPanelBoard = ref<TransitBoardConfig>();
 const fullscreenPanelPanamDirectionId = ref<string>();
 const fullscreenPanelRouteDesignOverride = ref<FullscreenStationPanelDesign>();
 const fullscreenPanelEnteredNativeFullscreen = ref(false);
+const homeTrafficModalTarget = ref<{
+  board: TransitBoardConfig;
+  alert: BoardTrafficAlert;
+}>();
+const homeTrafficModalOpen = ref(false);
 const alarmTarget = ref<{
   board: TransitBoardConfig;
   directionGroup: DirectionDepartureGroup;
@@ -663,23 +670,11 @@ const fullscreenPanelTrafficAlert = computed(() => {
     return undefined;
   }
 
-  const report = trafficReportByLineRef.value.get(
-    resolveBoardTrafficLineRef(board),
-  );
-  const alert = getBoardTrafficAlert(board);
-
-  if (!alert) {
-    return undefined;
-  }
-
-  const disruption = report?.disruptions.find(
-    (item) => item.id === alert.target.alertId,
-  );
-
-  return {
-    ...alert,
-    disruption,
-  };
+  return getTrafficAlertModalData(board, getBoardTrafficAlert(board));
+});
+const homeTrafficModalAlert = computed<TrafficAlertModalData | undefined>(() => {
+  const target = homeTrafficModalTarget.value;
+  return target ? getTrafficAlertModalData(target.board, target.alert) : undefined;
 });
 const fullscreenPanelUpdatedAtLabel = computed(() => {
   const board = fullscreenPanelBoard.value;
@@ -1634,6 +1629,51 @@ function openLinePage(board: TransitBoardConfig): void {
     "_blank",
     "noopener,noreferrer",
   );
+}
+
+function getTrafficAlertModalData(
+  board: TransitBoardConfig,
+  alert?: BoardTrafficAlert,
+): TrafficAlertModalData | undefined {
+  if (!alert) {
+    return undefined;
+  }
+
+  const report = trafficReportByLineRef.value.get(
+    resolveBoardTrafficLineRef(board),
+  );
+  const disruption = report?.disruptions.find(
+    (item) => item.id === alert.target.alertId,
+  );
+
+  return {
+    ...alert,
+    disruption,
+  };
+}
+
+function openHomeTrafficModal(
+  board: TransitBoardConfig,
+  alert: BoardTrafficAlert,
+): void {
+  homeTrafficModalTarget.value = { board, alert };
+  homeTrafficModalOpen.value = true;
+}
+
+function closeHomeTrafficModal(): void {
+  homeTrafficModalOpen.value = false;
+  homeTrafficModalTarget.value = undefined;
+}
+
+function goToTrafficPageFromHome(): void {
+  const target = homeTrafficModalTarget.value;
+
+  if (!target) {
+    return;
+  }
+
+  closeHomeTrafficModal();
+  openTrafficPage(target.board, target.alert);
 }
 
 function openTrafficPage(
@@ -2702,7 +2742,7 @@ onBeforeUnmount(() => {
                       updateHiddenDirectionIdsForBoard(board.id, $event)
                     "
                     @change-station="changeBoardStation(board, $event)"
-                    @open-traffic="(alert) => openTrafficPage(board, alert)"
+                    @open-traffic="(alert) => openHomeTrafficModal(board, alert)"
                     @remove="removeCustomBoard(board.id)"
                     @open-line-page="openLinePage"
                     @open-fullscreen-panel="openFullscreenPanel"
@@ -2732,6 +2772,9 @@ onBeforeUnmount(() => {
           :dark-theme="settings.fullscreenStationPanelDarkTheme"
           :panam-direction-id="fullscreenPanelPanamDirectionId"
           :traffic-alert="fullscreenPanelTrafficAlert"
+          :smart-traffic-modal-formatting="
+            settings.smartTrafficModalFormatting
+          "
           :loading="states[fullscreenPanelBoard.id]?.loading ?? false"
           :error="states[fullscreenPanelBoard.id]?.error"
           :updated-at-label="fullscreenPanelUpdatedAtLabel"
@@ -2755,6 +2798,14 @@ onBeforeUnmount(() => {
           </template>
         </FullscreenStationPanel>
       </Teleport>
+      <UserFriendlyTrafficModal
+        :open="homeTrafficModalOpen"
+        :alert="homeTrafficModalAlert"
+        :smart-formatting-enabled="settings.smartTrafficModalFormatting"
+        :show-go-to-trafic-page="true"
+        @close="closeHomeTrafficModal"
+        @go-to-traffic-page="goToTrafficPageFromHome"
+      />
 
       <PlaceNameModal
         :error="placeNameError"

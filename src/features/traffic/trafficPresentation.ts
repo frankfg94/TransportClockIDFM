@@ -77,3 +77,35 @@ export function normalizeTrafficText(value: string): string {
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase();
 }
+
+export function getTrafficDisruptionReason(
+  value?: string,
+): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const plainText = value
+    .replace(/<[^>]+>/gu, " ")
+    .replace(/\r\n?/gu, "\n")
+    .trim();
+  const marker = /\b(?:motif|reason)\s*:\s*/iu.exec(plainText);
+
+  if (!marker) {
+    return undefined;
+  }
+
+  const reason = plainText
+    .slice(marker.index + marker[0].length)
+    .split("\n", 1)[0]
+    .replace(/[.!?;]+$/gu, "")
+    .trim();
+
+  return reason || undefined;
+}
+
+export function isGenericTrafficWorksReason(value: string): boolean {
+  return ["travaux", "work", "works", "maintenance", "chantier"].includes(
+    normalizeTrafficText(value).replace(/[^a-z0-9]+/gu, " ").trim(),
+  );
+}

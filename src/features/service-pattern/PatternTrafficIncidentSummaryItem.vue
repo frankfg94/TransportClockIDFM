@@ -126,7 +126,30 @@ const emit = defineEmits<{ activate: [] }>();
   color: #0284c7;
 }
 
+.pattern-traffic-friendly-summary__item--concert
+  .pattern-traffic-friendly-summary__incident-icon,
+.pattern-traffic-friendly-summary__item--police
+  .pattern-traffic-friendly-summary__incident-icon {
+  color: #2563eb;
+}
+
+.pattern-traffic-friendly-summary__item--celebration
+  .pattern-traffic-friendly-summary__incident-icon,
+.pattern-traffic-friendly-summary__item--medical
+  .pattern-traffic-friendly-summary__incident-icon {
+  color: #db2777;
+}
+
+.pattern-traffic-friendly-summary__item--animal
+  .pattern-traffic-friendly-summary__incident-icon,
+.pattern-traffic-friendly-summary__item--fallen-tree
+  .pattern-traffic-friendly-summary__incident-icon {
+  color: #15803d;
+}
+
 .pattern-traffic-friendly-summary__item--safety
+  .pattern-traffic-friendly-summary__incident-icon,
+.pattern-traffic-friendly-summary__item--suspicious-package
   .pattern-traffic-friendly-summary__incident-icon {
   color: #e11d48;
 }

@@ -7,9 +7,9 @@ import {
   getTodayScheduledTrafficInterruption,
   type ScheduledTrafficInterruption,
 } from "./trafficScheduledWarnings";
-import type { TrafficLineReport } from "./types";
+import type { TrafficAlertTone, TrafficLineReport } from "./types";
 
-export type BoardTrafficAlertTone = "orange" | "red" | "upcoming";
+export type BoardTrafficAlertTone = TrafficAlertTone;
 
 export interface BoardTrafficAlert {
   label: string;

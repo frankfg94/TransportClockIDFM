@@ -21,6 +21,16 @@ const trafficResponse: TrafficResponse = {
           impactedStopNames: ["La Croix de Berny"],
         },
         {
+          id: "rer-b-opaque-work",
+          title:
+            "La Croix de Berny/Robinson et Aéroport CDG/Mitry-Claye\nJusqu'à 02:00",
+          message: "Motif : renouvellement des voies.",
+          kind: "works",
+          applicationPeriods: [],
+          impactedLineRefs: ["line:IDFM:C01743"],
+          impactedStopNames: [],
+        },
+        {
           id: "rer-b-upcoming-work",
           title: "Travaux planifies",
           message: "Service adapte en septembre.",
@@ -165,6 +175,9 @@ describe("TrafficPage", () => {
     expect(wrapper.text()).toContain("A venir");
     expect(wrapper.text()).toContain("Travaux nocturnes");
     expect(wrapper.text()).toContain("La Croix de Berny");
+    expect(wrapper.text()).toContain("Travaux");
+    expect(wrapper.text()).toContain("renouvellement des voies");
+    expect(wrapper.text()).toContain("Jusqu'à 02:00");
 
     const upcomingTab = wrapper
       .findAll(".traffic-timing-tabs button")
