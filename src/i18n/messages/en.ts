@@ -795,6 +795,7 @@ export const en = {
       strike: "Industrial action",
       weather: "Severe weather",
       concert: "Concert",
+      sport: "Sporting event",
       celebration: "Celebration",
       animal: "Animal on the tracks",
       "fallen-tree": "Tree fallen on the tracks",
@@ -831,6 +832,10 @@ export const en = {
     optimized: "Optimized",
     noActiveRail: "No active rail line on the board.",
     compactAria: "Compact traffic information by active line",
+    detailAria: "Selected line details",
+    detailPromptTitle: "Choose a line",
+    detailPromptBody:
+      "Select a line in the control area to display detailed traffic information.",
     cardsAria: "Traffic information by active line",
     noBus: "Buses are not shown for now.",
     summaryOne: "{count} line with traffic information",
@@ -853,6 +858,9 @@ export const en = {
     upcoming: "Upcoming",
     emptyCategory: "No announcement in this category.",
     affectedStops: "Affected stops:",
+    moreStops: "+{count} more",
+    showDisruptionDetails: "View details",
+    hideDisruptionDetails: "Show less",
     loadFailed: "Unable to load traffic information.",
     allLinesLoadFailed: "Unable to load all lines.",
     family: {

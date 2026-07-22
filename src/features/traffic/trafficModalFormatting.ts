@@ -16,12 +16,19 @@ export interface TrafficModalTimeWindow {
   untilEndOfService?: boolean;
 }
 
+export interface TrafficModalDateTilePeriod {
+  start?: Date;
+  end?: Date;
+  endLabel?: string;
+}
+
 export interface TrafficModalDateTile {
   id: string;
   title: string;
   start?: Date;
   end?: Date;
   endLabel?: string;
+  periods: TrafficModalDateTilePeriod[];
   evening: boolean;
   replacementBus: boolean;
   timeWindows: TrafficModalTimeWindow[];
@@ -37,16 +44,88 @@ export function extractTrafficModalDateTiles(
   const fallbackTileTitle = getFallbackTileTitle(disruption, normalizedFallbackTitle);
   const endOnlyTileTitle = normalizedFallbackTitle || fallbackTileTitle;
 
-  return getTrafficDisruptionTextDateSets(disruption).map((dateSet) => ({
-    id: dateSet.id,
-    title: dateSet.titleHint ?? (dateSet.kind === "range" ? fallbackTileTitle : endOnlyTileTitle),
-    start: dateSet.explicitStart ? dateSet.start : undefined,
-    end: dateSet.end,
-    endLabel: dateSet.endLabel,
-    evening: dateSet.evening,
-    replacementBus: hasReplacementBus(dateSet.sourceText),
-    timeWindows: dateSet.explicitStart ? extractTrafficModalTimeWindows(dateSet.sourceText) : [],
-  }));
+  const candidates = getTrafficDisruptionTextDateSets(disruption).map((dateSet) => {
+    const start = dateSet.explicitStart ? dateSet.start : undefined;
+    const title =
+      dateSet.titleHint ??
+      (dateSet.kind === "range" ? fallbackTileTitle : endOnlyTileTitle);
+
+    return {
+      mergeKey: dateSet.titleHint ? normalizeTrafficText(title) : undefined,
+      tile: {
+        id: dateSet.id,
+        title,
+        start,
+        end: dateSet.end,
+        endLabel: dateSet.endLabel,
+        periods: [
+          {
+            start,
+            end: dateSet.end,
+            endLabel: dateSet.endLabel,
+          },
+        ],
+        evening: dateSet.evening,
+        replacementBus: hasReplacementBus(dateSet.sourceText),
+        timeWindows: dateSet.explicitStart
+          ? extractTrafficModalTimeWindows(dateSet.sourceText)
+          : [],
+      } satisfies TrafficModalDateTile,
+    };
+  });
+
+  return mergeEquivalentTrafficModalDateTiles(candidates);
+}
+
+function mergeEquivalentTrafficModalDateTiles(
+  candidates: Array<{
+    mergeKey?: string;
+    tile: TrafficModalDateTile;
+  }>,
+): TrafficModalDateTile[] {
+  const merged: Array<{
+    mergeKey?: string;
+    tile: TrafficModalDateTile;
+  }> = [];
+
+  candidates.forEach((candidate) => {
+    const existing = candidate.mergeKey
+      ? merged.find(
+          (entry) =>
+            entry.mergeKey === candidate.mergeKey &&
+            entry.tile.evening === candidate.tile.evening &&
+            entry.tile.replacementBus === candidate.tile.replacementBus,
+        )
+      : undefined;
+
+    if (!existing) {
+      merged.push({
+        mergeKey: candidate.mergeKey,
+        tile: {
+          ...candidate.tile,
+          periods: [...candidate.tile.periods],
+          timeWindows: [...candidate.tile.timeWindows],
+        },
+      });
+      return;
+    }
+
+    candidate.tile.periods.forEach((period) => {
+      const duplicate = existing.tile.periods.some(
+        (current) =>
+          current.start?.getTime() === period.start?.getTime() &&
+          current.end?.getTime() === period.end?.getTime() &&
+          current.endLabel === period.endLabel,
+      );
+      if (!duplicate) existing.tile.periods.push(period);
+    });
+    candidate.tile.timeWindows.forEach((window) =>
+      pushTrafficModalTimeWindow(existing.tile.timeWindows, window),
+    );
+    existing.tile.id += "|" + candidate.tile.id;
+  });
+
+  return merged.map((entry) => entry.tile);
 }
 function getFallbackTileTitle(disruption: TrafficDisruption, fallbackTitle?: string): string {
   const rawTitle = getTrafficTitleWithoutLinePrefix(disruption.title);

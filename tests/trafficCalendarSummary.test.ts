@@ -23,6 +23,7 @@ describe("traffic calendar friendly summary", () => {
     ["strike", "Mouvement social régional", "incident"],
     ["weather", "Circulation adaptée en raison de la neige", "incident"],
     ["concert", "Concert exceptionnel au Stade de France", "information"],
+    ["sport", "Manifestation sportive au Stade de France", "information"],
     ["celebration", "Feu d'artifice du 14 juillet", "information"],
     ["animal", "Animal sur les voies", "incident"],
     ["fallen-tree", "Arbre tombé sur les voies", "incident"],
@@ -62,6 +63,18 @@ describe("traffic calendar friendly summary", () => {
       expect(classifyPatternTrafficIncident(disruption)).toBe(expected);
     },
   );
+
+  it("prioritizes a sporting event over a police mention", () => {
+    const disruption = createDisruption(
+      "Arrivee du Tour de France le dimanche 26 juillet",
+      "information",
+    );
+    disruption.message =
+      "Certaines stations seront fermees a la demande de la Prefecture de Police.";
+    disruption.motif = "Manifestation sportive - Autre";
+
+    expect(classifyPatternTrafficIncident(disruption)).toBe("sport");
+  });
 
   it("formats full-day, bounded, starting and ending windows", () => {
     const day = new Date(2026, 6, 18);

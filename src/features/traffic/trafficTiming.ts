@@ -403,6 +403,11 @@ function getTrafficTextDateSetTitleHint(
         .replace(/^\s*[-–—•]\s*/u, "")
         .replace(/^\s*(?:dates?|periode|période)\s*:\s*/iu, "")
         .replace(/\b(?:du|de)\s*$/iu, "")
+        .replace(
+          /(?:^|\s)(?:du\s+)?\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\s*(?:au|a|[-–])\s*\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\s*(?:et)?\s*$/iu,
+          "",
+        )
+        .replace(/\b(?:sauf|excepte|excepté)\s*$/iu, "")
         .replace(/\bdans\s+les?\s+2\s+sens\s*$/iu, "")
         .replace(/[\s:;,–—-]+$/gu, "")
         .replace(/\s+/gu, " ")
@@ -414,33 +419,55 @@ function getTrafficTextDateSetTitleHint(
       const prefix = getTrafficTitleWithoutLinePrefix(rawPrefix);
       const normalized = normalizeTrafficText(prefix);
       const isGeneric =
-        /^(?:dates?|periode|travaux|information trafic|trafic (?:interrompu|perturbe)|arret(?:s)? non desservi(?:s)?)$/u.test(
+        /^(?:attention|important|a noter|dates?|periode|travaux|information trafic|trafic (?:interrompu|perturbe)|arret(?:s)? non desservi(?:s)?)$/u.test(
           normalized,
         );
       const containsAnnouncementMetadata =
         /\b(?:dates?|periode|rappel)\s*:/u.test(rawNormalized) ||
         /^(?:reprise|jusqu|du|date|a partir)\b/u.test(normalized);
+      const suffixHint = getTrafficTextDateSetSuffixHint(line, match);
+      const title = isGeneric ? suffixHint : prefix;
 
-      if (
-        prefix.length < 4 ||
-        prefix.length > 130 ||
-        isGeneric ||
-        containsAnnouncementMetadata
-      ) {
+      if (!title || title.length > 130 || containsAnnouncementMetadata) {
         return [];
       }
 
-
       return [
         {
-          title: prefix,
-          score: Number(transportSpecific) * 100 + Math.min(prefix.length, 80),
+          title,
+          score: Number(transportSpecific) * 100 + Math.min(title.length, 80),
         },
       ];
     })
     .sort((left, right) => right.score - left.score)
     .at(0)?.title;
 }
+
+function getTrafficTextDateSetSuffixHint(
+  line: { start: number; text: string },
+  match: TrafficTextDateSetMatch,
+): string | undefined {
+  const relativeEnd = match.index - line.start + match.length;
+  const suffix = line.text
+    .slice(relativeEnd)
+    .replace(/^\s*[:;,–—-]?\s*/u, "")
+    .split(/\s*[:;]\s*/u, 1)[0]
+    .replace(/[.!,\s]+$/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const normalized = normalizeTrafficText(suffix);
+
+  if (
+    suffix.length < 4 ||
+    suffix.length > 100 ||
+    /^(?:dates?|periode|attention|important|a noter)$/u.test(normalized)
+  ) {
+    return undefined;
+  }
+
+  return getTrafficTitleWithoutLinePrefix(suffix);
+}
+
 function extractNamedTrafficDateSetMatches(text: string): TrafficTextDateSetMatch[] {
   const pattern = new RegExp(
     "\\b(?:dates?\\s*:\\s*)?(?:du|de)\\s+" +
@@ -627,7 +654,7 @@ function extractUntilTrafficDateSetMatches(text: string): TrafficTextDateSetMatc
 
 function extractSingleTrafficDateSetMatches(text: string): TrafficTextDateSetMatch[] {
   const pattern = new RegExp(
-    "\\bdate\\s*:?\\s*(?:le\\s+)?" +
+    "\\b(?:date\\s*:?\\s*(?:le\\s+)?|le\\s+)" +
       TRAFFIC_TEXT_WEEKDAY_PATTERN +
       "(\\d{1,2})(?:er)?\\s+(" +
       TRAFFIC_TEXT_MONTH_PATTERN +

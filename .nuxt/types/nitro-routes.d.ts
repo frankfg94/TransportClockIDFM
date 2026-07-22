@@ -65,9 +65,6 @@ declare module "nitropack/types" {
     '/__nuxt_island/**': {
       'default': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/#internal/nuxt/island-renderer').default>>>>
     }
-    '/api/lines/:transportType/:lineId/vehicles': {
-      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../packages/realtime-vehicles/src/runtime/server/vehicles.get').default>>>>
-    }
   }
 }
 export {}

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { ChevronDown, Info, RefreshCw, TrafficCone } from "lucide-vue-next";
+import { ChevronDown, Info, RefreshCw } from "lucide-vue-next";
 import { useRoute } from "#imports";
 import LineIconBadge from "../../components/LineIconBadge.vue";
+import UserFriendlyTraffic from "../../components/UserFriendlyTraffic.vue";
 import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import { useI18n } from "../../i18n";
 import TrafficDisruptionCard from "./TrafficDisruptionCard.vue";
+import LineTrafficIcon from "./LineTrafficIcon.vue";
 import {
   trafficInfoDesignOptions,
   useAppSettings,
@@ -59,6 +61,10 @@ const selectedTimingTabs = ref<Record<string, TrafficTimingTab>>({});
 const allLinesMode = ref(false);
 const scopeBurstKey = ref(0);
 const scopeBurstKind = ref<"optimized" | "all">("optimized");
+const trafficPolishReady = ref(false);
+const trafficDisruptionList = ref<HTMLElement>();
+const trafficDisruptionCanScrollUp = ref(false);
+const trafficDisruptionCanScrollDown = ref(false);
 const { settings, updateSettings } = useAppSettings();
 const route = useRoute();
 const { d, t } = useI18n();
@@ -110,6 +116,19 @@ const groupedLines = computed(() => {
         getFamilyOrder(left.label) - getFamilyOrder(right.label) ||
         left.label.localeCompare(right.label),
     );
+});
+const selectedRatpDetail = computed(() => {
+  const selectedLineRef = expandedLineRefs.value.values().next().value;
+  const line = displayedLines.value.find(
+    (candidate) => candidate.navitiaLineRef === selectedLineRef,
+  );
+
+  return line
+    ? {
+        line,
+        report: getLineReport(line),
+      }
+    : undefined;
 });
 const informationTime = computed(() => {
   const date = generatedAt.value ? new Date(generatedAt.value) : new Date();
@@ -204,21 +223,25 @@ async function loadTraffic(): Promise<void> {
     generatedAt.value = payload.generatedAt;
     configured.value = payload.configured;
     await nextTick();
+    trafficPolishReady.value = true;
     applyTrafficDeepLink();
   } catch (error) {
     errorMessage.value =
-      error instanceof Error
-        ? error.message
-        : t("traffic.loadFailed");
+      error instanceof Error ? error.message : t("traffic.loadFailed");
   } finally {
     loading.value = false;
   }
 }
 
-function includeDeepLinkedTrafficLine(lines: ActiveTrafficLine[]): ActiveTrafficLine[] {
+function includeDeepLinkedTrafficLine(
+  lines: ActiveTrafficLine[],
+): ActiveTrafficLine[] {
   const deepLine = deepLinkedTrafficLine.value;
 
-  if (!deepLine || lines.some((line) => line.navitiaLineRef === deepLine.navitiaLineRef)) {
+  if (
+    !deepLine ||
+    lines.some((line) => line.navitiaLineRef === deepLine.navitiaLineRef)
+  ) {
     return lines;
   }
 
@@ -241,7 +264,8 @@ function createDeepLinkedTrafficLine(): ActiveTrafficLine | undefined {
   }
 
   const mode = parseTrafficRouteMode(getRouteQueryValue("lineMode")) ?? "train";
-  const shortName = getRouteQueryValue("lineShortName") ?? getFallbackLineLabel(lineRef);
+  const shortName =
+    getRouteQueryValue("lineShortName") ?? getFallbackLineLabel(lineRef);
   const longName = getRouteQueryValue("lineName") ?? shortName;
   const presentation = createLinePresentation({
     color: getRouteQueryValue("lineColor"),
@@ -324,9 +348,7 @@ async function ensureAllTrafficLinesLoaded(): Promise<boolean> {
     return true;
   } catch (error) {
     allLinesError.value =
-      error instanceof Error
-        ? error.message
-        : t("traffic.allLinesLoadFailed");
+      error instanceof Error ? error.message : t("traffic.allLinesLoadFailed");
     return false;
   } finally {
     loadingAllLines.value = false;
@@ -403,7 +425,9 @@ function toggleLine(lineRef: string): void {
     return;
   }
 
+  highlightedTrafficAlertId.value = "";
   expandedLineRefs.value = new Set([lineRef]);
+  scheduleTrafficDisruptionScrollReset();
 }
 
 function selectTimingTab(lineRef: string, tab: TrafficTimingTab): void {
@@ -411,6 +435,8 @@ function selectTimingTab(lineRef: string, tab: TrafficTimingTab): void {
     ...selectedTimingTabs.value,
     [lineRef]: tab,
   };
+  highlightedTrafficAlertId.value = "";
+  scheduleTrafficDisruptionScrollReset();
 }
 
 function getSelectedTimingTab(lineRef: string): TrafficTimingTab {
@@ -437,9 +463,10 @@ function applyTrafficDeepLink(): void {
 
   const report = reportByLineRef.value.get(lineRef);
   const alertId = routeTrafficAlertId.value;
-  const trafficTab = report && alertId
-    ? resolveTrafficDeepLinkTab(report, alertId, routeTrafficTab.value)
-    : routeTrafficTab.value;
+  const trafficTab =
+    report && alertId
+      ? resolveTrafficDeepLinkTab(report, alertId, routeTrafficTab.value)
+      : routeTrafficTab.value;
 
   expandedLineRefs.value = new Set([lineRef]);
   selectedTimingTabs.value = {
@@ -469,33 +496,83 @@ function resolveTrafficDeepLinkTab(
     return requestedTab;
   }
 
-  if (getCurrentDisruptions(report).some((disruption) => disruption.id === alertId)) {
+  if (
+    getCurrentDisruptions(report).some(
+      (disruption) => disruption.id === alertId,
+    )
+  ) {
     return "current";
   }
 
-  if (getUpcomingDisruptions(report).some((disruption) => disruption.id === alertId)) {
+  if (
+    getUpcomingDisruptions(report).some(
+      (disruption) => disruption.id === alertId,
+    )
+  ) {
     return "upcoming";
   }
 
   return requestedTab;
 }
 
+function scheduleTrafficDisruptionScrollReset(): void {
+  void nextTick(() => {
+    resetTrafficDisruptionScroll();
+  });
+}
+
+function resetTrafficDisruptionScroll(): void {
+  const element = trafficDisruptionList.value;
+  if (!element) return;
+
+  if (typeof element.scrollTo === "function") {
+    element.scrollTo({ top: 0, behavior: "smooth" });
+  } else {
+    element.scrollTop = 0;
+  }
+
+  updateTrafficDisruptionScrollState();
+}
+
+function updateTrafficDisruptionScrollState(): void {
+  const element = trafficDisruptionList.value;
+  if (!element) {
+    trafficDisruptionCanScrollUp.value = false;
+    trafficDisruptionCanScrollDown.value = false;
+    return;
+  }
+
+  trafficDisruptionCanScrollUp.value = element.scrollTop > 3;
+  trafficDisruptionCanScrollDown.value =
+    element.scrollTop + element.clientHeight < element.scrollHeight - 3;
+}
+
 function scrollToHighlightedTrafficAlert(): void {
   const alertId = highlightedTrafficAlertId.value;
+  const container = trafficDisruptionList.value;
 
-  if (!alertId || typeof document === "undefined") {
+  if (!alertId || !container) {
     return;
   }
 
   const element = Array.from(
-    document.querySelectorAll<HTMLElement>("[data-traffic-alert-id]"),
+    container.querySelectorAll<HTMLElement>("[data-traffic-alert-id]"),
   ).find((candidate) => candidate.dataset.trafficAlertId === alertId);
 
-  element?.scrollIntoView?.({
-    behavior: "smooth",
-    block: "center",
-    inline: "nearest",
-  });
+  if (!element) return;
+
+  const top = Math.max(
+    0,
+    element.offsetTop - (container.clientHeight - element.offsetHeight) / 2,
+  );
+
+  if (typeof container.scrollTo === "function") {
+    container.scrollTo({ top, behavior: "smooth" });
+  } else {
+    container.scrollTop = top;
+  }
+
+  updateTrafficDisruptionScrollState();
 }
 
 function getCurrentDisruptions(report: TrafficLineReport): TrafficDisruption[] {
@@ -646,12 +723,6 @@ function hasOnlyUpcomingDisruptions(report: TrafficLineReport): boolean {
   );
 }
 
-function getExpandedLines(lines: ActiveTrafficLine[]): ActiveTrafficLine[] {
-  return lines.filter((line) =>
-    expandedLineRefs.value.has(line.navitiaLineRef),
-  );
-}
-
 function getCurrentTrafficAlert(
   report: TrafficLineReport,
 ): TrafficAlertPresentation | undefined {
@@ -662,17 +733,25 @@ function getLineToneClass(
   report: TrafficLineReport,
   classPrefix: "traffic-ratp-line" | "traffic-line-card",
 ): string | undefined {
-  const currentAlert = getCurrentTrafficAlert(report);
+  const tone = getLineTone(report);
 
-  return currentAlert
-    ? `${classPrefix}--tone-${currentAlert.tone}`
-    : undefined;
+  return tone ? `${classPrefix}--tone-${tone}` : undefined;
 }
 
+function getLineTone(
+  report: TrafficLineReport,
+): TrafficAlertPresentation["tone"] | undefined {
+  return getCurrentTrafficAlert(report)?.tone;
+}
 </script>
 
 <template>
-  <main class="traffic-page" :class="{ 'traffic-page--ratp': isRatpDesign }">
+  <main
+    class="traffic-page"
+    :class="{
+      'traffic-page--ratp': isRatpDesign,
+    }"
+  >
     <template v-if="isRatpDesign">
       <section class="traffic-ratp-panel">
         <header class="traffic-ratp-heading">
@@ -746,82 +825,103 @@ function getLineToneClass(
           {{ t("traffic.noActiveRail") }}
         </section>
 
-        <section
-          v-else
-          class="traffic-ratp-groups"
-          :aria-label="t('traffic.compactAria')"
-        >
-          <article
-            v-for="group in groupedLines"
-            :key="group.label"
-            class="traffic-ratp-row"
+        <div v-else class="traffic-ratp-workspace">
+          <section
+            class="traffic-ratp-groups"
+            :aria-label="t('traffic.compactAria')"
           >
-            <div class="traffic-ratp-family" aria-hidden="true">
-              <span>{{ group.label }}</span>
-            </div>
-
-            <TransitionGroup
-              name="traffic-line-pop"
-              tag="div"
-              class="traffic-ratp-lines"
+            <article
+              v-for="(group, groupIndex) in groupedLines"
+              :key="group.label"
+              class="traffic-ratp-row"
             >
-              <button
-                v-for="line in group.lines"
-                :key="line.navitiaLineRef"
-                class="traffic-ratp-line"
-                :class="[
-                  `traffic-ratp-line--${getLineDisplayStatus(getLineReport(line))}`,
-                  getLineToneClass(getLineReport(line), 'traffic-ratp-line'),
-                ]"
-                type="button"
-                :aria-label="`${line.line.longName}: ${getLineStatusLabel(getLineReport(line))}`"
-                @click="toggleLine(line.navitiaLineRef)"
-              >
-                <LineIconBadge :line="line.line" compact />
-                <span
-                  v-if="getLineStatusSymbol(getLineReport(line))"
-                  class="traffic-ratp-line__status"
-                  :class="{
-                    'traffic-ratp-line__status--roadwork':
-                      getLineStatusSymbol(getLineReport(line)) === 'roadwork',
-                  }"
-                >
-                  <TrafficCone
-                    :size="18"
-                    v-if="
-                      getLineStatusSymbol(getLineReport(line)) === 'roadwork'
-                    "
-                    fill="white"
-                    aria-hidden="true"
-                  />
-                  <template v-else>
-                    {{ getLineStatusSymbol(getLineReport(line)) }}
-                  </template>
-                </span>
-              </button>
-            </TransitionGroup>
+              <div class="traffic-ratp-family" aria-hidden="true">
+                <span>{{ group.label }}</span>
+              </div>
 
-            <div class="traffic-ratp-row-details">
+              <TransitionGroup
+                name="traffic-line-pop"
+                tag="div"
+                class="traffic-ratp-lines"
+              >
+                <button
+                  v-for="(line, lineIndex) in group.lines"
+                  :key="line.navitiaLineRef"
+                  class="traffic-ratp-line"
+                  :class="[
+                    `traffic-ratp-line--${getLineDisplayStatus(getLineReport(line))}`,
+                    getLineToneClass(getLineReport(line), 'traffic-ratp-line'),
+                    {
+                      'traffic-ratp-line--selected': expandedLineRefs.has(
+                        line.navitiaLineRef,
+                      ),
+                    },
+                  ]"
+                  type="button"
+                  :aria-controls="
+                    expandedLineRefs.has(line.navitiaLineRef)
+                      ? 'traffic-ratp-detail-panel'
+                      : undefined
+                  "
+                  :aria-label="`${line.line.longName}: ${getLineStatusLabel(getLineReport(line))}`"
+                  :aria-pressed="expandedLineRefs.has(line.navitiaLineRef)"
+                  @click="toggleLine(line.navitiaLineRef)"
+                >
+                  <LineTrafficIcon
+                    :animation-order="groupIndex * 3 + lineIndex"
+                    :line="line.line"
+                    :ready="trafficPolishReady"
+                    :status="getLineDisplayStatus(getLineReport(line))"
+                    :symbol="getLineStatusSymbol(getLineReport(line))"
+                    :tone="getLineTone(getLineReport(line))"
+                  />
+                </button>
+              </TransitionGroup>
+            </article>
+
+            <div
+              v-if="!hasDisplayedBusLine"
+              class="traffic-ratp-row traffic-ratp-row--bus"
+            >
+              <div class="traffic-ratp-family" aria-hidden="true">
+                <span>BUS</span>
+              </div>
+              <p>{{ t("traffic.noBus") }}</p>
+            </div>
+          </section>
+
+          <aside
+            id="traffic-ratp-detail-panel"
+            class="traffic-ratp-detail-panel"
+            :class="{
+              'traffic-ratp-detail-panel--active': selectedRatpDetail,
+            }"
+            :aria-label="t('traffic.detailAria')"
+            aria-live="polite"
+          >
+            <Transition name="traffic-detail-swap" mode="out-in">
               <article
-                v-for="line in getExpandedLines(group.lines)"
-                :key="line.navitiaLineRef"
+                v-if="selectedRatpDetail"
+                :key="selectedRatpDetail.line.navitiaLineRef"
                 class="traffic-ratp-detail"
               >
                 <header>
-                  <LineIconBadge :line="line.line" compact />
+                  <LineIconBadge :line="selectedRatpDetail.line.line" compact />
                   <div>
-                    <strong>{{ line.line.longName }}</strong>
-                    <span>{{ getLineStatusLabel(getLineReport(line)) }}</span>
+                    <strong>{{ selectedRatpDetail.line.line.longName }}</strong>
+                    <span>{{
+                      getLineStatusLabel(selectedRatpDetail.report)
+                    }}</span>
                   </div>
                 </header>
                 <p
-                  v-if="getLineReport(line).error"
+                  v-if="selectedRatpDetail.report.error"
                   class="traffic-details__error"
                 >
-                  {{ getLineReport(line).error }}
+                  {{ selectedRatpDetail.report.error }}
                 </p>
                 <p
-                  v-else-if="getLineReport(line).disruptions.length === 0"
+                  v-else-if="selectedRatpDetail.report.disruptions.length === 0"
                   class="traffic-details__normal"
                 >
                   {{ t("traffic.noDisruption") }}
@@ -832,68 +932,100 @@ function getLineToneClass(
                       type="button"
                       :class="{
                         'traffic-timing-tabs__button--active':
-                          getSelectedTimingTab(line.navitiaLineRef) ===
-                          'current',
+                          getSelectedTimingTab(
+                            selectedRatpDetail.line.navitiaLineRef,
+                          ) === 'current',
                       }"
-                      @click="selectTimingTab(line.navitiaLineRef, 'current')"
+                      @click="
+                        selectTimingTab(
+                          selectedRatpDetail.line.navitiaLineRef,
+                          'current',
+                        )
+                      "
                     >
                       {{ t("traffic.current") }}
                       <span>{{
-                        getCurrentDisruptions(getLineReport(line)).length
+                        getCurrentDisruptions(selectedRatpDetail.report).length
                       }}</span>
                     </button>
                     <button
                       type="button"
                       :class="{
                         'traffic-timing-tabs__button--active':
-                          getSelectedTimingTab(line.navitiaLineRef) ===
-                          'upcoming',
+                          getSelectedTimingTab(
+                            selectedRatpDetail.line.navitiaLineRef,
+                          ) === 'upcoming',
                       }"
-                      @click="selectTimingTab(line.navitiaLineRef, 'upcoming')"
+                      @click="
+                        selectTimingTab(
+                          selectedRatpDetail.line.navitiaLineRef,
+                          'upcoming',
+                        )
+                      "
                     >
                       {{ t("traffic.upcoming") }}
                       <span>{{
-                        getUpcomingDisruptions(getLineReport(line)).length
+                        getUpcomingDisruptions(selectedRatpDetail.report).length
                       }}</span>
                     </button>
                   </div>
-                  <p
-                    v-if="
-                      getVisibleDisruptions(getLineReport(line)).length === 0
-                    "
-                    class="traffic-details__normal"
-                  >
-                    {{ t("traffic.emptyCategory") }}
-                  </p>
-                  <TrafficDisruptionCard
-                    v-for="disruption in getVisibleDisruptions(
-                      getLineReport(line),
-                    )"
-                    :key="disruption.id"
+                  <div
+                    class="traffic-ratp-disruption-viewport"
                     :class="{
-                      'traffic-disruption--target':
-                        highlightedTrafficAlertId === disruption.id,
+                      'traffic-ratp-disruption-viewport--shadow-top':
+                        trafficDisruptionCanScrollUp,
+                      'traffic-ratp-disruption-viewport--shadow-bottom':
+                        trafficDisruptionCanScrollDown,
                     }"
-                    :data-traffic-alert-id="disruption.id"
-                    :disruption="disruption"
-                    compact
-                    :show-header="false"
-                  />
+                  >
+                    <div
+                      ref="trafficDisruptionList"
+                      class="traffic-ratp-disruption-list"
+                      @scroll="updateTrafficDisruptionScrollState"
+                    >
+                      <p
+                        v-if="
+                          getVisibleDisruptions(selectedRatpDetail.report)
+                            .length === 0
+                        "
+                        class="traffic-details__normal"
+                      >
+                        {{ t("traffic.emptyCategory") }}
+                      </p>
+                      <UserFriendlyTraffic
+                        v-for="disruption in getVisibleDisruptions(
+                          selectedRatpDetail.report,
+                        )"
+                        :key="disruption.id"
+                        :data-traffic-alert-id="disruption.id"
+                        :disruption="disruption"
+                        :highlighted="
+                          highlightedTrafficAlertId === disruption.id
+                        "
+                        :smart-formatting-enabled="
+                          settings.smartTrafficModalFormatting
+                        "
+                        collapsible
+                        compact
+                      />
+                    </div>
+                  </div>
                 </template>
               </article>
-            </div>
-          </article>
 
-          <div
-            v-if="!hasDisplayedBusLine"
-            class="traffic-ratp-row traffic-ratp-row--bus"
-          >
-            <div class="traffic-ratp-family" aria-hidden="true">
-              <span>BUS</span>
-            </div>
-            <p>{{ t("traffic.noBus") }}</p>
-          </div>
-        </section>
+              <div v-else key="empty" class="traffic-ratp-detail-empty">
+                <span
+                  class="traffic-ratp-detail-empty__icon"
+                  aria-hidden="true"
+                >
+                  <Info />
+                </span>
+                <strong>{{ t("traffic.detailPromptTitle") }}</strong>
+                <p>{{ t("traffic.detailPromptBody") }}</p>
+              </div>
+            </Transition>
+          </aside>
+        </div>
       </section>
     </template>
 
@@ -1334,9 +1466,18 @@ function getLineToneClass(
   width: 27px;
 }
 
+.traffic-ratp-workspace {
+  align-items: start;
+  display: grid;
+  gap: clamp(32px, 4vw, 72px);
+  grid-template-columns: minmax(420px, 0.82fr) minmax(440px, 1.18fr);
+}
+
 .traffic-ratp-groups {
   display: grid;
   gap: 13px;
+  min-width: 0;
+  padding-top: 6px;
 }
 
 .traffic-ratp-row {
@@ -1357,6 +1498,8 @@ function getLineToneClass(
 }
 
 .traffic-ratp-family span {
+  animation: traffic-ratp-family-arrive 420ms cubic-bezier(0.22, 1, 0.36, 1)
+    both;
   border-bottom: 3px solid currentColor;
   border-top: 3px solid currentColor;
   display: inline-flex;
@@ -1376,14 +1519,18 @@ function getLineToneClass(
 .traffic-ratp-line {
   align-items: center;
   background: #ffffff;
-  border: 2px solid #3ca70d;
+  border: 0;
   border-radius: 7px;
   display: inline-flex;
   height: 48px;
   justify-content: center;
-  padding: 3px;
+  padding: 0;
   position: relative;
   transform: none;
+  transition:
+    background-color 180ms ease,
+    box-shadow 220ms ease,
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
   width: 48px;
 }
 
@@ -1394,143 +1541,196 @@ function getLineToneClass(
   transform: none;
 }
 
-.traffic-ratp-line--planned,
-.traffic-ratp-line--information {
-  border-color: #d49400;
+.traffic-ratp-line--selected,
+.traffic-ratp-line--selected:hover,
+.traffic-ratp-line--selected:focus-visible {
+  background: #f3f1ff !important;
+  box-shadow:
+    0 0 0 3px rgba(51, 47, 159, 0.3),
+    0 9px 22px rgba(51, 47, 159, 0.18);
+  transform: translateY(-2px);
+  z-index: 2;
 }
 
-.traffic-ratp-line--disrupted,
-.traffic-ratp-line--error {
-  border-color: #e63214;
-  &:hover {
-    background: #e63214;
-  }
-}
-
-.traffic-ratp-line--tone-orange {
-  border-color: #f59e0b;
-  &:hover {
-    background: #f59e0b;
-  }
-}
-
-.traffic-ratp-line--tone-red {
-  border-color: #e63214;
-}
-
-.traffic-ratp-line--unknown {
-  border-color: #c8ceda;
-}
-
-.traffic-ratp-line :deep(.line-icon-badge) {
-  height: 36px;
-  justify-content: center;
-  min-width: 36px;
-}
-
-.traffic-ratp-line :deep(.line-icon-badge img) {
-  max-height: 36px;
-  max-width: 42px;
-}
-
-.traffic-ratp-line :deep(.line-icon-badge__fallback) {
-  border: 0;
-  height: 34px;
-}
-
-.traffic-ratp-line :deep(.line-icon-badge__label) {
-  font-size: 1.05rem;
-  min-width: 34px;
-  padding: 0 6px;
-}
-
-.traffic-ratp-line__status {
-  align-items: center;
-  background: #e63214;
-  border-radius: 999px;
-  bottom: -5px;
-  color: #ffffff;
-  font-size: 1rem;
-  font-weight: bold;
-  line-height: 14px;
-  height: 18px;
-  text-align: center;
-  justify-content: center;
-  position: absolute;
-  right: -5px;
-  width: 18px;
-}
-
-.traffic-ratp-line__status--roadwork {
-  background: transparent;
-  border: 0;
-  bottom: -4px;
-  box-shadow: none;
-  color: #8b8f99;
-  height: 18px;
-  right: -6px;
-  width: 18px;
-}
-
-.traffic-ratp-line__status--roadwork svg {
-  height: 23px;
-  stroke-width: 2.5;
-  width: 23px;
-}
-
-.traffic-ratp-line--planned .traffic-ratp-line__status,
-.traffic-ratp-line--information .traffic-ratp-line__status {
-  background: #f7b500;
-  color: #ffffff;
-}
-
-.traffic-ratp-line--tone-orange .traffic-ratp-line__status {
-  background: #f59e0b;
-}
-
-.traffic-ratp-line--tone-red .traffic-ratp-line__status {
-  background: #e63214;
-}
-
-.traffic-ratp-row-details {
+.traffic-ratp-detail-panel {
+  background: linear-gradient(145deg, #fbfcff 0%, #f5f7fb 100%);
+  border: 1px solid #e2e6ef;
+  border-radius: 16px;
+  box-shadow: 0 18px 48px rgba(16, 35, 63, 0.08);
   display: grid;
-  gap: 10px;
-  grid-column: 2;
-  margin-top: -6px;
+  height: clamp(420px, calc(100dvh - 220px), 780px);
+  min-height: 0;
+  overflow: hidden;
+  padding: 20px;
+  position: sticky;
+  top: 20px;
+  transition:
+    border-color 240ms ease,
+    box-shadow 280ms ease;
+}
+
+.traffic-ratp-detail-panel--active {
+  border-color: rgba(51, 47, 159, 0.22);
+  box-shadow:
+    0 20px 54px rgba(16, 35, 63, 0.11),
+    inset 0 3px 0 #332f9f;
 }
 
 .traffic-ratp-detail {
-  background: #ffffff;
-  border: 1px solid #e2e6ef;
-  border-radius: 7px;
-  box-shadow: 0 10px 28px rgba(16, 35, 63, 0.08);
+  background: transparent;
   display: grid;
-  gap: 10px;
-  max-width: 760px;
-  padding: 12px;
+  gap: 14px;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .traffic-ratp-detail > header {
   align-items: center;
+  border-bottom: 1px solid rgba(16, 35, 63, 0.09);
   display: flex;
-  gap: 10px;
+  gap: 12px;
+  padding: 2px 2px 16px;
 }
 
 .traffic-ratp-detail > header strong {
   color: var(--ink);
   display: block;
-  font-size: 1rem;
+  font-size: 1.08rem;
   font-weight: 950;
 }
 
 .traffic-ratp-detail > header span {
   color: var(--muted);
   display: block;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 850;
+  letter-spacing: 0.025em;
+  margin-top: 2px;
   text-transform: uppercase;
 }
 
+.traffic-ratp-disruption-viewport {
+  min-height: 0;
+  position: relative;
+}
+
+.traffic-ratp-disruption-viewport::before,
+.traffic-ratp-disruption-viewport::after {
+  content: "";
+  height: 28px;
+  left: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 8px;
+  transition: opacity 180ms ease;
+  z-index: 3;
+}
+
+.traffic-ratp-disruption-viewport::before {
+  background: linear-gradient(#f7f9fc, rgba(247, 249, 252, 0));
+  top: 0;
+}
+
+.traffic-ratp-disruption-viewport::after {
+  background: linear-gradient(rgba(247, 249, 252, 0), #f7f9fc);
+  bottom: 0;
+}
+
+.traffic-ratp-disruption-viewport--shadow-top::before,
+.traffic-ratp-disruption-viewport--shadow-bottom::after {
+  opacity: 1;
+}
+
+.traffic-ratp-disruption-list {
+  display: grid;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 8px 18px 2px;
+  scrollbar-color: rgba(51, 47, 159, 0.3) transparent;
+  scrollbar-width: thin;
+}
+
+.traffic-ratp-disruption-list::-webkit-scrollbar {
+  width: 7px;
+}
+
+.traffic-ratp-disruption-list::-webkit-scrollbar-thumb {
+  background: rgba(51, 47, 159, 0.28);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+
+.traffic-ratp-detail-empty {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 378px;
+  padding: 30px;
+  text-align: center;
+}
+
+.traffic-ratp-detail-empty__icon {
+  align-items: center;
+  background: #eeecff;
+  border-radius: 999px;
+  color: #332f9f;
+  display: inline-flex;
+  height: 52px;
+  justify-content: center;
+  margin-bottom: 16px;
+  width: 52px;
+}
+
+.traffic-ratp-detail-empty__icon svg {
+  height: 24px;
+  width: 24px;
+}
+
+.traffic-ratp-detail-empty strong {
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 950;
+}
+
+.traffic-ratp-detail-empty p {
+  font-size: 0.9rem;
+  font-weight: 720;
+  line-height: 1.5;
+  margin: 7px 0 0;
+  max-width: 330px;
+}
+
+.traffic-detail-swap-enter-active {
+  transition:
+    opacity 260ms ease,
+    transform 340ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.traffic-detail-swap-leave-active {
+  transition:
+    opacity 130ms ease,
+    transform 160ms ease;
+}
+
+.traffic-detail-swap-enter-from {
+  opacity: 0;
+  transform: translateX(12px) scale(0.985);
+}
+
+.traffic-detail-swap-leave-to {
+  opacity: 0;
+  transform: translateX(-6px) scale(0.99);
+}
 .traffic-disruption--compact {
   background: #f8f9fc;
   box-shadow: none;
@@ -1985,6 +2185,18 @@ function getLineToneClass(
   }
 }
 
+@keyframes traffic-ratp-family-arrive {
+  0% {
+    opacity: 0;
+    transform: translateX(-7px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 .traffic-line-pop-move,
 .traffic-card-pop-move {
   transition: transform 360ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -2017,6 +2229,11 @@ function getLineToneClass(
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .traffic-ratp-family span,
+  .traffic-ratp-line,
+  .traffic-ratp-detail-panel,
+  .traffic-detail-swap-enter-active,
+  .traffic-detail-swap-leave-active,
   .traffic-scope-burst-enter-active,
   .traffic-line-pop-move,
   .traffic-card-pop-move,
@@ -2035,7 +2252,61 @@ function getLineToneClass(
   }
 }
 
+@media (max-width: 1120px) {
+  .traffic-ratp-workspace {
+    gap: 28px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .traffic-ratp-detail-panel {
+    height: auto;
+    min-height: 300px;
+    overflow: visible;
+    position: relative;
+    top: auto;
+  }
+
+  .traffic-ratp-detail {
+    grid-template-rows: auto;
+    height: auto;
+    overflow: visible;
+  }
+
+  .traffic-ratp-disruption-list {
+    height: auto;
+    overflow: visible;
+    padding-right: 2px;
+  }
+
+  .traffic-ratp-disruption-viewport::before,
+  .traffic-ratp-disruption-viewport::after {
+    display: none;
+  }
+
+  .traffic-ratp-detail-empty {
+    min-height: 258px;
+  }
+}
 @media (max-width: 720px) {
+  .traffic-ratp-workspace {
+    gap: 20px;
+  }
+
+  .traffic-ratp-row {
+    gap: 10px;
+    grid-template-columns: 46px minmax(0, 1fr);
+  }
+
+  .traffic-ratp-detail-panel {
+    border-radius: 12px;
+    min-height: 0;
+    padding: 14px;
+  }
+
+  .traffic-ratp-detail-empty {
+    min-height: 190px;
+    padding: 20px;
+  }
   .traffic-ratp-heading,
   .traffic-ratp-heading__title,
   .traffic-hero {

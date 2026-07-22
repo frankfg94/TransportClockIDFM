@@ -143,7 +143,19 @@ describe("TrafficPage", () => {
     expect(wrapper.text()).toContain("RER");
     expect(wrapper.text()).toContain("Tram");
     expect(wrapper.text()).not.toContain("Bus 74");
+    expect(wrapper.findAll(".line-traffic-icon")).toHaveLength(
+      wrapper.findAll(".traffic-ratp-line").length,
+    );
+    const trafficFrame = wrapper.get(".line-traffic-icon__frame rect");
+    expect(trafficFrame.attributes("pathLength")).toBe("100");
+    expect(trafficFrame.attributes("stroke-dasharray")).toBe("102 100");
 
+    const ratpWorkspace = wrapper.get(".traffic-ratp-workspace");
+    expect(ratpWorkspace.find(".traffic-ratp-groups").exists()).toBe(true);
+    expect(ratpWorkspace.find(".traffic-ratp-detail-panel").exists()).toBe(
+      true,
+    );
+    expect(wrapper.text()).toContain("Choisissez une ligne");
     const futureOnlyButton = wrapper
       .findAll(".traffic-ratp-line")
       .find((button) =>
@@ -168,8 +180,20 @@ describe("TrafficPage", () => {
 
     expect(rerButton).toBeTruthy();
     expect(rerButton!.classes()).toContain("traffic-ratp-line--tone-red");
-    expect(rerButton!.get(".traffic-ratp-line__status").text()).toBe("x");
+    expect(rerButton!.get(".line-traffic-icon__status").text()).toBe("x");
     await rerButton!.trigger("click");
+    expect(rerButton!.attributes("aria-pressed")).toBe("true");
+    expect(rerButton!.classes()).toContain("traffic-ratp-line--selected");
+    expect(
+      wrapper.findAll(".traffic-ratp-detail-panel .traffic-ratp-detail"),
+    ).toHaveLength(1);
+    expect(wrapper.find(".traffic-ratp-disruption-list").exists()).toBe(true);
+    expect(
+      wrapper.findAll(
+        ".traffic-ratp-disruption-list .user-friendly-traffic",
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(wrapper.text()).not.toContain("Choisissez une ligne");
     expect(wrapper.text()).toContain("RER B");
     expect(wrapper.text()).toContain("En cours");
     expect(wrapper.text()).toContain("A venir");
@@ -202,9 +226,7 @@ describe("TrafficPage", () => {
     expect(wrapper.text()).toContain("RER B");
     expect(wrapper.text()).toContain("Travaux planifies");
     expect(
-      wrapper
-        .get('[data-traffic-alert-id="rer-b-upcoming-work"]')
-        .classes(),
+      wrapper.get('[data-traffic-alert-id="rer-b-upcoming-work"]').classes(),
     ).toContain("traffic-disruption--target");
 
     const activeTab = wrapper.get(".traffic-timing-tabs__button--active");
@@ -266,9 +288,8 @@ async function mountTrafficPage(
     };
   });
 
-  const { default: TrafficPage } = await import(
-    "../src/features/traffic/TrafficPage.vue"
-  );
+  const { default: TrafficPage } =
+    await import("../src/features/traffic/TrafficPage.vue");
   const wrapper = mount(TrafficPage);
 
   await flushPromises();

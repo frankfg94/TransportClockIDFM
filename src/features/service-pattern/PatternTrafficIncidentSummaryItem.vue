@@ -133,6 +133,11 @@ const emit = defineEmits<{ activate: [] }>();
   color: #2563eb;
 }
 
+.pattern-traffic-friendly-summary__item--sport
+  .pattern-traffic-friendly-summary__incident-icon {
+  color: #7c3aed;
+}
+
 .pattern-traffic-friendly-summary__item--celebration
   .pattern-traffic-friendly-summary__incident-icon,
 .pattern-traffic-friendly-summary__item--medical

@@ -56,6 +56,80 @@ describe("traffic modal intelligent formatting", () => {
     expectLocalDate(tiles[1].end, [2026, 7, 7]);
   });
 
+  it("extracts the date of a sporting event introduced by le", () => {
+    const disruption = createDisruption(
+      "tour-de-france",
+      "Arrivee du Tour de France le dimanche 26 juillet",
+      [
+        "Arrivee du Tour de France le dimanche 26 juillet : certaines stations seront fermees.",
+        "Manifestation sportive - Autre",
+      ].join("\n"),
+      [{ begin: "20260722T161700", end: "20260727T043000" }],
+    );
+    disruption.kind = "information";
+    disruption.motif = "Manifestation sportive";
+
+    const [tile] = extractTrafficModalDateTiles(disruption);
+
+    expect(tile).toMatchObject({
+      title: "Arrivee du Tour de France",
+      evening: false,
+      replacementBus: false,
+      timeWindows: [],
+    });
+    expectLocalDate(tile.start, [2026, 6, 26]);
+    expectLocalDate(tile.end, [2026, 6, 26]);
+  });
+
+  it("keeps a stable RER E title across two date ranges", () => {
+    const disruption = createDisruption(
+      "rer-e-nanterre-chelles",
+      "RER E : Nanterre - Chelles 15/06 - 2/10 et du 15/10 - 11/12",
+      [
+        "Période : en semaine à partir de 22h45.",
+        "Dates : du lundi 15 juin au vendredi 2 octobre et du jeudi 15 octobre au vendredi 11 décembre.",
+        "Le dernier train CONY de Nanterre-la-Folie vers Chelles Gournay est à 22h49, sauf le 15 juin : bus de remplacement.",
+      ].join("\n"),
+      [{ begin: "20260615T224500", end: "20261212T020000" }],
+    );
+
+    const tiles = extractTrafficModalDateTiles(
+      disruption,
+      "Travaux sur le réseau ferroviaire",
+    );
+
+    expect(tiles).toHaveLength(2);
+    expect(tiles[0].title).toBe("Nanterre - Chelles");
+    expect(tiles[0].periods).toHaveLength(2);
+    expectLocalDate(tiles[0].periods[0].start, [2026, 5, 15]);
+    expectLocalDate(tiles[0].periods[0].end, [2026, 9, 2]);
+    expectLocalDate(tiles[0].periods[1].start, [2026, 9, 15]);
+    expectLocalDate(tiles[0].periods[1].end, [2026, 11, 11]);
+    expect(tiles[1].title).toBe(
+      "Le dernier train CONY de Nanterre-la-Folie vers Chelles Gournay est à 22h49",
+    );
+  });
+
+  it("uses the useful text after a generic Attention date label", () => {
+    const disruption = createDisruption(
+      "ligne-j-mantes-via-poissy",
+      "Ligne J : Paris St-Lazare <> Mantes via Poissy du 20/07 au 14/08",
+      [
+        "Période : en semaine, à partir de 21h40.",
+        "Dates : du lundi 20 juillet au vendredi 14 août.",
+        "Un service de bus de remplacement est mis en place.",
+        "Attention le lundi 20 juillet les bus seront au départ : - Houilles Carrières sur Seine <> Les Mureaux.",
+      ].join("\n"),
+      [{ begin: "20260720T214000", end: "20260815T020000" }],
+    );
+
+    const tiles = extractTrafficModalDateTiles(disruption, "Travaux");
+
+    expect(tiles).toHaveLength(2);
+    expect(tiles[1].title).toBe("Les bus seront au départ");
+    expect(tiles[1].title).not.toBe("Attention");
+  });
+
   it("extracts an evening start and avoids duplicate textual ranges", () => {
     const disruption = createDisruption(
       "evening-works",

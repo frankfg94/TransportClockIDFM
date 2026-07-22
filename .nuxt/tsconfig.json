@@ -166,7 +166,6 @@
     "../packages/nuxt-plugin-host/src/runtime/server",
     "../packages/nuxt-plugin-host/src/dist/runtime/server",
     "../node_modules/runtime/server",
-    "../node_modules/dist/runtime/server",
-    "dev"
+    "../node_modules/dist/runtime/server"
   ]
 }

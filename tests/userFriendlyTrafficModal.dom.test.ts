@@ -73,6 +73,12 @@ describe("UserFriendlyTrafficModal", () => {
       props: { alert, open: true },
     });
 
+    expect(wrapper.get(".user-friendly-traffic").classes()).toContain(
+      "user-friendly-traffic--plain",
+    );
+    expect(wrapper.get(".user-friendly-traffic").classes()).toContain(
+      "user-friendly-traffic--compact",
+    );
     const summaryItem = wrapper.get(".pattern-traffic-friendly-summary__item");
     expect(summaryItem.classes()).toContain("pattern-traffic-friendly-summary__item--works");
     expect(summaryItem.classes()).toContain("pattern-traffic-friendly-summary__item--critical");
@@ -89,6 +95,46 @@ describe("UserFriendlyTrafficModal", () => {
         .text()
         .match(/Métro 4 : Travaux - Trafic interrompu/gu),
     ).toHaveLength(1);
+
+    wrapper.unmount();
+  });
+
+  it("uses the sport icon and event-day tile for a sporting event", async () => {
+    mockFrenchI18n();
+    const { default: UserFriendlyTrafficModal } =
+      await import("../src/components/UserFriendlyTrafficModal.vue");
+    const alert: TrafficAlertModalData = {
+      label: "Manifestation sportive",
+      tone: "orange",
+      disruption: {
+        id: "tour-de-france",
+        title: "Arrivee du Tour de France le dimanche 26 juillet",
+        message:
+          "Certaines stations seront fermees a la demande de la Prefecture de Police.",
+        motif: "Manifestation sportive - Autre",
+        kind: "information",
+        applicationPeriods: [
+          { begin: "20260722T161700", end: "20260727T043000" },
+        ],
+        impactedLineRefs: [],
+        impactedStopNames: [],
+      },
+    };
+    const wrapper = mount(UserFriendlyTrafficModal, {
+      attachTo: document.body,
+      props: { alert, open: true },
+    });
+
+    const summaryItem = wrapper.get(".pattern-traffic-friendly-summary__item");
+    expect(summaryItem.classes()).toContain(
+      "pattern-traffic-friendly-summary__item--sport",
+    );
+    expect(
+      summaryItem.get(".pattern-traffic-friendly-summary__incident-icon svg").classes(),
+    ).toContain("lucide-trophy");
+    const tile = wrapper.get(".traffic-alert-modal__date-tile");
+    expect(tile.text()).toContain("Arrivee du Tour de France");
+    expect(tile.text()).toContain("26 juil.");
 
     wrapper.unmount();
   });
@@ -126,6 +172,13 @@ describe("UserFriendlyTrafficModal", () => {
         smartFormattingEnabled: true,
       },
     });
+
+    expect(wrapper.find(".traffic-alert-modal__detail").exists()).toBe(false);
+    const toggle = wrapper.get(".user-friendly-traffic__toggle");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(wrapper.findAll(".traffic-alert-modal__date-tile")).toHaveLength(1);
+
+    await toggle.trigger("click");
 
     const tiles = wrapper.findAll(".traffic-alert-modal__date-tile");
     expect(tiles).toHaveLength(2);
@@ -368,6 +421,7 @@ describe("UserFriendlyTrafficModal", () => {
     const updatedDots = wrapper.findAll(".traffic-alert-modal__stepper-dot");
     expect(updatedDots[1].classes()).toContain("traffic-alert-modal__stepper-dot--active");
     expect(updatedDots[1].attributes("aria-current")).toBe("step");
+    await wrapper.get(".user-friendly-traffic__toggle").trigger("click");
     expect(wrapper.get(".traffic-alert-modal__detail").text()).toContain(
       "dégradations par un tiers",
     );

@@ -18,6 +18,7 @@ import {
   Siren,
   TreePine,
   TriangleAlert,
+  Trophy,
   UsersRound,
   Wrench,
 } from "lucide-vue-next";
@@ -34,6 +35,7 @@ export const trafficIncidentIcons: Record<
   strike: Megaphone,
   weather: CloudLightning,
   concert: Music,
+  sport: Trophy,
   celebration: PartyPopper,
   animal: PawPrint,
   "fallen-tree": TreePine,

@@ -11,6 +11,7 @@ export type PatternTrafficSummaryIncidentType =
   | "strike"
   | "weather"
   | "concert"
+  | "sport"
   | "celebration"
   | "animal"
   | "fallen-tree"
@@ -73,6 +74,16 @@ const WEATHER_KEYWORDS = [
   "storm",
 ];
 const CONCERT_KEYWORDS = ["concert", "festival de musique", "fete de la musique", "music festival"];
+const SPORT_KEYWORDS = [
+  "manifestation sportive",
+  "evenement sportif",
+  "epreuve sportive",
+  "competition sportive",
+  "course cycliste",
+  "tour de france",
+  "marathon",
+  "sporting event",
+];
 const CELEBRATION_KEYWORDS = [
   "feu d'artifice",
   "feu d’artifice",
@@ -308,6 +319,7 @@ export function classifyPatternTrafficIncident(
     return "works";
   }
   if (containsAny(searchable, CONCERT_KEYWORDS)) return "concert";
+  if (containsAny(searchable, SPORT_KEYWORDS)) return "sport";
   if (containsAny(searchable, CELEBRATION_KEYWORDS)) return "celebration";
   if (containsAny(searchable, ANIMAL_KEYWORDS)) return "animal";
   if (containsAny(searchable, FALLEN_TREE_KEYWORDS)) return "fallen-tree";

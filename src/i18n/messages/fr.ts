@@ -794,6 +794,7 @@ export const fr = {
       strike: "Mouvement social",
       weather: "Intempéries",
       concert: "Concert",
+      sport: "Manifestation sportive",
       celebration: "Fête",
       animal: "Animal sur les voies",
       "fallen-tree": "Arbre tombé sur les voies",
@@ -830,6 +831,10 @@ export const fr = {
     optimized: "Optimise",
     noActiveRail: "Aucune ligne ferree active sur le tableau.",
     compactAria: "Information trafic compact par ligne active",
+    detailAria: "Detail de la ligne selectionnee",
+    detailPromptTitle: "Choisissez une ligne",
+    detailPromptBody:
+      "Selectionnez une ligne dans l'espace de commande pour afficher le detail du trafic.",
     cardsAria: "Information trafic par ligne active",
     noBus: "Les bus ne sont pas affiches pour le moment.",
     summaryOne: "{count} ligne avec info trafic",
@@ -852,6 +857,9 @@ export const fr = {
     upcoming: "A venir",
     emptyCategory: "Aucune annonce dans cette categorie.",
     affectedStops: "Arrets concernes:",
+    moreStops: "+{count} autres",
+    showDisruptionDetails: "Voir le detail",
+    hideDisruptionDetails: "Reduire",
     loadFailed: "Impossible de charger l'information trafic.",
     allLinesLoadFailed: "Impossible de charger toutes les lignes.",
     family: {
