@@ -149,12 +149,41 @@
   }
 
   .departure {
-    gap: 10px;
-    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 8px;
+    grid-template-areas:
+      "main main main main"
+      "time pattern alarm status";
+    grid-template-columns: minmax(72px, 1fr) auto auto auto;
+    row-gap: 8px;
   }
 
   .departure__main {
-    grid-column: 1 / -1;
+    align-items: baseline;
+    display: flex;
+    gap: 8px;
+    grid-area: main;
+    min-width: 0;
+  }
+
+  .departure__main-button {
+    align-items: baseline;
+    display: flex;
+  }
+
+  .departure__main strong {
+    flex: 0 1 auto;
+  }
+
+  .departure__main .departure__meta {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .departure__main .departure__meta span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .departure__time {
@@ -162,6 +191,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
+    grid-area: time;
     min-width: 0;
     text-align: left;
   }
@@ -176,18 +206,17 @@
   }
 
   .status-pill {
+    grid-area: status;
     justify-self: start;
   }
 
   .departure-alarm-button {
-    grid-column: 2;
-    grid-row: 2;
+    grid-area: alarm;
     opacity: 1;
   }
 
   .departure-pattern-button {
-    grid-column: 1;
-    grid-row: 2;
+    grid-area: pattern;
     justify-self: start;
     opacity: 1;
   }
