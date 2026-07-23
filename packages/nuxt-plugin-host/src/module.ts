@@ -1,14 +1,6 @@
 import path from "node:path";
-import {
-  addServerHandler,
-  addServerTemplate,
-  addTemplate,
-  defineNuxtModule,
-} from "@nuxt/kit";
-import {
-  TRANSPORT_CLOCK_PLUGIN_API_VERSION,
-  type TransportClockPluginManifest,
-} from "./types";
+import { addServerHandler, addServerTemplate, addTemplate, defineNuxtModule } from "@nuxt/kit";
+import { TRANSPORT_CLOCK_PLUGIN_API_VERSION, type TransportClockPluginManifest } from "./types";
 
 export interface TransportClockPluginHostOptions {
   disallow?: boolean;
@@ -29,14 +21,10 @@ export default defineNuxtModule<TransportClockPluginHostOptions>({
   },
   defaults: { disallow: false, plugins: [] },
   async setup(options, nuxt) {
-    const specifiers = [
-      ...new Set(options.plugins?.map((value) => value.trim()).filter(Boolean)),
-    ];
+    const specifiers = [...new Set(options.plugins?.map((value) => value.trim()).filter(Boolean))];
 
     if (options.disallow && specifiers.length > 0) {
-      throw new Error(
-        "DISALLOW_PLUGINS=true interdit les packages listés dans ENABLED_PLUGINS.",
-      );
+      throw new Error("DISALLOW_PLUGINS=true interdit les packages listés dans ENABLED_PLUGINS.");
     }
 
     const loadedPlugins: LoadedPlugin[] = [];
@@ -106,15 +94,15 @@ export default defineNuxtModule<TransportClockPluginHostOptions>({
       getContents: () => createServerRegistry(loadedPlugins, healthChecks),
     });
 
-    const serverHostPath = path.resolve(
-      nuxt.options.rootDir,
-      "server/services/pluginHost.ts",
-    );
+    const serverHostPath = path.resolve(nuxt.options.rootDir, "server/services/pluginHost.ts");
 
     nuxt.options.alias["#transport-clock/plugins"] = clientTemplate.dst;
     nuxt.options.alias["#transport-clock/plugin-server"] = serverHostPath;
-    nuxt.options.nitro.alias ??= {};
-    nuxt.options.nitro.alias["#transport-clock/plugin-server"] = serverHostPath;
+    const nitroOptions = nuxt.options as typeof nuxt.options & {
+      nitro: { alias?: Record<string, string> };
+    };
+    nitroOptions.nitro.alias ??= {};
+    nitroOptions.nitro.alias["#transport-clock/plugin-server"] = serverHostPath;
   },
 });
 
@@ -131,10 +119,7 @@ function createClientRegistry(entries: string[]): string {
   ].join("\n");
 }
 
-function createServerRegistry(
-  plugins: LoadedPlugin[],
-  healthChecks: string[],
-): string {
+function createServerRegistry(plugins: LoadedPlugin[], healthChecks: string[]): string {
   const imports = healthChecks.map(
     (entry, index) => `import healthCheck${index} from ${JSON.stringify(entry)};`,
   );

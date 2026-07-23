@@ -1,16 +1,11 @@
 <script setup lang="ts">
 import AppModal from "../../components/AppModal.vue";
 import AppRightPanel from "../../components/AppRightPanel.vue";
-import LoadingClock, {
-  type LoadingClockDirection,
-} from "../../components/LoadingClock.vue";
+import LoadingClock, { type LoadingClockDirection } from "../../components/LoadingClock.vue";
 import { useI18n } from "../../i18n";
 import type { TrafficDisruption } from "../traffic";
 import PatternTrafficCalendar from "./PatternTrafficCalendar.vue";
-import type {
-  PatternTrafficCalendarDay,
-  PatternTrafficCalendarMonth,
-} from "./trafficCalendar";
+import type { PatternTrafficCalendarDay, PatternTrafficCalendarMonth } from "./trafficCalendar";
 import type { PatternTrafficSummaryEntry } from "./trafficCalendarSummary";
 
 withDefaults(
@@ -100,21 +95,19 @@ const { t } = useI18n();
       :id-prefix="`${idPrefix}-modal`"
       :user-friendly-summary="userFriendlySummary"
       mode="modal"
+      focusable-summaries
       :show-identity="false"
       @previous="emit('previous')"
       @next="emit('next')"
       @reset-today="emit('resetToday')"
       @select="emit('select', $event)"
+      @focus-disruption="emit('focusDisruption', $event)"
     />
   </AppModal>
 
   <Teleport to="body">
     <Transition name="loading-clock-overlay">
-      <LoadingClock
-        v-if="loadingDateKey"
-        overlay
-        :direction="loadingDirection"
-      />
+      <LoadingClock v-if="loadingDateKey" overlay :direction="loadingDirection" />
     </Transition>
   </Teleport>
 </template>

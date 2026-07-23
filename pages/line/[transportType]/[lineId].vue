@@ -1,7 +1,7 @@
 <template>
   <main class="line-pattern-page">
     <DeparturePatternModal
-      v-if="activeView === 'schema'"
+      v-if="isSchemaView"
       embedded
       open
       wheel-zoom
@@ -21,30 +21,18 @@
       :show-interruption-walking-times="settings.showInterruptionWalkingTimes"
       :pattern-compact-branch-gap="settings.patternCompactBranchGap"
       :pattern-compact-fork-gap="settings.patternCompactForkGap"
-      :pattern-realistic-min-gap-coefficient="
-        settings.patternRealisticMinGapCoefficient
-      "
-      :pattern-realistic-max-gap-coefficient="
-        settings.patternRealisticMaxGapCoefficient
-      "
+      :pattern-realistic-min-gap-coefficient="settings.patternRealisticMinGapCoefficient"
+      :pattern-realistic-max-gap-coefficient="settings.patternRealisticMaxGapCoefficient"
       :rich-transfer-tooltips="settings.richTransferTooltips"
       :reduce-motion="settings.reduceMotion"
       :smart-traffic-detection="settings.smartTrafficDetection"
       :traffic-calendar-impact-scope="settings.trafficCalendarImpactScope"
       :traffic-warning-lookahead-days="settings.trafficWarningLookaheadDays"
       :transfer-bundle-retention-days="settings.transferBundleRetentionDays"
-      :transfer-bundle-request-concurrency="
-        settings.transferBundleRequestConcurrency
-      "
-      :transfer-bundle-request-spacing-ms="
-        settings.transferBundleRequestSpacingMs
-      "
-      :transfer-bundle-local-cache-enabled="
-        settings.transferBundleLocalCacheEnabled
-      "
-      :transfer-bundle-backend-cache-enabled="
-        settings.transferBundleBackendCacheEnabled
-      "
+      :transfer-bundle-request-concurrency="settings.transferBundleRequestConcurrency"
+      :transfer-bundle-request-spacing-ms="settings.transferBundleRequestSpacingMs"
+      :transfer-bundle-local-cache-enabled="settings.transferBundleLocalCacheEnabled"
+      :transfer-bundle-backend-cache-enabled="settings.transferBundleBackendCacheEnabled"
       :transport-type="transferBundleTransportType"
       :transfer-resolver-mode="settings.transferResolverMode"
       @close="navigateHome"
@@ -99,22 +87,11 @@
       </template>
 
       <template #flow-actions-prefix>
-        <nav
-          class="line-pattern-page__view-tabs"
-          :aria-label="t('linePage.viewTabsAria')"
-        >
-          <button
-            type="button"
-            :aria-pressed="activeView === 'schema'"
-            @click.stop="changeView('schema')"
-          >
+        <nav class="line-pattern-page__view-tabs" :aria-label="t('linePage.viewTabsAria')">
+          <button type="button" :aria-pressed="isSchemaView" @click.stop="changeView('schema')">
             {{ t("linePage.schema") }}
           </button>
-          <button
-            type="button"
-            :aria-pressed="activeView === 'map'"
-            @click.stop="changeView('map')"
-          >
+          <button type="button" :aria-pressed="isMapView" @click.stop="changeView('map')">
             {{ t("linePage.map") }}
           </button>
         </nav>
@@ -128,9 +105,8 @@
         :line="lineMapLine"
         :selectable="false"
         ghost-network-enabled
-        :ghost-network-scope="
-          settings.ghostNetworkStructuralOnly ? 'structural' : 'all'
-        "
+        :ghost-network-scope="settings.ghostNetworkStructuralOnly ? 'structural' : 'all'"
+        :gtfs-line-geometry-enabled="settings.gtfsLineGeometryEnabled"
         :reduce-motion="settings.reduceMotion"
         :smart-traffic-detection="settings.smartTrafficDetection"
         :traffic-calendar-impact-scope="settings.trafficCalendarImpactScope"
@@ -163,18 +139,10 @@
             class="line-pattern-page__view-tabs line-pattern-page__view-tabs--map"
             :aria-label="t('linePage.viewTabsAria')"
           >
-            <button
-              type="button"
-              :aria-pressed="activeView === 'schema'"
-              @click.stop="changeView('schema')"
-            >
+            <button type="button" :aria-pressed="isSchemaView" @click.stop="changeView('schema')">
               {{ t("linePage.schema") }}
             </button>
-            <button
-              type="button"
-              :aria-pressed="activeView === 'map'"
-              @click.stop="changeView('map')"
-            >
+            <button type="button" :aria-pressed="isMapView" @click.stop="changeView('map')">
               {{ t("linePage.map") }}
             </button>
           </nav>
@@ -210,9 +178,7 @@
     </section>
 
     <section
-      v-if="
-        activeView === 'schema' && (isPatternRequestPending || errorMessage)
-      "
+      v-if="isSchemaView && (isPatternRequestPending || errorMessage)"
       class="line-pattern-page__fallback"
       aria-live="polite"
     >
@@ -235,19 +201,10 @@
 </template>
 
 <script setup lang="ts">
-import {
-  computed,
-  defineAsyncComponent,
-  onBeforeUnmount,
-  ref,
-  watch,
-} from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
 import { ArrowLeft, Edit2 } from "lucide-vue-next";
 import { useFetch, useRoute, navigateTo } from "#imports";
-import {
-  filterTerminalOnly,
-  useAppSettings,
-} from "../../../src/features/app-settings";
+import { filterTerminalOnly, useAppSettings } from "../../../src/features/app-settings";
 import {
   createLinePresentation,
   transitModeToFamily,
@@ -261,8 +218,7 @@ import type {
 import { useI18n } from "../../../src/i18n";
 
 const DeparturePatternModal = defineAsyncComponent(
-  () =>
-    import("../../../src/features/service-pattern/DeparturePatternModal.vue"),
+  () => import("../../../src/features/service-pattern/DeparturePatternModal.vue"),
 );
 const DetailedLineMapPicker = defineAsyncComponent(
   () => import("../../../src/features/line-map/DetailedLineMapPicker.vue"),
@@ -298,11 +254,7 @@ const apiUrl = computed(() => {
     )}/pattern${suffix}`,
   );
 });
-const {
-  data: patternView,
-  pending,
-  error,
-} = useFetch<LinePatternViewResponse>(apiUrl);
+const { data: patternView, pending, error } = useFetch<LinePatternViewResponse>(apiUrl.value);
 const patternRequestTimedOut = ref(false);
 const lineSelectorOpen = ref(false);
 let patternRequestTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -310,18 +262,14 @@ const selectedDirectionId = computed(
   () => firstRouteQuery(route.query.direction) ?? LINE_COMPLETE_DIRECTION_ID,
 );
 const isPatternRequestPending = computed(
-  () =>
-    pending.value &&
-    !patternView.value &&
-    !error.value &&
-    !patternRequestTimedOut.value,
+  () => pending.value && !patternView.value && !error.value && !patternRequestTimedOut.value,
 );
-const isFullLineSelected = computed(
-  () => selectedDirectionId.value === LINE_COMPLETE_DIRECTION_ID,
-);
+const isFullLineSelected = computed(() => selectedDirectionId.value === LINE_COMPLETE_DIRECTION_ID);
 const activeView = computed<LinePageView>(() =>
   firstRouteQuery(route.query.view) === "map" ? "map" : "schema",
 );
+const isSchemaView = computed(() => activeView.value === "schema");
+const isMapView = computed(() => activeView.value === "map");
 const directionOptions = computed(() => [
   {
     id: LINE_COMPLETE_DIRECTION_ID,
@@ -353,9 +301,7 @@ const pageTitle = computed(() => {
   return `${route.params.transportType}/${route.params.lineId}`;
 });
 const transferBundleTransportType = computed(
-  () =>
-    patternView.value?.transportType ??
-    firstRouteQuery(route.params.transportType),
+  () => patternView.value?.transportType ?? firstRouteQuery(route.params.transportType),
 );
 const lineMapLine = computed<LineSearchOption | undefined>(() => {
   const view = patternView.value;
@@ -365,9 +311,7 @@ const lineMapLine = computed<LineSearchOption | undefined>(() => {
     return undefined;
   }
 
-  const family =
-    transitModeToFamily(boardLine.mode) ??
-    transportTypeToFamily(view.transportType);
+  const family = transitModeToFamily(boardLine.mode) ?? transportTypeToFamily(view.transportType);
   const presentation = createLinePresentation({
     code: boardLine.shortName,
     color: boardLine.color,

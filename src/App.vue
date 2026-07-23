@@ -10,6 +10,8 @@ import {
   ref,
   watch,
 } from "vue";
+import type { GtfsPublicStatus } from "../server/services/gtfs/types";
+
 import Draggable from "vuedraggable";
 import BoardVisibilityControls from "./components/BoardVisibilityControls.vue";
 import ContextMenu from "./components/ContextMenu.vue";
@@ -36,11 +38,9 @@ import {
   type BoardTrafficAlert,
 } from "./features/traffic";
 import { transitModeToFamily } from "./services/linePresentation";
-import {
-  fetchBoardDepartures,
-  fetchDirectionGroupsForStation,
-} from "./services/idfm";
+import { fetchBoardDepartures, fetchDirectionGroupsForStation } from "./services/idfm";
 import { toServerApiUrl } from "./services/serverApi";
+import { fetchGtfsStatus } from "./services/gtfsStatus";
 import {
   cancelDepartureAlarm,
   getDepartureAlarmCapability,
@@ -122,9 +122,7 @@ const DepartureAlarmModal = defineAsyncComponent(
 const DeparturePatternModal = defineAsyncComponent(
   () => import("./features/service-pattern/DeparturePatternModal.vue"),
 );
-const StationBoardModal = defineAsyncComponent(
-  () => import("./components/StationBoardModal.vue"),
-);
+const StationBoardModal = defineAsyncComponent(() => import("./components/StationBoardModal.vue"));
 const WeatherForecastModal = defineAsyncComponent(
   () => import("./features/weather/WeatherForecastModal.vue"),
 );
@@ -167,16 +165,13 @@ interface NetexCacheStatus {
 
 const REFRESH_INTERVAL_MS = 30_000;
 const MOBILE_BREAKPOINT_QUERY = "(max-width: 760px)";
-const DESKTOP_DRAG_BREAKPOINT_QUERY =
-  "(min-width: 761px) and (hover: hover) and (pointer: fine)";
+const DESKTOP_DRAG_BREAKPOINT_QUERY = "(min-width: 761px) and (hover: hover) and (pointer: fine)";
 const NEW_BOARD_SCROLL_FALLBACK_MS = 420;
 const NEW_BOARD_HIGHLIGHT_MS = 500;
 const NEW_BOARD_BOTTOM_INSET_PX = 104;
 const route = useRoute();
 const router = useRouter();
-const presetState = reactive<TransitPresetState>(
-  createDefaultTransitPresetState(transitBoards),
-);
+const presetState = reactive<TransitPresetState>(createDefaultTransitPresetState(transitBoards));
 const preferences = reactive(createDefaultPreferences(transitBoards));
 const { settings, updateSettings } = useAppSettings();
 const { d, t } = useI18n();
@@ -209,6 +204,7 @@ const alarmTarget = ref<{
 const alarmToast = ref<DepartureAlarm>();
 const departureAlarms = ref<DepartureAlarm[]>([]);
 const nativeAlarmPlatform = isNativeDepartureAlarmPlatform();
+
 const alarmNativePermissionState = ref<"ready" | "required" | "checking">(
   nativeAlarmPlatform ? "checking" : "ready",
 );
@@ -226,6 +222,7 @@ const pageVisible = ref(true);
 const nowTick = ref(Date.now());
 const netexCacheStatus = ref<NetexCacheStatus>();
 const netexCacheStatusLoaded = ref(false);
+const gtfsStatus = ref<GtfsPublicStatus>();
 const trafficReports = ref<TrafficLineReport[]>([]);
 const mobileBoardTogglesInContextMenu = ref(false);
 const desktopDragEnabled = ref(false);
@@ -246,15 +243,10 @@ let boardRevealCleanup: (() => void) | undefined;
 let boardRevealRequest = 0;
 let mobileBreakpointQuery: MediaQueryList | undefined;
 let desktopDragBreakpointQuery: MediaQueryList | undefined;
-const departureServiceTypeCache = new Map<
-  string,
-  Promise<DepartureServiceType | undefined>
->();
+const departureServiceTypeCache = new Map<string, Promise<DepartureServiceType | undefined>>();
 const isFullscreenPanelOpen = computed(() => Boolean(fullscreenPanelBoard.value));
 const fullscreenPanelDesign = computed<FullscreenStationPanelDesign>(
-  () =>
-    fullscreenPanelRouteDesignOverride.value ??
-    settings.value.fullscreenStationPanelDesign,
+  () => fullscreenPanelRouteDesignOverride.value ?? settings.value.fullscreenStationPanelDesign,
 );
 
 const placeOptions = computed(() =>
@@ -268,12 +260,8 @@ const activePlace = computed<TransitPlacePreset | undefined>(() =>
   getTransitPlaceById(presetState, activePlaceId.value),
 );
 const activePlaceLabel = computed(() => getPlaceLabel(activePlace.value));
-const placeDropdownEnabled = computed(
-  () => settings.value.placePresetNavigationMode !== "swipe",
-);
-const placeSwipeEnabled = computed(
-  () => settings.value.placePresetNavigationMode !== "dropdown",
-);
+const placeDropdownEnabled = computed(() => settings.value.placePresetNavigationMode !== "swipe");
+const placeSwipeEnabled = computed(() => settings.value.placePresetNavigationMode !== "dropdown");
 const placeSwipe = usePlaceSwipeNavigation({
   places: placeOptions,
   activePlaceId,
@@ -300,9 +288,7 @@ const allBoards = computed<TransitBoardConfig[]>(() => [
 ]);
 
 const orderedBoards = computed<TransitBoardConfig[]>(() => {
-  const orderById = new Map(
-    preferences.boardOrderIds.map((boardId, index) => [boardId, index]),
-  );
+  const orderById = new Map(preferences.boardOrderIds.map((boardId, index) => [boardId, index]));
 
   return [...allBoards.value].sort((left, right) => {
     const leftIndex = orderById.get(left.id) ?? Number.MAX_SAFE_INTEGER;
@@ -316,10 +302,7 @@ const stationModalMode = computed<"dropdown" | "multistep">(() =>
 );
 
 function syncActivePreferencesFromState(): void {
-  const resolvedPlaceId = resolveTransitPlaceId(
-    presetState,
-    activePlaceId.value,
-  );
+  const resolvedPlaceId = resolveTransitPlaceId(presetState, activePlaceId.value);
   const place = getTransitPlaceById(presetState, resolvedPlaceId);
 
   if (!place) {
@@ -332,11 +315,7 @@ function syncActivePreferencesFromState(): void {
 }
 
 function saveActiveTransitPreferences(): void {
-  const nextState = updateTransitPlacePreferences(
-    presetState,
-    activePlaceId.value,
-    preferences,
-  );
+  const nextState = updateTransitPlacePreferences(presetState, activePlaceId.value, preferences);
 
   Object.assign(presetState, nextState);
   saveTransitPresetState(nextState);
@@ -362,9 +341,7 @@ function getRouteFullscreenStationRequest(): string | undefined {
   return getRouteQueryParam("fullscreen");
 }
 
-function getRouteFullscreenPanelDesign():
-  | FullscreenStationPanelDesign
-  | undefined {
+function getRouteFullscreenPanelDesign(): FullscreenStationPanelDesign | undefined {
   const value =
     getRouteQueryParam("fullscreenDisplay") ??
     getRouteQueryParam("fullscreenDesign") ??
@@ -373,12 +350,8 @@ function getRouteFullscreenPanelDesign():
   return isFullscreenStationPanelDesign(value) ? value : undefined;
 }
 
-function isFullscreenStationPanelDesign(
-  value: unknown,
-): value is FullscreenStationPanelDesign {
-  return fullscreenStationPanelDesignOptions.some(
-    (option) => option.id === value,
-  );
+function isFullscreenStationPanelDesign(value: unknown): value is FullscreenStationPanelDesign {
+  return fullscreenStationPanelDesignOptions.some((option) => option.id === value);
 }
 
 function normalizeFullscreenStationToken(value: string | undefined): string {
@@ -470,9 +443,7 @@ function syncFullscreenPanelFromRoute(options?: {
   const stationRequest = getRouteFullscreenStationRequest();
   const routeDesign = getRouteFullscreenPanelDesign();
 
-  fullscreenPanelRouteDesignOverride.value = stationRequest
-    ? routeDesign
-    : undefined;
+  fullscreenPanelRouteDesignOverride.value = stationRequest ? routeDesign : undefined;
 
   if (!stationRequest) {
     if (fullscreenPanelBoard.value) {
@@ -566,15 +537,11 @@ function createPlaceFromName(label: string): void {
     closePlaceNameModal();
     selectTransitPlace(result.place.id);
   } catch (error) {
-    placeNameError.value =
-      error instanceof Error ? error.message : t("app.errors.addPlace");
+    placeNameError.value = error instanceof Error ? error.message : t("app.errors.addPlace");
   }
 }
 
-function updateHiddenDirectionIdsForBoard(
-  boardId: string,
-  directionIds: string[],
-): void {
+function updateHiddenDirectionIdsForBoard(boardId: string, directionIds: string[]): void {
   const nextHiddenDirectionIdsByBoardId = {
     ...preferences.hiddenDirectionIdsByBoardId,
   };
@@ -590,9 +557,7 @@ function updateHiddenDirectionIdsForBoard(
 }
 
 const visibleBoards = computed(() =>
-  orderedBoards.value.filter((board) =>
-    preferences.visibleBoardIds.includes(board.id),
-  ),
+  orderedBoards.value.filter((board) => preferences.visibleBoardIds.includes(board.id)),
 );
 
 watch(
@@ -626,8 +591,7 @@ watch(
 
 const boardTogglesInContextMenu = computed(
   () =>
-    mobileBoardTogglesInContextMenu.value ||
-    preferences.boardTogglesPlacement === "context-menu",
+    mobileBoardTogglesInContextMenu.value || preferences.boardTogglesPlacement === "context-menu",
 );
 
 const nextAlarm = computed(
@@ -635,9 +599,7 @@ const nextAlarm = computed(
     departureAlarms.value
       .filter((alarm) => !alarm.notified)
       .sort(
-        (left, right) =>
-          new Date(left.alarmTime).getTime() -
-          new Date(right.alarmTime).getTime(),
+        (left, right) => new Date(left.alarmTime).getTime() - new Date(right.alarmTime).getTime(),
       )[0],
 );
 
@@ -650,18 +612,16 @@ const netexCacheAlert = computed(() => {
     return "";
   }
 
-  return (
-    netexCacheStatus.value?.message ||
-    t("app.netexMissingBody")
-  );
+  return netexCacheStatus.value?.message || t("app.netexMissingBody");
 });
+const gtfsStaleAlert = computed(() =>
+  gtfsStatus.value?.enabled && gtfsStatus.value.stale ? gtfsStatus.value : undefined,
+);
 const trafficReportByLineRef = computed(
   () => new Map(trafficReports.value.map((report) => [report.lineRef, report])),
 );
 const fullscreenPanelDirections = computed<FullscreenPanelDirection[]>(() =>
-  fullscreenPanelBoard.value
-    ? getFullscreenPanelDirections(fullscreenPanelBoard.value)
-    : [],
+  fullscreenPanelBoard.value ? getFullscreenPanelDirections(fullscreenPanelBoard.value) : [],
 );
 const fullscreenPanelTrafficAlert = computed(() => {
   const board = fullscreenPanelBoard.value;
@@ -738,24 +698,13 @@ async function refreshBoard(boardId: string): Promise<void> {
   state.error = undefined;
 
   try {
-    const result = await fetchBoardDepartures(
-      createBoardRequestForSettings(board),
-    );
-    const enrichedResult = await enrichBoardDeparturesWithServiceTypes(
-      board,
-      result,
-    );
+    const result = await fetchBoardDepartures(createBoardRequestForSettings(board));
+    const enrichedResult = await enrichBoardDeparturesWithServiceTypes(board, result);
 
     state.departures = enrichedResult.departures;
     state.directionGroups = enrichedResult.directionGroups;
     state.updatedAt = new Date();
-    updateAlarms(
-      reconcileBoardAlarms(
-        board,
-        enrichedResult.departures,
-        departureAlarms.value,
-      ),
-    );
+    updateAlarms(reconcileBoardAlarms(board, enrichedResult.departures, departureAlarms.value));
   } catch (error) {
     state.error = error instanceof Error ? error.message : t("app.errors.fetch");
   } finally {
@@ -778,23 +727,14 @@ async function enrichBoardDeparturesWithServiceTypes(
 
   await Promise.all(
     entries.map(async ({ departure, group }) => {
-      const serviceType = await fetchCachedDepartureServiceType(
-        board,
-        group,
-        departure,
-      );
+      const serviceType = await fetchCachedDepartureServiceType(board, group, departure);
 
-      departuresById.set(
-        departure.id,
-        serviceType ? { ...departure, serviceType } : departure,
-      );
+      departuresById.set(departure.id, serviceType ? { ...departure, serviceType } : departure);
     }),
   );
 
   return {
-    departures: result.departures.map(
-      (departure) => departuresById.get(departure.id) ?? departure,
-    ),
+    departures: result.departures.map((departure) => departuresById.get(departure.id) ?? departure),
     directionGroups: result.directionGroups.map((group) => ({
       ...group,
       departures: group.departures.map(
@@ -809,11 +749,7 @@ async function fetchCachedDepartureServiceType(
   directionGroup: DirectionDepartureGroup,
   departure: Departure,
 ): Promise<DepartureServiceType | undefined> {
-  const cacheKey = createDepartureServiceTypeCacheKey(
-    board,
-    directionGroup,
-    departure,
-  );
+  const cacheKey = createDepartureServiceTypeCacheKey(board, directionGroup, departure);
   let request = departureServiceTypeCache.get(cacheKey);
 
   if (!request) {
@@ -858,9 +794,7 @@ async function refreshAll(): Promise<void> {
   refreshing.value = true;
 
   try {
-    await runWithConcurrency(visibleBoards.value, 3, (board) =>
-      refreshBoard(board.id),
-    );
+    await runWithConcurrency(visibleBoards.value, 3, (board) => refreshBoard(board.id));
     void refreshTrafficSummary();
     lastRefresh.value = new Date();
   } finally {
@@ -873,11 +807,7 @@ async function refreshTrafficSummary(): Promise<void> {
     return;
   }
 
-  const lineRefs = Array.from(
-    new Set(
-      visibleBoards.value.map(resolveBoardTrafficLineRef),
-    ),
-  );
+  const lineRefs = Array.from(new Set(visibleBoards.value.map(resolveBoardTrafficLineRef)));
 
   if (lineRefs.length === 0) {
     trafficReports.value = [];
@@ -988,16 +918,14 @@ async function toggleFullscreenPanelMode(): Promise<void> {
 
 function syncFullscreenPanelNativeState(): void {
   fullscreenPanelEnteredNativeFullscreen.value =
-    isFullscreenPanelOpen.value &&
-    document.fullscreenElement === document.documentElement;
+    isFullscreenPanelOpen.value && document.fullscreenElement === document.documentElement;
 }
 
 async function closeFullscreenPanel(
   options: { syncRoute?: boolean; resumeRefresh?: boolean } = {},
 ): Promise<void> {
   const shouldExitFullscreen =
-    fullscreenPanelEnteredNativeFullscreen.value &&
-    Boolean(document.fullscreenElement);
+    fullscreenPanelEnteredNativeFullscreen.value && Boolean(document.fullscreenElement);
 
   if (options.syncRoute !== false) {
     removeRouteFullscreenPanel();
@@ -1083,15 +1011,11 @@ function mergeDraggedVisibleBoardOrder(): string[] {
   let draggedBoardIndex = 0;
 
   return orderedBoards.value.map((board) =>
-    visibleBoardIds.has(board.id)
-      ? (draggedBoardIds[draggedBoardIndex++] ?? board.id)
-      : board.id,
+    visibleBoardIds.has(board.id) ? (draggedBoardIds[draggedBoardIndex++] ?? board.id) : board.id,
   );
 }
 
-function createBoardRequestForSettings(
-  board: TransitBoardConfig,
-): TransitBoardConfig {
+function createBoardRequestForSettings(board: TransitBoardConfig): TransitBoardConfig {
   const maxDeparturesPerDirection = preferences.maxDeparturesPerDirection;
 
   return typeof maxDeparturesPerDirection === "number"
@@ -1102,21 +1026,15 @@ function createBoardRequestForSettings(
     : board;
 }
 
-function getVisibleDirectionGroupsForBoard(
-  boardId: string,
-): DirectionDepartureGroup[] {
+function getVisibleDirectionGroupsForBoard(boardId: string): DirectionDepartureGroup[] {
   return filterTerminalOnly(
     states[boardId]?.directionGroups ?? [],
     preferences.terminalDirectionsOnly,
   );
 }
 
-function getFullscreenPanelDirections(
-  board: TransitBoardConfig,
-): FullscreenPanelDirection[] {
-  const hiddenDirectionIds = new Set(
-    preferences.hiddenDirectionIdsByBoardId[board.id] ?? [],
-  );
+function getFullscreenPanelDirections(board: TransitBoardConfig): FullscreenPanelDirection[] {
+  const hiddenDirectionIds = new Set(preferences.hiddenDirectionIdsByBoardId[board.id] ?? []);
 
   return getVisibleDirectionGroupsForBoard(board.id)
     .filter((direction) => !hiddenDirectionIds.has(direction.id))
@@ -1150,19 +1068,14 @@ function formatPanelWait(departure?: Departure): string {
     return "--";
   }
 
-  const minutes = Math.max(
-    0,
-    Math.round((new Date(time).getTime() - Date.now()) / 60000),
-  );
+  const minutes = Math.max(0, Math.round((new Date(time).getTime() - Date.now()) / 60000));
 
   return minutes === 0 ? "0" : String(minutes);
 }
 
 function getDepartureTime(departure: Departure): string | undefined {
   return (
-    departure.expectedDepartureTime ??
-    departure.aimedDepartureTime ??
-    departure.expectedArrivalTime
+    departure.expectedDepartureTime ?? departure.aimedDepartureTime ?? departure.expectedArrivalTime
   );
 }
 
@@ -1193,9 +1106,7 @@ function getDepartureMonitoringLabel(departure: Departure): string {
   return departure.monitoringLabel;
 }
 
-function formatDepartureServiceType(
-  serviceType?: DepartureServiceType,
-): string {
+function formatDepartureServiceType(serviceType?: DepartureServiceType): string {
   if (serviceType === "direct") {
     return t("board.serviceType.direct");
   }
@@ -1263,18 +1174,15 @@ async function runWithConcurrency<T>(
   worker: (item: T) => Promise<void>,
 ): Promise<void> {
   const queue = [...items];
-  const workers = Array.from(
-    { length: Math.min(limit, queue.length) },
-    async () => {
-      while (queue.length > 0) {
-        const item = queue.shift();
+  const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    while (queue.length > 0) {
+      const item = queue.shift();
 
-        if (item) {
-          await worker(item);
-        }
+      if (item) {
+        await worker(item);
       }
-    },
-  );
+    }
+  });
 
   await Promise.all(workers);
 }
@@ -1291,11 +1199,18 @@ async function loadNetexCacheStatus(): Promise<void> {
   } catch (error) {
     netexCacheStatus.value = {
       available: false,
-      message:
-        error instanceof Error ? error.message : t("app.netexMissingBody"),
+      message: error instanceof Error ? error.message : t("app.netexMissingBody"),
     };
   } finally {
     netexCacheStatusLoaded.value = true;
+  }
+}
+
+async function loadGtfsStatus(): Promise<void> {
+  try {
+    gtfsStatus.value = await fetchGtfsStatus();
+  } catch {
+    gtfsStatus.value = undefined;
   }
 }
 
@@ -1328,15 +1243,11 @@ function addCustomBoard(board: TransitBoardConfig): void {
 }
 
 function upsertCustomBoard(board: TransitBoardConfig): void {
-  const existingBoardIndex = preferences.customBoards.findIndex(
-    (item) => item.id === board.id,
-  );
+  const existingBoardIndex = preferences.customBoards.findIndex((item) => item.id === board.id);
 
   preferences.customBoards =
     existingBoardIndex >= 0
-      ? preferences.customBoards.map((item, index) =>
-          index === existingBoardIndex ? board : item,
-        )
+      ? preferences.customBoards.map((item, index) => (index === existingBoardIndex ? board : item))
       : [...preferences.customBoards, board];
 }
 
@@ -1382,9 +1293,7 @@ function replaceBoardId(
   nextBoardId: string,
 ): string[] {
   return dedupeBoardIds(
-    boardIds.map((boardId) =>
-      boardId === previousBoardId ? nextBoardId : boardId,
-    ),
+    boardIds.map((boardId) => (boardId === previousBoardId ? nextBoardId : boardId)),
   );
 }
 
@@ -1473,20 +1382,11 @@ function scrollBoardIntoView(element: HTMLElement): void {
 function getBoardBottomScrollTop(element: HTMLElement): number {
   const rect = element.getBoundingClientRect();
   const currentScrollTop =
-    window.scrollY ??
-    window.pageYOffset ??
-    document.documentElement.scrollTop ??
-    0;
+    window.scrollY ?? window.pageYOffset ?? document.documentElement.scrollTop ?? 0;
   const targetScrollTop =
-    currentScrollTop +
-    rect.bottom -
-    window.innerHeight +
-    NEW_BOARD_BOTTOM_INSET_PX;
+    currentScrollTop + rect.bottom - window.innerHeight + NEW_BOARD_BOTTOM_INSET_PX;
 
-  return Math.min(
-    getMaxWindowScrollTop(),
-    Math.max(0, Math.ceil(targetScrollTop)),
-  );
+  return Math.min(getMaxWindowScrollTop(), Math.max(0, Math.ceil(targetScrollTop)));
 }
 
 function getMaxWindowScrollTop(): number {
@@ -1518,14 +1418,10 @@ function waitForBoardScroll(): Promise<void> {
 
     if ("onscrollend" in window) {
       window.addEventListener("scrollend", complete, { once: true });
-      boardRevealCleanup = () =>
-        window.removeEventListener("scrollend", complete);
+      boardRevealCleanup = () => window.removeEventListener("scrollend", complete);
     }
 
-    boardRevealTimer = window.setTimeout(
-      complete,
-      NEW_BOARD_SCROLL_FALLBACK_MS,
-    );
+    boardRevealTimer = window.setTimeout(complete, NEW_BOARD_SCROLL_FALLBACK_MS);
   });
 }
 
@@ -1565,10 +1461,7 @@ function clearBoardRevealTimer(): void {
 
 function waitForNextFrame(): Promise<void> {
   return new Promise((resolve) => {
-    if (
-      typeof window === "undefined" ||
-      typeof window.requestAnimationFrame !== "function"
-    ) {
+    if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
       resolve();
       return;
     }
@@ -1578,15 +1471,9 @@ function waitForNextFrame(): Promise<void> {
 }
 
 function removeCustomBoard(boardId: string): void {
-  preferences.customBoards = preferences.customBoards.filter(
-    (board) => board.id !== boardId,
-  );
-  preferences.visibleBoardIds = preferences.visibleBoardIds.filter(
-    (id) => id !== boardId,
-  );
-  preferences.boardOrderIds = preferences.boardOrderIds.filter(
-    (id) => id !== boardId,
-  );
+  preferences.customBoards = preferences.customBoards.filter((board) => board.id !== boardId);
+  preferences.visibleBoardIds = preferences.visibleBoardIds.filter((id) => id !== boardId);
+  preferences.boardOrderIds = preferences.boardOrderIds.filter((id) => id !== boardId);
   preferences.collapsedDirectionIds = preferences.collapsedDirectionIds.filter(
     (id) => !id.startsWith(`${boardId}:`),
   );
@@ -1599,9 +1486,7 @@ function isCustomBoard(boardId: string): boolean {
   return preferences.customBoards.some((board) => board.id === boardId);
 }
 
-function setBoardDisplayMode(
-  displayMode: TransitBoardPreferences["boardDisplayMode"],
-): void {
+function setBoardDisplayMode(displayMode: TransitBoardPreferences["boardDisplayMode"]): void {
   if (preferences.boardDisplayMode === displayMode) {
     closeTopbarMenu();
     return;
@@ -1613,8 +1498,7 @@ function setBoardDisplayMode(
 }
 
 function openLinePage(board: TransitBoardConfig): void {
-  const transportType =
-    board.line.mode === "train" ? "transilien" : board.line.mode;
+  const transportType = board.line.mode === "train" ? "transilien" : board.line.mode;
   const lineId = board.line.shortName || board.line.ref;
   const startStation = board.title || board.schedule?.stopAreaRef;
   const params = new URLSearchParams();
@@ -1639,9 +1523,7 @@ function getTrafficAlertModalData(
     return undefined;
   }
 
-  const report = trafficReportByLineRef.value.get(
-    resolveBoardTrafficLineRef(board),
-  );
+  const report = trafficReportByLineRef.value.get(resolveBoardTrafficLineRef(board));
   const targets = alert.targets?.length ? alert.targets : [alert.target];
   const disruptionsById = new Map(
     report?.disruptions.map((disruption) => [disruption.id, disruption]) ?? [],
@@ -1658,10 +1540,7 @@ function getTrafficAlertModalData(
   };
 }
 
-function openHomeTrafficModal(
-  board: TransitBoardConfig,
-  alert: BoardTrafficAlert,
-): void {
+function openHomeTrafficModal(board: TransitBoardConfig, alert: BoardTrafficAlert): void {
   homeTrafficModalTarget.value = { board, alert };
   homeTrafficModalOpen.value = true;
 }
@@ -1682,10 +1561,7 @@ function goToTrafficPageFromHome(): void {
   openTrafficPage(target.board, target.alert);
 }
 
-function openTrafficPage(
-  board: TransitBoardConfig,
-  alert?: BoardTrafficAlert,
-): void {
+function openTrafficPage(board: TransitBoardConfig, alert?: BoardTrafficAlert): void {
   router.push({
     path: "/traffic",
     query: createTrafficPageQuery(board, alert),
@@ -1717,12 +1593,8 @@ function createTrafficPageQuery(
   return query;
 }
 
-function getBoardTrafficAlert(
-  board: TransitBoardConfig,
-): BoardTrafficAlert | undefined {
-  const report = trafficReportByLineRef.value.get(
-    resolveBoardTrafficLineRef(board),
-  );
+function getBoardTrafficAlert(board: TransitBoardConfig): BoardTrafficAlert | undefined {
+  const report = trafficReportByLineRef.value.get(resolveBoardTrafficLineRef(board));
 
   if (!report) {
     return undefined;
@@ -1736,12 +1608,9 @@ function getBoardTrafficAlert(
         t("board.traffic.disruptionAndInterruptionAt", { time }),
       interruption: t("board.traffic.interruption"),
       multipleInterruptions: t("board.traffic.multipleInterruptions"),
-      interruptionAt: (time) =>
-        t("board.traffic.interruptionAt", { time }),
-      interruptionInDay: (count) =>
-        t("board.traffic.interruptionInDay", { count }),
-      interruptionInDays: (count) =>
-        t("board.traffic.interruptionInDays", { count }),
+      interruptionAt: (time) => t("board.traffic.interruptionAt", { time }),
+      interruptionInDay: (count) => t("board.traffic.interruptionInDay", { count }),
+      interruptionInDays: (count) => t("board.traffic.interruptionInDays", { count }),
       interruptionToday: t("board.traffic.interruptionToday"),
     },
   });
@@ -1783,9 +1652,7 @@ function openAlarmModal(payload: {
   departure: Departure;
 }): void {
   alarmTriggerElement =
-    document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : undefined;
+    document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
   alarmModalError.value = "";
   alarmModalBusy.value = false;
   alarmTarget.value = {
@@ -1802,10 +1669,7 @@ function openAlarmModal(payload: {
   }
 }
 
-function openFullscreenAlarmModal(payload: {
-  directionId: string;
-  departureId: string;
-}): void {
+function openFullscreenAlarmModal(payload: { directionId: string; departureId: string }): void {
   const board = fullscreenPanelBoard.value;
   if (!board) {
     return;
@@ -1814,9 +1678,7 @@ function openFullscreenAlarmModal(payload: {
   const directionGroup = states[board.id]?.directionGroups.find(
     (direction) => direction.id === payload.directionId,
   );
-  const departure = directionGroup?.departures.find(
-    (item) => item.id === payload.departureId,
-  );
+  const departure = directionGroup?.departures.find((item) => item.id === payload.departureId);
 
   if (!directionGroup || !departure) {
     return;
@@ -1871,10 +1733,7 @@ async function openPatternModal(payload: {
   directionGroup: DirectionDepartureGroup;
   departure: Departure;
 }): Promise<void> {
-  if (
-    patternLoading.value &&
-    patternTarget.value?.departure.id === payload.departure.id
-  ) {
+  if (patternLoading.value && patternTarget.value?.departure.id === payload.departure.id) {
     return;
   }
 
@@ -1892,10 +1751,7 @@ async function openPatternModal(payload: {
 
     patternData.value = patternView.pattern;
   } catch (error) {
-    patternError.value =
-      error instanceof Error
-        ? error.message
-        : t("app.errors.pattern");
+    patternError.value = error instanceof Error ? error.message : t("app.errors.pattern");
   } finally {
     patternLoading.value = false;
   }
@@ -1906,16 +1762,11 @@ async function fetchLinePatternView(
   departure: Departure,
   directionGroup: DirectionDepartureGroup,
 ): Promise<LinePatternViewResponse> {
-  const transportType =
-    board.line.mode === "train" ? "transilien" : board.line.mode;
+  const transportType = board.line.mode === "train" ? "transilien" : board.line.mode;
   const lineId = board.line.shortName || board.line.ref;
-  const direction =
-    departure.destination || directionGroup.id || directionGroup.label;
+  const direction = departure.destination || directionGroup.id || directionGroup.label;
   const startStation =
-    departure.stopName ||
-    board.title ||
-    board.schedule?.stopAreaRef ||
-    departure.monitoringRef;
+    departure.stopName || board.title || board.schedule?.stopAreaRef || departure.monitoringRef;
   const params = new URLSearchParams();
 
   if (direction) {
@@ -2021,9 +1872,7 @@ async function removeAlarm(): Promise<void> {
   try {
     await cancelDepartureAlarm(alarm);
 
-    updateAlarms(
-      removeDepartureAlarmById(alarm.id, departureAlarms.value),
-    );
+    updateAlarms(removeDepartureAlarmById(alarm.id, departureAlarms.value));
     closeAlarmModal();
   } catch {
     alarmModalError.value = t("alarm.errors.cancel");
@@ -2071,7 +1920,6 @@ function updateAlarms(alarms: DepartureAlarm[]): void {
   void synchronizeAlarmState();
 }
 
-
 async function synchronizeAlarmState(): Promise<void> {
   const request = ++alarmSyncRequest;
 
@@ -2092,10 +1940,7 @@ async function synchronizeAlarmState(): Promise<void> {
       return;
     }
 
-    const notifiedIds = new Set([
-      ...result.expiredAlarmIds,
-      ...result.deliveredAlarmIds,
-    ]);
+    const notifiedIds = new Set([...result.expiredAlarmIds, ...result.deliveredAlarmIds]);
     if (notifiedIds.size > 0) {
       departureAlarms.value = departureAlarms.value.map((alarm) =>
         notifiedIds.has(alarm.id) ? { ...alarm, notified: true } : alarm,
@@ -2174,9 +2019,7 @@ async function dismissAlarmToast(): Promise<void> {
 transitBoards.forEach((board) => ensureBoardState(board.id));
 
 function isPageVisible(): boolean {
-  return (
-    typeof document === "undefined" || document.visibilityState === "visible"
-  );
+  return typeof document === "undefined" || document.visibilityState === "visible";
 }
 
 function startRefreshTimer(): void {
@@ -2270,25 +2113,19 @@ function formatAlarmRemaining(alarm: DepartureAlarm, now: number): string {
 }
 
 async function migrateStoredCustomBoardDirections(): Promise<void> {
-  const migration = await migrateCustomBoardDirectionGroups(
-    preferences,
-    async (board) => {
-      const input = createDirectionDiscoveryInput(board);
+  const migration = await migrateCustomBoardDirectionGroups(preferences, async (board) => {
+    const input = createDirectionDiscoveryInput(board);
 
-      if (!input) {
-        return undefined;
-      }
+    if (!input) {
+      return undefined;
+    }
 
-      const directionGroups = await fetchDirectionGroupsForStation(
-        input.line,
-        input.station,
-      );
+    const directionGroups = await fetchDirectionGroupsForStation(input.line, input.station);
 
-      return directionGroups.some((group) => group.id === "all-directions")
-        ? undefined
-        : directionGroups;
-    },
-  );
+    return directionGroups.some((group) => group.id === "all-directions")
+      ? undefined
+      : directionGroups;
+  });
 
   migration.updatedBoardIds.forEach((boardId) => {
     delete states[boardId];
@@ -2376,27 +2213,19 @@ onMounted(() => {
   document.addEventListener("fullscreenchange", syncFullscreenPanelNativeState);
   window.addEventListener("focus", refreshOnReturn);
   window.addEventListener("storage", syncTransitPreferences);
-  window.addEventListener(
-    TRANSIT_PREFERENCES_CHANGED_EVENT,
-    syncTransitPreferences,
-  );
+  window.addEventListener(TRANSIT_PREFERENCES_CHANGED_EVENT, syncTransitPreferences);
   mobileBreakpointQuery = window.matchMedia(MOBILE_BREAKPOINT_QUERY);
   mobileBoardTogglesInContextMenu.value = mobileBreakpointQuery.matches;
-  mobileBreakpointQuery.addEventListener(
-    "change",
-    handleMobileBreakpointChange,
-  );
+  mobileBreakpointQuery.addEventListener("change", handleMobileBreakpointChange);
   desktopDragBreakpointQuery = window.matchMedia(DESKTOP_DRAG_BREAKPOINT_QUERY);
   desktopDragEnabled.value = desktopDragBreakpointQuery.matches;
-  desktopDragBreakpointQuery.addEventListener(
-    "change",
-    handleDesktopDragBreakpointChange,
-  );
+  desktopDragBreakpointQuery.addEventListener("change", handleDesktopDragBreakpointChange);
   clockTimer = window.setInterval(() => {
     nowTick.value = Date.now();
   }, 1000);
   void synchronizeAlarmState();
   void loadNetexCacheStatus();
+  void loadGtfsStatus();
 
   if (primApiKeyConfigured && pageVisible.value) {
     startRefreshTimer();
@@ -2421,25 +2250,13 @@ onBeforeUnmount(() => {
   clearBoardRevealTimers();
   stopDepartureAlarmSound();
   document.removeEventListener("visibilitychange", handleVisibilityChange);
-  document.removeEventListener(
-    "fullscreenchange",
-    syncFullscreenPanelNativeState,
-  );
+  document.removeEventListener("fullscreenchange", syncFullscreenPanelNativeState);
   window.removeEventListener("focus", refreshOnReturn);
   window.removeEventListener("storage", syncTransitPreferences);
-  window.removeEventListener(
-    TRANSIT_PREFERENCES_CHANGED_EVENT,
-    syncTransitPreferences,
-  );
-  mobileBreakpointQuery?.removeEventListener(
-    "change",
-    handleMobileBreakpointChange,
-  );
+  window.removeEventListener(TRANSIT_PREFERENCES_CHANGED_EVENT, syncTransitPreferences);
+  mobileBreakpointQuery?.removeEventListener("change", handleMobileBreakpointChange);
   mobileBreakpointQuery = undefined;
-  desktopDragBreakpointQuery?.removeEventListener(
-    "change",
-    handleDesktopDragBreakpointChange,
-  );
+  desktopDragBreakpointQuery?.removeEventListener("change", handleDesktopDragBreakpointChange);
   desktopDragBreakpointQuery = undefined;
 });
 </script>
@@ -2481,11 +2298,7 @@ onBeforeUnmount(() => {
             <small>{{ t("app.lastUpdated") }}</small>
           </div>
           <div class="topbar-inline-buttons">
-            <button
-              class="button-secondary"
-              type="button"
-              @click="stationModalOpen = true"
-            >
+            <button class="button-secondary" type="button" @click="stationModalOpen = true">
               <Plus />
               {{ t("app.addBoard") }}
             </button>
@@ -2514,10 +2327,7 @@ onBeforeUnmount(() => {
                   :disabled="refreshing"
                   @click="refreshFromTopbarMenu"
                 >
-                  <RefreshCw
-                    aria-hidden="true"
-                    :class="{ 'topbar-actions__spin': refreshing }"
-                  />
+                  <RefreshCw aria-hidden="true" :class="{ 'topbar-actions__spin': refreshing }" />
                   {{ refreshing ? t("app.refreshing") : t("app.refresh") }}
                 </button>
                 <button type="button" role="menuitem" @click="openWeatherModal">
@@ -2550,11 +2360,7 @@ onBeforeUnmount(() => {
                     <List aria-hidden="true" />
                   </button>
                 </div>
-                <button
-                  type="button"
-                  role="menuitem"
-                  @click="openBoardDisplayModal"
-                >
+                <button type="button" role="menuitem" @click="openBoardDisplayModal">
                   <SlidersHorizontal aria-hidden="true" />
                   {{ t("settings.display.eyebrow") }}
                 </button>
@@ -2627,11 +2433,7 @@ onBeforeUnmount(() => {
                     : t("app.displaySummaryOther", { count: visibleBoards.length })
                 }}
               </span>
-              <button
-                class="button-secondary"
-                type="button"
-                @click="boardDisplayModalOpen = false"
-              >
+              <button class="button-secondary" type="button" @click="boardDisplayModalOpen = false">
                 {{ t("common.actions.close") }}
               </button>
             </footer>
@@ -2672,21 +2474,22 @@ onBeforeUnmount(() => {
         </button>
 
         <Transition :name="placeSwipe.transitionName.value">
-          <div
-            :key="activePlaceId"
-            class="place-swipe-page"
-            :style="placeSwipe.pageStyle.value"
-          >
-            <section
-              v-if="netexCacheAlert"
-              class="netex-cache-alert"
-              role="status"
-            >
+          <div :key="activePlaceId" class="place-swipe-page" :style="placeSwipe.pageStyle.value">
+            <section v-if="netexCacheAlert" class="netex-cache-alert" role="status">
               <strong>{{ t("app.netexMissingTitle") }}</strong>
               <span>
                 {{ netexCacheAlert }}
                 {{ t("app.netexMissingInstruction") }}
               </span>
+            </section>
+
+            <section
+              v-if="gtfsStaleAlert"
+              class="netex-cache-alert netex-cache-alert--gtfs"
+              role="status"
+            >
+              <strong>{{ t("app.gtfsStaleTitle") }}</strong>
+              <span>{{ t("app.gtfsStaleBody", { days: gtfsStaleAlert.ageDays ?? 20 }) }}</span>
             </section>
 
             <EmptyStationsState
@@ -2728,15 +2531,9 @@ onBeforeUnmount(() => {
                   <TransitBoard
                     :board="board"
                     :departures="states[board.id].departures"
-                    :direction-groups="
-                      getVisibleDirectionGroupsForBoard(board.id)
-                    "
-                    :collapsed-direction-ids="
-                      getBoardCollapsedDirectionIds(board.id)
-                    "
-                    :hidden-direction-ids="
-                      preferences.hiddenDirectionIdsByBoardId[board.id] ?? []
-                    "
+                    :direction-groups="getVisibleDirectionGroupsForBoard(board.id)"
+                    :collapsed-direction-ids="getBoardCollapsedDirectionIds(board.id)"
+                    :hidden-direction-ids="preferences.hiddenDirectionIdsByBoardId[board.id] ?? []"
                     :loading="states[board.id].loading"
                     :error="states[board.id].error"
                     :updated-at="states[board.id].updatedAt"
@@ -2779,16 +2576,12 @@ onBeforeUnmount(() => {
           :dark-theme="settings.fullscreenStationPanelDarkTheme"
           :panam-direction-id="fullscreenPanelPanamDirectionId"
           :traffic-alert="fullscreenPanelTrafficAlert"
-          :smart-traffic-modal-formatting="
-            settings.smartTrafficModalFormatting
-          "
+          :smart-traffic-modal-formatting="settings.smartTrafficModalFormatting"
           :loading="states[fullscreenPanelBoard.id]?.loading ?? false"
           :error="states[fullscreenPanelBoard.id]?.error"
           :updated-at-label="fullscreenPanelUpdatedAtLabel"
           :browser-fullscreen-active="fullscreenPanelEnteredNativeFullscreen"
-          :alarm-departure-ids="
-            getBoardAlarmDepartureIds(fullscreenPanelBoard.id)
-          "
+          :alarm-departure-ids="getBoardAlarmDepartureIds(fullscreenPanelBoard.id)"
           :inert="Boolean(alarmTarget)"
           @change-design="updateFullscreenPanelDesign"
           @change-theme="updateFullscreenPanelTheme"
@@ -2798,10 +2591,7 @@ onBeforeUnmount(() => {
           @schedule-alarm="openFullscreenAlarmModal"
         >
           <template #line-logo>
-            <LineIconBadge
-              class="fullscreen-panel-line-icon"
-              :line="fullscreenPanelBoard.line"
-            />
+            <LineIconBadge class="fullscreen-panel-line-icon" :line="fullscreenPanelBoard.line" />
           </template>
         </FullscreenStationPanel>
       </Teleport>
@@ -2854,71 +2644,41 @@ onBeforeUnmount(() => {
         :loading="patternLoading"
         :open="Boolean(patternTarget)"
         :pattern="patternData"
-        :line-id="
-          patternTarget?.board.line.shortName || patternTarget?.board.line.ref
-        "
+        :line-id="patternTarget?.board.line.shortName || patternTarget?.board.line.ref"
         :transport-type="
-          patternTarget?.board.line.mode === 'train'
-            ? 'transilien'
-            : patternTarget?.board.line.mode
+          patternTarget?.board.line.mode === 'train' ? 'transilien' : patternTarget?.board.line.mode
         "
         :reduce-motion="settings.reduceMotion"
         :show-mini-map="settings.showPatternMiniMap"
         :show-city-zones="settings.showPatternCityZones"
         :compact-mode="settings.compactLinePlanMode"
         :pattern-rounded-curves="settings.patternRoundedCurves"
-        :show-interruption-walking-times="
-          settings.showInterruptionWalkingTimes
-        "
+        :show-interruption-walking-times="settings.showInterruptionWalkingTimes"
         :pattern-compact-branch-gap="settings.patternCompactBranchGap"
         :pattern-compact-fork-gap="settings.patternCompactForkGap"
-        :pattern-realistic-min-gap-coefficient="
-          settings.patternRealisticMinGapCoefficient
-        "
-        :pattern-realistic-max-gap-coefficient="
-          settings.patternRealisticMaxGapCoefficient
-        "
+        :pattern-realistic-min-gap-coefficient="settings.patternRealisticMinGapCoefficient"
+        :pattern-realistic-max-gap-coefficient="settings.patternRealisticMaxGapCoefficient"
         :rich-transfer-tooltips="settings.richTransferTooltips"
         :smart-traffic-detection="settings.smartTrafficDetection"
         :traffic-calendar-impact-scope="settings.trafficCalendarImpactScope"
-        :traffic-warning-lookahead-days="
-          settings.trafficWarningLookaheadDays
-        "
+        :traffic-warning-lookahead-days="settings.trafficWarningLookaheadDays"
         :traffic-report="
           patternTarget?.board
-            ? trafficReportByLineRef.get(
-                resolveBoardTrafficLineRef(patternTarget.board),
-              )
+            ? trafficReportByLineRef.get(resolveBoardTrafficLineRef(patternTarget.board))
             : undefined
         "
         :transfer-bundle-retention-days="settings.transferBundleRetentionDays"
-        :transfer-bundle-request-concurrency="
-          settings.transferBundleRequestConcurrency
-        "
-        :transfer-bundle-request-spacing-ms="
-          settings.transferBundleRequestSpacingMs
-        "
-        :transfer-bundle-local-cache-enabled="
-          settings.transferBundleLocalCacheEnabled
-        "
-        :transfer-bundle-backend-cache-enabled="
-          settings.transferBundleBackendCacheEnabled
-        "
+        :transfer-bundle-request-concurrency="settings.transferBundleRequestConcurrency"
+        :transfer-bundle-request-spacing-ms="settings.transferBundleRequestSpacingMs"
+        :transfer-bundle-local-cache-enabled="settings.transferBundleLocalCacheEnabled"
+        :transfer-bundle-backend-cache-enabled="settings.transferBundleBackendCacheEnabled"
         :transfer-resolver-mode="settings.transferResolverMode"
         @close="closePatternModal"
       />
 
       <div v-if="alarmToast" class="alarm-alert-backdrop" role="presentation">
-        <section
-          class="alarm-toast"
-          role="dialog"
-          aria-live="assertive"
-          aria-modal="true"
-        >
-          <div
-            class="alarm-toast__line"
-            :style="{ backgroundColor: alarmToast.lineColor }"
-          >
+        <section class="alarm-toast" role="dialog" aria-live="assertive" aria-modal="true">
+          <div class="alarm-toast__line" :style="{ backgroundColor: alarmToast.lineColor }">
             {{ alarmToast.lineLabel }}
           </div>
           <div>
@@ -2958,11 +2718,7 @@ onBeforeUnmount(() => {
         </p>
         <ol>
           <li>
-            <a
-              href="https://prim.iledefrance-mobilites.fr/"
-              target="_blank"
-              rel="noreferrer"
-            >
+            <a href="https://prim.iledefrance-mobilites.fr/" target="_blank" rel="noreferrer">
               {{ t("app.createApiKey") }}
             </a>
           </li>

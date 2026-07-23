@@ -431,13 +431,17 @@ function formatTimeWindow(window: TrafficModalTimeWindow): string {
 
 <style scoped>
 .user-friendly-traffic {
+  align-content: start;
+  align-self: start;
   background: #ffffff;
   border: 1px solid #dfe4ed;
   border-radius: 16px;
+  box-sizing: border-box;
   display: grid;
   gap: 18px;
   min-width: 0;
   padding: 18px;
+  width: 100%;
   transition:
     border-color 220ms ease,
     box-shadow 260ms ease,
@@ -666,11 +670,7 @@ function formatTimeWindow(window: TrafficModalTimeWindow): string {
   width: 34px;
 }
 
-.user-friendly-traffic--compact
-  :deep(.pattern-traffic-friendly-summary__incident-icon svg) {
-  height: 26px;
-  width: 26px;
-}
+
 
 .user-friendly-traffic-expand-enter-active,
 .user-friendly-traffic-expand-leave-active {

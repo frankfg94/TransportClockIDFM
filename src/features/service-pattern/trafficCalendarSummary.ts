@@ -373,6 +373,13 @@ export function getPatternTrafficSummaryCopy(
   if (operationalSummary) return operationalSummary;
 
   const title = getConciseTrafficTitle(disruption.title);
+  const lineStatusTitle = extractLineStatusTitle(sourceText);
+  if (title && lineStatusTitle && isVerboseOperationalTrafficTitle(title)) {
+    return {
+      title: lineStatusTitle,
+      description: title,
+    };
+  }
   if (title && !isGenericTrafficTitle(title)) {
     return splitTrafficSummaryCopy(title);
   }
@@ -394,6 +401,26 @@ export function getPatternTrafficSummaryTitle(disruption: TrafficDisruption): st
 
 const LINE_TITLE_PREFIX_PATTERN =
   /^(?:(?:m[eé]tro|rer|tram(?:way)?|transilien|ligne|bus)\s+)[a-z0-9][a-z0-9.+/-]{0,7}\s*:\s*/iu;
+
+const COMPACT_LINE_STATUS_PATTERN =
+  /^(?:interruptions?|trafic (?:interrompu|perturb[eé])|travaux|arr[eê]t\(s\) non desservi\(s\))$/iu;
+
+function extractLineStatusTitle(value: string): string | undefined {
+  return normalizeMultilineTrafficText(value)
+    .split(/\r?\n/gu)
+    .map((line) => line.trim())
+    .filter((line) => LINE_TITLE_PREFIX_PATTERN.test(line))
+    .map((line) => cleanSummaryText(line.replace(LINE_TITLE_PREFIX_PATTERN, "")))
+    .find((line): line is string => Boolean(line && COMPACT_LINE_STATUS_PATTERN.test(line)));
+}
+
+function isVerboseOperationalTrafficTitle(value: string): boolean {
+  const normalized = normalizeTrafficText(value);
+  return (
+    value.length > 88 &&
+    /^(?:le )?trafic (?:est|sera) (?:interrompu|perturbe)\b/u.test(normalized)
+  );
+}
 
 function getConciseTrafficTitle(value?: string): string | undefined {
   const lead = getConciseTextLead(value, true);

@@ -1,6 +1,10 @@
-import { isBusLikeTransfer } from "../service-pattern/transferVisibility";
+import {
+  filterDuplicateBusTransfers,
+  isBusLikeTransfer,
+} from "../service-pattern/transferVisibility";
 import type { TransferLineOption } from "../../types/transit";
 import { createLinePresentation } from "../../services/linePresentation";
+import { selectRepresentativeStopSequencePatterns } from "../line-map/topologyPatterns";
 import { toServerApiUrl } from "../../services/serverApi";
 import {
   projectTransitCoordinate,
@@ -27,10 +31,11 @@ export function filterNetworkGhostTransfers(
   transfers: TransferLineOption[],
   scope: GhostNetworkScope,
 ): TransferLineOption[] {
+  const deduplicated = filterDuplicateBusTransfers(transfers);
   const filtered =
     scope === "structural"
-      ? transfers.filter((transfer) => !isBusLikeTransfer(transfer))
-      : transfers;
+      ? deduplicated.filter((transfer) => !isBusLikeTransfer(transfer))
+      : deduplicated;
 
   return [...filtered].sort(
     (left, right) =>
@@ -73,6 +78,10 @@ export function getNetworkGhostModeKey(
     return "rer";
   }
 
+  if (transfer.family === "TRANSILIEN") {
+    return "transilien";
+  }
+
   const mode = normalizeStationName(transfer.mode ?? "");
 
   if (mode.includes("noctilien")) {
@@ -93,6 +102,10 @@ export function getNetworkGhostModeKey(
 
   if (mode.includes("rer")) {
     return "rer";
+  }
+
+  if (mode.includes("train") || mode.includes("rail") || mode.includes("transilien")) {
+    return "transilien";
   }
 
   return undefined;
@@ -118,26 +131,24 @@ function isNoctilienTransfer(transfer: TransferLineOption): boolean {
     return true;
   }
 
-  const compactLabel = normalizeStationName(transfer.label).replace(
-    /[\s_-]+/gu,
-    "",
-  );
+  const compactLabel = normalizeStationName(transfer.label).replace(/[\s_-]+/gu, "");
 
   return /^n\d{1,3}[a-z]?$/u.test(compactLabel);
 }
 
 export function loadNetworkGhostTopology(
   lineId: string,
+  signal?: AbortSignal,
 ): Promise<NetworkGhostTopology> {
   const cached = topologyCache.get(lineId);
 
   if (cached) {
-    return cached;
+    return raceWithAbort(cached, signal);
   }
 
-  const request = fetch(
-    toServerApiUrl(`/api/lines/${encodeURIComponent(lineId)}/topology`),
-  )
+  const request = fetch(toServerApiUrl(`/api/lines/${encodeURIComponent(lineId)}/topology`), {
+    signal,
+  })
     .then(async (response) => {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -152,11 +163,41 @@ export function loadNetworkGhostTopology(
 
   topologyCache.set(lineId, request);
 
-  return request;
+  return raceWithAbort(request, signal);
 }
 
 export function clearNetworkGhostTopologyCache(): void {
   topologyCache.clear();
+}
+
+function raceWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(createAbortError());
+
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(createAbortError());
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function createAbortError(): Error {
+  if (typeof DOMException !== "undefined") {
+    return new DOMException("The operation was aborted.", "AbortError");
+  }
+
+  const error = new Error("The operation was aborted.");
+  error.name = "AbortError";
+  return error;
 }
 
 export function createNetworkGhostLine(
@@ -174,22 +215,29 @@ export function createNetworkGhostLine(
 
   const projectedStations = topology.stations.flatMap((station) => {
     const point = projectTransitCoordinate(station, viewport);
+    const lonLat = resolveTransitLonLat(station);
 
-    return point
+    return point && lonLat
       ? [
           {
             id: station.id,
             label: station.name,
+            lon: lonLat.lon,
+            lat: lonLat.lat,
             x: point.x,
             y: point.y,
           },
         ]
       : [];
   });
-  const projectedStationById = new Map(
-    projectedStations.map((station) => [station.id, station]),
-  );
-  const topologySegments = getTopologySegments(topology);
+  const projectedStationById = new Map(projectedStations.map((station) => [station.id, station]));
+  const branches = selectRepresentativeStopSequencePatterns(
+    topology.patterns ?? [],
+  ).map((pattern) => ({
+    id: pattern.id,
+    stopIds: pattern.stops,
+  }));
+  const topologySegments = getTopologySegments(topology, branches);
   const levels = createStationLevels(
     topology.stations.map((station) => station.id),
     topologySegments,
@@ -206,8 +254,7 @@ export function createNetworkGhostLine(
     const fromLevel = levels.get(from.id) ?? Number.MAX_SAFE_INTEGER;
     const toLevel = levels.get(to.id) ?? Number.MAX_SAFE_INTEGER;
     const reverse =
-      toLevel < fromLevel ||
-      (toLevel === fromLevel && to.id.localeCompare(from.id) < 0);
+      toLevel < fromLevel || (toLevel === fromLevel && to.id.localeCompare(from.id) < 0);
     const source = reverse ? to : from;
     const target = reverse ? from : to;
 
@@ -240,10 +287,7 @@ export function createNetworkGhostLine(
     textColor: transfer.textColor,
   });
   const iconUrls = Array.from(
-    new Set([
-      ...(transfer.iconUrls ?? []),
-      ...(presentation.iconUrls ?? []),
-    ]),
+    new Set([...(transfer.iconUrls ?? []), ...(presentation.iconUrls ?? [])]),
   );
 
   return {
@@ -253,10 +297,7 @@ export function createNetworkGhostLine(
     family: transfer.family,
     ref: transfer.ref,
     color: normalizeColor(transfer.color ?? presentation.color, "#475569"),
-    textColor: normalizeColor(
-      transfer.textColor ?? presentation.textColor,
-      "#ffffff",
-    ),
+    textColor: normalizeColor(transfer.textColor ?? presentation.textColor, "#ffffff"),
     iconUrl: transfer.iconUrl ?? iconUrls[0],
     iconUrls,
     isBus: isBusLikeTransfer(transfer),
@@ -264,7 +305,11 @@ export function createNetworkGhostLine(
     anchorX: projectedAnchor.x,
     anchorY: projectedAnchor.y,
     stations: projectedStations,
+    branches,
     segments,
+    geometrySource: "direct",
+    geometryAttempts: [{ source: "direct", status: "success" }],
+    entrances: [],
     loadOrder,
   };
 }
@@ -305,11 +350,8 @@ function findAnchorStation(
   stations: NetworkGhostTopologyStation[],
   anchor: NetworkGhostAnchor,
 ): NetworkGhostTopologyStation | undefined {
-  const anchorKeys = createStationMatchKeys(anchor.label);
   const nameMatches = stations.filter((station) =>
-    Array.from(createStationMatchKeys(station.name)).some((key) =>
-      anchorKeys.has(key),
-    ),
+    isSameNetworkGhostStationName(station.name, anchor.label),
   );
 
   if (nameMatches.length === 1) {
@@ -342,18 +384,39 @@ function findAnchorStation(
     : undefined;
 }
 
+export function isSameNetworkGhostStationName(left: string, right: string): boolean {
+  const leftKeys = createStationMatchKeys(left);
+  const rightKeys = createStationMatchKeys(right);
+  if (Array.from(rightKeys).some((key) => leftKeys.has(key))) return true;
+
+  return (
+    getCompoundStationNameSegments(left).some((segment) =>
+      Array.from(createStationMatchKeys(segment)).some((key) => rightKeys.has(key)),
+    ) ||
+    getCompoundStationNameSegments(right).some((segment) =>
+      Array.from(createStationMatchKeys(segment)).some((key) => leftKeys.has(key)),
+    )
+  );
+}
+
+function getCompoundStationNameSegments(value: string): string[] {
+  const segments = value
+    .split(/\s+(?:[-–—&+])\s+|\s*\/\s*/gu)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  return segments.length > 1 ? segments : [];
+}
+
 function getTopologySegments(
   topology: NetworkGhostTopology,
+  branches: Array<{ id: string; stopIds: string[] }>,
 ): NetworkGhostTopologySegment[] {
-  if (topology.segments?.length) {
-    return topology.segments;
-  }
-
   const segments = new Map<string, NetworkGhostTopologySegment>();
 
-  for (const pattern of topology.patterns ?? []) {
-    pattern.stops.slice(0, -1).forEach((from, index) => {
-      const to = pattern.stops[index + 1];
+  for (const branch of branches) {
+    branch.stopIds.slice(0, -1).forEach((from, index) => {
+      const to = branch.stopIds[index + 1];
       const id = [from, to].sort().join("__");
 
       if (from !== to && !segments.has(id)) {
@@ -362,7 +425,7 @@ function getTopologySegments(
     });
   }
 
-  return Array.from(segments.values());
+  return segments.size > 0 ? Array.from(segments.values()) : (topology.segments ?? []);
 }
 
 function createStationLevels(
@@ -370,9 +433,7 @@ function createStationLevels(
   segments: NetworkGhostTopologySegment[],
   anchorStationId: string,
 ): Map<string, number> {
-  const neighbors = new Map(
-    stationIds.map((stationId) => [stationId, new Set<string>()]),
-  );
+  const neighbors = new Map(stationIds.map((stationId) => [stationId, new Set<string>()]));
 
   for (const segment of segments) {
     neighbors.get(segment.from)?.add(segment.to);
@@ -432,24 +493,16 @@ function getDistanceMeters(
   const deltaLat = lat2 - lat1;
   const deltaLon = toRadians(right.lon - left.lon);
   const haversine =
-    Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
+    Math.sin(deltaLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
 
-  return (
-    2 *
-    EARTH_RADIUS_METERS *
-    Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
-  );
+  return 2 * EARTH_RADIUS_METERS * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 }
 
 function toRadians(value: number): number {
   return (value * Math.PI) / 180;
 }
 
-function normalizeColor(
-  value: string | undefined,
-  fallback: string,
-): string {
+function normalizeColor(value: string | undefined, fallback: string): string {
   if (!value) {
     return fallback;
   }

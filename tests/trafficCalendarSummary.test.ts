@@ -238,6 +238,25 @@ describe("traffic calendar friendly summary", () => {
     });
   });
 
+  it("uses the short line status instead of a verbose operational title", () => {
+    const disruption = createDisruption(
+      "Le trafic est interrompu de Paris Austerlitz vers Dourdan La Forêt, de Paris Austerlitz vers Saint-Martin d'Étampes et de Paris Austerlitz vers Massy-Palaiseau jusqu'à 10h.",
+      "incident",
+    );
+    disruption.message = [
+      disruption.title,
+      "Pour plus d'informations sur cette perturbation, consultez le fil X du RER C.",
+      "RER C : interruptions",
+      "Arrêt(s) non desservi(s)",
+    ].join("\n\n");
+
+    expect(getPatternTrafficSummaryCopy(disruption)).toEqual({
+      title: "Interruptions",
+      description:
+        "Le trafic est interrompu de Paris Austerlitz vers Dourdan La Forêt, de Paris Austerlitz vers Saint-Martin d'Étampes et de Paris Austerlitz vers Massy-Palaiseau jusqu'à 10h",
+    });
+  });
+
   it("prefers a labelled motif to an earlier causal phrase", () => {
     const disruption = createDisruption("Trafic interrompu", "works");
     disruption.message =

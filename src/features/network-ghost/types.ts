@@ -1,8 +1,10 @@
-import type {
-  TransitQuay,
-  TransferLineOption,
-} from "../../types/transit";
+import type { TransitQuay, TransferLineOption } from "../../types/transit";
 import type { GeographicViewport } from "./geoProjection";
+import type {
+  LineGeometryAttempt,
+  LineGeometryPoint,
+  LineGeometrySource,
+} from "../line-map/lineGeometry";
 
 export type GhostNetworkScope = "all" | "structural";
 export type GhostNetworkModeKey =
@@ -10,7 +12,8 @@ export type GhostNetworkModeKey =
   | "metro"
   | "tram"
   | "noctilien"
-  | "rer";
+  | "rer"
+  | "transilien";
 
 export type GhostNetworkModeVisibility = Record<GhostNetworkModeKey, boolean>;
 
@@ -60,6 +63,8 @@ export interface NetworkGhostTopologySegment {
 export interface NetworkGhostStationView {
   id: string;
   label: string;
+  lon?: number;
+  lat?: number;
   x: number;
   y: number;
 }
@@ -72,7 +77,19 @@ export interface NetworkGhostSegmentView {
   fromY: number;
   toX: number;
   toY: number;
+  polyline?: LineGeometryPoint[];
   level: number;
+}
+
+export interface NetworkGhostEntranceView {
+  id: string;
+  parentStationId: string;
+  name: string;
+  code?: string;
+  lon: number;
+  lat: number;
+  x: number;
+  y: number;
 }
 
 export interface NetworkGhostLineView {
@@ -90,7 +107,15 @@ export interface NetworkGhostLineView {
   anchorX: number;
   anchorY: number;
   stations: NetworkGhostStationView[];
+  branches?: Array<{
+    id: string;
+    stopIds: string[];
+  }>;
   segments: NetworkGhostSegmentView[];
+  geometrySource: LineGeometrySource;
+  geometryAttempts: LineGeometryAttempt[];
+  geometryPending?: boolean;
+  entrances?: NetworkGhostEntranceView[];
   loadOrder: number;
 }
 
@@ -112,4 +137,6 @@ export interface NetworkGhostLoadOptions {
 export interface NetworkGhostProgress {
   completed: number;
   total: number;
+  precisionCompleted: number;
+  precisionTotal: number;
 }

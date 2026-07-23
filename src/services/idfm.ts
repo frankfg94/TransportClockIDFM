@@ -21,6 +21,7 @@ import {
   monitoringRefToNavitiaStopPointRef,
   navitiaStopPointToMonitoringRef,
 } from "./idfmStopReferences";
+import { selectMaximalStopSequencePatterns } from "../features/line-map/topologyPatterns";
 import { createLinePresentation } from "./linePresentation";
 import { toServerApiUrl } from "./serverApi";
 import {
@@ -1424,6 +1425,7 @@ interface ServerLineTopology {
 
 export function convertServerTopologyToLineRouteSequences(
   topology: ServerLineTopology,
+  preferCompletePatterns = false,
 ): LineRouteSequence[] {
   const stations = new Map(topology.stations.map((station) => [station.id, station]));
   const segmentSequences = (topology.segments ?? [])
@@ -1445,11 +1447,11 @@ export function convertServerTopologyToLineRouteSequences(
     })
     .filter((sequence): sequence is LineRouteSequence => Boolean(sequence));
 
-  if (segmentSequences.length > 0) {
+  if (!preferCompletePatterns && segmentSequences.length > 0) {
     return segmentSequences;
   }
 
-  return topology.patterns
+  const patternSequences = selectMaximalStopSequencePatterns(topology.patterns)
     .map((pattern) => {
       const stops = pattern.stops.flatMap((stationId) => {
         const station = stations.get(stationId);
@@ -1470,6 +1472,8 @@ export function convertServerTopologyToLineRouteSequences(
       } satisfies LineRouteSequence;
     })
     .filter((sequence) => sequence.stops.length >= 2);
+
+  return patternSequences.length > 0 ? patternSequences : segmentSequences;
 }
 
 function createServerTopologyRouteStop(
@@ -1519,7 +1523,7 @@ async function fetchServerLineTopology(
   }
 
   const topology = (await response.json()) as ServerLineTopology;
-  return convertServerTopologyToLineRouteSequences(topology);
+  return convertServerTopologyToLineRouteSequences(topology, true);
 }
 
 async function fetchLineScheduleTopologyRoutes(

@@ -17,6 +17,8 @@ Application Nuxt 3 + Vue 3 + TypeScript affichant les prochains passages IDFM PR
 La procedure de distribution APK Android est documentee dans [docs/mobile-release.md](docs/mobile-release.md).
 Le fonctionnement i18n est documente dans [docs/i18n.md](docs/i18n.md).
 
+La precision des traces et son import securise sont documentes dans [docs/gtfs-line-geometry.md](docs/gtfs-line-geometry.md).
+
 ## Lancer le projet
 
 ```powershell

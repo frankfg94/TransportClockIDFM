@@ -6,6 +6,12 @@ declare module "nitropack/types" {
     '/api/_transport-clock/plugins': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/_transport-clock/plugins.get').default>>>>
     }
+    '/api/gtfs/preload': {
+      'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/gtfs/preload.post').default>>>>
+    }
+    '/api/gtfs/status': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/gtfs/status.get').default>>>>
+    }
     '/api/ha/v1/boards': {
       'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/ha/v1/boards.post').default>>>>
     }
@@ -29,6 +35,9 @@ declare module "nitropack/types" {
     }
     '/api/idfm/**:path': {
       'default': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/idfm/[...path]').default>>>>
+    }
+    '/api/line-geometry/resolve': {
+      'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/line-geometry/resolve.post').default>>>>
     }
     '/api/lines/:lineId/topology': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/lines/[lineId]/topology.get').default>>>>
@@ -64,6 +73,9 @@ declare module "nitropack/types" {
     }
     '/__nuxt_island/**': {
       'default': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/#internal/nuxt/island-renderer').default>>>>
+    }
+    '/api/lines/:transportType/:lineId/vehicles': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../packages/realtime-vehicles/src/runtime/server/vehicles.get').default>>>>
     }
   }
 }

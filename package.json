@@ -16,6 +16,8 @@
     "capacitor:sync:android:live": "set \"CAPACITOR_LIVE_RELOAD=true\" && npx cap sync android",
     "capacitor:android": "npx cap open android",
     "capacitor:ios": "npx cap open ios",
+    "gtfs:update": "tsx scripts/gtfs/update.ts",
+    "gtfs:reset": "tsx scripts/gtfs/update.ts --reset",
     "apk:build": "tsx scripts/mobile-release/build.ts",
     "apk:publish": "tsx scripts/mobile-release/publish.ts",
     "preview": "wrangler pages dev dist --ip 127.0.0.1 --port 3000",

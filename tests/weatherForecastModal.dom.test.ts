@@ -18,6 +18,7 @@ const baseSettings: AppSettings = {
   placePresetNavigationMode: "dropdown-swipe",
   navigationAutoHide: "none",
   reduceMotion: false,
+  gtfsLineGeometryEnabled: true,
   pluginViewerMode: "grid",
   plugins: {},
   legacyPluginData: {},
@@ -131,8 +132,7 @@ afterEach(() => {
 describe("WeatherForecastModal", () => {
   it("loads and renders forecast sections from the weather API", async () => {
     vi.doMock("../src/features/app-settings", async (importActual) => {
-      const actual =
-        await importActual<typeof import("../src/features/app-settings")>();
+      const actual = await importActual<typeof import("../src/features/app-settings")>();
       const { ref } = await import("vue");
       const settings = ref(baseSettings);
 
@@ -153,9 +153,8 @@ describe("WeatherForecastModal", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const { default: WeatherForecastModal } = await import(
-      "../src/features/weather/WeatherForecastModal.vue"
-    );
+    const { default: WeatherForecastModal } =
+      await import("../src/features/weather/WeatherForecastModal.vue");
     const wrapper = mount(WeatherForecastModal, {
       props: {
         open: true,
@@ -164,9 +163,7 @@ describe("WeatherForecastModal", () => {
 
     await flushPromises();
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/api/weather?"),
-    );
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/weather?"));
     expect(wrapper.text()).toContain("Meteo");
     expect(wrapper.text()).toContain("31°");
     expect(wrapper.text()).toContain("Precipitations");
@@ -177,8 +174,7 @@ describe("WeatherForecastModal", () => {
 
   it("updates the hourly chart when another day is selected", async () => {
     vi.doMock("../src/features/app-settings", async (importActual) => {
-      const actual =
-        await importActual<typeof import("../src/features/app-settings")>();
+      const actual = await importActual<typeof import("../src/features/app-settings")>();
       const { ref } = await import("vue");
       const settings = ref(baseSettings);
 
@@ -201,9 +197,8 @@ describe("WeatherForecastModal", () => {
       })),
     );
 
-    const { default: WeatherForecastModal } = await import(
-      "../src/features/weather/WeatherForecastModal.vue"
-    );
+    const { default: WeatherForecastModal } =
+      await import("../src/features/weather/WeatherForecastModal.vue");
     const wrapper = mount(WeatherForecastModal, {
       props: {
         open: true,
