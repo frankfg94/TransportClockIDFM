@@ -1,4 +1,4 @@
-import type { H3Event } from "h3";
+import { getRequestURL, type H3Event } from "h3";
 import type { GtfsLineArtifact, GtfsManifest, GtfsPublicStatus } from "./types";
 import {
   compileGtfsLineArtifact,
@@ -7,6 +7,7 @@ import {
 
 const STALE_AFTER_MS = 20 * 24 * 60 * 60_000;
 const MANIFEST_CACHE_MS = 60_000;
+const COMMITTED_GTFS_ASSET_BASE = "/_gtfs-data";
 
 interface R2ObjectLike {
   json?<T>(): Promise<T>;
@@ -17,7 +18,15 @@ interface R2BucketLike {
   get(key: string): Promise<R2ObjectLike | null>;
 }
 
-type CloudflareEnv = { GTFS_DATA_BUCKET?: R2BucketLike; [key: string]: unknown };
+interface AssetFetcherLike {
+  fetch(request: Request): Promise<Response>;
+}
+
+type CloudflareEnv = {
+  ASSETS?: AssetFetcherLike;
+  GTFS_DATA_BUCKET?: R2BucketLike;
+  [key: string]: unknown;
+};
 type RuntimeGlobal = typeof globalThis & {
   process?: { env?: Record<string, string | undefined> };
 };
@@ -155,10 +164,31 @@ async function readGtfsJson<T>(
 
   try {
     const value = await useStorage("gtfs").getItem<T>(key);
-    return { value: value ?? undefined, storage: "nitro" };
+    if (value !== null && value !== undefined) {
+      return { value, storage: "local" };
+    }
   } catch {
-    return { storage: "unconfigured" };
+    // Production has no writable filesystem storage; try the committed assets.
   }
+
+  if (event) {
+    try {
+      const request = new Request(
+        new URL(createCommittedGtfsAssetPath(key), getRequestURL(event).origin),
+        { headers: { Accept: "application/json" } },
+      );
+      const response = getCloudflareEnv(event)?.ASSETS
+        ? await getCloudflareEnv(event)!.ASSETS!.fetch(request)
+        : await fetch(request);
+      if (response.ok) {
+        return { value: (await response.json()) as T, storage: "local" };
+      }
+    } catch {
+      // Missing committed assets keep the provider unavailable so fallbacks can run.
+    }
+  }
+
+  return { storage: "unconfigured" };
 }
 
 function getCloudflareEnv(event?: H3Event): CloudflareEnv | undefined {
@@ -168,5 +198,13 @@ function getCloudflareEnv(event?: H3Event): CloudflareEnv | undefined {
 function detectStorage(event?: H3Event): GtfsPublicStatus["storage"] {
   if (getCloudflareEnv(event)?.GTFS_DATA_BUCKET) return "r2";
 
-  return "nitro";
+  return "local";
+}
+
+export function createCommittedGtfsAssetPath(key: string): string {
+  const encodedKey = key
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `${COMMITTED_GTFS_ASSET_BASE}/${encodedKey}`;
 }

@@ -20,6 +20,7 @@ describe("GtfsSettingsPanel", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("Precision GTFS");
+    expect(wrapper.text()).toContain("Cloudflare R2");
     expect(wrapper.text()).toContain("Ces donnees ont environ 21 jours");
     expect(wrapper.text()).toContain("npm run gtfs:update");
     expect(wrapper.find('input[type="password"]').exists()).toBe(false);
@@ -34,7 +35,13 @@ describe("GtfsSettingsPanel", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(statusResponse({ available: false, datasetVersion: undefined }))
-      .mockResolvedValueOnce(statusResponse({ available: true, datasetVersion: "2026-07-23" }));
+      .mockResolvedValueOnce(
+        statusResponse({
+          available: true,
+          datasetVersion: "2026-07-23",
+          storage: "local",
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
     const wrapper = mount(GtfsSettingsPanel, { props: { modelValue: true } });
     await flushPromises();
@@ -44,6 +51,7 @@ describe("GtfsSettingsPanel", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("2026-07-23");
+    expect(wrapper.text()).toContain("Donnees locales");
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.every(([url]) => String(url).endsWith("/api/gtfs/status"))).toBe(
       true,

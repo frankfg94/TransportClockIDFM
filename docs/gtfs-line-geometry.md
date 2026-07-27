@@ -10,9 +10,11 @@ are rejected rather than merged.
 - `GTFS_ENABLED`: defaults to `true`; `false` skips only the GTFS provider.
 - `GTFS_OUTPUT_DIR`: optional local output directory, `.data/gtfs` by default.
 
-On Cloudflare, bind the read-only R2 bucket as `GTFS_DATA_BUCKET`. Bind a KV
-namespace as `LINE_GEOMETRY_CACHE_KV` to persist public-IDFM and Navitia fallback
-caches across isolates. Nuxt only reads published GTFS artifacts.
+On Cloudflare, the read-only R2 binding `GTFS_DATA_BUCKET` is optional and takes
+priority when present. Without it, Nitro copies the committed `.data/gtfs`
+directory to `dist/_gtfs-data` and the runtime reads those same-version assets
+from the deployed application. Bind a KV namespace as `LINE_GEOMETRY_CACHE_KV`
+to persist public-IDFM and Navitia fallback caches across isolates.
 
 ## Update and reset
 

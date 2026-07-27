@@ -1,12 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { H3Event } from "h3";
 import {
   clearGtfsRuntimeCaches,
+  createCommittedGtfsAssetPath,
   getGtfsManifest,
   getGtfsPublicStatus,
   isGtfsEnabled,
+  loadGtfsLineArtifact,
   normalizeLineArtifactKey,
 } from "../server/services/gtfs/runtime";
-import type { GtfsManifest } from "../server/services/gtfs/types";
+import type {
+  GtfsLineArtifact,
+  GtfsManifest,
+} from "../server/services/gtfs/types";
 
 const originalEnabled = process.env.GTFS_ENABLED;
 
@@ -39,7 +45,7 @@ describe("GTFS runtime status", () => {
       available: true,
       sha256: "aaaaaaaaaaaa",
       datasetVersion: "2026-07-23",
-      storage: "nitro",
+      storage: "local",
     });
     expect(status).not.toHaveProperty("sourceEtag");
     expect(status).not.toHaveProperty("sourceLastModified");
@@ -67,6 +73,76 @@ describe("GTFS runtime status", () => {
   it("normalizes line identifiers into safe immutable artifact keys", () => {
     expect(normalizeLineArtifactKey("line:IDFM:C01384")).toBe("IDFM%3AC01384");
     expect(normalizeLineArtifactKey(" IDFM:BUS 57 ")).toBe("IDFM%3ABUS%2057");
+  });
+
+  it("encodes committed artifact filenames without turning their percent escapes into paths", () => {
+    expect(
+      createCommittedGtfsAssetPath(
+        "versions/abc/lines/IDFM%3AC01743.json",
+      ),
+    ).toBe("/_gtfs-data/versions/abc/lines/IDFM%253AC01743.json");
+  });
+
+  it("loads committed GTFS assets when neither R2 nor local Nitro storage has data", async () => {
+    const manifest = createManifest("2026-07-23T00:00:00.000Z");
+    const artifact = createLineArtifact("IDFM:C01743");
+    vi.stubGlobal("useStorage", () => ({
+      getItem: vi.fn(async () => null),
+    }));
+    const assetFetchMock = vi.fn(async (request: Request) => {
+      const url = request.url;
+      return new Response(
+        JSON.stringify(url.endsWith("/current.json") ? manifest : artifact),
+        { headers: { "content-type": "application/json" } },
+      );
+    });
+    const globalFetchMock = vi.fn();
+    vi.stubGlobal("fetch", globalFetchMock);
+    const event = createTestEvent({
+      ASSETS: {
+        fetch: assetFetchMock,
+      },
+    });
+
+    await expect(
+      loadGtfsLineArtifact(event, "line:IDFM:C01743"),
+    ).resolves.toMatchObject({ lineId: "IDFM:C01743" });
+    await expect(getGtfsPublicStatus(event)).resolves.toMatchObject({
+      available: true,
+      storage: "local",
+    });
+    expect(assetFetchMock.mock.calls.map(([request]) => request.url)).toEqual([
+      "https://transportclockidfm.pages.dev/_gtfs-data/current.json",
+      `https://transportclockidfm.pages.dev/_gtfs-data/versions/${manifest.sha256}/lines/IDFM%253AC01743.json`,
+    ]);
+    expect(globalFetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps R2 ahead of committed local assets", async () => {
+    const manifest = createManifest("2026-07-23T00:00:00.000Z");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("useStorage", () => ({
+      getItem: vi.fn(async () => {
+        throw new Error("local storage should not be read");
+      }),
+    }));
+
+    await expect(
+      getGtfsPublicStatus(
+        createTestEvent({
+          GTFS_DATA_BUCKET: {
+            get: vi.fn(async () => ({
+              text: async () => JSON.stringify(manifest),
+            })),
+          },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      available: true,
+      storage: "r2",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("caches the manifest until runtime caches are explicitly cleared", async () => {
@@ -113,6 +189,39 @@ function createManifest(installedAt: string): GtfsManifest {
     cacheGeneration: 1,
     lineCount: 1200,
   };
+}
+
+function createLineArtifact(lineId: string): GtfsLineArtifact {
+  return {
+    schemaVersion: 1,
+    lineId,
+    routeIds: [lineId],
+    labels: ["B"],
+    routeTypes: ["2"],
+    patterns: [],
+    shapes: {},
+    entrances: [],
+  };
+}
+
+function createTestEvent(cloudflareEnv: Record<string, unknown> = {}): H3Event {
+  return {
+    context: {
+      cloudflare: {
+        env: cloudflareEnv,
+      },
+    },
+    node: {
+      req: {
+        headers: {
+          host: "transportclockidfm.pages.dev",
+          "x-forwarded-proto": "https",
+        },
+        originalUrl: "/api/gtfs/status",
+      },
+    },
+    path: "/api/gtfs/status",
+  } as unknown as H3Event;
 }
 
 function restoreEnvironment(key: string, value: string | undefined): void {

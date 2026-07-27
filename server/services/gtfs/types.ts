@@ -55,5 +55,5 @@ export interface GtfsPublicStatus {
   stale: boolean;
   lineCount?: number;
   cacheGeneration?: number;
-  storage: "r2" | "nitro" | "unconfigured";
+  storage: "r2" | "local" | "nitro" | "unconfigured";
 }

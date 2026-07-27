@@ -1,6 +1,8 @@
+import { resolve } from "node:path";
 import { defineNuxtConfig } from "nuxt/config";
 
 const isCapacitorBuild = process.env.CAPACITOR_BUILD === "true";
+const committedGtfsDir = resolve(process.cwd(), ".data/gtfs");
 const serverApiBaseUrl = process.env.NUXT_PUBLIC_API_BASE_URL ?? "";
 const mobileReleasePublicBaseUrl = process.env.NUXT_PUBLIC_MOBILE_RELEASE_BASE_URL ?? "";
 const appSourceRevision =
@@ -52,6 +54,14 @@ export default defineNuxtConfig({
       : process.env.NODE_ENV === "production"
         ? "cloudflare-pages"
         : undefined,
+    publicAssets: [
+      {
+        dir: committedGtfsDir,
+        baseURL: "/_gtfs-data",
+        fallthrough: false,
+        maxAge: 0,
+      },
+    ],
     output: isCapacitorBuild
       ? {
           publicDir: "dist/capacitor",

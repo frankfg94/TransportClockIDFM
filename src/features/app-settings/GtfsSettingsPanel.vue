@@ -32,6 +32,12 @@ function formatStatusDate(value?: string): string {
     ? d(new Date(value), { dateStyle: "medium", timeStyle: "short" })
     : t("settings.gtfs.unknown");
 }
+
+function formatStorage(storage: GtfsPublicStatus["storage"]): string {
+  if (storage === "r2") return t("settings.gtfs.storageR2");
+  if (storage === "local" || storage === "nitro") return t("settings.gtfs.storageLocal");
+  return t("settings.gtfs.unknown");
+}
 </script>
 
 <template>
@@ -64,6 +70,10 @@ function formatStatusDate(value?: string): string {
       <div>
         <dt>{{ t("settings.gtfs.availability") }}</dt>
         <dd>{{ status.available ? t("common.booleans.yes") : t("common.booleans.no") }}</dd>
+      </div>
+      <div>
+        <dt>{{ t("settings.gtfs.storage") }}</dt>
+        <dd>{{ formatStorage(status.storage) }}</dd>
       </div>
       <div>
         <dt>{{ t("settings.gtfs.version") }}</dt>
