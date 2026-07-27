@@ -2,14 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ChevronDown, Pencil, Plus, Trash2 } from "lucide-vue-next";
 import AppModal from "../../components/AppModal.vue";
-import AppNotification, {
-  type AppNotificationTone,
-} from "../../components/AppNotification.vue";
+import AppNotification, { type AppNotificationTone } from "../../components/AppNotification.vue";
 import MaterialCombobox, {
   type MaterialComboboxOption,
 } from "../../components/MaterialCombobox.vue";
 import PlaceNameModal from "../../components/PlaceNameModal.vue";
 import PluginViewer from "./PluginViewer.vue";
+import GtfsSettingsPanel from "./GtfsSettingsPanel.vue";
 import { transitBoards } from "../../config/transitBoards";
 import { MobileReleaseCard } from "../mobile-release";
 import {
@@ -73,10 +72,7 @@ import {
   type TransferBundleSummary,
 } from "../service-pattern/transferBundles";
 import { clearPatternTransferRuntimeCaches } from "../service-pattern/patternTransfers";
-import {
-  weatherLocationOptions,
-  type WeatherLocationPreset,
-} from "../weather/weatherLocations";
+import { weatherLocationOptions, type WeatherLocationPreset } from "../weather/weatherLocations";
 import {
   DEFAULT_TRANSIT_PLACE_ID,
   WORK_TRANSIT_PLACE_ID,
@@ -104,9 +100,7 @@ import {
 
 const { settings, updateSettings, resetSettings } = useAppSettings();
 const { d, n, t } = useI18n();
-const presetState = ref<TransitPresetState>(
-  createDefaultTransitPresetState(transitBoards),
-);
+const presetState = ref<TransitPresetState>(createDefaultTransitPresetState(transitBoards));
 const bundlesModalOpen = ref(false);
 const presetsModalOpen = ref(false);
 const placeNameModalOpen = ref(false);
@@ -124,9 +118,7 @@ const settingsNotification = ref<{
 const openPanelIds = ref(new Set<string>());
 const backendBundleCount = computed(() => bundleSummaries.value.length);
 const localBundleCount = computed(() => localBundleSummaries.value.length);
-const bundleCount = computed(
-  () => backendBundleCount.value + localBundleCount.value,
-);
+const bundleCount = computed(() => backendBundleCount.value + localBundleCount.value);
 function isPanelOpen(panelId: string): boolean {
   return openPanelIds.value.has(panelId);
 }
@@ -195,8 +187,7 @@ const wakeLockLocalizedOptions = computed(() =>
 const navigationAutoHideLocalizedOptions = computed(() =>
   navigationAutoHideOptions.map((option) => ({
     id: option.id,
-    label:
-      option.id === "none" ? t("settings.options.autoHide.none") : option.label,
+    label: option.id === "none" ? t("settings.options.autoHide.none") : option.label,
   })),
 );
 const boardTogglesPlacementLocalizedOptions = computed(() =>
@@ -257,22 +248,18 @@ const trafficTopologyLabelKeys = {
   "trunk-core": "settings.trafficCalendarEquation.topologyRoles.trunk-core",
 } as const;
 const trafficImpactTransferRows = computed(() =>
-  Object.entries(TRAFFIC_IMPACT_SEVERITY_MODEL.transferWeights).map(
-    ([mode, weight]) => ({
-      id: mode,
-      label: t(trafficTransferLabelKeys[mode as keyof typeof trafficTransferLabelKeys]),
-      weight,
-    }),
-  ),
+  Object.entries(TRAFFIC_IMPACT_SEVERITY_MODEL.transferWeights).map(([mode, weight]) => ({
+    id: mode,
+    label: t(trafficTransferLabelKeys[mode as keyof typeof trafficTransferLabelKeys]),
+    weight,
+  })),
 );
 const trafficImpactTopologyRows = computed(() =>
-  Object.entries(TRAFFIC_IMPACT_SEVERITY_MODEL.topologyMultipliers).map(
-    ([role, multiplier]) => ({
-      id: role,
-      label: t(trafficTopologyLabelKeys[role as keyof typeof trafficTopologyLabelKeys]),
-      multiplier,
-    }),
-  ),
+  Object.entries(TRAFFIC_IMPACT_SEVERITY_MODEL.topologyMultipliers).map(([role, multiplier]) => ({
+    id: role,
+    label: t(trafficTopologyLabelKeys[role as keyof typeof trafficTopologyLabelKeys]),
+    multiplier,
+  })),
 );
 const trafficImpactEveningExampleWindow = {
   startMinute: 22 * 60 + 45,
@@ -291,9 +278,7 @@ const trafficImpactExampleScore = calculateTrafficImpactSeverity({
     },
   ],
   edges: [],
-  temporalMultipliersByStationKey: new Map([
-    ["example", trafficImpactEveningExample.multiplier],
-  ]),
+  temporalMultipliersByStationKey: new Map([["example", trafficImpactEveningExample.multiplier]]),
 }).score;
 
 function formatTrafficMinuteOfDay(value: number): string {
@@ -352,10 +337,7 @@ const transferBundleRequestConcurrencyLocalizedOptions = computed(() =>
 const transferBundleRequestSpacingLocalizedOptions = computed(() =>
   transferBundleRequestSpacingOptions.map((option) => ({
     id: option.id,
-    label:
-      option.id === "0"
-        ? t("settings.options.transferBundle.noDelay")
-        : option.label,
+    label: option.id === "0" ? t("settings.options.transferBundle.noDelay") : option.label,
   })),
 );
 const weatherModeLocalizedOptions = computed(() =>
@@ -389,19 +371,13 @@ const weatherTestModeLocalizedOptions = computed(() =>
 const weatherLookaheadLocalizedOptions = computed(() =>
   weatherLookaheadOptions.map((option) => ({
     id: option.id,
-    label:
-      option.id === "1440"
-        ? t("settings.options.weatherLookahead.allDay")
-        : option.label,
+    label: option.id === "1440" ? t("settings.options.weatherLookahead.allDay") : option.label,
   })),
 );
 const weatherLocationLocalizedOptions = computed(() =>
   weatherLocationOptions.map((option) => ({
     id: option.id,
-    label:
-      option.id === "custom"
-        ? t("settings.options.weatherLocation.custom")
-        : option.label,
+    label: option.id === "custom" ? t("settings.options.weatherLocation.custom") : option.label,
   })),
 );
 const selectedDisplayPlace = computed(
@@ -409,9 +385,7 @@ const selectedDisplayPlace = computed(
     getTransitPlaceById(presetState.value, selectedDisplayPlaceId.value) ??
     presetState.value.places[0],
 );
-const selectedDisplayPreferences = computed(
-  () => selectedDisplayPlace.value?.preferences,
-);
+const selectedDisplayPreferences = computed(() => selectedDisplayPlace.value?.preferences);
 let settingsNotificationTimer: ReturnType<typeof setTimeout> | undefined;
 
 function updateClosedSummaryMode(value: string): void {
@@ -468,18 +442,16 @@ function updatePatternCompactForkGap(value: string): void {
 
 function updatePatternRealisticMinGapCoefficient(value: string): void {
   updateSettings({
-    patternRealisticMinGapCoefficient:
-      parsePatternRealisticMinGapCoefficient(value),
+    patternRealisticMinGapCoefficient: parsePatternRealisticMinGapCoefficient(value),
   });
 }
 
 function updatePatternRealisticMaxGapCoefficient(value: string): void {
   updateSettings({
-    patternRealisticMaxGapCoefficient:
-      parsePatternRealisticMaxGapCoefficient(
-        value,
-        settings.value.patternRealisticMinGapCoefficient,
-      ),
+    patternRealisticMaxGapCoefficient: parsePatternRealisticMaxGapCoefficient(
+      value,
+      settings.value.patternRealisticMinGapCoefficient,
+    ),
   });
 }
 
@@ -490,10 +462,7 @@ function updateFullscreenStationPanelDesign(value: string): void {
 }
 
 function updateSelectedDisplayPlace(value: string): void {
-  selectedDisplayPlaceId.value = resolveTransitPlaceId(
-    presetState.value,
-    value,
-  );
+  selectedDisplayPlaceId.value = resolveTransitPlaceId(presetState.value, value);
 }
 
 function updateDefaultPlace(value: string): void {
@@ -507,9 +476,7 @@ function updateDefaultPlace(value: string): void {
   }
 }
 
-function updateSelectedDisplayPreferences(
-  patch: Partial<TransitBoardPreferences>,
-): void {
+function updateSelectedDisplayPreferences(patch: Partial<TransitBoardPreferences>): void {
   const place = selectedDisplayPlace.value;
 
   if (!place) {
@@ -557,11 +524,7 @@ function submitPlaceName(name: string): void {
       selectedDisplayPlaceId.value = result.place.id;
     } else {
       const previousTargetId = placeNameTargetId.value;
-      const nextState = renameTransitPlace(
-        presetState.value,
-        previousTargetId,
-        name,
-      );
+      const nextState = renameTransitPlace(presetState.value, previousTargetId, name);
       const renamedPlace =
         getTransitPlaceById(nextState, previousTargetId) ??
         nextState.places.find((place) => place.label === name);
@@ -685,9 +648,7 @@ async function refreshBundleSummaries(): Promise<void> {
 
   bundleSummaries.value = backendSummaries;
   localBundleSummaries.value =
-    typeof window === "undefined"
-      ? []
-      : listTransferBundles(window.localStorage);
+    typeof window === "undefined" ? [] : listTransferBundles(window.localStorage);
 }
 
 async function clearBundles(): Promise<void> {
@@ -700,9 +661,7 @@ async function clearBundles(): Promise<void> {
   }
 
   clearPatternTransferRuntimeCaches();
-  showSettingsNotification(
-    t("settings.bundles.cleared"),
-  );
+  showSettingsNotification(t("settings.bundles.cleared"));
   await backendClear;
   await refreshBundleSummaries();
 }
@@ -730,9 +689,7 @@ function formatBundleDate(value: string): string {
       });
 }
 
-function formatTransferResolverMode(
-  _value: TransferBundleSummary["transferResolverMode"],
-): string {
+function formatTransferResolverMode(_value: TransferBundleSummary["transferResolverMode"]): string {
   return "Nearby";
 }
 
@@ -796,10 +753,7 @@ function resetSettingsWithNotification(): void {
   showSettingsNotification(t("settings.notifications.reset"));
 }
 
-function showSettingsNotification(
-  message: string,
-  tone: AppNotificationTone = "info",
-): void {
+function showSettingsNotification(message: string, tone: AppNotificationTone = "info"): void {
   settingsNotification.value = { message, tone };
 
   if (settingsNotificationTimer) {
@@ -960,9 +914,7 @@ onBeforeUnmount(() => {
           <span>{{ t("settings.display.stationButtonsDescription") }}</span>
         </div>
         <MaterialCombobox
-          :model-value="
-            selectedDisplayPreferences?.boardTogglesPlacement ?? 'inline'
-          "
+          :model-value="selectedDisplayPreferences?.boardTogglesPlacement ?? 'inline'"
           :options="boardTogglesPlacementLocalizedOptions"
           :aria-label="t('settings.display.stationButtonsAria')"
           @update:model-value="updateBoardTogglesPlacement"
@@ -988,9 +940,7 @@ onBeforeUnmount(() => {
           :checked="settings.fullscreenStationPanelDarkTheme"
           @change="
             updateSettings({
-              fullscreenStationPanelDarkTheme: (
-                $event.target as HTMLInputElement
-              ).checked,
+              fullscreenStationPanelDarkTheme: ($event.target as HTMLInputElement).checked,
             })
           "
         />
@@ -1007,9 +957,7 @@ onBeforeUnmount(() => {
           <span>{{ t("settings.display.closedAccordionDescription") }}</span>
         </div>
         <MaterialCombobox
-          :model-value="
-            selectedDisplayPreferences?.closedDirectionSummaryMode ?? 'next'
-          "
+          :model-value="selectedDisplayPreferences?.closedDirectionSummaryMode ?? 'next'"
           :options="closedDirectionSummaryLocalizedOptions"
           :aria-label="t('settings.display.closedAccordionAria')"
           @update:model-value="updateClosedSummaryMode"
@@ -1022,12 +970,7 @@ onBeforeUnmount(() => {
           <span>{{ t("settings.display.maxDeparturesDescription") }}</span>
         </div>
         <MaterialCombobox
-          :model-value="
-            String(
-              selectedDisplayPreferences?.maxDeparturesPerDirection ??
-                'default',
-            )
-          "
+          :model-value="String(selectedDisplayPreferences?.maxDeparturesPerDirection ?? 'default')"
           :options="maxDeparturesLocalizedOptions"
           :aria-label="t('settings.display.maxDeparturesAria')"
           @update:model-value="updateMaxDepartures"
@@ -1040,8 +983,7 @@ onBeforeUnmount(() => {
           :checked="selectedDisplayPreferences?.terminalDirectionsOnly ?? false"
           @change="
             updateSelectedDisplayPreferences({
-              terminalDirectionsOnly: ($event.target as HTMLInputElement)
-                .checked,
+              terminalDirectionsOnly: ($event.target as HTMLInputElement).checked,
             })
           "
         />
@@ -1060,9 +1002,7 @@ onBeforeUnmount(() => {
           :checked="settings.ghostNetworkStructuralOnly"
           @change="
             updateSettings({
-              ghostNetworkStructuralOnly: (
-                $event.target as HTMLInputElement
-              ).checked,
+              ghostNetworkStructuralOnly: ($event.target as HTMLInputElement).checked,
             })
           "
         />
@@ -1183,11 +1123,11 @@ onBeforeUnmount(() => {
                     {{ t("settings.trafficCalendarEquation.temporalCoverage") }}
                   </th>
                   <td>
-                    {{ t("settings.trafficCalendarEquation.temporalCoverageValue", {
-                      minutes: n(
-                        TRAFFIC_IMPACT_SEVERITY_MODEL.temporal.minutesPerDay,
-                      ),
-                    }) }}
+                    {{
+                      t("settings.trafficCalendarEquation.temporalCoverageValue", {
+                        minutes: n(TRAFFIC_IMPACT_SEVERITY_MODEL.temporal.minutesPerDay),
+                      })
+                    }}
                   </td>
                 </tr>
                 <tr>
@@ -1198,17 +1138,12 @@ onBeforeUnmount(() => {
                     {{
                       t("settings.trafficCalendarEquation.offPeakValue", {
                         start: formatTrafficMinuteOfDay(
-                          TRAFFIC_IMPACT_SEVERITY_MODEL.temporal
-                            .offPeakStartMinute,
+                          TRAFFIC_IMPACT_SEVERITY_MODEL.temporal.offPeakStartMinute,
                         ),
                         end: formatTrafficMinuteOfDay(
-                          TRAFFIC_IMPACT_SEVERITY_MODEL.temporal
-                            .offPeakEndMinute,
+                          TRAFFIC_IMPACT_SEVERITY_MODEL.temporal.offPeakEndMinute,
                         ),
-                        coefficient: n(
-                          TRAFFIC_IMPACT_SEVERITY_MODEL.temporal
-                            .offPeakMultiplier,
-                        ),
+                        coefficient: n(TRAFFIC_IMPACT_SEVERITY_MODEL.temporal.offPeakMultiplier),
                       })
                     }}
                   </td>
@@ -1219,12 +1154,7 @@ onBeforeUnmount(() => {
                   </th>
                   <td>
                     &times;
-                    {{
-                      n(
-                        TRAFFIC_IMPACT_SEVERITY_MODEL.temporal
-                          .unspecifiedMultiplier,
-                      )
-                    }}
+                    {{ n(TRAFFIC_IMPACT_SEVERITY_MODEL.temporal.unspecifiedMultiplier) }}
                   </td>
                 </tr>
               </tbody>
@@ -1237,9 +1167,7 @@ onBeforeUnmount(() => {
               <tbody>
                 <tr>
                   <th scope="row">{{ t("pattern.trafficCalendarSeverity.low") }}</th>
-                  <td>
-                    &lt; {{ n(TRAFFIC_IMPACT_SEVERITY_MODEL.thresholds.medium) }}
-                  </td>
+                  <td>&lt; {{ n(TRAFFIC_IMPACT_SEVERITY_MODEL.thresholds.medium) }}</td>
                 </tr>
                 <tr>
                   <th scope="row">
@@ -1253,9 +1181,7 @@ onBeforeUnmount(() => {
                 </tr>
                 <tr>
                   <th scope="row">{{ t("pattern.trafficCalendarSeverity.high") }}</th>
-                  <td>
-                    ? {{ n(TRAFFIC_IMPACT_SEVERITY_MODEL.thresholds.high) }}
-                  </td>
+                  <td>? {{ n(TRAFFIC_IMPACT_SEVERITY_MODEL.thresholds.high) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -1265,9 +1191,7 @@ onBeforeUnmount(() => {
         <p class="traffic-impact-equation__topology-note">
           {{
             t("settings.trafficCalendarEquation.topologyDeduction", {
-              ratio: n(
-                TRAFFIC_IMPACT_SEVERITY_MODEL.smallBranchRatio * 100,
-              ),
+              ratio: n(TRAFFIC_IMPACT_SEVERITY_MODEL.smallBranchRatio * 100),
             })
           }}
         </p>
@@ -1275,21 +1199,11 @@ onBeforeUnmount(() => {
           {{
             t("settings.trafficCalendarEquation.example", {
               base: n(TRAFFIC_IMPACT_SEVERITY_MODEL.baseStationScore),
-              transfer: n(
-                TRAFFIC_IMPACT_SEVERITY_MODEL.transferWeights.RER,
-              ),
-              coefficient: n(
-                TRAFFIC_IMPACT_SEVERITY_MODEL.topologyMultipliers[
-                  "trunk-core"
-                ],
-              ),
+              transfer: n(TRAFFIC_IMPACT_SEVERITY_MODEL.transferWeights.RER),
+              coefficient: n(TRAFFIC_IMPACT_SEVERITY_MODEL.topologyMultipliers["trunk-core"]),
               temporal: n(trafficImpactEveningExample.multiplier),
-              start: formatTrafficMinuteOfDay(
-                trafficImpactEveningExampleWindow.startMinute,
-              ),
-              end: formatTrafficMinuteOfDay(
-                trafficImpactEveningExampleWindow.endMinute,
-              ),
+              start: formatTrafficMinuteOfDay(trafficImpactEveningExampleWindow.startMinute),
+              end: formatTrafficMinuteOfDay(trafficImpactEveningExampleWindow.endMinute),
               score: n(trafficImpactExampleScore),
             })
           }}
@@ -1298,7 +1212,6 @@ onBeforeUnmount(() => {
           {{ t("settings.trafficCalendarEquation.exclusions") }}
         </p>
       </article>
-
 
       <label
         class="settings-toggle"
@@ -1309,9 +1222,7 @@ onBeforeUnmount(() => {
           :checked="settings.smartTrafficModalFormatting"
           @change="
             updateSettings({
-              smartTrafficModalFormatting: (
-                $event.target as HTMLInputElement
-              ).checked,
+              smartTrafficModalFormatting: ($event.target as HTMLInputElement).checked,
             })
           "
         />
@@ -1332,8 +1243,7 @@ onBeforeUnmount(() => {
           :checked="settings.smartTrafficDetection"
           @change="
             updateSettings({
-              smartTrafficDetection: ($event.target as HTMLInputElement)
-                .checked,
+              smartTrafficDetection: ($event.target as HTMLInputElement).checked,
             })
           "
         />
@@ -1358,11 +1268,7 @@ onBeforeUnmount(() => {
             :aria-label="t('settings.display.trafficWarningLookaheadAria')"
             step="1"
             type="range"
-            @input="
-              updateTrafficWarningLookaheadDays(
-                ($event.target as HTMLInputElement).value,
-              )
-            "
+            @input="updateTrafficWarningLookaheadDays(($event.target as HTMLInputElement).value)"
           />
         </label>
       </div>
@@ -1373,9 +1279,7 @@ onBeforeUnmount(() => {
           :checked="settings.transferBundleLocalCacheEnabled"
           @change="
             updateSettings({
-              transferBundleLocalCacheEnabled: (
-                $event.target as HTMLInputElement
-              ).checked,
+              transferBundleLocalCacheEnabled: ($event.target as HTMLInputElement).checked,
             })
           "
         />
@@ -1392,9 +1296,7 @@ onBeforeUnmount(() => {
           :checked="settings.transferBundleBackendCacheEnabled"
           @change="
             updateSettings({
-              transferBundleBackendCacheEnabled: (
-                $event.target as HTMLInputElement
-              ).checked,
+              transferBundleBackendCacheEnabled: ($event.target as HTMLInputElement).checked,
             })
           "
         />
@@ -1455,10 +1357,7 @@ onBeforeUnmount(() => {
         <div>
           <strong>{{ t("settings.bundles.spacing") }}</strong>
           <span>{{ t("settings.display.transferSpacingDescription") }}</span>
-          <small
-            v-if="settings.transferBundleRequestSpacingMs > 0"
-            class="settings-inline-warning"
-          >
+          <small v-if="settings.transferBundleRequestSpacingMs > 0" class="settings-inline-warning">
             {{ t("settings.display.transferSpacingWarning") }}
           </small>
         </div>
@@ -1476,11 +1375,7 @@ onBeforeUnmount(() => {
           <span>{{ t("settings.display.transferCacheDescription") }}</span>
         </div>
         <div class="settings-bundle-actions__buttons">
-          <button
-            class="button-secondary"
-            type="button"
-            @click="openBundlesModal"
-          >
+          <button class="button-secondary" type="button" @click="openBundlesModal">
             {{ t("settings.bundles.view") }}
           </button>
           <button class="button-secondary" type="button" @click="clearBundles">
@@ -1555,9 +1450,7 @@ onBeforeUnmount(() => {
           :checked="settings.weatherShowApparentTemperature"
           @change="
             updateSettings({
-              weatherShowApparentTemperature: (
-                $event.target as HTMLInputElement
-              ).checked,
+              weatherShowApparentTemperature: ($event.target as HTMLInputElement).checked,
             })
           "
         />
@@ -1581,22 +1474,14 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div
-        v-if="settings.weatherLocationPreset === 'custom'"
-        class="settings-custom-location"
-      >
+      <div v-if="settings.weatherLocationPreset === 'custom'" class="settings-custom-location">
         <label>
           <span>{{ t("settings.display.weatherCustomName") }}</span>
           <input
             class="settings-input"
             :value="settings.weatherCustomLocation.label"
             type="text"
-            @input="
-              updateWeatherCustomLocation(
-                'label',
-                ($event.target as HTMLInputElement).value,
-              )
-            "
+            @input="updateWeatherCustomLocation('label', ($event.target as HTMLInputElement).value)"
           />
         </label>
         <label>
@@ -1608,10 +1493,7 @@ onBeforeUnmount(() => {
             type="number"
             step="0.0001"
             @input="
-              updateWeatherCustomLocation(
-                'latitude',
-                ($event.target as HTMLInputElement).value,
-              )
+              updateWeatherCustomLocation('latitude', ($event.target as HTMLInputElement).value)
             "
           />
         </label>
@@ -1624,15 +1506,17 @@ onBeforeUnmount(() => {
             type="number"
             step="0.0001"
             @input="
-              updateWeatherCustomLocation(
-                'longitude',
-                ($event.target as HTMLInputElement).value,
-              )
+              updateWeatherCustomLocation('longitude', ($event.target as HTMLInputElement).value)
             "
           />
         </label>
       </div>
     </section>
+
+    <GtfsSettingsPanel
+      :model-value="settings.gtfsLineGeometryEnabled"
+      @update:model-value="updateSettings({ gtfsLineGeometryEnabled: $event })"
+    />
 
     <section
       class="settings-panel"
@@ -1715,11 +1599,7 @@ onBeforeUnmount(() => {
             :aria-label="t('settings.display.compactVerticalSpacingAria')"
             step="4"
             type="range"
-            @input="
-              updatePatternCompactBranchGap(
-                ($event.target as HTMLInputElement).value,
-              )
-            "
+            @input="updatePatternCompactBranchGap(($event.target as HTMLInputElement).value)"
           />
         </label>
       </div>
@@ -1730,8 +1610,7 @@ onBeforeUnmount(() => {
           :checked="settings.patternRoundedCurves"
           @change="
             updateSettings({
-              patternRoundedCurves: ($event.target as HTMLInputElement)
-                .checked,
+              patternRoundedCurves: ($event.target as HTMLInputElement).checked,
             })
           "
         />
@@ -1748,8 +1627,7 @@ onBeforeUnmount(() => {
           :checked="settings.showInterruptionWalkingTimes"
           @change="
             updateSettings({
-              showInterruptionWalkingTimes: ($event.target as HTMLInputElement)
-                .checked,
+              showInterruptionWalkingTimes: ($event.target as HTMLInputElement).checked,
             })
           "
         />
@@ -1774,11 +1652,7 @@ onBeforeUnmount(() => {
             :aria-label="t('settings.display.compactForkGapAria')"
             step="2"
             type="range"
-            @input="
-              updatePatternCompactForkGap(
-                ($event.target as HTMLInputElement).value,
-              )
-            "
+            @input="updatePatternCompactForkGap(($event.target as HTMLInputElement).value)"
           />
         </label>
       </div>
@@ -1792,9 +1666,7 @@ onBeforeUnmount(() => {
           <label class="settings-range">
             <small>{{ t("settings.display.minCoefficient") }}</small>
             <span>
-              {{
-                formatCoefficient(settings.patternRealisticMinGapCoefficient)
-              }}
+              {{ formatCoefficient(settings.patternRealisticMinGapCoefficient) }}
             </span>
             <input
               :max="PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MAX"
@@ -1804,18 +1676,14 @@ onBeforeUnmount(() => {
               step="0.05"
               type="range"
               @input="
-                updatePatternRealisticMinGapCoefficient(
-                  ($event.target as HTMLInputElement).value,
-                )
+                updatePatternRealisticMinGapCoefficient(($event.target as HTMLInputElement).value)
               "
             />
           </label>
           <label class="settings-range">
             <small>{{ t("settings.display.maxCoefficient") }}</small>
             <span>
-              {{
-                formatCoefficient(settings.patternRealisticMaxGapCoefficient)
-              }}
+              {{ formatCoefficient(settings.patternRealisticMaxGapCoefficient) }}
             </span>
             <input
               :max="PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MAX"
@@ -1825,9 +1693,7 @@ onBeforeUnmount(() => {
               step="0.25"
               type="range"
               @input="
-                updatePatternRealisticMaxGapCoefficient(
-                  ($event.target as HTMLInputElement).value,
-                )
+                updatePatternRealisticMaxGapCoefficient(($event.target as HTMLInputElement).value)
               "
             />
           </label>
@@ -1867,12 +1733,9 @@ onBeforeUnmount(() => {
           <small>{{ t("settings.display.reduceMotionDescription") }}</small>
         </div>
       </label>
-
     </section>
 
-    <PluginViewer
-      @notify="showSettingsNotification($event.message, $event.tone)"
-    />
+    <PluginViewer @notify="showSettingsNotification($event.message, $event.tone)" />
 
     <MobileReleaseCard />
 
@@ -1941,11 +1804,7 @@ onBeforeUnmount(() => {
     </section>
 
     <footer class="settings-page__footer">
-      <button
-        class="button-secondary"
-        type="button"
-        @click="resetSettingsWithNotification"
-      >
+      <button class="button-secondary" type="button" @click="resetSettingsWithNotification">
         {{ t("common.actions.reset") }}
       </button>
     </footer>
@@ -1958,11 +1817,7 @@ onBeforeUnmount(() => {
       @close="presetsModalOpen = false"
     >
       <div class="settings-presets-list">
-        <article
-          v-for="place in presetState.places"
-          :key="place.id"
-          class="settings-preset-item"
-        >
+        <article v-for="place in presetState.places" :key="place.id" class="settings-preset-item">
           <div class="settings-preset-item__content">
             <strong>{{ getPlaceLabel(place) }}</strong>
             <span>{{ getPlaceStationSummary(place) }}</span>
@@ -2001,19 +1856,11 @@ onBeforeUnmount(() => {
       </div>
 
       <template #footer>
-        <button
-          class="button-secondary"
-          type="button"
-          @click="openCreatePlaceModal"
-        >
+        <button class="button-secondary" type="button" @click="openCreatePlaceModal">
           <Plus :size="18" aria-hidden="true" />
           {{ t("settings.places.addPlace") }}
         </button>
-        <button
-          class="button-secondary"
-          type="button"
-          @click="presetsModalOpen = false"
-        >
+        <button class="button-secondary" type="button" @click="presetsModalOpen = false">
           {{ t("common.actions.close") }}
         </button>
       </template>
@@ -2028,10 +1875,7 @@ onBeforeUnmount(() => {
       @submit="submitPlaceName"
     />
 
-    <AppNotification
-      :message="settingsNotification.message"
-      :tone="settingsNotification.tone"
-    />
+    <AppNotification :message="settingsNotification.message" :tone="settingsNotification.tone" />
 
     <Teleport to="body">
       <div
@@ -2072,10 +1916,7 @@ onBeforeUnmount(() => {
             }}
           </p>
 
-          <section
-            v-if="bundleSummaries.length"
-            class="settings-bundle-section"
-          >
+          <section v-if="bundleSummaries.length" class="settings-bundle-section">
             <h3>{{ t("settings.bundles.backend") }}</h3>
             <div class="settings-bundle-list">
               <article
@@ -2098,13 +1939,9 @@ onBeforeUnmount(() => {
                       })
                     }}
                     -
-                    {{
-                      formatTransferResolverMode(bundle.transferResolverMode)
-                    }}
+                    {{ formatTransferResolverMode(bundle.transferResolverMode) }}
                     -
-                    {{
-                      formatTransferBundleDistance(bundle.nearbyDistanceMeters)
-                    }}
+                    {{ formatTransferBundleDistance(bundle.nearbyDistanceMeters) }}
                   </span>
                   <small>
                     {{
@@ -2114,21 +1951,14 @@ onBeforeUnmount(() => {
                     }}
                   </small>
                 </div>
-                <button
-                  class="button-secondary"
-                  type="button"
-                  @click="deleteBundle(bundle.id)"
-                >
+                <button class="button-secondary" type="button" @click="deleteBundle(bundle.id)">
                   {{ t("common.actions.delete") }}
                 </button>
               </article>
             </div>
           </section>
 
-          <section
-            v-if="localBundleSummaries.length"
-            class="settings-bundle-section"
-          >
+          <section v-if="localBundleSummaries.length" class="settings-bundle-section">
             <h3>{{ t("settings.bundles.browser") }}</h3>
             <div class="settings-bundle-list">
               <article
@@ -2151,13 +1981,9 @@ onBeforeUnmount(() => {
                       })
                     }}
                     -
-                    {{
-                      formatTransferResolverMode(bundle.transferResolverMode)
-                    }}
+                    {{ formatTransferResolverMode(bundle.transferResolverMode) }}
                     -
-                    {{
-                      formatTransferBundleDistance(bundle.nearbyDistanceMeters)
-                    }}
+                    {{ formatTransferBundleDistance(bundle.nearbyDistanceMeters) }}
                   </span>
                   <small>
                     {{
@@ -2167,11 +1993,7 @@ onBeforeUnmount(() => {
                     }}
                   </small>
                 </div>
-                <button
-                  class="button-secondary"
-                  type="button"
-                  @click="deleteBundle(bundle.id)"
-                >
+                <button class="button-secondary" type="button" @click="deleteBundle(bundle.id)">
                   {{ t("common.actions.delete") }}
                 </button>
               </article>
@@ -2667,8 +2489,7 @@ onBeforeUnmount(() => {
 }
 
 .traffic-impact-equation {
-  background:
-    linear-gradient(135deg, rgba(245, 243, 255, 0.92), rgba(255, 247, 251, 0.92));
+  background: linear-gradient(135deg, rgba(245, 243, 255, 0.92), rgba(255, 247, 251, 0.92));
   border: 1px solid rgba(109, 40, 217, 0.14);
   border-radius: 16px;
   display: grid;

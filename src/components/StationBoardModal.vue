@@ -8,10 +8,7 @@ import LineCombobox from "./LineCombobox.vue";
 import StationBoardSelector from "./StationBoardSelector.vue";
 import StationCombobox from "./StationCombobox.vue";
 import { createBoardFromDraft } from "../services/boardBuilder";
-import {
-  DEFAULT_TRANSIT_PLACE_ID,
-  type TransitPlacePreset,
-} from "../storage/transitPreferences";
+import { DEFAULT_TRANSIT_PLACE_ID, type TransitPlacePreset } from "../storage/transitPreferences";
 import {
   fetchDirectionGroupsForStation,
   fetchStationTransfers,
@@ -82,12 +79,10 @@ const selectedDashboardId = ref(DEFAULT_TRANSIT_PLACE_ID);
 const canAdd = computed(() =>
   Boolean(
     draft.family &&
-      draft.line &&
-      draft.station &&
-      (!props.showDashboardSelector ||
-        props.dashboardOptions.some(
-          (place) => place.id === selectedDashboardId.value,
-        )),
+    draft.line &&
+    draft.station &&
+    (!props.showDashboardSelector ||
+      props.dashboardOptions.some((place) => place.id === selectedDashboardId.value)),
   ),
 );
 const canSelectLine = computed(() => Boolean(draft.family && draft.line));
@@ -104,10 +99,7 @@ const visibleSteps = computed(() =>
   ),
 );
 const modalWide = computed(
-  () =>
-    !props.lineOnly &&
-    stationSelectionMode.value === "map" &&
-    Boolean(draft.line),
+  () => !props.lineOnly && stationSelectionMode.value === "map" && Boolean(draft.line),
 );
 const modalEyebrow = computed(() =>
   props.lineOnly
@@ -120,9 +112,7 @@ const modalTitle = computed(() =>
     : t("board.stationModal.newStationTitle"),
 );
 const filteredStationOptions = computed(() =>
-  stationOptions.value.filter((station) =>
-    stationMatchesQuery(station, stationQuery.value),
-  ),
+  stationOptions.value.filter((station) => stationMatchesQuery(station, stationQuery.value)),
 );
 let lineSearchTimer: number | undefined;
 let latestFamilyRequest = 0;
@@ -198,10 +188,7 @@ watch(lineQuery, () => {
 });
 
 watch(stationQuery, () => {
-  if (
-    draft.station &&
-    !stationMatchesQuery(draft.station, stationQuery.value)
-  ) {
+  if (draft.station && !stationMatchesQuery(draft.station, stationQuery.value)) {
     draft.station = undefined;
   }
 });
@@ -283,10 +270,7 @@ async function loadFamilies(): Promise<void> {
   } catch (error) {
     if (requestId === latestFamilyRequest) {
       familyOptions.value = [];
-      errorMessage.value = formatLoadError(
-        error,
-        t("board.stationModal.resources.networks"),
-      );
+      errorMessage.value = formatLoadError(error, t("board.stationModal.resources.networks"));
     }
   } finally {
     if (requestId === latestFamilyRequest) {
@@ -354,8 +338,8 @@ function selectStationFromMap(station: StationSearchOption): void {
   draft.station = station;
 
   if (!stationOptions.value.some((option) => option.id === station.id)) {
-    stationOptions.value = [...stationOptions.value, station].sort(
-      (left, right) => left.label.localeCompare(right.label, "fr"),
+    stationOptions.value = [...stationOptions.value, station].sort((left, right) =>
+      left.label.localeCompare(right.label, "fr"),
     );
   }
 
@@ -364,8 +348,7 @@ function selectStationFromMap(station: StationSearchOption): void {
 }
 
 function toggleStationSelectionMode(): void {
-  stationSelectionMode.value =
-    stationSelectionMode.value === "list" ? "map" : "list";
+  stationSelectionMode.value = stationSelectionMode.value === "list" ? "map" : "list";
 }
 
 async function loadLines(): Promise<void> {
@@ -388,10 +371,7 @@ async function loadLines(): Promise<void> {
   } catch (error) {
     if (requestId === latestLineRequest) {
       lineOptions.value = [];
-      errorMessage.value = formatLoadError(
-        error,
-        t("board.stationModal.resources.lines"),
-      );
+      errorMessage.value = formatLoadError(error, t("board.stationModal.resources.lines"));
     }
   } finally {
     if (requestId === latestLineRequest) {
@@ -419,10 +399,7 @@ async function loadStations(): Promise<void> {
   } catch (error) {
     if (requestId === latestStationRequest) {
       stationOptions.value = [];
-      errorMessage.value = formatLoadError(
-        error,
-        t("board.stationModal.resources.stations"),
-      );
+      errorMessage.value = formatLoadError(error, t("board.stationModal.resources.stations"));
     }
   } finally {
     if (requestId === latestStationRequest) {
@@ -431,9 +408,7 @@ async function loadStations(): Promise<void> {
   }
 }
 
-async function loadStationTransferBadges(
-  station: StationSearchOption,
-): Promise<void> {
+async function loadStationTransferBadges(station: StationSearchOption): Promise<void> {
   if (!draft.line || stationTransfers[station.id]) {
     return;
   }
@@ -442,16 +417,10 @@ async function loadStationTransferBadges(
     return;
   }
 
-  stationTransferLoadingIds.value = [
-    ...stationTransferLoadingIds.value,
-    station.id,
-  ];
+  stationTransferLoadingIds.value = [...stationTransferLoadingIds.value, station.id];
 
   try {
-    stationTransfers[station.id] = await fetchStationTransfers(
-      station,
-      draft.line.id,
-    );
+    stationTransfers[station.id] = await fetchStationTransfers(station, draft.line.id);
   } catch {
     stationTransfers[station.id] = [];
   } finally {
@@ -470,10 +439,7 @@ async function addStation(): Promise<void> {
   errorMessage.value = "";
 
   try {
-    const directionGroups = await fetchDirectionGroupsForStation(
-      draft.line,
-      draft.station,
-    );
+    const directionGroups = await fetchDirectionGroupsForStation(draft.line, draft.station);
     const board = createBoardFromDraft(
       {
         family: draft.family,
@@ -483,11 +449,7 @@ async function addStation(): Promise<void> {
       directionGroups,
     );
 
-    emit(
-      "add",
-      board,
-      props.showDashboardSelector ? selectedDashboardId.value : undefined,
-    );
+    emit("add", board, props.showDashboardSelector ? selectedDashboardId.value : undefined);
     resetDraft();
     emit("close");
   } catch {
@@ -522,10 +484,7 @@ function resetDraft(): void {
   selectedDashboardId.value = resolveDefaultDashboardId();
 }
 
-function setCurrentStep(
-  step: number,
-  direction: StepTransitionDirection,
-): void {
+function setCurrentStep(step: number, direction: StepTransitionDirection): void {
   if (step === currentStep.value) {
     return;
   }
@@ -639,23 +598,17 @@ function retryCurrentStep(): void {
   void loadFamilies();
 }
 
-function stationMatchesQuery(
-  station: StationSearchOption,
-  query: string,
-): boolean {
+function stationMatchesQuery(station: StationSearchOption, query: string): boolean {
   const normalizedQuery = normalizeText(query);
 
   return (
     !normalizedQuery ||
-    normalizeText(`${station.label} ${station.city ?? ""}`).includes(
-      normalizedQuery,
-    )
+    normalizeText(`${station.label} ${station.city ?? ""}`).includes(normalizedQuery)
   );
 }
 
 function formatLoadError(error: unknown, resource: string): string {
-  const isRateLimit =
-    error instanceof Error && error.message.toLowerCase().includes("429");
+  const isRateLimit = error instanceof Error && error.message.toLowerCase().includes("429");
 
   if (isRateLimit) {
     return t("board.stationModal.loadRateLimited", { resource });
@@ -710,10 +663,7 @@ function normalizeText(value: string): string {
             </button>
           </header>
 
-          <div
-            class="station-form"
-            :class="{ 'station-multistep__form': isMultiStep }"
-          >
+          <div class="station-form" :class="{ 'station-multistep__form': isMultiStep }">
             <template v-if="!isMultiStep && hasInitialLine">
               <div class="station-board-modal__line-summary">
                 <span>{{ t("board.stationModal.selectedLine") }}</span>
@@ -738,10 +688,7 @@ function normalizeText(value: string): string {
                   </button>
                 </div>
 
-                <div
-                  v-if="stationSelectionMode === 'list'"
-                  class="station-picker__list"
-                >
+                <div v-if="stationSelectionMode === 'list'" class="station-picker__list">
                   <StationCombobox
                     :model-value="draft.station"
                     :options="filteredStationOptions"
@@ -765,6 +712,7 @@ function normalizeText(value: string): string {
                   v-else
                   :line="draft.line"
                   :selected-station-id="draft.station?.id"
+                  :gtfs-line-geometry-enabled="settings.gtfsLineGeometryEnabled"
                   :smart-traffic-detection="settings.smartTrafficDetection"
                   @select="selectStationFromMap"
                 />
@@ -829,10 +777,7 @@ function normalizeText(value: string): string {
                   </button>
                 </div>
 
-                <div
-                  v-if="stationSelectionMode === 'list'"
-                  class="station-picker__list"
-                >
+                <div v-if="stationSelectionMode === 'list'" class="station-picker__list">
                   <StationCombobox
                     :model-value="draft.station"
                     :options="filteredStationOptions"
@@ -856,6 +801,7 @@ function normalizeText(value: string): string {
                   v-else
                   :line="draft.line"
                   :selected-station-id="draft.station?.id"
+                  :gtfs-line-geometry-enabled="settings.gtfsLineGeometryEnabled"
                   :smart-traffic-detection="settings.smartTrafficDetection"
                   @select="selectStationFromMap"
                 />
@@ -898,10 +844,7 @@ function normalizeText(value: string): string {
               </label>
 
               <div v-else key="station" class="station-multistep__station-step">
-                <div
-                  v-if="hasInitialLine"
-                  class="station-board-modal__line-summary"
-                >
+                <div v-if="hasInitialLine" class="station-board-modal__line-summary">
                   <span>{{ t("board.stationModal.selectedLine") }}</span>
                   <strong>{{ draft.line?.label }}</strong>
                   <small>{{ draft.family }}</small>
@@ -924,10 +867,7 @@ function normalizeText(value: string): string {
                     </button>
                   </div>
 
-                  <div
-                    v-if="stationSelectionMode === 'list'"
-                    class="station-picker__list"
-                  >
+                  <div v-if="stationSelectionMode === 'list'" class="station-picker__list">
                     <StationCombobox
                       :model-value="draft.station"
                       :options="filteredStationOptions"
@@ -951,6 +891,7 @@ function normalizeText(value: string): string {
                     v-else
                     :line="draft.line"
                     :selected-station-id="draft.station?.id"
+                    :gtfs-line-geometry-enabled="settings.gtfsLineGeometryEnabled"
                     :smart-traffic-detection="settings.smartTrafficDetection"
                     @select="selectStationFromMap"
                   />
@@ -967,29 +908,17 @@ function normalizeText(value: string): string {
 
             <div v-if="errorMessage" class="form-error">
               <span>{{ errorMessage }}</span>
-              <button
-                class="button-secondary form-retry"
-                type="button"
-                @click="retryCurrentStep"
-              >
+              <button class="button-secondary form-retry" type="button" @click="retryCurrentStep">
                 {{ t("common.actions.retry") }}
               </button>
             </div>
           </div>
 
           <footer v-if="!isMultiStep" class="modal-panel__footer">
-            <button
-              class="button-secondary"
-              type="button"
-              @click="emit('close')"
-            >
+            <button class="button-secondary" type="button" @click="emit('close')">
               {{ t("common.actions.close") }}
             </button>
-            <button
-              type="button"
-              :disabled="!canAdd || adding"
-              @click="addStation"
-            >
+            <button type="button" :disabled="!canAdd || adding" @click="addStation">
               <span class="button-plus" aria-hidden="true">+</span>
               {{ adding ? t("board.stationModal.adding") : t("common.actions.add") }}
             </button>
@@ -1038,9 +967,7 @@ function normalizeText(value: string): string {
               :disabled="lineOnly ? !canSelectLine : !canAdd || adding"
               @click="lineOnly ? selectCurrentLine() : addStation()"
             >
-              <span v-if="!lineOnly" class="button-plus" aria-hidden="true">
-                +
-              </span>
+              <span v-if="!lineOnly" class="button-plus" aria-hidden="true"> + </span>
               {{
                 lineOnly
                   ? t("common.actions.change")

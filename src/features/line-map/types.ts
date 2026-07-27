@@ -5,6 +5,7 @@ import type {
 } from "../../types/transit";
 import type { GeographicViewport } from "../network-ghost/geoProjection";
 
+import type { LineGeometryAttempt, LineGeometryPoint, LineGeometrySource } from "./lineGeometry";
 export interface LineMapQuayView {
   id: string;
   name: string;
@@ -37,6 +38,18 @@ export interface LineMapSegmentView {
   fromStopId: string;
   toStopId: string;
   distanceKm?: number;
+  polyline?: LineGeometryPoint[];
+}
+
+export interface LineMapEntranceView {
+  id: string;
+  parentStopId: string;
+  name: string;
+  code?: string;
+  lon: number;
+  lat: number;
+  x: number;
+  y: number;
 }
 
 export interface LineMapBranchView {
@@ -50,6 +63,7 @@ export interface LineMapBranchView {
 export interface MapTile {
   id: string;
   url: string;
+  priority: "visible" | "overscan";
   x: number;
   y: number;
   width: number;
@@ -66,6 +80,10 @@ export interface LineMapViewModel {
   branches: LineMapBranchView[];
   tiles: MapTile[];
   viewport?: GeographicViewport;
+  geometrySource: LineGeometrySource;
+  geometryAttempts: LineGeometryAttempt[];
+  geometryDatasetVersion?: string;
+  entrances: LineMapEntranceView[];
 }
 
 export interface LineTransferSummary {

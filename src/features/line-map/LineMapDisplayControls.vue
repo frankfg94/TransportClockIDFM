@@ -24,6 +24,7 @@ const modes: GhostNetworkModeKey[] = [
   "tram",
   "noctilien",
   "rer",
+  "transilien",
 ];
 
 function updateMainVisibility(event: Event): void {
@@ -48,6 +49,7 @@ function getModeLabel(mode: GhostNetworkModeKey): string {
   if (mode === "metro") return t("traffic.family.metro");
   if (mode === "tram") return t("traffic.family.tram");
   if (mode === "rer") return t("traffic.family.rer");
+  if (mode === "transilien") return t("traffic.family.train");
 
   return mode === "bus" ? "Bus" : "Noctilien";
 }

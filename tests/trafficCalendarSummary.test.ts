@@ -233,8 +233,42 @@ describe("traffic calendar friendly summary", () => {
       "RER E: Pendant les vacances scolaires du samedi 11 juillet jusqu’au dimanche 23 août, l’offre de transport est adaptée sur votre RER E. Certains trains ne circuleront pas.";
 
     expect(getPatternTrafficSummaryCopy(disruption)).toEqual({
-      title: "Offre de transport adaptée",
+      title: "Offre réduite",
       description: "Certains trains ne circuleront pas.",
+    });
+  });
+
+  it("summarizes the Transilien J adapted service before its operational cause", () => {
+    const disruption = createDisruption("Trafic perturbé", "incident");
+    disruption.message = [
+      "Ligne J : adaptation de l’offre de transport",
+      "Pendant les vacances scolaires du 12/07/2026 au 29/08/2026, l’offre de transport est adaptée sur votre Ligne J. Certains trains ne circuleront pas.",
+      "Par ailleurs, suite à l’incident d’exploitation qui a rendu indisponibles certaines rames, les réparations se poursuivent dans nos ateliers de maintenance. Ces trains sont également retirés de la circulation.",
+      "Pour préparer votre trajet et avant de vous rendre en gare, vérifiez vos horaires sur l’appli Ile-de-France Mobilités, le site Transilien.com, SNCF Connect ou votre appli de mobilité.",
+    ].join("\n");
+
+    expect(getPatternTrafficSummaryCopy(disruption)).toEqual({
+      title: "Offre réduite",
+      description: "Certains trains ne circuleront pas.",
+    });
+  });
+
+  it("uses the short line status instead of a verbose operational title", () => {
+    const disruption = createDisruption(
+      "Le trafic est interrompu de Paris Austerlitz vers Dourdan La Forêt, de Paris Austerlitz vers Saint-Martin d'Étampes et de Paris Austerlitz vers Massy-Palaiseau jusqu'à 10h.",
+      "incident",
+    );
+    disruption.message = [
+      disruption.title,
+      "Pour plus d'informations sur cette perturbation, consultez le fil X du RER C.",
+      "RER C : interruptions",
+      "Arrêt(s) non desservi(s)",
+    ].join("\n\n");
+
+    expect(getPatternTrafficSummaryCopy(disruption)).toEqual({
+      title: "Interruptions",
+      description:
+        "Le trafic est interrompu de Paris Austerlitz vers Dourdan La Forêt, de Paris Austerlitz vers Saint-Martin d'Étampes et de Paris Austerlitz vers Massy-Palaiseau jusqu'à 10h",
     });
   });
 

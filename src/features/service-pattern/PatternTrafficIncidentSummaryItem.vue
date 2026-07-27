@@ -42,7 +42,7 @@ const emit = defineEmits<{ activate: [] }>();
     <span class="pattern-traffic-friendly-summary__incident-icon" role="img">
       <component
         :is="trafficIncidentIcons[incidentType]"
-        :size="40"
+        :size="60"
         :stroke-width="2.4"
         aria-hidden="true"
       />
@@ -51,7 +51,7 @@ const emit = defineEmits<{ activate: [] }>();
       class="pattern-traffic-friendly-summary__copy"
       :class="{ 'small-title': props.smallTitle }"
     >
-      <strong :title="title">{{ title }}</strong>
+      <strong class="pattern-summary-title" :title="title">{{ title }}</strong>
       <span
         v-if="subtitle"
         class="pattern-traffic-friendly-summary__description"
@@ -73,7 +73,7 @@ const emit = defineEmits<{ activate: [] }>();
 
 <style scoped>
 .pattern-traffic-friendly-summary__item {
-  align-items: flex-start;
+  align-items: center;
   display: flex;
   gap: 18px;
   min-width: 0;
@@ -109,6 +109,9 @@ const emit = defineEmits<{ activate: [] }>();
   justify-content: center;
   margin-top: 1px;
   width: 50px;
+}
+
+.pattern-summary-title {
 }
 
 .pattern-traffic-friendly-summary__item--crowding
@@ -170,6 +173,7 @@ const emit = defineEmits<{ activate: [] }>();
   gap: 3px;
   min-width: 0;
   overflow: hidden;
+
 }
 
 .pattern-traffic-friendly-summary__copy strong,
@@ -188,10 +192,6 @@ const emit = defineEmits<{ activate: [] }>();
   font-size: 1.84rem;
   font-weight: 800;
   line-height: 1.3;
-}
-
-.pattern-traffic-friendly-summary__copy.small-title strong {
-  font-size: 0.84rem;
 }
 
 .pattern-traffic-friendly-summary__description {

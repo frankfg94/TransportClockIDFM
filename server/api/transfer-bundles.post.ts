@@ -6,9 +6,7 @@ import {
   getTransferLineId,
   mergeTransferLineOptionPresentation,
 } from "../../src/services/transferLineOptions";
-import {
-  type EffectiveTransferResolverMode,
-} from "../../src/features/service-pattern/transferResolverMode";
+import { type EffectiveTransferResolverMode } from "../../src/features/service-pattern/transferResolverMode";
 import type {
   LineSearchOption,
   StationSearchOption,
@@ -21,7 +19,7 @@ import type {
   TransferBundleTarget,
 } from "../../src/features/service-pattern/transferBundles";
 
-declare const useStorage: typeof import("nitropack/runtime/internal/storage").useStorage;
+declare function useStorage<T>(base: string): unknown;
 
 export interface TransferBundleRequestBody {
   /** Legacy clients may still send this; server-side bundle results are no longer cached by version. */
@@ -166,9 +164,7 @@ type TransferBundleDebugLogger = {
   startedAt: number;
 };
 
-type NormalizedTransferBundleRequestBody = Required<
-  Omit<TransferBundleRequestBody, "cacheBust">
->;
+type NormalizedTransferBundleRequestBody = Required<Omit<TransferBundleRequestBody, "cacheBust">>;
 
 type ServerTransferBundleRecord = TransferBundleSummary & {
   createdAt: string;
@@ -189,8 +185,7 @@ type NearbyStopAreaCandidate = {
   stopArea: NonNullable<NavitiaNearbyPlace["stop_area"]>;
 };
 
-const MARKETPLACE_NAVITIA_BASE =
-  "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia";
+const MARKETPLACE_NAVITIA_BASE = "https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia";
 const MAX_TRANSFER_TARGETS = 96;
 const MAX_SERVER_TRANSFER_TARGETS_PER_INVOCATION = 4;
 const DEFAULT_SERVER_TARGET_CONCURRENCY = 1;
@@ -226,10 +221,7 @@ const nearbyStopAreasCache = new Map<string, CachedNearbyStopAreasRequest>();
 const stopAreaLinesCache = new Map<string, CachedStopAreaLinesRequest>();
 const stopPointStructuralCache = new Map<string, CachedStopPointStructuralRequest>();
 const linePresentationCache = new Map<string, CachedLinePresentationRequest>();
-const fallbackTransferBundleStorage = new Map<
-  string,
-  ServerTransferBundleRecord
->();
+const fallbackTransferBundleStorage = new Map<string, ServerTransferBundleRecord>();
 
 const bundleTransferFamilyPriority: Record<TransitFamily, number> = {
   METRO: 0,
@@ -245,10 +237,9 @@ export default defineEventHandler(async (event): Promise<TransferBundleResponse>
   const apiKey = getServerIdfmApiKey(event);
   const fetcher = apiKey ? createServerNavitiaFetcher(apiKey) : undefined;
 
-  return createTransferBundleResponse(
-    await readBody<TransferBundleRequestBody>(event),
-    { fetcher },
-  );
+  return createTransferBundleResponse(await readBody<TransferBundleRequestBody>(event), {
+    fetcher,
+  });
 });
 
 export async function createTransferBundleResponse(
@@ -296,10 +287,7 @@ export async function createTransferBundleResponse(
     );
     const missingTargets = body.targets.filter(
       (target) =>
-        !Object.prototype.hasOwnProperty.call(
-          reusableTransfersByStopAreaRef,
-          target.stopAreaRef,
-        ),
+        !Object.prototype.hasOwnProperty.call(reusableTransfersByStopAreaRef, target.stopAreaRef),
     );
 
     if (existingBundle && missingTargets.length === 0) {
@@ -317,12 +305,17 @@ export async function createTransferBundleResponse(
       );
     }
 
-    logTransferBundleDebug(logger, existingBundle ? "info" : "debug", existingBundle ? "bundle:hit-partial" : "bundle:miss", {
-      bundleId,
-      missingTargetCount: missingTargets.length,
-      reusableTargetCount: Object.keys(reusableTransfersByStopAreaRef).length,
-      targetCount: body.targets.length,
-    });
+    logTransferBundleDebug(
+      logger,
+      existingBundle ? "info" : "debug",
+      existingBundle ? "bundle:hit-partial" : "bundle:miss",
+      {
+        bundleId,
+        missingTargetCount: missingTargets.length,
+        reusableTargetCount: Object.keys(reusableTransfersByStopAreaRef).length,
+        targetCount: body.targets.length,
+      },
+    );
 
     if (!fetcher) {
       logTransferBundleDebug(logger, "error", "request:missing-api-key", {
@@ -336,23 +329,14 @@ export async function createTransferBundleResponse(
       });
     }
 
-    const invocationTargets = missingTargets.slice(
-      0,
-      MAX_SERVER_TRANSFER_TARGETS_PER_INVOCATION,
-    );
+    const invocationTargets = missingTargets.slice(0, MAX_SERVER_TRANSFER_TARGETS_PER_INVOCATION);
     let savedBundle = existingBundle;
-    const uncachedTransfersByStopAreaRef: Record<
-      string,
-      TransferLineOption[]
-    > = {};
+    const uncachedTransfersByStopAreaRef: Record<string, TransferLineOption[]> = {};
 
     logTransferBundleDebug(logger, "info", "bundle:batch", {
       batchTargetCount: invocationTargets.length,
       bundleId,
-      deferredTargetCount: Math.max(
-        0,
-        missingTargets.length - invocationTargets.length,
-      ),
+      deferredTargetCount: Math.max(0, missingTargets.length - invocationTargets.length),
       missingTargetCount: missingTargets.length,
     });
 
@@ -379,29 +363,19 @@ export async function createTransferBundleResponse(
         logger,
       );
 
-      logTransferBundleDebug(
-        logger,
-        transfers === undefined ? "warn" : "info",
-        "target:resolved",
-        {
-          index,
-          target: summarizeTransferTarget(target),
-          transfers: summarizeTransferLines(transfers),
-        },
-      );
+      logTransferBundleDebug(logger, transfers === undefined ? "warn" : "info", "target:resolved", {
+        index,
+        target: summarizeTransferTarget(target),
+        transfers: summarizeTransferLines(transfers),
+      });
 
       // undefined means that the target was not reliably resolved, usually due to
       // a transient upstream failure. [] is different: it means "resolved, but no transfers".
       if (transfers !== undefined) {
         if (body.backendCacheEnabled) {
-          savedBundle = await saveServerTransferBundle(
-            body,
-            body.transferResolverMode,
-            bundleId,
-            {
-              [target.stopAreaRef]: transfers,
-            },
-          );
+          savedBundle = await saveServerTransferBundle(body, body.transferResolverMode, bundleId, {
+            [target.stopAreaRef]: transfers,
+          });
 
           logTransferBundleDebug(logger, "info", "target:persisted", {
             bundleId,
@@ -437,21 +411,13 @@ export async function createTransferBundleResponse(
       };
     }
 
-    savedBundle ??= await saveServerTransferBundle(
-      body,
-      body.transferResolverMode,
-      bundleId,
-      {},
-    );
+    savedBundle ??= await saveServerTransferBundle(body, body.transferResolverMode, bundleId, {});
     trimTransferCache();
 
     logTransferBundleDebug(logger, "info", "request:done", {
       durationMs: Date.now() - logger.startedAt,
       bundleId,
-      deferredTargetCount: Math.max(
-        0,
-        missingTargets.length - invocationTargets.length,
-      ),
+      deferredTargetCount: Math.max(0, missingTargets.length - invocationTargets.length),
       missingTargetCount: missingTargets.length,
       resolvedTargetCount: savedBundle.stopAreaCount,
       targetCount: body.targets.length,
@@ -478,16 +444,12 @@ function normalizeRequestBody(
 ): NormalizedTransferBundleRequestBody {
   const lineId = typeof body.lineId === "string" ? body.lineId.trim() : "";
   const lineLabel =
-    typeof body.lineLabel === "string" && body.lineLabel.trim()
-      ? body.lineLabel.trim()
-      : lineId;
+    typeof body.lineLabel === "string" && body.lineLabel.trim() ? body.lineLabel.trim() : lineId;
   const retentionDays = normalizeRetentionDays(body.retentionDays);
   const requestConcurrency = normalizeRequestConcurrency(body.requestConcurrency);
   const requestSpacingMs = normalizeRequestSpacingMs(body.requestSpacingMs);
   const backendCacheEnabled = body.backendCacheEnabled !== false;
-  const nearbyDistanceMeters = normalizeNearbyDistanceMeters(
-    body.nearbyDistanceMeters,
-  );
+  const nearbyDistanceMeters = normalizeNearbyDistanceMeters(body.nearbyDistanceMeters);
   const transferResolverMode: EffectiveTransferResolverMode = "nearby";
   const targets = (Array.isArray(body.targets) ? body.targets : [])
     .map(normalizeTarget)
@@ -520,8 +482,7 @@ function normalizeTarget(target: unknown): TransferBundleTarget | undefined {
   }
 
   const value = target as Partial<TransferBundleTarget>;
-  const stopAreaRef =
-    typeof value.stopAreaRef === "string" ? value.stopAreaRef.trim() : "";
+  const stopAreaRef = typeof value.stopAreaRef === "string" ? value.stopAreaRef.trim() : "";
   const label = typeof value.label === "string" ? value.label.trim() : stopAreaRef;
 
   if (!isSupportedTransferTargetRef(stopAreaRef)) {
@@ -538,17 +499,13 @@ function normalizeTarget(target: unknown): TransferBundleTarget | undefined {
 function normalizeRetentionDays(value: unknown): number {
   const numericValue = typeof value === "number" ? value : Number(value);
 
-  return [1, 3, 7, 15, 30, 60].includes(numericValue)
-    ? numericValue
-    : DEFAULT_RETENTION_DAYS;
+  return [1, 3, 7, 15, 30, 60].includes(numericValue) ? numericValue : DEFAULT_RETENTION_DAYS;
 }
 
 function normalizeRequestConcurrency(value: unknown): number {
   const numericValue = typeof value === "number" ? value : Number(value);
 
-  return [1, 2, 3, 4].includes(numericValue)
-    ? numericValue
-    : DEFAULT_SERVER_TARGET_CONCURRENCY;
+  return [1, 2, 3, 4].includes(numericValue) ? numericValue : DEFAULT_SERVER_TARGET_CONCURRENCY;
 }
 
 function normalizeRequestSpacingMs(value: unknown): number {
@@ -556,9 +513,9 @@ function normalizeRequestSpacingMs(value: unknown): number {
 
   return Number.isFinite(numericValue)
     ? Math.min(
-      MAX_SERVER_REQUEST_SPACING_MS,
-      Math.max(DEFAULT_SERVER_REQUEST_SPACING_MS, Math.trunc(numericValue)),
-    )
+        MAX_SERVER_REQUEST_SPACING_MS,
+        Math.max(DEFAULT_SERVER_REQUEST_SPACING_MS, Math.trunc(numericValue)),
+      )
     : DEFAULT_SERVER_REQUEST_SPACING_MS;
 }
 
@@ -567,12 +524,9 @@ function normalizeNearbyDistanceMeters(value: unknown): number {
 
   return Number.isFinite(numericValue)
     ? Math.min(
-      MAX_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS,
-      Math.max(
-        MIN_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS,
-        Math.trunc(numericValue),
-      ),
-    )
+        MAX_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS,
+        Math.max(MIN_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS, Math.trunc(numericValue)),
+      )
     : DEFAULT_TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS;
 }
 
@@ -714,12 +668,7 @@ export async function enrichTransferLineOptionsWithNavitia(
       }
 
       requestedPresentationCount += 1;
-      const line = await getCachedNavitiaLinePresentation(
-        lineId,
-        retentionDays,
-        fetcher,
-        logger,
-      );
+      const line = await getCachedNavitiaLinePresentation(lineId, retentionDays, fetcher, logger);
 
       if (!line) {
         return transfer;
@@ -797,11 +746,7 @@ async function getCachedNavitiaLinePresentation(
     });
   }
 
-  const request = fetchNavitiaLinePresentation(
-    normalizedLineId,
-    fetcher,
-    logger,
-  ).catch((error) => {
+  const request = fetchNavitiaLinePresentation(normalizedLineId, fetcher, logger).catch((error) => {
     if (logger) {
       logTransferBundleDebug(logger, "warn", "line-presentation:error", {
         error: formatTransferBundleError(error),
@@ -845,9 +790,9 @@ async function fetchNavitiaLinePresentation(
     return undefined;
   }
 
-  const payload = (await response.json().catch(
-    (): NavitiaLinesResponse => ({}),
-  )) as NavitiaLinesResponse;
+  const payload = (await response
+    .json()
+    .catch((): NavitiaLinesResponse => ({}))) as NavitiaLinesResponse;
 
   return payload.lines?.[0];
 }
@@ -957,8 +902,7 @@ function resolveTargetStopAreaFromLine(
   if (directStopAreaRef) {
     const directStation = stations.find(
       (station) =>
-        station.id === directStopAreaRef ||
-        station.scheduleStopAreaRef === directStopAreaRef,
+        station.id === directStopAreaRef || station.scheduleStopAreaRef === directStopAreaRef,
     );
 
     if (directStation) {
@@ -1000,14 +944,8 @@ async function resolveTransferLinesForNearbyStopAreas(
 ): Promise<TransferLineOption[] | undefined> {
   const linesByStopArea = await mapBundleItemsWithConcurrency(
     nearbyStopAreas,
-    Math.min(
-      NEARBY_STOP_AREA_LINE_BATCH_SIZE,
-      normalizeRequestConcurrency(requestConcurrency),
-    ),
-    Math.max(
-      normalizeRequestSpacingMs(requestSpacingMs),
-      DEFAULT_INTERNAL_NAVITIA_SPACING_MS,
-    ),
+    Math.min(NEARBY_STOP_AREA_LINE_BATCH_SIZE, normalizeRequestConcurrency(requestConcurrency)),
+    Math.max(normalizeRequestSpacingMs(requestSpacingMs), DEFAULT_INTERNAL_NAVITIA_SPACING_MS),
     async ({ stopArea }) =>
       getCachedStopAreaLines(stopArea.id ?? "", retentionDays, fetcher, logger),
   );
@@ -1044,9 +982,7 @@ async function resolveStationForTarget(
     target: summarizeTransferTarget(target),
   });
 
-  const directStopAreaRef = convertNetexStopPlaceRefToNavitiaStopAreaRef(
-    target.stopAreaRef,
-  );
+  const directStopAreaRef = convertNetexStopPlaceRefToNavitiaStopAreaRef(target.stopAreaRef);
 
   if (directStopAreaRef) {
     logTransferBundleDebug(logger, "info", "station-resolve:netex-direct", {
@@ -1086,10 +1022,15 @@ async function resolveStationForTarget(
 
   const searchedStation = await searchStopAreaForTarget(target, fetcher, logger);
 
-  logTransferBundleDebug(logger, searchedStation ? "info" : "warn", "station-resolve:search-fallback", {
-    station: searchedStation ? summarizeStationOption(searchedStation) : undefined,
-    target: summarizeTransferTarget(target),
-  });
+  logTransferBundleDebug(
+    logger,
+    searchedStation ? "info" : "warn",
+    "station-resolve:search-fallback",
+    {
+      station: searchedStation ? summarizeStationOption(searchedStation) : undefined,
+      target: summarizeTransferTarget(target),
+    },
+  );
 
   return searchedStation;
 }
@@ -1107,9 +1048,7 @@ function createStationOptionForTarget(
   };
 }
 
-function convertNetexStopPlaceRefToNavitiaStopAreaRef(
-  stopAreaRef: string,
-): string | undefined {
+function convertNetexStopPlaceRefToNavitiaStopAreaRef(stopAreaRef: string): string | undefined {
   const normalized = stopAreaRef.trim();
 
   const match = normalized.match(
@@ -1203,13 +1142,7 @@ async function getCachedLineStations(
   fetcher: typeof fetch,
   logger?: TransferBundleDebugLogger,
 ): Promise<StationSearchOption[]> {
-  return getCachedLineStopAreas(
-    currentLineId,
-    currentLineLabel,
-    retentionDays,
-    fetcher,
-    logger,
-  );
+  return getCachedLineStopAreas(currentLineId, currentLineLabel, retentionDays, fetcher, logger);
 }
 
 async function fetchLineStopAreas(
@@ -1234,9 +1167,7 @@ async function fetchLineStopAreas(
     NavitiaStopAreasResponse,
     NonNullable<NavitiaStopAreaSearchObject["stop_area"]>
   >(
-    `${MARKETPLACE_NAVITIA_BASE}/lines/${encodeURIComponent(
-      navitiaLineId,
-    )}/stop_areas`,
+    `${MARKETPLACE_NAVITIA_BASE}/lines/${encodeURIComponent(navitiaLineId)}/stop_areas`,
     searchParams,
     "stop_areas",
     MAX_LINE_STOP_AREAS,
@@ -1290,9 +1221,9 @@ async function resolveNavitiaLineId(
     return currentLineId;
   }
 
-  const payload = (await response.json().catch(
-    (): NavitiaStopAreaSearchResponse => ({}),
-  )) as NavitiaStopAreaSearchResponse;
+  const payload = (await response
+    .json()
+    .catch((): NavitiaStopAreaSearchResponse => ({}))) as NavitiaStopAreaSearchResponse;
   const line = (payload.pt_objects ?? []).find(
     (object) => object.embedded_type === "line" && object.line?.id,
   )?.line;
@@ -1325,20 +1256,17 @@ async function getCachedNearbyStopAreas(
     stopAreaRef,
   });
 
-  const request = fetchNearbyStopAreas(
-    stopAreaRef,
-    nearbyDistanceMeters,
-    fetcher,
-    logger,
-  ).catch((error): NearbyStopAreaCandidate[] => {
-    logTransferBundleDebug(logger, "warn", "nearby:error", {
-      error: formatTransferBundleError(error),
-      stopAreaRef,
-    });
-    nearbyStopAreasCache.delete(cacheKey);
+  const request = fetchNearbyStopAreas(stopAreaRef, nearbyDistanceMeters, fetcher, logger).catch(
+    (error): NearbyStopAreaCandidate[] => {
+      logTransferBundleDebug(logger, "warn", "nearby:error", {
+        error: formatTransferBundleError(error),
+        stopAreaRef,
+      });
+      nearbyStopAreasCache.delete(cacheKey);
 
-    return [];
-  });
+      return [];
+    },
+  );
 
   nearbyStopAreasCache.set(cacheKey, {
     expiresAt: now + retentionDays * DAY_MS,
@@ -1368,9 +1296,7 @@ async function fetchNearbyStopAreas(
     NavitiaPlacesNearbyResponse,
     NavitiaNearbyPlace
   >(
-    `${MARKETPLACE_NAVITIA_BASE}/stop_areas/${encodeURIComponent(
-      stopAreaRef,
-    )}/places_nearby`,
+    `${MARKETPLACE_NAVITIA_BASE}/stop_areas/${encodeURIComponent(stopAreaRef)}/places_nearby`,
     searchParams,
     "places_nearby",
     MAX_TRANSFER_BUNDLE_NEARBY_STOP_AREAS,
@@ -1408,9 +1334,7 @@ async function fetchNearbyStopAreas(
     sample: result.slice(0, 8).map((place) => ({
       distance: place.distance,
       id: place.stopArea.id,
-      name: cleanBundleStopAreaLabel(
-        place.stopArea.name ?? place.stopArea.label ?? "",
-      ),
+      name: cleanBundleStopAreaLabel(place.stopArea.name ?? place.stopArea.label ?? ""),
     })),
     stopAreaRef,
   });
@@ -1480,9 +1404,7 @@ async function fetchStopAreaLines(
   });
 
   return fetchPaginatedNavitiaCollection<NavitiaLinesResponse, NavitiaLineForTransfer>(
-    `${MARKETPLACE_NAVITIA_BASE}/stop_areas/${encodeURIComponent(
-      stopAreaRef,
-    )}/lines`,
+    `${MARKETPLACE_NAVITIA_BASE}/stop_areas/${encodeURIComponent(stopAreaRef)}/lines`,
     searchParams,
     "lines",
     MAX_STOP_AREA_LINES,
@@ -1491,9 +1413,7 @@ async function fetchStopAreaLines(
   );
 }
 
-function mapNavitiaLineToTransferOption(
-  line: NavitiaLineForTransfer,
-): TransferLineOption {
+function mapNavitiaLineToTransferOption(line: NavitiaLineForTransfer): TransferLineOption {
   return createTransferLineOption({
     code: line.code,
     color: line.color,
@@ -1539,10 +1459,7 @@ function inferTransitFamily(lineLabel: string): TransitFamily {
     return "TRAM";
   }
 
-  if (
-    normalizedLabel.startsWith("train") ||
-    normalizedLabel.startsWith("transilien")
-  ) {
+  if (normalizedLabel.startsWith("train") || normalizedLabel.startsWith("transilien")) {
     return "TRANSILIEN";
   }
 
@@ -1557,9 +1474,7 @@ export function findMatchingLineStation(
   const targetTokens = createBundleStationTokens(normalizedTarget);
 
   return (
-    stations.find(
-      (station) => normalizeBundleStationName(station.label) === normalizedTarget,
-    ) ??
+    stations.find((station) => normalizeBundleStationName(station.label) === normalizedTarget) ??
     stations
       .map((station) => ({
         score: scoreStationNameMatch(
@@ -1598,9 +1513,9 @@ async function searchStopAreaForTarget(
 
   searchParams.append("type[]", "stop_area");
 
-  const response = await fetcher(
-    `${MARKETPLACE_NAVITIA_BASE}/pt_objects?${searchParams}`,
-  ).catch(() => undefined);
+  const response = await fetcher(`${MARKETPLACE_NAVITIA_BASE}/pt_objects?${searchParams}`).catch(
+    () => undefined,
+  );
 
   if (!response?.ok) {
     logTransferBundleDebug(logger, "warn", "station-search:non-ok", {
@@ -1612,9 +1527,9 @@ async function searchStopAreaForTarget(
     return undefined;
   }
 
-  const payload = (await response.json().catch(
-    (): NavitiaStopAreaSearchResponse => ({}),
-  )) as NavitiaStopAreaSearchResponse;
+  const payload = (await response
+    .json()
+    .catch((): NavitiaStopAreaSearchResponse => ({}))) as NavitiaStopAreaSearchResponse;
   const stations = (payload.pt_objects ?? [])
     .filter((object) => object.embedded_type === "stop_area")
     .map((object) => object.stop_area)
@@ -1704,18 +1619,19 @@ async function fetchOfficialConnectionStopNamesWithSearchFallback(
       throw error;
     }
 
-    logTransferBundleDebug(context.logger, "warn", "official-connections:direct-stop-area-not-found", {
-      error: formatTransferBundleError(error),
-      stopAreaRef,
-      target: summarizeTransferTarget(target),
-    });
+    logTransferBundleDebug(
+      context.logger,
+      "warn",
+      "official-connections:direct-stop-area-not-found",
+      {
+        error: formatTransferBundleError(error),
+        stopAreaRef,
+        target: summarizeTransferTarget(target),
+      },
+    );
   }
 
-  const searchedStation = await searchStopAreaForTarget(
-    target,
-    context.fetcher!,
-    context.logger,
-  );
+  const searchedStation = await searchStopAreaForTarget(target, context.fetcher!, context.logger);
   const fallbackStopAreaRef = searchedStation?.scheduleStopAreaRef ?? searchedStation?.id;
 
   if (!fallbackStopAreaRef?.startsWith("stop_area:")) {
@@ -1736,9 +1652,7 @@ async function fetchOfficialConnectionStopNamesWithSearchFallback(
   }
 
   logTransferBundleDebug(context.logger, "info", "official-connections:fallback-search-match", {
-    fallbackStation: searchedStation
-      ? summarizeStationOption(searchedStation)
-      : undefined,
+    fallbackStation: searchedStation ? summarizeStationOption(searchedStation) : undefined,
     originalStopAreaRef: stopAreaRef,
     target: summarizeTransferTarget(target),
   });
@@ -1756,11 +1670,16 @@ async function fetchOfficialConnectionStopNamesWithSearchFallback(
       throw error;
     }
 
-    logTransferBundleDebug(context.logger, "warn", "official-connections:fallback-stop-area-not-found", {
-      error: formatTransferBundleError(error),
-      fallbackStopAreaRef,
-      target: summarizeTransferTarget(target),
-    });
+    logTransferBundleDebug(
+      context.logger,
+      "warn",
+      "official-connections:fallback-stop-area-not-found",
+      {
+        error: formatTransferBundleError(error),
+        fallbackStopAreaRef,
+        target: summarizeTransferTarget(target),
+      },
+    );
 
     return [];
   }
@@ -1788,18 +1707,14 @@ export async function fetchOfficialConnectionStopNames(
     NavitiaConnectionsResponse,
     NavitiaConnection
   >(
-    `${MARKETPLACE_NAVITIA_BASE}/stop_areas/${encodeURIComponent(
-      stopAreaRef,
-    )}/connections`,
+    `${MARKETPLACE_NAVITIA_BASE}/stop_areas/${encodeURIComponent(stopAreaRef)}/connections`,
     searchParams,
     "connections",
     MAX_COMPATIBLE_CONNECTIONS,
     fetcher,
     logger,
   );
-  const candidates = collectOfficialConnectionStopNameCandidates(
-    connections,
-  );
+  const candidates = collectOfficialConnectionStopNameCandidates(connections);
   const officialConnectionNames = candidates.map((candidate) => candidate.name);
   const names = new Set<string>();
 
@@ -1832,12 +1747,12 @@ export async function fetchOfficialConnectionStopNames(
   const shouldResolveStopPoints = nearbyNames.length < 2;
   const stopPointNames = shouldResolveStopPoints
     ? await fetchStructuralConnectionStopPointNames(
-      unresolvedCandidates,
-      currentLineId,
-      fetcher,
-      logger,
-      requestSpacingMs,
-    )
+        unresolvedCandidates,
+        currentLineId,
+        fetcher,
+        logger,
+        requestSpacingMs,
+      )
     : [];
 
   if (!shouldResolveStopPoints) {
@@ -1878,10 +1793,7 @@ async function fetchStructuralConnectionStopPointNames(
   const accepted = await mapBundleItemsWithConcurrency(
     candidates,
     STOP_POINT_LINE_BATCH_SIZE,
-    Math.max(
-      normalizeRequestSpacingMs(requestSpacingMs),
-      DEFAULT_INTERNAL_NAVITIA_SPACING_MS,
-    ),
+    Math.max(normalizeRequestSpacingMs(requestSpacingMs), DEFAULT_INTERNAL_NAVITIA_SPACING_MS),
     async (candidate) =>
       [
         candidate.name,
@@ -1949,10 +1861,8 @@ async function fetchPaginatedNavitiaCollection<
       throw createTransferBundleHttpStatusError(response.status, response.statusText);
     }
 
-    const payload = (await response.json().catch(
-      (): TPayload => ({} as TPayload),
-    )) as TPayload;
-    const pageItems = ((payload[collectionKey] as TItem[] | undefined) ?? []);
+    const payload = (await response.json().catch((): TPayload => ({}) as TPayload)) as TPayload;
+    const pageItems = (payload[collectionKey] as TItem[] | undefined) ?? [];
     const pagination = payload.pagination;
 
     items.push(...pageItems);
@@ -1971,14 +1881,10 @@ async function fetchPaginatedNavitiaCollection<
     }
 
     const loadedCount =
-      (pagination?.start_page ?? page) *
-      (pagination?.items_per_page ?? pageItems.length) +
+      (pagination?.start_page ?? page) * (pagination?.items_per_page ?? pageItems.length) +
       (pagination?.items_on_page ?? pageItems.length);
 
-    if (
-      pageItems.length === 0 ||
-      (typeof totalResult === "number" && loadedCount >= totalResult)
-    ) {
+    if (pageItems.length === 0 || (typeof totalResult === "number" && loadedCount >= totalResult)) {
       break;
     }
 
@@ -2089,9 +1995,9 @@ async function fetchNearbyStructuralStopAreaNames(
     return [];
   }
 
-  const payload = (await response.json().catch(
-    (): NavitiaPlacesNearbyResponse => ({}),
-  )) as NavitiaPlacesNearbyResponse;
+  const payload = (await response
+    .json()
+    .catch((): NavitiaPlacesNearbyResponse => ({}))) as NavitiaPlacesNearbyResponse;
   const nearbyStopAreas = (payload.places_nearby ?? [])
     .filter((place) => place.embedded_type === "stop_area")
     .map((place) => ({
@@ -2099,19 +2005,25 @@ async function fetchNearbyStructuralStopAreaNames(
       stopArea: place.stop_area,
     }))
     .filter(
-      (place): place is {
+      (
+        place,
+      ): place is {
         distance: number;
         stopArea: NonNullable<NavitiaNearbyPlace["stop_area"]>;
       } => Boolean(place.stopArea?.id),
     )
-    .filter((place) => normalizeBundleStationName(place.stopArea.id) !== normalizeBundleStationName(stopAreaRef))
-    .filter((place) =>
-      officialConnectionNames.length === 0 ||
-      bundleStopAreaNameMatchesOfficialConnection(
-        cleanBundleStopAreaLabel(place.stopArea.name ?? place.stopArea.label ?? ""),
-        officialConnectionNames,
-        officialConnectionKeys,
-      ),
+    .filter(
+      (place) =>
+        normalizeBundleStationName(place.stopArea.id) !== normalizeBundleStationName(stopAreaRef),
+    )
+    .filter(
+      (place) =>
+        officialConnectionNames.length === 0 ||
+        bundleStopAreaNameMatchesOfficialConnection(
+          cleanBundleStopAreaLabel(place.stopArea.name ?? place.stopArea.label ?? ""),
+          officialConnectionNames,
+          officialConnectionKeys,
+        ),
     )
     .sort((left, right) => left.distance - right.distance);
   const names = new Set<string>();
@@ -2121,9 +2033,7 @@ async function fetchNearbyStructuralStopAreaNames(
     sample: nearbyStopAreas.slice(0, 8).map((place) => ({
       distance: place.distance,
       id: place.stopArea.id,
-      name: cleanBundleStopAreaLabel(
-        place.stopArea.name ?? place.stopArea.label ?? "",
-      ),
+      name: cleanBundleStopAreaLabel(place.stopArea.name ?? place.stopArea.label ?? ""),
     })),
     stopAreaRef,
   });
@@ -2131,10 +2041,7 @@ async function fetchNearbyStructuralStopAreaNames(
   const accepted = await mapBundleItemsWithConcurrency(
     nearbyStopAreas,
     STOP_POINT_LINE_BATCH_SIZE,
-    Math.max(
-      normalizeRequestSpacingMs(requestSpacingMs),
-      DEFAULT_INTERNAL_NAVITIA_SPACING_MS,
-    ),
+    Math.max(normalizeRequestSpacingMs(requestSpacingMs), DEFAULT_INTERNAL_NAVITIA_SPACING_MS),
     async ({ stopArea }) =>
       [
         cleanBundleStopAreaLabel(stopArea.name ?? stopArea.label ?? ""),
@@ -2154,9 +2061,7 @@ async function fetchNearbyStructuralStopAreaNames(
   });
 
   logTransferBundleDebug(logger, "debug", "nearby-structural:validated", {
-    accepted: accepted
-      .filter(([, hasStructuralLine]) => hasStructuralLine)
-      .map(([name]) => name),
+    accepted: accepted.filter(([, hasStructuralLine]) => hasStructuralLine).map(([name]) => name),
     candidateCount: nearbyStopAreas.length,
     rejectedCount: accepted.filter(([, hasStructuralLine]) => !hasStructuralLine).length,
     stopAreaRef,
@@ -2196,13 +2101,8 @@ function collectOfficialConnectionStopNameCandidates(
   return Array.from(candidates.values());
 }
 
-function bundleStationNameMatchesKeySet(
-  name: string,
-  acceptedKeys: Set<string>,
-): boolean {
-  return createCompatibleBundleStationNameKeys(name).some((key) =>
-    acceptedKeys.has(key),
-  );
+function bundleStationNameMatchesKeySet(name: string, acceptedKeys: Set<string>): boolean {
+  return createCompatibleBundleStationNameKeys(name).some((key) => acceptedKeys.has(key));
 }
 
 function bundleStopAreaNameMatchesOfficialConnection(
@@ -2221,21 +2121,14 @@ function bundleStopAreaNameMatchesOfficialConnection(
   }
 
   return officialNames.some((officialName) => {
-    const officialTokens = createBundleStationTokens(
-      normalizeBundleStationName(officialName),
-    );
-    const sharedTokenCount = nameTokens.filter((token) =>
-      officialTokens.includes(token),
-    ).length;
+    const officialTokens = createBundleStationTokens(normalizeBundleStationName(officialName));
+    const sharedTokenCount = nameTokens.filter((token) => officialTokens.includes(token)).length;
 
     return sharedTokenCount >= Math.min(nameTokens.length, officialTokens.length, 2);
   });
 }
 
-function bundleStationNameMatchesNameSet(
-  name: string,
-  acceptedNames: Set<string>,
-): boolean {
+function bundleStationNameMatchesNameSet(name: string, acceptedNames: Set<string>): boolean {
   const acceptedKeys = new Set(
     Array.from(acceptedNames).flatMap(createCompatibleBundleStationNameKeys),
   );
@@ -2245,13 +2138,8 @@ function bundleStationNameMatchesNameSet(
 
 function createCompatibleBundleStationNameKeys(value: string): string[] {
   const normalized = normalizeBundleStationName(value);
-  const withoutParentheses = normalizeBundleStationName(
-    value.replace(/\([^)]*\)/gu, " "),
-  );
-  const withoutGarePrefix = normalized.replace(
-    /^gare\s+(?!d(?:e|u|es)?\b)(.+)$/u,
-    "$1",
-  );
+  const withoutParentheses = normalizeBundleStationName(value.replace(/\([^)]*\)/gu, " "));
+  const withoutGarePrefix = normalized.replace(/^gare\s+(?!d(?:e|u|es)?\b)(.+)$/u, "$1");
   const hyphenCompacted = normalized.replace(/\s*-\s*/gu, "-");
   const hyphenSpaced = normalized.replace(/\s*-\s*/gu, " - ");
   const safeComponents = createSafeBundleStationNameComponents(value);
@@ -2304,10 +2192,7 @@ function pushSafeBundleStationComponent(target: string[], value: string): void {
     target.push(value);
   }
 
-  const withoutNonGenericGarePrefix = normalized.replace(
-    /^gare\s+(?!d(?:e|u|es)?\b)(.+)$/u,
-    "$1",
-  );
+  const withoutNonGenericGarePrefix = normalized.replace(/^gare\s+(?!d(?:e|u|es)?\b)(.+)$/u, "$1");
 
   if (
     withoutNonGenericGarePrefix !== normalized &&
@@ -2475,9 +2360,9 @@ async function fetchStopPointHasNonCurrentStructuralLine(
     return false;
   }
 
-  const payload = (await response.json().catch(
-    (): NavitiaLinesResponse => ({}),
-  )) as NavitiaLinesResponse;
+  const payload = (await response
+    .json()
+    .catch((): NavitiaLinesResponse => ({}))) as NavitiaLinesResponse;
 
   const hasStructuralLine = (payload.lines ?? []).some(
     (line) =>
@@ -2528,9 +2413,9 @@ async function fetchStopAreaHasNonCurrentStructuralLine(
     return false;
   }
 
-  const payload = (await response.json().catch(
-    (): NavitiaLinesResponse => ({}),
-  )) as NavitiaLinesResponse;
+  const payload = (await response
+    .json()
+    .catch((): NavitiaLinesResponse => ({}))) as NavitiaLinesResponse;
 
   const hasStructuralLine = (payload.lines ?? []).some(
     (line) =>
@@ -2632,16 +2517,12 @@ function normalizeIdfmLineId(value?: string): string | undefined {
 function mapSearchedStopAreaToStation(
   stopArea: NonNullable<NavitiaStopAreaSearchObject["stop_area"]>,
 ): StationSearchOption {
-  const id = stopArea.id?.startsWith("stop_area:")
-    ? stopArea.id
-    : `stop_area:IDFM:${stopArea.id}`;
+  const id = stopArea.id?.startsWith("stop_area:") ? stopArea.id : `stop_area:IDFM:${stopArea.id}`;
 
   return {
     id,
     label: cleanBundleStopAreaLabel(stopArea.name ?? stopArea.label ?? id),
-    city:
-      stopArea.administrative_regions?.[0]?.name ??
-      extractBundleStopAreaCity(stopArea.label),
+    city: stopArea.administrative_regions?.[0]?.name ?? extractBundleStopAreaCity(stopArea.label),
     monitoringRef: "",
     scheduleStopAreaRef: id,
   };
@@ -2662,9 +2543,7 @@ function extractBundleStopAreaCity(value: string | undefined): string | undefine
 function parseBundleDistance(value: string | number | undefined): number {
   const numericValue = typeof value === "number" ? value : Number(value);
 
-  return Number.isFinite(numericValue)
-    ? numericValue
-    : Number.POSITIVE_INFINITY;
+  return Number.isFinite(numericValue) ? numericValue : Number.POSITIVE_INFINITY;
 }
 
 function scoreStationNameMatch(
@@ -2684,17 +2563,13 @@ function scoreStationNameMatch(
   }
 
   const stationTokens = new Set(createBundleStationTokens(normalizedStation));
-  const sharedTokenCount = targetTokens.filter((token) =>
-    stationTokens.has(token),
-  ).length;
+  const sharedTokenCount = targetTokens.filter((token) => stationTokens.has(token)).length;
 
   if (sharedTokenCount === 0) {
     return 0;
   }
 
-  return sharedTokenCount >= Math.min(targetTokens.length, 2)
-    ? 40 + sharedTokenCount
-    : 0;
+  return sharedTokenCount >= Math.min(targetTokens.length, 2) ? 40 + sharedTokenCount : 0;
 }
 
 function createBundleStationTokens(value: string): string[] {
@@ -2737,15 +2612,10 @@ function normalizeBundleColor(value?: string): string | undefined {
     return undefined;
   }
 
-  return trimmed.startsWith("#")
-    ? trimmed.toLowerCase()
-    : `#${trimmed.toLowerCase()}`;
+  return trimmed.startsWith("#") ? trimmed.toLowerCase() : `#${trimmed.toLowerCase()}`;
 }
 
-function compareBundleTransfers(
-  left: TransferLineOption,
-  right: TransferLineOption,
-): number {
+function compareBundleTransfers(left: TransferLineOption, right: TransferLineOption): number {
   const familyDelta =
     bundleTransferFamilyPriority[left.family ?? "BUS"] -
     bundleTransferFamilyPriority[right.family ?? "BUS"];
@@ -2900,8 +2770,7 @@ async function queueServerTransferBundleWrite<TResult>(
   bundleId: string,
   write: () => Promise<TResult>,
 ): Promise<TResult> {
-  const previousWrite =
-    serverTransferBundleWriteQueues.get(bundleId) ?? Promise.resolve();
+  const previousWrite = serverTransferBundleWriteQueues.get(bundleId) ?? Promise.resolve();
   let result!: TResult;
   const currentWrite = previousWrite
     .catch(() => undefined)
@@ -2958,10 +2827,7 @@ function getReusableTransferBundleEntries(
 
   return Object.fromEntries(
     targets.flatMap((target) =>
-      Object.prototype.hasOwnProperty.call(
-        bundle.transfersByStopAreaRef,
-        target.stopAreaRef,
-      )
+      Object.prototype.hasOwnProperty.call(bundle.transfersByStopAreaRef, target.stopAreaRef)
         ? [[target.stopAreaRef, bundle.transfersByStopAreaRef[target.stopAreaRef] ?? []]]
         : [],
     ),
@@ -3008,9 +2874,7 @@ async function readServerTransferBundle(
   return storedBundle;
 }
 
-async function writeServerTransferBundle(
-  bundle: ServerTransferBundleRecord,
-): Promise<void> {
+async function writeServerTransferBundle(bundle: ServerTransferBundleRecord): Promise<void> {
   await getTransferBundleStorage()
     .setItem(createStoredTransferBundleKey(bundle.id), bundle)
     .catch((error) => {
@@ -3079,9 +2943,7 @@ function serverTransferBundleIsExpired(bundle: ServerTransferBundleRecord): bool
 
 function createTransferBundleDebugLogger(): TransferBundleDebugLogger {
   return {
-    requestId: `tb-${Date.now().toString(36)}-${Math.random()
-      .toString(36)
-      .slice(2, 8)}`,
+    requestId: `tb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     startedAt: Date.now(),
   };
 }
@@ -3182,9 +3044,7 @@ function summarizeStringList(values: string[], limit = 16): Record<string, unkno
   };
 }
 
-function countTransferLines(
-  transfersByStopAreaRef: Record<string, TransferLineOption[]>,
-): number {
+function countTransferLines(transfersByStopAreaRef: Record<string, TransferLineOption[]>): number {
   return Object.values(transfersByStopAreaRef).reduce(
     (count, transfers) => count + transfers.length,
     0,
@@ -3196,10 +3056,7 @@ function formatTransferBundleError(error: unknown): Record<string, unknown> {
     return {
       message: error.message,
       name: error.name,
-      status:
-        "status" in error && typeof error.status === "number"
-          ? error.status
-          : undefined,
+      status: "status" in error && typeof error.status === "number" ? error.status : undefined,
       stack: error.stack?.split("\n").slice(0, 4),
     };
   }
@@ -3269,9 +3126,7 @@ function createServerNavitiaFetcher(apiKey: string): typeof fetch {
         url: sanitizeTransferBundleUrl(String(input)),
       });
 
-      await waitForTransferBundleRetry(
-        retryDelayMs,
-      );
+      await waitForTransferBundleRetry(retryDelayMs);
     }
 
     return fetch(input, {
@@ -3320,10 +3175,7 @@ function trimTransferCache(): void {
     }
   });
   Array.from(transferCache.entries()).forEach(([key, cached]) => {
-    if (
-      cached.expiresAt <= now ||
-      !serverTransferBundles.has(cached.bundleId)
-    ) {
+    if (cached.expiresAt <= now || !serverTransferBundles.has(cached.bundleId)) {
       transferCache.delete(key);
     }
   });

@@ -1,27 +1,23 @@
 import { defineEventHandler, type H3Event } from "h3";
-import type {
-  HealthCheck,
-  HealthQuota,
-  HealthResponse,
-} from "../../src/features/health/types";
+import type { HealthCheck, HealthQuota, HealthResponse } from "../../src/features/health/types";
 import { getServerIdfmApiKey } from "../services/idfm/resolveStopArea";
 import {
   getNetexCacheStatus,
   getNetexRuntimeEnv,
   type NetexRuntimeEnv,
 } from "../services/topology/netexCache";
+import { getGtfsPublicStatus } from "../services/gtfs/runtime";
 import { transportClockPluginHealthChecks } from "#transport-clock/plugin-server-registry";
 
-const MARKETPLACE_ROOT =
-  "https://prim.iledefrance-mobilites.fr/marketplace";
+const MARKETPLACE_ROOT = "https://prim.iledefrance-mobilites.fr/marketplace";
 const HEALTH_TIMEOUT_MS = 2_800;
-const MAP_TILE_HEALTH_URL =
-  "https://a.basemaps.cartocdn.com/light_all/12/2074/1408.png";
+const MAP_TILE_HEALTH_URL = "https://a.basemaps.cartocdn.com/light_all/12/2074/1408.png";
 const OPEN_METEO_HEALTH_URL =
   "https://api.open-meteo.com/v1/forecast?latitude=48.8566&longitude=2.3522&current=temperature_2m,weather_code&forecast_days=1&timezone=Europe%2FParis";
-const PRIM_API_STATUS_URL =
-  "https://prim.iledefrance-mobilites.fr/fr/etat-des-api";
+const PRIM_API_STATUS_URL = "https://prim.iledefrance-mobilites.fr/fr/etat-des-api";
 const PRIM_API_STATUS_CACHE_TTL_MS = 10 * 60_000;
+const MARKETPLACE_HEALTH_CACHE_TTL_MS = 10 * 60_000;
+const marketplaceHealthCache = new Map<string, { expiresAt: number; check: HealthCheck }>();
 const BROWSER_LIKE_HEALTH_HEADERS = {
   accept: "application/json",
   "accept-language": "fr-FR,fr;q=0.9,en;q=0.8",
@@ -40,11 +36,8 @@ type PrimGlobalStatusPageSnapshot = {
 };
 
 let primGlobalStatusPageCache:
-  | { expiresAt: number; snapshot: PrimGlobalStatusPageSnapshot }
-  | undefined;
-let primGlobalStatusPageRequest:
-  | Promise<PrimGlobalStatusPageSnapshot>
-  | undefined;
+  { expiresAt: number; snapshot: PrimGlobalStatusPageSnapshot } | undefined;
+let primGlobalStatusPageRequest: Promise<PrimGlobalStatusPageSnapshot> | undefined;
 
 type NetexDatasetFreshness = {
   status: "warning" | "error";
@@ -55,9 +48,12 @@ type NetexDatasetFreshness = {
 export default defineEventHandler(async (event): Promise<HealthResponse> => {
   const checks = await Promise.all([
     checkNetexCache(event),
-    ...(transportClockPluginHealthChecks as Array<
-      (event: H3Event) => HealthCheck | Promise<HealthCheck>
-    >).map((check) => check(event)),
+    checkGtfsCache(event),
+    ...(
+      transportClockPluginHealthChecks as Array<
+        (event: H3Event) => HealthCheck | Promise<HealthCheck>
+      >
+    ).map((check) => check(event)),
     checkR2Cache(event),
     checkMarketplaceApi(
       event,
@@ -176,9 +172,7 @@ async function loadPrimGlobalStatusPage(): Promise<PrimGlobalStatusPageSnapshot>
   }
 }
 
-export function parsePrimGlobalRequestAvailability(
-  html: string,
-): number | undefined {
+export function parsePrimGlobalRequestAvailability(html: string): number | undefined {
   const text = decodeHealthStatusHtml(html)
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
@@ -188,9 +182,7 @@ export function parsePrimGlobalRequestAvailability(
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
-  const headingMatch = /prochains passages(?:\s|[-–—:|/])*requete globale/.exec(
-    text,
-  );
+  const headingMatch = /prochains passages(?:\s|[-–—:|/])*requete globale/.exec(text);
 
   if (!headingMatch) {
     return undefined;
@@ -230,20 +222,53 @@ function decodeHealthStatusHtml(value: string): string {
     raquo: "»",
   };
 
-  return value.replace(
-    /&(#x[0-9a-f]+|#\d+|[a-z]+);/gi,
-    (entity, code: string) => {
-      if (code.startsWith("#x")) {
-        return String.fromCodePoint(Number.parseInt(code.slice(2), 16));
-      }
+  return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, code: string) => {
+    if (code.startsWith("#x")) {
+      return String.fromCodePoint(Number.parseInt(code.slice(2), 16));
+    }
 
-      if (code.startsWith("#")) {
-        return String.fromCodePoint(Number.parseInt(code.slice(1), 10));
-      }
+    if (code.startsWith("#")) {
+      return String.fromCodePoint(Number.parseInt(code.slice(1), 10));
+    }
 
-      return namedEntities[code.toLowerCase()] ?? entity;
-    },
-  );
+    return namedEntities[code.toLowerCase()] ?? entity;
+  });
+}
+
+export async function checkGtfsCache(event: H3Event): Promise<HealthCheck> {
+  return timedCheck("gtfs", "GTFS geometry", "Data", false, async () => {
+    const status = await getGtfsPublicStatus(event);
+
+    if (!status.enabled) {
+      return {
+        status: "not_configured",
+        message: "GTFS geometry disabled",
+        messageKey: "health.messages.gtfsDisabled",
+      };
+    }
+
+    if (!status.available) {
+      return {
+        status: "warning",
+        message: "GTFS geometry unavailable",
+        messageKey: "health.messages.gtfsUnavailable",
+      };
+    }
+
+    return {
+      status: status.stale ? "warning" : "ok",
+      message: `${status.lineCount ?? 0} lines indexed`,
+      messageKey: "health.messages.gtfsAvailable",
+      messageParams: { count: status.lineCount ?? 0 },
+      detail: status.stale
+        ? `Dataset is ${status.ageDays ?? 20} days old.`
+        : `Dataset ${status.datasetVersion ?? "unknown"}.`,
+      detailKey: status.stale ? "health.messages.gtfsStaleDetail" : "health.messages.gtfsVersion",
+      detailParams: status.stale
+        ? { days: status.ageDays ?? 20 }
+        : { version: status.datasetVersion ?? "unknown" },
+    };
+  });
 }
 
 async function checkNetexCache(event: H3Event): Promise<HealthCheck> {
@@ -264,10 +289,7 @@ async function checkNetexCache(event: H3Event): Promise<HealthCheck> {
 
     return {
       status: freshness?.status ?? (status.warning ? "warning" : "ok"),
-      message: [
-        `${status.lineCount ?? 0} lines loaded`,
-        freshness?.message,
-      ]
+      message: [`${status.lineCount ?? 0} lines loaded`, freshness?.message]
         .filter(Boolean)
         .join(" · "),
       detail: [
@@ -292,8 +314,7 @@ async function checkR2Cache(event: H3Event): Promise<HealthCheck> {
         status: "not_configured",
         message: "R2 not configured",
         messageKey: "health.messages.r2NotConfigured",
-        detail:
-          "IDFM_NETEX_CACHE_REMOTE does not point to an r2:// source for this deployment.",
+        detail: "IDFM_NETEX_CACHE_REMOTE does not point to an r2:// source for this deployment.",
         detailKey: "health.messages.r2NotConfiguredDetail",
       };
     }
@@ -338,7 +359,12 @@ async function checkMarketplaceApi(
   label: string,
   path: string,
 ): Promise<HealthCheck> {
-  return timedCheck(id, label, "Realtime", true, async () => {
+  const cached = marketplaceHealthCache.get(id);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { ...cached.check, latencyMs: 0 };
+  }
+
+  const result = await timedCheck(id, label, "Realtime", true, async () => {
     const apiKey = getServerIdfmApiKey(event);
 
     if (!apiKey) {
@@ -379,41 +405,40 @@ async function checkMarketplaceApi(
       quota,
     };
   });
+  marketplaceHealthCache.set(id, {
+    expiresAt: Date.now() + MARKETPLACE_HEALTH_CACHE_TTL_MS,
+    check: result,
+  });
+  return result;
 }
 
 async function checkOpenMeteoWeather(): Promise<HealthCheck> {
-  return timedCheck(
-    "open-meteo",
-    "Open-Meteo weather",
-    "Weather",
-    false,
-    async () => {
-      const response = await fetchWithTimeout(OPEN_METEO_HEALTH_URL, {
-        headers: {
-          accept: "application/json",
-        },
-      });
+  return timedCheck("open-meteo", "Open-Meteo weather", "Weather", false, async () => {
+    const response = await fetchWithTimeout(OPEN_METEO_HEALTH_URL, {
+      headers: {
+        accept: "application/json",
+      },
+    });
 
-      if (!response.ok) {
-        return {
-          status: "warning",
-          message: `${response.status} ${response.statusText}`,
-          detail: "The weather API responded without an OK status.",
-          detailKey: "health.messages.weatherBadStatus",
-          quota: extractQuota(response.headers),
-        };
-      }
-
+    if (!response.ok) {
       return {
-        status: "ok",
-        message: "Weather forecast reachable",
-        messageKey: "health.messages.weatherReachable",
-        detail: "Short Open-Meteo test on Paris, without an API key.",
-        detailKey: "health.messages.weatherTest",
+        status: "warning",
+        message: `${response.status} ${response.statusText}`,
+        detail: "The weather API responded without an OK status.",
+        detailKey: "health.messages.weatherBadStatus",
         quota: extractQuota(response.headers),
       };
-    },
-  );
+    }
+
+    return {
+      status: "ok",
+      message: "Weather forecast reachable",
+      messageKey: "health.messages.weatherReachable",
+      detail: "Short Open-Meteo test on Paris, without an API key.",
+      detailKey: "health.messages.weatherTest",
+      quota: extractQuota(response.headers),
+    };
+  });
 }
 
 async function checkMapTiles(): Promise<HealthCheck> {
@@ -481,8 +506,7 @@ async function timedCheck(
       message: "Service unreachable",
       messageKey: "health.messages.serviceUnreachable",
       detail: error instanceof Error ? error.message : "Unknown error",
-      detailKey:
-        error instanceof Error ? undefined : "health.messages.unknownError",
+      detailKey: error instanceof Error ? undefined : "health.messages.unknownError",
       quota: { exposed: false },
     };
   }
@@ -491,6 +515,7 @@ async function timedCheck(
 function getHealthCheckLabelKey(id: string): HealthCheck["labelKey"] {
   return {
     netex: "health.checks.netex",
+    gtfs: "health.checks.gtfs",
     r2: "health.checks.r2",
     prim: "health.checks.prim",
     navitia: "health.checks.navitia",
@@ -511,10 +536,7 @@ function getHealthCategoryKey(category: string): HealthCheck["categoryKey"] {
   }[category] as HealthCheck["categoryKey"];
 }
 
-async function fetchWithTimeout(
-  url: string,
-  init: RequestInit = {},
-): Promise<Response> {
+async function fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
 
@@ -554,11 +576,9 @@ function extractQuota(headers: Headers): HealthQuota {
 }
 
 function getMissingR2Variables(runtimeEnv: NetexRuntimeEnv): string[] {
-  return [
-    "R2_ACCOUNT_ID",
-    "R2_ACCESS_KEY_ID",
-    "R2_SECRET_ACCESS_KEY",
-  ].filter((key) => !runtimeEnv[key]?.trim());
+  return ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"].filter(
+    (key) => !runtimeEnv[key]?.trim(),
+  );
 }
 
 function formatNetexSource(kind?: string): string {
@@ -583,10 +603,7 @@ export function getNetexDatasetFreshness(
     return undefined;
   }
 
-  if (
-    now.getTime() >
-    addUtcMonths(generatedDate, NETEX_OUTDATED_AFTER_MONTHS).getTime()
-  ) {
+  if (now.getTime() > addUtcMonths(generatedDate, NETEX_OUTDATED_AFTER_MONTHS).getTime()) {
     return {
       status: "error",
       message: "dataset outdated",
@@ -595,8 +612,7 @@ export function getNetexDatasetFreshness(
   }
 
   if (
-    now.getTime() >
-    addUtcMonths(generatedDate, NETEX_UPDATE_RECOMMENDED_AFTER_MONTHS).getTime()
+    now.getTime() > addUtcMonths(generatedDate, NETEX_UPDATE_RECOMMENDED_AFTER_MONTHS).getTime()
   ) {
     return {
       status: "warning",
@@ -659,4 +675,3 @@ function sanitizeNetexLocation(location?: string): string {
 
   return "Local folder configured";
 }
-

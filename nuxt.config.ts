@@ -2,18 +2,14 @@ import { defineNuxtConfig } from "nuxt/config";
 
 const isCapacitorBuild = process.env.CAPACITOR_BUILD === "true";
 const serverApiBaseUrl = process.env.NUXT_PUBLIC_API_BASE_URL ?? "";
-const mobileReleasePublicBaseUrl =
-  process.env.NUXT_PUBLIC_MOBILE_RELEASE_BASE_URL ?? "";
+const mobileReleasePublicBaseUrl = process.env.NUXT_PUBLIC_MOBILE_RELEASE_BASE_URL ?? "";
 const appSourceRevision =
   process.env.CF_PAGES_COMMIT_SHA ??
   process.env.NUXT_PUBLIC_APP_SOURCE_REVISION ??
   process.env.GITHUB_SHA ??
   "";
 const idfmApiKeyConfigured =
-  isCapacitorBuild ||
-  Boolean(
-    (process.env.NUXT_IDFM_API_KEY ?? process.env.IDFM_API_KEY)?.trim(),
-  );
+  isCapacitorBuild || Boolean((process.env.NUXT_IDFM_API_KEY ?? process.env.IDFM_API_KEY)?.trim());
 const disallowPlugins = ["1", "true", "yes", "on"].includes(
   (process.env.DISALLOW_PLUGINS ?? "").trim().toLowerCase(),
 );
@@ -23,9 +19,7 @@ const enabledPluginPackages = (process.env.ENABLED_PLUGINS ?? "")
   .filter(Boolean);
 
 if (isCapacitorBuild && !serverApiBaseUrl.trim()) {
-  throw new Error(
-    "NUXT_PUBLIC_API_BASE_URL est requis pour construire l'application Capacitor.",
-  );
+  throw new Error("NUXT_PUBLIC_API_BASE_URL est requis pour construire l'application Capacitor.");
 }
 
 export default defineNuxtConfig({
@@ -38,13 +32,19 @@ export default defineNuxtConfig({
       },
     ],
   ],
+  app: {
+    head: {
+      link: [
+        { rel: "preconnect", href: "https://a.basemaps.cartocdn.com", crossorigin: "anonymous" },
+        { rel: "preconnect", href: "https://b.basemaps.cartocdn.com", crossorigin: "anonymous" },
+        { rel: "preconnect", href: "https://c.basemaps.cartocdn.com", crossorigin: "anonymous" },
+      ],
+    },
+  },
   // Keep the native build independent from a concurrently running `nuxt dev`.
   buildDir: isCapacitorBuild ? ".nuxt-capacitor" : undefined,
   compatibilityDate: "2026-05-17",
-  css: [
-    "@fontsource-variable/atkinson-hyperlegible-next/wght.css",
-    "~/src/styles.css",
-  ],
+  css: ["@fontsource-variable/atkinson-hyperlegible-next/wght.css", "~/src/styles.css"],
   devtools: { enabled: false },
   nitro: {
     preset: isCapacitorBuild
@@ -57,17 +57,16 @@ export default defineNuxtConfig({
           publicDir: "dist/capacitor",
         }
       : undefined,
+    storage:
+      process.env.NODE_ENV === "production"
+        ? {}
+        : {
+            lineGeometry: { driver: "fs", base: "./.data/line-geometry" },
+            gtfs: { driver: "fs", base: "./.data/gtfs" },
+          },
   },
   routeRules: {
-    // The Capacitor WebView is a different origin from the deployed Nuxt API.
-    "/api/**": {
-      cors: true,
-      headers: {
-        "access-control-allow-origin": "*",
-        "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
-        "access-control-allow-headers": "Content-Type, Authorization",
-      },
-    },
+    "/api/**": { cors: true },
   },
   ssr: false,
   experimental: {

@@ -18,6 +18,7 @@ const baseSettings: AppSettings = {
   placePresetNavigationMode: "dropdown-swipe",
   navigationAutoHide: "none",
   reduceMotion: false,
+  gtfsLineGeometryEnabled: true,
   pluginViewerMode: "grid",
   plugins: {},
   legacyPluginData: {},
@@ -111,8 +112,7 @@ afterEach(() => {
 
 async function mountWeatherExperience(settingsPatch: Partial<AppSettings>) {
   vi.doMock("../src/features/app-settings", async (importActual) => {
-    const actual =
-      await importActual<typeof import("../src/features/app-settings")>();
+    const actual = await importActual<typeof import("../src/features/app-settings")>();
     const { ref } = await import("vue");
     const settings = ref({
       ...baseSettings,
@@ -130,9 +130,8 @@ async function mountWeatherExperience(settingsPatch: Partial<AppSettings>) {
     };
   });
 
-  const { default: WeatherExperience } = await import(
-    "../src/features/weather/WeatherExperience.vue"
-  );
+  const { default: WeatherExperience } =
+    await import("../src/features/weather/WeatherExperience.vue");
 
   return mount(WeatherExperience, {
     global: {
@@ -186,9 +185,7 @@ describe("WeatherExperience", () => {
     const wrapper = await mountWeatherExperience({ reduceMotion: true });
     await flushPromises();
 
-    expect(wrapper.get(".weather-backdrop").classes()).not.toContain(
-      "weather-backdrop--animated",
-    );
+    expect(wrapper.get(".weather-backdrop").classes()).not.toContain("weather-backdrop--animated");
   });
 
   it("uses test mode weather without calling the API", async () => {
@@ -201,9 +198,7 @@ describe("WeatherExperience", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain("Orage prevu dans 14 min");
     expect(wrapper.text()).toContain("fin dans 94 min");
-    expect(wrapper.get(".weather-backdrop").classes()).toContain(
-      "weather-backdrop--storm",
-    );
+    expect(wrapper.get(".weather-backdrop").classes()).toContain("weather-backdrop--storm");
   });
 
   it("shows the measured maximum and apparent temperature for heat alerts", async () => {

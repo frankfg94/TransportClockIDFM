@@ -62,8 +62,26 @@ export const fr = {
       eyebrow: "Interface",
       title: "Langue et internationalisation",
       label: "Langue de l'application",
-      description: "En automatique, le francais est utilise avec la timezone Europe/Paris, sinon l'anglais est choisi.",
+      description:
+        "En automatique, le francais est utilise avec la timezone Europe/Paris, sinon l'anglais est choisi.",
       aria: "Langue de l'application",
+    },
+    gtfs: {
+      eyebrow: "Geometrie des lignes",
+      title: "Precision GTFS",
+      description:
+        "Utilise les formes officielles pour suivre les rues et les voies, avec des fallbacks sequentiels si les donnees sont absentes.",
+      toggle: "Activer les traces GTFS",
+      toggleDescription:
+        "Desactivez cette option pour ignorer GTFS tout en conservant les sources de secours.",
+      statusFailed: "Impossible de charger le statut GTFS.",
+      unknown: "Inconnu",
+      availability: "Disponible",
+      version: "Version",
+      sourceUpdatedAt: "Donnees source",
+      lines: "Lignes indexees",
+      stale: "Ces donnees ont environ {days} jours. Une mise a jour est recommandee.",
+      commandManaged: "La mise a jour est geree cote serveur avec",
     },
     places: {
       eyebrow: "Lieux",
@@ -73,7 +91,8 @@ export const fr = {
       defaultDescription: "Utilise quand la page d'accueil est ouverte sans parametre place.",
       defaultAria: "Lieu par defaut",
       navigationLabel: "Selecteur de lieux",
-      navigationDescription: "Choisit comment naviguer entre Maison, Travail et les lieux personnalises.",
+      navigationDescription:
+        "Choisit comment naviguer entre Maison, Travail et les lieux personnalises.",
       navigationAria: "Mode du selecteur de lieux",
       displayPlaceLabel: "Lieu a configurer",
       displayPlaceDescription: "Ces reglages d'affichage sont propres a chaque dashboard.",
@@ -89,13 +108,15 @@ export const fr = {
       eyebrow: "Affichage",
       title: "Tableaux et prochains passages",
       stationButtons: "Affichage des stations",
-      stationButtonsDescription: "Garde les boutons de stations visibles ou les range dans le menu contextuel du dashboard.",
+      stationButtonsDescription:
+        "Garde les boutons de stations visibles ou les range dans le menu contextuel du dashboard.",
       stationButtonsAria: "Emplacement des boutons de stations",
       panelDesign: "Design panneau plein ecran",
       panelDesignDescription: "Choisit l'apparence utilisee par defaut pour l'affichage panneau.",
       panelDesignAria: "Design panneau plein ecran",
       panelDarkTheme: "Theme sombre du panneau",
-      panelDarkThemeDescription: "Active une lecture plus proche des panneaux PANAM, y compris sur la carte station.",
+      panelDarkThemeDescription:
+        "Active une lecture plus proche des panneaux PANAM, y compris sur la carte station.",
       closedAccordion: "Accordion ferme",
       closedAccordionDescription: "Choisit le resume visible sans ouvrir une direction.",
       closedAccordionAria: "Affichage accordion ferme",
@@ -103,7 +124,8 @@ export const fr = {
       maxDeparturesDescription: "La valeur par defaut conserve la limite actuelle du tableau.",
       maxDeparturesAria: "Nombre maximum de prochains passages",
       terminalOnly: "Afficher uniquement les directions terminus",
-      terminalOnlyDescription: "Masque les directions intermediaires quand une station expose beaucoup de destinations.",
+      terminalOnlyDescription:
+        "Masque les directions intermediaires quand une station expose beaucoup de destinations.",
       trafficDesign: "Apparence info trafic",
       trafficDesignDescription: "Choisit la presentation de la page info trafic.",
       trafficDesignAria: "Apparence de la page info trafic",
@@ -111,29 +133,38 @@ export const fr = {
       trafficScopeDescription: "Mode par defaut au chargement de la page.",
       trafficScopeAria: "Mode par defaut info trafic",
       trafficCalendarScope: "Impacts affichés dans le calendrier",
-      trafficCalendarScopeDescription:
-        "Ce filtre s'applique uniquement au calendrier du schéma.",
+      trafficCalendarScopeDescription: "Ce filtre s'applique uniquement au calendrier du schéma.",
       trafficCalendarScopeAria: "Impacts du calendrier trafic",
       smartTraffic: "Detection intelligente sur le schema",
-      smartTrafficDescription: "Charge les perturbations utiles pour detecter les sections impactees.",
+      smartTrafficDescription:
+        "Charge les perturbations utiles pour detecter les sections impactees.",
       trafficModalSmartFormatting:
         "Modale de perturbations et d'interruptions - formatage intelligent",
       trafficModalSmartFormattingDescription:
         "Analyse le texte de l'annonce pour extraire les periodes, les horaires et les bus de remplacement afin de generer des tuiles supplementaires.",
       trafficWarningLookahead: "Avertissement travaux sur le schema",
-      trafficWarningLookaheadDescription: "Affiche les travaux et perturbations prevus sur le schema jusqu'a ce nombre de jours avant leur debut. 0 desactive l'avertissement anticipe.",
+      trafficWarningLookaheadDescription:
+        "Affiche les travaux et perturbations prevus sur le schema jusqu'a ce nombre de jours avant leur debut. 0 desactive l'avertissement anticipe.",
       trafficWarningLookaheadAria: "Delai d'avertissement travaux sur le schema",
-      transferLocalCacheDescription: "Evite de recalculer les correspondances apres un reload sur Cloudflare Pages.",
-      transferBackendCacheDescription: "Conserve les bundles de correspondances dans le cache serveur Nuxt entre deux chargements.",
-      transferExpirationDescription: "Les correspondances pre-calculees sont supprimees automatiquement apres ce delai.",
+      transferLocalCacheDescription:
+        "Evite de recalculer les correspondances apres un reload sur Cloudflare Pages.",
+      transferBackendCacheDescription:
+        "Conserve les bundles de correspondances dans le cache serveur Nuxt entre deux chargements.",
+      transferExpirationDescription:
+        "Les correspondances pre-calculees sont supprimees automatiquement apres ce delai.",
       transferExpirationAria: "Expiration des bundles de correspondances",
-      transferLoadingDescription: "Un chargement sequentiel evite de saturer les APIs externes; plus de concurrence accelere le premier chargement.",
-      transferConcurrencyDescription: "Ajuste le nombre d'appels simultanes utilises pour preparer les bundles.",
+      transferLoadingDescription:
+        "Un chargement sequentiel evite de saturer les APIs externes; plus de concurrence accelere le premier chargement.",
+      transferConcurrencyDescription:
+        "Ajuste le nombre d'appels simultanes utilises pour preparer les bundles.",
       transferConcurrencyAria: "Niveau de concurrence des bundles de correspondances",
-      transferConcurrencyWarning: "Attention : au-dessus de 1, certaines APIs peuvent repondre de facon partielle ou limiter le debit.",
-      transferSpacingDescription: "Le chargement initial sera plus lent, mais les bundles deja en cache accelerent les schemas de ligne.",
+      transferConcurrencyWarning:
+        "Attention : au-dessus de 1, certaines APIs peuvent repondre de facon partielle ou limiter le debit.",
+      transferSpacingDescription:
+        "Le chargement initial sera plus lent, mais les bundles deja en cache accelerent les schemas de ligne.",
       transferSpacingAria: "Espacement des appels bundles de correspondances",
-      transferSpacingWarning: "Le chargement initial sera plus lent, mais les bundles deja en cache restent instantanes.",
+      transferSpacingWarning:
+        "Le chargement initial sera plus lent, mais les bundles deja en cache restent instantanes.",
       transferCacheDescription: "Vide les caches utilises pour accelerer les schemas de ligne.",
       weather: "Meteo dynamique",
       weatherDescription: "Affiche les alertes meteo sur le dashboard.",
@@ -142,7 +173,8 @@ export const fr = {
       weatherTestDescription: "Force une fausse alerte meteo locale pour previsualiser le rendu.",
       weatherTestAria: "Mode test meteo",
       weatherLookahead: "Prevenir a l'avance",
-      weatherLookaheadDescription: "Fenetre utilisee pour detecter une pluie, un orage ou de la neige avant le depart.",
+      weatherLookaheadDescription:
+        "Fenetre utilisee pour detecter une pluie, un orage ou de la neige avant le depart.",
       weatherLookaheadAria: "Fenetre de prevision meteo",
       weatherLocation: "Lieu meteo",
       weatherLocationDescription: "Paris est utilise par defaut, avec quelques presets IDF.",
@@ -159,30 +191,39 @@ export const fr = {
       showCityZones: "Afficher les villes du plan",
       showCityZonesDescription: "Regroupe les stations voisines par commune sur le schema.",
       compactMode: "Mode visuel du plan",
-      compactModeDescription: "Automatique choisit entre confort et compact selon la densite de la ligne.",
+      compactModeDescription:
+        "Automatique choisit entre confort et compact selon la densite de la ligne.",
       compactModeAria: "Mode visuel du plan",
       compactVerticalSpacing: "Espacement vertical compact",
-      compactVerticalSpacingDescription: "Augmente l'ecart entre les lignes de branches dans la vue compacte.",
+      compactVerticalSpacingDescription:
+        "Augmente l'ecart entre les lignes de branches dans la vue compacte.",
       compactVerticalSpacingAria: "Espacement vertical compact du plan",
       roundedCurves: "Courbes arrondies",
-      roundedCurvesDescription: "Remplace les pentes droites du schema par des courbes plus douces.",
+      roundedCurvesDescription:
+        "Remplace les pentes droites du schema par des courbes plus douces.",
       interruptionWalkingTimes: "Temps de marche lors d'une interruption",
-      interruptionWalkingTimesDescription: "Affiche une estimation de marche entre deux stations lorsque le trafic est interrompu.",
+      interruptionWalkingTimesDescription:
+        "Affiche une estimation de marche entre deux stations lorsque le trafic est interrompu.",
       compactForkGap: "Ecart des fourches compactes",
-      compactForkGapDescription: "Separe les petites branches horizontales des branches principales quand elles partent dans le meme sens.",
+      compactForkGapDescription:
+        "Separe les petites branches horizontales des branches principales quand elles partent dans le meme sens.",
       compactForkGapAria: "Espacement vertical des fourches compactes",
       realisticSpacing: "Espacement realiste",
-      realisticSpacingDescription: "Borne les distances NeTEx converties en pixels dans la vue realiste.",
+      realisticSpacingDescription:
+        "Borne les distances NeTEx converties en pixels dans la vue realiste.",
       minCoefficient: "Coefficient min",
       minCoefficientAria: "Coefficient minimum de l'espacement realiste",
       maxCoefficient: "Coefficient max",
       maxCoefficientAria: "Coefficient maximum de l'espacement realiste",
       richTransferTooltips: "Tooltips riches de correspondances",
-      richTransferTooltipsDescription: "Affiche les groupes de transport et les directions bus au survol.",
+      richTransferTooltipsDescription:
+        "Affiche les groupes de transport et les directions bus au survol.",
       reduceMotion: "Reduire les animations",
-      reduceMotionDescription: "Conserve les interactions, mais limite les effets visuels secondaires.",
+      reduceMotionDescription:
+        "Conserve les interactions, mais limite les effets visuels secondaires.",
       structuralGhostLines: "Limiter les lignes fantomes aux modes structurants",
-      structuralGhostLinesDescription: "Masque les bus sur la carte detaillee et conserve metro, RER, train, tram, cable et funiculaire.",
+      structuralGhostLinesDescription:
+        "Masque les bus sur la carte detaillee et conserve metro, RER, train, tram, cable et funiculaire.",
     },
     trafficCalendarEquation: {
       eyebrow: "Source unique de vérité",
@@ -266,7 +307,8 @@ export const fr = {
       expiration: "Expiration des bundles",
       enableLocalCache: "Activer le cache navigateur",
       enableBackendCache: "Activer le cache backend",
-      slowWarning: "Le chargement des correspondances sera tres lent tant que le cache backend est desactive.",
+      slowWarning:
+        "Le chargement des correspondances sera tres lent tant que le cache backend est desactive.",
       loading: "Chargement des correspondances",
       resolver: "Mode de correspondance",
       concurrency: "Concurrence des bundles",
@@ -282,19 +324,23 @@ export const fr = {
       stations: "{count} stations",
       transfers: "{count} correspondances",
       empty: "Aucun bundle enregistre pour l'instant.",
-      cleared: "Bundles supprimes cote navigateur et backend. Le prochain plan rechargera les correspondances.",
+      cleared:
+        "Bundles supprimes cote navigateur et backend. Le prochain plan rechargera les correspondances.",
       autoDistance: "distance auto",
     },
     device: {
       eyebrow: "Tablette",
       title: "Ecran et navigation",
       wakeLock: "Wake lock",
-      wakeLockDescription: "Demande au navigateur de garder l'ecran actif pendant la duree choisie.",
+      wakeLockDescription:
+        "Demande au navigateur de garder l'ecran actif pendant la duree choisie.",
       wakeLockAria: "Duree du wake lock",
       wakeDeviceOnAlarm: "Wake device on alarm",
-      wakeDeviceOnAlarmDescription: "Reactive le wake lock ou la notification quand le navigateur le permet, sans promettre de reveiller un OS endormi.",
+      wakeDeviceOnAlarmDescription:
+        "Reactive le wake lock ou la notification quand le navigateur le permet, sans promettre de reveiller un OS endormi.",
       navigationAutoHide: "Masquer la navigation",
-      navigationAutoHideDescription: "Le menu reapparait au toucher, au focus ou au retour sur l'onglet.",
+      navigationAutoHideDescription:
+        "Le menu reapparait au toucher, au focus ou au retour sur l'onglet.",
       navigationAutoHideAria: "Masquage automatique de la navigation",
     },
     notifications: {
@@ -416,6 +462,11 @@ export const fr = {
       closeAria: "Fermer les details de la station",
       hoveredLine: "Ligne survolee",
       addLineStation: "Ajouter une station de cette ligne",
+      viewLineMap: "Voir le plan de cette ligne",
+      stationExits: "Sorties de la station",
+      focusEntrancesAria: "Centrer le plan sur les sorties de {station}",
+      focusEntranceAria: "Centrer le plan sur la sortie {exit}",
+      exitWithCode: "Sortie {code}",
       lineDirections: "Directions de la ligne",
       directionsUnavailable: "Directions indisponibles",
       noDirections: "Aucune direction renseignee",
@@ -468,7 +519,8 @@ export const fr = {
     loadingDiagram: "Chargement du schema...",
     fullLine: "Ligne complete",
     loadError: "Impossible de charger ce schema de ligne.",
-    timeoutError: "Le chargement de ce schema prend trop longtemps. Recharge la page pour reessayer.",
+    timeoutError:
+      "Le chargement de ce schema prend trop longtemps. Recharge la page pour reessayer.",
   },
   transfers: {
     title: "Correspondances",
@@ -532,14 +584,20 @@ export const fr = {
     schedulesAria: "Horaires par arret",
     netexMissingTitle: "Donnees NeTEx introuvables",
     netexMissingBody: "Les plans de ligne et dessertes detaillees peuvent etre indisponibles.",
-    netexMissingInstruction: "Configurez IDFM_NETEX_CACHE_REMOTE avec une URL R2/HTTP ou IDFM_NETEX_CACHE_LOCAL avec un dossier contenant index.json.",
+    netexMissingInstruction:
+      "Configurez IDFM_NETEX_CACHE_REMOTE avec une URL R2/HTTP ou IDFM_NETEX_CACHE_LOCAL avec un dossier contenant index.json.",
+    gtfsStaleTitle: "Donnees GTFS a actualiser",
+    gtfsStaleBody:
+      "Les traces de lignes ont environ {days} jours. Une mise a jour cote serveur est recommandee.",
+
     alarmToastEyebrow: "Alarme de passage",
     alarmNotificationTitle: "Il est temps de partir pour {station}",
     alarmNotificationLine: "{line} vers {destination}",
     platform: "Quai {platform}",
     apiKeyEyebrow: "Configuration PRIM",
     apiKeyTitle: "Cle API IDFM PRIM manquante",
-    apiKeyBody: "Ajoutez une cle d'API PRIM Ile-De-France Mobilites gratuite dans le fichier d'environnement pour activer les prochains passages.",
+    apiKeyBody:
+      "Ajoutez une cle d'API PRIM Ile-De-France Mobilites gratuite dans le fichier d'environnement pour activer les prochains passages.",
     createApiKey: "Creer votre cle API PRIM",
     assignApiKey: "Assignez IDFM_API_KEY",
     restartServer: "Redemarrez le serveur",
@@ -614,7 +672,8 @@ export const fr = {
       noStation: "Aucune station",
       stationSelected: "Station selectionnee",
       addFailed: "Impossible d'ajouter cette station.",
-      loadRateLimited: "L'API IDFM limite les appels pour le moment. Reessaie le chargement des {resource}.",
+      loadRateLimited:
+        "L'API IDFM limite les appels pour le moment. Reessaie le chargement des {resource}.",
       loadFailedResource: "Impossible de charger les {resource} depuis l'API IDFM.",
       resources: {
         networks: "reseaux",
@@ -652,34 +711,28 @@ export const fr = {
     triggerTime: "Heure de d\u00e9clenchement",
     advance: "Avance programm\u00e9e",
     minutesBeforeValue: "{count} min avant",
-    cancelDescription:
-      "L'alarme et sa notification Android seront supprim\u00e9es.",
+    cancelDescription: "L'alarme et sa notification Android seront supprim\u00e9es.",
     keep: "Conserver l'alarme",
     cancelAction: "Annuler l'alarme",
     cancelling: "Annulation...",
     scheduling: "Programmation...",
-    nativeSound:
-      "Son d'alarme activ\u00e9 \u2014 arr\u00eat automatique apr\u00e8s 1 minute",
+    nativeSound: "Son d'alarme activ\u00e9 \u2014 arr\u00eat automatique apr\u00e8s 1 minute",
     permissionTitle: "Autorisations Android requises",
     permissionDescription:
       "Autorisez les notifications et les alarmes exactes pour garantir le d\u00e9clenchement sur l'\u00e9cran verrouill\u00e9.",
     authorize: "Autoriser",
     checkingPermissions: "V\u00e9rification des autorisations...",
-    notificationDetailsWithPlatform:
-      "{monitoring} - quai {platform}",
+    notificationDetailsWithPlatform: "{monitoring} - quai {platform}",
     errors: {
-      permissionCheck:
-        "Impossible de v\u00e9rifier les autorisations Android.",
+      permissionCheck: "Impossible de v\u00e9rifier les autorisations Android.",
       permissionRequired:
         "Les notifications et l'acc\u00e8s aux alarmes exactes doivent \u00eatre autoris\u00e9s.",
-      permissionRequest:
-        "Les autorisations n'ont pas pu \u00eatre demand\u00e9es.",
+      permissionRequest: "Les autorisations n'ont pas pu \u00eatre demand\u00e9es.",
       timePassed:
         "L'heure de cette alarme est d\u00e9j\u00e0 pass\u00e9e. Choisissez un d\u00e9part plus tardif ou moins d'avance.",
       schedule:
         "La programmation Android a \u00e9chou\u00e9. Aucune alarme n'a \u00e9t\u00e9 enregistr\u00e9e.",
-      cancel:
-        "L'annulation Android a \u00e9chou\u00e9. L'alarme est conserv\u00e9e.",
+      cancel: "L'annulation Android a \u00e9chou\u00e9. L'alarme est conserv\u00e9e.",
     },
   },
   emptyStations: {
@@ -751,8 +804,7 @@ export const fr = {
     trafficCalendarNoImpact: "Aucun impact",
     trafficCalendarImpactCount: "{count} impacts",
     trafficCalendarDayNoImpactAria: "{date}, aucun impact prévu",
-    trafficCalendarDayImpactAria:
-      "{date}, impact {level}, score estimé {score}",
+    trafficCalendarDayImpactAria: "{date}, impact {level}, score estimé {score}",
     trafficCalendarLegend: "Légende des niveaux d'impact",
     trafficCalendarLegendEquation:
       "Niveau issu des gares, correspondances, rôles topologiques et horaires",
@@ -769,8 +821,7 @@ export const fr = {
     trafficCalendarTotalDuration: "Durée totale",
     trafficCalendarScore: "Score {score}",
     trafficCalendarSelectedImpact: "Impact {level} · score {score}",
-    trafficCalendarSelectedNormalDay:
-      "Aucun impact n'est prévu pour cette journée.",
+    trafficCalendarSelectedNormalDay: "Aucun impact n'est prévu pour cette journée.",
     trafficCalendarFriendlySelected: "Sélectionné",
     trafficCalendarFriendlyImpactOne: "1 impact",
     trafficCalendarFriendlyImpactMany: "{count} impacts",
@@ -781,8 +832,7 @@ export const fr = {
     trafficCalendarFriendlyTimeUnknown: "Horaire non communiqué",
     trafficCalendarFriendlyRemainingDayOne: "1 jour restant",
     trafficCalendarFriendlyRemainingDayMany: "{count} jours restants",
-    trafficCalendarFocusDisruptionAria:
-      "Afficher la zone concernée par {title}",
+    trafficCalendarFocusDisruptionAria: "Afficher la zone concernée par {title}",
     trafficCalendarFriendlyAt: "{type} à {station}",
     trafficCalendarFriendlyBetween: "{type} entre {from} et {to}",
     trafficCalendarFriendlyOnStops: "{type} sur {count} gares",
@@ -821,7 +871,8 @@ export const fr = {
     headingAt: "Votre trafic a {time}",
     cardsHeadingAt: "Information trafic a {time}",
     cardsEyebrow: "Info trafic",
-    cardsBody: "Lignes suivies sur le tableau uniquement. Les bus restent exclus pour cette premiere version.",
+    cardsBody:
+      "Lignes suivies sur le tableau uniquement. Les bus restent exclus pour cette premiere version.",
     refreshSr: "Rafraichir",
     mode: "Mode",
     style: "Style",
@@ -907,6 +958,7 @@ export const fr = {
     },
     checks: {
       netex: "Donnees NeTEx",
+      gtfs: "Geometrie GTFS",
       idfmLineTraces: "Traces des lignes IDFM",
       r2: "Cloudflare R2",
       prim: "PRIM live API",
@@ -920,10 +972,16 @@ export const fr = {
       netexMissing: "Cache NeTEx introuvable",
       netexIndexMissing: "Aucun index NeTEx charge.",
       netexLoaded: "{count} lignes chargees",
+      gtfsDisabled: "Geometrie GTFS desactivee",
+      gtfsUnavailable: "Artefacts GTFS introuvables",
+      gtfsAvailable: "{count} lignes GTFS indexees",
+      gtfsStaleDetail: "Le dataset a {days} jours; une mise a jour est recommandee.",
+      gtfsVersion: "Dataset {version}.",
       source: "Source {source}",
       generatedAt: "generee le {date}",
       r2NotConfigured: "R2 non configure",
-      r2NotConfiguredDetail: "IDFM_NETEX_CACHE_REMOTE ne pointe pas vers une source r2:// pour ce deploiement.",
+      r2NotConfiguredDetail:
+        "IDFM_NETEX_CACHE_REMOTE ne pointe pas vers une source r2:// pour ce deploiement.",
       r2MissingCredentials: "Identifiants R2 incomplets",
       missingVariables: "Variables manquantes: {variables}",
       r2ReadFailed: "Lecture R2 impossible",
@@ -936,13 +994,15 @@ export const fr = {
       idfmLineTracesDetail: "Jeu public IDFM derive du GTFS, sans cle API.",
       idfmLineTracesBadStatus: "L'API publique des traces IDFM a repondu sans statut OK.",
       idfmLineTracesEmpty: "Aucune geometrie de ligne retournee",
-      idfmLineTracesEmptyDetail: "Le service repond mais ne retourne aucun enregistrement exploitable.",
+      idfmLineTracesEmptyDetail:
+        "Le service repond mais ne retourne aucun enregistrement exploitable.",
       idfmEndpointBadStatus: "L'endpoint IDFM a repondu mais pas avec un statut OK.",
       idfmProxyTest: "Test court via le proxy marketplace IDFM.",
       primGlobalStatusAvailable: "Service requete globale disponible a {value}%",
       primGlobalStatusDegraded: "Service requete globale degrade : {value}% de disponibilite",
       primGlobalStatusBadStatus: "La page officielle d'etat PRIM a repondu sans statut OK.",
-      primGlobalStatusParseFailed: "Impossible de lire la disponibilite du service requete globale sur la page officielle PRIM.",
+      primGlobalStatusParseFailed:
+        "Impossible de lire la disponibilite du service requete globale sur la page officielle PRIM.",
       primGlobalStatusDetail: "Page officielle d'etat PRIM, mise en cache pendant 10 minutes.",
       weatherBadStatus: "L'API meteo a repondu mais pas avec un statut OK.",
       weatherReachable: "Previsions meteo joignables",
@@ -955,7 +1015,8 @@ export const fr = {
       datasetOutdated: "dataset outdated",
       datasetOutdatedDetail: "Dataset NeTEx de plus d'un an, il doit etre regenere.",
       datasetUpdateRecommended: "mise a jour conseillee",
-      datasetUpdateRecommendedDetail: "Dataset NeTEx de plus de 6 mois, mieux vaut le mettre a jour.",
+      datasetUpdateRecommendedDetail:
+        "Dataset NeTEx de plus de 6 mois, mieux vaut le mettre a jour.",
       sourceConfigured: "Source configuree",
       remoteUrlConfigured: "URL distante configuree",
       localFolderConfigured: "Dossier local configure",
@@ -1045,7 +1106,8 @@ export const fr = {
       pageMatch: "Correspondance avec la page (optionnel)",
       pageMatchDisabled: "Non activee : la derniere APK valide reste telechargeable.",
       pageMatchReady: "Le commit {commit} correspond egalement a l'APK.",
-      pageMatchWaiting: "La derniere APK valide est proposee sans bloquer sur le commit de la page.",
+      pageMatchWaiting:
+        "La derniere APK valide est proposee sans bloquer sur le commit de la page.",
       aria: "Conditions de disponibilite de l'APK",
     },
   },

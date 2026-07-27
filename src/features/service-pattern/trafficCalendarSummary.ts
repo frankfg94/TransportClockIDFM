@@ -357,11 +357,11 @@ export function getPatternTrafficSummaryCopy(
   const sourceText = [disruption.motif, disruption.message, disruption.cause, disruption.title]
     .filter((value): value is string => Boolean(value))
     .join("\n");
-  const explicitReason = extractTrafficReason(sourceText);
-  if (explicitReason && !isGenericTrafficTitle(explicitReason)) {
-    return splitTrafficSummaryCopy(explicitReason);
+  const labelledReason = extractLabelledTrafficReason(sourceText);
+  if (labelledReason && !isGenericTrafficTitle(labelledReason)) {
+    return splitTrafficSummaryCopy(labelledReason);
   }
-  if (explicitReason && normalizeTrafficText(explicitReason) === "travaux") {
+  if (labelledReason && normalizeTrafficText(labelledReason) === "travaux") {
     const description =
       extractTrafficReasonContext(disruption.title) ??
       extractTrafficReasonContext(disruption.message);
@@ -372,7 +372,26 @@ export function getPatternTrafficSummaryCopy(
   const operationalSummary = extractOperationalTrafficSummary(sourceText);
   if (operationalSummary) return operationalSummary;
 
+  const causalReason = extractCausalTrafficReason(sourceText);
+  if (causalReason && !isGenericTrafficTitle(causalReason)) {
+    return splitTrafficSummaryCopy(causalReason);
+  }
+  if (causalReason && normalizeTrafficText(causalReason) === "travaux") {
+    const description =
+      extractTrafficReasonContext(disruption.title) ??
+      extractTrafficReasonContext(disruption.message);
+
+    return description ? { title: "Travaux", description } : { title: "Travaux" };
+  }
+
   const title = getConciseTrafficTitle(disruption.title);
+  const lineStatusTitle = extractLineStatusTitle(sourceText);
+  if (title && lineStatusTitle && isVerboseOperationalTrafficTitle(title)) {
+    return {
+      title: lineStatusTitle,
+      description: title,
+    };
+  }
   if (title && !isGenericTrafficTitle(title)) {
     return splitTrafficSummaryCopy(title);
   }
@@ -395,6 +414,26 @@ export function getPatternTrafficSummaryTitle(disruption: TrafficDisruption): st
 const LINE_TITLE_PREFIX_PATTERN =
   /^(?:(?:m[eé]tro|rer|tram(?:way)?|transilien|ligne|bus)\s+)[a-z0-9][a-z0-9.+/-]{0,7}\s*:\s*/iu;
 
+const COMPACT_LINE_STATUS_PATTERN =
+  /^(?:interruptions?|trafic (?:interrompu|perturb[eé])|travaux|arr[eê]t\(s\) non desservi\(s\))$/iu;
+
+function extractLineStatusTitle(value: string): string | undefined {
+  return normalizeMultilineTrafficText(value)
+    .split(/\r?\n/gu)
+    .map((line) => line.trim())
+    .filter((line) => LINE_TITLE_PREFIX_PATTERN.test(line))
+    .map((line) => cleanSummaryText(line.replace(LINE_TITLE_PREFIX_PATTERN, "")))
+    .find((line): line is string => Boolean(line && COMPACT_LINE_STATUS_PATTERN.test(line)));
+}
+
+function isVerboseOperationalTrafficTitle(value: string): boolean {
+  const normalized = normalizeTrafficText(value);
+  return (
+    value.length > 88 &&
+    /^(?:le )?trafic (?:est|sera) (?:interrompu|perturbe)\b/u.test(normalized)
+  );
+}
+
 function getConciseTrafficTitle(value?: string): string | undefined {
   const lead = getConciseTextLead(value, true);
   if (!lead) return undefined;
@@ -408,17 +447,24 @@ function getConciseTrafficTitle(value?: string): string | undefined {
   return cleanSummaryText(segments.join(" – "));
 }
 
-function extractTrafficReason(value: string): string | undefined {
+function extractLabelledTrafficReason(value: string): string | undefined {
   const plainText = normalizeMultilineTrafficText(value);
   if (!plainText) return undefined;
 
   const motifMarker = /\bmotif\s*:\s*/iu.exec(plainText);
-  if (motifMarker) {
-    return cleanSummaryText(
-      extractTrafficClause(plainText, motifMarker.index + motifMarker[0].length),
-    );
-  }
+  return motifMarker
+    ? cleanSummaryText(
+        extractTrafficClause(
+          plainText,
+          motifMarker.index + motifMarker[0].length,
+        ),
+      )
+    : undefined;
+}
 
+function extractCausalTrafficReason(value: string): string | undefined {
+  const plainText = normalizeMultilineTrafficText(value);
+  if (!plainText) return undefined;
   const reasonMarker =
     /\b(?:en\s+raison\s+(?:de(?:s)?\s+|d['’])|pour\s+cause\s+de\s+|[àa]\s+cause\s+de\s+|(?:[àa]\s+la\s+)?suite\s+[àa]\s+)/iu.exec(
       plainText,
@@ -551,15 +597,17 @@ function extractOperationalTrafficSummary(value: string): PatternTrafficSummaryC
   const normalized = normalizeTrafficText(plainText);
 
   if (
-    /\boffre de transport (?:est |sera )?adaptee\b/u.test(normalized) ||
-    /\bservice (?:est |sera )?adapte\b/u.test(normalized)
+    /\boffre de transport (?:est |sera )?(?:adaptee|reduite)\b/u.test(
+      normalized,
+    ) ||
+    /\bservice (?:est |sera )?(?:adapte|reduit)\b/u.test(normalized)
   ) {
     const trainNotice = plainText.match(
       /\bcertains trains ne circuleront pas[^.!?\r\n]*[.!?]?/iu,
     )?.[0];
 
     return {
-      title: "Offre de transport adaptée",
+      title: "Offre réduite",
       description: trainNotice ? sentenceCase(trainNotice) : undefined,
     };
   }

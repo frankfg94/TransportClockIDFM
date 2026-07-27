@@ -66,8 +66,26 @@ export const en = {
       eyebrow: "Interface",
       title: "Language and internationalization",
       label: "Application language",
-      description: "In automatic mode, French is used with the Europe/Paris timezone; otherwise English is selected.",
+      description:
+        "In automatic mode, French is used with the Europe/Paris timezone; otherwise English is selected.",
       aria: "Application language",
+    },
+    gtfs: {
+      eyebrow: "Line geometry",
+      title: "GTFS precision",
+      description:
+        "Uses official shapes to follow streets and tracks, with sequential fallbacks when data is missing.",
+      toggle: "Enable GTFS line shapes",
+      toggleDescription:
+        "Disable this option to skip GTFS while keeping the fallback sources available.",
+      statusFailed: "Unable to load GTFS status.",
+      unknown: "Unknown",
+      availability: "Available",
+      version: "Version",
+      sourceUpdatedAt: "Source data",
+      lines: "Indexed lines",
+      stale: "This dataset is about {days} days old. Updating it is recommended.",
+      commandManaged: "Updates are managed server-side with",
     },
     places: {
       eyebrow: "Places",
@@ -93,13 +111,15 @@ export const en = {
       eyebrow: "Display",
       title: "Boards and next departures",
       stationButtons: "Station display",
-      stationButtonsDescription: "Keeps station buttons visible or moves them into the dashboard context menu.",
+      stationButtonsDescription:
+        "Keeps station buttons visible or moves them into the dashboard context menu.",
       stationButtonsAria: "Station button placement",
       panelDesign: "Fullscreen panel design",
       panelDesignDescription: "Chooses the default appearance used by panel display.",
       panelDesignAria: "Fullscreen panel design",
       panelDarkTheme: "Dark panel theme",
-      panelDarkThemeDescription: "Enables a display closer to PANAM panels, including on the station map.",
+      panelDarkThemeDescription:
+        "Enables a display closer to PANAM panels, including on the station map.",
       closedAccordion: "Closed accordion",
       closedAccordionDescription: "Chooses the summary visible before opening a direction.",
       closedAccordionAria: "Closed accordion display",
@@ -107,7 +127,8 @@ export const en = {
       maxDeparturesDescription: "The default value keeps the current board limit.",
       maxDeparturesAria: "Maximum number of next departures",
       terminalOnly: "Show terminal directions only",
-      terminalOnlyDescription: "Hides intermediate directions when a station exposes many destinations.",
+      terminalOnlyDescription:
+        "Hides intermediate directions when a station exposes many destinations.",
       trafficDesign: "Traffic appearance",
       trafficDesignDescription: "Chooses the traffic page presentation.",
       trafficDesignAria: "Traffic page appearance",
@@ -120,24 +141,32 @@ export const en = {
       trafficCalendarScopeAria: "Traffic calendar impacts",
       smartTraffic: "Smart detection on the diagram",
       smartTrafficDescription: "Loads useful disruptions to detect impacted sections.",
-      trafficModalSmartFormatting:
-        "Disruption and interruption modal - smart formatting",
+      trafficModalSmartFormatting: "Disruption and interruption modal - smart formatting",
       trafficModalSmartFormattingDescription:
         "Analyzes the announcement text to extract periods, times, and replacement buses and generate additional tiles.",
       trafficWarningLookahead: "Works warning on the diagram",
-      trafficWarningLookaheadDescription: "Shows planned works and disruptions on the diagram up to this many days before they start. 0 disables the early warning.",
+      trafficWarningLookaheadDescription:
+        "Shows planned works and disruptions on the diagram up to this many days before they start. 0 disables the early warning.",
       trafficWarningLookaheadAria: "Works warning lead time on the diagram",
-      transferLocalCacheDescription: "Avoids recomputing transfers after a reload on Cloudflare Pages.",
-      transferBackendCacheDescription: "Keeps transfer bundles in the Nuxt server cache between loads.",
-      transferExpirationDescription: "Precomputed transfers are automatically removed after this delay.",
+      transferLocalCacheDescription:
+        "Avoids recomputing transfers after a reload on Cloudflare Pages.",
+      transferBackendCacheDescription:
+        "Keeps transfer bundles in the Nuxt server cache between loads.",
+      transferExpirationDescription:
+        "Precomputed transfers are automatically removed after this delay.",
       transferExpirationAria: "Transfer bundle expiration",
-      transferLoadingDescription: "Sequential loading avoids saturating external APIs; more concurrency speeds up the first load.",
-      transferConcurrencyDescription: "Adjusts how many simultaneous calls are used to prepare bundles.",
+      transferLoadingDescription:
+        "Sequential loading avoids saturating external APIs; more concurrency speeds up the first load.",
+      transferConcurrencyDescription:
+        "Adjusts how many simultaneous calls are used to prepare bundles.",
       transferConcurrencyAria: "Transfer bundle concurrency level",
-      transferConcurrencyWarning: "Warning: above 1, some APIs may return partial responses or rate-limit the flow.",
-      transferSpacingDescription: "The initial load is slower, but cached bundles speed up line diagrams.",
+      transferConcurrencyWarning:
+        "Warning: above 1, some APIs may return partial responses or rate-limit the flow.",
+      transferSpacingDescription:
+        "The initial load is slower, but cached bundles speed up line diagrams.",
       transferSpacingAria: "Transfer bundle call spacing",
-      transferSpacingWarning: "The initial load is slower, but bundles already in cache remain instant.",
+      transferSpacingWarning:
+        "The initial load is slower, but bundles already in cache remain instant.",
       transferCacheDescription: "Clears the caches used to speed up line diagrams.",
       weather: "Dynamic weather",
       weatherDescription: "Shows weather alerts on the dashboard.",
@@ -171,9 +200,11 @@ export const en = {
       roundedCurves: "Rounded curves",
       roundedCurvesDescription: "Replaces straight slopes in the diagram with softer curves.",
       interruptionWalkingTimes: "Walking time during an interruption",
-      interruptionWalkingTimesDescription: "Shows an estimated walking time between two stations when traffic is interrupted.",
+      interruptionWalkingTimesDescription:
+        "Shows an estimated walking time between two stations when traffic is interrupted.",
       compactForkGap: "Compact fork gap",
-      compactForkGapDescription: "Separates small horizontal branches from main branches when they leave in the same direction.",
+      compactForkGapDescription:
+        "Separates small horizontal branches from main branches when they leave in the same direction.",
       compactForkGapAria: "Compact fork vertical spacing",
       realisticSpacing: "Realistic spacing",
       realisticSpacingDescription: "Bounds NeTEx distances converted to pixels in realistic view.",
@@ -186,15 +217,15 @@ export const en = {
       reduceMotion: "Reduce animations",
       reduceMotionDescription: "Keeps interactions but limits secondary visual effects.",
       structuralGhostLines: "Limit ghost lines to structural modes",
-      structuralGhostLinesDescription: "Hides buses on the detailed map and keeps metro, RER, train, tram, cable, and funicular.",
+      structuralGhostLinesDescription:
+        "Hides buses on the detailed map and keeps metro, RER, train, tram, cable, and funicular.",
     },
     trafficCalendarEquation: {
       eyebrow: "Single source of truth",
       title: "How the level is calculated",
       description:
         "Each affected station is counted once. An interruption takes precedence over a disruption and its schedule scales its contribution.",
-      formula:
-        "score = Σ((1 + connection weights) × topology coefficient × time coefficient)",
+      formula: "score = Σ((1 + connection weights) × topology coefficient × time coefficient)",
       transferWeights: "Connection weights",
       topology: "Topology coefficient",
       thresholds: "Thresholds",
@@ -296,9 +327,11 @@ export const en = {
       wakeLockDescription: "Asks the browser to keep the screen active for the selected duration.",
       wakeLockAria: "Wake lock duration",
       wakeDeviceOnAlarm: "Wake device on alarm",
-      wakeDeviceOnAlarmDescription: "Restarts the wake lock or notification when the browser allows it, without promising to wake a sleeping OS.",
+      wakeDeviceOnAlarmDescription:
+        "Restarts the wake lock or notification when the browser allows it, without promising to wake a sleeping OS.",
       navigationAutoHide: "Hide navigation",
-      navigationAutoHideDescription: "The menu reappears on touch, focus, or when returning to the tab.",
+      navigationAutoHideDescription:
+        "The menu reappears on touch, focus, or when returning to the tab.",
       navigationAutoHideAria: "Automatic navigation hiding",
     },
     notifications: {
@@ -420,6 +453,11 @@ export const en = {
       closeAria: "Close station details",
       hoveredLine: "Hovered line",
       addLineStation: "Add a station from this line",
+      viewLineMap: "View this line map",
+      stationExits: "Station exits",
+      focusEntrancesAria: "Center the map on the exits for {station}",
+      focusEntranceAria: "Center the map on exit {exit}",
+      exitWithCode: "Exit {code}",
       lineDirections: "Line directions",
       directionsUnavailable: "Directions unavailable",
       noDirections: "No direction provided",
@@ -536,14 +574,19 @@ export const en = {
     schedulesAria: "Schedules by stop",
     netexMissingTitle: "NeTEx data not found",
     netexMissingBody: "Line diagrams and detailed service patterns may be unavailable.",
-    netexMissingInstruction: "Configure IDFM_NETEX_CACHE_REMOTE with an R2/HTTP URL or IDFM_NETEX_CACHE_LOCAL with a folder containing index.json.",
+    netexMissingInstruction:
+      "Configure IDFM_NETEX_CACHE_REMOTE with an R2/HTTP URL or IDFM_NETEX_CACHE_LOCAL with a folder containing index.json.",
+    gtfsStaleTitle: "GTFS data should be updated",
+    gtfsStaleBody: "Line geometry is about {days} days old. A server-side update is recommended.",
+
     alarmToastEyebrow: "Departure alarm",
     alarmNotificationTitle: "Time to leave for {station}",
     alarmNotificationLine: "{line} toward {destination}",
     platform: "Platform {platform}",
     apiKeyEyebrow: "PRIM configuration",
     apiKeyTitle: "Missing IDFM PRIM API key",
-    apiKeyBody: "Add a free Ile-De-France Mobilites PRIM API key in the environment file to enable upcoming departures.",
+    apiKeyBody:
+      "Add a free Ile-De-France Mobilites PRIM API key in the environment file to enable upcoming departures.",
     createApiKey: "Create your PRIM API key",
     assignApiKey: "Assign IDFM_API_KEY",
     restartServer: "Restart the server",
@@ -656,32 +699,25 @@ export const en = {
     triggerTime: "Alarm time",
     advance: "Scheduled advance",
     minutesBeforeValue: "{count} min before",
-    cancelDescription:
-      "The alarm and its Android notification will be removed.",
+    cancelDescription: "The alarm and its Android notification will be removed.",
     keep: "Keep alarm",
     cancelAction: "Cancel alarm",
     cancelling: "Cancelling...",
     scheduling: "Scheduling...",
-    nativeSound:
-      "Alarm sound enabled \u2014 stops automatically after 1 minute",
+    nativeSound: "Alarm sound enabled \u2014 stops automatically after 1 minute",
     permissionTitle: "Android permissions required",
     permissionDescription:
       "Allow notifications and exact alarms so the alarm can fire on the lock screen.",
     authorize: "Allow",
     checkingPermissions: "Checking permissions...",
-    notificationDetailsWithPlatform:
-      "{monitoring} - platform {platform}",
+    notificationDetailsWithPlatform: "{monitoring} - platform {platform}",
     errors: {
       permissionCheck: "Unable to check Android permissions.",
-      permissionRequired:
-        "Notifications and exact alarm access must be allowed.",
+      permissionRequired: "Notifications and exact alarm access must be allowed.",
       permissionRequest: "The permissions could not be requested.",
-      timePassed:
-        "This alarm time has already passed. Choose a later departure or less advance.",
-      schedule:
-        "Android scheduling failed. No alarm was saved.",
-      cancel:
-        "Android cancellation failed. The alarm was kept.",
+      timePassed: "This alarm time has already passed. Choose a later departure or less advance.",
+      schedule: "Android scheduling failed. No alarm was saved.",
+      cancel: "Android cancellation failed. The alarm was kept.",
     },
   },
   emptyStations: {
@@ -753,8 +789,7 @@ export const en = {
     trafficCalendarNoImpact: "No impact",
     trafficCalendarImpactCount: "{count} impacts",
     trafficCalendarDayNoImpactAria: "{date}, no expected impact",
-    trafficCalendarDayImpactAria:
-      "{date}, {level} impact, estimated score {score}",
+    trafficCalendarDayImpactAria: "{date}, {level} impact, estimated score {score}",
     trafficCalendarLegend: "Impact level legend",
     trafficCalendarLegendEquation:
       "Level based on stations, connections, topology roles and schedules",
@@ -771,8 +806,7 @@ export const en = {
     trafficCalendarTotalDuration: "Total duration",
     trafficCalendarScore: "Score {score}",
     trafficCalendarSelectedImpact: "{level} impact · score {score}",
-    trafficCalendarSelectedNormalDay:
-      "No impact is expected on this day.",
+    trafficCalendarSelectedNormalDay: "No impact is expected on this day.",
     trafficCalendarFriendlySelected: "Selected",
     trafficCalendarFriendlyImpactOne: "1 impact",
     trafficCalendarFriendlyImpactMany: "{count} impacts",
@@ -822,7 +856,8 @@ export const en = {
     headingAt: "Your traffic at {time}",
     cardsHeadingAt: "Traffic information at {time}",
     cardsEyebrow: "Traffic",
-    cardsBody: "Only lines followed on the board are shown. Buses remain excluded for this first version.",
+    cardsBody:
+      "Only lines followed on the board are shown. Buses remain excluded for this first version.",
     refreshSr: "Refresh",
     mode: "Mode",
     style: "Style",
@@ -834,8 +869,7 @@ export const en = {
     compactAria: "Compact traffic information by active line",
     detailAria: "Selected line details",
     detailPromptTitle: "Choose a line",
-    detailPromptBody:
-      "Select a line in the control area to display detailed traffic information.",
+    detailPromptBody: "Select a line in the control area to display detailed traffic information.",
     cardsAria: "Traffic information by active line",
     noBus: "Buses are not shown for now.",
     summaryOne: "{count} line with traffic information",
@@ -908,6 +942,7 @@ export const en = {
     },
     checks: {
       netex: "NeTEx data",
+      gtfs: "GTFS geometry",
       idfmLineTraces: "IDFM line traces",
       r2: "Cloudflare R2",
       prim: "PRIM live API",
@@ -921,10 +956,16 @@ export const en = {
       netexMissing: "NeTEx cache not found",
       netexIndexMissing: "No NeTEx index loaded.",
       netexLoaded: "{count} lines loaded",
+      gtfsDisabled: "GTFS geometry disabled",
+      gtfsUnavailable: "GTFS artifacts not found",
+      gtfsAvailable: "{count} GTFS lines indexed",
+      gtfsStaleDetail: "The dataset is {days} days old; updating it is recommended.",
+      gtfsVersion: "Dataset {version}.",
       source: "Source {source}",
       generatedAt: "generated on {date}",
       r2NotConfigured: "R2 not configured",
-      r2NotConfiguredDetail: "IDFM_NETEX_CACHE_REMOTE does not point to an r2:// source for this deployment.",
+      r2NotConfiguredDetail:
+        "IDFM_NETEX_CACHE_REMOTE does not point to an r2:// source for this deployment.",
       r2MissingCredentials: "Incomplete R2 credentials",
       missingVariables: "Missing variables: {variables}",
       r2ReadFailed: "Unable to read R2",
@@ -943,7 +984,8 @@ export const en = {
       primGlobalStatusAvailable: "Global request service available at {value}%",
       primGlobalStatusDegraded: "Global request service degraded: {value}% availability",
       primGlobalStatusBadStatus: "The official PRIM status page responded without an OK status.",
-      primGlobalStatusParseFailed: "Unable to read the global request service availability from the official PRIM page.",
+      primGlobalStatusParseFailed:
+        "Unable to read the global request service availability from the official PRIM page.",
       primGlobalStatusDetail: "Official PRIM status page, cached for 10 minutes.",
       weatherBadStatus: "The weather API responded but not with an OK status.",
       weatherReachable: "Weather forecast reachable",

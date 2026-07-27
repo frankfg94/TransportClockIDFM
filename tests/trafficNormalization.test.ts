@@ -262,6 +262,76 @@ describe("traffic normalization", () => {
         "Remplacement de 26 aiguillages dans le secteur de Gare du Nord",
     });
   });
+
+  it("merges duplicate Transilien J alerts with the same title, event and period", () => {
+    const disruptions = normalizeNavitiaLineReportPayload(
+      {
+        disruptions: [
+          {
+            id: "transilien-j-works-short",
+            category: "Travaux",
+            messages: [
+              { text: "Travaux" },
+              {
+                text: "Ligne J : Épône - Mézières <> Mantes la Jolie du 15/07 au 14/08",
+              },
+              { text: "Période : en semaine." },
+              { text: "Motif : Travaux" },
+            ],
+            application_periods: [
+              { begin: "20260715T000000", end: "20260814T235959" },
+            ],
+            impacted_objects: [
+              {
+                pt_object: {
+                  embedded_type: "stop_area",
+                  name: "Épône - Mézières",
+                },
+              },
+            ],
+          },
+          {
+            id: "transilien-j-works-detailed",
+            category: "Travaux",
+            messages: [
+              { text: "Travaux" },
+              {
+                text: "Ligne J : Épône - Mézières <> Mantes la Jolie du 15/07 au 14/08",
+              },
+              { text: "Période : en semaine." },
+              {
+                text: "Dates : du mercredi 15 juillet au vendredi 14 août.",
+              },
+              { text: "Motif : Travaux" },
+            ],
+            application_periods: [
+              { begin: "20260715T000000", end: "20260814T235959" },
+            ],
+            impacted_objects: [
+              {
+                pt_object: {
+                  embedded_type: "stop_area",
+                  name: "Mantes la Jolie",
+                },
+              },
+            ],
+          },
+        ],
+      },
+      "line:IDFM:C01739",
+    );
+
+    expect(disruptions).toHaveLength(1);
+    expect(disruptions[0].id).toBe("transilien-j-works-short");
+    expect(disruptions[0].message).toContain(
+      "Dates : du mercredi 15 juillet au vendredi 14 août.",
+    );
+    expect(disruptions[0].impactedStopNames).toEqual([
+      "Épône - Mézières",
+      "Mantes la Jolie",
+    ]);
+  });
+
   it("converts STIF line references to Navitia line references", () => {
     expect(normalizeTrafficLineRef("STIF:Line::C02528:")).toBe(
       "line:IDFM:C02528",

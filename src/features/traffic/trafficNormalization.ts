@@ -4,6 +4,7 @@ import type {
   TrafficLineStatus,
 } from "./types";
 import { parseTrafficDate } from "./trafficTiming";
+import { mergeEquivalentTrafficDisruptions } from "./trafficDisruptionMerging";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -32,7 +33,9 @@ export function normalizeNavitiaLineReportPayload(
     }
   });
 
-  return enrichMissingWorkMotifs(Array.from(disruptionsById.values()));
+  return mergeEquivalentTrafficDisruptions(
+    enrichMissingWorkMotifs(Array.from(disruptionsById.values())),
+  );
 }
 
 export function getTrafficLineStatus(

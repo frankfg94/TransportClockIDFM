@@ -9,6 +9,8 @@ Nuxt 3 + Vue 3 + TypeScript application showing IDFM PRIM departures and dynamic
 Android APK distribution is documented in [docs/mobile-release.md](docs/mobile-release.md).
 The i18n workflow is documented in [docs/i18n.md](docs/i18n.md).
 
+Secure GTFS line geometry and import are documented in [docs/gtfs-line-geometry.md](docs/gtfs-line-geometry.md).
+
 ## Run the Project
 
 ```powershell

@@ -1,0 +1,116 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildLineGeometryDebugPlan > produces deterministic readable JSON for rounded and preserved corners > GTFS geometry debug plan 1`] = `
+"{
+  "source": "gtfs",
+  "topology": "requested",
+  "datasetVersion": "fixture-2026-07-23",
+  "attempts": [
+    {
+      "source": "gtfs",
+      "status": "success"
+    }
+  ],
+  "stops": [
+    {
+      "id": "A",
+      "lon": 2.3,
+      "lat": 48.8
+    },
+    {
+      "id": "B",
+      "lon": 2.31,
+      "lat": 48.81
+    },
+    {
+      "id": "C",
+      "lon": 2.32,
+      "lat": 48.82
+    }
+  ],
+  "branches": [
+    {
+      "id": "main",
+      "stopIds": [
+        "A",
+        "B",
+        "C"
+      ]
+    }
+  ],
+  "entrances": [],
+  "segments": [
+    {
+      "id": "rounded",
+      "fromStopId": "A",
+      "toStopId": "B",
+      "points": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 10,
+          "y": 0
+        },
+        {
+          "x": 10,
+          "y": 10
+        }
+      ],
+      "path": "M 0 0 L 7.8 0 Q 10 0 10 2.2 L 10 10",
+      "corners": [
+        {
+          "index": 1,
+          "mode": "rounded",
+          "at": {
+            "x": 10,
+            "y": 0
+          },
+          "before": {
+            "x": 7.8,
+            "y": 0
+          },
+          "after": {
+            "x": 10,
+            "y": 2.2
+          },
+          "radius": 2.2
+        }
+      ]
+    },
+    {
+      "id": "too-close",
+      "fromStopId": "B",
+      "toStopId": "C",
+      "points": [
+        {
+          "x": 20,
+          "y": 0
+        },
+        {
+          "x": 21,
+          "y": 0
+        },
+        {
+          "x": 21,
+          "y": 1
+        }
+      ],
+      "path": "M 20 0 L 21 0 L 21 1",
+      "corners": [
+        {
+          "index": 1,
+          "mode": "straight",
+          "at": {
+            "x": 21,
+            "y": 0
+          },
+          "radius": 0,
+          "reason": "too-close"
+        }
+      ]
+    }
+  ]
+}"
+`;

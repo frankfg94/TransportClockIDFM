@@ -2,7 +2,10 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { X } from "lucide-vue-next";
 import { useI18n } from "../i18n";
-import type { TrafficAlertModalData } from "../features/traffic";
+import type {
+  TrafficAlertModalData,
+  TrafficDisruption,
+} from "../features/traffic";
 import UserFriendlyTraffic from "./UserFriendlyTraffic.vue";
 
 const props = withDefaults(
@@ -29,18 +32,32 @@ const dialog = ref<HTMLElement>();
 const activeTrafficModalDisruptionIndex = ref(0);
 let previousFocus: HTMLElement | undefined;
 
-const trafficModalDisruptions = computed(() => {
+const trafficModalDisruptions = computed<TrafficDisruption[]>(() => {
   const alert = props.alert;
   if (!alert) return [];
   if (alert.disruptions?.length) return alert.disruptions;
 
-  return alert.disruption ? [alert.disruption] : [];
+  if (alert.disruption) return [alert.disruption];
+  return [
+    {
+      id: "standalone-alert",
+      title: alert.title || alert.label,
+      message: alert.message,
+      kind: "information",
+      applicationPeriods: [],
+      impactedLineRefs: [],
+      impactedStopNames: [],
+    },
+  ];
 });
 
 const activeTrafficModalDisruption = computed(
   () =>
     trafficModalDisruptions.value[activeTrafficModalDisruptionIndex.value] ??
     trafficModalDisruptions.value[0],
+);
+const isStandaloneAlert = computed(
+  () => Boolean(props.alert) && !props.alert?.disruption && !props.alert?.disruptions?.length,
 );
 
 const hasMultipleTrafficModalDisruptions = computed(
@@ -149,6 +166,7 @@ onBeforeUnmount(() => {
             collapsible
             compact
             :critical="alert.tone === 'red'"
+            :default-expanded="isStandaloneAlert"
             :disruption="activeTrafficModalDisruption"
             :smart-formatting-enabled="smartFormattingEnabled"
             surface="plain"

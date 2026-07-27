@@ -1,20 +1,13 @@
 import { computed, onMounted, watch, type ComputedRef, type Ref } from "vue";
 import { useState } from "#imports";
-import type {
-  WeatherLocationPreset,
-} from "../weather/weatherLocations";
-import type {
-  WeatherSettingsLocation,
-} from "../weather/types";
+import type { WeatherLocationPreset } from "../weather/weatherLocations";
+import type { WeatherSettingsLocation } from "../weather/types";
 import {
   isTransferResolverMode,
   transferResolverModeOptions,
   type TransferResolverMode,
 } from "../service-pattern/transferResolverMode";
-import {
-  isLanguagePreference,
-  type LanguagePreference,
-} from "../../i18n/types";
+import { isLanguagePreference, type LanguagePreference } from "../../i18n/types";
 import { transportClockPlugins } from "#transport-clock/plugins";
 import type { TrafficCalendarImpactScope } from "../traffic/types";
 
@@ -22,33 +15,15 @@ export { transferResolverModeOptions };
 export type { TrafficCalendarImpactScope, TransferResolverMode };
 
 export type ClosedDirectionSummaryMode = "last" | "next";
-export type MaxDeparturesPerDirectionSetting =
-  | "default"
-  | 1
-  | 2
-  | 3
-  | 4
-  | 6
-  | 8
-  | 10;
-export type WakeLockDuration =
-  | "none"
-  | "1m"
-  | "30m"
-  | "1h"
-  | "3h"
-  | "24h"
-  | "unlimited";
+export type MaxDeparturesPerDirectionSetting = "default" | 1 | 2 | 3 | 4 | 6 | 8 | 10;
+export type WakeLockDuration = "none" | "1m" | "30m" | "1h" | "3h" | "24h" | "unlimited";
 export type NavigationAutoHide = "none" | "1m";
 export type BoardTogglesPlacement = "inline" | "context-menu";
 export type PlacePresetNavigationMode = "dropdown-swipe" | "dropdown" | "swipe";
 export type CompactLinePlanMode = "auto" | "comfort" | "compact" | "realistic";
 export type TrafficInfoDesign = "ratp" | "cards";
 export type TrafficInfoDefaultScope = "optimized" | "all";
-export type FullscreenStationPanelDesign =
-  | "all-directions"
-  | "double-stop"
-  | "home-card";
+export type FullscreenStationPanelDesign = "all-directions" | "double-stop" | "home-card";
 export type TransferBundleRetentionDays = 1 | 3 | 7 | 15 | 30 | 60;
 export type TransferBundleRequestConcurrency = 1 | 2 | 3 | 4;
 export type TransferBundleRequestSpacingMs = 0 | 250 | 500 | 1000 | 1500 | 2000;
@@ -106,6 +81,7 @@ export interface AppSettings {
   patternRealisticMaxGapCoefficient: number;
   richTransferTooltips: boolean;
   ghostNetworkStructuralOnly: boolean;
+  gtfsLineGeometryEnabled: boolean;
   trafficCalendarImpactScope: TrafficCalendarImpactScope;
   trafficInfoDesign: TrafficInfoDesign;
   trafficInfoDefaultScope: TrafficInfoDefaultScope;
@@ -193,7 +169,6 @@ export const trafficCalendarImpactScopeOptions = [
   { id: "interruptions-only", label: "Interruptions only" },
   { id: "all-impacts", label: "Interruptions and disruptions" },
 ] as const;
-
 
 export const trafficInfoDesignOptions = [
   { id: "ratp", label: "Compact RATP style" },
@@ -297,12 +272,11 @@ export function createDefaultAppSettings(): AppSettings {
     showInterruptionWalkingTimes: true,
     patternCompactBranchGap: PATTERN_COMPACT_BRANCH_GAP_DEFAULT,
     patternCompactForkGap: PATTERN_COMPACT_FORK_GAP_DEFAULT,
-    patternRealisticMinGapCoefficient:
-      PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_DEFAULT,
-    patternRealisticMaxGapCoefficient:
-      PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_DEFAULT,
+    patternRealisticMinGapCoefficient: PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_DEFAULT,
+    patternRealisticMaxGapCoefficient: PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_DEFAULT,
     richTransferTooltips: true,
     ghostNetworkStructuralOnly: false,
+    gtfsLineGeometryEnabled: true,
     trafficCalendarImpactScope: "all-impacts",
     trafficInfoDesign: "ratp",
     trafficInfoDefaultScope: "optimized",
@@ -338,36 +312,23 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     return defaults;
   }
 
-  const patternRealisticMinGapCoefficient =
-    parsePatternRealisticMinGapCoefficient(
-      value.patternRealisticMinGapCoefficient,
-    );
+  const patternRealisticMinGapCoefficient = parsePatternRealisticMinGapCoefficient(
+    value.patternRealisticMinGapCoefficient,
+  );
   const pluginState = normalizePluginSettings(value, defaults);
 
   return {
     version: 2,
-    language: isLanguagePreference(value.language)
-      ? value.language
-      : defaults.language,
+    language: isLanguagePreference(value.language) ? value.language : defaults.language,
     hiddenDirectionIdsByBoardId: parseHiddenDirectionIdsByBoardId(
       value.hiddenDirectionIdsByBoardId,
     ),
-    closedDirectionSummaryMode: isClosedDirectionSummaryMode(
-      value.closedDirectionSummaryMode,
-    )
+    closedDirectionSummaryMode: isClosedDirectionSummaryMode(value.closedDirectionSummaryMode)
       ? value.closedDirectionSummaryMode
       : defaults.closedDirectionSummaryMode,
-    maxDeparturesPerDirection: parseMaxDeparturesPerDirection(
-      value.maxDeparturesPerDirection,
-    ),
-    showPatternMiniMap: readBoolean(
-      value.showPatternMiniMap,
-      defaults.showPatternMiniMap,
-    ),
-    showPatternCityZones: readBoolean(
-      value.showPatternCityZones,
-      defaults.showPatternCityZones,
-    ),
+    maxDeparturesPerDirection: parseMaxDeparturesPerDirection(value.maxDeparturesPerDirection),
+    showPatternMiniMap: readBoolean(value.showPatternMiniMap, defaults.showPatternMiniMap),
+    showPatternCityZones: readBoolean(value.showPatternCityZones, defaults.showPatternCityZones),
     terminalDirectionsOnly: readBoolean(
       value.terminalDirectionsOnly,
       defaults.terminalDirectionsOnly,
@@ -375,13 +336,8 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     wakeLockDuration: isWakeLockDuration(value.wakeLockDuration)
       ? value.wakeLockDuration
       : defaults.wakeLockDuration,
-    wakeDeviceOnAlarm: readBoolean(
-      value.wakeDeviceOnAlarm,
-      defaults.wakeDeviceOnAlarm,
-    ),
-    boardTogglesPlacement: isBoardTogglesPlacement(
-      value.boardTogglesPlacement,
-    )
+    wakeDeviceOnAlarm: readBoolean(value.wakeDeviceOnAlarm, defaults.wakeDeviceOnAlarm),
+    boardTogglesPlacement: isBoardTogglesPlacement(value.boardTogglesPlacement)
       ? value.boardTogglesPlacement
       : defaults.boardTogglesPlacement,
     placePresetNavigationMode: parsePlacePresetNavigationMode(
@@ -400,63 +356,47 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     compactLinePlanMode: isCompactLinePlanMode(value.compactLinePlanMode)
       ? value.compactLinePlanMode
       : defaults.compactLinePlanMode,
-    patternRoundedCurves: readBoolean(
-      value.patternRoundedCurves,
-      defaults.patternRoundedCurves,
-    ),
+    patternRoundedCurves: readBoolean(value.patternRoundedCurves, defaults.patternRoundedCurves),
     showInterruptionWalkingTimes: readBoolean(
       value.showInterruptionWalkingTimes,
       defaults.showInterruptionWalkingTimes,
     ),
-    patternCompactBranchGap: parsePatternCompactBranchGap(
-      value.patternCompactBranchGap,
-    ),
-    patternCompactForkGap: parsePatternCompactForkGap(
-      value.patternCompactForkGap,
-    ),
+    patternCompactBranchGap: parsePatternCompactBranchGap(value.patternCompactBranchGap),
+    patternCompactForkGap: parsePatternCompactForkGap(value.patternCompactForkGap),
     patternRealisticMinGapCoefficient,
-    patternRealisticMaxGapCoefficient:
-      parsePatternRealisticMaxGapCoefficient(
-        value.patternRealisticMaxGapCoefficient,
-        patternRealisticMinGapCoefficient,
-      ),
-    trafficCalendarImpactScope: isTrafficCalendarImpactScope(
-      value.trafficCalendarImpactScope,
-    )
+    patternRealisticMaxGapCoefficient: parsePatternRealisticMaxGapCoefficient(
+      value.patternRealisticMaxGapCoefficient,
+      patternRealisticMinGapCoefficient,
+    ),
+    trafficCalendarImpactScope: isTrafficCalendarImpactScope(value.trafficCalendarImpactScope)
       ? value.trafficCalendarImpactScope
       : defaults.trafficCalendarImpactScope,
-    richTransferTooltips: readBoolean(
-      value.richTransferTooltips,
-      defaults.richTransferTooltips,
-    ),
+    richTransferTooltips: readBoolean(value.richTransferTooltips, defaults.richTransferTooltips),
     ghostNetworkStructuralOnly: readBoolean(
       value.ghostNetworkStructuralOnly,
       defaults.ghostNetworkStructuralOnly,
     ),
+    gtfsLineGeometryEnabled: readBoolean(
+      value.gtfsLineGeometryEnabled,
+      defaults.gtfsLineGeometryEnabled,
+    ),
     trafficInfoDesign: isTrafficInfoDesign(value.trafficInfoDesign)
       ? value.trafficInfoDesign
       : defaults.trafficInfoDesign,
-    trafficInfoDefaultScope: isTrafficInfoDefaultScope(
-      value.trafficInfoDefaultScope,
-    )
+    trafficInfoDefaultScope: isTrafficInfoDefaultScope(value.trafficInfoDefaultScope)
       ? value.trafficInfoDefaultScope
       : defaults.trafficInfoDefaultScope,
     trafficWarningLookaheadDays: parseTrafficWarningLookaheadDays(
       value.trafficWarningLookaheadDays,
     ),
-    fullscreenStationPanelDesign: isFullscreenStationPanelDesign(
-      value.fullscreenStationPanelDesign,
-    )
+    fullscreenStationPanelDesign: isFullscreenStationPanelDesign(value.fullscreenStationPanelDesign)
       ? value.fullscreenStationPanelDesign
       : defaults.fullscreenStationPanelDesign,
     fullscreenStationPanelDarkTheme: readBoolean(
       value.fullscreenStationPanelDarkTheme,
       defaults.fullscreenStationPanelDarkTheme,
     ),
-    smartTrafficDetection: readBoolean(
-      value.smartTrafficDetection,
-      defaults.smartTrafficDetection,
-    ),
+    smartTrafficDetection: readBoolean(value.smartTrafficDetection, defaults.smartTrafficDetection),
     smartTrafficModalFormatting: readBoolean(
       value.smartTrafficModalFormatting,
       defaults.smartTrafficModalFormatting,
@@ -481,12 +421,8 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     transferBundleRequestSpacingMs: parseTransferBundleRequestSpacingMs(
       value.transferBundleRequestSpacingMs,
     ),
-    weatherMode: isWeatherMode(value.weatherMode)
-      ? value.weatherMode
-      : defaults.weatherMode,
-    weatherLookaheadMinutes: parseWeatherLookaheadMinutes(
-      value.weatherLookaheadMinutes,
-    ),
+    weatherMode: isWeatherMode(value.weatherMode) ? value.weatherMode : defaults.weatherMode,
+    weatherLookaheadMinutes: parseWeatherLookaheadMinutes(value.weatherLookaheadMinutes),
     weatherShowApparentTemperature: readBoolean(
       value.weatherShowApparentTemperature,
       defaults.weatherShowApparentTemperature,
@@ -504,9 +440,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
   };
 }
 
-export function parseMaxDeparturesPerDirection(
-  value: unknown,
-): MaxDeparturesPerDirectionSetting {
+export function parseMaxDeparturesPerDirection(value: unknown): MaxDeparturesPerDirectionSetting {
   if (value === "default") {
     return "default";
   }
@@ -523,9 +457,7 @@ export function parseMaxDeparturesPerDirection(
     : "default";
 }
 
-export function parseWeatherLookaheadMinutes(
-  value: unknown,
-): WeatherLookaheadMinutes {
+export function parseWeatherLookaheadMinutes(value: unknown): WeatherLookaheadMinutes {
   const numericValue =
     typeof value === "number"
       ? value
@@ -538,9 +470,7 @@ export function parseWeatherLookaheadMinutes(
     : 1440;
 }
 
-export function parseTransferBundleRetentionDays(
-  value: unknown,
-): TransferBundleRetentionDays {
+export function parseTransferBundleRetentionDays(value: unknown): TransferBundleRetentionDays {
   const numericValue =
     typeof value === "number"
       ? value
@@ -568,9 +498,7 @@ export function parseTransferBundleRequestConcurrency(
     : 1;
 }
 
-function parseHiddenDirectionIdsByBoardId(
-  value: unknown,
-): Record<string, string[]> {
+function parseHiddenDirectionIdsByBoardId(value: unknown): Record<string, string[]> {
   if (!isRecord(value)) {
     return {};
   }
@@ -610,9 +538,7 @@ export function parseTransferBundleRequestSpacingMs(
     : 0;
 }
 
-export function parseTrafficWarningLookaheadDays(
-  value: unknown,
-): TrafficWarningLookaheadDays {
+export function parseTrafficWarningLookaheadDays(value: unknown): TrafficWarningLookaheadDays {
   return parseBoundedNumber(
     value,
     TRAFFIC_WARNING_LOOKAHEAD_DAYS_DEFAULT,
@@ -665,9 +591,7 @@ export function parsePatternRealisticMaxGapCoefficient(
   );
 }
 
-export function getEffectiveMaxDeparturesPerDirection(
-  settings: AppSettings,
-): number | undefined {
+export function getEffectiveMaxDeparturesPerDirection(settings: AppSettings): number | undefined {
   return settings.maxDeparturesPerDirection === "default"
     ? undefined
     : settings.maxDeparturesPerDirection;
@@ -680,9 +604,7 @@ export function filterTerminalOnly<T extends { isTerminal?: boolean }>(
   return terminalOnly ? items.filter((item) => item.isTerminal !== false) : items;
 }
 
-export function getWakeLockDurationMs(
-  duration: WakeLockDuration,
-): number | undefined {
+export function getWakeLockDurationMs(duration: WakeLockDuration): number | undefined {
   return wakeLockDurationMs[duration];
 }
 
@@ -791,34 +713,32 @@ function normalizePluginSettings(
   const knownKeys = new Set(Object.keys(defaults));
   const legacyPluginData: Record<string, unknown> = {
     ...preservedLegacy,
-    ...Object.fromEntries(
-      Object.entries(rawSettings).filter(([key]) => !knownKeys.has(key)),
-    ),
+    ...Object.fromEntries(Object.entries(rawSettings).filter(([key]) => !knownKeys.has(key))),
   };
   const migrationSource = { ...legacyPluginData, ...rawSettings };
   const claimedKeys = new Set<string>();
-  const installedPluginIds = new Set(
-    transportClockPlugins.map((plugin) => plugin.id),
-  );
+  const installedPluginIds = new Set(transportClockPlugins.map((plugin) => plugin.id));
   const unavailablePlugins = Object.fromEntries(
     Object.entries(storedPlugins).flatMap(([id, value]) => {
       if (installedPluginIds.has(id) || !isRecord(value)) {
         return [];
       }
 
-      return [[
-        id,
-        {
-          enabled: readBoolean(value.enabled, false),
-          value: "value" in value ? value.value : null,
-          version:
-            typeof value.version === "number" &&
-            Number.isInteger(value.version) &&
-            value.version > 0
-              ? value.version
-              : 1,
-        } satisfies AppPluginSettingsEntry,
-      ]];
+      return [
+        [
+          id,
+          {
+            enabled: readBoolean(value.enabled, false),
+            value: "value" in value ? value.value : null,
+            version:
+              typeof value.version === "number" &&
+              Number.isInteger(value.version) &&
+              value.version > 0
+                ? value.version
+                : 1,
+          } satisfies AppPluginSettingsEntry,
+        ],
+      ];
     }),
   );
   const plugins = {
@@ -826,9 +746,7 @@ function normalizePluginSettings(
     ...Object.fromEntries(
       transportClockPlugins.map((plugin) => {
         const storedValue = storedPlugins[plugin.id];
-        const stored: Record<string, unknown> = isRecord(storedValue)
-          ? storedValue
-          : {};
+        const stored: Record<string, unknown> = isRecord(storedValue) ? storedValue : {};
         const migration = plugin.settings?.migrateLegacy?.(migrationSource);
         migration?.claimedKeys?.forEach((key) => claimedKeys.add(key));
         const defaultEntry = defaults.plugins[plugin.id];
@@ -842,10 +760,7 @@ function normalizePluginSettings(
         return [
           plugin.id,
           {
-            enabled: readBoolean(
-              stored.enabled,
-              migration?.enabled ?? defaultEntry.enabled,
-            ),
+            enabled: readBoolean(stored.enabled, migration?.enabled ?? defaultEntry.enabled),
             value: plugin.settings?.normalize(rawValue) ?? null,
             version: plugin.settings?.version ?? defaultEntry.version,
           },
@@ -885,22 +800,12 @@ function parseBoundedNumber(
   return Number(clampedValue.toFixed(precision));
 }
 
-function isClosedDirectionSummaryMode(
-  value: unknown,
-): value is ClosedDirectionSummaryMode {
+function isClosedDirectionSummaryMode(value: unknown): value is ClosedDirectionSummaryMode {
   return value === "last" || value === "next";
 }
 
 function isWakeLockDuration(value: unknown): value is WakeLockDuration {
-  return [
-    "none",
-    "1m",
-    "30m",
-    "1h",
-    "3h",
-    "24h",
-    "unlimited",
-  ].includes(value as WakeLockDuration);
+  return ["none", "1m", "30m", "1h", "3h", "24h", "unlimited"].includes(value as WakeLockDuration);
 }
 
 function isNavigationAutoHide(value: unknown): value is NavigationAutoHide {
@@ -911,9 +816,7 @@ function isPluginViewerMode(value: unknown): value is PluginViewerMode {
   return value === "grid" || value === "list";
 }
 
-function isBoardTogglesPlacement(
-  value: unknown,
-): value is BoardTogglesPlacement {
+function isBoardTogglesPlacement(value: unknown): value is BoardTogglesPlacement {
   return value === "inline" || value === "context-menu";
 }
 
@@ -928,26 +831,15 @@ function parsePlacePresetNavigationMode(
   return legacySwipeEnabled === false ? "dropdown" : "dropdown-swipe";
 }
 
-function isPlacePresetNavigationMode(
-  value: unknown,
-): value is PlacePresetNavigationMode {
-  return (
-    value === "dropdown-swipe" || value === "dropdown" || value === "swipe"
-  );
+function isPlacePresetNavigationMode(value: unknown): value is PlacePresetNavigationMode {
+  return value === "dropdown-swipe" || value === "dropdown" || value === "swipe";
 }
 
 function isCompactLinePlanMode(value: unknown): value is CompactLinePlanMode {
-  return (
-    value === "auto" ||
-    value === "comfort" ||
-    value === "compact" ||
-    value === "realistic"
-  );
+  return value === "auto" || value === "comfort" || value === "compact" || value === "realistic";
 }
 
-function isTrafficCalendarImpactScope(
-  value: unknown,
-): value is TrafficCalendarImpactScope {
+function isTrafficCalendarImpactScope(value: unknown): value is TrafficCalendarImpactScope {
   return value === "interruptions-only" || value === "all-impacts";
 }
 
@@ -955,44 +847,27 @@ function isTrafficInfoDesign(value: unknown): value is TrafficInfoDesign {
   return value === "ratp" || value === "cards";
 }
 
-function isTrafficInfoDefaultScope(
-  value: unknown,
-): value is TrafficInfoDefaultScope {
+function isTrafficInfoDefaultScope(value: unknown): value is TrafficInfoDefaultScope {
   return value === "optimized" || value === "all";
 }
 
-function isFullscreenStationPanelDesign(
-  value: unknown,
-): value is FullscreenStationPanelDesign {
-  return (
-    value === "all-directions" ||
-    value === "double-stop" ||
-    value === "home-card"
-  );
+function isFullscreenStationPanelDesign(value: unknown): value is FullscreenStationPanelDesign {
+  return value === "all-directions" || value === "double-stop" || value === "home-card";
 }
 
 function isWeatherMode(value: unknown): value is WeatherMode {
   return (
-    value === "animated" ||
-    value === "static" ||
-    value === "alerts_only" ||
-    value === "disabled"
+    value === "animated" || value === "static" || value === "alerts_only" || value === "disabled"
   );
 }
 
 function isWeatherTestMode(value: unknown): value is WeatherTestMode {
   return (
-    value === "off" ||
-    value === "rain" ||
-    value === "storm" ||
-    value === "snow" ||
-    value === "heat"
+    value === "off" || value === "rain" || value === "storm" || value === "snow" || value === "heat"
   );
 }
 
-function isWeatherLocationPreset(
-  value: unknown,
-): value is WeatherLocationPreset {
+function isWeatherLocationPreset(value: unknown): value is WeatherLocationPreset {
   return (
     value === "paris" ||
     value === "la-defense" ||
@@ -1012,20 +887,13 @@ function parseWeatherCustomLocation(
 
   return {
     label:
-      typeof value.label === "string" && value.label.trim()
-        ? value.label.trim()
-        : fallback.label,
+      typeof value.label === "string" && value.label.trim() ? value.label.trim() : fallback.label,
     latitude: parseCoordinate(value.latitude, fallback.latitude, -90, 90),
     longitude: parseCoordinate(value.longitude, fallback.longitude, -180, 180),
   };
 }
 
-function parseCoordinate(
-  value: unknown,
-  fallback: number,
-  min: number,
-  max: number,
-): number {
+function parseCoordinate(value: unknown, fallback: number, min: number, max: number): number {
   const numericValue =
     typeof value === "number"
       ? value
@@ -1033,7 +901,5 @@ function parseCoordinate(
         ? Number.parseFloat(value)
         : Number.NaN;
 
-  return Number.isFinite(numericValue)
-    ? Math.min(max, Math.max(min, numericValue))
-    : fallback;
+  return Number.isFinite(numericValue) ? Math.min(max, Math.max(min, numericValue)) : fallback;
 }
