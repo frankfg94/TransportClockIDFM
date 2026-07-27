@@ -931,6 +931,49 @@ describe("DetailedLineMapPicker sidebar", () => {
     wrapper.unmount();
   });
 
+  it("keeps every exactly matched exit for a large main-line station", async () => {
+    const map = createMap();
+    map.entrances = [
+      {
+        id: "exit:north",
+        parentStopId: "station:a",
+        name: "rue du Nord",
+        code: "9",
+        lon: 2.3503,
+        lat: 48.8502,
+        x: 0.305,
+        y: 0.495,
+      },
+      {
+        id: "exit:south",
+        parentStopId: "station:a",
+        name: "rue du Sud",
+        code: "1",
+        lon: 2.3544,
+        lat: 48.85,
+        x: 0.42,
+        y: 0.5,
+      },
+    ];
+    loadDetailedLineMap.mockResolvedValueOnce(map);
+
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: { line, mode: "explorer", selectable: false },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    await wrapper.findAll(".line-map-hit-target")[0].trigger("click");
+    await flushPromises();
+
+    expect(
+      wrapper
+        .findAll('[data-testid="line-map-sidebar-focus-entrance"]')
+        .map((button) => button.get("strong").text()),
+    ).toEqual(["Sortie 1", "Sortie 9"]);
+
+    wrapper.unmount();
+  });
+
   it("keeps the visible center anchored when zooming with controls", async () => {
     const requestAnimationFrame = vi
       .spyOn(window, "requestAnimationFrame")

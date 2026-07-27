@@ -315,6 +315,7 @@ describe("traffic modal intelligent formatting", () => {
         "Orly ville non desservie par les trains pour Paris 06/07 au 30/08",
       ].join("\n"),
       expectedTitle: "Orly ville non desservie par les trains pour Paris",
+      expectedStationNotServedName: "Orly ville",
       begin: "20260706T000000",
       end: "20260830T235900",
     },
@@ -339,6 +340,11 @@ describe("traffic modal intelligent formatting", () => {
     );
 
     expect(tile.title).toBe(fixture.expectedTitle);
+    expect(tile.stationNotServedName).toBe(
+      "expectedStationNotServedName" in fixture
+        ? fixture.expectedStationNotServedName
+        : undefined,
+    );
     expect(tile.title).not.toMatch(/^(?:RER|Métro|Tramway|Ligne|Bus)\b/u);
   });
 

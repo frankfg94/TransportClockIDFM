@@ -9,10 +9,17 @@ import {
   type PatternTrafficSummaryTimeWindow,
 } from "./trafficCalendarSummary";
 
-const props = defineProps<{
-  day: PatternTrafficCalendarDay;
-  focusable?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    day: PatternTrafficCalendarDay;
+    focusable?: boolean;
+    smallTitle?: boolean;
+  }>(),
+  {
+    focusable: false,
+    smallTitle: false,
+  },
+);
 
 const emit = defineEmits<{
   focus: [entry: PatternTrafficSummaryEntry];
@@ -122,12 +129,12 @@ function getEntryDetails(entry: PatternTrafficSummaryEntry): string[] {
     <ul v-if="entries.length > 0" class="pattern-traffic-friendly-summary__list">
       <PatternTrafficIncidentSummaryItem
         v-for="entry in entries"
-        small-title
         :key="entry.id"
         :critical="entry.critical"
         :details="getEntryDetails(entry)"
         :incident-type="entry.incidentType"
         :interactive="focusable"
+        :small-title="smallTitle"
         :action-label="
           focusable
             ? t('pattern.trafficCalendarFocusDisruptionAria', {

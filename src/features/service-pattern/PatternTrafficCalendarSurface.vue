@@ -20,8 +20,8 @@ withDefaults(
     hasNext?: boolean;
     loadingDateKey?: string;
     loadingDirection?: LoadingClockDirection;
-    idPrefix?: string;
     userFriendlySummary?: boolean;
+    smallTitle?: boolean;
   }>(),
   {
     expanded: false,
@@ -31,8 +31,8 @@ withDefaults(
     hasNext: false,
     loadingDateKey: undefined,
     loadingDirection: "idle",
-    idPrefix: "traffic-calendar",
     userFriendlySummary: true,
+    smallTitle: false,
   },
 );
 
@@ -65,8 +65,8 @@ const { t } = useI18n();
       :selected-disruptions="selectedDisruptions"
       :has-previous="hasPrevious"
       :has-next="hasNext"
-      :id-prefix="idPrefix"
       :user-friendly-summary="userFriendlySummary"
+      :small-title="smallTitle"
       mode="panel"
       focusable-summaries
       :show-identity="false"
@@ -92,7 +92,6 @@ const { t } = useI18n();
       :selected-disruptions="selectedDisruptions"
       :has-previous="hasPrevious"
       :has-next="hasNext"
-      :id-prefix="`${idPrefix}-modal`"
       :user-friendly-summary="userFriendlySummary"
       mode="modal"
       focusable-summaries

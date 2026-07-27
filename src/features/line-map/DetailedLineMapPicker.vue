@@ -482,7 +482,7 @@ const visibleEntrances = computed<LineMapEntranceView[]>(() => {
   if (!stop) return [];
 
   const mainEntrances = (lineMap.value?.entrances ?? []).filter((entrance) =>
-    isSameStopReference(entrance.parentStopId, stop.id) && isEntranceAttachedToStop(entrance, stop),
+    isSameStopReference(entrance.parentStopId, stop.id),
   );
   const transferEntrances = ghostLines.value.flatMap((line) => {
     const anchorStation = line.stations.find((station) => station.id === line.anchorStationId);
@@ -3327,7 +3327,7 @@ function getEntranceDisplayKey(entrance: LineMapEntranceView): string {
 
     <PatternTrafficCalendarSurface
       v-if="trafficCalendarEventCount > 0"
-      id-prefix="line-map-traffic-calendar"
+      small-title
       :open="trafficCalendarPanelOpen"
       :expanded="trafficCalendarExpanded"
       :has-next="hasNextTrafficCalendarMonth"

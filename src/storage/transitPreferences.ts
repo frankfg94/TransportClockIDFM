@@ -12,7 +12,7 @@ export const DEFAULT_TRANSIT_PLACE_ID = "home";
 export const WORK_TRANSIT_PLACE_ID = "work";
 
 const TRANSIT_PRESET_STATE_VERSION = 3;
-const DIRECTION_GROUP_DISCOVERY_VERSION = 1;
+const DIRECTION_GROUP_DISCOVERY_VERSION = 2;
 const BUILTIN_PLACE_IDS = [DEFAULT_TRANSIT_PLACE_ID, WORK_TRANSIT_PLACE_ID];
 
 export type TransitPlaceKind = "builtin" | "custom";

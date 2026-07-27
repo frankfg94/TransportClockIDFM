@@ -560,6 +560,7 @@ export const en = {
     trafficModalMultipleInterruptionsAria: "Current interruptions",
     trafficModalInterruptionStepAria: "Show interruption {index} of {count}",
     trafficModalReplacementBus: "Replacement bus",
+    trafficModalStationNotServed: "Station not served: {station}",
     trafficModalEvening: "In the evening",
     trafficModalUntilDate: "Until {date}",
     trafficModalUntilLabel: "Until {label}",

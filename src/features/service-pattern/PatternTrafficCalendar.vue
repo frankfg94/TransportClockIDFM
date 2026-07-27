@@ -11,7 +11,6 @@ import TrafficDisruptionCard from "../traffic/TrafficDisruptionCard.vue";
 import type { TrafficDisruption } from "../traffic/types";
 import PatternTrafficCalendarFriendlySummary from "./PatternTrafficCalendarFriendlySummary.vue";
 import type { PatternTrafficSummaryEntry } from "./trafficCalendarSummary";
-import PatternTrafficCalendarTooltip from "./PatternTrafficCalendarTooltip.vue";
 import type {
   PatternTrafficCalendarDay,
   PatternTrafficCalendarMonth,
@@ -22,7 +21,6 @@ const props = withDefaults(
     calendar: PatternTrafficCalendarMonth;
     selectedDateKey: string;
     selectedDay?: PatternTrafficCalendarDay;
-    idPrefix?: string;
     hasPrevious?: boolean;
     hasNext?: boolean;
     expanded?: boolean;
@@ -31,10 +29,10 @@ const props = withDefaults(
     userFriendlySummary?: boolean;
     selectedDisruptions?: TrafficDisruption[];
     focusableSummaries?: boolean;
+    smallTitle?: boolean;
   }>(),
   {
     selectedDay: undefined,
-    idPrefix: "traffic-calendar",
     hasPrevious: false,
     hasNext: false,
     expanded: false,
@@ -43,6 +41,7 @@ const props = withDefaults(
     userFriendlySummary: false,
     selectedDisruptions: () => [],
     focusableSummaries: false,
+    smallTitle: false,
   },
 );
 
@@ -233,12 +232,11 @@ function getDurationLabel(minutes?: number): string {
       role="grid"
       :aria-label="monthLabel"
     >
-      <PatternTrafficCalendarTooltip
+      <div
         v-for="day in visibleDays"
         :key="day.dateKey"
-        :day="day"
-        :tooltip-id="`${idPrefix}-tooltip-${day.dateKey}`"
-        :grid-column-start="getDayGridColumnStart(day)"
+        class="pattern-traffic-calendar__day-cell"
+        :style="{ gridColumnStart: getDayGridColumnStart(day) }"
       >
         <button
           class="pattern-traffic-calendar__day"
@@ -256,11 +254,6 @@ function getDurationLabel(minutes?: number): string {
           role="gridcell"
           :aria-label="getDayAriaLabel(day)"
           :aria-selected="day.dateKey === selectedDateKey"
-          :aria-describedby="
-            day.events.length > 0
-              ? `${idPrefix}-tooltip-${day.dateKey}`
-              : undefined
-          "
           :disabled="day.isPast"
           :data-date="day.dateKey"
           @click="emit('select', day)"
@@ -272,7 +265,7 @@ function getDurationLabel(minutes?: number): string {
             {{ getDayStatus(day) }}
           </span>
         </button>
-      </PatternTrafficCalendarTooltip>
+      </div>
     </div>
 
     <div
@@ -311,6 +304,7 @@ function getDurationLabel(minutes?: number): string {
         v-if="userFriendlySummary"
         :day="selectedDay"
         :focusable="focusableSummaries"
+        :small-title="smallTitle"
         @focus="emit('focusDisruption', $event)"
       />
       <template v-else>
@@ -500,6 +494,10 @@ function getDurationLabel(minutes?: number): string {
   display: grid;
   gap: 5px;
   grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.pattern-traffic-calendar__day-cell {
+  min-width: 0;
 }
 
 .pattern-traffic-calendar__weekdays {

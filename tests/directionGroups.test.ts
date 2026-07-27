@@ -78,13 +78,66 @@ describe("station direction groups", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("does not persist an all-directions fallback after a transient lookup failure", async () => {
+    const fetcher = vi.fn(async () =>
+      new Response("Service unavailable", { status: 503 }),
+    );
+
+    await expect(
+      fetchDirectionGroupsForStation(line, station, {
+        apiBase: "https://idfm.test/v2/navitia",
+        fetcher: fetcher as typeof fetch,
+      }),
+    ).rejects.toThrow("HTTP 503");
+  });
+
+  it("keeps every stop point serving the same direction", async () => {
+    const fetcher = vi.fn(async () =>
+      jsonResponse({
+        pagination: {
+          total_result: 2,
+          start_page: 0,
+          items_per_page: 100,
+          items_on_page: 2,
+        },
+        stop_schedules: [
+          createSchedule(
+            "Saint-Denis - Pleyel (Saint-Denis)",
+            "stop_point:IDFM:490835",
+          ),
+          createSchedule(
+            "Saint-Denis - Pleyel (Saint-Denis)",
+            "stop_point:IDFM:490836",
+          ),
+        ],
+      }),
+    );
+
+    const groups = await fetchDirectionGroupsForStation(line, station, {
+      apiBase: "https://idfm.test/v2/navitia",
+      fetcher: fetcher as typeof fetch,
+    });
+
+    expect(groups).toEqual([
+      expect.objectContaining({
+        id: "saint-denis-pleyel",
+        match: expect.objectContaining({
+          navitiaStopPointRefs: [
+            "stop_point:IDFM:490835",
+            "stop_point:IDFM:490836",
+          ],
+        }),
+      }),
+    ]);
+  });
+
   it("upgrades existing custom boards that were saved with one direction", async () => {
     const preferences = {
       ...createDefaultPreferences([]),
       customBoards: [createBoardWithOneDirection()],
       visibleBoardIds: ["metro-14-chevilly"],
       boardOrderIds: ["metro-14-chevilly"],
-      directionGroupDiscoveryVersion: 0,
+      directionGroupDiscoveryVersion: 1,
     };
     const discoverDirectionGroups = vi.fn().mockResolvedValue([
       {
@@ -115,7 +168,7 @@ describe("station direction groups", () => {
       completed: true,
     });
     expect(preferences.customBoards[0].directionGroups).toHaveLength(2);
-    expect(preferences.directionGroupDiscoveryVersion).toBe(1);
+    expect(preferences.directionGroupDiscoveryVersion).toBe(2);
     expect(discoverDirectionGroups).toHaveBeenCalledWith(
       expect.objectContaining({ id: "metro-14-chevilly" }),
     );

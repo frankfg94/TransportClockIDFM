@@ -67,7 +67,7 @@ describe("PatternTrafficCalendar", () => {
     expect(wrapper.emitted("expand")).toHaveLength(1);
   });
 
-  it("exposes scrollable impact details to mouse, keyboard and touch users", async () => {
+  it("does not render the removed calendar tooltip panel", () => {
     const calendar = createCalendar();
     const wrapper = mount(PatternTrafficCalendar, {
       props: {
@@ -77,70 +77,11 @@ describe("PatternTrafficCalendar", () => {
     });
     const impactedDay = wrapper.get("[data-date='2026-07-18']");
 
-    expect(impactedDay.attributes("aria-describedby")).toBe(
-      "traffic-calendar-tooltip-2026-07-18",
-    );
-    await impactedDay.trigger("focusin");
-    const tooltip = document.body.querySelector("[data-testid='pattern-traffic-calendar-tooltip']");
-    expect(tooltip?.getAttribute("role")).toBe("tooltip");
-    expect(tooltip?.textContent).toContain("Station A");
-    expect(tooltip?.textContent).toContain("Station B");
+    expect(impactedDay.attributes("aria-describedby")).toBeUndefined();
     expect(
-      tooltip?.querySelector(
-        ".pattern-traffic-calendar-tooltip__scroll",
-      ),
-    ).not.toBeNull();
-
-    await wrapper
-      .get("[data-tooltip-date='2026-07-18']")
-      .trigger("pointerup", { pointerType: "touch" });
-    expect(
-      document.body.querySelector("[data-testid='pattern-traffic-calendar-tooltip']"),
-    ).not.toBeNull();
+      wrapper.find(".pattern-traffic-calendar-tooltip__panel").exists(),
+    ).toBe(false);
     wrapper.unmount();
-  });
-
-  it("waits for one second of continuous hover before opening details", async () => {
-    vi.useFakeTimers();
-
-    try {
-      const wrapper = mount(PatternTrafficCalendar, {
-        props: {
-          calendar: createCalendar(),
-          selectedDateKey: "2026-07-16",
-        },
-      });
-      const tooltipTrigger = wrapper.get(
-        "[data-tooltip-date='2026-07-18']",
-      );
-
-      await tooltipTrigger.trigger("pointerenter", { pointerType: "mouse" });
-      expect(
-        document.body.querySelector("[data-testid='pattern-traffic-calendar-tooltip']"),
-      ).toBeNull();
-
-      vi.advanceTimersByTime(999);
-      await wrapper.vm.$nextTick();
-      expect(
-        document.body.querySelector("[data-testid='pattern-traffic-calendar-tooltip']"),
-      ).toBeNull();
-
-      vi.advanceTimersByTime(1);
-      await wrapper.vm.$nextTick();
-      expect(
-        document.body.querySelector("[data-testid='pattern-traffic-calendar-tooltip']"),
-      ).not.toBeNull();
-
-      await tooltipTrigger.trigger("pointerleave", { pointerType: "mouse" });
-      vi.advanceTimersByTime(120);
-      await wrapper.vm.$nextTick();
-      expect(
-        document.body.querySelector("[data-testid='pattern-traffic-calendar-tooltip']"),
-      ).toBeNull();
-      wrapper.unmount();
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it("renders persistent details in expanded mode", () => {
@@ -215,6 +156,7 @@ describe("PatternTrafficCalendar", () => {
         selectedDateKey: selectedDay.dateKey,
         userFriendlySummary: true,
         focusableSummaries: true,
+        smallTitle: true,
       },
     });
     const summary = wrapper.get(

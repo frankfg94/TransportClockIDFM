@@ -316,7 +316,15 @@ function formatTimeWindow(window: TrafficModalTimeWindow): string {
           <CalendarDays v-else aria-hidden="true" />
         </span>
         <div class="traffic-alert-modal__date-tile-copy">
-          <strong>{{ tile.title }}</strong>
+          <strong>
+            {{
+              tile.stationNotServedName
+                ? t("app.trafficModalStationNotServed", {
+                    station: tile.stationNotServedName,
+                  })
+                : tile.title
+            }}
+          </strong>
           <span v-if="tile.replacementBus">
             {{ t("app.trafficModalReplacementBus") }}
           </span>

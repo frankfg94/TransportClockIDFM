@@ -194,6 +194,11 @@ const emit = defineEmits<{ activate: [] }>();
   line-height: 1.3;
 }
 
+.pattern-traffic-friendly-summary__copy.small-title strong {
+  font-size: 1.08rem;
+  line-height: 1.25;
+}
+
 .pattern-traffic-friendly-summary__description {
   -webkit-line-clamp: 2;
   color: #69657e;

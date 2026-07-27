@@ -2482,10 +2482,9 @@ describe("DeparturePatternModal settings", () => {
     await toggle.trigger("click");
     await flushPromises();
 
-    await wrapper.get("[data-tooltip-date='2026-07-20']").trigger("focusin");
-    await nextTick();
-    expect(wrapper.get("[data-testid='pattern-traffic-calendar-tooltip']").text())
-      .toContain("Station B");
+    expect(
+      wrapper.find(".pattern-traffic-calendar-tooltip__panel").exists(),
+    ).toBe(false);
     expect(
       wrapper.findAll("[data-testid='pattern-traffic-calendar']"),
     ).toHaveLength(1);

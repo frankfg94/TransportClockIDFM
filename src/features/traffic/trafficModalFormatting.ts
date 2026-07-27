@@ -25,6 +25,7 @@ export interface TrafficModalDateTilePeriod {
 export interface TrafficModalDateTile {
   id: string;
   title: string;
+  stationNotServedName?: string;
   start?: Date;
   end?: Date;
   endLabel?: string;
@@ -49,12 +50,14 @@ export function extractTrafficModalDateTiles(
     const title =
       dateSet.titleHint ??
       (dateSet.kind === "range" ? fallbackTileTitle : endOnlyTileTitle);
+    const stationNotServedName = getNonServedStationName(disruption, title);
 
     return {
       mergeKey: dateSet.titleHint ? normalizeTrafficText(title) : undefined,
       tile: {
         id: dateSet.id,
         title,
+        ...(stationNotServedName ? { stationNotServedName } : {}),
         start,
         end: dateSet.end,
         endLabel: dateSet.endLabel,
@@ -144,6 +147,36 @@ function getFallbackTileTitle(disruption: TrafficDisruption, fallbackTitle?: str
   return !isGenericTitle && !isRawTitleStatusVariant && rawTitle.length <= 100
     ? rawTitle
     : fallbackTitle || rawTitle;
+}
+
+function getNonServedStationName(
+  disruption: TrafficDisruption,
+  title: string,
+): string | undefined {
+  if (!/\b(?:non|pas)\s+desservi(?:e|s|es)?\b/iu.test(title)) {
+    return undefined;
+  }
+
+  if (disruption.impactedStopNames.length === 1) {
+    return disruption.impactedStopNames[0];
+  }
+
+  const match = title.match(
+    /^(.{2,100}?)\s+(?:n['’]est\s+pas\s+|non\s+)desservi(?:e|s|es)?\b/iu,
+  );
+  const stationName = match?.[1]?.trim();
+
+  if (!stationName) {
+    return undefined;
+  }
+
+  const normalizedStationName = normalizeTrafficText(stationName)
+    .replace(/[^a-z0-9]+/gu, " ")
+    .trim();
+
+  return /^(?:arret|arrets|station|stations)$/u.test(normalizedStationName)
+    ? undefined
+    : stationName;
 }
 
 function hasReplacementBus(value: string): boolean {

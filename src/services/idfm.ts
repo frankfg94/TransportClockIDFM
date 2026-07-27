@@ -2423,22 +2423,16 @@ export async function fetchDirectionGroupsForStation(
     items_per_schedule: "8",
   });
 
-  let schedules: NavitiaStopSchedule[];
-
-  try {
-    schedules = await fetchPaginatedCollection<
-      NavitiaStopScheduleResponse,
-      NavitiaStopSchedule
-    >(
-      `${navitiaApiBase(options)}/lines/${encodeURIComponent(line.navitiaId)}/stop_areas/${encodeURIComponent(station.scheduleStopAreaRef)}/stop_schedules`,
-      searchParams,
-      "stop_schedules",
-      MAX_DIRECTION_SCHEDULES,
-      options,
-    );
-  } catch {
-    return [createFallbackDirectionGroup(station.label)];
-  }
+  const schedules = await fetchPaginatedCollection<
+    NavitiaStopScheduleResponse,
+    NavitiaStopSchedule
+  >(
+    `${navitiaApiBase(options)}/lines/${encodeURIComponent(line.navitiaId)}/stop_areas/${encodeURIComponent(station.scheduleStopAreaRef)}/stop_schedules`,
+    searchParams,
+    "stop_schedules",
+    MAX_DIRECTION_SCHEDULES,
+    options,
+  );
   const groups = new Map<string, DirectionGroupConfig>();
 
   for (const schedule of schedules) {
@@ -2452,15 +2446,26 @@ export async function fetchDirectionGroupsForStation(
     }
 
     const id = createStableId(destination);
+    const existing = groups.get(id);
+    const navitiaStopPointRefs = Array.from(
+      new Set([
+        ...(existing?.match.navitiaStopPointRefs ?? []),
+        ...(schedule.stop_point?.id ? [schedule.stop_point.id] : []),
+      ]),
+    );
 
     groups.set(id, {
       id,
-      label: `${destination}`,
+      label: existing?.label ?? destination,
       match: {
-        destinationIncludes: [destination],
-        navitiaStopPointRefs: schedule.stop_point?.id
-          ? [schedule.stop_point.id]
-          : undefined,
+        destinationIncludes: Array.from(
+          new Set([
+            ...(existing?.match.destinationIncludes ?? []),
+            destination,
+          ]),
+        ),
+        navitiaStopPointRefs:
+          navitiaStopPointRefs.length > 0 ? navitiaStopPointRefs : undefined,
       },
     });
   }

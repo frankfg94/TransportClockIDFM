@@ -41,6 +41,9 @@ function mockFrenchI18n(): void {
         if (key === "app.trafficModalFromTime") {
           return "À partir de " + params?.time;
         }
+        if (key === "app.trafficModalStationNotServed") {
+          return "Station non desservie : " + params?.station;
+        }
 
         return key;
       },
@@ -188,7 +191,9 @@ describe("UserFriendlyTrafficModal", () => {
     expect(tiles[0].text()).toContain("16:00 - 19:30");
     expect(tiles[0].get("svg").classes()).toContain("lucide-calendar-days");
     expect(tiles[1].classes()).toContain("traffic-alert-modal__date-tile--replacement-bus");
-    expect(tiles[1].text()).toContain("Rosny-Bois-Perrier non desservie");
+    expect(tiles[1].text()).toContain(
+      "Station non desservie : Rosny-Bois-Perrier",
+    );
     expect(tiles[1].text()).toContain("Bus de remplacement");
     expect(tiles[1].text()).toContain("1 août");
     expect(tiles[1].text()).toContain("7 août");
