@@ -1399,6 +1399,7 @@ describe("DetailedLineMapPicker sidebar", () => {
       "r. de Test",
     );
 
+    expect(wrapper.findAll('[data-testid="line-map-sidebar-focus-entrance"]')).toHaveLength(1);
     expect(wrapper.get('[data-testid="line-map-sidebar-view-line-map"]').text()).toContain(
       "Voir le plan de cette ligne",
     );
@@ -1956,6 +1957,14 @@ function stubGhostTopologyFetch(): void {
                 code: "4",
                 lon: 2.3501,
                 lat: 48.8501,
+              },
+              {
+                id: "exit:remote",
+                parentStopId: "ghost:a",
+                name: "r. trop lointaine",
+                code: "9",
+                lon: 2.354,
+                lat: 48.85,
               },
             ],
             attempts: [{ source: "gtfs", status: "success" }],

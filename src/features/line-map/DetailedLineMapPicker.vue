@@ -46,7 +46,7 @@ import {
   WORK_TRANSIT_PLACE_ID,
   type TransitPlacePreset,
 } from "../../storage/transitPreferences";
-import { formatTransitDistance } from "../../services/distance";
+import { formatTransitDistance, getCoordinatesDistanceKm } from "../../services/distance";
 import { getTransferLineId } from "../../services/transferLineOptions";
 import type {
   LineFrequencyProfile,
@@ -470,12 +470,14 @@ function recordMapPerformance(): void {
   mapPerformanceSummary.value = JSON.stringify(report);
   console.info("[line-map:perf]", report);
 }
+const MAX_VISIBLE_ENTRANCE_DISTANCE_METERS = 200;
+
 const visibleEntrances = computed<LineMapEntranceView[]>(() => {
   const stop = activeStop.value;
   if (!stop) return [];
 
   const mainEntrances = (lineMap.value?.entrances ?? []).filter((entrance) =>
-    isSameStopReference(entrance.parentStopId, stop.id),
+    isSameStopReference(entrance.parentStopId, stop.id) && isEntranceAttachedToStop(entrance, stop),
   );
   const transferEntrances = ghostLines.value.flatMap((line) => {
     const anchorStation = line.stations.find((station) => station.id === line.anchorStationId);
@@ -484,15 +486,23 @@ const visibleEntrances = computed<LineMapEntranceView[]>(() => {
     }
 
     return (line.entrances ?? [])
-      .filter((entrance) => isSameStopReference(entrance.parentStationId, line.anchorStationId))
+      .filter(
+        (entrance) =>
+          isSameStopReference(entrance.parentStationId, line.anchorStationId) &&
+          isEntranceAttachedToStop(entrance, stop),
+      )
       .map((entrance) => ({ ...entrance, parentStopId: stop.id }));
   });
 
-  return [
-    ...new Map(
-      [...mainEntrances, ...transferEntrances].map((entrance) => [entrance.id, entrance]),
-    ).values(),
-  ];
+  const uniqueEntrances = new Map<string, LineMapEntranceView>();
+  [...mainEntrances, ...transferEntrances].forEach((entrance) => {
+    const key = getEntranceDisplayKey(entrance);
+    if (!uniqueEntrances.has(key)) {
+      uniqueEntrances.set(key, entrance);
+    }
+  });
+
+  return [...uniqueEntrances.values()];
 });
 const { analyzeCurrentTrafficImpacts, resolvedTrafficReport, trafficTimingNow } =
   useDeparturePatternTraffic({
@@ -2682,6 +2692,39 @@ function isSameStopReference(left: string, right: string): boolean {
       .replace(/^(?:stop_area|stop_point):/u, "")
       .replace(/[^a-z0-9]/gu, "");
   return normalize(left) === normalize(right);
+}
+
+function isEntranceAttachedToStop(
+  entrance: Pick<LineMapEntranceView, "lon" | "lat">,
+  stop: Pick<LineMapStopView, "lon" | "lat">,
+): boolean {
+  if (
+    !Number.isFinite(entrance.lon) ||
+    !Number.isFinite(entrance.lat) ||
+    !Number.isFinite(stop.lon) ||
+    !Number.isFinite(stop.lat)
+  ) {
+    return true;
+  }
+
+  return (
+    getCoordinatesDistanceKm(stop.lat!, stop.lon!, entrance.lat, entrance.lon) * 1_000 <=
+    MAX_VISIBLE_ENTRANCE_DISTANCE_METERS
+  );
+}
+
+function getEntranceDisplayKey(entrance: LineMapEntranceView): string {
+  const normalize = (value: string | undefined) =>
+    (value ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/gu, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gu, " ")
+      .trim();
+  const code = normalize(entrance.code);
+  const name = normalize(entrance.name);
+
+  return code || name ? `${code}:${name}` : entrance.id;
 }
 </script>
 

@@ -67,6 +67,25 @@ describe("GTFS entrance matching", () => {
       }),
     ]);
   });
+
+  it("does not attach an unmatched parent station to a distant nearby stop", () => {
+    const result = matchGtfsEntrancesToRequestStops(
+      [
+        {
+          id: "palais-royal:exit",
+          parentStopId: "IDFM:71297",
+          name: "r. de Rivoli",
+          code: "7",
+          lon: 2.3364,
+          lat: 48.863,
+        },
+      ],
+      [createPattern("IDFM:71297", 2.3364, 48.863)],
+      [{ id: "pyramides", lon: 2.3342, lat: 48.8663 }],
+    );
+
+    expect(result).toEqual([]);
+  });
 });
 
 function createPattern(

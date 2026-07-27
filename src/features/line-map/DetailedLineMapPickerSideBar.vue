@@ -8,6 +8,7 @@ import { useI18n } from "../../i18n";
 import type { NetworkGhostLineView } from "../network-ghost";
 import type { TransitPlacePreset } from "../../storage/transitPreferences";
 import type { LineFrequencyProfile, TransferLineOption } from "../../types/transit";
+import SidebarActionButton from "./SidebarActionButton.vue";
 import type { LineMapEntranceView, LineMapStopView } from "./types";
 
 const props = withDefaults(
@@ -241,6 +242,16 @@ function formatFrequency(minutes?: number): string {
     </div>
 
     <footer v-if="showActions" class="line-map-sidebar__actions">
+      <SidebarActionButton
+        v-if="activeGhostLine"
+        class="button-secondary line-map-sidebar__line-map"
+        type="button"
+        data-testid="line-map-sidebar-view-line-map"
+        :prefix-icon="MapPinned"
+        @click="emit('viewGhostLineMap')"
+      >
+        {{ t("lineMap.sidebar.viewLineMap") }}
+      </SidebarActionButton>
       <section
         v-if="favoriteDashboardSelectorOpen"
         class="line-map-sidebar__favorite-selector"
@@ -257,58 +268,48 @@ function formatFrequency(minutes?: number): string {
           {{ favoriteError }}
         </p>
         <div class="line-map-sidebar__favorite-selector-actions">
-          <button
+          <SidebarActionButton
             class="button-secondary"
             type="button"
             :disabled="favoriteLoading"
             @click="emit('cancelFavoriteDashboard')"
           >
             {{ t("common.actions.cancel") }}
-          </button>
-          <button
+          </SidebarActionButton>
+          <SidebarActionButton
             class="line-map-sidebar__favorite"
             type="button"
             :disabled="favoriteLoading || !favoriteDashboardId"
+            :prefix-icon="Star"
             @click="emit('confirmFavoriteDashboard')"
           >
-            <Star aria-hidden="true" />
             {{ favoriteLoading ? t("lineMap.sidebar.adding") : t("common.actions.add") }}
-          </button>
+          </SidebarActionButton>
         </div>
       </section>
       <template v-else>
         <p v-if="favoriteError" class="line-map-sidebar__error" role="alert">
           {{ favoriteError }}
         </p>
-        <button
+        <SidebarActionButton
           class="line-map-sidebar__favorite"
           type="button"
           :disabled="favoriteLoading"
+          :prefix-icon="Star"
           @click="emit('addFavorite')"
         >
-          <Star aria-hidden="true" />
           {{ favoriteLoading ? t("lineMap.sidebar.adding") : t("lineMap.sidebar.addToFavorites") }}
-        </button>
+        </SidebarActionButton>
       </template>
-      <button
-        v-if="activeGhostLine"
-        class="button-secondary line-map-sidebar__line-map"
-        type="button"
-        data-testid="line-map-sidebar-view-line-map"
-        @click="emit('viewGhostLineMap')"
-      >
-        <MapPinned aria-hidden="true" />
-        {{ t("lineMap.sidebar.viewLineMap") }}
-      </button>
-      <button
+      <SidebarActionButton
         class="button-secondary line-map-sidebar__maps"
         type="button"
+        :prefix-icon="MapIcon"
+        :suffix-icon="ExternalLink"
         @click="emit('openGoogleMaps')"
       >
-        <MapIcon aria-hidden="true" />
         {{ t("lineMap.sidebar.openInGoogleMaps") }}
-        <ExternalLink aria-hidden="true" />
-      </button>
+      </SidebarActionButton>
     </footer>
   </div>
 </template>
@@ -321,11 +322,6 @@ function formatFrequency(minutes?: number): string {
   height: 100%;
   min-height: 0;
   width: 100%;
-}
-
-.line-map-sidebar__actions svg {
-  height: 18px;
-  width: 18px;
 }
 
 .line-map-sidebar__content {
@@ -593,10 +589,6 @@ function formatFrequency(minutes?: number): string {
   padding: 16px 20px 20px;
 }
 
-.line-map-sidebar__actions button {
-  width: 100%;
-}
-
 .line-map-sidebar__favorite {
   box-shadow: 0 10px 24px rgba(0, 100, 255, 0.18);
 }
@@ -618,12 +610,6 @@ function formatFrequency(minutes?: number): string {
 
 .line-map-sidebar__favorite-selector-actions button {
   min-height: 40px;
-}
-
-.line-map-sidebar__maps svg:last-child {
-  height: 15px;
-  margin-left: auto;
-  width: 15px;
 }
 
 .line-map-sidebar__error {

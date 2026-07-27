@@ -4,7 +4,7 @@ import type {
 } from "../../../src/features/line-map/lineGeometry";
 import type { GtfsIndexedPattern } from "../gtfs/types";
 
-const MAX_PARENT_STATION_DISTANCE_METERS = 300;
+const MAX_PARENT_STATION_DISTANCE_METERS = 200;
 
 /**
  * Converts GTFS parent_station IDs to the station IDs used by the requested
