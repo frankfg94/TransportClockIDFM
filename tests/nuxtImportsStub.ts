@@ -18,6 +18,14 @@ export function useRoute(): { path: string; query: Record<string, unknown>; para
   };
 }
 
+export function useRouter(): {
+  replace(to: { path?: string; query?: Record<string, unknown> }): Promise<void>;
+} {
+  return {
+    replace: () => Promise.resolve(),
+  };
+}
+
 export function useFetch<T>(): {
   data: Ref<T | null>;
   pending: Ref<boolean>;

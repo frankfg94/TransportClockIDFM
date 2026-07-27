@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { navigateTo, useRoute } from "#imports";
+import { navigateTo, useRoute, useRouter } from "#imports";
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { CircleCheck, Eye, Minus, Plus, Settings, X } from "lucide-vue-next";
 import DistanceToggle from "../../components/DistanceToggle.vue";
@@ -206,6 +206,7 @@ const emit = defineEmits<{
   select: [station: StationSearchOption];
 }>();
 const route = useRoute();
+const router = useRouter();
 const { t } = useI18n();
 
 const VIEWBOX_WIDTH = 1080;
@@ -740,37 +741,6 @@ watch(
   },
 );
 
-watch(
-  () => firstRouteQuery(route.query.station),
-  (stationId) => {
-    if (!lineMap.value || !isExplorerMode.value) {
-      return;
-    }
-
-    if (!stationId) {
-      if (activeStop.value) {
-        closeSidebar();
-      }
-      return;
-    }
-
-    const stop = lineMap.value.stops.find((item) => item.id === stationId);
-
-    if (stop) {
-      if (activeStop.value?.id === stop.id && stationDetailsPanelOpen.value) {
-        return;
-      }
-      toggleStopDetails(stop);
-      return;
-    }
-
-    if (activeStop.value) {
-      closeSidebar();
-    }
-    updateStationQuery();
-  },
-);
-
 watch(ghostDisplayEnabled, (enabled) => {
   if (!enabled) {
     activeGhostLine.value = undefined;
@@ -815,7 +785,19 @@ async function loadMap(): Promise<void> {
         width: VIEWBOX_WIDTH,
         height: VIEWBOX_HEIGHT,
       };
-      void nextTick(updateVisibleMapTileWindow);
+
+      // Render the SVG (including the ghost-layer Teleport targets) before a
+      // station from the URL opens its details and starts loading transfers.
+      // Otherwise the ghost component mounts before its targets exist and
+      // Vue's following updates break.
+      loadingMap.value = false;
+      await nextTick();
+
+      if (requestId !== latestMapRequest) {
+        return;
+      }
+
+      updateVisibleMapTileWindow();
       openStationFromQuery(map);
     }
   } catch (error) {
@@ -940,7 +922,7 @@ function updateStationQuery(stationId?: string): void {
     delete query.station;
   }
 
-  void navigateTo({
+  void router.replace({
     path: route.path,
     query,
   });

@@ -19,6 +19,10 @@ declare module "#imports" {
     params: Record<string, string | string[]>;
   };
 
+  export function useRouter(): {
+    replace(to: { path?: string; query?: Record<string, unknown> }): Promise<void> | void;
+  };
+
   export function useFetch<T>(url: string): {
     data: Ref<T | null>;
     pending: Ref<boolean>;

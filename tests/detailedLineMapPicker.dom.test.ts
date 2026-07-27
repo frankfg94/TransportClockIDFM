@@ -1,8 +1,9 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { navigateToMock, routeState } = vi.hoisted(() => ({
+const { navigateToMock, replaceRouteMock, routeState } = vi.hoisted(() => ({
   navigateToMock: vi.fn(),
+  replaceRouteMock: vi.fn(),
   routeState: {
     path: "/line/metro/4",
     query: {} as Record<string, unknown>,
@@ -17,6 +18,7 @@ vi.mock("#imports", async (importOriginal) => {
     ...actual,
     navigateTo: navigateToMock,
     useRoute: () => routeState,
+    useRouter: () => ({ replace: replaceRouteMock }),
   };
 });
 
@@ -93,6 +95,8 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   navigateToMock.mockReset();
   navigateToMock.mockResolvedValue(undefined);
+  replaceRouteMock.mockReset();
+  replaceRouteMock.mockResolvedValue(undefined);
   routeState.path = "/line/metro/4";
   routeState.query = {};
   clearNetworkGhostTopologyCache();
@@ -165,7 +169,7 @@ describe("DetailedLineMapPicker sidebar", () => {
     });
     await flushPromises();
 
-    expect(navigateToMock).toHaveBeenCalledWith({
+    expect(replaceRouteMock).toHaveBeenCalledWith({
       path: "/line/metro/4",
       query: { view: "map" },
     });
@@ -186,15 +190,25 @@ describe("DetailedLineMapPicker sidebar", () => {
     await target.trigger("click");
     await flushPromises();
 
-    expect(navigateToMock).toHaveBeenLastCalledWith({
+    expect(replaceRouteMock).toHaveBeenLastCalledWith({
       path: "/line/metro/4",
       query: { view: "map", station: "station:a" },
     });
 
+    const initialSvgWidth = Number.parseFloat(
+      (wrapper.get('[data-testid="line-map"]').element as SVGElement).style.width,
+    );
+    await wrapper.findAll(".line-map-zoom__button")[1].trigger("click");
+    expect(
+      Number.parseFloat(
+        (wrapper.get('[data-testid="line-map"]').element as SVGElement).style.width,
+      ),
+    ).toBeGreaterThan(initialSvgWidth);
+
     await target.trigger("click");
     await flushPromises();
 
-    expect(navigateToMock).toHaveBeenLastCalledWith({
+    expect(replaceRouteMock).toHaveBeenLastCalledWith({
       path: "/line/metro/4",
       query: { view: "map" },
     });
