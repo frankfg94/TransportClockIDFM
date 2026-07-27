@@ -16,6 +16,7 @@ import type {
 } from "../../types/transit";
 import type {
   LineMapBranchView,
+  LineMapDirectionOption,
   LineMapQuayView,
   LineMapSegmentView,
   LineMapStopView,
@@ -34,6 +35,7 @@ import {
 } from "../network-ghost/geoProjection";
 import { getCoordinatesDistanceKm } from "../../services/distance";
 import { fetchResolvedLineGeometry } from "../../services/lineGeometry";
+import { loadTransferBundleForTarget } from "../service-pattern/transferBundles";
 import { applyResolvedLineGeometry, createLineGeometryRequest } from "./lineGeometryViewModel";
 
 const VIEWBOX_WIDTH = 1080;
@@ -42,9 +44,15 @@ const SVG_PADDING_X = 78;
 const SVG_PADDING_Y = 68;
 const MAP_COORDINATE_PADDING = 0.08;
 const TILE_SERVER_SHARDS = ["a", "b", "c"];
+const BUS_DIRECTION_POSITION_TOLERANCE_KM = 0.005;
+const CANONICAL_STATION_NAME_MAX_DISTANCE_KM = 0.3;
+const CANONICAL_STATION_NAME_AMBIGUITY_MARGIN_KM = 0.075;
+const CANONICAL_STATION_POSITION_MAX_DISTANCE_KM = 0.16;
+const CANONICAL_STATION_POSITION_AMBIGUITY_MARGIN_KM = 0.15;
 
 interface CanonicalStationLookup {
   byLabel: Map<string, StationSearchOption[]>;
+  stations: StationSearchOption[];
 }
 
 interface PositionedLineMap {
@@ -55,13 +63,25 @@ interface PositionedLineMap {
 export async function loadDetailedLineMap(
   line: LineSearchOption,
   useGtfs = true,
+  selectedDirectionId?: string,
 ): Promise<LineMapViewModel> {
+  const useBusDirection = line.family === "BUS";
   const [sequences, stationCatalog] = await Promise.all([
-    fetchLineRouteSequences(line),
+    fetchLineRouteSequences(line, useBusDirection),
     searchLineStations(line, "").catch((): StationSearchOption[] => []),
   ]);
+  const directionSelection = useBusDirection
+    ? selectBusMapDirection(sequences, selectedDirectionId)
+    : undefined;
+  const selectedSequences = directionSelection
+    ? [directionSelection.sequence]
+    : sequences;
 
-  const map = createDetailedLineMapViewModel(line, sequences, stationCatalog);
+  const map = createDetailedLineMapViewModel(line, selectedSequences, stationCatalog);
+  if (directionSelection) {
+    map.directionOptions = directionSelection.options;
+    map.selectedDirectionId = directionSelection.selectedDirectionId;
+  }
   const request = createLineGeometryRequest(map, useGtfs);
 
   if (!request) return map;
@@ -77,6 +97,84 @@ export async function loadDetailedLineMap(
     );
     return map;
   }
+}
+
+export interface BusMapDirectionSelection {
+  sequence: LineRouteSequence;
+  options: LineMapDirectionOption[];
+  selectedDirectionId: string;
+}
+
+export function selectBusMapDirection(
+  sequences: LineRouteSequence[],
+  selectedDirectionId?: string,
+): BusMapDirectionSelection | undefined {
+  const directions = new Map<
+    string,
+    { sequence: LineRouteSequence; option: LineMapDirectionOption }
+  >();
+
+  [...sequences]
+    .sort((left, right) => right.stops.length - left.stops.length)
+    .forEach((sequence) => {
+      const terminal = sequence.stops.at(-1);
+      if (!terminal || directions.has(terminal.id)) return;
+
+      directions.set(terminal.id, {
+        sequence,
+        option: {
+          id: terminal.id,
+          label: sequence.direction ?? terminal.label,
+          stopCount: sequence.stops.length,
+        },
+      });
+    });
+
+  const candidates = [...directions.values()];
+  const selected =
+    candidates.find(({ option }) => option.id === selectedDirectionId) ??
+    candidates[0];
+  if (!selected) return undefined;
+
+  const hasDifferentDirections = candidates.some(
+    (candidate, index) =>
+      index > 0 &&
+      !haveEquivalentDirectionPositions(candidates[0].sequence, candidate.sequence),
+  );
+
+  return {
+    sequence: selected.sequence,
+    options: hasDifferentDirections
+      ? candidates.map(({ option }) => option)
+      : [],
+    selectedDirectionId: selected.option.id,
+  };
+}
+
+function haveEquivalentDirectionPositions(
+  left: LineRouteSequence,
+  right: LineRouteSequence,
+): boolean {
+  if (left.stops.length !== right.stops.length) return false;
+
+  return left.stops.every((leftStop, index) => {
+    const rightStop = right.stops[right.stops.length - index - 1];
+    const leftCoordinate = resolveTransitLonLat(leftStop);
+    const rightCoordinate = resolveTransitLonLat(rightStop);
+
+    if (!leftCoordinate || !rightCoordinate) {
+      return leftStop.id === rightStop.id;
+    }
+
+    return (
+      getCoordinatesDistanceKm(
+        leftCoordinate.lat,
+        leftCoordinate.lon,
+        rightCoordinate.lat,
+        rightCoordinate.lon,
+      ) <= BUS_DIRECTION_POSITION_TOLERANCE_KM
+    );
+  });
 }
 
 export function createDetailedLineMapViewModel(
@@ -147,8 +245,27 @@ export function createDetailedLineMapViewModel(
 
 export async function loadStationTransfers(
   station: StationSearchOption,
-  currentLineId?: string,
+  currentLine?: LineSearchOption,
 ): Promise<TransferLineOption[]> {
+  const currentLineId = currentLine?.navitiaId ?? currentLine?.id;
+
+  if (currentLineId && currentLine) {
+    const bundledTransfers = await loadTransferBundleForTarget({
+      lineId: currentLineId,
+      lineLabel: currentLine.label,
+      target: {
+        stopAreaRef: station.scheduleStopAreaRef ?? station.id,
+        label: station.label,
+        city: station.city,
+      },
+      transportType: currentLine.family,
+    }).catch(() => undefined);
+
+    if (bundledTransfers !== undefined) {
+      return bundledTransfers;
+    }
+  }
+
   return fetchStationTransfers(station, currentLineId);
 }
 
@@ -238,7 +355,7 @@ function createCanonicalStationLookup(stations: StationSearchOption[]): Canonica
     });
   });
 
-  return { byLabel };
+  return { byLabel, stations };
 }
 
 function findCanonicalStationForStop(
@@ -252,30 +369,150 @@ function findCanonicalStationForStop(
     new Map(candidates.map((station) => [station.id, station])).values(),
   );
 
-  if (uniqueCandidates.length === 0) {
-    return undefined;
+  if (uniqueCandidates.length > 0) {
+    return selectCanonicalStationCandidate(stop, uniqueCandidates);
   }
 
-  if (uniqueCandidates.length === 1) {
-    return uniqueCandidates[0];
+  const compatibleCandidates = lookup.stations.filter((station) =>
+    haveCompatibleOfficialStationLabels(stop.label, station.label),
+  );
+
+  if (compatibleCandidates.length === 1) {
+    return compatibleCandidates[0];
   }
 
-  const stopLon = stop.lon;
-  const stopLat = stop.lat;
+  if (compatibleCandidates.length > 1) {
+    return selectCanonicalStationCandidate(stop, compatibleCandidates);
+  }
 
-  if (typeof stopLon === "number" && typeof stopLat === "number") {
+  const labelCandidates = lookup.stations.filter((station) =>
+    haveSharedOfficialStationLabelToken(stop.label, station.label),
+  );
+  const labelMatch = selectProximateCanonicalStation(
+    stop,
+    labelCandidates,
+    CANONICAL_STATION_NAME_MAX_DISTANCE_KM,
+    CANONICAL_STATION_NAME_AMBIGUITY_MARGIN_KM,
+  );
+
+  if (labelMatch) {
+    return labelMatch;
+  }
+
+  // Some official stop areas use a completely different hub name from their
+  // individual NeTEx quay. Keep this fallback restricted to the current line,
+  // a short radius and a clearly isolated nearest candidate.
+  return selectProximateCanonicalStation(
+    stop,
+    lookup.stations,
+    CANONICAL_STATION_POSITION_MAX_DISTANCE_KM,
+    CANONICAL_STATION_POSITION_AMBIGUITY_MARGIN_KM,
+  );
+}
+
+function selectCanonicalStationCandidate(
+  stop: LineRouteStop,
+  candidates: StationSearchOption[],
+): StationSearchOption | undefined {
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+
+  const stopCoordinate = resolveTransitLonLat(stop);
+
+  if (stopCoordinate) {
     return (
-      uniqueCandidates
+      candidates
         .filter((station) => typeof station.lon === "number" && typeof station.lat === "number")
         .sort(
           (left, right) =>
-            getCoordinateDistance(stopLon, stopLat, left) -
-            getCoordinateDistance(stopLon, stopLat, right),
-        )[0] ?? uniqueCandidates[0]
+            getCoordinateDistance(stopCoordinate.lon, stopCoordinate.lat, left) -
+            getCoordinateDistance(stopCoordinate.lon, stopCoordinate.lat, right),
+        )[0] ?? candidates[0]
     );
   }
 
-  return uniqueCandidates[0];
+  return candidates[0];
+}
+
+function haveCompatibleOfficialStationLabels(left: string, right: string): boolean {
+  const leftTokens = createOfficialStationIdentityTokens(left);
+  const rightTokens = createOfficialStationIdentityTokens(right);
+
+  if (leftTokens.size < 2 || rightTokens.size < 2) {
+    return false;
+  }
+
+  const sharedTokenCount = Array.from(leftTokens).filter((token) =>
+    rightTokens.has(token),
+  ).length;
+
+  return sharedTokenCount >= 2;
+}
+
+function haveSharedOfficialStationLabelToken(left: string, right: string): boolean {
+  const leftTokens = createOfficialStationIdentityTokens(left);
+  const rightTokens = createOfficialStationIdentityTokens(right);
+
+  return Array.from(leftTokens).some((token) => rightTokens.has(token));
+}
+
+function selectProximateCanonicalStation(
+  stop: LineRouteStop,
+  candidates: StationSearchOption[],
+  maximumDistanceKm: number,
+  ambiguityMarginKm: number,
+): StationSearchOption | undefined {
+  const stopCoordinate = resolveTransitLonLat(stop);
+
+  if (!stopCoordinate) {
+    return undefined;
+  }
+
+  const rankedCandidates = candidates
+    .flatMap((station) =>
+      typeof station.lon === "number" && typeof station.lat === "number"
+        ? [
+            {
+              station,
+              distanceKm: getCoordinatesDistanceKm(
+                stopCoordinate.lat,
+                stopCoordinate.lon,
+                station.lat,
+                station.lon,
+              ),
+            },
+          ]
+        : [],
+    )
+    .sort((left, right) => left.distanceKm - right.distanceKm);
+  const nearest = rankedCandidates[0];
+  const secondNearest = rankedCandidates[1];
+
+  if (!nearest || nearest.distanceKm > maximumDistanceKm) {
+    return undefined;
+  }
+
+  if (
+    secondNearest &&
+    secondNearest.distanceKm - nearest.distanceKm < ambiguityMarginKm
+  ) {
+    return undefined;
+  }
+
+  return nearest.station;
+}
+
+function createOfficialStationIdentityTokens(value: string): Set<string> {
+  return new Set(
+    normalizeStationLookupLabel(value)
+      .split(/\s+/u)
+      .filter((token) => token.length >= 3)
+      .filter(
+        (token) =>
+          !["bus", "gare", "metro", "rer", "station", "tram"].includes(token),
+      ),
+  );
 }
 
 function createStationLookupKeys(value: string): string[] {

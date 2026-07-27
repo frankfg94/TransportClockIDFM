@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createGeographicMapFocusPlan,
   createDetailedLineMapViewModel,
   createMapTiles,
   createTransferDirectionList,
   getMaximumMapZoom,
+  loadStationTransfers,
+  selectBusMapDirection,
 } from "../src/features/line-map/lineMapData";
 import type { LineRouteSequence, LineRouteStop, LineSearchOption } from "../src/types/transit";
 
@@ -217,6 +219,264 @@ describe("detailed station picker line map model", () => {
     expect(croixDeBerny?.station.scheduleStopAreaRef).toBe("stop_area:IDFM:463101");
   });
 
+  it("attaches the Palais Royal stop area to both official bus 68 quay labels", () => {
+    const museum = createProjectedStop("Musée du Louvre", 651100, 6862511);
+    const comedy = createProjectedStop(
+      "Palais Royal - Comédie Française",
+      651210,
+      6862877,
+    );
+
+    museum.id = "FR::Quay:50114582:FR1";
+    museum.station = {
+      id: museum.id,
+      label: museum.label,
+      monitoringRef: "",
+      scheduleStopAreaRef: museum.id,
+    };
+    comedy.id = "FR::Quay:50114347:FR1";
+    comedy.station = {
+      id: comedy.id,
+      label: comedy.label,
+      monitoringRef: "",
+      scheduleStopAreaRef: comedy.id,
+    };
+
+    const model = createDetailedLineMapViewModel(
+      {
+        ...createLine(),
+        family: "BUS",
+        id: "line:IDFM:C01104",
+        label: "68",
+        navitiaId: "line:IDFM:C01104",
+        ref: "line:IDFM:C01104",
+      },
+      [createSequence("direction", [museum, comedy])],
+      [
+        {
+          id: "stop_area:IDFM:71297",
+          label: "Palais Royal - Musée du Louvre",
+          city: "Paris",
+          lon: 2.336001,
+          lat: 48.86253,
+          monitoringRef: "STIF:StopArea:SP:71297:",
+          scheduleStopAreaRef: "stop_area:IDFM:71297",
+        },
+      ],
+    );
+
+    expect(
+      model.stops.map((stop) => [
+        stop.id,
+        stop.station.scheduleStopAreaRef,
+      ]),
+    ).toEqual([
+      ["FR::Quay:50114582:FR1", "stop_area:IDFM:71297"],
+      ["FR::Quay:50114347:FR1", "stop_area:IDFM:71297"],
+    ]);
+  });
+
+  it("attaches official line hubs from unique label and position evidence", () => {
+    const model = createDetailedLineMapViewModel(
+      {
+        ...createLine(),
+        family: "BUS",
+        id: "line:IDFM:C01104",
+        label: "68",
+        navitiaId: "line:IDFM:C01104",
+        ref: "line:IDFM:C01104",
+      },
+      [
+        createSequence("direction", [
+          createNetexQuayStop(
+            "Victor Considérant",
+            "FR::Quay:50121463:FR1",
+            650964,
+            6859672,
+          ),
+          createNetexQuayStop(
+            "Raspail - Edgar Quinet",
+            "FR::Quay:50121508:FR1",
+            650886,
+            6860106,
+          ),
+          createNetexQuayStop(
+            "Rennes - Raspail",
+            "FR::Quay:50121459:FR1",
+            650654,
+            6861134,
+          ),
+          createNetexQuayStop(
+            "Solférino - Bellechasse",
+            "FR::Quay:50141953:FR1",
+            650355,
+            6862218,
+          ),
+          createNetexQuayStop(
+            "Alésia - Maine",
+            "FR::Quay:50114552:FR1",
+            650668,
+            6859016,
+          ),
+          createNetexQuayStop(
+            "Alésia - Général Leclerc",
+            "FR::Quay:50114399:FR1",
+            650548,
+            6858779,
+          ),
+        ]),
+      ],
+      [
+        createCanonicalStation("stop_area:IDFM:71056", "Denfert-Rochereau", 2.332768, 48.833953),
+        createCanonicalStation("stop_area:IDFM:71088", "Raspail", 2.330622, 48.838784),
+        createCanonicalStation("stop_area:IDFM:73640", "Rennes", 2.328321, 48.848651),
+        createCanonicalStation("stop_area:IDFM:71270", "Solférino", 2.323244, 48.858681),
+        createCanonicalStation("stop_area:IDFM:71030", "Alésia", 2.326848, 48.828209),
+      ],
+    );
+
+    expect(
+      Object.fromEntries(
+        model.stops.map((stop) => [
+          stop.label,
+          stop.station.scheduleStopAreaRef,
+        ]),
+      ),
+    ).toEqual({
+      "Victor Considérant": "stop_area:IDFM:71056",
+      "Raspail - Edgar Quinet": "stop_area:IDFM:71088",
+      "Rennes - Raspail": "stop_area:IDFM:73640",
+      "Solférino - Bellechasse": "stop_area:IDFM:71270",
+      "Alésia - Maine": "stop_area:IDFM:71030",
+      "Alésia - Général Leclerc": "stop_area:IDFM:71030",
+    });
+  });
+
+  it("refuses a position-only hub match when two official candidates are close", () => {
+    const stop = createStop("Quai sans nom commun");
+
+    stop.id = "FR::Quay:ambiguous:FR1";
+    stop.lon = 2.33;
+    stop.lat = 48.84;
+    stop.station = {
+      id: stop.id,
+      label: stop.label,
+      monitoringRef: "",
+      scheduleStopAreaRef: stop.id,
+    };
+
+    const model = createDetailedLineMapViewModel(
+      createLine(),
+      [createSequence("main", [stop, createStop("Station suivante")])],
+      [
+        createCanonicalStation("stop_area:IDFM:A", "Pôle Alpha", 2.3304, 48.84),
+        createCanonicalStation("stop_area:IDFM:B", "Pôle Bêta", 2.3308, 48.84),
+      ],
+    );
+
+    expect(model.stops[0].station.scheduleStopAreaRef).toBe(
+      "FR::Quay:ambiguous:FR1",
+    );
+  });
+
+  it("does not attach an official stop area from a single shared name token", () => {
+    const model = createDetailedLineMapViewModel(
+      createLine(),
+      [
+        createSequence("main", [
+          createProjectedStop("Maisons-Laffitte", 642000, 6872000),
+          createProjectedStop("Station suivante", 642500, 6871500),
+        ]),
+      ],
+      [
+        {
+          id: "stop_area:IDFM:Maisons-Alfort",
+          label: "Maisons-Alfort - Alfortville",
+          monitoringRef: "",
+          scheduleStopAreaRef: "stop_area:IDFM:Maisons-Alfort",
+        },
+      ],
+    );
+
+    const maisonsLaffitte = model.stops.find(
+      (stop) => stop.label === "Maisons-Laffitte",
+    );
+
+    expect(maisonsLaffitte?.station.id).toBe("station:Maisons-Laffitte");
+    expect(maisonsLaffitte?.station.scheduleStopAreaRef).toBeUndefined();
+  });
+
+  it("loads map correspondences from the conservative transfer bundle", async () => {
+    const fetchMock = vi.fn(async (
+      _input: string | URL | Request,
+      _init?: RequestInit,
+    ) =>
+      new Response(
+        JSON.stringify({
+          version: 1,
+          generatedAt: "2026-07-27T12:00:00.000Z",
+          lineId: "line:IDFM:C01104",
+          lineLabel: "68",
+          transfersByStopAreaRef: {
+            "stop_area:IDFM:71297": [
+              {
+                id: "line:IDFM:C01371",
+                label: "1",
+                family: "METRO",
+              },
+              {
+                id: "line:IDFM:C01372",
+                label: "7",
+                family: "METRO",
+              },
+            ],
+          },
+        }),
+        {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const transfers = await loadStationTransfers(
+        {
+          id: "stop_area:IDFM:71297",
+          label: "Palais Royal - Musée du Louvre",
+          city: "Paris",
+          monitoringRef: "STIF:StopArea:SP:71297:",
+          scheduleStopAreaRef: "stop_area:IDFM:71297",
+        },
+        {
+          family: "BUS",
+          id: "line:IDFM:C01104",
+          label: "68",
+          navitiaId: "line:IDFM:C01104",
+          ref: "line:IDFM:C01104",
+        },
+      );
+
+      expect(transfers.map((line) => line.label)).toEqual(["1", "7"]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/transfer-bundles");
+      expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+        lineId: "line:IDFM:C01104",
+        nearbyDistanceMeters: 200,
+        targets: [
+          {
+            stopAreaRef: "stop_area:IDFM:71297",
+            label: "Palais Royal - Musée du Louvre",
+          },
+        ],
+        transferResolverMode: "nearby",
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("dedupes bus directions by removing transport-only qualifiers", () => {
     expect(
       createTransferDirectionList([
@@ -247,6 +507,60 @@ describe("detailed station picker line map model", () => {
       ]),
     ).toEqual(["Gare Montparnasse", "Dreux", "Plaisir - Grignon"]);
   });
+
+  it("selects one coherent bus direction and exposes only genuinely different paths", () => {
+    const outbound = createSequence("outbound", [
+      createProjectedStop("Porte", 650000, 6860000),
+      createProjectedStop("Mairie", 650300, 6859500),
+      createProjectedStop("Robinson", 650500, 6859000),
+    ]);
+    outbound.direction = "Robinson";
+
+    const inbound = createSequence("inbound", [
+      createProjectedStop("Robinson retour", 650620, 6859000),
+      createProjectedStop("Mairie retour", 650430, 6859500),
+      createProjectedStop("Porte retour", 650120, 6860000),
+    ]);
+    inbound.direction = "Porte";
+
+    const selection = selectBusMapDirection(
+      [outbound, inbound],
+      inbound.stops.at(-1)?.id,
+    );
+
+    expect(selection?.sequence.id).toBe("inbound");
+    expect(selection?.options).toEqual([
+      {
+        id: outbound.stops.at(-1)?.id,
+        label: "Robinson",
+        stopCount: 3,
+      },
+      {
+        id: inbound.stops.at(-1)?.id,
+        label: "Porte",
+        stopCount: 3,
+      },
+    ]);
+  });
+
+  it("keeps the bus direction control hidden when both directions share the same stops", () => {
+    const outbound = createSequence("outbound", [
+      createProjectedStop("A", 650000, 6860000),
+      createProjectedStop("B", 650300, 6859500),
+    ]);
+    outbound.direction = "B";
+
+    const inbound = createSequence("inbound", [
+      createProjectedStop("B", 650300, 6859500),
+      createProjectedStop("A", 650000, 6860000),
+    ]);
+    inbound.direction = "A";
+
+    const selection = selectBusMapDirection([outbound, inbound]);
+
+    expect(selection?.sequence.id).toBe("outbound");
+    expect(selection?.options).toEqual([]);
+  });
 });
 
 function createLine(): LineSearchOption {
@@ -274,6 +588,41 @@ function createProjectedStop(label: string, projectedX: number, projectedY: numb
     ...createStop(label),
     projectedX,
     projectedY,
+  };
+}
+
+function createNetexQuayStop(
+  label: string,
+  id: string,
+  projectedX: number,
+  projectedY: number,
+): LineRouteStop {
+  const stop = createProjectedStop(label, projectedX, projectedY);
+
+  stop.id = id;
+  stop.station = {
+    id,
+    label,
+    monitoringRef: "",
+    scheduleStopAreaRef: id,
+  };
+
+  return stop;
+}
+
+function createCanonicalStation(
+  id: string,
+  label: string,
+  lon: number,
+  lat: number,
+) {
+  return {
+    id,
+    label,
+    lon,
+    lat,
+    monitoringRef: "",
+    scheduleStopAreaRef: id,
   };
 }
 

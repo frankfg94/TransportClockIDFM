@@ -517,11 +517,12 @@ async function fetchLineStationsByLineId(
 
 export async function fetchLineRouteSequences(
   line: LineSearchOption,
+  preferCompletePatterns = false,
 ): Promise<LineRouteSequence[]> {
   const sequences = await fetchLineRouteSequencesByLineId(
     line.navitiaId,
     line.label,
-    false,
+    preferCompletePatterns,
   );
 
   if (sequences.length > 0) {

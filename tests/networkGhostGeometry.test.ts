@@ -53,17 +53,52 @@ describe("network ghost geometry", () => {
     });
   });
 
-  it("requests physical edges independently from service-pattern variants", () => {
+  it("keeps the selected bus ghost direction as one complete GTFS branch", () => {
     expect(
       createNetworkGhostGeometryRequest(
         {
           ...line,
+          stations: [
+            ...line.stations,
+            { id: "c", label: "Gamma", lon: 2.32, lat: 48.82, x: 0.9, y: 0.8 },
+          ],
+          branches: [
+            { id: "direction:porte", stopIds: ["a", "b", "c"] },
+          ],
+          segments: [
+            line.segments[0],
+            {
+              id: "b-c",
+              fromStationId: "b",
+              toStationId: "c",
+              fromX: 0.8,
+              fromY: 0.6,
+              toX: 0.9,
+              toY: 0.8,
+              level: 1,
+            },
+          ],
+        },
+        { id: "bus:42", ref: "line:IDFM:C01085", label: "42", family: "BUS" },
+        true,
+      ),
+    ).toMatchObject({
+      branches: [{ id: "direction:porte", stopIds: ["a", "b", "c"] }],
+    });
+  });
+
+  it("continues resolving rail service-pattern variants edge by edge", () => {
+    expect(
+      createNetworkGhostGeometryRequest(
+        {
+          ...line,
+          isBus: false,
           branches: [
             { id: "express", stopIds: ["a", "skipped", "b"] },
             { id: "local", stopIds: ["a", "b"] },
           ],
         },
-        { id: "bus:42", ref: "line:IDFM:C01085", label: "42", family: "BUS" },
+        { id: "metro:4", ref: "line:IDFM:C01374", label: "4", family: "METRO" },
         true,
       ),
     ).toMatchObject({

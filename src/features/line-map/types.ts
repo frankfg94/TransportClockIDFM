@@ -60,6 +60,12 @@ export interface LineMapBranchView {
   stopIds: string[];
 }
 
+export interface LineMapDirectionOption {
+  id: string;
+  label: string;
+  stopCount: number;
+}
+
 export interface MapTile {
   id: string;
   url: string;
@@ -84,6 +90,8 @@ export interface LineMapViewModel {
   geometryAttempts: LineGeometryAttempt[];
   geometryDatasetVersion?: string;
   entrances: LineMapEntranceView[];
+  directionOptions?: LineMapDirectionOption[];
+  selectedDirectionId?: string;
 }
 
 export interface LineTransferSummary {

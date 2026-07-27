@@ -34,15 +34,19 @@ export function createNetworkGhostGeometryRequest(
     lineLabel: line.label,
     useGtfs,
     stops,
-    // Service patterns contain express variants with skipped stops. Asking one
-    // GTFS shape to cover each complete variant rejects an otherwise complete
-    // line as soon as the active timetable differs from NeTEx. Physical edges
-    // keep strict whole-line coverage while allowing any indexed GTFS pattern
-    // to provide the same edge.
-    branches: line.segments.map((segment) => ({
-      id: segment.id,
-      stopIds: [segment.fromStationId, segment.toStationId],
-    })),
+    // A bus ghost already contains one representative direction. Keep that
+    // direction intact so every adjacent edge comes from the same GTFS trip.
+    // Rail variants still resolve physical edges independently.
+    branches:
+      line.isBus && line.branches?.length
+        ? line.branches.map((branch) => ({
+            id: branch.id,
+            stopIds: branch.stopIds,
+          }))
+        : line.segments.map((segment) => ({
+            id: segment.id,
+            stopIds: [segment.fromStationId, segment.toStationId],
+          })),
   };
 }
 

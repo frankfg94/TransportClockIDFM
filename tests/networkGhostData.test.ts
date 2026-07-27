@@ -82,6 +82,57 @@ describe("network ghost data", () => {
     expect(line.branches?.flatMap((branch) => branch.stopIds)).toContain("station:c");
   });
 
+  it("keeps only one complete bus direction containing the selected interchange", () => {
+    const viewport = createGeographicViewport(
+      [
+        { lon: 2.31, lat: 48.82 },
+        { lon: 2.34, lat: 48.85 },
+      ],
+      { viewBoxWidth: 1080, viewBoxHeight: 620, paddingX: 78, paddingY: 68 },
+    )!;
+    const topology: NetworkGhostTopology = {
+      stations: [
+        { id: "out:a", name: "Porte d'Orléans", lon: 2.326, lat: 48.823 },
+        { id: "out:barbara", name: "Barbara", lon: 2.317, lat: 48.828 },
+        { id: "out:c", name: "Robinson RER", lon: 2.31, lat: 48.846 },
+        { id: "return:c", name: "Robinson RER", lon: 2.3104, lat: 48.8462 },
+        { id: "return:barbara", name: "Barbara", lon: 2.3174, lat: 48.8282 },
+        { id: "return:a", name: "Porte d'Orléans", lon: 2.3264, lat: 48.8232 },
+      ],
+      patterns: [
+        { id: "outbound", stops: ["out:a", "out:barbara", "out:c"] },
+        { id: "return", stops: ["return:c", "return:barbara", "return:a"] },
+      ],
+    };
+    const line = createNetworkGhostLine(
+      { id: "line:IDFM:C01157", label: "128", family: "BUS", mode: "Bus" },
+      topology,
+      {
+        id: "metro:barbara",
+        label: "Barbara",
+        lon: 2.317,
+        lat: 48.828,
+        mapX: 0.5,
+        mapY: 0.5,
+      },
+      viewport,
+      0,
+    )!;
+
+    expect(line.branches).toEqual([
+      { id: "outbound", stopIds: ["out:a", "out:barbara", "out:c"] },
+    ]);
+    expect(line.stations.map((station) => station.id)).toEqual([
+      "out:a",
+      "out:barbara",
+      "out:c",
+    ]);
+    expect(line.segments.map((segment) => segment.id)).toEqual([
+      "out:a__out:barbara",
+      "out:barbara__out:c",
+    ]);
+  });
+
   it("keeps all transfers by default and removes only buses in structural mode", () => {
     const transfers = [
       { id: "bus:91", label: "91", family: "BUS" as const },

@@ -33,6 +33,37 @@ describe("resolved line geometry view model", () => {
     ]);
   });
 
+  it("keeps a selected bus direction in one branch so adjacent edges use one GTFS pattern", () => {
+    const stops = [
+      createStop("A", 2.3, 48.8, 0.1, 0.2),
+      createStop("B", 2.31, 48.81, 0.4, 0.4),
+      createStop("C", 2.32, 48.82, 0.7, 0.6),
+    ];
+
+    expect(
+      createLineGeometryRequestFromParts(
+        { id: "line:IDFM:C01157", label: "128" },
+        stops,
+        [
+          {
+            id: "outbound",
+            label: "Porte vers Robinson",
+            direction: "Robinson",
+            stopIds: ["A", "B", "C"],
+          },
+        ],
+        true,
+        true,
+      )?.branches,
+    ).toEqual([
+      {
+        id: "outbound",
+        direction: "Robinson",
+        stopIds: ["A", "B", "C"],
+      },
+    ]);
+  });
+
   it("anchors stop dots and connected segment endpoints to the same trace point", () => {
     const viewport = createGeographicViewport(
       [

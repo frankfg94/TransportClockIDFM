@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ExternalLink, MapIcon, MapPinned, Plus, Star } from "lucide-vue-next";
+import { ArrowLeftRight, ExternalLink, MapIcon, MapPinned, Plus, Star } from "lucide-vue-next";
 import { computed } from "vue";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import StationBoardSelector from "../../components/StationBoardSelector.vue";
@@ -9,7 +9,11 @@ import type { NetworkGhostLineView } from "../network-ghost";
 import type { TransitPlacePreset } from "../../storage/transitPreferences";
 import type { LineFrequencyProfile, TransferLineOption } from "../../types/transit";
 import SidebarActionButton from "./SidebarActionButton.vue";
-import type { LineMapEntranceView, LineMapStopView } from "./types";
+import type {
+  LineMapDirectionOption,
+  LineMapEntranceView,
+  LineMapStopView,
+} from "./types";
 
 const props = withDefaults(
   defineProps<{
@@ -33,9 +37,12 @@ const props = withDefaults(
     ghostFrequency?: LineFrequencyProfile;
     ghostFrequencyLoading?: boolean;
     ghostFrequencyError?: boolean;
+    directionOptions?: LineMapDirectionOption[];
+    selectedDirectionId?: string;
   }>(),
   {
     entrances: () => [],
+    directionOptions: () => [],
     favoriteDashboardOptions: () => [],
     favoriteDashboardSelectorOpen: false,
   },
@@ -51,6 +58,7 @@ const emit = defineEmits<{
   openGoogleMaps: [];
   viewGhostLineMap: [];
   selectTransfer: [transfer: TransferLineOption];
+  changeDirection: [directionId: string];
   "update:favoriteDashboardId": [placeId: string];
 }>();
 
@@ -71,6 +79,27 @@ const sortedEntrances = computed(() =>
     });
   }),
 );
+
+const selectedDirection = computed(
+  () =>
+    props.directionOptions.find((direction) => direction.id === props.selectedDirectionId) ??
+    props.directionOptions[0],
+);
+
+function selectNextDirection(): void {
+  const current = selectedDirection.value;
+  if (!current || props.directionOptions.length < 2) return;
+
+  const currentIndex = props.directionOptions.findIndex(
+    (direction) => direction.id === current.id,
+  );
+  const nextDirection =
+    props.directionOptions[(currentIndex + 1) % props.directionOptions.length];
+
+  if (nextDirection) {
+    emit("changeDirection", nextDirection.id);
+  }
+}
 
 function getEntranceNumber(code?: string): number {
   const match = code?.match(/\d+/u);
@@ -242,6 +271,25 @@ function formatFrequency(minutes?: number): string {
     </div>
 
     <footer v-if="showActions" class="line-map-sidebar__actions">
+      <SidebarActionButton
+        v-if="directionOptions.length > 1 && selectedDirection"
+        class="button-secondary line-map-sidebar__direction"
+        type="button"
+        data-testid="line-map-sidebar-change-direction"
+        :prefix-icon="ArrowLeftRight"
+        :aria-label="
+          t('lineMap.sidebar.changeDirectionAria', {
+            direction: selectedDirection.label,
+          })
+        "
+        @click="selectNextDirection"
+      >
+        {{
+          t("lineMap.sidebar.currentDirection", {
+            direction: selectedDirection.label,
+          })
+        }}
+      </SidebarActionButton>
       <SidebarActionButton
         v-if="activeGhostLine"
         class="button-secondary line-map-sidebar__line-map"

@@ -137,6 +137,7 @@ interface SegmentDistanceLabel {
 }
 
 type LineMapRightPanelContent = "station" | "traffic";
+type MobileSheetStage = "peek" | "mid" | "full";
 
 interface TouchStopClickGuard {
   stopId: string;
@@ -189,6 +190,7 @@ const props = withDefaults(
     smartTrafficDetection?: boolean;
     trafficReport?: TrafficLineReport;
     trafficCalendarImpactScope?: TrafficCalendarImpactScope;
+    selectedDirectionId?: string;
   }>(),
   {
     mode: "picker",
@@ -204,6 +206,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   select: [station: StationSearchOption];
+  directionChange: [directionId: string];
 }>();
 const route = useRoute();
 const router = useRouter();
@@ -275,6 +278,7 @@ const ghostLineStationFamily = ref<TransitFamily>();
 const ghostLineStationStation = ref<StationSearchOption>();
 const showDistances = ref(false);
 const mobileDisplayOpen = ref(false);
+const mobileSheetStage = ref<MobileSheetStage>("mid");
 const selectedTrafficDisruptionIds = ref<string[]>([]);
 const selectedTrafficTimestamp = ref<number>();
 const trafficPulseStopIds = ref(new Set<string>());
@@ -283,6 +287,7 @@ const pendingStopTap = ref<PendingStopTap>();
 const pendingGhostTap = ref<PendingGhostTap>();
 const ghostTapRequest = ref<GhostTapRequest>();
 const pendingGhostLineSelection = ref<TransferLineOption>();
+const pendingDirectionStationLabel = ref<string>();
 const ghostGestureClickGuard = ref<GhostGestureClickGuard>();
 let ghostTapRequestId = 0;
 let trafficFocusRequest = 0;
@@ -723,7 +728,12 @@ const visibleLabelIds = computed(() => {
 });
 
 watch(
-  () => [props.line?.id, props.gtfsLineGeometryEnabled] as const,
+  () =>
+    [
+      props.line?.id,
+      props.gtfsLineGeometryEnabled,
+      props.selectedDirectionId,
+    ] as const,
   () => {
     closeSidebar();
     closePatternTrafficCalendar();
@@ -782,7 +792,11 @@ async function loadMap(): Promise<void> {
   activeRightPanel.value = undefined;
 
   try {
-    const map = await loadDetailedLineMap(props.line, props.gtfsLineGeometryEnabled);
+    const map = await loadDetailedLineMap(
+      props.line,
+      props.gtfsLineGeometryEnabled,
+      props.selectedDirectionId,
+    );
 
     if (requestId === latestMapRequest) {
       lineMap.value = map;
@@ -875,6 +889,7 @@ function toggleStopDetails(
   if (activeStop.value?.id === stop.id) {
     if (!stationDetailsPanelOpen.value) {
       activeRightPanel.value = "station";
+      mobileSheetStage.value = "mid";
       if (options.syncStationQuery) {
         updateStationQuery(stop.id);
       }
@@ -894,6 +909,7 @@ function toggleStopDetails(
   favoriteDashboardSelectorOpen.value = false;
   activeStop.value = stop;
   activeRightPanel.value = "station";
+  mobileSheetStage.value = "mid";
   void loadTransfers(stop);
   if (options.syncStationQuery) {
     updateStationQuery(stop.id);
@@ -906,6 +922,23 @@ function openStationFromQuery(map: LineMapViewModel): void {
   }
 
   const stationId = firstRouteQuery(route.query.station);
+  const pendingStationLabel = pendingDirectionStationLabel.value;
+  pendingDirectionStationLabel.value = undefined;
+
+  if (pendingStationLabel) {
+    const matchingStop = map.stops.find(
+      (item) =>
+        item.label.localeCompare(pendingStationLabel, "fr", {
+          sensitivity: "base",
+        }) === 0,
+    );
+    if (matchingStop) {
+      toggleStopDetails(matchingStop);
+      updateStationQuery(matchingStop.id);
+      return;
+    }
+  }
+
   if (!stationId) {
     return;
   }
@@ -917,6 +950,11 @@ function openStationFromQuery(map: LineMapViewModel): void {
   }
 
   toggleStopDetails(stop);
+}
+
+function changeLineDirection(directionId: string): void {
+  pendingDirectionStationLabel.value = activeStop.value?.label;
+  emit("directionChange", directionId);
 }
 
 function updateStationQuery(stationId?: string): void {
@@ -964,6 +1002,7 @@ function closeSidebar(options: CloseSidebarOptions = {}): void {
   favoriteError.value = "";
   favoriteLoading.value = false;
   favoriteDashboardSelectorOpen.value = false;
+  mobileSheetStage.value = "mid";
   closeGhostLineStationModal();
 }
 
@@ -1461,7 +1500,7 @@ async function loadTransfers(stop: LineMapStopView): Promise<void> {
   };
 
   try {
-    const lines = await loadStationTransfers(stop.station, props.line?.id);
+    const lines = await loadStationTransfers(stop.station, props.line);
 
     transferStates[stop.id] = {
       loading: false,
@@ -3243,7 +3282,11 @@ function getEntranceDisplayKey(entrance: LineMapEntranceView): string {
       v-if="isExplorerMode && lineMap && activeStop && stationDetailsPanelOpen"
       :open="stationDetailsPanelOpen"
       :title="t('lineMap.sidebar.stationDetails')"
+      mobile-sheet
+      :mobile-sheet-stage="mobileSheetStage"
+      :mobile-sheet-resize-label="t('lineMap.sidebar.resizeAria')"
       @close="closeSidebarFromRoute"
+      @mobile-sheet-stage-change="mobileSheetStage = $event"
     >
       <DetailedLineMapPickerSideBar
         :stop="activeStop"
@@ -3266,6 +3309,8 @@ function getEntranceDisplayKey(entrance: LineMapEntranceView): string {
         :ghost-frequency="activeGhostFrequencyState?.profile"
         :ghost-frequency-loading="activeGhostFrequencyState?.loading ?? false"
         :ghost-frequency-error="activeGhostFrequencyState?.error"
+        :direction-options="lineMap.directionOptions ?? []"
+        :selected-direction-id="lineMap.selectedDirectionId"
         @add-favorite="openActiveStopFavoriteSelector"
         @update:favorite-dashboard-id="favoriteDashboardId = $event"
         @confirm-favorite-dashboard="confirmActiveStopFavoriteDashboard"
@@ -3274,6 +3319,7 @@ function getEntranceDisplayKey(entrance: LineMapEntranceView): string {
         @view-ghost-line-map="openActiveGhostLineMap"
         @open-google-maps="openActiveStopInGoogleMaps"
         @select-transfer="selectTransferLineOnMap"
+        @change-direction="changeLineDirection"
         @focus-entrances="focusEntrances"
         @focus-entrance="focusEntrance"
       />

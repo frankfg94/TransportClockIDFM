@@ -231,27 +231,42 @@ export function createNetworkGhostLine(
     return undefined;
   }
 
-  const projectedStations = topology.stations.flatMap((station) => {
-    const point = projectTransitCoordinate(station, viewport);
-    const lonLat = resolveTransitLonLat(station);
-
-    return point && lonLat
-      ? [
-          {
-            id: station.id,
-            label: station.name,
-            lon: lonLat.lon,
-            lat: lonLat.lat,
-            x: point.x,
-            y: point.y,
-          },
-        ]
-      : [];
-  });
-  const projectedStationById = new Map(projectedStations.map((station) => [station.id, station]));
-  const branches = selectRepresentativeStopSequencePatterns(
+  const representativePatterns = selectRepresentativeStopSequencePatterns(
     topology.patterns ?? [],
-  ).map((pattern) => ({
+  );
+  const selectedBusPattern =
+    representativePatterns.find((pattern) => pattern.stops.includes(anchorStation.id)) ??
+    representativePatterns[0];
+  const selectedPatterns = isBusLikeTransfer(transfer)
+    ? selectedBusPattern
+      ? [selectedBusPattern]
+      : []
+    : representativePatterns;
+  const selectedBusStationIds =
+    isBusLikeTransfer(transfer) && selectedPatterns.length > 0
+      ? new Set(selectedPatterns[0].stops)
+      : undefined;
+  const projectedStations = topology.stations
+    .filter((station) => !selectedBusStationIds || selectedBusStationIds.has(station.id))
+    .flatMap((station) => {
+      const point = projectTransitCoordinate(station, viewport);
+      const lonLat = resolveTransitLonLat(station);
+
+      return point && lonLat
+        ? [
+            {
+              id: station.id,
+              label: station.name,
+              lon: lonLat.lon,
+              lat: lonLat.lat,
+              x: point.x,
+              y: point.y,
+            },
+          ]
+        : [];
+    });
+  const projectedStationById = new Map(projectedStations.map((station) => [station.id, station]));
+  const branches = selectedPatterns.map((pattern) => ({
     id: pattern.id,
     stopIds: pattern.stops,
   }));

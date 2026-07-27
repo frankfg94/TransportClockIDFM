@@ -43,6 +43,8 @@ type DeparturePatternPayload = {
 
 type ClosedSummaryMode = "last" | "next";
 
+const STATION_CHANGE_TIMEOUT_MS = 15_000;
+
 const props = withDefaults(
   defineProps<{
     board: TransitBoardConfig;
@@ -130,6 +132,7 @@ const changingStation = ref(false);
 const stationEditorError = ref("");
 let compactPatternMediaQuery: MediaQueryList | undefined;
 let latestStationRequest = 0;
+let latestStationChangeRequest = 0;
 
 const currentLineOption = computed<LineSearchOption>(() => {
   const family = transitModeToFamily(props.board.line.mode);
@@ -381,6 +384,8 @@ function removeBoard(): void {
 }
 
 function closeStationEditor(): void {
+  latestStationChangeRequest += 1;
+  changingStation.value = false;
   stationEditorOpen.value = false;
   stationOptions.value = [];
   stationQuery.value = "";
@@ -417,6 +422,12 @@ async function loadStations(): Promise<void> {
 }
 
 function selectStationOption(station?: StationSearchOption): void {
+  if (changingStation.value) {
+    latestStationChangeRequest += 1;
+    changingStation.value = false;
+    stationEditorError.value = "";
+  }
+
   selectedStation.value = station;
 
   if (station) {
@@ -455,24 +466,58 @@ async function loadStationTransferBadges(
   }
 }
 
+async function fetchDirectionGroupsForStationWithTimeout(
+  line: LineSearchOption,
+  station: StationSearchOption,
+): Promise<Awaited<ReturnType<typeof fetchDirectionGroupsForStation>>> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      fetchDirectionGroupsForStation(line, station),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error("Station direction lookup timed out"));
+        }, STATION_CHANGE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 async function confirmStationChange(): Promise<void> {
-  if (!selectedStation.value || changingStation.value) {
+  const station = selectedStation.value;
+
+  if (!station || changingStation.value) {
     return;
   }
 
+  const requestId = ++latestStationChangeRequest;
+  const line = currentLineOption.value;
   changingStation.value = true;
   stationEditorError.value = "";
 
   try {
-    const directionGroups = await fetchDirectionGroupsForStation(
-      currentLineOption.value,
-      selectedStation.value,
+    const directionGroups = await fetchDirectionGroupsForStationWithTimeout(
+      line,
+      station,
     );
+
+    if (
+      requestId !== latestStationChangeRequest ||
+      selectedStation.value?.id !== station.id
+    ) {
+      return;
+    }
+
     const nextBoard = createBoardFromDraft(
       {
-        family: currentLineOption.value.family,
-        line: currentLineOption.value,
-        station: selectedStation.value,
+        family: line.family,
+        line,
+        station,
       },
       directionGroups,
     );
@@ -480,9 +525,13 @@ async function confirmStationChange(): Promise<void> {
     emit("change-station", nextBoard);
     closeStationEditor();
   } catch {
-    stationEditorError.value = t("board.stationModal.changeFailed");
+    if (requestId === latestStationChangeRequest) {
+      stationEditorError.value = t("board.stationModal.changeFailed");
+    }
   } finally {
-    changingStation.value = false;
+    if (requestId === latestStationChangeRequest) {
+      changingStation.value = false;
+    }
   }
 }
 

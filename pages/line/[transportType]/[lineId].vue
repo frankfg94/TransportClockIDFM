@@ -110,6 +110,8 @@
         :reduce-motion="settings.reduceMotion"
         :smart-traffic-detection="settings.smartTrafficDetection"
         :traffic-calendar-impact-scope="settings.trafficCalendarImpactScope"
+        :selected-direction-id="selectedDirectionId"
+        @direction-change="changeDirection"
       >
         <template #bar-before-chip>
           <div class="line-pattern-page__summary-actions">
@@ -374,6 +376,11 @@ function changeDirection(directionId: string): void {
   const query: Record<string, string> = {
     direction: directionId,
   };
+
+  if (activeView.value === "map") {
+    query.view = "map";
+  }
+
   const startStation = firstRouteQuery(route.query.startStation);
 
   if (startStation) {

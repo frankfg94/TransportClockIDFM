@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { X } from "lucide-vue-next";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useI18n } from "../i18n";
+
+type MobileSheetStage = "peek" | "mid" | "full";
 
 const props = withDefaults(
   defineProps<{
@@ -10,26 +12,48 @@ const props = withDefaults(
     closeLabel?: string;
     size?: "medium" | "large";
     busy?: boolean;
+    mobileSheet?: boolean;
+    mobileSheetStage?: MobileSheetStage;
+    mobileSheetResizeLabel?: string;
   }>(),
   {
     closeLabel: "",
     size: "medium",
     busy: false,
+    mobileSheet: false,
+    mobileSheetStage: "mid",
+    mobileSheetResizeLabel: "",
   },
 );
 
 const emit = defineEmits<{
   close: [];
+  mobileSheetStageChange: [stage: MobileSheetStage];
 }>();
 
 const { t } = useI18n();
 const panel = ref<HTMLElement>();
 const isOverlay = ref(false);
-const resolvedCloseLabel = computed(
-  () => props.closeLabel || t("common.actions.close"),
-);
+const isMobileViewport = ref(false);
+const mobileDrag = reactive({
+  active: false,
+  currentY: 0,
+  pointerId: -1,
+  startY: 0,
+});
+const suppressHandleClick = ref(false);
+const resolvedCloseLabel = computed(() => props.closeLabel || t("common.actions.close"));
+const isMobileSheet = computed(() => props.mobileSheet && isMobileViewport.value);
+const isModalOverlay = computed(() => isOverlay.value && !isMobileSheet.value);
+const panelStyle = computed(() => ({
+  "--app-right-panel-drag-offset": mobileDrag.active
+    ? `${Math.max(-90, Math.min(220, mobileDrag.currentY - mobileDrag.startY))}px`
+    : "0px",
+}));
 let overlayMedia: MediaQueryList | undefined;
+let mobileMedia: MediaQueryList | undefined;
 let previouslyFocused: HTMLElement | undefined;
+let backdropEnabledAt = 0;
 
 watch(
   () => props.open,
@@ -37,12 +61,13 @@ watch(
     if (typeof document === "undefined") return;
 
     if (open) {
+      backdropEnabledAt = Date.now() + 350;
       previouslyFocused =
-        document.activeElement instanceof HTMLElement
-          ? document.activeElement
-          : undefined;
+        document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
       await nextTick();
-      panel.value?.focus({ preventScroll: true });
+      if (!isMobileSheet.value) {
+        panel.value?.focus({ preventScroll: true });
+      }
       return;
     }
 
@@ -56,10 +81,14 @@ onMounted(() => {
   overlayMedia = window.matchMedia("(max-width: 1100px)");
   syncOverlayMode(overlayMedia);
   overlayMedia.addEventListener?.("change", syncOverlayMode);
+  mobileMedia = window.matchMedia("(max-width: 720px)");
+  syncMobileMode(mobileMedia);
+  mobileMedia.addEventListener?.("change", syncMobileMode);
 });
 
 onBeforeUnmount(() => {
   overlayMedia?.removeEventListener?.("change", syncOverlayMode);
+  mobileMedia?.removeEventListener?.("change", syncMobileMode);
   restorePreviousFocus();
 });
 
@@ -72,6 +101,97 @@ function syncOverlayMode(event: MediaQueryList | MediaQueryListEvent): void {
   isOverlay.value = event.matches;
 }
 
+function syncMobileMode(event: MediaQueryList | MediaQueryListEvent): void {
+  isMobileViewport.value = event.matches;
+}
+
+function closeFromBackdrop(): void {
+  if (Date.now() < backdropEnabledAt) {
+    return;
+  }
+
+  emit("close");
+}
+
+function toggleMobileSheetFromHandle(): void {
+  if (suppressHandleClick.value) {
+    suppressHandleClick.value = false;
+    return;
+  }
+
+  emit("mobileSheetStageChange", props.mobileSheetStage === "full" ? "mid" : "full");
+}
+
+function startMobileSheetDrag(event: PointerEvent): void {
+  if (event.button !== 0 && event.pointerType === "mouse") {
+    return;
+  }
+
+  mobileDrag.active = true;
+  mobileDrag.pointerId = event.pointerId;
+  mobileDrag.startY = event.clientY;
+  mobileDrag.currentY = event.clientY;
+
+  if (event.currentTarget instanceof HTMLElement) {
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+}
+
+function moveMobileSheetDrag(event: PointerEvent): void {
+  if (!mobileDrag.active || event.pointerId !== mobileDrag.pointerId) {
+    return;
+  }
+
+  mobileDrag.currentY = event.clientY;
+}
+
+function finishMobileSheetDrag(event: PointerEvent): void {
+  if (!mobileDrag.active || event.pointerId !== mobileDrag.pointerId) {
+    return;
+  }
+
+  mobileDrag.currentY = event.clientY;
+  const deltaY = mobileDrag.currentY - mobileDrag.startY;
+
+  mobileDrag.active = false;
+  mobileDrag.pointerId = -1;
+
+  if (event.currentTarget instanceof HTMLElement) {
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
+  if (Math.abs(deltaY) < 60) {
+    return;
+  }
+
+  suppressHandleClick.value = true;
+  window.setTimeout(() => {
+    suppressHandleClick.value = false;
+  }, 120);
+
+  if (deltaY < 0) {
+    emit("mobileSheetStageChange", props.mobileSheetStage === "peek" ? "mid" : "full");
+    return;
+  }
+
+  if (props.mobileSheetStage === "full") {
+    emit("mobileSheetStageChange", "mid");
+  } else if (props.mobileSheetStage === "mid") {
+    emit("mobileSheetStageChange", "peek");
+  } else {
+    emit("close");
+  }
+}
+
+function cancelMobileSheetDrag(event: PointerEvent): void {
+  if (!mobileDrag.active || event.pointerId !== mobileDrag.pointerId) {
+    return;
+  }
+
+  mobileDrag.active = false;
+  mobileDrag.pointerId = -1;
+}
+
 function handleKeydown(event: KeyboardEvent): void {
   if (event.key === "Escape") {
     event.preventDefault();
@@ -79,7 +199,7 @@ function handleKeydown(event: KeyboardEvent): void {
     return;
   }
 
-  if (!isOverlay.value || event.key !== "Tab" || !panel.value) return;
+  if (!isModalOverlay.value || event.key !== "Tab" || !panel.value) return;
 
   const focusable = Array.from(
     panel.value.querySelectorAll<HTMLElement>(
@@ -114,7 +234,8 @@ function handleKeydown(event: KeyboardEvent): void {
       type="button"
       tabindex="-1"
       :aria-label="resolvedCloseLabel"
-      @click="emit('close')"
+      :class="{ 'app-right-panel__backdrop--mobile-sheet': mobileSheet }"
+      @click="closeFromBackdrop"
     ></button>
   </Transition>
 
@@ -123,15 +244,38 @@ function handleKeydown(event: KeyboardEvent): void {
       v-if="open"
       ref="panel"
       class="app-right-panel"
-      :class="`app-right-panel--${size}`"
-      :role="isOverlay ? 'dialog' : 'complementary'"
-      :aria-modal="isOverlay ? 'true' : undefined"
+      :class="[
+        `app-right-panel--${size}`,
+        {
+          'app-right-panel--mobile-sheet': mobileSheet,
+          [`app-right-panel--mobile-${mobileSheetStage}`]: mobileSheet,
+          'app-right-panel--mobile-dragging': mobileSheet && mobileDrag.active,
+        },
+      ]"
+      :style="panelStyle"
+      :role="isModalOverlay ? 'dialog' : 'complementary'"
+      :aria-modal="isModalOverlay ? 'true' : undefined"
       :aria-label="title"
       :aria-busy="busy || undefined"
       tabindex="-1"
       data-testid="app-right-panel"
       @keydown="handleKeydown"
     >
+      <button
+        v-if="mobileSheet"
+        class="app-right-panel__drag-handle"
+        type="button"
+        :aria-label="mobileSheetResizeLabel || title"
+        data-testid="app-right-panel-drag-handle"
+        @click="toggleMobileSheetFromHandle"
+        @pointerdown.prevent="startMobileSheetDrag"
+        @pointermove.prevent="moveMobileSheetDrag"
+        @pointerup.prevent="finishMobileSheetDrag"
+        @pointercancel.prevent="cancelMobileSheetDrag"
+      >
+        <span aria-hidden="true"></span>
+      </button>
+
       <header class="app-right-panel__header">
         <slot name="header">
           <strong>{{ title }}</strong>
@@ -226,6 +370,10 @@ function handleKeydown(event: KeyboardEvent): void {
   display: none;
 }
 
+.app-right-panel__drag-handle {
+  display: none;
+}
+
 .app-right-panel-slide-enter-active,
 .app-right-panel-slide-leave-active,
 .app-right-panel-backdrop-enter-active,
@@ -275,6 +423,76 @@ function handleKeydown(event: KeyboardEvent): void {
     border-left: 0;
     max-width: none;
     width: 100vw;
+  }
+
+  .app-right-panel--mobile-sheet {
+    border-radius: 24px 24px 0 0;
+    bottom: 0;
+    box-shadow: 0 -24px 70px rgba(15, 23, 42, 0.24);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    height: 52dvh;
+    max-height: calc(100dvh - 10px);
+    min-height: 180px;
+    overflow: hidden;
+    top: auto;
+    transform: translateY(var(--app-right-panel-drag-offset, 0px));
+    transition:
+      height 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 180ms ease;
+  }
+
+  .app-right-panel--mobile-peek {
+    height: 28dvh;
+  }
+
+  .app-right-panel--mobile-mid {
+    height: 52dvh;
+  }
+
+  .app-right-panel--mobile-full {
+    height: 92dvh;
+  }
+
+  .app-right-panel--mobile-dragging {
+    transition: none;
+  }
+
+  .app-right-panel__backdrop--mobile-sheet {
+    display: none;
+  }
+
+  .app-right-panel__drag-handle {
+    align-items: center;
+    appearance: none;
+    background: transparent;
+    border: 0;
+    cursor: grab;
+    display: flex;
+    justify-content: center;
+    padding: 10px 0 6px;
+    touch-action: none;
+  }
+
+  .app-right-panel__drag-handle:active {
+    cursor: grabbing;
+  }
+
+  .app-right-panel__drag-handle span {
+    background: rgba(100, 116, 139, 0.42);
+    border-radius: 999px;
+    display: block;
+    height: 5px;
+    width: 48px;
+  }
+
+  .app-right-panel--mobile-sheet .app-right-panel__header {
+    min-height: 42px;
+    padding: 2px 12px 10px 18px;
+  }
+
+  .app-right-panel--mobile-sheet.app-right-panel-slide-enter-from,
+  .app-right-panel--mobile-sheet.app-right-panel-slide-leave-to {
+    transform: translateY(100%);
   }
 }
 

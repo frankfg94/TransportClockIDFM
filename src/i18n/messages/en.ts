@@ -464,6 +464,8 @@ export const en = {
       lineDirections: "Line directions",
       directionsUnavailable: "Directions unavailable",
       noDirections: "No direction provided",
+      currentDirection: "Direction: {direction}",
+      changeDirectionAria: "Change direction. Current direction: {direction}",
       theoreticalFrequency: "Theoretical frequency at this station",
       calculating: "Calculating...",
       night: "Night",

@@ -87,6 +87,15 @@ const line: LineSearchOption = {
   textColor: "#ffffff",
 };
 
+const busLine: LineSearchOption = {
+  ...line,
+  family: "BUS",
+  id: "line:bus:128",
+  label: "128",
+  navitiaId: "line:bus:128",
+  ref: "line:bus:128",
+};
+
 beforeEach(() => {
   vi.useRealTimers();
   document.body.innerHTML = "";
@@ -212,6 +221,42 @@ describe("DetailedLineMapPicker sidebar", () => {
       path: "/line/metro/4",
       query: { view: "map" },
     });
+
+    wrapper.unmount();
+  });
+
+  it("offers the next bus direction from the sidebar when paths differ", async () => {
+    routeState.query = { view: "map", station: "station:b" };
+    const map = createMap();
+    map.directionOptions = [
+      { id: "direction:outbound", label: "Robinson RER", stopCount: 21 },
+      { id: "direction:inbound", label: "Porte d'Orleans", stopCount: 21 },
+    ];
+    map.selectedDirectionId = "direction:outbound";
+    loadDetailedLineMap.mockResolvedValueOnce(map);
+
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: {
+        line: busLine,
+        mode: "explorer",
+        selectable: false,
+        selectedDirectionId: "direction:outbound",
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const directionButton = wrapper.get('[data-testid="line-map-sidebar-change-direction"]');
+    expect(directionButton.text()).toContain("Robinson RER");
+
+    await directionButton.trigger("click");
+
+    expect(wrapper.emitted("directionChange")).toEqual([["direction:inbound"]]);
+    expect(loadDetailedLineMap).toHaveBeenCalledWith(
+      busLine,
+      true,
+      "direction:outbound",
+    );
 
     wrapper.unmount();
   });
@@ -379,7 +424,7 @@ describe("DetailedLineMapPicker sidebar", () => {
     wrapper.unmount();
   });
 
-  it("uses the generic right panel without a bottom-sheet drag handle", async () => {
+  it("uses the generic right panel with the mobile bottom-sheet drag handle", async () => {
     const wrapper = mount(DetailedLineMapPicker, {
       props: { line, mode: "explorer", selectable: false },
       attachTo: document.body,
@@ -390,12 +435,53 @@ describe("DetailedLineMapPicker sidebar", () => {
     await flushPromises();
 
     expect(wrapper.find('[data-testid="app-right-panel"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="line-map-sidebar-drag-handle"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="app-right-panel-drag-handle"]').exists()).toBe(true);
 
     await wrapper.get('[data-testid="app-right-panel-close"]').trigger("click");
     await flushPromises();
 
     expect(wrapper.find('[data-testid="line-map-sidebar"]').exists()).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it("keeps the tablet panel and ghost layer open after the synthetic tap click", async () => {
+    stubGhostTopologyFetch();
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: {
+        line,
+        mode: "explorer",
+        selectable: false,
+        ghostNetworkEnabled: true,
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const target = wrapper.findAll(".line-map-hit-target")[0];
+    await target.trigger("pointerdown", {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+      pointerId: 8,
+      pointerType: "touch",
+    });
+    await target.trigger("pointerup", {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+      pointerId: 8,
+      pointerType: "touch",
+    });
+    await flushPromises();
+
+    await wrapper.get(".app-right-panel__backdrop").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="app-right-panel"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="line-map-sidebar"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="network-ghost-layer"]').exists()).toBe(true);
+    expect(loadStationTransfers).toHaveBeenCalledTimes(1);
 
     wrapper.unmount();
   });
@@ -1154,6 +1240,135 @@ describe("DetailedLineMapPicker sidebar", () => {
     vi.useRealTimers();
   });
 
+  it("keeps the bus 128 ghost in one direction after selecting Barbara on metro 4", async () => {
+    loadDetailedLineMap.mockResolvedValueOnce(createBarbaraMap());
+    loadStationTransfers.mockResolvedValueOnce([
+      {
+        id: "line:IDFM:C01157",
+        ref: "line:IDFM:C01157",
+        label: "128",
+        family: "BUS",
+        mode: "Bus",
+        color: "#6d4c00",
+      },
+    ]);
+    const geometryRequests: Array<{
+      lineId: string;
+      stops: Array<{ id: string; lon: number; lat: number }>;
+      branches: Array<{ id: string; stopIds: string[] }>;
+    }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes("/api/gtfs/preload")) {
+          return new Response(
+            JSON.stringify({
+              enabled: true,
+              datasetVersion: "fixture",
+              availableLineIds: ["line:IDFM:C01157"],
+              missingLineIds: [],
+            }),
+          );
+        }
+
+        if (url.includes("/api/line-geometry/resolve")) {
+          const request = JSON.parse(String(init?.body)) as (typeof geometryRequests)[number];
+          geometryRequests.push(request);
+          const stopById = new Map(request.stops.map((stop) => [stop.id, stop]));
+
+          return new Response(
+            JSON.stringify({
+              schemaVersion: 1,
+              source: "gtfs",
+              generatedAt: "2026-07-27T12:00:00.000Z",
+              stops: request.stops,
+              branches: request.branches,
+              segments: request.branches.flatMap((branch) =>
+                branch.stopIds.slice(0, -1).flatMap((fromStopId, index) => {
+                  const toStopId = branch.stopIds[index + 1];
+                  const from = stopById.get(fromStopId);
+                  const to = stopById.get(toStopId);
+                  return from && to
+                    ? [
+                        {
+                          id: `${fromStopId}--${toStopId}`,
+                          fromStopId,
+                          toStopId,
+                          coordinates: [from, to],
+                        },
+                      ]
+                    : [];
+                }),
+              ),
+              entrances: [],
+              attempts: [{ source: "gtfs", status: "success" }],
+            }),
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            stations: [
+              { id: "out:porte", name: "Porte d'Orléans", lon: 2.326, lat: 48.823 },
+              { id: "out:barbara", name: "Barbara", lon: 2.317, lat: 48.828 },
+              { id: "out:robinson", name: "Robinson RER", lon: 2.31, lat: 48.846 },
+              { id: "return:robinson", name: "Robinson RER", lon: 2.3104, lat: 48.8462 },
+              { id: "return:barbara", name: "Barbara", lon: 2.3174, lat: 48.8282 },
+              {
+                id: "return:porte",
+                name: "Porte d'Orléans",
+                lon: 2.3264,
+                lat: 48.8232,
+              },
+            ],
+            patterns: [
+              {
+                id: "direction:porte-robinson",
+                stops: ["out:porte", "out:barbara", "out:robinson"],
+              },
+              {
+                id: "direction:robinson-porte",
+                stops: ["return:robinson", "return:barbara", "return:porte"],
+              },
+            ],
+          }),
+        );
+      }),
+    );
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: {
+        line,
+        mode: "explorer",
+        selectable: false,
+        ghostNetworkEnabled: true,
+        reduceMotion: true,
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    await wrapper.findAll(".line-map-hit-target")[0].trigger("click");
+    await flushPromises();
+    await flushPromises();
+
+    expect(geometryRequests).toHaveLength(1);
+    expect(geometryRequests[0]).toMatchObject({
+      lineId: "line:IDFM:C01157",
+      branches: [
+        {
+          id: "direction:porte-robinson",
+          stopIds: ["out:porte", "out:barbara", "out:robinson"],
+        },
+      ],
+    });
+    expect(wrapper.get('[data-network-ghost-line="line:IDFM:C01157"]')).toBeTruthy();
+    expect(wrapper.findAll(".network-ghost-line__segment")).toHaveLength(1);
+
+    wrapper.unmount();
+  });
+
   it("loads ghost correspondences progressively and keeps active quays visible", async () => {
     loadStationTransfers.mockResolvedValueOnce([
       {
@@ -1816,6 +2031,23 @@ function createMap(): LineMapViewModel {
       },
     ),
   };
+}
+
+function createBarbaraMap(): LineMapViewModel {
+  const map = createMap();
+  const barbara = map.stops[0];
+
+  barbara.label = "Barbara";
+  barbara.lon = 2.317;
+  barbara.lat = 48.828;
+  barbara.station = {
+    ...barbara.station,
+    label: "Barbara",
+    lon: 2.317,
+    lat: 48.828,
+  };
+
+  return map;
 }
 
 function createDistanceMap(): LineMapViewModel {

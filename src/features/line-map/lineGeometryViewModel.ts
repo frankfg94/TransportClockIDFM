@@ -17,6 +17,7 @@ export function createLineGeometryRequest(
     map.stops,
     map.branches,
     useGtfs,
+    Boolean(map.selectedDirectionId),
   );
 }
 
@@ -25,6 +26,7 @@ export function createLineGeometryRequestFromParts(
   stops: LineMapStopView[],
   branches: LineMapBranchView[],
   useGtfs: boolean,
+  preserveCompleteBranches = false,
 ): LineGeometryRequest | undefined {
   const coordinateStops = stops.flatMap((stop) =>
     typeof stop.lon === "number" && typeof stop.lat === "number"
@@ -43,7 +45,13 @@ export function createLineGeometryRequestFromParts(
     // NeTEx can contain timetable variants that no single current GTFS trip
     // covers end-to-end. Resolve physical edges independently so each edge can
     // use the matching indexed shape without falling back for the whole bus.
-    branches: createPhysicalEdgeBranches(branches),
+    branches: preserveCompleteBranches
+      ? branches.map((branch) => ({
+          id: branch.id,
+          direction: branch.direction,
+          stopIds: branch.stopIds,
+        }))
+      : createPhysicalEdgeBranches(branches),
   };
 }
 

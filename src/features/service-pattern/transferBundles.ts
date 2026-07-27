@@ -626,6 +626,34 @@ function normalizeTransferBundleTransportType(
   return undefined;
 }
 
+export async function loadTransferBundleForTarget(params: {
+  lineId: string;
+  lineLabel: string;
+  target: TransferBundleTarget;
+  transportType?: string;
+}): Promise<TransferLineOption[] | undefined> {
+  const response = await fetchTransferBundle({
+    backendCacheEnabled: true,
+    lineId: params.lineId,
+    lineLabel: params.lineLabel,
+    nearbyDistanceMeters: resolveTransferBundleNearbyDistanceMeters(
+      params.transportType,
+    ),
+    requestConcurrency: DEFAULT_TRANSFER_BUNDLE_REQUEST_CONCURRENCY,
+    requestSpacingMs: 0,
+    retentionDays: DEFAULT_TRANSFER_BUNDLE_RETENTION_DAYS,
+    targets: [params.target],
+    transferResolverMode: "nearby",
+  });
+
+  return Object.prototype.hasOwnProperty.call(
+    response.transfersByStopAreaRef,
+    params.target.stopAreaRef,
+  )
+    ? response.transfersByStopAreaRef[params.target.stopAreaRef]
+    : undefined;
+}
+
 function fetchTransferBundle(payload: {
   backendCacheEnabled: boolean;
   lineId: string;
