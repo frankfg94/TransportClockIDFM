@@ -161,6 +161,47 @@ describe("traffic calendar friendly summary", () => {
     expect(classifyPatternTrafficIncident(disruption)).toBe("works");
   });
 
+  it("shortens a diverted bus station-closure title to its works reason", () => {
+    const disruption = createDisruption(
+      "Bus 317 : Travaux - Arrêt(s) non desservi(s)",
+      "works",
+    );
+
+    expect(getPatternTrafficSummaryCopy(disruption)).toEqual({
+      title: "Travaux",
+    });
+  });
+
+  it("uses diversion for diverted lines and keeps works as the priority", () => {
+    const diversion = createDisruption(
+      "La ligne 317 est deviee : les arrets situes entre Liberation - Rabelais et La Fourchette de Champigny ne sont plus desservis.",
+      "incident",
+    );
+    diversion.message = "Arret(s) non desservi(s)";
+
+    expect(classifyPatternTrafficIncident(diversion)).toBe("diversion");
+    expect(getPatternTrafficSummaryTitle(diversion)).toBe("Déviation");
+
+    const works = createDisruption(diversion.title, "incident");
+    works.message =
+      "Arret(s) non desservi(s)\nBus 317 : Travaux - Arret(s) non desservi(s)\nRaison : travaux.";
+
+    expect(classifyPatternTrafficIncident(works)).toBe("works");
+    expect(getPatternTrafficSummaryTitle(works)).toBe("Travaux");
+  });
+
+  it("keeps a signalling failure concise even when IDFM marks it as works", () => {
+    const disruption = createDisruption(
+      "Métro 13 : Panne de signalisation - Trafic interrompu",
+      "works",
+    );
+
+    expect(getPatternTrafficSummaryTitle(disruption)).toBe(
+      "Panne de signalisation",
+    );
+    expect(classifyPatternTrafficIncident(disruption)).toBe("signalling");
+  });
+
   it("extracts a labelled motif from IDFM copy", () => {
     const disruption = createDisruption("Information trafic", "incident");
     disruption.message =

@@ -78,6 +78,7 @@ import {
   TRAFFIC_DISTURBANCE_COLOR,
   TRAFFIC_INTERRUPTION_COLOR,
 } from "../service-pattern/trafficImpactStyles";
+import { createLineMapTrafficGraph } from "./lineMapTrafficGraph";
 import type {
   LineMapEntranceView,
   LineMapSegmentView,
@@ -519,16 +520,11 @@ const { analyzeCurrentTrafficImpacts, resolvedTrafficReport, trafficTimingNow } 
     trafficEvaluationTimestamp: computed(() => selectedTrafficTimestamp.value),
   });
 
+const lineMapTrafficGraph = computed(() => createLineMapTrafficGraph(lineMap.value));
 const lineTrafficAnalysis = computed(() => {
-  const map = lineMap.value;
-
   return analyzeCurrentTrafficImpacts(
-    map?.stops.map((stop) => ({ key: stop.id, label: stop.label })) ?? [],
-    map?.segments.map((segment) => ({
-      id: segment.id,
-      source: segment.fromStopId,
-      target: segment.toStopId,
-    })) ?? [],
+    lineMapTrafficGraph.value.stations,
+    lineMapTrafficGraph.value.edges,
   );
 });
 

@@ -89,32 +89,40 @@ export function applyResolvedLineGeometry(
     polyline: segment.points,
   }));
   const providerPolylines = providerSegments.map((segment) => segment.polyline);
+  const resolvedStops = map.stops.map((stop) => {
+    if (renderPlan.topology === "provider") {
+      const point = projectPointOntoLineGeometry(stop, providerPolylines);
+      return { ...stop, x: point.x, y: point.y };
+    }
+    const point = aligned.stopPoints.get(stop.id);
+    return point ? { ...stop, x: point.x, y: point.y } : stop;
+  });
+  const resolvedStopPoints = new Map(
+    resolvedStops.map((stop) => [stop.id, { x: stop.x, y: stop.y }]),
+  );
 
   return {
     ...map,
     geometrySource: renderPlan.source,
     geometryAttempts: renderPlan.attempts,
     geometryDatasetVersion: renderPlan.datasetVersion,
-    stops: map.stops.map((stop) => {
-      if (renderPlan.topology === "provider") {
-        const point = projectPointOntoLineGeometry(stop, providerPolylines);
-        return { ...stop, x: point.x, y: point.y };
+    stops: resolvedStops,
+    // Geometry providers may return raw traces, but the station graph remains
+    // the single source of truth for continuity and traffic impact matching.
+    segments: map.segments.map((segment) => {
+      const geometry = geometryByEdge.get(segment.id);
+      if (geometry) {
+        return {
+          ...segment,
+          polyline: geometry.points,
+        };
       }
-      const point = aligned.stopPoints.get(stop.id);
-      return point ? { ...stop, x: point.x, y: point.y } : stop;
-    }),
-    segments:
-      renderPlan.topology === "provider"
-        ? providerSegments
-        : map.segments.map((segment) => {
-            const geometry = geometryByEdge.get(segment.id);
-            if (!geometry) return segment;
 
-            return {
-              ...segment,
-              polyline: geometry.points,
-            };
-          }),
+      if (renderPlan.topology !== "provider") return segment;
+      const from = resolvedStopPoints.get(segment.fromStopId);
+      const to = resolvedStopPoints.get(segment.toStopId);
+      return from && to ? { ...segment, polyline: [from, to] } : segment;
+    }),
     entrances: renderPlan.entrances.map((entrance) => ({
       ...entrance,
       parentStopId: findEntranceParentStopId(entrance, map.stops),

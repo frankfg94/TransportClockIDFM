@@ -19,10 +19,18 @@ export function normalizeNavitiaLineReportPayload(
     const report = asRecord(lineReport);
     return asArray(report.disruptions);
   });
+  const linkedDisruptionIds = extractLineReportDisruptionIds(lineReports);
+  const linkedRootDisruptions = linkedDisruptionIds.size
+    ? rootDisruptions.filter((item) => {
+        const disruption = asRecord(item);
+        const id = asText(disruption.id);
+        return id ? linkedDisruptionIds.has(id) : false;
+      })
+    : rootDisruptions;
   // Navitia line_reports can expose disruptions either directly on each
   // line_report or once at the payload root with links from the line report.
   // Keep both shapes so long-running issues such as Tram T1 are not lost.
-  const sourceDisruptions = [...rootDisruptions, ...lineReportDisruptions];
+  const sourceDisruptions = [...linkedRootDisruptions, ...lineReportDisruptions];
   const disruptionsById = new Map<string, TrafficDisruption>();
 
   sourceDisruptions.forEach((item, index) => {
@@ -33,9 +41,11 @@ export function normalizeNavitiaLineReportPayload(
     }
   });
 
+  const normalizedLineRef = normalizeTrafficLineRef(fallbackLineRef);
+
   return mergeEquivalentTrafficDisruptions(
     enrichMissingWorkMotifs(Array.from(disruptionsById.values())),
-  );
+  ).filter((disruption) => disruption.impactedLineRefs.includes(normalizedLineRef));
 }
 
 export function getTrafficLineStatus(
@@ -315,7 +325,7 @@ function extractImpactedLineRefs(
   disruption: JsonRecord,
   fallbackLineRef: string,
 ): string[] {
-  const lineRefs = new Set<string>([normalizeTrafficLineRef(fallbackLineRef)]);
+  const lineRefs = new Set<string>();
 
   asArray(disruption.lines).forEach((line) => {
     const record = asRecord(line);
@@ -340,7 +350,31 @@ function extractImpactedLineRefs(
     }
   });
 
+  if (lineRefs.size === 0) {
+    lineRefs.add(normalizeTrafficLineRef(fallbackLineRef));
+  }
+
   return Array.from(lineRefs);
+}
+
+function extractLineReportDisruptionIds(lineReports: unknown[]): Set<string> {
+  const disruptionIds = new Set<string>();
+
+  lineReports.forEach((lineReport) => {
+    const report = asRecord(lineReport);
+    const line = asRecord(report.line);
+    [...asArray(report.links), ...asArray(line.links)].forEach((link) => {
+      const record = asRecord(link);
+      const relation = normalizeText(asText(record.rel) ?? asText(record.relationship) ?? "");
+
+      if (!relation.includes("disruption")) return;
+
+      const id = asText(record.id);
+      if (id) disruptionIds.add(id);
+    });
+  });
+
+  return disruptionIds;
 }
 
 function extractImpactedStopNames(disruption: JsonRecord): string[] {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createCanonicalTraceGeometry,
+  createCompleteSegmentsFromTraces,
   createSegmentsFromTraces,
   projectStopsMonotonically,
 } from "../server/services/lineGeometry/traceProjection";
@@ -64,6 +65,33 @@ describe("GTFS trace projection", () => {
     );
 
     expect(projected).toBeUndefined();
+  });
+
+  it("prefers a coherent reverse trace over a hybrid detour between the same stops", () => {
+    const stops = [
+      { lon: 2.36, lat: 48.88 },
+      { lon: 2.76, lat: 48.74 },
+    ];
+    const hybridTrace = [
+      stops[0],
+      { lon: 2.2, lat: 49.1 },
+      { lon: 2.9, lat: 49.1 },
+      stops[1],
+    ];
+    const coherentReverseTrace = [
+      stops[1],
+      { lon: 2.6, lat: 48.8 },
+      { lon: 2.45, lat: 48.86 },
+      stops[0],
+    ];
+
+    const projected = projectStopsMonotonically(
+      stops,
+      [hybridTrace, coherentReverseTrace],
+    );
+
+    expect(projected?.trace).toEqual([...coherentReverseTrace].reverse());
+    expect(projected?.pathRatio).toBeLessThan(1.8);
   });
 
   it("uses successive shapes from the same provider when no single shape covers every stop", () => {
@@ -140,6 +168,44 @@ describe("GTFS trace projection", () => {
         ],
       ]),
     ).toBeUndefined();
+  });
+
+  it("keeps the requested topology complete when only part of a trace is available", () => {
+    const request = {
+      lineId: "line:IDFM:C01390",
+      stops: [
+        { id: "Puteaux", lon: 2.238, lat: 48.883 },
+        { id: "LaDefense", lon: 2.2385, lat: 48.892 },
+        { id: "Faubourg", lon: 2.246, lat: 48.895 },
+        { id: "Fauvelles", lon: 2.25, lat: 48.9 },
+      ],
+      branches: [
+        {
+          id: "tram-t2",
+          stopIds: ["Puteaux", "LaDefense", "Faubourg", "Fauvelles"],
+        },
+      ],
+    };
+    const segments = createCompleteSegmentsFromTraces(request, [
+      [
+        { lon: 2.238, lat: 48.883 },
+        { lon: 2.2385, lat: 48.892 },
+      ],
+      [
+        { lon: 2.246, lat: 48.895 },
+        { lon: 2.25, lat: 48.9 },
+      ],
+    ]);
+
+    expect(segments?.map((segment) => segment.id)).toEqual([
+      "LaDefense--Puteaux",
+      "Faubourg--LaDefense",
+      "Faubourg--Fauvelles",
+    ]);
+    expect(segments?.find((segment) => segment.id === "Faubourg--LaDefense")?.coordinates).toEqual([
+      { lon: 2.2385, lat: 48.892 },
+      { lon: 2.246, lat: 48.895 },
+    ]);
   });
 
   it("keeps a tiny edge when two nearby stops project to the same shape point", () => {

@@ -393,6 +393,43 @@ describe("traffic modal intelligent formatting", () => {
     expectLocalDate(tile.end, [2026, 6, 25]);
   });
 
+  it("labels a multi-stop bus diversion without inventing one station name", () => {
+    const disruption = createDisruption(
+      "bus-317-diversion",
+      "Bus 317 : Travaux - Arrêt(s) non desservi(s)",
+      "La ligne 317 est déviée : les arrêts situés entre La Fourchette de Champigny et Libération - Rabelais ne sont plus desservis. Reprise estimée : dimanche 30 août 2026, à partir de 03h30. Raison : travaux.",
+      [{ begin: "20260722T120000", end: "20260830T033000" }],
+    );
+    disruption.impactedStopNames = [
+      "La Fourchette de Champigny (Champigny-sur-Marne)",
+      "Godefroy Cavaignac / Libération - Rabelais (Saint-Maur-des-Fossés)",
+    ];
+
+    const [tile] = extractTrafficModalDateTiles(disruption, "Travaux");
+
+    expect(tile.multipleStationsNotServed).toBe(true);
+    expect(tile.stationNotServedName).toBeUndefined();
+  });
+
+  it("wraps a single RER station title with the station-not-served pattern", () => {
+    const disruption = createDisruption(
+      "rer-a-nation-closure",
+      "Travaux",
+      [
+        "Période : toute la journée.",
+        "Dates : du lundi 29 juin au dimanche 30 août.",
+        "RER A : Nation du 29/06 au 30/08",
+      ].join("\n"),
+      [{ begin: "20260629T000000", end: "20260830T235900" }],
+    );
+    disruption.impactedStopNames = ["Nation (Paris)"];
+
+    const [tile] = extractTrafficModalDateTiles(disruption, "Travaux");
+
+    expect(tile.title).toBe("Nation");
+    expect(tile.stationNotServedName).toBe("Nation");
+  });
+
   it("keeps the explicit years for the cross-year Metro 8 period", () => {
     const [tile] = extractTrafficModalDateTiles(
       createDisruption(

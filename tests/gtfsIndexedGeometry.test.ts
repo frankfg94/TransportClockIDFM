@@ -199,6 +199,39 @@ describe("indexed GTFS geometry", () => {
     ]);
   });
 
+  it("rejects a hybrid detour when the opposite GTFS shape connects the same stops coherently", () => {
+    const badPattern = createPattern("a-hybrid", ["A", "B"], "hybrid-shape");
+    const goodPattern = createPattern("z-coherent", ["A", "B"], "coherent-shape");
+    const artifact = createArtifact({
+      patterns: [badPattern, goodPattern],
+      shapes: {
+        "hybrid-shape": [
+          { lon: 2.3, lat: 48.8 },
+          { lon: 2.3, lat: 48.9 },
+          { lon: 2.31, lat: 48.81 },
+          { lon: 2.32, lat: 48.82 },
+        ],
+        "coherent-shape": [
+          { lon: 2.3, lat: 48.8 },
+          { lon: 2.305, lat: 48.805 },
+          { lon: 2.31, lat: 48.81 },
+          { lon: 2.32, lat: 48.82 },
+        ],
+      },
+    });
+
+    const segments = createSegmentsFromIndexedGtfs(
+      createRequest(["A", "B"]),
+      compileGtfsLineArtifact(artifact),
+    );
+
+    expect(segments?.[0].coordinates).toEqual([
+      { lon: 2.3, lat: 48.8 },
+      { lon: 2.305, lat: 48.805 },
+      { lon: 2.31, lat: 48.81 },
+    ]);
+  });
+
   it("covers every branch, deduplicates shared edges and rejects contradictory shapes", () => {
     const sharedShape = createShape();
     const branchShape = [

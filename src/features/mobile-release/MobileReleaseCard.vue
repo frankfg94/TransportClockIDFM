@@ -110,7 +110,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="settings-panel mobile-release-card" aria-labelledby="settings-android-title">
+  <section
+    class="settings-panel settings-panel--open mobile-release-card"
+    aria-labelledby="settings-android-title"
+  >
     <div class="settings-panel__heading">
       <div>
         <p class="settings-panel__eyebrow">{{ t("mobileRelease.eyebrow") }}</p>

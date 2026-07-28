@@ -26,6 +26,7 @@ export interface TrafficModalDateTile {
   id: string;
   title: string;
   stationNotServedName?: string;
+  multipleStationsNotServed?: boolean;
   start?: Date;
   end?: Date;
   endLabel?: string;
@@ -50,14 +51,14 @@ export function extractTrafficModalDateTiles(
     const title =
       dateSet.titleHint ??
       (dateSet.kind === "range" ? fallbackTileTitle : endOnlyTileTitle);
-    const stationNotServedName = getNonServedStationName(disruption, title);
+    const nonServedPresentation = getNonServedPresentation(disruption, title);
 
     return {
       mergeKey: dateSet.titleHint ? normalizeTrafficText(title) : undefined,
       tile: {
         id: dateSet.id,
         title,
-        ...(stationNotServedName ? { stationNotServedName } : {}),
+        ...nonServedPresentation,
         start,
         end: dateSet.end,
         endLabel: dateSet.endLabel,
@@ -142,41 +143,83 @@ function getFallbackTileTitle(disruption: TrafficDisruption, fallbackTitle?: str
   const isGenericTitle =
     /^(?:information trafic|trafic (?:interrompu|perturbe|ralenti)|travaux)$/u.test(
       normalizedTitle,
-    );
+    ) || /^(?:arrets?|stations?)(?: s)? non desservi(?:e|s|es)?(?: s)?$/u.test(normalizedTitle);
 
   return !isGenericTitle && !isRawTitleStatusVariant && rawTitle.length <= 100
     ? rawTitle
     : fallbackTitle || rawTitle;
 }
 
-function getNonServedStationName(
+function getNonServedPresentation(
   disruption: TrafficDisruption,
   title: string,
-): string | undefined {
-  if (!/\b(?:non|pas)\s+desservi(?:e|s|es)?\b/iu.test(title)) {
-    return undefined;
+): Pick<TrafficModalDateTile, "stationNotServedName" | "multipleStationsNotServed"> {
+  const searchable = [disruption.title, disruption.message, disruption.motif, title]
+    .filter((value): value is string => Boolean(value))
+    .join("\n");
+  const hasNonServedMarker = /\b(?:non|pas)\s+desservi(?:e|s|es)?\b/iu.test(searchable);
+  const titleStationName = extractNonServedStationName(title);
+
+  if (titleStationName && disruption.impactedStopNames.length === 0) {
+    return { stationNotServedName: titleStationName };
   }
 
   if (disruption.impactedStopNames.length === 1) {
-    return disruption.impactedStopNames[0];
+    const stationName = disruption.impactedStopNames[0];
+    if (
+      stationName &&
+      (hasNonServedMarker ||
+        (disruption.kind === "works" && titleMatchesStation(title, stationName)))
+    ) {
+      return {
+        stationNotServedName: titleMatchesStation(title, stationName)
+          ? title
+          : stationName,
+      };
+    }
+
+    return {};
   }
 
+  if (disruption.impactedStopNames.length > 1 && hasNonServedMarker) {
+    return { multipleStationsNotServed: true };
+  }
+
+  return {};
+}
+
+function extractNonServedStationName(title: string): string | undefined {
   const match = title.match(
     /^(.{2,100}?)\s+(?:n['’]est\s+pas\s+|non\s+)desservi(?:e|s|es)?\b/iu,
   );
   const stationName = match?.[1]?.trim();
 
-  if (!stationName) {
-    return undefined;
-  }
+  if (!stationName) return undefined;
 
-  const normalizedStationName = normalizeTrafficText(stationName)
-    .replace(/[^a-z0-9]+/gu, " ")
-    .trim();
-
-  return /^(?:arret|arrets|station|stations)$/u.test(normalizedStationName)
+  const normalizedStationName = normalizeTrafficStationLabel(stationName);
+  return /^(?:arrets?|stations?)(?: s)?$/u.test(normalizedStationName)
     ? undefined
     : stationName;
+}
+
+function titleMatchesStation(title: string, stationName: string): boolean {
+  const normalizedTitle = normalizeTrafficStationLabel(title);
+  const normalizedStation = normalizeTrafficStationLabel(stationName);
+
+  return Boolean(
+    normalizedTitle &&
+      normalizedStation &&
+      (normalizedTitle === normalizedStation ||
+        normalizedTitle.startsWith(`${normalizedStation} `) ||
+        normalizedStation.startsWith(`${normalizedTitle} `)),
+  );
+}
+
+function normalizeTrafficStationLabel(value: string): string {
+  return normalizeTrafficText(value)
+    .replace(/\([^)]*\)/gu, " ")
+    .replace(/[^a-z0-9]+/gu, " ")
+    .trim();
 }
 
 function hasReplacementBus(value: string): boolean {

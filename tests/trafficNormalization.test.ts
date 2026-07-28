@@ -121,6 +121,11 @@ describe("traffic normalization", () => {
               },
             ],
           },
+          {
+            id: "n71-unrelated",
+            category: "Travaux",
+            messages: [{ text: "Bus N71 : Travaux" }],
+          },
         ],
         line_reports: [
           {
@@ -140,6 +145,46 @@ describe("traffic normalization", () => {
     expect(disruptions[0].severity).toBe("bloquante");
     expect(disruptions[0].impactedLineRefs).toContain("line:IDFM:C01389");
     expect(getTrafficLineStatus(disruptions)).toBe("disrupted");
+  });
+
+  it("does not attach a disruption explicitly scoped to another line", () => {
+    const disruptions = normalizeNavitiaLineReportPayload(
+      {
+        disruptions: [
+          {
+            id: "n71-diversion",
+            category: "Travaux",
+            messages: [{ text: "Bus N71 : Travaux - Arrêt(s) non desservi(s)" }],
+            impacted_objects: [
+              {
+                pt_object: {
+                  embedded_type: "line",
+                  id: "line:IDFM:C00171",
+                },
+              },
+            ],
+          },
+          {
+            id: "bus-317-diversion",
+            category: "Travaux",
+            messages: [{ text: "Bus 317 : Travaux - Arrêt(s) non desservi(s)" }],
+            impacted_objects: [
+              {
+                pt_object: {
+                  embedded_type: "line",
+                  id: "line:IDFM:C00317",
+                },
+              },
+            ],
+          },
+        ],
+      },
+      "line:IDFM:C00317",
+    );
+
+    expect(disruptions.map((disruption) => disruption.id)).toEqual([
+      "bus-317-diversion",
+    ]);
   });
 
   it("ignores elevator outages so they do not mark traffic as disrupted", () => {

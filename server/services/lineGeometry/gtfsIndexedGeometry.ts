@@ -14,6 +14,7 @@ import {
 const MAX_STOP_MATCH_DISTANCE_METERS = 300;
 const MAX_SHARED_EDGE_DEVIATION_METERS = 75;
 const MAX_GEOMETRY_COMPARISON_SAMPLES = 24;
+const MAX_PREFERRED_PATH_RATIO = 1.8;
 
 export interface CompiledGtfsPattern {
   id: string;
@@ -46,6 +47,7 @@ interface PatternMatch {
   directionPenalty: number;
   skippedStops: number;
   geographicErrorMeters: number;
+  pathRatio: number;
 }
 
 interface CandidateSubsequence {
@@ -117,6 +119,7 @@ export function createSegmentsFromIndexedGtfs(
   const candidatesByRequestId = new Map(
     requestedStops.map((stop) => [stop.id, findStopCandidates(stop, compiled)]),
   );
+  const requestedStopsById = new Map(requestedStops.map((stop) => [stop.id, stop]));
   if ([...candidatesByRequestId.values()].some((candidates) => candidates.length === 0)) {
     return undefined;
   }
@@ -131,6 +134,7 @@ export function createSegmentsFromIndexedGtfs(
       branchCandidates,
       branch.direction,
       compiled.patterns,
+      branch.stopIds.map((stopId) => requestedStopsById.get(stopId)!),
     );
     if (!patternMatch) return undefined;
     const patternScore =
@@ -268,7 +272,14 @@ function findBestPatternMatch(
   stopCandidates: StopCandidate[][],
   requestedDirection: string | undefined,
   patterns: CompiledGtfsPattern[],
+  requestedStops: LineGeometryStopRequest[],
 ): PatternMatch | undefined {
+  const directDistanceMeters = requestedStops
+    .slice(1)
+    .reduce(
+      (total, stop, index) => total + distanceMeters(requestedStops[index], stop),
+      0,
+    );
   const matches = patterns.flatMap((pattern) => {
     const increasing = findCandidateSubsequence(pattern.stopIds, stopCandidates);
     const decreasing = findDecreasingCandidateSubsequence(
@@ -292,6 +303,16 @@ function findBestPatternMatch(
           : 0;
       const geographicErrorMeters =
         subsequence.stopMatchErrorMeters + projectionError;
+      const pathDistanceMeters = subsequence.indexes
+        .slice(1)
+        .reduce((total, stopIndex, index) => {
+          const coordinates = slicePatternShape(
+            pattern,
+            subsequence.indexes[index],
+            stopIndex,
+          );
+          return total + getPolylineLengthMeters(coordinates);
+        }, 0);
 
       return [
         {
@@ -300,6 +321,7 @@ function findBestPatternMatch(
           directionPenalty,
           skippedStops: subsequence.skipped,
           geographicErrorMeters,
+          pathRatio: pathDistanceMeters / Math.max(directDistanceMeters, 1),
         },
       ];
     });
@@ -309,10 +331,15 @@ function findBestPatternMatch(
     (left, right) =>
       left.directionPenalty - right.directionPenalty ||
       left.skippedStops - right.skippedStops ||
+      getPathRatioPenalty(left.pathRatio) - getPathRatioPenalty(right.pathRatio) ||
       left.geographicErrorMeters - right.geographicErrorMeters ||
       left.pattern.id.localeCompare(right.pattern.id) ||
       left.stopIndexes.join(",").localeCompare(right.stopIndexes.join(",")),
   )[0];
+}
+
+function getPathRatioPenalty(pathRatio: number): number {
+  return pathRatio > MAX_PREFERRED_PATH_RATIO ? 1 : 0;
 }
 
 function findCandidateSubsequence(
@@ -427,6 +454,16 @@ function slicePatternShape(
   }
   coordinates.push(to.coordinate);
   return dedupeCoordinates(coordinates);
+}
+
+function getPolylineLengthMeters(coordinates: LineGeometryCoordinate[]): number {
+  return coordinates
+    .slice(1)
+    .reduce(
+      (total, coordinate, index) =>
+        total + distanceMeters(coordinates[index], coordinate),
+      0,
+    );
 }
 
 function createStopReferenceKeys(value: string): string[] {

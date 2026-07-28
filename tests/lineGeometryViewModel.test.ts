@@ -227,11 +227,100 @@ describe("resolved line geometry view model", () => {
 
     const resolved = applyResolvedLineGeometry(map, resolution);
     const [from, to] = resolved.segments[0].polyline!;
+    expect(resolved.segments).toMatchObject([
+      { id: "A--B", fromStopId: "A", toStopId: "B" },
+    ]);
     resolved.stops.forEach((stop) => {
       const crossProduct =
         (stop.x - from.x) * (to.y - from.y) - (stop.y - from.y) * (to.x - from.x);
       expect(Math.abs(crossProduct)).toBeLessThan(0.000001);
     });
+  });
+
+  it("never cuts the Tram T2 station graph when provider traces are partial", () => {
+    const coordinates = [
+      [2.238, 48.883],
+      [2.2385, 48.892],
+      [2.246, 48.895],
+      [2.25, 48.9],
+    ] as const;
+    const viewport = createGeographicViewport(
+      coordinates.map(([lon, lat]) => ({ lon, lat })),
+      { viewBoxWidth: 1080, viewBoxHeight: 620, paddingX: 78, paddingY: 68 },
+    )!;
+    const ids = [
+      "FR::Quay:50143957:FR1",
+      "FR::Quay:50145872:FR1",
+      "FR::Quay:50145871:FR1",
+      "FR::Quay:50145859:FR1",
+    ];
+    const stops = ids.map((id, index) =>
+      createStop(id, coordinates[index][0], coordinates[index][1], 0.2 + index * 0.2, 0.5),
+    );
+    const segments = ids.slice(0, -1).map((fromStopId, index) => ({
+      id: [fromStopId, ids[index + 1]].sort().join("--"),
+      fromStopId,
+      toStopId: ids[index + 1],
+    }));
+    const map: LineMapViewModel = {
+      lineId: "line:IDFM:C01390",
+      lineLabel: "T2",
+      lineColor: "#a0006e",
+      textColor: "#ffffff",
+      viewport,
+      geometrySource: "direct",
+      geometryAttempts: [{ source: "direct", status: "success" }],
+      entrances: [],
+      tiles: [],
+      stops,
+      branches: [{ id: "tram-t2", label: "T2", stopIds: ids }],
+      segments,
+    };
+    const resolution: LineGeometryResolution = {
+      schemaVersion: 1,
+      source: "gtfs",
+      topology: "provider",
+      generatedAt: "2026-07-28T12:00:00.000Z",
+      stops: [
+        { id: "trace:1:start", lon: coordinates[0][0], lat: coordinates[0][1] },
+        { id: "trace:1:end", lon: coordinates[1][0], lat: coordinates[1][1] },
+        { id: "trace:2:start", lon: coordinates[2][0], lat: coordinates[2][1] },
+        { id: "trace:2:end", lon: coordinates[3][0], lat: coordinates[3][1] },
+      ],
+      branches: [
+        { id: "trace:1", stopIds: ["trace:1:start", "trace:1:end"] },
+        { id: "trace:2", stopIds: ["trace:2:start", "trace:2:end"] },
+      ],
+      segments: [
+        {
+          id: "trace:1",
+          fromStopId: "trace:1:start",
+          toStopId: "trace:1:end",
+          coordinates: [
+            { lon: coordinates[0][0], lat: coordinates[0][1] },
+            { lon: coordinates[1][0], lat: coordinates[1][1] },
+          ],
+        },
+        {
+          id: "trace:2",
+          fromStopId: "trace:2:start",
+          toStopId: "trace:2:end",
+          coordinates: [
+            { lon: coordinates[2][0], lat: coordinates[2][1] },
+            { lon: coordinates[3][0], lat: coordinates[3][1] },
+          ],
+        },
+      ],
+      entrances: [],
+      attempts: [{ source: "gtfs", status: "success" }],
+    };
+
+    const resolved = applyResolvedLineGeometry(map, resolution);
+    expect(resolved.segments.map((segment) => segment.id)).toEqual(
+      segments.map((segment) => segment.id),
+    );
+    expect(resolved.segments).toHaveLength(ids.length - 1);
+    expect(resolved.segments.every((segment) => (segment.polyline?.length ?? 0) >= 2)).toBe(true);
   });
 });
 

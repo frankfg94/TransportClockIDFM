@@ -318,7 +318,9 @@ function formatTimeWindow(window: TrafficModalTimeWindow): string {
         <div class="traffic-alert-modal__date-tile-copy">
           <strong>
             {{
-              tile.stationNotServedName
+              tile.multipleStationsNotServed
+                ? t("app.trafficModalMultipleStationsNotServed")
+                : tile.stationNotServedName
                 ? t("app.trafficModalStationNotServed", {
                     station: tile.stationNotServedName,
                   })

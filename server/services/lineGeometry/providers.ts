@@ -17,7 +17,7 @@ import {
   loadGtfsLineArtifact,
 } from "../gtfs/runtime";
 import {
-  createCanonicalTraceGeometry,
+  createCompleteSegmentsFromTraces,
   createSegmentsFromTraces,
 } from "./traceProjection";
 import { matchGtfsEntrancesToRequestStops } from "./entranceMatching";
@@ -31,6 +31,7 @@ const NAVITIA_CACHE_TTL_MS = 30 * 24 * 60 * 60_000;
 const NAVITIA_BREAKER_FAILURES = 3;
 const NAVITIA_BREAKER_DURATION_MS = 5 * 60_000;
 const GTFS_GEOMETRY_CACHE_ENTRIES = 128;
+const GTFS_GEOMETRY_ALGORITHM_VERSION = 3;
 
 interface CachedTraces {
   expiresAt: number;
@@ -160,6 +161,7 @@ function createGtfsGeometryCacheKey(
   request: LineGeometryRequest,
 ): string {
   return JSON.stringify([
+    GTFS_GEOMETRY_ALGORITHM_VERSION,
     manifest.sha256,
     manifest.cacheGeneration,
     request.lineId,
@@ -242,48 +244,20 @@ function createGeometryFromTraces(
   } = {},
 ): LineGeometry | undefined {
   const projectedSegments = createSegmentsFromTraces(request, traces);
-
-  if (projectedSegments) {
-    return {
-      schemaVersion: 1,
-      source,
-      topology: "requested",
-      datasetVersion: options.datasetVersion,
-      generatedAt: new Date().toISOString(),
-      stops: request.stops,
-      branches: request.branches,
-      segments: projectedSegments,
-      entrances: options.entrances ?? [],
-    };
-  }
-
-  const canonical = createCanonicalTraceGeometry(traces);
-  return createProviderTraceGeometry(
-    source,
-    traces,
-    options.datasetVersion,
-    options.entrances,
-    canonical,
-  );
-}
-
-function createProviderTraceGeometry(
-  source: Exclude<LineGeometry["source"], "direct">,
-  traces: LineGeometryCoordinate[][],
-  datasetVersion?: string,
-  entrances: LineGeometry["entrances"] = [],
-  canonical = createCanonicalTraceGeometry(traces),
-): LineGeometry | undefined {
-  if (canonical.segments.length === 0) return undefined;
+  const completeSegments =
+    projectedSegments ?? createCompleteSegmentsFromTraces(request, traces);
+  if (!completeSegments) return undefined;
 
   return {
     schemaVersion: 1,
     source,
-    topology: "provider",
-    datasetVersion,
+    topology: "requested",
+    datasetVersion: options.datasetVersion,
     generatedAt: new Date().toISOString(),
-    ...canonical,
-    entrances,
+    stops: request.stops,
+    branches: request.branches,
+    segments: completeSegments,
+    entrances: options.entrances ?? [],
   };
 }
 

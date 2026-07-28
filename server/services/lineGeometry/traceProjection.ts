@@ -10,6 +10,7 @@ import {
 const MAX_PROJECTION_ERROR_METERS = 300;
 const MIN_PATH_RATIO = 0.35;
 const MAX_PATH_RATIO = 8;
+const MAX_PREFERRED_PATH_RATIO = 1.8;
 const MAX_DEGENERATE_EDGE_METERS = 50;
 
 export interface TraceProjection {
@@ -122,6 +123,55 @@ export function createSegmentsFromTraces(
   return [...segments.values()];
 }
 
+/**
+ * Keeps the requested station graph complete when a provider trace only
+ * covers part of a line. Trace-backed edges stay precise; only unmatched
+ * physical edges fall back to their station coordinates.
+ */
+export function createCompleteSegmentsFromTraces(
+  request: LineGeometryRequest,
+  traces: LineGeometryCoordinate[][],
+): LineGeometrySegment[] | undefined {
+  const stops = new Map(request.stops.map((stop) => [stop.id, stop]));
+  const segments = new Map<string, LineGeometrySegment>();
+
+  for (const branch of request.branches) {
+    for (let index = 0; index < branch.stopIds.length - 1; index += 1) {
+      const fromStopId = branch.stopIds[index];
+      const toStopId = branch.stopIds[index + 1];
+      const key = createUndirectedEdgeKey(fromStopId, toStopId);
+      if (segments.has(key)) continue;
+
+      const from = stops.get(fromStopId);
+      const to = stops.get(toStopId);
+      if (!from || !to) return undefined;
+
+      const projected = createSegmentsFromTraces(
+        {
+          ...request,
+          branches: [{ id: key, stopIds: [fromStopId, toStopId] }],
+        },
+        traces,
+      )?.[0];
+
+      segments.set(
+        key,
+        projected ?? {
+          id: key,
+          fromStopId,
+          toStopId,
+          coordinates: [
+            { lon: from.lon, lat: from.lat },
+            { lon: to.lon, lat: to.lat },
+          ],
+        },
+      );
+    }
+  }
+
+  return segments.size > 0 ? [...segments.values()] : undefined;
+}
+
 export function projectStopsMonotonically(
   stops: LineGeometryCoordinate[],
   traces: LineGeometryCoordinate[][],
@@ -174,11 +224,18 @@ export function projectStopsMonotonically(
 
   return candidates.sort(
     (left, right) =>
+      getTracePathRatioPenalty(left.pathRatio) -
+        getTracePathRatioPenalty(right.pathRatio) ||
       left.score - right.score ||
       left.errorMeters - right.errorMeters ||
       left.trace.length - right.trace.length,
   )[0];
 }
+
+function getTracePathRatioPenalty(pathRatio: number): number {
+  return pathRatio > MAX_PREFERRED_PATH_RATIO ? 1 : 0;
+}
+
 function projectPointOnTrace(
   point: LineGeometryCoordinate,
   trace: LineGeometryCoordinate[],

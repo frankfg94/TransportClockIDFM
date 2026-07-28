@@ -44,6 +44,9 @@ function mockFrenchI18n(): void {
         if (key === "app.trafficModalStationNotServed") {
           return "Station non desservie : " + params?.station;
         }
+        if (key === "app.trafficModalMultipleStationsNotServed") {
+          return "Multiple stations non desservies";
+        }
 
         return key;
       },
@@ -138,6 +141,108 @@ describe("UserFriendlyTrafficModal", () => {
     const tile = wrapper.get(".traffic-alert-modal__date-tile");
     expect(tile.text()).toContain("Arrivee du Tour de France");
     expect(tile.text()).toContain("26 juil.");
+
+    wrapper.unmount();
+  });
+
+  it("uses a visible signalling icon and concise Metro 13 title", async () => {
+    mockFrenchI18n();
+    const { default: UserFriendlyTrafficModal } =
+      await import("../src/components/UserFriendlyTrafficModal.vue");
+    const alert: TrafficAlertModalData = {
+      label: "Perturbation",
+      tone: "orange",
+      disruption: {
+        id: "metro-13-signalling",
+        title: "Métro 13 : Panne de signalisation - Trafic interrompu",
+        message: "Le détail de la panne est affiché ci-dessous.",
+        kind: "works",
+        applicationPeriods: [],
+        impactedLineRefs: ["line:IDFM:C01383"],
+        impactedStopNames: [],
+      },
+    };
+    const wrapper = mount(UserFriendlyTrafficModal, {
+      attachTo: document.body,
+      props: { alert, open: true },
+    });
+
+    expect(wrapper.get(".pattern-summary-title").text()).toBe(
+      "Panne de signalisation",
+    );
+    expect(
+      wrapper.get(".pattern-traffic-friendly-summary__incident-icon svg").classes(),
+    ).toContain("lucide-radio-tower");
+
+    wrapper.unmount();
+  });
+
+  it("uses the concise works title and multi-station tile label for bus 317", async () => {
+    mockFrenchI18n();
+    const { default: UserFriendlyTrafficModal } =
+      await import("../src/components/UserFriendlyTrafficModal.vue");
+    const alert: TrafficAlertModalData = {
+      label: "Perturbation",
+      tone: "red",
+      disruption: {
+        id: "bus-317-diversion",
+        title: "Bus 317 : Travaux - Arrêt(s) non desservi(s)",
+        message:
+          "La ligne 317 est déviée : les arrêts situés entre La Fourchette de Champigny et Libération - Rabelais ne sont plus desservis. Reprise estimée : dimanche 30 août 2026, à partir de 03h30. Raison : travaux.",
+        kind: "works",
+        applicationPeriods: [{ begin: "20260722T120000", end: "20260830T033000" }],
+        impactedLineRefs: ["line:IDFM:C0317"],
+        impactedStopNames: [
+          "La Fourchette de Champigny (Champigny-sur-Marne)",
+          "Godefroy Cavaignac / Libération - Rabelais (Saint-Maur-des-Fossés)",
+        ],
+      },
+    };
+    const wrapper = mount(UserFriendlyTrafficModal, {
+      attachTo: document.body,
+      props: { alert, open: true },
+    });
+
+    expect(wrapper.get(".pattern-summary-title").text()).toBe("Travaux");
+    expect(wrapper.get(".traffic-alert-modal__date-tile").text()).toContain(
+      "Multiple stations non desservies",
+    );
+    expect(wrapper.get(".traffic-alert-modal__date-tile").text()).not.toContain(
+      "Station non desservie : Travaux",
+    );
+
+    wrapper.unmount();
+  });
+
+  it("uses the station-not-served pattern for the RER A Nation tile", async () => {
+    mockFrenchI18n();
+    const { default: UserFriendlyTrafficModal } =
+      await import("../src/components/UserFriendlyTrafficModal.vue");
+    const alert: TrafficAlertModalData = {
+      label: "Interruption",
+      tone: "red",
+      disruption: {
+        id: "rer-a-nation-closure",
+        title: "Travaux",
+        message: [
+          "Période : toute la journée.",
+          "Dates : du lundi 29 juin au dimanche 30 août.",
+          "RER A : Nation du 29/06 au 30/08",
+        ].join("\n"),
+        kind: "works",
+        applicationPeriods: [{ begin: "20260629T000000", end: "20260830T235900" }],
+        impactedLineRefs: ["line:IDFM:C01742"],
+        impactedStopNames: ["Nation (Paris)"],
+      },
+    };
+    const wrapper = mount(UserFriendlyTrafficModal, {
+      attachTo: document.body,
+      props: { alert, open: true },
+    });
+
+    expect(wrapper.get(".traffic-alert-modal__date-tile").text()).toContain(
+      "Station non desservie : Nation",
+    );
 
     wrapper.unmount();
   });

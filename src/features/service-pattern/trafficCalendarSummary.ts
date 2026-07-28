@@ -17,6 +17,7 @@ export type PatternTrafficSummaryIncidentType =
   | "fallen-tree"
   | "luggage"
   | "signalling"
+  | "diversion"
   | "suspicious-package"
   | "medical"
   | "train-breakdown"
@@ -128,6 +129,16 @@ const SIGNALLING_KEYWORDS = [
   "defaut de signal",
   "panne de signal",
   "signal failure",
+];
+const SIGNALLING_FAILURE_KEYWORDS = [
+  "defaut de signal",
+  "panne de signal",
+  "signal failure",
+];
+const WORKS_KEYWORDS = ["travaux", "chantier", "maintenance", "works"];
+const DIVERSION_PATTERNS = [
+  /\bla ligne\b[\s\S]{0,160}\best deviee\b/u,
+  /\bline\b[\s\S]{0,160}\bis diverted\b/u,
 ];
 const SUSPICIOUS_PACKAGE_KEYWORDS = [
   "colis suspect",
@@ -301,7 +312,6 @@ export function classifyPatternTrafficIncident(
       .join(" "),
   );
   const title = normalizeTrafficText(disruption.title);
-  const worksKeywords = ["travaux", "chantier", "maintenance", "works"];
   const interruptionKeywords = [
     "interrompu",
     "interrompue",
@@ -315,9 +325,18 @@ export function classifyPatternTrafficIncident(
     "no service",
   ];
 
-  if (disruption.kind === "works" || containsAny(title, worksKeywords)) {
+  if (containsAny(searchable, SIGNALLING_FAILURE_KEYWORDS)) {
+    return "signalling";
+  }
+  const isDiversion = containsTrafficDiversion(searchable);
+  if (
+    disruption.kind === "works" ||
+    containsAny(title, WORKS_KEYWORDS) ||
+    (isDiversion && containsAny(searchable, WORKS_KEYWORDS))
+  ) {
     return "works";
   }
+  if (isDiversion) return "diversion";
   if (containsAny(searchable, CONCERT_KEYWORDS)) return "concert";
   if (containsAny(searchable, SPORT_KEYWORDS)) return "sport";
   if (containsAny(searchable, CELEBRATION_KEYWORDS)) return "celebration";
@@ -346,7 +365,7 @@ export function classifyPatternTrafficIncident(
   ) {
     return "interruption";
   }
-  if (containsAny(searchable, worksKeywords)) return "works";
+  if (containsAny(searchable, WORKS_KEYWORDS)) return "works";
   if (disruption.kind === "information") return "information";
   return "incident";
 }
@@ -357,6 +376,12 @@ export function getPatternTrafficSummaryCopy(
   const sourceText = [disruption.motif, disruption.message, disruption.cause, disruption.title]
     .filter((value): value is string => Boolean(value))
     .join("\n");
+  const normalizedSourceText = normalizeTrafficText(sourceText);
+  if (containsTrafficDiversion(normalizedSourceText)) {
+    return containsAny(normalizedSourceText, WORKS_KEYWORDS) || disruption.kind === "works"
+      ? { title: "Travaux" }
+      : { title: "Déviation" };
+  }
   const labelledReason = extractLabelledTrafficReason(sourceText);
   if (labelledReason && !isGenericTrafficTitle(labelledReason)) {
     return splitTrafficSummaryCopy(labelledReason);
@@ -386,6 +411,13 @@ export function getPatternTrafficSummaryCopy(
 
   const title = getConciseTrafficTitle(disruption.title);
   const lineStatusTitle = extractLineStatusTitle(sourceText);
+  if (
+    title &&
+    normalizeTrafficText(title) === "travaux" &&
+    /\b(?:non|pas)\s+desservi(?:e|s|es)?\b/iu.test(sourceText)
+  ) {
+    return { title };
+  }
   if (title && lineStatusTitle && isVerboseOperationalTrafficTitle(title)) {
     return {
       title: lineStatusTitle,
@@ -717,6 +749,10 @@ function isGenericTrafficTitle(value: string): boolean {
     return true;
   }
 
+  if (/^(?:arrets?|stations?)(?: s)? non desservi(?:e|s|es)?(?: s)?$/u.test(normalized)) {
+    return true;
+  }
+
   return /^(?:le )?(?:trafic|circulation|service) (?:est )?(?:(?:tres|fortement|partiellement|legerement) )?(?:interrompu|interrompue|suspendu|suspendue|perturbe|perturbee|ralenti|ralentie)$/u.test(
     normalized,
   );
@@ -729,6 +765,10 @@ function isScheduleOnlyText(value: string): boolean {
 
 function containsAny(value: string, keywords: string[]): boolean {
   return keywords.some((keyword) => value.includes(keyword));
+}
+
+function containsTrafficDiversion(value: string): boolean {
+  return DIVERSION_PATTERNS.some((pattern) => pattern.test(value));
 }
 
 function formatClock(date: Date): string {
