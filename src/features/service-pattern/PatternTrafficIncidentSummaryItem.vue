@@ -51,7 +51,13 @@ const emit = defineEmits<{ activate: [] }>();
       class="pattern-traffic-friendly-summary__copy"
       :class="{ 'small-title': props.smallTitle }"
     >
-      <strong class="pattern-summary-title" :title="title">{{ title }}</strong>
+      <strong
+        class="pattern-summary-title"
+        :class="{ 'pattern-summary-title--small': props.smallTitle }"
+        :title="title"
+      >
+        {{ title }}
+      </strong>
       <span
         v-if="subtitle"
         class="pattern-traffic-friendly-summary__description"
@@ -194,9 +200,9 @@ const emit = defineEmits<{ activate: [] }>();
   line-height: 1.3;
 }
 
-.pattern-traffic-friendly-summary__copy.small-title strong {
-  font-size: 1.08rem;
-  line-height: 1.25;
+.pattern-summary-title--small {
+  font-size: 1rem;
+  line-height: 1.2;
 }
 
 .pattern-traffic-friendly-summary__description {

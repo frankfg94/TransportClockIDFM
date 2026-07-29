@@ -1233,6 +1233,11 @@ describe("DetailedLineMapPicker sidebar", () => {
 
     expect(wrapper.find('[data-testid="app-right-panel"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="pattern-traffic-calendar"]').exists()).toBe(true);
+    expect(
+      wrapper
+        .findAll(".pattern-summary-title")
+        .every((title) => title.classes().includes("pattern-summary-title--small")),
+    ).toBe(true);
     expect(loadStationTransfers).toHaveBeenCalledTimes(2);
 
     await wrapper.get('[data-date="2026-07-20"]').trigger("click");

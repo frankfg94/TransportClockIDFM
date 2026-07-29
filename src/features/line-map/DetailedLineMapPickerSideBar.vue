@@ -364,20 +364,27 @@ function formatFrequency(minutes?: number): string {
 
 <style scoped>
 .line-map-sidebar {
+  box-sizing: border-box;
   color: var(--ink);
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   height: 100%;
+  max-height: 100%;
   min-height: 0;
+  min-width: 0;
   width: 100%;
 }
 
 .line-map-sidebar__content {
   display: grid;
+  flex: 1 1 auto;
   gap: 16px;
   min-height: 0;
-  overflow: auto;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 20px;
+  scrollbar-gutter: stable;
 }
 
 .line-map-sidebar__entrances {
@@ -633,6 +640,7 @@ function formatFrequency(minutes?: number): string {
   background: #ffffff;
   border-top: 1px solid var(--border);
   display: grid;
+  flex: 0 0 auto;
   gap: 10px;
   padding: 16px 20px 20px;
 }

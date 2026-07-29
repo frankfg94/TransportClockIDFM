@@ -95,6 +95,7 @@ const { t } = useI18n();
       :user-friendly-summary="userFriendlySummary"
       mode="modal"
       focusable-summaries
+      :small-title="smallTitle"
       :show-identity="false"
       @previous="emit('previous')"
       @next="emit('next')"
