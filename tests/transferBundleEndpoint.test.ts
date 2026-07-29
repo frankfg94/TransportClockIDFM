@@ -550,6 +550,159 @@ describe("transfer bundle endpoint", () => {
     ).toBe("stop_area:IDFM:71305");
   });
 
+  it.each([
+    [
+      "FR::Quay:50121960:FR1",
+      "Gare de Lyon - Diderot",
+      "Paris 12e",
+      "stop_area:IDFM:73626",
+      "Gare de Lyon",
+    ],
+    [
+      "FR::Quay:50114394:FR1",
+      "Montparnasse - Rue du Départ",
+      "Paris 15e",
+      "stop_area:IDFM:71139",
+      "Gare Montparnasse",
+    ],
+    [
+      "FR::Quay:50115010:FR1",
+      "Montparnasse - Cinémas",
+      "Paris 6e",
+      "stop_area:IDFM:71139",
+      "Gare Montparnasse",
+    ],
+  ])(
+    "matches bus 91 quay %s to its official interchange stop area",
+    (stopAreaRef, label, city, expectedStopAreaRef, officialLabel) => {
+      expect(
+        findMatchingLineStation(
+          { stopAreaRef, label, city },
+          [
+            {
+              id: expectedStopAreaRef,
+              label: officialLabel,
+              city: "Paris",
+              monitoringRef: "",
+              scheduleStopAreaRef: expectedStopAreaRef,
+            },
+          ],
+        )?.scheduleStopAreaRef,
+      ).toBe(expectedStopAreaRef);
+    },
+  );
+
+  it("loads official interchange lines for the three bus 91 quays", async () => {
+    await clearServerTransferBundles();
+    const targets = [
+      {
+        stopAreaRef: "FR::Quay:50121960:FR1",
+        label: "Gare de Lyon - Diderot",
+        city: "Paris 12e",
+      },
+      {
+        stopAreaRef: "FR::Quay:50114394:FR1",
+        label: "Montparnasse - Rue du Départ",
+        city: "Paris 15e",
+      },
+      {
+        stopAreaRef: "FR::Quay:50115010:FR1",
+        label: "Montparnasse - Cinémas",
+        city: "Paris 6e",
+      },
+    ];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = decodeURIComponent(input.toString());
+
+      if (url.includes("/lines/line:IDFM:C01122/stop_areas?")) {
+        return jsonResponse({
+          stop_areas: [
+            {
+              id: "stop_area:IDFM:73626",
+              name: "Gare de Lyon",
+              administrative_regions: [{ name: "Paris" }],
+            },
+            {
+              id: "stop_area:IDFM:71139",
+              name: "Gare Montparnasse",
+              administrative_regions: [{ name: "Paris" }],
+            },
+          ],
+        });
+      }
+
+      if (url.includes("/places_nearby?")) {
+        return jsonResponse({ places_nearby: [] });
+      }
+
+      if (url.includes("/stop_areas/stop_area:IDFM:73626/lines?")) {
+        return jsonResponse({
+          lines: [
+            {
+              id: "line:IDFM:C01122",
+              code: "91",
+              commercial_mode: { name: "Bus" },
+              physical_modes: [{ name: "Bus" }],
+            },
+            {
+              id: "line:IDFM:C01384",
+              code: "14",
+              commercial_mode: { name: "Métro" },
+              physical_modes: [{ name: "Métro" }],
+            },
+          ],
+        });
+      }
+
+      if (url.includes("/stop_areas/stop_area:IDFM:71139/lines?")) {
+        return jsonResponse({
+          lines: [
+            {
+              id: "line:IDFM:C01122",
+              code: "91",
+              commercial_mode: { name: "Bus" },
+              physical_modes: [{ name: "Bus" }],
+            },
+            {
+              id: "line:IDFM:C01374",
+              code: "4",
+              commercial_mode: { name: "Métro" },
+              physical_modes: [{ name: "Métro" }],
+            },
+          ],
+        });
+      }
+
+      return jsonResponse({ lines: [] });
+    });
+    const response = await createTransferBundleResponse(
+      {
+        backendCacheEnabled: false,
+        lineId: "line:IDFM:C01122",
+        lineLabel: "91",
+        nearbyDistanceMeters: 200,
+        targets,
+        transferResolverMode: "nearby",
+      },
+      { fetcher: fetcher as unknown as typeof fetch },
+    );
+
+    expect(response.transfersByStopAreaRef[targets[0]!.stopAreaRef]).toMatchObject([
+      { id: "line:IDFM:C01384", label: "14", family: "METRO" },
+    ]);
+    expect(response.transfersByStopAreaRef[targets[1]!.stopAreaRef]).toMatchObject([
+      { id: "line:IDFM:C01374", label: "4", family: "METRO" },
+    ]);
+    expect(response.transfersByStopAreaRef[targets[2]!.stopAreaRef]).toMatchObject([
+      { id: "line:IDFM:C01374", label: "4", family: "METRO" },
+    ]);
+    expect(
+      fetcher.mock.calls.some((call) =>
+        decodeURIComponent(String(call[0])).includes("/pt_objects?"),
+      ),
+    ).toBe(false);
+  });
+
   it("rejects the Bobigny homonym when resolving Hôtel de Ville de La Courneuve", () => {
     expect(
       findMatchingLineStation(

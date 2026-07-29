@@ -6,6 +6,32 @@ import {
 } from "../src/services/transferLineOptions";
 
 describe("transfer line presentation options", () => {
+  it("resolves the T1 commercial alias to the official tram logo", () => {
+    const transfer = createTransferLineOption({
+      code: "T1",
+      id: "line:IDFM:T1",
+    });
+
+    expect(transfer).toMatchObject({
+      family: "TRAM",
+      iconUrl:
+        "https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/tramway/picto-ligne-LIGIDFMC01389.svg",
+    });
+  });
+
+  it("keeps the C02404 replacement identity as a bus when its mode says bus", () => {
+    const replacement = createTransferLineOption({
+      code: "T1",
+      id: "line:IDFM:C02404",
+      mode: "Bus",
+    });
+
+    expect(replacement).toMatchObject({
+      family: "BUS",
+      iconUrl: undefined,
+    });
+  });
+
   it("creates colored transfer badges from a single shared mapper", () => {
     const transfer = createTransferLineOption({
       code: "74",

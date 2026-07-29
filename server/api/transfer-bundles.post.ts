@@ -205,7 +205,7 @@ const COMPATIBLE_STOP_AREA_NEARBY_DISTANCE_METERS = 650;
 const MAX_COMPATIBLE_NEARBY_STOP_AREAS = 24;
 const MAX_COMPATIBLE_CONNECTIONS = 1000;
 const STRUCTURAL_LINE_CACHE_VERSION = "v3";
-const TRANSFER_BUNDLE_RESOLVER_VERSION = "v4";
+const TRANSFER_BUNDLE_RESOLVER_VERSION = "v5";
 const DEFAULT_RETENTION_DAYS = 30;
 const MAX_SERVER_RETRY_AFTER_DELAY_MS = 5_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -830,8 +830,8 @@ async function resolveNearbyTransfersForTarget(
   );
   const station =
     resolveTargetStopAreaFromLine(target, lineStopAreas, "exact") ??
-    (await searchStopAreaForTarget(target, fetcher, logger)) ??
-    resolveTargetStopAreaFromLine(target, lineStopAreas);
+    resolveTargetStopAreaFromLine(target, lineStopAreas) ??
+    (await searchStopAreaForTarget(target, fetcher, logger));
   const stopAreaRef = station?.scheduleStopAreaRef ?? station?.id;
 
   if (!station || !stopAreaRef?.startsWith("stop_area:")) {
@@ -1027,6 +1027,17 @@ async function resolveStationForTarget(
     return exactLineStation;
   }
 
+  const compatibleLineStation = findMatchingLineStation(target, stations);
+
+  if (compatibleLineStation) {
+    logTransferBundleDebug(logger, "info", "station-resolve:compatible-line-station-match", {
+      station: summarizeStationOption(compatibleLineStation),
+      target: summarizeTransferTarget(target),
+    });
+
+    return compatibleLineStation;
+  }
+
   const searchedStation = await searchStopAreaForTarget(target, fetcher, logger);
 
   logTransferBundleDebug(
@@ -1039,7 +1050,7 @@ async function resolveStationForTarget(
     },
   );
 
-  return searchedStation ?? findMatchingLineStation(target, stations);
+  return searchedStation;
 }
 
 function createStationOptionForTarget(
@@ -1483,7 +1494,7 @@ export function findMatchingLineStation(
   const compatibleStations = stations.filter((station) => {
     const stationCity = normalizeBundleStationName(station.city ?? "");
 
-    return !targetCity || !stationCity || stationCity === targetCity;
+    return !targetCity || !stationCity || areCompatibleBundleCities(stationCity, targetCity);
   });
 
   return (
@@ -1492,10 +1503,10 @@ export function findMatchingLineStation(
     ) ??
     compatibleStations
       .map((station) => ({
-        score: scoreStationNameMatch(
-          normalizedTarget,
-          targetTokens,
-          normalizeBundleStationName(`${station.label} ${station.city ?? ""}`),
+        score: Math.max(
+          ...createLineStationNameKeys(station.label).map((stationNameKey) =>
+            scoreStationNameMatch(normalizedTarget, targetTokens, stationNameKey),
+          ),
         ),
         station,
       }))
@@ -1516,9 +1527,29 @@ function findExactMatchingLineStation(
 
     return (
       normalizeBundleStationName(station.label) === normalizedTarget &&
-      (!targetCity || !stationCity || stationCity === targetCity)
+      (!targetCity || !stationCity || areCompatibleBundleCities(stationCity, targetCity))
     );
   });
+}
+
+function areCompatibleBundleCities(left: string, right: string): boolean {
+  return normalizeBundleCityIdentity(left) === normalizeBundleCityIdentity(right);
+}
+
+function createLineStationNameKeys(value: string): string[] {
+  const normalized = normalizeBundleStationName(value);
+  const withoutGarePrefix = normalized.replace(
+    /^gare\s+(?:(?:de|du|des)\s+)?/u,
+    "",
+  );
+
+  return Array.from(new Set([normalized, withoutGarePrefix].filter(Boolean)));
+}
+
+function normalizeBundleCityIdentity(value: string): string {
+  return value
+    .replace(/\s+\d{1,2}(?:er|e|eme)?(?:\s+arrondissement)?$/u, "")
+    .trim();
 }
 
 async function searchStopAreaForTarget(
@@ -2601,7 +2632,7 @@ function scoreStationNameMatch(
     return 0;
   }
 
-  return sharedTokenCount >= Math.min(targetTokens.length, 2) ? 40 + sharedTokenCount : 0;
+  return sharedTokenCount >= 2 ? 40 + sharedTokenCount : 0;
 }
 
 function createBundleStationTokens(value: string): string[] {
@@ -2617,6 +2648,8 @@ function createBundleStationTokens(value: string): string[] {
           "rer",
           "tram",
           "bus",
+          "hotel",
+          "ville",
           "sur",
           "sous",
           "les",

@@ -4,6 +4,7 @@ import {
   transitFamilyToMode,
   transitModeToFamily,
 } from "./linePresentation";
+import { inferTransitFamilyFromLineIdentity } from "./lineIcons";
 
 export interface TransferLineOptionSource {
   code?: string;
@@ -24,6 +25,7 @@ export function createTransferLineOption(
   const family =
     source.family ??
     transitModeToFamily(source.mode) ??
+    inferTransitFamilyFromLineIdentity(source) ??
     inferTransferFamily(source);
   const label = normalizeTransferLabel(
     source.code ?? source.label ?? source.name ?? source.longName ?? source.id,

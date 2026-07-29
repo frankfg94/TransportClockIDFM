@@ -1,5 +1,8 @@
 import type { LineConfig, TransitFamily, TransitMode } from "../types/transit";
-import { createRatpLineIconUrls } from "./lineIcons";
+import {
+  createRatpLineIconUrls,
+  inferTransitFamilyFromLineIdentity,
+} from "./lineIcons";
 
 type LinePresentationSource = {
   code?: string;
@@ -55,7 +58,10 @@ const OFFICIAL_LINE_PRESENTATION: Record<
 export function createLinePresentation(
   source: LinePresentationSource,
 ): LinePresentation {
-  const family = source.family ?? transitModeToFamily(source.mode);
+  const family =
+    source.family ??
+    transitModeToFamily(source.mode) ??
+    inferTransitFamilyFromLineIdentity(source);
   const official = resolveOfficialLinePresentation(source);
   const iconUrls = createRatpLineIconUrls({
     code: source.code ?? source.shortName,
