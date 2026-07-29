@@ -167,6 +167,9 @@ const DEFAULT_ROUNDED_POLYLINE_OPTIONS: Required<RoundedPolylineOptions> = {
   maximumCornerRadius: 7,
   cornerRadiusRatio: 0.22,
 };
+// Two GTFS shapes can project the same shared station a few metres apart.
+// Permit a short final extension, but never one large enough to reshape the edge.
+const SHARED_ENDPOINT_EXTENSION_MULTIPLIER = 4;
 
 /**
  * Sequential provider resolver. A provider either supplies every requested edge
@@ -363,18 +366,38 @@ export function alignLineGeometrySegmentEndpoints(
     ]),
   );
   const maximumSnapDistance = options.maximumEndpointSnapDistance ?? Number.POSITIVE_INFINITY;
+  const maximumSharedEndpointExtensionDistance =
+    maximumSnapDistance * SHARED_ENDPOINT_EXTENSION_MULTIPLIER;
   const alignedSegments = segments.map((segment) => {
     const points = [...segment.points];
     const from = stopPoints.get(segment.fromStopId);
     const to = stopPoints.get(segment.toStopId);
 
-    if (from && points.length > 0 && pointDistance(points[0], from) <= maximumSnapDistance) {
+    if (
+      from &&
+      points.length > 0 &&
+      shouldConnectSegmentEndpoint(
+        segment.fromStopId,
+        points[0],
+        from,
+        candidates,
+        maximumSnapDistance,
+        maximumSharedEndpointExtensionDistance,
+      )
+    ) {
       points[0] = from;
     }
     if (
       to &&
       points.length > 1 &&
-      pointDistance(points[points.length - 1], to) <= maximumSnapDistance
+      shouldConnectSegmentEndpoint(
+        segment.toStopId,
+        points[points.length - 1],
+        to,
+        candidates,
+        maximumSnapDistance,
+        maximumSharedEndpointExtensionDistance,
+      )
     ) {
       points[points.length - 1] = to;
     }
@@ -389,6 +412,20 @@ export function alignLineGeometrySegmentEndpoints(
   });
 
   return { segments: alignedSegments, stopPoints };
+}
+
+function shouldConnectSegmentEndpoint(
+  stopId: string,
+  endpoint: LineGeometryPoint,
+  anchor: LineGeometryPoint,
+  candidates: Map<string, LineGeometryPoint[]>,
+  maximumSnapDistance: number,
+  maximumSharedEndpointExtensionDistance: number,
+): boolean {
+  const gap = pointDistance(endpoint, anchor);
+  if (gap <= maximumSnapDistance) return true;
+  if ((candidates.get(stopId)?.length ?? 0) < 2) return false;
+  return gap <= maximumSharedEndpointExtensionDistance;
 }
 
 /** Stable, JSON-safe representation used by Vitest snapshots and diagnostics. */

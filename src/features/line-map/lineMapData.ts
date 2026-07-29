@@ -36,6 +36,7 @@ import {
 import { getCoordinatesDistanceKm } from "../../services/distance";
 import { fetchResolvedLineGeometry } from "../../services/lineGeometry";
 import { loadTransferBundleForTarget } from "../service-pattern/transferBundles";
+import { filterCurrentLineTransfers } from "../service-pattern/transferVisibility";
 import { applyResolvedLineGeometry, createLineGeometryRequest } from "./lineGeometryViewModel";
 
 const VIEWBOX_WIDTH = 1080;
@@ -248,6 +249,17 @@ export async function loadStationTransfers(
   currentLine?: LineSearchOption,
 ): Promise<TransferLineOption[]> {
   const currentLineId = currentLine?.navitiaId ?? currentLine?.id;
+  const removeCurrentLine = (transfers: TransferLineOption[]) =>
+    filterCurrentLineTransfers(
+      transfers,
+      currentLine
+        ? {
+            family: currentLine.family,
+            ids: [currentLine.id, currentLine.navitiaId, currentLine.ref],
+            labels: [currentLine.label, currentLine.displayName],
+          }
+        : undefined,
+    );
 
   if (currentLineId && currentLine) {
     const bundledTransfers = await loadTransferBundleForTarget({
@@ -262,11 +274,11 @@ export async function loadStationTransfers(
     }).catch(() => undefined);
 
     if (bundledTransfers !== undefined) {
-      return bundledTransfers;
+      return removeCurrentLine(bundledTransfers);
     }
   }
 
-  return fetchStationTransfers(station, currentLineId);
+  return removeCurrentLine(await fetchStationTransfers(station, currentLineId));
 }
 
 export async function loadTransferLineDirections(lineId: string): Promise<TransferLineDirections> {
@@ -376,13 +388,15 @@ function findCanonicalStationForStop(
   const compatibleCandidates = lookup.stations.filter((station) =>
     haveCompatibleOfficialStationLabels(stop.label, station.label),
   );
+  const compatibleMatch = selectProximateCanonicalStation(
+    stop,
+    compatibleCandidates,
+    CANONICAL_STATION_NAME_MAX_DISTANCE_KM,
+    CANONICAL_STATION_NAME_AMBIGUITY_MARGIN_KM,
+  );
 
-  if (compatibleCandidates.length === 1) {
-    return compatibleCandidates[0];
-  }
-
-  if (compatibleCandidates.length > 1) {
-    return selectCanonicalStationCandidate(stop, compatibleCandidates);
+  if (compatibleMatch) {
+    return compatibleMatch;
   }
 
   const labelCandidates = lookup.stations.filter((station) =>

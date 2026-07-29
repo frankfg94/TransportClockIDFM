@@ -15,6 +15,11 @@ export interface GtfsManifest {
   lineCount: number;
 }
 
+export interface GtfsLineLookupIndex {
+  schemaVersion: 1;
+  lineIdsByLabel: Record<string, string[]>;
+}
+
 export interface GtfsStopShapeProjection {
   stopId: string;
   shapePointIndex: number;

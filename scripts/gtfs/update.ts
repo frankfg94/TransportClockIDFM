@@ -16,9 +16,11 @@ import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3
 import { Unzip, UnzipInflate } from "fflate";
 import type {
   GtfsLineArtifact,
+  GtfsLineLookupIndex,
   GtfsManifest,
   GtfsStopShapeProjection,
 } from "../../server/services/gtfs/types";
+import { normalizeGtfsLineLabel } from "../../server/services/gtfs/labels";
 import { projectStopsMonotonically } from "../../server/services/lineGeometry/traceProjection";
 
 const GTFS_SOURCE_URL = "https://eu.ftp.opendatasoft.com/stif/GTFS/IDFM-gtfs.zip";
@@ -69,6 +71,7 @@ type Pattern = {
 const outputDir = resolve(process.env.GTFS_OUTPUT_DIR || ".data/gtfs");
 const resetRequested = process.argv.includes("--reset");
 const forceRequested = process.argv.includes("--force");
+const reindexRequested = process.argv.includes("--reindex");
 const r2 = createR2Client();
 let lastProgressAt = 0;
 
@@ -102,7 +105,10 @@ async function main(): Promise<void> {
     try {
       const archivePath = join(tempRoot, "idfm-gtfs.zip");
       const downloaded = await downloadArchive(archivePath, previous);
-      if (downloaded.status === "unchanged" || previous?.sha256 === downloaded.sha256) {
+      if (
+        downloaded.status === "unchanged" ||
+        (!reindexRequested && previous?.sha256 === downloaded.sha256)
+      ) {
         report("unchanged", "The installed GTFS archive is already current.");
         return;
       }
@@ -150,8 +156,10 @@ async function downloadArchive(
   | { status: "downloaded"; sha256: string; etag?: string; lastModified?: string }
 > {
   const headers = new Headers({ Accept: "application/zip" });
-  if (previous?.sourceEtag) headers.set("If-None-Match", previous.sourceEtag);
-  if (previous?.sourceLastModified) {
+  if (!reindexRequested && previous?.sourceEtag) {
+    headers.set("If-None-Match", previous.sourceEtag);
+  }
+  if (!reindexRequested && previous?.sourceLastModified) {
     headers.set("If-Modified-Since", previous.sourceLastModified);
   }
 
@@ -272,11 +280,11 @@ export async function buildLineArtifacts(inputDir: string, versionDir: string): 
   if (routes.size === 0 || routes.size > MAX_ROUTE_COUNT) {
     throw new Error(`GTFS route count is outside the accepted range: ${routes.size}.`);
   }
-  const activeServices = await loadActiveServices(
+  const geometryServices = await loadGeometryServices(
     join(inputDir, "calendar.txt"),
     join(inputDir, "calendar_dates.txt"),
   );
-  const trips = await loadTrips(join(inputDir, "trips.txt"), activeServices);
+  const trips = await loadTrips(join(inputDir, "trips.txt"), geometryServices);
   const patterns = await loadPatterns(join(inputDir, "stop_times.txt"), trips, stops);
   const selectedPatterns = selectPatterns(patterns);
   const wantedShapeIds = new Set(
@@ -286,6 +294,7 @@ export async function buildLineArtifacts(inputDir: string, versionDir: string): 
   const linesDir = join(versionDir, "lines");
   await fs.mkdir(linesDir, { recursive: true });
   let lineCount = 0;
+  const lineIdsByLabel = new Map<string, Set<string>>();
 
   for (const [routeId, routePatterns] of selectedPatterns) {
     const route = routes.get(routeId);
@@ -342,10 +351,26 @@ export async function buildLineArtifacts(inputDir: string, versionDir: string): 
       join(linesDir, `${normalizeLineKey(routeId)}.json`),
       JSON.stringify(artifact),
     );
+    for (const label of artifact.labels) {
+      const normalizedLabel = normalizeGtfsLineLabel(label);
+      if (!normalizedLabel) continue;
+      const lineIds = lineIdsByLabel.get(normalizedLabel) ?? new Set<string>();
+      lineIds.add(routeId);
+      lineIdsByLabel.set(normalizedLabel, lineIds);
+    }
     lineCount += 1;
 
     if (lineCount % 100 === 0) reportProgress("indexing", lineCount, selectedPatterns.size, true);
   }
+  const lookup: GtfsLineLookupIndex = {
+    schemaVersion: 1,
+    lineIdsByLabel: Object.fromEntries(
+      [...lineIdsByLabel]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([label, lineIds]) => [label, [...lineIds].sort()]),
+    ),
+  };
+  await fs.writeFile(join(versionDir, "line-index.json"), JSON.stringify(lookup));
   return lineCount;
 }
 
@@ -415,11 +440,14 @@ async function loadStops(path: string): Promise<Map<string, StopRow>> {
   return result;
 }
 
-async function loadTrips(path: string, activeServices: Set<string>): Promise<Map<string, TripRow>> {
+async function loadTrips(
+  path: string,
+  geometryServices: Set<string>,
+): Promise<Map<string, TripRow>> {
   const result = new Map<string, TripRow>();
   await readCsv(path, (row) => {
     if (!row.trip_id || !row.route_id || !row.shape_id) return;
-    if (activeServices.size && !activeServices.has(row.service_id)) return;
+    if (geometryServices.size && !geometryServices.has(row.service_id)) return;
     result.set(row.trip_id, {
       routeId: row.route_id,
       serviceId: row.service_id,
@@ -516,30 +544,42 @@ async function loadShapes(
   );
 }
 
-async function loadActiveServices(
+/**
+ * Geometry must survive long planned interruptions. Keep every service that
+ * has not permanently expired, including regular trips scheduled to resume
+ * beyond the next 31 days. Date-specific removals affect timetables, not the
+ * physical line shape.
+ */
+async function loadGeometryServices(
   calendarPath: string,
   exceptionsPath: string,
 ): Promise<Set<string>> {
-  const active = new Set<string>();
-  const dates = Array.from({ length: 31 }, (_, offset) => {
-    const date = new Date();
-    date.setUTCDate(date.getUTCDate() + offset);
-    return date;
-  });
+  const services = new Set<string>();
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
   await readCsv(calendarPath, (row) => {
-    const start = parseGtfsDate(row.start_date);
     const end = parseGtfsDate(row.end_date);
-    if (!row.service_id || !start || !end) return;
-    if (dates.some((date) => date >= start && date <= end && row[weekdayKey(date)] === "1"))
-      active.add(row.service_id);
+    if (!row.service_id || !end || end < today) return;
+    if (
+      [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+      ].some((day) => row[day] === "1")
+    ) {
+      services.add(row.service_id);
+    }
   });
   await readCsv(exceptionsPath, (row) => {
     const date = parseGtfsDate(row.date);
-    if (!row.service_id || !date || !dates.some((item) => sameUtcDay(item, date))) return;
-    if (row.exception_type === "1") active.add(row.service_id);
-    if (row.exception_type === "2") active.delete(row.service_id);
+    if (!row.service_id || !date || date < today) return;
+    if (row.exception_type === "1") services.add(row.service_id);
   });
-  return active;
+  return services;
 }
 
 async function readCsv(path: string, onRow: (row: CsvRow) => void): Promise<void> {
@@ -611,6 +651,14 @@ async function publishVersion(versionDir: string, sha256: string): Promise<void>
   if (!r2) return;
   const linesDir = join(versionDir, "lines");
   const files = await fs.readdir(linesDir);
+  await r2.client.send(
+    new PutObjectCommand({
+      Bucket: r2.bucket,
+      Key: `gtfs/versions/${sha256}/line-index.json`,
+      Body: createReadStream(join(versionDir, "line-index.json")),
+      ContentType: "application/json",
+    }),
+  );
   let uploaded = 0;
   for (const filename of files) {
     await r2.client.send(
@@ -723,14 +771,4 @@ function parseGtfsDate(value: string | undefined): Date | undefined {
       Number(value!.slice(6, 8)),
     ),
   );
-}
-
-function weekdayKey(date: Date): string {
-  return ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"][
-    date.getUTCDay()
-  ];
-}
-
-function sameUtcDay(left: Date, right: Date): boolean {
-  return left.toISOString().slice(0, 10) === right.toISOString().slice(0, 10);
 }

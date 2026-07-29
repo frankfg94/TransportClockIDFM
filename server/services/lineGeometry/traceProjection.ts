@@ -31,6 +31,13 @@ export interface ProjectedTrace {
   reversed: boolean;
 }
 
+interface MonotonicProjectionState {
+  projection: TraceProjection;
+  previousIndex: number;
+  totalErrorMeters: number;
+  maximumErrorMeters: number;
+}
+
 export interface CanonicalTraceGeometry {
   stops: LineGeometryStopRequest[];
   branches: LineGeometryBranchRequest[];
@@ -90,10 +97,7 @@ export function createSegmentsFromTraces(
 
       const projected =
         projectedBranch ??
-        projectStopsMonotonically(
-          [branchStops[index], branchStops[index + 1]],
-          traces,
-        );
+        projectStopsMonotonically([branchStops[index], branchStops[index + 1]], traces);
       const from = branchStops[index];
       const to = branchStops[index + 1];
       let coordinates = projected
@@ -124,9 +128,9 @@ export function createSegmentsFromTraces(
 }
 
 /**
- * Keeps the requested station graph complete when a provider trace only
- * covers part of a line. Trace-backed edges stay precise; only unmatched
- * physical edges fall back to their station coordinates.
+ * Allows separate provider traces to cover adjacent requested edges while
+ * keeping the provider result all-or-nothing. An unmatched physical edge must
+ * reject the result instead of being presented as a trace-backed chord.
  */
 export function createCompleteSegmentsFromTraces(
   request: LineGeometryRequest,
@@ -153,19 +157,8 @@ export function createCompleteSegmentsFromTraces(
         },
         traces,
       )?.[0];
-
-      segments.set(
-        key,
-        projected ?? {
-          id: key,
-          fromStopId,
-          toStopId,
-          coordinates: [
-            { lon: from.lon, lat: from.lat },
-            { lon: to.lon, lat: to.lat },
-          ],
-        },
-      );
+      if (!projected) return undefined;
+      segments.set(key, projected);
     }
   }
 
@@ -191,41 +184,37 @@ export function projectStopsMonotonically(
         [true, [...trace].reverse()],
       ] as const
     ).flatMap(([reversed, orientedTrace]) => {
-      const projections = stops.map((stop) => projectPointOnTrace(stop, orientedTrace));
-      if (projections.some((projection) => !projection)) return [];
-
-      const defined = projections as TraceProjection[];
-      const monotonic = defined.every(
-        (projection, index) => index === 0 || projection.along >= defined[index - 1].along,
+      const defined = selectMonotonicProjections(
+        stops,
+        orientedTrace,
+        directDistance,
+        maximumErrorMeters,
       );
+      if (!defined) return [];
       const errorMeters = Math.max(...defined.map((projection) => projection.errorMeters));
       const meanErrorMeters =
         defined.reduce((total, projection) => total + projection.errorMeters, 0) / defined.length;
       const pathDistance = defined[defined.length - 1].along - defined[0].along;
       const pathRatio = pathDistance / Math.max(directDistance, 1);
-      const plausiblePath = pathRatio >= MIN_PATH_RATIO && pathRatio <= MAX_PATH_RATIO;
       const score = meanErrorMeters + errorMeters * 0.35 + Math.max(0, pathRatio - 2.5) * 40;
 
-      return monotonic && plausiblePath && errorMeters <= maximumErrorMeters
-        ? [
-            {
-              trace: orientedTrace,
-              projections: defined,
-              errorMeters,
-              meanErrorMeters,
-              pathRatio,
-              score,
-              reversed,
-            },
-          ]
-        : [];
+      return [
+        {
+          trace: orientedTrace,
+          projections: defined,
+          errorMeters,
+          meanErrorMeters,
+          pathRatio,
+          score,
+          reversed,
+        },
+      ];
     });
   });
 
   return candidates.sort(
     (left, right) =>
-      getTracePathRatioPenalty(left.pathRatio) -
-        getTracePathRatioPenalty(right.pathRatio) ||
+      getTracePathRatioPenalty(left.pathRatio) - getTracePathRatioPenalty(right.pathRatio) ||
       left.score - right.score ||
       left.errorMeters - right.errorMeters ||
       left.trace.length - right.trace.length,
@@ -236,12 +225,287 @@ function getTracePathRatioPenalty(pathRatio: number): number {
   return pathRatio > MAX_PREFERRED_PATH_RATIO ? 1 : 0;
 }
 
-function projectPointOnTrace(
+/**
+ * Finds one globally monotonic projection path instead of independently taking
+ * the nearest shape point for every stop. Closed and self-crossing routes can
+ * contain the same station more than once; a local nearest-point choice maps
+ * both occurrences to the first visit and makes an otherwise valid loop look
+ * non-monotonic.
+ */
+function selectMonotonicProjections(
+  points: LineGeometryCoordinate[],
+  trace: LineGeometryCoordinate[],
+  directDistance: number,
+  maximumErrorMeters: number,
+): TraceProjection[] | undefined {
+  const candidateLayers = points.map((point) =>
+    projectPointCandidatesOnTrace(point, trace).filter(
+      (candidate) => candidate.errorMeters <= maximumErrorMeters,
+    ),
+  );
+  if (candidateLayers.some((candidates) => candidates.length === 0)) {
+    return undefined;
+  }
+  if (candidateLayers.length === 2) {
+    return selectTwoPointProjectionPath(
+      candidateLayers[0],
+      candidateLayers[1],
+      directDistance,
+    );
+  }
+
+  const stateLayers: Array<Array<MonotonicProjectionState | undefined>> = [
+    candidateLayers[0].map((projection) => ({
+      projection,
+      previousIndex: -1,
+      totalErrorMeters: projection.errorMeters,
+      maximumErrorMeters: projection.errorMeters,
+    })),
+  ];
+
+  for (let layerIndex = 1; layerIndex < candidateLayers.length; layerIndex += 1) {
+    const previousStates = stateLayers[layerIndex - 1];
+    const currentCandidates = candidateLayers[layerIndex];
+    const currentStates: Array<MonotonicProjectionState | undefined> = [];
+    let previousCursor = 0;
+    let bestPreviousIndex = -1;
+
+    for (const projection of currentCandidates) {
+      while (
+        previousCursor < previousStates.length &&
+        candidateLayers[layerIndex - 1][previousCursor].along <= projection.along
+      ) {
+        const candidateState = previousStates[previousCursor];
+        const bestState = bestPreviousIndex >= 0 ? previousStates[bestPreviousIndex] : undefined;
+        if (
+          candidateState &&
+          (!bestState || compareProjectionStates(candidateState, bestState, points.length) < 0)
+        ) {
+          bestPreviousIndex = previousCursor;
+        }
+        previousCursor += 1;
+      }
+
+      const previousState = bestPreviousIndex >= 0 ? previousStates[bestPreviousIndex] : undefined;
+      currentStates.push(
+        previousState
+          ? {
+              projection,
+              previousIndex: bestPreviousIndex,
+              totalErrorMeters: previousState.totalErrorMeters + projection.errorMeters,
+              maximumErrorMeters: Math.max(
+                previousState.maximumErrorMeters,
+                projection.errorMeters,
+              ),
+            }
+          : undefined,
+      );
+    }
+
+    if (currentStates.every((state) => !state)) return undefined;
+    stateLayers.push(currentStates);
+  }
+
+  const lastLayerIndex = stateLayers.length - 1;
+  const viablePaths = stateLayers[lastLayerIndex].flatMap((state, stateIndex) => {
+    if (!state) return [];
+    const projections = reconstructProjectionPath(stateLayers, lastLayerIndex, stateIndex);
+    const pathDistance = projections[projections.length - 1].along - projections[0].along;
+    const pathRatio = pathDistance / Math.max(directDistance, 1);
+    return pathRatio >= MIN_PATH_RATIO && pathRatio <= MAX_PATH_RATIO
+      ? [{ projections, pathRatio }]
+      : [];
+  });
+
+  return viablePaths.sort(
+    (left, right) =>
+      getTracePathRatioPenalty(left.pathRatio) - getTracePathRatioPenalty(right.pathRatio) ||
+      compareProjectionPaths(left.projections, right.projections),
+  )[0]?.projections;
+}
+
+function selectTwoPointProjectionPath(
+  fromCandidates: TraceProjection[],
+  toCandidates: TraceProjection[],
+  directDistance: number,
+): TraceProjection[] | undefined {
+  const normalizedDirectDistance = Math.max(directDistance, 1);
+  const minimumPathMeters = MIN_PATH_RATIO * normalizedDirectDistance;
+  const preferredMaximumPathMeters =
+    MAX_PREFERRED_PATH_RATIO * normalizedDirectDistance;
+  const maximumPathMeters = MAX_PATH_RATIO * normalizedDirectDistance;
+
+  return (
+    selectBestProjectionPairWithinPathRange(
+      fromCandidates,
+      toCandidates,
+      minimumPathMeters,
+      preferredMaximumPathMeters,
+    ) ??
+    selectBestProjectionPairWithinPathRange(
+      fromCandidates,
+      toCandidates,
+      minimumPathMeters,
+      maximumPathMeters,
+    )
+  );
+}
+
+function selectBestProjectionPairWithinPathRange(
+  fromCandidates: TraceProjection[],
+  toCandidates: TraceProjection[],
+  minimumPathMeters: number,
+  maximumPathMeters: number,
+): TraceProjection[] | undefined {
+  const activeFromIndexes: number[] = [];
+  let nextFromIndex = 0;
+  const pairs: TraceProjection[][] = [];
+
+  for (const to of toCandidates) {
+    const latestAllowedAlong = to.along - minimumPathMeters;
+    const earliestAllowedAlong = to.along - maximumPathMeters;
+
+    while (
+      nextFromIndex < fromCandidates.length &&
+      fromCandidates[nextFromIndex].along <= latestAllowedAlong
+    ) {
+      pushProjectionCandidateIndex(
+        activeFromIndexes,
+        nextFromIndex,
+        fromCandidates,
+      );
+      nextFromIndex += 1;
+    }
+
+    while (
+      activeFromIndexes.length > 0 &&
+      fromCandidates[activeFromIndexes[0]].along < earliestAllowedAlong
+    ) {
+      popProjectionCandidateIndex(activeFromIndexes, fromCandidates);
+    }
+
+    const bestFromIndex = activeFromIndexes[0];
+    if (bestFromIndex !== undefined) {
+      pairs.push([fromCandidates[bestFromIndex], to]);
+    }
+  }
+
+  return pairs.sort(compareProjectionPaths)[0];
+}
+
+function pushProjectionCandidateIndex(
+  heap: number[],
+  candidateIndex: number,
+  candidates: TraceProjection[],
+): void {
+  heap.push(candidateIndex);
+  let index = heap.length - 1;
+
+  while (index > 0) {
+    const parentIndex = Math.floor((index - 1) / 2);
+    if (
+      compareProjectionCandidates(
+        candidates[heap[parentIndex]],
+        candidates[heap[index]],
+      ) <= 0
+    ) {
+      break;
+    }
+    [heap[parentIndex], heap[index]] = [heap[index], heap[parentIndex]];
+    index = parentIndex;
+  }
+}
+
+function popProjectionCandidateIndex(
+  heap: number[],
+  candidates: TraceProjection[],
+): void {
+  const last = heap.pop();
+  if (last === undefined || heap.length === 0) return;
+  heap[0] = last;
+  let index = 0;
+
+  while (true) {
+    const leftIndex = index * 2 + 1;
+    const rightIndex = leftIndex + 1;
+    let bestIndex = index;
+
+    if (
+      leftIndex < heap.length &&
+      compareProjectionCandidates(
+        candidates[heap[leftIndex]],
+        candidates[heap[bestIndex]],
+      ) < 0
+    ) {
+      bestIndex = leftIndex;
+    }
+    if (
+      rightIndex < heap.length &&
+      compareProjectionCandidates(
+        candidates[heap[rightIndex]],
+        candidates[heap[bestIndex]],
+      ) < 0
+    ) {
+      bestIndex = rightIndex;
+    }
+    if (bestIndex === index) return;
+    [heap[index], heap[bestIndex]] = [heap[bestIndex], heap[index]];
+    index = bestIndex;
+  }
+}
+
+function compareProjectionCandidates(
+  left: TraceProjection,
+  right: TraceProjection,
+): number {
+  return left.errorMeters - right.errorMeters || left.along - right.along;
+}
+
+function compareProjectionStates(
+  left: MonotonicProjectionState,
+  right: MonotonicProjectionState,
+  stopCount: number,
+): number {
+  return (
+    left.totalErrorMeters / stopCount +
+      left.maximumErrorMeters * 0.35 -
+      (right.totalErrorMeters / stopCount + right.maximumErrorMeters * 0.35) ||
+    left.projection.along - right.projection.along
+  );
+}
+
+function compareProjectionPaths(left: TraceProjection[], right: TraceProjection[]): number {
+  const leftMaximum = Math.max(...left.map(({ errorMeters }) => errorMeters));
+  const rightMaximum = Math.max(...right.map(({ errorMeters }) => errorMeters));
+  const leftMean = left.reduce((total, { errorMeters }) => total + errorMeters, 0) / left.length;
+  const rightMean = right.reduce((total, { errorMeters }) => total + errorMeters, 0) / right.length;
+  return (
+    leftMean + leftMaximum * 0.35 - (rightMean + rightMaximum * 0.35) ||
+    left[0].along - right[0].along
+  );
+}
+
+function reconstructProjectionPath(
+  stateLayers: Array<Array<MonotonicProjectionState | undefined>>,
+  layerIndex: number,
+  stateIndex: number,
+): TraceProjection[] {
+  const projections: TraceProjection[] = [];
+  let currentStateIndex = stateIndex;
+  for (let currentLayerIndex = layerIndex; currentLayerIndex >= 0; currentLayerIndex -= 1) {
+    const state = stateLayers[currentLayerIndex][currentStateIndex]!;
+    projections.push(state.projection);
+    currentStateIndex = state.previousIndex;
+  }
+  return projections.reverse();
+}
+
+function projectPointCandidatesOnTrace(
   point: LineGeometryCoordinate,
   trace: LineGeometryCoordinate[],
-): TraceProjection | undefined {
+): TraceProjection[] {
   let travelled = 0;
-  let best: TraceProjection | undefined;
+  const candidates: TraceProjection[] = [];
 
   for (let index = 0; index < trace.length - 1; index += 1) {
     const start = trace[index];
@@ -258,11 +522,11 @@ function projectPointOnTrace(
       errorMeters: distanceMeters(point, projected.point),
     };
 
-    if (!best || candidate.errorMeters < best.errorMeters) best = candidate;
+    candidates.push(candidate);
     travelled += segmentMeters;
   }
 
-  return best;
+  return candidates;
 }
 
 function sliceTraceBetween(

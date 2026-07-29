@@ -67,17 +67,36 @@ describe("GTFS trace projection", () => {
     expect(projected).toBeUndefined();
   });
 
+  it("keeps a viable repeated-stop passage instead of the lower-error loop occurrence", () => {
+    const from = { lon: 0, lat: 0 };
+    const to = { lon: 0.005, lat: 0 };
+    const projected = projectStopsMonotonically(
+      [from, to],
+      [
+        [
+          from,
+          { lon: 0, lat: 0.03 },
+          { lon: 0.015, lat: 0.03 },
+          { lon: 0.015, lat: 0.015 },
+          { lon: 0.00005, lat: 0 },
+          to,
+        ],
+      ],
+    );
+
+    expect(projected).toBeDefined();
+    expect(projected?.reversed).toBe(false);
+    expect(projected?.pathRatio).toBeGreaterThan(0.9);
+    expect(projected?.pathRatio).toBeLessThan(1.1);
+    expect(projected?.errorMeters).toBeLessThan(6);
+  });
+
   it("prefers a coherent reverse trace over a hybrid detour between the same stops", () => {
     const stops = [
       { lon: 2.36, lat: 48.88 },
       { lon: 2.76, lat: 48.74 },
     ];
-    const hybridTrace = [
-      stops[0],
-      { lon: 2.2, lat: 49.1 },
-      { lon: 2.9, lat: 49.1 },
-      stops[1],
-    ];
+    const hybridTrace = [stops[0], { lon: 2.2, lat: 49.1 }, { lon: 2.9, lat: 49.1 }, stops[1]];
     const coherentReverseTrace = [
       stops[1],
       { lon: 2.6, lat: 48.8 },
@@ -85,10 +104,7 @@ describe("GTFS trace projection", () => {
       stops[0],
     ];
 
-    const projected = projectStopsMonotonically(
-      stops,
-      [hybridTrace, coherentReverseTrace],
-    );
+    const projected = projectStopsMonotonically(stops, [hybridTrace, coherentReverseTrace]);
 
     expect(projected?.trace).toEqual([...coherentReverseTrace].reverse());
     expect(projected?.pathRatio).toBeLessThan(1.8);
@@ -170,7 +186,7 @@ describe("GTFS trace projection", () => {
     ).toBeUndefined();
   });
 
-  it("keeps the requested topology complete when only part of a trace is available", () => {
+  it("rejects partial trace coverage instead of completing a long edge with a chord", () => {
     const request = {
       lineId: "line:IDFM:C01390",
       stops: [
@@ -197,15 +213,7 @@ describe("GTFS trace projection", () => {
       ],
     ]);
 
-    expect(segments?.map((segment) => segment.id)).toEqual([
-      "LaDefense--Puteaux",
-      "Faubourg--LaDefense",
-      "Faubourg--Fauvelles",
-    ]);
-    expect(segments?.find((segment) => segment.id === "Faubourg--LaDefense")?.coordinates).toEqual([
-      { lon: 2.2385, lat: 48.892 },
-      { lon: 2.246, lat: 48.895 },
-    ]);
+    expect(segments).toBeUndefined();
   });
 
   it("keeps a tiny edge when two nearby stops project to the same shape point", () => {

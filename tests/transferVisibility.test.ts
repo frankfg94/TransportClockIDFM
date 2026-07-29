@@ -144,6 +144,18 @@ describe("pattern transfer visibility", () => {
     ).toEqual([busB]);
   });
 
+  it("removes a bus replacement carrying the same tram line label", () => {
+    const replacement = transfer("T1", "BUS", "Bus");
+    const bus = transfer("249", "BUS", "Bus");
+
+    expect(
+      filterCurrentLineTransfers([replacement, bus], {
+        family: "TRAM",
+        labels: ["T1"],
+      }),
+    ).toEqual([bus]);
+  });
+
   it("normalizes Navitia and STIF forms to the same IDFM line id", () => {
     expect(normalizeTransferLineId("line:idfm:C01743")).toBe(
       "line:IDFM:C01743",

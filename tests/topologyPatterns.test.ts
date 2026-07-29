@@ -92,4 +92,27 @@ describe("selectRepresentativeStopSequencePatterns", () => {
 
     expect(selected.map((pattern) => pattern.id)).toEqual(["outbound", "shuttle"]);
   });
+
+  it.each([
+    {
+      line: "2226",
+      patterns: [
+        { id: "rare-27-stops", stops: Array.from({ length: 27 }, (_, index) => `${index}`), tripCount: 1 },
+        { id: "dominant-24-stops", stops: Array.from({ length: 24 }, (_, index) => `${index}`), tripCount: 82 },
+      ],
+      expected: "dominant-24-stops",
+    },
+    {
+      line: "2229",
+      patterns: [
+        { id: "rare-26-stops", stops: Array.from({ length: 26 }, (_, index) => `${index}`), tripCount: 3 },
+        { id: "dominant-25-stops", stops: Array.from({ length: 25 }, (_, index) => `${index}`), tripCount: 49 },
+      ],
+      expected: "dominant-25-stops",
+    },
+  ])("prefers the dominant $line service over a longer rare variant", ({ patterns, expected }) => {
+    expect(selectRepresentativeStopSequencePatterns(patterns).map(({ id }) => id)).toEqual([
+      expected,
+    ]);
+  });
 });

@@ -406,6 +406,49 @@ describe("detailed station picker line map model", () => {
     expect(maisonsLaffitte?.station.scheduleStopAreaRef).toBeUndefined();
   });
 
+  it("does not confuse Hôtel de Ville de La Courneuve with Hôtel de Ville de Bobigny", () => {
+    const hotelDeVille = createNetexQuayStop(
+      "Hôtel de Ville de La Courneuve",
+      "FR::Quay:50143533:FR1",
+      655494,
+      6869885,
+    );
+    const model = createDetailedLineMapViewModel(
+      {
+        ...createLine(),
+        family: "TRAM",
+        id: "line:IDFM:C01389",
+        label: "T1",
+        navitiaId: "line:IDFM:C01389",
+        ref: "line:IDFM:C01389",
+      },
+      [
+        createSequence("t1", [
+          hotelDeVille,
+          createNetexQuayStop("Stade Géo André", "FR::Quay:50143534:FR1", 655900, 6869500),
+        ]),
+      ],
+      [
+        createCanonicalStation(
+          "stop_area:IDFM:72477",
+          "Hôtel de Ville de Bobigny",
+          2.443957,
+          48.906589,
+        ),
+        createCanonicalStation(
+          "stop_area:IDFM:73696",
+          "La Courneuve - 8 Mai 1945",
+          2.409931,
+          48.91997,
+        ),
+      ],
+    );
+
+    const selected = model.stops.find(({ id }) => id === hotelDeVille.id);
+
+    expect(selected?.station.scheduleStopAreaRef).toBe("FR::Quay:50143533:FR1");
+  });
+
   it("loads map correspondences from the conservative transfer bundle", async () => {
     const fetchMock = vi.fn(async (
       _input: string | URL | Request,
@@ -471,6 +514,103 @@ describe("detailed station picker line map model", () => {
           },
         ],
         transferResolverMode: "nearby",
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("removes a duplicate current T1 identity returned under another IDFM line id", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            version: 1,
+            generatedAt: "2026-07-29T12:00:00.000Z",
+            lineId: "line:IDFM:C01389",
+            lineLabel: "T1",
+            transfersByStopAreaRef: {
+              "FR::Quay:50143533:FR1": [
+                { id: "line:IDFM:C02404", label: "T1", family: "TRAM" },
+                { id: "line:IDFM:C01241", label: "249", family: "BUS" },
+              ],
+            },
+          }),
+        ),
+      ),
+    );
+
+    try {
+      const transfers = await loadStationTransfers(
+        {
+          id: "FR::Quay:50143533:FR1",
+          label: "Hôtel de Ville de La Courneuve",
+          city: "La Courneuve",
+          monitoringRef: "",
+          scheduleStopAreaRef: "FR::Quay:50143533:FR1",
+        },
+        {
+          family: "TRAM",
+          id: "line:IDFM:C01389",
+          label: "T1",
+          navitiaId: "line:IDFM:C01389",
+          ref: "line:IDFM:C01389",
+        },
+      );
+
+      expect(transfers.map(({ label }) => label)).toEqual(["249"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps Danton in La Courneuve and removes the replacement T1 alias", async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            version: 1,
+            generatedAt: "2026-07-29T12:00:00.000Z",
+            lineId: "line:IDFM:C01389",
+            lineLabel: "T1",
+            transfersByStopAreaRef: {
+              "FR::Quay:50143535:FR1": [
+                { id: "line:IDFM:C02404", label: "T1", family: "BUS", mode: "Bus" },
+              ],
+            },
+          }),
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await expect(
+        loadStationTransfers(
+          {
+            id: "FR::Quay:50143535:FR1",
+            label: "Danton",
+            city: "La Courneuve",
+            monitoringRef: "",
+            scheduleStopAreaRef: "FR::Quay:50143535:FR1",
+          },
+          {
+            family: "TRAM",
+            id: "line:IDFM:C01389",
+            label: "T1",
+            navitiaId: "line:IDFM:C01389",
+            ref: "line:IDFM:C01389",
+          },
+        ),
+      ).resolves.toEqual([]);
+      expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+        targets: [
+          {
+            stopAreaRef: "FR::Quay:50143535:FR1",
+            label: "Danton",
+            city: "La Courneuve",
+          },
+        ],
       });
     } finally {
       vi.unstubAllGlobals();

@@ -23,6 +23,7 @@ vi.mock("#imports", async (importOriginal) => {
 });
 
 import DetailedLineMapPicker from "../src/features/line-map/DetailedLineMapPicker.vue";
+import { alignLineGeometrySegmentEndpoints } from "../src/features/line-map/lineGeometry";
 import type { LineMapViewModel, LineMapStopView } from "../src/features/line-map/types";
 import {
   clearNetworkGhostTopologyCache,
@@ -1134,6 +1135,63 @@ describe("DetailedLineMapPicker sidebar", () => {
     wrapper.unmount();
   });
 
+  it("keeps both interrupted T1 paths intersecting at Jean Rostand", async () => {
+    const t1Line: LineSearchOption = {
+      family: "TRAM",
+      id: "line:IDFM:C01389",
+      label: "T1",
+      navitiaId: "line:IDFM:C01389",
+      ref: "line:IDFM:C01389",
+      color: "#4c3de3",
+      textColor: "#ffffff",
+    };
+    loadDetailedLineMap.mockResolvedValueOnce(createT1JeanRostandInterruptionMap(t1Line));
+
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: {
+        line: t1Line,
+        mode: "explorer",
+        selectable: false,
+        smartTrafficDetection: true,
+        trafficReport: {
+          lineRef: t1Line.ref,
+          status: "disrupted",
+          disruptions: [
+            {
+              id: "t1-bobigny-jean-rostand",
+              title: "Trafic interrompu",
+              message:
+                "Le trafic est interrompu entre Bobigny - Pablo Picasso et Auguste Delaune.",
+              kind: "works",
+              applicationPeriods: [],
+              impactedLineRefs: [t1Line.ref],
+              impactedStopNames: [],
+            },
+          ],
+        },
+      },
+    });
+    await flushPromises();
+
+    const interruptedPaths = wrapper.findAll(
+      ".line-map-segment--traffic-interruption",
+    );
+    expect(interruptedPaths).toHaveLength(2);
+
+    const bobignyToJeanEnd = readPathEndpoint(
+      interruptedPaths[0].attributes("d") ?? "",
+      "end",
+    );
+    const jeanToAugusteStart = readPathEndpoint(
+      interruptedPaths[1].attributes("d") ?? "",
+      "start",
+    );
+
+    expect(bobignyToJeanEnd).toEqual(jeanToAugusteStart);
+
+    wrapper.unmount();
+  });
+
   it("opens the shared traffic calendar, time-travels the map and yields to station details", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0));
@@ -1408,6 +1466,180 @@ describe("DetailedLineMapPicker sidebar", () => {
     });
     expect(wrapper.get('[data-network-ghost-line="line:IDFM:C01157"]')).toBeTruthy();
     expect(wrapper.findAll(".network-ghost-line__segment")).toHaveLength(1);
+
+    wrapper.unmount();
+  });
+
+  it("shows as many ghost correspondences as sidebar lines at Hôtel de Ville de La Courneuve", async () => {
+    const hotelStopId = "FR::Quay:50143533:FR1";
+    const hotelMap = createMap();
+    hotelMap.lineId = "line:IDFM:C01389";
+    hotelMap.lineLabel = "T1";
+    hotelMap.stops[0] = {
+      ...hotelMap.stops[0],
+      id: hotelStopId,
+      label: "Hôtel de Ville de La Courneuve",
+      city: "La Courneuve",
+      lon: 2.39275,
+      lat: 48.927092,
+      station: {
+        id: hotelStopId,
+        label: "Hôtel de Ville de La Courneuve",
+        city: "La Courneuve",
+        lon: 2.39275,
+        lat: 48.927092,
+        monitoringRef: "",
+        scheduleStopAreaRef: hotelStopId,
+      },
+    };
+    hotelMap.segments[0] = {
+      ...hotelMap.segments[0],
+      fromStopId: hotelStopId,
+    };
+    hotelMap.branches[0] = {
+      ...hotelMap.branches[0],
+      stopIds: [hotelStopId, hotelMap.stops[1].id],
+    };
+    hotelMap.viewport = createGeographicViewport(
+      [
+        { lon: 2.38, lat: 48.91 },
+        { lon: 2.42, lat: 48.94 },
+      ],
+      {
+        viewBoxWidth: 1080,
+        viewBoxHeight: 620,
+        paddingX: 78,
+        paddingY: 68,
+      },
+    );
+    const transfers = [
+      ["line:IDFM:C01168", "143"],
+      ["line:IDFM:C01174", "150"],
+      ["line:IDFM:C01241", "249"],
+      ["line:IDFM:C01242", "250"],
+      ["line:IDFM:C01273", "302"],
+      ["line:IDFM:C01406", "N43"],
+    ].map(([id, label]) => ({ id, label, family: "BUS" as const }));
+    loadDetailedLineMap.mockResolvedValueOnce(hotelMap);
+    loadStationTransfers.mockResolvedValueOnce(transfers);
+    routeState.query = { view: "map", station: hotelStopId };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+
+        if (url.includes("/api/line-geometry/resolve")) {
+          const request = JSON.parse(String(init?.body));
+          const stops = new Map(
+            request.stops.map((stop: { id: string }) => [stop.id, stop]),
+          );
+
+          return new Response(
+            JSON.stringify({
+              schemaVersion: 1,
+              source: "gtfs",
+              datasetVersion: "fixture",
+              generatedAt: "2026-07-29T12:00:00.000Z",
+              stops: request.stops,
+              branches: request.branches,
+              segments: request.branches.flatMap(
+                (branch: { id: string; stopIds: string[] }) => {
+                  const from = stops.get(branch.stopIds[0]);
+                  const to = stops.get(branch.stopIds[1]);
+
+                  return from && to
+                    ? [
+                        {
+                          id: branch.id,
+                          fromStopId: branch.stopIds[0],
+                          toStopId: branch.stopIds[1],
+                          coordinates: [from, to],
+                        },
+                      ]
+                    : [];
+                },
+              ),
+              entrances: [],
+              attempts: [{ source: "gtfs", status: "success" }],
+            }),
+          );
+        }
+
+        const lineId =
+          decodeURIComponent(url).match(/line:IDFM:C\d{5}/u)?.[0] ?? "line";
+        const anchorId = `${lineId}:hotel`;
+        const nextId = `${lineId}:next`;
+
+        return new Response(
+          JSON.stringify({
+            stations: [
+              {
+                id: anchorId,
+                name: "Hôtel de Ville de La Courneuve",
+                lon: 2.39275,
+                lat: 48.927092,
+              },
+              {
+                id: nextId,
+                name: `Station suivante ${lineId}`,
+                lon: 2.4,
+                lat: 48.93,
+              },
+            ],
+            segments: [{ id: `${anchorId}-${nextId}`, from: anchorId, to: nextId }],
+            patterns: [
+              {
+                id: `${lineId}:pattern`,
+                terminalFrom: "Hôtel de Ville de La Courneuve",
+                terminalTo: "Station suivante",
+                stops: [anchorId, nextId],
+                tripCount: 20,
+              },
+            ],
+          }),
+        );
+      }),
+    );
+    const t1Line: LineSearchOption = {
+      family: "TRAM",
+      id: "line:IDFM:C01389",
+      label: "T1",
+      navitiaId: "line:IDFM:C01389",
+      ref: "line:IDFM:C01389",
+      color: "#0055c8",
+      textColor: "#ffffff",
+    };
+    const wrapper = mount(DetailedLineMapPicker, {
+      props: {
+        line: t1Line,
+        mode: "explorer",
+        selectable: false,
+        ghostNetworkEnabled: true,
+      },
+      attachTo: document.body,
+    });
+
+    await flushPromises();
+    await new Promise<void>((resolve) =>
+      window.requestAnimationFrame(() => resolve()),
+    );
+    await flushPromises();
+
+    const sidebarCorrespondences = wrapper.findAll(".station-transfer-details__item");
+    const displayedCorrespondences = wrapper.findAll(
+      ".network-ghost-line__accessibility-button",
+    );
+
+    expect(sidebarCorrespondences.map((item) => item.text())).toEqual([
+      "143",
+      "150",
+      "249",
+      "250",
+      "302",
+      "N43",
+    ]);
+    expect(displayedCorrespondences).toHaveLength(sidebarCorrespondences.length);
+    expect(displayedCorrespondences).toHaveLength(6);
 
     wrapper.unmount();
   });
@@ -2161,6 +2393,113 @@ function createTrafficMap(): LineMapViewModel {
   ];
 
   return map;
+}
+
+function createT1JeanRostandInterruptionMap(
+  t1Line: LineSearchOption,
+): LineMapViewModel {
+  const bobigny = { x: 0.715323, y: 0.658707 };
+  const jeanRostand = { x: 0.738208, y: 0.644485 };
+  const projectedJeanRostand = { x: 0.735569, y: 0.649677 };
+  const augusteDelaune = { x: 0.768845, y: 0.658735 };
+  const stopFixtures = [
+    {
+      id: "FR::Quay:T1:Bobigny:FR1",
+      label: "Bobigny - Pablo Picasso",
+      point: bobigny,
+    },
+    {
+      id: "FR::Quay:T1:JeanRostand:FR1",
+      label: "Jean Rostand",
+      point: jeanRostand,
+    },
+    {
+      id: "FR::Quay:T1:AugusteDelaune:FR1",
+      label: "Auguste Delaune",
+      point: augusteDelaune,
+    },
+  ];
+  const stops: LineMapStopView[] = stopFixtures.map(({ id, label, point }) => ({
+    id,
+    label,
+    city: "Bobigny",
+    x: point.x,
+    y: point.y,
+    coordinateSource: "wgs84",
+    routeIds: ["t1"],
+    routeLabels: ["T1"],
+    station: {
+      id,
+      label,
+      city: "Bobigny",
+      monitoringRef: id,
+      scheduleStopAreaRef: id,
+    },
+  }));
+  const aligned = alignLineGeometrySegmentEndpoints(
+    [
+      {
+        id: "t1-bobigny--jean-rostand",
+        fromStopId: stops[0].id,
+        toStopId: stops[1].id,
+        points: [
+          bobigny,
+          { x: 0.728, y: 0.652 },
+          projectedJeanRostand,
+        ],
+        path: "",
+        corners: [],
+      },
+      {
+        id: "t1-jean-rostand--auguste-delaune",
+        fromStopId: stops[1].id,
+        toStopId: stops[2].id,
+        points: [
+          jeanRostand,
+          { x: 0.752, y: 0.651 },
+          augusteDelaune,
+        ],
+        path: "",
+        corners: [],
+      },
+    ],
+    new Map(stops.map((stop) => [stop.id, { x: stop.x, y: stop.y }])),
+    { maximumEndpointSnapDistance: 0.004 },
+  );
+
+  return {
+    lineId: t1Line.id,
+    lineLabel: t1Line.label,
+    lineColor: t1Line.color ?? "#4c3de3",
+    textColor: t1Line.textColor ?? "#ffffff",
+    geometrySource: "gtfs",
+    geometryAttempts: [{ source: "gtfs", status: "success" }],
+    entrances: [],
+    stops,
+    segments: aligned.segments.map((segment) => ({
+      id: segment.id,
+      fromStopId: segment.fromStopId,
+      toStopId: segment.toStopId,
+      polyline: segment.points,
+    })),
+    branches: [
+      {
+        id: "t1",
+        label: "T1",
+        stopIds: stops.map((stop) => stop.id),
+      },
+    ],
+    tiles: [],
+  };
+}
+
+function readPathEndpoint(
+  path: string,
+  side: "start" | "end",
+): { x: number; y: number } {
+  const values = path.match(/-?\d+(?:\.\d+)?/gu)?.map(Number) ?? [];
+  const index = side === "start" ? 0 : values.length - 2;
+  return { x: values[index], y: values[index + 1] };
 }
 
 function createDomRect({

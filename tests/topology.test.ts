@@ -73,6 +73,22 @@ const RER_B_LINE: LineSearchOption = {
 };
 
 describe("NeTEx cache topology adapter", () => {
+  it("preserves the station city used to disambiguate homonymous transfers", () => {
+    const [sequence] = convertServerTopologyToLineRouteSequences({
+      stations: [
+        { id: "danton", name: "Danton", city: "La Courneuve" },
+        { id: "next", name: "Stade Géo André", city: "La Courneuve" },
+      ],
+      segments: [{ id: "danton-next", from: "danton", to: "next" }],
+      patterns: [],
+    });
+
+    expect(sequence.stops[0]).toMatchObject({
+      city: "La Courneuve",
+      station: { city: "La Courneuve" },
+    });
+  });
+
   it.each(cacheCases)(
     "loads $label from the generated backend JSON cache",
     async ({ id, stationCount, branchPoints, terminals }) => {

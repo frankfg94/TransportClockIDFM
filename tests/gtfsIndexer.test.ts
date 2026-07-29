@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { strToU8, zipSync } from "fflate";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildLineArtifacts, extractRequiredFiles, parseCsvLine } from "../scripts/gtfs/update";
-import type { GtfsLineArtifact } from "../server/services/gtfs/types";
+import type {
+  GtfsLineArtifact,
+  GtfsLineLookupIndex,
+} from "../server/services/gtfs/types";
 
 const temporaryDirectories: string[] = [];
 
@@ -23,15 +26,26 @@ describe("GTFS compact indexer", () => {
     await fs.mkdir(input);
     await writeFixture(input);
 
-    await expect(buildLineArtifacts(input, output)).resolves.toBe(3);
+    await expect(buildLineArtifacts(input, output)).resolves.toBe(4);
 
     const bus = await readArtifact(output, "IDFM:BUS");
+    const loop = await readArtifact(output, "IDFM:LOOP");
     const metro = await readArtifact(output, "IDFM:METRO");
     const funicular = await readArtifact(output, "IDFM:FUNICULAR");
+    const lookup = JSON.parse(
+      await fs.readFile(join(output, "line-index.json"), "utf8"),
+    ) as GtfsLineLookupIndex;
 
     expect(bus.routeTypes).toEqual(["3"]);
     expect(new Set(bus.patterns.map((pattern) => pattern.direction))).toEqual(new Set(["0", "1"]));
-    expect(Object.keys(bus.shapes).sort()).toEqual(["BUS_BRANCH", "BUS_MAIN"]);
+    expect(Object.keys(bus.shapes).sort()).toEqual([
+      "BUS_BRANCH",
+      "BUS_FUTURE",
+      "BUS_MAIN",
+    ]);
+    expect(bus.patterns.some((pattern) => pattern.shapeId === "BUS_FUTURE")).toBe(
+      true,
+    );
     const projectedPattern = bus.patterns.find((pattern) => pattern.stopIds.join(",") === "A,B,C");
     expect(projectedPattern?.shapeDirection).toBe("forward");
     expect(projectedPattern?.projections.map((projection) => projection.stopId)).toEqual([
@@ -50,6 +64,11 @@ describe("GTFS compact indexer", () => {
     expect(
       bus.patterns.find((pattern) => pattern.stopIds.includes("UNKNOWN"))?.projections,
     ).toEqual([]);
+    expect(loop.patterns[0].stopIds).toEqual(["A", "B", "C", "A"]);
+    expect(loop.patterns[0].projections).toHaveLength(4);
+    expect(loop.patterns[0].projections.at(-1)!.distanceAlongMeters).toBeGreaterThan(
+      loop.patterns[0].projections[0].distanceAlongMeters,
+    );
     expect(bus.entrances).toContainEqual({
       id: "EXIT_A_1",
       parentStopId: "A",
@@ -60,6 +79,11 @@ describe("GTFS compact indexer", () => {
     });
     expect(metro.routeTypes).toEqual(["1"]);
     expect(funicular.routeTypes).toEqual(["7"]);
+    expect(lookup.lineIdsByLabel).toMatchObject({
+      "57": ["IDFM:BUS"],
+      "2250": ["IDFM:LOOP"],
+      "metro 13": ["IDFM:METRO"],
+    });
   });
 
   it("parses quoted commas and escaped quotes without loading a whole CSV", () => {
@@ -123,6 +147,7 @@ async function writeFixture(directory: string): Promise<void> {
     "routes.txt": csv([
       "route_id,route_short_name,route_long_name,route_type",
       "IDFM:BUS,57,Porte de Bagnolet - Arcueil,3",
+      "IDFM:LOOP,2250,Lagny - Thorigny loop,3",
       "IDFM:METRO,13,Metro 13,1",
       "IDFM:FUNICULAR,F,Funiculaire,7",
     ]),
@@ -152,6 +177,8 @@ async function writeFixture(directory: string): Promise<void> {
       "IDFM:BUS,S,BUS_2,1,Station D,BUS_BRANCH",
       "IDFM:BUS,S,BUS_3,1,Station A,BUS_MAIN",
       "IDFM:BUS,S,BUS_MISSING,0,Station D,BUS_BRANCH",
+      "IDFM:BUS,FUTURE,BUS_FUTURE,0,Station C,BUS_FUTURE",
+      "IDFM:LOOP,S,LOOP_1,0,Lagny - Thorigny,LOOP",
       "IDFM:METRO,S,METRO_1,0,Metro B,METRO",
       "IDFM:FUNICULAR,S,FUNICULAR_1,0,Funiculaire haut,FUNICULAR",
     ]),
@@ -169,6 +196,13 @@ async function writeFixture(directory: string): Promise<void> {
       "BUS_MISSING,11:00:00,11:00:00,A_Q,1",
       "BUS_MISSING,11:10:00,11:10:00,UNKNOWN,2",
       "BUS_MISSING,11:20:00,11:20:00,D_Q,3",
+      "BUS_FUTURE,12:00:00,12:00:00,A_Q,1",
+      "BUS_FUTURE,12:10:00,12:10:00,B_Q,2",
+      "BUS_FUTURE,12:20:00,12:20:00,C_Q,3",
+      "LOOP_1,12:00:00,12:00:00,A_Q,1",
+      "LOOP_1,12:10:00,12:10:00,B_Q,2",
+      "LOOP_1,12:20:00,12:20:00,C_Q,3",
+      "LOOP_1,12:30:00,12:30:00,A_Q,4",
       "METRO_1,08:00:00,08:00:00,M1_Q,1",
       "METRO_1,08:05:00,08:05:00,M2_Q,2",
       "FUNICULAR_1,08:00:00,08:00:00,F1_Q,1",
@@ -182,6 +216,13 @@ async function writeFixture(directory: string): Promise<void> {
       "BUS_BRANCH,48.8000,2.3000,1",
       "BUS_BRANCH,48.8100,2.3100,2",
       "BUS_BRANCH,48.8200,2.3300,3",
+      "BUS_FUTURE,48.8000,2.3000,1",
+      "BUS_FUTURE,48.8105,2.3100,2",
+      "BUS_FUTURE,48.8200,2.3200,3",
+      "LOOP,48.8000,2.3000,1",
+      "LOOP,48.8100,2.3100,2",
+      "LOOP,48.8200,2.3200,3",
+      "LOOP,48.8000,2.3000,4",
       "METRO,48.8300,2.3400,1",
       "METRO,48.8400,2.3500,2",
       "FUNICULAR,48.8500,2.3600,1",
@@ -190,6 +231,7 @@ async function writeFixture(directory: string): Promise<void> {
     "calendar.txt": csv([
       "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date",
       "S,1,1,1,1,1,1,1,20200101,20301231",
+      "FUTURE,1,1,1,1,1,1,1,20310101,20311231",
     ]),
     "calendar_dates.txt": "service_id,date,exception_type\n",
   };

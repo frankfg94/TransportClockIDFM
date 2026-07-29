@@ -1,5 +1,11 @@
 import { getRequestURL, type H3Event } from "h3";
-import type { GtfsLineArtifact, GtfsManifest, GtfsPublicStatus } from "./types";
+import type {
+  GtfsLineArtifact,
+  GtfsLineLookupIndex,
+  GtfsManifest,
+  GtfsPublicStatus,
+} from "./types";
+import { normalizeGtfsLineLabel } from "./labels";
 import {
   compileGtfsLineArtifact,
   type CompiledGtfsLineArtifact,
@@ -34,6 +40,7 @@ type RuntimeGlobal = typeof globalThis & {
 let manifestCache:
   { expiresAt: number; manifest?: GtfsManifest; storage: GtfsPublicStatus["storage"] } | undefined;
 const artifactCache = new Map<string, Promise<GtfsLineArtifact | undefined>>();
+const lineLookupCache = new Map<string, Promise<GtfsLineLookupIndex | undefined>>();
 const compiledArtifactCache = new Map<
   string,
   Promise<CompiledGtfsLineArtifact | undefined>
@@ -137,9 +144,42 @@ export async function loadCompiledGtfsLineArtifact(
   return request;
 }
 
+export async function loadGtfsLineArtifactsByLabel(
+  event: H3Event | undefined,
+  label: string,
+): Promise<GtfsLineArtifact[]> {
+  const manifest = await getGtfsManifest(event);
+  const normalizedLabel = normalizeGtfsLineLabel(label);
+  if (!manifest || !normalizedLabel) return [];
+
+  const cacheKey = manifest.sha256;
+  let lookupRequest = lineLookupCache.get(cacheKey);
+  if (!lookupRequest) {
+    lookupRequest = readGtfsJson<GtfsLineLookupIndex>(
+      event,
+      `versions/${manifest.sha256}/line-index.json`,
+    ).then(({ value }) => {
+      if (!value) lineLookupCache.delete(cacheKey);
+      return value;
+    });
+    lineLookupCache.set(cacheKey, lookupRequest);
+    lookupRequest.catch(() => lineLookupCache.delete(cacheKey));
+  }
+
+  const lookup = await lookupRequest;
+  const lineIds = lookup?.lineIdsByLabel[normalizedLabel] ?? [];
+  const artifacts = await Promise.all(
+    lineIds.map((lineId) => loadGtfsLineArtifact(event, lineId)),
+  );
+  return artifacts.filter(
+    (artifact): artifact is GtfsLineArtifact => artifact !== undefined,
+  );
+}
+
 export function clearGtfsRuntimeCaches(): void {
   manifestCache = undefined;
   artifactCache.clear();
+  lineLookupCache.clear();
   compiledArtifactCache.clear();
 }
 

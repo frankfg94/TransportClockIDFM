@@ -1,6 +1,8 @@
 import type { H3Event } from "h3";
 import {
+  createDirectLineGeometry,
   createDirectLineGeometryProvider,
+  createUndirectedEdgeKey,
   measureLineGeometryContinuity,
   resolveLineGeometryWithProviders,
   type LineGeometry,
@@ -15,7 +17,10 @@ import {
   isGtfsEnabled,
   loadCompiledGtfsLineArtifact,
   loadGtfsLineArtifact,
+  loadGtfsLineArtifactsByLabel,
 } from "../gtfs/runtime";
+import type { GtfsLineArtifact } from "../gtfs/types";
+import { normalizeGtfsLineLabel } from "../gtfs/labels";
 import {
   createCompleteSegmentsFromTraces,
   createSegmentsFromTraces,
@@ -25,13 +30,16 @@ import { createSegmentsFromIndexedGtfs } from "./gtfsIndexedGeometry";
 
 const IDFM_LINE_TRACES_ROOT =
   "https://data.iledefrance-mobilites.fr/api/explore/v2.1/catalog/datasets/traces-des-lignes-de-transport-en-commun-idfm/records";
+const IDFM_RAIL_TRACES_ROOT =
+  "https://data.iledefrance-mobilites.fr/api/explore/v2.1/catalog/datasets/traces-du-reseau-ferre-idf/records";
 const PROVIDER_TIMEOUT_MS = 4_500;
 const PUBLIC_TRACE_CACHE_TTL_MS = 7 * 24 * 60 * 60_000;
 const NAVITIA_CACHE_TTL_MS = 30 * 24 * 60 * 60_000;
 const NAVITIA_BREAKER_FAILURES = 3;
 const NAVITIA_BREAKER_DURATION_MS = 5 * 60_000;
 const GTFS_GEOMETRY_CACHE_ENTRIES = 128;
-const GTFS_GEOMETRY_ALGORITHM_VERSION = 3;
+const GTFS_GEOMETRY_ALGORITHM_VERSION = 9;
+const GTFS_SIBLING_RELEVANCE_METERS = 2_000;
 
 interface CachedTraces {
   expiresAt: number;
@@ -105,27 +113,40 @@ function createGtfsProvider(event: H3Event): LineGeometryProvider {
     source: "gtfs",
     enabled: (request) => request.useGtfs !== false && isGtfsEnabled(event),
     resolve: async (request) => {
-      const [manifest, artifact, compiled] = await Promise.all([
+      const [manifest, artifact, compiled, labelArtifacts] = await Promise.all([
         getGtfsManifest(event),
         loadGtfsLineArtifact(event, request.lineId),
         loadCompiledGtfsLineArtifact(event, request.lineId),
+        request.lineLabel
+          ? loadGtfsLineArtifactsByLabel(event, request.lineLabel)
+          : Promise.resolve([]),
       ]);
       if (!manifest || !artifact || !compiled) {
         return { status: "unavailable", reason: "not_installed" };
       }
 
+      const artifacts = dedupeGtfsArtifacts([artifact, ...labelArtifacts]).filter(
+        (candidate) =>
+          candidate.lineId === artifact.lineId ||
+          (isGtfsArtifactCompatibleWithRequestedLine(candidate, artifact) &&
+            isGtfsArtifactRelevantToRequest(candidate, request)),
+      );
       const cacheKey = createGtfsGeometryCacheKey(manifest, request);
       const cached = readGtfsGeometryCache(cacheKey);
       if (cached) return { status: "success", geometry: cached };
 
       const segments = createSegmentsFromIndexedGtfs(request, compiled);
       const entrances = matchGtfsEntrancesToRequestStops(
-        artifact.entrances,
-        artifact.patterns,
+        artifacts.flatMap((candidate) => candidate.entrances),
+        artifacts.flatMap((candidate) => candidate.patterns),
         request.stops,
       );
-      const geometry: LineGeometry | undefined = segments
-        ? {
+      const traces = artifacts.flatMap((candidate) =>
+        Object.values(candidate.shapes),
+      );
+      let geometry: LineGeometry | undefined;
+      if (segments) {
+        geometry = {
             schemaVersion: 1,
             source: "gtfs",
             topology: "requested",
@@ -135,16 +156,27 @@ function createGtfsProvider(event: H3Event): LineGeometryProvider {
             branches: request.branches,
             segments,
             entrances,
-          }
-        : createGeometryFromTraces(
-            "gtfs",
+          };
+      } else {
+        geometry = createGeometryFromTraces("gtfs", request, traces, {
+          datasetVersion: manifest.datasetVersion,
+          entrances,
+        });
+        if (!geometry) {
+          const railTraces = await loadIdfmRailTraces(
+            event,
+            normalizeIdfmRouteId(request.lineId),
+          ).catch((): LineGeometryCoordinate[][] => []);
+          geometry = createPartiallyResolvedGtfsGeometry(
             request,
-            Object.values(artifact.shapes),
-            {
-              datasetVersion: manifest.datasetVersion,
-              entrances,
-            },
+            compiled,
+            traces,
+            railTraces,
+            manifest.datasetVersion,
+            entrances,
           );
+        }
+      }
       if (!geometry) return { status: "miss", reason: "shape_projection_failed" };
       writeGtfsGeometryCache(cacheKey, geometry);
 
@@ -153,6 +185,72 @@ function createGtfsProvider(event: H3Event): LineGeometryProvider {
         geometry,
       };
     },
+  };
+}
+
+/**
+ * Current GTFS exports can omit suspended parts of a regular line while still
+ * publishing their replacement bus under the same commercial label. Keep every
+ * exact regular-line segment that can be resolved, then fill only genuinely
+ * absent edges from IDFM's physical rail reference. A station chord remains the
+ * last resort when neither official geometry source contains that edge.
+ */
+function createPartiallyResolvedGtfsGeometry(
+  request: LineGeometryRequest,
+  compiled: Parameters<typeof createSegmentsFromIndexedGtfs>[1],
+  traces: LineGeometryCoordinate[][],
+  railTraces: LineGeometryCoordinate[][],
+  datasetVersion: string,
+  entrances: LineGeometry["entrances"],
+): LineGeometry | undefined {
+  const gtfsSegments = new Map<string, LineGeometry["segments"][number]>();
+
+  for (const branch of request.branches) {
+    for (let index = 0; index < branch.stopIds.length - 1; index += 1) {
+      const fromStopId = branch.stopIds[index];
+      const toStopId = branch.stopIds[index + 1];
+      const edgeKey = createUndirectedEdgeKey(fromStopId, toStopId);
+      if (gtfsSegments.has(edgeKey)) continue;
+
+      const edgeRequest: LineGeometryRequest = {
+        ...request,
+        branches: [
+          {
+            id: edgeKey,
+            direction: branch.direction,
+            stopIds: [fromStopId, toStopId],
+          },
+        ],
+      };
+      const gtfsSegment =
+        createSegmentsFromIndexedGtfs(edgeRequest, compiled)?.[0] ??
+        createSegmentsFromTraces(edgeRequest, traces)?.[0];
+      const segment =
+        gtfsSegment ??
+        createSegmentsFromTraces(edgeRequest, railTraces)?.[0];
+      if (segment) gtfsSegments.set(edgeKey, segment);
+    }
+  }
+
+  if (gtfsSegments.size === 0) return undefined;
+
+  const segments = createDirectLineGeometry(request).segments.map(
+    (segment) =>
+      gtfsSegments.get(
+        createUndirectedEdgeKey(segment.fromStopId, segment.toStopId),
+      ) ?? segment,
+  );
+
+  return {
+    schemaVersion: 1,
+    source: "gtfs",
+    topology: "requested",
+    datasetVersion,
+    generatedAt: new Date().toISOString(),
+    stops: request.stops,
+    branches: request.branches,
+    segments,
+    entrances,
   };
 }
 
@@ -165,6 +263,7 @@ function createGtfsGeometryCacheKey(
     manifest.sha256,
     manifest.cacheGeneration,
     request.lineId,
+    request.lineLabel ?? "",
     request.stops.map(({ id, lon, lat }) => [
       id,
       Number(lon.toFixed(7)),
@@ -176,6 +275,62 @@ function createGtfsGeometryCacheKey(
       stopIds,
     ]),
   ]);
+}
+
+function dedupeGtfsArtifacts(artifacts: GtfsLineArtifact[]): GtfsLineArtifact[] {
+  return [...new Map(artifacts.map((artifact) => [artifact.lineId, artifact])).values()];
+}
+
+function isGtfsArtifactCompatibleWithRequestedLine(
+  candidate: GtfsLineArtifact,
+  requested: GtfsLineArtifact,
+): boolean {
+  if (
+    !isReplacementGtfsArtifact(requested) &&
+    isReplacementGtfsArtifact(candidate)
+  ) {
+    return false;
+  }
+
+  if (requested.routeTypes.length === 0 || candidate.routeTypes.length === 0) {
+    return true;
+  }
+
+  const requestedRouteTypes = new Set(requested.routeTypes);
+  return candidate.routeTypes.some((routeType) =>
+    requestedRouteTypes.has(routeType),
+  );
+}
+
+function isReplacementGtfsArtifact(artifact: GtfsLineArtifact): boolean {
+  return artifact.labels.some((label) =>
+    normalizeGtfsLineLabel(label).split(" ").includes("remplacement"),
+  );
+}
+
+function isGtfsArtifactRelevantToRequest(
+  artifact: GtfsLineArtifact,
+  request: LineGeometryRequest,
+): boolean {
+  return Object.values(artifact.shapes).some((shape) =>
+    shape.some((coordinate) =>
+      request.stops.some(
+        (stop) =>
+          coordinateDistanceMeters(coordinate, stop) <=
+          GTFS_SIBLING_RELEVANCE_METERS,
+      ),
+    ),
+  );
+}
+
+function coordinateDistanceMeters(
+  left: LineGeometryCoordinate,
+  right: LineGeometryCoordinate,
+): number {
+  const averageLatRadians = ((left.lat + right.lat) * Math.PI) / 360;
+  const dx = (left.lon - right.lon) * 111_320 * Math.cos(averageLatRadians);
+  const dy = (left.lat - right.lat) * 110_540;
+  return Math.hypot(dx, dy);
 }
 
 function readGtfsGeometryCache(key: string): LineGeometry | undefined {
@@ -282,6 +437,38 @@ async function loadIdfmLineTraces(
   return traces;
 }
 
+async function loadIdfmRailTraces(
+  event: H3Event,
+  routeId: string,
+): Promise<LineGeometryCoordinate[][]> {
+  const commercialLineRef = routeId.replace(/^IDFM:/iu, "");
+  const cacheKey = await createPersistentTraceCacheKey(
+    event,
+    "idfm-rail",
+    commercialLineRef,
+  );
+  const cached = await readPersistentTraceCache(event, traceCache, cacheKey);
+  if (cached) return cached;
+
+  const url = new URL(IDFM_RAIL_TRACES_ROOT);
+  url.searchParams.set("select", "idrefligc,geo_shape");
+  url.searchParams.set("where", `idrefligc="${commercialLineRef}"`);
+  url.searchParams.set("limit", "100");
+  const response = await fetchWithTimeout(url.toString(), {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new Error(`IDFM rail traces HTTP ${response.status}`);
+  const traces = extractGeoJsonTraces(await response.json());
+  await writePersistentTraceCache(
+    event,
+    traceCache,
+    cacheKey,
+    traces,
+    PUBLIC_TRACE_CACHE_TTL_MS,
+  );
+  return traces;
+}
+
 async function loadNavitiaLineTraces(
   event: H3Event,
   lineId: string,
@@ -314,7 +501,7 @@ async function loadNavitiaLineTraces(
 
 async function createPersistentTraceCacheKey(
   event: H3Event,
-  provider: "idfm" | "navitia",
+  provider: "idfm" | "idfm-rail" | "navitia",
   lineId: string,
 ): Promise<string> {
   const generation = (await getGtfsManifest(event).catch(() => undefined))?.cacheGeneration ?? 0;

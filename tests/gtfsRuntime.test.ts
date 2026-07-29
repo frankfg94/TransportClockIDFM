@@ -7,10 +7,12 @@ import {
   getGtfsPublicStatus,
   isGtfsEnabled,
   loadGtfsLineArtifact,
+  loadGtfsLineArtifactsByLabel,
   normalizeLineArtifactKey,
 } from "../server/services/gtfs/runtime";
 import type {
   GtfsLineArtifact,
+  GtfsLineLookupIndex,
   GtfsManifest,
 } from "../server/services/gtfs/types";
 
@@ -73,6 +75,33 @@ describe("GTFS runtime status", () => {
   it("normalizes line identifiers into safe immutable artifact keys", () => {
     expect(normalizeLineArtifactKey("line:IDFM:C01384")).toBe("IDFM%3AC01384");
     expect(normalizeLineArtifactKey(" IDFM:BUS 57 ")).toBe("IDFM%3ABUS%2057");
+  });
+
+  it("loads every GTFS artifact sharing a normalized commercial label", async () => {
+    const manifest = createManifest("2026-07-23T00:00:00.000Z");
+    const lookup: GtfsLineLookupIndex = {
+      schemaVersion: 1,
+      lineIdsByLabel: {
+        t1: ["IDFM:C01389", "IDFM:C02404"],
+      },
+    };
+    const artifacts = new Map([
+      ["IDFM%3AC01389", createLineArtifact("IDFM:C01389")],
+      ["IDFM%3AC02404", createLineArtifact("IDFM:C02404")],
+    ]);
+    vi.stubGlobal("useStorage", () => ({
+      getItem: vi.fn(async (key: string) => {
+        if (key === "current.json") return manifest;
+        if (key.endsWith("/line-index.json")) return lookup;
+        const artifactKey = /\/lines\/(.+)\.json$/u.exec(key)?.[1];
+        return artifactKey ? artifacts.get(artifactKey) ?? null : null;
+      }),
+    }));
+
+    await expect(loadGtfsLineArtifactsByLabel(undefined, " T1 ")).resolves.toEqual([
+      expect.objectContaining({ lineId: "IDFM:C01389" }),
+      expect.objectContaining({ lineId: "IDFM:C02404" }),
+    ]);
   });
 
   it("encodes committed artifact filenames without turning their percent escapes into paths", () => {

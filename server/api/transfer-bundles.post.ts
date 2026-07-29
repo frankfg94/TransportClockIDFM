@@ -205,6 +205,7 @@ const COMPATIBLE_STOP_AREA_NEARBY_DISTANCE_METERS = 650;
 const MAX_COMPATIBLE_NEARBY_STOP_AREAS = 24;
 const MAX_COMPATIBLE_CONNECTIONS = 1000;
 const STRUCTURAL_LINE_CACHE_VERSION = "v3";
+const TRANSFER_BUNDLE_RESOLVER_VERSION = "v4";
 const DEFAULT_RETENTION_DAYS = 30;
 const MAX_SERVER_RETRY_AFTER_DELAY_MS = 5_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -827,7 +828,10 @@ async function resolveNearbyTransfersForTarget(
     fetcher,
     logger,
   );
-  const station = resolveTargetStopAreaFromLine(target, lineStopAreas);
+  const station =
+    resolveTargetStopAreaFromLine(target, lineStopAreas, "exact") ??
+    (await searchStopAreaForTarget(target, fetcher, logger)) ??
+    resolveTargetStopAreaFromLine(target, lineStopAreas);
   const stopAreaRef = station?.scheduleStopAreaRef ?? station?.id;
 
   if (!station || !stopAreaRef?.startsWith("stop_area:")) {
@@ -894,6 +898,7 @@ function createCurrentStopAreaCandidate(
 function resolveTargetStopAreaFromLine(
   target: TransferBundleTarget,
   stations: StationSearchOption[],
+  matchMode: "exact" | "fuzzy" = "fuzzy",
 ): StationSearchOption | undefined {
   const directStopAreaRef =
     convertNetexStopPlaceRefToNavitiaStopAreaRef(target.stopAreaRef) ??
@@ -924,7 +929,9 @@ function resolveTargetStopAreaFromLine(
     }
   }
 
-  return findMatchingLineStation(target, stations);
+  return matchMode === "exact"
+    ? findExactMatchingLineStation(target, stations)
+    : findMatchingLineStation(target, stations);
 }
 
 function extractNetexNumericId(value: string): string | undefined {
@@ -1009,15 +1016,15 @@ async function resolveStationForTarget(
     fetcher,
     logger,
   );
-  const lineStation = findMatchingLineStation(target, stations);
+  const exactLineStation = findExactMatchingLineStation(target, stations);
 
-  if (lineStation) {
+  if (exactLineStation) {
     logTransferBundleDebug(logger, "info", "station-resolve:line-station-match", {
-      station: summarizeStationOption(lineStation),
+      station: summarizeStationOption(exactLineStation),
       target: summarizeTransferTarget(target),
     });
 
-    return lineStation;
+    return exactLineStation;
   }
 
   const searchedStation = await searchStopAreaForTarget(target, fetcher, logger);
@@ -1032,7 +1039,7 @@ async function resolveStationForTarget(
     },
   );
 
-  return searchedStation;
+  return searchedStation ?? findMatchingLineStation(target, stations);
 }
 
 function createStationOptionForTarget(
@@ -1472,10 +1479,18 @@ export function findMatchingLineStation(
 ): StationSearchOption | undefined {
   const normalizedTarget = normalizeBundleStationName(target.label);
   const targetTokens = createBundleStationTokens(normalizedTarget);
+  const targetCity = normalizeBundleStationName(target.city ?? "");
+  const compatibleStations = stations.filter((station) => {
+    const stationCity = normalizeBundleStationName(station.city ?? "");
+
+    return !targetCity || !stationCity || stationCity === targetCity;
+  });
 
   return (
-    stations.find((station) => normalizeBundleStationName(station.label) === normalizedTarget) ??
-    stations
+    compatibleStations.find(
+      (station) => normalizeBundleStationName(station.label) === normalizedTarget,
+    ) ??
+    compatibleStations
       .map((station) => ({
         score: scoreStationNameMatch(
           normalizedTarget,
@@ -1487,6 +1502,23 @@ export function findMatchingLineStation(
       .filter(({ score }) => score > 0)
       .sort((left, right) => right.score - left.score)[0]?.station
   );
+}
+
+function findExactMatchingLineStation(
+  target: TransferBundleTarget,
+  stations: StationSearchOption[],
+): StationSearchOption | undefined {
+  const normalizedTarget = normalizeBundleStationName(target.label);
+  const targetCity = normalizeBundleStationName(target.city ?? "");
+
+  return stations.find((station) => {
+    const stationCity = normalizeBundleStationName(station.city ?? "");
+
+    return (
+      normalizeBundleStationName(station.label) === normalizedTarget &&
+      (!targetCity || !stationCity || stationCity === targetCity)
+    );
+  });
 }
 
 async function searchStopAreaForTarget(
@@ -2797,7 +2829,7 @@ function createServerTransferBundleId(
 ): string {
   // Concurrency and spacing only affect how the bundle is built. They should not
   // create a different cache key because the expected transfer content is identical.
-  return `${lineId.trim().toLowerCase()}::${transferResolverMode}::d${nearbyDistanceMeters}`;
+  return `${TRANSFER_BUNDLE_RESOLVER_VERSION}::${lineId.trim().toLowerCase()}::${transferResolverMode}::d${nearbyDistanceMeters}`;
 }
 
 function createTransferBundleResponseFromStoredBundle(

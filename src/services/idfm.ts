@@ -1400,6 +1400,7 @@ interface ServerLineTopology {
   stations: Array<{
     id: string;
     name: string;
+    city?: string;
     lat?: number;
     lon?: number;
     projectedX?: number;
@@ -1484,6 +1485,7 @@ function createServerTopologyRouteStop(
   const searchStation: StationSearchOption = {
     id: station.id,
     label: station.name,
+    city: station.city,
     monitoringRef: "",
     scheduleStopAreaRef: station.id,
   };
@@ -1491,6 +1493,7 @@ function createServerTopologyRouteStop(
   return {
     id: station.id,
     label: station.name,
+    city: station.city,
     lat: station.lat,
     lon: station.lon,
     projectedX: station.projectedX,

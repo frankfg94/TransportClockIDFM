@@ -550,6 +550,217 @@ describe("transfer bundle endpoint", () => {
     ).toBe("stop_area:IDFM:71305");
   });
 
+  it("rejects the Bobigny homonym when resolving Hôtel de Ville de La Courneuve", () => {
+    expect(
+      findMatchingLineStation(
+        {
+          stopAreaRef: "FR::Quay:50143533:FR1",
+          label: "Hôtel de Ville de La Courneuve",
+          city: "La Courneuve",
+        },
+        [
+          {
+            id: "stop_area:IDFM:72477",
+            label: "Hôtel de Ville de Bobigny",
+            city: "Bobigny",
+            monitoringRef: "",
+            scheduleStopAreaRef: "stop_area:IDFM:72477",
+          },
+          {
+            id: "stop_area:IDFM:73696",
+            label: "La Courneuve - 8 Mai 1945",
+            city: "La Courneuve",
+            monitoringRef: "",
+            scheduleStopAreaRef: "stop_area:IDFM:73696",
+          },
+        ],
+      ),
+    ).toBeUndefined();
+  });
+
+  it("falls back to the global stop-area search for Hôtel de Ville de La Courneuve", async () => {
+    await clearServerTransferBundles();
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = decodeURIComponent(input.toString());
+
+      if (url.includes("/lines/line:IDFM:C01389/stop_areas?")) {
+        return jsonResponse({
+          stop_areas: [
+            {
+              id: "stop_area:IDFM:72477",
+              name: "Hôtel de Ville de Bobigny",
+              administrative_regions: [{ name: "Bobigny" }],
+            },
+            {
+              id: "stop_area:IDFM:73696",
+              name: "La Courneuve - 8 Mai 1945",
+              administrative_regions: [{ name: "La Courneuve" }],
+            },
+          ],
+        });
+      }
+
+      if (url.includes("/pt_objects?")) {
+        return jsonResponse({
+          pt_objects: [
+            {
+              embedded_type: "stop_area",
+              stop_area: {
+                id: "stop_area:IDFM:72622",
+                name: "Hôtel de Ville de la Courneuve",
+                administrative_regions: [{ name: "La Courneuve" }],
+              },
+            },
+          ],
+        });
+      }
+
+      if (url.includes("/places_nearby?")) {
+        return jsonResponse({ places_nearby: [] });
+      }
+
+      if (url.includes("/stop_areas/stop_area:IDFM:72622/lines?")) {
+        return jsonResponse({
+          lines: [
+            {
+              id: "line:IDFM:C01389",
+              code: "T1",
+              commercial_mode: { id: "commercial_mode:Tramway", name: "Tramway" },
+              physical_modes: [{ id: "physical_mode:Tramway", name: "Tramway" }],
+            },
+            {
+              id: "line:IDFM:C01241",
+              code: "249",
+              commercial_mode: { id: "commercial_mode:Bus", name: "Bus" },
+              physical_modes: [{ id: "physical_mode:Bus", name: "Bus" }],
+            },
+          ],
+        });
+      }
+
+      return jsonResponse({ lines: [] });
+    });
+    const target = {
+      stopAreaRef: "FR::Quay:50143533:FR1",
+      label: "Hôtel de Ville de La Courneuve",
+    };
+    const response = await createTransferBundleResponse(
+      {
+        backendCacheEnabled: false,
+        lineId: "line:IDFM:C01389",
+        lineLabel: "T1",
+        nearbyDistanceMeters: 650,
+        targets: [target],
+        transferResolverMode: "nearby",
+      },
+      { fetcher: fetcher as unknown as typeof fetch },
+    );
+
+    expect(response.transfersByStopAreaRef[target.stopAreaRef]).toMatchObject([
+      { id: "line:IDFM:C01241", label: "249", family: "BUS" },
+    ]);
+    expect(
+      fetcher.mock.calls.some((call) =>
+        decodeURIComponent(String(call[0])).includes("/pt_objects?"),
+      ),
+    ).toBe(true);
+  });
+
+  it("resolves Danton in La Courneuve instead of homonymous bus stops", async () => {
+    await clearServerTransferBundles();
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = decodeURIComponent(input.toString());
+
+      if (url.includes("/lines/line:IDFM:C01389/stop_areas?")) {
+        return jsonResponse({
+          stop_areas: [
+            {
+              id: "stop_area:IDFM:72477",
+              name: "Hôtel de Ville de Bobigny",
+              administrative_regions: [{ name: "Bobigny" }],
+            },
+          ],
+        });
+      }
+
+      if (url.includes("/pt_objects?")) {
+        return jsonResponse({
+          pt_objects: [
+            {
+              embedded_type: "stop_area",
+              stop_area: {
+                id: "stop_area:IDFM:71796",
+                name: "Danton",
+                administrative_regions: [{ name: "Montreuil" }],
+              },
+            },
+            {
+              embedded_type: "stop_area",
+              stop_area: {
+                id: "stop_area:IDFM:73693",
+                name: "Danton",
+                administrative_regions: [{ name: "La Courneuve" }],
+              },
+            },
+          ],
+        });
+      }
+
+      if (url.includes("/places_nearby?")) {
+        return jsonResponse({ places_nearby: [] });
+      }
+
+      if (url.includes("/stop_areas/stop_area:IDFM:73693/lines?")) {
+        return jsonResponse({
+          lines: [
+            {
+              id: "line:IDFM:C02404",
+              code: "T1",
+              commercial_mode: { id: "commercial_mode:Bus", name: "Bus" },
+              physical_modes: [{ id: "physical_mode:Bus", name: "Bus" }],
+            },
+          ],
+        });
+      }
+
+      if (url.includes("/stop_areas/stop_area:IDFM:71796/lines?")) {
+        return jsonResponse({
+          lines: ["102", "116", "121", "202", "N34"].map((code) => ({
+            id: `line:wrong:${code}`,
+            code,
+            commercial_mode: { id: "commercial_mode:Bus", name: "Bus" },
+            physical_modes: [{ id: "physical_mode:Bus", name: "Bus" }],
+          })),
+        });
+      }
+
+      return jsonResponse({ lines: [] });
+    });
+    const target = {
+      stopAreaRef: "FR::Quay:50143535:FR1",
+      label: "Danton",
+      city: "La Courneuve",
+    };
+    const response = await createTransferBundleResponse(
+      {
+        backendCacheEnabled: false,
+        lineId: "line:IDFM:C01389",
+        lineLabel: "T1",
+        nearbyDistanceMeters: 350,
+        targets: [target],
+        transferResolverMode: "nearby",
+      },
+      { fetcher: fetcher as unknown as typeof fetch },
+    );
+
+    expect(response.transfersByStopAreaRef[target.stopAreaRef]).toMatchObject([
+      { id: "line:IDFM:C02404", label: "T1" },
+    ]);
+    expect(
+      response.transfersByStopAreaRef[target.stopAreaRef].map(({ label }) => label),
+    ).not.toEqual(expect.arrayContaining(["102", "116", "121", "202", "N34"]));
+  });
+
   it("keeps only structural official connections before they become compatible Open Data names", async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = decodeURIComponent(input.toString());

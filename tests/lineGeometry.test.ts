@@ -273,6 +273,109 @@ describe("buildLineGeometryDebugPlan", () => {
     expect(aligned.segments[1].points[0]).toEqual({ x: 20, y: 0 });
   });
 
+  it("extends the interrupted T1 paths until they intersect at Jean Rostand", () => {
+    const bobigny = { x: 0.715323, y: 0.658707 };
+    const jeanRostand = { x: 0.738208, y: 0.644485 };
+    const projectedJeanRostand = { x: 0.735569, y: 0.649677 };
+    const augusteDelaune = { x: 0.768845, y: 0.658735 };
+    const initialGap = Math.hypot(
+      projectedJeanRostand.x - jeanRostand.x,
+      projectedJeanRostand.y - jeanRostand.y,
+    );
+
+    expect(initialGap).toBeGreaterThan(0.004);
+
+    const aligned = alignLineGeometrySegmentEndpoints(
+      [
+        {
+          id: "Bobigny--Jean-Rostand",
+          fromStopId: "Bobigny - Pablo Picasso",
+          toStopId: "Jean Rostand",
+          points: [
+            bobigny,
+            { x: 0.728, y: 0.652 },
+            projectedJeanRostand,
+          ],
+          path: "",
+          corners: [],
+        },
+        {
+          id: "Jean-Rostand--Auguste-Delaune",
+          fromStopId: "Jean Rostand",
+          toStopId: "Auguste Delaune",
+          points: [
+            jeanRostand,
+            { x: 0.752, y: 0.651 },
+            augusteDelaune,
+          ],
+          path: "",
+          corners: [],
+        },
+      ],
+      new Map([
+        ["Bobigny - Pablo Picasso", bobigny],
+        ["Jean Rostand", jeanRostand],
+        ["Auguste Delaune", augusteDelaune],
+      ]),
+      { maximumEndpointSnapDistance: 0.004 },
+    );
+
+    const bobignyToJeanEnd = aligned.segments[0].points.at(-1);
+    const jeanToAugusteStart = aligned.segments[1].points[0];
+
+    expect(bobignyToJeanEnd).toEqual(jeanRostand);
+    expect(jeanToAugusteStart).toEqual(jeanRostand);
+    expect(bobignyToJeanEnd).toEqual(jeanToAugusteStart);
+  });
+
+  it("extends the short interrupted T2 path until it intersects at Charlebourg", () => {
+    const lesFauvelles = { x: 0.858994, y: 0.361322 };
+    const projectedCharlebourg = { x: 0.857389, y: 0.344658 };
+    const charlebourg = { x: 0.853899, y: 0.337686 };
+    const jacquelineAuriol = { x: 0.840033, y: 0.322595 };
+    const initialGap = Math.hypot(
+      projectedCharlebourg.x - charlebourg.x,
+      projectedCharlebourg.y - charlebourg.y,
+    );
+
+    expect(initialGap).toBeGreaterThan(0.004);
+    expect(initialGap).toBeLessThan(0.016);
+
+    const aligned = alignLineGeometrySegmentEndpoints(
+      [
+        {
+          id: "Les-Fauvelles--Charlebourg",
+          fromStopId: "Les Fauvelles",
+          toStopId: "Charlebourg",
+          points: [lesFauvelles, projectedCharlebourg],
+          path: "",
+          corners: [],
+        },
+        {
+          id: "Charlebourg--Jacqueline-Auriol",
+          fromStopId: "Charlebourg",
+          toStopId: "Jacqueline Auriol",
+          points: [charlebourg, jacquelineAuriol],
+          path: "",
+          corners: [],
+        },
+      ],
+      new Map([
+        ["Les Fauvelles", lesFauvelles],
+        ["Charlebourg", charlebourg],
+        ["Jacqueline Auriol", jacquelineAuriol],
+      ]),
+      { maximumEndpointSnapDistance: 0.004 },
+    );
+
+    const fauvellesToCharlebourgEnd = aligned.segments[0].points.at(-1);
+    const charlebourgToJacquelineStart = aligned.segments[1].points[0];
+
+    expect(fauvellesToCharlebourgEnd).toEqual(charlebourg);
+    expect(charlebourgToJacquelineStart).toEqual(charlebourg);
+    expect(fauvellesToCharlebourgEnd).toEqual(charlebourgToJacquelineStart);
+  });
+
   it("emits readable continuity metrics for detached route pieces", () => {
     const metrics = measureLineGeometryContinuity(
       [

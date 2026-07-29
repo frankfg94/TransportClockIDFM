@@ -104,13 +104,30 @@ export function filterCurrentLineTransfers(
 
     if (
       !currentLine.family ||
-      !familiesMatch(transfer.family, currentLine.family)
+      (!familiesMatch(transfer.family, currentLine.family) &&
+        !isBusReplacementOfCurrentTram(
+          transfer,
+          currentLine.family,
+          currentLabels,
+        ))
     ) {
       return true;
     }
 
     return !currentLabels.has(normalizeLineLabel(transfer.label));
   });
+}
+
+function isBusReplacementOfCurrentTram(
+  transfer: TransferLineOption,
+  currentFamily: TransitFamily,
+  currentLabels: Set<string>,
+): boolean {
+  return (
+    currentFamily === "TRAM" &&
+    isBusLikeTransfer(transfer) &&
+    currentLabels.has(normalizeLineLabel(transfer.label))
+  );
 }
 
 function transfersShareIdentity(

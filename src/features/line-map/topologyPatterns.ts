@@ -20,8 +20,8 @@ export function selectRepresentativeStopSequencePatterns<
     ...patterns.map((pattern) => pattern.tripCount ?? 0),
   );
   const minimumTripCount =
-    maximumTripCount >= 100
-      ? Math.max(2, Math.ceil(maximumTripCount * 0.01))
+    maximumTripCount >= 20
+      ? Math.max(2, Math.ceil(maximumTripCount * 0.1))
       : 1;
   const representative = patterns.filter(
     (pattern) =>
