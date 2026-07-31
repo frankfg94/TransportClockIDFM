@@ -7,6 +7,7 @@ import type {
   LineConfig,
   LinePatternDirectionOption,
   LineTopologyLayout,
+  LineTopologyTerminalJunctionLayout,
   LineTopologyLoopLayout,
   LinePatternStationStatus,
   LinePatternViewResponse,
@@ -24,6 +25,7 @@ import {
   type NetexRuntimeEnv,
 } from "../topology/netexCache";
 import { createLinePresentation } from "../../../src/services/linePresentation";
+import { LINE_PATTERN_VIEW_SCHEMA_VERSION } from "../../../src/types/transit";
 import type {
   LineTopology,
   TopologyPattern,
@@ -178,6 +180,22 @@ function createLineTopologyLayout(topology: LineTopology): LineTopologyLayout {
           stationIds: [...hint.stationIds],
           lane: hint.lane,
           side: hint.side,
+        })),
+      }),
+    ),
+    terminalJunctions: (topology.terminalJunctions ?? []).map(
+      (junction): LineTopologyTerminalJunctionLayout => ({
+        id: junction.id,
+        junctionStationId: junction.junctionStationId,
+        direction: junction.direction,
+        axisDegrees: junction.axisDegrees,
+        arms: junction.arms.map((arm) => ({
+          id: arm.id,
+          anchorStationId: arm.anchorStationId,
+          stationIds: [...arm.stationIds],
+          direction: arm.direction,
+          side: arm.side,
+          angleDegrees: arm.angleDegrees,
         })),
       }),
     ),
@@ -356,6 +374,7 @@ function createPatternViewCacheKey(
     lineId: resolvedLineId,
     netexCache: createNetexCacheEnvironmentKey(params.runtimeEnv),
     presentation: getRuntimeIdfmApiKey(params.runtimeEnv) ? "idfm" : "fallback",
+    schemaVersion: LINE_PATTERN_VIEW_SCHEMA_VERSION,
     citySource: "netex-town-v1",
     transportType: normalizeId(params.transportType),
     directionId: normalizeId(params.directionId),

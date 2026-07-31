@@ -4,6 +4,7 @@ import type {
   RawStation,
   TopologyBranchLayout,
   TopologyBranch,
+  TopologyTerminalJunctionLayout,
   TopologyLoop,
   TopologyQuay,
   TopologySegment,
@@ -86,6 +87,7 @@ export interface NetexLineCache {
     nodes: NetexSchematicNode[];
     segments: NetexSchematicSegment[];
     branchGroups: NetexBranchGroup[];
+    terminalJunctions?: NetexTerminalJunction[];
     parallelGroups: NetexParallelGroup[];
     loops: NetexLoop[];
   };
@@ -161,6 +163,22 @@ export interface NetexBranchGroup {
     segmentIds?: string[];
     stationIds: string[];
     stations?: NetexStationSummary[];
+  }>;
+}
+
+export interface NetexTerminalJunction {
+  id: string;
+  junctionStationId: string;
+  junction?: NetexStationSummary;
+  direction: "forward" | "reverse";
+  axisDegrees?: number;
+  arms: Array<{
+    id: string;
+    anchorStationId: string;
+    stationIds: string[];
+    direction: "forward" | "reverse";
+    side: "upper" | "lower" | "center";
+    angleDegrees?: number;
   }>;
 }
 
@@ -976,6 +994,7 @@ function adaptNetexLineToTopology(cache: NetexLineCache): LineTopology {
   const segments = buildTopologySegmentsFromSchematic(cache);
   const patterns = buildTopologyPatternsFromNetex(cache, rawToSchematicId, stationById);
   const branches = buildTopologyBranchesFromSchematic(cache);
+  const terminalJunctions = buildTopologyTerminalJunctionsFromSchematic(cache);
   const loops = buildTopologyLoopsFromSchematic(cache);
   const branchPoints = nodes
     .filter((node) => node.isJunction || node.degree >= 3)
@@ -1014,10 +1033,33 @@ function adaptNetexLineToTopology(cache: NetexLineCache): LineTopology {
     segments,
     patterns,
     branches,
+    terminalJunctions,
     loops,
     branchPoints,
     terminals,
   };
+}
+
+function buildTopologyTerminalJunctionsFromSchematic(
+  cache: NetexLineCache,
+): TopologyTerminalJunctionLayout[] {
+  return (cache.schematic.terminalJunctions ?? [])
+    .map((junction) => ({
+      id: junction.id,
+      junctionStationId: junction.junctionStationId,
+      direction: junction.direction,
+      axisDegrees: junction.axisDegrees,
+      arms: junction.arms.map((arm) => ({
+        id: arm.id,
+        anchorStationId: arm.anchorStationId,
+        stationIds: dedupeConsecutive(arm.stationIds),
+        direction: arm.direction,
+        side: arm.side,
+        angleDegrees: arm.angleDegrees,
+      })),
+    }))
+    .filter((junction) => junction.arms.length >= 3)
+    .sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function buildRawToSchematicMap(

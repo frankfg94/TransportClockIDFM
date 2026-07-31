@@ -8,6 +8,8 @@ export type TransitFamily =
   | "TRANSILIEN"
   | "CABLE";
 
+export const LINE_PATTERN_VIEW_SCHEMA_VERSION = "topology-layout-v1";
+
 export interface LineConfig {
   ref: string;
   shortName: string;
@@ -245,6 +247,24 @@ export interface LineRouteBranchLayout {
 
 export interface LineTopologyLayout {
   loops: LineTopologyLoopLayout[];
+  terminalJunctions?: LineTopologyTerminalJunctionLayout[];
+}
+
+export interface LineTopologyTerminalJunctionLayout {
+  id: string;
+  junctionStationId: string;
+  direction: "forward" | "reverse";
+  axisDegrees?: number;
+  arms: LineTopologyTerminalJunctionArm[];
+}
+
+export interface LineTopologyTerminalJunctionArm {
+  id: string;
+  anchorStationId: string;
+  stationIds: string[];
+  direction: "forward" | "reverse";
+  side: "upper" | "lower" | "center";
+  angleDegrees?: number;
 }
 
 export interface LineTopologyLoopLayout {

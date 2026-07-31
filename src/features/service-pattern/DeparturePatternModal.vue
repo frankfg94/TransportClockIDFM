@@ -93,6 +93,7 @@ import { createInterruptionWalkingTimes } from "./interruptionWalkingTimes";
 import {
   createTrafficMarkerStationObstacles,
   getTrafficMarkerAnchor,
+  getTrafficMarkerPulseStationKeys,
   getTrafficMarkerSize,
   groupPatternTrafficMarkerSegments,
   layoutTrafficMarkers,
@@ -100,6 +101,14 @@ import {
   type PatternTrafficMarkerGroup,
   type TrafficMarkerRect,
 } from "./trafficMarkerLayout";
+import {
+  createDeparturePatternModalInfoCardsDebugTools,
+  type InfoCardDebugEdge,
+  type InfoCardDebugMarker,
+  type InfoCardDebugObstacle,
+  type InfoCardDebugRect,
+  type InfoCardDebugSnapshot,
+} from "./infoCardsDebugTools/infoCardsDebugTools";
 import { useI18n } from "../../i18n";
 import { useAppSettings } from "../app-settings/appSettings";
 import { transportClockPlugins } from "#transport-clock/plugins";
@@ -114,6 +123,7 @@ import type {
   LineRouteSequence,
   LineRouteStop,
   LineTopologyLayout,
+  LineTopologyTerminalJunctionLayout,
   LineTopologyLoopLayout,
   LinePatternDirectionOption,
   TransferLineOption,
@@ -466,6 +476,8 @@ const hoveredTrafficMarkerKey = ref<string>();
 const selectedTrafficDisruptionIds = ref<string[]>([]);
 const selectedTrafficTimestamp = ref<number>();
 const hydratedPattern = ref<DepartureCallingPattern>();
+const infoCardsDebugEnabled = ref(false);
+const infoCardsDebugOutput = ref("");
 const transferHydrationLoading = ref(false);
 const transferHydrationProgress = ref<PatternTransferHydrationProgress>({
   completed: 0,
@@ -488,6 +500,10 @@ let trafficFocusTimerResolve: (() => void) | undefined;
 let trafficPulseClearTimer: number | undefined;
 let trafficFocusRequest = 0;
 const missingNetexTownWarningKeys = new Set<string>();
+const departurePatternModalInfoCardsDebugTools =
+  createDeparturePatternModalInfoCardsDebugTools(
+    createInfoCardsDebugSnapshot,
+  );
 
 const serviceLabel = computed(() =>
   displayPattern.value
@@ -1285,18 +1301,7 @@ function getTrafficFocusStationKeys(
   positions: Map<string, PatternLayoutPosition> =
     flowModel.value?.trafficPositions,
 ): string[] {
-  const stationKeys = new Set<string>();
-
-  segments.forEach((segment) => {
-    segment.stationKeys.forEach((stationKey) => stationKeys.add(stationKey));
-    segment.edgeKeys.forEach((edgeKey) => {
-      const [source, target] = edgeKey.split("--");
-      if (source) stationKeys.add(source);
-      if (target) stationKeys.add(target);
-    });
-  });
-
-  return Array.from(stationKeys).filter((stationKey) =>
+  return getTrafficMarkerPulseStationKeys(segments).filter((stationKey) =>
     positions?.has(stationKey),
   );
 }
@@ -1880,6 +1885,7 @@ function createPatternFlow(
     segments: trafficAnalysis.segments,
     edges: visibleDrawableEdges,
     unifyReplacementBusMarkers,
+    availableStationKeys: topology.positions.keys(),
   }).filter((group) => !hiddenTrafficMarkerKeys.value.has(group.id));
   const trafficMarkerNodes = createTrafficMarkerFlowNodes({
     groups: trafficMarkerGroups,
@@ -1964,6 +1970,28 @@ function createEmptyTrafficImpactAnalysis(): PatternTrafficImpactAnalysis {
   };
 }
 
+function createTrafficMarkerRailPositions(
+  stationNodes: PatternStationFlowNode[],
+  layout: PatternLayoutOptions,
+  compact: boolean,
+): Map<string, PatternLayoutPosition> {
+  return new Map(
+    stationNodes.map((node) => [
+      node.id,
+      {
+        x: node.position.x + layout.nodeWidth / 2,
+        y:
+          node.position.y +
+          (compact
+            ? COMPACT_STATION_RAIL_CENTER_Y
+            : node.data?.branchEnd
+              ? REGULAR_TERMINAL_RAIL_CENTER_Y
+              : REGULAR_STATION_RAIL_CENTER_Y),
+      },
+    ]),
+  );
+}
+
 function createTrafficMarkerFlowNodes({
   groups,
   edges,
@@ -1981,20 +2009,10 @@ function createTrafficMarkerFlowNodes({
   cityZoneNodes: PatternCityZoneFlowNode[];
   walkingNodes: PatternTrafficWalkingFlowNode[];
 }): PatternFlowNode[] {
-  const railPositions = new Map(
-    stationNodes.map((node) => [
-      node.id,
-      {
-        x: node.position.x + layout.nodeWidth / 2,
-        y:
-          node.position.y +
-          (compact
-            ? COMPACT_STATION_RAIL_CENTER_Y
-            : node.data?.branchEnd
-              ? REGULAR_TERMINAL_RAIL_CENTER_Y
-              : REGULAR_STATION_RAIL_CENTER_Y),
-      },
-    ]),
+  const railPositions = createTrafficMarkerRailPositions(
+    stationNodes,
+    layout,
+    compact,
   );
   const obstacles: TrafficMarkerRect[] = [
     ...stationNodes.flatMap((node) =>
@@ -2037,9 +2055,10 @@ function createTrafficMarkerFlowNodes({
         anchor,
         width: size.width,
         height: size.height,
-        preferAbove: group.representative.replacementBus
-          ? shouldPreferTrafficMarkerAbove(anchor, railPositions.values())
-          : false,
+        preferAbove: shouldPreferTrafficMarkerAbove(
+          anchor,
+          railPositions.values(),
+        ),
       },
     ];
   });
@@ -2109,6 +2128,305 @@ function createTrafficMarkerFlowNodes({
       };
       return [connectorNode, markerNode];
     });
+}
+
+function createInfoCardsDebugSnapshot(): InfoCardDebugSnapshot {
+  if (!props.open) {
+    return { markers: [], obstacles: [] };
+  }
+
+  const model = flowModel.value;
+  const layout = currentLayoutOptions.value;
+  const railPositions = createTrafficMarkerRailPositions(
+    model.stationNodes,
+    layout,
+    layout.compact,
+  );
+  const groups = groupPatternTrafficMarkerSegments({
+    segments: model.trafficAnalysis.segments,
+    edges: model.trafficEdges,
+    unifyReplacementBusMarkers: props.unifyReplacementBusMarkers,
+    availableStationKeys: model.trafficPositions.keys(),
+  }).filter((group) => !hiddenTrafficMarkerKeys.value.has(group.id));
+  const groupById = new Map(groups.map((group) => [group.id, group]));
+  const edgeByKey = new Map(
+    model.trafficEdges.map((edge) => [createEdgeKey(edge.source, edge.target), edge]),
+  );
+  const markerNodes = allFlowNodes.value.filter(
+    (node): node is PatternTrafficMarkerFlowNode =>
+      node.type === "traffic-marker",
+  );
+  const connectorNodes = new Map(
+    allFlowNodes.value
+      .filter(
+        (node): node is PatternTrafficMarkerConnectorFlowNode =>
+          node.type === "traffic-marker-connector",
+      )
+      .flatMap((node) => (node.data ? [[node.data.key, node] as const] : [])),
+  );
+  const markers = markerNodes.flatMap((node): InfoCardDebugMarker[] => {
+    const markerData = node.data;
+    if (!markerData) return [];
+    const group = groupById.get(markerData.key);
+    if (!group) return [];
+
+    const anchor = getTrafficMarkerAnchor(
+      group,
+      model.trafficEdges,
+      railPositions,
+    );
+    const connectorNode = connectorNodes.get(group.id);
+    if (!anchor || !connectorNode) return [];
+
+    const size = getTrafficMarkerSize(
+      group.representative.kind,
+      layout.compact,
+      group.representative.replacementBus,
+    );
+    const card = {
+      x: node.position.x,
+      y: node.position.y,
+      width: size.width,
+      height: markerData.markerHeight,
+    };
+    const segmentEdges: InfoCardDebugEdge[] = group.edgeKeys.flatMap(
+      (edgeKey) => {
+        const edge = edgeByKey.get(edgeKey);
+        const sourcePoint = edge && railPositions.get(edge.source);
+        const targetPoint = edge && railPositions.get(edge.target);
+        if (!edge || !sourcePoint || !targetPoint) return [];
+        return [
+          {
+            edgeKey,
+            source: edge.source,
+            target: edge.target,
+            sourcePoint,
+            targetPoint,
+          },
+        ];
+      },
+    );
+
+    return [
+      {
+        markerId: node.id,
+        groupId: group.id,
+        kind: markerData.kind,
+        replacementBus: markerData.replacementBus,
+        segmentIds: group.segments.map((segment) => segment.id),
+        stationKeys: group.stationKeys,
+        edgeKeys: group.edgeKeys,
+        text: {
+          statusLabel: markerData.statusLabel,
+          detailLabel: markerData.detailLabel,
+          restartTimeLabel: group.representative.restartTimeLabel,
+          endDateLabel: group.representative.endDateLabel,
+        },
+        disruption: group.representative.disruption,
+        anchor,
+        card,
+        placement: markerData.placement,
+        connector: {
+          height: connectorNode.data?.connectorHeight ?? 0,
+          length: connectorNode.data?.connectorLength ?? 0,
+          offset: connectorNode.data?.connectorOffset ?? 0,
+          angle: connectorNode.data?.connectorAngle ?? 0,
+        },
+        segmentEdges,
+        domCard: readDebugRect(
+          findDebugElement(
+            ".pattern-flow-traffic-marker",
+            "data-traffic-marker-key",
+            group.id,
+          ),
+        ),
+        domConnector: readDebugRect(
+          findDebugElement(
+            ".pattern-flow-traffic-marker-connector",
+            "data-traffic-marker-connector-key",
+            group.id,
+          ),
+        ),
+      },
+    ];
+  });
+
+  return {
+    markers,
+    obstacles: createInfoCardsDebugObstacles({
+      stationNodes: model.stationNodes,
+      cityZoneNodes: model.nodes.filter(
+        (node): node is PatternCityZoneFlowNode => node.type === "city-zone",
+      ),
+      walkingNodes: model.nodes.filter(
+        (node): node is PatternTrafficWalkingFlowNode =>
+          node.type === "traffic-walking",
+      ),
+      markerNodes,
+      layout,
+    }),
+  };
+}
+
+function createInfoCardsDebugObstacles({
+  stationNodes,
+  cityZoneNodes,
+  walkingNodes,
+  markerNodes,
+  layout,
+}: {
+  stationNodes: PatternStationFlowNode[];
+  cityZoneNodes: PatternCityZoneFlowNode[];
+  walkingNodes: PatternTrafficWalkingFlowNode[];
+  markerNodes: PatternTrafficMarkerFlowNode[];
+  layout: PatternLayoutOptions;
+}): InfoCardDebugObstacle[] {
+  const obstacles: InfoCardDebugObstacle[] = [];
+  const add = (obstacle: InfoCardDebugObstacle): void => {
+    obstacles.push(obstacle);
+  };
+
+  stationNodes.forEach((node) => {
+    const graphRects = createTrafficMarkerStationObstacles({
+      position: node.position,
+      width: layout.nodeWidth,
+      height: layout.nodeHeight,
+      compact: layout.compact,
+    });
+    const stationElement = findDebugElement(
+      ".pattern-flow-station",
+      "data-station-key",
+      node.id,
+    );
+    add({
+      id: `${node.id}:station`,
+      type: "station",
+      rect: graphRects[0]!,
+      domRect: readDebugRect(stationElement),
+    });
+    if (graphRects[1]) {
+      add({
+        id: `${node.id}:title`,
+        type: "station-title",
+        rect: graphRects[1],
+        domRect: readDebugRect(
+          stationElement?.querySelector<HTMLElement>(".station-name"),
+        ),
+      });
+    }
+    const transferRect = readDebugRect(
+      stationElement?.querySelector<HTMLElement>(
+        ".pattern-flow-station__transfers",
+      ),
+    );
+    if (transferRect) {
+      add({
+        id: `${node.id}:transfers`,
+        type: "transfer",
+        rect: transferRect,
+        domRect: transferRect,
+      });
+    }
+  });
+
+  cityZoneNodes.forEach((node) => {
+    const data = node.data;
+    if (!data) return;
+    add({
+      id: node.id,
+      type: "city-title",
+      rect: {
+        x: node.position.x,
+        y: node.position.y,
+        width: data.width,
+        height: 32,
+      },
+      domRect: readDebugRect(
+        findDebugElement(
+          ".pattern-flow-city-zone",
+          "data-city-zone-key",
+          data.key,
+        ),
+      ),
+    });
+  });
+
+  walkingNodes.forEach((node) => {
+    const data = node.data;
+    if (!data) return;
+    const rect = {
+      x: node.position.x,
+      y: node.position.y,
+      width: layout.compact ? 84 : 96,
+      height: layout.compact ? 24 : 26,
+    };
+    const domRect = readDebugRect(
+      findDebugElement(
+        ".pattern-flow-traffic-walking",
+        "data-traffic-walking-edge-key",
+        data.edgeKey,
+      ),
+    );
+    add({ id: node.id, type: "walking", rect, domRect });
+  });
+
+  markerNodes.forEach((node) => {
+    const data = node.data;
+    if (!data) return;
+    const size = getTrafficMarkerSize(
+      data.kind,
+      layout.compact,
+      data.replacementBus,
+    );
+    add({
+      id: node.id,
+      markerId: node.id,
+      type: "traffic-marker",
+      rect: {
+        x: node.position.x,
+        y: node.position.y,
+        width: size.width,
+        height: data.markerHeight,
+      },
+      domRect: readDebugRect(
+        findDebugElement(
+          ".pattern-flow-traffic-marker",
+          "data-traffic-marker-key",
+          data.key,
+        ),
+      ),
+    });
+  });
+
+  return obstacles;
+}
+
+function findDebugElement(
+  selector: string,
+  attribute: string,
+  value: string,
+): HTMLElement | undefined {
+  if (typeof document === "undefined") return undefined;
+  return [...document.querySelectorAll<HTMLElement>(selector)].find(
+    (element) => element.getAttribute(attribute) === value,
+  );
+}
+
+function readDebugRect(
+  element?: Element | null,
+): InfoCardDebugRect | undefined {
+  if (!element) return undefined;
+  const rect = element.getBoundingClientRect();
+  if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)) {
+    return undefined;
+  }
+  if (rect.width <= 0 || rect.height <= 0) return undefined;
+  return {
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+  };
 }
 
 function createTrafficWalkingFlowNodes({
@@ -2706,15 +3024,21 @@ function createTopologyLayout(
   const destinationKey = fullLine ? undefined : getServedDestinationKey(calls);
   const preferStructuralSpine = graphHasCycle(nodes, edges);
   const topologyStationKeyById = createTopologyStationKeyById(lineTopology);
+  const terminalKeys = new Set(
+    nodes
+      .filter((node) => (adjacency.get(node.id)?.size ?? 0) <= 1)
+      .map((node) => node.id),
+  );
+  const terminalJunctionHints = createTerminalJunctionLayoutHints(
+    lineTopologyLayout,
+    topologyStationKeyById,
+    adjacency,
+  );
   const preferredMainPaths = createPreferredMainPaths(
     lineTopologyLayout,
     topologyStationKeyById,
     adjacency,
-    new Set(
-      nodes
-        .filter((node) => (adjacency.get(node.id)?.size ?? 0) <= 1)
-        .map((node) => node.id),
-    ),
+    terminalKeys,
   );
   const mainPath = chooseMainPath(
     nodes,
@@ -2724,6 +3048,7 @@ function createTopologyLayout(
     destinationKey,
     preferStructuralSpine,
     preferredMainPaths,
+    terminalJunctionHints,
   );
 
   if (mainPath.length < 2) {
@@ -2758,6 +3083,17 @@ function createTopologyLayout(
     }
   });
   addPathEdges(mainPath, visibleEdges);
+  placeTerminalJunctionFans({
+    nodes,
+    adjacency,
+    mainPath,
+    terminalKeys,
+    terminalJunctionHints,
+    positions,
+    placed,
+    visibleEdges,
+    layout,
+  });
   if ((lineTopologyLayout?.loops.length ?? 0) === 0) {
     placeSimpleTerminalForks({
       nodes,
@@ -2776,6 +3112,18 @@ function createTopologyLayout(
     visibleEdges,
     layout,
   );
+  placeTerminalJunctionFans({
+    nodes,
+    adjacency,
+    mainPath,
+    terminalKeys,
+    terminalJunctionHints,
+    positions,
+    placed,
+    visibleEdges,
+    layout,
+    reflowExisting: true,
+  });
 
   const laneSteps = createLaneSteps();
   let guard = 0;
@@ -2859,7 +3207,6 @@ function createTopologyLayout(
     layout,
   );
   addGraphEdges(edges, visibleEdges);
-
   return {
     positions,
     syntheticEdges,
@@ -2948,6 +3295,7 @@ function chooseMainPath(
   destinationKey?: string,
   preferStructuralSpine = false,
   preferredMainPaths: string[][] = [],
+  terminalJunctionHints: PatternTerminalJunctionLayoutHint[] = [],
 ): string[] {
   const terminals = nodes
     .filter((node) => (adjacency.get(node.id)?.size ?? 0) <= 1)
@@ -2978,6 +3326,40 @@ function chooseMainPath(
       evaluatePath(path, true);
     }
   });
+
+  // A semantic terminus can still have several outgoing arms in the
+  // schematic graph. Treat its longest arm as a preferred spine, so the
+  // terminus remains an endpoint of the drawing instead of being selected as
+  // the middle of a longest terminal-to-terminal path. This applies only to
+  // the full-line graph, where there is no departure direction to preserve.
+  if (activeKeys.size === 0 && !currentKey && terminalJunctionHints.length > 0) {
+    const terminalKeys = new Set(terminals);
+
+    terminalJunctionHints.forEach((hint) => {
+      hint.arms.forEach((arm) => {
+        const firstKey = arm.stationKeys[1];
+        if (!firstKey) {
+          return;
+        }
+
+        const armPath = findTerminalArmPath({
+          junctionKey: hint.junctionKey,
+          firstKey,
+          adjacency,
+          terminalKeys,
+        });
+
+        if (!armPath || armPath.length < 3) {
+          return;
+        }
+
+        evaluatePath(
+          hint.direction === "forward" ? armPath : [...armPath].reverse(),
+          true,
+        );
+      });
+    });
+  }
 
   candidates.forEach((source, sourceIndex) => {
     candidates.slice(sourceIndex + 1).forEach((target) => {
@@ -3104,6 +3486,20 @@ type PatternBranchLayoutHint = LineRouteBranchLayout & {
   stationKeys: string[];
 };
 
+type PatternTerminalJunctionArmHint =
+  LineTopologyTerminalJunctionLayout["arms"][number] & {
+    anchorKey: string;
+    stationKeys: string[];
+  };
+
+type PatternTerminalJunctionLayoutHint = Omit<
+  LineTopologyTerminalJunctionLayout,
+  "junctionStationId" | "arms"
+> & {
+  junctionKey: string;
+  arms: PatternTerminalJunctionArmHint[];
+};
+
 function createBranchLayoutHints(
   lineTopology: LineRouteSequence[],
 ): Map<string, PatternBranchLayoutHint> {
@@ -3139,6 +3535,44 @@ function createBranchLayoutHints(
   });
 
   return hints;
+}
+
+function createTerminalJunctionLayoutHints(
+  lineTopologyLayout: LineTopologyLayout | undefined,
+  stationKeyById: Map<string, string>,
+  adjacency: Map<string, Set<string>>,
+): PatternTerminalJunctionLayoutHint[] {
+  return (lineTopologyLayout?.terminalJunctions ?? []).flatMap((junction) => {
+    const junctionKey = stationKeyById.get(junction.junctionStationId);
+    if (!junctionKey) {
+      return [];
+    }
+
+    const arms = junction.arms.flatMap((arm) => {
+      const stationKeys = arm.stationIds.flatMap(
+        (stationId) => stationKeyById.get(stationId) ?? [],
+      );
+      const anchorKey = stationKeyById.get(arm.anchorStationId) ?? stationKeys.at(-1);
+
+      if (
+        !anchorKey ||
+        stationKeys.length < 2 ||
+        stationKeys[0] !== junctionKey ||
+        !stationKeys.every((key, index) => {
+          const nextKey = stationKeys[index + 1];
+          return !nextKey || adjacency.get(key)?.has(nextKey);
+        })
+      ) {
+        return [];
+      }
+
+      return [{ ...arm, anchorKey, stationKeys }];
+    });
+
+    return arms.length >= 3
+      ? [{ ...junction, junctionKey, arms }]
+      : [];
+  });
 }
 
 function createTopologyStationKeyById(
@@ -3482,6 +3916,133 @@ function createBranchLayoutHintKey(
   terminalKey: string,
 ): string {
   return `${junctionKey}::${terminalKey}`;
+}
+
+function placeTerminalJunctionFans(params: {
+  nodes: PatternGraphNode[];
+  adjacency: Map<string, Set<string>>;
+  mainPath: string[];
+  terminalKeys: Set<string>;
+  terminalJunctionHints: PatternTerminalJunctionLayoutHint[];
+  reflowExisting?: boolean;
+  positions: Map<string, PatternLayoutPosition>;
+  placed: Set<string>;
+  visibleEdges: Set<string>;
+  layout: PatternLayoutOptions;
+}): void {
+  params.terminalJunctionHints.forEach((hint) => {
+    const junctionPosition = params.positions.get(hint.junctionKey);
+    if (!junctionPosition || hint.arms.length < 3) {
+      return;
+    }
+
+    const junctionIndex = params.mainPath.indexOf(hint.junctionKey);
+    const mainPathNeighbor =
+      junctionIndex >= 0
+        ? params.mainPath[
+            hint.direction === "forward"
+              ? junctionIndex + 1
+              : junctionIndex - 1
+          ]
+        : undefined;
+    const mainArm = hint.arms.find((arm) =>
+      arm.stationKeys.slice(1).includes(mainPathNeighbor ?? ""),
+    );
+    const orderedArms = [...hint.arms].sort(
+      (left, right) =>
+        terminalJunctionSideRank(left.side) -
+          terminalJunctionSideRank(right.side) ||
+        (left.side === "lower" && right.side === "lower"
+          ? (right.angleDegrees ?? 0) - (left.angleDegrees ?? 0)
+          : (left.angleDegrees ?? 0) - (right.angleDegrees ?? 0)) ||
+        left.id.localeCompare(right.id),
+    );
+    const mainArmIndex = Math.max(0, orderedArms.indexOf(mainArm ?? orderedArms[0]));
+    const direction = hint.direction === "forward" ? 1 : -1;
+    const armPaths = new Map(
+      orderedArms.map((arm) => {
+        const firstKey = arm.stationKeys[1];
+        const armPath = firstKey
+          ? findTerminalArmPath({
+              junctionKey: hint.junctionKey,
+              firstKey,
+              adjacency: params.adjacency,
+              terminalKeys: params.terminalKeys,
+            }) ?? arm.stationKeys
+          : arm.stationKeys;
+
+        return [arm.id, armPath] as const;
+      }),
+    );
+
+    if (params.reflowExisting) {
+      orderedArms.forEach((arm) => {
+        if (arm.id === (mainArm ?? orderedArms[0]).id) {
+          return;
+        }
+
+        armPaths
+          .get(arm.id)
+          ?.slice(1)
+          .forEach((key) => params.positions.delete(key));
+      });
+    }
+
+    orderedArms.forEach((arm, armIndex) => {
+      const firstKey = arm.stationKeys[1];
+      if (!firstKey) {
+        return;
+      }
+
+      const armPath = armPaths.get(arm.id) ?? arm.stationKeys;
+
+      addPathEdges(armPath, params.visibleEdges);
+
+      const laneOffset = armIndex - mainArmIndex;
+      if (laneOffset === 0) {
+        armPath.slice(1).forEach((key) => params.placed.add(key));
+        return;
+      }
+
+      const side = laneOffset < 0 ? -1 : 1;
+      const y = findClearSameDirectionForkY({
+        path: armPath,
+        junctionPosition,
+        direction,
+        side,
+        initialMagnitude: Math.max(1, Math.abs(laneOffset)),
+        positions: params.positions,
+        layout: params.layout,
+      });
+
+      createDirectionalPathPlacementProposals({
+        path: armPath,
+        anchorPosition: junctionPosition,
+        direction,
+        y,
+        positions: params.positions,
+        layout: params.layout,
+      }).forEach(({ key, position }) => {
+        params.positions.set(key, position);
+      });
+      armPath.slice(1).forEach((key) => params.placed.add(key));
+    });
+
+  });
+}
+
+function terminalJunctionSideRank(
+  side: PatternTerminalJunctionArmHint["side"],
+): number {
+  if (side === "upper") {
+    return 0;
+  }
+
+  if (side === "lower") {
+    return 2;
+  }
+
+  return 1;
 }
 
 function placeSameDirectionForks(
@@ -5805,8 +6366,60 @@ function syncPatternFlowFullscreenState(): void {
   void nextTick();
 }
 
+function isInfoCardsDebugQueryEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  const params = new URLSearchParams(window.location.search);
+  return ["debugInfoCards", "debugReplacementBuses"].some((key) => {
+    const value = params.get(key);
+    return value === "1" || value === "true" || value === "yes";
+  });
+}
+
+function refreshInfoCardsDebugOutput(): void {
+  if (!infoCardsDebugEnabled.value) return;
+  if (typeof window !== "undefined") {
+    window.__departurePatternModalInfoCardsDebugTools =
+      departurePatternModalInfoCardsDebugTools;
+    window.__departurePatternModalDebugTools =
+      departurePatternModalInfoCardsDebugTools;
+  }
+  const infos = departurePatternModalInfoCardsDebugTools.getInfoCardInfos();
+  infoCardsDebugOutput.value = JSON.stringify(
+    {
+      infoCards: infos,
+      duplicateInfoCards:
+        departurePatternModalInfoCardsDebugTools.checkDuplicateInfoCards(),
+    },
+    null,
+    2,
+  );
+}
+
+watch(
+  () => [
+    props.open,
+    flowModel.value.nodes,
+    hiddenTrafficMarkerKeys.value,
+    selectedTrafficTimestamp.value,
+  ],
+  () => {
+    if (infoCardsDebugEnabled.value) {
+      void nextTick(refreshInfoCardsDebugOutput);
+    }
+  },
+  { flush: "post" },
+);
+
 onMounted(() => {
   document.addEventListener("fullscreenchange", syncPatternFlowFullscreenState);
+  if (isInfoCardsDebugQueryEnabled()) {
+    infoCardsDebugEnabled.value = true;
+    window.__departurePatternModalInfoCardsDebugTools =
+      departurePatternModalInfoCardsDebugTools;
+    window.__departurePatternModalDebugTools =
+      departurePatternModalInfoCardsDebugTools;
+    void nextTick(refreshInfoCardsDebugOutput);
+  }
 });
 
 onBeforeUnmount(() => {
@@ -6023,6 +6636,11 @@ onBeforeUnmount(() => {
                         </small>
                       </div>
                     </div>
+                    <pre
+                      v-if="infoCardsDebugEnabled"
+                      class="pattern-flow-debug-output"
+                      data-info-cards-debug
+                    >{{ infoCardsDebugOutput }}</pre>
                     <div
                       class="pattern-flow-actions pattern-flow-actions--desktop"
                     >
@@ -6153,6 +6771,7 @@ onBeforeUnmount(() => {
                       <template #node-city-zone="{ data }">
                         <div
                           class="pattern-flow-city-zone"
+                          :data-city-zone-key="data.key"
                           :data-city-zone-width="data.width"
                           :data-layout-x="data.layoutX"
                           :data-layout-y="data.layoutY"
@@ -6169,6 +6788,7 @@ onBeforeUnmount(() => {
                       <template #node-traffic-marker-connector="{ data }">
                         <div
                           class="pattern-flow-traffic-marker-connector"
+                          :data-traffic-marker-connector-key="data.key"
                           :class="[
                             `pattern-flow-traffic-marker-connector--${data.kind}`,
                             `pattern-flow-traffic-marker-connector--${data.placement}`,
@@ -6187,6 +6807,7 @@ onBeforeUnmount(() => {
                       <template #node-traffic-marker="{ data }">
                         <div
                           class="pattern-flow-traffic-marker"
+                          :data-traffic-marker-key="data.key"
                           :class="[
                             `pattern-flow-traffic-marker--${data.kind}`,
                             data.kind === 'interruption' || data.replacementBus
@@ -6262,6 +6883,7 @@ onBeforeUnmount(() => {
                       <template #node-traffic-walking="{ data }">
                         <div
                           class="pattern-flow-traffic-walking"
+                          :data-traffic-walking-edge-key="data.edgeKey"
                           role="note"
                           :aria-label="
                             t('pattern.walkingTimeAria', {

@@ -141,9 +141,9 @@ export const fr = {
       smartTraffic: "Detection intelligente sur le schema",
       smartTrafficDescription:
         "Charge les perturbations utiles pour detecter les sections impactees.",
-      unifyReplacementBusMarkers: "Unifier les bus de remplacement",
+      unifyReplacementBusMarkers: "Unifier les cartes d'information trafic",
       unifyReplacementBusMarkersDescription:
-        "Regroupe les cartes identiques d'une même alerte sur un même tronçon.",
+        "Regroupe les cartes identiques avec le même tronçon concerné.",
       trafficModalSmartFormatting:
         "Modale de perturbations et d'interruptions - formatage intelligent",
       trafficModalSmartFormattingDescription:

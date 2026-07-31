@@ -1,6 +1,9 @@
 import { normalizeTrafficText } from "./trafficPresentation";
 import { parseTrafficDate } from "./trafficTiming";
-import { getTrafficDisruptionStartClockTime } from "./trafficTextTimes";
+import {
+  getTrafficDisruptionStartClockTime,
+  type TrafficClockTime,
+} from "./trafficTextTimes";
 import type { TrafficDisruption, TrafficPeriod } from "./types";
 
 export interface ScheduledTrafficInterruption {
@@ -30,39 +33,44 @@ export function getTodayScheduledTrafficInterruption(
   }
 
   const current = new Date(now);
-  const start = new Date(current);
-  start.setHours(startTime.hour, startTime.minute, 0, 0);
+  for (const start of getCandidateScheduledStarts(current, startTime)) {
+    if (isWeekdayOnly(text) && !isWeekday(start)) {
+      continue;
+    }
 
-  if (isWeekdayOnly(text) && !isWeekday(start)) {
-    return undefined;
+    if (isWeekendOnly(text) && !isWeekend(start)) {
+      continue;
+    }
+
+    const matchingPeriod = findMatchingScheduledPeriod(
+      disruption.applicationPeriods,
+      start,
+    );
+
+    if (!matchingPeriod) {
+      continue;
+    }
+
+    const startTimeMs = start.getTime();
+    const endTimeMs = matchingPeriod.end?.getTime();
+
+    if (typeof endTimeMs === "number" && now > endTimeMs) {
+      continue;
+    }
+
+    const scheduled: ScheduledTrafficInterruption = {
+      active: now >= startTimeMs,
+      start,
+    };
+
+    if (matchingPeriod.end) {
+      scheduled.end = matchingPeriod.end;
+    }
+
+    return scheduled;
   }
 
-  const matchingPeriod = findMatchingScheduledPeriod(
-    disruption.applicationPeriods,
-    start,
-  );
-
-  if (!matchingPeriod) {
-    return undefined;
-  }
-
-  const startTimeMs = start.getTime();
-  const endTimeMs = matchingPeriod.end?.getTime();
-
-  if (typeof endTimeMs === "number" && now > endTimeMs) {
-    return undefined;
-  }
-
-  const scheduled: ScheduledTrafficInterruption = {
-    active: now >= startTimeMs,
-    start,
-  };
-
-  if (matchingPeriod.end) {
-    scheduled.end = matchingPeriod.end;
-  }
-
-  return scheduled;
+  return undefined;
 }
 
 export function getTodayScheduledTrafficStart(
@@ -114,8 +122,17 @@ function periodMatchesScheduledStart(
   end: Date | undefined,
   start: Date,
 ): boolean {
-  if (end && !Number.isNaN(end.getTime()) && end.getTime() <= start.getTime()) {
+  const endTime = end?.getTime();
+
+  if (typeof endTime === "number" && !Number.isNaN(endTime) && endTime <= start.getTime()) {
     return false;
+  }
+
+  if (
+    begin.getTime() <= start.getTime() &&
+    (endTime === undefined || Number.isNaN(endTime) || endTime > start.getTime())
+  ) {
+    return true;
   }
 
   if (isSameLocalDate(begin, start)) {
@@ -132,10 +149,43 @@ function isWeekdayOnly(text: string): boolean {
   return text.includes("en semaine");
 }
 
+function isWeekendOnly(text: string): boolean {
+  return /\bweek[-\s]?ends?\b/u.test(text);
+}
+
+function getCandidateScheduledStarts(
+  current: Date,
+  startTime: TrafficClockTime,
+): Date[] {
+  const starts: Date[] = [];
+
+  if (current.getHours() <= EARLY_MORNING_TECHNICAL_PERIOD_LIMIT) {
+    const previous = new Date(current);
+    previous.setDate(previous.getDate() - 1);
+    starts.push(createScheduledStart(previous, startTime));
+  }
+
+  starts.push(createScheduledStart(current, startTime));
+
+  return starts;
+}
+
+function createScheduledStart(date: Date, startTime: TrafficClockTime): Date {
+  const start = new Date(date);
+  start.setHours(startTime.hour, startTime.minute, 0, 0);
+  return start;
+}
+
 function isWeekday(date: Date): boolean {
   const day = date.getDay();
 
   return day >= 1 && day <= 5;
+}
+
+function isWeekend(date: Date): boolean {
+  const day = date.getDay();
+
+  return day === 0 || day === 6;
 }
 
 function isSameLocalDate(left: Date, right: Date): boolean {

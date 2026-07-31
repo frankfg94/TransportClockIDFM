@@ -234,7 +234,10 @@ function goToPage(page: number): void {
 </script>
 
 <template>
-  <section class="settings-panel plugin-viewer" aria-labelledby="settings-plugins-title">
+  <section
+    class="settings-panel settings-panel--open plugin-viewer"
+    aria-labelledby="settings-plugins-title"
+  >
     <div class="settings-panel__heading plugin-viewer__heading">
       <div>
         <p class="eyebrow">{{ t("settings.plugins.eyebrow") }}</p>

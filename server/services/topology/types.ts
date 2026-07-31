@@ -36,6 +36,7 @@ export interface LineTopology {
   segments: TopologySegment[];
   patterns: TopologyPattern[];
   branches: TopologyBranch[];
+  terminalJunctions?: TopologyTerminalJunctionLayout[];
   loops: TopologyLoop[];
   branchPoints: string[];
   terminals: string[];
@@ -81,6 +82,23 @@ export interface TopologyBranchLayout {
   direction: "forward" | "reverse";
   side: "upper" | "lower" | "center";
   axisDegrees?: number;
+  angleDegrees?: number;
+}
+
+export interface TopologyTerminalJunctionLayout {
+  id: string;
+  junctionStationId: string;
+  direction: "forward" | "reverse";
+  axisDegrees?: number;
+  arms: TopologyTerminalJunctionArm[];
+}
+
+export interface TopologyTerminalJunctionArm {
+  id: string;
+  anchorStationId: string;
+  stationIds: string[];
+  direction: "forward" | "reverse";
+  side: "upper" | "lower" | "center";
   angleDegrees?: number;
 }
 

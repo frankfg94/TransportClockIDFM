@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { getSelectedTrafficDisruptions } from "../src/features/service-pattern/useDeparturePatternTraffic";
+import {
+  getCurrentDeparturePatternTrafficDisruptions,
+  getSelectedTrafficDisruptions,
+} from "../src/features/service-pattern/useDeparturePatternTraffic";
 import type { TrafficDisruption } from "../src/features/traffic";
 
 describe("departure pattern traffic calendar selection", () => {
@@ -41,4 +44,73 @@ describe("departure pattern traffic calendar selection", () => {
     ).toEqual([interruption]);
     expect(getSelectedTrafficDisruptions([interruption], [])).toEqual([]);
   });
+
+  it("prioritizes a weekday evening slot over a broad technical period", () => {
+    const interruption = createWeekdayEveningInterruption();
+    const fridayAfternoon = new Date(2026, 6, 31, 14).getTime();
+    const fridayEvening = new Date(2026, 6, 31, 22).getTime();
+    const saturdayAfternoon = new Date(2026, 7, 1, 14).getTime();
+    const saturdayEarlyMorning = new Date(2026, 7, 1, 1).getTime();
+
+    expect(
+      getCurrentDeparturePatternTrafficDisruptions(
+        [interruption],
+        fridayAfternoon,
+      ),
+    ).toEqual([]);
+    expect(
+      getCurrentDeparturePatternTrafficDisruptions(
+        [interruption],
+        fridayEvening,
+      ),
+    ).toEqual([interruption]);
+    expect(
+      getCurrentDeparturePatternTrafficDisruptions(
+        [interruption],
+        saturdayAfternoon,
+      ),
+    ).toEqual([]);
+    expect(
+      getCurrentDeparturePatternTrafficDisruptions(
+        [interruption],
+        saturdayEarlyMorning,
+      ),
+    ).toEqual([interruption]);
+  });
+
+  it("keeps an all-day disruption on the technical fallback", () => {
+    const interruption: TrafficDisruption = {
+      id: "all-day-interruption",
+      title: "Trafic interrompu",
+      message: "Période : toute la journée. Dates : le 31 juillet.",
+      kind: "works",
+      applicationPeriods: [
+        { begin: "20260731T000000", end: "20260801T000000" },
+      ],
+      impactedLineRefs: ["line:IDFM:C01730"],
+      impactedStopNames: [],
+    };
+
+    expect(
+      getCurrentDeparturePatternTrafficDisruptions(
+        [interruption],
+        new Date(2026, 6, 31, 14).getTime(),
+      ),
+    ).toEqual([interruption]);
+  });
 });
+
+function createWeekdayEveningInterruption(): TrafficDisruption {
+  return {
+    id: "transilien-p-chateau-thierry-evening-work",
+    title: "Ligne P : Paris Est - Château-Thierry du 29/06 au 28/08",
+    message:
+      "Période : en semaine à partir de 22h00. Dates : du lundi 29 juin au vendredi 28 août. Le trafic est interrompu entre Paris Est et Château Thierry.",
+    kind: "works",
+    applicationPeriods: [
+      { begin: "20260629T220000", end: "20260829T023000" },
+    ],
+    impactedLineRefs: ["line:IDFM:C01730"],
+    impactedStopNames: [],
+  };
+}

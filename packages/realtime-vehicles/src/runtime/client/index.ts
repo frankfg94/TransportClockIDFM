@@ -183,7 +183,11 @@ function createVehicleNode(
   const mode = context.line.value?.mode?.toLowerCase();
   const transportType = context.line.value?.transportType?.toLowerCase();
   const imageUrl =
-    mode === "rer" || transportType === "rer"
+    mode === "rer" ||
+    transportType === "rer" ||
+    mode === "train" ||
+    transportType === "transilien" ||
+    transportType === "train"
       ? vehicleImageUrl
       : ["metro", "tram", "tramway"].includes(mode ?? "") ||
         ["metro", "tram", "tramway"].includes(transportType ?? "")

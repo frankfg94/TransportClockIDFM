@@ -766,12 +766,38 @@ describe("DeparturePatternModal settings", () => {
 
     expect(
       isles.y,
-      "Transilien P: La Ferté-Milon mini branch should sit below the Château-Thierry branch",
-    ).toBeGreaterThan(changis.y);
+      "Transilien P: La Ferté-Milon mini branch should sit above the Château-Thierry branch",
+    ).toBeLessThan(changis.y);
     expect(
       miniForkGap,
       `Transilien P: nested mini-fork gap should leave room for station labels, got ${miniForkGap}`,
     ).toBeGreaterThanOrEqual(120);
+
+    wrapper.unmount();
+  });
+
+  it("anchors Transilien P Gare de l'Est before its three geographic arms", async () => {
+    const wrapper = await mountRealLineGeometry("line:IDFM:C01730", "train");
+    const stations = readStationGeometry(wrapper);
+    const gare = findStationGeometry(stations, "Gare de l'Est");
+    const chelles = findStationGeometry(stations, "Chelles - Gournay");
+    const tournan = findStationGeometry(stations, "Tournan");
+    const verneuil = stations.find((station) =>
+      station.label.startsWith("Verneuil"),
+    );
+    const coulommiers = findStationGeometry(stations, "Coulommiers");
+    const provins = findStationGeometry(stations, "Provins");
+
+    expect(verneuil, "Verneuil-l'Étang should be present on the Provins arm").toBeDefined();
+    if (!verneuil) {
+      wrapper.unmount();
+      return;
+    }
+
+    expect([chelles, tournan, verneuil].every((station) => station.x > gare.x)).toBe(true);
+    expect(coulommiers.x).toBeGreaterThan(gare.x);
+    expect(provins.x).toBeGreaterThan(gare.x);
+    expect(tournan.y).toBeLessThan(verneuil.y);
 
     wrapper.unmount();
   });
@@ -903,7 +929,7 @@ describe("DeparturePatternModal settings", () => {
     wrapper.unmount();
   });
 
-  it("renders estimated metro vehicles on the pattern without adding them to the minimap", async () => {
+  it("renders estimated vehicles for each guided rail mode without adding them to the minimap", async () => {
     const now = Date.now();
     const vehiclePattern: DepartureCallingPattern = {
       ...pattern,
@@ -1112,6 +1138,21 @@ describe("DeparturePatternModal settings", () => {
     expect(wrapper.get(".pattern-flow-vehicle img").attributes("src")).toBe(
       "/images/mp14_train_top.webp",
     );
+
+    await wrapper.setProps({
+      board: {
+        ...metroBoard,
+        line: { ...metroBoard.line, shortName: "J", mode: "train" },
+      },
+      lineId: "J",
+      transportType: "transilien",
+    });
+    await flushPromises();
+    await nextTick();
+    expect(
+      wrapper.get(".pattern-flow-vehicle img").attributes("src"),
+    ).toContain("rer_mi84.webp");
+
     expect(wrapper.find(".pattern-flow-plugin-status--live").exists()).toBe(
       true,
     );
@@ -2593,6 +2634,171 @@ describe("DeparturePatternModal settings", () => {
     separateWrapper.unmount();
   });
 
+  it("unifies five source alerts when their pulsed station sets are identical", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 27, 12, 0, 0));
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: createThreeStationTrafficPattern(),
+        showMiniMap: false,
+        unifyReplacementBusMarkers: true,
+        trafficReport: createFiveDuplicateReplacementBusTrafficReport(),
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowPositionedStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    const markers = wrapper.findAll(".pattern-flow-traffic-marker");
+    expect(markers).toHaveLength(1);
+    expect(markers[0]?.text()).toContain("Bus de remplacement");
+
+    const markerRects = readPositionedFlowRects(wrapper).filter(
+      (rect) => rect.type === "traffic-marker",
+    );
+    expect(markerRects).toHaveLength(1);
+    expectTrafficMarkerConnectorsToBeVerticalAndAttached(wrapper);
+
+    wrapper.unmount();
+  });
+
+  it("exposes rendered info-card geometry through the debug query mode", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 27, 12, 0, 0));
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const originalUrl = window.location.href;
+    window.history.pushState({}, "", `${window.location.pathname}?debugInfoCards=1`);
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: createThreeStationTrafficPattern(),
+        showMiniMap: false,
+        unifyReplacementBusMarkers: true,
+        trafficReport: createFiveDuplicateReplacementBusTrafficReport(),
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowPositionedStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    const tools = window.__departurePatternModalInfoCardsDebugTools;
+    expect(tools).toBeDefined();
+    const infos = tools?.getInfoCardInfos() ?? [];
+    expect(infos).toHaveLength(1);
+    expect(infos[0]).toMatchObject({
+      position: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+      segmentIds: expect.any(Array),
+      text: expect.objectContaining({ detailLabel: expect.any(String) }),
+      intersection: expect.objectContaining({
+        vertical: true,
+        connectorTouchesSegment: true,
+      }),
+    });
+    expect(tools?.checkDuplicateInfoCards()).toMatchObject({
+      hasDuplicates: false,
+      duplicateCount: 0,
+    });
+    expect(wrapper.find("[data-info-cards-debug]").text()).toContain(
+      '"infoCards"',
+    );
+
+    wrapper.unmount();
+    window.history.replaceState({}, "", originalUrl);
+    delete window.__departurePatternModalInfoCardsDebugTools;
+    delete window.__departurePatternModalDebugTools;
+  });
+
+  it("unifies duplicate interruption info cards with the same text, end date and stations", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: createThreeStationTrafficPattern(),
+        showMiniMap: false,
+        unifyReplacementBusMarkers: true,
+        trafficReport: createFiveDuplicateInterruptionTrafficReport(),
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowPositionedStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    const interruptionMarkers = wrapper
+      .findAll(".pattern-flow-traffic-marker")
+      .filter((marker) => marker.text().includes("Trafic interrompu"));
+    expect(interruptionMarkers).toHaveLength(1);
+
+    wrapper.unmount();
+  });
+
   it("recenters and pulses the affected segment three times from the eye action", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 2, 12, 0, 0));
@@ -2786,6 +2992,54 @@ describe("DeparturePatternModal settings", () => {
         ).toBe(false);
       });
     });
+    expectTrafficMarkerConnectorsToBeVerticalAndAttached(wrapper);
+
+    wrapper.unmount();
+  });
+
+  it("places a non-bus interruption above an upper branch when lower rows exist", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 2, 12, 0, 0));
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: createTransilienJBranchPattern(),
+        showMiniMap: false,
+        trafficReport: createTopBranchInterruptionTrafficReport(),
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowPositionedStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          Handle: true,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    const markers = wrapper.findAll(".pattern-flow-traffic-marker--interruption");
+    expect(markers).toHaveLength(1);
+    expect(markers[0]?.classes()).toContain(
+      "pattern-flow-traffic-marker--above",
+    );
     expectTrafficMarkerConnectorsToBeVerticalAndAttached(wrapper);
 
     wrapper.unmount();
@@ -3730,6 +3984,50 @@ function createReplacementBusTrafficReport(): TrafficLineReport {
   };
 }
 
+function createFiveDuplicateReplacementBusTrafficReport(): TrafficLineReport {
+  const baseReport = createReplacementBusTrafficReport();
+  const baseDisruption = baseReport.disruptions[0];
+  if (!baseDisruption) return baseReport;
+
+  return {
+    ...baseReport,
+    disruptions: Array.from({ length: 5 }, (_, index) => ({
+      ...baseDisruption,
+      id: `rer-j-27-august-duplicate-${index}`,
+    })),
+  };
+}
+
+function createFiveDuplicateInterruptionTrafficReport(): TrafficLineReport {
+  const disruption = {
+    id: "rer-c-duplicate-interruption-0",
+    title: "Travaux",
+    message: [
+      "Période : toute la journée",
+      "Dates : du 1er juillet au 7 août",
+      "Station A <> Station C : trafic interrompu",
+    ].join("\n"),
+    kind: "works" as const,
+    applicationPeriods: [
+      {
+        begin: "20260701T000000",
+        end: "20260807T235959",
+      },
+    ],
+    impactedLineRefs: ["line:test"],
+    impactedStopNames: [],
+  };
+
+  return {
+    lineRef: "line:test",
+    status: "disrupted",
+    disruptions: Array.from({ length: 5 }, (_, index) => ({
+      ...disruption,
+      id: `rer-c-duplicate-interruption-${index}`,
+    })),
+  };
+}
+
 function createReplacementBusDisturbanceTrafficReport(): TrafficLineReport {
   return {
     lineRef: "line:test",
@@ -3926,6 +4224,33 @@ function createTransilienJBranchTrafficReport(): TrafficLineReport {
           "- Eragny Neuville <> Pontoise : trafic interrompu",
           "- Conflans-Sainte-Honorine <> Andrésy : trafic interrompu",
           "Bus de remplacement prévu sur les branches.",
+        ].join("\n"),
+        kind: "works",
+        applicationPeriods: [
+          {
+            begin: "20260701T000000",
+            end: "20260807T235959",
+          },
+        ],
+        impactedLineRefs: ["line:test"],
+        impactedStopNames: [],
+      },
+    ],
+  };
+}
+
+function createTopBranchInterruptionTrafficReport(): TrafficLineReport {
+  return {
+    lineRef: "line:test",
+    status: "disrupted",
+    disruptions: [
+      {
+        id: "transilien-j-top-branch-interruption",
+        title: "Interruption branche haute",
+        message: [
+          "Période : toute la journée",
+          "Dates : du 1er juillet au 7 août",
+          "- Eragny Neuville <> Pontoise : trafic interrompu",
         ].join("\n"),
         kind: "works",
         applicationPeriods: [

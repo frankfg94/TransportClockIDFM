@@ -36,9 +36,9 @@ export interface TrafficMarkerLayoutRequest {
 }
 
 /**
- * Keep replacement-bus cards above a single-row line and above every row
- * except the lowest one on a branched line. The decision uses rendered rail
- * rows only, so it remains valid when the topology changes.
+ * Keep traffic info cards above a single-row line and above every row except
+ * the lowest one on a branched line. The decision uses rendered rail rows
+ * only, so it remains valid when the topology changes.
  */
 export function shouldPreferTrafficMarkerAbove(
   anchor: Pick<TrafficMarkerPoint, "y">,
@@ -71,24 +71,24 @@ export function groupPatternTrafficMarkerSegments({
   segments,
   edges,
   unifyReplacementBusMarkers,
+  availableStationKeys,
 }: {
   segments: PatternTrafficImpactSegment[];
   edges: PatternTrafficEdge[];
   unifyReplacementBusMarkers: boolean;
+  availableStationKeys?: Iterable<string>;
 }): PatternTrafficMarkerGroup[] {
   if (!unifyReplacementBusMarkers) {
     return segments.map((segment) => createMarkerGroup([segment], segment.id));
   }
 
   const edgeByKey = new Map(edges.map((edge) => [getPatternTrafficEdgeKey(edge), edge]));
+  const availableStationKeySet = availableStationKeys
+    ? new Set(availableStationKeys)
+    : undefined;
   const buckets = new Map<string, Array<{ segment: PatternTrafficImpactSegment; index: number }>>();
-  const individual: IndexedGroup[] = [];
 
   segments.forEach((segment, index) => {
-    if (!segment.replacementBus) {
-      individual.push({ index, group: createMarkerGroup([segment], segment.id) });
-      return;
-    }
     const key = [
       segment.disruption.id,
       segment.kind,
@@ -114,7 +114,57 @@ export function groupPatternTrafficMarkerSegments({
     }
   }
 
-  return [...individual, ...grouped]
+  // Calendar entries can have different source ids/messages while rendering
+  // the same info card. The visible text, end date and exact focus station set
+  // are the safe merge key.
+  const fallbackGroups = new Map<string, IndexedGroup[]>();
+  grouped.forEach((candidate) => {
+    const textKey = getTrafficMarkerDisplayTextKey(
+      candidate.group.representative,
+    );
+    const endDateKey = normalizeTrafficMarkerMessage(
+      candidate.group.representative.endDateLabel,
+    );
+    const pulseStationKey = getTrafficMarkerPulseStationKey(
+      candidate.group.segments,
+      availableStationKeySet,
+    );
+    if (!textKey || !endDateKey || !pulseStationKey) return;
+
+    const key = [
+      textKey,
+      endDateKey,
+      pulseStationKey,
+    ].join("\u001e");
+    fallbackGroups.set(key, [
+      ...(fallbackGroups.get(key) ?? []),
+      candidate,
+    ]);
+  });
+
+  const mergedGrouped: IndexedGroup[] = [];
+  const mergedCandidates = new Set<IndexedGroup>();
+  for (const candidates of fallbackGroups.values()) {
+    if (candidates.length < 2) continue;
+    const first = candidates[0];
+    if (!first) continue;
+    const segments = candidates
+      .slice()
+      .sort((left, right) => left.index - right.index)
+      .flatMap(({ group }) => group.segments);
+    mergedGrouped.push({
+      index: Math.min(...candidates.map(({ index }) => index)),
+      group: createMarkerGroup(segments, `group:${first.group.representative.id}`),
+    });
+    candidates.forEach((candidate) => mergedCandidates.add(candidate));
+  }
+
+  const finalGrouped = [
+    ...grouped.filter((candidate) => !mergedCandidates.has(candidate)),
+    ...mergedGrouped,
+  ];
+
+  return finalGrouped
     .sort((left, right) => left.index - right.index)
     .map(({ group }) => group);
 }
@@ -127,12 +177,57 @@ export function createTrafficMarkerDisplayDateKey(
   );
 }
 
+export function getTrafficMarkerDisplayTextKey(
+  segment: Pick<
+    PatternTrafficImpactSegment,
+    "kind" | "replacementBus" | "restartTimeLabel"
+  >,
+): string {
+  return [
+    segment.kind,
+    segment.replacementBus,
+    normalizeTrafficMarkerMessage(segment.restartTimeLabel),
+  ].join("\u001f");
+}
+
 export function normalizeTrafficMarkerMessage(message?: string): string {
   return (message ?? "")
     .normalize("NFKC")
     .replace(/\s+/gu, " ")
     .trim()
     .toLocaleLowerCase("fr-FR");
+}
+
+/** The exact station set used by the marker focus action. */
+export function getTrafficMarkerPulseStationKeys(
+  segments: Array<Pick<PatternTrafficImpactSegment, "stationKeys" | "edgeKeys">>,
+): string[] {
+  const stationKeys = new Set<string>();
+  segments.forEach((segment) => {
+    segment.stationKeys.forEach((stationKey) => stationKeys.add(stationKey));
+    segment.edgeKeys.forEach((edgeKey) => {
+      const [source, target] = edgeKey.split("--");
+      if (source) stationKeys.add(source);
+      if (target) stationKeys.add(target);
+    });
+  });
+  return [...stationKeys].sort();
+}
+
+/**
+ * The focus station set is also the presentation identity used to merge
+ * duplicate alerts that were split into separate source disruptions.
+ */
+function getTrafficMarkerPulseStationKey(
+  segments: Array<Pick<PatternTrafficImpactSegment, "stationKeys" | "edgeKeys">>,
+  availableStationKeys?: ReadonlySet<string>,
+): string {
+  return getTrafficMarkerPulseStationKeys(segments)
+    .filter(
+      (stationKey) =>
+        !availableStationKeys || availableStationKeys.has(stationKey),
+    )
+    .join("\u001f");
 }
 
 export function getTrafficMarkerSize(

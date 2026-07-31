@@ -78,6 +78,7 @@ describe("PluginViewer", () => {
       expect(wrapper.findAll(".plugin-card")).toHaveLength(10);
     });
 
+    expect(wrapper.get(".plugin-viewer").classes()).toContain("settings-panel--open");
     expect(wrapper.get('[data-testid="plugin-catalog"]').classes()).toContain(
       "plugin-viewer__catalog--grid",
     );

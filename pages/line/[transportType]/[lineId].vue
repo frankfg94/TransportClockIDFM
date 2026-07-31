@@ -218,6 +218,7 @@ import type {
   LineSearchOption,
   TransitFamily,
 } from "../../../src/types/transit";
+import { LINE_PATTERN_VIEW_SCHEMA_VERSION } from "../../../src/types/transit";
 import { useI18n } from "../../../src/i18n";
 
 const DeparturePatternModal = defineAsyncComponent(
@@ -238,6 +239,7 @@ const { settings } = useAppSettings();
 const { t } = useI18n();
 const apiUrl = computed(() => {
   const params = new URLSearchParams();
+  params.set("schemaVersion", LINE_PATTERN_VIEW_SCHEMA_VERSION);
   const direction = firstRouteQuery(route.query.direction);
   const startStation = firstRouteQuery(route.query.startStation);
 

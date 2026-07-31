@@ -54,16 +54,21 @@ describe("traffic marker presentation", () => {
     ]);
   });
 
-  it("does not merge two different source alerts even when their text and dates match", () => {
+  it("keeps different source alerts separate when their pulsed stations differ", () => {
     const first = createSegment({ id: "alert-a:section:0" });
     const second = createSegment({
       id: "alert-b:section:0",
       disruptionId: "alert-b",
+      stationKeys: ["station-d"],
+      edgeKeys: ["station-c--station-d"],
     });
 
     const groups = groupPatternTrafficMarkerSegments({
       segments: [first, second],
-      edges: [createEdge("station-a", "station-b")],
+      edges: [
+        createEdge("station-a", "station-b"),
+        createEdge("station-c", "station-d"),
+      ],
       unifyReplacementBusMarkers: true,
     });
 
@@ -72,6 +77,55 @@ describe("traffic marker presentation", () => {
       "alert-a",
       "alert-b",
     ]);
+  });
+
+  it("merges distinct source alerts when their visible text, end date and stations match", () => {
+    const first = createSegment({ id: "alert-a:section:0" });
+    const duplicate = createSegment({
+      id: "alert-b:section:0",
+      disruptionId: "alert-b",
+    });
+    duplicate.disruption.message = "Alerte source enrichie";
+
+    const groups = groupPatternTrafficMarkerSegments({
+      segments: [first, duplicate],
+      edges: [createEdge("station-a", "station-b")],
+      unifyReplacementBusMarkers: true,
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.segments.map((segment) => segment.id)).toEqual([
+      first.id,
+      duplicate.id,
+    ]);
+  });
+
+  it("merges duplicate interruption cards when text, end date and stations match", () => {
+    const first = createSegment({
+      id: "interruption-a:section:0",
+      disruptionId: "interruption-a",
+      replacementBus: false,
+      message: "Trafic interrompu - reprise le 7 août",
+    });
+    const duplicate = createSegment({
+      id: "interruption-b:section:0",
+      disruptionId: "interruption-b",
+      replacementBus: false,
+      message: "Trafic interrompu - reprise le 7 août",
+    });
+
+    const groups = groupPatternTrafficMarkerSegments({
+      segments: [first, duplicate],
+      edges: [createEdge("station-a", "station-b")],
+      unifyReplacementBusMarkers: true,
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.segments.map((segment) => segment.id)).toEqual([
+      first.id,
+      duplicate.id,
+    ]);
+    expect(groups[0]?.representative.disruption.id).toBe("interruption-a");
   });
 
   it("keeps disconnected sections as separate replacement-bus markers", () => {
@@ -361,12 +415,16 @@ function createSegment({
   stationKeys = ["station-b"],
   edgeKeys = ["station-a--station-b"],
   kind = "interruption",
+  replacementBus = true,
+  message,
 }: {
   id: string;
   disruptionId?: string;
   stationKeys?: string[];
   edgeKeys?: string[];
   kind?: PatternTrafficImpactKind;
+  replacementBus?: boolean;
+  message?: string;
 }): PatternTrafficImpactSegment {
   const disruption: TrafficDisruption = {
     id: disruptionId,
@@ -379,13 +437,14 @@ function createSegment({
     impactedLineRefs: ["line:test"],
     impactedStopNames: ["Station B"],
   };
+  if (message) disruption.message = message;
 
   return {
     id,
     kind,
     disruption,
     endDateLabel: "7 août",
-    replacementBus: true,
+    replacementBus,
     stationKeys,
     edgeKeys,
   };

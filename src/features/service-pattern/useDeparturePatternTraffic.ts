@@ -8,6 +8,9 @@ import {
 import { toServerApiUrl } from "../../services/serverApi";
 import type { LineSearchOption, TransitBoardConfig } from "../../types/transit";
 import { normalizeTrafficLineRef } from "../traffic/trafficNormalization";
+import { normalizeTrafficText } from "../traffic/trafficPresentation";
+import { getTodayScheduledTrafficInterruption } from "../traffic/trafficScheduledWarnings";
+import { getTrafficDisruptionStartClockTime } from "../traffic/trafficTextTimes";
 import {
   getCurrentAndUpcomingTrafficWarningDisruptions,
   getCurrentTrafficDisruptions,
@@ -38,6 +41,40 @@ export function getSelectedTrafficDisruptions(
   return disruptions.filter((disruption) =>
     selectedIds.includes(disruption.id),
   );
+}
+
+export function getCurrentDeparturePatternTrafficDisruptions(
+  disruptions: TrafficDisruption[],
+  now = Date.now(),
+): TrafficDisruption[] {
+  return getCurrentTrafficDisruptions(disruptions, now).filter((disruption) => {
+    const startTime = getTrafficDisruptionStartClockTime(disruption);
+
+    if (!startTime) {
+      return true;
+    }
+
+    const scheduled = getTodayScheduledTrafficInterruption(disruption, now);
+
+    if (scheduled) {
+      return scheduled.active;
+    }
+
+    const text = normalizeTrafficText(
+      `${disruption.title} ${disruption.message ?? ""}`,
+    );
+    const currentDay = new Date(now).getDay();
+
+    if (text.includes("en semaine")) {
+      return currentDay >= 1 && currentDay <= 5;
+    }
+
+    if (/\bweek[-\s]?ends?\b/u.test(text)) {
+      return currentDay === 0 || currentDay === 6;
+    }
+
+    return true;
+  });
 }
 interface UseDeparturePatternTrafficOptions {
   open: ComputedRef<boolean>;
@@ -125,7 +162,7 @@ export function useDeparturePatternTraffic({
     }
 
     if (typeof selectedNow === "number" && Number.isFinite(selectedNow)) {
-      return getCurrentTrafficDisruptions(disruptions, now);
+      return getCurrentDeparturePatternTrafficDisruptions(disruptions, now);
     }
 
     return includeUpcomingTrafficWarnings.value
@@ -134,7 +171,7 @@ export function useDeparturePatternTraffic({
           now,
           upcomingWarningLookaheadDays.value,
         )
-      : getCurrentTrafficDisruptions(disruptions, now);
+      : getCurrentDeparturePatternTrafficDisruptions(disruptions, now);
   });
 
   const trafficImpactKey = computed(() =>
@@ -255,8 +292,6 @@ export function useDeparturePatternTraffic({
     if (
       !open.value ||
       !smartTrafficDetection.value ||
-      !includeUpcomingTrafficWarnings.value ||
-      upcomingWarningLookaheadDays.value <= 0 ||
       typeof window === "undefined"
     ) {
       return;
