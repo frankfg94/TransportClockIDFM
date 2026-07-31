@@ -50,6 +50,10 @@ const OFFICIAL_LINE_PRESENTATION: Record<
   "transilien-j": { color: "#d6cd00", textColor: "#111827" },
   "train-j": { color: "#d6cd00", textColor: "#111827" },
 
+  "line-idfm-c01730": { color: "#ef8c2f", textColor: "#ffffff" },
+  "transilien-p": { color: "#ef8c2f", textColor: "#ffffff" },
+  "train-p": { color: "#ef8c2f", textColor: "#ffffff" },
+
   "line-idfm-c02528": { color: "#9acd32", textColor: "#10233f" },
   "tram-t10": { color: "#9acd32", textColor: "#10233f" },
   t10: { color: "#9acd32", textColor: "#10233f" },
@@ -72,8 +76,9 @@ export function createLinePresentation(
   });
 
   return {
-    color: normalizeHexColor(source.color) ?? official?.color ?? "#0064ff",
-    textColor: normalizeHexColor(source.textColor) ?? official?.textColor ?? "#ffffff",
+    color: official?.color ?? normalizeHexColor(source.color) ?? "#0064ff",
+    textColor:
+      official?.textColor ?? normalizeHexColor(source.textColor) ?? "#ffffff",
     iconUrl: iconUrls[0],
     iconUrls,
   };

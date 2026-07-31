@@ -1254,6 +1254,26 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
+      <label
+        class="settings-toggle"
+        :title="t('settings.display.unifyReplacementBusMarkersDescription')"
+      >
+        <input
+          type="checkbox"
+          :checked="settings.unifyReplacementBusMarkers"
+          @change="
+            updateSettings({
+              unifyReplacementBusMarkers: ($event.target as HTMLInputElement).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>{{ t("settings.display.unifyReplacementBusMarkers") }}</strong>
+          <small>{{ t("settings.display.unifyReplacementBusMarkersDescription") }}</small>
+        </div>
+      </label>
+
       <div class="settings-row settings-row--range">
         <div>
           <strong>{{ t("settings.display.trafficWarningLookahead") }}</strong>

@@ -147,6 +147,25 @@ describe("SettingsPage", () => {
       (smartModalFormattingInput.element as HTMLInputElement).checked,
     ).toBe(false);
 
+    const replacementBusGroupingToggle = wrapper
+      .findAll("label.settings-toggle")
+      .find((label) =>
+        label.text().includes("Unifier les bus de remplacement"),
+      );
+    if (!replacementBusGroupingToggle) {
+      throw new Error("Missing replacement bus marker grouping setting");
+    }
+    const replacementBusGroupingInput = replacementBusGroupingToggle.find(
+      "input",
+    );
+    expect(
+      (replacementBusGroupingInput.element as HTMLInputElement).checked,
+    ).toBe(true);
+    await replacementBusGroupingInput.setValue(false);
+    expect(
+      (replacementBusGroupingInput.element as HTMLInputElement).checked,
+    ).toBe(false);
+
     expect(wrapper.text()).toContain("Avertissement travaux sur le schema");
     expect(wrapper.text()).toContain("10 jours");
     const trafficWarningSlider = wrapper.get(

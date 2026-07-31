@@ -1571,6 +1571,7 @@
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid rgba(16, 35, 63, 0.1);
   border-radius: 8px;
+  box-sizing: border-box;
   box-shadow: 0 12px 28px rgba(16, 35, 63, 0.14);
   color: #1f2937;
   display: inline-flex;
@@ -1579,26 +1580,72 @@
   gap: 6px;
   justify-content: center;
   line-height: 1.1;
-  min-height: 32px;
+  min-height: var(--traffic-marker-layout-height, 32px);
   padding: 6px 9px;
   pointer-events: auto;
   position: relative;
   width: 156px;
 }
 
-.pattern-flow-traffic-marker::before {
-  background: currentColor;
-  bottom: 100%;
-  content: "";
-  height: var(--traffic-marker-connector-height, 20px);
-  left: 50%;
-  opacity: 0.58;
-  position: absolute;
-  transform: translateX(-50%);
-  width: 2px;
+.pattern-flow-traffic-marker-connector {
+  box-sizing: border-box;
+  height: calc(
+    var(--traffic-marker-layout-height, 32px) +
+      var(--traffic-marker-connector-height, 20px)
+  );
+  pointer-events: none;
+  position: relative;
+  width: var(--traffic-marker-layout-width, 156px);
 }
 
-.pattern-flow-traffic-marker--interruption {
+.pattern-flow-traffic-marker-connector::before {
+  background: currentColor;
+  bottom: auto;
+  content: "";
+  height: 2px;
+  left: calc(50% + var(--traffic-marker-connector-offset, 0px));
+  opacity: 0.58;
+  pointer-events: none;
+  position: absolute;
+  top: calc(var(--traffic-marker-layout-height, 32px) - 1px);
+  transform: rotate(var(--traffic-marker-connector-angle, 90deg));
+  transform-origin: left center;
+  width: var(--traffic-marker-connector-length, 20px);
+}
+
+.pattern-flow-traffic-marker-connector--interruption {
+  color: #bd332b;
+}
+
+.pattern-flow-traffic-marker-connector--disturbance {
+  color: #b45309;
+}
+
+.pattern-flow-traffic-marker-connector--below::before {
+  top: -1px;
+}
+
+.pattern-flow-traffic-marker-connector--interruption::after {
+  background: #bd332b;
+  border-radius: 50%;
+  content: "";
+  height: 7px;
+  left: calc(50% + var(--traffic-marker-connector-offset, 0px));
+  pointer-events: none;
+  position: absolute;
+  top: calc(
+    var(--traffic-marker-layout-height, 32px) +
+      var(--traffic-marker-connector-height, 20px)
+  );
+  transform: translate(-50%, -50%);
+  width: 7px;
+}
+
+.pattern-flow-traffic-marker-connector--interruption.pattern-flow-traffic-marker-connector--below::after {
+  top: calc(0px - var(--traffic-marker-connector-height, 20px));
+}
+
+.pattern-flow-traffic-marker--large {
   align-items: center;
   background: #ffffff;
   border-color: rgba(185, 42, 34, 0.16);
@@ -1609,28 +1656,9 @@
   color: #bd332b;
   gap: 22px;
   justify-content: flex-start;
-  min-height: 126px;
+  min-height: var(--traffic-marker-layout-height, 126px);
   padding: 26px 30px 26px 24px;
   width: 420px;
-}
-
-.pattern-flow-traffic-marker--interruption::before {
-  background: #bd332b;
-  bottom: calc(100% + 2px);
-  height: var(--traffic-marker-connector-height, 54px);
-  opacity: 1;
-}
-
-.pattern-flow-traffic-marker--interruption::after {
-  background: #bd332b;
-  border-radius: 50%;
-  bottom: calc(100% + var(--traffic-marker-connector-height, 54px));
-  content: "";
-  height: 7px;
-  left: 50%;
-  position: absolute;
-  transform: translateX(-50%);
-  width: 7px;
 }
 
 .pattern-flow-traffic-marker__dismiss {
@@ -1641,8 +1669,10 @@
   color: #6f6b86;
   cursor: pointer;
   display: inline-flex;
-  height: 26px;
+  flex: 0 0 28px;
+  height: 28px;
   justify-content: center;
+  min-height: 28px;
   opacity: 0;
   padding: 0;
   pointer-events: none;
@@ -1650,7 +1680,9 @@
   right: 9px;
   top: 9px;
   transition: background 140ms ease, color 140ms ease, opacity 140ms ease;
-  width: 26px;
+  width: 28px;
+  min-width: 28px;
+  aspect-ratio: 1;
 }
 
 .pattern-flow-traffic-marker--interruption:hover .pattern-flow-traffic-marker__dismiss,
@@ -1672,6 +1704,55 @@
   height: 15px;
   stroke-width: 2.5;
   width: 15px;
+}
+
+.pattern-flow-traffic-marker__focus {
+  align-items: center;
+  background: rgba(31, 36, 55, 0.06);
+  border: 0;
+  border-radius: 50%;
+  color: currentColor;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 26px;
+  height: 26px;
+  justify-content: center;
+  min-height: 26px;
+  opacity: 0;
+  padding: 0;
+  pointer-events: auto;
+  position: absolute;
+  right: 9px;
+  top: 9px;
+  transition: background 140ms ease, color 140ms ease, opacity 140ms ease;
+  width: 26px;
+  min-width: 26px;
+  aspect-ratio: 1;
+}
+
+.pattern-flow-traffic-marker:hover .pattern-flow-traffic-marker__focus,
+.pattern-flow-traffic-marker:focus-within .pattern-flow-traffic-marker__focus {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.pattern-flow-traffic-marker__focus:hover:not(:disabled),
+.pattern-flow-traffic-marker__focus:focus-visible {
+  background: rgba(16, 35, 63, 0.12);
+  outline: 2px solid color-mix(in srgb, currentColor, transparent 72%);
+  outline-offset: 1px;
+  transform: none;
+}
+
+.pattern-flow-traffic-marker__focus svg {
+  height: 15px;
+  stroke-width: 2.2;
+  width: 15px;
+}
+
+.pattern-flow-traffic-marker--interruption .pattern-flow-traffic-marker__focus {
+  right: 9px;
+  top: 43px;
 }
 
 .pattern-flow-traffic-walking {
@@ -1711,6 +1792,10 @@
 .pattern-flow-traffic-marker--disturbance {
   border-color: rgba(245, 158, 11, 0.7);
   color: #b45309;
+}
+
+.pattern-flow-traffic-marker--large.pattern-flow-traffic-marker--disturbance {
+  border-top-color: #f59e0b;
 }
 
 .pattern-flow-traffic-marker__icon {
@@ -1784,7 +1869,7 @@
   width: 12px;
 }
 
-.pattern-flow-traffic-marker--interruption .pattern-flow-traffic-marker__icon {
+.pattern-flow-traffic-marker--large .pattern-flow-traffic-marker__icon {
   align-items: center;
   background: rgba(185, 42, 34, 0.1);
   border-radius: 50%;
@@ -1794,7 +1879,7 @@
   width: 76px;
 }
 
-.pattern-flow-traffic-marker--interruption
+.pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__icon
   svg {
   height: 42px;
@@ -1802,19 +1887,19 @@
   width: 42px;
 }
 
-.pattern-flow-traffic-marker--interruption
+.pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__content {
   align-items: flex-start;
   gap: 12px;
 }
 
-.pattern-flow-traffic-marker--interruption .pattern-flow-traffic-marker__copy {
+.pattern-flow-traffic-marker--large .pattern-flow-traffic-marker__copy {
   align-items: flex-start;
   gap: 8px;
   text-align: left;
 }
 
-.pattern-flow-traffic-marker--interruption
+.pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__copy
   strong {
   color: #1f2437;
@@ -1823,7 +1908,7 @@
   line-height: 1.05;
 }
 
-.pattern-flow-traffic-marker--interruption
+.pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__copy
   small {
   color: #6f6b86;
@@ -1832,7 +1917,7 @@
   line-height: 1.2;
 }
 
-.pattern-flow-traffic-marker--interruption
+.pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__details {
   background: rgba(185, 42, 34, 0.08);
   border: 1px solid rgba(185, 42, 34, 0.14);
@@ -1842,18 +1927,38 @@
   padding: 6px 9px;
 }
 
-.pattern-flow-traffic-marker--interruption
+.pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__details:hover:not(:disabled),
-.pattern-flow-traffic-marker--interruption
+.pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__details:focus-visible {
   background: rgba(185, 42, 34, 0.14);
 }
 
-.pattern-flow-traffic-marker--interruption
+.pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__details
   svg {
   height: 15px;
   width: 15px;
+}
+
+.pattern-flow-traffic-marker--large.pattern-flow-traffic-marker--disturbance
+  .pattern-flow-traffic-marker__icon {
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+}
+
+.pattern-flow-traffic-marker--large.pattern-flow-traffic-marker--disturbance
+  .pattern-flow-traffic-marker__details {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.24);
+  color: #b45309;
+}
+
+.pattern-flow-traffic-marker--large.pattern-flow-traffic-marker--disturbance
+  .pattern-flow-traffic-marker__details:hover:not(:disabled),
+.pattern-flow-traffic-marker--large.pattern-flow-traffic-marker--disturbance
+  .pattern-flow-traffic-marker__details:focus-visible {
+  background: rgba(245, 158, 11, 0.16);
 }
 
 .pattern-flow-shell--compact .pattern-flow-traffic-marker,
@@ -1868,30 +1973,30 @@
   font-size: 0.58rem;
 }
 
-.pattern-flow-shell--compact .pattern-flow-traffic-marker--interruption,
-.pattern-flow-shell--realistic .pattern-flow-traffic-marker--interruption {
+.pattern-flow-shell--compact .pattern-flow-traffic-marker--large,
+.pattern-flow-shell--realistic .pattern-flow-traffic-marker--large {
   gap: 16px;
-  min-height: 104px;
+  min-height: var(--traffic-marker-layout-height, 104px);
   padding: 20px 24px 20px 20px;
   width: 340px;
 }
 
 .pattern-flow-shell--compact
-  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__icon,
 .pattern-flow-shell--realistic
-  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__icon {
   height: 62px;
   width: 62px;
 }
 
 .pattern-flow-shell--compact
-  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__icon
   svg,
 .pattern-flow-shell--realistic
-  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__icon
   svg {
   height: 34px;
@@ -1899,52 +2004,52 @@
 }
 
 .pattern-flow-shell--compact
-  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__copy
   strong,
 .pattern-flow-shell--realistic
-  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__copy
   strong {
   font-size: 1.25rem;
 }
 
 .pattern-flow-shell--compact
-  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__copy
   small,
 .pattern-flow-shell--realistic
-  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__copy
   small {
   font-size: 0.86rem;
 }
 
 .pattern-flow-shell--compact
-  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__content,
 .pattern-flow-shell--realistic
-  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__content {
   gap: 9px;
 }
 
 .pattern-flow-shell--compact
-  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__details,
 .pattern-flow-shell--realistic
-  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__details {
   font-size: 0.72rem;
   padding: 5px 8px;
 }
 
 .pattern-flow-shell--compact
-  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__details
   svg,
 .pattern-flow-shell--realistic
-  .pattern-flow-traffic-marker--interruption
+  .pattern-flow-traffic-marker--large
   .pattern-flow-traffic-marker__details
   svg {
   height: 13px;

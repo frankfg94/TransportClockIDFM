@@ -141,6 +141,9 @@ export const fr = {
       smartTraffic: "Detection intelligente sur le schema",
       smartTrafficDescription:
         "Charge les perturbations utiles pour detecter les sections impactees.",
+      unifyReplacementBusMarkers: "Unifier les bus de remplacement",
+      unifyReplacementBusMarkersDescription:
+        "Regroupe les cartes identiques d'une même alerte sur un même tronçon.",
       trafficModalSmartFormatting:
         "Modale de perturbations et d'interruptions - formatage intelligent",
       trafficModalSmartFormattingDescription:
@@ -777,6 +780,7 @@ export const fr = {
     mainTransfersAria: "Correspondances principales",
     trafficDetailsAria: "Detail de l'information trafic",
     closeTrafficAria: "Fermer l'information trafic",
+    focusTrafficAria: "Centrer et mettre en evidence les stations concernees",
     trafficReplacementBus: "Bus de remplacement",
     trafficReplacementBusPlanned: "Bus de remplacement prevu",
     trafficInterrupted: "Trafic interrompu",

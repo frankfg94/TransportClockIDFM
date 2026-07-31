@@ -144,6 +144,9 @@ export const en = {
       trafficCalendarScopeAria: "Traffic calendar impacts",
       smartTraffic: "Smart detection on the diagram",
       smartTrafficDescription: "Loads useful disruptions to detect impacted sections.",
+      unifyReplacementBusMarkers: "Unify replacement buses",
+      unifyReplacementBusMarkersDescription:
+        "Groups identical cards from the same alert on the same section.",
       trafficModalSmartFormatting: "Disruption and interruption modal - smart formatting",
       trafficModalSmartFormattingDescription:
         "Analyzes the announcement text to extract periods, times, and replacement buses and generate additional tiles.",
@@ -762,6 +765,7 @@ export const en = {
     mainTransfersAria: "Main transfers",
     trafficDetailsAria: "Traffic information detail",
     closeTrafficAria: "Close traffic information",
+    focusTrafficAria: "Center and highlight the affected stations",
     trafficReplacementBus: "Replacement bus",
     trafficReplacementBusPlanned: "Replacement bus planned",
     trafficInterrupted: "Traffic interrupted",

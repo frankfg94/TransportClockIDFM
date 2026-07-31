@@ -25,6 +25,7 @@ const baseSettings: AppSettings = {
   compactLinePlanMode: "auto",
   patternRoundedCurves: false,
   showInterruptionWalkingTimes: true,
+  unifyReplacementBusMarkers: true,
   patternCompactBranchGap: 258,
   patternCompactForkGap: 158,
   patternRealisticMinGapCoefficient: 0.5,

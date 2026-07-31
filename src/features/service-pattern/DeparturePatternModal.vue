@@ -23,6 +23,7 @@ import {
 import { Controls } from "@vue-flow/controls";
 import {
   Bus,
+  Eye,
   Expand,
   Footprints,
   Info,
@@ -89,6 +90,16 @@ import {
   TRAFFIC_INTERRUPTION_COLOR,
 } from "./trafficImpactStyles";
 import { createInterruptionWalkingTimes } from "./interruptionWalkingTimes";
+import {
+  createTrafficMarkerStationObstacles,
+  getTrafficMarkerAnchor,
+  getTrafficMarkerSize,
+  groupPatternTrafficMarkerSegments,
+  layoutTrafficMarkers,
+  shouldPreferTrafficMarkerAbove,
+  type PatternTrafficMarkerGroup,
+  type TrafficMarkerRect,
+} from "./trafficMarkerLayout";
 import { useI18n } from "../../i18n";
 import { useAppSettings } from "../app-settings/appSettings";
 import { transportClockPlugins } from "#transport-clock/plugins";
@@ -124,6 +135,11 @@ type PatternTrafficMarkerFlowNode = Node<
   Record<string, never>,
   "traffic-marker"
 >;
+type PatternTrafficMarkerConnectorFlowNode = Node<
+  PatternTrafficMarkerConnectorNodeData,
+  Record<string, never>,
+  "traffic-marker-connector"
+>;
 type PatternTrafficWalkingFlowNode = Node<
   PatternTrafficWalkingNodeData,
   Record<string, never>,
@@ -133,6 +149,7 @@ type PatternFlowNode =
   | PatternStationFlowNode
   | PatternCityZoneFlowNode
   | PatternTrafficMarkerFlowNode
+  | PatternTrafficMarkerConnectorFlowNode
   | PatternTrafficWalkingFlowNode;
 type PatternFlowEdge = Edge<
   PatternFlowEdgeData,
@@ -172,13 +189,27 @@ interface PatternCityZoneNodeData {
 }
 
 interface PatternTrafficMarkerNodeData {
-  connectorHeight: number;
   key: string;
   kind: PatternTrafficImpact["kind"];
+  markerHeight: number;
+  placement: "above" | "below";
+  pulseStationKeys: string[];
   statusLabel: string;
   detailLabel?: string;
   replacementBus: boolean;
   trafficImpact: PatternTrafficImpact;
+}
+
+interface PatternTrafficMarkerConnectorNodeData {
+  connectorAngle: number;
+  connectorHeight: number;
+  connectorLength: number;
+  connectorOffset: number;
+  key: string;
+  kind: PatternTrafficImpact["kind"];
+  markerHeight: number;
+  markerWidth: number;
+  placement: "above" | "below";
 }
 
 interface PatternTrafficWalkingNodeData {
@@ -314,6 +345,9 @@ const TRANSFER_HYDRATION_HEALTH_CHECK_TIMEOUT_MS = 2_500;
 const REGULAR_STATION_RAIL_CENTER_Y = 17;
 const REGULAR_TERMINAL_RAIL_CENTER_Y = 19;
 const COMPACT_STATION_RAIL_CENTER_Y = 15;
+const TRAFFIC_MARKER_CONNECTOR_Z_INDEX = 90;
+const TRAFFIC_MARKER_CARD_Z_INDEX = 100;
+const TRAFFIC_MARKER_HOVERED_CONNECTOR_Z_INDEX = 110;
 type PatternSpacingOptions = {
   compactBranchGap: number;
   compactForkGap: number;
@@ -360,6 +394,7 @@ const props = withDefaults(
     compactMode?: PatternCompactMode;
     patternRoundedCurves?: boolean;
     showInterruptionWalkingTimes?: boolean;
+    unifyReplacementBusMarkers?: boolean;
     patternCompactBranchGap?: number;
     patternCompactForkGap?: number;
     patternRealisticMinGapCoefficient?: number;
@@ -385,6 +420,7 @@ const props = withDefaults(
     compactMode: "compact",
     patternRoundedCurves: false,
     showInterruptionWalkingTimes: true,
+    unifyReplacementBusMarkers: true,
     patternCompactBranchGap: DEFAULT_COMPACT_BRANCH_GAP,
     patternCompactForkGap: DEFAULT_COMPACT_FORK_GAP,
     patternRealisticMinGapCoefficient:
@@ -426,6 +462,7 @@ const patternFlowViewportSize = ref<PatternViewportSize>({
 });
 const trafficPulseStationKeys = ref<Set<string>>(new Set());
 const hiddenTrafficMarkerKeys = ref<Set<string>>(new Set());
+const hoveredTrafficMarkerKey = ref<string>();
 const selectedTrafficDisruptionIds = ref<string[]>([]);
 const selectedTrafficTimestamp = ref<number>();
 const hydratedPattern = ref<DepartureCallingPattern>();
@@ -627,6 +664,7 @@ const flowModel = computed(() =>
     props.showCityZones,
     props.patternRoundedCurves,
     props.showInterruptionWalkingTimes,
+    props.unifyReplacementBusMarkers,
     analyzeCurrentTrafficImpacts,
   ),
 );
@@ -738,10 +776,25 @@ const pluginStatuses = computed(() =>
     return status ? [status] : [];
   }),
 );
-const allFlowNodes = computed<Node[]>(() => [
-  ...flowModel.value.nodes,
-  ...pluginFlowNodes.value,
-]);
+const allFlowNodes = computed<Node[]>(() =>
+  [...flowModel.value.nodes, ...pluginFlowNodes.value].map((node) => {
+    if (node.type === "traffic-marker") {
+      return { ...node, zIndex: TRAFFIC_MARKER_CARD_Z_INDEX };
+    }
+
+    if (node.type === "traffic-marker-connector") {
+      return {
+        ...node,
+        zIndex:
+          node.data.key === hoveredTrafficMarkerKey.value
+            ? TRAFFIC_MARKER_HOVERED_CONNECTOR_Z_INDEX
+            : TRAFFIC_MARKER_CONNECTOR_Z_INDEX,
+      };
+    }
+
+    return node;
+  }),
+);
 const {
   calendar: trafficCalendar,
   close: closeTrafficCalendar,
@@ -786,7 +839,9 @@ const patternFlowKey = computed(
       props.patternRoundedCurves ? "rounded" : "straight"
     }:spacing:${patternSpacingKey.value}${
       props.board?.line.mode ? `:${props.board.line.mode}` : ""
-    }:traffic:${props.smartTrafficDetection ? trafficImpactKey.value : "off"}`,
+    }:traffic:${props.smartTrafficDetection ? trafficImpactKey.value : "off"}:bus-markers:${
+      props.unifyReplacementBusMarkers ? "unified" : "separate"
+    }`,
 );
 const initialViewport = computed(() => {
   const currentNode =
@@ -1154,7 +1209,27 @@ async function focusTrafficDisruption(
   const segments = flowModel.value.trafficAnalysis.segments.filter((segment) =>
     disruptionIds.has(segment.disruption.id),
   );
-  const stationKeys = getTrafficFocusStationKeys(segments);
+  await focusTrafficStationKeys(getTrafficFocusStationKeys(segments), 2);
+}
+
+function focusTrafficMarker(stationKeys: string[]): void {
+  void focusTrafficStationKeys(stationKeys, 3);
+}
+
+function hoverTrafficMarker(key: string): void {
+  hoveredTrafficMarkerKey.value = key;
+}
+
+function unhoverTrafficMarker(key: string): void {
+  if (hoveredTrafficMarkerKey.value === key) {
+    hoveredTrafficMarkerKey.value = undefined;
+  }
+}
+
+async function focusTrafficStationKeys(
+  stationKeys: string[],
+  pulseCount: number,
+): Promise<void> {
   const viewport = createTrafficFocusViewport(stationKeys);
   const controller = patternFlowViewportController.value;
 
@@ -1176,14 +1251,15 @@ async function focusTrafficDisruption(
   }
   if (request !== trafficFocusRequest) return;
 
-  await waitForTrafficFocus(TRAFFIC_FOCUS_PULSE_DELAY_MS);
-  if (request !== trafficFocusRequest) return;
-
-  pulseStations(stationKeys);
-  await waitForTrafficFocus(TRAFFIC_FOCUS_PULSE_REPEAT_DELAY_MS);
-  if (request !== trafficFocusRequest) return;
-
-  pulseStations(stationKeys);
+  for (let pulseIndex = 0; pulseIndex < pulseCount; pulseIndex += 1) {
+    await waitForTrafficFocus(
+      pulseIndex === 0
+        ? TRAFFIC_FOCUS_PULSE_DELAY_MS
+        : TRAFFIC_FOCUS_PULSE_REPEAT_DELAY_MS,
+    );
+    if (request !== trafficFocusRequest) return;
+    pulseStations(stationKeys);
+  }
 }
 
 function pulseStations(stations: string[]): void {
@@ -1206,6 +1282,8 @@ function pulseStations(stations: string[]): void {
 
 function getTrafficFocusStationKeys(
   segments: PatternTrafficImpactSegment[],
+  positions: Map<string, PatternLayoutPosition> =
+    flowModel.value?.trafficPositions,
 ): string[] {
   const stationKeys = new Set<string>();
 
@@ -1219,7 +1297,7 @@ function getTrafficFocusStationKeys(
   });
 
   return Array.from(stationKeys).filter((stationKey) =>
-    flowModel.value.trafficPositions.has(stationKey),
+    positions?.has(stationKey),
   );
 }
 
@@ -1704,6 +1782,7 @@ function createPatternFlow(
   showCityZones = true,
   roundedCurves = false,
   showInterruptionWalkingTimes = true,
+  unifyReplacementBusMarkers = true,
   analyzeTraffic: DeparturePatternTrafficAnalyzer = createEmptyTrafficImpactAnalysis,
 ): PatternFlowModel {
   const graph = buildPatternGraph(calls, lineTopology, fullLine);
@@ -1797,19 +1876,19 @@ function createPatternFlow(
         layout,
       })
     : [];
-  const trafficMarkerNodes = createTrafficMarkerFlowNodes({
-    segments: trafficAnalysis.segments.filter(
-      (segment) => !hiddenTrafficMarkerKeys.value.has(segment.id),
-    ),
+  const trafficMarkerGroups = groupPatternTrafficMarkerSegments({
+    segments: trafficAnalysis.segments,
     edges: visibleDrawableEdges,
-    positions: topology.positions,
+    unifyReplacementBusMarkers,
+  }).filter((group) => !hiddenTrafficMarkerKeys.value.has(group.id));
+  const trafficMarkerNodes = createTrafficMarkerFlowNodes({
+    groups: trafficMarkerGroups,
+    edges: visibleDrawableEdges,
     layout,
     compact: layout.compact,
-    walkingEdgeKeys: new Set(
-      trafficWalkingNodes.flatMap((node) =>
-        node.data ? [node.data.edgeKey] : [],
-      ),
-    ),
+    stationNodes,
+    cityZoneNodes,
+    walkingNodes: trafficWalkingNodes,
   });
   const nodes: PatternFlowNode[] = [
     ...cityZoneNodes,
@@ -1886,94 +1965,150 @@ function createEmptyTrafficImpactAnalysis(): PatternTrafficImpactAnalysis {
 }
 
 function createTrafficMarkerFlowNodes({
-  segments,
+  groups,
   edges,
-  positions,
   layout,
   compact,
-  walkingEdgeKeys,
+  stationNodes,
+  cityZoneNodes,
+  walkingNodes,
 }: {
-  segments: PatternTrafficImpactSegment[];
+  groups: PatternTrafficMarkerGroup[];
   edges: PatternGraphEdge[];
-  positions: Map<string, { x: number; y: number }>;
   layout: PatternLayoutOptions;
   compact: boolean;
-  walkingEdgeKeys: Set<string>;
-}): PatternTrafficMarkerFlowNode[] {
-  const edgeByKey = new Map(
-    edges.map((edge) => [createEdgeKey(edge.source, edge.target), edge]),
+  stationNodes: PatternStationFlowNode[];
+  cityZoneNodes: PatternCityZoneFlowNode[];
+  walkingNodes: PatternTrafficWalkingFlowNode[];
+}): PatternFlowNode[] {
+  const railPositions = new Map(
+    stationNodes.map((node) => [
+      node.id,
+      {
+        x: node.position.x + layout.nodeWidth / 2,
+        y:
+          node.position.y +
+          (compact
+            ? COMPACT_STATION_RAIL_CENTER_Y
+            : node.data?.branchEnd
+              ? REGULAR_TERMINAL_RAIL_CENTER_Y
+              : REGULAR_STATION_RAIL_CENTER_Y),
+      },
+    ]),
   );
-  return segments
-    .map((segment): PatternTrafficMarkerFlowNode | undefined => {
-      const anchor = getTrafficSegmentAnchor(segment, edgeByKey, positions);
+  const obstacles: TrafficMarkerRect[] = [
+    ...stationNodes.flatMap((node) =>
+      createTrafficMarkerStationObstacles({
+        position: node.position,
+        width: layout.nodeWidth,
+        height: layout.nodeHeight,
+        compact,
+      }),
+    ),
+    ...cityZoneNodes.map((node) => ({
+      x: node.position.x,
+      y: node.position.y,
+      width: node.data?.width ?? 0,
+      height: 32,
+    })),
+    ...walkingNodes.map((node) => ({
+      x: node.position.x,
+      y: node.position.y,
+      width: compact ? 84 : 96,
+      height: compact ? 24 : 26,
+    })),
+  ];
+  const requests = groups.flatMap((group) => {
+    const anchor = getTrafficMarkerAnchor(group, edges, railPositions);
 
-      if (!anchor) {
-        return undefined;
+    if (!anchor) {
+      return [];
+    }
+
+    const size = getTrafficMarkerSize(
+      group.representative.kind,
+      compact,
+      group.representative.replacementBus,
+    );
+
+    return [
+      {
+        key: group.id,
+        anchor,
+        width: size.width,
+        height: size.height,
+        preferAbove: group.representative.replacementBus
+          ? shouldPreferTrafficMarkerAbove(anchor, railPositions.values())
+          : false,
+      },
+    ];
+  });
+  const placements = layoutTrafficMarkers(requests, obstacles);
+
+  return groups.flatMap((group): PatternFlowNode[] => {
+      const anchor = getTrafficMarkerAnchor(group, edges, railPositions);
+      const placement = placements.get(group.id);
+
+      if (!anchor || !placement) {
+        return [];
       }
 
-      const hasWalkingTimes =
-        segment.kind === "interruption" &&
-        segment.edgeKeys.some((edgeKey) => walkingEdgeKeys.has(edgeKey));
-      const markerWidth = getTrafficMarkerWidth(segment, compact);
-      const markerOffset = getTrafficMarkerOffset(
-        segment,
+      const segment = group.representative;
+      const markerSize = getTrafficMarkerSize(
+        segment.kind,
         compact,
-        hasWalkingTimes,
+        segment.replacementBus,
       );
 
-      return {
-        id: `traffic-marker:${segment.id}`,
-        type: "traffic-marker",
-        position: {
-          x: anchor.x - markerWidth / 2,
-          y: anchor.y + markerOffset,
+      const connectorNode: PatternTrafficMarkerConnectorFlowNode = {
+        id: `traffic-marker-connector:${group.id}`,
+        type: "traffic-marker-connector",
+        position: placement.position,
+        draggable: false,
+        selectable: false,
+        connectable: false,
+        focusable: false,
+        class: `pattern-flow-traffic-marker-connector-node pattern-flow-traffic-marker-connector-node--${segment.kind}`,
+        zIndex: TRAFFIC_MARKER_CONNECTOR_Z_INDEX,
+        data: {
+          connectorAngle: placement.connectorAngle,
+          connectorHeight: placement.connectorHeight,
+          connectorLength: placement.connectorLength,
+          connectorOffset: placement.connectorOffset,
+          key: group.id,
+          kind: segment.kind,
+          markerHeight: markerSize.height,
+          markerWidth: markerSize.width,
+          placement: placement.placement,
         },
+      };
+      const markerNode: PatternTrafficMarkerFlowNode = {
+        id: `traffic-marker:${group.id}`,
+        type: "traffic-marker",
+        position: placement.position,
         draggable: false,
         selectable: false,
         connectable: false,
         focusable: false,
         class: `pattern-flow-traffic-marker-node pattern-flow-traffic-marker-node--${segment.kind}`,
-        zIndex: 92,
+        zIndex: TRAFFIC_MARKER_CARD_Z_INDEX,
         data: {
-          connectorHeight:
-            segment.kind === "interruption" ? markerOffset - 12 : 20,
-          key: segment.id,
+          key: group.id,
           kind: segment.kind,
+          markerHeight: markerSize.height,
+          placement: placement.placement,
+          pulseStationKeys: getTrafficFocusStationKeys(
+            group.segments,
+            railPositions,
+          ),
           statusLabel: getTrafficMarkerStatusLabel(segment),
           detailLabel: getTrafficMarkerDetailLabel(segment),
           replacementBus: segment.replacementBus,
           trafficImpact: segment,
         },
       };
-    })
-    .filter((node): node is PatternTrafficMarkerFlowNode => Boolean(node));
-}
-
-function getTrafficMarkerWidth(
-  segment: PatternTrafficImpact,
-  compact: boolean,
-): number {
-  if (segment.kind === "interruption") {
-    return compact ? 340 : 420;
-  }
-
-  return compact ? 120 : 156;
-}
-
-function getTrafficMarkerOffset(
-  segment: PatternTrafficImpact,
-  compact: boolean,
-  hasWalkingTimes = false,
-): number {
-  if (segment.kind === "interruption") {
-    if (hasWalkingTimes) {
-      return compact ? 188 : 164;
-    }
-
-    return compact ? 74 : 66;
-  }
-
-  return compact ? 58 : 52;
+      return [connectorNode, markerNode];
+    });
 }
 
 function createTrafficWalkingFlowNodes({
@@ -2225,52 +2360,6 @@ function formatTrafficRestartTime(date: Date): string {
   });
 
   return locale.value === "fr" ? formatted.replace(":", "h") : formatted;
-}
-
-function getTrafficSegmentAnchor(
-  segment: PatternTrafficImpactSegment,
-  edgeByKey: Map<string, PatternGraphEdge>,
-  positions: Map<string, { x: number; y: number }>,
-): { x: number; y: number } | undefined {
-  const edgeMidpoints = segment.edgeKeys
-    .map((edgeKey) => edgeByKey.get(edgeKey))
-    .filter((edge): edge is PatternGraphEdge => Boolean(edge))
-    .map((edge) => {
-      const source = positions.get(edge.source);
-      const target = positions.get(edge.target);
-
-      if (!source || !target) {
-        return undefined;
-      }
-
-      return {
-        x: (source.x + target.x) / 2,
-        y: (source.y + target.y) / 2,
-      };
-    })
-    .filter((point): point is { x: number; y: number } => Boolean(point));
-
-  if (edgeMidpoints.length > 0) {
-    return averagePatternPoints(edgeMidpoints);
-  }
-
-  const stationPoints = segment.stationKeys
-    .map((stationKey) => positions.get(stationKey))
-    .filter((point): point is { x: number; y: number } => Boolean(point));
-
-  return stationPoints.length > 0
-    ? averagePatternPoints(stationPoints)
-    : undefined;
-}
-
-function averagePatternPoints(points: Array<{ x: number; y: number }>): {
-  x: number;
-  y: number;
-} {
-  return {
-    x: points.reduce((total, point) => total + point.x, 0) / points.length,
-    y: points.reduce((total, point) => total + point.y, 0) / points.length,
-  };
 }
 
 function createCityZoneFlowNodes({
@@ -6077,13 +6166,41 @@ onBeforeUnmount(() => {
                           <span>{{ data.city }}</span>
                         </div>
                       </template>
+                      <template #node-traffic-marker-connector="{ data }">
+                        <div
+                          class="pattern-flow-traffic-marker-connector"
+                          :class="[
+                            `pattern-flow-traffic-marker-connector--${data.kind}`,
+                            `pattern-flow-traffic-marker-connector--${data.placement}`,
+                          ]"
+                          :style="{
+                            '--traffic-marker-connector-angle': `${data.connectorAngle}deg`,
+                            '--traffic-marker-connector-height': `${data.connectorHeight}px`,
+                            '--traffic-marker-connector-length': `${data.connectorLength}px`,
+                            '--traffic-marker-connector-offset': `${data.connectorOffset}px`,
+                            '--traffic-marker-layout-height': `${data.markerHeight}px`,
+                            '--traffic-marker-layout-width': `${data.markerWidth}px`,
+                          }"
+                          aria-hidden="true"
+                        ></div>
+                      </template>
                       <template #node-traffic-marker="{ data }">
                         <div
                           class="pattern-flow-traffic-marker"
-                          :class="`pattern-flow-traffic-marker--${data.kind}`"
+                          :class="[
+                            `pattern-flow-traffic-marker--${data.kind}`,
+                            data.kind === 'interruption' || data.replacementBus
+                              ? 'pattern-flow-traffic-marker--large'
+                              : '',
+                            `pattern-flow-traffic-marker--${data.placement}`,
+                          ]"
                           :style="{
-                            '--traffic-marker-connector-height': `${data.connectorHeight}px`,
+                            '--traffic-marker-layout-height': `${data.markerHeight}px`,
                           }"
+                          @mouseenter="hoverTrafficMarker(data.key)"
+                          @mouseleave="unhoverTrafficMarker(data.key)"
+                          @focusin="hoverTrafficMarker(data.key)"
+                          @focusout="unhoverTrafficMarker(data.key)"
                         >
                           <button
                             v-if="data.kind === 'interruption'"
@@ -6094,6 +6211,16 @@ onBeforeUnmount(() => {
                             @click.stop="hideTrafficMarker(data.key)"
                           >
                             <X aria-hidden="true" />
+                          </button>
+                          <button
+                            v-if="data.replacementBus"
+                            class="pattern-flow-traffic-marker__focus"
+                            type="button"
+                            :aria-label="t('pattern.focusTrafficAria')"
+                            @pointerdown.stop.prevent
+                            @click.stop="focusTrafficMarker(data.pulseStationKeys)"
+                          >
+                            <Eye aria-hidden="true" />
                           </button>
                           <span
                             v-if="data.replacementBus"

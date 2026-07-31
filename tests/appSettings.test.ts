@@ -50,6 +50,7 @@ describe("app settings", () => {
       compactLinePlanMode: "compact",
       patternRoundedCurves: true,
       showInterruptionWalkingTimes: true,
+      unifyReplacementBusMarkers: true,
       patternCompactBranchGap: 258,
       patternCompactForkGap: 158,
       patternRealisticMinGapCoefficient: 0.5,
@@ -99,6 +100,7 @@ describe("app settings", () => {
       compactLinePlanMode: "tiny",
       patternRoundedCurves: "yes",
       showInterruptionWalkingTimes: "yes",
+      unifyReplacementBusMarkers: "yes",
       patternCompactBranchGap: "9999",
       patternCompactForkGap: "-999",
       patternRealisticMinGapCoefficient: "2",
@@ -144,6 +146,7 @@ describe("app settings", () => {
     expect(settings.compactLinePlanMode).toBe("compact");
     expect(settings.patternRoundedCurves).toBe(true);
     expect(settings.showInterruptionWalkingTimes).toBe(true);
+    expect(settings.unifyReplacementBusMarkers).toBe(true);
     expect(settings.patternCompactBranchGap).toBe(360);
     expect(settings.patternCompactForkGap).toBe(110);
     expect(settings.patternRealisticMinGapCoefficient).toBe(1.25);
@@ -204,6 +207,13 @@ describe("app settings", () => {
     expect(
       normalizeAppSettings({ experimentalRealtimeVehicleVisualization: false })
         .plugins["idfm-realtime-vehicles"].enabled,
+    ).toBe(false);
+  });
+
+  it("preserves the replacement bus marker grouping preference", () => {
+    expect(
+      normalizeAppSettings({ unifyReplacementBusMarkers: false })
+        .unifyReplacementBusMarkers,
     ).toBe(false);
   });
 
