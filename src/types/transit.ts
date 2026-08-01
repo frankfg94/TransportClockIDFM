@@ -179,6 +179,7 @@ export interface TransitFamilyOption {
   id: string;
   label: string;
   family: TransitFamily;
+  commercialModeIds?: string[];
 }
 
 export interface TransferLineOption {

@@ -423,7 +423,26 @@ export async function fetchTransitFamilyOptions(
     .filter((option): option is TransitFamilyOption => option !== null);
   const dedupedOptions = new Map<TransitFamily, TransitFamilyOption>();
 
-  familyOptions.forEach((option) => dedupedOptions.set(option.family, option));
+  familyOptions.forEach((option) => {
+    const existing = dedupedOptions.get(option.family);
+
+    if (!existing) {
+      dedupedOptions.set(option.family, option);
+      return;
+    }
+
+    const commercialModeIds = Array.from(
+      new Set([
+        ...(existing.commercialModeIds ?? [existing.id]),
+        ...(option.commercialModeIds ?? [option.id]),
+      ]),
+    );
+
+    dedupedOptions.set(option.family, {
+      ...existing,
+      commercialModeIds: commercialModeIds.length > 1 ? commercialModeIds : undefined,
+    });
+  });
 
   return Array.from(dedupedOptions.values()).sort((left, right) =>
     familyOrder.indexOf(left.family) - familyOrder.indexOf(right.family),
@@ -439,14 +458,14 @@ export async function searchTransitLines(
   const normalizedQuery = normalizeText(trimmedQuery);
   const primaryLines = trimmedQuery
     ? await searchLinesWithPtObjects(network, trimmedQuery, options)
-    : await fetchLinesForCommercialMode(network, options);
+    : await fetchLinesForCommercialModes(network, options);
   const primaryResults = mapSearchLines(primaryLines, network, normalizedQuery);
 
   if (primaryResults.length > 0 || !trimmedQuery) {
     return primaryResults;
   }
 
-  const modeLines = await fetchLinesForCommercialMode(network, options);
+  const modeLines = await fetchLinesForCommercialModes(network, options);
 
   return mapSearchLines(modeLines, network, normalizedQuery);
 }
@@ -1824,23 +1843,33 @@ function dedupeRawTopologyRoutes(
   return Array.from(bestByCanonicalKey.values());
 }
 
-async function fetchLinesForCommercialMode(
+async function fetchLinesForCommercialModes(
   network: TransitFamilyOption,
   options: NavitiaRequestOptions = {},
 ): Promise<NavitiaLine[]> {
-  const searchParams = new URLSearchParams({
-    count: "100",
-    disable_disruption: "true",
-    disable_geojson: "true",
-  });
-
-  return fetchPaginatedCollection<NavitiaLinesResponse, NavitiaLine>(
-    `${navitiaApiBase(options)}/commercial_modes/${encodeURIComponent(network.id)}/lines`,
-    searchParams,
-    "lines",
-    MAX_LINE_RESULTS,
-    options,
+  const commercialModeIds = Array.from(
+    new Set([network.id, ...(network.commercialModeIds ?? [])]),
   );
+
+  const lineBatches = await Promise.all(
+    commercialModeIds.map((commercialModeId) => {
+      const searchParams = new URLSearchParams({
+        count: "100",
+        disable_disruption: "true",
+        disable_geojson: "true",
+      });
+
+      return fetchPaginatedCollection<NavitiaLinesResponse, NavitiaLine>(
+        `${navitiaApiBase(options)}/commercial_modes/${encodeURIComponent(commercialModeId)}/lines`,
+        searchParams,
+        "lines",
+        MAX_LINE_RESULTS,
+        options,
+      );
+    }),
+  );
+
+  return lineBatches.flat();
 }
 
 async function searchLinesWithPtObjects(
@@ -1876,7 +1905,7 @@ async function searchLinesWithPtObjects(
     return lines;
   }
 
-  return fetchLinesForCommercialMode(network);
+  return fetchLinesForCommercialModes(network, options);
 }
 
 async function fetchLineRoutes(line: LineSearchOption): Promise<NavitiaRoute[]> {
@@ -3532,7 +3561,7 @@ function mapLineToSearchOption(
     navitiaId: line.id,
     label,
     ref: navitiaLineIdToSiriRef(line.id),
-    commercialModeId: network.id,
+    commercialModeId: line.commercial_mode?.id ?? network.id,
     color: presentation.color,
     textColor: presentation.textColor,
     iconUrl: presentation.iconUrl,
