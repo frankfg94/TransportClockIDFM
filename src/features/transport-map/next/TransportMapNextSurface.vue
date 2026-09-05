@@ -17,7 +17,8 @@
 
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Map as MapLibreMap, type IControl } from "maplibre-gl";
+import { Map as MapLibreMap, setWorkerUrl, type IControl } from "maplibre-gl";
+import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { useRuntimeConfig } from "nuxt/app";
 import type { CameraState } from "../geo/camera";
@@ -208,6 +209,10 @@ function onMapLoad(): void {
 
 onMounted(() => {
   if (!mapElement.value) return;
+  // MapLibre 6 resolves its worker relative to import.meta.url by default.
+  // Vite moves the main module: explicitly bundle the worker and its imports
+  // so both dev and production use a real, same-origin worker entry point.
+  setWorkerUrl(mapLibreWorkerUrl);
   const initialView = cameraStateToMapLibreView(props.camera);
   try {
     const runtimeStyle = runtimeConfig.public.nextMap?.vectorStyleUrl;
