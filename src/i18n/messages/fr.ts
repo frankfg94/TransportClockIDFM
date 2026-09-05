@@ -1129,6 +1129,13 @@ export const fr = {
       clear: "Vider le cache piéton",
       cleared: "Cache des trajets piétons vidé. Les prochains calculs seront relancés.",
     },
+    network: {
+      title: "Appels réseau simultanés",
+      description: "Pour les données du score de quartier. Automatique suit UNLIMITED_NETWORK ; votre choix est enregistré sur cet appareil et appliqué immédiatement.",
+      auto: "Automatique (UNLIMITED_NETWORK)",
+      limited: "Limités à 4 appels",
+      unlimited: "Illimités",
+    },
     device: {
       eyebrow: "Tablette",
       title: "Ecran et navigation",

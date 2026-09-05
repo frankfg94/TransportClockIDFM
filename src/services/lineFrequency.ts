@@ -1,3 +1,4 @@
+import { runNetworkTask } from "./networkScheduler";
 import type { GtfsLineFrequencyResponse } from "../types/lineFrequency";
 import { toServerApiUrl } from "./serverApi";
 
@@ -54,16 +55,18 @@ export async function fetchGtfsLineFrequency(
     return cached.value;
   }
 
-  const response = await fetch(
-    toServerApiUrl(`/api/lines/${encodeURIComponent(lineId)}/frequency`),
-    {
-      signal: options.signal,
-      cache: "no-store",
-      headers: { Accept: "application/json" },
-    },
-  );
-  if (!response.ok) throw new Error(`GTFS frequency request failed: ${response.status}`);
-  const value = (await response.json()) as GtfsLineFrequencyResponse;
+  const value = await runNetworkTask(async (signal) => {
+    const response = await fetch(
+      toServerApiUrl(`/api/lines/${encodeURIComponent(lineId)}/frequency`),
+      {
+        signal,
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      },
+    );
+    if (!response.ok) throw new Error(`GTFS frequency request failed: ${response.status}`);
+    return (await response.json()) as GtfsLineFrequencyResponse;
+  }, options.signal);
   options.signal?.throwIfAborted();
   // Reject a stale upstream service day, including requests crossing Paris
   // midnight. Weekend responses must refer to the upcoming Monday.

@@ -98,6 +98,29 @@ Ce benchmark ecrit `reports/global-map/performance-desktop-latest.json`; il ne r
 
 ## Build et deploiement Cloudflare Pages
 
+Les requêtes du score de quartier (trajets Navitia, lieux proches, fréquences et
+verdict) partagent une file FIFO côté client, limitée à quatre appels simultanés
+par onglet en production, jusqu'à la lecture complète de la réponse. Chaque
+appel dispose de 45 secondes après son démarrage ; l'attente dans la file ne
+consomme pas ce délai. Les appels annulés en attente sont retirés de la file.
+
+`UNLIMITED_NETWORK` est activé par défaut avec le serveur de développement local,
+et désactivé par défaut dans les builds de production, quel que soit l'hébergeur
+(y compris Capacitor). `UNLIMITED_NETWORK=true` supprime cette limite de concurrence ;
+`UNLIMITED_NETWORK=false` l'impose aussi en local. Redémarrer le serveur de
+développement ou reconstruire le frontend après modification. Sur Cloudflare
+payant, activer explicitement la variable de build si souhaité : le forfait
+n'est pas détecté automatiquement. Le délai maximal et les protections PRIM
+côté serveur restent actifs. Cette file réduit les rafales, pas le nombre total
+d'appels ni les quotas journaliers ; elle ne constitue pas une limite globale
+entre plusieurs utilisateurs.
+
+Dans les paramètres « Écran et navigation », « Appels réseau simultanés » permet
+de choisir Automatique, Limités à 4 appels ou Illimités. Ce choix est enregistré
+dans les paramètres locaux de l'appareil et s'applique immédiatement. Automatique
+(valeur par défaut) suit `UNLIMITED_NETWORK`. Les appels déjà partis ne sont pas
+interrompus lorsqu'on diminue la limite ; la file attend qu'une place se libère.
+
 ```powershell
 npm.cmd run build
 ```

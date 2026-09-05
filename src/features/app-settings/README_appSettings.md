@@ -28,6 +28,12 @@ local to the map component.
 
 ---
 
+`networkConcurrencyMode` persists `auto`, `limited`, or `unlimited` in the shared
+settings storage. `auto` follows the build's `UNLIMITED_NETWORK` value.
+`AppSettingsRuntime` watches it synchronously and updates the shared network
+scheduler; reducing concurrency lets active requests finish before starting
+queued work. Services never read localStorage themselves.
+
 ## 1. Add the setting to the `AppSettings` interface
 
 Open `appSettings.ts` and add your setting to the `AppSettings` interface.

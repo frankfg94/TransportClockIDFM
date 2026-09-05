@@ -25,6 +25,17 @@ import {
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../src/features/transport-map/config/globalTransportPlanConfig";
 
 describe("app settings", () => {
+  it("defaults the network override to auto and preserves valid saved choices", () => {
+    expect(createDefaultAppSettings().networkConcurrencyMode).toBe("auto");
+    for (const value of [undefined, null, true, false, "invalid", 4]) {
+      expect(normalizeAppSettings({ networkConcurrencyMode: value }).networkConcurrencyMode).toBe("auto");
+    }
+    for (const mode of ["auto", "limited", "unlimited"] as const) {
+      const saved = JSON.stringify({ ...createDefaultAppSettings(), networkConcurrencyMode: mode });
+      expect(normalizeAppSettings(JSON.parse(saved)).networkConcurrencyMode).toBe(mode);
+    }
+  });
+
   it("keeps current behaviour as the default", () => {
     expect(createDefaultAppSettings()).toMatchObject({
       language: "auto",

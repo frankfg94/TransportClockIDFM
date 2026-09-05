@@ -1,3 +1,4 @@
+import type { NetworkConcurrencyMode } from "../../services/networkScheduler";
 import { computed, onMounted, watch, type ComputedRef, type Ref } from "vue";
 import { useState } from "#imports";
 import type { WeatherLocationPreset } from "../weather/weatherLocations";
@@ -61,6 +62,7 @@ export const TRAVEL_ALARM_SAFETY_MINUTES_MAX = 30;
 export interface AppSettings {
   version: 2;
   language: AppLanguageSetting;
+  networkConcurrencyMode: NetworkConcurrencyMode;
   closedDirectionSummaryMode: ClosedDirectionSummaryMode;
   maxDeparturesPerDirection: MaxDeparturesPerDirectionSetting;
   showPatternMiniMap: boolean;
@@ -273,6 +275,7 @@ export function createDefaultAppSettings(): AppSettings {
   return {
     version: 2,
     language: "auto",
+    networkConcurrencyMode: "auto",
     closedDirectionSummaryMode: "next",
     maxDeparturesPerDirection: "default",
     showPatternMiniMap: true,
@@ -339,6 +342,10 @@ export function createDefaultAppSettings(): AppSettings {
   };
 }
 
+export function parseNetworkConcurrencyMode(value: unknown): NetworkConcurrencyMode {
+  return value === "limited" || value === "unlimited" ? value : "auto";
+}
+
 export function normalizeAppSettings(value: unknown): AppSettings {
   const defaults = createDefaultAppSettings();
 
@@ -354,6 +361,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
   return {
     version: 2,
     language: isLanguagePreference(value.language) ? value.language : defaults.language,
+    networkConcurrencyMode: parseNetworkConcurrencyMode(value.networkConcurrencyMode),
     hiddenDirectionIdsByBoardId: parseHiddenDirectionIdsByBoardId(
       value.hiddenDirectionIdsByBoardId,
     ),

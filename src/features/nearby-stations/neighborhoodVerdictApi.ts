@@ -1,3 +1,4 @@
+import { runNetworkTask } from "../../services/networkScheduler";
 import { toServerApiUrl } from "../../services/serverApi";
 
 export type PublicVerdictCategoryId = "transport" | "daily-life" | "nature-leisure" | "health" | "education" | "living-environment" | "security";
@@ -107,18 +108,20 @@ export interface PublicNeighborhoodVerdict {
 }
 
 export async function fetchNeighborhoodVerdict(lat: number, lon: number, signal?: AbortSignal): Promise<PublicNeighborhoodVerdict> {
-  const params = new URLSearchParams({ lat: String(lat), lon: String(lon) });
-  const response = await fetch(toServerApiUrl(`/api/neighborhood-verdict?${params}`), { signal });
-  if (!response.ok) throw new Error(`Neighborhood verdict unavailable (${response.status})`);
-  const payload = await response.json() as PublicNeighborhoodVerdict;
-  if (payload.schemaVersion !== PUBLIC_NEIGHBORHOOD_VERDICT_SCHEMA_VERSION || !Array.isArray(payload.categories) || !Array.isArray(payload.sources)) throw new Error("Unsupported neighborhood verdict contract");
-  return {
-    ...payload,
-    categories: payload.categories.map((category) => ({
-      ...category,
-      positiveFacts: Array.isArray(category.positiveFacts) ? category.positiveFacts : [],
-      negativeFacts: Array.isArray(category.negativeFacts) ? category.negativeFacts : [],
-      neutralFacts: Array.isArray(category.neutralFacts) ? category.neutralFacts : [],
-    })),
-  };
+  return runNetworkTask(async (signal) => {
+    const params = new URLSearchParams({ lat: String(lat), lon: String(lon) });
+    const response = await fetch(toServerApiUrl(`/api/neighborhood-verdict?${params}`), { signal });
+    if (!response.ok) throw new Error(`Neighborhood verdict unavailable (${response.status})`);
+    const payload = await response.json() as PublicNeighborhoodVerdict;
+    if (payload.schemaVersion !== PUBLIC_NEIGHBORHOOD_VERDICT_SCHEMA_VERSION || !Array.isArray(payload.categories) || !Array.isArray(payload.sources)) throw new Error("Unsupported neighborhood verdict contract");
+    return {
+      ...payload,
+      categories: payload.categories.map((category) => ({
+        ...category,
+        positiveFacts: Array.isArray(category.positiveFacts) ? category.positiveFacts : [],
+        negativeFacts: Array.isArray(category.negativeFacts) ? category.negativeFacts : [],
+        neutralFacts: Array.isArray(category.neutralFacts) ? category.neutralFacts : [],
+      })),
+    };
+  }, signal);
 }

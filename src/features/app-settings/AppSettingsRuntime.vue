@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, watch } from "vue";
+import { setNetworkConcurrencyMode } from "../../services/networkScheduler";
 import { useAppSettings } from "./appSettings";
 import { requestScreenWakeLock } from "./screenWakeLock";
 
@@ -9,6 +10,12 @@ interface WakeLockSentinelLike {
 }
 
 const { settings } = useAppSettings();
+
+watch(
+  () => settings.value.networkConcurrencyMode,
+  setNetworkConcurrencyMode,
+  { immediate: true, flush: "sync" },
+);
 
 let wakeLock: WakeLockSentinelLike | undefined;
 let wakeLockTimer: number | undefined;

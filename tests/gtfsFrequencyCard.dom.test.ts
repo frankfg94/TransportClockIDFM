@@ -736,7 +736,7 @@ describe("GTFS frequency client cache", () => {
     expect(frequencyClient.getGtfsServiceDate(new Date(now))).toBe(expected);
   });
 
-  it("uses the encoded line endpoint and forwards cancellation", async () => {
+  it("uses the encoded line endpoint and caches the completed response", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, json: async () => profile() }));
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
@@ -744,8 +744,28 @@ describe("GTFS frequency client cache", () => {
     await frequencyClient.fetchGtfsLineFrequency("line:IDFM:C01371");
     expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
       "/api/lines/line%3AIDFM%3AC01371/frequency",
-      expect.objectContaining({ signal: controller.signal, cache: "no-store" }),
+      expect.objectContaining({ signal: expect.any(AbortSignal), cache: "no-store" }),
     );
+  });
+
+  it("forwards cancellation while reading the frequency response body", async () => {
+    let requestSignal: AbortSignal | undefined;
+    let bodyStarted!: () => void;
+    const started = new Promise<void>((resolve) => { bodyStarted = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return { ok: true, json: async () => {
+        bodyStarted();
+        return new Promise(() => {});
+      } };
+    }));
+    const controller = new AbortController();
+    const pending = frequencyClient.fetchGtfsLineFrequency("line:IDFM:C01371", { signal: controller.signal });
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await started;
+    controller.abort();
+    await rejected;
+    expect(requestSignal?.aborted).toBe(true);
   });
 
   it("bounds the cache and expires results by TTL and Paris service date", async () => {

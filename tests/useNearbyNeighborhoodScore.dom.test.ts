@@ -1,6 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { defineComponent, ref } from "vue";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GtfsLineFrequencyResponse } from "../src/types/lineFrequency";
 import type { GlobalMapLine, GlobalMapStation } from "../src/features/transport-map/contracts/manifest";
 import type { TransportMapNetwork } from "../src/features/transport-map/contracts/network";
@@ -8,6 +8,12 @@ import type { NearbyJourney, TravelRoutesProvider } from "../src/features/nearby
 import type { NearbyPlace, PlacesProvider } from "../src/features/nearby-stations/nearbyPlaces";
 import type { NearbyStationEntry } from "../src/features/nearby-stations/nearbyStations";
 import { useNearbyNeighborhoodScore } from "../src/features/nearby-stations/useNearbyNeighborhoodScore";
+
+// Each test may provide its own verdict response; never use a live backend.
+beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("No verdict fixture"); }));
+});
+afterEach(() => vi.unstubAllGlobals());
 
 function createLine(): GlobalMapLine {
   return {
@@ -148,7 +154,7 @@ describe("useNearbyNeighborhoodScore", () => {
     await flushPromises();
 
     expect(placesProvider.searchNearby).toHaveBeenCalledTimes(1);
-    expect(travelRoutesProvider.findJourneys).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(travelRoutesProvider.findJourneys).toHaveBeenCalledTimes(1));
     expect(travelRoutesProvider.findJourneys).toHaveBeenCalledWith(expect.objectContaining({
       datetime: "20260902T090000",
     }));

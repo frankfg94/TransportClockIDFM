@@ -1,3 +1,4 @@
+import { runNetworkTask } from "../networkScheduler";
 import * as idfmClient from "../idfm";
 import { toServerApiUrl } from "../serverApi";
 import { createIgnTransportMapGeocoder } from "../geocoding/ign";
@@ -100,13 +101,15 @@ export function createCurrentPlacesProvider(
         radius: String(radius),
       });
       const path = options.nearbyPath ?? DEFAULT_NEARBY_PATH;
-      const response = await fetcher(toServerApiUrl(`${path}?${params}`), {
-        headers: { accept: "application/json" },
-        signal,
-      });
-      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-      const payload = await response.json() as NearbyPlacesApiResponse;
-      return Array.isArray(payload.places) ? payload.places.filter(isNearbyPlace) : [];
+      return runNetworkTask(async (signal) => {
+        const response = await fetcher(toServerApiUrl(`${path}?${params}`), {
+          headers: { accept: "application/json" },
+          signal,
+        });
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        const payload = await response.json() as NearbyPlacesApiResponse;
+        return Array.isArray(payload.places) ? payload.places.filter(isNearbyPlace) : [];
+      }, signal);
     },
   };
 }

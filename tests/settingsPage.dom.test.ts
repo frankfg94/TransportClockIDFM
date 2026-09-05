@@ -10,6 +10,8 @@ import {
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../src/features/transport-map/config/globalTransportPlanConfig";
 import type { GlobalMapManifest } from "../src/features/transport-map/contracts/manifest";
 
+vi.mock("nuxt/app", () => ({ useRouter: () => ({ replace: vi.fn() }) }));
+
 const globalMapManifestFixture = {
   dataVersion: "test-v1",
   generatedAt: "2026-08-02T23:34:00.000Z",
@@ -132,6 +134,15 @@ describe("SettingsPage", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("Personnalisation du dashboard");
+    const networkControl = wrapper.get("[data-network-concurrency-setting]");
+    expect(networkControl.text()).toContain("Automatique (UNLIMITED_NETWORK)");
+    for (const label of ["Illimités", "Limités à 4 appels", "Automatique (UNLIMITED_NETWORK)"]) {
+      await networkControl.get("[role='combobox']").trigger("click");
+      const option = networkControl.findAll("[role='option']").find((entry) => entry.text() === label);
+      expect(option).toBeDefined();
+      await option!.trigger("mousedown");
+      expect(networkControl.get("[role='combobox']").text()).toContain(label);
+    }
     expect(wrapper.find("[data-traffic-cache-settings]").exists()).toBe(true);
     expect(wrapper.find("[data-traffic-cache-refresh]").exists()).toBe(true);
     expect(wrapper.text()).toContain("Expiration des bundles");

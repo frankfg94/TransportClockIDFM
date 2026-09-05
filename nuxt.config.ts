@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { defineNuxtConfig } from "nuxt/config";
+import { resolveUnlimitedNetwork } from "./config/networkPolicy";
 
 const isCapacitorBuild = process.env.CAPACITOR_BUILD === "true";
 const committedGtfsDir = resolve(process.cwd(), ".data/gtfs");
@@ -144,6 +145,7 @@ export default defineNuxtConfig({
       },
     },
     define: {
+      __UNLIMITED_NETWORK__: JSON.stringify(resolveUnlimitedNetwork(process.env.UNLIMITED_NETWORK, process.env.NODE_ENV === "development" && !isCapacitorBuild)),
       __IDFM_API_KEY_CONFIGURED__: JSON.stringify(idfmApiKeyConfigured),
       __SERVER_API_BASE_URL__: JSON.stringify(serverApiBaseUrl),
       __MOBILE_RELEASE_PUBLIC_BASE_URL__: JSON.stringify(mobileReleasePublicBaseUrl),

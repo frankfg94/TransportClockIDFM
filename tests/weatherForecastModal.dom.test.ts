@@ -6,6 +6,7 @@ import type { WeatherResponse } from "../src/features/weather/types";
 
 const baseSettings: AppSettings = {
   version: 2,
+  networkConcurrencyMode: "auto",
   language: "fr",
   closedDirectionSummaryMode: "last",
   maxDeparturesPerDirection: "default",

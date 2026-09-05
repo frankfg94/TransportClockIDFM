@@ -1,3 +1,4 @@
+import { runNetworkTask } from "./networkScheduler";
 ﻿import type {
   BoardDeparturesResult,
   Departure,
@@ -547,17 +548,19 @@ export async function fetchNavitiaJourneys(
     params.set("datetime", request.datetime);
     params.set("datetime_represents", "departure");
   }
-  const response = await navitiaFetchWithRetry(
-    `${navitiaApiBase(options)}/journeys?${params.toString()}`,
-    options,
-  );
+  return runNetworkTask(async (signal) => {
+    const response = await navitiaFetchWithRetry(
+      `${navitiaApiBase(options)}/journeys?${params.toString()}`,
+      { ...options, signal },
+    );
 
-  if (!response.ok) {
-    throw new Error(`navitia-journeys-${response.status}`);
-  }
+    if (!response.ok) {
+      throw new Error(`navitia-journeys-${response.status}`);
+    }
 
-  const payload = (await response.json()) as NavitiaJourneysResponse;
-  return (payload.journeys ?? []).map(normalizeNavitiaJourney);
+    const payload = (await response.json()) as NavitiaJourneysResponse;
+    return (payload.journeys ?? []).map(normalizeNavitiaJourney);
+  }, options.signal);
 }
 
 function normalizeNavitiaStopAreaReference(value: string | undefined): string | undefined {

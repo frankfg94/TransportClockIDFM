@@ -1108,6 +1108,13 @@ export const en = {
       clear: "Clear walking cache",
       cleared: "Walking route cache cleared. The next calculations will run again.",
     },
+    network: {
+      title: "Concurrent network requests",
+      description: "For neighborhood score data. Automatic follows UNLIMITED_NETWORK; your choice is saved on this device and applied immediately.",
+      auto: "Automatic (UNLIMITED_NETWORK)",
+      limited: "Limited to 4 requests",
+      unlimited: "Unlimited",
+    },
     device: {
       eyebrow: "Tablet",
       title: "Screen and navigation",

@@ -39,6 +39,7 @@ import {
   parseGlobalMapBasemapContrast,
   parseGlobalMapBasemapStyle,
   parseMaxDeparturesPerDirection,
+  parseNetworkConcurrencyMode,
   parsePatternCompactBranchGap,
   parsePatternCompactForkGap,
   parsePatternRealisticMaxGapCoefficient,
@@ -571,6 +572,13 @@ const maxDeparturesLocalizedOptions = computed(() =>
     };
   }),
 );
+const networkConcurrencyOptions = computed(() =>
+  (["auto", "limited", "unlimited"] as const).map((id) => ({
+    id,
+    label: t(`settings.network.${id}`),
+  })),
+);
+
 const wakeLockLocalizedOptions = computed(() =>
   wakeLockDurationOptions.map((option) => ({
     id: option.id,
@@ -2753,6 +2761,19 @@ onBeforeUnmount(() => {
           </div>
           <ChevronDown :size="22" aria-hidden="true" />
         </button>
+      </div>
+
+      <div class="settings-row" data-network-concurrency-setting>
+        <div>
+          <strong>{{ t("settings.network.title") }}</strong>
+          <span>{{ t("settings.network.description") }}</span>
+        </div>
+        <MaterialCombobox
+          :model-value="settings.networkConcurrencyMode"
+          :options="networkConcurrencyOptions"
+          :aria-label="t('settings.network.title')"
+          @update:model-value="updateSettings({ networkConcurrencyMode: parseNetworkConcurrencyMode($event) })"
+        />
       </div>
 
       <div class="settings-row">
