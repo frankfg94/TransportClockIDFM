@@ -87,6 +87,25 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
   let cameraAnimationFrame: number | undefined;
   let cameraAnimationToken = 0;
   let dragDistance = 0;
+  let longPressTimer: ReturnType<typeof setTimeout> | undefined;
+  let longPressStart: ScreenPoint | undefined;
+  let suppressClickUntil = 0;
+
+  function cancelLongPress(): void {
+    clearTimeout(longPressTimer);
+    longPressTimer = undefined;
+    longPressStart = undefined;
+  }
+
+  // Register before the menu mounts: its document capture listener would
+  // otherwise close it on the compatibility click following a touch release.
+  function suppressLongPressClick(event: MouseEvent): void {
+    if (Date.now() > suppressClickUntil || event.target !== options.getCanvas()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    suppressClickUntil = 0;
+  }
+  if (typeof document !== "undefined") document.addEventListener("click", suppressLongPressClick, true);
 
   const requestFrame = (callback: FrameRequestCallback): number => {
     if (typeof requestAnimationFrame !== "undefined") return requestAnimationFrame(callback);
@@ -451,6 +470,8 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
   }
 
   function onPointerDown(event: PointerEvent): void {
+    cancelLongPress();
+    suppressClickUntil = 0;
     if (event.button !== undefined && event.button !== 0) return;
     const canvas = options.getCanvas();
     if (!canvas) return;
@@ -475,6 +496,14 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
     dragMoved = false;
     dragDistance = 0;
     lastPointerTime = typeof performance === "undefined" ? Date.now() : performance.now();
+    if (event.pointerType === "touch" && pointers.size === 1 && options.onContextMenu) {
+      longPressStart = point;
+      longPressTimer = setTimeout(() => {
+        cancelLongPress();
+        if (!options.isMounted() || !pointers.has(event.pointerId)) return;
+        onContextMenu(event);
+      }, 550);
+    }
     if (pointers.size === 2) {
       dragLast = undefined;
       dragMoved = true;
@@ -493,6 +522,10 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
 
   function onPointerMove(event: PointerEvent): void {
     const point = localPoint(event);
+    if (longPressStart) {
+      if (distanceBetween(point, longPressStart) <= 8) return;
+      cancelLongPress();
+    }
     if (!pointers.has(event.pointerId)) {
       options.updateHovered(point);
       return;
@@ -545,6 +578,11 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
   }
 
   function onPointerUp(event: PointerEvent): void {
+    cancelLongPress();
+    if (!pointers.has(event.pointerId)) {
+      if (suppressClickUntil) suppressClickUntil = Date.now() + 1500;
+      return;
+    }
     if (event.button !== undefined && event.button !== 0) return;
     const point = localPoint(event);
     const wasPinching = Boolean(pinchState);
@@ -577,6 +615,7 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
   }
 
   function onPointerCancel(event: PointerEvent): void {
+    cancelLongPress();
     pointers.delete(event.pointerId);
     pinchState = undefined;
     dragVelocity = { x: 0, y: 0 };
@@ -600,6 +639,22 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
 
   function onContextMenu(event: MouseEvent): void {
     event.preventDefault();
+    cancelLongPress();
+    if (pointers.size) {
+      suppressClickUntil = Date.now() + 1500;
+      const ids = [...pointers.keys()];
+      pointers.clear();
+      pinchState = undefined;
+      dragLast = undefined;
+      cancelInertia();
+      options.setInteractionActive(false);
+      const canvas = options.getCanvas();
+      for (const id of ids) {
+        if (canvas?.hasPointerCapture?.(id)) canvas.releasePointerCapture(id);
+      }
+      options.draw();
+      options.scheduleViewportRefresh();
+    }
     options.onContextMenu?.(localPoint(event), event);
   }
 
@@ -636,6 +691,8 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
   }
 
   function dispose(): void {
+    cancelLongPress();
+    if (typeof document !== "undefined") document.removeEventListener("click", suppressLongPressClick, true);
     cancelCameraAnimation();
     cancelInertia();
     cancelWheelZoom();

@@ -3007,6 +3007,57 @@ describe("GlobalTransportPlan facade", () => {
     }
   });
 
+  it("keeps the touch long-press menu open after release and opens the itinerary", async () => {
+    vi.useFakeTimers();
+    const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 600,
+      width: 800, height: 600, toJSON: () => ({}),
+    });
+    try {
+      const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+      wrappers.push(wrapper);
+      await flushPromises();
+      const canvas = wrapper.get("canvas.global-transport-plan__canvas");
+      const pointer = { pointerId: 51, pointerType: "touch", button: 0, clientX: 160, clientY: 190 };
+      await canvas.trigger("pointerdown", pointer);
+      await canvas.trigger("pointermove", { ...pointer, clientX: 163 });
+      await vi.advanceTimersByTimeAsync(550);
+      await nextTick();
+      expect(document.querySelector(".global-transport-plan__context-menu")).not.toBeNull();
+      await canvas.trigger("pointerup", pointer);
+      await canvas.trigger("click", pointer);
+      const button = [...document.querySelectorAll<HTMLButtonElement>(".global-transport-plan__context-menu button")]
+        .find((entry) => entry.textContent?.includes("Itinéraire jusqu’ici"));
+      expect(button).toBeDefined();
+      button!.click();
+      await flushPromises();
+      expect(wrapper.find(".global-transport-plan__itinerary-panel").exists()).toBe(true);
+    } finally {
+      bounds.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["drag", "pinch", "cancel", "release"])("cancels touch long press on %s", async (gesture) => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+      wrappers.push(wrapper);
+      await flushPromises();
+      const canvas = wrapper.get("canvas.global-transport-plan__canvas");
+      const pointer = { pointerId: 51, pointerType: "touch", button: 0, clientX: 160, clientY: 190 };
+      await canvas.trigger("pointerdown", pointer);
+      if (gesture === "drag") await canvas.trigger("pointermove", { ...pointer, clientX: 190 });
+      if (gesture === "pinch") await canvas.trigger("pointerdown", { ...pointer, pointerId: 52 });
+      if (gesture === "cancel") await canvas.trigger("pointercancel", pointer);
+      if (gesture === "release") await canvas.trigger("pointerup", pointer);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(document.querySelector(".global-transport-plan__context-menu")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("opens the fixed context menu and exposes neighborhood and itinerary actions", async () => {
     const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
     wrappers.push(wrapper);
