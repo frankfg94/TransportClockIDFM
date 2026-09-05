@@ -1,0 +1,1 @@
+{"schemaVersion":1,"trips":[{"id":"IDFM:FPP:514-C01500-5406-562298","serviceId":"IDFM:10947","directionId":"1","headsign":"Rue de Paris","calls":[[2,0,57600,57600,0,1],[4,1,58560,58560,0,0],[6,2,59100,59100,1,0]]},{"id":"IDFM:FPP:514-C01500-5406-562299","serviceId":"IDFM:10947","directionId":"1","headsign":"Rue de Paris","calls":[[2,0,60480,60480,0,1],[6,1,61560,61560,1,0]]}]}
