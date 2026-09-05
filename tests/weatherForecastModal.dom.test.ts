@@ -1,5 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { nextTick } from "vue";
 import type { AppSettings } from "../src/features/app-settings/appSettings";
 import type { WeatherResponse } from "../src/features/weather/types";
 
@@ -14,8 +15,20 @@ const baseSettings: AppSettings = {
   hiddenDirectionIdsByBoardId: {},
   wakeLockDuration: "none",
   wakeDeviceOnAlarm: true,
+  travelAlarmSafetyMinutes: 2,
   boardTogglesPlacement: "inline",
   placePresetNavigationMode: "dropdown-swipe",
+  showPlanInNavigation: true,
+  showTravelRouteLineIcons: true,
+  showUserLocation: true,
+  globalMapBasemapContrast: 1.02,
+  globalMapBasemapStyle: "voyager",
+  deckAntialiasing: true,
+  nearbyMapShowIsochroneControl: true,
+  nearbyMapShowDirectoryControl: true,
+  nearbyMapShowBasemapControl: true,
+  nearbyMapShowDisplayControl: true,
+  nearbyMapShowFullscreenControl: true,
   navigationAutoHide: "none",
   reduceMotion: false,
   gtfsLineGeometryEnabled: true,
@@ -124,6 +137,31 @@ const weatherResponse: WeatherResponse = {
   },
 };
 
+const versaillesLocation = {
+  label: "Versailles",
+  latitude: 48.8014,
+  longitude: 2.1301,
+};
+
+const versaillesWeatherResponse: WeatherResponse = {
+  ...weatherResponse,
+  generatedAt: "2026-05-28T18:01:00.000Z",
+  location: versaillesLocation,
+  condition: {
+    ...weatherResponse.condition,
+    temperatureC: 22,
+    apparentTemperatureC: 23,
+  },
+  forecast: {
+    ...weatherResponse.forecast!,
+    current: {
+      ...weatherResponse.forecast!.current!,
+      temperatureC: 22,
+      apparentTemperatureC: 23,
+    },
+  },
+};
+
 afterEach(() => {
   vi.resetModules();
   vi.unstubAllGlobals();
@@ -216,5 +254,83 @@ describe("WeatherForecastModal", () => {
     expect(dayButtons[1].attributes("aria-pressed")).toBe("true");
     expect(wrapper.text()).toContain("90%");
     expect(wrapper.text()).toContain("vendredi 29 mai");
+  });
+
+  it("starts a new request and ignores the previous location response", async () => {
+    let updateSettings!: (patch: Partial<AppSettings>) => void;
+    const pendingRequests: Array<{
+      resolve: (response: {
+        ok: boolean;
+        json: () => Promise<WeatherResponse>;
+      }) => void;
+      url: string;
+    }> = [];
+
+    vi.doMock("../src/features/app-settings", async (importActual) => {
+      const actual = await importActual<typeof import("../src/features/app-settings")>();
+      const { ref } = await import("vue");
+      const settings = ref(baseSettings);
+      updateSettings = (patch) => {
+        settings.value = { ...settings.value, ...patch };
+      };
+
+      return {
+        ...actual,
+        useAppSettings: () => ({
+          settings,
+          effectiveMaxDeparturesPerDirection: ref(undefined),
+          updateSettings: vi.fn(),
+          resetSettings: vi.fn(),
+        }),
+      };
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo | URL) =>
+      new Promise<{
+        ok: boolean;
+        json: () => Promise<WeatherResponse>;
+      }>((resolve) => {
+        pendingRequests.push({ resolve, url: String(input) });
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { default: WeatherForecastModal } =
+      await import("../src/features/weather/WeatherForecastModal.vue");
+    const wrapper = mount(WeatherForecastModal, {
+      props: {
+        open: true,
+      },
+    });
+
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    updateSettings({
+      weatherLocationPreset: "custom",
+      weatherCustomLocation: versaillesLocation,
+    });
+    await nextTick();
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(pendingRequests[1].url).toContain("48.8014");
+
+    pendingRequests[0].resolve({
+      ok: true,
+      json: async () => weatherResponse,
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("31°");
+
+    pendingRequests[1].resolve({
+      ok: true,
+      json: async () => versaillesWeatherResponse,
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Versailles");
+    expect(wrapper.text()).toContain("22°");
   });
 });

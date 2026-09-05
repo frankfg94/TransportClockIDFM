@@ -14,6 +14,27 @@ export type TrafficLineStatus =
   | "unknown"
   | "error";
 
+export type TrafficCacheState =
+  | "hit"
+  | "miss"
+  | "stale"
+  | "refreshing"
+  | "rate-limited"
+  | "error";
+
+export interface TrafficCacheMetadata {
+  state: TrafficCacheState;
+  refreshedAt?: string;
+  nextRefreshAt?: string;
+  refreshIntervalMs: number;
+  detailRefreshAfterMs: number;
+  ageMs?: number;
+  refreshing: boolean;
+  lastError?: string;
+  retryAt?: string;
+  storage?: "memory" | "persistent";
+}
+
 export type TrafficAlertTone = "orange" | "red" | "upcoming";
 
 export type TrafficCalendarImpactScope =
@@ -58,9 +79,10 @@ export interface TrafficLineReport {
 
 export interface TrafficResponse {
   generatedAt: string;
-  source: "prim-line-reports";
+  source: "prim-line-reports" | "prim-disruptions-bulk" | "mixed-cache";
   configured: boolean;
   lines: TrafficLineReport[];
+  cache?: TrafficCacheMetadata;
 }
 
 export interface ActiveTrafficLine {

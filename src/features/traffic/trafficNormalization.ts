@@ -1,6 +1,7 @@
 import type {
   TrafficDisruption,
   TrafficDisruptionKind,
+  TrafficLineReport,
   TrafficLineStatus,
 } from "./types";
 import { parseTrafficDate } from "./trafficTiming";
@@ -46,6 +47,110 @@ export function normalizeNavitiaLineReportPayload(
   return mergeEquivalentTrafficDisruptions(
     enrichMissingWorkMotifs(Array.from(disruptionsById.values())),
   ).filter((disruption) => disruption.impactedLineRefs.includes(normalizedLineRef));
+}
+
+/**
+ * Normalize the IDFM `idfm-disruptions_bulk` response into the same line
+ * reports consumed by the map and the other traffic views. The bulk API is
+ * intentionally treated as an index: only lines present in the payload are
+ * returned, while a missing line is equivalent to a normal line for callers.
+ */
+export function normalizeIdfmGlobalTrafficPayload(
+  payload: unknown,
+): TrafficLineReport[] {
+  const payloadRecord = asRecord(payload);
+  const nestedData = asOptionalRecord(payloadRecord.data);
+  const root = nestedData ?? payloadRecord;
+  const lineRecords = asArray(root.lines)
+    .map(asOptionalRecord)
+    .filter((line): line is JsonRecord => Boolean(line));
+  const disruptionRecords = asArray(root.disruptions);
+  const lineRefs = new Set<string>();
+  const disruptionIdsByLine = new Map<string, Set<string>>();
+  const impactedStopNamesByLine = new Map<
+    string,
+    Map<string, Set<string>>
+  >();
+
+  lineRecords.forEach((line) => {
+    const lineRef = normalizeBulkLineRef(line);
+    if (!lineRef) return;
+    lineRefs.add(lineRef);
+
+    const linkedIds = extractLinkedDisruptionIds(line);
+    extractBulkImpactedObjects(line).forEach((impactedObject) => {
+      const impactedIds = extractLinkedDisruptionIds(impactedObject);
+      impactedIds.forEach((id) => linkedIds.add(id));
+
+      const impactedType = normalizeText(
+        asText(impactedObject.type) ??
+          asText(impactedObject.objectType) ??
+          "",
+      );
+      const impactedName = asText(impactedObject.name);
+
+      if (impactedType !== "line" && impactedName) {
+        impactedIds.forEach((id) =>
+          addBulkStopName(
+            impactedStopNamesByLine,
+            lineRef,
+            id,
+            impactedName,
+          ),
+        );
+      }
+    });
+
+    if (linkedIds.size > 0) disruptionIdsByLine.set(lineRef, linkedIds);
+  });
+
+  const normalizedDisruptions = disruptionRecords.flatMap((item, index) => {
+    const disruption = normalizeDisruption(item, "", index);
+    return disruption ? [disruption] : [];
+  });
+  const disruptionsById = new Map(
+    normalizedDisruptions.map((disruption) => [disruption.id, disruption]),
+  );
+  const disruptionsByLine = new Map<string, Map<string, TrafficDisruption>>();
+
+  normalizedDisruptions.forEach((disruption) => {
+    disruption.impactedLineRefs.forEach((lineRef) => {
+      lineRefs.add(lineRef);
+      addDisruptionToLine(disruptionsByLine, lineRef, disruption);
+    });
+  });
+
+  disruptionIdsByLine.forEach((ids, lineRef) => {
+    ids.forEach((id) => {
+      const disruption = disruptionsById.get(id);
+      if (!disruption) return;
+
+      const stopNames = impactedStopNamesByLine.get(lineRef)?.get(id) ?? [];
+      addDisruptionToLine(disruptionsByLine, lineRef, {
+        ...disruption,
+        impactedLineRefs: Array.from(
+          new Set([...disruption.impactedLineRefs, lineRef]),
+        ),
+        impactedStopNames: Array.from(
+          new Set([...disruption.impactedStopNames, ...stopNames]),
+        ),
+      });
+    });
+  });
+
+  return Array.from(lineRefs).sort().map((lineRef) => {
+    const disruptions = mergeEquivalentTrafficDisruptions(
+      enrichMissingWorkMotifs(
+        Array.from(disruptionsByLine.get(lineRef)?.values() ?? []),
+      ),
+    );
+
+    return {
+      lineRef,
+      status: getTrafficLineStatus(disruptions),
+      disruptions,
+    };
+  });
 }
 
 export function getTrafficLineStatus(
@@ -125,7 +230,11 @@ function normalizeDisruption(
     severity,
     cause,
     status: asText(disruption.status),
-    updatedAt: asText(disruption.updated_at) ?? asText(disruption.updatedAt),
+    updatedAt:
+      asText(disruption.updated_at) ??
+      asText(disruption.updatedAt) ??
+      asText(disruption.last_update) ??
+      asText(disruption.lastUpdate),
     applicationPeriods: extractApplicationPeriods(disruption),
     impactedLineRefs,
     impactedStopNames: extractImpactedStopNames(disruption),
@@ -338,10 +447,18 @@ function extractImpactedLineRefs(
 
   extractImpactedObjects(disruption).forEach((object) => {
     const ptObject = asOptionalRecord(object.pt_object) ?? object;
-    const embeddedType = normalizeText(asText(ptObject.embedded_type) ?? "");
+    const embeddedType = normalizeText(
+      asText(ptObject.embedded_type) ??
+        asText(ptObject.embeddedType) ??
+        asText(ptObject.type) ??
+        asText(ptObject.objectType) ??
+        "",
+    );
     const line = asRecord(ptObject.line);
     const lineRef =
-      (embeddedType === "line" ? asText(ptObject.id) : undefined) ??
+      (embeddedType === "line"
+        ? asText(ptObject.id) ?? asText(ptObject.ref)
+        : undefined) ??
       asText(line.id) ??
       asText(line.ref);
 
@@ -350,7 +467,7 @@ function extractImpactedLineRefs(
     }
   });
 
-  if (lineRefs.size === 0) {
+  if (lineRefs.size === 0 && fallbackLineRef) {
     lineRefs.add(normalizeTrafficLineRef(fallbackLineRef));
   }
 
@@ -382,7 +499,13 @@ function extractImpactedStopNames(disruption: JsonRecord): string[] {
 
   extractImpactedObjects(disruption).forEach((object) => {
     const ptObject = asOptionalRecord(object.pt_object) ?? object;
-    const embeddedType = normalizeText(asText(ptObject.embedded_type) ?? "");
+    const embeddedType = normalizeText(
+      asText(ptObject.embedded_type) ??
+        asText(ptObject.embeddedType) ??
+        asText(ptObject.type) ??
+        asText(ptObject.objectType) ??
+        "",
+    );
     const name = asText(ptObject.name);
 
     if (name && embeddedType !== "line") {
@@ -414,6 +537,60 @@ function extractImpactedObjects(disruption: JsonRecord): JsonRecord[] {
   ]
     .map(asOptionalRecord)
     .filter((object): object is JsonRecord => Boolean(object));
+}
+
+function extractBulkImpactedObjects(line: JsonRecord): JsonRecord[] {
+  return [
+    ...asArray(line.impactedObjects),
+    ...asArray(line.impacted_objects),
+  ]
+    .map(asOptionalRecord)
+    .filter((object): object is JsonRecord => Boolean(object));
+}
+
+function normalizeBulkLineRef(line: JsonRecord): string | undefined {
+  const lineRef = asText(line.id) ?? asText(line.ref) ?? asText(line.lineRef);
+  return lineRef ? normalizeTrafficLineRef(lineRef) : undefined;
+}
+
+function extractLinkedDisruptionIds(line: JsonRecord): Set<string> {
+  const ids = new Set<string>();
+  const values = [
+    ...asArray(line.disruptions),
+    ...asArray(line.disruptionIds),
+    ...asArray(line.disruption_ids),
+  ];
+
+  values.forEach((value) => {
+    const record = asOptionalRecord(value);
+    const id = asText(record?.id) ?? asText(value);
+    if (id) ids.add(id);
+  });
+
+  return ids;
+}
+
+function addBulkStopName(
+  stopNamesByLine: Map<string, Map<string, Set<string>>>,
+  lineRef: string,
+  disruptionId: string,
+  stopName: string,
+): void {
+  const lineStopNames = stopNamesByLine.get(lineRef) ?? new Map();
+  const stopNames = lineStopNames.get(disruptionId) ?? new Set<string>();
+  stopNames.add(stopName);
+  lineStopNames.set(disruptionId, stopNames);
+  stopNamesByLine.set(lineRef, lineStopNames);
+}
+
+function addDisruptionToLine(
+  disruptionsByLine: Map<string, Map<string, TrafficDisruption>>,
+  lineRef: string,
+  disruption: TrafficDisruption,
+): void {
+  const disruptions = disruptionsByLine.get(lineRef) ?? new Map();
+  disruptions.set(disruption.id, disruption);
+  disruptionsByLine.set(lineRef, disruptions);
 }
 
 function createFallbackDisruptionId(title: string, index: number): string {

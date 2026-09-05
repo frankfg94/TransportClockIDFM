@@ -18,11 +18,16 @@ const GET_CACHE_DEFAULT_TTL_MS = 60_000;
 const GET_CACHE_STRUCTURAL_TTL_MS = 6 * 60 * 60_000;
 const GET_CACHE_REALTIME_TTL_MS = 8_000;
 const GET_CACHE_SCHEDULE_TTL_MS = 5 * 60_000;
+const GET_CACHE_REALTIME_STALE_TTL_MS = 2 * 60_000;
+const GET_CACHE_SCHEDULE_STALE_TTL_MS = 6 * 60 * 60_000;
+const GET_CACHE_STRUCTURAL_STALE_TTL_MS = 24 * 60 * 60_000;
+const GET_CACHE_DEFAULT_STALE_TTL_MS = 30 * 60_000;
 
 type CachedProxyResponse = {
   body: ArrayBuffer | null;
   expiresAt: number;
   headers: Array<[string, string]>;
+  staleUntil: number;
   status: number;
   statusText: string;
 };
@@ -59,22 +64,17 @@ export default defineEventHandler(async (event) => {
   );
   upstreamUrl.search = sourceUrl.search;
 
-  const headers = new Headers();
-
-  Object.entries(getRequestHeaders(event)).forEach(([key, value]) => {
-    if (value !== undefined) {
-      headers.set(key, value);
-    }
+  const requestHeaders = getRequestHeaders(event);
+  const headers = new Headers({
+    accept: requestHeaders.accept ?? "application/json",
+    "accept-encoding": "gzip, deflate",
   });
 
-  headers.set("apikey", apiKey);
+  if (requestHeaders["content-type"]) {
+    headers.set("content-type", requestHeaders["content-type"]);
+  }
 
-  headers.delete("host");
-  headers.delete("cf-connecting-ip");
-  headers.delete("cf-ipcountry");
-  headers.delete("cf-ray");
-  headers.delete("x-forwarded-for");
-  headers.delete("x-forwarded-proto");
+  headers.set("apikey", apiKey);
 
   if (method === "GET" || method === "HEAD") {
     const cachedResponse = await fetchCachedGetResponse(
@@ -140,11 +140,19 @@ async function fetchAndCacheGetResponse(
   const cachedResponse = await createCachedResponse(response);
 
   if (response.ok) {
+    const now = Date.now();
     getResponseCache.set(cacheKey, {
       ...cachedResponse,
-      expiresAt: Date.now() + getCacheTtl(upstreamUrl),
+      expiresAt: now + getCacheTtl(upstreamUrl),
+      staleUntil: now + getStaleCacheTtl(upstreamUrl),
     });
     trimGetResponseCache();
+  } else if (response.status === 429) {
+    const staleResponse = getResponseCache.get(cacheKey);
+
+    if (staleResponse && staleResponse.staleUntil > Date.now()) {
+      return createStaleRateLimitResponse(staleResponse);
+    }
   }
 
   return cachedResponse;
@@ -155,8 +163,22 @@ async function createCachedResponse(response: Response): Promise<CachedProxyResp
     body: response.body ? await response.arrayBuffer() : null,
     expiresAt: 0,
     headers: createForwardedResponseHeaders(response.headers),
+    staleUntil: 0,
     status: response.status,
     statusText: response.statusText,
+  };
+}
+
+function createStaleRateLimitResponse(
+  response: CachedProxyResponse,
+): CachedProxyResponse {
+  const headers = new Headers(response.headers);
+  headers.set("warning", '110 - "IDFM response is stale because the upstream is rate-limited"');
+  headers.set("x-idfm-cache", "stale-rate-limit");
+
+  return {
+    ...response,
+    headers: Array.from(headers.entries()),
   };
 }
 
@@ -206,6 +228,10 @@ function getCacheTtl(upstreamUrl: URL): number {
     return GET_CACHE_SCHEDULE_TTL_MS;
   }
 
+  if (pathname.includes("/journeys")) {
+    return GET_CACHE_SCHEDULE_TTL_MS;
+  }
+
   if (
     pathname.includes("/commercial_modes") ||
     pathname.includes("/connections") ||
@@ -218,6 +244,31 @@ function getCacheTtl(upstreamUrl: URL): number {
   }
 
   return GET_CACHE_DEFAULT_TTL_MS;
+}
+
+function getStaleCacheTtl(upstreamUrl: URL): number {
+  const pathname = upstreamUrl.pathname;
+
+  if (pathname.includes("/stop-monitoring")) {
+    return GET_CACHE_REALTIME_STALE_TTL_MS;
+  }
+
+  if (pathname.includes("/stop_schedules") || pathname.includes("/journeys")) {
+    return GET_CACHE_SCHEDULE_STALE_TTL_MS;
+  }
+
+  if (
+    pathname.includes("/commercial_modes") ||
+    pathname.includes("/connections") ||
+    pathname.includes("/lines") ||
+    pathname.includes("/places_nearby") ||
+    pathname.includes("/routes") ||
+    pathname.includes("/stop_areas")
+  ) {
+    return GET_CACHE_STRUCTURAL_STALE_TTL_MS;
+  }
+
+  return GET_CACHE_DEFAULT_STALE_TTL_MS;
 }
 
 function trimGetResponseCache(): void {

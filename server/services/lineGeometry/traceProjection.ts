@@ -5,7 +5,7 @@ import {
   type LineGeometryRequest,
   type LineGeometrySegment,
   type LineGeometryStopRequest,
-} from "../../../src/features/line-map/lineGeometry";
+} from "../../../src/features/line-map/lineGeometry.js";
 
 const MAX_PROJECTION_ERROR_METERS = 300;
 const MIN_PATH_RATIO = 0.35;

@@ -40,6 +40,89 @@ describe("ContextMenu", () => {
 
     wrapper.unmount();
   });
+
+  it("can render inside a fullscreen host", async () => {
+    const Host = defineComponent({
+      components: { ContextMenu },
+      setup() {
+        const open = ref(true);
+        const anchor = ref<HTMLElement>();
+        return { anchor, open };
+      },
+      template: `
+        <div class="fullscreen-host">
+          <button ref="anchor" type="button">Open</button>
+        </div>
+        <ContextMenu
+          v-model:open="open"
+          :anchor="anchor"
+          teleport-to=".fullscreen-host"
+          class="fullscreen-context-menu"
+        >
+          <button type="button">Action</button>
+        </ContextMenu>
+      `,
+    });
+    const wrapper = mount(Host, { attachTo: document.body });
+
+    await nextTick();
+    expect(document.querySelector(".fullscreen-host .fullscreen-context-menu")?.textContent).toBe("Action");
+
+    wrapper.unmount();
+  });
+
+  it("positions a context menu from a fixed viewport point", async () => {
+    const Host = defineComponent({
+      components: { ContextMenu },
+      setup() {
+        const open = ref(true);
+        return { open };
+      },
+      template: `
+        <ContextMenu v-model:open="open" :point="{ x: 120, y: 80 }" class="point-context-menu">
+          <button type="button">Action</button>
+        </ContextMenu>
+      `,
+    });
+    const wrapper = mount(Host, { attachTo: document.body });
+
+    await nextTick();
+    const menu = document.querySelector<HTMLElement>(".point-context-menu");
+    expect(menu?.style.position).toBe("fixed");
+    expect(menu?.style.left).toBe("120px");
+    expect(menu?.style.top).toBe("88px");
+
+    wrapper.unmount();
+  });
+
+  it("repositions when the fixed point arrives on the opening render", async () => {
+    const Host = defineComponent({
+      components: { ContextMenu },
+      setup() {
+        const open = ref(true);
+        const point = ref<{ x: number; y: number }>();
+        return { open, point };
+      },
+      template: `
+        <ContextMenu v-model:open="open" :point="point" class="late-point-context-menu">
+          <button type="button">Action</button>
+        </ContextMenu>
+      `,
+    });
+    const wrapper = mount(Host, { attachTo: document.body });
+
+    await nextTick();
+    wrapper.vm.point = { x: 220, y: 140 };
+    await nextTick();
+    await nextTick();
+
+    const menu = document.querySelector<HTMLElement>(".late-point-context-menu");
+    expect(menu?.style.position).toBe("fixed");
+    expect(menu?.style.left).toBe("220px");
+    expect(menu?.style.top).toBe("148px");
+
+    wrapper.unmount();
+  });
 });
 
 function mountHost(options: { closeOnOutsideClick?: boolean } = {}) {

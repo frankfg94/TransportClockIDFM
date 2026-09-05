@@ -33,6 +33,8 @@ export interface LineGeometrySegment {
   fromStopId: string;
   toStopId: string;
   coordinates: LineGeometryCoordinate[];
+  /** True when the segment is fallback geometry rather than the primary provider shape. */
+  fallback?: boolean;
 }
 
 export interface LineGeometryEntrance extends LineGeometryCoordinate {
@@ -116,6 +118,17 @@ export interface LineGeometryCornerDecision {
   reason?: "too-close" | "collinear";
 }
 
+export type RoundedPolylineCommand =
+  | { type: "moveTo"; point: LineGeometryPoint }
+  | { type: "lineTo"; point: LineGeometryPoint }
+  | { type: "quadraticCurveTo"; control: LineGeometryPoint; point: LineGeometryPoint };
+
+export interface RoundedPolylinePathBuilder {
+  moveTo(x: number, y: number): void;
+  lineTo(x: number, y: number): void;
+  quadraticCurveTo(controlX: number, controlY: number, x: number, y: number): void;
+}
+
 export interface LineGeometryRenderSegment {
   id: string;
   fromStopId: string;
@@ -146,7 +159,21 @@ export interface RoundedPolylineOptions {
   minimumCornerSegmentLength?: number;
   maximumCornerRadius?: number;
   cornerRadiusRatio?: number;
+  /** Remove a non-anchor vertex when one of its screen-space legs is a tiny spur. */
+  maximumShortSegmentLength?: number;
+  maximumShortSegmentRatio?: number;
+  protectedPointIndices?: readonly number[];
 }
+
+export interface RoundedPolylineScratch {
+  retainedIndices: number[];
+  dedupedIndices: number[];
+}
+
+type RequiredRoundedPolylineDefaults = Required<Pick<
+  RoundedPolylineOptions,
+  "minimumPointDistance" | "minimumCornerSegmentLength" | "maximumCornerRadius" | "cornerRadiusRatio"
+>>;
 
 export interface LineGeometryAlignmentOptions extends RoundedPolylineOptions {
   maximumEndpointSnapDistance?: number;
@@ -161,7 +188,7 @@ export interface LineGeometryContinuityReport {
   disconnectedStops: Array<{ stopId: string; gapMeters: number }>;
 }
 
-const DEFAULT_ROUNDED_POLYLINE_OPTIONS: Required<RoundedPolylineOptions> = {
+const DEFAULT_ROUNDED_POLYLINE_OPTIONS: RequiredRoundedPolylineDefaults = {
   minimumPointDistance: 0.7,
   minimumCornerSegmentLength: 2.5,
   maximumCornerRadius: 7,
@@ -267,6 +294,31 @@ export function createDirectLineGeometry(
     segments,
     entrances: [],
   };
+}
+
+/**
+ * Builds the same physical station-to-station requests used by the V1 line
+ * map. GTFS shapes are selected and projected per physical edge so a branch
+ * or timetable variant cannot make the complete line fall back as one block.
+ */
+export function createPhysicalEdgeBranches(
+  branches: LineGeometryBranchRequest[],
+): LineGeometryBranchRequest[] {
+  const edges = new Map<string, LineGeometryBranchRequest>();
+
+  branches.forEach((branch) => {
+    branch.stopIds.slice(0, -1).forEach((fromStopId, index) => {
+      const toStopId = branch.stopIds[index + 1];
+      if (fromStopId === toStopId) return;
+
+      const id = [fromStopId, toStopId].sort().join("--");
+      if (!edges.has(id)) {
+        edges.set(id, { id, stopIds: [fromStopId, toStopId] });
+      }
+    });
+  });
+
+  return [...edges.values()];
 }
 
 export function createDirectLineGeometryProvider(): LineGeometryProvider {
@@ -444,15 +496,224 @@ export function buildRoundedPolylinePath(
   inputPoints: LineGeometryPoint[],
   options: RoundedPolylineOptions = {},
 ): { path: string; corners: LineGeometryCornerDecision[] } {
-  const settings = { ...DEFAULT_ROUNDED_POLYLINE_OPTIONS, ...options };
-  const points = dedupeLineGeometryPoints(inputPoints, settings.minimumPointDistance);
+  const rounded = createRoundedPolylineCommands(inputPoints, options);
+  return {
+    path: rounded.commands
+      .map((command) => {
+        if (command.type === "moveTo") return `M ${formatPoint(command.point)}`;
+        if (command.type === "lineTo") return `L ${formatPoint(command.point)}`;
+        return `Q ${formatPoint(command.control)} ${formatPoint(command.point)}`;
+      })
+      .join(" "),
+    corners: rounded.corners,
+  };
+}
 
-  if (points.length === 0) return { path: "", corners: [] };
-  if (points.length === 1) {
-    return { path: `M ${formatPoint(points[0])}`, corners: [] };
+/**
+ * Removes disproportionate micro-segments from a rendered polyline while
+ * preserving station anchors. Provider traces occasionally contain a tiny
+ * non-station vertex beside a real anchor; keeping that vertex turns a smooth
+ * route into a visible spike at high zoom. The threshold is supplied in the
+ * target coordinate space (normally CSS pixels), so the rule stays generic
+ * across lines, modes, and zoom levels.
+ */
+export function collapseShortUnprotectedPolylineVertices(
+  inputPoints: LineGeometryPoint[],
+  options: Pick<
+    RoundedPolylineOptions,
+    "maximumShortSegmentLength" | "maximumShortSegmentRatio" | "protectedPointIndices"
+  > = {},
+): LineGeometryPoint[] {
+  const maximumLength = options.maximumShortSegmentLength;
+  if (!Number.isFinite(maximumLength) || maximumLength! <= 0 || inputPoints.length < 3) {
+    return inputPoints.map((point) => ({ ...point }));
   }
 
-  const commands = [`M ${formatPoint(points[0])}`];
+  const maximumRatio = options.maximumShortSegmentRatio ?? 0.12;
+  const protectedIndices = new Set(options.protectedPointIndices ?? []);
+  const retained = inputPoints.map((point, originalIndex) => ({
+    point: { ...point },
+    originalIndex,
+  }));
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let index = 1; index < retained.length - 1; index += 1) {
+      const current = retained[index]!;
+      if (protectedIndices.has(current.originalIndex)) continue;
+
+      const previous = retained[index - 1]!.point;
+      const next = retained[index + 1]!.point;
+      const incomingLength = pointDistance(previous, current.point);
+      const outgoingLength = pointDistance(current.point, next);
+      const shortest = Math.min(incomingLength, outgoingLength);
+      const longest = Math.max(incomingLength, outgoingLength);
+      if (
+        shortest > maximumLength! ||
+        longest <= 0 ||
+        shortest / longest > maximumRatio
+      ) {
+        continue;
+      }
+
+      retained.splice(index, 1);
+      changed = true;
+      break;
+    }
+  }
+
+  return retained.map(({ point }) => point);
+}
+
+/**
+ * Applies the exact V1 screen-space rounding to a Canvas path. Keeping the
+ * command generation shared prevents SVG and Canvas from disagreeing at a
+ * station corner such as Metro 12 / Concorde.
+ */
+export function appendRoundedPolylineToPath(
+  builder: RoundedPolylinePathBuilder,
+  inputPoints: LineGeometryPoint[],
+  options: RoundedPolylineOptions = {},
+): { corners: LineGeometryCornerDecision[] } {
+  const rounded = createRoundedPolylineCommands(inputPoints, options);
+  rounded.commands.forEach((command) => {
+    if (command.type === "moveTo") {
+      builder.moveTo(command.point.x, command.point.y);
+    } else if (command.type === "lineTo") {
+      builder.lineTo(command.point.x, command.point.y);
+    } else {
+      builder.quadraticCurveTo(
+        command.control.x,
+        command.control.y,
+        command.point.x,
+        command.point.y,
+      );
+    }
+  });
+  return { corners: rounded.corners };
+}
+
+/**
+ * Emits the same Canvas commands as appendRoundedPolylineToPath without
+ * allocating command/corner/point arrays. The caller owns the reusable scratch
+ * buffers; this is intended for high-frequency map animation, not diagnostics.
+ */
+export function appendRoundedPolylineToPathDirect(
+  builder: RoundedPolylinePathBuilder,
+  inputPoints: LineGeometryPoint[],
+  options: RoundedPolylineOptions,
+  scratch: RoundedPolylineScratch,
+): void {
+  const retained = scratch.retainedIndices;
+  const points = scratch.dedupedIndices;
+  retained.length = 0;
+  points.length = 0;
+  for (let index = 0; index < inputPoints.length; index += 1) retained.push(index);
+
+  const maximumLength = options.maximumShortSegmentLength;
+  if (Number.isFinite(maximumLength) && maximumLength! > 0 && retained.length >= 3) {
+    const maximumRatio = options.maximumShortSegmentRatio ?? 0.12;
+    const protectedIndices = options.protectedPointIndices ?? [];
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let index = 1; index < retained.length - 1; index += 1) {
+        const originalIndex = retained[index]!;
+        if (protectedIndices.includes(originalIndex)) continue;
+        const previous = inputPoints[retained[index - 1]!]!;
+        const current = inputPoints[originalIndex]!;
+        const next = inputPoints[retained[index + 1]!]!;
+        const incomingLength = pointDistance(previous, current);
+        const outgoingLength = pointDistance(current, next);
+        const shortest = Math.min(incomingLength, outgoingLength);
+        const longest = Math.max(incomingLength, outgoingLength);
+        if (
+          shortest > maximumLength! ||
+          longest <= 0 ||
+          shortest / longest > maximumRatio
+        ) {
+          continue;
+        }
+        retained.splice(index, 1);
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  const minimumPointDistance =
+    options.minimumPointDistance ?? DEFAULT_ROUNDED_POLYLINE_OPTIONS.minimumPointDistance;
+  for (const originalIndex of retained) {
+    const previousIndex = points[points.length - 1];
+    if (
+      previousIndex === undefined ||
+      pointDistance(inputPoints[previousIndex]!, inputPoints[originalIndex]!) >= minimumPointDistance
+    ) {
+      points.push(originalIndex);
+    }
+  }
+  if (points.length === 1 && retained.length > 1) points.push(retained[retained.length - 1]!);
+  if (points.length === 0) return;
+
+  const first = inputPoints[points[0]!]!;
+  builder.moveTo(first.x, first.y);
+  if (points.length === 1) return;
+
+  const minimumCornerSegmentLength =
+    options.minimumCornerSegmentLength ??
+    DEFAULT_ROUNDED_POLYLINE_OPTIONS.minimumCornerSegmentLength;
+  const maximumCornerRadius =
+    options.maximumCornerRadius ?? DEFAULT_ROUNDED_POLYLINE_OPTIONS.maximumCornerRadius;
+  const cornerRadiusRatio =
+    options.cornerRadiusRatio ?? DEFAULT_ROUNDED_POLYLINE_OPTIONS.cornerRadiusRatio;
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const previous = inputPoints[points[index - 1]!]!;
+    const current = inputPoints[points[index]!]!;
+    const next = inputPoints[points[index + 1]!]!;
+    const incomingLength = pointDistance(previous, current);
+    const outgoingLength = pointDistance(current, next);
+    const cross =
+      (current.x - previous.x) * (next.y - current.y) -
+      (current.y - previous.y) * (next.x - current.x);
+    const shortest = Math.min(incomingLength, outgoingLength);
+    if (Math.abs(cross) < 0.0001 || shortest < minimumCornerSegmentLength) {
+      builder.lineTo(current.x, current.y);
+      continue;
+    }
+
+    const radius = Math.min(maximumCornerRadius, shortest * cornerRadiusRatio);
+    const incomingRatio = incomingLength > 0 ? Math.min(1, radius / incomingLength) : 0;
+    const outgoingRatio = outgoingLength > 0 ? Math.min(1, radius / outgoingLength) : 0;
+    builder.lineTo(
+      current.x + (previous.x - current.x) * incomingRatio,
+      current.y + (previous.y - current.y) * incomingRatio,
+    );
+    builder.quadraticCurveTo(
+      current.x,
+      current.y,
+      current.x + (next.x - current.x) * outgoingRatio,
+      current.y + (next.y - current.y) * outgoingRatio,
+    );
+  }
+  const last = inputPoints[points[points.length - 1]!]!;
+  builder.lineTo(last.x, last.y);
+}
+
+function createRoundedPolylineCommands(
+  inputPoints: LineGeometryPoint[],
+  options: RoundedPolylineOptions = {},
+): { commands: RoundedPolylineCommand[]; corners: LineGeometryCornerDecision[] } {
+  const settings = { ...DEFAULT_ROUNDED_POLYLINE_OPTIONS, ...options };
+  const simplifiedPoints = collapseShortUnprotectedPolylineVertices(inputPoints, options);
+  const points = dedupeLineGeometryPoints(simplifiedPoints, settings.minimumPointDistance);
+
+  if (points.length === 0) return { commands: [], corners: [] };
+  if (points.length === 1) {
+    return { commands: [{ type: "moveTo", point: points[0] }], corners: [] };
+  }
+
+  const commands: RoundedPolylineCommand[] = [{ type: "moveTo", point: points[0] }];
   const corners: LineGeometryCornerDecision[] = [];
 
   for (let index = 1; index < points.length - 1; index += 1) {
@@ -466,7 +727,7 @@ export function buildRoundedPolylinePath(
       (current.y - previous.y) * (next.x - current.x);
 
     if (Math.abs(cross) < 0.0001) {
-      commands.push(`L ${formatPoint(current)}`);
+      commands.push({ type: "lineTo", point: current });
       corners.push({
         index,
         mode: "straight",
@@ -480,7 +741,7 @@ export function buildRoundedPolylinePath(
     const shortest = Math.min(incomingLength, outgoingLength);
 
     if (shortest < settings.minimumCornerSegmentLength) {
-      commands.push(`L ${formatPoint(current)}`);
+      commands.push({ type: "lineTo", point: current });
       corners.push({
         index,
         mode: "straight",
@@ -495,7 +756,10 @@ export function buildRoundedPolylinePath(
     const before = moveTowards(current, previous, radius);
     const after = moveTowards(current, next, radius);
 
-    commands.push(`L ${formatPoint(before)}`, `Q ${formatPoint(current)} ${formatPoint(after)}`);
+    commands.push(
+      { type: "lineTo", point: before },
+      { type: "quadraticCurveTo", control: current, point: after },
+    );
     corners.push({
       index,
       mode: "rounded",
@@ -506,13 +770,13 @@ export function buildRoundedPolylinePath(
     });
   }
 
-  commands.push(`L ${formatPoint(points[points.length - 1])}`);
-  return { path: commands.join(" "), corners };
+  commands.push({ type: "lineTo", point: points[points.length - 1] });
+  return { commands, corners };
 }
 
 export function createScreenSpaceRoundedPolylineOptions(
   zoom: number,
-): Required<RoundedPolylineOptions> {
+): RequiredRoundedPolylineDefaults {
   const safeZoom = Math.max(0.01, zoom);
 
   return {

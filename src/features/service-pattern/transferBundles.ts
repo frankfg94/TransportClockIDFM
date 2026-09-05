@@ -87,6 +87,17 @@ export interface TransferBundleLocalCacheOptions {
   localCacheStorage?: TransferBundleStorage;
 }
 
+export interface TransferBundleTargetLoadOptions
+  extends TransferBundleLocalCacheOptions {
+  backendCacheEnabled?: boolean;
+  nearbyDistanceMeters?: number;
+  requestConcurrency?: number;
+  requestSpacingMs?: number;
+  retentionDays?: number;
+  transportType?: TransferBundleNearbyDistanceTransport;
+  transferResolverMode?: TransferResolverMode;
+}
+
 export interface TransferBundleClearOptions extends TransferBundleLocalCacheOptions {
   /** Controls whether the shared backend cache should also be cleared. */
   backendCacheEnabled?: boolean;
@@ -144,7 +155,7 @@ const pendingTransferBundleRequests = new Map<
   Promise<TransferBundleResponse>
 >();
 
-type TransferBundleNearbyDistanceTransport =
+export type TransferBundleNearbyDistanceTransport =
   | TransitMode
   | keyof typeof TRANSFER_BUNDLE_NEARBY_DISTANCE_METERS
   | string;
@@ -626,25 +637,105 @@ function normalizeTransferBundleTransportType(
   return undefined;
 }
 
-export async function loadTransferBundleForTarget(params: {
-  lineId: string;
-  lineLabel: string;
-  target: TransferBundleTarget;
-  transportType?: string;
-}): Promise<TransferLineOption[] | undefined> {
+export async function loadTransferBundleForTarget(
+  params: {
+    lineId: string;
+    lineLabel: string;
+    target: TransferBundleTarget;
+  } & TransferBundleTargetLoadOptions,
+): Promise<TransferLineOption[] | undefined> {
+  const transferResolverMode = resolveEffectiveTransferResolverMode(
+    params.transferResolverMode ?? "nearby",
+    params.transportType,
+  );
+  const requestConcurrency = normalizeTransferBundleRequestConcurrency(
+    params.requestConcurrency,
+  );
+  const requestSpacingMs = normalizeTransferBundleRequestSpacingMs(
+    params.requestSpacingMs,
+  );
+  const nearbyDistanceMeters = normalizeTransferBundleNearbyDistanceMeters(
+    params.nearbyDistanceMeters ??
+    resolveTransferBundleNearbyDistanceMeters(params.transportType),
+  );
+  const retentionDays = normalizeTransferBundleRetentionDays(
+    params.retentionDays,
+  );
+  const storage = resolveLocalTransferBundleStorage(params);
+
+  if (storage) {
+    const expiredBundleIds = pruneExpiredTransferBundles(storage);
+
+    if (expiredBundleIds.length > 0) {
+      logTransferBundleClientDebug("local-cache:expired-pruned", {
+        expiredBundleIds,
+      });
+    }
+
+    const localEntries = readReusableLocalTransferBundleEntries({
+      lineId: params.lineId,
+      transferResolverMode,
+      requestConcurrency,
+      nearbyDistanceMeters,
+      targets: [params.target],
+      storage,
+    });
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        localEntries,
+        params.target.stopAreaRef,
+      )
+    ) {
+      logTransferBundleClientDebug("local-cache:hit-target", {
+        lineId: params.lineId,
+        stopAreaRef: params.target.stopAreaRef,
+        transferCount: localEntries[params.target.stopAreaRef]?.length ?? 0,
+      });
+
+      return localEntries[params.target.stopAreaRef];
+    }
+  }
+
   const response = await fetchTransferBundle({
-    backendCacheEnabled: true,
+    backendCacheEnabled: params.backendCacheEnabled !== false,
     lineId: params.lineId,
     lineLabel: params.lineLabel,
-    nearbyDistanceMeters: resolveTransferBundleNearbyDistanceMeters(
-      params.transportType,
-    ),
-    requestConcurrency: DEFAULT_TRANSFER_BUNDLE_REQUEST_CONCURRENCY,
-    requestSpacingMs: 0,
-    retentionDays: DEFAULT_TRANSFER_BUNDLE_RETENTION_DAYS,
+    nearbyDistanceMeters,
+    requestConcurrency,
+    requestSpacingMs,
+    retentionDays,
     targets: [params.target],
-    transferResolverMode: "nearby",
+    transferResolverMode,
   });
+
+  if (
+    storage &&
+    transferBundleResponseHasRequestedTarget([params.target], response)
+  ) {
+    const savedBundle = saveTransferBundle(
+      {
+        ...response,
+        lineId: params.lineId,
+        lineLabel: params.lineLabel,
+        nearbyDistanceMeters,
+        requestConcurrency,
+        transferResolverMode,
+      },
+      retentionDays,
+      storage,
+    );
+
+    logTransferBundleClientDebug("local-cache:write", {
+      bundleId: savedBundle.id,
+      expiresAt: savedBundle.expiresAt,
+      stopAreaCount: Object.keys(savedBundle.transfersByStopAreaRef).length,
+      transferCount: Object.values(savedBundle.transfersByStopAreaRef).reduce(
+        (count, transfers) => count + transfers.length,
+        0,
+      ),
+    });
+  }
 
   return Object.prototype.hasOwnProperty.call(
     response.transfersByStopAreaRef,

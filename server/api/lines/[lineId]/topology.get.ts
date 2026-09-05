@@ -1,4 +1,6 @@
 import { createError, defineEventHandler, getRouterParam, setHeader } from "h3";
+import { loadGtfsLineArtifact } from "../../../services/gtfs/runtime";
+import { attachGtfsMonitoringRefs } from "../../../services/topology/attachGtfsMonitoringRefs";
 import { getLineTopology } from "../../../services/topology/getLineTopology";
 import { getNetexRuntimeEnv } from "../../../services/topology/netexCache";
 
@@ -13,10 +15,13 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const topology = await getLineTopology(lineId, getNetexRuntimeEnv(event));
+    const [topology, gtfsArtifact] = await Promise.all([
+      getLineTopology(lineId, getNetexRuntimeEnv(event)),
+      loadGtfsLineArtifact(event, lineId).catch(() => undefined),
+    ]);
     setHeader(event, "Cache-Control", "public, max-age=21600");
 
-    return topology;
+    return gtfsArtifact ? attachGtfsMonitoringRefs(topology, gtfsArtifact) : topology;
   } catch (error) {
     throw createError({
       cause: error,

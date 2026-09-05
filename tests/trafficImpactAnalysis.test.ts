@@ -614,6 +614,71 @@ describe("traffic impact analysis", () => {
     ).toBe("disturbance");
   });
 
+  it("recognizes the English bulk wording for an interrupted section", () => {
+    const stations = createStations([
+      "Gare du Nord",
+      "CitÃ© Universitaire",
+      "Bourg-la-Reine",
+    ]);
+    const disruption = createDisruption({
+      id: "rer-b-english-interruption",
+      title: "Major summer works",
+      message:
+        "Gare du Nord <> Bourg-la-Reine: traffic interrupted - replacement buses.",
+    });
+
+    const analysis = analyzeTrafficImpacts(
+      [disruption],
+      stations,
+      createSequentialEdges(stations),
+    );
+
+    expect(getInterruptedStations(analysis)).toEqual([
+      stations[1].key,
+    ]);
+    expect(analysis.segments[0]?.kind).toBe("interruption");
+  });
+
+  it("removes a duplicated bulk endpoint before resolving a split branch", () => {
+    const stations = createStations([
+      "Gare du Nord",
+      "Cite Universitaire",
+      "Bourg-la-Reine",
+      "La Croix de Berny",
+      "Robinson",
+    ]);
+    const edge = (source: string, target: string) => ({
+      source: normalizePatternStationName(source),
+      target: normalizePatternStationName(target),
+    });
+    const edges = [
+      edge("Gare du Nord", "Cite Universitaire"),
+      edge("Cite Universitaire", "Bourg-la-Reine"),
+      edge("Bourg-la-Reine", "La Croix de Berny"),
+      edge("Bourg-la-Reine", "Robinson"),
+    ];
+    const analysis = analyzeTrafficImpacts(
+      [
+        createDisruption({
+          id: "rer-b-duplicated-bulk-endpoint",
+          title: "Major summer works",
+          message:
+            "- Gare du Nord <> Gare du Nord <> La Croix-de-Berny/Robinson: traffic interrupted",
+        }),
+      ],
+      stations,
+      edges,
+    );
+
+    expect(analysis.segments.length).toBeGreaterThanOrEqual(2);
+    expect(
+      analysis.edgeImpacts[getPatternTrafficEdgeKey(edge("Gare du Nord", "Cite Universitaire"))]?.kind,
+    ).toBe("interruption");
+    expect(
+      analysis.edgeImpacts[getPatternTrafficEdgeKey(edge("Bourg-la-Reine", "Robinson"))]?.kind,
+    ).toBe("interruption");
+  });
+
   it("extracts de-a and depuis-jusqua section variants", () => {
     const stations = createStations(["Station A", "Station B", "Station C"]);
     const edges = createSequentialEdges(stations);
@@ -691,6 +756,55 @@ describe("traffic impact analysis", () => {
       stations.map((station) => station.key),
     );
   });
+
+  it("builds an order-independent hull from slash-separated impacted stops", () => {
+    const stations = createStations([
+      "Pont de Levallois - Bécon",
+      "Pompidou",
+      "Place Mermoz",
+      "Place de Belgique",
+      "Michel Ricard",
+    ]);
+    const edges = createSequentialEdges(stations);
+    const impactedStopNames = [
+      "Pompidou / Pont de Levallois",
+      "Place de Belgique / Bécon les Bruyères",
+      "Place Mermoz",
+    ];
+    const disruption = createDisruption({
+      id: "bus-275-manifestation",
+      title: "Bus 275 : Manifestation - Arrêt(s) non desservi(s)",
+      message:
+        "La ligne 275 est déviée : les arrêts situés entre Pont de Levallois - Bécon - Métro et Paix - Verdun ne sont plus desservis en direction de La Défense.",
+      impactedStopNames,
+    });
+    const reversedDisruption = {
+      ...disruption,
+      id: "bus-275-manifestation-reversed",
+      impactedStopNames: [...impactedStopNames].reverse(),
+    };
+
+    const expectedEdgeKeys = edges.slice(0, 3).map(getPatternTrafficEdgeKey);
+    const analysis = analyzeTrafficImpacts([disruption], stations, edges);
+    const reversedAnalysis = analyzeTrafficImpacts(
+      [reversedDisruption],
+      stations,
+      edges,
+    );
+
+    expect(Object.keys(analysis.edgeImpacts).sort()).toEqual(
+      expectedEdgeKeys.sort(),
+    );
+    expect(Object.keys(reversedAnalysis.edgeImpacts).sort()).toEqual(
+      expectedEdgeKeys.sort(),
+    );
+    expect(getInterruptedStations(analysis)).toEqual(
+      expect.arrayContaining(
+        stations.slice(0, 4).map((station) => station.key),
+      ),
+    );
+  });
+
   it("marks the terminal branch station without interrupting the shared endpoint", () => {
     const stations = createStations(
       ["Aéroport CDG Terminal 2", "Gare du Nord", "Châtelet", "Mitry - Claye"],

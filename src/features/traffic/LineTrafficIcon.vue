@@ -61,7 +61,7 @@ watch(
           height="46"
           rx="7"
           pathLength="100"
-          stroke-dasharray="102 100"
+          stroke-dasharray="130 100"
         />
       </svg>
     </span>

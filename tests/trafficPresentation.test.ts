@@ -44,6 +44,19 @@ describe("traffic presentation", () => {
       symbol: "x",
       tone: "red",
     });
+
+    expect(
+      getTrafficAlertPresentation([
+        createDisruption({
+          id: "english-interruption",
+          message: "Traffic is interrupted between Gare du Nord and Robinson.",
+        }),
+      ]),
+    ).toEqual({
+      label: "Interruption",
+      symbol: "x",
+      tone: "red",
+    });
   });
 });
 

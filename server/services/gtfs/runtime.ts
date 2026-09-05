@@ -45,6 +45,9 @@ const compiledArtifactCache = new Map<
   string,
   Promise<CompiledGtfsLineArtifact | undefined>
 >();
+let runtimeCacheEpoch = 0;
+
+export function getGtfsRuntimeCacheEpoch(): number { return runtimeCacheEpoch; }
 
 export function isGtfsEnabled(event?: H3Event): boolean {
   return !["0", "false", "no", "off"].includes(
@@ -177,6 +180,7 @@ export async function loadGtfsLineArtifactsByLabel(
 }
 
 export function clearGtfsRuntimeCaches(): void {
+  runtimeCacheEpoch += 1;
   manifestCache = undefined;
   artifactCache.clear();
   lineLookupCache.clear();
@@ -187,7 +191,7 @@ export function normalizeLineArtifactKey(value: string): string {
   return encodeURIComponent(value.trim().replace(/^line:/iu, ""));
 }
 
-async function readGtfsJson<T>(
+export async function readGtfsJson<T>(
   event: H3Event | undefined,
   key: string,
 ): Promise<{ value?: T; storage: GtfsPublicStatus["storage"] }> {

@@ -27,6 +27,10 @@ export interface RawPattern {
   terminalFrom: string;
   terminalTo: string;
   stops: string[];
+  /** Raw quay ids aligned with stops when the source pattern preserves them. */
+  quayIds?: Array<string | undefined>;
+  /** SIRI stop-area refs aligned with stops, resolved from the local GTFS cache. */
+  monitoringRefs?: Array<string | undefined>;
   tripCount: number;
 }
 

@@ -6,7 +6,9 @@ import {
 } from "h3";
 import { getServerIdfmApiKey } from "../idfm/resolveStopArea";
 import { createServerIdfmRequestOptions } from "../idfm/serverClient";
-import { fetchIdfmTrafficLineReport } from "../idfm/traffic";
+import { getTrafficSnapshot } from "../idfm/traffic";
+import { normalizeTrafficLineRef } from "../../../src/features/traffic/trafficNormalization";
+import type { TrafficLineReport } from "../../../src/features/traffic/types";
 import {
   HomeAssistantApiInputError,
   HomeAssistantApiNotFoundError,
@@ -44,7 +46,22 @@ export function getHomeAssistantTransitApi(event: H3Event): HomeAssistantTransit
   }
 
   const api = new HomeAssistantTransitApi({
-    fetchTraffic: (lineRef) => fetchIdfmTrafficLineReport(lineRef, apiKey),
+    fetchTraffic: async (lineRef): Promise<TrafficLineReport> => {
+      const snapshot = await getTrafficSnapshot(event);
+      const normalizedLineRef = normalizeTrafficLineRef(lineRef);
+      const report = snapshot.response.lines.find(
+        (candidate) => normalizeTrafficLineRef(candidate.lineRef) === normalizedLineRef,
+      );
+
+      return report ?? {
+        disruptions: [],
+        error: snapshot.response.configured
+          ? undefined
+          : snapshot.response.cache?.lastError,
+        lineRef: normalizedLineRef,
+        status: snapshot.response.configured ? "normal" : "error",
+      };
+    },
     requestOptions: createServerIdfmRequestOptions(apiKey),
   });
 

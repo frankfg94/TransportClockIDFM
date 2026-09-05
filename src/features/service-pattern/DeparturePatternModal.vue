@@ -172,6 +172,8 @@ interface PatternStationNodeData {
   key: string;
   label: string;
   city?: string;
+  cityNode: boolean;
+  mixedServed: boolean;
   layoutX: number;
   layoutY: number;
   nodeX: number;
@@ -231,8 +233,10 @@ interface PatternFlowEdgeData {
   trafficImpact?: PatternTrafficImpact;
 }
 
-type PatternVisualMode = "comfort" | "compact" | "realistic";
-type PatternCompactMode = "auto" | PatternVisualMode;
+type PatternVisualMode = "comfort" | "compact" | "realistic" | "cities";
+type PatternCompactMode =
+  | "auto"
+  | Exclude<PatternVisualMode, "cities">;
 
 interface PatternGraphNode {
   id: string;
@@ -256,6 +260,35 @@ interface PatternGraphEdge {
   distanceKm?: number;
 }
 
+interface PatternCityGroup {
+  key: string;
+  internalLabel: string;
+  label: string;
+  city?: string;
+  sourceKeys: string[];
+  current: boolean;
+  served: boolean;
+  mixedServed: boolean;
+  time?: string;
+  transfers: TransferLineOption[];
+  lon?: number;
+  lat?: number;
+  coordinatePriority: number;
+}
+
+interface PatternCityCompression {
+  graph: {
+    nodes: PatternGraphNode[];
+    edges: PatternGraphEdge[];
+  };
+  calls: DepartureCall[];
+  lineTopology: LineRouteSequence[];
+  lineTopologyLayout?: LineTopologyLayout;
+  displayKeyBySourceKey: Map<string, string>;
+  cityNodeKeys: Set<string>;
+  mixedServedKeys: Set<string>;
+}
+
 interface PatternLoopLayoutHint {
   id: string;
   kind: LineTopologyLoopLayout["kind"];
@@ -272,9 +305,12 @@ interface PatternFlowModel {
   stationNodes: PatternStationFlowNode[];
   edges: PatternFlowEdge[];
   trafficEdges: PatternTrafficEdge[];
+  trafficSourceEdges: PatternTrafficEdge[];
   trafficPositions: Map<string, PatternLayoutPosition>;
   trafficStations: PatternTrafficStation[];
+  trafficSourceStations: PatternTrafficStation[];
   trafficAnalysis: PatternTrafficImpactAnalysis;
+  displayKeyBySourceKey: Map<string, string>;
 }
 
 interface PatternCityZoneGroup {
@@ -384,6 +420,7 @@ const PATTERN_VISUAL_MODE_OPTIONS: Array<{
   { id: "comfort", label: "Comfort view" },
   { id: "compact", label: "Compact view" },
   { id: "realistic", label: "Realistic view" },
+  { id: "cities", label: "City view" },
 ];
 
 const props = withDefaults(
@@ -518,7 +555,9 @@ const patternVisualModeOptions = computed(() =>
         ? t("settings.options.compactLinePlan.comfort")
         : option.id === "compact"
           ? t("settings.options.compactLinePlan.compact")
-          : t("settings.options.compactLinePlan.realistic"),
+          : option.id === "realistic"
+            ? t("settings.options.compactLinePlan.realistic")
+            : t("pattern.cityView"),
   })),
 );
 
@@ -597,7 +636,10 @@ watch(
     showCityZones: props.showCityZones,
   }),
   () => {
-    warnMissingNetexTown(displayPattern.value, props.showCityZones);
+    warnMissingNetexTown(
+      displayPattern.value,
+      props.showCityZones && patternVisualMode.value !== "cities",
+    );
   },
   { immediate: true },
 );
@@ -611,10 +653,14 @@ const isCompactPatternFlow = computed(
 const isRealisticPatternFlow = computed(
   () => patternVisualMode.value === "realistic",
 );
+const isCitiesPatternFlow = computed(
+  () => patternVisualMode.value === "cities",
+);
 const usesCompactPatternFlowLayout = computed(
   () =>
     patternVisualMode.value === "compact" ||
-    patternVisualMode.value === "realistic",
+    patternVisualMode.value === "realistic" ||
+    patternVisualMode.value === "cities",
 );
 const currentLayoutOptions = computed(() =>
   createPatternLayoutOptions(patternVisualMode.value),
@@ -690,10 +736,12 @@ const topologyStationKeyById = computed(() => {
   for (const sequence of displayPattern.value?.lineTopology ?? []) {
     for (const stop of sequence.stops) {
       const stationKey = createStationKey(stop);
+      const displayKey =
+        flowModel.value.displayKeyBySourceKey.get(stationKey) ?? stationKey;
 
       [stop.id, stop.station.id, stop.station.scheduleStopAreaRef]
         .filter((value): value is string => Boolean(value))
-        .forEach((value) => keys.set(value, stationKey));
+        .forEach((value) => keys.set(value, displayKey));
     }
   }
 
@@ -743,7 +791,15 @@ const patternPluginExtensions = transportClockPlugins.flatMap((plugin) => {
       if (sourceId === targetId) {
         return true;
       }
-      const edgeKey = createEdgeKey(sourceId, targetId);
+      const sourceDisplayKey =
+        topologyStationKeyById.value.get(sourceId) ??
+        flowModel.value.displayKeyBySourceKey.get(sourceId) ??
+        sourceId;
+      const targetDisplayKey =
+        topologyStationKeyById.value.get(targetId) ??
+        flowModel.value.displayKeyBySourceKey.get(targetId) ??
+        targetId;
+      const edgeKey = createEdgeKey(sourceDisplayKey, targetDisplayKey);
       return flowModel.value.trafficEdges.some(
         (edge) => createEdgeKey(edge.source, edge.target) === edgeKey,
       );
@@ -759,8 +815,13 @@ const patternPluginExtensions = transportClockPlugins.flatMap((plugin) => {
     reduceMotion: computed(() => props.reduceMotion),
     resolveServerApiUrl: toServerApiUrl,
     resolveStationKey(stationId) {
+      const sourceKey = topologyStationKeyById.value.get(stationId);
+      const displayKey = sourceKey
+        ? flowModel.value.displayKeyBySourceKey.get(sourceKey) ?? sourceKey
+        : undefined;
+
       return (
-        topologyStationKeyById.value.get(stationId) ??
+        displayKey ??
         (vehicleRailPositions.value.has(stationId) ? stationId : undefined)
       );
     },
@@ -836,8 +897,8 @@ const {
   report: computed(() =>
     props.smartTrafficDetection ? resolvedTrafficReport.value : undefined,
   ),
-  stations: computed(() => flowModel.value.trafficStations),
-  edges: computed(() => flowModel.value.trafficEdges),
+  stations: computed(() => flowModel.value.trafficSourceStations),
+  edges: computed(() => flowModel.value.trafficSourceEdges),
   impactScope: computed(() => props.trafficCalendarImpactScope),
   now: trafficTimingNow,
   reduceMotion: computed(() => props.reduceMotion),
@@ -983,7 +1044,7 @@ function createPatternLayoutOptions(
 ): PatternLayoutOptions {
   const spacing = getPatternSpacingOptions();
 
-  return mode === "compact" || mode === "realistic"
+  return mode === "compact" || mode === "realistic" || mode === "cities"
     ? {
         mode,
         compact: true,
@@ -1092,7 +1153,12 @@ function selectPatternVisualMode(mode: string): void {
 }
 
 function isPatternVisualMode(value: string): value is PatternVisualMode {
-  return value === "comfort" || value === "compact" || value === "realistic";
+  return (
+    value === "comfort" ||
+    value === "compact" ||
+    value === "realistic" ||
+    value === "cities"
+  );
 }
 
 function createInitialZoom({
@@ -1790,19 +1856,70 @@ function createPatternFlow(
   unifyReplacementBusMarkers = true,
   analyzeTraffic: DeparturePatternTrafficAnalyzer = createEmptyTrafficImpactAnalysis,
 ): PatternFlowModel {
-  const graph = buildPatternGraph(calls, lineTopology, fullLine);
-  const layout = createResolvedPatternLayoutOptions(visualMode, graph.edges);
-  const topology =
+  const sourceGraph = buildPatternGraph(calls, lineTopology, fullLine);
+  const sourceLayout = createResolvedPatternLayoutOptions(
+    visualMode === "cities" ? "compact" : visualMode,
+    sourceGraph.edges,
+  );
+  const sourceTopology =
     createTopologyLayout(
-      graph.nodes,
-      graph.edges,
+      sourceGraph.nodes,
+      sourceGraph.edges,
       calls,
       lineTopology,
       lineTopologyLayout,
       fullLine,
-      layout,
-    ) ?? createFallbackTopologyLayout(graph, layout);
-
+      sourceLayout,
+    ) ?? createFallbackTopologyLayout(sourceGraph, sourceLayout);
+  const sourceDrawableEdges = [
+    ...sourceGraph.edges,
+    ...sourceTopology.syntheticEdges,
+  ];
+  const sourceVisibleDrawableEdges = sourceDrawableEdges.filter((edge) =>
+    sourceTopology.visibleEdges.has(createEdgeKey(edge.source, edge.target)),
+  );
+  const trafficSourceStations = sourceGraph.nodes.map((node) => ({
+    key: node.id,
+    label: node.label,
+    transfers: filterCurrentLineTransfers(node.transfers, currentLine),
+    branchEnd: node.degree <= 1,
+  }));
+  const trafficSourceEdges = sourceVisibleDrawableEdges.map((edge) => ({
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+  }));
+  const sourceTrafficAnalysis = analyzeTraffic(
+    trafficSourceStations,
+    trafficSourceEdges,
+  );
+  const cityCompression =
+    visualMode === "cities"
+      ? createCityPatternCompression({
+          sourceGraph,
+          calls,
+          lineTopology,
+          lineTopologyLayout,
+          fullLine,
+        })
+      : undefined;
+  const graph = cityCompression?.graph ?? sourceGraph;
+  const renderCalls = cityCompression?.calls ?? calls;
+  const renderLineTopology = cityCompression?.lineTopology ?? lineTopology;
+  const renderLineTopologyLayout =
+    cityCompression?.lineTopologyLayout ?? lineTopologyLayout;
+  const layout = createResolvedPatternLayoutOptions(visualMode, graph.edges);
+  const topology = cityCompression
+    ? createTopologyLayout(
+        graph.nodes,
+        graph.edges,
+        renderCalls,
+        renderLineTopology,
+        renderLineTopologyLayout,
+        fullLine,
+        layout,
+      ) ?? createFallbackTopologyLayout(graph, layout)
+    : sourceTopology;
   const activeTerminalIds = getActiveTerminalIds(graph);
   const drawableEdges = [...graph.edges, ...topology.syntheticEdges];
   const visibleDrawableEdges = drawableEdges.filter((edge) =>
@@ -1819,7 +1936,13 @@ function createPatternFlow(
     source: edge.source,
     target: edge.target,
   }));
-  const trafficAnalysis = analyzeTraffic(trafficStations, trafficEdges);
+  const trafficAnalysis = cityCompression
+    ? projectPatternTrafficAnalysis(
+        sourceTrafficAnalysis,
+        cityCompression.displayKeyBySourceKey,
+        trafficEdges,
+      )
+    : sourceTrafficAnalysis;
   const stationNodes = graph.nodes.map((node) => {
     const position = topology.positions.get(node.id) ?? { x: 0, y: 0 };
     const nodePosition = {
@@ -1827,6 +1950,7 @@ function createPatternFlow(
       y: position.y - layout.nodeHeight / 2,
     };
     const isBranchEnd = node.degree <= 1;
+    const cityNode = Boolean(cityCompression?.cityNodeKeys.has(node.id));
     const visibleTransfers = filterDuplicateBusTransfers(
       filterCurrentLineTransfers(node.transfers, currentLine),
     );
@@ -1846,6 +1970,8 @@ function createPatternFlow(
         key: node.id,
         label: node.label,
         city: node.city,
+        cityNode,
+        mixedServed: Boolean(cityCompression?.mixedServedKeys.has(node.id)),
         layoutX: position.x,
         layoutY: position.y,
         nodeX: nodePosition.x,
@@ -1857,14 +1983,18 @@ function createPatternFlow(
         branchChip: fullLine
           ? undefined
           : getBranchChip(node, activeTerminalIds, departureTimeLabel),
-        busTransfers: visibleTransfers.filter(isBusTransfer),
-        nonBusTransfers: visibleTransfers.filter(isVisiblePatternPlanTransfer),
+        busTransfers:
+          visualMode === "cities" ? [] : visibleTransfers.filter(isBusTransfer),
+        nonBusTransfers:
+          visualMode === "cities"
+            ? []
+            : visibleTransfers.filter(isVisiblePatternPlanTransfer),
         transfers: visibleTransfers,
         trafficImpact: trafficAnalysis.stationImpacts[node.id],
       },
     } satisfies PatternStationFlowNode;
   });
-  const cityZoneNodes = showCityZones
+  const cityZoneNodes = showCityZones && visualMode !== "cities"
     ? createCityZoneFlowNodes({
         graphNodes: graph.nodes,
         graphEdges: graph.edges,
@@ -1904,10 +2034,10 @@ function createPatternFlow(
   ];
   const activeRouteEdgeOrder = fullLine
     ? new Map<string, number>()
-    : createActiveRouteEdgeOrder(calls, lineTopology);
+    : createActiveRouteEdgeOrder(renderCalls, renderLineTopology);
   const activeRouteEdgeDirections = fullLine
     ? new Map<string, { source: string; target: string }>()
-    : createActiveRouteEdgeDirections(calls, lineTopology);
+    : createActiveRouteEdgeDirections(renderCalls, renderLineTopology);
   const activeLightEdges = fullLine
     ? []
     : visibleDrawableEdges
@@ -1950,16 +2080,619 @@ function createPatternFlow(
       ),
     ),
   ];
-
   return {
     nodes,
     stationNodes,
     edges,
     trafficEdges,
+    trafficSourceEdges,
     trafficPositions: topology.positions,
     trafficStations,
+    trafficSourceStations,
     trafficAnalysis,
+    displayKeyBySourceKey:
+      cityCompression?.displayKeyBySourceKey ??
+      new Map(sourceGraph.nodes.map((node) => [node.id, node.id])),
   };
+}
+
+function createCityPatternCompression({
+  sourceGraph,
+  calls,
+  lineTopology,
+  lineTopologyLayout,
+  fullLine,
+}: {
+  sourceGraph: {
+    nodes: PatternGraphNode[];
+    edges: PatternGraphEdge[];
+  };
+  calls: DepartureCall[];
+  lineTopology: LineRouteSequence[];
+  lineTopologyLayout: LineTopologyLayout | undefined;
+  fullLine: boolean;
+}): PatternCityCompression {
+  const groups = createPatternCityGroups(sourceGraph.nodes, fullLine);
+  const groupByKey = new Map(groups.map((group) => [group.key, group]));
+  const displayKeyBySourceKey = new Map<string, string>();
+
+  groups.forEach((group) => {
+    group.sourceKeys.forEach((sourceKey) => {
+      displayKeyBySourceKey.set(sourceKey, group.key);
+    });
+  });
+
+  const topologyIdBySourceKey = new Map<string, string>();
+  lineTopology.forEach((sequence) => {
+    sequence.stops.forEach((stop) => {
+      const sourceKey = createStationKey(stop);
+      const displayKey = resolveCityDisplayKey(
+        sourceKey,
+        sourceGraph.nodes,
+        displayKeyBySourceKey,
+      );
+
+      if (!displayKey) {
+        return;
+      }
+
+      topologyIdBySourceKey.set(sourceKey, displayKey);
+      topologyIdBySourceKey.set(stop.id, displayKey);
+      topologyIdBySourceKey.set(stop.station.id, displayKey);
+      if (stop.station.scheduleStopAreaRef) {
+        topologyIdBySourceKey.set(stop.station.scheduleStopAreaRef, displayKey);
+      }
+    });
+  });
+
+  const compressedCalls = calls.flatMap((call, index) => {
+    const sourceKey = createStationKey(call);
+    const displayKey = resolveCityDisplayKey(
+      sourceKey,
+      sourceGraph.nodes,
+      displayKeyBySourceKey,
+    );
+    const group = displayKey ? groupByKey.get(displayKey) : undefined;
+
+    if (!group) {
+      return [];
+    }
+
+    return [
+      {
+        ...call,
+        id: `${group.key}:call:${index}`,
+        label: group.internalLabel,
+        city: group.city,
+        time: group.time,
+        current: fullLine ? false : group.current,
+        served: fullLine || group.served,
+        stopAreaRef: group.key,
+        transferLines: group.transfers,
+      },
+    ];
+  });
+
+  const compressedTopology = lineTopology.flatMap((sequence) => {
+    const compressedKeys = dedupeAdjacentPatternKeys(
+      sequence.stops.flatMap((stop) => {
+        const sourceKey = createStationKey(stop);
+        const displayKey = resolveCityDisplayKey(
+          sourceKey,
+          sourceGraph.nodes,
+          displayKeyBySourceKey,
+        );
+        return displayKey ? [displayKey] : [];
+      }),
+    );
+    const stops = compressedKeys.flatMap((key) => {
+      const group = groupByKey.get(key);
+      return group ? [createCitySyntheticStop(group)] : [];
+    });
+
+    if (stops.length === 0) {
+      return [];
+    }
+
+    const branchLayout = sequence.branchLayout
+      ? remapCityBranchLayout(
+          sequence.branchLayout,
+          topologyIdBySourceKey,
+          stops,
+        )
+      : undefined;
+
+    return [
+      {
+        ...sequence,
+        stops,
+        branchLayout,
+      },
+    ];
+  });
+
+  const compressedTopologyLayout = lineTopologyLayout
+    ? remapCityTopologyLayout(lineTopologyLayout, topologyIdBySourceKey)
+    : undefined;
+  const graph = buildPatternGraph(compressedCalls, compressedTopology, fullLine);
+
+  graph.nodes.forEach((node) => {
+    const group = groupByKey.get(node.id);
+
+    if (!group) {
+      return;
+    }
+
+    node.label = group.label;
+    node.city = group.city;
+    node.lon = group.lon;
+    node.lat = group.lat;
+    node.coordinatePriority = group.coordinatePriority;
+    node.current = group.current;
+    node.served = group.served;
+    node.time = group.time;
+    node.transfers = group.transfers;
+  });
+
+  return {
+    graph,
+    calls: compressedCalls,
+    lineTopology: compressedTopology,
+    lineTopologyLayout: compressedTopologyLayout,
+    displayKeyBySourceKey,
+    cityNodeKeys: new Set(
+      groups.filter((group) => Boolean(group.city)).map((group) => group.key),
+    ),
+    mixedServedKeys: new Set(
+      groups
+        .filter((group) => group.mixedServed)
+        .map((group) => group.key),
+    ),
+  };
+}
+
+function createPatternCityGroups(
+  sourceNodes: PatternGraphNode[],
+  fullLine: boolean,
+): PatternCityGroup[] {
+  const groupsByIdentity = new Map<string, PatternCityGroup>();
+
+  sourceNodes.forEach((node) => {
+    const city = normalizeCityLabel(node.city);
+    const normalizedCity = normalizeCityZoneKey(city);
+    const identity = normalizedCity
+      ? `city:${normalizedCity}`
+      : `station:${node.id}`;
+    const existing = groupsByIdentity.get(identity);
+
+    if (existing) {
+      existing.sourceKeys.push(node.id);
+      existing.current ||= node.current;
+      existing.served ||= fullLine || node.served;
+      existing.transfers = mergeTransfers(existing.transfers, node.transfers);
+      existing.coordinatePriority = Math.max(
+        existing.coordinatePriority,
+        node.coordinatePriority,
+      );
+      return;
+    }
+
+    const internalLabel = normalizedCity
+      ? `__citynode:${normalizedCity}__`
+      : `__stationnode:${node.id}__`;
+    const coordinates = node.lon !== undefined && node.lat !== undefined
+      ? { lon: node.lon, lat: node.lat }
+      : undefined;
+
+    groupsByIdentity.set(identity, {
+      key: createStationKey({ label: internalLabel }),
+      internalLabel,
+      label: city || node.label,
+      city: city || undefined,
+      sourceKeys: [node.id],
+      current: fullLine ? false : node.current,
+      served: fullLine || node.served,
+      mixedServed: false,
+      time: fullLine ? undefined : node.time,
+      transfers: node.transfers,
+      lon: coordinates?.lon,
+      lat: coordinates?.lat,
+      coordinatePriority: node.coordinatePriority,
+    });
+  });
+
+  const groups = Array.from(groupsByIdentity.values());
+  groups.forEach((group) => {
+    if (!group.city) {
+      return;
+    }
+
+    const members = group.sourceKeys.flatMap((sourceKey) =>
+      sourceNodes.filter((node) => node.id === sourceKey),
+    );
+    const servedMembers = members.filter((node) => node.served);
+    const currentWithTime = members.find((node) => node.current && node.time);
+    const servedWithTime = servedMembers.find((node) => node.time);
+
+    group.time = fullLine
+      ? undefined
+      : (currentWithTime?.time ?? servedWithTime?.time);
+    group.mixedServed =
+      group.sourceKeys.length > 1 &&
+      !fullLine &&
+      members.some((node) => node.served) &&
+      members.some((node) => !node.served);
+
+    const coordinateMembers = members.filter(
+      (node): node is PatternGraphNode & { lon: number; lat: number } =>
+        node.lon !== undefined && node.lat !== undefined,
+    );
+    if (coordinateMembers.length > 0) {
+      group.lon =
+        coordinateMembers.reduce((sum, node) => sum + node.lon, 0) /
+        coordinateMembers.length;
+      group.lat =
+        coordinateMembers.reduce((sum, node) => sum + node.lat, 0) /
+        coordinateMembers.length;
+    }
+  });
+
+  return groups;
+}
+
+function resolveCityDisplayKey(
+  sourceKey: string,
+  sourceNodes: PatternGraphNode[],
+  displayKeyBySourceKey: Map<string, string>,
+): string | undefined {
+  const exact = displayKeyBySourceKey.get(sourceKey);
+  if (exact) {
+    return exact;
+  }
+
+  const compatible = sourceNodes.find((node) =>
+    stationKeysAreCompatible(sourceKey, node.id),
+  );
+
+  return compatible ? displayKeyBySourceKey.get(compatible.id) : undefined;
+}
+
+function createCitySyntheticStop(group: PatternCityGroup): LineRouteStop {
+  return {
+    id: group.key,
+    label: group.internalLabel,
+    city: group.city,
+    lon: group.lon,
+    lat: group.lat,
+    station: {
+      id: group.key,
+      label: group.internalLabel,
+      city: group.city,
+      lon: group.lon,
+      lat: group.lat,
+      monitoringRef: group.key,
+      scheduleStopAreaRef: group.key,
+    },
+    transferLines: group.transfers,
+  };
+}
+
+function remapCityBranchLayout(
+  branchLayout: LineRouteBranchLayout,
+  topologyIdBySourceKey: Map<string, string>,
+  stops: LineRouteStop[],
+): LineRouteBranchLayout | undefined {
+  const firstStopId = stops[0]?.id ?? branchLayout.junctionStationId;
+  const lastStopId = stops.at(-1)?.id ?? branchLayout.terminalStationId;
+  const junctionStationId =
+    topologyIdBySourceKey.get(branchLayout.junctionStationId) ?? firstStopId;
+  const terminalStationId =
+    topologyIdBySourceKey.get(branchLayout.terminalStationId) ?? lastStopId;
+
+  if (
+    stops.length < 2 ||
+    !junctionStationId ||
+    !terminalStationId ||
+    junctionStationId === terminalStationId ||
+    !stops.some((stop) => stop.id === junctionStationId) ||
+    !stops.some((stop) => stop.id === terminalStationId)
+  ) {
+    return undefined;
+  }
+
+  const trunkStationId = branchLayout.trunkStationId
+    ? topologyIdBySourceKey.get(branchLayout.trunkStationId)
+    : undefined;
+
+  return {
+    ...branchLayout,
+    junctionStationId,
+    terminalStationId,
+    trunkStationId:
+      trunkStationId &&
+      trunkStationId !== junctionStationId &&
+      trunkStationId !== terminalStationId
+        ? trunkStationId
+        : undefined,
+  };
+}
+
+function remapCityTopologyLayout(
+  layout: LineTopologyLayout,
+  topologyIdBySourceKey: Map<string, string>,
+): LineTopologyLayout {
+  const mapIds = (ids: string[] | undefined): string[] =>
+    normalizeCityTopologyHintIds(
+      (ids ?? []).flatMap((id) => {
+        const mapped = topologyIdBySourceKey.get(id);
+        return mapped ? [mapped] : [];
+      }),
+    );
+
+  const remapLaneHints = (
+    laneHints: NonNullable<LineTopologyLoopLayout["laneHints"]>,
+  ): NonNullable<LineTopologyLoopLayout["laneHints"]> =>
+    laneHints.flatMap((laneHint) => {
+      const anchorStationIds = mapIds(laneHint.anchorStationIds);
+      const stationIds = mapIds(laneHint.stationIds);
+
+      return stationIds.length >= 3 &&
+        new Set(anchorStationIds).size >= 2
+        ? [{ ...laneHint, anchorStationIds, stationIds }]
+        : [];
+    });
+
+  const loops = layout.loops.flatMap((loop) => {
+    const anchorStationIds = mapIds(loop.anchorStationIds);
+    const stationIds = mapIds(loop.stationIds);
+    const orderedAnchorStationIds = loop.orderedAnchorStationIds
+      ? mapIds(loop.orderedAnchorStationIds)
+      : undefined;
+    const orderedStationIds = loop.orderedStationIds
+      ? mapIds(loop.orderedStationIds)
+      : undefined;
+    const laneHints = loop.laneHints
+      ? remapLaneHints(loop.laneHints)
+      : undefined;
+    const effectiveStationIds =
+      orderedStationIds && orderedStationIds.length > 0
+        ? orderedStationIds
+        : stationIds;
+    const effectiveAnchorStationIds =
+      orderedAnchorStationIds && orderedAnchorStationIds.length > 0
+        ? orderedAnchorStationIds
+        : anchorStationIds;
+
+    if (
+      effectiveStationIds.length < 3 ||
+      new Set(effectiveAnchorStationIds).size < 2
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        ...loop,
+        anchorStationIds,
+        stationIds,
+        orderedAnchorStationIds,
+        orderedStationIds,
+        laneHints: laneHints && laneHints.length > 0 ? laneHints : undefined,
+      },
+    ];
+  });
+
+  const terminalJunctions = layout.terminalJunctions?.flatMap((junction) => {
+      const junctionStationId = topologyIdBySourceKey.get(
+        junction.junctionStationId,
+      );
+
+      if (!junctionStationId) {
+        return [];
+      }
+
+      const arms = junction.arms.flatMap((arm) => {
+        const stationIds = mapIds(arm.stationIds);
+        const anchorStationId =
+          topologyIdBySourceKey.get(arm.anchorStationId) ?? stationIds.at(-1);
+
+        return anchorStationId &&
+          stationIds.length >= 2 &&
+          stationIds[0] === junctionStationId &&
+          new Set(stationIds).size >= 2 &&
+          anchorStationId !== junctionStationId
+          ? [{ ...arm, anchorStationId, stationIds }]
+          : [];
+      });
+
+      return arms.length >= 3
+        ? [{ ...junction, junctionStationId, arms }]
+        : [];
+    }) ?? [];
+
+  return {
+    loops,
+    terminalJunctions:
+      terminalJunctions.length > 0 ? terminalJunctions : undefined,
+  };
+}
+
+function dedupeAdjacentPatternKeys(keys: string[]): string[] {
+  return keys.filter((key, index) => index === 0 || key !== keys[index - 1]);
+}
+
+function normalizeCityTopologyHintIds(ids: string[]): string[] {
+  const normalized = dedupeAdjacentPatternKeys(ids);
+
+  if (
+    normalized.length > 1 &&
+    normalized[0] === normalized[normalized.length - 1]
+  ) {
+    normalized.pop();
+  }
+
+  return normalized;
+}
+
+function projectPatternTrafficAnalysis(
+  sourceAnalysis: PatternTrafficImpactAnalysis,
+  displayKeyBySourceKey: Map<string, string>,
+  displayEdges: PatternTrafficEdge[],
+): PatternTrafficImpactAnalysis {
+  const displayEdgeKeys = new Set(
+    displayEdges.map((edge) => createEdgeKey(edge.source, edge.target)),
+  );
+  const projectedSegments = sourceAnalysis.segments.flatMap((segment) => {
+    let stationKeys = Array.from(
+      new Set(
+        segment.stationKeys.flatMap((sourceKey) => {
+          const displayKey = displayKeyBySourceKey.get(sourceKey);
+          return displayKey ? [displayKey] : [];
+        }),
+      ),
+    );
+    const edgeKeys = Array.from(
+      new Set(
+        segment.edgeKeys.flatMap((sourceKey) => {
+          const displayKey = projectPatternTrafficEdgeKey(
+            sourceKey,
+            displayKeyBySourceKey,
+            displayEdgeKeys,
+          );
+          return displayKey ? [displayKey] : [];
+        }),
+      ),
+    );
+
+    if (
+      segment.kind === "interruption" &&
+      stationKeys.length === 0 &&
+      edgeKeys.length === 0
+    ) {
+      stationKeys = Array.from(
+        new Set(
+          segment.edgeKeys.flatMap((sourceKey) => {
+            const [source, target] = sourceKey.split("--");
+            const displaySource = source
+              ? displayKeyBySourceKey.get(source)
+              : undefined;
+            const displayTarget = target
+              ? displayKeyBySourceKey.get(target)
+              : undefined;
+
+            return displaySource && displaySource === displayTarget
+              ? [displaySource]
+              : [];
+          }),
+        ),
+      );
+    }
+
+    return stationKeys.length > 0 || edgeKeys.length > 0
+      ? [{ ...segment, stationKeys, edgeKeys }]
+      : [];
+  });
+
+  const interruptionStationKeys = new Set(
+    projectedSegments.flatMap((segment) =>
+      segment.kind === "interruption" ? segment.stationKeys : [],
+    ),
+  );
+  const interruptionEdgeKeys = new Set(
+    projectedSegments.flatMap((segment) =>
+      segment.kind === "interruption" ? segment.edgeKeys : [],
+    ),
+  );
+  const segments = projectedSegments.flatMap((segment) => {
+    if (segment.kind === "interruption") {
+      return [segment];
+    }
+
+    const stationKeys = segment.stationKeys.filter(
+      (stationKey) => !interruptionStationKeys.has(stationKey),
+    );
+    const edgeKeys = segment.edgeKeys.filter(
+      (edgeKey) => !interruptionEdgeKeys.has(edgeKey),
+    );
+
+    return stationKeys.length > 0 || edgeKeys.length > 0
+      ? [{ ...segment, stationKeys, edgeKeys }]
+      : [];
+  });
+
+  const stationImpacts: Record<string, PatternTrafficImpact> = {};
+  const edgeImpacts: Record<string, PatternTrafficImpact> = {};
+
+  Object.entries(sourceAnalysis.stationImpacts).forEach(
+    ([sourceKey, impact]) => {
+      const displayKey = displayKeyBySourceKey.get(sourceKey);
+      if (displayKey) {
+        stationImpacts[displayKey] = chooseProjectedTrafficImpact(
+          stationImpacts[displayKey],
+          impact,
+        );
+      }
+    },
+  );
+
+  Object.entries(sourceAnalysis.edgeImpacts).forEach(([sourceKey, impact]) => {
+    const displayKey = projectPatternTrafficEdgeKey(
+      sourceKey,
+      displayKeyBySourceKey,
+      displayEdgeKeys,
+    );
+    if (displayKey) {
+      edgeImpacts[displayKey] = chooseProjectedTrafficImpact(
+        edgeImpacts[displayKey],
+        impact,
+      );
+    }
+  });
+
+  segments.forEach((segment) => {
+    segment.stationKeys.forEach((stationKey) => {
+      stationImpacts[stationKey] = chooseProjectedTrafficImpact(
+        stationImpacts[stationKey],
+        segment,
+      );
+    });
+    segment.edgeKeys.forEach((edgeKey) => {
+      edgeImpacts[edgeKey] = chooseProjectedTrafficImpact(
+        edgeImpacts[edgeKey],
+        segment,
+      );
+    });
+  });
+
+  return { segments, stationImpacts, edgeImpacts };
+}
+
+function projectPatternTrafficEdgeKey(
+  sourceEdgeKey: string,
+  displayKeyBySourceKey: Map<string, string>,
+  displayEdgeKeys: Set<string>,
+): string | undefined {
+  const [source, target] = sourceEdgeKey.split("--");
+  const displaySource = source ? displayKeyBySourceKey.get(source) : undefined;
+  const displayTarget = target ? displayKeyBySourceKey.get(target) : undefined;
+
+  if (!displaySource || !displayTarget || displaySource === displayTarget) {
+    return undefined;
+  }
+
+  const displayEdgeKey = createEdgeKey(displaySource, displayTarget);
+  return displayEdgeKeys.has(displayEdgeKey) ? displayEdgeKey : undefined;
+}
+
+function chooseProjectedTrafficImpact(
+  existing: PatternTrafficImpact | undefined,
+  next: PatternTrafficImpact,
+): PatternTrafficImpact {
+  if (!existing || (next.kind === "interruption" && existing.kind !== "interruption")) {
+    return next;
+  }
+
+  return existing;
 }
 
 function createEmptyTrafficImpactAnalysis(): PatternTrafficImpactAnalysis {
@@ -3083,6 +3816,22 @@ function createTopologyLayout(
     }
   });
   addPathEdges(mainPath, visibleEdges);
+
+  // Resolve anchored corridors while the common spine is the only placed
+  // geometry. This keeps their lane selection local and prevents later fork
+  // placement from forcing a secondary corridor onto a distant lane.
+  while (
+    placeLoopCorridor(
+      loopLayoutHints,
+      positions,
+      placed,
+      visibleEdges,
+      layout,
+    )
+  ) {
+    // Keep placing all resolvable two-anchor corridors before other branches.
+  }
+
   placeTerminalJunctionFans({
     nodes,
     adjacency,
@@ -4648,33 +5397,16 @@ function placeLoopPath(
 ): void {
   const startKey = path[0];
   const endKey = path[path.length - 1];
-  let startPosition = positions.get(startKey);
-  let endPosition = positions.get(endKey);
+  const startPosition = positions.get(startKey);
+  const endPosition = positions.get(endKey);
 
   if (!startPosition || !endPosition) {
     return;
   }
 
-  const requiredSpan = getPathSpan(path, layout);
-  const actualSpan = Math.abs(endPosition.x - startPosition.x);
-
-  if (actualSpan < requiredSpan) {
-    const direction = endPosition.x >= startPosition.x ? 1 : -1;
-
-    expandConnectorSpan({
-      positions,
-      anchorKey: startKey,
-      endKey,
-      direction,
-      delta: requiredSpan - actualSpan,
-    });
-    startPosition = positions.get(startKey);
-    endPosition = positions.get(endKey);
-
-    if (!startPosition || !endPosition) {
-      return;
-    }
-  }
+  // The corridor is constrained by its already-placed anchors. Its natural
+  // span is used only to preserve local proportions inside that interval.
+  const naturalSpan = getPathSpan(path, layout);
 
   const lane = resolveLoopInterpolatedPathLane({
     hint,
@@ -4686,7 +5418,7 @@ function placeLoopPath(
     path,
     startPosition,
     endPosition,
-    requiredSpan,
+    naturalSpan,
     initialLane: lane.initialLane,
     baseY: lane.baseY,
     laneGap: lane.laneGap,
@@ -4697,7 +5429,7 @@ function placeLoopPath(
     path,
     startPosition,
     endPosition,
-    requiredSpan,
+    naturalSpan,
     y,
     positions,
     layout,
@@ -5049,33 +5781,16 @@ function placeConnectorPath(
 ): void {
   const startKey = path[0];
   const endKey = path[path.length - 1];
-  let startPosition = positions.get(startKey);
-  let endPosition = positions.get(endKey);
+  const startPosition = positions.get(startKey);
+  const endPosition = positions.get(endKey);
 
   if (!startPosition || !endPosition) {
     return;
   }
 
-  const requiredSpan = getPathSpan(path, layout);
-  const actualSpan = Math.abs(endPosition.x - startPosition.x);
-
-  if (actualSpan < requiredSpan) {
-    const direction = endPosition.x >= startPosition.x ? 1 : -1;
-
-    expandConnectorSpan({
-      positions,
-      anchorKey: startKey,
-      endKey,
-      direction,
-      delta: requiredSpan - actualSpan,
-    });
-    startPosition = positions.get(startKey);
-    endPosition = positions.get(endKey);
-
-    if (!startPosition || !endPosition) {
-      return;
-    }
-  }
+  // A connector with two placed endpoints must fit between those endpoints;
+  // it must never move the common spine to satisfy its natural length.
+  const naturalSpan = getPathSpan(path, layout);
 
   const baseY = Math.max(startPosition.y, endPosition.y, 0);
   const lane = Math.abs(laneSteps.next().value);
@@ -5083,7 +5798,7 @@ function placeConnectorPath(
     path,
     startPosition,
     endPosition,
-    requiredSpan,
+    naturalSpan,
     initialLane: lane,
     baseY,
     laneGap: layout.branchGap,
@@ -5094,7 +5809,7 @@ function placeConnectorPath(
     path,
     startPosition,
     endPosition,
-    requiredSpan,
+    naturalSpan,
     y,
     positions,
     layout,
@@ -5106,36 +5821,6 @@ function placeConnectorPath(
   path.slice(1, -1).forEach((key) => placed.add(key));
 
   addPathEdges(path, visibleEdges);
-}
-
-function expandConnectorSpan(params: {
-  positions: Map<string, { x: number; y: number }>;
-  anchorKey: string;
-  endKey: string;
-  direction: 1 | -1;
-  delta: number;
-}): void {
-  const anchorPosition = params.positions.get(params.anchorKey);
-
-  if (!anchorPosition || params.delta <= 0) {
-    return;
-  }
-
-  params.positions.forEach((position, key) => {
-    if (key === params.anchorKey) {
-      return;
-    }
-
-    const isOnExpandableSide =
-      key === params.endKey ||
-      (params.direction > 0
-        ? position.x > anchorPosition.x
-        : position.x < anchorPosition.x);
-
-    if (isOnExpandableSide) {
-      position.x += params.direction * params.delta;
-    }
-  });
 }
 
 function placeBranchPath(
@@ -5249,7 +5934,7 @@ function findClearInterpolatedPathY(params: {
   path: string[];
   startPosition: PatternLayoutPosition;
   endPosition: PatternLayoutPosition;
-  requiredSpan: number;
+  naturalSpan: number;
   initialLane: number;
   baseY: number;
   laneGap: number;
@@ -5269,13 +5954,16 @@ function findClearInterpolatedPathY(params: {
       path: params.path,
       startPosition: params.startPosition,
       endPosition: params.endPosition,
-      requiredSpan: params.requiredSpan,
+      naturalSpan: params.naturalSpan,
       y,
       positions: params.positions,
       layout: params.layout,
     });
 
-    if (!hasLayoutPlacementCollision(proposals, params.positions)) {
+    // A compressed anchored corridor may have adjacent stops closer than the
+    // global separation threshold. Only collisions with already-placed
+    // geometry should force it onto another lane.
+    if (!hasExistingLayoutPlacementCollision(proposals, params.positions)) {
       return y;
     }
 
@@ -5365,7 +6053,7 @@ function createInterpolatedPathPlacementProposals(params: {
   path: string[];
   startPosition: PatternLayoutPosition;
   endPosition: PatternLayoutPosition;
-  requiredSpan: number;
+  naturalSpan: number;
   y: number;
   positions: Map<string, PatternLayoutPosition>;
   layout: PatternLayoutOptions;
@@ -5383,8 +6071,8 @@ function createInterpolatedPathPlacementProposals(params: {
       params.layout,
     );
     const ratio =
-      params.requiredSpan > 0
-        ? realisticOffset / params.requiredSpan
+      params.naturalSpan > 0
+        ? realisticOffset / params.naturalSpan
         : (index + 1) / denominator;
 
     return [
@@ -5406,22 +6094,11 @@ function hasLayoutPlacementCollision(
   positions: Map<string, PatternLayoutPosition>,
   ignoredExistingKeys = new Set<string>(),
 ): boolean {
-  const minimumDistance = MIN_STATION_LAYOUT_SEPARATION;
-
   if (proposals.length === 0) {
     return false;
   }
 
-  if (
-    proposals.some(({ key, position }) =>
-      Array.from(positions.entries()).some(
-        ([existingKey, existingPosition]) =>
-          !ignoredExistingKeys.has(existingKey) &&
-          existingKey !== key &&
-          getLayoutDistance(position, existingPosition) < minimumDistance,
-      ),
-    )
-  ) {
+  if (hasExistingLayoutPlacementCollision(proposals, positions, ignoredExistingKeys)) {
     return true;
   }
 
@@ -5432,8 +6109,24 @@ function hasLayoutPlacementCollision(
         (otherProposal) =>
           proposal.key !== otherProposal.key &&
           getLayoutDistance(proposal.position, otherProposal.position) <
-            minimumDistance,
+            MIN_STATION_LAYOUT_SEPARATION,
       ),
+  );
+}
+
+function hasExistingLayoutPlacementCollision(
+  proposals: PatternPlacementProposal[],
+  positions: Map<string, PatternLayoutPosition>,
+  ignoredExistingKeys = new Set<string>(),
+): boolean {
+  return proposals.some(({ key, position }) =>
+    Array.from(positions.entries()).some(
+      ([existingKey, existingPosition]) =>
+        !ignoredExistingKeys.has(existingKey) &&
+        existingKey !== key &&
+        getLayoutDistance(position, existingPosition) <
+          MIN_STATION_LAYOUT_SEPARATION,
+    ),
   );
 }
 
@@ -6576,8 +7269,10 @@ onBeforeUnmount(() => {
                     class="pattern-flow-shell"
                     :class="{
                       'pattern-flow-shell--comfort': isComfortPatternFlow,
-                      'pattern-flow-shell--compact': isCompactPatternFlow,
+                      'pattern-flow-shell--compact':
+                        isCompactPatternFlow || isCitiesPatternFlow,
                       'pattern-flow-shell--realistic': isRealisticPatternFlow,
+                      'pattern-flow-shell--cities': isCitiesPatternFlow,
                       'pattern-flow-shell--reduce-motion': reduceMotion,
                     }"
                   >
@@ -6901,6 +7596,10 @@ onBeforeUnmount(() => {
                           :data-station-key="data.key"
                           :data-station-label="data.label"
                           :data-station-city="data.city ?? ''"
+                          :data-city-node="data.cityNode ? 'true' : 'false'"
+                          :data-mixed-served="
+                            data.mixedServed ? 'true' : 'false'
+                          "
                           :data-layout-x="data.layoutX"
                           :data-layout-y="data.layoutY"
                           :data-node-x="data.nodeX"
@@ -6911,6 +7610,8 @@ onBeforeUnmount(() => {
                             'pattern-flow-station--current': data.current,
                             'pattern-flow-station--skipped': !data.served,
                             'pattern-flow-station--terminal': data.branchEnd,
+                            'pattern-flow-station--city': data.cityNode,
+                            'pattern-flow-station--mixed': data.mixedServed,
                             'pattern-flow-station--tooltip-open':
                               activeStationTooltipKey === data.key,
                             'pattern-flow-station--traffic-interruption':
@@ -6921,7 +7622,11 @@ onBeforeUnmount(() => {
                               trafficPulseStationKeys.has(data.key),
                           }"
                           :title="
-                            data.served ? undefined : t('pattern.skippedTitle')
+                            data.mixedServed
+                              ? t('pattern.cityPartiallyServedTitle')
+                              : data.served
+                                ? undefined
+                                : t('pattern.skippedTitle')
                           "
                           @focusin="showStationTooltip(data.key)"
                           @focusout="scheduleHideStationTooltip(data.key)"
@@ -6979,7 +7684,7 @@ onBeforeUnmount(() => {
                             >
                               <StationTransferDetails
                                 :station-label="data.label"
-                                :city="data.city"
+                                :city="data.cityNode ? undefined : data.city"
                                 :transfers="data.transfers"
                                 :rich-details="richTransferTooltips"
                                 :line-color="board?.line.color ?? '#0064ff'"

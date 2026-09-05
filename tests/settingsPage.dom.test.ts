@@ -1,4 +1,4 @@
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
 import { transitBoards } from "../src/config/transitBoards";
@@ -7,6 +7,37 @@ import {
   createTransitPlace,
   saveTransitPresetState,
 } from "../src/storage/transitPreferences";
+import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../src/features/transport-map/config/globalTransportPlanConfig";
+import type { GlobalMapManifest } from "../src/features/transport-map/contracts/manifest";
+
+const globalMapManifestFixture = {
+  dataVersion: "test-v1",
+  generatedAt: "2026-08-02T23:34:00.000Z",
+  counts: {
+    lines: 3,
+    stations: 12,
+    paths: 5,
+    vertices: 10,
+    chunks: 2,
+    entrances: 0,
+    bikes: 0,
+  },
+  files: {
+    bootstrap: { bytes: 1024 },
+    catalog: { bytes: 2048 },
+    regional: { bytes: 4096 },
+    regionalBus: { bytes: 512 },
+    linePalette: { bytes: 256 },
+    chunks: [{ bytes: 8192 }],
+  },
+  palette: { missingCount: 1 },
+  warnings: [
+    { code: "gtfs-topology-edge-missing", count: 1 },
+    { code: "gtfs-station-coordinate-corrected", count: 2 },
+    { code: "fallback-geometry", count: 3 },
+    { code: "line-color-palette-missing", count: 1 },
+  ],
+} as unknown as GlobalMapManifest;
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -21,6 +52,37 @@ afterEach(() => {
 describe("SettingsPage", () => {
   it("renders the global feature flag controls with default values", async () => {
     mockMobileReleaseCard();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("/api/ridership/status")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              available: true,
+              version: "2024-local-fixture",
+              actualYears: [2024],
+              source: { kind: "directory", location: "local-fixture" },
+              counts: {
+                lines: 2011,
+                stations: 31778,
+                lineMeasures: 40,
+                stationMeasures: 655,
+                availableLines: 40,
+                availableStations: 655,
+              },
+            }),
+          };
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          json: async () => globalMapManifestFixture,
+        };
+      }),
+    );
     vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
       const actual =
         await importActual<
@@ -67,17 +129,60 @@ describe("SettingsPage", () => {
     for (const trigger of wrapper.findAll(".settings-panel__trigger")) {
       await trigger.trigger("click");
     }
+    await flushPromises();
 
     expect(wrapper.text()).toContain("Personnalisation du dashboard");
+    expect(wrapper.find("[data-traffic-cache-settings]").exists()).toBe(true);
+    expect(wrapper.find("[data-traffic-cache-refresh]").exists()).toBe(true);
     expect(wrapper.text()).toContain("Expiration des bundles");
     expect(wrapper.text()).toContain("Activer le cache backend");
     expect(wrapper.text()).toContain("15 jours");
     expect(wrapper.text()).toContain("Chargement des correspondances");
+    expect(wrapper.text()).toContain("Mode de correspondance");
     expect(wrapper.text()).toContain("Auto");
+    const transferResolverControl = wrapper.get(
+      "[data-settings-transfer-resolver]",
+    );
+    expect(transferResolverControl.text()).toContain("Automatique");
+    await transferResolverControl.get("[role='combobox']").trigger("click");
+    const nearbyResolverOption = transferResolverControl
+      .findAll("[role='option']")
+      .find((option) => option.text().includes("Stations proches"));
+    if (!nearbyResolverOption) {
+      throw new Error("Missing nearby transfer resolver option");
+    }
+    await nearbyResolverOption.trigger("mousedown");
+    expect(transferResolverControl.text()).toContain("Stations proches");
     expect(wrapper.text()).toContain("Concurrence des bundles");
     expect(wrapper.text()).toContain("1 appel a la fois");
     expect(wrapper.text()).toContain("Espacement des appels bundles");
     expect(wrapper.text()).toContain("Aucun delai");
+    expect(wrapper.find("[data-global-map-pack-overview]").exists()).toBe(true);
+    expect(wrapper.text()).toContain("Qualité des tuiles");
+    expect(wrapper.text()).toContain("Vue régionale");
+    expect(wrapper.text()).toContain("Vue détaillée");
+    expect(wrapper.text()).toContain("128 tuiles");
+    expect(wrapper.text()).toContain("Taille recensée");
+    expect(wrapper.text()).toContain("Réseau et stations");
+    expect(wrapper.text()).toContain("Incomplète");
+    expect(wrapper.text()).toContain("Marge de sortie avant un itinéraire");
+    const travelAlarmSafetyInput = wrapper.get(
+      'input[aria-label="Marge de sortie avant un itinéraire"]',
+    );
+    expect((travelAlarmSafetyInput.element as HTMLInputElement).value).toBe("2");
+    await travelAlarmSafetyInput.setValue("7");
+    expect((travelAlarmSafetyInput.element as HTMLInputElement).value).toBe("7");
+    expect(
+      wrapper.findAll("[data-global-map-quality-cards] .settings-data-quality-card"),
+    ).toHaveLength(6);
+    expect(wrapper.find('[data-quality-card-id="ridership"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("Cache local");
+    expect(wrapper.text()).toContain("2024-local-fixture");
+    expect(wrapper.find("[data-global-map-pack-summary]").exists()).toBe(true);
+    expect(wrapper.find("[data-global-map-pack-files]").exists()).toBe(true);
+    expect(wrapper.find("[data-global-map-pack-warnings]").exists()).toBe(true);
+    expect(wrapper.find("[data-global-map-pack-manifest]").exists()).toBe(true);
+    expect(wrapper.find("[data-global-map-pack-config]").exists()).toBe(true);
     expect(wrapper.text()).toContain("Bundles de correspondances");
     expect(wrapper.text()).toContain("Voir les bundles");
     expect(wrapper.text()).toContain("Vider les bundles");
@@ -87,7 +192,83 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Lieu a configurer");
     expect(wrapper.text()).toContain("Maison");
     expect(wrapper.text()).toContain("Affichage des stations");
+    const mapContrastSlider = wrapper.get("[data-settings-map-contrast]");
+    expect(mapContrastSlider.attributes("min")).toBe(
+      String(GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.min),
+    );
+    expect(mapContrastSlider.attributes("max")).toBe(
+      String(GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.max),
+    );
+    expect((mapContrastSlider.element as HTMLInputElement).value).toBe(
+      String(GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.default),
+    );
+    await mapContrastSlider.setValue("1.12");
+    expect((mapContrastSlider.element as HTMLInputElement).value).toBe("1.12");
+    expect(wrapper.text()).toContain("112%");
+    const mapStyleControl = wrapper.get("[data-settings-map-basemap-style]");
+    expect(mapStyleControl.text()).toContain("fond plus sobre");
+    await mapStyleControl.get("[role='combobox']").trigger("click");
+    const voyagerStyleOption = mapStyleControl
+      .findAll("[role='option']")
+      .find((option) => option.text().includes("espaces verts renforcés"));
+    if (!voyagerStyleOption) {
+      throw new Error("Missing Voyager basemap style option");
+    }
+    await voyagerStyleOption.trigger("mousedown");
+    expect(mapStyleControl.text()).toContain("espaces verts renforcés");
+
+    const mapAntialiasingToggle = wrapper.get(
+      "[data-settings-map-antialiasing] input",
+    );
+    expect(mapAntialiasingToggle.attributes("role")).toBe("switch");
+    expect(mapAntialiasingToggle.attributes("aria-checked")).toBe("true");
+    expect((mapAntialiasingToggle.element as HTMLInputElement).checked).toBe(true);
+    await mapAntialiasingToggle.setValue(false);
+    expect(mapAntialiasingToggle.attributes("aria-checked")).toBe("false");
+    expect((mapAntialiasingToggle.element as HTMLInputElement).checked).toBe(false);
+
+    const nearbyMapControlToggles = wrapper.findAll(
+      "[data-settings-nearby-control] input",
+    );
+    expect(nearbyMapControlToggles).toHaveLength(5);
+    expect(
+      nearbyMapControlToggles.every(
+        (toggle) => (toggle.element as HTMLInputElement).checked,
+      ),
+    ).toBe(true);
+    for (const toggle of nearbyMapControlToggles) {
+      await toggle.setValue(false);
+      expect((toggle.element as HTMLInputElement).checked).toBe(false);
+    }
+
+    const userLocationToggle = wrapper.get(
+      "[data-settings-user-location] input",
+    );
+    expect((userLocationToggle.element as HTMLInputElement).checked).toBe(true);
+    await userLocationToggle.setValue(false);
+    expect((userLocationToggle.element as HTMLInputElement).checked).toBe(false);
     expect(wrapper.text()).toContain("Visible directement");
+    expect(wrapper.text()).toContain("Afficher le bouton Plan");
+    const planNavigationToggle = wrapper
+      .findAll("label.settings-toggle")
+      .find((label) => label.text().includes("Afficher le bouton Plan"));
+    if (!planNavigationToggle) {
+      throw new Error("Missing Plan navigation setting");
+    }
+    const planNavigationInput = planNavigationToggle.find("input");
+    expect((planNavigationInput.element as HTMLInputElement).checked).toBe(true);
+    await planNavigationInput.setValue(false);
+    expect((planNavigationInput.element as HTMLInputElement).checked).toBe(false);
+
+    const travelRouteLineIconsToggle = wrapper.get(
+      "[data-settings-travel-route-line-icons] input",
+    );
+    expect(travelRouteLineIconsToggle.attributes("role")).toBe("switch");
+    expect(travelRouteLineIconsToggle.attributes("aria-checked")).toBe("true");
+    expect((travelRouteLineIconsToggle.element as HTMLInputElement).checked).toBe(true);
+    await travelRouteLineIconsToggle.setValue(false);
+    expect(travelRouteLineIconsToggle.attributes("aria-checked")).toBe("false");
+    expect((travelRouteLineIconsToggle.element as HTMLInputElement).checked).toBe(false);
 
     await wrapper
       .get('[aria-label="Emplacement des boutons de stations"]')
@@ -284,6 +465,87 @@ describe("SettingsPage", () => {
     expect(backendCacheToggle?.text()).toContain(
       "Le chargement des correspondances sera tres lent tant que le cache backend est desactive.",
     );
+  }, 10_000);
+
+  it("identifies Cloudflare R2 when the ridership cache is remote", async () => {
+    mockMobileReleaseCard();
+    vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
+      const actual =
+        await importActual<
+          typeof import("../src/features/app-settings/appSettings")
+        >();
+      const { computed, ref } = await import("vue");
+      const settings = ref(actual.normalizeAppSettings({
+        ...actual.createDefaultAppSettings(),
+        language: "fr",
+      }));
+
+      return {
+        ...actual,
+        useAppSettings: () => ({
+          settings,
+          effectiveMaxDeparturesPerDirection: computed(() =>
+            actual.getEffectiveMaxDeparturesPerDirection(settings.value),
+          ),
+          updateSettings: (patch: Partial<typeof settings.value>) => {
+            settings.value = actual.normalizeAppSettings({
+              ...settings.value,
+              ...patch,
+            });
+          },
+          resetSettings: () => {
+            settings.value = actual.normalizeAppSettings({
+              ...actual.createDefaultAppSettings(),
+              language: "fr",
+            });
+          },
+        }),
+      };
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("/api/ridership/status")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              available: true,
+              version: "2024-r2-fixture",
+              actualYears: [2024],
+              source: { kind: "r2", location: "r2://shared-bucket/ridership" },
+              counts: {
+                lines: 2011,
+                stations: 31778,
+                lineMeasures: 40,
+                stationMeasures: 655,
+                availableLines: 40,
+                availableStations: 655,
+              },
+            }),
+          };
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          json: async () => globalMapManifestFixture,
+        };
+      }),
+    );
+
+    const { default: SettingsPage } = await import(
+      "../src/features/app-settings/SettingsPage.vue"
+    );
+    const wrapper = mount(SettingsPage);
+    for (const trigger of wrapper.findAll(".settings-panel__trigger")) {
+      await trigger.trigger("click");
+    }
+    await flushPromises();
+
+    const ridershipCard = wrapper.find('[data-quality-card-id="ridership"]');
+    expect(ridershipCard.text()).toContain("Cloudflare R2");
+    expect(ridershipCard.text()).toContain("2024-r2-fixture");
   });
 
   it("switches the settings UI language from French to English", async () => {
@@ -352,6 +614,16 @@ describe("SettingsPage", () => {
   it("shows a temporary notification after clearing bundles or resetting settings", async () => {
     vi.useFakeTimers();
     mockMobileReleaseCard();
+    const clearWalkingCache = vi.fn();
+    vi.doMock("../src/services/nearbyWalkingRoutes", async (importActual) => {
+      const actual = await importActual<
+        typeof import("../src/services/nearbyWalkingRoutes")
+      >();
+      return {
+        ...actual,
+        clearNearbyWalkingRouteCache: clearWalkingCache,
+      };
+    });
     vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
       const actual =
         await importActual<
@@ -411,6 +683,11 @@ describe("SettingsPage", () => {
     await clearBundlesButton?.trigger("click");
     expect(document.body.textContent).toContain("Bundles supprimes");
 
+    const clearWalkingCacheButton = wrapper.get("[data-settings-walking-cache-clear]");
+    await clearWalkingCacheButton.trigger("click");
+    expect(clearWalkingCache).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).toContain("Cache des trajets piétons vidé");
+
     await vi.advanceTimersByTimeAsync(5_000);
     expect(document.body.textContent).not.toContain("Bundles supprimes");
 
@@ -420,6 +697,7 @@ describe("SettingsPage", () => {
 
     expect(resetButton).toBeTruthy();
     await resetButton?.trigger("click");
+    expect(clearWalkingCache).toHaveBeenCalledTimes(2);
     expect(document.body.textContent).toContain("Parametres reinitialises");
   });
 

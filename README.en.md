@@ -11,6 +11,8 @@ The i18n workflow is documented in [docs/i18n.md](docs/i18n.md).
 
 Secure GTFS line geometry and import are documented in [docs/gtfs-line-geometry.md](docs/gtfs-line-geometry.md).
 
+The global map's walking radar, IDFM/ORS Docker generator and targeted Nuxt API (local archive or R2) are documented in [docs/global-map-isochrones.md](docs/global-map-isochrones.md#english-summary).
+
 ## Run the Project
 
 ```powershell
@@ -20,7 +22,18 @@ npm.cmd run dev
 
 Then open `http://localhost:3000` or the URL printed by Nuxt.
 
+The global transport map is available at `/map` (the MapLibre + Deck.gl/WebGL2
+experience). The previous Canvas2D/raster experience remains available at
+`/map/legacy`; `/map/next` redirects to the canonical `/map` URL.
+
 The PRIM key is read from `.env.local` through `IDFM_API_KEY`. Calls to `"/api/idfm"` go through the Nitro route `server/api/idfm/[...path].ts`, so the browser never receives the key.
+
+The neighbourhood verdict is calculated by Nitro from the JSON compiled by
+`idfm-node-backend`; no second server is required. Generate or validate the
+data with `npm.cmd run neighborhood-verdict:compile` and
+`npm.cmd run neighborhood-verdict:validate`. The default path is
+`../idfm-node-backend/.data/neighborhood-verdict/compiled.json`; override it
+with `NUXT_NEIGHBORHOOD_VERDICT_DATA_PATH` in `.env.local` when needed.
 
 ## Internationalization
 

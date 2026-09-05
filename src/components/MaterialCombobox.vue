@@ -35,18 +35,10 @@ const { t } = useI18n();
 const selectedOption = computed(() =>
   props.options.find((option) => option.id === props.modelValue),
 );
-const resolvedPlaceholder = computed(
-  () => props.placeholder || t("common.actions.select"),
-);
-const resolvedAriaLabel = computed(
-  () => props.ariaLabel || t("common.actions.selectOption"),
-);
-const displayLabel = computed(
-  () => selectedOption.value?.label ?? resolvedPlaceholder.value,
-);
-const enabledOptions = computed(() =>
-  props.options.filter((option) => !option.disabled),
-);
+const resolvedPlaceholder = computed(() => props.placeholder || t("common.actions.select"));
+const resolvedAriaLabel = computed(() => props.ariaLabel || t("common.actions.selectOption"));
+const displayLabel = computed(() => selectedOption.value?.label ?? resolvedPlaceholder.value);
+const enabledOptions = computed(() => props.options.filter((option) => !option.disabled));
 
 watch(
   () => props.modelValue,
@@ -88,9 +80,7 @@ function toggleOpen(): void {
 function focusSelectedOption(): void {
   activeIndex.value = Math.max(
     0,
-    props.options.findIndex(
-      (option) => !option.disabled && option.id === props.modelValue,
-    ),
+    props.options.findIndex((option) => !option.disabled && option.id === props.modelValue),
   );
 }
 
@@ -183,7 +173,9 @@ function handleKeydown(event: KeyboardEvent): void {
         class="material-combobox__value"
         :class="{ 'material-combobox__value--placeholder': !selectedOption }"
       >
-        {{ displayLabel }}
+        <slot name="value" :option="selectedOption" :selected="Boolean(selectedOption)">
+          {{ displayLabel }}
+        </slot>
       </span>
       <span class="material-combobox__chevron" aria-hidden="true"></span>
     </button>
@@ -202,7 +194,15 @@ function handleKeydown(event: KeyboardEvent): void {
           @mouseenter="activeIndex = index"
           @mousedown.prevent="selectOption(option)"
         >
-          {{ option.label }}
+          <slot
+            name="option"
+            :option="option"
+            :selected="option.id === modelValue"
+            :active="index === activeIndex"
+            :index="index"
+          >
+            {{ option.label }}
+          </slot>
         </button>
       </div>
     </Transition>

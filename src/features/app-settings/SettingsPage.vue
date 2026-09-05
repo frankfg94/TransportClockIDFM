@@ -1,12 +1,29 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { ChevronDown, Pencil, Plus, Trash2 } from "lucide-vue-next";
+import { computed, onBeforeUnmount, onMounted, ref, type Component, watch } from "vue";
+import {
+  BarChart3,
+  BookOpen,
+  CheckCircle2,
+  ChevronDown,
+  CircleAlert,
+  Database,
+  Layers,
+  Palette,
+  Pencil,
+  Plus,
+  Route,
+  Trash2,
+  Wifi,
+} from "lucide-vue-next";
 import AppModal from "../../components/AppModal.vue";
 import AppNotification, { type AppNotificationTone } from "../../components/AppNotification.vue";
 import MaterialCombobox, {
   type MaterialComboboxOption,
 } from "../../components/MaterialCombobox.vue";
 import PlaceNameModal from "../../components/PlaceNameModal.vue";
+import AdressBook from "../address-book/AdressBook.vue";
+import type { AddressBookEntry } from "../address-book/addressBook";
+import { useRouter } from "nuxt/app";
 import PluginViewer from "./PluginViewer.vue";
 import GtfsSettingsPanel from "./GtfsSettingsPanel.vue";
 import { transitBoards } from "../../config/transitBoards";
@@ -19,11 +36,14 @@ import {
   maxDeparturesPerDirectionOptions,
   navigationAutoHideOptions,
   placePresetNavigationModeOptions,
+  parseGlobalMapBasemapContrast,
+  parseGlobalMapBasemapStyle,
   parseMaxDeparturesPerDirection,
   parsePatternCompactBranchGap,
   parsePatternCompactForkGap,
   parsePatternRealisticMaxGapCoefficient,
   parsePatternRealisticMinGapCoefficient,
+  parseTravelAlarmSafetyMinutes,
   parseTrafficWarningLookaheadDays,
   parseTransferBundleRetentionDays,
   parseTransferBundleRequestConcurrency,
@@ -37,6 +57,7 @@ import {
   PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MIN,
   PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MAX,
   PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MIN,
+  TRAVEL_ALARM_SAFETY_MINUTES_MAX,
   TRAFFIC_WARNING_LOOKAHEAD_DAYS_MAX,
   TRAFFIC_WARNING_LOOKAHEAD_DAYS_MIN,
   transferBundleRequestConcurrencyOptions,
@@ -45,6 +66,7 @@ import {
   trafficInfoDefaultScopeOptions,
   trafficCalendarImpactScopeOptions,
   trafficInfoDesignOptions,
+  transferResolverModeOptions,
   useAppSettings,
   wakeLockDurationOptions,
   weatherLookaheadOptions,
@@ -61,6 +83,7 @@ import {
   type TrafficInfoDesign,
   type TransferBundleRequestConcurrency,
   type TransferBundleRequestSpacingMs,
+  type TransferResolverMode,
   type WakeLockDuration,
   type WeatherMode,
   type WeatherTestMode,
@@ -97,9 +120,17 @@ import {
   calculateTrafficImpactTemporalMultiplier,
   TRAFFIC_IMPACT_SEVERITY_MODEL,
 } from "../traffic/trafficImpactSeverity";
+import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../transport-map/config/globalTransportPlanConfig";
+import type { GlobalMapManifest } from "../transport-map/contracts/manifest";
+import { fetchAnnualRidershipStatus } from "../../services/ridership";
+import { toServerApiUrl } from "../../services/serverApi";
+import type { TrafficCacheMetadata } from "../traffic/types";
+import type { AnnualRidershipStatusResponse } from "../../types/ridership";
+import { clearNearbyWalkingRouteCache } from "../../services/nearbyWalkingRoutes";
 
 const { settings, updateSettings, resetSettings } = useAppSettings();
-const { d, n, t } = useI18n();
+const { d, locale, n, t } = useI18n();
+const router = useRouter();
 const presetState = ref<TransitPresetState>(createDefaultTransitPresetState(transitBoards));
 const bundlesModalOpen = ref(false);
 const presetsModalOpen = ref(false);
@@ -108,6 +139,7 @@ const placeNameMode = ref<"create" | "rename">("create");
 const placeNameInitialValue = ref("");
 const placeNameTargetId = ref("");
 const placeNameError = ref("");
+const addressBookModalOpen = ref(false);
 const selectedDisplayPlaceId = ref(DEFAULT_TRANSIT_PLACE_ID);
 const bundleSummaries = ref<TransferBundleSummary[]>([]);
 const localBundleSummaries = ref<TransferBundleSummary[]>([]);
@@ -116,6 +148,253 @@ const settingsNotification = ref<{
   tone: AppNotificationTone;
 }>({ message: "", tone: "info" });
 const openPanelIds = ref(new Set<string>());
+const globalMapManifest = ref<GlobalMapManifest>();
+const globalMapManifestLoading = ref(false);
+const globalMapManifestError = ref("");
+interface TrafficCacheStatusResponse {
+  configured: boolean;
+  generatedAt: string;
+  source: string;
+  cache: TrafficCacheMetadata;
+}
+const trafficCacheStatus = ref<TrafficCacheStatusResponse>();
+const trafficCacheNow = ref(Date.now());
+const trafficCacheLoading = ref(false);
+const trafficCacheError = ref("");
+const annualRidershipStatus = ref<AnnualRidershipStatusResponse>();
+const annualRidershipStatusLoading = ref(false);
+const annualRidershipStatusError = ref("");
+let trafficCacheStatusTimer: ReturnType<typeof setInterval> | undefined;
+let trafficCacheClockTimer: ReturnType<typeof setInterval> | undefined;
+
+type GlobalMapQualityLevel = "good" | "attention" | "limited" | "online";
+
+interface GlobalMapQualityCard {
+  id: string;
+  icon: Component;
+  level: GlobalMapQualityLevel;
+  levelLabel: string;
+  title: string;
+  description: string;
+  detail: string;
+}
+
+const globalMapConfigJson = computed(() => JSON.stringify(GLOBAL_TRANSPORT_PLAN_CONFIG, null, 2));
+const globalMapPackSummaryJson = computed(() => {
+  const manifest = globalMapManifest.value;
+  if (!manifest) return "";
+
+  return JSON.stringify({
+    schemaVersion: manifest.schemaVersion,
+    minReaderVersion: manifest.minReaderVersion,
+    dataVersion: manifest.dataVersion,
+    generatedAt: manifest.generatedAt,
+    sourceVersions: manifest.sourceVersions,
+    projection: manifest.projection,
+    bounds: manifest.bounds,
+    lod: manifest.lod,
+    modes: manifest.modes,
+    counts: manifest.counts,
+    compilation: manifest.compilation,
+  }, null, 2);
+});
+const globalMapPackFilesJson = computed(() => {
+  const manifest = globalMapManifest.value;
+  return manifest?.files ? JSON.stringify(manifest.files, null, 2) : "";
+});
+const globalMapPackWarningsJson = computed(() => {
+  const manifest = globalMapManifest.value;
+  if (!manifest?.warnings) return "";
+
+  return JSON.stringify({
+    palette: manifest.palette ?? null,
+    warnings: manifest.warnings,
+  }, null, 2);
+});
+const globalMapManifestJson = computed(() => globalMapManifest.value ? JSON.stringify(globalMapManifest.value, null, 2) : "");
+const globalMapTotalPackBytes = computed(() => {
+  const manifest = globalMapManifest.value;
+  if (!manifest?.files) return 0;
+
+  const namedFiles = [
+    manifest.files.bootstrap,
+    manifest.files.catalog,
+    manifest.files.regional,
+    manifest.files.regionalBus,
+    manifest.files.linePalette,
+  ];
+
+  return namedFiles.reduce((total, file) => total + (file?.bytes ?? 0), 0)
+    + manifest.files.chunks.reduce((total, chunk) => total + (chunk.bytes ?? 0), 0);
+});
+const globalMapQualityCards = computed<GlobalMapQualityCard[]>(() => {
+  const manifest = globalMapManifest.value;
+  if (!manifest?.counts || !manifest.files || !manifest.warnings) return [];
+
+  const warningCount = (code: string): number =>
+    manifest.warnings.find((warning) => warning.code === code)?.count ?? 0;
+  const topologyWarningCount = warningCount("gtfs-topology-edge-missing");
+  const coordinateCorrectionCount = warningCount("gtfs-station-coordinate-corrected");
+  const fallbackGeometryCount = warningCount("fallback-geometry");
+  const paletteMissingCount = manifest.palette?.missingCount
+    ?? warningCount("line-color-palette-missing");
+  const hasPackTiles = manifest.files.chunks.length > 0 && globalMapTotalPackBytes.value > 0;
+
+  return [
+    {
+      id: "network",
+      icon: Database,
+      level: topologyWarningCount > 0 ? "attention" : "good",
+      levelLabel: t(
+        topologyWarningCount > 0
+          ? "settings.globalMapData.qualityLevels.attention"
+          : "settings.globalMapData.qualityLevels.good",
+      ),
+      title: t("settings.globalMapData.quality.network.title"),
+      description: t("settings.globalMapData.quality.network.description"),
+      detail: t("settings.globalMapData.quality.network.detail", {
+        lines: n(manifest.counts.lines),
+        stations: n(manifest.counts.stations),
+        alerts: n(topologyWarningCount + coordinateCorrectionCount),
+      }),
+    },
+    {
+      id: "geometry",
+      icon: Route,
+      level: fallbackGeometryCount > 0 ? "attention" : "good",
+      levelLabel: t(
+        fallbackGeometryCount > 0
+          ? "settings.globalMapData.qualityLevels.attention"
+          : "settings.globalMapData.qualityLevels.good",
+      ),
+      title: t("settings.globalMapData.quality.geometry.title"),
+      description: t("settings.globalMapData.quality.geometry.description"),
+      detail: t("settings.globalMapData.quality.geometry.detail", {
+        fallback: n(fallbackGeometryCount),
+        paths: n(manifest.counts.paths),
+      }),
+    },
+    {
+      id: "palette",
+      icon: Palette,
+      level: paletteMissingCount > 0 ? "limited" : "good",
+      levelLabel: t(
+        paletteMissingCount > 0
+          ? "settings.globalMapData.qualityLevels.limited"
+          : "settings.globalMapData.qualityLevels.good",
+      ),
+      title: t("settings.globalMapData.quality.palette.title"),
+      description: t("settings.globalMapData.quality.palette.description"),
+      detail: t("settings.globalMapData.quality.palette.detail", {
+        missing: n(paletteMissingCount),
+      }),
+    },
+    {
+      id: "tiles",
+      icon: Layers,
+      level: hasPackTiles ? "good" : "limited",
+      levelLabel: t(
+        hasPackTiles
+          ? "settings.globalMapData.qualityLevels.good"
+          : "settings.globalMapData.qualityLevels.limited",
+      ),
+      title: t("settings.globalMapData.quality.tiles.title"),
+      description: t("settings.globalMapData.quality.tiles.description"),
+      detail: t("settings.globalMapData.quality.tiles.detail", {
+        chunks: n(manifest.files.chunks.length),
+        size: formatGlobalMapBytes(globalMapTotalPackBytes.value),
+      }),
+    },
+    {
+      id: "basemap",
+      icon: Wifi,
+      level: "online",
+      levelLabel: t("settings.globalMapData.qualityLevels.online"),
+      title: t("settings.globalMapData.quality.basemap.title"),
+      description: t("settings.globalMapData.quality.basemap.description"),
+      detail: t("settings.globalMapData.quality.basemap.detail", {
+        standard: n(GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.maxTiles),
+        highZoom: n(GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.highZoomMaxTiles),
+      }),
+    },
+  ];
+});
+type AnnualRidershipSourceKind = NonNullable<AnnualRidershipStatusResponse["source"]>["kind"];
+
+function formatAnnualRidershipSource(kind: AnnualRidershipSourceKind | undefined): string {
+  switch (kind) {
+    case "directory":
+      return t("settings.annualRidership.quality.sources.local");
+    case "r2":
+      return t("settings.annualRidership.quality.sources.r2");
+    case "remote":
+      return t("settings.annualRidership.quality.sources.remote");
+    case "auto":
+      return t("settings.annualRidership.quality.sources.auto");
+    default:
+      return t("settings.annualRidership.quality.sources.unknown");
+  }
+}
+
+const annualRidershipQualityCard = computed<GlobalMapQualityCard>(() => {
+  const status = annualRidershipStatus.value;
+
+  if (annualRidershipStatusLoading.value || !status) {
+    return {
+      id: "ridership",
+      icon: BarChart3,
+      level: "attention",
+      levelLabel: t("settings.annualRidership.qualityLevels.checking"),
+      title: t("settings.annualRidership.quality.title"),
+      description: t("settings.annualRidership.quality.description"),
+      detail: annualRidershipStatusError.value
+        ? `${t("settings.annualRidership.quality.loadFailed")}: ${annualRidershipStatusError.value}`
+        : t("settings.annualRidership.quality.checkingDetail"),
+    };
+  }
+
+  if (!status.available) {
+    return {
+      id: "ridership",
+      icon: BarChart3,
+      level: "limited",
+      levelLabel: t("settings.annualRidership.qualityLevels.unavailable"),
+      title: t("settings.annualRidership.quality.title"),
+      description: t("settings.annualRidership.quality.description"),
+      detail: t("settings.annualRidership.quality.unavailableDetail", {
+        source: formatAnnualRidershipSource(status.source?.kind),
+        message: status.message ?? t("settings.annualRidership.quality.noManifest"),
+      }),
+    };
+  }
+
+  const counts = status.counts;
+  return {
+    id: "ridership",
+    icon: BarChart3,
+    level: "good",
+    levelLabel: t("settings.annualRidership.qualityLevels.available"),
+    title: t("settings.annualRidership.quality.title"),
+    description: t("settings.annualRidership.quality.description"),
+    detail: t("settings.annualRidership.quality.availableDetail", {
+      source: formatAnnualRidershipSource(status.source?.kind),
+      version: status.version ?? "—",
+      years: status.actualYears?.join(", ") ?? "—",
+      lines: counts ? n(counts.availableLines) : "—",
+      stations: counts ? n(counts.availableStations) : "—",
+    }),
+  };
+});
+const dataQualityCards = computed<GlobalMapQualityCard[]>(() => [
+  ...globalMapQualityCards.value,
+  annualRidershipQualityCard.value,
+]);
+const globalMapQualityStatusIcons: Record<GlobalMapQualityLevel, Component> = {
+  good: CheckCircle2,
+  attention: CircleAlert,
+  limited: CircleAlert,
+  online: Wifi,
+};
 const backendBundleCount = computed(() => bundleSummaries.value.length);
 const localBundleCount = computed(() => localBundleSummaries.value.length);
 const bundleCount = computed(() => backendBundleCount.value + localBundleCount.value);
@@ -135,6 +414,116 @@ function togglePanel(panelId: string): void {
   openPanelIds.value = nextOpenPanelIds;
 }
 
+function formatGlobalMapBytes(bytes: number): string {
+  if (bytes < 1024) return `${n(bytes)} ${t("globalMap.page.units.bytes")}`;
+  if (bytes < 1024 * 1024) {
+    return `${n(bytes / 1024, { maximumFractionDigits: 0 })} ${t("globalMap.page.units.kilobytes")}`;
+  }
+
+  return `${n(bytes / (1024 * 1024), { maximumFractionDigits: 1 })} ${t("globalMap.page.units.megabytes")}`;
+}
+
+function formatGlobalMapDate(value: string | undefined): string {
+  return value ? d(value, { dateStyle: "medium", timeStyle: "short" }) : "—";
+}
+
+async function loadGlobalMapSettingsData(): Promise<void> {
+  if (globalMapManifest.value || globalMapManifestLoading.value || typeof fetch === "undefined") return;
+  globalMapManifestLoading.value = true;
+  globalMapManifestError.value = "";
+  try {
+    const response = await fetch("/data/global-map/v1/manifest.json");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    globalMapManifest.value = await response.json() as GlobalMapManifest;
+  } catch (error) {
+    globalMapManifestError.value = error instanceof Error ? error.message : t("settings.globalMapData.loadFailed");
+  } finally {
+    globalMapManifestLoading.value = false;
+  }
+}
+
+async function loadTrafficCacheStatus(): Promise<void> {
+  if (typeof fetch === "undefined") return;
+
+  try {
+    const params = new URLSearchParams({ locale: locale.value });
+    const response = await fetch(toServerApiUrl(`/api/traffic/status?${params}`), {
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    trafficCacheStatus.value = await response.json() as TrafficCacheStatusResponse;
+    trafficCacheError.value = "";
+  } catch (error) {
+    trafficCacheError.value = error instanceof Error
+      ? error.message
+      : t("settings.trafficCache.loadFailed");
+  }
+}
+
+async function loadAnnualRidershipStatus(): Promise<void> {
+  if (typeof fetch === "undefined" || annualRidershipStatusLoading.value) return;
+
+  annualRidershipStatusLoading.value = true;
+  annualRidershipStatusError.value = "";
+  try {
+    annualRidershipStatus.value = await fetchAnnualRidershipStatus();
+  } catch (error) {
+    annualRidershipStatus.value = undefined;
+    annualRidershipStatusError.value = error instanceof Error
+      ? error.message
+      : t("settings.annualRidership.quality.noManifest");
+  } finally {
+    annualRidershipStatusLoading.value = false;
+  }
+}
+
+async function forceTrafficCacheRefresh(): Promise<void> {
+  if (trafficCacheLoading.value) return;
+  trafficCacheLoading.value = true;
+  trafficCacheError.value = "";
+
+  try {
+    const params = new URLSearchParams({ locale: locale.value });
+    const response = await fetch(toServerApiUrl(`/api/traffic/refresh?${params}`), {
+      method: "POST",
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json() as { cache?: TrafficCacheMetadata };
+    await loadTrafficCacheStatus();
+    const state = payload.cache?.state ?? trafficCache.value?.state;
+    showSettingsNotification(
+      state === "rate-limited"
+        ? t("settings.trafficCache.refreshTooRecent")
+        : t("settings.trafficCache.refreshStarted"),
+      state === "rate-limited" ? "info" : "success",
+    );
+  } catch (error) {
+    trafficCacheError.value = error instanceof Error
+      ? error.message
+      : t("settings.trafficCache.refreshFailed");
+    showSettingsNotification(t("settings.trafficCache.refreshFailed"), "error");
+  } finally {
+    trafficCacheLoading.value = false;
+  }
+}
+
+function formatTrafficCacheDuration(milliseconds: number): string {
+  const totalSeconds = Math.ceil(milliseconds / 1_000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return minutes > 0
+    ? t("settings.trafficCache.durationMinutesSeconds", { minutes, seconds })
+    : t("settings.trafficCache.durationSeconds", { seconds });
+}
+
+watch(locale, () => {
+  if (typeof window !== "undefined") {
+    void loadTrafficCacheStatus();
+  }
+});
+
 const placeOptions = computed(() =>
   presetState.value.places.map((place) => ({
     id: place.id,
@@ -146,6 +535,15 @@ const languageOptions = computed<MaterialComboboxOption[]>(() => [
   { id: "fr", label: t("settings.options.language.fr") },
   { id: "en", label: t("settings.options.language.en") },
 ]);
+const globalMapBasemapStyleLocalizedOptions = computed<MaterialComboboxOption[]>(() =>
+  GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.style.options.map((style) => ({
+    id: style,
+    label:
+      style === "voyager"
+        ? t("settings.options.mapBasemapStyle.voyager")
+        : t("settings.options.mapBasemapStyle.light"),
+  })),
+);
 const closedDirectionSummaryLocalizedOptions = computed(() =>
   closedDirectionSummaryOptions.map((option) => ({
     id: option.id,
@@ -305,6 +703,21 @@ const trafficInfoDefaultScopeLocalizedOptions = computed(() =>
         : t("settings.options.trafficScope.all"),
   })),
 );
+const trafficCache = computed(() => trafficCacheStatus.value?.cache);
+const trafficCacheCountdown = computed(() => {
+  const nextRefreshAt = trafficCache.value?.nextRefreshAt;
+  if (!nextRefreshAt) return t("settings.trafficCache.noRefreshScheduled");
+
+  const remainingMs = Math.max(0, Date.parse(nextRefreshAt) - trafficCacheNow.value);
+  if (remainingMs === 0) return t("settings.trafficCache.refreshDue");
+
+  return t("settings.trafficCache.countdown", {
+    duration: formatTrafficCacheDuration(remainingMs),
+  });
+});
+const trafficCacheStateLabel = computed(() =>
+  t(`settings.trafficCache.states.${trafficCache.value?.state ?? "miss"}`),
+);
 const fullscreenStationPanelDesignLocalizedOptions = computed(() =>
   fullscreenStationPanelDesignOptions.map((option) => ({
     id: option.id,
@@ -338,6 +751,12 @@ const transferBundleRequestSpacingLocalizedOptions = computed(() =>
   transferBundleRequestSpacingOptions.map((option) => ({
     id: option.id,
     label: option.id === "0" ? t("settings.options.transferBundle.noDelay") : option.label,
+  })),
+);
+const transferResolverModeLocalizedOptions = computed(() =>
+  transferResolverModeOptions.map((option) => ({
+    id: option.id,
+    label: t(`settings.options.transferResolver.${option.id}`),
   })),
 );
 const weatherModeLocalizedOptions = computed(() =>
@@ -408,6 +827,10 @@ function updateWakeLock(value: string): void {
   updateSettings({ wakeLockDuration: value as WakeLockDuration });
 }
 
+function updateTravelAlarmSafetyMinutes(value: string): void {
+  updateSettings({ travelAlarmSafetyMinutes: parseTravelAlarmSafetyMinutes(value) });
+}
+
 function updateAutoHide(value: string): void {
   updateSettings({ navigationAutoHide: value as NavigationAutoHide });
 }
@@ -426,6 +849,14 @@ function updatePlacePresetNavigationMode(value: string): void {
 
 function updateCompactMode(value: string): void {
   updateSettings({ compactLinePlanMode: value as CompactLinePlanMode });
+}
+
+function updateGlobalMapBasemapContrast(value: string): void {
+  updateSettings({ globalMapBasemapContrast: parseGlobalMapBasemapContrast(value) });
+}
+
+function updateGlobalMapBasemapStyle(value: string): void {
+  updateSettings({ globalMapBasemapStyle: parseGlobalMapBasemapStyle(value) });
 }
 
 function updatePatternCompactBranchGap(value: string): void {
@@ -492,6 +923,37 @@ function updateSelectedDisplayPreferences(patch: Partial<TransitBoardPreferences
 
 function openPresetsModal(): void {
   presetsModalOpen.value = true;
+}
+
+function openAddressBook(): void {
+  addressBookModalOpen.value = true;
+}
+
+function closeAddressBook(): void {
+  addressBookModalOpen.value = false;
+}
+
+function viewAddressBookLocation(entry: AddressBookEntry): void {
+  addressBookModalOpen.value = false;
+  void router.push({
+    path: "/map",
+    query: {
+      focusLat: String(entry.lat),
+      focusLon: String(entry.lon),
+      ...(entry.name ? { focusLabel: entry.name } : {}),
+    },
+  });
+}
+
+function viewAddressBookNeighborhood(entry: AddressBookEntry): void {
+  addressBookModalOpen.value = false;
+  if (typeof window === "undefined") return;
+  const params = new URLSearchParams({
+    address: entry.address || entry.name,
+    lat: String(entry.lat),
+    lon: String(entry.lon),
+  });
+  window.open(`/nearby-stations?${params.toString()}`, "_blank", "noopener,noreferrer");
 }
 
 function openCreatePlaceModal(): void {
@@ -636,6 +1098,10 @@ function updateTransferBundleRequestSpacing(value: string): void {
   });
 }
 
+function updateTransferResolverMode(value: string): void {
+  updateSettings({ transferResolverMode: value as TransferResolverMode });
+}
+
 async function openBundlesModal(): Promise<void> {
   await refreshBundleSummaries();
   bundlesModalOpen.value = true;
@@ -666,6 +1132,11 @@ async function clearBundles(): Promise<void> {
   await refreshBundleSummaries();
 }
 
+function clearWalkingRoutesCache(): void {
+  clearNearbyWalkingRouteCache();
+  showSettingsNotification(t("settings.walkingCache.cleared"));
+}
+
 async function deleteBundle(id: string): Promise<void> {
   const backendDelete = deleteTransferBundle(id).catch(() => undefined);
 
@@ -690,7 +1161,7 @@ function formatBundleDate(value: string): string {
 }
 
 function formatTransferResolverMode(_value: TransferBundleSummary["transferResolverMode"]): string {
-  return "Nearby";
+  return t("settings.options.transferResolver.nearby");
 }
 
 function formatTransferBundleDistance(
@@ -703,6 +1174,10 @@ function formatTransferBundleDistance(
 
 function formatPixels(value: number): string {
   return `${Math.round(value)} px`;
+}
+
+function formatMapContrast(value: number): string {
+  return `${Math.round(value * 100)}%`;
 }
 
 function formatCoefficient(value: number): string {
@@ -750,6 +1225,7 @@ function updateWeatherCustomLocation(
 
 function resetSettingsWithNotification(): void {
   resetSettings();
+  clearNearbyWalkingRouteCache();
   showSettingsNotification(t("settings.notifications.reset"));
 }
 
@@ -772,12 +1248,23 @@ onMounted(() => {
     presetState.value,
     selectedDisplayPlaceId.value,
   );
+  void loadGlobalMapSettingsData();
+  void loadTrafficCacheStatus();
+  void loadAnnualRidershipStatus();
+  trafficCacheStatusTimer = setInterval(() => {
+    void loadTrafficCacheStatus();
+  }, 15_000);
+  trafficCacheClockTimer = setInterval(() => {
+    trafficCacheNow.value = Date.now();
+  }, 1_000);
 });
 
 onBeforeUnmount(() => {
   if (settingsNotificationTimer) {
     clearTimeout(settingsNotificationTimer);
   }
+  if (trafficCacheStatusTimer) clearInterval(trafficCacheStatusTimer);
+  if (trafficCacheClockTimer) clearInterval(trafficCacheClockTimer);
 });
 </script>
 
@@ -821,6 +1308,203 @@ onBeforeUnmount(() => {
           @update:model-value="updateLanguage"
         />
       </div>
+    </section>
+
+    <section
+      class="settings-panel"
+      :class="{ 'settings-panel--open': isPanelOpen('menu') }"
+      aria-labelledby="settings-menu-title"
+    >
+      <div class="settings-panel__heading">
+        <button
+          class="settings-panel__trigger"
+          type="button"
+          :aria-expanded="isPanelOpen('menu')"
+          @click="togglePanel('menu')"
+        >
+          <div>
+            <p class="eyebrow">{{ t("settings.menu.eyebrow") }}</p>
+            <h2 id="settings-menu-title">{{ t("settings.menu.title") }}</h2>
+          </div>
+          <ChevronDown :size="22" aria-hidden="true" />
+        </button>
+      </div>
+
+      <label class="settings-toggle">
+        <input
+          type="checkbox"
+          :checked="settings.showPlanInNavigation"
+          :aria-label="t('settings.menu.showPlanAria')"
+          @change="
+            updateSettings({
+              showPlanInNavigation: ($event.target as HTMLInputElement).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>{{ t("settings.menu.showPlan") }}</strong>
+          <small>{{ t("settings.menu.showPlanDescription") }}</small>
+        </div>
+      </label>
+    </section>
+
+    <section
+      class="settings-panel settings-panel--data"
+      :class="{ 'settings-panel--open': isPanelOpen('global-map-data') }"
+      aria-labelledby="settings-global-map-data-title"
+      data-global-map-pack-settings
+    >
+      <div class="settings-panel__heading">
+        <button
+          class="settings-panel__trigger"
+          type="button"
+          :aria-expanded="isPanelOpen('global-map-data')"
+          @click="togglePanel('global-map-data')"
+        >
+          <div>
+            <p class="eyebrow">{{ t("settings.globalMapData.eyebrow") }}</p>
+            <h2 id="settings-global-map-data-title">{{ t("settings.globalMapData.title") }}</h2>
+          </div>
+          <ChevronDown :size="22" aria-hidden="true" />
+        </button>
+      </div>
+
+      <p class="settings-panel__description">{{ t("settings.globalMapData.description") }}</p>
+      <article
+        class="settings-data-overview"
+        data-global-map-pack-overview
+        aria-labelledby="settings-global-map-pack-overview-title"
+      >
+        <div class="settings-data-overview__header">
+          <div>
+            <p class="eyebrow">{{ t("settings.globalMapData.pack.eyebrow") }}</p>
+            <h3 id="settings-global-map-pack-overview-title">
+              {{ t("settings.globalMapData.pack.title") }}
+            </h3>
+            <p>{{ t("settings.globalMapData.pack.description") }}</p>
+          </div>
+          <span class="settings-data-overview__badge">
+            {{ t("settings.globalMapData.quality.badge") }}
+          </span>
+        </div>
+
+        <dl v-if="globalMapManifest?.counts" class="settings-data-facts">
+          <div>
+            <dt>{{ t("settings.globalMapData.pack.lines") }}</dt>
+            <dd>{{ n(globalMapManifest.counts.lines) }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("settings.globalMapData.pack.stations") }}</dt>
+            <dd>{{ n(globalMapManifest.counts.stations) }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("settings.globalMapData.pack.paths") }}</dt>
+            <dd>{{ n(globalMapManifest.counts.paths) }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("settings.globalMapData.pack.chunks") }}</dt>
+            <dd>{{ n(globalMapManifest.counts.chunks) }}</dd>
+          </div>
+        </dl>
+
+        <div v-if="globalMapManifest" class="settings-data-overview__meta" data-global-map-pack-meta>
+          <span>{{ t("settings.globalMapData.pack.generated", { date: formatGlobalMapDate(globalMapManifest.generatedAt) }) }}</span>
+          <span>{{ t("settings.globalMapData.pack.version", { version: globalMapManifest.dataVersion }) }}</span>
+          <span>{{ t("settings.globalMapData.pack.size", { size: formatGlobalMapBytes(globalMapTotalPackBytes) }) }}</span>
+        </div>
+
+        <section
+          class="settings-data-quality"
+          aria-labelledby="settings-global-map-quality-title"
+        >
+          <div>
+            <p class="eyebrow">{{ t("settings.globalMapData.quality.eyebrow") }}</p>
+            <h3 id="settings-global-map-quality-title">
+              {{ t("settings.globalMapData.quality.title") }}
+            </h3>
+            <p>{{ t("settings.globalMapData.quality.description") }}</p>
+          </div>
+          <div class="settings-data-quality__levels">
+            <div class="settings-data-quality__level">
+              <strong>{{ t("settings.globalMapData.quality.regional") }}</strong>
+              <span>
+                {{
+                  t("settings.globalMapData.quality.regionalDescription", {
+                    tiles: n(GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.maxTiles),
+                  })
+                }}
+              </span>
+            </div>
+            <div class="settings-data-quality__level settings-data-quality__level--detailed">
+              <strong>{{ t("settings.globalMapData.quality.detailed") }}</strong>
+              <span>
+                {{
+                  t("settings.globalMapData.quality.detailedDescription", {
+                    zoom: n(GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.highZoomMin),
+                    tiles: n(GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.highZoomMaxTiles),
+                  })
+                }}
+              </span>
+            </div>
+          </div>
+          <p class="settings-data-quality__note">
+            {{ t("settings.globalMapData.quality.note") }}
+          </p>
+        </section>
+
+        <div
+          v-if="dataQualityCards.length"
+          class="settings-data-quality-cards"
+          data-global-map-quality-cards
+        >
+          <article
+            v-for="card in dataQualityCards"
+            :key="card.id"
+            class="settings-data-quality-card"
+            :class="`settings-data-quality-card--${card.level}`"
+            :data-quality-card-id="card.id"
+          >
+            <div class="settings-data-quality-card__icon" aria-hidden="true">
+              <component :is="card.icon" :size="20" />
+            </div>
+            <div>
+              <div class="settings-data-quality-card__status">
+                <component :is="globalMapQualityStatusIcons[card.level]" :size="15" aria-hidden="true" />
+                <span>{{ card.levelLabel }}</span>
+              </div>
+              <h4>{{ card.title }}</h4>
+              <p>{{ card.description }}</p>
+              <small>{{ card.detail }}</small>
+            </div>
+          </article>
+        </div>
+      </article>
+      <p v-if="globalMapManifestLoading" role="status">{{ t("settings.globalMapData.loading") }}</p>
+      <p v-else-if="globalMapManifestError" class="settings-panel__error" role="alert">
+        <CircleAlert :size="18" aria-hidden="true" />
+        <span>{{ t("settings.globalMapData.loadFailed") }}: {{ globalMapManifestError }}</span>
+      </p>
+      <details class="settings-data-accordion" data-global-map-pack-summary>
+        <summary>{{ t("settings.globalMapData.summaryAccordion") }}</summary>
+        <pre v-if="globalMapPackSummaryJson">{{ globalMapPackSummaryJson }}</pre>
+      </details>
+      <details class="settings-data-accordion" data-global-map-pack-files>
+        <summary>{{ t("settings.globalMapData.filesAccordion") }}</summary>
+        <pre v-if="globalMapPackFilesJson">{{ globalMapPackFilesJson }}</pre>
+      </details>
+      <details class="settings-data-accordion" data-global-map-pack-warnings>
+        <summary>{{ t("settings.globalMapData.warningsAccordion") }}</summary>
+        <pre v-if="globalMapPackWarningsJson">{{ globalMapPackWarningsJson }}</pre>
+      </details>
+      <details class="settings-data-accordion" data-global-map-pack-manifest>
+        <summary>{{ t("settings.globalMapData.rawManifestAccordion") }}</summary>
+        <pre v-if="globalMapManifestJson">{{ globalMapManifestJson }}</pre>
+      </details>
+      <details class="settings-data-accordion" data-global-map-pack-config>
+        <summary>{{ t("settings.globalMapData.configAccordion") }}</summary>
+        <pre>{{ globalMapConfigJson }}</pre>
+      </details>
     </section>
 
     <section
@@ -872,6 +1556,42 @@ onBeforeUnmount(() => {
           :aria-label="t('settings.places.navigationAria')"
           @update:model-value="updatePlacePresetNavigationMode"
         />
+      </div>
+    </section>
+
+    <section
+      class="settings-panel settings-panel--address-book"
+      :class="{ 'settings-panel--open': isPanelOpen('address-book') }"
+      aria-labelledby="settings-address-book-title"
+      data-settings-address-book
+    >
+      <div class="settings-panel__heading">
+        <button
+          class="settings-panel__trigger"
+          type="button"
+          :aria-expanded="isPanelOpen('address-book')"
+          @click="togglePanel('address-book')"
+        >
+          <div>
+            <p class="eyebrow">{{ t("addressBook.eyebrow") }}</p>
+            <h2 id="settings-address-book-title">{{ t("addressBook.title") }}</h2>
+          </div>
+          <ChevronDown :size="22" aria-hidden="true" />
+        </button>
+        <button class="button-secondary" type="button" @click="openAddressBook">
+          <BookOpen :size="17" aria-hidden="true" />
+          {{ t("addressBook.add") }}
+        </button>
+      </div>
+      <div class="settings-row">
+        <div>
+          <strong>{{ t("addressBook.title") }}</strong>
+          <span>{{ t("addressBook.description") }}</span>
+        </div>
+        <button class="button-secondary" type="button" @click="openAddressBook">
+          <BookOpen :size="17" aria-hidden="true" />
+          {{ t("common.actions.showAll") }}
+        </button>
       </div>
     </section>
 
@@ -1061,6 +1781,51 @@ onBeforeUnmount(() => {
           @update:model-value="updateTrafficInfoDefaultScope"
         />
       </div>
+      <article class="traffic-cache-settings" data-traffic-cache-settings>
+        <header class="traffic-cache-settings__header">
+          <div>
+            <p class="eyebrow">{{ t("settings.trafficCache.eyebrow") }}</p>
+            <h3>{{ t("settings.trafficCache.title") }}</h3>
+            <p>{{ t("settings.trafficCache.description") }}</p>
+          </div>
+          <span
+            class="traffic-cache-settings__state"
+            :data-state="trafficCache?.state ?? 'miss'"
+            data-traffic-cache-state
+          >
+            {{ trafficCacheStateLabel }}
+          </span>
+        </header>
+        <dl class="traffic-cache-settings__facts">
+          <div>
+            <dt>{{ t("settings.trafficCache.frequency") }}</dt>
+            <dd>{{ formatTrafficCacheDuration(trafficCache?.refreshIntervalMs ?? 150_000) }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("settings.trafficCache.lastUpdate") }}</dt>
+            <dd>{{ formatGlobalMapDate(trafficCache?.refreshedAt) }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("settings.trafficCache.nextUpdate") }}</dt>
+            <dd data-traffic-cache-countdown>{{ trafficCacheCountdown }}</dd>
+          </div>
+        </dl>
+        <p v-if="trafficCacheError" class="settings-inline-warning" role="alert">
+          {{ trafficCacheError }}
+        </p>
+        <p v-else-if="trafficCache?.lastError" class="settings-inline-warning" role="status">
+          {{ trafficCache.lastError }}
+        </p>
+        <button
+          class="button-secondary"
+          type="button"
+          data-traffic-cache-refresh
+          :disabled="trafficCacheLoading"
+          @click="void forceTrafficCacheRefresh()"
+        >
+          {{ trafficCacheLoading ? t("settings.trafficCache.refreshing") : t("settings.trafficCache.forceRefresh") }}
+        </button>
+      </article>
       <div class="settings-row">
         <div>
           <strong>{{ t("settings.display.trafficCalendarScope") }}</strong>
@@ -1293,6 +2058,23 @@ onBeforeUnmount(() => {
         </label>
       </div>
 
+      <label class="settings-toggle" data-settings-user-location>
+        <input
+          type="checkbox"
+          :checked="settings.showUserLocation"
+          @change="
+            updateSettings({
+              showUserLocation: ($event.target as HTMLInputElement).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>{{ t("settings.display.showUserLocation") }}</strong>
+          <small>{{ t("settings.display.showUserLocationDescription") }}</small>
+        </div>
+      </label>
+
       <label class="settings-toggle">
         <input
           type="checkbox"
@@ -1354,6 +2136,19 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
+      <div class="settings-row" data-settings-transfer-resolver>
+        <div>
+          <strong>{{ t("settings.bundles.resolver") }}</strong>
+          <span>{{ t("settings.display.transferResolverDescription") }}</span>
+        </div>
+        <MaterialCombobox
+          :model-value="settings.transferResolverMode"
+          :options="transferResolverModeLocalizedOptions"
+          :aria-label="t('settings.display.transferResolverAria')"
+          @update:model-value="updateTransferResolverMode"
+        />
+      </div>
+
       <div class="settings-row">
         <div>
           <strong>{{ t("settings.bundles.concurrency") }}</strong>
@@ -1400,6 +2195,23 @@ onBeforeUnmount(() => {
           </button>
           <button class="button-secondary" type="button" @click="clearBundles">
             {{ t("settings.bundles.clear") }}
+          </button>
+        </div>
+      </div>
+
+      <div class="settings-bundle-actions settings-walking-cache-actions">
+        <div>
+          <strong>{{ t("settings.walkingCache.title") }}</strong>
+          <span>{{ t("settings.walkingCache.description") }}</span>
+        </div>
+        <div class="settings-bundle-actions__buttons">
+          <button
+            data-settings-walking-cache-clear
+            class="button-secondary"
+            type="button"
+            @click="clearWalkingRoutesCache"
+          >
+            {{ t("settings.walkingCache.clear") }}
           </button>
         </div>
       </div>
@@ -1558,6 +2370,150 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
+      <div class="settings-row settings-row--range">
+        <div>
+          <strong>{{ t("settings.display.mapContrast") }}</strong>
+          <span>{{ t("settings.display.mapContrastDescription") }}</span>
+        </div>
+        <label class="settings-range">
+          <span>{{ formatMapContrast(settings.globalMapBasemapContrast) }}</span>
+          <input
+            data-settings-map-contrast
+            :max="GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.max"
+            :min="GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.min"
+            :value="settings.globalMapBasemapContrast"
+            :aria-label="t('settings.display.mapContrastAria')"
+            :step="GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.step"
+            type="range"
+            @input="updateGlobalMapBasemapContrast(($event.target as HTMLInputElement).value)"
+          />
+        </label>
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <strong>{{ t("settings.display.mapBasemapStyle") }}</strong>
+          <span>{{ t("settings.display.mapBasemapStyleDescription") }}</span>
+        </div>
+        <MaterialCombobox
+          data-settings-map-basemap-style
+          :model-value="settings.globalMapBasemapStyle"
+          :options="globalMapBasemapStyleLocalizedOptions"
+          :aria-label="t('settings.display.mapBasemapStyleAria')"
+          @update:model-value="updateGlobalMapBasemapStyle"
+        />
+      </div>
+
+      <label class="settings-toggle" data-settings-map-antialiasing>
+        <input
+          type="checkbox"
+          role="switch"
+          :checked="settings.deckAntialiasing"
+          :aria-checked="settings.deckAntialiasing"
+          :aria-label="t('settings.display.deckAntialiasingAria')"
+          @change="
+            updateSettings({
+              deckAntialiasing: ($event.target as HTMLInputElement).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>{{ t("settings.display.deckAntialiasing") }}</strong>
+          <small>{{ t("settings.display.deckAntialiasingDescription") }}</small>
+        </div>
+      </label>
+
+      <div class="settings-subheading">
+        <strong>{{ t("settings.display.nearbyMapControlsTitle") }}</strong>
+        <span>{{ t("settings.display.nearbyMapControlsDescription") }}</span>
+      </div>
+
+      <label class="settings-toggle" data-settings-nearby-control="isochrone">
+        <input
+          type="checkbox"
+          :checked="settings.nearbyMapShowIsochroneControl"
+          @change="
+            updateSettings({
+              nearbyMapShowIsochroneControl: ($event.target as HTMLInputElement).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>{{ t("settings.display.nearbyMapShowIsochroneControl") }}</strong>
+          <small>{{ t("settings.display.nearbyMapShowIsochroneControlDescription") }}</small>
+        </div>
+      </label>
+
+      <label class="settings-toggle" data-settings-nearby-control="directory">
+        <input
+          type="checkbox"
+          :checked="settings.nearbyMapShowDirectoryControl"
+          @change="
+            updateSettings({
+              nearbyMapShowDirectoryControl: ($event.target as HTMLInputElement).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>{{ t("settings.display.nearbyMapShowDirectoryControl") }}</strong>
+          <small>{{ t("settings.display.nearbyMapShowDirectoryControlDescription") }}</small>
+        </div>
+      </label>
+
+      <label class="settings-toggle" data-settings-nearby-control="basemap">
+        <input
+          type="checkbox"
+          :checked="settings.nearbyMapShowBasemapControl"
+          @change="
+            updateSettings({
+              nearbyMapShowBasemapControl: ($event.target as HTMLInputElement).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>{{ t("settings.display.nearbyMapShowBasemapControl") }}</strong>
+          <small>{{ t("settings.display.nearbyMapShowBasemapControlDescription") }}</small>
+        </div>
+      </label>
+
+      <label class="settings-toggle" data-settings-nearby-control="display">
+        <input
+          type="checkbox"
+          :checked="settings.nearbyMapShowDisplayControl"
+          @change="
+            updateSettings({
+              nearbyMapShowDisplayControl: ($event.target as HTMLInputElement).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>{{ t("settings.display.nearbyMapShowDisplayControl") }}</strong>
+          <small>{{ t("settings.display.nearbyMapShowDisplayControlDescription") }}</small>
+        </div>
+      </label>
+
+      <label class="settings-toggle" data-settings-nearby-control="fullscreen">
+        <input
+          type="checkbox"
+          :checked="settings.nearbyMapShowFullscreenControl"
+          @change="
+            updateSettings({
+              nearbyMapShowFullscreenControl: ($event.target as HTMLInputElement).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>{{ t("settings.display.nearbyMapShowFullscreenControl") }}</strong>
+          <small>{{ t("settings.display.nearbyMapShowFullscreenControlDescription") }}</small>
+        </div>
+      </label>
+
       <label class="settings-toggle">
         <input
           type="checkbox"
@@ -1572,6 +2528,26 @@ onBeforeUnmount(() => {
         <div>
           <strong>{{ t("settings.display.showMiniMap") }}</strong>
           <small>{{ t("settings.display.showMiniMapDescription") }}</small>
+        </div>
+      </label>
+
+      <label class="settings-toggle" data-settings-travel-route-line-icons>
+        <input
+          type="checkbox"
+          role="switch"
+          :checked="settings.showTravelRouteLineIcons"
+          :aria-checked="settings.showTravelRouteLineIcons"
+          :aria-label="t('settings.display.showTravelRouteLineIconsAria')"
+          @change="
+            updateSettings({
+              showTravelRouteLineIcons: ($event.target as HTMLInputElement).checked,
+            })
+          "
+        />
+        <span></span>
+        <div>
+          <strong>{{ t("settings.display.showTravelRouteLineIcons") }}</strong>
+          <small>{{ t("settings.display.showTravelRouteLineIconsDescription") }}</small>
         </div>
       </label>
 
@@ -1811,6 +2787,26 @@ onBeforeUnmount(() => {
 
       <div class="settings-row">
         <div>
+          <strong>{{ t("settings.device.travelAlarmSafetyMinutes") }}</strong>
+          <span>{{ t("settings.device.travelAlarmSafetyMinutesDescription") }}</span>
+        </div>
+        <label class="settings-number-control">
+          <input
+            class="settings-input"
+            type="number"
+            min="0"
+            :max="TRAVEL_ALARM_SAFETY_MINUTES_MAX"
+            step="1"
+            :value="settings.travelAlarmSafetyMinutes"
+            :aria-label="t('settings.device.travelAlarmSafetyMinutesAria')"
+            @change="updateTravelAlarmSafetyMinutes(($event.target as HTMLInputElement).value)"
+          />
+          <span>{{ t("settings.device.minutesUnit") }}</span>
+        </label>
+      </div>
+
+      <div class="settings-row">
+        <div>
           <strong>{{ t("settings.device.navigationAutoHide") }}</strong>
           <span>{{ t("settings.device.navigationAutoHideDescription") }}</span>
         </div>
@@ -1893,6 +2889,13 @@ onBeforeUnmount(() => {
       :open="placeNameModalOpen"
       @close="closePlaceNameModal"
       @submit="submitPlaceName"
+    />
+
+    <AdressBook
+      :open="addressBookModalOpen"
+      @close="closeAddressBook"
+      @view-location="viewAddressBookLocation"
+      @view-neighborhood="viewAddressBookNeighborhood"
     />
 
     <AppNotification :message="settingsNotification.message" :tone="settingsNotification.tone" />
@@ -2125,11 +3128,281 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
+.settings-panel__description {
+  color: var(--muted);
+  font-weight: 720;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.settings-panel__error {
+  align-items: center;
+  color: #b42318;
+  display: flex;
+  gap: 8px;
+  font-weight: 800;
+}
+
+.settings-data-overview {
+  background: linear-gradient(145deg, #f4f7ff 0%, #ffffff 72%);
+  border: 1px solid rgba(45, 92, 171, 0.16);
+  border-radius: 14px;
+  display: grid;
+  gap: 20px;
+  padding: 20px;
+}
+
+.settings-data-overview__header {
+  align-items: flex-start;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+}
+
+.settings-data-overview h3,
+.settings-data-quality h3 {
+  font-size: 1.15rem;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.settings-data-overview p:not(.eyebrow),
+.settings-data-quality p:not(.eyebrow) {
+  color: var(--muted);
+  font-weight: 720;
+  line-height: 1.45;
+  margin: 8px 0 0;
+}
+
+.settings-data-overview__badge {
+  background: #e8efff;
+  border: 1px solid rgba(45, 92, 171, 0.18);
+  border-radius: 999px;
+  color: #234d99;
+  flex: 0 0 auto;
+  font-size: 0.76rem;
+  font-weight: 950;
+  line-height: 1.2;
+  max-width: 240px;
+  padding: 8px 11px;
+  text-align: center;
+}
+
+.settings-data-facts {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+}
+
+.settings-data-facts > div,
+.settings-data-quality__level {
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(16, 35, 63, 0.08);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.settings-data-facts dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-data-facts dd {
+  font-size: 1.2rem;
+  font-weight: 950;
+  margin: 4px 0 0;
+}
+
+.settings-data-overview__meta {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  font-weight: 800;
+  gap: 8px 18px;
+  line-height: 1.4;
+}
+
+.settings-data-overview__meta span + span {
+  border-left: 1px solid rgba(16, 35, 63, 0.14);
+  padding-left: 18px;
+}
+
+.settings-data-quality {
+  border-top: 1px solid rgba(16, 35, 63, 0.1);
+  display: grid;
+  gap: 14px;
+  padding-top: 18px;
+}
+
+.settings-data-quality__levels {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-data-quality__level {
+  display: grid;
+  gap: 5px;
+}
+
+.settings-data-quality__level--detailed {
+  border-color: rgba(191, 48, 153, 0.28);
+  box-shadow: inset 3px 0 #bf3099;
+}
+
+.settings-data-quality__level strong {
+  font-size: 0.95rem;
+  font-weight: 950;
+}
+
+.settings-data-quality__level span,
+.settings-data-quality__note {
+  color: var(--muted);
+  font-size: 0.87rem;
+  font-weight: 720;
+  line-height: 1.4;
+}
+
+.settings-data-quality__note {
+  margin: 0 !important;
+}
+
+.settings-data-quality-cards {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+
+.settings-data-quality-card {
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(16, 35, 63, 0.1);
+  border-left: 3px solid #2d5cab;
+  border-radius: 10px;
+  display: grid;
+  gap: 11px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 13px;
+}
+
+.settings-data-quality-card--attention {
+  border-left-color: #d97706;
+}
+
+.settings-data-quality-card--limited {
+  border-left-color: #b42318;
+}
+
+.settings-data-quality-card--online {
+  border-left-color: #168a63;
+}
+
+.settings-data-quality-card__icon {
+  align-items: center;
+  background: #e8efff;
+  border-radius: 9px;
+  color: #234d99;
+  display: flex;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.settings-data-quality-card__status {
+  align-items: center;
+  color: #234d99;
+  display: flex;
+  font-size: 0.72rem;
+  font-weight: 950;
+  gap: 5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-data-quality-card--attention .settings-data-quality-card__status {
+  color: #a45300;
+}
+
+.settings-data-quality-card--limited .settings-data-quality-card__status {
+  color: #b42318;
+}
+
+.settings-data-quality-card--online .settings-data-quality-card__status {
+  color: #16734f;
+}
+
+.settings-data-quality-card h4 {
+  font-size: 0.98rem;
+  line-height: 1.2;
+  margin: 5px 0 0;
+}
+
+.settings-data-quality-card p,
+.settings-data-quality-card small {
+  color: var(--muted);
+  display: block;
+  font-weight: 720;
+  line-height: 1.4;
+  margin: 5px 0 0;
+}
+
+.settings-data-quality-card small {
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.settings-data-accordion {
+  background: #f7f9fe;
+  border: 1px solid rgba(16, 35, 63, 0.08);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.settings-data-accordion summary {
+  cursor: pointer;
+  font-weight: 900;
+  padding: 14px 16px;
+}
+
+.settings-data-accordion pre {
+  border-top: 1px solid rgba(16, 35, 63, 0.08);
+  margin: 0;
+  max-height: 460px;
+  overflow: auto;
+  padding: 16px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .settings-row {
   align-items: center;
   display: grid;
   gap: 18px;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+}
+
+.settings-subheading {
+  border-top: 1px solid rgba(16, 35, 63, 0.1);
+  display: grid;
+  gap: 4px;
+  padding-top: 18px;
+}
+
+.settings-subheading strong {
+  color: var(--ink);
+  font-size: 1.02rem;
+  font-weight: 950;
+}
+
+.settings-subheading span {
+  color: var(--muted);
+  font-weight: 720;
+  line-height: 1.45;
 }
 
 .settings-row strong,
@@ -2146,6 +3419,23 @@ onBeforeUnmount(() => {
   font-weight: 720;
   line-height: 1.45;
   margin-top: 4px;
+}
+
+.settings-number-control {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-self: end;
+  min-width: 0;
+}
+
+.settings-number-control .settings-input {
+  width: 92px;
+}
+
+.settings-number-control > span {
+  margin-top: 0;
+  white-space: nowrap;
 }
 
 .settings-row--range {
@@ -2508,6 +3798,84 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
+.traffic-cache-settings {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(16, 35, 63, 0.1);
+  border-radius: 14px;
+  display: grid;
+  gap: 14px;
+  margin: 18px 0;
+  padding: 16px;
+}
+
+.traffic-cache-settings__header {
+  align-items: flex-start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.traffic-cache-settings__header h3,
+.traffic-cache-settings__header p {
+  margin: 0;
+}
+
+.traffic-cache-settings__header h3 {
+  font-size: 1rem;
+  margin-top: 3px;
+}
+
+.traffic-cache-settings__header p:last-child {
+  color: var(--settings-muted, #64748b);
+  font-size: 0.82rem;
+  margin-top: 5px;
+}
+
+.traffic-cache-settings__state {
+  border: 1px solid rgba(16, 35, 63, 0.14);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 5px 9px;
+  white-space: nowrap;
+}
+
+.traffic-cache-settings__state[data-state="hit"] {
+  background: rgba(34, 197, 94, 0.12);
+  color: #166534;
+}
+
+.traffic-cache-settings__state[data-state="stale"],
+.traffic-cache-settings__state[data-state="rate-limited"],
+.traffic-cache-settings__state[data-state="error"] {
+  background: rgba(245, 158, 11, 0.14);
+  color: #92400e;
+}
+
+.traffic-cache-settings__facts {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+.traffic-cache-settings__facts div {
+  background: rgba(248, 250, 252, 0.9);
+  border-radius: 9px;
+  padding: 9px 10px;
+}
+
+.traffic-cache-settings__facts dt {
+  color: var(--settings-muted, #64748b);
+  font-size: 0.72rem;
+}
+
+.traffic-cache-settings__facts dd {
+  font-size: 0.83rem;
+  font-weight: 800;
+  margin: 3px 0 0;
+}
+
 .traffic-impact-equation {
   background: linear-gradient(135deg, rgba(245, 243, 255, 0.92), rgba(255, 247, 251, 0.92));
   border: 1px solid rgba(109, 40, 217, 0.14);
@@ -2606,10 +3974,34 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 760px) {
+  .settings-data-overview__header {
+    flex-direction: column;
+  }
+
+  .settings-data-overview__badge {
+    max-width: none;
+  }
+
+  .settings-data-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-data-quality__levels {
+    grid-template-columns: 1fr;
+  }
+
+  .traffic-cache-settings__facts {
+    grid-template-columns: 1fr;
+  }
+
   .settings-row,
   .settings-range-pair,
   .settings-custom-location {
     grid-template-columns: 1fr;
+  }
+
+  .settings-number-control {
+    justify-self: start;
   }
 
   .settings-range-pair__controls {

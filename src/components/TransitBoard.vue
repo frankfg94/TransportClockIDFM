@@ -60,11 +60,13 @@ const props = withDefaults(
     closedSummaryMode?: ClosedSummaryMode;
     trafficAlert?: BoardTrafficAlert;
     displayMode?: "grid" | "list";
+    showStationChangeAction?: boolean;
   }>(),
   {
     closedSummaryMode: "last",
     displayMode: "grid",
     hiddenDirectionIds: () => [],
+    showStationChangeAction: true,
   },
 );
 
@@ -616,15 +618,18 @@ onUnmounted(() => {
         <div class="board__title-row">
           <h2>{{ board.title }}</h2>
 
-          <button
-            v-if="trafficAlert"
-            class="board-traffic-chip"
-            :class="`board-traffic-chip--${trafficAlert.tone}`"
-            type="button"
-            @click.stop="emit('open-traffic', trafficAlert)"
-          >
-            {{ trafficAlert.label }}
-          </button>
+          <Transition name="board-traffic-pop" appear>
+            <button
+              v-if="trafficAlert"
+              :key="trafficAlert.target.alertId"
+              class="board-traffic-chip"
+              :class="`board-traffic-chip--${trafficAlert.tone}`"
+              type="button"
+              @click.stop="emit('open-traffic', trafficAlert)"
+            >
+              {{ trafficAlert.label }}
+            </button>
+          </Transition>
         </div>
 
         <p class="board__city">{{ board.city }}</p>
@@ -648,17 +653,17 @@ onUnmounted(() => {
           class="board-actions__menu"
           close-on-outside-click
         >
-          <button type="button" @click="openLinePage">
+          <button type="button" role="menuitem" @click="openLinePage">
             <Map :size="17" aria-hidden="true" />
             {{ t("board.lineMap") }}
           </button>
 
-          <button type="button" @click="openStationEditor">
+          <button v-if="showStationChangeAction" type="button" role="menuitem" @click="openStationEditor">
             <MapPin :size="17" aria-hidden="true" />
             {{ t("board.changeStation") }}
           </button>
 
-          <button type="button" @click="openFullscreenPanel">
+          <button type="button" role="menuitem" @click="openFullscreenPanel">
             <Maximize2 :size="17" aria-hidden="true" />
             {{ t("board.panelDisplay") }}
           </button>
@@ -666,6 +671,7 @@ onUnmounted(() => {
           <button
             v-if="directionGroups.length > 0"
             type="button"
+            role="menuitem"
             @click="openDirectionFilter"
           >
             <Route :size="17" aria-hidden="true" />
@@ -679,6 +685,7 @@ onUnmounted(() => {
             v-if="removable"
             class="board-actions__danger"
             type="button"
+            role="menuitem"
             @click="removeBoard"
           >
             <Trash :size="17" aria-hidden="true" />
@@ -692,8 +699,14 @@ onUnmounted(() => {
       {{ error }}
     </div>
 
-    <div v-else-if="loading && totalDeparturesCount === 0" class="notice">
-      {{ t("board.loadingDepartures") }}
+    <div
+      v-else-if="loading && totalDeparturesCount === 0"
+      class="notice board-loading-notice"
+      aria-live="polite"
+    >
+      <span class="board-loading-notice__text">
+        {{ t("board.loadingDepartures") }}
+      </span>
     </div>
 
     <div
@@ -714,6 +727,7 @@ onUnmounted(() => {
         v-for="group in visibleDirectionGroups"
         :key="group.id"
         class="direction-section"
+        :data-direction-id="group.id"
         :class="{
           'direction-section--collapsed': isDirectionCollapsed(group.id),
         }"
@@ -849,14 +863,14 @@ onUnmounted(() => {
                   <strong>
                     {{
                       formatWait(
-                        departure.expectedDepartureTime,
+                        getDepartureTime(departure),
                         departure.vehicleAtStop,
                       )
                     }}
                   </strong>
 
                   <span>
-                    {{ formatClock(departure.expectedDepartureTime) }}
+                    {{ formatClock(getDepartureTime(departure)) }}
                   </span>
                 </div>
 

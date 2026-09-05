@@ -1,7 +1,14 @@
 import type { PatternTrafficImpact } from "./trafficImpactAnalysis";
+export {
+  TRAFFIC_DISTURBANCE_COLOR,
+  TRAFFIC_INTERRUPTION_COLOR,
+  TRAFFIC_INTERRUPTION_GAP_COLOR,
+} from "../transport-map/render/trafficStyleTokens";
 
-export const TRAFFIC_INTERRUPTION_COLOR = "#ef4444";
-export const TRAFFIC_DISTURBANCE_COLOR = "#f59e0b";
+import {
+  TRAFFIC_DISTURBANCE_COLOR,
+  TRAFFIC_INTERRUPTION_COLOR,
+} from "../transport-map/render/trafficStyleTokens";
 
 export function getTrafficImpactColor(
   impact?: Pick<PatternTrafficImpact, "kind">,

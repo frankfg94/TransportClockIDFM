@@ -405,16 +405,21 @@ export async function migrateCustomBoardDirectionGroups(
     board: TransitBoardConfig,
   ) => Promise<DirectionGroupConfig[] | undefined>,
 ): Promise<DirectionGroupMigrationResult> {
+  const candidates = preferences.customBoards.filter(
+    (board) =>
+      Boolean(board.schedule) &&
+      (preferences.directionGroupDiscoveryVersion < DIRECTION_GROUP_DISCOVERY_VERSION
+        ? board.directionGroups.length === 1
+        : isFallbackDirectionGroups(board.directionGroups)),
+  );
+
   if (
-    preferences.directionGroupDiscoveryVersion >=
-    DIRECTION_GROUP_DISCOVERY_VERSION
+    preferences.directionGroupDiscoveryVersion >= DIRECTION_GROUP_DISCOVERY_VERSION &&
+    candidates.length === 0
   ) {
     return { updatedBoardIds: [], completed: true };
   }
 
-  const candidates = preferences.customBoards.filter(
-    (board) => Boolean(board.schedule) && board.directionGroups.length === 1,
-  );
   const updatedBoardIds: string[] = [];
   let completed = true;
 
@@ -765,7 +770,7 @@ function isTransitBoardConfigLike(value: unknown): value is TransitBoardConfig {
   return isRecord(value) && typeof value.id === "string";
 }
 
-function boardsReferToSameStation(
+export function boardsReferToSameStation(
   left: TransitBoardConfig,
   right: TransitBoardConfig,
 ): boolean {
@@ -843,6 +848,14 @@ function haveSameDirectionGroups(
         group.label === right[index]?.label &&
         JSON.stringify(group.match) === JSON.stringify(right[index]?.match),
     )
+  );
+}
+
+function isFallbackDirectionGroups(directionGroups: DirectionGroupConfig[]): boolean {
+  return (
+    directionGroups.length === 1 &&
+    directionGroups[0]?.id === "all-directions" &&
+    Object.keys(directionGroups[0].match).length === 0
   );
 }
 

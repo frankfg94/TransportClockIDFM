@@ -25,6 +25,9 @@ const overallStatus = computed<HealthStatus>(() => {
 
   return "ok";
 });
+const navitiaJourneysCheck = computed(() => checks.value.find((check) => check.id === "navitia-journeys"));
+const nearbyPlacesCheck = computed(() => checks.value.find((check) => check.id === "overpass-places"));
+const walkingRoutesCheck = computed(() => checks.value.find((check) => check.id === "walking-routes"));
 
 onMounted(() => {
   void loadHealth();
@@ -140,6 +143,42 @@ function formatGeneratedAt(value: string): string {
       </button>
     </section>
 
+    <section
+      v-if="navitiaJourneysCheck"
+      class="health-capability"
+      :class="`health-capability--${navitiaJourneysCheck.status}`"
+    >
+      <div>
+        <p class="eyebrow">{{ t("health.nearbyRouting.title") }}</p>
+        <strong>{{ t("health.nearbyRouting.body") }}</strong>
+      </div>
+      <span>{{ statusLabel(navitiaJourneysCheck.status) }}</span>
+    </section>
+
+    <section
+      v-if="nearbyPlacesCheck"
+      class="health-capability"
+      :class="`health-capability--${nearbyPlacesCheck.status}`"
+    >
+      <div>
+        <p class="eyebrow">{{ t("health.nearbyPlaces.title") }}</p>
+        <strong>{{ t("health.nearbyPlaces.body") }}</strong>
+      </div>
+      <span>{{ statusLabel(nearbyPlacesCheck.status) }}</span>
+    </section>
+
+    <section
+      v-if="walkingRoutesCheck"
+      class="health-capability"
+      :class="`health-capability--${walkingRoutesCheck.status}`"
+    >
+      <div>
+        <p class="eyebrow">{{ t("health.nearbyWalkingRoutes.title") }}</p>
+        <strong>{{ t("health.nearbyWalkingRoutes.body") }}</strong>
+      </div>
+      <span>{{ statusLabel(walkingRoutesCheck.status) }}</span>
+    </section>
+
     <section v-if="loading" class="health-state" role="status">
       {{ t("health.loading") }}
     </section>
@@ -252,6 +291,46 @@ function formatGeneratedAt(value: string): string {
 }
 
 .health-summary--error {
+  border-left-color: #ef4444;
+}
+
+.health-capability {
+  align-items: center;
+  background: #fff;
+  border: 1px solid rgba(81, 70, 255, .16);
+  border-left: 7px solid #5146ff;
+  border-radius: 8px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding: 14px 18px;
+}
+
+.health-capability .eyebrow {
+  margin-bottom: 3px;
+}
+
+.health-capability strong {
+  color: var(--muted);
+  display: block;
+  font-size: .88rem;
+  line-height: 1.4;
+  max-width: 760px;
+}
+
+.health-capability > span {
+  color: #4034df;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.health-capability--warning,
+.health-capability--not_configured {
+  border-left-color: #f59e0b;
+}
+
+.health-capability--error {
   border-left-color: #ef4444;
 }
 

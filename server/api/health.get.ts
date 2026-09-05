@@ -7,13 +7,20 @@ import {
   type NetexRuntimeEnv,
 } from "../services/topology/netexCache";
 import { getGtfsPublicStatus } from "../services/gtfs/runtime";
+import { getTrafficCacheStatus } from "../services/idfm/traffic";
+import { fetchOpenRouteServiceHealth } from "../services/walking/openRouteService";
+import { IDFM_MARKETPLACE_BASE_URL } from "../services/idfm/marketplaceClient";
 import { transportClockPluginHealthChecks } from "#transport-clock/plugin-server-registry";
 
 const MARKETPLACE_ROOT = "https://prim.iledefrance-mobilites.fr/marketplace";
 const HEALTH_TIMEOUT_MS = 2_800;
-const MAP_TILE_HEALTH_URL = "https://a.basemaps.cartocdn.com/light_all/12/2074/1408.png";
+const MAP_TILE_HEALTH_URL = "https://a.basemaps.cartocdn.com/rastertiles/voyager/12/2074/1408.png";
+const SATELLITE_TILE_HEALTH_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/12/1408/2074";
 const OPEN_METEO_HEALTH_URL =
   "https://api.open-meteo.com/v1/forecast?latitude=48.8566&longitude=2.3522&current=temperature_2m,weather_code&forecast_days=1&timezone=Europe%2FParis";
+const IGN_GEOCODING_HEALTH_URL =
+  "https://data.geopf.fr/geocodage/completion/?text=10%20avenue%20de%20Paris%20Versailles&maximumResponses=1&type=StreetAddress&bbox=1.4,48.1,3.6,49.3";
+const OVERPASS_HEALTH_URL = "https://overpass-api.de/api/status";
 const PRIM_API_STATUS_URL = "https://prim.iledefrance-mobilites.fr/fr/etat-des-api";
 const PRIM_API_STATUS_CACHE_TTL_MS = 10 * 60_000;
 const MARKETPLACE_HEALTH_CACHE_TTL_MS = 10 * 60_000;
@@ -45,15 +52,17 @@ type NetexDatasetFreshness = {
   detail: string;
 };
 
+type HealthCheckHandler = (event: H3Event) => HealthCheck | Promise<HealthCheck>;
+
 export default defineEventHandler(async (event): Promise<HealthResponse> => {
+  const pluginChecks = (
+    transportClockPluginHealthChecks as HealthCheckHandler[]
+  ).map((check, index) => runPluginHealthCheck(check, event, index));
+
   const checks = await Promise.all([
     checkNetexCache(event),
     checkGtfsCache(event),
-    ...(
-      transportClockPluginHealthChecks as Array<
-        (event: H3Event) => HealthCheck | Promise<HealthCheck>
-      >
-    ).map((check) => check(event)),
+    ...pluginChecks,
     checkR2Cache(event),
     checkMarketplaceApi(
       event,
@@ -67,15 +76,15 @@ export default defineEventHandler(async (event): Promise<HealthResponse> => {
       "Navitia API",
       "/v2/navitia/commercial_modes?count=1&disable_disruption=true&disable_geojson=true",
     ),
-    checkMarketplaceApi(
-      event,
-      "prim-traffic",
-      "PRIM info trafic",
-      "/v2/navitia/line_reports/lines/line%3AIDFM%3AC01743/line_reports?count=1&disable_geojson=true",
-    ),
+    checkNavitiaJourneys(event),
+    checkTrafficCache(event),
     checkPrimGlobalStatus(),
     checkOpenMeteoWeather(),
     checkMapTiles(),
+    checkSatelliteTiles(),
+    checkIgnGeocoding(),
+    checkNearbyPlaces(),
+    checkWalkingRoutes(event),
   ]);
 
   return {
@@ -83,6 +92,41 @@ export default defineEventHandler(async (event): Promise<HealthResponse> => {
     checks,
   };
 });
+
+export async function runPluginHealthCheck(
+  check: HealthCheckHandler,
+  event: H3Event,
+  index: number,
+): Promise<HealthCheck> {
+  const startedAt = performance.now();
+
+  try {
+    return await check(event);
+  } catch (error) {
+    return {
+      id: `plugin-health-${index + 1}`,
+      label: check.name || `Plugin health check #${index + 1}`,
+      category: "Plugin",
+      required: false,
+      status: "error",
+      latencyMs: Math.round(performance.now() - startedAt),
+      message: "Service unreachable",
+      messageKey: "health.messages.serviceUnreachable",
+      detail: error instanceof Error ? error.message : "Unknown error",
+      detailKey: error instanceof Error ? undefined : "health.messages.unknownError",
+      quota: { exposed: false },
+    };
+  }
+}
+
+export function checkNavitiaJourneys(event: H3Event): Promise<HealthCheck> {
+  return checkMarketplaceApi(
+    event,
+    "navitia-journeys",
+    "Navitia journeys",
+    "/v2/navitia/journeys?from=2.333974%3B48.829464&to=2.333974%3B48.829464&count=1&data_freshness=base_schedule&disable_disruption=true&disable_geojson=true",
+  );
+}
 
 export async function checkPrimGlobalStatus(): Promise<HealthCheck> {
   return timedCheck(
@@ -412,6 +456,55 @@ async function checkMarketplaceApi(
   return result;
 }
 
+async function checkTrafficCache(event: H3Event): Promise<HealthCheck> {
+  return timedCheck("prim-traffic", "PRIM info trafic", "Realtime", true, async () => {
+    const status = await getTrafficCacheStatus(event);
+
+    if (!status.configured) {
+      return {
+        status: "error",
+        message: "Missing API key",
+        messageKey: "health.messages.missingApiKey",
+        detail: status.cache.lastError,
+        detailKey: "health.messages.missingApiKeyDetail",
+        quota: { exposed: false },
+      };
+    }
+
+    const cacheState = status.cache.state;
+    const cacheHealthy = cacheState === "hit" || cacheState === "refreshing";
+    const cacheWarning =
+      cacheState === "miss" ||
+      cacheState === "stale" ||
+      cacheState === "rate-limited";
+
+    return {
+      status: cacheHealthy ? "ok" : cacheWarning ? "warning" : "error",
+      message: cacheHealthy
+        ? "Global traffic cache available"
+        : cacheWarning
+        ? cacheState === "miss"
+          ? "Global traffic cache is not warmed"
+          : "Global traffic cache is stale"
+          : "Global traffic cache unavailable",
+      messageKey: cacheHealthy
+        ? "health.messages.endpointReachable"
+        : "health.messages.idfmEndpointBadStatus",
+      detail: [
+        `state=${cacheState}`,
+        status.cache.ageMs !== undefined
+          ? `age=${Math.round(status.cache.ageMs / 1000)}s`
+          : "no snapshot",
+        status.cache.lastError,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      detailKey: "health.messages.idfmProxyTest",
+      quota: { exposed: false },
+    };
+  });
+}
+
 async function checkOpenMeteoWeather(): Promise<HealthCheck> {
   return timedCheck("open-meteo", "Open-Meteo weather", "Weather", false, async () => {
     const response = await fetchWithTimeout(OPEN_METEO_HEALTH_URL, {
@@ -463,8 +556,165 @@ async function checkMapTiles(): Promise<HealthCheck> {
       status: "ok",
       message: "Map background reachable",
       messageKey: "health.messages.mapReachable",
-      detail: "Carto basemap light_all responds correctly.",
+      detail: "Carto basemap Voyager responds correctly.",
       detailKey: "health.messages.mapTest",
+      quota: extractQuota(response.headers),
+    };
+  });
+}
+
+async function checkIgnGeocoding(): Promise<HealthCheck> {
+  return timedCheck("ign-geocoding", "IGN address search", "Map", false, async () => {
+    const response = await fetchWithTimeout(IGN_GEOCODING_HEALTH_URL, {
+      headers: { accept: "application/json", "accept-language": "fr-FR,fr;q=0.9" },
+    });
+    if (!response.ok) {
+      return {
+        status: "warning",
+        message: `${response.status} ${response.statusText}`,
+        detail: "The IGN geocoding API responded without an OK status.",
+        detailKey: "health.messages.ignGeocodingBadStatus",
+        quota: extractQuota(response.headers),
+      };
+    }
+    return {
+      status: "ok",
+      message: "Address search reachable",
+      messageKey: "health.messages.ignGeocodingReachable",
+      detail: "Public IGN Géoplateforme completion test on a fixed address.",
+      detailKey: "health.messages.ignGeocodingTest",
+      quota: extractQuota(response.headers),
+    };
+  });
+}
+
+export async function checkNearbyPlaces(): Promise<HealthCheck> {
+  return timedCheck("overpass-places", "OpenStreetMap nearby places", "Map", false, async () => {
+    const response = await fetchWithTimeout(OVERPASS_HEALTH_URL, {
+      headers: { accept: "text/plain", "user-agent": "TransportClockGPT/0.1 health check" },
+    });
+    if (!response.ok) {
+      return {
+        status: "warning",
+        message: `${response.status} ${response.statusText}`,
+        detailKey: "health.messages.overpassBadStatus",
+      };
+    }
+    return {
+      status: "ok",
+      message: "Nearby places reachable",
+      messageKey: "health.messages.overpassReachable",
+      detailKey: "health.messages.overpassTest",
+      quota: extractQuota(response.headers),
+    };
+  });
+}
+
+export async function checkWalkingRoutes(event: H3Event): Promise<HealthCheck> {
+  return timedCheck("walking-routes", "Walking routes", "Map", false, async () => {
+    const idfmKey = getServerIdfmApiKey(event);
+    if (idfmKey) {
+      const url = new URL(`${IDFM_MARKETPLACE_BASE_URL}/v2/navitia/journeys`);
+      url.searchParams.set("count", "1");
+      url.searchParams.set("data_freshness", "base_schedule");
+      url.searchParams.set("disable_disruption", "true");
+      url.searchParams.set("disable_geojson", "false");
+      url.searchParams.set("direct_path", "only");
+      url.searchParams.append("first_section_mode[]", "walking");
+      url.searchParams.append("last_section_mode[]", "walking");
+      url.searchParams.set("from", "2.333974;48.829464");
+      url.searchParams.set("to", "2.3348;48.8298");
+      const response = await fetchWithTimeout(url.toString(), {
+        headers: { accept: "application/json", apikey: idfmKey },
+      });
+      if (response.ok) {
+        return {
+          status: "ok",
+          message: "IDFM walking routes reachable",
+          messageKey: "health.messages.walkingRoutesIdfmReachable",
+          detail: "PRIM/Navitia direct walking route with GeoJSON geometry.",
+          detailKey: "health.messages.walkingRoutesIdfmTest",
+          quota: extractQuota(response.headers),
+        };
+      }
+
+      const orsResponse = await fetchOpenRouteServiceHealth(event);
+      if (orsResponse?.ok) {
+        return {
+          status: "warning",
+          message: `${response.status} ${response.statusText}`,
+          messageKey: "health.messages.walkingRoutesIdfmBadStatus",
+          detail: "PRIM is unavailable; OpenRouteService fallback is reachable.",
+          detailKey: "health.messages.walkingRoutesOrsFallback",
+          quota: extractQuota(response.headers),
+        };
+      }
+
+      return {
+        status: "warning",
+        message: `${response.status} ${response.statusText}`,
+        messageKey: "health.messages.walkingRoutesIdfmBadStatus",
+        detail: "Neither the preferred PRIM route nor the configured fallback responded correctly.",
+        detailKey: "health.messages.walkingRoutesUnavailableDetail",
+        quota: extractQuota(response.headers),
+      };
+    }
+
+    const orsResponse = await fetchOpenRouteServiceHealth(event);
+    if (!orsResponse) {
+      return {
+        status: "not_configured",
+        message: "No walking route provider configured",
+        messageKey: "health.messages.walkingRoutesNotConfigured",
+        detail: "Configure IDFM_API_KEY for the preferred PRIM route, or ORS_API_KEY as fallback.",
+        detailKey: "health.messages.walkingRoutesNotConfiguredDetail",
+      };
+    }
+    if (!orsResponse.ok) {
+      return {
+        status: "warning",
+        message: `${orsResponse.status} ${orsResponse.statusText}`,
+        messageKey: "health.messages.walkingRoutesOrsBadStatus",
+        detail: "OpenRouteService fallback responded without an OK status.",
+        detailKey: "health.messages.walkingRoutesOrsTest",
+        quota: extractQuota(orsResponse.headers),
+      };
+    }
+    return {
+      status: "ok",
+      message: "OpenRouteService walking fallback reachable",
+      messageKey: "health.messages.walkingRoutesOrsReachable",
+      detail: "Used only when the preferred PRIM/Navitia route is unavailable.",
+      detailKey: "health.messages.walkingRoutesOrsTest",
+      quota: extractQuota(orsResponse.headers),
+    };
+  });
+}
+
+export async function checkSatelliteTiles(): Promise<HealthCheck> {
+  return timedCheck("satellite-tiles", "Satellite imagery", "Map", false, async () => {
+    const response = await fetchWithTimeout(SATELLITE_TILE_HEALTH_URL, {
+      headers: {
+        accept: "image/jpeg,image/png,image/*;q=0.8,*/*;q=0.5",
+      },
+    });
+
+    if (!response.ok) {
+      return {
+        status: "warning",
+        message: `${response.status} ${response.statusText}`,
+        detail: "The Esri World Imagery basemap did not respond correctly.",
+        detailKey: "health.messages.satelliteBadStatus",
+        quota: extractQuota(response.headers),
+      };
+    }
+
+    return {
+      status: "ok",
+      message: "Satellite imagery reachable",
+      messageKey: "health.messages.satelliteReachable",
+      detail: "Esri World Imagery tile responds correctly.",
+      detailKey: "health.messages.satelliteTest",
       quota: extractQuota(response.headers),
     };
   });
@@ -519,10 +769,15 @@ function getHealthCheckLabelKey(id: string): HealthCheck["labelKey"] {
     r2: "health.checks.r2",
     prim: "health.checks.prim",
     navitia: "health.checks.navitia",
+    "navitia-journeys": "health.checks.navitiaJourneys",
     "prim-traffic": "health.checks.primTraffic",
     "prim-global-status": "health.checks.primGlobalStatus",
     "open-meteo": "health.checks.openMeteo",
     "map-tiles": "health.checks.mapTiles",
+    "satellite-tiles": "health.checks.satelliteTiles",
+    "ign-geocoding": "health.checks.ignGeocoding",
+    "overpass-places": "health.checks.overpassPlaces",
+    "walking-routes": "health.checks.walkingRoutes",
   }[id] as HealthCheck["labelKey"];
 }
 

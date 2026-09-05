@@ -5,12 +5,15 @@ import {
   filterTerminalOnly,
   fullscreenStationPanelDesignOptions,
   getEffectiveMaxDeparturesPerDirection,
+  parseGlobalMapBasemapContrast,
+  parseGlobalMapBasemapStyle,
   normalizeAppSettings,
   parseMaxDeparturesPerDirection,
   parsePatternCompactBranchGap,
   parsePatternCompactForkGap,
   parsePatternRealisticMaxGapCoefficient,
   parsePatternRealisticMinGapCoefficient,
+  parseTravelAlarmSafetyMinutes,
   parseTrafficWarningLookaheadDays,
   parseTransferBundleRetentionDays,
   parseTransferBundleRequestConcurrency,
@@ -19,6 +22,7 @@ import {
   transferResolverModeOptions,
   trafficCalendarImpactScopeOptions,
 } from "../src/features/app-settings/appSettings";
+import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../src/features/transport-map/config/globalTransportPlanConfig";
 
 describe("app settings", () => {
   it("keeps current behaviour as the default", () => {
@@ -31,9 +35,20 @@ describe("app settings", () => {
       terminalDirectionsOnly: false,
       wakeLockDuration: "none",
       wakeDeviceOnAlarm: true,
+      travelAlarmSafetyMinutes: 2,
       boardTogglesPlacement: "inline",
       placePresetNavigationMode: "dropdown-swipe",
+      showTravelRouteLineIcons: true,
+      showUserLocation: true,
       navigationAutoHide: "none",
+      globalMapBasemapContrast: GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.default,
+      globalMapBasemapStyle: GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.style.default,
+      deckAntialiasing: true,
+      nearbyMapShowIsochroneControl: true,
+      nearbyMapShowDirectoryControl: true,
+      nearbyMapShowBasemapControl: true,
+      nearbyMapShowDisplayControl: true,
+      nearbyMapShowFullscreenControl: true,
       pluginViewerMode: "grid",
       plugins: {
         "idfm-realtime-vehicles": {
@@ -88,12 +103,18 @@ describe("app settings", () => {
     const settings = normalizeAppSettings({
       closedDirectionSummaryMode: "future",
       maxDeparturesPerDirection: "999",
+      globalMapBasemapContrast: "not-a-number",
+      globalMapBasemapStyle: "unknown-style",
+      deckAntialiasing: "yes",
+      showUserLocation: "yes",
+      showTravelRouteLineIcons: "yes",
       showPatternMiniMap: "yes",
       showPatternCityZones: "yes",
       terminalDirectionsOnly: true,
       boardTogglesPlacement: "drawer",
       placePresetNavigationMode: "future",
       wakeLockDuration: "forever",
+      travelAlarmSafetyMinutes: "999",
       navigationAutoHide: "always",
       pluginViewerMode: "tiles",
       experimentalRealtimeVehicleVisualization: "sometimes",
@@ -134,12 +155,27 @@ describe("app settings", () => {
     expect(settings.language).toBe("auto");
     expect(settings.closedDirectionSummaryMode).toBe("next");
     expect(settings.maxDeparturesPerDirection).toBe("default");
+    expect(settings.globalMapBasemapContrast).toBe(
+      GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.default,
+    );
+    expect(settings.globalMapBasemapStyle).toBe(
+      GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.style.default,
+    );
+    expect(settings.deckAntialiasing).toBe(true);
+    expect(settings.nearbyMapShowIsochroneControl).toBe(true);
+    expect(settings.nearbyMapShowDirectoryControl).toBe(true);
+    expect(settings.nearbyMapShowBasemapControl).toBe(true);
+    expect(settings.nearbyMapShowDisplayControl).toBe(true);
+    expect(settings.nearbyMapShowFullscreenControl).toBe(true);
+    expect(settings.showUserLocation).toBe(true);
+    expect(settings.showTravelRouteLineIcons).toBe(true);
     expect(settings.showPatternMiniMap).toBe(true);
     expect(settings.showPatternCityZones).toBe(true);
     expect(settings.terminalDirectionsOnly).toBe(true);
     expect(settings.boardTogglesPlacement).toBe("inline");
     expect(settings.placePresetNavigationMode).toBe("dropdown-swipe");
     expect(settings.wakeLockDuration).toBe("none");
+    expect(settings.travelAlarmSafetyMinutes).toBe(30);
     expect(settings.navigationAutoHide).toBe("none");
     expect(settings.pluginViewerMode).toBe("grid");
     expect(settings.plugins["idfm-realtime-vehicles"].enabled).toBe(true);
@@ -196,6 +232,24 @@ describe("app settings", () => {
     ).toBe(false);
   });
 
+  it("allows disabling user location while keeping it enabled by default", () => {
+    expect(createDefaultAppSettings().showUserLocation).toBe(true);
+    expect(normalizeAppSettings({ showUserLocation: false }).showUserLocation).toBe(false);
+    expect(normalizeAppSettings({ showUserLocation: "false" }).showUserLocation).toBe(true);
+  });
+
+  it("keeps Deck antialiasing enabled by default and allows disabling it", () => {
+    expect(createDefaultAppSettings().deckAntialiasing).toBe(true);
+    expect(normalizeAppSettings({ deckAntialiasing: false }).deckAntialiasing).toBe(false);
+    expect(normalizeAppSettings({ deckAntialiasing: "false" }).deckAntialiasing).toBe(true);
+  });
+
+  it("allows hiding official line icons in travel routes while keeping them enabled by default", () => {
+    expect(createDefaultAppSettings().showTravelRouteLineIcons).toBe(true);
+    expect(normalizeAppSettings({ showTravelRouteLineIcons: false }).showTravelRouteLineIcons).toBe(false);
+    expect(normalizeAppSettings({ showTravelRouteLineIcons: "false" }).showTravelRouteLineIcons).toBe(true);
+  });
+
   it("preserves the interruption walking time preference", () => {
     expect(
       normalizeAppSettings({ showInterruptionWalkingTimes: false })
@@ -221,6 +275,39 @@ describe("app settings", () => {
     expect(
       normalizeAppSettings({ pluginViewerMode: "list" }).pluginViewerMode,
     ).toBe("list");
+  });
+
+  it("preserves nearby map control preferences and safely defaults invalid values", () => {
+    const persisted = JSON.parse(JSON.stringify({
+      ...createDefaultAppSettings(),
+      nearbyMapShowIsochroneControl: false,
+      nearbyMapShowDirectoryControl: false,
+      nearbyMapShowBasemapControl: false,
+      nearbyMapShowDisplayControl: false,
+      nearbyMapShowFullscreenControl: false,
+    }));
+
+    expect(normalizeAppSettings(persisted)).toMatchObject({
+      nearbyMapShowIsochroneControl: false,
+      nearbyMapShowDirectoryControl: false,
+      nearbyMapShowBasemapControl: false,
+      nearbyMapShowDisplayControl: false,
+      nearbyMapShowFullscreenControl: false,
+    });
+
+    expect(normalizeAppSettings({
+      nearbyMapShowIsochroneControl: "false",
+      nearbyMapShowDirectoryControl: 0,
+      nearbyMapShowBasemapControl: null,
+      nearbyMapShowDisplayControl: undefined,
+      nearbyMapShowFullscreenControl: {},
+    })).toMatchObject({
+      nearbyMapShowIsochroneControl: true,
+      nearbyMapShowDirectoryControl: true,
+      nearbyMapShowBasemapControl: true,
+      nearbyMapShowDisplayControl: true,
+      nearbyMapShowFullscreenControl: true,
+    });
   });
 
   it("preserves settings for plugins missing from the current build", () => {
@@ -311,6 +398,9 @@ describe("app settings", () => {
     expect(parseTrafficWarningLookaheadDays("0")).toBe(0);
     expect(parseTrafficWarningLookaheadDays("14")).toBe(14);
     expect(parseTrafficWarningLookaheadDays("999")).toBe(30);
+    expect(parseTravelAlarmSafetyMinutes("7")).toBe(7);
+    expect(parseTravelAlarmSafetyMinutes("-1")).toBe(0);
+    expect(parseTravelAlarmSafetyMinutes("999")).toBe(30);
     expect(parsePatternCompactBranchGap("300")).toBe(300);
     expect(parsePatternCompactBranchGap("9999")).toBe(360);
     expect(parsePatternCompactForkGap("180")).toBe(180);
@@ -319,6 +409,17 @@ describe("app settings", () => {
     expect(parsePatternRealisticMinGapCoefficient("9")).toBe(1.25);
     expect(parsePatternRealisticMaxGapCoefficient("3", 0.75)).toBe(3);
     expect(parsePatternRealisticMaxGapCoefficient("0.5", 1.25)).toBe(1.25);
+    expect(parseGlobalMapBasemapContrast("1.12")).toBe(1.12);
+    expect(parseGlobalMapBasemapContrast("9")).toBe(
+      GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.max,
+    );
+    expect(parseGlobalMapBasemapContrast("0.1")).toBe(
+      GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.min,
+    );
+    expect(parseGlobalMapBasemapStyle("light")).toBe("light");
+    expect(parseGlobalMapBasemapStyle("unknown-style")).toBe(
+      GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.style.default,
+    );
   });
 
   it("migrates the previous place swipe toggle to the new selector mode", () => {

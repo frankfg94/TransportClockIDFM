@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   createIdfmStopReferenceKeys,
   extractIdfmStopPointCode,
+  idfmLineToSiriRef,
+  idfmReferenceToMonitoringRef,
+  monitoringRefToNavitiaStopAreaRef,
   monitoringRefToNavitiaStopPointRef,
   navitiaStopPointToMonitoringRef,
 } from "../src/services/idfmStopReferences";
@@ -44,5 +47,20 @@ describe("IDFM stop point references", () => {
         ),
       ),
     ).toEqual(["idfm-stop:22222", "idfm-stop:22222", "idfm-stop:22222"]);
+  });
+
+  it("converts precalculated stop-area and line ids to SIRI refs", () => {
+    expect(idfmReferenceToMonitoringRef("station:FR::monomodalStopPlace:46007:FR1"))
+      .toBe("STIF:StopArea:SP:46007:");
+    expect(idfmReferenceToMonitoringRef("FR::Quay:50227635:FR1"))
+      .toBe("STIF:StopPoint:Q:50227635:");
+    expect(idfmLineToSiriRef("line:IDFM:C01743"))
+      .toBe("STIF:Line::C01743:");
+  });
+
+  it("converts a topology SIRI stop-area ref to a Navitia schedule ref", () => {
+    expect(monitoringRefToNavitiaStopAreaRef("STIF:StopArea:SP:70505:"))
+      .toBe("stop_area:IDFM:70505");
+    expect(monitoringRefToNavitiaStopAreaRef("STIF:StopPoint:Q:70505:")).toBeUndefined();
   });
 });

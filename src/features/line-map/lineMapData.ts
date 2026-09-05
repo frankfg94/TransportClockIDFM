@@ -35,7 +35,11 @@ import {
 } from "../network-ghost/geoProjection";
 import { getCoordinatesDistanceKm } from "../../services/distance";
 import { fetchResolvedLineGeometry } from "../../services/lineGeometry";
-import { loadTransferBundleForTarget } from "../service-pattern/transferBundles";
+import { createLinePresentation } from "../../services/linePresentation";
+import {
+  loadTransferBundleForTarget,
+  type TransferBundleTargetLoadOptions,
+} from "../service-pattern/transferBundles";
 import { filterCurrentLineTransfers } from "../service-pattern/transferVisibility";
 import { applyResolvedLineGeometry, createLineGeometryRequest } from "./lineGeometryViewModel";
 
@@ -45,7 +49,6 @@ const SVG_PADDING_X = 78;
 const SVG_PADDING_Y = 68;
 const MAP_COORDINATE_PADDING = 0.08;
 const TILE_SERVER_SHARDS = ["a", "b", "c"];
-const BUS_DIRECTION_POSITION_TOLERANCE_KM = 0.005;
 const CANONICAL_STATION_NAME_MAX_DISTANCE_KM = 0.3;
 const CANONICAL_STATION_NAME_AMBIGUITY_MARGIN_KM = 0.075;
 const CANONICAL_STATION_POSITION_MAX_DISTANCE_KM = 0.16;
@@ -60,6 +63,8 @@ interface PositionedLineMap {
   stops: LineMapStopView[];
   viewport?: GeographicViewport;
 }
+
+export type StationTransfersLoadOptions = TransferBundleTargetLoadOptions;
 
 export async function loadDetailedLineMap(
   line: LineSearchOption,
@@ -102,8 +107,38 @@ export async function loadDetailedLineMap(
 
 export interface BusMapDirectionSelection {
   sequence: LineRouteSequence;
+  /** The passenger-facing, main directions. */
   options: LineMapDirectionOption[];
+  /** Optional short-turn, school or branch variants of the selected main direction. */
+  variants: LineMapDirectionOption[];
   selectedDirectionId: string;
+  selectedMainDirectionId: string;
+}
+
+/**
+ * The global map uses the same direction model for every line family.  The
+ * historical Bus name is kept as a compatibility alias because the detailed
+ * and global bus tests import it directly.
+ */
+export type GlobalMapDirectionSelection = BusMapDirectionSelection;
+
+export const GLOBAL_MERGED_DIRECTION_ID = "global:merged";
+
+export function defaultGlobalDirectionMerge(mode: string): boolean {
+  return mode !== "BUS" && mode !== "NOCTILIEN";
+}
+
+/**
+ * Rail, metro and tram lines expose their route patterns through the same
+ * topology endpoint as buses. The individual direction options keep the
+ * existing passenger-facing grouping; the global map adds a separate
+ * synthetic "merged" direction when callers need every branch at once.
+ */
+export function selectGlobalMapDirection(
+  sequences: LineRouteSequence[],
+  selectedDirectionId?: string,
+): GlobalMapDirectionSelection | undefined {
+  return selectFusedGlobalMapDirection(sequences, selectedDirectionId);
 }
 
 export function selectBusMapDirection(
@@ -131,51 +166,274 @@ export function selectBusMapDirection(
       });
     });
 
-  const candidates = [...directions.values()];
+  let candidates = [...directions.values()];
+  const onlyCandidate = candidates[0];
+  const firstStop = onlyCandidate?.sequence.stops[0];
+  const lastStop = onlyCandidate?.sequence.stops.at(-1);
+  const uniqueStopCount = onlyCandidate
+    ? new Set(onlyCandidate.sequence.stops.map((stop) => stop.id)).size
+    : 0;
+
+  // A closed topology loop has one terminal id by definition, so a
+  // terminal-id map would otherwise discard the reverse traversal entirely.
+  // Materialize that reverse generically; the compiler still receives the
+  // original topology and no line-specific exception is needed.
+  if (
+    onlyCandidate &&
+    firstStop &&
+    lastStop &&
+    firstStop.id === lastStop.id &&
+    uniqueStopCount >= 3
+  ) {
+    const reverseId = `${onlyCandidate.option.id}:reverse`;
+    directions.set(reverseId, {
+      sequence: {
+        ...onlyCandidate.sequence,
+        id: `${onlyCandidate.sequence.id}:reverse`,
+        stops: [...onlyCandidate.sequence.stops].reverse(),
+      },
+      option: {
+        id: reverseId,
+        label: onlyCandidate.option.label,
+        stopCount: onlyCandidate.sequence.stops.length,
+      },
+    });
+    candidates = [...directions.values()];
+  }
+
   const selected =
     candidates.find(({ option }) => option.id === selectedDirectionId) ??
     candidates[0];
   if (!selected) return undefined;
 
-  const hasDifferentDirections = candidates.some(
-    (candidate, index) =>
-      index > 0 &&
-      !haveEquivalentDirectionPositions(candidates[0].sequence, candidate.sequence),
-  );
+  const hasDifferentDirections = candidates.length > 1;
 
   return {
     sequence: selected.sequence,
     options: hasDifferentDirections
       ? candidates.map(({ option }) => option)
       : [],
+    variants: [],
     selectedDirectionId: selected.option.id,
+    selectedMainDirectionId: selected.option.id,
   };
 }
 
-function haveEquivalentDirectionPositions(
-  left: LineRouteSequence,
-  right: LineRouteSequence,
-): boolean {
-  if (left.stops.length !== right.stops.length) return false;
+/**
+ * Selects a bus service pattern for the global map without turning every
+ * short-turn or school run into a passenger-facing direction. NeTEx exposes
+ * the service direction independently of a pattern's actual terminal; that
+ * semantic field is therefore the grouping key. A terminal is only used as a
+ * generic fallback when the source does not provide a direction.
+ */
+export function selectGlobalBusMapDirection(
+  sequences: LineRouteSequence[],
+  selectedDirectionId?: string,
+): BusMapDirectionSelection | undefined {
+  return selectGlobalMapDirection(sequences, selectedDirectionId);
+}
 
-  return left.stops.every((leftStop, index) => {
-    const rightStop = right.stops[right.stops.length - index - 1];
-    const leftCoordinate = resolveTransitLonLat(leftStop);
-    const rightCoordinate = resolveTransitLonLat(rightStop);
+function selectFusedGlobalMapDirection(
+  sequences: LineRouteSequence[],
+  selectedDirectionId?: string,
+): GlobalMapDirectionSelection | undefined {
+  type Variant = {
+    sequence: LineRouteSequence;
+    terminalId: string;
+    option: LineMapDirectionOption;
+  };
+  type DirectionGroup = {
+    label: string;
+    variants: Variant[];
+  };
 
-    if (!leftCoordinate || !rightCoordinate) {
-      return leftStop.id === rightStop.id;
+  const groups = new Map<string, DirectionGroup>();
+
+  for (const sequence of sequences) {
+    const terminal = sequence.stops.at(-1);
+    if (!terminal) continue;
+
+    const directionLabel = sequence.direction?.trim();
+    const groupKey = directionLabel
+      ? `direction:${normalizeBusDirectionLabel(directionLabel)}`
+      : `terminal:${terminal.id}`;
+    const group = groups.get(groupKey) ?? {
+      label: directionLabel || terminal.label,
+      variants: [],
+    };
+
+    // Two services can share a terminus while one inserts a school or
+    // diversion stop in the middle. Retain both: grouping only by terminal
+    // silently turns that detour into the passenger-facing route.
+    if (!group.variants.some((variant) => variant.option.id === sequence.id)) {
+      group.variants.push({
+        sequence,
+        terminalId: terminal.id,
+        option: {
+          id: sequence.id,
+          label: terminal.label,
+          stopCount: sequence.stops.length,
+        },
+      });
+    }
+    groups.set(groupKey, group);
+  }
+
+  // A short-turn can have a different destination label even though it is
+  // only a prefix/suffix of a passenger-facing direction. Treat that pattern
+  // as an optional variant of the containing direction. This keeps a short
+  // run such as "vers Porte de Clichy" from becoming a third main direction
+  // while preserving the exact pattern for callers that request it.
+  const groupEntries = [...groups.entries()];
+  const findContainingDirectionGroup = (
+    sourceKey: string,
+    candidate: LineRouteSequence,
+  ): DirectionGroup | undefined => {
+    let best: { group: DirectionGroup; length: number } | undefined;
+
+    for (const [groupKey, group] of groupEntries) {
+      if (groupKey === sourceKey) continue;
+
+      for (const parent of group.variants) {
+        const parentLength = parent.sequence.stops.length;
+        if (
+          parentLength <= candidate.stops.length ||
+          !containsOrderedStopWindow(parent.sequence, candidate)
+        ) {
+          continue;
+        }
+
+        if (!best || parentLength > best.length) {
+          best = { group, length: parentLength };
+        }
+      }
     }
 
-    return (
-      getCoordinatesDistanceKm(
-        leftCoordinate.lat,
-        leftCoordinate.lon,
-        rightCoordinate.lat,
-        rightCoordinate.lon,
-      ) <= BUS_DIRECTION_POSITION_TOLERANCE_KM
-    );
-  });
+    return best?.group;
+  };
+
+  for (const [sourceKey, sourceGroup] of groupEntries) {
+    for (const variant of [...sourceGroup.variants]) {
+      const parentGroup = findContainingDirectionGroup(sourceKey, variant.sequence);
+      if (!parentGroup) continue;
+
+      sourceGroup.variants = sourceGroup.variants.filter(
+        (sourceVariant) => sourceVariant.option.id !== variant.option.id,
+      );
+      if (!parentGroup.variants.some(
+        (parentVariant) => parentVariant.option.id === variant.option.id,
+      )) {
+        parentGroup.variants.push(variant);
+      }
+    }
+
+    if (sourceGroup.variants.length === 0) {
+      groups.delete(sourceKey);
+    }
+  }
+
+  const candidates = [...groups.values()]
+    .map((group) => {
+      const variants = [...group.variants].sort(compareGlobalBusDirectionVariants);
+      const primary = variants[0];
+      return primary ? { group, primary, variants } : undefined;
+    })
+    .filter((candidate): candidate is {
+      group: DirectionGroup;
+      primary: Variant;
+      variants: Variant[];
+    } => Boolean(candidate))
+    .sort((left, right) => right.primary.sequence.stops.length - left.primary.sequence.stops.length);
+
+  if (candidates.length === 0) return undefined;
+
+  const selectedCandidate = candidates.find(({ primary, variants }) =>
+    primary.option.id === selectedDirectionId
+    || variants.some((variant) =>
+      variant.option.id === selectedDirectionId || variant.terminalId === selectedDirectionId,
+    ),
+  ) ?? candidates[0];
+  const selectedVariant = selectedCandidate.variants.find((variant) =>
+    variant.option.id === selectedDirectionId || variant.terminalId === selectedDirectionId,
+  ) ?? selectedCandidate.primary;
+
+  return {
+    sequence: selectedVariant.sequence,
+    options: candidates.map(({ group, primary }) => ({
+      ...primary.option,
+      label: group.label,
+    })),
+    variants: selectedCandidate.variants.map(({ option }) => option),
+    selectedDirectionId: selectedVariant.option.id,
+    selectedMainDirectionId: selectedCandidate.primary.option.id,
+  };
+}
+
+function compareGlobalBusDirectionVariants(
+  left: { sequence: LineRouteSequence; terminalId: string; option: LineMapDirectionOption },
+  right: { sequence: LineRouteSequence; terminalId: string; option: LineMapDirectionOption },
+): number {
+  // For identical termini, the shorter ordered subsequence is the regular
+  // traversal when the longer pattern only inserts intermediate stops. A
+  // genuine short-turn has another terminus and remains an optional variant.
+  if (left.terminalId === right.terminalId) {
+    const leftContainsRight =
+      left.sequence.stops.length > right.sequence.stops.length &&
+      containsOrderedStopSubsequence(left.sequence, right.sequence);
+    const rightContainsLeft =
+      right.sequence.stops.length > left.sequence.stops.length &&
+      containsOrderedStopSubsequence(right.sequence, left.sequence);
+    if (leftContainsRight) return 1;
+    if (rightContainsLeft) return -1;
+  }
+
+  return right.sequence.stops.length - left.sequence.stops.length
+    || left.option.id.localeCompare(right.option.id, "fr-FR");
+}
+
+function normalizeBusDirectionLabel(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+function containsOrderedStopWindow(
+  parent: LineRouteSequence,
+  candidate: LineRouteSequence,
+): boolean {
+  const parentStops = parent.stops.map(routeStopIdentity);
+  const candidateStops = candidate.stops.map(routeStopIdentity);
+  if (candidateStops.length > parentStops.length) return false;
+
+  return parentStops.some((_stop, start) =>
+    candidateStops.every((stop, offset) => parentStops[start + offset] === stop),
+  );
+}
+
+function containsOrderedStopSubsequence(
+  parent: LineRouteSequence,
+  candidate: LineRouteSequence,
+): boolean {
+  const parentStops = parent.stops.map(routeStopIdentity);
+  const candidateStops = candidate.stops.map(routeStopIdentity);
+  if (candidateStops.length > parentStops.length) return false;
+
+  let candidateIndex = 0;
+  for (const parentStop of parentStops) {
+    if (parentStop === candidateStops[candidateIndex]) candidateIndex += 1;
+    if (candidateIndex === candidateStops.length) return true;
+  }
+  return candidateStops.length === 0;
+}
+
+function routeStopIdentity(stop: LineRouteSequence["stops"][number]): string {
+  return (stop.station?.id || stop.id)
+    .trim()
+    .toLowerCase()
+    .replace(/^(?:station|stop[-_]?point|stop[-_]?area|quay):/u, "");
 }
 
 export function createDetailedLineMapViewModel(
@@ -227,12 +485,22 @@ export function createDetailedLineMapViewModel(
   const positionedMap = applyMapCoordinates(Array.from(stopsById.values()), branches);
   const stops = positionedMap.stops;
   const segments = createLineMapSegments(stops, branches);
+  const presentation = createLinePresentation({
+    code: line.label,
+    color: line.color,
+    family: line.family,
+    id: line.id,
+    longName: line.displayName ?? line.label,
+    ref: line.ref,
+    shortName: line.label,
+    textColor: line.textColor,
+  });
 
   return {
     lineId: line.id,
     lineLabel: line.label,
-    lineColor: line.color ?? "#0064ff",
-    textColor: line.textColor ?? "#ffffff",
+    lineColor: presentation.color,
+    textColor: presentation.textColor,
     stops,
     segments,
     branches,
@@ -247,6 +515,7 @@ export function createDetailedLineMapViewModel(
 export async function loadStationTransfers(
   station: StationSearchOption,
   currentLine?: LineSearchOption,
+  options: StationTransfersLoadOptions = {},
 ): Promise<TransferLineOption[]> {
   const currentLineId = currentLine?.navitiaId ?? currentLine?.id;
   const removeCurrentLine = (transfers: TransferLineOption[]) =>
@@ -263,6 +532,7 @@ export async function loadStationTransfers(
 
   if (currentLineId && currentLine) {
     const bundledTransfers = await loadTransferBundleForTarget({
+      ...options,
       lineId: currentLineId,
       lineLabel: currentLine.label,
       target: {
@@ -270,7 +540,7 @@ export async function loadStationTransfers(
         label: station.label,
         city: station.city,
       },
-      transportType: currentLine.family,
+      transportType: options.transportType ?? currentLine.family,
     }).catch(() => undefined);
 
     if (bundledTransfers !== undefined) {

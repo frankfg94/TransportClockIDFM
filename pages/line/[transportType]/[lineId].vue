@@ -111,6 +111,13 @@
         :reduce-motion="settings.reduceMotion"
         :smart-traffic-detection="settings.smartTrafficDetection"
         :traffic-calendar-impact-scope="settings.trafficCalendarImpactScope"
+        :transfer-bundle-retention-days="settings.transferBundleRetentionDays"
+        :transfer-bundle-request-concurrency="settings.transferBundleRequestConcurrency"
+        :transfer-bundle-request-spacing-ms="settings.transferBundleRequestSpacingMs"
+        :transfer-bundle-local-cache-enabled="settings.transferBundleLocalCacheEnabled"
+        :transfer-bundle-backend-cache-enabled="settings.transferBundleBackendCacheEnabled"
+        :transfer-bundle-transport-type="transferBundleTransportType"
+        :transfer-resolver-mode="settings.transferResolverMode"
         :selected-direction-id="selectedDirectionId"
         @direction-change="changeDirection"
       >
@@ -259,7 +266,7 @@ const apiUrl = computed(() => {
     )}/pattern${suffix}`,
   );
 });
-const { data: patternView, pending, error } = useFetch<LinePatternViewResponse>(apiUrl.value);
+const { data: patternView, pending, error } = useFetch<LinePatternViewResponse>(apiUrl);
 const patternRequestTimedOut = ref(false);
 const lineSelectorOpen = ref(false);
 let patternRequestTimeout: ReturnType<typeof setTimeout> | undefined;

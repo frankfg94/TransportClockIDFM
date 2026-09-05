@@ -90,6 +90,31 @@ describe("board departures", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("keeps a StopArea direction when SIRI answers with its concrete StopPoint", async () => {
+    const departureTime = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const board = createRerBBoard();
+    board.directionGroups[0]!.match.monitoringRefs = ["STIF:StopArea:SP:46007:"];
+    const payload = createStopMonitoringPayload(
+      departureTime,
+      "1",
+      "STIF:StopPoint:Q:486826:",
+    );
+    payload.Siri.ServiceDelivery.StopMonitoringDelivery[0]!
+      .MonitoredStopVisit[0]!.MonitoredVehicleJourney
+      .MonitoredCall.DestinationDisplay[0]!.value = "Massy-Pal.";
+    const fetchMock = vi.fn(async () => jsonResponse(payload));
+
+    const result = await fetchBoardDepartures(board, {
+      fetcher: fetchMock as unknown as typeof fetch,
+    });
+
+    expect(result.directionGroups[0]?.departures).toHaveLength(1);
+    expect(result.directionGroups[0]?.departures[0]?.monitoringRef).toBe(
+      "STIF:StopPoint:Q:486826:",
+    );
+    expect(result.directionGroups[0]?.departures[0]?.destination).toBe("Massy-Palaiseau");
+  });
 });
 
 function createRerBBoard(platforms?: string[]): TransitBoardConfig {
@@ -132,6 +157,7 @@ function createRerBBoard(platforms?: string[]): TransitBoardConfig {
 function createStopMonitoringPayload(
   departureTime: string,
   platform: string | null = "1",
+  monitoringRef = "STIF:StopArea:SP:46007:",
 ) {
   return {
     Siri: {
@@ -142,7 +168,7 @@ function createStopMonitoringPayload(
               {
                 ItemIdentifier: "massy-palaiseau-test",
                 MonitoringRef: {
-                  value: "STIF:StopArea:SP:46007:",
+                  value: monitoringRef,
                 },
                 MonitoredVehicleJourney: {
                   LineRef: {

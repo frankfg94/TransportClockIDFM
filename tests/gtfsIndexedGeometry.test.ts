@@ -70,6 +70,32 @@ describe("indexed GTFS geometry", () => {
     ]);
   });
 
+  it("reconciles an imported stop projection with the nearby GTFS shape corridor", () => {
+    const artifact = createArtifact();
+    artifact.patterns[0].projections[1] = {
+      ...artifact.patterns[0].projections[1],
+      coordinate: { lon: 2.309, lat: 48.809 },
+    };
+
+    const segments = createSegmentsFromIndexedGtfs(
+      createRequest(["A", "B", "C"]),
+      compileGtfsLineArtifact(artifact),
+    );
+
+    expect(segments?.map((segment) => segment.coordinates)).toEqual([
+      [
+        { lon: 2.3, lat: 48.8 },
+        { lon: 2.305, lat: 48.805 },
+        { lon: 2.31, lat: 48.81 },
+      ],
+      [
+        { lon: 2.31, lat: 48.81 },
+        { lon: 2.315, lat: 48.815 },
+        { lon: 2.32, lat: 48.82 },
+      ],
+    ]);
+  });
+
   it("uses shape order to disambiguate nearby bus platforms and rejects incomplete coverage", () => {
     const ambiguousArtifact = createArtifact({
       patterns: [
@@ -304,6 +330,8 @@ function createArtifact(
     routeIds: ["IDFM:TEST"],
     labels: ["Test"],
     routeTypes: ["3"],
+    routeColor: "#123456",
+    routeTextColor: "#ffffff",
     patterns: [createPattern("main", ["A", "B", "C"], "shape")],
     shapes: { shape: createShape() },
     entrances: [],

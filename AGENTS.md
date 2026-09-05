@@ -49,6 +49,7 @@ Entry points:
 - `app.vue` mounts `NuxtLayout` and `NuxtPage`.
 - `layouts/default.vue` wraps pages with `AppSettingsRuntime` and `AppNavigationMenu`.
 - `pages/index.vue` renders `src/App.vue`, the main dashboard.
+- `pages/map/index.vue` is the default MapLibre/Deck.gl global map at `/map`; `pages/map/legacy.vue` keeps the Canvas2D/raster experience at `/map/legacy`.
 - `pages/traffic.vue`, `pages/settings.vue`, and `pages/health.vue` delegate to feature pages.
 - `pages/line/[transportType]/[lineId].vue` switches between the embedded line schema and detailed map views.
 

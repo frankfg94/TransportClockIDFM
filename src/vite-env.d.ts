@@ -9,7 +9,7 @@ declare const __APP_SOURCE_REVISION__: string;
 declare module "@tsparticles/vue3";
 
 declare module "#imports" {
-  import type { Ref } from "vue";
+  import type { MaybeRefOrGetter, Ref } from "vue";
 
   export function useState<T>(key: string, init: () => T): Ref<T>;
 
@@ -23,7 +23,7 @@ declare module "#imports" {
     replace(to: { path?: string; query?: Record<string, unknown> }): Promise<void> | void;
   };
 
-  export function useFetch<T>(url: string): {
+  export function useFetch<T>(url: MaybeRefOrGetter<string>): {
     data: Ref<T | null>;
     pending: Ref<boolean>;
     error: Ref<unknown>;

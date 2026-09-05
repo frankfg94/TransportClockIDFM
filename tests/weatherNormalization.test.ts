@@ -59,6 +59,34 @@ describe("Open-Meteo weather normalization", () => {
     expect(response.condition.kind).toBe("rain");
   });
 
+  it("keeps alert ends beyond two hours in the normalized response", () => {
+    const response = normalizeOpenMeteoWeather(
+      payloadWithSeries(
+        [
+          "2026-05-28T10:15:00.000Z",
+          "2026-05-28T10:30:00.000Z",
+          "2026-05-28T10:45:00.000Z",
+          "2026-05-28T11:00:00.000Z",
+          "2026-05-28T11:15:00.000Z",
+          "2026-05-28T11:30:00.000Z",
+          "2026-05-28T11:45:00.000Z",
+          "2026-05-28T12:00:00.000Z",
+          "2026-05-28T12:15:00.000Z",
+          "2026-05-28T12:30:00.000Z",
+          "2026-05-28T12:45:00.000Z",
+        ],
+        {
+          precipitation: [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+          rain: [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+          weather_code: [0, 61, 61, 61, 61, 61, 61, 61, 61, 61, 0],
+        },
+      ),
+      { location, lookaheadMinutes: 240, now },
+    );
+
+    expect(response.alert?.endsInMinutes).toBe(165);
+  });
+
   it("prioritizes storms over ordinary rain", () => {
     const response = normalizeOpenMeteoWeather(
       payloadWithSeries(

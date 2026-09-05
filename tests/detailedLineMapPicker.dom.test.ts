@@ -728,6 +728,9 @@ describe("DetailedLineMapPicker sidebar", () => {
       initialAnchorX,
       5,
     );
+    const liveSvg = wrapper.get('[data-testid="line-map"]');
+    expect(liveSvg.classes()).toContain("line-map-svg--live-strokes");
+    expect((liveSvg.element as SVGSVGElement).style.getPropertyValue("--zoom")).toBeTruthy();
 
     for (let frame = 0; frame < 160 && animationFrames.size > 0; frame += 1) {
       const callbacks = [...animationFrames.values()];

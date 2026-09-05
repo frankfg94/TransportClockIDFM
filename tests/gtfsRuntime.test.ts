@@ -227,6 +227,8 @@ function createLineArtifact(lineId: string): GtfsLineArtifact {
     routeIds: [lineId],
     labels: ["B"],
     routeTypes: ["2"],
+    routeColor: "#123456",
+    routeTextColor: "#ffffff",
     patterns: [],
     shapes: {},
     entrances: [],

@@ -158,7 +158,7 @@ describe("station add to service-pattern modal workflow", () => {
     expect(assertPatternHasNoOrphanStations(response)).toEqual([]);
   });
 
-  it("uses Navitia line metadata to color cached RER patterns like the home page", async () => {
+  it("uses the shared pictogram presentation to color cached RER patterns like the home page", async () => {
     const originalFetch = globalThis.fetch;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = input.toString();
@@ -212,7 +212,7 @@ describe("station add to service-pattern modal workflow", () => {
         },
       });
 
-      expect(response.board.line.color).toBe("#b94e9a");
+      expect(response.board.line.color).toBe("#a0006e");
       expect(response.board.line.textColor).toBe("#ffffff");
       expect(response.board.line.iconUrls).toEqual(
         expect.arrayContaining([

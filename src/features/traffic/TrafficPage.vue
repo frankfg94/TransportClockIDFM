@@ -65,9 +65,10 @@ const trafficPolishReady = ref(false);
 const trafficDisruptionList = ref<HTMLElement>();
 const trafficDisruptionCanScrollUp = ref(false);
 const trafficDisruptionCanScrollDown = ref(false);
+let trafficLoadRequest = 0;
 const { settings, updateSettings } = useAppSettings();
 const route = useRoute();
-const { d, t } = useI18n();
+const { d, locale, t } = useI18n();
 
 const reportByLineRef = computed(
   () => new Map(reports.value.map((report) => [report.lineRef, report])),
@@ -171,6 +172,10 @@ watch([routeTrafficLineRef, routeTrafficAlertId, routeTrafficTab], () => {
   });
 });
 
+watch(locale, () => {
+  void loadTraffic();
+});
+
 function getRoutePlaceId(): string | undefined {
   return getRouteQueryValue("place");
 }
@@ -197,6 +202,7 @@ async function initializeTrafficPage(): Promise<void> {
 }
 
 async function loadTraffic(): Promise<void> {
+  const requestId = ++trafficLoadRequest;
   loading.value = true;
   errorMessage.value = "";
 
@@ -207,11 +213,13 @@ async function loadTraffic(): Promise<void> {
       return;
     }
 
-    const params = new URLSearchParams({
-      lineRefs: displayedLines.value
-        .map((line) => line.navitiaLineRef)
-        .join(","),
-    });
+    const params = new URLSearchParams({ locale: locale.value });
+    if (!allLinesMode.value) {
+      params.set(
+        "lineRefs",
+        displayedLines.value.map((line) => line.navitiaLineRef).join(","),
+      );
+    }
     const response = await fetch(toServerApiUrl(`/api/traffic?${params}`));
 
     if (!response.ok) {
@@ -219,6 +227,7 @@ async function loadTraffic(): Promise<void> {
     }
 
     const payload = (await response.json()) as TrafficResponse;
+    if (requestId !== trafficLoadRequest) return;
     reports.value = payload.lines;
     generatedAt.value = payload.generatedAt;
     configured.value = payload.configured;
@@ -226,10 +235,12 @@ async function loadTraffic(): Promise<void> {
     trafficPolishReady.value = true;
     applyTrafficDeepLink();
   } catch (error) {
-    errorMessage.value =
-      error instanceof Error ? error.message : t("traffic.loadFailed");
+    if (requestId === trafficLoadRequest) {
+      errorMessage.value =
+        error instanceof Error ? error.message : t("traffic.loadFailed");
+    }
   } finally {
-    loading.value = false;
+    if (requestId === trafficLoadRequest) loading.value = false;
   }
 }
 

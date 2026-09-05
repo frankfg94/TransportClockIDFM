@@ -3,6 +3,16 @@ import { defineNuxtConfig } from "nuxt/config";
 
 const isCapacitorBuild = process.env.CAPACITOR_BUILD === "true";
 const committedGtfsDir = resolve(process.cwd(), ".data/gtfs");
+const configuredNeighborhoodVerdictDataPath =
+  process.env.NUXT_NEIGHBORHOOD_VERDICT_DATA_PATH?.trim() ||
+  (process.env.NEIGHBORHOOD_VERDICT_DATA_DIR?.trim()
+    ? resolve(process.cwd(), process.env.NEIGHBORHOOD_VERDICT_DATA_DIR.trim(), "compiled.json")
+    : "");
+const neighborhoodVerdictDataPath = resolve(
+  process.cwd(),
+  configuredNeighborhoodVerdictDataPath ||
+    "../idfm-node-backend/.data/neighborhood-verdict/compiled.json",
+);
 const serverApiBaseUrl = process.env.NUXT_PUBLIC_API_BASE_URL ?? "";
 const mobileReleasePublicBaseUrl = process.env.NUXT_PUBLIC_MOBILE_RELEASE_BASE_URL ?? "";
 const appSourceRevision =
@@ -11,7 +21,13 @@ const appSourceRevision =
   process.env.GITHUB_SHA ??
   "";
 const idfmApiKeyConfigured =
-  isCapacitorBuild || Boolean((process.env.NUXT_IDFM_API_KEY ?? process.env.IDFM_API_KEY)?.trim());
+  isCapacitorBuild ||
+  [
+    process.env.NUXT_IDFM_API_KEY,
+    process.env.IDFM_API_KEY,
+    process.env.NUXT_IDFM_DATASET_KEY,
+    process.env.IDFM_DATASET_KEY,
+  ].some((value) => Boolean(value?.trim()));
 const disallowPlugins = ["1", "true", "yes", "on"].includes(
   (process.env.DISALLOW_PLUGINS ?? "").trim().toLowerCase(),
 );
@@ -48,6 +64,12 @@ export default defineNuxtConfig({
   compatibilityDate: "2026-05-17",
   css: ["@fontsource-variable/atkinson-hyperlegible-next/wght.css", "~/src/styles.css"],
   devtools: { enabled: false },
+  // Nitro source maps are expensive to generate on Windows and are not used by
+  // this SPA during local development. Keep client source maps unchanged.
+  sourcemap: { server: false },
+  // Generated GTFS data can contain tens of thousands of files and must not be
+  // traversed by Nuxt's project watcher during development.
+  ignore: [".data"],
   nitro: {
     preset: isCapacitorBuild
       ? "static"
@@ -73,6 +95,7 @@ export default defineNuxtConfig({
         : {
             lineGeometry: { driver: "fs", base: "./.data/line-geometry" },
             gtfs: { driver: "fs", base: "./.data/gtfs" },
+            traffic: { driver: "fs", base: "./.data/traffic" },
           },
   },
   routeRules: {
@@ -88,6 +111,14 @@ export default defineNuxtConfig({
   },
   runtimeConfig: {
     idfmApiKey: process.env.IDFM_API_KEY ?? "",
+    // idfm-node-backend generates this artifact; Nitro reads it locally and
+    // calculates the request-specific verdict without a second HTTP server.
+    neighborhoodVerdictDataPath,
+    public: {
+      nextMap: {
+        vectorStyleUrl: process.env.NUXT_PUBLIC_NEXT_MAP_STYLE_URL ?? "",
+      },
+    },
   },
   typescript: {
     strict: true,
@@ -95,7 +126,11 @@ export default defineNuxtConfig({
   },
   vite: {
     optimizeDeps: {
-      exclude: ["lucide-vue-next"],
+      // MapLibre resolves its dedicated worker bundle at runtime. Pre-bundling
+      // the package makes Vite look for a generated maplibre-gl-worker.mjs
+      // that is not present in Nuxt's dependency cache, leaving the vector map
+      // blank before the Deck overlay can be mounted.
+      exclude: ["lucide-vue-next", "maplibre-gl"],
     },
     server: {
       watch: {

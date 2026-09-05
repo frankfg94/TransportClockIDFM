@@ -39,6 +39,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   selectTransfer: [transfer: TransferLineOption];
+  hoverTransfer: [transfer?: TransferLineOption];
 }>();
 
 const activeTransfer = ref<TransferLineOption>();
@@ -71,6 +72,13 @@ function showTransferDetails(transfer: TransferLineOption): void {
 function selectTransfer(transfer: TransferLineOption): void {
   showTransferDetails(transfer);
   emit("selectTransfer", transfer);
+}
+
+function updateHoveredTransfer(transfer?: TransferLineOption): void {
+  if (transfer) {
+    showTransferDetails(transfer);
+  }
+  emit("hoverTransfer", transfer);
 }
 
 async function loadTransferDirections(
@@ -200,8 +208,10 @@ function formatTransferFamilyLabel(key: TransferGroup["key"]): string {
             :aria-label="
               t('transfers.showLineDetailsAria', { line: transfer.label })
             "
-            @focus="showTransferDetails(transfer)"
-            @mouseenter="showTransferDetails(transfer)"
+            @focus="updateHoveredTransfer(transfer)"
+            @blur="updateHoveredTransfer()"
+            @mouseenter="updateHoveredTransfer(transfer)"
+            @mouseleave="updateHoveredTransfer()"
             @click="selectTransfer(transfer)"
           >
             <LineIconBadge :line="transfer" compact />

@@ -339,6 +339,14 @@
   vector-effect: non-scaling-stroke;
 }
 
+/* During the wheel gesture, keep the route width in screen space through the
+ * live zoom variable. The regular non-scaling stroke cannot follow the
+ * temporary compositor transform until the zoom is committed. */
+.line-map-svg--live-strokes .line-map-segment {
+  stroke-width: calc(12px / var(--zoom, 1));
+  vector-effect: none;
+}
+
 .line-map-entrance {
   pointer-events: none;
 }

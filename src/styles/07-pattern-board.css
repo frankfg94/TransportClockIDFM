@@ -983,6 +983,16 @@
   width: 34px;
 }
 
+.pattern-flow-station--city .pattern-flow-station__dot {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--line-color), white 66%),
+    0 2px 9px rgba(16, 35, 63, 0.18);
+}
+
+.pattern-flow-station--mixed .pattern-flow-station__dot {
+  border-style: dashed;
+}
+
 .pattern-flow-station .station-name {
   color: var(--ink);
   display: block;

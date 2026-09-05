@@ -27,6 +27,9 @@ const {
   dismissAlert,
 } = useWeatherExperience();
 const { d, t } = useI18n();
+const emit = defineEmits<{
+  "open-weather": [];
+}>();
 
 const alert = computed(() => weather.value?.alert);
 const effectiveMode = computed(() =>
@@ -346,17 +349,28 @@ function alertTitle(value: WeatherAlert): string {
   }
 
   if (value.kind === "snow") {
-    return t("weather.alert.snowIn", { minutes: value.startsInMinutes });
+    return t("weather.alert.snowIn", { duration: formatAlertDuration(value.startsInMinutes) });
   }
 
   if (value.kind === "storm") {
     if(value.startsInMinutes === 0) {
       return t("weather.alert.stormNow");
     }
-    return t("weather.alert.stormIn", { minutes: value.startsInMinutes });
+    return t("weather.alert.stormIn", { duration: formatAlertDuration(value.startsInMinutes) });
   }
 
-  return t("weather.alert.rainIn", { minutes: value.startsInMinutes });
+  return t("weather.alert.rainIn", { duration: formatAlertDuration(value.startsInMinutes) });
+}
+
+function formatAlertDuration(minutes: number): string {
+  const rounded = Math.max(0, Math.round(minutes));
+  if (rounded < 60) return t("weather.duration.minutes", { minutes: rounded });
+
+  const hours = Math.floor(rounded / 60);
+  const remainder = rounded % 60;
+  return remainder === 0
+    ? t("weather.duration.hours", { hours })
+    : t("weather.duration.hoursMinutes", { hours, minutes: remainder });
 }
 
 function alertAdvice(value: WeatherAlert): string {
@@ -381,7 +395,7 @@ function alertAdvice(value: WeatherAlert): string {
 
 function formatEnd(value: WeatherAlert): string {
   return typeof value.endsInMinutes === "number"
-    ? t("weather.alert.endsIn", { minutes: value.endsInMinutes })
+    ? t("weather.alert.endsIn", { duration: formatAlertDuration(value.endsInMinutes) })
     : "";
 }
 
@@ -509,7 +523,14 @@ function alertIcon(value: WeatherAlert) {
         </div>
       </div>
       <div class="weather-alert__content">
-        <strong>{{ alertTitle(alert) }}</strong>
+        <button
+          class="weather-alert__title"
+          type="button"
+          :aria-label="t('weather.openAlertAria')"
+          @click="emit('open-weather')"
+        >
+          <strong>{{ alertTitle(alert) }}</strong>
+        </button>
         <span>
           {{ alertAdvice(alert) }}
           <template v-if="formatTemperature(alert)">
@@ -860,6 +881,30 @@ function alertIcon(value: WeatherAlert) {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.weather-alert__title {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: block;
+  margin: 0;
+  min-height: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.weather-alert__title:hover strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.weather-alert__title:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
 }
 
 .weather-alert__content strong {

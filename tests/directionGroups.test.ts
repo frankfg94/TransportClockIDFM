@@ -173,6 +173,50 @@ describe("station direction groups", () => {
       expect.objectContaining({ id: "metro-14-chevilly" }),
     );
   });
+
+  it("retries a fallback direction after the migration version is current", async () => {
+    const board = createBoardWithOneDirection();
+    board.directionGroups = [
+      {
+        id: "all-directions",
+        label: "All directions",
+        subtitle: board.title,
+        match: {},
+      },
+    ];
+    const preferences = {
+      ...createDefaultPreferences([]),
+      customBoards: [board],
+      visibleBoardIds: [board.id],
+      boardOrderIds: [board.id],
+      directionGroupDiscoveryVersion: 2,
+    };
+    const discoverDirectionGroups = vi.fn().mockResolvedValue([
+      {
+        id: "saint-denis-pleyel",
+        label: "Saint-Denis - Pleyel",
+        match: {
+          destinationIncludes: ["Saint-Denis - Pleyel"],
+        },
+      },
+    ]);
+
+    const result = await migrateCustomBoardDirectionGroups(
+      preferences,
+      discoverDirectionGroups,
+    );
+
+    expect(result).toEqual({
+      updatedBoardIds: [board.id],
+      completed: true,
+    });
+    expect(preferences.customBoards[0].directionGroups).toEqual([
+      expect.objectContaining({ id: "saint-denis-pleyel" }),
+    ]);
+    expect(discoverDirectionGroups).toHaveBeenCalledWith(
+      expect.objectContaining({ id: board.id }),
+    );
+  });
 });
 
 const line: LineSearchOption = {

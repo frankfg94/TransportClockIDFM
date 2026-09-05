@@ -2,6 +2,7 @@ export { default as TrafficPage } from "./TrafficPage.vue";
 export { getActiveTrafficLines } from "./activeTrafficLines";
 export {
   getTrafficLineStatus,
+  normalizeIdfmGlobalTrafficPayload,
   normalizeNavitiaLineReportPayload,
   normalizeTrafficLineRef,
 } from "./trafficNormalization";
@@ -49,6 +50,8 @@ export type {
   TrafficAlertModalData,
   TrafficAlertTone,
   TrafficCalendarImpactScope,
+  TrafficCacheMetadata,
+  TrafficCacheState,
   TrafficDisruption,
   TrafficLineReport,
   TrafficLineStatus,
@@ -74,3 +77,10 @@ export {
   getTrafficDisruptionStartClockTime,
   type TrafficClockTime,
 } from "./trafficTextTimes";
+export {
+  DEFAULT_TRAFFIC_LOCALE,
+  getTrafficAcceptLanguage,
+  isTrafficLocale,
+  resolveTrafficLocale,
+  type TrafficLocale,
+} from "./trafficLocale";

@@ -771,9 +771,10 @@ async function fetchSignedR2Object(
   return response;
 }
 
-async function createR2SignedHeaders(
+export async function createR2SignedHeaders(
   url: URL,
   runtimeEnv?: NetexRuntimeEnv,
+  method: "GET" | "HEAD" = "GET",
 ): Promise<Headers> {
   const env = getRuntimeEnv(runtimeEnv);
   const now = new Date();
@@ -787,7 +788,7 @@ async function createR2SignedHeaders(
     `x-amz-content-sha256:${payloadHash}\n` +
     `x-amz-date:${amzDate}\n`;
   const canonicalRequest = [
-    "GET",
+    method,
     url.pathname,
     url.searchParams.toString(),
     canonicalHeaders,
@@ -1301,17 +1302,31 @@ function buildTopologyPatternsFromNetex(
   stationById: Map<string, NetexSchematicNode>,
 ): RawPattern[] {
   const patternsBySequence = new Map<string, RawPattern>();
+  const rawQuayIdByReference = new Map<string, string>();
+
+  for (const station of cache.stations ?? []) {
+    rawQuayIdByReference.set(station.id, station.id);
+    for (const rawRef of station.rawRefs ?? []) {
+      rawQuayIdByReference.set(rawRef, station.id);
+    }
+  }
 
   for (const pattern of cache.patterns ?? []) {
     const rawStopIds =
       pattern.stopIds ??
       pattern.stops?.map((stop) => stop.id) ??
       [];
-    const stops = dedupeConsecutive(
-      rawStopIds
-        .map((stopId) => rawToSchematicId.get(stopId) ?? stopId)
-        .filter((stopId) => stationById.has(stopId)),
+    const mappedStops = rawStopIds
+      .map((stopId) => ({
+        stopId: rawToSchematicId.get(stopId) ?? stopId,
+        quayId: rawQuayIdByReference.get(stopId),
+      }))
+      .filter(({ stopId }) => stationById.has(stopId));
+    const stopsWithQuays = mappedStops.filter(
+      (entry, index) => index === 0 || entry.stopId !== mappedStops[index - 1]?.stopId,
     );
+    const stops = stopsWithQuays.map(({ stopId }) => stopId);
+    const quayIds = stopsWithQuays.map(({ quayId }) => quayId);
 
     if (stops.length < 2) {
       continue;
@@ -1322,6 +1337,9 @@ function buildTopologyPatternsFromNetex(
 
     if (existing) {
       existing.tripCount += pattern.serviceCount ?? 1;
+      if (!existing.quayIds?.some(Boolean) && quayIds.some(Boolean)) {
+        existing.quayIds = quayIds;
+      }
       continue;
     }
 
@@ -1335,6 +1353,7 @@ function buildTopologyPatternsFromNetex(
       terminalFrom: decodeMojibake(first?.name ?? ""),
       terminalTo: terminalTo || decodeMojibake(last?.name ?? ""),
       stops,
+      ...(quayIds.some(Boolean) ? { quayIds } : {}),
       tripCount: pattern.serviceCount ?? 1,
     });
   }

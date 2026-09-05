@@ -14,6 +14,7 @@ import type { GtfsPublicStatus } from "../server/services/gtfs/types";
 
 import Draggable from "vuedraggable";
 import BoardVisibilityControls from "./components/BoardVisibilityControls.vue";
+import AppNotification, { type AppNotificationTone } from "./components/AppNotification.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import EmptyStationsState from "./components/EmptyStationsState.vue";
 import UserFriendlyTrafficModal from "./components/UserFriendlyTrafficModal.vue";
@@ -33,10 +34,16 @@ import {
 } from "./features/app-settings";
 import { WeatherExperience } from "./features/weather";
 import {
+  addGlobalMapTargetsToDashboard,
+  type GlobalMapDashboardTarget,
+} from "./features/transport-map/adapters/dashboard";
+import { clearNearbyStationsDraft } from "./features/nearby-stations/nearbyStationsDraft";
+import {
   getBoardTrafficAlertForReport,
   normalizeTrafficLineRef,
   type BoardTrafficAlert,
 } from "./features/traffic";
+import { createBoardFromDraft } from "./services/boardBuilder";
 import { transitModeToFamily } from "./services/linePresentation";
 import { fetchBoardDepartures, fetchDirectionGroupsForStation } from "./services/idfm";
 import { toServerApiUrl } from "./services/serverApi";
@@ -123,6 +130,9 @@ const DeparturePatternModal = defineAsyncComponent(
   () => import("./features/service-pattern/DeparturePatternModal.vue"),
 );
 const StationBoardModal = defineAsyncComponent(() => import("./components/StationBoardModal.vue"));
+const NearbyStationsSelector = defineAsyncComponent(
+  () => import("./features/nearby-stations/NearbyStationsSelector.vue"),
+);
 const WeatherForecastModal = defineAsyncComponent(
   () => import("./features/weather/WeatherForecastModal.vue"),
 );
@@ -174,12 +184,17 @@ const router = useRouter();
 const presetState = reactive<TransitPresetState>(createDefaultTransitPresetState(transitBoards));
 const preferences = reactive(createDefaultPreferences(transitBoards));
 const { settings, updateSettings } = useAppSettings();
-const { d, t } = useI18n();
+const { d, locale, t } = useI18n();
 const states = reactive<Record<string, BoardState>>({});
 const refreshing = ref(false);
 const lastRefresh = ref<Date>();
 const activePlaceId = ref(DEFAULT_TRANSIT_PLACE_ID);
 const stationModalOpen = ref(false);
+const nearbyStationsModalOpen = ref(false);
+const nearbyStationsAdding = ref(false);
+const nearbyStationsTargetPlaceId = ref<string>();
+const nearbyNotification = ref("");
+const nearbyNotificationTone = ref<AppNotificationTone>("success");
 const placeNameModalOpen = ref(false);
 const placeNameError = ref("");
 const topbarMenuOpen = ref(false);
@@ -231,11 +246,13 @@ const draggableBoards = ref<TransitBoardConfig[]>([]);
 const highlightedBoardId = ref<string>();
 const primApiKeyConfigured = __IDFM_API_KEY_CONFIGURED__;
 let refreshTimer: number | undefined;
+let trafficSummaryRequest = 0;
 const boardCardElements = new Map<string, HTMLElement>();
 let toastTimer: number | undefined;
 let clockTimer: number | undefined;
 let boardRevealTimer: number | undefined;
 let boardHighlightTimer: number | undefined;
+let nearbyNotificationTimer: number | undefined;
 let alarmTriggerElement: HTMLElement | undefined;
 let disposeAlarmRuntime: (() => Promise<void>) | undefined;
 let alarmSyncRequest = 0;
@@ -244,6 +261,9 @@ let boardRevealRequest = 0;
 let mobileBreakpointQuery: MediaQueryList | undefined;
 let desktopDragBreakpointQuery: MediaQueryList | undefined;
 const departureServiceTypeCache = new Map<string, Promise<DepartureServiceType | undefined>>();
+const boardRefreshPromises = new Map<string, Promise<void>>();
+const boardDirectionHydrationRequests = new Map<string, number>();
+let nextBoardDirectionHydrationRequest = 0;
 const isFullscreenPanelOpen = computed(() => Boolean(fullscreenPanelBoard.value));
 const fullscreenPanelDesign = computed<FullscreenStationPanelDesign>(
   () => fullscreenPanelRouteDesignOverride.value ?? settings.value.fullscreenStationPanelDesign,
@@ -528,7 +548,7 @@ function closePlaceNameModal(): void {
   placeNameError.value = "";
 }
 
-function createPlaceFromName(label: string): void {
+function createPlaceFromName(label: string): string | undefined {
   try {
     const result = createTransitPlace(presetState, label, transitBoards);
 
@@ -536,9 +556,86 @@ function createPlaceFromName(label: string): void {
     saveTransitPresetState(result.state);
     closePlaceNameModal();
     selectTransitPlace(result.place.id);
+    return result.place.id;
   } catch (error) {
     placeNameError.value = error instanceof Error ? error.message : t("app.errors.addPlace");
+    return undefined;
   }
+}
+
+function createPlaceFromNameAndOpenNearby(label: string): void {
+  const placeId = createPlaceFromName(label);
+  if (placeId) openNearbyStations(placeId);
+}
+
+function openNearbyStations(placeId = activePlaceId.value): void {
+  nearbyStationsTargetPlaceId.value = placeId;
+  nearbyStationsModalOpen.value = true;
+}
+
+function openNearbyStationsFromStationModal(): void {
+  stationModalOpen.value = false;
+  openNearbyStations();
+}
+
+function closeNearbyStations(options: { preserveDraft?: boolean } = {}): void {
+  nearbyStationsModalOpen.value = false;
+  nearbyStationsAdding.value = false;
+  if (!options.preserveDraft) clearNearbyStationsDraft();
+  if (getFirstRouteQueryValue(route.query.nearby) === "1") {
+    const query = { ...route.query };
+    delete query.nearby;
+    void router.replace({ path: route.path, query });
+  }
+}
+
+function openManualStationSelector(): void {
+  closeNearbyStations();
+  void nextTick(() => { stationModalOpen.value = true; });
+}
+
+async function addNearbyStations(targets: GlobalMapDashboardTarget[]): Promise<void> {
+  if (targets.length === 0 || nearbyStationsAdding.value) return;
+  nearbyStationsAdding.value = true;
+  try {
+    const result = await addGlobalMapTargetsToDashboard(
+      targets,
+      nearbyStationsTargetPlaceId.value ?? activePlaceId.value,
+    );
+    closeNearbyStations();
+    showNearbyNotification(
+      t("nearbyStations.addedSummary", {
+        added: result.addedBoardIds.length,
+        duplicates: result.duplicateBoardIds.length,
+      }),
+      "success",
+    );
+    if (result.placeId === activePlaceId.value && result.addedBoardIds[0]) {
+      await nextTick();
+      void revealBoardAfterRender(result.addedBoardIds[0]);
+    }
+  } catch (error) {
+    nearbyStationsAdding.value = false;
+    showNearbyNotification(
+      error instanceof Error ? error.message : t("nearbyStations.errors.addFailed"),
+      "error",
+    );
+  }
+}
+
+function openNearbyStationDetails(target: GlobalMapDashboardTarget): void {
+  const query = new URLSearchParams({
+    station: target.station.id,
+    line: target.line.id,
+  });
+  window.open(`/map?${query.toString()}`, "_blank", "noopener,noreferrer");
+}
+
+function showNearbyNotification(message: string, tone: AppNotificationTone): void {
+  nearbyNotification.value = message;
+  nearbyNotificationTone.value = tone;
+  if (nearbyNotificationTimer !== undefined) window.clearTimeout(nearbyNotificationTimer);
+  nearbyNotificationTimer = window.setTimeout(() => { nearbyNotification.value = ""; }, 4_500);
 }
 
 function updateHiddenDirectionIdsForBoard(boardId: string, directionIds: string[]): void {
@@ -588,6 +685,10 @@ watch(
     syncFullscreenPanelFromRoute({ refresh: true });
   },
 );
+
+watch(locale, () => {
+  void refreshTrafficSummary();
+});
 
 const boardTogglesInContextMenu = computed(
   () =>
@@ -691,24 +792,37 @@ async function refreshBoard(boardId: string): Promise<void> {
   const state = ensureBoardState(board.id);
 
   if (state.loading) {
+    await boardRefreshPromises.get(board.id);
     return;
   }
 
   state.loading = true;
   state.error = undefined;
 
-  try {
-    const result = await fetchBoardDepartures(createBoardRequestForSettings(board));
-    const enrichedResult = await enrichBoardDeparturesWithServiceTypes(board, result);
+  const refreshPromise = (async (): Promise<void> => {
+    try {
+      const result = await fetchBoardDepartures(createBoardRequestForSettings(board));
+      const enrichedResult = await enrichBoardDeparturesWithServiceTypes(board, result);
 
-    state.departures = enrichedResult.departures;
-    state.directionGroups = enrichedResult.directionGroups;
-    state.updatedAt = new Date();
-    updateAlarms(reconcileBoardAlarms(board, enrichedResult.departures, departureAlarms.value));
-  } catch (error) {
-    state.error = error instanceof Error ? error.message : t("app.errors.fetch");
+      state.departures = enrichedResult.departures;
+      state.directionGroups = enrichedResult.directionGroups;
+      state.updatedAt = new Date();
+      updateAlarms(reconcileBoardAlarms(board, enrichedResult.departures, departureAlarms.value));
+    } catch (error) {
+      state.error = error instanceof Error ? error.message : t("app.errors.fetch");
+    } finally {
+      state.loading = false;
+    }
+  })();
+
+  boardRefreshPromises.set(board.id, refreshPromise);
+
+  try {
+    await refreshPromise;
   } finally {
-    state.loading = false;
+    if (boardRefreshPromises.get(board.id) === refreshPromise) {
+      boardRefreshPromises.delete(board.id);
+    }
   }
 }
 
@@ -803,6 +917,7 @@ async function refreshAll(): Promise<void> {
 }
 
 async function refreshTrafficSummary(): Promise<void> {
+  const requestId = ++trafficSummaryRequest;
   if (!primApiKeyConfigured || !isPageVisible()) {
     return;
   }
@@ -810,13 +925,14 @@ async function refreshTrafficSummary(): Promise<void> {
   const lineRefs = Array.from(new Set(visibleBoards.value.map(resolveBoardTrafficLineRef)));
 
   if (lineRefs.length === 0) {
-    trafficReports.value = [];
+    if (requestId === trafficSummaryRequest) trafficReports.value = [];
     return;
   }
 
   try {
     const params = new URLSearchParams({
       lineRefs: lineRefs.join(","),
+      locale: locale.value,
     });
     const response = await fetch(toServerApiUrl(`/api/traffic?${params}`));
 
@@ -825,9 +941,9 @@ async function refreshTrafficSummary(): Promise<void> {
     }
 
     const payload = (await response.json()) as TrafficResponse;
-    trafficReports.value = payload.lines;
+    if (requestId === trafficSummaryRequest) trafficReports.value = payload.lines;
   } catch {
-    trafficReports.value = [];
+    if (requestId === trafficSummaryRequest) trafficReports.value = [];
   }
 }
 
@@ -1238,8 +1354,100 @@ function addCustomBoard(board: TransitBoardConfig): void {
   ensureBoardVisible(board.id);
   ensureBoardState(board.id);
   saveActiveTransitPreferences();
-  const refreshPromise = refreshBoard(board.id);
+  const refreshPromise = refreshBoard(board.id).catch(() => undefined);
+  void hydrateCustomBoardDirections(board, refreshPromise);
   void revealBoardAfterRender(board.id, refreshPromise);
+}
+
+async function hydrateCustomBoardDirections(
+  board: TransitBoardConfig,
+  initialRefreshPromise: Promise<void>,
+): Promise<void> {
+  if (!primApiKeyConfigured) {
+    return;
+  }
+
+  const input = createDirectionDiscoveryInput(board);
+
+  if (!input) {
+    return;
+  }
+
+  const requestId = ++nextBoardDirectionHydrationRequest;
+  boardDirectionHydrationRequests.set(board.id, requestId);
+
+  try {
+    const directionGroups = await fetchDirectionGroupsForStation(input.line, input.station);
+
+    if (boardDirectionHydrationRequests.get(board.id) !== requestId) {
+      return;
+    }
+
+    const currentBoard = preferences.customBoards.find((candidate) => candidate.id === board.id);
+
+    if (!currentBoard) {
+      return;
+    }
+
+    const directionAwareBoard = createBoardFromDraft(
+      {
+        family: input.line.family,
+        line: input.line,
+        station: input.station,
+      },
+      directionGroups,
+    );
+
+    if (haveSameDirectionGroups(currentBoard.directionGroups, directionAwareBoard.directionGroups)) {
+      return;
+    }
+
+    preferences.customBoards = preferences.customBoards.map((candidate) =>
+      candidate.id === board.id
+        ? {
+            ...candidate,
+            directionGroups: directionAwareBoard.directionGroups,
+            monitoringPoints: directionAwareBoard.monitoringPoints,
+          }
+        : candidate,
+    );
+    saveActiveTransitPreferences();
+
+    // The fallback board may already be loading. Wait for that request before
+    // refreshing with the real direction matching rules.
+    await initialRefreshPromise;
+
+    if (
+      boardDirectionHydrationRequests.get(board.id) === requestId &&
+      preferences.customBoards.some((candidate) => candidate.id === board.id)
+    ) {
+      await refreshBoard(board.id);
+    }
+  } catch {
+    // Adding the station has already succeeded. Keep the fallback direction
+    // and let the normal refresh/startup migration retry the discovery later.
+  } finally {
+    if (boardDirectionHydrationRequests.get(board.id) === requestId) {
+      boardDirectionHydrationRequests.delete(board.id);
+    }
+  }
+}
+
+function haveSameDirectionGroups(
+  left: TransitBoardConfig["directionGroups"],
+  right: TransitBoardConfig["directionGroups"],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (group, index) =>
+        group.id === right[index]?.id &&
+        group.label === right[index]?.label &&
+        group.subtitle === right[index]?.subtitle &&
+        group.isTerminal === right[index]?.isTerminal &&
+        JSON.stringify(group.match) === JSON.stringify(right[index]?.match),
+    )
+  );
 }
 
 function upsertCustomBoard(board: TransitBoardConfig): void {
@@ -1276,6 +1484,7 @@ function changeBoardStation(
   preferences.collapsedDirectionIds = preferences.collapsedDirectionIds.filter(
     (id) => !id.startsWith(`${previousBoard.id}:`),
   );
+  boardDirectionHydrationRequests.delete(previousBoard.id);
   delete states[previousBoard.id];
   ensureBoardState(nextBoard.id);
   saveActiveTransitPreferences();
@@ -1477,6 +1686,7 @@ function removeCustomBoard(boardId: string): void {
   preferences.collapsedDirectionIds = preferences.collapsedDirectionIds.filter(
     (id) => !id.startsWith(`${boardId}:`),
   );
+  boardDirectionHydrationRequests.delete(boardId);
   delete states[boardId];
   saveActiveTransitPreferences();
   updateAlarms(removeAlarmsForBoard(boardId, departureAlarms.value));
@@ -2193,6 +2403,9 @@ function syncTransitPreferences(event?: Event): void {
 onMounted(() => {
   Object.assign(presetState, loadTransitPresetState(transitBoards));
   syncActivePlaceFromRoute({ refresh: false });
+  if (getFirstRouteQueryValue(route.query.nearby) === "1") {
+    openNearbyStations(activePlaceId.value);
+  }
   syncFullscreenPanelFromRoute({ refresh: false });
   departureAlarms.value = loadDepartureAlarms();
   void initializeDepartureAlarmRuntime({
@@ -2248,6 +2461,9 @@ onBeforeUnmount(() => {
     disposeAlarmRuntime = undefined;
   }
   clearBoardRevealTimers();
+  if (nearbyNotificationTimer !== undefined) {
+    window.clearTimeout(nearbyNotificationTimer);
+  }
   stopDepartureAlarmSound();
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   document.removeEventListener("fullscreenchange", syncFullscreenPanelNativeState);
@@ -2384,7 +2600,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <WeatherExperience />
+      <WeatherExperience @open-weather="openWeatherModal" />
       <WeatherForecastModal
         v-if="weatherModalOpen"
         :open="weatherModalOpen"
@@ -2496,6 +2712,7 @@ onBeforeUnmount(() => {
               v-if="visibleBoards.length === 0"
               :place-label="activePlaceLabel"
               @add-station="stationModalOpen = true"
+              @add-nearby="openNearbyStations()"
             />
 
             <Draggable
@@ -2609,6 +2826,23 @@ onBeforeUnmount(() => {
         :open="placeNameModalOpen"
         @close="closePlaceNameModal"
         @submit="createPlaceFromName"
+        @submit-nearby="createPlaceFromNameAndOpenNearby"
+      />
+
+      <NearbyStationsSelector
+        v-if="nearbyStationsModalOpen"
+        :open="nearbyStationsModalOpen"
+        :adding="nearbyStationsAdding"
+        :basemap-style="settings.globalMapBasemapStyle"
+        :show-isochrone-control="settings.nearbyMapShowIsochroneControl"
+        :show-directory-control="settings.nearbyMapShowDirectoryControl"
+        :show-basemap-control="settings.nearbyMapShowBasemapControl"
+        :show-display-control="settings.nearbyMapShowDisplayControl"
+        :show-fullscreen-control="settings.nearbyMapShowFullscreenControl"
+        @close="closeNearbyStations()"
+        @manual="openManualStationSelector"
+        @confirm="addNearbyStations"
+        @details="openNearbyStationDetails"
       />
 
       <StationBoardModal
@@ -2616,8 +2850,11 @@ onBeforeUnmount(() => {
         :open="stationModalOpen"
         :mode="stationModalMode"
         @add="addCustomBoard"
+        @add-nearby="openNearbyStationsFromStationModal"
         @close="stationModalOpen = false"
       />
+
+      <AppNotification :message="nearbyNotification" :tone="nearbyNotificationTone" />
 
       <DepartureAlarmModal
         v-if="alarmTarget"

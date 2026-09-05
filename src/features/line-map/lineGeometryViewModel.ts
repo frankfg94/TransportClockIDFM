@@ -4,6 +4,7 @@ import type { LineGeometryRequest, LineGeometryResolution } from "./lineGeometry
 import {
   alignLineGeometrySegmentEndpoints,
   buildLineGeometryRenderPlan,
+  createPhysicalEdgeBranches,
   projectPointOntoLineGeometry,
 } from "./lineGeometry";
 import type { LineMapBranchView, LineMapStopView, LineMapViewModel } from "./types";
@@ -142,24 +143,4 @@ function findEntranceParentStopId(
 function areSameStopReferences(left: string, right: string): boolean {
   const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/gu, "");
   return normalize(left) === normalize(right);
-}
-
-function createPhysicalEdgeBranches(
-  branches: LineMapBranchView[],
-): LineGeometryRequest["branches"] {
-  const edges = new Map<string, LineGeometryRequest["branches"][number]>();
-
-  branches.forEach((branch) => {
-    branch.stopIds.slice(0, -1).forEach((fromStopId, index) => {
-      const toStopId = branch.stopIds[index + 1];
-      if (fromStopId === toStopId) return;
-
-      const id = [fromStopId, toStopId].sort().join("--");
-      if (!edges.has(id)) {
-        edges.set(id, { id, stopIds: [fromStopId, toStopId] });
-      }
-    });
-  });
-
-  return [...edges.values()];
 }

@@ -349,10 +349,7 @@ function findPriorityAlert(
         ? effectiveStart.toISOString()
         : undefined,
     endsAt: eventEnd?.toISOString(),
-    endsInMinutes:
-      typeof endsInMinutes === "number" && endsInMinutes <= 120
-        ? endsInMinutes
-        : undefined,
+    endsInMinutes: typeof endsInMinutes === "number" ? endsInMinutes : undefined,
     intensity: selected.intensity,
     temperatureC: selected.temperatureC,
     apparentTemperatureC: selected.apparentTemperatureC,

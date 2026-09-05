@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
+import { MapPinPlus } from "lucide-vue-next";
 import { DetailedLineMapPicker } from "../features/line-map";
 import { useAppSettings } from "../features/app-settings/appSettings";
 import { useI18n } from "../i18n";
@@ -10,7 +11,6 @@ import StationCombobox from "./StationCombobox.vue";
 import { createBoardFromDraft } from "../services/boardBuilder";
 import { DEFAULT_TRANSIT_PLACE_ID, type TransitPlacePreset } from "../storage/transitPreferences";
 import {
-  fetchDirectionGroupsForStation,
   fetchStationTransfers,
   fetchTransitFamilyOptions,
   searchLineStations,
@@ -52,6 +52,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   add: [board: TransitBoardConfig, dashboardId?: string];
+  "add-nearby": [];
   "select-line": [line: LineSearchOption, family: TransitFamily];
   close: [];
 }>();
@@ -71,7 +72,6 @@ const stationSelectionMode = ref<StationSelectionMode>("list");
 const loadingFamilies = ref(false);
 const loadingLines = ref(false);
 const loadingStations = ref(false);
-const adding = ref(false);
 const errorMessage = ref("");
 const currentStep = ref(1);
 const stepTransitionName = ref("station-step-forward");
@@ -408,8 +408,10 @@ async function loadStations(): Promise<void> {
   }
 }
 
-async function loadStationTransferBadges(station: StationSearchOption): Promise<void> {
-  if (!draft.line || stationTransfers[station.id]) {
+function loadStationTransferBadges(station: StationSearchOption): void {
+  const lineId = draft.line?.id;
+
+  if (!lineId || stationTransfers[station.id]) {
     return;
   }
 
@@ -419,44 +421,41 @@ async function loadStationTransferBadges(station: StationSearchOption): Promise<
 
   stationTransferLoadingIds.value = [...stationTransferLoadingIds.value, station.id];
 
-  try {
-    stationTransfers[station.id] = await fetchStationTransfers(station, draft.line.id);
-  } catch {
-    stationTransfers[station.id] = [];
-  } finally {
-    stationTransferLoadingIds.value = stationTransferLoadingIds.value.filter(
-      (id) => id !== station.id,
-    );
-  }
+  // Transfer badges are optional station metadata. Keep their request fully
+  // detached from the station selection/add flow so a slow lookup cannot
+  // delay or disable the add action.
+  void fetchStationTransfers(station, lineId)
+    .then((transfers) => {
+      stationTransfers[station.id] = transfers;
+    })
+    .catch(() => {
+      stationTransfers[station.id] = [];
+    })
+    .finally(() => {
+      stationTransferLoadingIds.value = stationTransferLoadingIds.value.filter(
+        (id) => id !== station.id,
+      );
+    });
 }
 
-async function addStation(): Promise<void> {
-  if (!draft.family || !draft.line || !draft.station || adding.value) {
+function addStation(): void {
+  if (!draft.family || !draft.line || !draft.station) {
     return;
   }
 
-  adding.value = true;
   errorMessage.value = "";
+  const board = createBoardFromDraft({
+    family: draft.family,
+    line: draft.line,
+    station: draft.station,
+  });
 
-  try {
-    const directionGroups = await fetchDirectionGroupsForStation(draft.line, draft.station);
-    const board = createBoardFromDraft(
-      {
-        family: draft.family,
-        line: draft.line,
-        station: draft.station,
-      },
-      directionGroups,
-    );
-
-    emit("add", board, props.showDashboardSelector ? selectedDashboardId.value : undefined);
-    resetDraft();
-    emit("close");
-  } catch {
-    errorMessage.value = t("board.stationModal.addFailed");
-  } finally {
-    adding.value = false;
-  }
+  // The board is intentionally emitted before any direction, transfer, or
+  // departure lookup. App.vue owns the background hydration, so closing this
+  // modal cannot cancel the add operation.
+  emit("add", board, props.showDashboardSelector ? selectedDashboardId.value : undefined);
+  resetDraft();
+  emit("close");
 }
 
 function resetDraft(): void {
@@ -722,7 +721,6 @@ function normalizeText(value: string): string {
                 v-if="showDashboardSelector"
                 v-model="selectedDashboardId"
                 :places="dashboardOptions"
-                :disabled="adding"
               />
             </template>
 
@@ -901,10 +899,30 @@ function normalizeText(value: string): string {
                   v-if="showDashboardSelector"
                   v-model="selectedDashboardId"
                   :places="dashboardOptions"
-                  :disabled="adding"
                 />
               </div>
             </Transition>
+
+            <div
+              v-if="currentStep === 1 && !lineOnly"
+              class="station-board-modal__nearby-action"
+            >
+              <div
+                class="station-board-modal__nearby-divider"
+                role="separator"
+                :aria-label="t('board.stationModal.or')"
+              >
+                <span>{{ t("board.stationModal.or") }}</span>
+              </div>
+              <button
+                class="button-secondary station-board-modal__nearby-button"
+                type="button"
+                @click="emit('add-nearby')"
+              >
+                <MapPinPlus aria-hidden="true" />
+                {{ t("nearbyStations.addAroundPlace") }}
+              </button>
+            </div>
 
             <div v-if="errorMessage" class="form-error">
               <span>{{ errorMessage }}</span>
@@ -918,9 +936,9 @@ function normalizeText(value: string): string {
             <button class="button-secondary" type="button" @click="emit('close')">
               {{ t("common.actions.close") }}
             </button>
-            <button type="button" :disabled="!canAdd || adding" @click="addStation">
+            <button type="button" :disabled="!canAdd" @click="addStation">
               <span class="button-plus" aria-hidden="true">+</span>
-              {{ adding ? t("board.stationModal.adding") : t("common.actions.add") }}
+              {{ t("common.actions.add") }}
             </button>
           </footer>
 
@@ -964,16 +982,14 @@ function normalizeText(value: string): string {
             <button
               v-else
               type="button"
-              :disabled="lineOnly ? !canSelectLine : !canAdd || adding"
+              :disabled="lineOnly ? !canSelectLine : !canAdd"
               @click="lineOnly ? selectCurrentLine() : addStation()"
             >
               <span v-if="!lineOnly" class="button-plus" aria-hidden="true"> + </span>
               {{
                 lineOnly
                   ? t("common.actions.change")
-                  : adding
-                    ? t("board.stationModal.adding")
-                    : t("common.actions.add")
+                  : t("common.actions.add")
               }}
             </button>
           </footer>
@@ -1026,6 +1042,35 @@ function normalizeText(value: string): string {
 
 .station-multistep__station-step > .station-board-selector {
   grid-row: 3;
+}
+
+.station-board-modal__nearby-action {
+  display: grid;
+  gap: 10px;
+}
+
+.station-board-modal__nearby-divider {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 0.72rem;
+  font-weight: 900;
+  gap: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.station-board-modal__nearby-divider::before,
+.station-board-modal__nearby-divider::after {
+  background: var(--border);
+  content: "";
+  flex: 1;
+  height: 1px;
+}
+
+.station-board-modal__nearby-button {
+  justify-content: center;
+  width: 100%;
 }
 
 .station-multistep__station-step .station-picker__list {

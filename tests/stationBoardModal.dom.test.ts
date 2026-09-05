@@ -7,13 +7,11 @@ import type {
 } from "../src/types/transit";
 
 const {
-  fetchDirectionGroupsForStation,
   fetchStationTransfers,
   fetchTransitFamilyOptions,
   searchLineStations,
   searchTransitLines,
 } = vi.hoisted(() => ({
-  fetchDirectionGroupsForStation: vi.fn(),
   fetchStationTransfers: vi.fn(),
   fetchTransitFamilyOptions: vi.fn(),
   searchLineStations: vi.fn(),
@@ -21,7 +19,6 @@ const {
 }));
 
 vi.mock("../src/services/idfm", () => ({
-  fetchDirectionGroupsForStation,
   fetchStationTransfers,
   fetchTransitFamilyOptions,
   searchLineStations,
@@ -64,13 +61,6 @@ const dashboardOptions = [
 beforeEach(() => {
   document.body.innerHTML = "";
   vi.restoreAllMocks();
-  fetchDirectionGroupsForStation.mockResolvedValue([
-    {
-      id: "all",
-      label: "Toutes directions",
-      match: {},
-    },
-  ]);
   fetchStationTransfers.mockResolvedValue([]);
   fetchTransitFamilyOptions.mockResolvedValue([
     { id: "rer", label: "RER", family: "RER" },
@@ -214,19 +204,101 @@ describe("StationBoardModal", () => {
 
     const addButton = Array.from(document.body.querySelectorAll("button")).find(
       (button) =>
-        button.closest(".modal-panel") &&
+        button.closest(".modal-panel__footer") &&
         button.textContent?.includes("Ajouter"),
     ) as HTMLButtonElement;
     addButton.click();
-    await flushPromises();
 
     expect(wrapper.emitted("add")?.[0]?.[0]).toMatchObject({
       title: "Station C",
       line: {
         shortName: "B",
       },
+      directionGroups: [
+        expect.objectContaining({ id: "all-directions" }),
+      ],
     });
     expect(wrapper.emitted("add")?.[0]?.[1]).toBe("work");
+  });
+
+  it("offers nearby station addition from the first add step", async () => {
+    const wrapper = mount(StationBoardModal, {
+      props: { open: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const nearbyButton = Array.from(document.body.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("Ajouter autour d'un lieu"),
+    ) as HTMLButtonElement;
+
+    expect(nearbyButton).toBeTruthy();
+    expect(document.body.textContent).toContain("OU");
+
+    nearbyButton.click();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.emitted("add-nearby")).toHaveLength(1);
+  });
+
+  it("keeps the add action available after searching a station in the normal flow", async () => {
+    let releaseTransfers: (() => void) | undefined;
+    fetchStationTransfers.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseTransfers = () => resolve([]);
+        }),
+    );
+
+    const wrapper = mount(StationBoardModal, {
+      props: { open: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const familyOption = document.body.querySelector(
+      ".family-combobox__option",
+    ) as HTMLButtonElement;
+    familyOption.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await flushPromises();
+
+    const lineOption = document.body.querySelector(
+      ".rich-combobox__option",
+    ) as HTMLButtonElement;
+    lineOption.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await flushPromises();
+
+    const stationOption = document.body.querySelector(
+      ".station-combobox__option",
+    ) as HTMLButtonElement;
+    const stationInput = document.body.querySelector(
+      ".station-combobox__input",
+    ) as HTMLInputElement;
+    stationInput.value = station.label;
+    stationInput.dispatchEvent(new Event("input", { bubbles: true }));
+    await wrapper.vm.$nextTick();
+    stationOption.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    await wrapper.vm.$nextTick();
+    stationOption.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await wrapper.vm.$nextTick();
+
+    expect(document.body.querySelector(".station-board-modal__nearby-action")).toBeNull();
+
+    const addButton = Array.from(document.body.querySelectorAll("button")).find(
+      (button) =>
+        button.closest(".modal-panel__footer") &&
+        button.textContent?.includes("Ajouter"),
+    ) as HTMLButtonElement;
+
+    expect(fetchStationTransfers).toHaveBeenCalledWith(station, initialLine.id);
+    expect(addButton.disabled).toBe(false);
+
+    addButton.click();
+    await flushPromises();
+
+    expect(wrapper.emitted("add")).toHaveLength(1);
+    releaseTransfers?.();
+    await flushPromises();
   });
 
   it("can be used as a line-only selector without loading station choices", async () => {

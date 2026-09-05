@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   alignLineGeometrySegmentEndpoints,
+  appendRoundedPolylineToPath,
+  appendRoundedPolylineToPathDirect,
   buildLineGeometryDebugPlan,
   buildRoundedPolylinePath,
+  collapseShortUnprotectedPolylineVertices,
   createDirectLineGeometry,
   createScreenSpaceRoundedPolylineOptions,
   measureLineGeometryContinuity,
@@ -232,6 +235,64 @@ describe("buildLineGeometryDebugPlan", () => {
     expect(overview.path).not.toContain(" Q ");
     expect(closeUp.corners[0]).toMatchObject({ mode: "rounded" });
     expect(closeUp.path).toContain(" Q ");
+  });
+
+  it("removes a short unprotected spur without moving a station anchor", () => {
+    const station = { x: 100, y: 0 };
+    const spur = { x: 100, y: 40 };
+    const next = { x: 1_000, y: 0 };
+
+    expect(collapseShortUnprotectedPolylineVertices(
+      [{ x: 0, y: 0 }, station, spur, next],
+      {
+        maximumShortSegmentLength: 50,
+        maximumShortSegmentRatio: 0.12,
+        protectedPointIndices: [1],
+      },
+    )).toEqual([{ x: 0, y: 0 }, station, next]);
+  });
+
+  it("emits identical direct Canvas commands without per-frame diagnostics allocations", () => {
+    const points = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 40 },
+      { x: 1_000, y: 0 },
+      { x: 1_000, y: 0 },
+    ];
+    const options = {
+      minimumPointDistance: 0.7,
+      minimumCornerSegmentLength: 2.5,
+      maximumCornerRadius: 7,
+      cornerRadiusRatio: 0.22,
+      maximumShortSegmentLength: 50,
+      maximumShortSegmentRatio: 0.12,
+      protectedPointIndices: [1],
+    };
+    const commands = () => {
+      const result: unknown[][] = [];
+      return {
+        result,
+        builder: {
+          moveTo: (x: number, y: number) => result.push(["M", x, y]),
+          lineTo: (x: number, y: number) => result.push(["L", x, y]),
+          quadraticCurveTo: (cx: number, cy: number, x: number, y: number) =>
+            result.push(["Q", cx, cy, x, y]),
+        },
+      };
+    };
+    const diagnostic = commands();
+    const direct = commands();
+
+    appendRoundedPolylineToPath(diagnostic.builder, points, options);
+    appendRoundedPolylineToPathDirect(
+      direct.builder,
+      points,
+      options,
+      { retainedIndices: [], dedupedIndices: [] },
+    );
+
+    expect(direct.result).toEqual(diagnostic.result);
   });
 
   it("does not bend a distant directional trace toward another platform", () => {

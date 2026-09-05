@@ -1331,8 +1331,8 @@ describe("transfer bundle endpoint", () => {
         id: "line:IDFM:C01740",
         label: "L",
         family: "TRANSILIEN",
-        color: "#a65a95",
-        textColor: "#ffffff",
+        color: "#c4a4cc",
+        textColor: "#111827",
       }),
       expect.objectContaining({
         id: "line:IDFM:C01120",

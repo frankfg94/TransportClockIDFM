@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
   createReadStream,
@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
@@ -22,6 +22,11 @@ import type {
 } from "../../server/services/gtfs/types";
 import { normalizeGtfsLineLabel } from "../../server/services/gtfs/labels";
 import { projectStopsMonotonically } from "../../server/services/lineGeometry/traceProjection";
+import { GTFS_TIMETABLE_SCHEMA_VERSION } from "../../server/services/gtfs/timetableTypes";
+import { readCsv } from "./csv";
+import { buildTimetableArtifacts } from "./timetableIndexer";
+
+export { parseCsvLine } from "./csv";
 
 const GTFS_SOURCE_URL = "https://eu.ftp.opendatasoft.com/stif/GTFS/IDFM-gtfs.zip";
 const REQUIRED_FILES = new Set([
@@ -37,13 +42,14 @@ const MAX_COMPRESSED_BYTES = 512 * 1024 * 1024;
 const MAX_UNCOMPRESSED_BYTES = 3 * 1024 * 1024 * 1024;
 const MAX_PATTERNS_PER_ROUTE = 80;
 
-type CsvRow = Record<string, string>;
 const MAX_ROUTE_COUNT = 20_000;
 type RouteRow = {
   routeId: string;
   shortName: string;
   longName: string;
   routeType: string;
+  routeColor: string;
+  routeTextColor: string;
 };
 type StopRow = {
   id: string;
@@ -68,46 +74,82 @@ type Pattern = {
   tripCount: number;
 };
 
-const outputDir = resolve(process.env.GTFS_OUTPUT_DIR || ".data/gtfs");
-const resetRequested = process.argv.includes("--reset");
-const forceRequested = process.argv.includes("--force");
-const reindexRequested = process.argv.includes("--reindex");
-const r2 = createR2Client();
-let lastProgressAt = 0;
-
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  await main();
+export interface GtfsUpdateOptions {
+  outputDir: string;
+  local?: boolean;
+  reset?: boolean;
+  force?: boolean;
+  reindex?: boolean;
+  keepSource?: boolean;
 }
 
-async function main(): Promise<void> {
+type R2Target = { client: S3Client; bucket: string };
+let lastProgressAt = 0;
+
+export function parseUpdateOptions(
+  args = process.argv.slice(2),
+  env = process.env,
+): GtfsUpdateOptions {
+  return {
+    outputDir: resolve(env.GTFS_OUTPUT_DIR || ".data/gtfs"),
+    local: args.includes("--local"),
+    reset: args.includes("--reset"),
+    force: args.includes("--force"),
+    reindex: args.includes("--reindex"),
+    keepSource: args.includes("--keep-source"),
+  };
+}
+
+export function needsTimetableMigration(previous?: GtfsManifest): boolean {
+  return Boolean(previous && (
+    previous.timetable?.schemaVersion !== GTFS_TIMETABLE_SCHEMA_VERSION ||
+    !previous.timetable.path
+  ));
+}
+
+export function shouldRefresh(
+  previous?: GtfsManifest,
+  options: Pick<GtfsUpdateOptions, "force" | "reindex"> = {},
+  now = Date.now(),
+): boolean {
+  if (!previous || options.force || options.reindex || needsTimetableMigration(previous)) return true;
+  const installedAt = Date.parse(previous.installedAt);
+  return !Number.isFinite(installedAt) || now - installedAt >= 12 * 60 * 60_000;
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await runGtfsUpdate(parseUpdateOptions());
+}
+
+export async function runGtfsUpdate(options: GtfsUpdateOptions): Promise<void> {
+  const outputDir = resolve(options.outputDir);
+  // Decide this before constructing a client or loading any remote manifest.
+  const r2 = options.local ? undefined : createR2Client();
   report("checking", "Checking the installed GTFS version.");
   try {
-    if (resetRequested) {
-      const current = await loadCurrentManifest();
+    if (options.reset) {
+      const current = await loadCurrentManifest(outputDir, r2);
       if (!current) throw new Error("No installed GTFS manifest to reset.");
-      await publishManifest({ ...current, cacheGeneration: current.cacheGeneration + 1 });
+      await publishManifest({ ...current, cacheGeneration: current.cacheGeneration + 1 }, outputDir, r2);
       report("completed", "Geometry cache generation reset.");
       return;
     }
 
-    const previous = await loadCurrentManifest();
-    const installedAt = previous ? Date.parse(previous.installedAt) : Number.NaN;
-    if (
-      !forceRequested &&
-      Number.isFinite(installedAt) &&
-      Date.now() - installedAt < 12 * 60 * 60_000
-    ) {
+    const previous = await loadCurrentManifest(outputDir, r2);
+    if (!shouldRefresh(previous, options)) {
       report("unchanged", "The 12-hour update cooldown is active.");
       return;
     }
 
     const tempRoot = await fs.mkdtemp(join(tmpdir(), "transport-clock-gtfs-"));
+    let stagingDir: string | undefined;
     try {
       const archivePath = join(tempRoot, "idfm-gtfs.zip");
-      const downloaded = await downloadArchive(archivePath, previous);
+      const reindex = Boolean(options.reindex || needsTimetableMigration(previous));
+      const downloaded = await downloadArchive(archivePath, previous, reindex);
       if (
         downloaded.status === "unchanged" ||
-        (!reindexRequested && previous?.sha256 === downloaded.sha256)
+        (!reindex && previous?.sha256 === downloaded.sha256)
       ) {
         report("unchanged", "The installed GTFS archive is already current.");
         return;
@@ -118,9 +160,26 @@ async function main(): Promise<void> {
       await fs.mkdir(extractedDir, { recursive: true });
       await extractRequiredFiles(archivePath, extractedDir);
 
-      report("indexing", "Building compact per-line indexes.");
+      await fs.mkdir(outputDir, { recursive: true });
+      stagingDir = await fs.mkdtemp(join(outputDir, ".staging-"));
       const versionDir = join(outputDir, "versions", downloaded.sha256);
-      const lineCount = await buildLineArtifacts(extractedDir, versionDir);
+      const existingLineCount = await getExistingGeometryLineCount(versionDir);
+      const stagedGeometry = join(stagingDir, "geometry");
+      report("indexing", existingLineCount === undefined
+        ? "Building compact per-line geometry indexes."
+        : "Reusing immutable geometry for this archive SHA-256.");
+      const lineCount = existingLineCount ?? await buildLineArtifacts(extractedDir, stagedGeometry);
+      if (!lineCount) throw new Error("GTFS geometry is empty; keep the installed version.");
+
+      report("indexing", "Building calendar-aware timetable indexes.");
+      const timetablePath = `timetables/v${GTFS_TIMETABLE_SCHEMA_VERSION}/${downloaded.sha256}/${randomUUID()}`;
+      const stagedTimetable = join(stagingDir, "timetable");
+      const timetable = {
+        ...await buildTimetableArtifacts(extractedDir, stagedTimetable, {
+          progress: (lines, total) => reportProgress("indexing", lines, total),
+        }),
+        path: timetablePath,
+      };
       const sourceUpdatedAt = parseHttpDate(downloaded.lastModified) ?? new Date().toISOString();
       const manifest: GtfsManifest = {
         schemaVersion: 1,
@@ -132,39 +191,64 @@ async function main(): Promise<void> {
         sourceLastModified: downloaded.lastModified,
         cacheGeneration: (previous?.cacheGeneration ?? 0) + 1,
         lineCount,
+        timetable,
       };
 
-      report("publishing", `Publishing ${lineCount} line indexes.`);
-      await publishVersion(versionDir, downloaded.sha256);
-      await publishManifest(manifest);
-      report("completed", `${lineCount} lines published.`);
+      // Install only complete builds. Never rebuild inside an immutable version.
+      if (existingLineCount === undefined) {
+        await fs.mkdir(dirname(versionDir), { recursive: true });
+        await fs.rename(stagedGeometry, versionDir);
+      }
+      const timetableDir = join(outputDir, timetablePath);
+      await fs.mkdir(dirname(timetableDir), { recursive: true });
+      await fs.rename(stagedTimetable, timetableDir);
+
+      report("publishing", `Publishing ${lineCount} geometry lines and ${timetable.fileCount} timetable files.`);
+      // The active remote geometry is already complete and must not be rewritten.
+      if (r2 && previous?.sha256 !== downloaded.sha256) {
+        await publishDirectory(versionDir, `versions/${downloaded.sha256}`, r2, true);
+      }
+      if (r2) await publishDirectory(timetableDir, timetablePath, r2);
+      await publishManifest(manifest, outputDir, r2);
+      report("completed", `${lineCount} geometry lines and ${timetable.tripCount} timetable trips published.`);
     } finally {
-      if (tempRoot.startsWith(resolve(tmpdir()))) {
+      if (stagingDir && resolve(stagingDir).startsWith(outputDir + sep)) {
+        await fs.rm(stagingDir, { recursive: true, force: true });
+      }
+      if (options.keepSource) {
+        report("checking", `Source files retained for diagnostics: ${resolve(tempRoot)}`);
+      } else if (resolve(tempRoot).startsWith(resolve(tmpdir()) + sep)) {
         await fs.rm(tempRoot, { recursive: true, force: true });
       }
     }
   } catch (error) {
     report("failed", error instanceof Error ? error.message : String(error));
     throw error;
+  } finally {
+    r2?.client.destroy();
   }
 }
 async function downloadArchive(
   archivePath: string,
   previous?: GtfsManifest,
+  reindex = false,
 ): Promise<
   | { status: "unchanged" }
   | { status: "downloaded"; sha256: string; etag?: string; lastModified?: string }
 > {
   const headers = new Headers({ Accept: "application/zip" });
-  if (!reindexRequested && previous?.sourceEtag) {
+  if (!reindex && previous?.sourceEtag) {
     headers.set("If-None-Match", previous.sourceEtag);
   }
-  if (!reindexRequested && previous?.sourceLastModified) {
+  if (!reindex && previous?.sourceLastModified) {
     headers.set("If-Modified-Since", previous.sourceLastModified);
   }
 
   const response = await fetch(GTFS_SOURCE_URL, { headers, redirect: "follow" });
-  if (response.status === 304) return { status: "unchanged" };
+  if (response.status === 304) {
+    if (reindex) throw new Error("GTFS reindex requires a full archive, but the source returned 304.");
+    return { status: "unchanged" };
+  }
   if (!response.ok || !response.body) {
     throw new Error(`GTFS download failed (${response.status}).`);
   }
@@ -327,6 +411,8 @@ export async function buildLineArtifacts(inputDir: string, versionDir: string): 
       routeIds: [routeId],
       labels: [route.shortName, route.longName].filter(Boolean),
       routeTypes: [route.routeType],
+      routeColor: route.routeColor,
+      routeTextColor: route.routeTextColor,
       patterns: usablePatterns.map(({ tripCount: _tripCount, ...pattern }) => {
         const projection = buildMonotonicShapeProjection(
           pattern.stopIds,
@@ -410,9 +496,23 @@ async function loadRoutes(path: string): Promise<Map<string, RouteRow>> {
       shortName: row.route_short_name || "",
       longName: row.route_long_name || "",
       routeType: row.route_type || "",
+      routeColor: normalizeGtfsColor(row.route_color, row.route_id, "route_color"),
+      routeTextColor: normalizeGtfsColor(row.route_text_color, row.route_id, "route_text_color"),
     });
   });
   return result;
+}
+
+function normalizeGtfsColor(
+  value: string | undefined,
+  routeId: string,
+  field: "route_color" | "route_text_color",
+): string {
+  const normalized = value?.trim().replace(/^#/u, "").toLowerCase();
+  if (!normalized || !/^[0-9a-f]{6}$/u.test(normalized)) {
+    throw new Error(`GTFS ${field} is missing or invalid for route ${routeId}.`);
+  }
+  return `#${normalized}`;
 }
 
 async function loadStops(path: string): Promise<Map<string, StopRow>> {
@@ -582,52 +682,7 @@ async function loadGeometryServices(
   return services;
 }
 
-async function readCsv(path: string, onRow: (row: CsvRow) => void): Promise<void> {
-  const input = createReadStream(path, { encoding: "utf8" });
-  let headers: string[] | undefined;
-  let buffered = "";
-
-  for await (const chunk of input) {
-    buffered += chunk;
-    let newline = buffered.indexOf("\n");
-    while (newline >= 0) {
-      const line = buffered.slice(0, newline).replace(/\r$/u, "");
-      buffered = buffered.slice(newline + 1);
-      const fields = parseCsvLine(line);
-      if (!headers) headers = fields.map((field) => field.replace(/^\uFEFF/u, "").trim());
-      else if (fields.some(Boolean)) {
-        onRow(Object.fromEntries(headers.map((header, index) => [header, fields[index] || ""])));
-      }
-      newline = buffered.indexOf("\n");
-    }
-  }
-  if (buffered.trim() && headers) {
-    const fields = parseCsvLine(buffered.replace(/\r$/u, ""));
-    onRow(Object.fromEntries(headers.map((header, index) => [header, fields[index] || ""])));
-  }
-}
-
-export function parseCsvLine(line: string): string[] {
-  const fields: string[] = [];
-  let field = "";
-  let quoted = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    if (char === '"') {
-      if (quoted && line[index + 1] === '"') {
-        field += '"';
-        index += 1;
-      } else quoted = !quoted;
-    } else if (char === "," && !quoted) {
-      fields.push(field);
-      field = "";
-    } else field += char;
-  }
-  fields.push(field);
-  return fields;
-}
-
-async function loadCurrentManifest(): Promise<GtfsManifest | undefined> {
+async function loadCurrentManifest(outputDir: string, r2?: R2Target): Promise<GtfsManifest | undefined> {
   if (r2) {
     try {
       const response = await r2.client.send(
@@ -647,47 +702,86 @@ async function loadCurrentManifest(): Promise<GtfsManifest | undefined> {
   }
 }
 
-async function publishVersion(versionDir: string, sha256: string): Promise<void> {
-  if (!r2) return;
-  const linesDir = join(versionDir, "lines");
-  const files = await fs.readdir(linesDir);
-  await r2.client.send(
-    new PutObjectCommand({
-      Bucket: r2.bucket,
-      Key: `gtfs/versions/${sha256}/line-index.json`,
-      Body: createReadStream(join(versionDir, "line-index.json")),
-      ContentType: "application/json",
-    }),
-  );
-  let uploaded = 0;
-  for (const filename of files) {
-    await r2.client.send(
-      new PutObjectCommand({
+/** Existing geometry belongs to its SHA forever, including during --reindex. */
+async function getExistingGeometryLineCount(versionDir: string): Promise<number | undefined> {
+  try {
+    await fs.stat(versionDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+  const lookup = JSON.parse(await fs.readFile(join(versionDir, "line-index.json"), "utf8")) as GtfsLineLookupIndex;
+  const files = await fs.readdir(join(versionDir, "lines"), { withFileTypes: true });
+  const lineFiles = new Set(files.filter((file) => file.isFile() && file.name.endsWith(".json")).map((file) => file.name));
+  if (lookup.schemaVersion !== 1 || !lookup.lineIdsByLabel || !lineFiles.size ||
+    Object.values(lookup.lineIdsByLabel).some((ids) =>
+      !Array.isArray(ids) || ids.some((id) => !lineFiles.has(`${normalizeLineKey(id)}.json`)))) {
+    throw new Error(`Existing immutable GTFS geometry is incomplete: ${versionDir}`);
+  }
+  return lineFiles.size;
+}
+
+async function publishDirectory(
+  directory: string,
+  prefix: string,
+  r2: R2Target,
+  reuseExisting = false,
+  progress = { uploaded: 0 },
+): Promise<void> {
+  for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    const key = `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      await publishDirectory(path, key, r2, reuseExisting, progress);
+      continue;
+    }
+    if (!entry.isFile()) throw new Error(`Unexpected GTFS artifact: ${path}`);
+    const body = createReadStream(path);
+    try {
+      await r2.client.send(new PutObjectCommand({
         Bucket: r2.bucket,
-        Key: `gtfs/versions/${sha256}/lines/${filename}`,
-        Body: createReadStream(join(linesDir, filename)),
+        Key: `gtfs/${key}`,
+        Body: body,
         ContentType: "application/json",
-      }),
-    );
-    uploaded += 1;
-    if (uploaded % 50 === 0) reportProgress("publishing", uploaded, files.length, true);
+        IfNoneMatch: "*",
+      }));
+    } catch (error) {
+      // A previous run may already have installed this immutable geometry.
+      // Timetable directories are unique per run: a collision there must fail.
+      const failure = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+      if (!reuseExisting || (failure.name !== "PreconditionFailed" && failure.$metadata?.httpStatusCode !== 412)) throw error;
+    } finally {
+      body.destroy();
+    }
+    progress.uploaded += 1;
+    reportProgress("publishing", progress.uploaded);
   }
 }
 
-async function publishManifest(manifest: GtfsManifest): Promise<void> {
+export async function publishManifest(manifest: GtfsManifest, outputDir: string, r2?: R2Target): Promise<void> {
   const body = JSON.stringify(manifest, null, 2);
   await fs.mkdir(outputDir, { recursive: true });
-  await fs.writeFile(join(outputDir, "current.json"), body);
-  if (r2) {
-    await r2.client.send(
-      new PutObjectCommand({
-        Bucket: r2.bucket,
-        Key: "gtfs/current.json",
-        Body: body,
-        ContentType: "application/json",
-        CacheControl: "no-cache",
-      }),
-    );
+  const temporaryPath = join(outputDir, `.current-${randomUUID()}.json.tmp`);
+  try {
+    const handle = await fs.open(temporaryPath, "wx");
+    try {
+      await handle.writeFile(body);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    if (r2) {
+      await r2.client.send(new PutObjectCommand({
+          Bucket: r2.bucket,
+          Key: "gtfs/current.json",
+          Body: body,
+          ContentType: "application/json",
+          CacheControl: "no-cache",
+        }));
+    }
+    await fs.rename(temporaryPath, join(outputDir, "current.json"));
+  } finally {
+    await fs.rm(temporaryPath, { force: true });
   }
 }
 

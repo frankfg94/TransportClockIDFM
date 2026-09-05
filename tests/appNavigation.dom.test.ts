@@ -74,6 +74,8 @@ describe("AppNavigation", () => {
     expect(wrapper.text()).toContain("Info trafic");
     expect(menuPanel?.querySelector('a[href="/settings"]')).toBeTruthy();
     expect(menuPanel?.querySelector('a[href="/health"]')).toBeTruthy();
+    expect(menuPanel?.querySelector('a[href="/nearby-stations"]')).toBeTruthy();
+    expect(menuPanel?.textContent).toContain("Stations proches");
     expect(menuPanel?.textContent).toContain("Health");
 
     await vi.advanceTimersByTimeAsync(60_000);
@@ -133,6 +135,100 @@ describe("AppNavigation", () => {
       1,
     );
 
+    wrapper.unmount();
+  });
+
+  it("marks Nearby stations as the active secondary page", async () => {
+    vi.doMock("#imports", () => ({
+      useRoute: () => ({ path: "/nearby-stations" }),
+    }));
+    vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
+      const actual =
+        await importActual<
+          typeof import("../src/features/app-settings/appSettings")
+        >();
+      const { ref } = await import("vue");
+      const settings = ref(actual.createDefaultAppSettings());
+
+      return {
+        ...actual,
+        useAppSettings: () => ({
+          settings,
+          effectiveMaxDeparturesPerDirection: ref(undefined),
+          updateSettings: vi.fn(),
+          resetSettings: vi.fn(),
+        }),
+      };
+    });
+
+    const { default: AppNavigation } = await import(
+      "../src/features/app-settings/AppNavigationMenu.vue"
+    );
+    const wrapper = mount(AppNavigation, {
+      global: {
+        stubs: {
+          NuxtLink: {
+            props: ["to"],
+            template: '<a :href="typeof to === \'string\' ? to : to.path"><slot /></a>',
+          },
+        },
+      },
+    });
+
+    expect(wrapper.find(".app-navigation__menu-button").classes()).toContain(
+      "app-navigation__menu-button--active",
+    );
+
+    await wrapper.find(".app-navigation__menu-button").trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(document.body.querySelector('a[href="/nearby-stations"]')?.classList).toContain(
+      "app-navigation__menu-link--active",
+    );
+    wrapper.unmount();
+  });
+
+  it("shows the Plan entry by default and removes it when the preference is disabled", async () => {
+    vi.doMock("#imports", () => ({
+      useRoute: () => ({ path: "/" }),
+    }));
+    vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
+      const actual =
+        await importActual<
+          typeof import("../src/features/app-settings/appSettings")
+        >();
+      const { ref } = await import("vue");
+      const settings = ref({
+        ...actual.createDefaultAppSettings(),
+        showPlanInNavigation: false,
+      });
+
+      return {
+        ...actual,
+        useAppSettings: () => ({
+          settings,
+          effectiveMaxDeparturesPerDirection: ref(undefined),
+          updateSettings: vi.fn(),
+          resetSettings: vi.fn(),
+        }),
+      };
+    });
+
+    const { default: AppNavigation } = await import(
+      "../src/features/app-settings/AppNavigationMenu.vue"
+    );
+    const wrapper = mount(AppNavigation, {
+      global: {
+        stubs: {
+          NuxtLink: {
+            props: ["to"],
+            template: '<a :href="typeof to === \'string\' ? to : to.path"><slot /></a>',
+          },
+        },
+      },
+    });
+
+    expect(wrapper.find(".app-navigation__link--plan").exists()).toBe(false);
+    expect(wrapper.classes()).toContain("app-navigation--plan-hidden");
     wrapper.unmount();
   });
 });

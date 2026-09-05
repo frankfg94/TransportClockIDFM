@@ -13,6 +13,7 @@ import { buildLinePatternViewFromTopology } from "../server/services/servicePatt
 import { getLineTopology } from "../server/services/topology/getLineTopology";
 import type {
   DepartureCallingPattern,
+  TransferLineOption,
   TransitBoardConfig,
 } from "../src/types/transit";
 import type { TrafficLineReport, TrafficResponse } from "../src/features/traffic";
@@ -156,6 +157,70 @@ const VueFlowGeometryStub = defineComponent({
             }),
         ),
       ]);
+  },
+});
+
+const PatternModeComboboxStub = defineComponent({
+  name: "MaterialCombobox",
+  props: {
+    modelValue: {
+      type: String,
+      default: "",
+    },
+    options: {
+      type: Array,
+      default: () => [],
+    },
+  },
+  emits: ["update:model-value"],
+  setup(props, { emit }) {
+    return () =>
+      h(
+        "div",
+        {
+          class: "pattern-mode-combobox-test",
+          "data-model-value": props.modelValue,
+        },
+        (props.options as Array<{ id: string; label: string }>).map(
+          (option) =>
+            h(
+              "button",
+              {
+                type: "button",
+                "data-mode-id": option.id,
+                onClick: () => emit("update:model-value", option.id),
+              },
+              option.label,
+            ),
+        ),
+      );
+  },
+});
+
+const StationTransferDetailsStub = defineComponent({
+  name: "StationTransferDetails",
+  props: {
+    stationLabel: {
+      type: String,
+      default: "",
+    },
+    transfers: {
+      type: Array,
+      default: () => [],
+    },
+  },
+  setup(props) {
+    return () =>
+      h(
+        "div",
+        { class: "station-transfer-details-test" },
+        [
+          h("strong", props.stationLabel),
+          ...(props.transfers as Array<{ label: string }>).map((transfer) =>
+            h("span", { class: "transfer-label" }, transfer.label),
+          ),
+        ],
+      );
   },
 });
 
@@ -1638,7 +1703,7 @@ describe("DeparturePatternModal settings", () => {
     wrapper.unmount();
   });
 
-  it("extends a full-line common spine before parallel alternatives", async () => {
+  it("keeps the full-line common spine fixed while compressing a longer alternative", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({ places: [], records: [] }),
@@ -1796,12 +1861,14 @@ describe("DeparturePatternModal settings", () => {
     const houilles = positionByLabel.get("Houilles - Carrieres-sur-Seine");
     const sartrouville = positionByLabel.get("Sartrouville");
     const boisColombes = positionByLabel.get("Bois-Colombes");
+    const colombes = positionByLabel.get("Colombes");
     const saintLazare = positionByLabel.get("Gare Saint-Lazare");
 
     expect(asnieres).toBeDefined();
     expect(houilles).toBeDefined();
     expect(sartrouville).toBeDefined();
     expect(boisColombes).toBeDefined();
+    expect(colombes).toBeDefined();
     expect(saintLazare).toBeDefined();
     expect(saintLazare!.x).toBeLessThan(asnieres!.x);
     expect(asnieres!.x).toBeLessThan(houilles!.x);
@@ -1809,13 +1876,59 @@ describe("DeparturePatternModal settings", () => {
     expect(saintLazare!.y).toBe(asnieres!.y);
     expect(asnieres!.y).toBe(houilles!.y);
     expect(houilles!.y).toBe(sartrouville!.y);
+    expect(
+      houilles!.x - asnieres!.x,
+      "the longer alternative must not expand the common Asnieres-Houilles interval",
+    ).toBe(138);
     expect(boisColombes!.x).toBeGreaterThan(asnieres!.x);
+    expect(boisColombes!.x).toBeLessThan(colombes!.x);
     expect(boisColombes!.x).toBeLessThan(houilles!.x);
+    expect(colombes!.x).toBeLessThan(houilles!.x);
     expect(boisColombes!.y).toBeGreaterThan(asnieres!.y);
+    expect(colombes!.y).toBe(boisColombes!.y);
 
     await flushPromises();
     wrapper.unmount();
   });
+
+  it("keeps the Transilien J common spine compact around Asnieres and Houilles", async () => {
+    const wrapper = await mountRealLineGeometry("line:IDFM:C01739", "train");
+    const stations = readStationGeometry(wrapper);
+    const findByPrefix = (prefix: string) =>
+      stations.find((station) => station.label.startsWith(prefix));
+    const paris = findByPrefix("Gare Saint-Lazare");
+    const asnieres = findByPrefix("Asni");
+    const houilles = findByPrefix("Houilles");
+    const sartrouville = findByPrefix("Sartrouville");
+    const boisColombes = findByPrefix("Bois-Colombes");
+    const colombes = findByPrefix("Colombes");
+    const leStade = findByPrefix("Le Stade");
+    const argenteuil = findByPrefix("Argenteuil");
+    const mantes = findByPrefix("Mantes-la-Jolie");
+
+    expect(paris).toBeDefined();
+    expect(asnieres).toBeDefined();
+    expect(houilles).toBeDefined();
+    expect(sartrouville).toBeDefined();
+    expect(boisColombes).toBeDefined();
+    expect(colombes).toBeDefined();
+    expect(leStade).toBeDefined();
+    expect(argenteuil).toBeDefined();
+    expect(mantes).toBeDefined();
+
+    expect(paris!.x).toBeLessThan(asnieres!.x);
+    expect(asnieres!.x).toBeLessThan(houilles!.x);
+    expect(houilles!.x).toBeLessThan(sartrouville!.x);
+    expect(houilles!.x - asnieres!.x).toBe(138);
+    expect(boisColombes!.x).toBeGreaterThan(asnieres!.x);
+    expect(boisColombes!.x).toBeLessThan(colombes!.x);
+    expect(colombes!.x).toBeLessThan(leStade!.x);
+    expect(leStade!.x).toBeLessThan(argenteuil!.x);
+    expect(argenteuil!.x).toBeLessThan(mantes!.x);
+    expect(boisColombes!.y).not.toBe(asnieres!.y);
+
+    wrapper.unmount();
+  }, 20000);
 
   it("places topology loop corridors as parallel lanes between placed anchors", async () => {
     const fetchMock = vi.fn(async () => ({
@@ -2206,6 +2319,697 @@ describe("DeparturePatternModal settings", () => {
     expect(wrapper.findAll(".pattern-flow-city-zone")).toHaveLength(0);
 
     await flushPromises();
+    wrapper.unmount();
+  });
+
+  it("compresses stations into city nodes with aggregated transfers and states", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+    const metro4: TransferLineOption = {
+      id: "metro-4",
+      label: "4",
+      family: "METRO",
+    };
+    const tram6: TransferLineOption = {
+      id: "tram-6",
+      label: "T6",
+      family: "TRAM",
+    };
+    const cityPattern: DepartureCallingPattern = {
+      ...pattern,
+      destination: "Station sans ville",
+      calls: [
+        {
+          ...createCall("antony-1", "Antony Centre", "Antony", true),
+          time: "2026-08-29T10:00:00+02:00",
+          transferLines: [metro4],
+        },
+        {
+          ...createCall("antony-2", "Antony Gare", " antony "),
+          served: false,
+        },
+        {
+          ...createCall("antony-3", "Antony Sud", " Antóný "),
+          transferLines: [tram6],
+        },
+        createCall("antony-4", "Antony Centre 2", "Antony"),
+        createCall("antony-5", "Antony Gare 2", "Antony"),
+        createCall("sceaux-1", "Sceaux Gare", "Sceaux"),
+        createCall("sceaux-2", "Sceaux Centre", " SCEAUX "),
+        createCall("station-without-city", "Station sans ville", ""),
+      ],
+      lineTopology: [
+        {
+          id: "city-compression-sequence",
+          label: "Antony - Sceaux",
+          topologySource: "server",
+          stops: [
+            createRouteStop("antony-1", "Antony Centre", 652146, 6862288, "Antony"),
+            createRouteStop("antony-2", "Antony Gare", 652246, 6862288, " antony "),
+            createRouteStop(
+              "antony-3",
+              "Antony Sud",
+              652346,
+              6862288,
+              " Antóný ",
+            ),
+            createRouteStop("antony-4", "Antony Centre 2", 652446, 6862288, "Antony"),
+            createRouteStop("antony-5", "Antony Gare 2", 652546, 6862288, "Antony"),
+            createRouteStop("sceaux-1", "Sceaux Gare", 652946, 6862288, "Sceaux"),
+            createRouteStop("sceaux-2", "Sceaux Centre", 653046, 6862288, " SCEAUX "),
+            createRouteStop("station-without-city", "Station sans ville", 653446, 6862288),
+          ],
+        },
+      ],
+    };
+    let miniMapNodes: Array<{ id: string; type?: string; data?: { label?: string } }> = [];
+    const PatternFlowMiniMapStub = defineComponent({
+      name: "PatternFlowMiniMap",
+      props: {
+        nodes: {
+          type: Array,
+          default: () => [],
+        },
+      },
+      setup(props) {
+        return () => {
+          miniMapNodes = props.nodes as Array<{
+            id: string;
+            type?: string;
+            data?: { label?: string };
+          }>;
+
+          return h("div", { "data-testid": "pattern-minimap" });
+        };
+      },
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: cityPattern,
+        showMiniMap: true,
+        transferBundleBackendCacheEnabled: false,
+        transferBundleLocalCacheEnabled: false,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowGeometryStub,
+          Controls: true,
+          PatternFlowMiniMap: PatternFlowMiniMapStub,
+          LineIconBadge: true,
+          MaterialCombobox: PatternModeComboboxStub,
+          StationTransferDetails: StationTransferDetailsStub,
+          Handle: true,
+        },
+      },
+    });
+
+    const cityModeOptions = wrapper.findAll('[data-mode-id="cities"]');
+    expect(cityModeOptions.length).toBeGreaterThan(0);
+    expect(cityModeOptions[0]?.text()).toBe("Vue villes");
+
+    await cityModeOptions[0]!.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".pattern-flow-shell--cities").exists()).toBe(true);
+    expect(wrapper.find(".pattern-flow-shell--compact").exists()).toBe(true);
+    expect(wrapper.findAll(".pattern-flow-city-zone")).toHaveLength(0);
+
+    const stationNodes = wrapper.findAll(".pattern-flow-station");
+    const stationLabels = stationNodes.map((node) =>
+      node.attributes("data-station-label"),
+    );
+    expect(stationLabels).toEqual([
+      "Antony",
+      "Sceaux",
+      "Station sans ville",
+    ]);
+    expect(wrapper.findAll('[data-station-label="Antony"]')).toHaveLength(1);
+    expect(wrapper.findAll('[data-station-label="Sceaux"]')).toHaveLength(1);
+    expect(
+      wrapper.find('[data-station-label="Antony"]')?.attributes("data-city-node"),
+    ).toBe("true");
+    expect(
+      wrapper.find('[data-station-label="Antony"]')?.attributes("data-mixed-served"),
+    ).toBe("true");
+    expect(
+      wrapper.find('[data-station-label="Antony"]')?.attributes("title"),
+    ).toBe("Ville partiellement desservie");
+    expect(wrapper.find('[data-station-label="Antony"]').text()).toContain(
+      "10:00",
+    );
+    expect(wrapper.findAll(".pattern-flow-station__transfers--inline")).toHaveLength(0);
+
+    const antonyNode = wrapper.find('[data-station-label="Antony"]');
+    await antonyNode.trigger("mouseenter");
+    await nextTick();
+    const transferTooltip = wrapper.find(".station-transfer-details-test");
+    expect(transferTooltip.exists()).toBe(true);
+    expect(transferTooltip.text()).toContain("Antony");
+    expect(transferTooltip.text()).toContain("4");
+    expect(transferTooltip.text()).toContain("T6");
+    expect(transferTooltip.text()).not.toContain("Antony Centre");
+    expect(transferTooltip.text()).not.toContain("Antony Gare");
+
+    const edges = readEdgeGeometry(wrapper);
+    const uniqueEdges = new Set(
+      edges.map((edge) => [edge.source, edge.target].sort().join("--")),
+    );
+    expect(uniqueEdges).toHaveLength(2);
+    expect(edges.every((edge) => edge.source !== edge.target)).toBe(true);
+    expect(miniMapNodes).toHaveLength(3);
+    expect(miniMapNodes.every((node) => node.type === "station")).toBe(true);
+    expect(miniMapNodes.map((node) => node.data?.label)).toEqual([
+      "Antony",
+      "Sceaux",
+      "Station sans ville",
+    ]);
+
+    await wrapper.setProps({
+      pattern: {
+        ...cityPattern,
+        departureId: "dep-other",
+      },
+    });
+    await flushPromises();
+    expect(wrapper.find(".pattern-flow-shell--cities").exists()).toBe(false);
+    expect(wrapper.find(".pattern-flow-shell--compact").exists()).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it("keeps compressed branch arms and edge geometry", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+    const branchPattern: DepartureCallingPattern = {
+      ...pattern,
+      calls: [
+        createCall("root-1", "Antony Nord", "Antony", true),
+        createCall("root-2", "Antony Sud", " antony "),
+        createCall("main-1", "Sceaux", "Sceaux"),
+        createCall("main-2", "Bourg-la-Reine", "Bourg-la-Reine"),
+        createCall("upper-1", "Clamart", "Clamart"),
+        createCall("upper-2", "Meudon", "Meudon"),
+        createCall("lower-1", "Bagneux", "Bagneux"),
+        createCall("lower-2", "Massy", "Massy"),
+      ],
+      lineTopology: [
+        {
+          id: "main-arm",
+          label: "Main arm",
+          topologySource: "server",
+          stops: [
+            createRouteStop("root-1", "Antony Nord", 652146, 6862288, "Antony"),
+            createRouteStop("root-2", "Antony Sud", 652246, 6862288, " antony "),
+            createRouteStop("main-1", "Sceaux", 652646, 6862288, "Sceaux"),
+            createRouteStop(
+              "main-2",
+              "Bourg-la-Reine",
+              653146,
+              6862288,
+              "Bourg-la-Reine",
+            ),
+          ],
+        },
+        {
+          id: "upper-arm",
+          label: "Upper arm",
+          topologySource: "server",
+          branchLayout: {
+            kind: "same-direction-fork",
+            junctionStationId: "root-1",
+            terminalStationId: "upper-2",
+            trunkStationId: "main-1",
+            direction: "forward",
+            side: "upper",
+          },
+          stops: [
+            createRouteStop("root-1", "Antony Nord", 652146, 6862288, "Antony"),
+            createRouteStop("upper-1", "Clamart", 652646, 6862888, "Clamart"),
+            createRouteStop("upper-2", "Meudon", 653146, 6862888, "Meudon"),
+          ],
+        },
+        {
+          id: "lower-arm",
+          label: "Lower arm",
+          topologySource: "server",
+          branchLayout: {
+            kind: "same-direction-fork",
+            junctionStationId: "root-2",
+            terminalStationId: "lower-2",
+            trunkStationId: "main-1",
+            direction: "forward",
+            side: "lower",
+          },
+          stops: [
+            createRouteStop("root-2", "Antony Sud", 652246, 6862288, " antony "),
+            createRouteStop("lower-1", "Bagneux", 652646, 6861688, "Bagneux"),
+            createRouteStop("lower-2", "Massy", 653146, 6861688, "Massy"),
+          ],
+        },
+      ],
+    };
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: branchPattern,
+        showMiniMap: false,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowGeometryStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: PatternModeComboboxStub,
+          Handle: true,
+        },
+      },
+    });
+
+    await wrapper.find('[data-mode-id="cities"]').trigger("click");
+    await flushPromises();
+
+    const stationLabels = wrapper.findAll(".pattern-flow-station").map((node) =>
+      node.attributes("data-station-label"),
+    );
+    expect(stationLabels).toEqual([
+      "Antony",
+      "Sceaux",
+      "Bourg-la-Reine",
+      "Clamart",
+      "Meudon",
+      "Bagneux",
+      "Massy",
+    ]);
+    expect(wrapper.findAll('[data-station-label="Antony"]')).toHaveLength(1);
+
+    const geometry = readStationGeometry(wrapper);
+    const upper = findStationGeometry(geometry, "Meudon");
+    const lower = findStationGeometry(geometry, "Massy");
+    expect(upper.y).not.toBe(lower.y);
+
+    const uniqueEdges = new Set(
+      readEdgeGeometry(wrapper).map((edge) =>
+        [edge.source, edge.target].sort().join("--"),
+      ),
+    );
+    expect(uniqueEdges).toHaveLength(6);
+    expect(readEdgeGeometry(wrapper).every((edge) => edge.source !== edge.target)).toBe(
+      true,
+    );
+
+    wrapper.unmount();
+  });
+
+  it("keeps non-degenerate compressed loop corridors", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+    const loopPattern: DepartureCallingPattern = {
+      ...pattern,
+      calls: [
+        createCall("left", "Saint-Denis", "Saint-Denis", true),
+        createCall("anchor-1", "Paris Nord", "Paris"),
+        createCall("anchor-2", "Paris Sud", " paris "),
+        createCall("main-mid", "Clamart", "Clamart"),
+        createCall("right", "Sceaux", "Sceaux"),
+        createCall("terminal", "Versailles", "Versailles"),
+        createCall("upper", "Meudon", "Meudon"),
+        createCall("lower", "Antony", "Antony"),
+      ],
+      lineTopology: [
+        {
+          id: "loop-main",
+          label: "Main corridor",
+          topologySource: "server",
+          stops: [
+            createRouteStop("left", "Saint-Denis", 651146, 6862288, "Saint-Denis"),
+            createRouteStop("anchor-1", "Paris Nord", 652146, 6862288, "Paris"),
+            createRouteStop("anchor-2", "Paris Sud", 652246, 6862288, " paris "),
+            createRouteStop("main-mid", "Clamart", 652646, 6862288, "Clamart"),
+            createRouteStop("right", "Sceaux", 653146, 6862288, "Sceaux"),
+            createRouteStop("terminal", "Versailles", 654146, 6862288, "Versailles"),
+          ],
+        },
+        {
+          id: "loop-upper",
+          label: "Upper corridor",
+          topologySource: "server",
+          stops: [
+            createRouteStop("anchor-1", "Paris Nord", 652146, 6862288, "Paris"),
+            createRouteStop("upper", "Meudon", 652646, 6862888, "Meudon"),
+            createRouteStop("right", "Sceaux", 653146, 6862288, "Sceaux"),
+          ],
+        },
+        {
+          id: "loop-lower",
+          label: "Lower corridor",
+          topologySource: "server",
+          stops: [
+            createRouteStop("anchor-2", "Paris Sud", 652246, 6862288, " paris "),
+            createRouteStop("lower", "Antony", 652646, 6861688, "Antony"),
+            createRouteStop("right", "Sceaux", 653146, 6862288, "Sceaux"),
+          ],
+        },
+      ],
+      lineTopologyLayout: {
+        loops: [
+          {
+            id: "parallel-city-loop",
+            kind: "parallel",
+            anchorStationIds: ["anchor-1", "right"],
+            segmentIds: ["loop-upper", "loop-lower"],
+            stationIds: ["anchor-1", "upper", "right", "lower"],
+            laneHints: [
+              {
+                id: "upper-lane",
+                role: "alternative",
+                anchorStationIds: ["anchor-1", "right"],
+                segmentIds: ["loop-upper"],
+                stationIds: ["anchor-1", "upper", "right"],
+                lane: -1,
+                side: "upper",
+              },
+              {
+                id: "lower-lane",
+                role: "alternative",
+                anchorStationIds: ["anchor-2", "right"],
+                segmentIds: ["loop-lower"],
+                stationIds: ["anchor-2", "lower", "right"],
+                lane: 1,
+                side: "lower",
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: loopPattern,
+        showMiniMap: false,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowGeometryStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          LineIconBadge: true,
+          MaterialCombobox: PatternModeComboboxStub,
+          Handle: true,
+        },
+      },
+    });
+
+    await wrapper.find('[data-mode-id="cities"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.findAll('[data-station-label="Paris"]')).toHaveLength(1);
+    const geometry = readStationGeometry(wrapper);
+    const upper = findStationGeometry(geometry, "Meudon");
+    const lower = findStationGeometry(geometry, "Antony");
+    expect(upper.y).not.toBe(lower.y);
+
+    const uniqueEdges = new Set(
+      readEdgeGeometry(wrapper).map((edge) =>
+        [edge.source, edge.target].sort().join("--"),
+      ),
+    );
+    expect(uniqueEdges).toHaveLength(8);
+    expect(readEdgeGeometry(wrapper).every((edge) => edge.source !== edge.target)).toBe(
+      true,
+    );
+
+    wrapper.unmount();
+  });
+
+  it("projects traffic to city nodes while keeping source stations in the calendar", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 1, 12, 0, 0));
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+    const trafficPattern: DepartureCallingPattern = {
+      ...pattern,
+      calls: [
+        createCall("antony-centre", "Antony Centre", "Antony", true),
+        createCall("antony-gare", "Antony Gare", " antony "),
+        createCall("sceaux-gare", "Sceaux Gare", "Sceaux"),
+        createCall("sceaux-centre", "Sceaux Centre", " SCEAUX "),
+      ],
+      lineTopology: [
+        {
+          id: "traffic-city-sequence",
+          label: "Traffic cities",
+          topologySource: "server",
+          stops: [
+            createRouteStop("antony-centre", "Antony Centre", 652146, 6862288, "Antony"),
+            createRouteStop("antony-gare", "Antony Gare", 652646, 6862288, " antony "),
+            createRouteStop("sceaux-gare", "Sceaux Gare", 653146, 6862288, "Sceaux"),
+            createRouteStop("sceaux-centre", "Sceaux Centre", 653646, 6862288, " SCEAUX "),
+          ],
+        },
+      ],
+    };
+    const trafficReport: TrafficLineReport = {
+      lineRef: "line:test",
+      status: "disrupted",
+      disruptions: [
+        {
+          id: "city-source-interruption",
+          title: "Interruption Antony Sceaux",
+          message: [
+            "Période : toute la journée",
+            "Dates : du 1er au 7 août",
+            "- Antony Centre <> Sceaux Centre : trafic interrompu",
+          ].join("\\n"),
+          kind: "works",
+          applicationPeriods: [
+            {
+              begin: "20260801T000000",
+              end: "20260807T235959",
+            },
+          ],
+          impactedLineRefs: ["line:test"],
+          impactedStopNames: [],
+        },
+      ],
+    };
+    type CapturedCalendar = {
+      days: Array<{
+        events: Array<{
+          interruptedStationKeys: string[];
+        }>;
+        interruptedStationLabels: string[];
+      }>;
+    };
+    let capturedCalendar: CapturedCalendar | undefined;
+    const PatternTrafficCalendarSurfaceStub = defineComponent({
+      name: "PatternTrafficCalendarSurface",
+      props: {
+        calendar: {
+          type: Object,
+          default: () => ({ days: [] }),
+        },
+      },
+      setup(props) {
+        return () => {
+          capturedCalendar = props.calendar as CapturedCalendar;
+          return h("div", { "data-testid": "pattern-traffic-calendar-stub" });
+        };
+      },
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: trafficPattern,
+        trafficReport,
+        showMiniMap: false,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowTrafficStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          PatternTrafficCalendarSurface: PatternTrafficCalendarSurfaceStub,
+          LineIconBadge: true,
+          MaterialCombobox: PatternModeComboboxStub,
+          Handle: true,
+        },
+      },
+    });
+
+    await wrapper.find('[data-mode-id="cities"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.findAll('[data-station-label="Antony"]')).toHaveLength(1);
+    expect(wrapper.findAll('[data-station-label="Sceaux"]')).toHaveLength(1);
+    expect(
+      wrapper.findAll(".pattern-flow-station--traffic-interruption"),
+    ).toHaveLength(2);
+    expect(wrapper.find(".pattern-flow-edge--traffic-interruption").exists()).toBe(
+      true,
+    );
+    expect(wrapper.find(".pattern-flow-traffic-marker--interruption").exists()).toBe(
+      true,
+    );
+
+    const impactedDays = capturedCalendar?.days.filter(
+      (day) => day.events.length > 0,
+    );
+    expect(impactedDays?.length).toBeGreaterThan(0);
+    const sourceLabels = impactedDays?.flatMap(
+      (day) => day.interruptedStationLabels,
+    );
+    expect(sourceLabels).toContain("Antony Gare");
+    expect(sourceLabels).toContain("Sceaux Gare");
+    expect(sourceLabels).not.toContain("Antony");
+    expect(sourceLabels).not.toContain("Sceaux");
+    expect(impactedDays?.some((day) =>
+      day.events.some((event) =>
+        event.interruptedStationKeys.includes("antonygare") &&
+        event.interruptedStationKeys.includes("sceauxgare"),
+      ),
+    )).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it("represents an interruption internal to one city on its node without walking", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 1, 12, 0, 0));
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ places: [], records: [] }),
+    }));
+    const internalCityPattern: DepartureCallingPattern = {
+      ...pattern,
+      calls: [
+        createCall("antony-a", "Antony A", "Antony", true),
+        createCall("antony-b", "Antony B", " antony "),
+        createCall("antony-c", "Antony C", "ANTONY"),
+      ],
+      lineTopology: [
+        {
+          id: "internal-city-sequence",
+          label: "Antony internal",
+          topologySource: "server",
+          stops: [
+            createRouteStop("antony-a", "Antony A", 652146, 6862288, "Antony"),
+            createRouteStop("antony-b", "Antony B", 652646, 6862288, " antony "),
+            createRouteStop("antony-c", "Antony C", 653146, 6862288, "ANTONY"),
+          ],
+        },
+      ],
+    };
+    const trafficReport: TrafficLineReport = {
+      lineRef: "line:test",
+      status: "disrupted",
+      disruptions: [
+        {
+          id: "internal-city-interruption",
+          title: "Interruption interne à Antony",
+          message: "Antony A <> Antony C : trafic interrompu",
+          kind: "works",
+          applicationPeriods: [
+            {
+              begin: "20260801T000000",
+              end: "20260801T235959",
+            },
+          ],
+          impactedLineRefs: ["line:test"],
+          impactedStopNames: [],
+        },
+      ],
+    };
+
+    vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      value: fetchMock,
+    });
+
+    const wrapper = mount(DeparturePatternModal, {
+      props: {
+        open: true,
+        board,
+        pattern: internalCityPattern,
+        trafficReport,
+        showMiniMap: false,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          VueFlow: VueFlowTrafficStub,
+          Controls: true,
+          PatternFlowMiniMap: true,
+          PatternTrafficCalendarSurface: true,
+          LineIconBadge: true,
+          MaterialCombobox: PatternModeComboboxStub,
+          Handle: true,
+        },
+      },
+    });
+
+    await wrapper.find('[data-mode-id="cities"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.findAll(".pattern-flow-station")).toHaveLength(1);
+    expect(wrapper.find('[data-station-label="Antony"]')).toBeDefined();
+    expect(
+      wrapper.findAll(".pattern-flow-station--traffic-interruption"),
+    ).toHaveLength(1);
+    expect(wrapper.findAll(".pattern-flow-traffic-walking")).toHaveLength(0);
+    expect(wrapper.find(".pattern-flow-traffic-marker--interruption").exists()).toBe(
+      true,
+    );
+
     wrapper.unmount();
   });
 

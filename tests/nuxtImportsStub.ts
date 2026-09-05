@@ -1,4 +1,4 @@
-import { ref, type Ref } from "vue";
+import { ref, type MaybeRefOrGetter, type Ref } from "vue";
 
 const stateStore = new Map<string, Ref<unknown>>();
 
@@ -26,7 +26,7 @@ export function useRouter(): {
   };
 }
 
-export function useFetch<T>(): {
+export function useFetch<T>(_url?: MaybeRefOrGetter<string>): {
   data: Ref<T | null>;
   pending: Ref<boolean>;
   error: Ref<unknown>;

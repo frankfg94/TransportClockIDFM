@@ -8,7 +8,27 @@ import {
   loadStationTransfers,
   selectBusMapDirection,
 } from "../src/features/line-map/lineMapData";
+import {
+  saveTransferBundle,
+  type TransferBundleStorage,
+} from "../src/features/service-pattern/transferBundles";
 import type { LineRouteSequence, LineRouteStop, LineSearchOption } from "../src/types/transit";
+
+class MemoryStorage implements TransferBundleStorage {
+  private readonly values = new Map<string, string>();
+
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.values.set(key, value);
+  }
+
+  removeItem(key: string): void {
+    this.values.delete(key);
+  }
+}
 
 describe("detailed station picker line map model", () => {
   it("creates a map with background tiles from projected NeTEx coordinates", () => {
@@ -520,6 +540,67 @@ describe("detailed station picker line map model", () => {
     }
   });
 
+  it("reuses a locally cached map correspondence without requesting the backend", async () => {
+    const storage = new MemoryStorage();
+    const lineId = "line:IDFM:C01104";
+    const stopAreaRef = "stop_area:IDFM:71297";
+    const transfers = [
+      {
+        id: "line:IDFM:C01371",
+        label: "1",
+        family: "METRO" as const,
+      },
+    ];
+
+    saveTransferBundle(
+      {
+        version: 1,
+        generatedAt: new Date().toISOString(),
+        lineId,
+        lineLabel: "68",
+        nearbyDistanceMeters: 200,
+        requestConcurrency: 1,
+        transferResolverMode: "nearby",
+        transfersByStopAreaRef: {
+          [stopAreaRef]: transfers,
+        },
+      },
+      15,
+      storage,
+    );
+
+    const fetchMock = vi.fn();
+    vi.stubGlobal("window", { localStorage: storage });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const result = await loadStationTransfers(
+        {
+          id: stopAreaRef,
+          label: "Palais Royal - Musée du Louvre",
+          city: "Paris",
+          monitoringRef: "STIF:StopArea:SP:71297:",
+          scheduleStopAreaRef: stopAreaRef,
+        },
+        {
+          family: "BUS",
+          id: lineId,
+          label: "68",
+          navitiaId: lineId,
+          ref: lineId,
+        },
+        {
+          localCacheEnabled: true,
+        },
+      );
+
+      expect(result).toEqual(transfers);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("removes a duplicate current T1 identity returned under another IDFM line id", async () => {
     vi.stubGlobal(
       "fetch",
@@ -683,7 +764,7 @@ describe("detailed station picker line map model", () => {
     ]);
   });
 
-  it("keeps the bus direction control hidden when both directions share the same stops", () => {
+  it("keeps both controls when both directions share the same physical stops", () => {
     const outbound = createSequence("outbound", [
       createProjectedStop("A", 650000, 6860000),
       createProjectedStop("B", 650300, 6859500),
@@ -699,7 +780,35 @@ describe("detailed station picker line map model", () => {
     const selection = selectBusMapDirection([outbound, inbound]);
 
     expect(selection?.sequence.id).toBe("outbound");
-    expect(selection?.options).toEqual([]);
+    expect(selection?.options).toEqual([
+      {
+        id: "station:B",
+        label: "B",
+        stopCount: 2,
+      },
+      {
+        id: "station:A",
+        label: "A",
+        stopCount: 2,
+      },
+    ]);
+  });
+
+  it("materializes the reverse traversal of a closed loop", () => {
+    const loop = createSequence("loop", [
+      createProjectedStop("A", 650000, 6860000),
+      createProjectedStop("B", 650300, 6859500),
+      createProjectedStop("C", 650500, 6859000),
+      createProjectedStop("A", 650000, 6860000),
+    ]);
+    loop.direction = "Boucle";
+
+    const selection = selectBusMapDirection([loop]);
+
+    expect(selection?.options).toHaveLength(2);
+    expect(selection?.options[1]?.id).toBe("station:A:reverse");
+    expect(selection?.selectedDirectionId).toBe("station:A");
+    expect(selection?.sequence.stops.map((stop) => stop.label)).toEqual(["A", "B", "C", "A"]);
   });
 });
 

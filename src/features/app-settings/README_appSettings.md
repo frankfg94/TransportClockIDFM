@@ -18,6 +18,14 @@ child components
 
 Child components should usually not read or write `localStorage` directly. They should receive settings through props and emit events when something needs to change.
 
+The nearby stations map controls follow the same flow. The five persisted
+booleans are `nearbyMapShowIsochroneControl`,
+`nearbyMapShowDirectoryControl`, `nearbyMapShowBasemapControl`,
+`nearbyMapShowDisplayControl`, and `nearbyMapShowFullscreenControl`. They only
+control the availability of the Xray, directory, basemap, display, and
+fullscreen controls; the transient Xray and station-visibility states remain
+local to the map component.
+
 ---
 
 ## 1. Add the setting to the `AppSettings` interface
@@ -427,6 +435,12 @@ For every new setting, follow this checklist:
 9. Call updateSettings()
 10. Never access localStorage directly from child components
 ```
+
+For nearby map controls, add the corresponding `nearbyMapShow*Control` field
+to all three `AppSettings` stages, expose it from `App.vue`, and pass it through
+`NearbyStationsSelector` to `NearbyStationsMap`. If a control is disabled while
+active, the map should restore its neutral state so the user never loses the
+way to close a panel, leave fullscreen, or stop an overlay.
 
 ---
 

@@ -87,6 +87,7 @@ const DISTURBANCE_KEYWORDS = [
   "temps d attente allonges",
   "disturbed",
   "reduced service",
+  "reduced transport offer",
 ];
 
 const NON_SERVED_INTERRUPTION_KEYWORDS = ["non desservi", "pas desservi"];
@@ -105,6 +106,7 @@ const INTERRUPTION_KEYWORDS = [
   ...NON_SERVED_INTERRUPTION_KEYWORDS,
   "no service",
   "no-service",
+  "interrupted",
 ];
 
 const REPLACEMENT_BUS_KEYWORDS = [
@@ -354,24 +356,21 @@ function createResolvedSegments({
     });
   }
 
-  const impactedStationKeys = disruption.impactedStopNames
-    .map((name) =>
-      resolveStationKey(name, stations, {
-        allowFuzzy: kind === "interruption",
-      }),
-    )
-    .filter((key): key is string => Boolean(key));
+  const impactedStationKeys = resolveImpactedStationKeys(
+    disruption.impactedStopNames,
+    stations,
+    kind,
+  );
 
   if (impactedStationKeys.length >= 2) {
     return [
-      createSegmentFromEndpoints({
+      createSegmentFromImpactedStations({
         disruption,
         parsed,
         stations,
         edges,
         kind,
-        source: impactedStationKeys[0],
-        target: impactedStationKeys[impactedStationKeys.length - 1],
+        stationKeys: impactedStationKeys,
         index: 0,
       }),
     ];
@@ -388,6 +387,48 @@ function createResolvedSegments({
   }
 
   return [];
+}
+
+function resolveImpactedStationKeys(
+  impactedStopNames: string[],
+  stations: PatternTrafficStation[],
+  kind: PatternTrafficImpactKind,
+): string[] {
+  const allowFuzzy = kind === "interruption";
+  const resolvedStationKeys = impactedStopNames.flatMap((name) => {
+    const exactWholeNameMatch = findExactStationKey(name, stations);
+
+    if (exactWholeNameMatch) {
+      return [exactWholeNameMatch];
+    }
+
+    const alternatives = splitSectionStationAlternatives(name);
+    if (alternatives.length > 1) {
+      const resolvedAlternatives = alternatives
+        .map((alternative) =>
+          resolveStationKey(alternative, stations, { allowFuzzy }),
+        )
+        .filter((key): key is string => Boolean(key));
+
+      if (resolvedAlternatives.length > 0) {
+        return resolvedAlternatives;
+      }
+    }
+
+    const wholeNameMatch = resolveStationKey(name, stations, { allowFuzzy });
+
+    if (wholeNameMatch) {
+      return [wholeNameMatch];
+    }
+
+    return alternatives
+      .map((alternative) =>
+        resolveStationKey(alternative, stations, { allowFuzzy }),
+      )
+      .filter((key): key is string => Boolean(key));
+  });
+
+  return Array.from(new Set(resolvedStationKeys));
 }
 
 function createStationOnlySegments({
@@ -446,6 +487,75 @@ function createSegmentFromEndpoints({
     id: `${disruption.id}:section:${index}`,
     stationKeys,
     edgeKeys,
+  };
+}
+
+function createSegmentFromImpactedStations({
+  disruption,
+  parsed,
+  stations,
+  edges,
+  kind,
+  stationKeys,
+  index,
+}: {
+  disruption: TrafficDisruption;
+  parsed: ParsedTrafficDisruption;
+  stations: PatternTrafficStation[];
+  edges: PatternTrafficEdge[];
+  kind: PatternTrafficImpactKind;
+  stationKeys: string[];
+  index: number;
+}): PatternTrafficImpactSegment {
+  if (stationKeys.length === 2) {
+    return createSegmentFromEndpoints({
+      disruption,
+      parsed,
+      stations,
+      edges,
+      kind,
+      source: stationKeys[0]!,
+      target: stationKeys[1]!,
+      index,
+    });
+  }
+
+  const hull = createStationHull(stationKeys, edges);
+
+  return {
+    ...createImpact(disruption, parsed, kind),
+    id: `${disruption.id}:impacted-stations:${index}`,
+    stationKeys: hull.stationKeys,
+    edgeKeys: hull.edgeKeys,
+  };
+}
+
+function createStationHull(
+  stationKeys: string[],
+  edges: PatternTrafficEdge[],
+): { stationKeys: string[]; edgeKeys: string[] } {
+  const orderedStationKeys = Array.from(new Set(stationKeys)).sort();
+  const anchor = orderedStationKeys[0];
+
+  if (!anchor) {
+    return { stationKeys: [], edgeKeys: [] };
+  }
+
+  const hullStationKeys = new Set(orderedStationKeys);
+  const hullEdgeKeys = new Set<string>();
+
+  orderedStationKeys.slice(1).forEach((target) => {
+    const stationPath = findStationPath(anchor, target, edges);
+
+    stationPath.forEach((stationKey) => hullStationKeys.add(stationKey));
+    getEdgeKeysForStationPath(stationPath).forEach((edgeKey) =>
+      hullEdgeKeys.add(edgeKey),
+    );
+  });
+
+  return {
+    stationKeys: Array.from(hullStationKeys),
+    edgeKeys: Array.from(hullEdgeKeys),
   };
 }
 
@@ -593,9 +703,11 @@ function addTrafficSections(
   kind?: PatternTrafficImpactKind,
 ): void {
   const fromOptions = splitSectionStationAlternatives(fromValue);
-  const toOptions = splitSectionStationAlternatives(toValue);
 
   fromOptions.forEach((from) => {
+    const toOptions = splitSectionStationAlternatives(
+      removeRepeatedSectionEndpoint(toValue, from),
+    );
     toOptions.forEach((to) => {
       if (!from || !to) {
         return;
@@ -611,6 +723,22 @@ function addTrafficSections(
       sections.push({ from, to, kind });
     });
   });
+}
+
+function removeRepeatedSectionEndpoint(
+  value: string | undefined,
+  from: string,
+): string | undefined {
+  const cleaned = cleanSectionStationLabel(value);
+  const match = cleaned.match(
+    /^(.+?)\s*(?:<>|<->|\u2194|\u21c4)\s*(.+)$/u,
+  );
+  if (!match) return value;
+
+  return normalizePatternStationName(match[1]!) ===
+    normalizePatternStationName(from)
+    ? match[2]
+    : value;
 }
 
 function splitSectionStationAlternatives(value?: string): string[] {
@@ -979,20 +1107,11 @@ function resolveStationKey(
   options: { allowFuzzy?: boolean } = {},
 ): string | undefined {
   const labelKeys = createStationMatchKeys(label);
-  const exactStationKey = normalizePatternStationName(
-    removeStationLocationQualifier(label),
-  );
-  const exactStation = stations.find(
-    (station) =>
-      normalizePatternStationName(
-        removeStationLocationQualifier(station.label),
-      ) === exactStationKey,
-  );
+  const exactStation = findExactStationKey(label, stations);
 
-  if (exactStationKey && exactStation) {
-    return exactStation.key;
+  if (exactStation) {
+    return exactStation;
   }
-
 
   if (labelKeys.length === 0) {
     return undefined;
@@ -1020,6 +1139,26 @@ function resolveStationKey(
   return options.allowFuzzy
     ? resolveFuzzyStationKey(labelKeys, stations)
     : undefined;
+}
+
+function findExactStationKey(
+  label: string,
+  stations: PatternTrafficStation[],
+): string | undefined {
+  const exactStationKey = normalizePatternStationName(
+    removeStationLocationQualifier(label),
+  );
+
+  if (!exactStationKey) {
+    return undefined;
+  }
+
+  return stations.find(
+    (station) =>
+      normalizePatternStationName(
+        removeStationLocationQualifier(station.label),
+      ) === exactStationKey,
+  )?.key;
 }
 
 function removeStationLocationQualifier(value: string): string {

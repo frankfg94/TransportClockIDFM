@@ -233,6 +233,7 @@
   .modal-panel,
   .modal-panel--wide {
     max-height: calc(100vh - 20px);
+    max-height: calc(100dvh - 20px);
     width: 100%;
   }
 

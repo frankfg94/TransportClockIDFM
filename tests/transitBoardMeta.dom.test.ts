@@ -41,6 +41,40 @@ describe("TransitBoard departure metadata", () => {
     wrapper.unmount();
   });
 
+  it("uses the aimed departure fallback when a bus has no expected timestamp", () => {
+    const aimedDepartureTime = new Date(Date.now() + 25 * 60_000).toISOString();
+    const departure: Departure = {
+      id: "departure-aimed-only",
+      lineRef: "line:test",
+      monitoringRef: "stop:test",
+      stopName: "Station test",
+      destination: "Saint-Remy",
+      monitoringLabel: "Tous quais",
+      aimedDepartureTime,
+      vehicleAtStop: false,
+    };
+    const wrapper = mount(TransitBoard, {
+      props: {
+        board: createBoard(),
+        collapsedDirectionIds: [],
+        departures: [departure],
+        directionGroups: [createDirectionGroup(departure)],
+        loading: false,
+      },
+      global: {
+        stubs: {
+          LineIconBadge: true,
+        },
+      },
+    });
+
+    expect(wrapper.find(".last-service__time strong").text()).not.toBe("--");
+    expect(wrapper.find(".departure__time strong").text()).not.toBe("--");
+    expect(wrapper.find(".departure__time span").text()).not.toBe("--:--");
+
+    wrapper.unmount();
+  });
+
   it("shows the service pattern instead of platform metadata", () => {
     const departure: Departure = {
       id: "departure-1",
@@ -166,6 +200,45 @@ describe("TransitBoard departure metadata", () => {
         tone: "upcoming",
       },
     ]);
+
+    wrapper.unmount();
+  });
+
+  it("reveals the loading label before a traffic alert can pop in", async () => {
+    const wrapper = mount(TransitBoard, {
+      props: {
+        board: createBoard(),
+        collapsedDirectionIds: [],
+        departures: [],
+        directionGroups: [],
+        loading: true,
+      },
+      global: {
+        stubs: {
+          LineIconBadge: true,
+        },
+      },
+    });
+
+    expect(wrapper.find(".board-loading-notice__text").exists()).toBe(true);
+
+    await wrapper.setProps({
+      loading: false,
+      trafficAlert: {
+        label: "Perturbation",
+        target: {
+          alertId: "incident-1",
+          lineRef: "line:test",
+          trafficTab: "current",
+        },
+        tone: "orange",
+      },
+    });
+
+    expect(wrapper.find(".board-loading-notice__text").exists()).toBe(false);
+    expect(wrapper.get(".board-traffic-chip").classes()).toContain(
+      "board-traffic-chip--orange",
+    );
 
     wrapper.unmount();
   });

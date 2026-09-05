@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  selectDirectionalStopSequencePatterns,
   selectMaximalStopSequencePatterns,
   selectRepresentativeStopSequencePatterns,
 } from "../src/features/line-map/topologyPatterns";
@@ -70,6 +71,18 @@ describe("selectMaximalStopSequencePatterns", () => {
         stops: [{ id: "A" }, { id: "C" }],
       },
     ]);
+  });
+});
+
+describe("selectDirectionalStopSequencePatterns", () => {
+  it("keeps opposite traversals for direction selection", () => {
+    const selected = selectDirectionalStopSequencePatterns([
+      { id: "outbound", stops: ["A", "B", "C"] },
+      { id: "inbound", stops: ["C", "B", "A"] },
+      { id: "short", stops: ["A", "B"] },
+    ]);
+
+    expect(selected.map(({ id }) => id)).toEqual(["outbound", "inbound"]);
   });
 });
 

@@ -47,6 +47,10 @@ import {
   type TransitPlacePreset,
 } from "../../storage/transitPreferences";
 import { formatTransitDistance, getCoordinatesDistanceKm } from "../../services/distance";
+import {
+  createLinePresentation,
+  transitFamilyToMode,
+} from "../../services/linePresentation";
 import { getTransferLineId } from "../../services/transferLineOptions";
 import type {
   LineFrequencyProfile,
@@ -68,6 +72,7 @@ import { useDeparturePatternTraffic } from "../service-pattern/useDeparturePatte
 import { usePatternTrafficCalendar } from "../service-pattern/usePatternTrafficCalendar";
 import type { PatternTrafficCalendarDay } from "../service-pattern/trafficCalendar";
 import type { PatternTrafficSummaryEntry } from "../service-pattern/trafficCalendarSummary";
+import type { TransferResolverMode } from "../service-pattern/transferResolverMode";
 import { useI18n } from "../../i18n";
 import { buildRoundedPolylinePath, createScreenSpaceRoundedPolylineOptions } from "./lineGeometry";
 import {
@@ -79,6 +84,7 @@ import {
   TRAFFIC_INTERRUPTION_COLOR,
 } from "../service-pattern/trafficImpactStyles";
 import { createLineMapTrafficGraph } from "./lineMapTrafficGraph";
+import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../transport-map/config/globalTransportPlanConfig";
 import type {
   LineMapEntranceView,
   LineMapSegmentView,
@@ -192,6 +198,13 @@ const props = withDefaults(
     trafficReport?: TrafficLineReport;
     trafficCalendarImpactScope?: TrafficCalendarImpactScope;
     selectedDirectionId?: string;
+    transferBundleRetentionDays?: number;
+    transferBundleRequestConcurrency?: number;
+    transferBundleRequestSpacingMs?: number;
+    transferBundleLocalCacheEnabled?: boolean;
+    transferBundleBackendCacheEnabled?: boolean;
+    transferBundleTransportType?: string;
+    transferResolverMode?: TransferResolverMode;
   }>(),
   {
     mode: "picker",
@@ -202,6 +215,12 @@ const props = withDefaults(
     reduceMotion: false,
     smartTrafficDetection: false,
     trafficCalendarImpactScope: "all-impacts",
+    transferBundleRetentionDays: 15,
+    transferBundleRequestConcurrency: 1,
+    transferBundleRequestSpacingMs: 0,
+    transferBundleLocalCacheEnabled: false,
+    transferBundleBackendCacheEnabled: true,
+    transferResolverMode: "auto",
   },
 );
 
@@ -239,6 +258,21 @@ const ENTRANCES_OVERVIEW_RADIUS_METERS = 1_000;
 const ENTRANCE_FOCUS_RADIUS_METERS = 250;
 
 const lineMap = ref<LineMapViewModel>();
+const resolvedLinePresentation = computed(() => createLinePresentation({
+  color: props.line?.color,
+  family: props.line?.family,
+  id: props.line?.id,
+  mode: props.line?.family ? transitFamilyToMode(props.line.family) : undefined,
+  ref: props.line?.ref,
+  shortName: props.line?.label,
+  textColor: props.line?.textColor,
+}));
+const resolvedLineColor = computed(() =>
+  lineMap.value?.lineColor ?? resolvedLinePresentation.value.color,
+);
+const resolvedLineTextColor = computed(() =>
+  lineMap.value?.textColor ?? resolvedLinePresentation.value.textColor,
+);
 const loadingMap = ref(false);
 const errorMessage = ref("");
 const hoveredStop = ref<LineMapStopView>();
@@ -249,6 +283,7 @@ const maximumZoom = computed(() => getMaximumMapZoom(lineMap.value?.viewport));
 const mapCanvas = ref<HTMLDivElement>();
 const mapWorld = ref<HTMLDivElement>();
 const mapScene = ref<HTMLDivElement>();
+const mapSvg = ref<SVGSVGElement>();
 const mapTileWindow = ref<NormalizedMapTileWindow>({ minX: 0, maxX: 1, minY: 0, maxY: 1 });
 const ghostViewportRect = ref<NetworkGhostCanvasRect>({
   x: 0,
@@ -340,11 +375,18 @@ let wheelZoomAnimationFrame: number | undefined;
 let wheelZoomTarget: number | undefined;
 let wheelZoomClientX = 0;
 let wheelZoomClientY = 0;
-let liveZoom = zoom.value;
-let liveZoomActive = false;
+const resizeSvgStrokesDuringZoom = GLOBAL_TRANSPORT_PLAN_CONFIG.lineMap.svg.resizeStrokesDuringZoom;
+const liveZoom = ref(zoom.value);
+const liveZoomActive = ref(false);
 let panInertiaAnimationFrame: number | undefined;
 let panInertiaLastTime = 0;
 let mapPerformanceScrollTimer: number | undefined;
+const svgRenderZoom = computed(() =>
+  resizeSvgStrokesDuringZoom && liveZoomActive.value ? liveZoom.value : zoom.value,
+);
+const liveSvgStrokeResizeActive = computed(() =>
+  resizeSvgStrokesDuringZoom && liveZoomActive.value,
+);
 
 const stopById = computed(() => {
   const stops = new Map<string, LineMapStopView>();
@@ -601,8 +643,8 @@ const segmentDistanceLabels = computed<SegmentDistanceLabel[]>(() => {
     }
 
     const label = formatTransitDistance(segment.distanceKm);
-    const height = 22 / zoom.value;
-    const width = Math.max(42, label.length * 6.6 + 14) / zoom.value;
+    const height = 22 / svgRenderZoom.value;
+    const width = Math.max(42, label.length * 6.6 + 14) / svgRenderZoom.value;
 
     return [
       {
@@ -637,11 +679,12 @@ const renderedStops = computed(() => {
 const svgStyle = computed(() => ({
   height: `${VIEWBOX_HEIGHT * zoom.value}px`,
   width: `${VIEWBOX_WIDTH * zoom.value}px`,
+  "--zoom": String(svgRenderZoom.value),
 }));
 
 watch(zoom, (nextZoom) => {
-  if (liveZoomActive) return;
-  liveZoom = nextZoom;
+  if (liveZoomActive.value) return;
+  liveZoom.value = nextZoom;
   void nextTick(() => resetLiveZoomComposite(nextZoom));
 });
 
@@ -672,11 +715,11 @@ watch(
   { flush: "post" },
 );
 
-const stopRadius = computed(() => 7 / zoom.value);
-const stopHaloRadius = computed(() => 16 / zoom.value);
-const stopStrokeWidth = computed(() => 2 / zoom.value);
-const stopTrafficCrossRadius = computed(() => 5.2 / zoom.value);
-const stopTrafficCrossStrokeWidth = computed(() => 2.4 / zoom.value);
+const stopRadius = computed(() => 7 / svgRenderZoom.value);
+const stopHaloRadius = computed(() => 16 / svgRenderZoom.value);
+const stopStrokeWidth = computed(() => 2 / svgRenderZoom.value);
+const stopTrafficCrossRadius = computed(() => 5.2 / svgRenderZoom.value);
+const stopTrafficCrossStrokeWidth = computed(() => 2.4 / svgRenderZoom.value);
 
 const visibleLabelIds = computed(() => {
   const map = lineMap.value;
@@ -1359,17 +1402,30 @@ function createLineSearchOptionFromGhostLine(
   line: NetworkGhostLineView,
   family: TransitFamily,
 ): LineSearchOption {
+  const presentation = createLinePresentation({
+    color: line.color,
+    family,
+    id: line.id,
+    mode: line.mode,
+    ref: line.ref ?? line.id,
+    shortName: line.label,
+    textColor: line.textColor,
+  });
+  const iconUrls = Array.from(
+    new Set([...(line.iconUrls ?? []), ...(presentation.iconUrls ?? [])]),
+  );
+
   return {
     family,
     id: line.id,
     label: line.label,
     ref: line.ref ?? line.id,
     navitiaId: line.id,
-    color: line.color,
-    textColor: line.textColor,
+    color: presentation.color,
+    textColor: presentation.textColor,
     displayName: line.label,
-    iconUrl: line.iconUrl,
-    iconUrls: line.iconUrls,
+    iconUrl: line.iconUrl ?? presentation.iconUrl ?? iconUrls[0],
+    iconUrls,
   };
 }
 
@@ -1496,7 +1552,15 @@ async function loadTransfers(stop: LineMapStopView): Promise<void> {
   };
 
   try {
-    const lines = await loadStationTransfers(stop.station, props.line);
+    const lines = await loadStationTransfers(stop.station, props.line, {
+      backendCacheEnabled: props.transferBundleBackendCacheEnabled,
+      localCacheEnabled: props.transferBundleLocalCacheEnabled,
+      requestConcurrency: props.transferBundleRequestConcurrency,
+      requestSpacingMs: props.transferBundleRequestSpacingMs,
+      retentionDays: props.transferBundleRetentionDays,
+      transportType: props.transferBundleTransportType,
+      transferResolverMode: props.transferResolverMode,
+    });
 
     transferStates[stop.id] = {
       loading: false,
@@ -1727,7 +1791,7 @@ function getSegmentPath(segment: LineMapSegmentView): string {
         { x: getSegmentX(segment, "from"), y: getSegmentY(segment, "from") },
         { x: getSegmentX(segment, "to"), y: getSegmentY(segment, "to") },
       ];
-  return buildRoundedPolylinePath(points, createScreenSpaceRoundedPolylineOptions(zoom.value)).path;
+  return buildRoundedPolylinePath(points, createScreenSpaceRoundedPolylineOptions(svgRenderZoom.value)).path;
 }
 
 function toSvgX(value: number): number {
@@ -1835,7 +1899,7 @@ function scheduleVisibleMapTileWindowUpdate(): void {
 }
 
 function handleMapCanvasScroll(): void {
-  if (liveZoomActive) return;
+  if (liveZoomActive.value) return;
   scheduleVisibleMapTileWindowUpdate();
   if (!mapPerformanceProbe || isMapMoving.value) return;
 
@@ -1922,11 +1986,11 @@ function getLabelAnchor(stop: LineMapStopView): "middle" | "start" | "end" {
 }
 
 function getLabelX(stop: LineMapStopView, index: number): number {
-  return toSvgX(stop.x) + getLabelOffset(stop, index).x / zoom.value;
+  return toSvgX(stop.x) + getLabelOffset(stop, index).x / svgRenderZoom.value;
 }
 
 function getLabelY(stop: LineMapStopView, index: number): number {
-  return toSvgY(stop.y) + getLabelOffset(stop, index).y / zoom.value;
+  return toSvgY(stop.y) + getLabelOffset(stop, index).y / svgRenderZoom.value;
 }
 
 function getLabelOffset(
@@ -1986,7 +2050,7 @@ function getStopTrafficClass(stop: LineMapStopView) {
 }
 
 function getLineStyle(segment?: LineMapSegmentView) {
-  const color = lineMap.value?.lineColor ?? props.line?.color ?? "#0064ff";
+  const color = resolvedLineColor.value;
   const impact = segment ? getSegmentTrafficImpact(segment) : undefined;
 
   if (impact?.kind === "interruption") {
@@ -2008,7 +2072,7 @@ function getLineStyle(segment?: LineMapSegmentView) {
 }
 
 function getStopStyle(stop: LineMapStopView) {
-  const color = lineMap.value?.lineColor ?? props.line?.color ?? "#0064ff";
+  const color = resolvedLineColor.value;
   const isActive = stop.id === activeStop.value?.id;
   const isSelected = stop.id === props.selectedStationId || isActive;
   const impact = getStopTrafficImpact(stop);
@@ -2038,15 +2102,15 @@ function getStopStyle(stop: LineMapStopView) {
 
 function getLabelStyle() {
   return {
-    fontSize: `${12.5 / zoom.value}px`,
-    strokeWidth: `${5 / zoom.value}px`,
+    fontSize: `${12.5 / svgRenderZoom.value}px`,
+    strokeWidth: `${5 / svgRenderZoom.value}px`,
   };
 }
 
 function getActiveLabelBackground(stop: LineMapStopView, index: number) {
-  const paddingX = 8 / zoom.value;
-  const height = 24 / zoom.value;
-  const width = Math.max(42, stop.label.length * 7.2) / zoom.value + paddingX * 2;
+  const paddingX = 8 / svgRenderZoom.value;
+  const height = 24 / svgRenderZoom.value;
+  const width = Math.max(42, stop.label.length * 7.2) / svgRenderZoom.value + paddingX * 2;
   const labelX = getLabelX(stop, index);
   const anchor = getLabelAnchor(stop);
 
@@ -2057,7 +2121,7 @@ function getActiveLabelBackground(stop: LineMapStopView, index: number) {
         : anchor === "middle"
           ? labelX - width / 2
           : labelX - paddingX,
-    y: getLabelY(stop, index) - 17 / zoom.value,
+    y: getLabelY(stop, index) - 17 / svgRenderZoom.value,
     width,
     height,
     rx: height / 2,
@@ -2109,7 +2173,7 @@ function zoomAtCanvasCenter(nextZoom: number): void {
 }
 
 function zoomAtCanvasPointToZoom(nextZoom: number, clientX: number, clientY: number): void {
-  if (liveZoomActive) commitLiveZoom();
+  if (liveZoomActive.value) commitLiveZoom();
   const canvas = mapCanvas.value;
 
   if (!canvas) {
@@ -2177,20 +2241,40 @@ function previewZoomAtCanvasPointToZoom(
   );
 
   cancelPendingZoomScroll();
-  liveZoom = nextZoom;
-  liveZoomActive = true;
-  world.style.width = `${VIEWBOX_WIDTH * nextZoom}px`;
-  world.style.height = `${VIEWBOX_HEIGHT * nextZoom}px`;
-  scene.style.transform = `translateZ(0) scale(${nextZoom / zoom.value})`;
+  liveZoomActive.value = true;
+  liveZoom.value = nextZoom;
+  applyLiveZoomComposite(nextZoom);
+  if (resizeSvgStrokesDuringZoom) {
+    // A live SVG update causes Vue to patch the subtree. Reapply the
+    // compositor dimensions after that patch so the optional live path/style
+    // refresh does not reset the smooth zoom surface to the committed size.
+    void nextTick(() => {
+      if (liveZoomActive.value) applyLiveZoomComposite(liveZoom.value);
+    });
+  }
   canvas.scrollLeft = nextScrollLeft;
   canvas.scrollTop = nextScrollTop;
 }
 
-function commitLiveZoom(): void {
-  if (!liveZoomActive) return;
+function applyLiveZoomComposite(nextZoom: number): void {
+  const zoomElements = [mapWorld.value, mapScene.value, mapSvg.value];
+  zoomElements.forEach((element) => {
+    element?.style.setProperty("--zoom", String(nextZoom));
+  });
+  if (mapWorld.value) {
+    mapWorld.value.style.width = `${VIEWBOX_WIDTH * nextZoom}px`;
+    mapWorld.value.style.height = `${VIEWBOX_HEIGHT * nextZoom}px`;
+  }
+  if (mapScene.value) {
+    mapScene.value.style.transform = `translateZ(0) scale(${nextZoom / zoom.value})`;
+  }
+}
 
-  const nextZoom = liveZoom;
-  liveZoomActive = false;
+function commitLiveZoom(): void {
+  if (!liveZoomActive.value) return;
+
+  const nextZoom = liveZoom.value;
+  liveZoomActive.value = false;
   zoom.value = nextZoom;
   void nextTick(() => {
     resetLiveZoomComposite(nextZoom);
@@ -2199,7 +2283,11 @@ function commitLiveZoom(): void {
 }
 
 function resetLiveZoomComposite(nextZoom = zoom.value): void {
-  if (liveZoomActive) return;
+  if (liveZoomActive.value) return;
+  const zoomElements = [mapWorld.value, mapScene.value, mapSvg.value];
+  zoomElements.forEach((element) => {
+    element?.style.setProperty("--zoom", String(nextZoom));
+  });
   if (mapWorld.value) {
     mapWorld.value.style.width = `${VIEWBOX_WIDTH * nextZoom}px`;
     mapWorld.value.style.height = `${VIEWBOX_HEIGHT * nextZoom}px`;
@@ -2210,7 +2298,7 @@ function resetLiveZoomComposite(nextZoom = zoom.value): void {
 }
 
 function getCurrentVisualZoom(): number {
-  return liveZoomActive ? liveZoom : zoom.value;
+  return liveZoomActive.value ? liveZoom.value : zoom.value;
 }
 
 function panCanvasByViewportDelta(deltaX: number, deltaY: number): void {
@@ -2230,7 +2318,7 @@ function panCanvasByViewportDelta(deltaX: number, deltaY: number): void {
     canvas.clientHeight || rect.height,
   );
 
-  if (liveZoomActive || mapPinch.active) {
+  if (liveZoomActive.value || mapPinch.active) {
     cancelPendingZoomScroll();
     canvas.scrollLeft = nextScrollLeft;
     canvas.scrollTop = nextScrollTop;
@@ -2775,7 +2863,7 @@ function getEntranceDisplayKey(entrance: LineMapEntranceView): string {
     @touchend.stop
     @touchcancel.stop
     :style="{
-      '--line-color': lineMap?.lineColor ?? props.line?.color ?? '#0064ff',
+      '--line-color': resolvedLineColor,
     }"
   >
     <div class="line-map-panel__bar">
@@ -2783,8 +2871,8 @@ function getEntranceDisplayKey(entrance: LineMapEntranceView): string {
       <span
         class="line-map-chip"
         :style="{
-          background: props.line?.color ?? '#0064ff',
-          color: props.line?.textColor ?? '#ffffff',
+          background: resolvedLineColor,
+          color: resolvedLineTextColor,
         }"
       >
         {{ props.line?.label }}
@@ -2999,7 +3087,11 @@ function getEntranceDisplayKey(entrance: LineMapEntranceView): string {
             :style="svgStyle"
           >
             <svg
+              ref="mapSvg"
               class="line-map-svg"
+              :class="{
+                'line-map-svg--live-strokes': liveSvgStrokeResizeActive,
+              }"
               role="img"
               :style="svgStyle"
               :viewBox="`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`"
@@ -3089,22 +3181,22 @@ function getEntranceDisplayKey(entrance: LineMapEntranceView): string {
               <circle
                 v-if="entrance.id === focusedEntranceId"
                 class="line-map-entrance__pulse line-map-entrance__pulse--delayed"
-                :r="8 / zoom"
+                :r="8 / svgRenderZoom"
               />
               <circle
                 v-if="entrance.id === focusedEntranceId"
                 class="line-map-entrance__pulse"
-                :r="8 / zoom"
+                :r="8 / svgRenderZoom"
               />
-              <circle class="line-map-entrance__dot" :r="5 / zoom" />
+              <circle class="line-map-entrance__dot" :r="5 / svgRenderZoom" />
               <line
-                :x1="5 / zoom"
-                :x2="12 / zoom"
+                :x1="5 / svgRenderZoom"
+                :x2="12 / svgRenderZoom"
                 y1="0"
                 y2="0"
-                :style="{ strokeWidth: `${1.5 / zoom}px` }"
+                :style="{ strokeWidth: `${1.5 / svgRenderZoom}px` }"
               />
-              <text :x="15 / zoom" :y="-2 / zoom" :style="{ fontSize: `${10.5 / zoom}px` }">
+              <text :x="15 / svgRenderZoom" :y="-2 / svgRenderZoom" :style="{ fontSize: `${10.5 / svgRenderZoom}px` }">
                 {{ [entrance.code, entrance.name].filter(Boolean).join(" - ") }}
               </text>
               <title>{{ entrance.name }}</title>
@@ -3128,7 +3220,7 @@ function getEntranceDisplayKey(entrance: LineMapEntranceView): string {
                 <text
                   text-anchor="middle"
                   dominant-baseline="central"
-                  :style="{ fontSize: `${11.5 / zoom}px` }"
+                  :style="{ fontSize: `${11.5 / svgRenderZoom}px` }"
                 >
                   {{ distance.label }}
                 </text>

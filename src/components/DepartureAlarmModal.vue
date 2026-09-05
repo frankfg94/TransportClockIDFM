@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { BellOff, BellRing, ShieldCheck, Volume2 } from "lucide-vue-next";
-import { computed, nextTick, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import LineIconBadge from "./LineIconBadge.vue";
 import { useI18n } from "../i18n";
 import type {
@@ -15,11 +15,14 @@ const props = defineProps<{
   departure?: Departure;
   activeAlarm?: DepartureAlarm;
   open: boolean;
+  initialMinutesBefore?: number;
+  transportTypeLabel?: string;
   nativeSoundRequired?: boolean;
   nativePermissionState?: "ready" | "required" | "checking";
   busy?: boolean;
   error?: string;
   aboveFullscreen?: boolean;
+  teleportTarget?: string;
 }>();
 
 const emit = defineEmits<{
@@ -51,16 +54,49 @@ const displayPlatform = computed(
 const displayDepartureTime = computed(
   () => departureTime(props.departure) ?? props.activeAlarm?.scheduledDepartureTime,
 );
+const currentMinutesBefore = computed(() => normalizeMinutesBefore(draft.minutesBefore));
+const displayTransportTypeLabel = computed(() => props.transportTypeLabel?.trim() ?? "");
+const currentTimestamp = ref(Date.now());
+const remainingAlarmMinutes = computed(() => {
+  const departure = displayDepartureTime.value;
+  if (!departure) return undefined;
+
+  const departureTimestamp = new Date(departure).getTime();
+  if (!Number.isFinite(departureTimestamp)) return undefined;
+
+  return Math.max(
+    0,
+    Math.ceil(
+      (departureTimestamp - currentMinutesBefore.value * 60_000 - currentTimestamp.value)
+        / 60_000,
+    ),
+  );
+});
+let currentTimestampTimer: ReturnType<typeof setInterval> | undefined;
+
+onMounted(() => {
+  currentTimestamp.value = Date.now();
+  currentTimestampTimer = setInterval(() => {
+    currentTimestamp.value = Date.now();
+  }, 30_000);
+});
+
+onBeforeUnmount(() => {
+  if (currentTimestampTimer) {
+    clearInterval(currentTimestampTimer);
+  }
+});
 
 watch(
-  () => [props.open, props.activeAlarm?.id] as const,
+  () => [props.open, props.activeAlarm?.id, props.initialMinutesBefore] as const,
   ([open]) => {
     if (open) {
-      draft.minutesBefore = 5;
+      draft.minutesBefore = normalizeMinutesBefore(props.initialMinutesBefore);
       draft.soundEnabled = true;
       void nextTick(() => dialog.value?.focus());
     }
   },
+  { immediate: true },
 );
 
 function confirmAlarm(): void {
@@ -69,7 +105,7 @@ function confirmAlarm(): void {
   }
 
   emit("confirm", {
-    minutesBefore: Math.max(1, Math.min(120, Math.round(draft.minutesBefore))),
+    minutesBefore: currentMinutesBefore.value,
     soundEnabled: props.nativeSoundRequired ? true : draft.soundEnabled,
   });
 }
@@ -99,10 +135,16 @@ function departureTime(departure?: Departure): string | undefined {
     departure?.aimedDepartureTime
   );
 }
+
+function normalizeMinutesBefore(value?: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 5;
+  return Math.max(1, Math.min(120, Math.round(numeric)));
+}
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport :to="teleportTarget ?? 'body'">
     <Transition name="modal-scale">
       <div
         v-if="open"
@@ -205,6 +247,13 @@ function departureTime(departure?: Departure): string | undefined {
                   :disabled="busy"
                 />
               </label>
+
+              <slot
+                name="before-departure-hint"
+                :minutes-before="currentMinutesBefore"
+                :remaining-minutes="remainingAlarmMinutes"
+                :transport-type-label="displayTransportTypeLabel"
+              />
 
               <div v-if="nativeSoundRequired" class="alarm-modal__native-sound">
                 <Volume2 :size="18" aria-hidden="true" />
@@ -313,6 +362,13 @@ function departureTime(departure?: Departure): string | undefined {
   gap: 9px;
 }
 
+:slotted(.alarm-modal__context-copy) {
+  color: var(--muted);
+  font-size: .78rem;
+  line-height: 1.4;
+  margin: -2px 0 0;
+}
+
 .alarm-modal__error {
   background: #fef2f2;
   border: 1px solid #fecaca;
@@ -330,4 +386,3 @@ function departureTime(departure?: Departure): string | undefined {
   background: #991b1b;
 }
 </style>
-

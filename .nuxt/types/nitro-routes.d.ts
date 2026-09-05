@@ -6,6 +6,15 @@ declare module "nitropack/types" {
     '/api/_transport-clock/plugins': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/_transport-clock/plugins.get').default>>>>
     }
+    '/api/geocoding/autocomplete': {
+      'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/geocoding/autocomplete.post').default>>>>
+    }
+    '/api/geocoding/reverse': {
+      'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/geocoding/reverse.post').default>>>>
+    }
+    '/api/geocoding/search': {
+      'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/geocoding/search.post').default>>>>
+    }
     '/api/gtfs/preload': {
       'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/gtfs/preload.post').default>>>>
     }
@@ -39,11 +48,20 @@ declare module "nitropack/types" {
     '/api/line-geometry/resolve': {
       'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/line-geometry/resolve.post').default>>>>
     }
+    '/api/lines/:lineId/frequency': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/lines/[lineId]/frequency.get').default>>>>
+    }
+    '/api/lines/:lineId/timetable': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/lines/[lineId]/timetable.get').default>>>>
+    }
     '/api/lines/:lineId/topology': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/lines/[lineId]/topology.get').default>>>>
     }
     '/api/lines/:transportType/:lineId/pattern': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/lines/[transportType]/[lineId]/pattern.get').default>>>>
+    }
+    '/api/map/isochrones': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/map/isochrones.get').default>>>>
     }
     '/api/mobile/android/release': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/mobile/android/release.get').default>>>>
@@ -51,19 +69,55 @@ declare module "nitropack/types" {
     '/api/mobile/android/release/download': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/mobile/android/release/download.get').default>>>>
     }
+    '/api/neighborhood-verdict': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/neighborhood-verdict.get').default>>>>
+    }
+    '/api/neighborhood-verdict/noise-grid': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/neighborhood-verdict/noise-grid.get').default>>>>
+    }
     '/api/netex/status': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/netex/status.get').default>>>>
     }
     '/api/opendata/arrets-lignes/records': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/opendata/arrets-lignes/records.get').default>>>>
     }
+    '/api/places/nearby': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/places/nearby.get').default>>>>
+    }
+    '/api/ridership/lines/:lineId': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/ridership/lines/[lineId].get').default>>>>
+    }
+    '/api/ridership/lines/:lineId/monthly': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/ridership/lines/[lineId]/monthly.get').default>>>>
+    }
+    '/api/ridership/stations/:stationId': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/ridership/stations/[stationId].get').default>>>>
+    }
+    '/api/ridership/status': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/ridership/status.get').default>>>>
+    }
     '/api/traffic': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/traffic.get').default>>>>
+    }
+    '/api/traffic/refresh': {
+      'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/traffic/refresh.post').default>>>>
+    }
+    '/api/traffic/status': {
+      'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/traffic/status.get').default>>>>
     }
     '/api/transfer-bundles': {
       'delete': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/transfer-bundles.delete').default>>>>
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/transfer-bundles.get').default>>>>
       'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/transfer-bundles.post').default>>>>
+    }
+    '/api/walking/isochrones': {
+      'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/walking/isochrones.post').default>>>>
+    }
+    '/api/walking/matrix': {
+      'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/walking/matrix.post').default>>>>
+    }
+    '/api/walking/route': {
+      'post': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/walking/route.post').default>>>>
     }
     '/api/weather': {
       'get': Simplify<Serialize<Awaited<ReturnType<typeof import('../../server/api/weather.get').default>>>>

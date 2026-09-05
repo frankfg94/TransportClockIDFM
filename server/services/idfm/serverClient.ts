@@ -1,4 +1,5 @@
 import type { NavitiaRequestOptions } from "../../../src/services/idfm";
+import { fetchIdfmMarketplaceWithRetry } from "./marketplaceClient";
 
 const IDFM_MARKETPLACE_BASE =
   "https://prim.iledefrance-mobilites.fr/marketplace";
@@ -14,7 +15,11 @@ export function createServerIdfmRequestOptions(
       headers.set("accept", "application/json");
       headers.set("apikey", apiKey);
 
-      return fetch(input, {
+      const upstreamUrl = input instanceof Request
+        ? new URL(input.url)
+        : new URL(input.toString());
+
+      return fetchIdfmMarketplaceWithRetry(upstreamUrl, {
         ...init,
         headers,
       });

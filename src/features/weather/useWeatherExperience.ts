@@ -1,4 +1,4 @@
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useAppSettings, type WeatherTestMode } from "../app-settings";
 import { useI18n } from "../../i18n";
 import { resolveWeatherLocation } from "./weatherLocations";
@@ -18,6 +18,7 @@ export function useWeatherExperience() {
   const loading = ref(false);
   const error = ref("");
   const dismissedAlertKey = ref("");
+  let requestGeneration = 0;
 
   const location = computed(() =>
     resolveWeatherLocation(
@@ -57,32 +58,43 @@ export function useWeatherExperience() {
 
       if (enabled.value) {
         void loadWeather();
+      } else {
+        invalidateWeatherRequest();
       }
     },
   );
 
+  onBeforeUnmount(invalidateWeatherRequest);
+
   async function loadWeather(): Promise<void> {
-    if (!enabled.value || loading.value) {
+    const requestGenerationAtStart = ++requestGeneration;
+    const requestLocation = { ...location.value };
+    const lookaheadMinutes = settings.value.weatherLookaheadMinutes;
+
+    error.value = "";
+
+    if (!enabled.value) {
+      loading.value = false;
       return;
     }
 
     if (testModeEnabled.value) {
       weather.value = createTestWeatherResponse(
         settings.value.weatherTestMode,
-        location.value,
+        requestLocation,
       );
+      loading.value = false;
       return;
     }
 
     loading.value = true;
-    error.value = "";
 
     try {
       const params = new URLSearchParams({
-        latitude: String(location.value.latitude),
-        longitude: String(location.value.longitude),
-        locationLabel: location.value.label,
-        lookaheadMinutes: String(settings.value.weatherLookaheadMinutes),
+        latitude: String(requestLocation.latitude),
+        longitude: String(requestLocation.longitude),
+        locationLabel: requestLocation.label,
+        lookaheadMinutes: String(lookaheadMinutes),
       });
       const response = await fetch(toServerApiUrl(`/api/weather?${params}`));
 
@@ -90,15 +102,32 @@ export function useWeatherExperience() {
         throw new Error(`${response.status} ${response.statusText}`);
       }
 
-      weather.value = (await response.json()) as WeatherResponse;
+      const nextWeather = (await response.json()) as WeatherResponse;
+
+      if (requestGenerationAtStart !== requestGeneration) {
+        return;
+      }
+
+      weather.value = nextWeather;
     } catch (fetchError) {
+      if (requestGenerationAtStart !== requestGeneration) {
+        return;
+      }
+
       error.value =
         fetchError instanceof Error
           ? fetchError.message
           : t("weather.loadFailed");
     } finally {
-      loading.value = false;
+      if (requestGenerationAtStart === requestGeneration) {
+        loading.value = false;
+      }
     }
+  }
+
+  function invalidateWeatherRequest(): void {
+    requestGeneration += 1;
+    loading.value = false;
   }
 
   function dismissAlert(): void {

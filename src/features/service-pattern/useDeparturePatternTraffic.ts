@@ -6,6 +6,7 @@ import {
   type ComputedRef,
 } from "vue";
 import { toServerApiUrl } from "../../services/serverApi";
+import { useI18n } from "../../i18n";
 import type { LineSearchOption, TransitBoardConfig } from "../../types/transit";
 import { normalizeTrafficLineRef } from "../traffic/trafficNormalization";
 import { normalizeTrafficText } from "../traffic/trafficPresentation";
@@ -99,6 +100,7 @@ export function useDeparturePatternTraffic({
   trafficEvaluationTimestamp,
   warningLookaheadDays,
 }: UseDeparturePatternTrafficOptions) {
+  const { locale } = useI18n();
   const fetchedTrafficReport = ref<TrafficLineReport>();
   const activeTrafficImpact = ref<PatternTrafficImpact>();
   const trafficTimingNow = ref(Date.now());
@@ -207,7 +209,7 @@ export function useDeparturePatternTraffic({
       : createEmptyDeparturePatternTrafficAnalysis();
 
   watch(
-    [open, patternTrafficLineRef, smartTrafficDetection, trafficReport],
+    [open, patternTrafficLineRef, smartTrafficDetection, trafficReport, locale],
     () => {
       void refreshPatternTrafficReport();
     },
@@ -262,7 +264,11 @@ export function useDeparturePatternTraffic({
     }
 
     try {
-      const params = new URLSearchParams({ lineRefs: lineRef });
+      const params = new URLSearchParams({
+        lineRefs: lineRef,
+        detail: "1",
+        locale: locale.value,
+      });
       const response = await fetch(toServerApiUrl(`/api/traffic?${params}`));
 
       if (!response.ok) {

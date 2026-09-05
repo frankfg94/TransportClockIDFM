@@ -9,6 +9,7 @@ transport-clock*.png
 transport-clock-screenshot*.png
 .unlighthouse/
 reports/
+.data/map-isochrones/
 .env
 .env.*
 !.env.example

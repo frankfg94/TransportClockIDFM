@@ -89,6 +89,54 @@ describe("NeTEx cache topology adapter", () => {
     });
   });
 
+  it("keeps the pattern quay on the corresponding directional stop", () => {
+    const [sequence] = convertServerTopologyToLineRouteSequences({
+      stations: [
+        {
+          id: "scheffer",
+          name: "Scheffer",
+          quays: [
+            { id: "quay:scheffer-centre", name: "Quai vers Centre", projectedX: 650000, projectedY: 6860000 },
+            { id: "quay:scheffer-gare", name: "Quai vers Gare", projectedX: 650100, projectedY: 6860100 },
+          ],
+        },
+        { id: "next", name: "Trocadéro" },
+      ],
+      patterns: [{
+        id: "towards-centre",
+        terminalFrom: "Scheffer",
+        terminalTo: "Centre",
+        stops: ["scheffer", "next"],
+        quayIds: ["quay:scheffer-centre", undefined],
+      }],
+    });
+
+    expect(sequence.stops[0]?.quays).toEqual([{
+      id: "quay:scheffer-centre",
+      name: "Quai vers Centre",
+      projectedX: 650000,
+      projectedY: 6860000,
+    }]);
+  });
+
+  it("keeps the precalculated SIRI monitoring ref on the directional stop", () => {
+    const [sequence] = convertServerTopologyToLineRouteSequences({
+      stations: [
+        { id: "current", name: "Current" },
+        { id: "terminal", name: "Terminal" },
+      ],
+      patterns: [{
+        id: "outbound",
+        terminalFrom: "Current",
+        terminalTo: "Terminal",
+        stops: ["current", "terminal"],
+        monitoringRefs: ["STIF:StopArea:SP:70310:", "STIF:StopArea:SP:461505:"],
+      }],
+    }, true);
+
+    expect(sequence.stops[0]?.station.monitoringRef).toBe("STIF:StopArea:SP:70310:");
+  });
+
   it.each(cacheCases)(
     "loads $label from the generated backend JSON cache",
     async ({ id, stationCount, branchPoints, terminals }) => {

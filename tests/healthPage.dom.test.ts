@@ -47,6 +47,16 @@ const healthResponse: HealthResponse = {
       quota: { exposed: false },
     },
     {
+      id: "navitia-journeys",
+      label: "Navitia journeys",
+      category: "Realtime",
+      required: true,
+      status: "ok",
+      latencyMs: 39,
+      message: "Endpoint reachable",
+      quota: { exposed: false },
+    },
+    {
       id: "prim-traffic",
       label: "PRIM traffic information",
       category: "Realtime",
@@ -77,6 +87,16 @@ const healthResponse: HealthResponse = {
       quota: { exposed: false },
     },
     {
+      id: "satellite-tiles",
+      label: "Satellite imagery",
+      category: "Map",
+      required: false,
+      status: "ok",
+      latencyMs: 27,
+      message: "Satellite imagery reachable",
+      quota: { exposed: false },
+    },
+    {
       id: "open-meteo",
       label: "Open-Meteo weather",
       category: "Weather",
@@ -84,6 +104,16 @@ const healthResponse: HealthResponse = {
       status: "ok",
       latencyMs: 32,
       message: "Weather forecast reachable",
+      quota: { exposed: false },
+    },
+    {
+      id: "overpass-places",
+      label: "OpenStreetMap nearby places",
+      category: "Map",
+      required: false,
+      status: "ok",
+      latencyMs: 31,
+      message: "Nearby places reachable",
       quota: { exposed: false },
     },
   ],
@@ -113,10 +143,15 @@ describe("HealthPage", () => {
     expect(wrapper.text()).toContain("Cloudflare R2");
     expect(wrapper.text()).toContain("PRIM live API");
     expect(wrapper.text()).toContain("Navitia API");
+    expect(wrapper.text()).toContain("Navitia journeys");
+    expect(wrapper.text()).toContain("Routage des stations proches");
     expect(wrapper.text()).toContain("PRIM traffic information");
     expect(wrapper.text()).toContain("IDFM Open Data arrets-lignes");
     expect(wrapper.text()).toContain("Open-Meteo weather");
     expect(wrapper.text()).toContain("Vector map");
+    expect(wrapper.text()).toContain("Satellite imagery");
+    expect(wrapper.text()).toContain("Commerces et lieux à proximité");
+    expect(wrapper.text()).toContain("OpenStreetMap nearby places");
     expect(wrapper.text()).toContain("Quota");
     expect(wrapper.text()).toContain("Non expose");
   });

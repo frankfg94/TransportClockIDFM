@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Check } from "lucide-vue-next";
+import { Check, MapPinPlus } from "lucide-vue-next";
 import AppModal from "./AppModal.vue";
 import { useI18n } from "../i18n";
 
@@ -21,6 +21,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   close: [];
   submit: [name: string];
+  submitNearby: [name: string];
 }>();
 
 const name = ref("");
@@ -52,6 +53,10 @@ function submit(): void {
     emit("submit", name.value.trim());
   }
 }
+
+function submitNearby(): void {
+  if (canSubmit.value) emit("submitNearby", name.value.trim());
+}
 </script>
 
 <template>
@@ -81,6 +86,16 @@ function submit(): void {
       <button class="button-secondary" type="button" @click="emit('close')">
         {{ t("common.actions.cancel") }}
       </button>
+      <button
+        v-if="mode === 'create'"
+        class="button-secondary place-name-modal__nearby"
+        type="button"
+        :disabled="!canSubmit"
+        @click="submitNearby"
+      >
+        <MapPinPlus :size="18" aria-hidden="true" />
+        {{ t("nearbyStations.createAndAdd") }}
+      </button>
       <button type="button" :disabled="!canSubmit" @click="submit">
         <Check :size="18" aria-hidden="true" />
         {{ submitLabel }}
@@ -90,10 +105,47 @@ function submit(): void {
 </template>
 <style lang="css" scoped>
 .place-name-form {
-  display: flex;
-  align-items: start;
+  box-sizing: border-box;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+}
+.place-name-form label {
+  min-width: 0;
 }
 .form-input {
-  max-height: 20px;
+  box-sizing: border-box;
+  max-width: 100%;
+  width: 100%;
+}
+
+:global(.place-name-modal .modal-panel__footer) {
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+:global(.place-name-modal .app-modal__body) {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+@media (max-width: 560px) {
+  :global(.place-name-modal .modal-panel__footer) > button {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  :global(.place-name-modal .place-name-modal__nearby) {
+    flex-basis: 100%;
+    order: -1;
+  }
+}
+
+@media (max-width: 360px) {
+  :global(.place-name-modal .modal-panel__footer) > button {
+    flex-basis: 100%;
+  }
 }
 </style>

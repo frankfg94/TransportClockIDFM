@@ -19,6 +19,8 @@ Le fonctionnement i18n est documente dans [docs/i18n.md](docs/i18n.md).
 
 La precision des traces et son import securise sont documentes dans [docs/gtfs-line-geometry.md](docs/gtfs-line-geometry.md).
 
+Le radar piéton du plan global et sa commande de précalcul ORS sont documentés dans [docs/global-map-isochrones.md](docs/global-map-isochrones.md).
+
 ## Lancer le projet
 
 ```powershell
@@ -28,7 +30,18 @@ npm.cmd run dev
 
 Puis ouvrir `http://localhost:3000` ou l'URL affichee par Nuxt.
 
+La carte globale est disponible sur `/map` (experience MapLibre + Deck.gl/WebGL2).
+L'ancienne experience Canvas2D/raster reste accessible sur `/map/legacy` ;
+`/map/next` redirige vers l'URL canonique `/map`.
+
 La cle PRIM est lue depuis `.env.local` via `IDFM_API_KEY`. Les appels `"/api/idfm"` passent par la route Nitro `server/api/idfm/[...path].ts`, ce qui evite d'exposer la cle au navigateur.
+
+Le verdict de quartier est calculé par Nitro à partir du JSON compilé par
+`idfm-node-backend` ; aucun second serveur n'est nécessaire. Générez ou validez
+les données avec `npm.cmd run neighborhood-verdict:compile` et
+`npm.cmd run neighborhood-verdict:validate`. Le chemin par défaut est
+`../idfm-node-backend/.data/neighborhood-verdict/compiled.json`; il peut être
+remplacé par `NUXT_NEIGHBORHOOD_VERDICT_DATA_PATH` dans `.env.local`.
 
 ## Internationalisation
 
@@ -68,6 +81,20 @@ Unlighthouse explore les routes de l'application, affiche l'URL locale de son ta
 ```powershell
 yarn.cmd unlighthouse --desktop
 ```
+
+## Mesurer les performances de la carte globale
+
+La route `/map?mapDebug=1` active le panneau de diagnostic de `GlobalTransportPlan`. Lancez l'application en mode developpement, ouvrez ce panneau, puis cliquez sur `Demarrer` avant de reproduire le geste cible : zoom lent vers Chatelet, puis pan rapide final. Cliquez sur `Arreter` et `Exporter JSON` pour conserver le rapport.
+
+Le rapport distingue la cadence RAF du navigateur (`frames`) des frames effectivement envoyees au renderer (`presentedFrames` et `presentedP95FrameTimeMs`). Il contient aussi le p95/p99, les frames de plus de 50 ms, les longues taches, les temps worker/decode, le cache Canvas, la memoire et les derniers compteurs du renderer. Le code de mesure est volontairement autonome et commente dans `src/features/transport-map/performance/transportMapPerformance.ts`.
+
+Pour mesurer le chargement et le decoupage des donnees sans navigateur :
+
+```powershell
+npm.cmd run bench:map -- --cold=3 --warm=5
+```
+
+Ce benchmark ecrit `reports/global-map/performance-desktop-latest.json`; il ne remplace pas la mesure des frames du panneau debug. Pour la validation Android, utilisez d'abord `npm.cmd run bench:map:android`, puis le replay CDP `npm.cmd run replay:map:android` (APK release et appareil de reference requis). Les captures `dumpsys gfxinfo` sont disponibles avec `npm.cmd run replay:map:android:gfxinfo`.
 
 ## Build et deploiement Cloudflare Pages
 
@@ -178,3 +205,36 @@ $env:TRANSPORT_CLOCK_INSTANCE_ID="<identifiant-stable>"
 Les tableaux par defaut sont dans `src/config/transitBoards.ts`.
 
 Pour la modal d'ajout, `src/services/boardBuilder.ts` transforme une selection ligne + station en `TransitBoardConfig`, puis les preferences sont persistees via `src/storage/transitPreferences.ts`.
+
+### Verdict de quartier sur Cloudflare
+
+Le lecteur conserve le fichier compilé complet. En développement, le chemin local
+existant reste utilisable. En production, définir :
+
+```env
+IDFM_NEIGHBORHOOD_VERDICT_CACHE_REMOTE=r2://idfm-backend-netex-cache/neighborhood-verdict/compiled.json
+```
+
+Configurer aussi `R2_ACCOUNT_ID` (ou `R2_ENDPOINT`), `R2_ACCESS_KEY_ID` et
+`R2_SECRET_ACCESS_KEY` dans Cloudflare, côté serveur. Une source distante explicite
+est prioritaire et ses erreurs ne sont pas masquées par un repli local.
+Le JSON est validé, conservé en mémoire 60 secondes et les lectures simultanées
+partagent le même téléchargement. HTTP(S) est également accepté.
+
+Depuis TransportClockGPT :
+
+```powershell
+npm.cmd run neighborhood-verdict:compile
+npm.cmd run neighborhood-verdict:publish:r2 -- --dry-run
+npm.cmd run neighborhood-verdict:publish:r2
+npm.cmd run check:data
+```
+
+La publication utilise le remote rclone `CLOUDFLARE_R2_IDFM_BACKEND_JSON` existant
+et ne copie que `compiled.json`. Pour un chemin de compilation personnalisé,
+adapter le chemin source de la commande rclone.
+`check:data` charge le verdict avec le même lecteur que Nitro ; il vérifie aussi
+l'index et le répertoire ZIP des isochrones et lit les assets déclarés de la carte
+globale. Il contrôle l'environnement du terminal (`.env.local`, puis `.env`),
+pas automatiquement les variables du déploiement Cloudflare. L'index des
+isochrones est validé sans décompresser toutes les géométries.

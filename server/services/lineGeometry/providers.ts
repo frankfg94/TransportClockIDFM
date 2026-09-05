@@ -19,6 +19,7 @@ import {
   loadGtfsLineArtifact,
   loadGtfsLineArtifactsByLabel,
 } from "../gtfs/runtime";
+import { getGtfsLineAliasCandidates } from "../gtfs/lineAliases";
 import type { GtfsLineArtifact } from "../gtfs/types";
 import { normalizeGtfsLineLabel } from "../gtfs/labels";
 import {
@@ -38,7 +39,7 @@ const NAVITIA_CACHE_TTL_MS = 30 * 24 * 60 * 60_000;
 const NAVITIA_BREAKER_FAILURES = 3;
 const NAVITIA_BREAKER_DURATION_MS = 5 * 60_000;
 const GTFS_GEOMETRY_CACHE_ENTRIES = 128;
-const GTFS_GEOMETRY_ALGORITHM_VERSION = 9;
+const GTFS_GEOMETRY_ALGORITHM_VERSION = 11;
 const GTFS_SIBLING_RELEVANCE_METERS = 2_000;
 
 interface CachedTraces {
@@ -113,19 +114,40 @@ function createGtfsProvider(event: H3Event): LineGeometryProvider {
     source: "gtfs",
     enabled: (request) => request.useGtfs !== false && isGtfsEnabled(event),
     resolve: async (request) => {
-      const [manifest, artifact, compiled, labelArtifacts] = await Promise.all([
+      const [manifest, exactArtifact, exactCompiled, labelArtifacts, aliasArtifacts] = await Promise.all([
         getGtfsManifest(event),
         loadGtfsLineArtifact(event, request.lineId),
         loadCompiledGtfsLineArtifact(event, request.lineId),
         request.lineLabel
           ? loadGtfsLineArtifactsByLabel(event, request.lineLabel)
           : Promise.resolve([]),
+        Promise.all(
+          getGtfsLineAliasCandidates(request.lineId).map((lineId) =>
+            loadGtfsLineArtifact(event, lineId),
+          ),
+        ),
       ]);
+
+      const artifact = exactArtifact
+        ?? aliasArtifacts.find((candidate): candidate is GtfsLineArtifact =>
+          candidate !== undefined && isGtfsArtifactRelevantToRequest(candidate, request),
+        )
+        ?? labelArtifacts.find((candidate) => isGtfsArtifactRelevantToRequest(candidate, request));
+      const compiled = artifact?.lineId === exactArtifact?.lineId
+        ? exactCompiled
+        : artifact
+          ? await loadCompiledGtfsLineArtifact(event, artifact.lineId)
+          : undefined;
       if (!manifest || !artifact || !compiled) {
         return { status: "unavailable", reason: "not_installed" };
       }
 
-      const artifacts = dedupeGtfsArtifacts([artifact, ...labelArtifacts]).filter(
+      const artifacts = dedupeGtfsArtifacts([
+        artifact,
+        exactArtifact,
+        ...aliasArtifacts,
+        ...labelArtifacts,
+      ].filter((candidate): candidate is GtfsLineArtifact => Boolean(candidate))).filter(
         (candidate) =>
           candidate.lineId === artifact.lineId ||
           (isGtfsArtifactCompatibleWithRequestedLine(candidate, artifact) &&
@@ -189,11 +211,9 @@ function createGtfsProvider(event: H3Event): LineGeometryProvider {
 }
 
 /**
- * Current GTFS exports can omit suspended parts of a regular line while still
- * publishing their replacement bus under the same commercial label. Keep every
- * exact regular-line segment that can be resolved, then fill only genuinely
- * absent edges from IDFM's physical rail reference. A station chord remains the
- * last resort when neither official geometry source contains that edge.
+ * Keep every provider-resolved edge, but make every unresolved edge explicit.
+ * This preserves useful sibling-artifact geometry while preventing a direct
+ * station chord from inheriting an unqualified GTFS provenance in the map.
  */
 function createPartiallyResolvedGtfsGeometry(
   request: LineGeometryRequest,
@@ -225,21 +245,18 @@ function createPartiallyResolvedGtfsGeometry(
       const gtfsSegment =
         createSegmentsFromIndexedGtfs(edgeRequest, compiled)?.[0] ??
         createSegmentsFromTraces(edgeRequest, traces)?.[0];
-      const segment =
-        gtfsSegment ??
-        createSegmentsFromTraces(edgeRequest, railTraces)?.[0];
-      if (segment) gtfsSegments.set(edgeKey, segment);
+      const segment = gtfsSegment
+        ?? createSegmentsFromTraces(edgeRequest, railTraces)?.[0];
+      if (segment) {
+        gtfsSegments.set(
+          edgeKey,
+          gtfsSegment ? segment : { ...segment, fallback: true },
+        );
+      }
     }
   }
 
   if (gtfsSegments.size === 0) return undefined;
-
-  const segments = createDirectLineGeometry(request).segments.map(
-    (segment) =>
-      gtfsSegments.get(
-        createUndirectedEdgeKey(segment.fromStopId, segment.toStopId),
-      ) ?? segment,
-  );
 
   return {
     schemaVersion: 1,
@@ -249,7 +266,11 @@ function createPartiallyResolvedGtfsGeometry(
     generatedAt: new Date().toISOString(),
     stops: request.stops,
     branches: request.branches,
-    segments,
+    segments: createDirectLineGeometry(request).segments.map(
+      (segment) => gtfsSegments.get(
+        createUndirectedEdgeKey(segment.fromStopId, segment.toStopId),
+      ) ?? { ...segment, fallback: true },
+    ),
     entrances,
   };
 }

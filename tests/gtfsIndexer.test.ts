@@ -37,6 +37,8 @@ describe("GTFS compact indexer", () => {
     ) as GtfsLineLookupIndex;
 
     expect(bus.routeTypes).toEqual(["3"]);
+    expect(bus.routeColor).toBe("#123456");
+    expect(bus.routeTextColor).toBe("#ffffff");
     expect(new Set(bus.patterns.map((pattern) => pattern.direction))).toEqual(new Set(["0", "1"]));
     expect(Object.keys(bus.shapes).sort()).toEqual([
       "BUS_BRANCH",
@@ -94,6 +96,21 @@ describe("GTFS compact indexer", () => {
     ]);
   });
 
+  it("refuses to publish an artifact when a GTFS route color is missing", async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), "gtfs-missing-color-fixture-"));
+    temporaryDirectories.push(root);
+    const input = join(root, "input");
+    await fs.mkdir(input);
+    await writeFixture(input);
+    const routesPath = join(input, "routes.txt");
+    const routes = await fs.readFile(routesPath, "utf8");
+    await fs.writeFile(routesPath, routes.replace("123456,FFFFFF", ",FFFFFF"));
+
+    await expect(buildLineArtifacts(input, join(root, "version"))).rejects.toThrow(
+      "GTFS route_color is missing or invalid for route IDFM:BUS",
+    );
+  });
+
   it("streams every required file from a ZIP containing ignored large entries", async () => {
     const root = await fs.mkdtemp(join(tmpdir(), "gtfs-archive-fixture-"));
     temporaryDirectories.push(root);
@@ -145,11 +162,11 @@ describe("GTFS compact indexer", () => {
 async function writeFixture(directory: string): Promise<void> {
   const files: Record<string, string> = {
     "routes.txt": csv([
-      "route_id,route_short_name,route_long_name,route_type",
-      "IDFM:BUS,57,Porte de Bagnolet - Arcueil,3",
-      "IDFM:LOOP,2250,Lagny - Thorigny loop,3",
-      "IDFM:METRO,13,Metro 13,1",
-      "IDFM:FUNICULAR,F,Funiculaire,7",
+      "route_id,route_short_name,route_long_name,route_type,route_color,route_text_color",
+      "IDFM:BUS,57,Porte de Bagnolet - Arcueil,3,123456,FFFFFF",
+      "IDFM:LOOP,2250,Lagny - Thorigny loop,3,234567,FFFFFF",
+      "IDFM:METRO,13,Metro 13,1,345678,FFFFFF",
+      "IDFM:FUNICULAR,F,Funiculaire,7,456789,000000",
     ]),
     "stops.txt": csv([
       "stop_id,stop_code,stop_name,stop_lat,stop_lon,location_type,parent_station",

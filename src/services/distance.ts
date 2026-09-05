@@ -8,7 +8,22 @@ export function getCoordinatesDistanceKm(
   targetLatValue: number,
   targetLonValue: number,
 ): number {
-  const earthRadiusKm = 6371;
+  return getCoordinatesDistanceMeters(
+    sourceLatValue,
+    sourceLonValue,
+    targetLatValue,
+    targetLonValue,
+  ) / 1_000;
+}
+
+/** Shared geodesic primitive for V1 line maps and V2 spatial queries. */
+export function getCoordinatesDistanceMeters(
+  sourceLatValue: number,
+  sourceLonValue: number,
+  targetLatValue: number,
+  targetLonValue: number,
+): number {
+  const earthRadiusMeters = 6_371_000;
   const sourceLat = toRadians(sourceLatValue);
   const targetLat = toRadians(targetLatValue);
   const deltaLat = toRadians(targetLatValue - sourceLatValue);
@@ -18,10 +33,15 @@ export function getCoordinatesDistanceKm(
     Math.cos(sourceLat) * Math.cos(targetLat) * Math.sin(deltaLon / 2) ** 2;
 
   return (
-    2 *
-    earthRadiusKm *
-    Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
+    2 * earthRadiusMeters * Math.atan2(
+      Math.sqrt(haversine),
+      Math.sqrt(Math.max(0, 1 - haversine)),
+    )
   );
+}
+
+export function formatTransitDistanceMeters(distanceMeters: number): string {
+  return formatTransitDistance(distanceMeters / 1_000);
 }
 
 export function formatTransitDistance(distanceKm: number): string {

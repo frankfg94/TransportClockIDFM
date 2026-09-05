@@ -1,12 +1,67 @@
 import { describe, expect, it } from "vitest";
 import {
   getTrafficLineStatus,
+  normalizeIdfmGlobalTrafficPayload,
   normalizeNavitiaLineReportPayload,
   normalizeTrafficLineRef,
 } from "../src/features/traffic";
 import { getPatternTrafficSummaryCopy } from "../src/features/service-pattern/trafficCalendarSummary";
 
 describe("traffic normalization", () => {
+  it("joins bulk line impactedObjects to root disruptions", () => {
+    const [report] = normalizeIdfmGlobalTrafficPayload({
+      lines: [
+        {
+          id: "line:IDFM:C01743",
+          name: "B",
+          impactedObjects: [
+            {
+              type: "line",
+              id: "line:IDFM:C01743",
+              name: "B",
+              disruptionIds: ["rer-b-summer-works"],
+            },
+            {
+              type: "stop_point",
+              id: "stop_point:IDFM:gare-du-nord",
+              name: "Gare du Nord",
+              disruptionIds: ["rer-b-summer-works"],
+            },
+            {
+              type: "stop_point",
+              id: "stop_point:IDFM:croix-de-berny",
+              name: "La Croix de Berny",
+              disruptionIds: ["rer-b-summer-works"],
+            },
+          ],
+        },
+      ],
+      disruptions: [
+        {
+          id: "rer-b-summer-works",
+          title: "Grands Travaux d'été 2026",
+          message:
+            "Gare du Nord <> La Croix-de-Berny / Robinson : trafic interrompu",
+          cause: "Travaux sur le réseau ferré",
+          applicationPeriods: [
+            { begin: "20260807T030000", end: "20260817T030000" },
+          ],
+        },
+      ],
+    });
+
+    expect(report).toMatchObject({
+      lineRef: "line:IDFM:C01743",
+      status: "planned",
+    });
+    expect(report.disruptions[0]?.impactedLineRefs).toContain(
+      "line:IDFM:C01743",
+    );
+    expect(report.disruptions[0]?.impactedStopNames).toEqual(
+      expect.arrayContaining(["Gare du Nord", "La Croix de Berny"]),
+    );
+  });
+
   it("normalizes Navitia line_reports disruptions and impacted lines", () => {
     const disruptions = normalizeNavitiaLineReportPayload(
       {

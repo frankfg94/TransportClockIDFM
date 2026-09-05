@@ -10,8 +10,13 @@ import {
 import { isLanguagePreference, type LanguagePreference } from "../../i18n/types";
 import { transportClockPlugins } from "#transport-clock/plugins";
 import type { TrafficCalendarImpactScope } from "../traffic/types";
+import {
+  GLOBAL_TRANSPORT_PLAN_CONFIG,
+  type TransportMapBasemapStyle,
+} from "../transport-map/config/globalTransportPlanConfig";
 
 export { transferResolverModeOptions };
+export type { TransportMapBasemapStyle };
 export type { TrafficCalendarImpactScope, TransferResolverMode };
 
 export type ClosedDirectionSummaryMode = "last" | "next";
@@ -49,6 +54,9 @@ export const PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MAX = 8;
 export const TRAFFIC_WARNING_LOOKAHEAD_DAYS_DEFAULT = 10;
 export const TRAFFIC_WARNING_LOOKAHEAD_DAYS_MIN = 0;
 export const TRAFFIC_WARNING_LOOKAHEAD_DAYS_MAX = 30;
+export const TRAVEL_ALARM_SAFETY_MINUTES_DEFAULT = 2;
+export const TRAVEL_ALARM_SAFETY_MINUTES_MIN = 0;
+export const TRAVEL_ALARM_SAFETY_MINUTES_MAX = 30;
 
 export interface AppSettings {
   version: 2;
@@ -61,8 +69,20 @@ export interface AppSettings {
   hiddenDirectionIdsByBoardId: Record<string, string[]>;
   wakeLockDuration: WakeLockDuration;
   wakeDeviceOnAlarm: boolean;
+  travelAlarmSafetyMinutes: number;
   boardTogglesPlacement: BoardTogglesPlacement;
   placePresetNavigationMode: PlacePresetNavigationMode;
+  showPlanInNavigation: boolean;
+  showTravelRouteLineIcons: boolean;
+  showUserLocation: boolean;
+  globalMapBasemapContrast: number;
+  globalMapBasemapStyle: TransportMapBasemapStyle;
+  deckAntialiasing: boolean;
+  nearbyMapShowIsochroneControl: boolean;
+  nearbyMapShowDirectoryControl: boolean;
+  nearbyMapShowBasemapControl: boolean;
+  nearbyMapShowDisplayControl: boolean;
+  nearbyMapShowFullscreenControl: boolean;
   // Browser-side cache layer used before the backend bundle fallback.
   transferBundleLocalCacheEnabled: boolean;
   // Nuxt-side bundle cache shared by successive transfer requests.
@@ -260,8 +280,20 @@ export function createDefaultAppSettings(): AppSettings {
     terminalDirectionsOnly: false,
     wakeLockDuration: "none",
     wakeDeviceOnAlarm: true,
+    travelAlarmSafetyMinutes: TRAVEL_ALARM_SAFETY_MINUTES_DEFAULT,
     boardTogglesPlacement: "inline",
     placePresetNavigationMode: "dropdown-swipe",
+    showPlanInNavigation: true,
+    showTravelRouteLineIcons: true,
+    showUserLocation: true,
+    globalMapBasemapContrast: GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.default,
+    globalMapBasemapStyle: GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.style.default,
+    deckAntialiasing: true,
+    nearbyMapShowIsochroneControl: true,
+    nearbyMapShowDirectoryControl: true,
+    nearbyMapShowBasemapControl: true,
+    nearbyMapShowDisplayControl: true,
+    nearbyMapShowFullscreenControl: true,
     navigationAutoHide: "none",
     hiddenDirectionIdsByBoardId: {},
     reduceMotion: false,
@@ -339,12 +371,45 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       ? value.wakeLockDuration
       : defaults.wakeLockDuration,
     wakeDeviceOnAlarm: readBoolean(value.wakeDeviceOnAlarm, defaults.wakeDeviceOnAlarm),
+    travelAlarmSafetyMinutes: parseTravelAlarmSafetyMinutes(value.travelAlarmSafetyMinutes),
     boardTogglesPlacement: isBoardTogglesPlacement(value.boardTogglesPlacement)
       ? value.boardTogglesPlacement
       : defaults.boardTogglesPlacement,
     placePresetNavigationMode: parsePlacePresetNavigationMode(
       value.placePresetNavigationMode,
       value.placeSwipeNavigationEnabled,
+    ),
+    showPlanInNavigation: readBoolean(
+      value.showPlanInNavigation,
+      defaults.showPlanInNavigation,
+    ),
+    showTravelRouteLineIcons: readBoolean(
+      value.showTravelRouteLineIcons,
+      defaults.showTravelRouteLineIcons,
+    ),
+    showUserLocation: readBoolean(value.showUserLocation, defaults.showUserLocation),
+    globalMapBasemapContrast: parseGlobalMapBasemapContrast(value.globalMapBasemapContrast),
+    globalMapBasemapStyle: parseGlobalMapBasemapStyle(value.globalMapBasemapStyle),
+    deckAntialiasing: readBoolean(value.deckAntialiasing, defaults.deckAntialiasing),
+    nearbyMapShowIsochroneControl: readBoolean(
+      value.nearbyMapShowIsochroneControl,
+      defaults.nearbyMapShowIsochroneControl,
+    ),
+    nearbyMapShowDirectoryControl: readBoolean(
+      value.nearbyMapShowDirectoryControl,
+      defaults.nearbyMapShowDirectoryControl,
+    ),
+    nearbyMapShowBasemapControl: readBoolean(
+      value.nearbyMapShowBasemapControl,
+      defaults.nearbyMapShowBasemapControl,
+    ),
+    nearbyMapShowDisplayControl: readBoolean(
+      value.nearbyMapShowDisplayControl,
+      defaults.nearbyMapShowDisplayControl,
+    ),
+    nearbyMapShowFullscreenControl: readBoolean(
+      value.nearbyMapShowFullscreenControl,
+      defaults.nearbyMapShowFullscreenControl,
     ),
     navigationAutoHide: isNavigationAutoHide(value.navigationAutoHide)
       ? value.navigationAutoHide
@@ -552,6 +617,27 @@ export function parseTrafficWarningLookaheadDays(value: unknown): TrafficWarning
     TRAFFIC_WARNING_LOOKAHEAD_DAYS_MAX,
     0,
   );
+}
+
+export function parseTravelAlarmSafetyMinutes(value: unknown): number {
+  return parseBoundedNumber(
+    value,
+    TRAVEL_ALARM_SAFETY_MINUTES_DEFAULT,
+    TRAVEL_ALARM_SAFETY_MINUTES_MIN,
+    TRAVEL_ALARM_SAFETY_MINUTES_MAX,
+    0,
+  );
+}
+
+export function parseGlobalMapBasemapContrast(value: unknown): number {
+  const { contrast } = GLOBAL_TRANSPORT_PLAN_CONFIG.basemap;
+  return parseBoundedNumber(value, contrast.default, contrast.min, contrast.max, 2);
+}
+
+export function parseGlobalMapBasemapStyle(value: unknown): TransportMapBasemapStyle {
+  return value === "light" || value === "voyager"
+    ? value
+    : GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.style.default;
 }
 
 export function parsePatternCompactBranchGap(value: unknown): number {

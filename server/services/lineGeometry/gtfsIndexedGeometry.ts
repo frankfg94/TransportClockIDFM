@@ -2,16 +2,17 @@ import type {
   GtfsIndexedPattern,
   GtfsLineArtifact,
   GtfsStopShapeProjection,
-} from "../gtfs/types";
+} from "../gtfs/types.js";
 import {
   createUndirectedEdgeKey,
   type LineGeometryCoordinate,
   type LineGeometryRequest,
   type LineGeometrySegment,
   type LineGeometryStopRequest,
-} from "../../../src/features/line-map/lineGeometry";
+} from "../../../src/features/line-map/lineGeometry.js";
 
 const MAX_STOP_MATCH_DISTANCE_METERS = 300;
+const MIN_SHAPE_STOP_RECONCILIATION_IMPROVEMENT_METERS = 20;
 const MAX_SHARED_EDGE_DEVIATION_METERS = 75;
 const MAX_GEOMETRY_COMPARISON_SAMPLES = 24;
 const MAX_PREFERRED_PATH_RATIO = 1.8;
@@ -48,6 +49,16 @@ interface PatternMatch {
   skippedStops: number;
   geographicErrorMeters: number;
   pathRatio: number;
+}
+
+interface PatternProjectionOverride {
+  shapePointIndex: number;
+  segmentProgress: number;
+  coordinate: LineGeometryCoordinate;
+}
+
+interface ShapeProjectionCandidate extends PatternProjectionOverride {
+  errorMeters: number;
 }
 
 interface CandidateSubsequence {
@@ -141,6 +152,11 @@ export function createSegmentsFromIndexedGtfs(
       patternMatch.directionPenalty * 1_000_000_000_000 +
       patternMatch.skippedStops * 100_000_000 +
       patternMatch.geographicErrorMeters;
+    const projectionOverrides = reconcilePatternProjections(
+      patternMatch.pattern,
+      patternMatch.stopIndexes,
+      branch.stopIds.map((stopId) => requestedStopsById.get(stopId)!),
+    );
 
     for (let index = 0; index < branch.stopIds.length - 1; index += 1) {
       const fromStopId = branch.stopIds[index];
@@ -149,6 +165,7 @@ export function createSegmentsFromIndexedGtfs(
         patternMatch.pattern,
         patternMatch.stopIndexes[index],
         patternMatch.stopIndexes[index + 1],
+        projectionOverrides,
       );
       if (coordinates.length < 2) return undefined;
 
@@ -427,19 +444,153 @@ function compareCandidateSubsequences(
   );
 }
 
+function reconcilePatternProjections(
+  pattern: CompiledGtfsPattern,
+  stopIndexes: number[],
+  requestedStops: LineGeometryStopRequest[],
+): ReadonlyMap<number, PatternProjectionOverride> {
+  const overrides = new Map<number, PatternProjectionOverride>();
+
+  stopIndexes.forEach((patternStopIndex, requestedStopIndex) => {
+    const projection = pattern.projections[patternStopIndex];
+    const requestedStop = requestedStops[requestedStopIndex];
+    if (!projection || !requestedStop) return;
+
+    const previousProjection = pattern.projections[patternStopIndex - 1];
+    const nextProjection = pattern.projections[patternStopIndex + 1];
+    const corridorStart = previousProjection
+      ? Math.min(previousProjection.shapePointIndex, projection.shapePointIndex)
+      : 0;
+    const corridorEnd = nextProjection
+      ? Math.max(
+          projection.shapePointIndex + 1,
+          nextProjection.shapePointIndex + 1,
+        )
+      : pattern.shape.length - 1;
+    const candidate = findClosestShapeProjection(
+      pattern.shape,
+      requestedStop,
+      corridorStart,
+      corridorEnd,
+    );
+    if (!candidate) return;
+
+    const importedErrorMeters = distanceMeters(
+      requestedStop,
+      projection.coordinate,
+    );
+    if (
+      candidate.errorMeters > MAX_STOP_MATCH_DISTANCE_METERS ||
+      importedErrorMeters - candidate.errorMeters <
+        MIN_SHAPE_STOP_RECONCILIATION_IMPROVEMENT_METERS
+    ) {
+      return;
+    }
+
+    overrides.set(patternStopIndex, candidate);
+  });
+
+  return overrides;
+}
+
+function findClosestShapeProjection(
+  shape: LineGeometryCoordinate[],
+  point: LineGeometryCoordinate,
+  startShapePointIndex: number,
+  endShapePointIndex: number,
+): ShapeProjectionCandidate | undefined {
+  if (shape.length === 0) return undefined;
+
+  const start = Math.max(0, Math.min(startShapePointIndex, shape.length - 1));
+  const end = Math.max(0, Math.min(endShapePointIndex, shape.length - 1));
+  if (end <= start) {
+    const coordinate = shape[start];
+    return coordinate
+      ? {
+          shapePointIndex: start,
+          segmentProgress: 0,
+          coordinate,
+          errorMeters: distanceMeters(point, coordinate),
+        }
+      : undefined;
+  }
+
+  let best: ShapeProjectionCandidate | undefined;
+  for (let index = start; index < end; index += 1) {
+    const from = shape[index];
+    const to = shape[index + 1];
+    if (!from || !to) continue;
+
+    const projected = projectCoordinateOntoSegment(point, from, to);
+    const atSegmentEnd = projected.progress >= 1 - 1e-6;
+    const candidate: ShapeProjectionCandidate = {
+      shapePointIndex: atSegmentEnd ? index + 1 : index,
+      segmentProgress: atSegmentEnd ? 0 : projected.progress,
+      coordinate: atSegmentEnd ? to : projected.coordinate,
+      errorMeters: distanceMeters(point, projected.coordinate),
+    };
+    if (!best || candidate.errorMeters < best.errorMeters) {
+      best = candidate;
+    }
+  }
+
+  return best;
+}
+
+function projectCoordinateOntoSegment(
+  point: LineGeometryCoordinate,
+  start: LineGeometryCoordinate,
+  end: LineGeometryCoordinate,
+): { coordinate: LineGeometryCoordinate; progress: number } {
+  const latitudeRadians =
+    (((point.lat + start.lat + end.lat) / 3) * Math.PI) / 180;
+  const xScale = Math.max(0.1, Math.cos(latitudeRadians));
+  const dx = (end.lon - start.lon) * xScale;
+  const dy = end.lat - start.lat;
+  const px = (point.lon - start.lon) * xScale;
+  const py = point.lat - start.lat;
+  const denominator = dx * dx + dy * dy;
+  const progress = denominator
+    ? Math.min(1, Math.max(0, (px * dx + py * dy) / denominator))
+    : 0;
+
+  return {
+    progress,
+    coordinate: {
+      lon: start.lon + (end.lon - start.lon) * progress,
+      lat: start.lat + (end.lat - start.lat) * progress,
+    },
+  };
+}
+
 function slicePatternShape(
   pattern: CompiledGtfsPattern,
   fromStopIndex: number,
   toStopIndex: number,
+  projectionOverrides: ReadonlyMap<number, PatternProjectionOverride> = new Map(),
 ): LineGeometryCoordinate[] {
   if (fromStopIndex === toStopIndex) return [];
   if (fromStopIndex > toStopIndex) {
-    return slicePatternShape(pattern, toStopIndex, fromStopIndex).reverse();
+    return slicePatternShape(
+      pattern,
+      toStopIndex,
+      fromStopIndex,
+      projectionOverrides,
+    ).reverse();
   }
 
-  const from = pattern.projections[fromStopIndex];
-  const to = pattern.projections[toStopIndex];
-  if (!from || !to || to.distanceAlongMeters < from.distanceAlongMeters) {
+  const fromProjection = pattern.projections[fromStopIndex];
+  const toProjection = pattern.projections[toStopIndex];
+  const from =
+    projectionOverrides.get(fromStopIndex) ?? fromProjection;
+  const to = projectionOverrides.get(toStopIndex) ?? toProjection;
+  if (
+    !fromProjection ||
+    !toProjection ||
+    !from ||
+    !to ||
+    toProjection.distanceAlongMeters < fromProjection.distanceAlongMeters
+  ) {
     return [];
   }
 
@@ -485,7 +636,17 @@ function createStopReferenceKeys(value: string): string[] {
 }
 
 function createCanonicalStopReferenceKey(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+  // Global-map assets use a stable `station:` namespace for their canonical
+  // station ids, while V1 requests keep the original GTFS/NeTEx reference.
+  // Both ids identify the same physical stop.  Keeping the namespace in the
+  // lookup key made the indexed matcher miss exact GTFS references in V2 and
+  // silently fall back to the nearest compiled stop (which can be a neighbour
+  // on a parallel/looped route).  Normalize only this transport-map prefix;
+  // the provider reference itself remains unchanged in the returned geometry.
+  return value
+    .replace(/^(?:station|stop[_-]?point):/iu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "");
 }
 
 function normalizeDirection(value: string): string {
@@ -507,7 +668,7 @@ function minimumCoordinateDistance(
   );
 }
 
-function maximumPolylineDeviationMeters(
+export function maximumPolylineDeviationMeters(
   left: LineGeometryCoordinate[],
   right: LineGeometryCoordinate[],
 ): number {

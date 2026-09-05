@@ -308,6 +308,8 @@ function artifact(
     routeIds: [lineId],
     labels: options.labels ?? ["T1"],
     routeTypes: options.routeTypes ?? ["0"],
+    routeColor: "#123456",
+    routeTextColor: "#ffffff",
     patterns: [],
     shapes,
     entrances: [],

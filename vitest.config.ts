@@ -1,22 +1,25 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vitest/config";
+
+const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      "#imports": path.resolve(__dirname, "tests/nuxtImportsStub.ts"),
+      "#imports": path.resolve(projectRoot, "tests/nuxtImportsStub.ts"),
       "#transport-clock/plugins": path.resolve(
-        __dirname,
+        projectRoot,
         "tests/pluginRegistryStub.ts",
       ),
       "#transport-clock/plugin-server-registry": path.resolve(
-        __dirname,
+        projectRoot,
         "tests/pluginServerRegistryStub.ts",
       ),
       "#transport-clock/plugin-server": path.resolve(
-        __dirname,
+        projectRoot,
         "server/services/pluginHost.ts",
       ),
     },

@@ -60,6 +60,31 @@ export function selectMaximalStopSequencePatterns<T extends StopSequencePattern>
   return selected;
 }
 
+/**
+ * Selects the longest directional variants while retaining an explicit
+ * reverse service. The physical graph compiler uses
+ * selectMaximalStopSequencePatterns, where a reverse traversal is redundant;
+ * the map direction picker needs both traversals to expose the user's choice.
+ */
+export function selectDirectionalStopSequencePatterns<T extends StopSequencePattern>(
+  patterns: T[] = [],
+): T[] {
+  const candidates = [...patterns]
+    .filter((pattern) => pattern.stops.length >= 2)
+    .sort((left, right) => right.stops.length - left.stops.length);
+  const selected: T[] = [];
+
+  for (const candidate of candidates) {
+    const alreadyCovered = selected.some((parent) =>
+      containsStopSequence(parent.stops, candidate.stops),
+    );
+
+    if (!alreadyCovered) selected.push(candidate);
+  }
+
+  return selected;
+}
+
 function containsStopSequence(parent: string[], candidate: string[]): boolean {
   if (candidate.length > parent.length) return false;
 

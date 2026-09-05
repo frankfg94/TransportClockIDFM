@@ -506,6 +506,70 @@ describe("dashboard presets", () => {
     wrapper.unmount();
   });
 
+  it("persists a station before directions resolve and hydrates it in the background", async () => {
+    let releaseDirections:
+      | ((directionGroups: TransitBoardConfig["directionGroups"]) => void)
+      | undefined;
+    const { fetchDirectionGroupsForStation } = installDashboardMocks(
+      {},
+      {},
+      { apiConfigured: true },
+    );
+    fetchDirectionGroupsForStation.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseDirections = resolve;
+        }),
+    );
+
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushPromises();
+
+    const addedBoard = createBoard("added-board", "stop_area:added");
+    addedBoard.directionGroups = [
+      {
+        id: "all-directions",
+        label: "All directions",
+        subtitle: addedBoard.title,
+        match: {},
+      },
+    ];
+
+    (
+      wrapper.vm as unknown as {
+        addCustomBoard: (board: TransitBoardConfig) => void;
+      }
+    ).addCustomBoard(addedBoard);
+    await flushPromises();
+
+    expect(loadTransitPresetState([]).places[0]?.preferences.customBoards).toEqual([
+      expect.objectContaining({
+        id: "added-board",
+        directionGroups: [expect.objectContaining({ id: "all-directions" })],
+      }),
+    ]);
+
+    releaseDirections?.([
+      {
+        id: "north",
+        label: "North",
+        match: { destinationIncludes: ["North"] },
+      },
+    ]);
+    await flushPromises();
+    await flushPromises();
+
+    expect(loadTransitPresetState([]).places[0]?.preferences.customBoards).toEqual([
+      expect.objectContaining({
+        id: "added-board",
+        directionGroups: [expect.objectContaining({ id: "north" })],
+      }),
+    ]);
+
+    wrapper.unmount();
+  });
+
   it("scrolls to the newly added station and highlights its card", async () => {
     const scrollTo = vi.fn();
     const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
@@ -639,7 +703,10 @@ function installDashboardMocks(
   query: Record<string, string | undefined>,
   appSettings: Record<string, unknown> = {},
   options: { apiConfigured?: boolean } = {},
-): void {
+): {
+  fetchBoardDepartures: ReturnType<typeof vi.fn>;
+  fetchDirectionGroupsForStation: ReturnType<typeof vi.fn>;
+} {
   route = reactive({
     path: "/",
     query: { ...query },
@@ -752,19 +819,23 @@ function installDashboardMocks(
       `,
     }),
   }));
-  vi.doMock("../src/services/idfm", () => ({
-    fetchBoardDepartures: vi.fn(async (board: TransitBoardConfig) => ({
+  const fetchBoardDepartures = vi.fn(async (board: TransitBoardConfig) => ({
+    departures: [],
+    directionGroups: board.directionGroups.map((group) => ({
+      id: group.id,
+      label: group.label,
+      subtitle: group.subtitle,
       departures: [],
-      directionGroups: board.directionGroups.map((group) => ({
-        id: group.id,
-        label: group.label,
-        subtitle: group.subtitle,
-        departures: [],
-        serviceEnded: false,
-      })),
+      serviceEnded: false,
     })),
-    fetchDirectionGroupsForStation: vi.fn(async () => []),
   }));
+  const fetchDirectionGroupsForStation = vi.fn(async () => []);
+  vi.doMock("../src/services/idfm", () => ({
+    fetchBoardDepartures,
+    fetchDirectionGroupsForStation,
+  }));
+
+  return { fetchBoardDepartures, fetchDirectionGroupsForStation };
 }
 
 function createBoard(id: string, stopAreaRef: string): TransitBoardConfig {

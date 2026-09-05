@@ -89,8 +89,8 @@ describe("transfer line presentation options", () => {
       id: "line:IDFM:C01740",
       label: "L",
       family: "TRANSILIEN",
-      color: "#a65a95",
-      textColor: "#ffffff",
+      color: "#c4a4cc",
+      textColor: "#111827",
     });
   });
 });

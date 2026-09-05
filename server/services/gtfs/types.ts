@@ -1,7 +1,8 @@
 import type {
   LineGeometryCoordinate,
   LineGeometryEntrance,
-} from "../../../src/features/line-map/lineGeometry";
+} from "../../../src/features/line-map/lineGeometry.js";
+import type { GtfsTimetableDescriptor } from "./timetableTypes.js";
 
 export interface GtfsManifest {
   schemaVersion: 1;
@@ -13,6 +14,7 @@ export interface GtfsManifest {
   sourceLastModified?: string;
   cacheGeneration: number;
   lineCount: number;
+  timetable?: GtfsTimetableDescriptor;
 }
 
 export interface GtfsLineLookupIndex {
@@ -44,6 +46,10 @@ export interface GtfsLineArtifact {
   routeIds: string[];
   labels: string[];
   routeTypes: string[];
+  /** Normalized routes.txt route_color, including the leading '#'. */
+  routeColor: string;
+  /** Normalized routes.txt route_text_color, including the leading '#'. */
+  routeTextColor: string;
   patterns: GtfsIndexedPattern[];
   shapes: Record<string, LineGeometryCoordinate[]>;
   entrances: LineGeometryEntrance[];

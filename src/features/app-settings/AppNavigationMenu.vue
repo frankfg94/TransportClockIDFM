@@ -4,6 +4,7 @@ import {
   Activity,
   Briefcase,
   Home,
+  Map,
   MapPin,
   MoreVertical,
   SlidersHorizontal,
@@ -29,7 +30,7 @@ import {
 
 const AUTO_HIDE_MS = 60_000;
 
-type NavigationSlot = "stations" | "traffic" | "more";
+type NavigationSlot = "stations" | "traffic" | "plan" | "more";
 type NavigationIcon = typeof Home;
 type NavigationTarget = string | { path: string; query?: Record<string, string> };
 type PrimaryNavigationLink = {
@@ -89,9 +90,18 @@ const primaryLinks = computed<PrimaryNavigationLink[]>(() => [
     icon: TriangleAlert,
     slot: "traffic",
   },
+  ...(settings.value.showPlanInNavigation
+    ? [{
+        to: "/map",
+        label: t("common.labels.plan"),
+        icon: Map,
+        slot: "plan" as const,
+      }]
+    : []),
 ]);
 
 const localizedSecondaryLinks = computed(() => [
+  { to: "/nearby-stations", label: t("common.labels.nearbyStations"), icon: MapPin },
   { to: "/settings", label: t("common.labels.settings"), icon: SlidersHorizontal },
   { to: "/health", label: t("common.labels.health"), icon: Activity },
 ]);
@@ -113,6 +123,10 @@ const activeNavigationSlot = computed<NavigationSlot>(() => {
     return "traffic";
   }
 
+  if (isActive("/map")) {
+    return "plan";
+  }
+
   return "stations";
 });
 
@@ -120,6 +134,7 @@ const navigationClasses = computed(() => [
   {
     "app-navigation--hidden": hidden.value && shouldAutoHide.value,
   },
+  { "app-navigation--plan-hidden": !settings.value.showPlanInNavigation },
   `app-navigation--active-${activeNavigationSlot.value}`,
 ]);
 
@@ -288,6 +303,8 @@ function handleVisibilityChange(): void {
           ? t('navigation.stationWithPlace', {
               place: getPlaceNavigationLabel(activeStationPlace),
             })
+          : link.slot === 'plan'
+            ? t('navigation.planAria')
           : undefined
       "
       :to="link.to"
@@ -363,6 +380,7 @@ function handleVisibilityChange(): void {
 
   --nav-stations-w: 116px;
   --nav-traffic-w: 136px;
+  --nav-plan-w: 104px;
   --nav-more-w: 42px;
 
   --indicator-x: var(--nav-padding);
@@ -425,9 +443,24 @@ function handleVisibilityChange(): void {
 .app-navigation--active-more {
   --indicator-x: calc(
     var(--nav-padding) + var(--nav-stations-w) + var(--nav-gap) +
-      var(--nav-traffic-w) + var(--nav-gap)
+      var(--nav-traffic-w) + var(--nav-gap) + var(--nav-plan-w) + var(--nav-gap)
   );
   --indicator-w: var(--nav-more-w);
+}
+
+.app-navigation--active-plan {
+  --indicator-x: calc(
+    var(--nav-padding) + var(--nav-stations-w) + var(--nav-gap) +
+      var(--nav-traffic-w) + var(--nav-gap)
+  );
+  --indicator-w: var(--nav-plan-w);
+}
+
+.app-navigation--plan-hidden.app-navigation--active-more {
+  --indicator-x: calc(
+    var(--nav-padding) + var(--nav-stations-w) + var(--nav-gap) +
+      var(--nav-traffic-w) + var(--nav-gap)
+  );
 }
 
 .app-navigation--hidden {
@@ -470,6 +503,10 @@ function handleVisibilityChange(): void {
 
 .app-navigation__link--traffic {
   width: var(--nav-traffic-w);
+}
+
+.app-navigation__link--plan {
+  width: var(--nav-plan-w);
 }
 
 .app-navigation__link svg {
@@ -633,6 +670,7 @@ function handleVisibilityChange(): void {
     --nav-gap: 4px;
     --nav-stations-w: 100px;
     --nav-traffic-w: 118px;
+    --nav-plan-w: 92px;
     --nav-more-w: 42px;
 
     bottom: 10px;

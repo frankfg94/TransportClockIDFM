@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import {
   Cloud,
   CloudFog,
@@ -47,6 +47,7 @@ const error = ref("");
 const activeMetric = ref<ForecastMetric>("temperature");
 const selectedDayIndex = ref(0);
 const chartScrollElement = ref<HTMLElement>();
+let requestGeneration = 0;
 
 const location = computed(() =>
   resolveWeatherLocation(
@@ -193,20 +194,23 @@ watch(
   { immediate: true },
 );
 
+onBeforeUnmount(invalidateWeatherRequest);
+
 async function loadWeather(): Promise<void> {
-  if (loading.value) {
-    return;
-  }
+  const requestGenerationAtStart = ++requestGeneration;
+  const requestLocation = { ...location.value };
+  const lookaheadMinutes = settings.value.weatherLookaheadMinutes;
 
   loading.value = true;
   error.value = "";
+  weather.value = undefined;
 
   try {
     const params = new URLSearchParams({
-      latitude: String(location.value.latitude),
-      longitude: String(location.value.longitude),
-      locationLabel: location.value.label,
-      lookaheadMinutes: String(settings.value.weatherLookaheadMinutes),
+      latitude: String(requestLocation.latitude),
+      longitude: String(requestLocation.longitude),
+      locationLabel: requestLocation.label,
+      lookaheadMinutes: String(lookaheadMinutes),
     });
     const response = await fetch(toServerApiUrl(`/api/weather?${params}`));
 
@@ -214,17 +218,34 @@ async function loadWeather(): Promise<void> {
       throw new Error(`${response.status} ${response.statusText}`);
     }
 
-    weather.value = (await response.json()) as WeatherResponse;
+    const nextWeather = (await response.json()) as WeatherResponse;
+
+    if (requestGenerationAtStart !== requestGeneration) {
+      return;
+    }
+
+    weather.value = nextWeather;
     selectDefaultDay();
     scrollChartToStart();
   } catch (fetchError) {
+    if (requestGenerationAtStart !== requestGeneration) {
+      return;
+    }
+
     error.value =
       fetchError instanceof Error
         ? fetchError.message
         : t("weather.loadFailed");
   } finally {
-    loading.value = false;
+    if (requestGenerationAtStart === requestGeneration) {
+      loading.value = false;
+    }
   }
+}
+
+function invalidateWeatherRequest(): void {
+  requestGeneration += 1;
+  loading.value = false;
 }
 
 function selectDay(index: number): void {

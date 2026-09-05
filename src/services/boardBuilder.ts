@@ -26,10 +26,23 @@ export interface BoardBuilderGateway {
   searchStations(line: LineSearchOption, query: string): Promise<StationSearchOption[]>;
 }
 
+export function createFallbackDirectionGroup(label: string): DirectionGroupConfig {
+  return {
+    id: "all-directions",
+    label: "All directions",
+    subtitle: label,
+    match: {},
+  };
+}
+
 export function createBoardFromDraft(
   draft: Required<StationBoardDraft>,
-  directionGroups: DirectionGroupConfig[],
+  directionGroups: DirectionGroupConfig[] = [],
 ): TransitBoardConfig {
+  const resolvedDirectionGroups =
+    directionGroups.length > 0
+      ? directionGroups
+      : [createFallbackDirectionGroup(draft.station.label)];
   const mode = transitFamilyToMode(draft.family);
   const presentation = createLinePresentation({
     code: draft.line.label,
@@ -56,8 +69,8 @@ export function createBoardFromDraft(
       iconUrl: draft.line.iconUrl ?? presentation.iconUrl,
       iconUrls: mergeIconUrls(draft.line.iconUrls, presentation.iconUrls),
     },
-    monitoringPoints: createMonitoringPoints(draft.station, directionGroups),
-    directionGroups,
+    monitoringPoints: createMonitoringPoints(draft.station, resolvedDirectionGroups),
+    directionGroups: resolvedDirectionGroups,
     schedule: draft.station.scheduleStopAreaRef
       ? {
           lineRef: draft.line.navitiaId,
@@ -75,6 +88,18 @@ function createMonitoringPoints(
   const monitoringPoints = new Map<string, MonitoringPointConfig>();
 
   directionGroups.forEach((group) => {
+    const directMonitoringRefs = group.match.monitoringRefs ?? [];
+    directMonitoringRefs.forEach((monitoringRef) => {
+      if (monitoringRef && !monitoringPoints.has(monitoringRef)) {
+        monitoringPoints.set(monitoringRef, {
+          ref: monitoringRef,
+          label: group.label,
+        });
+      }
+    });
+
+    if (directMonitoringRefs.length > 0) return;
+
     group.match.navitiaStopPointRefs?.forEach((stopPointRef) => {
       const monitoringRef = navitiaStopPointToMonitoringRef(stopPointRef);
 

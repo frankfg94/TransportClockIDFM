@@ -6,7 +6,10 @@ d’application ne télécharge, ne décompresse et ne parse jamais l’archive 
 ## Fichiers
 
 - `types.ts` définit le manifeste public et le contrat des artefacts par ligne :
-  formes, directions, branches, arrêts projetés et entrées/sorties.
+  formes, directions, branches, arrêts projetés et entrées/sorties. Le descripteur
+  optionnel `timetable` n’altère pas le format des géométries existantes.
+- `timetableTypes.ts` définit la version des horaires, le descripteur de couverture,
+  les dictionnaires d’arrêts/services et les fichiers de courses bornés en taille.
 - `runtime.ts` sélectionne le stockage, charge le manifeste et fournit les
   artefacts demandés au reste du pipeline de géométrie.
 
@@ -43,7 +46,38 @@ Les artefacts sont lus sous :
 
 ```text
 versions/<sha256>/lines/<identifiant-normalisé>.json
+timetables/v1/<sha256-source>/<identifiant-unique-exécution>/<ligne>/index.json
+timetables/v1/<sha256-source>/<identifiant-unique-exécution>/<ligne>/0000.json
 ```
+
+Le chemin de base des horaires vient exclusivement de `current.json.timetable.path`
+et n’est pas déduit du seul SHA de l’archive. Deux réindexations du même ZIP peuvent
+avoir le même SHA et des dossiers d’horaires différents. Tout cache d’horaires doit
+donc distinguer ces chemins immuables. Sans descripteur compatible, les géométries
+restent utilisables mais l’index horaire doit être considéré comme indisponible.
+
+Les services horaires conservent les jours de semaine et les intervalles de
+`calendar.txt`, ainsi que les ajouts et suppressions de `calendar_dates.txt`.
+Les heures sont des secondes depuis le début du jour de service, y compris
+au-delà de 24 heures. Ne pas réutiliser le filtrage des services de géométrie
+pour décider si une course circule un jour donné : les suppressions calendaires
+affectent les horaires, pas le tracé physique.
+
+L’importeur construit les deux index avant de changer le manifeste. Il téléverse
+tous les nouveaux fichiers avant `gtfs/current.json` ; une erreur de construction
+ou de transfert laisse le manifeste courant en place. Les géométries actives sont
+réutilisées lors d’une migration d’horaires à SHA identique, et les anciens dossiers
+d’horaires restent intacts. Le remplacement local du manifeste utilise un fichier
+temporaire et un renommage atomique.
+
+Pour préparer uniquement les données locales, utiliser
+`npm.cmd run gtfs:update -- --local --keep-source`. `--local` exclut toute lecture
+ou écriture R2 et ne déploie rien ; le runtime déployé conserve sa priorité R2.
+`--keep-source` conserve le ZIP et les CSV temporaires après succès ou échec et
+journalise leur chemin absolu. Ajouter `--reindex` pour reconstruire des horaires
+déjà à jour. Une absence d’horaires ou un changement de schéma déclenche cette
+reconstruction automatiquement, même pendant le délai de 12 heures et pour un
+ZIP identique. Voir les [options de l’importeur](../../../scripts/gtfs/README.md).
 
 La structure d’ensemble et l’ordre des fournisseurs sont détaillés dans
 [la documentation de géométrie GTFS](../../../docs/gtfs-line-geometry.md).

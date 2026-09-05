@@ -22,6 +22,7 @@ type LineIconLike = {
 const props = defineProps<{
   line: LineIconLike;
   compact?: boolean;
+  eager?: boolean;
 }>();
 const { t } = useI18n();
 
@@ -100,16 +101,11 @@ function getLineModeLabel(line: typeof props.line): string {
     class="line-icon-badge"
     :class="{ 'line-icon-badge--compact': compact }"
   >
-    <img
-      v-if="currentIconUrl"
-      :src="currentIconUrl"
-      :alt="t('lineMap.lineAlt', { line: displayLabel })"
-      loading="lazy"
-      @error="showNextIconCandidate"
-    />
     <span
-      v-else
+      v-if="!currentIconUrl"
       class="line-icon-badge__fallback"
+      role="img"
+      :aria-label="t('lineMap.lineAlt', { line: displayLabel })"
       :style="{
         '--line-bg': line.color ?? '#0064ff',
         '--line-fg': line.textColor ?? '#ffffff',
@@ -117,6 +113,14 @@ function getLineModeLabel(line: typeof props.line): string {
     >
       <span class="line-icon-badge__label">{{ displayLabel }}</span>
     </span>
+    <img
+      v-if="currentIconUrl"
+      :src="currentIconUrl"
+      :alt="t('lineMap.lineAlt', { line: displayLabel })"
+      :loading="eager ? 'eager' : 'lazy'"
+      decoding="async"
+      @error="showNextIconCandidate"
+    />
   </span>
 </template>
 

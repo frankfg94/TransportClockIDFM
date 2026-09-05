@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  checkSatelliteTiles,
+  checkNavitiaJourneys,
   getNetexDatasetFreshness,
   parsePrimGlobalRequestAvailability,
+  runPluginHealthCheck,
 } from "../server/api/health.get";
 import { checkIdfmLineTraces } from "../packages/realtime-vehicles/src/runtime/server/healthCheck";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 const now = new Date("2026-06-18T12:00:00.000Z");
@@ -40,6 +44,75 @@ describe("getNetexDatasetFreshness", () => {
 
   it("ignores invalid generation dates", () => {
     expect(getNetexDatasetFreshness("not-a-date", now)).toBeUndefined();
+  });
+});
+
+describe("checkNavitiaJourneys", () => {
+  it("exposes a dedicated required health check without leaking a key", async () => {
+    vi.stubEnv("IDFM_API_KEY", "");
+    vi.stubEnv("NUXT_IDFM_API_KEY", "");
+    const check = await checkNavitiaJourneys({ context: {} } as never);
+
+    expect(check).toMatchObject({
+      id: "navitia-journeys",
+      labelKey: "health.checks.navitiaJourneys",
+      category: "Realtime",
+      required: true,
+      status: "error",
+      messageKey: "health.messages.missingApiKey",
+    });
+  });
+});
+
+describe("runPluginHealthCheck", () => {
+  it("isolates synchronous and asynchronous plugin failures", async () => {
+    const event = { context: {} } as never;
+    const checks = await Promise.all([
+      runPluginHealthCheck(
+        () => {
+          throw new Error("plugin exploded");
+        },
+        event,
+        0,
+      ),
+      runPluginHealthCheck(
+        async () => {
+          throw new Error("async plugin exploded");
+        },
+        event,
+        1,
+      ),
+      runPluginHealthCheck(
+        async () => ({
+          id: "healthy-plugin",
+          label: "Healthy plugin",
+          category: "Plugin",
+          required: false,
+          status: "ok" as const,
+          message: "Available",
+        }),
+        event,
+        2,
+      ),
+    ]);
+
+    expect(checks[0]).toMatchObject({
+      id: "plugin-health-1",
+      category: "Plugin",
+      required: false,
+      status: "error",
+      messageKey: "health.messages.serviceUnreachable",
+      detail: "plugin exploded",
+    });
+    expect(checks[1]).toMatchObject({
+      id: "plugin-health-2",
+      status: "error",
+      detail: "async plugin exploded",
+    });
+    expect(checks[2]).toMatchObject({
+      id: "healthy-plugin",
+      status: "ok",
+    });
   });
 });
 
@@ -89,5 +162,28 @@ describe("checkIdfmLineTraces", () => {
       "select=route_id",
     );
     expect(String(fetchMock.mock.calls[0][0])).not.toContain("apikey");
+  });
+});
+
+describe("checkSatelliteTiles", () => {
+  it("reports the Esri World Imagery tile endpoint", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      new Response(new Uint8Array([0]), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(checkSatelliteTiles()).resolves.toMatchObject({
+      id: "satellite-tiles",
+      category: "Map",
+      required: false,
+      status: "ok",
+      message: "Satellite imagery reachable",
+    });
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "World_Imagery/MapServer/tile/12/1408/2074",
+    );
   });
 });

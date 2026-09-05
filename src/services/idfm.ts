@@ -21,14 +21,23 @@ import {
   monitoringRefToNavitiaStopPointRef,
   navitiaStopPointToMonitoringRef,
 } from "./idfmStopReferences";
-import { selectMaximalStopSequencePatterns } from "../features/line-map/topologyPatterns";
-import { createLinePresentation } from "./linePresentation";
+import { createFallbackDirectionGroup } from "./boardBuilder";
+import { selectDirectionalStopSequencePatterns, selectMaximalStopSequencePatterns } from "../features/line-map/topologyPatterns";
+import {
+  createLinePresentation,
+} from "./linePresentation";
 import { toServerApiUrl } from "./serverApi";
 import {
   createTransferLineOption,
   dedupeTransferLineOptions,
   normalizeTransferLineId,
 } from "./transferLineOptions";
+import type {
+  NearbyJourney,
+  NearbyJourneyRequest,
+  NearbyJourneySection,
+} from "../features/nearby-stations/nearbyHeavyTransports";
+import type { GeocoderPoint } from "../features/transport-map/contracts/geocoder";
 
 type SiriTextValue =
   | string
@@ -197,6 +206,47 @@ interface NavitiaPlacesNearbyResponse {
   pagination?: NavitiaPagination;
 }
 
+interface NavitiaPlaceSearchEntry {
+  id?: string;
+  name?: string;
+  label?: string;
+  embedded_type?: string;
+  type?: string;
+  kind?: string;
+  category?: string;
+  poi_type?: unknown;
+  coord?: NavitiaCoord;
+  administrative_regions?: NavitiaAdministrativeRegion[];
+  stop_area?: NavitiaStopArea;
+  address?: {
+    id?: string;
+    name?: string;
+    label?: string;
+    coord?: NavitiaCoord;
+    administrative_regions?: NavitiaAdministrativeRegion[];
+    type?: string;
+    kind?: string;
+    category?: string;
+    poi_type?: unknown;
+  };
+  poi?: {
+    id?: string;
+    name?: string;
+    label?: string;
+    coord?: NavitiaCoord;
+    administrative_regions?: NavitiaAdministrativeRegion[];
+    type?: string;
+    kind?: string;
+    category?: string;
+    poi_type?: unknown;
+  };
+}
+
+interface NavitiaPlaceSearchResponse {
+  places?: NavitiaPlaceSearchEntry[];
+  pagination?: NavitiaPagination;
+}
+
 interface NavitiaConnectionStopPoint {
   id?: string;
   name?: string;
@@ -232,6 +282,73 @@ interface NavitiaRoute {
 interface NavitiaRoutesResponse {
   routes?: NavitiaRoute[];
   pagination?: NavitiaPagination;
+}
+
+interface NavitiaJourneyLine {
+  id?: string;
+  code?: string;
+  label?: string;
+  name?: string;
+  commercial_mode?: { id?: string; name?: string } | string;
+  physical_mode?: { id?: string; name?: string } | string;
+  physical_modes?: Array<{ id?: string; name?: string }>;
+}
+
+interface NavitiaJourneyLocation {
+  id?: string;
+  name?: string;
+  coord?: NavitiaCoord;
+  address?: { coord?: NavitiaCoord };
+  stop_point?: { coord?: NavitiaCoord };
+  stop_area?: { coord?: NavitiaCoord };
+}
+
+interface NavitiaJourneySection {
+  id?: string;
+  links?: Array<{ type?: string; id?: string }>;
+  type?: string;
+  mode?: string;
+  duration?: number;
+  length?: number;
+  departure_date_time?: string;
+  arrival_date_time?: string;
+  from?: NavitiaJourneyLocation;
+  to?: NavitiaJourneyLocation;
+  geojson?: {
+    type?: string;
+    coordinates?: unknown;
+    geometry?: { coordinates?: unknown };
+  };
+  path?: unknown[];
+  stop_date_times?: Array<{
+    stop_point?: {
+      id?: string;
+      name?: string;
+      label?: string;
+      stop_area?: { name?: string; label?: string };
+    };
+    stop_area?: { name?: string; label?: string };
+  }>;
+  display_informations?: NavitiaJourneyLine & {
+    line?: NavitiaJourneyLine;
+    direction?: string;
+    color?: string;
+    text_color?: string;
+  };
+}
+
+interface NavitiaJourney {
+  id?: string;
+  duration?: number;
+  departure_date_time?: string;
+  arrival_date_time?: string;
+  nb_transfers?: number;
+  status?: string;
+  sections?: NavitiaJourneySection[];
+}
+
+interface NavitiaJourneysResponse {
+  journeys?: NavitiaJourney[];
 }
 
 interface NavitiaStopPoint {
@@ -286,8 +403,17 @@ interface BoardScheduleInfo {
 export interface NavitiaRequestOptions {
   apiBase?: string;
   fetcher?: typeof fetch;
+  signal?: AbortSignal;
   siriApiBase?: string;
   transferScope?: "connected" | "direct";
+}
+
+export interface NavitiaDestinationSearchOptions {
+  includeStations?: boolean;
+  includePlaces?: boolean;
+  /** Kept in the shared search contract; street addresses are resolved by IGN. */
+  includeAddresses?: boolean;
+  count?: number;
 }
 
 const API_BASE = toServerApiUrl("/api/idfm");
@@ -319,7 +445,6 @@ const lineFrequencyProfileCache = new Map<
   string,
   Promise<LineFrequencyProfile>
 >();
-
 const familyMatchers: Record<TransitFamily, string[]> = {
   METRO: ["metro", "métro"],
   RER: ["rer"],
@@ -378,7 +503,10 @@ function navitiaFetch(
   options: NavitiaRequestOptions,
   init?: RequestInit,
 ): Promise<Response> {
-  return (options.fetcher ?? fetch)(input, init);
+  return (options.fetcher ?? fetch)(input, {
+    ...init,
+    signal: init?.signal ?? options.signal,
+  });
 }
 
 async function navitiaFetchWithRetry(
@@ -386,19 +514,390 @@ async function navitiaFetchWithRetry(
   options: NavitiaRequestOptions,
   init?: RequestInit,
 ): Promise<Response> {
-  const delays = [220, 620, 1200];
+  // The same-origin server proxy owns pacing and Retry-After handling. A
+  // second retry loop here multiplied every upstream 429 into as many as
+  // sixteen PRIM requests (four browser attempts x four server attempts).
+  return navitiaFetch(input, options, init);
+}
 
-  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
-    const response = await navitiaFetch(input, options, init);
+/**
+ * Small Navitia adapter used by nearby heavy-transport resolution. Keeping
+ * this request behind the existing same-origin proxy means the API key never
+ * reaches the browser. The normalized result is deliberately independent of
+ * the raw Navitia response so eligibility stays unit-testable.
+ */
+export async function fetchNavitiaJourneys(
+  request: NearbyJourneyRequest,
+  options: NavitiaRequestOptions = {},
+): Promise<NearbyJourney[]> {
+  const destinationRef = request.destinationRef?.trim()
+    || normalizeNavitiaStopAreaReference(request.destination.id);
+  const params = new URLSearchParams({
+    // Keep enough distinct journey variants for projected heavy stations:
+    // several local buses can serve the same heavy stop through different
+    // physical quays, and the resolver deduplicates them by feeder line.
+    count: String(Math.max(1, Math.min(20, Math.round(request.count ?? 16)))),
+    data_freshness: "base_schedule",
+    disable_disruption: request.includeDisruptions ? "false" : "true",
+    disable_geojson: request.includeGeoJson ? "false" : "true",
+    from: `${request.origin.lon};${request.origin.lat}`,
+    to: destinationRef ?? `${request.destination.lon};${request.destination.lat}`,
+  });
+  if (request.datetime) {
+    params.set("datetime", request.datetime);
+    params.set("datetime_represents", "departure");
+  }
+  const response = await navitiaFetchWithRetry(
+    `${navitiaApiBase(options)}/journeys?${params.toString()}`,
+    options,
+  );
 
-    if (response.status !== 429 || attempt === delays.length) {
-      return response;
-    }
-
-    await wait(delays[attempt]);
+  if (!response.ok) {
+    throw new Error(`navitia-journeys-${response.status}`);
   }
 
-  return navitiaFetch(input, options, init);
+  const payload = (await response.json()) as NavitiaJourneysResponse;
+  return (payload.journeys ?? []).map(normalizeNavitiaJourney);
+}
+
+function normalizeNavitiaStopAreaReference(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized?.startsWith("stop_area:") ? normalized : undefined;
+}
+
+/**
+ * Search the Navitia place index for itinerary destinations. Unlike the
+ * marketplace `/places` endpoint, this response already exposes WGS84
+ * coordinates for stop areas, so station destinations can be sent directly
+ * back to the journey endpoint.
+ */
+export async function searchNavitiaDestinationPoints(
+  query: string,
+  searchOptions: NavitiaDestinationSearchOptions = {},
+  requestOptions: NavitiaRequestOptions = {},
+): Promise<GeocoderPoint[]> {
+  const normalizedQuery = query.trim();
+  if (normalizedQuery.length < 2) return [];
+
+  const includeStations = searchOptions.includeStations !== false;
+  const includePlaces = searchOptions.includePlaces === true;
+  const params = new URLSearchParams({
+    q: normalizedQuery,
+    count: String(Math.max(1, Math.min(20, Math.round(searchOptions.count ?? 8)))),
+  });
+  if (includeStations) params.append("type[]", "stop_area");
+  if (includePlaces) params.append("type[]", "poi");
+  const response = await navitiaFetchWithRetry(
+    `${navitiaApiBase(requestOptions)}/places?${params.toString()}`,
+    requestOptions,
+  );
+  if (!response.ok) throw new Error(`navitia-place-search-${response.status}`);
+
+  const payload = (await response.json()) as NavitiaPlaceSearchResponse;
+  const results: GeocoderPoint[] = [];
+
+  for (const place of payload.places ?? []) {
+    const station = includeStations && place.stop_area
+      ? mapNavitiaDestinationStopArea(place.stop_area)
+      : undefined;
+    if (station) {
+      results.push(station);
+      continue;
+    }
+    if (!includePlaces || place.embedded_type === "stop_area") continue;
+
+    // A Navitia POI may also carry an embedded address. Prefer the POI so its
+    // name and `poi_type` survive the provider boundary; plain addresses are
+    // intentionally left to the IGN geocoder and are not POI destinations.
+    const embedded = place.poi ?? (place.embedded_type === "poi" ? place.address : undefined);
+    if (!embedded) continue;
+    const point = mapNavitiaDestinationPlace(place, embedded);
+    if (point) results.push(point);
+  }
+
+  const seen = new Set<string>();
+  return results.filter((point) => {
+    const key = point.id ?? `${point.label ?? ""}:${point.lon}:${point.lat}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function mapNavitiaDestinationStopArea(stopArea: NavitiaStopArea): GeocoderPoint | undefined {
+  const lon = Number(stopArea.coord?.lon);
+  const lat = Number(stopArea.coord?.lat);
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return undefined;
+  const label = stopArea.label?.trim() || stopArea.name?.trim();
+  if (!label) return undefined;
+  return {
+    id: stopArea.id,
+    lon,
+    lat,
+    label,
+    provider: "idfm-navitia",
+    city: getStopAreaCity(stopArea, label),
+    type: "station",
+  };
+}
+
+function mapNavitiaDestinationPlace(
+  place: NavitiaPlaceSearchEntry,
+  embedded?: NavitiaPlaceSearchEntry["address"] | NavitiaPlaceSearchEntry["poi"],
+): GeocoderPoint | undefined {
+  const lon = Number(embedded?.coord?.lon ?? place.coord?.lon);
+  const lat = Number(embedded?.coord?.lat ?? place.coord?.lat);
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return undefined;
+  const label = embedded?.label?.trim()
+    || embedded?.name?.trim()
+    || place.label?.trim()
+    || place.name?.trim();
+  if (!label) return undefined;
+  const kind = resolveNavitiaPlaceKind(place, embedded);
+  const category = resolveNavitiaPlaceCategory(kind)
+    ?? resolveNavitiaPlaceCategory(embedded?.category ?? place.category)
+    ?? (kind ? "service" : undefined);
+  const placeFields = kind || category ? {
+    ...(kind ? { kind } : {}),
+    ...(category ? { category } : {}),
+  } : undefined;
+  return {
+    id: embedded?.id ?? place.id,
+    lon,
+    lat,
+    label,
+    provider: "idfm-navitia",
+    city: embedded?.administrative_regions?.[0]?.name
+      ?? place.administrative_regions?.[0]?.name,
+    type: "place",
+    ...placeFields,
+  };
+}
+
+function resolveNavitiaPlaceKind(
+  place: NavitiaPlaceSearchEntry,
+  embedded?: NavitiaPlaceSearchEntry["address"] | NavitiaPlaceSearchEntry["poi"],
+): string | undefined {
+  const candidates = [
+    embedded?.poi_type,
+    embedded?.kind,
+    embedded?.type,
+    place.poi_type,
+    place.kind,
+    place.type,
+  ];
+  for (const candidate of candidates) {
+    const kind = readNavitiaPlaceKind(candidate);
+    if (kind) return kind;
+  }
+  return undefined;
+}
+
+function readNavitiaPlaceKind(value: unknown): string | undefined {
+  if (typeof value === "string") return value.trim() || undefined;
+  if (!value || typeof value !== "object") return undefined;
+
+  const record = value as Record<string, unknown>;
+  const identifier = firstNonEmptyString(record.id, record.code);
+  if (identifier) {
+    const normalizedIdentifier = identifier.split(/[:/]/u).at(-1)?.trim();
+    if (normalizedIdentifier) return normalizedIdentifier;
+  }
+  return firstNonEmptyString(record.name, record.label, record.kind);
+}
+
+function firstNonEmptyString(...values: unknown[]): string | undefined {
+  return values.find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim();
+}
+
+function resolveNavitiaPlaceCategory(kind: string | undefined): GeocoderPoint["category"] {
+  const normalized = kind
+    ?.normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleLowerCase()
+    .replace(/[^\p{Letter}\p{Number}]+/gu, "_")
+    .replace(/^_+|_+$/gu, "");
+  if (!normalized) return undefined;
+
+  if (new Set([
+    "shop", "supermarket", "convenience", "department_store", "book", "books", "book_store", "bookshop",
+    "clothes", "clothing", "shoe_store", "shoes", "florist", "mall", "marketplace", "electronics",
+  ]).has(normalized)) return "shop";
+  if (new Set([
+    "restaurant", "cafe", "bar", "pub", "fast_food", "food_court", "bakery", "butcher", "ice_cream",
+  ]).has(normalized)) return "food";
+  if (new Set(["cinema", "theatre", "library", "museum", "gallery", "antiques"]).has(normalized)) return "culture";
+  if (new Set(["attraction", "viewpoint", "artwork", "amusement_park", "theme_park", "zoo"]).has(normalized)) return "attraction";
+  return undefined;
+}
+
+function normalizeNavitiaJourney(journey: NavitiaJourney): NearbyJourney {
+  const sections: NearbyJourneySection[] = (journey.sections ?? []).map((section) => {
+    const fromPoint = normalizeNavitiaJourneyPoint(section.from);
+    const toPoint = normalizeNavitiaJourneyPoint(section.to);
+    return ({
+    // Navitia has returned both display_informations.line and the line fields
+    // directly on display_informations over time. Keep both shapes so feeder
+    // resolution does not silently lose the T10/N62 line identity.
+    ...(() => {
+      const display = section.display_informations;
+      const line = display?.line ?? display;
+      return {
+        lineId: line?.id ?? section.links?.find((link) => link.type === "line")?.id,
+        lineCode: line?.code ?? line?.name,
+        lineAliases: [...new Set([
+          line?.code,
+          line?.label,
+          line?.name,
+        ].filter((value): value is string => Boolean(value?.trim())))],
+        lineMode: normalizeJourneyLineMode(line),
+        lineColor: normalizeNavitiaJourneyColor(display?.color),
+        lineTextColor: normalizeNavitiaJourneyColor(display?.text_color),
+        direction: display?.direction,
+      };
+    })(),
+    type: section.type,
+    mode: section.mode,
+    durationSeconds: Number.isFinite(section.duration) ? Math.max(0, section.duration ?? 0) : 0,
+    departureDateTime: section.departure_date_time,
+    arrivalDateTime: section.arrival_date_time,
+    distanceMeters: Number.isFinite(section.length) ? Math.max(0, section.length ?? 0) : undefined,
+    fromName: section.from?.name,
+    toName: section.to?.name,
+    fromPoint,
+    toPoint,
+    geometry: normalizeNavitiaJourneyGeometry(section),
+    stopNames: normalizeNavitiaJourneyStopNames(section),
+    });
+  });
+
+  return {
+    id: journey.id,
+    durationSeconds: Number.isFinite(journey.duration)
+      ? Math.max(0, journey.duration ?? 0)
+      : sections.reduce((sum, section) => sum + section.durationSeconds, 0),
+    departureDateTime: journey.departure_date_time,
+    arrivalDateTime: journey.arrival_date_time,
+    transferCount: Number.isFinite(journey.nb_transfers) ? Math.max(0, journey.nb_transfers ?? 0) : undefined,
+    status: journey.status,
+    sections,
+  };
+}
+
+function normalizeNavitiaJourneyGeometry(section: NavitiaJourneySection): { lon: number; lat: number }[] | undefined {
+  const candidates: unknown[] = [
+    section.geojson?.coordinates,
+    section.geojson?.geometry?.coordinates,
+    section.path,
+  ];
+  for (const candidate of candidates) {
+    const points = extractJourneyPoints(candidate);
+    if (points.length >= 2) return points;
+  }
+  return undefined;
+}
+
+function extractJourneyPoints(value: unknown): { lon: number; lat: number }[] {
+  if (Array.isArray(value)) {
+    const lon = Number(value[0]);
+    const lat = Number(value[1]);
+    if (Number.isFinite(lon) && Number.isFinite(lat) && typeof value[0] !== "object" && typeof value[1] !== "object") {
+      return [{ lon, lat }];
+    }
+    return value.flatMap((entry) => extractJourneyPoints(entry));
+  }
+  if (!value || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  const lon = Number(record.lon ?? record.longitude);
+  const lat = Number(record.lat ?? record.latitude);
+  if (Number.isFinite(lon) && Number.isFinite(lat)) return [{ lon, lat }];
+  if (record.coord) return extractJourneyPoints(record.coord);
+  if (record.coordinates) return extractJourneyPoints(record.coordinates);
+  return [];
+}
+
+function normalizeNavitiaJourneyPoint(
+  point?: NavitiaJourneyLocation,
+): { lon: number; lat: number } | undefined {
+  const candidates = [
+    point?.coord,
+    point?.address?.coord,
+    point?.stop_point?.coord,
+    point?.stop_area?.coord,
+  ];
+  for (const candidate of candidates) {
+    const lon = typeof candidate?.lon === "string" ? Number(candidate.lon) : candidate?.lon;
+    const lat = typeof candidate?.lat === "string" ? Number(candidate.lat) : candidate?.lat;
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      return { lon: lon as number, lat: lat as number };
+    }
+  }
+  return undefined;
+}
+
+function normalizeNavitiaJourneyStopNames(section: NavitiaJourneySection): string[] | undefined {
+  const candidates = [
+    section.from?.name,
+    ...(section.stop_date_times ?? []).map((stopDateTime) =>
+      stopDateTime.stop_point?.label
+      ?? stopDateTime.stop_point?.name
+      ?? stopDateTime.stop_point?.stop_area?.label
+      ?? stopDateTime.stop_point?.stop_area?.name
+      ?? stopDateTime.stop_area?.label
+      ?? stopDateTime.stop_area?.name),
+    section.to?.name,
+  ];
+  const seen = new Set<string>();
+  const names = candidates
+    .map((name) => name?.trim())
+    .filter((name): name is string => Boolean(name))
+    .filter((name) => {
+      const key = name
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, "")
+        .toLocaleLowerCase("fr-FR")
+        .replace(/\s*\([^)]*\)\s*$/u, "")
+        .replace(/\s+/gu, " ")
+        .trim();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return names.length > 0 ? names : undefined;
+}
+
+function normalizeNavitiaJourneyColor(value?: string): string | undefined {
+  const normalized = value?.trim().replace(/^#/u, "");
+  return normalized && /^[0-9a-f]{6}$/iu.test(normalized) ? `#${normalized}` : undefined;
+}
+
+function normalizeJourneyLineMode(
+  line?: NavitiaJourneyLine,
+): NearbyJourneySection["lineMode"] {
+  const lineCode = line?.code?.trim() ?? line?.name?.trim() ?? "";
+  const commercialMode = typeof line?.commercial_mode === "string"
+    ? line.commercial_mode
+    : line?.commercial_mode?.name;
+  const physicalMode = typeof line?.physical_mode === "string"
+    ? line.physical_mode
+    : line?.physical_mode?.name;
+  const names = [
+    ...(commercialMode ? [commercialMode] : []),
+    ...(physicalMode ? [physicalMode] : []),
+    ...(line?.physical_modes ?? []).flatMap((mode) => [mode.id, mode.name]),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" ")
+    .toLocaleLowerCase("fr-FR");
+  if (/^N\d{1,3}$/iu.test(lineCode)) return "NOCTILIEN";
+  if (names.includes("metro") || names.includes("métro")) return "METRO";
+  if (names.includes("rer")) return "RER";
+  if (names.includes("transilien") || names.includes("train")) return "TRANSILIEN";
+  if (names.includes("tram")) return "TRAM";
+  if (names.includes("noctilien")) return "NOCTILIEN";
+  if (names.includes("cable") || names.includes("téléphérique")) return "CABLE";
+  if (names.includes("bus")) return "BUS";
+  return undefined;
 }
 
 export async function fetchTransitFamilyOptions(
@@ -572,6 +1071,24 @@ export async function fetchLineRouteSequences(
   }
 
   return [];
+}
+
+/**
+ * Reads the cache-backed server topology without falling back to Navitia.
+ * Nearby realtime boards use this path so an exhausted Navitia quota cannot
+ * prevent calls to the separately-quotad SIRI next-departures API.
+ */
+export function fetchCachedLineRouteSequences(
+  line: LineSearchOption,
+  preferCompletePatterns = false,
+  signal?: AbortSignal,
+): Promise<LineRouteSequence[]> {
+  return fetchLineRouteSequencesByLineId(
+    line.navitiaId,
+    line.label,
+    preferCompletePatterns,
+    signal,
+  );
 }
 
 export async function fetchLineRouteSummaries(
@@ -1147,23 +1664,22 @@ function findTopologyCorridorStops(
   return candidates[0]?.stops;
 }
 
-function lineStopMatchesDepartureStation(
+export function lineStopMatchesDepartureStation(
   stop: LineRouteStop,
   departure: Departure,
 ): boolean {
-  const refs = [
+  const lineRefs = [
     stop.id,
     stop.station.id,
+    stop.station.monitoringRef,
     stop.station.scheduleStopAreaRef,
+  ].filter((ref): ref is string => Boolean(ref));
+  const departureRefs = [
     departure.monitoringRef,
     departure.navitiaStopPointRef,
-  ].filter(Boolean);
+  ].filter((ref): ref is string => Boolean(ref));
 
-  if (
-    refs.some((ref) =>
-      refs.some((candidate) => ref !== candidate && ref === candidate),
-    )
-  ) {
+  if (lineRefs.some((ref) => departureRefs.includes(ref))) {
     return true;
   }
 
@@ -1442,6 +1958,8 @@ interface ServerLineTopology {
     terminalFrom: string;
     terminalTo: string;
     stops: string[];
+    quayIds?: Array<string | undefined>;
+    monitoringRefs?: Array<string | undefined>;
   }>;
 }
 
@@ -1473,16 +1991,20 @@ export function convertServerTopologyToLineRouteSequences(
     return segmentSequences;
   }
 
-  const patternSequences = selectMaximalStopSequencePatterns(topology.patterns)
+  const patternSequences = selectDirectionalStopSequencePatterns(topology.patterns)
     .map((pattern) => {
-      const stops = pattern.stops.flatMap((stationId) => {
+      const stops = pattern.stops.flatMap((stationId, index) => {
         const station = stations.get(stationId);
 
         if (!station) {
           return [];
         }
 
-        return [createServerTopologyRouteStop(station)];
+        return [createServerTopologyRouteStop(
+          station,
+          pattern.quayIds?.[index],
+          pattern.monitoringRefs?.[index],
+        )];
       });
 
       return {
@@ -1500,14 +2022,20 @@ export function convertServerTopologyToLineRouteSequences(
 
 function createServerTopologyRouteStop(
   station: ServerLineTopology["stations"][number],
+  quayId?: string,
+  monitoringRef?: string,
 ): LineRouteStop {
   const searchStation: StationSearchOption = {
     id: station.id,
     label: station.name,
     city: station.city,
-    monitoringRef: "",
+    monitoringRef: monitoringRef ?? "",
     scheduleStopAreaRef: station.id,
   };
+
+  const quays = quayId
+    ? station.quays?.filter((quay) => quay.id === quayId)
+    : station.quays;
 
   return {
     id: station.id,
@@ -1517,7 +2045,7 @@ function createServerTopologyRouteStop(
     lon: station.lon,
     projectedX: station.projectedX,
     projectedY: station.projectedY,
-    quays: station.quays,
+    ...(quays?.length ? { quays } : {}),
     station: searchStation,
   };
 }
@@ -1526,10 +2054,12 @@ async function fetchLineRouteSequencesByLineId(
   lineId: string,
   lineLabel: string,
   preferCompletePatterns = true,
+  signal?: AbortSignal,
 ): Promise<LineRouteSequence[]> {
   const serverSequences = await fetchServerLineTopology(
     lineId,
     preferCompletePatterns,
+    signal,
   ).catch(() => []);
 
   if (serverSequences.length > 0) {
@@ -1542,9 +2072,11 @@ async function fetchLineRouteSequencesByLineId(
 async function fetchServerLineTopology(
   lineId: string,
   preferCompletePatterns = true,
+  signal?: AbortSignal,
 ): Promise<LineRouteSequence[]> {
   const response = await fetch(
     toServerApiUrl(`/api/lines/${encodeURIComponent(lineId)}/topology`),
+    { signal },
   );
 
   if (!response.ok) {
@@ -2659,13 +3191,19 @@ export async function fetchBoardDepartures(
   const [batches, scheduleInfo] = await Promise.all([
     Promise.all(
       getEffectiveMonitoringPoints(board).map((point) =>
-        fetchMonitoringPoint(board, point, options).catch(() => []),
+        fetchMonitoringPoint(board, point, options).catch((cause) => {
+          if (isAbortError(cause)) throw cause;
+          return [];
+        }),
       ),
     ),
-    fetchBoardScheduleInfo(board, options).catch(() => ({
-      lastDepartures: [],
-      scheduledDepartures: [],
-    })),
+    fetchBoardScheduleInfo(board, options).catch((cause) => {
+      if (isAbortError(cause)) throw cause;
+      return {
+        lastDepartures: [],
+        scheduledDepartures: [],
+      };
+    }),
   ]);
 
   const uniqueDepartures = new Map<string, Departure>();
@@ -2688,12 +3226,30 @@ export async function fetchBoardDepartures(
   );
 }
 
+function isAbortError(cause: unknown): boolean {
+  return cause instanceof DOMException
+    ? cause.name === "AbortError"
+    : cause instanceof Error && cause.name === "AbortError";
+}
+
 function getEffectiveMonitoringPoints(
   board: TransitBoardConfig,
 ): MonitoringPointConfig[] {
   const monitoringPoints = new Map<string, MonitoringPointConfig>();
 
   board.directionGroups.forEach((group) => {
+    const directMonitoringRefs = group.match.monitoringRefs ?? [];
+    directMonitoringRefs.forEach((monitoringRef) => {
+      if (monitoringRef && !monitoringPoints.has(monitoringRef)) {
+        monitoringPoints.set(monitoringRef, {
+          ref: monitoringRef,
+          label: group.label,
+        });
+      }
+    });
+
+    if (directMonitoringRefs.length > 0) return;
+
     group.match.navitiaStopPointRefs?.forEach((stopPointRef) => {
       const monitoringRef = navitiaStopPointToMonitoringRef(stopPointRef);
 
@@ -2757,8 +3313,8 @@ function mapVisitToDeparture(
   const expectedDepartureTime =
     call.ExpectedDepartureTime ?? call.ExpectedArrivalTime ?? call.AimedDepartureTime;
   const destination =
-    firstValue(call.DestinationDisplay) ??
     firstValue(journey.DestinationName) ??
+    firstValue(call.DestinationDisplay) ??
     "Destination inconnue";
   const stopName = firstValue(call.StopPointName) ?? "";
   const journeyName =
@@ -3077,9 +3633,7 @@ function matchesDirectionGroup(
   const label = normalizeText(candidate.monitoringLabel);
   const destinationRules = match.destinationIncludes ?? [];
   const comparableLocationChecks = [
-    candidate.monitoringRef && match.monitoringRefs
-      ? match.monitoringRefs.includes(candidate.monitoringRef)
-      : undefined,
+    matchMonitoringRef(candidate.monitoringRef, match.monitoringRefs),
     candidate.monitoringLabel && match.monitoringLabels
       ? match.monitoringLabels.some((value) => normalizeText(value) === label)
       : undefined,
@@ -3098,6 +3652,30 @@ function matchesDirectionGroup(
     comparableLocationChecks.some(Boolean);
 
   return matchesDestination && matchesLocation;
+}
+
+function matchMonitoringRef(
+  candidate: string | undefined,
+  configured: string[] | undefined,
+): boolean | undefined {
+  if (!candidate || !configured) return undefined;
+
+  // A StopArea request commonly returns the concrete StopPoint used by the
+  // vehicle. Those two reference levels are not directly comparable; in that
+  // case the destination rule must decide the direction instead of rejecting
+  // an otherwise valid departure.
+  const candidateKind = monitoringReferenceKind(candidate);
+  const comparable = configured.filter(
+    (reference) => monitoringReferenceKind(reference) === candidateKind,
+  );
+
+  return comparable.length > 0 ? comparable.includes(candidate) : undefined;
+}
+
+function monitoringReferenceKind(reference: string): "area" | "point" | "other" {
+  if (/:StopArea:SP:/iu.test(reference)) return "area";
+  if (/:StopPoint:Q:/iu.test(reference)) return "point";
+  return "other";
 }
 
 function directionMatchesRule(
@@ -3333,7 +3911,18 @@ function findUpcomingNavitiaTimeEntries(
   return entries.sort((left, right) => left.rawTime.localeCompare(right.rawTime));
 }
 
-function parseNavitiaDateTime(value: string): string | undefined {
+const parisDateTimeFormatter = new Intl.DateTimeFormat("fr-FR", {
+  day: "2-digit",
+  hour: "2-digit",
+  hourCycle: "h23",
+  minute: "2-digit",
+  month: "2-digit",
+  second: "2-digit",
+  timeZone: "Europe/Paris",
+  year: "numeric",
+});
+
+export function parseNavitiaDateTime(value: string): string | undefined {
   const match = value.match(
     /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/,
   );
@@ -3343,15 +3932,45 @@ function parseNavitiaDateTime(value: string): string | undefined {
   }
 
   const [, year, month, day, hour, minute, second] = match;
-
-  return new Date(
+  const utcTimestamp = Date.UTC(
     Number(year),
     Number(month) - 1,
     Number(day),
     Number(hour),
     Number(minute),
     Number(second),
-  ).toISOString();
+  );
+  const initialOffset = getParisTimeZoneOffsetMilliseconds(new Date(utcTimestamp));
+
+  if (initialOffset === undefined) {
+    return undefined;
+  }
+
+  // Navitia omits the timezone suffix, but its values are local Europe/Paris
+  // times. Derive the offset from Intl instead of relying on the process TZ.
+  const initialCandidate = new Date(utcTimestamp - initialOffset);
+  const adjustedOffset =
+    getParisTimeZoneOffsetMilliseconds(initialCandidate) ?? initialOffset;
+
+  return new Date(utcTimestamp - adjustedOffset).toISOString();
+}
+
+function getParisTimeZoneOffsetMilliseconds(date: Date): number | undefined {
+  const partMap = Object.fromEntries(
+    parisDateTimeFormatter.formatToParts(date).map((part) => [part.type, part.value]),
+  );
+  const localTimestamp = Date.UTC(
+    Number(partMap.year),
+    Number(partMap.month) - 1,
+    Number(partMap.day),
+    Number(partMap.hour),
+    Number(partMap.minute),
+    Number(partMap.second),
+  );
+
+  return Number.isFinite(localTimestamp) && Number.isFinite(date.getTime())
+    ? localTimestamp - date.getTime()
+    : undefined;
 }
 
 function getParisServiceDayWindow(): NavitiaServiceDayWindow {
@@ -3435,16 +4054,7 @@ function getNextParisWeekdayServiceDayWindow(): NavitiaServiceDayWindow {
 }
 
 function formatParisNavitiaDateTime(date: Date): string {
-  const parts = new Intl.DateTimeFormat("fr-FR", {
-    day: "2-digit",
-    hour: "2-digit",
-    hourCycle: "h23",
-    minute: "2-digit",
-    month: "2-digit",
-    second: "2-digit",
-    timeZone: "Europe/Paris",
-    year: "numeric",
-  }).formatToParts(date);
+  const parts = parisDateTimeFormatter.formatToParts(date);
   const partMap = Object.fromEntries(
     parts.map((part) => [part.type, part.value]),
   );
@@ -4017,15 +4627,6 @@ function navitiaLineIdFromSiriRef(ref: string): string {
   const lineId = ref.match(/Line::([^:]+):/u)?.[1] ?? ref.split(":").pop() ?? ref;
 
   return lineId.startsWith("line:") ? lineId : `line:IDFM:${lineId}`;
-}
-
-function createFallbackDirectionGroup(label: string): DirectionGroupConfig {
-  return {
-    id: "all-directions",
-    label: "All directions",
-    subtitle: label,
-    match: {},
-  };
 }
 
 function createStableId(value: string): string {
