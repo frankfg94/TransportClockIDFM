@@ -98,6 +98,7 @@ describe("Nuxt indexed walking atlas", () => {
 
   it("signs private R2 HEAD and GET without exposing credentials in URLs", async () => {
     const fetcher = vi.fn<typeof fetch>(async (url, init) => {
+      expect(init?.redirect).toBe("manual");
       expect(String(url)).toBe("https://account.r2.cloudflarestorage.com/bucket/radar/walking.zip");
       expect(new Headers(init?.headers).get("authorization")).toContain("AWS4-HMAC-SHA256");
       return init?.method === "HEAD"
@@ -107,6 +108,14 @@ describe("Nuxt indexed walking atlas", () => {
     const source = await openIsochroneSource({ IDFM_MAP_ISOCHRONES_REMOTE: "r2://bucket/radar/walking.zip", R2_ACCOUNT_ID: "account", R2_ACCESS_KEY_ID: "test-access", R2_SECRET_ACCESS_KEY: "test-secret" }, fetcher);
     expect(await source.read(78, 22)).toHaveLength(22);
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects redirected archives without following the new URL", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(null, {
+      status: 302, headers: { location: "https://other.test/archive.zip" },
+    }));
+    await expect(openIsochroneSource({ IDFM_MAP_ISOCHRONES_REMOTE: "https://assets.test/redirect.zip" }, fetcher)).rejects.toMatchObject({ code: "unavailable" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it("serves compact partial data and safe errors through the actual Nuxt handler", async () => {

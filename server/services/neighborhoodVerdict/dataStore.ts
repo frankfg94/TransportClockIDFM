@@ -49,7 +49,8 @@ export async function loadCompiledNeighborhoodVerdictData(env: NetexRuntimeEnv, 
         headers = await createR2SignedHeaders(url, env);
       }
       if (!/^https?:$/u.test(url.protocol)) throw new Error("Verdict cache requires r2:// or HTTP(S).");
-      const response = await fetch(url, { headers, redirect: "error", signal: AbortSignal.timeout(30_000) });
+      // Workers supports manual/follow only. Reject 3xx below without forwarding credentials.
+      const response = await fetch(url, { headers, redirect: "manual", signal: AbortSignal.timeout(30_000) });
       if (!response.ok) throw new Error(`Verdict cache request failed: HTTP ${response.status}`);
       data = await response.json() as CompiledNeighborhoodVerdictData;
     }

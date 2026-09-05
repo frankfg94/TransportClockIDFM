@@ -2,6 +2,7 @@ import { createError } from "h3";
 import type { NearbyPlace, NearbyPlaceCategory } from "../../../src/features/nearby-stations/nearbyPlaces";
 
 export const OVERPASS_API_ROOT = "https://overpass-api.de/api";
+const OVERPASS_FALLBACK_ROOT = "https://overpass.private.coffee/api";
 const REQUEST_TIMEOUT_MS = 15_000;
 const CACHE_TTL_MS = 10 * 60_000;
 const MAX_CACHE_ENTRIES = 120;
@@ -37,12 +38,22 @@ export async function loadNearbyPlaces(lat: number, lon: number, radiusMeters: n
 }
 
 async function fetchOverpassPlaces(lat: number, lon: number, radius: number): Promise<NearbyPlace[]> {
+  try {
+    return await fetchOverpassEndpoint(OVERPASS_API_ROOT, lat, lon, radius);
+  } catch (error) {
+    const status = (error as { statusCode?: number })?.statusCode;
+    if (status && status < 500 && status !== 429) throw error;
+    return fetchOverpassEndpoint(OVERPASS_FALLBACK_ROOT, lat, lon, radius);
+  }
+}
+
+async function fetchOverpassEndpoint(root: string, lat: number, lon: number, radius: number): Promise<NearbyPlace[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   const query = buildNearbyPlacesQuery(lat, lon, radius);
 
   try {
-    const response = await fetch(`${OVERPASS_API_ROOT}/interpreter`, {
+    const response = await fetch(`${root}/interpreter`, {
       method: "POST",
       headers: {
         accept: "application/json",
@@ -53,6 +64,7 @@ async function fetchOverpassPlaces(lat: number, lon: number, radius: number): Pr
       signal: controller.signal,
     });
     if (!response.ok) {
+      await response.body?.cancel();
       throw createError({
         statusCode: response.status === 429 ? 429 : 502,
         statusMessage: response.status === 429
@@ -61,7 +73,11 @@ async function fetchOverpassPlaces(lat: number, lon: number, radius: number): Pr
       });
     }
     const payload = await response.json() as OverpassResponse;
-    return normalizeOverpassPlaces(payload.elements ?? [], { lat, lon }).slice(0, MAX_NEARBY_PLACES);
+    // Overpass can return HTTP 200 with only a runtime-error remark.
+    if (!Array.isArray(payload.elements) || (payload as { remark?: string }).remark) {
+      throw createError({ statusCode: 502, statusMessage: "Overpass API returned incomplete results." });
+    }
+    return normalizeOverpassPlaces(payload.elements, { lat, lon }).slice(0, MAX_NEARBY_PLACES);
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw createError({ statusCode: 504, statusMessage: "Overpass API timed out." });

@@ -50,7 +50,7 @@ async function openRemote(location: string, env: NetexRuntimeEnv, fetcher: typeo
   }
   if (!/^https?:$/u.test(url.protocol) || url.username || url.password) throw new GlobalIsochroneError("unavailable");
   const headersFor = async (method: "HEAD" | "GET") => signed ? createR2SignedHeaders(url, env, method) : new Headers();
-  const head = await fetcher(url, { method: "HEAD", headers: await headersFor("HEAD"), signal: AbortSignal.timeout(15_000), redirect: "error" });
+  const head = await fetcher(url, { method: "HEAD", headers: await headersFor("HEAD"), signal: AbortSignal.timeout(15_000), redirect: "manual" });
   assertResponse(head);
   const size = Number(head.headers.get("content-length"));
   const etag = head.headers.get("etag");
@@ -65,7 +65,7 @@ async function openRemote(location: string, env: NetexRuntimeEnv, fetcher: typeo
       headers.set("Range", `bytes=${offset}-${offset + length - 1}`);
       headers.set("If-Match", etag);
       headers.set("Accept-Encoding", "identity");
-      const response = await fetcher(url, { headers, signal: AbortSignal.timeout(20_000), redirect: "error" });
+      const response = await fetcher(url, { headers, signal: AbortSignal.timeout(20_000), redirect: "manual" });
       assertResponse(response);
       if (response.status !== 206 || response.headers.get("content-range") !== `bytes ${offset}-${offset + length - 1}/${size}` ||
         (response.headers.get("etag") && response.headers.get("etag") !== etag)) {

@@ -3,6 +3,15 @@ import { loadCompiledNeighborhoodVerdictData } from "../server/services/neighbor
 const data = { schemaVersion: "1.1", generatedAt: "2026-09-05", sources: [], greenSpaces: [{}], gpeStations: [{}], airNoiseCommunes: { a: {} }, security: { communes: { a: {} } } };
 afterEach(() => vi.unstubAllGlobals());
 describe("verdict remote cache", () => {
+  it("rejects redirects without forwarding R2 credentials on Workers", async () => {
+    const fetcher = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      expect(init?.redirect).toBe("manual");
+      return new Response(null, { status: 302, headers: { Location: "https://other.test/data" } });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    await expect(loadCompiledNeighborhoodVerdictData({ IDFM_NEIGHBORHOOD_VERDICT_CACHE_REMOTE: "https://example.test/redirect.json" })).rejects.toThrow("HTTP 302");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
   it("shares concurrent loads and caches the validated snapshot", async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify(data)));
     vi.stubGlobal("fetch", fetcher);
