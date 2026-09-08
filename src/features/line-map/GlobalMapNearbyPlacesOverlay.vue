@@ -57,7 +57,9 @@ const displayedPlaces = computed(() => props.places
       @mouseenter="hoveredPlaceId = entry.place.id"
       @mouseleave="hoveredPlaceId = undefined"
     >
-      <component :is="entry.presentation.icon" :size="16" stroke-width="2.25" aria-hidden="true" />
+      <span class="global-map-nearby-place__icon" aria-hidden="true">
+        <component :is="entry.presentation.icon" :size="12" stroke-width="2" />
+      </span>
       <PlaceTooltip
         v-if="hoveredPlaceId === entry.place.id"
         :place="entry.place"
@@ -81,22 +83,41 @@ const displayedPlaces = computed(() => props.places
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border: 2px solid #ffffff;
+  border: 0;
   border-radius: 50%;
-  background: #5146ff;
-  color: #ffffff;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, .24);
+  background: transparent;
+  color: #4b5563;
   cursor: pointer;
   pointer-events: auto;
   transform: translate(-50%, -50%);
+  transition: transform 140ms ease;
+}
+.global-map-nearby-place__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  aspect-ratio: 1;
+  box-sizing: border-box;
+  border: 1px solid rgba(100, 116, 139, .2);
+  border-radius: 50%;
+  background: #e7e9ee;
+  box-shadow: 0 3px 8px rgba(15, 23, 42, .16);
+  color: inherit;
 }
 .global-map-nearby-place:hover,
 .global-map-nearby-place:focus-visible {
-  background: #4034df;
-  outline: 3px solid rgba(81, 70, 255, .24);
+  outline: 2px solid rgba(100, 116, 139, .28);
   outline-offset: 2px;
+  transform: translate(-50%, -50%) scale(1.04);
+}
+.global-map-nearby-place:hover .global-map-nearby-place__icon,
+.global-map-nearby-place:focus-visible .global-map-nearby-place__icon {
+  background: #dde1e7;
 }
 </style>

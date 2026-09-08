@@ -95,6 +95,7 @@ const optionalDirectionVariants = computed(() =>
 const itineraryExpanded = ref(!defaultGlobalDirectionMerge(props.displayLine?.mode ?? "BUS"));
 const lineCitiesExpanded = ref(false);
 const entrancesExpanded = ref(false);
+const nearbyPlacesExpanded = ref(true);
 const nearbyRadiusOptions = computed<MaterialComboboxOption[]>(() => [
   { id: "2", label: t("globalMap.sidebar.nearbyPlacesRadius", { minutes: 2 }) },
   { id: "5", label: t("globalMap.sidebar.nearbyPlacesRadius", { minutes: 5 }) },
@@ -110,6 +111,7 @@ watch(
   () => {
     itineraryExpanded.value = !defaultGlobalDirectionMerge(props.displayLine?.mode ?? "BUS");
     lineCitiesExpanded.value = false;
+    nearbyPlacesExpanded.value = true;
   },
 );
 
@@ -262,9 +264,25 @@ function updateNearbyRadius(value: string): void {
       </article>
     </section>
 
-    <section v-if="!isLinePreview" class="global-map-picker-sidebar__line-card global-map-picker-sidebar__nearby-card">
+    <section
+      v-if="!isLinePreview"
+      class="global-map-picker-sidebar__line-card global-map-picker-sidebar__nearby-card"
+      :aria-busy="nearbyPlacesLoading"
+    >
       <div class="global-map-picker-sidebar__line-card-title">
-        <span><Building2 :size="16" aria-hidden="true" />{{ t("globalMap.sidebar.nearbyPlaces") }}</span>
+        <button
+          id="global-map-picker-sidebar-nearby-toggle"
+          class="global-map-picker-sidebar__accordion-trigger"
+          :class="{ 'global-map-picker-sidebar__accordion-trigger--expanded': nearbyPlacesExpanded }"
+          type="button"
+          aria-controls="global-map-picker-sidebar-nearby-places"
+          :aria-expanded="nearbyPlacesExpanded"
+          data-testid="global-map-picker-nearby-toggle"
+          @click="nearbyPlacesExpanded = !nearbyPlacesExpanded"
+        >
+          <span><Building2 :size="16" aria-hidden="true" />{{ t("globalMap.sidebar.nearbyPlaces") }}</span>
+          <ChevronDown :size="16" aria-hidden="true" />
+        </button>
         <MaterialCombobox
           :model-value="String(nearbyPlacesRadiusMinutes)"
           :options="nearbyRadiusOptions"
@@ -272,27 +290,37 @@ function updateNearbyRadius(value: string): void {
           @update:model-value="updateNearbyRadius"
         />
       </div>
-      <p class="global-map-picker-sidebar__nearby-hint">
-        {{ t("globalMap.sidebar.nearbyPlacesDescription", { minutes: nearbyPlacesRadiusMinutes }) }}
-      </p>
-      <p v-if="nearbyPlacesLoading" class="global-map-picker-sidebar__line-empty" role="status">
-        {{ t("globalMap.sidebar.nearbyPlacesLoading") }}
-      </p>
-      <p v-else-if="nearbyPlacesError" class="global-map-picker-sidebar__line-empty" role="status">
-        {{ t("globalMap.sidebar.nearbyPlacesUnavailable") }}
-      </p>
-      <p v-else-if="presentedNearbyPlaces.length === 0" class="global-map-picker-sidebar__line-empty">
-        {{ t("globalMap.sidebar.nearbyPlacesEmpty") }}
-      </p>
-      <ul v-else class="global-map-picker-sidebar__nearby-list">
-        <li v-for="entry in presentedNearbyPlaces" :key="entry.place.id">
-          <component :is="entry.presentation.icon" :size="16" aria-hidden="true" />
-          <span>
-            <strong>{{ entry.presentation.name }}</strong>
-            <small>{{ entry.presentation.typeLabel }} · {{ t("nearbyStations.walkingTime", { minutes: entry.minutes }) }}</small>
-          </span>
-        </li>
-      </ul>
+      <div
+        v-if="nearbyPlacesExpanded"
+        id="global-map-picker-sidebar-nearby-places"
+        role="region"
+        aria-labelledby="global-map-picker-sidebar-nearby-toggle"
+      >
+        <p class="global-map-picker-sidebar__nearby-hint">
+          {{ t("globalMap.sidebar.nearbyPlacesDescription", { minutes: nearbyPlacesRadiusMinutes }) }}
+        </p>
+        <div v-if="nearbyPlacesLoading" class="global-map-picker-sidebar__nearby-loading" role="status" aria-live="polite">
+          <span class="global-map-picker-sidebar__nearby-loading-bar" aria-hidden="true"><span /></span>
+          <span>{{ t("globalMap.sidebar.nearbyPlacesLoading") }}</span>
+        </div>
+        <p v-else-if="nearbyPlacesError" class="global-map-picker-sidebar__line-empty" role="status">
+          {{ t("globalMap.sidebar.nearbyPlacesUnavailable") }}
+        </p>
+        <p v-else-if="presentedNearbyPlaces.length === 0" class="global-map-picker-sidebar__line-empty">
+          {{ t("globalMap.sidebar.nearbyPlacesEmpty") }}
+        </p>
+        <ul v-else class="global-map-picker-sidebar__nearby-list">
+          <li v-for="entry in presentedNearbyPlaces" :key="entry.place.id">
+            <span class="global-map-picker-sidebar__nearby-icon" aria-hidden="true">
+              <component :is="entry.presentation.icon" :size="12" stroke-width="2" />
+            </span>
+            <span>
+              <strong>{{ entry.presentation.name }}</strong>
+              <small>{{ entry.presentation.typeLabel }} · {{ t("nearbyStations.walkingTime", { minutes: entry.minutes }) }}</small>
+            </span>
+          </li>
+        </ul>
+      </div>
     </section>
 
     <section
@@ -646,11 +674,25 @@ function updateNearbyRadius(value: string): void {
 }
 .global-map-picker-sidebar__nearby-list li {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-columns: 26px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
   min-width: 0;
-  color: #5146ff;
+  color: #4b5563;
+}
+.global-map-picker-sidebar__nearby-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  aspect-ratio: 1;
+  box-sizing: border-box;
+  border: 1px solid rgba(100, 116, 139, .2);
+  border-radius: 50%;
+  background: #e7e9ee;
+  color: #596579;
 }
 .global-map-picker-sidebar__nearby-list li > span {
   display: grid;
@@ -669,5 +711,36 @@ function updateNearbyRadius(value: string): void {
 .global-map-picker-sidebar__nearby-list small {
   color: var(--muted, #71809d);
   font-size: .62rem;
+}
+.global-map-picker-sidebar__nearby-loading {
+  display: grid;
+  gap: 7px;
+  color: var(--muted, #71809d);
+  font-size: .68rem;
+  font-weight: 750;
+}
+.global-map-picker-sidebar__nearby-loading-bar {
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e7e9ee;
+}
+.global-map-picker-sidebar__nearby-loading-bar > span {
+  display: block;
+  width: 38%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--line-color, #71809d);
+  animation: global-map-picker-sidebar-nearby-loading 1.15s ease-in-out infinite;
+}
+@keyframes global-map-picker-sidebar-nearby-loading {
+  0% { transform: translateX(-130%); }
+  100% { transform: translateX(290%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .global-map-picker-sidebar__nearby-loading-bar > span { animation: none; transform: translateX(0); }
 }
 </style>

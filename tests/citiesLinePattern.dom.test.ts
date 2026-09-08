@@ -154,6 +154,72 @@ describe("CitiesLinePattern", () => {
     expect(wrapper.findAll(".cities-line-pattern__dot")).toHaveLength(3);
     wrapper.unmount();
   });
+
+  it("collapses nearby places like the other line sections and exposes loading progress", async () => {
+    vi.doMock("../src/services/lineFrequency", () => ({
+      fetchGtfsLineFrequency: vi.fn(async () => ({ status: "missing" })),
+      getGtfsRequestDate: () => "2026-09-08",
+    }));
+    vi.doMock("../src/services/ridership", () => ({
+      fetchAnnualRidershipLine: vi.fn(async () => { throw new Error("not available"); }),
+      fetchAnnualRidershipStation: vi.fn(async () => { throw new Error("not available"); }),
+    }));
+    vi.doMock("../src/i18n", () => ({
+      useI18n: () => ({ t: (key: string) => key }),
+    }));
+
+    const { default: GlobalMapPickerSideBar } = await import(
+      "../src/features/line-map/GlobalMapPickerSideBar.vue"
+    );
+    const line = createLine("line:nearby", ["station:a", "station:b"]);
+    const routeStations = [
+      createStation("station:a", "Station A", "Paris", line.id),
+      createStation("station:b", "Station B", "Paris", line.id),
+    ];
+    const nearbyPlace = {
+      id: "place:market",
+      name: "Marché test",
+      lon: 2.3,
+      lat: 48.8,
+      category: "shop" as const,
+      kind: "supermarket",
+      distanceMeters: 180,
+    };
+    const wrapper = mount(GlobalMapPickerSideBar, {
+      props: {
+        line,
+        stations: routeStations,
+        cityPatternStations: routeStations,
+        nearbyPlaces: [nearbyPlace],
+      },
+      global: {
+        stubs: {
+          AnnualRidershipCard: true,
+          AnnualRidershipStationCard: true,
+          CitiesLinePattern: true,
+          GtfsFrequencyCard: true,
+          LineIconBadge: true,
+          MaterialCombobox: true,
+          UserFriendlyTraffic: true,
+        },
+      },
+    });
+
+    const toggle = wrapper.get("#global-map-picker-sidebar-nearby-toggle");
+    expect(toggle.attributes("aria-expanded")).toBe("true");
+    expect(wrapper.find("#global-map-picker-sidebar-nearby-places").exists()).toBe(true);
+    expect(wrapper.get(".global-map-picker-sidebar__nearby-icon").find("svg").attributes("width")).toBe("12");
+
+    await toggle.trigger("click");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(wrapper.find("#global-map-picker-sidebar-nearby-places").exists()).toBe(false);
+
+    await toggle.trigger("click");
+    await wrapper.setProps({ nearbyPlacesLoading: true });
+    expect(wrapper.find(".global-map-picker-sidebar__nearby-loading-bar").exists()).toBe(true);
+    expect(wrapper.get(".global-map-picker-sidebar__nearby-card").attributes("aria-busy")).toBe("true");
+    wrapper.unmount();
+  });
 });
 
 describe("NearbyStationsSelector city pattern", () => {
