@@ -23,6 +23,7 @@ import { useI18n } from "../../../i18n";
 import { resolveGlobalMapMarkerIcon } from "../../line-map/globalMapMarkerIcons";
 import type { GlobalMapMarker } from "../../line-map/globalMapMarkers";
 import { useNearbyPlacePresenter } from "../../nearby-stations/useNearbyPlacePresenter";
+import { fuzzyMatches } from "../../../services/fuzzySearch";
 
 interface RecentSearchKey {
   kind: "station" | "line";
@@ -75,6 +76,8 @@ const props = withDefaults(defineProps<{
   catalogReady?: boolean;
   catalogLoading?: boolean;
   searchPlaces?: (query: string, signal?: AbortSignal) => Promise<GeocoderPoint[]>;
+  favoritePlaces?: readonly GeocoderPoint[];
+  showMapInteractions?: boolean;
   markers?: readonly GlobalMapMarker[];
 }>(), {
   open: false,
@@ -83,6 +86,8 @@ const props = withDefaults(defineProps<{
   entrances: () => [],
   catalogReady: true,
   catalogLoading: false,
+  favoritePlaces: () => [],
+  showMapInteractions: true,
   markers: () => [],
 });
 
@@ -130,11 +135,9 @@ const searchOptions = {
   sameNameMergeMaxDistanceM: GLOBAL_TRANSPORT_PLAN_CONFIG.search.sameNameMergeMaxDistanceM,
   sameNameMergeMinHeavyLines: GLOBAL_TRANSPORT_PLAN_CONFIG.search.sameNameMergeMinHeavyLines,
 };
-const stationNameCollator = new Intl.Collator("fr-FR", { sensitivity: "base" });
 const searchIndex = computed(() => createGlobalMapSearchIndex(props.stations, props.lines, searchOptions));
 const normalizedQuery = computed(() => normalizeGlobalMapSearchText(localQuery.value));
 const linesById = computed(() => new Map(props.lines.map((line) => [line.id, line])));
-const groupedStations = computed(() => searchIndex.value.groups);
 const groupedStationByMemberId = computed(() => searchIndex.value.groupsByMemberId);
 const entrancesByStationId = computed(() => {
   const counts = new Map<string, number>();
@@ -154,14 +157,18 @@ const matchingPlaces = computed(() => placeResults.value.map((place, index): Sea
 const matchingMarkers = computed(() => props.markers
   .filter((marker) => !marker.isHidden)
   .filter((marker) => {
-    const searchable = normalizeGlobalMapSearchText(`${marker.name} ${marker.address ?? ""}`);
-    return !normalizedQuery.value || searchable.includes(normalizedQuery.value);
+    return fuzzyMatches(normalizedQuery.value, [marker.name, marker.address]);
   })
   .map((marker): SearchResult => ({
     kind: "marker",
     key: `match-marker-${marker.id}`,
     marker,
   })));
+const favoriteResults = computed(() => props.favoritePlaces.map((place, index): SearchResult => ({
+  kind: "place",
+  key: `favorite-place-${index}-${placeResultKey(place)}`,
+  place,
+})));
 
 const recentResults = computed(() => recentSearches.value
   .map((entry, index) => {
@@ -174,17 +181,16 @@ const recentResults = computed(() => recentSearches.value
   })
   .filter((result): result is SearchResult => Boolean(result)));
 
-const correspondenceResults = computed(() => groupedStations.value
-  .filter((station) => station.lineIds.length > 1)
-  .sort((left, right) => right.lineIds.length - left.lineIds.length || Number(right.isHub) - Number(left.isHub) || stationNameCollator.compare(left.name, right.name))
-  .slice(0, 4)
-  .map((station, index) => createStationResult({ ...station, memberStationIds: [station.id] }, `correspondence-${index}`)));
-
 const sections = computed<SearchSection[]>(() => {
   // The visibleResults watcher stays mounted while the panel is closed.
   // Do not let catalogue hydration at zoom 11 pull the full search index and
-  // correspondence sort into the map's update. Read no catalogue deps here.
+  // search rendering into the map's update. Read no catalogue deps here.
   if (!props.open) return [];
+
+  // Warm the index as soon as the surface opens. The empty-query view now
+  // starts with recents and favourites, but the same catalogue must already
+  // be ready when the user begins typing.
+  void searchIndex.value;
 
   if (normalizedQuery.value) {
     return [
@@ -197,7 +203,7 @@ const sections = computed<SearchSection[]>(() => {
 
   return [
     { id: "recent", label: t("globalMap.search.recent"), results: recentResults.value },
-    { id: "correspondences", label: t("globalMap.search.correspondences"), results: correspondenceResults.value },
+    { id: "favorites", label: t("globalMap.search.favorites"), results: favoriteResults.value },
   ].filter((section) => section.results.length > 0);
 });
 
@@ -566,7 +572,7 @@ function readRecentSearches(): RecentSearchKey[] {
 
 <template>
   <section
-    v-if="!open"
+    v-if="showMapInteractions && !open"
     class="global-map-search global-map-search--closed"
     data-global-map-search
     :aria-label="t('globalMap.search.aria')"
@@ -579,8 +585,8 @@ function readRecentSearches(): RecentSearchKey[] {
   </section>
 
   <section
-    v-else
-    class="global-map-search"
+    v-else-if="showMapInteractions"
+    class="global-map-search global-map-search--open"
     data-global-map-search
     :aria-label="t('globalMap.search.aria')"
     @pointerdown.stop
@@ -746,6 +752,7 @@ function readRecentSearches(): RecentSearchKey[] {
   pointer-events: auto;
 }
 
+.global-map-search--open { z-index: 1000; }
 .global-map-search--closed { width: auto; }
 .global-map-search__open,
 .global-map-search__bar { display: flex; align-items: center; min-height: 58px; border: 1px solid rgba(217, 224, 237, .95); border-radius: 17px; background: rgba(255, 255, 255, .97); box-shadow: 0 10px 32px rgba(27, 48, 87, .15), 0 2px 6px rgba(27, 48, 87, .06); }
@@ -757,7 +764,7 @@ function readRecentSearches(): RecentSearchKey[] {
 .global-map-search__input::placeholder { color: #8994ad; opacity: 1; }
 .global-map-search__close, .global-map-search__clear { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; border: 1px solid #cbd4e5; border-radius: 50%; background: #fff; color: #65718a; cursor: pointer; }
 .global-map-search__close svg, .global-map-search__clear svg { display: block; flex: 0 0 auto; }
-.global-map-search__close { width: 36px; height: 36px; }
+.global-map-search__close { box-sizing: border-box; width: 40px; min-width: 40px; height: 40px; min-height: 40px; padding: 0; aspect-ratio: 1; border-radius: 50%; line-height: 1; }
 .global-map-search__clear { width: 28px; height: 28px; margin-left: 6px; }
 .global-map-search__close:hover, .global-map-search__close:focus-visible, .global-map-search__clear:hover, .global-map-search__clear:focus-visible { border-color: #6e9cff; color: #1e4cb3; outline: none; }
 .global-map-search__results { max-height: min(66vh, 620px); overflow: auto; margin-top: 4px; padding: 10px 8px 8px; border: 1px solid rgba(217, 224, 237, .9); border-radius: 0 0 17px 17px; background: rgba(255, 255, 255, .98); box-shadow: 0 18px 42px rgba(27, 48, 87, .14); }
@@ -791,5 +798,45 @@ function readRecentSearches(): RecentSearchKey[] {
 .global-map-search__skeleton-copy i:last-child { width: 36%; height: 8px; border-radius: 5px; }
 .global-map-search__skeleton-chip { width: 42px; height: 24px; border-radius: 6px; }
 @keyframes global-map-search-shimmer { to { background-position: -200% 0; } }
-@media (max-width: 700px) { .global-map-search { top: 10px; width: calc(100% - 20px); } .global-map-search--closed { width: auto; } .global-map-search__result-action { display: none; } .global-map-search__chips { max-width: 130px; } }
+@media (max-width: 700px) {
+  .global-map-search {
+    position: absolute;
+    z-index: 20;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    padding: env(safe-area-inset-top, 0px) 10px env(safe-area-inset-bottom, 0px);
+    transform: none;
+    background: rgba(246, 248, 253, 0.98);
+  }
+  .global-map-search--open { z-index: 1000; }
+  .global-map-search--closed {
+    inset: 10px auto auto 10px;
+    display: block;
+    width: auto;
+    height: auto;
+    padding: 0;
+    transform: none;
+    background: transparent;
+  }
+  .global-map-search:not(.global-map-search--closed) .global-map-search__bar {
+    flex: 0 0 auto;
+    min-height: 58px;
+    border-radius: 14px;
+    box-shadow: 0 5px 16px rgba(27, 48, 87, 0.12);
+  }
+  .global-map-search__results {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    margin-top: 8px;
+    padding-bottom: 18px;
+    border-radius: 14px 14px 0 0;
+    box-shadow: none;
+  }
+  .global-map-search__result-action { display: none; }
+  .global-map-search__chips { max-width: 130px; }
+}
 </style>

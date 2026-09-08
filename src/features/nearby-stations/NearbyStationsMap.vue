@@ -2315,6 +2315,7 @@ function mix(from: number, to: number, progress: number): number {
         aria-hidden="true"
       >
         <g v-for="segment in walkingMapPaths" :key="segment.id">
+          <path class="nearby-map__walking-flow-halo" :d="segment.d" />
           <path class="nearby-map__walking-flow-path" :d="segment.d" />
           <circle class="nearby-map__walking-flow-node" :cx="segment.from.x" :cy="segment.from.y" r="4" />
           <circle class="nearby-map__walking-flow-node" :cx="segment.to.x" :cy="segment.to.y" r="4" />
@@ -3146,8 +3147,12 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__walking-zone[data-walking-zone="10"] { fill: rgba(134, 239, 172, .27); stroke: rgba(62, 160, 93, .62); }
 .nearby-map__walking-zone[data-walking-zone="15"] { fill: rgba(250, 204, 21, .24); stroke: rgba(180, 137, 0, .62); }
 .nearby-map__walking-flow { height: 100%; inset: 0; overflow: visible; pointer-events: none; position: absolute; width: 100%; z-index: 3; }
+.nearby-map__walking-flow-halo { display: none; fill: none; stroke: rgba(255,255,255,.98); stroke-dasharray: 2 8; stroke-linecap: round; stroke-linejoin: round; stroke-width: 10; filter: drop-shadow(0 0 4px rgba(255,255,255,.95)) drop-shadow(0 0 7px rgba(81,70,255,.75)); }
 .nearby-map__walking-flow-path { fill: none; stroke: #5146ff; stroke-dasharray: 2 8; stroke-linecap: round; stroke-width: 3; }
 .nearby-map__walking-flow-node { fill: #fff; stroke: #5146ff; stroke-width: 2; }
+.nearby-map--satellite .nearby-map__walking-flow-halo { display: block; }
+.nearby-map--satellite .nearby-map__walking-flow-path { filter: drop-shadow(0 0 2px rgba(255,255,255,.98)); stroke: #5146ff; stroke-width: 4; }
+.nearby-map--satellite .nearby-map__walking-flow-node { filter: drop-shadow(0 0 3px rgba(255,255,255,.98)); stroke: #5146ff; stroke-width: 3; }
 .nearby-map__markers { display: contents; }
 .nearby-map__top-control-zone { height: 74px; inset: 0 0 auto; pointer-events: none; position: absolute; z-index: 12; }
 .nearby-map__primary-controls { display: flex; gap: 8px; position: absolute; right: 12px; top: 12px; z-index: 13; }

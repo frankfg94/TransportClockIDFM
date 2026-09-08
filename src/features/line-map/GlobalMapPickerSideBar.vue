@@ -21,6 +21,8 @@ import type {
   GlobalMapSidebarBodyProps,
   GlobalMapSidebarTrafficCalendarState,
 } from "./globalMapSidebarBodyTypes";
+import type { NearbyLineRadiusMinutes } from "./globalMapSidebarBodyTypes";
+import type { NearbyPlace } from "../nearby-stations/nearbyPlaces";
 import type { PatternTrafficCalendarDay } from "../service-pattern/trafficCalendar";
 import type { PatternTrafficSummaryEntry } from "../service-pattern/trafficCalendarSummary";
 import type {
@@ -28,6 +30,9 @@ import type {
   AnnualRidershipRankingScope,
   AnnualRidershipStationResponse,
 } from "../../types/ridership";
+
+type GlobalMapSidebarSheetSnap = "collapsed" | "medium" | "expanded";
+const MOBILE_SHEET_OVERSCROLL_PX = 56;
 
 const props = withDefaults(defineProps<{
   station?: GlobalMapStation;
@@ -56,6 +61,13 @@ const props = withDefaults(defineProps<{
   hoveredLineId?: string;
   trafficDisruption?: TrafficDisruption;
   trafficCalendar?: GlobalMapSidebarTrafficCalendarState;
+  mobileSheet?: boolean;
+  mobileSheetSnap?: GlobalMapSidebarSheetSnap;
+  showGhostLineIcons?: boolean;
+  nearbyPlaces?: NearbyPlace[];
+  nearbyPlacesLoading?: boolean;
+  nearbyPlacesError?: boolean;
+  nearbyPlacesRadiusMinutes?: NearbyLineRadiusMinutes;
 }>(), {
   lines: () => [],
   allLines: () => [],
@@ -79,6 +91,13 @@ const props = withDefaults(defineProps<{
   trafficDisruption: undefined,
   trafficCalendar: undefined,
   mergeDirections: false,
+  mobileSheet: true,
+  mobileSheetSnap: "collapsed",
+  showGhostLineIcons: false,
+  nearbyPlaces: () => [],
+  nearbyPlacesLoading: false,
+  nearbyPlacesError: false,
+  nearbyPlacesRadiusMinutes: 2,
 });
 
 const emit = defineEmits<{
@@ -102,11 +121,41 @@ const emit = defineEmits<{
   "traffic-calendar-select": [day: PatternTrafficCalendarDay];
   "traffic-calendar-expand": [];
   "traffic-calendar-focus-disruption": [entry: PatternTrafficSummaryEntry];
+  "mobile-sheet-snap-change": [snap: GlobalMapSidebarSheetSnap];
+  "modal-open": [open: boolean];
+  "toggle-ghost-line-icons": [];
+  "update:nearby-radius-minutes": [minutes: NearbyLineRadiusMinutes];
 }>();
 
 const { t } = useI18n();
 
 const SIDEBAR_PREVIEW_SWITCH_DEBOUNCE_MS = 100;
+const mobileSheetDragging = ref(false);
+const mobileSheetHeight = ref<number>();
+const mobileSheetStage = ref<GlobalMapSidebarSheetSnap>(props.mobileSheetSnap);
+const sidebarElement = ref<HTMLElement>();
+const suppressMobileSheetClick = ref(false);
+let mobileSheetPointerId: number | undefined;
+let mobileSheetPointerStartY = 0;
+let mobileSheetPointerStartHeight = 0;
+let mobileSheetPointerMoved = false;
+let mobileSheetResizeListener: (() => void) | undefined;
+
+const mobileSheetStyle = computed<Record<string, string>>(() => {
+  const style: Record<string, string> = {};
+  if (mobileSheetHeight.value && isMobileViewport()) {
+    style.height = `${mobileSheetHeight.value}px`;
+  }
+  return style;
+});
+
+watch(
+  () => props.mobileSheetSnap,
+  (snap) => {
+    mobileSheetStage.value = snap;
+    mobileSheetHeight.value = undefined;
+  },
+);
 
 // The tooltip can briefly lose its hovered line while the pointer crosses the
 // small gap between two overlapping line choices. Keep the current body
@@ -301,6 +350,11 @@ const sidebarBodyProps = computed<GlobalMapSidebarBodyProps>(() => ({
   selectedDirectionId: props.selectedDirectionId,
   selectedMainDirectionId: props.selectedMainDirectionId,
   mergeDirections: props.mergeDirections,
+  showGhostLineIcons: props.showGhostLineIcons,
+  nearbyPlaces: props.nearbyPlaces,
+  nearbyPlacesLoading: props.nearbyPlacesLoading,
+  nearbyPlacesError: props.nearbyPlacesError,
+  nearbyPlacesRadiusMinutes: props.nearbyPlacesRadiusMinutes,
 }));
 
 function modeLabel(mode: GlobalMapLine["mode"]): string {
@@ -489,32 +543,162 @@ watch(
   { immediate: true },
 );
 
+function isMobileViewport(): boolean {
+  if (typeof window === "undefined") return false;
+  if (window.innerWidth > 0) return window.innerWidth <= 700;
+  return typeof window.matchMedia === "function"
+    && window.matchMedia("(max-width: 700px)").matches;
+}
+
+function mobileSheetSnapHeight(snap: GlobalMapSidebarSheetSnap): number {
+  const viewportHeight = Math.max(
+    1,
+    typeof document !== "undefined" ? document.documentElement.clientHeight : 0,
+    typeof window !== "undefined" ? window.innerHeight : 720,
+  );
+  if (snap === "collapsed") return Math.min(210, Math.max(168, viewportHeight * 0.24));
+  if (snap === "medium") return Math.min(520, Math.max(360, viewportHeight * 0.56));
+  return Math.min(760, Math.max(500, viewportHeight * 0.92));
+}
+
+function setMobileSheetStage(stage: GlobalMapSidebarSheetSnap): void {
+  mobileSheetStage.value = stage;
+  mobileSheetHeight.value = mobileSheetSnapHeight(stage);
+  emit("mobile-sheet-snap-change", stage);
+}
+
+function cycleMobileSheetStage(): void {
+  if (suppressMobileSheetClick.value) {
+    suppressMobileSheetClick.value = false;
+    return;
+  }
+  if (mobileSheetPointerMoved) {
+    mobileSheetPointerMoved = false;
+    return;
+  }
+
+  const next: Record<GlobalMapSidebarSheetSnap, GlobalMapSidebarSheetSnap> = {
+    collapsed: "medium",
+    medium: "expanded",
+    expanded: "collapsed",
+  };
+  setMobileSheetStage(next[mobileSheetStage.value]);
+}
+
+function startMobileSheetDrag(event: PointerEvent): void {
+  if (!props.mobileSheet || !isMobileViewport()) return;
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+
+  mobileSheetPointerId = event.pointerId;
+  mobileSheetPointerStartY = event.clientY;
+  mobileSheetPointerStartHeight = sidebarElement.value?.getBoundingClientRect().height
+    || mobileSheetSnapHeight(mobileSheetStage.value);
+  mobileSheetPointerMoved = false;
+  mobileSheetDragging.value = true;
+  (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+}
+
+function moveMobileSheetDrag(event: PointerEvent): void {
+  if (!mobileSheetDragging.value || event.pointerId !== mobileSheetPointerId) return;
+  const delta = mobileSheetPointerStartY - event.clientY;
+  if (Math.abs(delta) > 4) mobileSheetPointerMoved = true;
+  const minHeight = Math.max(112, mobileSheetSnapHeight("collapsed") - MOBILE_SHEET_OVERSCROLL_PX);
+  const maxHeight = mobileSheetSnapHeight("expanded");
+  mobileSheetHeight.value = Math.max(
+    minHeight,
+    Math.min(maxHeight, mobileSheetPointerStartHeight + delta),
+  );
+  event.preventDefault();
+}
+
+function finishMobileSheetDrag(event: PointerEvent): void {
+  if (!mobileSheetDragging.value || event.pointerId !== mobileSheetPointerId) return;
+  const currentTarget = event.currentTarget as HTMLElement | null;
+  currentTarget?.releasePointerCapture?.(event.pointerId);
+  const currentHeight = mobileSheetHeight.value ?? mobileSheetPointerStartHeight;
+  const stages: GlobalMapSidebarSheetSnap[] = ["collapsed", "medium", "expanded"];
+  const nearest = stages.reduce((closest, stage) =>
+    Math.abs(mobileSheetSnapHeight(stage) - currentHeight) < Math.abs(mobileSheetSnapHeight(closest) - currentHeight)
+      ? stage
+      : closest,
+  "collapsed" as GlobalMapSidebarSheetSnap);
+
+  mobileSheetDragging.value = false;
+  mobileSheetPointerId = undefined;
+  suppressMobileSheetClick.value = mobileSheetPointerMoved;
+  setMobileSheetStage(nearest);
+  if (suppressMobileSheetClick.value && typeof window !== "undefined") {
+    window.setTimeout(() => {
+      suppressMobileSheetClick.value = false;
+    }, 120);
+  }
+  event.preventDefault();
+}
+
+function cancelMobileSheetDrag(event: PointerEvent): void {
+  if (!mobileSheetDragging.value || event.pointerId !== mobileSheetPointerId) return;
+  mobileSheetDragging.value = false;
+  mobileSheetPointerId = undefined;
+  mobileSheetHeight.value = undefined;
+}
+
 // Refresh the date even while the same pinned line remains open overnight.
 onMounted(() => {
   frequencyDateTimer = setInterval(() => {
     if (frequencyDate !== getGtfsRequestDate()) scheduleFrequencyLoad();
   }, 30_000);
+  mobileSheetResizeListener = () => {
+    if (!mobileSheetDragging.value) mobileSheetHeight.value = undefined;
+  };
+  window.addEventListener("resize", mobileSheetResizeListener);
 });
 
 onBeforeUnmount(() => {
   clearPreviewSwitchTimer();
   if (frequencyTimer !== undefined) clearTimeout(frequencyTimer);
   if (frequencyDateTimer !== undefined) clearInterval(frequencyDateTimer);
+  if (mobileSheetResizeListener && typeof window !== "undefined") {
+    window.removeEventListener("resize", mobileSheetResizeListener);
+  }
   frequencyController?.abort();
   frequencyRequestToken.value += 1;
   ridershipRequestToken.value += 1;
   ridershipStationRequestToken.value += 1;
+  emit("modal-open", false);
 });
 </script>
 
 <template>
   <aside
+    ref="sidebarElement"
     class="global-map-picker-sidebar"
+    :class="{
+      'global-map-picker-sidebar--mobile-sheet': props.mobileSheet,
+      [`global-map-picker-sidebar--mobile-${mobileSheetStage}`]: props.mobileSheet,
+      'global-map-picker-sidebar--mobile-dragging': props.mobileSheet && mobileSheetDragging,
+    }"
     data-global-map-picker-sidebar
+    :data-mobile-sidebar-sheet="mobileSheetStage"
     :data-global-map-line-preview="props.previewLine?.id"
     :aria-label="t('globalMap.sidebar.aria')"
     @pointerleave="emit('hover-line', undefined)"
   >
+    <button
+      v-if="props.mobileSheet"
+      class="global-map-picker-sidebar__sheet-handle"
+      type="button"
+      :aria-label="t('globalMap.sidebar.dragHandle')"
+      :aria-expanded="mobileSheetStage !== 'collapsed'"
+      data-global-map-sidebar-sheet-handle
+      @click="cycleMobileSheetStage"
+      @pointerdown="startMobileSheetDrag"
+      @pointermove="moveMobileSheetDrag"
+      @pointerup="finishMobileSheetDrag"
+      @pointercancel="cancelMobileSheetDrag"
+    >
+      <span aria-hidden="true" />
+    </button>
     <header class="global-map-picker-sidebar__header" :class="{ 'global-map-picker-sidebar__header--line': panelLine || trafficCalendarOpen }">
       <div>
         <p class="global-map-picker-sidebar__eyebrow">{{ panelEyebrow }}</p>
@@ -551,6 +735,9 @@ onBeforeUnmount(() => {
         @update:scope="ridershipStationScope = $event"
         @hover-line="emit('hover-line', $event)"
         @add-active-station="emit('add-active-station')"
+        @modal-open="emit('modal-open', $event)"
+        @toggle-ghost-line-icons="emit('toggle-ghost-line-icons')"
+        @update:nearby-radius-minutes="emit('update:nearby-radius-minutes', $event)"
       />
 
       <section v-if="selectedStationCount && !trafficCalendarOpen" class="global-map-picker-sidebar__dashboard">
@@ -613,6 +800,7 @@ onBeforeUnmount(() => {
 .global-map-picker-sidebar__header p { margin: 0; }
 .global-map-picker-sidebar__header h2 { max-width: 310px; font-size: 1.12rem; letter-spacing: -.02em; }
 .global-map-picker-sidebar__eyebrow { margin-bottom: 6px !important; color: #71809d; font-size: .64rem; font-weight: 950; letter-spacing: .12em; text-transform: uppercase; }
+.global-map-picker-sidebar__sheet-handle { display: none; }
 .global-map-picker-sidebar__close {
   display: inline-flex;
   flex: 0 0 auto;
@@ -869,6 +1057,70 @@ onBeforeUnmount(() => {
 
 @media (max-width: 760px) {
   .global-map-picker-sidebar { width: min(430px, calc(100% - 16px)); }
+}
+@media (max-width: 700px) {
+  .global-map-picker-sidebar--mobile-sheet {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-width: none;
+    height: 184px;
+    max-height: 100%;
+    border-left: 0;
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -24px 70px rgba(15, 23, 42, .24);
+    transition: height 260ms cubic-bezier(.22, .8, .26, 1);
+  }
+  .global-map-picker-sidebar--mobile-collapsed { height: 184px; }
+  .global-map-picker-sidebar--mobile-medium { height: 56dvh; }
+  .global-map-picker-sidebar--mobile-expanded { height: 92dvh; }
+  .global-map-picker-sidebar--mobile-dragging { transition: none; }
+  .global-map-picker-sidebar__sheet-handle {
+    display: flex;
+    flex: 0 0 25px;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 20px 20px 0 0;
+    background: rgba(255, 255, 255, .98);
+    color: #65718a;
+    cursor: grab;
+    touch-action: none;
+  }
+  .global-map-picker-sidebar__sheet-handle:active { cursor: grabbing; }
+  .global-map-picker-sidebar__sheet-handle span {
+    display: block;
+    width: 42px;
+    height: 5px;
+    border-radius: 999px;
+    background: #c4c9d8;
+  }
+  .global-map-picker-sidebar__sheet-handle:focus-visible {
+    outline: 2px solid #5146ff;
+    outline-offset: -3px;
+  }
+  .global-map-picker-sidebar--mobile-sheet .global-map-picker-sidebar__header {
+    flex: 0 0 auto;
+    min-height: 58px;
+    padding: 8px 14px 12px 18px;
+  }
+  .global-map-picker-sidebar--mobile-sheet .global-map-picker-sidebar__header h2 { max-width: 250px; font-size: 1rem; }
+  .global-map-picker-sidebar--mobile-sheet .global-map-picker-sidebar__content {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 14px;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+  .global-map-picker-sidebar--mobile-sheet .global-map-picker-sidebar__close {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+  }
 }
 @media (max-width: 420px) {
   .global-map-picker-sidebar__content { padding: 14px; }

@@ -1071,7 +1071,7 @@ function dedupePaths(paths: GlobalMapPath[]): GlobalMapPath[] {
   return [...byId.values()];
 }
 
-function materializeLod(path: GlobalMapPath, lodLevel: number): GlobalMapPath {
+export function materializeLod(path: GlobalMapPath, lodLevel: number): GlobalMapPath {
   const lodKey = String(lodLevel);
   const vertices = path.lodVertices?.[lodKey];
   if (!vertices || vertices.length < 2) return path;

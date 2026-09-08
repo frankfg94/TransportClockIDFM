@@ -1,7 +1,7 @@
 <template>
   <Transition name="global-map-location-request">
     <div
-      v-if="requestVisible"
+      v-if="requestVisible && showMapInteractions"
       class="global-transport-plan__location-request"
       role="status"
       aria-live="polite"
@@ -34,13 +34,16 @@
 <script setup lang="ts">
 import { useI18n } from "../../i18n";
 
-defineProps<{
+withDefaults(defineProps<{
   requestVisible: boolean;
   loading: boolean;
   markerVisible: boolean;
   stale: boolean;
   markerStyle: Record<string, string>;
-}>();
+  showMapInteractions?: boolean;
+}>(), {
+  showMapInteractions: true,
+});
 
 const emit = defineEmits<{
   request: [];
@@ -53,8 +56,8 @@ const { t } = useI18n();
 .global-transport-plan__location-request {
   position: absolute;
   z-index: 4;
-  top: 16px;
-  right: 16px;
+  top: 18px;
+  right: clamp(120px, 11vw, 210px);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -179,11 +182,7 @@ const { t } = useI18n();
 
 @media (max-width: 700px) {
   .global-transport-plan__location-request {
-    top: 10px;
-    right: 10px;
-    left: 10px;
-    max-width: none;
-    justify-content: space-between;
+    display: none;
   }
 }
 

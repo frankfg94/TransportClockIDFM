@@ -2,6 +2,16 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("../src/services/nearbyDataProviders", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/nearbyDataProviders")>();
+  return {
+    ...actual,
+    createNearbyDataProviders: (...args: Parameters<typeof actual.createNearbyDataProviders>) => ({
+      ...actual.createNearbyDataProviders(...args),
+      places: { searchNearby: vi.fn(async () => []) },
+    }),
+  };
+});
 import {
   GlobalMapAssetLoader,
   decodeBootstrap,
@@ -269,7 +279,7 @@ describe("GlobalTransportPlan bus 389 DOM continuity", () => {
     ).toEqual([]);
   }, 20_000);
 
-  it("retains Lycée de Villebon as a special variant without inventing a straight road detour", async () => {
+  it("renders the school variant only when the current GTFS artifact covers its whole traversal", async () => {
     const direction = resolveGlobalBusDirection(fixture.routeSequences, "pattern:1");
     expect(direction).toMatchObject({
       selectedDirectionId: "pattern:1",
@@ -297,12 +307,16 @@ describe("GlobalTransportPlan bus 389 DOM continuity", () => {
       .map((call) => call[1] as { activeLineId?: string; paths?: GlobalMapPath[] })
       .findLast((candidate) => candidate.activeLineId === LINE_ID);
     const visible389Paths = (scene?.paths ?? []).filter((path) => path.lineId === LINE_ID);
-    expect(
-      fixture.fallbackLegLabels.map(normalizeLabel).some((label) =>
-        label.includes("lycee de villebon"),
-      ),
-      "the missing GTFS coverage must identify the school detour rather than turn it into a chord",
-    ).toBe(true);
+    // This fixture reads the installed GTFS artifact. Its coverage changes
+    // when data or station coordinates are regenerated; do not assume that
+    // the school traversal is permanently missing from that artifact.
+    if (fixture.fallbackLegLabels.length === 0) {
+      const providerPath = visible389Paths.find((path) => path.id === `path:${LINE_ID}:direction:pattern:1`);
+      expect(providerPath).toBeDefined();
+      expect(providerPath!.quality).toMatchObject({ complete: true, fallback: false });
+      expect(providerPath!.stationIds).toContain(lyceeStationId!);
+      return;
+    }
     expect(
       visible389Paths.some((path) => path.stationIds.includes(lyceeStationId!)),
       "a missing GTFS road shape must not render a fictitious Lycée de Villebon detour",

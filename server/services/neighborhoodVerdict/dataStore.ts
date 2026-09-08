@@ -80,6 +80,20 @@ export function validateCompiledNeighborhoodVerdictData(
   if (!Object.keys(data.security.communes).length) {
     throw new Error("SSMSI mapper produced no publishable commune.");
   }
+  if (!data.serviceQuality || !data.serviceQuality.lines.length) {
+    throw new Error("Service-quality mapper produced no line reliability.");
+  }
+  for (const line of data.serviceQuality.lines) {
+    if (
+      !line.lineId ||
+      !line.lineName ||
+      !Number.isFinite(line.reliabilityScore) ||
+      line.reliabilityScore < 0 ||
+      line.reliabilityScore > 100
+    ) {
+      throw new Error(`Invalid service-quality line ${line.lineId || "unknown"}.`);
+    }
+  }
   if (data.airNoiseGrid) {
     const { columns, rows, classes, values } = data.airNoiseGrid;
     if (

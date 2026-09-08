@@ -1,6 +1,7 @@
 import type { TranslationKey } from "../../i18n";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import type { NearbyPlace } from "./nearbyPlaces";
+import { fuzzyFilter } from "../../services/fuzzySearch";
 import {
   NEARBY_WALKING_MINUTES,
   type NearbyWalkingMinutes,
@@ -370,8 +371,8 @@ const NEARBY_PLACE_CATEGORY_TYPE_KEYS: Readonly<Record<NearbyPlace["category"], 
   attraction: "nearbyStations.placeTypes.attraction",
 };
 
-export function walkingMinutesToMeters(minutes: NearbyWalkingMinutes): number {
-  return minutes * 80;
+export function walkingMinutesToMeters(minutes: number): number {
+  return Math.max(0, minutes) * 80;
 }
 
 export interface NearbyWalkingMetricsSource {
@@ -611,23 +612,28 @@ export function filterAndGroupNearbyPlaces(options: {
 }): NearbyPlaceGroupResult[] {
   const normalizedQuery = normalizeNearbyPlaceText(options.query);
   const groupById = new Map(NEARBY_PLACE_GROUPS.map((group) => [group.id, { ...group, places: [] as NearbyPlace[] }]));
+  const candidates: Array<{
+    place: NearbyPlace;
+    group: NearbyPlaceGroupPresentation & { places: NearbyPlace[] };
+  }> = [];
 
   for (const place of options.places) {
     const distanceMeters = options.walkingDistance?.(place) ?? place.distanceMeters;
     if (distanceMeters > options.radiusMeters && !options.includePlaceIds?.has(place.id)) continue;
     const group = groupById.get(resolveNearbyPlaceGroupId(place)) ?? groupById.get("other")!;
-    if (normalizedQuery) {
-      const searchable = normalizeNearbyPlaceText([
+    candidates.push({ place, group });
+  }
+
+  const visibleCandidates = normalizedQuery
+    ? fuzzyFilter(candidates, options.query, ({ place, group }) => [
         place.name,
         place.address ?? "",
         place.kind,
         options.typeLabel(place),
         options.groupLabel(group),
-      ].join(" "));
-      if (!searchable.includes(normalizedQuery)) continue;
-    }
-    group.places.push(place);
-  }
+      ])
+    : candidates;
+  for (const candidate of visibleCandidates) candidate.group.places.push(candidate.place);
 
   for (const group of groupById.values()) {
     group.places.sort((left, right) => (options.walkingDistance?.(left) ?? left.distanceMeters)

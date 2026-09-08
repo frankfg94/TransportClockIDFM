@@ -18,6 +18,9 @@ import type {
   PatternTrafficCalendarDay,
   PatternTrafficCalendarMonth,
 } from "../service-pattern/trafficCalendar";
+import type { NearbyPlace } from "../nearby-stations/nearbyPlaces";
+
+export type NearbyLineRadiusMinutes = 2 | 5;
 
 export interface GlobalMapSidebarTrafficCalendarState {
   open: boolean;
@@ -73,6 +76,11 @@ export interface GlobalMapSidebarBodyProps {
   selectedDirectionId?: string;
   selectedMainDirectionId?: string;
   mergeDirections: boolean;
+  showGhostLineIcons: boolean;
+  nearbyPlaces: NearbyPlace[];
+  nearbyPlacesLoading: boolean;
+  nearbyPlacesError: boolean;
+  nearbyPlacesRadiusMinutes: NearbyLineRadiusMinutes;
 }
 
 export interface GlobalMapSidebarBodyEmits {
@@ -86,4 +94,7 @@ export interface GlobalMapSidebarBodyEmits {
   "update:scope": [scope: AnnualRidershipRankingScope];
   "hover-line": [lineId: string | undefined];
   "add-active-station": [];
+  "modal-open": [open: boolean];
+  "toggle-ghost-line-icons": [];
+  "update:nearby-radius-minutes": [minutes: NearbyLineRadiusMinutes];
 }

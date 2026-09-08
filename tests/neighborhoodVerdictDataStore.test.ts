@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadCompiledNeighborhoodVerdictData } from "../server/services/neighborhoodVerdict/dataStore";
-const data = { schemaVersion: "1.1", generatedAt: "2026-09-05", sources: [], greenSpaces: [{}], gpeStations: [{}], airNoiseCommunes: { a: {} }, security: { communes: { a: {} } } };
+const data = { schemaVersion: "1.2", generatedAt: "2026-09-05", sources: [], greenSpaces: [{}], gpeStations: [{}], airNoiseCommunes: { a: {} }, security: { communes: { a: {} } }, serviceQuality: { lines: [] } };
 afterEach(() => vi.unstubAllGlobals());
 describe("verdict remote cache", () => {
   it("rejects redirects without forwarding R2 credentials on Workers", async () => {

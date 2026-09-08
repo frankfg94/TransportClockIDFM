@@ -9,6 +9,7 @@ import {
 } from "../../services/linePresentation";
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../transport-map/config/globalTransportPlanConfig";
 import type { GlobalMapLine, GlobalMapMode } from "../transport-map/contracts/manifest";
+import { fuzzyFilter } from "../../services/fuzzySearch";
 
 const props = withDefaults(defineProps<{
   mode: GlobalMapMode;
@@ -99,23 +100,13 @@ const presentedLines = computed(() =>
   }),
 );
 const filteredPresentedLines = computed(() => {
-  const query = normalizeLineSearch(lineSearchQuery.value);
-  if (!query) return presentedLines.value;
-
-  return presentedLines.value.filter(({ line }) =>
-    [line.label, line.code]
-      .filter((value): value is string => Boolean(value))
-      .some((value) => normalizeLineSearch(value).includes(query)),
-  );
+  return fuzzyFilter(presentedLines.value, lineSearchQuery.value, ({ line }) => [
+    line.label,
+    line.code,
+    line.id,
+    ...line.aliases,
+  ]);
 });
-
-function normalizeLineSearch(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLocaleLowerCase(locale.value === "fr" ? "fr-FR" : "en-US")
-    .trim();
-}
 
 function toggleLineSearch(): void {
   lineSearchOpen.value = !lineSearchOpen.value;

@@ -1,6 +1,6 @@
 <template>
-  <header class="global-transport-plan__toolbar">
-    <div>
+  <header v-if="showMapInteractions" class="global-transport-plan__toolbar">
+    <div class="global-transport-plan__toolbar-brand">
       <p class="global-transport-plan__eyebrow">{{ t("globalMap.page.brand") }}</p>
       <h1>{{ t("globalMap.page.title") }}</h1>
       <p class="global-transport-plan__subtitle">
@@ -22,7 +22,26 @@
         </span>
       </p>
     </div>
-    <div class="global-transport-plan__actions" :aria-label="t('globalMap.page.actionsAria')">
+    <div
+      ref="actionsElement"
+      class="global-transport-plan__actions"
+      :aria-label="t('globalMap.page.actionsAria')"
+      @click="handleActionsClick"
+    >
+      <div
+        id="global-map-advanced-menu"
+        v-show="advancedOpen"
+        class="global-transport-plan__advanced-menu"
+        role="menu"
+        :aria-label="t('globalMap.page.advancedMenuAria')"
+      >
+        <div class="global-transport-plan__advanced-metrics" role="status">
+          <span>{{ statusLabel }}</span>
+          <span v-if="rendererMetrics">
+            {{ t("globalMap.page.rendererMetrics", { renderer: rendererMetrics.renderer, ms: rendererMetrics.renderMs.toFixed(1) }) }}
+          </span>
+          <span v-if="rendererMetrics">{{ t("globalMap.page.zoom", { value: displayZoom.toFixed(1) }) }}</span>
+        </div>
       <PatternTrafficCalendarToggle
         v-if="trafficCalendarEventCount > 0"
         data-global-map-traffic-calendar-toggle
@@ -142,28 +161,51 @@
         >
           {{ t("globalMap.page.layerSatellite") }}
         </button>
+        </div>
+        <span
+          v-if="shareFeedback"
+          class="global-transport-plan__share-feedback"
+          role="status"
+          aria-live="polite"
+        >
+          {{ shareFeedback }}
+        </span>
       </div>
-      <span
-        v-if="shareFeedback"
-        class="global-transport-plan__share-feedback"
-        role="status"
-        aria-live="polite"
+      <button
+        type="button"
+        class="map-button map-button--advanced"
+        :aria-expanded="advancedOpen"
+        :aria-label="t('globalMap.page.advancedMenuAria')"
+        aria-controls="global-map-advanced-menu"
+        data-global-map-advanced-toggle
+        @click="toggleAdvanced"
       >
-        {{ shareFeedback }}
-      </span>
+        <SlidersHorizontal :size="16" :stroke-width="2.2" aria-hidden="true" />
+        <span class="global-transport-plan__advanced-button-copy">
+          <strong>{{ t("globalMap.page.advanced") }}</strong>
+          <small>{{ t("globalMap.page.advancedHint") }}</small>
+        </span>
+        <ChevronDown
+          class="global-transport-plan__advanced-button-arrow"
+          :size="15"
+          :stroke-width="2.25"
+          aria-hidden="true"
+        />
+      </button>
     </div>
   </header>
 </template>
 
 <script setup lang="ts">
-import { Radar } from "lucide-vue-next";
+import { onBeforeUnmount, onMounted, ref } from "vue";
+import { ChevronDown, Radar, SlidersHorizontal } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
 import PatternTrafficCalendarToggle from "../service-pattern/PatternTrafficCalendarToggle.vue";
 import type { TransportMapBasemapLayer } from "../transport-map/basemap/tileMath";
 import type { TransportMapRendererMetrics } from "../transport-map/contracts/renderer";
 import type { TransportMapTrafficStatus } from "../transport-map/state/useTransportMapTraffic";
 
-defineProps<{
+withDefaults(defineProps<{
   statusLabel: string;
   rendererMetrics?: TransportMapRendererMetrics;
   displayZoom: number;
@@ -187,7 +229,10 @@ defineProps<{
   shareFeedback: string;
   radarEnabled?: boolean;
   radarPanelOpen?: boolean;
-}>();
+  showMapInteractions?: boolean;
+}>(), {
+  showMapInteractions: true,
+});
 
 const emit = defineEmits<{
   "run-chaos": [];
@@ -203,19 +248,54 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const advancedOpen = ref(false);
+const actionsElement = ref<HTMLElement>();
+
+function toggleAdvanced(): void {
+  advancedOpen.value = !advancedOpen.value;
+}
+
+function handleActionsClick(event: MouseEvent): void {
+  const target = event.target;
+  if (target instanceof Element && target.closest("[data-global-map-advanced-toggle]")) return;
+  advancedOpen.value = false;
+}
+
+function closeAdvancedOnOutsideClick(event: PointerEvent): void {
+  if (!advancedOpen.value) return;
+  const target = event.target;
+  if (target instanceof Node && actionsElement.value?.contains(target)) return;
+  advancedOpen.value = false;
+}
+
+onMounted(() => {
+  document.addEventListener("pointerdown", closeAdvancedOnOutsideClick);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", closeAdvancedOnOutsideClick);
+});
 </script>
 
 <style scoped>
 .global-transport-plan__toolbar {
+  position: absolute;
   z-index: 3;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 16px;
-  padding: 16px 20px;
-  background: var(--map-panel, rgba(255, 255, 255, 0.94));
-  border-bottom: 1px solid rgba(148, 163, 184, 0.35);
-  backdrop-filter: blur(12px);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  pointer-events: none;
+}
+.global-transport-plan__toolbar-brand {
+  display: none;
 }
 .global-transport-plan__toolbar h1,
 .global-transport-plan__toolbar p {
@@ -244,11 +324,93 @@ const { t } = useI18n();
   white-space: nowrap;
 }
 .global-transport-plan__actions {
+  position: absolute;
+  top: 18px;
+  right: 18px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  pointer-events: auto;
+}
+.global-transport-plan__advanced-menu {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: min(440px, calc(100vw - 32px));
+  padding: 12px;
+  border: 1px solid rgba(100, 116, 139, 0.22);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.2);
+  backdrop-filter: blur(16px);
+}
+.global-transport-plan__advanced-menu[style*="display: none"] {
+  display: none !important;
+}
+.global-transport-plan__advanced-metrics {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 2px 2px 6px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+.global-transport-plan__advanced-metrics span + span::before {
+  margin-right: 10px;
+  color: #cbd5e1;
+  content: "·";
+}
+.map-button--advanced {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 6px 10px 6px 12px;
+  background: #fff;
+  color: #334155;
+}
+.global-transport-plan__advanced-button-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+.global-transport-plan__advanced-button-copy strong {
+  font-size: 0.76rem;
+  line-height: 1;
+}
+.global-transport-plan__advanced-button-copy small {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.59rem;
+  font-weight: 750;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.global-transport-plan__advanced-button-arrow {
+  flex: 0 0 auto;
+  transition: transform 160ms ease;
+}
+.map-button--advanced[aria-expanded="true"] .global-transport-plan__advanced-button-arrow {
+  transform: rotate(180deg);
+}
+.map-button--advanced:hover,
+.map-button--advanced:focus-visible,
+.map-button--advanced[aria-expanded="true"] {
+  border-color: #94a3b8;
+  background: #f1f5f9;
+  color: #0f172a;
 }
 .global-transport-plan__share-feedback {
   color: #475569;
@@ -407,12 +569,16 @@ const { t } = useI18n();
 
 @media (max-width: 700px) {
   .global-transport-plan__toolbar {
-    align-items: flex-start;
-    flex-direction: column;
-    padding: 12px 14px;
+    z-index: 22;
+    display: block;
   }
   .global-transport-plan__actions {
-    justify-content: flex-start;
+    top: calc(env(safe-area-inset-top, 0px) + 76px);
+    right: 12px;
+  }
+  .global-transport-plan__advanced-menu {
+    max-height: min(68dvh, 620px);
+    overflow-y: auto;
   }
 }
 </style>

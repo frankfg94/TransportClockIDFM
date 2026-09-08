@@ -35,6 +35,31 @@ afterEach(() => {
 });
 
 describe("dashboard presets", () => {
+  it("shows departures and releases refresh while optional service labels remain pending", async () => {
+    const { fetchBoardDepartures } = installDashboardMocks({}, {}, { apiConfigured: true });
+    fetchBoardDepartures.mockImplementation(async (board: TransitBoardConfig) => {
+      const departure = { id: board.id, destination: "Destination", expectedDepartureTime: new Date(Date.now() + 300_000).toISOString() };
+      return {
+        departures: [departure],
+        directionGroups: [{ ...board.directionGroups[0], departures: [departure], serviceEnded: false }],
+      };
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/pattern")) return new Promise<Response>(() => {});
+      return new Response(JSON.stringify({ available: true, configured: true, lines: [] }));
+    }));
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushPromises();
+    await vi.waitFor(() => {
+      const boards = wrapper.findAll(".mock-board");
+      expect(boards.length).toBeGreaterThan(0);
+      expect(boards.every((board) => board.attributes("data-departures") === "1")).toBe(true);
+      expect(boards.every((board) => board.attributes("data-loading") === "false")).toBe(true);
+    });
+    wrapper.unmount();
+  });
+
   it("normalizes the home URL and switches to an empty work dashboard", async () => {
     installDashboardMocks({});
     const { default: App } = await import("../src/App.vue");
@@ -795,10 +820,10 @@ function installDashboardMocks(
   }));
   vi.doMock("../src/components/TransitBoard.vue", () => ({
     default: defineComponent({
-      props: ["board", "trafficAlert"],
+      props: ["board", "trafficAlert", "departures", "loading"],
       emits: ["open-fullscreen-panel", "open-traffic"],
       template: `
-        <article class="mock-board">
+        <article class="mock-board" :data-loading="loading" :data-departures="departures?.length ?? 0">
           {{ board.title }}
           <button
             v-if="trafficAlert"

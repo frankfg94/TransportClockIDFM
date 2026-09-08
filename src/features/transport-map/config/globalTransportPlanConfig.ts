@@ -248,8 +248,12 @@ export const GLOBAL_TRANSPORT_PLAN_CONFIG = {
   connections: {
     // A station selection keeps the selected stop as the anchor, then exposes
     // nearby physical stops as entrance/context data. Ghost correspondences
-    // themselves stay limited to the exact selected station.
+    // themselves stay limited to the exact selected station. Correspondence
+    // ghosts are an explicit local interchange view, so they must not inherit
+    // the global mode picker (otherwise Noctilien and other secondary modes
+    // disappear when the picker is intentionally narrowed).
     radiusMeters: STATION_CORRESPONDENCE_RADIUS_METERS,
+    overrideSelectedModesForGhostCorrespondences: true,
   },
   dashboard: {
     maxStations: 12,
@@ -341,7 +345,9 @@ export const GLOBAL_TRANSPORT_PLAN_CONFIG = {
     // signal in the split quay/stop-place catalogue (Châtelet included).
     overviewMajorHubMinLines: 3,
     stationLabelZoom: 10.5,
-    entranceRadius: 2.5,
+    // Exit markers must remain discoverable at the line zoom used by the
+    // sidebar. Keep one source for Canvas2D and Deck GL renderers.
+    entranceRadius: 5.5,
     entranceLabelZoom: 15,
     // Correspondence lines stay readable, but remain visibly secondary to the
     // the focused line and to the normal network layer. The hierarchy is

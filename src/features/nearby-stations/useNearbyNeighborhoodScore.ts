@@ -2,6 +2,7 @@ import { onBeforeUnmount, readonly, ref, shallowReadonly, shallowRef, watch } fr
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { fetchGtfsLineFrequency } from "../../services/lineFrequency";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
+import { useLineFrequencyTimetable } from "../line-map/useLineFrequencyTimetable";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import type { GlobalMapMode, GlobalMapStation } from "../transport-map/contracts/manifest";
 import type { TransportMapNetwork } from "../transport-map/contracts/network";
@@ -23,7 +24,6 @@ import {
 } from "./nearbyHeavyTransports";
 import type { NearbyStationEntry } from "./nearbyStations";
 import {
-  NEIGHBORHOOD_FREQUENCY_LINE_LIMIT,
   buildNeighborhoodScore,
   type NeighborhoodGreenSpaceJourney,
   type NeighborhoodJourneyBenchmark,
@@ -36,6 +36,7 @@ import {
   type PublicGreenSpaceAccess,
   type PublicNeighborhoodVerdict,
 } from "./neighborhoodVerdictApi";
+import type { PublicServiceQuality } from "./serviceQualityApi";
 
 type ReadonlyValue<T> = { readonly value: T };
 
@@ -56,6 +57,7 @@ export interface UseNearbyNeighborhoodScoreOptions {
   placesProvider?: PlacesProvider;
   travelRoutesProvider?: TravelRoutesProvider;
   fetchFrequency?: typeof fetchGtfsLineFrequency;
+  serviceQuality?: ReadonlyValue<PublicServiceQuality | undefined>;
   initialSnapshot?: NearbyNeighborhoodScoreSnapshot;
 }
 
@@ -64,6 +66,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const placesProvider = options.placesProvider ?? defaultProviders.places;
   const travelRoutesProvider = options.travelRoutesProvider ?? defaultProviders.travelRoutes;
   const fetchFrequency = options.fetchFrequency ?? fetchGtfsLineFrequency;
+  const frequencyTimetable = useLineFrequencyTimetable({ fetchFrequency });
   const nightJourneyDateTime = options.nightJourneyDateTime ?? getNearbyNightJourneyDateTime();
   const places = ref<NearbyPlace[]>([]);
   const placesLoaded = ref(false);
@@ -74,6 +77,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const greenSpaceJourneys = ref<NeighborhoodGreenSpaceJourney[]>([]);
   const noctilienJourneys = ref<NearbyJourney[]>([]);
   const frequencyProfiles = shallowRef(new Map<string, GtfsLineFrequencyResponse | undefined>());
+  const lastServiceByLine = shallowRef(new Map<string, Awaited<ReturnType<typeof frequencyTimetable.getLastService>>>());
+  const hospitalJourneys = ref<Record<string, NearbyJourney[] | undefined>>({});
   const backendVerdict = shallowRef<PublicNeighborhoodVerdict>();
   const result = ref<NeighborhoodScoreResult>(buildNeighborhoodScore({
     places: [],
@@ -91,6 +96,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const journeyRequests = new Map<string, Promise<NearbyJourney[]>>();
   const frequencyResults = new Map<string, GtfsLineFrequencyResponse>();
   const frequencyRequests = new Map<string, { controller: AbortController; promise: Promise<GtfsLineFrequencyResponse> }>();
+  const lastServiceResults = new Map<string, Awaited<ReturnType<typeof frequencyTimetable.getLastService>>>();
+  const lastServiceRequests = new Map<string, { controller: AbortController; promise: Promise<Awaited<ReturnType<typeof frequencyTimetable.getLastService>>> }>();
   const verdictResults = new Map<string, PublicNeighborhoodVerdict>();
   const verdictRequests = new Map<string, { controller: AbortController; promise: Promise<PublicNeighborhoodVerdict> }>();
   const pendingTasks = new Set<string>();
@@ -121,6 +128,9 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       greenSpaceJourneys: greenSpaceJourneys.value,
       noctilienJourneys: noctilienJourneys.value,
       frequencyProfiles: frequencyProfiles.value,
+      lastServiceByLine: lastServiceByLine.value,
+      hospitalJourneys: hospitalJourneys.value,
+      serviceQuality: options.serviceQuality?.value,
       generatedAt: updatedAt.value,
       backendVerdict: backendVerdict.value,
     });
@@ -140,6 +150,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     const token = ++requestToken;
     resetOriginState(originKey);
     greenSpaceJourneys.value = [];
+    hospitalJourneys.value = {};
+    lastServiceByLine.value = new Map();
     abortStalePlaceRequests(originKey);
     pendingTasks.clear();
     updateLoadingState();
@@ -179,10 +191,13 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         (next) => {
           places.value = next;
           placesLoaded.value = true;
+          trackHospitalJourneys(origin, next, originKey, token);
           updatedAt.value = Date.now();
         },
         true,
       );
+    } else {
+      trackHospitalJourneys(origin, places.value, originKey, token);
     }
 
     const benchmarkDestinations = resolveJourneyBenchmarks(options.network.value);
@@ -229,15 +244,25 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     }
     noctilienJourneys.value = [];
 
-    const lineIds = getRelevantLineIds(options.stations.value, options.heavyCandidates?.value ?? heavyCandidates.value);
-    for (const lineId of lineIds) {
+    const lineTargets = getRelevantLineTargets(options.stations.value, options.heavyCandidates?.value ?? heavyCandidates.value);
+    for (const { lineId, stationId } of lineTargets) {
       trackTask(
         `frequency:${lineId}`,
-        loadFrequency(lineId),
+        loadFrequency(lineId, stationId),
         token,
         (next) => {
           frequencyResults.set(lineId, next);
           frequencyProfiles.value = new Map(frequencyResults);
+          updatedAt.value = Date.now();
+        },
+        false,
+      );
+      trackTask(
+        `last-service:${lineId}`,
+        loadLastService(lineId, stationId),
+        token,
+        (next) => {
+          lastServiceByLine.value = new Map(lastServiceResults.set(lineId, next));
           updatedAt.value = Date.now();
         },
         false,
@@ -257,6 +282,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     greenSpaceJourneys.value = [];
     noctilienJourneys.value = [];
     frequencyProfiles.value = new Map();
+    lastServiceByLine.value = new Map();
+    hospitalJourneys.value = {};
+    frequencyResults.clear();
+    lastServiceResults.clear();
     backendVerdict.value = undefined;
     error.value = undefined;
     if (!originKey) return;
@@ -360,13 +389,38 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     }));
   }
 
-  function loadFrequency(lineId: string): Promise<GtfsLineFrequencyResponse> {
+  function trackHospitalJourneys(
+    origin: Pick<GeocoderPoint, "lon" | "lat">,
+    sourcePlaces: readonly NearbyPlace[],
+    originKey: string,
+    token: number,
+  ): void {
+    const targets = sourcePlaces.filter((place) => normalizeScoreText(place.kind) === "hospital");
+    if (targets.length === 0) return;
+    const promise = Promise.all(targets.map(async (place) => {
+      const destination = { id: place.id, lon: place.lon, lat: place.lat };
+      const journeyKey = journeyCacheKey(originKey, place.id, destination, options.journeyDateTime, "hospital");
+      return [place.id, await loadJourneyProbe(origin, destination, options.journeyDateTime, journeyKey)] as const;
+    })).then((entries) => Object.fromEntries(entries));
+    trackTask(
+      "hospital-routes",
+      promise,
+      token,
+      (next) => {
+        hospitalJourneys.value = next;
+        updatedAt.value = Date.now();
+      },
+      false,
+    );
+  }
+
+  function loadFrequency(lineId: string, stationId?: string): Promise<GtfsLineFrequencyResponse> {
     const cached = frequencyResults.get(lineId);
     if (cached) return Promise.resolve(cached);
     const active = frequencyRequests.get(lineId);
     if (active) return active.promise;
     const controller = new AbortController();
-    const promise = fetchFrequency(lineId, { signal: controller.signal })
+    const promise = frequencyTimetable.getFrequencies(lineId, stationId, { signal: controller.signal })
       .then((next) => {
         frequencyResults.set(lineId, next);
         return next;
@@ -375,6 +429,26 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         if (frequencyRequests.get(lineId)?.promise === promise) frequencyRequests.delete(lineId);
       });
     frequencyRequests.set(lineId, { controller, promise });
+    return promise;
+  }
+
+  function loadLastService(
+    lineId: string,
+    stationId?: string,
+  ): Promise<Awaited<ReturnType<typeof frequencyTimetable.getLastService>>> {
+    if (lastServiceResults.has(lineId)) return Promise.resolve(lastServiceResults.get(lineId));
+    const active = lastServiceRequests.get(lineId);
+    if (active) return active.promise;
+    const controller = new AbortController();
+    const promise = frequencyTimetable.getLastService(lineId, stationId, { signal: controller.signal })
+      .then((next) => {
+        lastServiceResults.set(lineId, next);
+        return next;
+      })
+      .finally(() => {
+        if (lastServiceRequests.get(lineId)?.promise === promise) lastServiceRequests.delete(lineId);
+      });
+    lastServiceRequests.set(lineId, { controller, promise });
     return promise;
   }
 
@@ -468,12 +542,17 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     () => options.heavyCandidatesLoading?.value,
     recompute,
   );
+  watch(
+    () => options.serviceQuality?.value,
+    recompute,
+  );
 
   onBeforeUnmount(() => {
     requestToken += 1;
     if (refreshTimer !== undefined) clearTimeout(refreshTimer);
     for (const request of placeRequests.values()) request.controller.abort();
     for (const request of frequencyRequests.values()) request.controller.abort();
+    for (const request of lastServiceRequests.values()) request.controller.abort();
     for (const request of verdictRequests.values()) request.controller.abort();
   });
 
@@ -649,19 +728,38 @@ function hasNoctilienTransitSection(journey: NearbyJourney): boolean {
   });
 }
 
-function getRelevantLineIds(
+interface NearbyFrequencyTarget {
+  lineId: string;
+  stationId?: string;
+}
+
+const NEIGHBORHOOD_FREQUENCY_WALKING_LIMIT_METERS = 10 * 80;
+
+function getRelevantLineTargets(
   stations: readonly NearbyStationEntry[],
   candidates: readonly NearbyHeavyTransportCandidate[],
-): string[] {
+): NearbyFrequencyTarget[] {
   const heavyModes = new Set<GlobalMapMode>(["METRO", "RER", "TRAIN", "TRANSILIEN", "TRAM", "CABLE"]);
-  const ids = new Set<string>();
-  for (const line of [
-    ...stations.filter((entry) => entry.insideRadius).flatMap((entry) => entry.lines),
-    ...candidates.flatMap((candidate) => candidate.lines),
-  ]) {
-    if (heavyModes.has(line.mode)) ids.add(line.id);
+  const targets = new Map<string, NearbyFrequencyTarget>();
+  const add = (lineId: string, stationId: string | undefined): void => {
+    if (!targets.has(lineId)) targets.set(lineId, { lineId, stationId });
+  };
+  for (const entry of stations) {
+    for (const line of entry.lines) {
+      const lineDistance = entry.lineDistanceMeters?.[line.id] ?? entry.distanceMeters;
+      if (!heavyModes.has(line.mode)
+        || entry.lineInsideRadius?.[line.id] === false
+        || lineDistance > NEIGHBORHOOD_FREQUENCY_WALKING_LIMIT_METERS) continue;
+      const station = entry.memberStations.find((candidate) => candidate.lineIds.includes(line.id));
+      add(line.id, station?.id);
+    }
   }
-  return [...ids].sort().slice(0, NEIGHBORHOOD_FREQUENCY_LINE_LIMIT);
+  for (const candidate of candidates) {
+    for (const line of candidate.lines) {
+      if (heavyModes.has(line.mode)) add(line.id, candidate.station.id);
+    }
+  }
+  return [...targets.values()].sort((left, right) => left.lineId.localeCompare(right.lineId));
 }
 
 function snapshotForOrigin(

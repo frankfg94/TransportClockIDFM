@@ -10,6 +10,7 @@ import {
   getNeighborhoodScoreDisplay,
   type NeighborhoodScoreInput,
 } from "../src/features/nearby-stations/neighborhoodScore";
+import type { PublicServiceQuality } from "../src/features/nearby-stations/serviceQualityApi";
 
 function place(id: string, kind: string, category: NearbyPlace["category"] = "shop", distanceMeters = 160): NearbyPlace {
   return { id, name: `${kind} ${id}`, kind, category, lon: 2.35, lat: 48.85, distanceMeters };
@@ -106,12 +107,70 @@ function input(overrides: Partial<NeighborhoodScoreInput> = {}): NeighborhoodSco
 }
 
 describe("neighborhood score", () => {
+  it("adds nearby service reliability at 15% of the transport sub-score", () => {
+    const metro = line("metro-1", "1", "METRO");
+    const serviceQuality: PublicServiceQuality = {
+      schemaVersion: "1.2",
+      generatedAt: "2026-09-01T00:00:00.000Z",
+      availableYears: [2023, 2024, 2025],
+      lines: [{
+        lineId: "metro:1",
+        lineName: "1",
+        mode: "METRO",
+        aliases: ["1"],
+        reliabilityScore: 100,
+        labelKey: "very-reliable",
+        scoreMethod: "metro-combined",
+        trend: "improving",
+        trendDelta: 1,
+        yearsUsed: [2023, 2024, 2025],
+        indicators: [],
+      }],
+      sources: [],
+      warnings: [],
+    };
+    const withoutQuality = buildNeighborhoodScore(input({ stations: [stationEntry([metro])] }));
+    const withQuality = buildNeighborhoodScore(input({ stations: [stationEntry([metro])], serviceQuality }));
+    const baseTransport = withoutQuality.categories.find((category) => category.id === "transport");
+    const qualityTransport = withQuality.categories.find((category) => category.id === "transport");
+
+    expect(qualityTransport?.score).toBeGreaterThan(baseTransport?.score ?? 0);
+    const qualityFact = [
+      ...(qualityTransport?.positiveFacts ?? []),
+      ...(qualityTransport?.negativeFacts ?? []),
+      ...(qualityTransport?.neutralFacts ?? []),
+    ].find((fact) => fact.kind === "transportServiceQuality");
+    expect(qualityFact).toMatchObject({
+      action: { href: "/lines-ranking" },
+      evidence: { value: 100, unit: "/100" },
+    });
+  });
+
   it("turns zero pharmacies into an explicit negative health fact", () => {
     const result = buildNeighborhoodScore(input({ places: [place("shop", "supermarket")] }));
     const health = result.categories.find((category) => category.id === "health");
 
     expect(health?.score).toBe(2);
     expect(health?.negativeFacts.map((fact) => fact.kind)).toContain("noPharmacy");
+  });
+
+  it("shows a reachable hospital from a real walking route", () => {
+    const hospital = place("hospital", "hospital", "service", 2_000);
+    const result = buildNeighborhoodScore(input({
+      places: [hospital],
+      walkingRoutes: {
+        [hospital.id]: {
+          provider: "openrouteservice",
+          distanceMeters: 2_100,
+          durationSeconds: 29 * 60,
+        },
+      },
+    }));
+    const health = result.categories.find((category) => category.id === "health");
+    const fact = health?.positiveFacts.find((candidate) => candidate.kind === "hospitalNearbyWalking");
+
+    expect(fact?.labelValues).toMatchObject({ name: "hospital hospital", minutes: 29 });
+    expect(fact?.evidence.proof).toBe("direct");
   });
 
   it("saturates daily-life shop counts instead of rewarding raw volume indefinitely", () => {
@@ -260,6 +319,44 @@ describe("neighborhood score", () => {
     expect(transport?.displayScore).toBeGreaterThan(0);
   });
 
+  it("shows peak frequency for every nearby important line and ignores buses", () => {
+    const metro = line("line:metro:4", "4", "METRO");
+    const tram = line("line:tram:T6", "T6", "TRAM");
+    const bus = line("line:bus:62", "62", "BUS");
+    const result = buildNeighborhoodScore(input({
+      stations: [stationEntry([metro, tram, bus])],
+      frequencyProfiles: new Map([
+        [metro.id, frequency(metro.id, 4)],
+        [tram.id, frequency(tram.id, 12)],
+        [bus.id, frequency(bus.id, 2)],
+      ]),
+    }));
+    const transport = result.categories.find((category) => category.id === "transport");
+    const frequencyFacts = [
+      ...(transport?.positiveFacts ?? []),
+      ...(transport?.negativeFacts ?? []),
+    ].filter((fact) => fact.kind === "frequencyVeryGood" || fact.kind === "frequencyLow");
+
+    expect(frequencyFacts.map((fact) => fact.labelValues?.lines)).toEqual(expect.arrayContaining([
+      "Métro 4",
+      "Tramway T6",
+    ]));
+    expect(frequencyFacts).toHaveLength(2);
+    expect(frequencyFacts.some((fact) => fact.labelValues?.lines === "Bus 62")).toBe(false);
+  });
+
+  it("marks a heavy line with an early last service as a transport watch point", () => {
+    const metro = line("line:metro:4", "4", "METRO");
+    const result = buildNeighborhoodScore(input({
+      stations: [stationEntry([metro])],
+      lastServiceByLine: new Map([[metro.id, { seconds: 20 * 60 * 60 }]]),
+    }));
+    const transport = result.categories.find((category) => category.id === "transport");
+    const fact = transport?.negativeFacts.find((candidate) => candidate.kind === "lastServiceEarly");
+
+    expect(fact?.labelValues).toMatchObject({ line: "Métro 4", time: "20:00" });
+  });
+
   it("groups a co-located future GPE line and raises an exceptional three-line hub", () => {
     const metro13 = line("line:metro:13", "13", "METRO");
     const tramT6 = line("line:tram:T6", "T6", "TRAM");
@@ -285,7 +382,7 @@ describe("neighborhood score", () => {
         projected: true,
       } satisfies NearbyHeavyTransportCandidate],
       backendVerdict: {
-        schemaVersion: "1.1",
+        schemaVersion: "1.2",
         generatedAt: "2026-09-01T00:00:00.000Z",
         warnings: [],
         sources: [],
@@ -305,6 +402,49 @@ describe("neighborhood score", () => {
 
     expect(transport?.positiveFacts.some((fact) => fact.kind === "transportHub" && fact.labelValues?.futureLine === "15")).toBe(true);
     expect(transport?.displayScore).toBeGreaterThanOrEqual(9);
+  });
+
+  it("does not repeat current or future line access when a combined hub fact covers them", () => {
+    const metro13 = line("line:metro:13", "13", "METRO");
+    const future15 = line("line:gpe:15", "15", "METRO");
+    const local = stationEntry([metro13, future15], 800);
+    const futureProject = {
+      id: "gpe:15:chatillon",
+      name: "Châtillon–Montrouge",
+      line: "15",
+      lon: 2.35,
+      lat: 48.85,
+      walkingMinutes: 14,
+      coLocatedCurrentLineCodes: ["13"],
+    };
+    const result = buildNeighborhoodScore(input({
+      stations: [local],
+      heavyCandidates: [{
+        id: "station:chatillon",
+        entry: local,
+        station: local.memberStations[0]!,
+        lines: [metro13, future15],
+        distanceMeters: 800,
+        access: { kind: "direct", walkingSeconds: 840, totalSeconds: 840 },
+        accessByLine: {},
+        futureProjectsByLine: { [future15.id]: futureProject },
+        projected: true,
+      } satisfies NearbyHeavyTransportCandidate],
+      backendVerdict: {
+        schemaVersion: "1.2",
+        generatedAt: "2026-09-01T00:00:00.000Z",
+        warnings: [],
+        sources: [],
+        futureProjects: [futureProject],
+        categories: [],
+      },
+    }));
+    const transport = result.categories.find((category) => category.id === "transport");
+    const accessFacts = transport?.positiveFacts.filter((fact) => fact.kind.startsWith("transportLine")) ?? [];
+
+    expect(transport?.positiveFacts.some((fact) => fact.kind === "transportHub")).toBe(true);
+    expect(accessFacts.some((fact) => fact.labelValues?.line === "Métro 13")).toBe(false);
+    expect(accessFacts.some((fact) => fact.labelValues?.line === "Métro 15")).toBe(false);
   });
 
   it("uses a real current-line access for a co-located GPE station beyond 15 minutes on foot", () => {
@@ -331,7 +471,7 @@ describe("neighborhood score", () => {
         projected: true,
       } satisfies NearbyHeavyTransportCandidate],
       backendVerdict: {
-        schemaVersion: "1.1",
+        schemaVersion: "1.2",
         generatedAt: "2026-09-01T00:00:00.000Z",
         warnings: [],
         sources: [],
@@ -409,7 +549,7 @@ describe("neighborhood score", () => {
         } satisfies NearbyHeavyTransportCandidate,
       ],
       backendVerdict: {
-        schemaVersion: "1.1",
+        schemaVersion: "1.2",
         generatedAt: "2026-09-01T00:00:00.000Z",
         warnings: [],
         sources: [],
@@ -609,7 +749,7 @@ describe("neighborhood score", () => {
       placesLoaded: false,
       stationsLoaded: false,
       backendVerdict: {
-        schemaVersion: "1.1",
+        schemaVersion: "1.2",
         generatedAt: "2026-09-01T00:00:00.000Z",
         warnings: [],
         sources: [],
@@ -632,7 +772,7 @@ describe("neighborhood score", () => {
       placesLoaded: false,
       stationsLoaded: false,
       backendVerdict: {
-        schemaVersion: "1.1",
+        schemaVersion: "1.2",
         generatedAt: "2026-09-01T00:00:00.000Z",
         warnings: [],
         sources: [],

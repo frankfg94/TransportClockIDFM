@@ -60,6 +60,7 @@
     "@vue-flow/minimap": "^1.5.4",
     "@vueuse/core": "^13.9.0",
     "fflate": "^0.8.3",
+    "fuse.js": "7.5.0",
     "lucide-vue-next": "^1.0.0",
     "maplibre-gl": "^6.6.0",
     "nuxt": "3.20.2",

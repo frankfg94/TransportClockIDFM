@@ -17,6 +17,7 @@ import type { PublicFutureGpeStation } from "./neighborhoodVerdictApi";
 import { resolveNearbyPlaceGroupId } from "./nearbyPlacePresentation";
 import { readNearbyNeighborhoodScoreSnapshot } from "./nearbyNeighborhoodScoreSnapshot";
 import { useNearbyNeighborhoodScore } from "./useNearbyNeighborhoodScore";
+import { useServiceQuality } from "./useServiceQuality";
 import { useNearbyHeavyTransports } from "./useNearbyHeavyTransports";
 import { useNearbyStations } from "./useNearbyStations";
 import { useNearbyWalkingRoutes } from "./useNearbyWalkingRoutes";
@@ -65,6 +66,7 @@ const nearby = useNearbyStations(initialOrigin ? {
 } : undefined);
 const nearbyDataProviders = createNearbyDataProviders();
 const nearbyWalking = useNearbyWalkingRoutes();
+const serviceQuality = useServiceQuality();
 const journeyDateTime = getNearbyWorkdayJourneyDateTime();
 const nightJourneyDateTime = getNearbyNightJourneyDateTime();
 const futureProjects = ref<PublicFutureGpeStation[]>([]);
@@ -109,6 +111,7 @@ const score = useNearbyNeighborhoodScore({
   travelRoutesProvider: journeyProvider,
   journeyProbe: routeComposer,
   nightJourneyDateTime,
+  serviceQuality: serviceQuality.data,
   initialSnapshot: readNearbyNeighborhoodScoreSnapshot(initialOrigin),
 });
 

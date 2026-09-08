@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { CircleHelp } from "lucide-vue-next";
+import { useRouter } from "#imports";
 import { useI18n, type TranslationKey } from "../../i18n";
 import type { NeighborhoodFact, NeighborhoodFactGeography } from "./neighborhoodScore";
 
@@ -13,6 +14,7 @@ const emit = defineEmits<{
 }>();
 
 const { d, t } = useI18n();
+const router = useRouter();
 
 const geographyKeys: Record<NeighborhoodFactGeography["level"], TranslationKey> = {
   point: "nearbyStations.neighborhoodScore.evidence.geographyPoint",
@@ -36,7 +38,22 @@ function factLabel(): string {
 }
 
 function factTooltip(): string {
-  return props.fact.tooltip ?? (props.fact.tooltipKey ? t(props.fact.tooltipKey, props.fact.tooltipValues) : "");
+  if (props.fact.tooltip) return props.fact.tooltip;
+  if (!props.fact.tooltipKey) return "";
+  const values = props.fact.tooltipValues;
+  if (props.fact.kind === "transportServiceQuality" && typeof values?.trend === "string") {
+    const trendKey: Record<string, TranslationKey> = {
+      improving: "nearbyStations.linesRanking.trends.improving",
+      stable: "nearbyStations.linesRanking.trends.stable",
+      declining: "nearbyStations.linesRanking.trends.declining",
+    };
+    return t(props.fact.tooltipKey, { ...values, trend: t(trendKey[values.trend] ?? "nearbyStations.linesRanking.trends.stable") });
+  }
+  return t(props.fact.tooltipKey, values);
+}
+
+function openAction(): void {
+  if (props.fact.action?.href) void router.replace({ path: props.fact.action.href });
 }
 
 function geographyLabel(): string {
@@ -107,6 +124,14 @@ function geographyLabel(): string {
           <dd>{{ t("nearbyStations.neighborhoodScore.evidence.loadedAt", { time: d(fact.evidence.observedAt, { dateStyle: "short", timeStyle: "short" }) }) }}</dd>
         </div>
       </dl>
+      <button
+        v-if="fact.action"
+        type="button"
+        class="nearby-neighborhood-score-fact__action"
+        @click.stop="openAction"
+      >
+        {{ t(fact.action.labelKey) }}
+      </button>
     </div>
   </div>
 </template>
@@ -128,6 +153,8 @@ function geographyLabel(): string {
 .nearby-neighborhood-score-fact__tooltip dl > div { display: grid; gap: 2px; grid-template-columns: auto 1fr; }
 .nearby-neighborhood-score-fact__tooltip dt { color: #8490a4; font-size: .64rem; font-weight: 850; }
 .nearby-neighborhood-score-fact__tooltip dd { color: #344054; font-size: .68rem; margin: 0; }
+.nearby-neighborhood-score-fact__action { background: #5146ff; border: 0; border-radius: 8px; color: #fff; cursor: pointer; font: inherit; font-size: .7rem; font-weight: 850; margin-top: 10px; padding: 7px 9px; }
+.nearby-neighborhood-score-fact__action:hover, .nearby-neighborhood-score-fact__action:focus-visible { background: #4034df; outline: 2px solid rgba(81,70,255,.24); outline-offset: 2px; }
 @media (max-width: 680px) {
   .nearby-neighborhood-score-fact__tooltip { left: 0; max-width: none; position: relative; top: auto; transform: none; width: auto; }
   .nearby-neighborhood-score-fact:hover .nearby-neighborhood-score-fact__tooltip { opacity: 0; pointer-events: none; visibility: hidden; }

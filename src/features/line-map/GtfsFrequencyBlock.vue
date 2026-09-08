@@ -30,6 +30,9 @@ function formatHeadway(value?: number): string {
       })
     : t("globalMap.sidebar.lineUnavailable");
 }
+function isDirectionUnavailable(direction: FrequencyDirection): boolean {
+  return periods.every((period) => roundedHeadway(direction[period.key]) === undefined);
+}
 const cells = computed(() =>
   periods.map((period) => {
     const values = props.directions
@@ -44,7 +47,7 @@ const cells = computed(() =>
           ? t("globalMap.sidebar.gtfsFrequency.minutes", { value: n(min) })
           : t("globalMap.sidebar.gtfsFrequency.rangeMinutes", { min: n(min), max: n(max) });
     }
-    return { ...period, value };
+    return { ...period, value, available: values.length > 1 || isHeadway(props.average[period.key]) };
   }),
 );
 const showDirectionDetails = computed(
@@ -55,13 +58,27 @@ const showDirectionDetails = computed(
       return values.some((value) => value === undefined) || new Set(values).size > 1;
     }),
 );
+const summaryUnavailable = computed(() =>
+  cells.value.every((cell) => !cell.available),
+);
 </script>
 
 <template>
   <section class="gtfs-frequency-block">
-    <h4 v-if="title">{{ title }}</h4>
-    <p v-if="endpoints" class="gtfs-frequency-block__endpoints">{{ endpoints }}</p>
-    <dl class="gtfs-frequency-block__grid" data-testid="frequency-grid">
+    <div v-if="title || endpoints || summaryUnavailable" class="gtfs-frequency-block__heading">
+      <div class="gtfs-frequency-block__heading-copy">
+        <h4 v-if="title">{{ title }}</h4>
+        <p v-if="endpoints" class="gtfs-frequency-block__endpoints">{{ endpoints }}</p>
+      </div>
+      <span
+        v-if="summaryUnavailable"
+        class="gtfs-frequency-block__summary-unavailable"
+        data-testid="frequency-summary-unavailable"
+      >
+        {{ t("globalMap.sidebar.lineUnavailable") }}
+      </span>
+    </div>
+    <dl v-if="!summaryUnavailable" class="gtfs-frequency-block__grid" data-testid="frequency-grid">
       <div v-for="cell in cells" :key="cell.key" :data-period="cell.key">
         <dt>{{ t(cell.label) }}</dt>
         <dd>
@@ -76,15 +93,20 @@ const showDirectionDetails = computed(
         :key="direction.id"
         class="gtfs-frequency-block__direction"
       >
-        <p>
+        <div class="gtfs-frequency-block__direction-heading">
+          <p>
           {{
             t("globalMap.sidebar.gtfsFrequency.fromTo", {
               from: direction.from || t("globalMap.sidebar.gtfsFrequency.unknownOrigin"),
               to: direction.to || t("globalMap.sidebar.gtfsFrequency.unknownDestination"),
             })
           }}
-        </p>
-        <dl class="gtfs-frequency-block__grid">
+          </p>
+          <span v-if="isDirectionUnavailable(direction)" class="gtfs-frequency-block__direction-unavailable">
+            {{ t("globalMap.sidebar.lineUnavailable") }}
+          </span>
+        </div>
+        <dl v-if="!isDirectionUnavailable(direction)" class="gtfs-frequency-block__grid">
           <div v-for="period in periods" :key="period.key">
             <dt>{{ t(period.label) }}</dt>
             <dd>{{ formatHeadway(direction[period.key]) }}</dd>
@@ -99,6 +121,18 @@ const showDirectionDetails = computed(
 .gtfs-frequency-block {
   display: grid;
   gap: var(--space-2);
+  min-width: 0;
+}
+.gtfs-frequency-block__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.gtfs-frequency-block__heading-copy {
+  display: grid;
+  gap: var(--space-1);
   min-width: 0;
 }
 h4,
@@ -116,6 +150,13 @@ h4 {
   color: var(--muted);
   font-size: 0.7rem;
   overflow-wrap: anywhere;
+}
+.gtfs-frequency-block__summary-unavailable {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-align: right;
 }
 .gtfs-frequency-block__grid {
   display: grid;
@@ -156,5 +197,17 @@ summary:focus-visible {
   display: grid;
   gap: var(--space-2);
   margin-top: var(--space-2);
+}
+.gtfs-frequency-block__direction-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.gtfs-frequency-block__direction-unavailable {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: .68rem;
+  font-weight: 800;
 }
 </style>

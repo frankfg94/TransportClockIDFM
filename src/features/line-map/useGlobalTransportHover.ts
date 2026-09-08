@@ -19,7 +19,11 @@ export interface UseGlobalTransportHoverOptions {
   hasActivePointers: () => boolean;
   draw: () => void;
   setSidebarPreviewLineId: (lineId?: string) => void;
-  selectFeature: (feature: TransportMapHitCandidates, event?: MouseEvent) => void;
+  selectFeature: (
+    feature: TransportMapHitCandidates,
+    event?: MouseEvent,
+    point?: ScreenPoint,
+  ) => void;
   selectLine?: (line: GlobalMapLine, disruption?: TrafficDisruption) => void | Promise<void>;
   resolveCandidateTrafficDisruption?: (
     candidate: LineHitCandidate,
@@ -141,10 +145,18 @@ export function useGlobalTransportHover(options: UseGlobalTransportHoverOptions)
     );
   }
 
-  function openLineChoice(lineCandidates: LineHitCandidate[], event?: MouseEvent): void {
+  function openLineChoice(
+    lineCandidates: LineHitCandidate[],
+    event?: MouseEvent,
+    pointer?: ScreenPoint,
+  ): void {
     if (lineCandidates.length < 2) return;
     lineChoiceOpen.value = true;
     hoveredLineCandidates.value = lineCandidates;
+    // A touch tap has no preceding hover event. Keep the tap position so the
+    // interactive picker can still be positioned on the map instead of
+    // relying on a desktop-only pointermove.
+    if (pointer) hoveredPointer.value = pointer;
     const first = lineCandidates[0]!;
     hoveredFeature.value = {
       type: "line",

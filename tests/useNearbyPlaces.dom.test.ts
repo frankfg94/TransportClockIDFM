@@ -90,4 +90,43 @@ describe("useNearbyPlaces", () => {
       vi.useRealTimers();
     }
   });
+
+  it("merges multi-station line anchors and keeps partial provider results", async () => {
+    const provider: PlacesProvider = {
+      searchDestinations: vi.fn(async () => []),
+      searchNearby: vi.fn(async ({ origin }) => {
+        if (origin.lon === 2.4) throw new Error("one anchor unavailable");
+        return [{
+          id: "node:shared",
+          name: "Café partagé",
+          lon: 2.3,
+          lat: 48.81,
+          category: "food" as const,
+          kind: "cafe",
+          distanceMeters: 180,
+        }];
+      }),
+    };
+    const origins = ref([
+      { lon: 2.3, lat: 48.81, label: "Station ouest" },
+      { lon: 2.4, lat: 48.82, label: "Station est" },
+    ]);
+    const radius = ref(160);
+    const enabled = ref(true);
+    let nearby!: ReturnType<typeof useNearbyPlaces>;
+    const Harness = defineComponent({
+      setup() {
+        nearby = useNearbyPlaces({ origins, radius, enabled, provider });
+        return () => null;
+      },
+    });
+    const wrapper = mount(Harness);
+
+    await flushPromises();
+
+    expect(provider.searchNearby).toHaveBeenCalledTimes(2);
+    expect(nearby.places.value.map((place) => place.id)).toEqual(["node:shared"]);
+    expect(nearby.error.value).toBeUndefined();
+    wrapper.unmount();
+  });
 });

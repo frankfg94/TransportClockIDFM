@@ -359,6 +359,28 @@ describe("GTFS frequency card", () => {
     expect(sections[0]!.find('[data-period="peakMinutes"] small').exists()).toBe(false);
   });
 
+  it("condenses an unavailable section summary beside its direction", () => {
+    const wrapper = card(
+      profile({
+        branched: true,
+        sections: [
+          {
+            ...section("missing", "branch"),
+            average: {},
+            directions: [],
+          },
+        ],
+      }),
+    );
+
+    const missingSection = wrapper.get('[data-frequency-section="missing"]');
+    expect(missingSection.find('[data-testid="frequency-grid"]').exists()).toBe(false);
+    expect(missingSection.get('[data-testid="frequency-summary-unavailable"]').text()).toBe(
+      "Unavailable",
+    );
+    expect(missingSection.text()).toContain("From missing origin to missing terminus");
+  });
+
   it("collapses direction ranges whose formatted bounds are equal", () => {
     const wrapper = card(
       profile({
@@ -633,6 +655,22 @@ describe("GTFS frequency card", () => {
     expect(wrapper.text()).toContain("3 min");
     expect(wrapper.get('[data-period="nightMinutes"] strong').text()).toBe("Non disponible");
     expect(wrapper.find("details").exists()).toBe(false);
+  });
+
+  it("collapses an entirely unavailable direction into one compact label", () => {
+    const unavailableDirection = {
+      id: "out",
+      from: "West",
+      to: "East",
+      stationCount: 3,
+    };
+    const wrapper = card(profile({
+      directions: [unavailableDirection, { ...unavailableDirection, id: "back" }],
+    }));
+
+    expect(wrapper.find("details").exists()).toBe(true);
+    expect(wrapper.findAll(".gtfs-frequency-block__direction-unavailable")).toHaveLength(2);
+    expect(wrapper.findAll(".gtfs-frequency-block__direction .gtfs-frequency-block__grid")).toHaveLength(0);
   });
 
   it("hides pinned metrics and metadata during preview", () => {

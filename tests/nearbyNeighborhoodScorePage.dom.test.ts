@@ -1,5 +1,5 @@
 import { mount } from "@vue/test-utils";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import NearbyNeighborhoodScorePage from "../src/features/nearby-stations/NearbyNeighborhoodScorePage.vue";
 
 const mocks = vi.hoisted(() => ({
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   useNearbyStations: vi.fn(),
   useNearbyHeavyTransports: vi.fn(),
   useNearbyNeighborhoodScore: vi.fn(),
+  useServiceQuality: vi.fn(),
   nearby: {
     selectedPlace: { value: undefined as { lon: number; lat: number; label?: string } | undefined },
     stations: { value: [] },
@@ -52,6 +53,9 @@ vi.mock("../src/features/nearby-stations/useNearbyHeavyTransports", () => ({
 vi.mock("../src/features/nearby-stations/useNearbyNeighborhoodScore", () => ({
   useNearbyNeighborhoodScore: mocks.useNearbyNeighborhoodScore,
 }));
+vi.mock("../src/features/nearby-stations/useServiceQuality", () => ({
+  useServiceQuality: mocks.useServiceQuality,
+}));
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -60,6 +64,11 @@ afterEach(() => {
   mocks.useNearbyStations.mockReturnValue(mocks.nearby);
   mocks.useNearbyHeavyTransports.mockReturnValue(mocks.heavy);
   mocks.useNearbyNeighborhoodScore.mockReturnValue(mocks.score);
+  mocks.useServiceQuality.mockReturnValue({ data: { value: undefined }, isLoading: { value: false }, error: { value: undefined } });
+});
+
+beforeEach(() => {
+  mocks.useServiceQuality.mockReturnValue({ data: { value: undefined }, isLoading: { value: false }, error: { value: undefined } });
 });
 
 describe("NearbyNeighborhoodScorePage", () => {

@@ -4,6 +4,7 @@ import { LoaderCircle, MapPin, Search, Store, TrainFront } from "lucide-vue-next
 import { useI18n } from "../../i18n";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import { createIgnTransportMapGeocoder } from "./geocoding";
+import { fuzzyMatches } from "../../services/fuzzySearch";
 
 const props = defineProps<{
   modelValue?: GeocoderPoint;
@@ -50,20 +51,8 @@ function filterSuggestions(points: GeocoderPoint[]): GeocoderPoint[] {
     : points;
 }
 
-function normalizedSearchValue(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLocaleLowerCase("fr-FR")
-    .trim();
-}
-
 function isMatchingSavedSuggestion(point: GeocoderPoint, value: string): boolean {
-  const normalized = normalizedSearchValue(value);
-  if (!normalized) return true;
-  return [point.label, point.address, point.city, point.postcode]
-    .filter((candidate): candidate is string => Boolean(candidate))
-    .some((candidate) => normalizedSearchValue(candidate).includes(normalized));
+  return fuzzyMatches(value, [point.label, point.address, point.city, point.postcode]);
 }
 
 function savedSuggestionsFor(value: string): GeocoderPoint[] {

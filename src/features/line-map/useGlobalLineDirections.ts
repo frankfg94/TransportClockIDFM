@@ -6,7 +6,6 @@ import type { TransportMapNetwork } from "../transport-map/contracts/network";
 import type {
   GlobalMapLine,
   GlobalMapPath,
-  GlobalMapStation,
 } from "../transport-map/contracts/manifest";
 import { lonLatToWorld } from "../transport-map/geo/coordinateKernel";
 import {
@@ -19,7 +18,6 @@ import {
 import {
   createGlobalBusDirectionGeometryPath,
   createGlobalBusDirectionGeometryRequest,
-  hasSingleConnectedGlobalMapPathGeometry,
 } from "./globalBusDirectionGeometry";
 import {
   defaultGlobalDirectionMerge,
@@ -300,11 +298,7 @@ export function useGlobalLineDirections(options: UseGlobalLineDirectionsOptions)
     await nextTick();
     if (
       requestToken !== busDirectionGeometryRequestToken ||
-      options.getActiveLine()?.id !== line.id ||
-      hasSingleConnectedGlobalMapPathGeometry(
-        options.getStaticLineMetadataPaths(),
-        options.getNetwork()?.stationsById ?? new Map<string, GlobalMapStation>(),
-      )
+      options.getActiveLine()?.id !== line.id
     ) {
       return;
     }
@@ -318,6 +312,9 @@ export function useGlobalLineDirections(options: UseGlobalLineDirectionsOptions)
     if (!request || stationIds.length !== request.stops.length) return;
 
     const cacheKey = `${line.id}:${direction.selectedDirectionId}`;
+    // Resolve the selected stop sequence independently of whichever static
+    // tiles happen to have arrived. Connectivity alone cannot prove that a
+    // mixed topology path follows this direction's road/platform geometry.
     let geometry = busDirectionGeometryCache.get(cacheKey);
     if (!geometry) {
       geometry = fetchResolvedLineGeometry(request)
@@ -328,6 +325,11 @@ export function useGlobalLineDirections(options: UseGlobalLineDirectionsOptions)
       busDirectionGeometryCache.set(cacheKey, geometry);
     }
     const path = await geometry;
+    // Transient failures must be retried on the next selection, not retained
+    // for the entire session until a browser reload.
+    if (!path && busDirectionGeometryCache.get(cacheKey) === geometry) {
+      busDirectionGeometryCache.delete(cacheKey);
+    }
     if (
       path &&
       requestToken === busDirectionGeometryRequestToken &&

@@ -1,10 +1,66 @@
 // Bump this whenever the compiled artifact or source identifiers change so
 // Nitro cannot silently consume an old neighborhood snapshot.
-export const VERDICT_SCHEMA_VERSION = "1.1" as const;
+export const VERDICT_SCHEMA_VERSION = "1.2" as const;
 
 /** Stable logical ids; the active edition is carried by source metadata. */
 export const AIR_NOISE_STATISTICS_SOURCE_ID = "air-noise-statistics" as const;
 export const AIR_NOISE_GRID_SOURCE_ID = "air-noise-grid" as const;
+export const SERVICE_QUALITY_SOURCE_ID = "idfm-service-quality-2025" as const;
+
+export type ServiceQualityMode = "METRO" | "RER" | "TRAIN" | "TRAM";
+export type ReliabilityTrend = "improving" | "stable" | "declining";
+export type ReliabilityLabel = "very-reliable" | "reliable" | "fairly-reliable" | "unreliable" | "very-unreliable";
+export type ServiceQualityScoreMethod = "threshold" | "peer-comparison" | "metro-combined";
+
+export interface ServiceQualityYearValue {
+  year: number;
+  value: number;
+}
+
+export interface ServiceQualityIndicatorResult {
+  id: string;
+  label: string;
+  source?: string;
+  weight: number;
+  latestValue?: number;
+  weightedValue?: number;
+  threshold?: number;
+  marginToThreshold?: number;
+  reliabilityScore: number;
+  labelKey: ReliabilityLabel;
+  scoreMethod: Exclude<ServiceQualityScoreMethod, "metro-combined">;
+  trend: ReliabilityTrend;
+  trendDelta: number;
+  trendMessage?: string;
+  yearsUsed: number[];
+  values: ServiceQualityYearValue[];
+}
+
+export interface ServiceQualityLineReliability {
+  lineId: string;
+  lineName: string;
+  mode: ServiceQualityMode;
+  aliases: string[];
+  latestValue?: number;
+  weightedValue?: number;
+  threshold?: number;
+  marginToThreshold?: number;
+  reliabilityScore: number;
+  labelKey: ReliabilityLabel;
+  scoreMethod: ServiceQualityScoreMethod;
+  trend: ReliabilityTrend;
+  trendDelta: number;
+  trendMessage?: string;
+  yearsUsed: number[];
+  indicators: ServiceQualityIndicatorResult[];
+}
+
+export interface CompiledServiceQualityData {
+  generatedAt: string;
+  sourceId: typeof SERVICE_QUALITY_SOURCE_ID;
+  availableYears: number[];
+  lines: ServiceQualityLineReliability[];
+}
 
 export type VerdictCategoryId =
   | "transport"
@@ -256,4 +312,5 @@ export interface CompiledNeighborhoodVerdictData {
     communes: Record<string, SecurityCommuneResult>;
     trends: Record<string, SecurityTrendResult>;
   };
+  serviceQuality: CompiledServiceQualityData;
 }

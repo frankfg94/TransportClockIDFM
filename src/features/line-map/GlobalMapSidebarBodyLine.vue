@@ -17,8 +17,12 @@ import AnnualRidershipStationCard from "./AnnualRidershipStationCard.vue";
 import CitiesLinePattern from "./CitiesLinePattern.vue";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import UserFriendlyTraffic from "../../components/UserFriendlyTraffic.vue";
+import MaterialCombobox, { type MaterialComboboxOption } from "../../components/MaterialCombobox.vue";
 import { useI18n } from "../../i18n";
 import { formatTransitDistance } from "../../services/distance";
+import { useNearbyPlacePresenter } from "../nearby-stations/useNearbyPlacePresenter";
+import { nearbyPlaceWalkingMinutes } from "../nearby-stations/nearbyPlacePresentation";
+import type { NearbyPlace } from "../nearby-stations/nearbyPlaces";
 import type { GlobalMapLine } from "../transport-map/contracts/manifest";
 import type { TransitFamily } from "../../types/transit";
 import { buildGlobalLineMetadata, type GlobalLineMetadata } from "./globalLineMetadata";
@@ -32,6 +36,7 @@ import type {
 const props = defineProps<GlobalMapSidebarBodyProps>();
 const emit = defineEmits<GlobalMapSidebarBodyEmits>();
 const { t } = useI18n();
+const { presentPlace } = useNearbyPlacePresenter();
 
 const displayLine = computed(() => props.displayLine);
 const isLinePreview = computed(() => props.isLinePreview);
@@ -90,6 +95,15 @@ const optionalDirectionVariants = computed(() =>
 const itineraryExpanded = ref(!defaultGlobalDirectionMerge(props.displayLine?.mode ?? "BUS"));
 const lineCitiesExpanded = ref(false);
 const entrancesExpanded = ref(false);
+const nearbyRadiusOptions = computed<MaterialComboboxOption[]>(() => [
+  { id: "2", label: t("globalMap.sidebar.nearbyPlacesRadius", { minutes: 2 }) },
+  { id: "5", label: t("globalMap.sidebar.nearbyPlacesRadius", { minutes: 5 }) },
+]);
+const presentedNearbyPlaces = computed(() => props.nearbyPlaces.slice(0, 80).map((place: NearbyPlace) => ({
+  place,
+  presentation: presentPlace(place),
+  minutes: nearbyPlaceWalkingMinutes(place),
+})));
 
 watch(
   () => [props.displayLine?.id, props.displayLine?.mode] as const,
@@ -146,6 +160,10 @@ function formatLineLength(lengthKm?: number): string {
   return typeof lengthKm === "number" && lengthKm > 0
     ? formatTransitDistance(lengthKm)
     : t("globalMap.sidebar.lineUnavailable");
+}
+
+function updateNearbyRadius(value: string): void {
+  emit("update:nearby-radius-minutes", value === "5" ? 5 : 2);
 }
 </script>
 
@@ -242,6 +260,39 @@ function formatLineLength(lengthKm?: number): string {
           ><span>{{ t("globalMap.sidebar.lineStatsConnections") }}</span>
         </div>
       </article>
+    </section>
+
+    <section v-if="!isLinePreview" class="global-map-picker-sidebar__line-card global-map-picker-sidebar__nearby-card">
+      <div class="global-map-picker-sidebar__line-card-title">
+        <span><Building2 :size="16" aria-hidden="true" />{{ t("globalMap.sidebar.nearbyPlaces") }}</span>
+        <MaterialCombobox
+          :model-value="String(nearbyPlacesRadiusMinutes)"
+          :options="nearbyRadiusOptions"
+          :aria-label="t('globalMap.sidebar.nearbyPlacesRadiusAria')"
+          @update:model-value="updateNearbyRadius"
+        />
+      </div>
+      <p class="global-map-picker-sidebar__nearby-hint">
+        {{ t("globalMap.sidebar.nearbyPlacesDescription", { minutes: nearbyPlacesRadiusMinutes }) }}
+      </p>
+      <p v-if="nearbyPlacesLoading" class="global-map-picker-sidebar__line-empty" role="status">
+        {{ t("globalMap.sidebar.nearbyPlacesLoading") }}
+      </p>
+      <p v-else-if="nearbyPlacesError" class="global-map-picker-sidebar__line-empty" role="status">
+        {{ t("globalMap.sidebar.nearbyPlacesUnavailable") }}
+      </p>
+      <p v-else-if="presentedNearbyPlaces.length === 0" class="global-map-picker-sidebar__line-empty">
+        {{ t("globalMap.sidebar.nearbyPlacesEmpty") }}
+      </p>
+      <ul v-else class="global-map-picker-sidebar__nearby-list">
+        <li v-for="entry in presentedNearbyPlaces" :key="entry.place.id">
+          <component :is="entry.presentation.icon" :size="16" aria-hidden="true" />
+          <span>
+            <strong>{{ entry.presentation.name }}</strong>
+            <small>{{ entry.presentation.typeLabel }} · {{ t("nearbyStations.walkingTime", { minutes: entry.minutes }) }}</small>
+          </span>
+        </li>
+      </ul>
     </section>
 
     <section
@@ -480,6 +531,7 @@ function formatLineLength(lengthKm?: number): string {
       :loading="frequencyLoading"
       :unavailable="frequencyUnavailable"
       :preview="isLinePreview"
+      @modal-open="emit('modal-open', $event)"
     />
 
     <AnnualRidershipCard
@@ -560,3 +612,62 @@ function formatLineLength(lengthKm?: number): string {
     </button>
   </div>
 </template>
+
+<style scoped>
+.global-map-picker-sidebar__nearby-card {
+  gap: 9px;
+}
+.global-map-picker-sidebar__nearby-card .global-map-picker-sidebar__line-card-title {
+  align-items: center;
+}
+.global-map-picker-sidebar__nearby-card :deep(.material-combobox) {
+  min-width: 126px;
+  max-width: 150px;
+}
+.global-map-picker-sidebar__nearby-card :deep(.material-combobox__trigger) {
+  min-height: 34px;
+  padding: 5px 9px;
+}
+.global-map-picker-sidebar__nearby-card :deep(.material-combobox__value) {
+  font-size: .72rem;
+  font-weight: 800;
+}
+.global-map-picker-sidebar__nearby-hint {
+  color: var(--muted, #71809d);
+  font-size: .68rem;
+  line-height: 1.35;
+}
+.global-map-picker-sidebar__nearby-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.global-map-picker-sidebar__nearby-list li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: #5146ff;
+}
+.global-map-picker-sidebar__nearby-list li > span {
+  display: grid;
+  min-width: 0;
+}
+.global-map-picker-sidebar__nearby-list strong,
+.global-map-picker-sidebar__nearby-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.global-map-picker-sidebar__nearby-list strong {
+  color: var(--ink, #18233f);
+  font-size: .72rem;
+}
+.global-map-picker-sidebar__nearby-list small {
+  color: var(--muted, #71809d);
+  font-size: .62rem;
+}
+</style>

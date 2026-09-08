@@ -241,7 +241,7 @@ describe("useNearbyNeighborhoodScore", () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true,
       json: async () => ({
-      schemaVersion: "1.1",
+      schemaVersion: "1.2",
         generatedAt: "2026-09-04T00:00:00.000Z",
         categories: [],
         sources: [],

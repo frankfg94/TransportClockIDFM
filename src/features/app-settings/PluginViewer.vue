@@ -19,6 +19,7 @@ import {
 } from "lucide-vue-next";
 import AppModal from "../../components/AppModal.vue";
 import { useI18n } from "../../i18n";
+import { fuzzyFilter } from "../../services/fuzzySearch";
 import { toServerApiUrl } from "../../services/serverApi";
 import { getTransportClockPlugins } from "../plugins/pluginRuntime";
 import {
@@ -61,19 +62,13 @@ const sortedPlugins = computed(() => {
 });
 
 const filteredPlugins = computed(() => {
-  const normalizedQuery = normalizeSearchText(query.value);
-  if (!normalizedQuery) {
-    return sortedPlugins.value;
-  }
-  return sortedPlugins.value.filter((plugin) =>
-    [
-      pluginName(plugin),
-      pluginDescription(plugin),
-      plugin.metadata.author,
-      plugin.id,
-      plugin.version,
-    ].some((value) => normalizeSearchText(value).includes(normalizedQuery)),
-  );
+  return fuzzyFilter(sortedPlugins.value, query.value, (plugin) => [
+    pluginName(plugin),
+    pluginDescription(plugin),
+    plugin.metadata.author,
+    plugin.id,
+    plugin.version,
+  ]);
 });
 
 const pageCount = computed(() =>
@@ -141,14 +136,6 @@ function pluginName(plugin: TransportClockClientPlugin): string {
 
 function pluginDescription(plugin: TransportClockClientPlugin): string {
   return plugin.metadata.description[locale.value];
-}
-
-function normalizeSearchText(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLocaleLowerCase(locale.value)
-    .trim();
 }
 
 function getEntry(plugin: TransportClockClientPlugin): AppPluginSettingsEntry {

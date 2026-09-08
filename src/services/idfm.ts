@@ -1,4 +1,4 @@
-import { runNetworkTask } from "./networkScheduler";
+import { createNetworkScheduler, runNetworkTask } from "./networkScheduler";
 ﻿import type {
   BoardDeparturesResult,
   Departure,
@@ -39,6 +39,7 @@ import type {
   NearbyJourneySection,
 } from "../features/nearby-stations/nearbyHeavyTransports";
 import type { GeocoderPoint } from "../features/transport-map/contracts/geocoder";
+import { fuzzyMatches } from "./fuzzySearch";
 
 type SiriTextValue =
   | string
@@ -984,9 +985,7 @@ function mapSearchLines(
         return true;
       }
 
-      return normalizeText(`${line.code ?? ""} ${line.name ?? ""}`).includes(
-        normalizedQuery,
-      );
+      return fuzzyMatches(normalizedQuery, [line.code, line.name]);
     })
     .sort(compareLines)
     .map((line) => mapLineToSearchOption(line, network));
@@ -1006,9 +1005,7 @@ export async function searchLineStations(
         return true;
       }
 
-      return normalizeText(`${station.label} ${station.city ?? ""}`).includes(
-        normalizedQuery,
-      );
+      return fuzzyMatches(normalizedQuery, [station.label, station.city]);
     })
     .sort((left, right) => left.label.localeCompare(right.label, "fr"));
 }
@@ -3187,46 +3184,61 @@ export function clearLineFrequencyProfileCache(): void {
   lineFrequencyProfileCache.clear();
 }
 
+// Departure sources must not wait behind exploratory neighborhood requests.
+// Each deadline covers headers and body consumption, even in unlimited mode.
+const runBoardSource = createNetworkScheduler(Infinity, 12_000);
+
+export interface BoardDeparturesRequestOptions extends NavitiaRequestOptions {
+  onUpdate?: (result: BoardDeparturesResult) => void;
+}
+
 export async function fetchBoardDepartures(
   board: TransitBoardConfig,
-  options: NavitiaRequestOptions = {},
+  options: BoardDeparturesRequestOptions = {},
 ): Promise<BoardDeparturesResult> {
-  const [batches, scheduleInfo] = await Promise.all([
-    Promise.all(
-      getEffectiveMonitoringPoints(board).map((point) =>
-        fetchMonitoringPoint(board, point, options).catch((cause) => {
-          if (isAbortError(cause)) throw cause;
-          return [];
-        }),
-      ),
-    ),
-    fetchBoardScheduleInfo(board, options).catch((cause) => {
-      if (isAbortError(cause)) throw cause;
-      return {
-        lastDepartures: [],
-        scheduledDepartures: [],
-      };
-    }),
-  ]);
+  const batches: Departure[][] = [];
+  let scheduleInfo: BoardScheduleInfo = { lastDepartures: [], scheduledDepartures: [] };
+  let successfulSources = 0;
+  let firstFailure: unknown;
 
-  const uniqueDepartures = new Map<string, Departure>();
-
-  batches
-    .flat()
-    .filter(isUpcomingDeparture)
-    .sort(compareDepartures)
-    .forEach((departure) => {
+  const result = (): BoardDeparturesResult => {
+    const uniqueDepartures = new Map<string, Departure>();
+    batches.flat().filter(isUpcomingDeparture).sort(compareDepartures).forEach((departure) => {
       uniqueDepartures.set(departure.id, departure);
     });
+    return buildBoardDeparturesResult(
+      board,
+      Array.from(uniqueDepartures.values()).sort(compareDepartures),
+      scheduleInfo.lastDepartures,
+      scheduleInfo.scheduledDepartures,
+    );
+  };
+  const publish = () => {
+    const current = result();
+    if (current.departures.length > 0 && !options.signal?.aborted) options.onUpdate?.(current);
+  };
+  const failed = (cause: unknown) => {
+    if (isAbortError(cause) || options.signal?.aborted) throw cause;
+    firstFailure ??= cause;
+  };
 
-  const departures = Array.from(uniqueDepartures.values()).sort(compareDepartures);
+  await Promise.all([
+    ...getEffectiveMonitoringPoints(board).map((point) =>
+      runBoardSource((signal) => fetchMonitoringPoint(board, point, { ...options, signal }), options.signal)
+        .then((departures) => { batches.push(departures); successfulSources++; publish(); })
+        .catch(failed),
+    ),
+    ...(board.schedule ? [
+      runBoardSource((signal) => fetchBoardScheduleInfo(board, { ...options, signal }), options.signal)
+        .then((schedule) => { scheduleInfo = schedule; successfulSources++; publish(); })
+        .catch(failed),
+    ] : []),
+  ]);
 
-  return buildBoardDeparturesResult(
-    board,
-    departures,
-    scheduleInfo.lastDepartures,
-    scheduleInfo.scheduledDepartures,
-  );
+  options.signal?.throwIfAborted();
+  // An unavailable upstream is not evidence of an empty timetable.
+  if (successfulSources === 0 && firstFailure !== undefined) throw firstFailure;
+  return result();
 }
 
 function isAbortError(cause: unknown): boolean {

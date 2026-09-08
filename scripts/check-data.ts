@@ -51,6 +51,7 @@ async function main(): Promise<void> {
     checkRidership(),
     checkR2Credentials(),
     checkNeighborhoodVerdict(),
+    checkServiceQuality(),
     checkIsochrones(),
     checkGlobalMap(),
   ]);
@@ -66,8 +67,32 @@ export async function checkNeighborhoodVerdict(): Promise<DataCheckRow> {
   const row: DataCheckRow = { Data: "Neighborhood verdict", Configured: source.kind === "directory" ? "Auto" : "Yes", Installed: "No", Mode: modeFromSource(source.kind, false), Location: source.location, Details: "" };
   try {
     const data = await loadCompiledNeighborhoodVerdictData(env);
-    return { ...row, Installed: "Yes", Details: `${data.greenSpaces.length} green spaces · ${data.gpeStations.length} GPE stations · ${data.sources.length} sources · air/noise grid ${data.airNoiseGrid ? "loaded" : "absent (optional)"} · generated ${data.generatedAt}` };
+    return { ...row, Installed: "Yes", Details: `${data.greenSpaces.length} green spaces · ${data.gpeStations.length} GPE stations · ${data.sources.length} sources · air/noise grid ${data.airNoiseGrid ? "loaded" : "absent (optional)"} · service quality ${data.serviceQuality.lines.length} lines · generated ${data.generatedAt}` };
   } catch (error) { return { ...row, Details: String(error) }; }
+}
+
+export async function checkServiceQuality(): Promise<DataCheckRow> {
+  const env = getNetexRuntimeEnv();
+  const source = getNeighborhoodVerdictSource(env);
+  const row: DataCheckRow = {
+    Data: "IDFM service quality",
+    Configured: source.kind === "directory" ? "Auto" : "Yes",
+    Installed: "No",
+    Mode: modeFromSource(source.kind, false),
+    Location: source.location,
+    Details: "",
+  };
+  try {
+    const data = await loadCompiledNeighborhoodVerdictData(env);
+    const years = data.serviceQuality.availableYears;
+    return {
+      ...row,
+      Installed: "Yes",
+      Details: `${data.serviceQuality.lines.length} lines · ${years[0] ?? "?"}–${years.at(-1) ?? "?"} · artifact ${source.kind} · generated ${data.serviceQuality.generatedAt}`,
+    };
+  } catch (error) {
+    return { ...row, Details: String(error) };
+  }
 }
 
 export async function checkIsochrones(): Promise<DataCheckRow> {
@@ -417,7 +442,7 @@ function printRecommendations(rows: DataCheckRow[]): void {
     );
   }
 
-  for (const name of ["Neighborhood verdict", "Walking isochrones", "Global map"]) {
+  for (const name of ["Neighborhood verdict", "IDFM service quality", "Walking isochrones", "Global map"]) {
     if (byData.get(name)?.Installed !== "Yes") recommendations.push(`${name}: vérifier la source indiquée et régénérer/publier les données manquantes.`);
   }
   console.log("\nRecommendations");

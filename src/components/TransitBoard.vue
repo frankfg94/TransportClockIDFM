@@ -34,6 +34,7 @@ import type {
   TransitFamily,
   TransferLineOption,
 } from "../types/transit";
+import { fuzzyMatches } from "../services/fuzzySearch";
 
 type DeparturePatternPayload = {
   board: TransitBoardConfig;
@@ -555,14 +556,7 @@ function stationMatchesQuery(
   station: StationSearchOption,
   query: string,
 ): boolean {
-  const normalizedQuery = normalizeText(query);
-
-  return (
-    !normalizedQuery ||
-    normalizeText(`${station.label} ${station.city ?? ""}`).includes(
-      normalizedQuery,
-    )
-  );
+  return fuzzyMatches(query, [station.label, station.city]);
 }
 
 function transitModeToFamily(mode: string): TransitFamily {

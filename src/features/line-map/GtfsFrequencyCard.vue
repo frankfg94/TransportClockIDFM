@@ -19,6 +19,14 @@ const props = defineProps<{
 const { t, d } = useI18n();
 const sourceDetailsOpen = ref(false);
 const timetableOpen = ref(false);
+const emit = defineEmits<{
+  "modal-open": [open: boolean];
+}>();
+watch(
+  [sourceDetailsOpen, timetableOpen],
+  ([sourceOpen, timetableIsOpen]) => emit("modal-open", sourceOpen || timetableIsOpen),
+  { immediate: true },
+);
 watch(
   [() => props.profile, () => props.loading, () => props.preview],
   ([profile, loading, preview]) => {

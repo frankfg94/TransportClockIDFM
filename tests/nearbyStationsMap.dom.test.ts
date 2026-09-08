@@ -106,7 +106,7 @@ function createIsochroneResponse(origin = { lon: 2.35, lat: 48.85 }) {
 
 function createNoiseZonesResponse(origin = { lon: 2.35, lat: 48.85 }): NearbyNoiseZonesResponse {
   return {
-    schemaVersion: "1.1",
+    schemaVersion: "1.2",
     origin,
     radiusMeters: 600,
     bbox: [2.34, 48.84, 2.36, 48.86],

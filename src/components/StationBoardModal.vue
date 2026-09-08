@@ -25,6 +25,7 @@ import type {
   TransitFamilyOption,
   TransferLineOption,
 } from "../types/transit";
+import { fuzzyMatches } from "../services/fuzzySearch";
 
 type StationSelectionMode = "list" | "map";
 type StationBoardModalMode = "dropdown" | "multistep";
@@ -598,12 +599,7 @@ function retryCurrentStep(): void {
 }
 
 function stationMatchesQuery(station: StationSearchOption, query: string): boolean {
-  const normalizedQuery = normalizeText(query);
-
-  return (
-    !normalizedQuery ||
-    normalizeText(`${station.label} ${station.city ?? ""}`).includes(normalizedQuery)
-  );
+  return fuzzyMatches(query, [station.label, station.city]);
 }
 
 function formatLoadError(error: unknown, resource: string): string {
@@ -616,12 +612,6 @@ function formatLoadError(error: unknown, resource: string): string {
   return t("board.stationModal.loadFailedResource", { resource });
 }
 
-function normalizeText(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
-}
 </script>
 
 <template>

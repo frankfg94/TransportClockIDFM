@@ -16,11 +16,23 @@
         </span>
         <div class="global-transport-plan__filter-heading-copy">
           <h2>{{ t("globalMap.page.exploreNetworks") }}</h2>
-          <p>{{ t("globalMap.page.quickViewSubtitle") }}</p>
+          <p v-if="!collapsed">{{ t("globalMap.page.quickViewSubtitle") }}</p>
         </div>
+        <button
+          type="button"
+          class="global-transport-plan__filter-toggle"
+          :aria-expanded="!collapsed"
+          :aria-label="collapsed ? t('globalMap.page.expandFilters') : t('globalMap.page.collapseFilters')"
+          :title="collapsed ? t('globalMap.page.expandFilters') : t('globalMap.page.collapseFilters')"
+          data-global-map-filters-toggle
+          @click="toggleCollapsed"
+        >
+          <Minimize2 v-if="!collapsed" :size="18" :stroke-width="2.35" aria-hidden="true" />
+          <Maximize2 v-else :size="18" :stroke-width="2.35" aria-hidden="true" />
+        </button>
       </header>
 
-      <div class="global-transport-plan__mode-list" role="list">
+      <div v-if="!collapsed" class="global-transport-plan__mode-list" role="list">
         <div
           class="global-transport-plan__mode-preset-row global-transport-plan__mode-preset-row--all"
           :class="{ 'global-transport-plan__mode-preset-row--active': activePreset === 'ALL' }"
@@ -94,7 +106,7 @@
         </div>
       </div>
 
-      <div class="global-transport-plan__filter-actions">
+      <div v-if="!collapsed" class="global-transport-plan__filter-actions">
         <button
           type="button"
           class="global-transport-plan__customize-button"
@@ -121,7 +133,8 @@
 </template>
 
 <script setup lang="ts">
-import { ChevronRight, LayoutGrid, Layers, Radar, SlidersHorizontal } from "lucide-vue-next";
+import { ref } from "vue";
+import { ChevronRight, LayoutGrid, Layers, Maximize2, Minimize2, Radar, SlidersHorizontal } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
 import type { GlobalMapMode } from "../transport-map/contracts/manifest";
 import GlobalTransportPlanModeIcon from "./GlobalTransportPlanModeIcon.vue";
@@ -153,9 +166,16 @@ const emit = defineEmits<{
   "open-line-panel": [mode: GlobalMapMode];
   "request-preset-install": [mode: GlobalMapMode];
   "open-radar": [mode: GlobalMapMode];
+  collapse: [];
 }>();
 
 const { t } = useI18n();
+const collapsed = ref(false);
+
+function toggleCollapsed(): void {
+  emit("collapse");
+  collapsed.value = !collapsed.value;
+}
 
 function isModeAvailable(mode: GlobalMapMode): boolean {
   return availableModes.includes(mode);
@@ -220,6 +240,33 @@ function handleModeClick(mode: GlobalMapMode): void {
 .global-transport-plan__filter-heading-copy {
   min-width: 0;
   padding-top: 2px;
+}
+.global-transport-plan__filter-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin: 4px 0 0 auto;
+  border: 1px solid rgba(82, 121, 179, 0.24);
+  border-radius: 10px;
+  background: rgba(242, 247, 255, 0.86);
+  color: #5279b3;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, transform 180ms ease;
+}
+.global-transport-plan__filter-toggle:hover,
+.global-transport-plan__filter-toggle:focus-visible {
+  border-color: rgba(82, 121, 179, 0.46);
+  background: #e8f1ff;
+  color: #1d4ed8;
+  outline: 2px solid rgba(37, 99, 235, 0.16);
+  outline-offset: 1px;
+}
+.global-transport-plan__filter-toggle svg {
+  display: block;
+  flex: 0 0 auto;
 }
 .global-transport-plan__filter-heading h2 {
   color: #172642;

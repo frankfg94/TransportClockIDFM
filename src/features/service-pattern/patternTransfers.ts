@@ -4,6 +4,7 @@ import {
   searchLineStations,
   searchTransitLines,
 } from "../../services/idfm";
+import { fuzzyFilter } from "../../services/fuzzySearch";
 import type {
   DepartureCall,
   DepartureCallingPattern,
@@ -362,17 +363,11 @@ async function resolveLineOption(
 
     const network = await resolveTransitFamilyOption(family, client);
     const lines = await findLineOptions(network, query, client);
-    const normalizedQuery = normalizePatternStationName(query);
-
-    return (
-      lines.find((line) => normalizePatternStationName(line.label) === normalizedQuery) ??
-      lines.find((line) =>
-        normalizePatternStationName(line.displayName ?? "").startsWith(
-          normalizedQuery,
-        ),
-      ) ??
-      lines[0]
-    );
+    return fuzzyFilter(
+      lines,
+      query,
+      (line) => [line.label, line.displayName, line.ref, line.navitiaId],
+    )[0] ?? lines[0];
   })();
 
   resolvedLineCache.set(cacheKey, request);

@@ -1,5 +1,6 @@
 import { lonLatToWorld } from "../transport-map/geo/coordinateKernel";
 import { resolveTransitLonLat } from "../network-ghost/geoProjection";
+import { isHighFidelityTransportPath } from "../transport-map/data/pathPrecedence";
 import type {
   GlobalMapLine,
   GlobalMapPath,
@@ -19,7 +20,13 @@ const ENDPOINT_PRECISION = 10_000_000;
 export function hasSingleConnectedGlobalMapPathGeometry(
   paths: readonly GlobalMapPath[],
   stationsById: ReadonlyMap<string, GlobalMapStation>,
+  requiredStationIds: readonly string[] = [],
 ): boolean {
+  const detailedPaths = paths.filter(isHighFidelityTransportPath);
+  const anchoredStationIds = new Set(detailedPaths.flatMap((path) =>
+    path.vertices.flatMap((vertex) => vertex.stationId ? [vertex.stationId] : []),
+  ));
+  if (requiredStationIds.some((id) => !anchoredStationIds.has(id))) return false;
   const parent: number[] = [];
   const endpointIndex = new Map<string, number>();
   const find = (index: number): number => {
@@ -45,7 +52,7 @@ export function hasSingleConnectedGlobalMapPathGeometry(
     return index;
   };
 
-  for (const path of paths) {
+  for (const path of detailedPaths) {
     // A connected schematic chord is still only a fallback. Let the GTFS
     // provider replace it when a current artifact is available for the line.
     if (path.quality.fallback) continue;

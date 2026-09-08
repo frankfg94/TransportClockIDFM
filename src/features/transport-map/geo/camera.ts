@@ -29,6 +29,13 @@ export interface CameraViewportOptions {
   generation?: number;
 }
 
+export interface CameraFitInsets {
+  top?: number;
+  right?: number;
+  bottom?: number;
+  left?: number;
+}
+
 export const DEFAULT_CAMERA: Readonly<CameraState> = {
   centerWorldX: 0.5,
   centerWorldY: 0.5,
@@ -115,16 +122,25 @@ export function fitCameraToBounds(
   paddingCssPx = 24,
   minZoom = 0,
   maxZoom = 20,
+  insets: CameraFitInsets = {},
 ): CameraState {
   const width = Math.max(bounds.maxX - bounds.minX, Number.EPSILON);
   const height = Math.max(bounds.maxY - bounds.minY, Number.EPSILON);
-  const availableWidth = Math.max(1, camera.viewportWidthCssPx - paddingCssPx * 2);
-  const availableHeight = Math.max(1, camera.viewportHeightCssPx - paddingCssPx * 2);
+  const leftInset = Math.max(0, insets.left ?? 0);
+  const rightInset = Math.max(0, insets.right ?? 0);
+  const topInset = Math.max(0, insets.top ?? 0);
+  const bottomInset = Math.max(0, insets.bottom ?? 0);
+  const availableWidth = Math.max(1, camera.viewportWidthCssPx - leftInset - rightInset - paddingCssPx * 2);
+  const availableHeight = Math.max(1, camera.viewportHeightCssPx - topInset - bottomInset - paddingCssPx * 2);
   const scale = Math.min(availableWidth / width, availableHeight / height);
   const zoom = Math.max(minZoom, Math.min(maxZoom, Math.log2(scale / 256)));
+  const worldScale = worldScaleAtZoom(zoom);
   return updateCamera(camera, {
-    centerWorldX: (bounds.minX + bounds.maxX) / 2,
-    centerWorldY: (bounds.minY + bounds.maxY) / 2,
+    // Center the bounds in the usable rectangle between the sidebars rather
+    // than in the full canvas. Positive left/right insets shift that rectangle
+    // and therefore require the inverse camera correction.
+    centerWorldX: (bounds.minX + bounds.maxX) / 2 - (leftInset - rightInset) / (2 * worldScale),
+    centerWorldY: (bounds.minY + bounds.maxY) / 2 - (topInset - bottomInset) / (2 * worldScale),
     zoom,
   });
 }

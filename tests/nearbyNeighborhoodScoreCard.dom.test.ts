@@ -20,6 +20,18 @@ describe("NearbyNeighborhoodScoreCard", () => {
       stationsLoaded: false,
       generatedAt: 1,
     });
+    result.categories.find((category) => category.id === "transport")!.neutralFacts.push({
+      id: "transport-quality",
+      kind: "transportServiceQuality",
+      category: "transport",
+      polarity: "positive",
+      family: "transport-service-quality",
+      priority: 1,
+      label: "Fiabilité des transports proches : 90/100",
+      tooltip: "Qualité de service documentée",
+      action: { labelKey: "nearbyStations.neighborhoodScore.facts.transportServiceQuality.openRanking", href: "/lines-ranking" },
+      evidence: { proof: "derived", sourceName: "IDFM", observedAt: 1, value: 90, unit: "/100" },
+    });
     const wrapper = mount(NearbyNeighborhoodScoreCard, {
       props: { result, directoryUrl: "/nearby-stations?annuary=" },
       global: {
@@ -41,6 +53,11 @@ describe("NearbyNeighborhoodScoreCard", () => {
     expect(wrapper.find(".nearby-neighborhood-score-fact__tooltip").text()).toContain("Source");
     expect(wrapper.find(".nearby-neighborhood-score-fact__tooltip").text()).toContain("Règle");
     expect(wrapper.find(".nearby-neighborhood-score-fact__tooltip").text()).toContain("Niveau de preuve");
+    const qualityTrigger = wrapper.findAll(".nearby-neighborhood-score-fact__trigger").find((candidate) => candidate.text().includes("Fiabilité"));
+    expect(qualityTrigger).toBeDefined();
+    await qualityTrigger!.trigger("click");
+    expect(wrapper.get(".nearby-neighborhood-score-fact__action").text()).toContain("Voir le classement");
+    await wrapper.get(".nearby-neighborhood-score-fact__action").trigger("click");
     wrapper.unmount();
   });
 

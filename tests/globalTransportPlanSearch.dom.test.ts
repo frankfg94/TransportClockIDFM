@@ -120,6 +120,18 @@ const louvreAddress = {
   type: "address",
 } satisfies GeocoderPoint;
 
+const favoriteAddress = {
+  id: "address-book:home",
+  lon: 2.3522,
+  lat: 48.8566,
+  label: "Chez moi",
+  address: "10 rue de Rivoli",
+  city: "Paris",
+  postcode: "75004",
+  provider: "address-book",
+  type: "address",
+} satisfies GeocoderPoint;
+
 const louvreStation = {
   id: "station:louvre",
   lon: 2.3366,
@@ -164,7 +176,7 @@ describe("GlobalTransportPlanSearch", () => {
 
     await wrapper.setProps({ open: true });
     expect(createGlobalMapSearchIndex).toHaveBeenCalledTimes(1);
-    expect(wrapper.text()).toContain(station.name);
+    expect(wrapper.text()).toContain("Aucune station, ligne ou lieu disponible.");
 
     await wrapper.setProps({ open: false });
     const updatedStation = { ...station, name: "Updated station" };
@@ -173,7 +185,7 @@ describe("GlobalTransportPlanSearch", () => {
 
     await wrapper.setProps({ open: true });
     expect(createGlobalMapSearchIndex).toHaveBeenCalledTimes(2);
-    expect(wrapper.text()).toContain(updatedStation.name);
+    expect(wrapper.text()).toContain("Aucune station, ligne ou lieu disponible.");
   });
 
   it("is closed by default and can be opened and closed explicitly", async () => {
@@ -193,6 +205,21 @@ describe("GlobalTransportPlanSearch", () => {
     expect(wrapper.emitted("update:open")?.at(-1)).toEqual([false]);
   });
 
+  it("hides the complete search surface when map interactions are disabled", async () => {
+    wrapper = mount(GlobalTransportPlanSearch, {
+      props: {
+        open: true,
+        showMapInteractions: false,
+        stations: [station],
+        lines: [line14, lineRerA],
+      },
+    });
+
+    expect(wrapper.find("[data-global-map-search]").exists()).toBe(false);
+    await wrapper.setProps({ showMapInteractions: true });
+    expect(wrapper.find("[data-global-map-search]").exists()).toBe(true);
+  });
+
   it("presents the IDFM-style search surface and emits a station with its exit count", async () => {
     wrapper = mount(GlobalTransportPlanSearch, {
       props: {
@@ -200,13 +227,14 @@ describe("GlobalTransportPlanSearch", () => {
         stations: [station],
         lines: [line14, lineRerA],
         entrances,
+        favoritePlaces: [favoriteAddress],
         catalogReady: true,
       },
     });
 
     expect(wrapper.get("input").attributes("placeholder")).toContain("station");
     expect(wrapper.text()).not.toContain("Suggestions");
-    expect(wrapper.text()).toContain("Correspondances");
+    expect(wrapper.text()).toContain("Favoris");
 
     await wrapper.get("input").setValue("chatelet");
     await vi.advanceTimersByTimeAsync(180);
@@ -219,6 +247,28 @@ describe("GlobalTransportPlanSearch", () => {
     await result.trigger("click");
     expect(wrapper.emitted("select-station")?.[0]?.[0]).toMatchObject({ id: station.id, name: station.name });
     expect(wrapper.text()).toContain("Récentes");
+  });
+
+  it("shows address-book entries under Favorites and emits the selected address", async () => {
+    wrapper = mount(GlobalTransportPlanSearch, {
+      props: {
+        open: true,
+        stations: [],
+        lines: [],
+        favoritePlaces: [favoriteAddress],
+        catalogReady: true,
+      },
+    });
+
+    expect(wrapper.text()).toContain("Favoris");
+    expect(wrapper.text()).toContain("Chez moi");
+    expect(wrapper.text()).toContain("Paris");
+    expect(wrapper.text()).not.toContain("Correspondances");
+
+    const favoriteResult = wrapper.get('[data-global-map-search-result-type="place"]');
+    await favoriteResult.trigger("click");
+
+    expect(wrapper.emitted("select-place")?.[0]?.[0]).toEqual(favoriteAddress);
   });
 
   it("searches a complete line and emits it through keyboard selection", async () => {
@@ -238,7 +288,7 @@ describe("GlobalTransportPlanSearch", () => {
     await wrapper.vm.$nextTick();
     const lineResult = wrapper.get(".global-map-search__result");
     expect(lineResult.text()).toContain("Ligne 4");
-    expect(lineResult.find('img[src*="LIGIDFMC01374.svg"]').exists()).toBe(true);
+    expect(lineResult.find('img[src*="LIGIDFMC01374"]').exists()).toBe(true);
     await input.trigger("keydown", { key: "ArrowDown" });
     await input.trigger("keydown", { key: "Enter" });
 

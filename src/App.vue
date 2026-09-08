@@ -46,6 +46,7 @@ import {
 import { createBoardFromDraft } from "./services/boardBuilder";
 import { transitModeToFamily } from "./services/linePresentation";
 import { fetchBoardDepartures, fetchDirectionGroupsForStation } from "./services/idfm";
+import { createNetworkScheduler } from "./services/networkScheduler";
 import { toServerApiUrl } from "./services/serverApi";
 import { fetchGtfsStatus } from "./services/gtfsStatus";
 import {
@@ -261,6 +262,8 @@ let boardRevealRequest = 0;
 let mobileBreakpointQuery: MediaQueryList | undefined;
 let desktopDragBreakpointQuery: MediaQueryList | undefined;
 const departureServiceTypeCache = new Map<string, Promise<DepartureServiceType | undefined>>();
+const runPatternRequest = createNetworkScheduler(3, 10_000);
+const boardEnrichmentVersions = new Map<string, symbol>();
 const boardRefreshPromises = new Map<string, Promise<void>>();
 const boardDirectionHydrationRequests = new Map<string, number>();
 let nextBoardDirectionHydrationRequest = 0;
@@ -801,13 +804,21 @@ async function refreshBoard(boardId: string): Promise<void> {
 
   const refreshPromise = (async (): Promise<void> => {
     try {
-      const result = await fetchBoardDepartures(createBoardRequestForSettings(board));
-      const enrichedResult = await enrichBoardDeparturesWithServiceTypes(board, result);
-
-      state.departures = enrichedResult.departures;
-      state.directionGroups = enrichedResult.directionGroups;
-      state.updatedAt = new Date();
-      updateAlarms(reconcileBoardAlarms(board, enrichedResult.departures, departureAlarms.value));
+      const version = Symbol(board.id);
+      boardEnrichmentVersions.set(board.id, version);
+      const publish = (result: BoardDeparturesResult) => {
+        if (boardEnrichmentVersions.get(board.id) !== version) return;
+        state.departures = result.departures;
+        state.directionGroups = result.directionGroups;
+        state.updatedAt = new Date();
+      };
+      const result = await fetchBoardDepartures(createBoardRequestForSettings(board), { onUpdate: publish });
+      publish(result);
+      updateAlarms(reconcileBoardAlarms(board, result.departures, departureAlarms.value));
+      // Service labels are optional: never hold back times or other boards.
+      void enrichBoardDeparturesWithServiceTypes(board, result).then((enriched) => {
+        if (boardEnrichmentVersions.get(board.id) === version) publish(enriched);
+      }).catch(() => undefined);
     } catch (error) {
       state.error = error instanceof Error ? error.message : t("app.errors.fetch");
     } finally {
@@ -867,7 +878,7 @@ async function fetchCachedDepartureServiceType(
   let request = departureServiceTypeCache.get(cacheKey);
 
   if (!request) {
-    request = fetchLinePatternView(board, departure, directionGroup)
+    request = runPatternRequest((signal) => fetchLinePatternView(board, departure, directionGroup, signal))
       .then((patternView) => patternView.pattern.serviceType)
       .catch(() => undefined);
     departureServiceTypeCache.set(cacheKey, request);
@@ -1971,6 +1982,7 @@ async function fetchLinePatternView(
   board: TransitBoardConfig,
   departure: Departure,
   directionGroup: DirectionDepartureGroup,
+  signal?: AbortSignal,
 ): Promise<LinePatternViewResponse> {
   const transportType = board.line.mode === "train" ? "transilien" : board.line.mode;
   const lineId = board.line.shortName || board.line.ref;
@@ -1994,6 +2006,7 @@ async function fetchLinePatternView(
         lineId,
       )}/pattern${suffix}`,
     ),
+    { signal },
   );
 
   if (!response.ok) {
@@ -2449,6 +2462,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  boardEnrichmentVersions.clear();
   stopRefreshTimer();
   if (toastTimer) {
     window.clearTimeout(toastTimer);

@@ -2,6 +2,7 @@ import type {
   GlobalMapLine,
   GlobalMapStation,
 } from "../contracts/manifest";
+import Fuse from "fuse.js";
 
 export interface GlobalMapStationSearchGroup extends GlobalMapStation {
   /** Physical station records represented by this one search result. */
@@ -25,11 +26,13 @@ export interface GlobalMapSearchOptions {
 export interface GlobalMapIndexedStationSearchEntry {
   station: GlobalMapStation;
   normalizedValues: string[];
+  searchableValues: string[];
 }
 
 export interface GlobalMapIndexedLineSearchEntry {
   line: GlobalMapLine;
   normalizedValues: string[];
+  searchableValues: string[];
 }
 
 export interface GlobalMapSearchIndex {
@@ -41,6 +44,8 @@ export interface GlobalMapSearchIndex {
   }>;
   stationEntriesById: Map<string, GlobalMapIndexedStationSearchEntry>;
   lineEntries: GlobalMapIndexedLineSearchEntry[];
+  stationFuse: Fuse<GlobalMapIndexedStationSearchEntry>;
+  lineFuse: Fuse<GlobalMapIndexedLineSearchEntry>;
   lineById: Map<string, GlobalMapLine>;
   stationLimit: number;
   lineLimit: number;
@@ -157,15 +162,19 @@ export function createGlobalMapSearchIndex(
   const lineById = new Map(lines.map((line) => [line.id, line]));
   const groups = groupGlobalMapStations(stations, lines, options);
   const stationEntriesById = new Map(
-    stations.map((station) => [station.id, {
-      station,
-      normalizedValues: normalizeSearchValues([
+    stations.map((station) => {
+      const normalizedValues = normalizeSearchValues([
         station.name,
         station.normalizedName,
         station.city,
         ...station.aliases,
-      ]),
-    } satisfies GlobalMapIndexedStationSearchEntry]),
+      ]);
+      return [station.id, {
+        station,
+        normalizedValues,
+        searchableValues: normalizedValues,
+      } satisfies GlobalMapIndexedStationSearchEntry];
+    }),
   );
   const groupsByMemberId = new Map<string, GlobalMapStationSearchGroup>();
   const groupEntries = groups.map((group) => {
@@ -177,9 +186,8 @@ export function createGlobalMapSearchIndex(
         .filter((entry): entry is GlobalMapIndexedStationSearchEntry => Boolean(entry)),
     };
   });
-  const lineEntries = lines.map((line) => ({
-    line,
-    normalizedValues: normalizeSearchValues([
+  const lineEntries = lines.map((line) => {
+    const normalizedValues = normalizeSearchValues([
       line.code,
       line.label,
       line.id,
@@ -187,8 +195,13 @@ export function createGlobalMapSearchIndex(
       `${line.mode} ${line.code}`,
       `${line.mode} ${line.label}`,
       ...line.aliases,
-    ]),
-  } satisfies GlobalMapIndexedLineSearchEntry));
+    ]);
+    return {
+      line,
+      normalizedValues,
+      searchableValues: normalizedValues,
+    } satisfies GlobalMapIndexedLineSearchEntry;
+  });
 
   return {
     groups,
@@ -196,6 +209,20 @@ export function createGlobalMapSearchIndex(
     groupEntries,
     stationEntriesById,
     lineEntries,
+    stationFuse: new Fuse([...stationEntriesById.values()], {
+      keys: ["searchableValues"],
+      threshold: 0.42,
+      ignoreLocation: true,
+      minMatchCharLength: 1,
+      includeScore: true,
+    }),
+    lineFuse: new Fuse(lineEntries, {
+      keys: ["searchableValues"],
+      threshold: 0.42,
+      ignoreLocation: true,
+      minMatchCharLength: 1,
+      includeScore: true,
+    }),
     lineById,
     stationLimit: options.stationLimit ?? 8,
     lineLimit: options.lineLimit ?? 8,
@@ -217,11 +244,15 @@ export function searchGlobalMapIndex(
     return cached;
   }
 
-  const scoreByStationId = new Map(
-    [...index.stationEntriesById.values()]
-      .map((entry) => [entry.station.id, scoreNormalizedSearchMatch(normalizedQuery, entry.normalizedValues)] as const)
-      .filter((entry) => entry[1] !== NO_MATCH),
-  );
+  const scoreByStationId = new Map<string, number>();
+  for (const result of searchFuse(index.stationFuse, normalizedQuery)) {
+    scoreByStationId.set(
+      result.item.station.id,
+      scoreNormalizedSearchMatch(normalizedQuery, result.item.normalizedValues) !== NO_MATCH
+        ? scoreNormalizedSearchMatch(normalizedQuery, result.item.normalizedValues)
+        : 40 + (result.score ?? 1) * 100,
+    );
+  }
   const stationMatches = index.groupEntries
     .map((entry) => ({
       station: entry.group,
@@ -247,12 +278,13 @@ export function searchGlobalMapIndex(
     .slice(0, index.stationLimit)
     .map((entry) => entry.station);
 
-  const lineMatches = index.lineEntries
-    .map((entry) => ({
-      line: entry.line,
-      score: scoreNormalizedSearchMatch(normalizedQuery, entry.normalizedValues),
+  const lineMatches = searchFuse(index.lineFuse, normalizedQuery)
+    .map((result) => ({
+      line: result.item.line,
+      score: scoreNormalizedSearchMatch(normalizedQuery, result.item.normalizedValues) !== NO_MATCH
+        ? scoreNormalizedSearchMatch(normalizedQuery, result.item.normalizedValues)
+        : 40 + (result.score ?? 1) * 100,
     }))
-    .filter((entry) => entry.score !== NO_MATCH)
     .sort((left, right) =>
       left.score - right.score ||
       compareLineIds(left.line.id, right.line.id, index.lineById) ||
@@ -476,6 +508,29 @@ function scoreNormalizedSearchMatch(query: string, values: string[]): number {
   }
 
   return bestScore;
+}
+
+function searchFuse<T extends { normalizedValues: string[] }>(
+  fuse: Fuse<T>,
+  query: string,
+): Array<{ item: T; score?: number }> {
+  const variants = [
+    query,
+    query.replace(/^(?:ligne|line)\s+/u, ""),
+  ].filter((variant, index, all) => variant && all.indexOf(variant) === index);
+  const resultsByIdentity = new Map<string, { item: T; score?: number }>();
+  for (const variant of variants) {
+    for (const result of fuse.search(variant)) {
+      const identity = JSON.stringify(result.item.normalizedValues);
+      const previous = resultsByIdentity.get(identity);
+      if (!previous || (result.score ?? 1) < (previous.score ?? 1)) {
+        resultsByIdentity.set(identity, result);
+      }
+    }
+  }
+  return [...resultsByIdentity.values()].filter(
+    (result) => (result.score ?? 1) <= 0.42,
+  );
 }
 
 function compact(value: string): string {

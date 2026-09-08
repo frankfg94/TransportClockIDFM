@@ -190,7 +190,7 @@ describe("global transport progressive data source", () => {
     source.dispose();
   }, 60_000);
 
-  it("keeps Transilien P and N nodes and station segments identical across focused zooms", async () => {
+  it("keeps P, N and bus 45 geometry stable across zooms and line reselection", async () => {
     const loader = new GlobalMapAssetLoader({
       fetcher: async (input: RequestInfo | URL) => {
         const asset = String(input).split("/global-map/v1/")[1];
@@ -206,7 +206,8 @@ describe("global transport progressive data source", () => {
 
     await source.initialize();
     const network = await source.ensureCatalog();
-    for (const [lineIndex, lineId] of ["line:IDFM:C01730", "line:IDFM:C01736"].entries()) {
+    const firstGeometryByLine = new Map<string, string>();
+    for (const [lineIndex, lineId] of ["line:IDFM:C02244", "line:IDFM:C01730", "line:IDFM:C01736", "line:IDFM:C02244"].entries()) {
       const line = network.linesById.get(lineId);
       expect(line).toBeDefined();
       const stations = line!.stationIds
@@ -239,6 +240,12 @@ describe("global transport progressive data source", () => {
         );
         const linePaths = result.paths.filter((path) => path.lineId === line!.id);
         expect(linePaths, `${line!.label} should be present at zoom ${zoom}`).not.toHaveLength(0);
+        const geometrySignature = JSON.stringify(linePaths.map((path) => ({
+          id: path.id, vertices: path.vertices, subpathStarts: path.subpathStarts,
+        })).sort((a, b) => a.id.localeCompare(b.id)));
+        const firstGeometry = firstGeometryByLine.get(lineId);
+        if (firstGeometry) expect(geometrySignature, `${lineId}: geometry changed after zoom/selection`).toBe(firstGeometry);
+        else firstGeometryByLine.set(lineId, geometrySignature);
         expect(linePaths.every((path) => ["gtfs", "official-open-data"].includes(path.geometrySource))).toBe(true);
         expect(
           linePaths.some((path) => path.vertices.length > (path.lodVertices?.["1"]?.length ?? 0)),

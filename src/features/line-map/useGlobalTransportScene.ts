@@ -74,6 +74,7 @@ export interface UseGlobalTransportSceneOptions {
   getHoveredStationId: () => string | undefined;
   getHoveredLineId: () => string | undefined;
   getConnectedStationIds: () => readonly string[];
+  overrideSelectedModesForGhostCorrespondences?: () => boolean;
   getSelectedBusDirectionStationIds: () => readonly string[] | undefined;
   getSelectedBusDirectionStationSet: () => ReadonlySet<string> | undefined;
   getSelectedBusDirectionEdgeKeys: () => ReadonlySet<string> | undefined;
@@ -173,12 +174,17 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
     try {
       const network = options.getNetwork();
       if (!network) return [];
+      const showAllCorrespondenceModes =
+        options.overrideSelectedModesForGhostCorrespondences?.() === true &&
+        options.getConnectedStationIds().length > 0;
       return activeConnectionStationIds.value
         .flatMap((stationId) => network.stationsById.get(stationId)?.lineIds ?? [])
         .filter((lineId, index, lineIds) => lineIds.indexOf(lineId) === index)
         .map((id) => network.linesById.get(id))
         .filter((line): line is GlobalMapLine => Boolean(line))
-        .filter((line) => options.getSelectedModes().includes(line.mode))
+        .filter(
+          (line) => showAllCorrespondenceModes || options.getSelectedModes().includes(line.mode),
+        )
         .sort(
           (left, right) =>
             modeRank(left.mode) - modeRank(right.mode) ||

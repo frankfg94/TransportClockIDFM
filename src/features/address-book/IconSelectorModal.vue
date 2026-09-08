@@ -8,6 +8,7 @@ import {
   type GlobalMapMarkerIconOption,
 } from "../line-map/globalMapMarkerIcons";
 import type { AddressBookMarkerIcon } from "./addressBook";
+import { fuzzyFilter } from "../../services/fuzzySearch";
 
 const props = defineProps<{
   open: boolean;
@@ -25,12 +26,8 @@ const options = ref<GlobalMapMarkerIconOption[]>([]);
 const loading = ref(false);
 const loadError = ref(false);
 
-const normalizedQuery = computed(() => query.value.trim().toLocaleLowerCase("en-US"));
 const filteredOptions = computed(() => {
-  if (!normalizedQuery.value) return options.value;
-  return options.value.filter((option) => `${option.name} ${option.label}`
-    .toLocaleLowerCase("en-US")
-    .includes(normalizedQuery.value));
+  return fuzzyFilter(options.value, query.value, (option) => [option.name, option.label]);
 });
 
 watch(

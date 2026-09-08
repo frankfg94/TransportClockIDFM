@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { ChevronDown, MapPinned, Train } from "lucide-vue-next";
+import { ChevronDown, MapPinned, Train, Waypoints } from "lucide-vue-next";
 import StationTransferDetails from "../../components/StationTransferDetails.vue";
 import AnnualRidershipStationCard from "./AnnualRidershipStationCard.vue";
 import UserFriendlyTraffic from "../../components/UserFriendlyTraffic.vue";
@@ -103,6 +103,25 @@ function toMode(mode: GlobalMapLine["mode"]): string {
       collapsible
     />
 
+    <section v-if="props.lines.length > 1" class="global-map-picker-sidebar__ghost-options">
+      <div>
+        <strong>{{ t("globalMap.sidebar.ghostLineIcons") }}</strong>
+        <small>{{ t("globalMap.sidebar.ghostLineIconsDescription") }}</small>
+      </div>
+      <button
+        class="global-map-picker-sidebar__switch"
+        type="button"
+        role="switch"
+        :aria-checked="showGhostLineIcons"
+        :aria-label="t('globalMap.sidebar.ghostLineIconsAria')"
+        data-testid="global-map-ghost-line-icons-toggle"
+        @click="emit('toggle-ghost-line-icons')"
+      >
+        <Waypoints :size="15" aria-hidden="true" />
+        <span>{{ showGhostLineIcons ? t("common.booleans.yes") : t("common.booleans.no") }}</span>
+      </button>
+    </section>
+
     <AnnualRidershipStationCard
       :station="ridershipStation"
       :loading="ridershipStationLoading"
@@ -169,3 +188,54 @@ function toMode(mode: GlobalMapLine["mode"]): string {
     </button>
   </div>
 </template>
+
+<style scoped>
+.global-map-picker-sidebar__ghost-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+  border: 1px solid rgba(81, 70, 255, .16);
+  border-radius: 13px;
+  background: rgba(241, 239, 255, .58);
+}
+.global-map-picker-sidebar__ghost-options > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.global-map-picker-sidebar__ghost-options strong {
+  color: var(--ink, #18233f);
+  font-size: .74rem;
+}
+.global-map-picker-sidebar__ghost-options small {
+  color: var(--muted, #71809d);
+  font-size: .62rem;
+  line-height: 1.3;
+}
+.global-map-picker-sidebar__switch {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 5px;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid rgba(81, 70, 255, .22);
+  border-radius: 999px;
+  background: #fff;
+  color: #5146ff;
+  font: inherit;
+  font-size: .64rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+.global-map-picker-sidebar__switch[aria-checked="true"] {
+  background: #5146ff;
+  color: #fff;
+}
+.global-map-picker-sidebar__switch:focus-visible {
+  outline: 2px solid rgba(81, 70, 255, .36);
+  outline-offset: 2px;
+}
+</style>

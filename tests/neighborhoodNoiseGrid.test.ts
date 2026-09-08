@@ -56,7 +56,7 @@ describe("compiled neighborhood noise grid", () => {
     const grid = createGrid();
     grid.values = ["12", "23", "31"];
     const result = buildNearbyNoiseGridResponse(
-      { schemaVersion: "1.1", sources: [source], airNoiseGrid: grid },
+      { schemaVersion: "1.2", sources: [source], airNoiseGrid: grid },
       { lon: 2.35, lat: 48.85 }, 600,
     )!;
     expect(isNearbyNoiseZonesResponse(result)).toBe(true);
@@ -69,14 +69,14 @@ describe("compiled neighborhood noise grid", () => {
   });
   it("clips the grid around the origin and preserves the source metadata", () => {
     const result = buildNearbyNoiseGridResponse(
-      { schemaVersion: "1.1", sources: [source], airNoiseGrid: createGrid() },
+      { schemaVersion: "1.2", sources: [source], airNoiseGrid: createGrid() },
       { lon: 2.35, lat: 48.85 },
       600,
     );
 
     expect(result).toBeDefined();
     expect(result).toEqual(expect.objectContaining<Partial<NearbyNoiseGridResponse>>({
-      schemaVersion: "1.1",
+      schemaVersion: "1.2",
       radiusMeters: 600,
       columns: 20,
       rows: 20,
@@ -100,7 +100,7 @@ describe("compiled neighborhood noise grid", () => {
   it("does not expose a layer when its source is not scorable", () => {
     expect(buildNearbyNoiseGridResponse(
       {
-        schemaVersion: "1.1",
+        schemaVersion: "1.2",
         sources: [{ ...source, scorable: false }],
         airNoiseGrid: createGrid(),
       },

@@ -3,6 +3,8 @@ import {
   GLOBAL_TRANSPORT_PLAN_CONFIG,
   globalTransportPlanLineWidth,
 } from "../src/features/transport-map/config/globalTransportPlanConfig";
+import { createCamera, fitCameraToBounds } from "../src/features/transport-map/geo/camera";
+import { worldToScreen } from "../src/features/transport-map/geo/coordinateKernel";
 
 describe("global transport plan renderer configuration", () => {
   it("exposes Bus and Noctilien as primary network choices", () => {
@@ -12,6 +14,7 @@ describe("global transport plan renderer configuration", () => {
   });
 
   it("keeps family-specific widths in the shared configuration", () => {
+    expect(GLOBAL_TRANSPORT_PLAN_CONFIG.connections.overrideSelectedModesForGhostCorrespondences).toBe(true);
     expect(globalTransportPlanLineWidth("METRO")).toBe(GLOBAL_TRANSPORT_PLAN_CONFIG.renderer.modeLineWidth.METRO);
     expect(globalTransportPlanLineWidth("RER")).toBeGreaterThan(globalTransportPlanLineWidth("BUS"));
     expect(globalTransportPlanLineWidth("RER")).toBeGreaterThan(globalTransportPlanLineWidth("METRO"));
@@ -112,5 +115,19 @@ describe("global transport plan renderer configuration", () => {
     });
     expect(GLOBAL_TRANSPORT_PLAN_CONFIG.lineMap.highFidelityGhostCorrespondences).toBe(true);
     expect(GLOBAL_TRANSPORT_PLAN_CONFIG.lineMap.svg.resizeStrokesDuringZoom).toBe(true);
+  });
+
+  it("fits a selected line inside the usable area between sidebars", () => {
+    const camera = createCamera({
+      viewportWidthCssPx: 1_000,
+      viewportHeightCssPx: 600,
+    });
+    const bounds = { minX: 0.45, minY: 0.475, maxX: 0.55, maxY: 0.525 };
+    const fitted = fitCameraToBounds(camera, bounds, 24, 0, 20, { left: 100, right: 300 });
+    const center = worldToScreen({ x: 0.5, y: 0.5 }, fitted);
+
+    expect(center.x).toBeCloseTo(400, 5);
+    expect(center.y).toBeCloseTo(300, 5);
+    expect(fitted.zoom).toBeLessThan(fitCameraToBounds(camera, bounds).zoom);
   });
 });

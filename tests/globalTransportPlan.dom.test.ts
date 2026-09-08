@@ -394,6 +394,80 @@ describe("GlobalTransportPlan facade", () => {
     }
   });
 
+  it("keeps the network filters expanded by default and lets the user collapse them", async () => {
+    const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+    wrappers.push(wrapper);
+    await flushPromises();
+
+    const toggle = wrapper.get("[data-global-map-filters-toggle]");
+    expect(toggle.attributes("aria-expanded")).toBe("true");
+    expect(toggle.find("svg").exists()).toBe(true);
+    expect(toggle.find("svg.lucide-minimize-2").exists()).toBe(true);
+    expect(wrapper.find("[data-global-map-preset='METRO']").exists()).toBe(true);
+
+    await toggle.trigger("click");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(toggle.find("svg.lucide-maximize-2").exists()).toBe(true);
+    expect(wrapper.text()).not.toContain("Choisissez une vue rapide");
+    expect(wrapper.find("[data-global-map-preset='METRO']").exists()).toBe(false);
+
+    await toggle.trigger("click");
+    expect(wrapper.find("[data-global-map-preset='METRO']").exists()).toBe(true);
+  });
+
+  it("reduces the mobile line selector to a Layers button and centers it on open", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+      wrappers.push(wrapper);
+      await flushPromises();
+
+      const compactSelector = wrapper.get("[data-global-map-mobile-line-selector]");
+      expect(compactSelector.find("svg.lucide-layers").exists()).toBe(true);
+      expect(wrapper.find("[data-global-map-filters]").exists()).toBe(false);
+
+      await compactSelector.trigger("click");
+      await nextTick();
+      expect(wrapper.find("[data-global-map-mobile-line-selector]").exists()).toBe(false);
+      expect(wrapper.get(".global-transport-plan__left-controls").classes()).toContain(
+        "global-transport-plan__left-controls--mobile-open",
+      );
+      expect(wrapper.find("[data-global-map-filters]").exists()).toBe(true);
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+    }
+  });
+
+  it("keeps advanced map actions and renderer metrics behind an explicit menu", async () => {
+    const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+    wrappers.push(wrapper);
+    await flushPromises();
+
+    const toggle = wrapper.get("[data-global-map-advanced-toggle]");
+    const menu = wrapper.get("#global-map-advanced-menu");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(toggle.text()).toContain("Radar · trafic · outils");
+    expect(menu.attributes("style")).toContain("display: none");
+
+    await toggle.trigger("click");
+    expect(toggle.attributes("aria-expanded")).toBe("true");
+    expect(menu.text()).toContain("2 lignes");
+    expect(menu.find("[data-global-map-chaos-zoom]").exists()).toBe(true);
+    expect(menu.find("[data-global-map-chaos-zoom-extreme]").exists()).toBe(true);
+    expect(menu.findAll("button").find((button) => button.text().includes("Recentrer"))).toBeDefined();
+
+    const recenterButton = menu.findAll("button").find((button) => button.text().includes("Recentrer"));
+    await recenterButton?.trigger("click");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+
+    await toggle.trigger("click");
+    expect(toggle.attributes("aria-expanded")).toBe("true");
+    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    await nextTick();
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+  });
+
   it("mounts the bounded cover only for a selected line and keeps it before the live raster", async () => {
     routeState.query = { line: fixture.network.lines[0]!.id, mergeDirections: "0" };
     const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
@@ -1360,6 +1434,32 @@ describe("GlobalTransportPlan facade", () => {
       if (!renderedCamera) throw new Error("Expected a rendered camera");
       const pointer = worldToScreen(center, renderedCamera);
 
+      // Mobile has no hover phase. A touch tap must open the same picker and
+      // position it from the release point, then an outside tap must dismiss it.
+      await canvas.trigger("pointerdown", {
+        pointerId: 7,
+        pointerType: "touch",
+        clientX: pointer.x,
+        clientY: pointer.y,
+        button: 0,
+        isPrimary: true,
+      });
+      await canvas.trigger("pointerup", {
+        pointerId: 7,
+        pointerType: "touch",
+        clientX: pointer.x,
+        clientY: pointer.y,
+        button: 0,
+        isPrimary: true,
+      });
+      await nextTick();
+      const touchTooltip = wrapper.get(".global-transport-plan__tooltip");
+      expect(touchTooltip.findAll(".global-transport-plan__tooltip-choice")).toHaveLength(2);
+      expect(touchTooltip.attributes("style")).toContain("left:");
+      document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      await nextTick();
+      expect(wrapper.find(".global-transport-plan__tooltip").exists()).toBe(false);
+
       await canvas.trigger("pointermove", { clientX: pointer.x, clientY: pointer.y });
       await new Promise((resolve) => setTimeout(resolve, 20));
       await flushPromises();
@@ -2183,13 +2283,15 @@ describe("GlobalTransportPlan facade", () => {
         .find((input) => input.attributes("aria-label")?.includes("Bus"))!;
       await busCheckbox.setValue(false);
       await flushPromises();
-      expect(wrapper.findAll(".station-transfer-details__item")).toHaveLength(1);
-      expect(wrapper.find(".station-transfer-details").text()).not.toContain("38");
+      // Ghost correspondences intentionally override the global mode picker:
+      // the local interchange still keeps every matching line visible.
+      expect(wrapper.findAll(".station-transfer-details__item")).toHaveLength(2);
+      expect(wrapper.find(".station-transfer-details").text()).toContain("Bus");
       await new Promise((resolve) => setTimeout(resolve, 100));
       await flushPromises();
       const busHiddenViewportCall = fixture.dataSourceCalls.queryViewport.mock.calls.at(-1);
       expect(busHiddenViewportCall?.[1]).toBe(2); // METRO only
-      expect(busHiddenViewportCall?.[4]).toEqual([]);
+      expect(busHiddenViewportCall?.[4]).toEqual([fixture.network.lines[1].id]);
       await busCheckbox.setValue(true);
       await flushPromises();
       await customization.get("[data-global-map-customization-finish]").trigger("click");
@@ -3179,6 +3281,8 @@ describe("GlobalTransportPlan facade", () => {
     await flushPromises();
 
     expect(document.body.querySelector(".address-book-modal")).not.toBeNull();
+    expect(wrapper.find("[data-global-map-advanced-toggle]").exists()).toBe(false);
+    expect(wrapper.find("[data-global-map-search]").exists()).toBe(false);
   });
 
   it("offers to hide a marker from its context menu and persists the hidden state", async () => {

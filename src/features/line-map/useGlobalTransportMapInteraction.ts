@@ -35,7 +35,11 @@ export interface UseGlobalTransportMapInteractionOptions {
   clearHover: () => void;
   updateHovered: (point: ScreenPoint) => void;
   hitAt: (point: ScreenPoint) => TransportMapHitCandidates;
-  selectFeature: (hit: TransportMapHitCandidates, event?: MouseEvent) => void;
+  selectFeature: (
+    hit: TransportMapHitCandidates,
+    event?: MouseEvent,
+    point?: ScreenPoint,
+  ) => void;
   scheduleViewportRefresh: () => void;
   cancelScheduledViewportRefresh: () => void;
   captureSelectedLineInteractionSceneIfReady: () => boolean;
@@ -90,6 +94,9 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
   let longPressTimer: ReturnType<typeof setTimeout> | undefined;
   let longPressStart: ScreenPoint | undefined;
   let suppressClickUntil = 0;
+  let primaryPointerType = "mouse";
+
+  const TOUCH_TAP_SLOP_CSS_PX = 8;
 
   function cancelLongPress(): void {
     clearTimeout(longPressTimer);
@@ -495,6 +502,7 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
     dragLast = point;
     dragMoved = false;
     dragDistance = 0;
+    if (pointers.size === 1) primaryPointerType = event.pointerType || "mouse";
     lastPointerTime = typeof performance === "undefined" ? Date.now() : performance.now();
     if (event.pointerType === "touch" && pointers.size === 1 && options.onContextMenu) {
       longPressStart = point;
@@ -562,8 +570,12 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
         dragDistance += Math.hypot(dx, dy);
         // A slow drag can be made of many sub-threshold samples. Classify it
         // using the total gesture distance so it cannot end as an accidental
-        // feature tap merely because no single sample moved 2 px.
-        dragMoved = dragMoved || dragDistance > 2;
+        // feature tap merely because no single sample moved 2 px. Touch input
+        // gets a larger tap slop because mobile browsers emit small pointer
+        // jitters between touch-down and touch-up; those must still open the
+        // multi-line picker.
+        const tapSlop = primaryPointerType === "touch" ? TOUCH_TAP_SLOP_CSS_PX : 2;
+        dragMoved = dragMoved || dragDistance > tapSlop;
         const panSensitivity = GLOBAL_TRANSPORT_PLAN_CONFIG.camera.panSensitivity;
         const panDelta = { x: dx * panSensitivity, y: dy * panSensitivity };
         const nextCamera = panCameraByScreen(options.getCamera(), panDelta);
@@ -599,13 +611,16 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
     if (canvas?.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
     if (!dragMoved && pointers.size === 0) {
       const hit = options.hitAt(point);
-      if (hit.station || hit.lines.length) options.selectFeature(hit, event);
+      if (hit.station || hit.lines.length) options.selectFeature(hit, event, point);
     } else if (dragMoved && pointers.size === 0) {
       inertiaState = startInertia(inertiaState, dragVelocity.x, dragVelocity.y);
       runInertia();
     }
     if (pointers.size === 0) dragLast = undefined;
-    if (pointers.size === 0) dragDistance = 0;
+    if (pointers.size === 0) {
+      dragDistance = 0;
+      primaryPointerType = "mouse";
+    }
     if (pointers.size === 0 && !inertiaState.active) {
       options.setInteractionActive(false);
       options.setDisplayZoom(options.getCamera().zoom);
@@ -628,6 +643,7 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
     dragLast = undefined;
     dragMoved = false;
     dragDistance = 0;
+    primaryPointerType = "mouse";
     cancelInertia();
     if (pointers.size === 0) {
       options.setInteractionActive(false);

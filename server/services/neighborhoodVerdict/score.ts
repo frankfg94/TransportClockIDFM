@@ -625,8 +625,13 @@ function securitySignal(
   const make = (
     polarity: "positive" | "negative" | "neutral",
     indicator: typeof commune.indicators[number],
-  ): VerdictEvidence =>
-    evidence({
+  ): VerdictEvidence => {
+    const percentile = Math.max(0, Math.min(1, indicator.percentile));
+    const lowerPercent = Math.max(1, Math.round(percentile * 100));
+    const upperPercent = Math.max(1, Math.round((1 - percentile) * 100));
+    const populationRank = polarity === "negative" ? upperPercent : lowerPercent;
+    const rankDirection = polarity === "negative" ? "plus" : "moins";
+    return evidence({
       id: `security-${indicator.id}`,
       category: "security",
       polarity,
@@ -634,13 +639,8 @@ function securitySignal(
       priority: Math.round(indicator.weight * 100),
       scoreImpact:
         polarity === "positive" ? indicator.weight : polarity === "negative" ? -indicator.weight : 0,
-      label:
-        polarity === "positive"
-          ? `${indicator.label} : faits enregistrés relativement peu fréquents`
-          : polarity === "negative"
-            ? `${indicator.label} : faits enregistrés relativement fréquents`
-            : `${indicator.label} : ${rounded(indicator.rate)} ${indicator.unit}, percentile ${Math.round(indicator.percentile * 100)}`,
-      explanation: `Taux ${rounded(indicator.rate)} ${indicator.unit}, percentile ${Math.round(indicator.percentile * 100)} parmi les communes franciliennes diffusables, année ${indicator.year}, pour la même unité. Il s’agit de faits enregistrés par la police et la gendarmerie.`,
+      label: `${indicator.label} : parmi les ${populationRank} % de communes avec le ${rankDirection} de faits enregistrés`,
+      explanation: `Le percentile ${Math.round(percentile * 100)} signifie que la commune fait partie des ${populationRank} % de communes avec le ${rankDirection} de faits liés à « ${indicator.label} » parmi les communes franciliennes diffusables. Taux observé : ${rounded(indicator.rate)} ${indicator.unit}, année ${indicator.year}. Il s’agit de faits enregistrés par la police et la gendarmerie.`,
       rule:
         polarity === "positive"
           ? "Point fort sous le 25e percentile."
@@ -653,6 +653,7 @@ function securitySignal(
       referencePeriod: String(indicator.year),
       sourceIds: ["ssmsi-communal-2025"],
     });
+  };
   return available(
     "security",
     score,

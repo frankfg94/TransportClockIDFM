@@ -1,6 +1,7 @@
 import type { TranslationKey, TranslationParams } from "../../i18n";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
 import type { GlobalMapLine, GlobalMapMode } from "../transport-map/contracts/manifest";
+import type { GtfsLastService } from "../line-map/useLineFrequencyTimetable";
 import type {
   NearbyHeavyTransportCandidate,
   NearbyJourney,
@@ -23,10 +24,14 @@ import type {
   PublicVerdictEvidence,
   PublicVerdictSource,
 } from "./neighborhoodVerdictApi";
+import type {
+  PublicServiceQuality,
+  ServiceQualityLineReliability,
+  ServiceQualityMode,
+} from "./serviceQualityApi";
 
 export const NEIGHBORHOOD_MAX_SCORE = 10;
 export const NEIGHBORHOOD_WALKING_LIMIT_MINUTES = 15;
-export const NEIGHBORHOOD_FREQUENCY_LINE_LIMIT = 4;
 
 export const NEIGHBORHOOD_CATEGORY_WEIGHTS = {
   transport: 0.27,
@@ -59,6 +64,7 @@ export type NeighborhoodFactKind =
   | "transportOffer"
   | "transportLimited"
   | "transportHub"
+  | "transportServiceQuality"
   | "majorStationUnder40"
   | "noctilienAtNight"
   | "greenSpaceTransitNearby"
@@ -68,6 +74,7 @@ export type NeighborhoodFactKind =
   | "chateletOver60"
   | "frequencyVeryGood"
   | "frequencyLow"
+  | "lastServiceEarly"
   | "supermarketNearby"
   | "supermarketNearbyApprox"
   | "supermarketsNearby"
@@ -81,6 +88,9 @@ export type NeighborhoodFactKind =
   | "leisurePlaceNearbyApprox"
   | "pharmacyNearby"
   | "pharmacyNearbyApprox"
+  | "hospitalNearby"
+  | "hospitalNearbyWalking"
+  | "hospitalNearbyApprox"
   | "noSupermarket"
   | "noPharmacy";
 
@@ -100,6 +110,11 @@ export interface NeighborhoodFactEvidence {
   observedAt: number;
 }
 
+export interface NeighborhoodFactAction {
+  labelKey: TranslationKey;
+  href: string;
+}
+
 export interface NeighborhoodFact {
   id: string;
   kind: NeighborhoodFactKind;
@@ -114,6 +129,7 @@ export interface NeighborhoodFact {
   tooltipValues?: TranslationParams;
   label?: string;
   tooltip?: string;
+  action?: NeighborhoodFactAction;
   evidence: NeighborhoodFactEvidence;
 }
 
@@ -179,6 +195,9 @@ export interface NeighborhoodScoreInput {
   greenSpaceJourneys?: readonly NeighborhoodGreenSpaceJourney[];
   noctilienJourneys?: readonly NearbyJourney[];
   frequencyProfiles?: ReadonlyMap<string, GtfsLineFrequencyResponse | undefined>;
+  lastServiceByLine?: ReadonlyMap<string, GtfsLastService | undefined>;
+  hospitalJourneys?: Readonly<Record<string, readonly NearbyJourney[] | undefined>>;
+  serviceQuality?: PublicServiceQuality;
   generatedAt?: number;
   backendVerdict?: PublicNeighborhoodVerdict;
 }
@@ -234,6 +253,10 @@ const FACT_KEYS: Record<NeighborhoodFactKind, { label: TranslationKey; tooltip: 
     label: "nearbyStations.neighborhoodScore.facts.transportHub.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.transportHub.tooltip",
   },
+  transportServiceQuality: {
+    label: "nearbyStations.neighborhoodScore.facts.transportServiceQuality.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.transportServiceQuality.tooltip",
+  },
   majorStationUnder40: {
     label: "nearbyStations.neighborhoodScore.facts.majorStationUnder40.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.majorStationUnder40.tooltip",
@@ -269,6 +292,10 @@ const FACT_KEYS: Record<NeighborhoodFactKind, { label: TranslationKey; tooltip: 
   frequencyLow: {
     label: "nearbyStations.neighborhoodScore.facts.frequencyLow.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.frequencyLow.tooltip",
+  },
+  lastServiceEarly: {
+    label: "nearbyStations.neighborhoodScore.facts.lastServiceEarly.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.lastServiceEarly.tooltip",
   },
   supermarketNearby: {
     label: "nearbyStations.neighborhoodScore.facts.supermarketNearby.label",
@@ -322,6 +349,18 @@ const FACT_KEYS: Record<NeighborhoodFactKind, { label: TranslationKey; tooltip: 
     label: "nearbyStations.neighborhoodScore.facts.pharmacyNearbyApprox.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.pharmacyNearbyApprox.tooltip",
   },
+  hospitalNearby: {
+    label: "nearbyStations.neighborhoodScore.facts.hospitalNearby.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.hospitalNearby.tooltip",
+  },
+  hospitalNearbyWalking: {
+    label: "nearbyStations.neighborhoodScore.facts.hospitalNearbyWalking.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.hospitalNearbyWalking.tooltip",
+  },
+  hospitalNearbyApprox: {
+    label: "nearbyStations.neighborhoodScore.facts.hospitalNearbyApprox.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.hospitalNearbyApprox.tooltip",
+  },
   noSupermarket: {
     label: "nearbyStations.neighborhoodScore.facts.noSupermarket.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.noSupermarket.tooltip",
@@ -339,6 +378,7 @@ const SOURCE_KEYS = {
   journeys: "nearbyStations.neighborhoodScore.sources.journeys",
   heavyRoutes: "nearbyStations.neighborhoodScore.sources.heavyRoutes",
   frequency: "nearbyStations.neighborhoodScore.sources.frequency",
+  serviceQuality: "nearbyStations.neighborhoodScore.sources.serviceQuality",
 } as const satisfies Record<string, TranslationKey>;
 
 const RULE_KEYS = {
@@ -358,8 +398,11 @@ const RULE_KEYS = {
   placeSaturation: "nearbyStations.neighborhoodScore.rules.placeSaturation",
   commercialCluster: "nearbyStations.neighborhoodScore.rules.commercialCluster",
   pharmacyPresence: "nearbyStations.neighborhoodScore.rules.pharmacyPresence",
+  hospitalPresence: "nearbyStations.neighborhoodScore.rules.hospitalPresence",
+  lastService: "nearbyStations.neighborhoodScore.rules.lastService",
   leisurePresence: "nearbyStations.neighborhoodScore.rules.leisurePresence",
   greenSpaceTransit: "nearbyStations.neighborhoodScore.rules.greenSpaceTransit",
+  serviceQuality: "nearbyStations.neighborhoodScore.rules.serviceQuality",
 } as const satisfies Record<string, TranslationKey>;
 
 const HEAVY_SCORE_MODES = new Set<GlobalMapMode>([
@@ -423,6 +466,8 @@ const RESTAURANT_KINDS = new Set([
   "ice_cream",
 ]);
 const PHARMACY_KINDS = new Set(["pharmacy", "chemist", "medical_supply"]);
+const HOSPITAL_KINDS = new Set(["hospital"]);
+const EARLY_LAST_SERVICE_CUTOFF_SECONDS = 21 * 60 * 60;
 
 function clamp(value: number, minimum = 0, maximum = NEIGHBORHOOD_MAX_SCORE): number {
   if (!Number.isFinite(value)) return minimum;
@@ -603,7 +648,11 @@ function buildTransportCategory(input: NeighborhoodScoreInput): NeighborhoodCate
   const nearestAccess = accessSignals[0];
   const fastestJourney = chooseFastestJourney(input.chateletJourneys);
   const journeySummary = fastestJourney ? summarizeJourney(fastestJourney) : undefined;
-  const readyFrequencies = getReadyFrequencies(input.frequencyProfiles);
+  const readyFrequencies = getReadyFrequencyEntries(
+    input.frequencyProfiles,
+    input.stations,
+    input.heavyCandidates,
+  );
   const scoreParts: Array<{ value: number; weight: number }> = [];
 
   if (nearestAccess) {
@@ -611,32 +660,55 @@ function buildTransportCategory(input: NeighborhoodScoreInput): NeighborhoodCate
       value: nearestAccess.source === "route"
         ? clamp(10 * (1 - nearestAccess.minutes / 30))
         : clamp(10 * (1 - nearestAccess.distanceMeters / 2_000)),
-      weight: 0.4,
+      weight: 0.4 * 0.85,
     });
   }
   if (linesByKey.size > 0) {
-    scoreParts.push({ value: saturatingNeighborhoodBonus(structuralLineCount, 4, 10), weight: 0.25 });
+    scoreParts.push({ value: saturatingNeighborhoodBonus(structuralLineCount, 4, 10), weight: 0.25 * 0.85 });
   }
   if (accessibleModes.size > 0) {
-    scoreParts.push({ value: saturatingNeighborhoodBonus(accessibleModes.size, 3, 10), weight: 0.15 });
+    scoreParts.push({ value: saturatingNeighborhoodBonus(accessibleModes.size, 3, 10), weight: 0.15 * 0.85 });
   }
   if (journeySummary) {
     scoreParts.push({
       value: clamp(10 * (1 - Math.max(0, journeySummary.durationMinutes - 15) / 75)),
-      weight: 0.15,
+      weight: 0.15 * 0.85,
     });
   }
   if (readyFrequencies.length > 0) {
     const frequencyScore = readyFrequencies.reduce(
-      (sum, value) => sum + clamp(10 * (1 - Math.max(0, value - 2) / 13)),
+      (sum, entry) => sum + clamp(10 * (1 - Math.max(0, entry.minutes - 2) / 13)),
       0,
     ) / readyFrequencies.length;
-    scoreParts.push({ value: frequencyScore, weight: 0.05 });
+    scoreParts.push({ value: frequencyScore, weight: 0.05 * 0.85 });
   }
+
+  const serviceQuality = summarizeNearbyServiceQuality(input, [...linesByKey.values()]);
+  if (serviceQuality) scoreParts.push({ value: serviceQuality.score / 10, weight: 0.15 });
 
   const positiveFacts: NeighborhoodFact[] = [];
   const negativeFacts: NeighborhoodFact[] = [];
-  for (const signal of accessSignals.slice(0, 4)) {
+  const neutralFacts: NeighborhoodFact[] = [];
+  if (serviceQuality && input.serviceQuality) {
+    const qualityFact = makeServiceQualityFact(serviceQuality, input.serviceQuality);
+    if (qualityFact.polarity === "positive") positiveFacts.push(qualityFact);
+    else if (qualityFact.polarity === "negative") negativeFacts.push(qualityFact);
+    else neutralFacts.push(qualityFact);
+  }
+  const knownTransportLines = [
+    ...input.stations.flatMap((entry) => entry.lines),
+    ...(input.heavyCandidates ?? []).flatMap((candidate) => candidate.lines),
+  ];
+  const hubCoveredLineKeys = new Set(coLocatedFutureProjects.flatMap(({ project, currentLines }) => [
+    ...currentLines.map((line) => lineKey(line)),
+    ...knownTransportLines
+      .filter((line) => transportLineReferencesMatch(line.code || line.label, project.line))
+      .map((line) => lineKey(line)),
+    ...accessSignals
+      .filter((signal) => signal.futureProject?.id === project.id)
+      .map((signal) => lineKey(signal.line)),
+  ]));
+  for (const signal of accessSignals.filter((candidate) => !hubCoveredLineKeys.has(lineKey(candidate.line))).slice(0, 4)) {
     positiveFacts.push(makeTransportAccessFact(signal));
   }
 
@@ -796,38 +868,57 @@ function buildTransportCategory(input: NeighborhoodScoreInput): NeighborhoodCate
     }
   }
 
-  if (readyFrequencies.length > 0) {
-    const frequencyValues = readyFrequencies.map((value) => Math.round(value * 10) / 10);
-    const frequencyLabels = getReadyFrequencyLabels(input.frequencyProfiles, input.stations, input.heavyCandidates);
-    if (Math.min(...frequencyValues) <= 5) {
+  for (const entry of readyFrequencies) {
+    const minutes = Math.round(entry.minutes * 10) / 10;
+    const values = { minutes, lines: entry.label };
+    if (minutes <= 5) {
       positiveFacts.push(makeFact({
-        id: "frequency-high",
+        id: `frequency-high:${entry.lineId}`,
         kind: "frequencyVeryGood",
         category: "transport",
         polarity: "positive",
-        family: "frequency",
+        family: `frequency:${entry.lineId}`,
         priority: 7,
-        values: { minutes: Math.min(...frequencyValues), lines: frequencyLabels },
+        values,
         sourceKey: SOURCE_KEYS.frequency,
         proof: "direct",
         ruleKey: RULE_KEYS.frequencyHigh,
         ruleValues: { threshold: 5 },
       }));
-    } else if (Math.min(...frequencyValues) >= 10) {
+    } else if (minutes >= 10) {
       negativeFacts.push(makeFact({
-        id: "frequency-low",
+        id: `frequency-low:${entry.lineId}`,
         kind: "frequencyLow",
         category: "transport",
         polarity: "negative",
-        family: "frequency",
+        family: `frequency:${entry.lineId}`,
         priority: 6,
-        values: { minutes: Math.min(...frequencyValues), lines: frequencyLabels },
+        values,
         sourceKey: SOURCE_KEYS.frequency,
         proof: "direct",
         ruleKey: RULE_KEYS.frequencyLow,
         ruleValues: { threshold: 10 },
       }));
     }
+  }
+
+  for (const [lineId, lastService] of input.lastServiceByLine ?? []) {
+    if (!lastService || lastService.seconds >= EARLY_LAST_SERVICE_CUTOFF_SECONDS) continue;
+    const line = findLineById(input, lineId);
+    if (!line || !HEAVY_SCORE_MODES.has(line.mode)) continue;
+    negativeFacts.push(makeFact({
+      id: `last-service-early:${lineId}`,
+      kind: "lastServiceEarly",
+      category: "transport",
+      polarity: "negative",
+      family: `last-service:${lineId}`,
+      priority: 8,
+      values: { line: formatTransportLineName(line), time: formatServiceTime(lastService.seconds) },
+      sourceKey: SOURCE_KEYS.frequency,
+      proof: "direct",
+      ruleKey: RULE_KEYS.lastService,
+      ruleValues: { threshold: "21:00" },
+    }));
   }
 
   const weightedScore = scoreParts.length > 0 ? weightedAverage(scoreParts) : 1.5;
@@ -839,7 +930,121 @@ function buildTransportCategory(input: NeighborhoodScoreInput): NeighborhoodCate
     score: exceptionalTransport ? Math.max(9, weightedScore) : weightedScore,
     positiveFacts,
     negativeFacts,
+    neutralFacts,
   });
+}
+
+interface NearbyServiceQualitySummary {
+  lines: ServiceQualityLineReliability[];
+  score: number;
+  latestValue?: number;
+  weightedValue?: number;
+  trendDelta: number;
+  yearsUsed: number[];
+}
+
+function summarizeNearbyServiceQuality(
+  input: NeighborhoodScoreInput,
+  nearbyLines: readonly GlobalMapLine[],
+): NearbyServiceQualitySummary | undefined {
+  const dataset = input.serviceQuality;
+  if (!dataset) return undefined;
+  const matched = new Map<string, ServiceQualityLineReliability>();
+  for (const line of nearbyLines) {
+    if (!HEAVY_SCORE_MODES.has(line.mode)) continue;
+    const mode = serviceQualityMode(line.mode);
+    if (!mode) continue;
+    const tokens = new Set([
+      line.code,
+      line.label,
+      line.sourceLineId ?? "",
+      ...line.aliases,
+    ].flatMap(qualityLineTokens));
+    const candidate = dataset.lines.find((qualityLine) =>
+      qualityLine.mode === mode && qualityLine.aliases.some((alias) => tokens.has(alias)),
+    );
+    if (candidate) matched.set(candidate.lineId, candidate);
+  }
+  const lines = [...matched.values()];
+  if (!lines.length) return undefined;
+  return {
+    lines,
+    score: average(lines.map((line) => line.reliabilityScore)),
+    latestValue: averageOptional(lines.map((line) => line.latestValue)),
+    weightedValue: averageOptional(lines.map((line) => line.weightedValue)),
+    trendDelta: average(lines.map((line) => line.trendDelta)),
+    yearsUsed: [...new Set(lines.flatMap((line) => line.yearsUsed))].sort((left, right) => left - right),
+  };
+}
+
+function makeServiceQualityFact(
+  summary: NearbyServiceQualitySummary,
+  dataset: PublicServiceQuality,
+): NeighborhoodFact {
+  const polarity: NeighborhoodFactPolarity = summary.score >= 80
+    ? "positive"
+    : summary.score < 70
+      ? "negative"
+      : "neutral";
+  const source = dataset.sources[0];
+  const fact = makeFact({
+    id: "transport-service-quality",
+    kind: "transportServiceQuality",
+    category: "transport",
+    polarity,
+    family: "transport-service-quality",
+    priority: 12,
+    values: {
+      score: Math.round(summary.score),
+      lines: summary.lines.length,
+      latest: summary.latestValue === undefined ? "—" : Math.round(summary.latestValue * 10) / 10,
+      weighted: summary.weightedValue === undefined ? "—" : Math.round(summary.weightedValue * 10) / 10,
+      trend: summary.trendDelta > 0.25 ? "improving" : summary.trendDelta < -0.25 ? "declining" : "stable",
+    },
+    sourceKey: SOURCE_KEYS.serviceQuality,
+    proof: "derived",
+    ruleKey: RULE_KEYS.serviceQuality,
+    ruleValues: { weight: 15 },
+    action: {
+      labelKey: "nearbyStations.neighborhoodScore.facts.transportServiceQuality.openRanking",
+      href: "/lines-ranking",
+    },
+  });
+  fact.evidence.sourceName = source?.title;
+  fact.evidence.sourceUrl = source?.pageUrl;
+  fact.evidence.licence = source?.licence.label;
+  fact.evidence.value = Math.round(summary.score * 100) / 100;
+  fact.evidence.unit = "/100";
+  fact.evidence.referencePeriod = summary.yearsUsed.length
+    ? `${summary.yearsUsed[0]}–${summary.yearsUsed.at(-1)}`
+    : undefined;
+  return fact;
+}
+
+function serviceQualityMode(mode: GlobalMapMode): ServiceQualityMode | undefined {
+  if (mode === "METRO") return "METRO";
+  if (mode === "RER") return "RER";
+  if (mode === "TRAIN" || mode === "TRANSILIEN") return "TRAIN";
+  if (mode === "TRAM") return "TRAM";
+  return undefined;
+}
+
+function qualityLineTokens(value: string): string[] {
+  const normalized = normalizeScoreText(value);
+  if (!normalized) return [];
+  return normalized
+    .split(/\s+(?:et|and)\s+|[&,/;]/u)
+    .map((token) => token.replace(/\bbis\b/gu, "b").replace(/[^a-z0-9]/gu, "").toUpperCase())
+    .filter(Boolean);
+}
+
+function average(values: readonly number[]): number {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+}
+
+function averageOptional(values: readonly (number | undefined)[]): number | undefined {
+  const available = values.filter((value): value is number => Number.isFinite(value));
+  return available.length ? average(available) : undefined;
 }
 
 function buildJourneyBenchmarkFacts(input: NeighborhoodScoreInput): {
@@ -1183,6 +1388,7 @@ function buildHealthCategory(input: NeighborhoodScoreInput): NeighborhoodCategor
     };
   }
   const pharmacies = scorePlaces(input, (place) => PHARMACY_KINDS.has(placeKind(place)));
+  const hospitals = scorePlaces(input, (place) => HOSPITAL_KINDS.has(placeKind(place)), 30);
   const positiveFacts: NeighborhoodFact[] = [];
   const negativeFacts: NeighborhoodFact[] = [];
   const nearest = pharmacies[0];
@@ -1214,11 +1420,43 @@ function buildHealthCategory(input: NeighborhoodScoreInput): NeighborhoodCategor
       ruleValues: { threshold: NEIGHBORHOOD_WALKING_LIMIT_MINUTES },
     }));
   }
+
+  const hospital = hospitals
+    .map((candidate) => ({ candidate, journey: chooseFastestJourney(input.hospitalJourneys?.[candidate.place.id]) }))
+    .filter(({ candidate, journey }) => candidate.minutes <= 30 || (journey && journey.durationSeconds <= 30 * 60))
+    .sort((left, right) => (left.journey?.durationSeconds ?? left.candidate.minutes * 60)
+      - (right.journey?.durationSeconds ?? right.candidate.minutes * 60))[0];
+  if (hospital) {
+    const journeySummary = hospital.journey ? summarizeJourney(hospital.journey) : undefined;
+    const routedWalking = hospital.candidate.routed;
+    const routed = Boolean(journeySummary) || routedWalking;
+    const minutes = journeySummary?.durationMinutes ?? hospital.candidate.minutes;
+    const via = journeySummary && journeySummary.transitSectionCount > 0
+      ? journeySummary.lines
+      : undefined;
+    positiveFacts.push(makeFact({
+      id: "hospital-nearby",
+      kind: routed
+        ? journeySummary?.transitSectionCount
+          ? "hospitalNearby"
+          : "hospitalNearbyWalking"
+        : "hospitalNearbyApprox",
+      category: "health",
+      polarity: "positive",
+      family: "hospital",
+      priority: 9,
+      values: { name: hospital.candidate.place.name, minutes, via },
+      sourceKey: journeySummary ? SOURCE_KEYS.journeys : routedWalking ? SOURCE_KEYS.placesAndWalking : SOURCE_KEYS.places,
+      proof: routed ? "direct" : "derived",
+      ruleKey: RULE_KEYS.hospitalPresence,
+      ruleValues: { threshold: 30 },
+    }));
+  }
   return withFacts({
     ...base,
     available: true,
-    score: pharmacies.length > 0
-      ? clamp(6 + saturatingNeighborhoodBonus(pharmacies.length - 1, 3, 2))
+    score: pharmacies.length > 0 || hospital
+      ? clamp(6 + saturatingNeighborhoodBonus(pharmacies.length + (hospital ? 1 : 0) - 1, 3, 2))
       : 2,
     positiveFacts,
     negativeFacts,
@@ -1271,6 +1509,7 @@ function makeFact(options: {
   proof: NeighborhoodFactProof;
   ruleKey: TranslationKey;
   ruleValues: TranslationParams;
+  action?: NeighborhoodFactAction;
 }): NeighborhoodFact {
   const keys = FACT_KEYS[options.kind];
   return {
@@ -1284,6 +1523,7 @@ function makeFact(options: {
     labelValues: options.values,
     tooltipKey: keys.tooltip,
     tooltipValues: options.values,
+    action: options.action,
     evidence: {
       sourceKey: options.sourceKey,
       proof: options.proof,
@@ -1309,11 +1549,12 @@ function formatSupermarketLabel(place: ScoredPlace): string {
 function scorePlaces(
   input: NeighborhoodScoreInput,
   predicate: (place: NearbyPlace) => boolean,
+  limitMinutes = NEIGHBORHOOD_WALKING_LIMIT_MINUTES,
 ): ScoredPlace[] {
   return input.places
     .filter(predicate)
     .map((place) => scorePlace(place, input.walkingRoutes?.[place.id]))
-    .filter((place) => place.minutes <= NEIGHBORHOOD_WALKING_LIMIT_MINUTES)
+    .filter((place) => place.minutes <= limitMinutes)
     .sort((left, right) => left.minutes - right.minutes
       || left.distanceMeters - right.distanceMeters
       || left.place.name.localeCompare(right.place.name, "fr"));
@@ -1791,27 +2032,39 @@ function summarizeJourney(journey: NearbyJourney): JourneySummary {
   };
 }
 
-function getReadyFrequencies(
-  profiles: ReadonlyMap<string, GtfsLineFrequencyResponse | undefined> | undefined,
-): number[] {
-  return [...(profiles?.values() ?? [])]
-    .filter((profile): profile is GtfsLineFrequencyResponse =>
-      profile?.status === "ready" && finitePositive(profile.average.peakMinutes) !== undefined)
-    .map((profile) => profile.average.peakMinutes!)
-    .filter((value): value is number => Number.isFinite(value));
-}
-
-function getReadyFrequencyLabels(
+function getReadyFrequencyEntries(
   profiles: ReadonlyMap<string, GtfsLineFrequencyResponse | undefined> | undefined,
   stations: readonly NearbyStationEntry[],
   candidates: readonly NearbyHeavyTransportCandidate[] | undefined,
-): string {
+): Array<{ lineId: string; minutes: number; label: string }> {
   const lines = [...stations.flatMap((entry) => entry.lines), ...(candidates ?? []).flatMap((candidate) => candidate.lines)];
-  const labelsById = new Map(lines.map((line) => [line.id, line.code || line.label]));
-  return [...(profiles?.keys() ?? [])]
-    .map((lineId) => labelsById.get(lineId) || lineId)
-    .slice(0, 4)
-    .join(" · ");
+  const linesById = new Map(lines.map((line) => [line.id, line]));
+  return [...(profiles?.values() ?? [])]
+    .filter((profile): profile is GtfsLineFrequencyResponse =>
+      profile?.status === "ready" && finitePositive(profile.average.peakMinutes) !== undefined)
+    .map((profile) => {
+      const line = linesById.get(profile.lineId);
+      if (!line || !HEAVY_SCORE_MODES.has(line.mode)) return undefined;
+      return {
+        lineId: profile.lineId,
+        minutes: profile.average.peakMinutes!,
+        label: formatTransportLineName(line),
+      };
+    })
+    .filter((entry): entry is { lineId: string; minutes: number; label: string } => Boolean(entry))
+    .filter((entry): entry is { lineId: string; minutes: number; label: string } => Number.isFinite(entry.minutes));
+}
+
+function findLineById(input: NeighborhoodScoreInput, lineId: string): GlobalMapLine | undefined {
+  return [
+    ...input.stations.flatMap((entry) => entry.lines),
+    ...(input.heavyCandidates ?? []).flatMap((candidate) => candidate.lines),
+  ].find((line) => line.id === lineId);
+}
+
+function formatServiceTime(seconds: number): string {
+  const normalized = ((Math.round(seconds) % (24 * 60 * 60)) + 24 * 60 * 60) % (24 * 60 * 60);
+  return `${String(Math.floor(normalized / 3_600)).padStart(2, "0")}:${String(Math.floor((normalized % 3_600) / 60)).padStart(2, "0")}`;
 }
 
 function lineKey(line: Pick<GlobalMapLine, "id" | "code">): string {

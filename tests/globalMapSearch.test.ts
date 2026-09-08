@@ -112,6 +112,27 @@ describe("global map offline search", () => {
     expect(result.lines.map((line) => line.id)).toEqual([metro14.id]);
   });
 
+  it("keeps a station searchable when the query also names its serving network", () => {
+    const parkStation = {
+      ...station,
+      id: "station:le-parc-de-saint-maur",
+      name: "Le Parc de Saint-Maur",
+      normalizedName: "le parc de saint maur",
+      aliases: ["Le Parc de Saint Maur"],
+      lineIds: [rerA.id],
+      isHub: false,
+    } satisfies GlobalMapStation;
+
+    const result = searchGlobalMapNetwork(
+      [parkStation, otherStation],
+      [rerA],
+      "le parc de saint maur Rer",
+    );
+
+    expect(result.stations.map((item) => item.id)).toEqual([parkStation.id]);
+    expect(result.stations[0]?.lineIds).toEqual([rerA.id]);
+  });
+
   it("keeps station and line result families separate", () => {
     const result = searchGlobalMapNetwork(
       [station, otherStation],

@@ -2,6 +2,16 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("../src/services/nearbyDataProviders", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/services/nearbyDataProviders")>();
+  return {
+    ...actual,
+    createNearbyDataProviders: (...args: Parameters<typeof actual.createNearbyDataProviders>) => ({
+      ...actual.createNearbyDataProviders(...args),
+      places: { searchNearby: vi.fn(async () => []) },
+    }),
+  };
+});
 import {
   GlobalMapAssetLoader,
   decodeBootstrap,

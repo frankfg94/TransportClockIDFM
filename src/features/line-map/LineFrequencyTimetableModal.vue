@@ -2,10 +2,10 @@
 import { onBeforeUnmount, ref, watch } from "vue";
 import AppModal from "../../components/AppModal.vue";
 import { useI18n } from "../../i18n";
-import { fetchGtfsLineTimetable } from "../../services/lineFrequencyTimetable";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
 import type { GtfsLineTimetableResponse } from "../../types/lineFrequencyTimetable";
 import type { LineFrequencyStationCoordinate } from "./lineFrequencyCompass";
+import { useLineFrequencyTimetable } from "./useLineFrequencyTimetable";
 import LineFrequencyTimetable from "./LineFrequencyTimetable.vue";
 
 const props = defineProps<{
@@ -20,6 +20,7 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const { getTimetable } = useLineFrequencyTimetable();
 const timetable = ref<GtfsLineTimetableResponse>();
 const loading = ref(false);
 const error = ref(false);
@@ -44,7 +45,7 @@ async function loadTimetable(): Promise<void> {
   error.value = false;
 
   try {
-    timetable.value = await fetchGtfsLineTimetable(lineId, {
+    timetable.value = await getTimetable(lineId, {
       serviceDate: props.profile?.serviceDate,
       signal: controller.signal,
     });

@@ -11,6 +11,7 @@
     @keydown="onKeydown"
   >
     <GlobalTransportPlanToolbar
+      :show-map-interactions="showMapInteractions"
       :status-label="statusLabel"
       :renderer-metrics="rendererMetrics"
       :display-zoom="displayZoom"
@@ -88,9 +89,11 @@
       />
       <GlobalTransportPlanSearch
         v-model:open="searchOpen"
+        :show-map-interactions="showMapInteractions"
         :lines="network?.lines ?? []"
         :stations="network?.stations ?? []"
         :entrances="network?.entrances ?? []"
+        :favorite-places="savedOriginSuggestions"
         :markers="globalMapMarkers.markers.value"
         :catalog-ready="searchCatalogReady"
         :catalog-loading="searchCatalogLoading"
@@ -101,6 +104,17 @@
         @select-place="selectPlaceFromSearch($event)"
         @select-marker="selectMarkerFromSearch($event)"
       />
+      <button
+        v-if="showMapInteractions && mobileViewportActive && !mobileLineSelectorOpen"
+        type="button"
+        class="global-transport-plan__mobile-line-selector"
+        data-global-map-mobile-line-selector
+        :aria-label="t('globalMap.page.openMobileLineSelector')"
+        :title="t('globalMap.page.openMobileLineSelector')"
+        @click="openMobileLineSelector"
+      >
+        <Layers :size="22" :stroke-width="2.15" aria-hidden="true" />
+      </button>
       <canvas
         ref="canvasElement"
         class="global-transport-plan__canvas"
@@ -150,6 +164,21 @@
         @wheel="onWheel"
       />
 
+      <GlobalMapGhostLineIconsOverlay
+        v-if="!routePreviewActive && activeStationView"
+        :enabled="showGhostLineIcons"
+        :active-line-id="activeLine?.id"
+        :lines="activeStationLines"
+        :paths="ghostLinePaths"
+        :camera="camera"
+      />
+
+      <GlobalMapNearbyPlacesOverlay
+        v-if="!routePreviewActive && activeLine"
+        :places="nearbyLinePlaces.places.value"
+        :camera="camera"
+      />
+
       <TransportMapUserLocationOverlay
         v-if="!routePreviewActive"
         :request-visible="locationRequestVisible"
@@ -157,6 +186,7 @@
         :marker-visible="userLocationMarkerVisible"
         :stale="userGeolocation.isStale.value"
         :marker-style="userLocationMarkerStyle"
+        :show-map-interactions="showMapInteractions"
         @request="void userGeolocation.askGeolocation()"
       />
 
@@ -170,8 +200,48 @@
       />
 
       <Transition name="global-map-itinerary-slide">
-        <div v-if="globalItinerary.open.value" class="global-transport-plan__itinerary-panel">
-          <LeftNearbySidebar @close="globalItinerary.close">
+        <div
+          v-if="globalItinerary.open.value"
+          ref="itineraryPanelElement"
+          class="global-transport-plan__itinerary-panel"
+          :class="[
+            `global-transport-plan__itinerary-panel--${mobileItinerarySheetSnap}`,
+            { 'global-transport-plan__itinerary-panel--dragging': mobileItinerarySheetDragging },
+          ]"
+          :data-mobile-itinerary-sheet="mobileItinerarySheetSnap"
+          :style="mobileItinerarySheetStyle"
+          @transitionrun="onItinerarySheetTransition"
+          @transitionstart="onItinerarySheetTransition"
+          @transitionend="onItinerarySheetTransition"
+          @transitioncancel="onItinerarySheetTransition"
+        >
+          <button
+            type="button"
+            class="global-transport-plan__itinerary-sheet-handle"
+            :aria-label="t('globalMap.itinerary.dragHandle')"
+            :aria-expanded="mobileItinerarySheetSnap !== 'collapsed'"
+            aria-controls="global-map-itinerary-content"
+            data-global-map-itinerary-sheet-handle
+            @click="cycleMobileItinerarySheet"
+            @pointerdown="onItinerarySheetPointerDown"
+            @pointermove="onItinerarySheetPointerMove"
+            @pointerup="onItinerarySheetPointerUp"
+            @pointercancel="onItinerarySheetPointerCancel"
+          >
+            <span aria-hidden="true" />
+          </button>
+          <div class="global-transport-plan__itinerary-mobile-summary" aria-live="polite">
+            <div class="global-transport-plan__itinerary-mobile-endpoints">
+              <span><small>{{ t("globalMap.itinerary.from") }}</small>{{ globalItinerary.origin.value?.label || t("globalMap.itinerary.myPosition") }}</span>
+              <span aria-hidden="true">→</span>
+              <span><small>{{ t("globalMap.itinerary.to") }}</small>{{ globalItinerary.travelRoutes.destination.value?.label || t("globalMap.itinerary.noRoute") }}</span>
+            </div>
+            <div class="global-transport-plan__itinerary-mobile-meta">
+              <strong>{{ mobileItineraryDuration }}</strong>
+              <span v-if="mobileItineraryModeSummary">{{ mobileItineraryModeSummary }}</span>
+            </div>
+          </div>
+          <LeftNearbySidebar id="global-map-itinerary-content" @close="globalItinerary.close">
             <template #actions>
               <button
                 type="button"
@@ -350,7 +420,11 @@
         {{ t("globalMap.page.loading") }}
       </div>
 
-      <div class="global-transport-plan__left-controls">
+      <div
+        v-if="!mobileViewportActive || mobileLineSelectorOpen"
+        class="global-transport-plan__left-controls"
+        :class="{ 'global-transport-plan__left-controls--mobile-open': mobileLineSelectorOpen }"
+      >
         <Transition :name="leftControlsTransitionName" mode="out-in">
           <div
             v-if="leftControlsView === 'presets'"
@@ -371,6 +445,7 @@
               @request-preset-install="requestPresetInstall"
               @open-customization="openCustomization"
               @open-line-panel="openLinePanel"
+              @collapse="collapseMobileLineSelector"
             />
           </div>
 
@@ -415,6 +490,11 @@
           :selected-direction-id="busDirectionSelection?.selectedDirectionId"
           :selected-main-direction-id="selectedDirectionButtonId"
           :merge-directions="directionMergeEnabled"
+          :show-ghost-line-icons="showGhostLineIcons"
+          :nearby-places="nearbyLinePlaces.places.value"
+          :nearby-places-loading="nearbyLinePlaces.isLoading.value"
+          :nearby-places-error="Boolean(nearbyLinePlaces.error.value)"
+          :nearby-places-radius-minutes="nearbyLineRadiusMinutes"
           :lines="activeStationLines"
           :all-lines="network?.lines ?? []"
           :stations="network?.stations ?? []"
@@ -431,6 +511,7 @@
           :dashboard-message="dashboardMessage"
           :last-dashboard-undo="dashboardHasUndo"
           :hovered-line-id="hoveredFeature?.type === 'line' ? hoveredFeature.id : undefined"
+          :mobile-sheet-snap="mobilePickerSidebarSnap"
           :traffic-disruption="activeTrafficDisruption"
           :traffic-calendar="globalTrafficCalendar"
           @close="clearSelection"
@@ -453,6 +534,10 @@
           @traffic-calendar-select="selectGlobalTrafficCalendarDay"
           @traffic-calendar-expand="expandTrafficCalendar"
           @traffic-calendar-focus-disruption="focusGlobalTrafficDisruption"
+          @mobile-sheet-snap-change="mobilePickerSidebarSnap = $event"
+          @modal-open="sidebarModalOpen = $event"
+          @toggle-ghost-line-icons="showGhostLineIcons = !showGhostLineIcons"
+          @update:nearby-radius-minutes="nearbyLineRadiusMinutes = $event"
         />
       </Transition>
 
@@ -615,6 +700,7 @@ import {
   BookOpen,
   Copy,
   EyeOff,
+  Layers,
   Map as MapIcon,
   MapPinPlus,
   Pencil,
@@ -653,6 +739,7 @@ import {
   fitCameraToBounds,
   resizeCamera,
   updateCamera,
+  type CameraFitInsets,
   type CameraState,
 } from "../transport-map/geo/camera";
 import {
@@ -660,6 +747,7 @@ import {
   screenToLonLat,
   screenToWorld,
   visibleWorldBounds,
+  worldScaleAtZoom,
   worldToScreen,
 } from "../transport-map/geo/coordinateKernel";
 import type { LonLatPoint } from "../transport-map/geo/coordinateKernel";
@@ -762,11 +850,15 @@ import {
 import { queryStationsWithinRadius } from "../transport-map/spatial/radiusQuery";
 import GlobalMapMarkerModal from "./GlobalMapMarkerModal.vue";
 import GlobalMapMarkersOverlay from "./GlobalMapMarkersOverlay.vue";
+import GlobalMapGhostLineIconsOverlay from "./GlobalMapGhostLineIconsOverlay.vue";
+import GlobalMapNearbyPlacesOverlay from "./GlobalMapNearbyPlacesOverlay.vue";
 import GlobalTransportItineraryOverlay from "./GlobalTransportItineraryOverlay.vue";
 import GlobalMapDistanceMeasurementOverlay from "./GlobalMapDistanceMeasurementOverlay.vue";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { createIgnTransportMapGeocoder } from "../../services/geocoding/ign";
 import { useGlobalTransportItinerary } from "./useGlobalTransportItinerary";
+import { useNearbyPlaces } from "../nearby-stations/useNearbyPlaces";
+import { walkingMinutesToMeters } from "../nearby-stations/nearbyPlacePresentation";
 import type { TravelRoute } from "../nearby-stations/useTravelRoutes";
 import { useGlobalMapMarkers, type GlobalMapMarker } from "./globalMapMarkers";
 import { createGlobalMapDistanceMeasurement } from "./globalMapDistanceMeasurement";
@@ -795,6 +887,7 @@ import type { PatternTrafficCalendarDay } from "../service-pattern/trafficCalend
 import type { PatternTrafficSummaryEntry } from "../service-pattern/trafficCalendarSummary";
 import { createGlobalMapTrafficGraph } from "./globalMapTrafficGraph";
 import type { GlobalMapSidebarTrafficCalendarState } from "./globalMapSidebarBodyTypes";
+import type { NearbyLineRadiusMinutes } from "./globalMapSidebarBodyTypes";
 
 const StationBoardModal = defineAsyncComponent(
   () => import("../../components/StationBoardModal.vue"),
@@ -876,6 +969,7 @@ function isBusOnlyOverviewStation(station: GlobalMapStation): boolean {
 
 const rootElement = ref<HTMLElement>();
 const stageElement = ref<HTMLElement>();
+const itineraryPanelElement = ref<HTMLElement>();
 const canvasElement = ref<HTMLCanvasElement>();
 const legacyBasemapRef = ref<{
   getStackElement: () => HTMLElement | undefined;
@@ -982,7 +1076,7 @@ const globalTransportHover = useGlobalTransportHover({
     sidebarPreviewLineId.value = lineId;
   },
   selectFeature,
-  selectLine: (line, disruption) => selectLineFromSearch(line, disruption),
+  selectLine: (line, disruption) => selectLineFromSearch(line, disruption, true),
   resolveCandidateTrafficDisruption: (candidate) =>
     resolveCandidateTrafficDisruption(candidate),
   getFocusableStations: () => routePreviewActive.value ? [] : renderStations.value,
@@ -1044,6 +1138,7 @@ type GlobalMapMarkerDraft = Pick<GlobalMapMarker, "lon" | "lat"> & Partial<Pick<
 const markerModalOpen = ref(false);
 const markerModalInitial = ref<GlobalMapMarkerDraft>();
 const bikeInstallModalOpen = ref(false);
+const sidebarModalOpen = ref(false);
 const globalContextMenuOpen = ref(false);
 const globalContextMenuPoint = ref<{ x: number; y: number }>();
 const contextPoint = ref<GeocoderPoint>();
@@ -1079,6 +1174,10 @@ const linePanelMode = ref<GlobalMapMode>();
 const leftControlsTransitionName = ref("global-map-controls-slide-forward");
 type GlobalTransportPlanPanelView = "presets" | "customization" | "lines";
 const leftControlsView = ref<GlobalTransportPlanPanelView>("presets");
+const mobileViewportActive = ref(false);
+const mobileLineSelectorOpen = ref(false);
+type GlobalMapSidebarSheetSnap = "collapsed" | "medium" | "expanded";
+const mobilePickerSidebarSnap = ref<GlobalMapSidebarSheetSnap>("collapsed");
 const lineSelectorOpen = ref(false);
 const connectedStationIds = ref<string[]>([]);
 const stationConnectionRequestsPending = ref(0);
@@ -1257,6 +1356,8 @@ const globalTransportScene = useGlobalTransportScene({
   getHoveredLineId: () =>
     hoveredFeature.value?.type === "line" ? hoveredFeature.value.id : undefined,
   getConnectedStationIds: () => connectedStationIds.value,
+  overrideSelectedModesForGhostCorrespondences: () =>
+    GLOBAL_TRANSPORT_PLAN_CONFIG.connections.overrideSelectedModesForGhostCorrespondences,
   getSelectedBusDirectionStationIds: () => selectedBusDirectionStationIds.value,
   getSelectedBusDirectionStationSet: () => selectedBusDirectionStationSet.value,
   getSelectedBusDirectionEdgeKeys: () => selectedBusDirectionEdgeKeys.value,
@@ -1541,6 +1642,7 @@ const linePanelLines = computed(() =>
 const locationRequestVisible = computed(
   () =>
     userLocationVisible.value &&
+    !isMobileViewport() &&
     userGeolocation.isSupported.value &&
     !userGeolocation.isAuthorized.value &&
     ["prompt", "prompt-with-rationale", "unknown"].includes(userGeolocation.permissionState.value),
@@ -1943,6 +2045,43 @@ const globalSelectedTravelRoute = computed(() => {
     : undefined;
 });
 
+type GlobalItinerarySheetSnap = "collapsed" | "medium" | "expanded";
+const mobileItinerarySheetSnap = ref<GlobalItinerarySheetSnap>("collapsed");
+const mobileItinerarySheetDragging = ref(false);
+const mobileItinerarySheetHeight = ref<number>();
+let itinerarySheetPointerId: number | undefined;
+let itinerarySheetPointerStartY = 0;
+let itinerarySheetPointerStartHeight = 0;
+let itinerarySheetPointerMoved = false;
+let itinerarySheetMapSyncFrame: number | undefined;
+let itinerarySheetTransitionSyncUntil = 0;
+
+const mobileItineraryModeSummary = computed(() => {
+  const route = globalSelectedTravelRoute.value;
+  if (!route) return "";
+  const modes = [...new Set(route.transitSections
+    .map((section) => section.lineCode?.trim() || (section.lineMode ? modeLabel(section.lineMode) : ""))
+    .filter(Boolean))];
+  return modes.length > 0 ? modes.slice(0, 5).join(" · ") : t("globalMap.itinerary.walkOnly");
+});
+
+const mobileItineraryDuration = computed(() => {
+  const seconds = globalSelectedTravelRoute.value?.durationSeconds;
+  if (seconds === undefined) return t("globalMap.itinerary.noRoute");
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return minutes >= 60
+    ? t("nearbyStations.travel.hoursMinutes", { hours: Math.floor(minutes / 60), minutes: minutes % 60 })
+    : t("nearbyStations.travel.minutes", { minutes });
+});
+
+const mobileItinerarySheetStyle = computed<Record<string, string>>(() => {
+  const style: Record<string, string> = {};
+  if (mobileItinerarySheetHeight.value && isMobileViewport()) {
+    style.height = `${mobileItinerarySheetHeight.value}px`;
+  }
+  return style;
+});
+
 const globalItineraryLinePaths = shallowRef(new Map<string, GlobalMapPath[]>());
 
 watch(globalSelectedTravelRoute, async (selectedRoute, _previous, onCleanup) => {
@@ -2034,6 +2173,74 @@ const globalItinerarySegments = computed<GlobalTransportItinerarySegment[]>(() =
 
 /** During a route detail preview the renderer intentionally receives no map layers. */
 const routePreviewActive = computed(() => Boolean(globalSelectedTravelRoute.value));
+const showGhostLineIcons = ref(false);
+const nearbyLineRadiusMinutes = ref<NearbyLineRadiusMinutes>(2);
+const nearbyLineRadiusMeters = computed(() => walkingMinutesToMeters(nearbyLineRadiusMinutes.value));
+const nearbyLineAnchors = computed<GeocoderPoint[]>(() => {
+  const maxAnchors = 24;
+  const line = activeLine.value;
+  const stations = line?.stationIds
+    .map((stationId) => network.value?.stationsById.get(stationId))
+    .filter((station): station is GlobalMapStation => Boolean(station))
+    .filter((station) => Number.isFinite(station.lon) && Number.isFinite(station.lat)) ?? [];
+  if (stations.length <= maxAnchors) {
+    return stations.map((station) => ({
+      id: station.id,
+      label: station.name,
+      lon: station.lon,
+      lat: station.lat,
+      type: "station",
+      city: station.city,
+    }));
+  }
+
+  const selected = new Set<number>([0, stations.length - 1]);
+  const step = (stations.length - 1) / (maxAnchors - 1);
+  for (let index = 0; index < maxAnchors; index += 1) selected.add(Math.round(index * step));
+  return [...selected].sort((left, right) => left - right).map((index) => {
+    const station = stations[index]!;
+    return {
+      id: station.id,
+      label: station.name,
+      lon: station.lon,
+      lat: station.lat,
+      type: "station" as const,
+      city: station.city,
+    };
+  });
+});
+const nearbyLinePlaces = useNearbyPlaces({
+  origins: nearbyLineAnchors,
+  radius: nearbyLineRadiusMeters,
+  enabled: computed(() => Boolean(activeLine.value && !routePreviewActive.value)),
+  provider: globalNearbyProviders.places,
+});
+const globalMapPickerSidebarVisible = computed(() =>
+  !routePreviewActive.value && Boolean(activeStationView.value || activeLine.value || selectedStations.value.length),
+);
+const mobileRightSidebarFullscreen = computed(() => {
+  if (!isMobileViewport()) return false;
+  return (globalItinerary.open.value && mobileItinerarySheetSnap.value === "expanded")
+    || (globalMapPickerSidebarVisible.value && mobilePickerSidebarSnap.value === "expanded");
+});
+const globalMapModalOpen = computed(() =>
+  addressBookOpen.value
+  || markerModalOpen.value
+  || bikeInstallModalOpen.value
+  || lineSelectorOpen.value
+  || trafficCalendarExpanded.value
+  || sidebarModalOpen.value
+  || globalMapIsochrones.modalOpen.value,
+);
+const showMapInteractions = computed(() =>
+  !globalMapModalOpen.value && !mobileRightSidebarFullscreen.value,
+);
+
+watch(showMapInteractions, (visible) => {
+  if (visible) return;
+  searchOpen.value = false;
+  mobileLineSelectorOpen.value = false;
+});
 
 let routeSwitchMeasurementToken = 0;
 let activeRouteSwitchTraceId: string | undefined;
@@ -2329,10 +2536,148 @@ function endItineraryFitTrace(metadata: Record<string, unknown> = {}): void {
   activeItineraryFitCameraUpdates = 0;
 }
 
-function fitGlobalItineraryToRoute(): void {
+function isMobileViewport(): boolean {
+  if (typeof window === "undefined") return false;
+  if (window.innerWidth > 0) return window.innerWidth <= 700;
+  return typeof window.matchMedia === "function"
+    && window.matchMedia("(max-width: 700px)").matches;
+}
+
+function mobileItinerarySnapHeight(snap: GlobalItinerarySheetSnap): number {
+  const stageHeight = stageElement.value?.getBoundingClientRect().height
+    || (typeof window !== "undefined" ? window.innerHeight : 720);
+  if (snap === "collapsed") return Math.min(210, Math.max(168, stageHeight * 0.24));
+  if (snap === "medium") return Math.min(520, Math.max(360, stageHeight * 0.56));
+  return Math.min(760, Math.max(500, stageHeight * 0.86));
+}
+
+function readItinerarySheetHeight(): number {
+  if (!isMobileViewport()) return 0;
+  const panel = itineraryPanelElement.value;
+  const stage = stageElement.value;
+  if (!panel || !stage) return mobileItinerarySnapHeight(mobileItinerarySheetSnap.value);
+  const panelRect = panel.getBoundingClientRect();
+  const stageRect = stage.getBoundingClientRect();
+  return Math.max(0, Math.min(stageRect.height, stageRect.bottom - panelRect.top));
+}
+
+function syncMobileItinerarySheetHeight(): void {
+  if (!isMobileViewport() || !globalItinerary.open.value) return;
+  mobileItinerarySheetHeight.value = mobileItinerarySnapHeight(mobileItinerarySheetSnap.value);
+}
+
+function scheduleItineraryMapSync(force = true): void {
+  if (!isMobileViewport() || !globalSelectedTravelRoute.value) return;
+  if (itinerarySheetMapSyncFrame !== undefined) return;
+  itinerarySheetMapSyncFrame = requestAnimationFrame(() => {
+    itinerarySheetMapSyncFrame = undefined;
+    fitGlobalItineraryToRoute({ force, animate: false });
+  });
+}
+
+function startItinerarySheetTransitionSync(): void {
+  if (!isMobileViewport() || !globalSelectedTravelRoute.value) return;
+  if (itinerarySheetMapSyncFrame !== undefined) {
+    cancelAnimationFrame(itinerarySheetMapSyncFrame);
+    itinerarySheetMapSyncFrame = undefined;
+  }
+  itinerarySheetTransitionSyncUntil = performance.now() + 360;
+  const sync = () => {
+    itinerarySheetMapSyncFrame = undefined;
+    if (!isMobileViewport() || mobileItinerarySheetDragging.value || !globalSelectedTravelRoute.value) return;
+    fitGlobalItineraryToRoute({ force: true, animate: false });
+    if (performance.now() < itinerarySheetTransitionSyncUntil) {
+      itinerarySheetMapSyncFrame = requestAnimationFrame(sync);
+    }
+  };
+  itinerarySheetMapSyncFrame = requestAnimationFrame(sync);
+}
+
+function setMobileItinerarySheetSnap(snap: GlobalItinerarySheetSnap): void {
+  mobileItinerarySheetSnap.value = snap;
+  syncMobileItinerarySheetHeight();
+  scheduleItineraryMapSync();
+}
+
+function cycleMobileItinerarySheet(): void {
+  if (itinerarySheetPointerMoved) {
+    itinerarySheetPointerMoved = false;
+    return;
+  }
+  const next: Record<GlobalItinerarySheetSnap, GlobalItinerarySheetSnap> = {
+    collapsed: "medium",
+    medium: "expanded",
+    expanded: "collapsed",
+  };
+  setMobileItinerarySheetSnap(next[mobileItinerarySheetSnap.value]);
+}
+
+function onItinerarySheetPointerDown(event: PointerEvent): void {
+  if (!isMobileViewport() || !event.isPrimary) return;
+  const currentTarget = event.currentTarget as HTMLElement | null;
+  if (!currentTarget) return;
+  itinerarySheetPointerId = event.pointerId;
+  itinerarySheetPointerStartY = event.clientY;
+  itinerarySheetPointerStartHeight = readItinerarySheetHeight() || mobileItinerarySnapHeight(mobileItinerarySheetSnap.value);
+  itinerarySheetPointerMoved = false;
+  mobileItinerarySheetDragging.value = true;
+  currentTarget.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+}
+
+function onItinerarySheetPointerMove(event: PointerEvent): void {
+  if (!mobileItinerarySheetDragging.value || event.pointerId !== itinerarySheetPointerId) return;
+  const delta = itinerarySheetPointerStartY - event.clientY;
+  if (Math.abs(delta) > 4) itinerarySheetPointerMoved = true;
+  const minHeight = Math.max(112, mobileItinerarySnapHeight("collapsed") - 56);
+  const maxHeight = mobileItinerarySnapHeight("expanded");
+  mobileItinerarySheetHeight.value = Math.max(minHeight, Math.min(maxHeight, itinerarySheetPointerStartHeight + delta));
+  scheduleItineraryMapSync();
+  event.preventDefault();
+}
+
+function onItinerarySheetPointerUp(event: PointerEvent): void {
+  if (!mobileItinerarySheetDragging.value || event.pointerId !== itinerarySheetPointerId) return;
+  const currentTarget = event.currentTarget as HTMLElement | null;
+  currentTarget?.releasePointerCapture?.(event.pointerId);
+  const currentHeight = mobileItinerarySheetHeight.value ?? itinerarySheetPointerStartHeight;
+  const nextSnap = (["collapsed", "medium", "expanded"] as GlobalItinerarySheetSnap[]).reduce((closest, snap) =>
+    Math.abs(mobileItinerarySnapHeight(snap) - currentHeight) < Math.abs(mobileItinerarySnapHeight(closest) - currentHeight)
+      ? snap
+      : closest,
+  "collapsed");
+  mobileItinerarySheetDragging.value = false;
+  itinerarySheetPointerId = undefined;
+  setMobileItinerarySheetSnap(nextSnap);
+  event.preventDefault();
+}
+
+function onItinerarySheetPointerCancel(event: PointerEvent): void {
+  if (!mobileItinerarySheetDragging.value || event.pointerId !== itinerarySheetPointerId) return;
+  mobileItinerarySheetDragging.value = false;
+  itinerarySheetPointerId = undefined;
+  syncMobileItinerarySheetHeight();
+  scheduleItineraryMapSync();
+}
+
+function onItinerarySheetTransition(event: TransitionEvent): void {
+  if (event.propertyName !== "height" || !isMobileViewport()) return;
+  if (event.type === "transitionrun" || event.type === "transitionstart") {
+    startItinerarySheetTransitionSync();
+    return;
+  }
+  if (itinerarySheetMapSyncFrame !== undefined) {
+    cancelAnimationFrame(itinerarySheetMapSyncFrame);
+    itinerarySheetMapSyncFrame = undefined;
+  }
+  fitGlobalItineraryToRoute({ force: true, animate: false });
+}
+
+function fitGlobalItineraryToRoute(options: { force?: boolean; animate?: boolean } = {}): void {
   const route = globalSelectedTravelRoute.value;
   const origin = globalItinerary.origin.value;
   const destination = globalItinerary.travelRoutes.destination.value;
+  const sheetHeight = readItinerarySheetHeight();
   if (!route || !origin || !destination) {
     globalItineraryFitKey = undefined;
     endItineraryFitTrace({ cancelled: true });
@@ -2347,8 +2692,9 @@ function fitGlobalItineraryToRoute(): void {
     destination.lat,
     camera.value.viewportWidthCssPx,
     camera.value.viewportHeightCssPx,
+    Math.round(sheetHeight),
   ].join(":");
-  if (key === globalItineraryFitKey) return;
+  if (!options.force && key === globalItineraryFitKey) return;
 
   endItineraryFitTrace({ cancelled: true });
   const bounds = getGlobalTransportItineraryBounds(
@@ -2365,14 +2711,26 @@ function fitGlobalItineraryToRoute(): void {
   });
   activeItineraryFitTraceId = fitTraceId;
   activeItineraryFitCameraUpdates = 0;
-  const targetCamera = fitCameraToBounds(
-    camera.value,
+  const fitCamera = sheetHeight > 0
+    ? updateCamera(camera.value, {
+        viewportHeightCssPx: Math.max(1, camera.value.viewportHeightCssPx - sheetHeight),
+      })
+    : camera.value;
+  const fittedCamera = fitCameraToBounds(
+    fitCamera,
     bounds,
     Math.max(48, GLOBAL_TRANSPORT_PLAN_CONFIG.lineView.paddingCssPx),
     GLOBAL_TRANSPORT_PLAN_CONFIG.lineView.minZoom,
     GLOBAL_TRANSPORT_PLAN_CONFIG.lineView.maxZoom,
   );
-  if (interactionController) {
+  const targetCamera = sheetHeight > 0
+    ? updateCamera(fittedCamera, {
+        viewportHeightCssPx: camera.value.viewportHeightCssPx,
+        // Keep the route centered in the usable area above the sheet.
+        centerWorldY: fittedCamera.centerWorldY + sheetHeight / (2 * worldScaleAtZoom(fittedCamera.zoom)),
+      })
+    : fittedCamera;
+  if (interactionController && options.animate !== false) {
     // Keep the itinerary overlay mounted while the camera flies to the full
     // route, just like a line selection keeps the new line visible during its
     // own pan and zoom.
@@ -2396,6 +2754,7 @@ function animateCameraToStation(station: Pick<GlobalMapStation, "worldX" | "worl
 }
 
 function resizeStage(): void {
+  mobileViewportActive.value = isMobileViewport();
   if (!stageElement.value || !renderer) return;
   const rect = stageElement.value.getBoundingClientRect();
   const pixelRatio = Math.max(
@@ -2408,6 +2767,7 @@ function resizeStage(): void {
     Math.max(1, rect.height),
     pixelRatio,
   );
+  syncMobileItinerarySheetHeight();
   captureSelectedLineBasemapCoverSnapshot();
   displayZoom.value = camera.value.zoom;
   renderer.resize(camera.value.viewportWidthCssPx, camera.value.viewportHeightCssPx, pixelRatio);
@@ -2492,12 +2852,25 @@ function zoomToLine(lineId: string, animate = false): void {
       .map((id) => network.value?.stationsById.get(id))
       .filter((station): station is GlobalMapStation => Boolean(station)) ?? [];
   if (!points.length) return;
-  const bounds = {
+  const geometryBounds = [...viewport.value.paths, ...preloadedLinePaths.value]
+    .filter((path) => path.lineId === lineId)
+    .map((path) => ({
+      minX: path.minX,
+      minY: path.minY,
+      maxX: path.maxX,
+      maxY: path.maxY,
+    }));
+  const bounds = [...geometryBounds, {
     minX: Math.min(...points.map((point) => point.worldX)),
     minY: Math.min(...points.map((point) => point.worldY)),
     maxX: Math.max(...points.map((point) => point.worldX)),
     maxY: Math.max(...points.map((point) => point.worldY)),
-  };
+  }].reduce((current, bound) => ({
+    minX: Math.min(current.minX, bound.minX),
+    minY: Math.min(current.minY, bound.minY),
+    maxX: Math.max(current.maxX, bound.maxX),
+    maxY: Math.max(current.maxY, bound.maxY),
+  }));
 
   const targetCamera = fitCameraToBounds(
     camera.value,
@@ -2505,6 +2878,7 @@ function zoomToLine(lineId: string, animate = false): void {
     GLOBAL_TRANSPORT_PLAN_CONFIG.lineView.paddingCssPx,
     GLOBAL_TRANSPORT_PLAN_CONFIG.lineView.minZoom,
     GLOBAL_TRANSPORT_PLAN_CONFIG.lineView.maxZoom,
+    readGlobalMapCameraFitInsets(lineId),
   );
   if (animate && interactionController) {
     cancelCameraAnimation();
@@ -2523,6 +2897,39 @@ function zoomToLine(lineId: string, animate = false): void {
   cancelCameraAnimation();
   applyCamera(targetCamera);
   captureSelectedLineBasemapCoverSnapshot();
+}
+
+function readGlobalMapCameraFitInsets(lineId?: string): CameraFitInsets {
+  const stage = stageElement.value;
+  if (!stage) return {};
+  const stageRect = stage.getBoundingClientRect();
+  const insets: CameraFitInsets = {};
+  const leftControls = stage.querySelector<HTMLElement>(".global-transport-plan__left-controls");
+  const sidebar = stage.querySelector<HTMLElement>("[data-global-map-picker-sidebar]");
+
+  if (leftControls) {
+    const rect = leftControls.getBoundingClientRect();
+    insets.left = Math.max(0, rect.right - stageRect.left + 12);
+  }
+  if (sidebar) {
+    const rect = sidebar.getBoundingClientRect();
+    insets.right = Math.max(0, stageRect.right - rect.left + 12);
+  } else if (lineId && activeLine.value?.id === lineId && !isMobileViewport()) {
+    // The right sidebar is mounted on the next Vue render tick after a map
+    // click. Reserve its CSS width for the flight target so the line remains
+    // inside the future usable rectangle from the first frame.
+    insets.right = Math.min(430, stageRect.width * .44) + 12;
+  }
+
+  if (isMobileViewport() && globalMapPickerSidebarVisible.value) {
+    const viewportHeight = Math.max(1, stageRect.height);
+    insets.bottom = mobilePickerSidebarSnap.value === "expanded"
+      ? viewportHeight * .92
+      : mobilePickerSidebarSnap.value === "medium"
+        ? viewportHeight * .56
+        : Math.min(210, Math.max(168, viewportHeight * .24));
+  }
+  return insets;
 }
 
 function toggleGlobalTrafficCalendar(): void {
@@ -2976,10 +3383,10 @@ function selectStation(
   activeTrafficDisruption.value = undefined;
   activeStationGroup.value = stationGroup;
   focusedEntranceId.value = undefined;
-  // A station click should expose the local interchange context and Bus family.
-  // Noctilien remains opt-in so selecting a station cannot enable it silently.
-  // A focused line still constrains the base geometry; extra modes are
-  // rendered only through exact ghost lines.
+  // A station click should expose the local interchange context and Bus family
+  // without changing the user's global mode selection. Exact ghost
+  // correspondences have their own all-modes override, so Noctilien and other
+  // local secondary modes can appear without enabling them network-wide.
   filters.setAllIncludingBus();
   selection.selectStation(
     stationId,
@@ -3030,8 +3437,10 @@ async function loadStationConnections(
     // then freezes the coarse trace for the whole gesture (notably line 27
     // drawing a chord across the Seine instead of following Pont du Carrousel).
     const selectedModes = new Set(filters.selectedModes.value);
+    const overrideSelectedModes =
+      GLOBAL_TRANSPORT_PLAN_CONFIG.connections.overrideSelectedModesForGhostCorrespondences;
     const connectionLineIds = correspondence.lines
-      .filter((line) => selectedModes.has(line.mode))
+      .filter((line) => overrideSelectedModes || selectedModes.has(line.mode))
       .map((line) => line.id);
     const geometryReady = await refreshViewport(connectionLineIds);
     if (selection.activeStationId.value !== station.id) return;
@@ -3102,7 +3511,11 @@ function clearSelection(): void {
   if (mounted && network.value) void refreshViewport().catch(() => undefined);
 }
 
-function selectFeature(feature: TransportMapHitCandidates, event?: MouseEvent): void {
+function selectFeature(
+  feature: TransportMapHitCandidates,
+  event?: MouseEvent,
+  pointer?: { x: number; y: number },
+): void {
   if (extremeChaosGuardActive.value) return;
   if (feature.station) {
     globalTransportHover.clearLineChoiceState();
@@ -3121,14 +3534,23 @@ function selectFeature(feature: TransportMapHitCandidates, event?: MouseEvent): 
       draw();
       return;
     }
-    void selectLineFromSearch(line, disruption);
+    void selectLineFromSearch(line, disruption, true);
     return;
   }
 
   if (feature.lines.length > 1) {
     activeTrafficDisruption.value = undefined;
-    globalTransportHover.openLineChoice(feature.lines, event);
+    globalTransportHover.openLineChoice(feature.lines, event, pointer);
   }
+}
+
+function closeLineChoiceOnDocumentPointerDown(event: PointerEvent): void {
+  if (!globalTransportHover.lineChoiceOpen.value) return;
+  const target = event.target;
+  if (typeof Element !== "undefined" && target instanceof Element && target.closest(".global-transport-plan__tooltip")) {
+    return;
+  }
+  globalTransportHover.clear();
 }
 
 function selectPreset(preset: GlobalTransportPlanPreset): void {
@@ -3146,10 +3568,21 @@ function requestPresetInstall(mode: GlobalMapMode): void {
   if (mode === "BIKE") bikeInstallModalOpen.value = true;
 }
 
+function openMobileLineSelector(): void {
+  if (!isMobileViewport()) return;
+  searchOpen.value = false;
+  mobileLineSelectorOpen.value = true;
+}
+
+function collapseMobileLineSelector(): void {
+  if (isMobileViewport()) mobileLineSelectorOpen.value = false;
+}
+
 function openCustomization(): void {
   leftControlsTransitionName.value = "global-map-controls-slide-forward";
   leftControlsView.value = "customization";
   linePanelMode.value = undefined;
+  mobileLineSelectorOpen.value = true;
 }
 
 function openLinePanel(mode: GlobalMapMode): void {
@@ -3157,6 +3590,7 @@ function openLinePanel(mode: GlobalMapMode): void {
   leftControlsTransitionName.value = "global-map-controls-slide-forward";
   linePanelMode.value = mode;
   leftControlsView.value = "lines";
+  mobileLineSelectorOpen.value = true;
 }
 
 function resetLeftControlsToPresetView(): void {
@@ -3194,7 +3628,7 @@ function selectLineFromPanel(lineId: string): void {
 function selectLineById(lineId: string): void {
   const line = network.value?.linesById.get(lineId);
   if (!line) return;
-  void selectLineFromSearch(line);
+  void selectLineFromSearch(line, undefined, true);
 }
 
 function captureSelectedLineInteractionSceneIfReady(): boolean {
@@ -3553,17 +3987,21 @@ watch(
     () => globalItinerary.origin.value?.lat,
     () => globalItinerary.travelRoutes.destination.value?.lon,
     () => globalItinerary.travelRoutes.destination.value?.lat,
+    mobileItinerarySheetSnap,
     () => camera.value.viewportWidthCssPx,
     () => camera.value.viewportHeightCssPx,
   ],
   () => {
     if (!globalItinerary.open.value) {
       globalItineraryFitKey = undefined;
+      mobileItinerarySheetHeight.value = undefined;
+      mobileItinerarySheetSnap.value = "collapsed";
       draw();
       scheduleViewportRefresh();
       return;
     }
     void nextTick(() => {
+      syncMobileItinerarySheetHeight();
       fitGlobalItineraryToRoute();
       draw();
       if (!routePreviewActive.value) scheduleViewportRefresh();
@@ -3813,11 +4251,25 @@ function restoreAddressBookFocusFromUrl(): void {
   });
 }
 
+function requestMobileLocationOnArrival(): void {
+  if (
+    !isMobileViewport()
+    || !userLocationVisible.value
+    || !userGeolocation.isSupported.value
+    || userGeolocation.isAuthorized.value
+    || ["denied", "unsupported"].includes(userGeolocation.permissionState.value)
+  ) return;
+  void userGeolocation.askGeolocation();
+}
+
 defineExpose({ runChaosZoom, runChaosZoomExtreme });
 
 onMounted(async () => {
   mounted = true;
+  document.addEventListener("pointerdown", closeLineChoiceOnDocumentPointerDown, true);
   await nextTick();
+  mobileViewportActive.value = isMobileViewport();
+  requestMobileLocationOnArrival();
   if (canvasElement.value) renderer.mount(canvasElement.value);
   resizeStage();
   resizeObserver =
@@ -3863,6 +4315,11 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   mounted = false;
+  document.removeEventListener("pointerdown", closeLineChoiceOnDocumentPointerDown, true);
+  if (itinerarySheetMapSyncFrame !== undefined) {
+    cancelAnimationFrame(itinerarySheetMapSyncFrame);
+    itinerarySheetMapSyncFrame = undefined;
+  }
   if (globalMapContextFeedbackTimer !== undefined) {
     window.clearTimeout(globalMapContextFeedbackTimer);
     globalMapContextFeedbackTimer = undefined;
@@ -3916,8 +4373,26 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow: hidden;
 }
-.global-transport-plan__itinerary-panel { position: absolute; z-index: 8; top: 16px; right: 16px; width: min(400px, calc(100% - 32px)); height: min(calc(100% - 32px), 760px); pointer-events: auto; }
-.global-transport-plan__itinerary-panel > .left-nearby-sidebar { height: 100%; }
+.global-transport-plan__itinerary-panel {
+  position: absolute;
+  z-index: 8;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  width: min(400px, calc(100% - 32px));
+  height: min(calc(100% - 32px), 760px);
+  pointer-events: auto;
+}
+.global-transport-plan__itinerary-panel > .left-nearby-sidebar {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+.global-transport-plan__itinerary-sheet-handle,
+.global-transport-plan__itinerary-mobile-summary {
+  display: none;
+}
 .global-transport-plan__context-menu { display: grid; gap: 3px; min-width: 250px; }
 .global-transport-plan__context-menu button { align-items: center; background: transparent; border: 0; border-radius: 8px; color: inherit; display: flex; font: inherit; font-size: .8rem; gap: 8px; justify-content: flex-start; min-height: 38px; padding: 8px 10px; text-align: left; width: 100%; }
 .global-transport-plan__context-menu button:hover, .global-transport-plan__context-menu button:focus-visible { background: #f1efff; color: #4034df; outline: 0; }
@@ -4040,6 +4515,9 @@ onBeforeUnmount(() => {
   width: 100%;
   min-width: 0;
   pointer-events: auto;
+}
+.global-transport-plan__mobile-line-selector {
+  display: none;
 }
 .global-map-controls-slide-forward-enter-active,
 .global-map-controls-slide-forward-leave-active,
@@ -4359,12 +4837,149 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 700px) {
+  .global-transport-plan__itinerary-panel {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-height: 100%;
+    height: 184px;
+    border-radius: 20px 20px 0 0;
+    transition: height 260ms cubic-bezier(0.22, 0.8, 0.26, 1);
+  }
+  .global-transport-plan__itinerary-panel--collapsed { height: 184px; }
+  .global-transport-plan__itinerary-panel--medium { height: 56dvh; }
+  .global-transport-plan__itinerary-panel--expanded { height: 86dvh; }
+  .global-transport-plan__itinerary-panel--dragging { transition: none; }
+  .global-transport-plan__itinerary-sheet-handle {
+    display: flex;
+    flex: 0 0 25px;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 20px 20px 0 0;
+    background: rgba(255, 255, 255, 0.98);
+    cursor: grab;
+    touch-action: none;
+  }
+  .global-transport-plan__itinerary-sheet-handle:active { cursor: grabbing; }
+  .global-transport-plan__itinerary-sheet-handle span {
+    display: block;
+    width: 42px;
+    height: 5px;
+    border-radius: 999px;
+    background: #c4c9d8;
+  }
+  .global-transport-plan__itinerary-sheet-handle:focus-visible {
+    outline: 2px solid #5146ff;
+    outline-offset: -3px;
+  }
+  .global-transport-plan__itinerary-mobile-summary {
+    display: grid;
+    flex: 0 0 auto;
+    gap: 5px;
+    padding: 7px 14px 9px;
+    border-bottom: 1px solid rgba(81, 70, 255, 0.12);
+    background: rgba(255, 255, 255, 0.98);
+    color: #18233f;
+  }
+  .global-transport-plan__itinerary-mobile-endpoints {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    font-size: 0.73rem;
+    font-weight: 850;
+  }
+  .global-transport-plan__itinerary-mobile-endpoints > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .global-transport-plan__itinerary-mobile-endpoints > span:nth-child(2) {
+    color: #8b93a8;
+    font-size: 0.9rem;
+  }
+  .global-transport-plan__itinerary-mobile-endpoints small {
+    display: block;
+    margin-bottom: 2px;
+    color: #7a849c;
+    font-size: 0.57rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .global-transport-plan__itinerary-mobile-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    color: #64748b;
+    font-size: 0.65rem;
+    white-space: nowrap;
+  }
+  .global-transport-plan__itinerary-mobile-meta strong {
+    color: #4034df;
+    font-size: 0.76rem;
+  }
+  .global-transport-plan__itinerary-mobile-meta span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .global-transport-plan__itinerary-panel > .left-nearby-sidebar {
+    border-radius: 0;
+    box-shadow: none;
+  }
   .global-transport-plan__left-controls {
-    top: 10px;
-    left: 10px;
-    width: min(310px, calc(100% - 20px));
-    max-width: 310px;
-    max-height: min(560px, calc(100% - 78px));
+    z-index: 21;
+    top: 50%;
+    left: 50%;
+    width: min(360px, calc(100% - 24px));
+    max-width: none;
+    max-height: min(72dvh, calc(100% - 112px));
+    border-color: rgba(148, 163, 184, 0.38);
+    background: rgba(255, 255, 255, 0.97);
+    box-shadow: 0 22px 58px rgba(15, 23, 42, 0.24);
+    transform: translate(-50%, -50%);
+  }
+  .global-transport-plan__left-controls--mobile-open {
+    pointer-events: auto;
+  }
+  .global-transport-plan__mobile-line-selector {
+    position: absolute;
+    z-index: 22;
+    top: calc(env(safe-area-inset-top, 0px) + 76px);
+    left: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 46px;
+    padding: 0;
+    border: 1px solid rgba(125, 157, 225, 0.5);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 8px 20px rgba(27, 48, 87, 0.2);
+    color: #526fc1;
+    cursor: pointer;
+    pointer-events: auto;
+  }
+  .global-transport-plan__mobile-line-selector:hover,
+  .global-transport-plan__mobile-line-selector:focus-visible {
+    border-color: #6e9cff;
+    background: #f1f6ff;
+    color: #284fa7;
+    outline: 2px solid rgba(81, 70, 255, 0.2);
+    outline-offset: 2px;
+  }
+  .global-transport-plan__mobile-line-selector svg {
+    display: block;
+    flex: 0 0 auto;
   }
   .global-transport-plan__panel {
     top: auto;

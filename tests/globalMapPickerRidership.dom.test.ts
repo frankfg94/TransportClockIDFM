@@ -453,6 +453,45 @@ describe("GlobalMapPickerSideBar annual ridership", () => {
     expect(wrapper.emitted("update:scope")?.[0]).toEqual(["mode"]);
     wrapper.unmount();
   });
+
+  it("provides the generic mobile sheet wrapper for every sidebar body", async () => {
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(390);
+    const { default: GlobalMapPickerSideBar } = await import(
+      "../src/features/line-map/GlobalMapPickerSideBar.vue"
+    );
+    const wrapper = mount(GlobalMapPickerSideBar, {
+      props: { mobileSheet: true },
+    });
+
+    const sidebar = wrapper.get("[data-global-map-picker-sidebar]");
+    const handle = wrapper.get("[data-global-map-sidebar-sheet-handle]");
+    expect(sidebar.attributes("data-mobile-sidebar-sheet")).toBe("collapsed");
+
+    await handle.trigger("click");
+    expect(wrapper.emitted("mobile-sheet-snap-change")?.at(-1)).toEqual(["medium"]);
+
+    await wrapper.setProps({ mobileSheetSnap: "medium" });
+    expect(sidebar.classes()).toContain("global-map-picker-sidebar--mobile-medium");
+
+    await handle.trigger("pointerdown", {
+      button: 0,
+      clientY: 500,
+      pointerId: 3,
+      pointerType: "touch",
+    });
+    await handle.trigger("pointermove", {
+      clientY: 120,
+      pointerId: 3,
+      pointerType: "touch",
+    });
+    await handle.trigger("pointerup", {
+      clientY: 120,
+      pointerId: 3,
+      pointerType: "touch",
+    });
+    expect(wrapper.emitted("mobile-sheet-snap-change")?.at(-1)).toEqual(["expanded"]);
+    wrapper.unmount();
+  });
 });
 
 function createLine(

@@ -5,6 +5,8 @@ import {
   selectPreferredLinePaths,
 } from "../src/features/transport-map/data/pathPrecedence";
 import type { GlobalMapPath } from "../src/features/transport-map/contracts/manifest";
+import { hasSingleConnectedGlobalMapPathGeometry } from "../src/features/line-map/globalBusDirectionGeometry";
+import { breakIncompleteGtfsConnectors, materializeLod } from "../src/features/transport-map/data/createTransportMapDataSource";
 
 const lineId = "line:metro:1";
 
@@ -34,6 +36,25 @@ function path(
 }
 
 describe("global map path source precedence", () => {
+  it("does not treat a connected partial or regional route as complete direction geometry", () => {
+    const fragment = { ...path("detail", "gtfs"), vertices: [
+      { x: 0, y: 0, stationId: "a" }, { x: 1, y: 1, stationId: "b" },
+    ] };
+    expect(hasSingleConnectedGlobalMapPathGeometry([fragment], new Map(), ["a", "b", "c"])).toBe(false);
+    expect(hasSingleConnectedGlobalMapPathGeometry([fragment], new Map(), ["a", "b"])).toBe(true);
+    expect(hasSingleConnectedGlobalMapPathGeometry([{ ...fragment, id: "path:regional:test" }], new Map(), ["a", "b"])).toBe(false);
+  });
+
+  it("preserves explicit compiler continuity at full detail and lower LOD", () => {
+    const connector = { ...path("connector", "gtfs"), quality: { ...path("connector", "gtfs").quality, complete: false },
+      vertices: [{ x: 0, y: 0, stationId: "a" }, { x: 1, y: 1, stationId: "b" }],
+      subpathStarts: [0],
+      lodVertices: { "1": [{ x: 0, y: 0, stationId: "a" }, { x: 1, y: 1, stationId: "b" }] },
+      lodSubpathStarts: { "1": [0] },
+    };
+    expect(breakIncompleteGtfsConnectors(connector).subpathStarts).toEqual([0]);
+    expect(breakIncompleteGtfsConnectors(materializeLod(connector, 1)).subpathStarts).toEqual([0]);
+  });
   it("does not paint regional and detailed representations together", () => {
     const regional = path("path:regional:1", "gtfs");
     const detailed = path("path:line:metro:1:segment:1#chunk", "gtfs");
