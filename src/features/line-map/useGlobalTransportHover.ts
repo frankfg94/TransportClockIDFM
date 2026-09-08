@@ -19,6 +19,7 @@ export interface UseGlobalTransportHoverOptions {
   hasActivePointers: () => boolean;
   draw: () => void;
   setSidebarPreviewLineId: (lineId?: string) => void;
+  getSidebarPreviewLineId: () => string | undefined;
   selectFeature: (
     feature: TransportMapHitCandidates,
     event?: MouseEvent,
@@ -92,6 +93,20 @@ export function useGlobalTransportHover(options: UseGlobalTransportHoverOptions)
     pointer?: ScreenPoint,
     lineCandidates: LineHitCandidate[] = [],
   ): void {
+    const isAlreadyEmpty =
+      !feature &&
+      !hoveredFeature.value &&
+      !hoveredPointer.value &&
+      hoveredLineCandidates.value.length === 0 &&
+      !lineChoiceOpen.value;
+    if (isAlreadyEmpty) {
+      if (options.getSidebarPreviewLineId() !== undefined) {
+        options.setSidebarPreviewLineId(undefined);
+        options.draw();
+      }
+      return;
+    }
+
     hoveredFeature.value = feature;
     hoveredLineCandidates.value = lineCandidates;
     options.setSidebarPreviewLineId(feature?.type === "line" ? feature.id : undefined);

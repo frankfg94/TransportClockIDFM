@@ -1075,6 +1075,7 @@ const globalTransportHover = useGlobalTransportHover({
   setSidebarPreviewLineId: (lineId) => {
     sidebarPreviewLineId.value = lineId;
   },
+  getSidebarPreviewLineId: () => sidebarPreviewLineId.value,
   selectFeature,
   selectLine: (line, disruption) => selectLineFromSearch(line, disruption, true),
   resolveCandidateTrafficDisruption: (candidate) =>

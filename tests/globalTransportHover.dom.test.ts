@@ -1,5 +1,5 @@
 import { mount, type VueWrapper } from "@vue/test-utils";
-import { defineComponent, h, nextTick, ref } from "vue";
+import { defineComponent, h, nextTick, ref, type Ref } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   GlobalMapLine,
@@ -58,6 +58,39 @@ function candidate(line: GlobalMapLine, distanceCssPx: number): LineHitCandidate
   };
 }
 
+function mountHoverHarness(
+  hit: Ref<TransportMapHitCandidates>,
+  draw = vi.fn(),
+  previewLineId = ref<string>(),
+) {
+  const hitTest = vi.fn(() => hit.value);
+  let controller: ReturnType<typeof useGlobalTransportHover> | undefined;
+  const host = defineComponent({
+    setup() {
+      controller = useGlobalTransportHover({
+        getNetwork: () => network,
+        getCamera: () => createCamera(),
+        hitTest,
+        isWheelScrolling: () => false,
+        hasActivePointers: () => false,
+        draw,
+        setSidebarPreviewLineId: (lineId) => {
+          previewLineId.value = lineId;
+        },
+        getSidebarPreviewLineId: () => previewLineId.value,
+        selectFeature: () => undefined,
+        getFocusableStations: () => [],
+        getActiveStationId: () => undefined,
+        selectStation: () => undefined,
+      });
+      return () => h("div");
+    },
+  });
+  const harnessWrapper = mount(host);
+  if (!controller) throw new Error("hover controller was not created");
+  return { controller, draw, hitTest, previewLineId, wrapper: harnessWrapper };
+}
+
 describe("useGlobalTransportHover", () => {
   let wrapper: VueWrapper | undefined;
 
@@ -92,6 +125,7 @@ describe("useGlobalTransportHover", () => {
           setSidebarPreviewLineId: (lineId) => {
             previewLineId.value = lineId;
           },
+          getSidebarPreviewLineId: () => previewLineId.value,
           selectFeature: (feature) => selectedFeature.push(feature),
           selectLine: (line) => {
             selectedLines.push(line);
@@ -173,6 +207,7 @@ describe("useGlobalTransportHover", () => {
           hasActivePointers: () => false,
           draw: vi.fn(),
           setSidebarPreviewLineId: () => undefined,
+          getSidebarPreviewLineId: () => undefined,
           selectFeature: () => undefined,
           getFocusableStations: () => [],
           getActiveStationId: () => undefined,
@@ -190,5 +225,91 @@ describe("useGlobalTransportHover", () => {
     expect(controller.hoveredFeature.value?.id).toBe(lineA.id);
     controller.clear();
     expect(controller.hoveredFeature.value).toBeUndefined();
+  });
+
+  it("keeps hit-testing an empty background without scheduling redundant draws", () => {
+    const hit = ref<TransportMapHitCandidates>({ lines: [] });
+    const harness = mountHoverHarness(hit);
+    wrapper = harness.wrapper;
+    const emptyCandidates = harness.controller.hoveredLineCandidates.value;
+
+    harness.controller.update({ x: 10, y: 20 });
+    harness.controller.update({ x: 11, y: 21 });
+    harness.controller.update({ x: 12, y: 22 });
+
+    expect(harness.hitTest).toHaveBeenCalledTimes(3);
+    expect(harness.draw).not.toHaveBeenCalled();
+    expect(harness.controller.hoveredFeature.value).toBeUndefined();
+    expect(harness.controller.hoveredPointer.value).toBeUndefined();
+    expect(harness.controller.hoveredLineCandidates.value).toBe(emptyCandidates);
+  });
+
+  it.each([
+    [
+      "station",
+      {
+        station: { type: "station", id: stationA.id, distanceCssPx: 2 },
+        lines: [],
+      },
+    ],
+    [
+      "line",
+      {
+        lines: [candidate(lineA, 2)],
+      },
+    ],
+    [
+      "isochrone",
+      {
+        lines: [],
+        isochrone: {
+          type: "isochrone",
+          id: "isochrone:a",
+          distanceCssPx: 0,
+          surfaces: [],
+        },
+      },
+    ],
+  ] satisfies Array<[string, TransportMapHitCandidates]>)(
+    "clears a %s hover and skips later empty draws",
+    (_kind, activeHit) => {
+      const hit = ref<TransportMapHitCandidates>({ lines: [] });
+      const harness = mountHoverHarness(hit);
+      wrapper = harness.wrapper;
+
+      hit.value = activeHit;
+      harness.controller.update({ x: 10, y: 20 });
+      expect(harness.draw).toHaveBeenCalledTimes(1);
+
+      hit.value = { lines: [] };
+      harness.controller.update({ x: 11, y: 21 });
+      expect(harness.draw).toHaveBeenCalledTimes(2);
+      expect(harness.controller.hoveredFeature.value).toBeUndefined();
+      expect(harness.controller.hoveredPointer.value).toBeUndefined();
+      expect(harness.controller.hoveredLineCandidates.value).toEqual([]);
+      const clearedCandidates = harness.controller.hoveredLineCandidates.value;
+
+      harness.controller.update({ x: 12, y: 22 });
+      expect(harness.hitTest).toHaveBeenCalledTimes(3);
+      expect(harness.draw).toHaveBeenCalledTimes(2);
+      expect(harness.controller.hoveredLineCandidates.value).toBe(clearedCandidates);
+    },
+  );
+
+  it("clears a residual sidebar preview before skipping empty hover updates", () => {
+    const hit = ref<TransportMapHitCandidates>({ lines: [] });
+    const harness = mountHoverHarness(hit, vi.fn(), ref(lineA.id));
+    wrapper = harness.wrapper;
+    const emptyCandidates = harness.controller.hoveredLineCandidates.value;
+
+    harness.controller.update({ x: 10, y: 20 });
+
+    expect(harness.previewLineId.value).toBeUndefined();
+    expect(harness.draw).toHaveBeenCalledTimes(1);
+    expect(harness.controller.hoveredLineCandidates.value).toBe(emptyCandidates);
+
+    harness.controller.update({ x: 11, y: 21 });
+    expect(harness.hitTest).toHaveBeenCalledTimes(2);
+    expect(harness.draw).toHaveBeenCalledTimes(1);
   });
 });
