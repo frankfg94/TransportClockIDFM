@@ -146,12 +146,15 @@ describe("CitiesLinePattern", () => {
     });
 
     await wrapper.get("#global-map-picker-sidebar-line-cities-toggle").trigger("click");
+    expect(wrapper.emitted("line-cities-expanded")).toEqual([[true]]);
     expect(wrapper.findAll(".cities-line-pattern__content strong").map((node) => node.text())).toEqual([
       "Clamart",
       "Châtenay",
       "Créteil",
     ]);
     expect(wrapper.findAll(".cities-line-pattern__dot")).toHaveLength(3);
+    await wrapper.get("#global-map-picker-sidebar-line-cities-toggle").trigger("click");
+    expect(wrapper.emitted("line-cities-expanded")).toEqual([[true], [false]]);
     wrapper.unmount();
   });
 
@@ -185,12 +188,22 @@ describe("CitiesLinePattern", () => {
       kind: "supermarket",
       distanceMeters: 180,
     };
+    const nearbyTransitFixture = {
+      id: "place:shelter",
+      name: "Abri",
+      lon: 2.301,
+      lat: 48.801,
+      category: "service" as const,
+      kind: "shelter",
+      distanceMeters: 1,
+    };
     const wrapper = mount(GlobalMapPickerSideBar, {
       props: {
         line,
         stations: routeStations,
         cityPatternStations: routeStations,
-        nearbyPlaces: [nearbyPlace],
+        nearbyPlaces: [nearbyTransitFixture, nearbyPlace],
+        nearbyPlacesRadiusMinutes: 2,
       },
       global: {
         stubs: {
@@ -209,6 +222,8 @@ describe("CitiesLinePattern", () => {
     expect(toggle.attributes("aria-expanded")).toBe("true");
     expect(wrapper.find("#global-map-picker-sidebar-nearby-places").exists()).toBe(true);
     expect(wrapper.get(".global-map-picker-sidebar__nearby-icon").find("svg").attributes("width")).toBe("12");
+    expect(wrapper.get(".global-map-picker-sidebar__nearby-list").text()).toContain("Marché test");
+    expect(wrapper.get(".global-map-picker-sidebar__nearby-list").text()).not.toContain("Abri");
 
     await toggle.trigger("click");
     expect(toggle.attributes("aria-expanded")).toBe("false");

@@ -151,6 +151,67 @@ describe("NearbyStations line ghost flow DOM", () => {
     }
   });
 
+  it("renders the bootstrap path while the focused viewport is still loading", async () => {
+    vi.useFakeTimers();
+    let wrapper: ReturnType<typeof mount> | undefined;
+    let resolveViewport: ((result: TransportMapViewportResult) => void) | undefined;
+    try {
+      const camera = createCamera({
+        centerWorldX: 0.5,
+        centerWorldY: 0.5,
+        zoom: 12,
+        viewportWidthCssPx: 720,
+        viewportHeightCssPx: 360,
+      });
+      const queryTransportMapViewport = vi.fn(() => new Promise<TransportMapViewportResult>((resolve) => {
+        resolveViewport = resolve;
+      }));
+      const bootstrapNetwork: TransportMapNetwork = { ...network, regionalPaths: [path] };
+      const source: NearbyStationsLineFlowSource = {
+        visibleStations: ref([]),
+        activeModes: ref(["METRO"]),
+        transportMapNetwork: ref(bootstrapNetwork),
+        queryTransportMapViewport,
+      };
+      const Harness = defineComponent({
+        components: { GhostLineFlowOverlay },
+        setup() {
+          const flow = useNearbyStationsLineFlow(source);
+          flow.handleCameraChange(camera);
+          return { flow, lineId: line.id };
+        },
+        template: `
+          <button data-testid="activate-line" @click="flow.handleActivateLine(lineId)">Activer</button>
+          <GhostLineFlowOverlay
+            v-if="flow.lineFlowModel.value"
+            :model="flow.lineFlowModel.value"
+            terminus-label="Terminus"
+          />
+        `,
+      });
+
+      wrapper = mount(Harness);
+      await wrapper.get("[data-testid='activate-line']").trigger("click");
+      await nextTick();
+
+      expect(queryTransportMapViewport).not.toHaveBeenCalled();
+      expect(wrapper.find(".transport-ghost-flow").exists()).toBe(true);
+      expect(wrapper.findAll(".transport-ghost-flow__path")).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(70);
+      expect(queryTransportMapViewport).toHaveBeenCalledWith(camera, line.id, [line.id]);
+      expect(wrapper.find(".transport-ghost-flow").exists()).toBe(true);
+
+      resolveViewport?.(createViewportResult([path]));
+      await flushPromises();
+      await nextTick();
+      expect(wrapper.find(".transport-ghost-flow").exists()).toBe(true);
+    } finally {
+      wrapper?.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it("renders the visible feeder ghost when the projected Metro 13 route is outside the map", async () => {
     vi.useFakeTimers();
     let wrapper: ReturnType<typeof mount> | undefined;

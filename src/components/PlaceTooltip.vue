@@ -2,6 +2,7 @@
 import { Footprints } from "lucide-vue-next";
 import { useI18n } from "../i18n";
 import type { NearbyPlace } from "../features/nearby-stations/nearbyPlaces";
+import { useNearbyPlacePresenter } from "../features/nearby-stations/useNearbyPlacePresenter";
 
 type PlaceTooltipPlacement = "above" | "below" | "left" | "right";
 
@@ -13,6 +14,7 @@ defineProps<{
 }>();
 
 const { t } = useI18n();
+const { presentPlace } = useNearbyPlacePresenter();
 </script>
 
 <template>
@@ -22,7 +24,7 @@ const { t } = useI18n();
     data-testid="place-tooltip"
     role="tooltip"
   >
-    <strong class="place-tooltip__name">{{ place.name }}</strong>
+    <strong class="place-tooltip__name">{{ presentPlace(place).name }}</strong>
     <span class="place-tooltip__type">{{ typeLabel }}</span>
     <span class="place-tooltip__walking">
       <Footprints :size="14" aria-hidden="true" />

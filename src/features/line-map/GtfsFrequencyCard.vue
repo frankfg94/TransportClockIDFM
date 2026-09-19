@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Clock3, Search } from "lucide-vue-next";
+import { ChevronDown, Clock3, Search } from "lucide-vue-next";
 import { useI18n, type TranslationKey } from "../../i18n";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
 import AppModal from "../../components/AppModal.vue";
@@ -17,6 +17,7 @@ const props = defineProps<{
   preview?: boolean;
 }>();
 const { t, d } = useI18n();
+const frequencyExpanded = ref(false);
 const sourceDetailsOpen = ref(false);
 const timetableOpen = ref(false);
 const emit = defineEmits<{
@@ -30,6 +31,7 @@ watch(
 watch(
   [() => props.profile, () => props.loading, () => props.preview],
   ([profile, loading, preview]) => {
+    frequencyExpanded.value = false;
     if (!profile || loading || preview) {
       sourceDetailsOpen.value = false;
       timetableOpen.value = false;
@@ -51,6 +53,11 @@ const sections = computed(() =>
       )
     : [],
 );
+const centralSection = computed(() => sections.value.find((section) => section.kind === "central"));
+const showCompactAverageFallback = computed(() => {
+  const profile = props.profile;
+  return Boolean(profile?.status === "ready" && (!profile.branched || !profile.topologyAvailable));
+});
 function formatServiceDate(value: string): string {
   if (!/^\d{8}$/u.test(value)) return t("globalMap.sidebar.gtfsFrequency.unknownDate");
   const year = Number(value.slice(0, 4));
@@ -74,7 +81,21 @@ const datasetDate = computed(() => {
 <template>
   <section class="gtfs-frequency-card" data-testid="gtfs-frequency-card">
     <div class="gtfs-frequency-card__title">
-      <h3><Clock3 :size="16" aria-hidden="true" />{{ t("globalMap.sidebar.lineFrequency") }}</h3>
+      <button
+        class="gtfs-frequency-card__accordion-trigger"
+        type="button"
+        id="gtfs-frequency-card-toggle"
+        data-testid="gtfs-frequency-toggle"
+        aria-controls="gtfs-frequency-card-content"
+        :aria-expanded="frequencyExpanded"
+        :disabled="preview || loading || !profile"
+        @click="frequencyExpanded = !frequencyExpanded"
+      >
+        <span
+          ><Clock3 :size="16" aria-hidden="true" />{{ t("globalMap.sidebar.lineFrequency") }}</span
+        >
+        <ChevronDown :size="16" aria-hidden="true" />
+      </button>
       <button
         class="gtfs-frequency-card__source-trigger"
         data-testid="gtfs-frequency-source"
@@ -87,66 +108,124 @@ const datasetDate = computed(() => {
         {{ t("globalMap.sidebar.gtfsFrequency.source") }}
       </button>
     </div>
-    <p class="gtfs-frequency-card__hint">{{ t("globalMap.sidebar.gtfsFrequency.hint") }}</p>
-    <p v-if="preview" role="status">{{ t("globalMap.sidebar.linePreviewFrequencyUnavailable") }}</p>
-    <p v-else-if="loading" role="status">{{ t("globalMap.sidebar.lineLoading") }}</p>
-    <template v-else-if="profile">
-      <p v-if="profile.status !== 'ready'" role="status" :data-frequency-status="profile.status">
+    <template v-if="!frequencyExpanded">
+      <p v-if="preview" role="status">
+        {{ t("globalMap.sidebar.linePreviewFrequencyUnavailable") }}
+      </p>
+      <p v-else-if="loading" role="status">{{ t("globalMap.sidebar.lineLoading") }}</p>
+      <p
+        v-else-if="profile && profile.status !== 'ready'"
+        role="status"
+        :data-frequency-status="profile.status"
+      >
         {{ t(statusKeys[profile.status]) }}
       </p>
-      <template v-else>
+      <template v-else-if="profile">
         <GtfsFrequencyBlock
-          :key="profile.lineId + profile.serviceDate"
-          data-testid="frequency-average"
-          :title="profile.branched ? t('globalMap.sidebar.gtfsFrequency.average') : undefined"
-          :average="profile.average"
-          :directions="profile.branched ? [] : profile.directions"
+          v-if="centralSection || showCompactAverageFallback"
+          :key="profile.lineId + profile.serviceDate + '-compact'"
+          data-testid="frequency-compact"
+          compact
+          :title="centralSection ? t('globalMap.sidebar.gtfsFrequency.central') : undefined"
+          :endpoints="
+            centralSection
+              ? t('globalMap.sidebar.gtfsFrequency.fromTo', {
+                  from: centralSection.from.name,
+                  to: centralSection.to.name,
+                })
+              : undefined
+          "
+          :average="centralSection?.average ?? profile.average"
+          :directions="centralSection?.directions ?? (profile.branched ? [] : profile.directions)"
         />
-        <button
-          class="gtfs-frequency-card__timetable-trigger"
-          data-testid="gtfs-frequency-timetable"
-          type="button"
-          aria-haspopup="dialog"
-          :aria-expanded="timetableOpen"
-          @click="timetableOpen = true"
-        >
-          <Search :size="14" aria-hidden="true" />
-          {{ t("globalMap.sidebar.gtfsFrequency.timetableLink") }}
-        </button>
         <p v-if="!profile.topologyAvailable" role="status">
           {{ t("globalMap.sidebar.gtfsFrequency.topologyMissing") }}
         </p>
-        <p v-else-if="profile.branched && !sections.length" role="status">
+        <p v-else-if="profile.branched && !centralSection && !sections.length" role="status">
           {{ t("globalMap.sidebar.gtfsFrequency.sectionsMissing") }}
         </p>
-        <GtfsFrequencyBlock
-          v-for="section in sections"
-          :key="profile.lineId + profile.serviceDate + section.id"
-          class="gtfs-frequency-card__section"
-          :data-frequency-section="section.id"
-          :title="
-            section.kind === 'central' ? t('globalMap.sidebar.gtfsFrequency.central') : undefined
-          "
-          :endpoints="
-            t('globalMap.sidebar.gtfsFrequency.fromTo', {
-              from: section.from.name,
-              to: section.to.name,
-            })
-          "
-          :average="section.average"
-          :directions="section.directions"
-        />
       </template>
+      <p v-else role="status">
+        {{
+          t(
+            unavailable
+              ? "globalMap.sidebar.lineFrequencyUnavailable"
+              : "globalMap.sidebar.lineLoading",
+          )
+        }}
+      </p>
     </template>
-    <p v-else role="status">
-      {{
-        t(
-          unavailable
-            ? "globalMap.sidebar.lineFrequencyUnavailable"
-            : "globalMap.sidebar.lineLoading",
-        )
-      }}
-    </p>
+    <div
+      v-else
+      id="gtfs-frequency-card-content"
+      class="gtfs-frequency-card__content"
+      role="region"
+      aria-labelledby="gtfs-frequency-card-toggle"
+      data-testid="gtfs-frequency-card-content"
+    >
+      <p class="gtfs-frequency-card__hint">{{ t("globalMap.sidebar.gtfsFrequency.hint") }}</p>
+      <p v-if="preview" role="status">
+        {{ t("globalMap.sidebar.linePreviewFrequencyUnavailable") }}
+      </p>
+      <p v-else-if="loading" role="status">{{ t("globalMap.sidebar.lineLoading") }}</p>
+      <template v-else-if="profile">
+        <p v-if="profile.status !== 'ready'" role="status" :data-frequency-status="profile.status">
+          {{ t(statusKeys[profile.status]) }}
+        </p>
+        <template v-else>
+          <GtfsFrequencyBlock
+            :key="profile.lineId + profile.serviceDate"
+            data-testid="frequency-average"
+            :title="profile.branched ? t('globalMap.sidebar.gtfsFrequency.average') : undefined"
+            :average="profile.average"
+            :directions="profile.branched ? [] : profile.directions"
+          />
+          <button
+            class="gtfs-frequency-card__timetable-trigger"
+            data-testid="gtfs-frequency-timetable"
+            type="button"
+            aria-haspopup="dialog"
+            :aria-expanded="timetableOpen"
+            @click="timetableOpen = true"
+          >
+            <Search :size="14" aria-hidden="true" />
+            {{ t("globalMap.sidebar.gtfsFrequency.timetableLink") }}
+          </button>
+          <p v-if="!profile.topologyAvailable" role="status">
+            {{ t("globalMap.sidebar.gtfsFrequency.topologyMissing") }}
+          </p>
+          <p v-else-if="profile.branched && !sections.length" role="status">
+            {{ t("globalMap.sidebar.gtfsFrequency.sectionsMissing") }}
+          </p>
+          <GtfsFrequencyBlock
+            v-for="section in sections"
+            :key="profile.lineId + profile.serviceDate + section.id"
+            class="gtfs-frequency-card__section"
+            :data-frequency-section="section.id"
+            :title="
+              section.kind === 'central' ? t('globalMap.sidebar.gtfsFrequency.central') : undefined
+            "
+            :endpoints="
+              t('globalMap.sidebar.gtfsFrequency.fromTo', {
+                from: section.from.name,
+                to: section.to.name,
+              })
+            "
+            :average="section.average"
+            :directions="section.directions"
+          />
+        </template>
+      </template>
+      <p v-else role="status">
+        {{
+          t(
+            unavailable
+              ? "globalMap.sidebar.lineFrequencyUnavailable"
+              : "globalMap.sidebar.lineLoading",
+          )
+        }}
+      </p>
+    </div>
     <AppModal
       :open="sourceDetailsOpen"
       :title="t('globalMap.sidebar.gtfsFrequency.sourceDetails')"
@@ -221,6 +300,54 @@ const datasetDate = computed(() => {
   justify-content: space-between;
   gap: var(--space-2);
 }
+.gtfs-frequency-card__accordion-trigger {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: var(--space-2);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+.gtfs-frequency-card__accordion-trigger > span {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: var(--space-2);
+}
+.gtfs-frequency-card__accordion-trigger > span > svg {
+  flex: 0 0 auto;
+}
+.gtfs-frequency-card__accordion-trigger > svg {
+  flex: 0 0 auto;
+  transition: transform 160ms ease;
+}
+.gtfs-frequency-card__accordion-trigger[aria-expanded="true"] > svg {
+  transform: rotate(180deg);
+}
+.gtfs-frequency-card__accordion-trigger:hover:not(:disabled),
+.gtfs-frequency-card__accordion-trigger:focus-visible {
+  color: var(--idfm-blue);
+  outline: none;
+}
+.gtfs-frequency-card__accordion-trigger:focus-visible {
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--idfm-blue), transparent 72%);
+}
+.gtfs-frequency-card__accordion-trigger:disabled {
+  cursor: default;
+}
+.gtfs-frequency-card__content {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
 h3 {
   display: inline-flex;
   align-items: center;
@@ -285,5 +412,10 @@ p {
 .gtfs-frequency-card__section {
   border-top: 1px solid var(--border);
   padding-top: var(--space-3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .gtfs-frequency-card__accordion-trigger > svg {
+    transition: none;
+  }
 }
 </style>

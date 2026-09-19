@@ -281,10 +281,15 @@ function station(): GlobalMapStation {
   };
 }
 const wrappers: Array<{ unmount(): void }> = [];
-function card(value = profile(), preview = false) {
-  const wrapper = mount(GtfsFrequencyCard, { props: { profile: value, preview } });
+function card(value = profile(), preview = false, lineColor?: string) {
+  const wrapper = mount(GtfsFrequencyCard, {
+    props: { profile: value, preview, lineColor },
+  });
   wrappers.push(wrapper);
   return wrapper;
+}
+async function expandFrequencyCard(wrapper: ReturnType<typeof card>): Promise<void> {
+  await wrapper.get('[data-testid="gtfs-frequency-toggle"]').trigger("click");
 }
 function sidebar(props: { line?: GlobalMapLine; previewLine?: GlobalMapLine } = {}) {
   const wrapper = mount(GlobalMapPickerSideBar, {
@@ -319,11 +324,16 @@ afterEach(() => {
 describe("GTFS frequency card", () => {
   it("renders one compact grid for a simple line, with direction ranges and expandable labelled details", async () => {
     const wrapper = card();
+    expect(wrapper.get('[data-testid="gtfs-frequency-toggle"]').attributes("aria-expanded")).toBe(
+      "false",
+    );
     expect(wrapper.findAll('[data-testid="frequency-grid"]')).toHaveLength(1);
     expect(wrapper.get('[data-period="peakMinutes"] strong').text()).toBe("4–8 min");
     expect(wrapper.find('[data-period="peakMinutes"] small').exists()).toBe(false);
     expect(wrapper.get('[data-period="nightMinutes"] strong').text()).toBe("16–20 min");
     expect(wrapper.findAll("[data-frequency-section]")).toHaveLength(0);
+    expect(wrapper.find("details").exists()).toBe(false);
+    await expandFrequencyCard(wrapper);
     const details = wrapper.get("details");
     expect(details.attributes("open")).toBeUndefined();
     await wrapper.get("summary").trigger("click");
@@ -332,7 +342,7 @@ describe("GTFS frequency card", () => {
     expect(details.text()).toContain("From East to West");
   });
 
-  it("replaces the station mean with the timetable link and orders central before endpoints", () => {
+  it("replaces the station mean with the timetable link and orders central before endpoints", async () => {
     const wrapper = card(
       profile({
         branched: true,
@@ -344,6 +354,10 @@ describe("GTFS frequency card", () => {
         ],
       }),
     );
+    expect(wrapper.get('[data-testid="frequency-compact"] h4').text()).toBe("Central section");
+    expect(wrapper.get('[data-testid="frequency-compact"]').text()).not.toContain("branch origin");
+    expect(wrapper.findAll("[data-frequency-section]")).toHaveLength(0);
+    await expandFrequencyCard(wrapper);
     expect(wrapper.get('[data-testid="frequency-average"] strong').text()).toBe("12 min");
     expect(wrapper.text()).toContain("View timetable");
     expect(wrapper.find('[data-testid="gtfs-frequency-timetable"]').exists()).toBe(true);
@@ -359,7 +373,7 @@ describe("GTFS frequency card", () => {
     expect(sections[0]!.find('[data-period="peakMinutes"] small').exists()).toBe(false);
   });
 
-  it("condenses an unavailable section summary beside its direction", () => {
+  it("condenses an unavailable section summary beside its direction", async () => {
     const wrapper = card(
       profile({
         branched: true,
@@ -373,6 +387,7 @@ describe("GTFS frequency card", () => {
       }),
     );
 
+    await expandFrequencyCard(wrapper);
     const missingSection = wrapper.get('[data-frequency-section="missing"]');
     expect(missingSection.find('[data-testid="frequency-grid"]').exists()).toBe(false);
     expect(missingSection.get('[data-testid="frequency-summary-unavailable"]').text()).toBe(
@@ -423,7 +438,7 @@ describe("GTFS frequency card", () => {
     expect(wrapper.find("details").exists()).toBe(false);
   });
 
-  it("keeps direction details when one period is missing", () => {
+  it("keeps direction details when one period is missing", async () => {
     const wrapper = card(
       profile({
         average: { peakMinutes: 4, offPeakMinutes: 5, nightMinutes: 15 },
@@ -433,10 +448,11 @@ describe("GTFS frequency card", () => {
         ],
       }),
     );
+    await expandFrequencyCard(wrapper);
     expect(wrapper.find("details").exists()).toBe(true);
   });
 
-  it("shows branches without inventing a central section", () => {
+  it("shows branches without inventing a central section", async () => {
     const wrapper = card(
       profile({
         branched: true,
@@ -444,16 +460,19 @@ describe("GTFS frequency card", () => {
       }),
     );
     expect(wrapper.text()).not.toContain("Central section");
+    await expandFrequencyCard(wrapper);
     expect(wrapper.findAll("[data-frequency-section]")).toHaveLength(2);
     expect(wrapper.text()).toContain("From north origin to north terminus");
   });
 
-  it("retains the average when topology is missing and explains the unavailable decomposition", () => {
+  it("retains the average when topology is missing and explains the unavailable decomposition", async () => {
     const wrapper = card(profile({ topologyAvailable: false, branched: true }));
-    expect(wrapper.get('[data-testid="frequency-average"] strong').text()).toBe("6 min");
+    expect(wrapper.get('[data-testid="frequency-compact"] strong').text()).toBe("6 min");
     expect(wrapper.text()).toContain(
       "Topology unavailable: average shown, section breakdown unavailable.",
     );
+    await expandFrequencyCard(wrapper);
+    expect(wrapper.get('[data-testid="frequency-average"] strong').text()).toBe("6 min");
   });
 
   it("shows GTFS provenance metadata only after opening the source modal", async () => {
@@ -476,6 +495,7 @@ describe("GTFS frequency card", () => {
       .mockResolvedValue(timetable());
     const wrapper = card();
 
+    await expandFrequencyCard(wrapper);
     await wrapper.get('[data-testid="gtfs-frequency-timetable"]').trigger("click");
     await flushPromises();
 
@@ -497,6 +517,30 @@ describe("GTFS frequency card", () => {
     expect(
       document.body.querySelector('[data-testid="line-frequency-timetable-departures"]'),
     ).toBeNull();
+  });
+
+  it("pins an indeterminate loading bar to the timetable modal bottom", async () => {
+    let resolveTimetable!: (value: GtfsLineTimetableResponse) => void;
+    vi.spyOn(timetableClient, "fetchGtfsLineTimetable").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveTimetable = resolve;
+        }),
+    );
+    const wrapper = card(profile(), false, "#123456");
+
+    await expandFrequencyCard(wrapper);
+    await wrapper.get('[data-testid="gtfs-frequency-timetable"]').trigger("click");
+    await nextTick();
+
+    const loadingBar = document.body.querySelector(".line-frequency-timetable-modal .loading-bar");
+    expect(loadingBar).not.toBeNull();
+    expect(loadingBar?.getAttribute("aria-valuenow")).toBeNull();
+    expect(loadingBar?.getAttribute("style")).toContain("--loading-bar-color: #123456;");
+
+    resolveTimetable(timetable());
+    await flushPromises();
+    expect(document.body.querySelector(".line-frequency-timetable-modal .loading-bar")).toBeNull();
   });
 
   it("uses the server-resolved topology ids for technical NeTEx sections", async () => {
@@ -523,6 +567,7 @@ describe("GTFS frequency card", () => {
       }),
     );
 
+    await expandFrequencyCard(wrapper);
     await wrapper.get('[data-testid="gtfs-frequency-timetable"]').trigger("click");
     await flushPromises();
 
@@ -540,6 +585,7 @@ describe("GTFS frequency card", () => {
     });
     const wrapper = card();
 
+    await expandFrequencyCard(wrapper);
     await wrapper.get('[data-testid="gtfs-frequency-timetable"]').trigger("click");
     await flushPromises();
 
@@ -585,6 +631,7 @@ describe("GTFS frequency card", () => {
     });
     wrappers.push(wrapper);
 
+    await expandFrequencyCard(wrapper);
     await wrapper.get('[data-testid="gtfs-frequency-timetable"]').trigger("click");
     await flushPromises();
 
@@ -599,9 +646,9 @@ describe("GTFS frequency card", () => {
     ).toContain("Central section");
     trigger?.click();
     await nextTick();
-    const options = [...selector!.querySelectorAll('[role="option"]')].map(
-      (option) => option.textContent,
-    );
+    const options = [
+      ...document.body.querySelectorAll('.line-frequency-timetable__segment-menu [role="option"]'),
+    ].map((option) => option.textContent);
     expect(options).toContain("Central sectionFrom West to EastWest → East");
     expect(
       document.body
@@ -657,20 +704,25 @@ describe("GTFS frequency card", () => {
     expect(wrapper.find("details").exists()).toBe(false);
   });
 
-  it("collapses an entirely unavailable direction into one compact label", () => {
+  it("collapses an entirely unavailable direction into one compact label", async () => {
     const unavailableDirection = {
       id: "out",
       from: "West",
       to: "East",
       stationCount: 3,
     };
-    const wrapper = card(profile({
-      directions: [unavailableDirection, { ...unavailableDirection, id: "back" }],
-    }));
+    const wrapper = card(
+      profile({
+        directions: [unavailableDirection, { ...unavailableDirection, id: "back" }],
+      }),
+    );
 
+    await expandFrequencyCard(wrapper);
     expect(wrapper.find("details").exists()).toBe(true);
     expect(wrapper.findAll(".gtfs-frequency-block__direction-unavailable")).toHaveLength(2);
-    expect(wrapper.findAll(".gtfs-frequency-block__direction .gtfs-frequency-block__grid")).toHaveLength(0);
+    expect(
+      wrapper.findAll(".gtfs-frequency-block__direction .gtfs-frequency-block__grid"),
+    ).toHaveLength(0);
   });
 
   it("hides pinned metrics and metadata during preview", () => {
@@ -789,16 +841,26 @@ describe("GTFS frequency client cache", () => {
   it("forwards cancellation while reading the frequency response body", async () => {
     let requestSignal: AbortSignal | undefined;
     let bodyStarted!: () => void;
-    const started = new Promise<void>((resolve) => { bodyStarted = resolve; });
-    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      requestSignal = init?.signal ?? undefined;
-      return { ok: true, json: async () => {
-        bodyStarted();
-        return new Promise(() => {});
-      } };
-    }));
+    const started = new Promise<void>((resolve) => {
+      bodyStarted = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        requestSignal = init?.signal ?? undefined;
+        return {
+          ok: true,
+          json: async () => {
+            bodyStarted();
+            return new Promise(() => {});
+          },
+        };
+      }),
+    );
     const controller = new AbortController();
-    const pending = frequencyClient.fetchGtfsLineFrequency("line:IDFM:C01371", { signal: controller.signal });
+    const pending = frequencyClient.fetchGtfsLineFrequency("line:IDFM:C01371", {
+      signal: controller.signal,
+    });
     const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
     await started;
     controller.abort();

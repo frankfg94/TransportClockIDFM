@@ -78,7 +78,7 @@ export class GlobalIsochroneArchive {
         }
       }
       for (const id of scope.coveredStationIds) availableStations.add(id);
-      surfaces.push({ id: zone.asset, mode: request.mode, minutes: request.minutes, geometry: cached.geometry });
+      surfaces.push({ id: zone.asset, mode: request.mode, minutes: request.minutes, scopeKey: request.key, geometry: cached.geometry });
     }
     return {
       surfaces,

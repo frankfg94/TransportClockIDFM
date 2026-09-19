@@ -196,9 +196,13 @@ interface NatureSignalResult {
 const GREEN_SPACE_ROUTE_CANDIDATE_LIMIT = 12;
 const GREEN_SPACE_DISPLAY_LIMIT_MINUTES = 30;
 const GREEN_SPACE_POSITIVE_LIMIT_MINUTES = 15;
-const GREEN_SPACE_TRANSIT_MIN_SURFACE_M2 = 100_000;
+// Keep all spaces large enough for the frontend exceptional-access barème in
+// the public route-target contract. The client applies the exact surface/time
+// rule; this threshold only prevents a 3 ha candidate from being discarded
+// before it can be evaluated.
+const GREEN_SPACE_TRANSIT_MIN_SURFACE_M2 = 30_000;
 const GREEN_SPACE_TRANSIT_DISPLAY_LIMIT_MINUTES = 45;
-const GREEN_SPACE_TRANSIT_TARGET_LIMIT = 4;
+const GREEN_SPACE_TRANSIT_TARGET_LIMIT = 8;
 const DEFAULT_GREEN_SPACE_SOURCE_ID = "hds-green-spaces";
 
 async function natureSignal(
@@ -434,8 +438,8 @@ function greenSpaceReferencePeriod(
 function isNamedPark(space: CompiledGreenSpace): boolean {
   const name = normalizeGreenSpaceText(space.name);
   const category = normalizeGreenSpaceText(space.category ?? "");
-  return category === "parc"
-    || /\b(?:parc|domaine|vallee|foret|bois)\b/iu.test(`${name} ${category}`);
+  return /^(?:parc|jardin|square|espace vert|bois|foret|vallee|domaine|reserve naturelle|nature reserve)$/iu.test(category)
+    || /\b(?:parc|domaine|vallee|foret|bois|jardin|square|espace vert)\b/iu.test(`${name} ${category}`);
 }
 
 function formatGreenSpaceArea(surfaceM2: number): string | undefined {

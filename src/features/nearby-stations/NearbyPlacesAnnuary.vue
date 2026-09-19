@@ -32,6 +32,9 @@ import {
   countNearbyPlaces,
   filterAndGroupNearbyPlaces,
   nearbyPlaceGoogleMapsUrl,
+  nearbyPlaceDisplayName,
+  isNearbyPlaceCommerce,
+  isNearbyPlaceVisibleInDirectory,
   nearbyPlaceIsWithinWalkingMinutes,
   nearbyPlaceWalkingDistanceMeters,
   nearbyPlaceWalkingMinutes,
@@ -94,7 +97,7 @@ let filterCloseTimer: number | undefined;
 
 const radiusMeters = computed(() => walkingMinutesToMeters(props.walkingMinutes));
 const baseGroups = computed(() => {
-  const places = props.places.filter((place) =>
+  const places = props.places.filter(isNearbyPlaceVisibleInDirectory).filter((place) =>
     nearbyPlaceIsWithinWalkingMinutes(
       place,
       props.walkingRoutes?.[place.id],
@@ -335,7 +338,7 @@ function placeMetadata(place: NearbyPlace): string {
 
 function placeAriaLabel(place: NearbyPlace): string {
   return t("nearbyStations.directory.selectPlace", {
-    name: place.name,
+    name: nearbyPlaceDisplayName(place, t),
     minutes: placeWalkingMinutes(place),
     metadata: placeMetadata(place),
   });
@@ -348,7 +351,7 @@ function openPlaceContextMenu(placeId: string, event: MouseEvent): void {
 
 function exportPayload(): NearbyPlacesExportPayload {
   const exportWalkingMinutes: NearbyWalkingMinutes = props.walkingMinutes === 5 ? 5 : 10;
-  const exportPlaces = props.places.filter((place) =>
+  const exportPlaces = props.places.filter(isNearbyPlaceVisibleInDirectory).filter((place) =>
     nearbyPlaceWalkingDistanceMeters(place, placeRoute(place)) <= nearbyPlacesExportPolicy.maxRadiusMeters,
   );
   const exportPlaceIds = new Set(exportPlaces.map((place) => place.id));
@@ -403,17 +406,18 @@ function exportSections(
     expanded: true,
     places: group.places.map<NearbyPlacesExportItem>((place) => {
       const route = payload.walkingRoutes?.[place.id];
+      const name = nearbyPlaceDisplayName(place, t);
       return {
         id: place.id,
-        name: place.name,
+        name,
         type: subcategoryLabel(place),
         address: place.address,
         distanceMeters: nearbyPlaceWalkingDistanceMeters(place, route),
         walkingMinutes: nearbyPlaceWalkingMinutes(place, route),
         walkingTime: t("nearbyStations.walkingTime", { minutes: nearbyPlaceWalkingMinutes(place, route) }),
-        googleMapsUrl: nearbyPlaceGoogleMapsUrl(place, { city: props.originCity }),
+        googleMapsUrl: nearbyPlaceGoogleMapsUrl({ ...place, name }, { city: props.originCity }),
         selected: props.selectedPlaceId === place.id,
-        commerce: place.category === "shop",
+        commerce: isNearbyPlaceCommerce(place),
       };
     }),
   }));
@@ -680,17 +684,17 @@ onBeforeUnmount(() => {
                   >
                     <span class="nearby-directory__place-icon"><component :is="placeIcon(place)" :size="16" aria-hidden="true" /></span>
                     <span class="nearby-directory__place-copy">
-                      <strong>{{ place.name }}</strong>
+                      <strong>{{ nearbyPlaceDisplayName(place, t) }}</strong>
                       <span>{{ placeMetadata(place) }}</span>
                     </span>
                     <span class="nearby-directory__place-walk"><Footprints :size="15" aria-hidden="true" />{{ t("nearbyStations.walkingTime", { minutes: placeWalkingMinutes(place) }) }}</span>
                   </button>
                   <a
                     class="nearby-directory__place-google"
-                    :href="nearbyPlaceGoogleMapsUrl(place, { city: originCity })"
+                    :href="nearbyPlaceGoogleMapsUrl({ ...place, name: nearbyPlaceDisplayName(place, t) }, { city: originCity })"
                     target="_blank"
                     rel="noopener noreferrer"
-                    :aria-label="t('nearbyStations.directory.openPlaceInGoogleMaps', { name: place.name, address: place.address ?? '' })"
+                    :aria-label="t('nearbyStations.directory.openPlaceInGoogleMaps', { name: nearbyPlaceDisplayName(place, t), address: place.address ?? '' })"
                     :title="t('nearbyStations.directory.openInGoogleMaps')"
                     @click.stop
                   >

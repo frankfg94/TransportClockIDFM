@@ -60,6 +60,87 @@ describe("dashboard presets", () => {
     wrapper.unmount();
   });
 
+  it("collapses and expands the home board controls from the topbar chevron", async () => {
+    installDashboardMocks({});
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+
+    await flushPromises();
+
+    const toggle = wrapper.get("[data-testid='topbar-controls-toggle']");
+    const controls = wrapper.get("#topbar-board-controls");
+
+    expect(toggle.attributes("aria-controls")).toBe("topbar-board-controls");
+    expect(toggle.attributes("aria-expanded")).toBe("true");
+    expect(controls.classes()).not.toContain("topbar__controls-clip--collapsed");
+
+    await toggle.trigger("click");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(controls.classes()).toContain("topbar__controls-clip--collapsed");
+
+    await toggle.trigger("click");
+    expect(toggle.attributes("aria-expanded")).toBe("true");
+    expect(controls.classes()).not.toContain("topbar__controls-clip--collapsed");
+
+    wrapper.unmount();
+  });
+
+  it("updates the browser tab title for fullscreen double-stop without changing the panel display", async () => {
+    vi.useFakeTimers();
+    const initialTitle = document.title;
+    const departureTime = Date.now() + 125_000;
+    const { fetchBoardDepartures } = installDashboardMocks(
+      {
+        fullscreen: "t10-les-peintres",
+        fullscreenDisplay: "double-stop",
+      },
+      {},
+      { apiConfigured: true },
+    );
+
+    fetchBoardDepartures.mockImplementation(async (board: TransitBoardConfig) => {
+      const departure = {
+        id: `${board.id}-departure`,
+        lineRef: board.line.ref,
+        monitoringRef: board.monitoringPoints[0]?.ref ?? "",
+        stopName: board.title,
+        destination: board.directionGroups[0]?.label ?? "Destination",
+        monitoringLabel: "",
+        expectedDepartureTime: new Date(departureTime).toISOString(),
+        vehicleAtStop: false,
+      };
+
+      return {
+        departures: [departure],
+        directionGroups: board.directionGroups.map((group, index) => ({
+          ...group,
+          departures: index === 0 ? [departure] : [],
+          serviceEnded: false,
+        })),
+      };
+    });
+
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+
+    await flushPromises();
+    await vi.waitFor(() => {
+      expect(document.title).toBe("T10 - dans 2 minutes");
+    });
+
+    const panel = document.body.querySelector(".fullscreen-station-panel");
+    expect(panel?.textContent).toContain("2");
+    expect(panel?.textContent).not.toContain("T10 - dans");
+
+    await vi.advanceTimersByTimeAsync(61_000);
+    await vi.waitFor(() => {
+      expect(document.title).toBe("T10 - dans 1 minute");
+    });
+
+    wrapper.unmount();
+    expect(document.title).toBe(initialTitle);
+  });
+
   it("normalizes the home URL and switches to an empty work dashboard", async () => {
     installDashboardMocks({});
     const { default: App } = await import("../src/App.vue");

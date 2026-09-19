@@ -52,6 +52,7 @@ export class TransportMapRenderSceneIndex implements TransportMapRenderSceneInde
   private interruptedStationIdsSource?: string[];
   private disturbedStationIdsSource?: string[];
   private selectedStationIdsSource?: string[];
+  private servedCityZonesSource?: TransportMapRenderScene["servedCityZones"];
   private visibleModeMask = Number.NaN;
 
   linesById = new Map<string, GlobalMapLine>();
@@ -85,6 +86,7 @@ export class TransportMapRenderSceneIndex implements TransportMapRenderSceneInde
     const linesChanged = this.linesSource !== scene.lines;
     const stationsChanged = this.stationsSource !== scene.stations;
     const ghostLineIdsChanged = this.ghostLineIdsSource !== scene.ghostLineIds;
+    const servedCityZonesChanged = this.servedCityZonesSource !== scene.servedCityZones;
 
     if (linesChanged) {
       this.linesSource = scene.lines;
@@ -104,6 +106,10 @@ export class TransportMapRenderSceneIndex implements TransportMapRenderSceneInde
     if (stationsChanged) {
       this.stationsSource = scene.stations;
       this.stationsById = new Map(scene.stations.map((station) => [station.id, station]));
+      changed = true;
+    }
+    if (servedCityZonesChanged) {
+      this.servedCityZonesSource = scene.servedCityZones;
       changed = true;
     }
     if (ghostLineIdsChanged) {
@@ -191,6 +197,7 @@ export class TransportMapRenderSceneIndex implements TransportMapRenderSceneInde
     this.interruptedStationIdsSource = undefined;
     this.disturbedStationIdsSource = undefined;
     this.selectedStationIdsSource = undefined;
+    this.servedCityZonesSource = undefined;
     this.visibleModeMask = Number.NaN;
     this.linesById.clear();
     this.pathsByLineId.clear();

@@ -239,8 +239,10 @@ function handleClusterGroupingDistanceUpdate(value: number): void {
       <NearbyStationsMap
         v-if="nearby.selectedPlace.value"
         :origin="nearby.selectedPlace.value"
+        :origin-label="nearby.selectedPlace.value.label"
         :radius="nearby.radius.value"
         :stations="nearby.visibleStations.value"
+        :city-view-network="nearby.transportMapNetwork?.value"
         :selected-line-ids="nearby.selectedLineIds"
         :active-modes="nearby.activeModes.value"
         :basemap-style="props.basemapStyle"

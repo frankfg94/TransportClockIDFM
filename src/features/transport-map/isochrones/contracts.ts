@@ -4,6 +4,23 @@ import type { WalkingIsochroneGeometry } from "../../../shared/walkingIsochroneG
 export const GLOBAL_ISOCHRONE_SCHEMA_VERSION = 1;
 export const GLOBAL_ISOCHRONE_MINUTES = [5, 10, 15, 20, 25, 30] as const;
 export type GlobalIsochroneMinutes = typeof GLOBAL_ISOCHRONE_MINUTES[number];
+export const GLOBAL_ISOCHRONE_PRESETS = {
+  standard: [5, 10, 15],
+  extended: [10, 20, 25],
+} as const satisfies Record<string, readonly GlobalIsochroneMinutes[]>;
+export const GLOBAL_ISOCHRONE_PRESET_ORDER = ["standard", "extended"] as const;
+export type GlobalIsochronePresetId = typeof GLOBAL_ISOCHRONE_PRESET_ORDER[number];
+export const GLOBAL_ISOCHRONE_DEFAULT_PRESET: Record<GlobalMapMode, GlobalIsochronePresetId> = {
+  METRO: "standard",
+  RER: "standard",
+  TRAIN: "standard",
+  TRANSILIEN: "standard",
+  TRAM: "standard",
+  CABLE: "standard",
+  BUS: "extended",
+  NOCTILIEN: "extended",
+  BIKE: "standard",
+};
 export const GLOBAL_ISOCHRONE_ASSET = "/data/global-map/v1/walking-isochrones.zip";
 export const GLOBAL_ISOCHRONE_ATTRIBUTION = "© openrouteservice · © OpenStreetMap contributors";
 export const GLOBAL_ISOCHRONE_PARAMETERS = {
@@ -14,12 +31,8 @@ export const GLOBAL_ISOCHRONE_PARAMETERS = {
   minutes: GLOBAL_ISOCHRONE_MINUTES,
 } as const;
 
-export const GLOBAL_ISOCHRONE_DEFAULT_MINUTES: Record<GlobalMapMode, GlobalIsochroneMinutes> = {
-  METRO: 10, RER: 15, TRAIN: 20, TRANSILIEN: 20, TRAM: 10,
-  CABLE: 10, BUS: 5, NOCTILIEN: 10, BIKE: 5,
-};
-
-export type GlobalIsochroneSettings = Record<GlobalMapMode, { enabled: boolean; minutes: GlobalIsochroneMinutes }>;
+export type GlobalIsochroneModeSetting = { enabled: boolean; preset: GlobalIsochronePresetId };
+export type GlobalIsochroneSettings = Record<GlobalMapMode, GlobalIsochroneModeSetting>;
 export type GlobalIsochroneStatus = "idle" | "loading" | "ready" | "partial" | "missing" | "incompatible" | "error";
 export type GlobalIsochroneErrorCode = "missing" | "incompatible" | "invalid" | "unavailable";
 
@@ -50,6 +63,8 @@ export interface GlobalIsochroneIndex {
   parameters: typeof GLOBAL_ISOCHRONE_PARAMETERS;
   attribution: string;
   scopes: Record<string, GlobalIsochroneScope>;
+  /** Per-station access to shared, coordinate-deduplicated contours. Optional in legacy archives. */
+  stationOrigins?: Record<string, { asset: string; lon: number; lat: number }>;
 }
 
 export interface GlobalIsochroneRequest {
@@ -63,6 +78,8 @@ export interface GlobalIsochroneSurface {
   id: string;
   mode: GlobalMapMode;
   minutes: GlobalIsochroneMinutes;
+  /** Scope key such as mode:METRO or line:line:METRO:1, when provided by the archive response. */
+  scopeKey?: string;
   geometry: WalkingIsochroneGeometry;
 }
 
@@ -84,9 +101,17 @@ export function isGlobalIsochroneMinutes(value: unknown): value is GlobalIsochro
   return GLOBAL_ISOCHRONE_MINUTES.includes(value as GlobalIsochroneMinutes);
 }
 
+export function isGlobalIsochronePresetId(value: unknown): value is GlobalIsochronePresetId {
+  return GLOBAL_ISOCHRONE_PRESET_ORDER.includes(value as GlobalIsochronePresetId);
+}
+
+export function globalIsochronePresetMinutes(preset: GlobalIsochronePresetId): readonly GlobalIsochroneMinutes[] {
+  return GLOBAL_ISOCHRONE_PRESETS[preset];
+}
+
 export function createGlobalIsochroneSettings(): GlobalIsochroneSettings {
   return Object.fromEntries(GLOBAL_MAP_MODE_ORDER.map((mode) => [mode, {
-    enabled: true, minutes: GLOBAL_ISOCHRONE_DEFAULT_MINUTES[mode],
+    enabled: true, preset: GLOBAL_ISOCHRONE_DEFAULT_PRESET[mode],
   }])) as GlobalIsochroneSettings;
 }
 
@@ -128,7 +153,7 @@ export function assertGlobalIsochroneIndex(value: unknown, mapDataVersion?: stri
       !stringList(scope.stationIds) || !stringList(scope.coveredStationIds) || !isRecord(scope.zones)) {
       throw new GlobalIsochroneError("invalid");
     }
-    const stations = new Set(scope.stationIds);
+  const stations = new Set(scope.stationIds);
     if (stations.size !== scope.stationIds.length || new Set(scope.coveredStationIds).size !== scope.coveredStationIds.length ||
       scope.coveredStationIds.some((id) => !stations.has(id))) throw new GlobalIsochroneError("invalid");
     for (const minutes of GLOBAL_ISOCHRONE_MINUTES) {
@@ -136,6 +161,17 @@ export function assertGlobalIsochroneIndex(value: unknown, mapDataVersion?: stri
       if (!scope.coveredStationIds.length && zone === undefined) continue;
       if (!isRecord(zone) || zone.asset !== globalIsochroneZoneAsset(key, minutes) ||
         !Number.isSafeInteger(zone.bytes) || Number(zone.bytes) <= 0) throw new GlobalIsochroneError("invalid");
+    }
+  }
+  if (value.stationOrigins !== undefined) {
+    if (!isRecord(value.stationOrigins)) throw new GlobalIsochroneError("invalid");
+    for (const entry of Object.values(value.stationOrigins)) {
+      if (!isRecord(entry) || typeof entry.lon !== "number" || typeof entry.lat !== "number"
+        || !Number.isFinite(entry.lon) || !Number.isFinite(entry.lat)
+        || Math.abs(entry.lon) > 180 || Math.abs(entry.lat) > 90
+        || entry.asset !== `origins/${encodeURIComponent(`${entry.lon.toFixed(5)},${entry.lat.toFixed(5)}`)}.json`) {
+        throw new GlobalIsochroneError("invalid");
+      }
     }
   }
 }

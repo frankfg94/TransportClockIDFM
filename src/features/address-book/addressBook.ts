@@ -53,12 +53,14 @@ export interface AddressBookEntry {
   icon: AddressBookMarkerIcon;
   color?: string;
   isPrimary?: boolean;
+  isWorkplace?: boolean;
   isHidden?: boolean;
 }
 
-export type AddressBookEntryInput = Omit<AddressBookEntry, "id" | "isPrimary"> & {
+export type AddressBookEntryInput = Omit<AddressBookEntry, "id" | "isPrimary" | "isWorkplace"> & {
   id?: string;
   isPrimary?: boolean;
+  isWorkplace?: boolean;
 };
 
 export interface AddressBookStorageState {
@@ -128,6 +130,7 @@ export function normalizeAddressBookEntry(value: unknown): AddressBookEntry | un
     icon,
     ...(color ? { color } : {}),
     ...(kind === "address" && candidate.isPrimary === true ? { isPrimary: true } : {}),
+    ...(kind === "address" && candidate.isWorkplace === true ? { isWorkplace: true } : {}),
     ...(isHidden ? { isHidden: true } : {}),
   };
 }
@@ -136,6 +139,7 @@ export function normalizeAddressBookEntries(values: unknown): AddressBookEntry[]
   if (!Array.isArray(values)) return [];
   const seen = new Set<string>();
   let primaryFound = false;
+  let workplaceFound = false;
   return values
     .map(normalizeAddressBookEntry)
     .filter((entry): entry is AddressBookEntry => Boolean(entry))
@@ -147,6 +151,13 @@ export function normalizeAddressBookEntries(values: unknown): AddressBookEntry[]
           entry.isPrimary = false;
         } else {
           primaryFound = true;
+        }
+      }
+      if (entry.isWorkplace) {
+        if (workplaceFound) {
+          entry.isWorkplace = false;
+        } else {
+          workplaceFound = true;
         }
       }
       return true;
@@ -211,6 +222,7 @@ export function toAddressBookPoint(entry: AddressBookEntry): GeocoderPoint {
     label: entry.name,
     ...(entry.address ? { address: entry.address } : {}),
     ...(entry.isPrimary ? { addressBookPrimary: true } : {}),
+    ...(entry.isWorkplace ? { addressBookWorkplace: true } : {}),
     ...(entry.city ? { city: entry.city } : {}),
     ...(entry.postcode ? { postcode: entry.postcode } : {}),
     provider: "address-book",
@@ -221,10 +233,12 @@ export function toAddressBookPoint(entry: AddressBookEntry): GeocoderPoint {
 interface AddressBookStateApi {
   entries: ComputedRef<AddressBookEntry[]>;
   primaryAddress: ComputedRef<AddressBookEntry | undefined>;
+  workplaceAddress: ComputedRef<AddressBookEntry | undefined>;
   addEntry: (input: AddressBookEntryInput) => AddressBookEntry;
   updateEntry: (input: AddressBookEntry) => boolean;
   removeEntry: (id: string) => boolean;
   setPrimary: (id: string) => boolean;
+  setWorkplace: (id: string) => boolean;
   getEntry: (id: string) => AddressBookEntry | undefined;
   reloadFromStorage: () => void;
 }
@@ -269,6 +283,7 @@ function createAddressBookState(): { scope: ReturnType<typeof effectScope>; api:
 
     const entries = computed(() => normalizeAddressBookEntries(storage.value?.entries));
     const primaryAddress = computed(() => entries.value.find((entry) => entry.isPrimary));
+    const workplaceAddress = computed(() => entries.value.find((entry) => entry.isWorkplace));
     let lastRaw = target?.getItem(ADDRESS_BOOK_STORAGE_KEY) ?? null;
 
     function replaceEntries(nextEntries: readonly AddressBookEntry[]): void {
@@ -292,9 +307,12 @@ function createAddressBookState(): { scope: ReturnType<typeof effectScope>; api:
     function addEntry(input: AddressBookEntryInput): AddressBookEntry {
       const entry = normalizeAddressBookEntry({ ...input, id: input.id ?? createAddressBookEntryId() });
       if (!entry) throw new Error("invalid-address-book-entry");
-      const next = entry.isPrimary && entry.kind === "address"
+      let next = entry.isPrimary && entry.kind === "address"
         ? entries.value.map((candidate) => ({ ...candidate, isPrimary: false }))
         : entries.value.slice();
+      if (entry.isWorkplace && entry.kind === "address") {
+        next = next.map((candidate) => ({ ...candidate, isWorkplace: false }));
+      }
       replaceEntries([...next, entry]);
       return entry;
     }
@@ -303,11 +321,20 @@ function createAddressBookState(): { scope: ReturnType<typeof effectScope>; api:
       if (!entries.value.some((entry) => entry.id === input.id)) return false;
       const normalized = normalizeAddressBookEntry(input);
       if (!normalized) return false;
-      const next = entries.value.map((entry) => entry.id === normalized.id ? normalized : entry);
-      replaceEntries(normalized.isPrimary ? next.map((entry) => ({
-        ...entry,
-        isPrimary: entry.id === normalized.id && entry.kind === "address",
-      })) : next);
+      let next = entries.value.map((entry) => entry.id === normalized.id ? normalized : entry);
+      if (normalized.isPrimary && normalized.kind === "address") {
+        next = next.map((entry) => ({
+          ...entry,
+          isPrimary: entry.id === normalized.id,
+        }));
+      }
+      if (normalized.isWorkplace && normalized.kind === "address") {
+        next = next.map((entry) => ({
+          ...entry,
+          isWorkplace: entry.id === normalized.id,
+        }));
+      }
+      replaceEntries(next);
       return true;
     }
 
@@ -328,6 +355,16 @@ function createAddressBookState(): { scope: ReturnType<typeof effectScope>; api:
       return true;
     }
 
+    function setWorkplace(id: string): boolean {
+      const targetEntry = entries.value.find((entry) => entry.id === id);
+      if (!targetEntry || targetEntry.kind !== "address") return false;
+      replaceEntries(entries.value.map((entry) => ({
+        ...entry,
+        isWorkplace: entry.id === id,
+      })));
+      return true;
+    }
+
     function getEntry(id: string): AddressBookEntry | undefined {
       return entries.value.find((entry) => entry.id === id);
     }
@@ -335,10 +372,12 @@ function createAddressBookState(): { scope: ReturnType<typeof effectScope>; api:
     return {
       entries,
       primaryAddress,
+      workplaceAddress,
       addEntry,
       updateEntry,
       removeEntry,
       setPrimary,
+      setWorkplace,
       getEntry,
       reloadFromStorage,
     } satisfies AddressBookStateApi;

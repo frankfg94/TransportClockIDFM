@@ -243,18 +243,18 @@ function formatWait(departure?: Departure): string {
 </template>
 
 <style scoped>
-.nearby-map__inline-schedules { backdrop-filter: blur(5px); background: rgba(255,255,255,.94); border: 1px solid rgba(255,255,255,.98); border-radius: 8px; box-shadow: 0 4px 10px rgba(37,31,92,.2), 0 1px 2px rgba(37,31,92,.14); box-sizing: border-box; display: grid; gap: 1px; max-width: min(132px, calc(100vw - 20px)); min-width: 118px; padding: 4px 5px; pointer-events: auto; width: max-content; }
-.nearby-map__inline-schedule { align-items: center; display: grid; gap: 4px; grid-template-columns: 54px minmax(52px, 1fr); min-height: 29px; padding: 0 1px; }
+.nearby-map__inline-schedules { backdrop-filter: blur(5px); background: rgba(255,255,255,.94); border: 1px solid rgba(255,255,255,.98); border-radius: 7px; box-shadow: 0 4px 10px rgba(37,31,92,.2), 0 1px 2px rgba(37,31,92,.14); box-sizing: border-box; display: grid; gap: 1px; max-width: min(122px, calc(100vw - 16px)); min-width: 108px; padding: 3px 4px; pointer-events: auto; width: max-content; }
+.nearby-map__inline-schedule { align-items: center; display: grid; gap: 3px; grid-template-columns: 48px minmax(44px, 1fr); min-height: 25px; padding: 0 1px; }
 .nearby-map__inline-schedule--muted { opacity: .45; }
-.nearby-map__inline-schedule-direction { animation: nearby-inline-schedule-direction-expand 180ms ease-out both; color: var(--ink); display: flex; flex-wrap: wrap; font-size: .64rem; font-weight: 850; gap: 3px; grid-column: 1 / -1; justify-content: center; line-height: 1.15; max-height: 40px; min-width: 0; overflow: hidden; padding: 4px 1px 2px; text-align: center; }
+.nearby-map__inline-schedule-direction { animation: nearby-inline-schedule-direction-expand 180ms ease-out both; color: var(--ink); display: flex; flex-wrap: wrap; font-size: .61rem; font-weight: 850; gap: 3px; grid-column: 1 / -1; justify-content: center; line-height: 1.15; max-height: 36px; min-width: 0; overflow: hidden; padding: 3px 1px 2px; text-align: center; }
 .nearby-map__inline-schedule-orientation { color: var(--muted); font-weight: 700; }
-.nearby-map__inline-schedule :deep(.line-icon-badge) { align-items: center; display: inline-flex; flex: 0 0 54px; height: 29px; min-width: 54px; }
-.nearby-map__inline-schedule :deep(.line-icon-badge img) { max-height: 29px; max-width: 54px; }
-.nearby-map__inline-schedule :deep(.line-icon-badge__fallback) { border-radius: 5px; height: 28px; }
-.nearby-map__inline-schedule :deep(.line-icon-badge__label) { font-size: .9rem; min-width: 45px; padding: 0 5px; }
-.nearby-map__inline-schedule-time { color: #4034df; font-size: .66rem; font-weight: 900; justify-self: start; line-height: 1; max-width: 100%; white-space: nowrap; }
+.nearby-map__inline-schedule :deep(.line-icon-badge) { align-items: center; display: inline-flex; flex: 0 0 48px; height: 25px; min-width: 48px; }
+.nearby-map__inline-schedule :deep(.line-icon-badge img) { max-height: 25px; max-width: 48px; }
+.nearby-map__inline-schedule :deep(.line-icon-badge__fallback) { border-radius: 5px; height: 24px; }
+.nearby-map__inline-schedule :deep(.line-icon-badge__label) { font-size: .82rem; min-width: 40px; padding: 0 4px; }
+.nearby-map__inline-schedule-time { color: #4034df; font-size: .64rem; font-weight: 900; justify-self: start; line-height: 1; max-width: 100%; white-space: nowrap; }
 .nearby-map__inline-schedules--empty { align-items: center; color: var(--muted); display: inline-flex; font-size: .62rem; gap: 4px; width: auto; }
 .nearby-map__inline-schedules-disabled { align-items: center; background: #fff; border: 2px solid var(--nearby-marker-color, #5146ff); border-radius: 50%; bottom: -7px; box-shadow: 0 2px 6px rgba(16,35,63,.24); color: var(--nearby-marker-color, #5146ff); display: inline-flex; height: 18px; justify-content: center; min-height: 18px; min-width: 18px; padding: 0; pointer-events: auto; position: absolute; right: -7px; width: 18px; z-index: 26; }
 .nearby-map__inline-schedules-disabled--unavailable { border-color: #8b95a7; color: #6d778a; }
-@keyframes nearby-inline-schedule-direction-expand { from { max-height: 0; opacity: 0; padding-bottom: 0; padding-top: 0; } to { max-height: 40px; opacity: 1; padding-bottom: 2px; padding-top: 4px; } }
+@keyframes nearby-inline-schedule-direction-expand { from { max-height: 0; opacity: 0; padding-bottom: 0; padding-top: 0; } to { max-height: 36px; opacity: 1; padding-bottom: 2px; padding-top: 3px; } }
 </style>

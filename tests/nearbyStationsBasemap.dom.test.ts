@@ -64,6 +64,42 @@ describe("NearbyStationsBasemap", () => {
     expect(cover.attributes("data-ready")).toBe("true");
   });
 
+  it("keeps the cover visible when one raster tile fails", async () => {
+    const referenceCamera = createCamera({
+      centerWorldX: 0.5,
+      centerWorldY: 0.5,
+      viewportWidthCssPx: 900,
+      viewportHeightCssPx: 560,
+      zoom: 14.2,
+    });
+    const wrapper = mount(NearbyStationsBasemap, {
+      props: {
+        camera: referenceCamera,
+        referenceCamera,
+        bounds: { minX: 0.4998, minY: 0.4998, maxX: 0.5002, maxY: 0.5002 },
+        sourceZoom: 14,
+      },
+      global: {
+        stubs: {
+          TransportMapBasemap: {
+            template: "<div class='transport-map-basemap' />",
+          },
+        },
+      },
+    });
+
+    const cover = wrapper.get("[data-nearby-basemap-cover]");
+    const images = cover.findAll("img");
+    expect(images.length).toBeGreaterThan(1);
+
+    await images[0]!.trigger("error");
+    for (const image of images.slice(1)) await image.trigger("load");
+    await flushPromises();
+
+    expect(cover.attributes("data-ready")).toBe("true");
+    wrapper.unmount();
+  });
+
   it("audits the requested live tile definition 200 ms after a dezoom settles", async () => {
     vi.useFakeTimers();
     try {

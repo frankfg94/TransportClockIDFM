@@ -1,6 +1,6 @@
 import type { H3Event } from "h3";
 import { createR2SignedHeaders, getNetexRuntimeEnv, type NetexRuntimeEnv } from "../topology/netexCache";
-import { VERDICT_SCHEMA_VERSION, type CompiledNeighborhoodVerdictData } from "./contracts";
+import { IRIS_SOURCE_ID, VERDICT_SCHEMA_VERSION, type CompiledNeighborhoodVerdictData } from "./contracts";
 
 let cached: { key: string; data: CompiledNeighborhoodVerdictData; expires: number } | undefined;
 const pending = new Map<string, Promise<CompiledNeighborhoodVerdictData>>();
@@ -73,6 +73,14 @@ export function validateCompiledNeighborhoodVerdictData(
   }
   if (!data.greenSpaces.length || !data.gpeStations.length) {
     throw new Error("Compiled verdict geometry is incomplete.");
+  }
+  if (
+    !data.iris ||
+    data.iris.sourceId !== IRIS_SOURCE_ID ||
+    data.iris.bbox.length !== 4 ||
+    data.iris.neighborhoods.length === 0
+  ) {
+    throw new Error("Compiled IRIS geometry is incomplete.");
   }
   if (!Object.keys(data.airNoiseCommunes).length) {
     throw new Error("Air/noise mapper produced no commune.");

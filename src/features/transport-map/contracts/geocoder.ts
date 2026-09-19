@@ -21,9 +21,13 @@ export interface GeocoderPoint extends GeocoderPlaceMetadata {
   address?: string;
   /** True only for an address-book suggestion selected as the primary address. */
   addressBookPrimary?: boolean;
+  /** True only for the address-book entry selected as the workplace. */
+  addressBookWorkplace?: boolean;
   provider?: string;
   city?: string;
   postcode?: string;
+  /** Optional official commune code carried across nearby-page links. */
+  code?: string;
   type?: "address" | "street" | "municipality" | "locality" | "station" | "place" | "unknown";
 }
 

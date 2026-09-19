@@ -56,7 +56,7 @@ describe("walking areas in both map engines", () => {
 
     layer.draw(ctx as unknown as CanvasRenderingContext2D, camera, surfaces, [surfaces[0]!.id]);
 
-    expect(ctx.strokeStyle).toBe("rgba(29, 78, 216, 0.92)");
+    expect(ctx.strokeStyle).toBe("rgba(22, 130, 70, .70)");
     expect(ctx.lineWidth).toBe(2);
   });
 
@@ -73,7 +73,7 @@ describe("walking areas in both map engines", () => {
     renderer.mount(canvas as unknown as HTMLCanvasElement);
     renderer.resize(1000, 700, 1);
     renderer.render(camera, scene);
-    expect(colors[0]).toBe("rgba(59, 130, 246, 0.14)");
+    expect(colors[0]).toBe("rgba(34, 197, 94, .29)");
     expect(colors.indexOf("#112233")).toBeGreaterThan(0);
     renderer.render(camera, { ...scene, interactionActive: true });
     expect(ctx.drawImage).toHaveBeenCalledTimes(1);
@@ -104,7 +104,7 @@ describe("walking areas in both map engines", () => {
       getLineWidth: (feature: { properties?: { surfaceId?: string } }) => number;
     };
     const hoveredFeature = { properties: { surfaceId: surfaces[0]!.id } };
-    expect(hoveredProps.getLineColor(hoveredFeature)).toEqual([29, 78, 216, 235]);
+    expect(hoveredProps.getLineColor(hoveredFeature)).toEqual([22, 130, 70, 235]);
     expect(hoveredProps.getLineWidth(hoveredFeature)).toBe(2);
     const hovering = builder.build(camera, { ...scene, hoveredLineId: "line:1" });
     expect(createDeckTransportLayers({ ...frame, model: hovering }, "labels")[0]!.props.data).toBe(props.data);

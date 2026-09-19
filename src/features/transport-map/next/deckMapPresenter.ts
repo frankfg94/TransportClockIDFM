@@ -1,4 +1,5 @@
 import type { Map as MapLibreMap } from "maplibre-gl";
+import type { Layer } from "@deck.gl/core";
 import type {
   TransportMapDeckMetrics,
   TransportMapRenderFrame,
@@ -22,6 +23,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
   private lastBeforeId?: string;
   private layerRebuilds = 0;
   private setPropsCount = 0;
+  private nearbyPlaceLayers: readonly Layer[] = [];
   private deckMetrics?: Omit<TransportMapDeckMetrics, "sampleAgeMs">;
   private performanceTrace?: TransportMapPerformanceTrace;
 
@@ -32,6 +34,15 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
 
   setPerformanceTrace(trace: TransportMapPerformanceTrace | undefined): void {
     this.performanceTrace = trace;
+  }
+
+  /** Place layers survive transport model updates and camera-only frames. */
+  setNearbyPlaceLayers(layers: readonly Layer[]): void {
+    if (layers === this.nearbyPlaceLayers) return;
+    this.nearbyPlaceLayers = layers;
+    this.overlay.setProps({ layers: [...(this.layers ?? []), ...layers] });
+    this.setPropsCount += 1;
+    this.map.triggerRepaint();
   }
 
   present(frame: TransportMapRenderFrame): void {
@@ -89,7 +100,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
         reason,
         layerCount: this.layers.length,
       }, rebuildEventId);
-      this.overlay.setProps({ layers: this.layers });
+      this.overlay.setProps({ layers: [...this.layers, ...this.nearbyPlaceLayers] });
       this.activeTrace?.end(setPropsEventId, {
         reason,
         layerCount: this.layers.length,
@@ -131,6 +142,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
   }
 
   dispose(): void {
+    this.nearbyPlaceLayers = [];
     this.lastFrame = undefined;
     this.layers = undefined;
     this.lastLayerModel = undefined;

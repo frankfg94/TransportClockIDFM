@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, nextTick } from "vue";
 import type { GeocoderPoint } from "../src/features/transport-map/contracts/geocoder";
 import type { NearbyJourney } from "../src/features/nearby-stations/nearbyHeavyTransports";
+import type { NearbyPlace } from "../src/features/nearby-stations/nearbyPlaces";
 import type { GtfsLineFrequencyResponse } from "../src/types/lineFrequency";
 import { clampCameraToBounds } from "../src/features/transport-map/geo/camera";
 import { lonLatToWorld, metersToWorldUnits, worldToLonLat, worldToScreen } from "../src/features/transport-map/geo/coordinateKernel";
@@ -165,6 +166,7 @@ const fixture = vi.hoisted(() => {
     routeState: { path: "/map", query: {} as Record<string, unknown> },
     dataSourceCalls: { initialize: vi.fn(), queryViewport: vi.fn(), queryStationsWithinRadius: vi.fn(), dispose: vi.fn() },
     placesSearch: vi.fn(async (): Promise<GeocoderPoint[]> => []),
+    nearbyPlacesSearch: vi.fn(async (): Promise<NearbyPlace[]> => []),
     travelRoutesSearch: vi.fn(async (): Promise<NearbyJourney[]> => []),
     radiusResults: [] as Array<{ station: typeof stationA; distanceMeters: number }>,
   };
@@ -238,7 +240,7 @@ vi.mock("../src/services/nearbyDataProviders", () => ({
   createNearbyDataProviders: () => ({
     places: {
       searchDestinations: fixture.placesSearch,
-      searchNearby: vi.fn(async () => []),
+      searchNearby: fixture.nearbyPlacesSearch,
     },
     travelRoutes: {
       findJourneys: fixture.travelRoutesSearch,
@@ -247,6 +249,7 @@ vi.mock("../src/services/nearbyDataProviders", () => ({
 }));
 
 import GlobalTransportPlan from "../src/features/line-map/GlobalTransportPlan.vue";
+import { resolveGlobalDirection } from "../src/features/line-map/globalBusDirections";
 
 const stationBoardModalStub = defineComponent({
   name: "StationBoardModal",
@@ -285,6 +288,8 @@ describe("GlobalTransportPlan facade", () => {
     fixture.dashboardAdd.mockClear();
     fixture.placesSearch.mockReset();
     fixture.placesSearch.mockResolvedValue([]);
+    fixture.nearbyPlacesSearch.mockReset();
+    fixture.nearbyPlacesSearch.mockResolvedValue([]);
     fixture.travelRoutesSearch.mockReset();
     fixture.travelRoutesSearch.mockResolvedValue([]);
     window.localStorage.removeItem("transport-clock.global-map-reperes.v1");
@@ -1835,6 +1840,122 @@ describe("GlobalTransportPlan facade", () => {
     expect(wrapper.text()).toContain("ajoutée");
   });
 
+  it("keeps nearby heavy stations enabled by default and removes their scope when toggled off", async () => {
+    const metroId = fixture.network.lines[0]!.id;
+    const busId = fixture.network.lines[1]!.id;
+    fixture.network.stations[1]!.lineIds = [busId];
+    routeState.query = {
+      lineToKeep: metroId,
+      nearbyHeavyLine: busId,
+      nearbyHeavyStation: fixture.network.stations[1]!.id,
+    };
+
+    const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+    wrappers.push(wrapper);
+    await flushPromises();
+
+    const toggle = wrapper.get("[data-global-map-nearby-heavy-toggle]");
+    expect(toggle.attributes("role")).toBe("switch");
+    expect(toggle.attributes("aria-checked")).toBe("true");
+    expect(toggle.text()).toContain("Autoriser les correspondances lourdes à proximité");
+    expect(fixture.dataSourceCalls.queryViewport.mock.calls.some((call) =>
+      (call[4] as string[] | undefined)?.includes(busId),
+    )).toBe(true);
+    await vi.waitFor(() => {
+      const enabledScene = fixture.renderer.render.mock.calls.at(-1)?.[1] as
+        | { lines?: Array<{ id: string }>; stations?: Array<{ id: string }> }
+        | undefined;
+      expect(enabledScene?.lines?.map((line) => line.id)).toEqual([metroId, busId]);
+      expect(enabledScene?.stations?.some((station) => station.id === fixture.network.stations[1]!.id)).toBe(true);
+    });
+
+    await toggle.trigger("click");
+    await flushPromises();
+    await vi.waitFor(() => {
+      expect(toggle.attributes("aria-checked")).toBe("false");
+      expect(fixture.dataSourceCalls.queryViewport.mock.calls.at(-1)?.[4]).toEqual([metroId]);
+    });
+
+    await vi.waitFor(() => {
+      const renderedScene = fixture.renderer.render.mock.calls.at(-1)?.[1] as
+        | { lines?: Array<{ id: string }>; stations?: Array<{ id: string }> }
+        | undefined;
+      expect(renderedScene?.lines?.map((line) => line.id)).toEqual([metroId]);
+      expect(renderedScene?.stations?.some((station) => station.id === fixture.network.stations[1]!.id)).toBe(false);
+    });
+  });
+
+  it("disables nearby places by default and loads them after selecting a walking radius", async () => {
+    vi.useFakeTimers();
+    routeState.query = { line: fixture.network.lines[0]!.id };
+
+    try {
+      const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+      wrappers.push(wrapper);
+      await flushPromises();
+      await nextTick();
+
+      const nearbyCard = wrapper.get(".global-map-picker-sidebar__nearby-card");
+      expect(nearbyCard.get(".material-combobox__value").text()).toBe("Désactivé");
+      expect(nearbyCard.text()).toContain("La recherche des commerces et lieux proches est désactivée.");
+      expect(fixture.nearbyPlacesSearch).not.toHaveBeenCalled();
+
+      await nearbyCard.get(".material-combobox__trigger").trigger("click");
+      const twoMinuteOption = nearbyCard.findAll(".material-combobox__option")
+        .find((option) => option.text().includes("2 min à pied"));
+      expect(twoMinuteOption).toBeDefined();
+      await twoMinuteOption!.trigger("mousedown");
+      await nextTick();
+      expect(nearbyCard.get(".material-combobox__value").text()).toBe("2 min à pied");
+
+      await vi.advanceTimersByTimeAsync(2_500);
+      await flushPromises();
+      expect(fixture.nearbyPlacesSearch).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows places up to five minutes even when over 120 places are closer to the line", async () => {
+    vi.useFakeTimers();
+    routeState.query = { line: fixture.network.lines[0]!.id };
+    const station = fixture.network.stations[0]!;
+    const places: NearbyPlace[] = Array.from({ length: 150 }, (_, index) => ({
+      id: `shop:${index}`,
+      name: `Commerce ${index}`,
+      lon: station.lon,
+      lat: station.lat,
+      category: "shop",
+      kind: "bakery",
+      distanceMeters: index < 130 ? 30 : 390,
+    }));
+    fixture.nearbyPlacesSearch.mockResolvedValue(places);
+    try {
+      const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+      wrappers.push(wrapper);
+      await flushPromises();
+      const card = wrapper.get(".global-map-picker-sidebar__nearby-card");
+      await card.get(".material-combobox__trigger").trigger("click");
+      const option = card.findAll(".material-combobox__option")
+        .find((entry) => entry.text().includes("5 min à pied"));
+      await option!.trigger("mousedown");
+      await vi.advanceTimersByTimeAsync(2_500);
+      await flushPromises();
+
+      expect(fixture.nearbyPlacesSearch).toHaveBeenCalledWith(
+        expect.objectContaining({ radiusMeters: 400 }), expect.any(AbortSignal),
+      );
+      expect(card.findAll(".global-map-picker-sidebar__nearby-list li")).toHaveLength(150);
+      expect(card.findAll(".global-map-picker-sidebar__nearby-list li").at(-1)!.text())
+        .toContain("5 min à pied");
+      expect(wrapper.findAll(".global-map-nearby-place")).toHaveLength(150);
+      expect(wrapper.findAll(".global-map-nearby-place").at(-1)!.attributes("aria-label"))
+        .toContain("Commerce 149");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("restores the focused line when a URL contains both line and station", async () => {
     routeState.query = { line: fixture.network.lines[0].id, station: "station:a" };
     const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
@@ -2421,7 +2542,7 @@ describe("GlobalTransportPlan facade", () => {
     }
   });
 
-  it("searches place-only destinations and flies to a useful fixed zoom without selecting a station", async () => {
+  it("searches destinations and flies to a useful fixed zoom without selecting a station", async () => {
     vi.useFakeTimers();
     const place = {
       id: "place:fnac",
@@ -2446,8 +2567,9 @@ describe("GlobalTransportPlan facade", () => {
       expect(fixture.placesSearch).toHaveBeenCalledWith(
         "fnac",
         {
-          includeStations: false,
+          includeStations: true,
           includePlaces: true,
+          includeAddresses: true,
           count: 8,
         },
         expect.any(AbortSignal),
@@ -2490,6 +2612,150 @@ describe("GlobalTransportPlan facade", () => {
     }
   });
 
+  it("opens the itinerary from a place destination action", async () => {
+    vi.useFakeTimers();
+    const place = {
+      id: "place:fnac-route",
+      lon: 2.3268,
+      lat: 48.8421,
+      label: "Fnac Montparnasse",
+      city: "Paris",
+      type: "place" as const,
+    };
+    fixture.placesSearch.mockResolvedValue([place]);
+
+    try {
+      const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+      wrappers.push(wrapper);
+      await flushPromises();
+
+      await wrapper.get("[data-global-map-search] .global-map-search__open").trigger("click");
+      await wrapper.get("[data-global-map-search] input").setValue("fnac");
+      await vi.advanceTimersByTimeAsync(GLOBAL_TRANSPORT_PLAN_CONFIG.search.debounceMs + 32);
+      await flushPromises();
+
+      const routeAction = wrapper.get("[data-global-map-search-route-to-place]");
+      expect(routeAction.text()).toContain("Voir l’itinéraire");
+      await routeAction.trigger("click");
+      await flushPromises();
+
+      expect(wrapper.find(".global-transport-plan__itinerary-panel").exists()).toBe(true);
+      expect((wrapper.findAll(".left-nearby-travel__inputs input")[1]?.element as HTMLInputElement).value)
+        .toBe("Fnac Montparnasse");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("opens enough room for all mobile itinerary proposals", async () => {
+    vi.useFakeTimers();
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    const place = {
+      id: "place:fnac-mobile-route",
+      lon: 2.3268,
+      lat: 48.8421,
+      label: "Fnac Montparnasse",
+      city: "Paris",
+      type: "place" as const,
+    };
+    fixture.placesSearch.mockResolvedValue([place]);
+    fixture.travelRoutesSearch.mockResolvedValue(Array.from({ length: 8 }, (_, index) => ({
+      id: `journey:${index}`,
+      durationSeconds: 600 + index * 60,
+      sections: [],
+    })));
+
+    try {
+      const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+      wrappers.push(wrapper);
+      await flushPromises();
+
+      await wrapper.get("[data-global-map-search] .global-map-search__open").trigger("click");
+      await wrapper.get("[data-global-map-search] input").setValue("fnac");
+      await vi.advanceTimersByTimeAsync(GLOBAL_TRANSPORT_PLAN_CONFIG.search.debounceMs + 32);
+      await flushPromises();
+      await wrapper.get("[data-global-map-search-route-to-place]").trigger("click");
+      await flushPromises();
+
+      const sidebar = wrapper.findComponent({ name: "LeftNearbySidebarBodyTravel" });
+      sidebar.vm.$emit("origin", {
+        lon: 2.3522,
+        lat: 48.8566,
+        label: "Départ",
+        provider: "test",
+        type: "address",
+      });
+      await flushPromises();
+      await nextTick();
+
+      expect(wrapper.find('[data-mobile-itinerary-sheet="medium"]').exists()).toBe(true);
+      expect(wrapper.findAll(".left-nearby-travel__route")).toHaveLength(8);
+      expect(wrapper.get(".left-nearby-travel__routes").classes()).not.toContain("left-nearby-travel__routes--detail");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses the active GPS position as the default itinerary origin", async () => {
+    let webWatchSuccess: ((position: GeolocationPosition) => void) | undefined;
+    const geolocation = {
+      getCurrentPosition: vi.fn(),
+      watchPosition: vi.fn((success: (position: GeolocationPosition) => void) => {
+        webWatchSuccess = success;
+        success(createUserPosition());
+        return 93;
+      }),
+      clearWatch: vi.fn(),
+    };
+    vi.stubGlobal("navigator", {
+      geolocation,
+      permissions: { query: vi.fn(async () => ({ state: "granted" })) },
+    });
+    fixture.travelRoutesSearch.mockResolvedValue([]);
+
+    try {
+      const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+      wrappers.push(wrapper);
+      await flushPromises();
+      await flushPromises();
+      expect(webWatchSuccess).toBeDefined();
+
+      const canvas = wrapper.get("canvas.global-transport-plan__canvas");
+      vi.spyOn(canvas.element, "getBoundingClientRect").mockReturnValue({
+        x: 40,
+        y: 60,
+        left: 40,
+        top: 60,
+        right: 840,
+        bottom: 660,
+        width: 800,
+        height: 600,
+        toJSON: () => ({}),
+      });
+      await canvas.trigger("contextmenu", { clientX: 160, clientY: 190 });
+      await nextTick();
+      const itineraryButton = [...document.querySelectorAll<HTMLButtonElement>(
+        ".global-transport-plan__context-menu button",
+      )].find((button) => button.textContent?.includes("Itinéraire jusqu’ici"));
+      itineraryButton?.click();
+      await flushPromises();
+
+      expect(fixture.travelRoutesSearch).toHaveBeenCalledWith(expect.objectContaining({
+        origin: expect.objectContaining({
+          lat: 48.8566,
+          lon: 2.3522,
+          label: "Ma position",
+          provider: "device",
+          type: "address",
+        }),
+      }));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("collapses the itinerary for a line whose default direction is merged", async () => {
     routeState.query = { line: fixture.network.lines[0]!.id };
     const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
@@ -2505,6 +2771,36 @@ describe("GlobalTransportPlan facade", () => {
     await itineraryToggle.trigger("click");
     expect(itineraryToggle.attributes("aria-expanded")).toBe("true");
     expect(wrapper.find("#global-map-picker-sidebar-line-route").exists()).toBe(true);
+  });
+
+  it("includes off-direction stations in served cities while branches are merged", async () => {
+    routeState.query = { line: fixture.network.lines[0]!.id };
+    const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+    wrappers.push(wrapper);
+    await flushPromises();
+    const stations = fixture.network.stations;
+    // Simulate a topology direction that repeats the shared terminus while
+    // another station belongs to a different branch of the complete line.
+    const direction = resolveGlobalDirection([{
+      id: "branch-a",
+      label: "Branch A",
+      direction: "Branch A",
+      stops: [stations[0]!, stations[0]!].map((station) => ({
+        id: station.id, label: station.name, lon: station.lon, lat: station.lat,
+        station: { id: station.id, label: station.name, monitoringRef: station.id },
+      })),
+    }]);
+    const state = (wrapper.vm.$ as unknown as { setupState: Record<string, unknown> }).setupState;
+    state.busDirectionSelection = direction;
+    state.directionMergeEnabled = true;
+    await nextTick();
+    const sidebar = wrapper.findComponent({ name: "GlobalMapPickerSideBar" });
+    expect(sidebar.props("cityPatternStations").map((station: { id: string }) => station.id))
+      .toEqual(stations.map((station) => station.id));
+    state.directionMergeEnabled = false;
+    await nextTick();
+    expect(sidebar.props("cityPatternStations").map((station: { id: string }) => station.id))
+      .toEqual([stations[0]!.id, stations[0]!.id]);
   });
 
   it("keeps the itinerary expanded by default for a bus line", async () => {
@@ -3187,6 +3483,7 @@ describe("GlobalTransportPlan facade", () => {
     expect(menu?.textContent).toContain("Ouvrir l’annuaire");
     expect(menu?.textContent).toContain("Voir le plan du quartier");
     expect(menu?.textContent).toContain("Itinéraire jusqu’ici");
+    expect(menu?.textContent).toContain("Mesurer une distance (cercle)");
     const contextMenuPanel = menu?.closest<HTMLElement>(".context-menu");
     expect(contextMenuPanel?.style.position).toBe("fixed");
     expect(contextMenuPanel?.style.left).toBe("160px");
@@ -3405,6 +3702,235 @@ describe("GlobalTransportPlan facade", () => {
     await nextTick();
     expect(overlay.attributes("data-active")).toBe("false");
     expect(wrapper.text()).toContain("Distance :");
+  });
+
+  it("resizes the segment endpoint nearest to the context-menu cursor", async () => {
+    const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+    wrappers.push(wrapper);
+    await flushPromises();
+
+    const canvas = wrapper.get("canvas.global-transport-plan__canvas");
+    vi.spyOn(canvas.element, "getBoundingClientRect").mockReturnValue({
+      x: 40,
+      y: 60,
+      left: 40,
+      top: 60,
+      right: 840,
+      bottom: 660,
+      width: 800,
+      height: 600,
+      toJSON: () => ({}),
+    });
+    await canvas.trigger("contextmenu", { clientX: 160, clientY: 190 });
+    await nextTick();
+
+    const contextButtons = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>(
+      ".global-transport-plan__context-menu button",
+    )];
+    contextButtons().find((button) => button.textContent?.trim() === "Mesurer une distance")?.click();
+    await nextTick();
+    await canvas.trigger("pointermove", { clientX: 120, clientY: 160, pointerId: 31, button: -1 });
+    await canvas.trigger("pointerdown", { clientX: 120, clientY: 160, pointerId: 31, button: 0 });
+    await canvas.trigger("pointerup", { clientX: 120, clientY: 160, pointerId: 31, button: 0 });
+    await nextTick();
+
+    const overlay = wrapper.get('[data-testid="global-map-distance-measurement"]');
+    const line = overlay.get("line.global-map-distance-measurement__line");
+    const startBeforeResize = {
+      x: line.attributes("x1"),
+      y: line.attributes("y1"),
+    };
+    const endBeforeResize = {
+      x: line.attributes("x2"),
+      y: line.attributes("y2"),
+    };
+
+    await overlay.get("line.global-map-distance-measurement__hit-area").trigger("contextmenu", {
+      clientX: 155,
+      clientY: 185,
+    });
+    await nextTick();
+    contextButtons().find((button) => button.textContent?.includes("Redimensionner le segment"))?.click();
+    await nextTick();
+    await canvas.trigger("pointermove", { clientX: 165, clientY: 185, pointerId: 32, button: -1 });
+    await nextTick();
+
+    const resizedLine = overlay.get("line.global-map-distance-measurement__line");
+    expect(resizedLine.attributes("x1")).not.toBe(startBeforeResize.x);
+    expect(resizedLine.attributes("y1")).not.toBe(startBeforeResize.y);
+    expect(resizedLine.attributes("x2")).toBe(endBeforeResize.x);
+    expect(resizedLine.attributes("y2")).toBe(endBeforeResize.y);
+
+    await canvas.trigger("pointerdown", { clientX: 165, clientY: 185, pointerId: 32, button: 0 });
+    await canvas.trigger("pointerup", { clientX: 165, clientY: 185, pointerId: 32, button: 0 });
+    await nextTick();
+    expect(overlay.attributes("data-active")).toBe("false");
+  });
+
+  it("draws a circle from the context-menu point and anchors its distance on the circumference", async () => {
+    const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+    wrappers.push(wrapper);
+    await flushPromises();
+
+    const canvas = wrapper.get("canvas.global-transport-plan__canvas");
+    vi.spyOn(canvas.element, "getBoundingClientRect").mockReturnValue({
+      x: 40,
+      y: 60,
+      left: 40,
+      top: 60,
+      right: 840,
+      bottom: 660,
+      width: 800,
+      height: 600,
+      toJSON: () => ({}),
+    });
+    await canvas.trigger("contextmenu", { clientX: 160, clientY: 190 });
+    await nextTick();
+
+    const circleButton = [...document.querySelectorAll<HTMLButtonElement>(
+      ".global-transport-plan__context-menu button",
+    )].find((button) => button.textContent?.includes("Mesurer une distance (cercle)"));
+    expect(circleButton).toBeDefined();
+    circleButton!.click();
+    await nextTick();
+
+    const overlay = wrapper.get('[data-testid="global-map-distance-measurement"]');
+    expect(overlay.attributes("data-active")).toBe("true");
+    expect(overlay.attributes("data-shape")).toBe("circle");
+    expect(overlay.get("circle.global-map-distance-measurement__hit-area").classes()).not.toContain(
+      "global-map-distance-measurement__hit-area--enabled",
+    );
+    expect(wrapper.text()).toContain("choisir le rayon");
+
+    await canvas.trigger("pointermove", { clientX: 165, clientY: 185, pointerId: 12, button: -1 });
+    await nextTick();
+
+    const circle = overlay.get("circle.global-map-distance-measurement__circle");
+    expect(Number(circle.attributes("r"))).toBeGreaterThan(0);
+    const points = overlay.findAll("circle.global-map-distance-measurement__point");
+    const label = overlay.get("g.global-map-distance-measurement__label-group");
+    expect(label.attributes("transform")).toBe(
+      `translate(${points[1]!.attributes("cx")} ${points[1]!.attributes("cy")})`,
+    );
+    expect(wrapper.text()).toContain("km");
+
+    await canvas.trigger("pointerdown", { clientX: 165, clientY: 185, pointerId: 12, button: 0 });
+    await canvas.trigger("pointerup", { clientX: 165, clientY: 185, pointerId: 12, button: 0 });
+    await nextTick();
+    expect(overlay.attributes("data-active")).toBe("false");
+    expect(overlay.get("circle.global-map-distance-measurement__hit-area").classes()).toContain(
+      "global-map-distance-measurement__hit-area--enabled",
+    );
+    expect(wrapper.text()).toMatch(/Distance\s*:\s*.*km/);
+  });
+
+  it("keeps multiple measurements and lets each shape be resized or deleted from its context menu", async () => {
+    const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+    wrappers.push(wrapper);
+    await flushPromises();
+
+    const canvas = wrapper.get("canvas.global-transport-plan__canvas");
+    vi.spyOn(canvas.element, "getBoundingClientRect").mockReturnValue({
+      x: 40,
+      y: 60,
+      left: 40,
+      top: 60,
+      right: 840,
+      bottom: 660,
+      width: 800,
+      height: 600,
+      toJSON: () => ({}),
+    });
+
+    const openContextMenu = async (clientX: number, clientY: number): Promise<void> => {
+      await canvas.trigger("contextmenu", { clientX, clientY });
+      await nextTick();
+    };
+    const contextButtons = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>(
+      ".global-transport-plan__context-menu button",
+    )];
+
+    await openContextMenu(160, 190);
+    contextButtons().find((button) => button.textContent?.includes("Mesurer une distance"))?.click();
+    await nextTick();
+    await canvas.trigger("pointermove", { clientX: 100, clientY: 170, pointerId: 21, button: -1 });
+    await canvas.trigger("pointerdown", { clientX: 120, clientY: 160, pointerId: 21, button: 0 });
+    await canvas.trigger("pointerup", { clientX: 120, clientY: 160, pointerId: 21, button: 0 });
+    await nextTick();
+
+    await openContextMenu(160, 190);
+    const circleMeasureButton = contextButtons().find((button) => button.textContent?.includes("Mesurer une distance (cercle)"));
+    expect(circleMeasureButton).toBeDefined();
+    circleMeasureButton!.click();
+    await nextTick();
+    await canvas.trigger("pointermove", { clientX: 165, clientY: 185, pointerId: 22, button: -1 });
+    await canvas.trigger("pointerdown", { clientX: 165, clientY: 185, pointerId: 22, button: 0 });
+    await canvas.trigger("pointerup", { clientX: 165, clientY: 185, pointerId: 22, button: 0 });
+    await nextTick();
+
+    const overlay = wrapper.get('[data-testid="global-map-distance-measurement"]');
+    expect(overlay.findAll("g.global-map-distance-measurement__item")).toHaveLength(2);
+    expect(overlay.findAll("line.global-map-distance-measurement__line")).toHaveLength(1);
+    expect(overlay.findAll("circle.global-map-distance-measurement__circle")).toHaveLength(1);
+
+    const circleBeforeResize = Number(
+      overlay.get("circle.global-map-distance-measurement__circle").attributes("r"),
+    );
+    await overlay.get("circle.global-map-distance-measurement__hit-area").trigger("contextmenu", {
+      clientX: 175,
+      clientY: 190,
+    });
+    await nextTick();
+    expect(document.body.textContent).toContain("Redimensionner le cercle");
+    contextButtons().find((button) => button.textContent?.includes("Redimensionner le cercle"))?.click();
+    await nextTick();
+    expect(overlay.attributes("data-active")).toBe("true");
+
+    await canvas.trigger("pointermove", { clientX: 165, clientY: 184, pointerId: 23, button: -1 });
+    await nextTick();
+    const circleAfterResize = Number(
+      overlay.get("circle.global-map-distance-measurement__circle").attributes("r"),
+    );
+    expect(circleAfterResize).not.toBe(circleBeforeResize);
+    await canvas.trigger("pointerdown", { clientX: 165, clientY: 184, pointerId: 23, button: 0 });
+    await canvas.trigger("pointerup", { clientX: 165, clientY: 184, pointerId: 23, button: 0 });
+    await nextTick();
+
+    await openContextMenu(160, 190);
+    const secondSegmentButton = contextButtons().find((button) => button.textContent?.trim() === "Mesurer une distance");
+    expect(secondSegmentButton).toBeDefined();
+    secondSegmentButton!.click();
+    await nextTick();
+    await canvas.trigger("pointermove", { clientX: 100, clientY: 170, pointerId: 24, button: -1 });
+    await canvas.trigger("pointerdown", { clientX: 100, clientY: 170, pointerId: 24, button: 0 });
+    await canvas.trigger("pointerup", { clientX: 100, clientY: 170, pointerId: 24, button: 0 });
+    await nextTick();
+    expect(overlay.findAll("g.global-map-distance-measurement__item")).toHaveLength(3);
+
+    await overlay.get("line.global-map-distance-measurement__hit-area").trigger("contextmenu", {
+      clientX: 110,
+      clientY: 165,
+    });
+    await nextTick();
+    expect(document.body.textContent).toContain("Supprimer le segment");
+    contextButtons().find((button) => button.textContent?.includes("Supprimer le segment"))?.click();
+    await nextTick();
+
+    expect(overlay.findAll("g.global-map-distance-measurement__item")).toHaveLength(2);
+    expect(overlay.findAll("line.global-map-distance-measurement__line")).toHaveLength(1);
+    expect(overlay.findAll("circle.global-map-distance-measurement__circle")).toHaveLength(1);
+
+    await overlay.get("circle.global-map-distance-measurement__hit-area").trigger("contextmenu", {
+      clientX: 165,
+      clientY: 185,
+    });
+    await nextTick();
+    expect(document.body.textContent).toContain("Supprimer le cercle");
+    contextButtons().find((button) => button.textContent?.includes("Supprimer le cercle"))?.click();
+    await nextTick();
+    expect(overlay.findAll("g.global-map-distance-measurement__item")).toHaveLength(1);
+    expect(overlay.findAll("line.global-map-distance-measurement__line")).toHaveLength(1);
+    expect(overlay.findAll("circle.global-map-distance-measurement__circle")).toHaveLength(0);
   });
 
   it("reverse-geocodes and copies the address from the global context menu", async () => {

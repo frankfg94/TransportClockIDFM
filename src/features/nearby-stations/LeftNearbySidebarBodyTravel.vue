@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import {
   ArrowLeft,
   AlarmClock,
@@ -22,11 +22,14 @@ import { createLinePresentation, transitFamilyToMode } from "../../services/line
 import type { TransitFamily } from "../../types/transit";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import type { GlobalMapMode } from "../transport-map/contracts/manifest";
-import type { NearbyJourneySection, RouteExit } from "./nearbyHeavyTransports";
+import type { NearbyJourneySection, NearbyJourneyServiceType, RouteExit } from "./nearbyHeavyTransports";
 import NearbyAddressSearch from "./NearbyAddressSearch.vue";
 import { selectFastestRouteExit } from "./travelBoundary";
 import type { TravelRoute } from "./useTravelRoutes";
 import type { NearbyWalkingRoute } from "./nearbyWalkingRoutes";
+import TravelTurboPanel from "./TravelTurboPanel.vue";
+import type { TravelTurboController } from "./useTravelTurbo";
+import { turboTime } from "./travelTurbo";
 
 const props = withDefaults(defineProps<{
   originLabel?: string;
@@ -47,7 +50,10 @@ const props = withDefaults(defineProps<{
   allowedModes?: readonly GlobalMapMode[];
   modeLabel?: (mode: GlobalMapMode) => string;
   resolveLineId?: (section: NearbyJourneySection) => string | undefined;
+  serviceTypeForSection?: (section: NearbyJourneySection) => NearbyJourneyServiceType | undefined;
   routes: readonly TravelRoute[];
+  turbo?: TravelTurboController;
+  detailsVisible?: boolean;
   selectedRouteId?: string;
   loading?: boolean;
   error?: Error;
@@ -61,6 +67,7 @@ const props = withDefaults(defineProps<{
   showLineIcons: true,
   currentLocationAvailable: false,
   showOriginSave: false,
+  detailsVisible: true,
 });
 const emit = defineEmits<{
   origin: [point: GeocoderPoint];
@@ -86,11 +93,17 @@ const originModel = computed({
   set: (point) => { if (point) emit("origin", point); },
 });
 const expandedRouteId = ref<string>();
+const timelineExpanded = ref(true);
 const expandedSectionKeys = ref<Set<string>>(new Set());
 const timePickerOpen = ref(false);
 const draftDepartureDate = ref("");
 const draftDepartureTime = ref("");
 const activeRoute = computed(() => props.routes.find((route) => route.id === expandedRouteId.value));
+watch(() => [props.detailsVisible, expandedRouteId.value, activeRoute.value] as const, () => {
+  if (props.detailsVisible && activeRoute.value) props.turbo?.open(activeRoute.value);
+  else props.turbo?.close();
+});
+onBeforeUnmount(() => props.turbo?.close());
 const activeRouteArrivalExits = computed<readonly RouteExit[]>(() => {
   const route = activeRoute.value;
   const getSectionExits = props.getSectionExits;
@@ -214,12 +227,17 @@ function travelModeLabel(mode: GlobalMapMode): string {
 }
 
 function formatTime(value?: string): string {
+  if (value && /(?:Z|[+-]\d\d:\d\d)$/u.test(value)) {
+    const epoch = turboTime(value);
+    return epoch === undefined ? "" : d(new Date(epoch), { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" });
+  }
   const match = value?.match(/T(\d{2}):?(\d{2})(?::?\d{2})?/u)
     ?? value?.match(/(?:^|[^\d])(\d{2}):?(\d{2})(?:\d{2})?$/u);
   return match ? `${match[1] ?? match[2]}:${match[2] ?? match[3]}` : "";
 }
 
 function clockMinutes(value?: string): number | undefined {
+  if (value && /(?:Z|[+-]\d\d:\d\d)$/u.test(value)) return clockMinutes(formatTime(value));
   const match = value?.match(/T(\d{2}):?(\d{2})(?::?(\d{2}))?/u)
     ?? value?.match(/(?:^|[^\d])(\d{2}):?(\d{2})(?:\d{2})?$/u);
   if (!match) return undefined;
@@ -234,21 +252,7 @@ function formatClockMinutes(value: number): string {
 }
 
 function journeyDateTimeMs(value?: string): number | undefined {
-  if (!value) return undefined;
-  const compact = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?$/u);
-  if (compact) {
-    const date = new Date(
-      Number(compact[1]),
-      Number(compact[2]) - 1,
-      Number(compact[3]),
-      Number(compact[4]),
-      Number(compact[5]),
-      Number(compact[6] ?? "0"),
-    );
-    return Number.isFinite(date.getTime()) ? date.getTime() : undefined;
-  }
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : undefined;
+  return turboTime(value);
 }
 
 function sectionStartMs(route: TravelRoute, sectionIndex: number): number | undefined {
@@ -273,8 +277,7 @@ function sectionEndMs(route: TravelRoute, sectionIndex: number): number | undefi
 function sectionClockTime(route: TravelRoute, sectionIndex: number): string {
   const start = sectionStartMs(route, sectionIndex);
   if (start === undefined) return "";
-  const date = new Date(start);
-  return formatClockMinutes(date.getHours() * 60 + date.getMinutes());
+  return formatTime(new Date(start).toISOString());
 }
 
 function waitingGapSeconds(route: TravelRoute, sectionIndex: number): number {
@@ -289,8 +292,7 @@ function waitingGapSeconds(route: TravelRoute, sectionIndex: number): number {
 function waitingGapClockTime(route: TravelRoute, sectionIndex: number): string {
   const previousEnd = sectionEndMs(route, sectionIndex - 1);
   if (previousEnd === undefined) return "";
-  const date = new Date(previousEnd);
-  return formatClockMinutes(date.getHours() * 60 + date.getMinutes());
+  return formatTime(new Date(previousEnd).toISOString());
 }
 
 function sectionFamily(section: NearbyJourneySection): TransitFamily {
@@ -403,6 +405,10 @@ function sectionStopsLabel(section: NearbyJourneySection): string {
   return count > 0 ? t("nearbyStations.travel.stops", { count }) : "";
 }
 
+function sectionServiceType(section: NearbyJourneySection): NearbyJourneyServiceType | undefined {
+  return section.serviceType ?? props.serviceTypeForSection?.(section);
+}
+
 function walkingRouteForSection(route: TravelRoute, sectionIndex: number): NearbyWalkingRoute | undefined {
   return props.walkingRoutes?.[`${route.id}:walk:${sectionIndex}`];
 }
@@ -437,6 +443,7 @@ function toggleSection(routeId: string, sectionIndex: number): void {
 }
 
 function openRoute(route: TravelRoute): void {
+  timelineExpanded.value = true;
   expandedRouteId.value = route.id;
   expandedSectionKeys.value = new Set();
   emit("selectRoute", route);
@@ -462,7 +469,11 @@ function routeAlarmLabel(route: TravelRoute): string {
 
 <template>
   <div class="left-nearby-travel">
-    <section class="left-nearby-travel__inputs">
+    <div v-if="activeRoute && turbo" class="left-nearby-travel__compact-endpoints">
+      <span>{{ origin?.label ?? originLabel }} → {{ destination?.label }}</span>
+      <button type="button" @click="backToRoutes">{{ t("common.actions.change") }}</button>
+    </div>
+    <section v-show="!activeRoute || !turbo" class="left-nearby-travel__inputs">
       <label>
         <span>{{ t("nearbyStations.travel.origin") }}</span>
         <NearbyAddressSearch
@@ -505,7 +516,7 @@ function routeAlarmLabel(route: TravelRoute): string {
       />
     </section>
 
-    <details class="left-nearby-travel__advanced-filters">
+    <details v-show="!activeRoute || !turbo" class="left-nearby-travel__advanced-filters">
       <summary>
         <SlidersHorizontal :size="15" aria-hidden="true" />
         <span>{{ t("nearbyStations.travel.advancedFilters") }}</span>
@@ -605,7 +616,7 @@ function routeAlarmLabel(route: TravelRoute): string {
     </section>
     </details>
 
-    <div class="left-nearby-travel__heading">
+    <div v-show="!activeRoute || !turbo" class="left-nearby-travel__heading">
       <strong>{{ t("nearbyStations.travel.suggestions") }}</strong>
       <button type="button" :disabled="loading || !destination" :aria-label="t('common.actions.refresh')" @click="emit('refresh')">
         <RefreshCw :size="15" aria-hidden="true" />
@@ -687,7 +698,13 @@ function routeAlarmLabel(route: TravelRoute): string {
           </div>
         </div>
 
-        <div class="left-nearby-travel__timeline" role="list" :aria-label="t('nearbyStations.travel.legs')">
+        <TravelTurboPanel v-if="turbo" :turbo="turbo" :routes="routes" :current-route-id="activeRoute.id" :show-line-icons="showLineIcons" :fill-space="!timelineExpanded" @select="openRoute" />
+        <button v-if="turbo" type="button" class="left-nearby-travel__timeline-toggle" :aria-expanded="timelineExpanded"
+          :aria-controls="`${activeRoute.id}:timeline`" @click="timelineExpanded = !timelineExpanded">
+          <span>{{ t(timelineExpanded ? "travelTurbo.hideSteps" : "travelTurbo.showSteps") }}</span>
+          <ChevronDown :size="17" :class="{ 'left-nearby-travel__timeline-chevron--expanded': timelineExpanded }" aria-hidden="true" />
+        </button>
+        <div v-show="!turbo || timelineExpanded" :id="`${activeRoute.id}:timeline`" class="left-nearby-travel__timeline" role="list" :aria-label="t('nearbyStations.travel.legs')">
           <template v-for="(section, sectionIndex) in activeRoute.sections" :key="`${activeRoute.id}:detail-section:${sectionIndex}`">
             <article
               v-if="waitingGapSeconds(activeRoute, sectionIndex) > 0"
@@ -736,11 +753,17 @@ function routeAlarmLabel(route: TravelRoute): string {
                 <span class="left-nearby-travel__timeline-line">
                   <LineIconBadge v-if="showLineIcons" :line="sectionBadge(section)" compact eager />
                   <strong>{{ sectionTitle(section) }}</strong>
+                  <span v-if="sectionServiceType(section)" class="left-nearby-travel__service-chip">
+                    {{ sectionServiceType(section) === "semi-direct"
+                      ? t("nearbyStations.travel.serviceType.semiDirect")
+                      : t("nearbyStations.travel.serviceType.allStops") }}
+                  </span>
                   <small v-if="sectionStopsLabel(section)">· {{ sectionStopsLabel(section) }}</small>
                 </span>
                 <span class="left-nearby-travel__timeline-subtitle">
                   <span v-if="sectionDirection(section)">{{ t("nearbyStations.travel.direction", { direction: sectionDirection(section) }) }}</span>
                   <span v-if="section.durationSeconds"> · {{ formatDuration(section.durationSeconds) }}</span>
+                  <span v-if="turbo && section.timingSource"> · {{ t(`travelTurbo.${section.timingSource}`) }}</span>
                 </span>
               </span>
               <ChevronDown
@@ -895,6 +918,9 @@ function routeAlarmLabel(route: TravelRoute): string {
 </template>
 
 <style scoped>
+.left-nearby-travel__compact-endpoints { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--surface-muted); font-size: .75rem; }
+.left-nearby-travel__compact-endpoints span { min-width: 0; flex: 1; }
+.left-nearby-travel__compact-endpoints button { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--ink); font: inherit; padding: 6px; cursor: pointer; }
 .left-nearby-travel { display: flex; flex: 1 1 auto; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
 .left-nearby-travel__inputs { background: #f6f5ff; border-bottom: 1px solid rgba(81,70,255,.12); display: grid; flex: 0 0 auto; gap: 10px; overflow: visible; padding: 14px; position: relative; z-index: 30; }
 .left-nearby-travel__inputs > label { display: grid; gap: 5px; }
@@ -941,7 +967,7 @@ function routeAlarmLabel(route: TravelRoute): string {
 .left-nearby-travel__time-popover-actions button { font-size: .66rem; min-height: 31px; padding: 5px 9px; }
 .left-nearby-travel__state { align-items: center; color: #64748b; display: flex; flex: 0 0 auto; font-size: .78rem; gap: 8px; padding: 18px 14px; }
 .left-nearby-travel__state--error { color: #b42318; }
-.left-nearby-travel__routes { display: grid; flex: 1 1 auto; gap: 8px; min-height: 0; overflow: auto; padding: 8px 12px 14px; position: relative; z-index: 1; }
+.left-nearby-travel__routes { display: grid; flex: 1 1 auto; gap: 8px; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; padding: 8px 12px 14px; position: relative; z-index: 1; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
 .left-nearby-travel__routes--detail { display: block; overflow: hidden; padding: 0; }
 .left-nearby-travel__route { background: #fff; border: 1px solid rgba(15,23,42,.12); border-radius: 14px; color: #18233f; min-width: 0; }
 .left-nearby-travel__route:hover, .left-nearby-travel__route--selected { border-color: #5146ff; box-shadow: 0 0 0 2px rgba(81,70,255,.1); }
@@ -990,6 +1016,7 @@ function routeAlarmLabel(route: TravelRoute): string {
 .left-nearby-travel__detail-badges :deep(.line-icon-badge img) { max-height: 27px; max-width: 48px; }
 .left-nearby-travel__detail-meta { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
 .left-nearby-travel__timeline { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 5px 12px 14px; }
+.left-nearby-travel__timeline-toggle { display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto; width: 100%; min-height: 44px; border: 0; border-top: 1px solid var(--border); background: var(--surface-muted); color: var(--ink); padding: 10px 12px; font: inherit; font-size: .78rem; font-weight: 700; cursor: pointer; }
 .left-nearby-travel__timeline-item { border-bottom: 1px solid rgba(100,116,139,.13); position: relative; }
 .left-nearby-travel__timeline-item:last-child { border-bottom: 0; }
 .left-nearby-travel__timeline-row { align-items: center; background: transparent; border: 0; color: #18233f; display: grid; gap: 7px; grid-template-columns: 42px 25px minmax(0,1fr) 18px; min-height: 62px; padding: 7px 0; text-align: left; width: 100%; }
@@ -1010,6 +1037,7 @@ function routeAlarmLabel(route: TravelRoute): string {
 .left-nearby-travel__timeline-line :deep(.line-icon-badge img) { max-height: 27px; max-width: 48px; }
 .left-nearby-travel__timeline-line strong, .left-nearby-travel__timeline-copy > strong { font-size: .76rem; font-weight: 900; line-height: 1.2; }
 .left-nearby-travel__timeline-line small { color: #64748b; font-size: .62rem; font-weight: 750; }
+.left-nearby-travel__service-chip { background: #f1f0ff; border: 1px solid rgba(81,70,255,.2); border-radius: 999px; color: #4034df; font-size: .59rem; font-weight: 850; line-height: 1.2; padding: 3px 6px; white-space: nowrap; }
 .left-nearby-travel__timeline-subtitle, .left-nearby-travel__timeline-copy > small { color: #64748b; font-size: .64rem; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .left-nearby-travel__timeline-chevron { color: #64748b; transition: transform .16s ease; }
 .left-nearby-travel__timeline-chevron--expanded { color: #4034df; transform: rotate(180deg); }

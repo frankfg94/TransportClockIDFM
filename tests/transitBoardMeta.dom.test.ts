@@ -1,6 +1,6 @@
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import TransitBoard from "../src/components/TransitBoard.vue";
 import type {
   Departure,
@@ -241,6 +241,52 @@ describe("TransitBoard departure metadata", () => {
     );
 
     wrapper.unmount();
+  });
+
+  it("animates the card height when departures replace the loading notice", async () => {
+    const departure: Departure = {
+      id: "departure-height-transition",
+      lineRef: "line:test",
+      monitoringRef: "stop:test",
+      stopName: "Station test",
+      destination: "Saint-Remy",
+      monitoringLabel: "Tous quais",
+      expectedDepartureTime: new Date(Date.now() + 5 * 60_000).toISOString(),
+      vehicleAtStop: false,
+    };
+    const wrapper = mount(TransitBoard, {
+      props: {
+        board: createBoard(),
+        collapsedDirectionIds: [],
+        departures: [],
+        directionGroups: [],
+        loading: true,
+      },
+      global: {
+        stubs: {
+          LineIconBadge: true,
+        },
+      },
+    });
+    const boardElement = wrapper.get(".board").element as HTMLElement;
+    const heightSpy = vi
+      .spyOn(boardElement, "getBoundingClientRect")
+      .mockReturnValueOnce({ height: 180 } as DOMRect)
+      .mockReturnValueOnce({ height: 460 } as DOMRect);
+
+    await wrapper.setProps({
+      loading: false,
+      departures: [departure],
+      directionGroups: [createDirectionGroup(departure)],
+    });
+    await nextTick();
+
+    expect(wrapper.get(".board").classes()).toContain(
+      "board--height-transitioning",
+    );
+
+    wrapper.unmount();
+    heightSpy.mockRestore();
   });
 });
 

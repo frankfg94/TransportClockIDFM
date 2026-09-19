@@ -32,6 +32,10 @@ const profile: GtfsLineFrequencyResponse = {
       directions: [],
     },
   ],
+  stations: [
+    { id: "topology:station-a", average: { peakMinutes: 4 }, directions: [] },
+    { id: "topology:station-b", average: { peakMinutes: 6 }, directions: [] },
+  ],
   stationCount: 2,
   sampledStationCount: 2,
 };
@@ -65,7 +69,7 @@ describe("useLineFrequencyTimetable", () => {
     const branch = await source.getFrequencies("line:metro:4", "topology:station-a");
     const lastService = await source.getLastService("line:metro:4", "topology:station-a");
 
-    expect(branch.average.peakMinutes).toBe(9);
+    expect(branch.average.peakMinutes).toBe(4);
     expect(branch.sections.map((section) => section.id)).toEqual(["branch-a"]);
     expect(lastService).toEqual({ seconds: 23 * 3_600 + 30 * 60, stopName: "Station A" });
   });

@@ -20,7 +20,7 @@ import type {
 } from "../service-pattern/trafficCalendar";
 import type { NearbyPlace } from "../nearby-stations/nearbyPlaces";
 
-export type NearbyLineRadiusMinutes = 2 | 5;
+export type NearbyLineRadiusMinutes = 0 | 2 | 5;
 
 export interface GlobalMapSidebarTrafficCalendarState {
   open: boolean;
@@ -96,5 +96,6 @@ export interface GlobalMapSidebarBodyEmits {
   "add-active-station": [];
   "modal-open": [open: boolean];
   "toggle-ghost-line-icons": [];
+  "line-cities-expanded": [expanded: boolean];
   "update:nearby-radius-minutes": [minutes: NearbyLineRadiusMinutes];
 }

@@ -97,7 +97,7 @@ const props = withDefaults(defineProps<{
   nearbyPlaces: () => [],
   nearbyPlacesLoading: false,
   nearbyPlacesError: false,
-  nearbyPlacesRadiusMinutes: 2,
+  nearbyPlacesRadiusMinutes: 0,
 });
 
 const emit = defineEmits<{
@@ -124,6 +124,7 @@ const emit = defineEmits<{
   "mobile-sheet-snap-change": [snap: GlobalMapSidebarSheetSnap];
   "modal-open": [open: boolean];
   "toggle-ghost-line-icons": [];
+  "line-cities-expanded": [expanded: boolean];
   "update:nearby-radius-minutes": [minutes: NearbyLineRadiusMinutes];
 }>();
 
@@ -737,6 +738,7 @@ onBeforeUnmount(() => {
         @add-active-station="emit('add-active-station')"
         @modal-open="emit('modal-open', $event)"
         @toggle-ghost-line-icons="emit('toggle-ghost-line-icons')"
+        @line-cities-expanded="emit('line-cities-expanded', $event)"
         @update:nearby-radius-minutes="emit('update:nearby-radius-minutes', $event)"
       />
 

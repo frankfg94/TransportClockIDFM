@@ -75,6 +75,76 @@ describe("AdressBook", () => {
     expect(saved.entries?.[0]?.isHidden).toBeUndefined();
   });
 
+  it("offers a workplace checkbox and persists the blue workplace chip", async () => {
+    window.localStorage.setItem(ADDRESS_BOOK_STORAGE_KEY, JSON.stringify({
+      version: ADDRESS_BOOK_STORAGE_VERSION,
+      entries: [{
+        id: "office",
+        kind: "address",
+        name: "Mon bureau",
+        address: "10 Rue de Rivoli",
+        lon: 2.35,
+        lat: 48.856,
+        icon: "work",
+      }],
+    }));
+
+    wrapper = mount(AdressBook, { props: { open: true }, attachTo: document.body });
+    await flushPromises();
+
+    const editButton = Array.from(document.body.querySelectorAll<HTMLButtonElement>(
+      ".address-book-entry__actions button",
+    )).find((button) => button.getAttribute("aria-label") === "Modifier Mon bureau");
+    editButton?.click();
+    await nextTick();
+
+    const workplaceCheckbox = document.body.querySelector<HTMLInputElement>(
+      ".address-book-form__workplace input",
+    );
+    expect(workplaceCheckbox).not.toBeNull();
+    expect(workplaceCheckbox?.checked).toBe(false);
+    workplaceCheckbox!.click();
+    await nextTick();
+
+    document.body.querySelector<HTMLButtonElement>(
+      'button[type="submit"][form="address-book-form"]',
+    )?.click();
+    await flushPromises();
+
+    const saved = JSON.parse(window.localStorage.getItem(ADDRESS_BOOK_STORAGE_KEY) ?? "{}") as {
+      entries?: Array<{ isWorkplace?: boolean }>;
+    };
+    expect(saved.entries?.[0]?.isWorkplace).toBe(true);
+    expect(document.body.querySelector(".address-book-entry__workplace")?.textContent).toContain("Travail");
+    expect(document.body.querySelector(".address-book-entry__workplace svg")).not.toBeNull();
+  });
+
+  it("returns to the address list from the add form", async () => {
+    wrapper = mount(AdressBook, { props: { open: true }, attachTo: document.body });
+    await flushPromises();
+
+    const addButton = Array.from(document.body.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent?.includes("Ajouter une entrée"));
+    expect(addButton).toBeDefined();
+    addButton?.click();
+    await nextTick();
+
+    const backButton = document.body.querySelector<HTMLButtonElement>(
+      ".address-book-modal__back",
+    );
+    expect(backButton?.getAttribute("aria-label")).toBe("Retour à la liste des adresses");
+    expect(backButton?.querySelector("svg")).not.toBeNull();
+    expect(document.body.querySelector(".modal-panel__header h2")?.textContent)
+      .toContain("Ajouter à l’annuaire");
+
+    backButton?.click();
+    await nextTick();
+
+    expect(document.body.querySelector(".address-book-modal__back")).toBeNull();
+    expect(document.body.querySelector(".modal-panel__header h2")?.textContent)
+      .toContain("Mon annuaire");
+  });
+
   it("opens the dynamic icon selector, searches Lucide names and keeps the selection", async () => {
     wrapper = mount(AdressBook, { props: { open: true }, attachTo: document.body });
     await flushPromises();

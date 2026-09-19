@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, ref, watch, type Ref } from "vue";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
+import type { GlobalMapMode } from "../transport-map/contracts/manifest";
 import type {
   NearbyJourney,
   NearbyJourneyRequest,
@@ -9,6 +10,8 @@ import type {
 } from "./nearbyHeavyTransports";
 import type { PlaceDestinationSearchOptions } from "./nearbyPlaces";
 import type { PlacesProvider as NearbyPlacesProvider } from "./nearbyPlaces";
+import { useTravelTurbo } from "./useTravelTurbo";
+import type { TravelTurboProvider } from "./travelTurbo";
 
 export interface TravelRoute extends NearbyJourney {
   id: string;
@@ -38,10 +41,14 @@ export function useTravelRoutes(options: {
   searchPlaces?: boolean;
   searchAddresses?: boolean;
   searchDestinationPoints?: TravelDestinationSearch;
+  turboProvider?: TravelTurboProvider;
+  allowedModes?: { readonly value: readonly GlobalMapMode[] };
 }) {
   const destination = ref<GeocoderPoint>();
   const departureDateTime = ref("");
-  const routes = ref<TravelRoute[]>([]);
+  const baseRoutes = ref<TravelRoute[]>([]);
+  const turbo = useTravelTurbo({ routes: baseRoutes, departureDateTime, provider: options.turboProvider });
+  const routes = turbo.mergedRoutes;
   const selectedRouteId = ref<string>();
   const isLoading = ref(false);
   const error = ref<Error>();
@@ -78,11 +85,12 @@ export function useTravelRoutes(options: {
   }
 
   async function refresh(): Promise<void> {
+    turbo.reset();
     const origin = options.origin.value;
     const target = destination.value;
     const token = ++requestToken;
     if (!origin || !target) {
-      routes.value = [];
+      baseRoutes.value = [];
       selectedRouteId.value = undefined;
       return;
     }
@@ -96,13 +104,14 @@ export function useTravelRoutes(options: {
         count: 8,
         includeDisruptions: true,
         includeGeoJson: true,
+        allowedModes: options.allowedModes?.value,
       });
       if (token !== requestToken) return;
-      routes.value = toTravelRoutes(journeys);
+      baseRoutes.value = toTravelRoutes(journeys);
       selectedRouteId.value = routes.value[0]?.id;
     } catch (cause) {
       if (token !== requestToken) return;
-      routes.value = [];
+      baseRoutes.value = [];
       selectedRouteId.value = undefined;
       error.value = cause instanceof Error ? cause : new Error("travel-routes-unavailable");
     } finally {
@@ -126,10 +135,11 @@ export function useTravelRoutes(options: {
   }
 
   function clear(): void {
+    turbo.reset();
     requestToken += 1;
     destination.value = undefined;
     departureDateTime.value = "";
-    routes.value = [];
+    baseRoutes.value = [];
     selectedRouteId.value = undefined;
     error.value = undefined;
     isLoading.value = false;
@@ -139,9 +149,14 @@ export function useTravelRoutes(options: {
     () => [options.origin.value?.lon, options.origin.value?.lat] as const,
     () => { if (destination.value) void refresh(); },
   );
+  watch(
+    () => [...(options.allowedModes?.value ?? [])].sort().join("|"),
+    () => { if (destination.value) void refresh(); },
+  );
   onBeforeUnmount(() => { requestToken += 1; });
 
   return {
+    turbo,
     destination,
     departureDateTime,
     routes,

@@ -173,6 +173,31 @@ describe("ghost line flow overlay model", () => {
     expect(model.wavePaths[0]?.d.startsWith("M 20.00 50.00")).toBe(true);
   });
 
+  it("exposes the same provider station anchors used by the ghost stroke", () => {
+    const stations = [station("a", 20, 50), station("b", 80, 50)];
+    const sourcePath = path("anchored", [["a", 20, 50], ["b", 80, 50]]);
+    sourcePath.renderStationAnchors = [
+      { stationId: "a", ...screenWorld(24, 50) },
+      { stationId: "b", ...screenWorld(84, 50) },
+    ];
+
+    const model = createGhostLineFlowModel({
+      camera,
+      line,
+      stationsById: stationsById(stations),
+      directions: [direction("forward", ["a", "b"])],
+      paths: [sourcePath],
+    });
+
+    expect(model.stationAnchors).toEqual([
+      expect.objectContaining({ stationId: "a", x: 24, y: 50 }),
+      expect.objectContaining({ stationId: "b", x: 84, y: 50 }),
+    ]);
+    expect(model.termini).toEqual([
+      expect.objectContaining({ directionId: "forward", x: 84, y: 50 }),
+    ]);
+  });
+
   it("detects exits on every viewport side, including visible destinations", () => {
     const cases: Array<[string, [number, number], [number, number]]> = [
       ["top", [50, 20], [50, -20]],

@@ -48,15 +48,27 @@ describe("official line icon URLs", () => {
     );
   });
 
-  it("uses the current legacy RATP bus asset when available", () => {
+  it("uses the canonical IDFM bus pictogram instead of the ambiguous display-number asset", () => {
     expect(
       createRatpLineIconUrls({
         family: "BUS",
-        id: "line:IDFM:C01214",
-        code: "124",
+        id: "line:IDFM:C00350",
+        code: "14",
       })[0],
     ).toBe(
-      "https://www.ratp.fr/sites/default/files/lines-assets/picto/busratp/picto_busratp_ligne-124.1496915831.svg",
+      "https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/bus/picto-ligne-LIGIDFMC00350.svg",
+    );
+  });
+
+  it("uses the canonical IDFM pictogram for a Noctilien line", () => {
+    expect(
+      createRatpLineIconUrls({
+        family: "NOCTILIEN",
+        id: "line:IDFM:C01402",
+        code: "N61",
+      }),
+    ).toContain(
+      "https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/bus/picto-ligne-LIGIDFMC01402.svg",
     );
   });
 
@@ -81,6 +93,18 @@ describe("official line icon URLs", () => {
       }),
     ).toContain(
       "https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/tramway/picto-ligne-LIGIDFMC01389.svg",
+    );
+  });
+
+  it("resolves the public T10 code to its official IDFM pictogram", () => {
+    expect(
+      createRatpLineIconUrls({
+        family: "TRAM",
+        id: "line:tram:T10",
+        code: "T10",
+      })[0],
+    ).toBe(
+      "https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/tramway/picto-ligne-LIGIDFMC02528.1787972732.svg",
     );
   });
 

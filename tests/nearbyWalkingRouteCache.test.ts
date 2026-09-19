@@ -104,4 +104,44 @@ describe("nearby walking route cache", () => {
       destination: { lon: destination.lon, lat: destination.lat },
     })).toBeUndefined();
   });
+
+  it("does not reuse a direct route for a different origin", async () => {
+    const storage = new MemoryStorage();
+    const otherOrigin = { lon: 2.41, lat: 48.82 };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: destination.id,
+        provider: "openrouteservice",
+        distanceMeters: 640,
+        durationSeconds: 480,
+        coordinates: [origin, { lon: destination.lon, lat: destination.lat }],
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: destination.id,
+        provider: "openrouteservice",
+        distanceMeters: 1_240,
+        durationSeconds: 780,
+        coordinates: [otherOrigin, { lon: destination.lon, lat: destination.lat }],
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("localStorage", storage);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const service = await import("../src/services/nearbyWalkingRoutes");
+    const request = (requestOrigin: typeof origin) => ({
+      id: destination.id,
+      cacheKey: destination.cacheKey,
+      origin: requestOrigin,
+      destination: { lon: destination.lon, lat: destination.lat },
+    });
+
+    await service.getNearbyWalkingRoute(request(origin));
+    const otherRoute = await service.getNearbyWalkingRoute(request(otherOrigin));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(otherRoute).toMatchObject({
+      coordinates: [otherOrigin, { lon: destination.lon, lat: destination.lat }],
+      distanceMeters: 1_240,
+      durationSeconds: 780,
+    });
+  });
 });

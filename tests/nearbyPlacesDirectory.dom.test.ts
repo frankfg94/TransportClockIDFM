@@ -62,7 +62,7 @@ describe("NearbyPlacesDirectoryOverlay", () => {
 
     expect(wrapper.get("[role='dialog']").attributes("aria-modal")).toBe("true");
     expect(wrapper.findAll(".nearby-directory__place")).toHaveLength(3);
-    expect(wrapper.get(".nearby-directory__toolbar").text()).toContain("3 lieux dont 1 commerces à moins de 15 minutes à pied");
+    expect(wrapper.get(".nearby-directory__toolbar").text()).toContain("3 lieux dont 2 commerces à moins de 15 minutes à pied");
     expect(wrapper.findAll(".nearby-directory__group h3 > button")[0]?.attributes("aria-expanded")).toBe("true");
     expect(wrapper.get("[data-testid='directory-map']").attributes("data-variant")).toBe("places-preview");
     expect(document.body.style.overflow).toBe("hidden");
@@ -104,7 +104,46 @@ describe("NearbyPlacesDirectoryOverlay", () => {
     expect(wrapper.get("[data-place-id='school'] .nearby-directory__place-icon svg").classes()).toContain("lucide-school");
     expect(wrapper.get("[data-place-id='gym'] .nearby-directory__place-icon svg").classes()).toContain("lucide-dumbbell");
     expect(wrapper.findAll(".nearby-directory__group-title").some((title) => title.text() === "Espaces verts")).toBe(true);
-    expect(wrapper.get(".nearby-directory__toolbar").text()).toContain("6 lieux dont 1 commerces à moins de 15 minutes à pied");
+    expect(wrapper.get(".nearby-directory__toolbar").text()).toContain("6 lieux dont 2 commerces à moins de 15 minutes à pied");
+    wrapper.unmount();
+  });
+
+  it("hides benches and waste baskets from the directory", async () => {
+    const wrapper = mountOverlay({
+      places: [
+        ...places,
+        { id: "bench", name: "Banc public", lon: 2.305, lat: 48.815, category: "service", kind: "bench", distanceMeters: 350 },
+        { id: "waste-basket", name: "Corbeille", lon: 2.306, lat: 48.816, category: "service", kind: "waste_basket", distanceMeters: 360 },
+      ],
+    });
+    await flushPromises();
+
+    expect(wrapper.find("[data-place-id='bench']").exists()).toBe(false);
+    expect(wrapper.find("[data-place-id='waste-basket']").exists()).toBe(false);
+    expect(wrapper.get(".nearby-directory__toolbar").text()).toContain("3 lieux dont 2 commerces");
+    wrapper.unmount();
+  });
+
+  it("shows a translated generic name when an OSM place has no name", async () => {
+    const wrapper = mountOverlay({
+      places: [
+        ...places,
+        {
+          id: "tennis-anonymous",
+          name: "",
+          genericNameKey: "nearbyStations.genericPlaceNames.tennisCourt",
+          lon: 2.307,
+          lat: 48.817,
+          category: "attraction",
+          kind: "tennis",
+          distanceMeters: 370,
+        },
+      ],
+    });
+    await flushPromises();
+
+    expect(wrapper.get("[data-place-id='tennis-anonymous'] strong").text()).toBe("Terrain de tennis");
+    expect(wrapper.get("[data-place-id='tennis-anonymous']").attributes("aria-label")).toContain("Terrain de tennis");
     wrapper.unmount();
   });
 

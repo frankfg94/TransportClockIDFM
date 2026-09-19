@@ -111,6 +111,7 @@ import type {
 } from "./features/traffic/types";
 import {
   BellRing,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CloudSun,
@@ -199,6 +200,7 @@ const nearbyNotificationTone = ref<AppNotificationTone>("success");
 const placeNameModalOpen = ref(false);
 const placeNameError = ref("");
 const topbarMenuOpen = ref(false);
+const topbarControlsCollapsed = ref(false);
 const topbarMenuTrigger = ref<HTMLElement>();
 const weatherModalOpen = ref(false);
 const boardDisplayModalOpen = ref(false);
@@ -251,6 +253,7 @@ let trafficSummaryRequest = 0;
 const boardCardElements = new Map<string, HTMLElement>();
 let toastTimer: number | undefined;
 let clockTimer: number | undefined;
+let originalDocumentTitle: string | undefined;
 let boardRevealTimer: number | undefined;
 let boardHighlightTimer: number | undefined;
 let nearbyNotificationTimer: number | undefined;
@@ -751,6 +754,29 @@ const fullscreenPanelUpdatedAtLabel = computed(() => {
     time: formatClock(states[board.id].updatedAt),
   });
 });
+const fullscreenPanelBrowserTitle = computed(() => {
+  const now = nowTick.value;
+  const board = fullscreenPanelBoard.value;
+
+  if (!board || fullscreenPanelDesign.value !== "double-stop") {
+    return "";
+  }
+
+  const departure = getFullscreenPanelFirstDeparture(board);
+  const minutes = getPanelWaitMinutes(departure, now);
+
+  if (minutes === undefined) {
+    return "";
+  }
+
+  return `${board.line.shortName} - ${t(
+    minutes === 1
+      ? "app.fullscreenDepartureInOneMinute"
+      : "app.fullscreenDepartureInMinutes",
+    { count: minutes },
+  )}`;
+});
+watch(fullscreenPanelBrowserTitle, syncFullscreenPanelBrowserTitle);
 
 function getBoardAlarmDepartureIds(boardId: string): string[] {
   return departureAlarms.value
@@ -966,6 +992,10 @@ function closeTopbarMenu(): void {
   topbarMenuOpen.value = false;
 }
 
+function toggleTopbarControls(): void {
+  topbarControlsCollapsed.value = !topbarControlsCollapsed.value;
+}
+
 function refreshFromTopbarMenu(): void {
   closeTopbarMenu();
   void refreshAll();
@@ -1160,6 +1190,27 @@ function getVisibleDirectionGroupsForBoard(boardId: string): DirectionDepartureG
   );
 }
 
+function getFullscreenPanelFirstDeparture(board: TransitBoardConfig): Departure | undefined {
+  const hiddenDirectionIds = new Set(preferences.hiddenDirectionIdsByBoardId[board.id] ?? []);
+  const directions = getVisibleDirectionGroupsForBoard(board.id).filter(
+    (direction) => !hiddenDirectionIds.has(direction.id),
+  );
+  const selectedDirection =
+    directions.find((direction) => direction.id === fullscreenPanelPanamDirectionId.value) ??
+    directions.find((direction) => direction.departures.length > 0) ??
+    directions[0];
+
+  return selectedDirection?.departures[0];
+}
+
+function syncFullscreenPanelBrowserTitle(): void {
+  if (typeof document === "undefined" || originalDocumentTitle === undefined) {
+    return;
+  }
+
+  document.title = fullscreenPanelBrowserTitle.value || originalDocumentTitle;
+}
+
 function getFullscreenPanelDirections(board: TransitBoardConfig): FullscreenPanelDirection[] {
   const hiddenDirectionIds = new Set(preferences.hiddenDirectionIdsByBoardId[board.id] ?? []);
 
@@ -1198,6 +1249,24 @@ function formatPanelWait(departure?: Departure): string {
   const minutes = Math.max(0, Math.round((new Date(time).getTime() - Date.now()) / 60000));
 
   return minutes === 0 ? "0" : String(minutes);
+}
+
+function getPanelWaitMinutes(
+  departure?: Departure,
+  now = Date.now(),
+): number | undefined {
+  if (!departure || departure.vehicleAtStop) {
+    return undefined;
+  }
+
+  const time = getDepartureTime(departure);
+  const timestamp = time ? new Date(time).getTime() : Number.NaN;
+
+  if (!Number.isFinite(timestamp)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.round((timestamp - now) / 60000));
 }
 
 function getDepartureTime(departure: Departure): string | undefined {
@@ -2414,6 +2483,8 @@ function syncTransitPreferences(event?: Event): void {
 }
 
 onMounted(() => {
+  originalDocumentTitle = document.title;
+  syncFullscreenPanelBrowserTitle();
   Object.assign(presetState, loadTransitPresetState(transitBoards));
   syncActivePlaceFromRoute({ refresh: false });
   if (getFirstRouteQueryValue(route.query.nearby) === "1") {
@@ -2462,6 +2533,10 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (typeof document !== "undefined" && originalDocumentTitle !== undefined) {
+    document.title = originalDocumentTitle;
+    originalDocumentTitle = undefined;
+  }
   boardEnrichmentVersions.clear();
   stopRefreshTimer();
   if (toastTimer) {
@@ -2600,17 +2675,35 @@ onBeforeUnmount(() => {
         </div>
 
         <div
-          class="topbar__controls"
-          :class="{
-            'topbar__controls--menu-toggles': boardTogglesInContextMenu,
-          }"
+          v-if="!boardTogglesInContextMenu && visibleBoards.length > 0"
+          class="topbar__controls-shell"
         >
-          <BoardVisibilityControls
-            v-if="!boardTogglesInContextMenu && visibleBoards.length > 0"
-            :boards="allBoards"
-            :visible-board-ids="preferences.visibleBoardIds"
-            @toggle="toggleBoardVisibility"
-          />
+          <div
+            id="topbar-board-controls"
+            class="topbar__controls-clip"
+            :class="{ 'topbar__controls-clip--collapsed': topbarControlsCollapsed }"
+          >
+            <div class="topbar__controls">
+              <BoardVisibilityControls
+                :boards="allBoards"
+                :visible-board-ids="preferences.visibleBoardIds"
+                @toggle="toggleBoardVisibility"
+              />
+            </div>
+          </div>
+          <button
+            class="topbar__controls-toggle"
+            :class="{ 'topbar__controls-toggle--collapsed': topbarControlsCollapsed }"
+            data-testid="topbar-controls-toggle"
+            type="button"
+            :aria-controls="'topbar-board-controls'"
+            :aria-expanded="!topbarControlsCollapsed"
+            :aria-label="t(topbarControlsCollapsed ? 'app.expandBoardControlsAria' : 'app.collapseBoardControlsAria')"
+            :title="t(topbarControlsCollapsed ? 'app.expandBoardControlsAria' : 'app.collapseBoardControlsAria')"
+            @click="toggleTopbarControls"
+          >
+            <ChevronDown aria-hidden="true" :size="18" />
+          </button>
         </div>
       </section>
 

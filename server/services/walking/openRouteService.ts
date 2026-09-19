@@ -17,8 +17,10 @@ import {
   type NearbyIsochronesResponse,
 } from "../../../src/features/nearby-stations/nearbyIsochrones";
 import {
+  normalizeNearbyWalkingMinutes,
   NEARBY_WALKING_MINUTES,
   walkingMinutesToSeconds,
+  type NearbyWalkingMinutes,
 } from "../../../src/features/nearby-stations/nearbyWalkingMinutes";
 
 export const OPEN_ROUTE_SERVICE_DEFAULT_ROOT = "https://api.openrouteservice.org";
@@ -289,11 +291,13 @@ export async function matrixWalkingWithOpenRouteService(
 export async function getNearbyIsochronesWithOpenRouteService(
   event: H3Event,
   origin: { lon: number; lat: number },
+  requestedMinutes: readonly NearbyWalkingMinutes[] = NEARBY_WALKING_MINUTES,
 ): Promise<NearbyIsochronesResponse> {
   const config = getOpenRouteServiceConfig(event);
   if (!config.apiKey) throw new Error(NEARBY_ISOCHRONES_NOT_CONFIGURED_CODE);
 
-  const cacheKey = isochroneCacheKey(origin);
+  const minutes = normalizeNearbyWalkingMinutes(requestedMinutes);
+  const cacheKey = isochroneCacheKey(origin, minutes);
   const cached = isochroneCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.response;
 
@@ -307,15 +311,21 @@ export async function getNearbyIsochronesWithOpenRouteService(
     body: JSON.stringify({
       locations: [[origin.lon, origin.lat]],
       range_type: "time",
-      range: NEARBY_WALKING_MINUTES.map(walkingMinutesToSeconds),
+      range: minutes.map(walkingMinutesToSeconds),
       location_type: "start",
       smoothing: 0.25,
     }),
   });
-  if (!response.ok) throw new Error(`openrouteservice-isochrones-${response.status}`);
+  if (!response.ok) {
+    const detail = await response.text();
+    if (response.status === 429 || (response.status === 403 && /quota exceeded/iu.test(detail))) {
+      throw new Error("openrouteservice-isochrones-quota");
+    }
+    throw new Error(`openrouteservice-isochrones-${response.status}`);
+  }
 
   const payload = await response.json() as unknown;
-  const normalized = normalizeNearbyIsochronePayload(payload, origin);
+  const normalized = normalizeNearbyIsochronePayload(payload, origin, minutes);
   if (!normalized) throw new Error("openrouteservice-isochrones-invalid");
 
   isochroneCache.set(cacheKey, {
@@ -557,8 +567,8 @@ function matrixCacheKey(origin: NearbyJourneyPoint, destinations: readonly Nearb
   return `${origin.lon.toFixed(5)},${origin.lat.toFixed(5)}>${destinations.map((destination) => `${destination.lon.toFixed(5)},${destination.lat.toFixed(5)}`).join(";")}`;
 }
 
-function isochroneCacheKey(origin: { lon: number; lat: number }): string {
-  return `${ISOCHRONE_CACHE_GEOMETRY_VERSION}:${origin.lon.toFixed(5)},${origin.lat.toFixed(5)}`;
+function isochroneCacheKey(origin: { lon: number; lat: number }, minutes: readonly NearbyWalkingMinutes[]): string {
+  return `${ISOCHRONE_CACHE_GEOMETRY_VERSION}:${origin.lon.toFixed(5)},${origin.lat.toFixed(5)}:${minutes.join(",")}`;
 }
 
 function saveCache(cache: Map<string, CachedRoute>, key: string, route: NearbyWalkingRoute, ttlMs: number): void {

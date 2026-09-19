@@ -6,6 +6,19 @@ globale. Les contrôles du radar ne changent jamais les filtres du réseau.
 
 ## Responsabilités
 
+La vue Ville des stations proches utilise également cette archive :
+`POST /api/walking/isochrones` lit d'abord les contours individuels de
+`stationOrigins` (coordonnées dédupliquées, fichiers `origins/*.json`).
+Seule une origine absente ou une archive indisponible déclenche le secours ORS.
+Le navigateur reçoit les trois seuils 5/10/15 minutes et fusionne seulement les
+stations de son périmètre. Le mode piéton est désactivé à l'entrée en vue Ville.
+L'en-tête `X-Isochrone-Source: archive|ors` permet de contrôler la provenance.
+Les archives anciennes sans `stationOrigins` restent compatibles avec le radar
+global, mais doivent être régénérées pour servir la vue Ville sans ORS.
+
+La génération sans sélecteur traite désormais tous les modes, BUS et NOCTILIEN
+inclus. Les contours par mode/ligne sont conservés pour le radar global.
+
 - **IDFM** : ORS Docker, catalogue complet, checkpoints, calculs et unions,
   production d'un seul fichier `walking-isochrones.zip`.
 - **Nuxt** : lecteur indexé du fichier local ou distant/R2, validation et cache.
@@ -58,8 +71,9 @@ npm run map:isochrones:build -- --keep-archives
 `--download-only` prépare et valide le dataset fusionné sans démarrer ORS (il
 faut néanmoins `osmium-tool` local ou le fallback Docker pour la fusion). Après
 un graphe prêt, les PBF sources et fusionnés sont supprimés par défaut ; après
-une génération complète, les checkpoints sont également supprimés. Ajouter
-`--keep-archives` à `ors:install` et/ou `map:isochrones:build` pour les garder.
+une génération complète, les checkpoints d'isochrones sont conservés pour les
+reprises incrémentales. Ajouter `--keep-archives` à `ors:install` pour garder
+aussi les fichiers source OSM.
 Le délai d’attente par défaut est 45 minutes. En cas de délai dépassé, le
 conteneur continue sa préparation ; la commande peut être relancée sans nouveau
 téléchargement. Un verrou empêche deux installations simultanées. Après un
@@ -123,8 +137,11 @@ dans IDFM. La cadence par défaut devient 15/minute. Utiliser `--max-requests`
 pour borner le quota consommé ; les reprises HTTP comptent dans ce budget.
 
 Les checkpoints atomiques sont dans `.data/map-isochrones/` pendant le calcul.
-Ils sont supprimés après publication complète par défaut ; `--keep-archives` les
-conserve pour une reprise/debug. Le cache dépend du fournisseur, des paramètres et de la révision OSM/ORS. Pour le Docker fourni,
+Les unions réessaient les rares échecs numériques sur une grille de précision
+submétrique (7 puis 6 décimales), sans abandonner de contour. Les géométries
+individuelles sauvegardées restent inchangées.
+Ils sont conservés après publication pour les reprises et générations incrémentales.
+Le cache dépend du fournisseur, des paramètres et de la révision OSM/ORS. Pour le Docker fourni,
 le PBF et les configurations sont hachés automatiquement. Pour un autre serveur,
 renseigner et actualiser `ORS_DATA_VERSION`. Garder le même graphe et le même PBF
 permet de recalculer hors ligne, mais ne les actualise pas automatiquement.
@@ -155,6 +172,14 @@ vide n'est pas supprimée automatiquement ; une génération réussie la remplac
 Relancer reprend les origines manquantes. Codes de sortie : 0 terminé,
 2 partiel/interrompu, 1 erreur fatale. L'ajout de bus préserve les unions compatibles.
 Les unions `polygon-clipping` conservent trous et multipolygones.
+À partir de 512 nouvelles origines, le compilateur utilise GEOS 3.13 en WASM
+dans un worker Node isolé : lots de 128 origines, puis fusion hiérarchique des
+résultats par groupes de 16. La grille fixe de 1e-7 degré évite les instabilités
+numériques sans simplification des contours. Ce moteur reste hors du bundle web.
+Le journal indique les origines, la durée, le lot de fusion et le temps écoulé.
+Une opération sans progression pendant 120 secondes est interrompue ; Ctrl+C
+interrompt aussi le worker. Chaque grande union terminée est sauvegardée dans
+le cache versionné pour ne pas la refaire après une reprise.
 Publication par fichier temporaire puis renommage atomique ; verrou `.lock`.
 Après un arrêt brutal, vérifier qu'aucun générateur n'est actif avant d'enlever
 un verrou résiduel. La génération reste indépendante des builds web/Android.
@@ -245,9 +270,9 @@ the merge backend. Java and manual YAML/.env edits are not needed. Use
 `--refresh` for an explicit snapshot update. Existing files/graphs are reused,
 and old graph revisions are retained.
 Keep `.data/map-isochrones` and Docker graph volumes for resumability.
-Dataset/config fingerprints invalidate stale origin calculations. Successful
-one-shot builds clean raw PBF/checkpoint archives by default; pass
-`--keep-archives` to retain them. R2 publication is a separate, opt-in command;
+Dataset/config fingerprints invalidate stale origin calculations. The compiler
+retains verified checkpoints after publication. The ORS installer may clean raw
+PBF archives unless `--keep-archives` is supplied. R2 publication is a separate, opt-in command;
 ordinary builds neither calculate nor upload.
 Configure `IDFM_MAP_ISOCHRONES_LOCAL` or server-only
 `IDFM_MAP_ISOCHRONES_REMOTE`. Native clients use `NUXT_PUBLIC_API_BASE_URL`;

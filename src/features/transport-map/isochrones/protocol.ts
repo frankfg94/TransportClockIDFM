@@ -1,6 +1,13 @@
 import { GLOBAL_MAP_MODE_ORDER, type GlobalMapMode } from "../contracts/manifest";
 import { normalizeWalkingIsochroneGeometry } from "../../../shared/walkingIsochroneGeometry";
-import { GlobalIsochroneError, globalIsochroneZoneAsset, isGlobalIsochroneMinutes, type GlobalIsochroneRequest, type GlobalIsochroneResult } from "./contracts";
+import {
+  GLOBAL_ISOCHRONE_MINUTES,
+  GlobalIsochroneError,
+  globalIsochroneZoneAsset,
+  isGlobalIsochroneMinutes,
+  type GlobalIsochroneRequest,
+  type GlobalIsochroneResult,
+} from "./contracts";
 export { GlobalIsochroneError } from "./contracts";
 export const GLOBAL_ISOCHRONE_API = "/api/map/isochrones";
 export const GLOBAL_ISOCHRONE_RESPONSE_LIMIT = 64 * 1024 * 1024;
@@ -10,13 +17,13 @@ export function parseGlobalIsochroneQuery(query: Record<string, unknown>): { sco
     typeof query.scopes !== "string" || query.scopes.length > 4096) throw new GlobalIsochroneError("invalid");
   let scopes: unknown;
   try { scopes = JSON.parse(query.scopes); } catch { throw new GlobalIsochroneError("invalid"); }
-  if (!Array.isArray(scopes) || !scopes.length || scopes.length > GLOBAL_MAP_MODE_ORDER.length) throw new GlobalIsochroneError("invalid");
+  if (!Array.isArray(scopes) || !scopes.length || scopes.length > GLOBAL_MAP_MODE_ORDER.length * GLOBAL_ISOCHRONE_MINUTES.length) throw new GlobalIsochroneError("invalid");
   const keys = new Set<string>();
   for (const scope of scopes) {
     if (!isRecord(scope) || typeof scope.key !== "string" || scope.key.length > 180 ||
       !GLOBAL_MAP_MODE_ORDER.includes(scope.mode as GlobalMapMode) || !isGlobalIsochroneMinutes(scope.minutes) ||
-      !(scope.key === `mode:${scope.mode}` || /^line:[a-zA-Z0-9:_-]+$/u.test(scope.key)) || keys.has(scope.key)) throw new GlobalIsochroneError("invalid");
-    keys.add(scope.key);
+      !(scope.key === `mode:${scope.mode}` || /^line:[a-zA-Z0-9:_-]+$/u.test(scope.key)) || keys.has(`${scope.key}:${scope.minutes}`)) throw new GlobalIsochroneError("invalid");
+    keys.add(`${scope.key}:${scope.minutes}`);
   }
   return { scopes: scopes as GlobalIsochroneRequest[], mapVersion: query.mapVersion, reload: query.retry !== undefined };
 }
@@ -34,11 +41,15 @@ export function parseGlobalIsochroneResponse(value: unknown, mapVersion: string,
     coverage.missingScopes.some((key) => !requests.some((r) => r.key === key))) throw new GlobalIsochroneError("invalid");
   const ids = new Set<string>();
   for (const surface of result.surfaces) {
-    if (!isRecord(surface) || typeof surface.id !== "string" || ids.has(surface.id) || !requests.some((r) =>
-      r.mode === surface.mode && r.minutes === surface.minutes && globalIsochroneZoneAsset(r.key, r.minutes) === surface.id)) throw new GlobalIsochroneError("invalid");
+    const request = isRecord(surface)
+      ? requests.find((candidate) => candidate.mode === surface.mode && candidate.minutes === surface.minutes && globalIsochroneZoneAsset(candidate.key, candidate.minutes) === surface.id)
+      : undefined;
+    if (!isRecord(surface) || typeof surface.id !== "string" || ids.has(surface.id) || !request ||
+      (surface.scopeKey !== undefined && surface.scopeKey !== request.key)) throw new GlobalIsochroneError("invalid");
     const geometry = normalizeWalkingIsochroneGeometry(surface.geometry);
     if (!geometry) throw new GlobalIsochroneError("invalid");
     surface.geometry = geometry;
+    surface.scopeKey = request.key;
     ids.add(surface.id);
   }
   return result as unknown as GlobalIsochroneResult;

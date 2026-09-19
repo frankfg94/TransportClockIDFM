@@ -104,6 +104,31 @@
             <ChevronRight :size="18" :stroke-width="2.05" aria-hidden="true" />
           </button>
         </div>
+
+        <div
+          v-if="showCityZonesFilter"
+          class="global-transport-plan__mode-preset-row"
+          :class="{ 'global-transport-plan__mode-preset-row--active': cityZonesVisible }"
+          role="listitem"
+          data-global-map-preset="CITIES"
+        >
+          <button
+            type="button"
+            class="global-transport-plan__mode-preset-select"
+            :aria-label="t('globalMap.page.toggleCityZones')"
+            :aria-pressed="cityZonesVisible"
+            :aria-busy="cityZonesLoading"
+            :disabled="cityZonesLoading"
+            data-global-map-city-toggle
+            @click="emit('toggle-city-zones')"
+          >
+            <span class="global-transport-plan__mode-icon global-transport-plan__mode-icon--cities" aria-hidden="true">
+              <LoaderCircle v-if="cityZonesLoading" class="global-transport-plan__city-filter-loader" :size="18" :stroke-width="2.1" />
+              <MapPinned v-else :size="18" :stroke-width="2.1" />
+            </span>
+            <span class="global-transport-plan__mode-label">{{ t("globalMap.page.cities") }}</span>
+          </button>
+        </div>
       </div>
 
       <div v-if="!collapsed" class="global-transport-plan__filter-actions">
@@ -134,7 +159,7 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
-import { ChevronRight, LayoutGrid, Layers, Maximize2, Minimize2, Radar, SlidersHorizontal } from "lucide-vue-next";
+import { ChevronRight, LayoutGrid, Layers, LoaderCircle, MapPinned, Maximize2, Minimize2, Radar, SlidersHorizontal } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
 import type { GlobalMapMode } from "../transport-map/contracts/manifest";
 import GlobalTransportPlanModeIcon from "./GlobalTransportPlanModeIcon.vue";
@@ -149,6 +174,9 @@ const {
   modeColor,
   embedded = false,
   radarEnabledModes = [],
+  showCityZonesFilter = true,
+  cityZonesVisible = false,
+  cityZonesLoading = false,
 } = defineProps<{
   primaryModes: GlobalMapMode[];
   availableModes: GlobalMapMode[];
@@ -158,6 +186,9 @@ const {
   modeColor: (mode: GlobalMapMode) => string;
   embedded?: boolean;
   radarEnabledModes?: readonly GlobalMapMode[];
+  showCityZonesFilter?: boolean;
+  cityZonesVisible?: boolean;
+  cityZonesLoading?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -166,6 +197,7 @@ const emit = defineEmits<{
   "open-line-panel": [mode: GlobalMapMode];
   "request-preset-install": [mode: GlobalMapMode];
   "open-radar": [mode: GlobalMapMode];
+  "toggle-city-zones": [];
   collapse: [];
 }>();
 
@@ -402,6 +434,12 @@ function handleModeClick(mode: GlobalMapMode): void {
   background: #fff;
   color: #5279b3;
 }
+.global-transport-plan__mode-icon--cities {
+  border-color: rgba(124, 58, 237, 0.22);
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+.global-transport-plan__city-filter-loader { animation: global-transport-plan-city-filter-spin 900ms linear infinite; }
 .global-transport-plan__mode-label {
   min-width: 0;
   overflow: hidden;
@@ -410,6 +448,7 @@ function handleModeClick(mode: GlobalMapMode): void {
   font-size: 0.76rem;
   font-weight: 770;
 }
+@keyframes global-transport-plan-city-filter-spin { to { transform: rotate(360deg); } }
 .global-transport-plan__filter-actions {
   padding-top: 12px;
   margin-top: 10px;

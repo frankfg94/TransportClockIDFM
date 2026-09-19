@@ -39,27 +39,40 @@ describe("LineMapDisplayControls global variant", () => {
         nearbyOptions: true,
         hideLongWaitTransports: true,
         showNearbyPlaces: true,
+        showNearbyBenches: false,
+        showNearbyParkings: false,
         showNearbyPlaceNames: false,
       },
     });
 
     const longWaitToggle = wrapper.get("[data-hide-long-wait-transports]");
     const placesToggle = wrapper.get("[data-show-nearby-places]");
+    const benchesToggle = wrapper.get("[data-show-nearby-benches]");
     const placeNamesToggle = wrapper.get("[data-show-nearby-place-names]");
     expect((longWaitToggle.element as HTMLInputElement).checked).toBe(true);
     expect((placesToggle.element as HTMLInputElement).checked).toBe(true);
+    expect((benchesToggle.element as HTMLInputElement).checked).toBe(false);
+    expect((benchesToggle.element as HTMLInputElement).disabled).toBe(false);
+    const parkingsToggle = wrapper.get("[data-show-nearby-parkings]");
+    expect((parkingsToggle.element as HTMLInputElement).checked).toBe(false);
+    expect((parkingsToggle.element as HTMLInputElement).disabled).toBe(false);
     expect((placeNamesToggle.element as HTMLInputElement).checked).toBe(false);
     expect((placeNamesToggle.element as HTMLInputElement).disabled).toBe(false);
 
     await longWaitToggle.setValue(false);
     await placesToggle.setValue(false);
+    await benchesToggle.setValue(true);
+    await parkingsToggle.setValue(true);
     await placeNamesToggle.setValue(true);
 
     expect(wrapper.emitted("update:hideLongWaitTransports")).toEqual([[false]]);
     expect(wrapper.emitted("update:showNearbyPlaces")).toEqual([[false]]);
+    expect(wrapper.emitted("update:showNearbyBenches")).toEqual([[true]]);
+    expect(wrapper.emitted("update:showNearbyParkings")).toEqual([[true]]);
     expect(wrapper.emitted("update:showNearbyPlaceNames")).toEqual([[true]]);
 
     await wrapper.setProps({ showNearbyPlaces: false });
+    expect((parkingsToggle.element as HTMLInputElement).disabled).toBe(true);
     expect((placeNamesToggle.element as HTMLInputElement).disabled).toBe(true);
     expect(placeNamesToggle.element.parentElement?.classList.contains("line-map-display-panel__nearby-option--disabled")).toBe(true);
   });

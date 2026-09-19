@@ -383,6 +383,8 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
         v-model="selectedSectionKey"
         :options="sectionOptions"
         :aria-label="t('globalMap.sidebar.gtfsFrequency.timetableSegment')"
+        menu-class="line-frequency-timetable__segment-menu"
+        teleport
         data-testid="line-frequency-timetable-segment"
       >
         <template #value="{ option }">
@@ -426,11 +428,7 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
     <p v-else-if="error" role="alert" data-testid="line-frequency-timetable-unavailable">
       {{ t("globalMap.sidebar.gtfsFrequency.timetableError") }}
     </p>
-    <p
-      v-else-if="!timetable"
-      role="status"
-      data-testid="line-frequency-timetable-unavailable"
-    >
+    <p v-else-if="!timetable" role="status" data-testid="line-frequency-timetable-unavailable">
       {{ t("globalMap.sidebar.gtfsFrequency.timetableError") }}
     </p>
     <p
@@ -459,11 +457,7 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
           : t("globalMap.sidebar.gtfsFrequency.timetableNoDepartures")
       }}
     </p>
-    <p
-      v-else-if="!hasIntervals"
-      role="status"
-      data-testid="line-frequency-timetable-unavailable"
-    >
+    <p v-else-if="!hasIntervals" role="status" data-testid="line-frequency-timetable-unavailable">
       {{ t("globalMap.sidebar.gtfsFrequency.timetableNoIntervals") }}
     </p>
     <div
@@ -551,6 +545,12 @@ p {
 }
 
 .line-frequency-timetable__segment-picker :deep(.material-combobox__option) {
+  display: flex;
+  min-height: 42px;
+  white-space: normal;
+}
+
+:global(.line-frequency-timetable__segment-menu .material-combobox__option) {
   display: flex;
   min-height: 42px;
   white-space: normal;

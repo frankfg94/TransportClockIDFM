@@ -1,6 +1,10 @@
 import type { TranslationKey } from "../../i18n";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
-import type { NearbyPlace } from "./nearbyPlaces";
+import type { NearbyPlace, NearbyPlaceGenericNameKey } from "./nearbyPlaces";
+import {
+  classifyPlacesRankingCategory,
+  type PlacesRankingCategory,
+} from "../../services/places/compiledPlaces";
 import { fuzzyFilter } from "../../services/fuzzySearch";
 import {
   NEARBY_WALKING_MINUTES,
@@ -46,7 +50,14 @@ export type NearbyPlaceIconId =
  * this rules module stays independent from Vue rendering.
  */
 export type NearbyPlaceMarkerIconId =
+  | "armchair"
+  | "banknote"
   | "car"
+  | "circle-parking"
+  | "dog"
+  | "flower-2"
+  | "mailbox"
+  | "milk"
   | "washing-machine"
   | "film"
   | "ear"
@@ -68,11 +79,17 @@ export type NearbyPlaceMarkerIconId =
   | "tree-pine"
   | "school"
   | "dumbbell"
-  | "book-open";
+  | "book-open"
+  | "wallet-cards";
 
 export type NearbyPlacePresentationSource = Pick<GeocoderPoint, "kind" | "category"> & {
+  rankingCategory?: PlacesRankingCategory;
   name?: string;
   label?: string;
+  brand?: string;
+  operator?: string;
+  tags?: Readonly<Record<string, string>>;
+  genericNameKey?: NearbyPlaceGenericNameKey;
 };
 
 export interface NearbyPlaceGroupPresentation {
@@ -360,6 +377,93 @@ export const NEARBY_PLACE_TYPE_KEYS: Readonly<Record<string, TranslationKey>> = 
   antiques: "nearbyStations.placeTypes.antiques",
   viewpoint: "nearbyStations.placeTypes.viewpoint",
   artwork: "nearbyStations.placeTypes.artwork",
+  // Keep frequent OSM amenity and office values specific before the broad
+  // category fallback is used for places without a more precise mapping.
+  parking_space: "nearbyStations.placeTypes.parkingSpace",
+  parking: "nearbyStations.placeTypes.parking",
+  parking_entrance: "nearbyStations.placeTypes.parkingEntrance",
+  motorcycle_parking: "nearbyStations.placeTypes.motorcycleParking",
+  bicycle_parking: "nearbyStations.placeTypes.bicycleParking",
+  bicycle: "nearbyStations.placeTypes.bicycle",
+  bicycle_rental: "nearbyStations.placeTypes.bicycleRental",
+  bicycle_repair_station: "nearbyStations.placeTypes.bicycleRepairStation",
+  bench: "nearbyStations.placeTypes.bench",
+  waste_basket: "nearbyStations.placeTypes.wasteBasket",
+  recycling: "nearbyStations.placeTypes.recycling",
+  waste_disposal: "nearbyStations.placeTypes.wasteDisposal",
+  vending_machine: "nearbyStations.placeTypes.vendingMachine",
+  post_box: "nearbyStations.placeTypes.postBox",
+  letter_box: "nearbyStations.placeTypes.letterBox",
+  ticket_validator: "nearbyStations.placeTypes.ticketValidator",
+  drinking_water: "nearbyStations.placeTypes.drinkingWater",
+  toilets: "nearbyStations.placeTypes.toilets",
+  fountain: "nearbyStations.placeTypes.fountain",
+  clock: "nearbyStations.placeTypes.clock",
+  information: "nearbyStations.placeTypes.information",
+  atm: "nearbyStations.placeTypes.atm",
+  company: "nearbyStations.placeTypes.company",
+  social_facility: "nearbyStations.placeTypes.socialFacility",
+  place_of_worship: "nearbyStations.placeTypes.placeOfWorship",
+  hotel: "nearbyStations.placeTypes.hotel",
+  guest_house: "nearbyStations.placeTypes.guestHouse",
+  townhall: "nearbyStations.placeTypes.townHall",
+  government: "nearbyStations.placeTypes.government",
+  association: "nearbyStations.placeTypes.association",
+  charity: "nearbyStations.placeTypes.charity",
+  ngo: "nearbyStations.placeTypes.ngo",
+  research: "nearbyStations.placeTypes.research",
+  laboratory: "nearbyStations.placeTypes.laboratory",
+  police: "nearbyStations.placeTypes.police",
+  fire_station: "nearbyStations.placeTypes.fireStation",
+  veterinary: "nearbyStations.placeTypes.veterinary",
+  medical_supply: "nearbyStations.placeTypes.medicalSupply",
+  alternative: "nearbyStations.placeTypes.alternative",
+  cosmetics: "nearbyStations.placeTypes.cosmetics",
+  massage: "nearbyStations.placeTypes.massage",
+  insurance: "nearbyStations.placeTypes.insurance",
+  architect: "nearbyStations.placeTypes.architect",
+  builder: "nearbyStations.placeTypes.builder",
+  trade: "nearbyStations.placeTypes.trade",
+  plumber: "nearbyStations.placeTypes.plumber",
+  shoemaker: "nearbyStations.placeTypes.shoemaker",
+  dressmaker: "nearbyStations.placeTypes.dressmaker",
+  cleaning: "nearbyStations.placeTypes.cleaning",
+  caterer: "nearbyStations.placeTypes.caterer",
+  car_rental: "nearbyStations.placeTypes.carRental",
+  taxi: "nearbyStations.placeTypes.taxi",
+  bus_station: "nearbyStations.placeTypes.busStation",
+  photo_booth: "nearbyStations.placeTypes.photoBooth",
+  vehicle_inspection: "nearbyStations.placeTypes.vehicleInspection",
+  electronics_repair: "nearbyStations.placeTypes.electronicsRepair",
+  coworking: "nearbyStations.placeTypes.coworking",
+  coworking_space: "nearbyStations.placeTypes.coworkingSpace",
+  fashion_accessories: "nearbyStations.placeTypes.fashionAccessories",
+  kick_scooter_rental: "nearbyStations.placeTypes.kickScooterRental",
+  lavoir: "nearbyStations.placeTypes.lavoir",
+  outdoor_seating: "nearbyStations.placeTypes.outdoorSeating",
+  lounger: "nearbyStations.placeTypes.lounger",
+  compressed_air: "nearbyStations.placeTypes.compressedAir",
+  loading_dock: "nearbyStations.placeTypes.loadingDock",
+  grit_bin: "nearbyStations.placeTypes.gritBin",
+  trolley_bay: "nearbyStations.placeTypes.trolleyBay",
+  slipway: "nearbyStations.placeTypes.slipway",
+  financial: "nearbyStations.placeTypes.financial",
+  diplomatic: "nearbyStations.placeTypes.diplomatic",
+  studio: "nearbyStations.placeTypes.studio",
+  centre: "nearbyStations.placeTypes.centre",
+  convenience_gas: "nearbyStations.placeTypes.convenience",
+  multi: "nearbyStations.placeTypes.sports",
+  boules: "nearbyStations.placeTypes.sports",
+  equestrian: "nearbyStations.placeTypes.sports",
+  skateboard: "nearbyStations.placeTypes.sports",
+  dojo: "nearbyStations.placeTypes.sports",
+  dance: "nearbyStations.placeTypes.sports",
+  rugby_union: "nearbyStations.placeTypes.sports",
+  schoolyard: "nearbyStations.placeTypes.sports",
+  fitness_station: "nearbyStations.placeTypes.sports",
+  chess: "nearbyStations.placeTypes.sports",
+  orienteering: "nearbyStations.placeTypes.sports",
+  soccer_basketball: "nearbyStations.placeTypes.sports",
   shelter: "nearbyStations.placeTypes.shelter",
 };
 
@@ -457,20 +561,197 @@ export function nearbyPlaceTypeKey(place: NearbyPlacePresentationSource): Transl
     ?? "nearbyStations.placeTypes.attraction";
 }
 
+export function nearbyPlaceDisplayName(
+  place: NearbyPlacePresentationSource,
+  translate?: (key: TranslationKey) => string,
+): string {
+  const name = [
+    place.name,
+    place.label,
+    place.tags?.name,
+    place.brand,
+    place.tags?.brand,
+    place.operator,
+    place.tags?.operator,
+  ].find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim();
+  if (name) return name;
+
+  if (translate && place.genericNameKey) return translate(place.genericNameKey);
+  if (translate) return translate(nearbyPlaceTypeKey(place));
+  return place.kind?.trim() || "";
+}
+
 export function nearbyPlaceHasKnownType(place: NearbyPlacePresentationSource): boolean {
   const kind = normalizeNearbyPlaceText(placeKind(place)).replace(/\s+/g, "_");
   return Boolean(NEARBY_PLACE_TYPE_KEYS[kind] || placeCategory(place));
 }
 
-export function nearbyPlaceMarkerIconId(place: NearbyPlacePresentationSource): NearbyPlaceMarkerIconId {
-  const kind = normalizeNearbyPlaceText(placeKind(place)).replace(/\s+/g, "_");
-  const category = placeCategory(place);
-  const name = normalizeNearbyPlaceText(place.name ?? place.label ?? "");
+/**
+ * Canonical commerce predicate shared by the city map, neighborhood map,
+ * directory summary and exports. The category fallback is intentional: old
+ * compiled assets and legacy API responses may have `category: "food"`
+ * without a persisted `rankingCategory`.
+ */
+export function isNearbyPlaceCommerce(place: NearbyPlacePresentationSource): boolean {
+  return place.rankingCategory === "commerce"
+    || place.category === "shop"
+    || place.category === "food"
+    || (place.tags ? classifyPlacesRankingCategory({ ...place.tags }) === "commerce" : false);
+}
 
+/** Parks, gardens and other named natural spaces used by the city comparison. */
+export function isNearbyPlaceGreenSpace(place: NearbyPlacePresentationSource): boolean {
+  const kind = normalizedPlaceKind(place);
+  if (kind === "picnic_table") return false;
+  const name = normalizeNearbyPlaceText(nearbyPlaceDisplayName(place));
+  return isNaturalPlace(kind, place.category, name);
+}
+
+const BENCH_KINDS = new Set(["bench", "seat", "seating"]);
+const WASTE_BASKET_KINDS = new Set(["waste_basket", "wastebasket", "litter_bin", "trash_bin"]);
+
+function normalizedPlaceKind(place: NearbyPlacePresentationSource): string {
+  return normalizeNearbyPlaceText(placeKind(place)).replace(/\s+/g, "_");
+}
+
+/** Benches remain in the compiled dataset but are opt-in on the map. */
+export function isNearbyPlaceBench(place: NearbyPlacePresentationSource): boolean {
+  return BENCH_KINDS.has(normalizedPlaceKind(place));
+}
+
+export function isNearbyPlaceParking(place: NearbyPlacePresentationSource): boolean {
+  return PARKING_KINDS.has(normalizedPlaceKind(place));
+}
+
+/** Waste baskets are not useful POIs for the directory or map. */
+export function isNearbyPlaceWasteBasket(place: NearbyPlacePresentationSource): boolean {
+  return WASTE_BASKET_KINDS.has(normalizedPlaceKind(place));
+}
+
+export function isNearbyPlaceVisibleInDirectory(place: NearbyPlacePresentationSource): boolean {
+  return !isNearbyPlaceBench(place) && !isNearbyPlaceWasteBasket(place);
+}
+
+export function isNearbyPlaceVisibleOnMap(
+  place: NearbyPlacePresentationSource,
+  showBenches = false,
+  showParkings = false,
+): boolean {
+  return !isNearbyPlaceWasteBasket(place)
+    && (showBenches || !isNearbyPlaceBench(place))
+    && (showParkings || !isNearbyPlaceParking(place));
+}
+
+/**
+ * The global line view is an outing planner: its places answer "what could I
+ * do this weekend around this line?". Keep this exclusion list explicit even
+ * though the activity allow-list below already removes most service records.
+ * It documents the OSM infrastructure that must never compete with shops,
+ * leisure/entertainment and culture: fountains, benches, waste facilities,
+ * recycling points, parking and transit fixtures.
+ */
+export const GLOBAL_LINE_WEEKEND_EXCLUDED_KINDS: ReadonlySet<string> = new Set([
+  // Transit infrastructure and station equipment.
+  "bus_station",
+  "bus_stop",
+  "tram_stop",
+  "train_station",
+  "station",
+  "stop_position",
+  "platform",
+  "public_transport",
+  "railway",
+  "shelter",
+  "information",
+  "vending_machine",
+  "ticket",
+  "ticket_machine",
+  "ticket_validator",
+  "toilets",
+  "clock",
+  "trolley_bay",
+  "loading_dock",
+  // Street furniture and utilities: no weekend activity value.
+  "bench",
+  "seat",
+  "seating",
+  "fountain",
+  "drinking_water",
+  "water_point",
+  "waste_basket",
+  "wastebasket",
+  "litter_bin",
+  "trash_bin",
+  "recycling",
+  "waste_disposal",
+  "recycling_centre",
+  "recycling_center",
+  "recycling_container",
+  "waste_transfer_station",
+  "waste_transfer",
+  "waste_management",
+  "waste_collection",
+  "waste_container",
+  "dumpster",
+  "sanitary_dump_station",
+  "landfill",
+  "composting",
+  "dump",
+  "grit_bin",
+  // Parking and vehicle infrastructure are deliberately outside this mode.
+  "parking",
+  "parking_space",
+  "parking_entrance",
+  "motorcycle_parking",
+  "bicycle_parking",
+  "charging_station",
+  "fuel",
+]);
+
+/** The only broad compiled groups useful for a weekend outing. */
+export const GLOBAL_LINE_WEEKEND_ALLOWED_RANKING_CATEGORIES: ReadonlySet<PlacesRankingCategory> = new Set([
+  "commerce",
+  "sports-leisure",
+  "culture",
+]);
+
+export function isNearbyPlaceVisibleForGlobalLine(place: NearbyPlacePresentationSource): boolean {
+  const kind = normalizedPlaceKind(place);
+  if (!isNearbyPlaceVisibleOnMap(place) || GLOBAL_LINE_WEEKEND_EXCLUDED_KINDS.has(kind)) return false;
+
+  // `rankingCategory` is persisted by the compiled provider. The tag
+  // fallback keeps older assets useful without admitting generic services.
+  const ranking = place.rankingCategory
+    ?? (place.tags ? classifyPlacesRankingCategory({ ...place.tags }) : undefined);
+  if (ranking && GLOBAL_LINE_WEEKEND_ALLOWED_RANKING_CATEGORIES.has(ranking)) return true;
+
+  // Legacy records can lack rankingCategory/tags. Their broad category still
+  // safely identifies shops, food venues and culture; attractions are kept
+  // only when they are recognizable leisure destinations (parks, viewpoints,
+  // playgrounds, museums and similar places to visit).
+  if (place.category === "shop" || place.category === "food" || place.category === "culture") return true;
+  return place.category === "attraction" && isNearbyPlaceActivity(place, "leisure");
+}
+
+export function nearbyPlaceMarkerIconId(place: NearbyPlacePresentationSource): NearbyPlaceMarkerIconId {
+  const kind = normalizedPlaceKind(place);
+  const category = placeCategory(place);
+  const name = normalizeNearbyPlaceText(nearbyPlaceDisplayName(place));
+
+  if (isNearbyPlaceBench(place)) return "armchair";
   if (isSchoolPlace(kind, name)) return "school";
   if (isSportsPlace(kind, name)) return "dumbbell";
   if (isNaturalPlace(kind, category, name)) return "tree-pine";
-  if (kind === "library" || /^(bibliotheque|mediatheque)\b/u.test(name)) return "book-open";
+  if (BOOK_KINDS.has(kind) || /^(bibliotheque|mediatheque|librairie|livres?)\b/u.test(name)) return "book-open";
+
+  if (PARKING_KINDS.has(kind)) return "circle-parking";
+  if (kind === "bank" || kind === "financial") return "banknote";
+  if (kind === "atm" || kind === "cash_machine") return "wallet-cards";
+  if (kind === "veterinary") return "dog";
+  if (kind === "cheese") return "milk";
+  if (kind === "florist") return "flower-2";
+  if (kind === "post_box" || kind === "letter_box") return "mailbox";
+  if (HEALTH_KINDS.has(kind)) return "cross";
 
   if (kind === "car_repair" || kind === "car") return "car";
   if (kind === "laundry") return "washing-machine";
@@ -506,6 +787,37 @@ const SCHOOL_KINDS = new Set([
   "music_school",
   "driving_school",
   "educational_institution",
+]);
+
+const BOOK_KINDS = new Set([
+  "library",
+  "public_bookcase",
+  "books",
+  "book",
+  "book_store",
+  "bookstore",
+  "bookshop",
+]);
+
+const PARKING_KINDS = new Set([
+  "parking",
+  "parking_space",
+  "parking_entrance",
+  "motorcycle_parking",
+  "bicycle_parking",
+]);
+
+const HEALTH_KINDS = new Set([
+  "pharmacy",
+  "chemist",
+  "medical_supply",
+  "doctors",
+  "dentist",
+  "clinic",
+  "hospital",
+  "physiotherapist",
+  "healthcare",
+  "health",
 ]);
 
 const NATURAL_KINDS = new Set([
@@ -578,18 +890,19 @@ function isSportsPlace(kind: string, name: string): boolean {
     || /^(gymnase|stade|terrain|complexe sportif|club sportif|tennis|city stade)\b/u.test(name);
 }
 
-export function countNearbyPlaces(places: readonly Pick<NearbyPlace, "category">[]): {
+export function countNearbyPlaces(places: readonly NearbyPlacePresentationSource[]): {
   total: number;
   commerce: number;
 } {
   return {
     total: places.length,
-    commerce: places.filter((place) => place.category === "shop").length,
+    commerce: places.filter(isNearbyPlaceCommerce).length,
   };
 }
 
 export function resolveNearbyPlaceGroupId(place: NearbyPlace): NearbyPlaceGroupId {
   const kind = normalizeNearbyPlaceText(place.kind).replace(/\s+/g, "_");
+  if (isNearbyPlaceGreenSpace(place)) return "green-spaces";
   for (const group of NEARBY_PLACE_GROUPS) {
     if (group.id !== "other" && KINDS_BY_GROUP[group.id].has(kind)) return group.id;
   }
@@ -626,7 +939,7 @@ export function filterAndGroupNearbyPlaces(options: {
 
   const visibleCandidates = normalizedQuery
     ? fuzzyFilter(candidates, options.query, ({ place, group }) => [
-        place.name,
+        nearbyPlaceDisplayName(place),
         place.address ?? "",
         place.kind,
         options.typeLabel(place),
@@ -644,4 +957,28 @@ export function filterAndGroupNearbyPlaces(options: {
   return NEARBY_PLACE_GROUPS
     .map((group) => groupById.get(group.id)!)
     .filter((group) => group.places.length > 0);
+}
+
+
+export type NearbyCityActivity = "commerce" | "economic" | "leisure";
+export type NearbyOptionalPlace = "companies" | "worship" | "artworks";
+
+export function nearbyOptionalPlace(place: NearbyPlacePresentationSource): NearbyOptionalPlace | undefined {
+  const kind = normalizedPlaceKind(place);
+  if (kind === "place_of_worship" || place.tags?.amenity === "place_of_worship") return "worship";
+  if (kind === "artwork" || place.tags?.tourism === "artwork") return "artworks";
+  if (["company", "office", "industrial", "works"].includes(kind) || place.tags?.office || place.tags?.industrial || place.tags?.man_made === "works") return "companies";
+  return undefined;
+}
+
+export function isNearbyPlaceActivity(place: NearbyPlacePresentationSource, activity: NearbyCityActivity): boolean {
+  if (activity === "commerce") return isNearbyPlaceCommerce(place);
+  const kind = normalizedPlaceKind(place);
+  const ranking = place.rankingCategory ?? (place.tags ? classifyPlacesRankingCategory({ ...place.tags }) : undefined);
+  if (activity === "economic") return isNearbyPlaceCommerce(place)
+    || nearbyOptionalPlace(place) === "companies" || Boolean(place.tags?.craft || place.tags?.healthcare)
+    || ranking === "health" || ["hotel", "hostel", "motel", "guest_house", "bank", "insurance", "estate_agent", "coworking_space"].includes(kind);
+  return ranking === "sports-leisure" || ranking === "culture" || place.category === "culture"
+    || (place.category === "attraction" && nearbyOptionalPlace(place) !== "worship")
+    || ["bar", "pub", "nightclub", "cafe", "restaurant", "park", "garden", "playground"].includes(kind);
 }

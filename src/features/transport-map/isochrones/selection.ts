@@ -1,5 +1,10 @@
 import type { GlobalMapLine, GlobalMapMode } from "../contracts/manifest";
-import { globalIsochroneScopeKey, type GlobalIsochroneRequest, type GlobalIsochroneSettings } from "./contracts";
+import {
+  globalIsochronePresetMinutes,
+  globalIsochroneScopeKey,
+  type GlobalIsochroneRequest,
+  type GlobalIsochroneSettings,
+} from "./contracts";
 
 export interface GlobalIsochroneContext {
   activeLine?: Pick<GlobalMapLine, "id" | "mode">;
@@ -10,7 +15,7 @@ export interface GlobalIsochroneContext {
 export function globalIsochroneEligibleModes(context: GlobalIsochroneContext): GlobalMapMode[] {
   if (context.activeLine) return [context.activeLine.mode];
   if (context.preset && context.preset !== "ALL") return [context.preset];
-  return [...new Set(context.selectedModes)].filter((mode) => mode !== "BUS" && mode !== "NOCTILIEN");
+  return [...new Set(context.selectedModes)];
 }
 
 export function selectGlobalIsochroneScopes(
@@ -19,11 +24,10 @@ export function selectGlobalIsochroneScopes(
 ): GlobalIsochroneRequest[] {
   return globalIsochroneEligibleModes(context)
     .filter((mode) => settings[mode].enabled)
-    .map((mode) => ({
-      key: context.activeLine
+    .flatMap((mode) => {
+      const key = context.activeLine
         ? globalIsochroneScopeKey("line", context.activeLine.id)
-        : globalIsochroneScopeKey("mode", mode),
-      mode,
-      minutes: settings[mode].minutes,
-    }));
+        : globalIsochroneScopeKey("mode", mode);
+      return globalIsochronePresetMinutes(settings[mode].preset).map((minutes) => ({ key, mode, minutes }));
+    });
 }

@@ -44,13 +44,17 @@ describe("walking radar lazy state", () => {
     const state = harness();
     expect(state.radar.enabled.value).toBe(false);
     state.context.value = { preset: "RER", selectedModes: ["RER"] };
-    state.radar.settings.value.RER.minutes = 25;
+    state.radar.settings.value.RER.preset = "extended";
     state.radar.panelOpen.value = true;
     await flushPromises();
     expect(state.createClient).not.toHaveBeenCalled();
     state.radar.enabled.value = true;
     await flushPromises();
-    expect(state.select).toHaveBeenCalledWith([{ key: "mode:RER", mode: "RER", minutes: 25 }], "test-v1", false);
+    expect(state.select).toHaveBeenCalledWith([
+      { key: "mode:RER", mode: "RER", minutes: 10 },
+      { key: "mode:RER", mode: "RER", minutes: 20 },
+      { key: "mode:RER", mode: "RER", minutes: 25 },
+    ], "test-v1", false);
     expect(state.radar.status.value).toBe("ready");
     state.radar.panelOpen.value = false;
     await flushPromises();
@@ -68,7 +72,11 @@ describe("walking radar lazy state", () => {
     state.context.value = { activeLine: { id: "line:RER:A", mode: "RER" }, selectedModes: ["METRO", "RER"] };
     await nextTick();
     expect(state.radar.status.value).toBe("loading");
-    expect(state.select.mock.calls[1]?.[0]).toEqual([{ key: "line:line:RER:A", mode: "RER", minutes: 15 }]);
+    expect(state.select.mock.calls[1]?.[0]).toEqual([
+      { key: "line:line:RER:A", mode: "RER", minutes: 5 },
+      { key: "line:line:RER:A", mode: "RER", minutes: 10 },
+      { key: "line:line:RER:A", mode: "RER", minutes: 15 },
+    ]);
     second.resolve(result("latest"));
     await flushPromises();
     first.resolve(result("stale", 5));
@@ -80,7 +88,7 @@ describe("walking radar lazy state", () => {
 
   it("suspends for an itinerary, ignores pending work when disabled, and preserves settings", async () => {
     const state = harness();
-    state.radar.settings.value.METRO.minutes = 20;
+    state.radar.settings.value.METRO.preset = "extended";
     state.radar.enabled.value = true;
     await flushPromises();
     state.suspended.value = true;
@@ -90,10 +98,10 @@ describe("walking radar lazy state", () => {
     state.suspended.value = false;
     await flushPromises();
     expect(state.select).toHaveBeenCalledTimes(2);
-    expect(state.radar.settings.value.METRO.minutes).toBe(20);
+    expect(state.radar.settings.value.METRO.preset).toBe("extended");
     const pending = deferred<GlobalIsochroneResult>();
     state.select.mockReturnValueOnce(pending.promise);
-    state.radar.settings.value.METRO.minutes = 25;
+    state.radar.settings.value.METRO.preset = "standard";
     await nextTick();
     state.radar.enabled.value = false;
     await nextTick();
@@ -101,7 +109,7 @@ describe("walking radar lazy state", () => {
     await flushPromises();
     expect(state.radar.surfaces.value).toEqual([]);
     expect(state.radar.status.value).toBe("idle");
-    expect(state.radar.settings.value.METRO.minutes).toBe(25);
+    expect(state.radar.settings.value.METRO.preset).toBe("standard");
   });
 
   it("keeps partial areas and does not reopen the notice for equivalent scopes or camera navigation", async () => {
@@ -113,7 +121,7 @@ describe("walking radar lazy state", () => {
     state.radar.closeModal();
     expect(state.radar.enabled.value).toBe(true);
     expect(state.radar.surfaces.value).toHaveLength(1);
-    state.context.value = { selectedModes: ["METRO", "BUS"] }; // identical effective scopes
+    state.context.value = { selectedModes: ["METRO"] }; // identical effective scopes
     await flushPromises();
     expect(state.select).toHaveBeenCalledTimes(1);
     expect(state.radar.modalOpen.value).toBe(false);
@@ -169,17 +177,20 @@ describe("walking radar controls and accessibility", () => {
     return wrapper;
   }
 
-  it("opens at the requested mode, offers six times, and changes only radar settings", async () => {
+  it("opens at the requested mode, offers two three-zone presets, and changes only radar settings", async () => {
     const wrapper = panel();
     await wrapper.setProps({ open: true, focusMode: "RER" });
     await flushPromises();
     expect(document.activeElement).toBe(wrapper.get('[data-radar-mode="RER"] input').element);
     const duration = wrapper.get('[data-radar-mode="RER"] select');
-    expect(duration.findAll("option").map((option) => option.attributes("value"))).toEqual(["5", "10", "15", "20", "25", "30"]);
-    await duration.setValue("25");
-    expect(wrapper.emitted("update:mode")).toEqual([["RER", { enabled: true, minutes: 25 }]]);
-    await wrapper.get("[data-radar-master]").setValue(true);
-    expect(wrapper.emitted("update:enabled")).toEqual([[true]]);
+    expect(duration.findAll("option").map((option) => option.attributes("value"))).toEqual(["standard", "extended"]);
+    await duration.setValue("extended");
+    expect(wrapper.emitted("update:mode")).toEqual([["RER", { enabled: true, preset: "extended" }]]);
+    expect(wrapper.find("[data-radar-master]").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("Afficher les zones à pied");
+    await wrapper.get(".walking-radar__disable").trigger("click");
+    expect(wrapper.emitted("update:enabled")).toEqual([[false]]);
+    expect(wrapper.emitted("update:open")).toEqual([[false]]);
     expect(wrapper.emitted("select-preset")).toBeUndefined();
     await duration.trigger("keydown", { key: "Escape" });
     expect(wrapper.emitted("update:open")?.at(-1)).toEqual([false]);

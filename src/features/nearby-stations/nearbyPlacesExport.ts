@@ -1,4 +1,5 @@
 import {
+  isNearbyPlaceVisibleInDirectory,
   nearbyPlaceWalkingDistanceMeters,
   type NearbyPlaceIconId,
   type NearbyWalkingMinutes,
@@ -131,7 +132,7 @@ function safeHttpUrl(value: string | undefined): string {
 }
 
 function safePayload(payload: NearbyPlacesExportPayload): NearbyPlacesExportPayload {
-  const places = payload.places.filter((place) =>
+  const places = payload.places.filter(isNearbyPlaceVisibleInDirectory).filter((place) =>
     nearbyPlaceWalkingDistanceMeters(place, payload.walkingRoutes?.[place.id]) <= MAX_FREE_EXPORT_RADIUS_METERS,
   );
   const placeIds = new Set(places.map((place) => place.id));

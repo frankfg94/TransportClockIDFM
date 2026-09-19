@@ -15,10 +15,14 @@ const props = withDefaults(
     placeholder?: string;
     ariaLabel?: string;
     disabled?: boolean;
+    teleport?: boolean;
+    menuClass?: string;
   }>(),
   {
     placeholder: "",
     ariaLabel: "",
+    teleport: false,
+    menuClass: "",
   },
 );
 
@@ -28,8 +32,10 @@ const emit = defineEmits<{
 }>();
 
 const root = ref<HTMLElement>();
+const menu = ref<HTMLElement>();
 const open = ref(false);
 const activeIndex = ref(-1);
+const menuStyle = ref<Record<string, string>>({});
 const { t } = useI18n();
 
 const selectedOption = computed(() =>
@@ -53,14 +59,19 @@ watch(
 
 onMounted(() => {
   document.addEventListener("pointerdown", closeOnOutsidePointer);
+  window.addEventListener("resize", updateMenuPosition);
+  window.addEventListener("scroll", updateMenuPosition, true);
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  window.removeEventListener("resize", updateMenuPosition);
+  window.removeEventListener("scroll", updateMenuPosition, true);
 });
 
 function closeOnOutsidePointer(event: PointerEvent): void {
-  if (!root.value?.contains(event.target as Node)) {
+  const target = event.target as Node;
+  if (!root.value?.contains(target) && !menu.value?.contains(target)) {
     open.value = false;
   }
 }
@@ -107,10 +118,51 @@ function moveActive(delta: number): void {
 }
 
 function scrollActiveOptionIntoView(): void {
-  root.value
+  (menu.value ?? root.value)
     ?.querySelector<HTMLElement>("[data-combobox-active='true']")
     ?.scrollIntoView({ block: "nearest" });
 }
+
+function updateMenuPosition(): void {
+  if (!props.teleport || !open.value || !root.value) {
+    return;
+  }
+
+  const rect = root.value.getBoundingClientRect();
+  const viewportPadding = 12;
+  const gap = 6;
+  const desiredMenuHeight = 320;
+  const spaceAbove = rect.top - viewportPadding - gap;
+  const spaceBelow = window.innerHeight - rect.bottom - viewportPadding - gap;
+  const opensAbove = spaceBelow < desiredMenuHeight && spaceAbove > spaceBelow;
+  const availableHeight = Math.max(
+    96,
+    Math.min(desiredMenuHeight, opensAbove ? spaceAbove : spaceBelow),
+  );
+  const width = Math.min(rect.width, window.innerWidth - viewportPadding * 2);
+  const left = Math.min(
+    Math.max(viewportPadding, rect.left),
+    window.innerWidth - viewportPadding - width,
+  );
+
+  menuStyle.value = {
+    left: `${left}px`,
+    maxHeight: `${availableHeight}px`,
+    top: opensAbove ? "auto" : `${rect.bottom + gap}px`,
+    bottom: opensAbove ? `${window.innerHeight - rect.top + gap}px` : "auto",
+    width: `${width}px`,
+  };
+}
+
+watch(
+  [open, () => props.teleport, () => props.options.map((option) => option.id).join("|")],
+  ([isOpen]) => {
+    if (isOpen && props.teleport) {
+      void nextTick(updateMenuPosition);
+    }
+  },
+  { flush: "post" },
+);
 
 function selectOption(option: MaterialComboboxOption): void {
   if (option.disabled) {
@@ -180,32 +232,41 @@ function handleKeydown(event: KeyboardEvent): void {
       <span class="material-combobox__chevron" aria-hidden="true"></span>
     </button>
 
-    <Transition name="material-combobox-menu">
-      <div v-if="open" class="material-combobox__menu" role="listbox">
-        <button
-          v-for="(option, index) in options"
-          :key="option.id"
-          class="material-combobox__option"
-          type="button"
-          role="option"
-          :disabled="option.disabled"
-          :aria-selected="option.id === modelValue"
-          :data-combobox-active="index === activeIndex ? 'true' : undefined"
-          @mouseenter="activeIndex = index"
-          @mousedown.prevent="selectOption(option)"
+    <Teleport to="body" :disabled="!teleport">
+      <Transition name="material-combobox-menu">
+        <div
+          v-if="open"
+          ref="menu"
+          class="material-combobox__menu"
+          :class="[{ 'material-combobox__menu--teleported': teleport }, menuClass]"
+          :style="teleport ? menuStyle : undefined"
+          role="listbox"
         >
-          <slot
-            name="option"
-            :option="option"
-            :selected="option.id === modelValue"
-            :active="index === activeIndex"
-            :index="index"
+          <button
+            v-for="(option, index) in options"
+            :key="option.id"
+            class="material-combobox__option"
+            type="button"
+            role="option"
+            :disabled="option.disabled"
+            :aria-selected="option.id === modelValue"
+            :data-combobox-active="index === activeIndex ? 'true' : undefined"
+            @mouseenter="activeIndex = index"
+            @mousedown.prevent="selectOption(option)"
           >
-            {{ option.label }}
-          </slot>
-        </button>
-      </div>
-    </Transition>
+            <slot
+              name="option"
+              :option="option"
+              :selected="option.id === modelValue"
+              :active="index === activeIndex"
+              :index="index"
+            >
+              {{ option.label }}
+            </slot>
+          </button>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -298,6 +359,12 @@ function handleKeydown(event: KeyboardEvent): void {
   right: 0;
   top: calc(100% + 6px);
   z-index: 40;
+}
+
+.material-combobox__menu--teleported {
+  position: fixed;
+  right: auto;
+  z-index: 1000;
 }
 
 .material-combobox__option {

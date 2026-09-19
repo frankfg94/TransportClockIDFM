@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "../../i18n";
 import { toServerApiUrl } from "../../services/serverApi";
+import DatasetManager from "./DatasetManager.vue";
 import type { HealthCheck, HealthResponse, HealthStatus } from "./types";
 
 const checks = ref<HealthCheck[]>([]);
@@ -142,6 +143,8 @@ function formatGeneratedAt(value: string): string {
         {{ t("common.actions.refresh") }}
       </button>
     </section>
+
+    <DatasetManager />
 
     <section
       v-if="navitiaJourneysCheck"

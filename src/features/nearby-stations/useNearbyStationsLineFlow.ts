@@ -56,8 +56,37 @@ export interface NearbyLineFlowFocus {
   fromStationId?: string;
 }
 
+const MAX_LINE_SEQUENCE_CACHE_ENTRIES = 64;
+const MAX_LINE_FLOW_GEOMETRY_CACHE_ENTRIES = 64;
 const lineSequenceCache = new Map<string, Promise<LineRouteSequence[]>>();
 const lineFlowGeometryCache = new Map<string, Promise<GlobalMapPath | undefined>>();
+
+function getLruCacheValue<T>(cache: Map<string, T>, key: string): T | undefined {
+  const cached = cache.get(key);
+  if (cached === undefined) return undefined;
+
+  cache.delete(key);
+  cache.set(key, cached);
+  return cached;
+}
+
+function setLruCacheValue<T>(
+  cache: Map<string, T>,
+  key: string,
+  value: T,
+  maxEntries: number,
+): void {
+  cache.set(key, value);
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
+  }
+}
+
+function deleteCachedValue<T>(cache: Map<string, T>, key: string, value: T): void {
+  if (cache.get(key) === value) cache.delete(key);
+}
 
 interface NearbyLineFlowState {
   metadataPaths: GlobalMapPath[];
@@ -183,10 +212,18 @@ export function useNearbyStationsLineFlow(
   ));
   const lineFlowModel = computed<GhostLineFlowModel | undefined>(() => {
     const line = flowLine.value;
+    if (!line) return undefined;
     const camera = flowCamera.value;
     const network = source.transportMapNetwork.value;
-    const paths = lineMetadataPaths.value.length > 0 ? lineMetadataPaths.value : renderPaths.value;
-    if (!line || !camera || paths.length === 0 || !network) return undefined;
+    if (!camera || !network) return undefined;
+
+    // The bootstrap already contains a compact path for every line. Use it as
+    // an immediate visual skeleton while the focused chunks and direction
+    // geometry are loading. The detailed model below replaces it as soon as
+    // those assets are available.
+    const loadedPaths = lineMetadataPaths.value.length > 0 ? lineMetadataPaths.value : renderPaths.value;
+    const paths = pathsForLine(line.id, loadedPaths, network);
+    if (paths.length === 0) return undefined;
 
     return createGhostLineFlowModel({
       camera,
@@ -198,18 +235,27 @@ export function useNearbyStationsLineFlow(
       focusedFromStationId: focusedDirectionStartStationId.value,
     });
   });
+  const emptyLineFlowModels: GhostLineFlowModel[] = [];
   const lineFlowModels = computed<GhostLineFlowModel[]>(() => {
+    const lineIds = flowLineIds.value;
+    // Do not subscribe the whole nearby page to the camera just to publish a
+    // new empty array on every pointer move when no line is being traced.
+    if (lineIds.length === 0) return emptyLineFlowModels;
     const camera = flowCamera.value;
     const network = source.transportMapNetwork.value;
-    if (!camera || !network) return [];
+    if (!camera || !network) return emptyLineFlowModels;
 
-    return flowLineIds.value.flatMap((lineId) => {
+    return lineIds.flatMap((lineId) => {
       if (lineId === flowLineId.value && lineFlowModel.value) return [lineFlowModel.value];
 
       const line = findNearbyLine(lineId);
       const state = lineFlowStates.value.get(lineId);
-      if (!line || !state) return [];
-      const paths = state.metadataPaths.length > 0 ? state.metadataPaths : state.renderPaths;
+      if (!line) return [];
+      const paths = pathsForLine(
+        lineId,
+        state && (state.metadataPaths.length > 0 ? state.metadataPaths : state.renderPaths),
+        network,
+      );
       if (paths.length === 0) return [];
 
       return [createGhostLineFlowModel({
@@ -217,10 +263,21 @@ export function useNearbyStationsLineFlow(
         line,
         paths,
         stationsById: network.stationsById,
-        directions: state.directions.map((direction) => direction.flow),
+        directions: state?.directions.map((direction) => direction.flow) ?? [],
       })];
     });
   });
+
+  function pathsForLine(
+    lineId: string,
+    loadedPaths: readonly GlobalMapPath[] | undefined,
+    network: TransportMapNetwork,
+  ): GlobalMapPath[] {
+    const linePaths = loadedPaths?.filter((path) => path.lineId === lineId) ?? [];
+    return linePaths.length > 0
+      ? linePaths
+      : network.regionalPaths.filter((path) => path.lineId === lineId);
+  }
 
   function findNearbyLine(lineId: string): GlobalMapLine | undefined {
     const networkLines = source.transportMapNetwork.value?.linesById;
@@ -248,7 +305,7 @@ export function useNearbyStationsLineFlow(
 
   function handleCameraChange(nextCamera: CameraState): void {
     flowCamera.value = nextCamera;
-    scheduleLineFlowRefresh();
+    if (flowLineIds.value.length > 0) scheduleLineFlowRefresh();
   }
 
   function handleHoverLine(lineId: string): void {
@@ -340,13 +397,29 @@ export function useNearbyStationsLineFlow(
     lineFlowLoading.value = true;
     try {
       const network = source.transportMapNetwork.value;
+      const nextStates = new Map<string, NearbyLineFlowState>();
+      const publishPartialState = (lineId: string, state: NearbyLineFlowState): void => {
+        if (
+          requestToken !== lineFlowRequestToken.value ||
+          requestedLineIds.join("|") !== flowLineIds.value.join("|")
+        ) return;
+        nextStates.set(lineId, state);
+        lineFlowStates.value = new Map(nextStates);
+        if (lineId === flowLineId.value) {
+          lineMetadataPaths.value = state.metadataPaths;
+          renderPaths.value = state.renderPaths;
+          lineFlowDirections.value = state.directions;
+        }
+      };
       const states = await Promise.all(requestedLineIds.map(async (lineId) => {
         const line = findNearbyLine(lineId);
         if (!line) return undefined;
         try {
           return {
             lineId,
-            state: await loadLineFlowState(line, camera, network),
+            state: await loadLineFlowState(line, camera, network, (state) => {
+              publishPartialState(lineId, state);
+            }),
           };
         } catch (cause) {
           // A single unavailable line must not hide the other lines selected
@@ -363,7 +436,6 @@ export function useNearbyStationsLineFlow(
         requestedLineIds.join("|") !== flowLineIds.value.join("|")
       ) return;
 
-      const nextStates = new Map<string, NearbyLineFlowState>();
       for (const result of states) {
         if (result) nextStates.set(result.lineId, result.state);
       }
@@ -390,17 +462,29 @@ export function useNearbyStationsLineFlow(
     line: GlobalMapLine,
     camera: CameraState,
     network: TransportMapNetwork | undefined,
+    onPartialState?: (state: NearbyLineFlowState) => void,
   ): Promise<NearbyLineFlowState> {
-    const [viewport, sequences] = await Promise.all([
-      source.queryTransportMapViewport(camera, line.id, [line.id]),
-      getCachedLineSequences(line).catch((): LineRouteSequence[] => []),
-    ]);
+    // Start both requests together, but do not make the first visible path
+    // wait for the direction metadata. For a focused line the viewport is
+    // already enough to draw a useful path; direction arrows and road-level
+    // geometry can arrive afterwards.
+    const sequencesPromise = getCachedLineSequences(line).catch((): LineRouteSequence[] => []);
+    const viewport = await source.queryTransportMapViewport(camera, line.id, [line.id]);
     const targetPaths = viewport.paths.filter((path) => path.lineId === line.id);
     const preferredPaths = selectPreferredLinePaths(
       targetPaths,
       network?.regionalPaths ?? [],
       line.id,
     );
+    const initialPaths = preferredPaths.length > 0 ? preferredPaths : targetPaths;
+    if (initialPaths.length > 0) {
+      onPartialState?.({
+        metadataPaths: [],
+        renderPaths: initialPaths,
+        directions: [],
+      });
+    }
+    const sequences = await sequencesPromise;
     const directions = createTransportLineFlowDirections(
       line,
       sequences,
@@ -425,13 +509,18 @@ export function useNearbyStationsLineFlow(
   }
 
   function getCachedLineSequences(line: GlobalMapLine): Promise<LineRouteSequence[]> {
-    const cached = lineSequenceCache.get(line.id);
+    const cached = getLruCacheValue(lineSequenceCache, line.id);
     if (cached) return cached;
     const option = createTransportLineSearchOption(line);
     const request = option ? fetchLineRouteSequences(option, true) : Promise.resolve([]);
-    lineSequenceCache.set(line.id, request);
+    setLruCacheValue(
+      lineSequenceCache,
+      line.id,
+      request,
+      MAX_LINE_SEQUENCE_CACHE_ENTRIES,
+    );
     void request.catch(() => {
-      if (lineSequenceCache.get(line.id) === request) lineSequenceCache.delete(line.id);
+      deleteCachedValue(lineSequenceCache, line.id, request);
     });
     return request;
   }
@@ -451,9 +540,9 @@ export function useNearbyStationsLineFlow(
       if (!request || stationIds.length !== request.stops.length) return undefined;
 
       const cacheKey = `${line.id}:${direction.selection.selectedDirectionId}`;
-      let geometry = lineFlowGeometryCache.get(cacheKey);
+      let geometry = getLruCacheValue(lineFlowGeometryCache, cacheKey);
       if (!geometry) {
-        geometry = fetchResolvedLineGeometry(request)
+        const requestPromise = fetchResolvedLineGeometry(request)
           .then((resolution) => createGlobalBusDirectionGeometryPath(
             line,
             direction.selection,
@@ -461,7 +550,18 @@ export function useNearbyStationsLineFlow(
             resolution,
           ))
           .catch(() => undefined);
-        lineFlowGeometryCache.set(cacheKey, geometry);
+        setLruCacheValue(
+          lineFlowGeometryCache,
+          cacheKey,
+          requestPromise,
+          MAX_LINE_FLOW_GEOMETRY_CACHE_ENTRIES,
+        );
+        void requestPromise.then((result) => {
+          if (result === undefined) {
+            deleteCachedValue(lineFlowGeometryCache, cacheKey, requestPromise);
+          }
+        });
+        geometry = requestPromise;
       }
       return geometry;
     }));

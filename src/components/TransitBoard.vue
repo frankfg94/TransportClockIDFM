@@ -1,5 +1,13 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 import {
   Bell,
   BellRing,
@@ -45,6 +53,15 @@ type DeparturePatternPayload = {
 type ClosedSummaryMode = "last" | "next";
 
 const STATION_CHANGE_TIMEOUT_MS = 15_000;
+const BOARD_HEIGHT_TRANSITION_MS = 620;
+const BOARD_HEIGHT_TRANSITION_CLASS = "board--height-transitioning";
+
+type BoardHeightAnimation = {
+  frameId?: number;
+  timeoutId?: number;
+  previousHeight: string;
+  previousTransition: string;
+};
 
 const props = withDefaults(
   defineProps<{
@@ -90,6 +107,8 @@ const emit = defineEmits<{
 }>();
 
 const directionFilterOpen = ref(false);
+const boardElement = ref<HTMLElement>();
+let boardHeightAnimation: BoardHeightAnimation | undefined;
 const { d, t } = useI18n();
 
 const hiddenDirectionIdSet = computed(() => new Set(props.hiddenDirectionIds));
@@ -105,6 +124,10 @@ const totalDeparturesCount = computed(() =>
     (total, group) => total + group.departures.length,
     0,
   ),
+);
+
+const showsLoadingNotice = computed(
+  () => !props.error && props.loading && totalDeparturesCount.value === 0,
 );
 
 const displayedDeparturesCount = computed(() =>
@@ -186,6 +209,175 @@ watch(
     closeDirectionFilter();
   },
 );
+
+watch(
+  () =>
+    [
+      showsLoadingNotice.value,
+      props.directionGroups,
+      props.trafficAlert?.target.alertId,
+      props.trafficAlert?.label,
+    ] as const,
+  (
+    [isLoading, directionGroups, trafficAlertId, trafficAlertLabel],
+    [wasLoading, previousDirectionGroups, previousTrafficAlertId, previousTrafficAlertLabel],
+  ) => {
+    const contentChanged =
+      directionGroups !== previousDirectionGroups ||
+      trafficAlertId !== previousTrafficAlertId ||
+      trafficAlertLabel !== previousTrafficAlertLabel;
+
+    if ((wasLoading && !isLoading) || contentChanged) {
+      void animateBoardHeight();
+    }
+  },
+);
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window === "undefined" ||
+    (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false)
+  );
+}
+
+function requestBoardAnimationFrame(callback: () => void): number {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.requestAnimationFrame === "function"
+  ) {
+    return window.requestAnimationFrame(() => callback());
+  }
+
+  return setTimeout(callback, 0) as unknown as number;
+}
+
+function measureNaturalBoardHeight(element: HTMLElement): number {
+  const grid = element.closest<HTMLElement>(".boards-grid");
+  const gridBoards = grid
+    ? Array.from(grid.querySelectorAll<HTMLElement>(".board"))
+    : [];
+  const boardIndex = gridBoards.indexOf(element);
+  const clone = (grid ?? element).cloneNode(true) as HTMLElement;
+
+  clone.style.left = "-100000px";
+  clone.style.minHeight = "0";
+  clone.style.pointerEvents = "none";
+  clone.style.position = "absolute";
+  clone.style.top = "0";
+  clone.style.visibility = "hidden";
+  clone.style.width = `${(grid ?? element).getBoundingClientRect().width}px`;
+
+  const clonedBoards = Array.from(clone.querySelectorAll<HTMLElement>(".board"));
+  clonedBoards.forEach((board) => {
+    board.classList.remove(BOARD_HEIGHT_TRANSITION_CLASS);
+    board.style.removeProperty("height");
+    board.style.removeProperty("transition");
+  });
+
+  document.body.appendChild(clone);
+  const height =
+    clonedBoards[boardIndex >= 0 ? boardIndex : 0]?.getBoundingClientRect()
+      .height ?? clone.getBoundingClientRect().height;
+  clone.remove();
+
+  return height;
+}
+
+function cancelBoardHeightAnimation(): void {
+  const animation = boardHeightAnimation;
+
+  if (!animation) {
+    return;
+  }
+
+  if (animation.frameId !== undefined) {
+    if (
+      typeof window !== "undefined" &&
+      typeof window.cancelAnimationFrame === "function"
+    ) {
+      window.cancelAnimationFrame(animation.frameId);
+    } else {
+      clearTimeout(animation.frameId);
+    }
+  }
+
+  if (animation.timeoutId !== undefined) {
+    clearTimeout(animation.timeoutId);
+  }
+
+  const element = boardElement.value;
+  if (element) {
+    element.classList.remove(BOARD_HEIGHT_TRANSITION_CLASS);
+    element.style.height = animation.previousHeight;
+    element.style.transition = animation.previousTransition;
+  }
+
+  boardHeightAnimation = undefined;
+}
+
+function finishBoardHeightAnimation(animation: BoardHeightAnimation): void {
+  if (boardHeightAnimation !== animation) {
+    return;
+  }
+
+  const element = boardElement.value;
+  if (element) {
+    element.classList.remove(BOARD_HEIGHT_TRANSITION_CLASS);
+    element.style.height = animation.previousHeight;
+    element.style.transition = animation.previousTransition;
+  }
+
+  boardHeightAnimation = undefined;
+}
+
+async function animateBoardHeight(): Promise<void> {
+  const element = boardElement.value;
+
+  if (!element || prefersReducedMotion()) {
+    return;
+  }
+
+  const initialHeight = element.getBoundingClientRect().height;
+  cancelBoardHeightAnimation();
+
+  const animation: BoardHeightAnimation = {
+    previousHeight: element.style.height,
+    previousTransition: element.style.transition,
+  };
+  boardHeightAnimation = animation;
+
+  element.style.height = `${initialHeight}px`;
+  element.style.transition = "none";
+
+  await nextTick();
+
+  if (boardHeightAnimation !== animation || boardElement.value !== element) {
+    return;
+  }
+
+  const targetHeight = measureNaturalBoardHeight(element);
+
+  if (Math.abs(targetHeight - initialHeight) < 1) {
+    finishBoardHeightAnimation(animation);
+    return;
+  }
+
+  element.style.height = `${initialHeight}px`;
+  void element.offsetHeight;
+  element.style.transition = animation.previousTransition;
+  element.classList.add(BOARD_HEIGHT_TRANSITION_CLASS);
+
+  animation.frameId = requestBoardAnimationFrame(() => {
+    if (boardHeightAnimation === animation) {
+      element.style.height = `${targetHeight}px`;
+    }
+  });
+
+  animation.timeoutId = setTimeout(
+    () => finishBoardHeightAnimation(animation),
+    BOARD_HEIGHT_TRANSITION_MS + 100,
+  ) as unknown as number;
+}
 
 function formatClock(value?: string): string {
   if (!value) {
@@ -586,6 +778,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  cancelBoardHeightAnimation();
   compactPatternMediaQuery?.removeEventListener(
     "change",
     syncCompactPatternInteraction,
@@ -595,6 +788,7 @@ onUnmounted(() => {
 
 <template>
   <article
+    ref="boardElement"
     class="board"
     :class="{ 'board--list': displayMode === 'list' }"
     :style="{ '--line-color': board.line.color }"

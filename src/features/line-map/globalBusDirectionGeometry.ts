@@ -112,7 +112,14 @@ export function createGlobalBusDirectionGeometryPath(
     || resolution.segments.some((segment) => segment.fallback === true);
   if (hasFallbackLeg) return undefined;
 
-  const remainingSegments = [...resolution.segments];
+  // A provider can return one geometry per physical edge while a loop pattern
+  // visits that edge more than once. Keep unused copies distinct when they
+  // exist, then reuse the validated edge geometry for later visits instead of
+  // dropping the whole direction.
+  const segmentCandidates = resolution.segments.map((segment) => ({
+    segment,
+    used: false,
+  }));
   const orderedSegments: Array<{
     fromStationId: string;
     toStationId: string;
@@ -122,16 +129,12 @@ export function createGlobalBusDirectionGeometryPath(
   for (let index = 1; index < stops.length; index += 1) {
     const from = stops[index - 1]!;
     const to = stops[index]!;
-    const segmentIndex = remainingSegments.findIndex((segment) =>
-      (segment.fromStopId === from.id && segment.toStopId === to.id)
-      || (segment.fromStopId === to.id && segment.toStopId === from.id),
-    );
-    if (segmentIndex < 0) return undefined;
+    const match = findGeometrySegmentForLeg(segmentCandidates, from.id, to.id);
+    if (!match) return undefined;
 
-    const segment = remainingSegments.splice(segmentIndex, 1)[0]!;
-    const coordinates = segment.fromStopId === from.id
-      ? segment.coordinates
-      : [...segment.coordinates].reverse();
+    const coordinates = match.reversed
+      ? [...match.segment.coordinates].reverse()
+      : match.segment.coordinates;
     if (coordinates.length < 2) return undefined;
 
     orderedSegments.push({
@@ -233,6 +236,55 @@ export function createGlobalBusDirectionGeometryPath(
     maxY: Math.max(...vertices.map((vertex) => vertex.y)),
     chunkIds: [],
   };
+}
+
+function findGeometrySegmentForLeg(
+  candidates: Array<{
+    segment: LineGeometryResolution["segments"][number];
+    used: boolean;
+  }>,
+  fromStopId: string,
+  toStopId: string,
+): {
+  segment: LineGeometryResolution["segments"][number];
+  reversed: boolean;
+} | undefined {
+  const take = (
+    predicate: (segment: LineGeometryResolution["segments"][number]) => boolean,
+    reversed: boolean,
+    allowUsed: boolean,
+  ) => {
+    const candidate = candidates.find((entry) =>
+      (allowUsed || !entry.used) && predicate(entry.segment),
+    );
+    if (!candidate) return undefined;
+    candidate.used = true;
+    return { segment: candidate.segment, reversed };
+  };
+
+  // Prefer the provider's stored direction, then an unused reverse edge.
+  // Reusing an already selected edge is only the last resort, which preserves
+  // distinct provider shapes when they were actually returned.
+  return take(
+    (segment) => segment.fromStopId === fromStopId && segment.toStopId === toStopId,
+    false,
+    false,
+  )
+    ?? take(
+      (segment) => segment.fromStopId === toStopId && segment.toStopId === fromStopId,
+      true,
+      false,
+    )
+    ?? take(
+      (segment) => segment.fromStopId === fromStopId && segment.toStopId === toStopId,
+      false,
+      true,
+    )
+    ?? take(
+      (segment) => segment.fromStopId === toStopId && segment.toStopId === fromStopId,
+      true,
+      true,
+    );
 }
 
 function chooseClosestGlobalBusEndpoint(

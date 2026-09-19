@@ -7,6 +7,7 @@ import NearbyPlacesAnnuary from "./NearbyPlacesAnnuary.vue";
 import NearbyStationsMap from "./NearbyStationsMap.vue";
 import type { NearbyPlace } from "./nearbyPlaces";
 import {
+  isNearbyPlaceVisibleInDirectory,
   nearbyPlaceIsWithinWalkingMinutes,
   walkingMinutesToMeters,
   type NearbyPlaceGroupId,
@@ -67,7 +68,7 @@ const selectedPlace = computed(() => props.places.find((place) => place.id === s
 const selectedWalkingRoute = computed(() => selectedPlaceId.value
   ? props.walkingRoutes?.[selectedPlaceId.value]
   : undefined);
-const mapPlaces = computed(() => props.places.filter((place) => {
+const mapPlaces = computed(() => props.places.filter(isNearbyPlaceVisibleInDirectory).filter((place) => {
   return nearbyPlaceIsWithinWalkingMinutes(
     place,
     props.walkingRoutes?.[place.id],
@@ -363,6 +364,7 @@ onBeforeUnmount(() => {
                   :basemap-style="basemapStyle"
                   allow-zoom
                   show-nearby-places
+                  show-nearby-parkings
                   @select-place="selectPlace"
                   @place-context-menu="handlePlaceContextMenu"
                 />

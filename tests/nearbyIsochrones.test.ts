@@ -1,4 +1,9 @@
 import { EventEmitter } from "node:events";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { strToU8 } from "fflate";
+import { walkingArchiveFixture, walkingPolygon } from "./fixtures/walkingIsochrones";
 import type { H3Event } from "h3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -9,8 +14,10 @@ import {
   type NearbyIsochroneRing,
 } from "../src/features/nearby-stations/nearbyIsochrones";
 import {
+  NEARBY_ISOCHRONE_MINUTES,
   NEARBY_WALKING_MINUTES,
   walkingMinutesToSeconds,
+  type NearbyWalkingMinutes,
 } from "../src/features/nearby-stations/nearbyWalkingMinutes";
 import { NEARBY_DIRECTORY_WALKING_MINUTES } from "../src/features/nearby-stations/nearbyPlacePresentation";
 import { fetchNearbyIsochrones } from "../src/services/nearbyIsochrones";
@@ -48,8 +55,8 @@ function requestEvent(body: unknown, env: Record<string, string>): H3Event {
   });
   return {
     method: "POST",
-    context: { cloudflare: { env } },
-    node: { req: request },
+    context: { cloudflare: { env: { IDFM_MAP_ISOCHRONES_LOCAL: join(tmpdir(), "absent-test-isochrones.zip"), IDFM_MAP_ISOCHRONES_REMOTE: "", ...env } } },
+    node: { req: request, res: { setHeader: vi.fn(), getHeader: vi.fn() } },
   } as unknown as H3Event;
 }
 
@@ -100,6 +107,18 @@ function payload(overrides: Record<number, NearbyIsochroneGeometry> = {}) {
   };
 }
 
+function payloadFor(
+  minutes: readonly NearbyWalkingMinutes[],
+  overrides: Record<number, NearbyIsochroneGeometry> = {},
+) {
+  return {
+    type: "FeatureCollection",
+    features: [...minutes]
+      .reverse()
+      .map((minutesValue) => feature(walkingMinutesToSeconds(minutesValue), overrides[minutesValue] ?? polygon(minutesValue / 1_000))),
+  };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -122,6 +141,15 @@ describe("nearby walking isochrones", () => {
     expect(normalized?.zones.map((zone) => zone.minutes)).toEqual([5, 10, 15]);
     expect(normalized?.zones[1]?.geometry).toEqual(polygonWithHole);
     expect(isNearbyIsochronesResponse(normalized)).toBe(true);
+  });
+
+  it("normalizes the longer prepared thresholds when a panel requests them", () => {
+    const requested = [20, 30] as const;
+    const normalized = normalizeNearbyIsochronePayload(payloadFor(requested), origin, requested);
+
+    expect(NEARBY_ISOCHRONE_MINUTES).toEqual([5, 10, 15, 20, 25, 30]);
+    expect(normalized?.zones.map((zone) => zone.minutes)).toEqual(requested);
+    expect(isNearbyIsochronesResponse(normalized, requested)).toBe(true);
   });
 
   it("accepts MultiPolygon geometries", () => {
@@ -212,6 +240,64 @@ describe("nearby walking isochrones", () => {
     });
   });
 
+  it("serves an archived station without an ORS key or network request", async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), "station-isochrone-test-"));
+    try {
+      const fixture = walkingArchiveFixture();
+      const asset = `origins/${encodeURIComponent("2.35000,48.85000")}.json`;
+      fixture.index.stationOrigins = { s1: { asset, ...origin } };
+      fixture.entries[asset] = strToU8(JSON.stringify({ 5: walkingPolygon(), 10: walkingPolygon(), 15: walkingPolygon() }));
+      const archivePath = join(dir, "walking.zip");
+      await fs.writeFile(archivePath, fixture.bytes());
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const result = await isochroneHandler(requestEvent({ origin }, {
+        IDFM_MAP_ISOCHRONES_LOCAL: archivePath, IDFM_MAP_ISOCHRONES_REMOTE: "", NUXT_ORS_API_KEY: "",
+      }));
+      expect(result.zones.map((zone) => zone.minutes)).toEqual([5, 10, 15]);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("serves only the requested longer thresholds from the prepared archive", async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), "station-isochrone-long-test-"));
+    try {
+      const fixture = walkingArchiveFixture();
+      const asset = `origins/${encodeURIComponent("2.35000,48.85000")}.json`;
+      fixture.index.stationOrigins = { s1: { asset, ...origin } };
+      fixture.entries[asset] = strToU8(JSON.stringify(Object.fromEntries(
+        NEARBY_ISOCHRONE_MINUTES.map((minutes) => [minutes, walkingPolygon()]),
+      )));
+      const archivePath = join(dir, "walking.zip");
+      await fs.writeFile(archivePath, fixture.bytes());
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const requested = [20, 30] as const;
+      const result = await isochroneHandler(requestEvent({ origin, minutes: requested }, {
+        IDFM_MAP_ISOCHRONES_LOCAL: archivePath, IDFM_MAP_ISOCHRONES_REMOTE: "", NUXT_ORS_API_KEY: "",
+      }));
+      expect(result.zones.map((zone) => zone.minutes)).toEqual(requested);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("uses the ORS fallback with exactly the thresholds requested by the panel", async () => {
+    const requested = [20, 30] as const;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify(payloadFor(requested)), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await isochroneHandler(requestEvent({ origin, minutes: requested }, {
+      IDFM_MAP_ISOCHRONES_LOCAL: join(tmpdir(), "absent-fallback-isochrones.zip"),
+      IDFM_MAP_ISOCHRONES_REMOTE: "",
+      NUXT_ORS_API_KEY: "ors-test",
+      NUXT_ORS_API_URL: "https://ors-fallback.test",
+    }));
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const body = JSON.parse(String(init?.body));
+    expect(body.range).toEqual([1_200, 1_800]);
+    expect(result.zones.map((zone) => zone.minutes)).toEqual(requested);
+  });
+
   it("surfaces ORS errors and invalid payloads without an approximate fallback", async () => {
     const errorFetch = vi.fn(async () => new Response("upstream failure", { status: 503 }));
     vi.stubGlobal("fetch", errorFetch);
@@ -255,6 +341,26 @@ describe("nearby walking isochrones", () => {
     expect(body.range).toEqual([300, 600, 900]);
     expect(body.range).toEqual(NEARBY_WALKING_MINUTES.map(walkingMinutesToSeconds));
     expect(first).toEqual(second);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the selected thresholds in the ORS cache key", async () => {
+    const requested = [20, 30] as const;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify(payloadFor(requested)), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const requestOrigin = { lon: 2.359, lat: 48.859 };
+    const configuredEvent = event({
+      NUXT_ORS_API_KEY: "ors-test",
+      NUXT_ORS_API_URL: "https://ors-selected-thresholds.test",
+    });
+
+    await getNearbyIsochronesWithOpenRouteService(configuredEvent as never, requestOrigin, requested);
+    await getNearbyIsochronesWithOpenRouteService(configuredEvent as never, requestOrigin, requested);
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const body = JSON.parse(String(init?.body));
+
+    expect(body.range).toEqual([1_200, 1_800]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

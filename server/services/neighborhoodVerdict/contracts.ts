@@ -1,11 +1,12 @@
 // Bump this whenever the compiled artifact or source identifiers change so
 // Nitro cannot silently consume an old neighborhood snapshot.
-export const VERDICT_SCHEMA_VERSION = "1.2" as const;
+export const VERDICT_SCHEMA_VERSION = "1.3" as const;
 
 /** Stable logical ids; the active edition is carried by source metadata. */
 export const AIR_NOISE_STATISTICS_SOURCE_ID = "air-noise-statistics" as const;
 export const AIR_NOISE_GRID_SOURCE_ID = "air-noise-grid" as const;
 export const SERVICE_QUALITY_SOURCE_ID = "idfm-service-quality-2025" as const;
+export const IRIS_SOURCE_ID = "insee-iris" as const;
 
 export type ServiceQualityMode = "METRO" | "RER" | "TRAIN" | "TRAM";
 export type ReliabilityTrend = "improving" | "stable" | "declining";
@@ -299,6 +300,24 @@ export interface CompiledAirNoiseGrid {
   classes: number[];
 }
 
+export interface CompiledIrisNeighborhood {
+  id: string;
+  codeIris: string;
+  communeCode: string;
+  communeName: string;
+  departmentCode: string;
+  name: string;
+  type: string;
+  centroid: [number, number];
+  geometry: VerdictPolygonGeometry;
+}
+
+export interface CompiledIrisData {
+  sourceId: typeof IRIS_SOURCE_ID;
+  bbox: [number, number, number, number];
+  neighborhoods: CompiledIrisNeighborhood[];
+}
+
 export interface CompiledNeighborhoodVerdictData {
   schemaVersion: typeof VERDICT_SCHEMA_VERSION;
   generatedAt: string;
@@ -308,6 +327,7 @@ export interface CompiledNeighborhoodVerdictData {
   gpeStations: CompiledGpeStation[];
   airNoiseCommunes: Record<string, CompiledAirNoiseCommune>;
   airNoiseGrid?: CompiledAirNoiseGrid;
+  iris: CompiledIrisData;
   security: {
     communes: Record<string, SecurityCommuneResult>;
     trends: Record<string, SecurityTrendResult>;

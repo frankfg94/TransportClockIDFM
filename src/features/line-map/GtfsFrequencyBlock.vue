@@ -3,12 +3,18 @@ import { computed } from "vue";
 import { useI18n } from "../../i18n";
 import type { FrequencyDirection, FrequencyValues } from "../../types/lineFrequency";
 
-const props = defineProps<{
-  average: FrequencyValues;
-  directions: FrequencyDirection[];
-  title?: string;
-  endpoints?: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    average: FrequencyValues;
+    directions: FrequencyDirection[];
+    title?: string;
+    endpoints?: string;
+    compact?: boolean;
+  }>(),
+  {
+    compact: false,
+  },
+);
 const { t, n } = useI18n();
 const periods = [
   { key: "peakMinutes", label: "globalMap.sidebar.linePeak" },
@@ -47,24 +53,27 @@ const cells = computed(() =>
           ? t("globalMap.sidebar.gtfsFrequency.minutes", { value: n(min) })
           : t("globalMap.sidebar.gtfsFrequency.rangeMinutes", { min: n(min), max: n(max) });
     }
-    return { ...period, value, available: values.length > 1 || isHeadway(props.average[period.key]) };
+    return {
+      ...period,
+      value,
+      available: values.length > 1 || isHeadway(props.average[period.key]),
+    };
   }),
 );
 const showDirectionDetails = computed(
   () =>
+    !props.compact &&
     props.directions.length > 1 &&
     periods.some((period) => {
       const values = props.directions.map((direction) => roundedHeadway(direction[period.key]));
       return values.some((value) => value === undefined) || new Set(values).size > 1;
     }),
 );
-const summaryUnavailable = computed(() =>
-  cells.value.every((cell) => !cell.available),
-);
+const summaryUnavailable = computed(() => cells.value.every((cell) => !cell.available));
 </script>
 
 <template>
-  <section class="gtfs-frequency-block">
+  <section class="gtfs-frequency-block" :class="{ 'gtfs-frequency-block--compact': compact }">
     <div v-if="title || endpoints || summaryUnavailable" class="gtfs-frequency-block__heading">
       <div class="gtfs-frequency-block__heading-copy">
         <h4 v-if="title">{{ title }}</h4>
@@ -95,14 +104,17 @@ const summaryUnavailable = computed(() =>
       >
         <div class="gtfs-frequency-block__direction-heading">
           <p>
-          {{
-            t("globalMap.sidebar.gtfsFrequency.fromTo", {
-              from: direction.from || t("globalMap.sidebar.gtfsFrequency.unknownOrigin"),
-              to: direction.to || t("globalMap.sidebar.gtfsFrequency.unknownDestination"),
-            })
-          }}
+            {{
+              t("globalMap.sidebar.gtfsFrequency.fromTo", {
+                from: direction.from || t("globalMap.sidebar.gtfsFrequency.unknownOrigin"),
+                to: direction.to || t("globalMap.sidebar.gtfsFrequency.unknownDestination"),
+              })
+            }}
           </p>
-          <span v-if="isDirectionUnavailable(direction)" class="gtfs-frequency-block__direction-unavailable">
+          <span
+            v-if="isDirectionUnavailable(direction)"
+            class="gtfs-frequency-block__direction-unavailable"
+          >
             {{ t("globalMap.sidebar.lineUnavailable") }}
           </span>
         </div>
@@ -122,6 +134,9 @@ const summaryUnavailable = computed(() =>
   display: grid;
   gap: var(--space-2);
   min-width: 0;
+}
+.gtfs-frequency-block--compact {
+  gap: var(--space-1);
 }
 .gtfs-frequency-block__heading {
   display: flex;
@@ -170,10 +185,19 @@ h4 {
   border-radius: var(--radius-md);
   background: var(--surface-soft);
 }
+.gtfs-frequency-block--compact .gtfs-frequency-block__grid {
+  gap: 4px;
+}
+.gtfs-frequency-block--compact .gtfs-frequency-block__grid > div {
+  padding: 7px;
+}
 dt {
   color: var(--muted);
   font-size: 0.62rem;
   font-weight: 700;
+}
+.gtfs-frequency-block--compact dt {
+  font-size: 0.58rem;
 }
 dd {
   margin-top: var(--space-1);
@@ -181,6 +205,9 @@ dd {
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
+}
+.gtfs-frequency-block--compact dd {
+  font-size: 0.74rem;
 }
 summary {
   padding: var(--space-2) 0;
@@ -207,7 +234,7 @@ summary:focus-visible {
 .gtfs-frequency-block__direction-unavailable {
   flex: 0 0 auto;
   color: var(--muted);
-  font-size: .68rem;
+  font-size: 0.68rem;
   font-weight: 800;
 }
 </style>

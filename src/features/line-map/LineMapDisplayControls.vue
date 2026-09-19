@@ -22,6 +22,8 @@ const props = withDefaults(defineProps<{
   selectedModes?: GlobalMapMode[];
   hideLongWaitTransports?: boolean;
   showNearbyPlaces?: boolean;
+  showNearbyBenches?: boolean;
+  showNearbyParkings?: boolean;
   showNearbyPlaceNames?: boolean;
   nearbyOptions?: boolean;
 }>(), {
@@ -46,6 +48,8 @@ const emit = defineEmits<{
   "update:selectedModes": [value: GlobalMapMode[]];
   "update:hideLongWaitTransports": [value: boolean];
   "update:showNearbyPlaces": [value: boolean];
+  "update:showNearbyBenches": [value: boolean];
+  "update:showNearbyParkings": [value: boolean];
   "update:showNearbyPlaceNames": [value: boolean];
 }>();
 const { t } = useI18n();
@@ -172,6 +176,32 @@ function selectAllWithoutBus(): void {
         <span>{{ t("nearbyStations.showNearbyPlaces") }}</span>
       </label>
       <label
+        v-if="showNearbyBenches !== undefined"
+        :class="{ 'line-map-display-panel__nearby-option--disabled': showNearbyPlaces !== true }"
+      >
+        <input
+          data-show-nearby-benches
+          type="checkbox"
+          :checked="showNearbyBenches"
+          :disabled="showNearbyPlaces !== true"
+          @change="emit('update:showNearbyBenches', ($event.target as HTMLInputElement).checked)"
+        />
+        <span>{{ t("nearbyStations.showNearbyBenches") }}</span>
+      </label>
+      <label
+        v-if="showNearbyParkings !== undefined"
+        :class="{ 'line-map-display-panel__nearby-option--disabled': showNearbyPlaces !== true }"
+      >
+        <input
+          data-show-nearby-parkings
+          type="checkbox"
+          :checked="showNearbyParkings"
+          :disabled="showNearbyPlaces !== true"
+          @change="emit('update:showNearbyParkings', ($event.target as HTMLInputElement).checked)"
+        />
+        <span>{{ t("nearbyStations.showNearbyParkings") }}</span>
+      </label>
+      <label
         v-if="showNearbyPlaceNames !== undefined"
         :class="{ 'line-map-display-panel__nearby-option--disabled': showNearbyPlaces !== true }"
       >
@@ -184,6 +214,7 @@ function selectAllWithoutBus(): void {
         />
         <span>{{ t("nearbyStations.showNearbyPlaceNames") }}</span>
       </label>
+      <slot name="nearby-options" />
     </div>
   </div>
 

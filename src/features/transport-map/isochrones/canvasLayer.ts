@@ -3,6 +3,7 @@ import type { CameraState } from "../geo/camera";
 import { boundsIntersect, lonLatToWorld, visibleWorldBounds, worldScaleAtZoom } from "../geo/coordinateKernel";
 import type { GlobalMapBounds } from "../contracts/manifest";
 import type { GlobalIsochroneSurface } from "./contracts";
+import { globalIsochroneZoneIndex, WALKING_ISOCHRONE_ZONE_COLORS } from "./palette";
 
 interface PreparedPolygon { bounds: GlobalMapBounds; rings: Float64Array[] }
 
@@ -21,15 +22,15 @@ export class GlobalIsochroneCanvasLayer {
     const bounds = visibleWorldBounds(camera);
     const hoveredIds = new Set(hoveredSurfaceIds);
     let calls = 0;
+    const renderSurfaces = [...surfaces].sort((left, right) => right.minutes - left.minutes || left.id.localeCompare(right.id));
     context.save();
     context.globalAlpha = 1;
     context.setLineDash([]);
-    context.fillStyle = "rgba(59, 130, 246, 0.14)";
-    for (const surface of surfaces) {
+    for (const surface of renderSurfaces) {
+      const colors = WALKING_ISOCHRONE_ZONE_COLORS[globalIsochroneZoneIndex(surface, surfaces)]!;
+      context.fillStyle = colors.fill;
       const hovered = hoveredIds.has(surface.id);
-      context.strokeStyle = hovered
-        ? "rgba(29, 78, 216, 0.92)"
-        : "rgba(59, 130, 246, 0.60)";
+      context.strokeStyle = colors.stroke;
       context.lineWidth = hovered ? 2 : 1;
       for (const polygon of this.prepare(surface.geometry)) {
         if (!boundsIntersect(bounds, polygon.bounds)) continue;

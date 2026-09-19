@@ -19,8 +19,8 @@ export interface UseLineFrequencyTimetableOptions {
 
 /**
  * Shared GTFS source for line frequency cards and nearby-neighborhood facts.
- * A station lookup narrows a branched line to the section that actually serves
- * that station; without a station the line-level profile is returned.
+ * A station lookup prefers the exact station cadence and keeps the serving
+ * section as context; without a station the line-level profile is returned.
  */
 export function useLineFrequencyTimetable(options: UseLineFrequencyTimetableOptions = {}) {
   const loadFrequency = options.fetchFrequency ?? fetchGtfsLineFrequency;
@@ -101,22 +101,30 @@ export function selectFrequencySection(
   stationId?: string,
 ): GtfsLineFrequencyResponse {
   const normalizedStationId = stationId?.trim();
-  if (!normalizedStationId || profile.sections.length === 0) return profile;
+  if (!normalizedStationId) return profile;
+
+  const station = profile.stations?.find((candidate) =>
+    canonicalGtfsTimetableStationId(candidate.id) === canonicalGtfsTimetableStationId(normalizedStationId),
+  );
 
   const matchingSections = profile.sections.filter((section) => section.stationIds.some((id) =>
     canonicalGtfsTimetableStationId(id) === canonicalGtfsTimetableStationId(normalizedStationId),
   ));
   const section = [...matchingSections].sort(compareFrequencySections)[0];
-  if (!section) return profile;
+  if (!station && !section) return profile;
 
   return {
     ...profile,
-    average: { ...section.average },
-    directions: section.directions.map((direction) => ({ ...direction })),
-    sections: [section],
+    // A section average is useful as a branch fallback, but it can hide a
+    // local station cadence on a branched line. Prefer the exact station
+    // summary produced from the same GTFS departures whenever available.
+    average: { ...(station?.average ?? section?.average ?? profile.average) },
+    directions: (station?.directions ?? section?.directions ?? profile.directions)
+      .map((direction) => ({ ...direction })),
+    sections: section ? [section] : [],
     branched: false,
-    stationCount: section.stationIds.length,
-    sampledStationCount: section.stationIds.length,
+    stationCount: station ? 1 : section?.stationIds.length ?? profile.stationCount,
+    sampledStationCount: station ? 1 : section?.stationIds.length ?? profile.sampledStationCount,
   };
 }
 

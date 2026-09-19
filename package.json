@@ -27,6 +27,10 @@
     "update:all:map": "npm --prefix ../idfm-node-backend run update:all",
     "check:data": "tsx scripts/check-data.ts",
     "map:isochrones:build": "npm --prefix ../idfm-node-backend run map:isochrones:build --",
+    "places:compile": "npm --prefix ../idfm-node-backend run places:compile --",
+    "places:validate": "npm --prefix ../idfm-node-backend run places:validate --",
+    "places:overpass:up": "npm --prefix ../idfm-node-backend run places:overpass:up",
+    "places:overpass:stop": "npm --prefix ../idfm-node-backend run places:overpass:stop",
     "apk:build": "tsx scripts/mobile-release/build.ts",
     "apk:publish": "tsx scripts/mobile-release/publish.ts",
     "preview": "wrangler pages dev dist --ip 127.0.0.1 --port 3000",
@@ -64,6 +68,7 @@
     "lucide-vue-next": "^1.0.0",
     "maplibre-gl": "^6.6.0",
     "nuxt": "3.20.2",
+    "polygon-clipping": "0.15.7",
     "vue": "^3.5.13",
     "vuedraggable": "^4.1.0"
   },

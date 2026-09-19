@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { useRoute, useRouter } from "#imports";
-import { Check, Copy, Eye, EyeOff, LoaderCircle, Map as MapIcon, MapPin, RefreshCw, Route, RotateCcw, Trash2 } from "lucide-vue-next";
+import { BookOpen, Building2, Check, Copy, Eye, EyeOff, LoaderCircle, Map as MapIcon, MapPin, RefreshCw, Route, RotateCcw, Trash2 } from "lucide-vue-next";
 import AppModal from "../../components/AppModal.vue";
 import ContextMenu from "../../components/ContextMenu.vue";
 import DepartureAlarmModal from "../../components/DepartureAlarmModal.vue";
 import FullscreenStationPanel from "../../components/FullscreenStationPanel.vue";
 import LineIconBadge from "../../components/LineIconBadge.vue";
+import Spinner from "../../components/Spinner.vue";
 import UserFriendlyTrafficModal from "../../components/UserFriendlyTrafficModal.vue";
+import AdressBook from "../address-book/AdressBook.vue";
+import { toAddressBookPoint, type AddressBookEntry } from "../address-book/addressBook";
 import {
   requestTemporaryAlarmWakeLock,
   useAppSettings,
@@ -16,13 +19,20 @@ import { useI18n } from "../../i18n";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import type { GlobalMapMode, GlobalMapStation } from "../transport-map/contracts/manifest";
 import type { TransportMapBasemapStyle } from "../transport-map/basemap/tileMath";
+import { fetchIrisDataset } from "../transport-map/iris/irisApi";
 import { createIgnTransportMapGeocoder } from "./geocoding";
+import {
+  buildNearbyCityOptions,
+  type NearbyCityComparisonCityOption,
+} from "./nearbyCityComparison";
 import NearbyStationSchedulePanel from "./NearbyStationSchedulePanel.vue";
 import NearbyStationScheduleInline from "./NearbyStationScheduleInline.vue";
 import NearbyHeavyAccessGuide from "./NearbyHeavyAccessGuide.vue";
 import NearbyLineTraceModal from "./NearbyLineTraceModal.vue";
 import NearbyStationsMap from "./NearbyStationsMap.vue";
+import NearbyCityCityPicker from "./NearbyCityCityPicker.vue";
 import NearbyPlacesDirectoryOverlay from "./NearbyPlacesDirectoryOverlay.vue";
+import NearbyPlacesRankingModal from "./NearbyPlacesRankingModal.vue";
 import LeftNearbySidebar from "./LeftNearbySidebar.vue";
 import LeftNearbySidebarBodyTravel from "./LeftNearbySidebarBodyTravel.vue";
 import {
@@ -41,12 +51,15 @@ import { useNearbyStations } from "./useNearbyStations";
 import { useNearbyStationsLineFlow } from "./useNearbyStationsLineFlow";
 import { useNearbyPlaces } from "./useNearbyPlaces";
 import {
+  nearbyPlaceDisplayName,
   nearbyPlaceGoogleMapsUrl,
+  isNearbyPlaceCommerce,
+  isNearbyPlaceGreenSpace,
   walkingMinutesToMeters,
   type NearbyPlaceGroupId,
   type NearbyWalkingMinutes,
 } from "./nearbyPlacePresentation";
-import type { NearbyPlace } from "./nearbyPlaces";
+import { type NearbyPlace, type PlacesProvider } from "./nearbyPlaces";
 import { haversineMeters, type NearbyWalkingRoute } from "./nearbyWalkingRoutes";
 import { useNearbyWalkingRoutes } from "./useNearbyWalkingRoutes";
 import { saveNearbyNeighborhoodScoreSnapshot } from "./nearbyNeighborhoodScoreSnapshot";
@@ -65,6 +78,7 @@ import {
   isNearbyJourneyWalkingSection,
   type NearbyJourneyPoint,
   type NearbyJourneySection,
+  type NearbyJourneyServiceType,
   type RouteExit,
 } from "./nearbyHeavyTransports";
 import { alignNearbyWalkingGeometryToEndpoints, createNearbyTravelWalkingSegments } from "./nearbyTravelGeometry";
@@ -73,7 +87,14 @@ import {
   type TravelRouteAlarmContext,
 } from "./nearbyTravelAlarm";
 import { toServerApiUrl } from "../../services/serverApi";
+import type { NearbyCityComparisonPlaceCounts } from "./nearbyCityComparison";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
+import type { CompiledPlacesAccess } from "../../services/places/compiledPlacesProvider";
+import {
+  type CompiledPlacesCityFile,
+  type PlacesRankingDocument,
+  restoreCompiledPlaceName,
+} from "../../services/places/compiledPlaces";
 import { buildCitiesLinePatternCities, normalizeCityPatternLabel } from "../line-map/citiesLinePattern";
 import type { GlobalMapLine } from "../transport-map/contracts/manifest";
 import {
@@ -82,6 +103,7 @@ import {
   resolveTravelBoundaryStation,
   selectFastestRouteExit,
 } from "./travelBoundary";
+import { inferTravelServiceType } from "./travelServiceType";
 import type {
   AlarmDraft,
   Departure,
@@ -118,26 +140,35 @@ const geocoder = createIgnTransportMapGeocoder();
 const NEARBY_CUSTOM_PRESET_ID = "__custom" as const;
 const selectedPresetId = ref<NearbyAddressPresetId | typeof NEARBY_CUSTOM_PRESET_ID>(NEARBY_ADDRESS_PRESETS[0].id);
 const customAddressLabel = ref("");
+const addressBookOpen = ref(false);
+// "Choose a city" resolves the searched origin to a commune centre instead of
+// a street address, which is what a city-scale station scan needs.
+const cityPickerOpen = ref(false);
+const cityPickerOptions = ref<readonly NearbyCityComparisonCityOption[]>([]);
+const cityPickerLoading = ref(false);
+const cityPickerError = ref("");
 const placeLoading = ref(false);
 const placeError = ref("");
 const presetRequestToken = ref(0);
 const placeCache = new Map<NearbyAddressPresetId, Promise<GeocoderPoint>>();
 const nearby = useNearbyStations();
 const nearbyDataProviders = createNearbyDataProviders();
+const placesAccess = nearbyDataProviders.places as PlacesProvider & Partial<CompiledPlacesAccess>;
 const lineFlow = useNearbyStationsLineFlow(nearby);
+const travelAllowedModes = ref<GlobalMapMode[]>([...NEARBY_SUPPORTED_MODES]);
 const travelRoutes = useTravelRoutes({
   origin: nearby.selectedPlace,
   placesProvider: nearbyDataProviders.places,
   travelRoutesProvider: nearbyDataProviders.travelRoutes,
   searchStations: true,
   searchPlaces: true,
+  allowedModes: travelAllowedModes,
 });
 const travelPanelOpen = ref(false);
 const travelClusterGroupingRestore = ref<number>();
 // Keep the page compatible with lightweight consumers that still expose only
 // the legacy single ghost model while the multi-line flow API rolls out.
 const lineFlowModels = computed(() => lineFlow.lineFlowModels?.value ?? []);
-const travelAllowedModes = ref<GlobalMapMode[]>([...NEARBY_SUPPORTED_MODES]);
 const visibleTravelRoutes = computed(() => travelRoutes.routes.value.filter(route =>
   route.transitSections.every(section => travelSectionMode(section) === undefined ||
     travelAllowedModes.value.includes(travelSectionMode(section)!)),
@@ -238,6 +269,14 @@ function travelSectionMode(section: NearbyJourneySection): GlobalMapMode | undef
   return section.lineMode ?? "BUS";
 }
 
+function travelSectionServiceType(section: NearbyJourneySection): NearbyJourneyServiceType | undefined {
+  return inferTravelServiceType(
+    section,
+    nearby.transportMapNetwork.value,
+    resolveTravelNetworkLineId(section),
+  );
+}
+
 const heavy = useNearbyHeavyTransports({
   origin: nearby.selectedPlace,
   network: nearby.transportMapNetwork,
@@ -296,6 +335,8 @@ const focusedScheduleStationId = ref<string>();
 const hideStationsWithoutDepartures = ref(false);
 const hideLongWaitTransports = ref(true);
 const showNearbyPlaces = ref(true);
+const showNearbyBenches = ref(false);
+const showNearbyParkings = ref(false);
 const showNearbyPlaceNames = ref(false);
 const nearbyDirectoryOpen = ref(false);
 const nearbySelectedPlaceId = ref<string>();
@@ -308,12 +349,109 @@ const nearbyPlaces = useNearbyPlaces({
   enabled: nearbyPlacesLoadEnabled,
   provider: nearbyDataProviders.places,
 });
-const nearbyMapPlaces = computed(() => nearbyPlaces.places.value.filter((place) =>
-  place.distanceMeters <= nearby.radius.value,
-));
+const cityViewPlaces = shallowRef<NearbyPlace[]>([]);
+const cityViewCommerceCounts = ref<Record<string, number>>({});
+const cityViewCommerceTotal = ref<number>();
+const cityViewCode = ref<string>();
+const cityViewName = ref<string>();
+const cityPlacesRequestToken = ref(0);
+const placesRankingModalOpen = ref(false);
+const placesRanking = shallowRef<PlacesRankingDocument>();
+const placesRankingPopulationByCity = shallowRef<Readonly<Record<string, number>>>({});
+const placesRankingLoading = ref(false);
+const placesRankingError = ref("");
+const placesRankingRequestToken = ref(0);
+// The places provider already applies the directory's 15-minute geographic
+// radius. `nearby.radius` is the separate transit-station radius and must not
+// truncate businesses around the selected address.
+const nearbyMapPlaces = computed(() => nearbyPlaces.places.value);
 const nearbyPlacesErrorMessage = computed(() => nearbyPlaces.error.value
   ? t("nearbyStations.directory.error")
   : "");
+
+async function loadSelectedCityPlaces(): Promise<void> {
+  const origin = nearby.selectedPlace.value;
+  const token = ++cityPlacesRequestToken.value;
+  cityViewPlaces.value = [];
+  cityViewCommerceCounts.value = {};
+  cityViewCommerceTotal.value = undefined;
+  cityViewCode.value = undefined;
+  cityViewName.value = undefined;
+  if (!origin || !placesAccess.loadPlacesCity) return;
+  try {
+    const cityFile: CompiledPlacesCityFile = await placesAccess.loadPlacesCity({
+      name: origin.city,
+      lat: origin.lat,
+      lon: origin.lon,
+    });
+    if (token !== cityPlacesRequestToken.value) return;
+    cityViewPlaces.value = cityFile.places.map((cityPlace) => ({
+      ...restoreCompiledPlaceName(cityPlace),
+      cityCode: cityPlace.cityCode ?? cityFile.city.code,
+      distanceMeters: Math.round(haversineMeters(origin, cityPlace)),
+    }));
+    cityViewCommerceCounts.value = { ...(cityFile.neighborhoodCommerceCounts ?? {}) };
+    // Use the same canonical predicate as the map and directory. This also
+    // counts restaurants/cafes/bars in existing assets generated before the
+    // food-amenity ranking rule was added.
+    cityViewCommerceTotal.value = cityFile.places.filter(isNearbyPlaceCommerce).length;
+    cityViewCode.value = cityFile.city.code;
+    cityViewName.value = cityFile.city.name;
+  } catch {
+    if (token !== cityPlacesRequestToken.value) return;
+    cityViewCommerceCounts.value = {};
+    cityViewCommerceTotal.value = undefined;
+    cityViewName.value = undefined;
+  }
+}
+
+async function loadCityViewComparisonPlaceCounts(city: { code: string; name: string; lat: number; lon: number }): Promise<NearbyCityComparisonPlaceCounts | undefined> {
+  if (!placesAccess.loadPlacesCity) return undefined;
+  const cityFile = await placesAccess.loadPlacesCity({
+    code: city.code,
+    name: city.name,
+    lat: city.lat,
+    lon: city.lon,
+  });
+  // Keep the comparison aligned with map presentation: commerce uses the
+  // canonical commerce predicate, while green spaces only include natural
+  // spaces (parks, gardens, reserves and squares), never street furniture.
+  return {
+    commerce: cityFile.places.filter(isNearbyPlaceCommerce).length,
+    greenSpaces: cityFile.places.filter(isNearbyPlaceGreenSpace).length,
+  };
+}
+
+watch(
+  () => [nearby.selectedPlace.value?.city, nearby.selectedPlace.value?.lat, nearby.selectedPlace.value?.lon] as const,
+  () => void loadSelectedCityPlaces(),
+  { immediate: true },
+);
+
+async function loadPlacesRanking(): Promise<void> {
+  if (!placesAccess.loadPlacesRanking || placesRankingLoading.value) return;
+  const token = ++placesRankingRequestToken.value;
+  placesRankingLoading.value = true;
+  placesRankingError.value = "";
+  try {
+    const document = await placesAccess.loadPlacesRanking();
+    if (token === placesRankingRequestToken.value) placesRanking.value = document;
+  } catch (error) {
+    if (token === placesRankingRequestToken.value) placesRankingError.value = error instanceof Error ? error.message : t("nearbyStations.placesRanking.unavailable");
+  } finally {
+    if (token === placesRankingRequestToken.value) placesRankingLoading.value = false;
+  }
+}
+
+function openPlacesRanking(populationByCity?: Readonly<Record<string, number>>): void {
+  placesRankingModalOpen.value = true;
+  placesRankingPopulationByCity.value = populationByCity ?? {};
+  if (!placesRanking.value) void loadPlacesRanking();
+}
+
+function closePlacesRanking(): void {
+  placesRankingModalOpen.value = false;
+}
 const nearbyPlaceLoadingGroupIds = ref<Set<NearbyPlaceGroupId>>(new Set());
 const nearbySelectedPlace = computed(() => nearbySelectedPlaceId.value
   ? nearbyPlaces.places.value.find((place) => place.id === nearbySelectedPlaceId.value)
@@ -390,9 +528,15 @@ const presetOptions = computed(() => NEARBY_ADDRESS_PRESETS.map((preset) => ({
 const selectedPreset = computed(() =>
   presetOptions.value.find((preset) => preset.id === selectedPresetId.value) ?? presetOptions.value[0],
 );
-const selectedAddressLabel = computed(() =>
-  customAddressLabel.value || nearby.selectedPlace.value?.label || selectedPreset.value?.label || "",
-);
+const selectedAddressLabel = computed(() => {
+  const place = nearby.selectedPlace.value;
+  const label = place?.label?.trim();
+  const address = place?.address?.trim();
+  if (place?.provider === "address-book" && label && address && label !== address) {
+    return `${label} · ${address}`;
+  }
+  return customAddressLabel.value || label || selectedPreset.value?.label || "";
+});
 const basemapStyle = computed<TransportMapBasemapStyle | undefined>(() => settings.value.globalMapBasemapStyle);
 const errorMessage = computed(() => {
   if (placeError.value) return placeError.value;
@@ -928,9 +1072,10 @@ function openNearbyDirectory(): void {
   syncAnnuaryQuery(true);
 }
 
-function openNearbyNeighborhoodScore(): void {
+function persistNearbyNeighborhoodScoreSnapshot(): void {
   const origin = nearby.selectedPlace.value;
-  if (!origin) return;
+  const places = nearbyPlaces.places.value;
+  if (!origin || nearbyPlaces.isLoading.value || nearbyPlaces.error.value || places.length === 0) return;
 
   saveNearbyNeighborhoodScoreSnapshot({
     origin: {
@@ -939,8 +1084,8 @@ function openNearbyNeighborhoodScore(): void {
       label: origin.label,
       city: origin.city,
     },
-    places: nearbyPlaces.places.value,
-    placesLoaded: !nearbyPlaces.isLoading.value && !nearbyPlaces.error.value,
+    places,
+    placesLoaded: true,
     walkingRoutes: Object.fromEntries(
       Object.entries(nearbyWalking.placeRoutes.value).map(([placeId, route]) => [placeId, route
         ? {
@@ -953,6 +1098,13 @@ function openNearbyNeighborhoodScore(): void {
     ),
     heavyCandidates: heavy.visibleCandidates.value,
   });
+}
+
+function openNearbyNeighborhoodScore(): void {
+  const origin = nearby.selectedPlace.value;
+  if (!origin) return;
+
+  persistNearbyNeighborhoodScoreSnapshot();
 
   const params = new URLSearchParams({
     lat: String(origin.lat),
@@ -962,6 +1114,18 @@ function openNearbyNeighborhoodScore(): void {
   if (origin.city) params.set("city", origin.city);
   window.open(`/nearby-neighborhood-score?${params.toString()}`, "_blank", "noopener,noreferrer");
 }
+
+watch(
+  () => [
+    nearby.selectedPlace.value?.lon,
+    nearby.selectedPlace.value?.lat,
+    nearbyPlaces.isLoading.value,
+    nearbyPlaces.error.value?.message,
+    nearbyPlaces.places.value.map((place) => place.id).join(","),
+  ] as const,
+  persistNearbyNeighborhoodScoreSnapshot,
+  { immediate: true, flush: "post" },
+);
 
 function closeNearbyDirectory(): void {
   nearbyDirectoryOpen.value = false;
@@ -990,12 +1154,18 @@ function getNearbyQueryPlace(): GeocoderPoint | undefined {
   }
 
   const address = getQueryString(route.query.address);
+  const city = getQueryString(route.query.city);
+  const postcode = getQueryString(route.query.postcode);
+  const cityCode = getQueryString(route.query.cityCode);
   return {
     label: address ?? `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
     lon: longitude,
     lat: latitude,
     provider: "global-map",
     type: address ? "address" : "unknown",
+    ...(city ? { city } : {}),
+    ...(postcode ? { postcode } : {}),
+    ...(cityCode ? { code: cityCode } : {}),
   };
 }
 
@@ -1065,13 +1235,32 @@ async function selectCustomPlace(place: GeocoderPoint): Promise<void> {
   nearby.query.value = customAddressLabel.value;
 
   try {
-    await nearby.selectPlace(place);
+    // Links opened from a raw map click historically carried only coordinates.
+    // Reverse-resolve those coordinates before the static provider chooses a
+    // commune: neighbouring bboxes overlap around municipal boundaries.
+    await nearby.selectPlace(await enrichCustomPlace(place));
   } catch {
     if (token === presetRequestToken.value) {
       placeError.value = t("nearbyStations.errors.geocodingUnavailable");
     }
   } finally {
     if (token === presetRequestToken.value) placeLoading.value = false;
+  }
+}
+
+async function enrichCustomPlace(place: GeocoderPoint): Promise<GeocoderPoint> {
+  if (place.city?.trim() || !geocoder.reverseGeocode) return place;
+  try {
+    const resolved = (await geocoder.reverseGeocode({ lon: place.lon, lat: place.lat }))[0];
+    if (!resolved?.city?.trim()) return place;
+    return {
+      ...place,
+      city: resolved.city,
+      ...(place.postcode ? {} : resolved.postcode ? { postcode: resolved.postcode } : {}),
+      ...(place.code ? {} : resolved.code ? { code: resolved.code } : {}),
+    };
+  } catch {
+    return place;
   }
 }
 
@@ -1130,6 +1319,65 @@ function retry(): void {
   void selectPreset(selectedPresetId.value);
 }
 
+function openAddressBook(): void {
+  addressBookOpen.value = true;
+}
+
+function closeAddressBook(): void {
+  addressBookOpen.value = false;
+}
+
+function selectAddressBookEntry(entry: AddressBookEntry): void {
+  addressBookOpen.value = false;
+  void selectCustomPlace(toAddressBookPoint(entry));
+}
+
+/** Fetch the Île-de-France commune catalogue shared with the comparison modal. */
+async function loadCityPickerOptions(): Promise<void> {
+  if (cityPickerOptions.value.length > 0 || cityPickerLoading.value) return;
+  cityPickerLoading.value = true;
+  cityPickerError.value = "";
+  try {
+    const dataset = await fetchIrisDataset();
+    cityPickerOptions.value = buildNearbyCityOptions({
+      communes: dataset.neighborhoods,
+      statistics: dataset.airNoiseCommunes,
+      departmentNames: dataset.departmentNames,
+    });
+    if (cityPickerOptions.value.length === 0) cityPickerError.value = t("nearbyStations.chooseCityEmpty");
+  } catch {
+    cityPickerError.value = t("nearbyStations.chooseCityError");
+  } finally {
+    cityPickerLoading.value = false;
+  }
+}
+
+function openCityPicker(): void {
+  cityPickerOpen.value = true;
+  void loadCityPickerOptions();
+}
+
+function closeCityPicker(): void {
+  cityPickerOpen.value = false;
+}
+
+/** Use the commune centre as the reference point of the whole page. */
+function selectCityCenter(cityCode: string): void {
+  const city = cityPickerOptions.value.find((candidate) => candidate.code === cityCode);
+  cityPickerOpen.value = false;
+  if (!city) return;
+  void selectCustomPlace({
+    id: `commune:${city.code}`,
+    lon: city.lon,
+    lat: city.lat,
+    label: city.departmentCode ? `${city.name} (${city.departmentCode})` : city.name,
+    city: city.name,
+    code: city.code,
+    provider: "global-map",
+    type: "municipality",
+  });
+}
+
 function openStationContextMenu(stationId: string, anchor: HTMLElement): void {
   stationMenuStationId.value = stationId;
   stationMenuAnchor.value = anchor;
@@ -1173,11 +1421,14 @@ function contextStationGoogleMapsUrl(station: GlobalMapStation): string {
 
 function contextPlaceAddress(place: NearbyPlace | undefined = contextPlace.value): string {
   if (!place) return "";
-  return [place.name.trim(), place.address?.trim(), place.city?.trim()].filter(Boolean).join(", ");
+  return [nearbyPlaceDisplayName(place, t), place.address?.trim(), place.city?.trim()].filter(Boolean).join(", ");
 }
 
 function contextPlaceGoogleMapsUrl(place: NearbyPlace): string {
-  return nearbyPlaceGoogleMapsUrl(place, { city: nearby.selectedPlace.value?.city });
+  return nearbyPlaceGoogleMapsUrl(
+    { ...place, name: nearbyPlaceDisplayName(place, t) },
+    { city: nearby.selectedPlace.value?.city },
+  );
 }
 
 function openContextStationInGoogleMaps(): void {
@@ -1464,21 +1715,43 @@ onBeforeUnmount(() => {
     </header>
 
     <section class="my-nearby-stations-page__controls" :aria-label="t('nearbyStations.addressPresetLabel')">
-      <label class="my-nearby-stations-page__address">
-        <span>{{ t("nearbyStations.addressPresetLabel") }}</span>
-        <select
-          :value="selectedPresetId"
-          :disabled="placeLoading"
-          @change="selectPreset(($event.target as HTMLSelectElement).value as NearbyAddressPresetId)"
-        >
-          <option v-if="selectedPresetId === NEARBY_CUSTOM_PRESET_ID" :value="NEARBY_CUSTOM_PRESET_ID">
-            {{ customAddressLabel }}
-          </option>
-          <option v-for="preset in presetOptions" :key="preset.id" :value="preset.id">
-            {{ preset.label }}
-          </option>
-        </select>
-      </label>
+      <div class="my-nearby-stations-page__address">
+        <label for="my-nearby-address-preset">{{ t("nearbyStations.addressPresetLabel") }}</label>
+        <div class="my-nearby-stations-page__address-controls">
+          <select
+            id="my-nearby-address-preset"
+            :value="selectedPresetId"
+            :disabled="placeLoading"
+            @change="selectPreset(($event.target as HTMLSelectElement).value as NearbyAddressPresetId)"
+          >
+            <option v-if="selectedPresetId === NEARBY_CUSTOM_PRESET_ID" :value="NEARBY_CUSTOM_PRESET_ID">
+              {{ customAddressLabel }}
+            </option>
+            <option v-for="preset in presetOptions" :key="preset.id" :value="preset.id">
+              {{ preset.label }}
+            </option>
+          </select>
+          <button
+            class="my-nearby-stations-page__address-book"
+            type="button"
+            :disabled="placeLoading"
+            @click="openAddressBook"
+          >
+            <BookOpen :size="16" aria-hidden="true" />
+            {{ t("nearbyStations.chooseAddressBook") }}
+          </button>
+          <button
+            class="my-nearby-stations-page__address-book"
+            data-testid="my-nearby-choose-city"
+            type="button"
+            :disabled="placeLoading"
+            @click="openCityPicker"
+          >
+            <Building2 :size="16" aria-hidden="true" />
+            {{ t("nearbyStations.chooseCity") }}
+          </button>
+        </div>
+      </div>
       <div v-if="placeLoading" class="my-nearby-stations-page__status" role="status">
         <LoaderCircle class="my-nearby-stations-page__spin" :size="17" aria-hidden="true" />
         {{ t("nearbyStations.addressLoading") }}
@@ -1531,14 +1804,18 @@ onBeforeUnmount(() => {
     <section v-if="nearby.selectedPlace.value && !nearbyDirectoryOpen" class="my-nearby-stations-page__map-section">
       <NearbyStationsMap
         :origin="nearby.selectedPlace.value"
+        :origin-label="selectedAddressLabel"
         :radius="nearby.radius.value"
-        :stations="nearby.visibleStations.value.filter((entry) => !hiddenStationIds.has(entry.id))"
+        :stations="scheduleStations"
+        :city-view-stations="nearby.stations.value"
+        :city-view-network="nearby.transportMapNetwork?.value"
         :supplemental-stations="scheduleHeavyStations"
         :selected-line-ids="nearby.selectedLineIds"
         :active-modes="nearby.activeModes.value"
         :available-modes="NEARBY_SUPPORTED_MODES"
         :basemap-style="basemapStyle"
         :show-isochrone-control="settings.nearbyMapShowIsochroneControl"
+        show-city-view-control
         :show-directory-control="settings.nearbyMapShowDirectoryControl"
         show-neighborhood-score-control
         :show-basemap-control="settings.nearbyMapShowBasemapControl"
@@ -1555,8 +1832,14 @@ onBeforeUnmount(() => {
         :hide-stations-without-departures="hideStationsWithoutDepartures"
         v-model:hide-long-wait-transports="hideLongWaitTransports"
         v-model:show-nearby-places="showNearbyPlaces"
+        v-model:show-nearby-benches="showNearbyBenches"
+        v-model:show-nearby-parkings="showNearbyParkings"
         v-model:show-nearby-place-names="showNearbyPlaceNames"
         :places="nearbyMapPlaces"
+        :city-view-places="cityViewPlaces"
+        :city-view-commerce-counts="cityViewCommerceCounts"
+        :city-view-commerce-total="cityViewCommerceTotal"
+        :load-city-view-place-counts="loadCityViewComparisonPlaceCounts"
         :selected-place-id="nearbySelectedPlaceId"
         :walking-routes="nearbyPlaceWalkingRoutes"
         :walking-route="nearbySelectedWalkingRoute"
@@ -1583,11 +1866,14 @@ onBeforeUnmount(() => {
         @fullscreen-change="handleNearbyMapFullscreen"
         @open-places-directory="openNearbyDirectory"
         @open-neighborhood-score="openNearbyNeighborhoodScore"
+        @open-places-ranking="openPlacesRanking"
         @select-place="selectNearbyPlace"
       >
         <template #travel-sidebar>
           <LeftNearbySidebar @close="travelPanelOpen = false">
             <LeftNearbySidebarBodyTravel
+              :turbo="travelRoutes.turbo"
+              :details-visible="travelPanelOpen"
               :origin-label="nearby.selectedPlace.value?.label ?? selectedPreset?.label ?? ''"
               :show-line-icons="settings.showTravelRouteLineIcons"
               :destination="travelRoutes.destination.value"
@@ -1599,6 +1885,7 @@ onBeforeUnmount(() => {
               :allowed-modes="travelAllowedModes"
               :mode-label="modeLabel"
               :resolve-line-id="resolveTravelNetworkLineId"
+              :service-type-for-section="travelSectionServiceType"
               :routes="visibleTravelRoutes"
               :selected-route-id="travelRoutes.selectedRouteId.value"
               :loading="travelRoutes.isLoading.value"
@@ -1723,6 +2010,19 @@ onBeforeUnmount(() => {
       <span>{{ t("nearbyStations.emptyBody") }}</span>
     </section>
 
+    <NearbyPlacesRankingModal
+      :open="placesRankingModalOpen"
+      :city-code="cityViewCode"
+      :city-name="cityViewName ?? nearby.selectedPlace.value?.city"
+      :ranking="placesRanking"
+      :population-by-city="placesRankingPopulationByCity"
+      :loading="placesRankingLoading"
+      :error="placesRankingError"
+      :teleport-target="nearbyMapFullscreen ? '.nearby-map-shell' : 'body'"
+      @close="closePlacesRanking"
+      @retry="loadPlacesRanking"
+    />
+
     <ContextMenu
       v-model:open="stationMenuOpen"
       :anchor="stationMenuAnchor"
@@ -1810,6 +2110,43 @@ onBeforeUnmount(() => {
       </template>
     </AppModal>
 
+    <AdressBook
+      :open="addressBookOpen"
+      selection-mode
+      :selection-description="t('nearbyStations.addressBookSelectionDescription')"
+      @close="closeAddressBook"
+      @select="selectAddressBookEntry"
+    />
+
+    <AppModal
+      :open="cityPickerOpen"
+      :title="t('nearbyStations.chooseCity')"
+      :eyebrow="t('nearbyStations.chooseCityEyebrow')"
+      :close-label="t('nearbyStations.chooseCityClose')"
+      panel-class="my-nearby-stations-page__city-modal"
+      @close="closeCityPicker"
+    >
+      <div v-if="cityPickerLoading" class="my-nearby-stations-page__city-status" role="status">
+        <Spinner :size="18" :label="t('nearbyStations.chooseCityLoading')" />
+        {{ t("nearbyStations.chooseCityLoading") }}
+      </div>
+      <p v-else-if="cityPickerError" class="my-nearby-stations-page__city-status" role="alert">
+        {{ cityPickerError }}
+      </p>
+      <NearbyCityCityPicker
+        v-else
+        :title="t('nearbyStations.chooseCityPickerTitle')"
+        :description="t('nearbyStations.chooseCityPickerDescription')"
+        :search-label="t('nearbyStations.cityComparison.pickCitySearch')"
+        :search-placeholder="t('nearbyStations.cityComparison.pickCitySearchPlaceholder')"
+        :empty-label="t('nearbyStations.cityComparison.pickCityEmpty')"
+        :options="cityPickerOptions"
+        :selected-code="nearby.selectedPlace.value?.code"
+        @select="selectCityCenter"
+        @close="closeCityPicker"
+      />
+    </AppModal>
+
     <Teleport to="body">
       <FullscreenStationPanel
         v-if="nearbyFullscreenBoard"
@@ -1877,8 +2214,14 @@ onBeforeUnmount(() => {
 .my-nearby-stations-page__hero-icon { color: #5146ff; margin-right: 10px; opacity: .8; }
 .my-nearby-stations-page__controls { align-items: end; background: #fff; border: 1px solid var(--border); border-radius: 14px; display: flex; gap: 14px; justify-content: space-between; padding: 14px 16px; }
 .my-nearby-stations-page__address { display: grid; gap: 6px; min-width: min(100%, 560px); }
-.my-nearby-stations-page__address span, .my-nearby-stations-page__radius label { color: var(--muted); font-size: .74rem; font-weight: 850; }
-.my-nearby-stations-page__address select { background: #f8f9fd; border: 1px solid rgba(16,35,63,.14); border-radius: 9px; color: var(--ink); font: inherit; min-height: 42px; padding: 8px 11px; }
+.my-nearby-stations-page__address > label, .my-nearby-stations-page__radius label { color: var(--muted); font-size: .74rem; font-weight: 850; }
+.my-nearby-stations-page__address-controls { align-items: stretch; display: flex; gap: 8px; min-width: 0; }
+.my-nearby-stations-page__address select { background: #f8f9fd; border: 1px solid rgba(16,35,63,.14); border-radius: 9px; color: var(--ink); flex: 1 1 auto; font: inherit; min-height: 42px; min-width: 0; padding: 8px 11px; }
+.my-nearby-stations-page__address-book { align-items: center; background: #f1f0ff; border: 1px solid rgba(81,70,255,.2); border-radius: 9px; color: #4034df; display: inline-flex; flex: 0 0 auto; font: inherit; font-size: .74rem; font-weight: 850; gap: 6px; justify-content: center; min-height: 42px; padding: 8px 11px; white-space: nowrap; }
+.my-nearby-stations-page__address-book:hover, .my-nearby-stations-page__address-book:focus-visible { background: #e8e5ff; border-color: #5146ff; outline: 0; }
+.my-nearby-stations-page__address-book:disabled { cursor: not-allowed; opacity: .6; }
+.my-nearby-stations-page__city-modal { max-width: 560px; }
+.my-nearby-stations-page__city-status { align-items: center; color: var(--muted); display: flex; font-size: .78rem; font-weight: 750; gap: 8px; margin: 0; padding: 12px 0; }
 .my-nearby-stations-page__status, .my-nearby-stations-page__resolved { align-items: center; color: var(--muted); display: inline-flex; font-size: .78rem; gap: 7px; white-space: nowrap; }
 .my-nearby-stations-page__resolved { color: #17864c; font-weight: 800; }
 .my-nearby-stations-page__spin { animation: my-nearby-spin 900ms linear infinite; color: #5146ff; }
@@ -1905,12 +2248,18 @@ onBeforeUnmount(() => {
 .my-nearby-stations-page__danger-button { background: #b42318; color: #fff; font-weight: 850; }
 .my-nearby-stations-page__danger-button:hover, .my-nearby-stations-page__danger-button:focus-visible { background: #8f1c14; color: #fff; }
 @keyframes my-nearby-spin { to { transform: rotate(360deg); } }
+@media (max-width: 900px) {
+  .my-nearby-stations-page__controls { flex-wrap: wrap; }
+  .my-nearby-stations-page__address { flex: 1 1 100%; min-width: 0; }
+  .my-nearby-stations-page__status, .my-nearby-stations-page__resolved { flex: 1 1 100%; min-width: 0; white-space: normal; }
+}
 @media (max-width: 680px) {
   .my-nearby-stations-page { padding: 18px 12px 108px; }
   .my-nearby-stations-page__hero { padding: 19px; }
   .my-nearby-stations-page__hero-icon { display: none; }
   .my-nearby-stations-page__controls { align-items: stretch; flex-direction: column; }
   .my-nearby-stations-page__address { min-width: 0; }
+  .my-nearby-stations-page__address-controls { flex-direction: column; }
   .my-nearby-stations-page__status, .my-nearby-stations-page__resolved { white-space: normal; }
 }
 </style>

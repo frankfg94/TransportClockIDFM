@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NearbyStationScheduleItem } from "../src/features/nearby-stations/nearbyStationSchedules";
 import type { NearbyStationEntry } from "../src/features/nearby-stations/nearbyStations";
 import type { NearbyPlace } from "../src/features/nearby-stations/nearbyPlaces";
+import AdressBook from "../src/features/address-book/AdressBook.vue";
+import type { AddressBookEntry } from "../src/features/address-book/addressBook";
 import MyNearbyStationsPage from "../src/features/nearby-stations/MyNearbyStationsPage.vue";
+import NearbyCityCityPicker from "../src/features/nearby-stations/NearbyCityCityPicker.vue";
 
 const mocks = vi.hoisted(() => ({
   geocode: vi.fn(),
@@ -57,6 +60,7 @@ const mocks = vi.hoisted(() => ({
     refresh: vi.fn(async () => undefined),
   },
   nearbyPlacesOptions: undefined as undefined | { radius: { value: number }; enabled: { value: boolean } },
+  fetchIrisDataset: vi.fn(),
   travelRoutes: {
     destination: { value: undefined as { lon: number; lat: number; label?: string } | undefined },
     departureDateTime: { value: "" },
@@ -84,6 +88,12 @@ vi.mock("#imports", async (importOriginal) => {
     useRouter: () => ({ replace: vi.fn(async () => undefined) }),
   };
 });
+
+vi.mock("nuxt/app", () => ({
+  useRoute: () => mocks.routeState,
+  useRouter: () => ({ replace: vi.fn(async () => undefined) }),
+  useRuntimeConfig: () => ({ public: {} }),
+}));
 
 const trafficScheduleItem = {
   id: "station:rer:B",
@@ -116,6 +126,9 @@ vi.mock("../src/features/nearby-stations/useNearbyPlaces", () => ({
 }));
 vi.mock("../src/features/nearby-stations/useTravelRoutes", () => ({
   useTravelRoutes: () => mocks.travelRoutes,
+}));
+vi.mock("../src/features/transport-map/iris/irisApi", () => ({
+  fetchIrisDataset: () => mocks.fetchIrisDataset(),
 }));
 
 afterEach(() => {
@@ -182,6 +195,7 @@ describe("MyNearbyStationsPage", () => {
       address: "277 avenue de la division leclerc, Châtenay-Malabry",
       lat: "48.76591",
       lon: "2.26821",
+      city: "Châtenay-Malabry",
     };
     mocks.geocode.mockResolvedValue([{ lon: 9, lat: 9, label: "wrong fallback", provider: "ign" }]);
 
@@ -203,10 +217,165 @@ describe("MyNearbyStationsPage", () => {
       lat: 48.76591,
       lon: 2.26821,
       provider: "global-map",
+      city: "Châtenay-Malabry",
     }));
     expect((wrapper.get("select").element as HTMLSelectElement).value).toBe("__custom");
     expect(wrapper.get(".my-nearby-stations-page__resolved").text()).toContain("277 avenue de la division leclerc");
 
+    wrapper.unmount();
+  });
+
+  it("allows choosing any saved address from the address book", async () => {
+    mocks.geocode.mockResolvedValue([{ lon: 2.35, lat: 48.85, label: "Châteaubriand", provider: "ign" }]);
+
+    const wrapper = shallowMount(MyNearbyStationsPage, {
+      global: {
+        stubs: {
+          NearbyStationsMap: {
+            template: "<div data-testid='nearby-map'><slot name='station-schedules' :active-station-id='undefined' /><slot name='traffic-modal' /></div>",
+          },
+        },
+      },
+    });
+
+    await flushPromises();
+
+    const addressBook = wrapper.findComponent(AdressBook);
+    expect(addressBook.exists()).toBe(true);
+    expect(addressBook.props("selectionMode")).toBe(true);
+    expect(addressBook.props("selectionDescription")).toBe("Sélectionnez une adresse enregistrée pour afficher les stations proches.");
+
+    await wrapper.get(".my-nearby-stations-page__address-book").trigger("click");
+    expect(addressBook.props("open")).toBe(true);
+
+    const entry: AddressBookEntry = {
+      id: "home",
+      kind: "address",
+      name: "Mon appartement",
+      address: "277 avenue de la division Leclerc",
+      city: "Châtenay-Malabry",
+      lon: 2.26821,
+      lat: 48.76591,
+      icon: "home",
+    };
+    addressBook.vm.$emit("select", entry);
+    await flushPromises();
+
+    expect(mocks.nearby.selectPlace).toHaveBeenLastCalledWith(expect.objectContaining({
+      id: "home",
+      label: "Mon appartement",
+      address: "277 avenue de la division Leclerc",
+      provider: "address-book",
+      lon: 2.26821,
+      lat: 48.76591,
+    }));
+    expect((wrapper.get("select").element as HTMLSelectElement).value).toBe("__custom");
+    expect(wrapper.get(".my-nearby-stations-page__resolved").text()).toContain("Mon appartement");
+
+    wrapper.unmount();
+  });
+
+  it("uses the centre of the selected city as the reference point", async () => {
+    mocks.geocode.mockResolvedValue([{ lon: 2.35, lat: 48.85, label: "Châteaubriand", provider: "ign" }]);
+    // Two IRIS polygons in the same commune: their average centroid is the
+    // reference point the page must adopt.
+    mocks.fetchIrisDataset.mockResolvedValue({
+      neighborhoods: [
+        { codeIris: "920010001", communeCode: "92001", communeName: "Clamart", departmentCode: "92", centroid: [2.2, 48.9] },
+        { codeIris: "920010002", communeCode: "92001", communeName: "Clamart", departmentCode: "92", centroid: [2.2, 48.9] },
+        { codeIris: "786460001", communeCode: "78646", communeName: "Versailles", departmentCode: "78", centroid: [2.13, 48.8] },
+      ],
+      airNoiseCommunes: { "92001": { inseeCode: "92001", name: "Clamart", departmentCode: "92", population: 52_000 } },
+      departmentNames: { "92": "Hauts-de-Seine", "78": "Yvelines" },
+    });
+
+    const wrapper = shallowMount(MyNearbyStationsPage, {
+      global: {
+        stubs: {
+          NearbyStationsMap: {
+            template: "<div data-testid='nearby-map'><slot name='station-schedules' :active-station-id='undefined' /><slot name='traffic-modal' /></div>",
+          },
+          // AppModal teleports to body; render it inline so the picker and its
+          // props stay inside the wrapper under test.
+          AppModal: {
+            props: ["open"],
+            emits: ["close"],
+            template: "<div v-if='open' data-testid='mock-app-modal'><slot /></div>",
+          },
+        },
+      },
+    });
+
+    await flushPromises();
+
+    const chooseCity = wrapper.get("[data-testid='my-nearby-choose-city']");
+    expect(chooseCity.text()).toContain("Choisir une ville");
+    await chooseCity.trigger("click");
+    await flushPromises();
+
+    expect(mocks.fetchIrisDataset).toHaveBeenCalledTimes(1);
+    const picker = wrapper.findComponent(NearbyCityCityPicker);
+    expect(picker.exists()).toBe(true);
+    const options = picker.props("options") as readonly {
+      code: string;
+      name: string;
+      departmentName?: string;
+      population?: number;
+      lat: number;
+      lon: number;
+    }[];
+    expect(options.map((option) => option.code)).toEqual(["92001", "78646"]);
+    expect(options[0]).toMatchObject({
+      name: "Clamart",
+      departmentName: "Hauts-de-Seine",
+      population: 52_000,
+      lat: 48.9,
+      lon: 2.2,
+    });
+
+    picker.vm.$emit("select", "92001");
+    await flushPromises();
+
+    expect(mocks.nearby.selectPlace).toHaveBeenLastCalledWith(expect.objectContaining({
+      code: "92001",
+      city: "Clamart",
+      lat: 48.9,
+      lon: 2.2,
+      label: "Clamart (92)",
+      provider: "global-map",
+      type: "municipality",
+    }));
+    expect((wrapper.get("select").element as HTMLSelectElement).value).toBe("__custom");
+    expect(wrapper.get(".my-nearby-stations-page__resolved").text()).toContain("Clamart (92)");
+
+    wrapper.unmount();
+  });
+
+  it("reports an IRIS failure instead of an empty city list", async () => {
+    mocks.geocode.mockResolvedValue([{ lon: 2.35, lat: 48.85, label: "Châteaubriand", provider: "ign" }]);
+    mocks.fetchIrisDataset.mockRejectedValue(new Error("iris unavailable"));
+
+    const wrapper = shallowMount(MyNearbyStationsPage, {
+      global: {
+        stubs: {
+          NearbyStationsMap: {
+            template: "<div data-testid='nearby-map'><slot name='station-schedules' :active-station-id='undefined' /><slot name='traffic-modal' /></div>",
+          },
+          AppModal: {
+            props: ["open"],
+            emits: ["close"],
+            template: "<div v-if='open' data-testid='mock-app-modal'><slot /></div>",
+          },
+        },
+      },
+    });
+
+    await flushPromises();
+    await wrapper.get("[data-testid='my-nearby-choose-city']").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='mock-app-modal']").text()).toContain("Les communes d’Île-de-France sont indisponibles. Réessayez plus tard.");
+    expect(wrapper.findComponent(NearbyCityCityPicker).exists()).toBe(false);
     wrapper.unmount();
   });
 

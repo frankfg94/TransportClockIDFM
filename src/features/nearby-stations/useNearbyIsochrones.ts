@@ -1,12 +1,18 @@
 import { onBeforeUnmount, ref, toValue, watch, type MaybeRefOrGetter } from "vue";
 import type { NearbyIsochronesResponse } from "./nearbyIsochrones";
 import { fetchNearbyIsochrones } from "../../services/nearbyIsochrones";
+import {
+  normalizeNearbyWalkingMinutes,
+  NEARBY_WALKING_MINUTES,
+  type NearbyWalkingMinutes,
+} from "./nearbyWalkingMinutes";
 
 export type NearbyIsochronesStatus = "idle" | "loading" | "ready" | "error";
 
 export function useNearbyIsochrones(
   origin: MaybeRefOrGetter<{ lon: number; lat: number }>,
   enabled: MaybeRefOrGetter<boolean>,
+  minutes: MaybeRefOrGetter<readonly NearbyWalkingMinutes[]> = () => NEARBY_WALKING_MINUTES,
 ) {
   const status = ref<NearbyIsochronesStatus>("idle");
   const response = ref<NearbyIsochronesResponse>();
@@ -17,6 +23,10 @@ export function useNearbyIsochrones(
 
   function originKey(value: { lon: number; lat: number }): string {
     return `${value.lon.toFixed(5)},${value.lat.toFixed(5)}`;
+  }
+
+  function requestKey(value: { lon: number; lat: number }, requestedMinutes: readonly NearbyWalkingMinutes[]): string {
+    return `${originKey(value)}|${normalizeNearbyWalkingMinutes(requestedMinutes).join(",")}`;
   }
 
   function cancelRequest(): void {
@@ -39,7 +49,8 @@ export function useNearbyIsochrones(
     }
 
     const currentOrigin = toValue(origin);
-    const key = originKey(currentOrigin);
+    const currentMinutes = normalizeNearbyWalkingMinutes(toValue(minutes));
+    const key = requestKey(currentOrigin, currentMinutes);
     if (!force) {
       const cached = cache.get(key);
       if (cached) {
@@ -59,7 +70,7 @@ export function useNearbyIsochrones(
     status.value = "loading";
 
     try {
-      const nextResponse = await fetchNearbyIsochrones(currentOrigin, nextController.signal);
+      const nextResponse = await fetchNearbyIsochrones(currentOrigin, nextController.signal, currentMinutes);
       if (currentToken !== requestToken || !toValue(enabled)) return;
       cache.set(key, nextResponse);
       response.value = nextResponse;
@@ -79,6 +90,7 @@ export function useNearbyIsochrones(
     [
       () => toValue(enabled),
       () => originKey(toValue(origin)),
+      () => normalizeNearbyWalkingMinutes(toValue(minutes)).join(","),
     ],
     ([isEnabled]) => {
       if (!isEnabled) {

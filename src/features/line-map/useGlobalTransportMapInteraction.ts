@@ -40,6 +40,8 @@ export interface UseGlobalTransportMapInteractionOptions {
     event?: MouseEvent,
     point?: ScreenPoint,
   ) => void;
+  /** Optional fallback for a click on a non-transport administrative overlay. */
+  selectAdministrativeZone?: (point: ScreenPoint, event: PointerEvent) => boolean;
   scheduleViewportRefresh: () => void;
   cancelScheduledViewportRefresh: () => void;
   captureSelectedLineInteractionSceneIfReady: () => boolean;
@@ -612,6 +614,7 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
     if (!dragMoved && pointers.size === 0) {
       const hit = options.hitAt(point);
       if (hit.station || hit.lines.length) options.selectFeature(hit, event, point);
+      else options.selectAdministrativeZone?.(point, event);
     } else if (dragMoved && pointers.size === 0) {
       inertiaState = startInertia(inertiaState, dragVelocity.x, dragVelocity.y);
       runInertia();

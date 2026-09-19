@@ -29,7 +29,7 @@ import {
   type NeighborhoodJourneyBenchmark,
   type NeighborhoodScoreResult,
   type NeighborhoodWalkingMetrics,
-} from "./neighborhoodScore";
+} from "./neighborhood";
 import type { NearbyNeighborhoodScoreSnapshot } from "./nearbyNeighborhoodScoreSnapshot";
 import {
   fetchNeighborhoodVerdict,
@@ -39,6 +39,8 @@ import {
 import type { PublicServiceQuality } from "./serviceQualityApi";
 
 type ReadonlyValue<T> = { readonly value: T };
+
+export type NeighborhoodScoreErrorSource = "verdict" | "places" | "routes";
 
 export interface UseNearbyNeighborhoodScoreOptions {
   origin: ReadonlyValue<GeocoderPoint | undefined>;
@@ -88,6 +90,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   }));
   const isLoading = ref(false);
   const error = ref<Error>();
+  const errorSource = ref<NeighborhoodScoreErrorSource>();
   const updatedAt = ref(Date.now());
 
   const placesResults = new Map<string, NearbyPlace[]>();
@@ -148,6 +151,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     const origin = options.origin.value;
     const originKey = origin ? neighborhoodOriginKey(origin) : "";
     const token = ++requestToken;
+    error.value = undefined;
+    errorSource.value = undefined;
     resetOriginState(originKey);
     greenSpaceJourneys.value = [];
     hospitalJourneys.value = {};
@@ -181,6 +186,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         }
       },
       true,
+      "verdict",
     );
 
     if (!placesLoaded.value) {
@@ -195,6 +201,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
           updatedAt.value = Date.now();
         },
         true,
+        "places",
       );
     } else {
       trackHospitalJourneys(origin, places.value, originKey, token);
@@ -217,7 +224,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
           if (benchmark.id === "chatelet") chateletJourneys.value = next;
           updatedAt.value = Date.now();
         },
-        false,
+        true,
+        "routes",
       );
     }
     if (nextBenchmarks.length > 0) journeyBenchmarks.value = nextBenchmarks;
@@ -232,14 +240,16 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         token,
         (next) => {
           for (const journey of next) {
-            if (hasNoctilienTransitSection(journey) && !noctilienResults.some((candidate) => candidate.id === journey.id)) {
+            if (hasNoctilienTransitSection(journey)
+              && !noctilienResults.some((candidate) => nearbyJourneyDeduplicationKey(candidate) === nearbyJourneyDeduplicationKey(journey))) {
               noctilienResults.push(journey);
             }
           }
           noctilienJourneys.value = [...noctilienResults];
           updatedAt.value = Date.now();
         },
-        false,
+        true,
+        "routes",
       );
     }
     noctilienJourneys.value = [];
@@ -288,6 +298,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     lastServiceResults.clear();
     backendVerdict.value = undefined;
     error.value = undefined;
+    errorSource.value = undefined;
     if (!originKey) return;
 
     const snapshot = snapshotForOrigin(options.initialSnapshot, originKey);
@@ -343,12 +354,15 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     const promise = (options.journeyProbe
       ? options.journeyProbe.probeJourneys(request)
       : travelRoutesProvider.findJourneys(request))
-      .catch(() => []).then((next) => {
-      journeyResults.set(journeyKey, [...next]);
-      return next;
-    }).finally(() => {
-      if (journeyRequests.get(journeyKey) === promise) journeyRequests.delete(journeyKey);
-    });
+      .then((next) => {
+        // Cache only an actual provider response. A 429, timeout or aborted
+        // request must remain retryable; caching its former [] result makes
+        // every route-dependent signal disappear for the rest of the page.
+        journeyResults.set(journeyKey, [...next]);
+        return next;
+      }).finally(() => {
+        if (journeyRequests.get(journeyKey) === promise) journeyRequests.delete(journeyKey);
+      });
     journeyRequests.set(journeyKey, promise);
     return promise;
   }
@@ -383,7 +397,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
           destination,
           options.journeyDateTime,
           journeyKey,
-        );
+        ).catch(() => []);
       }))).flat();
       return { greenSpace, journeys };
     }));
@@ -471,6 +485,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     token: number,
     apply: (value: T) => void,
     reportError: boolean,
+    source?: NeighborhoodScoreErrorSource,
   ): void {
     pendingTasks.add(taskId);
     updateLoadingState();
@@ -483,7 +498,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       .catch((cause: unknown) => {
         if (token !== requestToken) return;
         if (cause instanceof Error && cause.name === "AbortError") return;
-        if (reportError) error.value = cause instanceof Error ? cause : new Error("neighborhood-source-unavailable");
+        if (reportError) {
+          error.value = cause instanceof Error ? cause : new Error("neighborhood-source-unavailable");
+          errorSource.value = source;
+        }
         recompute();
       })
       .finally(() => {
@@ -563,6 +581,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     backendVerdict: readonly(backendVerdict),
     isLoading: readonly(isLoading),
     error: readonly(error),
+    errorSource: readonly(errorSource),
     updatedAt: readonly(updatedAt),
     refresh,
   };
@@ -673,19 +692,21 @@ function resolveNoctilienTargets(
     .map(({ station }) => station);
 }
 
-const GREEN_SPACE_TRANSIT_MIN_SURFACE_M2 = 100_000;
+const GREEN_SPACE_TRANSIT_MIN_SURFACE_M2 = 30_000;
 
 function resolveGreenSpaceTransitTargets(
   spaces: readonly PublicGreenSpaceAccess[] | undefined,
 ): PublicGreenSpaceAccess[] {
   return [...(spaces ?? [])]
     .filter((space) => (space.surfaceM2 ?? 0) >= GREEN_SPACE_TRANSIT_MIN_SURFACE_M2)
-    .filter((space) => (space.walkingMinutes ?? space.estimatedWalkingMinutes) > 15)
+    // A real walking route under 15 min is handled directly by the score;
+    // unknown walking access remains eligible for a transit probe.
+    .filter((space) => space.walkingMinutes === undefined || space.walkingMinutes > 15)
     .sort((left, right) => (right.surfaceM2 ?? 0) - (left.surfaceM2 ?? 0)
       || (left.walkingMinutes ?? left.estimatedWalkingMinutes)
         - (right.walkingMinutes ?? right.estimatedWalkingMinutes)
       || left.name.localeCompare(right.name, "fr-FR"))
-    .slice(0, 4);
+    .slice(0, 8);
 }
 
 function getDistanceMeters(
@@ -725,6 +746,36 @@ function hasNoctilienTransitSection(journey: NearbyJourney): boolean {
       .filter((value): value is string => Boolean(value?.trim()))
       .map((value) => normalizeScoreText(value).replace(/[^a-z0-9]+/gu, ""));
     return references.some((reference) => /^n\d+$/u.test(reference));
+  });
+}
+
+function nearbyJourneyDeduplicationKey(journey: NearbyJourney): string {
+  const id = journey.id?.trim();
+  if (id) return `id:${id}`;
+
+  // Navitia does not always expose journey.id for scheduled journeys. Do not
+  // collapse every such response into the first line that happened to return:
+  // the route identity is reconstructed from its stable visible sections.
+  return JSON.stringify({
+    durationSeconds: journey.durationSeconds,
+    departureDateTime: journey.departureDateTime,
+    arrivalDateTime: journey.arrivalDateTime,
+    transferCount: journey.transferCount,
+    sections: journey.sections.map((section) => ({
+      type: section.type,
+      mode: section.mode,
+      durationSeconds: section.durationSeconds,
+      departureDateTime: section.departureDateTime,
+      arrivalDateTime: section.arrivalDateTime,
+      lineId: section.lineId,
+      lineCode: section.lineCode,
+      lineAliases: section.lineAliases,
+      lineMode: section.lineMode,
+      fromStopPointId: section.fromStopPointId,
+      toStopPointId: section.toStopPointId,
+      fromName: section.fromName,
+      toName: section.toName,
+    })),
   });
 }
 

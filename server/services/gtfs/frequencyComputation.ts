@@ -14,7 +14,7 @@ import {
 
 type Period = keyof FrequencyValues;
 /** Bump when grouping/windows/aggregation semantics change. */
-export const GTFS_FREQUENCY_CALCULATION_VERSION = 2;
+export const GTFS_FREQUENCY_CALCULATION_VERSION = 3;
 const PERIODS: Period[] = ["peakMinutes", "offPeakMinutes", "nightMinutes"];
 // Half-open, contiguous civil-day windows. Gaps NEVER cross their boundaries.
 export const GTFS_FREQUENCY_WINDOWS: ReadonlyArray<{ start: number; end: number; period: Period }> =
@@ -271,6 +271,7 @@ export function computeGtfsLineFrequency(input: GtfsFrequencyInput): GtfsLineFre
     average: {},
     directions: [],
     sections: [],
+    stations: [],
     stationCount: 0,
     sampledStationCount: 0,
   };
@@ -401,9 +402,20 @@ export function computeGtfsLineFrequency(input: GtfsFrequencyInput): GtfsLineFre
       lineMovements.set(call.stationId, movements);
     }
   }
-  const summary = summarize(lineSamplesBySense(lineMovements, graph?.sections.length === 1));
+  const stationSamples = lineSamplesBySense(lineMovements, graph?.sections.length === 1);
+  const summary = summarize(stationSamples);
   result.average = summary.average;
   result.directions = summary.directions;
+  result.stations = [...stationSamples.entries()]
+    .map(([id, samples]) => {
+      const stationSummary = summarize(new Map([[id, samples]]));
+      return {
+        id,
+        average: stationSummary.average,
+        directions: stationSummary.directions,
+      };
+    })
+    .filter((station) => Object.keys(station.average).length > 0);
   result.sampledStationCount = summary.sampledStationCount;
   result.stationCount = servedStations.size;
   result.status = Object.keys(result.average).length ? "ready" : "insufficient";

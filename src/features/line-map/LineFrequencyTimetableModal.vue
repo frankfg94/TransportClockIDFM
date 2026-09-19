@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from "vue";
 import AppModal from "../../components/AppModal.vue";
+import LoadingBar from "../../components/LoadingBar.vue";
 import { useI18n } from "../../i18n";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
 import type { GtfsLineTimetableResponse } from "../../types/lineFrequencyTimetable";
@@ -93,6 +94,14 @@ onBeforeUnmount(() => {
       :loading="loading"
       :error="error"
     />
+    <template v-if="loading" #footer>
+      <LoadingBar
+        class="line-frequency-timetable-modal__loading-bar"
+        indeterminate
+        :style="{ '--loading-bar-color': lineColor || 'var(--idfm-blue)' }"
+        :aria-label="t('globalMap.sidebar.gtfsFrequency.timetableLoading')"
+      />
+    </template>
   </AppModal>
 </template>
 
@@ -101,11 +110,20 @@ onBeforeUnmount(() => {
   width: min(760px, calc(100vw - 32px));
   max-width: min(760px, calc(100vw - 32px));
   max-height: min(92dvh, 920px);
-  overflow: auto;
+  overflow: hidden;
 }
 
 :global(.line-frequency-timetable-modal .app-modal__body) {
   min-width: 0;
   overflow-x: hidden;
+}
+
+:global(.line-frequency-timetable-modal .modal-panel__footer) {
+  padding: 0;
+  border-top: 0;
+}
+
+.line-frequency-timetable-modal__loading-bar {
+  width: 100%;
 }
 </style>

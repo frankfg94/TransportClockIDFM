@@ -7,7 +7,7 @@ import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { getNearbyWalkingRoute } from "../../services/nearbyWalkingRoutes";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import AdressBook from "../address-book/AdressBook.vue";
-import { toAddressBookPoint, type AddressBookEntry } from "../address-book/addressBook";
+import { toAddressBookPoint, useAddressBook, type AddressBookEntry } from "../address-book/addressBook";
 import {
   NEARBY_RADIUS_DEFAULT_METERS,
   NEARBY_SUPPORTED_MODES,
@@ -31,6 +31,7 @@ import {
 const route = useRoute();
 const router = useRouter();
 const { t } = useI18n();
+const addressBook = useAddressBook();
 
 function queryString(value: unknown): string | undefined {
   const candidate = Array.isArray(value) ? value[0] : value;
@@ -148,15 +149,28 @@ watch(
 );
 
 const originLabel = computed(() => formatOriginLabel(nearby.selectedPlace.value ?? initialOrigin));
+const workplaceLabel = computed(() => {
+  const workplace = addressBook.workplaceAddress.value;
+  return workplace?.name || workplace?.address || undefined;
+});
 const nearbyUrl = computed(() => createNearbyUrl(nearby.selectedPlace.value ?? initialOrigin));
 const directoryUrl = computed(() => {
   const url = createNearbyUrl(nearby.selectedPlace.value ?? initialOrigin);
   return url === "/nearby-stations" ? url : `${url}&annuary=`;
 });
 const addressBookOpen = ref(false);
-const scoreError = computed(() => score.error.value || heavy.error.value
-  ? t("nearbyStations.neighborhoodScore.partialError")
-  : undefined);
+const scoreError = computed(() => {
+  if (heavy.error.value || score.errorSource?.value === "routes") {
+    return t("nearbyStations.neighborhoodScore.partialErrorRoutes");
+  }
+  if (score.errorSource?.value === "places") {
+    return t("nearbyStations.neighborhoodScore.partialErrorPlaces");
+  }
+  if (score.errorSource?.value === "verdict") {
+    return t("nearbyStations.neighborhoodScore.partialErrorVerdict");
+  }
+  return score.error.value ? t("nearbyStations.neighborhoodScore.partialError") : undefined;
+});
 
 function openAddressSelector(): void {
   addressBookOpen.value = true;
@@ -258,6 +272,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
       v-else
       :result="score.result.value"
       :origin-label="originLabel"
+      :workplace-label="workplaceLabel"
       :loading="score.isLoading.value || heavy.isLoading.value"
       :error="scoreError"
       :directory-url="directoryUrl"

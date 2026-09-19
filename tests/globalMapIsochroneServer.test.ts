@@ -21,6 +21,21 @@ function memorySource(bytes: Uint8Array): IsochroneRangeSource & { reads: Array<
 afterEach(() => { clearIsochroneServerCache(); vi.unstubAllGlobals(); });
 
 describe("Nuxt indexed walking atlas", () => {
+  it("reads only the requested station entry, not the full archive", async () => {
+    const fixture = walkingArchiveFixture();
+    const asset = "origins/2.35000%2C48.85000.json";
+    fixture.index.stationOrigins = { s1: { asset, lon: 2.35, lat: 48.85 } };
+    fixture.entries[asset] = strToU8(JSON.stringify(Object.fromEntries([5, 10, 15, 20, 25, 30].map((minutes) => [minutes, walkingPolygon()]))));
+    const source = memorySource(fixture.bytes());
+    const archive = await IndexedIsochroneArchive.open(source);
+    const before = source.reads.length;
+    expect((await archive.selectOrigin(source, { lon: 2.35, lat: 48.85 }))?.zones.map((zone) => zone.minutes)).toEqual([5, 10, 15]);
+    expect(source.reads.length - before).toBe(3);
+    expect(source.reads.every(([, length]) => length < source.size)).toBe(true);
+    const after = source.reads.length;
+    expect(await archive.selectOrigin(source, { lon: 2.4, lat: 48.85 })).toBeUndefined();
+    expect(source.reads.length).toBe(after);
+  });
   it("reads index and only selected contours, preserving holes and caching geometry", async () => {
     const fixture = walkingArchiveFixture();
     const source = memorySource(fixture.bytes());

@@ -3,7 +3,12 @@ import { normalizeWalkingIsochroneGeometry, type WalkingIsochroneGeometry } from
 import {
   assertGlobalIsochroneIndex, GlobalIsochroneError,
   type GlobalIsochroneIndex, type GlobalIsochroneRequest, type GlobalIsochroneResult,
+  type GlobalIsochroneMinutes,
 } from "../../../src/features/transport-map/isochrones/contracts";
+import {
+  normalizeNearbyWalkingMinutes,
+  NEARBY_WALKING_MINUTES,
+} from "../../../src/features/nearby-stations/nearbyWalkingMinutes";
 import type { IsochroneRangeSource } from "./rangeSource";
 
 const MAX_ENTRY = 32 * 1024 * 1024;
@@ -20,7 +25,10 @@ const crcTable = Uint32Array.from({ length: 256 }, (_, byte) => {
 export class IndexedIsochroneArchive {
   private cache = new Map<string, { geometry: WalkingIsochroneGeometry; cost: number }>();
   private cacheBytes = 0;
-  private constructor(readonly index: GlobalIsochroneIndex, private entries: Map<string, Entry>, private directoryOffset: number) {}
+  private originAssets: Set<string>;
+  private constructor(readonly index: GlobalIsochroneIndex, private entries: Map<string, Entry>, private directoryOffset: number) {
+    this.originAssets = new Set(Object.values(index.stationOrigins ?? {}).map((station) => station.asset));
+  }
 
   static async open(source: IsochroneRangeSource): Promise<IndexedIsochroneArchive> {
     try {
@@ -54,6 +62,9 @@ export class IndexedIsochroneArchive {
       assertGlobalIsochroneIndex(index);
       for (const scope of Object.values(index.scopes)) for (const zone of Object.values(scope.zones)) {
         if (entries.get(zone.asset)?.original !== zone.bytes) throw new Error();
+      }
+      for (const station of Object.values(index.stationOrigins ?? {})) {
+        if (!entries.has(station.asset)) throw new Error();
       }
       return new IndexedIsochroneArchive(index, entries, start);
     } catch (error) {
@@ -94,12 +105,31 @@ export class IndexedIsochroneArchive {
         }
       }
       for (const id of scope.coveredStationIds) available.add(id);
-      result.surfaces.push({ id: zone.asset, mode: request.mode, minutes: request.minutes, geometry: cached.geometry });
+      result.surfaces.push({ id: zone.asset, mode: request.mode, minutes: request.minutes, scopeKey: request.key, geometry: cached.geometry });
     }
     result.coverage.total = total.size;
     result.coverage.available = available.size;
     result.coverage.missing = total.size - available.size;
     return result;
+  }
+
+  async selectOrigin(
+    source: IsochroneRangeSource,
+    origin: { lon: number; lat: number },
+    requestedMinutes: readonly GlobalIsochroneMinutes[] = NEARBY_WALKING_MINUTES,
+  ) {
+    const asset = `origins/${encodeURIComponent(`${origin.lon.toFixed(5)},${origin.lat.toFixed(5)}`)}.json`;
+    if (!this.originAssets.has(asset)) return undefined;
+    const entry = this.entries.get(asset);
+    if (!entry) throw new GlobalIsochroneError("invalid");
+    const payload = JSON.parse(strFromU8(await readEntry(source, entry, this.directoryOffset)));
+    const minutes = normalizeNearbyWalkingMinutes(requestedMinutes);
+    const zones = minutes.map((minutes) => {
+      const geometry = normalizeWalkingIsochroneGeometry(payload[minutes]);
+      if (!geometry) throw new GlobalIsochroneError("invalid");
+      return { minutes, geometry };
+    });
+    return { origin, zones };
   }
 }
 

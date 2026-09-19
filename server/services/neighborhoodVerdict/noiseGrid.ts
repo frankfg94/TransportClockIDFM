@@ -8,7 +8,9 @@ import {
 
 export const NEARBY_NOISE_GRID_DEFAULT_RADIUS_METERS = 600;
 export const NEARBY_NOISE_GRID_MIN_RADIUS_METERS = 100;
-export const NEARBY_NOISE_GRID_MAX_RADIUS_METERS = 2_000;
+// City view queries the fitted IRIS extent instead of the address radius. Keep
+// the payload bounded while covering large urban selections such as Paris.
+export const NEARBY_NOISE_GRID_MAX_RADIUS_METERS = 15_000;
 
 export type NoiseLevel = 1 | 2 | 3;
 

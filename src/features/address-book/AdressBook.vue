@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import {
+  Briefcase,
   Check,
+  ChevronLeft,
   Eye,
   EyeOff,
   Map as MapIcon,
@@ -45,6 +47,7 @@ export interface AddressBookInitialEntry {
   icon?: AddressBookMarkerIcon;
   color?: string;
   isPrimary?: boolean;
+  isWorkplace?: boolean;
   isHidden?: boolean;
 }
 
@@ -52,9 +55,11 @@ const props = withDefaults(defineProps<{
   open: boolean;
   initial?: AddressBookInitialEntry;
   selectionMode?: boolean;
+  selectionDescription?: string;
 }>(), {
   initial: undefined,
   selectionMode: false,
+  selectionDescription: undefined,
 });
 
 const emit = defineEmits<{
@@ -81,6 +86,7 @@ const draftLat = ref<number>();
 const draftIcon = ref<AddressBookMarkerIcon>("pin");
 const draftColor = ref(DEFAULT_ADDRESS_BOOK_MARKER_COLOR);
 const draftPrimary = ref(false);
+const draftWorkplace = ref(false);
 const draftHidden = ref(false);
 const iconSelectorOpen = ref(false);
 const originalAddress = ref("");
@@ -117,6 +123,7 @@ watch(
 
 function compareEntries(left: AddressBookEntry, right: AddressBookEntry): number {
   return Number(Boolean(right.isPrimary)) - Number(Boolean(left.isPrimary))
+    || Number(Boolean(right.isWorkplace)) - Number(Boolean(left.isWorkplace))
     || left.name.localeCompare(right.name, "fr-FR", { numeric: true })
     || left.id.localeCompare(right.id, "fr-FR");
 }
@@ -157,6 +164,7 @@ function openEditor(initial: AddressBookInitialEntry): void {
   draftIcon.value = normalizeAddressBookMarkerIcon(initial.icon);
   draftColor.value = normalizeAddressBookColor(initial.color) ?? DEFAULT_ADDRESS_BOOK_MARKER_COLOR;
   draftPrimary.value = initial.kind !== "marker" && initial.isPrimary === true;
+  draftWorkplace.value = initial.kind !== "marker" && initial.isWorkplace === true;
   draftHidden.value = initial.isHidden === true;
   iconSelectorOpen.value = false;
   originalAddress.value = draftAddress.value;
@@ -241,6 +249,7 @@ async function saveDraft(): Promise<void> {
     icon: draftIcon.value,
     color: draftColor.value,
     ...(draftKind.value === "address" && draftPrimary.value ? { isPrimary: true } : {}),
+    ...(draftKind.value === "address" && draftWorkplace.value ? { isWorkplace: true } : {}),
     ...(draftHidden.value ? { isHidden: true } : {}),
   };
 
@@ -300,9 +309,28 @@ function viewNeighborhood(entry: AddressBookEntry): void {
     :close-label="t('common.actions.close')"
     @close="emit('close')"
   >
+    <template #header>
+      <div class="address-book-modal__heading">
+        <button
+          v-if="editorOpen"
+          class="icon-button address-book-modal__back"
+          type="button"
+          :aria-label="t('addressBook.backToList')"
+          :title="t('addressBook.backToList')"
+          @click="closeEditor"
+        >
+          <ChevronLeft :size="22" aria-hidden="true" />
+        </button>
+        <div>
+          <p class="eyebrow">{{ t("addressBook.eyebrow") }}</p>
+          <h2>{{ editorOpen ? editorTitle : selectionMode ? t("addressBook.selectionTitle") : t("addressBook.title") }}</h2>
+        </div>
+      </div>
+    </template>
+
     <template v-if="!editorOpen">
       <div class="address-book-modal__intro">
-        <p>{{ selectionMode ? t("addressBook.selectionDescription") : t("addressBook.description") }}</p>
+        <p>{{ selectionMode ? (selectionDescription ?? t("addressBook.selectionDescription")) : t("addressBook.description") }}</p>
         <button type="button" @click="openCreate">
           <Plus :size="17" aria-hidden="true" />
           {{ t("addressBook.add") }}
@@ -327,6 +355,10 @@ function viewNeighborhood(entry: AddressBookEntry): void {
               <span v-if="entry.isPrimary" class="address-book-entry__primary">
                 <Star :size="12" fill="currentColor" aria-hidden="true" />
                 {{ t("addressBook.primary") }}
+              </span>
+              <span v-if="entry.isWorkplace" class="address-book-entry__workplace">
+                <Briefcase :size="12" aria-hidden="true" />
+                {{ t("addressBook.workplace") }}
               </span>
               <span v-if="entry.isHidden" class="address-book-entry__hidden">
                 <EyeOff :size="12" aria-hidden="true" />
@@ -463,6 +495,12 @@ function viewNeighborhood(entry: AddressBookEntry): void {
         <span>{{ t("addressBook.makePrimary") }}</span>
       </label>
 
+      <label v-if="draftKind === 'address'" class="address-book-form__workplace">
+        <input v-model="draftWorkplace" type="checkbox" />
+        <Briefcase :size="16" aria-hidden="true" />
+        <span>{{ t("addressBook.makeWorkplace") }}</span>
+      </label>
+
       <button
         class="address-book-form__visibility"
         :class="{ 'address-book-form__visibility--hidden': draftHidden }"
@@ -503,6 +541,9 @@ function viewNeighborhood(entry: AddressBookEntry): void {
 
 <style scoped>
 :global(.address-book-modal) { max-width: 760px; min-width: 0; width: min(100%, 760px); }
+.address-book-modal__heading { align-items: center; display: flex; gap: 12px; min-width: 0; }
+.address-book-modal__heading > div { min-width: 0; }
+.address-book-modal__heading h2 { overflow-wrap: anywhere; }
 .address-book-modal__intro { align-items: flex-start; display: flex; gap: 14px; justify-content: space-between; margin-bottom: 14px; }
 .address-book-modal__intro p { color: #64748b; font-size: .82rem; line-height: 1.4; margin: 0; }
 .address-book-modal__intro button, .address-book-entry__confirm button { align-items: center; background: #5146ff; border: 0; border-radius: 9px; color: #fff; display: inline-flex; flex: 0 0 auto; font: inherit; font-size: .76rem; font-weight: 850; gap: 6px; min-height: 36px; padding: 8px 11px; }
@@ -518,6 +559,7 @@ function viewNeighborhood(entry: AddressBookEntry): void {
 .address-book-entry__subtitle { color: #475569; font-size: .74rem; }
 .address-book-entry__content small { color: #64748b; font-size: .64rem; font-weight: 750; }
 .address-book-entry__primary { align-items: center; background: #fff1c2; border-radius: 999px; color: #8a5100; display: inline-flex; font-size: .62rem; font-weight: 850; gap: 3px; padding: 3px 6px; }
+.address-book-entry__workplace { align-items: center; background: #dbeafe; border-radius: 999px; color: #075985; display: inline-flex; font-size: .62rem; font-weight: 850; gap: 3px; padding: 3px 6px; }
 .address-book-entry__hidden { align-items: center; background: #eef2ff; border-radius: 999px; color: #4f46e5; display: inline-flex; font-size: .62rem; font-weight: 850; gap: 3px; padding: 3px 6px; }
 .address-book-entry__actions { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
 .address-book-entry__actions button { align-items: center; background: #fff; border: 1px solid rgba(24,35,63,.12); border-radius: 7px; color: #475569; display: flex; flex: 0 0 31px; height: 31px; justify-content: center; line-height: 0; min-height: 31px; min-width: 31px; padding: 0; width: 31px; }
@@ -554,6 +596,8 @@ function viewNeighborhood(entry: AddressBookEntry): void {
 .address-book-form__color-control code { color: #64748b; font-size: .72rem; }
 .address-book-form__primary { align-items: center; display: flex !important; gap: 8px; grid-template-columns: none !important; }
 .address-book-form__primary input { accent-color: #5146ff; }
+.address-book-form__workplace { align-items: center; color: #075985 !important; display: flex !important; gap: 8px; grid-template-columns: none !important; }
+.address-book-form__workplace input { accent-color: #0284c7; }
 .address-book-form__visibility { align-items: center; background: #f8f8ff; border: 1px solid rgba(81,70,255,.16); border-radius: 10px; color: #475569; display: inline-flex; font: inherit; font-size: .74rem; font-weight: 800; gap: 8px; justify-content: flex-start; min-height: 42px; padding: 7px 10px; text-align: left; }
 .address-book-form__visibility:hover, .address-book-form__visibility:focus-visible, .address-book-form__visibility--hidden { background: #efeeff; border-color: #5146ff; color: #4034df; outline: 0; }
 .address-book-form__visibility-track { background: #cbd5e1; border-radius: 999px; display: inline-flex; flex: 0 0 auto; height: 20px; padding: 2px; transition: background 140ms ease; width: 36px; }

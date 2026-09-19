@@ -6,12 +6,13 @@ import {
   NEIGHBORHOOD_SCORE_BAND_COLORS,
   type NeighborhoodScoreBand,
   type NeighborhoodScoreResult,
-} from "./neighborhoodScore";
+} from "./neighborhood";
 import NearbyNeighborhoodScoreFact from "./NearbyNeighborhoodScoreFact.vue";
 
 const props = defineProps<{
   result: NeighborhoodScoreResult;
   originLabel?: string;
+  workplaceLabel?: string;
   loading?: boolean;
   error?: string;
   directoryUrl: string;
@@ -104,7 +105,7 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
           :key="`summary:${fact.id}`"
           class="nearby-neighborhood-score-card__summary-fact"
         >
-          <span aria-hidden="true">+</span>
+          <span aria-hidden="true">{{ fact.emphasis === "exceptional" ? "+++" : "+" }}</span>
           {{ factLabel(fact) }}
         </p>
       </div>
@@ -115,7 +116,7 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
           :key="`summary:${fact.id}`"
           class="nearby-neighborhood-score-card__summary-fact"
         >
-          <span aria-hidden="true">−</span>
+          <span aria-hidden="true">{{ fact.emphasis === "exceptional" ? "+++" : "−" }}</span>
           {{ factLabel(fact) }}
         </p>
       </div>
@@ -132,7 +133,11 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
           {{ category.unavailableReasonKey ? t(category.unavailableReasonKey) : t("nearbyStations.neighborhoodScore.noData") }}
         </p>
         <div v-if="category.available || category.neutralFacts.length" class="nearby-neighborhood-score-card__facts">
-          <div v-if="category.positiveFacts.length" class="nearby-neighborhood-score-card__fact-group">
+          <div
+            v-if="category.positiveFacts.length"
+            class="nearby-neighborhood-score-card__fact-group"
+            :class="{ 'nearby-neighborhood-score-card__fact-group--positive-only': !category.negativeFacts.length }"
+          >
             <span>{{ t("nearbyStations.neighborhoodScore.positives") }}</span>
             <NearbyNeighborhoodScoreFact
               v-for="fact in category.positiveFacts"
@@ -194,7 +199,10 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
           <li>{{ t("nearbyStations.neighborhoodScore.limitations.education") }}</li>
           <li>{{ t("nearbyStations.neighborhoodScore.limitations.livingEnvironment") }}</li>
           <li>{{ t("nearbyStations.neighborhoodScore.limitations.futureProjects") }}</li>
-          <li>{{ t("nearbyStations.neighborhoodScore.limitations.work") }}</li>
+          <li v-if="workplaceLabel">
+            {{ t("nearbyStations.neighborhoodScore.limitations.workKnown", { name: workplaceLabel }) }}
+          </li>
+          <li v-else>{{ t("nearbyStations.neighborhoodScore.limitations.work") }}</li>
           <li>{{ t("nearbyStations.neighborhoodScore.limitations.crowding") }}</li>
         </ul>
       </details>
@@ -248,9 +256,11 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
 .nearby-neighborhood-score-card__category-header strong { color: #5146ff; font-size: .8rem; font-variant-numeric: tabular-nums; }
 .nearby-neighborhood-score-card__category-header span { color: #8b95a7; font-size: .7rem; font-weight: 800; }
 .nearby-neighborhood-score-card__category-empty { color: var(--muted); font-size: .76rem; line-height: 1.45; margin: 0; padding: 2px 7px 4px; }
-.nearby-neighborhood-score-card__facts { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.nearby-neighborhood-score-card__facts { display: grid; gap: 4px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .nearby-neighborhood-score-card__fact-group--neutral { grid-column: 1 / -1; }
 .nearby-neighborhood-score-card__fact-group { min-width: 0; }
+.nearby-neighborhood-score-card__fact-group--positive-only { display: grid; gap: 4px; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.nearby-neighborhood-score-card__fact-group--positive-only > span { grid-column: 1 / -1; }
 .nearby-neighborhood-score-card__footer { border-top: 1px solid rgba(16,35,63,.1); color: var(--muted); display: grid; font-size: .7rem; gap: 5px; line-height: 1.45; margin-top: 20px; padding: 14px 7px 0; }
 .nearby-neighborhood-score-card__footer p { margin: 0; }
 .nearby-neighborhood-score-card__footer details { margin-top: 4px; }
@@ -267,7 +277,7 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
 @keyframes nearby-score-spin { to { transform: rotate(360deg); } }
 @media (max-width: 680px) {
   .nearby-neighborhood-score-card { padding: 16px; }
-  .nearby-neighborhood-score-card__highlights, .nearby-neighborhood-score-card__facts { grid-template-columns: 1fr; }
+  .nearby-neighborhood-score-card__highlights, .nearby-neighborhood-score-card__facts, .nearby-neighborhood-score-card__fact-group--positive-only { grid-template-columns: 1fr; }
   .nearby-neighborhood-score-card__score { min-width: 74px; padding-left: 9px; padding-right: 9px; }
   .nearby-neighborhood-score-card__score strong { font-size: 1.9rem; }
 }

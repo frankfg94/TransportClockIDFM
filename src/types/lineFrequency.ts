@@ -21,6 +21,12 @@ export interface FrequencySection {
   directions: FrequencyDirection[];
 }
 
+export interface FrequencyStation {
+  id: string;
+  average: FrequencyValues;
+  directions: FrequencyDirection[];
+}
+
 export interface GtfsLineFrequencyResponse {
   lineId: string;
   serviceDate: string;
@@ -34,6 +40,8 @@ export interface GtfsLineFrequencyResponse {
   average: FrequencyValues;
   directions: FrequencyDirection[];
   sections: FrequencySection[];
+  /** Local station summaries used when a nearby score has a station target. */
+  stations?: FrequencyStation[];
   stationCount: number;
   sampledStationCount: number;
 }

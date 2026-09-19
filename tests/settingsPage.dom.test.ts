@@ -87,14 +87,14 @@ describe("SettingsPage", () => {
     );
     vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
       const actual =
-        await importActual<
-          typeof import("../src/features/app-settings/appSettings")
-        >();
+        await importActual<typeof import("../src/features/app-settings/appSettings")>();
       const { computed, ref } = await import("vue");
-      const settings = ref(actual.normalizeAppSettings({
-        ...actual.createDefaultAppSettings(),
-        language: "fr",
-      }));
+      const settings = ref(
+        actual.normalizeAppSettings({
+          ...actual.createDefaultAppSettings(),
+          language: "fr",
+        }),
+      );
 
       return {
         ...actual,
@@ -119,9 +119,7 @@ describe("SettingsPage", () => {
       };
     });
 
-    const { default: SettingsPage } = await import(
-      "../src/features/app-settings/SettingsPage.vue"
-    );
+    const { default: SettingsPage } = await import("../src/features/app-settings/SettingsPage.vue");
     const wrapper = mount(SettingsPage);
     expect(
       wrapper
@@ -138,7 +136,9 @@ describe("SettingsPage", () => {
     expect(networkControl.text()).toContain("Automatique (UNLIMITED_NETWORK)");
     for (const label of ["Illimités", "Limités à 4 appels", "Automatique (UNLIMITED_NETWORK)"]) {
       await networkControl.get("[role='combobox']").trigger("click");
-      const option = networkControl.findAll("[role='option']").find((entry) => entry.text() === label);
+      const option = networkControl
+        .findAll("[role='option']")
+        .find((entry) => entry.text() === label);
       expect(option).toBeDefined();
       await option!.trigger("mousedown");
       expect(networkControl.get("[role='combobox']").text()).toContain(label);
@@ -151,9 +151,7 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Chargement des correspondances");
     expect(wrapper.text()).toContain("Mode de correspondance");
     expect(wrapper.text()).toContain("Auto");
-    const transferResolverControl = wrapper.get(
-      "[data-settings-transfer-resolver]",
-    );
+    const transferResolverControl = wrapper.get("[data-settings-transfer-resolver]");
     expect(transferResolverControl.text()).toContain("Automatique");
     await transferResolverControl.get("[role='combobox']").trigger("click");
     const nearbyResolverOption = transferResolverControl
@@ -228,9 +226,7 @@ describe("SettingsPage", () => {
     await voyagerStyleOption.trigger("mousedown");
     expect(mapStyleControl.text()).toContain("espaces verts renforcés");
 
-    const mapAntialiasingToggle = wrapper.get(
-      "[data-settings-map-antialiasing] input",
-    );
+    const mapAntialiasingToggle = wrapper.get("[data-settings-map-antialiasing] input");
     expect(mapAntialiasingToggle.attributes("role")).toBe("switch");
     expect(mapAntialiasingToggle.attributes("aria-checked")).toBe("true");
     expect((mapAntialiasingToggle.element as HTMLInputElement).checked).toBe(true);
@@ -238,23 +234,17 @@ describe("SettingsPage", () => {
     expect(mapAntialiasingToggle.attributes("aria-checked")).toBe("false");
     expect((mapAntialiasingToggle.element as HTMLInputElement).checked).toBe(false);
 
-    const nearbyMapControlToggles = wrapper.findAll(
-      "[data-settings-nearby-control] input",
-    );
+    const nearbyMapControlToggles = wrapper.findAll("[data-settings-nearby-control] input");
     expect(nearbyMapControlToggles).toHaveLength(5);
     expect(
-      nearbyMapControlToggles.every(
-        (toggle) => (toggle.element as HTMLInputElement).checked,
-      ),
+      nearbyMapControlToggles.every((toggle) => (toggle.element as HTMLInputElement).checked),
     ).toBe(true);
     for (const toggle of nearbyMapControlToggles) {
       await toggle.setValue(false);
       expect((toggle.element as HTMLInputElement).checked).toBe(false);
     }
 
-    const userLocationToggle = wrapper.get(
-      "[data-settings-user-location] input",
-    );
+    const userLocationToggle = wrapper.get("[data-settings-user-location] input");
     expect((userLocationToggle.element as HTMLInputElement).checked).toBe(true);
     await userLocationToggle.setValue(false);
     expect((userLocationToggle.element as HTMLInputElement).checked).toBe(false);
@@ -271,9 +261,7 @@ describe("SettingsPage", () => {
     await planNavigationInput.setValue(false);
     expect((planNavigationInput.element as HTMLInputElement).checked).toBe(false);
 
-    const travelRouteLineIconsToggle = wrapper.get(
-      "[data-settings-travel-route-line-icons] input",
-    );
+    const travelRouteLineIconsToggle = wrapper.get("[data-settings-travel-route-line-icons] input");
     expect(travelRouteLineIconsToggle.attributes("role")).toBe("switch");
     expect(travelRouteLineIconsToggle.attributes("aria-checked")).toBe("true");
     expect((travelRouteLineIconsToggle.element as HTMLInputElement).checked).toBe(true);
@@ -281,9 +269,7 @@ describe("SettingsPage", () => {
     expect(travelRouteLineIconsToggle.attributes("aria-checked")).toBe("false");
     expect((travelRouteLineIconsToggle.element as HTMLInputElement).checked).toBe(false);
 
-    await wrapper
-      .get('[aria-label="Emplacement des boutons de stations"]')
-      .trigger("click");
+    await wrapper.get('[aria-label="Emplacement des boutons de stations"]').trigger("click");
     expect(wrapper.text()).toContain("Dans le menu contextuel");
     expect(wrapper.text()).toContain("Accordion ferme");
     expect(wrapper.text()).toContain("Prochain passage");
@@ -299,9 +285,7 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain(
       "Modale de perturbations et d'interruptions - formatage intelligent",
     );
-    expect(wrapper.text()).toContain(
-      "Analyse le texte de l'annonce pour extraire les periodes",
-    );
+    expect(wrapper.text()).toContain("Analyse le texte de l'annonce pour extraire les periodes");
     expect(wrapper.text()).toContain("Impacts affichés dans le calendrier");
     expect(wrapper.text()).toContain("Interruptions et perturbations");
     expect(wrapper.text()).toContain("Comment le niveau est calculé");
@@ -314,49 +298,32 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Coefficient temporel");
     expect(wrapper.text()).toContain("21:30–06:30");
     expect(wrapper.text()).toContain("22:45");
-    await wrapper
-      .get('[aria-label="Impacts du calendrier trafic"]')
-      .trigger("click");
+    await wrapper.get('[aria-label="Impacts du calendrier trafic"]').trigger("click");
     expect(wrapper.text()).toContain("Interruptions uniquement");
 
     const smartModalFormattingToggle = wrapper
       .findAll("label.settings-toggle")
       .find((label) =>
-        label.text().includes(
-          "Modale de perturbations et d'interruptions - formatage intelligent",
-        ),
+        label.text().includes("Modale de perturbations et d'interruptions - formatage intelligent"),
       );
     if (!smartModalFormattingToggle) {
       throw new Error("Missing smart traffic modal formatting setting");
     }
-    const smartModalFormattingInput =
-      smartModalFormattingToggle.find("input");
-    expect(
-      (smartModalFormattingInput.element as HTMLInputElement).checked,
-    ).toBe(true);
+    const smartModalFormattingInput = smartModalFormattingToggle.find("input");
+    expect((smartModalFormattingInput.element as HTMLInputElement).checked).toBe(true);
     await smartModalFormattingInput.setValue(false);
-    expect(
-      (smartModalFormattingInput.element as HTMLInputElement).checked,
-    ).toBe(false);
+    expect((smartModalFormattingInput.element as HTMLInputElement).checked).toBe(false);
 
     const replacementBusGroupingToggle = wrapper
       .findAll("label.settings-toggle")
-      .find((label) =>
-        label.text().includes("Unifier les bus de remplacement"),
-      );
+      .find((label) => label.text().includes("Unifier les bus de remplacement"));
     if (!replacementBusGroupingToggle) {
       throw new Error("Missing replacement bus marker grouping setting");
     }
-    const replacementBusGroupingInput = replacementBusGroupingToggle.find(
-      "input",
-    );
-    expect(
-      (replacementBusGroupingInput.element as HTMLInputElement).checked,
-    ).toBe(true);
+    const replacementBusGroupingInput = replacementBusGroupingToggle.find("input");
+    expect((replacementBusGroupingInput.element as HTMLInputElement).checked).toBe(true);
     await replacementBusGroupingInput.setValue(false);
-    expect(
-      (replacementBusGroupingInput.element as HTMLInputElement).checked,
-    ).toBe(false);
+    expect((replacementBusGroupingInput.element as HTMLInputElement).checked).toBe(false);
 
     expect(wrapper.text()).toContain("Avertissement travaux sur le schema");
     expect(wrapper.text()).toContain("10 jours");
@@ -385,9 +352,7 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Coefficient min");
     expect(wrapper.text()).toContain("Coefficient max");
     expect(wrapper.text()).toContain("Plugins installés");
-    expect(wrapper.text()).toContain(
-      "Visualisation des transports en temps reel",
-    );
+    expect(wrapper.text()).toContain("Visualisation des transports en temps reel");
     expect(wrapper.text()).not.toContain("Distance suivant le trace");
     const customizePluginButton = wrapper
       .findAll("button")
@@ -396,14 +361,10 @@ describe("SettingsPage", () => {
     await customizePluginButton?.trigger("click");
     expect(document.body.textContent).toContain("Distance suivant le trace");
     expect(document.body.textContent).toContain("Rafraichissement reseau");
-    document.body
-      .querySelector<HTMLButtonElement>('[aria-label="Fermer"]')
-      ?.click();
+    document.body.querySelector<HTMLButtonElement>('[aria-label="Fermer"]')?.click();
     await wrapper.vm.$nextTick();
     expect(document.body.textContent).not.toContain("Distance suivant le trace");
-    expect(wrapper.text()).toContain(
-      "Limiter les lignes fantomes aux modes structurants",
-    );
+    expect(wrapper.text()).toContain("Limiter les lignes fantomes aux modes structurants");
     expect(wrapper.text()).toContain("Wake lock");
     expect(wrapper.text()).toContain("Masquer la navigation");
 
@@ -411,13 +372,9 @@ describe("SettingsPage", () => {
       'input[aria-label="Activer ou désactiver Visualisation des transports en temps reel"]',
     );
 
-    expect(
-      (realtimeVehicleToggle.element as HTMLInputElement).checked,
-    ).toBe(true);
+    expect((realtimeVehicleToggle.element as HTMLInputElement).checked).toBe(true);
     await realtimeVehicleToggle.setValue(false);
-    expect(
-      (realtimeVehicleToggle.element as HTMLInputElement).checked,
-    ).toBe(false);
+    expect((realtimeVehicleToggle.element as HTMLInputElement).checked).toBe(false);
     expect(document.body.textContent).toContain(
       "Visualisation des transports en temps reel désactivé",
     );
@@ -440,34 +397,22 @@ describe("SettingsPage", () => {
     }
 
     const apparentTemperatureInput = apparentTemperatureToggle.find("input");
-    expect(
-      (apparentTemperatureInput.element as HTMLInputElement).checked,
-    ).toBe(true);
+    expect((apparentTemperatureInput.element as HTMLInputElement).checked).toBe(true);
     await apparentTemperatureInput.setValue(false);
-    expect(
-      (apparentTemperatureInput.element as HTMLInputElement).checked,
-    ).toBe(false);
+    expect((apparentTemperatureInput.element as HTMLInputElement).checked).toBe(false);
 
     const interruptionWalkingTimesToggle = wrapper
       .findAll("label.settings-toggle")
-      .find((label) =>
-        label.text().includes("Temps de marche lors d'une interruption"),
-      );
+      .find((label) => label.text().includes("Temps de marche lors d'une interruption"));
 
     if (!interruptionWalkingTimesToggle) {
       throw new Error("Missing interruption walking times setting");
     }
 
-    const interruptionWalkingTimesInput = interruptionWalkingTimesToggle.find(
-      "input",
-    );
-    expect(
-      (interruptionWalkingTimesInput.element as HTMLInputElement).checked,
-    ).toBe(true);
+    const interruptionWalkingTimesInput = interruptionWalkingTimesToggle.find("input");
+    expect((interruptionWalkingTimesInput.element as HTMLInputElement).checked).toBe(true);
     await interruptionWalkingTimesInput.setValue(false);
-    expect(
-      (interruptionWalkingTimesInput.element as HTMLInputElement).checked,
-    ).toBe(false);
+    expect((interruptionWalkingTimesInput.element as HTMLInputElement).checked).toBe(false);
 
     await wrapper.get('[aria-label="Mode du selecteur de lieux"]').trigger("click");
     expect(wrapper.text()).toContain("Dropdown + swipe");
@@ -478,18 +423,100 @@ describe("SettingsPage", () => {
     );
   }, 10_000);
 
+  it("debounces fuzzy settings search and renders its empty state", async () => {
+    vi.useFakeTimers();
+    mockMobileReleaseCard();
+    vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
+      const actual =
+        await importActual<typeof import("../src/features/app-settings/appSettings")>();
+      const { computed, ref } = await import("vue");
+      const settings = ref(
+        actual.normalizeAppSettings({
+          ...actual.createDefaultAppSettings(),
+          language: "fr",
+        }),
+      );
+
+      return {
+        ...actual,
+        useAppSettings: () => ({
+          settings,
+          effectiveMaxDeparturesPerDirection: computed(() =>
+            actual.getEffectiveMaxDeparturesPerDirection(settings.value),
+          ),
+          updateSettings: (patch: Partial<typeof settings.value>) => {
+            settings.value = actual.normalizeAppSettings({
+              ...settings.value,
+              ...patch,
+            });
+          },
+          resetSettings: () => {
+            settings.value = actual.normalizeAppSettings({
+              ...actual.createDefaultAppSettings(),
+              language: "fr",
+            });
+          },
+        }),
+      };
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("/api/ridership/status")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ available: false, message: "fixture" }),
+          };
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          json: async () => globalMapManifestFixture,
+        };
+      }),
+    );
+
+    const { default: SettingsPage } = await import("../src/features/app-settings/SettingsPage.vue");
+    const wrapper = mount(SettingsPage);
+    const searchInput = wrapper.get("[data-settings-search] input");
+
+    await searchInput.setValue("ressent");
+    expect(wrapper.find('[aria-labelledby="settings-language-title"]').exists()).toBe(true);
+    await vi.advanceTimersByTimeAsync(199);
+    expect(wrapper.find('[aria-labelledby="settings-language-title"]').exists()).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await wrapper.vm.$nextTick();
+
+    const weatherPanel = wrapper.get('[aria-labelledby="settings-weather-title"]');
+    expect(weatherPanel.findAll("label.settings-toggle")).toHaveLength(1);
+    expect(weatherPanel.text()).toContain("Afficher le ressenti");
+    expect(weatherPanel.text()).not.toContain("Mode test");
+    expect(wrapper.find('[aria-labelledby="settings-language-title"]').exists()).toBe(false);
+
+    await searchInput.setValue("zzzzzzzz");
+    await vi.advanceTimersByTimeAsync(200);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find("[data-settings-no-results]").exists()).toBe(true);
+    expect(wrapper.find('[aria-labelledby="settings-weather-title"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("identifies Cloudflare R2 when the ridership cache is remote", async () => {
     mockMobileReleaseCard();
     vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
       const actual =
-        await importActual<
-          typeof import("../src/features/app-settings/appSettings")
-        >();
+        await importActual<typeof import("../src/features/app-settings/appSettings")>();
       const { computed, ref } = await import("vue");
-      const settings = ref(actual.normalizeAppSettings({
-        ...actual.createDefaultAppSettings(),
-        language: "fr",
-      }));
+      const settings = ref(
+        actual.normalizeAppSettings({
+          ...actual.createDefaultAppSettings(),
+          language: "fr",
+        }),
+      );
 
       return {
         ...actual,
@@ -545,9 +572,7 @@ describe("SettingsPage", () => {
       }),
     );
 
-    const { default: SettingsPage } = await import(
-      "../src/features/app-settings/SettingsPage.vue"
-    );
+    const { default: SettingsPage } = await import("../src/features/app-settings/SettingsPage.vue");
     const wrapper = mount(SettingsPage);
     for (const trigger of wrapper.findAll(".settings-panel__trigger")) {
       await trigger.trigger("click");
@@ -563,14 +588,14 @@ describe("SettingsPage", () => {
     mockMobileReleaseCard();
     vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
       const actual =
-        await importActual<
-          typeof import("../src/features/app-settings/appSettings")
-        >();
+        await importActual<typeof import("../src/features/app-settings/appSettings")>();
       const { computed, ref } = await import("vue");
-      const settings = ref(actual.normalizeAppSettings({
-        ...actual.createDefaultAppSettings(),
-        language: "fr",
-      }));
+      const settings = ref(
+        actual.normalizeAppSettings({
+          ...actual.createDefaultAppSettings(),
+          language: "fr",
+        }),
+      );
 
       return {
         ...actual,
@@ -595,9 +620,7 @@ describe("SettingsPage", () => {
       };
     });
 
-    const { default: SettingsPage } = await import(
-      "../src/features/app-settings/SettingsPage.vue"
-    );
+    const { default: SettingsPage } = await import("../src/features/app-settings/SettingsPage.vue");
     const wrapper = mount(SettingsPage, { attachTo: document.body });
     expect(
       wrapper
@@ -627,9 +650,7 @@ describe("SettingsPage", () => {
     mockMobileReleaseCard();
     const clearWalkingCache = vi.fn();
     vi.doMock("../src/services/nearbyWalkingRoutes", async (importActual) => {
-      const actual = await importActual<
-        typeof import("../src/services/nearbyWalkingRoutes")
-      >();
+      const actual = await importActual<typeof import("../src/services/nearbyWalkingRoutes")>();
       return {
         ...actual,
         clearNearbyWalkingRouteCache: clearWalkingCache,
@@ -637,14 +658,14 @@ describe("SettingsPage", () => {
     });
     vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
       const actual =
-        await importActual<
-          typeof import("../src/features/app-settings/appSettings")
-        >();
+        await importActual<typeof import("../src/features/app-settings/appSettings")>();
       const { computed, ref } = await import("vue");
-      const settings = ref(actual.normalizeAppSettings({
-        ...actual.createDefaultAppSettings(),
-        language: "fr",
-      }));
+      const settings = ref(
+        actual.normalizeAppSettings({
+          ...actual.createDefaultAppSettings(),
+          language: "fr",
+        }),
+      );
 
       return {
         ...actual,
@@ -669,9 +690,7 @@ describe("SettingsPage", () => {
       };
     });
 
-    const { default: SettingsPage } = await import(
-      "../src/features/app-settings/SettingsPage.vue"
-    );
+    const { default: SettingsPage } = await import("../src/features/app-settings/SettingsPage.vue");
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ bundles: [] }))),
@@ -716,14 +735,14 @@ describe("SettingsPage", () => {
     mockMobileReleaseCard();
     vi.doMock("../src/features/app-settings/appSettings", async (importActual) => {
       const actual =
-        await importActual<
-          typeof import("../src/features/app-settings/appSettings")
-        >();
+        await importActual<typeof import("../src/features/app-settings/appSettings")>();
       const { computed, ref } = await import("vue");
-      const settings = ref(actual.normalizeAppSettings({
-        ...actual.createDefaultAppSettings(),
-        language: "fr",
-      }));
+      const settings = ref(
+        actual.normalizeAppSettings({
+          ...actual.createDefaultAppSettings(),
+          language: "fr",
+        }),
+      );
 
       return {
         ...actual,
@@ -755,9 +774,7 @@ describe("SettingsPage", () => {
     ).state;
     saveTransitPresetState(initialState);
 
-    const { default: SettingsPage } = await import(
-      "../src/features/app-settings/SettingsPage.vue"
-    );
+    const { default: SettingsPage } = await import("../src/features/app-settings/SettingsPage.vue");
     const wrapper = mount(SettingsPage, { attachTo: document.body });
     expect(
       wrapper
@@ -775,19 +792,12 @@ describe("SettingsPage", () => {
 
     expect(document.body.textContent).toContain("Dashboards enregistres");
     expect(document.body.textContent).toContain("Studio");
-    expect(
-      document.body.querySelector('[aria-label="Supprimer Maison"]'),
-    ).toBeNull();
+    expect(document.body.querySelector('[aria-label="Supprimer Maison"]')).toBeNull();
 
-    document
-      .body
-      .querySelector<HTMLButtonElement>('[aria-label="Renommer Studio"]')
-      ?.click();
+    document.body.querySelector<HTMLButtonElement>('[aria-label="Renommer Studio"]')?.click();
     await wrapper.vm.$nextTick();
 
-    const input = document.body.querySelector<HTMLInputElement>(
-      ".place-name-form input",
-    );
+    const input = document.body.querySelector<HTMLInputElement>(".place-name-form input");
     expect(input).toBeTruthy();
     input!.value = "Sport";
     input!.dispatchEvent(new Event("input"));
@@ -801,10 +811,7 @@ describe("SettingsPage", () => {
     expect(document.body.textContent).toContain("Sport");
     expect(document.body.textContent).not.toContain("Studio");
 
-    document
-      .body
-      .querySelector<HTMLButtonElement>('[aria-label="Supprimer Sport"]')
-      ?.click();
+    document.body.querySelector<HTMLButtonElement>('[aria-label="Supprimer Sport"]')?.click();
     await wrapper.vm.$nextTick();
 
     expect(document.body.textContent).not.toContain("Sport");

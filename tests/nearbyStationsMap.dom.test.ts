@@ -1,14 +1,39 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { nextTick } from "vue";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const { walkingMatrixMock } = vi.hoisted(() => ({
+  walkingMatrixMock: vi.fn(async () => [] as NearbyWalkingRoute[]),
+}));
+
+vi.mock("../src/services/nearbyWalkingRoutes", async () => {
+  const actual = await vi.importActual<typeof import("../src/services/nearbyWalkingRoutes")>(
+    "../src/services/nearbyWalkingRoutes",
+  );
+  return {
+    ...actual,
+    getNearbyWalkingRouteMatrix: walkingMatrixMock,
+  };
+});
+
 import NearbyStationsMap from "../src/features/nearby-stations/NearbyStationsMap.vue";
+import NearbyCityComparisonOverlay from "../src/features/nearby-stations/NearbyCityComparisonOverlay.vue";
+import NearbyCityCityPicker from "../src/features/nearby-stations/NearbyCityCityPicker.vue";
 import type { NearbyStationEntry } from "../src/features/nearby-stations/nearbyStations";
 import type { NearbyHeavyTransportCandidate } from "../src/features/nearby-stations/nearbyHeavyTransports";
 import { NEARBY_ISOCHRONES_NOT_CONFIGURED_CODE } from "../src/features/nearby-stations/nearbyIsochrones";
 import type { NearbyNoiseZonesResponse } from "../src/features/nearby-stations/nearbyNoiseZones";
+import type { NearbyWalkingRoute } from "../src/features/nearby-stations/nearbyWalkingRoutes";
 import type { GlobalMapLine, GlobalMapMode, GlobalMapStation } from "../src/features/transport-map/contracts/manifest";
+import type { TransportMapNetwork } from "../src/features/transport-map/contracts/network";
 import { lonLatToWorld } from "../src/features/transport-map/geo/coordinateKernel";
 import type { GhostLineFlowModel } from "../src/features/transport-map/overlays/ghostLineFlow";
+import { getGtfsServiceDate } from "../src/services/lineFrequency";
+
+beforeEach(() => {
+  walkingMatrixMock.mockReset();
+  walkingMatrixMock.mockResolvedValue([]);
+});
 
 function createLine(id: string, mode: GlobalMapLine["mode"]): GlobalMapLine {
   return {
@@ -49,6 +74,25 @@ function createStation(id: string, name: string, line: GlobalMapLine): GlobalMap
   };
 }
 
+function createStationAt(id: string, name: string, line: GlobalMapLine, lon: number, lat: number): GlobalMapStation {
+  const station = createStation(id, name, line);
+  const world = lonLatToWorld({ lon, lat });
+  return { ...station, lon, lat, worldX: world.x, worldY: world.y };
+}
+
+function createNetwork(lines: GlobalMapLine[], stations: GlobalMapStation[]): TransportMapNetwork {
+  return {
+    lines,
+    stations,
+    entrances: [],
+    regionalPaths: [],
+    pathsById: new Map(),
+    linesById: new Map(lines.map((line) => [line.id, line])),
+    stationsById: new Map(stations.map((station) => [station.id, station])),
+    bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 },
+  };
+}
+
 function createEntry(
   station: GlobalMapStation,
   line: GlobalMapLine,
@@ -82,10 +126,13 @@ function createProjectedHeavyCandidate(
   };
 }
 
-function createIsochroneResponse(origin = { lon: 2.35, lat: 48.85 }) {
+function createIsochroneResponse(
+  origin = { lon: 2.35, lat: 48.85 },
+  requestedMinutes: readonly number[] = [5, 10, 15],
+) {
   return {
     origin,
-    zones: [5, 10, 15].map((minutes) => {
+    zones: requestedMinutes.map((minutes) => {
       const delta = minutes / 100_000;
       return {
         minutes,
@@ -106,7 +153,7 @@ function createIsochroneResponse(origin = { lon: 2.35, lat: 48.85 }) {
 
 function createNoiseZonesResponse(origin = { lon: 2.35, lat: 48.85 }): NearbyNoiseZonesResponse {
   return {
-    schemaVersion: "1.2",
+    schemaVersion: "1.3",
     origin,
     radiusMeters: 600,
     bbox: [2.34, 48.84, 2.36, 48.86],
@@ -130,7 +177,110 @@ function createNoiseZonesResponse(origin = { lon: 2.35, lat: 48.85 }): NearbyNoi
   };
 }
 
-function installMapViewport(width: number, height: number): () => void {
+/**
+ * Two communes in one dataset, so the comparison modal can retarget its
+ * reference city without touching the searched origin. The IRIS loader caches
+ * its dataset for the whole module, so every case shares this catalogue.
+ */
+function createIrisResponse() {
+  return {
+    schemaVersion: "1.3",
+    generatedAt: "2026-09-10T00:00:00.000Z",
+    sourceId: "insee-iris",
+    bbox: [2.30, 48.80, 2.40, 48.90],
+    source: {
+      id: "insee-iris",
+      title: "IRIS fixture",
+      producer: "fixture",
+      pageUrl: "https://example.test/iris",
+      licence: { label: "Fixture", attribution: "Fixture" },
+      limitations: [],
+    },
+    airNoiseSource: {
+      id: "air-noise-statistics",
+      title: "Air/noise fixture",
+      producer: "fixture",
+      pageUrl: "https://example.test/air-noise",
+      referencePeriod: "2024",
+      licence: { label: "Fixture", attribution: "Fixture" },
+      limitations: [],
+    },
+    airNoiseCommunes: {
+      "92001": {
+        inseeCode: "92001",
+        name: "Fixture",
+        departmentCode: "92",
+        population: 1234,
+        score: 7.1,
+        airScore: 8.2,
+        noiseScore: 6.4,
+        dominantClass: "21",
+      },
+      "92002": {
+        inseeCode: "92002",
+        name: "Voisine",
+        departmentCode: "92",
+        population: 4321,
+        score: 6.2,
+        airScore: 7.4,
+        noiseScore: 5.8,
+        dominantClass: "22",
+      },
+    },
+    neighborhoods: [
+      {
+        id: "iris-fixture",
+        codeIris: "920010001",
+        communeCode: "92001",
+        communeName: "Fixture",
+        departmentCode: "92",
+        name: "Quartier fixture",
+        type: "D",
+        centroid: [2.35, 48.85],
+        geometry: {
+          type: "Polygon",
+          coordinates: [[[2.34, 48.84], [2.36, 48.84], [2.36, 48.86], [2.34, 48.86], [2.34, 48.84]]],
+        },
+      },
+      {
+        id: "iris-voisine",
+        codeIris: "920020001",
+        communeCode: "92002",
+        communeName: "Voisine",
+        departmentCode: "92",
+        name: "Quartier voisin",
+        type: "D",
+        centroid: [2.36, 48.86],
+        geometry: {
+          type: "Polygon",
+          coordinates: [[[2.355, 48.855], [2.365, 48.855], [2.365, 48.865], [2.355, 48.865], [2.355, 48.855]]],
+        },
+      },
+    ],
+  };
+}
+
+function createNeighborhoodVerdictResponse() {
+  return {
+    schemaVersion: "1.3",
+    generatedAt: "2026-09-10T00:00:00.000Z",
+    categories: [{
+      id: "security",
+      status: "available",
+      score: 8.7,
+      positiveFacts: [],
+      negativeFacts: [],
+      neutralFacts: [],
+      limitations: [],
+    }],
+    futureProjects: [],
+    nearbyGreenSpaces: [],
+    sources: [],
+    warnings: [],
+  };
+}
+
+function installMapViewport(width: number, height: number, cityWidth = width): () => void {
   const prototype = HTMLDivElement.prototype;
   const originalWidth = Object.getOwnPropertyDescriptor(prototype, "clientWidth");
   const originalHeight = Object.getOwnPropertyDescriptor(prototype, "clientHeight");
@@ -138,7 +288,7 @@ function installMapViewport(width: number, height: number): () => void {
     configurable: true,
     get() {
       return this.classList?.contains("nearby-map")
-        ? width
+        ? this.closest('.nearby-map-shell--city-view') ? cityWidth : width
         : originalWidth?.get?.call(this) ?? 0;
     },
   });
@@ -261,10 +411,13 @@ function mountMap(
   supplementalStations: NearbyHeavyTransportCandidate[] = [],
   activeModes: GlobalMapMode[] = ["METRO", "BUS"],
   travelWalkingSegments: Array<{ id: string; from: { lon: number; lat: number }; to: { lon: number; lat: number } }> = [],
+  cityViewNetwork?: TransportMapNetwork,
+  originLabel = "Adresse fixture",
 ) {
   return mount(NearbyStationsMap, {
     props: {
       origin: { lon: 2.35, lat: 48.85 },
+      originLabel,
       radius: 600,
       stations,
       supplementalStations,
@@ -276,6 +429,7 @@ function mountMap(
       scheduleState,
       showNearbyPlaceNames: false,
       travelWalkingSegments,
+      cityViewNetwork,
     },
     global: {
       stubs: {
@@ -410,12 +564,13 @@ describe("NearbyStationsMap walking accessibility zones and controls", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders the seven primary controls in Xray-first order and can hide them all", async () => {
+  it("renders the eight primary controls in city-view-first order and can hide them all", async () => {
     const wrapper = mountMap([]);
     const restoreFullscreen = await enterFullscreenForTest(wrapper);
 
     try {
       expect(wrapper.findAll(".nearby-map__primary-controls > button").map((button) => button.classes()[0])).toEqual([
+        "nearby-map__city-view-toggle",
         "nearby-map__isochrone-toggle",
         "nearby-map__noise-toggle",
         "nearby-map__air-quality-toggle",
@@ -426,6 +581,7 @@ describe("NearbyStationsMap walking accessibility zones and controls", () => {
       ]);
 
       await wrapper.setProps({
+        showCityViewControl: false,
         showIsochroneControl: false,
         showNoiseControl: false,
         showAirQualityControl: false,
@@ -439,6 +595,571 @@ describe("NearbyStationsMap walking accessibility zones and controls", () => {
     } finally {
       restoreFullscreen();
       wrapper.unmount();
+    }
+  });
+
+  it("keeps only in-viewport rail stops in city view and hides next departures", async () => {
+    const metro13 = createLine("line:metro:13", "METRO");
+    metro13.code = "13";
+    metro13.label = "13";
+    const tramT6 = createLine("line:tram:T6", "TRAM");
+    tramT6.code = "T6";
+    tramT6.label = "T6";
+    const bus194 = createLine("line:bus:194", "BUS");
+    bus194.code = "194";
+    bus194.label = "194";
+    const metroStation = createStationAt("station:metro:13", "Maison Blanche", metro13, 2.35, 48.85);
+    const tramStation = createStationAt("station:tram:T6", "Centre-ville", tramT6, 2.352, 48.851);
+    tramStation.lineIds = [tramT6.id, metro13.id];
+    const outsideStation = createStationAt("station:tram:outside", "Hors écran", tramT6, 2.5, 49);
+    const busStation = createStationAt("station:bus:194", "Bus voisin", bus194, 2.351, 48.85);
+    const network = createNetwork([metro13, tramT6, bus194], [metroStation, tramStation, outsideStation, busStation]);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      const payload = url.includes("/api/iris")
+        ? createIrisResponse()
+        : url.includes("/api/neighborhood-verdict?")
+          ? createNeighborhoodVerdictResponse()
+          : createNoiseZonesResponse();
+      return new Response(
+        JSON.stringify(payload),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const restoreViewport = installMapViewport(720, 360, 1040);
+    const wrapper = mountMap(
+      [createEntry(busStation, bus194)],
+      undefined,
+      undefined,
+      { "station-schedules-inline": "<div data-testid='inline-schedule'>2 min</div>" },
+      undefined,
+      () => "visible",
+      [],
+      ["BUS"],
+      [],
+      network,
+    );
+
+    try {
+      const viewSwitch = wrapper.get(".nearby-map__city-view-toggle");
+      expect(viewSwitch.get("[data-nearby-map-view-option='city']").text()).toBe("Ville");
+      expect(viewSwitch.get("[data-nearby-map-view-option='neighborhood']").text()).toBe("Quartier");
+      expect(viewSwitch.attributes("aria-label")).toBe("Vue sélectionnée : Quartier");
+      expect(viewSwitch.get("[data-nearby-map-view-option='city']").classes()).not.toContain(
+        "nearby-map__city-view-option--active",
+      );
+      expect(viewSwitch.get("[data-nearby-map-view-option='neighborhood']").classes()).toContain(
+        "nearby-map__city-view-option--active",
+      );
+      expect(viewSwitch.get(".nearby-map__city-view-slider").classes()).toContain(
+        "nearby-map__city-view-slider--neighborhood",
+      );
+      const mapScale = wrapper.get("[data-testid='nearby-map-scale']");
+      expect(mapScale.attributes("aria-label")).toContain("Échelle de la carte");
+      expect(mapScale.findAll(".nearby-map__scale-labels span")).toHaveLength(3);
+      expect(mapScale.find(".nearby-map__scale-track").exists()).toBe(true);
+
+      await viewSwitch.trigger("click");
+      await flushPromises();
+      await nextTick();
+
+      expect(viewSwitch.attributes("aria-pressed")).toBe("true");
+      expect(wrapper.get("[data-testid='nearby-map-scale']").find(".nearby-map__scale-track").exists()).toBe(true);
+      // Removing the sidebar enlarges the real map. IRIS must use that same
+      // viewport immediately, without stretching an old 720px projection.
+      expect(wrapper.get('.iris-neighborhood-overlay__svg').attributes('viewBox')).toBe('0 0 1040 360');
+      expect(viewSwitch.attributes("aria-label")).toBe("Vue sélectionnée : Ville");
+      expect(viewSwitch.get("[data-nearby-map-view-option='city']").classes()).toContain(
+        "nearby-map__city-view-option--active",
+      );
+      expect(viewSwitch.get("[data-nearby-map-view-option='neighborhood']").classes()).not.toContain(
+        "nearby-map__city-view-option--active",
+      );
+      expect(viewSwitch.get(".nearby-map__city-view-slider").classes()).not.toContain(
+        "nearby-map__city-view-slider--neighborhood",
+      );
+      const cityInfoCard = wrapper.get("[data-testid='nearby-city-info-card']");
+      expect(cityInfoCard.text()).toContain("Fixture");
+      expect(cityInfoCard.text()).toContain("1 234");
+      expect(cityInfoCard.text()).toContain("92");
+      expect(cityInfoCard.text()).toContain("Sécurité");
+      expect(cityInfoCard.text()).toContain("8,7/10");
+      expect(cityInfoCard.text()).not.toContain("Code INSEE");
+      expect(cityInfoCard.text()).not.toContain("Quartiers IRIS");
+      const placesRankingAction = cityInfoCard.get("[data-city-info-action='places-ranking']");
+      await placesRankingAction.trigger("pointerdown");
+      await placesRankingAction.trigger("click");
+      expect(wrapper.emitted("openPlacesRanking")).toHaveLength(1);
+      const commerceToggle = wrapper.get("[data-nearby-map-commerce-toggle]");
+      expect(commerceToggle.text()).toContain("Voir les commerces");
+      await commerceToggle.trigger("click");
+      await wrapper.setProps({
+        cityViewPlaces: [
+          { id: "node:city-shop", name: "Intermarché", lon: 2.35, lat: 48.85, category: "shop", kind: "supermarket", distanceMeters: 80 },
+          { id: "node:city-restaurant", name: "Le Relais", lon: 2.3504, lat: 48.8502, category: "food", kind: "restaurant", distanceMeters: 90 },
+          { id: "node:city-cafe", name: "Le Café", lon: 2.3508, lat: 48.8504, category: "food", kind: "cafe", distanceMeters: 100 },
+          { id: "node:city-bar", name: "Le Bar", lon: 2.3512, lat: 48.8506, category: "food", kind: "bar", distanceMeters: 110 },
+        ],
+      });
+      await nextTick();
+      expect(commerceToggle.attributes("aria-pressed")).toBe("true");
+      expect(wrapper.emitted("toggleCityCommerce")?.at(-1)).toEqual([true]);
+      const cityCommerceMarkers = wrapper.findAll(".nearby-map__place");
+      expect(cityCommerceMarkers).toHaveLength(4);
+      expect(cityCommerceMarkers.map((marker) => marker.attributes("data-place-id")))
+        .toEqual(expect.arrayContaining([
+          "node:city-shop",
+          "node:city-restaurant",
+          "node:city-cafe",
+          "node:city-bar",
+        ]));
+      const cityCommerceMarker = wrapper.get("[data-place-id='node:city-shop']");
+      expect(wrapper.find(".nearby-map__place-canvas").exists()).toBe(true);
+      expect(cityCommerceMarker.find(".nearby-map__place-name").exists()).toBe(false);
+      await cityCommerceMarker.trigger("mouseenter");
+      expect(wrapper.get("[data-testid='place-tooltip']").text()).toContain("Supermarché");
+      expect(cityInfoCard.findAll("[data-transport-mode]").map((mode) => mode.attributes("data-transport-mode")))
+        .toEqual(["BUS", "METRO", "TRAM"]);
+      expect(cityInfoCard.findAll("[data-transport-mode]").map((mode) => mode.text().replace(/\s+/gu, "").trim()))
+        .toEqual(["Bus1", "Métro1", "Tram1"]);
+      expect(cityInfoCard.findAll(".nearby-city-info-card__transport-mode svg")).toHaveLength(3);
+      expect(wrapper.find(".nearby-map__fullscreen").exists()).toBe(true);
+      const restoreCityFullscreen = await enterFullscreenForTest(wrapper);
+      expect(wrapper.emitted("fullscreen-change")?.at(-1)).toEqual([true]);
+      restoreCityFullscreen();
+
+      const markers = wrapper.findAll(".nearby-map__marker-anchor:not(.nearby-map__marker-anchor--supplemental)");
+      expect(markers).toHaveLength(2);
+      expect(markers.every((marker) => marker.find("[data-testid='line-badge']").exists())).toBe(true);
+      expect(markers.map((marker) => marker.get(".nearby-map__marker").attributes("aria-label")))
+        .toEqual(expect.arrayContaining([expect.stringContaining("Maison Blanche"), expect.stringContaining("Centre-ville")]));
+
+      const busMode = cityInfoCard.get("[data-transport-mode='BUS']");
+      await busMode.trigger("click");
+      await nextTick();
+      expect(busMode.attributes("aria-pressed")).toBe("true");
+      expect(cityInfoCard.get("[data-transport-mode='METRO']").attributes("aria-pressed")).toBe("false");
+      expect(wrapper.findAll(".nearby-map__marker-anchor:not(.nearby-map__marker-anchor--supplemental)")).toHaveLength(1);
+      expect(wrapper.get(".nearby-map__marker").attributes("aria-label")).toContain("Bus voisin");
+      expect(wrapper.get(".nearby-map__marker").find("[data-testid='line-badge']").exists()).toBe(true);
+
+      const busFlow = { ...createFlowModel(), lineId: bus194.id };
+      await wrapper.setProps({ lineFlowModel: busFlow });
+      await wrapper.get(".nearby-map__marker").trigger("mouseenter");
+      await nextTick();
+      expect(wrapper.emitted("hoverLine")?.at(-1)).toEqual([bus194.id]);
+      expect(wrapper.find(".transport-ghost-flow").exists()).toBe(true);
+      await wrapper.get(".nearby-map__marker-anchor").trigger("mouseleave");
+      await nextTick();
+      expect(wrapper.find(".transport-ghost-flow").exists()).toBe(false);
+
+      const metroMode = cityInfoCard.get("[data-transport-mode='METRO']");
+      await metroMode.trigger("click");
+      await nextTick();
+      expect(metroMode.attributes("aria-pressed")).toBe("true");
+      expect(cityInfoCard.get("[data-transport-mode='BUS']").attributes("aria-pressed")).toBe("false");
+      expect(wrapper.findAll(".nearby-map__marker-anchor:not(.nearby-map__marker-anchor--supplemental)")).toHaveLength(2);
+      expect(wrapper.find(".nearby-map__marker--bus").exists()).toBe(false);
+
+      await metroMode.trigger("click");
+      await nextTick();
+      expect(metroMode.attributes("aria-pressed")).toBe("false");
+      expect(wrapper.find(".nearby-map__marker--bus").exists()).toBe(false);
+      expect(wrapper.findAll(".nearby-map__marker-anchor:not(.nearby-map__marker-anchor--supplemental)")).toHaveLength(2);
+      expect(wrapper.find(".nearby-map__origin").exists()).toBe(true);
+      await vi.waitFor(() => {
+        expect(wrapper.find(".nearby-map__radius").exists()).toBe(false);
+      }, { timeout: 2_000 });
+      expect(wrapper.find(".nearby-map__noise-toggle").exists()).toBe(true);
+      expect(wrapper.find(".nearby-map__air-quality-toggle").exists()).toBe(true);
+      await wrapper.get(".nearby-map__noise-toggle").trigger("click");
+      await flushPromises();
+      await nextTick();
+      const noiseCalls = fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes("/api/neighborhood-verdict/noise-grid"),
+      );
+      expect(noiseCalls).toHaveLength(1);
+      const noiseRequest = new URL(String(noiseCalls[0]?.[0]), "http://localhost.test");
+      expect(Number(noiseRequest.searchParams.get("radius"))).toBeGreaterThan(600);
+      expect(wrapper.findAll(".nearby-map__noise-zone")).toHaveLength(3);
+      expect(wrapper.get(".nearby-map__noise-legend").text()).toContain("Exposition sonore");
+      await wrapper.get(".nearby-map__noise-toggle").trigger("click");
+      await wrapper.get(".nearby-map__air-quality-toggle").trigger("click");
+      await flushPromises();
+      await nextTick();
+      expect(wrapper.findAll(".nearby-map__air-quality-zone")).toHaveLength(3);
+      expect(wrapper.find(".nearby-map__noise-zones").exists()).toBe(false);
+      expect(wrapper.find(".nearby-map__marker-anchor--supplemental").exists()).toBe(false);
+      expect(wrapper.find(".nearby-map__marker--bus").exists()).toBe(false);
+      expect(wrapper.find("[data-testid='inline-schedule']").exists()).toBe(false);
+      expect(fetchMock.mock.calls.filter(([input]) =>
+        String(input).includes("/api/neighborhood-verdict/noise-grid"),
+      )).toHaveLength(1);
+      expect(wrapper.emitted("update:showNearbyPlaces")).toBeUndefined();
+      expect(wrapper.emitted("update:showNearbyPlaceNames")).toBeUndefined();
+      await vi.waitFor(() => {
+        expect(viewSwitch.attributes("aria-busy")).toBe("false");
+      }, { timeout: 2_000 });
+      await viewSwitch.trigger("click");
+      await flushPromises();
+      await vi.waitFor(() => {
+        expect(viewSwitch.attributes("aria-pressed")).toBe("false");
+      });
+      expect(wrapper.emitted("update:showNearbyPlaces")).toBeUndefined();
+      expect(wrapper.emitted("update:showNearbyPlaceNames")).toBeUndefined();
+    } finally {
+      wrapper.unmount();
+      restoreViewport();
+    }
+  });
+
+  it("activates merged walking zones around the visible city stations", async () => {
+    const metro13 = createLine("line:metro:13", "METRO");
+    metro13.code = "13";
+    metro13.label = "13";
+    const tramT6 = createLine("line:tram:T6", "TRAM");
+    tramT6.code = "T6";
+    tramT6.label = "T6";
+    const metroStation = createStationAt("station:metro:13", "Métro 13", metro13, 2.35, 48.85);
+    const tramStation = createStationAt("station:tram:T6", "T6", tramT6, 2.352, 48.851);
+    const network = createNetwork([metro13, tramT6], [metroStation, tramStation]);
+    const walkingOrigins: Array<{ lon: number; lat: number }> = [];
+    const walkingRequests: Array<{ origin: { lon: number; lat: number }; minutes: number[] }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/walking/isochrones")) {
+        const body = JSON.parse(String(init?.body)) as { origin: { lon: number; lat: number }; minutes?: number[] };
+        walkingOrigins.push(body.origin);
+        walkingRequests.push({ origin: body.origin, minutes: body.minutes ?? [] });
+        return new Response(JSON.stringify(createIsochroneResponse(body.origin, body.minutes)), { status: 200 });
+      }
+      const payload = url.includes("/api/iris")
+        ? createIrisResponse()
+        : url.includes("/api/neighborhood-verdict?")
+          ? createNeighborhoodVerdictResponse()
+          : createNoiseZonesResponse();
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const restoreViewport = installMapViewport(720, 360);
+    const wrapper = mountMap([], undefined, undefined, {}, undefined, undefined, [], ["METRO", "TRAM"], [], network);
+
+    try {
+      await wrapper.get(".nearby-map__city-view-toggle").trigger("click");
+      await flushPromises();
+      expect(wrapper.get(".nearby-map__isochrone-toggle").attributes("aria-pressed")).toBe("false");
+      expect(walkingOrigins).toHaveLength(0);
+      await wrapper.get(".nearby-map__isochrone-toggle").trigger("click");
+      await vi.waitFor(() => expect(walkingOrigins).toHaveLength(2), { timeout: 4_000 });
+      await nextTick();
+
+      expect(wrapper.get(".nearby-map__isochrone-toggle").attributes("aria-pressed")).toBe("true");
+      expect(wrapper.find(".nearby-map__walking-zones--city").exists()).toBe(true);
+      const isochronePanel = wrapper.get("[data-transport-isochrone-panel]");
+      expect(isochronePanel.findAll("[data-radar-mode]").map((mode) => mode.attributes("data-radar-mode")))
+        .toEqual(["METRO", "TRAM"]);
+      expect(isochronePanel.find("[data-radar-mode='BUS']").exists()).toBe(false);
+      expect(wrapper.findAll(".nearby-map__walking-zones--city .nearby-map__walking-zone")).toHaveLength(6);
+      expect(wrapper.findAll(".nearby-map__walking-zones--city .nearby-map__walking-zone").map((path) => path.attributes("data-walking-zone")))
+        .toEqual(["15", "10", "5", "15", "10", "5"]);
+      expect(wrapper.findAll(".nearby-map__walking-zones--city .nearby-map__walking-zone").map((path) => path.attributes("data-walking-mode")))
+        .toEqual(["METRO", "METRO", "METRO", "TRAM", "TRAM", "TRAM"]);
+      const mergedCityZone = wrapper.get(".nearby-map__walking-zones--city .nearby-map__walking-zone");
+      expect(mergedCityZone.attributes("fill-rule")).toBe("evenodd");
+      expect(mergedCityZone.attributes("stroke")).toBe("none");
+      await isochronePanel.get("[data-radar-mode='TRAM'] select").setValue("extended");
+      await vi.waitFor(() => expect(walkingRequests.some((request) => request.minutes.join(",") === "5,10,15,20,25")).toBe(true), { timeout: 4_000 });
+      await vi.waitFor(() => expect(wrapper.findAll(".nearby-map__walking-zones--city .nearby-map__walking-zone")).toHaveLength(6), { timeout: 4_000 });
+      expect(wrapper.findAll(".nearby-map__walking-zones--city .nearby-map__walking-zone").map((path) => path.attributes("data-walking-zone")))
+        .toEqual(["15", "10", "5", "25", "20", "10"]);
+      expect(walkingOrigins).toEqual(expect.arrayContaining([
+        { lon: 2.35, lat: 48.85 },
+        { lon: 2.352, lat: 48.851 },
+      ]));
+      await isochronePanel.get(".walking-radar__disable").trigger("click");
+      await nextTick();
+      expect(wrapper.get(".nearby-map__isochrone-toggle").attributes("aria-pressed")).toBe("false");
+      expect(wrapper.find(".nearby-map__walking-zones--city").exists()).toBe(false);
+      expect(wrapper.find("[data-transport-isochrone-panel]").exists()).toBe(false);
+    } finally {
+      wrapper.unmount();
+      restoreViewport();
+    }
+  });
+
+  it("retries a transient Noctilien failure and keeps the south station in city isochrones", async () => {
+    const noctilien = createLine("line:noctilien:N66", "NOCTILIEN");
+    noctilien.code = "N66";
+    noctilien.label = "N66";
+    const northStation = createStationAt("station:noctilien:north", "N66 nord", noctilien, 2.352, 48.854);
+    const southStation = createStationAt("station:noctilien:south", "N66 sud", noctilien, 2.346, 48.846);
+    const eastStation = createStationAt("station:noctilien:east", "N66 est", noctilien, 2.356, 48.852);
+    const network = createNetwork([noctilien], [northStation, southStation, eastStation]);
+    const attemptsByOrigin = new Map<string, number>();
+    const walkingOrigins: Array<{ lon: number; lat: number }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/walking/isochrones")) {
+        const body = JSON.parse(String(init?.body)) as { origin: { lon: number; lat: number }; minutes?: number[] };
+        const key = `${body.origin.lon},${body.origin.lat}`;
+        const attempt = (attemptsByOrigin.get(key) ?? 0) + 1;
+        attemptsByOrigin.set(key, attempt);
+        walkingOrigins.push(body.origin);
+        if (body.origin.lon === southStation.lon && attempt === 1) {
+          return new Response(JSON.stringify({ statusMessage: "temporarily unavailable" }), { status: 502 });
+        }
+        return new Response(JSON.stringify(createIsochroneResponse(body.origin, body.minutes)), { status: 200 });
+      }
+      const payload = url.includes("/api/iris")
+        ? createIrisResponse()
+        : url.includes("/api/neighborhood-verdict?")
+          ? createNeighborhoodVerdictResponse()
+          : createNoiseZonesResponse();
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const restoreViewport = installMapViewport(720, 360);
+    const wrapper = mountMap([], undefined, undefined, {}, undefined, undefined, [], ["NOCTILIEN"], [], network);
+
+    try {
+      await wrapper.get(".nearby-map__city-view-toggle").trigger("click");
+      await flushPromises();
+      await nextTick();
+      const cityInfoCard = wrapper.get("[data-testid='nearby-city-info-card']");
+      await cityInfoCard.get("[data-transport-mode='NOCTILIEN']").trigger("click");
+      await wrapper.get(".nearby-map__isochrone-toggle").trigger("click");
+      await vi.waitFor(() => expect(walkingOrigins).toContainEqual({ lon: southStation.lon, lat: southStation.lat }), { timeout: 4_000 });
+      await vi.waitFor(() => expect(wrapper.findAll(".nearby-map__walking-zones--city .nearby-map__walking-zone")).toHaveLength(3), { timeout: 4_000 });
+
+      const southKey = `${southStation.lon},${southStation.lat}`;
+      expect(attemptsByOrigin.get(southKey)).toBeGreaterThan(1);
+      expect(wrapper.get(".nearby-map__isochrone-toggle").attributes("aria-pressed")).toBe("true");
+      expect(wrapper.findAll(".iris-neighborhood-overlay__shape").every((shape) =>
+        shape.attributes("style")?.includes("fill: none")
+        && shape.attributes("style")?.includes("fill-opacity: 0"),
+      )).toBe(true);
+      expect(wrapper.findAll(".iris-neighborhood-overlay__group-boundary")).toHaveLength(1);
+    } finally {
+      wrapper.unmount();
+      restoreViewport();
+    }
+  });
+
+  it("hides the city transport fact when no line is inside the city scope", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      const payload = url.includes("/api/iris")
+        ? createIrisResponse()
+        : url.includes("/api/neighborhood-verdict?")
+          ? createNeighborhoodVerdictResponse()
+          : createNoiseZonesResponse();
+      return new Response(
+        JSON.stringify(payload),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const restoreViewport = installMapViewport(720, 360);
+    const wrapper = mountMap([], undefined, undefined, {}, undefined, undefined, [], ["BUS"], [], createNetwork([], []));
+
+    try {
+      await wrapper.get(".nearby-map__city-view-toggle").trigger("click");
+      await flushPromises();
+      await nextTick();
+
+      const cityInfoCard = wrapper.get("[data-testid='nearby-city-info-card']");
+      expect(cityInfoCard.find(".nearby-city-info-card__transport-modes").exists()).toBe(false);
+      expect(cityInfoCard.text()).not.toContain("Transports");
+    } finally {
+      wrapper.unmount();
+      restoreViewport();
+    }
+  });
+
+  it("retargets the compared city without changing the searched origin", async () => {
+    const requestedUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      const payload = url.includes("/api/iris")
+        ? createIrisResponse()
+        : url.includes("/api/neighborhood-verdict?")
+          ? createNeighborhoodVerdictResponse()
+          : createNoiseZonesResponse();
+      return new Response(
+        JSON.stringify(payload),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const restoreViewport = installMapViewport(720, 360);
+    const wrapper = mountMap([], undefined, undefined, {}, undefined, undefined, [], ["METRO", "BUS"], [], createNetwork([], []));
+
+    try {
+      await wrapper.get(".nearby-map__city-view-toggle").trigger("click");
+      await flushPromises();
+      await nextTick();
+
+      // Compare the searched commune with its neighbour, then swap the
+      // reference side from the modal.
+      const overlay = wrapper.findComponent(NearbyCityComparisonOverlay);
+      expect(overlay.exists()).toBe(true);
+      overlay.vm.$emit("select", "92002");
+      await flushPromises();
+      await nextTick();
+
+      const modal = wrapper.get("[data-testid='nearby-city-comparison-modal']");
+      expect(modal.text()).toContain("Fixture");
+      expect(modal.text()).toContain("Voisine");
+
+      const requestsBeforeSwap = requestedUrls.length;
+      await modal.get("[data-testid='nearby-city-comparison-current-city']").trigger("click");
+      const picker = wrapper.findComponent(NearbyCityCityPicker);
+      expect(picker.exists()).toBe(true);
+      // The commune already displayed as target is never offered as reference.
+      expect(picker.props("selectedCode")).toBe("92001");
+      expect((picker.props("options") as readonly { code: string }[]).map((option) => option.code))
+        .toEqual(["92001"]);
+
+      picker.vm.$emit("select", "92002");
+      await flushPromises();
+      await nextTick();
+
+      // The reference side was retargeted locally, and the searched origin and
+      // its data were never touched: no IRIS refetch, no station scan, no place
+      // reload, no navigation.
+      expect(wrapper.findComponent(NearbyCityCityPicker).exists()).toBe(false);
+      expect(wrapper.props("origin")).toEqual({ lon: 2.35, lat: 48.85 });
+      expect(requestedUrls.slice(requestsBeforeSwap).every((url) =>
+        url.includes("/api/neighborhood-verdict?"))).toBe(true);
+    } finally {
+      wrapper.unmount();
+      restoreViewport();
+    }
+  });
+
+  it("filters off-IRIS bus stops until their line is focused and keeps the focused badge", async () => {
+    const bus195 = createLine("line:bus:195", "BUS");
+    bus195.code = "195";
+    bus195.label = "195";
+    const tvm = createLine("line:bus:tvm", "BUS");
+    tvm.code = "TVM";
+    tvm.label = "TVM";
+    const insideStation = createStationAt("station:bus:inside", "Bus dans la commune", bus195, 2.347, 48.852);
+    const sharedStation = createStationAt("station:bus:shared", "Arrêt partagé", bus195, 2.348, 48.853);
+    sharedStation.lineIds = [tvm.id, bus195.id];
+    const outsideTvmStation = createStationAt("station:tvm:outside", "TVM hors commune", tvm, 2.363, 48.852);
+    bus195.stationIds = [insideStation.id, sharedStation.id];
+    tvm.stationIds = [sharedStation.id, outsideTvmStation.id];
+    const network = createNetwork([bus195, tvm], [insideStation, sharedStation, outsideTvmStation]);
+
+    const irisResponse = createIrisResponse();
+    const baseNeighborhood = irisResponse.neighborhoods[0]!;
+    irisResponse.bbox = [2.34, 48.84, 2.38, 48.86];
+    irisResponse.neighborhoods = [
+      {
+        ...baseNeighborhood,
+        id: "iris-left",
+        codeIris: "920010001",
+        centroid: [2.35, 48.85],
+        geometry: {
+          type: "Polygon",
+          coordinates: [[[2.34, 48.84], [2.355, 48.84], [2.355, 48.86], [2.34, 48.86], [2.34, 48.84]]],
+        },
+      },
+      {
+        ...baseNeighborhood,
+        id: "iris-right",
+        codeIris: "920010002",
+        centroid: [2.375, 48.85],
+        geometry: {
+          type: "Polygon",
+          coordinates: [[[2.37, 48.84], [2.38, 48.84], [2.38, 48.86], [2.37, 48.86], [2.37, 48.84]]],
+        },
+      },
+    ];
+
+    const walkingOrigins: Array<{ lon: number; lat: number }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/walking/isochrones")) {
+        const body = JSON.parse(String(init?.body)) as { origin: { lon: number; lat: number }; minutes?: number[] };
+        walkingOrigins.push(body.origin);
+        return new Response(JSON.stringify(createIsochroneResponse(body.origin, body.minutes)), { status: 200 });
+      }
+      const payload = url.includes("/api/iris")
+        ? irisResponse
+        : url.includes("/api/neighborhood-verdict?")
+          ? createNeighborhoodVerdictResponse()
+          : createNoiseZonesResponse();
+      return new Response(
+        JSON.stringify(payload),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const restoreViewport = installMapViewport(720, 360, 1040);
+    const wrapper = mountMap(
+      [createEntry(insideStation, tvm, true, [bus195])],
+      undefined,
+      undefined,
+      {},
+      undefined,
+      undefined,
+      [],
+      ["BUS"],
+      [],
+      network,
+    );
+
+    try {
+      await wrapper.get(".nearby-map__city-view-toggle").trigger("click");
+      await flushPromises();
+      await nextTick();
+      const cityInfoCard = wrapper.get("[data-testid='nearby-city-info-card']");
+      await cityInfoCard.get("[data-transport-mode='BUS']").trigger("click");
+      await nextTick();
+      await wrapper.get(".nearby-map__isochrone-toggle").trigger("click");
+      await vi.waitFor(() => expect(walkingOrigins).toHaveLength(2), { timeout: 4_000 });
+      expect(walkingOrigins).not.toContainEqual({ lon: 2.363, lat: 48.852 });
+
+      const initialMarkers = wrapper.findAll(".nearby-map__marker-anchor:not(.nearby-map__marker-anchor--supplemental)");
+      expect(initialMarkers).toHaveLength(2);
+      expect(wrapper.find(".nearby-map__marker").text()).not.toContain("TVM hors commune");
+
+      const insideAnchor = initialMarkers.find((anchor) =>
+        anchor.find(".nearby-map__marker").attributes("aria-label")?.includes("Bus dans la commune"),
+      );
+      expect(insideAnchor).toBeDefined();
+      await insideAnchor!.trigger("mouseenter");
+      expect(wrapper.emitted("hoverLine")?.at(-1)).toEqual([bus195.id]);
+      await insideAnchor!.trigger("mouseleave");
+      await insideAnchor!.get(".nearby-map__marker").trigger("click");
+      expect(wrapper.emitted("activateLine")?.at(-1)).toEqual([bus195.id]);
+
+      await wrapper.setProps({
+        activeLineId: tvm.id,
+        lineFlowModel: { ...createFlowModel(), lineId: tvm.id },
+      });
+      await nextTick();
+      await vi.waitFor(() => expect(walkingOrigins).toHaveLength(3), { timeout: 4_000 });
+      expect(walkingOrigins).toContainEqual({ lon: 2.363, lat: 48.852 });
+      expect(wrapper.findAll(".nearby-map__marker-anchor:not(.nearby-map__marker-anchor--supplemental)")).toHaveLength(3);
+      expect(wrapper.findAll(".nearby-map__marker").some((marker) =>
+        marker.attributes("aria-label")?.includes("TVM hors commune"),
+      )).toBe(true);
+
+      const sharedMarker = wrapper.findAll(".nearby-map__marker").find((marker) =>
+        marker.attributes("aria-label")?.includes("Arrêt partagé"),
+      );
+      expect(sharedMarker).toBeDefined();
+      await sharedMarker!.trigger("mouseenter");
+      await nextTick();
+      expect(wrapper.emitted("hoverLine")?.at(-1)).toEqual([tvm.id]);
+    } finally {
+      wrapper.unmount();
+      restoreViewport();
     }
   });
 
@@ -648,6 +1369,7 @@ describe("NearbyStationsMap walking accessibility zones and controls", () => {
 
       await path.trigger("mouseenter", { clientX: 360, clientY: 180 });
       expect(wrapper.get(".nearby-map__isochrone-tooltip").text()).toContain("10 min");
+      expect(wrapper.get(".nearby-map__isochrone-tooltip").text()).toContain("du Métro");
       await path.trigger("mousemove", { clientX: 720, clientY: 180 });
       expect(wrapper.get(".nearby-map__isochrone-tooltip").attributes("style")).toContain("left: 583px");
       expect(wrapper.get(".nearby-map__isochrone-tooltip").attributes("style")).toContain("max-width: 250px");
@@ -711,15 +1433,16 @@ describe("NearbyStationsMap walking accessibility zones and controls", () => {
       await wrapper.get(".nearby-map__isochrone-toggle").trigger("click");
       await flushPromises();
 
-      const modal = wrapper.get(".nearby-map__isochrone-config-modal");
-      expect(modal.attributes("role")).toBe("dialog");
-      expect(modal.text()).toContain("Clé OpenRouteService nécessaire");
-      expect(modal.text()).toContain("NUXT_ORS_API_KEY");
+      const modal = document.body.querySelector<HTMLElement>(".nearby-map__isochrone-config-modal");
+      expect(modal).not.toBeNull();
+      expect(modal?.getAttribute("role")).toBe("dialog");
+      expect(modal?.textContent).toContain("Clé OpenRouteService nécessaire");
+      expect(modal?.textContent).toContain("NUXT_ORS_API_KEY");
       expect(wrapper.find(".nearby-map__isochrone-status--error").exists()).toBe(false);
 
-      await modal.get(".nearby-map__isochrone-config-primary").trigger("click");
+      modal?.querySelector<HTMLElement>(".nearby-map__isochrone-config-primary")?.click();
       await flushPromises();
-      expect(wrapper.find(".nearby-map__isochrone-config-modal").exists()).toBe(false);
+      expect(document.body.querySelector(".nearby-map__isochrone-config-modal")).toBeNull();
       expect(wrapper.findAll(".nearby-map__walking-zone")).toHaveLength(3);
       expect(fetchMock).toHaveBeenCalledTimes(2);
     } finally {
@@ -886,6 +1609,28 @@ describe("NearbyStationsMap places directory mode", () => {
     restoreViewport();
   });
 
+  it("renders every in-viewport nearby place without a numeric map cap", async () => {
+    const restoreViewport = installMapViewport(720, 360);
+    const places = Array.from({ length: 121 }, (_, index) => ({
+      id: `commerce:${index}`,
+      name: `Commerce ${index}`,
+      lon: 2.35 + index * 0.000001,
+      lat: 48.85,
+      category: "shop" as const,
+      kind: "supermarket",
+      distanceMeters: index,
+    }));
+    const wrapper = mountMap([]);
+
+    try {
+      await wrapper.setProps({ showNearbyPlaces: true, places });
+      expect(wrapper.findAll(".nearby-map__place")).toHaveLength(121);
+    } finally {
+      wrapper.unmount();
+      restoreViewport();
+    }
+  });
+
   it("exposes bounded zoom controls in the directory preview when enabled", async () => {
     const restoreViewport = installMapViewport(720, 420);
     const wrapper = mount(NearbyStationsMap, {
@@ -916,6 +1661,7 @@ describe("NearbyStationsMap places directory mode", () => {
     wrapper.unmount();
     restoreViewport();
   });
+
 });
 
 function createFlowModel(): GhostLineFlowModel {
@@ -974,6 +1720,315 @@ async function enterFullscreenForTest(wrapper: ReturnType<typeof mount>): Promis
     }
   };
 }
+
+describe("NearbyStationsMap summary sidebar", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("groups nearby lines, renders hover frequency in the map card, and isolates the hovered line", async () => {
+    vi.useFakeTimers();
+    const metro = createLine("line:metro:summary", "METRO");
+    const firstStation = createStationAt("station:summary:one", "République", metro, 2.35, 48.85);
+    const secondStation = createStationAt("station:summary:two", "Châtelet", metro, 2.355, 48.855);
+    metro.stationIds = [firstStation.id, secondStation.id];
+    const network = createNetwork([metro], [firstStation, secondStation]);
+    walkingMatrixMock.mockResolvedValueOnce([{
+      id: metro.id,
+      provider: "idfm-navitia",
+      distanceMeters: 420,
+      durationSeconds: 300,
+      coordinates: [{ lon: 2.35, lat: 48.85 }, { lon: 2.351, lat: 48.851 }],
+    }]);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      return new Response(JSON.stringify({
+        lineId: metro.id,
+        serviceDate: getGtfsServiceDate(),
+        source: "gtfs",
+        status: "ready",
+        topologyAvailable: true,
+        branched: false,
+        average: { peakMinutes: 4, offPeakMinutes: 10 },
+        directions: [],
+        sections: [],
+        stationCount: 2,
+        sampledStationCount: 2,
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mountMap(
+      [createEntry(firstStation, metro)],
+      undefined,
+      { ...createFlowModel(), lineId: metro.id },
+      { "station-schedules": "<div data-testid='schedule-slot'>schedule</div>" },
+      undefined,
+      undefined,
+      [],
+      ["METRO"],
+      [],
+      network,
+    );
+
+    expect(wrapper.find("[data-testid='nearby-summary']").exists()).toBe(true);
+    expect(wrapper.findAll(".nearby-summary__group h4").map((heading) => heading.text())).toEqual(["Métro"]);
+    expect(wrapper.findAll(".nearby-summary__line")).toHaveLength(1);
+    expect(wrapper.findAll(".nearby-map__marker")).toHaveLength(1);
+
+    const summaryLine = wrapper.get(".nearby-summary__line");
+    await summaryLine.trigger("mouseenter");
+    expect(wrapper.emitted("hoverLine")).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(69);
+    expect(wrapper.emitted("hoverLine")).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    await flushPromises();
+    await nextTick();
+
+    expect(wrapper.emitted("hoverLine")).toEqual([[metro.id]]);
+    expect(wrapper.findAll(".nearby-map__marker")).toHaveLength(0);
+    expect(wrapper.findAll(".nearby-map__summary-line-station")).toHaveLength(2);
+    expect(wrapper.text()).toContain("5 min à pied");
+    expect(wrapper.find(".nearby-summary__frequency").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='nearby-line-hover-card']").exists()).toBe(true);
+    const lineHoverCard = wrapper.get("[data-testid='nearby-line-hover-card']");
+    expect(lineHoverCard.text()).toContain("Heures creuses");
+    expect(lineHoverCard.text()).toContain("10 min");
+    expect(lineHoverCard.text()).toContain("Pointe");
+    expect(lineHoverCard.text()).toContain("4 min");
+    expect(fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes("/api/lines/") && String(input).includes("/frequency"),
+    )).toHaveLength(1);
+
+    await summaryLine.trigger("mouseleave");
+    await vi.advanceTimersByTimeAsync(70);
+    await nextTick();
+    expect(wrapper.findAll(".nearby-map__marker")).toHaveLength(1);
+    expect(wrapper.emitted("leaveLine")).toEqual([[metro.id]]);
+  });
+
+  it("positions hovered bus stations on the provider anchors of the ghost path", async () => {
+    vi.useFakeTimers();
+    const bus = createLine("line:bus:anchored", "BUS");
+    const firstStation = createStationAt("station:anchored:one", "Arrêt amont", bus, 2.35, 48.85);
+    const secondStation = createStationAt("station:anchored:two", "Arrêt aval", bus, 2.355, 48.855);
+    bus.stationIds = [firstStation.id, secondStation.id];
+    const flow = {
+      ...createFlowModel(),
+      lineId: bus.id,
+      stationAnchors: [
+        { key: "provider:one", stationId: firstStation.id, x: 123, y: 45 },
+        { key: "provider:two", stationId: secondStation.id, x: 456, y: 278 },
+      ],
+    };
+    const wrapper = mountMap(
+      [createEntry(firstStation, bus)],
+      undefined,
+      flow,
+      {},
+      undefined,
+      undefined,
+      [],
+      ["BUS"],
+      [],
+      createNetwork([bus], [firstStation, secondStation]),
+    );
+
+    await wrapper.get(".nearby-summary__line").trigger("mouseenter");
+    await vi.advanceTimersByTimeAsync(70);
+    await nextTick();
+
+    const stationMarkers = wrapper.findAll(".nearby-map__summary-line-station");
+    expect(stationMarkers).toHaveLength(2);
+    expect(stationMarkers.map((marker) => marker.attributes("style"))).toEqual([
+      expect.stringContaining("left: 123px; top: 45px"),
+      expect.stringContaining("left: 456px; top: 278px"),
+    ]);
+  });
+
+  it("keeps projected heavy lines out of the primary summary", () => {
+    const local = createLine("line:metro:local", "METRO");
+    const projected = createLine("line:rer:projected", "RER");
+    const localStation = createStation("station:summary:local", "Local", local);
+    const projectedStation = createStation("station:summary:projected", "Projected", projected);
+    const wrapper = mountMap(
+      [createEntry(localStation, local)],
+      undefined,
+      undefined,
+      {},
+      undefined,
+      undefined,
+      [
+        createProjectedHeavyCandidate(projectedStation, projected),
+        createProjectedHeavyCandidate(localStation, local),
+      ],
+      ["METRO", "RER"],
+    );
+
+    const primaryLines = wrapper
+      .get("[data-testid='nearby-summary'] > .nearby-summary__groups")
+      .findAll(".nearby-summary__line");
+    expect(primaryLines.map((line) => line.attributes("data-summary-line-id"))).toEqual([local.id]);
+
+    const heavyAccordion = wrapper.get("[data-testid='nearby-summary-heavy-accordion']");
+    expect(heavyAccordion.attributes("open")).toBeUndefined();
+    expect(heavyAccordion.findAll("[data-summary-heavy-line-id]").map((line) =>
+      line.attributes("data-summary-heavy-line-id"),
+    )).toEqual([projected.id]);
+  });
+
+  it("pins a summary line, exposes map details, and switches the sidebar with tabs", async () => {
+    vi.useFakeTimers();
+    const bus = createLine("line:bus:summary", "BUS");
+    const secondBus = createLine("line:bus:summary:second", "BUS");
+    const station = createStation("station:summary:bus", "Denfert", bus);
+    const secondStation = createStation("station:summary:bus:second", "Alésia", secondBus);
+    const openMock = vi.spyOn(window, "open").mockImplementation(() => null);
+    const wrapper = mountMap(
+      [createEntry(station, bus), createEntry(secondStation, secondBus)],
+      undefined,
+      undefined,
+      { "station-schedules": "<div data-testid='schedule-slot'>schedule</div>" },
+      undefined,
+      undefined,
+      [],
+      ["BUS"],
+    );
+
+    expect(wrapper.get(".nearby-map__sidebar-tab--active").text()).toBe("Résumé");
+    expect(wrapper.get(".nearby-summary__group--dense").findAll(".nearby-summary__line")).toHaveLength(2);
+    const summaryLine = wrapper.get(".nearby-summary__line");
+    await summaryLine.trigger("click");
+    await nextTick();
+    expect(openMock).not.toHaveBeenCalled();
+    expect(wrapper.find("[data-testid='nearby-line-hover-card']").exists()).toBe(true);
+
+    await summaryLine.trigger("mouseleave");
+    await vi.advanceTimersByTimeAsync(70);
+    await nextTick();
+    expect(wrapper.find("[data-testid='nearby-line-hover-card']").exists()).toBe(true);
+
+    await wrapper.get("[data-testid='nearby-line-hover-card-more-details']").trigger("click");
+    expect(openMock).toHaveBeenCalledWith(
+      `/map?line=${encodeURIComponent(bus.id)}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+
+    await wrapper.get(".nearby-summary__global-map").trigger("click");
+    const globalMapUrl = String(openMock.mock.calls.at(-1)?.[0]);
+    const globalMapQuery = new URL(globalMapUrl, "http://localhost.test").searchParams;
+    expect(globalMapQuery.get("temporaryMarker")).toBe("2.35,48.85");
+    expect(globalMapQuery.get("temporaryMarkerRadius")).toBe("600");
+    expect(globalMapQuery.get("temporaryMarkerText")).toBe("Adresse fixture");
+    expect(globalMapQuery.getAll("lineToKeep")).toEqual([bus.id, secondBus.id]);
+    expect(wrapper.find(".nearby-summary__line").text()).not.toContain(bus.label);
+
+    await wrapper.get(".nearby-map").trigger("click");
+    expect(wrapper.find("[data-testid='nearby-line-hover-card']").exists()).toBe(false);
+
+    await wrapper.get("#nearby-map-schedule-tab").trigger("click");
+    await nextTick();
+    expect(wrapper.get(".nearby-map__sidebar-tab--active").text()).toBe("Prochains passages");
+    expect(wrapper.get(".nearby-map__sidebar-tab-track").classes()).toContain("nearby-map__sidebar-tab-track--schedule");
+    expect(wrapper.get("[data-testid='schedule-slot']").text()).toBe("schedule");
+
+    await wrapper.get("#nearby-map-summary-tab").trigger("click");
+    expect(wrapper.get(".nearby-map__sidebar-tab--active").text()).toBe("Résumé");
+  });
+
+  it("passes projected heavy lines and stations to the global map handoff", async () => {
+    const local = createLine("line:metro:summary:local", "METRO");
+    const projected = createLine("line:rer:summary:projected", "RER");
+    const localStation = createStation("station:summary:local", "Local", local);
+    const projectedStation = createStation("station:summary:projected", "Projected", projected);
+    const openMock = vi.spyOn(window, "open").mockImplementation(() => null);
+    const wrapper = mountMap(
+      [createEntry(localStation, local)],
+      undefined,
+      undefined,
+      {},
+      undefined,
+      undefined,
+      [createProjectedHeavyCandidate(projectedStation, projected)],
+      ["METRO", "RER"],
+    );
+
+    await wrapper.get(".nearby-summary__global-map").trigger("click");
+
+    const globalMapUrl = String(openMock.mock.calls.at(-1)?.[0]);
+    const globalMapQuery = new URL(globalMapUrl, "http://localhost.test").searchParams;
+    expect(globalMapQuery.getAll("lineToKeep")).toEqual([local.id]);
+    expect(globalMapQuery.getAll("nearbyHeavyLine")).toEqual([projected.id]);
+    expect(globalMapQuery.getAll("nearbyHeavyStation")).toEqual([projectedStation.id]);
+  });
+
+  it("shows the frequency card for station hover, station clicks, and station-line hover", async () => {
+    const metro = createLine("line:metro:station-card", "METRO");
+    metro.label = "13";
+    const station = createStation("station:station-card", "République", metro);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      lineId: metro.id,
+      serviceDate: getGtfsServiceDate(),
+      source: "gtfs",
+      status: "ready",
+      topologyAvailable: true,
+      branched: false,
+      average: { peakMinutes: 4, offPeakMinutes: 10 },
+      directions: [],
+      sections: [],
+      stationCount: 1,
+      sampledStationCount: 1,
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mountMap([createEntry(station, metro)]);
+
+    const marker = wrapper.get(".nearby-map__marker");
+    await marker.trigger("mouseenter");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='nearby-line-hover-card']").text()).toContain("10 min");
+
+    await wrapper.get(".nearby-map__marker-anchor").trigger("mouseleave");
+    expect(wrapper.find("[data-testid='nearby-line-hover-card']").exists()).toBe(false);
+
+    await marker.trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='nearby-line-hover-card']").exists()).toBe(true);
+
+    const lineButton = wrapper.get(".nearby-map__line");
+    await lineButton.trigger("mouseenter");
+    expect(wrapper.find("[data-testid='nearby-line-hover-card']").exists()).toBe(true);
+    await lineButton.trigger("mouseleave");
+    expect(wrapper.find("[data-testid='nearby-line-hover-card']").exists()).toBe(true);
+
+    await wrapper.get(".nearby-map").trigger("click");
+    expect(wrapper.find("[data-testid='nearby-line-hover-card']").exists()).toBe(false);
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("raises station tooltips and can hide them for ten seconds", async () => {
+    vi.useFakeTimers();
+    const metro = createLine("line:metro:tooltip-close", "METRO");
+    const station = createStation("station:tooltip-close", "République", metro);
+    const wrapper = mountMap([createEntry(station, metro)]);
+    const marker = wrapper.get(".nearby-map__marker");
+
+    await marker.trigger("mouseenter");
+    expect(wrapper.find(".nearby-map__marker-station-name").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='nearby-line-hover-card']").exists()).toBe(true);
+    const close = wrapper.get("[data-testid='nearby-map-tooltip-close']");
+    expect(close.attributes("aria-label")).toBe("Masquer les infobulles pendant 10 secondes");
+
+    await close.trigger("click");
+    expect(wrapper.find(".nearby-map__marker-station-name").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='nearby-line-hover-card']").exists()).toBe(true);
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(wrapper.find(".nearby-map__marker-station-name").exists()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(wrapper.find(".nearby-map__marker-station-name").exists()).toBe(true);
+  });
+});
 
 describe("NearbyStationsMap line focus", () => {
   it("emits fullscreen state changes for overlays that must stay inside the fullscreen element", async () => {
@@ -1771,7 +2826,7 @@ describe("NearbyStationsMap line focus", () => {
       await displayToggle.trigger("click");
       const panel = wrapper.find("#nearby-map-display-controls");
       expect(panel.exists()).toBe(true);
-      expect(panel.findAll("input[type='checkbox']")).toHaveLength(14);
+      expect(panel.findAll("input[type='checkbox']")).toHaveLength(16);
       expect((panel.find("input[type='checkbox']").element as HTMLInputElement).checked).toBe(true);
 
       const busCheckbox = panel.findAll("input[type='checkbox']")[0]!;
@@ -1817,17 +2872,25 @@ describe("NearbyStationsMap line focus", () => {
       const panel = wrapper.get("#nearby-map-display-controls");
       const longWaitToggle = panel.get("[data-hide-long-wait-transports]");
       const placesToggle = panel.get("[data-show-nearby-places]");
+      const benchesToggle = panel.get("[data-show-nearby-benches]");
+      const parkingsToggle = panel.get("[data-show-nearby-parkings]");
       const placeNamesToggle = panel.get("[data-show-nearby-place-names]");
       expect((longWaitToggle.element as HTMLInputElement).checked).toBe(true);
       expect((placesToggle.element as HTMLInputElement).checked).toBe(true);
+      expect((benchesToggle.element as HTMLInputElement).checked).toBe(false);
+      expect((parkingsToggle.element as HTMLInputElement).checked).toBe(false);
       expect((placeNamesToggle.element as HTMLInputElement).checked).toBe(false);
       expect((placeNamesToggle.element as HTMLInputElement).disabled).toBe(false);
 
       await longWaitToggle.setValue(false);
       await placesToggle.setValue(false);
+      await benchesToggle.setValue(true);
+      await parkingsToggle.setValue(true);
       await placeNamesToggle.setValue(true);
       expect(wrapper.emitted("update:hideLongWaitTransports")).toEqual([[false]]);
       expect(wrapper.emitted("update:showNearbyPlaces")).toEqual([[false]]);
+      expect(wrapper.emitted("update:showNearbyBenches")).toEqual([[true]]);
+      expect(wrapper.emitted("update:showNearbyParkings")).toEqual([[true]]);
       expect(wrapper.emitted("update:showNearbyPlaceNames")).toEqual([[true]]);
 
       await wrapper.setProps({ showNearbyPlaces: false });
@@ -1855,6 +2918,63 @@ describe("NearbyStationsMap line focus", () => {
       expect(wrapper.get(".nearby-map__place").attributes("aria-label")).toContain("80");
       await wrapper.setProps({ showNearbyPlaces: false });
       expect(wrapper.find(".nearby-map__place").exists()).toBe(false);
+    } finally {
+      wrapper?.unmount();
+      restoreViewport();
+    }
+  });
+
+  it("keeps places just outside the neighborhood circle as attenuated context", async () => {
+    const restoreViewport = installMapViewport(720, 360);
+    let wrapper: ReturnType<typeof mount> | undefined;
+    try {
+      const metro = createLine("line:metro:13", "METRO");
+      const station = createStation("station:13", "Châtillon–Montrouge", metro);
+      wrapper = mountMap([createEntry(station, metro)]);
+      await wrapper.setProps({
+        showNearbyPlaces: true,
+        places: [
+          { id: "inside", name: "Dans le cercle", lon: 2.35, lat: 48.85, category: "shop", kind: "supermarket", distanceMeters: 600 },
+          { id: "near-outside", name: "Juste hors cercle", lon: 2.35, lat: 48.85, category: "shop", kind: "supermarket", distanceMeters: 800 },
+          { id: "far-outside", name: "Trop loin", lon: 2.35, lat: 48.85, category: "shop", kind: "supermarket", distanceMeters: 801 },
+        ],
+      });
+
+      expect(wrapper.findAll(".nearby-map__place")).toHaveLength(2);
+      expect(wrapper.get("[data-place-id='inside']").classes()).not.toContain("nearby-map__place--outside");
+      expect(wrapper.get("[data-place-id='near-outside']").classes()).toContain("nearby-map__place--outside");
+      expect(wrapper.find("[data-place-id='far-outside']").exists()).toBe(false);
+    } finally {
+      wrapper?.unmount();
+      restoreViewport();
+    }
+  });
+
+  it("hides benches, parkings and waste baskets by default while allowing map opt-in", async () => {
+    const restoreViewport = installMapViewport(720, 360);
+    let wrapper: ReturnType<typeof mount> | undefined;
+    try {
+      const metro = createLine("line:metro:13", "METRO");
+      const station = createStation("station:13", "Châtillon–Montrouge", metro);
+      wrapper = mountMap([createEntry(station, metro)]);
+      await wrapper.setProps({
+        showNearbyPlaces: true,
+        places: [
+          { id: "shop", name: "Intermarché", lon: 2.35, lat: 48.85, category: "shop", kind: "supermarket", distanceMeters: 80 },
+          { id: "bench", name: "Banc public", lon: 2.35, lat: 48.85, category: "service", kind: "bench", distanceMeters: 81 },
+          { id: "parking", name: "Parking", lon: 2.35, lat: 48.85, category: "service", kind: "parking", distanceMeters: 82 },
+          { id: "waste-basket", name: "Corbeille", lon: 2.35, lat: 48.85, category: "service", kind: "waste_basket", distanceMeters: 83 },
+        ],
+      });
+
+      expect(wrapper.findAll(".nearby-map__place")).toHaveLength(1);
+      expect(wrapper.find("[data-place-id='shop']").exists()).toBe(true);
+
+      await wrapper.setProps({ showNearbyBenches: true, showNearbyParkings: true });
+      expect(wrapper.findAll(".nearby-map__place")).toHaveLength(3);
+      expect(wrapper.find("[data-place-id='bench']").exists()).toBe(true);
+      expect(wrapper.find("[data-place-id='parking']").exists()).toBe(true);
+      expect(wrapper.find("[data-place-id='waste-basket']").exists()).toBe(false);
     } finally {
       wrapper?.unmount();
       restoreViewport();

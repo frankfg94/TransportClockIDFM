@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Fuse from "fuse.js";
 import { computed, onBeforeUnmount, onMounted, ref, type Component, watch } from "vue";
 import {
   BarChart3,
@@ -12,8 +13,10 @@ import {
   Pencil,
   Plus,
   Route,
+  Search,
   Trash2,
   Wifi,
+  X,
 } from "lucide-vue-next";
 import AppModal from "../../components/AppModal.vue";
 import AppNotification, { type AppNotificationTone } from "../../components/AppNotification.vue";
@@ -128,6 +131,7 @@ import { toServerApiUrl } from "../../services/serverApi";
 import type { TrafficCacheMetadata } from "../traffic/types";
 import type { AnnualRidershipStatusResponse } from "../../types/ridership";
 import { clearNearbyWalkingRouteCache } from "../../services/nearbyWalkingRoutes";
+import NotSettingsFound from "./NotSettingsFound.vue";
 
 const { settings, updateSettings, resetSettings } = useAppSettings();
 const { d, locale, n, t } = useI18n();
@@ -165,6 +169,11 @@ const trafficCacheError = ref("");
 const annualRidershipStatus = ref<AnnualRidershipStatusResponse>();
 const annualRidershipStatusLoading = ref(false);
 const annualRidershipStatusError = ref("");
+const settingsSearchQuery = ref("");
+const debouncedSettingsSearchQuery = ref("");
+const settingsSearchCollapsedPanelIds = ref(new Set<string>());
+const SETTINGS_SEARCH_DEBOUNCE_MS = 200;
+let settingsSearchTimer: ReturnType<typeof setTimeout> | undefined;
 let trafficCacheStatusTimer: ReturnType<typeof setInterval> | undefined;
 let trafficCacheClockTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -185,19 +194,23 @@ const globalMapPackSummaryJson = computed(() => {
   const manifest = globalMapManifest.value;
   if (!manifest) return "";
 
-  return JSON.stringify({
-    schemaVersion: manifest.schemaVersion,
-    minReaderVersion: manifest.minReaderVersion,
-    dataVersion: manifest.dataVersion,
-    generatedAt: manifest.generatedAt,
-    sourceVersions: manifest.sourceVersions,
-    projection: manifest.projection,
-    bounds: manifest.bounds,
-    lod: manifest.lod,
-    modes: manifest.modes,
-    counts: manifest.counts,
-    compilation: manifest.compilation,
-  }, null, 2);
+  return JSON.stringify(
+    {
+      schemaVersion: manifest.schemaVersion,
+      minReaderVersion: manifest.minReaderVersion,
+      dataVersion: manifest.dataVersion,
+      generatedAt: manifest.generatedAt,
+      sourceVersions: manifest.sourceVersions,
+      projection: manifest.projection,
+      bounds: manifest.bounds,
+      lod: manifest.lod,
+      modes: manifest.modes,
+      counts: manifest.counts,
+      compilation: manifest.compilation,
+    },
+    null,
+    2,
+  );
 });
 const globalMapPackFilesJson = computed(() => {
   const manifest = globalMapManifest.value;
@@ -207,12 +220,18 @@ const globalMapPackWarningsJson = computed(() => {
   const manifest = globalMapManifest.value;
   if (!manifest?.warnings) return "";
 
-  return JSON.stringify({
-    palette: manifest.palette ?? null,
-    warnings: manifest.warnings,
-  }, null, 2);
+  return JSON.stringify(
+    {
+      palette: manifest.palette ?? null,
+      warnings: manifest.warnings,
+    },
+    null,
+    2,
+  );
 });
-const globalMapManifestJson = computed(() => globalMapManifest.value ? JSON.stringify(globalMapManifest.value, null, 2) : "");
+const globalMapManifestJson = computed(() =>
+  globalMapManifest.value ? JSON.stringify(globalMapManifest.value, null, 2) : "",
+);
 const globalMapTotalPackBytes = computed(() => {
   const manifest = globalMapManifest.value;
   if (!manifest?.files) return 0;
@@ -225,8 +244,10 @@ const globalMapTotalPackBytes = computed(() => {
     manifest.files.linePalette,
   ];
 
-  return namedFiles.reduce((total, file) => total + (file?.bytes ?? 0), 0)
-    + manifest.files.chunks.reduce((total, chunk) => total + (chunk.bytes ?? 0), 0);
+  return (
+    namedFiles.reduce((total, file) => total + (file?.bytes ?? 0), 0) +
+    manifest.files.chunks.reduce((total, chunk) => total + (chunk.bytes ?? 0), 0)
+  );
 });
 const globalMapQualityCards = computed<GlobalMapQualityCard[]>(() => {
   const manifest = globalMapManifest.value;
@@ -237,8 +258,8 @@ const globalMapQualityCards = computed<GlobalMapQualityCard[]>(() => {
   const topologyWarningCount = warningCount("gtfs-topology-edge-missing");
   const coordinateCorrectionCount = warningCount("gtfs-station-coordinate-corrected");
   const fallbackGeometryCount = warningCount("fallback-geometry");
-  const paletteMissingCount = manifest.palette?.missingCount
-    ?? warningCount("line-color-palette-missing");
+  const paletteMissingCount =
+    manifest.palette?.missingCount ?? warningCount("line-color-palette-missing");
   const hasPackTiles = manifest.files.chunks.length > 0 && globalMapTotalPackBytes.value > 0;
 
   return [
@@ -400,10 +421,27 @@ const backendBundleCount = computed(() => bundleSummaries.value.length);
 const localBundleCount = computed(() => localBundleSummaries.value.length);
 const bundleCount = computed(() => backendBundleCount.value + localBundleCount.value);
 function isPanelOpen(panelId: string): boolean {
+  if (hasSettingsSearchQuery.value) {
+    return isPanelVisible(panelId) && !settingsSearchCollapsedPanelIds.value.has(panelId);
+  }
+
   return openPanelIds.value.has(panelId);
 }
 
 function togglePanel(panelId: string): void {
+  if (hasSettingsSearchQuery.value) {
+    const nextCollapsedPanelIds = new Set(settingsSearchCollapsedPanelIds.value);
+
+    if (nextCollapsedPanelIds.has(panelId)) {
+      nextCollapsedPanelIds.delete(panelId);
+    } else {
+      nextCollapsedPanelIds.add(panelId);
+    }
+
+    settingsSearchCollapsedPanelIds.value = nextCollapsedPanelIds;
+    return;
+  }
+
   const nextOpenPanelIds = new Set(openPanelIds.value);
 
   if (nextOpenPanelIds.has(panelId)) {
@@ -429,15 +467,17 @@ function formatGlobalMapDate(value: string | undefined): string {
 }
 
 async function loadGlobalMapSettingsData(): Promise<void> {
-  if (globalMapManifest.value || globalMapManifestLoading.value || typeof fetch === "undefined") return;
+  if (globalMapManifest.value || globalMapManifestLoading.value || typeof fetch === "undefined")
+    return;
   globalMapManifestLoading.value = true;
   globalMapManifestError.value = "";
   try {
     const response = await fetch("/data/global-map/v1/manifest.json");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    globalMapManifest.value = await response.json() as GlobalMapManifest;
+    globalMapManifest.value = (await response.json()) as GlobalMapManifest;
   } catch (error) {
-    globalMapManifestError.value = error instanceof Error ? error.message : t("settings.globalMapData.loadFailed");
+    globalMapManifestError.value =
+      error instanceof Error ? error.message : t("settings.globalMapData.loadFailed");
   } finally {
     globalMapManifestLoading.value = false;
   }
@@ -452,12 +492,11 @@ async function loadTrafficCacheStatus(): Promise<void> {
       headers: { accept: "application/json" },
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    trafficCacheStatus.value = await response.json() as TrafficCacheStatusResponse;
+    trafficCacheStatus.value = (await response.json()) as TrafficCacheStatusResponse;
     trafficCacheError.value = "";
   } catch (error) {
-    trafficCacheError.value = error instanceof Error
-      ? error.message
-      : t("settings.trafficCache.loadFailed");
+    trafficCacheError.value =
+      error instanceof Error ? error.message : t("settings.trafficCache.loadFailed");
   }
 }
 
@@ -470,9 +509,8 @@ async function loadAnnualRidershipStatus(): Promise<void> {
     annualRidershipStatus.value = await fetchAnnualRidershipStatus();
   } catch (error) {
     annualRidershipStatus.value = undefined;
-    annualRidershipStatusError.value = error instanceof Error
-      ? error.message
-      : t("settings.annualRidership.quality.noManifest");
+    annualRidershipStatusError.value =
+      error instanceof Error ? error.message : t("settings.annualRidership.quality.noManifest");
   } finally {
     annualRidershipStatusLoading.value = false;
   }
@@ -490,7 +528,7 @@ async function forceTrafficCacheRefresh(): Promise<void> {
       headers: { accept: "application/json" },
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const payload = await response.json() as { cache?: TrafficCacheMetadata };
+    const payload = (await response.json()) as { cache?: TrafficCacheMetadata };
     await loadTrafficCacheStatus();
     const state = payload.cache?.state ?? trafficCache.value?.state;
     showSettingsNotification(
@@ -500,9 +538,8 @@ async function forceTrafficCacheRefresh(): Promise<void> {
       state === "rate-limited" ? "info" : "success",
     );
   } catch (error) {
-    trafficCacheError.value = error instanceof Error
-      ? error.message
-      : t("settings.trafficCache.refreshFailed");
+    trafficCacheError.value =
+      error instanceof Error ? error.message : t("settings.trafficCache.refreshFailed");
     showSettingsNotification(t("settings.trafficCache.refreshFailed"), "error");
   } finally {
     trafficCacheLoading.value = false;
@@ -523,6 +560,10 @@ watch(locale, () => {
   if (typeof window !== "undefined") {
     void loadTrafficCacheStatus();
   }
+});
+
+watch(debouncedSettingsSearchQuery, () => {
+  settingsSearchCollapsedPanelIds.value = new Set();
 });
 
 const placeOptions = computed(() =>
@@ -807,6 +848,589 @@ const weatherLocationLocalizedOptions = computed(() =>
     label: option.id === "custom" ? t("settings.options.weatherLocation.custom") : option.label,
   })),
 );
+
+interface SettingsSearchEntry {
+  id: string;
+  panelId: string;
+  searchText: string;
+}
+
+function normalizeSettingsSearchText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase();
+}
+
+function createSettingsSearchEntry(
+  id: string,
+  panelId: string,
+  label: string,
+  description = "",
+  keywords = "",
+): SettingsSearchEntry {
+  return {
+    id,
+    panelId,
+    searchText: normalizeSettingsSearchText(`${label} ${description} ${keywords}`),
+  };
+}
+
+function getSettingsOptionLabels(options: MaterialComboboxOption[]): string {
+  return options.map((option) => option.label).join(" ");
+}
+
+const settingsSearchEntries = computed<SettingsSearchEntry[]>(() => [
+  createSettingsSearchEntry(
+    "panel:language",
+    "language",
+    t("settings.language.title"),
+    t("settings.language.description"),
+    t("settings.language.eyebrow"),
+  ),
+  createSettingsSearchEntry(
+    "language",
+    "language",
+    t("settings.language.label"),
+    t("settings.language.description"),
+    getSettingsOptionLabels(languageOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "panel:menu",
+    "menu",
+    t("settings.menu.title"),
+    t("settings.menu.showPlanDescription"),
+    t("settings.menu.eyebrow"),
+  ),
+  createSettingsSearchEntry(
+    "menu.show-plan",
+    "menu",
+    t("settings.menu.showPlan"),
+    t("settings.menu.showPlanDescription"),
+  ),
+  createSettingsSearchEntry(
+    "panel:global-map-data",
+    "global-map-data",
+    t("settings.globalMapData.title"),
+    t("settings.globalMapData.description"),
+    "reseau donnees qualite pack hors connexion tuiles tracés couleurs",
+  ),
+  createSettingsSearchEntry(
+    "panel:places",
+    "places",
+    t("settings.places.title"),
+    t("settings.places.navigationDescription"),
+    t("settings.places.eyebrow"),
+  ),
+  createSettingsSearchEntry(
+    "places.default",
+    "places",
+    t("settings.places.defaultLabel"),
+    t("settings.places.defaultDescription"),
+    getSettingsOptionLabels(placeOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "places.navigation",
+    "places",
+    t("settings.places.navigationLabel"),
+    t("settings.places.navigationDescription"),
+    getSettingsOptionLabels(placePresetNavigationModeLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "panel:address-book",
+    "address-book",
+    t("addressBook.title"),
+    t("addressBook.description"),
+    t("addressBook.eyebrow"),
+  ),
+  createSettingsSearchEntry(
+    "address-book.entry",
+    "address-book",
+    t("addressBook.title"),
+    t("addressBook.description"),
+  ),
+  createSettingsSearchEntry(
+    "panel:display",
+    "display",
+    t("settings.display.title"),
+    "tableaux prochains passages affichage stations écran",
+  ),
+  createSettingsSearchEntry(
+    "display.place",
+    "display",
+    t("settings.places.displayPlaceLabel"),
+    t("settings.places.displayPlaceDescription"),
+    getSettingsOptionLabels(placeOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "display.station-buttons",
+    "display",
+    t("settings.display.stationButtons"),
+    t("settings.display.stationButtonsDescription"),
+    getSettingsOptionLabels(boardTogglesPlacementLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "display.panel-design",
+    "display",
+    t("settings.display.panelDesign"),
+    t("settings.display.panelDesignDescription"),
+    getSettingsOptionLabels(fullscreenStationPanelDesignLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "display.panel-dark-theme",
+    "display",
+    t("settings.display.panelDarkTheme"),
+    t("settings.display.panelDarkThemeDescription"),
+  ),
+  createSettingsSearchEntry(
+    "display.closed-accordion",
+    "display",
+    t("settings.display.closedAccordion"),
+    t("settings.display.closedAccordionDescription"),
+    getSettingsOptionLabels(closedDirectionSummaryLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "display.max-departures",
+    "display",
+    t("settings.display.maxDepartures"),
+    t("settings.display.maxDeparturesDescription"),
+    getSettingsOptionLabels(maxDeparturesLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "display.terminal-only",
+    "display",
+    t("settings.display.terminalOnly"),
+    t("settings.display.terminalOnlyDescription"),
+  ),
+  createSettingsSearchEntry(
+    "display.ghost-lines",
+    "display",
+    t("settings.display.structuralGhostLines"),
+    t("settings.display.structuralGhostLinesDescription"),
+  ),
+  createSettingsSearchEntry(
+    "display.traffic-design",
+    "display",
+    t("settings.display.trafficDesign"),
+    t("settings.display.trafficDesignDescription"),
+    getSettingsOptionLabels(trafficInfoDesignLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "panel:traffic",
+    "traffic",
+    t("settings.display.trafficScope"),
+    t("settings.display.trafficScopeDescription"),
+    "trafic perturbations interruptions cache correspondances",
+  ),
+  createSettingsSearchEntry(
+    "traffic.scope",
+    "traffic",
+    t("settings.display.trafficScope"),
+    t("settings.display.trafficScopeDescription"),
+    getSettingsOptionLabels(trafficInfoDefaultScopeLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "traffic.cache",
+    "traffic",
+    t("settings.trafficCache.title"),
+    t("settings.trafficCache.description"),
+    t("settings.trafficCache.forceRefresh"),
+  ),
+  createSettingsSearchEntry(
+    "traffic.calendar-scope",
+    "traffic",
+    t("settings.display.trafficCalendarScope"),
+    t("settings.display.trafficCalendarScopeDescription"),
+    getSettingsOptionLabels(trafficCalendarImpactScopeLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "traffic.equation",
+    "traffic",
+    t("settings.trafficCalendarEquation.title"),
+    t("settings.trafficCalendarEquation.description"),
+    t("settings.trafficCalendarEquation.formula"),
+  ),
+  createSettingsSearchEntry(
+    "traffic.modal-formatting",
+    "traffic",
+    t("settings.display.trafficModalSmartFormatting"),
+    t("settings.display.trafficModalSmartFormattingDescription"),
+  ),
+  createSettingsSearchEntry(
+    "traffic.smart-detection",
+    "traffic",
+    t("settings.display.smartTraffic"),
+    t("settings.display.smartTrafficDescription"),
+  ),
+  createSettingsSearchEntry(
+    "traffic.replacement-buses",
+    "traffic",
+    t("settings.display.unifyReplacementBusMarkers"),
+    t("settings.display.unifyReplacementBusMarkersDescription"),
+  ),
+  createSettingsSearchEntry(
+    "traffic.warning-lookahead",
+    "traffic",
+    t("settings.display.trafficWarningLookahead"),
+    t("settings.display.trafficWarningLookaheadDescription"),
+  ),
+  createSettingsSearchEntry(
+    "traffic.user-location",
+    "traffic",
+    t("settings.display.showUserLocation"),
+    t("settings.display.showUserLocationDescription"),
+  ),
+  createSettingsSearchEntry(
+    "traffic.local-cache",
+    "traffic",
+    t("settings.bundles.enableLocalCache"),
+    t("settings.display.transferLocalCacheDescription"),
+  ),
+  createSettingsSearchEntry(
+    "traffic.backend-cache",
+    "traffic",
+    t("settings.bundles.enableBackendCache"),
+    t("settings.display.transferBackendCacheDescription"),
+  ),
+  createSettingsSearchEntry(
+    "traffic.expiration",
+    "traffic",
+    t("settings.bundles.expiration"),
+    t("settings.display.transferExpirationDescription"),
+    getSettingsOptionLabels(transferBundleRetentionLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "traffic.loading",
+    "traffic",
+    t("settings.bundles.loading"),
+    t("settings.display.transferLoadingDescription"),
+  ),
+  createSettingsSearchEntry(
+    "traffic.resolver",
+    "traffic",
+    t("settings.bundles.resolver"),
+    t("settings.display.transferResolverDescription"),
+    getSettingsOptionLabels(transferResolverModeLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "traffic.concurrency",
+    "traffic",
+    t("settings.bundles.concurrency"),
+    t("settings.display.transferConcurrencyDescription"),
+    getSettingsOptionLabels(transferBundleRequestConcurrencyLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "traffic.spacing",
+    "traffic",
+    t("settings.bundles.spacing"),
+    t("settings.display.transferSpacingDescription"),
+    getSettingsOptionLabels(transferBundleRequestSpacingLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "traffic.bundles",
+    "traffic",
+    t("settings.bundles.title"),
+    t("settings.display.transferCacheDescription"),
+  ),
+  createSettingsSearchEntry(
+    "traffic.walking-cache",
+    "traffic",
+    t("settings.walkingCache.title"),
+    t("settings.walkingCache.description"),
+  ),
+  createSettingsSearchEntry(
+    "panel:weather",
+    "weather",
+    t("settings.display.weather"),
+    t("settings.display.weatherDescription"),
+    t("weather.title"),
+  ),
+  createSettingsSearchEntry(
+    "weather.mode",
+    "weather",
+    t("settings.display.weather"),
+    t("settings.display.weatherDescription"),
+    getSettingsOptionLabels(weatherModeLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "weather.test-mode",
+    "weather",
+    t("settings.display.weatherTestMode"),
+    t("settings.display.weatherTestDescription"),
+    getSettingsOptionLabels(weatherTestModeLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "weather.lookahead",
+    "weather",
+    t("settings.display.weatherLookahead"),
+    t("settings.display.weatherLookaheadDescription"),
+    getSettingsOptionLabels(weatherLookaheadLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "weather.apparent-temperature",
+    "weather",
+    t("settings.display.weatherApparent"),
+    t("settings.display.weatherApparentDescription"),
+  ),
+  createSettingsSearchEntry(
+    "weather.location",
+    "weather",
+    t("settings.display.weatherLocation"),
+    t("settings.display.weatherLocationDescription"),
+    getSettingsOptionLabels(weatherLocationLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "weather.custom-location",
+    "weather",
+    `${t("settings.display.weatherCustomName")} ${t("settings.display.weatherCustomLatitude")} ${t("settings.display.weatherCustomLongitude")}`,
+    t("settings.display.weatherLocationDescription"),
+  ),
+  createSettingsSearchEntry(
+    "panel:gtfs",
+    "gtfs",
+    t("settings.gtfs.title"),
+    t("settings.gtfs.description"),
+    t("settings.gtfs.toggle"),
+  ),
+  createSettingsSearchEntry(
+    "panel:map",
+    "map",
+    t("settings.display.mapTitle"),
+    "carte fond cartographique plan global stations proximité",
+  ),
+  createSettingsSearchEntry(
+    "map.contrast",
+    "map",
+    t("settings.display.mapContrast"),
+    t("settings.display.mapContrastDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.basemap-style",
+    "map",
+    t("settings.display.mapBasemapStyle"),
+    t("settings.display.mapBasemapStyleDescription"),
+    getSettingsOptionLabels(globalMapBasemapStyleLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "map.antialiasing",
+    "map",
+    t("settings.display.deckAntialiasing"),
+    t("settings.display.deckAntialiasingDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.nearby-controls",
+    "map",
+    t("settings.display.nearbyMapControlsTitle"),
+    t("settings.display.nearbyMapControlsDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.nearby-isochrone",
+    "map",
+    t("settings.display.nearbyMapShowIsochroneControl"),
+    t("settings.display.nearbyMapShowIsochroneControlDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.nearby-directory",
+    "map",
+    t("settings.display.nearbyMapShowDirectoryControl"),
+    t("settings.display.nearbyMapShowDirectoryControlDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.nearby-basemap",
+    "map",
+    t("settings.display.nearbyMapShowBasemapControl"),
+    t("settings.display.nearbyMapShowBasemapControlDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.nearby-display",
+    "map",
+    t("settings.display.nearbyMapShowDisplayControl"),
+    t("settings.display.nearbyMapShowDisplayControlDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.nearby-fullscreen",
+    "map",
+    t("settings.display.nearbyMapShowFullscreenControl"),
+    t("settings.display.nearbyMapShowFullscreenControlDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.minimap",
+    "map",
+    t("settings.display.showMiniMap"),
+    t("settings.display.showMiniMapDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.line-icons",
+    "map",
+    t("settings.display.showTravelRouteLineIcons"),
+    t("settings.display.showTravelRouteLineIconsDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.city-zones",
+    "map",
+    t("settings.display.showCityZones"),
+    t("settings.display.showCityZonesDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.compact-mode",
+    "map",
+    t("settings.display.compactMode"),
+    t("settings.display.compactModeDescription"),
+    getSettingsOptionLabels(compactLinePlanLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "map.compact-vertical-spacing",
+    "map",
+    t("settings.display.compactVerticalSpacing"),
+    t("settings.display.compactVerticalSpacingDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.rounded-curves",
+    "map",
+    t("settings.display.roundedCurves"),
+    t("settings.display.roundedCurvesDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.interruption-walking-times",
+    "map",
+    t("settings.display.interruptionWalkingTimes"),
+    t("settings.display.interruptionWalkingTimesDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.compact-fork-gap",
+    "map",
+    t("settings.display.compactForkGap"),
+    t("settings.display.compactForkGapDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.realistic-spacing",
+    "map",
+    t("settings.display.realisticSpacing"),
+    t("settings.display.realisticSpacingDescription"),
+    `${t("settings.display.minCoefficient")} ${t("settings.display.maxCoefficient")}`,
+  ),
+  createSettingsSearchEntry(
+    "map.rich-transfer-tooltips",
+    "map",
+    t("settings.display.richTransferTooltips"),
+    t("settings.display.richTransferTooltipsDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.reduce-motion",
+    "map",
+    t("settings.display.reduceMotion"),
+    t("settings.display.reduceMotionDescription"),
+    "animations mouvements accessibilité",
+  ),
+  createSettingsSearchEntry(
+    "panel:plugins",
+    "plugins",
+    t("settings.plugins.title"),
+    t("settings.plugins.description"),
+    t("settings.plugins.eyebrow"),
+  ),
+  createSettingsSearchEntry(
+    "panel:mobile-release",
+    "mobile-release",
+    t("mobileRelease.title"),
+    t("mobileRelease.body"),
+    "android apk application mobile",
+  ),
+  createSettingsSearchEntry(
+    "panel:device",
+    "device",
+    t("settings.device.title"),
+    "écran tablette navigation appareil",
+    t("settings.device.eyebrow"),
+  ),
+  createSettingsSearchEntry(
+    "device.network",
+    "device",
+    t("settings.network.title"),
+    t("settings.network.description"),
+    getSettingsOptionLabels(networkConcurrencyOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "device.wake-lock",
+    "device",
+    t("settings.device.wakeLock"),
+    t("settings.device.wakeLockDescription"),
+    getSettingsOptionLabels(wakeLockLocalizedOptions.value),
+  ),
+  createSettingsSearchEntry(
+    "device.wake-alarm",
+    "device",
+    t("settings.device.wakeDeviceOnAlarm"),
+    t("settings.device.wakeDeviceOnAlarmDescription"),
+  ),
+  createSettingsSearchEntry(
+    "device.travel-margin",
+    "device",
+    t("settings.device.travelAlarmSafetyMinutes"),
+    t("settings.device.travelAlarmSafetyMinutesDescription"),
+  ),
+  createSettingsSearchEntry(
+    "device.auto-hide",
+    "device",
+    t("settings.device.navigationAutoHide"),
+    t("settings.device.navigationAutoHideDescription"),
+    getSettingsOptionLabels(navigationAutoHideLocalizedOptions.value),
+  ),
+]);
+
+const settingsSearchFuse = computed(
+  () =>
+    new Fuse(settingsSearchEntries.value, {
+      ignoreLocation: true,
+      keys: ["searchText"],
+      minMatchCharLength: 1,
+      threshold: 0.42,
+    }),
+);
+const settingsSearchResults = computed(() => {
+  const query = normalizeSettingsSearchText(debouncedSettingsSearchQuery.value);
+  return query ? settingsSearchFuse.value.search(query) : [];
+});
+const matchedSettingsIds = computed(
+  () => new Set(settingsSearchResults.value.map((result) => result.item.id)),
+);
+const hasSettingsSearchQuery = computed(() => Boolean(debouncedSettingsSearchQuery.value));
+const settingsSearchPending = computed(
+  () => settingsSearchQuery.value.trim() !== debouncedSettingsSearchQuery.value,
+);
+
+function updateSettingsSearchQuery(value: string): void {
+  settingsSearchQuery.value = value;
+
+  if (settingsSearchTimer) {
+    clearTimeout(settingsSearchTimer);
+  }
+
+  settingsSearchTimer = setTimeout(() => {
+    debouncedSettingsSearchQuery.value = value.trim();
+    settingsSearchTimer = undefined;
+  }, SETTINGS_SEARCH_DEBOUNCE_MS);
+}
+
+function clearSettingsSearchQuery(): void {
+  updateSettingsSearchQuery("");
+}
+
+function isPanelVisible(panelId: string): boolean {
+  if (!hasSettingsSearchQuery.value) return true;
+  return settingsSearchResults.value.some((result) => result.item.panelId === panelId);
+}
+
+function isSettingVisible(settingId: string, panelId: string, parentSettingId?: string): boolean {
+  if (!hasSettingsSearchQuery.value) return true;
+
+  return (
+    matchedSettingsIds.value.has(settingId) ||
+    matchedSettingsIds.value.has(`panel:${panelId}`) ||
+    (parentSettingId ? matchedSettingsIds.value.has(parentSettingId) : false)
+  );
+}
+
 const selectedDisplayPlace = computed(
   () =>
     getTransitPlaceById(presetState.value, selectedDisplayPlaceId.value) ??
@@ -960,6 +1584,7 @@ function viewAddressBookNeighborhood(entry: AddressBookEntry): void {
     address: entry.address || entry.name,
     lat: String(entry.lat),
     lon: String(entry.lon),
+    ...(entry.city ? { city: entry.city } : {}),
   });
   window.open(`/nearby-stations?${params.toString()}`, "_blank", "noopener,noreferrer");
 }
@@ -1268,6 +1893,9 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (settingsSearchTimer) {
+    clearTimeout(settingsSearchTimer);
+  }
   if (settingsNotificationTimer) {
     clearTimeout(settingsNotificationTimer);
   }
@@ -1284,7 +1912,38 @@ onBeforeUnmount(() => {
       <p>{{ t("settings.hero.body") }}</p>
     </header>
 
+    <div class="settings-search" data-settings-search role="search">
+      <label class="settings-search__field">
+        <Search :size="20" aria-hidden="true" />
+        <span class="sr-only">{{ t("settings.search.label") }}</span>
+        <input
+          :value="settingsSearchQuery"
+          :aria-busy="settingsSearchPending"
+          :aria-label="t('settings.search.label')"
+          :placeholder="t('settings.search.placeholder')"
+          type="search"
+          @input="updateSettingsSearchQuery(($event.target as HTMLInputElement).value)"
+        />
+        <button
+          v-if="settingsSearchQuery"
+          class="settings-search__clear icon-button"
+          type="button"
+          :aria-label="t('settings.search.clear')"
+          @click="clearSettingsSearchQuery"
+        >
+          <X :size="18" aria-hidden="true" />
+        </button>
+      </label>
+    </div>
+
+    <NotSettingsFound
+      v-if="hasSettingsSearchQuery && settingsSearchResults.length === 0"
+      :description="t('settings.search.noResultsDescription')"
+      :title="t('settings.search.noResults')"
+    />
+
     <section
+      v-if="isPanelVisible('language')"
       class="settings-panel"
       :class="{ 'settings-panel--open': isPanelOpen('language') }"
       aria-labelledby="settings-language-title"
@@ -1304,7 +1963,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('language', 'language')" class="settings-row">
         <div>
           <strong>{{ t("settings.language.label") }}</strong>
           <span>{{ t("settings.language.description") }}</span>
@@ -1319,6 +1978,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section
+      v-if="isPanelVisible('menu')"
       class="settings-panel"
       :class="{ 'settings-panel--open': isPanelOpen('menu') }"
       aria-labelledby="settings-menu-title"
@@ -1338,7 +1998,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <label class="settings-toggle">
+      <label v-if="isSettingVisible('menu.show-plan', 'menu')" class="settings-toggle">
         <input
           type="checkbox"
           :checked="settings.showPlanInNavigation"
@@ -1358,6 +2018,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section
+      v-if="isPanelVisible('global-map-data')"
       class="settings-panel settings-panel--data"
       :class="{ 'settings-panel--open': isPanelOpen('global-map-data') }"
       aria-labelledby="settings-global-map-data-title"
@@ -1416,16 +2077,27 @@ onBeforeUnmount(() => {
           </div>
         </dl>
 
-        <div v-if="globalMapManifest" class="settings-data-overview__meta" data-global-map-pack-meta>
-          <span>{{ t("settings.globalMapData.pack.generated", { date: formatGlobalMapDate(globalMapManifest.generatedAt) }) }}</span>
-          <span>{{ t("settings.globalMapData.pack.version", { version: globalMapManifest.dataVersion }) }}</span>
-          <span>{{ t("settings.globalMapData.pack.size", { size: formatGlobalMapBytes(globalMapTotalPackBytes) }) }}</span>
+        <div
+          v-if="globalMapManifest"
+          class="settings-data-overview__meta"
+          data-global-map-pack-meta
+        >
+          <span>{{
+            t("settings.globalMapData.pack.generated", {
+              date: formatGlobalMapDate(globalMapManifest.generatedAt),
+            })
+          }}</span>
+          <span>{{
+            t("settings.globalMapData.pack.version", { version: globalMapManifest.dataVersion })
+          }}</span>
+          <span>{{
+            t("settings.globalMapData.pack.size", {
+              size: formatGlobalMapBytes(globalMapTotalPackBytes),
+            })
+          }}</span>
         </div>
 
-        <section
-          class="settings-data-quality"
-          aria-labelledby="settings-global-map-quality-title"
-        >
+        <section class="settings-data-quality" aria-labelledby="settings-global-map-quality-title">
           <div>
             <p class="eyebrow">{{ t("settings.globalMapData.quality.eyebrow") }}</p>
             <h3 id="settings-global-map-quality-title">
@@ -1478,7 +2150,11 @@ onBeforeUnmount(() => {
             </div>
             <div>
               <div class="settings-data-quality-card__status">
-                <component :is="globalMapQualityStatusIcons[card.level]" :size="15" aria-hidden="true" />
+                <component
+                  :is="globalMapQualityStatusIcons[card.level]"
+                  :size="15"
+                  aria-hidden="true"
+                />
                 <span>{{ card.levelLabel }}</span>
               </div>
               <h4>{{ card.title }}</h4>
@@ -1516,6 +2192,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section
+      v-if="isPanelVisible('places')"
       class="settings-panel"
       :class="{ 'settings-panel--open': isPanelOpen('places') }"
       aria-labelledby="settings-places-title"
@@ -1538,7 +2215,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('places.default', 'places')" class="settings-row">
         <div>
           <strong>{{ t("settings.places.defaultLabel") }}</strong>
           <span>
@@ -1553,7 +2230,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('places.navigation', 'places')" class="settings-row">
         <div>
           <strong>{{ t("settings.places.navigationLabel") }}</strong>
           <span>{{ t("settings.places.navigationDescription") }}</span>
@@ -1568,6 +2245,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section
+      v-if="isPanelVisible('address-book')"
       class="settings-panel settings-panel--address-book"
       :class="{ 'settings-panel--open': isPanelOpen('address-book') }"
       aria-labelledby="settings-address-book-title"
@@ -1591,7 +2269,7 @@ onBeforeUnmount(() => {
           {{ t("addressBook.add") }}
         </button>
       </div>
-      <div class="settings-row">
+      <div v-if="isSettingVisible('address-book.entry', 'address-book')" class="settings-row">
         <div>
           <strong>{{ t("addressBook.title") }}</strong>
           <span>{{ t("addressBook.description") }}</span>
@@ -1604,6 +2282,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section
+      v-if="isPanelVisible('display')"
       class="settings-panel"
       :class="{ 'settings-panel--open': isPanelOpen('display') }"
       aria-labelledby="settings-display-title"
@@ -1623,7 +2302,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('display.place', 'display')" class="settings-row">
         <div>
           <strong>{{ t("settings.places.displayPlaceLabel") }}</strong>
           <span>{{ t("settings.places.displayPlaceDescription") }}</span>
@@ -1636,7 +2315,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('display.station-buttons', 'display')" class="settings-row">
         <div>
           <strong>{{ t("settings.display.stationButtons") }}</strong>
           <span>{{ t("settings.display.stationButtonsDescription") }}</span>
@@ -1649,7 +2328,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('display.panel-design', 'display')" class="settings-row">
         <div>
           <strong>{{ t("settings.display.panelDesign") }}</strong>
           <span>{{ t("settings.display.panelDesignDescription") }}</span>
@@ -1662,7 +2341,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <label class="settings-toggle">
+      <label v-if="isSettingVisible('display.panel-dark-theme', 'display')" class="settings-toggle">
         <input
           type="checkbox"
           :checked="settings.fullscreenStationPanelDarkTheme"
@@ -1679,7 +2358,7 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('display.closed-accordion', 'display')" class="settings-row">
         <div>
           <strong>{{ t("settings.display.closedAccordion") }}</strong>
           <span>{{ t("settings.display.closedAccordionDescription") }}</span>
@@ -1692,7 +2371,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('display.max-departures', 'display')" class="settings-row">
         <div>
           <strong>{{ t("settings.display.maxDepartures") }}</strong>
           <span>{{ t("settings.display.maxDeparturesDescription") }}</span>
@@ -1705,7 +2384,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <label class="settings-toggle">
+      <label v-if="isSettingVisible('display.terminal-only', 'display')" class="settings-toggle">
         <input
           type="checkbox"
           :checked="selectedDisplayPreferences?.terminalDirectionsOnly ?? false"
@@ -1724,7 +2403,7 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <label class="settings-toggle">
+      <label v-if="isSettingVisible('display.ghost-lines', 'display')" class="settings-toggle">
         <input
           type="checkbox"
           :checked="settings.ghostNetworkStructuralOnly"
@@ -1743,7 +2422,7 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('display.traffic-design', 'display')" class="settings-row">
         <div>
           <strong>{{ t("settings.display.trafficDesign") }}</strong>
           <span>{{ t("settings.display.trafficDesignDescription") }}</span>
@@ -1758,6 +2437,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section
+      v-if="isPanelVisible('traffic')"
       class="settings-panel"
       :class="{ 'settings-panel--open': isPanelOpen('traffic') }"
       aria-labelledby="settings-traffic-title"
@@ -1777,7 +2457,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('traffic.scope', 'traffic')" class="settings-row">
         <div>
           <strong>{{ t("settings.display.trafficScope") }}</strong>
           <span>{{ t("settings.display.trafficScopeDescription") }}</span>
@@ -1789,7 +2469,11 @@ onBeforeUnmount(() => {
           @update:model-value="updateTrafficInfoDefaultScope"
         />
       </div>
-      <article class="traffic-cache-settings" data-traffic-cache-settings>
+      <article
+        v-if="isSettingVisible('traffic.cache', 'traffic')"
+        class="traffic-cache-settings"
+        data-traffic-cache-settings
+      >
         <header class="traffic-cache-settings__header">
           <div>
             <p class="eyebrow">{{ t("settings.trafficCache.eyebrow") }}</p>
@@ -1831,10 +2515,14 @@ onBeforeUnmount(() => {
           :disabled="trafficCacheLoading"
           @click="void forceTrafficCacheRefresh()"
         >
-          {{ trafficCacheLoading ? t("settings.trafficCache.refreshing") : t("settings.trafficCache.forceRefresh") }}
+          {{
+            trafficCacheLoading
+              ? t("settings.trafficCache.refreshing")
+              : t("settings.trafficCache.forceRefresh")
+          }}
         </button>
       </article>
-      <div class="settings-row">
+      <div v-if="isSettingVisible('traffic.calendar-scope', 'traffic')" class="settings-row">
         <div>
           <strong>{{ t("settings.display.trafficCalendarScope") }}</strong>
           <span>{{ t("settings.display.trafficCalendarScopeDescription") }}</span>
@@ -1848,6 +2536,7 @@ onBeforeUnmount(() => {
       </div>
 
       <article
+        v-if="isSettingVisible('traffic.equation', 'traffic')"
         class="traffic-impact-equation"
         aria-labelledby="traffic-impact-equation-title"
         data-testid="traffic-impact-equation"
@@ -1987,6 +2676,7 @@ onBeforeUnmount(() => {
       </article>
 
       <label
+        v-if="isSettingVisible('traffic.modal-formatting', 'traffic')"
         class="settings-toggle"
         :title="t('settings.display.trafficModalSmartFormattingDescription')"
       >
@@ -2010,7 +2700,7 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <label class="settings-toggle">
+      <label v-if="isSettingVisible('traffic.smart-detection', 'traffic')" class="settings-toggle">
         <input
           type="checkbox"
           :checked="settings.smartTrafficDetection"
@@ -2028,6 +2718,7 @@ onBeforeUnmount(() => {
       </label>
 
       <label
+        v-if="isSettingVisible('traffic.replacement-buses', 'traffic')"
         class="settings-toggle"
         :title="t('settings.display.unifyReplacementBusMarkersDescription')"
       >
@@ -2047,7 +2738,10 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <div class="settings-row settings-row--range">
+      <div
+        v-if="isSettingVisible('traffic.warning-lookahead', 'traffic')"
+        class="settings-row settings-row--range"
+      >
         <div>
           <strong>{{ t("settings.display.trafficWarningLookahead") }}</strong>
           <span>{{ t("settings.display.trafficWarningLookaheadDescription") }}</span>
@@ -2066,7 +2760,11 @@ onBeforeUnmount(() => {
         </label>
       </div>
 
-      <label class="settings-toggle" data-settings-user-location>
+      <label
+        v-if="isSettingVisible('traffic.user-location', 'traffic')"
+        class="settings-toggle"
+        data-settings-user-location
+      >
         <input
           type="checkbox"
           :checked="settings.showUserLocation"
@@ -2083,7 +2781,7 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <label class="settings-toggle">
+      <label v-if="isSettingVisible('traffic.local-cache', 'traffic')" class="settings-toggle">
         <input
           type="checkbox"
           :checked="settings.transferBundleLocalCacheEnabled"
@@ -2100,7 +2798,7 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <label class="settings-toggle">
+      <label v-if="isSettingVisible('traffic.backend-cache', 'traffic')" class="settings-toggle">
         <input
           type="checkbox"
           :checked="settings.transferBundleBackendCacheEnabled"
@@ -2124,7 +2822,7 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('traffic.expiration', 'traffic')" class="settings-row">
         <div>
           <strong>{{ t("settings.bundles.expiration") }}</strong>
           <span>{{ t("settings.display.transferExpirationDescription") }}</span>
@@ -2137,14 +2835,18 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('traffic.loading', 'traffic')" class="settings-row">
         <div>
           <strong>{{ t("settings.bundles.loading") }}</strong>
           <span>{{ t("settings.display.transferLoadingDescription") }}</span>
         </div>
       </div>
 
-      <div class="settings-row" data-settings-transfer-resolver>
+      <div
+        v-if="isSettingVisible('traffic.resolver', 'traffic')"
+        class="settings-row"
+        data-settings-transfer-resolver
+      >
         <div>
           <strong>{{ t("settings.bundles.resolver") }}</strong>
           <span>{{ t("settings.display.transferResolverDescription") }}</span>
@@ -2157,7 +2859,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('traffic.concurrency', 'traffic')" class="settings-row">
         <div>
           <strong>{{ t("settings.bundles.concurrency") }}</strong>
           <span>{{ t("settings.display.transferConcurrencyDescription") }}</span>
@@ -2176,7 +2878,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('traffic.spacing', 'traffic')" class="settings-row">
         <div>
           <strong>{{ t("settings.bundles.spacing") }}</strong>
           <span>{{ t("settings.display.transferSpacingDescription") }}</span>
@@ -2192,7 +2894,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="settings-bundle-actions">
+      <div v-if="isSettingVisible('traffic.bundles', 'traffic')" class="settings-bundle-actions">
         <div>
           <strong>{{ t("settings.bundles.title") }}</strong>
           <span>{{ t("settings.display.transferCacheDescription") }}</span>
@@ -2207,7 +2909,10 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="settings-bundle-actions settings-walking-cache-actions">
+      <div
+        v-if="isSettingVisible('traffic.walking-cache', 'traffic')"
+        class="settings-bundle-actions settings-walking-cache-actions"
+      >
         <div>
           <strong>{{ t("settings.walkingCache.title") }}</strong>
           <span>{{ t("settings.walkingCache.description") }}</span>
@@ -2226,6 +2931,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section
+      v-if="isPanelVisible('weather')"
       class="settings-panel"
       :class="{ 'settings-panel--open': isPanelOpen('weather') }"
       aria-labelledby="settings-weather-title"
@@ -2245,7 +2951,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('weather.mode', 'weather')" class="settings-row">
         <div>
           <strong>{{ t("settings.display.weather") }}</strong>
           <span>{{ t("settings.display.weatherDescription") }}</span>
@@ -2258,7 +2964,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('weather.test-mode', 'weather')" class="settings-row">
         <div>
           <strong>{{ t("settings.display.weatherTestMode") }}</strong>
           <span>{{ t("settings.display.weatherTestDescription") }}</span>
@@ -2271,7 +2977,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('weather.lookahead', 'weather')" class="settings-row">
         <div>
           <strong>{{ t("settings.display.weatherLookahead") }}</strong>
           <span>{{ t("settings.display.weatherLookaheadDescription") }}</span>
@@ -2284,7 +2990,10 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <label class="settings-toggle">
+      <label
+        v-if="isSettingVisible('weather.apparent-temperature', 'weather')"
+        class="settings-toggle"
+      >
         <input
           type="checkbox"
           :checked="settings.weatherShowApparentTemperature"
@@ -2301,7 +3010,10 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <div class="settings-row">
+      <div
+        v-if="isSettingVisible('weather.location', 'weather', 'weather.custom-location')"
+        class="settings-row"
+      >
         <div>
           <strong>{{ t("settings.display.weatherLocation") }}</strong>
           <span>{{ t("settings.display.weatherLocationDescription") }}</span>
@@ -2314,7 +3026,13 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div v-if="settings.weatherLocationPreset === 'custom'" class="settings-custom-location">
+      <div
+        v-if="
+          settings.weatherLocationPreset === 'custom' &&
+          isSettingVisible('weather.custom-location', 'weather')
+        "
+        class="settings-custom-location"
+      >
         <label>
           <span>{{ t("settings.display.weatherCustomName") }}</span>
           <input
@@ -2354,11 +3072,13 @@ onBeforeUnmount(() => {
     </section>
 
     <GtfsSettingsPanel
+      v-if="isPanelVisible('gtfs')"
       :model-value="settings.gtfsLineGeometryEnabled"
       @update:model-value="updateSettings({ gtfsLineGeometryEnabled: $event })"
     />
 
     <section
+      v-if="isPanelVisible('map')"
       class="settings-panel"
       :class="{ 'settings-panel--open': isPanelOpen('map') }"
       aria-labelledby="settings-map-title"
@@ -2378,7 +3098,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div class="settings-row settings-row--range">
+      <div v-if="isSettingVisible('map.contrast', 'map')" class="settings-row settings-row--range">
         <div>
           <strong>{{ t("settings.display.mapContrast") }}</strong>
           <span>{{ t("settings.display.mapContrastDescription") }}</span>
@@ -2398,7 +3118,7 @@ onBeforeUnmount(() => {
         </label>
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('map.basemap-style', 'map')" class="settings-row">
         <div>
           <strong>{{ t("settings.display.mapBasemapStyle") }}</strong>
           <span>{{ t("settings.display.mapBasemapStyleDescription") }}</span>
@@ -2412,7 +3132,11 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <label class="settings-toggle" data-settings-map-antialiasing>
+      <label
+        v-if="isSettingVisible('map.antialiasing', 'map')"
+        class="settings-toggle"
+        data-settings-map-antialiasing
+      >
         <input
           type="checkbox"
           role="switch"
@@ -2432,12 +3156,16 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <div class="settings-subheading">
+      <div v-if="isSettingVisible('map.nearby-controls', 'map')" class="settings-subheading">
         <strong>{{ t("settings.display.nearbyMapControlsTitle") }}</strong>
         <span>{{ t("settings.display.nearbyMapControlsDescription") }}</span>
       </div>
 
-      <label class="settings-toggle" data-settings-nearby-control="isochrone">
+      <label
+        v-if="isSettingVisible('map.nearby-isochrone', 'map', 'map.nearby-controls')"
+        class="settings-toggle"
+        data-settings-nearby-control="isochrone"
+      >
         <input
           type="checkbox"
           :checked="settings.nearbyMapShowIsochroneControl"
@@ -2454,7 +3182,11 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <label class="settings-toggle" data-settings-nearby-control="directory">
+      <label
+        v-if="isSettingVisible('map.nearby-directory', 'map', 'map.nearby-controls')"
+        class="settings-toggle"
+        data-settings-nearby-control="directory"
+      >
         <input
           type="checkbox"
           :checked="settings.nearbyMapShowDirectoryControl"
@@ -2471,7 +3203,11 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <label class="settings-toggle" data-settings-nearby-control="basemap">
+      <label
+        v-if="isSettingVisible('map.nearby-basemap', 'map', 'map.nearby-controls')"
+        class="settings-toggle"
+        data-settings-nearby-control="basemap"
+      >
         <input
           type="checkbox"
           :checked="settings.nearbyMapShowBasemapControl"
@@ -2488,7 +3224,11 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <label class="settings-toggle" data-settings-nearby-control="display">
+      <label
+        v-if="isSettingVisible('map.nearby-display', 'map', 'map.nearby-controls')"
+        class="settings-toggle"
+        data-settings-nearby-control="display"
+      >
         <input
           type="checkbox"
           :checked="settings.nearbyMapShowDisplayControl"
@@ -2505,7 +3245,11 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <label class="settings-toggle" data-settings-nearby-control="fullscreen">
+      <label
+        v-if="isSettingVisible('map.nearby-fullscreen', 'map', 'map.nearby-controls')"
+        class="settings-toggle"
+        data-settings-nearby-control="fullscreen"
+      >
         <input
           type="checkbox"
           :checked="settings.nearbyMapShowFullscreenControl"
@@ -2522,7 +3266,7 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <label class="settings-toggle">
+      <label v-if="isSettingVisible('map.minimap', 'map')" class="settings-toggle">
         <input
           type="checkbox"
           :checked="settings.showPatternMiniMap"
@@ -2539,7 +3283,11 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <label class="settings-toggle" data-settings-travel-route-line-icons>
+      <label
+        v-if="isSettingVisible('map.line-icons', 'map')"
+        class="settings-toggle"
+        data-settings-travel-route-line-icons
+      >
         <input
           type="checkbox"
           role="switch"
@@ -2559,7 +3307,7 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <label class="settings-toggle">
+      <label v-if="isSettingVisible('map.city-zones', 'map')" class="settings-toggle">
         <input
           type="checkbox"
           :checked="settings.showPatternCityZones"
@@ -2576,7 +3324,7 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('map.compact-mode', 'map')" class="settings-row">
         <div>
           <strong>{{ t("settings.display.compactMode") }}</strong>
           <span>{{ t("settings.display.compactModeDescription") }}</span>
@@ -2589,7 +3337,10 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <div class="settings-row settings-row--range">
+      <div
+        v-if="isSettingVisible('map.compact-vertical-spacing', 'map')"
+        class="settings-row settings-row--range"
+      >
         <div>
           <strong>{{ t("settings.display.compactVerticalSpacing") }}</strong>
           <span>{{ t("settings.display.compactVerticalSpacingDescription") }}</span>
@@ -2608,7 +3359,7 @@ onBeforeUnmount(() => {
         </label>
       </div>
 
-      <label class="settings-toggle">
+      <label v-if="isSettingVisible('map.rounded-curves', 'map')" class="settings-toggle">
         <input
           type="checkbox"
           :checked="settings.patternRoundedCurves"
@@ -2625,7 +3376,10 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <label class="settings-toggle">
+      <label
+        v-if="isSettingVisible('map.interruption-walking-times', 'map')"
+        class="settings-toggle"
+      >
         <input
           type="checkbox"
           :checked="settings.showInterruptionWalkingTimes"
@@ -2642,7 +3396,10 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <div class="settings-row settings-row--range">
+      <div
+        v-if="isSettingVisible('map.compact-fork-gap', 'map')"
+        class="settings-row settings-row--range"
+      >
         <div>
           <strong>{{ t("settings.display.compactForkGap") }}</strong>
           <span>{{ t("settings.display.compactForkGapDescription") }}</span>
@@ -2661,7 +3418,7 @@ onBeforeUnmount(() => {
         </label>
       </div>
 
-      <div class="settings-range-pair">
+      <div v-if="isSettingVisible('map.realistic-spacing', 'map')" class="settings-range-pair">
         <div>
           <strong>{{ t("settings.display.realisticSpacing") }}</strong>
           <span>{{ t("settings.display.realisticSpacingDescription") }}</span>
@@ -2704,7 +3461,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <label class="settings-toggle">
+      <label v-if="isSettingVisible('map.rich-transfer-tooltips', 'map')" class="settings-toggle">
         <input
           type="checkbox"
           :checked="settings.richTransferTooltips"
@@ -2721,7 +3478,7 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <label class="settings-toggle">
+      <label v-if="isSettingVisible('map.reduce-motion', 'map')" class="settings-toggle">
         <input
           type="checkbox"
           :checked="settings.reduceMotion"
@@ -2739,11 +3496,15 @@ onBeforeUnmount(() => {
       </label>
     </section>
 
-    <PluginViewer @notify="showSettingsNotification($event.message, $event.tone)" />
+    <PluginViewer
+      v-if="isPanelVisible('plugins')"
+      @notify="showSettingsNotification($event.message, $event.tone)"
+    />
 
-    <MobileReleaseCard />
+    <MobileReleaseCard v-if="isPanelVisible('mobile-release')" />
 
     <section
+      v-if="isPanelVisible('device')"
       class="settings-panel"
       :class="{ 'settings-panel--open': isPanelOpen('device') }"
       aria-labelledby="settings-device-title"
@@ -2763,7 +3524,11 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div class="settings-row" data-network-concurrency-setting>
+      <div
+        v-if="isSettingVisible('device.network', 'device')"
+        class="settings-row"
+        data-network-concurrency-setting
+      >
         <div>
           <strong>{{ t("settings.network.title") }}</strong>
           <span>{{ t("settings.network.description") }}</span>
@@ -2772,11 +3537,13 @@ onBeforeUnmount(() => {
           :model-value="settings.networkConcurrencyMode"
           :options="networkConcurrencyOptions"
           :aria-label="t('settings.network.title')"
-          @update:model-value="updateSettings({ networkConcurrencyMode: parseNetworkConcurrencyMode($event) })"
+          @update:model-value="
+            updateSettings({ networkConcurrencyMode: parseNetworkConcurrencyMode($event) })
+          "
         />
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('device.wake-lock', 'device')" class="settings-row">
         <div>
           <strong>{{ t("settings.device.wakeLock") }}</strong>
           <span>{{ t("settings.device.wakeLockDescription") }}</span>
@@ -2789,7 +3556,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <label class="settings-toggle">
+      <label v-if="isSettingVisible('device.wake-alarm', 'device')" class="settings-toggle">
         <input
           type="checkbox"
           :checked="settings.wakeDeviceOnAlarm"
@@ -2806,7 +3573,7 @@ onBeforeUnmount(() => {
         </div>
       </label>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('device.travel-margin', 'device')" class="settings-row">
         <div>
           <strong>{{ t("settings.device.travelAlarmSafetyMinutes") }}</strong>
           <span>{{ t("settings.device.travelAlarmSafetyMinutesDescription") }}</span>
@@ -2826,7 +3593,7 @@ onBeforeUnmount(() => {
         </label>
       </div>
 
-      <div class="settings-row">
+      <div v-if="isSettingVisible('device.auto-hide', 'device')" class="settings-row">
         <div>
           <strong>{{ t("settings.device.navigationAutoHide") }}</strong>
           <span>{{ t("settings.device.navigationAutoHideDescription") }}</span>
@@ -3079,6 +3846,54 @@ onBeforeUnmount(() => {
   font-weight: 720;
   line-height: 1.5;
   max-width: 760px;
+}
+
+.settings-search {
+  margin-bottom: 8px;
+}
+
+.settings-search__field {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(16, 35, 63, 0.06);
+  color: var(--muted);
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.settings-search__field:focus-within {
+  border-color: var(--idfm-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--idfm-blue), transparent 78%);
+}
+
+.settings-search__field input {
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  flex: 1;
+  font: inherit;
+  font-weight: 720;
+  min-width: 0;
+  outline: 0;
+  padding: 3px 0;
+}
+
+.settings-search__field input::placeholder {
+  color: var(--muted);
+  opacity: 0.9;
+}
+
+.settings-search__clear {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.settings-search__clear:hover:not(:disabled) {
+  color: var(--ink);
+  transform: none;
 }
 
 .settings-panel {

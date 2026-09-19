@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { useI18n } from "../../i18n";
 import { useNearbyPlacePresenter } from "../nearby-stations/useNearbyPlacePresenter";
-import { nearbyPlaceWalkingMinutes } from "../nearby-stations/nearbyPlacePresentation";
+import { isNearbyPlaceVisibleForGlobalLine, nearbyPlaceWalkingMinutes } from "../nearby-stations/nearbyPlacePresentation";
 import type { NearbyPlace } from "../nearby-stations/nearbyPlaces";
 import type { CameraState } from "../transport-map/geo/camera";
 import { lonLatToWorld, worldToScreen } from "../transport-map/geo/coordinateKernel";
@@ -11,22 +11,24 @@ import PlaceTooltip from "../../components/PlaceTooltip.vue";
 const props = defineProps<{
   places: readonly NearbyPlace[];
   camera: CameraState;
+  gpu?: boolean;
+  pickPlace?: (x: number, y: number) => NearbyPlace | undefined;
 }>();
 
 const hoveredPlaceId = ref<string>();
 const { t } = useI18n();
 const { presentPlace } = useNearbyPlacePresenter();
 
-const displayedPlaces = computed(() => props.places
-  .filter((place) => Number.isFinite(place.lon) && Number.isFinite(place.lat))
-  .slice(0, 120)
+const eligiblePlaces = computed(() => props.places
+  .filter(isNearbyPlaceVisibleForGlobalLine)
+  .filter((place) => Number.isFinite(place.lon) && Number.isFinite(place.lat)));
+const preparedPlaces = computed(() => props.gpu ? [] : eligiblePlaces.value
   .map((place) => {
-    const point = worldToScreen(lonLatToWorld(place), props.camera);
     const presentation = presentPlace(place);
     const minutes = nearbyPlaceWalkingMinutes(place);
     return {
       place,
-      point,
+      world: lonLatToWorld(place),
       presentation,
       minutes,
       ariaLabel: t("globalMap.sidebar.nearbyPlaceAria", {
@@ -35,16 +37,87 @@ const displayedPlaces = computed(() => props.places
       }),
     };
   }));
+const displayedPlaces = computed(() => preparedPlaces.value.map(entry => ({
+  ...entry, point: worldToScreen(entry.world, props.camera),
+})));
+
+const hoveredPlace = shallowRef<NearbyPlace>();
+const keyboardIndex = ref(0);
+const keyboardFocused = ref(false);
+const gpuPlace = computed(() => keyboardFocused.value
+  ? eligiblePlaces.value[keyboardIndex.value]
+  : hoveredPlace.value ?? eligiblePlaces.value[0]);
+const gpuPresentation = computed(() => gpuPlace.value ? presentPlace(gpuPlace.value) : undefined);
+const gpuPoint = computed(() => gpuPlace.value ? worldToScreen(lonLatToWorld(gpuPlace.value), props.camera) : undefined);
+let pickFrame: number | undefined;
+let pointer: { x: number; y: number } | undefined;
+
+function clearHover(): void {
+  if (pickFrame !== undefined) cancelAnimationFrame(pickFrame);
+  pickFrame = undefined;
+  pointer = undefined;
+  hoveredPlace.value = undefined;
+}
+function onPointerMove(event: PointerEvent): void {
+  if (!props.gpu) return;
+  // The interaction canvas is above MapLibre. Forward its hover explicitly;
+  // never run a GPU readback while dragging or hovering sidebar controls.
+  if (event.buttons || !(event.target instanceof HTMLCanvasElement)) {
+    clearHover();
+    return;
+  }
+  const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  pointer = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+  if (pickFrame !== undefined) return;
+  pickFrame = requestAnimationFrame(() => {
+    pickFrame = undefined;
+    if (pointer) hoveredPlace.value = props.pickPlace?.(pointer.x, pointer.y);
+  });
+}
+function onKeyboard(event: KeyboardEvent): void {
+  const count = eligiblePlaces.value.length;
+  if (!count) return;
+  if (event.key === "ArrowRight" || event.key === "ArrowDown") keyboardIndex.value = (keyboardIndex.value + 1) % count;
+  else if (event.key === "ArrowLeft" || event.key === "ArrowUp") keyboardIndex.value = (keyboardIndex.value + count - 1) % count;
+  else if (event.key === "Home") keyboardIndex.value = 0;
+  else if (event.key === "End") keyboardIndex.value = count - 1;
+  else return;
+  event.preventDefault();
+  event.stopPropagation();
+}
+watch(() => props.camera, clearHover);
+watch(eligiblePlaces, () => { clearHover(); keyboardIndex.value = 0; });
+onBeforeUnmount(clearHover);
+defineExpose({ onPointerMove, clearHover });
 </script>
 
 <template>
   <div
-    v-if="displayedPlaces.length"
+    v-if="eligiblePlaces.length"
     class="global-map-nearby-places-overlay"
     data-testid="global-map-nearby-places"
     role="group"
     :aria-label="t('globalMap.sidebar.nearbyPlaces')"
   >
+    <!-- One keyboard target/tooltip; every visible marker is drawn by Deck. -->
+    <button
+      v-if="gpu && gpuPlace && gpuPresentation && gpuPoint"
+      class="global-map-nearby-place global-map-nearby-place--gpu"
+      :class="{ 'global-map-nearby-place--inactive': !keyboardFocused && !hoveredPlace }"
+      :style="{ left: `${gpuPoint.x}px`, top: `${gpuPoint.y}px` }"
+      type="button"
+      :aria-label="t('globalMap.sidebar.nearbyPlaceAria', { place: gpuPresentation.name, minutes: nearbyPlaceWalkingMinutes(gpuPlace) })"
+      @focus="keyboardFocused = true"
+      @blur="keyboardFocused = false"
+      @keydown="onKeyboard"
+    >
+      <PlaceTooltip
+        v-if="keyboardFocused || hoveredPlace"
+        :place="gpuPlace"
+        :type-label="gpuPresentation.typeLabel"
+        :walking-minutes="nearbyPlaceWalkingMinutes(gpuPlace)"
+      />
+    </button>
     <button
       v-for="entry in displayedPlaces"
       :key="entry.place.id"
@@ -120,4 +193,6 @@ const displayedPlaces = computed(() => props.places
 .global-map-nearby-place:focus-visible .global-map-nearby-place__icon {
   background: #dde1e7;
 }
+.global-map-nearby-place--gpu { pointer-events: none; }
+.global-map-nearby-place--inactive { opacity: 0; }
 </style>

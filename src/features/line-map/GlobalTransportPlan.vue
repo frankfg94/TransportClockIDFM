@@ -35,7 +35,12 @@
       :share-feedback="shareFeedback"
       :radar-enabled="globalMapIsochrones.enabled.value"
       :radar-panel-open="globalMapIsochrones.panelOpen.value"
+      :iris-enabled="irisViewEnabled"
+      :iris-loading="irisViewLoading"
+      :iris-subdivisions-visible="irisSubdivisionsVisible"
       @open-radar="openGlobalRadar()"
+      @toggle-iris="void toggleIrisView()"
+      @toggle-iris-subdivisions="toggleIrisSubdivisions"
       @run-chaos="void runChaosZoom()"
       @run-chaos-extreme="void runChaosZoomExtreme()"
       @download-chaos-report="downloadChaosZoomReport"
@@ -51,6 +56,12 @@
       ref="stageElement"
       class="global-transport-plan__stage"
       :aria-label="t('globalMap.page.stageAria')"
+      @pointerdown.capture="onStagePointerDown($event); nearbyPlacesOverlayRef?.clearHover()"
+      @pointermove.capture="onStagePointerMove($event); nearbyPlacesOverlayRef?.onPointerMove($event)"
+      @pointerleave="nearbyPlacesOverlayRef?.clearHover()"
+      @pointerup.capture="onStagePointerUp"
+      @pointercancel.capture="onStagePointerCancel"
+      @wheel.capture="onStageWheel"
     >
       <GlobalTransportPlanLegacyBasemap
         ref="legacyBasemapRef"
@@ -77,10 +88,12 @@
       />
       <TransportMapNextSurface
         v-else
+        ref="nextSurfaceRef"
         :key="`transport-map-antialias-${appSettings.deckAntialiasing ? 'on' : 'off'}`"
         class="global-transport-plan__next-surface"
         :renderer="renderer"
         :camera="camera"
+        :nearby-places="!routePreviewActive && activeLine ? nearbyLinePlaces.places.value : undefined"
         :style-url="props.nextMapStyle"
         :interleaved="GLOBAL_TRANSPORT_PLAN_CONFIG.nextMap.deckInterleaved"
         :antialias="appSettings.deckAntialiasing"
@@ -102,6 +115,7 @@
         @select-station="void selectStationFromSearch($event)"
         @select-line="selectLineFromSearchResult"
         @select-place="selectPlaceFromSearch($event)"
+        @route-to-place="void openGlobalItineraryTo($event)"
         @select-marker="selectMarkerFromSearch($event)"
       />
       <button
@@ -146,11 +160,9 @@
 
       <GlobalMapDistanceMeasurementOverlay
         v-if="!routePreviewActive"
-        :start="globalMapDistanceMeasurement?.start"
-        :end="globalMapDistanceMeasurement?.end"
-        :distance-label="globalMapDistanceLabel"
-        :active="globalMapDistanceMeasurementMode === 'measuring'"
+        :measurements="globalMapDistanceMeasurementItems"
         :camera="camera"
+        @context-menu="openGlobalMeasurementContextMenu"
       />
 
       <GlobalMapMarkersOverlay
@@ -175,6 +187,9 @@
 
       <GlobalMapNearbyPlacesOverlay
         v-if="!routePreviewActive && activeLine"
+        ref="nearbyPlacesOverlayRef"
+        :gpu="mapExperience.kind === 'next'"
+        :pick-place="pickNearbyLinePlace"
         :places="nearbyLinePlaces.places.value"
         :camera="camera"
       />
@@ -190,6 +205,34 @@
         @request="void userGeolocation.askGeolocation()"
       />
 
+      <GlobalMapTemporaryMarkerOverlay
+        v-if="!routePreviewActive && temporaryMarker"
+        :marker="temporaryMarker"
+        :radius-meters="temporaryMarkerRadius"
+        :camera="camera"
+      />
+
+      <aside
+        v-if="!routePreviewActive && nearbyHeavyStationIds.length > 0"
+        class="global-transport-plan__nearby-heavy-control"
+        data-global-map-nearby-heavy-control
+      >
+        <button
+          type="button"
+          class="global-transport-plan__nearby-heavy-toggle"
+          :class="{ 'global-transport-plan__nearby-heavy-toggle--checked': nearbyHeavyStationsAllowed }"
+          role="switch"
+          :aria-checked="nearbyHeavyStationsAllowed"
+          data-global-map-nearby-heavy-toggle
+          @click.stop="toggleNearbyHeavyStations"
+        >
+          <span class="global-transport-plan__nearby-heavy-copy">
+            {{ t("globalMap.page.allowNearbyHeavyStations") }}
+          </span>
+          <span class="global-transport-plan__nearby-heavy-track" aria-hidden="true"><span /></span>
+        </button>
+      </aside>
+
       <TransportMapStationPulseOverlay
         v-if="!routePreviewActive"
         :stations="selectedStationPulseStations"
@@ -198,6 +241,35 @@
         :active-line-color="activeLine?.color"
         :lines-by-id="network?.linesById"
       />
+
+      <IrisNeighborhoodOverlay
+        v-if="irisViewEnabled && irisDataset"
+        :neighborhoods="irisDataset.neighborhoods"
+        :camera="camera"
+        :transport-stations="irisTransportStations"
+        :air-noise-communes="irisDataset.airNoiseCommunes"
+        :air-noise-source="irisDataset.airNoiseSource"
+        :show-subdivisions="irisSubdivisionsVisible"
+        scope="region"
+      />
+
+      <div
+        v-if="irisViewLoading || irisViewError || cityZonesLoading || cityZonesError"
+        class="global-transport-plan__iris-status"
+        :class="{ 'global-transport-plan__iris-status--error': Boolean(irisViewError || cityZonesError) }"
+        :role="irisViewError || cityZonesError ? 'alert' : 'status'"
+        aria-live="polite"
+      >
+        {{
+          irisViewError
+            ? t("globalMap.iris.unavailable")
+            : cityZonesError
+              ? t("globalMap.page.cityZonesUnavailable")
+              : cityZonesLoading
+                ? t("globalMap.page.cityZonesLoading")
+                : t("globalMap.iris.loading")
+        }}
+      </div>
 
       <Transition name="global-map-itinerary-slide">
         <div
@@ -253,6 +325,8 @@
               </button>
             </template>
             <LeftNearbySidebarBodyTravel
+              :turbo="globalItinerary.travelRoutes.turbo"
+              :details-visible="globalItinerary.open.value && (!isMobileViewport() || mobileItinerarySheetSnap !== 'collapsed')"
               :origin="globalItinerary.origin.value"
               editable-origin
               :show-line-icons="appSettings.showTravelRouteLineIcons"
@@ -295,6 +369,21 @@
         @close="closeGlobalContextMenu"
       >
         <div class="global-transport-plan__context-menu">
+          <template v-if="contextMeasurement">
+            <button type="button" @click="deleteContextDistanceMeasurement">
+              <Trash2 :size="16" aria-hidden="true" />
+              {{ contextMeasurement.shape === 'circle'
+                ? t("globalMap.contextMenu.deleteDistanceCircle")
+                : t("globalMap.contextMenu.deleteDistanceSegment") }}
+            </button>
+            <button type="button" @click="resizeContextDistanceMeasurement">
+              <Ruler :size="16" aria-hidden="true" />
+              {{ contextMeasurement.shape === 'circle'
+                ? t("globalMap.contextMenu.resizeDistanceCircle")
+                : t("globalMap.contextMenu.resizeDistanceSegment") }}
+            </button>
+          </template>
+          <template v-else>
           <button v-if="contextMarker" type="button" @click="editContextMarker">
             <Pencil :size="16" aria-hidden="true" />
             {{ t("globalMap.contextMenu.editMarker") }}
@@ -323,14 +412,19 @@
             <Route :size="16" aria-hidden="true" />
             {{ t("globalMap.contextMenu.itineraryHere") }}
           </button>
-          <button type="button" @click="startContextDistanceMeasurement">
+          <button type="button" @click="startContextDistanceMeasurement('segment')">
             <Ruler :size="16" aria-hidden="true" />
             {{ t("globalMap.contextMenu.measureDistance") }}
+          </button>
+          <button type="button" @click="startContextDistanceMeasurement('circle')">
+            <Circle :size="16" aria-hidden="true" />
+            {{ t("globalMap.contextMenu.measureDistanceCircle") }}
           </button>
           <button type="button" @click="void copyContextAddress()">
             <Copy :size="16" aria-hidden="true" />
             {{ t("globalMap.contextMenu.copyAddress") }}
           </button>
+          </template>
         </div>
       </ContextMenu>
 
@@ -342,7 +436,9 @@
       >
         <span>
           {{ globalMapDistanceMeasurementMode === 'measuring'
-            ? t("globalMap.measurement.clickToFinish")
+            ? globalMapDistanceMeasurementShape === 'circle'
+              ? t("globalMap.measurement.clickToFinishCircle")
+              : t("globalMap.measurement.clickToFinish")
             : t("globalMap.measurement.distance", { value: globalMapDistanceLabel }) }}
         </span>
         <button type="button" @click="clearGlobalMapDistanceMeasurement">
@@ -387,12 +483,12 @@
         </template>
       </AppModal>
 
-      <GlobalTransportIsochronePanel
+      <TransportIsochronePanel
         :open="globalMapIsochrones.panelOpen.value"
         :modal-open="globalMapIsochrones.modalOpen.value"
         :enabled="globalMapIsochrones.enabled.value"
         :settings="globalMapIsochrones.settings.value"
-        :modes="customizationModes"
+        :modes="globalRadarDisplayedModes"
         :eligible-modes="globalMapIsochrones.eligibleModes.value"
         :focus-mode="globalRadarFocusMode"
         :status="globalMapIsochrones.status.value"
@@ -440,11 +536,15 @@
               :mode-label="modeLabel"
               :mode-color="modeColor"
               :radar-enabled-modes="globalRadarEnabledModes"
+              :show-city-zones-filter="mapExperience.kind === 'next'"
+              :city-zones-visible="cityZonesVisible"
+              :city-zones-loading="cityZonesLoading"
               @open-radar="openGlobalRadar"
               @select-preset="selectPreset"
               @request-preset-install="requestPresetInstall"
               @open-customization="openCustomization"
               @open-line-panel="openLinePanel"
+              @toggle-city-zones="void toggleCityZones()"
               @collapse="collapseMobileLineSelector"
             />
           </div>
@@ -537,6 +637,7 @@
           @mobile-sheet-snap-change="mobilePickerSidebarSnap = $event"
           @modal-open="sidebarModalOpen = $event"
           @toggle-ghost-line-icons="showGhostLineIcons = !showGhostLineIcons"
+          @line-cities-expanded="setServedCitiesAccordionExpanded"
           @update:nearby-radius-minutes="nearbyLineRadiusMinutes = $event"
         />
       </Transition>
@@ -566,22 +667,12 @@
         @select-line="selectTooltipLine"
       />
 
-      <div
+      <TransportIsochroneTooltip
         v-else-if="!routePreviewActive && hoveredFeature?.type === 'isochrone'"
         class="global-transport-plan__tooltip global-transport-plan__tooltip--isochrone"
-        role="status"
-        :aria-label="hoveredIsochroneAriaLabel"
+        :items="hoveredIsochroneTooltipItems"
         :style="tooltipStyle"
-      >
-        <span
-          v-for="surface in hoveredFeature.surfaces"
-          :key="surface.id"
-          class="global-transport-plan__tooltip-isochrone-row"
-        >
-          <strong>{{ modeLabel(surface.mode) }}</strong>
-          <span>{{ t("globalMap.page.tooltip.walkingMax", { minutes: surface.minutes }) }}</span>
-        </span>
-      </div>
+      />
 
       <footer class="global-transport-plan__legend">
         <span><i class="legend-dot legend-dot--hub" /> {{ t("globalMap.page.hub") }}</span>
@@ -698,6 +789,7 @@ import {
 } from "vue";
 import {
   BookOpen,
+  Circle,
   Copy,
   EyeOff,
   Layers,
@@ -713,11 +805,12 @@ import type { LineRouteSequence, LineSearchOption, TransitFamily } from "../../t
 import GlobalTransportPlanModeCustomization from "./GlobalTransportPlanModeCustomization.vue";
 import GlobalTransportPlanModeFilter from "./GlobalTransportPlanModeFilter.vue";
 import GlobalTransportPlanToolbar from "./GlobalTransportPlanToolbar.vue";
-import GlobalTransportIsochronePanel from "./GlobalTransportIsochronePanel.vue";
+import TransportIsochronePanel from "../transport-map/isochrones/TransportIsochronePanel.vue";
 import { useGlobalMapIsochrones } from "./useGlobalMapIsochrones";
-import type { GlobalIsochroneSettings } from "../transport-map/isochrones/contracts";
+import type { GlobalIsochroneSettings, GlobalIsochroneSurface } from "../transport-map/isochrones/contracts";
 import { useGlobalTransportHover } from "./useGlobalTransportHover";
 import { hitTestGlobalIsochrones } from "../transport-map/isochrones/hitTest";
+import { globalIsochroneZoneIndex } from "../transport-map/isochrones/palette";
 import type {
   GlobalMapEntrance,
   GlobalMapLine,
@@ -744,6 +837,7 @@ import {
 } from "../transport-map/geo/camera";
 import {
   lonLatToWorld,
+  metersToWorldUnits,
   screenToLonLat,
   screenToWorld,
   visibleWorldBounds,
@@ -772,9 +866,26 @@ import {
 import GlobalMapPickerSideBar from "./GlobalMapPickerSideBar.vue";
 import GlobalTransportDebugPanel from "./GlobalTransportDebugPanel.vue";
 import GlobalTransportPlanLinePanel from "./GlobalTransportPlanLinePanel.vue";
+import IrisNeighborhoodOverlay from "../transport-map/overlays/IrisNeighborhoodOverlay.vue";
+import { fetchIrisDataset, type IrisDataset } from "../transport-map/iris/irisApi";
+import {
+  boundsForIrisDataset,
+  boundsForIrisGeometry,
+  pointInIrisGeometry,
+  transportStationsFromNetwork,
+} from "../transport-map/iris/irisGeometry";
+import {
+  buildAllGlobalZones,
+  buildServedCityZones,
+  GLOBAL_CITY_VIEW_MIN_ZOOM,
+  selectCityZonesForZoom,
+} from "../transport-map/iris/servedCityZones";
 import TransportMapStationPulseOverlay from "./TransportMapStationPulseOverlay.vue";
 import TransportMapUserLocationOverlay from "./TransportMapUserLocationOverlay.vue";
 import TransportMapTooltip from "../transport-map/overlays/TransportMapTooltip.vue";
+import TransportIsochroneTooltip, {
+  type TransportIsochroneTooltipItem,
+} from "../transport-map/isochrones/TransportIsochroneTooltip.vue";
 import { useAppSettings } from "../app-settings/appSettings";
 import {
   queryTransportMapCandidates,
@@ -841,6 +952,7 @@ import {
   type AddressBookEntry,
 } from "../address-book/addressBook";
 import type { NearbyJourneyPoint, NearbyJourneySection, RouteExit } from "../nearby-stations/nearbyHeavyTransports";
+import { NEARBY_MAP_MARGIN_METERS } from "../nearby-stations/nearbyStations";
 import {
   createRouteExitsForStation,
   MAX_RELIABLE_BOUNDARY_DISTANCE_METERS,
@@ -854,14 +966,28 @@ import GlobalMapGhostLineIconsOverlay from "./GlobalMapGhostLineIconsOverlay.vue
 import GlobalMapNearbyPlacesOverlay from "./GlobalMapNearbyPlacesOverlay.vue";
 import GlobalTransportItineraryOverlay from "./GlobalTransportItineraryOverlay.vue";
 import GlobalMapDistanceMeasurementOverlay from "./GlobalMapDistanceMeasurementOverlay.vue";
+import GlobalMapTemporaryMarkerOverlay from "./GlobalMapTemporaryMarkerOverlay.vue";
+import {
+  parseGlobalMapNearbyHeavyLineIds,
+  parseGlobalMapNearbyHeavyStationIds,
+  parseGlobalMapLineToKeep,
+  parseGlobalMapTemporaryMarker,
+  parseGlobalMapTemporaryMarkerRadius,
+} from "./globalMapTemporaryMarker";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { createIgnTransportMapGeocoder } from "../../services/geocoding/ign";
 import { useGlobalTransportItinerary } from "./useGlobalTransportItinerary";
 import { useNearbyPlaces } from "../nearby-stations/useNearbyPlaces";
 import { walkingMinutesToMeters } from "../nearby-stations/nearbyPlacePresentation";
+import type { NearbyPlace, NearbyPlaceCityRef } from "../nearby-stations/nearbyPlaces";
+import { normalizeCityName } from "../../services/places/compiledPlaces";
 import type { TravelRoute } from "../nearby-stations/useTravelRoutes";
 import { useGlobalMapMarkers, type GlobalMapMarker } from "./globalMapMarkers";
-import { createGlobalMapDistanceMeasurement } from "./globalMapDistanceMeasurement";
+import {
+  createGlobalMapDistanceMeasurement,
+  type GlobalMapDistanceMeasurementOverlayItem,
+  type GlobalMapDistanceMeasurementShape,
+} from "./globalMapDistanceMeasurement";
 import {
   createGlobalTransportItinerarySegments,
   clipGlobalTransportItineraryLine,
@@ -942,6 +1068,11 @@ const performanceTrace = mapExperience.kind === "next"
 const renderer = mapExperience.createRenderer();
 renderer.setPerformanceTrace?.(performanceTrace);
 const nextRendererReady = ref(mapExperience.kind === "legacy");
+const nextSurfaceRef = ref<{ pickNearbyPlace: (x: number, y: number) => NearbyPlace | undefined }>();
+const nearbyPlacesOverlayRef = ref<{ onPointerMove: (event: PointerEvent) => void; clearHover: () => void }>();
+function pickNearbyLinePlace(x: number, y: number) {
+  return nextSurfaceRef.value?.pickNearbyPlace(x, y);
+}
 
 const BUS_ONLY_GLOBAL_MAP_MODES = new Set<GlobalMapMode>(["BUS", "NOCTILIEN"]);
 const HEAVY_QUAY_MODES = new Set<GlobalMapMode>([
@@ -999,6 +1130,18 @@ const viewport = shallowRef<TransportMapViewportResult>({
 // never replaces the scene that is currently visible.
 const preloadedLinePaths = shallowRef<GlobalMapPath[]>([]);
 const network = shallowRef<ReturnType<TransportMapDataSource["getNetwork"]>>();
+const irisDataset = shallowRef<IrisDataset>();
+const irisViewEnabled = ref(false);
+const irisViewLoading = ref(false);
+const irisViewError = ref("");
+const irisSubdivisionsVisible = ref(false);
+const servedCitiesAccordionExpanded = ref(false);
+const cityZonesVisible = ref(false);
+const cityZonesLoading = ref(false);
+const cityZonesError = ref("");
+let irisDatasetPending: Promise<IrisDataset> | undefined;
+let irisViewRequestToken = 0;
+let irisViewPreviousCamera: CameraState | undefined;
 const availableModes = ref<GlobalMapMode[]>([]);
 const loading = ref(true);
 type GlobalTransportLoadingStage =
@@ -1020,12 +1163,17 @@ const interactionActive = ref(false);
 const wheelScrolling = ref(false);
 
 function queryGlobalMapHitCandidates(point: { x: number; y: number }): TransportMapHitCandidates {
+  const lines = network.value
+    ? scopedLineToKeepIds.value.length > 0
+      ? network.value.lines.filter((line) => scopedLineToKeepIds.value.includes(line.id))
+      : network.value.lines
+    : [];
   const candidates = network.value
     ? queryTransportMapCandidates(
         point,
         camera.value,
         renderStations.value,
-        network.value.lines,
+        lines,
         renderPaths.value,
         hitTestStationIndex.value,
         renderedPathIndex.value,
@@ -1096,13 +1244,30 @@ const {
   hoveredTooltipLines,
   tooltipStyle,
 } = globalTransportHover;
-const hoveredIsochroneAriaLabel = computed(() => {
+const hoveredIsochroneTooltipItems = computed<TransportIsochroneTooltipItem[]>(() => {
   const feature = hoveredFeature.value;
-  if (!feature || feature.type !== "isochrone") return undefined;
-  return feature.surfaces
-    .map((surface) => `${modeLabel(surface.mode)} · ${t("globalMap.page.tooltip.walkingMax", { minutes: surface.minutes })}`)
-    .join(", ");
+  if (!feature || feature.type !== "isochrone") return [];
+  const closestByScope = new Map<string, GlobalIsochroneSurface>();
+  for (const surface of feature.surfaces) {
+    const scope = surface.scopeKey ?? `mode:${surface.mode}`;
+    const current = closestByScope.get(scope);
+    if (!current || surface.minutes < current.minutes) closestByScope.set(scope, surface);
+  }
+  return [...closestByScope.values()]
+    .map((surface) => ({
+      minutes: surface.minutes,
+      transport: globalIsochroneTransportLabel(surface),
+      zoneIndex: globalIsochroneZoneIndex(surface, feature.surfaces),
+    }));
 });
+
+function globalIsochroneTransportLabel(surface: GlobalIsochroneSurface): string {
+  const scopeKey = surface.scopeKey;
+  const lineId = scopeKey?.startsWith("line:") ? scopeKey.slice("line:".length) : undefined;
+  const line = lineId ? network.value?.linesById.get(lineId) : undefined;
+  const name = line?.label?.trim() || line?.code?.trim();
+  return name ? `${modeLabel(surface.mode)} ${name}` : modeLabel(surface.mode);
+}
 const onCanvasPointerLeave = globalTransportHover.leave;
 const setHoveredLine = globalTransportHover.setHoveredLine;
 const setHoveredTooltipLine = globalTransportHover.setHoveredTooltipLine;
@@ -1147,24 +1312,65 @@ const contextMarker = ref<GlobalMapMarker>();
 const contextPlace = ref<GeocoderPoint>();
 type GlobalMapDistanceMeasurementMode = "idle" | "measuring" | "complete";
 const globalMapDistanceMeasurementMode = ref<GlobalMapDistanceMeasurementMode>("idle");
-const globalMapDistanceStart = ref<LonLatPoint>();
-const globalMapDistanceEnd = ref<LonLatPoint>();
+interface GlobalMapDistanceMeasurementRecord {
+  id: number;
+  start: LonLatPoint;
+  end: LonLatPoint;
+  shape: GlobalMapDistanceMeasurementShape;
+}
+const globalMapDistanceMeasurements = ref<GlobalMapDistanceMeasurementRecord[]>([]);
+const activeGlobalMapDistanceMeasurementId = ref<number>();
+const globalMapDistanceMeasurementPointerActive = ref(false);
+type GlobalMapDistanceMeasurementResizeEndpoint = "start" | "end";
+const globalMapDistanceMeasurementResizeEndpoint = ref<GlobalMapDistanceMeasurementResizeEndpoint>("end");
+const contextMeasurementId = ref<number>();
+const contextMeasurement = computed(() => globalMapDistanceMeasurements.value.find(
+  (measurement) => measurement.id === contextMeasurementId.value,
+));
+let nextGlobalMapDistanceMeasurementId = 1;
 const globalMapDistanceMeasurement = computed(() => {
-  if (!globalMapDistanceStart.value || !globalMapDistanceEnd.value) return undefined;
+  const record = globalMapDistanceMeasurements.value.find(
+    (measurement) => measurement.id === activeGlobalMapDistanceMeasurementId.value,
+  );
+  if (!record) return undefined;
   return createGlobalMapDistanceMeasurement(
-    globalMapDistanceStart.value,
-    globalMapDistanceEnd.value,
+    record.start,
+    record.end,
+    record.shape,
   );
 });
-const globalMapDistanceLabel = computed(() => {
-  const distanceMeters = globalMapDistanceMeasurement.value?.distanceMeters;
-  if (distanceMeters === undefined) return "";
+const globalMapDistanceMeasurementShape = computed<GlobalMapDistanceMeasurementShape>(() =>
+  globalMapDistanceMeasurements.value.find(
+    (measurement) => measurement.id === activeGlobalMapDistanceMeasurementId.value,
+  )?.shape ?? "segment",
+);
+function formatGlobalMapDistanceLabel(distanceMeters: number): string {
   if (distanceMeters < 1_000) {
     return t("globalMap.measurement.meters", { value: Math.round(distanceMeters) });
   }
   return t("globalMap.measurement.kilometers", {
     value: n(distanceMeters / 1_000, { maximumFractionDigits: 1 }),
   });
+}
+const globalMapDistanceMeasurementItems = computed<GlobalMapDistanceMeasurementOverlayItem[]>(() =>
+  globalMapDistanceMeasurements.value.map((record) => {
+    const measurement = createGlobalMapDistanceMeasurement(record.start, record.end, record.shape);
+    return {
+      id: record.id,
+      start: record.start,
+      end: record.end,
+      shape: record.shape,
+      distanceLabel: formatGlobalMapDistanceLabel(measurement.distanceMeters),
+      active: record.id === activeGlobalMapDistanceMeasurementId.value
+        && (globalMapDistanceMeasurementMode.value === "measuring"
+          || globalMapDistanceMeasurementPointerActive.value),
+    };
+  }),
+);
+const globalMapDistanceLabel = computed(() => {
+  const distanceMeters = globalMapDistanceMeasurement.value?.distanceMeters;
+  if (distanceMeters === undefined) return "";
+  return formatGlobalMapDistanceLabel(distanceMeters);
 });
 const globalMapContextFeedback = ref("");
 let globalMapContextFeedbackTimer: number | undefined;
@@ -1185,12 +1391,43 @@ const stationConnectionRequestsPending = ref(0);
 const { n, t } = useI18n();
 const route = useRoute();
 const router = useRouter();
+const temporaryMarker = computed(() => parseGlobalMapTemporaryMarker(route.query));
+const temporaryMarkerRadius = computed(() => parseGlobalMapTemporaryMarkerRadius(route.query));
+const lineToKeepIds = computed(() => parseGlobalMapLineToKeep(route.query));
+const nearbyHeavyLineIds = computed(() => parseGlobalMapNearbyHeavyLineIds(route.query));
+const nearbyHeavyStationIds = computed(() => parseGlobalMapNearbyHeavyStationIds(route.query));
+const nearbyHeavyStationsAllowed = ref(true);
+const scopedLineToKeepIds = computed(() => nearbyHeavyStationsAllowed.value
+  ? [...new Set([...lineToKeepIds.value, ...nearbyHeavyLineIds.value])]
+  : lineToKeepIds.value,
+);
+const scopedNearbyHeavyStationIds = computed(() => nearbyHeavyStationsAllowed.value
+  ? nearbyHeavyStationIds.value
+  : [],
+);
 const globalNearbyProviders = createNearbyDataProviders();
 const globalMapGeocoder = createIgnTransportMapGeocoder();
+
+function currentUserLocationAsItineraryOrigin(): GeocoderPoint | undefined {
+  const coordinates = userGeolocation.coordinates.value;
+  if (!userGeolocation.isEnabled.value || !userGeolocation.isAuthorized.value || !coordinates) {
+    return undefined;
+  }
+  return {
+    lon: coordinates.longitude,
+    lat: coordinates.latitude,
+    label: t("globalMap.itinerary.myPosition"),
+    provider: "device",
+    type: "address",
+  };
+}
+
 const globalItinerary = useGlobalTransportItinerary({
   placesProvider: globalNearbyProviders.places,
   travelRoutesProvider: globalNearbyProviders.travelRoutes,
   getDefaultOrigin: () => {
+    const currentLocation = currentUserLocationAsItineraryOrigin();
+    if (currentLocation) return currentLocation;
     const primary = addressBook.primaryAddress.value;
     return primary ? toAddressBookPoint(primary) : undefined;
   },
@@ -1241,6 +1478,9 @@ const primaryModes = computed(() =>
 const customizationModes = computed(() =>
   GLOBAL_TRANSPORT_PLAN_PANEL_MODES.filter((mode) => availableModes.value.includes(mode)),
 );
+const globalRadarDisplayedModes = computed(() => customizationModes.value.filter((mode) =>
+  filters.selectedModes.value.includes(mode),
+));
 const activePreset = computed<GlobalTransportPlanPreset | undefined>(() =>
   deriveGlobalTransportPlanPreset(availableModes.value, filters.selectedModes.value),
 );
@@ -1271,6 +1511,9 @@ const activeLine = computed(() => {
   const id = selection.activeLineId.value;
   return id ? network.value?.linesById.get(id) : undefined;
 });
+const irisTransportStations = computed(() => network.value
+  ? transportStationsFromNetwork(network.value.stations, network.value.linesById)
+  : []);
 const globalMapIsochrones = useGlobalMapIsochrones({
   getContext: () => ({
     activeLine: activeLine.value,
@@ -1297,10 +1540,29 @@ const globalRadarBuildCommand = computed(() => {
 });
 function openGlobalRadar(mode?: GlobalMapMode): void {
   globalRadarFocusMode.value = mode;
-  globalMapIsochrones.panelOpen.value = mode ? true : !globalMapIsochrones.panelOpen.value;
+  if (mode) {
+    globalMapIsochrones.enabled.value = true;
+    globalMapIsochrones.panelOpen.value = true;
+    return;
+  }
+
+  if (!globalMapIsochrones.enabled.value) {
+    globalMapIsochrones.enabled.value = true;
+    globalMapIsochrones.panelOpen.value = true;
+    return;
+  }
+
+  if (globalMapIsochrones.panelOpen.value) {
+    globalMapIsochrones.enabled.value = false;
+    globalMapIsochrones.panelOpen.value = false;
+    globalRadarFocusMode.value = undefined;
+    return;
+  }
+
+  globalMapIsochrones.panelOpen.value = true;
 }
 function setGlobalRadarMode(mode: GlobalMapMode, setting: GlobalIsochroneSettings[GlobalMapMode]): void {
-  globalMapIsochrones.settings.value[mode] = setting;
+  globalMapIsochrones.setMode(mode, setting);
 }
 const activeLineSearchOption = computed<LineSearchOption | undefined>(() => {
   const line = activeLine.value;
@@ -1377,6 +1639,8 @@ const globalTransportScene = useGlobalTransportScene({
   getProgrammaticCameraFlightActive: () => interactionController?.isCameraAnimationActive() ?? false,
   getTrafficState: () => sceneTrafficStateReader(),
   getSidebarPreviewLineId: () => sidebarPreviewLineId.value,
+  getLineIdsToKeep: () => scopedLineToKeepIds.value,
+  getStationIdsToKeep: () => scopedNearbyHeavyStationIds.value,
   recordTiming: (kind: TransportMapTraceEventType, durationMs: number, metadata?: TransportMapTraceMetadata) => {
     performanceTrace?.recordDuration(kind, durationMs, metadata);
   },
@@ -1407,7 +1671,7 @@ const {
   missingRenderedGhostLineIds,
   selectedLineGhostSceneComplete,
   liveRenderScene,
-  renderScene,
+  renderScene: baseRenderScene,
   hitTestStations,
   hitTestStationIds,
   hitTestStationIndex,
@@ -1608,7 +1872,9 @@ const sidebarCityPatternStations = computed<GlobalMapStation[]>(() => {
   }
 
   const direction = busDirectionSelection.value;
-  const directionalStationIds = direction
+  // A merged map shows every branch, so its city list and polygons must use
+  // the complete line rather than the direction retained by the selector.
+  const directionalStationIds = direction && !directionMergeEnabled.value
     ? getGlobalBusDirectionOrderedStopIds(line, direction, allStations)
     : [];
   const stationIds = directionalStationIds.length > 1
@@ -1619,6 +1885,126 @@ const sidebarCityPatternStations = computed<GlobalMapStation[]>(() => {
     .map((stationId) => network.value?.stationsById.get(stationId))
     .filter((station): station is GlobalMapStation => Boolean(station));
 });
+
+const servedCityZones = computed<ReturnType<typeof buildServedCityZones> | undefined>(() => {
+  if (
+    mapExperience.kind !== "next" ||
+    !sidebarOpen.value ||
+    !servedCitiesAccordionExpanded.value ||
+    routePreviewActive.value
+  ) {
+    return undefined;
+  }
+  const line = sidebarPreviewLine.value ?? activeLineView.value ?? activeLine.value;
+  if (!line || (activeStationView.value && !sidebarPreviewLine.value) || !irisDataset.value) return [];
+  return buildServedCityZones(
+    irisDataset.value,
+    sidebarCityPatternStations.value,
+    line.color,
+  );
+});
+
+const nearbyLineCityRefs = computed<NearbyPlaceCityRef[]>(() => {
+  const seen = new Set<string>();
+  return sidebarCityPatternStations.value.flatMap((station) => {
+    const name = station.city?.trim();
+    const key = name ? normalizeCityName(name) : "";
+    if (!key || seen.has(key)) return [];
+    seen.add(key);
+    return [{ name, lat: station.lat, lon: station.lon }];
+  });
+});
+
+const globalAdministrativeZones = computed(() => {
+  if (
+    mapExperience.kind !== "next" ||
+    !cityZonesVisible.value ||
+    routePreviewActive.value ||
+    !irisDataset.value
+  ) {
+    return [];
+  }
+  return buildAllGlobalZones(irisDataset.value);
+});
+
+const renderScene = computed<TransportMapRenderScene>(() => {
+  const scene = baseRenderScene.value;
+  const zones = servedCityZones.value ?? globalAdministrativeZones.value;
+  return zones.length > 0 ? { ...scene, servedCityZones: zones } : scene;
+});
+
+watch(
+  () => [activeLine.value?.id, activeStationView.value?.id] as const,
+  ([lineId, stationId], previous) => {
+    if (previous && (lineId !== previous[0] || stationId !== previous[1])) {
+      servedCitiesAccordionExpanded.value = false;
+      draw();
+    }
+  },
+);
+
+function setServedCitiesAccordionExpanded(expanded: boolean): void {
+  servedCitiesAccordionExpanded.value = expanded;
+  if (!expanded) cityZonesError.value = "";
+  if (expanded) void ensureServedCitiesDataset();
+  draw();
+}
+
+function ensureIrisDataset(): Promise<IrisDataset> {
+  if (irisDataset.value) return Promise.resolve(irisDataset.value);
+  if (irisDatasetPending) return irisDatasetPending;
+
+  const pending = fetchIrisDataset()
+    .then((dataset) => {
+      irisDataset.value = dataset;
+      return dataset;
+    })
+    .finally(() => {
+      if (irisDatasetPending === pending) irisDatasetPending = undefined;
+    });
+  irisDatasetPending = pending;
+  return pending;
+}
+
+async function ensureServedCitiesDataset(): Promise<void> {
+  if (!servedCitiesAccordionExpanded.value || irisDataset.value) return;
+  try {
+    await ensureIrisDataset();
+    if (servedCitiesAccordionExpanded.value) {
+      cityZonesError.value = "";
+      draw();
+    }
+  } catch {
+    if (servedCitiesAccordionExpanded.value) {
+      cityZonesError.value = "unavailable";
+      draw();
+    }
+  }
+}
+
+async function toggleCityZones(): Promise<void> {
+  if (cityZonesLoading.value) return;
+  if (cityZonesVisible.value) {
+    cityZonesVisible.value = false;
+    cityZonesError.value = "";
+    draw();
+    return;
+  }
+
+  cityZonesLoading.value = true;
+  cityZonesError.value = "";
+  try {
+    await ensureIrisDataset();
+    cityZonesVisible.value = true;
+  } catch {
+    cityZonesVisible.value = false;
+    cityZonesError.value = "unavailable";
+  } finally {
+    cityZonesLoading.value = false;
+    draw();
+  }
+}
+
 const sidebarPreviewPaths = computed<GlobalMapPath[]>(() => {
   const line = sidebarPreviewLine.value;
   if (!line || !network.value) return [];
@@ -1846,7 +2232,7 @@ const globalTransportViewport = useGlobalTransportViewport({
   getCamera: () => camera.value,
   getVisibleModeMask: () => filters.visibleModeMask.value,
   getActiveLineId: () => selection.activeLineId.value,
-  getForcedLineIds: () => ghostLineIds.value,
+  getForcedLineIds: () => [...new Set([...scopedLineToKeepIds.value, ...ghostLineIds.value])],
   queryViewport: (requestedCamera, visibleModeMask, generation, activeLineId, forcedLineIds) => {
     if (debugPerformanceEnabled.value) loadingStage.value = "viewport";
     return dataSource.queryViewport(
@@ -2018,13 +2404,14 @@ async function searchGlobalPlaces(query: string, signal?: AbortSignal): Promise<
   const points = await globalNearbyProviders.places.searchDestinations(
     query,
     {
-      includeStations: false,
+      includeStations: true,
       includePlaces: true,
+      includeAddresses: true,
       count: 8,
     },
     signal,
   );
-  return points.filter((point) => point.type === "place");
+  return points;
 }
 
 const globalVisibleTravelRoutes = computed(() => {
@@ -2175,45 +2562,35 @@ const globalItinerarySegments = computed<GlobalTransportItinerarySegment[]>(() =
 /** During a route detail preview the renderer intentionally receives no map layers. */
 const routePreviewActive = computed(() => Boolean(globalSelectedTravelRoute.value));
 const showGhostLineIcons = ref(false);
-const nearbyLineRadiusMinutes = ref<NearbyLineRadiusMinutes>(2);
+const nearbyLineRadiusMinutes = ref<NearbyLineRadiusMinutes>(0);
 const nearbyLineRadiusMeters = computed(() => walkingMinutesToMeters(nearbyLineRadiusMinutes.value));
 const nearbyLineAnchors = computed<GeocoderPoint[]>(() => {
-  const maxAnchors = 24;
   const line = activeLine.value;
   const stations = line?.stationIds
     .map((stationId) => network.value?.stationsById.get(stationId))
     .filter((station): station is GlobalMapStation => Boolean(station))
     .filter((station) => Number.isFinite(station.lon) && Number.isFinite(station.lat)) ?? [];
-  if (stations.length <= maxAnchors) {
-    return stations.map((station) => ({
-      id: station.id,
-      label: station.name,
-      lon: station.lon,
-      lat: station.lat,
-      type: "station",
-      city: station.city,
-    }));
-  }
-
-  const selected = new Set<number>([0, stations.length - 1]);
-  const step = (stations.length - 1) / (maxAnchors - 1);
-  for (let index = 0; index < maxAnchors; index += 1) selected.add(Math.round(index * step));
-  return [...selected].sort((left, right) => left - right).map((index) => {
-    const station = stations[index]!;
-    return {
-      id: station.id,
-      label: station.name,
-      lon: station.lon,
-      lat: station.lat,
-      type: "station" as const,
-      city: station.city,
-    };
-  });
+  // The compiled provider searches the complete city assets locally, so all
+  // stops must be supplied. It uses a metric origin grid to keep this
+  // complete query inexpensive; the HTTP fallback caps its own probes.
+  return stations.map((station) => ({
+    id: station.id,
+    label: station.name,
+    lon: station.lon,
+    lat: station.lat,
+    type: "station" as const,
+    city: station.city,
+  }));
 });
 const nearbyLinePlaces = useNearbyPlaces({
   origins: nearbyLineAnchors,
+  cityRefs: nearbyLineCityRefs,
   radius: nearbyLineRadiusMeters,
-  enabled: computed(() => Boolean(activeLine.value && !routePreviewActive.value)),
+  enabled: computed(() => Boolean(
+    activeLine.value
+    && !routePreviewActive.value
+    && nearbyLineRadiusMinutes.value > 0,
+  )),
   provider: globalNearbyProviders.places,
 });
 const globalMapPickerSidebarVisible = computed(() =>
@@ -2351,6 +2728,7 @@ function viewAddressBookNeighborhood(entry: AddressBookEntry): void {
     address: entry.address || entry.name,
     lat: String(entry.lat),
     lon: String(entry.lon),
+    ...(entry.city ? { city: entry.city } : {}),
   });
   window.open(`/nearby-stations?${params.toString()}`, "_blank", "noopener,noreferrer");
 }
@@ -2459,6 +2837,26 @@ function getGlobalSectionExits(section: NearbyJourneySection): readonly RouteExi
 function setGlobalTravelAllowedModes(modes: GlobalMapMode[]): void {
   const available = new Set(availableModes.value);
   globalTravelAllowedModes.value = modes.filter((mode) => available.size === 0 || available.has(mode));
+}
+
+async function openGlobalItineraryTo(destination: GeocoderPoint): Promise<void> {
+  if (
+    !Number.isFinite(destination.lon) ||
+    !Number.isFinite(destination.lat) ||
+    destination.lon < -180 ||
+    destination.lon > 180 ||
+    destination.lat < -90 ||
+    destination.lat > 90
+  ) {
+    return;
+  }
+
+  if (isMobileViewport() && !globalItinerary.open.value) {
+    // Give the proposals enough room to be read and scrolled as soon as the
+    // route mode opens. The handle still lets the user collapse or expand it.
+    mobileItinerarySheetSnap.value = "medium";
+  }
+  await globalItinerary.openTo(destination);
 }
 
 async function setGlobalItineraryOrigin(point: GeocoderPoint): Promise<void> {
@@ -2779,6 +3177,10 @@ function resetView(): void {
   if (!network.value) return;
   cancelCameraAnimation();
   focusedEntranceId.value = undefined;
+  if (irisViewEnabled.value) {
+    fitIrisView(true);
+    return;
+  }
   applyCamera(
     fitCameraToBounds(
       camera.value,
@@ -2789,6 +3191,79 @@ function resetView(): void {
     ),
   );
   captureSelectedLineBasemapCoverSnapshot();
+}
+
+function fitIrisView(animate: boolean): void {
+  const stage = stageElement.value;
+  const dataset = irisDataset.value;
+  if (!stage || !dataset) return;
+  const rect = stage.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return;
+  const resized = resizeCamera(
+    camera.value,
+    Math.max(1, rect.width),
+    Math.max(1, rect.height),
+    camera.value.pixelRatio,
+  );
+  const target = fitCameraToBounds(
+    resized,
+    boundsForIrisDataset(dataset),
+    GLOBAL_TRANSPORT_PLAN_CONFIG.initialView.paddingCssPx,
+    GLOBAL_TRANSPORT_PLAN_CONFIG.initialView.minZoom,
+    GLOBAL_TRANSPORT_PLAN_CONFIG.initialView.maxZoom,
+  );
+  if (animate && !appSettings.value.reduceMotion && interactionController) {
+    cancelCameraAnimation();
+    interactionController?.animateCameraToTarget(
+      {
+        centerWorldX: target.centerWorldX,
+        centerWorldY: target.centerWorldY,
+        zoom: target.zoom,
+      },
+      () => captureSelectedLineBasemapCoverSnapshot(),
+    );
+    return;
+  }
+  applyCamera(target, false, true, true);
+}
+
+async function toggleIrisView(): Promise<void> {
+  if (irisViewEnabled.value) {
+    irisViewEnabled.value = false;
+    irisSubdivisionsVisible.value = false;
+    irisViewError.value = "";
+    irisViewRequestToken += 1;
+    cancelCameraAnimation();
+    const previousCamera = irisViewPreviousCamera;
+    irisViewPreviousCamera = undefined;
+    if (previousCamera) applyCamera(previousCamera, false, true, true);
+    return;
+  }
+  if (irisViewLoading.value) return;
+  const token = ++irisViewRequestToken;
+  irisViewLoading.value = true;
+  irisViewError.value = "";
+  irisViewPreviousCamera = { ...camera.value };
+  try {
+    const dataset = await ensureIrisDataset();
+    if (token !== irisViewRequestToken) return;
+    irisDataset.value = dataset;
+    irisViewEnabled.value = true;
+    await nextTick();
+    fitIrisView(true);
+  } catch (error) {
+    if (token === irisViewRequestToken) {
+      irisViewPreviousCamera = undefined;
+      irisViewError.value = error instanceof Error ? error.message : String(error);
+    }
+  } finally {
+    if (token === irisViewRequestToken) irisViewLoading.value = false;
+  }
+}
+
+function toggleIrisSubdivisions(): void {
+  if (!irisViewEnabled.value) return;
+  irisSubdivisionsVisible.value = !irisSubdivisionsVisible.value;
 }
 
 async function shareViewport(): Promise<void> {
@@ -3046,28 +3521,116 @@ function mapPointFromPointerEvent(event: Pick<PointerEvent, "clientX" | "clientY
   }
 }
 
-function startContextDistanceMeasurement(): void {
+function nearestGlobalMapDistanceMeasurementEndpoint(
+  measurement: GlobalMapDistanceMeasurementRecord,
+  event: Pick<MouseEvent, "clientX" | "clientY">,
+): GlobalMapDistanceMeasurementResizeEndpoint {
+  if (measurement.shape === "circle") return "end";
+  const rect = canvasElement.value?.getBoundingClientRect();
+  if (!rect) return "end";
+
+  const pointer = {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top,
+  };
+  const start = worldToScreen(lonLatToWorld(measurement.start), camera.value);
+  const end = worldToScreen(lonLatToWorld(measurement.end), camera.value);
+  if (![pointer.x, pointer.y, start.x, start.y, end.x, end.y].every(Number.isFinite)) return "end";
+
+  return Math.hypot(pointer.x - start.x, pointer.y - start.y)
+    <= Math.hypot(pointer.x - end.x, pointer.y - end.y)
+    ? "start"
+    : "end";
+}
+
+function startContextDistanceMeasurement(shape: GlobalMapDistanceMeasurementShape): void {
   const point = contextPoint.value;
   if (!point) return;
 
   const start = { lon: point.lon, lat: point.lat };
-  globalMapDistanceStart.value = start;
-  globalMapDistanceEnd.value = start;
+  const measurement: GlobalMapDistanceMeasurementRecord = {
+    id: nextGlobalMapDistanceMeasurementId++,
+    start,
+    end: start,
+    shape,
+  };
+  globalMapDistanceMeasurements.value = [
+    ...globalMapDistanceMeasurements.value,
+    measurement,
+  ];
+  activeGlobalMapDistanceMeasurementId.value = measurement.id;
+  globalMapDistanceMeasurementResizeEndpoint.value = "end";
+  globalMapDistanceMeasurementPointerActive.value = false;
   globalMapDistanceMeasurementMode.value = "measuring";
   measurementCompletionPointerId = undefined;
   closeGlobalContextMenu();
 }
 
+function resizeContextDistanceMeasurement(): void {
+  const measurement = contextMeasurement.value;
+  if (!measurement) return;
+
+  activeGlobalMapDistanceMeasurementId.value = measurement.id;
+  globalMapDistanceMeasurementResizeEndpoint.value = nearestGlobalMapDistanceMeasurementEndpoint(
+    measurement,
+    {
+      clientX: globalContextMenuPoint.value?.x ?? 0,
+      clientY: globalContextMenuPoint.value?.y ?? 0,
+    },
+  );
+  globalMapDistanceMeasurementPointerActive.value = false;
+  globalMapDistanceMeasurementMode.value = "measuring";
+  measurementCompletionPointerId = undefined;
+  closeGlobalContextMenu();
+}
+
+function removeGlobalMapDistanceMeasurement(id: number): void {
+  const remaining = globalMapDistanceMeasurements.value.filter(
+    (measurement) => measurement.id !== id,
+  );
+  if (remaining.length === globalMapDistanceMeasurements.value.length) return;
+
+  globalMapDistanceMeasurements.value = remaining;
+  if (activeGlobalMapDistanceMeasurementId.value !== id) return;
+
+  const replacement = remaining.at(-1);
+  activeGlobalMapDistanceMeasurementId.value = replacement?.id;
+  globalMapDistanceMeasurementPointerActive.value = false;
+  globalMapDistanceMeasurementMode.value = replacement ? "complete" : "idle";
+  measurementCompletionPointerId = undefined;
+}
+
+function deleteContextDistanceMeasurement(): void {
+  const measurementId = contextMeasurementId.value;
+  if (measurementId === undefined) return;
+
+  closeGlobalContextMenu();
+  removeGlobalMapDistanceMeasurement(measurementId);
+}
+
 function updateGlobalMapDistanceMeasurement(event: PointerEvent): void {
   if (globalMapDistanceMeasurementMode.value !== "measuring") return;
   const point = mapPointFromPointerEvent(event);
-  if (point) globalMapDistanceEnd.value = point;
+  if (!point || activeGlobalMapDistanceMeasurementId.value === undefined) return;
+
+  globalMapDistanceMeasurements.value = globalMapDistanceMeasurements.value.map((measurement) =>
+    measurement.id === activeGlobalMapDistanceMeasurementId.value
+      ? globalMapDistanceMeasurementResizeEndpoint.value === "start"
+        ? { ...measurement, start: point }
+        : { ...measurement, end: point }
+      : measurement,
+  );
 }
 
 function clearGlobalMapDistanceMeasurement(): void {
-  globalMapDistanceMeasurementMode.value = "idle";
-  globalMapDistanceStart.value = undefined;
-  globalMapDistanceEnd.value = undefined;
+  const measurementId = activeGlobalMapDistanceMeasurementId.value;
+  if (measurementId !== undefined) {
+    removeGlobalMapDistanceMeasurement(measurementId);
+  } else {
+    globalMapDistanceMeasurementResizeEndpoint.value = "end";
+    globalMapDistanceMeasurementPointerActive.value = false;
+    globalMapDistanceMeasurementMode.value = "idle";
+  }
   measurementCompletionPointerId = undefined;
 }
 
@@ -3156,10 +3719,29 @@ function openGlobalContextMenu(
   marker?: GlobalMapMarker,
   place?: GeocoderPoint,
 ): void {
+  contextMeasurementId.value = undefined;
   contextPoint.value = target;
   contextMarker.value = marker;
   contextPlace.value = place;
   globalContextMenuPoint.value = point;
+  globalContextMenuOpen.value = true;
+}
+
+function openGlobalMeasurementContextMenu(measurementId: number, event: MouseEvent): void {
+  const measurement = globalMapDistanceMeasurements.value.find(
+    (candidate) => candidate.id === measurementId,
+  );
+  if (!measurement) return;
+
+  contextMeasurementId.value = measurement.id;
+  globalMapDistanceMeasurementResizeEndpoint.value = nearestGlobalMapDistanceMeasurementEndpoint(
+    measurement,
+    event,
+  );
+  contextPoint.value = undefined;
+  contextMarker.value = undefined;
+  contextPlace.value = undefined;
+  globalContextMenuPoint.value = { x: event.clientX, y: event.clientY };
   globalContextMenuOpen.value = true;
 }
 
@@ -3208,6 +3790,7 @@ function openPlaceContextMenu(place: GeocoderPoint, event: MouseEvent): void {
 function closeGlobalContextMenu(): void {
   globalContextMenuOpen.value = false;
   globalContextMenuPoint.value = undefined;
+  contextMeasurementId.value = undefined;
   contextPoint.value = undefined;
   contextMarker.value = undefined;
   contextPlace.value = undefined;
@@ -3279,6 +3862,7 @@ function openContextNeighborhoodPlan(): void {
     address,
     lat: String(point.lat),
     lon: String(point.lon),
+    ...(point.city ? { city: point.city } : {}),
   });
   closeGlobalContextMenu();
   window.open(`/nearby-stations?${params.toString()}`, "_blank", "noopener,noreferrer");
@@ -3289,7 +3873,7 @@ function openContextItinerary(): void {
   if (!point) return;
   const destination = { ...point, label: point.label ?? `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}` };
   closeGlobalContextMenu();
-  void globalItinerary.openTo(destination);
+  void openGlobalItineraryTo(destination);
 }
 
 async function selectLineFromSearch(
@@ -3494,6 +4078,7 @@ function selectStationForDashboard(stationId: string): void {
 
 function clearSelection(): void {
   cancelCameraAnimation();
+  servedCitiesAccordionExpanded.value = false;
   clearPreloadedLineGeometry();
   invalidatePendingViewportRequests();
   closeTrafficCalendar();
@@ -3543,6 +4128,47 @@ function selectFeature(
     activeTrafficDisruption.value = undefined;
     globalTransportHover.openLineChoice(feature.lines, event, pointer);
   }
+}
+
+/**
+ * Departments are the only clickable administrative representation. The
+ * resulting camera is deliberately fitted with the city-view minimum zoom so
+ * the normal camera-derived renderer state switches to cities immediately.
+ */
+function selectAdministrativeZone(point: { x: number; y: number }, _event: PointerEvent): boolean {
+  if (
+    mapExperience.kind !== "next" ||
+    routePreviewActive.value ||
+    !cityZonesVisible.value ||
+    globalAdministrativeZones.value.length === 0 ||
+    camera.value.zoom >= GLOBAL_CITY_VIEW_MIN_ZOOM
+  ) {
+    return false;
+  }
+
+  let lonLat: LonLatPoint;
+  try {
+    lonLat = screenToLonLat(point, camera.value);
+  } catch {
+    return false;
+  }
+
+  const department = selectCityZonesForZoom(
+    globalAdministrativeZones.value,
+    camera.value.zoom,
+  ).find((zone) => zone.kind === "department" && pointInIrisGeometry(lonLat, zone.geometry));
+  if (!department) return false;
+
+  applyCamera(
+    fitCameraToBounds(
+      camera.value,
+      boundsForIrisGeometry(department.geometry),
+      GLOBAL_TRANSPORT_PLAN_CONFIG.lineView.paddingCssPx,
+      GLOBAL_CITY_VIEW_MIN_ZOOM,
+      GLOBAL_TRANSPORT_PLAN_CONFIG.camera.maxZoom,
+    ),
+  );
+  return true;
 }
 
 function closeLineChoiceOnDocumentPointerDown(event: PointerEvent): void {
@@ -3684,6 +4310,7 @@ interactionController = useGlobalTransportMapInteraction({
   updateHovered: globalTransportHover.update,
   hitAt: globalTransportHover.hitTest,
   selectFeature,
+  selectAdministrativeZone,
   scheduleViewportRefresh,
   cancelScheduledViewportRefresh,
   captureSelectedLineInteractionSceneIfReady,
@@ -3742,11 +4369,38 @@ function isPrimaryPointer(event: PointerEvent): boolean {
   return event.button === undefined || event.button === 0;
 }
 
+function isIrisOverlayEvent(event: Event): boolean {
+  return event.target instanceof Element && Boolean(event.target.closest("[data-iris-overlay]"));
+}
+
+function onStagePointerDown(event: PointerEvent): void {
+  if (isIrisOverlayEvent(event)) onPointerDown(event);
+}
+
+function onStagePointerMove(event: PointerEvent): void {
+  // Let the IRIS layer own hover feedback. Forward only an active drag so a
+  // neighbourhood hover cannot also light up a transport feature underneath.
+  if (isIrisOverlayEvent(event) && event.buttons !== 0) onPointerMove(event);
+}
+
+function onStagePointerUp(event: PointerEvent): void {
+  if (isIrisOverlayEvent(event)) onPointerUp(event);
+}
+
+function onStagePointerCancel(event: PointerEvent): void {
+  if (isIrisOverlayEvent(event)) onPointerCancel(event);
+}
+
+function onStageWheel(event: WheelEvent): void {
+  if (isIrisOverlayEvent(event)) onWheel(event);
+}
+
 function onPointerDown(event: PointerEvent): void {
   if (globalMapDistanceMeasurementMode.value === "measuring" && isPrimaryPointer(event)) {
     const point = mapPointFromPointerEvent(event);
     if (point) {
-      globalMapDistanceEnd.value = point;
+      updateGlobalMapDistanceMeasurement(event);
+      globalMapDistanceMeasurementPointerActive.value = true;
       globalMapDistanceMeasurementMode.value = "complete";
       measurementCompletionPointerId = event.pointerId;
       event.preventDefault();
@@ -3767,6 +4421,7 @@ function onPointerMove(event: PointerEvent): void {
 function onPointerUp(event: PointerEvent): void {
   if (measurementCompletionPointerId === event.pointerId) {
     measurementCompletionPointerId = undefined;
+    globalMapDistanceMeasurementPointerActive.value = false;
     event.preventDefault();
     return;
   }
@@ -3780,6 +4435,7 @@ function onPointerUp(event: PointerEvent): void {
 function onPointerCancel(event: PointerEvent): void {
   if (measurementCompletionPointerId === event.pointerId) {
     measurementCompletionPointerId = undefined;
+    globalMapDistanceMeasurementPointerActive.value = false;
     event.preventDefault();
     return;
   }
@@ -3896,6 +4552,10 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+function toggleNearbyHeavyStations(): void {
+  nearbyHeavyStationsAllowed.value = !nearbyHeavyStationsAllowed.value;
+}
+
 watch(
   filters.selectedModes,
   () => {
@@ -3903,6 +4563,19 @@ watch(
     scheduleViewportRefresh();
   },
   { deep: true },
+);
+watch(
+  () => [
+    scopedLineToKeepIds.value.slice().sort().join("\u0000"),
+    scopedNearbyHeavyStationIds.value.slice().sort().join("\u0000"),
+  ].join("\u0001"),
+  (scopeKey, previousScopeKey) => {
+    if (scopeKey === previousScopeKey) return;
+    globalTransportHover.clear();
+    draw();
+    if (mounted && network.value) void refreshViewport();
+  },
+  { flush: "post" },
 );
 watch(globalMapIsochrones.surfaces, (surfaces) => {
   const feature = hoveredFeature.value;
@@ -4232,6 +4905,44 @@ viewportTimingReader = (kind, durationMs) => {
   performanceScenarios.recordTiming(kind, durationMs);
 };
 
+function restoreTemporaryMarkerFromUrl(): void {
+  const marker = temporaryMarker.value;
+  if (!marker) return;
+
+  const world = lonLatToWorld(marker);
+  const radiusMeters = temporaryMarkerRadius.value;
+  if (radiusMeters) {
+    // Keep the same framing envelope as NearbyStationsMap: the visible
+    // circle is the requested radius, with the shared map margin around it.
+    const radiusWorldUnits = metersToWorldUnits(
+      radiusMeters + NEARBY_MAP_MARGIN_METERS,
+      world,
+    );
+    applyCamera(
+      fitCameraToBounds(
+        camera.value,
+        {
+          minX: world.x - radiusWorldUnits,
+          minY: world.y - radiusWorldUnits,
+          maxX: world.x + radiusWorldUnits,
+          maxY: world.y + radiusWorldUnits,
+        },
+        32,
+        10,
+        18,
+      ),
+      false,
+    );
+    return;
+  }
+
+  applyCamera(updateCamera(camera.value, {
+    centerWorldX: world.x,
+    centerWorldY: world.y,
+    zoom: Math.max(camera.value.zoom, GLOBAL_TRANSPORT_PLAN_CONFIG.selection.stationZoom),
+  }), false);
+}
+
 function restoreAddressBookFocusFromUrl(): void {
   const lat = Number(queryString(route.query.focusLat));
   const lon = Number(queryString(route.query.focusLon));
@@ -4299,6 +5010,7 @@ onMounted(async () => {
       ),
       false,
     );
+    restoreTemporaryMarkerFromUrl();
     await refreshViewport();
     await restoreSelectionFromUrl();
     await restoreDebugLineFromUrl();
@@ -4374,6 +5086,27 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow: hidden;
 }
+.global-transport-plan__iris-status {
+  position: absolute;
+  z-index: 10;
+  top: 16px;
+  left: 50%;
+  max-width: min(460px, calc(100% - 32px));
+  padding: 8px 11px;
+  border: 1px solid rgba(109, 40, 217, .24);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .95);
+  box-shadow: 0 7px 18px rgba(15, 23, 42, .16);
+  color: #4c1d95;
+  font-size: .72rem;
+  font-weight: 800;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.global-transport-plan__iris-status--error {
+  border-color: rgba(217, 45, 32, .24);
+  color: #9b271e;
+}
 .global-transport-plan__itinerary-panel {
   position: absolute;
   z-index: 8;
@@ -4382,7 +5115,10 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   width: min(400px, calc(100% - 32px));
-  height: min(calc(100% - 32px), 760px);
+  height: calc(100% - 32px);
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: hidden;
   pointer-events: auto;
 }
 .global-transport-plan__itinerary-panel > .left-nearby-sidebar {
@@ -4480,6 +5216,73 @@ onBeforeUnmount(() => {
   color: #18233f;
   font-size: .76rem;
   font-weight: 750;
+}
+.global-transport-plan__nearby-heavy-control {
+  position: absolute;
+  z-index: 7;
+  right: 16px;
+  bottom: 54px;
+  max-width: min(320px, calc(100% - 32px));
+  border: 1px solid rgba(81, 70, 255, .2);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, .14);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+.global-transport-plan__nearby-heavy-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 46px;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #18233f;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.global-transport-plan__nearby-heavy-toggle:hover,
+.global-transport-plan__nearby-heavy-toggle:focus-visible {
+  background: #f1efff;
+  outline: 2px solid rgba(81, 70, 255, .24);
+  outline-offset: -2px;
+}
+.global-transport-plan__nearby-heavy-copy {
+  min-width: 0;
+  font-size: .74rem;
+  font-weight: 750;
+  line-height: 1.25;
+}
+.global-transport-plan__nearby-heavy-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  transition: background .16s ease;
+}
+.global-transport-plan__nearby-heavy-track > span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .25);
+  transition: transform .16s ease;
+}
+.global-transport-plan__nearby-heavy-toggle--checked .global-transport-plan__nearby-heavy-track {
+  background: #5146ff;
+}
+.global-transport-plan__nearby-heavy-toggle--checked .global-transport-plan__nearby-heavy-track > span {
+  transform: translateX(16px);
 }
 .global-transport-plan__left-controls {
   position: absolute;
@@ -4776,38 +5579,6 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
-.global-transport-plan__tooltip--isochrone {
-  position: absolute;
-  z-index: 2;
-  display: grid;
-  gap: 4px;
-  min-width: 150px;
-  max-width: min(260px, calc(100% - 16px));
-  padding: 7px 9px;
-  border: 1px solid rgba(29, 78, 216, .32);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, .96);
-  color: #18233f;
-  font-size: .72rem;
-  box-shadow: 0 8px 24px rgba(24, 41, 76, .18), 0 2px 6px rgba(24, 41, 76, .08);
-  pointer-events: none;
-}
-.global-transport-plan__tooltip-isochrone-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  white-space: nowrap;
-}
-.global-transport-plan__tooltip-isochrone-row strong {
-  color: #1d4ed8;
-  font-weight: 850;
-}
-.global-transport-plan__tooltip-isochrone-row > span {
-  color: #475569;
-  font-variant-numeric: tabular-nums;
-}
-
 :global(.global-transport-plan__bike-install-modal) {
   max-width: 520px;
 }
@@ -4852,6 +5623,13 @@ onBeforeUnmount(() => {
   .global-transport-plan__itinerary-panel--collapsed { height: 184px; }
   .global-transport-plan__itinerary-panel--medium { height: 56dvh; }
   .global-transport-plan__itinerary-panel--expanded { height: 86dvh; }
+  .global-transport-plan__itinerary-panel:not(.global-transport-plan__itinerary-panel--collapsed) {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    box-sizing: border-box;
+  }
+  .global-transport-plan__itinerary-panel:not(.global-transport-plan__itinerary-panel--collapsed) .global-transport-plan__itinerary-mobile-summary {
+    display: none;
+  }
   .global-transport-plan__itinerary-panel--dragging { transition: none; }
   .global-transport-plan__itinerary-sheet-handle {
     display: flex;
@@ -5003,6 +5781,11 @@ onBeforeUnmount(() => {
     bottom: 8px;
     left: 10px;
     justify-content: flex-start;
+  }
+  .global-transport-plan__nearby-heavy-control {
+    right: 10px;
+    bottom: 48px;
+    max-width: calc(100% - 20px);
   }
 }
 

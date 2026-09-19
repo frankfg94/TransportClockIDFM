@@ -4,37 +4,43 @@ import { GLOBAL_MAP_MODE_ORDER } from "../src/features/transport-map/contracts/m
 import { GlobalIsochroneArchive } from "../src/features/transport-map/isochrones/archive";
 import {
   assertGlobalIsochroneIndex, createGlobalIsochroneSettings, GLOBAL_ISOCHRONE_MINUTES,
-  globalIsochroneScopeKey, globalIsochroneZoneAsset,
+  globalIsochronePresetMinutes, globalIsochroneScopeKey, globalIsochroneZoneAsset,
 } from "../src/features/transport-map/isochrones/contracts";
 import { selectGlobalIsochroneScopes } from "../src/features/transport-map/isochrones/selection";
 import { normalizeWalkingIsochroneGeometry } from "../src/shared/walkingIsochroneGeometry";
 import { walkingArchiveFixture, walkingPolygon, walkingRing } from "./fixtures/walkingIsochrones";
 
 describe("walking radar scope selection", () => {
-  it("excludes bus/noctilien from general and custom views, even a bus-only custom view", () => {
+  it("follows the transports currently selected by the map, including bus families", () => {
     const settings = createGlobalIsochroneSettings();
-    expect(selectGlobalIsochroneScopes({ preset: "ALL", selectedModes: GLOBAL_MAP_MODE_ORDER }, settings).map((scope) => scope.mode))
-      .toEqual(GLOBAL_MAP_MODE_ORDER.filter((mode) => mode !== "BUS" && mode !== "NOCTILIEN"));
-    expect(selectGlobalIsochroneScopes({ selectedModes: ["BUS", "NOCTILIEN"] }, settings)).toEqual([]);
-    expect(selectGlobalIsochroneScopes({ selectedModes: ["BUS"] }, settings)).toEqual([]);
+    expect([...new Set(selectGlobalIsochroneScopes({ preset: "ALL", selectedModes: GLOBAL_MAP_MODE_ORDER }, settings).map((scope) => scope.mode))])
+      .toEqual(GLOBAL_MAP_MODE_ORDER);
+    expect(selectGlobalIsochroneScopes({ preset: "ALL", selectedModes: GLOBAL_MAP_MODE_ORDER }, settings)).toHaveLength(GLOBAL_MAP_MODE_ORDER.length * 3);
+    expect([...new Set(selectGlobalIsochroneScopes({ selectedModes: ["BUS", "NOCTILIEN"] }, settings).map((scope) => scope.mode))])
+      .toEqual(["BUS", "NOCTILIEN"]);
+    expect(selectGlobalIsochroneScopes({ selectedModes: ["BUS"] }, settings)).toEqual([
+      ...globalIsochronePresetMinutes(settings.BUS.preset).map((minutes) => ({ key: "mode:BUS", mode: "BUS", minutes })),
+    ]);
   });
 
-  it.each(GLOBAL_MAP_MODE_ORDER)("includes the entire explicit %s preset with its default duration", (mode) => {
+  it.each(GLOBAL_MAP_MODE_ORDER)("includes the entire explicit %s preset with its default durations", (mode) => {
     const settings = createGlobalIsochroneSettings();
     expect(selectGlobalIsochroneScopes({ preset: mode, selectedModes: GLOBAL_MAP_MODE_ORDER }, settings)).toEqual([
-      { key: `mode:${mode}`, mode, minutes: settings[mode].minutes },
+      ...globalIsochronePresetMinutes(settings[mode].preset).map((minutes) => ({ key: `mode:${mode}`, mode, minutes })),
     ]);
-    expect(settings.METRO.minutes).toBe(10);
-    expect(settings.RER.minutes).toBe(15);
-    expect(settings.TRANSILIEN.minutes).toBe(20);
-    expect(settings.BUS.minutes).toBe(5);
-    expect(settings.NOCTILIEN.minutes).toBe(10);
+    expect(settings.METRO.preset).toBe("standard");
+    expect(settings.RER.preset).toBe("standard");
+    expect(settings.TRANSILIEN.preset).toBe("standard");
+    expect(settings.BUS.preset).toBe("extended");
+    expect(settings.NOCTILIEN.preset).toBe("extended");
   });
 
   it("gives the selected line priority without deriving stations from directions or connections", () => {
     const settings = createGlobalIsochroneSettings();
     const context = { activeLine: { id: "line:BUS:1", mode: "BUS" as const }, preset: "METRO" as const, selectedModes: ["METRO" as const, "RER" as const] };
-    expect(selectGlobalIsochroneScopes(context, settings)).toEqual([{ key: "line:line:BUS:1", mode: "BUS", minutes: 5 }]);
+    expect(selectGlobalIsochroneScopes(context, settings)).toEqual(
+      globalIsochronePresetMinutes(settings.BUS.preset).map((minutes) => ({ key: "line:line:BUS:1", mode: "BUS", minutes })),
+    );
     settings.BUS.enabled = false;
     expect(selectGlobalIsochroneScopes(context, settings)).toEqual([]);
   });
@@ -42,13 +48,14 @@ describe("walking radar scope selection", () => {
   it("keeps each duration and enable flag independent without mutating network filters", () => {
     const settings = createGlobalIsochroneSettings();
     const selectedModes = ["METRO", "RER", "TRAM"] as const;
-    settings.METRO.minutes = 30;
+    settings.METRO.preset = "extended";
     settings.TRAM.enabled = false;
     expect(selectGlobalIsochroneScopes({ selectedModes }, settings)).toEqual([
-      { key: "mode:METRO", mode: "METRO", minutes: 30 }, { key: "mode:RER", mode: "RER", minutes: 15 },
+      ...globalIsochronePresetMinutes("extended").map((minutes) => ({ key: "mode:METRO", mode: "METRO", minutes })),
+      ...globalIsochronePresetMinutes("standard").map((minutes) => ({ key: "mode:RER", mode: "RER", minutes })),
     ]);
     expect(selectedModes).toEqual(["METRO", "RER", "TRAM"]);
-    expect(createGlobalIsochroneSettings().METRO.minutes).toBe(10);
+    expect(createGlobalIsochroneSettings().METRO.preset).toBe("standard");
   });
 });
 

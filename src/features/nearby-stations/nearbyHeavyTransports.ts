@@ -44,6 +44,8 @@ export interface NearbyJourneyRequest {
   count?: number;
   includeDisruptions?: boolean;
   includeGeoJson?: boolean;
+  /** Optional transport-mode constraint forwarded to the journey provider. */
+  allowedModes?: readonly GlobalMapMode[];
 }
 
 /**
@@ -88,6 +90,8 @@ export interface NearbyJourneyPoint {
   lat: number;
 }
 
+export type NearbyJourneyServiceType = "semi-direct" | "omnibus";
+
 /** A reliable station exit that can be shown at the end of a transit leg. */
 export interface RouteExit {
   id: string;
@@ -99,6 +103,16 @@ export interface RouteExit {
 }
 
 export interface NearbyJourneySection {
+  fromStopPointId?: string;
+  toStopPointId?: string;
+  fromStopAreaId?: string;
+  toStopAreaId?: string;
+  vehicleJourneyId?: string;
+  mission?: string;
+  baseDepartureDateTime?: string;
+  baseArrivalDateTime?: string;
+  timingSource?: "realtime" | "estimated" | "schedule";
+  timingObservedAt?: string;
   type?: string;
   mode?: string;
   durationSeconds: number;
@@ -122,6 +136,8 @@ export interface NearbyJourneySection {
   geometry?: NearbyJourneyPoint[];
   /** Optional ordered stop names when a journey provider can expose them. */
   stopNames?: string[];
+  /** Data-derived service pattern when the provider/network can identify it. */
+  serviceType?: NearbyJourneyServiceType;
 }
 
 export interface NearbyJourney {
@@ -178,6 +194,8 @@ export interface NearbyHeavyTransportAccess {
   feederLineCode?: string;
   feederMode?: GlobalMapMode;
   feederRideSeconds?: number;
+  /** Normalized provider journey used by compact neighborhood tooltips. */
+  journey?: NearbyJourney;
 }
 
 export interface NearbyHeavyAccessPresentation {
@@ -339,4 +357,5 @@ export interface HeavyJourneyEvaluation {
   feederLineCode?: string;
   feederMode?: GlobalMapMode;
   feederRideSeconds?: number;
+  journey?: NearbyJourney;
 }

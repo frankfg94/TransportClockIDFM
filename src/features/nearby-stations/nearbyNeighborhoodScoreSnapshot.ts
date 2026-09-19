@@ -1,7 +1,7 @@
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import type { NearbyHeavyTransportCandidate } from "./nearbyHeavyTransports";
 import type { NearbyPlace } from "./nearbyPlaces";
-import type { NeighborhoodWalkingMetrics } from "./neighborhoodScore";
+import type { NeighborhoodWalkingMetrics } from "./neighborhood";
 
 // v2 invalidates access snapshots produced before the initial-wait policy and
 // real station walking probes were introduced.

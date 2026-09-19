@@ -205,6 +205,20 @@ describe("GlobalTransportPlanSearch", () => {
     expect(wrapper.emitted("update:open")?.at(-1)).toEqual([false]);
   });
 
+  it("closes on an outside pointer press while keeping inside interactions open", async () => {
+    wrapper = mount(GlobalTransportPlanSearch, {
+      attachTo: document.body,
+      props: { open: true, stations: [station], lines: [line14], catalogReady: true },
+    });
+
+    await wrapper.get("[data-global-map-search]").trigger("pointerdown");
+    expect(wrapper.emitted("update:open")).toBeUndefined();
+
+    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    expect(wrapper.emitted("update:open")?.at(-1)).toEqual([false]);
+    await wrapper.setProps({ open: false });
+  });
+
   it("hides the complete search surface when map interactions are disabled", async () => {
     wrapper = mount(GlobalTransportPlanSearch, {
       props: {
@@ -295,7 +309,7 @@ describe("GlobalTransportPlanSearch", () => {
     expect(wrapper.emitted("select-line")?.[0]?.[0]).toMatchObject({ id: line14.id, code: line14.code });
   });
 
-  it("shows only place destinations in a dedicated section and emits a clicked place", async () => {
+  it("shows every geocoded destination in a dedicated section and emits a clicked place", async () => {
     const searchPlaces = vi.fn(async () => [louvrePlace, louvreAddress, louvreStation]);
     wrapper = mount(GlobalTransportPlanSearch, {
       props: {
@@ -318,11 +332,90 @@ describe("GlobalTransportPlanSearch", () => {
     expect(placeResult.text()).toContain("Musée");
     expect(placeResult.text()).not.toContain("Lieu d’intérêt");
     expect(placeResult.find('[data-global-map-place-icon="landmark"]').exists()).toBe(true);
-    expect(placeResult.text()).not.toContain("Rue de Rivoli");
-    expect(placeResult.text()).not.toContain("Louvre-Rivoli");
+    expect(wrapper.findAll('[data-global-map-search-result-type="place"]')).toHaveLength(3);
+    expect(wrapper.text()).toContain("Rue de Rivoli");
+    expect(wrapper.text()).toContain("Louvre-Rivoli");
+    expect(wrapper.findAll(".global-map-search__result-action--itinerary")).toHaveLength(3);
 
     await placeResult.trigger("click");
     expect(wrapper.emitted("select-place")?.[0]?.[0]).toEqual(louvrePlace);
+  });
+
+  it("offers the itinerary action on station, line and marker results", async () => {
+    wrapper = mount(GlobalTransportPlanSearch, {
+      props: {
+        open: true,
+        stations: [station],
+        lines: [line14],
+        markers: [savedMarker],
+        catalogReady: true,
+      },
+    });
+
+    const search = async (value: string) => {
+      await wrapper!.get("input").setValue(value);
+      await vi.advanceTimersByTimeAsync(180);
+      await wrapper!.vm.$nextTick();
+    };
+
+    await search("chatelet");
+    const stationAction = wrapper.get(".global-map-search__result-action--itinerary");
+    await stationAction.trigger("click");
+    expect(wrapper.emitted("route-to-place")?.[0]?.[0]).toMatchObject({
+      id: station.id,
+      label: station.name,
+      provider: "global-map",
+      type: "station",
+    });
+
+    await wrapper!.setProps({ open: true });
+    await search("ligne 4");
+    const lineAction = wrapper.get(".global-map-search__result-action--itinerary");
+    await lineAction.trigger("click");
+    expect(wrapper.emitted("route-to-place")?.[1]?.[0]).toMatchObject({
+      id: station.id,
+      label: `${line14.label} · ${station.name}`,
+      provider: "global-map",
+      type: "station",
+    });
+
+    await wrapper!.setProps({ open: true });
+    await search("division leclerc");
+    const markerAction = wrapper.get(".global-map-search__result-action--itinerary");
+    await markerAction.trigger("click");
+    expect(wrapper.emitted("route-to-place")?.[2]?.[0]).toMatchObject({
+      id: savedMarker.id,
+      label: savedMarker.name,
+      address: savedMarker.address,
+      provider: "global-map-marker",
+      type: "address",
+    });
+  });
+
+  it("offers a dedicated itinerary action for place destinations", async () => {
+    const searchPlaces = vi.fn(async () => [louvrePlace]);
+    wrapper = mount(GlobalTransportPlanSearch, {
+      props: {
+        open: true,
+        stations: [],
+        lines: [],
+        catalogReady: true,
+        searchPlaces,
+      },
+    });
+
+    await wrapper.get("input").setValue("louvre");
+    await vi.advanceTimersByTimeAsync(GLOBAL_TRANSPORT_PLAN_CONFIG.search.debounceMs);
+    await flushPromises();
+
+    const placeResult = wrapper.get('[data-global-map-search-result-type="place"]');
+    const routeAction = placeResult.get("[data-global-map-search-route-to-place]");
+    expect(routeAction.text()).toContain("Voir l’itinéraire");
+    expect(routeAction.attributes("aria-label")).toContain("Musée du Louvre");
+
+    await routeAction.trigger("click");
+    expect(wrapper.emitted("route-to-place")?.[0]?.[0]).toEqual(louvrePlace);
+    expect(wrapper.emitted("select-place")).toBeUndefined();
   });
 
   it("selects a place with the same keyboard navigation as stations and lines", async () => {

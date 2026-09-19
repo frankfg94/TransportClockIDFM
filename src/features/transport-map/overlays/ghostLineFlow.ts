@@ -52,6 +52,14 @@ export interface GhostLineTerminusIndicator {
   y: number;
 }
 
+export interface GhostLineFlowStationAnchor {
+  key: string;
+  stationId: string;
+  x: number;
+  y: number;
+  directionId?: string;
+}
+
 export interface GhostLineFlowModel {
   width: number;
   height: number;
@@ -65,6 +73,8 @@ export interface GhostLineFlowModel {
   chevrons: GhostLineFlowChevron[];
   exits: GhostLineExitIndicator[];
   termini: GhostLineTerminusIndicator[];
+  /** Screen-space points used by the rendered path for station overlays. */
+  stationAnchors?: GhostLineFlowStationAnchor[];
 }
 
 export interface GhostLineFlowInput {
@@ -82,6 +92,7 @@ interface ProjectedFragment {
   key: string;
   directionId?: string;
   points: ScreenPoint[];
+  stationAnchors: Array<{ stationId: string; point: ScreenPoint }>;
   order: number;
 }
 
@@ -128,6 +139,10 @@ export function createGhostLineFlowModel(
           );
           return worldToScreen(resolved, input.camera);
         });
+        const projectedStationAnchors = sourceVertices.flatMap((vertex, vertexIndex) => {
+          if (!vertex.stationId || !projected[vertexIndex]) return [];
+          return [{ stationId: vertex.stationId, point: projected[vertexIndex]! }];
+        });
 
         const candidates = chooseDirectionCandidates(
           path,
@@ -145,12 +160,16 @@ export function createGhostLineFlowModel(
           fragments.push({
             key: `${path.id}:${range.start}:${rangeIndex}`,
             points: projected,
+            stationAnchors: projectedStationAnchors,
             order: pathIndex * 10_000 + rangeIndex,
           });
         }
 
         renderCandidates.forEach((candidate, candidateIndex) => {
           const orientedPoints = candidate.reverse ? [...projected].reverse() : projected;
+          const orientedStationAnchors = candidate.reverse
+            ? [...projectedStationAnchors].reverse()
+            : projectedStationAnchors;
           const points = clipToFocusedBoardingStation
             ? clipDirectionalFragment(
               orientedPoints,
@@ -161,11 +180,13 @@ export function createGhostLineFlowModel(
             )
             : orientedPoints;
           if (points.length < 2) return;
+          const stationAnchors = orientedStationAnchors.filter((anchor) => points.includes(anchor.point));
 
           if (clipToFocusedBoardingStation) {
             fragments.push({
               key: `${path.id}:${range.start}:${rangeIndex}:focused:${candidate.direction.id}`,
               points,
+              stationAnchors,
               order: pathIndex * 10_000 + rangeIndex + candidateIndex / 100,
             });
           }
@@ -174,6 +195,7 @@ export function createGhostLineFlowModel(
             key: `${path.id}:${range.start}:${rangeIndex}:direction:${candidate.direction.id}`,
             directionId: candidate.direction.id,
             points,
+            stationAnchors,
             order: pathIndex * 10_000 + rangeIndex + candidateIndex / 100,
           });
         });
@@ -214,6 +236,9 @@ export function createGhostLineFlowModel(
     width,
     height,
   );
+  const stationAnchors = collectStationAnchors(
+    directionalFragments.length > 0 ? directionalFragments : fragments,
+  );
 
   return {
     width,
@@ -228,7 +253,32 @@ export function createGhostLineFlowModel(
     chevrons,
     exits,
     termini,
+    stationAnchors,
   };
+}
+
+function collectStationAnchors(
+  fragments: readonly ProjectedFragment[],
+): GhostLineFlowStationAnchor[] {
+  const seen = new Set<string>();
+  const result: GhostLineFlowStationAnchor[] = [];
+
+  for (const fragment of fragments) {
+    for (const anchor of fragment.stationAnchors) {
+      const key = `${anchor.stationId}:${Math.round(anchor.point.x * 100)}:${Math.round(anchor.point.y * 100)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push({
+        key: `station:${key}`,
+        stationId: anchor.stationId,
+        x: anchor.point.x,
+        y: anchor.point.y,
+        ...(fragment.directionId ? { directionId: fragment.directionId } : {}),
+      });
+    }
+  }
+
+  return result;
 }
 
 function clipDirectionalFragment(
@@ -382,7 +432,8 @@ function createExitIndicators(
       ? stationsById.get(direction.destinationStationId)
       : undefined;
     const destinationScreen = destination
-      ? worldToScreen({ x: destination.worldX, y: destination.worldY }, camera)
+      ? findProjectedStationPoint(fragments, direction.id, destination.id)
+        ?? worldToScreen({ x: destination.worldX, y: destination.worldY }, camera)
       : undefined;
     if (destinationScreen && isInsideViewport(destinationScreen, width, height)) continue;
 
@@ -428,10 +479,8 @@ function createTerminusIndicators(
       : undefined;
     if (!destination) continue;
 
-    const destinationScreen = worldToScreen(
-      { x: destination.worldX, y: destination.worldY },
-      camera,
-    );
+    const destinationScreen = findProjectedStationPoint(fragments, direction.id, destination.id)
+      ?? worldToScreen({ x: destination.worldX, y: destination.worldY }, camera);
     if (!isInsideViewport(destinationScreen, width, height)) continue;
     if (!fragments.some((fragment) => fragment.directionId === direction.id)) continue;
 
@@ -443,6 +492,21 @@ function createTerminusIndicators(
     });
   }
 
+  return result;
+}
+
+function findProjectedStationPoint(
+  fragments: readonly ProjectedFragment[],
+  directionId: string,
+  stationId: string,
+): ScreenPoint | undefined {
+  let result: ScreenPoint | undefined;
+  for (const fragment of fragments) {
+    if (fragment.directionId !== directionId) continue;
+    for (const anchor of fragment.stationAnchors) {
+      if (anchor.stationId === stationId) result = anchor.point;
+    }
+  }
   return result;
 }
 

@@ -240,7 +240,7 @@ onBeforeUnmount(() => {
           <span>
             <strong>{{ suggestion.label }}</strong>
             <small v-if="suggestion.provider === 'address-book'">
-              {{ t("nearbyStations.travel.savedAddress") }}<template v-if="suggestion.address"> · {{ suggestion.address }}</template><template v-if="suggestion.addressBookPrimary"> · {{ t("addressBook.primary") }}</template>
+              {{ t("nearbyStations.travel.savedAddress") }}<template v-if="suggestion.address"> · {{ suggestion.address }}</template><template v-if="suggestion.addressBookPrimary"> · {{ t("addressBook.primary") }}</template><template v-if="suggestion.addressBookWorkplace"> · {{ t("addressBook.workplace") }}</template>
             </small>
             <small v-else-if="suggestion.type === 'station'">{{ t("nearbyStations.travel.stationType") }}</small>
             <small v-else-if="suggestion.type === 'place'">{{ t("nearbyStations.travel.placeType") }}</small>

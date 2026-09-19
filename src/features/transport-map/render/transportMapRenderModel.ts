@@ -11,6 +11,7 @@ import type {
   TransportMapTrafficImpactKind,
 } from "../contracts/renderer";
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../config/globalTransportPlanConfig";
+import { cityZoneLodKey, selectCityZonesForZoom } from "../iris/servedCityZones";
 import { worldToLonLat, type LonLatPoint, type WorldPoint } from "../geo/coordinateKernel";
 import {
   PreparedWorldPathGeometryCache,
@@ -113,6 +114,7 @@ export interface TransportMapBinaryPathPacket {
 /** Backend-neutral data prepared from TransportMapRenderScene. */
 export interface TransportMapPreparedRenderModel {
   readonly walkingIsochrones?: TransportMapRenderScene["walkingIsochrones"];
+  readonly servedCityZones?: TransportMapRenderScene["servedCityZones"];
   readonly sceneVersion: number;
   /** Legacy alias for the base path identity. */
   readonly pathIdentity?: string;
@@ -179,6 +181,9 @@ export class TransportMapRenderModelBuilder {
   private previousEntrances: readonly TransportMapEntranceRenderRecord[] = [];
   private previousLabelsKey?: string;
   private previousLabels: readonly TransportMapLabelRenderRecord[] = [];
+  private previousCityZonesSource?: TransportMapRenderScene["servedCityZones"];
+  private previousCityZonesLodKey?: string;
+  private previousCityZones: NonNullable<TransportMapRenderScene["servedCityZones"]> = [];
   private previousModel?: TransportMapPreparedRenderModel;
   private previousModelKey?: string;
   private previousPathDependencyKey?: string;
@@ -323,7 +328,16 @@ export class TransportMapRenderModelBuilder {
       this.labelsGeneration += 1;
     }
     const labelKey = `labels-${this.labelsGeneration}`;
-    const modelKey = `${pathKey}|${markerKey}|${labelKey}|iso:${this.identityToken(scene.walkingIsochrones)}|iso-hover:${stableIdList(scene.hoveredIsochroneIds)}`;
+    const currentCityZoneLodKey = cityZoneLodKey(scene.servedCityZones, camera.zoom);
+    if (
+      this.previousCityZonesSource !== scene.servedCityZones ||
+      this.previousCityZonesLodKey !== currentCityZoneLodKey
+    ) {
+      this.previousCityZonesSource = scene.servedCityZones;
+      this.previousCityZonesLodKey = currentCityZoneLodKey;
+      this.previousCityZones = selectCityZonesForZoom(scene.servedCityZones, camera.zoom);
+    }
+    const modelKey = `${pathKey}|${markerKey}|${labelKey}|iso:${this.identityToken(scene.walkingIsochrones)}|iso-hover:${stableIdList(scene.hoveredIsochroneIds)}|served-cities:${this.identityToken(this.previousCityZones)}|city-lod:${currentCityZoneLodKey}`;
     if (this.previousModel && this.previousModelKey === modelKey) return this.previousModel;
 
     const pathBundle = this.buildPaths(
@@ -337,6 +351,7 @@ export class TransportMapRenderModelBuilder {
     const labels = this.buildLabels(labelKey, scene, camera);
     const model: TransportMapPreparedRenderModel = Object.freeze({
       walkingIsochrones: scene.walkingIsochrones,
+      servedCityZones: this.previousCityZones,
       sceneVersion: this.sceneIndex.version,
       pathIdentity: `base-path-${this.basePathGeneration}`,
       basePathIdentity: `base-path-${this.basePathGeneration}`,
@@ -366,6 +381,8 @@ export class TransportMapRenderModelBuilder {
     this.previousStationsSource = undefined;
     this.previousQuaysSource = undefined;
     this.previousEntrancesSource = undefined;
+    this.previousCityZonesSource = undefined;
+    this.previousCityZonesLodKey = undefined;
     this.previousPathDependencyKey = undefined;
     this.previousBasePathDependencyKey = undefined;
     this.previousTrafficPathDependencyKey = undefined;
@@ -384,6 +401,7 @@ export class TransportMapRenderModelBuilder {
     this.previousQuays = [];
     this.previousEntrances = [];
     this.previousLabels = [];
+    this.previousCityZones = [];
   }
 
   private identityToken(value: object | undefined): string {
@@ -951,6 +969,7 @@ function isEmptyTransportMapScene(scene: TransportMapRenderScene): boolean {
     (scene.interruptedStationIds?.length ?? 0) === 0 &&
     (scene.disturbedStationIds?.length ?? 0) === 0 &&
     (scene.trafficPathSpans?.length ?? 0) === 0 &&
+    (scene.servedCityZones?.length ?? 0) === 0 &&
     scene.visibleModeMask === 0;
 }
 
@@ -963,6 +982,7 @@ function isEmptyTransportMapModel(model: TransportMapPreparedRenderModel): boole
     model.stations.length === 0 &&
     model.quays.length === 0 &&
     model.entrances.length === 0 &&
+    (model.servedCityZones?.length ?? 0) === 0 &&
     model.labels.length === 0;
 }
 

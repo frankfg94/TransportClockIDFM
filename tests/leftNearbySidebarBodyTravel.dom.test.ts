@@ -1,9 +1,11 @@
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
+import { defineComponent, h, ref } from "vue";
 import LeftNearbySidebarBodyTravel from "../src/features/nearby-stations/LeftNearbySidebarBodyTravel.vue";
 import type { NearbyJourneySection } from "../src/features/nearby-stations/nearbyHeavyTransports";
 import type { GlobalMapMode } from "../src/features/transport-map/contracts/manifest";
 import type { TravelRoute } from "../src/features/nearby-stations/useTravelRoutes";
+import { useTravelTurbo } from "../src/features/nearby-stations/useTravelTurbo";
 
 const destination = { id: "station:destination", label: "Destination", lat: 48.8, lon: 2.3 };
 
@@ -130,6 +132,48 @@ describe("LeftNearbySidebarBodyTravel", () => {
     expect(lineButtons).toHaveLength(2);
     expect(lineButtons.every((button) => button.attributes("aria-expanded") === "false")).toBe(true);
     expect(wrapper.findAll(".left-nearby-travel__stations")).toHaveLength(0);
+  });
+
+  it("reopens Turbo when the active route object changes under the same id", async () => {
+    const walkingOnly: TravelRoute = {
+      ...route,
+      durationSeconds: 15 * 60,
+      sections: [{ ...walking, durationSeconds: 15 * 60 }],
+      transitSections: [],
+    };
+    const analyze = vi.fn(async ({ route: analyzedRoute }: { route: TravelRoute }) => analyzedRoute.transitSections.length
+      ? { status: "partial" as const, analyzedAt: "2026-08-20T20:00:00Z", proposals: [], winners: {}, currentOptimal: {} }
+      : { status: "unavailable" as const, analyzedAt: "2026-08-20T20:00:00Z", proposals: [], winners: {}, currentOptimal: {} });
+    let setRoutes!: (routes: TravelRoute[]) => void;
+    const wrapper = mount(defineComponent({
+      setup() {
+        const routes = ref<TravelRoute[]>([route]);
+        setRoutes = (nextRoutes) => { routes.value = nextRoutes; };
+        const turbo = useTravelTurbo({ routes, departureDateTime: ref(""), provider: { analyze } });
+        return () => h(LeftNearbySidebarBodyTravel, {
+          originLabel: "Origine",
+          destination,
+          routes: routes.value,
+          turbo,
+          detailsVisible: true,
+          selectedRouteId: route.id,
+          availableModes: ["BUS", "TRAM"] satisfies GlobalMapMode[],
+          allowedModes: ["BUS", "TRAM"] satisfies GlobalMapMode[],
+          modeLabel: (mode: GlobalMapMode) => mode,
+        });
+      },
+    }), { global: { stubs: { NearbyAddressSearch: true, LineIconBadge: true } } });
+
+    await wrapper.get(".left-nearby-travel__route-compact").trigger("click");
+    await flushPromises();
+    expect(analyze).toHaveBeenCalledTimes(1);
+
+    setRoutes([walkingOnly]);
+    await flushPromises();
+
+    expect(analyze).toHaveBeenCalledTimes(2);
+    expect(analyze.mock.calls[1]![0].route.transitSections).toHaveLength(0);
+    wrapper.unmount();
   });
 
   it("can hide route line icons while keeping each line code visible", async () => {

@@ -1,8 +1,12 @@
 import { COORDINATE_SYSTEM, type Layer, type Position } from "@deck.gl/core";
 import { GeoJsonLayer, PathLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import { PathStyleExtension } from "@deck.gl/extensions";
-import type { TransportMapRenderFrame } from "../contracts/renderer";
+import type {
+  TransportMapRenderFrame,
+  TransportMapServedCityZone,
+} from "../contracts/renderer";
 import type { GlobalIsochroneSurface } from "../isochrones/contracts";
+import { globalIsochroneZoneIndex, WALKING_ISOCHRONE_ZONE_COLORS } from "../isochrones/palette";
 import type {
   TransportMapEntranceRenderRecord,
   TransportMapLabelRenderRecord,
@@ -43,6 +47,35 @@ const binaryPathDataByPacket = new WeakMap<
 
 /** Create the small, stable Deck layer set owned by the next experience. */
 const isochroneGeoJsonBySurfaces = new WeakMap<readonly GlobalIsochroneSurface[], object>();
+const servedCityGeoJsonByZones = new WeakMap<readonly TransportMapServedCityZone[], object>();
+
+interface AdministrativeBoundaryRecord {
+  path: ReadonlyArray<readonly [number, number]>;
+  color: readonly [number, number, number, number];
+}
+
+// Deck compares data by identity. A transport hover/chunk update must not
+// retessellate all administrative paths or upload their attributes again.
+const administrativeDataByZones = new WeakMap<readonly TransportMapServedCityZone[], {
+  boundaries: AdministrativeBoundaryRecord[];
+  innerBoundaries: AdministrativeBoundaryRecord[];
+  labels: TransportMapServedCityZone[];
+}>();
+
+function administrativeData(zones: readonly TransportMapServedCityZone[]) {
+  let prepared = administrativeDataByZones.get(zones);
+  if (!prepared) {
+    prepared = {
+      boundaries: zones.flatMap((zone) => zone.boundaryPaths.map((path) => ({ path, color: zone.borderColor }))),
+      innerBoundaries: zones.flatMap((zone) => (zone.innerBoundaryPaths ?? []).map((path) => ({
+        path, color: zone.innerBoundaryColor ?? [100, 116, 139, 112],
+      }))),
+      labels: zones.filter((zone) => zone.showLabel !== false),
+    };
+    administrativeDataByZones.set(zones, prepared);
+  }
+  return prepared;
+}
 
 export function createDeckTransportLayers(
   frame: TransportMapRenderFrame,
@@ -51,10 +84,16 @@ export function createDeckTransportLayers(
   const model = frame.model;
   const layers: Layer[] = [];
   if (model.walkingIsochrones?.length) {
+    const renderSurfaces = [...model.walkingIsochrones].sort((left, right) => right.minutes - left.minutes || left.id.localeCompare(right.id));
     let data = isochroneGeoJsonBySurfaces.get(model.walkingIsochrones);
     if (!data) {
-      data = { type: "FeatureCollection", features: model.walkingIsochrones.map((surface) => ({
-        type: "Feature", id: surface.id, properties: { mode: surface.mode, minutes: surface.minutes, surfaceId: surface.id }, geometry: surface.geometry,
+      data = { type: "FeatureCollection", features: renderSurfaces.map((surface) => ({
+        type: "Feature", id: surface.id, properties: {
+          mode: surface.mode,
+          minutes: surface.minutes,
+          surfaceId: surface.id,
+          zoneIndex: globalIsochroneZoneIndex(surface, model.walkingIsochrones!),
+        }, geometry: surface.geometry,
       })) };
       isochroneGeoJsonBySurfaces.set(model.walkingIsochrones, data);
     }
@@ -63,11 +102,14 @@ export function createDeckTransportLayers(
       id: "transport-walking-isochrones", data,
       coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
       filled: true, stroked: true, pickable: false,
-      getFillColor: [59, 130, 246, 36],
-      getLineColor: (feature: { properties?: { surfaceId?: string } }) =>
-        feature.properties?.surfaceId && hoveredSurfaceIds.has(feature.properties.surfaceId)
-          ? [29, 78, 216, 235]
-          : [59, 130, 246, 153],
+      getFillColor: (feature: { properties?: { zoneIndex?: number } }) =>
+        WALKING_ISOCHRONE_ZONE_COLORS[feature.properties?.zoneIndex ?? 0]?.deckFill ?? [34, 197, 94, 74],
+      getLineColor: (feature: { properties?: { surfaceId?: string; zoneIndex?: number } }) => {
+        const colors = WALKING_ISOCHRONE_ZONE_COLORS[feature.properties?.zoneIndex ?? 0] ?? WALKING_ISOCHRONE_ZONE_COLORS[0];
+        return feature.properties?.surfaceId && hoveredSurfaceIds.has(feature.properties.surfaceId)
+          ? [...colors.deckStroke.slice(0, 3), 235]
+          : colors.deckStroke;
+      },
       getLineWidth: hoveredSurfaceIds.size
         ? (feature: { properties?: { surfaceId?: string } }) =>
             feature.properties?.surfaceId && hoveredSurfaceIds.has(feature.properties.surfaceId) ? 2 : 1
@@ -75,6 +117,10 @@ export function createDeckTransportLayers(
       lineWidthUnits: "pixels", lineWidthMinPixels: 1,
       ...(beforeId ? { beforeId } : {}),
     } as never));
+  }
+  if (model.servedCityZones?.length) {
+    layers.push(createServedCityFillLayer(model.servedCityZones, beforeId));
+    layers.push(...createServedCityBoundaryLayers(model.servedCityZones, beforeId));
   }
   if (model.basePaths.length) {
     layers.push(createPathLayer(
@@ -107,7 +153,142 @@ export function createDeckTransportLayers(
   if (model.quays.length) layers.push(createQuayLayer(model.quays, beforeId));
   if (model.entrances.length) layers.push(createEntranceLayer(model.entrances, beforeId));
   if (model.labels.length) layers.push(createLabelLayer(model.labels, beforeId));
+  // City names are deliberately last: station and entrance labels must not
+  // visually cover the context the open "Villes desservies" accordion adds.
+  const labeledCityZones = model.servedCityZones ? administrativeData(model.servedCityZones).labels : [];
+  if (labeledCityZones.length) layers.push(createServedCityLabelLayer(labeledCityZones, beforeId));
   return layers;
+}
+
+function createServedCityFillLayer(
+  zones: readonly TransportMapServedCityZone[],
+  beforeId: string | undefined,
+): Layer {
+  let data = servedCityGeoJsonByZones.get(zones);
+  if (!data) {
+    data = {
+      type: "FeatureCollection",
+      features: zones.map((zone) => ({
+        type: "Feature",
+        id: zone.id,
+        properties: { fillColor: zone.fillColor },
+        geometry: zone.geometry,
+      })),
+    };
+    servedCityGeoJsonByZones.set(zones, data);
+  }
+  return new GeoJsonLayer({
+    id: "transport-served-city-zones",
+    data,
+    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+    filled: true,
+    stroked: false,
+    pickable: false,
+    getFillColor: (feature: { properties?: { fillColor?: readonly [number, number, number, number] } }) =>
+      feature.properties?.fillColor ?? [0, 0, 0, 0],
+    ...(beforeId ? { beforeId } : {}),
+  } as never);
+}
+
+function createServedCityBoundaryLayers(
+  zones: readonly TransportMapServedCityZone[],
+  beforeId: string | undefined,
+): Layer[] {
+  const { boundaries: data, innerBoundaries: innerData } = administrativeData(zones);
+  if (data.length === 0 && innerData.length === 0) return [];
+
+  const commonProps = {
+    data,
+    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+    widthUnits: "pixels" as const,
+    widthMinPixels: 1,
+    pickable: false,
+    getPath: (record: AdministrativeBoundaryRecord) => record.path as Position[],
+    getColor: (record: AdministrativeBoundaryRecord) => record.color,
+    ...(beforeId ? { beforeId } : {}),
+  };
+
+  const layers: Layer[] = [];
+  if (innerData.length > 0) {
+    layers.push(new PathLayer({
+      ...commonProps,
+      data: innerData,
+      id: "transport-served-city-inner-boundaries",
+      getWidth: () => 1,
+      extensions: [new PathStyleExtension({ dash: true, highPrecisionDash: true })],
+      getDashArray: () => [3, 5],
+      dashJustified: false,
+      jointRounded: true,
+      capRounded: true,
+    } as never));
+  }
+  if (data.length > 0) {
+    layers.push(
+      new PathLayer({
+      ...commonProps,
+      id: "transport-served-city-boundary-halo",
+      getColor: (record: AdministrativeBoundaryRecord) => withAlpha(record.color, 82),
+      getWidth: () => 8,
+      jointRounded: true,
+      capRounded: true,
+      } as never),
+      new PathLayer({
+        ...commonProps,
+        id: "transport-served-city-boundaries",
+        getWidth: () => 2.5,
+        extensions: [new PathStyleExtension({ dash: true, highPrecisionDash: true })],
+        getDashArray: () => [7, 5],
+        dashJustified: false,
+        jointRounded: true,
+        capRounded: true,
+      } as never),
+    );
+  }
+  return layers;
+}
+
+function createServedCityLabelLayer(
+  zones: readonly TransportMapServedCityZone[],
+  beforeId: string | undefined,
+): Layer {
+  return new TextLayer<TransportMapServedCityZone>({
+    id: "transport-served-city-labels",
+    data: zones,
+    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+    billboard: true,
+    sizeUnits: "pixels",
+    pickable: false,
+    background: true,
+    getBackgroundColor: () => [255, 255, 255, 232],
+    getBorderColor: (zone: TransportMapServedCityZone) => withAlpha(zone.borderColor, 220),
+    getBorderWidth: () => 1.5,
+    backgroundBorderRadius: 6,
+    backgroundPadding: [7, 4],
+    characterSet: "auto",
+    fontFamily: "system-ui, sans-serif",
+    fontWeight: 850,
+    fontSettings: { sdf: true, fontSize: 192, buffer: 16, radius: 48, smoothing: 0.22 },
+    outlineWidth: TRANSPORT_LABEL_SDF_OUTLINE_WIDTH,
+    outlineColor: TRANSPORT_LABEL_OUTLINE_COLOR,
+    getPosition: (zone: TransportMapServedCityZone) => zone.centroid as Position,
+    getPixelOffset: (zone: TransportMapServedCityZone) => zone.labelPixelOffset,
+    getText: (zone: TransportMapServedCityZone) => zone.name,
+    getSize: () => 18,
+    getColor: (zone: TransportMapServedCityZone) => zone.labelColor,
+    getTextAnchor: () => "middle",
+    getAlignmentBaseline: () => "center",
+    // These labels are contextual annotations, so keep them visible above
+    // station/route geometry even when their ground coordinates overlap.
+    parameters: { depthTest: false },
+    ...(beforeId ? { beforeId } : {}),
+  } as never);
+}
+
+function withAlpha(
+  color: readonly [number, number, number, number],
+  alpha: number,
+): [number, number, number, number] {
+  return [color[0], color[1], color[2], alpha];
 }
 
 function createPathLayer(

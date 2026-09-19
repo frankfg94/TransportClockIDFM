@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
     places: { value: [] },
     isLoading: { value: false },
     error: { value: undefined as Error | undefined },
+    errorSource: { value: undefined as "verdict" | "places" | "routes" | undefined },
   },
 }));
 
@@ -61,6 +62,8 @@ afterEach(() => {
   vi.clearAllMocks();
   mocks.routeState.query = {};
   mocks.nearby.selectedPlace.value = undefined;
+  mocks.score.error.value = undefined;
+  mocks.score.errorSource.value = undefined;
   mocks.useNearbyStations.mockReturnValue(mocks.nearby);
   mocks.useNearbyHeavyTransports.mockReturnValue(mocks.heavy);
   mocks.useNearbyNeighborhoodScore.mockReturnValue(mocks.score);
@@ -91,8 +94,8 @@ describe("NearbyNeighborhoodScorePage", () => {
             template: "<a :href='to'><slot /></a>",
           },
           NearbyNeighborhoodScoreCard: {
-            props: ["directoryUrl", "originLabel"],
-            template: "<div data-testid='score-card' :data-directory='directoryUrl' :data-origin='originLabel' />",
+            props: ["directoryUrl", "originLabel", "error"],
+            template: "<div data-testid='score-card' :data-directory='directoryUrl' :data-origin='originLabel' :data-error='error' />",
           },
         },
       },
@@ -112,6 +115,31 @@ describe("NearbyNeighborhoodScorePage", () => {
       "/nearby-stations?lat=48.76591&lon=2.26821",
     );
     expect(wrapper.get("[data-testid='score-card']").attributes("data-directory")).toContain("annuary=");
+    wrapper.unmount();
+  });
+
+  it("names the unavailable route source in the partial-error banner", () => {
+    mocks.routeState.query = {
+      lat: "48.76591",
+      lon: "2.26821",
+      address: "Adresse test",
+    };
+    mocks.score.error.value = new Error("navitia unavailable");
+    mocks.score.errorSource.value = "routes";
+
+    const wrapper = mount(NearbyNeighborhoodScorePage, {
+      global: {
+        stubs: {
+          NuxtLink: true,
+          NearbyNeighborhoodScoreCard: {
+            props: ["error"],
+            template: "<div data-testid='score-card' :data-error='error' />",
+          },
+        },
+      },
+    });
+
+    expect(wrapper.get("[data-testid='score-card']").attributes("data-error")).toContain("itinéraires de transport (Navitia)");
     wrapper.unmount();
   });
 });

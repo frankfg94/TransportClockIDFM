@@ -22,6 +22,7 @@ export function createNavitiaTravelRoutesProvider(): TravelRoutesProvider {
         count: request.count ?? 16,
         includeDisruptions: request.includeDisruptions ?? false,
         includeGeoJson: request.includeGeoJson ?? false,
+        allowedModes: request.allowedModes ? [...request.allowedModes].sort() : undefined,
       });
       const cached = journeyCache.get(key);
       if (cached) return cached;

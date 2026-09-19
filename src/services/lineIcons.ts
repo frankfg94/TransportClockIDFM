@@ -35,6 +35,7 @@ const OFFICIAL_LINE_IDENTITIES: Record<
   "rer-b": { family: "RER", lineCode: "C01743" },
   "rer-c": { family: "RER", lineCode: "C01727" },
   "tram-t6": { family: "TRAM", lineCode: "C01794" },
+  "tram-t10": { family: "TRAM", lineCode: "C02528" },
   "bus-38": { family: "BUS", lineCode: "C01083" },
   "bus-68": { family: "BUS", lineCode: "C01104" },
   "bus-162": { family: "BUS", lineCode: "C01184" },
@@ -49,6 +50,7 @@ const OFFICIAL_LINE_IDENTITIES: Record<
   "noctilien-n66": { family: "NOCTILIEN", lineCode: "C01807" },
   "noctilien-n123": { family: "NOCTILIEN", lineCode: "C02659" },
   t1: { family: "TRAM", lineCode: "C01389" },
+  t10: { family: "TRAM", lineCode: "C02528" },
   c01389: { family: "TRAM", lineCode: "C01389" },
   c02404: { family: "BUS", lineCode: "C01389" },
 };
@@ -71,7 +73,6 @@ const RATP_PICTO_VERSIONS: Partial<Record<TransitFamily, string>> = {
 const RATP_LINE_PICTO_VERSIONS: Record<string, string> = {
   C01727: "1788059132",
 };
-const RATP_BUS_ICON_VERSION = "1496915831";
 
 export function inferTransitFamilyFromLineIdentity(
   source: LineIconSource,
@@ -99,9 +100,10 @@ export function createRatpLineIconUrls(source: LineIconSource): string[] {
   const legacyNoctilienIcon = family === "NOCTILIEN"
     ? NOCTILIEN_LEGACY_ICON_ASSETS[displayCode?.toLowerCase() ?? ""]
     : undefined;
-  const legacyBusIcon = family === "BUS" && isSafeIconCode(displayCode)
-    ? `https://www.ratp.fr/sites/default/files/lines-assets/picto/busratp/picto_busratp_ligne-${displayCode}.${RATP_BUS_ICON_VERSION}.svg`
-    : undefined;
+  // Bus and Noctilien assets are keyed by the canonical IDFM line identity.
+  // Their display numbers are not unique asset keys (the old "ligne-14"
+  // endpoint even returned the TVM artwork), so never use them as a fallback.
+  const canUseDisplayCodeFallback = family !== "BUS" && family !== "NOCTILIEN";
   const version = RATP_LINE_PICTO_VERSIONS[lineCode] ?? RATP_PICTO_VERSIONS[family];
 
   return Array.from(
@@ -110,12 +112,11 @@ export function createRatpLineIconUrls(source: LineIconSource): string[] {
         ...(legacyNoctilienIcon
           ? [`https://www.ratp.fr/sites/default/files/lines-assets/picto/noctilien/${legacyNoctilienIcon}`]
           : []),
-        ...(legacyBusIcon ? [legacyBusIcon] : []),
         ...modePaths.flatMap((modePath) => [
           ...(version
             ? [
                 `https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/${modePath}/picto-ligne-LIGIDFM${lineCode}.${version}.svg`,
-                ...(displayCode
+                ...(displayCode && canUseDisplayCodeFallback
                   ? [
                       `https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/${modePath}/picto-ligne-${displayCode}.${version}.svg`,
                     ]
@@ -123,7 +124,7 @@ export function createRatpLineIconUrls(source: LineIconSource): string[] {
               ]
             : []),
           `https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/${modePath}/picto-ligne-LIGIDFM${lineCode}.svg`,
-          ...(displayCode
+          ...(displayCode && canUseDisplayCodeFallback
             ? [
                 `https://www.ratp.fr/sites/default/files/lines-assets/picto-v2/${modePath}/picto-ligne-${displayCode}.svg`,
               ]
@@ -132,10 +133,6 @@ export function createRatpLineIconUrls(source: LineIconSource): string[] {
       ],
     ),
   );
-}
-
-function isSafeIconCode(value?: string): value is string {
-  return Boolean(value && /^[0-9A-Za-z-]+$/u.test(value));
 }
 
 function resolveLineIconIdentity(source: LineIconSource): LineIconIdentity {
@@ -212,8 +209,8 @@ function getRatpModePaths(family: TransitFamily): string[] {
     return ["tramway", "tram"];
   }
 
-  if (family === "NOCTILIEN") {
-    return ["noctilien"];
+  if (family === "BUS" || family === "NOCTILIEN") {
+    return ["bus"];
   }
 
   if (family === "TRANSILIEN") {
@@ -222,5 +219,3 @@ function getRatpModePaths(family: TransitFamily): string[] {
 
   return [];
 }
-
-

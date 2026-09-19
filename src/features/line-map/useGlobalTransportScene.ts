@@ -5,6 +5,7 @@ import type {
   GlobalMapPath,
   GlobalMapStation,
 } from "../transport-map/contracts/manifest";
+import { GLOBAL_MAP_MODE_ORDER } from "../transport-map/contracts/manifest";
 import type { TransportMapNetwork, TransportMapViewportResult } from "../transport-map/contracts/network";
 import type {
   GlobalMapQuayMarker,
@@ -88,12 +89,85 @@ export interface UseGlobalTransportSceneOptions {
   getProgrammaticCameraFlightActive?: () => boolean;
   getTrafficState: () => GlobalTransportSceneTrafficState;
   getSidebarPreviewLineId: () => string | undefined;
+  /** Optional URL scope used by the nearby-summary global-map handoff. */
+  getLineIdsToKeep?: () => readonly string[];
+  /** Optional off-viewport station scope used by the nearby-summary handoff. */
+  getStationIdsToKeep?: () => readonly string[];
   showBusOnlyStationNodesInOverview?: () => boolean;
   recordTiming?: (
     kind: TransportMapTraceEventType,
     durationMs: number,
     metadata?: TransportMapTraceMetadata,
   ) => void;
+}
+
+function lineModeBit(mode: GlobalMapMode): number {
+  const index = GLOBAL_MAP_MODE_ORDER.indexOf(mode);
+  return index >= 0 ? 1 << index : 0;
+}
+
+function restrictStationsToLineIds(
+  stations: readonly GlobalMapStation[],
+  lineIds: readonly string[],
+): GlobalMapStation[] {
+  if (lineIds.length === 0) return [...stations];
+  const allowed = new Set(lineIds);
+  return stations.flatMap((station) => {
+    const keptLineIds = station.lineIds.filter((lineId) => allowed.has(lineId));
+    return keptLineIds.length > 0 ? [{ ...station, lineIds: keptLineIds }] : [];
+  });
+}
+
+function restrictPathsToLineIds(
+  paths: readonly GlobalMapPath[],
+  lineIds: readonly string[],
+): GlobalMapPath[] {
+  if (lineIds.length === 0) return [...paths];
+  const allowed = new Set(lineIds);
+  return paths.filter((path) => allowed.has(path.lineId));
+}
+
+function restrictSceneToLineIds(
+  scene: TransportMapRenderScene,
+  lineIds: readonly string[],
+): TransportMapRenderScene {
+  if (lineIds.length === 0) return scene;
+
+  const allowed = new Set(lineIds);
+  const lines = scene.lines.filter((line) => allowed.has(line.id));
+  const stations = restrictStationsToLineIds(scene.stations, lineIds);
+  const paths = restrictPathsToLineIds(scene.paths, lineIds);
+  const stationIds = new Set(stations.map((station) => station.id));
+  const pathIds = new Set(paths.map((path) => path.id));
+  const lineMask = lines.reduce((mask, line) => mask | lineModeBit(line.mode), 0);
+
+  return {
+    ...scene,
+    lines,
+    paths,
+    stations,
+    quays: scene.quays?.filter((quay) => stationIds.has(quay.stationId)),
+    entrances: scene.entrances?.filter((entrance) => stationIds.has(entrance.stationId)),
+    entranceStationIds: (scene.entranceStationIds ?? []).filter((stationId) => stationIds.has(stationId)),
+    activeLineId: scene.activeLineId && allowed.has(scene.activeLineId) ? scene.activeLineId : undefined,
+    activeStationId: scene.activeStationId && stationIds.has(scene.activeStationId)
+      ? scene.activeStationId
+      : undefined,
+    hoveredStationId: scene.hoveredStationId && stationIds.has(scene.hoveredStationId)
+      ? scene.hoveredStationId
+      : undefined,
+    hoveredLineId: scene.hoveredLineId && allowed.has(scene.hoveredLineId)
+      ? scene.hoveredLineId
+      : undefined,
+    ghostLineIds: (scene.ghostLineIds ?? []).filter((lineId) => allowed.has(lineId)),
+    selectedStationIds: scene.selectedStationIds.filter((stationId) => stationIds.has(stationId)),
+    visibleModeMask: scene.visibleModeMask | lineMask,
+    interruptionLineIds: (scene.interruptionLineIds ?? []).filter((lineId) => allowed.has(lineId)),
+    disturbanceLineIds: (scene.disturbanceLineIds ?? []).filter((lineId) => allowed.has(lineId)),
+    interruptedStationIds: (scene.interruptedStationIds ?? []).filter((stationId) => stationIds.has(stationId)),
+    disturbedStationIds: (scene.disturbedStationIds ?? []).filter((stationId) => stationIds.has(stationId)),
+    trafficPathSpans: (scene.trafficPathSpans ?? []).filter((span) => pathIds.has(span.pathId)),
+  };
 }
 
 function isBusOnlyOverviewStation(
@@ -203,7 +277,7 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
       .filter((lineId) => lineId !== activeLineId);
   });
 
-  const renderStations = computed<GlobalMapStation[]>(() => {
+  const baseRenderStations = computed<GlobalMapStation[]>(() => {
     const startedAt = options.recordTiming ? nowMs() : Number.NaN;
     try {
       const network = options.getNetwork();
@@ -219,6 +293,10 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
               .map((stationId) => network?.stationsById.get(stationId))
               .filter((station): station is GlobalMapStation => Boolean(station))
           : [];
+      const nearbyStationIds = new Set(options.getStationIdsToKeep?.() ?? []);
+      const nearbyStations = [...nearbyStationIds]
+        .map((stationId) => network?.stationsById.get(stationId))
+        .filter((station): station is GlobalMapStation => Boolean(station));
       const focusedLine = options.getActiveLine();
       if (!focusedLine) {
         const selectedStationIds = new Set(options.getSelectedStationIds());
@@ -226,10 +304,11 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
           ...contextStationIds,
           ...selectedStationIds,
           ...hoveredGhostStations.map((station) => station.id),
+          ...nearbyStationIds,
         ]);
         const overviewStations = [
           ...new Map(
-            [...viewport.stations, ...contextStations, ...hoveredGhostStations].map((station) => [
+            [...viewport.stations, ...contextStations, ...hoveredGhostStations, ...nearbyStations].map((station) => [
               station.id,
               station,
             ]),
@@ -254,7 +333,7 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
           station.id === options.getActiveStationId(),
       );
       const byId = new Map(
-        [...focusedStations, ...contextStations, ...hoveredGhostStations].map((station) => [
+        [...focusedStations, ...contextStations, ...hoveredGhostStations, ...nearbyStations].map((station) => [
           station.id,
           station,
         ]),
@@ -271,6 +350,11 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
       recordSceneTiming(options, "render_stations_compute", startedAt);
     }
   });
+
+  const renderStations = computed<GlobalMapStation[]>(() => restrictStationsToLineIds(
+    baseRenderStations.value,
+    options.getLineIdsToKeep?.() ?? [],
+  ));
 
   const staticLineMetadataPaths = computed<GlobalMapPath[]>(() => {
     const lineId = options.getActiveLine()?.id;
@@ -321,7 +405,7 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
     }
   });
 
-  const renderPaths = computed<GlobalMapPath[]>(() => {
+  const baseRenderPaths = computed<GlobalMapPath[]>(() => {
     const startedAt = options.recordTiming ? nowMs() : Number.NaN;
     try {
       if (!options.getActiveLine()) return [...options.getViewport().paths];
@@ -352,6 +436,11 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
       recordSceneTiming(options, "render_paths_compute", startedAt);
     }
   });
+
+  const renderPaths = computed<GlobalMapPath[]>(() => restrictPathsToLineIds(
+    baseRenderPaths.value,
+    options.getLineIdsToKeep?.() ?? [],
+  ));
 
   const activeLineView = computed<GlobalMapLine | undefined>(() => {
     const line = options.getActiveLine();
@@ -507,9 +596,10 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
       const scene = snapshot
         ? { ...snapshot, interactionActive: options.getInteractionActive() }
         : liveRenderScene.value;
+      const scopedScene = restrictSceneToLineIds(scene, options.getLineIdsToKeep?.() ?? []);
       return options.getWalkingIsochrones || options.getHoveredIsochroneIds
         ? {
-            ...scene,
+            ...scopedScene,
             ...(options.getWalkingIsochrones
               ? { walkingIsochrones: options.getWalkingIsochrones() }
               : {}),
@@ -517,7 +607,7 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
               ? { hoveredIsochroneIds: options.getHoveredIsochroneIds() }
               : {}),
           }
-        : scene;
+        : scopedScene;
     } finally {
       recordSceneTiming(options, "render_scene_resolve", startedAt);
     }

@@ -19,6 +19,7 @@
         <img
           v-for="tile in coverTiles"
           :key="tile.id"
+          v-memo="[tile, props.layer, props.basemapStyle, props.contrast]"
           :src="tile.url"
           alt=""
           class="nearby-stations-basemap__cover-tile"
@@ -304,8 +305,10 @@ function settleTile(tileId: string, generation: number, loaded: boolean): void {
   if (loaded) loadedTileIds.add(tileId);
   else failedTileIds.add(tileId);
   // Keep counters non-reactive: hundreds of image events must produce only one
-  // Vue update, when the complete fallback mosaic can be shown atomically.
-  if (failedTileIds.size === 0 && loadedTileIds.size === coverTiles.value.length) {
+  // Vue update. A failed tile is still a settled tile: hiding the complete
+  // mosaic because one OSM request failed leaves the city view on a white
+  // background even though the neighbouring tiles decoded correctly.
+  if (loadedTileIds.size + failedTileIds.size === coverTiles.value.length) {
     coverReady.value = true;
   }
 }

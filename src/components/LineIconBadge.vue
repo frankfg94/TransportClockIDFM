@@ -62,19 +62,11 @@ const iconCandidates = computed(() => {
   return candidates;
 });
 const currentIconUrl = computed(() => iconCandidates.value[iconIndex.value]);
+const iconCandidatesKey = computed(() => JSON.stringify(iconCandidates.value));
 
-watch(
-  () => [
-    props.line.iconUrl,
-    props.line.iconUrls?.join("|"),
-    displayLabel.value,
-    resolvedFamily.value,
-    props.line.ref,
-  ],
-  () => {
-    iconIndex.value = 0;
-  },
-);
+watch(iconCandidatesKey, () => {
+  iconIndex.value = 0;
+});
 
 function showNextIconCandidate(): void {
   iconIndex.value += 1;

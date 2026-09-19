@@ -28,10 +28,30 @@ export function useNearbyWalkingRoutes() {
   const error = ref<Error>();
   const placeControllers = new Map<string, AbortController>();
   const placeRequestTokens = new Map<string, number>();
+  const directPlaceControllers = new Map<string, AbortController>();
+  const directPlaceRequestTokens = new Map<string, number>();
   const placeProgressTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const pendingPlaceScans = new Set<string>();
   const directPlaceRouteIds = new Set<string>();
   let segmentRequestToken = 0;
+  let directRequestSequence = 0;
+  let directRequestGeneration = 0;
+
+  function isCurrentDirectPlaceRequest(
+    placeId: string,
+    generation: number,
+    token: number,
+  ): boolean {
+    return generation === directRequestGeneration
+      && directPlaceRequestTokens.get(placeId) === token;
+  }
+
+  function invalidateDirectPlaceRequests(): void {
+    directRequestGeneration += 1;
+    for (const controller of directPlaceControllers.values()) controller.abort();
+    directPlaceControllers.clear();
+    directPlaceRequestTokens.clear();
+  }
 
   function updatePlaceLoading(scope: string, loading: boolean): void {
     if (loading) pendingPlaceScans.add(scope);
@@ -157,7 +177,13 @@ export function useNearbyWalkingRoutes() {
   async function loadPlaceRoute(
     origin: NearbyJourneyPoint,
     place: NearbyPlace,
-  ): Promise<NearbyWalkingRoute> {
+  ): Promise<NearbyWalkingRoute | undefined> {
+    const generation = directRequestGeneration;
+    const token = ++directRequestSequence;
+    directPlaceRequestTokens.set(place.id, token);
+    directPlaceControllers.get(place.id)?.abort();
+    const controller = new AbortController();
+    directPlaceControllers.set(place.id, controller);
     directPlaceRouteIds.add(place.id);
     const request = {
       id: place.id,
@@ -165,14 +191,34 @@ export function useNearbyWalkingRoutes() {
       origin,
       destination: { lon: place.lon, lat: place.lat },
     };
-    const cached = getCachedNearbyWalkingRoute(request);
-    if (cached) {
-      placeRoutes.value = { ...placeRoutes.value, [place.id]: cached };
-      return cached;
+
+    try {
+      const cached = getCachedNearbyWalkingRoute(request);
+      if (cached) {
+        if (!isCurrentDirectPlaceRequest(place.id, generation, token)) return undefined;
+        placeRoutes.value = { ...placeRoutes.value, [place.id]: cached };
+        return cached;
+      }
+      const route = await getNearbyWalkingRoute(request, controller.signal);
+      if (!isCurrentDirectPlaceRequest(place.id, generation, token)) return undefined;
+      placeRoutes.value = { ...placeRoutes.value, [place.id]: route };
+      return route;
+    } catch (cause) {
+      if (isCurrentDirectPlaceRequest(place.id, generation, token)
+        && !(cause instanceof Error && cause.name === "AbortError")) {
+        error.value = cause instanceof Error ? cause : new Error("walking-route-unavailable");
+      }
+      // Obsolete or aborted direct loads resolve to undefined so fire-and-forget
+      // callers such as selectNearbyPlace() never create an unhandled rejection.
+      return undefined;
+    } finally {
+      if (directPlaceControllers.get(place.id) === controller) {
+        directPlaceControllers.delete(place.id);
+      }
+      if (directPlaceRequestTokens.get(place.id) === token) {
+        directPlaceRequestTokens.delete(place.id);
+      }
     }
-    const route = await getNearbyWalkingRoute(request);
-    placeRoutes.value = { ...placeRoutes.value, [place.id]: route };
-    return route;
   }
 
   async function loadMissingSegmentRoutes(
@@ -195,6 +241,7 @@ export function useNearbyWalkingRoutes() {
   }
 
   function clear(): void {
+    invalidateDirectPlaceRequests();
     for (const controller of placeControllers.values()) controller.abort();
     for (const scope of [...placeProgressTimers.keys()]) clearPlaceLoadProgressTimer(scope);
     for (const scope of placeRequestTokens.keys()) {
@@ -213,15 +260,17 @@ export function useNearbyWalkingRoutes() {
 
   if (getCurrentInstance()) {
     onBeforeUnmount(() => {
+      invalidateDirectPlaceRequests();
       for (const controller of placeControllers.values()) controller.abort();
       for (const scope of placeRequestTokens.keys()) {
         placeRequestTokens.set(scope, (placeRequestTokens.get(scope) ?? 0) + 1);
       }
       segmentRequestToken += 1;
       placeControllers.clear();
-    pendingPlaceScans.clear();
+      directPlaceRouteIds.clear();
+      pendingPlaceScans.clear();
       for (const scope of [...placeProgressTimers.keys()]) clearPlaceLoadProgressTimer(scope);
-    placeLoadProgress.value = {};
+      placeLoadProgress.value = {};
     });
   }
 

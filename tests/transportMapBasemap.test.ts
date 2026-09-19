@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createCamera } from "../src/features/transport-map/geo/camera";
+import { definitionTransformStyle } from "../src/features/transport-map/basemap/basemapDefinition";
 import { screenToWorld, worldToScreen } from "../src/features/transport-map/geo/coordinateKernel";
 import {
   BASEMAP_TILE_EDGE_OVERLAP_CSS_PX,
@@ -9,6 +10,18 @@ import {
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../src/features/transport-map/config/globalTransportPlanConfig";
 
 describe("global map basemap tile math", () => {
+  it("keeps raster points aligned with markers when the sidebar resizes the viewport", () => {
+    const anchor = createCamera({ zoom: 12, viewportWidthCssPx: 720, viewportHeightCssPx: 360 });
+    const live = { ...anchor, zoom: 13, viewportWidthCssPx: 1040, viewportHeightCssPx: 480 };
+    const point = { x: 0.5001, y: 0.5002 };
+    const before = worldToScreen(point, anchor);
+    const after = worldToScreen(point, live);
+    const dx = live.viewportWidthCssPx / 2 - anchor.viewportWidthCssPx;
+    const dy = live.viewportHeightCssPx / 2 - anchor.viewportHeightCssPx;
+    expect(definitionTransformStyle(anchor, live)?.transform).toBe(`translate3d(${dx}px, ${dy}px, 0) scale3d(2, 2, 1)`);
+    expect(before.x * 2 + dx).toBeCloseTo(after.x, 8);
+    expect(before.y * 2 + dy).toBeCloseTo(after.y, 8);
+  });
   it("uses the same camera transform as the transport canvas", () => {
     const camera = createCamera({
       centerWorldX: 0.5065,

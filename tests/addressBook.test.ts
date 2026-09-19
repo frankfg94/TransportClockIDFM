@@ -33,6 +33,20 @@ describe("address book storage", () => {
     expect(entries.find((entry) => entry.id === "marker")?.isPrimary).toBeUndefined();
   });
 
+  it("keeps only one workplace address and exposes its origin marker", () => {
+    const entries = normalizeAddressBookEntries([
+      { id: "home", kind: "address", name: "Maison", lon: 2.2, lat: 48.8, icon: "home", isWorkplace: true },
+      { id: "work", kind: "address", name: "Bureau", lon: 2.3, lat: 48.9, icon: "work", isWorkplace: true },
+      { id: "marker", kind: "marker", name: "Repère", lon: 2.4, lat: 48.7, icon: "pin", isWorkplace: true },
+    ]);
+
+    expect(entries.filter((entry) => entry.isWorkplace).map((entry) => entry.id)).toEqual(["home"]);
+    expect(entries.find((entry) => entry.id === "marker")?.isWorkplace).toBeUndefined();
+    expect(toAddressBookPoint(entries[0]!)).toEqual(expect.objectContaining({
+      addressBookWorkplace: true,
+    }));
+  });
+
   it("keeps hidden entries and accepts canonical Lucide icon names", () => {
     const entries = normalizeAddressBookEntries([
       { id: "home", kind: "address", name: "Maison", lon: 2.2, lat: 48.8, icon: "MapPin", isHidden: true },

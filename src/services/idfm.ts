@@ -39,6 +39,8 @@ import type {
   NearbyJourneySection,
 } from "../features/nearby-stations/nearbyHeavyTransports";
 import type { GeocoderPoint } from "../features/transport-map/contracts/geocoder";
+import type { GlobalMapMode } from "../features/transport-map/contracts/manifest";
+import type { TurboObservation } from "../features/nearby-stations/travelTurbo";
 import { fuzzyMatches } from "./fuzzySearch";
 
 type SiriTextValue =
@@ -54,6 +56,8 @@ interface SiriMonitoredCall {
   ExpectedDepartureTime?: string;
   ExpectedArrivalTime?: string;
   AimedDepartureTime?: string;
+  AimedArrivalTime?: string;
+  ArrivalStatus?: string;
   DepartureStatus?: string;
   VehicleAtStop?: boolean;
   DeparturePlatformName?: SiriTextValue;
@@ -80,6 +84,7 @@ interface SiriVehicleJourney {
 }
 
 interface SiriVisit {
+  RecordedAtTime?: string;
   ItemIdentifier?: string;
   MonitoringRef?: SiriTextValue;
   MonitoredVehicleJourney?: SiriVehicleJourney;
@@ -301,8 +306,8 @@ interface NavitiaJourneyLocation {
   name?: string;
   coord?: NavitiaCoord;
   address?: { coord?: NavitiaCoord };
-  stop_point?: { coord?: NavitiaCoord };
-  stop_area?: { coord?: NavitiaCoord };
+  stop_point?: { id?: string; coord?: NavitiaCoord; stop_area?: { id?: string } };
+  stop_area?: { id?: string; coord?: NavitiaCoord };
 }
 
 interface NavitiaJourneySection {
@@ -332,6 +337,7 @@ interface NavitiaJourneySection {
     stop_area?: { name?: string; label?: string };
   }>;
   display_informations?: NavitiaJourneyLine & {
+    headsign?: string;
     line?: NavitiaJourneyLine;
     direction?: string;
     color?: string;
@@ -548,6 +554,12 @@ export async function fetchNavitiaJourneys(
   if (request.datetime) {
     params.set("datetime", request.datetime);
     params.set("datetime_represents", "departure");
+  }
+  const allowedIds = navitiaAllowedModeIds(request.allowedModes);
+  if (allowedIds?.length) {
+    for (const id of allowedIds) params.append("allowed_id[]", id);
+  } else if (allowedIds) {
+    for (const id of NAVITIA_NEARBY_TRANSIT_FILTER_IDS) params.append("forbidden_uris[]", id);
   }
   return runNetworkTask(async (signal) => {
     const response = await navitiaFetchWithRetry(
@@ -768,6 +780,15 @@ function normalizeNavitiaJourney(journey: NavitiaJourney): NearbyJourney {
     distanceMeters: Number.isFinite(section.length) ? Math.max(0, section.length ?? 0) : undefined,
     fromName: section.from?.name,
     toName: section.to?.name,
+    fromStopPointId: section.from?.stop_point?.id ?? (section.from?.id?.startsWith("stop_point:") ? section.from.id : undefined),
+    toStopPointId: section.to?.stop_point?.id ?? (section.to?.id?.startsWith("stop_point:") ? section.to.id : undefined),
+    fromStopAreaId: section.from?.stop_area?.id ?? section.from?.stop_point?.stop_area?.id,
+    toStopAreaId: section.to?.stop_area?.id ?? section.to?.stop_point?.stop_area?.id,
+    vehicleJourneyId: section.links?.find((link) => link.type === "vehicle_journey")?.id,
+    mission: section.display_informations?.headsign,
+    baseDepartureDateTime: section.departure_date_time,
+    baseArrivalDateTime: section.arrival_date_time,
+    timingSource: "schedule",
     fromPoint,
     toPoint,
     geometry: normalizeNavitiaJourneyGeometry(section),
@@ -3287,10 +3308,48 @@ async function fetchMonitoringPoint(
   point: MonitoringPointConfig,
   options: NavitiaRequestOptions,
 ): Promise<Departure[]> {
-  const searchParams = new URLSearchParams({
-    MonitoringRef: point.ref,
-    LineRef: board.line.ref,
-  });
+  const visits = await fetchSiriVisits(board.line.ref, point.ref, options);
+  return visits
+    .map((visit) => mapVisitToDeparture(visit, point))
+    .filter((departure): departure is Departure => departure !== null);
+}
+
+const NAVITIA_NEARBY_MODE_IDS: Readonly<Record<GlobalMapMode, readonly string[]>> = {
+  BUS: ["physical_mode:Bus"],
+  METRO: ["physical_mode:Metro"],
+  RER: ["physical_mode:RapidTransit"],
+  TRAIN: ["physical_mode:Train"],
+  TRANSILIEN: ["physical_mode:LocalTrain"],
+  TRAM: ["physical_mode:Tramway"],
+  CABLE: ["physical_mode:SuspendedCableCar"],
+  NOCTILIEN: ["commercial_mode:Noctilien"],
+  BIKE: ["physical_mode:Bike"],
+};
+
+const NAVITIA_NEARBY_MODE_SCOPE = [
+  "BUS", "METRO", "RER", "TRAIN", "TRANSILIEN", "TRAM", "CABLE", "NOCTILIEN",
+] as const satisfies readonly GlobalMapMode[];
+
+const NAVITIA_NEARBY_TRANSIT_FILTER_IDS = [...new Set(
+  NAVITIA_NEARBY_MODE_SCOPE.flatMap((mode) => NAVITIA_NEARBY_MODE_IDS[mode]),
+)];
+
+/**
+ * Translate the UI's normalized mode set to Navitia's mode constraints.
+ * Undefined means the default journey search is preserved; an empty array is
+ * intentional and is handled as a walking-only request by the caller.
+ */
+export function navitiaAllowedModeIds(
+  allowedModes?: readonly GlobalMapMode[],
+): string[] | undefined {
+  if (!allowedModes) return undefined;
+  const selected = new Set(allowedModes);
+  if (NAVITIA_NEARBY_MODE_SCOPE.every((mode) => selected.has(mode))) return undefined;
+  return [...new Set(allowedModes.flatMap((mode) => NAVITIA_NEARBY_MODE_IDS[mode] ?? []))];
+}
+
+async function fetchSiriVisits(lineRef: string, monitoringRef: string, options: NavitiaRequestOptions): Promise<SiriVisit[]> {
+  const searchParams = new URLSearchParams({ MonitoringRef: monitoringRef, LineRef: lineRef });
 
   const response = await navitiaFetchWithRetry(
     `${siriApiBase(options)}/stop-monitoring?${searchParams}`,
@@ -3309,9 +3368,28 @@ async function fetchMonitoringPoint(
     asArray(delivery.MonitoredStopVisit),
   );
 
-  return visits
-    .map((visit) => mapVisitToDeparture(visit, point))
-    .filter((departure): departure is Departure => departure !== null);
+  return visits;
+}
+
+/** Raw predictions: unlike boards, keep cancellations and missing expected times. */
+export async function fetchTravelStopMonitoring(lineRef: string, monitoringRef: string, signal?: AbortSignal): Promise<TurboObservation[]> {
+  const visits = await fetchSiriVisits(lineRef, monitoringRef, { signal });
+  const time = (value?: string) => value && Number.isFinite(Date.parse(value)) ? Date.parse(value) : undefined;
+  return visits.flatMap((visit): TurboObservation[] => {
+    const journey = visit.MonitoredVehicleJourney;
+    const call = journey?.MonitoredCall;
+    if (!journey || !call) return [];
+    return [{
+      lineId: siriValue(journey.LineRef) ?? lineRef,
+      stopId: siriValue(visit.MonitoringRef) ?? monitoringRef,
+      journeyId: journey.FramedVehicleJourneyRef?.DatedVehicleJourneyRef,
+      mission: firstValue(journey.JourneyNote) ?? firstValue(journey.VehicleJourneyName) ?? firstValue(journey.TrainNumbers?.TrainNumberRef),
+      aimedDeparture: time(call.AimedDepartureTime), aimedArrival: time(call.AimedArrivalTime),
+      departure: time(call.ExpectedDepartureTime), arrival: time(call.ExpectedArrivalTime),
+      observedAt: time(visit.RecordedAtTime),
+      cancelled: /cancelled|canceled|deleted/iu.test(`${call.DepartureStatus ?? ""} ${call.ArrivalStatus ?? ""}`),
+    }];
+  });
 }
 
 function mapVisitToDeparture(

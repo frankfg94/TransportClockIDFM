@@ -272,12 +272,102 @@ h3 {
   }
 }
 
+.topbar__controls-shell {
+  display: grid;
+  gap: 4px;
+  grid-column: 1 / -1;
+  justify-items: end;
+  min-width: 0;
+  width: 100%;
+}
+
+.topbar__controls-clip {
+  display: grid;
+  grid-template-rows: 1fr;
+  min-width: 0;
+  overflow: hidden;
+  transition:
+    grid-template-rows 280ms ease-in-out,
+    opacity var(--motion-panel);
+  width: 100%;
+}
+
+.topbar__controls-clip--collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
 .topbar__controls {
   align-items: center;
   display: flex;
   gap: 12px;
-  grid-column: 1 / -1;
-  justify-content: space-between;
+  min-height: 0;
+  overflow: hidden;
+  transform: translateY(0);
+  transition: transform 280ms ease-in-out;
+}
+
+.topbar__controls-clip--collapsed .topbar__controls {
+  transform: translateY(-12px);
+}
+
+.topbar__controls-toggle {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  min-height: 28px;
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  transition:
+    background var(--motion-fast),
+    color var(--motion-fast),
+    opacity var(--motion-panel);
+  width: 32px;
+}
+
+.topbar:hover .topbar__controls-toggle,
+.topbar:focus-within .topbar__controls-toggle,
+.topbar__controls-toggle:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.topbar__controls-toggle:hover:not(:disabled),
+.topbar__controls-toggle:focus-visible {
+  background: var(--surface-muted);
+  border-color: var(--border);
+  color: var(--ink);
+}
+
+.topbar__controls-toggle svg {
+  transform: rotate(180deg);
+  transition: transform 280ms ease-in-out;
+}
+
+.topbar__controls-toggle--collapsed svg {
+  transform: rotate(0deg);
+}
+
+@media (pointer: coarse) {
+  .topbar__controls-toggle {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar__controls-clip,
+  .topbar__controls,
+  .topbar__controls-toggle,
+  .topbar__controls-toggle svg {
+    transition-duration: 1ms;
+  }
 }
 
 .topbar__controls--menu-toggles {

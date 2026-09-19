@@ -99,6 +99,7 @@ const emit = defineEmits<{
   "select-station": [station: GlobalMapStationSearchGroup];
   "select-line": [line: GlobalMapLine];
   "select-place": [place: GeocoderPoint];
+  "route-to-place": [place: GeocoderPoint];
   "select-marker": [marker: GlobalMapMarker];
 }>();
 
@@ -123,11 +124,22 @@ const { presentPlace } = useNearbyPlacePresenter();
 onBeforeUnmount(() => {
   cancelScheduledSearch();
   cancelPlaceSearch();
+  if (typeof document !== "undefined") document.removeEventListener("pointerdown", onDocumentPointerDown);
   if (typeof window !== "undefined") {
     for (const timer of hoverTimers.values()) window.clearTimeout(timer);
   }
   hoverTimers.clear();
 });
+
+watch(
+  () => props.open,
+  (open) => {
+    if (typeof document === "undefined") return;
+    if (open) document.addEventListener("pointerdown", onDocumentPointerDown);
+    else document.removeEventListener("pointerdown", onDocumentPointerDown);
+  },
+  { immediate: true },
+);
 
 const searchOptions = {
   stationLimit: GLOBAL_TRANSPORT_PLAN_CONFIG.search.stationLimit,
@@ -298,7 +310,9 @@ function cachePlaceResults(queryKey: string, places: GeocoderPoint[]): GeocoderP
 function filterPlaceResults(points: GeocoderPoint[]): GeocoderPoint[] {
   const seen = new Set<string>();
   return points
-    .filter((point) => point.type === "place" && Number.isFinite(point.lon) && Number.isFinite(point.lat))
+    .filter((point) => Number.isFinite(point.lon) && Number.isFinite(point.lat)
+      && point.lon >= -180 && point.lon <= 180
+      && point.lat >= -90 && point.lat <= 90)
     .filter((point) => {
       const key = placeResultKey(point);
       if (seen.has(key)) return false;
@@ -400,6 +414,10 @@ function closeSearch(): void {
   emit("close");
 }
 
+function onDocumentPointerDown(): void {
+  if (props.open) closeSearch();
+}
+
 function onKeydown(event: KeyboardEvent): void {
   event.stopPropagation();
   if (event.key === "ArrowDown") {
@@ -433,6 +451,59 @@ function selectResult(result: SearchResult): void {
   else if (result.kind === "line") emit("select-line", result.line);
   else if (result.kind === "place") emit("select-place", result.place);
   else emit("select-marker", result.marker);
+}
+
+function itineraryDestinationFor(result: SearchResult): GeocoderPoint | undefined {
+  if (result.kind === "place") return result.place;
+
+  if (result.kind === "marker") {
+    if (!Number.isFinite(result.marker.lon) || !Number.isFinite(result.marker.lat)) return undefined;
+    const address = result.marker.address?.trim();
+    return {
+      id: result.marker.id,
+      lon: result.marker.lon,
+      lat: result.marker.lat,
+      label: result.marker.name,
+      ...(address ? { address } : {}),
+      provider: "global-map-marker",
+      type: "address",
+    };
+  }
+
+  if (result.kind === "station") return stationItineraryDestination(result.station);
+
+  // A line has no single coordinate. Use its first canonical station as the
+  // deterministic, data-derived destination represented by the line result.
+  const station = result.line.stationIds
+    .map((stationId) => props.stations.find((candidate) => candidate.id === stationId))
+    .find((candidate) => candidate && Number.isFinite(candidate.lon) && Number.isFinite(candidate.lat));
+  return station
+    ? stationItineraryDestination(station, `${lineLabel(result.line)} · ${station.name}`)
+    : undefined;
+}
+
+function stationItineraryDestination(
+  station: Pick<GlobalMapStationSearchGroup, "id" | "lon" | "lat" | "name" | "city">,
+  label = station.name,
+): GeocoderPoint | undefined {
+  if (!Number.isFinite(station.lon) || !Number.isFinite(station.lat)) return undefined;
+  return {
+    id: station.id,
+    lon: station.lon,
+    lat: station.lat,
+    label,
+    ...(station.city ? { city: station.city } : {}),
+    provider: "global-map",
+    type: "station",
+  };
+}
+
+function routeToResult(result: SearchResult): void {
+  const destination = itineraryDestinationFor(result);
+  if (!destination) return;
+  clearQuery(false);
+  closeSearch();
+  emit("route-to-place", destination);
 }
 
 function clearQuery(focus = true): void {
@@ -630,11 +701,11 @@ function readRecentSearches(): RecentSearchKey[] {
       <section v-for="section in sections" :key="section.id" class="global-map-search__section">
         <h2>{{ section.label }}</h2>
         <template v-for="result in section.results" :key="result.key">
-          <button
+          <div
             v-if="result.kind === 'station'"
             :id="resultDomId(result)"
-            type="button"
             role="option"
+            tabindex="0"
             class="global-map-search__result"
             :class="{ 'global-map-search__result--active': isActiveResult(result) }"
             :aria-selected="isActiveResult(result)"
@@ -642,6 +713,8 @@ function readRecentSearches(): RecentSearchKey[] {
             @pointerleave="cancelBusReveal(result)"
             @focus="expandBusLines(result.key)"
             @click="selectResult(result)"
+            @keydown.enter="selectResult(result)"
+            @keydown.space.prevent="selectResult(result)"
           >
             <span class="global-map-search__result-icon" :class="{ 'global-map-search__result-icon--major': result.station.lineIds.length >= GLOBAL_TRANSPORT_PLAN_CONFIG.search.majorStationMinLines }" aria-hidden="true">
               <Train v-if="result.station.lineIds.length >= GLOBAL_TRANSPORT_PLAN_CONFIG.search.majorStationMinLines" :size="18" />
@@ -658,35 +731,59 @@ function readRecentSearches(): RecentSearchKey[] {
               <LineIconBadge v-for="line in (isBusExpanded(result.key) ? result.lines : result.railLines).slice(0, 8)" :key="line.id" class="global-map-search__line-chip" :line="lineBadge(line)" compact />
               <span v-if="result.busLines.length && !isBusExpanded(result.key)" class="global-map-search__bus-more" role="button" tabindex="0" @click.stop="expandBusLines(result.key)" @keydown.enter.stop="expandBusLines(result.key)">{{ t("globalMap.search.showOtherLines", { count: result.busLines.length }) }}</span>
             </span>
+            <button
+              type="button"
+              class="global-map-search__result-action global-map-search__result-action--itinerary"
+              data-global-map-search-route-to-place
+              :aria-label="t('globalMap.search.routeToPlaceAria', { place: result.station.name })"
+              @click.stop="routeToResult(result)"
+              @keydown.stop
+            >
+              {{ t("globalMap.search.routeToPlace") }}
+            </button>
             <ChevronRight class="global-map-search__arrow" :size="20" aria-hidden="true" />
-          </button>
+          </div>
 
-          <button
+          <div
             v-else-if="result.kind === 'line'"
             :id="resultDomId(result)"
-            type="button"
             role="option"
+            tabindex="0"
             class="global-map-search__result"
             :class="{ 'global-map-search__result--active': isActiveResult(result) }"
             :aria-selected="isActiveResult(result)"
             @click="selectResult(result)"
+            @keydown.enter="selectResult(result)"
+            @keydown.space.prevent="selectResult(result)"
           >
             <LineIconBadge class="global-map-search__line-chip global-map-search__line-chip--large" :line="lineBadge(result.line)" />
             <span class="global-map-search__result-copy"><strong>{{ t("globalMap.search.lineName", { line: lineLabel(result.line) }) }}</strong><small>{{ modeLabel(result.line.mode) }} · {{ result.stationCount || t("globalMap.search.network") }}</small></span>
             <span class="global-map-search__result-action">{{ t("globalMap.search.viewLine") }}</span>
+            <button
+              type="button"
+              class="global-map-search__result-action global-map-search__result-action--itinerary"
+              data-global-map-search-route-to-place
+              :aria-label="t('globalMap.search.routeToPlaceAria', { place: t('globalMap.search.lineName', { line: lineLabel(result.line) }) })"
+              @click.stop="routeToResult(result)"
+              @keydown.stop
+            >
+              {{ t("globalMap.search.routeToPlace") }}
+            </button>
             <ChevronRight class="global-map-search__arrow" :size="20" aria-hidden="true" />
-          </button>
+          </div>
 
-          <button
+          <div
             v-else-if="result.kind === 'marker'"
             :id="resultDomId(result)"
             data-global-map-search-result-type="marker"
-            type="button"
             role="option"
+            tabindex="0"
             class="global-map-search__result"
             :class="{ 'global-map-search__result--active': isActiveResult(result) }"
             :aria-selected="isActiveResult(result)"
             @click="selectResult(result)"
+            @keydown.enter="selectResult(result)"
+            @keydown.space.prevent="selectResult(result)"
           >
             <span
               class="global-map-search__result-icon global-map-search__result-icon--marker"
@@ -700,19 +797,31 @@ function readRecentSearches(): RecentSearchKey[] {
               <small>{{ result.marker.address || t("globalMap.search.savedMarker") }}</small>
             </span>
             <span class="global-map-search__result-action">{{ t("globalMap.search.centerMarker") }}</span>
+            <button
+              type="button"
+              class="global-map-search__result-action global-map-search__result-action--itinerary"
+              data-global-map-search-route-to-place
+              :aria-label="t('globalMap.search.routeToPlaceAria', { place: result.marker.name })"
+              @click.stop="routeToResult(result)"
+              @keydown.stop
+            >
+              {{ t("globalMap.search.routeToPlace") }}
+            </button>
             <ChevronRight class="global-map-search__arrow" :size="20" aria-hidden="true" />
-          </button>
+          </div>
 
-          <button
+          <div
             v-else
             :id="resultDomId(result)"
             data-global-map-search-result-type="place"
-            type="button"
             role="option"
+            tabindex="0"
             class="global-map-search__result"
             :class="{ 'global-map-search__result--active': isActiveResult(result) }"
             :aria-selected="isActiveResult(result)"
             @click="selectResult(result)"
+            @keydown.enter="selectResult(result)"
+            @keydown.space.prevent="selectResult(result)"
           >
             <span
               class="global-map-search__result-icon global-map-search__result-icon--place"
@@ -726,8 +835,18 @@ function readRecentSearches(): RecentSearchKey[] {
               <small>{{ placeCity(result.place) }} · {{ placePresentation(result.place).typeLabel }}</small>
             </span>
             <span class="global-map-search__result-action">{{ t("globalMap.search.centerPlace") }}</span>
+            <button
+              type="button"
+              class="global-map-search__result-action global-map-search__result-action--itinerary"
+              data-global-map-search-route-to-place
+              :aria-label="t('globalMap.search.routeToPlaceAria', { place: placePresentation(result.place).name })"
+              @click.stop="routeToResult(result)"
+              @keydown.stop
+            >
+              {{ t("globalMap.search.routeToPlace") }}
+            </button>
             <ChevronRight class="global-map-search__arrow" :size="20" aria-hidden="true" />
-          </button>
+          </div>
         </template>
       </section>
 
@@ -786,6 +905,42 @@ function readRecentSearches(): RecentSearchKey[] {
 .global-map-search__line-chip--large :deep(.line-icon-badge__fallback) { height: 34px; }
 .global-map-search__bus-more { color: #365fc1; font-size: .62rem; font-weight: 850; cursor: pointer; }
 .global-map-search__result-action { flex: 0 0 auto; color: #5f76a8; font-size: .68rem; font-weight: 750; }
+.global-map-search__result-action--itinerary {
+  visibility: hidden;
+  max-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: #f5f7ff;
+  color: #4d66a0;
+  font: inherit;
+  font-size: .62rem;
+  font-weight: 850;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateX(4px);
+  transition: max-width .16s ease, margin .16s ease, padding .16s ease, opacity .16s ease, transform .16s ease, visibility .16s ease;
+}
+.global-map-search__result:hover .global-map-search__result-action--itinerary,
+.global-map-search__result:focus-within .global-map-search__result-action--itinerary {
+  visibility: visible;
+  max-width: 132px;
+  margin-left: 2px;
+  padding: 5px 8px;
+  border-color: #dbe3f5;
+  opacity: 1;
+  transform: none;
+}
+.global-map-search__result-action--itinerary:hover,
+.global-map-search__result-action--itinerary:focus-visible {
+  border-color: #9cb8f4;
+  background: #edf3ff;
+  color: #284f9d;
+  outline: none;
+}
 .global-map-search__arrow { flex: 0 0 auto; color: #254e9a; }
 .global-map-search__status { margin: 8px 12px 4px; color: #66748f; font-size: .72rem; font-weight: 700; }
 .global-map-search__status--error { color: #a33d4b; }
@@ -837,6 +992,18 @@ function readRecentSearches(): RecentSearchKey[] {
     box-shadow: none;
   }
   .global-map-search__result-action { display: none; }
+  .global-map-search__result-action--itinerary { display: inline-flex; }
   .global-map-search__chips { max-width: 130px; }
+}
+@media (min-width: 701px) and (max-width: 1024px), (hover: none) {
+  .global-map-search__result-action--itinerary {
+    visibility: visible;
+    max-width: 132px;
+    margin-left: 2px;
+    padding: 5px 8px;
+    border-color: #dbe3f5;
+    opacity: 1;
+    transform: none;
+  }
 }
 </style>

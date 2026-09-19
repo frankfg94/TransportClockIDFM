@@ -21,7 +21,10 @@ import MaterialCombobox, { type MaterialComboboxOption } from "../../components/
 import { useI18n } from "../../i18n";
 import { formatTransitDistance } from "../../services/distance";
 import { useNearbyPlacePresenter } from "../nearby-stations/useNearbyPlacePresenter";
-import { nearbyPlaceWalkingMinutes } from "../nearby-stations/nearbyPlacePresentation";
+import {
+  isNearbyPlaceVisibleForGlobalLine,
+  nearbyPlaceWalkingMinutes,
+} from "../nearby-stations/nearbyPlacePresentation";
 import type { NearbyPlace } from "../nearby-stations/nearbyPlaces";
 import type { GlobalMapLine } from "../transport-map/contracts/manifest";
 import type { TransitFamily } from "../../types/transit";
@@ -35,7 +38,7 @@ import type {
 
 const props = defineProps<GlobalMapSidebarBodyProps>();
 const emit = defineEmits<GlobalMapSidebarBodyEmits>();
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const { presentPlace } = useNearbyPlacePresenter();
 
 const displayLine = computed(() => props.displayLine);
@@ -97,20 +100,24 @@ const lineCitiesExpanded = ref(false);
 const entrancesExpanded = ref(false);
 const nearbyPlacesExpanded = ref(true);
 const nearbyRadiusOptions = computed<MaterialComboboxOption[]>(() => [
+  { id: "0", label: t("globalMap.sidebar.nearbyPlacesDisabled") },
   { id: "2", label: t("globalMap.sidebar.nearbyPlacesRadius", { minutes: 2 }) },
   { id: "5", label: t("globalMap.sidebar.nearbyPlacesRadius", { minutes: 5 }) },
 ]);
-const presentedNearbyPlaces = computed(() => props.nearbyPlaces.slice(0, 80).map((place: NearbyPlace) => ({
+const presentedNearbyPlaces = computed(() => props.nearbyPlaces
+  .filter((place) => isNearbyPlaceVisibleForGlobalLine(place))
+  .map((place: NearbyPlace) => ({
   place,
   presentation: presentPlace(place),
   minutes: nearbyPlaceWalkingMinutes(place),
-})));
+  })));
 
 watch(
   () => [props.displayLine?.id, props.displayLine?.mode] as const,
   () => {
     itineraryExpanded.value = !defaultGlobalDirectionMerge(props.displayLine?.mode ?? "BUS");
     lineCitiesExpanded.value = false;
+    emit("line-cities-expanded", false);
     nearbyPlacesExpanded.value = true;
   },
 );
@@ -135,6 +142,11 @@ function modeLabel(mode: GlobalMapLine["mode"]): string {
     BIKE: "bike",
   };
   return t(("globalMap.modes." + keys[mode]) as never);
+}
+
+function toggleLineCities(): void {
+  lineCitiesExpanded.value = !lineCitiesExpanded.value;
+  emit("line-cities-expanded", lineCitiesExpanded.value);
 }
 
 function toFamily(mode: GlobalMapLine["mode"]): TransitFamily | undefined {
@@ -165,7 +177,7 @@ function formatLineLength(lengthKm?: number): string {
 }
 
 function updateNearbyRadius(value: string): void {
-  emit("update:nearby-radius-minutes", value === "5" ? 5 : 2);
+  emit("update:nearby-radius-minutes", value === "5" ? 5 : value === "0" ? 0 : 2);
 }
 </script>
 
@@ -296,30 +308,35 @@ function updateNearbyRadius(value: string): void {
         role="region"
         aria-labelledby="global-map-picker-sidebar-nearby-toggle"
       >
-        <p class="global-map-picker-sidebar__nearby-hint">
-          {{ t("globalMap.sidebar.nearbyPlacesDescription", { minutes: nearbyPlacesRadiusMinutes }) }}
+        <p v-if="nearbyPlacesRadiusMinutes === 0" class="global-map-picker-sidebar__nearby-hint" role="status">
+          {{ t("globalMap.sidebar.nearbyPlacesDisabledDescription") }}
         </p>
-        <div v-if="nearbyPlacesLoading" class="global-map-picker-sidebar__nearby-loading" role="status" aria-live="polite">
-          <span class="global-map-picker-sidebar__nearby-loading-bar" aria-hidden="true"><span /></span>
-          <span>{{ t("globalMap.sidebar.nearbyPlacesLoading") }}</span>
-        </div>
-        <p v-else-if="nearbyPlacesError" class="global-map-picker-sidebar__line-empty" role="status">
-          {{ t("globalMap.sidebar.nearbyPlacesUnavailable") }}
-        </p>
-        <p v-else-if="presentedNearbyPlaces.length === 0" class="global-map-picker-sidebar__line-empty">
-          {{ t("globalMap.sidebar.nearbyPlacesEmpty") }}
-        </p>
-        <ul v-else class="global-map-picker-sidebar__nearby-list">
-          <li v-for="entry in presentedNearbyPlaces" :key="entry.place.id">
-            <span class="global-map-picker-sidebar__nearby-icon" aria-hidden="true">
-              <component :is="entry.presentation.icon" :size="12" stroke-width="2" />
-            </span>
-            <span>
-              <strong>{{ entry.presentation.name }}</strong>
-              <small>{{ entry.presentation.typeLabel }} · {{ t("nearbyStations.walkingTime", { minutes: entry.minutes }) }}</small>
-            </span>
-          </li>
-        </ul>
+        <template v-else>
+          <p class="global-map-picker-sidebar__nearby-hint">
+            {{ t("globalMap.sidebar.nearbyPlacesDescription", { minutes: nearbyPlacesRadiusMinutes }) }}
+          </p>
+          <div v-if="nearbyPlacesLoading" class="global-map-picker-sidebar__nearby-loading" role="status" aria-live="polite">
+            <span class="global-map-picker-sidebar__nearby-loading-bar" aria-hidden="true"><span /></span>
+            <span>{{ t("globalMap.sidebar.nearbyPlacesLoading") }}</span>
+          </div>
+          <p v-else-if="nearbyPlacesError" class="global-map-picker-sidebar__line-empty" role="status">
+            {{ t("globalMap.sidebar.nearbyPlacesUnavailable") }}
+          </p>
+          <p v-else-if="presentedNearbyPlaces.length === 0" class="global-map-picker-sidebar__line-empty">
+            {{ t("globalMap.sidebar.nearbyPlacesEmpty") }}
+          </p>
+          <ul v-else v-memo="[presentedNearbyPlaces, locale]" class="global-map-picker-sidebar__nearby-list">
+            <li v-for="entry in presentedNearbyPlaces" :key="entry.place.id">
+              <span class="global-map-picker-sidebar__nearby-icon" aria-hidden="true">
+                <component :is="entry.presentation.icon" :size="12" stroke-width="2" />
+              </span>
+              <span>
+                <strong>{{ entry.presentation.name }}</strong>
+                <small>{{ entry.presentation.typeLabel }} · {{ t("nearbyStations.walkingTime", { minutes: entry.minutes }) }}</small>
+              </span>
+            </li>
+          </ul>
+        </template>
       </div>
     </section>
 
@@ -477,7 +494,7 @@ function updateNearbyRadius(value: string): void {
           type="button"
           aria-controls="global-map-picker-sidebar-line-cities"
           :aria-expanded="lineCitiesExpanded"
-          @click="lineCitiesExpanded = !lineCitiesExpanded"
+          @click="toggleLineCities"
         >
           <span
             ><Building2 :size="16" aria-hidden="true" />{{

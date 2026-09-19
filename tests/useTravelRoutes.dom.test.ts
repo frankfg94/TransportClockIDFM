@@ -1,11 +1,45 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { defineComponent, ref } from "vue";
+import { defineComponent, nextTick, ref } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import type { TravelRoutesProvider } from "../src/features/nearby-stations/nearbyHeavyTransports";
 import type { PlacesProvider } from "../src/features/nearby-stations/nearbyPlaces";
 import { useTravelRoutes } from "../src/features/nearby-stations/useTravelRoutes";
 
 describe("useTravelRoutes", () => {
+  it("refreshes the journey request as advanced allowed modes change", async () => {
+    const allowedModes = ref<("BUS" | "TRAM")[]>(["BUS", "TRAM"]);
+    const findJourneys = vi.fn(async () => [{
+      id: "filtered-route",
+      durationSeconds: 900,
+      sections: [{ durationSeconds: 600, lineCode: "T2", lineMode: "TRAM" as const }],
+    }]);
+    let travel!: ReturnType<typeof useTravelRoutes>;
+    const Harness = defineComponent({
+      setup() {
+        travel = useTravelRoutes({
+          origin: ref({ lon: 2.3, lat: 48.8 }),
+          findJourneys,
+          allowedModes,
+        });
+        return () => null;
+      },
+    });
+    const wrapper = mount(Harness);
+
+    await travel.setDestination({ lon: 2.35, lat: 48.86, label: "Châtelet" });
+    await flushPromises();
+    expect(findJourneys).toHaveBeenCalledTimes(1);
+    expect(findJourneys).toHaveBeenLastCalledWith(expect.objectContaining({ allowedModes: ["BUS", "TRAM"] }));
+
+    allowedModes.value = ["TRAM"];
+    await nextTick();
+    await flushPromises();
+
+    expect(findJourneys).toHaveBeenCalledTimes(2);
+    expect(findJourneys).toHaveBeenLastCalledWith(expect.objectContaining({ allowedModes: ["TRAM"] }));
+    wrapper.unmount();
+  });
+
   it("asks Navitia for route alternatives, recommends the shortest and selects one", async () => {
     const findJourneys = vi.fn(async () => [
       { id: "slow", durationSeconds: 1_800, transferCount: 1, sections: [{ durationSeconds: 900, lineCode: "194", lineMode: "BUS" as const }] },

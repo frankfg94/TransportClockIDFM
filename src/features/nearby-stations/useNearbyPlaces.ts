@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, ref, watch, type Ref } from "vue";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
-import type { NearbyPlace, PlacesProvider } from "./nearbyPlaces";
+import { mergeNearbyPlaces, type NearbyPlace, type NearbyPlaceCityRef, type PlacesProvider } from "./nearbyPlaces";
 
 export const NEARBY_PLACES_REFRESH_DEBOUNCE_MS = 2_500;
 
@@ -10,6 +10,9 @@ export function useNearbyPlaces(options: {
   /** Multiple anchors are useful for a line: one request per sampled station
    * is merged into the same provider-independent place collection. */
   origins?: Ref<readonly GeocoderPoint[]>;
+  /** Optional unique communes served by a line. Providers can load one static
+   * asset per commune instead of issuing one request per station. */
+  cityRefs?: Ref<readonly NearbyPlaceCityRef[]>;
   radius: Ref<number>;
   enabled: Ref<boolean>;
   provider?: PlacesProvider;
@@ -25,6 +28,7 @@ export function useNearbyPlaces(options: {
     options.origins?.value
       ?? (options.origin?.value ? [options.origin.value] : []),
   );
+  const resolvedCityRefs = computed<readonly NearbyPlaceCityRef[]>(() => options.cityRefs?.value ?? []);
 
   async function refresh(): Promise<void> {
     const token = ++requestToken;
@@ -43,12 +47,20 @@ export function useNearbyPlaces(options: {
     isLoading.value = true;
     error.value = undefined;
     try {
-      const settled = await Promise.allSettled(origins.map((origin) =>
-        placesProvider.searchNearby({
-          origin,
-          radiusMeters: options.radius.value,
-        }, requestController.signal),
-      ));
+      const settled = placesProvider.searchNearbyCities && resolvedCityRefs.value.length > 0
+        ? await Promise.allSettled([
+          placesProvider.searchNearbyCities({
+            cities: resolvedCityRefs.value,
+            origins,
+            radiusMeters: options.radius.value,
+          }, requestController.signal),
+        ])
+        : await Promise.allSettled(origins.map((origin) =>
+          placesProvider.searchNearby({
+            origin,
+            radiusMeters: options.radius.value,
+          }, requestController.signal),
+        ));
       const responses = settled.flatMap((result) =>
         result.status === "fulfilled" ? [result.value] : [],
       );
@@ -64,17 +76,7 @@ export function useNearbyPlaces(options: {
         }
         return;
       }
-      const nearestByPlace = new Map<string, NearbyPlace>();
-      for (const place of responses.flat()) {
-        const key = place.id || `${place.name}:${place.lon}:${place.lat}`;
-        const previous = nearestByPlace.get(key);
-        if (!previous || place.distanceMeters < previous.distanceMeters) {
-          nearestByPlace.set(key, place);
-        }
-      }
-      const result = [...nearestByPlace.values()].sort(
-        (left, right) => left.distanceMeters - right.distanceMeters || left.name.localeCompare(right.name, "fr-FR"),
-      );
+      const result = mergeNearbyPlaces(...responses);
       if (token === requestToken) places.value = result;
     } catch (cause) {
       if (cause instanceof Error && cause.name === "AbortError") return;
@@ -105,6 +107,7 @@ export function useNearbyPlaces(options: {
   watch(
     () => resolvedOrigins.value
       .map((origin) => `${origin.lat}:${origin.lon}`)
+      .concat(resolvedCityRefs.value.map((city) => `${city.code ?? ""}:${city.name ?? ""}:${city.lat ?? ""}:${city.lon ?? ""}`))
       .join("|"),
     () => {
       clearRefreshTimer();

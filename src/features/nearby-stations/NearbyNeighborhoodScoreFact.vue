@@ -2,7 +2,8 @@
 import { CircleHelp } from "lucide-vue-next";
 import { useRouter } from "#imports";
 import { useI18n, type TranslationKey } from "../../i18n";
-import type { NeighborhoodFact, NeighborhoodFactGeography } from "./neighborhoodScore";
+import type { NeighborhoodFact, NeighborhoodFactGeography, NeighborhoodFactPlace } from "./neighborhood";
+import MiniTravelDisplay from "./MiniTravelDisplay.vue";
 
 const props = defineProps<{
   fact: NeighborhoodFact;
@@ -52,6 +53,14 @@ function factTooltip(): string {
   return t(props.fact.tooltipKey, values);
 }
 
+function placeItemLabel(place: NeighborhoodFactPlace): string {
+  return t("nearbyStations.neighborhoodScore.evidence.placeItem", {
+    name: place.name,
+    minutes: place.minutes,
+    meters: place.distanceMeters,
+  });
+}
+
 function openAction(): void {
   if (props.fact.action?.href) void router.replace({ path: props.fact.action.href });
 }
@@ -79,8 +88,12 @@ function geographyLabel(): string {
       :aria-expanded="open"
       @click="toggle"
     >
-      <span class="nearby-neighborhood-score-fact__marker" aria-hidden="true">
-        {{ fact.polarity === "positive" ? "+" : fact.polarity === "negative" ? "−" : "•" }}
+      <span
+        class="nearby-neighborhood-score-fact__marker"
+        :class="{ 'nearby-neighborhood-score-fact__marker--exceptional': fact.emphasis === 'exceptional' }"
+        aria-hidden="true"
+      >
+        {{ fact.emphasis === "exceptional" ? "+++" : fact.polarity === "positive" ? "+" : fact.polarity === "negative" ? "−" : "•" }}
       </span>
       <span>{{ factLabel() }}</span>
       <CircleHelp :size="15" aria-hidden="true" />
@@ -91,6 +104,12 @@ function geographyLabel(): string {
       role="tooltip"
     >
       <strong>{{ factTooltip() }}</strong>
+      <ul v-if="fact.places?.length" class="nearby-neighborhood-score-fact__places">
+        <li v-for="place in fact.places" :key="`${place.name}-${place.distanceMeters}`">
+          {{ placeItemLabel(place) }}
+        </li>
+      </ul>
+      <MiniTravelDisplay v-if="fact.travel" :journey="fact.travel.journey" />
       <dl>
         <div>
           <dt>{{ t("nearbyStations.neighborhoodScore.evidence.sourceLabel") }}</dt>
@@ -138,17 +157,21 @@ function geographyLabel(): string {
 
 <style scoped>
 .nearby-neighborhood-score-fact { position: relative; }
-.nearby-neighborhood-score-fact__trigger { align-items: center; background: transparent; border-radius: 9px; color: var(--ink); display: flex; font-size: .8rem; gap: 7px; justify-content: flex-start; line-height: 1.35; min-height: 35px; padding: 6px 7px; text-align: left; width: 100%; }
+.nearby-neighborhood-score-fact__trigger { align-items: center; background: transparent; border-radius: 9px; color: var(--ink); display: grid; font-size: .8rem; gap: 7px; grid-template-columns: 31px minmax(0, 1fr) auto; justify-content: flex-start; line-height: 1.35; min-height: 35px; padding: 6px 7px; text-align: left; width: 100%; }
 .nearby-neighborhood-score-fact__trigger:hover, .nearby-neighborhood-score-fact__trigger:focus-visible { background: #f6f7fb; outline: 0; }
-.nearby-neighborhood-score-fact__trigger > span:nth-child(2) { flex: 1; }
+.nearby-neighborhood-score-fact__trigger > span:nth-child(2) { min-width: 0; }
 .nearby-neighborhood-score-fact__trigger > svg { color: #8490a4; flex: 0 0 auto; }
-.nearby-neighborhood-score-fact__marker { align-items: center; border-radius: 999px; display: inline-flex; flex: 0 0 auto; font-size: .72rem; font-weight: 950; height: 19px; justify-content: center; width: 19px; }
+.nearby-neighborhood-score-fact__marker { align-items: center; border-radius: 999px; display: inline-flex; font-size: .72rem; font-weight: 950; height: 19px; justify-content: center; justify-self: center; width: 19px; }
+.nearby-neighborhood-score-fact__marker--exceptional { font-size: .61rem; letter-spacing: -.08em; width: 31px; }
 .nearby-neighborhood-score-fact--positive .nearby-neighborhood-score-fact__marker { background: #e3f5e9; color: #17864c; }
 .nearby-neighborhood-score-fact--negative .nearby-neighborhood-score-fact__marker { background: #fff0e8; color: #b74b24; }
 .nearby-neighborhood-score-fact--neutral .nearby-neighborhood-score-fact__marker { background: #eef2f7; color: #64748b; }
 .nearby-neighborhood-score-fact__tooltip { background: #fff; border: 1px solid rgba(16,35,63,.16); border-radius: 11px; box-shadow: 0 14px 30px rgba(16,35,63,.16); color: #344054; left: 0; max-width: min(380px, calc(100vw - 42px)); opacity: 0; padding: 11px 12px; pointer-events: none; position: absolute; top: calc(100% + 4px); transform: translateY(-3px); transition: opacity .14s ease, transform .14s ease, visibility .14s ease; visibility: hidden; width: max-content; z-index: 8; }
 .nearby-neighborhood-score-fact:hover .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact:focus-within .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact--open .nearby-neighborhood-score-fact__tooltip { opacity: 1; pointer-events: auto; transform: translateY(0); visibility: visible; }
 .nearby-neighborhood-score-fact__tooltip strong { color: var(--ink); display: block; font-size: .78rem; line-height: 1.35; max-width: 355px; }
+.nearby-neighborhood-score-fact__places { display: grid; gap: 3px; list-style: none; margin: 8px 0 0; max-width: 355px; padding: 0; }
+.nearby-neighborhood-score-fact__places li { color: #344054; font-size: .68rem; line-height: 1.35; padding-left: 10px; position: relative; }
+.nearby-neighborhood-score-fact__places li::before { color: #8490a4; content: "·"; left: 0; position: absolute; }
 .nearby-neighborhood-score-fact__tooltip dl { display: grid; gap: 5px; margin: 9px 0 0; }
 .nearby-neighborhood-score-fact__tooltip dl > div { display: grid; gap: 2px; grid-template-columns: auto 1fr; }
 .nearby-neighborhood-score-fact__tooltip dt { color: #8490a4; font-size: .64rem; font-weight: 850; }
@@ -156,8 +179,8 @@ function geographyLabel(): string {
 .nearby-neighborhood-score-fact__action { background: #5146ff; border: 0; border-radius: 8px; color: #fff; cursor: pointer; font: inherit; font-size: .7rem; font-weight: 850; margin-top: 10px; padding: 7px 9px; }
 .nearby-neighborhood-score-fact__action:hover, .nearby-neighborhood-score-fact__action:focus-visible { background: #4034df; outline: 2px solid rgba(81,70,255,.24); outline-offset: 2px; }
 @media (max-width: 680px) {
-  .nearby-neighborhood-score-fact__tooltip { left: 0; max-width: none; position: relative; top: auto; transform: none; width: auto; }
+  .nearby-neighborhood-score-fact__tooltip { left: 0; max-width: calc(100vw - 42px); position: absolute; top: calc(100% + 4px); transform: none; width: calc(100vw - 42px); }
   .nearby-neighborhood-score-fact:hover .nearby-neighborhood-score-fact__tooltip { opacity: 0; pointer-events: none; visibility: hidden; }
-  .nearby-neighborhood-score-fact:focus-within .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact--open .nearby-neighborhood-score-fact__tooltip { opacity: 1; pointer-events: auto; visibility: visible; }
+  .nearby-neighborhood-score-fact:focus-within .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact--open .nearby-neighborhood-score-fact__tooltip { opacity: 1; pointer-events: auto; position: relative; top: auto; visibility: visible; width: auto; }
 }
 </style>

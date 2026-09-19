@@ -66,6 +66,53 @@ function createNetwork(
   };
 }
 
+function createNoctilienNetwork(): TransportMapNetwork {
+  const n62 = {
+    ...createLine(),
+    id: "line:noctilien:62",
+    code: "N62",
+    label: "N62",
+    mode: "NOCTILIEN" as const,
+    stationIds: ["station:noctilien-62"],
+  };
+  const n63 = {
+    ...createLine(),
+    id: "line:noctilien:63",
+    code: "N63",
+    label: "N63",
+    mode: "NOCTILIEN" as const,
+    stationIds: ["station:noctilien-63"],
+  };
+  const n62Station = {
+    ...createNetwork(n62, { lon: 2.302, lat: 48.821 }).stations[0]!,
+    id: "station:noctilien-62",
+    name: "Arrêt N62",
+    normalizedName: "arret n62",
+    rawRefs: ["station:noctilien-62"],
+    lineIds: [n62.id],
+  };
+  const n63Station = {
+    ...createNetwork(n63, { lon: 2.304, lat: 48.822 }).stations[0]!,
+    id: "station:noctilien-63",
+    name: "Arrêt N63",
+    normalizedName: "arret n63",
+    rawRefs: ["station:noctilien-63"],
+    lineIds: [n63.id],
+  };
+  const stations = [n62Station, n63Station];
+  const lines = [n62, n63];
+  return {
+    lines,
+    stations,
+    entrances: [],
+    regionalPaths: [],
+    pathsById: new Map(),
+    linesById: new Map(lines.map((line) => [line.id, line])),
+    stationsById: new Map(stations.map((station) => [station.id, station])),
+    bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 },
+  };
+}
+
 function createEntry(line: GlobalMapLine): NearbyStationEntry {
   const station = createNetwork(line).stations[0]!;
   return {
@@ -163,6 +210,119 @@ describe("useNearbyNeighborhoodScore", () => {
     wrapper.unmount();
   });
 
+  it("does not cache a failed journey probe as an empty result", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        schemaVersion: "1.3",
+        generatedAt: "20260902T080000",
+        categories: [],
+        sources: [],
+        warnings: [],
+      }),
+    })));
+    const origin = ref({ lon: 2.30, lat: 48.82, label: "Origine" });
+    const stations = ref<NearbyStationEntry[]>([]);
+    const line = createLine();
+    const network = ref<TransportMapNetwork>(createNetwork(line));
+    const placesProvider: PlacesProvider = {
+      searchDestinations: vi.fn(async () => []),
+      searchNearby: vi.fn(async () => []),
+    };
+    const journeys: NearbyJourney[] = [{
+      id: "journey:chatelet-retry",
+      durationSeconds: 25 * 60,
+      transferCount: 0,
+      sections: [{
+        type: "public_transport",
+        mode: "metro",
+        durationSeconds: 25 * 60,
+        lineId: line.id,
+        lineCode: line.code,
+        lineMode: line.mode,
+      }],
+    }];
+    const findJourneys = vi.fn()
+      .mockRejectedValueOnce(new Error("navitia-journeys-429"))
+      .mockResolvedValue(journeys) as TravelRoutesProvider["findJourneys"];
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const Harness = defineComponent({
+      setup() {
+        score = useNearbyNeighborhoodScore({
+          origin,
+          stations,
+          network,
+          journeyDateTime: "20260902T090000",
+          placesProvider,
+          travelRoutesProvider: { findJourneys },
+        });
+        return () => null;
+      },
+    });
+    const wrapper = mount(Harness);
+
+    await vi.waitFor(() => expect(findJourneys).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(score.error.value).toBeInstanceOf(Error));
+    expect(score.errorSource.value).toBe("routes");
+    await score.refresh();
+    await vi.waitFor(() => expect(findJourneys).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(score.result.value.positiveFacts.some((fact) => fact.kind === "chateletUnder30")).toBe(true));
+    expect(score.error.value).toBeUndefined();
+    expect(score.errorSource.value).toBeUndefined();
+
+    wrapper.unmount();
+  });
+
+  it("keeps multiple Noctilien lines when scheduled journeys have no Navitia id", async () => {
+    const origin = ref({ lon: 2.30, lat: 48.82, label: "Origine" });
+    const stations = ref<NearbyStationEntry[]>([]);
+    const network = ref<TransportMapNetwork>(createNoctilienNetwork());
+    const placesProvider: PlacesProvider = {
+      searchDestinations: vi.fn(async () => []),
+      searchNearby: vi.fn(async () => []),
+    };
+    const travelRoutesProvider: TravelRoutesProvider = {
+      findJourneys: vi.fn(async (request): Promise<NearbyJourney[]> => [{
+        durationSeconds: 7 * 60,
+        sections: [
+          { type: "street_network", mode: "walking", durationSeconds: request.destination.id.endsWith("62") ? 300 : 360 },
+          {
+            type: "public_transport",
+            mode: "bus",
+            durationSeconds: 60,
+            lineCode: request.destination.id.endsWith("62") ? "N62" : "N63",
+            lineMode: "NOCTILIEN",
+          },
+        ],
+      }]),
+    };
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const Harness = defineComponent({
+      setup() {
+        score = useNearbyNeighborhoodScore({
+          origin,
+          stations,
+          network,
+          journeyDateTime: "20260902T090000",
+          nightJourneyDateTime: "20260902T030000",
+          placesProvider,
+          travelRoutesProvider,
+        });
+        return () => null;
+      },
+    });
+    const wrapper = mount(Harness);
+
+    await vi.waitFor(() => {
+      const fact = score.result.value.categories
+        .find((category) => category.id === "transport")
+        ?.positiveFacts.find((candidate) => candidate.kind === "noctilienAtNight");
+      expect(fact?.labelValues).toMatchObject({ line: "N62 et N63", minutes: 6 });
+    });
+    expect(travelRoutesProvider.findJourneys).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  });
+
   it("does not use a bootstrap bus stop as Châtelet and invalidates a stale target route", async () => {
     const origin = ref({ lon: 2.30, lat: 48.82, label: "Origine" });
     const stations = ref<NearbyStationEntry[]>([]);
@@ -241,7 +401,7 @@ describe("useNearbyNeighborhoodScore", () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true,
       json: async () => ({
-      schemaVersion: "1.2",
+      schemaVersion: "1.3",
         generatedAt: "2026-09-04T00:00:00.000Z",
         categories: [],
         sources: [],

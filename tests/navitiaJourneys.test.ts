@@ -1,7 +1,34 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchNavitiaJourneys, searchNavitiaDestinationPoints } from "../src/services/idfm";
+import { fetchNavitiaJourneys, navitiaAllowedModeIds, searchNavitiaDestinationPoints } from "../src/services/idfm";
 
 describe("Navitia nearby journeys adapter", () => {
+  it("maps advanced allowed modes to Navitia constraints instead of filtering only in the UI", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      expect(url.searchParams.getAll("allowed_id[]")).toEqual([
+        "physical_mode:Metro",
+        "physical_mode:RapidTransit",
+        "physical_mode:Tramway",
+      ]);
+      expect(url.searchParams.getAll("allowed_id[]")).not.toContain("physical_mode:Bus");
+      expect(url.searchParams.getAll("forbidden_uris[]")).toEqual([]);
+      return new Response(JSON.stringify({ journeys: [] }), { status: 200 });
+    });
+
+    await fetchNavitiaJourneys({
+      origin: { lon: 2.3, lat: 48.8 },
+      destination: { lon: 2.31, lat: 48.81 },
+      allowedModes: ["METRO", "RER", "TRAM"],
+    }, { fetcher });
+
+    expect(navitiaAllowedModeIds(["METRO", "RER", "TRAM"])).toEqual([
+      "physical_mode:Metro",
+      "physical_mode:RapidTransit",
+      "physical_mode:Tramway",
+    ]);
+    expect(navitiaAllowedModeIds(["BUS", "METRO", "RER", "TRAIN", "TRANSILIEN", "TRAM", "CABLE", "NOCTILIEN"])).toBeUndefined();
+  });
+
   it("uses the same-origin journeys endpoint and normalizes sections", async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://localhost");
@@ -36,8 +63,9 @@ describe("Navitia nearby journeys adapter", () => {
                   commercial_mode: { name: "Tramway" },
                 },
               },
-              from: { name: "Parc André Malraux" },
-              to: { name: "La Ferme" },
+              from: { id: "stop_point:IDFM:1", name: "Parc André Malraux", stop_point: { id: "stop_point:IDFM:1", stop_area: { id: "stop_area:IDFM:100" } } },
+              to: { id: "stop_point:IDFM:monomodalStopPlace:2", name: "La Ferme" },
+              links: [{ type: "vehicle_journey", id: "vehicle_journey:IDFM:trip" }],
               stop_date_times: [
                 { stop_point: { name: "Parc André Malraux" } },
                 { stop_point: { name: "Centre de Châtillon" } },
@@ -63,6 +91,11 @@ describe("Navitia nearby journeys adapter", () => {
       departureDateTime: "20260821T081000",
       arrivalDateTime: "20260821T082000",
       stopNames: ["Parc André Malraux", "Centre de Châtillon", "La Ferme"],
+      fromStopPointId: "stop_point:IDFM:1",
+      fromStopAreaId: "stop_area:IDFM:100",
+      toStopPointId: "stop_point:IDFM:monomodalStopPlace:2",
+      vehicleJourneyId: "vehicle_journey:IDFM:trip",
+      timingSource: "schedule",
     });
     expect(journeys[0]?.sections[0]).toMatchObject({
       fromPoint: { lon: 2.3, lat: 48.8 },

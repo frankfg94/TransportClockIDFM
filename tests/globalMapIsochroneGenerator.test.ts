@@ -4,17 +4,31 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { strToU8, strFromU8, unzipSync, zipSync } from "fflate";
+import { createRequire } from "node:module";
 import {
-  parseIsochroneBuildOptions, requestedIsochroneOrigins, runIsochroneBuild, writeIsochroneArchiveAtomic,
+  parseIsochroneBuildOptions, requestedIsochroneOrigins, runIsochroneBuild, writeIsochroneArchiveAtomic, UnionAccumulator,
   type IsochroneBuildOptions,
 } from "../../idfm-node-backend/src/transport/isochrones/build-isochrones";
 import { buildIsochroneCatalogue, containedPath, readIsochroneCatalogue } from "../../idfm-node-backend/src/transport/isochrones/catalogue";
 import { IsochroneOrsClient, normalizeIsochroneBatch } from "../../idfm-node-backend/src/transport/isochrones/openRouteService";
 import { GlobalIsochroneArchive } from "../src/features/transport-map/isochrones/archive";
 import { GLOBAL_ISOCHRONE_PARAMETERS } from "../src/features/transport-map/isochrones/contracts";
+import { IndexedIsochroneArchive } from "../server/services/isochrones/indexedArchive";
+import { openIsochroneSource } from "../server/services/isochrones/rangeSource";
 import { walkingCatalogueFixture, walkingOrsPayload, walkingPolygon } from "./fixtures/walkingIsochrones";
 
 describe("offline walking radar generator", () => {
+  it("retries a sweep-line precision failure without losing contours", () => {
+    const polygonClipping = createRequire(new URL("../../idfm-node-backend/package.json", import.meta.url))("polygon-clipping");
+    const union = vi.spyOn(polygonClipping, "union").mockImplementationOnce(() => { throw new Error("SweepLine tree"); });
+    try {
+      const accumulator = new UnionAccumulator();
+      accumulator.add(walkingPolygon());
+      accumulator.add(walkingPolygon());
+      expect(accumulator.finish().coordinates.length).toBeGreaterThan(0);
+      expect(union.mock.calls.length).toBeGreaterThan(1);
+    } finally { union.mockRestore(); }
+  });
   let temporary: string;
   let options: IsochroneBuildOptions;
   const report = vi.fn();
@@ -39,7 +53,7 @@ describe("offline walking radar generator", () => {
 
   beforeEach(async () => {
     temporary = await fs.mkdtemp(join(tmpdir(), "walking-radar-test-"));
-    options = { mapDir: join(temporary, "map"), output: join(temporary, "walking-isochrones.zip"), cacheDir: join(temporary, "cache"), all: false, dryRun: false, requestsPerMinute: 6000, keepArchives: true };
+    options = { mapDir: join(temporary, "map"), output: join(temporary, "walking-isochrones.zip"), cacheDir: join(temporary, "cache"), modes: ["METRO", "RER"], all: false, dryRun: false, requestsPerMinute: 6000, keepArchives: true };
     fetcher.mockClear();
     report.mockClear();
   });
@@ -55,6 +69,7 @@ describe("offline walking radar generator", () => {
     expect(catalogue.scopes.get("line:line:METRO:1")?.stationIds).toEqual(["s1", "s2"]);
     expect(catalogue.scopes.get("mode:RER")?.stationIds).toEqual(["s1", "s1-platform"]);
     expect(requestedIsochroneOrigins(catalogue, options)).toHaveLength(3);
+    expect(requestedIsochroneOrigins(catalogue, { ...options, modes: undefined })).toHaveLength(5);
     expect(requestedIsochroneOrigins(catalogue, { ...options, all: true })).toHaveLength(5);
     expect(requestedIsochroneOrigins(catalogue, { ...options, lineId: "line:METRO:1" })).toHaveLength(2);
     expect(() => requestedIsochroneOrigins(catalogue, { ...options, lineId: "not-a-line" })).toThrow("canonical");
@@ -101,11 +116,19 @@ describe("offline walking radar generator", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("cleans per-origin checkpoints after a complete publication unless explicitly retained", async () => {
+  it("retains per-origin checkpoints and station assets for incremental builds", async () => {
     await installCatalogue();
     const result = await runIsochroneBuild({ ...options, keepArchives: false }, { env, fetcher, report, sleep });
     expect(result).toMatchObject({ requested: 3, pending: 3, requests: 1, partial: false });
-    expect(await fs.readdir(options.cacheDir)).toEqual([]);
+    expect((await fs.readdir(options.cacheDir)).length).toBeGreaterThan(0);
+    expect((await archive()).index.stationOrigins?.s1).toMatchObject({ lon: 2.35, lat: 48.85 });
+    const source = await openIsochroneSource({ IDFM_MAP_ISOCHRONES_LOCAL: options.output });
+    try {
+      const indexed = await IndexedIsochroneArchive.open(source);
+      const result = await indexed.selectOrigin(source, { lon: 2.35, lat: 48.85 });
+      expect(result?.zones.map((zone) => zone.minutes)).toEqual([5, 10, 15]);
+      expect(await indexed.selectOrigin(source, { lon: 0, lat: 0 })).toBeUndefined();
+    } finally { await source.close(); }
     expect((await archive()).index.scopes["mode:METRO"]?.coveredStationIds).toEqual(["s1", "s2", "s3"]);
   });
 
@@ -147,6 +170,8 @@ describe("offline walking radar generator", () => {
     const result = await runIsochroneBuild({ ...options, cacheDir: join(temporary, "new-cache"), modes: ["BUS", "NOCTILIEN"] }, { env, fetcher, report, sleep });
     expect(result.requested).toBe(2);
     const after = await archive();
+    expect(after.index.stationOrigins?.s1).toBeDefined();
+    expect(after.index.stationOrigins?.n1).toBeDefined();
     expect(after.select([{ key: "mode:METRO", mode: "METRO", minutes: 10 }]).surfaces).toEqual(before.surfaces);
     expect(after.index.scopes["mode:BUS"]?.coveredStationIds).toEqual(["b1"]);
     expect(after.index.scopes["mode:NOCTILIEN"]?.coveredStationIds).toEqual(["n1"]);

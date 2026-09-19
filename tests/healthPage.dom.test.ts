@@ -154,5 +154,6 @@ describe("HealthPage", () => {
     expect(wrapper.text()).toContain("OpenStreetMap nearby places");
     expect(wrapper.text()).toContain("Quota");
     expect(wrapper.text()).toContain("Non expose");
+    expect(wrapper.get("[data-testid='dataset-manager-open']").text()).toContain("Gerer les datasets");
   });
 });

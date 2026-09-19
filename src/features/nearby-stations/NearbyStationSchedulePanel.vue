@@ -48,11 +48,33 @@ const now = ref(Date.now());
 let clockTimer: number | undefined;
 const expandedDirectionKeys = ref<Set<string>>(new Set());
 
-const displayedItems = computed(() => props.items.filter((item) =>
+function sortUnavailableLast(items: readonly NearbyStationScheduleItem[]): NearbyStationScheduleItem[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) =>
+      Number(left.item.state === "unavailable") - Number(right.item.state === "unavailable")
+      || left.index - right.index,
+    )
+    .map(({ item }) => item);
+}
+
+const filteredItems = computed(() => props.items.filter((item) =>
   item.state !== "hidden" &&
+  // A projected heavy station is an access aid drawn at the map edge, not a
+  // nearby boarding stop. Keep it out of both the main list and the outside
+  // accordion so the schedule panel only exposes physical nearby stations.
+  !item.projected &&
   (!props.activeModes || props.activeModes.includes(item.line.mode)) &&
   (!props.focusedStationId || item.stationId === props.focusedStationId),
 ));
+
+const displayedItems = computed(() => sortUnavailableLast(filteredItems.value.filter((item) =>
+  item.entry.insideRadius,
+)));
+
+const displayedOutsideMapItems = computed(() => sortUnavailableLast(filteredItems.value.filter((item) =>
+  !item.entry.insideRadius,
+)));
 
 onMounted(() => {
   clockTimer = window.setInterval(() => {
@@ -248,12 +270,7 @@ function boardContextMenu(itemId: string, event: MouseEvent): void {
       </div>
     </header>
 
-    <div v-if="displayedItems.length === 0 && !loading" class="nearby-schedule-panel__empty">
-      <Clock3 :size="21" aria-hidden="true" />
-      <span>{{ t("nearbyStations.scheduleEmpty") }}</span>
-    </div>
-
-    <div v-else class="nearby-schedule-panel__cards">
+    <div v-if="displayedItems.length > 0" class="nearby-schedule-panel__cards">
       <div
         v-for="item in displayedItems"
         :key="item.id"
@@ -288,6 +305,56 @@ function boardContextMenu(itemId: string, event: MouseEvent): void {
         />
       </div>
     </div>
+
+    <div v-else-if="displayedOutsideMapItems.length === 0 && !loading" class="nearby-schedule-panel__empty">
+      <Clock3 :size="21" aria-hidden="true" />
+      <span>{{ t("nearbyStations.scheduleEmpty") }}</span>
+    </div>
+
+    <details
+      v-if="displayedOutsideMapItems.length > 0"
+      class="nearby-schedule-panel__outside"
+    >
+      <summary class="nearby-schedule-panel__outside-summary">
+        <span>{{ t("nearbyStations.scheduleOutsideTitle") }}</span>
+        <strong>{{ t("nearbyStations.scheduleOutsideCount", { count: displayedOutsideMapItems.length }) }}</strong>
+      </summary>
+      <div class="nearby-schedule-panel__cards nearby-schedule-panel__outside-cards">
+        <div
+          v-for="item in displayedOutsideMapItems"
+          :key="item.id"
+          class="nearby-schedule-board-card"
+          :class="{
+            'nearby-schedule-board-card--active': activeStationId === item.stationId,
+            'nearby-schedule-board-card--unavailable': item.state === 'unavailable',
+          }"
+          :data-schedule-id="item.id"
+          @contextmenu="boardContextMenu(item.id, $event)"
+        >
+          <TransitBoard
+            :board="scheduleBoard(item)"
+            :departures="scheduleDepartures(item)"
+            :direction-groups="scheduleDirectionGroups(item)"
+            :collapsed-direction-ids="collapsedDirectionIds(item)"
+            :hidden-direction-ids="hiddenDirectionIds(item)"
+            :loading="item.state === 'loading'"
+            :error="item.state === 'unavailable' ? t('nearbyStations.scheduleUnavailable') : undefined"
+            removable
+            :show-station-change-action="false"
+            :alarm-departure-ids="alarmDepartureIds?.(item.id) ?? []"
+            :traffic-alert="trafficAlertForItem?.(item)"
+            display-mode="grid"
+            @toggle-direction="toggleScheduleDirection(item.id, $event)"
+            @open-traffic="openTraffic(item, $event)"
+            @open-line-page="emit('openLinePage', item, $event)"
+            @open-fullscreen-panel="emit('openFullscreenPanel', item, $event)"
+            @remove="emit('removeItem', item.id)"
+            @update:hidden-direction-ids="emit('updateHiddenDirections', item.id, $event)"
+            @schedule-alarm="emit('scheduleAlarm', $event)"
+          />
+        </div>
+      </div>
+    </details>
   </section>
 </template>
 
@@ -308,6 +375,11 @@ function boardContextMenu(itemId: string, event: MouseEvent): void {
 .nearby-schedule-panel__empty { align-items: center; color: var(--muted); display: flex; font-size: .76rem; gap: 8px; padding: 12px 3px; }
 .nearby-schedule-panel__empty svg { color: #5146ff; flex: 0 0 auto; }
 .nearby-schedule-panel__cards { display: grid; gap: 9px; max-height: 330px; overflow: auto; padding: 1px 2px 1px 0; }
+.nearby-schedule-panel__outside { border-top: 1px solid rgba(16,35,63,.1); margin-top: 3px; padding-top: 8px; }
+.nearby-schedule-panel__outside-summary { align-items: center; color: #5146ff; cursor: pointer; display: flex; font-size: .74rem; font-weight: 850; gap: 8px; justify-content: space-between; list-style-position: inside; padding: 3px 2px 6px; }
+.nearby-schedule-panel__outside-summary::marker { color: #5146ff; }
+.nearby-schedule-panel__outside-summary strong { color: var(--muted); font-size: .66rem; font-weight: 800; }
+.nearby-schedule-panel__outside-cards { margin-top: 4px; }
 .nearby-schedule-panel--fullscreen .nearby-schedule-panel__cards { max-height: none; overflow: visible; }
 .nearby-schedule-board-card { min-width: 0; }
 .nearby-schedule-board-card--active :deep(.board) { box-shadow: 0 8px 22px rgba(81,70,255,.14); outline: 2px solid color-mix(in srgb, var(--line-color, #5146ff), #fff 42%); }

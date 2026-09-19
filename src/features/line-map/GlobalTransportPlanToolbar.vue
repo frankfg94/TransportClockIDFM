@@ -101,10 +101,43 @@
       </button>
       <button
         type="button"
+        class="map-button map-button--iris"
+        :class="{ 'map-button--iris-active': irisEnabled }"
+        :disabled="irisLoading"
+        :aria-pressed="irisEnabled"
+        :aria-busy="irisLoading"
+        :aria-label="irisEnabled ? t('globalMap.iris.exit') : t('globalMap.iris.toggle')"
+        :title="irisEnabled ? t('globalMap.iris.exit') : t('globalMap.iris.toggle')"
+        data-global-map-iris-toggle
+        @click="emit('toggle-iris')"
+      >
+        <MapIcon :size="18" aria-hidden="true" />
+        {{ irisEnabled ? t("globalMap.iris.exit") : t("globalMap.iris.toggle") }}
+      </button>
+      <button
+        v-if="irisEnabled"
+        type="button"
+        class="map-button traffic-switch iris-subdivisions-switch"
+        :class="{ 'traffic-switch--checked': irisSubdivisionsVisible }"
+        role="switch"
+        :aria-checked="irisSubdivisionsVisible"
+        :aria-label="t('globalMap.iris.subdivisionsToggleAria')"
+        :title="t('globalMap.iris.subdivisionsToggleAria')"
+        data-global-map-iris-subdivisions-toggle
+        @click="emit('toggle-iris-subdivisions')"
+      >
+        <span class="traffic-switch__copy">
+          <strong>{{ t("globalMap.iris.subdivisionsToggle") }}</strong>
+          <small>{{ irisSubdivisionsVisible ? t("globalMap.iris.subdivisionsOn") : t("globalMap.iris.grouped") }}</small>
+        </span>
+        <span class="traffic-switch__track" aria-hidden="true"><span /></span>
+      </button>
+      <button
+        type="button"
         class="map-button map-button--radar"
         :class="{ 'map-button--radar-active': radarEnabled }"
-        :aria-label="t('globalMap.radar.open')"
-        :title="t('globalMap.radar.open')"
+        :aria-label="radarEnabled && radarPanelOpen ? t('globalMap.radar.disable') : t('globalMap.radar.open')"
+        :title="radarEnabled && radarPanelOpen ? t('globalMap.radar.disable') : t('globalMap.radar.open')"
         :aria-expanded="Boolean(radarPanelOpen)"
         aria-controls="global-map-radar-panel"
         data-global-map-radar-toggle
@@ -198,7 +231,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { ChevronDown, Radar, SlidersHorizontal } from "lucide-vue-next";
+import { ChevronDown, Map as MapIcon, Radar, SlidersHorizontal } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
 import PatternTrafficCalendarToggle from "../service-pattern/PatternTrafficCalendarToggle.vue";
 import type { TransportMapBasemapLayer } from "../transport-map/basemap/tileMath";
@@ -229,9 +262,15 @@ withDefaults(defineProps<{
   shareFeedback: string;
   radarEnabled?: boolean;
   radarPanelOpen?: boolean;
+  irisEnabled?: boolean;
+  irisLoading?: boolean;
+  irisSubdivisionsVisible?: boolean;
   showMapInteractions?: boolean;
 }>(), {
   showMapInteractions: true,
+  irisEnabled: false,
+  irisLoading: false,
+  irisSubdivisionsVisible: false,
 });
 
 const emit = defineEmits<{
@@ -243,6 +282,8 @@ const emit = defineEmits<{
   "toggle-traffic-calendar": [];
   "toggle-traffic": [];
   "open-radar": [];
+  "toggle-iris": [];
+  "toggle-iris-subdivisions": [];
   clear: [];
   "update:basemap-layer": [value: TransportMapBasemapLayer];
 }>();
@@ -486,6 +527,23 @@ onBeforeUnmount(() => {
   gap: 7px;
   background: #fff;
   color: #315b91;
+}
+.map-button--iris {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: #fff;
+  color: #6d28d9;
+}
+.map-button--iris:hover,
+.map-button--iris:focus-visible,
+.map-button--iris-active {
+  border-color: #a78bfa;
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+.iris-subdivisions-switch.traffic-switch--checked .traffic-switch__track {
+  background: #7c3aed;
 }
 .map-button--radar:hover,
 .map-button--radar:focus-visible,

@@ -1,6 +1,7 @@
 import type { GlobalMapEntrance, GlobalMapLine, GlobalMapPath, GlobalMapStation } from "./manifest";
 import type { CameraState } from "../geo/camera";
 import type { GlobalIsochroneSurface } from "../isochrones/contracts";
+import type { IrisPolygonGeometry } from "../iris/irisApi";
 import type {
   TransportMapBinaryPathPacket,
   TransportMapPreparedRenderModel,
@@ -29,6 +30,27 @@ export interface GlobalMapQuayMarker {
 
 export type TransportMapTrafficImpactKind = "interruption" | "disturbance";
 
+/** Official city or department geometry used by the global and served-city overlays. */
+export interface TransportMapServedCityZone {
+  id: string;
+  name: string;
+  /** Global overlays may temporarily use a department aggregate at low zoom. */
+  kind?: "city" | "department";
+  /** The basemap already carries city names for the global overlay. */
+  showLabel?: boolean;
+  geometry: IrisPolygonGeometry;
+  boundaryPaths: ReadonlyArray<ReadonlyArray<readonly [number, number]>>;
+  /** Lighter city delimitations drawn inside a department aggregate. */
+  innerBoundaryPaths?: ReadonlyArray<ReadonlyArray<readonly [number, number]>>;
+  innerBoundaryColor?: readonly [number, number, number, number];
+  centroid: readonly [number, number];
+  /** Fixed CSS-pixel offset used to detach the city name from route labels. */
+  labelPixelOffset: readonly [number, number];
+  fillColor: readonly [number, number, number, number];
+  borderColor: readonly [number, number, number, number];
+  labelColor: readonly [number, number, number, number];
+}
+
 export interface TransportMapTrafficPathSpan {
   pathId: string;
   startVertexIndex: number;
@@ -42,6 +64,8 @@ export interface TransportMapRenderScene {
   walkingIsochrones?: readonly GlobalIsochroneSurface[];
   /** Walking zones currently under the pointer, used for a subtle border emphasis. */
   hoveredIsochroneIds?: readonly string[];
+  /** Administrative polygons selected for the global or served-city overlay. */
+  servedCityZones?: readonly TransportMapServedCityZone[];
   lines: GlobalMapLine[];
   paths: GlobalMapPath[];
   stations: GlobalMapStation[];

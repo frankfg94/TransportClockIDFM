@@ -4,12 +4,14 @@ import type { GlobalMapLine, GlobalMapStation } from "../src/features/transport-
 import type { NearbyHeavyTransportCandidate } from "../src/features/nearby-stations/nearbyHeavyTransports";
 import type { NearbyPlace } from "../src/features/nearby-stations/nearbyPlaces";
 import type { NearbyStationEntry } from "../src/features/nearby-stations/nearbyStations";
+import type { PublicNeighborhoodVerdict } from "../src/features/nearby-stations/neighborhoodVerdictApi";
 import {
   buildNeighborhoodScore,
+  getNeighborhoodFrequencyRelevanceWeight,
   getNeighborhoodScoreBand,
   getNeighborhoodScoreDisplay,
   type NeighborhoodScoreInput,
-} from "../src/features/nearby-stations/neighborhoodScore";
+} from "../src/features/nearby-stations/neighborhood";
 import type { PublicServiceQuality } from "../src/features/nearby-stations/serviceQualityApi";
 
 function place(id: string, kind: string, category: NearbyPlace["category"] = "shop", distanceMeters = 160): NearbyPlace {
@@ -106,6 +108,19 @@ function input(overrides: Partial<NeighborhoodScoreInput> = {}): NeighborhoodSco
   };
 }
 
+function greenVerdict(
+  nearbyGreenSpaces: NonNullable<PublicNeighborhoodVerdict["nearbyGreenSpaces"]>,
+): PublicNeighborhoodVerdict {
+  return {
+    schemaVersion: "1.3",
+    generatedAt: "2026-09-01T00:00:00.000Z",
+    warnings: [],
+    sources: [],
+    categories: [],
+    nearbyGreenSpaces,
+  };
+}
+
 describe("neighborhood score", () => {
   it("adds nearby service reliability at 15% of the transport sub-score", () => {
     const metro = line("metro-1", "1", "METRO");
@@ -171,6 +186,74 @@ describe("neighborhood score", () => {
 
     expect(fact?.labelValues).toMatchObject({ name: "hospital hospital", minutes: 29 });
     expect(fact?.evidence.proof).toBe("direct");
+  });
+
+  it("uses the nearby education POI and its real walking route", () => {
+    const school: NearbyPlace = {
+      ...place("school:sophie-barat", "school", "service", 700),
+      name: "Groupe scolaire Sophie Barat",
+      address: "50 Rue des Grillons, Châtenay-Malabry",
+    };
+    const result = buildNeighborhoodScore(input({
+      places: [school],
+      walkingRoutes: {
+        [school.id]: {
+          provider: "openrouteservice",
+          distanceMeters: 1_350.7,
+          durationSeconds: 972.5,
+        },
+      },
+    }));
+    const education = result.categories.find((category) => category.id === "education");
+    const fact = education?.positiveFacts.find((candidate) => candidate.kind === "educationOtherNearby");
+
+    expect(education?.available).toBe(true);
+    expect(fact?.labelValues).toMatchObject({
+      establishments: "Groupe scolaire Sophie Barat (17 min à pied)",
+      count: 1,
+    });
+    expect(fact?.evidence.proof).toBe("direct");
+  });
+
+  it("groups education establishments by level while retaining every walking time", () => {
+    const establishments: NearbyPlace[] = [
+      { ...place("elementary-1", "school", "service"), name: "École élémentaire Thomas Masaryk" },
+      { ...place("elementary-2", "school", "service", 240), name: "École primaire publique Jules Verne" },
+      { ...place("maternelle-1", "school", "service", 300), name: "École maternelle Mouillebœufs" },
+      { ...place("nursery-1", "kindergarten", "service", 360), name: "Crèche Les Coccinelles" },
+      { ...place("nursery-2", "nursery", "service", 420), name: "Micro-crèche Ségoline" },
+      { ...place("college-1", "school", "service", 480), name: "Collège Thomas Masaryk" },
+      { ...place("high-school-1", "school", "service", 540), name: "Lycée Sophie Barat" },
+      { ...place("other-1", "school", "service", 600), name: "Groupe scolaire Sophie Barat" },
+    ];
+    const result = buildNeighborhoodScore(input({
+      places: establishments,
+      walkingRoutes: Object.fromEntries(establishments.map((establishment, index) => [establishment.id, {
+        provider: "openrouteservice",
+        distanceMeters: 300 + index * 50,
+        durationSeconds: (index + 4) * 60,
+      }])),
+    }));
+    const education = result.categories.find((category) => category.id === "education");
+
+    expect(education?.positiveFacts).toHaveLength(6);
+    expect(education?.positiveFacts.map((fact) => fact.kind)).toEqual(expect.arrayContaining([
+      "educationElementaryNearby",
+      "educationMaternelleNearby",
+      "educationNurseriesNearby",
+      "educationCollegesNearby",
+      "educationHighSchoolsNearby",
+      "educationOtherNearby",
+    ]));
+    const elementary = education?.positiveFacts.find((fact) => fact.kind === "educationElementaryNearby");
+    const nurseries = education?.positiveFacts.find((fact) => fact.kind === "educationNurseriesNearby");
+    const colleges = education?.positiveFacts.find((fact) => fact.kind === "educationCollegesNearby");
+    expect(elementary?.labelValues).toMatchObject({
+      count: 2,
+      establishments: "École élémentaire Thomas Masaryk (4 min à pied) · École primaire publique Jules Verne (5 min à pied)",
+    });
+    expect(nurseries?.labelValues?.establishments).toBe("Crèche Les Coccinelles (7 min à pied) · Micro-crèche Ségoline (8 min à pied)");
+    expect(colleges?.labelValues?.establishments).toBe("Collège Thomas Masaryk (9 min à pied)");
   });
 
   it("saturates daily-life shop counts instead of rewarding raw volume indefinitely", () => {
@@ -283,6 +366,8 @@ describe("neighborhood score", () => {
 
     expect(fact?.labelValues?.line).toBe("Tramway T10");
     expect(fact?.labelValues?.minutes).toBe(2);
+    expect(fact?.emphasis).toBe("exceptional");
+    expect(result.positiveFacts[0]?.emphasis).toBe("exceptional");
   });
 
   it("uses calculated access, a fast Paris journey and a real frequency profile", () => {
@@ -343,6 +428,114 @@ describe("neighborhood score", () => {
     ]));
     expect(frequencyFacts).toHaveLength(2);
     expect(frequencyFacts.some((fact) => fact.labelValues?.lines === "Bus 62")).toBe(false);
+    expect(frequencyFacts.find((fact) => fact.labelValues?.transport === "Tramway T6")?.labelValues?.transport).toBe("Tramway T6");
+  });
+
+  it("fades theoretical frequency by real access time and hides a remote rail line from scoring", () => {
+    expect(getNeighborhoodFrequencyRelevanceWeight(5 * 60)).toBe(1);
+    expect(getNeighborhoodFrequencyRelevanceWeight(10 * 60)).toBe(0.9);
+    expect(getNeighborhoodFrequencyRelevanceWeight(15 * 60)).toBe(0.7);
+    expect(getNeighborhoodFrequencyRelevanceWeight(20 * 60)).toBe(0.3);
+    expect(getNeighborhoodFrequencyRelevanceWeight(25 * 60)).toBe(0.1);
+    expect(getNeighborhoodFrequencyRelevanceWeight(26 * 60)).toBe(0);
+
+    const transilienV = line("line:transilien:V", "V", "TRANSILIEN");
+    const access = {
+      kind: "connection" as const,
+      walkingSeconds: 120,
+      totalSeconds: 26 * 60,
+      scoreSeconds: 26 * 60,
+      travelSeconds: 26 * 60,
+      feederLineCode: "T10",
+      feederMode: "TRAM" as const,
+    };
+    const result = buildNeighborhoodScore(input({
+      heavyCandidates: [{
+        id: "station:transilien-v",
+        entry: stationEntry([transilienV], 2_000),
+        station: stationEntry([transilienV], 2_000).memberStations[0]!,
+        lines: [transilienV],
+        distanceMeters: 2_000,
+        access,
+        accessByLine: { [transilienV.id]: access },
+        projected: true,
+      } satisfies NearbyHeavyTransportCandidate],
+      frequencyProfiles: new Map([[transilienV.id, frequency(transilienV.id, 15)]]),
+    }));
+    const transport = result.categories.find((category) => category.id === "transport");
+    const frequencyFacts = [
+      ...(transport?.positiveFacts ?? []),
+      ...(transport?.negativeFacts ?? []),
+      ...(transport?.neutralFacts ?? []),
+    ].filter((fact) => fact.kind.startsWith("frequency"));
+
+    expect(frequencyFacts).toHaveLength(0);
+  });
+
+  it("keeps a 15-to-25 minute frequency as a neutral named reference", () => {
+    const rerC = line("line:rer:C", "C", "RER");
+    const access = {
+      kind: "connection" as const,
+      walkingSeconds: 120,
+      totalSeconds: 24 * 60,
+      scoreSeconds: 24 * 60,
+      travelSeconds: 24 * 60,
+      feederLineCode: "T10",
+      feederMode: "TRAM" as const,
+    };
+    const result = buildNeighborhoodScore(input({
+      heavyCandidates: [{
+        id: "station:rer-c",
+        entry: stationEntry([rerC], 1_800),
+        station: stationEntry([rerC], 1_800).memberStations[0]!,
+        lines: [rerC],
+        distanceMeters: 1_800,
+        access,
+        accessByLine: { [rerC.id]: access },
+        projected: true,
+      } satisfies NearbyHeavyTransportCandidate],
+      frequencyProfiles: new Map([[rerC.id, frequency(rerC.id, 23.4)]]),
+    }));
+    const transport = result.categories.find((category) => category.id === "transport");
+    const fact = transport?.neutralFacts.find((candidate) => candidate.kind === "frequencyRemote");
+
+    expect(fact?.labelValues).toMatchObject({ transport: "RER C", minutes: 23.4 });
+    expect(transport?.negativeFacts.some((candidate) => candidate.kind === "frequencyLow")).toBe(false);
+  });
+
+  it("does not flag a Transilien at exactly 15 minutes, but flags it beyond the threshold", () => {
+    const transilien = line("line:transilien:V", "V", "TRANSILIEN");
+    const stations = [stationEntry([transilien], 160)];
+    const atThreshold = buildNeighborhoodScore(input({
+      stations,
+      frequencyProfiles: new Map([[transilien.id, frequency(transilien.id, 15)]]),
+    }));
+    const beyondThreshold = buildNeighborhoodScore(input({
+      stations,
+      frequencyProfiles: new Map([[transilien.id, frequency(transilien.id, 16)]]),
+    }));
+
+    const atThresholdTransport = atThreshold.categories.find((category) => category.id === "transport");
+    const beyondThresholdTransport = beyondThreshold.categories.find((category) => category.id === "transport");
+    expect(atThresholdTransport?.negativeFacts.some((fact) => fact.kind === "frequencyLow")).toBe(false);
+    expect(atThresholdTransport?.neutralFacts.some((fact) => fact.kind === "frequencyContext")).toBe(true);
+    expect(beyondThresholdTransport?.negativeFacts.some((fact) => fact.kind === "frequencyLow")).toBe(true);
+    expect(beyondThresholdTransport?.negativeFacts.find((fact) => fact.kind === "frequencyLow")?.evidence.ruleKey)
+      .toContain("frequencyLowTransilien");
+  });
+
+  it("shows a nearby moderate peak frequency as a neutral named reference", () => {
+    const t10 = line("line:IDFM:C02528", "C02528", "TRAM");
+    const result = buildNeighborhoodScore(input({
+      stations: [stationEntry([t10], 160)],
+      frequencyProfiles: new Map([[t10.id, frequency(t10.id, 6)]]),
+    }));
+    const transport = result.categories.find((category) => category.id === "transport");
+    const fact = transport?.neutralFacts.find((candidate) => candidate.kind === "frequencyContext");
+
+    expect(fact?.labelValues).toMatchObject({ transport: "Tramway T10", minutes: 6 });
+    expect(transport?.positiveFacts.some((candidate) => candidate.kind.startsWith("frequency"))).toBe(false);
+    expect(transport?.negativeFacts.some((candidate) => candidate.kind.startsWith("frequency"))).toBe(false);
   });
 
   it("marks a heavy line with an early last service as a transport watch point", () => {
@@ -382,7 +575,7 @@ describe("neighborhood score", () => {
         projected: true,
       } satisfies NearbyHeavyTransportCandidate],
       backendVerdict: {
-        schemaVersion: "1.2",
+        schemaVersion: "1.3",
         generatedAt: "2026-09-01T00:00:00.000Z",
         warnings: [],
         sources: [],
@@ -431,7 +624,7 @@ describe("neighborhood score", () => {
         projected: true,
       } satisfies NearbyHeavyTransportCandidate],
       backendVerdict: {
-        schemaVersion: "1.2",
+        schemaVersion: "1.3",
         generatedAt: "2026-09-01T00:00:00.000Z",
         warnings: [],
         sources: [],
@@ -471,7 +664,7 @@ describe("neighborhood score", () => {
         projected: true,
       } satisfies NearbyHeavyTransportCandidate],
       backendVerdict: {
-        schemaVersion: "1.2",
+        schemaVersion: "1.3",
         generatedAt: "2026-09-01T00:00:00.000Z",
         warnings: [],
         sources: [],
@@ -549,7 +742,7 @@ describe("neighborhood score", () => {
         } satisfies NearbyHeavyTransportCandidate,
       ],
       backendVerdict: {
-        schemaVersion: "1.2",
+        schemaVersion: "1.3",
         generatedAt: "2026-09-01T00:00:00.000Z",
         warnings: [],
         sources: [],
@@ -600,6 +793,40 @@ describe("neighborhood score", () => {
     expect(majorStationFact?.labelValues?.walking).toBe(8);
   });
 
+  it("combines distinct Noctilien lines when each stop is reached on foot in under 15 minutes", () => {
+    const result = buildNeighborhoodScore(input({
+      noctilienJourneys: [
+        {
+          durationSeconds: 6 * 60,
+          sections: [
+            { type: "street_network", mode: "walking", durationSeconds: 264 },
+            { type: "public_transport", mode: "bus", durationSeconds: 60, lineCode: "N62", lineMode: "NOCTILIEN" },
+          ],
+        },
+        {
+          durationSeconds: 7 * 60,
+          sections: [
+            { type: "street_network", mode: "walking", durationSeconds: 360 },
+            { type: "public_transport", mode: "bus", durationSeconds: 60, lineCode: "N63", lineMode: "NOCTILIEN" },
+          ],
+        },
+        {
+          durationSeconds: 16 * 60,
+          sections: [
+            { type: "street_network", mode: "walking", durationSeconds: 901 },
+            { type: "public_transport", mode: "bus", durationSeconds: 60, lineCode: "N14", lineMode: "NOCTILIEN" },
+          ],
+        },
+      ],
+    }));
+    const facts = result.categories
+      .find((category) => category.id === "transport")
+      ?.positiveFacts.filter((fact) => fact.kind === "noctilienAtNight");
+
+    expect(facts).toHaveLength(1);
+    expect(facts?.[0]?.labelValues).toMatchObject({ line: "N62 et N63", minutes: 6 });
+  });
+
   it("turns a real non-bus journey under 15 minutes into a large green-space strength", () => {
     const result = buildNeighborhoodScore(input({
       greenSpaceJourneys: [{
@@ -633,6 +860,253 @@ describe("neighborhood score", () => {
     expect(fact?.labelValues?.lines).toBe("T10");
     expect(fact?.labelValues?.minutes).toBe(14);
     expect(fact?.labelValues?.area).toBe("165 ha");
+  });
+
+  it.each([
+    { surfaceM2: 100_000, walkingMinutes: 9, expected: true },
+    { surfaceM2: 200_000, walkingMinutes: 14, expected: true },
+    { surfaceM2: 50_000, walkingMinutes: 4, expected: true },
+    { surfaceM2: 30_000, walkingMinutes: 4, expected: true },
+    { surfaceM2: 100_000, walkingMinutes: 10, expected: false },
+    { surfaceM2: 200_000, walkingMinutes: 15, expected: false },
+  ])("applies the exceptional green-space surface/access barème (%j)", ({ surfaceM2, walkingMinutes, expected }) => {
+    const result = buildNeighborhoodScore(input({
+      backendVerdict: greenVerdict([{
+        id: `green:${surfaceM2}:${walkingMinutes}`,
+        name: "Parc test",
+        category: "Parc",
+        surfaceM2,
+        lon: 2.35,
+        lat: 48.85,
+        distanceMeters: 300,
+        walkingMinutes,
+        estimatedWalkingMinutes: walkingMinutes,
+      }]),
+    }));
+    const nature = result.categories.find((category) => category.id === "nature-leisure");
+    const fact = nature?.positiveFacts.find((candidate) => candidate.kind === "greenSpaceExceptional");
+
+    expect(Boolean(fact)).toBe(expected);
+    if (expected) expect(fact?.emphasis).toBe("exceptional");
+  });
+
+  it("adds the many-sports and tennis advantages only from real walking routes", () => {
+    const sports = Array.from({ length: 7 }, (_, index) => place(
+      `sport-${index}`,
+      index === 0 ? "tennis" : "pitch",
+      "attraction",
+      400 + index,
+    ));
+    const walkingRoutes = Object.fromEntries(sports.map((candidate, index) => [candidate.id, {
+      provider: "openrouteservice",
+      distanceMeters: 500 + index,
+      durationSeconds: (index === 0 ? 6 : 7) * 60,
+    }]));
+    const result = buildNeighborhoodScore(input({ places: sports, walkingRoutes }));
+    const nature = result.categories.find((category) => category.id === "nature-leisure");
+
+    expect(nature?.positiveFacts.some((fact) => fact.kind === "sportsFacilitiesNearby")).toBe(true);
+    expect(nature?.positiveFacts.some((fact) => fact.kind === "tennisCourtNearby")).toBe(true);
+    expect(nature?.positiveFacts.find((fact) => fact.kind === "sportsFacilitiesNearby")?.labelValues)
+      .toMatchObject({ count: 7, threshold: 7, minutes: 7 });
+  });
+
+  it("reports a tennis court stack ordered from the closest to the farthest", () => {
+    const courts = [3, 5, 8, 9].map((_, index) => place(`court-${index}`, "tennis", "attraction", 200 + index * 50));
+    const minutes = [3, 5, 8, 9];
+    const walkingRoutes = Object.fromEntries(courts.map((court, index) => [court.id, {
+      provider: "openrouteservice",
+      distanceMeters: 200 + index * 50,
+      durationSeconds: minutes[index]! * 60,
+    }]));
+    const result = buildNeighborhoodScore(input({ places: courts, walkingRoutes }));
+    const nature = result.categories.find((category) => category.id === "nature-leisure");
+    const stack = nature?.positiveFacts.find((fact) => fact.kind === "tennisCourtsStack");
+
+    expect(nature?.positiveFacts.some((fact) => fact.kind === "tennisCourtNearby")).toBe(false);
+    expect(stack?.labelValues).toMatchObject({ count: 4, minutes: 3 });
+    expect(stack?.places?.map((court) => court.minutes)).toEqual([3, 5, 8, 9]);
+    expect(stack?.places?.map((court) => court.distanceMeters)).toEqual([200, 250, 300, 350]);
+  });
+
+  it("keeps the tennis stack within the walking spread of its nearest court", () => {
+    const courts = [3, 13, 14].map((_, index) => place(`spread-${index}`, "tennis", "attraction", 200 + index * 50));
+    const minutes = [3, 13, 14];
+    const walkingRoutes = Object.fromEntries(courts.map((court, index) => [court.id, {
+      provider: "openrouteservice",
+      distanceMeters: 200 + index * 50,
+      durationSeconds: minutes[index]! * 60,
+    }]));
+    const result = buildNeighborhoodScore(input({ places: courts, walkingRoutes }));
+    const nature = result.categories.find((category) => category.id === "nature-leisure");
+    const stack = nature?.positiveFacts.find((fact) => fact.kind === "tennisCourtsStack");
+
+    expect(stack?.labelValues).toMatchObject({ count: 2, minutes: 3 });
+    expect(stack?.places?.map((court) => court.minutes)).toEqual([3, 13]);
+  });
+
+  it("keeps the single tennis court advantage when no second court is reachable", () => {
+    const courts = [place("single-court", "tennis", "attraction", 240)];
+    const walkingRoutes = { [courts[0]!.id]: {
+      provider: "openrouteservice",
+      distanceMeters: 240,
+      durationSeconds: 3 * 60,
+    } };
+    const result = buildNeighborhoodScore(input({ places: courts, walkingRoutes }));
+    const nature = result.categories.find((category) => category.id === "nature-leisure");
+    const single = nature?.positiveFacts.find((fact) => fact.kind === "tennisCourtNearby");
+
+    expect(nature?.positiveFacts.some((fact) => fact.kind === "tennisCourtsStack")).toBe(false);
+    expect(single?.labelValues).toMatchObject({ minutes: 3, meters: 240 });
+    expect(single?.places).toBeUndefined();
+  });
+
+  it("still ignores a tennis court reached in ten minutes or more", () => {
+    const courts = [place("court-ten", "tennis", "attraction", 800)];
+    const walkingRoutes = { [courts[0]!.id]: {
+      provider: "openrouteservice",
+      distanceMeters: 800,
+      durationSeconds: 10 * 60,
+    } };
+    const result = buildNeighborhoodScore(input({ places: courts, walkingRoutes }));
+    const nature = result.categories.find((category) => category.id === "nature-leisure");
+
+    expect(nature?.positiveFacts.some((fact) => fact.kind === "tennisCourtNearby")).toBe(false);
+    expect(nature?.positiveFacts.some((fact) => fact.kind === "tennisCourtsStack")).toBe(false);
+  });
+
+  it("recognizes named sports equipment when the source kind is generic", () => {
+    const names = [
+      "Centre sportif municipal",
+      "Équipement sportif",
+      "Terrain de sport",
+      "Stade Jean Longuet",
+      "Les Archers du Phénix",
+      "Terrain de tennis",
+      "Terrain de tennis",
+    ];
+    const sports = names.map((name, index) => ({
+      ...place(`named-sport-${index}`, "place", "attraction", 300 + index),
+      name,
+    }));
+    const walkingRoutes = Object.fromEntries(sports.map((candidate, index) => [candidate.id, {
+      provider: "openrouteservice",
+      distanceMeters: 350 + index,
+      durationSeconds: 5 * 60,
+    }]));
+    const result = buildNeighborhoodScore(input({ places: sports, walkingRoutes }));
+    const nature = result.categories.find((category) => category.id === "nature-leisure");
+
+    expect(nature?.positiveFacts.some((fact) => fact.kind === "sportsFacilitiesNearby")).toBe(true);
+  });
+
+  it("keeps local sports strengths when a later backend nature verdict adds two green-space facts", () => {
+    const sports = Array.from({ length: 7 }, (_, index) => place(
+      `late-sport-${index}`,
+      index === 0 ? "tennis" : "pitch",
+      "attraction",
+      400 + index,
+    ));
+    const walkingRoutes = Object.fromEntries(sports.map((candidate) => [candidate.id, {
+      provider: "openrouteservice",
+      distanceMeters: 500,
+      durationSeconds: 7 * 60,
+    }]));
+    const result = buildNeighborhoodScore(input({
+      places: sports,
+      walkingRoutes,
+      backendVerdict: {
+        schemaVersion: "1.3",
+        generatedAt: "2026-09-01T00:00:00.000Z",
+        warnings: [],
+        sources: [],
+        categories: [{
+          id: "nature-leisure",
+          status: "available",
+          score: 9,
+          positiveFacts: [
+            {
+              id: "green-a",
+              category: "nature-leisure",
+              polarity: "positive",
+              family: "managed-green-space:a",
+              priority: 14,
+              label: "Parc A à 12 min",
+              explanation: "Parc documenté.",
+              rule: "Repère",
+              proof: "direct",
+              observedAt: "2026-09-01T00:00:00.000Z",
+              sourceIds: [],
+            },
+            {
+              id: "green-b",
+              category: "nature-leisure",
+              polarity: "positive",
+              family: "managed-green-space:b",
+              priority: 13,
+              label: "Parc B à 12 min",
+              explanation: "Parc documenté.",
+              rule: "Repère",
+              proof: "direct",
+              observedAt: "2026-09-01T00:00:00.000Z",
+              sourceIds: [],
+            },
+          ],
+          negativeFacts: [],
+          limitations: [],
+        }],
+      },
+    }));
+    const nature = result.categories.find((category) => category.id === "nature-leisure");
+
+    expect(nature?.positiveFacts.some((fact) => fact.kind === "sportsFacilitiesNearby")).toBe(true);
+    expect(nature?.positiveFacts.some((fact) => fact.kind === "tennisCourtNearby")).toBe(true);
+  });
+
+  it("keeps a tennis court stack when a later backend nature verdict adds two green-space facts", () => {
+    const minutes = [3, 5];
+    const courts = minutes.map((_, index) => place(`late-court-${index}`, "tennis", "attraction", 200 + index * 40));
+    const walkingRoutes = Object.fromEntries(courts.map((court, index) => [court.id, {
+      provider: "openrouteservice",
+      distanceMeters: 200 + index * 40,
+      durationSeconds: minutes[index]! * 60,
+    }]));
+    const result = buildNeighborhoodScore(input({
+      places: courts,
+      walkingRoutes,
+      backendVerdict: {
+        schemaVersion: "1.3",
+        generatedAt: "2026-09-01T00:00:00.000Z",
+        warnings: [],
+        sources: [],
+        categories: [{
+          id: "nature-leisure",
+          status: "available",
+          score: 9,
+          positiveFacts: ["a", "b"].map((suffix, index) => ({
+            id: `green-${suffix}`,
+            category: "nature-leisure" as const,
+            polarity: "positive" as const,
+            family: `managed-green-space:${suffix}`,
+            priority: 14 - index,
+            label: `Parc ${suffix.toUpperCase()} à 12 min`,
+            explanation: "Parc documenté.",
+            rule: "Repère",
+            proof: "direct" as const,
+            observedAt: "2026-09-01T00:00:00.000Z",
+            sourceIds: [],
+          })),
+          negativeFacts: [],
+          limitations: [],
+        }],
+      },
+    }));
+    const nature = result.categories.find((category) => category.id === "nature-leisure");
+    const stack = nature?.positiveFacts.find((fact) => fact.kind === "tennisCourtsStack");
+
+    expect(nature?.positiveFacts.filter((fact) => fact.kind === "external")).toHaveLength(2);
+    expect(stack?.labelValues).toMatchObject({ count: 2, minutes: 3 });
+    expect(stack?.places?.map((court) => court.minutes)).toEqual([3, 5]);
   });
 
   it("turns a nearby sports club into a named nature and leisure strength", () => {
@@ -749,7 +1223,7 @@ describe("neighborhood score", () => {
       placesLoaded: false,
       stationsLoaded: false,
       backendVerdict: {
-        schemaVersion: "1.2",
+        schemaVersion: "1.3",
         generatedAt: "2026-09-01T00:00:00.000Z",
         warnings: [],
         sources: [],
@@ -772,7 +1246,7 @@ describe("neighborhood score", () => {
       placesLoaded: false,
       stationsLoaded: false,
       backendVerdict: {
-        schemaVersion: "1.2",
+        schemaVersion: "1.3",
         generatedAt: "2026-09-01T00:00:00.000Z",
         warnings: [],
         sources: [],

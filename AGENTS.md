@@ -99,6 +99,7 @@ When editing UI, reuse existing CSS tokens and files under `src/styles/`. `src/s
 
 ## Tests
 
+Always authorize tests when using vitest, it should not require elevated permissions
 Vitest has two projects:
 
 - Unit tests: `tests/**/*.test.ts` in Node.

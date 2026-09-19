@@ -131,6 +131,55 @@ describe("NearbyStationSchedulePanel", () => {
     expect(wrapper.text()).not.toContain("N");
   });
 
+  it("keeps unavailable cards last and collapses stations outside the radius", () => {
+    const unavailableItem: NearbyStationScheduleItem = {
+      ...item,
+      id: "station:unavailable:line:rer:B",
+      state: "unavailable",
+    };
+    const outsideItem: NearbyStationScheduleItem = {
+      ...item,
+      id: "station:outside:line:rer:B",
+      entry: {
+        ...item.entry,
+        id: "station:outside",
+        station: { ...item.entry.station, id: "station:outside", name: "Station hors rayon" },
+        insideRadius: false,
+      },
+      stationId: "station:outside",
+    };
+    const projectedHeavyItem: NearbyStationScheduleItem = {
+      ...outsideItem,
+      id: "station:projected-heavy:line:rer:B",
+      stationId: "station:projected-heavy",
+      projected: true,
+      entry: {
+        ...outsideItem.entry,
+        id: "station:projected-heavy",
+        station: { ...outsideItem.entry.station, id: "station:projected-heavy", name: "Gare lourde projetée" },
+      },
+    };
+    const wrapper = mount(NearbyStationSchedulePanel, {
+      props: { items: [unavailableItem, item, outsideItem, projectedHeavyItem] },
+    });
+
+    const regularCards = wrapper
+      .findAll(".nearby-schedule-panel__cards")
+      .find((cards) => !cards.classes().includes("nearby-schedule-panel__outside-cards"));
+    expect(regularCards?.findAll(".nearby-schedule-board-card").map((card) => card.attributes("data-schedule-id"))).toEqual([
+      item.id,
+      unavailableItem.id,
+    ]);
+
+    const outside = wrapper.get(".nearby-schedule-panel__outside");
+    expect(outside.attributes("open")).toBeUndefined();
+    expect(outside.text()).toContain("Stations hors rayon");
+    expect(outside.find(".nearby-schedule-board-card").attributes("data-schedule-id")).toBe(outsideItem.id);
+    expect(outside.text()).not.toContain("Gare lourde projetée");
+    expect(wrapper.findAll(".nearby-schedule-board-card").map((card) => card.attributes("data-schedule-id")))
+      .not.toContain(projectedHeavyItem.id);
+  });
+
   it("shows only the focused station and two departures per direction", async () => {
     const departure = (id: string, minutes: number) => ({
       id,

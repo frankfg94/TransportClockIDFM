@@ -129,4 +129,50 @@ describe("useNearbyPlaces", () => {
     expect(nearby.error.value).toBeUndefined();
     wrapper.unmount();
   });
+
+  it("loads a line through one batch of served communes", async () => {
+    const provider: PlacesProvider = {
+      searchDestinations: vi.fn(async () => []),
+      searchNearby: vi.fn(async () => []),
+      searchNearbyCities: vi.fn(async ({ cities }) => [{
+        id: "node:compiled",
+        name: "Commerce compilé",
+        lon: 2.3,
+        lat: 48.81,
+        category: "shop" as const,
+        kind: "supermarket",
+        distanceMeters: 240,
+        city: cities[0]?.name,
+      }]),
+    };
+    const origins = ref([
+      { lon: 2.3, lat: 48.81, label: "Station ouest" },
+      { lon: 2.4, lat: 48.82, label: "Station est" },
+    ]);
+    const cityRefs = ref([
+      { code: "92001", name: "Fixture", lat: 48.81, lon: 2.3 },
+      { code: "92002", name: "Autre ville", lat: 48.82, lon: 2.4 },
+    ]);
+    const radius = ref(600);
+    const enabled = ref(true);
+    let nearby!: ReturnType<typeof useNearbyPlaces>;
+    const Harness = defineComponent({
+      setup() {
+        nearby = useNearbyPlaces({ origins, cityRefs, radius, enabled, provider });
+        return () => null;
+      },
+    });
+    const wrapper = mount(Harness);
+
+    await flushPromises();
+
+    expect(provider.searchNearbyCities).toHaveBeenCalledTimes(1);
+    expect(provider.searchNearby).not.toHaveBeenCalled();
+    expect(provider.searchNearbyCities).toHaveBeenCalledWith(
+      { cities: cityRefs.value, origins: origins.value, radiusMeters: 600 },
+      expect.any(AbortSignal),
+    );
+    expect(nearby.places.value[0]?.name).toBe("Commerce compilé");
+    wrapper.unmount();
+  });
 });

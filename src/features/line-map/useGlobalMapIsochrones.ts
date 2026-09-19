@@ -1,6 +1,5 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import {
-  createGlobalIsochroneSettings,
   emptyGlobalIsochroneCoverage,
   GLOBAL_ISOCHRONE_ATTRIBUTION,
   GlobalIsochroneError,
@@ -10,6 +9,7 @@ import {
 } from "../transport-map/isochrones/contracts";
 import { createGlobalIsochroneClient, type GlobalIsochroneClient } from "../transport-map/isochrones/client";
 import { globalIsochroneEligibleModes, selectGlobalIsochroneScopes, type GlobalIsochroneContext } from "../transport-map/isochrones/selection";
+import { useTransportIsochroneSettings } from "../transport-map/isochrones/useTransportIsochroneSettings";
 
 export interface UseGlobalMapIsochronesOptions {
   getContext: () => GlobalIsochroneContext;
@@ -21,10 +21,7 @@ export interface UseGlobalMapIsochronesOptions {
 const EMPTY_SURFACES: GlobalIsochroneSurface[] = [];
 
 export function useGlobalMapIsochrones(options: UseGlobalMapIsochronesOptions) {
-  const enabled = ref(false);
-  const settings = ref(createGlobalIsochroneSettings());
-  const panelOpen = ref(false);
-  const modalOpen = ref(false);
+  const { enabled, settings, panelOpen, modalOpen, setMode } = useTransportIsochroneSettings();
   const status = ref<GlobalIsochroneStatus>("idle");
   const surfaces = shallowRef<GlobalIsochroneSurface[]>(EMPTY_SURFACES);
   const coverage = shallowRef<GlobalIsochroneCoverage>(emptyGlobalIsochroneCoverage());
@@ -92,7 +89,7 @@ export function useGlobalMapIsochrones(options: UseGlobalMapIsochronesOptions) {
   });
 
   return {
-    enabled, settings, panelOpen, modalOpen, status, surfaces, coverage, eligibleModes, attribution,
+    enabled, settings, panelOpen, modalOpen, status, surfaces, coverage, eligibleModes, attribution, setMode,
     retry: () => load(true),
     closeModal: () => {
       modalOpen.value = false;

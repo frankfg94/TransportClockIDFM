@@ -186,6 +186,7 @@ describe("GTFS frequency computation", () => {
     ).toEqual([4, 8]);
     expect(response.sections[0]!.average.peakMinutes).toBe(6);
     expect(response.sampledStationCount).toBe(3);
+    expect(response.stations?.find((station) => station.id === "b")?.average.peakMinutes).toBe(6);
   });
 
   it("preserves meaningful endpoint labels for simple line directions with GTFS ids", () => {

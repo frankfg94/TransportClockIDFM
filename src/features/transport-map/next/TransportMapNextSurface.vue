@@ -16,7 +16,9 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import type { NearbyPlace } from "../../nearby-stations/nearbyPlaces";
+import { createDeckNearbyPlacesLayer, prepareDeckNearbyPlaces, NEARBY_PLACES_LAYER_ID, type DeckNearbyPlace } from "./deckNearbyPlaces";
 import { Map as MapLibreMap, setWorkerUrl, type IControl } from "maplibre-gl";
 import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
@@ -46,6 +48,7 @@ type SurfaceStatus = "initializing" | "ready" | "unsupported";
 const props = defineProps<{
   renderer: TransportMapRenderer;
   camera: CameraState;
+  nearbyPlaces?: readonly NearbyPlace[];
   styleUrl?: NextMapStyle;
   interleaved?: boolean;
   antialias?: boolean;
@@ -67,6 +70,21 @@ let mapResizeObserver: ResizeObserver | undefined;
 let mapLibreTraceProbe: TransportMapMapLibreTraceProbe | undefined;
 let detachMapLibreTraceProbe: (() => void) | undefined;
 let applyingMapLocale = false;
+
+// This computed never reads camera: panning neither prepares POIs nor updates
+// Deck data/accessors. The presenter retains the same layer and GPU buffers.
+const nearbyPlaceLayers = computed(() => {
+  const data = prepareDeckNearbyPlaces(props.nearbyPlaces ?? []);
+  return data.length ? [createDeckNearbyPlacesLayer(data)] : [];
+});
+watch(nearbyPlaceLayers, layers => presenter?.setNearbyPlaceLayers(layers));
+
+function pickNearbyPlace(x: number, y: number): NearbyPlace | undefined {
+  if (!overlay || !nearbyPlaceLayers.value.length) return undefined;
+  const hit = overlay.pickObject({ x, y, layerIds: [NEARBY_PLACES_LAYER_ID] });
+  return (hit?.object as DeckNearbyPlace | undefined)?.place;
+}
+defineExpose({ pickNearbyPlace });
 
 type MapLibreDeckCompatibility = MapLibreMap & {
   painter?: { transform?: unknown };
@@ -186,6 +204,7 @@ function onMapLoad(): void {
   activeMap.addControl(overlay as unknown as IControl);
   overlayAdded = true;
   presenter = new MapLibreDeckOverlayPresenter(activeMap, overlay);
+  presenter.setNearbyPlaceLayers(nearbyPlaceLayers.value);
   presenter.setPerformanceTrace(props.performanceTrace);
   if (props.performanceTrace) {
     mapLibreTraceProbe = new TransportMapMapLibreTraceProbe(

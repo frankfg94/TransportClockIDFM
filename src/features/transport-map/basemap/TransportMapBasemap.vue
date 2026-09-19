@@ -21,6 +21,7 @@
       <img
         v-for="entry in fallbackDecodedEntries"
         :key="entry.key"
+        v-memo="[entry, props.layer, props.basemapStyle, props.contrast]"
         :src="entry.tile.url"
         alt=""
         class="transport-map-basemap__tile transport-map-basemap__tile--loaded"
@@ -45,6 +46,7 @@
       <img
         v-for="entry in committedDefinition.entries"
         :key="entry.key"
+        v-memo="[entry, props.layer, props.basemapStyle, props.contrast]"
         :src="entry.tile.url"
         alt=""
         class="transport-map-basemap__tile"
@@ -75,6 +77,7 @@
       <img
         v-for="entry in pendingDefinition.entries"
         :key="entry.key"
+        v-memo="[entry, props.layer, props.basemapStyle, props.contrast]"
         :src="entry.tile.url"
         alt=""
         class="transport-map-basemap__tile"

@@ -18,7 +18,19 @@ describe("global map distance measurement", () => {
     const point = { lon: 2.3522, lat: 48.8566 };
     const measurement = createGlobalMapDistanceMeasurement(point, point);
 
+    expect(measurement.shape).toBe("segment");
     expect(measurement.distanceMeters).toBe(0);
   });
-});
 
+  it("marks circle measurements while measuring the center-to-edge distance", () => {
+    const measurement = createGlobalMapDistanceMeasurement(
+      { lon: 2.3522, lat: 48.8566 },
+      { lon: 2.3622, lat: 48.8566 },
+      "circle",
+    );
+
+    expect(measurement.shape).toBe("circle");
+    expect(measurement.distanceMeters).toBeGreaterThan(700);
+    expect(measurement.distanceMeters).toBeLessThan(800);
+  });
+});

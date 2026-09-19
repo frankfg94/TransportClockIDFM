@@ -23,7 +23,7 @@ const emit = defineEmits<{ viewTrace: [] }>();
 
 <template>
   <div
-    class="line-out-of-bounds-direction-tooltip transport-ghost-flow__exit"
+    class="line-out-of-bounds-direction-tooltip transport-ghost-flow__exit nearby-map__overlay-pill"
     :class="[
       `transport-ghost-flow__exit--${props.side}`,
       { 'transport-ghost-flow__exit--fullscreen': props.fullscreen },
@@ -54,7 +54,10 @@ const emit = defineEmits<{ viewTrace: [] }>();
 </template>
 
 <style scoped>
-.transport-ghost-flow__exit { --ghost-flow-exit-overflow-x: 0px; --ghost-flow-exit-overflow-y: 0px; align-items: center; backdrop-filter: blur(4px); background: #fff; border: 1px solid color-mix(in srgb, var(--ghost-flow-color) 45%, white); border-radius: 12px; box-shadow: 0 3px 10px rgba(16, 35, 63, .12); box-sizing: border-box; color: var(--ghost-flow-color); display: flex; font-size: .7rem; font-weight: 850; max-width: min(240px, calc(100% - 18px)); min-width: min(180px, calc(100% - 18px)); padding: 5px 9px; pointer-events: none; position: absolute; width: min(240px, calc(100% - 18px)); white-space: normal; z-index: 4; }
+/* A real surface: the whole pill swallows pointer events so a click never
+   reaches the map gesture and station handlers underneath. The host map owns
+   the z-index through .nearby-map__overlay-pill. */
+.transport-ghost-flow__exit { --ghost-flow-exit-overflow-x: 0px; --ghost-flow-exit-overflow-y: 0px; align-items: center; backdrop-filter: blur(4px); background: #fff; border: 1px solid color-mix(in srgb, var(--ghost-flow-color) 45%, white); border-radius: 12px; box-shadow: 0 3px 10px rgba(16, 35, 63, .12); box-sizing: border-box; color: var(--ghost-flow-color); display: flex; font-size: .7rem; font-weight: 850; max-width: min(240px, calc(100% - 18px)); min-width: min(180px, calc(100% - 18px)); padding: 5px 9px; pointer-events: auto; position: absolute; width: min(240px, calc(100% - 18px)); white-space: normal; z-index: 4; }
 .transport-ghost-flow__exit--fullscreen { border-radius: 14px; font-size: .82rem; max-width: min(300px, calc(100% - 24px)); min-width: min(240px, calc(100% - 24px)); padding: 8px 12px; width: min(300px, calc(100% - 24px)); }
 .transport-ghost-flow__exit-content { display: grid; gap: 1px; min-width: 0; }
 .transport-ghost-flow__exit-direction { overflow-wrap: break-word; }

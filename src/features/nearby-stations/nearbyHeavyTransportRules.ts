@@ -219,6 +219,7 @@ export function evaluateNearbyHeavyJourney(
       initialWaitSeconds: timing.initialWaitSeconds,
       scoreSeconds: timing.scoreSeconds,
       travelSeconds,
+      journey: input.journey,
     };
   }
 
@@ -273,6 +274,7 @@ export function evaluateNearbyHeavyJourney(
     feederLineCode: findMatchingLocalLineCode(feeder, input.localLineCodes) ?? feeder.lineCode,
     feederMode,
     feederRideSeconds: feeder.durationSeconds,
+    journey: input.journey,
   };
 }
 
@@ -319,6 +321,7 @@ function evaluateSingleLocalFeeder(
     feederLineCode: findMatchingLocalLineCode(feeder, input.localLineCodes) ?? feeder.lineCode,
     feederMode: sectionLineMode(feeder),
     feederRideSeconds: feeder.durationSeconds,
+    journey: input.journey,
   };
 }
 
