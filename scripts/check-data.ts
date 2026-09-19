@@ -1,5 +1,9 @@
 import { getNeighborhoodVerdictSource, loadCompiledNeighborhoodVerdictData } from "../server/services/neighborhoodVerdict/dataStore";
-import { IRIS_SOURCE_ID } from "../server/services/neighborhoodVerdict/contracts";
+import {
+  AIR_NOISE_GRID_SOURCE_ID,
+  AIR_NOISE_STATISTICS_SOURCE_ID,
+  IRIS_SOURCE_ID,
+} from "../server/services/neighborhoodVerdict/contracts";
 import { openIsochroneSource } from "../server/services/isochrones/rangeSource";
 import { IndexedIsochroneArchive } from "../server/services/isochrones/indexedArchive";
 import { config as loadDotenv } from "dotenv";
@@ -62,6 +66,8 @@ async function main(): Promise<void> {
     checkR2Credentials(),
     checkNeighborhoodVerdict(),
     checkIrisNeighborhoods(),
+    checkAirQuality(),
+    checkSoundQuality(),
     checkServiceQuality(),
     checkIsochrones(),
     checkGlobalMap(),
@@ -104,6 +110,51 @@ async function checkIrisNeighborhoods(): Promise<DataCheckRow> {
       ...row,
       Installed: "Yes",
       Details: `${data.iris.neighborhoods.length} polygons · bbox ${data.iris.bbox.join(",")} · ${sourceMetadata.licence.label} · generated ${data.generatedAt}`,
+    };
+  } catch (error) {
+    return { ...row, Details: String(error) };
+  }
+}
+
+export function checkAirQuality(): Promise<DataCheckRow> {
+  return checkAirNoiseComponent("air");
+}
+
+export function checkSoundQuality(): Promise<DataCheckRow> {
+  return checkAirNoiseComponent("sound");
+}
+
+async function checkAirNoiseComponent(component: "air" | "sound"): Promise<DataCheckRow> {
+  const env = getNetexRuntimeEnv();
+  const source = getNeighborhoodVerdictSource(env);
+  const row: DataCheckRow = {
+    Data: component === "air" ? "Air quality" : "Sound quality",
+    Configured: source.kind === "directory" ? "Auto" : "Yes",
+    Installed: "No",
+    Mode: modeFromSource(source.kind, false),
+    Location: source.location,
+    Details: "",
+  };
+  try {
+    const data = await loadCompiledNeighborhoodVerdictData(env);
+    const statisticsSource = data.sources.find((candidate) => candidate.id === AIR_NOISE_STATISTICS_SOURCE_ID);
+    const gridSource = data.sources.find((candidate) => candidate.id === AIR_NOISE_GRID_SOURCE_ID);
+    const grid = data.airNoiseGrid;
+    const communeCount = Object.keys(data.airNoiseCommunes).length;
+    if (!statisticsSource || communeCount === 0) {
+      throw new Error("Air/noise communal data is absent from the compiled artifact.");
+    }
+    if (!gridSource || !grid) {
+      throw new Error("Compiled air/noise grid is absent from the compiled artifact.");
+    }
+    const cellCount = grid.columns * grid.rows;
+    if (grid.classes.length !== cellCount || grid.values.length === 0) {
+      throw new Error("Compiled air/noise grid has no complete cells.");
+    }
+    return {
+      ...row,
+      Installed: "Yes",
+      Details: `${communeCount} communes · ${grid.columns}×${grid.rows} cells · generated ${data.generatedAt}`,
     };
   } catch (error) {
     return { ...row, Details: String(error) };
@@ -562,7 +613,7 @@ function printRecommendations(rows: DataCheckRow[]): void {
     );
   }
 
-  for (const name of ["Neighborhood verdict", "IRIS neighborhoods", "IDFM service quality", "Walking isochrones", "Global map", "Compiled OSM places"]) {
+  for (const name of ["Neighborhood verdict", "IRIS neighborhoods", "Air quality", "Sound quality", "IDFM service quality", "Walking isochrones", "Global map", "Compiled OSM places"]) {
     if (byData.get(name)?.Installed !== "Yes") recommendations.push(`${name}: vérifier la source indiquée et régénérer/publier les données manquantes.`);
   }
   console.log("\nRecommendations");
