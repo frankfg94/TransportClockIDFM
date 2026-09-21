@@ -206,7 +206,7 @@ describe("nearby OpenStreetMap places", () => {
       ["charging_station", "service"],
       ["post_office", "service"],
       ["doctors", "service"],
-      ["police", "security"],
+      ["police", "service"],
     ] as const;
     for (const [kind, category] of excluded) {
       expect(isNearbyPlaceVisibleForGlobalLine({ kind, category })).toBe(false);

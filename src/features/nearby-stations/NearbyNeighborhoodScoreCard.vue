@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { ExternalLink, LoaderCircle, Pencil } from "lucide-vue-next";
 import { useI18n, type TranslationKey } from "../../i18n";
 import {
@@ -7,6 +7,7 @@ import {
   type NeighborhoodScoreBand,
   type NeighborhoodScoreResult,
 } from "./neighborhood";
+import type { NeighborhoodCriterionState } from "./neighborhood/criterionRegistry";
 import NearbyNeighborhoodScoreFact from "./NearbyNeighborhoodScoreFact.vue";
 
 const props = defineProps<{
@@ -15,6 +16,7 @@ const props = defineProps<{
   workplaceLabel?: string;
   loading?: boolean;
   error?: string;
+  criteria?: readonly NeighborhoodCriterionState[];
   directoryUrl: string;
 }>();
 
@@ -24,6 +26,7 @@ const emit = defineEmits<{
 
 const { d, t } = useI18n();
 const selectedFactId = ref<string>();
+const criteriaById = computed(() => new Map((props.criteria ?? []).map((criterion) => [criterion.id, criterion])));
 
 const bandKeys: Record<NeighborhoodScoreBand, TranslationKey> = {
   excellent: "nearbyStations.neighborhoodScore.bands.excellent",
@@ -124,10 +127,16 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
 
     <section class="nearby-neighborhood-score-card__categories" :aria-label="t('nearbyStations.neighborhoodScore.categoriesLabel')">
       <article v-for="category in result.categories" :key="category.id" class="nearby-neighborhood-score-card__category">
+        <template v-for="criterion in [criteriaById.get(category.id)]" :key="`${category.id}:status`">
         <header class="nearby-neighborhood-score-card__category-header">
           <h3>{{ t(category.labelKey) }}</h3>
-          <strong v-if="category.available">{{ category.displayScore }}/10</strong>
-          <span v-else>{{ t("nearbyStations.neighborhoodScore.categoryUnavailable") }}</span>
+          <div class="nearby-neighborhood-score-card__category-status">
+            <strong v-if="category.available">{{ category.displayScore }}/10</strong>
+            <span v-else>{{ t("nearbyStations.neighborhoodScore.categoryUnavailable") }}</span>
+            <small v-if="criterion?.status === 'loading'" class="nearby-neighborhood-score-card__category-loading">
+              {{ t("nearbyStations.neighborhoodScore.criterionLoading") }}
+            </small>
+          </div>
         </header>
         <p v-if="!category.available && !category.neutralFacts.length" class="nearby-neighborhood-score-card__category-empty">
           {{ category.unavailableReasonKey ? t(category.unavailableReasonKey) : t("nearbyStations.neighborhoodScore.noData") }}
@@ -171,6 +180,7 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
             {{ t("nearbyStations.neighborhoodScore.noDocumentedSignal") }}
           </p>
         </div>
+        </template>
       </article>
     </section>
 
@@ -253,8 +263,10 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
 .nearby-neighborhood-score-card__category { background: #fbfcfe; border: 1px solid rgba(16,35,63,.1); border-radius: 13px; min-width: 0; padding: 12px 9px 9px; }
 .nearby-neighborhood-score-card__category-header { align-items: center; display: flex; gap: 10px; justify-content: space-between; padding: 0 7px 7px; }
 .nearby-neighborhood-score-card__category-header h3 { color: var(--ink); font-size: .9rem; margin: 0; }
+.nearby-neighborhood-score-card__category-status { align-items: flex-end; display: flex; flex-direction: column; gap: 2px; }
 .nearby-neighborhood-score-card__category-header strong { color: #5146ff; font-size: .8rem; font-variant-numeric: tabular-nums; }
 .nearby-neighborhood-score-card__category-header span { color: #8b95a7; font-size: .7rem; font-weight: 800; }
+.nearby-neighborhood-score-card__category-loading { color: #7168d8; font-size: .58rem; font-weight: 800; }
 .nearby-neighborhood-score-card__category-empty { color: var(--muted); font-size: .76rem; line-height: 1.45; margin: 0; padding: 2px 7px 4px; }
 .nearby-neighborhood-score-card__facts { display: grid; gap: 4px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .nearby-neighborhood-score-card__fact-group--neutral { grid-column: 1 / -1; }
@@ -277,6 +289,8 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
 @keyframes nearby-score-spin { to { transform: rotate(360deg); } }
 @media (max-width: 680px) {
   .nearby-neighborhood-score-card { padding: 16px; }
+  .nearby-neighborhood-score-card__header > div:first-child { min-width: 0; }
+  .nearby-neighborhood-score-card__header h2 { overflow-wrap: anywhere; }
   .nearby-neighborhood-score-card__highlights, .nearby-neighborhood-score-card__facts, .nearby-neighborhood-score-card__fact-group--positive-only { grid-template-columns: 1fr; }
   .nearby-neighborhood-score-card__score { min-width: 74px; padding-left: 9px; padding-right: 9px; }
   .nearby-neighborhood-score-card__score strong { font-size: 1.9rem; }

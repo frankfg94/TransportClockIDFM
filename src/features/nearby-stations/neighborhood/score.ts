@@ -8,6 +8,7 @@ import { buildTransportCategory } from "./criteria/transport/index";
 import { buildUnavailableCategory } from "./criteria/unavailable";
 import { category, compareFacts, externalFact, selectFacts, withFacts } from "./facts";
 import { clamp, getNeighborhoodScoreDisplay, weightedAverage } from "./primitives";
+import { measureDevPerformance } from "../../../services/devPerformance";
 
 export function getNeighborhoodScoreBand(score: number | undefined): NeighborhoodScoreBand | undefined {
   if (score === undefined || !Number.isFinite(score)) return undefined;
@@ -26,16 +27,72 @@ export const NEIGHBORHOOD_SCORE_BAND_COLORS: Readonly<Record<NeighborhoodScoreBa
   "very-weak": "#bd3428",
 };
 
+export const NEIGHBORHOOD_CATEGORY_IDS: readonly NeighborhoodCategoryId[] = [
+  "transport",
+  "daily-life",
+  "nature-leisure",
+  "health",
+  "education",
+  "living-environment",
+  "security",
+];
+
+type CategoryBuilder = (input: NeighborhoodScoreInput) => NeighborhoodCategoryResult;
+
+const CATEGORY_BUILDERS: Readonly<Record<NeighborhoodCategoryId, CategoryBuilder>> = {
+  transport: buildTransportCategory,
+  "daily-life": buildDailyLifeCategory,
+  "nature-leisure": buildNatureLeisureCategory,
+  health: buildHealthCategory,
+  education: buildEducationCategory,
+  "living-environment": (input) => buildUnavailableCategory(
+    "living-environment",
+    "nearbyStations.neighborhoodScore.unavailable.livingEnvironment",
+  ),
+  security: (input) => buildUnavailableCategory(
+    "security",
+    "nearbyStations.neighborhoodScore.unavailable.security",
+  ),
+};
+
+/**
+ * Build only the local criteria that are dirty. The returned values are kept
+ * before the backend merge so a later backend refresh cannot compound its
+ * score/facts on top of an already merged category.
+ */
+export function buildNeighborhoodCategories(
+  input: NeighborhoodScoreInput,
+  previous?: ReadonlyMap<NeighborhoodCategoryId, NeighborhoodCategoryResult>,
+  dirty?: ReadonlySet<NeighborhoodCategoryId>,
+): NeighborhoodCategoryResult[] {
+  return measureDevPerformance("nearby-neighborhood-criteria", () => NEIGHBORHOOD_CATEGORY_IDS.map((id) => {
+    const cached = previous?.get(id);
+    if (cached && dirty && !dirty.has(id)) return cached;
+    return CATEGORY_BUILDERS[id](input);
+  }));
+}
+
 export function buildNeighborhoodScore(input: NeighborhoodScoreInput): NeighborhoodScoreResult {
-  const categories = mergeBackendVerdict([
-    buildTransportCategory(input),
-    buildDailyLifeCategory(input),
-    buildNatureLeisureCategory(input),
-    buildHealthCategory(input),
-    buildEducationCategory(input),
-    buildUnavailableCategory("living-environment", "nearbyStations.neighborhoodScore.unavailable.livingEnvironment"),
-    buildUnavailableCategory("security", "nearbyStations.neighborhoodScore.unavailable.security"),
-  ], input.backendVerdict);
+  return aggregateNeighborhoodScore(buildNeighborhoodCategories(input), input);
+}
+
+/**
+ * Aggregate already-built criteria. This stays intentionally small: all
+ * expensive domain work belongs to a criterion builder, while this function
+ * only merges external facts and computes the weighted summary.
+ */
+export function aggregateNeighborhoodScore(
+  localCategories: readonly NeighborhoodCategoryResult[],
+  input: NeighborhoodScoreInput,
+): NeighborhoodScoreResult {
+  return measureDevPerformance("nearby-neighborhood-score-aggregation", () => aggregateNeighborhoodScoreInternal(localCategories, input));
+}
+
+function aggregateNeighborhoodScoreInternal(
+  localCategories: readonly NeighborhoodCategoryResult[],
+  input: NeighborhoodScoreInput,
+): NeighborhoodScoreResult {
+  const categories = mergeBackendVerdict([...localCategories], input.backendVerdict);
   const availableCategories = categories.filter(
     (category): category is NeighborhoodCategoryResult & { score: number } =>
       category.available && category.score !== undefined,

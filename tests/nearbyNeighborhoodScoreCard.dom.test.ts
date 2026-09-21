@@ -31,6 +31,11 @@ describe("NearbyNeighborhoodScoreCard", () => {
       label: "Fiabilité des transports proches : 90/100",
       tooltip: "Qualité de service documentée",
       action: { labelKey: "nearbyStations.neighborhoodScore.facts.transportServiceQuality.openRanking", href: "/lines-ranking" },
+      transportReliabilityLines: [
+        { lineId: "metro:1", lineName: "1", mode: "METRO", reliabilityScore: 94, labelKey: "very-reliable" },
+        { lineId: "metro:4", lineName: "4", mode: "METRO", reliabilityScore: 71, labelKey: "fairly-reliable" },
+        { lineId: "rer:a", lineName: "A", mode: "RER", reliabilityScore: 88, labelKey: "reliable" },
+      ],
       evidence: { proof: "derived", sourceName: "IDFM", observedAt: 1, value: 90, unit: "/100" },
     });
     const wrapper = mount(NearbyNeighborhoodScoreCard, {
@@ -57,6 +62,14 @@ describe("NearbyNeighborhoodScoreCard", () => {
     const qualityTrigger = wrapper.findAll(".nearby-neighborhood-score-fact__trigger").find((candidate) => candidate.text().includes("Fiabilité"));
     expect(qualityTrigger).toBeDefined();
     await qualityTrigger!.trigger("click");
+    const metroLines = wrapper.get("[data-testid='nearby-transport-reliability-mode-METRO']")
+      .findAll("[data-testid='nearby-transport-reliability-line']");
+    expect(metroLines.map((line) => line.find(".nearby-neighborhood-score-fact__transport-line-score").text()))
+      .toEqual(["94/100", "71/100"]);
+    const rerLines = wrapper.get("[data-testid='nearby-transport-reliability-mode-RER']")
+      .findAll("[data-testid='nearby-transport-reliability-line']");
+    expect(rerLines.map((line) => line.find(".nearby-neighborhood-score-fact__transport-line-name").text()))
+      .toEqual(["Ligne A"]);
     expect(wrapper.get(".nearby-neighborhood-score-fact__action").text()).toContain("Voir le classement");
     await wrapper.get(".nearby-neighborhood-score-fact__action").trigger("click");
     wrapper.unmount();

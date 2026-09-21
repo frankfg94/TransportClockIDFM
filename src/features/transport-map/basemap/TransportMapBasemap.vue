@@ -21,7 +21,7 @@
       <img
         v-for="entry in fallbackDecodedEntries"
         :key="entry.key"
-        v-memo="[entry, props.layer, props.basemapStyle, props.contrast]"
+        v-memo="[entry]"
         :src="entry.tile.url"
         alt=""
         class="transport-map-basemap__tile transport-map-basemap__tile--loaded"
@@ -46,7 +46,7 @@
       <img
         v-for="entry in committedDefinition.entries"
         :key="entry.key"
-        v-memo="[entry, props.layer, props.basemapStyle, props.contrast]"
+        v-memo="[entry]"
         :src="entry.tile.url"
         alt=""
         class="transport-map-basemap__tile"
@@ -77,7 +77,7 @@
       <img
         v-for="entry in pendingDefinition.entries"
         :key="entry.key"
-        v-memo="[entry, props.layer, props.basemapStyle, props.contrast]"
+        v-memo="[entry]"
         :src="entry.tile.url"
         alt=""
         class="transport-map-basemap__tile"
@@ -274,6 +274,11 @@ const basemapStyle = computed<Record<string, string>>(() => ({
     : props.basemapStyle === "voyager"
       ? "1"
       : "0.94",
+  filter: props.layer === "satellite"
+    ? `saturate(0.82) contrast(${props.contrast}) brightness(0.82)`
+    : props.basemapStyle === "voyager"
+      ? `saturate(1.32) contrast(${props.contrast}) brightness(0.96)`
+      : `saturate(1.08) contrast(${props.contrast}) brightness(0.98)`,
 }));
 
 function getPreloadBoundsKey(bounds?: GlobalMapBounds): string {
@@ -607,11 +612,6 @@ function tileStyle(tile: TransportMapBasemapTile): Record<string, string> {
     top: `${tile.topCssPx}px`,
     width: `${tile.widthCssPx}px`,
     height: `${tile.heightCssPx}px`,
-    filter: props.layer === "satellite"
-      ? `saturate(0.82) contrast(${props.contrast}) brightness(0.82)`
-      : props.basemapStyle === "voyager"
-        ? `saturate(1.32) contrast(${props.contrast}) brightness(0.96)`
-        : `saturate(1.08) contrast(${props.contrast}) brightness(0.98)`,
   };
 }
 

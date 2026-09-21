@@ -41,6 +41,8 @@ export interface NearbyHeavyTransportSource {
   radius: { value: number };
   /** Future heavy stations supplied by the verdict data source. */
   futureProjects?: { value: readonly PublicFutureGpeStation[] };
+  /** Delay the resolver until the verdict has either supplied or failed to supply future projects. */
+  futureProjectsReady?: { value: boolean };
 }
 
 export interface NearbyHeavyTransportResolverInput {
@@ -58,6 +60,8 @@ export interface NearbyHeavyTransportResolverInput {
   includeLocalCandidates?: boolean;
   /** Future GPE stations to resolve with the same heavy-station rules. */
   futureProjects?: readonly PublicFutureGpeStation[];
+  /** Cancels every network and walking probe started by this resolution. */
+  signal?: AbortSignal;
 }
 
 export interface HeavyTransportResolver {
@@ -167,7 +171,10 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
           origin: input.origin,
           destination: station,
           ...(scheduledDateTime ? { datetime: scheduledDateTime } : {}),
-        }).catch(() => []);
+        }, input.signal).catch((cause: unknown) => {
+          if (input.signal?.aborted || isAbortError(cause)) throw cause;
+          return [];
+        });
         const currentAlternatives = listNearbyHeavyJourneyAlternatives(journeys, {
           stationDistanceMeters: distanceMeters,
           localLineIds,
@@ -185,7 +192,10 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
             origin: input.origin,
             destination: station,
             datetime: representativeJourneyDateTime(),
-          }).catch(() => []);
+          }, input.signal).catch((cause: unknown) => {
+            if (input.signal?.aborted || isAbortError(cause)) throw cause;
+            return [];
+          });
         const daytimeAlternatives = listNearbyHeavyJourneyAlternatives(daytimeJourneys, {
           stationDistanceMeters: distanceMeters,
           localLineIds,
@@ -193,7 +203,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
         }).map((access) => normalizeNearbyHeavyAccessLine(access, feederLines));
         const currentAccess = currentAlternatives[0];
         const routedWalkingAccess = input.walkingRouteProvider
-          ? await resolveDirectWalkingAccess(input.walkingRouteProvider, input.origin, station)
+          ? await resolveDirectWalkingAccess(input.walkingRouteProvider, input.origin, station, input.signal)
           : undefined;
         const accessAlternatives = currentAccess && isNoctilienAccess(currentAccess, feederLines)
           ? daytimeAlternatives.length > 0
@@ -218,6 +228,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
         if (!input.includeLocalCandidates && existingIds.has(entry.id)) return undefined;
         return { entry, station, line, distanceMeters, access, accessAlternatives, correspondenceLines, futureProject };
       },
+      input.signal,
     );
 
     const byStation = new Map<string, {
@@ -299,23 +310,29 @@ export function useNearbyHeavyTransports(
   const error = ref<string>();
   const hiddenStationIds = ref<Set<string>>(new Set());
   const requestToken = ref(0);
-  let refreshTimer: number | undefined;
   let refreshInterval: number | undefined;
+  let refreshFrame: number | undefined;
+  let requestController: AbortController | undefined;
 
   const resolver = options.resolver ?? defaultNearbyHeavyTransportResolver;
   const journeyProvider = options.journeyProvider ?? defaultJourneyProvider;
   const visibleCandidates = computed(() => candidates.value.filter((candidate) => !hiddenStationIds.value.has(candidate.id)));
 
   async function refresh(): Promise<void> {
+    requestController?.abort();
+    requestController = undefined;
+    const token = requestToken.value + 1;
+    requestToken.value = token;
     const origin = source.origin.value;
     const network = source.network?.value;
-    if (!origin || !network) {
+    if (!origin || !network || (source.futureProjectsReady && !source.futureProjectsReady.value)) {
       candidates.value = [];
+      isLoading.value = false;
       return;
     }
 
-    const token = requestToken.value + 1;
-    requestToken.value = token;
+    const controller = new AbortController();
+    requestController = controller;
     isLoading.value = true;
     error.value = undefined;
     try {
@@ -330,25 +347,27 @@ export function useNearbyHeavyTransports(
         walkingRouteProvider: options.walkingRouteProvider,
         includeLocalCandidates: options.includeLocalCandidates,
         futureProjects: source.futureProjects?.value ?? [],
+        signal: controller.signal,
       });
-      if (token === requestToken.value) candidates.value = next;
+      if (token === requestToken.value && !controller.signal.aborted) candidates.value = next;
     } catch (cause) {
-      if (token === requestToken.value) {
+      if (token === requestToken.value && !controller.signal.aborted && !isAbortError(cause)) {
         candidates.value = [];
         error.value = cause instanceof Error ? cause.message : "heavy-transport-unavailable";
       }
     } finally {
+      if (requestController === controller) requestController = undefined;
       if (token === requestToken.value) isLoading.value = false;
     }
   }
 
   function refreshSoon(): void {
     if (typeof window === "undefined") return;
-    if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
-    refreshTimer = window.setTimeout(() => {
-      refreshTimer = undefined;
+    if (refreshFrame !== undefined) window.cancelAnimationFrame(refreshFrame);
+    refreshFrame = window.requestAnimationFrame(() => {
+      refreshFrame = undefined;
       void refresh();
-    }, 100);
+    });
   }
 
   function hideStation(stationId: string): void {
@@ -374,6 +393,7 @@ export function useNearbyHeavyTransports(
       source.activeModes.value.join(","),
       source.stations.value.map((entry) => entry.id).join(","),
       source.futureProjects?.value.map((project) => `${project.id}:${project.line}:${project.lon}:${project.lat}`).join(",") ?? "",
+      source.futureProjectsReady?.value ?? true,
     ],
     refreshSoon,
     { immediate: true },
@@ -388,7 +408,9 @@ export function useNearbyHeavyTransports(
 
   onBeforeUnmount(() => {
     requestToken.value += 1;
-    if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+    requestController?.abort();
+    requestController = undefined;
+    if (refreshFrame !== undefined) window.cancelAnimationFrame(refreshFrame);
     if (refreshInterval !== undefined) window.clearInterval(refreshInterval);
     document.removeEventListener("visibilitychange", handleVisibilityChange);
   });
@@ -604,8 +626,12 @@ async function resolveDirectWalkingAccess(
   provider: NearbyWalkingRouteProvider,
   origin: { lon: number; lat: number },
   station: Pick<GlobalMapStation, "lon" | "lat">,
+  signal?: AbortSignal,
 ): Promise<NearbyHeavyTransportAccess | undefined> {
-  const route = await provider(origin, station).catch(() => undefined);
+  const route = await provider(origin, station, signal).catch((cause: unknown) => {
+    if (signal?.aborted || isAbortError(cause)) throw cause;
+    return undefined;
+  });
   if (!route || route.provider === "straight-line" || route.fallback === true) return undefined;
   if (!Number.isFinite(route.durationSeconds) || route.durationSeconds < 0) return undefined;
   const durationSeconds = Math.round(route.durationSeconds);
@@ -648,15 +674,22 @@ async function mapWithConcurrency<T, R>(
   values: readonly T[],
   concurrency: number,
   worker: (value: T) => Promise<R>,
+  signal?: AbortSignal,
 ): Promise<R[]> {
   const results = new Array<R>(values.length);
   let nextIndex = 0;
   await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), values.length) }, async () => {
     while (nextIndex < values.length) {
+      signal?.throwIfAborted();
       const index = nextIndex;
       nextIndex += 1;
       results[index] = await worker(values[index]);
+      signal?.throwIfAborted();
     }
   }));
   return results;
+}
+
+function isAbortError(cause: unknown): boolean {
+  return cause instanceof Error && cause.name === "AbortError";
 }

@@ -60,7 +60,7 @@ describe("TransportMapBasemap", () => {
     expect(wrapper.get("[data-definition-role='pending'] img").attributes("src")).toContain(
       "basemaps.cartocdn.com/light_all/",
     );
-    expect(wrapper.get("[data-definition-role='pending'] img").attributes("style")).toContain("saturate(1.08)");
+    expect(wrapper.get("[data-transport-map-basemap]").attributes("style")).toContain("saturate(1.08)");
   });
 
   it("keeps the loaded definition visible while a new zoom definition loads", async () => {
@@ -149,7 +149,7 @@ describe("TransportMapBasemap", () => {
     expect(wrapper.findAll("img").some((image) => image.attributes("src")?.includes("/8/"))).toBe(true);
   });
 
-  it("applies the configurable contrast to every tile", () => {
+  it("applies the configurable contrast once at the basemap layer", () => {
     const wrapper = mount(TransportMapBasemap, {
       props: {
         camera: createCamera({ viewportWidthCssPx: 900, viewportHeightCssPx: 560, zoom: 12 }),
@@ -157,7 +157,7 @@ describe("TransportMapBasemap", () => {
       },
     });
 
-    expect(wrapper.get("img").attributes("style")).toContain("contrast(1.12)");
+    expect(wrapper.get("[data-transport-map-basemap]").attributes("style")).toContain("contrast(1.12)");
   });
 
   it("keeps plan parks visible while preserving the softer satellite treatment", async () => {
@@ -171,20 +171,20 @@ describe("TransportMapBasemap", () => {
     expect(wrapper.get("[data-transport-map-basemap]").attributes("style")).toContain(
       "--transport-map-basemap-opacity: 1",
     );
-    expect(wrapper.get("img").attributes("style")).toContain("saturate(1.32)");
+    expect(wrapper.get("[data-transport-map-basemap]").attributes("style")).toContain("saturate(1.32)");
 
     await wrapper.setProps({ basemapStyle: "light" });
     expect(wrapper.get("[data-transport-map-basemap]").attributes("style")).toContain(
       "--transport-map-basemap-opacity: 0.94",
     );
-    expect(wrapper.get("img").attributes("style")).toContain("saturate(1.08)");
+    expect(wrapper.get("[data-transport-map-basemap]").attributes("style")).toContain("saturate(1.08)");
 
     await wrapper.setProps({ layer: "satellite" });
 
     expect(wrapper.get("[data-transport-map-basemap]").attributes("style")).toContain(
       "--transport-map-basemap-opacity: 0.92",
     );
-    expect(wrapper.get("img").attributes("style")).toContain("saturate(0.82)");
+    expect(wrapper.get("[data-transport-map-basemap]").attributes("style")).toContain("saturate(0.82)");
   });
 });
 

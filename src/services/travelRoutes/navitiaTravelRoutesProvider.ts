@@ -13,7 +13,7 @@ export function createNavitiaTravelRoutesProvider(): TravelRoutesProvider {
   const journeyCache = new Map<string, Promise<NearbyJourney[]>>();
 
   return {
-    findJourneys(request: NearbyJourneyRequest): Promise<NearbyJourney[]> {
+    findJourneys(request: NearbyJourneyRequest, signal?: AbortSignal): Promise<NearbyJourney[]> {
       const key = JSON.stringify({
         origin: [request.origin.lon, request.origin.lat],
         destination: [request.destination.lon, request.destination.lat],
@@ -24,6 +24,11 @@ export function createNavitiaTravelRoutesProvider(): TravelRoutesProvider {
         includeGeoJson: request.includeGeoJson ?? false,
         allowedModes: request.allowedModes ? [...request.allowedModes].sort() : undefined,
       });
+      // A caller-owned signal must abort the actual request. Do not put a
+      // signal-bound promise in the shared cache: another consumer could then
+      // observe an unrelated component's AbortError.
+      if (signal) return fetchNavitiaJourneys(request, { signal });
+
       const cached = journeyCache.get(key);
       if (cached) return cached;
 

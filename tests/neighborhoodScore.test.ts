@@ -124,28 +124,59 @@ function greenVerdict(
 describe("neighborhood score", () => {
   it("adds nearby service reliability at 15% of the transport sub-score", () => {
     const metro = line("metro-1", "1", "METRO");
+    const metro4 = line("metro-4", "4", "METRO");
+    const rerA = line("rer-a", "A", "RER");
     const serviceQuality: PublicServiceQuality = {
       schemaVersion: "1.2",
       generatedAt: "2026-09-01T00:00:00.000Z",
       availableYears: [2023, 2024, 2025],
-      lines: [{
-        lineId: "metro:1",
-        lineName: "1",
-        mode: "METRO",
-        aliases: ["1"],
-        reliabilityScore: 100,
-        labelKey: "very-reliable",
-        scoreMethod: "metro-combined",
-        trend: "improving",
-        trendDelta: 1,
-        yearsUsed: [2023, 2024, 2025],
-        indicators: [],
-      }],
+      lines: [
+        {
+          lineId: "metro:4",
+          lineName: "4",
+          mode: "METRO",
+          aliases: ["4"],
+          reliabilityScore: 71,
+          labelKey: "fairly-reliable",
+          scoreMethod: "metro-combined",
+          trend: "stable",
+          trendDelta: 0,
+          yearsUsed: [2023, 2024, 2025],
+          indicators: [],
+        },
+        {
+          lineId: "rer:A",
+          lineName: "A",
+          mode: "RER",
+          aliases: ["A"],
+          reliabilityScore: 88,
+          labelKey: "reliable",
+          scoreMethod: "peer-comparison",
+          trend: "stable",
+          trendDelta: 0,
+          yearsUsed: [2023, 2024, 2025],
+          indicators: [],
+        },
+        {
+          lineId: "metro:1",
+          lineName: "1",
+          mode: "METRO",
+          aliases: ["1"],
+          reliabilityScore: 100,
+          labelKey: "very-reliable",
+          scoreMethod: "metro-combined",
+          trend: "improving",
+          trendDelta: 1,
+          yearsUsed: [2023, 2024, 2025],
+          indicators: [],
+        },
+      ],
       sources: [],
       warnings: [],
     };
-    const withoutQuality = buildNeighborhoodScore(input({ stations: [stationEntry([metro])] }));
-    const withQuality = buildNeighborhoodScore(input({ stations: [stationEntry([metro])], serviceQuality }));
+    const nearbyLines = [metro, metro4, rerA];
+    const withoutQuality = buildNeighborhoodScore(input({ stations: [stationEntry(nearbyLines)] }));
+    const withQuality = buildNeighborhoodScore(input({ stations: [stationEntry(nearbyLines)], serviceQuality }));
     const baseTransport = withoutQuality.categories.find((category) => category.id === "transport");
     const qualityTransport = withQuality.categories.find((category) => category.id === "transport");
 
@@ -157,8 +188,10 @@ describe("neighborhood score", () => {
     ].find((fact) => fact.kind === "transportServiceQuality");
     expect(qualityFact).toMatchObject({
       action: { href: "/lines-ranking" },
-      evidence: { value: 100, unit: "/100" },
+      evidence: { value: 86.33, unit: "/100" },
     });
+    expect(qualityFact?.transportReliabilityLines?.map((candidate) => candidate.lineName))
+      .toEqual(["1", "A", "4"]);
   });
 
   it("turns zero pharmacies into an explicit negative health fact", () => {
@@ -402,6 +435,14 @@ describe("neighborhood score", () => {
     expect(transport?.positiveFacts.find((fact) => fact.labelValues?.line === "RER B")?.labelValues?.minutes).toBe(6);
     expect(transport?.positiveFacts.some((fact) => fact.labelValues?.line === "Tramway T10")).toBe(true);
     expect(transport?.displayScore).toBeGreaterThan(0);
+  });
+
+  it("keeps a Châtelet journey visible when it falls between the score thresholds", () => {
+    const transport = buildNeighborhoodScore(input({
+      chateletJourneys: [journey(52 * 60)],
+    })).categories.find((category) => category.id === "transport");
+
+    expect(transport?.neutralFacts.some((fact) => fact.kind === "chateletContext" && fact.labelValues?.duration === 52)).toBe(true);
   });
 
   it("shows peak frequency for every nearby important line and ignores buses", () => {

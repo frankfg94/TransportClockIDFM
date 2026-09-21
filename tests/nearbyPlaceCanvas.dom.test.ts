@@ -78,4 +78,83 @@ describe("nearby place canvas scheduling", () => {
     expect(nearbyPlacePop(0, true).opacity).toBeCloseTo(1);
     expect(nearbyPlacePop(420, true).opacity).toBeCloseTo(0);
   });
+
+  it("uses one accessible canvas target on coarse pointers and paints only the viewport", async () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let sequence = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.set(++sequence, callback);
+      return sequence;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    const tick = (time: number) => {
+      const scheduled = [...frames.values()];
+      frames.clear();
+      scheduled.forEach((callback) => callback(time));
+    };
+    let imageCount = 0;
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      set src(_value: string) {
+        imageCount += 1;
+        this.onload?.();
+      }
+    });
+    const drawImage = vi.fn();
+    const context = {
+      drawImage,
+      scale: vi.fn(),
+      setTransform: vi.fn(),
+      clearRect: vi.fn(),
+      beginPath: vi.fn(),
+      arc: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+    };
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue(context as unknown as CanvasRenderingContext2D);
+
+    const center = { lon: 2.35, lat: 48.85 };
+    const world = lonLatToWorld(center);
+    const camera = createCamera({
+      centerWorldX: world.x,
+      centerWorldY: world.y,
+      zoom: 15,
+      viewportWidthCssPx: 300,
+      viewportHeightCssPx: 200,
+    });
+    const places: NearbyPlace[] = [
+      { id: "place:center", name: "Centre", ...center, category: "shop", kind: "bakery", distanceMeters: 20 },
+      { id: "place:far", name: "Hors écran", lon: 2.7, lat: 49.1, category: "shop", kind: "bakery", distanceMeters: 20 },
+    ];
+    const wrapper = mount(NearbyPlaceCanvas, {
+      props: {
+        places,
+        camera,
+        radius: 600,
+        city: false,
+        preview: false,
+        showNames: false,
+        reducedMotion: false,
+        canvasHitTesting: true,
+      },
+    });
+
+    try {
+      expect(wrapper.findAll("button")).toHaveLength(0);
+      expect(wrapper.get("canvas").attributes("role")).toBe("img");
+      tick(0);
+      expect(imageCount).toBe(1);
+      expect(drawImage).toHaveBeenCalledTimes(1); // one visible POI; the mocked sprite image is not baked through drawImage
+
+      await wrapper.get("canvas").trigger("click", { clientX: 150, clientY: 100 });
+      expect(wrapper.emitted("selectPlace")?.at(-1)).toEqual(["place:center"]);
+
+      wrapper.unmount();
+      tick(16);
+      expect(frames.size).toBe(0);
+    } finally {
+      wrapper.unmount();
+    }
+  });
 });

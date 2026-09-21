@@ -33,6 +33,7 @@ import type {
   TransportMapPerformanceTrace,
   TransportMapTraceEventId,
 } from "../performance/transportMapPerformanceTrace";
+import { measureDevPerformance } from "../../../services/devPerformance";
 
 export interface TransportMapDataSourceOptions {
   loader?: GlobalMapAssetLoader;
@@ -79,6 +80,15 @@ export interface TransportMapPrefetchOptions {
   generation?: number;
 }
 
+export type NearbyStationCatalogMode = "bootstrap" | "full";
+
+// Nearby scans are usually repeated while an address/camera settles. Cache a
+// small spatial cell of candidate stations, then recompute exact distances
+// for the caller's point so snapping never changes the radius contract.
+const NEARBY_STATION_CACHE_CELL_DEGREES = 0.00005;
+const NEARBY_STATION_CACHE_MARGIN_METERS = 8;
+const NEARBY_STATION_CACHE_MAX_ENTRIES = 48;
+
 export class TransportMapDataSource {
   private manifest?: GlobalMapManifest;
   private bootstrapPayload?: Awaited<ReturnType<GlobalMapAssetLoader["loadBootstrapPayload"]>>;
@@ -103,6 +113,7 @@ export class TransportMapDataSource {
   private regionalBusPromise?: Promise<GlobalMapPath[]>;
   private regionalBikePromise?: Promise<GlobalMapPath[]>;
   private readonly focusedViewportResultCache = new Map<string, TransportMapViewportResult>();
+  private readonly nearbyStationCandidateCache = new Map<string, GlobalMapStation[]>();
   private lifecycleToken = 0;
   private prefetchEpoch = 0;
   private prefetchedChunkIds = new Set<string>();
@@ -124,6 +135,7 @@ export class TransportMapDataSource {
 
   async initialize(signal?: AbortSignal): Promise<TransportMapNetwork> {
     const lifecycleToken = ++this.lifecycleToken;
+    this.nearbyStationCandidateCache.clear();
     const loader = this.options.loader ?? new GlobalMapAssetLoader({ trace: this.options.trace });
     const manifest = await loader.loadManifest(signal);
     if (lifecycleToken !== this.lifecycleToken) throw createLifecycleAbortError();
@@ -136,12 +148,12 @@ export class TransportMapDataSource {
     this.bootstrapPayload = bootstrapPayload;
     this.linePalette = linePalette;
     const decodeStartedAt = nowMs();
-    const network = decodeBootstrap(
+    const network = measureDevPerformance("transport-map-bootstrap-decode", () => decodeBootstrap(
       bootstrapPayload,
       manifest,
       undefined,
       linePalette,
-    );
+    ));
     this.network = network;
     this.decodeTimeMs += nowMs() - decodeStartedAt;
     this.stationIndex = buildStationSpatialIndex(network.stations);
@@ -211,7 +223,10 @@ export class TransportMapDataSource {
       // is cheaper than a structured-clone round trip on Android WebView.
       // Workers remain reserved for chunk decoding and viewport culling, where
       // the payload is bounded to the active viewport.
-      const catalog = assertCatalogPayload(parseCatalogPayload(raw, manifest), manifest);
+      const catalog = measureDevPerformance(
+        "transport-map-catalog-parse-and-index",
+        () => assertCatalogPayload(parseCatalogPayload(raw, manifest), manifest),
+      );
       if (lifecycleToken !== this.lifecycleToken) throw createLifecycleAbortError();
       this.catalog = catalog;
       // Decode a fresh network so all line/station relationships use the full
@@ -229,6 +244,7 @@ export class TransportMapDataSource {
         this.networkVersion += 1;
         this.decodeTimeMs += nowMs() - decodeStartedAt;
         this.stationIndex = buildStationSpatialIndex(nextNetwork.stations);
+        this.nearbyStationCandidateCache.clear();
         return nextNetwork;
       }
       return network;
@@ -914,15 +930,45 @@ export class TransportMapDataSource {
     lat: number,
     radiusMeters: number,
     signal?: AbortSignal,
+    options: { catalog?: NearbyStationCatalogMode } = {},
   ) {
-    const network = await this.ensureCatalog(signal);
+    // The bootstrap already contains the normalized station geometry and line
+    // relationships needed by the nearby selector. Keep the dense catalogue
+    // opt-in: the neighborhood score needs a handful of nearby stations, not
+    // the 6.3 MiB global catalogue and its second full decode.
+    const network = options.catalog === "bootstrap"
+      ? this.getNetwork()
+      : await this.ensureCatalog(signal);
+    signal?.throwIfAborted();
+    const catalogMode = options.catalog ?? "full";
+    const cacheKey = nearbyStationCacheKey(catalogMode, lon, lat, radiusMeters);
+    let candidates = this.nearbyStationCandidateCache.get(cacheKey);
+    if (candidates) {
+      // Map insertion order is our tiny LRU: a nearby scan keeps its cell hot.
+      this.nearbyStationCandidateCache.delete(cacheKey);
+      this.nearbyStationCandidateCache.set(cacheKey, candidates);
+    } else {
+      const cellPoint = nearbyStationCacheCellPoint(lon, lat);
+      candidates = queryStationsWithinRadius(
+        network.stations,
+        cellPoint,
+        radiusMeters + NEARBY_STATION_CACHE_MARGIN_METERS,
+        Number.POSITIVE_INFINITY,
+        0,
+        this.stationIndex,
+      ).map((result) => result.station);
+      this.nearbyStationCandidateCache.set(cacheKey, candidates);
+      while (this.nearbyStationCandidateCache.size > NEARBY_STATION_CACHE_MAX_ENTRIES) {
+        const oldestKey = this.nearbyStationCandidateCache.keys().next().value;
+        if (oldestKey === undefined) break;
+        this.nearbyStationCandidateCache.delete(oldestKey);
+      }
+    }
+    signal?.throwIfAborted();
     return queryStationsWithinRadius(
-      network.stations,
+      candidates,
       { lon, lat },
       radiusMeters,
-      Number.POSITIVE_INFINITY,
-      0,
-      this.stationIndex,
     );
   }
 
@@ -966,6 +1012,7 @@ export class TransportMapDataSource {
     this.workerPool?.dispose();
     this.scheduler = undefined;
     this.focusedViewportResultCache.clear();
+    this.nearbyStationCandidateCache.clear();
     this.network = undefined;
     this.networkVersion = 0;
     this.manifest = undefined;
@@ -1153,6 +1200,23 @@ function isLineVisible(
 
 function createLifecycleAbortError(): DOMException {
   return new DOMException("Global map data source lifecycle changed", "AbortError");
+}
+
+function nearbyStationCacheCellPoint(lon: number, lat: number): { lon: number; lat: number } {
+  return {
+    lon: Math.round(lon / NEARBY_STATION_CACHE_CELL_DEGREES) * NEARBY_STATION_CACHE_CELL_DEGREES,
+    lat: Math.round(lat / NEARBY_STATION_CACHE_CELL_DEGREES) * NEARBY_STATION_CACHE_CELL_DEGREES,
+  };
+}
+
+function nearbyStationCacheKey(
+  catalog: NearbyStationCatalogMode,
+  lon: number,
+  lat: number,
+  radiusMeters: number,
+): string {
+  const cell = nearbyStationCacheCellPoint(lon, lat);
+  return `${catalog}:${cell.lon.toFixed(5)}:${cell.lat.toFixed(5)}:${radiusMeters.toFixed(2)}`;
 }
 
 function createEmptyFilterPathsLocalMetrics(): TransportMapFilterPathsLocalMetrics {

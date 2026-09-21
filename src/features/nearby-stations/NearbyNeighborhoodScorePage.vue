@@ -57,6 +57,10 @@ function queryOrigin(): GeocoderPoint | undefined {
 
 const initialOrigin = queryOrigin();
 const nearby = useNearbyStations(initialOrigin ? {
+  // This page needs the complete station catalog for non-local benchmarks
+  // (metro, rail, and future-project access). The map may use its bootstrap
+  // catalog, but the neighborhood score must not silently lose those lines.
+  stationCatalog: "full",
   initialDraft: {
     query: initialOrigin.label ?? "",
     selectedPlace: initialOrigin,
@@ -71,6 +75,7 @@ const serviceQuality = useServiceQuality();
 const journeyDateTime = getNearbyWorkdayJourneyDateTime();
 const nightJourneyDateTime = getNearbyNightJourneyDateTime();
 const futureProjects = ref<PublicFutureGpeStation[]>([]);
+const futureProjectsReady = ref(false);
 const routeComposer = useTravelRoutes({
   origin: nearby.selectedPlace,
   travelRoutesProvider: nearbyDataProviders.travelRoutes,
@@ -81,11 +86,12 @@ const journeyProvider = {
 const walkingRouteProvider = async (
   origin: { lon: number; lat: number },
   destination: { lon: number; lat: number },
+  signal?: AbortSignal,
 ) => getNearbyWalkingRoute({
   id: `station:${destination.lat.toFixed(5)}:${destination.lon.toFixed(5)}`,
   origin,
   destination,
-});
+}, signal);
 const heavy = useNearbyHeavyTransports({
   origin: nearby.selectedPlace,
   network: nearby.transportMapNetwork,
@@ -93,6 +99,7 @@ const heavy = useNearbyHeavyTransports({
   activeModes: nearby.activeModes,
   radius: nearby.radius,
   futureProjects,
+  futureProjectsReady,
 }, {
   journeyProvider,
   journeyDateTime,
@@ -125,6 +132,14 @@ watch(
     if (next) futureProjects.value = [...next];
   },
   { immediate: true, deep: true, flush: "post" },
+);
+watch(
+  () => score.backendVerdictReady?.value ?? true,
+  (ready) => {
+    futureProjectsReady.value = ready;
+    if (!ready) futureProjects.value = [];
+  },
+  { immediate: true, flush: "post" },
 );
 watch(
   () => [nearby.selectedPlace.value?.lon, nearby.selectedPlace.value?.lat] as const,
@@ -275,6 +290,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
       :workplace-label="workplaceLabel"
       :loading="score.isLoading.value || heavy.isLoading.value"
       :error="scoreError"
+      :criteria="score.criteria?.value"
       :directory-url="directoryUrl"
       @change-origin="openAddressSelector"
     />

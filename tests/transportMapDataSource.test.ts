@@ -111,6 +111,27 @@ describe("global transport progressive data source", () => {
     expect(() => source.getNetwork()).toThrow("not initialized");
   }, 30_000);
 
+  it("queries nearby stations from bootstrap without loading the dense catalogue", async () => {
+    const calls: string[] = [];
+    const loader = createLocalAssetLoader((asset) => { calls.push(asset); });
+    const source = new TransportMapDataSource({ loader });
+
+    await source.initialize();
+    calls.length = 0;
+    const nearby = await source.queryStationsWithinRadius(
+      2.3522,
+      48.8566,
+      1_000,
+      undefined,
+      { catalog: "bootstrap" },
+    );
+
+    expect(nearby.length).toBeGreaterThan(0);
+    expect(calls).not.toContain("catalog.json");
+    expect(source.metrics().catalogLoaded).toBe(false);
+    source.dispose();
+  }, 30_000);
+
   it("uses the detailed default LOD for TER before the general LOD2 zoom band", async () => {
     const loader = new GlobalMapAssetLoader({
       fetcher: async (input: RequestInfo | URL) => {

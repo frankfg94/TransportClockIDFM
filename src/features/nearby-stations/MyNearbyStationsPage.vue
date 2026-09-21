@@ -1821,6 +1821,7 @@ onBeforeUnmount(() => {
         :show-basemap-control="settings.nearbyMapShowBasemapControl"
         :show-display-control="settings.nearbyMapShowDisplayControl"
         :show-fullscreen-control="settings.nearbyMapShowFullscreenControl"
+        :reduce-motion="settings.reduceMotion"
         :loading="nearby.isScanning.value || lineFlow.lineFlowLoading.value || heavy.isLoading.value"
         :line-flow-model="lineFlow.lineFlowModel.value"
         :line-flow-models="lineFlowModels"

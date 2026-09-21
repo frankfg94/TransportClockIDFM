@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GtfsLineFrequencyResponse } from "../src/types/lineFrequency";
 import type { GlobalMapLine, GlobalMapStation } from "../src/features/transport-map/contracts/manifest";
 import type { TransportMapNetwork } from "../src/features/transport-map/contracts/network";
-import type { NearbyJourney, TravelRoutesProvider } from "../src/features/nearby-stations/nearbyHeavyTransports";
+import type { NearbyHeavyTransportCandidate, NearbyJourney, TravelRoutesProvider } from "../src/features/nearby-stations/nearbyHeavyTransports";
 import type { NearbyPlace, PlacesProvider } from "../src/features/nearby-stations/nearbyPlaces";
 import type { NearbyStationEntry } from "../src/features/nearby-stations/nearbyStations";
 import { useNearbyNeighborhoodScore } from "../src/features/nearby-stations/useNearbyNeighborhoodScore";
@@ -126,6 +126,22 @@ function createEntry(line: GlobalMapLine): NearbyStationEntry {
   };
 }
 
+function createHeavyCandidate(line: GlobalMapLine): NearbyHeavyTransportCandidate {
+  const station = createNetwork(line).stations[0]!;
+  const entry = createEntry(line);
+  const access = { kind: "direct" as const, walkingSeconds: 600, totalSeconds: 900 };
+  return {
+    id: station.id,
+    entry,
+    station,
+    lines: [line],
+    distanceMeters: 2_300,
+    access,
+    accessByLine: { [line.id]: access },
+    projected: true,
+  };
+}
+
 function readyFrequency(lineId: string): GtfsLineFrequencyResponse {
   return {
     lineId,
@@ -143,6 +159,89 @@ function readyFrequency(lineId: string): GtfsLineFrequencyResponse {
 }
 
 describe("useNearbyNeighborhoodScore", () => {
+  it("marks a stale backend dataset as degraded without hiding the criterion", async () => {
+    const generatedAt = new Date(Date.now() - 2 * 24 * 60 * 60_000).toISOString();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      schemaVersion: "1.3",
+      generatedAt,
+      categories: [{
+        id: "security",
+        status: "available",
+        score: 7.2,
+        positiveFacts: [],
+        negativeFacts: [],
+        neutralFacts: [],
+        limitations: [],
+      }],
+      sources: [],
+      warnings: [],
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const origin = ref({ lon: 2.30, lat: 48.82, label: "Origine" });
+    const placesProvider: PlacesProvider = {
+      searchDestinations: vi.fn(async () => []),
+      searchNearby: vi.fn(async () => []),
+    };
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const Harness = defineComponent({
+      setup() {
+        score = useNearbyNeighborhoodScore({
+          origin,
+          stations: ref<NearbyStationEntry[]>([]),
+          network: ref<TransportMapNetwork>(),
+          placesProvider,
+        });
+        return () => null;
+      },
+    });
+    const wrapper = mount(Harness);
+
+    await vi.waitFor(() => expect(score.criteria.value.find((criterion) => criterion.id === "security")?.status).toBe("degraded"));
+    expect(score.criteria.value.find((criterion) => criterion.id === "security")?.datasets)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ id: "neighborhood-verdict", status: "stale" })]));
+    wrapper.unmount();
+  });
+
+  it("adds frequency details for a new heavy line without refreshing route benchmarks", async () => {
+    const origin = ref({ lon: 2.30, lat: 48.82, label: "Origine" });
+    const line1 = createLine();
+    const stations = ref<NearbyStationEntry[]>([createEntry(line1)]);
+    const network = ref<TransportMapNetwork>(createNetwork(line1));
+    const heavyCandidates = ref<NearbyHeavyTransportCandidate[]>([]);
+    const placesProvider: PlacesProvider = {
+      searchDestinations: vi.fn(async () => []),
+      searchNearby: vi.fn(async () => []),
+    };
+    const findJourneys = vi.fn(async () => [] as NearbyJourney[]);
+    const fetchFrequency = vi.fn(async (lineId: string) => readyFrequency(lineId));
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const Harness = defineComponent({
+      setup() {
+        score = useNearbyNeighborhoodScore({
+          origin,
+          stations,
+          network,
+          heavyCandidates,
+          placesProvider,
+          travelRoutesProvider: { findJourneys },
+          fetchFrequency,
+        });
+        return () => null;
+      },
+    });
+    const wrapper = mount(Harness);
+
+    await vi.waitFor(() => expect(fetchFrequency).toHaveBeenCalledTimes(1));
+    const routeCallsBeforeHeavy = findJourneys.mock.calls.length;
+    const line2 = { ...createLine(), id: "line:metro:15", code: "15", label: "15" };
+    heavyCandidates.value = [createHeavyCandidate(line2)];
+
+    await vi.waitFor(() => expect(fetchFrequency).toHaveBeenCalledTimes(2));
+    await flushPromises();
+    expect(findJourneys).toHaveBeenCalledTimes(routeCallsBeforeHeavy);
+    expect(score.result.value.categories.find((category) => category.id === "transport")).toBeDefined();
+    wrapper.unmount();
+  });
+
   it("deduplicates POI loading while adding the Châtelet and frequency stages", async () => {
     const origin = ref({ lon: 2.30, lat: 48.82, label: "Origine" });
     const stations = ref<NearbyStationEntry[]>([]);
@@ -204,7 +303,7 @@ describe("useNearbyNeighborhoodScore", () => {
     await vi.waitFor(() => expect(travelRoutesProvider.findJourneys).toHaveBeenCalledTimes(1));
     expect(travelRoutesProvider.findJourneys).toHaveBeenCalledWith(expect.objectContaining({
       datetime: "20260902T090000",
-    }));
+    }), expect.any(AbortSignal));
     expect(fetchFrequency).toHaveBeenCalledTimes(1);
     expect(score.result.value.categories.find((category) => category.id === "transport")?.available).toBe(true);
     wrapper.unmount();
@@ -270,6 +369,48 @@ describe("useNearbyNeighborhoodScore", () => {
     expect(score.error.value).toBeUndefined();
     expect(score.errorSource.value).toBeUndefined();
 
+    wrapper.unmount();
+  });
+
+  it("aborts origin-scoped probes when a refresh replaces the origin", async () => {
+    const origin = ref({ lon: 2.30, lat: 48.82, label: "Origine" });
+    const line = createLine();
+    const stations = ref<NearbyStationEntry[]>([]);
+    const network = ref<TransportMapNetwork>(createNetwork(line));
+    const placesProvider: PlacesProvider = {
+      searchDestinations: vi.fn(async () => []),
+      searchNearby: vi.fn(async () => []),
+    };
+    const signals: AbortSignal[] = [];
+    const findJourneys: TravelRoutesProvider["findJourneys"] = vi.fn((_, signal) => new Promise<NearbyJourney[]>((resolve, reject) => {
+      if (!signal) {
+        resolve([]);
+        return;
+      }
+      signals.push(signal);
+      signal.addEventListener("abort", () => reject(signal.reason ?? new DOMException("aborted", "AbortError")), { once: true });
+    }));
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const Harness = defineComponent({
+      setup() {
+        score = useNearbyNeighborhoodScore({
+          origin,
+          stations,
+          network,
+          placesProvider,
+          travelRoutesProvider: { findJourneys },
+        });
+        return () => null;
+      },
+    });
+    const wrapper = mount(Harness);
+
+    await vi.waitFor(() => expect(findJourneys).toHaveBeenCalledTimes(1));
+    expect(signals[0]?.aborted).toBe(false);
+    origin.value = { lon: 2.36, lat: 48.86, label: "Nouvelle origine" };
+
+    await vi.waitFor(() => expect(signals[0]?.aborted).toBe(true));
+    expect(score.isLoading.value).toBe(true);
     wrapper.unmount();
   });
 
@@ -391,7 +532,7 @@ describe("useNearbyNeighborhoodScore", () => {
     expect(travelRoutesProvider.findJourneys).toHaveBeenCalledTimes(2);
     expect(travelRoutesProvider.findJourneys).toHaveBeenCalledWith(expect.objectContaining({
       destination: expect.objectContaining({ lon: 2.347, lat: 48.8617 }),
-    }));
+    }), expect.any(AbortSignal));
     expect(score.result.value.negativeFacts.some((fact) => fact.kind === "chateletOver60")).toBe(false);
     expect(score.result.value.positiveFacts.some((fact) => fact.kind === "chateletUnder30")).toBe(true);
     wrapper.unmount();
@@ -464,7 +605,7 @@ describe("useNearbyNeighborhoodScore", () => {
     expect(travelRoutesProvider.findJourneys).toHaveBeenCalledWith(expect.objectContaining({
       destination: expect.objectContaining({ id: expect.stringMatching(/^green-space:green-domaine:/u) }),
       datetime: "20260907T090000",
-    }));
+    }), expect.any(AbortSignal));
     expect(score.result.value.categories
       .find((category) => category.id === "nature-leisure")
       ?.positiveFacts.some((fact) => fact.kind === "greenSpaceTransitNearby" && fact.labelValues?.lines === "T10"))

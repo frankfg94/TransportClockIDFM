@@ -13,7 +13,7 @@ it("shares one raster icon description for all places of the same kind", () => {
     { id: "b", name: "B", lon: 2.4, lat: 48.85, category: "shop", kind: "bakery", distanceMeters: 390 },
   ]);
   const layer = createDeckNearbyPlacesLayer(data);
-  const icon = layer.props.getIcon as (record: typeof data[number]) => { url: string };
+  const icon = layer.props.getIcon as unknown as (record: typeof data[number]) => { url: string };
   expect(icon(data[0]!)).toBe(icon(data[1]!));
   expect(decodeURIComponent(icon(data[0]!).url)).toContain("<svg");
 });

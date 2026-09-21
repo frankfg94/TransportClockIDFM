@@ -102,6 +102,7 @@ describe("NearbyNeighborhoodScorePage", () => {
     });
 
     expect(mocks.useNearbyStations).toHaveBeenCalledWith(expect.objectContaining({
+      stationCatalog: "full",
       initialDraft: expect.objectContaining({
         selectedPlace: expect.objectContaining({
           lat: 48.76591,

@@ -1,6 +1,6 @@
 import type { TranslationKey, TranslationParams } from "../../../i18n";
 import type { PublicVerdictEvidence, PublicVerdictSource } from "../neighborhoodVerdictApi";
-import type { NeighborhoodCategoryId, NeighborhoodCategoryResult, NeighborhoodFact, NeighborhoodFactAction, NeighborhoodFactKind, NeighborhoodFactPlace, NeighborhoodFactPolarity, NeighborhoodFactProof, NeighborhoodFactTravel } from "./contracts";
+import type { NeighborhoodCategoryId, NeighborhoodCategoryResult, NeighborhoodFact, NeighborhoodFactAction, NeighborhoodFactKind, NeighborhoodFactPlace, NeighborhoodFactPolarity, NeighborhoodFactProof, NeighborhoodFactTransportReliabilityLine, NeighborhoodFactTravel } from "./contracts";
 import { NEIGHBORHOOD_CATEGORY_WEIGHTS } from "./contracts";
 import { CATEGORY_KEYS, FACT_KEYS } from "./i18nKeys";
 import { getNeighborhoodScoreDisplay } from "./primitives";
@@ -67,6 +67,7 @@ export function makeFact(options: {
   emphasis?: "exceptional";
   travel?: NeighborhoodFactTravel;
   places?: readonly NeighborhoodFactPlace[];
+  transportReliabilityLines?: readonly NeighborhoodFactTransportReliabilityLine[];
 }): NeighborhoodFact {
   const keys = FACT_KEYS[options.kind];
   return {
@@ -84,6 +85,7 @@ export function makeFact(options: {
     action: options.action,
     travel: options.travel,
     places: options.places,
+    transportReliabilityLines: options.transportReliabilityLines,
     evidence: {
       sourceKey: options.sourceKey,
       proof: options.proof,

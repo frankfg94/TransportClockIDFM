@@ -284,6 +284,21 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
         ruleValues: { threshold: 60 },
         travel: fastestJourney ? { journey: fastestJourney } : undefined,
       }));
+    } else {
+      neutralFacts.push(makeFact({
+        id: "chatelet-context",
+        kind: "chateletContext",
+        category: "transport",
+        polarity: "neutral",
+        family: "chatelet-access",
+        priority: 6,
+        values,
+        sourceKey: SOURCE_KEYS.journeys,
+        proof: "direct",
+        ruleKey: RULE_KEYS.chateletContext,
+        ruleValues: { minimum: 45, maximum: 60 },
+        travel: fastestJourney ? { journey: fastestJourney } : undefined,
+      }));
     }
     if (journeySummary.transitSectionCount <= 1 && journeySummary.transfers === 0) {
       positiveFacts.push(makeFact({

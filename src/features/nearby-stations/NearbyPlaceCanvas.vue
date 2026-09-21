@@ -10,6 +10,7 @@ import { nearbyPlaceWalkingDistanceMeters, nearbyPlaceWalkingMinutes } from "./n
 import { PLACE_ICON_COMPONENTS, useNearbyPlacePresenter } from "./useNearbyPlacePresenter";
 import { indexNearbyPlaceViewport, queryNearbyPlaceViewport } from "./nearbyPlaceViewport";
 import { nearbyPlacePop, NEARBY_PLACE_POP_MS } from "./nearbyPlacePop";
+import { beginDevPerformance, endDevPerformance } from "../../services/devPerformance";
 
 const props = defineProps<{
   places: readonly NearbyPlace[];
@@ -19,6 +20,9 @@ const props = defineProps<{
   preview: boolean;
   showNames: boolean;
   reducedMotion: boolean;
+  interactionActive?: boolean;
+  canvasHitTesting?: boolean;
+  pixelRatioOverride?: number;
   selectedPlaceId?: string;
   walkingRoutes?: Readonly<Record<string, NearbyWalkingRoute | undefined>>;
 }>();
@@ -252,11 +256,13 @@ function prepareHoverRepaint(ctx: CanvasRenderingContext2D, camera: CameraState)
 }
 
 function paint(now: number): void {
+  const performanceId = beginDevPerformance("nearby-poi-canvas-draw");
+  try {
   frame = undefined;
   const node = canvas.value; const ctx = context;
   if (!node || !ctx) return;
   const camera = props.camera;
-  const nextRatio = camera.pixelRatio || 1;
+  const nextRatio = props.pixelRatioOverride ?? camera.pixelRatio ?? 1;
   if (ratio !== nextRatio) {
     ratio = nextRatio; sprites.clear(); pendingSprites.clear();
     for (const entry of [...entries.value, ...leaving.values()]) { entry.label = undefined; entry.sprite = undefined; }
@@ -282,7 +288,7 @@ function paint(now: number): void {
     if (inverse !== lastInverseScale) targets.value.style.setProperty("--place-inverse-scale", lastInverseScale = inverse);
   }
   let animating = false;
-  const reducedMotion = props.reducedMotion;
+  const reducedMotion = props.reducedMotion || props.interactionActive === true;
   const hovered = hoveredId.value;
   const selected = props.selectedPlaceId;
   const poses = new Map<string, ReturnType<typeof nearbyPlacePop>>();
@@ -310,7 +316,7 @@ function paint(now: number): void {
     const moving = !reducedMotion && elapsed < NEARBY_PLACE_POP_MS;
     animating ||= moving;
     const tile = sprite(entry);
-    const name = label(entry);
+    const name = props.interactionActive ? undefined : label(entry);
     if (!tile || (moving && elapsed < 0) || (!isLeaving && (entry.place.id === hovered || entry.place.id === selected))) return;
     let pose: ReturnType<typeof nearbyPlacePop> | undefined;
     if (moving) {
@@ -330,6 +336,9 @@ function paint(now: number): void {
   ctx.globalAlpha = 1;
   if (!fullPaint) ctx.restore();
   if (animating) schedule();
+  } finally {
+    endDevPerformance(performanceId, "nearby-poi-canvas-draw");
+  }
 }
 
 function placement(entry: Entry): "above" | "below" | "left" | "right" {
@@ -337,6 +346,84 @@ function placement(entry: Entry): "above" | "below" | "left" | "right" {
   return point.y < 92 ? "below" : point.x < 145 ? "right"
     : point.x > props.camera.viewportWidthCssPx - 145 ? "left" : "above";
 }
+
+function canvasPoint(event: MouseEvent | PointerEvent): { x: number; y: number } | undefined {
+  const node = canvas.value;
+  if (!node) return undefined;
+  const bounds = node.getBoundingClientRect();
+  const width = bounds.width || props.camera.viewportWidthCssPx;
+  const height = bounds.height || props.camera.viewportHeightCssPx;
+  if (width <= 0 || height <= 0) return undefined;
+  return {
+    x: (event.clientX - bounds.left) * props.camera.viewportWidthCssPx / width,
+    y: (event.clientY - bounds.top) * props.camera.viewportHeightCssPx / height,
+  };
+}
+
+function hitTest(event: MouseEvent | PointerEvent): Entry | undefined {
+  if (!props.canvasHitTesting) return undefined;
+  const point = canvasPoint(event);
+  if (!point) return undefined;
+  const camera = props.camera;
+  const radiusPx = 30;
+  const world = screenToWorld(point, camera);
+  const candidates = queryNearbyPlaceViewport(index.value, {
+    ...camera,
+    centerWorldX: world.x,
+    centerWorldY: world.y,
+    viewportWidthCssPx: radiusPx * 2,
+    viewportHeightCssPx: radiusPx * 2,
+  });
+  let closest: { entry: Entry; distance: number } | undefined;
+  for (const candidate of candidates) {
+    const entry = entryById.value.get(candidate.place.id);
+    if (!entry) continue;
+    const projected = worldToScreen({ x: entry.worldX, y: entry.worldY }, camera);
+    const distance = Math.hypot(projected.x - point.x, projected.y - point.y);
+    if (distance <= radiusPx && (!closest || distance < closest.distance)) {
+      closest = { entry, distance };
+    }
+  }
+  return closest?.entry;
+}
+
+function handleCanvasPointerMove(event: PointerEvent): void {
+  if (event.pointerType === "touch") return;
+  hoveredId.value = hitTest(event)?.place.id;
+}
+
+function handleCanvasPointerLeave(): void {
+  clearHover();
+}
+
+function handleCanvasClick(event: MouseEvent): void {
+  const entry = hitTest(event);
+  if (!entry) return;
+  emit("selectPlace", props.selectedPlaceId === entry.place.id ? undefined : entry.place.id);
+}
+
+function handleCanvasContextMenu(event: MouseEvent): void {
+  const entry = hitTest(event);
+  if (entry) emit("placeContextMenu", entry.place.id, event);
+}
+
+function handleCanvasKeydown(event: KeyboardEvent): void {
+  if (!props.canvasHitTesting) return;
+  const visible = entries.value.filter((entry) => entry.inViewport);
+  if (visible.length === 0) return;
+  const currentIndex = visible.findIndex((entry) => entry.place.id === hoveredId.value);
+  if (event.key === "ArrowRight" || event.key === "ArrowDown" || event.key === "ArrowLeft" || event.key === "ArrowUp") {
+    event.preventDefault();
+    const direction = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
+    hoveredId.value = visible[(currentIndex + direction + visible.length) % visible.length]!.place.id;
+    return;
+  }
+  if ((event.key === "Enter" || event.key === " ") && hoveredId.value) {
+    event.preventDefault();
+    emit("selectPlace", props.selectedPlaceId === hoveredId.value ? undefined : hoveredId.value);
+  }
+}
+
 function activeStyle(entry: Entry) {
   const point = worldToScreen({ x: entry.worldX, y: entry.worldY }, props.camera);
   return { left: `${point.x}px`, top: `${point.y}px` };
@@ -352,6 +439,7 @@ watch(() => [hoveredId.value, props.selectedPlaceId], (next, previous) => {
   scheduleFrame();
 });
 watch(() => props.reducedMotion, schedule);
+watch(() => [props.interactionActive, props.pixelRatioOverride], schedule);
 onMounted(() => {
   for (const node of iconDefinitions.value?.querySelectorAll<SVGElement>("[data-place-icon]") ?? []) {
     markup.set(node.dataset.placeIcon!, node.innerHTML);
@@ -374,8 +462,22 @@ onBeforeUnmount(() => {
     <svg v-once ref="iconDefinitions" class="nearby-map__place-definitions" aria-hidden="true"><defs>
       <component :is="component" v-for="(component, id) in PLACE_ICON_COMPONENTS" :key="id" :data-place-icon="id" />
     </defs></svg>
-    <canvas ref="canvas" class="nearby-map__place-canvas" aria-hidden="true" />
-    <div v-memo="[entries, selectedPlaceId]" ref="targets" class="nearby-map__place-targets">
+    <canvas
+      ref="canvas"
+      class="nearby-map__place-canvas"
+      :class="{ 'nearby-map__place-canvas--hit-test': canvasHitTesting }"
+      data-nearby-place-canvas
+      :aria-hidden="canvasHitTesting ? undefined : true"
+      :role="canvasHitTesting ? 'img' : undefined"
+      :aria-label="canvasHitTesting ? t('nearbyStations.mapAria') : undefined"
+      :tabindex="canvasHitTesting ? 0 : undefined"
+      @pointermove="handleCanvasPointerMove"
+      @pointerleave="handleCanvasPointerLeave"
+      @click.stop="handleCanvasClick"
+      @contextmenu.stop.prevent="handleCanvasContextMenu"
+      @keydown="handleCanvasKeydown"
+    />
+    <div v-if="!canvasHitTesting" v-memo="[entries, selectedPlaceId]" ref="targets" class="nearby-map__place-targets">
       <button v-for="entry in entries" :key="entry.place.id"
         :ref="element => { entry.target = element as HTMLButtonElement | undefined; }"
         v-memo="[entry, entry.place.id === selectedPlaceId]"
@@ -405,6 +507,7 @@ onBeforeUnmount(() => {
 .nearby-map__places { display: contents; }
 .nearby-map__place-definitions { height: 0; position: absolute; width: 0; pointer-events: none; }
 .nearby-map__place-canvas { inset: 0; height: 100%; width: 100%; position: absolute; pointer-events: none; z-index: 6; }
+.nearby-map__place-canvas--hit-test { pointer-events: auto; z-index: 4; }
 .nearby-map__place-targets { inset: 0; position: absolute; pointer-events: none; transform-origin: 0 0; z-index: 6; }
 /* Hit targets must stay fixed on hover: the global button transform/transition
    otherwise moves them under the pointer and repeatedly retriggers enter/leave. */

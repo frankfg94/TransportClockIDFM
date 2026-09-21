@@ -19,13 +19,13 @@
         <img
           v-for="tile in coverTiles"
           :key="tile.id"
-          v-memo="[tile, props.layer, props.basemapStyle, props.contrast]"
+          v-memo="[tile]"
           :src="tile.url"
           alt=""
           class="nearby-stations-basemap__cover-tile"
           :style="tileStyle(tile)"
           loading="eager"
-          decoding="sync"
+          decoding="async"
           draggable="false"
           referrerpolicy="strict-origin-when-cross-origin"
           @load="markTileLoaded(tile.id, $event)"
@@ -179,6 +179,11 @@ const coverStyle = computed<Record<string, string>>(() => ({
     : props.basemapStyle === "voyager"
       ? "1"
       : "0.94",
+  filter: props.layer === "satellite"
+    ? `saturate(0.82) contrast(${props.contrast}) brightness(0.82)`
+    : props.basemapStyle === "voyager"
+      ? `saturate(1.32) contrast(${props.contrast}) brightness(0.96)`
+      : `saturate(1.08) contrast(${props.contrast}) brightness(0.98)`,
 }));
 
 function rebuildCover(): void {
@@ -319,11 +324,6 @@ function tileStyle(tile: TransportMapBasemapTile): Record<string, string> {
     top: `${tile.topCssPx}px`,
     width: `${tile.widthCssPx}px`,
     height: `${tile.heightCssPx}px`,
-    filter: props.layer === "satellite"
-      ? `saturate(0.82) contrast(${props.contrast}) brightness(0.82)`
-      : props.basemapStyle === "voyager"
-        ? `saturate(1.32) contrast(${props.contrast}) brightness(0.96)`
-        : `saturate(1.08) contrast(${props.contrast}) brightness(0.98)`,
   };
 }
 </script>

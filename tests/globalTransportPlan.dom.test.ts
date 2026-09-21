@@ -1767,7 +1767,7 @@ describe("GlobalTransportPlan facade", () => {
     wrappers.push(wrapper);
     await flushPromises();
 
-    expect(wrapper.get("[data-transport-map-basemap] img").attributes("style")).toContain(
+    expect(wrapper.get("[data-transport-map-basemap]").attributes("style")).toContain(
       "contrast(1.12)",
     );
   });

@@ -28,7 +28,7 @@ export type TravelDestinationSearch = (
  * without changing the composable's selected destination or route list.
  */
 export interface TravelRouteProbe {
-  probeJourneys(request: NearbyJourneyRequest): Promise<NearbyJourney[]>;
+  probeJourneys(request: NearbyJourneyRequest, signal?: AbortSignal): Promise<NearbyJourney[]>;
 }
 
 export function useTravelRoutes(options: {
@@ -119,14 +119,17 @@ export function useTravelRoutes(options: {
     }
   }
 
-  async function probeJourneys(request: NearbyJourneyRequest): Promise<NearbyJourney[]> {
-    return travelRoutesProvider.findJourneys({
+  async function probeJourneys(request: NearbyJourneyRequest, signal?: AbortSignal): Promise<NearbyJourney[]> {
+    const normalizedRequest = {
       ...request,
       datetime: toNavitiaDepartureDateTime(request.datetime),
       count: request.count ?? 8,
       includeDisruptions: request.includeDisruptions ?? true,
       includeGeoJson: request.includeGeoJson ?? true,
-    });
+    };
+    return signal
+      ? travelRoutesProvider.findJourneys(normalizedRequest, signal)
+      : travelRoutesProvider.findJourneys(normalizedRequest);
   }
 
   function selectRoute(routeId: string): TravelRoute | undefined {

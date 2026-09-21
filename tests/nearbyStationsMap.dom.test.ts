@@ -495,27 +495,40 @@ describe("NearbyStationsMap pan interaction", () => {
       pointerType: "mouse",
     });
     await nextTick();
-    const firstClampedCamera = wrapper.emitted("cameraChange")?.at(-1)?.[0] as {
+    const cameraChangesDuringGesture = wrapper.emitted("cameraChange")?.length ?? 0;
+
+    expect(wrapper.emitted("cameraChange")?.length ?? 0).toBe(cameraChangesDuringGesture);
+
+    await map.trigger("pointerup", { pointerId: 1, pointerType: "mouse" });
+    const firstCommittedCamera = wrapper.emitted("cameraChange")?.at(-1)?.[0] as {
       centerWorldX: number;
       centerWorldY: number;
     };
 
+    await map.trigger("pointerdown", {
+      button: 0,
+      clientX: 360,
+      clientY: 180,
+      pointerId: 2,
+      pointerType: "mouse",
+    });
     await map.trigger("pointermove", {
       buttons: 1,
       clientX: 2_000_000,
       clientY: 2_000_000,
-      pointerId: 1,
+      pointerId: 2,
       pointerType: "mouse",
     });
     await nextTick();
-    const secondClampedCamera = wrapper.emitted("cameraChange")?.at(-1)?.[0] as {
+    expect(wrapper.emitted("cameraChange")?.at(-1)?.[0]).toEqual(firstCommittedCamera);
+    await map.trigger("pointerup", { pointerId: 2, pointerType: "mouse" });
+    const secondCommittedCamera = wrapper.emitted("cameraChange")?.at(-1)?.[0] as {
       centerWorldX: number;
       centerWorldY: number;
     };
 
-    expect(secondClampedCamera.centerWorldX).toBe(firstClampedCamera.centerWorldX);
-    expect(secondClampedCamera.centerWorldY).toBe(firstClampedCamera.centerWorldY);
-    await map.trigger("pointerup", { pointerId: 1, pointerType: "mouse" });
+    expect(secondCommittedCamera.centerWorldX).toBe(firstCommittedCamera.centerWorldX);
+    expect(secondCommittedCamera.centerWorldY).toBe(firstCommittedCamera.centerWorldY);
     expect(map.classes()).not.toContain("nearby-map--dragging");
     wrapper.unmount();
   });
@@ -544,6 +557,8 @@ describe("NearbyStationsMap pan interaction", () => {
         pointerType: "touch",
       });
       await nextTick();
+      expect(wrapper.emitted("cameraChange")?.at(-1)?.[0]).toEqual(before);
+      await map.trigger("pointerup", { pointerId: 2, pointerType: "touch" });
       const after = wrapper.emitted("cameraChange")?.at(-1)?.[0] as {
         centerWorldX: number;
         centerWorldY: number;
@@ -551,11 +566,73 @@ describe("NearbyStationsMap pan interaction", () => {
 
       expect(after.centerWorldX).not.toBe(before.centerWorldX);
       expect(after.centerWorldY).not.toBe(before.centerWorldY);
-      await map.trigger("pointerup", { pointerId: 2, pointerType: "touch" });
     } finally {
       wrapper.unmount();
       restoreViewport();
     }
+  });
+
+  it("moves the marker layer with the compositor gesture transform without committing Vue camera state", async () => {
+    const line = createLine("line:metro:1", "METRO");
+    const station = createStationAt("station:dynamic", "Station dynamique", line, 2.351, 48.851);
+    const wrapper = mountMap([createEntry(station, line)]);
+    const map = wrapper.get(".nearby-map");
+    const cameraChangesBeforeGesture = wrapper.emitted("cameraChange")?.length ?? 0;
+
+    await map.trigger("pointerdown", {
+      button: 0,
+      clientX: 360,
+      clientY: 180,
+      pointerId: 3,
+      pointerType: "mouse",
+    });
+    await map.trigger("pointermove", {
+      buttons: 1,
+      clientX: 400,
+      clientY: 200,
+      pointerId: 3,
+      pointerType: "mouse",
+    });
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    expect(wrapper.get(".nearby-map__camera-layer").attributes("style")).toContain("transform:");
+    expect(wrapper.get(".nearby-map__marker-layer").attributes("style")).toContain("transform:");
+    expect(wrapper.emitted("cameraChange")?.length ?? 0).toBe(cameraChangesBeforeGesture);
+
+    await map.trigger("pointerup", { pointerId: 3, pointerType: "mouse" });
+    await nextTick();
+    expect(wrapper.get(".nearby-map__marker-layer").attributes("style") ?? "").not.toContain("transform:");
+    wrapper.unmount();
+  });
+
+  it("keeps marker icons static during gestures when reduced motion is enabled", async () => {
+    const line = createLine("line:metro:1", "METRO");
+    const station = createStationAt("station:reduced", "Station sans mouvement", line, 2.351, 48.851);
+    const wrapper = mountMap([createEntry(station, line)]);
+    await wrapper.setProps({ reduceMotion: true });
+    const map = wrapper.get(".nearby-map");
+
+    await map.trigger("pointerdown", {
+      button: 0,
+      clientX: 360,
+      clientY: 180,
+      pointerId: 4,
+      pointerType: "mouse",
+    });
+    await map.trigger("pointermove", {
+      buttons: 1,
+      clientX: 400,
+      clientY: 200,
+      pointerId: 4,
+      pointerType: "mouse",
+    });
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    expect(wrapper.get(".nearby-map__camera-layer").attributes("style")).toContain("transform:");
+    expect(wrapper.get(".nearby-map__marker-layer").attributes("style") ?? "").not.toContain("transform:");
+
+    await map.trigger("pointerup", { pointerId: 4, pointerType: "mouse" });
+    wrapper.unmount();
   });
 });
 
@@ -1379,10 +1456,11 @@ describe("NearbyStationsMap walking accessibility zones and controls", () => {
         clientY: 180,
         deltaY: -120,
       });
-      await nextTick();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
       expect(path.attributes("d")).toBe(pathBefore);
-      expect(wrapper.get(".nearby-map__walking-zones g").attributes("transform")).not.toBe(transformBefore);
+      expect(wrapper.get(".nearby-map__walking-zones g").attributes("transform")).toBe(transformBefore);
+      expect(wrapper.get(".nearby-map__camera-layer").attributes("style")).toContain("transform:");
       await path.trigger("mouseleave");
       expect(wrapper.find(".nearby-map__isochrone-tooltip").exists()).toBe(false);
     } finally {
@@ -2826,7 +2904,7 @@ describe("NearbyStationsMap line focus", () => {
       await displayToggle.trigger("click");
       const panel = wrapper.find("#nearby-map-display-controls");
       expect(panel.exists()).toBe(true);
-      expect(panel.findAll("input[type='checkbox']")).toHaveLength(16);
+      expect(panel.findAll("input[type='checkbox']")).toHaveLength(19);
       expect((panel.find("input[type='checkbox']").element as HTMLInputElement).checked).toBe(true);
 
       const busCheckbox = panel.findAll("input[type='checkbox']")[0]!;

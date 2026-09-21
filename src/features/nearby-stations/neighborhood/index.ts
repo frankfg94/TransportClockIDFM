@@ -19,6 +19,7 @@ export type {
   NeighborhoodFactPlace,
   NeighborhoodFactPolarity,
   NeighborhoodFactProof,
+  NeighborhoodFactTransportReliabilityLine,
   NeighborhoodFactTravel,
   NeighborhoodGreenSpaceJourney,
   NeighborhoodJourneyBenchmark,
@@ -30,6 +31,19 @@ export type {
 export { getNeighborhoodScoreDisplay, saturatingNeighborhoodBonus } from "./primitives";
 export {
   NEIGHBORHOOD_SCORE_BAND_COLORS,
+  NEIGHBORHOOD_CATEGORY_IDS,
+  aggregateNeighborhoodScore,
+  buildNeighborhoodCategories,
   buildNeighborhoodScore,
   getNeighborhoodScoreBand,
 } from "./score";
+export {
+  NEIGHBORHOOD_CRITERION_REGISTRY,
+} from "./criterionRegistry";
+export type {
+  NeighborhoodCriterionDefinition,
+  NeighborhoodCriterionState,
+  NeighborhoodCriterionStatus,
+  NeighborhoodDatasetRequirement,
+  NeighborhoodDatasetStatus,
+} from "./criterionRegistry";

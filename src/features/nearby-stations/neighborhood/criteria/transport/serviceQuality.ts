@@ -1,6 +1,6 @@
 import type { GlobalMapLine, GlobalMapMode } from "../../../../transport-map/contracts/manifest";
 import type { PublicServiceQuality, ServiceQualityLineReliability, ServiceQualityMode } from "../../../serviceQualityApi";
-import type { NeighborhoodFact, NeighborhoodFactPolarity, NeighborhoodScoreInput } from "../../contracts";
+import type { NeighborhoodFact, NeighborhoodFactPolarity, NeighborhoodFactTransportReliabilityLine, NeighborhoodScoreInput } from "../../contracts";
 import { HEAVY_SCORE_MODES } from "../../contracts";
 import { makeFact } from "../../facts";
 import { RULE_KEYS, SOURCE_KEYS } from "../../i18nKeys";
@@ -59,6 +59,15 @@ export function makeServiceQualityFact(
       ? "negative"
       : "neutral";
   const source = dataset.sources[0];
+  const transportReliabilityLines: NeighborhoodFactTransportReliabilityLine[] = [...summary.lines]
+    .sort(compareNearbyServiceQualityLines)
+    .map((line) => ({
+      lineId: line.lineId,
+      lineName: line.lineName,
+      mode: line.mode,
+      reliabilityScore: line.reliabilityScore,
+      labelKey: line.labelKey,
+    }));
   const fact = makeFact({
     id: "transport-service-quality",
     kind: "transportServiceQuality",
@@ -77,6 +86,7 @@ export function makeServiceQualityFact(
     proof: "derived",
     ruleKey: RULE_KEYS.serviceQuality,
     ruleValues: { weight: 15 },
+    transportReliabilityLines,
     action: {
       labelKey: "nearbyStations.neighborhoodScore.facts.transportServiceQuality.openRanking",
       href: "/lines-ranking",
@@ -91,6 +101,24 @@ export function makeServiceQualityFact(
     ? `${summary.yearsUsed[0]}–${summary.yearsUsed.at(-1)}`
     : undefined;
   return fact;
+}
+
+const SERVICE_QUALITY_MODE_ORDER: Record<ServiceQualityMode, number> = {
+  METRO: 0,
+  RER: 1,
+  TRAIN: 2,
+  TRAM: 3,
+};
+
+function compareNearbyServiceQualityLines(
+  left: ServiceQualityLineReliability,
+  right: ServiceQualityLineReliability,
+): number {
+  const scoreDelta = right.reliabilityScore - left.reliabilityScore;
+  if (Math.abs(scoreDelta) > 0.0001) return scoreDelta;
+  const modeDelta = SERVICE_QUALITY_MODE_ORDER[left.mode] - SERVICE_QUALITY_MODE_ORDER[right.mode];
+  if (modeDelta !== 0) return modeDelta;
+  return left.lineName.localeCompare(right.lineName, "fr", { numeric: true, sensitivity: "base" });
 }
 
 function serviceQualityMode(mode: GlobalMapMode): ServiceQualityMode | undefined {

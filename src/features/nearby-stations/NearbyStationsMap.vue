@@ -60,6 +60,7 @@ import type { NearbyWalkingRoute } from "./nearbyWalkingRoutes";
 import IrisNeighborhoodOverlay from "../transport-map/overlays/IrisNeighborhoodOverlay.vue";
 import { fetchIrisDataset, type IrisAirNoiseStatistics, type IrisDataset, type IrisNeighborhood } from "../transport-map/iris/irisApi";
 import { fetchNeighborhoodVerdict } from "./neighborhoodVerdictApi";
+import { measureDevPerformance } from "../../services/devPerformance";
 import {
   boundsForIrisNeighborhoods,
   boundsForIrisGeometry,
@@ -178,6 +179,7 @@ const props = withDefaults(defineProps<{
   variant?: "transit" | "places-preview";
   allowZoom?: boolean;
   suspendResizeWork?: boolean;
+  reduceMotion?: boolean;
   selectedPlaceId?: string;
   origin: { lon: number; lat: number };
   originLabel?: string;
@@ -244,6 +246,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   toggleStation: [stationId: string];
+  toggleStationSchedule: [stationId: string];
   toggleLine: [stationId: string, lineId: string];
   details: [stationId: string, lineId: string];
   cameraChange: [camera: CameraState];
@@ -358,6 +361,8 @@ const SIDEBAR_DEFAULT_WIDTH = 310;
 const SIDEBAR_MAX_WIDTH = 520;
 const root = ref<HTMLElement>();
 const shell = ref<HTMLElement>();
+const gestureCameraLayer = ref<HTMLElement>();
+const gestureMarkerLayer = ref<HTMLElement>();
 const sidebarSplitter = ref<HTMLElement>();
 const sidebarActionButton = ref<HTMLButtonElement>();
 const camera = shallowRef<CameraState>(createCamera({ zoom: 14, viewportWidthCssPx: 720, viewportHeightCssPx: 380 }));
@@ -456,8 +461,13 @@ let cityViewSnapshot: {
   pinnedStationId?: string;
 } | undefined;
 const animating = ref(false);
+const isMapInteracting = ref(false);
+const coarsePointer = ref(false);
 const mapDragging = ref(false);
-const reducedMotion = ref(false);
+const systemReducedMotion = ref(false);
+const dataSaverMode = ref(false);
+const reducedMotion = computed(() => systemReducedMotion.value || props.reduceMotion === true || dataSaverMode.value);
+const dynamicIconMotionEnabled = computed(() => !reducedMotion.value);
 const sidebarWidth = ref(SIDEBAR_DEFAULT_WIDTH);
 const sidebarResizeActive = ref(false);
 const feederPulseActive = ref(false);
@@ -491,6 +501,8 @@ let pinchGesture: {
   initialDistance: number;
   anchorWorld: { x: number; y: number };
 } | undefined;
+let markerProjectionCamera: CameraState | undefined;
+const markerProjectionCache = new Map<string, ScreenPoint>();
 
 function shouldDisplayStationForSchedule(stationId: string): boolean {
   if (!props.hideStationsWithoutDepartures) return true;
@@ -1957,6 +1969,9 @@ watch(camera, (nextCamera) => {
   emit("cameraChange", nextCamera);
   scheduleGhostFlowTooltipContainment();
 });
+watch(dynamicIconMotionEnabled, () => {
+  if (pendingGestureCamera) applyGestureCameraTransform(pendingGestureCamera);
+});
 // Both compared communes need their own security verdict and place counts.
 // Results are cached per code, so a swap or a revisit resolves instantly.
 watch(
@@ -2015,7 +2030,10 @@ watch(() => props.showFullscreenControl, (visible) => {
 });
 
 onMounted(() => {
-  reducedMotion.value = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  systemReducedMotion.value = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  dataSaverMode.value = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true;
+  coarsePointer.value = window.matchMedia("(pointer: coarse)").matches
+    || (navigator.maxTouchPoints > 0 && window.innerWidth <= 900);
   document.addEventListener("fullscreenchange", syncFullscreenState);
   resizeObserver = new ResizeObserver(() => {
     flushGestureCamera();
@@ -2079,8 +2097,15 @@ function resizeNearbyCamera(baseCamera: CameraState): CameraState | undefined {
     baseCamera,
     element.clientWidth,
     element.clientHeight,
-    Math.min(window.devicePixelRatio || 1, 2),
+    nearbyMapPixelRatio(),
   );
+}
+
+function nearbyMapPixelRatio(): number {
+  const deviceRatio = Math.min(window.devicePixelRatio || 1, 2);
+  return coarsePointer.value && isMapInteracting.value
+    ? Math.min(deviceRatio, 1.25)
+    : deviceRatio;
 }
 
 function cityViewCameraTarget(
@@ -2719,6 +2744,7 @@ function handlePointerDown(event: PointerEvent): void {
     panLastPoint = undefined;
     panMoved = true;
     mapDragging.value = true;
+    isMapInteracting.value = true;
     cancelCameraAnimation();
     keepInteractionActive();
     return;
@@ -2808,6 +2834,7 @@ function beginMapPan(pointerId: number, point: ScreenPoint): void {
   panLastPoint = point;
   panMoved = false;
   mapDragging.value = true;
+  isMapInteracting.value = true;
   clearIsochroneHover();
   cancelCameraAnimation();
   keepInteractionActive();
@@ -2830,12 +2857,43 @@ function finishMapPan(event: PointerEvent): void {
   keepInteractionActive();
 }
 
+function applyGestureCameraTransform(nextCamera: CameraState): void {
+  const currentCamera = camera.value;
+  const referenceScale = worldScaleAtZoom(currentCamera.zoom);
+  const currentScale = worldScaleAtZoom(nextCamera.zoom);
+  const ratio = currentScale / referenceScale;
+  const translateX =
+    (currentCamera.centerWorldX - nextCamera.centerWorldX) * currentScale +
+    nextCamera.viewportWidthCssPx / 2 -
+    ratio * currentCamera.viewportWidthCssPx / 2;
+  const translateY =
+    (currentCamera.centerWorldY - nextCamera.centerWorldY) * currentScale +
+    nextCamera.viewportHeightCssPx / 2 -
+    ratio * currentCamera.viewportHeightCssPx / 2;
+  const transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${ratio})`;
+  if (gestureCameraLayer.value) gestureCameraLayer.value.style.transform = transform;
+  if (gestureMarkerLayer.value) {
+    gestureMarkerLayer.value.style.transform = dynamicIconMotionEnabled.value ? transform : "";
+  }
+}
+
+function clearGestureCameraTransform(): void {
+  if (gestureCameraLayer.value) gestureCameraLayer.value.style.transform = "";
+  if (gestureMarkerLayer.value) gestureMarkerLayer.value.style.transform = "";
+}
+
 // Pointer devices may produce several events per display frame. Accumulate
-// their deltas without publishing intermediate cameras into the Vue tree.
+// their deltas and move the already-rendered map layers in the compositor.
 function queueGestureCamera(nextCamera: CameraState): void {
   pendingGestureCamera = clampNearbyCamera(nextCamera);
-  if (gestureFrame === undefined) gestureFrame = requestAnimationFrame(flushGestureCamera);
+  isMapInteracting.value = true;
+  if (gestureFrame === undefined) gestureFrame = requestAnimationFrame(flushGestureCameraFrame);
   keepInteractionActive();
+}
+
+function flushGestureCameraFrame(): void {
+  gestureFrame = undefined;
+  if (pendingGestureCamera) applyGestureCameraTransform(pendingGestureCamera);
 }
 
 function flushGestureCamera(): void {
@@ -2843,11 +2901,23 @@ function flushGestureCamera(): void {
   gestureFrame = undefined;
   const nextCamera = pendingGestureCamera;
   pendingGestureCamera = undefined;
-  if (!nextCamera) return;
+  if (!nextCamera) {
+    clearGestureCameraTransform();
+    isMapInteracting.value = false;
+    return;
+  }
+  // Commit once at the end of a gesture. The transform remains in place until
+  // Vue has pushed the new camera to the child layers, avoiding a one-frame
+  // snap back to the old raster/marker positions.
+  applyGestureCameraTransform(nextCamera);
   const current = camera.value;
-  // A drag against the boundary must not keep invalidating the map.
   if (nextCamera.centerWorldX !== current.centerWorldX || nextCamera.centerWorldY !== current.centerWorldY
-    || nextCamera.zoom !== current.zoom) camera.value = nextCamera;
+    || nextCamera.zoom !== current.zoom || nextCamera.viewportWidthCssPx !== current.viewportWidthCssPx
+    || nextCamera.viewportHeightCssPx !== current.viewportHeightCssPx || nextCamera.pixelRatio !== current.pixelRatio) {
+    camera.value = nextCamera;
+  }
+  isMapInteracting.value = false;
+  void nextTick(clearGestureCameraTransform);
 }
 
 function isInteractiveMapTarget(target: EventTarget | null): boolean {
@@ -2912,6 +2982,7 @@ function keepInteractionActive(): void {
   // Never rebuild raster definitions in the middle of a slow drag.
   if (mapDragging.value) return;
   interactionTimer = window.setTimeout(() => {
+    flushGestureCamera();
     animating.value = false;
     interactionTimer = undefined;
   }, basemapInteractionSettleMs.value);
@@ -3296,6 +3367,11 @@ function markerScheduleState(entry: NearbyStationEntry): NearbyStationScheduleSt
   return props.scheduleState?.(entry.id);
 }
 
+function toggleMarkerSchedule(entry: NearbyStationEntry): void {
+  if (!props.scheduleState || markerScheduleState(entry) === undefined) return;
+  emit("toggleStationSchedule", entry.id);
+}
+
 function markerTooltipVisible(entry: NearbyStationEntry): boolean {
   return !summaryLineHoverActive.value &&
     !props.travelPanelOpen &&
@@ -3402,6 +3478,7 @@ function handleMapClick(event: MouseEvent): void {
     return;
   }
   if (isInteractiveMapTarget(event.target) && !isMapGeometryTarget(event.target)) return;
+  if (event.target instanceof Element && event.target.closest("[data-nearby-place-canvas]")) return;
   if (isMapGeometryTarget(event.target)) return;
   if (isPlacesPreview.value) {
     emit("selectPlace", undefined);
@@ -3728,7 +3805,19 @@ function isBusMarker(entry: NearbyStationEntry): boolean {
 }
 
 function markerScreen(entry: NearbyStationEntry): ScreenPoint {
-  return worldToScreen({ x: entry.station.worldX, y: entry.station.worldY }, camera.value);
+  if (markerProjectionCamera !== camera.value) {
+    markerProjectionCamera = camera.value;
+    markerProjectionCache.clear();
+  }
+  const key = `${entry.id}:${entry.station.worldX}:${entry.station.worldY}`;
+  const cached = markerProjectionCache.get(key);
+  if (cached) return cached;
+  const projected = measureDevPerformance(
+    "nearby-station-projection",
+    () => worldToScreen({ x: entry.station.worldX, y: entry.station.worldY }, camera.value),
+  );
+  markerProjectionCache.set(key, projected);
+  return projected;
 }
 
 function isCityViewStationInViewport(entry: NearbyStationEntry): boolean {
@@ -4225,6 +4314,7 @@ function mix(from: number, to: number, progress: number): number {
       'nearby-map--isochrone-panel-open': isochronePanelOpen,
       'nearby-map--interactive': canInteractWithMap,
       'nearby-map--dragging': mapDragging,
+      'nearby-map--interacting': isMapInteracting,
     }"
     :aria-label="t('nearbyStations.mapAria')"
       @pointercancel="handlePointerEnd"
@@ -4239,6 +4329,7 @@ function mix(from: number, to: number, progress: number): number {
         name="heavy-access-guide"
         :candidate="pinnedHeavyStation"
       />
+      <div ref="gestureCameraLayer" class="nearby-map__camera-layer">
       <NearbyStationsBasemap
         :camera="camera"
         :reference-camera="nearbyBasemapReferenceCamera"
@@ -4250,28 +4341,6 @@ function mix(from: number, to: number, progress: number): number {
         :interaction-active="animating"
         @coverage-audit="handleBasemapCoverageAudit"
       />
-      <div
-        class="nearby-map__scale-control"
-        data-testid="nearby-map-scale"
-        role="img"
-        :aria-label="t('nearbyStations.mapScaleAria', { distance: nearbyMapScale.distanceLabel })"
-        :style="{ '--nearby-map-scale-width': `${nearbyMapScale.barWidthPx}px` }"
-      >
-        <div class="nearby-map__scale-north" aria-hidden="true">
-          <span>N</span>
-          <Navigation :size="16" :stroke-width="1.8" />
-        </div>
-        <div class="nearby-map__scale-ruler" aria-hidden="true">
-          <div class="nearby-map__scale-labels">
-            <span>0</span>
-            <span>{{ nearbyMapScale.midpointLabel }}</span>
-            <span>{{ nearbyMapScale.distanceLabel }}</span>
-          </div>
-          <div class="nearby-map__scale-track">
-            <span aria-hidden="true" />
-          </div>
-        </div>
-      </div>
       <svg
         v-if="!summaryLineHoverActive && airQualityZoneCells.length > 0"
         class="nearby-map__air-quality-zones"
@@ -4437,6 +4506,29 @@ function mix(from: number, to: number, progress: number): number {
         }"
         scope="city"
       />
+      </div>
+      <div
+        class="nearby-map__scale-control"
+        data-testid="nearby-map-scale"
+        role="img"
+        :aria-label="t('nearbyStations.mapScaleAria', { distance: nearbyMapScale.distanceLabel })"
+        :style="{ '--nearby-map-scale-width': `${nearbyMapScale.barWidthPx}px` }"
+      >
+        <div class="nearby-map__scale-north" aria-hidden="true">
+          <span>N</span>
+          <Navigation :size="16" :stroke-width="1.8" />
+        </div>
+        <div class="nearby-map__scale-ruler" aria-hidden="true">
+          <div class="nearby-map__scale-labels">
+            <span>0</span>
+            <span>{{ nearbyMapScale.midpointLabel }}</span>
+            <span>{{ nearbyMapScale.distanceLabel }}</span>
+          </div>
+          <div class="nearby-map__scale-track">
+            <span aria-hidden="true" />
+          </div>
+        </div>
+      </div>
       <NearbyLineHoverCard
         v-if="!cityViewEnabled && lineHoverCardLine"
         :line="lineBadge(lineHoverCardLine)"
@@ -4878,6 +4970,7 @@ function mix(from: number, to: number, progress: number): number {
         />
         <span>{{ hoveredEnvironmentTooltip.text }}</span>
       </div>
+      <div ref="gestureMarkerLayer" class="nearby-map__marker-layer">
       <div
         v-if="!cityViewEnabled || cityViewRadiusTransition === 'to-city'"
         class="nearby-map__radius"
@@ -4909,6 +5002,9 @@ function mix(from: number, to: number, progress: number): number {
         :preview="isPlacesPreview"
         :show-names="props.showNearbyPlaceNames === true"
         :reduced-motion="reducedMotion"
+        :interaction-active="isMapInteracting"
+        :canvas-hit-testing="coarsePointer"
+        :pixel-ratio-override="coarsePointer && isMapInteracting ? 1.25 : undefined"
         :selected-place-id="selectedPlaceId"
         :walking-routes="props.walkingRoutes"
         @visibility-change="placesVisible = $event"
@@ -5010,6 +5106,16 @@ function mix(from: number, to: number, progress: number): number {
                 {{ t('nearbyStations.walkingTime', { minutes: walkingMinutes(entry) }) }}
               </span>
             </span>
+            <button
+              v-if="markerScheduleState(entry) === 'visible' || markerScheduleState(entry) === 'hidden'"
+              class="nearby-map__schedule-toggle"
+              type="button"
+              :aria-label="markerScheduleState(entry) === 'hidden' ? t('nearbyStations.showSchedule') : t('nearbyStations.hideSchedule')"
+              @click.stop="toggleMarkerSchedule(entry)"
+              @pointerdown.stop
+            >
+              {{ markerScheduleState(entry) === 'hidden' ? t('nearbyStations.showSchedule') : t('nearbyStations.hideSchedule') }}
+            </button>
             <span v-if="markerScheduleState(entry) === 'loading'" class="nearby-map__schedule-status">
               {{ t('nearbyStations.scheduleLoading') }}
             </span>
@@ -5130,6 +5236,7 @@ function mix(from: number, to: number, progress: number): number {
           </div>
         </div>
       </MapItemTransitionGroup>
+      </div>
 
       <div
         v-if="loading && !isPlacesPreview && !cityViewEnabled"
@@ -5370,6 +5477,15 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__splitter span { background: #5146ff; border-radius: 999px; height: 18px; opacity: .65; pointer-events: none; position: absolute; width: 3px; }
 .nearby-map { background: #edf2f4; border: 1px solid var(--border); border-radius: 14px; cursor: grab; height: var(--nearby-map-height); isolation: isolate; min-width: 0; overflow: hidden; position: relative; touch-action: none; }
 .nearby-map--dragging { cursor: grabbing; user-select: none; }
+.nearby-map__camera-layer { inset: 0; pointer-events: none; position: absolute; transform-origin: 0 0; will-change: transform; z-index: 0; }
+.nearby-map__marker-layer { inset: 0; pointer-events: none; position: absolute; transform-origin: 0 0; z-index: 5; }
+.nearby-map--interacting .nearby-map__marker-layer { will-change: transform; }
+.nearby-map__marker-layer .nearby-map__marker-anchor { pointer-events: auto; }
+.nearby-map__camera-layer :deep([data-city-code]), .nearby-map__camera-layer :deep([data-iris-neighborhood]), .nearby-map__camera-layer :deep(.nearby-map__overlay-pill) { pointer-events: auto; }
+.nearby-map--interacting .nearby-map__marker { box-shadow: none; transition: none; }
+.nearby-map--interacting .nearby-map__marker-ripple, .nearby-map--interacting .nearby-map__marker--feeder-pulse::before { animation: none; opacity: 0; }
+.nearby-map--interacting .nearby-map__marker-station-name, .nearby-map--interacting .nearby-map__heavy-edge-label, .nearby-map--interacting .nearby-map__summary-line-station-name { visibility: hidden; }
+.nearby-map--interacting .nearby-map__walking-flow { opacity: .35; }
 .nearby-map :deep(.transport-ghost-flow__path) { filter: brightness(1.32) saturate(1.15) drop-shadow(0 0 1px rgba(255,255,255,.82)); opacity: .58; }
 .nearby-map :deep(.transport-ghost-flow__wave) { filter: brightness(1.32) saturate(1.15) drop-shadow(0 0 1px rgba(255,255,255,.82)); opacity: .78; }
 .nearby-map :deep(.transport-ghost-flow__chevron) { filter: brightness(1.32) saturate(1.15) drop-shadow(0 0 1px rgba(255,255,255,.82)); opacity: .92; }
@@ -5582,6 +5698,8 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__marker-station-meta { align-items: center; color: var(--muted); display: flex; font-size: .67rem; font-weight: 850; gap: 6px; justify-content: center; line-height: 1.1; }
 .nearby-map__marker-meta-separator { color: var(--muted); }
 .nearby-map__marker-walking-time { align-items: center; color: #5146ff; display: inline-flex; gap: 3px; }
+.nearby-map__schedule-toggle { background: #ebe9ff; border: 1px solid rgba(81,70,255,.18); border-radius: 5px; color: #4034df; cursor: pointer; font: inherit; font-size: .62rem; justify-self: center; line-height: 1.2; min-height: 24px; padding: 3px 6px; }
+.nearby-map__schedule-toggle:hover, .nearby-map__schedule-toggle:focus-visible { background: #4034df; color: #fff; outline: 0; }
 .nearby-map__schedule-status { color: var(--muted); font-size: .64rem; }
 .nearby-map__marker-line-icon { align-items: center; display: inline-flex; flex: 0 0 25px; height: 25px; justify-content: center; min-width: 25px; width: 25px; }
 .nearby-map__marker-line-icon :deep(img) { display: block; height: 25px; max-height: 25px; max-width: 25px; object-fit: contain; width: 25px; }

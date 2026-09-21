@@ -6,7 +6,7 @@ import type { NearbyHeavyTransportCandidate, NearbyJourney } from "../nearbyHeav
 import type { NearbyPlace } from "../nearbyPlaces";
 import type { NearbyStationEntry } from "../nearbyStations";
 import type { PublicGreenSpaceAccess, PublicNeighborhoodVerdict, PublicVerdictSource } from "../neighborhoodVerdictApi";
-import type { PublicServiceQuality } from "../serviceQualityApi";
+import type { PublicServiceQuality, ServiceQualityLineReliability } from "../serviceQualityApi";
 
 export const NEIGHBORHOOD_MAX_SCORE = 10;
 export const NEIGHBORHOOD_WALKING_LIMIT_MINUTES = 15;
@@ -105,6 +105,7 @@ export type NeighborhoodFactKind =
   | "greenSpaceTransitNearby"
   | "chateletUnder30"
   | "chateletUnder45"
+  | "chateletContext"
   | "chateletDirect"
   | "chateletOver60"
   | "frequencyVeryGood"
@@ -184,6 +185,16 @@ export interface NeighborhoodFactPlace {
   distanceMeters: number;
 }
 
+/**
+ * Compact line-level detail used by the nearby transport reliability fact.
+ * Keeping only presentation data here avoids exposing the full indicator
+ * payload in every score card.
+ */
+export type NeighborhoodFactTransportReliabilityLine = Pick<
+  ServiceQualityLineReliability,
+  "lineId" | "lineName" | "mode" | "reliabilityScore" | "labelKey"
+>;
+
 export interface NeighborhoodFact {
   id: string;
   kind: NeighborhoodFactKind;
@@ -204,6 +215,8 @@ export interface NeighborhoodFact {
   travel?: NeighborhoodFactTravel;
   /** Members of a stacked signal, ordered from the closest to the farthest. */
   places?: readonly NeighborhoodFactPlace[];
+  /** Nearby service-quality lines, ordered by decreasing reliability. */
+  transportReliabilityLines?: readonly NeighborhoodFactTransportReliabilityLine[];
   evidence: NeighborhoodFactEvidence;
 }
 

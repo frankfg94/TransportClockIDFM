@@ -157,7 +157,7 @@ export function isNearbyJourneyWalkingSection(section: NearbyJourneySection): bo
 
 /** Stable application port used by both nearby heavy transport and travel routes. */
 export interface TravelRoutesProvider {
-  findJourneys(request: NearbyJourneyRequest): Promise<NearbyJourney[]>;
+  findJourneys(request: NearbyJourneyRequest, signal?: AbortSignal): Promise<NearbyJourney[]>;
 }
 
 /** Provider used for a real pedestrian route to a transport station. */
@@ -171,6 +171,7 @@ export interface NearbyWalkingRouteResult {
 export type NearbyWalkingRouteProvider = (
   origin: Pick<NearbyJourneyPoint, "lon" | "lat">,
   destination: Pick<NearbyJourneyPoint, "lon" | "lat">,
+  signal?: AbortSignal,
 ) => Promise<NearbyWalkingRouteResult | undefined>;
 
 /** @deprecated Use TravelRoutesProvider in new integrations. */

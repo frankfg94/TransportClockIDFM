@@ -38,6 +38,8 @@ export interface UseNearbyStationsOptions {
   enabled?: MaybeRefOrGetter<boolean>;
   geocoder?: TransportMapGeocoder;
   createDataSource?: () => TransportMapDataSource;
+  /** Use the normalized bootstrap for nearby lookup instead of the full map catalogue. */
+  stationCatalog?: "bootstrap" | "full";
   initialDraft?: NearbyStationsDraft;
 }
 
@@ -72,6 +74,7 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
   let scanController: AbortController | undefined;
   let source: TransportMapDataSource | undefined;
   let sourcePromise: Promise<TransportMapDataSource> | undefined;
+  let sourceInitializationController: AbortController | undefined;
   let disposed = false;
 
   watch(query, (value) => {
@@ -205,11 +208,16 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
     scanController = controller;
     isScanning.value = true;
     try {
+      // Source initialization is shared by all positions. Keep the manifest
+      // and bootstrap request alive across a position change, while the
+      // position-scoped radius query below remains abortable.
       const dataSource = await ensureSource();
       const results = await dataSource.queryStationsWithinRadius(
         place.lon,
         place.lat,
         radius.value + NEARBY_MAP_MARGIN_METERS,
+        controller.signal,
+        { catalog: options.stationCatalog ?? "full" },
       );
       if (controller.signal.aborted) return;
       transportMapNetwork.value = dataSource.getNetwork();
@@ -334,22 +342,25 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
     if (source) return source;
     if (sourcePromise) return sourcePromise;
     const next = options.createDataSource?.() ?? new TransportMapDataSource();
-    sourcePromise = next.initialize().then((network) => {
+    const controller = new AbortController();
+    sourceInitializationController = controller;
+    const promise = next.initialize(controller.signal).then((network) => {
       if (disposed) {
-        next.dispose();
         throw new DOMException("Nearby station selector disposed", "AbortError");
       }
       transportMapNetwork.value = network;
       source = next;
       return next;
     });
+    sourcePromise = promise;
     try {
-      return await sourcePromise;
+      return await promise;
     } catch (cause) {
-      next.dispose();
+      if (source !== next) next.dispose();
       throw cause;
     } finally {
-      sourcePromise = undefined;
+      if (sourcePromise === promise) sourcePromise = undefined;
+      if (sourceInitializationController === controller) sourceInitializationController = undefined;
     }
   }
 
@@ -365,6 +376,8 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
   onBeforeUnmount(() => {
     disposed = true;
     abortPending();
+    sourceInitializationController?.abort();
+    sourceInitializationController = undefined;
     source?.dispose();
     transportMapNetwork.value = undefined;
   });
