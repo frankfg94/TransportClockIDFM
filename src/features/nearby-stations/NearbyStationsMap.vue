@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useSlots, watch } from "vue";
-import { BusFront, Check, Ear, EllipsisVertical, ExternalLink, Footprints, Gauge, Layers, Map as MapIcon, MapPin, Maximize2, Minimize2, Minus, Navigation, Plus, Radar, Route, Satellite, Store, TrainFront, TramFront, Wind, ZoomIn, ZoomOut, X } from "lucide-vue-next";
+import { BusFront, Check, ChevronRight, Ear, EllipsisVertical, ExternalLink, Footprints, Gauge, Layers, LoaderCircle, Map as MapIcon, MapPin, Maximize2, Minimize2, Minus, Navigation, Plus, Radar, Route, Satellite, Store, TrainFront, TramFront, Wind, ZoomIn, ZoomOut, X } from "lucide-vue-next";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import NearbyPlaceCanvas from "./NearbyPlaceCanvas.vue";
 import MapItemTransitionGroup from "../../components/MapItemTransitionGroup";
@@ -47,6 +47,7 @@ import {
   isNearbyPlaceActivity,
   isNearbyPlaceGreenSpace,
   nearbyOptionalPlace,
+  nearbyPlaceWheelchairAccess,
   type NearbyCityActivity,
   type NearbyOptionalPlace,
   isNearbyPlaceVisibleOnMap,
@@ -393,6 +394,8 @@ const summaryFrequencyControllers = new Map<string, AbortController>();
 const activeSidebarTab = ref<NearbySidebarTab>("summary");
 const isFullscreen = ref(false);
 const displayControlsOpen = ref(false);
+const displayPanel = ref<HTMLElement>();
+const displayToggleButton = ref<HTMLButtonElement>();
 const basemapLayer = ref<TransportMapBasemapLayer>("plan");
 const nearbyIsochroneSettings = useTransportIsochroneSettings();
 const isochroneEnabled = nearbyIsochroneSettings.enabled;
@@ -430,6 +433,7 @@ const cityViewCommerceVisible = computed({
   set: (visible: boolean) => { cityViewActivity.value = visible ? "commerce" : null; },
 });
 const optionalPlaces = ref<Record<NearbyOptionalPlace, boolean>>({ companies: false, worship: false, artworks: false });
+const showAccessibilityPlaces = ref(false);
 const optionalPlaceKinds: NearbyOptionalPlace[] = ["companies", "worship", "artworks"];
 const extraCityActivities = ["economic", "leisure"] as const;
 function toggleCityActivity(activity: NearbyCityActivity): void {
@@ -463,6 +467,7 @@ let cityViewSnapshot: {
 const animating = ref(false);
 const isMapInteracting = ref(false);
 const coarsePointer = ref(false);
+const isMobileDisplaySheet = computed(() => coarsePointer.value || camera.value.viewportWidthCssPx <= 680);
 const mapDragging = ref(false);
 const systemReducedMotion = ref(false);
 const dataSaverMode = ref(false);
@@ -957,6 +962,7 @@ const eligibleMapPlaces = computed(() => {
   const radiusLimit = props.radius + NEARBY_MAP_MARGIN_METERS;
   return (props.places ?? []).filter((place) => {
     if (!isPlacesPreview.value && place.distanceMeters > radiusLimit) return false;
+    if (showAccessibilityPlaces.value) return nearbyPlaceWheelchairAccess(place) !== undefined;
     const option = nearbyOptionalPlace(place);
     return (isPlacesPreview.value || !option || optionalPlaces.value[option])
       && isNearbyPlaceVisibleOnMap(place, props.showNearbyBenches === true, props.showNearbyParkings === true);
@@ -1945,6 +1951,11 @@ function cancelSidebarSwipe(event?: PointerEvent): void {
   if (!event || sidebarSwipe?.pointerId === event.pointerId) sidebarSwipe = undefined;
 }
 
+function closeDisplayControls(): void {
+  displayControlsOpen.value = false;
+  void nextTick(() => displayToggleButton.value?.focus({ preventScroll: true }));
+}
+
 watch(cityViewEnabled, (enabled) => {
   if (!enabled) {
     clearCityComparison();
@@ -1990,6 +2001,11 @@ watch(
 
 watch(isFullscreen, (fullscreen) => {
   if (!fullscreen) displayControlsOpen.value = false;
+});
+
+watch(displayControlsOpen, (open) => {
+  if (!open || !isMobileDisplaySheet.value) return;
+  void nextTick(() => displayPanel.value?.focus({ preventScroll: true }));
 });
 
 watch(() => props.showIsochroneControl, (visible) => {
@@ -4692,6 +4708,7 @@ function mix(from: number, to: number, progress: number): number {
         </button>
         <button
           v-if="props.showDisplayControl && !cityViewEnabled"
+          ref="displayToggleButton"
           class="nearby-map__display-toggle"
           type="button"
           :aria-expanded="displayControlsOpen"
@@ -4736,74 +4753,149 @@ function mix(from: number, to: number, progress: number): number {
         @close-modal="closeIsochroneConfigurationModal"
         @retry="retryIsochronesFromConfigurationModal"
       />
-      <aside
-        v-if="displayControlsOpen && props.showDisplayControl && !cityViewEnabled"
-        id="nearby-map-display-controls"
-        class="nearby-map__display-panel"
-        :aria-label="t('nearbyStations.filtersAria')"
-        @click.stop
-        @pointerdown.stop
-      >
-        <header class="nearby-map__display-panel-header">
-          <span><Layers :size="16" aria-hidden="true" />{{ t('lineMap.picker.display') }}</span>
-        </header>
-        <LineMapDisplayControls
-          variant="global"
-          nearby-options
-          :available-modes="availableModes"
-          :selected-modes="activeModes"
-          :hide-long-wait-transports="props.hideLongWaitTransports"
-          :show-nearby-places="props.showNearbyPlaces"
-          :show-nearby-benches="props.showNearbyBenches"
-          :show-nearby-parkings="props.showNearbyParkings"
-          :show-nearby-place-names="props.showNearbyPlaceNames"
-          @update:selected-modes="emit('updateActiveModes', $event)"
-          @update:hide-long-wait-transports="emit('update:hideLongWaitTransports', $event)"
-          @update:show-nearby-places="emit('update:showNearbyPlaces', $event)"
-          @update:show-nearby-benches="emit('update:showNearbyBenches', $event)"
-          @update:show-nearby-parkings="emit('update:showNearbyParkings', $event)"
-          @update:show-nearby-place-names="emit('update:showNearbyPlaceNames', $event)"
-        >
-          <template #nearby-options>
-            <label v-for="option in optionalPlaceKinds" :key="option" class="nearby-map__optional-place">
-              <input v-model="optionalPlaces[option]" type="checkbox" :disabled="!props.showNearbyPlaces" />
-              <span>{{ t(`nearbyStations.optionalPlaces.${option}`) }}</span>
-            </label>
-          </template>
-        </LineMapDisplayControls>
-        <div class="nearby-map__cluster-grouping">
-          <div class="nearby-map__cluster-grouping-label">
-            <span>{{ t('nearbyStations.clusterGrouping') }}</span>
-            <strong>{{ t('nearbyStations.clusterGroupingValue', { meters: clusterGroupingDistance }) }}</strong>
+      <Teleport :disabled="!isMobileDisplaySheet" to="body">
+        <Transition name="nearby-map-display-sheet">
+          <div
+            v-if="displayControlsOpen && props.showDisplayControl && !cityViewEnabled"
+            class="nearby-map__display-overlay"
+            @wheel.stop
+          >
+          <button
+            class="nearby-map__display-panel-backdrop"
+            type="button"
+            :aria-label="t('nearbyStations.displayFiltersClose')"
+            @click.stop="closeDisplayControls"
+            @pointerdown.stop
+          ></button>
+          <aside
+            ref="displayPanel"
+            id="nearby-map-display-controls"
+            class="nearby-map__display-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="nearby-map-display-controls-title"
+            :aria-label="t('nearbyStations.displayFiltersTitle')"
+            tabindex="-1"
+            @click.stop
+            @pointerdown.stop
+            @keydown.esc.stop="closeDisplayControls"
+          >
+            <button
+              class="nearby-map__display-sheet-handle"
+              type="button"
+              :aria-label="t('nearbyStations.displayFiltersClose')"
+              data-nearby-map-display-sheet-handle
+              @click.stop="closeDisplayControls"
+              @pointerdown.stop
+            >
+              <span aria-hidden="true"></span>
+            </button>
+            <header class="nearby-map__display-panel-header">
+              <span id="nearby-map-display-controls-title"><Layers :size="16" aria-hidden="true" />{{ t('lineMap.picker.display') }}</span>
+              <button
+                class="nearby-map__display-panel-close"
+                type="button"
+                :aria-label="t('nearbyStations.displayFiltersClose')"
+                @click.stop="closeDisplayControls"
+              >
+                <X :size="18" aria-hidden="true" />
+              </button>
+            </header>
+            <div class="nearby-map__display-panel-scroll">
+              <details class="nearby-map__display-section" open data-nearby-map-filter-section="transport">
+                <summary>
+                  <span>{{ t('nearbyStations.displayFiltersTransport') }}</span>
+                  <ChevronRight :size="17" aria-hidden="true" />
+                </summary>
+                <div class="nearby-map__display-section-content">
+                  <LineMapDisplayControls
+                    variant="global"
+                    nearby-options
+                    :available-modes="availableModes"
+                    :selected-modes="activeModes"
+                    :hide-long-wait-transports="props.hideLongWaitTransports"
+                    :show-nearby-places="props.showNearbyPlaces"
+                    :show-nearby-benches="props.showNearbyBenches"
+                    :show-nearby-parkings="props.showNearbyParkings"
+                    :show-nearby-place-names="props.showNearbyPlaceNames"
+                    @update:selected-modes="emit('updateActiveModes', $event)"
+                    @update:hide-long-wait-transports="emit('update:hideLongWaitTransports', $event)"
+                    @update:show-nearby-places="emit('update:showNearbyPlaces', $event)"
+                    @update:show-nearby-benches="emit('update:showNearbyBenches', $event)"
+                    @update:show-nearby-parkings="emit('update:showNearbyParkings', $event)"
+                    @update:show-nearby-place-names="emit('update:showNearbyPlaceNames', $event)"
+                  >
+                    <template #nearby-options>
+                      <label class="nearby-map__optional-place">
+                        <input
+                          v-model="showAccessibilityPlaces"
+                          data-show-accessibility-places
+                          type="checkbox"
+                          :disabled="!props.showNearbyPlaces"
+                        />
+                        <span>{{ t('nearbyStations.accessibilityPlaces') }}</span>
+                      </label>
+                      <label v-for="option in optionalPlaceKinds" :key="option" class="nearby-map__optional-place">
+                        <input v-model="optionalPlaces[option]" type="checkbox" :disabled="!props.showNearbyPlaces" />
+                        <span>{{ t(`nearbyStations.optionalPlaces.${option}`) }}</span>
+                      </label>
+                    </template>
+                  </LineMapDisplayControls>
+                </div>
+              </details>
+              <details class="nearby-map__display-section" open data-nearby-map-filter-section="stations">
+                <summary>
+                  <span>{{ t('nearbyStations.displayFiltersStations') }}</span>
+                  <ChevronRight :size="17" aria-hidden="true" />
+                </summary>
+                <div class="nearby-map__display-section-content">
+                  <div class="nearby-map__cluster-grouping">
+                    <div class="nearby-map__cluster-grouping-label">
+                      <span>{{ t('nearbyStations.clusterGrouping') }}</span>
+                      <strong>{{ t('nearbyStations.clusterGroupingValue', { meters: clusterGroupingDistance }) }}</strong>
+                    </div>
+                    <input
+                      data-nearby-map-cluster-grouping
+                      :aria-label="t('nearbyStations.clusterGroupingAria')"
+                      :max="NEARBY_CLUSTER_GROUPING_MAX_METERS"
+                      :min="NEARBY_CLUSTER_GROUPING_MIN_METERS"
+                      :step="NEARBY_CLUSTER_GROUPING_STEP_METERS"
+                      :value="clusterGroupingDistance"
+                      type="range"
+                      @input="updateClusterGroupingDistance"
+                    />
+                  </div>
+                  <label class="nearby-map__schedule-filter">
+                    <input
+                      type="checkbox"
+                      :checked="hideStationsWithoutDepartures"
+                      @change="emit('updateHideStationsWithoutDepartures', ($event.target as HTMLInputElement).checked)"
+                    />
+                    <span>{{ t('nearbyStations.hideStationsWithoutDepartures') }}</span>
+                  </label>
+                </div>
+              </details>
+              <details class="nearby-map__display-section" open data-nearby-map-filter-section="map">
+                <summary>
+                  <span>{{ t('nearbyStations.displayFiltersMap') }}</span>
+                  <ChevronRight :size="17" aria-hidden="true" />
+                </summary>
+                <div class="nearby-map__display-section-content">
+                  <label class="nearby-map__station-visibility" data-nearby-map-show-map-stations>
+                    <input v-model="showMapStations" type="checkbox" />
+                    <span>{{ t('nearbyStations.showMapStations') }}</span>
+                  </label>
+                  <label class="nearby-map__station-visibility" data-nearby-map-show-projected-stations>
+                    <input v-model="showProjectedStations" type="checkbox" />
+                    <span>{{ t('nearbyStations.showProjectedStations') }}</span>
+                  </label>
+                </div>
+              </details>
+            </div>
+          </aside>
           </div>
-          <input
-            data-nearby-map-cluster-grouping
-            :aria-label="t('nearbyStations.clusterGroupingAria')"
-            :max="NEARBY_CLUSTER_GROUPING_MAX_METERS"
-            :min="NEARBY_CLUSTER_GROUPING_MIN_METERS"
-            :step="NEARBY_CLUSTER_GROUPING_STEP_METERS"
-            :value="clusterGroupingDistance"
-            type="range"
-            @input="updateClusterGroupingDistance"
-          />
-        </div>
-        <label class="nearby-map__schedule-filter">
-          <input
-            type="checkbox"
-            :checked="hideStationsWithoutDepartures"
-            @change="emit('updateHideStationsWithoutDepartures', ($event.target as HTMLInputElement).checked)"
-          />
-          <span>{{ t('nearbyStations.hideStationsWithoutDepartures') }}</span>
-        </label>
-        <label class="nearby-map__station-visibility" data-nearby-map-show-map-stations>
-          <input v-model="showMapStations" type="checkbox" />
-          <span>{{ t('nearbyStations.showMapStations') }}</span>
-        </label>
-        <label class="nearby-map__station-visibility" data-nearby-map-show-projected-stations>
-          <input v-model="showProjectedStations" type="checkbox" />
-          <span>{{ t('nearbyStations.showProjectedStations') }}</span>
-        </label>
-      </aside>
+        </Transition>
+      </Teleport>
       <div
         v-if="!isPlacesPreview || props.allowZoom === true"
         class="nearby-map__zoom-controls"
@@ -4857,6 +4949,13 @@ function mix(from: number, to: number, progress: number): number {
         :role="cityViewError ? 'alert' : 'status'"
         aria-live="polite"
       >
+        <LoaderCircle
+          v-if="cityViewLoading"
+          class="nearby-map__city-view-spinner"
+          :class="{ 'nearby-map__city-view-spinner--static': reducedMotion }"
+          :size="16"
+          aria-hidden="true"
+        />
         <span v-if="cityViewLoading">{{ t('globalMap.iris.loading') }}</span>
         <span v-else-if="cityViewError">{{ t('globalMap.iris.unavailable') }}</span>
         <span v-else>{{ t('globalMap.iris.partialCity') }}</span>
@@ -5001,6 +5100,7 @@ function mix(from: number, to: number, progress: number): number {
         :city="cityViewEnabled"
         :preview="isPlacesPreview"
         :show-names="props.showNearbyPlaceNames === true"
+        :show-accessibility="showAccessibilityPlaces"
         :reduced-motion="reducedMotion"
         :interaction-active="isMapInteracting"
         :canvas-hit-testing="coarsePointer"
@@ -5589,10 +5689,18 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__basemap-attribution { backdrop-filter: blur(4px); background: rgba(255,255,255,.84); border: 1px solid rgba(100,116,139,.18); border-radius: 6px; bottom: 8px; color: #475569; font-size: .62rem; left: 8px; padding: 3px 6px; pointer-events: none; position: absolute; z-index: 12; }
 .nearby-map__places-attribution { backdrop-filter: blur(4px); background: rgba(255,255,255,.84); border: 1px solid rgba(100,116,139,.18); border-radius: 6px; bottom: 8px; color: #475569; font-size: .58rem; left: 50%; padding: 3px 6px; pointer-events: none; position: absolute; transform: translateX(-50%); z-index: 12; }
 .nearby-map__city-view-status { align-items: center; backdrop-filter: blur(5px); background: rgba(255,255,255,.94); border: 1px solid rgba(109,40,217,.24); border-radius: 10px; box-shadow: 0 5px 16px rgba(16,35,63,.14); color: #4c1d95; display: flex; font-size: .72rem; font-weight: 820; gap: 8px; left: 50%; max-width: calc(100% - 24px); padding: 8px 10px; position: absolute; top: 82px; transform: translateX(-50%); z-index: 12; }
+.nearby-map__city-view-spinner { animation: nearby-map-city-view-spin 900ms linear infinite; flex: 0 0 auto; }
+.nearby-map__city-view-spinner--static { animation: none; }
 .nearby-map__city-view-status--error { border-color: rgba(217,45,32,.24); color: #9b271e; }
-.nearby-map__display-panel { background: #fff; border: 1px solid rgba(100, 116, 139, .24); border-radius: 14px; box-shadow: 0 8px 24px rgba(15, 23, 42, .18); overflow: hidden; position: absolute; right: 12px; top: 58px; width: min(270px, calc(100% - 24px)); z-index: 14; }
+.nearby-map__display-overlay { inset: 0; pointer-events: none; position: absolute; z-index: 9001; }
+.nearby-map__display-panel-backdrop { display: none; }
+.nearby-map__display-panel { background: #fff; border: 1px solid rgba(100, 116, 139, .24); border-radius: 14px; box-shadow: 0 8px 24px rgba(15, 23, 42, .18); overflow: hidden; pointer-events: auto; position: absolute; right: 12px; top: 58px; width: min(270px, calc(100% - 24px)); z-index: 9002; }
 .nearby-map__display-panel-header { align-items: center; border-bottom: 1px solid rgba(100, 116, 139, .16); color: #18233f; display: flex; font-size: .76rem; font-weight: 850; justify-content: space-between; min-height: 38px; padding: 8px 11px; }
 .nearby-map__display-panel-header span { align-items: center; display: inline-flex; gap: 7px; }
+.nearby-map__display-panel-close, .nearby-map__display-sheet-handle { display: none; }
+.nearby-map__display-panel-scroll { min-width: 0; }
+.nearby-map__display-section > summary { display: none; }
+.nearby-map__display-section-content { min-width: 0; }
 .nearby-map__optional-place { display: flex; align-items: center; gap: 7px; color: #334155; font-size: .75rem; font-weight: 750; }
 .nearby-map__optional-place input { accent-color: #18233f; }
 .nearby-map__display-panel :deep(.line-map-display-panel__content--global) { padding: 10px; }
@@ -5794,10 +5902,13 @@ function mix(from: number, to: number, progress: number): number {
 @keyframes nearby-map-current-marker-breathe { 0%, 100% { filter: brightness(1) drop-shadow(0 2px 4px rgba(16, 35, 63, .22)) drop-shadow(0 0 8px color-mix(in srgb, var(--nearby-marker-color, #0064ff), transparent 38%)); transform: scale(1.45); } 50% { filter: brightness(1.06) drop-shadow(0 3px 5px rgba(16, 35, 63, .2)) drop-shadow(0 0 12px color-mix(in srgb, var(--nearby-marker-color, #0064ff), transparent 28%)); transform: scale(1.49); } }
 @keyframes nearby-map-radius-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes nearby-map-radius-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes nearby-map-city-view-spin { to { transform: rotate(360deg); } }
 @keyframes nearby-map-feeder-pulse-ring { 0% { opacity: .78; transform: scale(.72); } 68% { opacity: .08; transform: scale(1.55); } 100% { opacity: 0; transform: scale(1.7); } }
 
 @keyframes nearby-map-pop { 0% { opacity: 0; transform: translate(-50%, calc(-50% + 10px)) scale(.85); } 70% { opacity: 1; transform: translate(-50%, -50%) scale(1.06); } 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
 @keyframes nearby-map-pop-out { 0% { transform: translate(-50%, -50%) scale(1); } 30% { transform: translate(-50%, -50%) scale(1.06); } 100% { opacity: 0; transform: translate(-50%, calc(-50% + 10px)) scale(.85); } }
+.nearby-map-display-sheet-enter-active, .nearby-map-display-sheet-leave-active { transition: opacity 180ms ease; }
+.nearby-map-display-sheet-enter-from, .nearby-map-display-sheet-leave-to { opacity: 0; }
 @media (max-width: 820px) {
   .nearby-map-shell { grid-template-columns: 1fr; }
   .nearby-map__splitter { display: none; }
@@ -5811,7 +5922,32 @@ function mix(from: number, to: number, progress: number): number {
   .nearby-map__top-control-zone { height: 112px; }
   .nearby-map__primary-controls { flex-wrap: wrap; gap: 6px; justify-content: flex-end; left: 12px; right: 12px; }
   .nearby-map__city-view-toggle { width: 128px; }
-  .nearby-map__display-panel { top: 118px; }
+  .nearby-map__display-overlay { background: rgba(15, 23, 42, .22); inset: 0; pointer-events: auto; position: fixed; }
+  .nearby-map-display-sheet-enter-active .nearby-map__display-panel, .nearby-map-display-sheet-leave-active .nearby-map__display-panel { transition: transform 220ms cubic-bezier(.16, 1, .3, 1); }
+  .nearby-map-display-sheet-enter-active .nearby-map__display-panel-backdrop, .nearby-map-display-sheet-leave-active .nearby-map__display-panel-backdrop { transition: opacity 180ms ease; }
+  .nearby-map-display-sheet-enter-from .nearby-map__display-panel, .nearby-map-display-sheet-leave-to .nearby-map__display-panel { transform: translateY(100%); }
+  .nearby-map-display-sheet-enter-from .nearby-map__display-panel-backdrop, .nearby-map-display-sheet-leave-to .nearby-map__display-panel-backdrop { opacity: 0; }
+  .nearby-map__display-panel-backdrop { background: transparent; border: 0; display: block; inset: 0; padding: 0; position: absolute; width: 100%; z-index: 0; }
+  .nearby-map__display-panel { border: 0; border-radius: 22px 22px 0 0; bottom: 0; box-shadow: 0 -20px 48px rgba(15, 23, 42, .25); display: grid; grid-template-rows: auto auto minmax(0, 1fr); left: 0; max-height: min(82dvh, 620px); right: 0; top: auto; width: 100%; }
+  .nearby-map__display-sheet-handle { align-items: center; appearance: none; background: #fff; border: 0; display: flex; flex: 0 0 27px; justify-content: center; padding: 0; touch-action: none; width: 100%; }
+  .nearby-map__display-sheet-handle span { background: rgba(100, 116, 139, .42); border-radius: 999px; display: block; height: 5px; width: 46px; }
+  .nearby-map__display-sheet-handle:focus-visible { outline: 2px solid #5146ff; outline-offset: -3px; }
+  .nearby-map__display-panel-header { min-height: 50px; padding: 7px 14px 9px 18px; }
+  .nearby-map__display-panel-header > span { font-size: .84rem; }
+  .nearby-map__display-panel-close { align-items: center; background: #f5f7fb; border: 1px solid rgba(100, 116, 139, .2); border-radius: 50%; color: #334155; display: inline-flex; flex: 0 0 34px; height: 34px; justify-content: center; padding: 0; width: 34px; }
+  .nearby-map__display-panel-close:hover, .nearby-map__display-panel-close:focus-visible { background: #ebe9ff; color: #4034df; outline: 0; }
+  .nearby-map__display-panel-scroll { min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding-bottom: max(12px, env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+  .nearby-map__display-section { border-top: 1px solid rgba(100, 116, 139, .16); }
+  .nearby-map__display-section > summary { align-items: center; color: #18233f; cursor: pointer; display: flex; font-size: .78rem; font-weight: 850; justify-content: space-between; list-style: none; min-height: 50px; padding: 9px 14px 9px 18px; }
+  .nearby-map__display-section > summary::-webkit-details-marker { display: none; }
+  .nearby-map__display-section > summary:focus-visible { background: #f5f7fb; outline: 0; }
+  .nearby-map__display-section > summary svg { color: #5146ff; transition: transform 160ms ease; }
+  .nearby-map__display-section[open] > summary svg { transform: rotate(90deg); }
+  .nearby-map__display-section-content { padding: 0 14px 14px; }
+  .nearby-map__display-panel :deep(.line-map-display-panel__content--global) { padding: 0; }
+  .nearby-map__display-panel .nearby-map__cluster-grouping { border-top: 0; padding: 0 0 12px; }
+  .nearby-map__display-panel .nearby-map__schedule-filter, .nearby-map__display-panel .nearby-map__station-visibility { padding-inline: 0; }
+  .nearby-map__display-panel .nearby-map__station-visibility:first-of-type { border-top: 0; }
   .nearby-map-shell:not(.nearby-map-shell--city-view) .nearby-map__isochrone-status { top: 120px; }
   .nearby-map-shell:not(.nearby-map-shell--city-view) .nearby-map__noise-status { top: 160px; }
   .nearby-map__scale-control { bottom: 14px; gap: 6px; padding: 4px 6px 5px; }
@@ -5831,6 +5967,8 @@ function mix(from: number, to: number, progress: number): number {
   .nearby-map-shell:fullscreen .nearby-map__sidebar { max-height: none; }
  }
 @media (prefers-reduced-motion: reduce) {
+  .nearby-map__city-view-spinner { animation: none; }
+  .nearby-map-display-sheet-enter-active, .nearby-map-display-sheet-leave-active { transition: none; }
   .nearby-map__sidebar-tab-track { transition: none; }
   .nearby-map__city-view-slider { transition: none; }
   .nearby-map__radius--fade-in, .nearby-map__radius--fade-out { animation: none; }

@@ -16,12 +16,14 @@ const props = defineProps<{
   workplaceLabel?: string;
   loading?: boolean;
   error?: string;
+  retrying?: boolean;
   criteria?: readonly NeighborhoodCriterionState[];
   directoryUrl: string;
 }>();
 
 const emit = defineEmits<{
   "change-origin": [];
+  "retry-source": [];
 }>();
 
 const { d, t } = useI18n();
@@ -84,7 +86,17 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
       <LoaderCircle class="nearby-neighborhood-score-card__spin" :size="16" aria-hidden="true" />
       {{ t("nearbyStations.neighborhoodScore.loading") }}
     </p>
-    <p v-if="error" class="nearby-neighborhood-score-card__error" role="status">{{ error }}</p>
+    <div v-if="error" class="nearby-neighborhood-score-card__error" role="status">
+      <span>{{ error }}</span>
+      <button
+        class="nearby-neighborhood-score-card__retry"
+        type="button"
+        :disabled="retrying"
+        @click="emit('retry-source')"
+      >
+        {{ retrying ? t("nearbyStations.neighborhoodScore.retrying") : t("common.actions.retry") }}
+      </button>
+    </div>
 
     <p v-if="result.band" class="nearby-neighborhood-score-card__verdict" :style="{ color: bandColor(result.band) }">
       {{ t(bandKeys[result.band]) }}
@@ -244,9 +256,13 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
 .nearby-neighborhood-score-card__score--medium { background: #fff7de; }
 .nearby-neighborhood-score-card__score--weak { background: #fff0e8; }
 .nearby-neighborhood-score-card__score--very-weak { background: #ffebe9; }
-.nearby-neighborhood-score-card__loading, .nearby-neighborhood-score-card__error { align-items: center; border-radius: 9px; display: flex; font-size: .76rem; gap: 7px; margin: 15px 0 0; padding: 8px 10px; }
+.nearby-neighborhood-score-card__loading, .nearby-neighborhood-score-card__error { align-items: center; border-radius: 9px; display: flex; font-size: .76rem; gap: 7px; justify-content: space-between; margin: 15px 0 0; padding: 8px 10px; }
 .nearby-neighborhood-score-card__loading { background: #f4f2ff; color: #5146ff; }
 .nearby-neighborhood-score-card__error { background: #fff5f4; color: #a5231d; }
+.nearby-neighborhood-score-card__error > span { line-height: 1.4; }
+.nearby-neighborhood-score-card__retry { background: transparent; border: 1px solid currentColor; border-radius: 7px; color: inherit; cursor: pointer; flex: 0 0 auto; font: inherit; font-size: .68rem; font-weight: 850; padding: 5px 8px; }
+.nearby-neighborhood-score-card__retry:hover, .nearby-neighborhood-score-card__retry:focus-visible { background: rgba(165,35,29,.08); outline: 2px solid currentColor; outline-offset: 1px; }
+.nearby-neighborhood-score-card__retry:disabled { cursor: wait; opacity: .65; }
 .nearby-neighborhood-score-card__spin { animation: nearby-score-spin 900ms linear infinite; }
 .nearby-neighborhood-score-card__verdict { font-size: 1.05rem; font-weight: 900; margin: 18px 0 3px; }
 .nearby-neighborhood-score-card__verdict--pending { color: var(--muted); }
@@ -287,6 +303,9 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
 .nearby-neighborhood-score-card__directory strong { font-size: .82rem; }
 .nearby-neighborhood-score-card__directory small { font-size: .68rem; opacity: .86; }
 @keyframes nearby-score-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .nearby-neighborhood-score-card__spin { animation: none; }
+}
 @media (max-width: 680px) {
   .nearby-neighborhood-score-card { padding: 16px; }
   .nearby-neighborhood-score-card__header > div:first-child { min-width: 0; }
@@ -294,5 +313,6 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
   .nearby-neighborhood-score-card__highlights, .nearby-neighborhood-score-card__facts, .nearby-neighborhood-score-card__fact-group--positive-only { grid-template-columns: 1fr; }
   .nearby-neighborhood-score-card__score { min-width: 74px; padding-left: 9px; padding-right: 9px; }
   .nearby-neighborhood-score-card__score strong { font-size: 1.9rem; }
+  .nearby-neighborhood-score-card__error { align-items: flex-start; flex-direction: column; }
 }
 </style>

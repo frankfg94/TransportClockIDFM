@@ -185,6 +185,13 @@
         :camera="camera"
       />
 
+      <GlobalMapLineConnectionIconsOverlay
+        v-if="!routePreviewActive && activeLine && !activeStationView"
+        :enabled="showLineConnectionIcons"
+        :groups="lineConnectionIconGroups"
+        :camera="camera"
+      />
+
       <GlobalMapNearbyPlacesOverlay
         v-if="!routePreviewActive && activeLine"
         ref="nearbyPlacesOverlayRef"
@@ -591,6 +598,8 @@
           :selected-main-direction-id="selectedDirectionButtonId"
           :merge-directions="directionMergeEnabled"
           :show-ghost-line-icons="showGhostLineIcons"
+          :show-line-connection-icons="showLineConnectionIcons"
+          :show-bus-correspondences="showBusCorrespondences"
           :nearby-places="nearbyLinePlaces.places.value"
           :nearby-places-loading="nearbyLinePlaces.isLoading.value"
           :nearby-places-error="Boolean(nearbyLinePlaces.error.value)"
@@ -637,6 +646,8 @@
           @mobile-sheet-snap-change="mobilePickerSidebarSnap = $event"
           @modal-open="sidebarModalOpen = $event"
           @toggle-ghost-line-icons="showGhostLineIcons = !showGhostLineIcons"
+          @toggle-line-connection-icons="showLineConnectionIcons = !showLineConnectionIcons"
+          @toggle-bus-correspondences="showBusCorrespondences = !showBusCorrespondences"
           @line-cities-expanded="setServedCitiesAccordionExpanded"
           @update:nearby-radius-minutes="nearbyLineRadiusMinutes = $event"
         />
@@ -963,6 +974,7 @@ import { queryStationsWithinRadius } from "../transport-map/spatial/radiusQuery"
 import GlobalMapMarkerModal from "./GlobalMapMarkerModal.vue";
 import GlobalMapMarkersOverlay from "./GlobalMapMarkersOverlay.vue";
 import GlobalMapGhostLineIconsOverlay from "./GlobalMapGhostLineIconsOverlay.vue";
+import GlobalMapLineConnectionIconsOverlay from "./GlobalMapLineConnectionIconsOverlay.vue";
 import GlobalMapNearbyPlacesOverlay from "./GlobalMapNearbyPlacesOverlay.vue";
 import GlobalTransportItineraryOverlay from "./GlobalTransportItineraryOverlay.vue";
 import GlobalMapDistanceMeasurementOverlay from "./GlobalMapDistanceMeasurementOverlay.vue";
@@ -981,6 +993,10 @@ import { useNearbyPlaces } from "../nearby-stations/useNearbyPlaces";
 import { walkingMinutesToMeters } from "../nearby-stations/nearbyPlacePresentation";
 import type { NearbyPlace, NearbyPlaceCityRef } from "../nearby-stations/nearbyPlaces";
 import { normalizeCityName } from "../../services/places/compiledPlaces";
+import {
+  buildGlobalLineConnectionStations,
+  filterGlobalLineConnections,
+} from "./globalLineMetadata";
 import type { TravelRoute } from "../nearby-stations/useTravelRoutes";
 import { useGlobalMapMarkers, type GlobalMapMarker } from "./globalMapMarkers";
 import {
@@ -2562,6 +2578,21 @@ const globalItinerarySegments = computed<GlobalTransportItinerarySegment[]>(() =
 /** During a route detail preview the renderer intentionally receives no map layers. */
 const routePreviewActive = computed(() => Boolean(globalSelectedTravelRoute.value));
 const showGhostLineIcons = ref(false);
+const showLineConnectionIcons = ref(false);
+const showBusCorrespondences = ref(false);
+const lineConnectionIconGroups = computed(() => {
+  const line = activeLine.value;
+  const currentNetwork = network.value;
+  if (!line || !currentNetwork) return [];
+
+  return buildGlobalLineConnectionStations(line, currentNetwork.stations).flatMap((group) => {
+    const lines = group.lineIds
+      .map((lineId) => currentNetwork.linesById.get(lineId))
+      .filter((candidate): candidate is GlobalMapLine => Boolean(candidate));
+    const visibleLines = filterGlobalLineConnections(lines, showBusCorrespondences.value);
+    return visibleLines.length ? [{ ...group, lines: visibleLines }] : [];
+  });
+});
 const nearbyLineRadiusMinutes = ref<NearbyLineRadiusMinutes>(0);
 const nearbyLineRadiusMeters = computed(() => walkingMinutesToMeters(nearbyLineRadiusMinutes.value));
 const nearbyLineAnchors = computed<GeocoderPoint[]>(() => {
@@ -3968,6 +3999,8 @@ function selectStation(
   activeTrafficDisruption.value = undefined;
   activeStationGroup.value = stationGroup;
   focusedEntranceId.value = undefined;
+  showLineConnectionIcons.value = false;
+  showBusCorrespondences.value = false;
   // A station click should expose the local interchange context and Bus family
   // without changing the user's global mode selection. Exact ghost
   // correspondences have their own all-modes override, so Noctilien and other
@@ -4078,6 +4111,8 @@ function selectStationForDashboard(stationId: string): void {
 
 function clearSelection(): void {
   cancelCameraAnimation();
+  showLineConnectionIcons.value = false;
+  showBusCorrespondences.value = false;
   servedCitiesAccordionExpanded.value = false;
   clearPreloadedLineGeometry();
   invalidatePendingViewportRequests();
@@ -4611,6 +4646,8 @@ watch(
   () => activeLine.value?.id,
   (lineId, previousLineId) => {
     if (lineId !== previousLineId) {
+      showLineConnectionIcons.value = false;
+      showBusCorrespondences.value = false;
       closeTrafficCalendar();
       resetTrafficCalendarSelection();
     }

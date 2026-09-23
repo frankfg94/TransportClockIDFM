@@ -77,6 +77,8 @@ export interface GlobalMapSidebarBodyProps {
   selectedMainDirectionId?: string;
   mergeDirections: boolean;
   showGhostLineIcons: boolean;
+  showLineConnectionIcons: boolean;
+  showBusCorrespondences: boolean;
   nearbyPlaces: NearbyPlace[];
   nearbyPlacesLoading: boolean;
   nearbyPlacesError: boolean;
@@ -96,6 +98,8 @@ export interface GlobalMapSidebarBodyEmits {
   "add-active-station": [];
   "modal-open": [open: boolean];
   "toggle-ghost-line-icons": [];
+  "toggle-line-connection-icons": [];
+  "toggle-bus-correspondences": [];
   "line-cities-expanded": [expanded: boolean];
   "update:nearby-radius-minutes": [minutes: NearbyLineRadiusMinutes];
 }

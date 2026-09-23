@@ -5,7 +5,11 @@ import type {
   GlobalMapStation,
 } from "../src/features/transport-map/contracts/manifest";
 import { lonLatToWorld } from "../src/features/transport-map/geo/coordinateKernel";
-import { buildGlobalLineMetadata } from "../src/features/line-map/globalLineMetadata";
+import {
+  buildGlobalLineConnectionStations,
+  buildGlobalLineMetadata,
+  filterGlobalLineConnections,
+} from "../src/features/line-map/globalLineMetadata";
 import { getCoordinatesDistanceKm } from "../src/services/distance";
 
 function station(
@@ -74,6 +78,19 @@ function path(lineId: string, points: Array<{ lat: number; lon: number }>): Glob
 }
 
 describe("buildGlobalLineMetadata", () => {
+  it("hides Bus and Noctilien connections until explicitly enabled", () => {
+    const rail = line([]);
+    const bus = { ...line([]), id: "line:IDFM:BUS", mode: "BUS" as const };
+    const noctilien = { ...line([]), id: "line:IDFM:N01", mode: "NOCTILIEN" as const };
+
+    expect(filterGlobalLineConnections([rail, bus, noctilien], false)).toEqual([rail]);
+    expect(filterGlobalLineConnections([rail, bus, noctilien], true)).toEqual([
+      rail,
+      bus,
+      noctilien,
+    ]);
+  });
+
   it("summarizes the ordered route, cities and detailed path length", () => {
     const first = station("station:first", "Depart", "Paris", 48.8566, 2.3522, ["line:IDFM:TEST"]);
     const second = station("station:second", "Centre", "Paris", 48.85, 2.34, ["line:IDFM:TEST"]);
@@ -103,6 +120,12 @@ describe("buildGlobalLineMetadata", () => {
     const metadata = buildGlobalLineMetadata(selectedLine, [routeStation, hub, nearbyNonHub], []);
 
     expect(metadata.connectionLineIds).toEqual(["line:IDFM:RERB"]);
+    expect(buildGlobalLineConnectionStations(selectedLine, [routeStation, hub, nearbyNonHub])).toEqual([
+      {
+        station: routeStation,
+        lineIds: ["line:IDFM:RERB"],
+      },
+    ]);
   });
 
   it("does not measure a partial viewport path as the whole line", () => {

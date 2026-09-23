@@ -155,8 +155,12 @@ export function createDeckTransportLayers(
   if (model.labels.length) layers.push(createLabelLayer(model.labels, beforeId));
   // City names are deliberately last: station and entrance labels must not
   // visually cover the context the open "Villes desservies" accordion adds.
-  const labeledCityZones = model.servedCityZones ? administrativeData(model.servedCityZones).labels : [];
-  if (labeledCityZones.length) layers.push(createServedCityLabelLayer(labeledCityZones, beforeId));
+  const administrative = model.servedCityZones ? administrativeData(model.servedCityZones) : undefined;
+  const labeledCityZones = administrative?.labels ?? [];
+  if (labeledCityZones.length) {
+    // Keep city titles above the basemap's own city-name labels.
+    layers.push(createServedCityLabelLayer(labeledCityZones, undefined));
+  }
   return layers;
 }
 

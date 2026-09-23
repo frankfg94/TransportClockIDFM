@@ -49,7 +49,11 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const addressInput = ref<HTMLInputElement>();
-const nearby = useNearbyStations({ enabled: () => props.open, initialDraft: readNearbyStationsDraft() });
+const nearby = useNearbyStations({
+  enabled: () => props.open,
+  initialDraft: readNearbyStationsDraft(),
+  stationCatalog: "full",
+});
 const geolocation = useUserGeolocation({ enabled: () => props.open, autoStart: false });
 const {
   hoveredLineId,

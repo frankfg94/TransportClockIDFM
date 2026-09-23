@@ -2904,7 +2904,17 @@ describe("NearbyStationsMap line focus", () => {
       await displayToggle.trigger("click");
       const panel = wrapper.find("#nearby-map-display-controls");
       expect(panel.exists()).toBe(true);
-      expect(panel.findAll("input[type='checkbox']")).toHaveLength(19);
+      expect(panel.attributes("role")).toBe("dialog");
+      expect(panel.attributes("aria-modal")).toBe("true");
+      expect(panel.find(".nearby-map__display-panel-scroll").exists()).toBe(true);
+      const filterSections = panel.findAll("[data-nearby-map-filter-section]");
+      expect(filterSections).toHaveLength(3);
+      expect(filterSections.map((section) => section.attributes("open"))).toEqual(["", "", ""]);
+      await filterSections[1]!.get("summary").trigger("click");
+      expect(filterSections[1]!.attributes("open")).toBeUndefined();
+      await filterSections[1]!.get("summary").trigger("click");
+      expect(filterSections[1]!.attributes("open")).toBe("");
+      expect(panel.findAll("input[type='checkbox']")).toHaveLength(20);
       expect((panel.find("input[type='checkbox']").element as HTMLInputElement).checked).toBe(true);
 
       const busCheckbox = panel.findAll("input[type='checkbox']")[0]!;
@@ -2996,6 +3006,44 @@ describe("NearbyStationsMap line focus", () => {
       expect(wrapper.get(".nearby-map__place").attributes("aria-label")).toContain("80");
       await wrapper.setProps({ showNearbyPlaces: false });
       expect(wrapper.find(".nearby-map__place").exists()).toBe(false);
+    } finally {
+      wrapper?.unmount();
+      restoreViewport();
+    }
+  });
+
+  it("shows only places with an explicit wheelchair status when the accessibility filter is enabled", async () => {
+    const restoreViewport = installMapViewport(720, 360);
+    let wrapper: ReturnType<typeof mount> | undefined;
+    try {
+      wrapper = mountMap([]);
+      await wrapper.setProps({
+        showNearbyPlaces: true,
+        places: [
+          { id: "accessible-shop", name: "Commerce accessible", lon: 2.35, lat: 48.85, category: "shop", kind: "supermarket", distanceMeters: 80, tags: { wheelchair: "yes" } },
+          { id: "limited-toilets", name: "Toilettes partiellement accessibles", lon: 2.351, lat: 48.851, category: "service", kind: "toilets", distanceMeters: 90, tags: { wheelchair: "limited" } },
+          { id: "inaccessible-parking", name: "Parking non accessible", lon: 2.352, lat: 48.852, category: "service", kind: "parking", distanceMeters: 100, tags: { wheelchair: "no" } },
+          { id: "unknown-shop", name: "Commerce sans information", lon: 2.353, lat: 48.853, category: "shop", kind: "supermarket", distanceMeters: 110 },
+        ],
+      });
+
+      expect(wrapper.find("[data-place-id='accessible-shop']").exists()).toBe(true);
+      expect(wrapper.find("[data-place-id='unknown-shop']").exists()).toBe(true);
+      expect(wrapper.find("[data-place-id='inaccessible-parking']").exists()).toBe(false);
+
+      await wrapper.get(".nearby-map__display-toggle").trigger("click");
+      const accessibilityToggle = wrapper.get("[data-show-accessibility-places]");
+      expect((accessibilityToggle.element as HTMLInputElement).checked).toBe(false);
+      await accessibilityToggle.setValue(true);
+
+      expect(wrapper.find("[data-place-id='accessible-shop']").exists()).toBe(true);
+      expect(wrapper.find("[data-place-id='limited-toilets']").exists()).toBe(true);
+      expect(wrapper.find("[data-place-id='inaccessible-parking']").exists()).toBe(true);
+      expect(wrapper.find("[data-place-id='unknown-shop']").exists()).toBe(false);
+
+      await wrapper.get("[data-place-id='accessible-shop']").trigger("mouseenter");
+      expect(wrapper.get(".place-tooltip__accessibility").text()).toContain("Accès fauteuil: Accessible");
+      expect(wrapper.get("[data-place-id='accessible-shop']").attributes("aria-label")).toContain("Accès fauteuil: Accessible");
     } finally {
       wrapper?.unmount();
       restoreViewport();

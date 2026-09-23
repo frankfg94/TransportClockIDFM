@@ -338,11 +338,13 @@ describe("served city zones", () => {
       background: boolean;
       backgroundPadding: readonly [number, number];
       getPixelOffset: (zone: typeof zones[number]) => readonly [number, number];
+      beforeId?: string;
       parameters: { depthTest: boolean };
     };
     expect(labelProps.background).toBe(true);
     expect(labelProps.backgroundPadding).toEqual([7, 4]);
     expect(labelProps.getPixelOffset(zones[0]!)).toEqual(zones[0]?.labelPixelOffset);
+    expect(labelProps.beforeId).toBeUndefined();
     expect(labelProps.parameters.depthTest).toBe(false);
 
     const modelWithStationLabels = {

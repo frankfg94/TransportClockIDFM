@@ -8,13 +8,14 @@ export function useServiceQuality() {
   const data = shallowRef<PublicServiceQuality | undefined>(cached);
   const isLoading = ref(!cached);
   const error = ref<Error>();
-  onMounted(() => {
-    if (data.value) return;
+  function load(force = false): Promise<void> {
+    if (!force && data.value) return Promise.resolve();
     isLoading.value = true;
+    error.value = undefined;
     pending ??= fetchServiceQuality().finally(() => {
       pending = undefined;
     });
-    void pending
+    return pending
       .then((next) => {
         cached = next;
         data.value = next;
@@ -26,11 +27,16 @@ export function useServiceQuality() {
       .finally(() => {
         isLoading.value = false;
       });
+  }
+
+  onMounted(() => {
+    void load();
   });
 
   return {
     data: readonly(data),
     isLoading: readonly(isLoading),
     error: readonly(error),
+    retry: () => load(true),
   };
 }

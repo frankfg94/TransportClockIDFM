@@ -64,6 +64,8 @@ const props = withDefaults(defineProps<{
   mobileSheet?: boolean;
   mobileSheetSnap?: GlobalMapSidebarSheetSnap;
   showGhostLineIcons?: boolean;
+  showLineConnectionIcons?: boolean;
+  showBusCorrespondences?: boolean;
   nearbyPlaces?: NearbyPlace[];
   nearbyPlacesLoading?: boolean;
   nearbyPlacesError?: boolean;
@@ -94,6 +96,8 @@ const props = withDefaults(defineProps<{
   mobileSheet: true,
   mobileSheetSnap: "collapsed",
   showGhostLineIcons: false,
+  showLineConnectionIcons: false,
+  showBusCorrespondences: false,
   nearbyPlaces: () => [],
   nearbyPlacesLoading: false,
   nearbyPlacesError: false,
@@ -124,6 +128,8 @@ const emit = defineEmits<{
   "mobile-sheet-snap-change": [snap: GlobalMapSidebarSheetSnap];
   "modal-open": [open: boolean];
   "toggle-ghost-line-icons": [];
+  "toggle-line-connection-icons": [];
+  "toggle-bus-correspondences": [];
   "line-cities-expanded": [expanded: boolean];
   "update:nearby-radius-minutes": [minutes: NearbyLineRadiusMinutes];
 }>();
@@ -352,6 +358,8 @@ const sidebarBodyProps = computed<GlobalMapSidebarBodyProps>(() => ({
   selectedMainDirectionId: props.selectedMainDirectionId,
   mergeDirections: props.mergeDirections,
   showGhostLineIcons: props.showGhostLineIcons,
+  showLineConnectionIcons: props.showLineConnectionIcons,
+  showBusCorrespondences: props.showBusCorrespondences,
   nearbyPlaces: props.nearbyPlaces,
   nearbyPlacesLoading: props.nearbyPlacesLoading,
   nearbyPlacesError: props.nearbyPlacesError,
@@ -738,6 +746,8 @@ onBeforeUnmount(() => {
         @add-active-station="emit('add-active-station')"
         @modal-open="emit('modal-open', $event)"
         @toggle-ghost-line-icons="emit('toggle-ghost-line-icons')"
+        @toggle-line-connection-icons="emit('toggle-line-connection-icons')"
+        @toggle-bus-correspondences="emit('toggle-bus-correspondences')"
         @line-cities-expanded="emit('line-cities-expanded', $event)"
         @update:nearby-radius-minutes="emit('update:nearby-radius-minutes', $event)"
       />

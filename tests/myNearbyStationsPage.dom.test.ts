@@ -10,6 +10,7 @@ import NearbyCityCityPicker from "../src/features/nearby-stations/NearbyCityCity
 
 const mocks = vi.hoisted(() => ({
   geocode: vi.fn(),
+  useNearbyStations: vi.fn(() => mocks.nearby),
   nearby: {
     query: { value: "" },
     selectedPlace: { value: undefined as { lon: number; lat: number; label?: string } | undefined },
@@ -110,7 +111,7 @@ vi.mock("../src/features/nearby-stations/geocoding", () => ({
   createIgnTransportMapGeocoder: () => ({ geocode: mocks.geocode }),
 }));
 vi.mock("../src/features/nearby-stations/useNearbyStations", () => ({
-  useNearbyStations: () => mocks.nearby,
+  useNearbyStations: mocks.useNearbyStations,
 }));
 vi.mock("../src/features/nearby-stations/useNearbyStationsLineFlow", () => ({
   useNearbyStationsLineFlow: () => mocks.lineFlow,
@@ -169,6 +170,7 @@ describe("MyNearbyStationsPage", () => {
 
     await flushPromises();
 
+    expect(mocks.useNearbyStations).toHaveBeenCalledWith({ stationCatalog: "full" });
     expect(wrapper.get("[data-testid='nearby-map']").attributes("data-hide-long-wait-transports")).toBe("true");
     expect(wrapper.get("[data-testid='nearby-map']").attributes("data-show-nearby-place-names")).toBe("false");
     expect(mocks.nearbyPlacesOptions?.radius.value).toBe(1_200);

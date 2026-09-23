@@ -151,7 +151,9 @@ const placeLoading = ref(false);
 const placeError = ref("");
 const presetRequestToken = ref(0);
 const placeCache = new Map<NearbyAddressPresetId, Promise<GeocoderPoint>>();
-const nearby = useNearbyStations();
+// Keep the complete catalogue here so every nearby map can expose all line
+// families. The score page also opts into it explicitly for its benchmarks.
+const nearby = useNearbyStations({ stationCatalog: "full" });
 const nearbyDataProviders = createNearbyDataProviders();
 const placesAccess = nearbyDataProviders.places as PlacesProvider & Partial<CompiledPlacesAccess>;
 const lineFlow = useNearbyStationsLineFlow(nearby);

@@ -92,6 +92,25 @@ export type NearbyPlacePresentationSource = Pick<GeocoderPoint, "kind" | "catego
   genericNameKey?: NearbyPlaceGenericNameKey;
 };
 
+export type NearbyPlaceWheelchairAccess = "yes" | "limited" | "no" | "designated";
+
+const OSM_WHEELCHAIR_ACCESS_VALUES: ReadonlySet<string> = new Set([
+  "yes",
+  "limited",
+  "no",
+  "designated",
+]);
+
+/** Return only recognized, explicitly recorded OSM wheelchair-access values. */
+export function nearbyPlaceWheelchairAccess(
+  place: Pick<NearbyPlacePresentationSource, "tags">,
+): NearbyPlaceWheelchairAccess | undefined {
+  const value = place.tags?.wheelchair?.trim().toLowerCase();
+  return value && OSM_WHEELCHAIR_ACCESS_VALUES.has(value)
+    ? value as NearbyPlaceWheelchairAccess
+    : undefined;
+}
+
 export interface NearbyPlaceGroupPresentation {
   id: NearbyPlaceGroupId;
   labelKey: TranslationKey;

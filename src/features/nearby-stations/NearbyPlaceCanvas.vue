@@ -6,7 +6,7 @@ import type { CameraState } from "../transport-map/geo/camera";
 import { screenToWorld, worldScaleAtZoom, worldToScreen } from "../transport-map/geo/coordinateKernel";
 import type { NearbyPlace } from "./nearbyPlaces";
 import type { NearbyWalkingRoute } from "./nearbyWalkingRoutes";
-import { nearbyPlaceWalkingDistanceMeters, nearbyPlaceWalkingMinutes } from "./nearbyPlacePresentation";
+import { nearbyPlaceWalkingDistanceMeters, nearbyPlaceWalkingMinutes, nearbyPlaceWheelchairAccess } from "./nearbyPlacePresentation";
 import { PLACE_ICON_COMPONENTS, useNearbyPlacePresenter } from "./useNearbyPlacePresenter";
 import { indexNearbyPlaceViewport, queryNearbyPlaceViewport } from "./nearbyPlaceViewport";
 import { nearbyPlacePop, NEARBY_PLACE_POP_MS } from "./nearbyPlacePop";
@@ -19,6 +19,7 @@ const props = defineProps<{
   city: boolean;
   preview: boolean;
   showNames: boolean;
+  showAccessibility?: boolean;
   reducedMotion: boolean;
   interactionActive?: boolean;
   canvasHitTesting?: boolean;
@@ -93,15 +94,20 @@ function rebuild(): void {
     const name = props.showNames && !props.city ? presentation.name : undefined;
     const outside = !props.city && !props.preview && point.place.distanceMeters > props.radius;
     const ink = color(point.place.category, outside);
+    const wheelchairAccess = props.showAccessibility ? nearbyPlaceWheelchairAccess(point.place) : undefined;
+    const wheelchairAccessLabel = wheelchairAccess
+      ? `${t("nearbyStations.wheelchairAccessLabel")}: ${t(`nearbyStations.wheelchairAccess.${wheelchairAccess}`)}`
+      : undefined;
+    const ariaLabel = t("nearbyStations.placeAria", { name: presentation.name, type: presentation.typeLabel,
+      meters: nearbyPlaceWalkingDistanceMeters(point.place, route),
+      walking: t("nearbyStations.walkingTime", { minutes: nearbyPlaceWalkingMinutes(point.place, route) }) });
     const entry: Entry = { ...point, presentation, name, outside, ink,
       sprite: old?.ink === ink && old.presentation.iconId === presentation.iconId ? old.sprite : undefined,
       label: old?.name === name ? old?.label : undefined,
       targetWidth: 24,
       inViewport: point.x >= 0 && point.y >= 0 && point.x <= reference.viewportWidthCssPx && point.y <= reference.viewportHeightCssPx,
       enterAt: old?.enterAt ?? now + 240 + Math.min(order * 20, 160),
-      ariaLabel: t("nearbyStations.placeAria", { name: presentation.name, type: presentation.typeLabel,
-        meters: nearbyPlaceWalkingDistanceMeters(point.place, route),
-        walking: t("nearbyStations.walkingTime", { minutes: nearbyPlaceWalkingMinutes(point.place, route) }) }),
+      ariaLabel: wheelchairAccessLabel ? `${ariaLabel}. ${wheelchairAccessLabel}` : ariaLabel,
     };
     if (context && name) {
       const nameTile = label(entry);
@@ -498,7 +504,8 @@ onBeforeUnmount(() => {
       <span class="nearby-map__place-icon" aria-hidden="true"><component :is="entry.presentation.icon" :size="13" /></span>
       <span v-if="entry.name" class="nearby-map__place-name" aria-hidden="true">{{ entry.name }}</span>
       <PlaceTooltip v-if="tooltip" :place="entry.place" :placement="placement(entry)"
-        :type-label="entry.presentation.typeLabel" :walking-minutes="nearbyPlaceWalkingMinutes(entry.place, walkingRoutes?.[entry.place.id])" />
+        :type-label="entry.presentation.typeLabel" :walking-minutes="nearbyPlaceWalkingMinutes(entry.place, walkingRoutes?.[entry.place.id])"
+        :show-accessibility="showAccessibility" />
     </div>
   </div>
 </template>

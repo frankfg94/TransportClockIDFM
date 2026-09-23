@@ -1,20 +1,24 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { Footprints } from "lucide-vue-next";
 import { useI18n } from "../i18n";
 import type { NearbyPlace } from "../features/nearby-stations/nearbyPlaces";
+import { nearbyPlaceWheelchairAccess } from "../features/nearby-stations/nearbyPlacePresentation";
 import { useNearbyPlacePresenter } from "../features/nearby-stations/useNearbyPlacePresenter";
 
 type PlaceTooltipPlacement = "above" | "below" | "left" | "right";
 
-defineProps<{
+const props = defineProps<{
   place: NearbyPlace;
   typeLabel: string;
   walkingMinutes: number;
+  showAccessibility?: boolean;
   placement?: PlaceTooltipPlacement;
 }>();
 
 const { t } = useI18n();
 const { presentPlace } = useNearbyPlacePresenter();
+const wheelchairAccess = computed(() => nearbyPlaceWheelchairAccess(props.place));
 </script>
 
 <template>
@@ -26,6 +30,9 @@ const { presentPlace } = useNearbyPlacePresenter();
   >
     <strong class="place-tooltip__name">{{ presentPlace(place).name }}</strong>
     <span class="place-tooltip__type">{{ typeLabel }}</span>
+    <span v-if="showAccessibility && wheelchairAccess" class="place-tooltip__accessibility">
+      {{ t("nearbyStations.wheelchairAccessLabel") }}: {{ t(`nearbyStations.wheelchairAccess.${wheelchairAccess}`) }}
+    </span>
     <span class="place-tooltip__walking">
       <Footprints :size="14" aria-hidden="true" />
       {{ t("nearbyStations.walkingTime", { minutes: walkingMinutes }) }}
@@ -61,5 +68,6 @@ const { presentPlace } = useNearbyPlacePresenter();
 .place-tooltip--right { bottom: 50%; left: calc(100% + 8px); transform: translateY(50%); }
 .place-tooltip__name { font-size: .68rem; font-weight: 850; max-width: 174px; overflow: hidden; text-overflow: ellipsis; }
 .place-tooltip__type { color: #64748b; font-size: .6rem; font-weight: 750; overflow: hidden; text-overflow: ellipsis; }
+.place-tooltip__accessibility { color: #334155; font-size: .59rem; font-weight: 800; }
 .place-tooltip__walking { align-items: center; color: #5146ff; display: inline-flex; font-size: .63rem; font-weight: 850; gap: 4px; justify-content: center; line-height: 1.1; }
 </style>

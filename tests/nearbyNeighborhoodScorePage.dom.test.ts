@@ -21,11 +21,13 @@ const mocks = vi.hoisted(() => ({
     activeModes: { value: [] },
     radius: { value: 600 },
     isScanning: { value: false },
+    error: { value: undefined as Error | undefined },
   },
   heavy: {
     visibleCandidates: { value: [] },
     isLoading: { value: false },
     error: { value: undefined as string | undefined },
+    refresh: vi.fn(async () => undefined),
   },
   score: {
     result: { value: {} },
@@ -33,6 +35,7 @@ const mocks = vi.hoisted(() => ({
     isLoading: { value: false },
     error: { value: undefined as Error | undefined },
     errorSource: { value: undefined as "verdict" | "places" | "routes" | undefined },
+    refresh: vi.fn(async () => undefined),
   },
 }));
 
@@ -62,16 +65,21 @@ afterEach(() => {
   vi.clearAllMocks();
   mocks.routeState.query = {};
   mocks.nearby.selectedPlace.value = undefined;
+  mocks.nearby.error.value = undefined;
+  mocks.nearby.isScanning.value = false;
+  mocks.heavy.isLoading.value = false;
+  mocks.heavy.error.value = undefined;
+  mocks.score.isLoading.value = false;
   mocks.score.error.value = undefined;
   mocks.score.errorSource.value = undefined;
   mocks.useNearbyStations.mockReturnValue(mocks.nearby);
   mocks.useNearbyHeavyTransports.mockReturnValue(mocks.heavy);
   mocks.useNearbyNeighborhoodScore.mockReturnValue(mocks.score);
-  mocks.useServiceQuality.mockReturnValue({ data: { value: undefined }, isLoading: { value: false }, error: { value: undefined } });
+  mocks.useServiceQuality.mockReturnValue({ data: { value: undefined }, isLoading: { value: false }, error: { value: undefined }, retry: vi.fn(async () => undefined) });
 });
 
 beforeEach(() => {
-  mocks.useServiceQuality.mockReturnValue({ data: { value: undefined }, isLoading: { value: false }, error: { value: undefined } });
+  mocks.useServiceQuality.mockReturnValue({ data: { value: undefined }, isLoading: { value: false }, error: { value: undefined }, retry: vi.fn(async () => undefined) });
 });
 
 describe("NearbyNeighborhoodScorePage", () => {
@@ -141,6 +149,38 @@ describe("NearbyNeighborhoodScorePage", () => {
     });
 
     expect(wrapper.get("[data-testid='score-card']").attributes("data-error")).toContain("itinéraires de transport (Navitia)");
+    wrapper.unmount();
+  });
+
+  it("shows a discrete loading bar and retries the failed score source", async () => {
+    mocks.routeState.query = {
+      lat: "48.76591",
+      lon: "2.26821",
+      address: "Adresse test",
+    };
+    mocks.score.isLoading.value = true;
+    mocks.score.error.value = new Error("navitia unavailable");
+    mocks.score.errorSource.value = "routes";
+
+    const wrapper = mount(NearbyNeighborhoodScorePage, {
+      global: {
+        stubs: {
+          NuxtLink: true,
+          NearbyNeighborhoodScoreCard: {
+            props: ["error", "loading", "retrying"],
+            template: `
+              <div data-testid="score-card" :data-loading="loading" :data-error="error">
+                <button v-if="error" data-testid="retry-source" type="button" @click="$emit('retry-source')" />
+              </div>
+            `,
+          },
+        },
+      },
+    });
+
+    expect(wrapper.get(".nearby-neighborhood-score-page__loading-bar").attributes("role")).toBe("progressbar");
+    await wrapper.get("[data-testid='retry-source']").trigger("click");
+    expect(mocks.score.refresh).toHaveBeenCalledTimes(1);
     wrapper.unmount();
   });
 });

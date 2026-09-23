@@ -22,6 +22,22 @@ export interface GlobalLineMetadata {
   geometrySources: string[];
 }
 
+export interface GlobalLineConnectionStation {
+  station: GlobalMapStation;
+  lineIds: string[];
+}
+
+export function isBusOrNoctilienLine(line: Pick<GlobalMapLine, "mode">): boolean {
+  return line.mode === "BUS" || line.mode === "NOCTILIEN";
+}
+
+export function filterGlobalLineConnections(
+  lines: readonly GlobalMapLine[],
+  showBusCorrespondences: boolean,
+): GlobalMapLine[] {
+  return lines.filter((line) => showBusCorrespondences || !isBusOrNoctilienLine(line));
+}
+
 function normalizeLabel(value: string): string {
   return value
     .normalize("NFD")
@@ -91,6 +107,80 @@ function stationsLengthKm(stations: GlobalMapStation[]): number | undefined {
   return lengthKm > 0 ? lengthKm : undefined;
 }
 
+/**
+ * Resolves the line ids that can be shown next to each station of a selected
+ * line. Direct station memberships are preferred; nearby physical hub records
+ * are reconciled using the same conservative 350 m rule as the line profile.
+ */
+export function buildGlobalLineConnectionStations(
+  line: GlobalMapLine,
+  stations: GlobalMapStation[],
+): GlobalLineConnectionStation[] {
+  const stationsById = new Map(stations.map((station) => [station.id, station]));
+  const lineStations = line.stationIds
+    .map((stationId) => stationsById.get(stationId))
+    .filter((station): station is GlobalMapStation => Boolean(station));
+  const lineStationGroups = new Map<string, GlobalLineConnectionStation>();
+
+  for (const station of lineStations) {
+    const group: GlobalLineConnectionStation = {
+      station,
+      lineIds: [],
+    };
+    for (const lineId of station.lineIds) {
+      if (lineId !== line.id && !group.lineIds.includes(lineId)) {
+        group.lineIds.push(lineId);
+      }
+    }
+    lineStationGroups.set(station.id, group);
+  }
+
+  // The global pack keeps the route quays as separate stations. Transfers
+  // therefore often live in neighbouring physical stop records rather than
+  // in the selected line's own station.lineIds.
+  const latitudeCellSize = 0.0045;
+  const longitudeCellSize = 0.0065;
+  const stationCells = new Map<string, GlobalMapStation[]>();
+  const cellKey = (latitude: number, longitude: number): string =>
+    `${Math.floor(latitude / latitudeCellSize)}:${Math.floor(longitude / longitudeCellSize)}`;
+
+  for (const candidate of stations) {
+    if (!candidate.lineIds.length) continue;
+    const key = cellKey(candidate.lat, candidate.lon);
+    const cell = stationCells.get(key) ?? [];
+    cell.push(candidate);
+    stationCells.set(key, cell);
+  }
+
+  const routeStationNames = new Set(lineStations.map((station) => normalizeLabel(station.name)));
+  for (const routeStation of lineStations) {
+    const latitudeCell = Math.floor(routeStation.lat / latitudeCellSize);
+    const longitudeCell = Math.floor(routeStation.lon / longitudeCellSize);
+    for (let latitudeOffset = -1; latitudeOffset <= 1; latitudeOffset += 1) {
+      for (let longitudeOffset = -1; longitudeOffset <= 1; longitudeOffset += 1) {
+        for (const candidate of stationCells.get(`${latitudeCell + latitudeOffset}:${longitudeCell + longitudeOffset}`) ?? []) {
+          if (candidate.id === routeStation.id || lineStationGroups.has(candidate.id)) continue;
+          const sameNamedStation = routeStationNames.has(normalizeLabel(candidate.name));
+          if (!candidate.isHub && !sameNamedStation) continue;
+          if (getCoordinatesDistanceKm(candidate.lat, candidate.lon, routeStation.lat, routeStation.lon) > 0.35) continue;
+
+          const group = lineStationGroups.get(routeStation.id);
+          if (!group) continue;
+          for (const lineId of candidate.lineIds) {
+            if (lineId !== line.id && !group.lineIds.includes(lineId)) {
+              group.lineIds.push(lineId);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return lineStations
+    .map((station) => lineStationGroups.get(station.id))
+    .filter((group): group is GlobalLineConnectionStation => Boolean(group?.lineIds.length));
+}
+
 export function buildGlobalLineMetadata(
   line: GlobalMapLine,
   stations: GlobalMapStation[],
@@ -117,69 +207,9 @@ export function buildGlobalLineMetadata(
     }
   }
 
-  const connectionLineIds: string[] = [];
-  const connectionIds = new Set<string>();
-  for (const station of lineStations) {
-    for (const lineId of station.lineIds) {
-      if (lineId !== line.id && !connectionIds.has(lineId)) {
-        connectionIds.add(lineId);
-        connectionLineIds.push(lineId);
-      }
-    }
-  }
-
-  // The global pack keeps the route quays as separate stations. Transfers
-  // therefore often live in neighbouring physical stop records rather than
-  // in the selected line's own station.lineIds. Reconcile those records with
-  // a short walking radius so the line profile can expose real connections.
-  const latitudeCellSize = 0.0045;
-  const longitudeCellSize = 0.0065;
-  const stationCells = new Map<string, GlobalMapStation[]>();
-  const cellKey = (latitude: number, longitude: number): string =>
-    `${Math.floor(latitude / latitudeCellSize)}:${Math.floor(longitude / longitudeCellSize)}`;
-
-  for (const candidate of stations) {
-    if (!candidate.lineIds.length) continue;
-    const key = cellKey(candidate.lat, candidate.lon);
-    const cell = stationCells.get(key) ?? [];
-    cell.push(candidate);
-    stationCells.set(key, cell);
-  }
-
-  const nearbyCandidates = new Map<string, GlobalMapStation>();
-  for (const routeStation of lineStations) {
-    const latitudeCell = Math.floor(routeStation.lat / latitudeCellSize);
-    const longitudeCell = Math.floor(routeStation.lon / longitudeCellSize);
-    for (let latitudeOffset = -1; latitudeOffset <= 1; latitudeOffset += 1) {
-      for (let longitudeOffset = -1; longitudeOffset <= 1; longitudeOffset += 1) {
-        for (const candidate of stationCells.get(`${latitudeCell + latitudeOffset}:${longitudeCell + longitudeOffset}`) ?? []) {
-          nearbyCandidates.set(candidate.id, candidate);
-        }
-      }
-    }
-  }
-
-  const routeStationNames = new Set(lineStations.map((station) => normalizeLabel(station.name)));
-  for (const candidate of nearbyCandidates.values()) {
-    if (lineStations.some((station) => station.id === candidate.id)) continue;
-    const sameNamedStation = routeStationNames.has(normalizeLabel(candidate.name));
-    if (!candidate.isHub && !sameNamedStation) continue;
-
-    const hasNearbyRouteStation = lineStations.some((routeStation) =>
-      getCoordinatesDistanceKm(
-        candidate.lat,
-        candidate.lon,
-        routeStation.lat,
-        routeStation.lon,
-      ) <= 0.35);
-    if (!hasNearbyRouteStation) continue;
-    for (const lineId of candidate.lineIds) {
-      if (lineId !== line.id && !connectionIds.has(lineId)) {
-        connectionIds.add(lineId);
-        connectionLineIds.push(lineId);
-      }
-    }
-  }
+  const connectionLineIds = [...new Set(
+    buildGlobalLineConnectionStations(line, stations).flatMap((group) => group.lineIds),
+  )];
 
   // `paths` is a viewport result, so a detailed zoom may contain only one
   // chunk of a line. Measuring that subset makes the profile distance jump

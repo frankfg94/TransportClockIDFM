@@ -1,4 +1,7 @@
-import type { GlobalMapPath } from "../contracts/manifest";
+import {
+  getGlobalMapPathSubpathRanges,
+  type GlobalMapPath,
+} from "../contracts/manifest";
 
 /**
  * A global line can be present twice while a focused viewport is settling:
@@ -43,6 +46,7 @@ export function selectPreferredLinePaths(
   viewportPaths: readonly GlobalMapPath[],
   regionalPaths: readonly GlobalMapPath[],
   lineId: string,
+  options: { requiredStationIds?: readonly string[] } = {},
 ): GlobalMapPath[] {
   const detailed = uniquePaths(viewportPaths.filter((path) => path.lineId === lineId));
   const regional = uniquePaths(regionalPaths.filter((path) => path.lineId === lineId));
@@ -61,7 +65,66 @@ export function selectPreferredLinePaths(
   const regionalPriority = sourcePriority(regional);
   const preferred = detailedPriority >= regionalPriority ? detailed : regional;
   const secondary = detailedPriority >= regionalPriority ? regional : detailed;
-  return selectPathsWithinLayer(preferred, [...preferred, ...secondary]);
+  const preferredPaths = selectPathsWithinLayer(preferred, [...preferred, ...secondary]);
+
+  // Detailed viewport queries can return some chunks for a line while other
+  // chunks are still outside the query or failed to load. In that case the
+  // high-priority partial set must not hide the complete regional route.
+  // Choose one complete layer instead of painting the two representations on
+  // top of each other.
+  const requiredStationIds = options.requiredStationIds ?? [];
+  if (
+    preferred === detailed &&
+    requiredStationIds.length > 1 &&
+    !pathsConnectStations(selectPathsWithinLayer(detailed, detailed), requiredStationIds) &&
+    pathsConnectStations(selectPathsWithinLayer(regional, regional), requiredStationIds)
+  ) {
+    return selectPathsWithinLayer(regional, regional);
+  }
+
+  return preferredPaths;
+}
+
+function pathsConnectStations(
+  paths: readonly GlobalMapPath[],
+  requiredStationIds: readonly string[],
+): boolean {
+  const required = new Set(requiredStationIds);
+  const connectedTo = new Map<string, string>();
+  const find = (stationId: string): string => {
+    const parent = connectedTo.get(stationId);
+    if (!parent) {
+      connectedTo.set(stationId, stationId);
+      return stationId;
+    }
+    if (parent === stationId) return stationId;
+    const root = find(parent);
+    connectedTo.set(stationId, root);
+    return root;
+  };
+
+  const anchored = new Set<string>();
+  for (const path of paths) {
+    for (const range of getGlobalMapPathSubpathRanges(path)) {
+      let previousStationId: string | undefined;
+      for (let index = range.start; index < range.end; index += 1) {
+        const stationId = path.vertices[index]?.stationId;
+        if (!stationId || !required.has(stationId)) continue;
+        anchored.add(stationId);
+        find(stationId);
+        if (previousStationId && previousStationId !== stationId) {
+          const previousRoot = find(previousStationId);
+          const currentRoot = find(stationId);
+          if (previousRoot !== currentRoot) connectedTo.set(currentRoot, previousRoot);
+        }
+        previousStationId = stationId;
+      }
+    }
+  }
+
+  if ([...required].some((stationId) => !anchored.has(stationId))) return false;
+  const roots = new Set([...required].map(find));
+  return roots.size <= 1;
 }
 
 function sourcePriority(paths: readonly GlobalMapPath[]): number {

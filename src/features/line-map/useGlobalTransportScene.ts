@@ -357,14 +357,18 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
   ));
 
   const staticLineMetadataPaths = computed<GlobalMapPath[]>(() => {
-    const lineId = options.getActiveLine()?.id;
-    if (!lineId) return [...options.getViewport().paths];
+    const activeLine = options.getActiveLine();
+    if (!activeLine) return [...options.getViewport().paths];
     const network = options.getNetwork();
     const preloadedPaths = options.getPreloadedLinePaths?.() ?? [];
     const preferredPaths = selectPreferredLinePaths(
       [...options.getViewport().paths, ...preloadedPaths],
       network?.regionalPaths ?? [],
-      lineId,
+      activeLine.id,
+      {
+        requiredStationIds:
+          options.getSelectedBusDirectionStationIds() ?? activeLine.stationIds,
+      },
     );
     const edgeKeys = options.getSelectedBusDirectionEdgeKeys();
     if (!edgeKeys) return preferredPaths;
@@ -397,9 +401,12 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
       const network = options.getNetwork();
       const viewportPaths = options.getViewport().paths;
       const regionalPaths = network?.regionalPaths ?? [];
-      return ghostLineIds.value.flatMap((lineId) =>
-        selectPreferredLinePaths(viewportPaths, regionalPaths, lineId),
-      );
+      return ghostLineIds.value.flatMap((lineId) => {
+        const line = network?.linesById.get(lineId);
+        return selectPreferredLinePaths(viewportPaths, regionalPaths, lineId, {
+          requiredStationIds: line?.stationIds,
+        });
+      });
     } finally {
       recordSceneTiming(options, "ghost_line_paths_compute", startedAt);
     }

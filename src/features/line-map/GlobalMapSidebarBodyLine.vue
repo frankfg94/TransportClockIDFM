@@ -10,6 +10,7 @@ import {
   Route,
   Shuffle,
   Train,
+  Waypoints,
 } from "lucide-vue-next";
 import AnnualRidershipCard from "./AnnualRidershipCard.vue";
 import GtfsFrequencyCard from "./GtfsFrequencyCard.vue";
@@ -28,7 +29,11 @@ import {
 import type { NearbyPlace } from "../nearby-stations/nearbyPlaces";
 import type { GlobalMapLine } from "../transport-map/contracts/manifest";
 import type { TransitFamily } from "../../types/transit";
-import { buildGlobalLineMetadata, type GlobalLineMetadata } from "./globalLineMetadata";
+import {
+  buildGlobalLineMetadata,
+  filterGlobalLineConnections,
+  type GlobalLineMetadata,
+} from "./globalLineMetadata";
 import { buildCitiesLinePatternCities } from "./citiesLinePattern";
 import { defaultGlobalDirectionMerge } from "./lineMapData";
 import type {
@@ -62,15 +67,14 @@ const servedCitiesPattern = computed(() =>
 );
 const lineConnectionOptions = computed(() => {
   const linesById = new Map(props.allLines.map((line) => [line.id, line]));
-  return (
+  const availableConnections = (
     (lineMetadata.value?.connectionLineIds ?? [])
       .map((lineId) => linesById.get(lineId))
       .filter((line): line is GlobalMapLine => Boolean(line))
-      // Nearby bus stops are useful on a station card, but they would drown out
-      // the actual rail/tram interchanges on a line profile.
-      .filter((line) => line.mode !== "BUS" && line.mode !== "NOCTILIEN")
   );
+  return filterGlobalLineConnections(availableConnections, props.showBusCorrespondences);
 });
+const lineConnectionTotal = computed(() => lineMetadata.value?.connectionLineIds.length ?? 0);
 const lineConnectionCount = computed(() =>
   props.allLines.length
     ? lineConnectionOptions.value.length
@@ -274,6 +278,48 @@ function updateNearbyRadius(value: string): void {
           ><span>{{ t("globalMap.sidebar.lineStatsConnections") }}</span>
         </div>
       </article>
+    </section>
+
+    <section
+      v-if="!isLinePreview && lineConnectionTotal"
+      class="global-map-picker-sidebar__line-connection-icons"
+    >
+      <div class="global-map-picker-sidebar__line-connection-setting">
+        <div>
+          <strong>{{ t("globalMap.sidebar.lineConnectionIcons") }}</strong>
+          <small>{{ t("globalMap.sidebar.lineConnectionIconsDescription") }}</small>
+        </div>
+        <button
+          class="global-map-picker-sidebar__line-connection-icons-switch"
+          type="button"
+          role="switch"
+          :aria-checked="showLineConnectionIcons"
+          :aria-label="t('globalMap.sidebar.lineConnectionIconsAria')"
+          data-testid="global-map-line-connection-icons-toggle"
+          @click="emit('toggle-line-connection-icons')"
+        >
+          <Waypoints :size="15" aria-hidden="true" />
+          <span>{{ showLineConnectionIcons ? t("common.booleans.yes") : t("common.booleans.no") }}</span>
+        </button>
+      </div>
+      <div class="global-map-picker-sidebar__line-connection-setting">
+        <div>
+          <strong>{{ t("globalMap.sidebar.busCorrespondences") }}</strong>
+          <small>{{ t("globalMap.sidebar.busCorrespondencesDescription") }}</small>
+        </div>
+        <button
+          class="global-map-picker-sidebar__line-connection-icons-switch"
+          type="button"
+          role="switch"
+          :aria-checked="showBusCorrespondences"
+          :aria-label="t('globalMap.sidebar.busCorrespondencesAria')"
+          data-testid="global-map-bus-correspondences-toggle"
+          @click="emit('toggle-bus-correspondences')"
+        >
+          <Waypoints :size="15" aria-hidden="true" />
+          <span>{{ showBusCorrespondences ? t("common.booleans.yes") : t("common.booleans.no") }}</span>
+        </button>
+      </div>
     </section>
 
     <section
@@ -661,6 +707,58 @@ function updateNearbyRadius(value: string): void {
 <style scoped>
 .global-map-picker-sidebar__nearby-card {
   gap: 9px;
+}
+.global-map-picker-sidebar__line-connection-icons {
+  display: grid;
+  gap: 12px;
+  padding: 11px 12px;
+  border: 1px solid rgba(81, 70, 255, .16);
+  border-radius: 13px;
+  background: rgba(241, 239, 255, .58);
+}
+.global-map-picker-sidebar__line-connection-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.global-map-picker-sidebar__line-connection-setting > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.global-map-picker-sidebar__line-connection-icons strong {
+  color: var(--ink, #18233f);
+  font-size: .74rem;
+}
+.global-map-picker-sidebar__line-connection-icons small {
+  color: var(--muted, #71809d);
+  font-size: .62rem;
+  line-height: 1.3;
+}
+.global-map-picker-sidebar__line-connection-icons-switch {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 5px;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid rgba(81, 70, 255, .22);
+  border-radius: 999px;
+  background: #fff;
+  color: #5146ff;
+  font: inherit;
+  font-size: .64rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+.global-map-picker-sidebar__line-connection-icons-switch[aria-checked="true"] {
+  background: #5146ff;
+  color: #fff;
+}
+.global-map-picker-sidebar__line-connection-icons-switch:focus-visible {
+  outline: 2px solid rgba(81, 70, 255, .36);
+  outline-offset: 2px;
 }
 .global-map-picker-sidebar__nearby-card .global-map-picker-sidebar__line-card-title {
   align-items: center;
