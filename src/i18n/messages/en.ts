@@ -295,6 +295,7 @@ export const en = {
       status: {
         unavailable: "Map unavailable",
         preparing: "Preparing static offline data",
+        loadingPage: "Loading the map…",
         summary: "{lines} lines - {stations} stations",
         catalog: "catalogue loaded",
         network: "network view",
@@ -1672,6 +1673,8 @@ export const en = {
     pageEyebrow: "Nearby",
     pageTitle: "Nearby stations",
     pageSubtitle: "Choose an address to see the stations, lines and upcoming departures around it.",
+    pageLoading: "Preparing nearby stations…",
+    pageLoadFailed: "Nearby stations are unavailable.",
     addressPresetLabel: "Starting address",
     chooseAddressBook: "Choose from address book",
     addressBookSelectionDescription: "Select a saved address to show nearby stations.",

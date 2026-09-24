@@ -264,27 +264,10 @@ export function countIrisTransportInNeighborhoods(
 ): IrisTransportCounts {
   if (neighborhoods.length === 0) return { stationCount: 0, lineCount: 0, modes: {}, lineIds: [] };
 
-  const spatialIndex = new Map<string, number[]>();
-  neighborhoods.forEach((neighborhood, index) => {
-    for (const key of geometryGridKeys(neighborhood.geometry)) {
-      const entries = spatialIndex.get(key);
-      if (entries) entries.push(index);
-      else spatialIndex.set(key, [index]);
-    }
-  });
-
+  const scopedStations = filterIrisTransportStationsInNeighborhoods(neighborhoods, stations);
   const uniqueLineModes = new Map<string, GlobalMapMode>();
   let stationCount = 0;
-  for (const station of stations) {
-    if (!Number.isFinite(station.lon) || !Number.isFinite(station.lat)) continue;
-    const point = { lon: station.lon, lat: station.lat };
-    const isInScope = [...new Set(spatialIndex.get(gridKey(station.lon, station.lat)) ?? [])]
-      .some((index) => {
-        const neighborhood = neighborhoods[index];
-        return Boolean(neighborhood && pointInGeometry(point, neighborhood.geometry));
-      });
-    if (!isInScope) continue;
-
+  for (const station of scopedStations) {
     stationCount += 1;
     for (const line of station.lines) {
       if (station.lineIds.includes(line.id) && !uniqueLineModes.has(line.id)) {
@@ -301,6 +284,37 @@ export function countIrisTransportInNeighborhoods(
     modes: Object.fromEntries(modes.entries()) as Partial<Record<GlobalMapMode, number>>,
     lineIds: [...uniqueLineModes.keys()],
   };
+}
+
+/**
+ * Keep the physical stations whose coordinates lie in at least one selected
+ * IRIS polygon. Callers that need station details must use this same scope
+ * before collecting co-served lines; filtering by a line id alone would match
+ * every station along that line across the network.
+ */
+export function filterIrisTransportStationsInNeighborhoods(
+  neighborhoods: readonly IrisNeighborhood[],
+  stations: readonly IrisTransportStation[],
+): IrisTransportStation[] {
+  if (neighborhoods.length === 0) return [];
+
+  const spatialIndex = new Map<string, number[]>();
+  neighborhoods.forEach((neighborhood, index) => {
+    for (const key of geometryGridKeys(neighborhood.geometry)) {
+      const entries = spatialIndex.get(key);
+      if (entries) entries.push(index);
+      else spatialIndex.set(key, [index]);
+    }
+  });
+
+  return stations.filter((station) => {
+    if (!Number.isFinite(station.lon) || !Number.isFinite(station.lat)) return false;
+    const point = { lon: station.lon, lat: station.lat };
+    return (spatialIndex.get(gridKey(station.lon, station.lat)) ?? []).some((index) => {
+      const neighborhood = neighborhoods[index];
+      return Boolean(neighborhood && pointInGeometry(point, neighborhood.geometry));
+    });
+  });
 }
 
 /**

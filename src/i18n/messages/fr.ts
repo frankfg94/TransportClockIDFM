@@ -292,6 +292,7 @@ export const fr = {
       status: {
         unavailable: "Carte indisponible",
         preparing: "Preparation des donnees statiques hors ligne",
+        loadingPage: "Chargement du plan…",
         summary: "{lines} lignes - {stations} stations",
         catalog: "catalogue charge",
         network: "vue reseau",
@@ -1702,6 +1703,8 @@ export const fr = {
     pageTitle: "Stations proches",
     pageSubtitle:
       "Choisissez une adresse pour voir les stations, les lignes et les prochains passages autour de vous.",
+    pageLoading: "Préparation des stations proches…",
+    pageLoadFailed: "Stations proches indisponibles.",
     addressPresetLabel: "Adresse de départ",
     chooseAddressBook: "Choisir dans l’annuaire",
     addressBookSelectionDescription: "Sélectionnez une adresse enregistrée pour afficher les stations proches.",

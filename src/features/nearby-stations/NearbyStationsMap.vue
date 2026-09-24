@@ -66,6 +66,7 @@ import {
   boundsForIrisNeighborhoods,
   boundsForIrisGeometry,
   countIrisTransportInNeighborhoods,
+  filterIrisTransportStationsInNeighborhoods,
   pointInIrisGeometry,
   scoreIrisNeighborhoodsFromGrid,
   selectIrisNeighborhoodsForPoint,
@@ -1304,12 +1305,11 @@ function comparisonStatisticsFor(code: string | undefined) {
  * how many lines they add, and every mode stays in its own group.
  */
 function comparisonTransportZone(
-  lineIds: readonly string[],
+  neighborhoods: readonly IrisNeighborhood[],
   loading: boolean,
 ): NearbyCityComparisonDetailZone {
   const detail = nearbyCityComparisonLineDetail(
-    cityViewTransportStations.value.filter((station) =>
-      station.lineIds.some((lineId) => lineIds.includes(lineId))),
+    filterIrisTransportStationsInNeighborhoods(neighborhoods, cityViewTransportStations.value),
   );
   return {
     loading,
@@ -1412,8 +1412,8 @@ const cityViewComparisonRows = computed<NearbyCityComparisonMetric[]>(() => {
     currentLoading: options.currentLoading,
     targetLoading: options.targetLoading,
   });
-  const currentZone = comparisonTransportZone(currentTransport.lineIds, false);
-  const targetZone = comparisonTransportZone(targetTransport.lineIds, Boolean(targetData.loading));
+  const currentZone = comparisonTransportZone(comparisonNeighborhoodsFor(currentCode), false);
+  const targetZone = comparisonTransportZone(comparisonNeighborhoodsFor(targetCode), Boolean(targetData.loading));
   const transportDetail: NearbyCityComparisonDetail = {
     current: currentZone,
     target: targetZone,

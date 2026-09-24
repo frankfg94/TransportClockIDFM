@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import {
-  ArrowDown,
-  ArrowRight,
-  ArrowUp,
   BusFront,
   ChevronDown,
+  Info,
   Leaf,
   Minus,
   ShoppingCart,
   Shield,
   TrainFront,
+  Trophy,
   Users,
   Volume2,
   Wind,
@@ -86,6 +85,16 @@ const statusText = computed(() => {
   return t("nearbyStations.cityComparison.unavailable");
 });
 
+/** Name the city with the better value; keep translated verdicts for equal/unavailable states. */
+const statusLabel = computed(() => {
+  if (tone.value === "better") return props.targetName;
+  if (tone.value === "worse") return props.currentName;
+  return statusText.value;
+});
+const statusTone = computed(() =>
+  tone.value === "better" || tone.value === "worse" ? "winner" : tone.value,
+);
+
 /** Screen reader summary: values first, then the verdict on the target city. */
 const rowAria = computed(() => {
   if (!showTarget.value) {
@@ -141,12 +150,11 @@ const toggleLabel = computed(() => t(
         :target-name="targetName"
         :show-target="showTarget"
       />
-      <span v-if="showTarget" class="comparison-metric__status" :data-status="tone">
-        <ArrowUp v-if="tone === 'better'" :size="13" :stroke-width="3" aria-hidden="true" />
-        <ArrowDown v-else-if="tone === 'worse'" :size="13" :stroke-width="3" aria-hidden="true" />
+      <span v-if="showTarget" class="comparison-metric__status" :data-status="statusTone">
+        <Trophy v-if="tone === 'better' || tone === 'worse'" :size="14" :stroke-width="2.5" aria-hidden="true" />
         <Minus v-else-if="tone === 'equal'" :size="13" :stroke-width="3" aria-hidden="true" />
-        <ArrowRight v-else :size="13" :stroke-width="3" aria-hidden="true" />
-        <span>{{ statusText }}</span>
+        <Info v-else :size="13" :stroke-width="2.5" aria-hidden="true" />
+        <span>{{ statusLabel }}</span>
       </span>
       <button
         v-if="expandable"
@@ -247,11 +255,16 @@ const toggleLabel = computed(() => t(
   gap: 5px;
   justify-content: center;
   padding: 5px 10px;
-  white-space: nowrap;
+  white-space: normal;
 }
 
-.comparison-metric__status[data-status="better"] { background: #dcfce7; color: #15803d; }
-.comparison-metric__status[data-status="worse"] { background: #fee2e2; color: #b91c1c; }
+.comparison-metric__status > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.comparison-metric__status[data-status="winner"] { background: #dcfce7; color: #15803d; }
 .comparison-metric__status[data-status="equal"],
 .comparison-metric__status[data-status="unavailable"] { background: #eef2f7; color: #52627a; }
 
