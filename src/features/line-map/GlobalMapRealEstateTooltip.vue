@@ -15,7 +15,6 @@
       <HousingTooltipBodyRent
         v-else-if="metricMode === 'rent'"
         :rental-estimate="rentalEstimate"
-        :rental-reference-period="rentalReferencePeriod"
       />
       <HousingTooltipBodyYield
         v-else
@@ -43,7 +42,6 @@ withDefaults(defineProps<{
   cell?: DvfMapGridCell;
   isPurchasePoint?: boolean;
   rentalEstimate?: DvfRentalEstimate;
-  rentalReferencePeriod?: string;
   liquidity?: DvfMapLiquidity;
   referencePeriod?: string;
   metricMode: DvfMapMetricMode;
@@ -51,7 +49,6 @@ withDefaults(defineProps<{
 }>(), {
   isPurchasePoint: false,
   referencePeriod: "",
-  rentalReferencePeriod: "",
 });
 
 const { t } = useI18n();
@@ -108,7 +105,6 @@ const { t } = useI18n();
 }
 
 .housing-tooltip-body__detail,
-.housing-tooltip-body__source,
 .housing-tooltip-body__caution {
   color: #64748b;
   font-size: 0.61rem;
@@ -156,10 +152,6 @@ const { t } = useI18n();
   color: #475569;
   font-variant-numeric: tabular-nums;
   text-align: right;
-}
-
-.housing-tooltip-body__source {
-  padding-top: 3px;
 }
 
 .housing-tooltip-body__yield-value {

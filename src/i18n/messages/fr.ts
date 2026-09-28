@@ -93,6 +93,7 @@ export const fr = {
       modeYield: "Rendement",
       metricSelectorAria: "Indicateur immobilier affiché sur la carte",
       metricUnavailable: "Aucune valeur disponible pour cet indicateur.",
+      sourcesAndMethod: "Sources et méthode",
       pointZoom: "Dès le zoom 17 : chaque point marque le centre d’une parcelle concernée par une vente DVF. Sa couleur suit l’indicateur sélectionné. Survolez un point pour afficher les détails correspondants.",
       preparing: "Préparation des données DVF…",
       loading: "Chargement des départements · {loaded}/{total}",

@@ -21,9 +21,6 @@
       <span v-if="rentalIsLowConfidence" class="housing-tooltip-body__caution">
         {{ t("globalMap.realEstate.rentLowConfidence") }}
       </span>
-      <span class="housing-tooltip-body__source">
-        {{ t("globalMap.realEstate.rentSource", { period: rentalReferencePeriod }) }}
-      </span>
     </template>
     <span v-else class="housing-tooltip-body__detail">
       {{ t("globalMap.realEstate.rentUnavailable") }}
@@ -38,7 +35,6 @@ import type { DvfRentalEstimate } from "../../services/real-estate/compiledRealE
 
 const props = defineProps<{
   rentalEstimate?: DvfRentalEstimate;
-  rentalReferencePeriod: string;
 }>();
 
 const { locale, t } = useI18n();

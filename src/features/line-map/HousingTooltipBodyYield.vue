@@ -12,7 +12,6 @@
       <span v-if="grossYieldInterval" class="housing-tooltip-body__detail">
         {{ t("globalMap.realEstate.grossYieldInterval", grossYieldInterval) }}
       </span>
-      <span class="housing-tooltip-body__source">{{ t("globalMap.realEstate.grossYieldMethod") }}</span>
     </template>
     <span v-else class="housing-tooltip-body__detail">
       {{ t("globalMap.realEstate.yieldUnavailable") }}

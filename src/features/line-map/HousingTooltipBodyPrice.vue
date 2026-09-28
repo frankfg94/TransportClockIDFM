@@ -29,9 +29,6 @@
           <span>{{ formatCount(benchmark.medianTransactionsPerCity) }} / {{ t("globalMap.realEstate.commune") }}</span>
         </li>
       </ul>
-      <span class="housing-tooltip-body__detail">
-        {{ t("globalMap.realEstate.liquidityMethod") }}
-      </span>
     </div>
   </section>
 </template>

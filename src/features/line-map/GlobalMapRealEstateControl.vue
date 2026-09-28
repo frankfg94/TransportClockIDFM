@@ -63,6 +63,16 @@
             failed: failedDepartmentCount,
           }) }}
         </p>
+        <div v-if="metricAvailable" class="global-map-real-estate__data-notes">
+          <span class="global-map-real-estate__data-notes-title">
+            {{ t("globalMap.realEstate.sourcesAndMethod") }}
+          </span>
+          <span v-if="metricMode === 'price'">{{ t("globalMap.realEstate.liquidityMethod") }}</span>
+          <template v-else>
+            <span>{{ t("globalMap.realEstate.rentSource", { period: rentalReferencePeriod }) }}</span>
+            <span v-if="metricMode === 'yield'">{{ t("globalMap.realEstate.grossYieldMethod") }}</span>
+          </template>
+        </div>
       </template>
 
       <div class="global-map-real-estate__metric-tabs" role="group" :aria-label="t('globalMap.realEstate.metricSelectorAria')">
@@ -110,6 +120,7 @@ const props = defineProps<{
   lowValue: number;
   highValue: number;
   referencePeriod: string;
+  rentalReferencePeriod: string;
 }>();
 
 const emit = defineEmits<{ toggle: []; changeMetric: [mode: DvfMapMetricMode] }>();
@@ -310,6 +321,23 @@ function formatCount(value: number): string {
   color: #64748b;
   font-size: 0.62rem;
   line-height: 1.35;
+}
+
+.global-map-real-estate__data-notes {
+  display: grid;
+  gap: 3px;
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  color: #64748b;
+  font-size: 0.59rem;
+  line-height: 1.32;
+}
+
+.global-map-real-estate__data-notes-title {
+  color: #475569;
+  font-size: 0.61rem;
+  font-weight: 750;
 }
 
 .global-map-real-estate__status {

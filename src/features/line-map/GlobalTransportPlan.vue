@@ -122,6 +122,7 @@
         :low-value="realEstateMetricRange?.low ?? 0"
         :high-value="realEstateMetricRange?.high ?? 0"
         :reference-period="realEstateReferencePeriod"
+        :rental-reference-period="realEstateRentalReferencePeriod"
         @toggle="toggleRealEstateLayer"
         @change-metric="setRealEstateMetricMode"
       />
@@ -130,7 +131,6 @@
         :cell="hoveredRealEstateCell"
         :is-purchase-point="Boolean(hoveredRealEstatePurchasePoint)"
         :rental-estimate="hoveredRealEstateCell ? realEstateRentalEstimates[hoveredRealEstateCell.cityCode] : undefined"
-        :rental-reference-period="realEstateRentalReferencePeriod"
         :liquidity="realEstateLiquidity"
         :reference-period="realEstateReferencePeriod"
         :metric-mode="realEstateMetricMode"
