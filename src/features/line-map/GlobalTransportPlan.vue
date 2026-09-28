@@ -2042,7 +2042,11 @@ const globalAdministrativeZones = computed(() => {
   }
   const zones = buildAllGlobalZones(irisDataset.value);
   return realEstateLayerEnabled.value
-    ? zones.map(zone => ({ ...zone, boundaryEmphasis: true }))
+    ? zones.map(zone => ({
+        ...zone,
+        boundaryEmphasis: true,
+        fillColor: [0, 0, 0, 0] as const,
+      }))
     : zones;
 });
 
