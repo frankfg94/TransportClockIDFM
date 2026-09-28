@@ -27,7 +27,7 @@
     </div>
 
     <template v-if="enabled">
-      <p class="global-map-real-estate__measure">{{ t("globalMap.realEstate.measure") }}</p>
+      <p class="global-map-real-estate__measure">{{ t(measureKey) }}</p>
       <p class="global-map-real-estate__source">{{ t("globalMap.realEstate.pointZoom") }}</p>
       <div v-if="loading" class="global-map-real-estate__status" role="status" aria-live="polite">
         <span class="global-map-real-estate__spinner" aria-hidden="true" />
@@ -39,11 +39,14 @@
         {{ t("globalMap.realEstate.unavailable") }}
       </div>
       <template v-else-if="cellCount > 0">
-        <div class="global-map-real-estate__scale" :aria-label="t('globalMap.realEstate.scaleAria')">
+        <p v-if="!metricAvailable" class="global-map-real-estate__status">
+          {{ t("globalMap.realEstate.metricUnavailable") }}
+        </p>
+        <div v-else class="global-map-real-estate__scale" :aria-label="t(scaleAriaKey)">
           <span class="global-map-real-estate__gradient" aria-hidden="true" />
           <span class="global-map-real-estate__endpoints">
-            <span>{{ formatPrice(lowPrice) }}</span>
-            <span>{{ formatPrice(highPrice) }}</span>
+            <span>{{ formatMetric(lowValue) }}</span>
+            <span>{{ formatMetric(highValue) }}</span>
           </span>
           <span class="global-map-real-estate__labels">
             <span>{{ t("globalMap.realEstate.low") }}</span>
@@ -61,13 +64,35 @@
           }) }}
         </p>
       </template>
+
+      <div class="global-map-real-estate__metric-tabs" role="group" :aria-label="t('globalMap.realEstate.metricSelectorAria')">
+        <button
+          v-for="tab in metricTabs"
+          :key="tab.mode"
+          type="button"
+          class="global-map-real-estate__metric-tab"
+          :class="{ 'global-map-real-estate__metric-tab--active': metricMode === tab.mode }"
+          :aria-pressed="metricMode === tab.mode"
+          @click="emit('changeMetric', tab.mode)"
+        >
+          {{ t(tab.labelKey) }}
+        </button>
+      </div>
     </template>
   </aside>
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
 import { Building2 } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
+import type { DvfMapMetricMode } from "../transport-map/next/deckRealEstateLayer";
+
+const metricTabs = [
+  { mode: "price", labelKey: "globalMap.realEstate.modePrice" },
+  { mode: "rent", labelKey: "globalMap.realEstate.modeRent" },
+  { mode: "yield", labelKey: "globalMap.realEstate.modeYield" },
+] as const;
 
 const props = defineProps<{
   enabled: boolean;
@@ -80,16 +105,34 @@ const props = defineProps<{
   totalCityCount: number;
   cityCount: number;
   cellCount: number;
-  lowPrice: number;
-  highPrice: number;
+  metricMode: DvfMapMetricMode;
+  metricAvailable: boolean;
+  lowValue: number;
+  highValue: number;
   referencePeriod: string;
 }>();
 
-const emit = defineEmits<{ toggle: [] }>();
+const emit = defineEmits<{ toggle: []; changeMetric: [mode: DvfMapMetricMode] }>();
 const { locale, t } = useI18n();
+const measureKeys = {
+  price: "globalMap.realEstate.measurePrice",
+  rent: "globalMap.realEstate.measureRent",
+  yield: "globalMap.realEstate.measureYield",
+} as const;
+const scaleAriaKeys = {
+  price: "globalMap.realEstate.scaleAriaPrice",
+  rent: "globalMap.realEstate.scaleAriaRent",
+  yield: "globalMap.realEstate.scaleAriaYield",
+} as const;
+const measureKey = computed(() => measureKeys[props.metricMode]);
+const scaleAriaKey = computed(() => scaleAriaKeys[props.metricMode]);
 
-function formatPrice(value: number): string {
-  return `${new Intl.NumberFormat(locale.value, { maximumFractionDigits: 0 }).format(value)} €`;
+function formatMetric(value: number): string {
+  const isYield = props.metricMode === "yield";
+  const formatted = new Intl.NumberFormat(locale.value, {
+    maximumFractionDigits: isYield || props.metricMode === "rent" ? 1 : 0,
+  }).format(value);
+  return `${formatted} ${isYield ? "%" : "€"}`;
 }
 
 function formatCount(value: number): string {
@@ -192,6 +235,46 @@ function formatCount(value: number): string {
   font-size: 0.68rem;
 }
 
+.global-map-real-estate__metric-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  margin-top: 10px;
+  padding: 3px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 10px;
+  background: rgba(241, 245, 249, 0.86);
+}
+
+.global-map-real-estate__metric-tab {
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 4px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #475569;
+  font: inherit;
+  font-size: 0.64rem;
+  font-weight: 750;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.global-map-real-estate__metric-tab:hover,
+.global-map-real-estate__metric-tab:focus-visible {
+  background: white;
+  color: #7f1d1d;
+  outline: 0;
+}
+
+.global-map-real-estate__metric-tab--active {
+  background: white;
+  color: #7f1d1d;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.14);
+}
+
 .global-map-real-estate__gradient {
   display: block;
   height: 9px;
@@ -274,7 +357,8 @@ function formatCount(value: number): string {
 
 @media (prefers-reduced-motion: reduce) {
   .global-map-real-estate__track,
-  .global-map-real-estate__track > span {
+  .global-map-real-estate__track > span,
+  .global-map-real-estate__metric-tab {
     transition: none;
   }
 

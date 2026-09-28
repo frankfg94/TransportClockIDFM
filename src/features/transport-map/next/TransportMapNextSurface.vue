@@ -25,13 +25,15 @@ import {
   loadDvfMapPurchasePoints,
   type DvfMapGridCell,
 } from "../../../services/real-estate/realEstateMapLayer";
-import type { DvfPurchasePoint } from "../../../services/real-estate/compiledRealEstate";
-import type { DvfMapPriceRange } from "./deckRealEstateLayer";
+import type { DvfPurchasePoint, DvfRentalEstimate } from "../../../services/real-estate/compiledRealEstate";
+import type { DvfMapMetricCell, DvfMapMetricMode, DvfMapMetricRange } from "./deckRealEstateLayer";
 import {
-  createDeckRealEstatePriceLayers,
-  createDeckRealEstatePurchasePointsLayer,
-  createDeckRealEstatePurchasePointsHaloLayer,
-  createDeckRealEstatePurchasePointHoverLayers,
+  createDeckRealEstateMetricLayers,
+  createDeckRealEstateMetricPurchasePointsLayer,
+  createDeckRealEstateMetricPurchasePointsHaloLayer,
+  createDeckRealEstateMetricPurchasePointHoverLayers,
+  getDvfMapMetricValue,
+  normalizeDvfMapMetricValue,
   REAL_ESTATE_HIT_LAYER_ID,
   REAL_ESTATE_PURCHASE_POINTS_LAYER_ID,
   type DvfMapPurchasePointMark,
@@ -73,7 +75,10 @@ const props = defineProps<{
   camera: CameraState;
   nearbyPlaces?: readonly NearbyPlace[];
   realEstateCells?: readonly DvfMapGridCell[];
-  realEstatePriceRange?: DvfMapPriceRange;
+  realEstateMetricRange?: DvfMapMetricRange;
+  realEstateMetricMode?: DvfMapMetricMode;
+  realEstateRentalEstimatesByCityCode?: Readonly<Record<string, DvfRentalEstimate>>;
+  reduceMotion?: boolean;
   styleUrl?: NextMapStyle;
   interleaved?: boolean;
   antialias?: boolean;
@@ -96,6 +101,42 @@ const realEstatePurchasePointZoomEnabled = ref(props.camera.zoom >= DVF_MAP_PURC
 const realEstateBeforeId = ref<string>();
 const realEstatePurchasePoints = shallowRef<readonly DvfMapPurchasePointMark[]>([]);
 const hoveredRealEstatePurchasePoint = shallowRef<DvfMapPurchasePointMark>();
+const realEstateTransitionDurationMs = computed(() => props.reduceMotion ? 0 : 1000);
+const realEstateMetricCells = computed<readonly DvfMapMetricCell[]>(() => {
+  const range = props.realEstateMetricRange;
+  if (!range) return [];
+  const mode = props.realEstateMetricMode ?? "price";
+  const estimates = props.realEstateRentalEstimatesByCityCode ?? {};
+  const metricCells: DvfMapMetricCell[] = [];
+  for (const cell of realEstateViewportCells.value) {
+    const value = getDvfMapMetricValue(cell, mode, estimates);
+    if (value === undefined) continue;
+    metricCells.push({ ...cell, normalizedMetric: normalizeDvfMapMetricValue(value, range) });
+  }
+  return metricCells;
+});
+const realEstatePurchasePointsForMetric = computed<readonly DvfMapPurchasePointMark[]>(() => {
+  const mode = props.realEstateMetricMode ?? "price";
+  const range = props.realEstateMetricRange;
+  const estimates = props.realEstateRentalEstimatesByCityCode ?? {};
+  return realEstatePurchasePoints.value.map((point) => {
+    const value = point.context && range
+      ? getDvfMapMetricValue(point.context, mode, estimates)
+      : undefined;
+    return {
+      ...point,
+      ...(value !== undefined && range
+        ? { normalizedMetric: normalizeDvfMapMetricValue(value, range) }
+        : { normalizedMetric: undefined }),
+    };
+  });
+});
+const hoveredRealEstatePurchasePointForMetric = computed(() => {
+  const hoveredId = hoveredRealEstatePurchasePoint.value?.id;
+  return hoveredId
+    ? realEstatePurchasePointsForMetric.value.find((point) => point.id === hoveredId)
+    : undefined;
+});
 const realEstatePurchasePointsByCity = new Map<string, readonly DvfPurchasePoint[]>();
 let realEstatePurchasePointsTimer: ReturnType<typeof setTimeout> | undefined;
 let realEstatePurchasePointsRevision = 0;
@@ -119,29 +160,39 @@ watch(nearbyPlaceLayers, layers => presenter?.setNearbyPlaceLayers(layers));
 
 const realEstateLayers = computed(() => {
   const cells = realEstateViewportCells.value;
-  const range = props.realEstatePriceRange;
-  if (!cells?.length || !range) return [];
-
-  const priceLayers = createDeckRealEstatePriceLayers(cells, range, realEstateRadiusPixels.value, realEstateBeforeId.value);
+  if (!cells?.length) return [];
+  const mode = props.realEstateMetricMode ?? "price";
+  const priceLayers = createDeckRealEstateMetricLayers(
+    cells,
+    realEstateMetricCells.value,
+    realEstateTransitionDurationMs.value,
+    realEstateRadiusPixels.value,
+    realEstateBeforeId.value,
+  );
   if (!realEstatePurchasePointZoomEnabled.value || !realEstatePurchasePoints.value.length) return priceLayers;
+  const hitTargetLayer = priceLayers.find((layer) => layer.id === REAL_ESTATE_HIT_LAYER_ID);
+  if (!hitTargetLayer) return priceLayers;
 
   return [
     // Preserve the transparent cell hit targets so the existing aggregate
     // tooltip keeps working in gaps between parcel-centre points.
-    priceLayers[1],
-    createDeckRealEstatePurchasePointsHaloLayer(
-      realEstatePurchasePoints.value,
-      range,
+    hitTargetLayer,
+    createDeckRealEstateMetricPurchasePointsHaloLayer(
+      realEstatePurchasePointsForMetric.value,
+      mode,
+      realEstateTransitionDurationMs.value,
       realEstateBeforeId.value,
     ),
-    createDeckRealEstatePurchasePointsLayer(
-      realEstatePurchasePoints.value,
-      range,
+    createDeckRealEstateMetricPurchasePointsLayer(
+      realEstatePurchasePointsForMetric.value,
+      mode,
+      realEstateTransitionDurationMs.value,
       realEstateBeforeId.value,
     ),
-    ...createDeckRealEstatePurchasePointHoverLayers(
-      hoveredRealEstatePurchasePoint.value,
-      range,
+    ...createDeckRealEstateMetricPurchasePointHoverLayers(
+      hoveredRealEstatePurchasePointForMetric.value,
+      mode,
+      realEstateTransitionDurationMs.value,
       realEstateBeforeId.value,
     ),
   ];

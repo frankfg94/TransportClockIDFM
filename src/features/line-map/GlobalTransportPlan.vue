@@ -95,7 +95,10 @@
         :camera="camera"
         :nearby-places="!routePreviewActive && activeLine ? nearbyLinePlaces.places.value : undefined"
         :real-estate-cells="realEstateLayerEnabled ? realEstateGridCells : undefined"
-        :real-estate-price-range="realEstatePriceRange"
+        :real-estate-metric-range="realEstateMetricRange"
+        :real-estate-metric-mode="realEstateMetricMode"
+        :real-estate-rental-estimates-by-city-code="realEstateRentalEstimates"
+        :reduce-motion="appSettings.reduceMotion"
         :style-url="props.nextMapStyle"
         :interleaved="GLOBAL_TRANSPORT_PLAN_CONFIG.nextMap.deckInterleaved"
         :antialias="appSettings.deckAntialiasing"
@@ -114,10 +117,13 @@
         :total-city-count="realEstateTotalCityCount"
         :city-count="realEstateCityCount"
         :cell-count="realEstateGridCells.length"
-        :low-price="realEstatePriceRange?.low ?? 0"
-        :high-price="realEstatePriceRange?.high ?? 0"
+        :metric-mode="realEstateMetricMode"
+        :metric-available="Boolean(realEstateMetricRange)"
+        :low-value="realEstateMetricRange?.low ?? 0"
+        :high-value="realEstateMetricRange?.high ?? 0"
         :reference-period="realEstateReferencePeriod"
         @toggle="toggleRealEstateLayer"
+        @change-metric="setRealEstateMetricMode"
       />
       <GlobalMapRealEstateTooltip
         v-if="realEstateLayerEnabled && (hoveredRealEstateCell || hoveredRealEstatePurchasePoint) && !hoveredFeature"
@@ -127,6 +133,7 @@
         :rental-reference-period="realEstateRentalReferencePeriod"
         :liquidity="realEstateLiquidity"
         :reference-period="realEstateReferencePeriod"
+        :metric-mode="realEstateMetricMode"
         :style="realEstateTooltipStyle"
       />
       <GlobalTransportPlanSearch
@@ -911,8 +918,8 @@ import GlobalTransportPlanLinePanel from "./GlobalTransportPlanLinePanel.vue";
 import IrisNeighborhoodOverlay from "../transport-map/overlays/IrisNeighborhoodOverlay.vue";
 import { fetchIrisDataset, type IrisDataset } from "../transport-map/iris/irisApi";
 import {
-  getDvfMapPriceRange,
-  type DvfMapPriceRange,
+  getDvfMapMetricRange,
+  type DvfMapMetricMode,
   type DvfMapPurchasePointMark,
 } from "../transport-map/next/deckRealEstateLayer";
 import { loadDvfMapCells, type DvfMapGridCell } from "../../services/real-estate/realEstateMapLayer";
@@ -1205,8 +1212,8 @@ const irisViewError = ref("");
 const realEstateLayerEnabled = ref(false);
 const realEstateLayerLoading = ref(false);
 const realEstateLayerError = ref("");
+const realEstateMetricMode = ref<DvfMapMetricMode>("price");
 const realEstateGridCells = shallowRef<DvfMapGridCell[]>([]);
-const realEstatePriceRange = shallowRef<DvfMapPriceRange>();
 const realEstateCityCount = ref(0);
 const realEstateTotalCityCount = ref(0);
 const realEstateCompletedDepartments = ref(0);
@@ -1217,6 +1224,11 @@ const realEstateReferencePeriod = ref("");
 const realEstateRentalEstimates = shallowRef<Record<string, DvfRentalEstimate>>({});
 const realEstateRentalReferencePeriod = ref("");
 const realEstateLiquidity = shallowRef<DvfMapLiquidity>();
+const realEstateMetricRange = computed(() => getDvfMapMetricRange(
+  realEstateGridCells.value,
+  realEstateMetricMode.value,
+  realEstateRentalEstimates.value,
+));
 const hoveredRealEstateCell = shallowRef<DvfMapGridCell>();
 const hoveredRealEstatePurchasePoint = shallowRef<DvfMapPurchasePointMark>();
 const hoveredRealEstatePoint = ref<{ x: number; y: number }>();
@@ -1238,6 +1250,10 @@ watch(() => camera.value.zoom, () => {
   hoveredRealEstatePoint.value = undefined;
   nextSurfaceRef.value?.clearRealEstatePurchasePointHover();
 });
+
+function setRealEstateMetricMode(mode: DvfMapMetricMode): void {
+  realEstateMetricMode.value = mode;
+}
 
 async function toggleRealEstateLayer(): Promise<void> {
   if (realEstateLayerEnabled.value) {
@@ -1277,7 +1293,6 @@ async function toggleRealEstateLayer(): Promise<void> {
     realEstateRentalEstimates.value = dataset.rentalEstimatesByCityCode;
     realEstateRentalReferencePeriod.value = dataset.rentalReferencePeriod;
     realEstateLiquidity.value = dataset.liquidity;
-    realEstatePriceRange.value = getDvfMapPriceRange(dataset.cells);
     realEstateCityCount.value = dataset.cityCount;
     realEstateTotalCityCount.value = dataset.totalCityCount;
     realEstateLoadedDepartmentCount.value = dataset.loadedDepartmentCount;
