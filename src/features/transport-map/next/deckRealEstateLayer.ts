@@ -21,6 +21,38 @@ const PRICE_COLORS = [
   [220, 38, 38, 238],
   [127, 29, 29, 245],
 ] as const;
+const DECK_PRICE_COLORS: [number, number, number, number][] = PRICE_COLORS.map((color) => [
+  color[0], color[1], color[2], color[3],
+]);
+
+interface PriceRangeAccessors {
+  low: number;
+  high: number;
+  getWeight: (cell: DvfMapGridCell) => number;
+  colorDomain: [number, number];
+  updateTriggers: { getWeight: readonly [number, number] };
+}
+
+const priceRangeAccessors = new WeakMap<DvfMapPriceRange, PriceRangeAccessors>();
+
+function getPriceRangeAccessors(range: DvfMapPriceRange): PriceRangeAccessors {
+  const cached = priceRangeAccessors.get(range);
+  if (cached && cached.low === range.low && cached.high === range.high) return cached;
+
+  const accessors: PriceRangeAccessors = {
+    low: range.low,
+    high: range.high,
+    getWeight: (cell) => Math.max(range.low, Math.min(range.high, cell.medianPriceM2)),
+    colorDomain: [range.low, range.high],
+    updateTriggers: { getWeight: [range.low, range.high] },
+  };
+  priceRangeAccessors.set(range, accessors);
+  return accessors;
+}
+
+function getDvfCellPosition(cell: DvfMapGridCell): [number, number] {
+  return [cell.lon, cell.lat];
+}
 
 /** Use robust tails so a few exceptional sales do not flatten the regional contrast. */
 export function getDvfMapPriceRange(cells: readonly DvfMapGridCell[]): DvfMapPriceRange {
@@ -43,6 +75,7 @@ export function createDeckRealEstatePriceLayers(
   radiusPixels = 28,
   beforeId?: string,
 ): Layer[] {
+  const accessors = getPriceRangeAccessors(range);
   return [
     new HeatmapLayer<DvfMapGridCell>({
       id: REAL_ESTATE_PRICE_LAYER_ID,
@@ -50,16 +83,16 @@ export function createDeckRealEstatePriceLayers(
       coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
       aggregation: "MEAN",
       radiusPixels,
-      colorDomain: [range.low, range.high],
-      colorRange: PRICE_COLORS.map((color) => [...color]),
+      colorDomain: accessors.colorDomain,
+      colorRange: DECK_PRICE_COLORS,
       weightsTextureSize: 1024,
       debounceTimeout: 120,
       opacity: 0.78,
-      getPosition: (cell) => [cell.lon, cell.lat],
+      getPosition: getDvfCellPosition,
       // Clamp outliers to the legend endpoints so every valid cell remains
       // visible, including the cheapest cells below the robust 4th percentile.
-      getWeight: (cell) => Math.max(range.low, Math.min(range.high, cell.medianPriceM2)),
-      updateTriggers: { getWeight: [range.low, range.high] },
+      getWeight: accessors.getWeight,
+      updateTriggers: accessors.updateTriggers,
       ...(beforeId ? { beforeId } : {}),
     }),
     new ScatterplotLayer<DvfMapGridCell>({
@@ -73,7 +106,7 @@ export function createDeckRealEstatePriceLayers(
       radiusUnits: "meters",
       radiusMinPixels: 6,
       radiusMaxPixels: 12,
-      getPosition: (cell) => [cell.lon, cell.lat],
+      getPosition: getDvfCellPosition,
       getRadius: 95,
       getFillColor: [0, 0, 0, 0],
       ...(beforeId ? { beforeId } : {}),

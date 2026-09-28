@@ -15,7 +15,10 @@ import {
   GLOBAL_CITY_VIEW_MIN_ZOOM,
   selectCityZonesForZoom,
 } from "../src/features/transport-map/iris/servedCityZones";
-import { createDeckTransportLayers } from "../src/features/transport-map/next/deckMapLayers";
+import {
+  createDeckTransportLayers,
+  deckAdministrativeBoundaryStyleBucket,
+} from "../src/features/transport-map/next/deckMapLayers";
 import { TransportMapRenderModelBuilder } from "../src/features/transport-map/render/transportMapRenderModel";
 import { pointInIrisGeometry } from "../src/features/transport-map/iris/irisGeometry";
 import { joinAdministrativeBoundarySegments } from "../src/features/transport-map/iris/administrativeGeometry";
@@ -117,6 +120,13 @@ function station(
 }
 
 describe("served city zones", () => {
+  it("keeps boundary layers stable until their real style thresholds", () => {
+    expect(deckAdministrativeBoundaryStyleBucket(9.99)).toBe(0);
+    expect(deckAdministrativeBoundaryStyleBucket(10)).toBe(1);
+    expect(deckAdministrativeBoundaryStyleBucket(11.99)).toBe(1);
+    expect(deckAdministrativeBoundaryStyleBucket(12)).toBe(2);
+  });
+
   it("groups the line stations by city and removes shared neighborhood edges", () => {
     const zones = buildServedCityZones(
       dataset([
@@ -347,6 +357,12 @@ describe("served city zones", () => {
     expect(labelProps.beforeId).toBeUndefined();
     expect(labelProps.parameters.depthTest).toBe(false);
 
+    const transparentZones = zones.map((zone) => ({ ...zone, fillColor: [0, 0, 0, 0] as const }));
+    const transparentScene = { ...scene, servedCityZones: transparentZones };
+    const transparentModel = builder.build(camera, transparentScene);
+    expect(createDeckTransportLayers({ camera, scene: transparentScene, model: transparentModel }, "labels")
+      .some((layer) => layer.id === "transport-served-city-zones")).toBe(false);
+
     const modelWithStationLabels = {
       ...model,
       labels: [{
@@ -402,6 +418,31 @@ describe("served city zones", () => {
     const departmentLayersAgain = createDeckTransportLayers({ camera: departmentCamera, scene: updatedScene, model: departmentsAgain }, "labels");
     for (const layer of departmentLayers) {
       expect(departmentLayersAgain.find((next) => next.id === layer.id)?.props.data).toBe(layer.props.data);
+    }
+    builder.dispose();
+  });
+
+  it("reuses administrative layer objects across label-layout zoom buckets", () => {
+    const source = dataset([neighborhood("A", "A", "Alpha", 2)]);
+    const zones = buildAllGlobalZones(source);
+    const scene: TransportMapRenderScene = {
+      lines: [], paths: [], stations: [], selectedStationIds: [], visibleModeMask: 0, servedCityZones: zones,
+    };
+    const camera = createCamera({ zoom: 13, viewportWidthCssPx: 800, viewportHeightCssPx: 600 });
+    const nextLabelBucketCamera = { ...camera, zoom: 13.07 };
+    const builder = new TransportMapRenderModelBuilder();
+    const firstModel = builder.build(camera, scene);
+    const nextModel = builder.build(nextLabelBucketCamera, scene);
+    expect(nextModel).not.toBe(firstModel);
+    expect(nextModel.labels).not.toBe(firstModel.labels);
+    expect(nextModel.servedCityZones).toBe(firstModel.servedCityZones);
+
+    const firstLayers = createDeckTransportLayers({ camera, scene, model: firstModel }, "labels");
+    const nextLayers = createDeckTransportLayers({ camera: nextLabelBucketCamera, scene, model: nextModel }, "labels");
+    const administrativeLayers = firstLayers.filter((layer) => layer.id.includes("boundary"));
+    expect(administrativeLayers.length).toBeGreaterThan(0);
+    for (const layer of administrativeLayers) {
+      expect(nextLayers.find((candidate) => candidate.id === layer.id)).toBe(layer);
     }
     builder.dispose();
   });

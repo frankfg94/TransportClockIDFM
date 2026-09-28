@@ -36,6 +36,8 @@ type DeckBinaryPathData = {
 // size instead of an outline that disappears when the map is downsampled.
 const TRANSPORT_LABEL_SDF_OUTLINE_WIDTH = 48;
 const TRANSPORT_LABEL_OUTLINE_COLOR = [255, 255, 255, 255] as const;
+const TRANSPORT_LABEL_FONT_SETTINGS = { sdf: true, fontSize: 192, buffer: 16, radius: 48, smoothing: 0.22 } as const;
+const ZERO_LABEL_PIXEL_OFFSET: [number, number] = [0, 0];
 
 // A packet normally belongs to one role, but keeping the dash variant in the
 // cache makes the wrapper identity correct even when a caller reuses a packet
@@ -48,36 +50,222 @@ const binaryPathDataByPacket = new WeakMap<
 /** Create the small, stable Deck layer set owned by the next experience. */
 const isochroneGeoJsonBySurfaces = new WeakMap<readonly GlobalIsochroneSurface[], object>();
 const servedCityGeoJsonByZones = new WeakMap<readonly TransportMapServedCityZone[], object>();
+const servedCityBoundaryLayersByZones = new WeakMap<
+  readonly TransportMapServedCityZone[],
+  Map<string, Layer[]>
+>();
 
 interface AdministrativeBoundaryRecord {
   path: ReadonlyArray<readonly [number, number]>;
   color: readonly [number, number, number, number];
+  haloColor?: readonly [number, number, number, number];
   boundaryEmphasis?: boolean;
+}
+
+interface AdministrativeData {
+  boundaries: AdministrativeBoundaryRecord[];
+  visibleBoundaries: AdministrativeBoundaryRecord[];
+  emphasizedBoundaries: AdministrativeBoundaryRecord[];
+  innerBoundaries: AdministrativeBoundaryRecord[];
+  visibleInnerBoundaries: AdministrativeBoundaryRecord[];
+  emphasizedInnerBoundaries: AdministrativeBoundaryRecord[];
+  labels: TransportMapServedCityZone[];
+  hasVisibleFill: boolean;
+}
+
+const DEFAULT_INNER_BOUNDARY_COLOR = [100, 116, 139, 112] as const;
+const ADMINISTRATIVE_DASH_EXTENSION = new PathStyleExtension({ dash: true, highPrecisionDash: true });
+const ADMINISTRATIVE_DASH_EXTENSIONS = [ADMINISTRATIVE_DASH_EXTENSION];
+const INNER_BOUNDARY_DASH: [number, number] = [3, 5];
+const CITY_BOUNDARY_DASH: [number, number] = [7, 5];
+const WHITE_INNER_BOUNDARY_HALO = [255, 255, 255, 190] as const;
+const WHITE_DETAIL_INNER_BOUNDARY_HALO = [255, 255, 255, 225] as const;
+const WHITE_CITY_BOUNDARY_HALO = [255, 255, 255, 235] as const;
+const DARK_INNER_BOUNDARY = [45, 55, 72, 225] as const;
+const REGIONAL_INNER_BOUNDARY = [45, 55, 72, 142] as const;
+const DARK_CITY_BOUNDARY = [45, 55, 72, 235] as const;
+
+function getAdministrativePath(record: AdministrativeBoundaryRecord): Position[] {
+  return record.path as Position[];
+}
+
+function getAdministrativeColor(record: AdministrativeBoundaryRecord): readonly [number, number, number, number] {
+  return record.color;
+}
+
+function getAdministrativeHaloColor(record: AdministrativeBoundaryRecord): readonly [number, number, number, number] {
+  return record.haloColor ?? record.color;
+}
+
+function getInnerBoundaryDashArray(): [number, number] {
+  return INNER_BOUNDARY_DASH;
+}
+
+function getCityBoundaryDashArray(): [number, number] {
+  return CITY_BOUNDARY_DASH;
+}
+
+function getTransportPath(record: TransportMapPathRenderRecord): Float64Array {
+  return record.positions;
+}
+
+function getTransportPathColor(record: TransportMapPathRenderRecord): readonly [number, number, number, number] {
+  return resolveDeckPathColor(record);
+}
+
+function getTransportPathWidth(record: TransportMapPathRenderRecord): number {
+  return record?.widthCssPx ?? 1;
+}
+
+function getTransportPathDashArray(record: TransportMapPathRenderRecord): readonly [number, number] {
+  return resolveDeckPathDashArray(record);
+}
+
+function getStationPosition(record: TransportMapStationRenderRecord): Position {
+  return record.position as Position;
+}
+
+function getStationRadius(record: TransportMapStationRenderRecord): number {
+  return record.radiusCssPx;
+}
+
+function getStationFillColor(record: TransportMapStationRenderRecord): readonly [number, number, number, number] {
+  return record.fillColor;
+}
+
+function getStationLineColor(record: TransportMapStationRenderRecord): readonly [number, number, number, number] {
+  return record.lineColor;
+}
+
+function getStationLineWidth(record: TransportMapStationRenderRecord): number {
+  return record.lineWidthCssPx;
+}
+
+function getQuayPosition(record: TransportMapQuayRenderRecord): Position {
+  return record.position as Position;
+}
+
+function getQuayRadius(record: TransportMapQuayRenderRecord): number {
+  return record.radiusCssPx;
+}
+
+function getQuayLineColor(record: TransportMapQuayRenderRecord): readonly [number, number, number, number] {
+  return record.color;
+}
+
+function getEntrancePosition(record: TransportMapEntranceRenderRecord): Position {
+  return record.position as Position;
+}
+
+function getEntranceRadius(record: TransportMapEntranceRenderRecord): number {
+  return record.radiusCssPx;
+}
+
+function getEntranceFillColor(record: TransportMapEntranceRenderRecord): readonly [number, number, number, number] {
+  return record.color;
+}
+
+function getLabelPosition(record: TransportMapLabelRenderRecord): Position {
+  return record.position as Position;
+}
+
+function getLabelPixelOffset(record: TransportMapLabelRenderRecord): Position {
+  return (record.pixelOffsetCssPx ?? ZERO_LABEL_PIXEL_OFFSET) as Position;
+}
+
+function getLabelText(record: TransportMapLabelRenderRecord): string {
+  return record.text;
+}
+
+function getLabelSize(record: TransportMapLabelRenderRecord): number {
+  return record.sizeCssPx;
+}
+
+function getLabelColor(record: TransportMapLabelRenderRecord): readonly [number, number, number, number] {
+  return record.color;
+}
+
+function getLabelTextAnchor(record: TransportMapLabelRenderRecord): string {
+  return record.textAnchor ?? "start";
+}
+
+const QUAY_FILL_COLOR = [255, 255, 255, 255] as const;
+const ENTRANCE_LINE_COLOR = [255, 255, 255, 255] as const;
+
+function getServedCityBorderColor(zone: TransportMapServedCityZone): [number, number, number, number] {
+  return withAlpha(zone.borderColor, 220);
+}
+
+function getServedCityPosition(zone: TransportMapServedCityZone): Position {
+  return zone.centroid as Position;
+}
+
+function getServedCityPixelOffset(zone: TransportMapServedCityZone): Position {
+  return zone.labelPixelOffset;
+}
+
+function getServedCityText(zone: TransportMapServedCityZone): string {
+  return zone.name;
+}
+
+function getServedCityColor(zone: TransportMapServedCityZone): readonly [number, number, number, number] {
+  return zone.labelColor;
+}
+
+const SERVED_CITY_LABEL_BACKGROUND = [255, 255, 255, 232] as const;
+const SERVED_CITY_LABEL_PADDING: [number, number] = [7, 4];
+const SERVED_CITY_LABEL_DEPTH = { depthTest: false } as const;
+const TRANSPARENT_FILL = [0, 0, 0, 0] as const;
+
+function getServedCityFillColor(feature: { properties?: { fillColor?: readonly [number, number, number, number] } }): readonly [number, number, number, number] {
+  return feature.properties?.fillColor ?? TRANSPARENT_FILL;
+}
+
+export function deckAdministrativeBoundaryStyleBucket(zoom: number): 0 | 1 | 2 {
+  return zoom < 10 ? 0 : zoom < 12 ? 1 : 2;
 }
 
 // Deck compares data by identity. A transport hover/chunk update must not
 // retessellate all administrative paths or upload their attributes again.
-const administrativeDataByZones = new WeakMap<readonly TransportMapServedCityZone[], {
-  boundaries: AdministrativeBoundaryRecord[];
-  innerBoundaries: AdministrativeBoundaryRecord[];
-  labels: TransportMapServedCityZone[];
-}>();
+const administrativeDataByZones = new WeakMap<readonly TransportMapServedCityZone[], AdministrativeData>();
 
-function administrativeData(zones: readonly TransportMapServedCityZone[]) {
+function administrativeData(zones: readonly TransportMapServedCityZone[]): AdministrativeData {
   let prepared = administrativeDataByZones.get(zones);
   if (!prepared) {
-    prepared = {
-      boundaries: zones.flatMap((zone) => zone.boundaryPaths.map((path) => ({
-        path,
-        color: zone.borderColor,
-        boundaryEmphasis: zone.boundaryEmphasis,
-      }))),
-      innerBoundaries: zones.flatMap((zone) => (zone.innerBoundaryPaths ?? []).map((path) => ({
-        path, color: zone.innerBoundaryColor ?? [100, 116, 139, 112],
-        boundaryEmphasis: zone.boundaryEmphasis,
-      }))),
-      labels: zones.filter((zone) => zone.showLabel !== false),
+    const data: AdministrativeData = {
+      boundaries: [],
+      visibleBoundaries: [],
+      emphasizedBoundaries: [],
+      innerBoundaries: [],
+      visibleInnerBoundaries: [],
+      emphasizedInnerBoundaries: [],
+      labels: [],
+      hasVisibleFill: false,
     };
+    for (const zone of zones) {
+      if (zone.fillColor[3] > 0) data.hasVisibleFill = true;
+      if (zone.showLabel !== false) data.labels.push(zone);
+      for (const path of zone.boundaryPaths) {
+        const record: AdministrativeBoundaryRecord = {
+          path,
+          color: zone.borderColor,
+          haloColor: withAlpha(zone.borderColor, 82),
+          boundaryEmphasis: zone.boundaryEmphasis,
+        };
+        data.boundaries.push(record);
+        (zone.boundaryEmphasis ? data.emphasizedBoundaries : data.visibleBoundaries).push(record);
+      }
+      for (const path of zone.innerBoundaryPaths ?? []) {
+        const record: AdministrativeBoundaryRecord = {
+          path,
+          color: zone.innerBoundaryColor ?? DEFAULT_INNER_BOUNDARY_COLOR,
+          boundaryEmphasis: zone.boundaryEmphasis,
+        };
+        data.innerBoundaries.push(record);
+        (zone.boundaryEmphasis ? data.emphasizedInnerBoundaries : data.visibleInnerBoundaries).push(record);
+      }
+    }
+    prepared = data;
     administrativeDataByZones.set(zones, prepared);
   }
   return prepared;
@@ -125,7 +313,8 @@ export function createDeckTransportLayers(
     } as never));
   }
   if (model.servedCityZones?.length) {
-    layers.push(createServedCityFillLayer(model.servedCityZones, beforeId));
+    const administrative = administrativeData(model.servedCityZones);
+    if (administrative.hasVisibleFill) layers.push(createServedCityFillLayer(model.servedCityZones, beforeId));
     layers.push(...createServedCityBoundaryLayers(model.servedCityZones, beforeId, frame.camera.zoom));
   }
   if (model.basePaths.length) {
@@ -158,7 +347,8 @@ export function createDeckTransportLayers(
   if (model.stations.length) layers.push(createStationLayer(model.stations, beforeId));
   if (model.quays.length) layers.push(createQuayLayer(model.quays, beforeId));
   if (model.entrances.length) layers.push(createEntranceLayer(model.entrances, beforeId));
-  if (model.labels.length) layers.push(createLabelLayer(model.labels, beforeId));
+  const stationAndPathLabels = createDeckTransportLabelLayer(model.labels, beforeId);
+  if (stationAndPathLabels) layers.push(stationAndPathLabels);
   // City names are deliberately last: station and entrance labels must not
   // visually cover the context the open "Villes desservies" accordion adds.
   const administrative = model.servedCityZones ? administrativeData(model.servedCityZones) : undefined;
@@ -168,6 +358,13 @@ export function createDeckTransportLayers(
     layers.push(createServedCityLabelLayer(labeledCityZones, undefined));
   }
   return layers;
+}
+
+export function createDeckTransportLabelLayer(
+  labels: readonly TransportMapLabelRenderRecord[],
+  beforeId: string | undefined,
+): Layer | undefined {
+  return labels.length ? createLabelLayer(labels, beforeId) : undefined;
 }
 
 function createServedCityFillLayer(
@@ -194,8 +391,7 @@ function createServedCityFillLayer(
     filled: true,
     stroked: false,
     pickable: false,
-    getFillColor: (feature: { properties?: { fillColor?: readonly [number, number, number, number] } }) =>
-      feature.properties?.fillColor ?? [0, 0, 0, 0],
+    getFillColor: getServedCityFillColor,
     ...(beforeId ? { beforeId } : {}),
   } as never);
 }
@@ -205,21 +401,25 @@ function createServedCityBoundaryLayers(
   beforeId: string | undefined,
   zoom: number,
 ): Layer[] {
-  const { boundaries: data, innerBoundaries: innerData } = administrativeData(zones);
+  const styleBucket = deckAdministrativeBoundaryStyleBucket(zoom);
+  const cacheKey = `${styleBucket}\u0000${beforeId ?? ""}`;
+  let byStyleAndOrder = servedCityBoundaryLayersByZones.get(zones);
+  const cached = byStyleAndOrder?.get(cacheKey);
+  if (cached) return cached;
+
+  const administrative = administrativeData(zones);
+  const { boundaries: data, innerBoundaries: innerData } = administrative;
   if (data.length === 0 && innerData.length === 0) return [];
-  const visibleCityBoundaries = data.filter((record) => !record.boundaryEmphasis);
-  const emphasizedCityBoundaries = data.filter((record) => record.boundaryEmphasis);
-  const visibleInnerBoundaries = innerData.filter((record) => !record.boundaryEmphasis);
-  const emphasizedInnerBoundaries = innerData.filter((record) => record.boundaryEmphasis);
+  const { visibleBoundaries: visibleCityBoundaries, emphasizedBoundaries: emphasizedCityBoundaries,
+    visibleInnerBoundaries, emphasizedInnerBoundaries } = administrative;
 
   const commonProps = {
-    data,
     coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
     widthUnits: "pixels" as const,
     widthMinPixels: 1,
     pickable: false,
-    getPath: (record: AdministrativeBoundaryRecord) => record.path as Position[],
-    getColor: (record: AdministrativeBoundaryRecord) => record.color,
+    getPath: getAdministrativePath,
+    getColor: getAdministrativeColor,
     ...(beforeId ? { beforeId } : {}),
   };
 
@@ -229,9 +429,9 @@ function createServedCityBoundaryLayers(
       ...commonProps,
       data: visibleInnerBoundaries,
       id: "transport-served-city-inner-boundaries",
-      getWidth: () => 1,
-      extensions: [new PathStyleExtension({ dash: true, highPrecisionDash: true })],
-      getDashArray: () => [3, 5],
+      getWidth: 1,
+      extensions: ADMINISTRATIVE_DASH_EXTENSIONS,
+      getDashArray: getInnerBoundaryDashArray,
       dashJustified: false,
       jointRounded: true,
       capRounded: true,
@@ -244,8 +444,8 @@ function createServedCityBoundaryLayers(
         ...commonProps,
         data: emphasizedInnerBoundaries,
         id: "transport-real-estate-city-inner-boundary-halo",
-        getColor: () => [255, 255, 255, zoom < 12 ? 190 : 225],
-        getWidth: () => zoom < 12 ? 2.4 : 3.2,
+        getColor: zoom < 12 ? WHITE_INNER_BOUNDARY_HALO : WHITE_DETAIL_INNER_BOUNDARY_HALO,
+        getWidth: zoom < 12 ? 2.4 : 3.2,
         jointRounded: true,
         capRounded: true,
       } as never));
@@ -254,8 +454,8 @@ function createServedCityBoundaryLayers(
       ...commonProps,
       data: emphasizedInnerBoundaries,
       id: "transport-real-estate-city-inner-boundaries",
-      getColor: () => [45, 55, 72, regionalView ? 142 : 225],
-      getWidth: () => regionalView ? 0.8 : zoom < 12 ? 1 : 1.25,
+      getColor: regionalView ? REGIONAL_INNER_BOUNDARY : DARK_INNER_BOUNDARY,
+      getWidth: regionalView ? 0.8 : zoom < 12 ? 1 : 1.25,
       jointRounded: true,
       capRounded: true,
     } as never));
@@ -263,21 +463,21 @@ function createServedCityBoundaryLayers(
   if (visibleCityBoundaries.length > 0) {
     layers.push(
       new PathLayer({
-      ...commonProps,
-      data: visibleCityBoundaries,
-      id: "transport-served-city-boundary-halo",
-      getColor: (record: AdministrativeBoundaryRecord) => withAlpha(record.color, 82),
-      getWidth: () => 8,
-      jointRounded: true,
-      capRounded: true,
+        ...commonProps,
+        data: visibleCityBoundaries,
+        id: "transport-served-city-boundary-halo",
+        getColor: getAdministrativeHaloColor,
+        getWidth: 8,
+        jointRounded: true,
+        capRounded: true,
       } as never),
       new PathLayer({
         ...commonProps,
         data: visibleCityBoundaries,
         id: "transport-served-city-boundaries",
-        getWidth: () => 2.5,
-        extensions: [new PathStyleExtension({ dash: true, highPrecisionDash: true })],
-        getDashArray: () => [7, 5],
+        getWidth: 2.5,
+        extensions: ADMINISTRATIVE_DASH_EXTENSIONS,
+        getDashArray: getCityBoundaryDashArray,
         dashJustified: false,
         jointRounded: true,
         capRounded: true,
@@ -290,8 +490,8 @@ function createServedCityBoundaryLayers(
         ...commonProps,
         data: emphasizedCityBoundaries,
         id: "transport-real-estate-city-boundary-halo",
-        getColor: () => [255, 255, 255, 235],
-        getWidth: () => zoom < 12 ? 3.5 : 4.2,
+        getColor: WHITE_CITY_BOUNDARY_HALO,
+        getWidth: zoom < 12 ? 3.5 : 4.2,
         jointRounded: true,
         capRounded: true,
       } as never),
@@ -299,13 +499,18 @@ function createServedCityBoundaryLayers(
         ...commonProps,
         data: emphasizedCityBoundaries,
         id: "transport-real-estate-city-boundaries",
-        getColor: () => [45, 55, 72, 235],
-        getWidth: () => zoom < 12 ? 1.4 : 1.6,
+        getColor: DARK_CITY_BOUNDARY,
+        getWidth: zoom < 12 ? 1.4 : 1.6,
         jointRounded: true,
         capRounded: true,
       } as never),
     );
   }
+  if (!byStyleAndOrder) {
+    byStyleAndOrder = new Map();
+    servedCityBoundaryLayersByZones.set(zones, byStyleAndOrder);
+  }
+  byStyleAndOrder.set(cacheKey, layers);
   return layers;
 }
 
@@ -321,27 +526,27 @@ function createServedCityLabelLayer(
     sizeUnits: "pixels",
     pickable: false,
     background: true,
-    getBackgroundColor: () => [255, 255, 255, 232],
-    getBorderColor: (zone: TransportMapServedCityZone) => withAlpha(zone.borderColor, 220),
-    getBorderWidth: () => 1.5,
+    getBackgroundColor: SERVED_CITY_LABEL_BACKGROUND,
+    getBorderColor: getServedCityBorderColor,
+    getBorderWidth: 1.5,
     backgroundBorderRadius: 6,
-    backgroundPadding: [7, 4],
+    backgroundPadding: SERVED_CITY_LABEL_PADDING,
     characterSet: "auto",
     fontFamily: "system-ui, sans-serif",
     fontWeight: 850,
-    fontSettings: { sdf: true, fontSize: 192, buffer: 16, radius: 48, smoothing: 0.22 },
+    fontSettings: TRANSPORT_LABEL_FONT_SETTINGS,
     outlineWidth: TRANSPORT_LABEL_SDF_OUTLINE_WIDTH,
     outlineColor: TRANSPORT_LABEL_OUTLINE_COLOR,
-    getPosition: (zone: TransportMapServedCityZone) => zone.centroid as Position,
-    getPixelOffset: (zone: TransportMapServedCityZone) => zone.labelPixelOffset,
-    getText: (zone: TransportMapServedCityZone) => zone.name,
-    getSize: () => 18,
-    getColor: (zone: TransportMapServedCityZone) => zone.labelColor,
-    getTextAnchor: () => "middle",
-    getAlignmentBaseline: () => "center",
+    getPosition: getServedCityPosition,
+    getPixelOffset: getServedCityPixelOffset,
+    getText: getServedCityText,
+    getSize: 18,
+    getColor: getServedCityColor,
+    getTextAnchor: "middle",
+    getAlignmentBaseline: "center",
     // These labels are contextual annotations, so keep them visible above
     // station/route geometry even when their ground coordinates overlap.
-    parameters: { depthTest: false },
+    parameters: SERVED_CITY_LABEL_DEPTH,
     ...(beforeId ? { beforeId } : {}),
   } as never);
 }
@@ -386,23 +591,17 @@ function createPathLayer(
     ...(binaryData
       ? {}
       : {
-          getPath: (record: TransportMapPathRenderRecord) => record?.positions ?? [],
-          getColor: (record: TransportMapPathRenderRecord) => resolveDeckPathColor(record),
-          getWidth: (record: TransportMapPathRenderRecord) => record?.widthCssPx ?? 1,
+          getPath: getTransportPath,
+          getColor: getTransportPathColor,
+          getWidth: getTransportPathWidth,
         }),
     ...(dashed
       ? {
-          extensions: [new PathStyleExtension({
-            dash: true,
-            // Keep the dash phase accurate along multi-vertex interruption
-            // spans, especially when several vertices occupy only a few
-            // screen pixels after zooming out.
-            highPrecisionDash: true,
-          })],
+          extensions: ADMINISTRATIVE_DASH_EXTENSIONS,
           ...(binaryData
             ? {}
             : {
-                getDashArray: (record: TransportMapPathRenderRecord) => resolveDeckPathDashArray(record),
+                getDashArray: getTransportPathDashArray,
               }),
           // Justification can turn a short interruption fragment into one
           // solid stroke. Keep the shared CSS-pixel rhythm exact instead.
@@ -453,11 +652,11 @@ function createStationLayer(
     filled: true,
     antialiasing: true,
     pickable: false,
-    getPosition: (record: TransportMapStationRenderRecord) => record.position as Position,
-    getRadius: (record: TransportMapStationRenderRecord) => record.radiusCssPx,
-    getFillColor: (record: TransportMapStationRenderRecord) => record.fillColor,
-    getLineColor: (record: TransportMapStationRenderRecord) => record.lineColor,
-    getLineWidth: (record: TransportMapStationRenderRecord) => record.lineWidthCssPx,
+    getPosition: getStationPosition,
+    getRadius: getStationRadius,
+    getFillColor: getStationFillColor,
+    getLineColor: getStationLineColor,
+    getLineWidth: getStationLineWidth,
     ...(beforeId ? { beforeId } : {}),
   } as never);
 }
@@ -474,11 +673,11 @@ function createQuayLayer(
     stroked: true,
     filled: true,
     pickable: false,
-    getPosition: (record: TransportMapQuayRenderRecord) => record.position as Position,
-    getRadius: (record: TransportMapQuayRenderRecord) => record.radiusCssPx,
-    getFillColor: () => [255, 255, 255, 255],
-    getLineColor: (record: TransportMapQuayRenderRecord) => record.color,
-    getLineWidth: () => 2,
+    getPosition: getQuayPosition,
+    getRadius: getQuayRadius,
+    getFillColor: QUAY_FILL_COLOR,
+    getLineColor: getQuayLineColor,
+    getLineWidth: 2,
     ...(beforeId ? { beforeId } : {}),
   } as never);
 }
@@ -495,11 +694,11 @@ function createEntranceLayer(
     stroked: true,
     filled: true,
     pickable: false,
-    getPosition: (record: TransportMapEntranceRenderRecord) => record.position as Position,
-    getRadius: (record: TransportMapEntranceRenderRecord) => record.radiusCssPx,
-    getFillColor: (record: TransportMapEntranceRenderRecord) => record.color,
-    getLineColor: () => [255, 255, 255, 255],
-    getLineWidth: () => 1,
+    getPosition: getEntrancePosition,
+    getRadius: getEntranceRadius,
+    getFillColor: getEntranceFillColor,
+    getLineColor: ENTRANCE_LINE_COLOR,
+    getLineWidth: 1,
     ...(beforeId ? { beforeId } : {}),
   } as never);
 }
@@ -525,17 +724,16 @@ function createLabelLayer(
     // MapLibre composites the shared canvas at device-pixel resolution. The
     // extra atlas buffer is intentional: it leaves enough room for the SDF
     // edge instead of clipping the outer pixels before they reach the map.
-    fontSettings: { sdf: true, fontSize: 192, buffer: 16, radius: 48, smoothing: 0.22 },
+    fontSettings: TRANSPORT_LABEL_FONT_SETTINGS,
     outlineWidth: TRANSPORT_LABEL_SDF_OUTLINE_WIDTH,
     outlineColor: TRANSPORT_LABEL_OUTLINE_COLOR,
-    getPosition: (record: TransportMapLabelRenderRecord) => record.position as Position,
-    getPixelOffset: (record: TransportMapLabelRenderRecord) =>
-      (record.pixelOffsetCssPx ?? [0, 0]) as Position,
-    getText: (record: TransportMapLabelRenderRecord) => record.text,
-    getSize: (record: TransportMapLabelRenderRecord) => record.sizeCssPx,
-    getColor: (record: TransportMapLabelRenderRecord) => record.color,
-    getTextAnchor: (record: TransportMapLabelRenderRecord) => record.textAnchor ?? "start",
-    getAlignmentBaseline: () => "center",
+    getPosition: getLabelPosition,
+    getPixelOffset: getLabelPixelOffset,
+    getText: getLabelText,
+    getSize: getLabelSize,
+    getColor: getLabelColor,
+    getTextAnchor: getLabelTextAnchor,
+    getAlignmentBaseline: "center",
     ...(beforeId ? { beforeId } : {}),
   } as never);
 }

@@ -32,6 +32,7 @@ import {
   createDeckRealEstatePurchasePointsLayer,
   REAL_ESTATE_HIT_LAYER_ID,
 } from "./deckRealEstateLayer";
+import { selectRealEstateViewportCells } from "../real-estate/realEstateViewportSelection";
 import { Map as MapLibreMap, setWorkerUrl, type IControl } from "maplibre-gl";
 import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
@@ -58,6 +59,7 @@ import type { TransportMapPerformanceTrace } from "../performance/transportMapPe
 import "maplibre-gl/dist/maplibre-gl.css";
 
 type SurfaceStatus = "initializing" | "ready" | "unsupported";
+const EMPTY_REAL_ESTATE_CELLS: readonly DvfMapGridCell[] = [];
 
 const props = defineProps<{
   renderer: TransportMapRenderer;
@@ -78,6 +80,11 @@ const mapElement = ref<HTMLElement>();
 const status = ref<SurfaceStatus>("initializing");
 const basemapUnavailable = ref(false);
 const realEstateRadiusPixels = ref(getRealEstateRadiusPixels(props.camera.zoom));
+const realEstateViewportCells = shallowRef<readonly DvfMapGridCell[]>(
+  props.realEstateCells?.length
+    ? selectRealEstateViewportCells(props.realEstateCells, props.camera, getRealEstateRadiusPixels(props.camera.zoom))
+    : EMPTY_REAL_ESTATE_CELLS,
+);
 const realEstatePurchasePointZoomEnabled = ref(props.camera.zoom >= DVF_MAP_PURCHASE_POINTS_MIN_ZOOM);
 const realEstateBeforeId = ref<string>();
 const realEstatePurchasePoints = shallowRef<readonly DvfPurchasePoint[]>([]);
@@ -103,7 +110,7 @@ const nearbyPlaceLayers = computed(() => {
 watch(nearbyPlaceLayers, layers => presenter?.setNearbyPlaceLayers(layers));
 
 const realEstateLayers = computed(() => {
-  const cells = props.realEstateCells;
+  const cells = realEstateViewportCells.value;
   const range = props.realEstatePriceRange;
   if (!cells?.length || !range) return [];
 
@@ -121,6 +128,8 @@ watch(realEstateLayers, layers => presenter?.setRealEstateLayers(layers));
 watch(() => Math.floor(props.camera.zoom), (zoom) => {
   realEstateRadiusPixels.value = getRealEstateRadiusPixels(zoom);
 });
+watch(() => props.camera, updateRealEstateViewportCells, { immediate: true, flush: "post" });
+watch(() => props.realEstateCells, updateRealEstateViewportCells, { immediate: true, flush: "post" });
 watch(() => props.camera.zoom >= DVF_MAP_PURCHASE_POINTS_MIN_ZOOM, (enabled) => {
   realEstatePurchasePointZoomEnabled.value = enabled;
 });
@@ -139,6 +148,20 @@ function scheduleRealEstatePurchasePointsLoad(): void {
     updateVisibleRealEstatePurchasePoints();
     void loadVisibleRealEstatePurchasePoints(revision);
   }, 120);
+}
+
+function updateRealEstateViewportCells(): void {
+  const source = props.realEstateCells;
+  const next = source?.length
+    ? selectRealEstateViewportCells(source, props.camera, getRealEstateRadiusPixels(props.camera.zoom))
+    : EMPTY_REAL_ESTATE_CELLS;
+  if (realEstateViewportCells.value === next) return;
+  realEstateViewportCells.value = next;
+  props.performanceTrace?.instant("real_estate_cell_selection", {
+    selectedCellCount: next.length,
+    totalCellCount: source?.length ?? 0,
+    zoom: props.camera.zoom,
+  });
 }
 
 async function loadVisibleRealEstatePurchasePoints(revision: number): Promise<void> {

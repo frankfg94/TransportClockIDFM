@@ -65,8 +65,10 @@ export type TransportMapTraceEventType =
   | "binary_packet_promote"
   | "deck_set_props"
   | "deck_data_changed"
+  | "deck_label_update"
   | "deck_layer_rebuild"
   | "deck_update_attributes"
+  | "real_estate_cell_selection"
   | "maplibre_render"
   | "maplibre_source_loading"
   | "maplibre_source_loaded"
@@ -427,8 +429,10 @@ const BINARY_EVENT_TYPES = new Set<TransportMapTraceEventType>([
 const DECK_EVENT_TYPES = new Set<TransportMapTraceEventType>([
   "deck_set_props",
   "deck_data_changed",
+  "deck_label_update",
   "deck_layer_rebuild",
   "deck_update_attributes",
+  "real_estate_cell_selection",
 ]);
 const CHUNK_EVENT_TYPES = new Set<TransportMapTraceEventType>([
   "chunk_request_batch",

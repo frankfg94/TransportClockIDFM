@@ -7,7 +7,11 @@ import type {
 } from "../contracts/renderer";
 import type { TransportMapPreparedRenderModel } from "../render/transportMapRenderModel";
 import { cameraStateToMapLibreView } from "./nextMapCamera";
-import { createDeckTransportLayers } from "./deckMapLayers";
+import {
+  createDeckTransportLabelLayer,
+  createDeckTransportLayers,
+  deckAdministrativeBoundaryStyleBucket,
+} from "./deckMapLayers";
 import type { TransportMapPerformanceTrace } from "../performance/transportMapPerformanceTrace";
 
 export interface DeckOverlayLike {
@@ -60,19 +64,26 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
   }
 
   present(frame: TransportMapRenderFrame): void {
+    const previousFrame = this.lastFrame;
     this.lastFrame = frame;
     const cameraChanged = syncCameraToMapLibre(this.map, frame);
     const beforeId = firstSymbolLayerId(this.map);
+    const binaryChanged = binaryPacketsChanged(this.lastBinaryPackets, frame.binaryPackets);
+    const modelChanged = this.lastLayerModel !== frame.model;
     const layersChanged =
       !this.layers ||
-      this.lastLayerModel !== frame.model ||
-      binaryPacketsChanged(this.lastBinaryPackets, frame.binaryPackets) ||
+      modelChanged ||
+      binaryChanged ||
       this.lastBeforeId !== beforeId;
     if (layersChanged) {
       const previousModel = this.lastLayerModel;
-      const binaryChanged = binaryPacketsChanged(this.lastBinaryPackets, frame.binaryPackets);
-      const modelChanged = previousModel !== frame.model;
-      const reason = binaryChanged
+      const labelOnlyUpdate = Boolean(
+        this.layers && previousFrame && this.lastBeforeId === beforeId && !binaryChanged
+        && isLabelOnlyFrameUpdate(previousFrame, frame),
+      );
+      const reason = labelOnlyUpdate
+        ? "label_layout_changed"
+        : binaryChanged
         ? "binary_promoted"
         : modelChanged
           ? previousModel?.sceneVersion !== frame.model.sceneVersion
@@ -80,7 +91,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
             : "geometry_changed"
           : "style_changed";
       for (const [layerId, changed] of [
-        ["transport-base", modelChanged || binaryChanged],
+        ["transport-base", previousModel?.basePaths !== frame.model.basePaths || binaryChanged],
         ["traffic", previousModel?.trafficPaths !== frame.model.trafficPaths || binaryChanged],
         ["stations", previousModel?.stations !== frame.model.stations],
       ] as const) {
@@ -99,21 +110,30 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
           newId: `${layerId}:${frame.model.sceneVersion}`,
         });
       }
-      const rebuildEventId = this.activeTrace?.begin("deck_layer_rebuild", {
+      const layerEventId = this.activeTrace?.begin(labelOnlyUpdate ? "deck_label_update" : "deck_layer_rebuild", {
         reason,
         sceneVersion: frame.model.sceneVersion,
         pathCount: frame.model.pathCount,
         stationCount: frame.model.stations.length,
+        labelCount: frame.model.labels.length,
       });
-      this.layers = createDeckTransportLayers(frame, beforeId);
-      this.activeTrace?.end(rebuildEventId, {
+      if (labelOnlyUpdate && this.layers) {
+        this.layers = replaceTransportLabelLayer(
+          this.layers,
+          createDeckTransportLabelLayer(frame.model.labels, beforeId),
+        );
+      } else {
+        this.layers = createDeckTransportLayers(frame, beforeId);
+      }
+      this.activeTrace?.end(layerEventId, {
         reason,
         layerCount: this.layers.length,
+        labelCount: frame.model.labels.length,
       });
       const setPropsEventId = this.activeTrace?.begin("deck_set_props", {
         reason,
         layerCount: this.layers.length,
-      }, rebuildEventId);
+      }, layerEventId);
       this.overlay.setProps({ layers: this.composeLayers() });
       this.activeTrace?.end(setPropsEventId, {
         reason,
@@ -125,7 +145,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
       this.lastLayerModel = frame.model;
       this.lastBinaryPackets = frame.binaryPackets;
       this.lastBeforeId = beforeId;
-      this.layerRebuilds += 1;
+      if (!labelOnlyUpdate) this.layerRebuilds += 1;
       this.setPropsCount += 1;
       this.activeTrace?.instant("scene_publish", {
         reason,
@@ -200,6 +220,47 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
   private get activeTrace(): TransportMapPerformanceTrace | undefined {
     return this.performanceTrace?.isRunning ? this.performanceTrace : undefined;
   }
+}
+
+function isLabelOnlyFrameUpdate(previous: TransportMapRenderFrame, next: TransportMapRenderFrame): boolean {
+  const previousModel = previous.model;
+  const nextModel = next.model;
+  return previousModel.labels !== nextModel.labels
+    && previousModel.walkingIsochrones === nextModel.walkingIsochrones
+    && previousModel.servedCityZones === nextModel.servedCityZones
+    && previousModel.basePaths === nextModel.basePaths
+    && previousModel.trafficPaths === nextModel.trafficPaths
+    && previousModel.highlightPaths === nextModel.highlightPaths
+    && previousModel.stations === nextModel.stations
+    && previousModel.quays === nextModel.quays
+    && previousModel.entrances === nextModel.entrances
+    && previousModel.pathCount === nextModel.pathCount
+    && previousModel.vertexCount === nextModel.vertexCount
+    && deckAdministrativeBoundaryStyleBucket(previous.camera.zoom) === deckAdministrativeBoundaryStyleBucket(next.camera.zoom)
+    && sameStringSequence(previous.scene.hoveredIsochroneIds, next.scene.hoveredIsochroneIds);
+}
+
+function sameStringSequence(left?: readonly string[], right?: readonly string[]): boolean {
+  const leftValues = left ?? [];
+  const rightValues = right ?? [];
+  if (leftValues.length !== rightValues.length) return false;
+  for (let index = 0; index < leftValues.length; index += 1) {
+    if (leftValues[index] !== rightValues[index]) return false;
+  }
+  return true;
+}
+
+function replaceTransportLabelLayer(layers: Layer[], replacement: Layer | undefined): Layer[] {
+  const existingIndex = layers.findIndex((layer) => layer.id === "transport-labels");
+  if (existingIndex >= 0) {
+    if (replacement) layers[existingIndex] = replacement;
+    else layers.splice(existingIndex, 1);
+  } else if (replacement) {
+    const cityLabelsIndex = layers.findIndex((layer) => layer.id === "transport-served-city-labels");
+    if (cityLabelsIndex >= 0) layers.splice(cityLabelsIndex, 0, replacement);
+    else layers.push(replacement);
+  }
+  return layers;
 }
 
 function binaryPacketsChanged(
