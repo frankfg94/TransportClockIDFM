@@ -3717,7 +3717,19 @@ function handleMapClick(event: MouseEvent): void {
   }
   if (isInteractiveMapTarget(event.target) && !isMapGeometryTarget(event.target)) return;
   if (event.target instanceof Element && event.target.closest("[data-nearby-place-canvas]")) return;
-  if (isMapGeometryTarget(event.target)) return;
+  if (isMapGeometryTarget(event.target)) {
+    if (cityViewEnabled.value && (
+      cityViewHoveredLineId.value ||
+      props.hoveredLineId ||
+      props.activeLineId ||
+      summaryActiveLineId.value
+    )) {
+      clearCityViewLineHover();
+      clearSummaryLineFocus();
+      emit("clearLineFocus");
+    }
+    return;
+  }
   if (isPlacesPreview.value) {
     emit("selectPlace", undefined);
     return;
