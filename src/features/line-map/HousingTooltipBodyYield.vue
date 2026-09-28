@@ -9,9 +9,6 @@
           price: formatPrice(cell.medianPriceM2),
         }) }}
       </span>
-      <span v-if="grossYieldInterval" class="housing-tooltip-body__detail">
-        {{ t("globalMap.realEstate.grossYieldInterval", grossYieldInterval) }}
-      </span>
     </template>
     <span v-else class="housing-tooltip-body__detail">
       {{ t("globalMap.realEstate.yieldUnavailable") }}
@@ -37,16 +34,6 @@ const grossYield = computed(() => {
   if (!rent || !price || price <= 0) return undefined;
   return rent * 12 / price * 100;
 });
-const grossYieldInterval = computed(() => {
-  const estimate = props.rentalEstimate;
-  const price = props.cell.medianPriceM2;
-  if (!estimate || price <= 0) return undefined;
-  return {
-    low: formatPercent(estimate.intervalLow * 12 / price * 100),
-    high: formatPercent(estimate.intervalHigh * 12 / price * 100),
-  };
-});
-
 function formatPrice(value: number): string {
   return new Intl.NumberFormat(locale.value, { maximumFractionDigits: 0 }).format(value);
 }

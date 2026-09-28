@@ -98,6 +98,7 @@ export const en = {
       metricSelectorAria: "Property metric shown on the map",
       metricUnavailable: "No values are available for this metric.",
       sourcesAndMethod: "Sources and method",
+      hoveredEstimate: "Hovered area estimate details",
       pointZoom: "From zoom 17: each dot marks the cadastral centre of a parcel with a DVF sale. Its color follows the selected metric. Hover a dot to see the matching details.",
       preparing: "Preparing DVF data…",
       loading: "Loading departments · {loaded}/{total}",

@@ -123,6 +123,8 @@
         :high-value="realEstateMetricRange?.high ?? 0"
         :reference-period="realEstateReferencePeriod"
         :rental-reference-period="realEstateRentalReferencePeriod"
+        :rental-estimate="hoveredRealEstateCell ? realEstateRentalEstimates[hoveredRealEstateCell.cityCode] : undefined"
+        :yield-price="hoveredRealEstateCell?.medianPriceM2"
         @toggle="toggleRealEstateLayer"
         @change-metric="setRealEstateMetricMode"
       />

@@ -73,6 +73,32 @@
             <span v-if="metricMode === 'yield'">{{ t("globalMap.realEstate.grossYieldMethod") }}</span>
           </template>
         </div>
+        <div v-if="metricMode === 'rent' && rentalEstimate" class="global-map-real-estate__estimate-details">
+          <span class="global-map-real-estate__data-notes-title">
+            {{ t("globalMap.realEstate.hoveredEstimate") }}
+          </span>
+          <span>
+            {{ t("globalMap.realEstate.rentInterval", {
+              low: formatRent(rentalEstimate.intervalLow),
+              high: formatRent(rentalEstimate.intervalHigh),
+            }) }}
+          </span>
+          <span>
+            {{ t("globalMap.realEstate.rentCoverage", {
+              level: rentalPredictionLevel,
+              count: formatCount(rentalObservationCount),
+            }) }}
+          </span>
+          <span v-if="rentalIsLowConfidence" class="global-map-real-estate__estimate-caution">
+            {{ t("globalMap.realEstate.rentLowConfidence") }}
+          </span>
+        </div>
+        <div v-else-if="metricMode === 'yield' && grossYieldInterval" class="global-map-real-estate__estimate-details">
+          <span class="global-map-real-estate__data-notes-title">
+            {{ t("globalMap.realEstate.hoveredEstimate") }}
+          </span>
+          <span>{{ t("globalMap.realEstate.grossYieldInterval", grossYieldInterval) }}</span>
+        </div>
       </template>
 
       <div class="global-map-real-estate__metric-tabs" role="group" :aria-label="t('globalMap.realEstate.metricSelectorAria')">
@@ -96,6 +122,7 @@
 import { computed } from "vue";
 import { Building2 } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
+import type { DvfRentalEstimate } from "../../services/real-estate/compiledRealEstate";
 import type { DvfMapMetricMode } from "../transport-map/next/deckRealEstateLayer";
 
 const metricTabs = [
@@ -121,6 +148,8 @@ const props = defineProps<{
   highValue: number;
   referencePeriod: string;
   rentalReferencePeriod: string;
+  rentalEstimate?: DvfRentalEstimate;
+  yieldPrice?: number;
 }>();
 
 const emit = defineEmits<{ toggle: []; changeMetric: [mode: DvfMapMetricMode] }>();
@@ -137,6 +166,27 @@ const scaleAriaKeys = {
 } as const;
 const measureKey = computed(() => measureKeys[props.metricMode]);
 const scaleAriaKey = computed(() => scaleAriaKeys[props.metricMode]);
+const rentalObservationCount = computed(() => props.rentalEstimate
+  ? props.rentalEstimate.observationsInCommune || props.rentalEstimate.observationsInMesh
+  : 0);
+const rentalPredictionLevel = computed(() => {
+  const level = props.rentalEstimate?.predictionLevel.toLowerCase();
+  if (level === "commune") return t("globalMap.realEstate.rentLevelCommune");
+  if (level === "epci") return t("globalMap.realEstate.rentLevelEpci");
+  return t("globalMap.realEstate.rentLevelMesh");
+});
+const rentalIsLowConfidence = computed(() => Boolean(props.rentalEstimate
+  && (props.rentalEstimate.observationsInCommune < 30
+    || (props.rentalEstimate.modelR2 !== undefined && props.rentalEstimate.modelR2 < 0.5))));
+const grossYieldInterval = computed(() => {
+  const estimate = props.rentalEstimate;
+  const price = props.yieldPrice;
+  if (!estimate || price === undefined || !Number.isFinite(price) || price <= 0) return undefined;
+  return {
+    low: formatPercent(estimate.intervalLow * 12 / price * 100),
+    high: formatPercent(estimate.intervalHigh * 12 / price * 100),
+  };
+});
 
 function formatMetric(value: number): string {
   const isYield = props.metricMode === "yield";
@@ -148,6 +198,14 @@ function formatMetric(value: number): string {
 
 function formatCount(value: number): string {
   return new Intl.NumberFormat(locale.value, { maximumFractionDigits: 0 }).format(value);
+}
+
+function formatRent(value: number): string {
+  return new Intl.NumberFormat(locale.value, { maximumFractionDigits: 1 }).format(value);
+}
+
+function formatPercent(value: number): string {
+  return new Intl.NumberFormat(locale.value, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value);
 }
 </script>
 
@@ -334,10 +392,25 @@ function formatCount(value: number): string {
   line-height: 1.32;
 }
 
+.global-map-real-estate__estimate-details {
+  display: grid;
+  gap: 3px;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+  color: #64748b;
+  font-size: 0.59rem;
+  line-height: 1.32;
+}
+
 .global-map-real-estate__data-notes-title {
   color: #475569;
   font-size: 0.61rem;
   font-weight: 750;
+}
+
+.global-map-real-estate__estimate-caution {
+  color: #9a3412;
 }
 
 .global-map-real-estate__status {
