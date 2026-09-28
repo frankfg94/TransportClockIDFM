@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "nuxt dev --dotenv .env.local",
+    "dataset-workbench": "npm --prefix ../dataset-workbench run dev",
     "tsc": "nuxt typecheck",
     "build": "nuxt build",
     "build:capacitor": "nuxt generate --dotenv .env.capacitor",

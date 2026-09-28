@@ -3277,7 +3277,7 @@ describe("NearbyStationsMap line focus", () => {
     expect(wrapper.emitted("toggleStationSchedule")).toEqual([[station.id]]);
   });
 
-  it("keeps the compact schedule slot visible without hovering when schedules are enabled", async () => {
+  it("shows the compact schedule slot after hovering its station", async () => {
     const metro = createLine("line:metro:1", "METRO");
     const station = createStation("station:1", "République", metro);
     const wrapper = mountMap(
@@ -3289,16 +3289,18 @@ describe("NearbyStationsMap line focus", () => {
       () => "visible",
     );
 
+    expect(wrapper.find("[data-testid='inline-schedule']").exists()).toBe(false);
+
+    await wrapper.get(".nearby-map__marker").trigger("mouseenter");
     const inlineSchedule = wrapper.find("[data-testid='inline-schedule']");
     expect(inlineSchedule.exists()).toBe(true);
     expect(inlineSchedule.element.parentElement?.classList.contains("nearby-map__marker-body")).toBe(true);
-    expect(wrapper.find(".nearby-map__marker-station-name").exists()).toBe(false);
 
     await wrapper.setProps({ scheduleState: () => "hidden" });
     expect(wrapper.find("[data-testid='inline-schedule']").exists()).toBe(false);
   });
 
-  it("keeps only feeder schedule badges while a projected heavy station is focused", async () => {
+  it("shows feeder schedule badges only while a projected heavy station is focused", async () => {
     const metro12 = createLine("line:metro:12", "METRO");
     metro12.code = "12";
     const bus394 = createLine("line:bus:394", "BUS");
@@ -3339,7 +3341,7 @@ describe("NearbyStationsMap line focus", () => {
       ["METRO", "BUS"],
     );
 
-    expect(wrapper.findAll("[data-testid='inline-schedule']")).toHaveLength(2);
+    expect(wrapper.findAll("[data-testid='inline-schedule']")).toHaveLength(0);
 
     await wrapper.find(".nearby-map__marker--supplemental").trigger("click");
     await nextTick();
@@ -3353,7 +3355,7 @@ describe("NearbyStationsMap line focus", () => {
 
     await wrapper.get(".nearby-map").trigger("click");
     await nextTick();
-    expect(wrapper.findAll("[data-testid='inline-schedule']")).toHaveLength(2);
+    expect(wrapper.findAll("[data-testid='inline-schedule']")).toHaveLength(0);
   });
 
   it("keeps only the access tooltip for a projected heavy station", () => {

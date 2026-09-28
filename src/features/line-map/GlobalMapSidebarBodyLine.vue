@@ -16,6 +16,7 @@ import AnnualRidershipCard from "./AnnualRidershipCard.vue";
 import GtfsFrequencyCard from "./GtfsFrequencyCard.vue";
 import AnnualRidershipStationCard from "./AnnualRidershipStationCard.vue";
 import CitiesLinePattern from "./CitiesLinePattern.vue";
+import GlobalMapSidebarLineStats from "./GlobalMapSidebarLineStats.vue";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import UserFriendlyTraffic from "../../components/UserFriendlyTraffic.vue";
 import MaterialCombobox, { type MaterialComboboxOption } from "../../components/MaterialCombobox.vue";
@@ -242,43 +243,19 @@ function updateNearbyRadius(value: string): void {
       @update:scope="emit('update:scope', $event)"
     />
 
-    <section
-      class="global-map-picker-sidebar__line-stats"
-      :aria-label="t('globalMap.sidebar.lineProfile')"
-    >
-      <article class="global-map-picker-sidebar__line-stat">
-        <Route :size="17" aria-hidden="true" />
-        <div>
-          <strong>{{ formatLineLength(lineMetadata?.lengthKm) }}</strong
-          ><span>{{ t("globalMap.sidebar.lineStatsLength") }}</span>
-        </div>
-      </article>
-      <article class="global-map-picker-sidebar__line-stat">
-        <Train :size="17" aria-hidden="true" />
-        <div>
-          <strong>{{ lineCount }}</strong
-          ><span>{{
-            isBikeLine
-              ? t("globalMap.sidebar.bikeSegments")
-              : t("globalMap.sidebar.lineStatsStations")
-          }}</span>
-        </div>
-      </article>
-      <article class="global-map-picker-sidebar__line-stat">
-        <Building2 :size="17" aria-hidden="true" />
-        <div>
-          <strong>{{ servedCitiesPattern.length }}</strong
-          ><span>{{ t("globalMap.sidebar.lineStatsCities") }}</span>
-        </div>
-      </article>
-      <article class="global-map-picker-sidebar__line-stat">
-        <Shuffle :size="17" aria-hidden="true" />
-        <div>
-          <strong>{{ lineConnectionCount }}</strong
-          ><span>{{ t("globalMap.sidebar.lineStatsConnections") }}</span>
-        </div>
-      </article>
-    </section>
+    <GlobalMapSidebarLineStats
+      :section-aria-label="t('globalMap.sidebar.lineProfile')"
+      :length-label="formatLineLength(lineMetadata?.lengthKm)"
+      :length-caption="t('globalMap.sidebar.lineStatsLength')"
+      :line-count="lineCount"
+      :line-stats-count-label="
+        isBikeLine ? t('globalMap.sidebar.bikeSegments') : t('globalMap.sidebar.lineStatsStations')
+      "
+      :city-count="servedCitiesPattern.length"
+      :city-count-caption="t('globalMap.sidebar.lineStatsCities')"
+      :connection-count="lineConnectionCount"
+      :connection-count-caption="t('globalMap.sidebar.lineStatsConnections')"
+    />
 
     <section
       v-if="!isLinePreview && lineConnectionTotal"

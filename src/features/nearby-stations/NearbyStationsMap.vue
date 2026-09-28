@@ -4017,10 +4017,12 @@ function markerLine(entry: NearbyStationEntry): GlobalMapLine | undefined {
     if (preferredLine) return preferredLine;
   }
 
+  const visibleModes = cityViewEnabled.value ? cityViewVisibleModes.value : props.activeModes;
   const selectedMode = cityViewEnabled.value ? cityViewSelectedTransportMode.value : undefined;
-  if (selectedMode) return entry.lines.find((line) => line.mode === selectedMode);
+  if (selectedMode && visibleModes.includes(selectedMode)) {
+    return entry.lines.find((line) => line.mode === selectedMode);
+  }
 
-  const visibleModes = cityViewEnabled.value ? CITY_VIEW_STATION_MODES : props.activeModes;
   const prioritizedLine = LINE_MODE_ORDER
     .map((mode) => entry.lines.find((line) => line.mode === mode && visibleModes.includes(line.mode)))
     .find((line): line is GlobalMapLine => Boolean(line));
@@ -4485,6 +4487,12 @@ function heavyMarkerAriaLabel(candidate: NearbyHeavyTransportCandidate): string 
 
 function shouldShowInlineSchedules(entry: NearbyStationEntry): boolean {
   if (cityViewEnabled.value || summaryLineHoverActive.value) return false;
+  const focusedStationId = hoveredStationId.value ?? pinnedStationId.value;
+  const isPinnedHeavyFeederView = !hoveredStationId.value &&
+    Boolean(pinnedHeavyStation.value) &&
+    hasFocusedHeavyFeeder.value &&
+    isFeederStation(entry, focusedHeavyFeederLineKeys.value);
+  if (focusedStationId !== entry.id && !isPinnedHeavyFeederView) return false;
   const state = markerScheduleState(entry);
   if (state !== "visible" && state !== "unavailable") return false;
 
@@ -6363,6 +6371,7 @@ function mix(from: number, to: number, progress: number): number {
 }
 @media (max-width: 680px) {
   .nearby-map-shell { --nearby-map-height: clamp(540px, calc(100dvh - 64px), 960px); }
+  .nearby-map__marker-line-icon { transform: scale(.5); }
   .nearby-map__sidebar { padding: 14px; }
   .nearby-map__travel-sidebar { left: 14px; max-width: calc(100% - 28px); width: min(460px, calc(100% - 28px)); }
   .nearby-map__top-control-zone { height: 112px; }

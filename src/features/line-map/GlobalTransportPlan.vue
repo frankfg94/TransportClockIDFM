@@ -1504,7 +1504,7 @@ const mobilePickerSidebarSnap = ref<GlobalMapSidebarSheetSnap>("collapsed");
 const lineSelectorOpen = ref(false);
 const connectedStationIds = ref<string[]>([]);
 const stationConnectionRequestsPending = ref(0);
-const { n, t } = useI18n();
+const { locale, n, t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const temporaryMarker = computed(() => parseGlobalMapTemporaryMarker(route.query));

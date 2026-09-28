@@ -3,9 +3,7 @@ import Fuse from "fuse.js";
 import { computed, onBeforeUnmount, onMounted, ref, type Component, watch } from "vue";
 import {
   BarChart3,
-  BookOpen,
   CheckCircle2,
-  ChevronDown,
   CircleAlert,
   Database,
   Layers,
@@ -20,15 +18,23 @@ import {
 } from "lucide-vue-next";
 import AppModal from "../../components/AppModal.vue";
 import AppNotification, { type AppNotificationTone } from "../../components/AppNotification.vue";
-import MaterialCombobox, {
-  type MaterialComboboxOption,
-} from "../../components/MaterialCombobox.vue";
+import type { MaterialComboboxOption } from "../../components/MaterialCombobox.vue";
 import PlaceNameModal from "../../components/PlaceNameModal.vue";
 import AdressBook from "../address-book/AdressBook.vue";
 import type { AddressBookEntry } from "../address-book/addressBook";
 import { useRouter } from "nuxt/app";
 import PluginViewer from "./PluginViewer.vue";
 import GtfsSettingsPanel from "./GtfsSettingsPanel.vue";
+import SettingsLanguageCategory from "./SettingsLanguageCategory.vue";
+import SettingsMenuCategory from "./SettingsMenuCategory.vue";
+import SettingsPlacesCategory from "./SettingsPlacesCategory.vue";
+import SettingsAddressBookCategory from "./SettingsAddressBookCategory.vue";
+import SettingsDisplayCategory from "./SettingsDisplayCategory.vue";
+import SettingsDeviceCategory from "./SettingsDeviceCategory.vue";
+import SettingsGlobalMapDataCategory from "./SettingsGlobalMapDataCategory.vue";
+import SettingsTrafficCategory from "./SettingsTrafficCategory.vue";
+import SettingsWeatherCategory from "./SettingsWeatherCategory.vue";
+import SettingsMapCategory from "./SettingsMapCategory.vue";
 import { transitBoards } from "../../config/transitBoards";
 import { MobileReleaseCard } from "../mobile-release";
 import {
@@ -466,6 +472,13 @@ function formatGlobalMapDate(value: string | undefined): string {
   return value ? d(value, { dateStyle: "medium", timeStyle: "short" }) : "—";
 }
 
+const globalMapGeneratedAtLabel = computed(() =>
+  formatGlobalMapDate(globalMapManifest.value?.generatedAt),
+);
+const globalMapPackBytesLabel = computed(() =>
+  formatGlobalMapBytes(globalMapTotalPackBytes.value),
+);
+
 async function loadGlobalMapSettingsData(): Promise<void> {
   if (globalMapManifest.value || globalMapManifestLoading.value || typeof fetch === "undefined")
     return;
@@ -734,6 +747,19 @@ function formatTrafficMinuteOfDay(value: number): string {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
+const trafficImpactEveningExampleStartLabel = formatTrafficMinuteOfDay(
+  trafficImpactEveningExampleWindow.startMinute,
+);
+const trafficImpactEveningExampleEndLabel = formatTrafficMinuteOfDay(
+  trafficImpactEveningExampleWindow.endMinute,
+);
+const trafficOffPeakStartLabel = formatTrafficMinuteOfDay(
+  TRAFFIC_IMPACT_SEVERITY_MODEL.temporal.offPeakStartMinute,
+);
+const trafficOffPeakEndLabel = formatTrafficMinuteOfDay(
+  TRAFFIC_IMPACT_SEVERITY_MODEL.temporal.offPeakEndMinute,
+);
+
 const trafficInfoDesignLocalizedOptions = computed(() =>
   trafficInfoDesignOptions.map((option) => ({
     id: option.id,
@@ -753,6 +779,15 @@ const trafficInfoDefaultScopeLocalizedOptions = computed(() =>
   })),
 );
 const trafficCache = computed(() => trafficCacheStatus.value?.cache);
+const trafficCacheRefreshIntervalLabel = computed(() =>
+  formatTrafficCacheDuration(trafficCache.value?.refreshIntervalMs ?? 150_000),
+);
+const trafficCacheLastUpdateLabel = computed(() =>
+  formatGlobalMapDate(trafficCache.value?.refreshedAt),
+);
+const trafficWarningLookaheadLabel = computed(() =>
+  formatDays(settings.value.trafficWarningLookaheadDays),
+);
 const trafficCacheCountdown = computed(() => {
   const nextRefreshAt = trafficCache.value?.nextRefreshAt;
   if (!nextRefreshAt) return t("settings.trafficCache.noRefreshScheduled");
@@ -1459,6 +1494,10 @@ function updateWakeLock(value: string): void {
   updateSettings({ wakeLockDuration: value as WakeLockDuration });
 }
 
+function updateNetworkConcurrencyMode(value: string): void {
+  updateSettings({ networkConcurrencyMode: parseNetworkConcurrencyMode(value) });
+}
+
 function updateTravelAlarmSafetyMinutes(value: string): void {
   updateSettings({ travelAlarmSafetyMinutes: parseTravelAlarmSafetyMinutes(value) });
 }
@@ -1805,21 +1844,6 @@ function formatTransferBundleDistance(
     : t("settings.bundles.autoDistance");
 }
 
-function formatPixels(value: number): string {
-  return `${Math.round(value)} px`;
-}
-
-function formatMapContrast(value: number): string {
-  return `${Math.round(value * 100)}%`;
-}
-
-function formatCoefficient(value: number): string {
-  return `${n(value, {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 0,
-  })}x`;
-}
-
 function formatDays(value: number): string {
   return value === 1
     ? t("settings.options.trafficWarning.oneDay")
@@ -1942,1134 +1966,149 @@ onBeforeUnmount(() => {
       :title="t('settings.search.noResults')"
     />
 
-    <section
+    <SettingsLanguageCategory
       v-if="isPanelVisible('language')"
-      class="settings-panel"
-      :class="{ 'settings-panel--open': isPanelOpen('language') }"
-      aria-labelledby="settings-language-title"
-    >
-      <div class="settings-panel__heading">
-        <button
-          class="settings-panel__trigger"
-          type="button"
-          :aria-expanded="isPanelOpen('language')"
-          @click="togglePanel('language')"
-        >
-          <div>
-            <p class="eyebrow">{{ t("settings.language.eyebrow") }}</p>
-            <h2 id="settings-language-title">{{ t("settings.language.title") }}</h2>
-          </div>
-          <ChevronDown :size="22" aria-hidden="true" />
-        </button>
-      </div>
+      :settings="settings"
+      :panel-open="isPanelOpen('language')"
+      :is-setting-visible="isSettingVisible"
+      :language-options="languageOptions"
+      @toggle="togglePanel('language')"
+      @update-settings="updateSettings"
+    />
 
-      <div v-if="isSettingVisible('language', 'language')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.language.label") }}</strong>
-          <span>{{ t("settings.language.description") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="settings.language"
-          :options="languageOptions"
-          :aria-label="t('settings.language.aria')"
-          @update:model-value="updateLanguage"
-        />
-      </div>
-    </section>
-
-    <section
+    <SettingsMenuCategory
       v-if="isPanelVisible('menu')"
-      class="settings-panel"
-      :class="{ 'settings-panel--open': isPanelOpen('menu') }"
-      aria-labelledby="settings-menu-title"
-    >
-      <div class="settings-panel__heading">
-        <button
-          class="settings-panel__trigger"
-          type="button"
-          :aria-expanded="isPanelOpen('menu')"
-          @click="togglePanel('menu')"
-        >
-          <div>
-            <p class="eyebrow">{{ t("settings.menu.eyebrow") }}</p>
-            <h2 id="settings-menu-title">{{ t("settings.menu.title") }}</h2>
-          </div>
-          <ChevronDown :size="22" aria-hidden="true" />
-        </button>
-      </div>
+      :settings="settings"
+      :panel-open="isPanelOpen('menu')"
+      :is-setting-visible="isSettingVisible"
+      @toggle="togglePanel('menu')"
+      @update-settings="updateSettings"
+    />
 
-      <label v-if="isSettingVisible('menu.show-plan', 'menu')" class="settings-toggle">
-        <input
-          type="checkbox"
-          :checked="settings.showPlanInNavigation"
-          :aria-label="t('settings.menu.showPlanAria')"
-          @change="
-            updateSettings({
-              showPlanInNavigation: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.menu.showPlan") }}</strong>
-          <small>{{ t("settings.menu.showPlanDescription") }}</small>
-        </div>
-      </label>
-    </section>
-
-    <section
+    <SettingsGlobalMapDataCategory
       v-if="isPanelVisible('global-map-data')"
-      class="settings-panel settings-panel--data"
-      :class="{ 'settings-panel--open': isPanelOpen('global-map-data') }"
-      aria-labelledby="settings-global-map-data-title"
-      data-global-map-pack-settings
-    >
-      <div class="settings-panel__heading">
-        <button
-          class="settings-panel__trigger"
-          type="button"
-          :aria-expanded="isPanelOpen('global-map-data')"
-          @click="togglePanel('global-map-data')"
-        >
-          <div>
-            <p class="eyebrow">{{ t("settings.globalMapData.eyebrow") }}</p>
-            <h2 id="settings-global-map-data-title">{{ t("settings.globalMapData.title") }}</h2>
-          </div>
-          <ChevronDown :size="22" aria-hidden="true" />
-        </button>
-      </div>
+      :data-quality-cards="dataQualityCards"
+      :global-map-config-json="globalMapConfigJson"
+      :global-map-generated-at-label="globalMapGeneratedAtLabel"
+      :global-map-manifest="globalMapManifest"
+      :global-map-manifest-error="globalMapManifestError"
+      :global-map-manifest-json="globalMapManifestJson"
+      :global-map-manifest-loading="globalMapManifestLoading"
+      :global-map-pack-files-json="globalMapPackFilesJson"
+      :global-map-pack-summary-json="globalMapPackSummaryJson"
+      :global-map-pack-warnings-json="globalMapPackWarningsJson"
+      :global-map-quality-status-icons="globalMapQualityStatusIcons"
+      :global-map-pack-bytes-label="globalMapPackBytesLabel"
+      :is-setting-visible="isSettingVisible"
+      :panel-open="isPanelOpen('global-map-data')"
+      @toggle="togglePanel('global-map-data')"
+    />
 
-      <p class="settings-panel__description">{{ t("settings.globalMapData.description") }}</p>
-      <article
-        class="settings-data-overview"
-        data-global-map-pack-overview
-        aria-labelledby="settings-global-map-pack-overview-title"
-      >
-        <div class="settings-data-overview__header">
-          <div>
-            <p class="eyebrow">{{ t("settings.globalMapData.pack.eyebrow") }}</p>
-            <h3 id="settings-global-map-pack-overview-title">
-              {{ t("settings.globalMapData.pack.title") }}
-            </h3>
-            <p>{{ t("settings.globalMapData.pack.description") }}</p>
-          </div>
-          <span class="settings-data-overview__badge">
-            {{ t("settings.globalMapData.quality.badge") }}
-          </span>
-        </div>
-
-        <dl v-if="globalMapManifest?.counts" class="settings-data-facts">
-          <div>
-            <dt>{{ t("settings.globalMapData.pack.lines") }}</dt>
-            <dd>{{ n(globalMapManifest.counts.lines) }}</dd>
-          </div>
-          <div>
-            <dt>{{ t("settings.globalMapData.pack.stations") }}</dt>
-            <dd>{{ n(globalMapManifest.counts.stations) }}</dd>
-          </div>
-          <div>
-            <dt>{{ t("settings.globalMapData.pack.paths") }}</dt>
-            <dd>{{ n(globalMapManifest.counts.paths) }}</dd>
-          </div>
-          <div>
-            <dt>{{ t("settings.globalMapData.pack.chunks") }}</dt>
-            <dd>{{ n(globalMapManifest.counts.chunks) }}</dd>
-          </div>
-        </dl>
-
-        <div
-          v-if="globalMapManifest"
-          class="settings-data-overview__meta"
-          data-global-map-pack-meta
-        >
-          <span>{{
-            t("settings.globalMapData.pack.generated", {
-              date: formatGlobalMapDate(globalMapManifest.generatedAt),
-            })
-          }}</span>
-          <span>{{
-            t("settings.globalMapData.pack.version", { version: globalMapManifest.dataVersion })
-          }}</span>
-          <span>{{
-            t("settings.globalMapData.pack.size", {
-              size: formatGlobalMapBytes(globalMapTotalPackBytes),
-            })
-          }}</span>
-        </div>
-
-        <section class="settings-data-quality" aria-labelledby="settings-global-map-quality-title">
-          <div>
-            <p class="eyebrow">{{ t("settings.globalMapData.quality.eyebrow") }}</p>
-            <h3 id="settings-global-map-quality-title">
-              {{ t("settings.globalMapData.quality.title") }}
-            </h3>
-            <p>{{ t("settings.globalMapData.quality.description") }}</p>
-          </div>
-          <div class="settings-data-quality__levels">
-            <div class="settings-data-quality__level">
-              <strong>{{ t("settings.globalMapData.quality.regional") }}</strong>
-              <span>
-                {{
-                  t("settings.globalMapData.quality.regionalDescription", {
-                    tiles: n(GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.maxTiles),
-                  })
-                }}
-              </span>
-            </div>
-            <div class="settings-data-quality__level settings-data-quality__level--detailed">
-              <strong>{{ t("settings.globalMapData.quality.detailed") }}</strong>
-              <span>
-                {{
-                  t("settings.globalMapData.quality.detailedDescription", {
-                    zoom: n(GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.highZoomMin),
-                    tiles: n(GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.highZoomMaxTiles),
-                  })
-                }}
-              </span>
-            </div>
-          </div>
-          <p class="settings-data-quality__note">
-            {{ t("settings.globalMapData.quality.note") }}
-          </p>
-        </section>
-
-        <div
-          v-if="dataQualityCards.length"
-          class="settings-data-quality-cards"
-          data-global-map-quality-cards
-        >
-          <article
-            v-for="card in dataQualityCards"
-            :key="card.id"
-            class="settings-data-quality-card"
-            :class="`settings-data-quality-card--${card.level}`"
-            :data-quality-card-id="card.id"
-          >
-            <div class="settings-data-quality-card__icon" aria-hidden="true">
-              <component :is="card.icon" :size="20" />
-            </div>
-            <div>
-              <div class="settings-data-quality-card__status">
-                <component
-                  :is="globalMapQualityStatusIcons[card.level]"
-                  :size="15"
-                  aria-hidden="true"
-                />
-                <span>{{ card.levelLabel }}</span>
-              </div>
-              <h4>{{ card.title }}</h4>
-              <p>{{ card.description }}</p>
-              <small>{{ card.detail }}</small>
-            </div>
-          </article>
-        </div>
-      </article>
-      <p v-if="globalMapManifestLoading" role="status">{{ t("settings.globalMapData.loading") }}</p>
-      <p v-else-if="globalMapManifestError" class="settings-panel__error" role="alert">
-        <CircleAlert :size="18" aria-hidden="true" />
-        <span>{{ t("settings.globalMapData.loadFailed") }}: {{ globalMapManifestError }}</span>
-      </p>
-      <details class="settings-data-accordion" data-global-map-pack-summary>
-        <summary>{{ t("settings.globalMapData.summaryAccordion") }}</summary>
-        <pre v-if="globalMapPackSummaryJson">{{ globalMapPackSummaryJson }}</pre>
-      </details>
-      <details class="settings-data-accordion" data-global-map-pack-files>
-        <summary>{{ t("settings.globalMapData.filesAccordion") }}</summary>
-        <pre v-if="globalMapPackFilesJson">{{ globalMapPackFilesJson }}</pre>
-      </details>
-      <details class="settings-data-accordion" data-global-map-pack-warnings>
-        <summary>{{ t("settings.globalMapData.warningsAccordion") }}</summary>
-        <pre v-if="globalMapPackWarningsJson">{{ globalMapPackWarningsJson }}</pre>
-      </details>
-      <details class="settings-data-accordion" data-global-map-pack-manifest>
-        <summary>{{ t("settings.globalMapData.rawManifestAccordion") }}</summary>
-        <pre v-if="globalMapManifestJson">{{ globalMapManifestJson }}</pre>
-      </details>
-      <details class="settings-data-accordion" data-global-map-pack-config>
-        <summary>{{ t("settings.globalMapData.configAccordion") }}</summary>
-        <pre>{{ globalMapConfigJson }}</pre>
-      </details>
-    </section>
-
-    <section
+    <SettingsPlacesCategory
       v-if="isPanelVisible('places')"
-      class="settings-panel"
-      :class="{ 'settings-panel--open': isPanelOpen('places') }"
-      aria-labelledby="settings-places-title"
-    >
-      <div class="settings-panel__heading">
-        <button
-          class="settings-panel__trigger"
-          type="button"
-          :aria-expanded="isPanelOpen('places')"
-          @click="togglePanel('places')"
-        >
-          <div>
-            <p class="eyebrow">{{ t("settings.places.eyebrow") }}</p>
-            <h2 id="settings-places-title">{{ t("settings.places.title") }}</h2>
-          </div>
-          <ChevronDown :size="22" aria-hidden="true" />
-        </button>
-        <button class="button-secondary" type="button" @click="openPresetsModal">
-          {{ t("settings.places.manage") }}
-        </button>
-      </div>
+      :default-place-id="presetState.defaultPlaceId"
+      :is-setting-visible="isSettingVisible"
+      :panel-open="isPanelOpen('places')"
+      :place-options="placeOptions"
+      :place-preset-navigation-mode-localized-options="placePresetNavigationModeLocalizedOptions"
+      :settings="settings"
+      @manage-places="openPresetsModal"
+      @toggle="togglePanel('places')"
+      @update-default-place="updateDefaultPlace"
+      @update-place-navigation="updatePlacePresetNavigationMode"
+    />
 
-      <div v-if="isSettingVisible('places.default', 'places')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.places.defaultLabel") }}</strong>
-          <span>
-            {{ t("settings.places.defaultDescription") }}
-          </span>
-        </div>
-        <MaterialCombobox
-          :model-value="presetState.defaultPlaceId"
-          :options="placeOptions"
-          :aria-label="t('settings.places.defaultAria')"
-          @update:model-value="updateDefaultPlace"
-        />
-      </div>
-
-      <div v-if="isSettingVisible('places.navigation', 'places')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.places.navigationLabel") }}</strong>
-          <span>{{ t("settings.places.navigationDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="settings.placePresetNavigationMode"
-          :options="placePresetNavigationModeLocalizedOptions"
-          :aria-label="t('settings.places.navigationAria')"
-          @update:model-value="updatePlacePresetNavigationMode"
-        />
-      </div>
-    </section>
-
-    <section
+    <SettingsAddressBookCategory
       v-if="isPanelVisible('address-book')"
-      class="settings-panel settings-panel--address-book"
-      :class="{ 'settings-panel--open': isPanelOpen('address-book') }"
-      aria-labelledby="settings-address-book-title"
-      data-settings-address-book
-    >
-      <div class="settings-panel__heading">
-        <button
-          class="settings-panel__trigger"
-          type="button"
-          :aria-expanded="isPanelOpen('address-book')"
-          @click="togglePanel('address-book')"
-        >
-          <div>
-            <p class="eyebrow">{{ t("addressBook.eyebrow") }}</p>
-            <h2 id="settings-address-book-title">{{ t("addressBook.title") }}</h2>
-          </div>
-          <ChevronDown :size="22" aria-hidden="true" />
-        </button>
-        <button class="button-secondary" type="button" @click="openAddressBook">
-          <BookOpen :size="17" aria-hidden="true" />
-          {{ t("addressBook.add") }}
-        </button>
-      </div>
-      <div v-if="isSettingVisible('address-book.entry', 'address-book')" class="settings-row">
-        <div>
-          <strong>{{ t("addressBook.title") }}</strong>
-          <span>{{ t("addressBook.description") }}</span>
-        </div>
-        <button class="button-secondary" type="button" @click="openAddressBook">
-          <BookOpen :size="17" aria-hidden="true" />
-          {{ t("common.actions.showAll") }}
-        </button>
-      </div>
-    </section>
+      :is-setting-visible="isSettingVisible"
+      :panel-open="isPanelOpen('address-book')"
+      @open-address-book="openAddressBook"
+      @toggle="togglePanel('address-book')"
+    />
 
-    <section
+    <SettingsDisplayCategory
       v-if="isPanelVisible('display')"
-      class="settings-panel"
-      :class="{ 'settings-panel--open': isPanelOpen('display') }"
-      aria-labelledby="settings-display-title"
-    >
-      <div class="settings-panel__heading">
-        <button
-          class="settings-panel__trigger"
-          type="button"
-          :aria-expanded="isPanelOpen('display')"
-          @click="togglePanel('display')"
-        >
-          <div>
-            <p class="eyebrow">{{ t("settings.display.eyebrow") }}</p>
-            <h2 id="settings-display-title">{{ t("settings.display.title") }}</h2>
-          </div>
-          <ChevronDown :size="22" aria-hidden="true" />
-        </button>
-      </div>
+      :board-toggles-placement-localized-options="boardTogglesPlacementLocalizedOptions"
+      :closed-direction-summary-localized-options="closedDirectionSummaryLocalizedOptions"
+      :fullscreen-station-panel-design-localized-options="fullscreenStationPanelDesignLocalizedOptions"
+      :is-setting-visible="isSettingVisible"
+      :max-departures-localized-options="maxDeparturesLocalizedOptions"
+      :panel-open="isPanelOpen('display')"
+      :place-options="placeOptions"
+      :selected-display-place-id="selectedDisplayPlaceId"
+      :selected-display-preferences="selectedDisplayPreferences"
+      :settings="settings"
+      :traffic-info-design-localized-options="trafficInfoDesignLocalizedOptions"
+      @toggle="togglePanel('display')"
+      @update-board-toggles-placement="updateBoardTogglesPlacement"
+      @update-closed-summary-mode="updateClosedSummaryMode"
+      @update-display-place="updateSelectedDisplayPlace"
+      @update-display-preferences="updateSelectedDisplayPreferences"
+      @update-max-departures="updateMaxDepartures"
+      @update-panel-design="updateFullscreenStationPanelDesign"
+      @update-traffic-info-design="updateTrafficInfoDesign"
+      @update-settings="updateSettings"
+    />
 
-      <div v-if="isSettingVisible('display.place', 'display')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.places.displayPlaceLabel") }}</strong>
-          <span>{{ t("settings.places.displayPlaceDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="selectedDisplayPlaceId"
-          :options="placeOptions"
-          :aria-label="t('settings.places.displayPlaceAria')"
-          @update:model-value="updateSelectedDisplayPlace"
-        />
-      </div>
-
-      <div v-if="isSettingVisible('display.station-buttons', 'display')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.display.stationButtons") }}</strong>
-          <span>{{ t("settings.display.stationButtonsDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="selectedDisplayPreferences?.boardTogglesPlacement ?? 'inline'"
-          :options="boardTogglesPlacementLocalizedOptions"
-          :aria-label="t('settings.display.stationButtonsAria')"
-          @update:model-value="updateBoardTogglesPlacement"
-        />
-      </div>
-
-      <div v-if="isSettingVisible('display.panel-design', 'display')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.display.panelDesign") }}</strong>
-          <span>{{ t("settings.display.panelDesignDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="settings.fullscreenStationPanelDesign"
-          :options="fullscreenStationPanelDesignLocalizedOptions"
-          :aria-label="t('settings.display.panelDesignAria')"
-          @update:model-value="updateFullscreenStationPanelDesign"
-        />
-      </div>
-
-      <label v-if="isSettingVisible('display.panel-dark-theme', 'display')" class="settings-toggle">
-        <input
-          type="checkbox"
-          :checked="settings.fullscreenStationPanelDarkTheme"
-          @change="
-            updateSettings({
-              fullscreenStationPanelDarkTheme: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.panelDarkTheme") }}</strong>
-          <small>{{ t("settings.display.panelDarkThemeDescription") }}</small>
-        </div>
-      </label>
-
-      <div v-if="isSettingVisible('display.closed-accordion', 'display')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.display.closedAccordion") }}</strong>
-          <span>{{ t("settings.display.closedAccordionDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="selectedDisplayPreferences?.closedDirectionSummaryMode ?? 'next'"
-          :options="closedDirectionSummaryLocalizedOptions"
-          :aria-label="t('settings.display.closedAccordionAria')"
-          @update:model-value="updateClosedSummaryMode"
-        />
-      </div>
-
-      <div v-if="isSettingVisible('display.max-departures', 'display')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.display.maxDepartures") }}</strong>
-          <span>{{ t("settings.display.maxDeparturesDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="String(selectedDisplayPreferences?.maxDeparturesPerDirection ?? 'default')"
-          :options="maxDeparturesLocalizedOptions"
-          :aria-label="t('settings.display.maxDeparturesAria')"
-          @update:model-value="updateMaxDepartures"
-        />
-      </div>
-
-      <label v-if="isSettingVisible('display.terminal-only', 'display')" class="settings-toggle">
-        <input
-          type="checkbox"
-          :checked="selectedDisplayPreferences?.terminalDirectionsOnly ?? false"
-          @change="
-            updateSelectedDisplayPreferences({
-              terminalDirectionsOnly: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.terminalOnly") }}</strong>
-          <small>
-            {{ t("settings.display.terminalOnlyDescription") }}
-          </small>
-        </div>
-      </label>
-
-      <label v-if="isSettingVisible('display.ghost-lines', 'display')" class="settings-toggle">
-        <input
-          type="checkbox"
-          :checked="settings.ghostNetworkStructuralOnly"
-          @change="
-            updateSettings({
-              ghostNetworkStructuralOnly: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.structuralGhostLines") }}</strong>
-          <small>
-            {{ t("settings.display.structuralGhostLinesDescription") }}
-          </small>
-        </div>
-      </label>
-
-      <div v-if="isSettingVisible('display.traffic-design', 'display')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.display.trafficDesign") }}</strong>
-          <span>{{ t("settings.display.trafficDesignDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="settings.trafficInfoDesign"
-          :options="trafficInfoDesignLocalizedOptions"
-          :aria-label="t('settings.display.trafficDesignAria')"
-          @update:model-value="updateTrafficInfoDesign"
-        />
-      </div>
-    </section>
-
-    <section
+    <SettingsTrafficCategory
       v-if="isPanelVisible('traffic')"
-      class="settings-panel"
-      :class="{ 'settings-panel--open': isPanelOpen('traffic') }"
-      aria-labelledby="settings-traffic-title"
-    >
-      <div class="settings-panel__heading">
-        <button
-          class="settings-panel__trigger"
-          type="button"
-          :aria-expanded="isPanelOpen('traffic')"
-          @click="togglePanel('traffic')"
-        >
-          <div>
-            <p class="eyebrow">{{ t("common.labels.traffic") }}</p>
-            <h2 id="settings-traffic-title">{{ t("settings.display.trafficScope") }}</h2>
-          </div>
-          <ChevronDown :size="22" aria-hidden="true" />
-        </button>
-      </div>
+      :is-setting-visible="isSettingVisible"
+      :panel-open="isPanelOpen('traffic')"
+      :settings="settings"
+      :traffic-cache="trafficCache"
+      :traffic-cache-countdown="trafficCacheCountdown"
+      :traffic-cache-error="trafficCacheError"
+      :traffic-cache-loading="trafficCacheLoading"
+      :traffic-cache-refresh-interval-label="trafficCacheRefreshIntervalLabel"
+      :traffic-cache-last-update-label="trafficCacheLastUpdateLabel"
+      :traffic-cache-state-label="trafficCacheStateLabel"
+      :traffic-calendar-impact-scope-localized-options="trafficCalendarImpactScopeLocalizedOptions"
+      :traffic-impact-evening-example="trafficImpactEveningExample"
+      :traffic-impact-example-score="trafficImpactExampleScore"
+      :traffic-impact-evening-example-start-label="trafficImpactEveningExampleStartLabel"
+      :traffic-impact-evening-example-end-label="trafficImpactEveningExampleEndLabel"
+      :traffic-off-peak-start-label="trafficOffPeakStartLabel"
+      :traffic-off-peak-end-label="trafficOffPeakEndLabel"
+      :traffic-impact-topology-rows="trafficImpactTopologyRows"
+      :traffic-impact-transfer-rows="trafficImpactTransferRows"
+      :traffic-warning-lookahead-label="trafficWarningLookaheadLabel"
+      :traffic-info-default-scope-localized-options="trafficInfoDefaultScopeLocalizedOptions"
+      :transfer-bundle-request-concurrency-localized-options="transferBundleRequestConcurrencyLocalizedOptions"
+      :transfer-bundle-request-spacing-localized-options="transferBundleRequestSpacingLocalizedOptions"
+      :transfer-bundle-retention-localized-options="transferBundleRetentionLocalizedOptions"
+      :transfer-resolver-mode-localized-options="transferResolverModeLocalizedOptions"
+      @clear-bundles="clearBundles"
+      @clear-walking-cache="clearWalkingRoutesCache"
+      @open-bundles="openBundlesModal"
+      @refresh-traffic-cache="forceTrafficCacheRefresh"
+      @toggle="togglePanel('traffic')"
+      @update-calendar-impact-scope="updateTrafficCalendarImpactScope"
+      @update-default-scope="updateTrafficInfoDefaultScope"
+      @update-settings="updateSettings"
+      @update-transfer-concurrency="updateTransferBundleRequestConcurrency"
+      @update-transfer-resolver-mode="updateTransferResolverMode"
+      @update-transfer-retention="updateTransferBundleRetention"
+      @update-transfer-spacing="updateTransferBundleRequestSpacing"
+      @update-warning-lookahead-days="updateTrafficWarningLookaheadDays"
+    />
 
-      <div v-if="isSettingVisible('traffic.scope', 'traffic')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.display.trafficScope") }}</strong>
-          <span>{{ t("settings.display.trafficScopeDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="settings.trafficInfoDefaultScope"
-          :options="trafficInfoDefaultScopeLocalizedOptions"
-          :aria-label="t('settings.display.trafficScopeAria')"
-          @update:model-value="updateTrafficInfoDefaultScope"
-        />
-      </div>
-      <article
-        v-if="isSettingVisible('traffic.cache', 'traffic')"
-        class="traffic-cache-settings"
-        data-traffic-cache-settings
-      >
-        <header class="traffic-cache-settings__header">
-          <div>
-            <p class="eyebrow">{{ t("settings.trafficCache.eyebrow") }}</p>
-            <h3>{{ t("settings.trafficCache.title") }}</h3>
-            <p>{{ t("settings.trafficCache.description") }}</p>
-          </div>
-          <span
-            class="traffic-cache-settings__state"
-            :data-state="trafficCache?.state ?? 'miss'"
-            data-traffic-cache-state
-          >
-            {{ trafficCacheStateLabel }}
-          </span>
-        </header>
-        <dl class="traffic-cache-settings__facts">
-          <div>
-            <dt>{{ t("settings.trafficCache.frequency") }}</dt>
-            <dd>{{ formatTrafficCacheDuration(trafficCache?.refreshIntervalMs ?? 150_000) }}</dd>
-          </div>
-          <div>
-            <dt>{{ t("settings.trafficCache.lastUpdate") }}</dt>
-            <dd>{{ formatGlobalMapDate(trafficCache?.refreshedAt) }}</dd>
-          </div>
-          <div>
-            <dt>{{ t("settings.trafficCache.nextUpdate") }}</dt>
-            <dd data-traffic-cache-countdown>{{ trafficCacheCountdown }}</dd>
-          </div>
-        </dl>
-        <p v-if="trafficCacheError" class="settings-inline-warning" role="alert">
-          {{ trafficCacheError }}
-        </p>
-        <p v-else-if="trafficCache?.lastError" class="settings-inline-warning" role="status">
-          {{ trafficCache.lastError }}
-        </p>
-        <button
-          class="button-secondary"
-          type="button"
-          data-traffic-cache-refresh
-          :disabled="trafficCacheLoading"
-          @click="void forceTrafficCacheRefresh()"
-        >
-          {{
-            trafficCacheLoading
-              ? t("settings.trafficCache.refreshing")
-              : t("settings.trafficCache.forceRefresh")
-          }}
-        </button>
-      </article>
-      <div v-if="isSettingVisible('traffic.calendar-scope', 'traffic')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.display.trafficCalendarScope") }}</strong>
-          <span>{{ t("settings.display.trafficCalendarScopeDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="settings.trafficCalendarImpactScope"
-          :options="trafficCalendarImpactScopeLocalizedOptions"
-          :aria-label="t('settings.display.trafficCalendarScopeAria')"
-          @update:model-value="updateTrafficCalendarImpactScope"
-        />
-      </div>
-
-      <article
-        v-if="isSettingVisible('traffic.equation', 'traffic')"
-        class="traffic-impact-equation"
-        aria-labelledby="traffic-impact-equation-title"
-        data-testid="traffic-impact-equation"
-      >
-        <header>
-          <p class="eyebrow">{{ t("settings.trafficCalendarEquation.eyebrow") }}</p>
-          <h3 id="traffic-impact-equation-title">
-            {{ t("settings.trafficCalendarEquation.title") }}
-          </h3>
-          <p>{{ t("settings.trafficCalendarEquation.description") }}</p>
-        </header>
-
-        <code>{{ t("settings.trafficCalendarEquation.formula") }}</code>
-
-        <div class="traffic-impact-equation__tables">
-          <section>
-            <h4>{{ t("settings.trafficCalendarEquation.transferWeights") }}</h4>
-            <table>
-              <tbody>
-                <tr v-for="row in trafficImpactTransferRows" :key="row.id">
-                  <th scope="row">{{ row.label }}</th>
-                  <td>+{{ n(row.weight) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-
-          <section>
-            <h4>{{ t("settings.trafficCalendarEquation.topology") }}</h4>
-            <table>
-              <tbody>
-                <tr v-for="row in trafficImpactTopologyRows" :key="row.id">
-                  <th scope="row">{{ row.label }}</th>
-                  <td>? {{ n(row.multiplier) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-
-          <section>
-            <h4>{{ t("settings.trafficCalendarEquation.temporal") }}</h4>
-            <table>
-              <tbody>
-                <tr>
-                  <th scope="row">
-                    {{ t("settings.trafficCalendarEquation.temporalCoverage") }}
-                  </th>
-                  <td>
-                    {{
-                      t("settings.trafficCalendarEquation.temporalCoverageValue", {
-                        minutes: n(TRAFFIC_IMPACT_SEVERITY_MODEL.temporal.minutesPerDay),
-                      })
-                    }}
-                  </td>
-                </tr>
-                <tr>
-                  <th scope="row">
-                    {{ t("settings.trafficCalendarEquation.offPeak") }}
-                  </th>
-                  <td>
-                    {{
-                      t("settings.trafficCalendarEquation.offPeakValue", {
-                        start: formatTrafficMinuteOfDay(
-                          TRAFFIC_IMPACT_SEVERITY_MODEL.temporal.offPeakStartMinute,
-                        ),
-                        end: formatTrafficMinuteOfDay(
-                          TRAFFIC_IMPACT_SEVERITY_MODEL.temporal.offPeakEndMinute,
-                        ),
-                        coefficient: n(TRAFFIC_IMPACT_SEVERITY_MODEL.temporal.offPeakMultiplier),
-                      })
-                    }}
-                  </td>
-                </tr>
-                <tr>
-                  <th scope="row">
-                    {{ t("settings.trafficCalendarEquation.unspecifiedTime") }}
-                  </th>
-                  <td>
-                    &times;
-                    {{ n(TRAFFIC_IMPACT_SEVERITY_MODEL.temporal.unspecifiedMultiplier) }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-
-          <section>
-            <h4>{{ t("settings.trafficCalendarEquation.thresholds") }}</h4>
-            <table>
-              <tbody>
-                <tr>
-                  <th scope="row">{{ t("pattern.trafficCalendarSeverity.low") }}</th>
-                  <td>&lt; {{ n(TRAFFIC_IMPACT_SEVERITY_MODEL.thresholds.medium) }}</td>
-                </tr>
-                <tr>
-                  <th scope="row">
-                    {{ t("pattern.trafficCalendarSeverity.medium") }}
-                  </th>
-                  <td>
-                    {{ n(TRAFFIC_IMPACT_SEVERITY_MODEL.thresholds.medium) }}
-                    ? score &lt;
-                    {{ n(TRAFFIC_IMPACT_SEVERITY_MODEL.thresholds.high) }}
-                  </td>
-                </tr>
-                <tr>
-                  <th scope="row">{{ t("pattern.trafficCalendarSeverity.high") }}</th>
-                  <td>? {{ n(TRAFFIC_IMPACT_SEVERITY_MODEL.thresholds.high) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-        </div>
-
-        <p class="traffic-impact-equation__topology-note">
-          {{
-            t("settings.trafficCalendarEquation.topologyDeduction", {
-              ratio: n(TRAFFIC_IMPACT_SEVERITY_MODEL.smallBranchRatio * 100),
-            })
-          }}
-        </p>
-        <p class="traffic-impact-equation__example">
-          {{
-            t("settings.trafficCalendarEquation.example", {
-              base: n(TRAFFIC_IMPACT_SEVERITY_MODEL.baseStationScore),
-              transfer: n(TRAFFIC_IMPACT_SEVERITY_MODEL.transferWeights.RER),
-              coefficient: n(TRAFFIC_IMPACT_SEVERITY_MODEL.topologyMultipliers["trunk-core"]),
-              temporal: n(trafficImpactEveningExample.multiplier),
-              start: formatTrafficMinuteOfDay(trafficImpactEveningExampleWindow.startMinute),
-              end: formatTrafficMinuteOfDay(trafficImpactEveningExampleWindow.endMinute),
-              score: n(trafficImpactExampleScore),
-            })
-          }}
-        </p>
-        <p class="traffic-impact-equation__note">
-          {{ t("settings.trafficCalendarEquation.exclusions") }}
-        </p>
-      </article>
-
-      <label
-        v-if="isSettingVisible('traffic.modal-formatting', 'traffic')"
-        class="settings-toggle"
-        :title="t('settings.display.trafficModalSmartFormattingDescription')"
-      >
-        <input
-          type="checkbox"
-          :checked="settings.smartTrafficModalFormatting"
-          @change="
-            updateSettings({
-              smartTrafficModalFormatting: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>
-            {{ t("settings.display.trafficModalSmartFormatting") }}
-          </strong>
-          <small>
-            {{ t("settings.display.trafficModalSmartFormattingDescription") }}
-          </small>
-        </div>
-      </label>
-
-      <label v-if="isSettingVisible('traffic.smart-detection', 'traffic')" class="settings-toggle">
-        <input
-          type="checkbox"
-          :checked="settings.smartTrafficDetection"
-          @change="
-            updateSettings({
-              smartTrafficDetection: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.smartTraffic") }}</strong>
-          <small>{{ t("settings.display.smartTrafficDescription") }}</small>
-        </div>
-      </label>
-
-      <label
-        v-if="isSettingVisible('traffic.replacement-buses', 'traffic')"
-        class="settings-toggle"
-        :title="t('settings.display.unifyReplacementBusMarkersDescription')"
-      >
-        <input
-          type="checkbox"
-          :checked="settings.unifyReplacementBusMarkers"
-          @change="
-            updateSettings({
-              unifyReplacementBusMarkers: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.unifyReplacementBusMarkers") }}</strong>
-          <small>{{ t("settings.display.unifyReplacementBusMarkersDescription") }}</small>
-        </div>
-      </label>
-
-      <div
-        v-if="isSettingVisible('traffic.warning-lookahead', 'traffic')"
-        class="settings-row settings-row--range"
-      >
-        <div>
-          <strong>{{ t("settings.display.trafficWarningLookahead") }}</strong>
-          <span>{{ t("settings.display.trafficWarningLookaheadDescription") }}</span>
-        </div>
-        <label class="settings-range">
-          <span>{{ formatDays(settings.trafficWarningLookaheadDays) }}</span>
-          <input
-            :max="TRAFFIC_WARNING_LOOKAHEAD_DAYS_MAX"
-            :min="TRAFFIC_WARNING_LOOKAHEAD_DAYS_MIN"
-            :value="settings.trafficWarningLookaheadDays"
-            :aria-label="t('settings.display.trafficWarningLookaheadAria')"
-            step="1"
-            type="range"
-            @input="updateTrafficWarningLookaheadDays(($event.target as HTMLInputElement).value)"
-          />
-        </label>
-      </div>
-
-      <label
-        v-if="isSettingVisible('traffic.user-location', 'traffic')"
-        class="settings-toggle"
-        data-settings-user-location
-      >
-        <input
-          type="checkbox"
-          :checked="settings.showUserLocation"
-          @change="
-            updateSettings({
-              showUserLocation: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.showUserLocation") }}</strong>
-          <small>{{ t("settings.display.showUserLocationDescription") }}</small>
-        </div>
-      </label>
-
-      <label v-if="isSettingVisible('traffic.local-cache', 'traffic')" class="settings-toggle">
-        <input
-          type="checkbox"
-          :checked="settings.transferBundleLocalCacheEnabled"
-          @change="
-            updateSettings({
-              transferBundleLocalCacheEnabled: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.bundles.enableLocalCache") }}</strong>
-          <small>{{ t("settings.display.transferLocalCacheDescription") }}</small>
-        </div>
-      </label>
-
-      <label v-if="isSettingVisible('traffic.backend-cache', 'traffic')" class="settings-toggle">
-        <input
-          type="checkbox"
-          :checked="settings.transferBundleBackendCacheEnabled"
-          @change="
-            updateSettings({
-              transferBundleBackendCacheEnabled: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.bundles.enableBackendCache") }}</strong>
-          <small>{{ t("settings.display.transferBackendCacheDescription") }}</small>
-          <small
-            v-if="!settings.transferBundleBackendCacheEnabled"
-            class="settings-inline-warning"
-            role="alert"
-          >
-            {{ t("settings.bundles.slowWarning") }}
-          </small>
-        </div>
-      </label>
-
-      <div v-if="isSettingVisible('traffic.expiration', 'traffic')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.bundles.expiration") }}</strong>
-          <span>{{ t("settings.display.transferExpirationDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="String(settings.transferBundleRetentionDays)"
-          :options="transferBundleRetentionLocalizedOptions"
-          :aria-label="t('settings.display.transferExpirationAria')"
-          @update:model-value="updateTransferBundleRetention"
-        />
-      </div>
-
-      <div v-if="isSettingVisible('traffic.loading', 'traffic')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.bundles.loading") }}</strong>
-          <span>{{ t("settings.display.transferLoadingDescription") }}</span>
-        </div>
-      </div>
-
-      <div
-        v-if="isSettingVisible('traffic.resolver', 'traffic')"
-        class="settings-row"
-        data-settings-transfer-resolver
-      >
-        <div>
-          <strong>{{ t("settings.bundles.resolver") }}</strong>
-          <span>{{ t("settings.display.transferResolverDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="settings.transferResolverMode"
-          :options="transferResolverModeLocalizedOptions"
-          :aria-label="t('settings.display.transferResolverAria')"
-          @update:model-value="updateTransferResolverMode"
-        />
-      </div>
-
-      <div v-if="isSettingVisible('traffic.concurrency', 'traffic')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.bundles.concurrency") }}</strong>
-          <span>{{ t("settings.display.transferConcurrencyDescription") }}</span>
-          <small
-            v-if="settings.transferBundleRequestConcurrency > 1"
-            class="settings-inline-warning"
-          >
-            {{ t("settings.display.transferConcurrencyWarning") }}
-          </small>
-        </div>
-        <MaterialCombobox
-          :model-value="String(settings.transferBundleRequestConcurrency)"
-          :options="transferBundleRequestConcurrencyLocalizedOptions"
-          :aria-label="t('settings.display.transferConcurrencyAria')"
-          @update:model-value="updateTransferBundleRequestConcurrency"
-        />
-      </div>
-
-      <div v-if="isSettingVisible('traffic.spacing', 'traffic')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.bundles.spacing") }}</strong>
-          <span>{{ t("settings.display.transferSpacingDescription") }}</span>
-          <small v-if="settings.transferBundleRequestSpacingMs > 0" class="settings-inline-warning">
-            {{ t("settings.display.transferSpacingWarning") }}
-          </small>
-        </div>
-        <MaterialCombobox
-          :model-value="String(settings.transferBundleRequestSpacingMs)"
-          :options="transferBundleRequestSpacingLocalizedOptions"
-          :aria-label="t('settings.display.transferSpacingAria')"
-          @update:model-value="updateTransferBundleRequestSpacing"
-        />
-      </div>
-
-      <div v-if="isSettingVisible('traffic.bundles', 'traffic')" class="settings-bundle-actions">
-        <div>
-          <strong>{{ t("settings.bundles.title") }}</strong>
-          <span>{{ t("settings.display.transferCacheDescription") }}</span>
-        </div>
-        <div class="settings-bundle-actions__buttons">
-          <button class="button-secondary" type="button" @click="openBundlesModal">
-            {{ t("settings.bundles.view") }}
-          </button>
-          <button class="button-secondary" type="button" @click="clearBundles">
-            {{ t("settings.bundles.clear") }}
-          </button>
-        </div>
-      </div>
-
-      <div
-        v-if="isSettingVisible('traffic.walking-cache', 'traffic')"
-        class="settings-bundle-actions settings-walking-cache-actions"
-      >
-        <div>
-          <strong>{{ t("settings.walkingCache.title") }}</strong>
-          <span>{{ t("settings.walkingCache.description") }}</span>
-        </div>
-        <div class="settings-bundle-actions__buttons">
-          <button
-            data-settings-walking-cache-clear
-            class="button-secondary"
-            type="button"
-            @click="clearWalkingRoutesCache"
-          >
-            {{ t("settings.walkingCache.clear") }}
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <section
+    <SettingsWeatherCategory
       v-if="isPanelVisible('weather')"
-      class="settings-panel"
-      :class="{ 'settings-panel--open': isPanelOpen('weather') }"
-      aria-labelledby="settings-weather-title"
-    >
-      <div class="settings-panel__heading">
-        <button
-          class="settings-panel__trigger"
-          type="button"
-          :aria-expanded="isPanelOpen('weather')"
-          @click="togglePanel('weather')"
-        >
-          <div>
-            <p class="eyebrow">{{ t("weather.title") }}</p>
-            <h2 id="settings-weather-title">{{ t("settings.display.weather") }}</h2>
-          </div>
-          <ChevronDown :size="22" aria-hidden="true" />
-        </button>
-      </div>
-
-      <div v-if="isSettingVisible('weather.mode', 'weather')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.display.weather") }}</strong>
-          <span>{{ t("settings.display.weatherDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="settings.weatherMode"
-          :options="weatherModeLocalizedOptions"
-          :aria-label="t('settings.display.weatherModeAria')"
-          @update:model-value="updateWeatherMode"
-        />
-      </div>
-
-      <div v-if="isSettingVisible('weather.test-mode', 'weather')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.display.weatherTestMode") }}</strong>
-          <span>{{ t("settings.display.weatherTestDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="settings.weatherTestMode"
-          :options="weatherTestModeLocalizedOptions"
-          :aria-label="t('settings.display.weatherTestAria')"
-          @update:model-value="updateWeatherTestMode"
-        />
-      </div>
-
-      <div v-if="isSettingVisible('weather.lookahead', 'weather')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.display.weatherLookahead") }}</strong>
-          <span>{{ t("settings.display.weatherLookaheadDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="String(settings.weatherLookaheadMinutes)"
-          :options="weatherLookaheadLocalizedOptions"
-          :aria-label="t('settings.display.weatherLookaheadAria')"
-          @update:model-value="updateWeatherLookahead"
-        />
-      </div>
-
-      <label
-        v-if="isSettingVisible('weather.apparent-temperature', 'weather')"
-        class="settings-toggle"
-      >
-        <input
-          type="checkbox"
-          :checked="settings.weatherShowApparentTemperature"
-          @change="
-            updateSettings({
-              weatherShowApparentTemperature: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.weatherApparent") }}</strong>
-          <small>{{ t("settings.display.weatherApparentDescription") }}</small>
-        </div>
-      </label>
-
-      <div
-        v-if="isSettingVisible('weather.location', 'weather', 'weather.custom-location')"
-        class="settings-row"
-      >
-        <div>
-          <strong>{{ t("settings.display.weatherLocation") }}</strong>
-          <span>{{ t("settings.display.weatherLocationDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="settings.weatherLocationPreset"
-          :options="weatherLocationLocalizedOptions"
-          :aria-label="t('settings.display.weatherLocationAria')"
-          @update:model-value="updateWeatherLocationPreset"
-        />
-      </div>
-
-      <div
-        v-if="
-          settings.weatherLocationPreset === 'custom' &&
-          isSettingVisible('weather.custom-location', 'weather')
-        "
-        class="settings-custom-location"
-      >
-        <label>
-          <span>{{ t("settings.display.weatherCustomName") }}</span>
-          <input
-            class="settings-input"
-            :value="settings.weatherCustomLocation.label"
-            type="text"
-            @input="updateWeatherCustomLocation('label', ($event.target as HTMLInputElement).value)"
-          />
-        </label>
-        <label>
-          <span>{{ t("settings.display.weatherCustomLatitude") }}</span>
-          <input
-            class="settings-input"
-            :value="settings.weatherCustomLocation.latitude"
-            inputmode="decimal"
-            type="number"
-            step="0.0001"
-            @input="
-              updateWeatherCustomLocation('latitude', ($event.target as HTMLInputElement).value)
-            "
-          />
-        </label>
-        <label>
-          <span>{{ t("settings.display.weatherCustomLongitude") }}</span>
-          <input
-            class="settings-input"
-            :value="settings.weatherCustomLocation.longitude"
-            inputmode="decimal"
-            type="number"
-            step="0.0001"
-            @input="
-              updateWeatherCustomLocation('longitude', ($event.target as HTMLInputElement).value)
-            "
-          />
-        </label>
-      </div>
-    </section>
+      :is-setting-visible="isSettingVisible"
+      :panel-open="isPanelOpen('weather')"
+      :settings="settings"
+      :weather-location-localized-options="weatherLocationLocalizedOptions"
+      :weather-lookahead-localized-options="weatherLookaheadLocalizedOptions"
+      :weather-mode-localized-options="weatherModeLocalizedOptions"
+      :weather-test-mode-localized-options="weatherTestModeLocalizedOptions"
+      @toggle="togglePanel('weather')"
+      @update-settings="updateSettings"
+      @update-weather-custom-location="updateWeatherCustomLocation"
+      @update-weather-location-preset="updateWeatherLocationPreset"
+      @update-weather-lookahead="updateWeatherLookahead"
+      @update-weather-mode="updateWeatherMode"
+      @update-weather-test-mode="updateWeatherTestMode"
+    />
 
     <GtfsSettingsPanel
       v-if="isPanelVisible('gtfs')"
@@ -3077,424 +2116,23 @@ onBeforeUnmount(() => {
       @update:model-value="updateSettings({ gtfsLineGeometryEnabled: $event })"
     />
 
-    <section
+    <SettingsMapCategory
       v-if="isPanelVisible('map')"
-      class="settings-panel"
-      :class="{ 'settings-panel--open': isPanelOpen('map') }"
-      aria-labelledby="settings-map-title"
-    >
-      <div class="settings-panel__heading">
-        <button
-          class="settings-panel__trigger"
-          type="button"
-          :aria-expanded="isPanelOpen('map')"
-          @click="togglePanel('map')"
-        >
-          <div>
-            <p class="eyebrow">{{ t("settings.display.mapEyebrow") }}</p>
-            <h2 id="settings-map-title">{{ t("settings.display.mapTitle") }}</h2>
-          </div>
-          <ChevronDown :size="22" aria-hidden="true" />
-        </button>
-      </div>
-
-      <div v-if="isSettingVisible('map.contrast', 'map')" class="settings-row settings-row--range">
-        <div>
-          <strong>{{ t("settings.display.mapContrast") }}</strong>
-          <span>{{ t("settings.display.mapContrastDescription") }}</span>
-        </div>
-        <label class="settings-range">
-          <span>{{ formatMapContrast(settings.globalMapBasemapContrast) }}</span>
-          <input
-            data-settings-map-contrast
-            :max="GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.max"
-            :min="GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.min"
-            :value="settings.globalMapBasemapContrast"
-            :aria-label="t('settings.display.mapContrastAria')"
-            :step="GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.step"
-            type="range"
-            @input="updateGlobalMapBasemapContrast(($event.target as HTMLInputElement).value)"
-          />
-        </label>
-      </div>
-
-      <div v-if="isSettingVisible('map.basemap-style', 'map')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.display.mapBasemapStyle") }}</strong>
-          <span>{{ t("settings.display.mapBasemapStyleDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          data-settings-map-basemap-style
-          :model-value="settings.globalMapBasemapStyle"
-          :options="globalMapBasemapStyleLocalizedOptions"
-          :aria-label="t('settings.display.mapBasemapStyleAria')"
-          @update:model-value="updateGlobalMapBasemapStyle"
-        />
-      </div>
-
-      <label
-        v-if="isSettingVisible('map.antialiasing', 'map')"
-        class="settings-toggle"
-        data-settings-map-antialiasing
-      >
-        <input
-          type="checkbox"
-          role="switch"
-          :checked="settings.deckAntialiasing"
-          :aria-checked="settings.deckAntialiasing"
-          :aria-label="t('settings.display.deckAntialiasingAria')"
-          @change="
-            updateSettings({
-              deckAntialiasing: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.deckAntialiasing") }}</strong>
-          <small>{{ t("settings.display.deckAntialiasingDescription") }}</small>
-        </div>
-      </label>
-
-      <div v-if="isSettingVisible('map.nearby-controls', 'map')" class="settings-subheading">
-        <strong>{{ t("settings.display.nearbyMapControlsTitle") }}</strong>
-        <span>{{ t("settings.display.nearbyMapControlsDescription") }}</span>
-      </div>
-
-      <label
-        v-if="isSettingVisible('map.nearby-isochrone', 'map', 'map.nearby-controls')"
-        class="settings-toggle"
-        data-settings-nearby-control="isochrone"
-      >
-        <input
-          type="checkbox"
-          :checked="settings.nearbyMapShowIsochroneControl"
-          @change="
-            updateSettings({
-              nearbyMapShowIsochroneControl: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.nearbyMapShowIsochroneControl") }}</strong>
-          <small>{{ t("settings.display.nearbyMapShowIsochroneControlDescription") }}</small>
-        </div>
-      </label>
-
-      <label
-        v-if="isSettingVisible('map.nearby-directory', 'map', 'map.nearby-controls')"
-        class="settings-toggle"
-        data-settings-nearby-control="directory"
-      >
-        <input
-          type="checkbox"
-          :checked="settings.nearbyMapShowDirectoryControl"
-          @change="
-            updateSettings({
-              nearbyMapShowDirectoryControl: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.nearbyMapShowDirectoryControl") }}</strong>
-          <small>{{ t("settings.display.nearbyMapShowDirectoryControlDescription") }}</small>
-        </div>
-      </label>
-
-      <label
-        v-if="isSettingVisible('map.nearby-basemap', 'map', 'map.nearby-controls')"
-        class="settings-toggle"
-        data-settings-nearby-control="basemap"
-      >
-        <input
-          type="checkbox"
-          :checked="settings.nearbyMapShowBasemapControl"
-          @change="
-            updateSettings({
-              nearbyMapShowBasemapControl: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.nearbyMapShowBasemapControl") }}</strong>
-          <small>{{ t("settings.display.nearbyMapShowBasemapControlDescription") }}</small>
-        </div>
-      </label>
-
-      <label
-        v-if="isSettingVisible('map.nearby-display', 'map', 'map.nearby-controls')"
-        class="settings-toggle"
-        data-settings-nearby-control="display"
-      >
-        <input
-          type="checkbox"
-          :checked="settings.nearbyMapShowDisplayControl"
-          @change="
-            updateSettings({
-              nearbyMapShowDisplayControl: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.nearbyMapShowDisplayControl") }}</strong>
-          <small>{{ t("settings.display.nearbyMapShowDisplayControlDescription") }}</small>
-        </div>
-      </label>
-
-      <label
-        v-if="isSettingVisible('map.nearby-fullscreen', 'map', 'map.nearby-controls')"
-        class="settings-toggle"
-        data-settings-nearby-control="fullscreen"
-      >
-        <input
-          type="checkbox"
-          :checked="settings.nearbyMapShowFullscreenControl"
-          @change="
-            updateSettings({
-              nearbyMapShowFullscreenControl: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.nearbyMapShowFullscreenControl") }}</strong>
-          <small>{{ t("settings.display.nearbyMapShowFullscreenControlDescription") }}</small>
-        </div>
-      </label>
-
-      <label v-if="isSettingVisible('map.minimap', 'map')" class="settings-toggle">
-        <input
-          type="checkbox"
-          :checked="settings.showPatternMiniMap"
-          @change="
-            updateSettings({
-              showPatternMiniMap: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.showMiniMap") }}</strong>
-          <small>{{ t("settings.display.showMiniMapDescription") }}</small>
-        </div>
-      </label>
-
-      <label
-        v-if="isSettingVisible('map.line-icons', 'map')"
-        class="settings-toggle"
-        data-settings-travel-route-line-icons
-      >
-        <input
-          type="checkbox"
-          role="switch"
-          :checked="settings.showTravelRouteLineIcons"
-          :aria-checked="settings.showTravelRouteLineIcons"
-          :aria-label="t('settings.display.showTravelRouteLineIconsAria')"
-          @change="
-            updateSettings({
-              showTravelRouteLineIcons: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.showTravelRouteLineIcons") }}</strong>
-          <small>{{ t("settings.display.showTravelRouteLineIconsDescription") }}</small>
-        </div>
-      </label>
-
-      <label v-if="isSettingVisible('map.city-zones', 'map')" class="settings-toggle">
-        <input
-          type="checkbox"
-          :checked="settings.showPatternCityZones"
-          @change="
-            updateSettings({
-              showPatternCityZones: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.showCityZones") }}</strong>
-          <small>{{ t("settings.display.showCityZonesDescription") }}</small>
-        </div>
-      </label>
-
-      <div v-if="isSettingVisible('map.compact-mode', 'map')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.display.compactMode") }}</strong>
-          <span>{{ t("settings.display.compactModeDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="settings.compactLinePlanMode"
-          :options="compactLinePlanLocalizedOptions"
-          :aria-label="t('settings.display.compactModeAria')"
-          @update:model-value="updateCompactMode"
-        />
-      </div>
-
-      <div
-        v-if="isSettingVisible('map.compact-vertical-spacing', 'map')"
-        class="settings-row settings-row--range"
-      >
-        <div>
-          <strong>{{ t("settings.display.compactVerticalSpacing") }}</strong>
-          <span>{{ t("settings.display.compactVerticalSpacingDescription") }}</span>
-        </div>
-        <label class="settings-range">
-          <span>{{ formatPixels(settings.patternCompactBranchGap) }}</span>
-          <input
-            :max="PATTERN_COMPACT_BRANCH_GAP_MAX"
-            :min="PATTERN_COMPACT_BRANCH_GAP_MIN"
-            :value="settings.patternCompactBranchGap"
-            :aria-label="t('settings.display.compactVerticalSpacingAria')"
-            step="4"
-            type="range"
-            @input="updatePatternCompactBranchGap(($event.target as HTMLInputElement).value)"
-          />
-        </label>
-      </div>
-
-      <label v-if="isSettingVisible('map.rounded-curves', 'map')" class="settings-toggle">
-        <input
-          type="checkbox"
-          :checked="settings.patternRoundedCurves"
-          @change="
-            updateSettings({
-              patternRoundedCurves: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.roundedCurves") }}</strong>
-          <small>{{ t("settings.display.roundedCurvesDescription") }}</small>
-        </div>
-      </label>
-
-      <label
-        v-if="isSettingVisible('map.interruption-walking-times', 'map')"
-        class="settings-toggle"
-      >
-        <input
-          type="checkbox"
-          :checked="settings.showInterruptionWalkingTimes"
-          @change="
-            updateSettings({
-              showInterruptionWalkingTimes: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.interruptionWalkingTimes") }}</strong>
-          <small>{{ t("settings.display.interruptionWalkingTimesDescription") }}</small>
-        </div>
-      </label>
-
-      <div
-        v-if="isSettingVisible('map.compact-fork-gap', 'map')"
-        class="settings-row settings-row--range"
-      >
-        <div>
-          <strong>{{ t("settings.display.compactForkGap") }}</strong>
-          <span>{{ t("settings.display.compactForkGapDescription") }}</span>
-        </div>
-        <label class="settings-range">
-          <span>{{ formatPixels(settings.patternCompactForkGap) }}</span>
-          <input
-            :max="PATTERN_COMPACT_FORK_GAP_MAX"
-            :min="PATTERN_COMPACT_FORK_GAP_MIN"
-            :value="settings.patternCompactForkGap"
-            :aria-label="t('settings.display.compactForkGapAria')"
-            step="2"
-            type="range"
-            @input="updatePatternCompactForkGap(($event.target as HTMLInputElement).value)"
-          />
-        </label>
-      </div>
-
-      <div v-if="isSettingVisible('map.realistic-spacing', 'map')" class="settings-range-pair">
-        <div>
-          <strong>{{ t("settings.display.realisticSpacing") }}</strong>
-          <span>{{ t("settings.display.realisticSpacingDescription") }}</span>
-        </div>
-        <div class="settings-range-pair__controls">
-          <label class="settings-range">
-            <small>{{ t("settings.display.minCoefficient") }}</small>
-            <span>
-              {{ formatCoefficient(settings.patternRealisticMinGapCoefficient) }}
-            </span>
-            <input
-              :max="PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MAX"
-              :min="PATTERN_REALISTIC_MIN_GAP_COEFFICIENT_MIN"
-              :value="settings.patternRealisticMinGapCoefficient"
-              :aria-label="t('settings.display.minCoefficientAria')"
-              step="0.05"
-              type="range"
-              @input="
-                updatePatternRealisticMinGapCoefficient(($event.target as HTMLInputElement).value)
-              "
-            />
-          </label>
-          <label class="settings-range">
-            <small>{{ t("settings.display.maxCoefficient") }}</small>
-            <span>
-              {{ formatCoefficient(settings.patternRealisticMaxGapCoefficient) }}
-            </span>
-            <input
-              :max="PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MAX"
-              :min="PATTERN_REALISTIC_MAX_GAP_COEFFICIENT_MIN"
-              :value="settings.patternRealisticMaxGapCoefficient"
-              :aria-label="t('settings.display.maxCoefficientAria')"
-              step="0.25"
-              type="range"
-              @input="
-                updatePatternRealisticMaxGapCoefficient(($event.target as HTMLInputElement).value)
-              "
-            />
-          </label>
-        </div>
-      </div>
-
-      <label v-if="isSettingVisible('map.rich-transfer-tooltips', 'map')" class="settings-toggle">
-        <input
-          type="checkbox"
-          :checked="settings.richTransferTooltips"
-          @change="
-            updateSettings({
-              richTransferTooltips: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.richTransferTooltips") }}</strong>
-          <small>{{ t("settings.display.richTransferTooltipsDescription") }}</small>
-        </div>
-      </label>
-
-      <label v-if="isSettingVisible('map.reduce-motion', 'map')" class="settings-toggle">
-        <input
-          type="checkbox"
-          :checked="settings.reduceMotion"
-          @change="
-            updateSettings({
-              reduceMotion: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.display.reduceMotion") }}</strong>
-          <small>{{ t("settings.display.reduceMotionDescription") }}</small>
-        </div>
-      </label>
-    </section>
+      :compact-line-plan-localized-options="compactLinePlanLocalizedOptions"
+      :global-map-basemap-style-localized-options="globalMapBasemapStyleLocalizedOptions"
+      :is-setting-visible="isSettingVisible"
+      :panel-open="isPanelOpen('map')"
+      :settings="settings"
+      @toggle="togglePanel('map')"
+      @update-basemap-contrast="updateGlobalMapBasemapContrast"
+      @update-basemap-style="updateGlobalMapBasemapStyle"
+      @update-compact-branch-gap="updatePatternCompactBranchGap"
+      @update-compact-fork-gap="updatePatternCompactForkGap"
+      @update-compact-mode="updateCompactMode"
+      @update-realistic-max-gap="updatePatternRealisticMaxGapCoefficient"
+      @update-realistic-min-gap="updatePatternRealisticMinGapCoefficient"
+      @update-settings="updateSettings"
+    />
 
     <PluginViewer
       v-if="isPanelVisible('plugins')"
@@ -3503,109 +2141,21 @@ onBeforeUnmount(() => {
 
     <MobileReleaseCard v-if="isPanelVisible('mobile-release')" />
 
-    <section
+    <SettingsDeviceCategory
       v-if="isPanelVisible('device')"
-      class="settings-panel"
-      :class="{ 'settings-panel--open': isPanelOpen('device') }"
-      aria-labelledby="settings-device-title"
-    >
-      <div class="settings-panel__heading">
-        <button
-          class="settings-panel__trigger"
-          type="button"
-          :aria-expanded="isPanelOpen('device')"
-          @click="togglePanel('device')"
-        >
-          <div>
-            <p class="eyebrow">{{ t("settings.device.eyebrow") }}</p>
-            <h2 id="settings-device-title">{{ t("settings.device.title") }}</h2>
-          </div>
-          <ChevronDown :size="22" aria-hidden="true" />
-        </button>
-      </div>
-
-      <div
-        v-if="isSettingVisible('device.network', 'device')"
-        class="settings-row"
-        data-network-concurrency-setting
-      >
-        <div>
-          <strong>{{ t("settings.network.title") }}</strong>
-          <span>{{ t("settings.network.description") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="settings.networkConcurrencyMode"
-          :options="networkConcurrencyOptions"
-          :aria-label="t('settings.network.title')"
-          @update:model-value="
-            updateSettings({ networkConcurrencyMode: parseNetworkConcurrencyMode($event) })
-          "
-        />
-      </div>
-
-      <div v-if="isSettingVisible('device.wake-lock', 'device')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.device.wakeLock") }}</strong>
-          <span>{{ t("settings.device.wakeLockDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="settings.wakeLockDuration"
-          :options="wakeLockLocalizedOptions"
-          :aria-label="t('settings.device.wakeLockAria')"
-          @update:model-value="updateWakeLock"
-        />
-      </div>
-
-      <label v-if="isSettingVisible('device.wake-alarm', 'device')" class="settings-toggle">
-        <input
-          type="checkbox"
-          :checked="settings.wakeDeviceOnAlarm"
-          @change="
-            updateSettings({
-              wakeDeviceOnAlarm: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span></span>
-        <div>
-          <strong>{{ t("settings.device.wakeDeviceOnAlarm") }}</strong>
-          <small>{{ t("settings.device.wakeDeviceOnAlarmDescription") }}</small>
-        </div>
-      </label>
-
-      <div v-if="isSettingVisible('device.travel-margin', 'device')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.device.travelAlarmSafetyMinutes") }}</strong>
-          <span>{{ t("settings.device.travelAlarmSafetyMinutesDescription") }}</span>
-        </div>
-        <label class="settings-number-control">
-          <input
-            class="settings-input"
-            type="number"
-            min="0"
-            :max="TRAVEL_ALARM_SAFETY_MINUTES_MAX"
-            step="1"
-            :value="settings.travelAlarmSafetyMinutes"
-            :aria-label="t('settings.device.travelAlarmSafetyMinutesAria')"
-            @change="updateTravelAlarmSafetyMinutes(($event.target as HTMLInputElement).value)"
-          />
-          <span>{{ t("settings.device.minutesUnit") }}</span>
-        </label>
-      </div>
-
-      <div v-if="isSettingVisible('device.auto-hide', 'device')" class="settings-row">
-        <div>
-          <strong>{{ t("settings.device.navigationAutoHide") }}</strong>
-          <span>{{ t("settings.device.navigationAutoHideDescription") }}</span>
-        </div>
-        <MaterialCombobox
-          :model-value="settings.navigationAutoHide"
-          :options="navigationAutoHideLocalizedOptions"
-          :aria-label="t('settings.device.navigationAutoHideAria')"
-          @update:model-value="updateAutoHide"
-        />
-      </div>
-    </section>
+      :is-setting-visible="isSettingVisible"
+      :navigation-auto-hide-localized-options="navigationAutoHideLocalizedOptions"
+      :network-concurrency-options="networkConcurrencyOptions"
+      :panel-open="isPanelOpen('device')"
+      :settings="settings"
+      :wake-lock-localized-options="wakeLockLocalizedOptions"
+      @toggle="togglePanel('device')"
+      @update-auto-hide="updateAutoHide"
+      @update-network-concurrency-mode="updateNetworkConcurrencyMode"
+      @update-travel-alarm-safety-minutes="updateTravelAlarmSafetyMinutes"
+      @update-wake-lock="updateWakeLock"
+      @update-settings="updateSettings"
+    />
 
     <footer class="settings-page__footer">
       <button class="button-secondary" type="button" @click="resetSettingsWithNotification">
@@ -3820,8 +2370,7 @@ onBeforeUnmount(() => {
   </main>
 </template>
 
-<style scoped>
-.settings-page {
+<style scoped>.settings-page {
   color: var(--ink);
   margin: 0 auto;
   max-width: 1120px;
@@ -3896,7 +2445,7 @@ onBeforeUnmount(() => {
   transform: none;
 }
 
-.settings-panel {
+:deep(.settings-panel) {
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(16, 35, 63, 0.1);
   border-radius: 8px;
@@ -3907,7 +2456,7 @@ onBeforeUnmount(() => {
   padding: 22px;
 }
 
-.settings-panel__heading {
+:deep(.settings-panel__heading) {
   align-items: center;
   border-bottom: 1px solid rgba(16, 35, 63, 0.1);
   display: flex;
@@ -3915,11 +2464,11 @@ onBeforeUnmount(() => {
   padding-bottom: 16px;
 }
 
-.settings-panel:not(.settings-panel--open) > :not(.settings-panel__heading) {
+:deep(.settings-panel:not(.settings-panel--open) > :not(.settings-panel__heading)) {
   display: none;
 }
 
-.settings-panel__trigger {
+:deep(.settings-panel__trigger) {
   align-items: center;
   background: transparent;
   border: 0;
@@ -3934,44 +2483,44 @@ onBeforeUnmount(() => {
   text-align: left;
 }
 
-.settings-panel__trigger > div {
+:deep(.settings-panel__trigger > div) {
   min-width: 0;
 }
 
-.settings-panel__trigger:hover:not(:disabled) {
+:deep(.settings-panel__trigger:hover:not(:disabled)) {
   background: rgba(16, 35, 63, 0.035);
   color: inherit;
   transform: none;
 }
-.settings-panel__trigger svg {
+:deep(.settings-panel__trigger svg) {
   flex: 0 0 auto;
   transition: transform 180ms ease;
 }
 
-.settings-panel--open .settings-panel__trigger svg {
+:deep(.settings-panel--open .settings-panel__trigger svg) {
   transform: rotate(180deg);
 }
 
-.settings-panel__trigger:focus-visible {
+:deep(.settings-panel__trigger:focus-visible) {
   border-radius: 6px;
   outline: 3px solid color-mix(in srgb, var(--idfm-blue), transparent 35%);
   outline-offset: 4px;
 }
 
-.settings-panel h2 {
+:deep(.settings-panel h2) {
   font-size: 1.55rem;
   line-height: 1.1;
   margin: 0;
 }
 
-.settings-panel__description {
+:deep(.settings-panel__description) {
   color: var(--muted);
   font-weight: 720;
   line-height: 1.45;
   margin: 0;
 }
 
-.settings-panel__error {
+:deep(.settings-panel__error) {
   align-items: center;
   color: #b42318;
   display: flex;
@@ -3979,7 +2528,7 @@ onBeforeUnmount(() => {
   font-weight: 800;
 }
 
-.settings-data-overview {
+:deep(.settings-data-overview) {
   background: linear-gradient(145deg, #f4f7ff 0%, #ffffff 72%);
   border: 1px solid rgba(45, 92, 171, 0.16);
   border-radius: 14px;
@@ -3988,29 +2537,29 @@ onBeforeUnmount(() => {
   padding: 20px;
 }
 
-.settings-data-overview__header {
+:deep(.settings-data-overview__header) {
   align-items: flex-start;
   display: flex;
   gap: 18px;
   justify-content: space-between;
 }
 
-.settings-data-overview h3,
-.settings-data-quality h3 {
+:deep(.settings-data-overview h3),
+:deep(.settings-data-quality h3) {
   font-size: 1.15rem;
   line-height: 1.2;
   margin: 0;
 }
 
-.settings-data-overview p:not(.eyebrow),
-.settings-data-quality p:not(.eyebrow) {
+:deep(.settings-data-overview p:not(.eyebrow)),
+:deep(.settings-data-quality p:not(.eyebrow)) {
   color: var(--muted);
   font-weight: 720;
   line-height: 1.45;
   margin: 8px 0 0;
 }
 
-.settings-data-overview__badge {
+:deep(.settings-data-overview__badge) {
   background: #e8efff;
   border: 1px solid rgba(45, 92, 171, 0.18);
   border-radius: 999px;
@@ -4024,22 +2573,22 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-.settings-data-facts {
+:deep(.settings-data-facts) {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0;
 }
 
-.settings-data-facts > div,
-.settings-data-quality__level {
+:deep(.settings-data-facts > div),
+:deep(.settings-data-quality__level) {
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(16, 35, 63, 0.08);
   border-radius: 10px;
   padding: 12px;
 }
 
-.settings-data-facts dt {
+:deep(.settings-data-facts dt) {
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 950;
@@ -4047,13 +2596,13 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
-.settings-data-facts dd {
+:deep(.settings-data-facts dd) {
   font-size: 1.2rem;
   font-weight: 950;
   margin: 4px 0 0;
 }
 
-.settings-data-overview__meta {
+:deep(.settings-data-overview__meta) {
   align-items: center;
   color: var(--muted);
   display: flex;
@@ -4064,58 +2613,58 @@ onBeforeUnmount(() => {
   line-height: 1.4;
 }
 
-.settings-data-overview__meta span + span {
+:deep(.settings-data-overview__meta span + span) {
   border-left: 1px solid rgba(16, 35, 63, 0.14);
   padding-left: 18px;
 }
 
-.settings-data-quality {
+:deep(.settings-data-quality) {
   border-top: 1px solid rgba(16, 35, 63, 0.1);
   display: grid;
   gap: 14px;
   padding-top: 18px;
 }
 
-.settings-data-quality__levels {
+:deep(.settings-data-quality__levels) {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.settings-data-quality__level {
+:deep(.settings-data-quality__level) {
   display: grid;
   gap: 5px;
 }
 
-.settings-data-quality__level--detailed {
+:deep(.settings-data-quality__level--detailed) {
   border-color: rgba(191, 48, 153, 0.28);
   box-shadow: inset 3px 0 #bf3099;
 }
 
-.settings-data-quality__level strong {
+:deep(.settings-data-quality__level strong) {
   font-size: 0.95rem;
   font-weight: 950;
 }
 
-.settings-data-quality__level span,
-.settings-data-quality__note {
+:deep(.settings-data-quality__level span),
+:deep(.settings-data-quality__note) {
   color: var(--muted);
   font-size: 0.87rem;
   font-weight: 720;
   line-height: 1.4;
 }
 
-.settings-data-quality__note {
+:deep(.settings-data-quality__note) {
   margin: 0 !important;
 }
 
-.settings-data-quality-cards {
+:deep(.settings-data-quality-cards) {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
 }
 
-.settings-data-quality-card {
+:deep(.settings-data-quality-card) {
   background: rgba(255, 255, 255, 0.86);
   border: 1px solid rgba(16, 35, 63, 0.1);
   border-left: 3px solid #2d5cab;
@@ -4126,19 +2675,19 @@ onBeforeUnmount(() => {
   padding: 13px;
 }
 
-.settings-data-quality-card--attention {
+:deep(.settings-data-quality-card--attention) {
   border-left-color: #d97706;
 }
 
-.settings-data-quality-card--limited {
+:deep(.settings-data-quality-card--limited) {
   border-left-color: #b42318;
 }
 
-.settings-data-quality-card--online {
+:deep(.settings-data-quality-card--online) {
   border-left-color: #168a63;
 }
 
-.settings-data-quality-card__icon {
+:deep(.settings-data-quality-card__icon) {
   align-items: center;
   background: #e8efff;
   border-radius: 9px;
@@ -4149,7 +2698,7 @@ onBeforeUnmount(() => {
   width: 34px;
 }
 
-.settings-data-quality-card__status {
+:deep(.settings-data-quality-card__status) {
   align-items: center;
   color: #234d99;
   display: flex;
@@ -4160,26 +2709,26 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
-.settings-data-quality-card--attention .settings-data-quality-card__status {
+:deep(.settings-data-quality-card--attention .settings-data-quality-card__status) {
   color: #a45300;
 }
 
-.settings-data-quality-card--limited .settings-data-quality-card__status {
+:deep(.settings-data-quality-card--limited .settings-data-quality-card__status) {
   color: #b42318;
 }
 
-.settings-data-quality-card--online .settings-data-quality-card__status {
+:deep(.settings-data-quality-card--online .settings-data-quality-card__status) {
   color: #16734f;
 }
 
-.settings-data-quality-card h4 {
+:deep(.settings-data-quality-card h4) {
   font-size: 0.98rem;
   line-height: 1.2;
   margin: 5px 0 0;
 }
 
-.settings-data-quality-card p,
-.settings-data-quality-card small {
+:deep(.settings-data-quality-card p),
+:deep(.settings-data-quality-card small) {
   color: var(--muted);
   display: block;
   font-weight: 720;
@@ -4187,25 +2736,25 @@ onBeforeUnmount(() => {
   margin: 5px 0 0;
 }
 
-.settings-data-quality-card small {
+:deep(.settings-data-quality-card small) {
   font-size: 0.78rem;
   font-weight: 850;
 }
 
-.settings-data-accordion {
+:deep(.settings-data-accordion) {
   background: #f7f9fe;
   border: 1px solid rgba(16, 35, 63, 0.08);
   border-radius: 8px;
   overflow: hidden;
 }
 
-.settings-data-accordion summary {
+:deep(.settings-data-accordion summary) {
   cursor: pointer;
   font-weight: 900;
   padding: 14px 16px;
 }
 
-.settings-data-accordion pre {
+:deep(.settings-data-accordion pre) {
   border-top: 1px solid rgba(16, 35, 63, 0.08);
   margin: 0;
   max-height: 460px;
@@ -4215,41 +2764,41 @@ onBeforeUnmount(() => {
   word-break: break-word;
 }
 
-.settings-row {
+:deep(.settings-row) {
   align-items: center;
   display: grid;
   gap: 18px;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
 }
 
-.settings-subheading {
+:deep(.settings-subheading) {
   border-top: 1px solid rgba(16, 35, 63, 0.1);
   display: grid;
   gap: 4px;
   padding-top: 18px;
 }
 
-.settings-subheading strong {
+:deep(.settings-subheading strong) {
   color: var(--ink);
   font-size: 1.02rem;
   font-weight: 950;
 }
 
-.settings-subheading span {
+:deep(.settings-subheading span) {
   color: var(--muted);
   font-weight: 720;
   line-height: 1.45;
 }
 
-.settings-row strong,
-.settings-toggle strong {
+:deep(.settings-row strong),
+:deep(.settings-toggle strong) {
   display: block;
   font-size: 1.02rem;
   font-weight: 950;
 }
 
-.settings-row span,
-.settings-toggle small {
+:deep(.settings-row span),
+:deep(.settings-toggle small) {
   color: var(--muted);
   display: block;
   font-weight: 720;
@@ -4257,7 +2806,7 @@ onBeforeUnmount(() => {
   margin-top: 4px;
 }
 
-.settings-number-control {
+:deep(.settings-number-control) {
   align-items: center;
   display: flex;
   gap: 8px;
@@ -4265,21 +2814,21 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-.settings-number-control .settings-input {
+:deep(.settings-number-control .settings-input) {
   width: 92px;
 }
 
-.settings-number-control > span {
+:deep(.settings-number-control > span) {
   margin-top: 0;
   white-space: nowrap;
 }
 
-.settings-row--range {
+:deep(.settings-row--range) {
   align-items: start;
 }
 
-.settings-range,
-.settings-range-pair {
+:deep(.settings-range),
+:deep(.settings-range-pair) {
   background: #f7f9fe;
   border: 1px solid rgba(16, 35, 63, 0.08);
   border-radius: 8px;
@@ -4288,11 +2837,11 @@ onBeforeUnmount(() => {
   padding: 14px;
 }
 
-.settings-range {
+:deep(.settings-range) {
   min-width: 0;
 }
 
-.settings-range span {
+:deep(.settings-range span) {
   color: var(--ink);
   display: block;
   font-size: 1rem;
@@ -4301,7 +2850,7 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
-.settings-range small {
+:deep(.settings-range small) {
   color: var(--muted);
   font-size: 0.76rem;
   font-weight: 950;
@@ -4309,23 +2858,23 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
-.settings-range input[type="range"] {
+:deep(.settings-range input[type="range"]) {
   accent-color: var(--idfm-blue);
   width: 100%;
 }
 
-.settings-range-pair {
+:deep(.settings-range-pair) {
   align-items: start;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
 }
 
-.settings-range-pair > div:first-child strong {
+:deep(.settings-range-pair > div:first-child strong) {
   display: block;
   font-size: 1.02rem;
   font-weight: 950;
 }
 
-.settings-range-pair > div:first-child span {
+:deep(.settings-range-pair > div:first-child span) {
   color: var(--muted);
   display: block;
   font-weight: 720;
@@ -4333,13 +2882,13 @@ onBeforeUnmount(() => {
   margin-top: 4px;
 }
 
-.settings-range-pair__controls {
+:deep(.settings-range-pair__controls) {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.settings-toggle .settings-inline-warning {
+:deep(.settings-toggle .settings-inline-warning) {
   background: #fff7ed;
   border: 1px solid rgba(234, 88, 12, 0.2);
   border-radius: 8px;
@@ -4352,7 +2901,7 @@ onBeforeUnmount(() => {
   padding: 8px 10px;
 }
 
-.settings-bundle-actions {
+:deep(.settings-bundle-actions) {
   align-items: center;
   background: #f7f9fe;
   border: 1px solid rgba(16, 35, 63, 0.08);
@@ -4363,13 +2912,13 @@ onBeforeUnmount(() => {
   padding: 16px;
 }
 
-.settings-bundle-actions strong {
+:deep(.settings-bundle-actions strong) {
   display: block;
   font-size: 1.02rem;
   font-weight: 950;
 }
 
-.settings-bundle-actions span {
+:deep(.settings-bundle-actions span) {
   color: var(--muted);
   display: block;
   font-weight: 720;
@@ -4377,7 +2926,7 @@ onBeforeUnmount(() => {
   margin-top: 4px;
 }
 
-.settings-bundle-actions__buttons {
+:deep(.settings-bundle-actions__buttons) {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -4528,25 +3077,25 @@ onBeforeUnmount(() => {
   margin-top: 3px;
 }
 
-.settings-custom-location {
+:deep(.settings-custom-location) {
   display: grid;
   gap: 14px;
   grid-template-columns: 1.4fr 1fr 1fr;
 }
 
-.settings-custom-location label {
+:deep(.settings-custom-location label) {
   display: grid;
   gap: 7px;
 }
 
-.settings-custom-location label > span {
+:deep(.settings-custom-location label > span) {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 950;
   text-transform: uppercase;
 }
 
-.settings-input {
+:deep(.settings-input) {
   background: #ffffff;
   border: 1px solid rgba(16, 35, 63, 0.16);
   border-radius: 8px;
@@ -4558,13 +3107,13 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
-.settings-input:focus {
+:deep(.settings-input:focus) {
   border-color: var(--idfm-blue);
   box-shadow: 0 0 0 3px rgba(0, 100, 255, 0.12);
   outline: none;
 }
 
-.settings-toggle {
+:deep(.settings-toggle) {
   align-items: center;
   background: #f7f9fe;
   border: 1px solid rgba(16, 35, 63, 0.08);
@@ -4577,7 +3126,7 @@ onBeforeUnmount(() => {
   padding: 16px;
 }
 
-.settings-toggle input {
+:deep(.settings-toggle input) {
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
   height: 1px;
@@ -4587,7 +3136,7 @@ onBeforeUnmount(() => {
   width: 1px;
 }
 
-.settings-toggle > span {
+:deep(.settings-toggle > span) {
   background: #dbe4f2;
   border-radius: 999px;
   box-shadow: inset 0 0 0 1px rgba(16, 35, 63, 0.08);
@@ -4598,7 +3147,7 @@ onBeforeUnmount(() => {
   width: 58px;
 }
 
-.settings-toggle > span::after {
+:deep(.settings-toggle > span::after) {
   background: #ffffff;
   border-radius: 999px;
   box-shadow: 0 3px 9px rgba(16, 35, 63, 0.18);
@@ -4611,11 +3160,11 @@ onBeforeUnmount(() => {
   width: 26px;
 }
 
-.settings-toggle input:checked + span {
+:deep(.settings-toggle input:checked + span) {
   background: var(--idfm-blue);
 }
 
-.settings-toggle input:checked + span::after {
+:deep(.settings-toggle input:checked + span::after) {
   transform: translateX(24px);
 }
 
@@ -4625,7 +3174,8 @@ onBeforeUnmount(() => {
   margin-top: 22px;
 }
 
-.eyebrow {
+.eyebrow,
+:deep(.eyebrow) {
   color: #5136ff;
   font-size: 0.8rem;
   font-weight: 950;
@@ -4634,7 +3184,7 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
-.traffic-cache-settings {
+:deep(.traffic-cache-settings) {
   background: rgba(255, 255, 255, 0.72);
   border: 1px solid rgba(16, 35, 63, 0.1);
   border-radius: 14px;
@@ -4644,30 +3194,30 @@ onBeforeUnmount(() => {
   padding: 16px;
 }
 
-.traffic-cache-settings__header {
+:deep(.traffic-cache-settings__header) {
   align-items: flex-start;
   display: flex;
   gap: 14px;
   justify-content: space-between;
 }
 
-.traffic-cache-settings__header h3,
-.traffic-cache-settings__header p {
+:deep(.traffic-cache-settings__header h3),
+:deep(.traffic-cache-settings__header p) {
   margin: 0;
 }
 
-.traffic-cache-settings__header h3 {
+:deep(.traffic-cache-settings__header h3) {
   font-size: 1rem;
   margin-top: 3px;
 }
 
-.traffic-cache-settings__header p:last-child {
+:deep(.traffic-cache-settings__header p:last-child) {
   color: var(--settings-muted, #64748b);
   font-size: 0.82rem;
   margin-top: 5px;
 }
 
-.traffic-cache-settings__state {
+:deep(.traffic-cache-settings__state) {
   border: 1px solid rgba(16, 35, 63, 0.14);
   border-radius: 999px;
   font-size: 0.72rem;
@@ -4676,43 +3226,43 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.traffic-cache-settings__state[data-state="hit"] {
+:deep(.traffic-cache-settings__state[data-state="hit"]) {
   background: rgba(34, 197, 94, 0.12);
   color: #166534;
 }
 
-.traffic-cache-settings__state[data-state="stale"],
-.traffic-cache-settings__state[data-state="rate-limited"],
-.traffic-cache-settings__state[data-state="error"] {
+:deep(.traffic-cache-settings__state[data-state="stale"]),
+:deep(.traffic-cache-settings__state[data-state="rate-limited"]),
+:deep(.traffic-cache-settings__state[data-state="error"]) {
   background: rgba(245, 158, 11, 0.14);
   color: #92400e;
 }
 
-.traffic-cache-settings__facts {
+:deep(.traffic-cache-settings__facts) {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 0;
 }
 
-.traffic-cache-settings__facts div {
+:deep(.traffic-cache-settings__facts div) {
   background: rgba(248, 250, 252, 0.9);
   border-radius: 9px;
   padding: 9px 10px;
 }
 
-.traffic-cache-settings__facts dt {
+:deep(.traffic-cache-settings__facts dt) {
   color: var(--settings-muted, #64748b);
   font-size: 0.72rem;
 }
 
-.traffic-cache-settings__facts dd {
+:deep(.traffic-cache-settings__facts dd) {
   font-size: 0.83rem;
   font-weight: 800;
   margin: 3px 0 0;
 }
 
-.traffic-impact-equation {
+:deep(.traffic-impact-equation) {
   background: linear-gradient(135deg, rgba(245, 243, 255, 0.92), rgba(255, 247, 251, 0.92));
   border: 1px solid rgba(109, 40, 217, 0.14);
   border-radius: 16px;
@@ -4721,30 +3271,30 @@ onBeforeUnmount(() => {
   padding: 18px;
 }
 
-.traffic-impact-equation header {
+:deep(.traffic-impact-equation header) {
   display: grid;
   gap: 5px;
 }
 
-.traffic-impact-equation h3,
-.traffic-impact-equation h4,
-.traffic-impact-equation p {
+:deep(.traffic-impact-equation h3),
+:deep(.traffic-impact-equation h4),
+:deep(.traffic-impact-equation p) {
   margin: 0;
 }
 
-.traffic-impact-equation h3 {
+:deep(.traffic-impact-equation h3) {
   font-size: 1.02rem;
 }
 
-.traffic-impact-equation header > p:last-child,
-.traffic-impact-equation__topology-note,
-.traffic-impact-equation__note {
+:deep(.traffic-impact-equation header > p:last-child),
+:deep(.traffic-impact-equation__topology-note),
+:deep(.traffic-impact-equation__note) {
   color: #69657d;
   font-size: 0.78rem;
   line-height: 1.45;
 }
 
-.traffic-impact-equation > code {
+:deep(.traffic-impact-equation > code) {
   background: #17132e;
   border-radius: 10px;
   color: #ffffff;
@@ -4756,13 +3306,13 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.traffic-impact-equation__tables {
+:deep(.traffic-impact-equation__tables) {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
 
-.traffic-impact-equation__tables section {
+:deep(.traffic-impact-equation__tables section) {
   background: rgba(255, 255, 255, 0.76);
   border: 1px solid rgba(16, 35, 63, 0.08);
   border-radius: 11px;
@@ -4770,36 +3320,36 @@ onBeforeUnmount(() => {
   padding: 11px;
 }
 
-.traffic-impact-equation h4 {
+:deep(.traffic-impact-equation h4) {
   font-size: 0.77rem;
   margin-bottom: 7px;
 }
 
-.traffic-impact-equation table {
+:deep(.traffic-impact-equation table) {
   border-collapse: collapse;
   font-size: 0.72rem;
   width: 100%;
 }
 
-.traffic-impact-equation th,
-.traffic-impact-equation td {
+:deep(.traffic-impact-equation th),
+:deep(.traffic-impact-equation td) {
   border-top: 1px solid rgba(16, 35, 63, 0.07);
   padding: 5px 0;
   text-align: left;
 }
 
-.traffic-impact-equation th {
+:deep(.traffic-impact-equation th) {
   font-weight: 700;
 }
 
-.traffic-impact-equation td {
+:deep(.traffic-impact-equation td) {
   font-variant-numeric: tabular-nums;
   font-weight: 900;
   text-align: right;
   white-space: nowrap;
 }
 
-.traffic-impact-equation__example {
+:deep(.traffic-impact-equation__example) {
   background: #ffffff;
   border-left: 3px solid #7c3aed;
   border-radius: 5px 10px 10px 5px;
@@ -4810,40 +3360,40 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 760px) {
-  .settings-data-overview__header {
+  :deep(.settings-data-overview__header) {
     flex-direction: column;
   }
 
-  .settings-data-overview__badge {
+  :deep(.settings-data-overview__badge) {
     max-width: none;
   }
 
-  .settings-data-facts {
+  :deep(.settings-data-facts) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .settings-data-quality__levels {
+  :deep(.settings-data-quality__levels) {
     grid-template-columns: 1fr;
   }
 
-  .traffic-cache-settings__facts {
+  :deep(.traffic-cache-settings__facts) {
     grid-template-columns: 1fr;
   }
 
-  .settings-row,
-  .settings-range-pair,
-  .settings-custom-location {
+  :deep(.settings-row),
+  :deep(.settings-range-pair),
+  :deep(.settings-custom-location) {
     grid-template-columns: 1fr;
   }
 
-  .settings-number-control {
+  :deep(.settings-number-control) {
     justify-self: start;
   }
 
-  .settings-range-pair__controls {
+  :deep(.settings-range-pair__controls) {
     grid-template-columns: 1fr;
   }
-  .traffic-impact-equation__tables {
+  :deep(.traffic-impact-equation__tables) {
     grid-template-columns: 1fr;
   }
 }

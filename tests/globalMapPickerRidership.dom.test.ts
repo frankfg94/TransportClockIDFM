@@ -287,6 +287,14 @@ describe("GlobalMapPickerSideBar annual ridership", () => {
 
     expect(wrapper.find(".global-map-picker-sidebar__line-profile").exists()).toBe(true);
     expect(wrapper.text()).toContain("194");
+    expect(
+      wrapper.findAll(".global-map-picker-sidebar__line-stat span").map((node) => node.text()),
+    ).toEqual([
+      "globalMap.sidebar.lineStatsLength",
+      "globalMap.sidebar.lineStatsStations",
+      "globalMap.sidebar.lineStatsCities",
+      "globalMap.sidebar.lineStatsConnections",
+    ]);
 
     // Moving through the tooltip gap must not mount the station body or leave
     // the line body just for one frame.

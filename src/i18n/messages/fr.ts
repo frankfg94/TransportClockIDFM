@@ -142,7 +142,7 @@ export const fr = {
     },
     modes: {
       bus: "Bus",
-      metro: "Metro",
+      metro: "Métro",
       rer: "RER",
       train: "Train",
       transilien: "Transilien",

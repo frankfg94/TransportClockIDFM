@@ -469,8 +469,22 @@ export function useNearbyStationsLineFlow(
     // already enough to draw a useful path; direction arrows and road-level
     // geometry can arrive afterwards.
     const sequencesPromise = getCachedLineSequences(line).catch((): LineRouteSequence[] => []);
-    const viewport = await source.queryTransportMapViewport(camera, line.id, [line.id]);
-    const targetPaths = viewport.paths.filter((path) => path.lineId === line.id);
+    let targetPaths: GlobalMapPath[] = [];
+    try {
+      const viewport = await source.queryTransportMapViewport(camera, line.id, [line.id]);
+      targetPaths = viewport.paths.filter((path) => path.lineId === line.id);
+    } catch (cause) {
+      // A camera change can cancel an in-flight viewport decode. Direction
+      // topology and GTFS geometry are independent of that viewport result,
+      // so keep resolving them against the regional skeleton instead of
+      // dropping the whole focused line flow.
+      if (!(cause instanceof Error && cause.name === "AbortError")) {
+        console.warn(
+          `[nearby-map] viewport detail unavailable line=${line.id}`,
+          cause instanceof Error ? cause.message : cause,
+        );
+      }
+    }
     const preferredPaths = selectPreferredLinePaths(
       targetPaths,
       network?.regionalPaths ?? [],

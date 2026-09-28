@@ -5,11 +5,19 @@ import GhostLineFlowOverlay from "../src/features/transport-map/overlays/GhostLi
 import type { GlobalMapLine, GlobalMapPath, GlobalMapStation } from "../src/features/transport-map/contracts/manifest";
 import type { TransportMapNetwork, TransportMapViewportResult } from "../src/features/transport-map/contracts/network";
 import { createCamera } from "../src/features/transport-map/geo/camera";
+import { fetchLineRouteSequences } from "../src/services/idfm";
+import { fetchResolvedLineGeometry } from "../src/services/lineGeometry";
+import type { LineGeometryResolution } from "../src/features/line-map/lineGeometry";
+import type { LineRouteSequence } from "../src/types/transit";
 import type { NearbyStationEntry } from "../src/features/nearby-stations/nearbyStations";
 import { useNearbyStationsLineFlow, type NearbyStationsLineFlowSource } from "../src/features/nearby-stations/useNearbyStationsLineFlow";
 
 vi.mock("../src/services/idfm", () => ({
   fetchLineRouteSequences: vi.fn(async () => []),
+}));
+
+vi.mock("../src/services/lineGeometry", () => ({
+  fetchResolvedLineGeometry: vi.fn(),
 }));
 
 const line: GlobalMapLine = {
@@ -97,6 +105,177 @@ function pathHasVisiblePoint(d: string, width: number, height: number): boolean 
 }
 
 describe("NearbyStations line ghost flow DOM", () => {
+  it("resolves Noctilien GTFS geometry when a focused viewport decode is canceled", async () => {
+    vi.useFakeTimers();
+    let wrapper: ReturnType<typeof mount> | undefined;
+    try {
+      const noctilienLine: GlobalMapLine = {
+        ...line,
+        id: "line:IDFM:C01807",
+        code: "N66",
+        label: "N66",
+        sourceLineId: "IDFM:C01807",
+        mode: "NOCTILIEN",
+        stationIds: ["station:n66:from", "station:n66:to"],
+        geometryIds: ["path:regional:line:IDFM:C01807"],
+      };
+      const fromStation: GlobalMapStation = {
+        ...station,
+        id: "station:n66:from",
+        name: "Châtillon",
+        normalizedName: "chatillon",
+        lineIds: [noctilienLine.id],
+        lon: 0,
+        lat: 0,
+        worldX: 0.5,
+        worldY: 0.5,
+      };
+      const toStation: GlobalMapStation = {
+        ...station,
+        id: "station:n66:to",
+        name: "Gare Montparnasse",
+        normalizedName: "gare montparnasse",
+        lineIds: [noctilienLine.id],
+        lon: 0.01,
+        lat: 0,
+        worldX: 0.5000277778,
+        worldY: 0.5,
+      };
+      const regionalPath: GlobalMapPath = {
+        ...path,
+        id: "path:regional:line:IDFM:C01807",
+        lineId: noctilienLine.id,
+        geometrySource: "netex",
+        stationIds: [fromStation.id, toStation.id],
+        vertices: [
+          { stationId: fromStation.id, x: fromStation.worldX, y: fromStation.worldY },
+          { stationId: toStation.id, x: toStation.worldX, y: toStation.worldY },
+        ],
+        minX: fromStation.worldX,
+        minY: fromStation.worldY,
+        maxX: toStation.worldX,
+        maxY: toStation.worldY,
+      };
+      const noctilienNetwork: TransportMapNetwork = {
+        ...network,
+        lines: [noctilienLine],
+        stations: [fromStation, toStation],
+        regionalPaths: [regionalPath],
+        pathsById: new Map([[regionalPath.id, regionalPath]]),
+        linesById: new Map([[noctilienLine.id, noctilienLine]]),
+        stationsById: new Map([
+          [fromStation.id, fromStation],
+          [toStation.id, toStation],
+        ]),
+      };
+      const route: LineRouteSequence = {
+        id: "pattern:n66:to-montparnasse",
+        label: "Châtillon ↔ Gare Montparnasse",
+        direction: "Gare Montparnasse",
+        topologySource: "server",
+        stops: [fromStation, toStation].map((nextStation) => ({
+          id: nextStation.id,
+          label: nextStation.name,
+          city: "Châtillon",
+          lon: nextStation.lon,
+          lat: nextStation.lat,
+          station: {
+            id: nextStation.id,
+            label: nextStation.name,
+            city: "Châtillon",
+            lon: nextStation.lon,
+            lat: nextStation.lat,
+            monitoringRef: nextStation.id,
+          },
+        })),
+      };
+      const resolution: LineGeometryResolution = {
+        schemaVersion: 1,
+        source: "gtfs",
+        topology: "requested",
+        datasetVersion: "2026-08-30",
+        generatedAt: "2026-08-30T00:00:00.000Z",
+        stops: route.stops.map((stop) => ({
+          id: stop.id,
+          label: stop.label,
+          lon: stop.lon!,
+          lat: stop.lat!,
+        })),
+        branches: [{
+          id: "station:n66:to",
+          direction: "Gare Montparnasse",
+          stopIds: ["station:n66:from", "station:n66:to"],
+        }],
+        segments: [{
+          id: "segment:n66:from-to",
+          fromStopId: "station:n66:from",
+          toStopId: "station:n66:to",
+          coordinates: [
+            { lon: 0, lat: 0 },
+            { lon: 0.005, lat: 0 },
+            { lon: 0.01, lat: 0 },
+          ],
+        }],
+        entrances: [],
+        attempts: [{ source: "gtfs", status: "success" }],
+      };
+      vi.mocked(fetchLineRouteSequences).mockResolvedValueOnce([route]);
+      vi.mocked(fetchResolvedLineGeometry).mockResolvedValueOnce(resolution);
+
+      const camera = createCamera({
+        centerWorldX: 0.5,
+        centerWorldY: 0.5,
+        zoom: 12,
+        viewportWidthCssPx: 720,
+        viewportHeightCssPx: 360,
+      });
+      const queryTransportMapViewport = vi.fn(async () => {
+        throw new DOMException("Stale worker generation", "AbortError");
+      });
+      const source: NearbyStationsLineFlowSource = {
+        visibleStations: ref([]),
+        activeModes: ref(["NOCTILIEN"]),
+        transportMapNetwork: ref(noctilienNetwork),
+        queryTransportMapViewport,
+      };
+      const Harness = defineComponent({
+        components: { GhostLineFlowOverlay },
+        setup() {
+          const flow = useNearbyStationsLineFlow(source);
+          flow.handleCameraChange(camera);
+          return { flow, lineId: noctilienLine.id };
+        },
+        template: `
+          <button data-testid="activate-line" @click="flow.handleActivateLine(lineId)">Activer</button>
+          <GhostLineFlowOverlay
+            v-if="flow.lineFlowModel.value"
+            :model="flow.lineFlowModel.value"
+            terminus-label="Terminus"
+          />
+        `,
+      });
+
+      wrapper = mount(Harness);
+      await wrapper.get("[data-testid='activate-line']").trigger("click");
+      await vi.advanceTimersByTimeAsync(70);
+      await flushPromises();
+      await nextTick();
+
+      expect(queryTransportMapViewport).toHaveBeenCalledWith(camera, noctilienLine.id, [noctilienLine.id]);
+      expect(fetchResolvedLineGeometry).toHaveBeenCalledWith(expect.objectContaining({
+        lineId: "IDFM:C01807",
+        lineLabel: "N66",
+        useGtfs: true,
+      }));
+      expect(wrapper.findAll(".transport-ghost-flow__wave")).toHaveLength(1);
+      const pathD = wrapper.get(".transport-ghost-flow__path").attributes("d");
+      expect(pathD?.match(/\bL\b/g)).toHaveLength(2);
+    } finally {
+      wrapper?.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it("loads and renders the selected projected Metro 13 ghost path with an explicit forced line", async () => {
     vi.useFakeTimers();
     let wrapper: ReturnType<typeof mount> | undefined;
