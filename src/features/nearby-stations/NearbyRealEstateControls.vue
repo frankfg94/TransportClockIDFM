@@ -117,3 +117,28 @@ function updateMeasure(event: Event): void {
     </p>
   </div>
 </template>
+
+<style scoped>
+.nearby-map__real-estate-controls { color: #263247; display: grid; gap: 10px; }
+.nearby-map__real-estate-layer-switch { align-items: center; border-bottom: 1px solid rgba(100,116,139,.12); color: #263247; cursor: pointer; display: flex; font-size: .82rem; font-weight: 800; gap: 12px; justify-content: space-between; min-height: 42px; padding-bottom: 8px; }
+.nearby-map__real-estate-layer-switch input { accent-color: #9f1239; flex: 0 0 20px; height: 20px; margin: 0; width: 20px; }
+.nearby-map__real-estate-mode { background: #f4f5f8; border: 1px solid rgba(100,116,139,.12); border-radius: 10px; display: grid; gap: 3px; grid-template-columns: 1fr 1fr; padding: 3px; }
+.nearby-map__real-estate-mode button { background: transparent; border: 0; border-radius: 7px; color: #687589; cursor: pointer; font: inherit; font-size: .7rem; font-weight: 780; min-height: 34px; padding: 6px 7px; }
+.nearby-map__real-estate-mode button:hover, .nearby-map__real-estate-mode button:focus-visible { outline: 2px solid rgba(159,18,57,.22); }
+.nearby-map__real-estate-mode button.nearby-map__real-estate-mode--active { background: #fff; box-shadow: 0 1px 4px rgba(15,23,42,.12); color: #9f1239; }
+.nearby-map__real-estate-selects { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0,1fr)); }
+.nearby-map__real-estate-selects label { display: grid; gap: 4px; min-width: 0; }
+.nearby-map__real-estate-selects label > span { color: #69768a; font-size: .67rem; font-weight: 760; }
+.nearby-map__real-estate-selects select { background: #fff; border: 1px solid rgba(100,116,139,.22); border-radius: 8px; color: #243047; font: inherit; font-size: .69rem; font-weight: 720; min-height: 34px; min-width: 0; padding: 5px 7px; }
+.nearby-map__real-estate-selects select:focus-visible { border-color: #be123c; outline: 2px solid rgba(190,18,60,.18); }
+.nearby-map__real-estate-gradient { display: grid; gap: 6px; grid-template-columns: repeat(3, minmax(0,1fr)); padding-top: 13px; position: relative; }
+.nearby-map__real-estate-gradient::before { background: linear-gradient(90deg, #16a34a 0%, #84cc16 20%, #facc15 40%, #f97316 60%, #dc2626 80%, #7f1d1d 100%); border-radius: 999px; content: ""; height: 8px; left: 0; position: absolute; right: 0; top: 0; }
+.nearby-map__real-estate-gradient--liquidity::before { background: linear-gradient(90deg, #fecaca 0%, #f87171 36%, #dc2626 72%, #991b1b 100%); }
+.nearby-map__real-estate-gradient span { color: #69768a; font-size: .64rem; line-height: 1.25; }
+.nearby-map__real-estate-gradient span:nth-child(2) { text-align: center; }
+.nearby-map__real-estate-gradient span:last-child { text-align: right; }
+.nearby-map__real-estate-rank { background: rgba(254,242,242,.72); border-radius: 8px; color: #52627a; font-size: .69rem; line-height: 1.35; margin: 0; padding: 7px 8px; }
+.nearby-map__real-estate-disclaimer { border-top: 1px solid rgba(100,116,139,.12); color: #738094; font-size: .67rem; line-height: 1.4; margin: 0; padding-top: 8px; }
+.nearby-map__real-estate-disclaimer a { color: #9f1239; font-weight: 790; margin-left: 3px; text-decoration: underline; text-underline-offset: 2px; }
+.nearby-map__real-estate-disclaimer a:focus-visible { outline: 2px solid rgba(159,18,57,.34); }
+</style>
