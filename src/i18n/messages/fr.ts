@@ -1773,6 +1773,13 @@ export const fr = {
      realEstate: {
        toggle: "Immobilier",
        toggleAria: "Afficher les prix et la fréquence des ventes immobilières",
+       showLayer: "Afficher la couche immobilière",
+       hideLayer: "Masquer la couche immobilière",
+       openPanel: "Afficher les réglages immobiliers",
+       closePanel: "Fermer les réglages immobiliers",
+       panelTitle: "Immobilier",
+       panelResize: "Agrandir ou réduire le panneau immobilier",
+       layerControl: "Afficher la couche des prix et des ventes",
        unavailable: "Données immobilières indisponibles",
        loading: "Chargement des tendances immobilières…",
        prices: "Prix au m²",
