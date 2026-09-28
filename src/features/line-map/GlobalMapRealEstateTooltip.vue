@@ -1,9 +1,26 @@
 <template>
   <div class="global-map-real-estate-tooltip" role="tooltip" :style="style">
-    <span class="global-map-real-estate-tooltip__city">{{ cell.cityName }}</span>
-    <strong>{{ formatPrice(cell.medianPriceM2) }} €/m²</strong>
-    <span class="global-map-real-estate-tooltip__sales">
-      {{ t("globalMap.realEstate.cellSales", { count: formatCount(cell.transactionCount) }) }}
+    <span v-if="isPurchasePoint" class="global-map-real-estate-tooltip__point">
+      {{ t("globalMap.realEstate.purchasePoint") }}
+    </span>
+    <span v-if="cell" class="global-map-real-estate-tooltip__city">{{ cell.cityName }}</span>
+    <template v-if="cell">
+      <span class="global-map-real-estate-tooltip__metric">
+        {{ t(isPurchasePoint ? "globalMap.realEstate.nearestCellMean" : "globalMap.realEstate.cellMean") }}
+      </span>
+      <strong>{{ formatPrice(cell.meanPriceM2) }} €/m²</strong>
+      <span class="global-map-real-estate-tooltip__sales">
+        {{ t(isPurchasePoint ? "globalMap.realEstate.nearestCellSales" : "globalMap.realEstate.cellSales", {
+          count: formatCount(cell.transactionCount),
+          median: formatPrice(cell.medianPriceM2),
+        }) }}
+      </span>
+      <span v-if="isPurchasePoint && referencePeriod" class="global-map-real-estate-tooltip__period">
+        DVF · {{ referencePeriod }}
+      </span>
+    </template>
+    <span v-else class="global-map-real-estate-tooltip__sales">
+      {{ t("globalMap.realEstate.purchasePointNoAggregate") }}
     </span>
   </div>
 </template>
@@ -13,7 +30,15 @@ import type { CSSProperties } from "vue";
 import { useI18n } from "../../i18n";
 import type { DvfMapGridCell } from "../../services/real-estate/realEstateMapLayer";
 
-defineProps<{ cell: DvfMapGridCell; style: CSSProperties }>();
+withDefaults(defineProps<{
+  cell?: DvfMapGridCell;
+  isPurchasePoint?: boolean;
+  referencePeriod?: string;
+  style: CSSProperties;
+}>(), {
+  isPurchasePoint: false,
+  referencePeriod: "",
+});
 const { locale, t } = useI18n();
 
 function formatPrice(value: number): string {
@@ -52,6 +77,13 @@ function formatCount(value: number): string {
   white-space: nowrap;
 }
 
+.global-map-real-estate-tooltip__point {
+  color: #475569;
+  font-size: 0.68rem;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
 .global-map-real-estate-tooltip strong {
   color: #991b1b;
   font-size: 0.94rem;
@@ -61,5 +93,12 @@ function formatCount(value: number): string {
 .global-map-real-estate-tooltip__sales {
   color: #64748b;
   font-size: 0.63rem;
+}
+
+.global-map-real-estate-tooltip__metric,
+.global-map-real-estate-tooltip__period {
+  color: #64748b;
+  font-size: 0.63rem;
+  line-height: 1.3;
 }
 </style>

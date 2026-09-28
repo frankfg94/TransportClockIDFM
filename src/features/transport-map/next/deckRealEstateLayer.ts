@@ -7,10 +7,21 @@ import type { DvfPurchasePoint } from "../../../services/real-estate/compiledRea
 export const REAL_ESTATE_PRICE_LAYER_ID = "real-estate-price-heatmap";
 export const REAL_ESTATE_HIT_LAYER_ID = "real-estate-price-hit-targets";
 export const REAL_ESTATE_PURCHASE_POINTS_LAYER_ID = "real-estate-purchase-points";
+export const REAL_ESTATE_PURCHASE_POINTS_HALO_LAYER_ID = "real-estate-purchase-point-halos";
+export const REAL_ESTATE_PURCHASE_POINT_HOVER_HALO_LAYER_ID = "real-estate-purchase-point-hover-halo";
+export const REAL_ESTATE_PURCHASE_POINT_HOVER_LAYER_ID = "real-estate-purchase-point-hover";
 
 export interface DvfMapPriceRange {
   low: number;
   high: number;
+}
+
+/** Runtime-only join between a parcel-centre dot and its nearest aggregate cell. */
+export interface DvfMapPurchasePointMark {
+  id: string;
+  cityCode: string;
+  coordinates: DvfPurchasePoint;
+  context?: DvfMapGridCell;
 }
 
 const PRICE_COLORS = [
@@ -42,7 +53,7 @@ function getPriceRangeAccessors(range: DvfMapPriceRange): PriceRangeAccessors {
   const accessors: PriceRangeAccessors = {
     low: range.low,
     high: range.high,
-    getWeight: (cell) => Math.max(range.low, Math.min(range.high, cell.medianPriceM2)),
+    getWeight: (cell) => Math.max(range.low, Math.min(range.high, cell.meanPriceM2)),
     colorDomain: [range.low, range.high],
     updateTriggers: { getWeight: [range.low, range.high] },
   };
@@ -56,7 +67,7 @@ function getDvfCellPosition(cell: DvfMapGridCell): [number, number] {
 
 /** Use robust tails so a few exceptional sales do not flatten the regional contrast. */
 export function getDvfMapPriceRange(cells: readonly DvfMapGridCell[]): DvfMapPriceRange {
-  const prices = cells.map((cell) => cell.medianPriceM2).filter(Number.isFinite).sort((a, b) => a - b);
+  const prices = cells.map((cell) => cell.meanPriceM2).filter(Number.isFinite).sort((a, b) => a - b);
   if (!prices.length) return { low: 0, high: 1 };
   return {
     low: quantile(prices, 0.04),
@@ -114,29 +125,128 @@ export function createDeckRealEstatePriceLayers(
   ];
 }
 
-/** Show only parcel-centre locations; the source carries no sale attributes. */
+/** Show parcel-centre dots joined at runtime to their nearest aggregate cell. */
 export function createDeckRealEstatePurchasePointsLayer(
-  points: readonly DvfPurchasePoint[],
+  points: readonly DvfMapPurchasePointMark[],
+  range: DvfMapPriceRange,
   beforeId?: string,
 ): Layer {
-  return new ScatterplotLayer<DvfPurchasePoint>({
+  return new ScatterplotLayer<DvfMapPurchasePointMark>({
     id: REAL_ESTATE_PURCHASE_POINTS_LAYER_ID,
     data: points,
     coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-    pickable: false,
+    pickable: true,
     stroked: true,
     filled: true,
     radiusUnits: "pixels",
-    radiusMinPixels: 2.5,
-    radiusMaxPixels: 3.5,
+    radiusMinPixels: 4,
+    radiusMaxPixels: 5.5,
     lineWidthUnits: "pixels",
     lineWidthMinPixels: 1,
-    getPosition: ([longitude, latitude]) => [longitude, latitude],
-    getRadius: 3,
-    getFillColor: [30, 41, 59, 235],
+    getPosition: (mark) => [mark.coordinates[0], mark.coordinates[1]],
+    getRadius: 4.5,
+    getFillColor: (mark) => mark.context
+      ? getDvfMapPriceColor(mark.context.meanPriceM2, range)
+      : [71, 85, 105, 220],
     getLineColor: [255, 255, 255, 245],
     ...(beforeId ? { beforeId } : {}),
   });
+}
+
+/** Subtle price-coloured halos make parcel dots distinguishable at close zoom. */
+export function createDeckRealEstatePurchasePointsHaloLayer(
+  points: readonly DvfMapPurchasePointMark[],
+  range: DvfMapPriceRange,
+  beforeId?: string,
+): Layer {
+  return new ScatterplotLayer<DvfMapPurchasePointMark>({
+    id: REAL_ESTATE_PURCHASE_POINTS_HALO_LAYER_ID,
+    data: points,
+    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+    pickable: false,
+    stroked: false,
+    filled: true,
+    radiusUnits: "pixels",
+    radiusMinPixels: 7,
+    radiusMaxPixels: 9,
+    getPosition: (mark) => [mark.coordinates[0], mark.coordinates[1]],
+    getRadius: 7.5,
+    getFillColor: (mark) => mark.context
+      ? getDvfMapPriceColor(mark.context.meanPriceM2, range, 0.2)
+      : [71, 85, 105, 38],
+    ...(beforeId ? { beforeId } : {}),
+  });
+}
+
+/** Add a soft halo and a slightly larger marker for the currently hovered dot. */
+export function createDeckRealEstatePurchasePointHoverLayers(
+  mark: DvfMapPurchasePointMark | undefined,
+  range: DvfMapPriceRange,
+  beforeId?: string,
+): Layer[] {
+  if (!mark) return [];
+  const data = [mark];
+  const color: [number, number, number, number] = mark.context
+    ? getDvfMapPriceColor(mark.context.meanPriceM2, range)
+    : [71, 85, 105, 220];
+  return [
+    new ScatterplotLayer<DvfMapPurchasePointMark>({
+      id: REAL_ESTATE_PURCHASE_POINT_HOVER_HALO_LAYER_ID,
+      data,
+      coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+      pickable: false,
+      stroked: false,
+      filled: true,
+      radiusUnits: "pixels",
+      radiusMinPixels: 12,
+      radiusMaxPixels: 14,
+      getPosition: (point) => [point.coordinates[0], point.coordinates[1]],
+      getRadius: 12.5,
+      getFillColor: [color[0], color[1], color[2], 90],
+      ...(beforeId ? { beforeId } : {}),
+    }),
+    new ScatterplotLayer<DvfMapPurchasePointMark>({
+      id: REAL_ESTATE_PURCHASE_POINT_HOVER_LAYER_ID,
+      data,
+      coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+      pickable: false,
+      stroked: true,
+      filled: true,
+      radiusUnits: "pixels",
+      radiusMinPixels: 6,
+      radiusMaxPixels: 7,
+      lineWidthUnits: "pixels",
+      lineWidthMinPixels: 1.5,
+      getPosition: (point) => [point.coordinates[0], point.coordinates[1]],
+      getRadius: 6.5,
+      getFillColor: color,
+      getLineColor: [255, 255, 255, 255],
+      ...(beforeId ? { beforeId } : {}),
+    }),
+  ];
+}
+
+/** Keep the point palette aligned with the price heatmap and its legend. */
+export function getDvfMapPriceColor(
+  value: number,
+  range: DvfMapPriceRange,
+  opacity = 1,
+): [number, number, number, number] {
+  const normalized = range.high > range.low
+    ? Math.max(0, Math.min(1, (value - range.low) / (range.high - range.low)))
+    : 0.5;
+  const colorIndex = normalized * (PRICE_COLORS.length - 1);
+  const lowerIndex = Math.floor(colorIndex);
+  const upperIndex = Math.min(PRICE_COLORS.length - 1, lowerIndex + 1);
+  const blend = colorIndex - lowerIndex;
+  const lower = PRICE_COLORS[lowerIndex]!;
+  const upper = PRICE_COLORS[upperIndex]!;
+  return [
+    Math.round(lower[0] + (upper[0] - lower[0]) * blend),
+    Math.round(lower[1] + (upper[1] - lower[1]) * blend),
+    Math.round(lower[2] + (upper[2] - lower[2]) * blend),
+    Math.round((lower[3] + (upper[3] - lower[3]) * blend) * opacity),
+  ];
 }
 
 function quantile(values: readonly number[], q: number): number {

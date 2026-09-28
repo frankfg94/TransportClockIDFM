@@ -107,7 +107,10 @@
         :enabled="realEstateLayerEnabled"
         :loading="realEstateLayerLoading"
         :error="realEstateLayerError"
-        :completed-cities="realEstateCompletedCities"
+        :completed-departments="realEstateCompletedDepartments"
+        :loaded-department-count="realEstateLoadedDepartmentCount"
+        :total-department-count="realEstateTotalDepartmentCount"
+        :failed-department-count="realEstateFailedDepartmentCount"
         :total-city-count="realEstateTotalCityCount"
         :city-count="realEstateCityCount"
         :cell-count="realEstateGridCells.length"
@@ -117,8 +120,10 @@
         @toggle="toggleRealEstateLayer"
       />
       <GlobalMapRealEstateTooltip
-        v-if="realEstateLayerEnabled && hoveredRealEstateCell && !hoveredFeature"
+        v-if="realEstateLayerEnabled && (hoveredRealEstateCell || hoveredRealEstatePurchasePoint) && !hoveredFeature"
         :cell="hoveredRealEstateCell"
+        :is-purchase-point="Boolean(hoveredRealEstatePurchasePoint)"
+        :reference-period="realEstateReferencePeriod"
         :style="realEstateTooltipStyle"
       />
       <GlobalTransportPlanSearch
@@ -902,7 +907,11 @@ import GlobalTransportDebugPanel from "./GlobalTransportDebugPanel.vue";
 import GlobalTransportPlanLinePanel from "./GlobalTransportPlanLinePanel.vue";
 import IrisNeighborhoodOverlay from "../transport-map/overlays/IrisNeighborhoodOverlay.vue";
 import { fetchIrisDataset, type IrisDataset } from "../transport-map/iris/irisApi";
-import { getDvfMapPriceRange, type DvfMapPriceRange } from "../transport-map/next/deckRealEstateLayer";
+import {
+  getDvfMapPriceRange,
+  type DvfMapPriceRange,
+  type DvfMapPurchasePointMark,
+} from "../transport-map/next/deckRealEstateLayer";
 import { loadDvfMapCells, type DvfMapGridCell } from "../../services/real-estate/realEstateMapLayer";
 import {
   boundsForIrisDataset,
@@ -1112,6 +1121,8 @@ const nextRendererReady = ref(mapExperience.kind === "legacy");
 const nextSurfaceRef = ref<{
   pickNearbyPlace: (x: number, y: number) => NearbyPlace | undefined;
   pickRealEstateCell: (x: number, y: number) => DvfMapGridCell | undefined;
+  pickRealEstatePurchasePoint: (x: number, y: number) => DvfMapPurchasePointMark | undefined;
+  clearRealEstatePurchasePointHover: () => void;
 }>();
 const nearbyPlacesOverlayRef = ref<{ onPointerMove: (event: PointerEvent) => void; clearHover: () => void }>();
 function pickNearbyLinePlace(x: number, y: number) {
@@ -1120,6 +1131,10 @@ function pickNearbyLinePlace(x: number, y: number) {
 
 function pickRealEstateMapCell(x: number, y: number) {
   return nextSurfaceRef.value?.pickRealEstateCell(x, y);
+}
+
+function pickRealEstateMapPurchasePoint(x: number, y: number) {
+  return nextSurfaceRef.value?.pickRealEstatePurchasePoint(x, y);
 }
 
 const BUS_ONLY_GLOBAL_MAP_MODES = new Set<GlobalMapMode>(["BUS", "NOCTILIEN"]);
@@ -1189,9 +1204,13 @@ const realEstateGridCells = shallowRef<DvfMapGridCell[]>([]);
 const realEstatePriceRange = shallowRef<DvfMapPriceRange>();
 const realEstateCityCount = ref(0);
 const realEstateTotalCityCount = ref(0);
-const realEstateCompletedCities = ref(0);
+const realEstateCompletedDepartments = ref(0);
+const realEstateLoadedDepartmentCount = ref(0);
+const realEstateTotalDepartmentCount = ref(0);
+const realEstateFailedDepartmentCount = ref(0);
 const realEstateReferencePeriod = ref("");
 const hoveredRealEstateCell = shallowRef<DvfMapGridCell>();
+const hoveredRealEstatePurchasePoint = shallowRef<DvfMapPurchasePointMark>();
 const hoveredRealEstatePoint = ref<{ x: number; y: number }>();
 
 const realEstateTooltipStyle = computed<Record<string, string>>(() => {
@@ -1200,16 +1219,25 @@ const realEstateTooltipStyle = computed<Record<string, string>>(() => {
   const width = stageElement.value?.clientWidth ?? camera.value.viewportWidthCssPx;
   const height = stageElement.value?.clientHeight ?? camera.value.viewportHeightCssPx;
   return {
-    left: `${Math.max(8, Math.min(width - 220, point.x + 14))}px`,
-    top: `${Math.max(8, Math.min(height - 78, point.y - 42))}px`,
+    left: `${Math.max(8, Math.min(width - 268, point.x + 14))}px`,
+    top: `${Math.max(8, Math.min(height - 128, point.y - 64))}px`,
   };
+});
+
+watch(() => camera.value.zoom, () => {
+  hoveredRealEstateCell.value = undefined;
+  hoveredRealEstatePurchasePoint.value = undefined;
+  hoveredRealEstatePoint.value = undefined;
+  nextSurfaceRef.value?.clearRealEstatePurchasePointHover();
 });
 
 async function toggleRealEstateLayer(): Promise<void> {
   if (realEstateLayerEnabled.value) {
     realEstateLayerEnabled.value = false;
     hoveredRealEstateCell.value = undefined;
+    hoveredRealEstatePurchasePoint.value = undefined;
     hoveredRealEstatePoint.value = undefined;
+    nextSurfaceRef.value?.clearRealEstatePurchasePointHover();
     return;
   }
 
@@ -1227,18 +1255,24 @@ async function toggleRealEstateLayer(): Promise<void> {
   if (realEstateGridCells.value.length || realEstateLayerLoading.value) return;
 
   realEstateLayerError.value = "";
-  realEstateCompletedCities.value = 0;
+  realEstateCompletedDepartments.value = 0;
+  realEstateLoadedDepartmentCount.value = 0;
+  realEstateTotalDepartmentCount.value = 0;
+  realEstateFailedDepartmentCount.value = 0;
   realEstateLayerLoading.value = true;
   try {
     const dataset = await loadDvfMapCells((completed, total) => {
-      realEstateTotalCityCount.value = total;
-      if (completed % 24 === 0 || completed === total) realEstateCompletedCities.value = completed;
+      realEstateTotalDepartmentCount.value = total;
+      realEstateCompletedDepartments.value = completed;
     });
     realEstateGridCells.value = dataset.cells;
     realEstatePriceRange.value = getDvfMapPriceRange(dataset.cells);
     realEstateCityCount.value = dataset.cityCount;
     realEstateTotalCityCount.value = dataset.totalCityCount;
-    realEstateCompletedCities.value = dataset.totalCityCount;
+    realEstateLoadedDepartmentCount.value = dataset.loadedDepartmentCount;
+    realEstateTotalDepartmentCount.value = dataset.totalDepartmentCount;
+    realEstateFailedDepartmentCount.value = dataset.failedDepartmentCodes.length;
+    realEstateCompletedDepartments.value = dataset.totalDepartmentCount;
     realEstateReferencePeriod.value = dataset.referencePeriod;
   } catch (error) {
     realEstateLayerError.value = error instanceof Error ? error.message : "DVF data unavailable";
@@ -1382,7 +1416,9 @@ function globalIsochroneTransportLabel(surface: GlobalIsochroneSurface): string 
 }
 function onCanvasPointerLeave(event: PointerEvent): void {
   hoveredRealEstateCell.value = undefined;
+  hoveredRealEstatePurchasePoint.value = undefined;
   hoveredRealEstatePoint.value = undefined;
+  nextSurfaceRef.value?.clearRealEstatePurchasePointHover();
   globalTransportHover.leave(event);
 }
 const setHoveredLine = globalTransportHover.setHoveredLine;
@@ -4562,7 +4598,9 @@ function onPointerMove(event: PointerEvent): void {
   mapOnPointerMove(event);
   if (!realEstateLayerEnabled.value || hoveredFeature.value || event.buttons !== 0) {
     hoveredRealEstateCell.value = undefined;
+    hoveredRealEstatePurchasePoint.value = undefined;
     hoveredRealEstatePoint.value = undefined;
+    nextSurfaceRef.value?.clearRealEstatePurchasePointHover();
     return;
   }
 
@@ -4571,9 +4609,11 @@ function onPointerMove(event: PointerEvent): void {
   if (!canvasBounds || !stageBounds) return;
   const x = event.clientX - canvasBounds.left;
   const y = event.clientY - canvasBounds.top;
-  const cell = pickRealEstateMapCell(x, y);
+  const purchasePoint = pickRealEstateMapPurchasePoint(x, y);
+  const cell = purchasePoint ? purchasePoint.context : pickRealEstateMapCell(x, y);
   hoveredRealEstateCell.value = cell;
-  hoveredRealEstatePoint.value = cell
+  hoveredRealEstatePurchasePoint.value = purchasePoint;
+  hoveredRealEstatePoint.value = cell || purchasePoint
     ? { x: event.clientX - stageBounds.left, y: event.clientY - stageBounds.top }
     : undefined;
 }

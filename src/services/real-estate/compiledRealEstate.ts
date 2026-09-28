@@ -64,6 +64,15 @@ export interface DvfCityDescriptor {
   cellSalesPercentiles: DvfMarketPercentiles;
 };
 
+export interface DvfMapDepartmentDescriptor {
+  code: string;
+  asset: string;
+  bytes: number;
+  checksumSha256: string;
+  cityCount: number;
+  cellCount: number;
+}
+
 export interface DvfManifest {
   schemaVersion: typeof DVF_DATA_SCHEMA_VERSION;
   datasetId: typeof DVF_DATASET_ID;
@@ -84,6 +93,7 @@ export interface DvfManifest {
     privacy: string;
   };
   cities: DvfCityDescriptor[];
+  mapDepartments: DvfMapDepartmentDescriptor[];
   marketBenchmarks: Record<DvfMarketScope, DvfMarketBenchmark>;
   totals: {
     cities: number;
@@ -110,6 +120,21 @@ export interface DvfGridCell {
   transactionCount: number;
   meanPriceM2: number;
   medianPriceM2: number;
+}
+
+/** Map-only cell with the commune identity needed for picking and tooltips. */
+export interface DvfMapCell extends DvfGridCell {
+  cityCode: string;
+  cityName: string;
+}
+
+export interface DvfMapDepartmentFile {
+  schemaVersion: typeof DVF_DATA_SCHEMA_VERSION;
+  datasetId: typeof DVF_DATASET_ID;
+  generatedAt: string;
+  referencePeriod: string;
+  departmentCode: string;
+  cells: DvfMapCell[];
 }
 
 export interface DvfCityFile {
@@ -182,6 +207,9 @@ export function assertDvfManifest(value: unknown): asserts value is DvfManifest 
   if (typeof value.generatedAt !== "string" || typeof value.referencePeriod !== "string" || !Array.isArray(value.cities)) {
     throw new Error("DVF manifest metadata is incomplete.");
   }
+  if (!Array.isArray(value.mapDepartments) || value.mapDepartments.length === 0) {
+    throw new Error("DVF map department descriptors are missing.");
+  }
   if (!isRecord(value.source)
     || typeof value.source.pageUrl !== "string"
     || typeof value.source.resourceUrl !== "string"
@@ -246,6 +274,33 @@ export function assertDvfManifest(value: unknown): asserts value is DvfManifest 
       }
     }
   }
+  const seenDepartments = new Set<string>();
+  let departmentCityCount = 0;
+  let departmentCellCount = 0;
+  for (const candidate of value.mapDepartments) {
+    if (!isRecord(candidate)
+      || typeof candidate.code !== "string"
+      || !/^\d{2}$/u.test(candidate.code)
+      || seenDepartments.has(candidate.code)
+      || typeof candidate.asset !== "string"
+      || !/^map\/\d{2}-[a-f0-9]{16}\.json$/u.test(candidate.asset)
+      || !isNonNegativeInteger(candidate.bytes)
+      || candidate.bytes === 0
+      || typeof candidate.checksumSha256 !== "string"
+      || !/^[a-f0-9]{64}$/u.test(candidate.checksumSha256)
+      || !isNonNegativeInteger(candidate.cityCount)
+      || candidate.cityCount === 0
+      || !isNonNegativeInteger(candidate.cellCount)) {
+      throw new Error("DVF map department descriptor is invalid.");
+    }
+    seenDepartments.add(candidate.code);
+    departmentCityCount += candidate.cityCount;
+    departmentCellCount += candidate.cellCount;
+  }
+  if (departmentCityCount !== value.totals.cities
+    || departmentCellCount !== value.totals.gridCellsWithEnoughSales) {
+    throw new Error("DVF map department totals do not match the manifest.");
+  }
 }
 
 export function assertDvfCityFile(value: unknown): asserts value is DvfCityFile {
@@ -290,6 +345,38 @@ export function assertDvfCityFile(value: unknown): asserts value is DvfCityFile 
       || !isFiniteNumber(candidate.meanPriceM2)
       || !isFiniteNumber(candidate.medianPriceM2)) {
       throw new Error("DVF map cells are invalid.");
+    }
+  }
+}
+
+/** Validate only the compact fields present in a map department shard. */
+export function assertDvfMapDepartmentFile(value: unknown): asserts value is DvfMapDepartmentFile {
+  if (!isRecord(value)
+    || value.schemaVersion !== DVF_DATA_SCHEMA_VERSION
+    || value.datasetId !== DVF_DATASET_ID
+    || typeof value.generatedAt !== "string"
+    || typeof value.referencePeriod !== "string"
+    || typeof value.departmentCode !== "string"
+    || !/^\d{2}$/u.test(value.departmentCode)
+    || !Array.isArray(value.cells)) {
+    throw new Error("DVF map department contract is incomplete.");
+  }
+  for (const candidate of value.cells) {
+    if (!isRecord(candidate)
+      || typeof candidate.cityCode !== "string"
+      || !/^\d{5}$/u.test(candidate.cityCode)
+      || candidate.cityCode.slice(0, 2) !== value.departmentCode
+      || typeof candidate.cityName !== "string"
+      || !isFiniteNumber(candidate.lon)
+      || candidate.lon < -180 || candidate.lon > 180
+      || !isFiniteNumber(candidate.lat)
+      || candidate.lat < -90 || candidate.lat > 90
+      || !isOptionalString(candidate.codeIris)
+      || !isNonNegativeInteger(candidate.transactionCount)
+      || candidate.transactionCount < DVF_MIN_PUBLIC_SAMPLE_SIZE
+      || !isFiniteNumber(candidate.meanPriceM2)
+      || !isFiniteNumber(candidate.medianPriceM2)) {
+      throw new Error("DVF map department cells are invalid.");
     }
   }
 }
@@ -388,6 +475,7 @@ export class DvfDataUnavailableError extends Error {
 export interface DvfDataProvider {
   loadManifest(signal?: AbortSignal): Promise<DvfManifest>;
   loadCity(code: string, signal?: AbortSignal): Promise<DvfCityFile>;
+  loadMapDepartment(code: string, signal?: AbortSignal): Promise<DvfMapDepartmentFile>;
   loadPurchasePointsManifest(signal?: AbortSignal): Promise<DvfPurchasePointsManifest>;
   loadPurchasePoints(code: string, signal?: AbortSignal): Promise<DvfPurchasePointsFile>;
 }
@@ -397,7 +485,11 @@ export function createDvfDataProvider(options: { fetcher?: typeof fetch; basePat
   const basePath = (options.basePath ?? DVF_DATASET_BASE_PATH).replace(/\/+$/u, "");
   let manifestRequest: Promise<DvfManifest> | undefined;
   let purchasePointsManifestRequest: Promise<DvfPurchasePointsManifest> | undefined;
+  let citiesByCode: Map<string, DvfCityDescriptor> | undefined;
+  let mapDepartmentsByCode: Map<string, DvfMapDepartmentDescriptor> | undefined;
+  let purchasePointCitiesByCode: Map<string, DvfPurchasePointsCityDescriptor> | undefined;
   const cityRequests = new Map<string, Promise<DvfCityFile>>();
+  const mapDepartmentRequests = new Map<string, Promise<DvfMapDepartmentFile>>();
   const purchasePointsRequests = new Map<string, Promise<DvfPurchasePointsFile>>();
 
   async function loadJson<T>(asset: string, validate: (value: unknown) => asserts value is T, signal?: AbortSignal): Promise<T> {
@@ -422,7 +514,9 @@ export function createDvfDataProvider(options: { fetcher?: typeof fetch; basePat
   }
 
   async function loadCity(code: string, signal?: AbortSignal): Promise<DvfCityFile> {
-    const descriptor = (await loadManifest(signal)).cities.find((candidate) => candidate.code === code);
+    const manifest = await loadManifest(signal);
+    citiesByCode ??= new Map(manifest.cities.map((candidate) => [candidate.code, candidate]));
+    const descriptor = citiesByCode.get(code);
     if (!descriptor || !/^cities\/[A-Za-z0-9_-]+\.json$/u.test(descriptor.asset)) {
       throw new DvfDataUnavailableError(`No DVF asset for commune ${code}.`);
     }
@@ -441,6 +535,32 @@ export function createDvfDataProvider(options: { fetcher?: typeof fetch; basePat
     return signal ? withAbort(request, signal) : request;
   }
 
+  async function loadMapDepartment(code: string, signal?: AbortSignal): Promise<DvfMapDepartmentFile> {
+    const manifest = await loadManifest(signal);
+    mapDepartmentsByCode ??= new Map(manifest.mapDepartments.map((candidate) => [candidate.code, candidate]));
+    const descriptor = mapDepartmentsByCode.get(code);
+    if (!descriptor || !/^map\/\d{2}-[a-f0-9]{16}\.json$/u.test(descriptor.asset)) {
+      throw new DvfDataUnavailableError(`No DVF map asset for department ${code}.`);
+    }
+
+    let request = mapDepartmentRequests.get(code);
+    if (!request) {
+      request = loadJson(descriptor.asset, assertDvfMapDepartmentFile).then((department) => {
+        if (department.departmentCode !== code
+          || department.referencePeriod !== manifest.referencePeriod
+          || department.cells.length !== descriptor.cellCount) {
+          throw new DvfDataUnavailableError("DVF map department asset does not match its manifest.");
+        }
+        return department;
+      }).catch((error) => {
+        mapDepartmentRequests.delete(code);
+        throw error;
+      });
+      mapDepartmentRequests.set(code, request);
+    }
+    return signal ? withAbort(request, signal) : request;
+  }
+
   function loadPurchasePointsManifest(signal?: AbortSignal): Promise<DvfPurchasePointsManifest> {
     if (!purchasePointsManifestRequest) {
       purchasePointsManifestRequest = loadJson("purchase-points/manifest.json", assertDvfPurchasePointsManifest).catch((error) => {
@@ -453,7 +573,8 @@ export function createDvfDataProvider(options: { fetcher?: typeof fetch; basePat
 
   async function loadPurchasePoints(code: string, signal?: AbortSignal): Promise<DvfPurchasePointsFile> {
     const manifest = await loadPurchasePointsManifest(signal);
-    const descriptor = manifest.cities.find((candidate) => candidate.code === code);
+    purchasePointCitiesByCode ??= new Map(manifest.cities.map((candidate) => [candidate.code, candidate]));
+    const descriptor = purchasePointCitiesByCode.get(code);
     if (!descriptor) throw new DvfDataUnavailableError(`No DVF purchase-point asset for commune ${code}.`);
 
     let request = purchasePointsRequests.get(code);
@@ -475,7 +596,7 @@ export function createDvfDataProvider(options: { fetcher?: typeof fetch; basePat
     return signal ? withAbort(request, signal) : request;
   }
 
-  return { loadManifest, loadCity, loadPurchasePointsManifest, loadPurchasePoints };
+  return { loadManifest, loadCity, loadMapDepartment, loadPurchasePointsManifest, loadPurchasePoints };
 }
 
 let sharedProvider: DvfDataProvider | undefined;

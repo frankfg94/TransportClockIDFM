@@ -30,9 +30,16 @@ import type { DvfMapPriceRange } from "./deckRealEstateLayer";
 import {
   createDeckRealEstatePriceLayers,
   createDeckRealEstatePurchasePointsLayer,
+  createDeckRealEstatePurchasePointsHaloLayer,
+  createDeckRealEstatePurchasePointHoverLayers,
   REAL_ESTATE_HIT_LAYER_ID,
+  REAL_ESTATE_PURCHASE_POINTS_LAYER_ID,
+  type DvfMapPurchasePointMark,
 } from "./deckRealEstateLayer";
-import { selectRealEstateViewportCells } from "../real-estate/realEstateViewportSelection";
+import {
+  findNearestRealEstateCell,
+  selectRealEstateViewportCells,
+} from "../real-estate/realEstateViewportSelection";
 import { Map as MapLibreMap, setWorkerUrl, type IControl } from "maplibre-gl";
 import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
@@ -87,7 +94,8 @@ const realEstateViewportCells = shallowRef<readonly DvfMapGridCell[]>(
 );
 const realEstatePurchasePointZoomEnabled = ref(props.camera.zoom >= DVF_MAP_PURCHASE_POINTS_MIN_ZOOM);
 const realEstateBeforeId = ref<string>();
-const realEstatePurchasePoints = shallowRef<readonly DvfPurchasePoint[]>([]);
+const realEstatePurchasePoints = shallowRef<readonly DvfMapPurchasePointMark[]>([]);
+const hoveredRealEstatePurchasePoint = shallowRef<DvfMapPurchasePointMark>();
 const realEstatePurchasePointsByCity = new Map<string, readonly DvfPurchasePoint[]>();
 let realEstatePurchasePointsTimer: ReturnType<typeof setTimeout> | undefined;
 let realEstatePurchasePointsRevision = 0;
@@ -118,10 +126,24 @@ const realEstateLayers = computed(() => {
   if (!realEstatePurchasePointZoomEnabled.value || !realEstatePurchasePoints.value.length) return priceLayers;
 
   return [
-    createDeckRealEstatePurchasePointsLayer(realEstatePurchasePoints.value, realEstateBeforeId.value),
     // Preserve the transparent cell hit targets so the existing aggregate
-    // tooltip keeps working after the price heatmap gives way to sale points.
+    // tooltip keeps working in gaps between parcel-centre points.
     priceLayers[1],
+    createDeckRealEstatePurchasePointsHaloLayer(
+      realEstatePurchasePoints.value,
+      range,
+      realEstateBeforeId.value,
+    ),
+    createDeckRealEstatePurchasePointsLayer(
+      realEstatePurchasePoints.value,
+      range,
+      realEstateBeforeId.value,
+    ),
+    ...createDeckRealEstatePurchasePointHoverLayers(
+      hoveredRealEstatePurchasePoint.value,
+      range,
+      realEstateBeforeId.value,
+    ),
   ];
 });
 watch(realEstateLayers, layers => presenter?.setRealEstateLayers(layers));
@@ -141,6 +163,7 @@ function scheduleRealEstatePurchasePointsLoad(): void {
   if (props.camera.zoom < DVF_MAP_PURCHASE_POINTS_MIN_ZOOM || !props.realEstateCells?.length) {
     realEstatePurchasePointsByCity.clear();
     realEstatePurchasePoints.value = [];
+    hoveredRealEstatePurchasePoint.value = undefined;
     return;
   }
 
@@ -199,24 +222,38 @@ async function loadVisibleRealEstatePurchasePoints(revision: number): Promise<vo
 function updateVisibleRealEstatePurchasePoints(): void {
   if (props.camera.zoom < DVF_MAP_PURCHASE_POINTS_MIN_ZOOM) {
     realEstatePurchasePoints.value = [];
+    hoveredRealEstatePurchasePoint.value = undefined;
     return;
   }
   const bounds = getVisibleRealEstateBounds();
   if (!bounds) {
     realEstatePurchasePoints.value = [];
+    hoveredRealEstatePurchasePoint.value = undefined;
     return;
   }
 
-  const points: DvfPurchasePoint[] = [];
-  for (const cityPoints of realEstatePurchasePointsByCity.values()) {
-    for (const point of cityPoints) {
+  const cells = props.realEstateCells ?? EMPTY_REAL_ESTATE_CELLS;
+  const points: DvfMapPurchasePointMark[] = [];
+  for (const [cityCode, cityPoints] of realEstatePurchasePointsByCity) {
+    for (let index = 0; index < cityPoints.length; index += 1) {
+      const point = cityPoints[index]!;
       if (point[0] >= bounds.minLongitude && point[0] <= bounds.maxLongitude
         && point[1] >= bounds.minLatitude && point[1] <= bounds.maxLatitude) {
-        points.push(point);
+        const context = findNearestRealEstateCell(cells, point[0], point[1], cityCode);
+        points.push({
+          id: `${cityCode}:${index}`,
+          cityCode,
+          coordinates: point,
+          ...(context ? { context } : {}),
+        });
       }
     }
   }
   realEstatePurchasePoints.value = points;
+  const selectedId = hoveredRealEstatePurchasePoint.value?.id;
+  hoveredRealEstatePurchasePoint.value = selectedId
+    ? points.find((point) => point.id === selectedId)
+    : undefined;
 }
 
 function getVisibleRealEstateBounds(): {
@@ -267,7 +304,29 @@ function pickRealEstateCell(x: number, y: number): DvfMapGridCell | undefined {
   return hit?.object as DvfMapGridCell | undefined;
 }
 
-defineExpose({ pickNearbyPlace, pickRealEstateCell });
+function pickRealEstatePurchasePoint(x: number, y: number): DvfMapPurchasePointMark | undefined {
+  if (!overlay || !realEstatePurchasePointZoomEnabled.value || !realEstatePurchasePoints.value.length) {
+    hoveredRealEstatePurchasePoint.value = undefined;
+    return undefined;
+  }
+  const hit = overlay.pickObject({ x, y, layerIds: [REAL_ESTATE_PURCHASE_POINTS_LAYER_ID] });
+  const mark = hit?.object as DvfMapPurchasePointMark | undefined;
+  if (hoveredRealEstatePurchasePoint.value?.id !== mark?.id) {
+    hoveredRealEstatePurchasePoint.value = mark;
+  }
+  return mark;
+}
+
+function clearRealEstatePurchasePointHover(): void {
+  hoveredRealEstatePurchasePoint.value = undefined;
+}
+
+defineExpose({
+  pickNearbyPlace,
+  pickRealEstateCell,
+  pickRealEstatePurchasePoint,
+  clearRealEstatePurchasePointHover,
+});
 
 type MapLibreDeckCompatibility = MapLibreMap & {
   painter?: { transform?: unknown };
@@ -478,6 +537,7 @@ onBeforeUnmount(() => {
   realEstatePurchasePointsRevision += 1;
   realEstatePurchasePointsByCity.clear();
   realEstatePurchasePoints.value = [];
+  hoveredRealEstatePurchasePoint.value = undefined;
   const renderer = props.renderer as TransportMapRenderer & {
     detachHost?: (host?: MapLibreDeckOverlayPresenter) => void;
   };

@@ -31,8 +31,8 @@
       <p class="global-map-real-estate__source">{{ t("globalMap.realEstate.pointZoom") }}</p>
       <div v-if="loading" class="global-map-real-estate__status" role="status" aria-live="polite">
         <span class="global-map-real-estate__spinner" aria-hidden="true" />
-        {{ totalCityCount
-          ? t("globalMap.realEstate.loading", { loaded: completedCities, total: totalCityCount })
+        {{ totalDepartmentCount
+          ? t("globalMap.realEstate.loading", { loaded: completedDepartments, total: totalDepartmentCount })
           : t("globalMap.realEstate.preparing") }}
       </div>
       <div v-else-if="error" class="global-map-real-estate__status global-map-real-estate__status--error" role="status">
@@ -53,6 +53,13 @@
         <p class="global-map-real-estate__source">
           {{ t("globalMap.realEstate.coverage", { period: referencePeriod, cells: formatCount(cellCount), cities: formatCount(cityCount), total: formatCount(totalCityCount) }) }}
         </p>
+        <p v-if="failedDepartmentCount > 0" class="global-map-real-estate__partial" role="status">
+          {{ t("globalMap.realEstate.partialCoverage", {
+            loaded: loadedDepartmentCount,
+            total: totalDepartmentCount,
+            failed: failedDepartmentCount,
+          }) }}
+        </p>
       </template>
     </template>
   </aside>
@@ -66,7 +73,10 @@ const props = defineProps<{
   enabled: boolean;
   loading: boolean;
   error: string;
-  completedCities: number;
+  completedDepartments: number;
+  loadedDepartmentCount: number;
+  totalDepartmentCount: number;
+  failedDepartmentCount: number;
   totalCityCount: number;
   cityCount: number;
   cellCount: number;
@@ -230,6 +240,13 @@ function formatCount(value: number): string {
 
 .global-map-real-estate__status--error {
   color: #991b1b;
+}
+
+.global-map-real-estate__partial {
+  margin: 6px 0 0;
+  color: #92400e;
+  font-size: 0.63rem;
+  line-height: 1.35;
 }
 
 .global-map-real-estate__spinner {

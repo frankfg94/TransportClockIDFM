@@ -67,6 +67,72 @@ export class RealEstateViewportCellSelector {
     this.selection = { coverage: queryBounds, cells };
     return cells;
   }
+
+  /** Find the closest cell in map space, optionally keeping the point's commune. */
+  findNearest(longitude: number, latitude: number, cityCode?: string): DvfMapGridCell | undefined {
+    const index = this.index;
+    if (!index.cells.length) return undefined;
+
+    const point = lonLatToWorld({ lon: longitude, lat: latitude });
+    const centerColumn = gridCoordinate(point.x, index.minX, index.maxX, index.columns);
+    const centerRow = gridCoordinate(point.y, index.minY, index.maxY, index.rows);
+    let nearestIndex = -1;
+    let nearestDistanceSquared = Number.POSITIVE_INFINITY;
+
+    const visitBucket = (row: number, column: number): void => {
+      for (const cellIndex of index.buckets[row * index.columns + column]!) {
+        const cell = index.cells[cellIndex]!;
+        if (cityCode && cell.cityCode !== cityCode) continue;
+        const dx = index.worldX[cellIndex]! - point.x;
+        const dy = index.worldY[cellIndex]! - point.y;
+        const distanceSquared = dx * dx + dy * dy;
+        if (distanceSquared < nearestDistanceSquared) {
+          nearestIndex = cellIndex;
+          nearestDistanceSquared = distanceSquared;
+        }
+      }
+    };
+
+    // Walk outward through the existing uniform grid. The first enclosing
+    // rectangle whose edge is farther away than the best match proves that
+    // no unvisited bucket can contain a nearer cell.
+    const maxRadius = Math.max(index.columns, index.rows);
+    for (let radius = 0; radius <= maxRadius; radius += 1) {
+      const minColumn = Math.max(0, centerColumn - radius);
+      const maxColumn = Math.min(index.columns - 1, centerColumn + radius);
+      const minRow = Math.max(0, centerRow - radius);
+      const maxRow = Math.min(index.rows - 1, centerRow + radius);
+
+      for (let column = minColumn; column <= maxColumn; column += 1) {
+        visitBucket(minRow, column);
+        if (maxRow !== minRow) visitBucket(maxRow, column);
+      }
+      for (let row = minRow + 1; row < maxRow; row += 1) {
+        visitBucket(row, minColumn);
+        if (maxColumn !== minColumn) visitBucket(row, maxColumn);
+      }
+
+      if (nearestIndex >= 0) {
+        const left = index.minX + (minColumn / index.columns) * (index.maxX - index.minX);
+        const right = index.minX + ((maxColumn + 1) / index.columns) * (index.maxX - index.minX);
+        const top = index.minY + (minRow / index.rows) * (index.maxY - index.minY);
+        const bottom = index.minY + ((maxRow + 1) / index.rows) * (index.maxY - index.minY);
+        const pointInsideVisitedBounds = point.x >= left && point.x <= right
+          && point.y >= top && point.y <= bottom;
+        if (pointInsideVisitedBounds) {
+          const distanceToUnvisitedBuckets = Math.min(
+            point.x - left,
+            right - point.x,
+            point.y - top,
+            bottom - point.y,
+          );
+          if (distanceToUnvisitedBuckets * distanceToUnvisitedBuckets >= nearestDistanceSquared) break;
+        }
+      }
+    }
+
+    return nearestIndex >= 0 ? index.cells[nearestIndex] : undefined;
+  }
 }
 
 /** Selects the cells that can affect visible heatmap pixels or hit targets. */
@@ -81,6 +147,21 @@ export function selectRealEstateViewportCells(
     selectorByDataset.set(cells, selector);
   }
   return selector.select(camera, heatmapRadiusPixels);
+}
+
+/** Reuse the viewport selector's spatial index to provide nearby cell context for parcel points. */
+export function findNearestRealEstateCell(
+  cells: readonly DvfMapGridCell[],
+  longitude: number,
+  latitude: number,
+  cityCode?: string,
+): DvfMapGridCell | undefined {
+  let selector = selectorByDataset.get(cells);
+  if (!selector) {
+    selector = new RealEstateViewportCellSelector(cells);
+    selectorByDataset.set(cells, selector);
+  }
+  return selector.findNearest(longitude, latitude, cityCode);
 }
 
 function buildSpatialIndex(cells: readonly DvfMapGridCell[]): SpatialIndex {
