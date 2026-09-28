@@ -89,6 +89,7 @@ export const en = {
       on: "On",
       off: "Off",
       measure: "Median sale price per m²",
+      pointZoom: "From zoom 17: sale points at cadastral parcel centres.",
       preparing: "Preparing DVF data…",
       loading: "Loading communes · {loaded}/{total}",
       unavailable: "Property data unavailable",

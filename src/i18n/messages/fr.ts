@@ -85,6 +85,7 @@ export const fr = {
       on: "Actif",
       off: "Désactivé",
       measure: "Prix médian de vente au m²",
+      pointZoom: "À partir du zoom 17 : points de vente au centre des parcelles cadastrales.",
       preparing: "Préparation des données DVF…",
       loading: "Chargement des communes · {loaded}/{total}",
       unavailable: "Données immobilières indisponibles",

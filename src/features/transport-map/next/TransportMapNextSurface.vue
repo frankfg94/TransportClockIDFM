@@ -16,12 +16,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import type { NearbyPlace } from "../../nearby-stations/nearbyPlaces";
 import { createDeckNearbyPlacesLayer, prepareDeckNearbyPlaces, NEARBY_PLACES_LAYER_ID, type DeckNearbyPlace } from "./deckNearbyPlaces";
-import type { DvfMapGridCell } from "../../../services/real-estate/realEstateMapLayer";
+import {
+  DVF_MAP_PURCHASE_POINTS_MIN_ZOOM,
+  loadDvfMapPurchasePointCityCodes,
+  loadDvfMapPurchasePoints,
+  type DvfMapGridCell,
+} from "../../../services/real-estate/realEstateMapLayer";
+import type { DvfPurchasePoint } from "../../../services/real-estate/compiledRealEstate";
 import type { DvfMapPriceRange } from "./deckRealEstateLayer";
-import { createDeckRealEstatePriceLayers, REAL_ESTATE_HIT_LAYER_ID } from "./deckRealEstateLayer";
+import {
+  createDeckRealEstatePriceLayers,
+  createDeckRealEstatePurchasePointsLayer,
+  REAL_ESTATE_HIT_LAYER_ID,
+} from "./deckRealEstateLayer";
 import { Map as MapLibreMap, setWorkerUrl, type IControl } from "maplibre-gl";
 import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
@@ -39,6 +49,7 @@ import {
 } from "./nextMapConfig";
 import { firstSymbolLayerId, MapLibreDeckOverlayPresenter } from "./deckMapPresenter";
 import { cameraStateToMapLibreView } from "./nextMapCamera";
+import { visibleWorldBounds, worldToLonLat } from "../geo/coordinateKernel";
 import {
   TransportMapMapLibreTraceProbe,
   type TransportMapMapLibreTraceMap,
@@ -67,7 +78,12 @@ const mapElement = ref<HTMLElement>();
 const status = ref<SurfaceStatus>("initializing");
 const basemapUnavailable = ref(false);
 const realEstateRadiusPixels = ref(getRealEstateRadiusPixels(props.camera.zoom));
+const realEstatePurchasePointZoomEnabled = ref(props.camera.zoom >= DVF_MAP_PURCHASE_POINTS_MIN_ZOOM);
 const realEstateBeforeId = ref<string>();
+const realEstatePurchasePoints = shallowRef<readonly DvfPurchasePoint[]>([]);
+const realEstatePurchasePointsByCity = new Map<string, readonly DvfPurchasePoint[]>();
+let realEstatePurchasePointsTimer: ReturnType<typeof setTimeout> | undefined;
+let realEstatePurchasePointsRevision = 0;
 let map: MapLibreMap | undefined;
 let overlay: MapboxOverlay | undefined;
 let presenter: MapLibreDeckOverlayPresenter | undefined;
@@ -89,14 +105,124 @@ watch(nearbyPlaceLayers, layers => presenter?.setNearbyPlaceLayers(layers));
 const realEstateLayers = computed(() => {
   const cells = props.realEstateCells;
   const range = props.realEstatePriceRange;
-  return cells?.length && range
-    ? createDeckRealEstatePriceLayers(cells, range, realEstateRadiusPixels.value, realEstateBeforeId.value)
-    : [];
+  if (!cells?.length || !range) return [];
+
+  const priceLayers = createDeckRealEstatePriceLayers(cells, range, realEstateRadiusPixels.value, realEstateBeforeId.value);
+  if (!realEstatePurchasePointZoomEnabled.value || !realEstatePurchasePoints.value.length) return priceLayers;
+
+  return [
+    createDeckRealEstatePurchasePointsLayer(realEstatePurchasePoints.value, realEstateBeforeId.value),
+    // Preserve the transparent cell hit targets so the existing aggregate
+    // tooltip keeps working after the price heatmap gives way to sale points.
+    priceLayers[1],
+  ];
 });
 watch(realEstateLayers, layers => presenter?.setRealEstateLayers(layers));
 watch(() => Math.floor(props.camera.zoom), (zoom) => {
   realEstateRadiusPixels.value = getRealEstateRadiusPixels(zoom);
 });
+watch(() => props.camera.zoom >= DVF_MAP_PURCHASE_POINTS_MIN_ZOOM, (enabled) => {
+  realEstatePurchasePointZoomEnabled.value = enabled;
+});
+
+function scheduleRealEstatePurchasePointsLoad(): void {
+  if (realEstatePurchasePointsTimer) clearTimeout(realEstatePurchasePointsTimer);
+  const revision = ++realEstatePurchasePointsRevision;
+
+  if (props.camera.zoom < DVF_MAP_PURCHASE_POINTS_MIN_ZOOM || !props.realEstateCells?.length) {
+    realEstatePurchasePointsByCity.clear();
+    realEstatePurchasePoints.value = [];
+    return;
+  }
+
+  realEstatePurchasePointsTimer = setTimeout(() => {
+    updateVisibleRealEstatePurchasePoints();
+    void loadVisibleRealEstatePurchasePoints(revision);
+  }, 120);
+}
+
+async function loadVisibleRealEstatePurchasePoints(revision: number): Promise<void> {
+  const cells = props.realEstateCells;
+  if (props.camera.zoom < DVF_MAP_PURCHASE_POINTS_MIN_ZOOM || !cells?.length) return;
+
+  const bounds = getVisibleRealEstateBounds();
+  if (!bounds) return;
+  const cityCodes = await loadDvfMapPurchasePointCityCodes({
+    minLongitude: bounds.minLongitude - 0.005,
+    minLatitude: bounds.minLatitude - 0.005,
+    maxLongitude: bounds.maxLongitude + 0.005,
+    maxLatitude: bounds.maxLatitude + 0.005,
+  });
+  if (revision !== realEstatePurchasePointsRevision || props.camera.zoom < DVF_MAP_PURCHASE_POINTS_MIN_ZOOM) return;
+  if (!cityCodes.length) return;
+
+  const loaded = await Promise.allSettled(cityCodes.map(async (cityCode) => ({
+    cityCode,
+    points: await loadDvfMapPurchasePoints(cityCode),
+  })));
+  if (revision !== realEstatePurchasePointsRevision || props.camera.zoom < DVF_MAP_PURCHASE_POINTS_MIN_ZOOM) return;
+
+  for (const result of loaded) {
+    if (result.status !== "fulfilled") continue;
+    realEstatePurchasePointsByCity.delete(result.value.cityCode);
+    realEstatePurchasePointsByCity.set(result.value.cityCode, result.value.points);
+  }
+  while (realEstatePurchasePointsByCity.size > 12) {
+    realEstatePurchasePointsByCity.delete(realEstatePurchasePointsByCity.keys().next().value as string);
+  }
+  updateVisibleRealEstatePurchasePoints();
+}
+
+function updateVisibleRealEstatePurchasePoints(): void {
+  if (props.camera.zoom < DVF_MAP_PURCHASE_POINTS_MIN_ZOOM) {
+    realEstatePurchasePoints.value = [];
+    return;
+  }
+  const bounds = getVisibleRealEstateBounds();
+  if (!bounds) {
+    realEstatePurchasePoints.value = [];
+    return;
+  }
+
+  const points: DvfPurchasePoint[] = [];
+  for (const cityPoints of realEstatePurchasePointsByCity.values()) {
+    for (const point of cityPoints) {
+      if (point[0] >= bounds.minLongitude && point[0] <= bounds.maxLongitude
+        && point[1] >= bounds.minLatitude && point[1] <= bounds.maxLatitude) {
+        points.push(point);
+      }
+    }
+  }
+  realEstatePurchasePoints.value = points;
+}
+
+function getVisibleRealEstateBounds(): {
+  minLongitude: number;
+  maxLongitude: number;
+  minLatitude: number;
+  maxLatitude: number;
+} | undefined {
+  const visible = visibleWorldBounds(props.camera);
+  const minX = Math.max(0, visible.minX);
+  const maxX = Math.min(1, visible.maxX);
+  const minY = Math.max(0, visible.minY);
+  const maxY = Math.min(1, visible.maxY);
+  if (minX > maxX || minY > maxY) return undefined;
+  const corners = [
+    worldToLonLat({ x: minX, y: minY }),
+    worldToLonLat({ x: maxX, y: maxY }),
+  ] as const;
+  if (!corners.every((point) => Number.isFinite(point.lon) && Number.isFinite(point.lat))) return undefined;
+  return {
+    minLongitude: Math.min(corners[0].lon, corners[1].lon),
+    maxLongitude: Math.max(corners[0].lon, corners[1].lon),
+    minLatitude: Math.min(corners[0].lat, corners[1].lat),
+    maxLatitude: Math.max(corners[0].lat, corners[1].lat),
+  };
+}
+
+watch(() => props.camera, scheduleRealEstatePurchasePointsLoad, { immediate: true, flush: "post" });
+watch(() => props.realEstateCells, scheduleRealEstatePurchasePointsLoad, { flush: "post" });
 
 function getRealEstateRadiusPixels(zoom: number): number {
   if (zoom < 9) return 14;
@@ -325,6 +451,10 @@ watch(locale, () => {
 });
 
 onBeforeUnmount(() => {
+  if (realEstatePurchasePointsTimer) clearTimeout(realEstatePurchasePointsTimer);
+  realEstatePurchasePointsRevision += 1;
+  realEstatePurchasePointsByCity.clear();
+  realEstatePurchasePoints.value = [];
   const renderer = props.renderer as TransportMapRenderer & {
     detachHost?: (host?: MapLibreDeckOverlayPresenter) => void;
   };

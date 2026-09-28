@@ -1,0 +1,7 @@
+/data/dvf/v1/purchase-points/manifest.json
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: public, max-age=0, must-revalidate
+
+/data/dvf/v1/purchase-points/*
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: public, max-age=31536000, immutable

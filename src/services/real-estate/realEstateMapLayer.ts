@@ -2,6 +2,7 @@ import {
   DvfDataUnavailableError,
   getDvfDataProvider,
   type DvfGridCell,
+  type DvfPurchasePoint,
 } from "./compiledRealEstate";
 
 export interface DvfMapGridCell extends DvfGridCell {
@@ -16,7 +17,16 @@ export interface DvfMapCellDataset {
   referencePeriod: string;
 }
 
+export interface DvfMapPurchasePointBounds {
+  minLongitude: number;
+  minLatitude: number;
+  maxLongitude: number;
+  maxLatitude: number;
+}
+
 type LoadProgress = (completedCities: number, totalCities: number) => void;
+
+export const DVF_MAP_PURCHASE_POINTS_MIN_ZOOM = 17;
 
 let datasetRequest: Promise<DvfMapCellDataset> | undefined;
 
@@ -31,6 +41,23 @@ export function loadDvfMapCells(onProgress?: LoadProgress): Promise<DvfMapCellDa
     void datasetRequest.then((dataset) => onProgress(dataset.totalCityCount, dataset.totalCityCount));
   }
   return datasetRequest;
+}
+
+/** Load parcel-centre locations separately from aggregate cells, on demand. */
+export async function loadDvfMapPurchasePoints(cityCode: string): Promise<readonly DvfPurchasePoint[]> {
+  const file = await getDvfDataProvider().loadPurchasePoints(cityCode);
+  return file.points;
+}
+
+/** Find point assets whose parcel-centre extents overlap the current viewport. */
+export async function loadDvfMapPurchasePointCityCodes(bounds: DvfMapPurchasePointBounds): Promise<string[]> {
+  const manifest = await getDvfDataProvider().loadPurchasePointsManifest();
+  return manifest.cities
+    .filter((city) => city.bounds[0] <= bounds.maxLongitude
+      && city.bounds[2] >= bounds.minLongitude
+      && city.bounds[1] <= bounds.maxLatitude
+      && city.bounds[3] >= bounds.minLatitude)
+    .map((city) => city.code);
 }
 
 async function loadDataset(onProgress?: LoadProgress): Promise<DvfMapCellDataset> {

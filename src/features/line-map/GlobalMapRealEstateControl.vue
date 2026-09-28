@@ -28,6 +28,7 @@
 
     <template v-if="enabled">
       <p class="global-map-real-estate__measure">{{ t("globalMap.realEstate.measure") }}</p>
+      <p class="global-map-real-estate__source">{{ t("globalMap.realEstate.pointZoom") }}</p>
       <div v-if="loading" class="global-map-real-estate__status" role="status" aria-live="polite">
         <span class="global-map-real-estate__spinner" aria-hidden="true" />
         {{ totalCityCount

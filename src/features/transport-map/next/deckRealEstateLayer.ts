@@ -2,9 +2,11 @@ import { COORDINATE_SYSTEM, type Layer } from "@deck.gl/core";
 import { HeatmapLayer } from "@deck.gl/aggregation-layers";
 import { ScatterplotLayer } from "@deck.gl/layers";
 import type { DvfMapGridCell } from "../../../services/real-estate/realEstateMapLayer";
+import type { DvfPurchasePoint } from "../../../services/real-estate/compiledRealEstate";
 
 export const REAL_ESTATE_PRICE_LAYER_ID = "real-estate-price-heatmap";
 export const REAL_ESTATE_HIT_LAYER_ID = "real-estate-price-hit-targets";
+export const REAL_ESTATE_PURCHASE_POINTS_LAYER_ID = "real-estate-purchase-points";
 
 export interface DvfMapPriceRange {
   low: number;
@@ -77,6 +79,31 @@ export function createDeckRealEstatePriceLayers(
       ...(beforeId ? { beforeId } : {}),
     }),
   ];
+}
+
+/** Show only parcel-centre locations; the source carries no sale attributes. */
+export function createDeckRealEstatePurchasePointsLayer(
+  points: readonly DvfPurchasePoint[],
+  beforeId?: string,
+): Layer {
+  return new ScatterplotLayer<DvfPurchasePoint>({
+    id: REAL_ESTATE_PURCHASE_POINTS_LAYER_ID,
+    data: points,
+    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+    pickable: false,
+    stroked: true,
+    filled: true,
+    radiusUnits: "pixels",
+    radiusMinPixels: 2.5,
+    radiusMaxPixels: 3.5,
+    lineWidthUnits: "pixels",
+    lineWidthMinPixels: 1,
+    getPosition: ([longitude, latitude]) => [longitude, latitude],
+    getRadius: 3,
+    getFillColor: [30, 41, 59, 235],
+    getLineColor: [255, 255, 255, 245],
+    ...(beforeId ? { beforeId } : {}),
+  });
 }
 
 function quantile(values: readonly number[], q: number): number {

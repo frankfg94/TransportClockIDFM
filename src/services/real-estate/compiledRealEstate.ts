@@ -128,6 +128,53 @@ export interface DvfCityFile {
   cells: DvfGridCell[];
 }
 
+export type DvfPurchasePoint = readonly [longitude: number, latitude: number];
+
+export interface DvfPurchasePointsFile {
+  schemaVersion: 1;
+  cityCode: string;
+  referencePeriod: string;
+  locationPrecision: "cadastral-parcel-centre-wgs84";
+  points: DvfPurchasePoint[];
+}
+
+export interface DvfPurchasePointsCityDescriptor {
+  code: string;
+  asset: string;
+  bytes: number;
+  checksumSha256: string;
+  pointCount: number;
+  bounds: readonly [minLongitude: number, minLatitude: number, maxLongitude: number, maxLatitude: number];
+}
+
+export interface DvfPurchasePointsManifest {
+  schemaVersion: 1;
+  datasetId: "dvf-purchase-parcel-centres";
+  generatedAt: string;
+  referencePeriod: string;
+  locationPrecision: "cadastral-parcel-centre-wgs84";
+  privacy: string;
+  source: {
+    pageUrl: string;
+    resourceUrl: string;
+    sourceChecksumSha256: string;
+    license: string;
+    licenseUrl: string;
+    attribution: string;
+  };
+  cities: DvfPurchasePointsCityDescriptor[];
+  totals: {
+    communes: number;
+    distinctParcelCentres: number;
+    geolocatedIdfRows: number;
+    sourceRows: number;
+  };
+}
+
+const DVF_PURCHASE_POINTS_SCHEMA_VERSION = 1 as const;
+const DVF_PURCHASE_POINTS_DATASET_ID = "dvf-purchase-parcel-centres" as const;
+const DVF_PURCHASE_POINTS_PRECISION = "cadastral-parcel-centre-wgs84" as const;
+
 export function assertDvfManifest(value: unknown): asserts value is DvfManifest {
   if (!isRecord(value) || value.schemaVersion !== DVF_DATA_SCHEMA_VERSION || value.datasetId !== DVF_DATASET_ID) {
     throw new Error("DVF manifest contract is unsupported.");
@@ -247,6 +294,88 @@ export function assertDvfCityFile(value: unknown): asserts value is DvfCityFile 
   }
 }
 
+export function assertDvfPurchasePointsManifest(value: unknown): asserts value is DvfPurchasePointsManifest {
+  if (!isRecord(value)
+    || value.schemaVersion !== DVF_PURCHASE_POINTS_SCHEMA_VERSION
+    || value.datasetId !== DVF_PURCHASE_POINTS_DATASET_ID
+    || value.locationPrecision !== DVF_PURCHASE_POINTS_PRECISION
+    || typeof value.generatedAt !== "string"
+    || typeof value.referencePeriod !== "string"
+    || typeof value.privacy !== "string"
+    || !Array.isArray(value.cities)
+    || !isRecord(value.source)
+    || typeof value.source.pageUrl !== "string"
+    || typeof value.source.resourceUrl !== "string"
+    || typeof value.source.sourceChecksumSha256 !== "string"
+    || !/^[a-f0-9]{64}$/u.test(value.source.sourceChecksumSha256)
+    || typeof value.source.license !== "string"
+    || typeof value.source.licenseUrl !== "string"
+    || typeof value.source.attribution !== "string"
+    || !isRecord(value.totals)) {
+    throw new Error("DVF purchase-points manifest is invalid.");
+  }
+
+  const seenCities = new Set<string>();
+  let distinctParcelCentres = 0;
+  for (const city of value.cities) {
+    if (!isRecord(city)
+      || typeof city.code !== "string"
+      || !/^\d{5}$/u.test(city.code)
+      || seenCities.has(city.code)
+      || typeof city.asset !== "string"
+      || !/^cities\/[A-Za-z0-9_-]+\.json$/u.test(city.asset)
+      || !isNonNegativeInteger(city.bytes)
+      || typeof city.checksumSha256 !== "string"
+      || !/^[a-f0-9]{64}$/u.test(city.checksumSha256)
+      || !isNonNegativeInteger(city.pointCount)
+      || city.pointCount < 1
+      || !Array.isArray(city.bounds)
+      || city.bounds.length !== 4
+      || !isFiniteNumber(city.bounds[0]) || city.bounds[0] < -180 || city.bounds[0] > 180
+      || !isFiniteNumber(city.bounds[1]) || city.bounds[1] < -90 || city.bounds[1] > 90
+      || !isFiniteNumber(city.bounds[2]) || city.bounds[2] < -180 || city.bounds[2] > 180
+      || !isFiniteNumber(city.bounds[3]) || city.bounds[3] < -90 || city.bounds[3] > 90
+      || city.bounds[0] > city.bounds[2]
+      || city.bounds[1] > city.bounds[3]) {
+      throw new Error("DVF purchase-points city descriptor is invalid.");
+    }
+    seenCities.add(city.code);
+    distinctParcelCentres += city.pointCount;
+  }
+
+  if (!isNonNegativeInteger(value.totals.communes)
+    || value.totals.communes !== value.cities.length
+    || !isNonNegativeInteger(value.totals.distinctParcelCentres)
+    || value.totals.distinctParcelCentres !== distinctParcelCentres
+    || !isNonNegativeInteger(value.totals.geolocatedIdfRows)
+    || !isNonNegativeInteger(value.totals.sourceRows)) {
+    throw new Error("DVF purchase-points manifest totals are invalid.");
+  }
+}
+
+export function assertDvfPurchasePointsFile(value: unknown): asserts value is DvfPurchasePointsFile {
+  if (!isRecord(value)
+    || value.schemaVersion !== DVF_PURCHASE_POINTS_SCHEMA_VERSION
+    || typeof value.cityCode !== "string"
+    || !/^\d{5}$/u.test(value.cityCode)
+    || typeof value.referencePeriod !== "string"
+    || value.locationPrecision !== DVF_PURCHASE_POINTS_PRECISION
+    || !Array.isArray(value.points)) {
+    throw new Error("DVF purchase-points city asset is invalid.");
+  }
+
+  for (const point of value.points) {
+    if (!Array.isArray(point)
+      || point.length !== 2
+      || !isFiniteNumber(point[0])
+      || point[0] < -180 || point[0] > 180
+      || !isFiniteNumber(point[1])
+      || point[1] < -90 || point[1] > 90) {
+      throw new Error("DVF purchase-points coordinates are invalid.");
+    }
+  }
+}
+
 export class DvfDataUnavailableError extends Error {
   readonly code = "dvf-data-unavailable";
 
@@ -259,13 +388,17 @@ export class DvfDataUnavailableError extends Error {
 export interface DvfDataProvider {
   loadManifest(signal?: AbortSignal): Promise<DvfManifest>;
   loadCity(code: string, signal?: AbortSignal): Promise<DvfCityFile>;
+  loadPurchasePointsManifest(signal?: AbortSignal): Promise<DvfPurchasePointsManifest>;
+  loadPurchasePoints(code: string, signal?: AbortSignal): Promise<DvfPurchasePointsFile>;
 }
 
 export function createDvfDataProvider(options: { fetcher?: typeof fetch; basePath?: string } = {}): DvfDataProvider {
   const fetcher = options.fetcher ?? fetch;
   const basePath = (options.basePath ?? DVF_DATASET_BASE_PATH).replace(/\/+$/u, "");
   let manifestRequest: Promise<DvfManifest> | undefined;
+  let purchasePointsManifestRequest: Promise<DvfPurchasePointsManifest> | undefined;
   const cityRequests = new Map<string, Promise<DvfCityFile>>();
+  const purchasePointsRequests = new Map<string, Promise<DvfPurchasePointsFile>>();
 
   async function loadJson<T>(asset: string, validate: (value: unknown) => asserts value is T, signal?: AbortSignal): Promise<T> {
     const response = await runNetworkTask((requestSignal) => fetcher(`${basePath}/${asset}`, {
@@ -308,7 +441,41 @@ export function createDvfDataProvider(options: { fetcher?: typeof fetch; basePat
     return signal ? withAbort(request, signal) : request;
   }
 
-  return { loadManifest, loadCity };
+  function loadPurchasePointsManifest(signal?: AbortSignal): Promise<DvfPurchasePointsManifest> {
+    if (!purchasePointsManifestRequest) {
+      purchasePointsManifestRequest = loadJson("purchase-points/manifest.json", assertDvfPurchasePointsManifest).catch((error) => {
+        purchasePointsManifestRequest = undefined;
+        throw error;
+      });
+    }
+    return signal ? withAbort(purchasePointsManifestRequest, signal) : purchasePointsManifestRequest;
+  }
+
+  async function loadPurchasePoints(code: string, signal?: AbortSignal): Promise<DvfPurchasePointsFile> {
+    const manifest = await loadPurchasePointsManifest(signal);
+    const descriptor = manifest.cities.find((candidate) => candidate.code === code);
+    if (!descriptor) throw new DvfDataUnavailableError(`No DVF purchase-point asset for commune ${code}.`);
+
+    let request = purchasePointsRequests.get(code);
+    if (!request) {
+      request = loadJson(`purchase-points/${descriptor.asset}`, assertDvfPurchasePointsFile).then((city) => {
+        if (city.cityCode !== code
+          || city.referencePeriod !== manifest.referencePeriod
+          || city.points.length !== descriptor.pointCount) {
+          throw new DvfDataUnavailableError("DVF purchase-point asset does not match its manifest.");
+        }
+        return city;
+      }).catch((error) => {
+        purchasePointsRequests.delete(code);
+        throw error;
+      });
+      purchasePointsRequests.set(code, request);
+      while (purchasePointsRequests.size > 12) purchasePointsRequests.delete(purchasePointsRequests.keys().next().value as string);
+    }
+    return signal ? withAbort(request, signal) : request;
+  }
+
+  return { loadManifest, loadCity, loadPurchasePointsManifest, loadPurchasePoints };
 }
 
 let sharedProvider: DvfDataProvider | undefined;
