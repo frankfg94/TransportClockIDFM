@@ -5369,6 +5369,21 @@ function mix(from: number, to: number, progress: number): number {
         <span v-else-if="cityViewError">{{ t('globalMap.iris.unavailable') }}</span>
         <span v-else>{{ t('globalMap.iris.partialCity') }}</span>
       </div>
+      <div
+        v-if="cityViewRealEstateLayerEnabled && cityViewDvfStatus === 'loading' && cityViewDvfMapCells.length === 0"
+        class="nearby-map__real-estate-loading"
+        role="status"
+        aria-live="polite"
+        data-testid="nearby-map-real-estate-loading"
+      >
+        <LoaderCircle
+          class="nearby-map__real-estate-spinner"
+          :class="{ 'nearby-map__real-estate-spinner--static': reducedMotion }"
+          :size="16"
+          aria-hidden="true"
+        />
+        <span>{{ t('nearbyStations.realEstate.mapLoading') }}</span>
+      </div>
       <span
         v-if="!summaryLineHoverActive && placesVisible"
         class="nearby-map__places-attribution"
@@ -6120,6 +6135,9 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__city-view-spinner { animation: nearby-map-city-view-spin 900ms linear infinite; flex: 0 0 auto; }
 .nearby-map__city-view-spinner--static { animation: none; }
 .nearby-map__city-view-status--error { border-color: rgba(217,45,32,.24); color: #9b271e; }
+.nearby-map__real-estate-loading { align-items: center; backdrop-filter: blur(5px); background: rgba(255,255,255,.95); border: 1px solid rgba(190,24,47,.22); border-radius: 999px; box-shadow: 0 5px 16px rgba(49,19,30,.16); color: #881337; display: flex; font-size: .76rem; font-weight: 820; gap: 8px; left: 50%; max-width: calc(100% - 24px); padding: 9px 13px; pointer-events: none; position: absolute; top: 50%; transform: translate(-50%, -50%); z-index: 12; }
+.nearby-map__real-estate-spinner { animation: nearby-map-city-view-spin 900ms linear infinite; flex: 0 0 auto; }
+.nearby-map__real-estate-spinner--static { animation: none; }
 .nearby-map__display-overlay { inset: 0; pointer-events: none; position: absolute; z-index: 9001; }
 .nearby-map__display-panel-backdrop { display: none; }
 .nearby-map__display-panel { background: #fff; border: 1px solid rgba(100, 116, 139, .24); border-radius: 14px; box-shadow: 0 8px 24px rgba(15, 23, 42, .18); overflow: hidden; pointer-events: auto; position: absolute; right: 12px; top: 58px; width: min(270px, calc(100% - 24px)); z-index: 9002; }
@@ -6400,7 +6418,7 @@ function mix(from: number, to: number, progress: number): number {
   .nearby-map-shell:fullscreen .nearby-map__sidebar { max-height: none; }
  }
 @media (prefers-reduced-motion: reduce) {
-  .nearby-map__city-view-spinner { animation: none; }
+  .nearby-map__city-view-spinner, .nearby-map__real-estate-spinner { animation: none; }
   .nearby-map-display-sheet-enter-active, .nearby-map-display-sheet-leave-active { transition: none; }
   .nearby-map__sidebar-tab-track { transition: none; }
   .nearby-map__city-view-slider { transition: none; }

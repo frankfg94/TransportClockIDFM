@@ -1782,6 +1782,7 @@ export const fr = {
        layerControl: "Afficher la couche des prix et des ventes",
        unavailable: "Données immobilières indisponibles",
        loading: "Chargement des tendances immobilières…",
+       mapLoading: "Chargement des zones de prix…",
        prices: "Prix au m²",
        liquidity: "Fréquence des ventes",
        cityScope: "Cette ville",

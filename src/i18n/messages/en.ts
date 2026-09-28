@@ -1751,6 +1751,7 @@ export const en = {
       layerControl: "Show the property market layer",
       unavailable: "Property data unavailable",
       loading: "Loading property market trends…",
+      mapLoading: "Loading property price zones…",
       prices: "Price per m²",
       liquidity: "Sale frequency",
       cityScope: "This city",
