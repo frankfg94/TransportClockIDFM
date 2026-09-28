@@ -3493,6 +3493,11 @@ function handleMapClick(event: MouseEvent): void {
     event.stopImmediatePropagation();
     return;
   }
+  if (displayControlsOpen.value && isMobileDisplaySheet.value) {
+    closeDisplayControls();
+    event.stopImmediatePropagation();
+    return;
+  }
   if (isInteractiveMapTarget(event.target) && !isMapGeometryTarget(event.target)) return;
   if (event.target instanceof Element && event.target.closest("[data-nearby-place-canvas]")) return;
   if (isMapGeometryTarget(event.target)) return;
@@ -5922,13 +5927,13 @@ function mix(from: number, to: number, progress: number): number {
   .nearby-map__top-control-zone { height: 112px; }
   .nearby-map__primary-controls { flex-wrap: wrap; gap: 6px; justify-content: flex-end; left: 12px; right: 12px; }
   .nearby-map__city-view-toggle { width: 128px; }
-  .nearby-map__display-overlay { background: rgba(15, 23, 42, .22); inset: 0; pointer-events: auto; position: fixed; }
+  .nearby-map__display-overlay { background: rgba(15, 23, 42, .22); inset: 0; pointer-events: none; position: fixed; }
   .nearby-map-display-sheet-enter-active .nearby-map__display-panel, .nearby-map-display-sheet-leave-active .nearby-map__display-panel { transition: transform 220ms cubic-bezier(.16, 1, .3, 1); }
   .nearby-map-display-sheet-enter-active .nearby-map__display-panel-backdrop, .nearby-map-display-sheet-leave-active .nearby-map__display-panel-backdrop { transition: opacity 180ms ease; }
   .nearby-map-display-sheet-enter-from .nearby-map__display-panel, .nearby-map-display-sheet-leave-to .nearby-map__display-panel { transform: translateY(100%); }
   .nearby-map-display-sheet-enter-from .nearby-map__display-panel-backdrop, .nearby-map-display-sheet-leave-to .nearby-map__display-panel-backdrop { opacity: 0; }
-  .nearby-map__display-panel-backdrop { background: transparent; border: 0; display: block; inset: 0; padding: 0; position: absolute; width: 100%; z-index: 0; }
-  .nearby-map__display-panel { border: 0; border-radius: 22px 22px 0 0; bottom: 0; box-shadow: 0 -20px 48px rgba(15, 23, 42, .25); display: grid; grid-template-rows: auto auto minmax(0, 1fr); left: 0; max-height: min(82dvh, 620px); right: 0; top: auto; width: 100%; }
+  .nearby-map__display-panel-backdrop { background: transparent; border: 0; display: block; inset: 0; padding: 0; pointer-events: none; position: absolute; width: 100%; z-index: 0; }
+  .nearby-map__display-panel { border: 0; border-radius: 22px 22px 0 0; bottom: 0; box-shadow: 0 -20px 48px rgba(15, 23, 42, .25); display: grid; grid-template-rows: auto auto minmax(0, 1fr); left: 0; max-height: min(82dvh, 620px); pointer-events: auto; right: 0; top: auto; width: 100%; }
   .nearby-map__display-sheet-handle { align-items: center; appearance: none; background: #fff; border: 0; display: flex; flex: 0 0 27px; justify-content: center; padding: 0; touch-action: none; width: 100%; }
   .nearby-map__display-sheet-handle span { background: rgba(100, 116, 139, .42); border-radius: 999px; display: block; height: 5px; width: 46px; }
   .nearby-map__display-sheet-handle:focus-visible { outline: 2px solid #5146ff; outline-offset: -3px; }
@@ -5937,6 +5942,7 @@ function mix(from: number, to: number, progress: number): number {
   .nearby-map__display-panel-close { align-items: center; background: #f5f7fb; border: 1px solid rgba(100, 116, 139, .2); border-radius: 50%; color: #334155; display: inline-flex; flex: 0 0 34px; height: 34px; justify-content: center; padding: 0; width: 34px; }
   .nearby-map__display-panel-close:hover, .nearby-map__display-panel-close:focus-visible { background: #ebe9ff; color: #4034df; outline: 0; }
   .nearby-map__display-panel-scroll { min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding-bottom: max(12px, env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+  .nearby-map__display-panel :deep(.line-map-display-panel__modes--global) { grid-template-columns: minmax(0, 1fr); }
   .nearby-map__display-section { border-top: 1px solid rgba(100, 116, 139, .16); }
   .nearby-map__display-section > summary { align-items: center; color: #18233f; cursor: pointer; display: flex; font-size: .78rem; font-weight: 850; justify-content: space-between; list-style: none; min-height: 50px; padding: 9px 14px 9px 18px; }
   .nearby-map__display-section > summary::-webkit-details-marker { display: none; }

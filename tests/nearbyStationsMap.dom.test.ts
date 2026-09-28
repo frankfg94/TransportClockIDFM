@@ -572,6 +572,66 @@ describe("NearbyStationsMap pan interaction", () => {
     }
   });
 
+  it("zooms the map camera for a two-finger touch pinch", async () => {
+    const restoreViewport = installMapViewport(390, 700);
+    const wrapper = mountMap([]);
+    const map = wrapper.get(".nearby-map");
+
+    try {
+      await wrapper.setProps({ showDisplayControl: true });
+      await wrapper.get(".nearby-map__display-toggle").trigger("click");
+      expect(document.body.querySelector("#nearby-map-display-controls")).not.toBeNull();
+      await nextTick();
+      const before = wrapper.emitted("cameraChange")?.at(-1)?.[0] as { zoom: number };
+
+      await map.trigger("pointerdown", {
+        clientX: 220,
+        clientY: 300,
+        pointerId: 10,
+        pointerType: "touch",
+      });
+      await map.trigger("pointerdown", {
+        clientX: 280,
+        clientY: 300,
+        pointerId: 11,
+        pointerType: "touch",
+      });
+      await map.trigger("pointermove", {
+        clientX: 340,
+        clientY: 300,
+        pointerId: 11,
+        pointerType: "touch",
+      });
+      await map.trigger("pointerup", { pointerId: 11, pointerType: "touch" });
+      await map.trigger("pointerup", { pointerId: 10, pointerType: "touch" });
+
+      const after = wrapper.emitted("cameraChange")?.at(-1)?.[0] as { zoom: number };
+      expect(after.zoom).toBeGreaterThan(before.zoom);
+    } finally {
+      wrapper.unmount();
+      restoreViewport();
+    }
+  });
+
+  it("closes the mobile display sheet from a tap on the uncovered map", async () => {
+    const restoreViewport = installMapViewport(390, 700);
+    const wrapper = mountMap([]);
+
+    try {
+      await wrapper.setProps({ showDisplayControl: true });
+      await wrapper.get(".nearby-map__display-toggle").trigger("click");
+      expect(document.body.querySelector("#nearby-map-display-controls")).not.toBeNull();
+
+      await wrapper.get(".nearby-map").trigger("click");
+      await flushPromises();
+
+      expect(document.body.querySelector("#nearby-map-display-controls")).toBeNull();
+    } finally {
+      wrapper.unmount();
+      restoreViewport();
+    }
+  });
+
   it("moves the marker layer with the compositor gesture transform without committing Vue camera state", async () => {
     const line = createLine("line:metro:1", "METRO");
     const station = createStationAt("station:dynamic", "Station dynamique", line, 2.351, 48.851);
