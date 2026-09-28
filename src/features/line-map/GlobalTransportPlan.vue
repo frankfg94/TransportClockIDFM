@@ -1214,6 +1214,16 @@ async function toggleRealEstateLayer(): Promise<void> {
   }
 
   realEstateLayerEnabled.value = true;
+  // The real-estate view also needs commune contours to make the color field
+  // legible. Load the same official IRIS geometry used by the city-boundary
+  // toggle, without delaying the DVF layer or making it depend on that toggle.
+  void ensureIrisDataset()
+    .then(() => {
+      if (realEstateLayerEnabled.value) draw();
+    })
+    .catch(() => {
+      // Boundary context is optional; DVF prices and the base map still work.
+    });
   if (realEstateGridCells.value.length || realEstateLayerLoading.value) return;
 
   realEstateLayerError.value = "";
@@ -2024,18 +2034,23 @@ const nearbyLineCityRefs = computed<NearbyPlaceCityRef[]>(() => {
 const globalAdministrativeZones = computed(() => {
   if (
     mapExperience.kind !== "next" ||
-    !cityZonesVisible.value ||
+    (!cityZonesVisible.value && !realEstateLayerEnabled.value) ||
     routePreviewActive.value ||
     !irisDataset.value
   ) {
     return [];
   }
-  return buildAllGlobalZones(irisDataset.value);
+  const zones = buildAllGlobalZones(irisDataset.value);
+  return realEstateLayerEnabled.value
+    ? zones.map(zone => ({ ...zone, boundaryEmphasis: true }))
+    : zones;
 });
 
 const renderScene = computed<TransportMapRenderScene>(() => {
   const scene = baseRenderScene.value;
-  const zones = servedCityZones.value ?? globalAdministrativeZones.value;
+  const zones = realEstateLayerEnabled.value
+    ? globalAdministrativeZones.value
+    : servedCityZones.value ?? globalAdministrativeZones.value;
   return zones.length > 0 ? { ...scene, servedCityZones: zones } : scene;
 });
 

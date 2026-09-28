@@ -38,6 +38,8 @@ export interface TransportMapServedCityZone {
   kind?: "city" | "department";
   /** The basemap already carries city names for the global overlay. */
   showLabel?: boolean;
+  /** Draw stronger administrative strokes while the real-estate heatmap is active. */
+  boundaryEmphasis?: boolean;
   geometry: IrisPolygonGeometry;
   boundaryPaths: ReadonlyArray<ReadonlyArray<readonly [number, number]>>;
   /** Lighter city delimitations drawn inside a department aggregate. */

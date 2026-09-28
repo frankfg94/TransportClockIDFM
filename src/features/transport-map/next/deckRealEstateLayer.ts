@@ -39,6 +39,7 @@ export function createDeckRealEstatePriceLayers(
   cells: readonly DvfMapGridCell[],
   range: DvfMapPriceRange,
   radiusPixels = 28,
+  beforeId?: string,
 ): Layer[] {
   return [
     new HeatmapLayer<DvfMapGridCell>({
@@ -57,6 +58,7 @@ export function createDeckRealEstatePriceLayers(
       // visible, including the cheapest cells below the robust 4th percentile.
       getWeight: (cell) => Math.max(range.low, Math.min(range.high, cell.medianPriceM2)),
       updateTriggers: { getWeight: [range.low, range.high] },
+      ...(beforeId ? { beforeId } : {}),
     }),
     new ScatterplotLayer<DvfMapGridCell>({
       id: REAL_ESTATE_HIT_LAYER_ID,
@@ -72,6 +74,7 @@ export function createDeckRealEstatePriceLayers(
       getPosition: (cell) => [cell.lon, cell.lat],
       getRadius: 95,
       getFillColor: [0, 0, 0, 0],
+      ...(beforeId ? { beforeId } : {}),
     }),
   ];
 }

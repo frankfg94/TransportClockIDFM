@@ -37,7 +37,7 @@ import {
   resolveNextMapStyle,
   type NextMapStyle,
 } from "./nextMapConfig";
-import { MapLibreDeckOverlayPresenter } from "./deckMapPresenter";
+import { firstSymbolLayerId, MapLibreDeckOverlayPresenter } from "./deckMapPresenter";
 import { cameraStateToMapLibreView } from "./nextMapCamera";
 import {
   TransportMapMapLibreTraceProbe,
@@ -67,6 +67,7 @@ const mapElement = ref<HTMLElement>();
 const status = ref<SurfaceStatus>("initializing");
 const basemapUnavailable = ref(false);
 const realEstateRadiusPixels = ref(getRealEstateRadiusPixels(props.camera.zoom));
+const realEstateBeforeId = ref<string>();
 let map: MapLibreMap | undefined;
 let overlay: MapboxOverlay | undefined;
 let presenter: MapLibreDeckOverlayPresenter | undefined;
@@ -89,7 +90,7 @@ const realEstateLayers = computed(() => {
   const cells = props.realEstateCells;
   const range = props.realEstatePriceRange;
   return cells?.length && range
-    ? createDeckRealEstatePriceLayers(cells, range, realEstateRadiusPixels.value)
+    ? createDeckRealEstatePriceLayers(cells, range, realEstateRadiusPixels.value, realEstateBeforeId.value)
     : [];
 });
 watch(realEstateLayers, layers => presenter?.setRealEstateLayers(layers));
@@ -172,7 +173,14 @@ function applyMapLocale(): void {
   if (changed > 0) activeMap.triggerRepaint();
 }
 
+function syncRealEstateLayerOrder(): void {
+  if (!map?.isStyleLoaded()) return;
+  const firstSymbolId = firstSymbolLayerId(map);
+  if (realEstateBeforeId.value !== firstSymbolId) realEstateBeforeId.value = firstSymbolId;
+}
+
 function onStyleData(): void {
+  syncRealEstateLayerOrder();
   presenter?.refresh();
   applyMapLocale();
 }
@@ -197,6 +205,7 @@ function installDeckMapLibreCompatibility(activeMap: MapLibreMap): void {
 function onMapLoad(): void {
   const activeMap = map;
   if (!activeMap) return;
+  syncRealEstateLayerOrder();
   installDeckMapLibreCompatibility(activeMap);
   const webgl2 = activeMap.getCanvas().getContext("webgl2");
   if (!webgl2) {

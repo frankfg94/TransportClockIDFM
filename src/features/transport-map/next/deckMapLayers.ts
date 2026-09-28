@@ -52,6 +52,7 @@ const servedCityGeoJsonByZones = new WeakMap<readonly TransportMapServedCityZone
 interface AdministrativeBoundaryRecord {
   path: ReadonlyArray<readonly [number, number]>;
   color: readonly [number, number, number, number];
+  boundaryEmphasis?: boolean;
 }
 
 // Deck compares data by identity. A transport hover/chunk update must not
@@ -66,9 +67,14 @@ function administrativeData(zones: readonly TransportMapServedCityZone[]) {
   let prepared = administrativeDataByZones.get(zones);
   if (!prepared) {
     prepared = {
-      boundaries: zones.flatMap((zone) => zone.boundaryPaths.map((path) => ({ path, color: zone.borderColor }))),
+      boundaries: zones.flatMap((zone) => zone.boundaryPaths.map((path) => ({
+        path,
+        color: zone.borderColor,
+        boundaryEmphasis: zone.boundaryEmphasis,
+      }))),
       innerBoundaries: zones.flatMap((zone) => (zone.innerBoundaryPaths ?? []).map((path) => ({
         path, color: zone.innerBoundaryColor ?? [100, 116, 139, 112],
+        boundaryEmphasis: zone.boundaryEmphasis,
       }))),
       labels: zones.filter((zone) => zone.showLabel !== false),
     };
@@ -120,7 +126,7 @@ export function createDeckTransportLayers(
   }
   if (model.servedCityZones?.length) {
     layers.push(createServedCityFillLayer(model.servedCityZones, beforeId));
-    layers.push(...createServedCityBoundaryLayers(model.servedCityZones, beforeId));
+    layers.push(...createServedCityBoundaryLayers(model.servedCityZones, beforeId, frame.camera.zoom));
   }
   if (model.basePaths.length) {
     layers.push(createPathLayer(
@@ -197,9 +203,14 @@ function createServedCityFillLayer(
 function createServedCityBoundaryLayers(
   zones: readonly TransportMapServedCityZone[],
   beforeId: string | undefined,
+  zoom: number,
 ): Layer[] {
   const { boundaries: data, innerBoundaries: innerData } = administrativeData(zones);
   if (data.length === 0 && innerData.length === 0) return [];
+  const visibleCityBoundaries = data.filter((record) => !record.boundaryEmphasis);
+  const emphasizedCityBoundaries = data.filter((record) => record.boundaryEmphasis);
+  const visibleInnerBoundaries = innerData.filter((record) => !record.boundaryEmphasis);
+  const emphasizedInnerBoundaries = innerData.filter((record) => record.boundaryEmphasis);
 
   const commonProps = {
     data,
@@ -213,10 +224,10 @@ function createServedCityBoundaryLayers(
   };
 
   const layers: Layer[] = [];
-  if (innerData.length > 0) {
+  if (visibleInnerBoundaries.length > 0) {
     layers.push(new PathLayer({
       ...commonProps,
-      data: innerData,
+      data: visibleInnerBoundaries,
       id: "transport-served-city-inner-boundaries",
       getWidth: () => 1,
       extensions: [new PathStyleExtension({ dash: true, highPrecisionDash: true })],
@@ -226,10 +237,34 @@ function createServedCityBoundaryLayers(
       capRounded: true,
     } as never));
   }
-  if (data.length > 0) {
+  if (emphasizedInnerBoundaries.length > 0) {
+    const regionalView = zoom < 10;
+    if (!regionalView) {
+      layers.push(new PathLayer({
+        ...commonProps,
+        data: emphasizedInnerBoundaries,
+        id: "transport-real-estate-city-inner-boundary-halo",
+        getColor: () => [255, 255, 255, zoom < 12 ? 190 : 225],
+        getWidth: () => zoom < 12 ? 2.4 : 3.2,
+        jointRounded: true,
+        capRounded: true,
+      } as never));
+    }
+    layers.push(new PathLayer({
+      ...commonProps,
+      data: emphasizedInnerBoundaries,
+      id: "transport-real-estate-city-inner-boundaries",
+      getColor: () => [45, 55, 72, regionalView ? 142 : 225],
+      getWidth: () => regionalView ? 0.8 : zoom < 12 ? 1 : 1.25,
+      jointRounded: true,
+      capRounded: true,
+    } as never));
+  }
+  if (visibleCityBoundaries.length > 0) {
     layers.push(
       new PathLayer({
       ...commonProps,
+      data: visibleCityBoundaries,
       id: "transport-served-city-boundary-halo",
       getColor: (record: AdministrativeBoundaryRecord) => withAlpha(record.color, 82),
       getWidth: () => 8,
@@ -238,11 +273,34 @@ function createServedCityBoundaryLayers(
       } as never),
       new PathLayer({
         ...commonProps,
+        data: visibleCityBoundaries,
         id: "transport-served-city-boundaries",
         getWidth: () => 2.5,
         extensions: [new PathStyleExtension({ dash: true, highPrecisionDash: true })],
         getDashArray: () => [7, 5],
         dashJustified: false,
+        jointRounded: true,
+        capRounded: true,
+      } as never),
+    );
+  }
+  if (emphasizedCityBoundaries.length > 0) {
+    layers.push(
+      new PathLayer({
+        ...commonProps,
+        data: emphasizedCityBoundaries,
+        id: "transport-real-estate-city-boundary-halo",
+        getColor: () => [255, 255, 255, 235],
+        getWidth: () => zoom < 12 ? 3.5 : 4.2,
+        jointRounded: true,
+        capRounded: true,
+      } as never),
+      new PathLayer({
+        ...commonProps,
+        data: emphasizedCityBoundaries,
+        id: "transport-real-estate-city-boundaries",
+        getColor: () => [45, 55, 72, 235],
+        getWidth: () => zoom < 12 ? 1.4 : 1.6,
         jointRounded: true,
         capRounded: true,
       } as never),
