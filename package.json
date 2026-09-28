@@ -18,6 +18,7 @@
     "capacitor:android": "npx cap open android",
     "capacitor:ios": "npx cap open ios",
     "gtfs:update": "tsx scripts/gtfs/update.ts",
+    "real-estate:rents:update": "node scripts/real-estate/update-rent-indicators.mjs",
     "gtfs:reset": "tsx scripts/gtfs/update.ts --reset",
     "neighborhood-verdict:publish:r2": "rclone copyto ../idfm-node-backend/.data/neighborhood-verdict/compiled.json CLOUDFLARE_R2_IDFM_BACKEND_JSON:idfm-backend-netex-cache/neighborhood-verdict/compiled.json --progress",
     "neighborhood-verdict:compile": "npm --prefix ../idfm-node-backend run data:compile",

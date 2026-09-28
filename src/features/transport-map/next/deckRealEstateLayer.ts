@@ -53,7 +53,7 @@ function getPriceRangeAccessors(range: DvfMapPriceRange): PriceRangeAccessors {
   const accessors: PriceRangeAccessors = {
     low: range.low,
     high: range.high,
-    getWeight: (cell) => Math.max(range.low, Math.min(range.high, cell.meanPriceM2)),
+    getWeight: (cell) => Math.max(range.low, Math.min(range.high, cell.medianPriceM2)),
     colorDomain: [range.low, range.high],
     updateTriggers: { getWeight: [range.low, range.high] },
   };
@@ -65,9 +65,9 @@ function getDvfCellPosition(cell: DvfMapGridCell): [number, number] {
   return [cell.lon, cell.lat];
 }
 
-/** Use robust tails so a few exceptional sales do not flatten the regional contrast. */
+/** Use robust tails of cell medians so a few exceptional sales do not flatten the regional contrast. */
 export function getDvfMapPriceRange(cells: readonly DvfMapGridCell[]): DvfMapPriceRange {
-  const prices = cells.map((cell) => cell.meanPriceM2).filter(Number.isFinite).sort((a, b) => a - b);
+  const prices = cells.map((cell) => cell.medianPriceM2).filter(Number.isFinite).sort((a, b) => a - b);
   if (!prices.length) return { low: 0, high: 1 };
   return {
     low: quantile(prices, 0.04),
@@ -76,9 +76,8 @@ export function getDvfMapPriceRange(cells: readonly DvfMapGridCell[]): DvfMapPri
 }
 
 /**
- * The visible layer is deck.gl's GPU Gaussian KDE. MEAN aggregation keeps
- * color tied to €/m² instead of transaction density; a transparent GPU point
- * layer preserves exact per-cell hover values.
+ * The visible layer smooths each cell's median €/m² with deck.gl's GPU
+ * Gaussian KDE; a transparent GPU point layer preserves exact hover values.
  */
 export function createDeckRealEstatePriceLayers(
   cells: readonly DvfMapGridCell[],
@@ -146,7 +145,7 @@ export function createDeckRealEstatePurchasePointsLayer(
     getPosition: (mark) => [mark.coordinates[0], mark.coordinates[1]],
     getRadius: 4.5,
     getFillColor: (mark) => mark.context
-      ? getDvfMapPriceColor(mark.context.meanPriceM2, range)
+      ? getDvfMapPriceColor(mark.context.medianPriceM2, range)
       : [71, 85, 105, 220],
     getLineColor: [255, 255, 255, 245],
     ...(beforeId ? { beforeId } : {}),
@@ -172,7 +171,7 @@ export function createDeckRealEstatePurchasePointsHaloLayer(
     getPosition: (mark) => [mark.coordinates[0], mark.coordinates[1]],
     getRadius: 7.5,
     getFillColor: (mark) => mark.context
-      ? getDvfMapPriceColor(mark.context.meanPriceM2, range, 0.2)
+      ? getDvfMapPriceColor(mark.context.medianPriceM2, range, 0.2)
       : [71, 85, 105, 38],
     ...(beforeId ? { beforeId } : {}),
   });
@@ -187,7 +186,7 @@ export function createDeckRealEstatePurchasePointHoverLayers(
   if (!mark) return [];
   const data = [mark];
   const color: [number, number, number, number] = mark.context
-    ? getDvfMapPriceColor(mark.context.meanPriceM2, range)
+    ? getDvfMapPriceColor(mark.context.medianPriceM2, range)
     : [71, 85, 105, 220];
   return [
     new ScatterplotLayer<DvfMapPurchasePointMark>({

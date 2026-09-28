@@ -123,6 +123,9 @@
         v-if="realEstateLayerEnabled && (hoveredRealEstateCell || hoveredRealEstatePurchasePoint) && !hoveredFeature"
         :cell="hoveredRealEstateCell"
         :is-purchase-point="Boolean(hoveredRealEstatePurchasePoint)"
+        :rental-estimate="hoveredRealEstateCell ? realEstateRentalEstimates[hoveredRealEstateCell.cityCode] : undefined"
+        :rental-reference-period="realEstateRentalReferencePeriod"
+        :liquidity="realEstateLiquidity"
         :reference-period="realEstateReferencePeriod"
         :style="realEstateTooltipStyle"
       />
@@ -913,6 +916,8 @@ import {
   type DvfMapPurchasePointMark,
 } from "../transport-map/next/deckRealEstateLayer";
 import { loadDvfMapCells, type DvfMapGridCell } from "../../services/real-estate/realEstateMapLayer";
+import type { DvfMapLiquidity } from "../../services/real-estate/realEstateMapLayer";
+import type { DvfRentalEstimate } from "../../services/real-estate/compiledRealEstate";
 import {
   boundsForIrisDataset,
   boundsForIrisGeometry,
@@ -1209,6 +1214,9 @@ const realEstateLoadedDepartmentCount = ref(0);
 const realEstateTotalDepartmentCount = ref(0);
 const realEstateFailedDepartmentCount = ref(0);
 const realEstateReferencePeriod = ref("");
+const realEstateRentalEstimates = shallowRef<Record<string, DvfRentalEstimate>>({});
+const realEstateRentalReferencePeriod = ref("");
+const realEstateLiquidity = shallowRef<DvfMapLiquidity>();
 const hoveredRealEstateCell = shallowRef<DvfMapGridCell>();
 const hoveredRealEstatePurchasePoint = shallowRef<DvfMapPurchasePointMark>();
 const hoveredRealEstatePoint = ref<{ x: number; y: number }>();
@@ -1219,8 +1227,8 @@ const realEstateTooltipStyle = computed<Record<string, string>>(() => {
   const width = stageElement.value?.clientWidth ?? camera.value.viewportWidthCssPx;
   const height = stageElement.value?.clientHeight ?? camera.value.viewportHeightCssPx;
   return {
-    left: `${Math.max(8, Math.min(width - 268, point.x + 14))}px`,
-    top: `${Math.max(8, Math.min(height - 128, point.y - 64))}px`,
+    left: `${Math.max(8, Math.min(width - 294, point.x + 14))}px`,
+    top: `${Math.max(8, Math.min(height - 300, point.y - 135))}px`,
   };
 });
 
@@ -1266,6 +1274,9 @@ async function toggleRealEstateLayer(): Promise<void> {
       realEstateCompletedDepartments.value = completed;
     });
     realEstateGridCells.value = dataset.cells;
+    realEstateRentalEstimates.value = dataset.rentalEstimatesByCityCode;
+    realEstateRentalReferencePeriod.value = dataset.rentalReferencePeriod;
+    realEstateLiquidity.value = dataset.liquidity;
     realEstatePriceRange.value = getDvfMapPriceRange(dataset.cells);
     realEstateCityCount.value = dataset.cityCount;
     realEstateTotalCityCount.value = dataset.totalCityCount;

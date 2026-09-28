@@ -47,6 +47,31 @@ export interface DvfYearlyPrice {
   transactionCount: number;
 }
 
+export interface DvfRentalEstimate {
+  code: string;
+  rentPerSquareMeter: number;
+  intervalLow: number;
+  intervalHigh: number;
+  predictionLevel: string;
+  observationsInCommune: number;
+  observationsInMesh: number;
+  modelR2?: number;
+}
+
+export interface DvfRentalIndicatorsFile {
+  schemaVersion: 1;
+  referencePeriod: string;
+  source: {
+    pageUrl: string;
+    resourceUrl: string;
+    sourceUpdatedAt: string;
+    license: string;
+    attribution: string;
+    methodology: string;
+  };
+  cities: DvfRentalEstimate[];
+}
+
 export interface DvfCityDescriptor {
   code: string;
   name: string;
@@ -303,6 +328,43 @@ export function assertDvfManifest(value: unknown): asserts value is DvfManifest 
   }
 }
 
+export function assertDvfRentalIndicatorsFile(value: unknown): asserts value is DvfRentalIndicatorsFile {
+  if (!isRecord(value)
+    || value.schemaVersion !== 1
+    || typeof value.referencePeriod !== "string"
+    || !isRecord(value.source)
+    || typeof value.source.pageUrl !== "string"
+    || typeof value.source.resourceUrl !== "string"
+    || typeof value.source.sourceUpdatedAt !== "string"
+    || typeof value.source.license !== "string"
+    || typeof value.source.attribution !== "string"
+    || typeof value.source.methodology !== "string"
+    || !Array.isArray(value.cities)) {
+    throw new Error("ANIL rent-indicator asset is invalid.");
+  }
+
+  const seenCities = new Set<string>();
+  for (const candidate of value.cities) {
+    if (!isRecord(candidate)
+      || typeof candidate.code !== "string"
+      || !/^\d{5}$/u.test(candidate.code)
+      || seenCities.has(candidate.code)
+      || !isFiniteNumber(candidate.rentPerSquareMeter)
+      || candidate.rentPerSquareMeter <= 0
+      || !isFiniteNumber(candidate.intervalLow)
+      || !isFiniteNumber(candidate.intervalHigh)
+      || candidate.intervalLow <= 0
+      || candidate.intervalHigh < candidate.intervalLow
+      || typeof candidate.predictionLevel !== "string"
+      || !isNonNegativeInteger(candidate.observationsInCommune)
+      || !isNonNegativeInteger(candidate.observationsInMesh)
+      || !isOptionalFiniteNumber(candidate.modelR2)) {
+      throw new Error("ANIL rent-indicator commune is invalid.");
+    }
+    seenCities.add(candidate.code);
+  }
+}
+
 export function assertDvfCityFile(value: unknown): asserts value is DvfCityFile {
   if (!isRecord(value) || value.schemaVersion !== DVF_DATA_SCHEMA_VERSION || value.datasetId !== DVF_DATASET_ID) {
     throw new Error("DVF city contract is unsupported.");
@@ -474,6 +536,7 @@ export class DvfDataUnavailableError extends Error {
 
 export interface DvfDataProvider {
   loadManifest(signal?: AbortSignal): Promise<DvfManifest>;
+  loadRentalIndicators(signal?: AbortSignal): Promise<DvfRentalIndicatorsFile>;
   loadCity(code: string, signal?: AbortSignal): Promise<DvfCityFile>;
   loadMapDepartment(code: string, signal?: AbortSignal): Promise<DvfMapDepartmentFile>;
   loadPurchasePointsManifest(signal?: AbortSignal): Promise<DvfPurchasePointsManifest>;
@@ -484,6 +547,7 @@ export function createDvfDataProvider(options: { fetcher?: typeof fetch; basePat
   const fetcher = options.fetcher ?? fetch;
   const basePath = (options.basePath ?? DVF_DATASET_BASE_PATH).replace(/\/+$/u, "");
   let manifestRequest: Promise<DvfManifest> | undefined;
+  let rentalIndicatorsRequest: Promise<DvfRentalIndicatorsFile> | undefined;
   let purchasePointsManifestRequest: Promise<DvfPurchasePointsManifest> | undefined;
   let citiesByCode: Map<string, DvfCityDescriptor> | undefined;
   let mapDepartmentsByCode: Map<string, DvfMapDepartmentDescriptor> | undefined;
@@ -511,6 +575,16 @@ export function createDvfDataProvider(options: { fetcher?: typeof fetch; basePat
       });
     }
     return signal ? withAbort(manifestRequest, signal) : manifestRequest;
+  }
+
+  function loadRentalIndicators(signal?: AbortSignal): Promise<DvfRentalIndicatorsFile> {
+    if (!rentalIndicatorsRequest) {
+      rentalIndicatorsRequest = loadJson("rent-indicators.json", assertDvfRentalIndicatorsFile).catch((error) => {
+        rentalIndicatorsRequest = undefined;
+        throw error;
+      });
+    }
+    return signal ? withAbort(rentalIndicatorsRequest, signal) : rentalIndicatorsRequest;
   }
 
   async function loadCity(code: string, signal?: AbortSignal): Promise<DvfCityFile> {
@@ -596,7 +670,7 @@ export function createDvfDataProvider(options: { fetcher?: typeof fetch; basePat
     return signal ? withAbort(request, signal) : request;
   }
 
-  return { loadManifest, loadCity, loadMapDepartment, loadPurchasePointsManifest, loadPurchasePoints };
+  return { loadManifest, loadRentalIndicators, loadCity, loadMapDepartment, loadPurchasePointsManifest, loadPurchasePoints };
 }
 
 let sharedProvider: DvfDataProvider | undefined;
