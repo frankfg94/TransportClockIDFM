@@ -23,6 +23,7 @@ import { useNearbyStations } from "./useNearbyStations";
 import { useNearbyWalkingRoutes } from "./useNearbyWalkingRoutes";
 import { useTravelRoutes } from "./useTravelRoutes";
 import NearbyNeighborhoodScoreCard from "./NearbyNeighborhoodScoreCard.vue";
+import NearbyRealEstateVerdict from "./NearbyRealEstateVerdict.vue";
 import {
   getNearbyNightJourneyDateTime,
   getNearbyWorkdayJourneyDateTime,
@@ -163,6 +164,11 @@ watch(
 );
 
 const originLabel = computed(() => formatOriginLabel(nearby.selectedPlace.value ?? initialOrigin));
+const realEstateOrigin = computed(() => {
+  const origin = nearby.selectedPlace.value ?? initialOrigin;
+  return origin ? { lon: origin.lon, lat: origin.lat } : undefined;
+});
+const realEstateRadiusMeters = computed(() => nearby.radius.value);
 const workplaceLabel = computed(() => {
   const workplace = addressBook.workplaceAddress.value;
   return workplace?.name || workplace?.address || undefined;
@@ -359,6 +365,11 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
       :directory-url="directoryUrl"
       @change-origin="openAddressSelector"
       @retry-source="retryFailedSource"
+    />
+    <NearbyRealEstateVerdict
+      v-if="initialOrigin"
+      :origin="realEstateOrigin"
+      :radius-meters="realEstateRadiusMeters"
     />
   </main>
   <AdressBook

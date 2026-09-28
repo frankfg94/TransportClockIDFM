@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useSlots, watch } from "vue";
-import { BusFront, Check, ChevronRight, Ear, EllipsisVertical, ExternalLink, Footprints, Gauge, Layers, LoaderCircle, Map as MapIcon, MapPin, Maximize2, Minimize2, Minus, Navigation, Plus, Radar, Route, Satellite, Store, TrainFront, TramFront, Wind, ZoomIn, ZoomOut, X } from "lucide-vue-next";
+import { BusFront, Check, ChevronRight, Ear, EllipsisVertical, Euro, ExternalLink, Footprints, Gauge, Layers, LoaderCircle, Map as MapIcon, MapPin, Maximize2, Minimize2, Minus, Navigation, Plus, Radar, Route, Satellite, Store, TrainFront, TramFront, Wind, ZoomIn, ZoomOut, X } from "lucide-vue-next";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import NearbyPlaceCanvas from "./NearbyPlaceCanvas.vue";
 import MapItemTransitionGroup from "../../components/MapItemTransitionGroup";
@@ -93,6 +93,21 @@ import {
 } from "./useNearbyStationIsochrones";
 import { mergeNearbyIsochroneGeometries } from "./nearbyIsochroneUnion";
 import { useNearbyNoiseZones } from "./useNearbyNoiseZones";
+import {
+  DVF_GRID_CELL_SIZE_METERS,
+  DVF_MARKET_SCOPES,
+  DVF_SOURCE_PAGE_URL,
+  getDvfDataProvider,
+  liquidityBand,
+  priceForScope,
+  type DvfCityDescriptor,
+  type DvfCityFile,
+  type DvfComparisonScope,
+  type DvfGridCell,
+  type DvfMarketPercentiles,
+  type DvfMarketScope,
+  type DvfManifest,
+} from "../../services/real-estate/compiledRealEstate";
 import NearbyLineHoverCard from "./NearbyLineHoverCard.vue";
 import NearbySummary from "./NearbySummary.vue";
 import NearbyCityInfoCard, {
@@ -416,6 +431,15 @@ const cityViewLoading = ref(false);
 const cityViewError = ref("");
 const cityViewSelectionExact = ref(true);
 const irisDataset = shallowRef<IrisDataset>();
+const cityViewDvfProvider = getDvfDataProvider();
+const cityViewDvfManifest = shallowRef<DvfManifest>();
+const cityViewDvfCity = shallowRef<DvfCityFile>();
+const cityViewDvfStatus = ref<"idle" | "loading" | "ready" | "unavailable">("idle");
+const cityViewRealEstateLayerEnabled = ref(false);
+const cityViewRealEstateMode = ref<"prices" | "liquidity">("prices");
+const cityViewRealEstateMeasure = ref<"median" | "mean">("median");
+const cityViewRealEstateReference = ref<DvfComparisonScope>("city");
+let cityViewDvfRequestId = 0;
 const cityViewSecurityScore = ref<number>();
 const cityViewActivity = ref<NearbyCityActivity | null>(null);
 // The comparator is fully symmetric: each side owns a commune code, and every
@@ -974,6 +998,143 @@ const cityViewNeighborhoods = computed(() => {
   return selectIrisNeighborhoodsForPoint(irisDataset.value, props.origin, { scope: "commune" }).neighborhoods;
 });
 const cityViewWorldBounds = computed(() => boundsForIrisNeighborhoods(cityViewNeighborhoods.value));
+const cityViewDvfCommuneCode = computed(() => cityViewNeighborhoods.value[0]?.communeCode);
+const cityViewDvfDescriptor = computed<DvfCityDescriptor | undefined>(() =>
+  cityViewDvfManifest.value?.cities.find((entry) => entry.code === cityViewDvfCommuneCode.value));
+const cityViewDvfNeighborhoodMetrics = computed<ReadonlyMap<string, DvfCityFile["neighborhoods"][number]>>(() =>
+  new Map((cityViewDvfCity.value?.neighborhoods ?? []).map((entry) => [entry.codeIris, entry])));
+const cityViewDvfReferencePrice = computed(() => {
+  const manifest = cityViewDvfManifest.value;
+  const city = cityViewDvfDescriptor.value;
+  return manifest && city
+    ? priceForScope(manifest, city, cityViewRealEstateReference.value, cityViewRealEstateMeasure.value)
+    : undefined;
+});
+const cityViewDvfCellSalesPercentiles = computed<DvfMarketPercentiles | undefined>(() =>
+  cityViewRealEstateReference.value === "city"
+    ? cityViewDvfDescriptor.value?.cellSalesPercentiles
+    : cityViewDvfManifest.value?.marketBenchmarks[cityViewRealEstateReference.value].cellSalesPercentiles);
+const cityViewDvfNeighborhoodSalesPercentiles = computed<DvfMarketPercentiles | undefined>(() =>
+  cityViewRealEstateReference.value === "city"
+    ? cityViewDvfDescriptor.value?.neighborhoodSalesPercentiles
+    : cityViewDvfManifest.value?.marketBenchmarks[cityViewRealEstateReference.value].neighborhoodSalesPercentiles);
+const cityViewDvfScopeForCity = computed<DvfMarketScope | undefined>(() => {
+  const department = cityViewDvfDescriptor.value?.departmentCode;
+  if (!department) return undefined;
+  if (department === "75") return "paris-intramuros";
+  if (["92", "93", "94"].includes(department)) return "petite-couronne";
+  return "grande-couronne";
+});
+function cityDvfRank(scope: DvfMarketScope, measure: "mean" | "median") {
+  const manifest = cityViewDvfManifest.value;
+  const city = cityViewDvfDescriptor.value;
+  if (!manifest || !city) return undefined;
+  const price = (candidate: DvfCityDescriptor) => measure === "mean" ? candidate.meanPriceM2 : candidate.medianPriceM2;
+  const inScope = (candidate: DvfCityDescriptor) => scope === "idf"
+    || scope === "paris-intramuros" && candidate.departmentCode === "75"
+    || scope === "petite-couronne" && ["92", "93", "94"].includes(candidate.departmentCode)
+    || scope === "grande-couronne" && !["75", "92", "93", "94"].includes(candidate.departmentCode);
+  const candidates = manifest.cities.filter((candidate) => inScope(candidate) && typeof price(candidate) === "number");
+  const cityPrice = price(city);
+  if (typeof cityPrice !== "number") return undefined;
+  const ahead = candidates.filter((candidate) => {
+    const candidatePrice = price(candidate)!;
+    return candidatePrice > cityPrice || candidatePrice === cityPrice && candidate.code.localeCompare(city.code) < 0;
+  }).length;
+  return { rank: ahead + 1, cityCount: candidates.length };
+}
+const cityViewDvfRank = computed(() => {
+  const scope = cityViewDvfScopeForCity.value;
+  return scope ? cityDvfRank(scope, "median") : undefined;
+});
+const cityViewDvfSelectedRank = computed(() => {
+  const scope = cityViewRealEstateReference.value === "city"
+    ? cityViewDvfScopeForCity.value
+    : cityViewRealEstateReference.value;
+  return scope ? cityDvfRank(scope, cityViewRealEstateMeasure.value) : undefined;
+});
+const cityViewDvfInfoSummary = computed<NearbyCityInfoCardItem["market"]>(() => {
+  const city = cityViewDvfDescriptor.value;
+  if (!city) return undefined;
+  const rank = cityViewDvfRank.value;
+  return {
+    medianLabel: t("nearbyStations.realEstate.median"),
+    median: typeof city.medianPriceM2 === "number" ? `${n(city.medianPriceM2)} €/m²` : t("nearbyStations.realEstate.noPrice"),
+    meanLabel: t("nearbyStations.realEstate.mean"),
+    mean: typeof city.meanPriceM2 === "number" ? `${n(city.meanPriceM2)} €/m²` : t("nearbyStations.realEstate.noPrice"),
+    transactionLabel: t("nearbyStations.realEstate.transactionCount"),
+    transactionCount: typeof city.transactionCount === "number" ? n(city.transactionCount) : t("nearbyStations.realEstate.noPrice"),
+    transactionNote: t("nearbyStations.realEstate.transactionCountNote"),
+    referencePeriod: t("nearbyStations.realEstate.periodLabel", { period: city.referencePeriod }),
+    ...(rank && cityViewDvfScopeForCity.value
+      ? { rank: t("nearbyStations.realEstate.rankSummary", { rank: n(rank.rank), count: n(rank.cityCount), scope: t(dvfScopeLabelKey(cityViewDvfScopeForCity.value)) }) }
+      : {}),
+  };
+});
+const cityViewDvfMapCells = computed(() => {
+  if (!cityViewEnabled.value || !cityViewRealEstateLayerEnabled.value || !cityViewDvfCity.value) return [];
+  const cityNeighborhoodCodes = new Set(cityViewNeighborhoods.value.map((neighborhood) => neighborhood.codeIris));
+  const reference = cityViewDvfReferencePrice.value;
+  const percentileValues = cityViewDvfCellSalesPercentiles.value;
+  const cellRadiusMeters = DVF_GRID_CELL_SIZE_METERS * 0.8;
+  return cityViewDvfCity.value.cells.flatMap((cell: DvfGridCell, index) => {
+    if (!cell.codeIris || !cityNeighborhoodCodes.has(cell.codeIris)) return [];
+    const world = lonLatToWorld({ lon: cell.lon, lat: cell.lat });
+    const radius = metersToWorldUnits(cellRadiusMeters, world);
+    if (cityViewRealEstateMode.value === "prices") {
+      const value = cityViewRealEstateMeasure.value === "mean" ? cell.meanPriceM2 : cell.medianPriceM2;
+      if (typeof reference !== "number" || reference <= 0 || !Number.isFinite(value)) return [];
+      const ratio = value / reference;
+      const color = ratio < 0.8 ? "#fca5a5" : ratio < 1 ? "#f87171" : ratio < 1.2 ? "#ef4444" : ratio < 1.5 ? "#dc2626" : "#991b1b";
+      const opacity = Math.min(0.94, 0.64 + Math.min(1, Math.max(0, ratio - 0.65) / 1.1) * 0.3);
+      return [{ key: `${cell.codeIris ?? "outside"}:${index}`, worldX: world.x, worldY: world.y, radius, color, opacity }];
+    }
+    if (!percentileValues) return [];
+    const band = liquidityBand(cell.transactionCount, percentileValues);
+    if (!band) return [];
+    const color = band === "very-high" ? "#991b1b" : band === "high" ? "#dc2626" : band === "typical" ? "#fb7185" : "#fecdd3";
+    const opacity = band === "very-high" ? 0.9 : band === "high" ? 0.78 : band === "typical" ? 0.64 : 0.48;
+    return [{ key: `${cell.codeIris ?? "outside"}:${index}`, worldX: world.x, worldY: world.y, radius, color, opacity }];
+  });
+});
+const cityViewDvfTopNeighborhood = computed(() => {
+  const entries = cityViewDvfCity.value?.neighborhoods
+    .filter((entry) => typeof entry.medianPriceM2 === "number" && entry.hasEnoughSales)
+    .sort((left, right) => right.medianPriceM2! - left.medianPriceM2! || left.codeIris.localeCompare(right.codeIris));
+  const top = entries?.[0];
+  const neighborhood = top && cityViewNeighborhoods.value.find((entry) => entry.codeIris === top.codeIris);
+  if (!top || !neighborhood || !cityViewRealEstateLayerEnabled.value || cityViewRealEstateMode.value !== "prices") return undefined;
+  const point = worldToScreen(lonLatToWorld({ lon: neighborhood.centroid[0], lat: neighborhood.centroid[1] }), camera.value);
+  const viewport = camera.value;
+  const legendWidth = Math.min(316, viewport.viewportWidthCssPx - 24);
+  const legendHeight = Math.min(300, viewport.viewportHeightCssPx * 0.52);
+  const legendLeft = viewport.viewportWidthCssPx - legendWidth - 12;
+  const legendTop = viewport.viewportHeightCssPx - legendHeight - 56;
+  const isCoveredByLegend = point.x >= legendLeft - 24 && point.x <= viewport.viewportWidthCssPx - 12
+    && point.y >= legendTop - 18 && point.y <= viewport.viewportHeightCssPx - 56;
+  const visibleTop = isCoveredByLegend ? Math.max(48, legendTop - 38) : point.y;
+  return { codeIris: top.codeIris, name: top.name, median: top.medianPriceM2!, left: point.x, top: visibleTop };
+});
+function dvfScopeLabelKey(scope: DvfMarketScope): "nearbyStations.realEstate.parisScope" | "nearbyStations.realEstate.petiteCouronneScope" | "nearbyStations.realEstate.grandeCouronneScope" | "nearbyStations.realEstate.idfScope" {
+  if (scope === "paris-intramuros") return "nearbyStations.realEstate.parisScope";
+  if (scope === "petite-couronne") return "nearbyStations.realEstate.petiteCouronneScope";
+  if (scope === "grande-couronne") return "nearbyStations.realEstate.grandeCouronneScope";
+  return "nearbyStations.realEstate.idfScope";
+}
+function dvfReferenceLabel(scope: DvfComparisonScope): string {
+  return scope === "city" ? cityViewDvfDescriptor.value?.name ?? t("nearbyStations.realEstate.cityScope") : t(dvfScopeLabelKey(scope));
+}
+function dvfPriceTierLabel(value: number): string {
+  if (value < 0.8) return t("nearbyStations.realEstate.lowPriceBand");
+  if (value < 1) return t("nearbyStations.realEstate.belowPriceBand");
+  if (value < 1.2) return t("nearbyStations.realEstate.typicalPriceBand");
+  if (value < 1.5) return t("nearbyStations.realEstate.highPriceBand");
+  return t("nearbyStations.realEstate.veryHighPriceBand");
+}
+function toggleCityRealEstateLayer(): void {
+  cityViewRealEstateLayerEnabled.value = !cityViewRealEstateLayerEnabled.value;
+  if (cityViewRealEstateLayerEnabled.value) cityViewRealEstateMode.value = "prices";
+}
 interface CityViewCommune {
   code: string;
   name: string;
@@ -1248,6 +1409,12 @@ const cityViewInfoCard = computed<{ cityName: string; ariaLabel: string; eyebrow
         label: t("nearbyStations.cityInfoEnvironment"),
         value: environmentValue,
       },
+      {
+        label: t("nearbyStations.cityInfoRealEstate"),
+        value: cityViewDvfStatus.value === "loading" ? t("nearbyStations.realEstate.loading") : t("nearbyStations.realEstate.unavailable"),
+        market: cityViewDvfInfoSummary.value,
+        wide: true,
+      },
     ],
   };
 });
@@ -1398,6 +1565,7 @@ const cityViewComparisonRows = computed<NearbyCityComparisonMetric[]>(() => {
       scaleMax?: number;
       currentLoading?: boolean;
       targetLoading?: boolean;
+      neutral?: boolean;
     } = {},
   ): NearbyCityComparisonMetric => ({
     id,
@@ -1407,7 +1575,8 @@ const cityViewComparisonRows = computed<NearbyCityComparisonMetric[]>(() => {
     targetNumeric,
     currentValue: (options.format ?? formatNumber)(currentNumeric),
     targetValue: (options.format ?? formatNumber)(targetNumeric),
-    higherIsBetter: true,
+    higherIsBetter: options.neutral ? undefined : true,
+    neutral: options.neutral,
     scaleMax: options.scaleMax,
     currentLoading: options.currentLoading,
     targetLoading: options.targetLoading,
@@ -1455,6 +1624,26 @@ const cityViewComparisonRows = computed<NearbyCityComparisonMetric[]>(() => {
     ),
     metric("air", t("nearbyStations.cityComparison.air"), currentStatistics?.airScore, targetStatistics?.airScore, { format: formatScore, scaleMax: 10 }),
     metric("noise", t("nearbyStations.cityComparison.noise"), currentStatistics?.noiseScore, targetStatistics?.noiseScore, { format: formatScore, scaleMax: 10 }),
+    {
+      ...metric(
+        "real-estate",
+        t("nearbyStations.cityComparison.realEstate"),
+        cityViewDvfManifest.value?.cities.find((entry) => entry.code === currentCode)?.medianPriceM2,
+        cityViewDvfManifest.value?.cities.find((entry) => entry.code === targetCode)?.medianPriceM2,
+        {
+          format: (value) => typeof value === "number" && Number.isFinite(value)
+            ? `${n(value)} €/m²`
+            : t("nearbyStations.cityComparison.missingValue"),
+          currentLoading: cityViewDvfStatus.value === "loading",
+          targetLoading: cityViewDvfStatus.value === "loading",
+          neutral: true,
+        },
+      ),
+      priceTrend: {
+        current: cityViewDvfManifest.value?.cities.find((entry) => entry.code === currentCode)?.yearlyPrices,
+        target: cityViewDvfManifest.value?.cities.find((entry) => entry.code === targetCode)?.yearlyPrices,
+      },
+    },
   ];
 });
 const environmentQuery = computed(() => {
@@ -1958,6 +2147,7 @@ function closeDisplayControls(): void {
 
 watch(cityViewEnabled, (enabled) => {
   if (!enabled) {
+    cityViewRealEstateLayerEnabled.value = false;
     clearCityComparison();
     cityViewCommerceVisible.value = false;
     emit("toggleCityCommerce", false);
@@ -1975,6 +2165,32 @@ watch(cityViewEnabled, (enabled) => {
   clearSummaryLineFocus();
   activeSidebarTab.value = "summary";
 });
+
+watch(() => cityViewEnabled.value ? cityViewDvfCommuneCode.value : undefined, async (communeCode) => {
+  const requestId = ++cityViewDvfRequestId;
+  if (!communeCode) {
+    cityViewDvfCity.value = undefined;
+    cityViewDvfStatus.value = cityViewEnabled.value ? "unavailable" : "idle";
+    return;
+  }
+  cityViewDvfStatus.value = "loading";
+  cityViewDvfCity.value = undefined;
+  try {
+    const manifest = await cityViewDvfProvider.loadManifest();
+    if (requestId !== cityViewDvfRequestId) return;
+    cityViewDvfManifest.value = manifest;
+    const descriptor = manifest.cities.find((entry) => entry.code === communeCode);
+    if (!descriptor) throw new Error(`No compiled DVF data for commune ${communeCode}.`);
+    const city = await cityViewDvfProvider.loadCity(communeCode);
+    if (requestId !== cityViewDvfRequestId) return;
+    cityViewDvfCity.value = city;
+    cityViewDvfStatus.value = "ready";
+  } catch {
+    if (requestId !== cityViewDvfRequestId) return;
+    cityViewDvfCity.value = undefined;
+    cityViewDvfStatus.value = "unavailable";
+  }
+}, { immediate: true });
 
 watch(camera, (nextCamera) => {
   emit("cameraChange", nextCamera);
@@ -2734,7 +2950,8 @@ function changeZoom(direction: 1 | -1): void {
 function handlePointerDown(event: PointerEvent): void {
   if (!canInteractWithMap.value) return;
   if (event.pointerType !== "touch" && event.button !== undefined && event.button !== 0) return;
-  if (isInteractiveMapTarget(event.target) && !isMapGeometryTarget(event.target)) return;
+  const isPlaceHitTarget = event.target instanceof Element && Boolean(event.target.closest(".nearby-map__place"));
+  if (isInteractiveMapTarget(event.target) && !isMapGeometryTarget(event.target) && !isPlaceHitTarget) return;
   flushGestureCamera();
   const point = localScreenPoint(event.clientX, event.clientY);
   if (!point) return;
@@ -4332,6 +4549,7 @@ function mix(from: number, to: number, progress: number): number {
     :class="{
       'nearby-map--satellite': basemapLayer === 'satellite',
       'nearby-map--isochrone': isochroneEnabled,
+      'nearby-map--dvf-active': cityViewEnabled && cityViewRealEstateLayerEnabled,
       'nearby-map--isochrone-panel-open': isochronePanelOpen,
       'nearby-map--interactive': canInteractWithMap,
       'nearby-map--dragging': mapDragging,
@@ -4407,6 +4625,53 @@ function mix(from: number, to: number, progress: number): number {
             @mouseenter="hoverEnvironmentCell('noise', cell, $event)"
             @mousemove="hoverEnvironmentCell('noise', cell, $event)"
             @mouseleave="clearHoveredEnvironmentCell('noise', cell)"
+          />
+        </g>
+      </svg>
+      <svg
+        v-if="cityViewDvfMapCells.length > 0"
+        class="nearby-map__real-estate-heatmap"
+        :viewBox="`0 0 ${isochroneViewport.width} ${isochroneViewport.height}`"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+        data-testid="nearby-map-real-estate-heatmap"
+      >
+        <defs>
+          <radialGradient id="nearby-dvf-heat-fca5a5">
+            <stop offset="0%" stop-color="#fca5a5" stop-opacity=".9" />
+            <stop offset="48%" stop-color="#fca5a5" stop-opacity=".5" />
+            <stop offset="100%" stop-color="#fda4af" stop-opacity="0" />
+          </radialGradient>
+          <radialGradient id="nearby-dvf-heat-f87171">
+            <stop offset="0%" stop-color="#f87171" stop-opacity=".9" />
+            <stop offset="48%" stop-color="#f87171" stop-opacity=".5" />
+            <stop offset="100%" stop-color="#fb7185" stop-opacity="0" />
+          </radialGradient>
+          <radialGradient id="nearby-dvf-heat-ef4444">
+            <stop offset="0%" stop-color="#ef4444" stop-opacity=".9" />
+            <stop offset="48%" stop-color="#ef4444" stop-opacity=".5" />
+            <stop offset="100%" stop-color="#ef4444" stop-opacity="0" />
+          </radialGradient>
+          <radialGradient id="nearby-dvf-heat-dc2626">
+            <stop offset="0%" stop-color="#dc2626" stop-opacity=".93" />
+            <stop offset="48%" stop-color="#dc2626" stop-opacity=".54" />
+            <stop offset="100%" stop-color="#dc2626" stop-opacity="0" />
+          </radialGradient>
+          <radialGradient id="nearby-dvf-heat-991b1b">
+            <stop offset="0%" stop-color="#991b1b" stop-opacity=".95" />
+            <stop offset="48%" stop-color="#991b1b" stop-opacity=".58" />
+            <stop offset="100%" stop-color="#991b1b" stop-opacity="0" />
+          </radialGradient>
+        </defs>
+        <g :transform="isochroneTransform" class="nearby-map__real-estate-haze">
+          <circle
+            v-for="cell in cityViewDvfMapCells"
+            :key="cell.key"
+            :cx="cell.worldX"
+            :cy="cell.worldY"
+            :r="cell.radius"
+            :fill="`url(#nearby-dvf-heat-${cell.color.slice(1)})`"
+            :fill-opacity="cell.opacity"
           />
         </g>
       </svg>
@@ -4509,10 +4774,18 @@ function mix(from: number, to: number, progress: number): number {
         v-if="(cityViewEnabled || cityViewTransition === 'to-neighborhood') && irisDataset && cityViewNeighborhoods.length > 0"
         :neighborhoods="cityViewNeighborhoods"
         :camera="camera"
+        :tooltip-teleport-target="root"
         :transport-stations="cityViewTransportStations"
         :air-noise-communes="cityViewAirNoiseCommunes"
         :air-noise-neighborhoods="cityViewAirNoiseNeighborhoods"
         :air-noise-source="irisDataset.airNoiseSource"
+        :real-estate-metrics="cityViewDvfNeighborhoodMetrics"
+        :real-estate-active="cityViewRealEstateLayerEnabled"
+        :real-estate-mode="cityViewRealEstateMode"
+        :real-estate-reference-price="cityViewDvfReferencePrice"
+        :real-estate-reference-label="dvfReferenceLabel(cityViewRealEstateReference)"
+        :real-estate-measure="cityViewRealEstateMeasure"
+        :real-estate-neighborhood-percentiles="cityViewDvfNeighborhoodSalesPercentiles"
         :commerce-counts="cityViewActivity ? cityActivityCounts.counts : props.cityViewCommerceCounts"
         :activity-totals="cityActivityCounts.totals"
         :activity-label="cityViewActivity ? t(`nearbyStations.cityActivity.${cityViewActivity}`) : undefined"
@@ -4527,6 +4800,17 @@ function mix(from: number, to: number, progress: number): number {
         }"
         scope="city"
       />
+      <div
+        v-if="cityViewDvfTopNeighborhood"
+        class="nearby-map__real-estate-top-neighborhood"
+        :style="{ left: `${cityViewDvfTopNeighborhood.left}px`, top: `${cityViewDvfTopNeighborhood.top}px` }"
+        :aria-label="t('nearbyStations.realEstate.topNeighborhoodBadge', { name: cityViewDvfTopNeighborhood.name, price: n(cityViewDvfTopNeighborhood.median) })"
+        :title="t('nearbyStations.realEstate.topNeighborhoodBadge', { name: cityViewDvfTopNeighborhood.name, price: n(cityViewDvfTopNeighborhood.median) })"
+        data-testid="nearby-map-real-estate-top-neighborhood"
+      >
+        <span aria-hidden="true" class="nearby-map__real-estate-top-neighborhood-euro">€</span>
+        <strong>{{ n(cityViewDvfTopNeighborhood.median) }} €/m²</strong>
+      </div>
       </div>
       <div
         class="nearby-map__scale-control"
@@ -4570,6 +4854,68 @@ function mix(from: number, to: number, progress: number): number {
         @transport-mode-toggle="toggleCityViewTransportMode"
         @item-action="handleCityInfoAction"
       />
+      <aside
+        v-if="cityViewEnabled && cityViewRealEstateLayerEnabled"
+        class="nearby-map__real-estate-legend"
+        :aria-label="t('nearbyStations.realEstate.legendAria')"
+        data-testid="nearby-map-real-estate-legend"
+      >
+        <header class="nearby-map__real-estate-legend-header">
+          <span class="nearby-map__real-estate-legend-icon" aria-hidden="true"><Euro :size="16" /></span>
+          <div>
+            <strong>{{ t('nearbyStations.realEstate.toggle') }}</strong>
+            <small>{{ cityViewDvfStatus === 'loading' ? t('nearbyStations.realEstate.loading') : cityViewDvfCity?.city.name ?? t('nearbyStations.realEstate.unavailable') }}</small>
+          </div>
+          <button type="button" :aria-label="t('nearbyStations.realEstate.toggleAria')" @click.stop="toggleCityRealEstateLayer"><X :size="16" aria-hidden="true" /></button>
+        </header>
+        <div class="nearby-map__real-estate-mode" role="group" :aria-label="t('nearbyStations.realEstate.layerMode')">
+          <button type="button" :aria-pressed="cityViewRealEstateMode === 'prices'" :class="{ 'nearby-map__real-estate-mode--active': cityViewRealEstateMode === 'prices' }" @click.stop="cityViewRealEstateMode = 'prices'">{{ t('nearbyStations.realEstate.prices') }}</button>
+          <button type="button" :aria-pressed="cityViewRealEstateMode === 'liquidity'" :class="{ 'nearby-map__real-estate-mode--active': cityViewRealEstateMode === 'liquidity' }" @click.stop="cityViewRealEstateMode = 'liquidity'">{{ t('nearbyStations.realEstate.liquidity') }}</button>
+        </div>
+        <div class="nearby-map__real-estate-selects">
+          <label>
+            <span>{{ t('nearbyStations.realEstate.reference') }}</span>
+            <select v-model="cityViewRealEstateReference" :aria-label="t('nearbyStations.realEstate.reference')" @click.stop>
+              <option value="city">{{ t('nearbyStations.realEstate.cityScope') }}</option>
+              <option v-for="scope in DVF_MARKET_SCOPES" :key="scope" :value="scope">{{ t(dvfScopeLabelKey(scope)) }}</option>
+            </select>
+          </label>
+          <label v-if="cityViewRealEstateMode === 'prices'">
+            <span>{{ t('nearbyStations.realEstate.measure') }}</span>
+            <select v-model="cityViewRealEstateMeasure" :aria-label="t('nearbyStations.realEstate.measure')" @click.stop>
+              <option value="median">{{ t('nearbyStations.realEstate.median') }}</option>
+              <option value="mean">{{ t('nearbyStations.realEstate.mean') }}</option>
+            </select>
+          </label>
+        </div>
+        <div
+          v-if="cityViewRealEstateMode === 'prices'"
+          class="nearby-map__real-estate-gradient nearby-map__real-estate-gradient--price"
+          role="img"
+          :aria-label="t('nearbyStations.realEstate.priceLegendAria', { measure: cityViewRealEstateMeasure === 'median' ? t('nearbyStations.realEstate.median') : t('nearbyStations.realEstate.mean'), reference: dvfReferenceLabel(cityViewRealEstateReference) })"
+        >
+          <span>{{ t('nearbyStations.realEstate.lowPriceBand') }}</span>
+          <span>{{ t('nearbyStations.realEstate.typicalPriceBand') }}</span>
+          <span>{{ t('nearbyStations.realEstate.veryHighPriceBand') }}</span>
+        </div>
+        <div
+          v-else
+          class="nearby-map__real-estate-gradient nearby-map__real-estate-gradient--liquidity"
+          role="img"
+          :aria-label="t('nearbyStations.realEstate.liquidityLegendAria', { reference: dvfReferenceLabel(cityViewRealEstateReference) })"
+        >
+          <span>{{ t('nearbyStations.realEstate.lowLiquidity') }}</span>
+          <span>{{ t('nearbyStations.realEstate.typicalLiquidity') }}</span>
+          <span>{{ t('nearbyStations.realEstate.veryHighLiquidity') }}</span>
+        </div>
+        <p v-if="cityViewRealEstateMode === 'prices' && cityViewDvfSelectedRank" class="nearby-map__real-estate-rank">
+          {{ t('nearbyStations.realEstate.rank', { rank: cityViewDvfSelectedRank.rank, count: cityViewDvfSelectedRank.cityCount }) }} · {{ t('nearbyStations.realEstate.rankNote') }}
+        </p>
+        <p class="nearby-map__real-estate-disclaimer">
+          {{ t(cityViewRealEstateMode === 'prices' ? 'nearbyStations.realEstate.priceDisclaimer' : 'nearbyStations.realEstate.liquidityDisclaimer') }}
+          <a :href="DVF_SOURCE_PAGE_URL" target="_blank" rel="noreferrer" @click.stop>{{ t('nearbyStations.realEstate.sourceShort') }}</a>
+        </p>
+      </aside>
       <NearbyCityComparisonModal
         v-if="cityViewComparisonCurrent && cityViewComparisonTarget"
         :open="Boolean(cityViewComparisonTargetCode)"
@@ -4631,6 +4977,21 @@ function mix(from: number, to: number, progress: number): number {
           <span class="nearby-map__commerce-toggle-label">
             {{ t(cityViewCommerceVisible ? 'nearbyStations.cityViewCommerceHide' : 'nearbyStations.cityViewCommerceToggle') }}
           </span>
+        </button>
+        <button
+          v-if="props.showCityViewControl && cityViewEnabled"
+          class="nearby-map__real-estate-toggle"
+          :class="{ 'nearby-map__real-estate-toggle--active': cityViewRealEstateLayerEnabled }"
+          type="button"
+          :aria-pressed="cityViewRealEstateLayerEnabled"
+          :aria-busy="cityViewDvfStatus === 'loading'"
+          :aria-label="t('nearbyStations.realEstate.toggleAria')"
+          :title="t('nearbyStations.realEstate.toggleAria')"
+          data-nearby-map-real-estate-toggle
+          @click.stop="toggleCityRealEstateLayer"
+        >
+          <Euro :size="18" aria-hidden="true" />
+          <span class="nearby-map__commerce-toggle-label">{{ t('nearbyStations.realEstate.toggle') }}</span>
         </button>
         <button
           v-for="activity in (cityViewEnabled ? extraCityActivities : [])"
@@ -5599,6 +5960,9 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map--satellite :deep(.transport-ghost-flow__chevron) { filter: drop-shadow(0 0 1px rgba(255,255,255,.88)); opacity: 1; }
 .nearby-map--isochrone .nearby-map__radius { background: transparent; border-color: rgba(72, 70, 255, .38); border-style: dashed; }
 .nearby-map__air-quality-zones, .nearby-map__noise-zones { height: 100%; inset: 0; overflow: visible; pointer-events: none; position: absolute; width: 100%; z-index: 1; }
+.nearby-map__real-estate-heatmap { height: 100%; inset: 0; overflow: visible; pointer-events: none; position: absolute; width: 100%; z-index: 5; }
+.nearby-map__real-estate-haze { mix-blend-mode: normal; }
+.nearby-map--satellite .nearby-map__real-estate-haze { mix-blend-mode: screen; }
 .nearby-map-shell--city-view.nearby-map-shell--environment-active :deep(.iris-neighborhood-overlay__shape) { pointer-events: none; }
 .nearby-map__air-quality-zone, .nearby-map__noise-zone { pointer-events: visiblePainted; shape-rendering: crispEdges; stroke-width: .5; transition: fill-opacity 140ms ease; vector-effect: non-scaling-stroke; }
 .nearby-map__air-quality-zone[data-air-quality-level="1"] { fill: rgb(34 197 94); fill-opacity: .23; stroke: rgba(22, 130, 70, .3); }
@@ -5655,15 +6019,17 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__markers { display: contents; }
 .nearby-map__top-control-zone { height: 74px; inset: 0 0 auto; pointer-events: none; position: absolute; z-index: 12; }
 .nearby-map__primary-controls { display: flex; gap: 8px; position: absolute; right: 12px; top: 12px; z-index: 13; }
-.nearby-map__fullscreen, .nearby-map__display-toggle, .nearby-map__basemap-toggle, .nearby-map__directory-toggle, .nearby-map__neighborhood-score-toggle, .nearby-map__city-view-toggle, .nearby-map__commerce-toggle, .nearby-map__isochrone-toggle, .nearby-map__noise-toggle, .nearby-map__air-quality-toggle { align-items: center; backdrop-filter: blur(5px); background: rgba(255,255,255,.92); border: 1px solid rgba(81,70,255,.18); border-radius: 10px; color: #4034df; display: flex; height: 38px; justify-content: center; padding: 0; position: absolute; top: 12px; width: 38px; z-index: 13; }
-.nearby-map__primary-controls > .nearby-map__fullscreen, .nearby-map__primary-controls > .nearby-map__display-toggle, .nearby-map__primary-controls > .nearby-map__basemap-toggle, .nearby-map__primary-controls > .nearby-map__directory-toggle, .nearby-map__primary-controls > .nearby-map__neighborhood-score-toggle, .nearby-map__primary-controls > .nearby-map__city-view-toggle, .nearby-map__primary-controls > .nearby-map__commerce-toggle, .nearby-map__primary-controls > .nearby-map__isochrone-toggle, .nearby-map__primary-controls > .nearby-map__noise-toggle, .nearby-map__primary-controls > .nearby-map__air-quality-toggle { position: static; }
+.nearby-map__fullscreen, .nearby-map__display-toggle, .nearby-map__basemap-toggle, .nearby-map__directory-toggle, .nearby-map__neighborhood-score-toggle, .nearby-map__city-view-toggle, .nearby-map__commerce-toggle, .nearby-map__real-estate-toggle, .nearby-map__isochrone-toggle, .nearby-map__noise-toggle, .nearby-map__air-quality-toggle { align-items: center; backdrop-filter: blur(5px); background: rgba(255,255,255,.92); border: 1px solid rgba(81,70,255,.18); border-radius: 10px; color: #4034df; display: flex; height: 38px; justify-content: center; padding: 0; position: absolute; top: 12px; width: 38px; z-index: 13; }
+.nearby-map__primary-controls > .nearby-map__fullscreen, .nearby-map__primary-controls > .nearby-map__display-toggle, .nearby-map__primary-controls > .nearby-map__basemap-toggle, .nearby-map__primary-controls > .nearby-map__directory-toggle, .nearby-map__primary-controls > .nearby-map__neighborhood-score-toggle, .nearby-map__primary-controls > .nearby-map__city-view-toggle, .nearby-map__primary-controls > .nearby-map__commerce-toggle, .nearby-map__primary-controls > .nearby-map__real-estate-toggle, .nearby-map__primary-controls > .nearby-map__isochrone-toggle, .nearby-map__primary-controls > .nearby-map__noise-toggle, .nearby-map__primary-controls > .nearby-map__air-quality-toggle { position: static; }
 .nearby-map__commerce-toggle { gap: 6px; min-width: 38px; padding-inline: 9px; width: auto; }
+.nearby-map__real-estate-toggle { background: rgba(255,250,246,.96); border-color: rgba(190,24,47,.22); color: #9f1239; cursor: pointer; gap: 6px; min-width: 38px; padding-inline: 9px; width: auto; }
+.nearby-map__real-estate-toggle--active { background: #9f1239 !important; border-color: #9f1239 !important; color: #fff !important; }
 .nearby-map__commerce-toggle-label { font-size: .66rem; font-weight: 850; line-height: 1; white-space: nowrap; }
 .nearby-map__commerce-toggle--active { background: #166534 !important; border-color: #166534 !important; color: #fff !important; }
 .nearby-map__fullscreen { right: 12px; }
 .nearby-map__display-toggle { right: 58px; }
 .nearby-map__basemap-toggle { right: 104px; }
-.nearby-map__fullscreen:hover:not(:disabled), .nearby-map__fullscreen:focus-visible, .nearby-map__display-toggle:hover:not(:disabled), .nearby-map__display-toggle:focus-visible, .nearby-map__basemap-toggle:hover:not(:disabled), .nearby-map__basemap-toggle:focus-visible, .nearby-map__directory-toggle:hover:not(:disabled), .nearby-map__directory-toggle:focus-visible, .nearby-map__neighborhood-score-toggle:hover:not(:disabled), .nearby-map__neighborhood-score-toggle:focus-visible, .nearby-map__city-view-toggle:hover:not(:disabled), .nearby-map__city-view-toggle:focus-visible, .nearby-map__commerce-toggle:hover:not(:disabled), .nearby-map__commerce-toggle:focus-visible, .nearby-map__isochrone-toggle:hover:not(:disabled), .nearby-map__isochrone-toggle:focus-visible, .nearby-map__noise-toggle:hover:not(:disabled), .nearby-map__noise-toggle:focus-visible, .nearby-map__air-quality-toggle:hover:not(:disabled), .nearby-map__air-quality-toggle:focus-visible { background: #fff; color: #4034df; transform: none; }
+.nearby-map__fullscreen:hover:not(:disabled), .nearby-map__fullscreen:focus-visible, .nearby-map__display-toggle:hover:not(:disabled), .nearby-map__display-toggle:focus-visible, .nearby-map__basemap-toggle:hover:not(:disabled), .nearby-map__basemap-toggle:focus-visible, .nearby-map__directory-toggle:hover:not(:disabled), .nearby-map__directory-toggle:focus-visible, .nearby-map__neighborhood-score-toggle:hover:not(:disabled), .nearby-map__neighborhood-score-toggle:focus-visible, .nearby-map__city-view-toggle:hover:not(:disabled), .nearby-map__city-view-toggle:focus-visible, .nearby-map__commerce-toggle:hover:not(:disabled), .nearby-map__commerce-toggle:focus-visible, .nearby-map__real-estate-toggle:hover:not(:disabled), .nearby-map__real-estate-toggle:focus-visible, .nearby-map__isochrone-toggle:hover:not(:disabled), .nearby-map__isochrone-toggle:focus-visible, .nearby-map__noise-toggle:hover:not(:disabled), .nearby-map__noise-toggle:focus-visible, .nearby-map__air-quality-toggle:hover:not(:disabled), .nearby-map__air-quality-toggle:focus-visible { background: #fff; color: #4034df; transform: none; }
 .nearby-map__city-view-toggle { align-items: stretch; appearance: none; background: rgba(242, 240, 255, .96); border-color: rgba(109, 40, 217, .28); border-radius: 999px; box-shadow: 0 4px 12px rgba(76, 29, 149, .12); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); isolation: isolate; overflow: hidden; padding: 3px; position: relative; width: 136px; }
 .nearby-map__city-view-toggle:hover:not(:disabled), .nearby-map__city-view-toggle:focus-visible { background: #ebe9ff; border-color: rgba(109, 40, 217, .42); }
 .nearby-map__city-view-slider { background: #fff; border: 1px solid rgba(109, 40, 217, .2); border-radius: 999px; bottom: 3px; box-shadow: 0 2px 6px rgba(76, 29, 149, .16); left: 3px; pointer-events: none; position: absolute; top: 3px; transition: transform 220ms cubic-bezier(.2, .8, .2, 1); width: calc(50% - 3px); z-index: 0; }
@@ -5690,6 +6056,38 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__scale-track::before { left: 0; }
 .nearby-map__scale-track::after { right: 0; }
 .nearby-map__scale-track > span { left: 50%; transform: translateX(-50%); }
+.nearby-map--dvf-active .nearby-map__scale-control { left: 12px; transform: none; }
+.nearby-map__real-estate-top-neighborhood { align-items: center; display: flex; flex-direction: column; gap: 3px; pointer-events: none; position: absolute; transform: translate(-50%, -50%); z-index: 31; }
+.nearby-map__real-estate-top-neighborhood > span { align-items: center; background: radial-gradient(circle at 32% 25%, #fff5c9, #f5c242 54%, #a96409); border: 2px solid rgba(255,255,255,.96); border-radius: 50%; box-shadow: 0 3px 10px rgba(77,47,3,.42), 0 0 0 2px rgba(210,160,48,.45); color: #71450b; display: inline-flex; height: 42px; justify-content: center; width: 42px; }
+.nearby-map__real-estate-top-neighborhood-euro { font-size: 29px; font-weight: 950; line-height: 1; padding-bottom: 2px; }
+.nearby-map__real-estate-top-neighborhood strong { background: rgba(255,255,255,.96); border: 1px solid rgba(181,134,25,.32); border-radius: 999px; box-shadow: 0 2px 7px rgba(15,23,42,.18); color: #624514; font-size: .62rem; font-variant-numeric: tabular-nums; padding: 3px 7px; white-space: nowrap; }
+.nearby-map__real-estate-legend { backdrop-filter: blur(14px); background: rgba(255,255,255,.95); border: 1px solid rgba(159,18,57,.16); border-radius: 15px; bottom: 56px; box-shadow: 0 8px 28px rgba(49,19,30,.17); color: #263247; display: grid; gap: 8px; max-height: min(48vh, 360px); max-width: min(316px, calc(100% - 24px)); overflow-y: auto; padding: 10px; pointer-events: auto; position: absolute; right: 12px; width: min(316px, calc(100% - 24px)); z-index: 30; }
+.nearby-map__real-estate-legend-header { align-items: center; display: flex; gap: 9px; min-width: 0; }
+.nearby-map__real-estate-legend-icon { align-items: center; background: #fff0f2; border: 1px solid rgba(190,24,47,.16); border-radius: 10px; color: #9f1239; display: inline-flex; flex: 0 0 34px; height: 34px; justify-content: center; }
+.nearby-map__real-estate-legend-header > div { display: grid; gap: 2px; min-width: 0; }
+.nearby-map__real-estate-legend-header strong { color: #1e293b; font-size: .8rem; }
+.nearby-map__real-estate-legend-header small { color: #64748b; font-size: .7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nearby-map__real-estate-legend-header > button { align-items: center; background: #f7f8fb; border: 1px solid rgba(100,116,139,.16); border-radius: 50%; color: #64748b; cursor: pointer; display: inline-flex; flex: 0 0 28px; height: 28px; justify-content: center; margin-left: auto; padding: 0; width: 28px; }
+.nearby-map__real-estate-legend-header > button:hover, .nearby-map__real-estate-legend-header > button:focus-visible { background: #fff0f2; color: #9f1239; outline: 2px solid rgba(190,24,47,.24); }
+.nearby-map__real-estate-mode { background: #f4f5f8; border: 1px solid rgba(100,116,139,.12); border-radius: 10px; display: grid; gap: 3px; grid-template-columns: 1fr 1fr; padding: 3px; }
+.nearby-map__real-estate-mode button { background: transparent; border: 0; border-radius: 7px; color: #687589; cursor: pointer; font-size: .68rem; font-weight: 780; min-height: 31px; padding: 5px 7px; }
+.nearby-map__real-estate-mode button:hover, .nearby-map__real-estate-mode button:focus-visible { outline: 2px solid rgba(159,18,57,.22); }
+.nearby-map__real-estate-mode button.nearby-map__real-estate-mode--active { background: #fff; box-shadow: 0 1px 4px rgba(15,23,42,.12); color: #9f1239; }
+.nearby-map__real-estate-selects { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0,1fr)); }
+.nearby-map__real-estate-selects label { display: grid; gap: 4px; min-width: 0; }
+.nearby-map__real-estate-selects label > span { color: #69768a; font-size: .67rem; font-weight: 760; }
+.nearby-map__real-estate-selects select { background: #fff; border: 1px solid rgba(100,116,139,.22); border-radius: 8px; color: #243047; font: inherit; font-size: .69rem; font-weight: 720; min-height: 34px; min-width: 0; padding: 5px 7px; }
+.nearby-map__real-estate-selects select:focus-visible { border-color: #be123c; outline: 2px solid rgba(190,18,60,.18); }
+.nearby-map__real-estate-gradient { display: grid; gap: 6px; grid-template-columns: repeat(3, minmax(0,1fr)); padding-top: 13px; position: relative; }
+.nearby-map__real-estate-gradient::before { background: linear-gradient(90deg, #fca5a5 0%, #f87171 24%, #ef4444 50%, #dc2626 75%, #991b1b 100%); border-radius: 999px; content: ""; height: 8px; left: 0; position: absolute; right: 0; top: 0; }
+.nearby-map__real-estate-gradient--liquidity::before { background: linear-gradient(90deg, #fecaca 0%, #f87171 36%, #dc2626 72%, #991b1b 100%); }
+.nearby-map__real-estate-gradient span { color: #69768a; font-size: .64rem; line-height: 1.25; }
+.nearby-map__real-estate-gradient span:nth-child(2) { text-align: center; }
+.nearby-map__real-estate-gradient span:last-child { text-align: right; }
+.nearby-map__real-estate-rank { color: #52627a; font-size: .69rem; line-height: 1.35; margin: -2px 0 0; }
+.nearby-map__real-estate-disclaimer { border-top: 1px solid rgba(100,116,139,.12); color: #738094; font-size: .67rem; line-height: 1.4; margin: 0; padding-top: 8px; }
+.nearby-map__real-estate-disclaimer a { color: #9f1239; font-weight: 790; margin-left: 3px; text-decoration: underline; text-underline-offset: 2px; }
+.nearby-map__real-estate-disclaimer a:focus-visible { outline: 2px solid rgba(159,18,57,.34); }
 .nearby-map-shell--places-preview .nearby-map__scale-control { bottom: 34px; }
 .nearby-map__basemap-attribution { backdrop-filter: blur(4px); background: rgba(255,255,255,.84); border: 1px solid rgba(100,116,139,.18); border-radius: 6px; bottom: 8px; color: #475569; font-size: .62rem; left: 8px; padding: 3px 6px; pointer-events: none; position: absolute; z-index: 12; }
 .nearby-map__places-attribution { backdrop-filter: blur(4px); background: rgba(255,255,255,.84); border: 1px solid rgba(100,116,139,.18); border-radius: 6px; bottom: 8px; color: #475569; font-size: .58rem; left: 50%; padding: 3px 6px; pointer-events: none; position: absolute; transform: translateX(-50%); z-index: 12; }
@@ -5957,6 +6355,8 @@ function mix(from: number, to: number, progress: number): number {
   .nearby-map-shell:not(.nearby-map-shell--city-view) .nearby-map__isochrone-status { top: 120px; }
   .nearby-map-shell:not(.nearby-map-shell--city-view) .nearby-map__noise-status { top: 160px; }
   .nearby-map__scale-control { bottom: 14px; gap: 6px; padding: 4px 6px 5px; }
+  .nearby-map__real-estate-legend { bottom: 54px; max-height: min(44vh, 340px); right: 12px; }
+  .nearby-map__real-estate-top-neighborhood > span { height: 38px; width: 38px; }
   .nearby-map__scale-labels { font-size: .54rem; }
 }
  .nearby-map-shell:fullscreen { --nearby-map-height: calc(100dvh - 32px); background: #f7f8fc; box-sizing: border-box; grid-template-columns: minmax(0, 1fr) 16px minmax(260px, var(--nearby-sidebar-width)); height: 100dvh; overflow: auto; padding: 16px; width: 100vw; }

@@ -494,7 +494,7 @@ onBeforeUnmount(() => {
         @mouseenter="hoveredId = entry.place.id" @mouseleave="clearHover(entry.place.id)"
         @focusin="hoveredId = entry.place.id" @focusout="clearHover(entry.place.id)"
         @click.stop="emit('selectPlace', selectedPlaceId === entry.place.id ? undefined : entry.place.id)"
-        @pointerdown.stop @contextmenu.stop.prevent="emit('placeContextMenu', entry.place.id, $event)">
+        @contextmenu.stop.prevent="emit('placeContextMenu', entry.place.id, $event)">
         <span v-if="entry.name" class="nearby-map__place-name-accessible" aria-hidden="true">{{ entry.name }}</span>
       </button>
     </div>

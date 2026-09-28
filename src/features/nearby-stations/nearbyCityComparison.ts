@@ -1,6 +1,7 @@
 import type { IrisAirNoiseStatistics, IrisNeighborhood } from "../transport-map/iris/irisApi";
+import type { DvfYearlyPrice } from "../../services/real-estate/compiledRealEstate";
 
-export type NearbyCityComparisonTone = "better" | "worse" | "equal" | "unavailable";
+export type NearbyCityComparisonTone = "better" | "worse" | "equal" | "unavailable" | "neutral";
 
 export interface NearbyCityComparisonMetric {
   id: string;
@@ -11,6 +12,8 @@ export interface NearbyCityComparisonMetric {
   targetNumeric?: number;
   /** Whether a larger numeric value is the better result for this metric. */
   higherIsBetter?: boolean;
+  /** Descriptive measures such as property prices are never graded. */
+  neutral?: boolean;
   /** Which shared icon illustrates the metric, resolved by the row component. */
   icon?: NearbyCityComparisonMetricIcon;
   /** The value is missing only because its data is still being fetched. */
@@ -24,6 +27,11 @@ export interface NearbyCityComparisonMetric {
   scaleMax?: number;
   /** Detail rows revealed when the metric row is expanded. */
   detail?: NearbyCityComparisonDetail;
+  /** Neutral annual price history shown below the real-estate comparison. */
+  priceTrend?: {
+    current?: readonly DvfYearlyPrice[];
+    target?: readonly DvfYearlyPrice[];
+  };
 }
 
 /** Visual identifier per comparison row; the view owns the actual glyph. */
@@ -35,7 +43,8 @@ export type NearbyCityComparisonMetricIcon =
   | "commerce"
   | "green-spaces"
   | "air"
-  | "noise";
+  | "noise"
+  | "real-estate";
 
 /** One end of a compared metric, already positioned on its own scale. */
 export interface NearbyCityComparisonMarker {
@@ -251,7 +260,8 @@ export function compareNearbyCityMetric(
   return targetIsHigher === higherIsBetter ? "better" : "worse";
 }
 
-export function nearbyCityComparisonTone(metric: Pick<NearbyCityComparisonMetric, "currentNumeric" | "targetNumeric" | "higherIsBetter">): NearbyCityComparisonTone {
+export function nearbyCityComparisonTone(metric: Pick<NearbyCityComparisonMetric, "currentNumeric" | "targetNumeric" | "higherIsBetter" | "neutral">): NearbyCityComparisonTone {
+  if (metric.neutral) return "neutral";
   return compareNearbyCityMetric(metric.currentNumeric, metric.targetNumeric, metric.higherIsBetter ?? true);
 }
 
@@ -350,5 +360,3 @@ export function nearbyCityComparisonLineLabel(line: NearbyCityComparisonLineSour
   if (code) return code;
   return nearbyCityComparisonLineCode(line) ?? line.id;
 }
-
-

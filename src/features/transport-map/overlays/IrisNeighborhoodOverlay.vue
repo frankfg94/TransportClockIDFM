@@ -19,6 +19,8 @@ import type {
   IrisNeighborhood,
   IrisSourceMetadata,
 } from "../iris/irisApi";
+import { liquidityBand, type DvfMarketPercentiles, type DvfNeighborhoodMetric } from "../../../services/real-estate/compiledRealEstate";
+import RealEstatePriceTrend from "../../../components/RealEstatePriceTrend.vue";
 
 const props = withDefaults(defineProps<{
   neighborhoods: readonly IrisNeighborhood[];
@@ -35,6 +37,8 @@ const props = withDefaults(defineProps<{
   revealOrder?: readonly string[];
   /** Normalized progress of the city transition, from 0 to 1. */
   revealProgress?: number;
+  /** Map root used to lift the interactive tooltip above the transformed camera and marker layers. */
+  tooltipTeleportTarget?: HTMLElement;
   /** Precomputed OSM commerce totals keyed by raw IRIS code. */
   commerceCounts?: Readonly<Record<string, number>>;
   /** True once the selected communeâ€™s compiled commerce data is available. */
@@ -43,6 +47,13 @@ const props = withDefaults(defineProps<{
   commerceHighlight?: boolean;
   activityTotals?: Readonly<Record<string, number>>;
   activityLabel?: string;
+  realEstateMetrics?: ReadonlyMap<string, DvfNeighborhoodMetric>;
+  realEstateActive?: boolean;
+  realEstateMode?: "prices" | "liquidity";
+  realEstateReferencePrice?: number;
+  realEstateReferenceLabel?: string;
+  realEstateMeasure?: "median" | "mean";
+  realEstateNeighborhoodPercentiles?: DvfMarketPercentiles;
 }>(), {
   transportStations: () => [],
   airNoiseCommunes: () => ({}),
@@ -53,6 +64,9 @@ const props = withDefaults(defineProps<{
   commerceCounts: () => ({}),
   commerceDataAvailable: false,
   commerceHighlight: false,
+  realEstateActive: false,
+  realEstateMode: "prices",
+  realEstateMeasure: "median",
 });
 
 interface IrisDisplayItem {
@@ -73,10 +87,13 @@ interface TooltipPosition {
 
 const { n, t } = useI18n();
 const overlayRoot = ref<HTMLElement>();
+const tooltipElement = ref<HTMLElement>();
+const tooltipHeight = ref(0);
 const hoveredId = ref<string>();
 const tooltipPosition = ref<TooltipPosition>();
 const tooltipLocked = ref(false);
 let clearTimer: ReturnType<typeof setTimeout> | undefined;
+let tooltipResizeObserver: ResizeObserver | undefined;
 
 const QUALITY_FACE_ICONS = [Smile, Meh, Frown] as const;
 
@@ -86,7 +103,7 @@ const preparedGroups = computed(() => prepareIrisNeighborhoodGroups(props.neighb
 // source subdivision behind one generic outline (for example "Quartier 1â€¦17").
 // Keep the explicit prop authoritative while exposing the raw subdivisions in
 // that degenerate grouped result.
-const effectiveShowSubdivisions = computed(() => props.showSubdivisions || preparedGroups.value.length === 1);
+const effectiveShowSubdivisions = computed(() => props.showSubdivisions || props.realEstateActive || preparedGroups.value.length === 1);
 const displayItems = computed<IrisDisplayItem[]>(() => {
   if (effectiveShowSubdivisions.value) {
     return preparedNeighborhoods.value.map((prepared) => ({
@@ -144,6 +161,24 @@ const transportCounts = computed(() => {
 const hoveredItem = computed(() => displayItems.value.find((item) => item.id === hoveredId.value));
 const hoveredCounts = computed(() => hoveredId.value ? transportCounts.value.get(hoveredId.value) : undefined);
 const hoveredCommerceCount = computed(() => hoveredId.value ? commerceCountByItem.value.get(hoveredId.value) : undefined);
+const hoveredRealEstate = computed(() => {
+  if (!props.realEstateActive) return undefined;
+  const member = hoveredItem.value?.members[0];
+  return member ? props.realEstateMetrics?.get(member.codeIris) : undefined;
+});
+const hoveredRealEstateBand = computed(() => {
+  const metric = hoveredRealEstate.value;
+  const percentiles = props.realEstateNeighborhoodPercentiles;
+  return metric && percentiles ? liquidityBand(metric.transactionCount, percentiles) : undefined;
+});
+const hoveredRealEstateDifference = computed(() => {
+  const metric = hoveredRealEstate.value;
+  if (!metric || typeof props.realEstateReferencePrice !== "number" || props.realEstateReferencePrice <= 0) return undefined;
+  const value = props.realEstateMeasure === "mean" ? metric.meanPriceM2 : metric.medianPriceM2;
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const difference = Math.round((value / props.realEstateReferencePrice - 1) * 100);
+  return `${difference > 0 ? "+" : ""}${difference} %`;
+});
 const hoveredAirNoise = computed(() => {
   const item = hoveredItem.value;
   if (!item) return undefined;
@@ -181,16 +216,36 @@ const cameraTransform = computed(() => {
 });
 const labelFontSize = computed(() => Math.max(0.000001, Math.min(0.00065, 14 / worldScaleAtZoom(props.camera.zoom))));
 const labelStrokeWidth = computed(() => Math.max(0.00000001, 2 / worldScaleAtZoom(props.camera.zoom)));
-const tooltipStyle = computed(() => {
+const tooltipPoint = computed(() => {
   const item = hoveredItem.value;
   if (!item) return undefined;
-  const point = props.scope === "city"
+  return props.scope === "city"
     ? tooltipPosition.value ?? worldToScreen(item.centroidWorld, props.camera)
     : worldToScreen(item.centroidWorld, props.camera);
+});
+const tooltipBelow = computed(() => {
+  const point = tooltipPoint.value;
+  if (props.scope !== "city" || point === undefined) return false;
+  const measuredHeight = tooltipHeight.value || Math.min(360, props.camera.viewportHeightCssPx * 0.7);
+  const screenY = (overlayRoot.value?.getBoundingClientRect().top ?? 0) + point.y;
+  const viewportHeight = window.innerHeight;
+  const bottomSafeArea = window.innerWidth <= 680 ? 112 : 12;
+  const availableAbove = screenY - 12;
+  const availableBelow = viewportHeight - bottomSafeArea - screenY;
+  if (availableAbove >= measuredHeight + 14) return false;
+  if (availableBelow >= measuredHeight + 14) return true;
+  return availableBelow > availableAbove;
+});
+const tooltipStyle = computed(() => {
+  const point = tooltipPoint.value;
+  if (!point) return undefined;
   const width = props.camera.viewportWidthCssPx;
   const height = props.camera.viewportHeightCssPx;
+  const halfTooltipWidth = Math.min(130, Math.max(0, (width - 24) / 2));
+  const horizontalInset = halfTooltipWidth + 12;
+  const maximumLeft = Math.max(horizontalInset, width - horizontalInset);
   return {
-    left: `${Math.max(12, Math.min(width - 12, point.x))}px`,
+    left: `${Math.max(horizontalInset, Math.min(maximumLeft, point.x))}px`,
     top: `${Math.max(12, Math.min(height - 12, point.y))}px`,
   };
 });
@@ -233,6 +288,20 @@ function aggregateAirNoise(statistics: readonly IrisNeighborhoodAirNoise[]): Iri
 
 function qualityFaceIcon(level: number) {
   return QUALITY_FACE_ICONS[level - 1] ?? Meh;
+}
+
+function realEstateBandLabel(band: ReturnType<typeof liquidityBand>): string | undefined {
+  if (band === "low") return t("nearbyStations.realEstate.lowLiquidity");
+  if (band === "typical") return t("nearbyStations.realEstate.typicalLiquidity");
+  if (band === "high") return t("nearbyStations.realEstate.highLiquidity");
+  if (band === "very-high") return t("nearbyStations.realEstate.veryHighLiquidity");
+  return undefined;
+}
+
+function realEstatePrice(value: number | undefined): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? `${n(value)} €/m²`
+    : t("nearbyStations.realEstate.noPrice");
 }
 
 function localPointerPosition(event: MouseEvent): TooltipPosition | undefined {
@@ -281,7 +350,7 @@ function unlockTooltip(): void {
 function handleDocumentPointerDown(event: PointerEvent): void {
   if (!tooltipLocked.value) return;
   const target = event.target;
-  if (target instanceof Node && overlayRoot.value?.contains(target)) return;
+  if (target instanceof Node && (overlayRoot.value?.contains(target) || tooltipElement.value?.contains(target))) return;
   unlockTooltip();
 }
 
@@ -353,9 +422,20 @@ watch(() => props.scope, (scope) => {
   if (scope !== "city") unlockTooltip();
 });
 
+watch(tooltipElement, (element) => {
+  tooltipResizeObserver?.disconnect();
+  tooltipHeight.value = element?.getBoundingClientRect().height ?? 0;
+  if (!element || typeof ResizeObserver === "undefined") return;
+  tooltipResizeObserver = new ResizeObserver(([entry]) => {
+    tooltipHeight.value = entry?.contentRect.height ?? element.getBoundingClientRect().height;
+  });
+  tooltipResizeObserver.observe(element);
+}, { flush: "post" });
+
 onMounted(() => document.addEventListener("pointerdown", handleDocumentPointerDown));
 onBeforeUnmount(() => {
   document.removeEventListener("pointerdown", handleDocumentPointerDown);
+  tooltipResizeObserver?.disconnect();
   unlockTooltip();
 });
 </script>
@@ -438,36 +518,56 @@ onBeforeUnmount(() => {
     map edges nor paint above the station, place and comparison layers.
   -->
 
-  <aside
-    v-if="hoveredItem && hoveredCounts && tooltipStyle"
-    class="iris-neighborhood-overlay__tooltip nearby-map__iris-tooltip-layer"
-    :class="{ 'iris-neighborhood-overlay__tooltip--locked': tooltipLocked }"
-    :style="tooltipStyle"
-    role="tooltip"
-    :data-tooltip-locked="tooltipLocked ? 'true' : 'false'"
-    @pointerenter="cancelClearHovered"
-    @pointerleave="scheduleClearHoveredTooltip"
-  >
+  <template v-if="hoveredItem && (hoveredCounts || hoveredRealEstate) && tooltipStyle">
+    <Teleport :to="tooltipTeleportTarget ?? 'body'" :disabled="!tooltipTeleportTarget">
+      <aside
+      ref="tooltipElement"
+      class="iris-neighborhood-overlay__tooltip nearby-map__iris-tooltip-layer"
+      :class="{
+        'iris-neighborhood-overlay__tooltip--locked': tooltipLocked,
+        'iris-neighborhood-overlay__tooltip--below': tooltipBelow,
+      }"
+      :style="tooltipStyle"
+      role="tooltip"
+      :data-tooltip-locked="tooltipLocked ? 'true' : 'false'"
+      @pointerenter="cancelClearHovered"
+      @pointerleave="scheduleClearHoveredTooltip"
+    >
     <strong>{{ hoveredItem.name }}</strong>
     <span>{{ hoveredItem.communeName }}</span>
     <small v-if="hoveredItem.members.length > 1">
       {{ t("globalMap.iris.subdivisionsCount", { count: hoveredItem.members.length }) }}
     </small>
     <small v-else>{{ t("globalMap.iris.tooltipCode", { code: hoveredItem.members[0]?.codeIris ?? "" }) }}</small>
-    <div v-if="modeEntries.length" class="iris-neighborhood-overlay__modes">
+    <div v-if="hoveredCounts && modeEntries.length" class="iris-neighborhood-overlay__modes">
       <span v-for="entry in modeEntries" :key="entry.mode" :title="modeLabel(entry.mode)">
         <component :is="modeIcon(entry.mode)" :size="13" :stroke-width="2.3" aria-hidden="true" />
         <b>{{ entry.count }}</b>
         <em>{{ modeLabel(entry.mode) }}</em>
       </span>
     </div>
-    <span v-else class="iris-neighborhood-overlay__empty">
+    <span v-else-if="hoveredCounts" class="iris-neighborhood-overlay__empty">
       {{ t("globalMap.iris.noTransport") }}
     </span>
-    <small>{{ t("globalMap.iris.tooltipStations", { count: hoveredCounts.stationCount }) }}</small>
+    <small v-if="hoveredCounts">{{ t("globalMap.iris.tooltipStations", { count: hoveredCounts.stationCount }) }}</small>
     <small v-if="commerceDataAvailable && hoveredCommerceCount !== undefined" class="iris-neighborhood-overlay__commerce-count">
       {{ activityLabel ? `${activityLabel} : ${n(hoveredCommerceCount)}` : t("globalMap.iris.tooltipCommerce", { count: n(hoveredCommerceCount) }) }}
     </small>
+    <div v-if="realEstateActive" class="iris-neighborhood-overlay__real-estate">
+      <template v-if="hoveredRealEstate?.hasEnoughSales">
+        <template v-if="realEstateMode === 'prices'">
+          <strong>{{ t(realEstateMeasure === 'mean' ? 'nearbyStations.realEstate.mean' : 'nearbyStations.realEstate.median') }} · {{ realEstatePrice(realEstateMeasure === 'mean' ? hoveredRealEstate.meanPriceM2 : hoveredRealEstate.medianPriceM2) }}</strong>
+          <small v-if="hoveredRealEstateDifference && realEstateReferenceLabel">{{ t('nearbyStations.realEstate.hoverPriceComparison', { difference: hoveredRealEstateDifference, reference: realEstateReferenceLabel }) }}</small>
+        </template>
+        <template v-else>
+          <strong>{{ realEstateBandLabel(hoveredRealEstateBand) ?? t('nearbyStations.realEstate.noNeighborhoodData') }}</strong>
+          <small v-if="realEstateReferenceLabel">{{ t('nearbyStations.realEstate.hoverLiquidityComparison', { reference: realEstateReferenceLabel }) }}</small>
+        </template>
+        <RealEstatePriceTrend :series="hoveredRealEstate.yearlyPrices" :measure="realEstateMeasure" />
+        <small>{{ t('nearbyStations.realEstate.transactionCount') }} · {{ n(hoveredRealEstate.transactionCount ?? 0) }}</small>
+      </template>
+      <small v-else>{{ t('nearbyStations.realEstate.noNeighborhoodData') }}</small>
+    </div>
     <div v-if="hoveredAirNoise && hoveredAirNoiseClass" class="iris-neighborhood-overlay__environment">
       <span
         class="iris-neighborhood-overlay__environment-item iris-neighborhood-overlay__environment-item--noise"
@@ -533,7 +633,9 @@ onBeforeUnmount(() => {
         target="_blank"
         rel="noopener noreferrer"
       >{{ t("globalMap.iris.sources") }}</a>
-    </aside>
+      </aside>
+    </Teleport>
+  </template>
     <aside v-else class="iris-neighborhood-overlay__commerce-legend" aria-live="polite">
       <strong>{{ activityLabel ? t("nearbyStations.cityActivity.legend", { activity: activityLabel }) : t("nearbyStations.cityCommerceLegend") }}</strong>
       <span><i class="iris-neighborhood-overlay__commerce-dot iris-neighborhood-overlay__commerce-dot--low" />{{ t("nearbyStations.cityCommerceLow") }}</span>
@@ -660,9 +762,13 @@ onBeforeUnmount(() => {
      knows the layer order. */
   z-index: 1;
   display: grid;
+  width: min(260px, calc(100% - 24px));
   gap: 3px;
   min-width: 168px;
   max-width: min(260px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 9px 11px;
   border: 1px solid rgba(124, 58, 237, .3);
   border-radius: 11px;
@@ -672,6 +778,9 @@ onBeforeUnmount(() => {
   font-size: .72rem;
   transform: translate(-50%, calc(-100% - 14px));
   pointer-events: auto;
+}
+.iris-neighborhood-overlay__tooltip--below {
+  transform: translate(-50%, 14px);
 }
 .iris-neighborhood-overlay__tooltip strong {
   color: #3b1d70;
@@ -686,6 +795,9 @@ onBeforeUnmount(() => {
   color: #166534 !important;
   font-weight: 850;
 }
+.iris-neighborhood-overlay__real-estate { background: rgba(255, 247, 247, .86); border: 1px solid rgba(190, 24, 47, .12); border-radius: 8px; display: grid; gap: 3px; margin-top: 4px; padding: 6px 7px; }
+.iris-neighborhood-overlay__real-estate strong { color: #8f1234; font-size: .7rem; line-height: 1.3; }
+.iris-neighborhood-overlay__real-estate small { color: #6b5260; font-size: .62rem; line-height: 1.35; }
 .iris-neighborhood-overlay__commerce-legend {
   position: absolute;
   right: 12px;

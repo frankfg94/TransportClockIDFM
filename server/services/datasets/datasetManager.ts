@@ -30,6 +30,11 @@ import {
 } from "../topology/netexCache";
 import type { GlobalMapManifest } from "../../../src/features/transport-map/contracts/manifest";
 import {
+  assertDvfManifest,
+  DVF_SOURCE_PAGE_URL,
+  type DvfManifest,
+} from "../../../src/services/real-estate/compiledRealEstate";
+import {
   assertPlacesManifest,
   type CompiledPlacesManifest,
 } from "../../../src/services/places/compiledPlaces";
@@ -50,7 +55,8 @@ type CoreDatasetId =
   | "neighborhood-verdict"
   | "walking-isochrones"
   | "global-map"
-  | "places";
+  | "places"
+  | "dvf-property-market";
 
 type DatasetDefinition = {
   id: CoreDatasetId;
@@ -164,13 +170,23 @@ const CORE_DATASETS: Record<CoreDatasetId, DatasetDefinition> = {
     warnAfterDays: 30,
     staleAfterDays: 90,
   },
+  "dvf-property-market": {
+    id: "dvf-property-market",
+    title: "Prix et transactions immobilières DVF",
+    description: "Médianes, moyennes et fréquence des ventes par commune, quartier IRIS et maille de 250 m.",
+    format: "JSON statique par commune (manifeste + fichiers lazy)",
+    sourceUrl: DVF_SOURCE_PAGE_URL,
+    license: { label: "Licence Ouverte / Open Licence version 2.0", url: OPEN_LICENSE_URL },
+    warnAfterDays: 365,
+    staleAfterDays: 730,
+  },
 };
 
 export async function getDatasetManagerResponse(
   event?: H3Event,
 ): Promise<DatasetManagerResponse> {
   const runtimeEnv = getNetexRuntimeEnv(event);
-  const [netex, gtfs, bike, ridership, verdict, isochrones, globalMap, places] = await Promise.all([
+  const [netex, gtfs, bike, ridership, verdict, isochrones, globalMap, places, dvf] = await Promise.all([
     safeBuildDataset(CORE_DATASETS.netex, "unconfigured", () => buildNetexDataset(runtimeEnv)),
     safeBuildDataset(CORE_DATASETS.gtfs, "local", () => buildGtfsDataset(event)),
     safeBuildDataset(CORE_DATASETS["bike-network"], "local", () => buildBikeNetworkDataset(runtimeEnv)),
@@ -179,6 +195,7 @@ export async function getDatasetManagerResponse(
     safeBuildDataset(CORE_DATASETS["walking-isochrones"], "local", () => buildWalkingIsochronesDataset(runtimeEnv)),
     safeBuildDataset(CORE_DATASETS["global-map"], "local", () => buildGlobalMapDataset(event)),
     safeBuildDataset(CORE_DATASETS.places, "local", () => buildPlacesDataset(event)),
+    safeBuildDataset(CORE_DATASETS["dvf-property-market"], "local", () => buildDvfDataset(event)),
   ]);
 
   const verdictSources = verdict.sources ?? [];
@@ -191,6 +208,7 @@ export async function getDatasetManagerResponse(
     isochrones,
     globalMap,
     places,
+    dvf,
     ...verdictSources.map((source) => toSourceDataset(source)),
   ];
 
@@ -450,6 +468,58 @@ async function buildPlacesDataset(event?: H3Event): Promise<DatasetInfo> {
     };
   } catch (error) {
     return unavailableDataset(definition, "local", safeErrorMessage(error));
+  }
+}
+
+async function buildDvfDataset(event?: H3Event): Promise<DatasetInfo> {
+  const definition = CORE_DATASETS["dvf-property-market"];
+  const root = resolve(process.env.DVF_OUTPUT_DIR?.trim() || "public/data/dvf/v1");
+  try {
+    const loaded = await readDvfManifest(event, root);
+    const localSize = loaded.storage === "local" ? await measureLocalPath(root, "dataset") : undefined;
+    const declaredBytes = loaded.manifest.cities.reduce((sum, city) => sum + city.bytes, 0);
+    const cityCount = loaded.manifest.cities.length;
+    return {
+      ...definition,
+      state: "available",
+      storage: loaded.storage,
+      sizeBytes: localSize?.bytes ?? declaredBytes,
+      sizeScope: localSize?.scope ?? "dataset",
+      generatedAt: loaded.manifest.generatedAt,
+      updatedAt: loaded.manifest.source.sourceUpdatedAt,
+      referencePeriod: loaded.manifest.referencePeriod,
+      freshness: freshnessFromDate(loaded.manifest.generatedAt, definition.warnAfterDays, definition.staleAfterDays),
+      metrics: [
+        { label: "Communes", value: String(cityCount) },
+        { label: "Quartiers renseignés", value: String(loaded.manifest.totals.neighborhoodsWithEnoughSales) },
+        { label: "Mailles renseignées", value: String(loaded.manifest.totals.gridCellsWithEnoughSales) },
+      ],
+      details: `Île-de-France · ${loaded.manifest.minimumPublicSampleSize} ventes minimum par zone · données ${loaded.manifest.referencePeriod}`,
+    };
+  } catch (error) {
+    return unavailableDataset(definition, "local", safeErrorMessage(error));
+  }
+}
+
+async function readDvfManifest(
+  event: H3Event | undefined,
+  root: string,
+): Promise<{ manifest: DvfManifest; storage: DatasetStorage }> {
+  try {
+    const manifest = JSON.parse(await fs.readFile(resolve(root, "manifest.json"), "utf8")) as unknown;
+    assertDvfManifest(manifest);
+    return { manifest, storage: "local" };
+  } catch (localError) {
+    if (!event) throw localError;
+    const url = new URL("/data/dvf/v1/manifest.json", getRequestURL(event));
+    const cloudflareAssets = (event.context as { cloudflare?: { env?: { ASSETS?: { fetch(request: Request): Promise<Response> } } } } | undefined)?.cloudflare?.env?.ASSETS;
+    const response = cloudflareAssets
+      ? await cloudflareAssets.fetch(new Request(url))
+      : await fetch(url);
+    if (!response.ok) throw localError;
+    const manifest = await response.json() as unknown;
+    assertDvfManifest(manifest);
+    return { manifest, storage: "local" };
   }
 }
 

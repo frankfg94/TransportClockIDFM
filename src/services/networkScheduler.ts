@@ -1,5 +1,9 @@
 export type NetworkConcurrencyMode = "auto" | "limited" | "unlimited";
 
+// Also imported by the Node data compiler, where Vite does not inject the
+// development-only constant. `typeof` keeps the runtime fallback safe there.
+declare const __UNLIMITED_NETWORK__: boolean | undefined;
+
 /** Client-side FIFO shared by nearby data requests, independent of hosting. */
 export function createNetworkScheduler(concurrency = 4, timeoutMs = 45_000) {
   let active = 0;

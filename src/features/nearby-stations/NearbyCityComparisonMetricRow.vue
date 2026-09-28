@@ -3,6 +3,7 @@ import { computed } from "vue";
 import {
   BusFront,
   ChevronDown,
+  Euro,
   Info,
   Leaf,
   Minus,
@@ -18,6 +19,7 @@ import {
 import { useI18n } from "../../i18n";
 import NearbyCityComparisonDumbbell from "./NearbyCityComparisonDumbbell.vue";
 import NearbyCityComparisonNetworks from "./NearbyCityComparisonNetworks.vue";
+import { calculateDvfPriceChanges, formatDvfPriceChange, type DvfPriceTrendChange } from "../../services/real-estate/priceTrends";
 import {
   nearbyCityComparisonScale,
   nearbyCityComparisonTone,
@@ -40,7 +42,7 @@ const emit = defineEmits<{
   toggle: [metricId: string];
 }>();
 
-const { t } = useI18n();
+const { n, t } = useI18n();
 
 /** Metric identity glyphs, so every row is recognisable at a glance. */
 const METRIC_ICONS: Record<NearbyCityComparisonMetricIcon, LucideIcon> = {
@@ -52,6 +54,7 @@ const METRIC_ICONS: Record<NearbyCityComparisonMetricIcon, LucideIcon> = {
   "green-spaces": Leaf,
   air: Wind,
   noise: Volume2,
+  "real-estate": Euro,
 };
 
 /**
@@ -67,6 +70,7 @@ const METRIC_ACCENTS: Record<NearbyCityComparisonMetricIcon, string> = {
   "green-spaces": "teal",
   air: "emerald",
   noise: "emerald",
+  "real-estate": "amber",
 };
 
 const tone = computed(() => nearbyCityComparisonTone(props.metric));
@@ -75,6 +79,17 @@ const scale = computed(() => nearbyCityComparisonScale(props.metric));
 const icon = computed(() => (props.metric.icon ? METRIC_ICONS[props.metric.icon] : undefined));
 const iconAccent = computed(() => (props.metric.icon ? METRIC_ACCENTS[props.metric.icon] : "neutral"));
 const detail = computed(() => props.metric.detail);
+const trendPeriods = [1, 3, 5] as const;
+const currentPriceChanges = computed(() => calculateDvfPriceChanges(props.metric.priceTrend?.current));
+const targetPriceChanges = computed(() => calculateDvfPriceChanges(props.metric.priceTrend?.target));
+const trendDateRange = computed(() => {
+  const changes = [...currentPriceChanges.value, ...targetPriceChanges.value]
+    .sort((left, right) => right.period - left.period);
+  const change = changes[0];
+  return change ? { from: change.fromYear, to: change.toYear } : undefined;
+});
+const hasPriceTrend = computed(() => props.metric.id === "real-estate"
+  && (currentPriceChanges.value.length > 0 || targetPriceChanges.value.length > 0));
 const expandable = computed(() => Boolean(detail.value)
   && (detail.value!.current.count > 0 || (showTarget.value && detail.value!.target.count > 0)));
 
@@ -82,6 +97,7 @@ const statusText = computed(() => {
   if (tone.value === "better") return t("nearbyStations.cityComparison.superior");
   if (tone.value === "worse") return t("nearbyStations.cityComparison.inferior");
   if (tone.value === "equal") return t("nearbyStations.cityComparison.equal");
+  if (tone.value === "neutral") return t("nearbyStations.cityComparison.realEstateNeutral");
   return t("nearbyStations.cityComparison.unavailable");
 });
 
@@ -121,6 +137,33 @@ const toggleLabel = computed(() => t(
   props.expanded ? "nearbyStations.cityComparison.hideDetail" : "nearbyStations.cityComparison.showDetail",
   { metric: props.metric.label },
 ));
+
+function changeForPeriod(changes: readonly DvfPriceTrendChange[], period: 1 | 3 | 5): DvfPriceTrendChange | undefined {
+  return changes.find((change) => change.period === period);
+}
+
+function trendPeriodLabel(period: 1 | 3 | 5): string {
+  const change = changeForPeriod(currentPriceChanges.value, period)
+    ?? changeForPeriod(targetPriceChanges.value, period);
+  // The current DVF release has five published annual vintages (2021–2025),
+  // so surface the exact interval instead of implying five elapsed years.
+  if (period === 5 && change) return `${change.fromYear}–${change.toYear}`;
+  return t(`nearbyStations.realEstate.trendPeriod${period}`);
+}
+
+function formattedChange(change: DvfPriceTrendChange | undefined): string {
+  if (!change) return t("nearbyStations.cityComparison.missingValue");
+  return formatDvfPriceChange(change.percent, (amount, maximumFractionDigits) => n(amount, {
+    minimumFractionDigits: maximumFractionDigits,
+    maximumFractionDigits,
+  }));
+}
+
+function changeTitle(change: DvfPriceTrendChange | undefined): string | undefined {
+  return change
+    ? t("nearbyStations.realEstate.trendIntervalTitle", { from: change.fromYear, to: change.toYear })
+    : undefined;
+}
 </script>
 
 <template>
@@ -172,6 +215,37 @@ const toggleLabel = computed(() => t(
       </button>
       <span v-else class="comparison-metric__toggle-spacer" aria-hidden="true" />
       <span class="comparison-metric__sr" role="note">{{ rowAria }}</span>
+    </div>
+
+    <div
+      v-if="hasPriceTrend"
+      class="comparison-metric__price-trend"
+      role="group"
+      :aria-label="t('nearbyStations.realEstate.trendLabel')"
+      data-testid="nearby-city-comparison-price-trend"
+    >
+      <span class="comparison-metric__price-trend-heading">{{ t("nearbyStations.realEstate.trendLabel") }}</span>
+      <small v-if="trendDateRange" class="comparison-metric__price-trend-range">
+        {{ t("nearbyStations.realEstate.trendDataRange", trendDateRange) }}
+      </small>
+      <div class="comparison-metric__price-trend-grid" :class="{ 'comparison-metric__price-trend-grid--single': !showTarget }">
+        <span aria-hidden="true" />
+        <small v-for="period in trendPeriods" :key="`heading:${period}`">{{ trendPeriodLabel(period) }}</small>
+        <strong :title="currentName">{{ currentName }}</strong>
+        <span
+          v-for="period in trendPeriods"
+          :key="`current:${period}`"
+          :title="changeTitle(changeForPeriod(currentPriceChanges, period))"
+        >{{ formattedChange(changeForPeriod(currentPriceChanges, period)) }}</span>
+        <template v-if="showTarget">
+          <strong :title="targetName">{{ targetName }}</strong>
+          <span
+            v-for="period in trendPeriods"
+            :key="`target:${period}`"
+            :title="changeTitle(changeForPeriod(targetPriceChanges, period))"
+          >{{ formattedChange(changeForPeriod(targetPriceChanges, period)) }}</span>
+        </template>
+      </div>
     </div>
 
     <NearbyCityComparisonNetworks
@@ -246,6 +320,45 @@ const toggleLabel = computed(() => t(
 
 .comparison-metric__visual { min-width: 0; }
 
+.comparison-metric__price-trend {
+  border-top: 1px solid rgba(100, 116, 139, .12);
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 1px 46px;
+  padding-top: 8px;
+}
+.comparison-metric__price-trend-heading {
+  color: #657187;
+  font-size: .72rem;
+  font-weight: 760;
+}
+.comparison-metric__price-trend-range { color: #778397; font-size: .65rem; line-height: 1.2; }
+.comparison-metric__price-trend-grid {
+  align-items: center;
+  display: grid;
+  gap: 5px 8px;
+  grid-template-columns: minmax(95px, 1.4fr) repeat(3, minmax(50px, .72fr));
+}
+.comparison-metric__price-trend-grid > small {
+  color: #778397;
+  font-size: .68rem;
+  font-weight: 730;
+  text-align: center;
+}
+.comparison-metric__price-trend-grid > strong {
+  color: #465366;
+  font-size: .69rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.comparison-metric__price-trend-grid > span {
+  color: #465366;
+  font-size: .73rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
 .comparison-metric__status {
   align-items: center;
   border-radius: 999px;
@@ -266,7 +379,8 @@ const toggleLabel = computed(() => t(
 
 .comparison-metric__status[data-status="winner"] { background: #dcfce7; color: #15803d; }
 .comparison-metric__status[data-status="equal"],
-.comparison-metric__status[data-status="unavailable"] { background: #eef2f7; color: #52627a; }
+.comparison-metric__status[data-status="unavailable"],
+.comparison-metric__status[data-status="neutral"] { background: #eef2f7; color: #52627a; }
 
 .comparison-metric__toggle {
   align-items: center;
@@ -318,6 +432,8 @@ const toggleLabel = computed(() => t(
   }
   .comparison-metric__visual { grid-column: 1 / -1; order: 3; }
   .comparison-metric__status { justify-self: end; }
+  .comparison-metric__price-trend { margin-left: 0; }
+  .comparison-metric__price-trend-grid { gap: 5px 4px; grid-template-columns: minmax(72px, 1.2fr) repeat(3, minmax(42px, .8fr)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

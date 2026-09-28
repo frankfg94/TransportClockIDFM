@@ -12,6 +12,18 @@ export interface NearbyCityInfoCardTransportMode {
 export interface NearbyCityInfoCardItem {
   label: string;
   value?: string;
+  wide?: boolean;
+  market?: {
+    medianLabel: string;
+    median: string;
+    meanLabel: string;
+    mean: string;
+    transactionLabel: string;
+    transactionCount: string;
+    transactionNote?: string;
+    referencePeriod?: string;
+    rank?: string;
+  };
   transportModes?: readonly NearbyCityInfoCardTransportMode[];
   action?: "places-ranking";
   actionLabel?: string;
@@ -98,7 +110,11 @@ onBeforeUnmount(() => {
           v-for="item in items"
           :key="item.label"
           class="nearby-city-info-card__fact"
-          :class="{ 'nearby-city-info-card__fact--transport': item.transportModes?.length }"
+          :class="{
+            'nearby-city-info-card__fact--transport': item.transportModes?.length,
+            'nearby-city-info-card__fact--market': Boolean(item.market),
+            'nearby-city-info-card__fact--wide': item.wide,
+          }"
         >
           <dt>{{ item.label }}</dt>
           <dd v-if="item.transportModes?.length" class="nearby-city-info-card__transport-modes">
@@ -149,6 +165,39 @@ onBeforeUnmount(() => {
               <span class="nearby-city-info-card__transport-label">{{ transport.label }}</span>
               <strong>{{ transport.count }}</strong>
             </button>
+          </dd>
+          <dd v-else-if="item.market" class="nearby-city-info-card__market">
+            <div class="nearby-city-info-card__market-prices">
+              <div class="nearby-city-info-card__market-price nearby-city-info-card__market-price--median">
+                <span>{{ item.market.medianLabel }}</span>
+                <strong>{{ item.market.median }}</strong>
+              </div>
+              <div class="nearby-city-info-card__market-price">
+                <span>{{ item.market.meanLabel }}</span>
+                <strong>{{ item.market.mean }}</strong>
+              </div>
+            </div>
+            <div class="nearby-city-info-card__market-volume">
+              <span>
+                {{ item.market.transactionLabel }}
+                <button
+                  v-if="item.market.transactionNote"
+                  type="button"
+                  class="nearby-city-info-card__market-info"
+                  :aria-label="item.market.transactionNote"
+                  :title="item.market.transactionNote"
+                  @pointerdown.stop
+                  @click.stop
+                >
+                  <Info :size="12" :stroke-width="2.4" aria-hidden="true" />
+                </button>
+              </span>
+              <strong>{{ item.market.transactionCount }}</strong>
+            </div>
+            <p v-if="item.market.referencePeriod || item.market.rank" class="nearby-city-info-card__market-context">
+              <span v-if="item.market.referencePeriod">{{ item.market.referencePeriod }}</span>
+              <span v-if="item.market.rank">{{ item.market.rank }}</span>
+            </p>
           </dd>
           <dd v-else-if="item.action" class="nearby-city-info-card__action-value">
             <span>{{ item.value }}</span>
@@ -285,6 +334,21 @@ onBeforeUnmount(() => {
   line-height: 1.25;
   padding: 6px 7px;
 }
+.nearby-city-info-card__fact--wide { align-items: start; display: grid; gap: 3px; }
+.nearby-city-info-card__fact--wide dd { font-size: .62rem; font-weight: 760; max-width: 100%; text-align: left; }
+.nearby-city-info-card__fact--market { align-items: start; display: grid; gap: 6px; }
+.nearby-city-info-card__market { display: grid; gap: 6px; max-width: 100% !important; text-align: left !important; width: 100%; }
+.nearby-city-info-card__market-prices { display: grid; gap: 5px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.nearby-city-info-card__market-price { background: rgba(255,255,255,.94); border: 1px solid rgba(190,24,47,.13); border-radius: 8px; display: grid; gap: 3px; min-width: 0; padding: 6px 7px; }
+.nearby-city-info-card__market-price--median { background: linear-gradient(145deg, #fff7f6, #fff); border-color: rgba(190,24,47,.22); }
+.nearby-city-info-card__market-price span, .nearby-city-info-card__market-volume span { color: #707b8e; font-size: .57rem; font-weight: 780; line-height: 1.2; }
+.nearby-city-info-card__market-price strong { color: #8f1234; font-size: .76rem; font-variant-numeric: tabular-nums; letter-spacing: -.02em; line-height: 1.12; white-space: nowrap; }
+.nearby-city-info-card__market-volume { align-items: center; background: #fff; border: 1px solid rgba(100,116,139,.13); border-radius: 7px; display: flex; gap: 8px; justify-content: space-between; padding: 5px 7px; }
+.nearby-city-info-card__market-volume > span { align-items: center; display: inline-flex; gap: 4px; }
+.nearby-city-info-card__market-info { align-items: center; appearance: none; background: transparent; border: 0; border-radius: 50%; color: #687589; cursor: help; display: inline-flex; justify-content: center; padding: 1px; pointer-events: auto; }
+.nearby-city-info-card__market-info:focus-visible { outline: 2px solid rgba(190,24,47,.5); outline-offset: 1px; }
+.nearby-city-info-card__market-volume strong { color: #344054; font-size: .65rem; font-variant-numeric: tabular-nums; }
+.nearby-city-info-card__market-context { color: #687589; display: grid; font-size: .57rem; font-weight: 720; gap: 2px; line-height: 1.25; margin: 0; }
 
 .nearby-city-info-card__fact dt {
   color: #64748b;

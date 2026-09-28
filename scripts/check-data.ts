@@ -27,6 +27,12 @@ import {
   MAX_PLACES_ASSET_BYTES,
   type PlaceCategoryCounts,
 } from "../src/services/places/compiledPlaces";
+import {
+  assertDvfCityFile,
+  assertDvfManifest,
+  DVF_SOURCE_PAGE_URL,
+  type DvfManifest,
+} from "../src/services/real-estate/compiledRealEstate";
 
 loadDotenv({ path: ".env.local", quiet: true });
 loadDotenv({ path: ".env", quiet: true });
@@ -72,6 +78,7 @@ async function main(): Promise<void> {
     checkIsochrones(),
     checkGlobalMap(),
     checkPlaces(),
+    checkDvfRealEstate(),
   ]);
 
   console.log("\nTransport data configuration\n");
@@ -284,6 +291,46 @@ export async function checkPlaces(): Promise<DataCheckRow> {
     };
   } catch (error) {
     return { ...row, Details: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export async function checkDvfRealEstate(): Promise<DataCheckRow> {
+  const root = resolve(process.env.DVF_OUTPUT_DIR?.trim() || "public/data/dvf/v1");
+  const row: DataCheckRow = {
+    Data: "DVF real estate",
+    Configured: "Auto",
+    Installed: "No",
+    Mode: "Local",
+    Location: root,
+    Details: "",
+  };
+  try {
+    const manifestPath = resolveContainedPath(root, "manifest.json");
+    const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as unknown;
+    assertDvfManifest(manifest);
+    const typedManifest = manifest as DvfManifest;
+    const seenCities = new Set<string>();
+    let checkedBytes = 0;
+    for (const city of typedManifest.cities) {
+      if (seenCities.has(city.code)) throw new Error(`Duplicate DVF commune ${city.code}.`);
+      seenCities.add(city.code);
+      const assetPath = resolveContainedPath(root, city.asset);
+      const bytes = await fs.readFile(assetPath);
+      if (bytes.length !== city.bytes || sha256(bytes) !== city.checksumSha256) {
+        throw new Error(`DVF city asset failed its size or checksum check: ${city.asset}.`);
+      }
+      const cityFile = JSON.parse(bytes.toString("utf8")) as unknown;
+      assertDvfCityFile(cityFile);
+      if (cityFile.city.code !== city.code) throw new Error(`DVF asset ${city.asset} has a different commune code.`);
+      checkedBytes += bytes.length;
+    }
+    return {
+      ...row,
+      Installed: "Yes",
+      Details: `${seenCities.size} communes · ${typedManifest.totals.neighborhoodsWithEnoughSales} IRIS · ${typedManifest.totals.gridCellsWithEnoughSales} cellules · ${typedManifest.referencePeriod} · ${checkedBytes} bytes validés · ${DVF_SOURCE_PAGE_URL}`,
+    };
+  } catch (error) {
+    return { ...row, Details: String(error) };
   }
 }
 
@@ -613,7 +660,7 @@ function printRecommendations(rows: DataCheckRow[]): void {
     );
   }
 
-  for (const name of ["Neighborhood verdict", "IRIS neighborhoods", "Air quality", "Sound quality", "IDFM service quality", "Walking isochrones", "Global map", "Compiled OSM places"]) {
+  for (const name of ["Neighborhood verdict", "IRIS neighborhoods", "Air quality", "Sound quality", "IDFM service quality", "Walking isochrones", "Global map", "Compiled OSM places", "DVF real estate"]) {
     if (byData.get(name)?.Installed !== "Yes") recommendations.push(`${name}: vérifier la source indiquée et régénérer/publier les données manquantes.`);
   }
   console.log("\nRecommendations");

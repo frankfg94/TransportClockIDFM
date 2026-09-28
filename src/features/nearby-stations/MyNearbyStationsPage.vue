@@ -2260,7 +2260,14 @@ onBeforeUnmount(() => {
   .my-nearby-stations-page { padding: 18px 12px 108px; }
   .my-nearby-stations-page__hero { padding: 19px; }
   .my-nearby-stations-page__hero-icon { display: none; }
-  .my-nearby-stations-page__controls { align-items: stretch; flex-direction: column; }
+  .my-nearby-stations-page__controls {
+    align-items: stretch;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+  }
+  .my-nearby-stations-page__controls > * { box-sizing: border-box; max-width: 100%; min-width: 0; }
   .my-nearby-stations-page__address { min-width: 0; }
   .my-nearby-stations-page__address-controls { flex-direction: column; }
   .my-nearby-stations-page__status, .my-nearby-stations-page__resolved { white-space: normal; }
