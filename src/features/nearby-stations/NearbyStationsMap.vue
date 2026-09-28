@@ -1087,7 +1087,7 @@ const cityViewDvfMapCells = computed(() => {
       const value = cityViewRealEstateMeasure.value === "mean" ? cell.meanPriceM2 : cell.medianPriceM2;
       if (typeof reference !== "number" || reference <= 0 || !Number.isFinite(value)) return [];
       const ratio = value / reference;
-      const color = ratio < 0.8 ? "#fca5a5" : ratio < 1 ? "#f87171" : ratio < 1.2 ? "#ef4444" : ratio < 1.5 ? "#dc2626" : "#991b1b";
+      const color = ratio < 0.8 ? "#16a34a" : ratio < 1 ? "#84cc16" : ratio < 1.2 ? "#facc15" : ratio < 1.5 ? "#f97316" : ratio < 2 ? "#dc2626" : "#7f1d1d";
       const opacity = Math.min(0.94, 0.64 + Math.min(1, Math.max(0, ratio - 0.65) / 1.1) * 0.3);
       return [{ key: `${cell.codeIris ?? "outside"}:${index}`, worldX: world.x, worldY: world.y, radius, color, opacity }];
     }
@@ -4666,20 +4666,25 @@ function mix(from: number, to: number, progress: number): number {
         data-testid="nearby-map-real-estate-heatmap"
       >
         <defs>
-          <radialGradient id="nearby-dvf-heat-fca5a5">
-            <stop offset="0%" stop-color="#fca5a5" stop-opacity=".9" />
-            <stop offset="48%" stop-color="#fca5a5" stop-opacity=".5" />
-            <stop offset="100%" stop-color="#fda4af" stop-opacity="0" />
+          <radialGradient id="nearby-dvf-heat-16a34a">
+            <stop offset="0%" stop-color="#16a34a" stop-opacity=".9" />
+            <stop offset="48%" stop-color="#16a34a" stop-opacity=".5" />
+            <stop offset="100%" stop-color="#16a34a" stop-opacity="0" />
           </radialGradient>
-          <radialGradient id="nearby-dvf-heat-f87171">
-            <stop offset="0%" stop-color="#f87171" stop-opacity=".9" />
-            <stop offset="48%" stop-color="#f87171" stop-opacity=".5" />
-            <stop offset="100%" stop-color="#fb7185" stop-opacity="0" />
+          <radialGradient id="nearby-dvf-heat-84cc16">
+            <stop offset="0%" stop-color="#84cc16" stop-opacity=".9" />
+            <stop offset="48%" stop-color="#84cc16" stop-opacity=".5" />
+            <stop offset="100%" stop-color="#84cc16" stop-opacity="0" />
           </radialGradient>
-          <radialGradient id="nearby-dvf-heat-ef4444">
-            <stop offset="0%" stop-color="#ef4444" stop-opacity=".9" />
-            <stop offset="48%" stop-color="#ef4444" stop-opacity=".5" />
-            <stop offset="100%" stop-color="#ef4444" stop-opacity="0" />
+          <radialGradient id="nearby-dvf-heat-facc15">
+            <stop offset="0%" stop-color="#facc15" stop-opacity=".9" />
+            <stop offset="48%" stop-color="#facc15" stop-opacity=".5" />
+            <stop offset="100%" stop-color="#facc15" stop-opacity="0" />
+          </radialGradient>
+          <radialGradient id="nearby-dvf-heat-f97316">
+            <stop offset="0%" stop-color="#f97316" stop-opacity=".92" />
+            <stop offset="48%" stop-color="#f97316" stop-opacity=".54" />
+            <stop offset="100%" stop-color="#f97316" stop-opacity="0" />
           </radialGradient>
           <radialGradient id="nearby-dvf-heat-dc2626">
             <stop offset="0%" stop-color="#dc2626" stop-opacity=".93" />
@@ -4690,6 +4695,21 @@ function mix(from: number, to: number, progress: number): number {
             <stop offset="0%" stop-color="#991b1b" stop-opacity=".95" />
             <stop offset="48%" stop-color="#991b1b" stop-opacity=".58" />
             <stop offset="100%" stop-color="#991b1b" stop-opacity="0" />
+          </radialGradient>
+          <radialGradient id="nearby-dvf-heat-7f1d1d">
+            <stop offset="0%" stop-color="#7f1d1d" stop-opacity=".95" />
+            <stop offset="48%" stop-color="#7f1d1d" stop-opacity=".58" />
+            <stop offset="100%" stop-color="#7f1d1d" stop-opacity="0" />
+          </radialGradient>
+          <radialGradient id="nearby-dvf-heat-fb7185">
+            <stop offset="0%" stop-color="#fb7185" stop-opacity=".9" />
+            <stop offset="48%" stop-color="#fb7185" stop-opacity=".5" />
+            <stop offset="100%" stop-color="#fb7185" stop-opacity="0" />
+          </radialGradient>
+          <radialGradient id="nearby-dvf-heat-fecdd3">
+            <stop offset="0%" stop-color="#fecdd3" stop-opacity=".9" />
+            <stop offset="48%" stop-color="#fecdd3" stop-opacity=".5" />
+            <stop offset="100%" stop-color="#fecdd3" stop-opacity="0" />
           </radialGradient>
         </defs>
         <g :transform="isochroneTransform" class="nearby-map__real-estate-haze">
@@ -6092,29 +6112,7 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__real-estate-legend-header small { color: #64748b; font-size: .7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nearby-map__real-estate-legend-header > button { align-items: center; background: #f7f8fb; border: 1px solid rgba(100,116,139,.16); border-radius: 50%; color: #64748b; cursor: pointer; display: inline-flex; flex: 0 0 28px; height: 28px; justify-content: center; margin-left: auto; padding: 0; width: 28px; }
 .nearby-map__real-estate-legend-header > button:hover, .nearby-map__real-estate-legend-header > button:focus-visible { background: #fff0f2; color: #9f1239; outline: 2px solid rgba(190,24,47,.24); }
-.nearby-map__real-estate-mode { background: #f4f5f8; border: 1px solid rgba(100,116,139,.12); border-radius: 10px; display: grid; gap: 3px; grid-template-columns: 1fr 1fr; padding: 3px; }
-.nearby-map__real-estate-controls { display: grid; gap: 8px; }
 .nearby-map__real-estate-sheet-content { box-sizing: border-box; padding: 12px 18px max(20px, env(safe-area-inset-bottom)); }
-.nearby-map__real-estate-layer-switch { align-items: center; border-bottom: 1px solid rgba(100,116,139,.12); color: #263247; cursor: pointer; display: flex; font-size: .82rem; font-weight: 800; gap: 12px; justify-content: space-between; min-height: 46px; padding-bottom: 8px; }
-.nearby-map__real-estate-layer-switch input { accent-color: #9f1239; flex: 0 0 20px; height: 20px; margin: 0; width: 20px; }
-.nearby-map__real-estate-mode button { background: transparent; border: 0; border-radius: 7px; color: #687589; cursor: pointer; font-size: .68rem; font-weight: 780; min-height: 31px; padding: 5px 7px; }
-.nearby-map__real-estate-mode button:hover, .nearby-map__real-estate-mode button:focus-visible { outline: 2px solid rgba(159,18,57,.22); }
-.nearby-map__real-estate-mode button.nearby-map__real-estate-mode--active { background: #fff; box-shadow: 0 1px 4px rgba(15,23,42,.12); color: #9f1239; }
-.nearby-map__real-estate-selects { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0,1fr)); }
-.nearby-map__real-estate-selects label { display: grid; gap: 4px; min-width: 0; }
-.nearby-map__real-estate-selects label > span { color: #69768a; font-size: .67rem; font-weight: 760; }
-.nearby-map__real-estate-selects select { background: #fff; border: 1px solid rgba(100,116,139,.22); border-radius: 8px; color: #243047; font: inherit; font-size: .69rem; font-weight: 720; min-height: 34px; min-width: 0; padding: 5px 7px; }
-.nearby-map__real-estate-selects select:focus-visible { border-color: #be123c; outline: 2px solid rgba(190,18,60,.18); }
-.nearby-map__real-estate-gradient { display: grid; gap: 6px; grid-template-columns: repeat(3, minmax(0,1fr)); padding-top: 13px; position: relative; }
-.nearby-map__real-estate-gradient::before { background: linear-gradient(90deg, #fca5a5 0%, #f87171 24%, #ef4444 50%, #dc2626 75%, #991b1b 100%); border-radius: 999px; content: ""; height: 8px; left: 0; position: absolute; right: 0; top: 0; }
-.nearby-map__real-estate-gradient--liquidity::before { background: linear-gradient(90deg, #fecaca 0%, #f87171 36%, #dc2626 72%, #991b1b 100%); }
-.nearby-map__real-estate-gradient span { color: #69768a; font-size: .64rem; line-height: 1.25; }
-.nearby-map__real-estate-gradient span:nth-child(2) { text-align: center; }
-.nearby-map__real-estate-gradient span:last-child { text-align: right; }
-.nearby-map__real-estate-rank { color: #52627a; font-size: .69rem; line-height: 1.35; margin: -2px 0 0; }
-.nearby-map__real-estate-disclaimer { border-top: 1px solid rgba(100,116,139,.12); color: #738094; font-size: .67rem; line-height: 1.4; margin: 0; padding-top: 8px; }
-.nearby-map__real-estate-disclaimer a { color: #9f1239; font-weight: 790; margin-left: 3px; text-decoration: underline; text-underline-offset: 2px; }
-.nearby-map__real-estate-disclaimer a:focus-visible { outline: 2px solid rgba(159,18,57,.34); }
 .nearby-map-shell--places-preview .nearby-map__scale-control { bottom: 34px; }
 .nearby-map__basemap-attribution { backdrop-filter: blur(4px); background: rgba(255,255,255,.84); border: 1px solid rgba(100,116,139,.18); border-radius: 6px; bottom: 8px; color: #475569; font-size: .62rem; left: 8px; padding: 3px 6px; pointer-events: none; position: absolute; z-index: 12; }
 .nearby-map__places-attribution { backdrop-filter: blur(4px); background: rgba(255,255,255,.84); border: 1px solid rgba(100,116,139,.18); border-radius: 6px; bottom: 8px; color: #475569; font-size: .58rem; left: 50%; padding: 3px 6px; pointer-events: none; position: absolute; transform: translateX(-50%); z-index: 12; }
