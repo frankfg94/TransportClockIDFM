@@ -19,6 +19,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { NearbyPlace } from "../../nearby-stations/nearbyPlaces";
 import { createDeckNearbyPlacesLayer, prepareDeckNearbyPlaces, NEARBY_PLACES_LAYER_ID, type DeckNearbyPlace } from "./deckNearbyPlaces";
+import type { DvfMapGridCell } from "../../../services/real-estate/realEstateMapLayer";
+import type { DvfMapPriceRange } from "./deckRealEstateLayer";
+import { createDeckRealEstatePriceLayers, REAL_ESTATE_HIT_LAYER_ID } from "./deckRealEstateLayer";
 import { Map as MapLibreMap, setWorkerUrl, type IControl } from "maplibre-gl";
 import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
@@ -49,6 +52,8 @@ const props = defineProps<{
   renderer: TransportMapRenderer;
   camera: CameraState;
   nearbyPlaces?: readonly NearbyPlace[];
+  realEstateCells?: readonly DvfMapGridCell[];
+  realEstatePriceRange?: DvfMapPriceRange;
   styleUrl?: NextMapStyle;
   interleaved?: boolean;
   antialias?: boolean;
@@ -61,6 +66,7 @@ const runtimeConfig = useRuntimeConfig();
 const mapElement = ref<HTMLElement>();
 const status = ref<SurfaceStatus>("initializing");
 const basemapUnavailable = ref(false);
+const realEstateRadiusPixels = ref(getRealEstateRadiusPixels(props.camera.zoom));
 let map: MapLibreMap | undefined;
 let overlay: MapboxOverlay | undefined;
 let presenter: MapLibreDeckOverlayPresenter | undefined;
@@ -79,12 +85,39 @@ const nearbyPlaceLayers = computed(() => {
 });
 watch(nearbyPlaceLayers, layers => presenter?.setNearbyPlaceLayers(layers));
 
+const realEstateLayers = computed(() => {
+  const cells = props.realEstateCells;
+  const range = props.realEstatePriceRange;
+  return cells?.length && range
+    ? createDeckRealEstatePriceLayers(cells, range, realEstateRadiusPixels.value)
+    : [];
+});
+watch(realEstateLayers, layers => presenter?.setRealEstateLayers(layers));
+watch(() => Math.floor(props.camera.zoom), (zoom) => {
+  realEstateRadiusPixels.value = getRealEstateRadiusPixels(zoom);
+});
+
+function getRealEstateRadiusPixels(zoom: number): number {
+  if (zoom < 9) return 14;
+  if (zoom < 11) return 18;
+  if (zoom < 13) return 26;
+  if (zoom < 15) return 40;
+  return 72;
+}
+
 function pickNearbyPlace(x: number, y: number): NearbyPlace | undefined {
   if (!overlay || !nearbyPlaceLayers.value.length) return undefined;
   const hit = overlay.pickObject({ x, y, layerIds: [NEARBY_PLACES_LAYER_ID] });
   return (hit?.object as DeckNearbyPlace | undefined)?.place;
 }
-defineExpose({ pickNearbyPlace });
+
+function pickRealEstateCell(x: number, y: number): DvfMapGridCell | undefined {
+  if (!overlay || !realEstateLayers.value.length) return undefined;
+  const hit = overlay.pickObject({ x, y, layerIds: [REAL_ESTATE_HIT_LAYER_ID] });
+  return hit?.object as DvfMapGridCell | undefined;
+}
+
+defineExpose({ pickNearbyPlace, pickRealEstateCell });
 
 type MapLibreDeckCompatibility = MapLibreMap & {
   painter?: { transform?: unknown };
@@ -205,6 +238,7 @@ function onMapLoad(): void {
   overlayAdded = true;
   presenter = new MapLibreDeckOverlayPresenter(activeMap, overlay);
   presenter.setNearbyPlaceLayers(nearbyPlaceLayers.value);
+  presenter.setRealEstateLayers(realEstateLayers.value);
   presenter.setPerformanceTrace(props.performanceTrace);
   if (props.performanceTrace) {
     mapLibreTraceProbe = new TransportMapMapLibreTraceProbe(

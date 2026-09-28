@@ -94,11 +94,32 @@
         :renderer="renderer"
         :camera="camera"
         :nearby-places="!routePreviewActive && activeLine ? nearbyLinePlaces.places.value : undefined"
+        :real-estate-cells="realEstateLayerEnabled ? realEstateGridCells : undefined"
+        :real-estate-price-range="realEstatePriceRange"
         :style-url="props.nextMapStyle"
         :interleaved="GLOBAL_TRANSPORT_PLAN_CONFIG.nextMap.deckInterleaved"
         :antialias="appSettings.deckAntialiasing"
         :performance-trace="performanceTrace"
         @ready="nextRendererReady = true"
+      />
+      <GlobalMapRealEstateControl
+        v-if="mapExperience.kind === 'next'"
+        :enabled="realEstateLayerEnabled"
+        :loading="realEstateLayerLoading"
+        :error="realEstateLayerError"
+        :completed-cities="realEstateCompletedCities"
+        :total-city-count="realEstateTotalCityCount"
+        :city-count="realEstateCityCount"
+        :cell-count="realEstateGridCells.length"
+        :low-price="realEstatePriceRange?.low ?? 0"
+        :high-price="realEstatePriceRange?.high ?? 0"
+        :reference-period="realEstateReferencePeriod"
+        @toggle="toggleRealEstateLayer"
+      />
+      <GlobalMapRealEstateTooltip
+        v-if="realEstateLayerEnabled && hoveredRealEstateCell && !hoveredFeature"
+        :cell="hoveredRealEstateCell"
+        :style="realEstateTooltipStyle"
       />
       <GlobalTransportPlanSearch
         v-model:open="searchOpen"
@@ -816,6 +837,8 @@ import type { LineRouteSequence, LineSearchOption, TransitFamily } from "../../t
 import GlobalTransportPlanModeCustomization from "./GlobalTransportPlanModeCustomization.vue";
 import GlobalTransportPlanModeFilter from "./GlobalTransportPlanModeFilter.vue";
 import GlobalTransportPlanToolbar from "./GlobalTransportPlanToolbar.vue";
+import GlobalMapRealEstateControl from "./GlobalMapRealEstateControl.vue";
+import GlobalMapRealEstateTooltip from "./GlobalMapRealEstateTooltip.vue";
 import TransportIsochronePanel from "../transport-map/isochrones/TransportIsochronePanel.vue";
 import { useGlobalMapIsochrones } from "./useGlobalMapIsochrones";
 import type { GlobalIsochroneSettings, GlobalIsochroneSurface } from "../transport-map/isochrones/contracts";
@@ -879,6 +902,8 @@ import GlobalTransportDebugPanel from "./GlobalTransportDebugPanel.vue";
 import GlobalTransportPlanLinePanel from "./GlobalTransportPlanLinePanel.vue";
 import IrisNeighborhoodOverlay from "../transport-map/overlays/IrisNeighborhoodOverlay.vue";
 import { fetchIrisDataset, type IrisDataset } from "../transport-map/iris/irisApi";
+import { getDvfMapPriceRange, type DvfMapPriceRange } from "../transport-map/next/deckRealEstateLayer";
+import { loadDvfMapCells, type DvfMapGridCell } from "../../services/real-estate/realEstateMapLayer";
 import {
   boundsForIrisDataset,
   boundsForIrisGeometry,
@@ -1084,10 +1109,17 @@ const performanceTrace = mapExperience.kind === "next"
 const renderer = mapExperience.createRenderer();
 renderer.setPerformanceTrace?.(performanceTrace);
 const nextRendererReady = ref(mapExperience.kind === "legacy");
-const nextSurfaceRef = ref<{ pickNearbyPlace: (x: number, y: number) => NearbyPlace | undefined }>();
+const nextSurfaceRef = ref<{
+  pickNearbyPlace: (x: number, y: number) => NearbyPlace | undefined;
+  pickRealEstateCell: (x: number, y: number) => DvfMapGridCell | undefined;
+}>();
 const nearbyPlacesOverlayRef = ref<{ onPointerMove: (event: PointerEvent) => void; clearHover: () => void }>();
 function pickNearbyLinePlace(x: number, y: number) {
   return nextSurfaceRef.value?.pickNearbyPlace(x, y);
+}
+
+function pickRealEstateMapCell(x: number, y: number) {
+  return nextSurfaceRef.value?.pickRealEstateCell(x, y);
 }
 
 const BUS_ONLY_GLOBAL_MAP_MODES = new Set<GlobalMapMode>(["BUS", "NOCTILIEN"]);
@@ -1150,6 +1182,60 @@ const irisDataset = shallowRef<IrisDataset>();
 const irisViewEnabled = ref(false);
 const irisViewLoading = ref(false);
 const irisViewError = ref("");
+const realEstateLayerEnabled = ref(false);
+const realEstateLayerLoading = ref(false);
+const realEstateLayerError = ref("");
+const realEstateGridCells = shallowRef<DvfMapGridCell[]>([]);
+const realEstatePriceRange = shallowRef<DvfMapPriceRange>();
+const realEstateCityCount = ref(0);
+const realEstateTotalCityCount = ref(0);
+const realEstateCompletedCities = ref(0);
+const realEstateReferencePeriod = ref("");
+const hoveredRealEstateCell = shallowRef<DvfMapGridCell>();
+const hoveredRealEstatePoint = ref<{ x: number; y: number }>();
+
+const realEstateTooltipStyle = computed<Record<string, string>>(() => {
+  const point = hoveredRealEstatePoint.value;
+  if (!point) return {} as Record<string, string>;
+  const width = stageElement.value?.clientWidth ?? camera.value.viewportWidthCssPx;
+  const height = stageElement.value?.clientHeight ?? camera.value.viewportHeightCssPx;
+  return {
+    left: `${Math.max(8, Math.min(width - 220, point.x + 14))}px`,
+    top: `${Math.max(8, Math.min(height - 78, point.y - 42))}px`,
+  };
+});
+
+async function toggleRealEstateLayer(): Promise<void> {
+  if (realEstateLayerEnabled.value) {
+    realEstateLayerEnabled.value = false;
+    hoveredRealEstateCell.value = undefined;
+    hoveredRealEstatePoint.value = undefined;
+    return;
+  }
+
+  realEstateLayerEnabled.value = true;
+  if (realEstateGridCells.value.length || realEstateLayerLoading.value) return;
+
+  realEstateLayerError.value = "";
+  realEstateCompletedCities.value = 0;
+  realEstateLayerLoading.value = true;
+  try {
+    const dataset = await loadDvfMapCells((completed, total) => {
+      realEstateTotalCityCount.value = total;
+      if (completed % 24 === 0 || completed === total) realEstateCompletedCities.value = completed;
+    });
+    realEstateGridCells.value = dataset.cells;
+    realEstatePriceRange.value = getDvfMapPriceRange(dataset.cells);
+    realEstateCityCount.value = dataset.cityCount;
+    realEstateTotalCityCount.value = dataset.totalCityCount;
+    realEstateCompletedCities.value = dataset.totalCityCount;
+    realEstateReferencePeriod.value = dataset.referencePeriod;
+  } catch (error) {
+    realEstateLayerError.value = error instanceof Error ? error.message : "DVF data unavailable";
+  } finally {
+    realEstateLayerLoading.value = false;
+  }
+}
 const irisSubdivisionsVisible = ref(false);
 const servedCitiesAccordionExpanded = ref(false);
 const cityZonesVisible = ref(false);
@@ -1284,7 +1370,11 @@ function globalIsochroneTransportLabel(surface: GlobalIsochroneSurface): string 
   const name = line?.label?.trim() || line?.code?.trim();
   return name ? `${modeLabel(surface.mode)} ${name}` : modeLabel(surface.mode);
 }
-const onCanvasPointerLeave = globalTransportHover.leave;
+function onCanvasPointerLeave(event: PointerEvent): void {
+  hoveredRealEstateCell.value = undefined;
+  hoveredRealEstatePoint.value = undefined;
+  globalTransportHover.leave(event);
+}
 const setHoveredLine = globalTransportHover.setHoveredLine;
 const setHoveredTooltipLine = globalTransportHover.setHoveredTooltipLine;
 const restoreHoveredTooltipLine = globalTransportHover.restoreHoveredTooltipLine;
@@ -4451,6 +4541,22 @@ function onPointerMove(event: PointerEvent): void {
     return;
   }
   mapOnPointerMove(event);
+  if (!realEstateLayerEnabled.value || hoveredFeature.value || event.buttons !== 0) {
+    hoveredRealEstateCell.value = undefined;
+    hoveredRealEstatePoint.value = undefined;
+    return;
+  }
+
+  const canvasBounds = canvasElement.value?.getBoundingClientRect();
+  const stageBounds = stageElement.value?.getBoundingClientRect();
+  if (!canvasBounds || !stageBounds) return;
+  const x = event.clientX - canvasBounds.left;
+  const y = event.clientY - canvasBounds.top;
+  const cell = pickRealEstateMapCell(x, y);
+  hoveredRealEstateCell.value = cell;
+  hoveredRealEstatePoint.value = cell
+    ? { x: event.clientX - stageBounds.left, y: event.clientY - stageBounds.top }
+    : undefined;
 }
 
 function onPointerUp(event: PointerEvent): void {

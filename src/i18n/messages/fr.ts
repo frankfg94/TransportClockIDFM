@@ -79,6 +79,21 @@ export const fr = {
     planAria: "Plan global des transports",
   },
   globalMap: {
+    realEstate: {
+      title: "Immobilier",
+      toggle: "Afficher la carte des prix immobiliers",
+      on: "Actif",
+      off: "Désactivé",
+      measure: "Prix médian de vente au m²",
+      preparing: "Préparation des données DVF…",
+      loading: "Chargement des communes · {loaded}/{total}",
+      unavailable: "Données immobilières indisponibles",
+      low: "Prix plus bas",
+      high: "Prix plus élevé",
+      coverage: "DVF · {period} · {cells} mailles · {cities}/{total} communes",
+      cellSales: "{count} ventes observées dans cette maille",
+      scaleAria: "Prix au mètre carré, du plus bas au plus élevé",
+    },
     radar: {
       title: "Radar piéton",
       open: "Régler le radar piéton",
