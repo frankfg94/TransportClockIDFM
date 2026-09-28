@@ -57,7 +57,8 @@ withDefaults(defineProps<{
 const { t } = useI18n();
 </script>
 
-<style scoped>
+<style>
+/* These selectors style content rendered by the three child tooltip bodies. */
 .global-map-real-estate-tooltip {
   position: absolute;
   z-index: 6;
@@ -87,39 +88,39 @@ const { t } = useI18n();
   white-space: nowrap;
 }
 
-:deep(.housing-tooltip-body__section) {
+.housing-tooltip-body__section {
   display: grid;
   gap: 3px;
   padding-top: 5px;
   border-top: 1px solid rgba(148, 163, 184, 0.24);
 }
 
-:deep(.housing-tooltip-body__metric) {
+.housing-tooltip-body__metric {
   color: #64748b;
   font-size: 0.63rem;
   line-height: 1.3;
 }
 
-:deep(.housing-tooltip-body__section > strong) {
+.housing-tooltip-body__section > strong {
   color: #991b1b;
   font-size: 0.92rem;
   font-variant-numeric: tabular-nums;
 }
 
-:deep(.housing-tooltip-body__detail),
-:deep(.housing-tooltip-body__source),
-:deep(.housing-tooltip-body__caution) {
+.housing-tooltip-body__detail,
+.housing-tooltip-body__source,
+.housing-tooltip-body__caution {
   color: #64748b;
   font-size: 0.61rem;
   line-height: 1.32;
 }
 
-:deep(.housing-tooltip-body__caution) {
+.housing-tooltip-body__caution {
   color: #9a3412;
 }
 
-:deep(.housing-tooltip-body__row),
-:deep(.housing-tooltip-body__benchmarks li) {
+.housing-tooltip-body__row,
+.housing-tooltip-body__benchmarks li {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -129,12 +130,12 @@ const { t } = useI18n();
   line-height: 1.3;
 }
 
-:deep(.housing-tooltip-body__row strong) {
+.housing-tooltip-body__row strong {
   color: #334155;
   font-size: 0.65rem;
 }
 
-:deep(.housing-tooltip-body__subsection) {
+.housing-tooltip-body__subsection {
   display: grid;
   gap: 3px;
   margin-top: 4px;
@@ -142,7 +143,7 @@ const { t } = useI18n();
   border-top: 1px solid rgba(148, 163, 184, 0.18);
 }
 
-:deep(.housing-tooltip-body__benchmarks) {
+.housing-tooltip-body__benchmarks {
   display: grid;
   gap: 2px;
   margin: 1px 0 0;
@@ -150,18 +151,18 @@ const { t } = useI18n();
   list-style: none;
 }
 
-:deep(.housing-tooltip-body__benchmarks li > span:last-child) {
+.housing-tooltip-body__benchmarks li > span:last-child {
   flex: 0 0 auto;
   color: #475569;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
-:deep(.housing-tooltip-body__source) {
+.housing-tooltip-body__source {
   padding-top: 3px;
 }
 
-:deep(.housing-tooltip-body__yield-value) {
+.housing-tooltip-body__yield-value {
   color: #166534 !important;
 }
 </style>
