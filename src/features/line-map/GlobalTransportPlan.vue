@@ -137,6 +137,7 @@
         :reference-period="realEstateReferencePeriod"
         :metric-mode="realEstateMetricMode"
         :style="realEstateTooltipStyle"
+        @height-change="updateRealEstateTooltipHeight"
       />
       <GlobalTransportPlanSearch
         v-model:open="searchOpen"
@@ -1234,17 +1235,26 @@ const realEstateMetricRange = computed(() => getDvfMapMetricRange(
 const hoveredRealEstateCell = shallowRef<DvfMapGridCell>();
 const hoveredRealEstatePurchasePoint = shallowRef<DvfMapPurchasePointMark>();
 const hoveredRealEstatePoint = ref<{ x: number; y: number }>();
+const hoveredRealEstateTooltipHeight = ref(0);
 
 const realEstateTooltipStyle = computed<Record<string, string>>(() => {
   const point = hoveredRealEstatePoint.value;
   if (!point) return {} as Record<string, string>;
   const width = stageElement.value?.clientWidth ?? camera.value.viewportWidthCssPx;
   const height = stageElement.value?.clientHeight ?? camera.value.viewportHeightCssPx;
+  const isRentMode = realEstateMetricMode.value === "rent";
+  const tooltipHeight = isRentMode ? hoveredRealEstateTooltipHeight.value || 90 : 300;
+  const maxTop = isRentMode ? Math.max(8, height - tooltipHeight - 8) : height - 300;
   return {
     left: `${Math.max(8, Math.min(width - 294, point.x + 14))}px`,
-    top: `${Math.max(8, Math.min(height - 300, point.y - 135))}px`,
+    top: `${Math.max(8, Math.min(maxTop, point.y - tooltipHeight / 2))}px`,
   };
 });
+
+function updateRealEstateTooltipHeight(height: number): void {
+  if (Math.abs(hoveredRealEstateTooltipHeight.value - height) < 0.5) return;
+  hoveredRealEstateTooltipHeight.value = height;
+}
 
 watch(() => camera.value.zoom, () => {
   hoveredRealEstateCell.value = undefined;
@@ -1254,6 +1264,7 @@ watch(() => camera.value.zoom, () => {
 });
 
 function setRealEstateMetricMode(mode: DvfMapMetricMode): void {
+  if (mode === "rent") hoveredRealEstateTooltipHeight.value = 0;
   realEstateMetricMode.value = mode;
 }
 

@@ -1,5 +1,5 @@
 <template>
-  <div class="global-map-real-estate-tooltip" role="tooltip" :style="style">
+  <div ref="tooltipElement" class="global-map-real-estate-tooltip" role="tooltip" :style="style">
     <span v-if="isPurchasePoint" class="global-map-real-estate-tooltip__point">
       {{ t("globalMap.realEstate.purchasePoint") }}
     </span>
@@ -29,7 +29,7 @@
 </template>
 
 <script setup lang="ts">
-import type { CSSProperties } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch, type CSSProperties } from "vue";
 import { useI18n } from "../../i18n";
 import type { DvfMapGridCell, DvfMapLiquidity } from "../../services/real-estate/realEstateMapLayer";
 import type { DvfRentalEstimate } from "../../services/real-estate/compiledRealEstate";
@@ -38,7 +38,8 @@ import HousingTooltipBodyPrice from "./HousingTooltipBodyPrice.vue";
 import HousingTooltipBodyRent from "./HousingTooltipBodyRent.vue";
 import HousingTooltipBodyYield from "./HousingTooltipBodyYield.vue";
 
-withDefaults(defineProps<{
+const emit = defineEmits<{ heightChange: [height: number] }>();
+const props = withDefaults(defineProps<{
   cell?: DvfMapGridCell;
   isPurchasePoint?: boolean;
   rentalEstimate?: DvfRentalEstimate;
@@ -51,7 +52,32 @@ withDefaults(defineProps<{
   referencePeriod: "",
 });
 
+const tooltipElement = ref<HTMLElement>();
+let resizeObserver: ResizeObserver | undefined;
+
 const { t } = useI18n();
+
+function reportTooltipHeight(): void {
+  const height = tooltipElement.value?.getBoundingClientRect().height;
+  if (height && Number.isFinite(height)) emit("heightChange", height);
+}
+
+onMounted(() => {
+  reportTooltipHeight();
+  if (tooltipElement.value && typeof ResizeObserver !== "undefined") {
+    resizeObserver = new ResizeObserver(reportTooltipHeight);
+    resizeObserver.observe(tooltipElement.value);
+  } else if (typeof window !== "undefined") {
+    window.addEventListener("resize", reportTooltipHeight);
+  }
+});
+
+watch(() => [props.metricMode, props.rentalEstimate] as const, reportTooltipHeight, { flush: "post" });
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+  if (typeof window !== "undefined") window.removeEventListener("resize", reportTooltipHeight);
+});
 </script>
 
 <style>
