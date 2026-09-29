@@ -229,6 +229,22 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
   negativeFacts.push(...benchmarkFacts.negativeFacts);
   positiveFacts.push(...buildNoctilienFacts(input.noctilienJourneys));
 
+  if (!journeySummary && input.chateletJourneyStatus !== "loading") {
+    neutralFacts.push(makeFact({
+      id: "chatelet-unavailable",
+      kind: "chateletUnavailable",
+      category: "transport",
+      polarity: "neutral",
+      family: "chatelet-access",
+      priority: 10,
+      values: {},
+      sourceKey: SOURCE_KEYS.journeys,
+      proof: "direct",
+      ruleKey: RULE_KEYS.chateletUnavailable,
+      ruleValues: {},
+    }));
+  }
+
   if (journeySummary) {
     const values = {
       duration: journeySummary.durationMinutes,

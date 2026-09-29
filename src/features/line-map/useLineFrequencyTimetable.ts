@@ -25,8 +25,8 @@ export interface UseLineFrequencyTimetableOptions {
 export function useLineFrequencyTimetable(options: UseLineFrequencyTimetableOptions = {}) {
   const loadFrequency = options.fetchFrequency ?? fetchGtfsLineFrequency;
   const loadTimetable = options.fetchTimetable ?? fetchGtfsLineTimetable;
-  const frequencyCache = new Map<string, Promise<GtfsLineFrequencyResponse>>();
-  const timetableCache = new Map<string, Promise<GtfsLineTimetableResponse>>();
+  const frequencyCache = new Map<string, { promise: Promise<GtfsLineFrequencyResponse>; signal?: AbortSignal }>();
+  const timetableCache = new Map<string, { promise: Promise<GtfsLineTimetableResponse>; signal?: AbortSignal }>();
 
   async function getFrequencies(
     lineId: string,
@@ -34,15 +34,18 @@ export function useLineFrequencyTimetable(options: UseLineFrequencyTimetableOpti
     requestOptions: { signal?: AbortSignal } = {},
   ): Promise<GtfsLineFrequencyResponse> {
     const key = lineId.trim();
+    requestOptions.signal?.throwIfAborted();
     let pending = frequencyCache.get(key);
-    if (!pending) {
-      pending = loadFrequency(key, requestOptions);
+    // Refresh can arrive before the aborted promise's catch has evicted it.
+    if (!pending || pending.signal?.aborted) {
+      pending = { promise: loadFrequency(key, requestOptions), signal: requestOptions.signal };
       frequencyCache.set(key, pending);
-      void pending.catch(() => {
+      void pending.promise.catch(() => {
         if (frequencyCache.get(key) === pending) frequencyCache.delete(key);
       });
     }
-    const profile = await pending;
+    const profile = await pending.promise;
+    requestOptions.signal?.throwIfAborted();
     return selectFrequencySection(profile, stationId);
   }
 
@@ -51,15 +54,18 @@ export function useLineFrequencyTimetable(options: UseLineFrequencyTimetableOpti
     requestOptions: { serviceDate?: string; signal?: AbortSignal } = {},
   ): Promise<GtfsLineTimetableResponse> {
     const key = `${lineId.trim()}:${requestOptions.serviceDate ?? "current"}`;
+    requestOptions.signal?.throwIfAborted();
     let pending = timetableCache.get(key);
-    if (!pending) {
-      pending = loadTimetable(lineId.trim(), requestOptions);
+    if (!pending || pending.signal?.aborted) {
+      pending = { promise: loadTimetable(lineId.trim(), requestOptions), signal: requestOptions.signal };
       timetableCache.set(key, pending);
-      void pending.catch(() => {
+      void pending.promise.catch(() => {
         if (timetableCache.get(key) === pending) timetableCache.delete(key);
       });
     }
-    return pending;
+    const timetable = await pending.promise;
+    requestOptions.signal?.throwIfAborted();
+    return timetable;
   }
 
   async function getLastService(

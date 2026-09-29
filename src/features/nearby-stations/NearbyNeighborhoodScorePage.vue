@@ -112,6 +112,12 @@ const score = useNearbyNeighborhoodScore({
   network: nearby.transportMapNetwork,
   journeyDateTime,
   stationsLoading: nearby.isScanning,
+  walkingRoutesLoading: nearbyWalking.isLoadingPlaces,
+  serviceQualityLoading: serviceQuality.isLoading,
+  failedCriteria: computed(() => [
+    ...(nearby.error?.value || heavy.error.value || serviceQuality.error.value ? ["transport" as const] : []),
+    ...(nearbyWalking.error.value ? ["daily-life", "nature-leisure", "health", "education"] as const : []),
+  ]),
   walkingRoutes: nearbyWalking.placeRoutes,
   heavyCandidates: heavy.visibleCandidates,
   heavyCandidatesLoading: heavy.isLoading,
@@ -179,7 +185,7 @@ const directoryUrl = computed(() => {
   return url === "/nearby-stations" ? url : `${url}&annuary=`;
 });
 const addressBookOpen = ref(false);
-type ScoreRetrySource = "stations" | "places" | "routes" | "verdict" | "walking" | "heavy" | "service-quality";
+type ScoreRetrySource = "stations" | "places" | "routes" | "verdict" | "timetables" | "walking" | "heavy" | "service-quality";
 
 const scoreLoading = computed(() => Boolean(initialOrigin && (
   nearby.isScanning.value
@@ -188,10 +194,19 @@ const scoreLoading = computed(() => Boolean(initialOrigin && (
   || nearbyWalking.isLoadingPlaces.value
   || serviceQuality.isLoading.value
 )));
+const scoreProgress = computed(() => {
+  const datasets = score.criteria.value.flatMap((criterion) => criterion.datasets);
+  return {
+    completed: datasets.filter((dataset) => dataset.status !== "loading").length,
+    total: datasets.length,
+  };
+});
+const scoreProgressLabel = computed(() => t("nearbyStations.neighborhoodScore.loadingProgress", scoreProgress.value));
 const failedSource = computed<ScoreRetrySource | undefined>(() => {
   if (nearby.error?.value) return "stations";
   if (heavy.error.value) return "heavy";
   if (score.errorSource?.value === "routes") return "routes";
+  if (score.errorSource?.value === "timetables") return "timetables";
   if (score.errorSource?.value === "places") return "places";
   if (score.errorSource?.value === "verdict") return "verdict";
   if (nearbyWalking.error.value) return "walking";
@@ -200,6 +215,9 @@ const failedSource = computed<ScoreRetrySource | undefined>(() => {
 });
 const retryingSource = ref<ScoreRetrySource>();
 const scoreError = computed(() => {
+  if (score.error.value?.name === "TimeoutError" && failedSource.value === score.errorSource.value) {
+    return t("nearbyStations.neighborhoodScore.partialErrorTimeout", { seconds: 45 });
+  }
   if (nearby.error?.value) {
     return t("nearbyStations.neighborhoodScore.partialErrorStations");
   }
@@ -210,6 +228,9 @@ const scoreError = computed(() => {
   }
   if (score.errorSource?.value === "places") {
     return t("nearbyStations.neighborhoodScore.partialErrorPlaces");
+  }
+  if (score.errorSource?.value === "timetables") {
+    return t("nearbyStations.neighborhoodScore.partialErrorTimetables");
   }
   if (score.errorSource?.value === "verdict") {
     return t("nearbyStations.neighborhoodScore.partialErrorVerdict");
@@ -230,7 +251,7 @@ async function retryFailedSource(): Promise<void> {
   try {
     if (source === "stations") {
       await nearby.scanNearbyStations();
-    } else if (source === "places" || source === "routes" || source === "verdict") {
+    } else if (source === "places" || source === "routes" || source === "verdict" || source === "timetables") {
       // The score composable keeps successful origin-scoped responses in
       // memory, so this retries failed score work without reloading the page.
       await score.refresh();
@@ -324,7 +345,11 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
       class="nearby-neighborhood-score-page__loading-bar"
       role="progressbar"
       :aria-label="t('nearbyStations.neighborhoodScore.loadingBar')"
-    ><span /></div>
+      :aria-valuemin="0"
+      :aria-valuemax="scoreProgress.total"
+      :aria-valuenow="scoreProgress.completed"
+      :aria-valuetext="scoreProgressLabel"
+    ><span :style="{ width: `${scoreProgress.total ? 100 * scoreProgress.completed / scoreProgress.total : 0}%` }" /></div>
     <header class="nearby-neighborhood-score-page__hero">
       <div>
         <NuxtLink class="nearby-neighborhood-score-page__back" :to="nearbyUrl">
@@ -359,6 +384,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
       :origin-label="originLabel"
       :workplace-label="workplaceLabel"
       :loading="scoreLoading"
+      :progress-label="scoreProgressLabel"
       :error="scoreError"
       :retrying="Boolean(retryingSource)"
       :criteria="score.criteria?.value"
@@ -383,7 +409,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 <style scoped>
 .nearby-neighborhood-score-page { display: grid; gap: 16px; margin: 0 auto; max-width: 920px; padding: 28px 22px 118px; }
 .nearby-neighborhood-score-page__loading-bar { background: rgba(81,70,255,.12); height: 2px; left: 0; overflow: hidden; pointer-events: none; position: fixed; right: 0; top: 0; z-index: 1100; }
-.nearby-neighborhood-score-page__loading-bar span { animation: nearby-score-loading-bar 1.25s ease-in-out infinite; background: #5146ff; height: 100%; left: 0; position: absolute; width: 32%; }
+.nearby-neighborhood-score-page__loading-bar span { background: #5146ff; height: 100%; left: 0; position: absolute; transition: width 200ms ease; }
 .nearby-neighborhood-score-page__hero { align-items: center; background: linear-gradient(135deg, #f4f2ff, #edf7ff); border: 1px solid rgba(81,70,255,.14); border-radius: 20px; display: flex; justify-content: space-between; overflow: hidden; padding: 24px 26px; }
 .nearby-neighborhood-score-page__back { align-items: center; color: #5146ff; display: inline-flex; font-size: .76rem; font-weight: 850; gap: 6px; margin-bottom: 18px; text-decoration: none; }
 .nearby-neighborhood-score-page__back:hover, .nearby-neighborhood-score-page__back:focus-visible { color: #4034df; text-decoration: underline; }
@@ -403,12 +429,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
   .nearby-neighborhood-score-page__hero { padding: 19px; }
   .nearby-neighborhood-score-page__icon { display: none; }
 }
-@keyframes nearby-score-loading-bar {
-  0% { transform: translateX(-110%); }
-  55% { transform: translateX(215%); }
-  100% { transform: translateX(360%); }
-}
 @media (prefers-reduced-motion: reduce) {
-  .nearby-neighborhood-score-page__loading-bar span { animation: none; left: 25%; width: 50%; }
+  .nearby-neighborhood-score-page__loading-bar span { transition: none; }
 }
 </style>

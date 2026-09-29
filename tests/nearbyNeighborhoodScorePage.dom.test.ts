@@ -34,7 +34,12 @@ const mocks = vi.hoisted(() => ({
     places: { value: [] },
     isLoading: { value: false },
     error: { value: undefined as Error | undefined },
-    errorSource: { value: undefined as "verdict" | "places" | "routes" | undefined },
+    errorSource: { value: undefined as "verdict" | "places" | "routes" | "timetables" | undefined },
+    criteria: { value: Array.from({ length: 7 }, (_, index) => ({
+      id: `indicator-${index}`,
+      status: "ready",
+      datasets: [],
+    })) as Array<{ id: string; status: "ready" | "loading"; datasets: never[] }> },
     refresh: vi.fn(async () => undefined),
   },
 }));
@@ -72,6 +77,7 @@ afterEach(() => {
   mocks.score.isLoading.value = false;
   mocks.score.error.value = undefined;
   mocks.score.errorSource.value = undefined;
+  mocks.score.criteria.value = Array.from({ length: 7 }, (_, index) => ({ id: `indicator-${index}`, status: "ready" as const, datasets: [] }));
   mocks.useNearbyStations.mockReturnValue(mocks.nearby);
   mocks.useNearbyHeavyTransports.mockReturnValue(mocks.heavy);
   mocks.useNearbyNeighborhoodScore.mockReturnValue(mocks.score);
@@ -159,6 +165,11 @@ describe("NearbyNeighborhoodScorePage", () => {
       address: "Adresse test",
     };
     mocks.score.isLoading.value = true;
+    mocks.score.criteria.value = Array.from({ length: 7 }, (_, index) => ({
+      id: `indicator-${index}`,
+      status: index === 0 ? "loading" as const : "ready" as const,
+      datasets: [],
+    }));
     mocks.score.error.value = new Error("navitia unavailable");
     mocks.score.errorSource.value = "routes";
 
@@ -179,6 +190,8 @@ describe("NearbyNeighborhoodScorePage", () => {
     });
 
     expect(wrapper.get(".nearby-neighborhood-score-page__loading-bar").attributes("role")).toBe("progressbar");
+    expect(wrapper.get(".nearby-neighborhood-score-page__loading-bar").attributes("aria-valuenow")).toBe("6");
+    expect(wrapper.get(".nearby-neighborhood-score-page__loading-bar").attributes("aria-valuemax")).toBe("7");
     await wrapper.get("[data-testid='retry-source']").trigger("click");
     expect(mocks.score.refresh).toHaveBeenCalledTimes(1);
     wrapper.unmount();

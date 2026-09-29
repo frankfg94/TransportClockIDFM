@@ -108,6 +108,7 @@ export type NeighborhoodFactKind =
   | "chateletContext"
   | "chateletDirect"
   | "chateletOver60"
+  | "chateletUnavailable"
   | "frequencyVeryGood"
   | "frequencyLow"
   | "frequencyContext"
@@ -278,6 +279,7 @@ export interface NeighborhoodScoreInput {
   heavyCandidates?: readonly NearbyHeavyTransportCandidate[];
   heavyCandidatesLoading?: boolean;
   chateletJourneys?: readonly NearbyJourney[];
+  chateletJourneyStatus?: "loading" | "ready" | "unavailable";
   journeyBenchmarks?: readonly NeighborhoodJourneyBenchmark[];
   greenSpaceJourneys?: readonly NeighborhoodGreenSpaceJourney[];
   noctilienJourneys?: readonly NearbyJourney[];

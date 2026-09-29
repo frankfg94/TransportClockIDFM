@@ -2448,7 +2448,31 @@ describe("NearbyStationsMap line focus", () => {
 
     await wrapper.setProps({ loading: true });
 
-    expect(wrapper.get(".nearby-map__loading").attributes("style")).toContain("top: 82px");
+    expect(wrapper.get(".nearby-map__loading").attributes("style")).toContain("top: 102px");
+    expect(wrapper.get(".nearby-map__loading").text()).toBe("Recherche des stations…");
+  });
+
+  it("shows a timeout when the nearby map search keeps loading", async () => {
+    vi.useFakeTimers();
+    const metro = createLine("line:metro:loading-timeout", "METRO");
+    const station = createStation("station:metro:loading-timeout", "Châtillon–Montrouge", metro);
+    const wrapper = mountMap([createEntry(station, metro)]);
+
+    try {
+      await wrapper.setProps({ loading: true });
+      await vi.advanceTimersByTimeAsync(45_000);
+      await nextTick();
+
+      const status = wrapper.get(".nearby-map__loading");
+      expect(status.text()).toBe("Délai de recherche dépassé après 45 s. Certaines données peuvent manquer.");
+      expect(status.attributes("role")).toBe("alert");
+
+      await wrapper.setProps({ loading: false });
+      expect(wrapper.find(".nearby-map__loading").exists()).toBe(false);
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
   });
 
   it("keeps the RER B south-east projected label inside a narrow fullscreen map", async () => {

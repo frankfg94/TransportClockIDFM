@@ -307,6 +307,7 @@ const NEARBY_ZOOM_BUTTON_STEP = 0.16;
 const NEARBY_MAP_CONTENT_INSET = 26;
 const NEARBY_MAP_TOP_CONTROL_RESERVE = 74;
 const NEARBY_MAP_MOBILE_TOP_CONTROL_RESERVE = 112;
+const NEARBY_MAP_LOADING_TIMEOUT_MS = 45_000;
 const NEARBY_MAP_HORIZONTAL_MARKER_CLEARANCE = 20;
 const NEARBY_MAP_FULLSCREEN_BOTTOM_CONTROL_RESERVE = 148;
 const NEARBY_MAP_SCALE_MAX_WIDTH_PX = 190;
@@ -425,6 +426,8 @@ const hoveredEnvironment = ref<NearbyEnvironmentHover>();
 const showMapStations = ref(true);
 const showProjectedStations = ref(true);
 const cityViewEnabled = ref(false);
+const nearbyMapLoadingTimedOut = ref(false);
+let nearbyMapLoadingTimeout: ReturnType<typeof setTimeout> | undefined;
 const cityViewSelectedTransportMode = ref<GlobalMapMode>();
 const cityViewHoveredLineId = ref<string>();
 const cityViewLoading = ref(false);
@@ -2277,6 +2280,21 @@ watch(() => props.showDisplayControl, (visible) => {
 watch(() => props.showFullscreenControl, (visible) => {
   if (!visible && isFullscreen.value) void exitFullscreen();
 });
+watch(
+  () => props.loading && !isPlacesPreview.value && !cityViewEnabled.value,
+  (isLoading) => {
+    if (nearbyMapLoadingTimeout !== undefined) clearTimeout(nearbyMapLoadingTimeout);
+    nearbyMapLoadingTimeout = undefined;
+    nearbyMapLoadingTimedOut.value = false;
+    if (isLoading) {
+      nearbyMapLoadingTimeout = setTimeout(() => {
+        nearbyMapLoadingTimeout = undefined;
+        nearbyMapLoadingTimedOut.value = true;
+      }, NEARBY_MAP_LOADING_TIMEOUT_MS);
+    }
+  },
+  { immediate: true },
+);
 
 onMounted(() => {
   systemReducedMotion.value = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -2324,6 +2342,7 @@ onBeforeUnmount(() => {
   if (feederPulseTimer !== undefined) window.clearTimeout(feederPulseTimer);
   if (suppressClickTimer !== undefined) window.clearTimeout(suppressClickTimer);
   if (stationTooltipSuppressionTimer !== undefined) window.clearTimeout(stationTooltipSuppressionTimer);
+  if (nearbyMapLoadingTimeout !== undefined) clearTimeout(nearbyMapLoadingTimeout);
   for (const controller of summaryFrequencyControllers.values()) controller.abort();
   summaryFrequencyControllers.clear();
   activePointers.clear();
@@ -4164,7 +4183,7 @@ function nearbyMapTopControlReserve(width: number): number {
 
 function nearbyMapLoadingTop(): number {
   const width = camera.value.viewportWidthCssPx;
-  return nearbyMapTopControlReserve(width) + 8;
+  return nearbyMapTopControlReserve(width) + 28;
 }
 
 function nearbyMapProjectionBounds(width: number, height: number): NearbyHeavyProjectionBounds {
@@ -5773,9 +5792,12 @@ function mix(from: number, to: number, progress: number): number {
       <div
         v-if="loading && !isPlacesPreview && !cityViewEnabled"
         class="nearby-map__loading"
+        :class="{ 'nearby-map__loading--timeout': nearbyMapLoadingTimedOut }"
         :style="{ top: `${nearbyMapLoadingTop()}px` }"
-        role="status"
-      >{{ t('nearbyStations.scanning') }}</div>
+        :role="nearbyMapLoadingTimedOut ? 'alert' : 'status'"
+      >{{ nearbyMapLoadingTimedOut
+        ? t('nearbyStations.scanningTimeout', { seconds: NEARBY_MAP_LOADING_TIMEOUT_MS / 1000 })
+        : t('nearbyStations.scanning') }}</div>
       <button
         v-if="!isPlacesPreview && !cityViewEnabled && $slots['travel-sidebar']"
         class="nearby-map__travel-toggle"
@@ -6350,7 +6372,8 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__sidebar-empty svg { color: #5146ff; }
 .nearby-map__sidebar-empty strong { color: var(--ink); font-size: .98rem; }
 .nearby-map__sidebar-empty span { font-size: .86rem; line-height: 1.4; }
-.nearby-map__loading { backdrop-filter: blur(2px); background: rgba(255,255,255,.76); border-radius: 999px; color: var(--muted); font-weight: 850; left: 50%; padding: 9px 14px; position: absolute; top: 82px; transform: translateX(-50%); z-index: 12; }
+.nearby-map__loading { backdrop-filter: blur(2px); background: rgba(255,255,255,.76); border-radius: 999px; color: var(--muted); font-weight: 850; left: 50%; padding: 9px 14px; position: absolute; top: 102px; transform: translateX(-50%); z-index: 12; }
+.nearby-map__loading--timeout { background: var(--surface); border: 1px solid var(--warning); color: var(--danger-strong); }
 @keyframes nearby-map-isochrone-progress { 0% { margin-left: -45%; } 100% { margin-left: 110%; } }
 @keyframes nearby-map-current-marker-ripple { 0% { opacity: 0; transform: scale(.55); } 10% { opacity: .65; } 42% { opacity: .2; } 100% { opacity: 0; transform: scale(2.65); } }
 @keyframes nearby-map-current-marker-breathe { 0%, 100% { filter: brightness(1) drop-shadow(0 2px 4px rgba(16, 35, 63, .22)) drop-shadow(0 0 8px color-mix(in srgb, var(--nearby-marker-color, #0064ff), transparent 38%)); transform: scale(1.45); } 50% { filter: brightness(1.06) drop-shadow(0 3px 5px rgba(16, 35, 63, .2)) drop-shadow(0 0 12px color-mix(in srgb, var(--nearby-marker-color, #0064ff), transparent 28%)); transform: scale(1.49); } }

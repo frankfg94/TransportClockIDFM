@@ -13,7 +13,10 @@ import { useNearbyNeighborhoodScore } from "../src/features/nearby-stations/useN
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("No verdict fixture"); }));
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 function createLine(): GlobalMapLine {
   return {
@@ -159,6 +162,43 @@ function readyFrequency(lineId: string): GtfsLineFrequencyResponse {
 }
 
 describe("useNearbyNeighborhoodScore", () => {
+  it("reports a source timeout instead of leaving its criterion loading", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      schemaVersion: "1.3",
+      generatedAt: new Date().toISOString(),
+      categories: [],
+      sources: [],
+      warnings: [],
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const origin = ref({ lon: 2.30, lat: 48.82, label: "Origine" });
+    const placesProvider: PlacesProvider = {
+      searchDestinations: vi.fn(async () => []),
+      searchNearby: vi.fn(() => new Promise<NearbyPlace[]>(() => undefined)),
+    };
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const Harness = defineComponent({
+      setup() {
+        score = useNearbyNeighborhoodScore({
+          origin,
+          stations: ref<NearbyStationEntry[]>([]),
+          network: ref<TransportMapNetwork>(),
+          placesProvider,
+        });
+        return () => null;
+      },
+    });
+    const wrapper = mount(Harness);
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(45_000);
+    await flushPromises();
+
+    expect(score.error.value?.name).toBe("TimeoutError");
+    expect(score.errorSource.value).toBe("places");
+    expect(score.criteria.value.find((criterion) => criterion.id === "daily-life")?.status).toBe("error");
+    wrapper.unmount();
+  });
+
   it("marks a stale backend dataset as degraded without hiding the criterion", async () => {
     const generatedAt = new Date(Date.now() - 2 * 24 * 60 * 60_000).toISOString();
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({

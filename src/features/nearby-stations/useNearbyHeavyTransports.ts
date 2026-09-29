@@ -1,5 +1,6 @@
 import { computed, onBeforeUnmount, onMounted, readonly, ref, watch } from "vue";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
+import { createNetworkScheduler } from "../../services/networkScheduler";
 import { getCoordinatesDistanceMeters } from "../../services/distance";
 import { lonLatToWorld } from "../transport-map/geo/coordinateKernel";
 import type { GlobalMapLine, GlobalMapMode, GlobalMapStation } from "../transport-map/contracts/manifest";
@@ -32,6 +33,9 @@ import type { PublicFutureGpeStation } from "./neighborhoodVerdictApi";
 const HEAVY_STATION_CANDIDATES_PER_LINE = 6;
 const HEAVY_RESOLUTION_CONCURRENCY = 6;
 const HEAVY_REFRESH_INTERVAL_MS = 5 * 60_000;
+// Target concurrency is already bounded by the resolver. This wrapper only
+// gives each provider call a deadline and releases it when the origin changes.
+const runHeavyProbe = createNetworkScheduler(Infinity);
 
 export interface NearbyHeavyTransportSource {
   origin: { value?: { lon: number; lat: number } };
@@ -335,6 +339,16 @@ export function useNearbyHeavyTransports(
     requestController = controller;
     isLoading.value = true;
     error.value = undefined;
+    const probe = async <T>(run: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> => {
+      try {
+        return await runHeavyProbe(run, signal);
+      } catch (cause) {
+        if (token === requestToken.value && !controller.signal.aborted) {
+          error.value = cause instanceof Error ? cause.message : "heavy-transport-unavailable";
+        }
+        throw cause;
+      }
+    };
     try {
       const next = await resolver.resolve({
         origin,
@@ -342,9 +356,13 @@ export function useNearbyHeavyTransports(
         localEntries: source.stations.value,
         activeModes: source.activeModes.value,
         radiusMeters: source.radius.value,
-        journeyProvider,
+        journeyProvider: {
+          findJourneys: (request, signal) => probe((probeSignal) => journeyProvider.findJourneys(request, probeSignal), signal),
+        },
         journeyDateTime: options.journeyDateTime,
-        walkingRouteProvider: options.walkingRouteProvider,
+        walkingRouteProvider: options.walkingRouteProvider
+          ? (origin, destination, signal) => probe((probeSignal) => options.walkingRouteProvider!(origin, destination, probeSignal), signal)
+          : undefined,
         includeLocalCandidates: options.includeLocalCandidates,
         futureProjects: source.futureProjects?.value ?? [],
         signal: controller.signal,
@@ -401,7 +419,7 @@ export function useNearbyHeavyTransports(
 
   onMounted(() => {
     refreshInterval = window.setInterval(() => {
-      if (document.visibilityState !== "hidden") void refresh();
+      if (document.visibilityState !== "hidden" && !isLoading.value) void refresh();
     }, HEAVY_REFRESH_INTERVAL_MS);
     document.addEventListener("visibilitychange", handleVisibilityChange);
   });
@@ -416,7 +434,7 @@ export function useNearbyHeavyTransports(
   });
 
   function handleVisibilityChange(): void {
-    if (document.visibilityState !== "hidden") void refresh();
+    if (document.visibilityState !== "hidden" && !isLoading.value) void refresh();
   }
 
   return {

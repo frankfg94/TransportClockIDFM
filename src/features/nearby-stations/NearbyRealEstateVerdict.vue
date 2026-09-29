@@ -21,6 +21,8 @@ const city = ref<DvfCityDescriptor>();
 const neighborhood = ref<DvfNeighborhoodMetric>();
 const localPrice = ref<number>();
 const remainderPrice = ref<number>();
+const rentPerSquareMeter = ref<number>();
+const rentalReferencePeriod = ref<string>();
 const scope = ref<DvfMarketScope>("idf");
 const frequency = ref<ReturnType<typeof liquidityBand>>();
 const cityFrequency = ref<ReturnType<typeof liquidityBand>>();
@@ -39,6 +41,16 @@ let requestId = 0;
 const showLocalComparison = computed(() =>
   typeof localPrice.value === "number" && typeof remainderPrice.value === "number",
 );
+const referencePurchasePrice = computed(() => [
+  localPrice.value,
+  neighborhood.value?.medianPriceM2,
+  city.value?.medianPriceM2,
+].find(isPositiveFinite));
+const grossRentalYield = computed(() => {
+  const rent = rentPerSquareMeter.value;
+  const price = referencePurchasePrice.value;
+  return isPositiveFinite(rent) && isPositiveFinite(price) ? rent * 12 / price * 100 : undefined;
+});
 const cityName = computed(() => city.value?.name);
 const neighborhoodName = ref("");
 
@@ -60,14 +72,17 @@ async function loadMarketFacts(): Promise<void> {
   neighborhood.value = undefined;
   localPrice.value = undefined;
   remainderPrice.value = undefined;
+  rentPerSquareMeter.value = undefined;
+  rentalReferencePeriod.value = undefined;
   frequency.value = undefined;
   cityFrequency.value = undefined;
   neighborhoodName.value = "";
 
   try {
-    const [manifest, iris] = await Promise.all([
+    const [manifest, iris, rentalIndicators] = await Promise.all([
       provider.loadManifest(),
       fetchIrisDataset(),
+      provider.loadRentalIndicators().catch(() => undefined),
     ]);
     if (id !== requestId) return;
     const neighborhoodAtOrigin = findNeighborhoodAtOrigin(iris.neighborhoods, origin, props.communeCode);
@@ -84,6 +99,9 @@ async function loadMarketFacts(): Promise<void> {
     const cityFile = await provider.loadCity(communeCode);
     if (id !== requestId) return;
     city.value = descriptor;
+    const rentalEstimate = rentalIndicators?.cities.find((entry) => entry.code === communeCode);
+    rentPerSquareMeter.value = rentalEstimate?.rentPerSquareMeter;
+    rentalReferencePeriod.value = rentalIndicators?.referencePeriod;
     neighborhoodName.value = neighborhoodAtOrigin.name;
     const neighborhoodMetric = cityFile.neighborhoods.find((entry) => entry.codeIris === neighborhoodAtOrigin.codeIris);
     neighborhood.value = neighborhoodMetric;
@@ -153,6 +171,22 @@ function formatPrice(value: number | undefined): string {
   return typeof value === "number" && Number.isFinite(value)
     ? `${n(Math.round(value))} €/m²`
     : t("nearbyStations.realEstate.noPrice");
+}
+
+function formatRent(value: number | undefined): string {
+  return isPositiveFinite(value)
+    ? `${n(value, { maximumFractionDigits: 1 })} €/m²/mois`
+    : t("nearbyStations.realEstate.noRent");
+}
+
+function formatYield(value: number | undefined): string {
+  return isPositiveFinite(value)
+    ? `${n(value, { maximumFractionDigits: 1, minimumFractionDigits: 1 })} %`
+    : t("nearbyStations.realEstate.noYield");
+}
+
+function isPositiveFinite(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 function formatChange(value: number): string {
@@ -233,6 +267,14 @@ function distanceMeters(left: { lon: number; lat: number }, right: { lon: number
           <span>{{ t("nearbyStations.realEstate.scoreCityMedian") }}</span>
           <strong>{{ formatPrice(city.medianPriceM2) }}</strong>
         </div>
+        <div>
+          <span>{{ t("nearbyStations.realEstate.scoreRent") }}</span>
+          <strong>{{ formatRent(rentPerSquareMeter) }}</strong>
+        </div>
+        <div>
+          <span>{{ t("nearbyStations.realEstate.scoreYield") }}</span>
+          <strong>{{ formatYield(grossRentalYield) }}</strong>
+        </div>
       </div>
       <p v-if="showLocalComparison && priceDifference(localPrice, remainderPrice)" class="nearby-real-estate-verdict__difference">
         {{ t("nearbyStations.realEstate.scorePriceDifference", { difference: priceDifference(localPrice, remainderPrice) }) }}
@@ -275,6 +317,14 @@ function distanceMeters(left: { lon: number; lat: number }, right: { lon: number
           <span>{{ t("nearbyStations.realEstate.mean") }}</span>
           <strong>{{ formatPrice(city.meanPriceM2) }}</strong>
         </div>
+        <div>
+          <span>{{ t("nearbyStations.realEstate.scoreRent") }}</span>
+          <strong>{{ formatRent(rentPerSquareMeter) }}</strong>
+        </div>
+        <div>
+          <span>{{ t("nearbyStations.realEstate.scoreYield") }}</span>
+          <strong>{{ formatYield(grossRentalYield) }}</strong>
+        </div>
       </div>
       <div v-if="city.transactionCount !== undefined" class="nearby-real-estate-verdict__city-frequency">
         {{ t(cityFrequency === "high" || cityFrequency === "very-high"
@@ -284,7 +334,12 @@ function distanceMeters(left: { lon: number; lat: number }, right: { lon: number
       </div>
       <p class="nearby-real-estate-verdict__sample-note">{{ t("nearbyStations.realEstate.noNeighborhoodData") }}</p>
     </template>
-    <p class="nearby-real-estate-verdict__footnote">{{ t("nearbyStations.realEstate.priceDisclaimer") }} {{ t("nearbyStations.realEstate.scoreLimit") }}</p>
+    <p class="nearby-real-estate-verdict__footnote">
+      {{ t("nearbyStations.realEstate.priceDisclaimer") }} {{ t("nearbyStations.realEstate.scoreLimit") }}
+      <template v-if="rentPerSquareMeter && rentalReferencePeriod">
+        {{ t("nearbyStations.realEstate.rentalEstimateNote", { period: rentalReferencePeriod }) }}
+      </template>
+    </p>
   </section>
 </template>
 

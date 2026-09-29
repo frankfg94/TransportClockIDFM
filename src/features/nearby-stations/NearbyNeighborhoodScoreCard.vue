@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { ExternalLink, LoaderCircle, Pencil } from "lucide-vue-next";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { CheckCircle2, CircleAlert, CircleHelp, EllipsisVertical, ExternalLink, LoaderCircle, Pencil, X } from "lucide-vue-next";
 import { useI18n, type TranslationKey } from "../../i18n";
 import {
   NEIGHBORHOOD_SCORE_BAND_COLORS,
   type NeighborhoodScoreBand,
   type NeighborhoodScoreResult,
 } from "./neighborhood";
-import type { NeighborhoodCriterionState } from "./neighborhood/criterionRegistry";
+import type {
+  NeighborhoodCriterionState,
+  NeighborhoodCriterionStatus,
+  NeighborhoodDatasetStatus,
+} from "./neighborhood/criterionRegistry";
 import NearbyNeighborhoodScoreFact from "./NearbyNeighborhoodScoreFact.vue";
 
 const props = defineProps<{
@@ -15,6 +19,7 @@ const props = defineProps<{
   originLabel?: string;
   workplaceLabel?: string;
   loading?: boolean;
+  progressLabel?: string;
   error?: string;
   retrying?: boolean;
   criteria?: readonly NeighborhoodCriterionState[];
@@ -29,6 +34,46 @@ const emit = defineEmits<{
 const { d, t } = useI18n();
 const selectedFactId = ref<string>();
 const criteriaById = computed(() => new Map((props.criteria ?? []).map((criterion) => [criterion.id, criterion])));
+const diagnosticsOpen = ref(false);
+const diagnosticsDialog = ref<HTMLElement>();
+let previouslyFocused: HTMLElement | undefined;
+
+const criterionStatusKeys: Record<NeighborhoodCriterionStatus, TranslationKey> = {
+  idle: "nearbyStations.neighborhoodScore.criterionStatuses.idle",
+  loading: "nearbyStations.neighborhoodScore.criterionStatuses.loading",
+  ready: "nearbyStations.neighborhoodScore.criterionStatuses.ready",
+  degraded: "nearbyStations.neighborhoodScore.criterionStatuses.degraded",
+  unavailable: "nearbyStations.neighborhoodScore.criterionStatuses.unavailable",
+  error: "nearbyStations.neighborhoodScore.criterionStatuses.error",
+};
+const datasetStatusKeys: Record<NeighborhoodDatasetStatus, TranslationKey> = {
+  ready: "nearbyStations.neighborhoodScore.datasetStatuses.ready",
+  loading: "nearbyStations.neighborhoodScore.datasetStatuses.loading",
+  missing: "nearbyStations.neighborhoodScore.datasetStatuses.missing",
+  stale: "nearbyStations.neighborhoodScore.datasetStatuses.stale",
+  error: "nearbyStations.neighborhoodScore.datasetStatuses.error",
+};
+const datasetLabelKeys: Record<string, TranslationKey> = {
+  "transport-bootstrap": "nearbyStations.neighborhoodScore.datasets.transport-bootstrap",
+  "navitia-journeys": "nearbyStations.neighborhoodScore.datasets.navitia-journeys",
+  "heavy-access": "nearbyStations.neighborhoodScore.datasets.heavy-access",
+  "gtfs-frequency": "nearbyStations.neighborhoodScore.datasets.gtfs-frequency",
+  "service-quality": "nearbyStations.neighborhoodScore.datasets.service-quality",
+  "neighborhood-verdict": "nearbyStations.neighborhoodScore.datasets.neighborhood-verdict",
+  "osm-places": "nearbyStations.neighborhoodScore.datasets.osm-places",
+  "neighborhood-green-spaces": "nearbyStations.neighborhoodScore.datasets.neighborhood-green-spaces",
+  "walking-routes": "nearbyStations.neighborhoodScore.datasets.walking-routes",
+};
+const diagnosticsSummary = computed(() => {
+  const datasets = (props.criteria ?? []).flatMap((criterion) => criterion.datasets);
+  const ready = datasets.filter((dataset) => dataset.status === "ready").length;
+  const loading = datasets.filter((dataset) => dataset.status === "loading").length;
+  return t("nearbyStations.neighborhoodScore.diagnosticsSummary", {
+    ready,
+    loading,
+    issues: datasets.length - ready - loading,
+  });
+});
 
 const bandKeys: Record<NeighborhoodScoreBand, TranslationKey> = {
   excellent: "nearbyStations.neighborhoodScore.bands.excellent",
@@ -49,6 +94,43 @@ function bandColor(band: NeighborhoodScoreBand | undefined): string | undefined 
 function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): string {
   return fact.label ?? (fact.labelKey ? t(fact.labelKey, fact.labelValues) : "");
 }
+
+function datasetLabel(datasetId: string): string {
+  const key = datasetLabelKeys[datasetId];
+  return key ? t(key) : datasetId;
+}
+
+function criterionStatusLabel(status: NeighborhoodCriterionStatus): string {
+  return t(criterionStatusKeys[status]);
+}
+
+function datasetStatusLabel(status: NeighborhoodDatasetStatus): string {
+  return t(datasetStatusKeys[status]);
+}
+
+function openDiagnostics(): void {
+  previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+  diagnosticsOpen.value = true;
+  requestAnimationFrame(() => diagnosticsDialog.value?.focus());
+}
+
+function closeDiagnostics(): void {
+  diagnosticsOpen.value = false;
+  previouslyFocused?.focus();
+  previouslyFocused = undefined;
+}
+
+function handleDiagnosticsKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Escape" || !diagnosticsOpen.value) return;
+  event.preventDefault();
+  closeDiagnostics();
+}
+
+onMounted(() => document.addEventListener("keydown", handleDiagnosticsKeydown));
+onBeforeUnmount(() => {
+  document.removeEventListener("keydown", handleDiagnosticsKeydown);
+  previouslyFocused?.focus();
+});
 </script>
 
 <template>
@@ -71,20 +153,108 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
           <Pencil :size="14" aria-hidden="true" />
         </button>
       </div>
-      <div
-        class="nearby-neighborhood-score-card__score"
-        :class="result.band ? `nearby-neighborhood-score-card__score--${result.band}` : undefined"
-        :style="{ '--score-color': bandColor(result.band) }"
-        data-testid="neighborhood-score"
-      >
-        <strong>{{ result.displayScore ?? "—" }}</strong>
-        <span>/10</span>
+      <div class="nearby-neighborhood-score-card__header-actions">
+        <div
+          class="nearby-neighborhood-score-card__score"
+          :class="result.band ? `nearby-neighborhood-score-card__score--${result.band}` : undefined"
+          :style="{ '--score-color': bandColor(result.band) }"
+          data-testid="neighborhood-score"
+        >
+          <strong>{{ result.displayScore ?? "—" }}</strong>
+          <span>/10</span>
+        </div>
+        <button
+          class="nearby-neighborhood-score-card__diagnostics-trigger"
+          type="button"
+          :aria-label="t('nearbyStations.neighborhoodScore.diagnosticsButton')"
+          :title="t('nearbyStations.neighborhoodScore.diagnosticsButton')"
+          aria-haspopup="dialog"
+          :aria-expanded="diagnosticsOpen"
+          @click="openDiagnostics"
+        >
+          <EllipsisVertical :size="19" aria-hidden="true" />
+        </button>
       </div>
     </header>
 
+    <Teleport to="body">
+      <div
+        v-if="diagnosticsOpen"
+        class="nearby-neighborhood-score-card__diagnostics-overlay"
+        role="presentation"
+        @click.self="closeDiagnostics"
+      >
+        <section
+          ref="diagnosticsDialog"
+          class="nearby-neighborhood-score-card__diagnostics-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="nearby-score-diagnostics-title"
+          tabindex="-1"
+        >
+          <header class="nearby-neighborhood-score-card__diagnostics-header">
+            <div>
+              <h2 id="nearby-score-diagnostics-title">{{ t("nearbyStations.neighborhoodScore.diagnosticsTitle") }}</h2>
+              <p>{{ t("nearbyStations.neighborhoodScore.diagnosticsDescription") }}</p>
+              <p class="nearby-neighborhood-score-card__diagnostics-summary">{{ diagnosticsSummary }}</p>
+            </div>
+            <button
+              class="nearby-neighborhood-score-card__diagnostics-close"
+              type="button"
+              :aria-label="t('common.actions.close')"
+              @click="closeDiagnostics"
+            >
+              <X :size="19" aria-hidden="true" />
+            </button>
+          </header>
+          <div class="nearby-neighborhood-score-card__diagnostics-list">
+            <article
+              v-for="category in result.categories"
+              :key="`diagnostic:${category.id}`"
+              class="nearby-neighborhood-score-card__diagnostics-category"
+            >
+              <header>
+                <h3>{{ t(category.labelKey) }}</h3>
+                <span
+                  v-if="criteriaById.get(category.id)"
+                  class="nearby-neighborhood-score-card__diagnostic-status"
+                  :data-status="criteriaById.get(category.id)?.status"
+                >{{ criterionStatusLabel(criteriaById.get(category.id)!.status) }}</span>
+                <span v-else class="nearby-neighborhood-score-card__diagnostic-status" data-status="idle">
+                  {{ criterionStatusLabel("idle") }}
+                </span>
+              </header>
+              <ul v-if="criteriaById.get(category.id)?.datasets.length">
+                <li
+                  v-for="dataset in criteriaById.get(category.id)!.datasets"
+                  :key="`${category.id}:${dataset.id}`"
+                  class="nearby-neighborhood-score-card__diagnostic-dataset"
+                  :data-status="dataset.status"
+                >
+                  <component
+                    :is="dataset.status === 'ready' ? CheckCircle2 : dataset.status === 'loading' ? LoaderCircle : dataset.status === 'error' ? CircleAlert : CircleHelp"
+                    :size="16"
+                    class="nearby-neighborhood-score-card__diagnostic-icon"
+                    :class="{ 'nearby-neighborhood-score-card__diagnostic-icon--spin': dataset.status === 'loading' }"
+                    aria-hidden="true"
+                  />
+                  <span class="nearby-neighborhood-score-card__diagnostic-label">{{ datasetLabel(dataset.id) }}</span>
+                  <small>{{ t(dataset.required ? "nearbyStations.neighborhoodScore.datasetRequirements.required" : "nearbyStations.neighborhoodScore.datasetRequirements.optional") }}</small>
+                  <strong>{{ datasetStatusLabel(dataset.status) }}</strong>
+                </li>
+              </ul>
+              <p v-else class="nearby-neighborhood-score-card__diagnostics-empty">
+                {{ t("nearbyStations.neighborhoodScore.diagnosticsNoCriteria") }}
+              </p>
+            </article>
+          </div>
+        </section>
+      </div>
+    </Teleport>
+
     <p v-if="loading" class="nearby-neighborhood-score-card__loading" role="status">
       <LoaderCircle class="nearby-neighborhood-score-card__spin" :size="16" aria-hidden="true" />
-      {{ t("nearbyStations.neighborhoodScore.loading") }}
+      {{ progressLabel ?? t("nearbyStations.neighborhoodScore.loading") }}
     </p>
     <div v-if="error" class="nearby-neighborhood-score-card__error" role="status">
       <span>{{ error }}</span>
@@ -112,7 +282,7 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
       }) }}
     </p>
 
-    <section v-if="result.positiveFacts.length || result.negativeFacts.length" class="nearby-neighborhood-score-card__highlights">
+    <section v-if="result.positiveFacts.length || result.negativeFacts.length || result.neutralFacts.length" class="nearby-neighborhood-score-card__highlights">
       <div v-if="result.positiveFacts.length" class="nearby-neighborhood-score-card__highlight nearby-neighborhood-score-card__highlight--positive">
         <h3>{{ t("nearbyStations.neighborhoodScore.positives") }}</h3>
         <p
@@ -135,6 +305,17 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
           {{ factLabel(fact) }}
         </p>
       </div>
+      <div v-if="result.neutralFacts.length" class="nearby-neighborhood-score-card__highlight nearby-neighborhood-score-card__highlight--neutral">
+        <h3>{{ t("nearbyStations.neighborhoodScore.neutralFacts") }}</h3>
+        <p
+          v-for="fact in result.neutralFacts"
+          :key="`summary:${fact.id}`"
+          class="nearby-neighborhood-score-card__summary-fact"
+        >
+          <span aria-hidden="true">·</span>
+          {{ factLabel(fact) }}
+        </p>
+      </div>
     </section>
 
     <section class="nearby-neighborhood-score-card__categories" :aria-label="t('nearbyStations.neighborhoodScore.categoriesLabel')">
@@ -147,6 +328,9 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
             <span v-else>{{ t("nearbyStations.neighborhoodScore.categoryUnavailable") }}</span>
             <small v-if="criterion?.status === 'loading'" class="nearby-neighborhood-score-card__category-loading">
               {{ t("nearbyStations.neighborhoodScore.criterionLoading") }}
+            </small>
+            <small v-else-if="criterion?.datasets.some((dataset) => dataset.status === 'error')" class="nearby-neighborhood-score-card__category-error">
+              {{ t("nearbyStations.neighborhoodScore.criterionError") }}
             </small>
           </div>
         </header>
@@ -245,6 +429,35 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
 .nearby-neighborhood-score-card__header { align-items: flex-start; display: flex; gap: 20px; justify-content: space-between; }
 .nearby-neighborhood-score-card__eyebrow { color: #5146ff; font-size: .68rem; font-weight: 900; letter-spacing: .1em; margin: 0 0 5px; text-transform: uppercase; }
 .nearby-neighborhood-score-card h2 { color: var(--ink); font-size: clamp(1.35rem, 3vw, 1.9rem); margin: 0; }
+.nearby-neighborhood-score-card__header-actions { align-items: flex-start; display: flex; flex: 0 0 auto; gap: 8px; }
+.nearby-neighborhood-score-card__diagnostics-trigger, .nearby-neighborhood-score-card__diagnostics-close { align-items: center; background: #f7f8fc; border: 1px solid rgba(16,35,63,.12); border-radius: 10px; color: var(--muted); cursor: pointer; display: inline-flex; height: 38px; justify-content: center; padding: 0; width: 38px; }
+.nearby-neighborhood-score-card__diagnostics-trigger:hover, .nearby-neighborhood-score-card__diagnostics-trigger:focus-visible, .nearby-neighborhood-score-card__diagnostics-close:hover, .nearby-neighborhood-score-card__diagnostics-close:focus-visible { background: #f2efff; border-color: rgba(81,70,255,.38); color: #5146ff; outline: 2px solid rgba(81,70,255,.25); outline-offset: 2px; }
+.nearby-neighborhood-score-card__diagnostics-overlay { align-items: center; background: rgba(15,23,42,.54); display: flex; inset: 0; justify-content: center; padding: 18px; position: fixed; z-index: 9500; }
+.nearby-neighborhood-score-card__diagnostics-dialog { background: #fff; border: 1px solid rgba(81,70,255,.16); border-radius: 18px; box-shadow: 0 28px 70px rgba(15,23,42,.28); display: flex; flex-direction: column; max-height: min(90vh, 820px); max-width: 760px; outline: none; overflow: hidden; padding: 20px; width: min(100%, 760px); }
+.nearby-neighborhood-score-card__diagnostics-header { align-items: flex-start; display: flex; gap: 14px; justify-content: space-between; padding-bottom: 14px; }
+.nearby-neighborhood-score-card__diagnostics-header h2 { font-size: 1.2rem; margin: 0; }
+.nearby-neighborhood-score-card__diagnostics-header p { color: var(--muted); font-size: .78rem; line-height: 1.45; margin: 6px 0 0; }
+.nearby-neighborhood-score-card__diagnostics-header .nearby-neighborhood-score-card__diagnostics-summary { color: #5146ff; font-weight: 800; }
+.nearby-neighborhood-score-card__diagnostics-list { display: grid; gap: 9px; overflow: auto; padding: 2px 2px 4px; }
+.nearby-neighborhood-score-card__diagnostics-category { background: #fbfcfe; border: 1px solid rgba(16,35,63,.1); border-radius: 12px; padding: 10px 12px; }
+.nearby-neighborhood-score-card__diagnostics-category > header { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
+.nearby-neighborhood-score-card__diagnostics-category h3 { color: var(--ink); font-size: .86rem; margin: 0; }
+.nearby-neighborhood-score-card__diagnostic-status { background: #f0edff; border-radius: 999px; color: #5146ff; flex: 0 0 auto; font-size: .66rem; font-weight: 850; padding: 4px 8px; }
+.nearby-neighborhood-score-card__diagnostic-status[data-status="ready"] { background: #e7f5eb; color: #267b3c; }
+.nearby-neighborhood-score-card__diagnostic-status[data-status="degraded"], .nearby-neighborhood-score-card__diagnostic-status[data-status="unavailable"], .nearby-neighborhood-score-card__diagnostic-status[data-status="error"] { background: #fff1e8; color: #a64b1d; }
+.nearby-neighborhood-score-card__diagnostics-category ul { display: grid; gap: 5px; list-style: none; margin: 9px 0 0; padding: 0; }
+.nearby-neighborhood-score-card__diagnostic-dataset { align-items: center; color: var(--ink); display: grid; gap: 8px; grid-template-columns: 18px minmax(0,1fr) auto auto; min-height: 28px; }
+.nearby-neighborhood-score-card__diagnostic-icon { color: #8792a6; flex: 0 0 auto; }
+.nearby-neighborhood-score-card__diagnostic-dataset[data-status="ready"] .nearby-neighborhood-score-card__diagnostic-icon { color: #278145; }
+.nearby-neighborhood-score-card__diagnostic-dataset[data-status="loading"] .nearby-neighborhood-score-card__diagnostic-icon { color: #6b4cff; }
+.nearby-neighborhood-score-card__diagnostic-dataset[data-status="error"] .nearby-neighborhood-score-card__diagnostic-icon, .nearby-neighborhood-score-card__diagnostic-dataset[data-status="stale"] .nearby-neighborhood-score-card__diagnostic-icon { color: #b74b24; }
+.nearby-neighborhood-score-card__diagnostic-icon--spin { animation: nearby-score-spin 900ms linear infinite; }
+.nearby-neighborhood-score-card__diagnostic-label { font-size: .75rem; font-weight: 750; min-width: 0; }
+.nearby-neighborhood-score-card__diagnostic-dataset small { color: var(--muted); font-size: .64rem; white-space: nowrap; }
+.nearby-neighborhood-score-card__diagnostic-dataset strong { color: #657089; font-size: .68rem; text-align: right; }
+.nearby-neighborhood-score-card__diagnostic-dataset[data-status="ready"] strong { color: #267b3c; }
+.nearby-neighborhood-score-card__diagnostic-dataset[data-status="error"] strong, .nearby-neighborhood-score-card__diagnostic-dataset[data-status="stale"] strong { color: #a64b1d; }
+.nearby-neighborhood-score-card__diagnostics-empty { color: var(--muted); font-size: .74rem; margin: 8px 0 0; }
 .nearby-neighborhood-score-card__origin { align-items: center; background: transparent; border: 0; color: var(--muted); cursor: pointer; display: inline-flex; font: inherit; font-size: .8rem; gap: 6px; margin: 6px 0 0; max-width: 100%; padding: 0; text-align: left; }
 .nearby-neighborhood-score-card__origin span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nearby-neighborhood-score-card__origin:hover, .nearby-neighborhood-score-card__origin:focus-visible { color: #5146ff; outline: 0; text-decoration: underline; text-underline-offset: 3px; }
@@ -271,10 +484,12 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
 .nearby-neighborhood-score-card__highlight { border-radius: 13px; padding: 10px 9px 8px; }
 .nearby-neighborhood-score-card__highlight--positive { background: #f1faf4; border: 1px solid rgba(23,134,76,.14); }
 .nearby-neighborhood-score-card__highlight--negative { background: #fff8f4; border: 1px solid rgba(183,75,36,.15); }
+.nearby-neighborhood-score-card__highlight--neutral { background: #f5f6fa; border: 1px solid rgba(93,105,130,.16); grid-column: 1 / -1; }
 .nearby-neighborhood-score-card__highlight h3, .nearby-neighborhood-score-card__fact-group > span { color: var(--muted); font-size: .68rem; font-weight: 900; letter-spacing: .05em; margin: 0 7px 4px; text-transform: uppercase; }
 .nearby-neighborhood-score-card__summary-fact { align-items: flex-start; color: var(--ink); display: flex; font-size: .78rem; gap: 7px; line-height: 1.35; margin: 0; padding: 5px 7px; }
 .nearby-neighborhood-score-card__highlight--positive .nearby-neighborhood-score-card__summary-fact > span { color: #17864c; font-weight: 950; }
 .nearby-neighborhood-score-card__highlight--negative .nearby-neighborhood-score-card__summary-fact > span { color: #b74b24; font-weight: 950; }
+.nearby-neighborhood-score-card__highlight--neutral .nearby-neighborhood-score-card__summary-fact > span { color: #64748b; font-weight: 950; }
 .nearby-neighborhood-score-card__categories { display: grid; gap: 9px; margin-top: 20px; }
 .nearby-neighborhood-score-card__category { background: #fbfcfe; border: 1px solid rgba(16,35,63,.1); border-radius: 13px; min-width: 0; padding: 12px 9px 9px; }
 .nearby-neighborhood-score-card__category-header { align-items: center; display: flex; gap: 10px; justify-content: space-between; padding: 0 7px 7px; }
@@ -283,6 +498,7 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
 .nearby-neighborhood-score-card__category-header strong { color: #5146ff; font-size: .8rem; font-variant-numeric: tabular-nums; }
 .nearby-neighborhood-score-card__category-header span { color: #8b95a7; font-size: .7rem; font-weight: 800; }
 .nearby-neighborhood-score-card__category-loading { color: #7168d8; font-size: .58rem; font-weight: 800; }
+.nearby-neighborhood-score-card__category-error { color: var(--muted); font-size: .65rem; font-weight: 800; }
 .nearby-neighborhood-score-card__category-empty { color: var(--muted); font-size: .76rem; line-height: 1.45; margin: 0; padding: 2px 7px 4px; }
 .nearby-neighborhood-score-card__facts { display: grid; gap: 4px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .nearby-neighborhood-score-card__fact-group--neutral { grid-column: 1 / -1; }
@@ -304,7 +520,7 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
 .nearby-neighborhood-score-card__directory small { font-size: .68rem; opacity: .86; }
 @keyframes nearby-score-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .nearby-neighborhood-score-card__spin { animation: none; }
+  .nearby-neighborhood-score-card__spin, .nearby-neighborhood-score-card__diagnostic-icon--spin { animation: none; }
 }
 @media (max-width: 680px) {
   .nearby-neighborhood-score-card { padding: 16px; }
@@ -314,5 +530,9 @@ function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): stri
   .nearby-neighborhood-score-card__score { min-width: 74px; padding-left: 9px; padding-right: 9px; }
   .nearby-neighborhood-score-card__score strong { font-size: 1.9rem; }
   .nearby-neighborhood-score-card__error { align-items: flex-start; flex-direction: column; }
+  .nearby-neighborhood-score-card__header-actions { gap: 5px; }
+  .nearby-neighborhood-score-card__diagnostics-dialog { border-radius: 14px; max-height: 94vh; padding: 15px; }
+  .nearby-neighborhood-score-card__diagnostic-dataset { align-items: flex-start; grid-template-columns: 18px minmax(0,1fr) auto; }
+  .nearby-neighborhood-score-card__diagnostic-dataset strong { grid-column: 2 / -1; text-align: left; }
 }
 </style>

@@ -52,7 +52,7 @@ import type { PublicServiceQuality } from "./serviceQualityApi";
 
 type ReadonlyValue<T> = { readonly value: T };
 
-export type NeighborhoodScoreErrorSource = "verdict" | "places" | "routes";
+export type NeighborhoodScoreErrorSource = "verdict" | "places" | "routes" | "timetables";
 
 export interface UseNearbyNeighborhoodScoreOptions {
   origin: ReadonlyValue<GeocoderPoint | undefined>;
@@ -65,6 +65,9 @@ export interface UseNearbyNeighborhoodScoreOptions {
   /** Optional Navitia departure datetime used for the real 03:00 Noctilien probe. */
   nightJourneyDateTime?: string;
   stationsLoading?: ReadonlyValue<boolean>;
+  walkingRoutesLoading?: ReadonlyValue<boolean>;
+  serviceQualityLoading?: ReadonlyValue<boolean>;
+  failedCriteria?: ReadonlyValue<readonly NeighborhoodCategoryId[]>;
   walkingRoutes?: ReadonlyValue<Record<string, NeighborhoodWalkingMetrics | undefined>>;
   heavyCandidates?: ReadonlyValue<NearbyHeavyTransportCandidate[]>;
   heavyCandidatesLoading?: ReadonlyValue<boolean>;
@@ -87,6 +90,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const walkingRoutes = ref<Record<string, NeighborhoodWalkingMetrics | undefined>>({});
   const heavyCandidates = ref<NearbyHeavyTransportCandidate[]>([]);
   const chateletJourneys = ref<NearbyJourney[]>([]);
+  const chateletJourneyStatus = ref<"loading" | "ready" | "unavailable">();
   const journeyBenchmarks = ref<NeighborhoodJourneyBenchmark[]>([]);
   const greenSpaceJourneys = ref<NeighborhoodGreenSpaceJourney[]>([]);
   const noctilienJourneys = ref<NearbyJourney[]>([]);
@@ -117,6 +121,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const verdictResults = new Map<string, PublicNeighborhoodVerdict>();
   const verdictRequests = new Map<string, { controller: AbortController; promise: Promise<PublicNeighborhoodVerdict> }>();
   const pendingTasks = new Set<string>();
+  const taskPromises = new Map<string, Promise<void>>();
   let activeOriginKey = "";
   let requestToken = 0;
   let refreshQueued = false;
@@ -125,7 +130,12 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const localCategories = new Map<NeighborhoodCategoryId, NeighborhoodCategoryResult>();
   const dirtyCriteria = new Set<NeighborhoodCategoryId>(NEIGHBORHOOD_CATEGORY_IDS);
   const activeCriteriaTasks = new Map<string, readonly NeighborhoodCategoryId[]>();
-  const criterionErrors = new Set<NeighborhoodCategoryId>();
+  const taskErrors = new Map<string, {
+    categories: readonly NeighborhoodCategoryId[];
+    cause: Error;
+    source?: NeighborhoodScoreErrorSource;
+    report: boolean;
+  }>();
   const criterionRevision = ref(0);
   const requestScheduler = createNeighborhoodRequestScheduler(6);
   const PLACES_CRITERIA: readonly NeighborhoodCategoryId[] = ["daily-life", "nature-leisure", "health", "education"];
@@ -150,6 +160,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       heavyCandidates: currentHeavyCandidates,
       heavyCandidatesLoading: options.heavyCandidatesLoading?.value,
       chateletJourneys: chateletJourneys.value,
+      chateletJourneyStatus: chateletJourneyStatus.value,
       journeyBenchmarks: journeyBenchmarks.value,
       greenSpaceJourneys: greenSpaceJourneys.value,
       noctilienJourneys: noctilienJourneys.value,
@@ -203,9 +214,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     const origin = options.origin.value;
     const originKey = origin ? neighborhoodOriginKey(origin) : "";
     const token = ++requestToken;
-    error.value = undefined;
-    errorSource.value = undefined;
     resetOriginState(originKey);
+    chateletJourneyStatus.value = origin ? "loading" : undefined;
     greenSpaceJourneys.value = [];
     hospitalJourneys.value = {};
     // A refresh replaces the current origin-scoped work. Abort in-flight
@@ -214,6 +224,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     // origin.
     abortActiveRequests();
     pendingTasks.clear();
+    taskPromises.clear();
     activeCriteriaTasks.clear();
     updateLoadingState();
     recompute();
@@ -270,13 +281,31 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
 
     const benchmarkDestinations = resolveJourneyBenchmarks(options.network.value);
     const nextBenchmarks: NeighborhoodJourneyBenchmark[] = [];
+    if (!benchmarkDestinations.some((benchmark) => benchmark.id === "chatelet")) {
+      chateletJourneyStatus.value = options.network.value || options.stationsLoading?.value !== true
+        ? "unavailable"
+        : "loading";
+      markCriteriaDirty(["transport"]);
+      scheduleRecompute();
+    }
     for (const benchmark of benchmarkDestinations) {
       const journeyKey = journeyCacheKey(originKey, benchmark.id, benchmark, options.journeyDateTime);
       const taskId = `journey:${benchmark.id}`;
       nextBenchmarks.push({ id: benchmark.id, label: benchmark.label, journeys: [] });
+      const journeyPromise = loadJourneyProbe(origin, benchmark, options.journeyDateTime, journeyKey)
+        .then((next) => {
+          if (benchmark.id === "chatelet" && token === requestToken) {
+            chateletJourneyStatus.value = next.length > 0 ? "ready" : "unavailable";
+          }
+          return next;
+        })
+        .catch((cause: unknown) => {
+          if (benchmark.id === "chatelet" && token === requestToken) chateletJourneyStatus.value = "unavailable";
+          throw cause;
+        });
       trackTask(
         taskId,
-        loadJourneyProbe(origin, benchmark, options.journeyDateTime, journeyKey),
+        journeyPromise,
         token,
         (next) => {
           const current = nextBenchmarks.find((candidate) => candidate.id === benchmark.id);
@@ -290,7 +319,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         ["transport"],
       );
     }
-    if (nextBenchmarks.length > 0) journeyBenchmarks.value = nextBenchmarks;
+    journeyBenchmarks.value = nextBenchmarks;
 
     const noctilienTargets = resolveNoctilienTargets(options.network.value, origin);
     const noctilienResults: NearbyJourney[] = [];
@@ -318,6 +347,11 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     noctilienJourneys.value = [];
 
     loadTransportLineDetails(token);
+    // Include follow-up tasks discovered by the verdict and places responses.
+    // The retry button stays busy until this batch has actually settled.
+    while (token === requestToken && taskPromises.size > 0) {
+      await Promise.all([...taskPromises.values()]);
+    }
   }
 
   /**
@@ -344,8 +378,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
             frequencyProfiles.value = new Map(frequencyResults);
             updatedAt.value = Date.now();
           },
-          false,
-          undefined,
+          true,
+          "timetables",
           ["transport"],
         );
       }
@@ -359,8 +393,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
             lastServiceByLine.value = new Map(lastServiceResults.set(lineId, next));
             updatedAt.value = Date.now();
           },
-          false,
-          undefined,
+          true,
+          "timetables",
           ["transport"],
         );
       }
@@ -375,6 +409,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     walkingRoutes.value = {};
     heavyCandidates.value = [];
     chateletJourneys.value = [];
+    chateletJourneyStatus.value = undefined;
     journeyBenchmarks.value = [];
     greenSpaceJourneys.value = [];
     noctilienJourneys.value = [];
@@ -386,7 +421,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     backendVerdict.value = undefined;
     backendVerdictReady.value = false;
     localCategories.clear();
-    criterionErrors.clear();
+    taskErrors.clear();
     markCriteriaDirty(NEIGHBORHOOD_CATEGORY_IDS);
     error.value = undefined;
     errorSource.value = undefined;
@@ -409,14 +444,15 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
 
     const controller = new AbortController();
     const promise = requestScheduler.schedule(
-      () => placesProvider.searchNearby({
+      (signal) => placesProvider.searchNearby({
         origin,
         radiusMeters: NEARBY_DIRECTORY_MAX_RADIUS_METERS,
-      }, controller.signal),
+      }, signal),
       controller.signal,
       0,
     )
       .then((next) => {
+        controller.signal.throwIfAborted();
         placesResults.set(originKey, [...next]);
         return next;
       })
@@ -448,14 +484,28 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       ...(datetime?.trim() ? { datetime: datetime.trim() } : {}),
     };
     const controller = new AbortController();
+    const probeJourneys = (nextRequest: NearbyJourneyRequest, signal: AbortSignal) => options.journeyProbe
+      ? options.journeyProbe.probeJourneys(nextRequest, signal)
+      : travelRoutesProvider.findJourneys(nextRequest, signal);
     const promise = requestScheduler.schedule(
-      () => options.journeyProbe
-        ? options.journeyProbe.probeJourneys(request, controller.signal)
-        : travelRoutesProvider.findJourneys(request, controller.signal),
+      async (signal) => {
+        if (destination.id !== "chatelet" || !request.destinationRef) return probeJourneys(request, signal);
+        try {
+          const byReference = await probeJourneys(request, signal);
+          if (byReference.length > 0) return byReference;
+        } catch {
+          signal.throwIfAborted();
+        }
+        signal.throwIfAborted();
+        const coordinateRequest: NearbyJourneyRequest = { ...request };
+        delete coordinateRequest.destinationRef;
+        return probeJourneys(coordinateRequest, signal);
+      },
       controller.signal,
       priority,
     )
       .then((next) => {
+        controller.signal.throwIfAborted();
         // Cache only an actual provider response. A 429, timeout or aborted
         // request must remain retryable; caching its former [] result makes
         // every route-dependent signal disappear for the rest of the page.
@@ -539,11 +589,12 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     if (active) return active.promise;
     const controller = new AbortController();
     const promise = requestScheduler.schedule(
-      () => frequencyTimetable.getFrequencies(lineId, stationId, { signal: controller.signal }),
+      (signal) => frequencyTimetable.getFrequencies(lineId, stationId, { signal }),
       controller.signal,
       2,
     )
       .then((next) => {
+        controller.signal.throwIfAborted();
         frequencyResults.set(lineId, next);
         return next;
       })
@@ -564,11 +615,12 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     if (active) return active.promise;
     const controller = new AbortController();
     const promise = requestScheduler.schedule(
-      () => frequencyTimetable.getLastService(lineId, stationId, { signal: controller.signal }),
+      (signal) => frequencyTimetable.getLastService(lineId, stationId, { signal }),
       controller.signal,
       priority,
     )
       .then((next) => {
+        controller.signal.throwIfAborted();
         lastServiceResults.set(lineId, next);
         return next;
       })
@@ -586,11 +638,15 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     if (active) return active.promise;
     const controller = new AbortController();
     const promise = requestScheduler.schedule(
-      () => fetchNeighborhoodVerdict(origin.lat, origin.lon, controller.signal),
+      (signal) => fetchNeighborhoodVerdict(origin.lat, origin.lon, signal),
       controller.signal,
       0,
     )
-      .then((next) => { verdictResults.set(originKey, next); return next; })
+      .then((next) => {
+        controller.signal.throwIfAborted();
+        verdictResults.set(originKey, next);
+        return next;
+      })
       .finally(() => { if (verdictRequests.get(originKey)?.promise === promise) verdictRequests.delete(originKey); });
     verdictRequests.set(originKey, { controller, promise });
     return promise;
@@ -608,54 +664,124 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     pendingTasks.add(taskId);
     activeCriteriaTasks.set(taskId, dirtyCategories);
     updateLoadingState();
-    void promise
+    const completion = promise
       .then((value) => {
         if (token !== requestToken) return;
         apply(value);
-        for (const id of dirtyCategories) criterionErrors.delete(id);
+        taskErrors.delete(taskId);
         markCriteriaDirty(dirtyCategories);
         scheduleRecompute();
       })
       .catch((cause: unknown) => {
         if (token !== requestToken) return;
-        if (cause instanceof Error && cause.name === "AbortError") return;
         if (taskId === "backend-verdict") backendVerdictReady.value = true;
-        for (const id of dirtyCategories) criterionErrors.add(id);
-        if (reportError) {
-          error.value = cause instanceof Error ? cause : new Error("neighborhood-source-unavailable");
-          errorSource.value = source;
-        }
+        taskErrors.set(taskId, {
+          categories: dirtyCategories,
+          cause: cause instanceof Error ? cause : new Error("neighborhood-source-unavailable"),
+          source,
+          report: reportError,
+        });
         markCriteriaDirty(dirtyCategories);
         scheduleRecompute();
       })
       .finally(() => {
         if (token !== requestToken) return;
         pendingTasks.delete(taskId);
+        taskPromises.delete(taskId);
         activeCriteriaTasks.delete(taskId);
         updateLoadingState();
       });
+    taskPromises.set(taskId, completion);
   }
 
   function updateLoadingState(): void {
     isLoading.value = pendingTasks.size > 0;
+    const failure = [...taskErrors.values()].find((entry) => entry.report);
+    error.value = failure?.cause;
+    errorSource.value = failure?.source;
     criterionRevision.value += 1;
+  }
+
+  function isRouteTask(taskId: string, categoryId: NeighborhoodCategoryId): boolean {
+    if (categoryId === "transport") {
+      return taskId.startsWith("journey:") || taskId.startsWith("noctilien:");
+    }
+    if (categoryId === "nature-leisure") return taskId === "green-space-routes";
+    if (categoryId === "health") return taskId === "hospital-routes";
+    return false;
+  }
+
+  function isDatasetLoading(datasetId: string, categoryId: NeighborhoodCategoryId): boolean {
+    if (datasetId === "transport-bootstrap") {
+      return !options.network.value && options.stationsLoading?.value === true;
+    }
+    if (datasetId === "osm-places") return pendingTasks.has("places");
+    if (datasetId === "neighborhood-verdict") return pendingTasks.has("backend-verdict");
+    if (datasetId === "neighborhood-green-spaces") {
+      return pendingTasks.has("backend-verdict") || pendingTasks.has("green-space-routes");
+    }
+    if (datasetId === "heavy-access") return options.heavyCandidatesLoading?.value === true;
+    if (datasetId === "service-quality") return options.serviceQualityLoading?.value === true;
+    if (datasetId === "gtfs-frequency") {
+      return [...pendingTasks].some((taskId) => taskId.startsWith("frequency:") || taskId.startsWith("last-service:"));
+    }
+    if (datasetId === "walking-routes") return options.walkingRoutesLoading?.value === true;
+    if (datasetId === "navitia-journeys") {
+      return [...pendingTasks].some((taskId) => isRouteTask(taskId, categoryId));
+    }
+    return false;
+  }
+
+  function isDatasetFailed(datasetId: string, categoryId: NeighborhoodCategoryId): boolean {
+    if (datasetId === "transport-bootstrap") {
+      return !options.network.value && options.failedCriteria?.value.includes(categoryId) === true;
+    }
+    if (datasetId === "osm-places") return taskErrors.has("places");
+    if (datasetId === "neighborhood-verdict") return taskErrors.has("backend-verdict");
+    if (datasetId === "neighborhood-green-spaces") return taskErrors.has("green-space-routes");
+    if (datasetId === "heavy-access") {
+      return options.failedCriteria?.value.includes(categoryId) === true
+        && (options.heavyCandidates?.value ?? heavyCandidates.value).length === 0;
+    }
+    if (datasetId === "service-quality") {
+      return options.failedCriteria?.value.includes(categoryId) === true
+        && !options.serviceQuality?.value;
+    }
+    if (datasetId === "gtfs-frequency") {
+      return [...taskErrors.entries()].some(([taskId, entry]) =>
+        (taskId.startsWith("frequency:") || taskId.startsWith("last-service:"))
+          && entry.categories.includes(categoryId));
+    }
+    if (datasetId === "walking-routes") {
+      return options.failedCriteria?.value.includes(categoryId) === true
+        && Object.keys({ ...walkingRoutes.value, ...(options.walkingRoutes?.value ?? {}) }).length === 0;
+    }
+    if (datasetId === "navitia-journeys") {
+      return [...taskErrors.entries()].some(([taskId, entry]) =>
+        isRouteTask(taskId, categoryId) && entry.categories.includes(categoryId));
+    }
+    return false;
   }
 
   function currentDatasetStatus(
     datasetId: string,
     maxAgeMs: number | undefined,
     categoryId: NeighborhoodCategoryId,
-    loading: boolean,
-    failed: boolean,
   ): NeighborhoodDatasetStatus {
-    if (loading) return "loading";
-    if (failed) return "error";
+    if (isDatasetLoading(datasetId, categoryId)) return "loading";
+    if (isDatasetFailed(datasetId, categoryId)) return "error";
     if (datasetId === "transport-bootstrap") return options.network.value ? "ready" : "missing";
     if (datasetId === "osm-places") return placesLoaded.value ? "ready" : "missing";
     if (datasetId === "neighborhood-green-spaces") {
       return backendVerdict.value?.nearbyGreenSpaces !== undefined ? "ready" : "missing";
     }
+    if (datasetId === "heavy-access") {
+      return (options.heavyCandidates?.value ?? heavyCandidates.value).length > 0 ? "ready" : "missing";
+    }
     if (datasetId === "neighborhood-verdict") {
+      const backendCategory = backendVerdict.value?.categories.find((entry) => entry.id === categoryId);
+      if (backendCategory?.status === "stale") return "stale";
+      if (backendCategory?.status !== "available") return "missing";
       return freshnessStatus(backendVerdict.value?.generatedAt, maxAgeMs);
     }
     if (datasetId === "service-quality") {
@@ -745,6 +871,9 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   watch(
     () => options.stationsLoading?.value,
     () => {
+      if (options.origin.value && !options.network.value && !journeyBenchmarks.value.some((benchmark) => benchmark.id === "chatelet")) {
+        chateletJourneyStatus.value = options.stationsLoading?.value === true ? "loading" : "unavailable";
+      }
       markCriteriaDirty(["transport"]);
       scheduleRecompute();
     },
@@ -775,17 +904,32 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     criterionRevision.value;
     return NEIGHBORHOOD_CRITERION_REGISTRY.map((definition) => {
       const category = result.value.categories.find((candidate) => candidate.id === definition.id);
-      const loading = (definition.id === "transport" && options.heavyCandidatesLoading?.value === true)
+      const taskLoading = (definition.id === "transport" && (
+        options.heavyCandidatesLoading?.value === true
+        || options.stationsLoading?.value === true
+        || options.serviceQualityLoading?.value === true
+      ))
+        || (PLACES_CRITERIA.includes(definition.id) && options.walkingRoutesLoading?.value === true)
         || [...activeCriteriaTasks.values()].some((ids) => ids.includes(definition.id));
-      const failed = criterionErrors.has(definition.id);
+      const failed = options.failedCriteria?.value.includes(definition.id) === true
+        || [...taskErrors.values()].some((entry) => entry.categories.includes(definition.id));
       const datasets = definition.datasets.map((dataset) => ({
         ...dataset,
-        status: currentDatasetStatus(dataset.id, dataset.maxAgeMs, definition.id, loading, failed),
+        status: currentDatasetStatus(dataset.id, dataset.maxAgeMs, definition.id),
       } satisfies typeof dataset & { status: NeighborhoodDatasetStatus }));
+      const categoryHasUsableData = Boolean(category?.available
+        || category?.positiveFacts.length
+        || category?.negativeFacts.length
+        || category?.neutralFacts.length);
+      const loading = datasets.some((dataset) => dataset.required && dataset.status === "loading")
+        || (taskLoading && !categoryHasUsableData)
+        || (datasets.some((dataset) => dataset.status === "loading") && !categoryHasUsableData);
+      const datasetFailed = datasets.some((dataset) => dataset.status === "error");
+      const categoryFailed = failed || datasetFailed;
       const staleDataset = datasets.some((dataset) => dataset.status === "stale");
       const status: NeighborhoodCriterionStatus = loading
         ? "loading"
-        : failed
+        : categoryFailed
           ? category?.available ? "degraded" : "error"
         : staleDataset
           ? category?.available ? "degraded" : "unavailable"
@@ -828,7 +972,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     degradedCriteria,
     globalScore: computed(() => result.value.score),
     confidence: computed(() => result.value.coverageRatio),
-    isComplete: computed(() => !isLoading.value),
+    isComplete: computed(() => loadingCriteria.value.length === 0),
     refresh,
   };
 }
@@ -1053,6 +1197,8 @@ function getRelevantLineTargets(
   }
   for (const candidate of candidates) {
     for (const line of candidate.lines) {
+      // Future stations have access journeys, but no operating GTFS timetable.
+      if (candidate.futureProjectsByLine?.[line.id]) continue;
       if (heavyModes.has(line.mode)) add(line.id, candidate.station.id);
     }
   }
@@ -1086,7 +1232,8 @@ function freshnessStatus(generatedAt: string | undefined, maxAgeMs: number | und
 }
 
 interface NeighborhoodScheduledRequest {
-  run: () => Promise<unknown>;
+  run: (signal: AbortSignal) => Promise<unknown>;
+  controller: AbortController;
   resolve: (value: unknown) => void;
   reject: (reason: unknown) => void;
   signal?: AbortSignal;
@@ -1112,10 +1259,29 @@ function createNeighborhoodRequestScheduler(maxConcurrency: number) {
       }
       request.started = true;
       active += 1;
-      void Promise.resolve()
-        .then(request.run)
+      // Bound both the response and its body, even if a provider ignores abort.
+      // A replaced batch must also release its slots immediately.
+      const controller = request.controller;
+      const timeout = setTimeout(() => {
+        controller.abort(new DOMException("Neighborhood source timed out after 45 seconds", "TimeoutError"));
+      }, 45_000);
+      let onAbort: () => void;
+      const aborted = new Promise<never>((_, reject) => {
+        onAbort = () => reject(controller.signal.reason ?? createNeighborhoodAbortError());
+        controller.signal.addEventListener("abort", onAbort, { once: true });
+        if (controller.signal.aborted) onAbort();
+      });
+      void Promise.race([
+        aborted,
+        Promise.resolve().then(() => {
+          controller.signal.throwIfAborted();
+          return request.run(controller.signal);
+        }),
+      ])
         .then(request.resolve, request.reject)
         .finally(() => {
+          clearTimeout(timeout);
+          controller.signal.removeEventListener("abort", onAbort);
           active -= 1;
           request.cleanup();
           pump();
@@ -1124,20 +1290,23 @@ function createNeighborhoodRequestScheduler(maxConcurrency: number) {
   };
 
   function schedule<T>(
-    run: () => Promise<T>,
+    run: (signal: AbortSignal) => Promise<T>,
     signal?: AbortSignal,
     priority = 0,
   ): Promise<T> {
+    if (signal?.aborted) return Promise.reject(signal.reason ?? createNeighborhoodAbortError());
     return new Promise<T>((resolve, reject) => {
       const request = {} as NeighborhoodScheduledRequest;
       const onAbort = (): void => {
+        request.controller.abort(signal?.reason ?? createNeighborhoodAbortError());
         if (request.started) return;
         const index = queue.indexOf(request);
         if (index >= 0) queue.splice(index, 1);
         request.cleanup();
         reject(signal?.reason ?? createNeighborhoodAbortError());
       };
-      request.run = run as () => Promise<unknown>;
+      request.run = run;
+      request.controller = new AbortController();
       request.resolve = (value) => resolve(value as T);
       request.reject = reject;
       request.signal = signal;

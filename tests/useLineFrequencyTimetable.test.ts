@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GtfsLineFrequencyResponse } from "../src/types/lineFrequency";
 import type { GtfsLineTimetableResponse } from "../src/types/lineFrequencyTimetable";
 import { useLineFrequencyTimetable } from "../src/features/line-map/useLineFrequencyTimetable";
@@ -72,5 +72,25 @@ describe("useLineFrequencyTimetable", () => {
     expect(branch.average.peakMinutes).toBe(4);
     expect(branch.sections.map((section) => section.id)).toEqual(["branch-a"]);
     expect(lastService).toEqual({ seconds: 23 * 3_600 + 30 * 60, stopName: "Station A" });
+  });
+
+  it("does not reuse a cached request after its owning signal is aborted", async () => {
+    const fetchFrequency = vi.fn((lineId: string, options: { signal?: AbortSignal } = {}) => {
+      if (fetchFrequency.mock.calls.length === 1) {
+        return new Promise<GtfsLineFrequencyResponse>((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true });
+        });
+      }
+      return Promise.resolve({ ...profile, lineId });
+    });
+    const source = useLineFrequencyTimetable({ fetchFrequency });
+    const controller = new AbortController();
+    const stale = source.getFrequencies("line:metro:4", undefined, { signal: controller.signal });
+    controller.abort(new DOMException("replaced", "AbortError"));
+
+    const fresh = await source.getFrequencies("line:metro:4");
+    await expect(stale).rejects.toMatchObject({ name: "AbortError" });
+    expect(fresh.status).toBe("ready");
+    expect(fetchFrequency).toHaveBeenCalledTimes(2);
   });
 });

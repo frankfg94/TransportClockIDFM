@@ -107,16 +107,20 @@ function aggregateNeighborhoodScoreInternal(
     "positive",
     3,
   );
+  preserveChateletJourneyFact(selectedPositiveFacts, availableCategories.flatMap((category) => category.positiveFacts), "positive", 3);
+  preserveJourneyBenchmarkFacts(selectedPositiveFacts, availableCategories.flatMap((category) => category.positiveFacts));
   const selectedNegativeFacts = selectFacts(
     availableCategories.flatMap((category) => category.negativeFacts),
     "negative",
     3,
   );
+  preserveChateletJourneyFact(selectedNegativeFacts, availableCategories.flatMap((category) => category.negativeFacts), "negative", 3);
   const selectedNeutralFacts = selectFacts(
     categories.flatMap((category) => category.neutralFacts),
     "neutral",
     4,
   );
+  preserveChateletJourneyFact(selectedNeutralFacts, categories.flatMap((category) => category.neutralFacts), "neutral", 4);
 
   return {
     score,
@@ -135,6 +139,31 @@ function aggregateNeighborhoodScoreInternal(
   };
 }
 
+/** Keep the Châtelet route status visible in the page summary for every polarity. */
+function preserveChateletJourneyFact(
+  selected: NeighborhoodFact[],
+  facts: readonly NeighborhoodFact[],
+  polarity: NeighborhoodFact["polarity"],
+  limit: number,
+): void {
+  const chatelet = facts.find((fact) => fact.family === "chatelet-access" && fact.polarity === polarity);
+  if (!chatelet || selected.some((fact) => fact.family === "chatelet-access")) return;
+  if (selected.length >= limit) selected.pop();
+  selected.push(chatelet);
+  selected.sort(compareFacts);
+}
+
+/** Keep each computed major-station time visible as other routes arrive. */
+function preserveJourneyBenchmarkFacts(
+  selected: NeighborhoodFact[],
+  facts: readonly NeighborhoodFact[],
+): void {
+  for (const benchmark of facts.filter((fact) => fact.family.startsWith("major-station:"))) {
+    if (!selected.some((fact) => fact.id === benchmark.id)) selected.push(benchmark);
+  }
+  selected.sort(compareFacts);
+}
+
 function mergeBackendVerdict(categories: NeighborhoodCategoryResult[], verdict: PublicNeighborhoodVerdict | undefined): NeighborhoodCategoryResult[] {
   if (!verdict) return categories;
   const byId = new Map(verdict.categories.map((category) => [category.id, category]));
@@ -147,8 +176,18 @@ function mergeBackendVerdict(categories: NeighborhoodCategoryResult[], verdict: 
       ...(external.neutralFacts ?? []),
     ].map((fact) => externalFact(fact, verdict.sources));
     const positiveFacts = mergePositiveFactsWithBackend(local.id, local.positiveFacts, externalFacts);
-    const negativeFacts = selectFacts([...local.negativeFacts, ...externalFacts], "negative", 2);
-    const neutralFacts = selectFacts([...local.neutralFacts, ...externalFacts], "neutral", 4);
+    const negativeFacts = preserveSelectedFamilyFact(
+      selectFacts([...local.negativeFacts, ...externalFacts], "negative", 2),
+      [...local.negativeFacts, ...externalFacts],
+      "negative",
+      2,
+    );
+    const neutralFacts = preserveSelectedFamilyFact(
+      selectFacts([...local.neutralFacts, ...externalFacts], "neutral", 4),
+      [...local.neutralFacts, ...externalFacts],
+      "neutral",
+      4,
+    );
     if (local.id === "transport" && external.scoreDelta !== undefined) {
       const score = local.score === undefined ? undefined : clamp(local.score + external.scoreDelta);
       return withFacts({ ...local, score, positiveFacts, negativeFacts, neutralFacts });
@@ -178,10 +217,26 @@ function mergePositiveFactsWithBackend(
 ): NeighborhoodFact[] {
   const protectedLocalFacts = categoryId === "nature-leisure"
     ? localFacts.filter((fact) => NATURE_LOCAL_PROTECTED_FACT_KINDS.has(fact.kind))
-    : [];
+    : categoryId === "transport"
+      ? localFacts.filter((fact) => fact.family === "chatelet-access" || fact.family.startsWith("major-station:"))
+      : [];
   const protectedFamilies = new Set(protectedLocalFacts.map((fact) => fact.family));
   const selectableFacts = [...localFacts, ...externalFacts].filter(
     (fact) => !protectedFamilies.has(fact.family),
   );
   return [...protectedLocalFacts, ...selectFacts(selectableFacts, "positive", 2)].sort(compareFacts);
+}
+
+function preserveSelectedFamilyFact(
+  selected: NeighborhoodFact[],
+  facts: readonly NeighborhoodFact[],
+  polarity: NeighborhoodFact["polarity"],
+  limit: number,
+): NeighborhoodFact[] {
+  const chatelet = facts.find((fact) => fact.family === "chatelet-access" && fact.polarity === polarity);
+  if (chatelet && !selected.some((fact) => fact.family === "chatelet-access")) {
+    if (selected.length >= limit) selected.pop();
+    selected.push(chatelet);
+  }
+  return selected.sort(compareFacts);
 }
