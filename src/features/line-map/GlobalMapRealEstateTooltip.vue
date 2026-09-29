@@ -4,7 +4,19 @@
       {{ t("globalMap.realEstate.purchasePoint") }}
     </span>
     <span v-if="cell" class="global-map-real-estate-tooltip__city">{{ cell.cityName }}</span>
-    <template v-if="cell">
+    <template v-if="estimatedMetricValue !== undefined && !cell">
+      <span class="global-map-real-estate-tooltip__estimate-label">
+        {{ t("globalMap.realEstate.localEstimate") }}
+      </span>
+      <div class="housing-tooltip-body__section">
+        <span class="housing-tooltip-body__metric">{{ t(measureKey) }}</span>
+        <strong>{{ formatEstimatedMetric(estimatedMetricValue) }}</strong>
+      </div>
+      <span class="housing-tooltip-body__detail">
+        {{ t("globalMap.realEstate.localEstimateMethod") }}
+      </span>
+    </template>
+    <template v-else-if="cell">
       <HousingTooltipBodyPrice
         v-if="metricMode === 'price'"
         :cell="cell"
@@ -25,14 +37,29 @@
     <span v-else class="housing-tooltip-body__detail">
       {{ t("globalMap.realEstate.purchasePointNoAggregate") }}
     </span>
+    <div v-if="cell && marketRankRows.length" class="housing-tooltip-body__subsection">
+      <strong class="housing-tooltip-body__metric">{{ t("globalMap.realEstate.marketRankingTitle") }}</strong>
+      <ul class="housing-tooltip-body__benchmarks">
+        <li v-for="entry in marketRankRows" :key="entry.scope">
+          <span>{{ t(scopeLabelKeys[entry.scope]) }}</span>
+          <span>{{ t("globalMap.realEstate.marketRankValue", { rank: entry.rank.rank, count: entry.rank.cityCount }) }}</span>
+        </li>
+      </ul>
+      <span class="housing-tooltip-body__detail">{{ t("globalMap.realEstate.marketRankingMethod") }}</span>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch, type CSSProperties } from "vue";
-import { useI18n } from "../../i18n";
+import { computed, onBeforeUnmount, onMounted, ref, watch, type CSSProperties } from "vue";
+import { useI18n, type TranslationKey } from "../../i18n";
 import type { DvfMapGridCell, DvfMapLiquidity } from "../../services/real-estate/realEstateMapLayer";
-import type { DvfRentalEstimate } from "../../services/real-estate/compiledRealEstate";
+import {
+  DVF_MARKET_SCOPES,
+  type DvfCityRank,
+  type DvfMarketScope,
+  type DvfRentalEstimate,
+} from "../../services/real-estate/compiledRealEstate";
 import type { DvfMapMetricMode } from "../transport-map/next/deckRealEstateLayer";
 import HousingTooltipBodyPrice from "./HousingTooltipBodyPrice.vue";
 import HousingTooltipBodyRent from "./HousingTooltipBodyRent.vue";
@@ -42,7 +69,9 @@ const emit = defineEmits<{ heightChange: [height: number] }>();
 const props = withDefaults(defineProps<{
   cell?: DvfMapGridCell;
   isPurchasePoint?: boolean;
+  estimatedMetricValue?: number;
   rentalEstimate?: DvfRentalEstimate;
+  marketRanks?: Partial<Record<DvfMarketScope, DvfCityRank>>;
   liquidity?: DvfMapLiquidity;
   referencePeriod?: string;
   metricMode: DvfMapMetricMode;
@@ -55,7 +84,30 @@ const props = withDefaults(defineProps<{
 const tooltipElement = ref<HTMLElement>();
 let resizeObserver: ResizeObserver | undefined;
 
-const { t } = useI18n();
+const { locale, t } = useI18n();
+const measureKeys = {
+  price: "globalMap.realEstate.measurePrice",
+  rent: "globalMap.realEstate.measureRent",
+  yield: "globalMap.realEstate.measureYield",
+} as const;
+const measureKey = computed(() => measureKeys[props.metricMode]);
+const scopeLabelKeys: Record<DvfMarketScope, TranslationKey> = {
+  "paris-intramuros": "globalMap.realEstate.marketScopeParis",
+  "petite-couronne": "globalMap.realEstate.marketScopePetite",
+  "grande-couronne": "globalMap.realEstate.marketScopeGrande",
+  idf: "globalMap.realEstate.marketScopeIdf",
+};
+const marketRankRows = computed(() => DVF_MARKET_SCOPES.flatMap((scope) => {
+  const rank = props.marketRanks?.[scope];
+  return rank ? [{ scope, rank }] : [];
+}));
+
+function formatEstimatedMetric(value: number): string {
+  const formatted = new Intl.NumberFormat(locale.value, {
+    maximumFractionDigits: props.metricMode === "price" ? 0 : 1,
+  }).format(value);
+  return `${formatted} ${props.metricMode === "yield" ? "%" : "€"}`;
+}
 
 function reportTooltipHeight(): void {
   const height = tooltipElement.value?.getBoundingClientRect().height;
@@ -72,7 +124,7 @@ onMounted(() => {
   }
 });
 
-watch(() => [props.metricMode, props.rentalEstimate] as const, reportTooltipHeight, { flush: "post" });
+watch(() => [props.metricMode, props.rentalEstimate, props.estimatedMetricValue, props.marketRanks] as const, reportTooltipHeight, { flush: "post" });
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
@@ -101,7 +153,8 @@ onBeforeUnmount(() => {
 }
 
 .global-map-real-estate-tooltip__city,
-.global-map-real-estate-tooltip__point {
+.global-map-real-estate-tooltip__point,
+.global-map-real-estate-tooltip__estimate-label {
   overflow: hidden;
   color: #475569;
   font-size: 0.68rem;
@@ -109,6 +162,10 @@ onBeforeUnmount(() => {
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.global-map-real-estate-tooltip__estimate-label {
+  color: #166534;
 }
 
 .housing-tooltip-body__section {

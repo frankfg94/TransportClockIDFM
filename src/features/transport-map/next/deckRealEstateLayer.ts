@@ -2,12 +2,13 @@ import { COORDINATE_SYSTEM, type Layer } from "@deck.gl/core";
 import { HeatmapLayer } from "@deck.gl/aggregation-layers";
 import { ScatterplotLayer } from "@deck.gl/layers";
 import type { DvfMapGridCell } from "../../../services/real-estate/realEstateMapLayer";
-import type { DvfPurchasePoint, DvfRentalEstimate } from "../../../services/real-estate/compiledRealEstate";
+import type { DvfMarketScope, DvfPurchasePoint, DvfRentalEstimate } from "../../../services/real-estate/compiledRealEstate";
+import { DVF_METRIC_INTERPOLATION_RADIUS_METERS } from "../real-estate/realEstateGridGeometry";
+import { REAL_ESTATE_METRIC_DECK_COLOR_RANGE, getRealEstateMetricColor } from "../real-estate/realEstateMetricColors";
 
 export const REAL_ESTATE_PRICE_LAYER_ID = "real-estate-price-heatmap";
 export const REAL_ESTATE_HIT_LAYER_ID = "real-estate-price-hit-targets";
 export const REAL_ESTATE_PURCHASE_POINTS_LAYER_ID = "real-estate-purchase-points";
-export const REAL_ESTATE_PURCHASE_POINTS_HALO_LAYER_ID = "real-estate-purchase-point-halos";
 export const REAL_ESTATE_PURCHASE_POINT_HOVER_HALO_LAYER_ID = "real-estate-purchase-point-hover-halo";
 export const REAL_ESTATE_PURCHASE_POINT_HOVER_LAYER_ID = "real-estate-purchase-point-hover";
 
@@ -22,8 +23,15 @@ export type DvfMapPriceRange = DvfMapMetricRange;
 export type DvfMapMetricMode = "price" | "rent" | "yield";
 
 export interface DvfMapMetricCell extends DvfMapGridCell {
+  /** Raw active metric value used by the mean-interpolation surface. */
+  metricValue: number;
   /** Value scaled to [0, 1] for stable color transitions between metrics. */
   normalizedMetric: number;
+}
+
+export interface DvfMapMetricCandidate {
+  cell: DvfMapGridCell;
+  distanceMeters: number;
 }
 
 /** Runtime-only join between a parcel-centre dot and its nearest aggregate cell. */
@@ -36,18 +44,7 @@ export interface DvfMapPurchasePointMark {
   normalizedMetric?: number;
 }
 
-const PRICE_COLORS = [
-  [22, 163, 74, 238],
-  [132, 204, 22, 238],
-  [250, 204, 21, 238],
-  [249, 115, 22, 238],
-  [220, 38, 38, 238],
-  [127, 29, 29, 245],
-] as const;
-const DECK_PRICE_COLORS: [number, number, number, number][] = PRICE_COLORS.map((color) => [
-  color[0], color[1], color[2], color[3],
-]);
-const NEUTRAL_POINT_COLOR: [number, number, number, number] = [71, 85, 105, 220];
+const DECK_PRICE_COLORS = REAL_ESTATE_METRIC_DECK_COLOR_RANGE;
 
 export function getDvfMapMetricValue(
   cell: DvfMapGridCell,
@@ -63,17 +60,28 @@ export function getDvfMapMetricValue(
   return rent! * 12 / cell.medianPriceM2 * 100;
 }
 
-/** Robust 4th–96th percentile range for the selected map metric. */
+/** Robust 4th–96th percentile range for the selected metric within the chosen market scope. */
 export function getDvfMapMetricRange(
   cells: readonly DvfMapGridCell[],
   mode: DvfMapMetricMode,
   rentalEstimatesByCityCode: Readonly<Record<string, DvfRentalEstimate>>,
+  cityCodesByMarketScope: Readonly<Partial<Record<DvfMarketScope, readonly string[]>>>,
+  scope: DvfMarketScope,
 ): DvfMapMetricRange | undefined {
-  const values = cells
-    .map((cell) => getDvfMapMetricValue(cell, mode, rentalEstimatesByCityCode))
-    .filter((value): value is number => value !== undefined && Number.isFinite(value))
-    .sort((a, b) => a - b);
+  const cityCodes = cityCodesByMarketScope[scope];
+  if (!cityCodes?.length) return undefined;
+
+  const includedCityCodes = new Set(cityCodes);
+  const values: number[] = [];
+  for (const cell of cells) {
+    if (!includedCityCodes.has(cell.cityCode)) continue;
+    const value = getDvfMapMetricValue(cell, mode, rentalEstimatesByCityCode);
+    if (value === undefined || !Number.isFinite(value)) continue;
+    values.push(value);
+  }
+
   if (!values.length) return undefined;
+  values.sort((left, right) => left - right);
   return { low: quantile(values, 0.04), high: quantile(values, 0.96) };
 }
 
@@ -82,74 +90,134 @@ export function normalizeDvfMapMetricValue(value: number, range: DvfMapMetricRan
   return Math.max(0, Math.min(1, (value - range.low) / (range.high - range.low)));
 }
 
-/** Apply the active metric to cells while keeping transparent hit targets for all cells. */
-export function createDeckRealEstateMetricLayers(
+/** Collapse cells split by IRIS at the same coordinate into one weighted sample. */
+export function createDvfMapMetricCells(
   cells: readonly DvfMapGridCell[],
-  metricCells: readonly DvfMapMetricCell[],
-  transitionDurationMs: number,
-  radiusPixels = 28,
-  beforeId?: string,
-): Layer[] {
-  const layers: Layer[] = [];
-  if (metricCells.length) {
-    layers.push(new HeatmapLayer<DvfMapMetricCell>({
-      id: REAL_ESTATE_PRICE_LAYER_ID,
-      data: metricCells,
-      coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-      aggregation: "MEAN",
-      radiusPixels,
-      colorDomain: [0, 1],
-      colorRange: DECK_PRICE_COLORS,
-      weightsTextureSize: 1024,
-      debounceTimeout: 120,
-      opacity: 0.78,
-      getPosition: getDvfCellPosition,
-      getWeight: getNormalizedMetric,
-      updateTriggers: { getWeight: "normalizedMetric" },
-      transitions: { getWeight: { duration: transitionDurationMs } },
-      ...(beforeId ? { beforeId } : {}),
-    }));
-  }
-  layers.push(new ScatterplotLayer<DvfMapGridCell>({
-    id: REAL_ESTATE_HIT_LAYER_ID,
-    data: cells,
-    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-    pickable: true,
-    stroked: false,
-    filled: true,
-    opacity: 0,
-    radiusUnits: "meters",
-    radiusMinPixels: 6,
-    radiusMaxPixels: 12,
-    getPosition: getDvfCellPosition,
-    getRadius: 95,
-    getFillColor: [0, 0, 0, 0],
-    ...(beforeId ? { beforeId } : {}),
+  mode: DvfMapMetricMode,
+  range: DvfMapMetricRange,
+  rentalEstimatesByCityCode: Readonly<Record<string, DvfRentalEstimate>>,
+): DvfMapMetricCell[] {
+  const candidates = cells.map((cell) => ({ cell, distanceMeters: 0 }));
+  return coalesceMetricCandidates(
+    candidates,
+    (cell) => getDvfMapMetricValue(cell, mode, rentalEstimatesByCityCode),
+  ).map(({ cell, metricValue }) => ({
+    ...cell,
+    metricValue,
+    normalizedMetric: normalizeDvfMapMetricValue(metricValue, range),
   }));
-  return layers;
 }
 
-function getNormalizedMetric(cell: DvfMapMetricCell): number {
-  return cell.normalizedMetric;
+/** Match deck.gl's Gaussian heatmap kernel to return the value visible under the pointer. */
+export function interpolateDvfMapMetricValue(
+  candidates: readonly DvfMapMetricCandidate[],
+  mode: DvfMapMetricMode,
+  rentalEstimatesByCityCode: Readonly<Record<string, DvfRentalEstimate>>,
+  radiusMeters = DVF_METRIC_INTERPOLATION_RADIUS_METERS,
+): number | undefined {
+  if (!Number.isFinite(radiusMeters) || radiusMeters <= 0) return undefined;
+  const groups = coalesceMetricCandidates(
+    candidates,
+    (cell) => getDvfMapMetricValue(cell, mode, rentalEstimatesByCityCode),
+  );
+  let weightedValue = 0;
+  let totalWeight = 0;
+
+  for (const group of groups) {
+    if (group.distanceMeters > radiusMeters) continue;
+    const normalizedDistance = group.distanceMeters / radiusMeters;
+    // deck.gl's HeatmapLayer uses exp(-18 * d²) inside its radius.
+    const distanceWeight = Math.exp(-18 * normalizedDistance * normalizedDistance);
+    weightedValue += group.metricValue * distanceWeight;
+    totalWeight += distanceWeight;
+  }
+
+  return totalWeight > 0 ? weightedValue / totalWeight : undefined;
+}
+
+interface CoalescedMetricCandidate {
+  cell: DvfMapGridCell;
+  metricValue: number;
+  distanceMeters: number;
+}
+
+function coalesceMetricCandidates(
+  candidates: readonly DvfMapMetricCandidate[],
+  getValue: (cell: DvfMapGridCell) => number | undefined,
+): CoalescedMetricCandidate[] {
+  const groups = new Map<string, {
+    cell: DvfMapGridCell;
+    weightedValue: number;
+    totalSampleWeight: number;
+    distanceMeters: number;
+  }>();
+
+  for (const candidate of candidates) {
+    const value = getValue(candidate.cell);
+    if (value === undefined || !Number.isFinite(value)) continue;
+    const key = `${candidate.cell.lon},${candidate.cell.lat}`;
+    const transactionWeight = Number.isFinite(candidate.cell.transactionCount)
+      && candidate.cell.transactionCount > 0
+      ? candidate.cell.transactionCount
+      : 1;
+    const group = groups.get(key);
+    if (group) {
+      group.weightedValue += value * transactionWeight;
+      group.totalSampleWeight += transactionWeight;
+    } else {
+      groups.set(key, {
+        cell: candidate.cell,
+        weightedValue: value * transactionWeight,
+        totalSampleWeight: transactionWeight,
+        distanceMeters: candidate.distanceMeters,
+      });
+    }
+  }
+
+  return [...groups.values()].map((group) => ({
+    cell: group.cell,
+    metricValue: group.weightedValue / group.totalSampleWeight,
+    distanceMeters: group.distanceMeters,
+  }));
+}
+
+/** Render the active metric as a continuous, local mean-interpolation surface. */
+export function createDeckRealEstateMetricLayers(
+  metricCells: readonly DvfMapMetricCell[],
+  range: DvfMapMetricRange,
+  radiusPixels: number,
+  transitionDurationMs: number,
+  beforeId?: string,
+): Layer[] {
+  if (!metricCells.length) return [];
+  const colorDomain: [number, number] = range.high > range.low
+    ? [range.low, range.high]
+    : [range.low - 0.5, range.high + 0.5];
+  return [new HeatmapLayer<DvfMapMetricCell>({
+    id: REAL_ESTATE_PRICE_LAYER_ID,
+    data: metricCells,
+    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+    aggregation: "MEAN",
+    radiusPixels,
+    colorDomain,
+    colorRange: DECK_PRICE_COLORS,
+    weightsTextureSize: 1024,
+    debounceTimeout: 120,
+    opacity: 0.78,
+    getPosition: getDvfCellPosition,
+    getWeight: getMetricWeight,
+    updateTriggers: { getWeight: [range.low, range.high] },
+    transitions: { getWeight: { duration: transitionDurationMs } },
+    ...(beforeId ? { beforeId } : {}),
+  })];
+}
+
+function getMetricWeight(cell: DvfMapMetricCell): number {
+  return cell.metricValue;
 }
 
 function metricColor(value: number | undefined, opacity = 1): [number, number, number, number] {
-  if (value === undefined || !Number.isFinite(value)) {
-    return [NEUTRAL_POINT_COLOR[0], NEUTRAL_POINT_COLOR[1], NEUTRAL_POINT_COLOR[2], Math.round(NEUTRAL_POINT_COLOR[3] * opacity)];
-  }
-  const normalized = Math.max(0, Math.min(1, value));
-  const colorIndex = normalized * (PRICE_COLORS.length - 1);
-  const lowerIndex = Math.floor(colorIndex);
-  const upperIndex = Math.min(PRICE_COLORS.length - 1, lowerIndex + 1);
-  const blend = colorIndex - lowerIndex;
-  const lower = PRICE_COLORS[lowerIndex]!;
-  const upper = PRICE_COLORS[upperIndex]!;
-  return [
-    Math.round(lower[0] + (upper[0] - lower[0]) * blend),
-    Math.round(lower[1] + (upper[1] - lower[1]) * blend),
-    Math.round(lower[2] + (upper[2] - lower[2]) * blend),
-    Math.round((lower[3] + (upper[3] - lower[3]) * blend) * opacity),
-  ];
+  return getRealEstateMetricColor(value, Math.round(238 * opacity));
 }
 
 export function createDeckRealEstateMetricPurchasePointsLayer(
@@ -174,31 +242,6 @@ export function createDeckRealEstateMetricPurchasePointsLayer(
     getRadius: 4.5,
     getFillColor: (mark) => metricColor(mark.normalizedMetric),
     getLineColor: [255, 255, 255, 245],
-    updateTriggers: { getFillColor: metricMode },
-    transitions: { getFillColor: { duration: transitionDurationMs } },
-    ...(beforeId ? { beforeId } : {}),
-  });
-}
-
-export function createDeckRealEstateMetricPurchasePointsHaloLayer(
-  points: readonly DvfMapPurchasePointMark[],
-  metricMode: DvfMapMetricMode,
-  transitionDurationMs: number,
-  beforeId?: string,
-): Layer {
-  return new ScatterplotLayer<DvfMapPurchasePointMark>({
-    id: REAL_ESTATE_PURCHASE_POINTS_HALO_LAYER_ID,
-    data: points,
-    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-    pickable: false,
-    stroked: false,
-    filled: true,
-    radiusUnits: "pixels",
-    radiusMinPixels: 7,
-    radiusMaxPixels: 9,
-    getPosition: (mark) => [mark.coordinates[0], mark.coordinates[1]],
-    getRadius: 7.5,
-    getFillColor: (mark) => metricColor(mark.normalizedMetric, 0.2),
     updateTriggers: { getFillColor: metricMode },
     transitions: { getFillColor: { duration: transitionDurationMs } },
     ...(beforeId ? { beforeId } : {}),
@@ -371,31 +414,6 @@ export function createDeckRealEstatePurchasePointsLayer(
   });
 }
 
-/** Subtle price-coloured halos make parcel dots distinguishable at close zoom. */
-export function createDeckRealEstatePurchasePointsHaloLayer(
-  points: readonly DvfMapPurchasePointMark[],
-  range: DvfMapPriceRange,
-  beforeId?: string,
-): Layer {
-  return new ScatterplotLayer<DvfMapPurchasePointMark>({
-    id: REAL_ESTATE_PURCHASE_POINTS_HALO_LAYER_ID,
-    data: points,
-    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-    pickable: false,
-    stroked: false,
-    filled: true,
-    radiusUnits: "pixels",
-    radiusMinPixels: 7,
-    radiusMaxPixels: 9,
-    getPosition: (mark) => [mark.coordinates[0], mark.coordinates[1]],
-    getRadius: 7.5,
-    getFillColor: (mark) => mark.context
-      ? getDvfMapPriceColor(mark.context.medianPriceM2, range, 0.2)
-      : [71, 85, 105, 38],
-    ...(beforeId ? { beforeId } : {}),
-  });
-}
-
 /** Add a soft halo and a slightly larger marker for the currently hovered dot. */
 export function createDeckRealEstatePurchasePointHoverLayers(
   mark: DvfMapPurchasePointMark | undefined,
@@ -453,18 +471,7 @@ export function getDvfMapPriceColor(
   const normalized = range.high > range.low
     ? Math.max(0, Math.min(1, (value - range.low) / (range.high - range.low)))
     : 0.5;
-  const colorIndex = normalized * (PRICE_COLORS.length - 1);
-  const lowerIndex = Math.floor(colorIndex);
-  const upperIndex = Math.min(PRICE_COLORS.length - 1, lowerIndex + 1);
-  const blend = colorIndex - lowerIndex;
-  const lower = PRICE_COLORS[lowerIndex]!;
-  const upper = PRICE_COLORS[upperIndex]!;
-  return [
-    Math.round(lower[0] + (upper[0] - lower[0]) * blend),
-    Math.round(lower[1] + (upper[1] - lower[1]) * blend),
-    Math.round(lower[2] + (upper[2] - lower[2]) * blend),
-    Math.round((lower[3] + (upper[3] - lower[3]) * blend) * opacity),
-  ];
+  return getRealEstateMetricColor(normalized, Math.round(238 * opacity));
 }
 
 function quantile(values: readonly number[], q: number): number {

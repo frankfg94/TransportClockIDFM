@@ -117,6 +117,7 @@
         :total-city-count="realEstateTotalCityCount"
         :city-count="realEstateCityCount"
         :cell-count="realEstateGridCells.length"
+        :comparison-scope="realEstateComparisonScope"
         :metric-mode="realEstateMetricMode"
         :metric-available="Boolean(realEstateMetricRange)"
         :low-value="realEstateMetricRange?.low ?? 0"
@@ -127,12 +128,15 @@
         :yield-price="hoveredRealEstateCell?.medianPriceM2"
         @toggle="toggleRealEstateLayer"
         @change-metric="setRealEstateMetricMode"
+        @change-comparison-scope="setRealEstateComparisonScope"
       />
       <GlobalMapRealEstateTooltip
-        v-if="realEstateLayerEnabled && (hoveredRealEstateCell || hoveredRealEstatePurchasePoint) && !hoveredFeature"
+        v-if="realEstateLayerEnabled && (hoveredRealEstateCell || hoveredRealEstatePurchasePoint || hoveredRealEstateMetricValue !== undefined) && !hoveredFeature"
         :cell="hoveredRealEstateCell"
         :is-purchase-point="Boolean(hoveredRealEstatePurchasePoint)"
+        :estimated-metric-value="hoveredRealEstateMetricValue"
         :rental-estimate="hoveredRealEstateCell ? realEstateRentalEstimates[hoveredRealEstateCell.cityCode] : undefined"
+        :market-ranks="hoveredRealEstateCell ? realEstateCityMetricRankings[hoveredRealEstateCell.cityCode]?.[realEstateMetricMode] : undefined"
         :liquidity="realEstateLiquidity"
         :reference-period="realEstateReferencePeriod"
         :metric-mode="realEstateMetricMode"
@@ -926,8 +930,9 @@ import {
   type DvfMapPurchasePointMark,
 } from "../transport-map/next/deckRealEstateLayer";
 import { loadDvfMapCells, type DvfMapGridCell } from "../../services/real-estate/realEstateMapLayer";
+import type { DvfCityMetricRankings } from "../../services/real-estate/realEstateMarketRankings";
 import type { DvfMapLiquidity } from "../../services/real-estate/realEstateMapLayer";
-import type { DvfRentalEstimate } from "../../services/real-estate/compiledRealEstate";
+import type { DvfMarketScope, DvfRentalEstimate } from "../../services/real-estate/compiledRealEstate";
 import {
   boundsForIrisDataset,
   boundsForIrisGeometry,
@@ -1135,8 +1140,8 @@ renderer.setPerformanceTrace?.(performanceTrace);
 const nextRendererReady = ref(mapExperience.kind === "legacy");
 const nextSurfaceRef = ref<{
   pickNearbyPlace: (x: number, y: number) => NearbyPlace | undefined;
-  pickRealEstateCell: (x: number, y: number) => DvfMapGridCell | undefined;
   pickRealEstatePurchasePoint: (x: number, y: number) => DvfMapPurchasePointMark | undefined;
+  estimateRealEstateMetricAt: (x: number, y: number) => number | undefined;
   clearRealEstatePurchasePointHover: () => void;
 }>();
 const nearbyPlacesOverlayRef = ref<{ onPointerMove: (event: PointerEvent) => void; clearHover: () => void }>();
@@ -1144,12 +1149,12 @@ function pickNearbyLinePlace(x: number, y: number) {
   return nextSurfaceRef.value?.pickNearbyPlace(x, y);
 }
 
-function pickRealEstateMapCell(x: number, y: number) {
-  return nextSurfaceRef.value?.pickRealEstateCell(x, y);
-}
-
 function pickRealEstateMapPurchasePoint(x: number, y: number) {
   return nextSurfaceRef.value?.pickRealEstatePurchasePoint(x, y);
+}
+
+function estimateRealEstateMapMetricAt(x: number, y: number) {
+  return nextSurfaceRef.value?.estimateRealEstateMetricAt(x, y);
 }
 
 const BUS_ONLY_GLOBAL_MAP_MODES = new Set<GlobalMapMode>(["BUS", "NOCTILIEN"]);
@@ -1225,15 +1230,21 @@ const realEstateTotalDepartmentCount = ref(0);
 const realEstateFailedDepartmentCount = ref(0);
 const realEstateReferencePeriod = ref("");
 const realEstateRentalEstimates = shallowRef<Record<string, DvfRentalEstimate>>({});
+const realEstateCityMetricRankings = shallowRef<Record<string, DvfCityMetricRankings>>({});
+const realEstateCityCodesByMarketScope = shallowRef<Partial<Record<DvfMarketScope, readonly string[]>>>({});
+const realEstateComparisonScope = ref<DvfMarketScope>("idf");
 const realEstateRentalReferencePeriod = ref("");
 const realEstateLiquidity = shallowRef<DvfMapLiquidity>();
 const realEstateMetricRange = computed(() => getDvfMapMetricRange(
   realEstateGridCells.value,
   realEstateMetricMode.value,
   realEstateRentalEstimates.value,
+  realEstateCityCodesByMarketScope.value,
+  realEstateComparisonScope.value,
 ));
 const hoveredRealEstateCell = shallowRef<DvfMapGridCell>();
 const hoveredRealEstatePurchasePoint = shallowRef<DvfMapPurchasePointMark>();
+const hoveredRealEstateMetricValue = ref<number>();
 const hoveredRealEstatePoint = ref<{ x: number; y: number }>();
 const hoveredRealEstateTooltipHeight = ref(0);
 
@@ -1242,9 +1253,10 @@ const realEstateTooltipStyle = computed<Record<string, string>>(() => {
   if (!point) return {} as Record<string, string>;
   const width = stageElement.value?.clientWidth ?? camera.value.viewportWidthCssPx;
   const height = stageElement.value?.clientHeight ?? camera.value.viewportHeightCssPx;
+  const isLocalEstimate = hoveredRealEstateMetricValue.value !== undefined;
   const isRentMode = realEstateMetricMode.value === "rent";
-  const tooltipHeight = isRentMode ? hoveredRealEstateTooltipHeight.value || 90 : 300;
-  const maxTop = isRentMode ? Math.max(8, height - tooltipHeight - 8) : height - 300;
+  const tooltipHeight = hoveredRealEstateTooltipHeight.value || (isLocalEstimate ? 112 : isRentMode ? 90 : 300);
+  const maxTop = Math.max(8, height - tooltipHeight - 8);
   return {
     left: `${Math.max(8, Math.min(width - 294, point.x + 14))}px`,
     top: `${Math.max(8, Math.min(maxTop, point.y - tooltipHeight / 2))}px`,
@@ -1259,13 +1271,22 @@ function updateRealEstateTooltipHeight(height: number): void {
 watch(() => camera.value.zoom, () => {
   hoveredRealEstateCell.value = undefined;
   hoveredRealEstatePurchasePoint.value = undefined;
+  hoveredRealEstateMetricValue.value = undefined;
   hoveredRealEstatePoint.value = undefined;
   nextSurfaceRef.value?.clearRealEstatePurchasePointHover();
 });
 
 function setRealEstateMetricMode(mode: DvfMapMetricMode): void {
   if (mode === "rent") hoveredRealEstateTooltipHeight.value = 0;
+  if (!hoveredRealEstatePurchasePoint.value) {
+    hoveredRealEstateMetricValue.value = undefined;
+    hoveredRealEstatePoint.value = undefined;
+  }
   realEstateMetricMode.value = mode;
+}
+
+function setRealEstateComparisonScope(scope: DvfMarketScope): void {
+  realEstateComparisonScope.value = scope;
 }
 
 async function toggleRealEstateLayer(): Promise<void> {
@@ -1273,6 +1294,7 @@ async function toggleRealEstateLayer(): Promise<void> {
     realEstateLayerEnabled.value = false;
     hoveredRealEstateCell.value = undefined;
     hoveredRealEstatePurchasePoint.value = undefined;
+    hoveredRealEstateMetricValue.value = undefined;
     hoveredRealEstatePoint.value = undefined;
     nextSurfaceRef.value?.clearRealEstatePurchasePointHover();
     return;
@@ -1304,6 +1326,8 @@ async function toggleRealEstateLayer(): Promise<void> {
     });
     realEstateGridCells.value = dataset.cells;
     realEstateRentalEstimates.value = dataset.rentalEstimatesByCityCode;
+    realEstateCityMetricRankings.value = dataset.cityMetricRankingsByCode;
+    realEstateCityCodesByMarketScope.value = dataset.cityCodesByMarketScope;
     realEstateRentalReferencePeriod.value = dataset.rentalReferencePeriod;
     realEstateLiquidity.value = dataset.liquidity;
     realEstateCityCount.value = dataset.cityCount;
@@ -1456,6 +1480,7 @@ function globalIsochroneTransportLabel(surface: GlobalIsochroneSurface): string 
 function onCanvasPointerLeave(event: PointerEvent): void {
   hoveredRealEstateCell.value = undefined;
   hoveredRealEstatePurchasePoint.value = undefined;
+  hoveredRealEstateMetricValue.value = undefined;
   hoveredRealEstatePoint.value = undefined;
   nextSurfaceRef.value?.clearRealEstatePurchasePointHover();
   globalTransportHover.leave(event);
@@ -4638,6 +4663,7 @@ function onPointerMove(event: PointerEvent): void {
   if (!realEstateLayerEnabled.value || hoveredFeature.value || event.buttons !== 0) {
     hoveredRealEstateCell.value = undefined;
     hoveredRealEstatePurchasePoint.value = undefined;
+    hoveredRealEstateMetricValue.value = undefined;
     hoveredRealEstatePoint.value = undefined;
     nextSurfaceRef.value?.clearRealEstatePurchasePointHover();
     return;
@@ -4649,10 +4675,12 @@ function onPointerMove(event: PointerEvent): void {
   const x = event.clientX - canvasBounds.left;
   const y = event.clientY - canvasBounds.top;
   const purchasePoint = pickRealEstateMapPurchasePoint(x, y);
-  const cell = purchasePoint ? purchasePoint.context : pickRealEstateMapCell(x, y);
+  const cell = purchasePoint?.context;
+  const estimatedMetricValue = purchasePoint ? undefined : estimateRealEstateMapMetricAt(x, y);
   hoveredRealEstateCell.value = cell;
   hoveredRealEstatePurchasePoint.value = purchasePoint;
-  hoveredRealEstatePoint.value = cell || purchasePoint
+  hoveredRealEstateMetricValue.value = estimatedMetricValue;
+  hoveredRealEstatePoint.value = cell || purchasePoint || estimatedMetricValue !== undefined
     ? { x: event.clientX - stageBounds.left, y: event.clientY - stageBounds.top }
     : undefined;
 }

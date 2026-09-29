@@ -173,7 +173,7 @@ const CORE_DATASETS: Record<CoreDatasetId, DatasetDefinition> = {
   "dvf-property-market": {
     id: "dvf-property-market",
     title: "Prix et transactions immobilières DVF",
-    description: "Médianes, moyennes et fréquence des ventes par commune, quartier IRIS et maille de 250 m.",
+    description: "Médianes, moyennes et fréquence des ventes par commune, quartier IRIS et maille de 250 m. Au survol d’un point de parcelle, la carte affiche aussi la position comparative de sa commune en prix/m², loyer/m² et rendement brut dans quatre périmètres franciliens; loyer et rendement dépendent des estimations ANIL disponibles.",
     format: "JSON statique par commune (manifeste + fichiers lazy)",
     sourceUrl: DVF_SOURCE_PAGE_URL,
     license: { label: "Licence Ouverte / Open Licence version 2.0", url: OPEN_LICENSE_URL },
@@ -493,6 +493,7 @@ async function buildDvfDataset(event?: H3Event): Promise<DatasetInfo> {
         { label: "Communes", value: String(cityCount) },
         { label: "Quartiers renseignés", value: String(loaded.manifest.totals.neighborhoodsWithEnoughSales) },
         { label: "Mailles renseignées", value: String(loaded.manifest.totals.gridCellsWithEnoughSales) },
+        { label: "Classements carte", value: "3 indicateurs · 4 périmètres" },
       ],
       details: `Île-de-France · ${loaded.manifest.minimumPublicSampleSize} ventes minimum par zone · données ${loaded.manifest.referencePeriod}`,
     };

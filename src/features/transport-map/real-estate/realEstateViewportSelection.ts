@@ -1,5 +1,11 @@
 import type { CameraState } from "../geo/camera";
-import { cssPixelsToWorldUnits, lonLatToWorld, writeVisibleWorldBounds } from "../geo/coordinateKernel";
+import {
+  cssPixelsToWorldUnits,
+  lonLatToWorld,
+  metersToWorldUnits,
+  worldUnitsPerMeterAt,
+  writeVisibleWorldBounds,
+} from "../geo/coordinateKernel";
 import type { GlobalMapBounds } from "../contracts/manifest";
 import type { DvfMapGridCell } from "../../../services/real-estate/realEstateMapLayer";
 
@@ -25,12 +31,17 @@ interface CachedSelection {
   cells: readonly DvfMapGridCell[];
 }
 
+export interface NearbyRealEstateCell {
+  cell: DvfMapGridCell;
+  distanceMeters: number;
+}
+
 const selectorByDataset = new WeakMap<readonly DvfMapGridCell[], RealEstateViewportCellSelector>();
 
 /**
  * Reuses an indexed DVF grid across camera frames and keeps one viewport of
- * overscan around the last query. The heatmap support radius is measured in
- * CSS pixels, then converted into the same normalized world space as the
+ * overscan around the last query. The rendered-cell support radius is measured
+ * in CSS pixels, then converted into the same normalized world space as the
  * camera so no contributing kernel can be cut off at a viewport edge.
  */
 export class RealEstateViewportCellSelector {
@@ -42,10 +53,10 @@ export class RealEstateViewportCellSelector {
     this.index = buildSpatialIndex(cells);
   }
 
-  select(camera: CameraState, heatmapRadiusPixels: number): readonly DvfMapGridCell[] {
+  select(camera: CameraState, cellSupportRadiusPixels: number): readonly DvfMapGridCell[] {
     const visible = writeVisibleWorldBounds(camera, this.visibleBounds);
     const support = cssPixelsToWorldUnits(
-      Math.max(heatmapRadiusPixels, PICK_RADIUS_MAX_PIXELS),
+      Math.max(cellSupportRadiusPixels, PICK_RADIUS_MAX_PIXELS),
       camera,
     );
     const previous = this.selection;
@@ -133,20 +144,49 @@ export class RealEstateViewportCellSelector {
 
     return nearestIndex >= 0 ? index.cells[nearestIndex] : undefined;
   }
+
+  /** Return only cells within the requested local ground-distance radius. */
+  findWithinRadius(longitude: number, latitude: number, radiusMeters: number): NearbyRealEstateCell[] {
+    const index = this.index;
+    if (!index.cells.length || !Number.isFinite(radiusMeters) || radiusMeters < 0) return [];
+
+    const point = lonLatToWorld({ lon: longitude, lat: latitude });
+    const radiusWorldUnits = metersToWorldUnits(radiusMeters, point);
+    const bounds = {
+      minX: point.x - radiusWorldUnits,
+      minY: point.y - radiusWorldUnits,
+      maxX: point.x + radiusWorldUnits,
+      maxY: point.y + radiusWorldUnits,
+    };
+    const radiusSquared = radiusWorldUnits * radiusWorldUnits;
+    const worldUnitsPerMeter = worldUnitsPerMeterAt(point);
+    const nearby: NearbyRealEstateCell[] = [];
+
+    for (const cell of querySpatialIndex(index, bounds)) {
+      const cellWorld = lonLatToWorld({ lon: cell.lon, lat: cell.lat });
+      const dx = cellWorld.x - point.x;
+      const dy = cellWorld.y - point.y;
+      const distanceSquared = dx * dx + dy * dy;
+      if (distanceSquared > radiusSquared) continue;
+      nearby.push({ cell, distanceMeters: Math.sqrt(distanceSquared) / worldUnitsPerMeter });
+    }
+
+    return nearby;
+  }
 }
 
-/** Selects the cells that can affect visible heatmap pixels or hit targets. */
+/** Selects the cells whose interpolation kernels can affect the visible map. */
 export function selectRealEstateViewportCells(
   cells: readonly DvfMapGridCell[],
   camera: CameraState,
-  heatmapRadiusPixels: number,
+  cellSupportRadiusPixels: number,
 ): readonly DvfMapGridCell[] {
   let selector = selectorByDataset.get(cells);
   if (!selector) {
     selector = new RealEstateViewportCellSelector(cells);
     selectorByDataset.set(cells, selector);
   }
-  return selector.select(camera, heatmapRadiusPixels);
+  return selector.select(camera, cellSupportRadiusPixels);
 }
 
 /** Reuse the viewport selector's spatial index to provide nearby cell context for parcel points. */
@@ -162,6 +202,21 @@ export function findNearestRealEstateCell(
     selectorByDataset.set(cells, selector);
   }
   return selector.findNearest(longitude, latitude, cityCode);
+}
+
+/** Reuse the dataset spatial index for local metric interpolation and hover estimates. */
+export function findRealEstateCellsWithinRadius(
+  cells: readonly DvfMapGridCell[],
+  longitude: number,
+  latitude: number,
+  radiusMeters: number,
+): NearbyRealEstateCell[] {
+  let selector = selectorByDataset.get(cells);
+  if (!selector) {
+    selector = new RealEstateViewportCellSelector(cells);
+    selectorByDataset.set(cells, selector);
+  }
+  return selector.findWithinRadius(longitude, latitude, radiusMeters);
 }
 
 function buildSpatialIndex(cells: readonly DvfMapGridCell[]): SpatialIndex {

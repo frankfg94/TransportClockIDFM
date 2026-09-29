@@ -28,20 +28,25 @@ import {
 import type { DvfPurchasePoint, DvfRentalEstimate } from "../../../services/real-estate/compiledRealEstate";
 import type { DvfMapMetricCell, DvfMapMetricMode, DvfMapMetricRange } from "./deckRealEstateLayer";
 import {
+  createDvfMapMetricCells,
   createDeckRealEstateMetricLayers,
   createDeckRealEstateMetricPurchasePointsLayer,
-  createDeckRealEstateMetricPurchasePointsHaloLayer,
   createDeckRealEstateMetricPurchasePointHoverLayers,
   getDvfMapMetricValue,
+  interpolateDvfMapMetricValue,
   normalizeDvfMapMetricValue,
-  REAL_ESTATE_HIT_LAYER_ID,
   REAL_ESTATE_PURCHASE_POINTS_LAYER_ID,
   type DvfMapPurchasePointMark,
 } from "./deckRealEstateLayer";
 import {
+  findRealEstateCellsWithinRadius,
   findNearestRealEstateCell,
   selectRealEstateViewportCells,
 } from "../real-estate/realEstateViewportSelection";
+import {
+  DVF_METRIC_INTERPOLATION_RADIUS_METERS,
+  getDvfMetricInterpolationRadiusCssPixels,
+} from "../real-estate/realEstateGridGeometry";
 import { Map as MapLibreMap, setWorkerUrl, type IControl } from "maplibre-gl";
 import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { MapboxOverlay } from "@deck.gl/mapbox";
@@ -59,7 +64,7 @@ import {
 } from "./nextMapConfig";
 import { firstSymbolLayerId, MapLibreDeckOverlayPresenter } from "./deckMapPresenter";
 import { cameraStateToMapLibreView } from "./nextMapCamera";
-import { visibleWorldBounds, worldToLonLat } from "../geo/coordinateKernel";
+import { screenToLonLat, visibleWorldBounds, worldToLonLat } from "../geo/coordinateKernel";
 import {
   TransportMapMapLibreTraceProbe,
   type TransportMapMapLibreTraceMap,
@@ -91,10 +96,14 @@ const runtimeConfig = useRuntimeConfig();
 const mapElement = ref<HTMLElement>();
 const status = ref<SurfaceStatus>("initializing");
 const basemapUnavailable = ref(false);
-const realEstateRadiusPixels = ref(getRealEstateRadiusPixels(props.camera.zoom));
+const realEstateInterpolationRadiusPixels = ref(getCurrentInterpolationRadiusPixels());
 const realEstateViewportCells = shallowRef<readonly DvfMapGridCell[]>(
   props.realEstateCells?.length
-    ? selectRealEstateViewportCells(props.realEstateCells, props.camera, getRealEstateRadiusPixels(props.camera.zoom))
+    ? selectRealEstateViewportCells(
+      props.realEstateCells,
+      props.camera,
+      realEstateInterpolationRadiusPixels.value,
+    )
     : EMPTY_REAL_ESTATE_CELLS,
 );
 const realEstatePurchasePointZoomEnabled = ref(props.camera.zoom >= DVF_MAP_PURCHASE_POINTS_MIN_ZOOM);
@@ -107,13 +116,7 @@ const realEstateMetricCells = computed<readonly DvfMapMetricCell[]>(() => {
   if (!range) return [];
   const mode = props.realEstateMetricMode ?? "price";
   const estimates = props.realEstateRentalEstimatesByCityCode ?? {};
-  const metricCells: DvfMapMetricCell[] = [];
-  for (const cell of realEstateViewportCells.value) {
-    const value = getDvfMapMetricValue(cell, mode, estimates);
-    if (value === undefined) continue;
-    metricCells.push({ ...cell, normalizedMetric: normalizeDvfMapMetricValue(value, range) });
-  }
-  return metricCells;
+  return createDvfMapMetricCells(realEstateViewportCells.value, mode, range, estimates);
 });
 const realEstatePurchasePointsForMetric = computed<readonly DvfMapPurchasePointMark[]>(() => {
   const mode = props.realEstateMetricMode ?? "price";
@@ -162,27 +165,19 @@ const realEstateLayers = computed(() => {
   const cells = realEstateViewportCells.value;
   if (!cells?.length) return [];
   const mode = props.realEstateMetricMode ?? "price";
-  const priceLayers = createDeckRealEstateMetricLayers(
-    cells,
-    realEstateMetricCells.value,
-    realEstateTransitionDurationMs.value,
-    realEstateRadiusPixels.value,
-    realEstateBeforeId.value,
-  );
-  if (!realEstatePurchasePointZoomEnabled.value || !realEstatePurchasePoints.value.length) return priceLayers;
-  const hitTargetLayer = priceLayers.find((layer) => layer.id === REAL_ESTATE_HIT_LAYER_ID);
-  if (!hitTargetLayer) return priceLayers;
-
-  return [
-    // Preserve the transparent cell hit targets so the existing aggregate
-    // tooltip keeps working in gaps between parcel-centre points.
-    hitTargetLayer,
-    createDeckRealEstateMetricPurchasePointsHaloLayer(
-      realEstatePurchasePointsForMetric.value,
-      mode,
+  const metricLayers = props.realEstateMetricRange
+    ? createDeckRealEstateMetricLayers(
+      realEstateMetricCells.value,
+      props.realEstateMetricRange,
+      realEstateInterpolationRadiusPixels.value,
       realEstateTransitionDurationMs.value,
       realEstateBeforeId.value,
-    ),
+    )
+    : [];
+  if (!realEstatePurchasePointZoomEnabled.value || !realEstatePurchasePoints.value.length) return metricLayers;
+
+  return [
+    ...metricLayers,
     createDeckRealEstateMetricPurchasePointsLayer(
       realEstatePurchasePointsForMetric.value,
       mode,
@@ -198,9 +193,6 @@ const realEstateLayers = computed(() => {
   ];
 });
 watch(realEstateLayers, layers => presenter?.setRealEstateLayers(layers));
-watch(() => Math.floor(props.camera.zoom), (zoom) => {
-  realEstateRadiusPixels.value = getRealEstateRadiusPixels(zoom);
-});
 watch(() => props.camera, updateRealEstateViewportCells, { immediate: true, flush: "post" });
 watch(() => props.realEstateCells, updateRealEstateViewportCells, { immediate: true, flush: "post" });
 watch(() => props.camera.zoom >= DVF_MAP_PURCHASE_POINTS_MIN_ZOOM, (enabled) => {
@@ -226,8 +218,12 @@ function scheduleRealEstatePurchasePointsLoad(): void {
 
 function updateRealEstateViewportCells(): void {
   const source = props.realEstateCells;
+  const nextRadius = getCurrentInterpolationRadiusPixels();
+  if (Math.abs(nextRadius - realEstateInterpolationRadiusPixels.value) > 0.001) {
+    realEstateInterpolationRadiusPixels.value = nextRadius;
+  }
   const next = source?.length
-    ? selectRealEstateViewportCells(source, props.camera, getRealEstateRadiusPixels(props.camera.zoom))
+    ? selectRealEstateViewportCells(source, props.camera, realEstateInterpolationRadiusPixels.value)
     : EMPTY_REAL_ESTATE_CELLS;
   if (realEstateViewportCells.value === next) return;
   realEstateViewportCells.value = next;
@@ -236,6 +232,18 @@ function updateRealEstateViewportCells(): void {
     totalCellCount: source?.length ?? 0,
     zoom: props.camera.zoom,
   });
+}
+
+function getCurrentInterpolationRadiusPixels(): number {
+  const latitude = worldToLonLat({
+    x: props.camera.centerWorldX,
+    y: props.camera.centerWorldY,
+  }).lat;
+  // Quantization avoids rebuilding the GPU texture on every pan/zoom frame.
+  return getDvfMetricInterpolationRadiusCssPixels(
+    Math.round(props.camera.zoom * 4) / 4,
+    Math.round(latitude * 4) / 4,
+  );
 }
 
 async function loadVisibleRealEstatePurchasePoints(revision: number): Promise<void> {
@@ -335,24 +343,27 @@ function getVisibleRealEstateBounds(): {
 watch(() => props.camera, scheduleRealEstatePurchasePointsLoad, { immediate: true, flush: "post" });
 watch(() => props.realEstateCells, scheduleRealEstatePurchasePointsLoad, { flush: "post" });
 
-function getRealEstateRadiusPixels(zoom: number): number {
-  if (zoom < 9) return 14;
-  if (zoom < 11) return 18;
-  if (zoom < 13) return 26;
-  if (zoom < 15) return 40;
-  return 72;
-}
-
 function pickNearbyPlace(x: number, y: number): NearbyPlace | undefined {
   if (!overlay || !nearbyPlaceLayers.value.length) return undefined;
   const hit = overlay.pickObject({ x, y, layerIds: [NEARBY_PLACES_LAYER_ID] });
   return (hit?.object as DeckNearbyPlace | undefined)?.place;
 }
 
-function pickRealEstateCell(x: number, y: number): DvfMapGridCell | undefined {
-  if (!overlay || !realEstateLayers.value.length) return undefined;
-  const hit = overlay.pickObject({ x, y, layerIds: [REAL_ESTATE_HIT_LAYER_ID] });
-  return hit?.object as DvfMapGridCell | undefined;
+function estimateRealEstateMetricAt(x: number, y: number): number | undefined {
+  const cells = props.realEstateCells;
+  if (!cells?.length || !props.realEstateMetricRange) return undefined;
+  const point = screenToLonLat({ x, y }, props.camera);
+  const candidates = findRealEstateCellsWithinRadius(
+    cells,
+    point.lon,
+    point.lat,
+    DVF_METRIC_INTERPOLATION_RADIUS_METERS,
+  );
+  return interpolateDvfMapMetricValue(
+    candidates,
+    props.realEstateMetricMode ?? "price",
+    props.realEstateRentalEstimatesByCityCode ?? {},
+  );
 }
 
 function pickRealEstatePurchasePoint(x: number, y: number): DvfMapPurchasePointMark | undefined {
@@ -374,8 +385,8 @@ function clearRealEstatePurchasePointHover(): void {
 
 defineExpose({
   pickNearbyPlace,
-  pickRealEstateCell,
   pickRealEstatePurchasePoint,
+  estimateRealEstateMetricAt,
   clearRealEstatePurchasePointHover,
 });
 

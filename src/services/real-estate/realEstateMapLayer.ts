@@ -8,12 +8,18 @@ import {
   type DvfPurchasePoint,
   type DvfRentalEstimate,
 } from "./compiledRealEstate";
+import {
+  buildDvfCityMetricRankings,
+  type DvfCityMetricRankings,
+} from "./realEstateMarketRankings";
 
 export interface DvfMapGridCell extends DvfMapCell {}
 
 export interface DvfMapCellDataset {
   cells: DvfMapGridCell[];
   rentalEstimatesByCityCode: Record<string, DvfRentalEstimate>;
+  cityMetricRankingsByCode: Record<string, DvfCityMetricRankings>;
+  cityCodesByMarketScope: Record<DvfMarketScope, string[]>;
   rentalReferencePeriod: string;
   liquidity: DvfMapLiquidity;
   cityCount: number;
@@ -121,6 +127,13 @@ async function loadDataset(onProgress?: LoadProgress): Promise<DvfMapCellDataset
   return {
     cells,
     rentalEstimatesByCityCode: Object.fromEntries((rentalIndicators?.cities ?? []).map((estimate) => [estimate.code, estimate])),
+    cityMetricRankingsByCode: buildDvfCityMetricRankings(manifest.cities, rentalIndicators?.cities ?? []),
+    cityCodesByMarketScope: Object.fromEntries(DVF_MARKET_SCOPES.map((scope) => [
+      scope,
+      manifest.cities
+        .filter((city) => city.rankByScope[scope] !== undefined)
+        .map((city) => city.code),
+    ])) as Record<DvfMarketScope, string[]>,
     rentalReferencePeriod: rentalIndicators?.referencePeriod ?? "",
     liquidity: buildLiquiditySummary(manifest.cities),
     cityCount,

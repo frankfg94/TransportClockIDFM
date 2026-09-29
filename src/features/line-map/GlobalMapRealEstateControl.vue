@@ -28,6 +28,21 @@
 
     <template v-if="enabled">
       <p class="global-map-real-estate__measure">{{ t(measureKey) }}</p>
+      <div class="global-map-real-estate__comparison">
+        <span class="global-map-real-estate__comparison-label">
+          {{ t("globalMap.realEstate.comparisonScope") }}
+        </span>
+        <MaterialCombobox
+          :model-value="comparisonScope"
+          :options="comparisonScopeOptions"
+          :aria-label="t('globalMap.realEstate.comparisonScopeAria')"
+          :teleport="true"
+          @change="handleComparisonScopeChange"
+        />
+        <span class="global-map-real-estate__comparison-hint">
+          {{ t("globalMap.realEstate.comparisonRangeMethod") }}
+        </span>
+      </div>
       <p class="global-map-real-estate__source">{{ t("globalMap.realEstate.pointZoom") }}</p>
       <div v-if="loading" class="global-map-real-estate__status" role="status" aria-live="polite">
         <span class="global-map-real-estate__spinner" aria-hidden="true" />
@@ -43,7 +58,7 @@
           {{ t("globalMap.realEstate.metricUnavailable") }}
         </p>
         <div v-else class="global-map-real-estate__scale" :aria-label="t(scaleAriaKey)">
-          <span class="global-map-real-estate__gradient" aria-hidden="true" />
+          <span class="global-map-real-estate__gradient" :style="{ background: REAL_ESTATE_METRIC_CSS_GRADIENT }" aria-hidden="true" />
           <span class="global-map-real-estate__endpoints">
             <span>{{ formatMetric(lowValue) }}</span>
             <span>{{ formatMetric(highValue) }}</span>
@@ -121,8 +136,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Building2 } from "lucide-vue-next";
-import { useI18n } from "../../i18n";
-import type { DvfRentalEstimate } from "../../services/real-estate/compiledRealEstate";
+import MaterialCombobox, { type MaterialComboboxOption } from "../../components/MaterialCombobox.vue";
+import { useI18n, type TranslationKey } from "../../i18n";
+import { REAL_ESTATE_METRIC_CSS_GRADIENT } from "../transport-map/real-estate/realEstateMetricColors";
+import { DVF_MARKET_SCOPES, type DvfMarketScope, type DvfRentalEstimate } from "../../services/real-estate/compiledRealEstate";
 import type { DvfMapMetricMode } from "../transport-map/next/deckRealEstateLayer";
 
 const metricTabs = [
@@ -142,6 +159,7 @@ const props = defineProps<{
   totalCityCount: number;
   cityCount: number;
   cellCount: number;
+  comparisonScope: DvfMarketScope;
   metricMode: DvfMapMetricMode;
   metricAvailable: boolean;
   lowValue: number;
@@ -152,8 +170,22 @@ const props = defineProps<{
   yieldPrice?: number;
 }>();
 
-const emit = defineEmits<{ toggle: []; changeMetric: [mode: DvfMapMetricMode] }>();
+const emit = defineEmits<{
+  toggle: [];
+  changeMetric: [mode: DvfMapMetricMode];
+  changeComparisonScope: [scope: DvfMarketScope];
+}>();
 const { locale, t } = useI18n();
+const comparisonScopeLabelKeys: Record<DvfMarketScope, TranslationKey> = {
+  "paris-intramuros": "globalMap.realEstate.marketScopeParis",
+  "petite-couronne": "globalMap.realEstate.marketScopePetite",
+  "grande-couronne": "globalMap.realEstate.marketScopeGrande",
+  idf: "globalMap.realEstate.marketScopeIdf",
+};
+const comparisonScopeOptions = computed<MaterialComboboxOption[]>(() => DVF_MARKET_SCOPES.map((scope) => ({
+  id: scope,
+  label: t(comparisonScopeLabelKeys[scope]),
+})));
 const measureKeys = {
   price: "globalMap.realEstate.measurePrice",
   rent: "globalMap.realEstate.measureRent",
@@ -194,6 +226,12 @@ function formatMetric(value: number): string {
     maximumFractionDigits: isYield || props.metricMode === "rent" ? 1 : 0,
   }).format(value);
   return `${formatted} ${isYield ? "%" : "€"}`;
+}
+
+function handleComparisonScopeChange(value: string): void {
+  if (DVF_MARKET_SCOPES.some((scope) => scope === value)) {
+    emit("changeComparisonScope", value as DvfMarketScope);
+  }
 }
 
 function formatCount(value: number): string {
@@ -304,6 +342,38 @@ function formatPercent(value: number): string {
   font-size: 0.68rem;
 }
 
+.global-map-real-estate__comparison {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 8px;
+}
+
+.global-map-real-estate__comparison-label {
+  color: #475569;
+  font-size: 0.63rem;
+  font-weight: 750;
+}
+
+.global-map-real-estate__comparison :deep(.material-combobox) {
+  width: 100%;
+  min-width: 0;
+}
+
+.global-map-real-estate__comparison :deep(.material-combobox__trigger) {
+  min-height: 31px;
+  padding: 5px 8px;
+}
+
+.global-map-real-estate__comparison :deep(.material-combobox__value) {
+  font-size: 0.68rem;
+}
+
+.global-map-real-estate__comparison-hint {
+  color: #64748b;
+  font-size: 0.58rem;
+  line-height: 1.3;
+}
+
 .global-map-real-estate__metric-tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -348,7 +418,6 @@ function formatPercent(value: number): string {
   display: block;
   height: 9px;
   border-radius: 999px;
-  background: linear-gradient(90deg, #16a34a 0%, #84cc16 24%, #facc15 46%, #f97316 66%, #dc2626 84%, #7f1d1d 100%);
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
 }
 
