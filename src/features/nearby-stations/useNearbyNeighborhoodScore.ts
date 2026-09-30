@@ -16,6 +16,18 @@ import { isNearbyJourneyTransitSection } from "./nearbyJourneyTiming";
 import type { TravelRouteProbe } from "./useTravelRoutes";
 import type { NearbyPlace, PlacesProvider } from "./nearbyPlaces";
 import {
+  MAJOR_SHOPPING_CENTRE_ACCESS_RULES,
+  MAJOR_SHOPPING_CENTRE_DETECTION_RULES,
+  type NeighborhoodShoppingCentreAccess,
+} from "./neighborhood/shoppingCentres";
+import type { NearbySupermarketFootprint } from "./neighborhood/supermarkets";
+import {
+  fetchNearbyShoppingCentres,
+  fetchNearbySupermarketFootprints,
+} from "../../services/places/nearbyShoppingCentres";
+import { getNearbyWalkingRouteMatrix } from "../../services/nearbyWalkingRoutes";
+import { placeDistanceMeters } from "../../services/places/compiledPlaces";
+import {
   NEARBY_DIRECTORY_MAX_RADIUS_METERS,
 } from "./nearbyPlacePresentation";
 import {
@@ -52,6 +64,10 @@ import type { PublicServiceQuality } from "./serviceQualityApi";
 
 type ReadonlyValue<T> = { readonly value: T };
 
+interface ShoppingCentreLoadResult {
+  centres: NeighborhoodShoppingCentreAccess[];
+}
+
 export type NeighborhoodScoreErrorSource = "verdict" | "places" | "routes" | "timetables";
 
 export interface UseNearbyNeighborhoodScoreOptions {
@@ -87,6 +103,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const nightJourneyDateTime = options.nightJourneyDateTime ?? getNearbyNightJourneyDateTime();
   const places = ref<NearbyPlace[]>([]);
   const placesLoaded = ref(false);
+  const shoppingCentres = ref<NeighborhoodShoppingCentreAccess[]>([]);
+  const shoppingCentresLoaded = ref(false);
+  const supermarketFootprints = ref<NearbySupermarketFootprint[]>([]);
+  const supermarketFootprintsLoaded = ref(false);
   const walkingRoutes = ref<Record<string, NeighborhoodWalkingMetrics | undefined>>({});
   const heavyCandidates = ref<NearbyHeavyTransportCandidate[]>([]);
   const chateletJourneys = ref<NearbyJourney[]>([]);
@@ -112,6 +132,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
 
   const placesResults = new Map<string, NearbyPlace[]>();
   const placeRequests = new Map<string, { controller: AbortController; promise: Promise<NearbyPlace[]> }>();
+  const shoppingCentreResults = new Map<string, ShoppingCentreLoadResult>();
+  const shoppingCentreRequests = new Map<string, { controller: AbortController; promise: Promise<ShoppingCentreLoadResult> }>();
+  const supermarketFootprintResults = new Map<string, NearbySupermarketFootprint[]>();
+  const supermarketFootprintRequests = new Map<string, { controller: AbortController; promise: Promise<NearbySupermarketFootprint[]> }>();
   const journeyResults = new Map<string, NearbyJourney[]>();
   const journeyRequests = new Map<string, { controller: AbortController; promise: Promise<NearbyJourney[]> }>();
   const frequencyResults = new Map<string, GtfsLineFrequencyResponse>();
@@ -154,6 +178,9 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     return {
       places: places.value,
       placesLoaded: placesLoaded.value,
+      shoppingCentres: shoppingCentres.value,
+      shoppingCentresLoaded: shoppingCentresLoaded.value,
+      supermarketFootprints: supermarketFootprints.value,
       walkingRoutes: currentWalkingRoutes,
       stations: options.stations.value,
       stationsLoaded,
@@ -277,6 +304,37 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       );
     } else {
       trackHospitalJourneys(origin, places.value, originKey, token);
+    }
+
+    if (!shoppingCentresLoaded.value) {
+      trackTask(
+        "shopping-centres",
+        loadShoppingCentreAccess(origin, originKey),
+        token,
+        (next) => {
+          shoppingCentres.value = next.centres;
+          shoppingCentresLoaded.value = true;
+          updatedAt.value = Date.now();
+        },
+        false,
+        "places",
+        ["daily-life"],
+      );
+    }
+    if (!supermarketFootprintsLoaded.value) {
+      trackTask(
+        "supermarket-footprints",
+        loadSupermarketFootprints(origin, originKey),
+        token,
+        (next) => {
+          supermarketFootprints.value = next;
+          supermarketFootprintsLoaded.value = true;
+          updatedAt.value = Date.now();
+        },
+        false,
+        "places",
+        ["daily-life"],
+      );
     }
 
     const benchmarkDestinations = resolveJourneyBenchmarks(options.network.value);
@@ -406,6 +464,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     activeOriginKey = originKey;
     places.value = [];
     placesLoaded.value = false;
+    shoppingCentres.value = [];
+    shoppingCentresLoaded.value = false;
+    supermarketFootprints.value = [];
+    supermarketFootprintsLoaded.value = false;
     walkingRoutes.value = {};
     heavyCandidates.value = [];
     chateletJourneys.value = [];
@@ -460,6 +522,139 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         if (placeRequests.get(originKey)?.promise === promise) placeRequests.delete(originKey);
       });
     placeRequests.set(originKey, { controller, promise });
+    return promise;
+  }
+
+  function loadShoppingCentreAccess(
+    origin: Pick<GeocoderPoint, "lon" | "lat">,
+    originKey: string,
+  ): Promise<ShoppingCentreLoadResult> {
+    const cached = shoppingCentreResults.get(originKey);
+    if (cached) return Promise.resolve({ centres: [...cached.centres] });
+    const active = shoppingCentreRequests.get(originKey);
+    if (active) return active.promise;
+
+    const controller = new AbortController();
+    const promise = requestScheduler.schedule(async (signal) => {
+      const centres = await fetchNearbyShoppingCentres(origin, signal);
+      signal.throwIfAborted();
+      if (centres.length === 0) return { centres: [] };
+
+      const walkingTargets = centres.slice(0, 6);
+      const maximumEstimatedWalkingDistanceMeters = MAJOR_SHOPPING_CENTRE_ACCESS_RULES.maximumWalkingEstimateMinutes
+        * MAJOR_SHOPPING_CENTRE_ACCESS_RULES.walkingMetersPerMinute;
+      const hasDirectAccessibleCentre = walkingTargets.some((centre) =>
+        centre.distanceMeters <= maximumEstimatedWalkingDistanceMeters
+          && hasMajorShoppingCentreScaleEvidence(centre, places.value));
+      const routedWalkingTargets = hasDirectAccessibleCentre
+        ? []
+        : walkingTargets.filter((centre) => centre.distanceMeters > maximumEstimatedWalkingDistanceMeters);
+      const walkingRoutes = routedWalkingTargets.length > 0
+        ? await getNearbyWalkingRouteMatrix(
+            origin,
+            routedWalkingTargets.map((centre) => ({
+              id: `shopping-centre:${centre.id}`,
+              cacheKey: `neighborhood:${centre.id}`,
+              lon: centre.lon,
+              lat: centre.lat,
+            })),
+            signal,
+          )
+        : [];
+      signal.throwIfAborted();
+      const walkingById = new Map(walkingRoutes.flatMap((route) => route.id
+        ? [[route.id.replace(/^shopping-centre:/u, ""), {
+            durationSeconds: route.durationSeconds,
+            distanceMeters: route.distanceMeters,
+            fallback: route.fallback,
+          }] as const]
+        : []));
+      for (const centre of walkingTargets) {
+        if (walkingById.has(centre.id) || centre.distanceMeters > maximumEstimatedWalkingDistanceMeters) continue;
+        walkingById.set(centre.id, {
+          durationSeconds: Math.max(60, Math.ceil(centre.distanceMeters / MAJOR_SHOPPING_CENTRE_ACCESS_RULES.walkingMetersPerMinute) * 60),
+          distanceMeters: centre.distanceMeters,
+          fallback: true,
+        });
+      }
+      const transitTargets = (hasDirectAccessibleCentre ? [] : walkingTargets)
+        .filter((centre) => (walkingById.get(centre.id)?.durationSeconds ?? Infinity)
+          > MAJOR_SHOPPING_CENTRE_ACCESS_RULES.maximumWalkingEstimateMinutes * 60)
+        .slice(0, 4);
+      const journeysById = new Map<string, NearbyJourney[]>();
+      const failedJourneyIds = new Set<string>();
+      await Promise.all(transitTargets.map(async (centre) => {
+        const destination = { id: `shopping-centre:${centre.id}`, lon: centre.lon, lat: centre.lat };
+        const journeyKey = journeyCacheKey(
+          originKey,
+          destination.id,
+          destination,
+          options.journeyDateTime,
+          "shopping-centre",
+        );
+        try {
+          journeysById.set(centre.id, await loadJourneyProbe(
+            origin,
+            destination,
+            options.journeyDateTime,
+            journeyKey,
+            4,
+          ));
+        } catch {
+          journeysById.set(centre.id, []);
+          failedJourneyIds.add(centre.id);
+        }
+      }));
+      signal.throwIfAborted();
+      return {
+        centres: centres.map((centre) => ({
+          ...centre,
+          walking: walkingById.get(centre.id),
+          journeys: journeysById.get(centre.id) ?? [],
+          journeyLookupFailed: failedJourneyIds.has(centre.id),
+        })),
+      };
+    }, controller.signal, 4)
+      .then((next) => {
+        controller.signal.throwIfAborted();
+        shoppingCentreResults.set(originKey, {
+          centres: [...next.centres],
+        });
+        return next;
+      })
+      .finally(() => {
+        if (shoppingCentreRequests.get(originKey)?.promise === promise) shoppingCentreRequests.delete(originKey);
+      });
+    shoppingCentreRequests.set(originKey, { controller, promise });
+    return promise;
+  }
+
+  function loadSupermarketFootprints(
+    origin: Pick<GeocoderPoint, "lon" | "lat">,
+    originKey: string,
+  ): Promise<NearbySupermarketFootprint[]> {
+    const cached = supermarketFootprintResults.get(originKey);
+    if (cached) return Promise.resolve([...cached]);
+    const active = supermarketFootprintRequests.get(originKey);
+    if (active) return active.promise;
+
+    const controller = new AbortController();
+    const promise = requestScheduler.schedule(
+      (signal) => fetchNearbySupermarketFootprints(origin, signal),
+      controller.signal,
+      5,
+    )
+      .then((next) => {
+        controller.signal.throwIfAborted();
+        supermarketFootprintResults.set(originKey, [...next]);
+        return next;
+      })
+      .finally(() => {
+        if (supermarketFootprintRequests.get(originKey)?.promise === promise) {
+          supermarketFootprintRequests.delete(originKey);
+        }
+      });
+    supermarketFootprintRequests.set(originKey, { controller, promise });
     return promise;
   }
 
@@ -716,6 +911,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       return !options.network.value && options.stationsLoading?.value === true;
     }
     if (datasetId === "osm-places") return pendingTasks.has("places");
+    if (datasetId === "shopping-centres") return pendingTasks.has("shopping-centres");
+    if (datasetId === "supermarket-footprints") return pendingTasks.has("supermarket-footprints");
     if (datasetId === "neighborhood-verdict") return pendingTasks.has("backend-verdict");
     if (datasetId === "neighborhood-green-spaces") {
       return pendingTasks.has("backend-verdict") || pendingTasks.has("green-space-routes");
@@ -737,6 +934,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       return !options.network.value && options.failedCriteria?.value.includes(categoryId) === true;
     }
     if (datasetId === "osm-places") return taskErrors.has("places");
+    if (datasetId === "shopping-centres") return taskErrors.has("shopping-centres");
+    if (datasetId === "supermarket-footprints") return taskErrors.has("supermarket-footprints");
     if (datasetId === "neighborhood-verdict") return taskErrors.has("backend-verdict");
     if (datasetId === "neighborhood-green-spaces") return taskErrors.has("green-space-routes");
     if (datasetId === "heavy-access") {
@@ -772,6 +971,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     if (isDatasetFailed(datasetId, categoryId)) return "error";
     if (datasetId === "transport-bootstrap") return options.network.value ? "ready" : "missing";
     if (datasetId === "osm-places") return placesLoaded.value ? "ready" : "missing";
+    if (datasetId === "shopping-centres") return shoppingCentresLoaded.value ? "ready" : "missing";
+    if (datasetId === "supermarket-footprints") return supermarketFootprintsLoaded.value ? "ready" : "missing";
     if (datasetId === "neighborhood-green-spaces") {
       return backendVerdict.value?.nearbyGreenSpaces !== undefined ? "ready" : "missing";
     }
@@ -813,6 +1014,14 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     for (const [key, request] of verdictRequests) {
       request.controller.abort();
       verdictRequests.delete(key);
+    }
+    for (const [key, request] of shoppingCentreRequests) {
+      request.controller.abort();
+      shoppingCentreRequests.delete(key);
+    }
+    for (const [key, request] of supermarketFootprintRequests) {
+      request.controller.abort();
+      supermarketFootprintRequests.delete(key);
     }
     for (const [key, request] of journeyRequests) {
       request.controller.abort();
@@ -892,6 +1101,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     refreshQueued = false;
     if (recomputeFrame !== undefined && typeof window !== "undefined") window.cancelAnimationFrame(recomputeFrame);
     for (const request of placeRequests.values()) request.controller.abort();
+    for (const request of shoppingCentreRequests.values()) request.controller.abort();
     for (const request of frequencyRequests.values()) request.controller.abort();
     for (const request of lastServiceRequests.values()) request.controller.abort();
     for (const request of verdictRequests.values()) request.controller.abort();
@@ -1211,6 +1421,20 @@ function snapshotForOrigin(
 ): NearbyNeighborhoodScoreSnapshot | undefined {
   if (!snapshot || Date.now() - snapshot.savedAt > 10 * 60_000) return undefined;
   return neighborhoodOriginKey(snapshot.origin) === originKey ? snapshot : undefined;
+}
+
+function hasMajorShoppingCentreScaleEvidence(
+  centre: NeighborhoodShoppingCentreAccess,
+  places: readonly NearbyPlace[],
+): boolean {
+  if (centre.areaM2 === undefined || centre.areaM2 >= MAJOR_SHOPPING_CENTRE_DETECTION_RULES.minimumMallSurfaceM2) {
+    return true;
+  }
+  const supportingPlaces = places.filter((place) =>
+    placeDistanceMeters(centre, place) <= MAJOR_SHOPPING_CENTRE_DETECTION_RULES.supportRadiusMeters);
+  const shopCount = new Set(supportingPlaces.filter((place) => Boolean(place.tags?.shop)).map((place) => place.id)).size;
+  const cinemaCount = supportingPlaces.filter((place) => place.tags?.amenity === "cinema").length;
+  return shopCount >= MAJOR_SHOPPING_CENTRE_DETECTION_RULES.minimumNearbyShopCount || cinemaCount > 0;
 }
 
 function neighborhoodOriginKey(origin: Pick<GeocoderPoint, "lon" | "lat">): string {

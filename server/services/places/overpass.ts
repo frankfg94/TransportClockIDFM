@@ -33,19 +33,27 @@ export async function loadNearbyPlaces(lat: number, lon: number, radiusMeters: n
 }
 
 async function fetchOverpassPlaces(lat: number, lon: number, radius: number): Promise<NearbyPlace[]> {
+  const elements = await requestOverpassElements(buildNearbyPlacesQuery(lat, lon, radius));
+  return normalizeOverpassPlaces(elements, { lat, lon });
+}
+
+/** Shared Overpass transport for the regular place directory and focused OSM lookups. */
+export async function requestOverpassElements(
+  query: string,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<OverpassElement[]> {
   try {
-    return await fetchOverpassEndpoint(OVERPASS_API_ROOT, lat, lon, radius);
+    return await fetchOverpassEndpoint(OVERPASS_API_ROOT, query, timeoutMs);
   } catch (error) {
     const status = (error as { statusCode?: number })?.statusCode;
     if (status && status < 500 && status !== 429) throw error;
-    return fetchOverpassEndpoint(OVERPASS_FALLBACK_ROOT, lat, lon, radius);
+    return fetchOverpassEndpoint(OVERPASS_FALLBACK_ROOT, query, timeoutMs);
   }
 }
 
-async function fetchOverpassEndpoint(root: string, lat: number, lon: number, radius: number): Promise<NearbyPlace[]> {
+async function fetchOverpassEndpoint(root: string, query: string, timeoutMs: number): Promise<OverpassElement[]> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  const query = buildNearbyPlacesQuery(lat, lon, radius);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(`${root}/interpreter`, {
@@ -72,7 +80,7 @@ async function fetchOverpassEndpoint(root: string, lat: number, lon: number, rad
     if (!Array.isArray(payload.elements) || (payload as { remark?: string }).remark) {
       throw createError({ statusCode: 502, statusMessage: "Overpass API returned incomplete results." });
     }
-    return normalizeOverpassPlaces(payload.elements, { lat, lon });
+    return payload.elements;
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw createError({ statusCode: 504, statusMessage: "Overpass API timed out." });

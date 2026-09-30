@@ -4,6 +4,8 @@ import type { GtfsLastService } from "../../line-map/useLineFrequencyTimetable";
 import type { GlobalMapMode } from "../../transport-map/contracts/manifest";
 import type { NearbyHeavyTransportCandidate, NearbyJourney } from "../nearbyHeavyTransports";
 import type { NearbyPlace } from "../nearbyPlaces";
+import type { NeighborhoodShoppingCentreAccess } from "./shoppingCentres";
+import type { NearbySupermarketFootprint } from "./supermarkets";
 import type { NearbyStationEntry } from "../nearbyStations";
 import type { PublicGreenSpaceAccess, PublicNeighborhoodVerdict, PublicVerdictSource } from "../neighborhoodVerdictApi";
 import type { PublicServiceQuality, ServiceQualityLineReliability } from "../serviceQualityApi";
@@ -117,10 +119,14 @@ export type NeighborhoodFactKind =
   | "supermarketNearby"
   | "supermarketNearbyApprox"
   | "supermarketsNearby"
+  | "mediumSupermarketsNearby"
   | "dailyStores"
   | "dailyStoresApprox"
   | "richCommercialStreet"
   | "richCommercialStreetApprox"
+  | "shoppingCentreNearby"
+  | "shoppingCentreNearbyApprox"
+  | "shoppingCentreNearbyTransit"
   | "restaurantsNearby"
   | "restaurantsNearbyApprox"
   | "leisurePlaceNearby"
@@ -273,6 +279,9 @@ export interface NeighborhoodGreenSpaceJourney {
 export interface NeighborhoodScoreInput {
   places: readonly NearbyPlace[];
   placesLoaded: boolean;
+  shoppingCentres?: readonly NeighborhoodShoppingCentreAccess[];
+  shoppingCentresLoaded?: boolean;
+  supermarketFootprints?: readonly NearbySupermarketFootprint[];
   walkingRoutes?: Readonly<Record<string, NeighborhoodWalkingMetrics | undefined>>;
   stations: readonly NearbyStationEntry[];
   stationsLoaded: boolean;

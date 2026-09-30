@@ -45,6 +45,8 @@ export const NEIGHBORHOOD_CRITERION_REGISTRY: readonly NeighborhoodCriterionDefi
     id: "daily-life",
     datasets: [
       { id: "osm-places", required: true, maxAgeMs: 24 * 60 * 60_000 },
+      { id: "shopping-centres", required: false, maxAgeMs: 24 * 60 * 60_000 },
+      { id: "supermarket-footprints", required: false, maxAgeMs: 24 * 60 * 60_000 },
       { id: "neighborhood-verdict", required: false, maxAgeMs: 24 * 60 * 60_000 },
     ],
   },

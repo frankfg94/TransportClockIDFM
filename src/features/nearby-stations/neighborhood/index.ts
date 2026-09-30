@@ -28,6 +28,10 @@ export type {
   NeighborhoodScoreResult,
   NeighborhoodWalkingMetrics,
 } from "./contracts";
+export { MAJOR_SHOPPING_CENTRE_ACCESS_RULES } from "./shoppingCentres";
+export type { NearbyMajorShoppingCentre, NeighborhoodShoppingCentreAccess } from "./shoppingCentres";
+export { MEDIUM_SUPERMARKET_ACCESS_RULES } from "./supermarkets";
+export type { NearbySupermarketFootprint } from "./supermarkets";
 export { getNeighborhoodScoreDisplay, saturatingNeighborhoodBonus } from "./primitives";
 export {
   NEIGHBORHOOD_SCORE_BAND_COLORS,

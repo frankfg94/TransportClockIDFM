@@ -61,6 +61,8 @@ const datasetLabelKeys: Record<string, TranslationKey> = {
   "service-quality": "nearbyStations.neighborhoodScore.datasets.service-quality",
   "neighborhood-verdict": "nearbyStations.neighborhoodScore.datasets.neighborhood-verdict",
   "osm-places": "nearbyStations.neighborhoodScore.datasets.osm-places",
+  "shopping-centres": "nearbyStations.neighborhoodScore.datasets.shopping-centres",
+  "supermarket-footprints": "nearbyStations.neighborhoodScore.datasets.supermarket-footprints",
   "neighborhood-green-spaces": "nearbyStations.neighborhoodScore.datasets.neighborhood-green-spaces",
   "walking-routes": "nearbyStations.neighborhoodScore.datasets.walking-routes",
 };

@@ -128,6 +128,10 @@ export const FACT_KEYS: Record<NeighborhoodFactKind, { label: TranslationKey; to
     label: "nearbyStations.neighborhoodScore.facts.supermarketsNearby.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.supermarketsNearby.tooltip",
   },
+  mediumSupermarketsNearby: {
+    label: "nearbyStations.neighborhoodScore.facts.mediumSupermarketsNearby.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.mediumSupermarketsNearby.tooltip",
+  },
   dailyStores: {
     label: "nearbyStations.neighborhoodScore.facts.dailyStores.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.dailyStores.tooltip",
@@ -143,6 +147,18 @@ export const FACT_KEYS: Record<NeighborhoodFactKind, { label: TranslationKey; to
   richCommercialStreetApprox: {
     label: "nearbyStations.neighborhoodScore.facts.richCommercialStreetApprox.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.richCommercialStreetApprox.tooltip",
+  },
+  shoppingCentreNearby: {
+    label: "nearbyStations.neighborhoodScore.facts.shoppingCentreNearby.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.shoppingCentreNearby.tooltip",
+  },
+  shoppingCentreNearbyApprox: {
+    label: "nearbyStations.neighborhoodScore.facts.shoppingCentreNearbyApprox.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.shoppingCentreNearbyApprox.tooltip",
+  },
+  shoppingCentreNearbyTransit: {
+    label: "nearbyStations.neighborhoodScore.facts.shoppingCentreNearbyTransit.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.shoppingCentreNearbyTransit.tooltip",
   },
   restaurantsNearby: {
     label: "nearbyStations.neighborhoodScore.facts.restaurantsNearby.label",
@@ -262,6 +278,8 @@ export const SOURCE_KEYS = {
   stations: "nearbyStations.neighborhoodScore.sources.stations",
   places: "nearbyStations.neighborhoodScore.sources.places",
   placesAndWalking: "nearbyStations.neighborhoodScore.sources.placesAndWalking",
+  shoppingCentres: "nearbyStations.neighborhoodScore.sources.shoppingCentres",
+  supermarketFootprints: "nearbyStations.neighborhoodScore.sources.supermarketFootprints",
   journeys: "nearbyStations.neighborhoodScore.sources.journeys",
   heavyRoutes: "nearbyStations.neighborhoodScore.sources.heavyRoutes",
   frequency: "nearbyStations.neighborhoodScore.sources.frequency",
@@ -289,6 +307,8 @@ export const RULE_KEYS = {
   placePresence: "nearbyStations.neighborhoodScore.rules.placePresence",
   placeSaturation: "nearbyStations.neighborhoodScore.rules.placeSaturation",
   commercialCluster: "nearbyStations.neighborhoodScore.rules.commercialCluster",
+  shoppingCentreAccess: "nearbyStations.neighborhoodScore.rules.shoppingCentreAccess",
+  mediumSupermarketAccess: "nearbyStations.neighborhoodScore.rules.mediumSupermarketAccess",
   pharmacyPresence: "nearbyStations.neighborhoodScore.rules.pharmacyPresence",
   hospitalPresence: "nearbyStations.neighborhoodScore.rules.hospitalPresence",
   lastService: "nearbyStations.neighborhoodScore.rules.lastService",

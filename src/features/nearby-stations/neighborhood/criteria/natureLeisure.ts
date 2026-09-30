@@ -296,7 +296,23 @@ function formatGreenSpaceJourneyLine(section: NearbyJourney["sections"][number])
     .filter((value): value is string => typeof value === "string"
       && !/^line:|^idfm:c\d+$/iu.test(value)
       && !/^c\d{5}$/iu.test(value));
-  return references[0] ?? section.lineMode?.toString();
+  const line = references[0];
+  if (!line) return undefined;
+
+  if (/^(?:métro|metro|rer|train|transilien|tram|tramway|câble|cable|bus|noctilien)\b/iu.test(line)) {
+    return line;
+  }
+
+  const modeLabel = section.lineMode === "METRO" ? "Métro"
+    : section.lineMode === "RER" ? "RER"
+      : section.lineMode === "TRAIN" ? "Train"
+        : section.lineMode === "TRANSILIEN" ? "Transilien"
+          : section.lineMode === "TRAM" ? "Tramway"
+            : section.lineMode === "CABLE" ? "Câble"
+              : section.lineMode === "BUS" ? "Bus"
+                : section.lineMode === "NOCTILIEN" ? "Noctilien"
+                  : undefined;
+  return modeLabel ? `${modeLabel} ${line}` : line;
 }
 
 function formatGreenSpaceAreaLabel(surfaceM2: number | undefined): string | undefined {

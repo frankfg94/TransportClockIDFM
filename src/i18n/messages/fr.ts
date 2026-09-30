@@ -2469,6 +2469,8 @@ export const fr = {
         "service-quality": "Qualité de service IDFM",
         "neighborhood-verdict": "Synthèse documentaire du quartier",
         "osm-places": "Lieux OpenStreetMap",
+        "shopping-centres": "Grands centres commerciaux OSM",
+        "supermarket-footprints": "Surfaces des supermarchés OSM",
         "neighborhood-green-spaces": "Espaces verts documentés",
         "walking-routes": "Itinéraires piétons",
       },
@@ -2526,6 +2528,8 @@ export const fr = {
         stations: "Carte des stations et lignes IDFM",
         places: "POI OpenStreetMap via Overpass",
         placesAndWalking: "POI OpenStreetMap + temps piéton calculé",
+        shoppingCentres: "Centres commerciaux OpenStreetMap via Overpass",
+        supermarketFootprints: "Surfaces de supermarchés OpenStreetMap via Overpass",
         journeys: "Itinéraires IDFM/Navitia vers Châtelet et les grandes gares",
         heavyRoutes: "Itinéraires IDFM/Navitia vers les transports lourds",
         frequency: "Horaires théoriques GTFS IDFM",
@@ -2569,6 +2573,8 @@ export const fr = {
         placePresence: "Le lieu est compté jusqu’à {threshold} min ; une distance sans itinéraire est une estimation.",
         placeSaturation: "La contribution augmente avec le nombre de lieux et est plafonnée vers {target} occurrences pour {maximum} points.",
         commercialCluster: "Une rue commerçante riche exige une fromagerie, une boucherie, un traiteur et une boulangerie distincts à moins de {threshold} min à pied.",
+        shoppingCentreAccess: "Un centre commercial shop=mall est retenu avec une emprise d'au moins {mallArea} m², ou au moins {shopCount} commerces distincts ou un cinéma dans un rayon de {supportDistance} m. Une zone landuse=retail nommée doit dépasser {retailArea} m². Observé dans OSM : emprise {area} m² (— si inconnue), {nearbyShops} commerces et {nearbyCinemas} cinéma(s) à proximité. Point fort si accessible en {walkingMinutes} min à pied ou {transitMinutes} min en transports.",
+        mediumSupermarketAccess: "Un supermarché est mis en valeur seulement si OSM fournit une emprise d’au moins {minimumSurface} m² et un itinéraire piéton vérifié de moins de {maximumWalkingMinutes} min. Une surface absente n’est pas estimée et le nom ou la marque ne servent pas à classer sa taille.",
         pharmacyPresence: "Une pharmacie est comptée jusqu’à {threshold} min ; une distance sans itinéraire est une estimation.",
         hospitalPresence: "Un hôpital est affiché lorsqu’un trajet réel ou piéton permet de le rejoindre en {threshold} min ou moins.",
         leisurePresence: "Un lieu culturel ou d’intérêt est compté jusqu’à {threshold} min ; une distance sans itinéraire est une estimation.",
@@ -2711,6 +2717,10 @@ export const fr = {
           label: "Supermarchés à moins de {minutes} min à pied : {supermarkets}",
           tooltip: "Les supermarchés situés à moins de {minutes} min sont regroupés sur une seule ligne : {supermarkets}. Un temps précédé de ≈ est une estimation issue de la distance lorsque l’itinéraire piéton n’est pas disponible.",
         },
+        mediumSupermarketsNearby: {
+          label: "Supermarchés de taille moyenne à moins de {minutes} min à pied : {supermarkets}",
+          tooltip: "{count} supermarché(s) dont l’emprise OSM vérifiée atteint au moins {minimumSurface} m² : {supermarkets}. Les durées sont arrondies à la minute supérieure ; les temps précédés de ≈ sont estimés à partir de la distance si aucun itinéraire piéton n’est disponible. Une surface absente n’est ni estimée ni déduite du nom ou de la marque.",
+        },
         dailyStores: {
           label: "{count} commerces du quotidien à moins de {minutes} min à pied",
           tooltip: "{count} commerces du quotidien sont recensés dans la limite de {minutes} min à pied pour les lieux dont le temps est disponible.",
@@ -2726,6 +2736,18 @@ export const fr = {
         richCommercialStreetApprox: {
           label: "Rue commerçante riche : fromagerie, boucherie, traiteur et boulangerie à environ {minutes} min",
           tooltip: "Une concentration de {count} spécialités alimentaires — fromagerie, boucherie, traiteur et boulangerie — est recensée dans une zone d’environ {minutes} min ; les temps sans itinéraire piéton sont des estimations.",
+        },
+        shoppingCentreNearby: {
+          label: "Grand centre commercial « {name} » à {minutes} min à pied",
+          tooltip: "Le centre commercial « {name} » est à {minutes} min à pied selon un itinéraire calculé. Il est identifié par son emprise ou par des preuves OSM de taille (commerces ou cinéma à proximité).",
+        },
+        shoppingCentreNearbyApprox: {
+          label: "Grand centre commercial « {name} » à environ {minutes} min à pied",
+          tooltip: "Le centre commercial « {name} » est estimé à {minutes} min à pied à partir de la distance cartographique ; aucun itinéraire piéton n'a été obtenu. Il est identifié par son emprise ou par des preuves OSM de taille (commerces ou cinéma à proximité).",
+        },
+        shoppingCentreNearbyTransit: {
+          label: "Grand centre commercial « {name} » accessible en {minutes} min en transports",
+          tooltip: "Un itinéraire IDFM/Navitia daté vers le centre commercial « {name} » dure {minutes} min et comprend un trajet en transport collectif. Le centre est identifié par son emprise ou par des preuves OSM de taille.",
         },
         restaurantsNearby: {
           label: "{count} restaurants ou cafés à moins de {minutes} min à pied",

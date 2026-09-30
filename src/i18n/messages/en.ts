@@ -2436,6 +2436,8 @@ export const en = {
         "service-quality": "IDFM service quality",
         "neighborhood-verdict": "Documented neighbourhood summary",
         "osm-places": "OpenStreetMap places",
+        "shopping-centres": "Major OSM shopping centres",
+        "supermarket-footprints": "OSM supermarket areas",
         "neighborhood-green-spaces": "Documented green spaces",
         "walking-routes": "Walking routes",
       },
@@ -2493,6 +2495,8 @@ export const en = {
         stations: "IDFM station and line map",
         places: "OpenStreetMap POIs via Overpass",
         placesAndWalking: "OpenStreetMap POIs + calculated walking time",
+        shoppingCentres: "OpenStreetMap shopping centres via Overpass",
+        supermarketFootprints: "OpenStreetMap supermarket footprints via Overpass",
         journeys: "IDFM/Navitia journeys to Châtelet and the major stations",
         heavyRoutes: "IDFM/Navitia journeys to heavy transport",
         frequency: "IDFM GTFS theoretical schedules",
@@ -2536,6 +2540,8 @@ export const en = {
         placePresence: "A place is counted up to {threshold} min; a distance without a route is an estimate.",
         placeSaturation: "The contribution grows with the number of places and caps around {target} occurrences for {maximum} points.",
         commercialCluster: "A rich shopping street requires distinct cheese, butcher, deli and bakery places within {threshold} min on foot.",
+        shoppingCentreAccess: "An OSM shop=mall or shop=shopping_centre feature qualifies when its footprint is at least {mallArea} m², or at least {shopCount} shops or one cinema are within {supportDistance} m. If its area is unavailable, the explicit tag is accepted. Observed OSM footprint: {area} m² (— when unavailable). Strength when reachable within {walkingMinutes} min on foot or {transitMinutes} min by transit.",
+        mediumSupermarketAccess: "A supermarket is highlighted only when OSM provides a footprint of at least {minimumSurface} m² and a verified walking route under {maximumWalkingMinutes} min. Missing surface is not estimated, and name or brand is not used to classify size.",
         pharmacyPresence: "A pharmacy is counted up to {threshold} min; a distance without a route is an estimate.",
         hospitalPresence: "A hospital is shown when a real transit or walking journey reaches it in {threshold} min or less.",
         leisurePresence: "A cultural or notable place is counted up to {threshold} min; a distance without a route is an estimate.",
@@ -2678,6 +2684,10 @@ export const en = {
           label: "Supermarkets within {minutes} min on foot: {supermarkets}",
           tooltip: "Supermarkets within {minutes} min are grouped on one line: {supermarkets}. A time prefixed with ≈ is estimated from distance because no walking route was available.",
         },
+        mediumSupermarketsNearby: {
+          label: "Medium-sized supermarkets within {minutes} min on foot: {supermarkets}",
+          tooltip: "{count} supermarket(s) with a verified OSM footprint of at least {minimumSurface} m²: {supermarkets}. Durations are rounded up to the next minute; times marked with ≈ are estimated from distance when no walking route is available. Missing surface is neither estimated nor inferred from the name or brand.",
+        },
         dailyStores: {
           label: "{count} daily shops within {minutes} min on foot",
           tooltip: "{count} daily shops are listed within {minutes} min on foot for places with an available walking time.",
@@ -2693,6 +2703,18 @@ export const en = {
         richCommercialStreetApprox: {
           label: "Rich shopping street: cheese shop, butcher, deli and bakery within about {minutes} min",
           tooltip: "A concentration of {count} food specialties — cheese shop, butcher, deli and bakery — is listed within an area of about {minutes} min; times without a walking route are estimates.",
+        },
+        shoppingCentreNearby: {
+          label: "Major shopping centre “{name}”, {minutes} min on foot",
+          tooltip: "Shopping centre “{name}” is {minutes} min away on a calculated walking route. Its scale is identified from its mapped footprint or nearby OSM evidence (shops or cinema).",
+        },
+        shoppingCentreNearbyApprox: {
+          label: "Major shopping centre “{name}”, about {minutes} min on foot",
+          tooltip: "Shopping centre “{name}” is estimated at {minutes} min on foot from map distance; no walking route was returned. Its scale is identified from its mapped footprint or nearby OSM evidence (shops or cinema).",
+        },
+        shoppingCentreNearbyTransit: {
+          label: "Major shopping centre “{name}”, {minutes} min by public transit",
+          tooltip: "A dated IDFM/Navitia route to shopping centre “{name}” takes {minutes} min and includes public transit. Its scale is identified from its mapped footprint or nearby OSM evidence.",
         },
         restaurantsNearby: {
           label: "{count} restaurants or cafés within {minutes} min on foot",
