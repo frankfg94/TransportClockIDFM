@@ -1,3 +1,4 @@
+import { normalizeNewsPreferences } from "../src/features/transport-news/types";
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { nextTick } from "vue";
@@ -19,6 +20,7 @@ const baseSettings: AppSettings = {
   travelAlarmSafetyMinutes: 2,
   boardTogglesPlacement: "inline",
   placePresetNavigationMode: "dropdown-swipe",
+  transportNews: normalizeNewsPreferences(undefined),
   showPlanInNavigation: true,
   showTravelRouteLineIcons: true,
   showUserLocation: true,
@@ -171,8 +173,8 @@ afterEach(() => {
 
 describe("WeatherForecastModal", () => {
   it("loads and renders forecast sections from the weather API", async () => {
-    vi.doMock("../src/features/app-settings", async (importActual) => {
-      const actual = await importActual<typeof import("../src/features/app-settings")>();
+    vi.doMock("../src/features/app-settings", async () => {
+      const actual = await import("../src/features/app-settings/appSettings");
       const { ref } = await import("vue");
       const settings = ref(baseSettings);
 
@@ -213,8 +215,8 @@ describe("WeatherForecastModal", () => {
   });
 
   it("updates the hourly chart when another day is selected", async () => {
-    vi.doMock("../src/features/app-settings", async (importActual) => {
-      const actual = await importActual<typeof import("../src/features/app-settings")>();
+    vi.doMock("../src/features/app-settings", async () => {
+      const actual = await import("../src/features/app-settings/appSettings");
       const { ref } = await import("vue");
       const settings = ref(baseSettings);
 
@@ -267,8 +269,8 @@ describe("WeatherForecastModal", () => {
       url: string;
     }> = [];
 
-    vi.doMock("../src/features/app-settings", async (importActual) => {
-      const actual = await importActual<typeof import("../src/features/app-settings")>();
+    vi.doMock("../src/features/app-settings", async () => {
+      const actual = await import("../src/features/app-settings/appSettings");
       const { ref } = await import("vue");
       const settings = ref(baseSettings);
       updateSettings = (patch) => {

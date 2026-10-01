@@ -65,6 +65,7 @@ type DatasetDefinition = {
   description: string;
   format: string;
   sourceUrl?: string;
+  primDatasetIds?: string[];
   license: DatasetInfo["license"];
   warnAfterDays: number;
   staleAfterDays: number;
@@ -107,6 +108,7 @@ const CORE_DATASETS: Record<CoreDatasetId, DatasetDefinition> = {
     description: "Artefacts GTFS indexés par ligne, avec formes, arrêts et horaires théoriques.",
     format: "JSON indexé (dérivé GTFS)",
     sourceUrl: GTFS_SOURCE_URL,
+    primDatasetIds: ["offre-horaires-tc-gtfs-idfm"],
     license: { label: "Open Database License (ODbL)", url: ODBL_URL },
     ...DATASET_FRESHNESS_POLICIES["gtfs"],
   },

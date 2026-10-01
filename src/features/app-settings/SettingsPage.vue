@@ -27,6 +27,9 @@ import PluginViewer from "./PluginViewer.vue";
 import GtfsSettingsPanel from "./GtfsSettingsPanel.vue";
 import SettingsLanguageCategory from "./SettingsLanguageCategory.vue";
 import SettingsMenuCategory from "./SettingsMenuCategory.vue";
+import SettingsTransportNewsCategory from "./SettingsTransportNewsCategory.vue";
+import { NEWS_MODES, NEWS_TOPICS } from "../transport-news/types";
+import { NEWS_SOURCES } from "../transport-news/sources";
 import SettingsPlacesCategory from "./SettingsPlacesCategory.vue";
 import SettingsAddressBookCategory from "./SettingsAddressBookCategory.vue";
 import SettingsDisplayCategory from "./SettingsDisplayCategory.vue";
@@ -918,6 +921,10 @@ function getSettingsOptionLabels(options: MaterialComboboxOption[]): string {
 }
 
 const settingsSearchEntries = computed<SettingsSearchEntry[]>(() => [
+  createSettingsSearchEntry("panel:feed", "feed", t("news.title"), t("news.settingsDescription"), "RSS actualités transports projets"),
+  createSettingsSearchEntry("feed.modes", "feed", t("news.mode"), NEWS_MODES.map(mode => t(`news.modes.${mode}`)).join(" ")),
+  createSettingsSearchEntry("feed.topics", "feed", t("news.topic"), NEWS_TOPICS.map(topic => t(`news.topics.${topic}`)).join(" ")),
+  createSettingsSearchEntry("feed.sources", "feed", t("news.source"), NEWS_SOURCES.map(source => source.name).join(" ")),
   createSettingsSearchEntry(
     "panel:language",
     "language",
@@ -1975,6 +1982,15 @@ onBeforeUnmount(() => {
       :is-setting-visible="isSettingVisible"
       :language-options="languageOptions"
       @toggle="togglePanel('language')"
+      @update-settings="updateSettings"
+    />
+
+    <SettingsTransportNewsCategory
+      v-if="isPanelVisible('feed')"
+      :settings="settings"
+      :panel-open="isPanelOpen('feed')"
+      :is-setting-visible="isSettingVisible"
+      @toggle="togglePanel('feed')"
       @update-settings="updateSettings"
     />
 

@@ -26,6 +26,7 @@ import type {
   DatasetSizeScope,
   DatasetState,
   DatasetStorage,
+  PrimCatalogUpdatesResponse,
 } from "./types";
 
 const props = defineProps<{
@@ -45,8 +46,12 @@ const generatedAt = ref("");
 const warningIds = ref<string[]>([]);
 const loading = ref(false);
 const errorMessage = ref("");
+const primCatalogUpdates = ref<PrimCatalogUpdatesResponse>();
+const primCatalogLoading = ref(false);
+const primCatalogRequestError = ref(false);
 let requestSequence = 0;
 let requestController: AbortController | undefined;
+const refreshLoading = computed(() => loading.value || primCatalogLoading.value);
 
 const availableCount = computed(() => datasets.value.filter((dataset) => dataset.state === "available").length);
 const warningCount = computed(() => datasets.value.filter((dataset) =>
@@ -72,6 +77,9 @@ async function loadDatasets(): Promise<void> {
   const sequence = ++requestSequence;
   loading.value = true;
   errorMessage.value = "";
+  primCatalogLoading.value = true;
+  primCatalogRequestError.value = false;
+  void loadPrimCatalogUpdates(controller, sequence);
 
   try {
     const response = await fetch(toServerApiUrl("/api/datasets"), { signal: controller.signal });
@@ -87,6 +95,25 @@ async function loadDatasets(): Promise<void> {
     errorMessage.value = error instanceof Error ? error.message : t("health.datasets.loadFailed");
   } finally {
     if (sequence === requestSequence) loading.value = false;
+  }
+}
+
+async function loadPrimCatalogUpdates(controller: AbortController, sequence: number): Promise<void> {
+  try {
+    const response = await fetch(toServerApiUrl("/api/datasets/prim-updates"), { signal: controller.signal });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    const payload = await response.json() as PrimCatalogUpdatesResponse;
+    if (!Array.isArray(payload.entries) || !["ready", "stale", "unavailable"].includes(payload.state)) {
+      throw new Error("Invalid PRIM catalogue response");
+    }
+    if (sequence !== requestSequence) return;
+    primCatalogUpdates.value = payload;
+  } catch {
+    if (controller.signal.aborted || sequence !== requestSequence) return;
+    primCatalogRequestError.value = true;
+    primCatalogUpdates.value = undefined;
+  } finally {
+    if (sequence === requestSequence) primCatalogLoading.value = false;
   }
 }
 
@@ -137,6 +164,87 @@ function hasFreshnessWarning(status: DatasetFreshnessStatus): boolean {
 function formatDate(value: string | undefined): string {
   if (!value) return "";
   return d(new Date(value), { dateStyle: "medium", timeStyle: "short" });
+}
+
+type PrimCatalogSignal = {
+  kind: "loading" | "unmapped" | "unavailable" | "notReported" | "updateAvailable" | "current" | "dateUnknown" | "localDateUnknown";
+  entry?: PrimCatalogUpdatesResponse["entries"][number];
+};
+
+function primCatalogSignal(dataset: DatasetInfo): PrimCatalogSignal {
+  const ids = new Set(dataset.primDatasetIds ?? []);
+  for (const value of [dataset.sourceUrl, dataset.resourceUrl]) {
+    const id = primDatasetIdFromUrl(value);
+    if (id) ids.add(id);
+  }
+  if (!ids.size) return { kind: "unmapped" };
+  const catalog = primCatalogUpdates.value;
+  if (primCatalogLoading.value && !catalog) return { kind: "loading" };
+  if (primCatalogRequestError.value || !catalog || catalog.state === "unavailable") {
+    return { kind: "unavailable" };
+  }
+  const entries = catalog.entries
+    .filter((entry) => ids.has(entry.datasetId))
+    .sort((left, right) => (right.updatedAt ?? "").localeCompare(left.updatedAt ?? ""));
+  if (!entries.length) return { kind: "notReported" };
+  const latest = entries[0];
+  if (!latest.updatedAt) return { kind: "dateUnknown", entry: latest };
+  if (!dataset.updatedAt || !Number.isFinite(Date.parse(dataset.updatedAt))) {
+    return { kind: "localDateUnknown", entry: latest };
+  }
+  return {
+    kind: Date.parse(latest.updatedAt) > Date.parse(dataset.updatedAt) ? "updateAvailable" : "current",
+    entry: latest,
+  };
+}
+
+function primDatasetIdFromUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || ![
+      "prim.iledefrance-mobilites.fr",
+      "data.iledefrance-mobilites.fr",
+    ].includes(url.hostname)) return undefined;
+    const match = url.pathname.match(/\/(?:fr\/)?(?:jeux-de-donnees|datasets|dataset)\/([^/]+)/iu)
+      ?? url.pathname.match(/\/catalog\/datasets\/([^/]+)/iu);
+    const id = match ? decodeURIComponent(match[1]) : "";
+    return /^[a-z0-9][a-z0-9_-]{1,119}$/iu.test(id) ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function primCatalogSignalText(dataset: DatasetInfo): string {
+  const signal = primCatalogSignal(dataset);
+  switch (signal.kind) {
+    case "loading": return t("health.datasets.prim.loading");
+    case "unmapped": return t("health.datasets.prim.unmapped");
+    case "unavailable": return t("health.datasets.prim.unavailable");
+    case "notReported": return t("health.datasets.prim.notReported");
+    case "dateUnknown": return t("health.datasets.prim.dateUnknown");
+    case "localDateUnknown": return t("health.datasets.prim.localDateUnknown", { date: formatDate(signal.entry?.updatedAt) });
+    case "updateAvailable": return t("health.datasets.prim.updateAvailable", { date: formatDate(signal.entry?.updatedAt) });
+    case "current": return t("health.datasets.prim.current", { date: formatDate(signal.entry?.updatedAt) });
+  }
+}
+
+function primCatalogSignalClass(dataset: DatasetInfo): string {
+  const kind = primCatalogSignal(dataset).kind;
+  if (kind === "updateAvailable" || kind === "unavailable") return "dataset-card__prim-status--warning";
+  if (kind === "current") return "dataset-card__prim-status--current";
+  return "dataset-card__prim-status--muted";
+}
+
+function primCatalogSummary(): string {
+  if (primCatalogLoading.value) return t("health.datasets.prim.loading");
+  if (primCatalogRequestError.value || !primCatalogUpdates.value || primCatalogUpdates.value.state === "unavailable") {
+    return t("health.datasets.prim.unavailableSummary");
+  }
+  const catalog = primCatalogUpdates.value;
+  return catalog.state === "stale"
+    ? t("health.datasets.prim.staleSummary", { date: formatDate(catalog.fetchedAt) })
+    : t("health.datasets.prim.readySummary", { date: formatDate(catalog.checkedAt), count: n(catalog.entries.length) });
 }
 
 function formatSize(bytes: number | undefined, scope: DatasetSizeScope | undefined): string {
@@ -193,13 +301,33 @@ function formatSize(bytes: number | undefined, scope: DatasetSizeScope | undefin
       <button
         class="dataset-manager-modal__refresh"
         type="button"
-        :disabled="loading"
+        :disabled="refreshLoading"
         @click="void loadDatasets()"
       >
-        <RefreshCw :size="15" :class="{ 'dataset-manager-modal__spin': loading }" aria-hidden="true" />
+        <RefreshCw :size="15" :class="{ 'dataset-manager-modal__spin': refreshLoading }" aria-hidden="true" />
         {{ t("health.datasets.refresh") }}
       </button>
     </div>
+
+    <section
+      class="dataset-manager-modal__prim"
+      :class="{ 'dataset-manager-modal__prim--warning': primCatalogUpdates?.state !== 'ready' || primCatalogRequestError }"
+      role="status"
+      aria-live="polite"
+    >
+      <div class="dataset-manager-modal__prim-heading">
+        <Info :size="16" aria-hidden="true" />
+        <strong>{{ primCatalogSummary() }}</strong>
+        <a
+          :href="primCatalogUpdates?.catalogPageUrl ?? 'https://prim.iledefrance-mobilites.fr/fr/mise-a-jour-jeux-de-donnees'"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {{ t("health.datasets.prim.catalogLink") }} <ExternalLink :size="12" aria-hidden="true" />
+        </a>
+      </div>
+      <p>{{ t("health.datasets.prim.scopeNote") }}</p>
+    </section>
 
     <section v-if="loading && !datasets.length" class="dataset-manager-modal__state" role="status">
       <LoaderCircle class="dataset-manager-modal__spin" :size="22" aria-hidden="true" />
@@ -308,6 +436,21 @@ function formatSize(bytes: number | undefined, scope: DatasetSizeScope | undefin
             {{ freshnessWarning(dataset) }}
           </p>
 
+          <p class="dataset-card__prim-status" :class="primCatalogSignalClass(dataset)" role="note">
+            <AlertTriangle v-if="primCatalogSignal(dataset).kind === 'updateAvailable' || primCatalogSignal(dataset).kind === 'unavailable'" :size="14" aria-hidden="true" />
+            <CheckCircle2 v-else-if="primCatalogSignal(dataset).kind === 'current'" :size="14" aria-hidden="true" />
+            <Info v-else :size="14" aria-hidden="true" />
+            <span>{{ primCatalogSignalText(dataset) }}</span>
+            <a
+              v-if="primCatalogSignal(dataset).entry"
+              :href="primCatalogSignal(dataset).entry?.url"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {{ t("health.datasets.prim.datasetLink") }} <ExternalLink :size="12" aria-hidden="true" />
+            </a>
+          </p>
+
           <p v-if="dataset.updatedAt || dataset.generatedAt || dataset.installedAt || dataset.referencePeriod" class="dataset-card__dates">
             <span v-if="dataset.updatedAt">{{ t("health.datasets.updatedAt", { date: formatDate(dataset.updatedAt) }) }}</span>
             <span v-if="dataset.generatedAt">{{ t("health.datasets.generatedAt", { date: formatDate(dataset.generatedAt) }) }}</span>
@@ -359,6 +502,13 @@ function formatSize(bytes: number | undefined, scope: DatasetSizeScope | undefin
 .dataset-manager-modal__summary strong { color: #18233f; font-size: .78rem; }
 .dataset-manager-modal__summary span { color: #64748b; font-size: .68rem; }
 .dataset-manager-modal__summary-warning { background: #fff1d5; border-radius: 999px; color: #915b00 !important; font-weight: 850; padding: 4px 7px; white-space: nowrap; }
+.dataset-manager-modal__prim { background: #eff6ff; border: 1px solid rgba(37,99,235,.16); border-radius: 10px; color: #1e3a5f; display: grid; gap: 5px; margin-bottom: 14px; padding: 10px 12px; }
+.dataset-manager-modal__prim--warning { background: #fff8e8; border-color: rgba(180,110,0,.18); color: #7c4a00; }
+.dataset-manager-modal__prim-heading { align-items: center; display: flex; flex-wrap: wrap; gap: 6px 8px; }
+.dataset-manager-modal__prim-heading strong { font-size: .72rem; }
+.dataset-manager-modal__prim-heading a { align-items: center; color: #4034df; display: inline-flex; font-size: .68rem; font-weight: 850; gap: 4px; margin-left: auto; text-decoration: none; }
+.dataset-manager-modal__prim-heading a:hover, .dataset-manager-modal__prim-heading a:focus-visible { text-decoration: underline; }
+.dataset-manager-modal__prim > p { color: #64748b; font-size: .67rem; line-height: 1.4; margin: 0; }
 .dataset-manager-modal__state { align-items: center; background: #f8f8ff; border: 1px dashed rgba(81,70,255,.25); border-radius: 10px; color: #5146ff; display: flex; font-size: .8rem; font-weight: 800; gap: 8px; justify-content: center; min-height: 100px; padding: 18px; }
 .dataset-manager-modal__state--error { background: #fff5f4; border-color: rgba(180,35,24,.2); color: #a5231d; }
 .dataset-manager-modal__inline-error { background: #fff5f4; border-radius: 8px; color: #a5231d; font-size: .72rem; margin: 0 0 12px; padding: 8px 10px; }
@@ -392,6 +542,13 @@ function formatSize(bytes: number | undefined, scope: DatasetSizeScope | undefin
 .dataset-card__metrics span { color: #64748b; font-size: .66rem; }
 .dataset-card__metrics strong { color: #475569; font-weight: 900; }
 .dataset-card__warning { align-items: flex-start; background: #fff8e8; border-radius: 8px; color: #8d5700; display: flex; font-size: .7rem; gap: 6px; line-height: 1.4; margin: 0; padding: 7px 8px; }
+.dataset-card__prim-status { align-items: flex-start; border-radius: 8px; display: flex; flex-wrap: wrap; font-size: .68rem; gap: 5px; line-height: 1.4; margin: 0; padding: 7px 8px; }
+.dataset-card__prim-status--warning { background: #fff8e8; color: #8d5700; }
+.dataset-card__prim-status--current { background: #ecfdf3; color: #087a50; }
+.dataset-card__prim-status--muted { background: #f8fafc; color: #64748b; }
+.dataset-card__prim-status > span { flex: 1 1 200px; }
+.dataset-card__prim-status a { align-items: center; color: #4034df; display: inline-flex; font-weight: 850; gap: 3px; text-decoration: none; }
+.dataset-card__prim-status a:hover, .dataset-card__prim-status a:focus-visible { text-decoration: underline; }
 .dataset-card__dates { color: #64748b; display: flex; flex-wrap: wrap; font-size: .66rem; gap: 4px 11px; line-height: 1.4; margin: 0; }
 .dataset-card__dates span + span::before { content: "·"; margin-right: 11px; }
 .dataset-card__details-note { align-items: flex-start; color: #64748b; display: flex; font-size: .68rem; gap: 6px; line-height: 1.4; margin: 0; }

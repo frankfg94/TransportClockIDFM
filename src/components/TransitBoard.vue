@@ -75,6 +75,7 @@ const props = withDefaults(
     error?: string;
     rateLimited?: boolean;
     updatedAt?: Date;
+    currentTimeMs?: number;
     removable?: boolean;
     alarmDepartureIds?: string[];
     closedSummaryMode?: ClosedSummaryMode;
@@ -96,6 +97,7 @@ const emit = defineEmits<{
   "open-traffic": [alert: BoardTrafficAlert];
   remove: [];
   "open-line-page": [board: TransitBoardConfig];
+  "open-news": [board: TransitBoardConfig];
   "open-fullscreen-panel": [board: TransitBoardConfig];
   "schedule-alarm": [
     payload: {
@@ -430,7 +432,7 @@ function formatWait(value?: string, vehicleAtStop = false): string {
 
   const minutes = Math.max(
     0,
-    Math.round((new Date(value).getTime() - Date.now()) / 60000),
+    Math.round((new Date(value).getTime() - (props.currentTimeMs ?? Date.now())) / 60000),
   );
 
   if (minutes === 0) {
@@ -541,6 +543,11 @@ function formatRemainingStopCount(departure: Departure): string {
 
 function openPatternForDeparture(payload: DeparturePatternPayload): void {
   emit("show-pattern", payload);
+}
+
+function openNews(): void {
+  actionsOpen.value = false;
+  emit("open-news", props.board);
 }
 
 function openLinePage(): void {
@@ -830,6 +837,11 @@ onUnmounted(() => {
           class="board-actions__menu"
           close-on-outside-click
         >
+          <button type="button" role="menuitem" @click="openNews">
+            <Rss :size="17" aria-hidden="true" />
+            {{ t("news.viewNews") }}
+          </button>
+
           <button type="button" role="menuitem" @click="openLinePage">
             <Map :size="17" aria-hidden="true" />
             {{ t("board.lineMap") }}

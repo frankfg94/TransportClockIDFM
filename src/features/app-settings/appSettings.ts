@@ -16,6 +16,8 @@ import {
   type TransportMapBasemapStyle,
 } from "../transport-map/config/globalTransportPlanConfig";
 
+import { normalizeNewsPreferences, type NewsPreferences } from "../transport-news/types";
+
 export { transferResolverModeOptions };
 export type { TransportMapBasemapStyle };
 export type { TrafficCalendarImpactScope, TransferResolverMode };
@@ -75,6 +77,7 @@ export interface AppSettings {
   boardTogglesPlacement: BoardTogglesPlacement;
   placePresetNavigationMode: PlacePresetNavigationMode;
   showPlanInNavigation: boolean;
+  transportNews: NewsPreferences;
   showTravelRouteLineIcons: boolean;
   showUserLocation: boolean;
   globalMapBasemapContrast: number;
@@ -288,6 +291,7 @@ export function createDefaultAppSettings(): AppSettings {
     boardTogglesPlacement: "inline",
     placePresetNavigationMode: "dropdown-swipe",
     showPlanInNavigation: true,
+    transportNews: normalizeNewsPreferences(undefined),
     showTravelRouteLineIcons: true,
     showUserLocation: true,
     globalMapBasemapContrast: GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.default,
@@ -388,6 +392,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       value.placePresetNavigationMode,
       value.placeSwipeNavigationEnabled,
     ),
+    transportNews: normalizeNewsPreferences(value.transportNews),
     showPlanInNavigation: readBoolean(
       value.showPlanInNavigation,
       defaults.showPlanInNavigation,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef } from "vue";
 import { ArrowLeft, ChevronDown, Clock3, LoaderCircle } from "lucide-vue-next";
 import TransitBoard from "../../components/TransitBoard.vue";
 import { useI18n } from "../../i18n";
@@ -17,6 +17,7 @@ import type { NearbyStationScheduleItem } from "./nearbyStationSchedules";
 
 const props = withDefaults(defineProps<{
   items: readonly NearbyStationScheduleItem[];
+  active?: boolean;
   activeModes?: readonly GlobalMapMode[];
   activeStationId?: string;
   loading?: boolean;
@@ -29,6 +30,7 @@ const props = withDefaults(defineProps<{
   alarmDepartureIds?: (itemId: string) => string[];
 }>(), {
   contextMenuMode: "direction",
+  active: true,
 });
 
 const emit = defineEmits<{
@@ -76,11 +78,18 @@ const displayedOutsideMapItems = computed(() => sortUnavailableLast(filteredItem
   !item.entry.insideRadius,
 )));
 
-onMounted(() => {
+function syncClock(): void {
+  if (clockTimer !== undefined) window.clearInterval(clockTimer);
+  clockTimer = undefined;
+  if (!props.active) return;
+  now.value = Date.now();
   clockTimer = window.setInterval(() => {
     now.value = Date.now();
   }, 1_000);
-});
+}
+
+onMounted(syncClock);
+watch(() => props.active, syncClock);
 
 onBeforeUnmount(() => {
   if (clockTimer !== undefined) window.clearInterval(clockTimer);
@@ -126,19 +135,25 @@ function isDirectionVisible(itemId: string, directionId: string): boolean {
 }
 
 function visibleDirectionGroups(item: NearbyStationScheduleItem): DirectionDepartureGroup[] {
-  // Keep the nearby panel's one-second clock refresh, just like the home board
-  // gets refreshed by its parent clock, so the shared counter stays current.
-  void now.value;
   return (item.result?.directionGroups ?? []).filter((group) =>
     isDirectionVisible(item.id, group.id),
   );
 }
 
+// Clock ticks change countdowns, not schedule content. Keep these references
+// stable so TransitBoard only measures/animates height on real data changes.
+const scheduleGroups = new WeakMap<NearbyStationScheduleItem, ComputedRef<DirectionDepartureGroup[]>>();
+
 function scheduleDirectionGroups(item: NearbyStationScheduleItem): DirectionDepartureGroup[] {
-  return visibleDirectionGroups(item).map((group) => ({
-    ...group,
-    departures: group.departures.slice(0, 2),
-  }));
+  let groups = scheduleGroups.get(item);
+  if (!groups) {
+    groups = computed(() => visibleDirectionGroups(item).map((group) => ({
+      ...group,
+      departures: group.departures.slice(0, 2),
+    })));
+    scheduleGroups.set(item, groups);
+  }
+  return groups.value;
 }
 
 function scheduleBoard(item: NearbyStationScheduleItem): TransitBoardConfig {
@@ -284,6 +299,7 @@ function boardContextMenu(itemId: string, event: MouseEvent): void {
       >
         <TransitBoard
           :board="scheduleBoard(item)"
+          :current-time-ms="now"
           :departures="scheduleDepartures(item)"
           :direction-groups="scheduleDirectionGroups(item)"
           :collapsed-direction-ids="collapsedDirectionIds(item)"
@@ -333,6 +349,7 @@ function boardContextMenu(itemId: string, event: MouseEvent): void {
         >
           <TransitBoard
             :board="scheduleBoard(item)"
+            :current-time-ms="now"
             :departures="scheduleDepartures(item)"
             :direction-groups="scheduleDirectionGroups(item)"
             :collapsed-direction-ids="collapsedDirectionIds(item)"

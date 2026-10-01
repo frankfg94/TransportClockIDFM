@@ -68,6 +68,8 @@ export interface DatasetInfo {
   sizeScope?: DatasetSizeScope;
   sourceUrl?: string;
   resourceUrl?: string;
+  /** Exact PRIM catalogue identifiers that describe this source, when known. */
+  primDatasetIds?: string[];
   license: DatasetLicense;
   referencePeriod?: string;
   updatedAt?: string;
@@ -84,4 +86,20 @@ export interface DatasetManagerResponse {
   generatedAt: string;
   datasets: DatasetInfo[];
   warnings: string[];
+}
+
+export interface PrimCatalogUpdateEntry {
+  datasetId: string;
+  title: string;
+  url: string;
+  updatedAt?: string;
+}
+
+export interface PrimCatalogUpdatesResponse {
+  feedUrl: string;
+  catalogPageUrl: string;
+  state: "ready" | "stale" | "unavailable";
+  checkedAt: string;
+  fetchedAt?: string;
+  entries: PrimCatalogUpdateEntry[];
 }

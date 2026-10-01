@@ -1823,6 +1823,10 @@ function setBoardDisplayMode(displayMode: TransitBoardPreferences["boardDisplayM
   closeTopbarMenu();
 }
 
+function openBoardNews(board: TransitBoardConfig): void {
+  void router.push({ path: "/feed", query: { mode: board.line.mode, line: board.line.shortName } });
+}
+
 function openLinePage(board: TransitBoardConfig): void {
   const transportType = board.line.mode === "train" ? "transilien" : board.line.mode;
   const lineId = board.line.shortName || board.line.ref;
@@ -2920,6 +2924,7 @@ onBeforeUnmount(() => {
                     @open-traffic="(alert) => openHomeTrafficModal(board, alert)"
                     @remove="removeCustomBoard(board.id)"
                     @open-line-page="openLinePage"
+                    @open-news="openBoardNews"
                     @open-fullscreen-panel="openFullscreenPanel"
                     @schedule-alarm="openAlarmModal"
                     @show-pattern="openPatternModal"

@@ -1815,6 +1815,7 @@ onBeforeUnmount(() => {
         :selected-line-ids="nearby.selectedLineIds"
         :active-modes="nearby.activeModes.value"
         :available-modes="NEARBY_SUPPORTED_MODES"
+        show-news-notifications
         :basemap-style="basemapStyle"
         :show-isochrone-control="settings.nearbyMapShowIsochroneControl"
         show-city-view-control
@@ -1913,9 +1914,10 @@ onBeforeUnmount(() => {
             :direction-visible="schedules.isDirectionVisible"
           />
         </template>
-        <template #station-schedules="{ activeStationId, fullscreen }">
+        <template #station-schedules="{ activeStationId, fullscreen, active }">
           <NearbyStationSchedulePanel
             :items="displayedScheduleItems"
+            :active="active"
             :active-modes="nearby.activeModes.value"
             :active-station-id="activeStationId"
             :loading="schedules.isRefreshing.value"

@@ -1,6 +1,7 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import NearbyStationSchedulePanel from "../src/features/nearby-stations/NearbyStationSchedulePanel.vue";
+import TransitBoard from "../src/components/TransitBoard.vue";
 import type { NearbyStationScheduleItem } from "../src/features/nearby-stations/nearbyStationSchedules";
 import type { BoardTrafficAlert } from "../src/features/traffic";
 
@@ -52,6 +53,80 @@ const item = {
 } as unknown as NearbyStationScheduleItem;
 
 describe("NearbyStationSchedulePanel", () => {
+  it("updates countdowns without cloning boards to animate unchanged schedules", async () => {
+    vi.useFakeTimers();
+    const group = item.result!.directionGroups[0]!;
+    const timedItem: NearbyStationScheduleItem = {
+      ...item,
+      result: {
+        ...item.result!,
+        directionGroups: [{ ...group, departures: [{ ...group.departures[0]!,
+          expectedDepartureTime: new Date(Date.now() + 60_000).toISOString(),
+        }] }],
+      },
+    };
+    const wrapper = mount(NearbyStationSchedulePanel, { props: { items: [timedItem] } });
+    const clone = vi.spyOn(HTMLElement.prototype, "cloneNode");
+    try {
+      const board = wrapper.getComponent(TransitBoard);
+      const groups = board.props("directionGroups");
+      expect(wrapper.get(".last-service__time").text()).toBe("1");
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(wrapper.get(".last-service__time").text()).toBe("0");
+      expect(board.props("directionGroups")).toBe(groups);
+      expect(clone).not.toHaveBeenCalled();
+
+      await wrapper.setProps({ items: [{ ...timedItem, result: {
+        ...timedItem.result!, directionGroups: [{ ...group, label: "New direction" }],
+      } }] });
+      expect(board.props("directionGroups")).not.toBe(groups);
+      expect(wrapper.text()).toContain("New direction");
+    } finally {
+      wrapper.unmount();
+      clone.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("pauses the hidden panel clock and immediately refreshes it when reopened", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(NearbyStationSchedulePanel, { props: { items: [item], active: false } });
+    try {
+      const board = wrapper.getComponent(TransitBoard);
+      const initialTime = board.props("currentTimeMs");
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(board.props("currentTimeMs")).toBe(initialTime);
+      await wrapper.setProps({ active: true });
+      expect(board.props("currentTimeMs")).toBe(Date.now());
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(board.props("currentTimeMs")).toBe(Date.now());
+      await wrapper.setProps({ active: false });
+      const hiddenTime = board.props("currentTimeMs");
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(board.props("currentTimeMs")).toBe(hiddenTime);
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not invalidate other boards when one schedule arrives", async () => {
+    const otherItem: NearbyStationScheduleItem = { ...item, id: "other" };
+    const wrapper = mount(NearbyStationSchedulePanel, { props: { items: [item, otherItem] } });
+    try {
+      const [board, otherBoard] = wrapper.findAllComponents(TransitBoard);
+      const groups = board!.props("directionGroups");
+      const otherGroups = otherBoard!.props("directionGroups");
+      await wrapper.setProps({ items: [item, { ...otherItem, result: {
+        ...otherItem.result!, directionGroups: [],
+      } }] });
+      expect(board!.props("directionGroups")).toBe(groups);
+      expect(otherBoard!.props("directionGroups")).not.toBe(otherGroups);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it("removes the list height limit in fullscreen and emits direction context menus", async () => {
     const wrapper = mount(NearbyStationSchedulePanel, {
       props: {
@@ -277,10 +352,10 @@ describe("NearbyStationSchedulePanel", () => {
     expect(menu.text()).toContain("Supprimer");
     expect(menu.text()).not.toContain("Changer de station");
 
-    await menu.findAll("button")[0]!.trigger("click");
+    await menu.findAll("button").find((button) => button.text().includes("Schéma de la ligne"))!.trigger("click");
     expect(wrapper.emitted("openLinePage")?.[0]).toEqual([item, expect.any(Object)]);
     await wrapper.get(".board-actions__trigger").trigger("click");
-    await wrapper.get(".context-menu-stub").findAll("button")[1]!.trigger("click");
+    await wrapper.get(".context-menu-stub").findAll("button").find((button) => button.text().includes("Affichage panneau"))!.trigger("click");
     expect(wrapper.emitted("openFullscreenPanel")?.[0]).toEqual([item, expect.any(Object)]);
     await wrapper.get(".board-actions__trigger").trigger("click");
     await wrapper.get(".context-menu-stub").findAll("button").at(-1)!.trigger("click");

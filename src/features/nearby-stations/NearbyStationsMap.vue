@@ -116,6 +116,9 @@ import NearbyCityInfoCard, {
 } from "./NearbyCityInfoCard.vue";
 import NearbyCityComparisonOverlay from "./NearbyCityComparisonOverlay.vue";
 import NearbyCityComparisonModal from "./NearbyCityComparisonModal.vue";
+import NearbyNewsAlerts from "./NearbyNewsAlerts.vue";
+import { normalizeNewsLine } from "../transport-news/filter";
+import type { NewsLine } from "../transport-news/types";
 import {
   buildNearbyCityOptions,
   nearbyCityComparisonLineDetail,
@@ -230,6 +233,7 @@ const props = withDefaults(defineProps<{
   showAirQualityControl?: boolean;
   showDirectoryControl?: boolean;
   showNeighborhoodScoreControl?: boolean;
+  showNewsNotifications?: boolean;
   showBasemapControl?: boolean;
   showDisplayControl?: boolean;
   showFullscreenControl?: boolean;
@@ -871,6 +875,7 @@ const hasVisiblePrimaryControls = computed(() => !isPlacesPreview.value && (
   || props.showAirQualityControl
   || props.showDirectoryControl
   || props.showNeighborhoodScoreControl
+  || props.showNewsNotifications
   || props.showBasemapControl
   || props.showDisplayControl
   || props.showFullscreenControl
@@ -1308,6 +1313,55 @@ const cityViewTransportStations = computed<IrisTransportStation[]>(() => {
     lineIds: station.lineIds,
     lines: entry.lines,
   })));
+});
+function nearbyNewsLine(mode: GlobalMapMode, code: string): NewsLine | undefined {
+  const newsMode = mode === "TRANSILIEN" ? "train" : mode.toLowerCase();
+  return normalizeNewsLine(newsMode, code);
+}
+const nearbyNewsLines = computed<NewsLine[]>(() => {
+  const lines = new Map<string, NewsLine>();
+  const add = (mode: GlobalMapMode, code: string) => {
+    const line = nearbyNewsLine(mode, code);
+    if (line) lines.set(`${line.mode}:${line.code}`, line);
+  };
+  if (cityViewEnabled.value && cityViewNeighborhoods.value.length) {
+    const localStations = filterIrisTransportStationsInNeighborhoods(
+      cityViewNeighborhoods.value,
+      cityViewTransportStations.value,
+    );
+    for (const station of localStations) {
+      for (const localLine of station.lines) {
+        const line = props.cityViewNetwork?.linesById.get(localLine.id);
+        if (line) add(line.mode, lineDisplayLabel(line));
+        else {
+          const nearbyLine = (props.cityViewStations ?? props.stations)
+            .flatMap((entry) => entry.lines)
+            .find((candidate) => candidate.id === localLine.id);
+          if (nearbyLine) add(nearbyLine.mode, lineDisplayLabel(nearbyLine));
+        }
+      }
+    }
+  } else {
+    for (const entry of props.stations) {
+      if (!entry.insideRadius) continue;
+      for (const line of entry.lines) {
+        if (entry.lineInsideRadius?.[line.id] === false) continue;
+        add(line.mode, lineDisplayLabel(line));
+      }
+    }
+  }
+  return [...lines.values()].sort((left, right) =>
+    left.mode.localeCompare(right.mode) || left.code.localeCompare(right.code, undefined, { numeric: true }),
+  );
+});
+const nearbyNewsLocalities = computed(() => {
+  const values = cityViewEnabled.value
+    ? cityViewNeighborhoods.value.map((neighborhood) => neighborhood.communeName)
+    : props.stations
+      .filter((entry) => entry.insideRadius)
+      .flatMap((entry) => entry.memberStations.map((station) => station.city ?? entry.station.city ?? ""));
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, "fr-FR"));
 });
 const cityViewTransportModes = computed<NearbyCityInfoCardTransportMode[]>(() => {
   const counts = countIrisTransportInNeighborhoods(cityViewNeighborhoods.value, cityViewTransportStations.value);
@@ -4995,6 +5049,11 @@ function mix(from: number, to: number, progress: number): number {
         @swap-cities="swapCityComparison"
       />
       <div v-if="hasVisiblePrimaryControls" class="nearby-map__primary-controls">
+        <NearbyNewsAlerts
+          v-if="props.showNewsNotifications"
+          :lines="nearbyNewsLines"
+          :localities="nearbyNewsLocalities"
+        />
         <button
           v-if="props.showCityViewControl"
           class="nearby-map__city-view-toggle"
@@ -6004,7 +6063,12 @@ function mix(from: number, to: number, progress: number): number {
             role="tabpanel"
             aria-labelledby="nearby-map-schedule-tab"
           >
-            <slot name="station-schedules" :active-station-id="activeStation?.id" :fullscreen="isFullscreen" />
+            <slot
+              name="station-schedules"
+              :active-station-id="activeStation?.id"
+              :fullscreen="isFullscreen"
+              :active="activeSidebarTab === 'schedule'"
+            />
           </section>
         </div>
       </div>

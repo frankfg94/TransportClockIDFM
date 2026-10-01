@@ -7,6 +7,7 @@ import {
   Map,
   MapPin,
   MoreVertical,
+  Rss,
   SlidersHorizontal,
   TriangleAlert,
 } from "lucide-vue-next";
@@ -101,6 +102,7 @@ const primaryLinks = computed<PrimaryNavigationLink[]>(() => [
 ]);
 
 const localizedSecondaryLinks = computed(() => [
+  { to: "/feed", label: t("news.title"), icon: Rss },
   { to: "/nearby-stations", label: t("common.labels.nearbyStations"), icon: MapPin },
   { to: "/settings", label: t("common.labels.settings"), icon: SlidersHorizontal },
   { to: "/health", label: t("common.labels.health"), icon: Activity },
