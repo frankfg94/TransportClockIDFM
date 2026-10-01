@@ -82,7 +82,10 @@ export interface AppSettings {
   showUserLocation: boolean;
   globalMapBasemapContrast: number;
   globalMapBasemapStyle: TransportMapBasemapStyle;
+  globalMapContinuousRendering: boolean;
+  globalMapProgressiveBusRendering: boolean;
   deckAntialiasing: boolean;
+  realEstateColorTransitions: boolean;
   nearbyMapShowIsochroneControl: boolean;
   nearbyMapShowDirectoryControl: boolean;
   nearbyMapShowBasemapControl: boolean;
@@ -296,7 +299,10 @@ export function createDefaultAppSettings(): AppSettings {
     showUserLocation: true,
     globalMapBasemapContrast: GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.default,
     globalMapBasemapStyle: GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.style.default,
+    globalMapContinuousRendering: true,
+    globalMapProgressiveBusRendering: false,
     deckAntialiasing: true,
+    realEstateColorTransitions: true,
     nearbyMapShowIsochroneControl: true,
     nearbyMapShowDirectoryControl: true,
     nearbyMapShowBasemapControl: true,
@@ -404,7 +410,13 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     showUserLocation: readBoolean(value.showUserLocation, defaults.showUserLocation),
     globalMapBasemapContrast: parseGlobalMapBasemapContrast(value.globalMapBasemapContrast),
     globalMapBasemapStyle: parseGlobalMapBasemapStyle(value.globalMapBasemapStyle),
+    globalMapContinuousRendering: readBoolean(value.globalMapContinuousRendering, defaults.globalMapContinuousRendering),
+    globalMapProgressiveBusRendering: readBoolean(value.globalMapProgressiveBusRendering, defaults.globalMapProgressiveBusRendering),
     deckAntialiasing: readBoolean(value.deckAntialiasing, defaults.deckAntialiasing),
+    realEstateColorTransitions: readBoolean(
+      value.realEstateColorTransitions,
+      defaults.realEstateColorTransitions,
+    ),
     nearbyMapShowIsochroneControl: readBoolean(
       value.nearbyMapShowIsochroneControl,
       defaults.nearbyMapShowIsochroneControl,

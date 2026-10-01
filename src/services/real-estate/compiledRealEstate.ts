@@ -188,6 +188,74 @@ export interface DvfPurchasePointsFile {
   points: DvfPurchasePoint[];
 }
 
+export interface DvfPurchasePropertyDetails {
+  type?: string;
+  builtSurfaceM2?: number;
+  rooms?: number;
+  landSurfaceM2?: number;
+  carrezSurfaceM2?: number;
+  count: number;
+}
+
+export interface DvfPurchaseSaleDetails {
+  date: string;
+  price?: number;
+  nature?: string;
+  lotCount?: number;
+  properties: DvfPurchasePropertyDetails[];
+}
+
+export interface DvfPurchaseSalesLocation {
+  coordinates: DvfPurchasePoint;
+  sales: DvfPurchaseSaleDetails[];
+}
+
+export interface DvfPurchaseSalesFile {
+  schemaVersion: 1;
+  cityCode: string;
+  referencePeriod: string;
+  locationPrecision: "cadastral-parcel-centre-wgs84";
+  locations: DvfPurchaseSalesLocation[];
+}
+
+type DvfCompactPurchaseProperty = readonly [
+  type: string | null,
+  builtSurfaceM2: number | null,
+  rooms: number | null,
+  landSurfaceM2: number | null,
+  carrezSurfaceM2: number | null,
+  count: number,
+];
+
+type DvfCompactPurchaseSale = readonly [
+  date: string,
+  price: number | null,
+  nature: string | null,
+  lotCount: number | null,
+  properties: readonly DvfCompactPurchaseProperty[],
+];
+
+type DvfCompactPurchaseLocation = readonly [
+  coordinates: DvfPurchasePoint,
+  sales: readonly DvfCompactPurchaseSale[],
+];
+
+interface DvfCompactPurchaseSalesAsset {
+  schemaVersion: 1;
+  cityCode: string;
+  referencePeriod: string;
+  locationPrecision: "cadastral-parcel-centre-wgs84";
+  locations: readonly DvfCompactPurchaseLocation[];
+}
+
+export interface DvfPurchaseSalesDescriptor {
+  asset: string;
+  bytes: number;
+  checksumSha256: string;
+  saleCount: number;
+  locationCount: number;
+}
+
 export interface DvfPurchasePointsCityDescriptor {
   code: string;
   asset: string;
@@ -195,6 +263,7 @@ export interface DvfPurchasePointsCityDescriptor {
   checksumSha256: string;
   pointCount: number;
   bounds: readonly [minLongitude: number, minLatitude: number, maxLongitude: number, maxLatitude: number];
+  sales?: DvfPurchaseSalesDescriptor;
 }
 
 export interface DvfPurchasePointsManifest {
@@ -485,7 +554,15 @@ export function assertDvfPurchasePointsManifest(value: unknown): asserts value i
       || !isFiniteNumber(city.bounds[2]) || city.bounds[2] < -180 || city.bounds[2] > 180
       || !isFiniteNumber(city.bounds[3]) || city.bounds[3] < -90 || city.bounds[3] > 90
       || city.bounds[0] > city.bounds[2]
-      || city.bounds[1] > city.bounds[3]) {
+      || city.bounds[1] > city.bounds[3]
+      || (city.sales !== undefined && (!isRecord(city.sales)
+        || typeof city.sales.asset !== "string"
+        || !/^sales\/[A-Za-z0-9_-]+\.json$/u.test(city.sales.asset)
+        || !isNonNegativeInteger(city.sales.bytes)
+        || typeof city.sales.checksumSha256 !== "string"
+        || !/^[a-f0-9]{64}$/u.test(city.sales.checksumSha256)
+        || !isNonNegativeInteger(city.sales.saleCount)
+        || !isNonNegativeInteger(city.sales.locationCount)))) {
       throw new Error("DVF purchase-points city descriptor is invalid.");
     }
     seenCities.add(city.code);
@@ -525,6 +602,85 @@ export function assertDvfPurchasePointsFile(value: unknown): asserts value is Dv
   }
 }
 
+export function assertDvfPurchaseSalesAsset(value: unknown): asserts value is DvfCompactPurchaseSalesAsset {
+  if (!isRecord(value)
+    || value.schemaVersion !== DVF_PURCHASE_POINTS_SCHEMA_VERSION
+    || typeof value.cityCode !== "string"
+    || !/^\d{5}$/u.test(value.cityCode)
+    || typeof value.referencePeriod !== "string"
+    || value.locationPrecision !== DVF_PURCHASE_POINTS_PRECISION
+    || !Array.isArray(value.locations)) {
+    throw new Error("DVF purchase-sales city asset is invalid.");
+  }
+
+  for (const location of value.locations) {
+    if (!Array.isArray(location)
+      || location.length !== 2
+      || !Array.isArray(location[0])
+      || location[0].length !== 2
+      || !isFiniteNumber(location[0][0])
+      || location[0][0] < -180 || location[0][0] > 180
+      || !isFiniteNumber(location[0][1])
+      || location[0][1] < -90 || location[0][1] > 90
+      || !Array.isArray(location[1])) {
+      throw new Error("DVF purchase-sales location is invalid.");
+    }
+
+    for (const sale of location[1]) {
+      if (!Array.isArray(sale)
+        || sale.length !== 5
+        || typeof sale[0] !== "string"
+        || !/^\d{4}-\d{2}-\d{2}$/u.test(sale[0])
+        || (sale[1] !== null && (!isFiniteNumber(sale[1]) || sale[1] < 0))
+        || (sale[2] !== null && typeof sale[2] !== "string")
+        || (sale[3] !== null && !isNonNegativeInteger(sale[3]))
+        || !Array.isArray(sale[4])) {
+        throw new Error("DVF purchase-sale details are invalid.");
+      }
+
+      for (const property of sale[4]) {
+        if (!Array.isArray(property)
+          || property.length !== 6
+          || (property[0] !== null && typeof property[0] !== "string")
+          || (property[1] !== null && (!isFiniteNumber(property[1]) || property[1] < 0))
+          || (property[2] !== null && !isNonNegativeInteger(property[2]))
+          || (property[3] !== null && (!isFiniteNumber(property[3]) || property[3] < 0))
+          || (property[4] !== null && (!isFiniteNumber(property[4]) || property[4] < 0))
+          || !isNonNegativeInteger(property[5])
+          || property[5] < 1) {
+          throw new Error("DVF purchase-sale property details are invalid.");
+        }
+      }
+    }
+  }
+}
+
+function normalizeDvfPurchaseSalesAsset(asset: DvfCompactPurchaseSalesAsset): DvfPurchaseSalesFile {
+  return {
+    schemaVersion: asset.schemaVersion,
+    cityCode: asset.cityCode,
+    referencePeriod: asset.referencePeriod,
+    locationPrecision: asset.locationPrecision,
+    locations: asset.locations.map(([coordinates, compactSales]) => ({
+      coordinates,
+      sales: compactSales.map(([date, price, nature, lotCount, compactProperties]) => ({
+        date,
+        ...(price !== null ? { price } : {}),
+        ...(nature !== null ? { nature } : {}),
+        ...(lotCount !== null ? { lotCount } : {}),
+        properties: compactProperties.map(([type, builtSurfaceM2, rooms, landSurfaceM2, carrezSurfaceM2, count]) => ({
+          ...(type !== null ? { type } : {}),
+          ...(builtSurfaceM2 !== null ? { builtSurfaceM2 } : {}),
+          ...(rooms !== null ? { rooms } : {}),
+          ...(landSurfaceM2 !== null ? { landSurfaceM2 } : {}),
+          ...(carrezSurfaceM2 !== null ? { carrezSurfaceM2 } : {}),
+          count,
+        })),
+      })),
+    })),
+  };
+}
+
 export class DvfDataUnavailableError extends Error {
   readonly code = "dvf-data-unavailable";
 
@@ -541,6 +697,7 @@ export interface DvfDataProvider {
   loadMapDepartment(code: string, signal?: AbortSignal): Promise<DvfMapDepartmentFile>;
   loadPurchasePointsManifest(signal?: AbortSignal): Promise<DvfPurchasePointsManifest>;
   loadPurchasePoints(code: string, signal?: AbortSignal): Promise<DvfPurchasePointsFile>;
+  loadPurchaseSales(code: string, signal?: AbortSignal): Promise<DvfPurchaseSalesFile>;
 }
 
 export function createDvfDataProvider(options: { fetcher?: typeof fetch; basePath?: string } = {}): DvfDataProvider {
@@ -555,6 +712,7 @@ export function createDvfDataProvider(options: { fetcher?: typeof fetch; basePat
   const cityRequests = new Map<string, Promise<DvfCityFile>>();
   const mapDepartmentRequests = new Map<string, Promise<DvfMapDepartmentFile>>();
   const purchasePointsRequests = new Map<string, Promise<DvfPurchasePointsFile>>();
+  const purchaseSalesRequests = new Map<string, Promise<DvfPurchaseSalesFile>>();
 
   async function loadJson<T>(asset: string, validate: (value: unknown) => asserts value is T, signal?: AbortSignal): Promise<T> {
     const response = await runNetworkTask((requestSignal) => fetcher(`${basePath}/${asset}`, {
@@ -670,7 +828,33 @@ export function createDvfDataProvider(options: { fetcher?: typeof fetch; basePat
     return signal ? withAbort(request, signal) : request;
   }
 
-  return { loadManifest, loadRentalIndicators, loadCity, loadMapDepartment, loadPurchasePointsManifest, loadPurchasePoints };
+  async function loadPurchaseSales(code: string, signal?: AbortSignal): Promise<DvfPurchaseSalesFile> {
+    const manifest = await loadPurchasePointsManifest(signal);
+    purchasePointCitiesByCode ??= new Map(manifest.cities.map((candidate) => [candidate.code, candidate]));
+    const descriptor = purchasePointCitiesByCode.get(code);
+    if (!descriptor?.sales) throw new DvfDataUnavailableError(`No DVF purchase-sales asset for commune ${code}.`);
+
+    let request = purchaseSalesRequests.get(code);
+    if (!request) {
+      request = loadJson(`purchase-points/${descriptor.sales.asset}`, assertDvfPurchaseSalesAsset).then((asset) => {
+        if (asset.cityCode !== code
+          || asset.referencePeriod !== manifest.referencePeriod
+          || asset.locations.length !== descriptor.sales!.locationCount
+          || asset.locations.reduce((count, location) => count + location[1].length, 0) !== descriptor.sales!.saleCount) {
+          throw new DvfDataUnavailableError("DVF purchase-sales asset does not match its manifest.");
+        }
+        return normalizeDvfPurchaseSalesAsset(asset);
+      }).catch((error) => {
+        purchaseSalesRequests.delete(code);
+        throw error;
+      });
+      purchaseSalesRequests.set(code, request);
+      while (purchaseSalesRequests.size > 4) purchaseSalesRequests.delete(purchaseSalesRequests.keys().next().value as string);
+    }
+    return signal ? withAbort(request, signal) : request;
+  }
+
+  return { loadManifest, loadRentalIndicators, loadCity, loadMapDepartment, loadPurchasePointsManifest, loadPurchasePoints, loadPurchaseSales };
 }
 
 let sharedProvider: DvfDataProvider | undefined;

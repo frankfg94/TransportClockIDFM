@@ -44,6 +44,7 @@ export interface UseGlobalTransportViewportOptions {
   afterRefresh?: () => void;
   isAbortError?: (error: unknown) => boolean;
   debounceMs: number;
+  acceptsCameraChange?: (requested: CameraState, current: CameraState) => boolean;
 }
 
 /**
@@ -86,21 +87,25 @@ export function useGlobalTransportViewport(options: UseGlobalTransportViewportOp
     }, Math.max(0, options.debounceMs));
   }
 
-  async function refreshViewport(forcedLineIds?: readonly string[]): Promise<boolean> {
+  async function refreshViewport(forcedLineIds?: readonly string[], requestedCamera?: CameraState): Promise<boolean> {
     const currentNetwork = options.getNetwork();
     if (!currentNetwork) return false;
     const currentRequestToken = ++requestToken;
-    const generation = options.getCamera().generation;
+    const queryCamera = requestedCamera ?? options.getCamera();
+    const generation = queryCamera.generation;
+    const modeMask = options.getVisibleModeMask();
+    const activeLineId = options.getActiveLineId();
     const networkVersionBefore = options.getNetworkVersion?.();
+    const forcedLineSignature = options.getForcedLineIds().join("\0");
     const requestedForcedLineIds = forcedLineIds ?? options.getForcedLineIds();
     pendingRequests += 1;
     options.setLoading(true);
     try {
       const result = await options.queryViewport(
-        options.getCamera(),
-        options.getVisibleModeMask(),
+        queryCamera,
+        modeMask,
         generation,
-        options.getActiveLineId(),
+        activeLineId,
         requestedForcedLineIds,
       );
       const refreshedNetwork = options.getNetworkAfterQuery();
@@ -120,7 +125,11 @@ export function useGlobalTransportViewport(options: UseGlobalTransportViewportOp
       });
       if (
         currentRequestToken !== requestToken ||
-        generation !== options.getCamera().generation
+        modeMask !== options.getVisibleModeMask() ||
+        activeLineId !== options.getActiveLineId() ||
+        forcedLineSignature !== options.getForcedLineIds().join("\0") ||
+        (generation !== options.getCamera().generation &&
+          !options.acceptsCameraChange?.(queryCamera, options.getCamera()))
       ) {
         if (currentRequestToken === requestToken) options.setLoading(false);
         recordTiming(options, "viewport_result_apply", resultApplyStartedAt, {

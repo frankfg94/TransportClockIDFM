@@ -98,6 +98,7 @@
         :real-estate-metric-range="realEstateMetricRange"
         :real-estate-metric-mode="realEstateMetricMode"
         :real-estate-rental-estimates-by-city-code="realEstateRentalEstimates"
+        :real-estate-color-transitions="appSettings.realEstateColorTransitions"
         :reduce-motion="appSettings.reduceMotion"
         :style-url="props.nextMapStyle"
         :interleaved="GLOBAL_TRANSPORT_PLAN_CONFIG.nextMap.deckInterleaved"
@@ -136,12 +137,24 @@
         :is-purchase-point="Boolean(hoveredRealEstatePurchasePoint)"
         :estimated-metric-value="hoveredRealEstateMetricValue"
         :rental-estimate="hoveredRealEstateCell ? realEstateRentalEstimates[hoveredRealEstateCell.cityCode] : undefined"
-        :market-ranks="hoveredRealEstateCell ? realEstateCityMetricRankings[hoveredRealEstateCell.cityCode]?.[realEstateMetricMode] : undefined"
+        :market-ranks="hoveredRealEstateCell && realEstateMetricMode !== 'liquidity'
+          ? realEstateCityMetricRankings[hoveredRealEstateCell.cityCode]?.[realEstateMetricMode]
+          : undefined"
         :liquidity="realEstateLiquidity"
         :reference-period="realEstateReferencePeriod"
         :metric-mode="realEstateMetricMode"
         :style="realEstateTooltipStyle"
         @height-change="updateRealEstateTooltipHeight"
+      />
+      <GlobalMapRealEstateSalesModal
+        :open="realEstateSalesModalOpen"
+        :loading="realEstateSalesLoading"
+        :error="realEstateSalesError"
+        :sales="realEstateSalesAtPoint"
+        :city-name="selectedRealEstateSalePoint?.context?.cityName ?? selectedRealEstateSalePoint?.cityCode ?? ''"
+        :reference-period="realEstateReferencePeriod"
+        @close="closeRealEstateSalesModal"
+        @retry="retryRealEstateSalesLoad"
       />
       <GlobalTransportPlanSearch
         v-model:open="searchOpen"
@@ -178,6 +191,7 @@
         :class="{
           'global-transport-plan__canvas--station-hover': hoveredFeature?.type === 'station',
           'global-transport-plan__canvas--next': mapExperience.kind === 'next',
+          'global-transport-plan__canvas--real-estate-purchase-hover': Boolean(hoveredRealEstatePurchasePoint),
           'global-transport-plan__canvas--distance-measuring': globalMapDistanceMeasurementMode === 'measuring',
         }"
         role="img"
@@ -883,6 +897,7 @@ import GlobalTransportPlanModeFilter from "./GlobalTransportPlanModeFilter.vue";
 import GlobalTransportPlanToolbar from "./GlobalTransportPlanToolbar.vue";
 import GlobalMapRealEstateControl from "./GlobalMapRealEstateControl.vue";
 import GlobalMapRealEstateTooltip from "./GlobalMapRealEstateTooltip.vue";
+import GlobalMapRealEstateSalesModal from "./GlobalMapRealEstateSalesModal.vue";
 import TransportIsochronePanel from "../transport-map/isochrones/TransportIsochronePanel.vue";
 import { useGlobalMapIsochrones } from "./useGlobalMapIsochrones";
 import type { GlobalIsochroneSettings, GlobalIsochroneSurface } from "../transport-map/isochrones/contracts";
@@ -951,10 +966,14 @@ import {
   type DvfMapMetricMode,
   type DvfMapPurchasePointMark,
 } from "../transport-map/next/deckRealEstateLayer";
-import { loadDvfMapCells, type DvfMapGridCell } from "../../services/real-estate/realEstateMapLayer";
+import { loadDvfMapCells, loadDvfMapPurchaseSales, type DvfMapGridCell } from "../../services/real-estate/realEstateMapLayer";
 import type { DvfCityMetricRankings } from "../../services/real-estate/realEstateMarketRankings";
 import type { DvfMapLiquidity } from "../../services/real-estate/realEstateMapLayer";
-import type { DvfMarketScope, DvfRentalEstimate } from "../../services/real-estate/compiledRealEstate";
+import type {
+  DvfMarketScope,
+  DvfPurchaseSaleDetails,
+  DvfRentalEstimate,
+} from "../../services/real-estate/compiledRealEstate";
 import {
   boundsForIrisDataset,
   boundsForIrisGeometry,
@@ -1271,6 +1290,12 @@ const hoveredRealEstatePurchasePoint = shallowRef<DvfMapPurchasePointMark>();
 const hoveredRealEstateMetricValue = ref<number>();
 const hoveredRealEstatePoint = ref<{ x: number; y: number }>();
 const hoveredRealEstateTooltipHeight = ref(0);
+const realEstateSalesModalOpen = ref(false);
+const realEstateSalesLoading = ref(false);
+const realEstateSalesError = ref(false);
+const realEstateSalesAtPoint = shallowRef<readonly DvfPurchaseSaleDetails[]>([]);
+const selectedRealEstateSalePoint = shallowRef<DvfMapPurchasePointMark>();
+let realEstateSalesLoadRevision = 0;
 
 const realEstateTooltipStyle = computed<Record<string, string>>(() => {
   const point = hoveredRealEstatePoint.value;
@@ -1279,7 +1304,9 @@ const realEstateTooltipStyle = computed<Record<string, string>>(() => {
   const height = stageElement.value?.clientHeight ?? camera.value.viewportHeightCssPx;
   const isLocalEstimate = hoveredRealEstateMetricValue.value !== undefined;
   const isRentMode = realEstateMetricMode.value === "rent";
-  const tooltipHeight = hoveredRealEstateTooltipHeight.value || (isLocalEstimate ? 112 : isRentMode ? 90 : 300);
+  const isLiquidityMode = realEstateMetricMode.value === "liquidity";
+  const tooltipHeight = hoveredRealEstateTooltipHeight.value
+    || (isLocalEstimate ? 112 : isRentMode ? 90 : isLiquidityMode ? 148 : 300);
   const maxTop = Math.max(8, height - tooltipHeight - 8);
   return {
     left: `${Math.max(8, Math.min(width - 294, point.x + 14))}px`,
@@ -1301,7 +1328,7 @@ watch(() => camera.value.zoom, () => {
 });
 
 function setRealEstateMetricMode(mode: DvfMapMetricMode): void {
-  if (mode === "rent") hoveredRealEstateTooltipHeight.value = 0;
+  hoveredRealEstateTooltipHeight.value = 0;
   if (!hoveredRealEstatePurchasePoint.value) {
     hoveredRealEstateMetricValue.value = undefined;
     hoveredRealEstatePoint.value = undefined;
@@ -1515,6 +1542,8 @@ const restoreHoveredTooltipLine = globalTransportHover.restoreHoveredTooltipLine
 const handleTooltipLeave = globalTransportHover.handleTooltipLeave;
 const selectTooltipLine = globalTransportHover.selectTooltipLine;
 let deferredNextViewport: TransportMapViewportResult | undefined;
+let anticipatedViewportKey: string | undefined;
+let anticipatedViewportAt = -Infinity;
 let globalTransportPerformanceScenarios: ReturnType<
   typeof useGlobalTransportPerformanceScenarios
 > | undefined;
@@ -1712,6 +1741,7 @@ const dataSource = new TransportMapDataSource({
   decodedChunkCacheMaxEntries: GLOBAL_TRANSPORT_PLAN_CONFIG.data.decodedChunkCacheMaxEntries,
   decodedChunkCacheMaxBytes: GLOBAL_TRANSPORT_PLAN_CONFIG.data.decodedChunkCacheMaxBytes,
   useRegionalOverview: mapExperience.kind === "next",
+  getContinuousRendering: () => mapExperience.kind === "next" && (appSettings.value.globalMapContinuousRendering || appSettings.value.globalMapProgressiveBusRendering),
   trace: performanceTrace,
 });
 let interactionController: ReturnType<typeof useGlobalTransportMapInteraction> | undefined;
@@ -1880,6 +1910,7 @@ const {
 const globalTransportScene = useGlobalTransportScene({
   getNetwork: () => network.value,
   getViewport: () => viewport.value,
+  getContinuousRendering: () => mapExperience.kind === "next" && (appSettings.value.globalMapContinuousRendering || appSettings.value.globalMapProgressiveBusRendering),
   getPreloadedLinePaths: () => preloadedLinePaths.value,
   getActiveLine: () => activeLine.value,
   getActiveStationView: () => activeStationView.value,
@@ -2467,6 +2498,10 @@ function draw(): void {
 }
 
 function setMapInteractionActive(active: boolean): void {
+  if (!active || !interactionActive.value) {
+    anticipatedViewportKey = undefined;
+    anticipatedViewportAt = -Infinity;
+  }
   if (active) {
     deferredNextViewport = undefined;
     interactionActive.value = true;
@@ -2542,10 +2577,10 @@ const globalTransportViewport = useGlobalTransportViewport({
   },
   publishViewport: (nextViewport) => {
     if (debugPerformanceEnabled.value) loadingStage.value = "applying-data";
-    // A viewport request can finish while the next-map wheel gesture is still
-    // moving. Keep the displayed Deck scene stable until the gesture ends;
-    // otherwise successive chunk/LOD responses make paths flicker or vanish.
-    if (mapExperience.kind === "next" && interactionActive.value) {
+    // The economy mode retains the displayed viewport through the gesture.
+    // Continuous mode publishes covered viewports; Deck still swaps complete
+    // binary packet sets atomically, avoiding partial geometry or flicker.
+    if (mapExperience.kind === "next" && interactionActive.value && !appSettings.value.globalMapContinuousRendering && !appSettings.value.globalMapProgressiveBusRendering) {
       deferredNextViewport = nextViewport;
       return;
     }
@@ -2571,9 +2606,20 @@ const globalTransportViewport = useGlobalTransportViewport({
   },
   isAbortError,
   debounceMs: GLOBAL_TRANSPORT_PLAN_CONFIG.camera.viewportRefreshDebounceMs,
+  acceptsCameraChange: (requested, current) => {
+    if (mapExperience.kind !== "next" || (!appSettings.value.globalMapContinuousRendering && !appSettings.value.globalMapProgressiveBusRendering) || !interactionActive.value) return false;
+    const cover = visibleWorldBounds(requested);
+    const visible = visibleWorldBounds(current);
+    return cover.minX <= visible.minX && cover.minY <= visible.minY
+      && cover.maxX >= visible.maxX && cover.maxY >= visible.maxY;
+  },
 });
 
 const refreshViewport = globalTransportViewport.refreshViewport;
+watch(() => [appSettings.value.globalMapContinuousRendering, appSettings.value.globalMapProgressiveBusRendering], () => {
+  deferredNextViewport = undefined;
+  if (mounted) void refreshViewport();
+});
 const preloadLine = globalTransportViewport.preloadLine;
 const cancelPreloadLine = globalTransportViewport.cancelPreloadLine;
 const cancelScheduledViewportRefresh = globalTransportViewport.cancelScheduledRefresh;
@@ -4406,6 +4452,7 @@ function selectFeature(
   pointer?: { x: number; y: number },
 ): void {
   if (extremeChaosGuardActive.value) return;
+  if (pointer && selectRealEstateSaleAtPoint(pointer)) return;
   if (feature.station) {
     globalTransportHover.clearLineChoiceState();
     selectStation(feature.station.id, event, undefined, true, true);
@@ -4439,15 +4486,15 @@ function selectFeature(
  * the normal camera-derived renderer state switches to cities immediately.
  */
 function selectAdministrativeZone(point: { x: number; y: number }, _event: PointerEvent): boolean {
+  if (mapExperience.kind !== "next" || routePreviewActive.value) return false;
+
+  if (selectRealEstateSaleAtPoint(point)) return true;
+
   if (
-    mapExperience.kind !== "next" ||
-    routePreviewActive.value ||
     !cityZonesVisible.value ||
     globalAdministrativeZones.value.length === 0 ||
     camera.value.zoom >= GLOBAL_CITY_VIEW_MIN_ZOOM
-  ) {
-    return false;
-  }
+  ) return false;
 
   let lonLat: LonLatPoint;
   try {
@@ -4472,6 +4519,53 @@ function selectAdministrativeZone(point: { x: number; y: number }, _event: Point
     ),
   );
   return true;
+}
+
+function selectRealEstateSaleAtPoint(point: { x: number; y: number }): boolean {
+  if (mapExperience.kind !== "next" || routePreviewActive.value || !realEstateLayerEnabled.value) return false;
+  const purchasePoint = pickRealEstateMapPurchasePoint(point.x, point.y);
+  if (!purchasePoint) return false;
+  openRealEstateSalesModal(purchasePoint);
+  return true;
+}
+
+function openRealEstateSalesModal(point: DvfMapPurchasePointMark): void {
+  selectedRealEstateSalePoint.value = point;
+  realEstateSalesModalOpen.value = true;
+  void loadRealEstateSalesForPoint(point);
+}
+
+async function loadRealEstateSalesForPoint(point: DvfMapPurchasePointMark): Promise<void> {
+  const revision = ++realEstateSalesLoadRevision;
+  realEstateSalesLoading.value = true;
+  realEstateSalesError.value = false;
+  realEstateSalesAtPoint.value = [];
+  try {
+    const file = await loadDvfMapPurchaseSales(point.cityCode);
+    if (revision !== realEstateSalesLoadRevision) return;
+    const location = file.locations.find((candidate) =>
+      candidate.coordinates[0] === point.coordinates[0]
+      && candidate.coordinates[1] === point.coordinates[1]);
+    realEstateSalesAtPoint.value = location?.sales ?? [];
+  } catch {
+    if (revision === realEstateSalesLoadRevision) realEstateSalesError.value = true;
+  } finally {
+    if (revision === realEstateSalesLoadRevision) realEstateSalesLoading.value = false;
+  }
+}
+
+function retryRealEstateSalesLoad(): void {
+  const point = selectedRealEstateSalePoint.value;
+  if (point) void loadRealEstateSalesForPoint(point);
+}
+
+function closeRealEstateSalesModal(): void {
+  realEstateSalesLoadRevision += 1;
+  realEstateSalesModalOpen.value = false;
+  realEstateSalesLoading.value = false;
+  selectedRealEstateSalePoint.value = undefined;
+  realEstateSalesAtPoint.value = [];
+  realEstateSalesError.value = false;
 }
 
 function closeLineChoiceOnDocumentPointerDown(event: PointerEvent): void {
@@ -4590,6 +4684,22 @@ interactionController = useGlobalTransportMapInteraction({
   getCanvas: () => canvasElement.value,
   getCamera: () => camera.value,
   applyCamera,
+  refreshDuringZoomOut: (targetCamera) => {
+    if (mapExperience.kind !== "next" || !appSettings.value.globalMapProgressiveBusRendering || routePreviewActive.value) return;
+    if (globalTransportViewport.isPending()) return;
+    // Rail routes can be retained separately. This optional request covers bus families only.
+    if (!filters.selectedModes.value.some((mode) => mode === "BUS" || mode === "NOCTILIEN")) return;
+    const key = [targetCamera.centerWorldX.toFixed(9), targetCamera.centerWorldY.toFixed(9),
+      targetCamera.zoom.toFixed(4), targetCamera.viewportWidthCssPx, targetCamera.viewportHeightCssPx,
+      filters.selectedModes.value.join(",")].join(":");
+    const now = performance.now();
+    if (key === anticipatedViewportKey || now - anticipatedViewportAt < 160) return;
+    anticipatedViewportKey = key;
+    anticipatedViewportAt = now;
+    void globalTransportViewport.refreshViewport(undefined, targetCamera).then((published) => {
+      if (!published && anticipatedViewportKey === key) anticipatedViewportKey = undefined;
+    });
+  },
   draw,
   drawNow,
   cancelQueuedDraw: () => {
@@ -5511,6 +5621,9 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 .global-transport-plan__canvas--station-hover {
+  cursor: pointer;
+}
+.global-transport-plan__canvas--real-estate-purchase-hover {
   cursor: pointer;
 }
 .global-transport-plan__canvas--distance-measuring {

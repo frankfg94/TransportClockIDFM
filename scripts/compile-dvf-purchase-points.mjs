@@ -24,6 +24,7 @@ if (typeof expectedChecksum !== "string" || !/^[a-f0-9]{64}$/u.test(expectedChec
 
 const communeCodes = new Set(baseManifest.cities.map((city) => city.code));
 const pointsByCommune = new Map();
+const salesByCommune = new Map();
 const sourceHash = createHash("sha256");
 const source = createReadStream(sourcePath);
 source.on("data", (chunk) => sourceHash.update(chunk));
@@ -49,6 +50,7 @@ for await (const physicalLine of csv) {
     headers = row.map(normalizeHeader);
     const requiredColumns = [
       ["code_commune", "code_commune_insee", "code_insee_commune"],
+      ["id_mutation"],
       ["date_mutation"],
       ["longitude", "lon"],
       ["latitude", "lat"],
@@ -60,6 +62,7 @@ for await (const physicalLine of csv) {
   }
 
   rowCount += 1;
+  if (rowCount % 2_000_000 === 0) console.log(`Processed ${rowCount.toLocaleString("en-US")} source rows; ${geolocatedIdfRows.toLocaleString("en-US")} geolocated rows retained.`);
   const communeCode = field(row, headers, ["code_commune", "code_commune_insee", "code_insee_commune"]);
   if (!communeCode || !communeCodes.has(communeCode)) continue;
 
@@ -78,10 +81,65 @@ for await (const physicalLine of csv) {
     pointsByCommune.set(communeCode, locations);
   }
 
-  // Keep one dot per distinct parcel-centre location. No sale ID, price,
-  // date, address, parcel number, or other transaction detail is published.
   const key = `${longitude},${latitude}`;
   if (!locations.has(key)) locations.set(key, [longitude, latitude]);
+
+  const mutationId = field(row, headers, ["id_mutation"]);
+  const saleDate = formatMutationDate(date);
+  if (!mutationId || !saleDate) continue;
+
+  let citySales = salesByCommune.get(communeCode);
+  if (!citySales) {
+    citySales = new Map();
+    salesByCommune.set(communeCode, citySales);
+  }
+  let salesAtLocation = citySales.get(key);
+  if (!salesAtLocation) {
+    salesAtLocation = new Map();
+    citySales.set(key, salesAtLocation);
+  }
+
+  let sale = salesAtLocation.get(mutationId);
+  if (!sale) {
+    sale = {
+      date: saleDate,
+      price: parseDvfNumber(field(row, headers, ["valeur_fonciere"])),
+      nature: field(row, headers, ["nature_mutation"]),
+      lotCount: parseDvfInteger(field(row, headers, ["nombre_lots"])),
+      properties: new Map(),
+    };
+    salesAtLocation.set(mutationId, sale);
+  } else {
+    sale.price ??= parseDvfNumber(field(row, headers, ["valeur_fonciere"]));
+    sale.nature ??= field(row, headers, ["nature_mutation"]);
+    sale.lotCount = Math.max(sale.lotCount ?? 0, parseDvfInteger(field(row, headers, ["nombre_lots"])) ?? 0) || undefined;
+  }
+
+  const property = {
+    type: field(row, headers, ["type_local"]) || field(row, headers, ["nature_culture"]),
+    builtSurfaceM2: parseDvfNumber(field(row, headers, ["surface_reelle_bati"])),
+    rooms: parseDvfInteger(field(row, headers, ["nombre_pieces_principales"])),
+    landSurfaceM2: parseDvfNumber(field(row, headers, ["surface_terrain"])),
+    carrezSurfaceM2: sumDvfNumbers(row, headers, [
+      "lot1_surface_carrez",
+      "lot2_surface_carrez",
+      "lot3_surface_carrez",
+      "lot4_surface_carrez",
+      "lot5_surface_carrez",
+    ]),
+  };
+  if (Object.values(property).some((value) => value !== undefined)) {
+    const propertyKey = JSON.stringify([
+      property.type,
+      property.builtSurfaceM2,
+      property.rooms,
+      property.landSurfaceM2,
+      property.carrezSurfaceM2,
+    ]);
+    const matchingProperty = sale.properties.get(propertyKey);
+    if (matchingProperty) matchingProperty.count += 1;
+    else sale.properties.set(propertyKey, { ...property, count: 1 });
+  }
 }
 
 if (record) throw new Error("The source CSV ended with an incomplete quoted record.");
@@ -95,7 +153,8 @@ if (!headers || rowCount === 0 || geolocatedIdfRows === 0) {
 
 const outputRoot = join(datasetRoot, "purchase-points");
 const cityOutputRoot = join(outputRoot, "cities");
-await mkdir(cityOutputRoot, { recursive: true });
+const salesOutputRoot = join(outputRoot, "sales");
+await Promise.all([mkdir(cityOutputRoot, { recursive: true }), mkdir(salesOutputRoot, { recursive: true })]);
 const cities = [];
 for (const [cityCode, locationMap] of [...pointsByCommune].sort(([left], [right]) => left.localeCompare(right))) {
   const points = [...locationMap.values()];
@@ -116,6 +175,39 @@ for (const [cityCode, locationMap] of [...pointsByCommune].sort(([left], [right]
   const asset = `cities/${cityCode}-${checksumSha256.slice(0, 16)}.json`;
   const assetPath = join(cityOutputRoot, basename(asset));
   await writeFile(assetPath, payload);
+
+  const citySales = salesByCommune.get(cityCode) ?? new Map();
+  const saleLocations = [...citySales].map(([locationKey, salesAtLocation]) => [
+    locationMap.get(locationKey),
+    [...salesAtLocation.values()]
+      .sort((left, right) => right.date.localeCompare(left.date))
+      .map((record) => [
+        record.date,
+        record.price ?? null,
+        record.nature ?? null,
+        record.lotCount ?? null,
+        [...record.properties.values()].map((property) => [
+          property.type ?? null,
+          property.builtSurfaceM2 ?? null,
+          property.rooms ?? null,
+          property.landSurfaceM2 ?? null,
+          property.carrezSurfaceM2 ?? null,
+          property.count,
+        ]),
+      ]),
+  ]).filter((location) => location[0] && location[1].length > 0);
+  const salesPayload = Buffer.from(JSON.stringify({
+    schemaVersion: 1,
+    cityCode,
+    referencePeriod: baseManifest.referencePeriod,
+    locationPrecision: "cadastral-parcel-centre-wgs84",
+    locations: saleLocations,
+  }));
+  const salesChecksumSha256 = createHash("sha256").update(salesPayload).digest("hex");
+  const salesAsset = `sales/${cityCode}-${salesChecksumSha256.slice(0, 16)}.json`;
+  await writeFile(join(salesOutputRoot, basename(salesAsset)), salesPayload);
+  const saleCount = saleLocations.reduce((total, location) => total + location[1].length, 0);
+
   cities.push({
     code: cityCode,
     asset,
@@ -123,6 +215,13 @@ for (const [cityCode, locationMap] of [...pointsByCommune].sort(([left], [right]
     checksumSha256,
     pointCount: points.length,
     bounds,
+    sales: {
+      asset: salesAsset,
+      bytes: salesPayload.byteLength,
+      checksumSha256: salesChecksumSha256,
+      saleCount,
+      locationCount: saleLocations.length,
+    },
   });
 }
 
@@ -132,7 +231,7 @@ const outputManifest = {
   generatedAt: new Date().toISOString(),
   referencePeriod: baseManifest.referencePeriod,
   locationPrecision: "cadastral-parcel-centre-wgs84",
-  privacy: "Coordinates only: no sale ID, date, price, address, or parcel number. Points are parcel centres and are loaded by the map at zoom 17 or higher.",
+  privacy: "Sale details are requested only after a user selects a parcel-centre marker at zoom 17 or higher. Assets omit mutation identifiers, addresses, and parcel numbers.",
   source: {
     pageUrl: baseManifest.source.pageUrl,
     resourceUrl: baseManifest.source.resourceUrl,
@@ -155,6 +254,7 @@ console.log(`Source: ${basename(sourcePath)} (${actualChecksum})`);
 console.log(`Reference period: ${baseManifest.referencePeriod}`);
 console.log(`IDF rows with coordinates: ${geolocatedIdfRows}`);
 console.log(`Distinct parcel-centre points: ${outputManifest.totals.distinctParcelCentres} across ${cities.length} communes`);
+console.log(`Sale details: ${cities.reduce((total, city) => total + city.sales.saleCount, 0)} mutations at ${cities.reduce((total, city) => total + city.sales.locationCount, 0)} locations`);
 console.log(`Generated manifest: ${join(outputRoot, "manifest.json")}`);
 
 function countUnescapedQuotes(value) {
@@ -193,17 +293,15 @@ function parseCsvRecord(value, separator) {
 }
 
 function detectDelimiter(value) {
-  let commas = 0;
-  let semicolons = 0;
+  const counts = new Map([[",", 0], [";", 0], ["|", 0]]);
   let quoted = false;
   for (let index = 0; index < value.length; index += 1) {
     if (value[index] === '"') {
       if (quoted && value[index + 1] === '"') index += 1;
       else quoted = !quoted;
-    } else if (!quoted && value[index] === ",") commas += 1;
-    else if (!quoted && value[index] === ";") semicolons += 1;
+    } else if (!quoted && counts.has(value[index])) counts.set(value[index], counts.get(value[index]) + 1);
   }
-  return semicolons > commas ? ";" : ",";
+  return [...counts].sort((left, right) => right[1] - left[1])[0][0];
 }
 
 function normalizeHeader(value) {
@@ -227,4 +325,35 @@ function parseCoordinate(value, min, max) {
   return Number.isFinite(coordinate) && coordinate >= min && coordinate <= max
     ? coordinate
     : undefined;
+}
+
+function formatMutationDate(value) {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/u.test(trimmed)) return trimmed;
+  const european = /^(\d{2})\/(\d{2})\/(\d{4})$/u.exec(trimmed);
+  if (european) return `${european[3]}-${european[2]}-${european[1]}`;
+  const yearFirst = /^(\d{4})\/(\d{2})\/(\d{2})$/u.exec(trimmed);
+  if (yearFirst) return `${yearFirst[1]}-${yearFirst[2]}-${yearFirst[3]}`;
+  return undefined;
+}
+
+function parseDvfNumber(value) {
+  if (!value) return undefined;
+  const normalized = value.trim().replace(/[\s\u00a0\u202f]/gu, "").replace(",", ".");
+  if (!normalized) return undefined;
+  const number = Number(normalized);
+  return Number.isFinite(number) && number >= 0 ? number : undefined;
+}
+
+function parseDvfInteger(value) {
+  const number = parseDvfNumber(value);
+  return number !== undefined && Number.isInteger(number) ? number : undefined;
+}
+
+function sumDvfNumbers(row, headerValues, aliases) {
+  const values = aliases.map((alias) => parseDvfNumber(field(row, headerValues, [alias])))
+    .filter((value) => value !== undefined);
+  if (!values.length) return undefined;
+  return values.reduce((total, value) => total + value, 0);
 }

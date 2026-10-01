@@ -449,6 +449,40 @@ describe("global transport progressive data source", () => {
     source.dispose();
   }, 30_000);
 
+  it("keeps full precise RER B geometry outside Paris through zoom-out and restores bounded mode", async () => {
+    const requests: string[] = [];
+    const loader = new GlobalMapAssetLoader({ fetcher: async (input: RequestInfo | URL) => {
+      const asset = String(input).split("/global-map/v1/")[1];
+      if (!asset) return new Response(null, { status: 404 });
+      requests.push(asset);
+      try { return new Response(readFileSync(resolve(assetRoot, asset)), { status: 200 }); }
+      catch { return new Response(null, { status: 404 }); }
+    } });
+    let continuous = true;
+    const source = new TransportMapDataSource({ loader, useRegionalOverview: true, getContinuousRendering: () => continuous });
+    const network = await source.initialize();
+    const rerB = network.lines.find((line) => line.id === "line:IDFM:C01743")!;
+    const paris = lonLatToWorld({ lon: 2.347, lat: 48.858 });
+    const mask = 1 << GLOBAL_MAP_MODE_ORDER.indexOf("RER");
+    const camera = createCamera({ centerWorldX: paris.x, centerWorldY: paris.y, zoom: 16, viewportWidthCssPx: 1280, viewportHeightCssPx: 720 });
+    const close = await source.queryViewport(camera, mask, 1);
+    const closeB = close.paths.filter((path) => path.lineId === rerB.id);
+    expect(closeB.length).toBeGreaterThan(0);
+    const terminus = source.getNetwork().stations.find((station) => /Saint.R.my.l.s.Chevreuse/i.test(station.name));
+    expect(terminus).toBeDefined();
+    expect(close.stations.some((station) => station.id === terminus!.id)).toBe(true);
+    expect(closeB.every((path) => !path.id.startsWith("path:regional:"))).toBe(true);
+    const wide = await source.queryViewport({ ...camera, zoom: 10, generation: 2 }, mask, 2);
+    expect(wide.paths.filter((path) => path.lineId === rerB.id)).toEqual(closeB);
+    const again = await source.queryViewport({ ...camera, generation: 3 }, mask, 3);
+    expect(again.paths).toBe(close.paths);
+    expect(requests.some((asset) => /-bus\.json$/.test(asset))).toBe(false);
+    continuous = false;
+    const bounded = await source.queryViewport({ ...camera, generation: 4 }, mask, 4);
+    expect(bounded.paths.length).toBeLessThan(close.paths.length);
+    source.dispose();
+  }, 60_000);
+
   it("promotes Saint-Sulpice line 70 from regional LOD to detailed GTFS chunks at every urban zoom", async () => {
     const loader = new GlobalMapAssetLoader({
       fetcher: async (input: RequestInfo | URL) => {

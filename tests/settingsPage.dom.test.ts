@@ -226,6 +226,12 @@ describe("SettingsPage", () => {
     await voyagerStyleOption.trigger("mousedown");
     expect(mapStyleControl.text()).toContain("espaces verts renforcés");
 
+    const continuousToggle = wrapper.get("[data-settings-map-continuous-rendering] input");
+    expect((continuousToggle.element as HTMLInputElement).checked).toBe(true);
+    await continuousToggle.setValue(false);
+    expect((continuousToggle.element as HTMLInputElement).checked).toBe(false);
+    expect(continuousToggle.attributes("aria-checked")).toBe("false");
+
     const mapAntialiasingToggle = wrapper.get("[data-settings-map-antialiasing] input");
     expect(mapAntialiasingToggle.attributes("role")).toBe("switch");
     expect(mapAntialiasingToggle.attributes("aria-checked")).toBe("true");

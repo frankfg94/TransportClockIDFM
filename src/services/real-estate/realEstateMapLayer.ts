@@ -6,6 +6,7 @@ import {
   type DvfMarketScope,
   type DvfMapCell,
   type DvfPurchasePoint,
+  type DvfPurchaseSalesFile,
   type DvfRentalEstimate,
 } from "./compiledRealEstate";
 import {
@@ -72,6 +73,11 @@ export function loadDvfMapCells(onProgress?: LoadProgress): Promise<DvfMapCellDa
 export async function loadDvfMapPurchasePoints(cityCode: string): Promise<readonly DvfPurchasePoint[]> {
   const file = await getDvfDataProvider().loadPurchasePoints(cityCode);
   return file.points;
+}
+
+/** Load sale details only after a user selects a parcel-centre marker. */
+export function loadDvfMapPurchaseSales(cityCode: string): Promise<DvfPurchaseSalesFile> {
+  return getDvfDataProvider().loadPurchaseSales(cityCode);
 }
 
 /** Find point assets whose parcel-centre extents overlap the current viewport. */

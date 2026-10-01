@@ -479,6 +479,42 @@ describe("Deck transport binary packets", () => {
     renderer.dispose();
   });
 
+  it.each([false, true])("publishes complete binary packets during motion only in continuous mode (%s)", async (continuousRendering) => {
+    const pending: Array<() => void> = [];
+    const compiler: DeckPathPacketCompiler = {
+      compile(records, key) {
+        return new Promise((resolve) => pending.push(() => resolve(createDeckPathBinaryPacket(records, key))));
+      },
+    };
+    const frames: TransportMapRenderFrame[] = [];
+    const renderer = new DeckGlRenderer(undefined, compiler);
+    renderer.attachHost({ present: (frame) => frames.push(frame), resize: () => undefined, dispose: () => undefined });
+    const scene = createRendererTestScene();
+    const camera = createCamera({ zoom: 12 });
+    renderer.render(camera, scene);
+    await Promise.resolve();
+    pending.splice(0).forEach((resolve) => resolve());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const stable = frames.at(-1)!;
+    const nextScene = { ...scene, paths: scene.paths.map((path) => ({ ...path, id: "new:path" })), interactionActive: true, continuousRendering };
+    renderer.render({ ...camera, zoom: 11 }, nextScene);
+    expect(frames.at(-1)!.model).toBe(stable.model);
+    await Promise.resolve();
+    pending.splice(0).forEach((resolve) => resolve());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (continuousRendering) {
+      expect(frames.at(-1)!.model).not.toBe(stable.model);
+      expect(frames.at(-1)!.binaryPackets?.base).toBeDefined();
+      expect(frames.at(-1)!.scene.interactionActive).toBe(true);
+    } else {
+      expect(frames.at(-1)!.model).toBe(stable.model);
+      renderer.render(camera, { ...nextScene, interactionActive: false });
+      expect(frames.at(-1)!.model).not.toBe(stable.model);
+    }
+    expect(renderer.getMetrics().objectFallbackFrames).toBe(1);
+    renderer.dispose();
+  });
+
   it("presents preloaded line geometry during a camera flight before its binary packet is ready", async () => {
     const pending = new Map<string, {
       resolve: () => void;

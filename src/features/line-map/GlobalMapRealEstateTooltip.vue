@@ -3,6 +3,9 @@
     <span v-if="isPurchasePoint" class="global-map-real-estate-tooltip__point">
       {{ t("globalMap.realEstate.purchasePoint") }}
     </span>
+    <span v-if="isPurchasePoint" class="housing-tooltip-body__detail">
+      {{ t("globalMap.realEstate.saleDetailsClickHint") }}
+    </span>
     <span v-if="cell" class="global-map-real-estate-tooltip__city">{{ cell.cityName }}</span>
     <template v-if="estimatedMetricValue !== undefined && !cell">
       <span class="global-map-real-estate-tooltip__estimate-label">
@@ -29,15 +32,21 @@
         :rental-estimate="rentalEstimate"
       />
       <HousingTooltipBodyYield
-        v-else
+        v-else-if="metricMode === 'yield'"
         :cell="cell"
         :rental-estimate="rentalEstimate"
+      />
+      <HousingTooltipBodyLiquidity
+        v-else
+        :cell="cell"
+        :is-purchase-point="isPurchasePoint"
+        :reference-period="referencePeriod"
       />
     </template>
     <span v-else class="housing-tooltip-body__detail">
       {{ t("globalMap.realEstate.purchasePointNoAggregate") }}
     </span>
-    <div v-if="cell && marketRankRows.length" class="housing-tooltip-body__subsection">
+    <div v-if="metricMode !== 'liquidity' && cell && marketRankRows.length" class="housing-tooltip-body__subsection">
       <strong class="housing-tooltip-body__metric">{{ t("globalMap.realEstate.marketRankingTitle") }}</strong>
       <ul class="housing-tooltip-body__benchmarks">
         <li v-for="entry in marketRankRows" :key="entry.scope">
@@ -64,6 +73,7 @@ import type { DvfMapMetricMode } from "../transport-map/next/deckRealEstateLayer
 import HousingTooltipBodyPrice from "./HousingTooltipBodyPrice.vue";
 import HousingTooltipBodyRent from "./HousingTooltipBodyRent.vue";
 import HousingTooltipBodyYield from "./HousingTooltipBodyYield.vue";
+import HousingTooltipBodyLiquidity from "./HousingTooltipBodyLiquidity.vue";
 
 const emit = defineEmits<{ heightChange: [height: number] }>();
 const props = withDefaults(defineProps<{
@@ -89,6 +99,7 @@ const measureKeys = {
   price: "globalMap.realEstate.measurePrice",
   rent: "globalMap.realEstate.measureRent",
   yield: "globalMap.realEstate.measureYield",
+  liquidity: "globalMap.realEstate.measureLiquidity",
 } as const;
 const measureKey = computed(() => measureKeys[props.metricMode]);
 const scopeLabelKeys: Record<DvfMarketScope, TranslationKey> = {
@@ -104,9 +115,14 @@ const marketRankRows = computed(() => DVF_MARKET_SCOPES.flatMap((scope) => {
 
 function formatEstimatedMetric(value: number): string {
   const formatted = new Intl.NumberFormat(locale.value, {
-    maximumFractionDigits: props.metricMode === "price" ? 0 : 1,
+    maximumFractionDigits: props.metricMode === "price" || props.metricMode === "liquidity" ? 0 : 1,
   }).format(value);
-  return `${formatted} ${props.metricMode === "yield" ? "%" : "€"}`;
+  const unit = props.metricMode === "yield"
+    ? "%"
+    : props.metricMode === "liquidity"
+      ? t("globalMap.realEstate.salesUnit")
+      : "€";
+  return `${formatted} ${unit}`;
 }
 
 function reportTooltipHeight(): void {
@@ -133,7 +149,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style>
-/* These selectors style content rendered by the three child tooltip bodies. */
+/* These selectors style content rendered by the child tooltip bodies. */
 .global-map-real-estate-tooltip {
   position: absolute;
   z-index: 6;

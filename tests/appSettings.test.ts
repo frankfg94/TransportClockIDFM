@@ -25,6 +25,14 @@ import {
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../src/features/transport-map/config/globalTransportPlanConfig";
 
 describe("app settings", () => {
+  it("persists continuous map rendering and falls back on invalid stored values", () => {
+    expect(createDefaultAppSettings().globalMapContinuousRendering).toBe(true);
+    expect(createDefaultAppSettings().globalMapProgressiveBusRendering).toBe(false);
+    expect(normalizeAppSettings({ globalMapContinuousRendering: false }).globalMapContinuousRendering).toBe(false);
+    expect(normalizeAppSettings({ version: 2, globalMapContinuousRendering: true }).globalMapContinuousRendering).toBe(true);
+    expect(normalizeAppSettings({ globalMapContinuousRendering: "false" }).globalMapContinuousRendering).toBe(true);
+  });
+
   it("defaults the network override to auto and preserves valid saved choices", () => {
     expect(createDefaultAppSettings().networkConcurrencyMode).toBe("auto");
     for (const value of [undefined, null, true, false, "invalid", 4]) {

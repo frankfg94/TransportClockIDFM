@@ -86,6 +86,7 @@ export interface UseGlobalTransportSceneOptions {
   getSelectedLineInteractionScene: () => TransportMapRenderScene | undefined;
   getItineraryPreviewActive?: () => boolean;
   getInteractionActive: () => boolean;
+  getContinuousRendering?: () => boolean;
   getProgrammaticCameraFlightActive?: () => boolean;
   getTrafficState: () => GlobalTransportSceneTrafficState;
   getSidebarPreviewLineId: () => string | undefined;
@@ -119,10 +120,10 @@ function restrictStationsToLineIds(
 }
 
 function restrictPathsToLineIds(
-  paths: readonly GlobalMapPath[],
+  paths: GlobalMapPath[],
   lineIds: readonly string[],
 ): GlobalMapPath[] {
-  if (lineIds.length === 0) return [...paths];
+  if (lineIds.length === 0) return paths;
   const allowed = new Set(lineIds);
   return paths.filter((path) => allowed.has(path.lineId));
 }
@@ -427,7 +428,7 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
       if (!options.getActiveLine()) {
         return options.getActiveStationView()
           ? ghostLinePaths.value
-          : [...options.getViewport().paths];
+          : options.getViewport().paths;
       }
       const focusedLinePaths = lineMetadataPaths.value;
       if (focusedLinePaths.length === 0) {
@@ -594,6 +595,7 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
         disturbedStationIds: [...traffic.disturbedStationIds],
         trafficPathSpans: traffic.trafficPathSpans,
         interactionActive: options.getInteractionActive(),
+        continuousRendering: options.getContinuousRendering?.() === true,
         allowGeometrySwapDuringInteraction:
           (options.getPreloadedLinePaths?.().length ?? 0) > 0 &&
           options.getInteractionActive() &&

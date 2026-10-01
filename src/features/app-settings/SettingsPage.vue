@@ -1256,10 +1256,31 @@ const settingsSearchEntries = computed<SettingsSearchEntry[]>(() => [
     getSettingsOptionLabels(globalMapBasemapStyleLocalizedOptions.value),
   ),
   createSettingsSearchEntry(
+    "map.continuous-rendering",
+    "map",
+    t("settings.display.globalMapContinuousRendering"),
+    t("settings.display.globalMapContinuousRenderingDescription"),
+    "dézoom zoom lignes progressif mouvement caméra performances",
+  ),
+  createSettingsSearchEntry(
+    "map.progressive-bus-rendering",
+    "map",
+    t("settings.display.globalMapProgressiveBusRendering"),
+    t("settings.display.globalMapProgressiveBusRenderingDescription"),
+    "dézoom bus autobus noctilien charge cpu mémoire progressif",
+  ),
+  createSettingsSearchEntry(
     "map.antialiasing",
     "map",
     t("settings.display.deckAntialiasing"),
     t("settings.display.deckAntialiasingDescription"),
+  ),
+  createSettingsSearchEntry(
+    "map.real-estate-color-transitions",
+    "map",
+    t("settings.display.realEstateColorTransitions"),
+    t("settings.display.realEstateColorTransitionsDescription"),
+    "immobilier couleurs transition animation",
   ),
   createSettingsSearchEntry(
     "map.nearby-controls",

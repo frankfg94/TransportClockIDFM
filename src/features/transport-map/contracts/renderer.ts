@@ -92,6 +92,8 @@ export interface TransportMapRenderScene {
   trafficPathSpans?: TransportMapTrafficPathSpan[];
   /** True while camera motion is being presented from the bounded path cache. */
   interactionActive?: boolean;
+  /** Publish complete binary packet sets as they become ready during camera motion. */
+  continuousRendering?: boolean;
   /**
    * A programmatic line flight may present newly preloaded geometry while
    * its binary Deck packet is still compiling. Pointer gestures keep the

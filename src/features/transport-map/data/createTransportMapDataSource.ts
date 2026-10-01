@@ -42,6 +42,8 @@ export interface TransportMapDataSourceOptions {
   decodedChunkCacheMaxBytes?: number;
   /** Keep the next vector overview on one complete regional geometry set. */
   useRegionalOverview?: boolean;
+  /** Retain precise non-road paths outside the viewport for immediate zoom-out. */
+  getContinuousRendering?: () => boolean;
   trace?: TransportMapPerformanceTrace;
 }
 
@@ -103,6 +105,9 @@ export class TransportMapDataSource {
   private stationIndex?: PackedSpatialIndex;
   private decodeTimeMs = 0;
   private workerTimeMs = 0;
+  private completeCorePaths?: GlobalMapPath[];
+  private previousOverviewPaths?: GlobalMapPath[];
+  private previousOverviewStations?: GlobalMapStation[];
   private filterPathsLocal: TransportMapFilterPathsLocalMetrics = createEmptyFilterPathsLocalMetrics();
   private readonly workerPool?: TransportMapWorkerPool;
   private catalogPromise?: Promise<TransportMapNetwork>;
@@ -339,6 +344,51 @@ export class TransportMapDataSource {
     this.networkVersion += 1;
   }
 
+  private async ensureCompleteCorePaths(generation: number): Promise<GlobalMapPath[]> {
+    if (this.completeCorePaths) return this.completeCorePaths;
+    const descriptors = this.manifest!.files.chunks.filter((chunk) =>
+      !chunk.modes || chunk.modes.some((mode) => mode !== "BUS" && mode !== "NOCTILIEN" && mode !== "BIKE"),
+    );
+    const payloads = await Promise.all(descriptors.map((descriptor) =>
+      this.scheduler!.request({ descriptor, generation, priority: "overscan" }),
+    ));
+    if (generation !== this.lastGeneration) throw new DOMException("Stale core warm-up", "AbortError");
+    // Retain original full-detail vertices and compiler-authored breaks. No
+    // camera/LOD materialization is needed for this small, immutable network.
+    this.completeCorePaths = dedupePaths(payloads.flatMap((payload) => payload.paths))
+      .filter((path) => {
+        const mode = this.network!.linesById.get(path.lineId)?.mode;
+        return mode && mode !== "BUS" && mode !== "NOCTILIEN" && mode !== "BIKE";
+      })
+      .map(breakIncompleteGtfsConnectors);
+    return this.completeCorePaths;
+  }
+
+  private withCompleteCorePaths(paths: GlobalMapPath[], mask: number): GlobalMapPath[] {
+    const core = filterPaths(this.completeCorePaths!, this.network!.linesById, mask, undefined);
+    const roadPaths = paths.filter((path) => {
+      const mode = this.network!.linesById.get(path.lineId)?.mode;
+      return mode === "BUS" || mode === "NOCTILIEN" || mode === "BIKE";
+    });
+    const next = [...core, ...roadPaths];
+    const previous = this.previousOverviewPaths;
+    if (previous?.length === next.length && next.every((path, index) => path === previous[index])) return previous;
+    this.previousOverviewPaths = next;
+    return next;
+  }
+
+  private withCompleteCoreStations(stations: GlobalMapStation[]): GlobalMapStation[] {
+    const core = this.network!.stations.filter((station) => station.lineIds.some((id) => {
+      const mode = this.network!.linesById.get(id)?.mode;
+      return mode && mode !== "BUS" && mode !== "NOCTILIEN" && mode !== "BIKE";
+    }));
+    const next = [...new Map([...core, ...stations].map((station) => [station.id, station])).values()];
+    const previous = this.previousOverviewStations;
+    if (previous?.length === next.length && next.every((station, index) => station === previous[index])) return previous;
+    this.previousOverviewStations = next;
+    return next;
+  }
+
   async queryViewport(
     camera: CameraState,
     visibleModeMask: number,
@@ -493,6 +543,9 @@ export class TransportMapDataSource {
       this.options.useRegionalOverview === true &&
       !shouldLoadFocusedLineDetail &&
       lod.level === 0;
+    const continuousOverview = this.options.getContinuousRendering?.() === true
+      && !shouldLoadFocusedLineDetail && !shouldLoadGhostCorrespondenceDetail;
+    if (continuousOverview) await this.ensureCompleteCorePaths(generation);
     const detailedPathBranch = !(
       useRegionalOverview ||
       (lod.level === 0 && !shouldLoadFocusedLineDetail && !shouldLoadGhostCorrespondenceDetail)
@@ -591,7 +644,11 @@ export class TransportMapDataSource {
         this.lastTracePathCount = paths.length;
         this.lastTraceStationCount = stations.length;
       }
-      return { generation, chunkIds: [], paths, stations, bytes: 0, fromCache: true };
+      return {
+        generation, chunkIds: [],
+        paths: continuousOverview ? this.withCompleteCorePaths(paths, renderModeMask) : paths,
+        stations: continuousOverview ? this.withCompleteCoreStations(stations) : stations, bytes: 0, fromCache: true,
+      };
     }
 
     await this.ensureCatalog();
@@ -793,6 +850,10 @@ export class TransportMapDataSource {
       bytes: this.bytes,
       fromCache: allDescriptorsCached,
     };
+    if (continuousOverview) {
+      result.paths = this.withCompleteCorePaths(result.paths, renderModeMask);
+      result.stations = this.withCompleteCoreStations(result.stations);
+    }
     if (trace) {
       this.lastTraceDetailed = true;
       this.lastTracePathCount = result.paths.length;
@@ -1008,6 +1069,9 @@ export class TransportMapDataSource {
 
   dispose(): void {
     this.lifecycleToken += 1;
+    this.completeCorePaths = undefined;
+    this.previousOverviewPaths = undefined;
+    this.previousOverviewStations = undefined;
     this.scheduler?.dispose();
     this.workerPool?.dispose();
     this.scheduler = undefined;

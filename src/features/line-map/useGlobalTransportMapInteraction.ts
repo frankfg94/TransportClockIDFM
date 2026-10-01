@@ -43,6 +43,7 @@ export interface UseGlobalTransportMapInteractionOptions {
   /** Optional fallback for a click on a non-transport administrative overlay. */
   selectAdministrativeZone?: (point: ScreenPoint, event: PointerEvent) => boolean;
   scheduleViewportRefresh: () => void;
+  refreshDuringZoomOut?: (targetCamera: CameraState) => void;
   cancelScheduledViewportRefresh: () => void;
   captureSelectedLineInteractionSceneIfReady: () => boolean;
   isSelectedLineCoverEnabled: () => boolean;
@@ -377,6 +378,9 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
     options.cancelQueuedDraw();
     options.drawNow();
     refreshBasemapDuringWheelZoom(timestamp, targetZoom, previousZoom, point);
+    if (targetZoom < previousZoom && !options.getActiveLineId()) {
+      options.refreshDuringZoomOut?.(zoomCameraAroundScreenPoint(nextCamera, targetZoom, point));
+    }
     const leadMs = GLOBAL_TRANSPORT_PLAN_CONFIG.camera.wheelViewportRefreshLeadMs;
     if (
       !options.getActiveLineId() &&

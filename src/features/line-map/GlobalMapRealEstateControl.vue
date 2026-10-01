@@ -82,7 +82,10 @@
           <span class="global-map-real-estate__data-notes-title">
             {{ t("globalMap.realEstate.sourcesAndMethod") }}
           </span>
-          <span v-if="metricMode === 'price'">{{ t("globalMap.realEstate.liquidityMethod") }}</span>
+          <span v-if="metricMode === 'liquidity'">
+            {{ t("globalMap.realEstate.liquidityCellMethod", { period: referencePeriod }) }}
+          </span>
+          <span v-else-if="metricMode === 'price'">{{ t("globalMap.realEstate.liquidityMethod") }}</span>
           <template v-else>
             <span>{{ t("globalMap.realEstate.rentSource", { period: rentalReferencePeriod }) }}</span>
             <span v-if="metricMode === 'yield'">{{ t("globalMap.realEstate.grossYieldMethod") }}</span>
@@ -146,6 +149,7 @@ const metricTabs = [
   { mode: "price", labelKey: "globalMap.realEstate.modePrice" },
   { mode: "rent", labelKey: "globalMap.realEstate.modeRent" },
   { mode: "yield", labelKey: "globalMap.realEstate.modeYield" },
+  { mode: "liquidity", labelKey: "globalMap.realEstate.modeLiquidity" },
 ] as const;
 
 const props = defineProps<{
@@ -190,11 +194,13 @@ const measureKeys = {
   price: "globalMap.realEstate.measurePrice",
   rent: "globalMap.realEstate.measureRent",
   yield: "globalMap.realEstate.measureYield",
+  liquidity: "globalMap.realEstate.measureLiquidity",
 } as const;
 const scaleAriaKeys = {
   price: "globalMap.realEstate.scaleAriaPrice",
   rent: "globalMap.realEstate.scaleAriaRent",
   yield: "globalMap.realEstate.scaleAriaYield",
+  liquidity: "globalMap.realEstate.scaleAriaLiquidity",
 } as const;
 const measureKey = computed(() => measureKeys[props.metricMode]);
 const scaleAriaKey = computed(() => scaleAriaKeys[props.metricMode]);
@@ -222,10 +228,12 @@ const grossYieldInterval = computed(() => {
 
 function formatMetric(value: number): string {
   const isYield = props.metricMode === "yield";
+  const isLiquidity = props.metricMode === "liquidity";
   const formatted = new Intl.NumberFormat(locale.value, {
     maximumFractionDigits: isYield || props.metricMode === "rent" ? 1 : 0,
   }).format(value);
-  return `${formatted} ${isYield ? "%" : "€"}`;
+  const unit = isYield ? "%" : isLiquidity ? t("globalMap.realEstate.salesUnit") : "€";
+  return `${formatted} ${unit}`;
 }
 
 function handleComparisonScopeChange(value: string): void {
@@ -376,7 +384,7 @@ function formatPercent(value: number): string {
 
 .global-map-real-estate__metric-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 3px;
   margin-top: 10px;
   padding: 3px;

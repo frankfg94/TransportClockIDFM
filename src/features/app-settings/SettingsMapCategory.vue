@@ -97,6 +97,46 @@ function formatCoefficient(value: number): string {
     </div>
 
     <label
+      v-if="isSettingVisible('map.continuous-rendering', 'map')"
+      class="settings-toggle"
+      data-settings-map-continuous-rendering
+    >
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.globalMapContinuousRendering"
+        :aria-checked="settings.globalMapContinuousRendering"
+        :aria-label="t('settings.display.globalMapContinuousRendering')"
+        @change="emit('update-settings', { globalMapContinuousRendering: ($event.target as HTMLInputElement).checked })"
+      />
+      <span></span>
+      <div>
+        <strong>{{ t("settings.display.globalMapContinuousRendering") }}</strong>
+        <small>{{ t("settings.display.globalMapContinuousRenderingDescription") }}</small>
+      </div>
+    </label>
+
+    <label
+      v-if="isSettingVisible('map.progressive-bus-rendering', 'map')"
+      class="settings-toggle"
+      data-settings-map-progressive-bus-rendering
+    >
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.globalMapProgressiveBusRendering"
+        :aria-checked="settings.globalMapProgressiveBusRendering"
+        :aria-label="t('settings.display.globalMapProgressiveBusRendering')"
+        @change="emit('update-settings', { globalMapProgressiveBusRendering: ($event.target as HTMLInputElement).checked })"
+      />
+      <span></span>
+      <div>
+        <strong>{{ t("settings.display.globalMapProgressiveBusRendering") }}</strong>
+        <small>{{ t("settings.display.globalMapProgressiveBusRenderingDescription") }}</small>
+      </div>
+    </label>
+
+    <label
       v-if="isSettingVisible('map.antialiasing', 'map')"
       class="settings-toggle"
       data-settings-map-antialiasing
@@ -117,6 +157,30 @@ function formatCoefficient(value: number): string {
       <div>
         <strong>{{ t("settings.display.deckAntialiasing") }}</strong>
         <small>{{ t("settings.display.deckAntialiasingDescription") }}</small>
+      </div>
+    </label>
+
+    <label
+      v-if="isSettingVisible('map.real-estate-color-transitions', 'map')"
+      class="settings-toggle"
+      data-settings-real-estate-color-transitions
+    >
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.realEstateColorTransitions"
+        :aria-checked="settings.realEstateColorTransitions"
+        :aria-label="t('settings.display.realEstateColorTransitionsAria')"
+        @change="
+          emit('update-settings', {
+            realEstateColorTransitions: ($event.target as HTMLInputElement).checked,
+          })
+        "
+      />
+      <span></span>
+      <div>
+        <strong>{{ t("settings.display.realEstateColorTransitions") }}</strong>
+        <small>{{ t("settings.display.realEstateColorTransitionsDescription") }}</small>
       </div>
     </label>
 

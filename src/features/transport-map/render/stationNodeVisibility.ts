@@ -68,9 +68,10 @@ export function createStationNodeVisibilityContext(
     : undefined;
   const hoveredGhostStationIds = overrides.hoveredGhostStationIds ?? new Set(hoveredGhostLine?.stationIds ?? []);
   const selectedStationIds = overrides.selectedStationIds ?? new Set(scene.selectedStationIds);
+  const lineModesById = new Map(scene.lines.map((line) => [line.id, line.mode]));
   const majorOverviewHubIds = new Set<string>();
   for (const station of scene.stations ?? []) {
-    if (isMajorOverviewHub(station, scene.lines)) majorOverviewHubIds.add(station.id);
+    if (isMajorOverviewHub(station, scene.lines, lineModesById)) majorOverviewHubIds.add(station.id);
   }
 
   return {
@@ -125,6 +126,7 @@ export function createStationNodeVisibilityPredicate(
 function isMajorOverviewHub(
   station: GlobalMapStation,
   lines: StationNodeVisibilityScene["lines"],
+  lineModesById?: ReadonlyMap<string, GlobalMapMode>,
 ): boolean {
   if (!station.isHub) return false;
   const stationLineIds = new Set(station.lineIds);
@@ -137,9 +139,12 @@ function isMajorOverviewHub(
   // secondary family can be filtered from the current view while the station
   // remains a real interchange hub.
   const stationModes = new Set(
-    lines
-      .filter((line) => stationLineIds.has(line.id))
-      .map((line) => line.mode),
+    lineModesById
+      ? [...stationLineIds].flatMap((id) => {
+          const mode = lineModesById.get(id);
+          return mode ? [mode] : [];
+        })
+      : lines.filter((line) => stationLineIds.has(line.id)).map((line) => line.mode),
   );
   return stationModes.size >= 2;
 }

@@ -20,7 +20,7 @@ export interface DvfMapMetricRange {
 /** Kept for the price-only layer API and its existing callers. */
 export type DvfMapPriceRange = DvfMapMetricRange;
 
-export type DvfMapMetricMode = "price" | "rent" | "yield";
+export type DvfMapMetricMode = "price" | "rent" | "yield" | "liquidity";
 
 export interface DvfMapMetricCell extends DvfMapGridCell {
   /** Raw active metric value used by the mean-interpolation surface. */
@@ -45,6 +45,12 @@ export interface DvfMapPurchasePointMark {
 }
 
 const DECK_PRICE_COLORS = REAL_ESTATE_METRIC_DECK_COLOR_RANGE;
+const NORMALIZED_METRIC_COLOR_DOMAIN: [number, number] = [0, 1];
+// HeatmapLayer computes into an off-screen weight texture, so WebGL MSAA on
+// the map canvas cannot smooth its contours. Use the library's 2048 px limit
+// to keep that intermediate texture at or above the map's common viewport size.
+const REAL_ESTATE_HEATMAP_TEXTURE_SIZE = 2048;
+const metricRangeUpdateTriggers = new WeakMap<DvfMapMetricRange, readonly [number, number]>();
 
 export function getDvfMapMetricValue(
   cell: DvfMapGridCell,
@@ -52,6 +58,7 @@ export function getDvfMapMetricValue(
   rentalEstimatesByCityCode: Readonly<Record<string, DvfRentalEstimate>>,
 ): number | undefined {
   if (mode === "price") return Number.isFinite(cell.medianPriceM2) ? cell.medianPriceM2 : undefined;
+  if (mode === "liquidity") return Number.isFinite(cell.transactionCount) ? cell.transactionCount : undefined;
   const estimate = rentalEstimatesByCityCode[cell.cityCode];
   const rent = estimate?.rentPerSquareMeter;
   if (!Number.isFinite(rent) || rent! <= 0) return undefined;
@@ -72,13 +79,16 @@ export function getDvfMapMetricRange(
   if (!cityCodes?.length) return undefined;
 
   const includedCityCodes = new Set(cityCodes);
-  const values: number[] = [];
-  for (const cell of cells) {
-    if (!includedCityCodes.has(cell.cityCode)) continue;
-    const value = getDvfMapMetricValue(cell, mode, rentalEstimatesByCityCode);
-    if (value === undefined || !Number.isFinite(value)) continue;
-    values.push(value);
-  }
+  const scopedCells = cells
+    .filter((cell) => includedCityCodes.has(cell.cityCode))
+    .map((cell) => ({ cell, distanceMeters: 0 }));
+  const getValue = (cell: DvfMapGridCell) => getDvfMapMetricValue(cell, mode, rentalEstimatesByCityCode);
+  const values = mode === "liquidity"
+    ? coalesceMetricCandidates(scopedCells, getValue, "sum").map(({ metricValue }) => metricValue)
+    : scopedCells.flatMap(({ cell }) => {
+      const value = getValue(cell);
+      return value !== undefined && Number.isFinite(value) ? [value] : [];
+    });
 
   if (!values.length) return undefined;
   values.sort((left, right) => left - right);
@@ -101,8 +111,10 @@ export function createDvfMapMetricCells(
   return coalesceMetricCandidates(
     candidates,
     (cell) => getDvfMapMetricValue(cell, mode, rentalEstimatesByCityCode),
+    mode === "liquidity" ? "sum" : "weighted-mean",
   ).map(({ cell, metricValue }) => ({
     ...cell,
+    ...(mode === "liquidity" ? { transactionCount: metricValue } : {}),
     metricValue,
     normalizedMetric: normalizeDvfMapMetricValue(metricValue, range),
   }));
@@ -119,6 +131,7 @@ export function interpolateDvfMapMetricValue(
   const groups = coalesceMetricCandidates(
     candidates,
     (cell) => getDvfMapMetricValue(cell, mode, rentalEstimatesByCityCode),
+    mode === "liquidity" ? "sum" : "weighted-mean",
   );
   let weightedValue = 0;
   let totalWeight = 0;
@@ -144,6 +157,7 @@ interface CoalescedMetricCandidate {
 function coalesceMetricCandidates(
   candidates: readonly DvfMapMetricCandidate[],
   getValue: (cell: DvfMapGridCell) => number | undefined,
+  aggregation: "weighted-mean" | "sum" = "weighted-mean",
 ): CoalescedMetricCandidate[] {
   const groups = new Map<string, {
     cell: DvfMapGridCell;
@@ -160,15 +174,16 @@ function coalesceMetricCandidates(
       && candidate.cell.transactionCount > 0
       ? candidate.cell.transactionCount
       : 1;
+    const sampleWeight = aggregation === "sum" ? 1 : transactionWeight;
     const group = groups.get(key);
     if (group) {
-      group.weightedValue += value * transactionWeight;
-      group.totalSampleWeight += transactionWeight;
+      group.weightedValue += value * sampleWeight;
+      group.totalSampleWeight += sampleWeight;
     } else {
       groups.set(key, {
         cell: candidate.cell,
-        weightedValue: value * transactionWeight,
-        totalSampleWeight: transactionWeight,
+        weightedValue: value * sampleWeight,
+        totalSampleWeight: sampleWeight,
         distanceMeters: candidate.distanceMeters,
       });
     }
@@ -176,7 +191,7 @@ function coalesceMetricCandidates(
 
   return [...groups.values()].map((group) => ({
     cell: group.cell,
-    metricValue: group.weightedValue / group.totalSampleWeight,
+    metricValue: aggregation === "sum" ? group.weightedValue : group.weightedValue / group.totalSampleWeight,
     distanceMeters: group.distanceMeters,
   }));
 }
@@ -186,34 +201,56 @@ export function createDeckRealEstateMetricLayers(
   metricCells: readonly DvfMapMetricCell[],
   range: DvfMapMetricRange,
   radiusPixels: number,
-  transitionDurationMs: number,
+  _transitionDurationMs: number,
   beforeId?: string,
 ): Layer[] {
-  if (!metricCells.length) return [];
-  const colorDomain: [number, number] = range.high > range.low
-    ? [range.low, range.high]
-    : [range.low - 0.5, range.high + 0.5];
-  return [new HeatmapLayer<DvfMapMetricCell>({
-    id: REAL_ESTATE_PRICE_LAYER_ID,
+  const layer = createDeckRealEstateMetricLayer(
+    metricCells,
+    range,
+    radiusPixels,
+    0.78,
+    REAL_ESTATE_PRICE_LAYER_ID,
+    beforeId,
+  );
+  return layer ? [layer] : [];
+}
+
+export function createDeckRealEstateMetricLayer(
+  metricCells: readonly DvfMapMetricCell[],
+  range: DvfMapMetricRange,
+  radiusPixels: number,
+  opacity: number,
+  id: string,
+  beforeId?: string,
+): Layer | undefined {
+  if (!metricCells.length) return undefined;
+  // Keep the color scale fixed while the normalized accessor interpolates
+  // between each metric's own range when the two category layers crossfade.
+  let rangeTrigger = metricRangeUpdateTriggers.get(range);
+  if (!rangeTrigger) {
+    rangeTrigger = Object.freeze([range.low, range.high] as const);
+    metricRangeUpdateTriggers.set(range, rangeTrigger);
+  }
+  return new HeatmapLayer<DvfMapMetricCell>({
+    id,
     data: metricCells,
     coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
     aggregation: "MEAN",
     radiusPixels,
-    colorDomain,
+    colorDomain: NORMALIZED_METRIC_COLOR_DOMAIN,
     colorRange: DECK_PRICE_COLORS,
-    weightsTextureSize: 1024,
+    weightsTextureSize: REAL_ESTATE_HEATMAP_TEXTURE_SIZE,
     debounceTimeout: 120,
-    opacity: 0.78,
+    opacity,
     getPosition: getDvfCellPosition,
-    getWeight: getMetricWeight,
-    updateTriggers: { getWeight: [range.low, range.high] },
-    transitions: { getWeight: { duration: transitionDurationMs } },
+    getWeight: getNormalizedMetricWeight,
+    updateTriggers: { getWeight: rangeTrigger },
     ...(beforeId ? { beforeId } : {}),
-  })];
+  });
 }
 
-function getMetricWeight(cell: DvfMapMetricCell): number {
-  return cell.metricValue;
+function getNormalizedMetricWeight(cell: DvfMapMetricCell): number {
+  return cell.normalizedMetric;
 }
 
 function metricColor(value: number | undefined, opacity = 1): [number, number, number, number] {
@@ -357,7 +394,7 @@ export function createDeckRealEstatePriceLayers(
       radiusPixels,
       colorDomain: accessors.colorDomain,
       colorRange: DECK_PRICE_COLORS,
-      weightsTextureSize: 1024,
+      weightsTextureSize: REAL_ESTATE_HEATMAP_TEXTURE_SIZE,
       debounceTimeout: 120,
       opacity: 0.78,
       getPosition: getDvfCellPosition,

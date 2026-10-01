@@ -29,12 +29,13 @@ import type { DvfPurchasePoint, DvfRentalEstimate } from "../../../services/real
 import type { DvfMapMetricCell, DvfMapMetricMode, DvfMapMetricRange } from "./deckRealEstateLayer";
 import {
   createDvfMapMetricCells,
-  createDeckRealEstateMetricLayers,
+  createDeckRealEstateMetricLayer,
   createDeckRealEstateMetricPurchasePointsLayer,
   createDeckRealEstateMetricPurchasePointHoverLayers,
   getDvfMapMetricValue,
   interpolateDvfMapMetricValue,
   normalizeDvfMapMetricValue,
+  REAL_ESTATE_PRICE_LAYER_ID,
   REAL_ESTATE_PURCHASE_POINTS_LAYER_ID,
   type DvfMapPurchasePointMark,
 } from "./deckRealEstateLayer";
@@ -83,6 +84,7 @@ const props = defineProps<{
   realEstateMetricRange?: DvfMapMetricRange;
   realEstateMetricMode?: DvfMapMetricMode;
   realEstateRentalEstimatesByCityCode?: Readonly<Record<string, DvfRentalEstimate>>;
+  realEstateColorTransitions?: boolean;
   reduceMotion?: boolean;
   styleUrl?: NextMapStyle;
   interleaved?: boolean;
@@ -96,6 +98,7 @@ const runtimeConfig = useRuntimeConfig();
 const mapElement = ref<HTMLElement>();
 const status = ref<SurfaceStatus>("initializing");
 const basemapUnavailable = ref(false);
+const systemReducedMotion = ref(false);
 const realEstateInterpolationRadiusPixels = ref(getCurrentInterpolationRadiusPixels());
 const realEstateViewportCells = shallowRef<readonly DvfMapGridCell[]>(
   props.realEstateCells?.length
@@ -110,7 +113,11 @@ const realEstatePurchasePointZoomEnabled = ref(props.camera.zoom >= DVF_MAP_PURC
 const realEstateBeforeId = ref<string>();
 const realEstatePurchasePoints = shallowRef<readonly DvfMapPurchasePointMark[]>([]);
 const hoveredRealEstatePurchasePoint = shallowRef<DvfMapPurchasePointMark>();
-const realEstateTransitionDurationMs = computed(() => props.reduceMotion ? 0 : 1000);
+const realEstateTransitionDurationMs = computed(() =>
+  props.reduceMotion || systemReducedMotion.value || props.realEstateColorTransitions === false
+    ? 0
+    : 800,
+);
 const realEstateMetricCells = computed<readonly DvfMapMetricCell[]>(() => {
   const range = props.realEstateMetricRange;
   if (!range) return [];
@@ -118,16 +125,33 @@ const realEstateMetricCells = computed<readonly DvfMapMetricCell[]>(() => {
   const estimates = props.realEstateRentalEstimatesByCityCode ?? {};
   return createDvfMapMetricCells(realEstateViewportCells.value, mode, range, estimates);
 });
+const realEstateTransitionFromCells = shallowRef<readonly DvfMapMetricCell[]>(realEstateMetricCells.value);
+const realEstateTransitionToCells = shallowRef<readonly DvfMapMetricCell[]>(realEstateMetricCells.value);
+const realEstateTransitionFromRange = shallowRef<DvfMapMetricRange | undefined>(props.realEstateMetricRange);
+const realEstateTransitionToRange = shallowRef<DvfMapMetricRange | undefined>(props.realEstateMetricRange);
+const realEstateTransitionProgress = ref(1);
+const realEstateActiveMetricCells = shallowRef<readonly DvfMapMetricCell[]>(realEstateMetricCells.value);
+const realEstateActiveMetricRange = shallowRef<DvfMapMetricRange | undefined>(props.realEstateMetricRange);
+const realEstateMetricValuesByCoordinate = computed(() => new Map(
+  realEstateMetricCells.value.map((cell) => [`${cell.lon},${cell.lat}`, cell.metricValue] as const),
+));
 const realEstatePurchasePointsForMetric = computed<readonly DvfMapPurchasePointMark[]>(() => {
   const mode = props.realEstateMetricMode ?? "price";
   const range = props.realEstateMetricRange;
   const estimates = props.realEstateRentalEstimatesByCityCode ?? {};
   return realEstatePurchasePoints.value.map((point) => {
-    const value = point.context && range
-      ? getDvfMapMetricValue(point.context, mode, estimates)
+    const context = point.context;
+    const value = context && range
+      ? mode === "liquidity"
+        ? realEstateMetricValuesByCoordinate.value.get(`${context.lon},${context.lat}`)
+          ?? getDvfMapMetricValue(context, mode, estimates)
+        : getDvfMapMetricValue(context, mode, estimates)
       : undefined;
     return {
       ...point,
+      ...(mode === "liquidity" && context && value !== undefined
+        ? { context: { ...context, transactionCount: value } }
+        : {}),
       ...(value !== undefined && range
         ? { normalizedMetric: normalizeDvfMapMetricValue(value, range) }
         : { normalizedMetric: undefined }),
@@ -151,7 +175,98 @@ let fallbackStyleAttempted = false;
 let mapResizeObserver: ResizeObserver | undefined;
 let mapLibreTraceProbe: TransportMapMapLibreTraceProbe | undefined;
 let detachMapLibreTraceProbe: (() => void) | undefined;
+let reducedMotionMediaQuery: MediaQueryList | undefined;
+let realEstateMetricTransitionFrame: number | undefined;
+let lastRealEstateMetricMode = props.realEstateMetricMode ?? "price";
 let applyingMapLocale = false;
+
+function onReducedMotionChange(event: MediaQueryListEvent): void {
+  systemReducedMotion.value = event.matches;
+}
+
+function cancelRealEstateMetricTransition(): void {
+  if (realEstateMetricTransitionFrame !== undefined) {
+    cancelAnimationFrame(realEstateMetricTransitionFrame);
+    realEstateMetricTransitionFrame = undefined;
+  }
+}
+
+function setRealEstateMetricTransitionTarget(
+  cells: readonly DvfMapMetricCell[],
+  range: DvfMapMetricRange | undefined,
+): void {
+  cancelRealEstateMetricTransition();
+  realEstateActiveMetricCells.value = cells;
+  realEstateActiveMetricRange.value = range;
+  realEstateTransitionFromCells.value = cells;
+  realEstateTransitionToCells.value = cells;
+  realEstateTransitionFromRange.value = range;
+  realEstateTransitionToRange.value = range;
+  realEstateTransitionProgress.value = 1;
+}
+
+function animateRealEstateMetricTransition(
+  fromCells: readonly DvfMapMetricCell[],
+  fromRange: DvfMapMetricRange | undefined,
+  toCells: readonly DvfMapMetricCell[],
+  toRange: DvfMapMetricRange | undefined,
+): void {
+  const duration = realEstateTransitionDurationMs.value;
+  if (duration <= 0 || !fromCells.length || !toCells.length) {
+    setRealEstateMetricTransitionTarget(toCells, toRange);
+    return;
+  }
+
+  cancelRealEstateMetricTransition();
+  realEstateActiveMetricCells.value = toCells;
+  realEstateActiveMetricRange.value = toRange;
+  realEstateTransitionFromCells.value = fromCells;
+  realEstateTransitionToCells.value = toCells;
+  realEstateTransitionFromRange.value = fromRange;
+  realEstateTransitionToRange.value = toRange;
+  realEstateTransitionProgress.value = 0;
+
+  const startedAt = performance.now();
+  const tick = (now: number) => {
+    const progress = Math.min(1, (now - startedAt) / duration);
+    realEstateTransitionProgress.value = progress;
+    if (progress >= 1) {
+      realEstateTransitionFromCells.value = toCells;
+      realEstateTransitionFromRange.value = toRange;
+      realEstateMetricTransitionFrame = undefined;
+      return;
+    }
+    realEstateMetricTransitionFrame = requestAnimationFrame(tick);
+  };
+  realEstateMetricTransitionFrame = requestAnimationFrame(tick);
+}
+
+watch(() => ({
+  mode: props.realEstateMetricMode ?? "price",
+  cells: realEstateMetricCells.value,
+  range: props.realEstateMetricRange,
+}), ({ mode, cells, range }) => {
+  if (mode !== lastRealEstateMetricMode) {
+    lastRealEstateMetricMode = mode;
+    animateRealEstateMetricTransition(
+      realEstateActiveMetricCells.value,
+      realEstateActiveMetricRange.value,
+      cells,
+      range,
+    );
+    return;
+  }
+  setRealEstateMetricTransitionTarget(cells, range);
+}, { flush: "post" });
+
+watch(realEstateTransitionDurationMs, (duration) => {
+  if (duration === 0) {
+    setRealEstateMetricTransitionTarget(
+      realEstateActiveMetricCells.value,
+      realEstateActiveMetricRange.value,
+    );
+  }
+});
 
 // This computed never reads camera: panning neither prepares POIs nor updates
 // Deck data/accessors. The presenter retains the same layer and GPU buffers.
@@ -165,15 +280,32 @@ const realEstateLayers = computed(() => {
   const cells = realEstateViewportCells.value;
   if (!cells?.length) return [];
   const mode = props.realEstateMetricMode ?? "price";
-  const metricLayers = props.realEstateMetricRange
-    ? createDeckRealEstateMetricLayers(
-      realEstateMetricCells.value,
-      props.realEstateMetricRange,
+  const progress = realEstateTransitionProgress.value;
+  const transitioning = progress < 1;
+  const fromLayer = transitioning && realEstateTransitionFromRange.value
+    ? createDeckRealEstateMetricLayer(
+      realEstateTransitionFromCells.value,
+      realEstateTransitionFromRange.value,
       realEstateInterpolationRadiusPixels.value,
-      realEstateTransitionDurationMs.value,
+      0.78 * (1 - progress),
+      `${REAL_ESTATE_PRICE_LAYER_ID}-transition-from`,
       realEstateBeforeId.value,
     )
-    : [];
+    : undefined;
+  const toLayer = realEstateTransitionToRange.value
+    ? createDeckRealEstateMetricLayer(
+      realEstateTransitionToCells.value,
+      realEstateTransitionToRange.value,
+      realEstateInterpolationRadiusPixels.value,
+      0.78 * (transitioning ? progress : 1),
+      REAL_ESTATE_PRICE_LAYER_ID,
+      realEstateBeforeId.value,
+    )
+    : undefined;
+  const metricLayers = [
+    ...(fromLayer ? [fromLayer] : []),
+    ...(toLayer ? [toLayer] : []),
+  ];
   if (!realEstatePurchasePointZoomEnabled.value || !realEstatePurchasePoints.value.length) return metricLayers;
 
   return [
@@ -540,6 +672,11 @@ function onMapLoad(): void {
 }
 
 onMounted(() => {
+  if (typeof window.matchMedia === "function") {
+    reducedMotionMediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    systemReducedMotion.value = reducedMotionMediaQuery.matches;
+    reducedMotionMediaQuery.addEventListener("change", onReducedMotionChange);
+  }
   if (!mapElement.value) return;
   // MapLibre 6 resolves its worker relative to import.meta.url by default.
   // Vite moves the main module: explicitly bundle the worker and its imports
@@ -595,6 +732,9 @@ watch(locale, () => {
 });
 
 onBeforeUnmount(() => {
+  cancelRealEstateMetricTransition();
+  reducedMotionMediaQuery?.removeEventListener("change", onReducedMotionChange);
+  reducedMotionMediaQuery = undefined;
   if (realEstatePurchasePointsTimer) clearTimeout(realEstatePurchasePointsTimer);
   realEstatePurchasePointsRevision += 1;
   realEstatePurchasePointsByCity.clear();

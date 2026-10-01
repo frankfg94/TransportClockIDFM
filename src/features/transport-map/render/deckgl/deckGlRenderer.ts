@@ -183,9 +183,9 @@ export class DeckGlRenderer implements TransportMapRenderer {
     if (!previousModel || previousModel.stations !== model.stations) this.stationPacketBuilds += 1;
 
     const binaryPackets = {
-      base: this.ensurePacket(model.basePaths, "base", scene.interactionActive === true, camera.zoom, model.basePathIdentity ?? model.pathIdentity),
-      traffic: this.ensurePacket(model.trafficPaths, "traffic", scene.interactionActive === true, camera.zoom, model.trafficPathIdentity ?? model.pathIdentity),
-      highlight: this.ensurePacket(model.highlightPaths, "highlight", scene.interactionActive === true, camera.zoom, model.highlightPathIdentity ?? model.pathIdentity),
+      base: this.ensurePacket(model.basePaths, "base", scene.interactionActive === true && !scene.continuousRendering, camera.zoom, model.basePathIdentity ?? model.pathIdentity),
+      traffic: this.ensurePacket(model.trafficPaths, "traffic", scene.interactionActive === true && !scene.continuousRendering, camera.zoom, model.trafficPathIdentity ?? model.pathIdentity),
+      highlight: this.ensurePacket(model.highlightPaths, "highlight", scene.interactionActive === true && !scene.continuousRendering, camera.zoom, model.highlightPathIdentity ?? model.pathIdentity),
     };
     const frame: TransportMapRenderFrame = { camera, scene, model, binaryPackets };
     this.currentFrame = frame;
@@ -409,7 +409,7 @@ export class DeckGlRenderer implements TransportMapRenderer {
         }
         if (role === "base") this.basePacketBuilds += 1;
         else if (role === "traffic") this.trafficPacketBuilds += 1;
-        if (this.currentFrame?.scene.interactionActive === true) {
+        if (this.currentFrame?.scene.interactionActive === true && !this.currentFrame.scene.continuousRendering) {
           this.deferPromotion(key);
         } else if (this.currentFrame) {
           // The current frame may have moved to another geometry key while
@@ -461,7 +461,7 @@ export class DeckGlRenderer implements TransportMapRenderer {
 
   private presentCurrentFrameWithCachedPackets(): void {
     const frame = this.currentFrame;
-    if (!frame || frame.scene.interactionActive === true) return;
+    if (!frame || (frame.scene.interactionActive === true && !frame.scene.continuousRendering)) return;
     const binaryPackets = {
       base: frame.model.basePaths.length
         ? this.binaryCache.get(this.buildPacketKey(frame.model.basePaths, "base", frame.model.basePathIdentity ?? frame.model.pathIdentity))
