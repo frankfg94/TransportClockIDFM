@@ -1,21 +1,21 @@
 {
   "schemaVersion": 1,
-  "sha256": "2ed2afe2a0726d6d243a841f89c15572c4119c84669de6c2237b4573175323b8",
-  "datasetVersion": "2026-08-30",
-  "sourceUpdatedAt": "2026-08-30T14:24:20.000Z",
-  "installedAt": "2026-08-31T00:21:42.995Z",
-  "sourceEtag": "\"6a943d14-85e4990\"",
-  "sourceLastModified": "Sun, 30 Aug 2026 14:24:20 GMT",
-  "cacheGeneration": 5,
-  "lineCount": 2019,
+  "sha256": "59a9eacc281de2788efb8f6c3ad7b28824a2ead22792b33ab11a9fe2e12f5e72",
+  "datasetVersion": "2026-09-30",
+  "sourceUpdatedAt": "2026-09-30T14:23:44.000Z",
+  "installedAt": "2026-09-30T20:17:42.942Z",
+  "sourceEtag": "\"6abd1b70-843f361\"",
+  "sourceLastModified": "Wed, 30 Sep 2026 14:23:44 GMT",
+  "cacheGeneration": 6,
+  "lineCount": 2018,
   "timetable": {
     "schemaVersion": 1,
-    "startDate": "20260827",
-    "endDate": "20260928",
-    "lineCount": 2028,
-    "tripCount": 513261,
-    "fileCount": 11772,
-    "bytes": 351209999,
-    "path": "timetables/v1/2ed2afe2a0726d6d243a841f89c15572c4119c84669de6c2237b4573175323b8/f908e659-13e4-4df9-ac72-f5cb6e26f6ae"
+    "startDate": "20260927",
+    "endDate": "20261029",
+    "lineCount": 2026,
+    "tripCount": 505158,
+    "fileCount": 11249,
+    "bytes": 346700175,
+    "path": "timetables/v1/59a9eacc281de2788efb8f6c3ad7b28824a2ead22792b33ab11a9fe2e12f5e72/331e45cc-fa12-44fa-8889-e918858ed084"
   }
 }

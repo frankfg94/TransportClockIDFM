@@ -47,6 +47,11 @@ import { createBoardFromDraft } from "./services/boardBuilder";
 import { transitModeToFamily } from "./services/linePresentation";
 import { fetchBoardDepartures, fetchDirectionGroupsForStation } from "./services/idfm";
 import { createNetworkScheduler } from "./services/networkScheduler";
+import {
+  getNavitiaRetryDelay,
+  isNavitiaRateLimit,
+  idfmRetryAt,
+} from "./services/navitiaRateLimit";
 import { toServerApiUrl } from "./services/serverApi";
 import { fetchGtfsStatus } from "./services/gtfsStatus";
 import {
@@ -142,6 +147,9 @@ const WeatherForecastModal = defineAsyncComponent(
 interface FullscreenPanelDeparture {
   id: string;
   waitLabel: string;
+  departureTime?: string;
+  mission?: string;
+  platform?: string;
   destination?: string;
   meta?: string;
   statusLabel?: string;
@@ -149,6 +157,7 @@ interface FullscreenPanelDeparture {
 
 interface FullscreenPanelDirection {
   id: string;
+  platforms?: string[];
   label: string;
   subtitle?: string;
   serviceEnded?: boolean;
@@ -724,6 +733,29 @@ const netexCacheAlert = computed(() => {
 const gtfsStaleAlert = computed(() =>
   gtfsStatus.value?.enabled && gtfsStatus.value.stale ? gtfsStatus.value : undefined,
 );
+const navitiaRetryDelay = computed(() =>
+  getNavitiaRetryDelay(idfmRetryAt.value, nowTick.value),
+);
+const navitiaRetryTime = computed(() => {
+  const time = navitiaRetryDelay.value;
+
+  return time.totalSeconds >= 3600
+    ? t("app.navitiaRetryHours", {
+        hours: time.hours,
+        minutes: time.minutes,
+        seconds: time.seconds,
+      })
+    : t("app.navitiaRetryMinutes", {
+        minutes: Math.floor(time.totalSeconds / 60),
+        seconds: time.seconds,
+      });
+});
+const navitiaRateLimited = computed(() => navitiaRetryDelay.value.totalSeconds > 0);
+const navitiaRateLimitMessage = computed(() =>
+  navitiaRateLimited.value
+    ? t("app.navitiaRateLimitBody", { time: navitiaRetryTime.value })
+    : "",
+);
 const trafficReportByLineRef = computed(
   () => new Map(trafficReports.value.map((report) => [report.lineRef, report])),
 );
@@ -846,7 +878,11 @@ async function refreshBoard(boardId: string): Promise<void> {
         if (boardEnrichmentVersions.get(board.id) === version) publish(enriched);
       }).catch(() => undefined);
     } catch (error) {
-      state.error = error instanceof Error ? error.message : t("app.errors.fetch");
+      state.error = isNavitiaRateLimit(error)
+        ? undefined
+        : error instanceof Error
+          ? error.message
+          : t("app.errors.fetch");
     } finally {
       state.loading = false;
     }
@@ -1191,10 +1227,7 @@ function getVisibleDirectionGroupsForBoard(boardId: string): DirectionDepartureG
 }
 
 function getFullscreenPanelFirstDeparture(board: TransitBoardConfig): Departure | undefined {
-  const hiddenDirectionIds = new Set(preferences.hiddenDirectionIdsByBoardId[board.id] ?? []);
-  const directions = getVisibleDirectionGroupsForBoard(board.id).filter(
-    (direction) => !hiddenDirectionIds.has(direction.id),
-  );
+  const directions = getVisibleDirectionGroupsForBoard(board.id);
   const selectedDirection =
     directions.find((direction) => direction.id === fullscreenPanelPanamDirectionId.value) ??
     directions.find((direction) => direction.departures.length > 0) ??
@@ -1212,18 +1245,21 @@ function syncFullscreenPanelBrowserTitle(): void {
 }
 
 function getFullscreenPanelDirections(board: TransitBoardConfig): FullscreenPanelDirection[] {
-  const hiddenDirectionIds = new Set(preferences.hiddenDirectionIdsByBoardId[board.id] ?? []);
-
+  // Keep the dense countdown in sync with the existing dashboard clock.
+  if (fullscreenPanelDesign.value === "dense-list") void nowTick.value;
   return getVisibleDirectionGroupsForBoard(board.id)
-    .filter((direction) => !hiddenDirectionIds.has(direction.id))
     .map((direction) => ({
       id: direction.id,
       label: direction.label,
       subtitle: direction.subtitle,
       serviceEnded: direction.serviceEnded,
-      departures: direction.departures.slice(0, 2).map((departure) => ({
+      platforms: board.directionGroups.find(group => group.id === direction.id)?.match.platforms,
+      departures: direction.departures.slice(0, fullscreenPanelDesign.value === "dense-list" ? undefined : 2).map((departure) => ({
         id: departure.id,
         waitLabel: formatPanelWait(departure),
+        departureTime: getDepartureTime(departure),
+        mission: departure.journeyName,
+        platform: departure.platform,
         destination: departure.destination,
         meta: formatPanelDepartureMeta(departure),
         statusLabel: statusLabel(departure.status),
@@ -2807,6 +2843,16 @@ onBeforeUnmount(() => {
             </section>
 
             <section
+              v-if="navitiaRateLimited"
+              class="netex-cache-alert netex-cache-alert--rate-limited"
+              role="status"
+              aria-live="polite"
+            >
+              <strong>{{ t("app.navitiaRateLimitTitle") }}</strong>
+              <span>{{ navitiaRateLimitMessage }}</span>
+            </section>
+
+            <section
               v-if="gtfsStaleAlert"
               class="netex-cache-alert netex-cache-alert--gtfs"
               role="status"
@@ -2860,6 +2906,7 @@ onBeforeUnmount(() => {
                     :hidden-direction-ids="preferences.hiddenDirectionIdsByBoardId[board.id] ?? []"
                     :loading="states[board.id].loading"
                     :error="states[board.id].error"
+                    :rate-limited="navitiaRateLimited"
                     :updated-at="states[board.id].updatedAt"
                     :removable="isCustomBoard(board.id)"
                     :alarm-departure-ids="getBoardAlarmDepartureIds(board.id)"
@@ -2895,7 +2942,9 @@ onBeforeUnmount(() => {
           :line-color="fullscreenPanelBoard.line.color"
           :line-text-color="fullscreenPanelBoard.line.textColor"
           :transport-type-label="getTransportTypeLabel(fullscreenPanelBoard)"
+          :transport-mode="fullscreenPanelBoard.line.mode"
           :directions="fullscreenPanelDirections"
+          :hidden-direction-ids="preferences.hiddenDirectionIdsByBoardId[fullscreenPanelBoard.id] ?? []"
           :design="fullscreenPanelDesign"
           :dark-theme="settings.fullscreenStationPanelDarkTheme"
           :panam-direction-id="fullscreenPanelPanamDirectionId"
@@ -2907,6 +2956,7 @@ onBeforeUnmount(() => {
           :browser-fullscreen-active="fullscreenPanelEnteredNativeFullscreen"
           :alarm-departure-ids="getBoardAlarmDepartureIds(fullscreenPanelBoard.id)"
           :inert="Boolean(alarmTarget)"
+          @update:hidden-direction-ids="updateHiddenDirectionIdsForBoard(fullscreenPanelBoard.id, $event)"
           @change-design="updateFullscreenPanelDesign"
           @change-theme="updateFullscreenPanelTheme"
           @refresh="refreshFullscreenPanel"

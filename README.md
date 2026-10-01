@@ -148,8 +148,37 @@ Les donnees NeTEx ne sont pas obligatoires pour faire fonctionner l'application,
 Pour mettre a jour le cache NeTEx :
 
 ```powershell
-rclone copy . <Votre remote cache NeTEx formate>:idfm-backend-netex-cache/netex/current --progress --transfers 16 --checkers 32 --fast-list
+npm.cmd run update:all:netex
 ```
+
+Pour actualiser NeTEx et GTFS ensemble, puis reconstruire les données dérivées :
+
+```powershell
+npm.cmd run update:all
+```
+
+NeTEx télécharge l’archive IBOO officielle via transport.data.gouv.fr ; GTFS télécharge
+l’archive IDFM officielle. Les deux imports utilisent `scripts/transit/` pour
+le téléchargement conditionnel, les limites de taille, les reprises HTTP et le
+SHA-256. Une compilation incomplète conserve la version active. Les anciennes
+versions restent disponibles ; aucune purge automatique n’est effectuée.
+
+Les imports utilisent un délai de 12 heures. `--force` consulte immédiatement
+la source, `--reindex` reconstruit même si l’archive est identique. Pour GTFS
+sur cet ordinateur uniquement : `npm.cmd run gtfs:update -- --local --force`.
+
+Le gestionnaire `npm.cmd run dataset-workbench` ouvre le service local au port
+4310. Sa page Datasets lance les imports et reconstruit la carte. La cible
+« Local + R2 » publie NeTEx avec le remote rclone configuré, en envoyant les
+artefacts immuables avant l’index actif. Publication manuelle équivalente :
+
+```powershell
+npm.cmd --prefix ../idfm-node-backend run deploy-netex-cache:r2
+```
+
+La date de fraîcheur NeTEx est celle de l’archive source, distincte de la date
+de compilation. Un cache distant reste prioritaire sur les fichiers locaux.
+La mémoire du serveur peut conserver l’ancien index pendant cinq minutes.
 
 Tu peux indiquer explicitement le cache NeTEx avec deux variables separees. `IDFM_NETEX_CACHE_REMOTE` est prioritaire et force un cache distant R2 prive ou HTTP(S). `IDFM_NETEX_CACHE_LOCAL` force un dossier local. Si aucune des deux variables n'est definie, Nuxt cherche automatiquement le cache local de developpement.
 

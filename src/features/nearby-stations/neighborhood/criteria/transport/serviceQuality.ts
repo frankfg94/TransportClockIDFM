@@ -35,7 +35,10 @@ export function summarizeNearbyServiceQuality(
     const candidate = dataset.lines.find((qualityLine) =>
       qualityLine.mode === mode && qualityLine.aliases.some((alias) => tokens.has(alias)),
     );
-    if (candidate) matched.set(candidate.lineId, candidate);
+    const regularity = candidate?.weightedValue ?? candidate?.latestValue;
+    if (candidate && typeof regularity === "number" && Number.isFinite(regularity) && regularity >= 0 && regularity <= 100) {
+      matched.set(candidate.lineId, { ...candidate, reliabilityScore: regularity });
+    }
   }
   const lines = [...matched.values()];
   if (!lines.length) return undefined;
@@ -96,7 +99,7 @@ export function makeServiceQualityFact(
   fact.evidence.sourceUrl = source?.pageUrl;
   fact.evidence.licence = source?.licence.label;
   fact.evidence.value = Math.round(summary.score * 100) / 100;
-  fact.evidence.unit = "/100";
+  fact.evidence.unit = "%";
   fact.evidence.referencePeriod = summary.yearsUsed.length
     ? `${summary.yearsUsed[0]}–${summary.yearsUsed.at(-1)}`
     : undefined;

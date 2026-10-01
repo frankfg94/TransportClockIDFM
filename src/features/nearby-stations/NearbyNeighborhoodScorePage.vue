@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { navitiaRetryAt } from "../../services/navitiaRateLimit";
 import { useRoute, useRouter } from "#imports";
 import { ArrowLeft, Gauge } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
@@ -214,7 +215,22 @@ const failedSource = computed<ScoreRetrySource | undefined>(() => {
   return score.error.value ? "routes" : undefined;
 });
 const retryingSource = ref<ScoreRetrySource>();
+const retryClock = ref(Date.now());
+let retryTimer: ReturnType<typeof setInterval> | undefined;
+onMounted(() => { retryTimer = setInterval(() => { retryClock.value = Date.now(); }, 1000); });
+onBeforeUnmount(() => { clearInterval(retryTimer); });
+const retrySeconds = computed(() => Math.max(0, Math.ceil((navitiaRetryAt.value - retryClock.value) / 1000)));
 const scoreError = computed(() => {
+  if ([heavy.error.value, score.error.value?.message].some((message) => message && /\b429\b/u.test(message))) {
+    if (retrySeconds.value >= 3600) return t("nearbyStations.neighborhoodScore.partialErrorRateLimitCountdownHours", {
+      hours: Math.floor(retrySeconds.value / 3600), minutes: Math.floor(retrySeconds.value % 3600 / 60),
+      seconds: String(retrySeconds.value % 60).padStart(2, "0"),
+    });
+    if (retrySeconds.value > 0) return t("nearbyStations.neighborhoodScore.partialErrorRateLimitCountdown", {
+      minutes: Math.floor(retrySeconds.value / 60), seconds: String(retrySeconds.value % 60).padStart(2, "0"),
+    });
+    return t("nearbyStations.neighborhoodScore.partialErrorRateLimit");
+  }
   if (score.error.value?.name === "TimeoutError" && failedSource.value === score.errorSource.value) {
     return t("nearbyStations.neighborhoodScore.partialErrorTimeout", { seconds: 45 });
   }
@@ -245,6 +261,7 @@ const scoreError = computed(() => {
 });
 
 async function retryFailedSource(): Promise<void> {
+  if (retrySeconds.value > 0) return;
   const source = failedSource.value;
   if (!source || retryingSource.value) return;
   retryingSource.value = source;
@@ -387,6 +404,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
       :progress-label="scoreProgressLabel"
       :error="scoreError"
       :retrying="Boolean(retryingSource)"
+      :retry-disabled="retrySeconds > 0"
       :criteria="score.criteria?.value"
       :directory-url="directoryUrl"
       @change-origin="openAddressSelector"

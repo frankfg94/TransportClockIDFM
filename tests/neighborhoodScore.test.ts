@@ -136,7 +136,7 @@ describe("neighborhood score", () => {
           lineName: "4",
           mode: "METRO",
           aliases: ["4"],
-          reliabilityScore: 71,
+          reliabilityScore: 71, weightedValue: 71,
           labelKey: "fairly-reliable",
           scoreMethod: "metro-combined",
           trend: "stable",
@@ -149,7 +149,7 @@ describe("neighborhood score", () => {
           lineName: "A",
           mode: "RER",
           aliases: ["A"],
-          reliabilityScore: 88,
+          reliabilityScore: 56.67, weightedValue: 88,
           labelKey: "reliable",
           scoreMethod: "peer-comparison",
           trend: "stable",
@@ -162,7 +162,7 @@ describe("neighborhood score", () => {
           lineName: "1",
           mode: "METRO",
           aliases: ["1"],
-          reliabilityScore: 100,
+          reliabilityScore: 100, weightedValue: 100,
           labelKey: "very-reliable",
           scoreMethod: "metro-combined",
           trend: "improving",
@@ -188,7 +188,7 @@ describe("neighborhood score", () => {
     ].find((fact) => fact.kind === "transportServiceQuality");
     expect(qualityFact).toMatchObject({
       action: { href: "/lines-ranking" },
-      evidence: { value: 86.33, unit: "/100" },
+      evidence: { value: 86.33, unit: "%" },
     });
     expect(qualityFact?.transportReliabilityLines?.map((candidate) => candidate.lineName))
       .toEqual(["1", "A", "4"]);

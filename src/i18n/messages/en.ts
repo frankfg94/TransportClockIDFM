@@ -156,6 +156,20 @@ export const en = {
       marketRankingMethod: "Rank 1 is the highest value. Outside its area, the commune is inserted for comparison.",
       commune: "commune",
     },
+    gpeStations: {
+      legend: "GPE stations",
+      groupAria: "Grand Paris Express stations",
+      customizationLabel: "Show projects",
+      stationAria: "{name}, line {line}, {status}",
+      line: "Line {line}",
+      status: {
+        planned: "Planned",
+        "under-construction": "Under construction",
+        open: "Open",
+      },
+      unavailable: "GPE stations are unavailable.",
+      retry: "Retry",
+    },
     radar: {
       title: "Walking radar",
       open: "Configure the walking radar",
@@ -546,6 +560,8 @@ export const en = {
         disabled: "GTFS timetables are disabled.",
         missing: "The GTFS dataset is unavailable.",
         outOfCoverage: "The service date is outside GTFS coverage.",
+        fallbackDate:
+          "GTFS does not cover {requestedDate}; frequency is estimated from the {serviceDate} service (same weekday).",
         lineMissing: "This line is absent from the GTFS dataset.",
         insufficient: "Too few departures to calculate intervals for this day.",
         average: "Line average",
@@ -1387,6 +1403,7 @@ export const en = {
       fullscreenPanel: {
         allDirections: "All directions",
         doubleStop: "Double stop",
+        denseList: "Dense list",
         homeCard: "Station card",
       },
       transferBundle: {
@@ -1582,8 +1599,14 @@ export const en = {
     netexMissingBody: "Line diagrams and detailed service patterns may be unavailable.",
     netexMissingInstruction:
       "Configure IDFM_NETEX_CACHE_REMOTE with an R2/HTTP URL or IDFM_NETEX_CACHE_LOCAL with a folder containing index.json.",
-    gtfsStaleTitle: "GTFS data should be updated",
-    gtfsStaleBody: "Line geometry is about {days} days old. A server-side update is recommended.",
+    gtfsStaleTitle: "GTFS data needs updating",
+    gtfsStaleBody:
+      "Line-shape data is about {days} days old. Refreshing the GTFS dataset on the server is recommended.",
+    navitiaRateLimitTitle: "Some transport data is temporarily unavailable",
+    navitiaRateLimitBody:
+      "One source is temporarily limiting requests. A new attempt is available in {time}. Other sources keep updating and previously received departures are preserved.",
+    navitiaRetryHours: "{hours} h {minutes} min {seconds} s",
+    navitiaRetryMinutes: "{minutes} min {seconds} s",
 
     alarmToastEyebrow: "Departure alarm",
     alarmNotificationTitle: "Time to leave for {station}",
@@ -1613,6 +1636,7 @@ export const en = {
     panelDisplay: "Panel display",
     filterDirections: "Filter directions",
     loadingDepartures: "Loading departures...",
+    rateLimitedNoDepartures: "Departures are temporarily unavailable.",
     allDirectionsHidden: "All directions are hidden.",
     direction: "Direction",
     nextDeparturesAria: "Next departures",
@@ -1679,6 +1703,11 @@ export const en = {
       progressAria: "Progress: {count} steps",
     },
     directionFilter: {
+      singleTitle: "Choose direction",
+      singleHint: "Double stop displays one direction.",
+      singleFiltersHint: "List view filters are preserved and do not apply to Double stop.",
+      done: "Done",
+
       eyebrow: "Directions",
       title: "Filter directions",
       summary: "{visible} / {total} directions shown",
@@ -2450,6 +2479,9 @@ export const en = {
       partialErrorStations: "One source did not respond: IDFM stations and lines. Transport signals may be missing.",
       partialErrorWalking: "One source did not respond: walking routes. Access times to places may be missing.",
       partialErrorHeavy: "One source did not respond: heavy-transport access. Some farther accesses may be missing.",
+      partialErrorRateLimit: "The IDFM journey service (Navitia) is temporarily limiting requests (429). Try again later. Some journeys and transport accesses may be missing.",
+      partialErrorRateLimitCountdown: "The IDFM journey service (Navitia) is limiting requests (429). Try again in {minutes} min {seconds} s. Some journeys and transport accesses may be missing.",
+      partialErrorRateLimitCountdownHours: "The IDFM journey service (Navitia) is limiting requests (429). Try again in {hours} h {minutes} min {seconds} s. Some journeys and transport accesses may be missing.",
       partialErrorServiceQuality: "One source did not respond: IDFM service quality. The reliability signal may be missing.",
       loadingBar: "Loading neighbourhood-score sources",
       retrying: "Retrying…",
@@ -2458,7 +2490,8 @@ export const en = {
       positives: "Strengths",
       negatives: "Watch points",
       neutralFacts: "Data and reference points",
-      transportReliabilityBreakdown: "Reliability by mode and line",
+      transportReliabilityBreakdown: "Regularity by mode and line",
+      regularityLineAria: "{mode}, line {line}, regularity: {score}%",
       categoriesLabel: "Neighbourhood score categories",
       categoryUnavailable: "Unavailable",
       noData: "No usable source yet.",
@@ -2551,7 +2584,7 @@ export const en = {
         sportsFacilities: "Advantage when at least {threshold} distinct sports facilities have a walking route of {minutes} min or less.",
         tennisPresence: "A tennis court is shown as an advantage when a real walking route reaches it in under {threshold} min.",
         tennisStack: "Tennis courts are grouped from {threshold} courts reachable on foot and located within {spread} min of the closest one.",
-        serviceQuality: "Service quality contributes {weight}% of the transport sub-score and aggregates the distinct covered nearby lines.",
+        serviceQuality: "Observed regularity contributes {weight}% of the transport sub-score and aggregates the distinct covered nearby lines, without relative ranking.",
       },
       unavailable: {
         transport: "The station map has not provided a usable network yet.",
@@ -2608,8 +2641,8 @@ export const en = {
           tooltip: "The {station} hub combines {currentLines} with future line {futureLine}. The real access is estimated at {minutes} min via {via}.",
         },
         transportServiceQuality: {
-          label: "Nearby transport reliability: {score}/100",
-          tooltip: "The average reliability of {lines} dataset-covered line(s) is {score}/100. Latest value: {latest}%, weighted average: {weighted}%. Trend: {trend}.",
+          label: "Nearby transport regularity: {score}%",
+          tooltip: "The average regularity of {lines} dataset-covered line(s) is {score}%, based on weighted observed values, or the latest available value. Latest value: {latest}%, weighted average: {weighted}%. Trend: {trend}.",
           openRanking: "View line ranking",
         },
         majorStationUnder40: {
@@ -3237,6 +3270,9 @@ export const en = {
     hideDisruptionDetails: "Show less",
     loadFailed: "Unable to load traffic information.",
     allLinesLoadFailed: "Unable to load all lines.",
+    rateLimited: "Navitia is temporarily limiting requests. Try again in {minutes} min {seconds} s. Lines already shown remain available.",
+    rateLimitedHours: "Navitia is temporarily limiting requests. Try again in {hours} h {minutes} min {seconds} s. Lines already shown remain available.",
+    rateLimitedTryAgain: "Navitia temporarily limited the requests. You can try again; lines already shown remain available.",
     family: {
       metro: "Metro",
       rer: "RER",
@@ -3317,6 +3353,13 @@ export const en = {
       gtfsUnavailable: "GTFS artifacts not found",
       gtfsAvailable: "{count} GTFS lines indexed",
       gtfsStaleDetail: "The dataset is {days} days old; updating it is recommended.",
+      datasetDateUnknown: "Source update date unavailable or invalid.",
+      netexFresh: "{count} lines loaded · NeTEx source up to date",
+      netexStale: "{count} lines loaded · NeTEx source outdated",
+      netexAging: "{count} lines loaded · NeTEx update recommended",
+      netexUnknown: "{count} lines loaded · NeTEx freshness unknown",
+      netexStaleDetail: "The NeTEx source is at least 365 days old; update the source dataset.",
+      netexAgingDetail: "The NeTEx source is at least 180 days old; an update is recommended.",
       gtfsVersion: "Dataset {version}.",
       source: "Source {source}",
       generatedAt: "generated on {date}",
@@ -3389,6 +3432,8 @@ export const en = {
       launchDescription:
         "Inspect the data actually used by the application, its source and its freshness.",
       button: "Manage datasets",
+      openWorkbench: "Open Dataset Workbench",
+      workbenchHint: "Launch Dataset Workbench on this Windows computer.",
       title: "Dataset manager",
       description:
         "Each card reports the state, provenance, size, format, licence and available warnings. Local paths and secrets stay hidden.",

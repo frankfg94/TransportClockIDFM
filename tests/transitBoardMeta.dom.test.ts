@@ -41,6 +41,44 @@ describe("TransitBoard departure metadata", () => {
     wrapper.unmount();
   });
 
+  it("keeps cached departures visible during a Navitia cooldown", async () => {
+    const departure: Departure = {
+      id: "departure-cached",
+      lineRef: "line:test",
+      monitoringRef: "stop:test",
+      stopName: "Station test",
+      destination: "Saint-Remy",
+      monitoringLabel: "Tous quais",
+      expectedDepartureTime: new Date(Date.now() + 5 * 60_000).toISOString(),
+      vehicleAtStop: false,
+    };
+    const wrapper = mount(TransitBoard, {
+      props: {
+        board: createBoard(),
+        collapsedDirectionIds: [],
+        departures: [departure],
+        directionGroups: [createDirectionGroup(departure)],
+        loading: false,
+        rateLimited: true,
+      },
+      global: {
+        stubs: {
+          LineIconBadge: true,
+        },
+      },
+    });
+
+    expect(wrapper.find(".departures li").exists()).toBe(true);
+    expect(wrapper.find(".notice--rate-limited").exists()).toBe(false);
+
+    await wrapper.setProps({ departures: [], directionGroups: [] });
+
+    expect(wrapper.find(".departures li").exists()).toBe(false);
+    expect(wrapper.find(".notice--rate-limited").text()).toContain("momentanément indisponibles");
+
+    wrapper.unmount();
+  });
+
   it("uses the aimed departure fallback when a bus has no expected timestamp", () => {
     const aimedDepartureTime = new Date(Date.now() + 25 * 60_000).toISOString();
     const departure: Departure = {

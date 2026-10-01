@@ -810,7 +810,9 @@ const fullscreenStationPanelDesignLocalizedOptions = computed(() =>
         ? t("settings.options.fullscreenPanel.allDirections")
         : option.id === "double-stop"
           ? t("settings.options.fullscreenPanel.doubleStop")
-          : t("settings.options.fullscreenPanel.homeCard"),
+          : option.id === "dense-list"
+            ? t("settings.options.fullscreenPanel.denseList")
+            : t("settings.options.fullscreenPanel.homeCard"),
   })),
 );
 const transferBundleRetentionLocalizedOptions = computed(() =>

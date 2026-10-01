@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { ChevronDown, Clock3, Search } from "lucide-vue-next";
 import { useI18n, type TranslationKey } from "../../i18n";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
+import { getGtfsServiceDate } from "../../services/lineFrequency";
 import AppModal from "../../components/AppModal.vue";
 import type { LineFrequencyStationCoordinate } from "./lineFrequencyCompass";
 import GtfsFrequencyBlock from "./GtfsFrequencyBlock.vue";
@@ -56,7 +57,17 @@ const sections = computed(() =>
 const centralSection = computed(() => sections.value.find((section) => section.kind === "central"));
 const showCompactAverageFallback = computed(() => {
   const profile = props.profile;
-  return Boolean(profile?.status === "ready" && (!profile.branched || !profile.topologyAvailable));
+  return Boolean(
+    profile?.status === "ready" &&
+      (!profile.branched || !profile.topologyAvailable || !centralSection.value),
+  );
+});
+const fallbackDates = computed(() => {
+  const profile = props.profile;
+  const requestedDate = getGtfsServiceDate();
+  return profile?.status === "ready" && profile.serviceDate < requestedDate
+    ? { requestedDate, serviceDate: profile.serviceDate }
+    : undefined;
 });
 function formatServiceDate(value: string): string {
   if (!/^\d{8}$/u.test(value)) return t("globalMap.sidebar.gtfsFrequency.unknownDate");
@@ -126,7 +137,13 @@ const datasetDate = computed(() => {
           :key="profile.lineId + profile.serviceDate + '-compact'"
           data-testid="frequency-compact"
           compact
-          :title="centralSection ? t('globalMap.sidebar.gtfsFrequency.central') : undefined"
+          :title="
+            centralSection
+              ? t('globalMap.sidebar.gtfsFrequency.central')
+              : profile.branched
+                ? t('globalMap.sidebar.gtfsFrequency.average')
+                : undefined
+          "
           :endpoints="
             centralSection
               ? t('globalMap.sidebar.gtfsFrequency.fromTo', {
@@ -138,6 +155,14 @@ const datasetDate = computed(() => {
           :average="centralSection?.average ?? profile.average"
           :directions="centralSection?.directions ?? (profile.branched ? [] : profile.directions)"
         />
+        <p v-if="fallbackDates" class="gtfs-frequency-card__fallback-note" role="status">
+          {{
+            t("globalMap.sidebar.gtfsFrequency.fallbackDate", {
+              requestedDate: formatServiceDate(fallbackDates.requestedDate),
+              serviceDate: formatServiceDate(fallbackDates.serviceDate),
+            })
+          }}
+        </p>
         <p v-if="!profile.topologyAvailable" role="status">
           {{ t("globalMap.sidebar.gtfsFrequency.topologyMissing") }}
         </p>
@@ -180,6 +205,14 @@ const datasetDate = computed(() => {
             :average="profile.average"
             :directions="profile.branched ? [] : profile.directions"
           />
+          <p v-if="fallbackDates" class="gtfs-frequency-card__fallback-note" role="status">
+            {{
+              t("globalMap.sidebar.gtfsFrequency.fallbackDate", {
+                requestedDate: formatServiceDate(fallbackDates.requestedDate),
+                serviceDate: formatServiceDate(fallbackDates.serviceDate),
+              })
+            }}
+          </p>
           <button
             class="gtfs-frequency-card__timetable-trigger"
             data-testid="gtfs-frequency-timetable"
@@ -408,6 +441,9 @@ p {
 }
 .gtfs-frequency-card__hint {
   font-size: 0.66rem;
+}
+.gtfs-frequency-card__fallback-note {
+  font-size: 0.72rem;
 }
 .gtfs-frequency-card__section {
   border-top: 1px solid var(--border);

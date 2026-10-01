@@ -244,6 +244,23 @@
         :camera="camera"
       />
 
+      <GlobalMapGpeStationsOverlay
+        v-if="gpeStationOverlayVisible && gpeStations.length > 0"
+        :stations="gpeStations"
+        :camera="camera"
+      />
+      <div
+        v-if="gpeStationOverlayVisible && gpeStationsError"
+        class="global-transport-plan__gpe-station-status"
+        role="status"
+        aria-live="polite"
+      >
+        <span>{{ t("globalMap.gpeStations.unavailable") }}</span>
+        <button type="button" @click="retryGpeStations">
+          {{ t("globalMap.gpeStations.retry") }}
+        </button>
+      </div>
+
       <TransportMapUserLocationOverlay
         v-if="!routePreviewActive"
         :request-visible="locationRequestVisible"
@@ -607,9 +624,11 @@
             <GlobalTransportPlanModeCustomization
               :modes="customizationModes"
               :selected-modes="filters.selectedModes.value"
+              :show-gpe-projects="showGpeProjects"
               :mode-label="modeLabel"
               :mode-color="modeColor"
               @update:selected-modes="setGlobalSelectedModes"
+              @update:show-gpe-projects="showGpeProjects = $event"
               @back="returnToModeList"
               @finish="finishCustomization"
             />
@@ -735,6 +754,9 @@
         >
         <span v-if="visibleSelectedBusDirectionQuays.length"
           ><i class="legend-dot legend-dot--quay" /> {{ t("globalMap.page.quay") }}</span
+        >
+        <span v-if="gpeStationOverlayVisible"
+          ><i class="legend-dot legend-dot--gpe" /> {{ t("globalMap.gpeStations.legend") }}</span
         >
         <span v-if="viewport.chunkIds.length"
           >{{ t("globalMap.page.zones", { count: viewport.chunkIds.length }) }} -
@@ -1030,6 +1052,8 @@ import GlobalMapMarkersOverlay from "./GlobalMapMarkersOverlay.vue";
 import GlobalMapGhostLineIconsOverlay from "./GlobalMapGhostLineIconsOverlay.vue";
 import GlobalMapLineConnectionIconsOverlay from "./GlobalMapLineConnectionIconsOverlay.vue";
 import GlobalMapNearbyPlacesOverlay from "./GlobalMapNearbyPlacesOverlay.vue";
+import GlobalMapGpeStationsOverlay from "./GlobalMapGpeStationsOverlay.vue";
+import { fetchGpeStations, type GpeMapStation } from "../transport-map/gpeStationsApi";
 import GlobalTransportItineraryOverlay from "./GlobalTransportItineraryOverlay.vue";
 import GlobalMapDistanceMeasurementOverlay from "./GlobalMapDistanceMeasurementOverlay.vue";
 import GlobalMapTemporaryMarkerOverlay from "./GlobalMapTemporaryMarkerOverlay.vue";
@@ -1503,6 +1527,40 @@ let sceneTrafficStateReader: () => GlobalTransportSceneTrafficState = () => ({
 });
 let viewportTimingReader: (kind: "decode" | "worker", durationMs: number) => void = () => undefined;
 const filters = useTransportMapFilters(availableModes);
+const showGpeProjects = ref(false);
+const gpeStationOverlayVisible = computed(() => {
+  const metroModeIndex = GLOBAL_MAP_MODE_ORDER.indexOf("METRO");
+  return showGpeProjects.value
+    && metroModeIndex >= 0
+    && (filters.visibleModeMask.value & (1 << metroModeIndex)) !== 0;
+});
+const gpeStations = shallowRef<readonly GpeMapStation[]>([]);
+const gpeStationsError = ref(false);
+let gpeStationsPending: Promise<void> | undefined;
+
+function ensureGpeStations(): Promise<void> {
+  if (gpeStations.value.length > 0) return Promise.resolve();
+  if (!gpeStationsPending) {
+    gpeStationsError.value = false;
+    const request = fetchGpeStations()
+      .then((stations) => { gpeStations.value = stations; })
+      .catch(() => { gpeStationsError.value = true; });
+    gpeStationsPending = request;
+    void request.finally(() => {
+      if (gpeStationsPending === request) gpeStationsPending = undefined;
+    });
+  }
+  return gpeStationsPending ?? Promise.resolve();
+}
+
+function retryGpeStations(): void {
+  gpeStationsError.value = false;
+  void ensureGpeStations();
+}
+
+watch(gpeStationOverlayVisible, (visible) => {
+  if (visible) void ensureGpeStations();
+}, { immediate: true });
 const selection = useTransportMapSelection(GLOBAL_TRANSPORT_PLAN_CONFIG.dashboard.maxStations);
 const activeTrafficDisruption = ref<TrafficDisruption>();
 const selectedTrafficDisruptionIds = ref<string[]>([]);
@@ -1715,6 +1773,7 @@ const customSummary = computed(() => {
 });
 
 function setDefaultModes(): void {
+  showGpeProjects.value = false;
   filters.setAll();
 }
 
@@ -4425,6 +4484,7 @@ function closeLineChoiceOnDocumentPointerDown(event: PointerEvent): void {
 }
 
 function selectPreset(preset: GlobalTransportPlanPreset): void {
+  showGpeProjects.value = false;
   if (preset === "ALL") {
     globalRadarPreset.value = undefined;
     filters.setAllVisible();
@@ -5376,6 +5436,35 @@ onBeforeUnmount(() => {
   border-color: rgba(217, 45, 32, .24);
   color: #9b271e;
 }
+.global-transport-plan__gpe-station-status {
+  position: absolute;
+  z-index: 10;
+  top: 52px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: min(460px, calc(100% - 32px));
+  padding: 7px 10px;
+  border: 1px solid rgba(217, 45, 32, .24);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 7px 18px rgba(15, 23, 42, .16);
+  color: #9b271e;
+  font-size: .72rem;
+  font-weight: 700;
+  transform: translateX(-50%);
+}
+.global-transport-plan__gpe-station-status button {
+  padding: 2px 5px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
 .global-transport-plan__itinerary-panel {
   position: absolute;
   z-index: 8;
@@ -5799,6 +5888,13 @@ onBeforeUnmount(() => {
   border-radius: 2px;
   background: #0f766e;
   transform: rotate(45deg);
+}
+.legend-dot--gpe {
+  width: 8px;
+  height: 8px;
+  border: 2px solid #fff;
+  background: #7353ba;
+  box-shadow: 0 0 0 1px #7353ba;
 }
 .global-map-line-debug {
   position: absolute;

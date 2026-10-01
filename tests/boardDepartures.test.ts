@@ -1,8 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
 import { fetchBoardDepartures } from "../src/services/idfm";
+import { recordNavitiaRateLimit } from "../src/services/navitiaRateLimit";
 import type { TransitBoardConfig } from "../src/types/transit";
 
 describe("board departures", () => {
+  it("still fetches realtime board departures during a Navitia cooldown", async () => {
+    vi.useFakeTimers();
+    // Keep the simulated deadline in the past once real timers are restored.
+    vi.setSystemTime(Date.now() - 120_000);
+    try {
+      recordNavitiaRateLimit(new Response(null, { status: 429, headers: { "retry-after": "60" } }));
+      const fetcher = vi.fn(async (_input: RequestInfo | URL) => jsonResponse(createStopMonitoringPayload(new Date(Date.now() + 300_000).toISOString())));
+      const result = await fetchBoardDepartures(createRerBBoard(), { fetcher });
+      expect(result.departures).toHaveLength(1);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(String(fetcher.mock.calls[0]?.[0])).toContain("/stop-monitoring?");
+    } finally {
+      vi.advanceTimersByTime(60_000);
+      vi.useRealTimers();
+    }
+  });
+
   it("publishes realtime before a stalled schedule and returns it after the deadline", async () => {
     vi.useFakeTimers();
     try {

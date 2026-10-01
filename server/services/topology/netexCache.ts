@@ -13,6 +13,8 @@ import type {
 
 interface NetexCacheIndex {
   generatedAt: string;
+  sourceUpdatedAt?: string;
+  installedAt?: string;
   lines: NetexCacheIndexLine[];
 }
 
@@ -57,6 +59,8 @@ export interface NetexCacheStatus {
     location: string;
   };
   generatedAt?: string;
+  sourceUpdatedAt?: string;
+  installedAt?: string;
   lineCount?: number;
   warning?: string;
   message?: string;
@@ -368,6 +372,8 @@ export async function getNetexCacheStatus(
         location: source.root,
       },
       generatedAt: index.generatedAt,
+      sourceUpdatedAt: index.sourceUpdatedAt,
+      installedAt: index.installedAt,
       lineCount: index.lines.length,
       warning: source.warning,
     };

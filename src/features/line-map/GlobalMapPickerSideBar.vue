@@ -429,7 +429,10 @@ async function loadFrequencyProfile(lineId: string, token: number): Promise<void
   const controller = new AbortController();
   frequencyController = controller;
   try {
-    const profile = await fetchGtfsLineFrequency(lineId, { signal: controller.signal });
+    const profile = await fetchGtfsLineFrequency(lineId, {
+      signal: controller.signal,
+      allowCoverageFallback: true,
+    });
     if (token !== frequencyRequestToken.value) return;
     frequencyProfile.value = profile;
     frequencyUnavailable.value = profile.status !== "ready";

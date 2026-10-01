@@ -29,7 +29,7 @@ export type PlacePresetNavigationMode = "dropdown-swipe" | "dropdown" | "swipe";
 export type CompactLinePlanMode = "auto" | "comfort" | "compact" | "realistic";
 export type TrafficInfoDesign = "ratp" | "cards";
 export type TrafficInfoDefaultScope = "optimized" | "all";
-export type FullscreenStationPanelDesign = "all-directions" | "double-stop" | "home-card";
+export type FullscreenStationPanelDesign = "all-directions" | "double-stop" | "home-card" | "dense-list";
 export type TransferBundleRetentionDays = 1 | 3 | 7 | 15 | 30 | 60;
 export type TransferBundleRequestConcurrency = 1 | 2 | 3 | 4;
 export type TransferBundleRequestSpacingMs = 0 | 250 | 500 | 1000 | 1500 | 2000;
@@ -207,6 +207,7 @@ export const fullscreenStationPanelDesignOptions = [
   { id: "all-directions", label: "All directions" },
   { id: "double-stop", label: "Double stop" },
   { id: "home-card", label: "Station card" },
+  { id: "dense-list", label: "Dense list" },
 ] as const;
 
 export const transferBundleRetentionOptions = [
@@ -952,7 +953,7 @@ function isTrafficInfoDefaultScope(value: unknown): value is TrafficInfoDefaultS
 }
 
 function isFullscreenStationPanelDesign(value: unknown): value is FullscreenStationPanelDesign {
-  return value === "all-directions" || value === "double-stop" || value === "home-card";
+  return value === "all-directions" || value === "double-stop" || value === "home-card" || value === "dense-list";
 }
 
 function isWeatherMode(value: unknown): value is WeatherMode {

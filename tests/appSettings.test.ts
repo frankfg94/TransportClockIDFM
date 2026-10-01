@@ -455,10 +455,14 @@ describe("app settings", () => {
     ]);
   });
 
+  it("normalizes the dense-list fullscreen design", () => {
+    expect(normalizeAppSettings({ fullscreenStationPanelDesign: "dense-list" }).fullscreenStationPanelDesign).toBe("dense-list");
+  });
+
   it("exposes every fullscreen station panel design option", () => {
     expect(
       fullscreenStationPanelDesignOptions.map((option) => option.id),
-    ).toEqual(["all-directions", "double-stop", "home-card"]);
+    ).toEqual(["all-directions", "double-stop", "home-card", "dense-list"]);
   });
 
   it("only hides directions that are explicitly marked as non-terminal", () => {

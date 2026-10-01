@@ -3,6 +3,7 @@ import { defineNuxtConfig } from "nuxt/config";
 import { resolveUnlimitedNetwork } from "./config/networkPolicy";
 
 const isCapacitorBuild = process.env.CAPACITOR_BUILD === "true";
+const customBuildDir = process.env.NUXT_BUILD_DIR?.trim();
 const committedGtfsDir = resolve(process.cwd(), ".data/gtfs");
 const configuredNeighborhoodVerdictDataPath =
   process.env.NUXT_NEIGHBORHOOD_VERDICT_DATA_PATH?.trim() ||
@@ -61,7 +62,7 @@ export default defineNuxtConfig({
     },
   },
   // Keep the native build independent from a concurrently running `nuxt dev`.
-  buildDir: isCapacitorBuild ? ".nuxt-capacitor" : undefined,
+  buildDir: customBuildDir || (isCapacitorBuild ? ".nuxt-capacitor" : undefined),
   compatibilityDate: "2026-05-17",
   css: ["@fontsource-variable/atkinson-hyperlegible-next/wght.css", "~/src/styles.css"],
   devtools: { enabled: false },
@@ -70,7 +71,7 @@ export default defineNuxtConfig({
   sourcemap: { server: false },
   // Generated GTFS data can contain tens of thousands of files and must not be
   // traversed by Nuxt's project watcher during development.
-  ignore: [".data"],
+  ignore: [".data", ...(customBuildDir ? [customBuildDir] : [])],
   nitro: {
     preset: isCapacitorBuild
       ? "static"
@@ -139,6 +140,7 @@ export default defineNuxtConfig({
           "**/dist/**",
           "**/.nuxt/**",
           "**/.nuxt-capacitor/**",
+          ...(customBuildDir ? [`${resolve(customBuildDir).replace(/\\/gu, "/")}/**`] : []),
           "**/.unlighthouse/**",
           "**/android/**",
         ],

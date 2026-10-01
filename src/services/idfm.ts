@@ -1,4 +1,5 @@
 import { createNetworkScheduler, runNetworkTask } from "./networkScheduler";
+import { assertNavitiaAvailable, getIdfmRequestScope, recordNavitiaRateLimit } from "./navitiaRateLimit";
 ﻿import type {
   BoardDeparturesResult,
   Departure,
@@ -525,7 +526,11 @@ async function navitiaFetchWithRetry(
   // The same-origin server proxy owns pacing and Retry-After handling. A
   // second retry loop here multiplied every upstream 429 into as many as
   // sixteen PRIM requests (four browser attempts x four server attempts).
-  return navitiaFetch(input, options, init);
+  const scope = getIdfmRequestScope(input);
+  assertNavitiaAvailable(scope);
+  const response = await navitiaFetch(input, options, init);
+  if (response.status === 429) throw recordNavitiaRateLimit(response, scope);
+  return response;
 }
 
 /**

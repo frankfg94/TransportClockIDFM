@@ -138,6 +138,7 @@ export function getIdfmRateLimitScope(upstreamUrl: URL): string {
   if (pathname.includes("/v2/navitia")) return "navitia";
   if (pathname.includes("/stop-monitoring")) return "siri-unit";
   if (pathname.includes("/estimated-timetable")) return "siri-global";
+  if (pathname.includes("/requete-ligne")) return "siri-line";
   if (pathname.includes("/general-message")) return "siri-messages";
   return "marketplace-other";
 }

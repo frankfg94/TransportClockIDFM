@@ -2,15 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
   createReadStream,
-  createWriteStream,
   openSync,
   promises as fs,
   writeSync,
 } from "node:fs";
-import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { Readable } from "node:stream";
+import { downloadSourceArchive } from "../transit/sourceArchive.mjs";
+import { acquireUpdateLock } from "../transit/updateLock.mjs";
 import { fileURLToPath } from "node:url";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Unzip, UnzipInflate } from "fflate";
@@ -122,6 +121,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
 }
 
 export async function runGtfsUpdate(options: GtfsUpdateOptions): Promise<void> {
+  const release = await acquireUpdateLock(options.outputDir);
+  try { await runGtfsUpdateUnlocked(options); } finally { await release(); }
+}
+
+async function runGtfsUpdateUnlocked(options: GtfsUpdateOptions): Promise<void> {
   const outputDir = resolve(options.outputDir);
   // Decide this before constructing a client or loading any remote manifest.
   const r2 = options.local ? undefined : createR2Client();
@@ -236,63 +240,10 @@ async function downloadArchive(
   | { status: "unchanged" }
   | { status: "downloaded"; sha256: string; etag?: string; lastModified?: string }
 > {
-  const headers = new Headers({ Accept: "application/zip" });
-  if (!reindex && previous?.sourceEtag) {
-    headers.set("If-None-Match", previous.sourceEtag);
-  }
-  if (!reindex && previous?.sourceLastModified) {
-    headers.set("If-Modified-Since", previous.sourceLastModified);
-  }
-
-  const response = await fetch(GTFS_SOURCE_URL, { headers, redirect: "follow" });
-  if (response.status === 304) {
-    if (reindex) throw new Error("GTFS reindex requires a full archive, but the source returned 304.");
-    return { status: "unchanged" };
-  }
-  if (!response.ok || !response.body) {
-    throw new Error(`GTFS download failed (${response.status}).`);
-  }
-
-  const advertisedSize = Number(response.headers.get("content-length"));
-  if (Number.isFinite(advertisedSize) && advertisedSize > MAX_COMPRESSED_BYTES) {
-    throw new Error("GTFS archive exceeds the compressed size limit.");
-  }
-
-  const output = createWriteStream(archivePath, { flags: "wx" });
-  const hash = createHash("sha256");
-  let downloadedBytes = 0;
-  let signature = Buffer.alloc(0);
-
-  for await (const chunk of Readable.fromWeb(response.body as never)) {
-    const buffer = Buffer.from(chunk as Uint8Array);
-    downloadedBytes += buffer.length;
-    if (downloadedBytes > MAX_COMPRESSED_BYTES) {
-      output.destroy();
-      throw new Error("GTFS archive exceeds the compressed size limit.");
-    }
-    if (signature.length < 4) signature = Buffer.concat([signature, buffer]).subarray(0, 4);
-    hash.update(buffer);
-    if (!output.write(buffer)) await once(output, "drain");
-
-    reportProgress(
-      "downloading",
-      downloadedBytes,
-      Number.isFinite(advertisedSize) ? advertisedSize : undefined,
-    );
-  }
-  output.end();
-  await once(output, "close");
-
-  if (signature.toString("hex") !== "504b0304") {
-    throw new Error("Downloaded GTFS file is not a valid ZIP archive.");
-  }
-
-  return {
-    status: "downloaded",
-    sha256: hash.digest("hex"),
-    etag: response.headers.get("etag") ?? undefined,
-    lastModified: response.headers.get("last-modified") ?? undefined,
-  };
+  return downloadSourceArchive({ url: GTFS_SOURCE_URL, archivePath, previous, reindex,
+    maxBytes: MAX_COMPRESSED_BYTES,
+    progress: (bytes, total) => reportProgress("downloading", bytes, total),
+  });
 }
 
 export async function extractRequiredFiles(zipPath: string, destination: string): Promise<void> {
@@ -303,7 +254,7 @@ export async function extractRequiredFiles(zipPath: string, destination: string)
 
   const unzip = new Unzip((file) => {
     const name = file.name.replace(/\\/gu, "/");
-    if (name.startsWith("/") || name.split("/").includes("..")) {
+    if (name.startsWith("/") || /^[a-z]:/iu.test(name) || name.includes("\0") || name.split("/").includes("..")) {
       extractionError = new Error(`Unsafe ZIP path: ${name}`);
       return;
     }

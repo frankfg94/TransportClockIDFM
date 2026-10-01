@@ -22,6 +22,7 @@ const props = defineProps<{
   progressLabel?: string;
   error?: string;
   retrying?: boolean;
+  retryDisabled?: boolean;
   criteria?: readonly NeighborhoodCriterionState[];
   directoryUrl: string;
 }>();
@@ -263,7 +264,7 @@ onBeforeUnmount(() => {
       <button
         class="nearby-neighborhood-score-card__retry"
         type="button"
-        :disabled="retrying"
+        :disabled="retrying || retryDisabled"
         @click="emit('retry-source')"
       >
         {{ retrying ? t("nearbyStations.neighborhoodScore.retrying") : t("common.actions.retry") }}

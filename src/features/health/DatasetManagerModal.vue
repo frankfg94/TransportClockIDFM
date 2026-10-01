@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   AlertTriangle,
   CalendarClock,
@@ -35,6 +35,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: [];
 }>();
+
+const localWorkbenchAvailable = ref(false);
+onMounted(() => { localWorkbenchAvailable.value = /Windows/i.test(navigator.userAgent); });
 
 const { d, n, t } = useI18n();
 const datasets = ref<DatasetInfo[]>([]);
@@ -177,6 +180,16 @@ function formatSize(bytes: number | undefined, scope: DatasetSizeScope | undefin
   >
     <div class="dataset-manager-modal__intro">
       <p>{{ t("health.datasets.description") }}</p>
+      <a
+        v-if="localWorkbenchAvailable"
+        class="dataset-manager-modal__refresh"
+        href="dataset-workbench://open/datasets"
+        :title="t('health.datasets.workbenchHint')"
+        data-testid="dataset-workbench-launch"
+      >
+        <ExternalLink :size="15" aria-hidden="true" />
+        {{ t("health.datasets.openWorkbench") }}
+      </a>
       <button
         class="dataset-manager-modal__refresh"
         type="button"

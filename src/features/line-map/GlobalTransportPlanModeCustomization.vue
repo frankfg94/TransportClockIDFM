@@ -72,6 +72,32 @@
       </label>
     </div>
 
+    <label
+      class="global-transport-plan__customization-row global-transport-plan__customization-projects"
+    >
+      <span
+        class="global-transport-plan__customization-icon global-transport-plan__customization-projects-icon"
+        aria-hidden="true"
+      >
+        <Eye :size="17" :stroke-width="2.1" />
+      </span>
+      <span class="global-transport-plan__customization-label">
+        {{ t("globalMap.gpeStations.customizationLabel") }}
+      </span>
+      <span class="global-transport-plan__customization-toggle">
+        <input
+          type="checkbox"
+          data-global-map-customization-gpe-projects
+          :checked="showGpeProjects"
+          :aria-label="t('globalMap.gpeStations.customizationLabel')"
+          @change="toggleGpeProjects"
+        />
+        <span class="global-transport-plan__customization-toggle-track" aria-hidden="true">
+          <span />
+        </span>
+      </span>
+    </label>
+
     <button
       type="button"
       class="global-transport-plan__customization-finish"
@@ -94,12 +120,14 @@ import GlobalTransportPlanModeIcon from "./GlobalTransportPlanModeIcon.vue";
 const props = defineProps<{
   modes: GlobalMapMode[];
   selectedModes: GlobalMapMode[];
+  showGpeProjects: boolean;
   modeLabel: (mode: GlobalMapMode) => string;
   modeColor: (mode: GlobalMapMode) => string;
 }>();
 
 const emit = defineEmits<{
   "update:selected-modes": [modes: GlobalMapMode[]];
+  "update:show-gpe-projects": [visible: boolean];
   back: [];
   finish: [];
 }>();
@@ -128,6 +156,10 @@ function selectAll(): void {
 
 function selectNone(): void {
   emit("update:selected-modes", []);
+}
+
+function toggleGpeProjects(event: Event): void {
+  emit("update:show-gpe-projects", (event.target as HTMLInputElement).checked);
 }
 </script>
 
@@ -221,6 +253,15 @@ function selectNone(): void {
 .global-transport-plan__customization-list {
   display: grid;
   gap: 4px;
+}
+.global-transport-plan__customization-projects {
+  margin-top: 10px;
+  border-color: rgba(148, 163, 184, 0.2);
+}
+.global-transport-plan__customization-projects-icon {
+  border-color: rgba(115, 83, 186, 0.18);
+  background: rgba(115, 83, 186, 0.07);
+  color: #7353ba;
 }
 .global-transport-plan__customization-row {
   position: relative;

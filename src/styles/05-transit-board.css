@@ -841,6 +841,10 @@
   color: var(--danger);
 }
 
+.notice--rate-limited {
+  color: #92400e;
+}
+
 .notice--compact {
   border-top: 1px solid rgba(16, 35, 63, 0.08);
   min-height: auto;

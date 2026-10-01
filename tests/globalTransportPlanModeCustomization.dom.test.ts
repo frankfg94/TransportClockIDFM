@@ -9,16 +9,23 @@ describe("GlobalTransportPlanModeCustomization", () => {
       props: {
         modes: [...modes],
         selectedModes: ["METRO"],
+        showGpeProjects: false,
         modeLabel: (mode: string) => mode,
         modeColor: () => "#7db1f5",
       },
     });
 
-    const inputs = wrapper.findAll("input[type='checkbox']");
+    const inputs = wrapper.findAll(
+      ".global-transport-plan__customization-list input[type='checkbox']",
+    );
     expect(inputs).toHaveLength(3);
     expect((inputs[0]!.element as HTMLInputElement).checked).toBe(true);
     expect((inputs[1]!.element as HTMLInputElement).checked).toBe(false);
     expect(inputs[1]!.attributes("aria-label")).toContain("BUS");
+    const projectsToggle = wrapper.get("[data-global-map-customization-gpe-projects]");
+    expect((projectsToggle.element as HTMLInputElement).checked).toBe(false);
+    await projectsToggle.setValue(true);
+    expect(wrapper.emitted("update:show-gpe-projects")).toEqual([[true]]);
 
     await inputs[1]!.setValue(true);
     const updateEvents = wrapper.emitted("update:selected-modes")!;

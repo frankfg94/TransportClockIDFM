@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ChevronDown, Info, RefreshCw } from "lucide-vue-next";
 import { useRoute } from "#imports";
 import LineIconBadge from "../../components/LineIconBadge.vue";
@@ -12,7 +12,7 @@ import {
   trafficInfoDesignOptions,
   useAppSettings,
   type TrafficInfoDesign,
-} from "../app-settings";
+} from "../app-settings/appSettings";
 import { getActiveTrafficLines } from "./activeTrafficLines";
 import {
   fetchTransitFamilyOptions,
@@ -43,6 +43,11 @@ import type {
   TrafficResponse,
 } from "./types";
 import { normalizeTrafficLineRef } from "./trafficNormalization";
+import {
+  getNavitiaRetryDelay,
+  isNavitiaRateLimit,
+  navitiaRetryAt,
+} from "../../services/navitiaRateLimit";
 
 type TrafficLineSymbol = TrafficAlertPresentation["symbol"] | "roadwork" | "";
 
@@ -53,7 +58,8 @@ const generatedAt = ref("");
 const loading = ref(false);
 const loadingAllLines = ref(false);
 const errorMessage = ref("");
-const allLinesError = ref("");
+const allLinesLoadError = ref("");
+const allLinesRateLimited = ref(false);
 const configured = ref(true);
 const expandedLineRefs = ref(new Set<string>());
 const highlightedTrafficAlertId = ref("");
@@ -69,6 +75,27 @@ let trafficLoadRequest = 0;
 const { settings, updateSettings } = useAppSettings();
 const route = useRoute();
 const { d, locale, t } = useI18n();
+const retryClock = ref(Date.now());
+let retryClockInterval: ReturnType<typeof setInterval> | undefined;
+
+onMounted(() => { retryClockInterval = setInterval(() => { retryClock.value = Date.now(); }, 1000); });
+onBeforeUnmount(() => { if (retryClockInterval !== undefined) clearInterval(retryClockInterval); });
+const retryDelay = computed(() => getNavitiaRetryDelay(navitiaRetryAt.value, retryClock.value));
+const retrySeconds = computed(() => retryDelay.value.totalSeconds);
+const allLinesError = computed(() => {
+  if (!allLinesRateLimited.value) return allLinesLoadError.value;
+  const time = retryDelay.value;
+  return retrySeconds.value >= 3600
+    ? t("traffic.rateLimitedHours", {
+        hours: time.hours,
+        minutes: time.minutes,
+        seconds: time.seconds,
+      })
+    : retrySeconds.value > 0
+      ? t("traffic.rateLimited", { minutes: Math.floor(retrySeconds.value / 60), seconds: time.seconds })
+      : t("traffic.rateLimitedTryAgain");
+});
+const allLinesRetryBlocked = computed(() => allLinesRateLimited.value && retrySeconds.value > 0);
 
 const reportByLineRef = computed(
   () => new Map(reports.value.map((report) => [report.lineRef, report])),
@@ -324,7 +351,8 @@ function getFallbackLineLabel(lineRef: string): string {
 async function toggleAllLinesMode(): Promise<void> {
   const nextMode = !allLinesMode.value;
 
-  allLinesError.value = "";
+  allLinesLoadError.value = "";
+  allLinesRateLimited.value = false;
 
   if (nextMode) {
     const isLoaded = await ensureAllTrafficLinesLoaded();
@@ -358,8 +386,11 @@ async function ensureAllTrafficLinesLoaded(): Promise<boolean> {
     allTrafficLines.value = await loadAllTrafficLines();
     return true;
   } catch (error) {
-    allLinesError.value =
-      error instanceof Error ? error.message : t("traffic.allLinesLoadFailed");
+    if (isNavitiaRateLimit(error) || (error instanceof Error && /\b429\b/u.test(error.message))) {
+      allLinesRateLimited.value = true;
+    } else {
+      allLinesLoadError.value = error instanceof Error ? error.message : t("traffic.allLinesLoadFailed");
+    }
     return false;
   } finally {
     loadingAllLines.value = false;
@@ -785,7 +816,7 @@ function getLineTone(
               class="traffic-scope-toggle"
               type="button"
               :aria-pressed="allLinesMode"
-              :disabled="loadingAllLines"
+              :disabled="loadingAllLines || allLinesRetryBlocked"
               @click="toggleAllLinesMode"
             >
               <span>{{ t("traffic.mode") }}</span>
@@ -821,15 +852,12 @@ function getLineTone(
           </div>
         </header>
 
-        <section v-if="errorMessage" class="traffic-state traffic-state--error">
-          {{ errorMessage }}
+        <section v-if="allLinesError" class="traffic-state traffic-state--rate-limited" role="status" aria-live="polite">
+          {{ allLinesError }}
         </section>
 
-        <section
-          v-else-if="allLinesError"
-          class="traffic-state traffic-state--error"
-        >
-          {{ allLinesError }}
+        <section v-if="errorMessage" class="traffic-state traffic-state--error">
+          {{ errorMessage }}
         </section>
 
         <section v-else-if="displayedLines.length === 0" class="traffic-state">
@@ -1053,7 +1081,7 @@ function getLineTone(
             class="traffic-scope-toggle traffic-scope-toggle--cards"
             type="button"
             :aria-pressed="allLinesMode"
-            :disabled="loadingAllLines"
+            :disabled="loadingAllLines || allLinesRetryBlocked"
             @click="toggleAllLinesMode"
           >
             <span>{{ t("traffic.mode") }}</span>
@@ -1109,15 +1137,12 @@ function getLineTone(
         <small v-else>{{ t("traffic.source") }}</small>
       </section>
 
-      <section v-if="errorMessage" class="traffic-state traffic-state--error">
-        {{ errorMessage }}
+      <section v-if="allLinesError" class="traffic-state traffic-state--rate-limited" role="status" aria-live="polite">
+        {{ allLinesError }}
       </section>
 
-      <section
-        v-else-if="allLinesError"
-        class="traffic-state traffic-state--error"
-      >
-        {{ allLinesError }}
+      <section v-if="errorMessage" class="traffic-state traffic-state--error">
+        {{ errorMessage }}
       </section>
 
       <section v-else-if="displayedLines.length === 0" class="traffic-state">
@@ -2177,6 +2202,19 @@ function getLineTone(
 
 .traffic-state--error {
   color: #b91c1c;
+}
+
+.traffic-state--rate-limited {
+  background: #fff8ed;
+  border: 1px solid #f0cb91;
+  border-radius: 10px;
+  box-shadow: none;
+  color: #754500;
+  font-size: 0.92rem;
+  font-weight: 720;
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  text-align: left;
 }
 
 @keyframes traffic-scope-burst {

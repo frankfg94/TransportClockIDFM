@@ -21,6 +21,7 @@ import {
   Trash,
 } from "lucide-vue-next";
 import ContextMenu from "./ContextMenu.vue";
+import DirectionFilterModal from "./DirectionFilterModal.vue";
 import LineCombobox from "./LineCombobox.vue";
 import LineIconBadge from "./LineIconBadge.vue";
 import StationCombobox from "./StationCombobox.vue";
@@ -72,6 +73,7 @@ const props = withDefaults(
     collapsedDirectionIds: string[];
     loading: boolean;
     error?: string;
+    rateLimited?: boolean;
     updatedAt?: Date;
     removable?: boolean;
     alarmDepartureIds?: string[];
@@ -84,6 +86,7 @@ const props = withDefaults(
     closedSummaryMode: "last",
     displayMode: "grid",
     hiddenDirectionIds: () => [],
+    rateLimited: false,
     showStationChangeAction: true,
   },
 );
@@ -127,7 +130,7 @@ const totalDeparturesCount = computed(() =>
 );
 
 const showsLoadingNotice = computed(
-  () => !props.error && props.loading && totalDeparturesCount.value === 0,
+  () => !props.error && !props.rateLimited && props.loading && totalDeparturesCount.value === 0,
 );
 
 const displayedDeparturesCount = computed(() =>
@@ -398,20 +401,6 @@ function openDirectionFilter(): void {
 
 function closeDirectionFilter(): void {
   directionFilterOpen.value = false;
-}
-
-function isDirectionVisible(directionId: string): boolean {
-  return !hiddenDirectionIdSet.value.has(directionId);
-}
-
-function setDirectionVisibility(directionId: string, event: Event): void {
-  const checked = (event.target as HTMLInputElement | null)?.checked ?? true;
-
-  const nextHiddenIds = checked
-    ? props.hiddenDirectionIds.filter((id) => id !== directionId)
-    : [...new Set([...props.hiddenDirectionIds, directionId])];
-
-  emit("update:hiddenDirectionIds", pruneDirectionIds(nextHiddenIds));
 }
 
 function showAllDirections(): void {
@@ -888,6 +877,15 @@ onUnmounted(() => {
     </div>
 
     <div
+      v-else-if="rateLimited && totalDeparturesCount === 0"
+      class="notice notice--rate-limited"
+      role="status"
+      aria-live="polite"
+    >
+      {{ t("board.rateLimitedNoDepartures") }}
+    </div>
+
+    <div
       v-else-if="loading && totalDeparturesCount === 0"
       class="notice board-loading-notice"
       aria-live="polite"
@@ -1234,110 +1232,16 @@ onUnmounted(() => {
       </div>
     </Transition>
 
-    <Transition name="modal-scale">
-      <div
-        v-if="directionFilterOpen"
-        class="modal-backdrop"
-        @click.self="closeDirectionFilter"
-      >
-        <section
-          class="modal-panel board-direction-filter-modal"
-          :style="{ '--line-color': board.line.color }"
-          aria-modal="true"
-          role="dialog"
-          aria-labelledby="direction-filter-title"
-        >
-          <header
-            class="modal-panel__header board-direction-filter-modal__header"
-          >
-            <div>
-              <p class="eyebrow">{{ t("board.directionFilter.eyebrow") }}</p>
-              <h2 id="direction-filter-title">
-                {{ t("board.directionFilter.title") }}
-              </h2>
-              <span class="board-station-modal__subtitle">
-                {{ board.line.longName }} · {{ board.title }}
-              </span>
-            </div>
-
-            <button
-              class="icon-button"
-              type="button"
-              :aria-label="t('common.actions.close')"
-              @click="closeDirectionFilter"
-            >
-              ×
-            </button>
-          </header>
-
-          <div class="direction-filter-summary">
-            <strong>
-              {{
-                t("board.directionFilter.summary", {
-                  visible: visibleDirectionGroups.length,
-                  total: directionGroups.length,
-                })
-              }}
-            </strong>
-
-            <span v-if="hiddenDirectionsCount > 0">
-              {{
-                hiddenDirectionsCount === 1
-                  ? t("board.directionFilter.hiddenOne", {
-                      count: hiddenDirectionsCount,
-                    })
-                  : t("board.directionFilter.hiddenOther", {
-                      count: hiddenDirectionsCount,
-                    })
-              }}
-            </span>
-          </div>
-
-          <div class="direction-filter-list">
-            <label
-              v-for="group in directionGroups"
-              :key="group.id"
-              class="direction-filter-option"
-              :class="{
-                'direction-filter-option--hidden': !isDirectionVisible(
-                  group.id,
-                ),
-              }"
-            >
-              <input
-                type="checkbox"
-                :checked="isDirectionVisible(group.id)"
-                @change="setDirectionVisibility(group.id, $event)"
-              />
-
-              <span
-                class="direction-filter-option__check"
-                aria-hidden="true"
-              ></span>
-
-              <span class="direction-filter-option__content">
-                <strong>{{ group.label }}</strong>
-              </span>
-            </label>
-          </div>
-
-          <footer
-            class="modal-panel__footer board-direction-filter-modal__footer"
-          >
-            <button
-              class="button-secondary"
-              type="button"
-              :disabled="hiddenDirectionsCount === 0"
-              @click="showAllDirections"
-            >
-              {{ t("common.actions.showAll") }}
-            </button>
-
-            <button type="button" @click="closeDirectionFilter">OK</button>
-          </footer>
-        </section>
-      </div>
-    </Transition>
+    <DirectionFilterModal
+      :open="directionFilterOpen"
+      :directions="directionGroups"
+      :hidden-direction-ids="hiddenDirectionIds"
+      :station-name="board.title"
+      :line-name="board.line.longName"
+      :line-color="board.line.color"
+      @update:hidden-direction-ids="emit('update:hiddenDirectionIds', pruneDirectionIds($event))"
+      @close="closeDirectionFilter"
+    />
   </Teleport>
 </template>
 
@@ -1349,192 +1253,7 @@ onUnmounted(() => {
   gap: 12px;
 }
 
-.board-direction-filter-modal {
-  width: min(460px, calc(100vw - 32px));
-  max-height: min(720px, calc(100vh - 48px));
-  overflow: hidden;
-  padding: 0;
-}
-
-.board-direction-filter-modal__header {
-  padding: 22px 24px 18px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
-}
-
-.board-direction-filter-modal__header .eyebrow {
-  color: var(--line-color);
-}
-
-.direction-filter-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 16px 20px 0;
-  padding: 12px 14px;
-  border-radius: 16px;
-}
-
-.direction-filter-summary strong {
-  min-width: 0;
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-.direction-filter-summary span {
-  flex-shrink: 0;
-  color: rgba(226, 232, 240, 0.72);
-  font-size: 0.78rem;
-  font-weight: 600;
-}
-
-.direction-filter-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: min(420px, 52vh);
-  overflow-y: auto;
-  padding: 18px 20px 20px;
-}
-
-.direction-filter-list::-webkit-scrollbar {
-  width: 8px;
-}
-
-.direction-filter-list::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.28);
-}
-
-.direction-filter-option {
-  position: relative;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  min-height: 64px;
-  padding: 13px 14px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 18px;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.06),
-    rgba(255, 255, 255, 0.025)
-  );
-  cursor: pointer;
-  transition:
-    border-color 160ms ease,
-    background 160ms ease,
-    opacity 160ms ease,
-    transform 160ms ease;
-}
-
-.direction-filter-option:hover {
-  border-color: color-mix(
-    in srgb,
-    var(--line-color) 42%,
-    rgba(148, 163, 184, 0.22)
-  );
-}
-
-.direction-filter-option input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.direction-filter-option__check {
-  position: relative;
-  width: 24px;
-  height: 24px;
-  border: 2px solid rgba(148, 163, 184, 0.48);
-  border-radius: 8px;
-  background: rgba(15, 23, 42, 0.72);
-  transition:
-    border-color 160ms ease,
-    background 160ms ease,
-    box-shadow 160ms ease;
-}
-
-.direction-filter-option input:focus-visible + .direction-filter-option__check {
-  outline: 2px solid color-mix(in srgb, var(--line-color) 70%, white);
-  outline-offset: 3px;
-}
-
-.direction-filter-option input:checked + .direction-filter-option__check {
-  border-color: var(--line-color);
-  background: var(--line-color);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--line-color) 18%, transparent);
-}
-
-.direction-filter-option
-  input:checked
-  + .direction-filter-option__check::after {
-  content: "";
-  position: absolute;
-  left: 7px;
-  top: 3px;
-  width: 6px;
-  height: 12px;
-  border: solid currentColor;
-  border-width: 0 2px 2px 0;
-  color: white;
-  transform: rotate(45deg);
-}
-
-.direction-filter-option__content {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.direction-filter-option__content strong {
-  overflow: hidden;
-  color: var(--line-color);
-  font-size: 0.98rem;
-  font-weight: 750;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.direction-filter-option__content small {
-  overflow: hidden;
-  color: rgba(203, 213, 225, 0.68);
-  font-size: 0.78rem;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.board-direction-filter-modal__footer {
-  padding: 16px 20px 20px;
-  border-top: 1px solid rgba(148, 163, 184, 0.16);
-}
-
 @media (max-width: 560px) {
-  .notice--direction-filter-empty {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .board-direction-filter-modal {
-    width: calc(100vw - 20px);
-    max-height: calc(100vh - 24px);
-  }
-
-  .direction-filter-summary {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .direction-filter-option {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .direction-filter-option__state {
-    grid-column: 2;
-    justify-self: start;
-  }
+  .notice--direction-filter-empty { align-items: stretch; flex-direction: column; }
 }
 </style>

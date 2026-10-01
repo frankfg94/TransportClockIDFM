@@ -152,6 +152,20 @@ export const fr = {
       marketRankingMethod: "Rang 1 = valeur la plus élevée. Hors de son périmètre, la commune est insérée à titre comparatif.",
       commune: "commune",
     },
+    gpeStations: {
+      legend: "Stations du GPE",
+      groupAria: "Stations du Grand Paris Express",
+      customizationLabel: "Voir les projets",
+      stationAria: "{name}, ligne {line}, {status}",
+      line: "Ligne {line}",
+      status: {
+        planned: "Prévue",
+        "under-construction": "En travaux",
+        open: "En service",
+      },
+      unavailable: "Stations du GPE indisponibles.",
+      retry: "Réessayer",
+    },
     radar: {
       title: "Radar piéton",
       open: "Régler le radar piéton",
@@ -543,6 +557,8 @@ export const fr = {
         disabled: "Les horaires GTFS sont désactivés.",
         missing: "Le jeu de données GTFS est indisponible.",
         outOfCoverage: "La date de service est hors de la période couverte par GTFS.",
+        fallbackDate:
+          "GTFS ne couvre pas le {requestedDate} ; fréquence estimée d’après le service du {serviceDate} (même jour de semaine).",
         lineMissing: "Cette ligne est absente du jeu de données GTFS.",
         insufficient: "Pas assez de passages pour calculer les intervalles de ce jour.",
         average: "Moyenne de la ligne",
@@ -1410,6 +1426,7 @@ export const fr = {
       fullscreenPanel: {
         allDirections: "Toutes directions",
         doubleStop: "Double arret",
+        denseList: "Liste dense",
         homeCard: "Carte station",
       },
       transferBundle: {
@@ -1606,9 +1623,14 @@ export const fr = {
     netexMissingBody: "Les plans de ligne et dessertes detaillees peuvent etre indisponibles.",
     netexMissingInstruction:
       "Configurez IDFM_NETEX_CACHE_REMOTE avec une URL R2/HTTP ou IDFM_NETEX_CACHE_LOCAL avec un dossier contenant index.json.",
-    gtfsStaleTitle: "Donnees GTFS a actualiser",
+    gtfsStaleTitle: "Données GTFS à actualiser",
     gtfsStaleBody:
-      "Les traces de lignes ont environ {days} jours. Une mise a jour cote serveur est recommandee.",
+      "Les tracés des lignes datent d’environ {days} jours. Une actualisation du jeu GTFS côté serveur est recommandée.",
+    navitiaRateLimitTitle: "Certaines données de transport sont temporairement indisponibles",
+    navitiaRateLimitBody:
+      "Une source limite temporairement les requêtes. Nouvel essai possible dans {time}. Les autres sources continuent de s’actualiser et les horaires déjà reçus sont conservés.",
+    navitiaRetryHours: "{hours} h {minutes} min {seconds} s",
+    navitiaRetryMinutes: "{minutes} min {seconds} s",
 
     alarmToastEyebrow: "Alarme de passage",
     alarmNotificationTitle: "Il est temps de partir pour {station}",
@@ -1638,6 +1660,7 @@ export const fr = {
     panelDisplay: "Affichage panneau",
     filterDirections: "Filtrer les directions",
     loadingDepartures: "Chargement des passages...",
+    rateLimitedNoDepartures: "Passages momentanément indisponibles.",
     allDirectionsHidden: "Toutes les directions sont masquees.",
     direction: "Direction",
     nextDeparturesAria: "Prochains passages",
@@ -1705,6 +1728,11 @@ export const fr = {
       progressAria: "Progression : {count} etapes",
     },
     directionFilter: {
+      singleTitle: "Choisir la direction",
+      singleHint: "Une seule direction affichée en mode Double arrêt.",
+      singleFiltersHint: "Les filtres des vues en liste sont conservés et ne s’appliquent pas au mode Double arrêt.",
+      done: "OK",
+
       eyebrow: "Directions",
       title: "Filtrer les directions",
       summary: "{visible} / {total} directions affichees",
@@ -2483,6 +2511,9 @@ export const fr = {
       partialErrorStations: "Une source n’a pas répondu : stations et lignes IDFM. Les signaux de transport peuvent manquer.",
       partialErrorWalking: "Une source n’a pas répondu : itinéraires piétons. Les temps d’accès aux lieux peuvent manquer.",
       partialErrorHeavy: "Une source n’a pas répondu : accès aux transports lourds. Certains accès éloignés peuvent manquer.",
+      partialErrorRateLimit: "Le service d’itinéraires IDFM (Navitia) limite temporairement les requêtes (429). Réessayez plus tard. Certains trajets et accès aux transports peuvent manquer.",
+      partialErrorRateLimitCountdown: "Le service d’itinéraires IDFM (Navitia) limite les requêtes (429). Réessayez dans {minutes} min {seconds} s. Certains trajets et accès aux transports peuvent manquer.",
+      partialErrorRateLimitCountdownHours: "Le service d’itinéraires IDFM (Navitia) limite les requêtes (429). Réessayez dans {hours} h {minutes} min {seconds} s. Certains trajets et accès aux transports peuvent manquer.",
       partialErrorServiceQuality: "Une source n’a pas répondu : qualité de service IDFM. Le signal de fiabilité peut manquer.",
       loadingBar: "Chargement des sources du score du quartier",
       retrying: "Nouvel essai…",
@@ -2491,7 +2522,8 @@ export const fr = {
       positives: "Points forts",
       negatives: "Points faibles",
       neutralFacts: "Repères et données",
-      transportReliabilityBreakdown: "Fiabilité par mode et par ligne",
+      transportReliabilityBreakdown: "Régularité par mode et par ligne",
+      regularityLineAria: "{mode}, ligne {line}, régularité : {score} %",
       categoriesLabel: "Catégories du score du quartier",
       categoryUnavailable: "Non disponible",
       noData: "Aucune source exploitable pour le moment.",
@@ -2584,7 +2616,7 @@ export const fr = {
         sportsFacilities: "Avantage si au moins {threshold} équipements sportifs distincts disposent d’un itinéraire piéton en {minutes} min ou moins.",
         tennisPresence: "Un terrain de tennis est affiché comme avantage lorsqu’un itinéraire piéton réel le rejoint en moins de {threshold} min.",
         tennisStack: "Les terrains de tennis sont regroupés à partir de {threshold} terrains accessibles à pied et situés à {spread} min de marche ou moins du plus proche.",
-        serviceQuality: "La qualité de service contribue à hauteur de {weight} % au sous-score transports ; elle agrège les lignes distinctes couvertes proches.",
+        serviceQuality: "La régularité observée contribue à hauteur de {weight} % au sous-score transports ; elle agrège les lignes distinctes couvertes proches, sans classement relatif.",
       },
       unavailable: {
         transport: "La carte des stations n’a pas encore fourni de réseau exploitable.",
@@ -2641,8 +2673,8 @@ export const fr = {
           tooltip: "Le pôle {station} regroupe {currentLines} et la future ligne {futureLine}. L’accès réel est estimé à {minutes} min via {via}.",
         },
         transportServiceQuality: {
-          label: "Fiabilité des transports proches : {score}/100",
-          tooltip: "La fiabilité moyenne de {lines} ligne(s) couvertes par le dataset est de {score}/100. Dernière valeur : {latest} %, moyenne pondérée : {weighted} %. Tendance : {trend}.",
+          label: "Régularité des transports proches : {score} %",
+          tooltip: "La régularité moyenne de {lines} ligne(s) couvertes par le dataset est de {score} %, calculée à partir des valeurs observées pondérées, ou de la dernière valeur disponible. Dernière valeur : {latest} %, moyenne pondérée : {weighted} %. Tendance : {trend}.",
           openRanking: "Voir le classement des lignes",
         },
         majorStationUnder40: {
@@ -3272,6 +3304,9 @@ export const fr = {
     hideDisruptionDetails: "Reduire",
     loadFailed: "Impossible de charger l'information trafic.",
     allLinesLoadFailed: "Impossible de charger toutes les lignes.",
+    rateLimited: "Navitia limite temporairement les requêtes. Réessayez dans {minutes} min {seconds} s. Les lignes déjà affichées restent disponibles.",
+    rateLimitedHours: "Navitia limite temporairement les requêtes. Réessayez dans {hours} h {minutes} min {seconds} s. Les lignes déjà affichées restent disponibles.",
+    rateLimitedTryAgain: "Navitia a temporairement limité les requêtes. Vous pouvez réessayer ; les lignes déjà affichées restent disponibles.",
     family: {
       metro: "Metro",
       rer: "RER",
@@ -3352,6 +3387,13 @@ export const fr = {
       gtfsUnavailable: "Artefacts GTFS introuvables",
       gtfsAvailable: "{count} lignes GTFS indexees",
       gtfsStaleDetail: "Le dataset a {days} jours; une mise a jour est recommandee.",
+      datasetDateUnknown: "Date de mise à jour de la source indisponible ou invalide.",
+      netexFresh: "{count} lignes chargées · source NeTEx à jour",
+      netexStale: "{count} lignes chargées · source NeTEx obsolète",
+      netexAging: "{count} lignes chargées · mise à jour NeTEx conseillée",
+      netexUnknown: "{count} lignes chargées · fraîcheur NeTEx inconnue",
+      netexStaleDetail: "La source NeTEx a au moins 365 jours ; mettez à jour les données source.",
+      netexAgingDetail: "La source NeTEx a au moins 180 jours ; une mise à jour est conseillée.",
       gtfsVersion: "Dataset {version}.",
       source: "Source {source}",
       generatedAt: "generee le {date}",
@@ -3426,6 +3468,8 @@ export const fr = {
       launchDescription:
         "Consultez les donnees effectivement utilisees par l'application, leur source et leur fraicheur.",
       button: "Gerer les datasets",
+      openWorkbench: "Ouvrir Dataset Workbench",
+      workbenchHint: "Lancer Dataset Workbench sur cet ordinateur Windows.",
       title: "Gestion des datasets",
       description:
         "Chaque fiche indique l'etat, la provenance, la taille, le format, la licence et les avertissements disponibles. Les chemins locaux et les secrets restent masques.",

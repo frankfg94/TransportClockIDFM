@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, readonly, ref, watch } from "vue";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { createNetworkScheduler } from "../../services/networkScheduler";
+import { isNavitiaRateLimit } from "../../services/navitiaRateLimit";
 import { getCoordinatesDistanceMeters } from "../../services/distance";
 import { lonLatToWorld } from "../transport-map/geo/coordinateKernel";
 import type { GlobalMapLine, GlobalMapMode, GlobalMapStation } from "../transport-map/contracts/manifest";
@@ -176,7 +177,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
           destination: station,
           ...(scheduledDateTime ? { datetime: scheduledDateTime } : {}),
         }, input.signal).catch((cause: unknown) => {
-          if (input.signal?.aborted || isAbortError(cause)) throw cause;
+          if (input.signal?.aborted || isAbortError(cause) || isNavitiaRateLimit(cause)) throw cause;
           return [];
         });
         const currentAlternatives = listNearbyHeavyJourneyAlternatives(journeys, {
@@ -197,7 +198,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
             destination: station,
             datetime: representativeJourneyDateTime(),
           }, input.signal).catch((cause: unknown) => {
-            if (input.signal?.aborted || isAbortError(cause)) throw cause;
+            if (input.signal?.aborted || isAbortError(cause) || isNavitiaRateLimit(cause)) throw cause;
             return [];
           });
         const daytimeAlternatives = listNearbyHeavyJourneyAlternatives(daytimeJourneys, {
@@ -317,6 +318,7 @@ export function useNearbyHeavyTransports(
   let refreshInterval: number | undefined;
   let refreshFrame: number | undefined;
   let requestController: AbortController | undefined;
+  let candidateOriginKey = "";
 
   const resolver = options.resolver ?? defaultNearbyHeavyTransportResolver;
   const journeyProvider = options.journeyProvider ?? defaultJourneyProvider;
@@ -329,6 +331,11 @@ export function useNearbyHeavyTransports(
     requestToken.value = token;
     const origin = source.origin.value;
     const network = source.network?.value;
+    const originKey = origin ? `${origin.lon},${origin.lat}` : "";
+    if (originKey !== candidateOriginKey) {
+      candidates.value = [];
+      candidateOriginKey = originKey;
+    }
     if (!origin || !network || (source.futureProjectsReady && !source.futureProjectsReady.value)) {
       candidates.value = [];
       isLoading.value = false;
@@ -370,7 +377,7 @@ export function useNearbyHeavyTransports(
       if (token === requestToken.value && !controller.signal.aborted) candidates.value = next;
     } catch (cause) {
       if (token === requestToken.value && !controller.signal.aborted && !isAbortError(cause)) {
-        candidates.value = [];
+        if (!isNavitiaRateLimit(cause)) candidates.value = [];
         error.value = cause instanceof Error ? cause.message : "heavy-transport-unavailable";
       }
     } finally {
@@ -696,12 +703,18 @@ async function mapWithConcurrency<T, R>(
 ): Promise<R[]> {
   const results = new Array<R>(values.length);
   let nextIndex = 0;
+  let stopped = false;
   await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), values.length) }, async () => {
-    while (nextIndex < values.length) {
+    while (!stopped && nextIndex < values.length) {
       signal?.throwIfAborted();
       const index = nextIndex;
       nextIndex += 1;
-      results[index] = await worker(values[index]);
+      try {
+        results[index] = await worker(values[index]);
+      } catch (cause) {
+        stopped = true;
+        throw cause;
+      }
       signal?.throwIfAborted();
     }
   }));

@@ -1,9 +1,10 @@
+import { DATASET_FRESHNESS_POLICIES, datasetFreshness, sourceSnapshotFreshness } from "../../../shared/datasets/freshness";
+export { freshnessFromDate } from "../../../shared/datasets/freshness";
 import type { H3Event } from "h3";
 import { getRequestURL } from "h3";
 import { promises as fs } from "node:fs";
 import { relative, resolve } from "node:path";
 import type {
-  DatasetFreshness,
   DatasetInfo,
   DatasetManagerResponse,
   DatasetSizeScope,
@@ -73,6 +74,7 @@ type SizeMeasurement = {
   bytes: number;
   scope: DatasetSizeScope;
 };
+const sizeMeasurements = new Map<string, { expires: number; value: Promise<number> }>();
 
 type BikeNetworkManifest = {
   schemaVersion: number;
@@ -97,8 +99,7 @@ const CORE_DATASETS: Record<CoreDatasetId, DatasetDefinition> = {
     format: "JSON indexé (cache NeTEx)",
     sourceUrl: IDFM_DATA_URL,
     license: { label: "Open Database License (ODbL)", url: ODBL_URL },
-    warnAfterDays: 180,
-    staleAfterDays: 365,
+    ...DATASET_FRESHNESS_POLICIES["netex"],
   },
   gtfs: {
     id: "gtfs",
@@ -107,8 +108,7 @@ const CORE_DATASETS: Record<CoreDatasetId, DatasetDefinition> = {
     format: "JSON indexé (dérivé GTFS)",
     sourceUrl: GTFS_SOURCE_URL,
     license: { label: "Open Database License (ODbL)", url: ODBL_URL },
-    warnAfterDays: 14,
-    staleAfterDays: 20,
+    ...DATASET_FRESHNESS_POLICIES["gtfs"],
   },
   "bike-network": {
     id: "bike-network",
@@ -117,8 +117,7 @@ const CORE_DATASETS: Record<CoreDatasetId, DatasetDefinition> = {
     format: "JSON géospatial indexé",
     sourceUrl: BIKE_SOURCE_URL,
     license: { label: "ODbL", url: ODBL_URL },
-    warnAfterDays: 365,
-    staleAfterDays: 730,
+    ...DATASET_FRESHNESS_POLICIES["bike-network"],
   },
   ridership: {
     id: "ridership",
@@ -127,8 +126,7 @@ const CORE_DATASETS: Record<CoreDatasetId, DatasetDefinition> = {
     format: "JSON indexé",
     sourceUrl: IDFM_DATA_URL,
     license: { label: "Licence Ouverte / Open Licence", url: OPEN_LICENSE_URL },
-    warnAfterDays: 730,
-    staleAfterDays: 1095,
+    ...DATASET_FRESHNESS_POLICIES["ridership"],
   },
   "neighborhood-verdict": {
     id: "neighborhood-verdict",
@@ -137,8 +135,7 @@ const CORE_DATASETS: Record<CoreDatasetId, DatasetDefinition> = {
     format: "JSON compilé (schéma versionné)",
     sourceUrl: IDFM_DATA_URL,
     license: { label: "Licences mixtes des sources détaillées" },
-    warnAfterDays: 30,
-    staleAfterDays: 90,
+    ...DATASET_FRESHNESS_POLICIES["neighborhood-verdict"],
   },
   "walking-isochrones": {
     id: "walking-isochrones",
@@ -147,8 +144,7 @@ const CORE_DATASETS: Record<CoreDatasetId, DatasetDefinition> = {
     format: "ZIP (index JSON + GeoJSON)",
     sourceUrl: GEOFABRIK_FRANCE_URL,
     license: { label: "Open Database License (ODbL)", url: ODBL_URL },
-    warnAfterDays: 90,
-    staleAfterDays: 180,
+    ...DATASET_FRESHNESS_POLICIES["walking-isochrones"],
   },
   "global-map": {
     id: "global-map",
@@ -157,8 +153,7 @@ const CORE_DATASETS: Record<CoreDatasetId, DatasetDefinition> = {
     format: "JSON packé (manifest + blocs)",
     sourceUrl: IDFM_DATA_URL,
     license: { label: "Licences mixtes IDFM, NeTEx, GTFS et OSM" },
-    warnAfterDays: 30,
-    staleAfterDays: 90,
+    ...DATASET_FRESHNESS_POLICIES["global-map"],
   },
   places: {
     id: "places",
@@ -167,8 +162,7 @@ const CORE_DATASETS: Record<CoreDatasetId, DatasetDefinition> = {
     format: "JSON communal (manifeste + fichiers lazy)",
     sourceUrl: "https://www.openstreetmap.org/",
     license: { label: "Open Database License (ODbL)", url: ODBL_URL },
-    warnAfterDays: 30,
-    staleAfterDays: 90,
+    ...DATASET_FRESHNESS_POLICIES["places"],
   },
   "dvf-property-market": {
     id: "dvf-property-market",
@@ -177,8 +171,7 @@ const CORE_DATASETS: Record<CoreDatasetId, DatasetDefinition> = {
     format: "JSON statique par commune (manifeste + fichiers lazy)",
     sourceUrl: DVF_SOURCE_PAGE_URL,
     license: { label: "Licence Ouverte / Open Licence version 2.0", url: OPEN_LICENSE_URL },
-    warnAfterDays: 365,
-    staleAfterDays: 730,
+    ...DATASET_FRESHNESS_POLICIES["dvf-property-market"],
   },
 };
 
@@ -237,7 +230,8 @@ async function buildNetexDataset(runtimeEnv: ReturnType<typeof getNetexRuntimeEn
     storage,
     ...(measurement ? { sizeBytes: measurement.bytes, sizeScope: measurement.scope } : {}),
     generatedAt: status.generatedAt,
-    freshness: freshnessFromDate(status.generatedAt, definition.warnAfterDays, definition.staleAfterDays),
+    updatedAt: status.sourceUpdatedAt,
+    freshness: datasetFreshness(definition.id, status),
     metrics: [
       { label: "Lignes", value: String(status.lineCount ?? 0) },
     ],
@@ -259,11 +253,10 @@ async function buildGtfsDataset(event?: H3Event): Promise<DatasetInfo> {
   const manifest = await getGtfsManifest(event);
   const localRoot = resolve(process.env.GTFS_OUTPUT_DIR?.trim() || ".data/gtfs");
   const measurement = storage === "local"
-    ? await measureLocalPath(localRoot, "dataset")
+    ? await measureActiveGtfs(localRoot, manifest)
     : manifest?.timetable?.bytes
       ? { bytes: manifest.timetable.bytes, scope: "component" as const }
       : undefined;
-  const sourceDate = status.sourceUpdatedAt ?? status.installedAt;
 
   return {
     ...definition,
@@ -272,7 +265,7 @@ async function buildGtfsDataset(event?: H3Event): Promise<DatasetInfo> {
     ...(measurement ? { sizeBytes: measurement.bytes, sizeScope: measurement.scope } : {}),
     updatedAt: status.sourceUpdatedAt,
     installedAt: status.installedAt,
-    freshness: freshnessFromDate(sourceDate, definition.warnAfterDays, definition.staleAfterDays),
+    freshness: datasetFreshness(definition.id, status),
     metrics: [
       { label: "Lignes", value: String(status.lineCount ?? 0) },
       ...(status.datasetVersion ? [{ label: "Version", value: status.datasetVersion }] : []),
@@ -312,7 +305,7 @@ async function buildBikeNetworkDataset(
       ...(rootSize ? { sizeBytes: rootSize.bytes, sizeScope: rootSize.scope } : { sizeBytes: assetInfo.size, sizeScope: "component" }),
       updatedAt: manifest.sourceUpdatedAt,
       fetchedAt: manifest.fetchedAt,
-      freshness: freshnessFromDate(manifest.sourceUpdatedAt, definition.warnAfterDays, definition.staleAfterDays),
+      freshness: datasetFreshness(definition.id, manifest),
       metrics: [
         { label: "Aménagements", value: String(manifest.featureCount) },
         { label: "Sommets", value: String(manifest.vertexCount) },
@@ -340,7 +333,7 @@ async function buildRidershipDataset(
     storage,
     ...(measurement ? { sizeBytes: measurement.bytes, sizeScope: measurement.scope } : {}),
     generatedAt: status.generatedAt,
-    freshness: freshnessFromDate(status.generatedAt, definition.warnAfterDays, definition.staleAfterDays),
+    freshness: datasetFreshness(definition.id, status),
     metrics: [
       ...(status.actualYears?.length ? [{ label: "Années", value: status.actualYears.join("–") }] : []),
       ...(status.counts ? [{ label: "Lignes", value: String(status.counts.lines) }] : []),
@@ -365,7 +358,7 @@ async function buildNeighborhoodVerdictDataset(event?: H3Event): Promise<Dataset
       storage: storageFromKind(source.kind),
       ...(measurement ? { sizeBytes: measurement.bytes, sizeScope: measurement.scope } : {}),
       generatedAt: data.generatedAt,
-      freshness: freshnessFromDate(data.generatedAt, definition.warnAfterDays, definition.staleAfterDays),
+      freshness: datasetFreshness(definition.id, data),
       metrics: [
         { label: "Sources", value: String(data.sources.length) },
         { label: "Espaces verts", value: String(data.greenSpaces.length) },
@@ -398,7 +391,7 @@ async function buildWalkingIsochronesDataset(
         sizeBytes: source.size,
         sizeScope: "archive",
         generatedAt: archive.index.generatedAt,
-        freshness: freshnessFromDate(archive.index.generatedAt, definition.warnAfterDays, definition.staleAfterDays),
+        freshness: datasetFreshness(definition.id, archive.index),
         metrics: [
           { label: "Périmètres", value: String(Object.keys(archive.index.scopes).length) },
           ...(archive.index.sourceRevision ? [{ label: "Révision source", value: archive.index.sourceRevision }] : []),
@@ -429,7 +422,7 @@ async function buildGlobalMapDataset(event?: H3Event): Promise<DatasetInfo> {
       storage: loaded.storage,
       ...(size ? { sizeBytes: size.bytes, sizeScope: size.scope } : {}),
       generatedAt: loaded.manifest.generatedAt,
-      freshness: freshnessFromDate(loaded.manifest.generatedAt, definition.warnAfterDays, definition.staleAfterDays),
+      freshness: datasetFreshness(definition.id, loaded.manifest),
       metrics: [
         { label: "Lignes", value: String(loaded.manifest.counts?.lines ?? 0) },
         { label: "Stations", value: String(loaded.manifest.counts?.stations ?? 0) },
@@ -457,7 +450,7 @@ async function buildPlacesDataset(event?: H3Event): Promise<DatasetInfo> {
       storage: loaded.storage,
       ...(measurement ? { sizeBytes: measurement.bytes, sizeScope: measurement.scope } : {}),
       generatedAt: loaded.manifest.generatedAt,
-      freshness: freshnessFromDate(loaded.manifest.generatedAt, definition.warnAfterDays, definition.staleAfterDays),
+      freshness: datasetFreshness(definition.id, loaded.manifest),
       metrics: [
         { label: "Communes", value: String(loaded.manifest.totals.cities) },
         { label: "Lieux", value: String(loaded.manifest.totals.places) },
@@ -488,7 +481,7 @@ async function buildDvfDataset(event?: H3Event): Promise<DatasetInfo> {
       generatedAt: loaded.manifest.generatedAt,
       updatedAt: loaded.manifest.source.sourceUpdatedAt,
       referencePeriod: loaded.manifest.referencePeriod,
-      freshness: freshnessFromDate(loaded.manifest.generatedAt, definition.warnAfterDays, definition.staleAfterDays),
+      freshness: datasetFreshness(definition.id, loaded.manifest),
       metrics: [
         { label: "Communes", value: String(cityCount) },
         { label: "Quartiers renseignés", value: String(loaded.manifest.totals.neighborhoodsWithEnoughSales) },
@@ -539,13 +532,7 @@ function toSourceDataset(source: VerdictSourceMetadata): DatasetInfo {
     referencePeriod: source.referencePeriod,
     updatedAt: source.updatedAt ?? source.publishedAt,
     fetchedAt: source.fetchedAt,
-    freshness: {
-      status: source.freshness.status,
-      ageDays: source.freshness.ageDays,
-      observedAt: source.freshness.checkedAt,
-      warnAfterDays: source.freshness.warnAfterDays,
-      staleAfterDays: source.freshness.staleAfterDays,
-    },
+    freshness: sourceSnapshotFreshness(source.freshness),
     metrics: [
       { label: "Producteur", value: source.producer },
       { label: "Couverture", value: source.coverage },
@@ -594,25 +581,6 @@ function storageFromGtfsStorage(storage?: string): DatasetStorage {
   return "unconfigured";
 }
 
-export function freshnessFromDate(
-  value: string | undefined,
-  warnAfterDays: number,
-  staleAfterDays: number,
-  now = Date.now(),
-): DatasetFreshness {
-  if (!value) return { status: "unknown", warnAfterDays, staleAfterDays };
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return { status: "unknown", warnAfterDays, staleAfterDays };
-  const ageDays = Math.max(0, Math.floor((now - timestamp) / 86_400_000));
-  return {
-    status: ageDays >= staleAfterDays ? "stale" : ageDays >= warnAfterDays ? "aging" : "fresh",
-    ageDays,
-    observedAt: new Date(timestamp).toISOString(),
-    warnAfterDays,
-    staleAfterDays,
-  };
-}
-
 async function measureSource(
   location: string | undefined,
   kind: string | undefined,
@@ -629,21 +597,43 @@ async function measureSource(
 
 async function measureLocalPath(location: string, scope: DatasetSizeScope): Promise<SizeMeasurement | undefined> {
   try {
-    return { bytes: await measurePath(location), scope };
+    const key = resolve(location);
+    let entry = sizeMeasurements.get(key);
+    if (!entry || entry.expires <= Date.now()) {
+      entry = { expires: Infinity, value: measurePath(key) };
+      sizeMeasurements.set(key, entry);
+      const active = entry;
+      active.value.then(() => { active.expires = Date.now() + 60_000; }, () => { sizeMeasurements.delete(key); });
+    }
+    return { bytes: await entry.value, scope };
   } catch {
     return undefined;
   }
 }
 
+async function measureActiveGtfs(root: string, manifest: GtfsManifest | undefined): Promise<SizeMeasurement | undefined> {
+  if (!manifest || !/^[a-f0-9]{64}$/iu.test(manifest.sha256)) return undefined;
+  const geometry = await measureLocalPath(resolve(root, "versions", manifest.sha256), "dataset");
+  if (!geometry || !Number.isSafeInteger(manifest.timetable?.bytes)) return undefined;
+  return { bytes: geometry.bytes + manifest.timetable!.bytes, scope: "dataset" };
+}
+
 async function measurePath(location: string): Promise<number> {
-  const info = await fs.stat(location);
-  if (info.isFile()) return info.size;
-  if (!info.isDirectory()) return 0;
-  const entries = await fs.readdir(location, { withFileTypes: true });
+  const pending = [location];
   let total = 0;
-  for (const entry of entries) {
-    if (entry.isFile()) total += (await fs.stat(resolve(location, entry.name))).size;
-    else if (entry.isDirectory()) total += await measurePath(resolve(location, entry.name));
+  // Bounded parallel filesystem reads; never traverse symlinks or old GTFS versions.
+  while (pending.length) {
+    const sizes = await Promise.all(pending.splice(0, 32).map(async (current) => {
+      const info = await fs.lstat(current);
+      if (info.isFile()) return info.size;
+      if (!info.isDirectory()) return 0;
+      const entries = await fs.readdir(current, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile() || entry.isDirectory()) pending.push(resolve(current, entry.name));
+      }
+      return 0;
+    }));
+    total += sizes.reduce((sum, bytes) => sum + bytes, 0);
   }
   return total;
 }

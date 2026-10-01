@@ -1,5 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrafficResponse } from "../src/features/traffic/types";
 
 const trafficResponse: TrafficResponse = {
@@ -83,14 +83,45 @@ const trafficResponse: TrafficResponse = {
   ],
 };
 
+beforeEach(() => {
+  // These fixtures include future disruptions relative to generatedAt.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(trafficResponse.generatedAt));
+});
+
 afterEach(() => {
+  vi.useRealTimers();
   window.localStorage.clear();
   vi.unstubAllGlobals();
   vi.resetModules();
   vi.doUnmock("#imports");
+  vi.doUnmock("../src/services/idfm");
 });
 
 describe("TrafficPage", () => {
+  it("keeps optimized traffic visible and explains the cooldown when all-lines mode is rate limited", async () => {
+    const { recordNavitiaRateLimit } = await import("../src/services/navitiaRateLimit");
+    const rateLimit = recordNavitiaRateLimit(new Response(null, {
+      status: 429,
+      headers: { "retry-after": "18000" },
+    }));
+    vi.doMock("../src/services/idfm", () => ({
+      fetchTransitFamilyOptions: vi.fn(async () => { throw rateLimit; }),
+      searchTransitLines: vi.fn(async () => []),
+    }));
+    installTrafficFetchMock();
+    const wrapper = await mountTrafficPage();
+    await wrapper.get(".traffic-scope-toggle").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[role="status"]').text()).toMatch(/Réessayez dans 4 h 59 min|Réessayez dans 5 h/u);
+    expect(wrapper.get('[role="status"]').text()).toContain("Les lignes déjà affichées restent disponibles");
+    expect(wrapper.get(".traffic-scope-toggle").attributes("disabled")).toBeDefined();
+    expect(wrapper.findAll(".traffic-ratp-line")).toHaveLength(2);
+    expect(wrapper.text()).not.toContain("navitia-journeys-429");
+    wrapper.unmount();
+  });
+
   it("renders only active non-bus dashboard lines and expands disruptions", async () => {
     window.localStorage.setItem(
       "transport-clock.preferences.v2",

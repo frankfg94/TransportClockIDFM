@@ -36,28 +36,45 @@ export function getGtfsServiceDate(now = new Date()): string {
   return civil.toISOString().slice(0, 10).replaceAll("-", "");
 }
 
+function isCoveredEarlierServiceDate(
+  value: GtfsLineFrequencyResponse,
+  requestedDate: string,
+): boolean {
+  const coverage = value.coverage;
+  return Boolean(
+    value.status === "ready" &&
+      /^\d{8}$/u.test(value.serviceDate) &&
+      value.serviceDate < requestedDate &&
+      coverage &&
+      value.serviceDate >= coverage.startDate &&
+      value.serviceDate <= coverage.endDate,
+  );
+}
+
 /** Cache completed responses only: each caller owns its cancellation signal. */
 export async function fetchGtfsLineFrequency(
   lineId: string,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; allowCoverageFallback?: boolean } = {},
 ): Promise<GtfsLineFrequencyResponse> {
   options.signal?.throwIfAborted();
   const now = Date.now();
   const requestDate = getGtfsRequestDate(new Date(now));
   const serviceDate = getGtfsServiceDate(new Date(now));
+  const cacheKey = JSON.stringify([lineId, options.allowCoverageFallback === true]);
   for (const [key, entry] of cache) {
     if (entry.expiresAt <= now || entry.requestDate !== requestDate) cache.delete(key);
   }
-  const cached = cache.get(lineId);
+  const cached = cache.get(cacheKey);
   if (cached) {
-    cache.delete(lineId);
-    cache.set(lineId, cached);
+    cache.delete(cacheKey);
+    cache.set(cacheKey, cached);
     return cached.value;
   }
 
+  const fallbackQuery = options.allowCoverageFallback ? "?allowCoverageFallback=1" : "";
   const value = await runNetworkTask(async (signal) => {
     const response = await fetch(
-      toServerApiUrl(`/api/lines/${encodeURIComponent(lineId)}/frequency`),
+      toServerApiUrl(`/api/lines/${encodeURIComponent(lineId)}/frequency${fallbackQuery}`),
       {
         signal,
         cache: "no-store",
@@ -68,13 +85,17 @@ export async function fetchGtfsLineFrequency(
     return (await response.json()) as GtfsLineFrequencyResponse;
   }, options.signal);
   options.signal?.throwIfAborted();
-  // Reject a stale upstream service day, including requests crossing Paris
-  // midnight. Weekend responses must refer to the upcoming Monday.
-  if (value.serviceDate !== serviceDate || getGtfsRequestDate() !== requestDate) {
+  // In the map's opt-in mode, accept an earlier covered date; still reject
+  // other date mismatches and requests that crossed Paris midnight.
+  if (
+    (value.serviceDate !== serviceDate &&
+      (!options.allowCoverageFallback || !isCoveredEarlierServiceDate(value, serviceDate))) ||
+    getGtfsRequestDate() !== requestDate
+  ) {
     throw new Error("GTFS frequency response has an outdated service date");
   }
-  cache.delete(lineId);
-  cache.set(lineId, {
+  cache.delete(cacheKey);
+  cache.set(cacheKey, {
     value,
     requestDate,
     expiresAt: Date.now() + (value.status === "ready" ? READY_TTL_MS : UNAVAILABLE_TTL_MS),

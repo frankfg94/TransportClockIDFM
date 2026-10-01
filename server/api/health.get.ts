@@ -1,3 +1,4 @@
+import { datasetFreshness } from "../../shared/datasets/freshness";
 import { defineEventHandler, type H3Event } from "h3";
 import type { HealthCheck, HealthQuota, HealthResponse } from "../../src/features/health/types";
 import { getServerIdfmApiKey } from "../services/idfm/resolveStopArea";
@@ -32,8 +33,6 @@ const BROWSER_LIKE_HEALTH_HEADERS = {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
     "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
 };
-const NETEX_UPDATE_RECOMMENDED_AFTER_MONTHS = 6;
-const NETEX_OUTDATED_AFTER_MONTHS = 12;
 
 type PrimGlobalStatusPageSnapshot = {
   responseOk: boolean;
@@ -50,6 +49,8 @@ type NetexDatasetFreshness = {
   status: "warning" | "error";
   message: string;
   detail: string;
+  messageKey?: HealthCheck["messageKey"];
+  detailKey?: HealthCheck["detailKey"];
 };
 
 type HealthCheckHandler = (event: H3Event) => HealthCheck | Promise<HealthCheck>;
@@ -299,17 +300,19 @@ export async function checkGtfsCache(event: H3Event): Promise<HealthCheck> {
       };
     }
 
+    const freshness = datasetFreshness("gtfs", status);
+    const needsUpdate = freshness.status === "aging" || freshness.status === "stale";
     return {
-      status: status.stale ? "warning" : "ok",
+      status: freshness.status === "fresh" ? "ok" : "warning",
       message: `${status.lineCount ?? 0} lines indexed`,
       messageKey: "health.messages.gtfsAvailable",
       messageParams: { count: status.lineCount ?? 0 },
-      detail: status.stale
-        ? `Dataset is ${status.ageDays ?? 20} days old.`
+      detail: freshness.status === "unknown" ? "GTFS source date unavailable." : needsUpdate
+        ? `Dataset is ${freshness.ageDays ?? 0} days old.`
         : `Dataset ${status.datasetVersion ?? "unknown"}.`,
-      detailKey: status.stale ? "health.messages.gtfsStaleDetail" : "health.messages.gtfsVersion",
-      detailParams: status.stale
-        ? { days: status.ageDays ?? 20 }
+      detailKey: freshness.status === "unknown" ? "health.messages.datasetDateUnknown" : needsUpdate ? "health.messages.gtfsStaleDetail" : "health.messages.gtfsVersion",
+      detailParams: needsUpdate
+        ? { days: freshness.ageDays ?? 0 }
         : { version: status.datasetVersion ?? "unknown" },
     };
   });
@@ -329,10 +332,13 @@ async function checkNetexCache(event: H3Event): Promise<HealthCheck> {
       };
     }
 
-    const freshness = getNetexDatasetFreshness(status.generatedAt);
+    const freshness = getNetexDatasetFreshness(status.sourceUpdatedAt);
 
     return {
       status: freshness?.status ?? (status.warning ? "warning" : "ok"),
+      messageKey: freshness?.messageKey ?? "health.messages.netexFresh",
+      messageParams: { count: status.lineCount ?? 0 },
+      detailKey: freshness?.detailKey,
       message: [`${status.lineCount ?? 0} lines loaded`, freshness?.message]
         .filter(Boolean)
         .join(" · "),
@@ -844,55 +850,12 @@ function formatNetexSource(kind?: string): string {
   return kind === "directory" ? "local" : kind.toUpperCase();
 }
 
-export function getNetexDatasetFreshness(
-  generatedAt?: string,
-  now = new Date(),
-): NetexDatasetFreshness | undefined {
-  if (!generatedAt) {
-    return undefined;
-  }
-
-  const generatedDate = new Date(generatedAt);
-
-  if (Number.isNaN(generatedDate.getTime()) || Number.isNaN(now.getTime())) {
-    return undefined;
-  }
-
-  if (now.getTime() > addUtcMonths(generatedDate, NETEX_OUTDATED_AFTER_MONTHS).getTime()) {
-    return {
-      status: "error",
-      message: "dataset outdated",
-      detail: "NeTEx dataset is over one year old and must be regenerated.",
-    };
-  }
-
-  if (
-    now.getTime() > addUtcMonths(generatedDate, NETEX_UPDATE_RECOMMENDED_AFTER_MONTHS).getTime()
-  ) {
-    return {
-      status: "warning",
-      message: "update recommended",
-      detail: "NeTEx dataset is over six months old; updating it is recommended.",
-    };
-  }
-
+export function getNetexDatasetFreshness(sourceUpdatedAt?: string, now = new Date()): NetexDatasetFreshness | undefined {
+  const freshness = datasetFreshness("netex", { sourceUpdatedAt }, now.getTime());
+  if (freshness.status === "stale") return { status: "error", messageKey: "health.messages.netexStale", detailKey: "health.messages.netexStaleDetail", message: "dataset outdated", detail: "NeTEx source is at least 365 days old; update the source dataset." };
+  if (freshness.status === "aging") return { status: "warning", messageKey: "health.messages.netexAging", detailKey: "health.messages.netexAgingDetail", message: "update recommended", detail: "NeTEx source is at least 180 days old; updating it is recommended." };
+  if (freshness.status === "unknown") return { status: "warning", messageKey: "health.messages.netexUnknown", detailKey: "health.messages.datasetDateUnknown", message: "dataset freshness unknown", detail: "The NeTEx source date is unavailable or invalid." };
   return undefined;
-}
-
-function addUtcMonths(date: Date, months: number): Date {
-  const next = new Date(date.getTime());
-  const originalDay = next.getUTCDate();
-
-  next.setUTCDate(1);
-  next.setUTCMonth(next.getUTCMonth() + months);
-
-  const lastDayInTargetMonth = new Date(
-    Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0),
-  ).getUTCDate();
-
-  next.setUTCDate(Math.min(originalDay, lastDayInTargetMonth));
-
-  return next;
 }
 
 function formatDate(value: string): string {

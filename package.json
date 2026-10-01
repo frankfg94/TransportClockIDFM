@@ -25,7 +25,7 @@
     "neighborhood-verdict:validate": "npm --prefix ../idfm-node-backend run data:validate",
     "ridership:update": "npm --prefix ../idfm-node-backend run ridership:update --",
     "update:all": "npm run update:all:netex && npm run gtfs:update && npm --prefix ../idfm-node-backend run update:all",
-    "update:all:netex": "npm --prefix ../idfm-node-backend run generate-netex-cache -- --workers 2",
+    "update:all:netex": "npm --prefix ../idfm-node-backend run netex:update -- --workers 2",
     "update:all:map": "npm --prefix ../idfm-node-backend run update:all",
     "check:data": "tsx scripts/check-data.ts",
     "map:isochrones:build": "npm --prefix ../idfm-node-backend run map:isochrones:build --",

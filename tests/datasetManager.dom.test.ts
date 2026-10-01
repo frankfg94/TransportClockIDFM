@@ -25,11 +25,27 @@ const datasetResponse: DatasetManagerResponse = {
 };
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   document.body.innerHTML = "";
 });
 
 describe("DatasetManagerModal", () => {
+  it.each([
+    ["Mozilla/5.0 (Windows NT 10.0; Win64; x64)", true],
+    ["Mozilla/5.0 (Linux; Android 16)", false],
+  ])("offers the local Windows launcher on the supported desktop (%s)", async (userAgent, visible) => {
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(userAgent);
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => datasetResponse }));
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(DatasetManagerModal, { props: { open: true }, attachTo: document.body });
+    await flushPromises();
+    const link = document.body.querySelector('[data-testid="dataset-workbench-launch"]');
+    expect(Boolean(link)).toBe(visible);
+    if (visible) expect(link?.getAttribute("href")).toBe("dataset-workbench://open/datasets");
+    wrapper.unmount();
+  });
+
   it("loads and displays provenance, freshness, size, source and licence", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,

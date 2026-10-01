@@ -1,3 +1,5 @@
+import type { DatasetFreshness } from "../../../shared/datasets/freshness";
+export type { DatasetFreshness } from "../../../shared/datasets/freshness";
 import type { TranslationKey, TranslationParams } from "../../i18n";
 
 export type HealthStatus = "ok" | "warning" | "error" | "not_configured";
@@ -48,14 +50,6 @@ export type DatasetSizeScope = "dataset" | "archive" | "manifest" | "component" 
 export interface DatasetLicense {
   label: string;
   url?: string;
-}
-
-export interface DatasetFreshness {
-  status: DatasetFreshnessStatus;
-  ageDays?: number;
-  observedAt?: string;
-  warnAfterDays?: number;
-  staleAfterDays?: number;
 }
 
 export interface DatasetMetric {

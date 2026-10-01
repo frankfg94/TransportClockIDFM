@@ -89,6 +89,22 @@ beforeEach(() => {
 });
 
 describe("NearbyNeighborhoodScorePage", () => {
+  it.each(["heavy", "routes"])("asks users to retry later when %s is rate limited", (source) => {
+    mocks.routeState.query = { lat: "48.76591", lon: "2.26821" };
+    if (source === "heavy") mocks.heavy.error.value = "navitia-journeys-429";
+    else {
+      mocks.score.error.value = new Error("navitia-journeys-429");
+      mocks.score.errorSource.value = "routes";
+    }
+    mocks.useNearbyStations.mockReturnValue(mocks.nearby);
+    mocks.useNearbyHeavyTransports.mockReturnValue(mocks.heavy);
+    mocks.useNearbyNeighborhoodScore.mockReturnValue(mocks.score);
+    const wrapper = mount(NearbyNeighborhoodScorePage, { global: { stubs: {
+      NearbyNeighborhoodScoreCard: { props: ["error"], template: "<div data-testid='score-card' :data-error='error' />" },
+    } } });
+    expect(wrapper.get("[data-testid='score-card']").attributes("data-error")).toContain("Réessayez plus tard");
+    wrapper.unmount();
+  });
   it("loads the score component from exact coordinates and keeps the directory handoff", () => {
     mocks.routeState.query = {
       lat: "48.76591",

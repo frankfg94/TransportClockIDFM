@@ -5,7 +5,7 @@ import { computed } from "vue";
 import { useI18n, type TranslationKey } from "../../i18n";
 import type { NeighborhoodFact, NeighborhoodFactGeography, NeighborhoodFactPlace, NeighborhoodFactTransportReliabilityLine } from "./neighborhood";
 import MiniTravelDisplay from "./MiniTravelDisplay.vue";
-import type { ReliabilityLabel, ServiceQualityMode } from "./serviceQualityApi";
+import type { ServiceQualityMode } from "./serviceQualityApi";
 
 const props = defineProps<{
   fact: NeighborhoodFact;
@@ -25,13 +25,6 @@ const transportModeKeys: Record<ServiceQualityMode, TranslationKey> = {
   RER: "nearbyStations.linesRanking.modes.RER",
   TRAIN: "nearbyStations.linesRanking.modes.TRAIN",
   TRAM: "nearbyStations.linesRanking.modes.TRAM",
-};
-const reliabilityLabelKeys: Record<ReliabilityLabel, TranslationKey> = {
-  "very-reliable": "nearbyStations.linesRanking.reliabilityLabels.veryReliable",
-  reliable: "nearbyStations.linesRanking.reliabilityLabels.reliable",
-  "fairly-reliable": "nearbyStations.linesRanking.reliabilityLabels.fairlyReliable",
-  unreliable: "nearbyStations.linesRanking.reliabilityLabels.unreliable",
-  "very-unreliable": "nearbyStations.linesRanking.reliabilityLabels.veryUnreliable",
 };
 
 interface TransportReliabilityGroup {
@@ -79,9 +72,6 @@ function modeLabel(mode: ServiceQualityMode): string {
   return t(transportModeKeys[mode]);
 }
 
-function reliabilityLabel(label: ReliabilityLabel): string {
-  return t(reliabilityLabelKeys[label]);
-}
 
 function formatReliabilityScore(score: number): string {
   return n(score, { maximumFractionDigits: 1 });
@@ -110,7 +100,7 @@ const transportReliabilityGroups = computed<TransportReliabilityGroup[]>(() => {
 });
 
 function transportLineAriaLabel(line: NeighborhoodFactTransportReliabilityLine): string {
-  return t("nearbyStations.linesRanking.lineAria", {
+  return t("nearbyStations.neighborhoodScore.regularityLineAria", {
     line: line.lineName,
     mode: modeLabel(line.mode),
     score: formatReliabilityScore(line.reliabilityScore),
@@ -191,12 +181,9 @@ function geographyLabel(): string {
             >
               <span class="nearby-neighborhood-score-fact__transport-line-name">
                 {{ t("nearbyStations.linesRanking.line") }} {{ line.lineName }}
-                <span class="nearby-neighborhood-score-fact__transport-line-label">
-                 ({{ reliabilityLabel(line.labelKey) }})
-                </span>
               </span>
               <span class="nearby-neighborhood-score-fact__transport-line-score">
-                {{ formatReliabilityScore(line.reliabilityScore) }}/100
+                {{ formatReliabilityScore(line.reliabilityScore) }} %
               </span>
             </li>
           </ol>

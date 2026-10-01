@@ -1,8 +1,10 @@
+import { datasetFreshness, sourceSnapshotFreshness, type DatasetFreshness } from "../shared/datasets/freshness";
 import { getNeighborhoodVerdictSource, loadCompiledNeighborhoodVerdictData } from "../server/services/neighborhoodVerdict/dataStore";
 import {
   AIR_NOISE_GRID_SOURCE_ID,
   AIR_NOISE_STATISTICS_SOURCE_ID,
   IRIS_SOURCE_ID,
+  SERVICE_QUALITY_SOURCE_ID,
 } from "../server/services/neighborhoodVerdict/contracts";
 import { openIsochroneSource } from "../server/services/isochrones/rangeSource";
 import { IndexedIsochroneArchive } from "../server/services/isochrones/indexedArchive";
@@ -44,6 +46,7 @@ type DataMode =
   | "Online (HTTP)";
 
 type DataCheckRow = {
+  Freshness?: DatasetFreshness;
   Data: string;
   Configured: "Yes" | "Auto" | "Partial" | "No";
   Installed: "Yes" | "No" | "Partial" | "Disabled";
@@ -92,7 +95,7 @@ export async function checkNeighborhoodVerdict(): Promise<DataCheckRow> {
   const row: DataCheckRow = { Data: "Neighborhood verdict", Configured: source.kind === "directory" ? "Auto" : "Yes", Installed: "No", Mode: modeFromSource(source.kind, false), Location: source.location, Details: "" };
   try {
     const data = await loadCompiledNeighborhoodVerdictData(env);
-    return { ...row, Installed: "Yes", Details: `${data.greenSpaces.length} green spaces · ${data.gpeStations.length} GPE stations · ${data.iris.neighborhoods.length} IRIS neighborhoods · ${data.sources.length} sources · air/noise grid ${data.airNoiseGrid ? "loaded" : "absent (optional)"} · service quality ${data.serviceQuality.lines.length} lines · generated ${data.generatedAt}` };
+    return { ...row, Installed: "Yes", Freshness: datasetFreshness("neighborhood-verdict", data), Details: `${data.greenSpaces.length} green spaces · ${data.gpeStations.length} GPE stations · ${data.iris.neighborhoods.length} IRIS neighborhoods · ${data.sources.length} sources · air/noise grid ${data.airNoiseGrid ? "loaded" : "absent (optional)"} · service quality ${data.serviceQuality.lines.length} lines · generated ${data.generatedAt}` };
   } catch (error) { return { ...row, Details: String(error) }; }
 }
 
@@ -116,6 +119,7 @@ async function checkIrisNeighborhoods(): Promise<DataCheckRow> {
     return {
       ...row,
       Installed: "Yes",
+      Freshness: sourceSnapshotFreshness(sourceMetadata.freshness),
       Details: `${data.iris.neighborhoods.length} polygons · bbox ${data.iris.bbox.join(",")} · ${sourceMetadata.licence.label} · generated ${data.generatedAt}`,
     };
   } catch (error) {
@@ -161,6 +165,7 @@ async function checkAirNoiseComponent(component: "air" | "sound"): Promise<DataC
     return {
       ...row,
       Installed: "Yes",
+      Freshness: sourceSnapshotFreshness(gridSource.freshness),
       Details: `${communeCount} communes · ${grid.columns}×${grid.rows} cells · generated ${data.generatedAt}`,
     };
   } catch (error) {
@@ -182,9 +187,13 @@ export async function checkServiceQuality(): Promise<DataCheckRow> {
   try {
     const data = await loadCompiledNeighborhoodVerdictData(env);
     const years = data.serviceQuality.availableYears;
+    const sourceMetadata = data.sources.find((candidate) => candidate.id === SERVICE_QUALITY_SOURCE_ID);
     return {
       ...row,
       Installed: "Yes",
+      Freshness: sourceMetadata
+        ? sourceSnapshotFreshness(sourceMetadata.freshness)
+        : { status: "unknown" },
       Details: `${data.serviceQuality.lines.length} lines · ${years[0] ?? "?"}–${years.at(-1) ?? "?"} · artifact ${source.kind} · generated ${data.serviceQuality.generatedAt}`,
     };
   } catch (error) {
@@ -200,7 +209,7 @@ export async function checkIsochrones(): Promise<DataCheckRow> {
     const source = await openIsochroneSource(env);
     try {
       const archive = await IndexedIsochroneArchive.open(source);
-      return { ...row, Installed: "Yes", Details: `${Object.keys(archive.index.scopes).length} scopes · ZIP directory and index validated` };
+      return { ...row, Installed: "Yes", Freshness: datasetFreshness("walking-isochrones", archive.index), Details: `${Object.keys(archive.index.scopes).length} scopes · ZIP directory and index validated` };
     } finally { await source.close(); }
   } catch (error) { return { ...row, Details: String(error) }; }
 }
@@ -217,7 +226,7 @@ export async function checkGlobalMap(): Promise<DataCheckRow> {
       if (bytes.length !== asset!.bytes) throw new Error(`Invalid size: ${asset!.asset}`);
       JSON.parse(bytes.toString("utf8"));
     }
-    return { ...row, Installed: "Yes", Details: `${assets.length} assets read · version ${manifest.dataVersion}` };
+    return { ...row, Installed: "Yes", Freshness: datasetFreshness("global-map", manifest), Details: `${assets.length} assets read · version ${manifest.dataVersion}` };
   } catch (error) { return { ...row, Details: String(error) }; }
 }
 
@@ -287,6 +296,7 @@ export async function checkPlaces(): Promise<DataCheckRow> {
     return {
       ...row,
       Installed: manifest.unassigned.count > 0 ? "Partial" : "Yes",
+      Freshness: datasetFreshness("places", manifest),
       Details: `${manifest.totals.cities} communes · ${manifest.totals.places} lieux · ${manifest.totals.categoryCounts.commerce} commerces · ranking ${ranking.cityCount} communes IDF · ${manifest.unassigned.count} non affecté(s) · ${manifest.scope}`,
     };
   } catch (error) {
@@ -327,6 +337,7 @@ export async function checkDvfRealEstate(): Promise<DataCheckRow> {
     return {
       ...row,
       Installed: "Yes",
+      Freshness: datasetFreshness("dvf-property-market", typedManifest),
       Details: `${seenCities.size} communes · ${typedManifest.totals.neighborhoodsWithEnoughSales} IRIS · ${typedManifest.totals.gridCellsWithEnoughSales} cellules · ${typedManifest.referencePeriod} · ${checkedBytes} bytes validés · ${DVF_SOURCE_PAGE_URL}`,
     };
   } catch (error) {
@@ -402,6 +413,7 @@ async function checkBikeNetworkData(): Promise<DataCheckRow> {
       Installed: available ? "Yes" : "Partial",
       Mode: "Local",
       Location: localRoot,
+      Freshness: datasetFreshness("bike-network", manifest),
       Details: available
         ? `${manifest.featureCount} aménagements · ${manifest.vertexCount} sommets · pack BIKE disponible`
         : `${manifest.featureCount} aménagements · dataset présent, pack global BIKE à recompiler`,
@@ -413,6 +425,7 @@ async function checkBikeNetworkData(): Promise<DataCheckRow> {
       Installed: "Partial",
       Mode: "Local",
       Location: localRoot,
+      Freshness: datasetFreshness("bike-network", manifest),
       Details: `Dataset présent, global map indisponible · ${error instanceof Error ? error.message : "manifest absent"}`,
     };
   }
@@ -463,12 +476,13 @@ async function checkNetex(): Promise<DataCheckRow> {
 
   return {
     Data: "NeTEx",
+    Freshness: datasetFreshness("netex", status),
     Configured: configured,
     Installed: status.available ? "Yes" : "No",
     Mode: modeFromSource(status.source?.kind, status.available),
     Location: status.source?.location ?? "-",
     Details: status.available
-      ? `${status.lineCount ?? 0} lines loaded${status.generatedAt ? ` · generated ${formatDate(status.generatedAt)}` : ""}`
+      ? `${status.lineCount ?? 0} lines loaded${status.sourceUpdatedAt ? ` · source ${formatDate(status.sourceUpdatedAt)}` : ""}${status.generatedAt ? ` · generated ${formatDate(status.generatedAt)}` : ""}`
       : status.message ?? "Cache unavailable",
   };
 }
@@ -481,6 +495,7 @@ async function checkRidership(): Promise<DataCheckRow> {
 
   return {
     Data: "Annual ridership",
+    Freshness: datasetFreshness("ridership", status),
     Configured: configured,
     Installed: status.available ? "Yes" : "No",
     Mode: modeFromSource(status.source?.kind, status.available),
@@ -554,6 +569,7 @@ function gtfsRow(
 ): DataCheckRow {
   return {
     Data: "GTFS geometry",
+    Freshness: datasetFreshness("gtfs", manifest),
     Configured: configured,
     Installed: installed,
     Mode: mode,

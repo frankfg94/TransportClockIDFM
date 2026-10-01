@@ -314,6 +314,15 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
             ]),
           ).values(),
         ];
+        if (options.getActiveStationView()) {
+          const localLineIds = new Set(ghostLineIds.value);
+          return overviewStations.flatMap((station) => {
+            const lineIds = station.lineIds.filter((id) => localLineIds.has(id));
+            return lineIds.length > 0 || contextStationIds.has(station.id)
+              ? [{ ...station, lineIds }]
+              : [];
+          });
+        }
         if (options.showBusOnlyStationNodesInOverview?.() ??
           GLOBAL_TRANSPORT_PLAN_CONFIG.renderer.showBusOnlyStationNodesInOverview) {
           return overviewStations;
@@ -415,7 +424,11 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
   const baseRenderPaths = computed<GlobalMapPath[]>(() => {
     const startedAt = options.recordTiming ? nowMs() : Number.NaN;
     try {
-      if (!options.getActiveLine()) return [...options.getViewport().paths];
+      if (!options.getActiveLine()) {
+        return options.getActiveStationView()
+          ? ghostLinePaths.value
+          : [...options.getViewport().paths];
+      }
       const focusedLinePaths = lineMetadataPaths.value;
       if (focusedLinePaths.length === 0) {
         if (!options.getSelectedBusDirectionEdgeKeys()) {
@@ -559,7 +572,9 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
       const traffic = options.getTrafficState();
       const activeStationView = options.getActiveStationView();
       const scene: TransportMapRenderScene = {
-        lines: options.getNetwork()?.lines ?? [],
+        lines: activeStationView && !options.getActiveLine()
+          ? activeStationLines.value
+          : options.getNetwork()?.lines ?? [],
         paths: renderPaths.value,
         stations: renderStations.value,
         quays: visibleSelectedBusDirectionQuays.value,

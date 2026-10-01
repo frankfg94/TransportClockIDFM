@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { Directive } from "vue";
+import type { TransitMode } from "../types/transit";
 import {
   Check,
   Bell,
@@ -9,9 +10,11 @@ import {
   Maximize2,
   Minimize2,
   RefreshCw,
+  SlidersHorizontal,
   X,
 } from "lucide-vue-next";
 import ContextMenu from "./ContextMenu.vue";
+import DirectionFilterModal from "./DirectionFilterModal.vue";
 import UserFriendlyTrafficModal from "./UserFriendlyTrafficModal.vue";
 import { useI18n } from "../i18n";
 import type { FullscreenStationPanelDesign } from "../features/app-settings";
@@ -20,6 +23,9 @@ import type { TrafficAlertModalData } from "../features/traffic";
 interface FullscreenPanelDeparture {
   id: string;
   waitLabel: string;
+  departureTime?: string;
+  mission?: string;
+  platform?: string;
   destination?: string;
   meta?: string;
   statusLabel?: string;
@@ -27,6 +33,7 @@ interface FullscreenPanelDeparture {
 
 interface FullscreenPanelDirection {
   id: string;
+  platforms?: string[];
   label: string;
   subtitle?: string;
   serviceEnded?: boolean;
@@ -47,7 +54,9 @@ const props = withDefaults(
     lineColor?: string;
     lineTextColor?: string;
     transportTypeLabel?: string;
+    transportMode?: TransitMode;
     directions?: FullscreenPanelDirection[];
+    hiddenDirectionIds?: string[];
     design?: FullscreenStationPanelDesign;
     darkTheme?: boolean;
     panamDirectionId?: string;
@@ -66,6 +75,7 @@ const props = withDefaults(
     lineTextColor: "#ffffff",
     transportTypeLabel: "transport",
     directions: () => [],
+    hiddenDirectionIds: () => [],
     design: "all-directions",
     darkTheme: false,
     panamDirectionId: undefined,
@@ -82,6 +92,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   close: [];
+  "update:hiddenDirectionIds": [ids: string[]];
   "change-design": [
     payload: {
       design: FullscreenStationPanelDesign;
@@ -95,8 +106,29 @@ const emit = defineEmits<{
     payload: { directionId: string; departureId: string },
   ];
 }>();
-const { t } = useI18n();
+const { t, d } = useI18n();
 
+const denseDepartures = computed(() =>
+  visibleDirections.value.flatMap((direction) =>
+    direction.departures.map((departure) => ({ direction, departure })),
+  ).sort((a, b) => denseDepartureOrder(a.departure) - denseDepartureOrder(b.departure)),
+);
+
+function denseDepartureOrder(departure: FullscreenPanelDeparture): number {
+  if (isDockedWaitLabel(departure.waitLabel)) return 0;
+  const timestamp = departure.departureTime ? Date.parse(departure.departureTime) : Number.NaN;
+  return Number.isFinite(timestamp) ? timestamp : Number.MAX_SAFE_INTEGER;
+}
+
+function denseDepartureTime(departure: FullscreenPanelDeparture): string {
+  const timestamp = departure.departureTime ? Date.parse(departure.departureTime) : Number.NaN;
+  return Number.isFinite(timestamp)
+    ? d(new Date(timestamp), { hour: "2-digit", minute: "2-digit", hour12: false })
+    : "—";
+}
+
+const directionFilterOpen = ref(false);
+const visibleDirections = computed(() => props.directions.filter(direction => !props.hiddenDirectionIds.includes(direction.id)));
 const controlsVisible = ref(true);
 const menuOpen = ref(false);
 const menuTrigger = ref<HTMLElement>();
@@ -129,7 +161,24 @@ const selectedDoubleStopDirection = computed(
     props.directions[0],
 );
 
-const hasDirections = computed(() => props.directions.length > 0);
+// Only an explicit direction platform set can establish a single fixed platform.
+// Two upcoming departures on the same platform are not a station topology proof.
+const showDoubleStopPlatforms = computed(() => {
+  if (props.transportMode !== "rer" && props.transportMode !== "train") return false;
+  const direction = selectedDoubleStopDirection.value;
+  if (!direction) return false;
+  const configured = direction.platforms?.map(value => value.trim()).filter(Boolean) ?? [];
+  const observed = direction.departures.map(departure => departure.platform?.trim()).filter((value): value is string => Boolean(value));
+  const distinct = new Set([...configured, ...observed].map(value => value.toLocaleUpperCase()));
+  return configured.length === 0 || distinct.size > 1;
+});
+function doubleStopPlatform(index: number): string | undefined {
+  return showDoubleStopPlatforms.value
+    ? getDeparture(selectedDoubleStopDirection.value, index)?.platform?.trim() || undefined
+    : undefined;
+}
+
+const hasDirections = computed(() => visibleDirections.value.length > 0);
 const alarmDepartureIdSet = computed(
   () => new Set(props.alarmDepartureIds),
 );
@@ -319,7 +368,7 @@ function revealControls(): void {
 function scheduleControlsHide(): void {
   clearControlsHideTimer();
 
-  if (menuOpen.value) {
+  if (menuOpen.value || directionFilterOpen.value) {
     return;
   }
 
@@ -379,11 +428,20 @@ function selectDoubleStopDesign(directionId: string): void {
   closeMenu();
 }
 
-function isSelectedDoubleStopDirection(directionId: string): boolean {
-  return (
-    props.design === "double-stop" &&
-    selectedDoubleStopDirection.value?.id === directionId
-  );
+function openDirectionFilter(): void {
+  closeMenu();
+  directionFilterOpen.value = true;
+  clearControlsHideTimer();
+}
+function closeDirectionFilter(): void {
+  directionFilterOpen.value = false;
+  scheduleControlsHide();
+  void nextTick(() => menuTrigger.value?.focus());
+}
+function openDoubleStopDesign(): void {
+  const directionId = selectedDoubleStopDirection.value?.id;
+  if (directionId) selectDoubleStopDesign(directionId);
+  openDirectionFilter();
 }
 
 function toggleDarkTheme(event: Event): void {
@@ -415,6 +473,11 @@ function handleKeydown(event: KeyboardEvent): void {
   }
 
   event.preventDefault();
+
+  if (directionFilterOpen.value) {
+    closeDirectionFilter();
+    return;
+  }
 
   if (trafficModalOpen.value) {
     closeTrafficModal();
@@ -538,6 +601,11 @@ onBeforeUnmount(() => {
             }}
           </button>
 
+          <button type="button" role="menuitem" @click="openDirectionFilter">
+            <SlidersHorizontal :size="17" aria-hidden="true" />
+            {{ t(design === 'double-stop' ? 'board.directionFilter.singleTitle' : 'board.filterDirections') }}
+          </button>
+
           <div class="fullscreen-station-panel__menu-heading">
             {{ t("app.changeDesign") }}
           </div>
@@ -556,20 +624,11 @@ onBeforeUnmount(() => {
             {{ t("settings.options.fullscreenPanel.allDirections") }}
           </button>
 
-          <button
-            v-for="direction in directions"
-            :key="`double-${direction.id}`"
-            type="button"
-            role="menuitem"
-            @click="selectDoubleStopDesign(direction.id)"
-          >
-            <Check
-              v-if="isSelectedDoubleStopDirection(direction.id)"
-              :size="17"
-              aria-hidden="true"
-            />
+          <button type="button" role="menuitem" @click="openDoubleStopDesign">
+            <Check v-if="design === 'double-stop'" :size="17" aria-hidden="true" />
             <span v-else aria-hidden="true"></span>
-            {{ t("app.doubleStopWithDirection", { direction: direction.label }) }}
+            {{ t('settings.options.fullscreenPanel.doubleStop') }}
+            <small v-if="design === 'double-stop'"> · {{ selectedDoubleStopDirection?.label }}</small>
           </button>
 
           <button type="button" role="menuitem" @click="selectHomeCardDesign">
@@ -580,6 +639,11 @@ onBeforeUnmount(() => {
             />
             <span v-else aria-hidden="true"></span>
             {{ t("settings.options.fullscreenPanel.homeCard") }}
+          </button>
+          <button type="button" role="menuitem" @click="emit('change-design', { design: 'dense-list' }); closeMenu()">
+            <Check v-if="design === 'dense-list'" :size="17" aria-hidden="true" />
+            <span v-else aria-hidden="true"></span>
+            {{ t("settings.options.fullscreenPanel.denseList") }}
           </button>
         </ContextMenu>
       </div>
@@ -629,14 +693,15 @@ onBeforeUnmount(() => {
         {{ error }}
       </div>
       <div
-        v-else-if="loading && !hasDirections"
+        v-else-if="loading && !directions.length"
         class="fullscreen-station-panel__notice"
       >
         {{ t("common.states.loading") }}
       </div>
+      <p v-else-if="!hasDirections" class="fullscreen-station-panel__notice">{{ t("board.allDirectionsHidden") }}</p>
       <div v-else class="fullscreen-station-panel__all-grid">
         <section
-          v-for="direction in directions"
+          v-for="direction in visibleDirections"
           :key="direction.id"
           class="fullscreen-station-panel__direction"
         >
@@ -770,6 +835,9 @@ onBeforeUnmount(() => {
                 {{ line }}
               </span>
             </strong>
+            <span v-if="doubleStopPlatform(0)" class="fullscreen-station-panel__panam-platform">
+              {{ t('app.platform', { platform: doubleStopPlatform(0)! }) }}
+            </span>
             <button
               v-if="getDeparture(selectedDoubleStopDirection, 0)"
               class="fullscreen-station-panel__alarm-button fullscreen-station-panel__alarm-button--cell"
@@ -817,6 +885,9 @@ onBeforeUnmount(() => {
                 {{ line }}
               </span>
             </strong>
+            <span v-if="doubleStopPlatform(1)" class="fullscreen-station-panel__panam-platform">
+              {{ t('app.platform', { platform: doubleStopPlatform(1)! }) }}
+            </span>
             <button
               v-if="getDeparture(selectedDoubleStopDirection, 1)"
               class="fullscreen-station-panel__alarm-button fullscreen-station-panel__alarm-button--cell"
@@ -862,6 +933,125 @@ onBeforeUnmount(() => {
     </div>
 
     <div
+      v-else-if="design === 'dense-list'"
+      class="fullscreen-station-panel__surface fullscreen-station-panel__dense"
+    >
+      <header class="fullscreen-station-panel__dense-header">
+        <div class="fullscreen-station-panel__logo">
+          <slot name="line-logo"
+            ><span class="fullscreen-station-panel__line-fallback">{{
+              lineShortName
+            }}</span></slot
+          >
+        </div>
+        <div class="fullscreen-station-panel__dense-heading">
+          <p>
+            {{ lineName }} <span v-if="city">· {{ city }}</span>
+          </p>
+          <h1 id="fullscreen-station-panel-title">{{ stationName }}</h1>
+        </div>
+      </header>
+      <button
+        v-if="trafficAlert"
+        class="fullscreen-station-panel__dense-traffic"
+        type="button"
+        :aria-label="t('app.openTrafficDetailsAria')"
+        @click="openTrafficModal"
+      >
+        {{ trafficAlert.label }}
+      </button>
+      <p v-if="error" class="fullscreen-station-panel__notice" role="alert">
+        {{ error }}
+      </p>
+      <p
+        v-else-if="loading && !denseDepartures.length"
+        class="fullscreen-station-panel__notice"
+        role="status"
+      >
+        {{ t("board.loadingDepartures") }}
+      </p>
+      <ol
+        v-else-if="denseDepartures.length"
+        class="fullscreen-station-panel__dense-list"
+        :aria-label="t('board.nextDeparturesAria')"
+      >
+        <li
+          v-for="{ direction, departure } in denseDepartures"
+          :key="direction.id + '-' + departure.id"
+          class="fullscreen-station-panel__dense-row"
+        >
+          <div class="fullscreen-station-panel__dense-mission">
+            <strong>{{ departure.mission || lineShortName }}</strong
+            ><time :datetime="departure.departureTime">{{
+              denseDepartureTime(departure)
+            }}</time>
+          </div>
+          <div class="fullscreen-station-panel__dense-destination">
+            <strong>{{ departure.destination || direction.label }}</strong>
+            <div class="fullscreen-station-panel__dense-details">
+              <small v-if="departure.meta || direction.subtitle">{{
+                departure.meta || direction.subtitle
+              }}</small>
+              <small v-if="departure.statusLabel">{{
+                departure.statusLabel
+              }}</small>
+            </div>
+          </div>
+          <span
+            v-if="departure.platform"
+            class="fullscreen-station-panel__dense-platform"
+            >{{ t("app.platform", { platform: departure.platform }) }}</span
+          >
+          <div class="fullscreen-station-panel__dense-wait">
+            <strong>{{
+              getWaitLabelLines(direction, departure).join(" ")
+            }}</strong>
+            <small v-if="/^\d+$/.test(getWaitLabel(direction, departure))">{{
+              t("settings.device.minutesUnit")
+            }}</small>
+          </div>
+          <button
+            class="fullscreen-station-panel__alarm-button"
+            :class="{
+              'fullscreen-station-panel__alarm-button--active':
+                hasAlarm(departure),
+              'fullscreen-station-panel__alarm-button--hidden':
+                !controlsVisible && !menuOpen,
+            }"
+            type="button"
+            :aria-label="
+              hasAlarm(departure)
+                ? t('board.alarmSetAria')
+                : t('board.alarmScheduleAria')
+            "
+            @pointerdown.stop
+            @click.stop="requestAlarm(direction, departure)"
+          >
+            <BellRing v-if="hasAlarm(departure)" aria-hidden="true" /><Bell
+              v-else
+              aria-hidden="true"
+            />
+          </button>
+        </li>
+      </ol>
+      <div v-else class="fullscreen-station-panel__notice">
+        <p v-if="!hasDirections">{{ t("board.allDirectionsHidden") }}</p>
+        <p v-for="direction in visibleDirections" :key="direction.id">
+          {{ direction.label }} ·
+          {{
+            direction.serviceEnded
+              ? t("board.serviceEnded")
+              : t("board.noUpcoming")
+          }}
+        </p>
+      </div>
+      <footer class="fullscreen-station-panel__dense-footer">
+        <span>{{ t("board.departures", { count: denseDepartures.length }) }}</span
+        ><span v-if="updatedAtLabel">{{ updatedAtLabel }}</span>
+      </footer>
+    </div>
+
+    <div
       v-else
       class="fullscreen-station-panel__surface fullscreen-station-panel__surface--home"
     >
@@ -896,9 +1086,10 @@ onBeforeUnmount(() => {
         <div v-if="error" class="fullscreen-station-panel__notice">
           {{ error }}
         </div>
+        <p v-else-if="!hasDirections" class="fullscreen-station-panel__notice">{{ t("board.allDirectionsHidden") }}</p>
         <div v-else class="fullscreen-station-panel__home-directions">
           <section
-            v-for="direction in directions"
+            v-for="direction in visibleDirections"
             :key="direction.id"
             class="fullscreen-station-panel__home-direction"
           >
@@ -974,14 +1165,29 @@ onBeforeUnmount(() => {
 
         <footer>
           <span
-            >{{ directions.length }} direction{{
-              directions.length > 1 ? "s" : ""
+            >{{ visibleDirections.length }} direction{{
+              visibleDirections.length > 1 ? "s" : ""
             }}</span
           >
           <span v-if="updatedAtLabel">{{ updatedAtLabel }}</span>
         </footer>
       </article>
     </div>
+
+    <DirectionFilterModal
+      :open="directionFilterOpen"
+      :directions="directions"
+      :hidden-direction-ids="hiddenDirectionIds"
+      :single="design === 'double-stop'"
+      :selected-direction-id="selectedDoubleStopDirection?.id"
+      :station-name="stationName"
+      :line-name="lineName"
+      :line-color="lineColor"
+      :dark-theme="darkTheme"
+      @update:hidden-direction-ids="emit('update:hiddenDirectionIds', $event)"
+      @select-direction="selectDoubleStopDesign"
+      @close="closeDirectionFilter"
+    />
 
     <UserFriendlyTrafficModal
       :open="trafficModalOpen"
@@ -2283,5 +2489,222 @@ onBeforeUnmount(() => {
   .fullscreen-station-panel__panam-times strong {
     font-size: clamp(4.6rem, 40vw, 9rem);
   }
+}
+
+/* Dense PANAM board: shared line colours, compact rows and responsive type. */
+.fullscreen-station-panel__dense {
+  --dense-bg: #f3f6fa;
+  --dense-row: #ffffff;
+  --dense-alt: #e8eef6;
+  --dense-ink: #102b49;
+  --dense-muted: #506880;
+  --dense-time: #163c64;
+  background: var(--dense-bg);
+  color: var(--dense-ink);
+  padding: clamp(16px, 3vw, 48px);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.fullscreen-station-panel--dark .fullscreen-station-panel__dense {
+  --dense-bg: #080f1b;
+  --dense-row: #14243c;
+  --dense-alt: #1b304d;
+  --dense-ink: #f4f7fc;
+  --dense-muted: #adc0d9;
+  --dense-time: #f4db55;
+}
+.fullscreen-station-panel__dense-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 190px 24px 0;
+  border-bottom: 3px solid var(--panel-line-color);
+}
+.fullscreen-station-panel__dense-header .fullscreen-station-panel__logo {
+  width: clamp(64px, 7vw, 110px);
+  flex-shrink: 0;
+}
+.fullscreen-station-panel__dense-heading {
+  min-width: 0;
+}
+.fullscreen-station-panel__dense-heading p {
+  margin: 0 0 6px;
+  color: var(--dense-muted);
+  font-size: clamp(13px, 1.4vw, 20px);
+}
+.fullscreen-station-panel__dense-heading h1 {
+  margin: 0;
+  font-size: clamp(26px, 3.8vw, 56px);
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+  overflow-wrap: anywhere;
+}
+.fullscreen-station-panel__dense-list {
+  flex-shrink: 0;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border-radius: 18px;
+  overflow: hidden;
+}
+.fullscreen-station-panel__dense-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: clamp(82px, 9vw, 140px) minmax(0, 1fr) auto minmax(
+      85px,
+      0.18fr
+    ) 44px;
+  align-items: center;
+  gap: clamp(12px, 2vw, 32px);
+  padding: clamp(12px, 1.4vh, 18px) clamp(14px, 2vw, 30px);
+  background: var(--dense-row);
+  border-inline-start: 4px solid var(--panel-line-color);
+}
+.fullscreen-station-panel__dense-row:nth-child(even) {
+  background: var(--dense-alt);
+}
+.fullscreen-station-panel__dense-mission,
+.fullscreen-station-panel__dense-destination {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.fullscreen-station-panel__dense-mission strong {
+  font-size: clamp(16px, 1.9vw, 28px);
+  letter-spacing: 0.04em;
+}
+.fullscreen-station-panel__dense-mission time {
+  font-size: clamp(14px, 1.5vw, 22px);
+  color: var(--dense-muted);
+  font-variant-numeric: tabular-nums;
+}
+.fullscreen-station-panel__dense-destination > strong {
+  font-size: clamp(20px, 2.6vw, 38px);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+}
+.fullscreen-station-panel__dense-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.fullscreen-station-panel__dense-destination small {
+  color: var(--dense-muted);
+  font-size: clamp(12px, 1.2vw, 18px);
+  overflow-wrap: anywhere;
+}
+.fullscreen-station-panel__dense-platform {
+  grid-column: 3;
+  font-size: clamp(12px, 1.4vw, 21px);
+  border: 1px solid var(--dense-muted);
+  border-radius: 8px;
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+.fullscreen-station-panel__dense-wait {
+  grid-column: 4;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 7px;
+  color: var(--dense-time);
+  font-variant-numeric: tabular-nums;
+}
+.fullscreen-station-panel__dense-wait strong {
+  font-size: clamp(24px, 3.6vw, 54px);
+  line-height: 1;
+  white-space: nowrap;
+}
+.fullscreen-station-panel__dense-wait small {
+  font-size: clamp(12px, 1.2vw, 18px);
+}
+.fullscreen-station-panel__dense-row .fullscreen-station-panel__alarm-button {
+  grid-column: 5;
+  position: static;
+  transform: none;
+}
+.fullscreen-station-panel__dense-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--dense-muted);
+  font-size: 13px;
+  margin-top: auto;
+  padding-top: 8px;
+}
+.fullscreen-station-panel__dense-traffic {
+  text-align: left;
+  color: var(--dense-ink);
+  background: var(--dense-alt);
+  border: 0;
+  border-left: 4px solid var(--panel-line-color);
+  border-radius: 8px;
+  padding: 12px 18px;
+  cursor: pointer;
+  font: inherit;
+}
+@media (max-width: 650px) {
+  .fullscreen-station-panel__dense {
+    padding: 16px 10px;
+    gap: 14px;
+  }
+  .fullscreen-station-panel__dense-header {
+    padding: 62px 6px 18px;
+    gap: 14px;
+  }
+  .fullscreen-station-panel__dense-row {
+    grid-template-columns: 60px minmax(0, 1fr) 70px;
+    gap: 8px 12px;
+    padding: 14px 10px;
+  }
+  .fullscreen-station-panel__dense-mission strong {
+    font-size: 14px;
+  }
+  .fullscreen-station-panel__dense-mission time {
+    font-size: 12px;
+  }
+  .fullscreen-station-panel__dense-destination > strong {
+    font-size: 19px;
+  }
+  .fullscreen-station-panel__dense-wait {
+    grid-column: 3;
+    grid-row: 1;
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+  .fullscreen-station-panel__dense-wait strong {
+    font-size: 28px;
+    white-space: normal;
+    text-align: right;
+  }
+  .fullscreen-station-panel__dense-platform {
+    grid-column: 2;
+    justify-self: start;
+    font-size: 12px;
+    padding: 3px 7px;
+  }
+  .fullscreen-station-panel__dense-row .fullscreen-station-panel__alarm-button {
+    position: absolute;
+    right: 10px;
+    top: auto;
+    bottom: 8px;
+    transform: none;
+  }
+}
+
+.fullscreen-station-panel__panam-times > div > .fullscreen-station-panel__panam-platform {
+  border: 2px solid currentColor;
+  border-radius: 10px;
+  padding: 8px 18px;
+  color: inherit;
+  font-size: clamp(1rem, 2.6vw, 2rem);
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+  max-width: 100%;
 }
 </style>

@@ -1,3 +1,4 @@
+import { datasetFreshness } from "../../../shared/datasets/freshness";
 import { getRequestURL, type H3Event } from "h3";
 import type {
   GtfsLineArtifact,
@@ -11,7 +12,6 @@ import {
   type CompiledGtfsLineArtifact,
 } from "../lineGeometry/gtfsIndexedGeometry";
 
-const STALE_AFTER_MS = 20 * 24 * 60 * 60_000;
 const MANIFEST_CACHE_MS = 60_000;
 const COMMITTED_GTFS_ASSET_BASE = "/_gtfs-data";
 
@@ -84,8 +84,7 @@ export async function getGtfsManifest(
 
 export async function getGtfsPublicStatus(event?: H3Event): Promise<GtfsPublicStatus> {
   const manifest = await getGtfsManifest(event);
-  const sourceDate = manifest?.sourceUpdatedAt ?? manifest?.installedAt;
-  const ageMs = sourceDate ? Math.max(0, Date.now() - Date.parse(sourceDate)) : undefined;
+  const freshness = datasetFreshness("gtfs", manifest ?? {});
 
   return {
     enabled: isGtfsEnabled(event),
@@ -96,12 +95,12 @@ export async function getGtfsPublicStatus(event?: H3Event): Promise<GtfsPublicSt
           sha256: manifest.sha256.slice(0, 12),
           sourceUpdatedAt: manifest.sourceUpdatedAt,
           installedAt: manifest.installedAt,
-          ageDays: ageMs === undefined ? undefined : Math.floor(ageMs / (24 * 60 * 60_000)),
+          ageDays: freshness.ageDays,
           lineCount: manifest.lineCount,
           cacheGeneration: manifest.cacheGeneration,
         }
       : {}),
-    stale: ageMs !== undefined && ageMs > STALE_AFTER_MS,
+    stale: freshness.status === "stale",
     storage: manifestCache?.storage ?? detectStorage(event),
   };
 }

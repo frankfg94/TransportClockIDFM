@@ -65,11 +65,11 @@ describe("NearbyNeighborhoodScoreCard", () => {
     const metroLines = wrapper.get("[data-testid='nearby-transport-reliability-mode-METRO']")
       .findAll("[data-testid='nearby-transport-reliability-line']");
     expect(metroLines.map((line) => line.find(".nearby-neighborhood-score-fact__transport-line-score").text()))
-      .toEqual(["94/100", "71/100"]);
+      .toEqual(["94 %", "71 %"]);
     const rerLines = wrapper.get("[data-testid='nearby-transport-reliability-mode-RER']")
       .findAll("[data-testid='nearby-transport-reliability-line']");
     expect(rerLines.map((line) => line.find(".nearby-neighborhood-score-fact__transport-line-name").text()))
-      .toEqual(["Ligne A  (Fiable)"]);
+      .toEqual(["Ligne A"]);
     expect(wrapper.get(".nearby-neighborhood-score-fact__action").text()).toContain("Voir le classement");
     await wrapper.get(".nearby-neighborhood-score-fact__action").trigger("click");
     wrapper.unmount();

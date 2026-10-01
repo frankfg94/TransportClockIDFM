@@ -511,6 +511,18 @@ describe("dashboard presets", () => {
     expect(panel?.textContent).toContain("La Croix de Berny");
   });
 
+  it("opens dense-list from the canonical fullscreenDisplay URL", async () => {
+    installDashboardMocks({ place: "home", fullscreen: "rer-b-croix-de-berny", fullscreenDisplay: "dense-list" });
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushPromises();
+    const panel = document.body.querySelector(".fullscreen-station-panel");
+    expect(panel?.classList.contains("fullscreen-station-panel--dense-list")).toBe(true);
+    expect(panel?.textContent).toContain("La Croix de Berny");
+    expect(route.query.fullscreenDisplay).toBe("dense-list");
+    wrapper.unmount();
+  });
+
   it("opens the fullscreen station panel from a station id query", async () => {
     installDashboardMocks({
       fullscreen: "stop_area:IDFM:69813",
@@ -864,6 +876,7 @@ function installDashboardMocks(
       { id: "all-directions", label: "Toutes directions" },
       { id: "double-stop", label: "Double arret" },
       { id: "home-card", label: "Carte station" },
+      { id: "dense-list", label: "Liste dense" },
     ],
     requestTemporaryAlarmWakeLock: vi.fn(),
     useAppSettings: () => {
