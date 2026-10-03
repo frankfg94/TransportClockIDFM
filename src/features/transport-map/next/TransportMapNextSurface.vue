@@ -59,6 +59,7 @@ import { useI18n } from "../../../i18n";
 import {
   applyMapLibreLabelLocale,
   diagnoseVectorStyle,
+  normalizeMapLibreReferenceFilters,
   type MapLibreLabelStyleAdapter,
   resolveNextMapStyle,
   type NextMapStyle,
@@ -290,6 +291,7 @@ const realEstateLayers = computed(() => {
       0.78 * (1 - progress),
       `${REAL_ESTATE_PRICE_LAYER_ID}-transition-from`,
       realEstateBeforeId.value,
+      props.antialias ?? true,
     )
     : undefined;
   const toLayer = realEstateTransitionToRange.value
@@ -300,6 +302,7 @@ const realEstateLayers = computed(() => {
       0.78 * (transitioning ? progress : 1),
       REAL_ESTATE_PRICE_LAYER_ID,
       realEstateBeforeId.value,
+      props.antialias ?? true,
     )
     : undefined;
   const metricLayers = [
@@ -621,6 +624,13 @@ function onMapLoad(): void {
   overlay = new MapboxOverlay({
     interleaved: props.interleaved ?? GLOBAL_TRANSPORT_PLAN_CONFIG.nextMap.deckInterleaved,
     layers: [],
+    onError: (error, layer) => {
+      props.performanceTrace?.instant("deck_error", {
+        layerId: layer?.id,
+        message: error.message,
+      });
+      console.error(error);
+    },
     _onMetrics: (metrics) => {
       const sampledAtMs = typeof performance === "undefined" ? Date.now() : performance.now();
       presenter?.recordDeckMetrics({
@@ -690,7 +700,6 @@ onMounted(() => {
       : GLOBAL_TRANSPORT_PLAN_CONFIG.nextMap.vectorStyleUrl;
     map = new MapLibreMap({
       container: mapElement.value,
-      style: resolveNextMapStyle(props.styleUrl ?? configuredStyle) as never,
       ...initialView,
       // The shared interaction canvas owns pointer/wheel gestures. MapLibre
       // remains a passive vector renderer and keeps its default tile/cache
@@ -718,6 +727,9 @@ onMounted(() => {
     map.on("webglcontextrestored", onContextRestored);
     map.on("styledata", onStyleData);
     map.once("load", onMapLoad);
+    map.setStyle(resolveNextMapStyle(props.styleUrl ?? configuredStyle) as never, {
+      transformStyle: (_previous, next) => normalizeMapLibreReferenceFilters(next),
+    });
     if (typeof ResizeObserver !== "undefined") {
       mapResizeObserver = new ResizeObserver(() => map?.resize());
       mapResizeObserver.observe(mapElement.value);

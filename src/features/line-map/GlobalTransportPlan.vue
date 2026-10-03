@@ -1173,7 +1173,7 @@ const mapExperience = typeof experienceFactory === "function"
       createRenderer: () => transportMapRendererFactory.createTransportMapRenderer(),
     };
 // The causal recorder is only allocated for the Deck/MapLibre experience
-// that owns the extreme benchmark. Legacy Canvas2D stays completely
+// used by both Chaos profiles. Legacy Canvas2D stays completely
 // uninstrumented in normal operation.
 const performanceTrace = mapExperience.kind === "next"
   ? createTransportMapPerformanceTrace()
@@ -4806,7 +4806,9 @@ function onStagePointerCancel(event: PointerEvent): void {
 }
 
 function onStageWheel(event: WheelEvent): void {
-  if (isIrisOverlayEvent(event)) onWheel(event);
+  const overLineChoice = event.target instanceof Element
+    && Boolean(event.target.closest(".global-transport-plan__tooltip--interactive"));
+  if (isIrisOverlayEvent(event) || overLineChoice) onWheel(event);
 }
 
 function onPointerDown(event: PointerEvent): void {
@@ -5297,6 +5299,19 @@ const performanceScenarios = useGlobalTransportPerformanceScenarios({
     getCamera: () => camera.value,
     getVisibleModes: () => filters.selectedModes.value,
     isTrafficEnabled: () => traffic.enabled.value,
+    getRenderingConfiguration: () => ({
+      antialiasing: appSettings.value.deckAntialiasing,
+      realEstate: {
+        enabled: realEstateLayerEnabled.value,
+        metric: realEstateMetricMode.value,
+        comparisonScope: realEstateComparisonScope.value,
+        cellCount: realEstateGridCells.value.length,
+        metricRange: realEstateMetricRange.value,
+        colorTransitions: appSettings.value.realEstateColorTransitions,
+      },
+      reduceMotion: appSettings.value.reduceMotion,
+      deckInterleaved: GLOBAL_TRANSPORT_PLAN_CONFIG.nextMap.deckInterleaved,
+    }),
     getChunkIds: () => viewport.value.chunkIds,
     getDataMetrics: () => {
       const metrics = dataSource.metrics();

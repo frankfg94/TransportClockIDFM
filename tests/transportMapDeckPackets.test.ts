@@ -4,6 +4,8 @@ import {
   createDeckPathBinaryPacket,
   deckPathPacketKey,
   validateTransportMapBinaryPathPacket,
+  packDeckPathCompilePayload,
+  compileDeckPathPayload,
 } from "../src/features/transport-map/render/deckgl/deckPathPacket";
 import { DeckGeometryCache } from "../src/features/transport-map/render/deckgl/deckGeometryCache";
 import { createDeckTransportLayers } from "../src/features/transport-map/next/deckMapLayers";
@@ -34,6 +36,28 @@ function record(id: string, dash: TransportMapPathRenderRecord["dash"] = "solid"
 }
 
 describe("Deck transport binary packets", () => {
+  it("transfers one owned coordinate buffer and preserves every subpath and style", () => {
+    const records = [record("a"), { ...record("b", "traffic-interruption"), positions: new Float64Array([2, 48, 3, 49, 4, 50]) }];
+    const original = records.map(({ positions }) => Array.from(positions));
+    const packed = packDeckPathCompilePayload(records, "packed");
+    const received = structuredClone(packed, { transfer: [packed.positions.buffer] });
+    expect(packed.positions.byteLength).toBe(0);
+    expect(records.map(({ positions }) => Array.from(positions))).toEqual(original);
+    expect(compileDeckPathPayload(received)).toEqual(createDeckPathBinaryPacket(records, "packed"));
+  });
+
+  it("still rejects nonfinite coordinates and negative styles without expanding typed buffers", () => {
+    const packet = createDeckPathBinaryPacket([record("a")], "validate");
+    packet.positions[0] = Number.NaN;
+    expect(() => validateTransportMapBinaryPathPacket(packet)).toThrow(/attributes/);
+    packet.positions[0] = 2.3;
+    packet.widths[0] = -1;
+    expect(() => validateTransportMapBinaryPathPacket(packet)).toThrow(/attributes/);
+    packet.widths[0] = 3;
+    packet.dashArrays[0] = Number.POSITIVE_INFINITY;
+    expect(() => validateTransportMapBinaryPathPacket(packet)).toThrow(/attributes/);
+  });
+
   it("packs subpaths without joining fragments and preserves dash attributes", () => {
     const first = record("path:a");
     const second = {

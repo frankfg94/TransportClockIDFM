@@ -3,8 +3,7 @@ import {
   type TransportMapWorkerRequest,
   type TransportMapWorkerResponse,
 } from "./protocol";
-import { createDeckPathBinaryPacket } from "../render/deckgl/deckPathPacket";
-import type { TransportMapPathRenderRecord } from "../render/transportMapRenderModel";
+import { compileDeckPathPayload, type DeckPathCompilePayload } from "../render/deckgl/deckPathPacket";
 
 self.onmessage = (event: MessageEvent<TransportMapWorkerRequest>) => {
   const request = event.data;
@@ -15,10 +14,7 @@ self.onmessage = (event: MessageEvent<TransportMapWorkerRequest>) => {
       : request.taskType === "decode-chunk"
         ? JSON.parse((request.payload as { raw: string }).raw)
       : request.taskType === "compile-deck-paths"
-        ? createDeckPathBinaryPacket(
-            (request.payload as { records: TransportMapPathRenderRecord[] }).records,
-            (request.payload as { key: string }).key,
-          )
+        ? compileDeckPathPayload(request.payload as DeckPathCompilePayload)
         : undefined;
     const response: TransportMapWorkerResponse = {
       schemaVersion: 1,

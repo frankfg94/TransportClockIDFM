@@ -229,6 +229,7 @@ export interface GlobalTransportPerformanceScenarioMetadataPort {
     workerCount: number;
   };
   getFullDataMetrics?: () => import("./useChaosZoom").ChaosZoomDataMetrics;
+  getRenderingConfiguration?: () => Record<string, unknown>;
 }
 
 export interface UseGlobalTransportPerformanceScenariosOptions {
@@ -262,6 +263,9 @@ export function useGlobalTransportPerformanceScenarios(
       traffic: options.metadata.isTrafficEnabled(),
       chunks: [...options.metadata.getChunkIds()],
       data: { ...options.metadata.getDataMetrics() },
+      rendering: options.metadata.getRenderingConfiguration?.(),
+      activeLineId: options.runtime.getActiveLineId(),
+      detailLineId: options.runtime.getDetailLineId?.(),
     };
   }
 

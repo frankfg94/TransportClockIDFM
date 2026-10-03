@@ -1,3 +1,5 @@
+import { TimingDistribution } from "./timingDistribution";
+
 /**
  * A small, optional causal trace for the transport-map performance probes.
  *
@@ -68,6 +70,8 @@ export type TransportMapTraceEventType =
   | "deck_label_update"
   | "deck_layer_rebuild"
   | "deck_update_attributes"
+  | "deck_metrics_sample"
+  | "deck_error"
   | "real_estate_cell_selection"
   | "maplibre_render"
   | "maplibre_source_loading"
@@ -296,6 +300,20 @@ export interface TransportMapTraceReport {
   events: TransportMapTraceEvent[];
   /** Fast repetitive diagnostics omitted from the event ring in spikes mode. */
   fastEventAggregates: Record<string, TransportMapTraceFastEventAggregate>;
+  /** Complete-run inclusive timings; nested spans must not be summed as CPU time. */
+  eventAggregates?: Record<string, ReturnType<TimingDistribution["snapshot"]> & {
+    timingKind: "main-thread-span" | "async-wall-time" | "sample-window";
+    incompleteCount: number;
+    worst?: { offsetMs: number; metadata?: Record<string, TransportMapTraceMetadataValue> };
+  }>;
+  longTasks?: Array<{ offsetMs: number; durationMs: number }>;
+  longAnimationFrames?: {
+    supported: boolean;
+    count: number;
+    worst: Array<{ offsetMs: number; durationMs: number; blockingDurationMs: number;
+      renderStartOffsetMs?: number; styleAndLayoutStartOffsetMs?: number;
+      scripts: Array<{ durationMs: number; forcedStyleAndLayoutDurationMs: number; invoker?: string; source?: string }> }>;
+  };
   counters: Record<string, number>;
   rendererFrames: number;
   frameCount: number;
@@ -455,6 +473,9 @@ const NON_MAIN_THREAD_EVENT_TYPES = new Set<TransportMapTraceEventType>([
   "maplibre_source_loaded",
   "maplibre_idle",
   "maplibre_error",
+  "deck_metrics_sample",
+  "deck_update_attributes",
+  "deck_error",
 ]);
 const WALL_TIME_ONLY_EVENT_TYPES = new Set<TransportMapTraceEventType>([
   // These spans cover async orchestration or I/O. Their elapsed wall time is
@@ -519,6 +540,10 @@ export class TransportMapPerformanceTrace {
   /** Copies only event windows around observed slow frames, not business data. */
   private readonly retainedCausalEvents = new Map<TransportMapTraceEventId, TransportMapTraceEvent>();
   private readonly fastEventAggregates = new Map<string, TransportMapTraceFastEventAggregate>();
+  private readonly eventAggregates = new Map<TransportMapTraceEventType, {
+    timings: TimingDistribution; incompleteCount: number;
+    worst?: { offsetMs: number; metadata?: Record<string, TransportMapTraceMetadataValue> };
+  }>();
   private readonly counters = new Map<string, number>();
   private nextEventId = 0;
   private traceSessionIdValue = 0;
@@ -543,6 +568,9 @@ export class TransportMapPerformanceTrace {
   private sessionMetadata?: Record<string, TransportMapTraceMetadataValue>;
   private memoryTimer?: ReturnType<typeof setInterval>;
   private longTaskObserver?: PerformanceObserver;
+  private animationFrameObserver?: PerformanceObserver;
+  private animationFrameCount = 0;
+  private animationFrameSamples: NonNullable<TransportMapTraceReport["longAnimationFrames"]>["worst"] = [];
   private lastFrameTimestamp?: number;
   private memoryStart?: TransportMapTraceMemorySample;
   private memoryEnd?: TransportMapTraceMemorySample;
@@ -583,6 +611,10 @@ export class TransportMapPerformanceTrace {
     return this.traceSessionIdValue;
   }
 
+  get latestMapLibreSample(): TransportMapTraceMapLibreSample | undefined {
+    return this.mapLibreSamples.last();
+  }
+
   /** Start a fresh bounded trace session. */
   start(metadata?: TransportMapTraceMetadata): void {
     if (this.running) return;
@@ -616,6 +648,8 @@ export class TransportMapPerformanceTrace {
     // still live. This is important for the MapLibre post-roll snapshot.
     for (const probe of this.probes) probe.stop();
     this.recordMemorySample(this.now());
+    this.consumeLongTasks(this.longTaskObserver?.takeRecords() ?? []);
+    this.consumeAnimationFrames(this.animationFrameObserver?.takeRecords() ?? []);
     this.running = false;
     this.stoppedAtMs = this.now();
     this.stoppedAtWall = new Date().toISOString();
@@ -629,6 +663,7 @@ export class TransportMapPerformanceTrace {
         ...(event.metadata ?? {}),
         incomplete: true,
       };
+      this.aggregateEvent(event);
     }
     this.activeEvents.clear();
     if (metadata) this.sessionMetadata = cloneTraceMetadata(metadata);
@@ -716,6 +751,22 @@ export class TransportMapPerformanceTrace {
           maxMs: round(aggregate.maxMs),
         }]),
       ),
+      eventAggregates: Object.fromEntries([...this.eventAggregates].map(([type, aggregate]) => [type, {
+        ...aggregate.timings.snapshot(),
+        timingKind: type === "deck_metrics_sample" || type === "deck_update_attributes"
+          ? "sample-window" as const
+          : NON_MAIN_THREAD_EVENT_TYPES.has(type) || WALL_TIME_ONLY_EVENT_TYPES.has(type)
+            ? "async-wall-time" as const : "main-thread-span" as const,
+        incompleteCount: aggregate.incompleteCount,
+        worst: aggregate.worst,
+      }])),
+      longTasks: this.longTasks.toArray().sort((a, b) => b.durationMs - a.durationMs).slice(0, 20)
+        .map((task) => ({ offsetMs: round(task.startMs - this.startedAtMs), durationMs: round(task.durationMs) })),
+      longAnimationFrames: {
+        supported: typeof PerformanceObserver !== "undefined" && PerformanceObserver.supportedEntryTypes?.includes("long-animation-frame"),
+        count: this.animationFrameCount,
+        worst: [...this.animationFrameSamples],
+      },
       counters,
       rendererFrames: this.rendererFramesValue,
       frameCount: this.frameCountValue,
@@ -778,6 +829,7 @@ export class TransportMapPerformanceTrace {
     const extra = cloneTraceMetadata(metadata);
     if (extra) event.metadata = { ...(event.metadata ?? {}), ...extra };
     this.activeEvents.delete(eventId);
+    this.aggregateEvent(event);
   }
 
   instant(
@@ -797,6 +849,8 @@ export class TransportMapPerformanceTrace {
     if (!this.running) return undefined;
     if (this.shouldSuppressEvent(type, metadata)) return undefined;
     const duration = Number.isFinite(durationMs) ? Math.max(0, durationMs) : 0;
+    this.aggregateEvent({ type, startMs: this.now() - duration,
+      durationMs: duration, metadata });
     const fastAggregateKey = this.fastEventAggregateKey(type, duration, metadata);
     if (fastAggregateKey) {
       this.recordFastEventAggregate(fastAggregateKey, duration);
@@ -938,6 +992,9 @@ export class TransportMapPerformanceTrace {
     this.mapLibreSamples.clear();
     this.retainedCausalEvents.clear();
     this.fastEventAggregates.clear();
+    this.eventAggregates.clear();
+    this.animationFrameCount = 0;
+    this.animationFrameSamples.length = 0;
     this.mapLibreSummary = undefined;
     this.counters.clear();
     this.nextEventId = 0;
@@ -1044,17 +1101,68 @@ export class TransportMapPerformanceTrace {
     if (!this.observeLongTasks || typeof PerformanceObserver === "undefined") return;
     try {
       this.longTaskObserver = new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) this.recordLongTask(entry.startTime, entry.duration);
+        this.consumeLongTasks(list.getEntries());
       });
       this.longTaskObserver.observe({ entryTypes: ["longtask"] });
     } catch {
       this.longTaskObserver = undefined;
+    }
+    if (PerformanceObserver.supportedEntryTypes?.includes("long-animation-frame")) {
+      try {
+        this.animationFrameObserver = new PerformanceObserver((list) => this.consumeAnimationFrames(list.getEntries()));
+        this.animationFrameObserver.observe({ type: "long-animation-frame" });
+      } catch { this.animationFrameObserver = undefined; }
     }
   }
 
   private stopLongTaskObserver(): void {
     this.longTaskObserver?.disconnect();
     this.longTaskObserver = undefined;
+    this.animationFrameObserver?.disconnect();
+    this.animationFrameObserver = undefined;
+  }
+
+  private consumeLongTasks(entries: PerformanceEntry[]): void {
+    for (const entry of entries) this.recordLongTask(entry.startTime, entry.duration);
+  }
+
+  private consumeAnimationFrames(entries: PerformanceEntry[]): void {
+    for (const value of entries) {
+      const entry = value as PerformanceEntry & {
+        blockingDuration: number; renderStart: number; styleAndLayoutStart: number;
+        scripts?: Array<{ duration: number; forcedStyleAndLayoutDuration: number; invoker?: string; sourceURL?: string }>;
+      };
+      this.animationFrameCount += 1;
+      this.animationFrameSamples.push({
+        offsetMs: round(entry.startTime - this.startedAtMs),
+        durationMs: round(entry.duration),
+        blockingDurationMs: round(entry.blockingDuration),
+        renderStartOffsetMs: entry.renderStart > 0 ? round(entry.renderStart - this.startedAtMs) : undefined,
+        styleAndLayoutStartOffsetMs: entry.styleAndLayoutStart > 0 ? round(entry.styleAndLayoutStart - this.startedAtMs) : undefined,
+        scripts: [...(entry.scripts ?? [])].sort((a, b) => b.duration - a.duration).slice(0, 4).map((script) => ({
+          durationMs: round(script.duration),
+          forcedStyleAndLayoutDurationMs: round(script.forcedStyleAndLayoutDuration),
+          invoker: script.invoker?.slice(0, 160),
+          source: script.sourceURL?.split(/[?#]/u)[0]?.slice(0, 240),
+        })),
+      });
+      this.animationFrameSamples.sort((a, b) => b.durationMs - a.durationMs);
+      this.animationFrameSamples.length = Math.min(20, this.animationFrameSamples.length);
+    }
+  }
+
+  private aggregateEvent(event: Pick<TransportMapTraceEvent, "type" | "startMs" | "durationMs"> & { metadata?: TransportMapTraceMetadata }): void {
+    let aggregate = this.eventAggregates.get(event.type);
+    if (!aggregate) {
+      aggregate = { timings: new TimingDistribution(), incompleteCount: 0 };
+      this.eventAggregates.set(event.type, aggregate);
+    }
+    if (event.metadata?.incomplete) aggregate.incompleteCount += 1;
+    const duration = event.durationMs ?? 0;
+    if (!aggregate.worst || duration > aggregate.timings.maxMs) {
+      aggregate.worst = { offsetMs: round(event.startMs - this.startedAtMs), metadata: cloneTraceMetadata(event.metadata) };
+    }
+    aggregate.timings.add(duration);
   }
 
   private shouldSuppressEvent(

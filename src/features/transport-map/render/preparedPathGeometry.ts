@@ -23,18 +23,25 @@ export interface PreparedWorldPathGeometry {
   subpaths: PreparedWorldPathSubpath[];
 }
 
+interface CachedGeometry {
+  geometry: PreparedWorldPathGeometry;
+  stationsRevision: number;
+  anchors: { vertex: GlobalMapVertex; x: number; y: number }[];
+}
+
 /**
  * Identity-based cache for backend-neutral world geometry. Screen-space
  * arrays, Canvas scratch and Path2D are deliberately kept out of this cache.
  */
 export class PreparedWorldPathGeometryCache {
   private stationsSource?: readonly GlobalMapStation[];
-  private preparedByPath = new WeakMap<GlobalMapPath, PreparedWorldPathGeometry>();
+  private preparedByPath = new WeakMap<GlobalMapPath, CachedGeometry>();
+  private stationsRevision = 0;
 
   setStationsSource(stations: readonly GlobalMapStation[] | undefined): void {
     if (this.stationsSource === stations) return;
     this.stationsSource = stations;
-    this.preparedByPath = new WeakMap();
+    this.stationsRevision += 1;
   }
 
   get(
@@ -43,7 +50,20 @@ export class PreparedWorldPathGeometryCache {
     stationsById: ReadonlyMap<string, GlobalMapStation>,
   ): PreparedWorldPathGeometry {
     const cached = this.preparedByPath.get(path);
-    if (cached && cached.mode === mode) return cached;
+    if (cached && cached.geometry.mode === mode) {
+      if (cached.stationsRevision === this.stationsRevision) return cached.geometry;
+      // A viewport can change the station list without changing any anchor
+      // used by this path. Recheck only its station vertices, rather than
+      // discarding all prepared bus geometry and longitude/latitude buffers.
+      const unchanged = cached.anchors.every(({ vertex, x, y }) => {
+        const resolved = resolveGlobalMapVertex(path, vertex, stationsById.get(vertex.stationId!), mode);
+        return resolved.x === x && resolved.y === y;
+      });
+      if (unchanged) {
+        cached.stationsRevision = this.stationsRevision;
+        return cached.geometry;
+      }
+    }
 
     const subpaths = getGlobalMapPathSubpathRanges(path).map(({ start, end }) => {
       const vertices = path.vertices.slice(start, end);
@@ -66,7 +86,12 @@ export class PreparedWorldPathGeometryCache {
       };
     });
     const prepared = { path, mode, subpaths };
-    this.preparedByPath.set(path, prepared);
+    const anchors = subpaths.flatMap(subpath => subpath.vertices.flatMap((vertex, index) => {
+      if (!vertex.stationId) return [];
+      const point = subpath.worldPoints[index]!;
+      return [{ vertex, x: point.x, y: point.y }];
+    }));
+    this.preparedByPath.set(path, { geometry: prepared, anchors, stationsRevision: this.stationsRevision });
     return prepared;
   }
 

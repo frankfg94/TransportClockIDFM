@@ -1546,6 +1546,36 @@ describe("GlobalTransportPlan facade", () => {
     }
   });
 
+  it("forwards wheel events through a line-choice overlay without hijacking other controls", async () => {
+    const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+    wrappers.push(wrapper);
+    await flushPromises();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await flushPromises();
+    const stage = wrapper.get(".global-transport-plan__stage");
+    const overlay = document.createElement("div");
+    overlay.className = "global-transport-plan__tooltip--interactive";
+    const choice = document.createElement("button");
+    overlay.append(choice);
+    stage.element.append(overlay);
+    const zoomBefore = fixture.renderer.render.mock.calls.at(-1)![0].zoom;
+    const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -80, clientX: 400, clientY: 250 });
+    choice.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await flushPromises();
+    const zoomedIn = fixture.renderer.render.mock.calls.at(-1)![0].zoom;
+    expect(zoomedIn).toBeGreaterThan(zoomBefore);
+    choice.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 80, clientX: 400, clientY: 250 }));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await flushPromises();
+    expect(fixture.renderer.render.mock.calls.at(-1)![0].zoom).toBeLessThan(zoomedIn);
+    overlay.className = "other-map-control";
+    const controlWheel = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 80 });
+    choice.dispatchEvent(controlWheel);
+    expect(controlWheel.defaultPrevented).toBe(false);
+  });
+
   it("reveals correspondence nodes without labels on line hover and lets the path switch focus", async () => {
     const station = fixture.network.stations[0]!;
     const ghostStation = {

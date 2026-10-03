@@ -5,6 +5,8 @@ import type { DvfMapGridCell } from "../../../services/real-estate/realEstateMap
 import type { DvfMarketScope, DvfPurchasePoint, DvfRentalEstimate } from "../../../services/real-estate/compiledRealEstate";
 import { DVF_METRIC_INTERPOLATION_RADIUS_METERS } from "../real-estate/realEstateGridGeometry";
 import { REAL_ESTATE_METRIC_DECK_COLOR_RANGE, getRealEstateMetricColor } from "../real-estate/realEstateMetricColors";
+import { REAL_ESTATE_HEATMAP_EXTENSIONS, REAL_ESTATE_HEATMAP_UNSMOOTHED_EXTENSIONS } from "./realEstateHeatmapExtension";
+import { RealEstateMetricHeatmapLayer } from "./realEstateMetricHeatmapLayer";
 
 export const REAL_ESTATE_PRICE_LAYER_ID = "real-estate-price-heatmap";
 export const REAL_ESTATE_HIT_LAYER_ID = "real-estate-price-hit-targets";
@@ -222,6 +224,7 @@ export function createDeckRealEstateMetricLayer(
   opacity: number,
   id: string,
   beforeId?: string,
+  antialias = true,
 ): Layer | undefined {
   if (!metricCells.length) return undefined;
   // Keep the color scale fixed while the normalized accessor interpolates
@@ -231,7 +234,7 @@ export function createDeckRealEstateMetricLayer(
     rangeTrigger = Object.freeze([range.low, range.high] as const);
     metricRangeUpdateTriggers.set(range, rangeTrigger);
   }
-  return new HeatmapLayer<DvfMapMetricCell>({
+  return new RealEstateMetricHeatmapLayer({
     id,
     data: metricCells,
     coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
@@ -239,6 +242,7 @@ export function createDeckRealEstateMetricLayer(
     radiusPixels,
     colorDomain: NORMALIZED_METRIC_COLOR_DOMAIN,
     colorRange: DECK_PRICE_COLORS,
+    extensions: antialias ? REAL_ESTATE_HEATMAP_EXTENSIONS : REAL_ESTATE_HEATMAP_UNSMOOTHED_EXTENSIONS,
     weightsTextureSize: REAL_ESTATE_HEATMAP_TEXTURE_SIZE,
     debounceTimeout: 120,
     opacity,

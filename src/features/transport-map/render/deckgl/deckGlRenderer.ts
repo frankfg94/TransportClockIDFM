@@ -196,6 +196,7 @@ export class DeckGlRenderer implements TransportMapRenderer {
       visibleStationCount: model.stations.length,
       visibleVertexCount: model.vertexCount,
       renderMs: Number((nowMs() - startedAt).toFixed(3)),
+      renderSequence: (this.metrics.renderSequence ?? 0) + 1,
       cacheBytes: this.binaryCache.metrics().bytes,
       binaryCacheBytes: this.binaryCache.metrics().bytes,
       binaryCacheEntries: this.binaryCache.metrics().entries,

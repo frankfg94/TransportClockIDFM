@@ -186,8 +186,12 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
 
   recordDeckMetrics(metrics: Omit<TransportMapDeckMetrics, "sampleAgeMs">): void {
     this.deckMetrics = { ...metrics };
-    if (metrics.updateAttributesCount > 0 || metrics.updateAttributesTime > 0) {
-      this.activeTrace?.recordDuration("deck_update_attributes", metrics.updateAttributesTime, {
+    // Deck reports rolling windows, not an operation ending at this callback.
+    // Keep them as samples; attributing the whole window to one RAF is false.
+    {
+      this.activeTrace?.instant("deck_metrics_sample", {
+        sampledAtMs: metrics.sampledAtMs,
+        rollingWindow: true,
         updateAttributesCount: metrics.updateAttributesCount,
         updateAttributesTime: metrics.updateAttributesTime,
         cpuTime: metrics.cpuTime,
@@ -199,6 +203,9 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
         drawLayersCount: metrics.drawLayersCount,
         updateLayersCount: metrics.updateLayersCount,
         windowFrames: metrics.framesRedrawn,
+        gpuMemory: metrics.gpuMemory,
+        textureMemory: metrics.textureMemory,
+        bufferMemory: metrics.bufferMemory,
       });
     }
   }

@@ -74,6 +74,10 @@ const presentedLines = computed(() => props.lines.map((line) => {
 }));
 
 const isInteractive = computed(() => !props.stationLabel && presentedLines.value.length > 1);
+const choiceGridStyle = computed(() => ({
+  "--tooltip-choice-row-count": String(Math.min(6, presentedLines.value.length)),
+  "--tooltip-choice-column-count": String(Math.ceil(presentedLines.value.length / 6)),
+}));
 const tooltipLabel = computed(() => props.stationLabel ?? (
   isInteractive.value
     ? t("globalMap.page.tooltip.chooseLine", { count: presentedLines.value.length })
@@ -107,7 +111,11 @@ const tooltipLabel = computed(() => props.stationLabel ?? (
       <span class="global-transport-plan__tooltip-choice-label">
         {{ t("globalMap.page.tooltip.chooseLine", { count: presentedLines.length }) }}
       </span>
-      <div class="global-transport-plan__tooltip-choice-list" role="list">
+      <div
+        class="global-transport-plan__tooltip-choice-list"
+        :style="choiceGridStyle"
+        role="list"
+      >
         <button
           v-for="presented in presentedLines"
           :key="presented.line.id"
@@ -152,6 +160,9 @@ const tooltipLabel = computed(() => props.stationLabel ?? (
 .global-transport-plan__tooltip.global-transport-plan__tooltip--interactive {
   display: block;
   pointer-events: auto;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(640px, calc(100vw - 16px));
   padding: 7px;
   white-space: normal;
 }
@@ -166,7 +177,12 @@ const tooltipLabel = computed(() => props.stationLabel ?? (
 
 .global-transport-plan__tooltip-choice-list {
   display: grid;
-  gap: 3px;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(var(--tooltip-choice-row-count), minmax(0, auto));
+  grid-template-columns: repeat(var(--tooltip-choice-column-count), minmax(112px, max-content));
+  gap: 3px 5px;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .global-transport-plan__tooltip-choice {
@@ -174,7 +190,7 @@ const tooltipLabel = computed(() => props.stationLabel ?? (
   align-items: center;
   gap: 7px;
   width: 100%;
-  min-width: 150px;
+  min-width: 0;
   padding: 3px 5px;
   border: 1px solid #e5eaf2;
   border-radius: 5px;
@@ -183,6 +199,13 @@ const tooltipLabel = computed(() => props.stationLabel ?? (
   cursor: pointer;
   font: inherit;
   text-align: left;
+}
+
+.global-transport-plan__tooltip-choice > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .global-transport-plan__tooltip-choice:hover,

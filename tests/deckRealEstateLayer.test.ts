@@ -44,7 +44,7 @@ describe("real-estate Deck layers", () => {
 
     expect(heatmap.data).toBe(cells);
     expect(heatmap.radiusPixels).toBe(72);
-    expect(heatmap.weightsTextureSize).toBe(1024);
+    expect(heatmap.weightsTextureSize).toBe(2048);
     expect(heatmap.debounceTimeout).toBe(120);
     expect(heatmap.opacity).toBe(0.78);
     expect(heatmap.colorDomain).toEqual([3000, 10000]);

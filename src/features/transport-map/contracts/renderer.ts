@@ -110,6 +110,8 @@ export interface TransportMapRendererMetrics {
   /** Number of vertices in the currently prepared transport model, when known. */
   visibleVertexCount?: number;
   renderMs: number;
+  /** Monotonic render-call ID; prevents polling a stale duration as a new render. */
+  renderSequence?: number;
   cacheBytes: number;
   /** True when the focused line was redrawn instead of using the path cache. */
   focusedLineLiveRedraw: boolean;

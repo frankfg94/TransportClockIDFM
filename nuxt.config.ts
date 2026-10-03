@@ -3,8 +3,10 @@ import { defineNuxtConfig } from "nuxt/config";
 import { resolveUnlimitedNetwork } from "./config/networkPolicy";
 
 const isCapacitorBuild = process.env.CAPACITOR_BUILD === "true";
+const isPagesBuild = !isCapacitorBuild && process.env.NODE_ENV === "production";
 const customBuildDir = process.env.NUXT_BUILD_DIR?.trim();
 const committedGtfsDir = resolve(process.cwd(), ".data/gtfs");
+const stagedGtfsDir = resolve(process.cwd(), ".nuxt-data-update/gtfs-pages-assets");
 const configuredNeighborhoodVerdictDataPath =
   process.env.NUXT_NEIGHBORHOOD_VERDICT_DATA_PATH?.trim() ||
   (process.env.NEIGHBORHOOD_VERDICT_DATA_DIR?.trim()
@@ -71,7 +73,7 @@ export default defineNuxtConfig({
   sourcemap: { server: false },
   // Generated GTFS data can contain tens of thousands of files and must not be
   // traversed by Nuxt's project watcher during development.
-  ignore: [".data", ...(customBuildDir ? [customBuildDir] : [])],
+  ignore: [".data", ".nuxt-data-update", ...(customBuildDir ? [customBuildDir] : [])],
   nitro: {
     preset: isCapacitorBuild
       ? "static"
@@ -80,7 +82,10 @@ export default defineNuxtConfig({
         : undefined,
     publicAssets: [
       {
-        dir: committedGtfsDir,
+        // Pages only needs the version referenced by current.json. The full
+        // local directory also retains historical immutable versions, which
+        // would otherwise exceed Pages' per-deployment file limit.
+        dir: isPagesBuild ? stagedGtfsDir : committedGtfsDir,
         baseURL: "/_gtfs-data",
         fallthrough: false,
         maxAge: 0,

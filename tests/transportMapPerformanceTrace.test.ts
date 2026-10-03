@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createTransportMapPerformanceTrace,
   TRANSPORT_MAP_TRACE_THRESHOLDS,
@@ -9,6 +9,68 @@ import {
 } from "../src/features/transport-map/performance/transportMapMapLibreTrace";
 
 describe("transport map causal performance trace", () => {
+  it("keeps complete operation costs when fast events are aggregated and the event ring wraps", () => {
+    let now = 0;
+    const trace = createTransportMapPerformanceTrace({ capacity: 256, now: () => now, observeLongTasks: false });
+    trace.start();
+    for (let index = 0; index < 1_000; index += 1) {
+      now += 2;
+      trace.recordDuration("binary_cache_key_build", 2);
+      trace.instant("deck_data_changed", { index });
+    }
+    const incomplete = trace.begin("worker_job");
+    now += 60;
+    expect(incomplete).toBeDefined();
+    const report = trace.stop();
+    expect(report.droppedEventCount).toBeGreaterThan(0);
+    expect(report.eventAggregates?.binary_cache_key_build).toMatchObject({ count: 1_000, totalMs: 2_000, maxMs: 2 });
+    expect(report.eventAggregates?.worker_job).toMatchObject({ count: 1, incompleteCount: 1, timingKind: "async-wall-time" });
+  });
+
+  it("does not count a rolling Deck metrics window as synchronous frame work", () => {
+    let now = 0;
+    const trace = createTransportMapPerformanceTrace({ now: () => now, observeLongTasks: false });
+    trace.start();
+    now = 80;
+    trace.recordDuration("deck_update_attributes", 60, { rollingWindow: true });
+    trace.instant("deck_metrics_sample", { gpuTimePerFrame: 20, windowFrames: 60 });
+    trace.recordFrame(80, now);
+    const report = trace.stop();
+    expect(report.spikes[0]?.measuredMainThreadMs).toBe(0);
+    expect(report.eventAggregates?.deck_update_attributes?.timingKind).toBe("sample-window");
+  });
+
+  it("drains final long tasks and long animation frames before disconnecting observers", () => {
+    const observers: Array<{ type: string; entries: PerformanceEntry[] }> = [];
+    class Observer {
+      static supportedEntryTypes = ["longtask", "long-animation-frame"];
+      type = "";
+      entries: PerformanceEntry[] = [];
+      constructor() { observers.push(this); }
+      observe(options: { type?: string; entryTypes?: string[] }) { this.type = options.type ?? options.entryTypes![0]!; }
+      takeRecords() { const result = this.entries; this.entries = []; return result; }
+      disconnect() {}
+    }
+    vi.stubGlobal("PerformanceObserver", Observer);
+    try {
+      let now = 0;
+      const trace = createTransportMapPerformanceTrace({ now: () => now });
+      trace.start();
+      observers.find((observer) => observer.type === "longtask")!.entries.push({ startTime: 10, duration: 70 } as PerformanceEntry);
+      observers.find((observer) => observer.type === "long-animation-frame")!.entries.push({
+        startTime: 10, duration: 90, blockingDuration: 40, renderStart: 75, styleAndLayoutStart: 80,
+        scripts: [{ duration: 65, forcedStyleAndLayoutDuration: 3, invoker: "RAF", sourceURL: "https://example.test/app.js?secret=removed" }],
+      } as unknown as PerformanceEntry);
+      now = 110;
+      const report = trace.stop();
+      expect(report.longTasksOver50Ms).toBe(1);
+      expect(report.longTasks?.[0]?.durationMs).toBe(70);
+      expect(report.longAnimationFrames?.worst[0]).toMatchObject({
+        durationMs: 90, blockingDurationMs: 40, styleAndLayoutStartOffsetMs: 80,
+        scripts: [{ durationMs: 65, forcedStyleAndLayoutDurationMs: 3, invoker: "RAF", source: "https://example.test/app.js" }],
+      });
+    } finally { vi.unstubAllGlobals(); }
+  });
   it("supports an explicit OFF mode without starting probes or recording frames", () => {
     let now = 0;
     const trace = createTransportMapPerformanceTrace({

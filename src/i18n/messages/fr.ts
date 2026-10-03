@@ -179,6 +179,10 @@ export const fr = {
       modeYield: "Rendement",
       modeLiquidity: "Liquidité",
       metricSelectorAria: "Indicateur immobilier affiché sur la carte",
+      chooseMetric: "Choisir un indicateur",
+      closePicker: "Fermer le choix de l’indicateur immobilier",
+      sourceInfo: "Sources",
+      dataInfo: "Informations sur les données",
       metricUnavailable: "Aucune valeur disponible pour cet indicateur.",
       sourcesAndMethod: "Sources et méthode",
       hoveredEstimate: "Détails de l’estimation survolée",
@@ -223,6 +227,8 @@ export const fr = {
       scaleAriaRent: "Loyer au mètre carré, de la valeur la plus faible à la plus élevée",
       scaleAriaYield: "Rendement brut, de la valeur la plus faible à la plus élevée",
       scaleAriaLiquidity: "Nombre de ventes géolocalisées par maille de 250 m, de la valeur la plus faible à la plus élevée",
+      priceUnit: "€/m²",
+      yieldUnit: "%",
       salesUnit: "ventes",
       cellLiquidity: "Transactions retenues dans cette maille de 250 m",
       nearestCellLiquidity: "Transactions retenues dans la maille DVF la plus proche",
@@ -1274,7 +1280,7 @@ export const fr = {
         "Charge les portions de BUS et Noctilien au fur et à mesure du dézoom. Cela peut consommer beaucoup de processeur et de mémoire.",
       deckAntialiasing: "Anti-aliasing du plan global (Deck GL)",
       deckAntialiasingDescription:
-        "Lisse les contours du rendu GPU partagé avec le fond cartographique. Désactivez-le pour réduire la consommation GPU.",
+        "Lisse les tracés et les contours des zones immobilières. Désactivez-le pour réduire la consommation GPU.",
       deckAntialiasingAria: "Activer l'anti-aliasing du plan global",
       realEstateColorTransitions: "Transition des couleurs immobilières",
       realEstateColorTransitionsDescription:

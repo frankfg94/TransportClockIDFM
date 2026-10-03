@@ -19,6 +19,7 @@ import type {
 } from "../transport-map/performance/transportMapPerformanceTrace";
 import type { TransportMapWorkerPoolMetrics } from "../transport-map/workers/workerPool";
 import { TRANSPORT_MAP_TRACE_THRESHOLDS } from "../transport-map/performance/transportMapPerformanceTrace";
+import { ChaosZoomDiagnostics, type ChaosZoomDiagnosticReport } from "./chaosZoomDiagnostics";
 import {
   analyzeChaosCanvas,
   CHAOS_BASEMAP_PARTIAL_BLANK_MISSING_RATIO,
@@ -211,6 +212,7 @@ export interface ChaosZoomReport {
     maxVertexCountDuringRun?: number;
   };
   performance?: TransportMapPerformanceReport;
+  diagnostics?: ChaosZoomDiagnosticReport;
   phase?: ChaosZoomExtremePhase;
   actionIndex?: number;
   modes?: {
@@ -237,6 +239,8 @@ export interface ChaosZoomReport {
   maplibreAudit?: TransportMapTraceMapLibreSummary;
   capabilities?: {
     deckMetrics: boolean;
+    basemapPixelCoverage?: boolean;
+    basemapReadiness?: boolean;
   };
   error?: string;
 }
@@ -481,6 +485,7 @@ interface ChaosZoomFrameMonitor {
   rafHandle?: number;
   timeoutHandle?: number;
   onFrame?: (durationMs: number, timestamp: number) => void;
+  lastRenderSequence?: number;
 }
 
 interface ChaosZoomGestureResult {
@@ -557,6 +562,7 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
   let chaosZoomScenarioPromise: Promise<ChaosZoomReport> | undefined;
   let chaosZoomScenarioToken = 0;
   let chaosZoomFrameMonitor: ChaosZoomFrameMonitor | undefined;
+  let diagnostics: ChaosZoomDiagnostics | undefined;
   const chaosZoomObjectUrls = new Set<string>();
 
   function chaosNow(): number {
@@ -669,6 +675,16 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
         const durationMs = Math.max(0, timestamp - previousTimestamp);
         monitor.frameTimesMs.push(durationMs);
         monitor.onFrame?.(durationMs, timestamp);
+        const camera = options.getCamera();
+        diagnostics?.recordFrame(durationMs, timestamp, {
+          phase: chaosZoomActiveProfile.value === "standard" ? "standard" : chaosZoomPhase.value,
+          actionIndex: chaosZoomActiveProfile.value === "standard" ? chaosZoomProgress.value - 1 : chaosZoomProgress.value - 2,
+          camera, scrolling: options.isScrolling(), metrics: options.getRendererMetrics(),
+        });
+        if (chaosZoomActiveProfile.value === "standard") options.performanceTrace?.recordFrame(durationMs, timestamp, {
+          camera: { zoom: camera.zoom },
+          metadata: { phase: "standard", actionIndex: chaosZoomProgress.value - 1 },
+        });
       }
       previousTimestamp = timestamp;
       if (options.isScrolling()) monitor.scrollingFrameCount += 1;
@@ -691,8 +707,10 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
         monitor.maxVertexCount = Math.max(monitor.maxVertexCount, rendererMetrics.visibleVertexCount);
       }
       const renderMs = rendererMetrics?.renderMs;
-      if (renderMs !== undefined && Number.isFinite(renderMs)) {
+      if (renderMs !== undefined && Number.isFinite(renderMs)
+        && (rendererMetrics?.renderSequence === undefined || rendererMetrics.renderSequence !== monitor.lastRenderSequence)) {
         monitor.renderTimesMs.push(Math.max(0, renderMs));
+        monitor.lastRenderSequence = rendererMetrics?.renderSequence;
       }
       schedule();
     };
@@ -786,6 +804,8 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
   }
 
   function sampleChaosBasemapAudit(samples: ChaosBasemapAuditSample[]): void {
+    // Raster DOM rectangles cannot measure the MapLibre WebGL surface.
+    if (options.getRendererKind() === "webgl2") return;
     const coverage = options.readBasemapCoverage?.();
     if (!coverage) return;
     samples.push({
@@ -801,11 +821,20 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
   }
 
   async function waitForChaosBasemapRecovery(token: number): Promise<boolean> {
-    if (!options.readBasemapCoverage) return true;
+    const vectorBasemap = options.getRendererKind() === "webgl2";
+    if (!options.readBasemapCoverage && !vectorBasemap) return true;
     const deadline = Date.now() + CHAOS_BASEMAP_RECOVERY_TIMEOUT_MS;
     while (true) {
       assertChaosZoomActive(token);
-      const coverage = options.readBasemapCoverage();
+      if (vectorBasemap) {
+        const sample = options.performanceTrace?.latestMapLibreSample;
+        if (!sample) return true; // Readiness unavailable; capability is reported below.
+        if (sample.styleLoaded && sample.tilesLoaded) return true;
+        if (Date.now() >= deadline) return false;
+        await waitForChaosZoomDelay(CHAOS_BASEMAP_SAMPLE_INTERVAL_MS);
+        continue;
+      }
+      const coverage = options.readBasemapCoverage?.();
       if (
         coverage &&
         !coverage.live.hasGap &&
@@ -934,7 +963,7 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
           visibleStationCount: scene.stations.length,
         })
       : createUnavailableCanvasAnalysis();
-    const basemapCoverage = options.readBasemapCoverage?.();
+    const basemapCoverage = options.getRendererKind() === "webgl2" ? undefined : options.readBasemapCoverage?.();
     const basemapMissingRatio = basemapCoverage
       ? Math.max(0, Math.min(1, 1 - basemapCoverage.combined.coverageRatio))
       : undefined;
@@ -1237,6 +1266,11 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
     let performanceReport: TransportMapPerformanceReport | undefined;
     let errorMessage: string | undefined;
 
+    const performanceTrace = options.performanceTrace;
+    let ownsPerformanceTrace = false;
+    let traceReport: TransportMapTraceReport | undefined;
+    let configurationStart: Record<string, unknown> = {};
+
     try {
       assertChaosZoomActive(token);
       options.beforeRun?.();
@@ -1263,7 +1297,13 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
       await options.beforeMeasure?.();
       assertChaosZoomActive(token);
       chaosPerformanceProbe?.dispose();
-      chaosPerformanceProbe = createTransportMapPerformanceProbe({ expectedHz: 60, warmupMs: 0 });
+      configurationStart = options.performanceMetadata();
+      if (performanceTrace && !performanceTrace.isRunning) {
+        performanceTrace.start({ scenario: "chaos-zoom", ...configurationStart });
+        ownsPerformanceTrace = true;
+      }
+      diagnostics = new ChaosZoomDiagnostics(chaosNow(), chaosNow);
+      chaosPerformanceProbe = createTransportMapPerformanceProbe({ expectedHz: 60, warmupMs: 0, trace: performanceTrace });
       chaosPerformanceProbe.start();
       publishChaosZoomLiveStatus("running", "standard", "standard");
 
@@ -1345,6 +1385,7 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
       cameraBeforeRestore = { ...options.getCamera() };
     } finally {
       stopChaosZoomFrameMonitor(chaosZoomFrameMonitor);
+      diagnostics?.finish();
       if (chaosPerformanceProbe) {
         performanceReport = chaosPerformanceProbe.stop({
           ...options.performanceMetadata(),
@@ -1354,6 +1395,9 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
         });
         chaosPerformanceProbe = undefined;
       }
+      if (performanceTrace?.isRunning) traceReport = ownsPerformanceTrace
+        ? performanceTrace.stop({ scenario: "chaos-zoom", ...options.performanceMetadata() })
+        : performanceTrace.snapshot();
       options.cancelInteractions();
       options.setInteractionActive(false);
       if (initialCamera && options.isMounted()) {
@@ -1376,6 +1420,15 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
       performance: performanceReport,
       error: errorMessage,
     });
+    report.trace = traceReport;
+    report.maplibreAudit = traceReport?.maplibre;
+    report.capabilities = {
+      deckMetrics: Boolean(options.getRendererMetrics()?.deck),
+      basemapPixelCoverage: options.getRendererKind() !== "webgl2" && report.basemapAudit.sampleCount > 0,
+      basemapReadiness: Boolean(traceReport?.maplibre?.samples.length),
+    };
+    report.diagnostics = diagnostics?.stop(configurationStart, options.performanceMetadata(), traceReport);
+    diagnostics = undefined;
     if (!errorMessage) {
       const failures: string[] = [];
       if (report.hasPersistentBasemapGap) failures.push("persistent-basemap-gap");
@@ -1669,6 +1722,7 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
     const performanceTrace = options.performanceTrace;
     let ownsPerformanceTrace = false;
     let traceReport: TransportMapTraceReport | undefined;
+    let configurationStart: Record<string, unknown> = {};
     let extremeValidation: ChaosZoomExtremeNetworkValidation | undefined;
     const fullNetworkInvariant = createChaosZoomExtremeNetworkInvariantDiagnostic();
     let enforceExtremeFullNetwork = false;
@@ -1777,6 +1831,7 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
         trace: performanceTrace,
       });
       chaosPerformanceProbe.start();
+      diagnostics = new ChaosZoomDiagnostics(chaosNow(), chaosNow);
       monitor = startChaosZoomFrameMonitor((durationMs, timestamp) => {
         enforceExtremeFullNetworkState();
         previousFrameSample = captureExtremeSpike(
@@ -1790,6 +1845,7 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
         );
       });
       preparation = await options.prepareExtreme(() => assertChaosZoomActive(token));
+      configurationStart = options.performanceMetadata();
       assertChaosZoomActive(token);
       enforceExtremeFullNetwork = true;
       enforceExtremeFullNetworkState();
@@ -1876,6 +1932,7 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
     }
 
     stopChaosZoomFrameMonitor(monitor);
+    diagnostics?.finish();
     if (chaosPerformanceProbe) {
       performanceReport = chaosPerformanceProbe.stop({
         ...options.performanceMetadata(),
@@ -1885,6 +1942,7 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
       });
       chaosPerformanceProbe = undefined;
     }
+    const measuredUntilMs = chaosNow();
     // Keep the recorder alive for the configured causal post-roll so late
     // chunk, worker, Deck, and MapLibre completions are attached to the last
     // slow frames. The frame monitor itself is already stopped.
@@ -1917,7 +1975,7 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
     const scene = options.getRenderScene();
     const frameTimesMs = monitor?.frameTimesMs ?? [];
     const renderTimesMs = monitor?.renderTimesMs ?? [];
-    const frameSummary = summarizeChaosFrameTimes(frameTimesMs, chaosNow() - startedAtMs);
+    const frameSummary = summarizeChaosFrameTimes(frameTimesMs, Math.max(0, measuredUntilMs - (monitor?.startedAt ?? startedAtMs)));
     const enrichedSpikes = enrichExtremeChaosSpikes(spikes, traceReport?.spikes);
     const maplibreAudit = traceReport?.maplibre;
     const memory = performanceReport?.memoryStart?.usedJsHeapSize !== undefined &&
@@ -2016,6 +2074,7 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
         maxVertexCountDuringRun: monitor?.maxVertexCount ?? scene.paths.reduce((sum, path) => sum + path.vertices.length, 0),
       },
       performance: performanceReport,
+      diagnostics: diagnostics?.stop(configurationStart, options.performanceMetadata(), traceReport),
       phase: currentPhase,
       actionIndex: currentAction?.index ?? (actions.at(-1)?.index ?? -1),
       modes: preparation ? {
@@ -2050,9 +2109,12 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
       spikes: enrichedSpikes,
       capabilities: {
         deckMetrics: Boolean(options.getRendererMetrics()?.deck),
+        basemapPixelCoverage: false,
+        basemapReadiness: Boolean(maplibreAudit?.samples.length),
       },
       error: errorMessage,
     };
+    diagnostics = undefined;
 
     try {
       await options.restoreExtreme?.();
@@ -2111,6 +2173,7 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
 
   function recordRendererMetrics(metrics: TransportMapRendererMetrics): void {
     chaosPerformanceProbe?.recordRendererMetrics(metrics);
+    diagnostics?.recordRender(metrics.renderMs);
   }
 
   function recordCacheMetrics(metrics: ChaosCacheMetrics): void {
@@ -2126,6 +2189,8 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
     stopChaosZoomFrameMonitor(chaosZoomFrameMonitor);
     chaosPerformanceProbe?.dispose();
     chaosPerformanceProbe = undefined;
+    diagnostics?.stop({}, {});
+    diagnostics = undefined;
     if (options.performanceTrace?.isRunning) {
       options.performanceTrace.stop({
         scenario: "chaos-zoom-extreme",

@@ -587,6 +587,7 @@ export class Canvas2dRenderer implements TransportMapRenderer {
       visiblePathCount,
       visibleStationCount,
       renderMs: Number(((typeof performance === "undefined" ? Date.now() : performance.now()) - startedAt).toFixed(3)),
+      renderSequence: (this.metrics.renderSequence ?? 0) + 1,
       cacheBytes: this.pathCacheCanvas ? this.pathCacheCanvas.width * this.pathCacheCanvas.height * 4 : 0,
       focusedLineLiveRedraw: redrawFocusedLineDuringZoom,
       pathCacheCaptureCount: this.metrics.pathCacheCaptureCount,

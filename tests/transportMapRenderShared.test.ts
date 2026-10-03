@@ -179,6 +179,29 @@ describe("shared transport-map renderer state", () => {
     expect(second.subpaths[0]?.worldPoints[1]).toEqual({ x: 0.7, y: 0.2 });
   });
 
+  it("retains prepared paths when unrelated stations change, and resolves removed anchors again", () => {
+    const source = path("anchored", "line:metro", [
+      { x: 0.1, y: 0.1 }, { stationId: "anchor", x: 0.2, y: 0.2 },
+    ]);
+    const anchor = station("anchor", [source.lineId], 0.6, 0.4);
+    const cache = new PreparedWorldPathGeometryCache();
+    cache.setStationsSource([anchor]);
+    const first = cache.get(source, "METRO", new Map([[anchor.id, anchor]]));
+    const other = station("unrelated", [], 0.7, 0.3);
+    cache.setStationsSource([anchor, other]);
+    expect(cache.get(source, "METRO", new Map([[anchor.id, anchor], [other.id, other]]))).toBe(first);
+    cache.setStationsSource([other]);
+    const removed = cache.get(source, "METRO", new Map([[other.id, other]]));
+    expect(removed).not.toBe(first);
+    expect(removed.subpaths[0]!.worldPoints[1]).toEqual(source.vertices[1]);
+
+    source.renderStationAnchors = [{ stationId: "anchor", x: 0.22, y: 0.23 }];
+    const bus = cache.get(source, "BUS", new Map([[other.id, other]]));
+    cache.setStationsSource([anchor, other]);
+    expect(cache.get(source, "BUS", new Map([[anchor.id, anchor], [other.id, other]]))).toBe(bus);
+    expect(bus.subpaths[0]!.worldPoints[1]).toEqual(source.renderStationAnchors[0]);
+  });
+
   it("groups and clips traffic ranges without recreating them on lookup", () => {
     const spans = [
       {

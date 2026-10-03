@@ -49,6 +49,29 @@ export function resolveNextMapStyle(style: NextMapStyle | undefined): NextMapSty
   return style ?? DEFAULT_NEXT_VECTOR_STYLE_URL;
 }
 
+/** Missing road references should fail their length filter without a warning. */
+export function normalizeMapLibreReferenceFilters<T extends { layers: readonly unknown[] }>(style: T): T {
+  function normalize(expression: unknown): unknown {
+    if (!Array.isArray(expression)) return expression;
+    const [operator, input, limit] = expression;
+    if ((operator === "<=" || operator === "<") && Array.isArray(input)
+      && input[0] === "get" && input[1] === "ref_length"
+      && typeof limit === "number" && Number.isFinite(limit)) {
+      return [operator, ["number", input, limit + 1], limit];
+    }
+    const next = expression.map(normalize);
+    return next.some((value, index) => value !== expression[index]) ? next : expression;
+  }
+  return {
+    ...style,
+    layers: style.layers.map((value) => {
+      if (!value || typeof value !== "object" || !("filter" in value)) return value;
+      const filter = normalize(value.filter);
+      return filter === value.filter ? value : { ...value, filter };
+    }),
+  };
+}
+
 type MapLibreStyleLayer = {
   id?: unknown;
   type?: unknown;

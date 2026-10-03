@@ -634,6 +634,28 @@ onBeforeUnmount(() => {
     top: calc(env(safe-area-inset-top, 0px) + 76px);
     right: 12px;
   }
+  .map-button--advanced {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+    place-items: center;
+    border-color: rgba(100, 116, 139, 0.18);
+    border-radius: 13px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 3px 11px rgba(15, 23, 42, 0.13);
+    color: #475569;
+    backdrop-filter: blur(10px);
+  }
+  .map-button--advanced > svg {
+    width: 19px;
+    height: 19px;
+  }
+  .global-transport-plan__advanced-button-copy,
+  .global-transport-plan__advanced-button-arrow {
+    display: none;
+  }
   .global-transport-plan__advanced-menu {
     max-height: min(68dvh, 620px);
     overflow-y: auto;

@@ -178,7 +178,8 @@ describe("transport map next factory and projection strategy", () => {
       }] },
     });
     expect(overlay.setProps).toHaveBeenCalledTimes(2);
-    expect(presenter.getPresentationMetrics().layerRebuilds).toBe(2);
+    // Updating labels publishes new props without rebuilding path layers.
+    expect(presenter.getPresentationMetrics().layerRebuilds).toBe(1);
 
     const sampledAtMs = performance.now();
     presenter.recordDeckMetrics({

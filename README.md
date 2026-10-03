@@ -88,6 +88,10 @@ La route `/map?mapDebug=1` active le panneau de diagnostic de `GlobalTransportPl
 
 Le rapport distingue la cadence RAF du navigateur (`frames`) des frames effectivement envoyees au renderer (`presentedFrames` et `presentedP95FrameTimeMs`). Il contient aussi le p95/p99, les frames de plus de 50 ms, les longues taches, les temps worker/decode, le cache Canvas, la memoire et les derniers compteurs du renderer. Le code de mesure est volontairement autonome et commente dans `src/features/transport-map/performance/transportMapPerformance.ts`.
 
+Les exports Chaos normal et extrême ajoutent des résumés par phase/action/zoom,
+la configuration immobilière, les fenêtres CPU/GPU et les tâches longues.
+Voir [le guide de lecture des diagnostics Chaos](docs/global-map-chaos-diagnostics.md).
+
 Pour mesurer le chargement et le decoupage des donnees sans navigateur :
 
 ```powershell

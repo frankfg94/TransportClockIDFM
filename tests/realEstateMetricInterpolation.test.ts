@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createDeckRealEstateMetricLayers,
+  createDeckRealEstateMetricLayer,
   createDeckRealEstateMetricPurchasePointsLayer,
   createDvfMapMetricCells,
   interpolateDvfMapMetricValue,
@@ -18,6 +19,10 @@ import {
   getRealEstateMetricColor,
 } from "../src/features/transport-map/real-estate/realEstateMetricColors";
 import type { DvfMapGridCell } from "../src/services/real-estate/realEstateMapLayer";
+import { HeatmapLayer } from "@deck.gl/aggregation-layers";
+import type { Layer } from "@deck.gl/core";
+import { ScatterplotLayer } from "@deck.gl/layers";
+import { RealEstateHeatmapExtension } from "../src/features/transport-map/next/realEstateHeatmapExtension";
 
 function cell(lon: number, medianPriceM2: number, transactionCount = 5): DvfMapGridCell {
   return {
@@ -116,9 +121,9 @@ describe("real-estate metric interpolation", () => {
     expect(surface!.id).toBe(REAL_ESTATE_PRICE_LAYER_ID);
     expect(surfaceProps.aggregation).toBe("MEAN");
     expect(surfaceProps.radiusPixels).toBe(64);
-    expect(surfaceProps.colorDomain).toEqual([1000, 9000]);
+    expect(surfaceProps.colorDomain).toEqual([0, 1]);
     expect(surfaceProps.colorRange).toBe(REAL_ESTATE_METRIC_DECK_COLOR_RANGE);
-    expect(surfaceProps.getWeight(metricCells[0]!)).toBe(5000);
+    expect(surfaceProps.getWeight(metricCells[0]!)).toBe(0.5);
     expect(pointProps.getFillColor({ normalizedMetric: 0.5 })).toEqual(
       getRealEstateMetricColor(0.5),
     );
@@ -136,5 +141,34 @@ describe("real-estate metric interpolation", () => {
     expect(getDvfMetricInterpolationRadiusCssPixels(10, 48.86)).toBeGreaterThan(
       getDvfMetricInterpolationRadiusCssPixels(10, 0),
     );
+  });
+
+  it("routes the antialiasing preference to the display shader without changing aggregation", () => {
+    const range = { low: 1000, high: 9000 };
+    const samples = createDvfMapMetricCells([cell(2.35, 1000), cell(2.36, 9000)], "price", range, {});
+    const smooth = createDeckRealEstateMetricLayer(samples, range, 64, 0.78, "smooth", "labels") as HeatmapLayer;
+    const sharp = createDeckRealEstateMetricLayer(samples, range, 64, 0.78, "sharp", "labels", false) as HeatmapLayer;
+    expect(smooth.props.getWeight).toBe(sharp.props.getWeight);
+    const getWeight = smooth.props.getWeight as (sample: (typeof samples)[number]) => number;
+    expect(getWeight(samples[0]!)).toBe(0);
+    expect(smooth.props.colorDomain).toEqual(sharp.props.colorDomain);
+    expect(smooth.props.weightsTextureSize).toBe(sharp.props.weightsTextureSize);
+    expect(smooth.props.radiusPixels).toBe(sharp.props.radiusPixels);
+    expect(smooth.props.extensions[0]).toBeInstanceOf(RealEstateHeatmapExtension);
+
+    // Use the actual Heatmap display sublayer rather than importing a private
+    // deck.gl module. The extension must not replace its aggregation shaders.
+    expect(smooth.props.extensions[0]!.getShaders.call(smooth, smooth.props.extensions[0]!)).toBeNull();
+    smooth.state = {} as HeatmapLayer["state"];
+    sharp.state = {} as HeatmapLayer["state"];
+    const display = smooth.renderLayers() as unknown as Layer;
+    const sharpDisplay = sharp.renderLayers() as unknown as Layer;
+    const smoothShaders = display.props.extensions[0]!.getShaders.call(display, display.props.extensions[0]!);
+    const sharpShaders = sharpDisplay.props.extensions[0]!.getShaders.call(sharpDisplay, sharpDisplay.props.extensions[0]!);
+    expect(smoothShaders.defines.DVF_SMOOTH_EDGES).toBe(1);
+    expect(sharpShaders.defines.DVF_SMOOTH_EDGES).toBe(0);
+    expect(smoothShaders.fs).toBe(sharpShaders.fs);
+    const dots = new ScatterplotLayer({ id: "dots", data: [] });
+    expect(smooth.props.extensions[0]!.getShaders.call(dots, smooth.props.extensions[0]!)).toBeNull();
   });
 });

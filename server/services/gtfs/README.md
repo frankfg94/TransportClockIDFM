@@ -23,11 +23,14 @@ Le runtime cherche les objets dans cet ordre :
    `dist/_gtfs-data` pendant le build.
 
 Le troisième niveau permet à un déploiement Cloudflare Pages sans binding R2
-d'utiliser directement la version GTFS présente dans le dépôt. Il suffit donc
-de mettre à jour puis de committer `.data/gtfs` avant le build. Ces fichiers
-sont publiés comme assets statiques plutôt qu'inlinés dans le Worker afin de ne
-pas ajouter environ 78 Mio au bundle JavaScript. Le Worker les lit directement
-via le binding statique `ASSETS` fourni automatiquement par Cloudflare Pages.
+d'utiliser directement la version GTFS présente dans le dépôt. `npm run build`
+prépare `.nuxt-data-update/gtfs-pages-assets` depuis `current.json` et n'y copie
+que la version de géométrie et le dossier d'horaires référencés par ce manifeste.
+Les versions immuables plus anciennes restent dans `.data/gtfs` mais ne sont pas
+publiées dans le déploiement. Ces fichiers sont publiés comme assets statiques
+plutôt qu'inlinés dans le Worker afin de ne pas ajouter environ 78 Mio au bundle
+JavaScript. Le Worker les lit directement via le binding statique `ASSETS`
+fourni automatiquement par Cloudflare Pages.
 
 Quand R2 est configuré, il reste prioritaire et aucun mélange de versions n'est
 effectué avec les données locales. Le statut public expose `storage: "r2"` ou

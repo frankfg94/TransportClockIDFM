@@ -183,6 +183,10 @@ export const en = {
       modeYield: "Yield",
       modeLiquidity: "Liquidity",
       metricSelectorAria: "Property metric shown on the map",
+      chooseMetric: "Choose a metric",
+      closePicker: "Close property metric selection",
+      sourceInfo: "Sources",
+      dataInfo: "Data information",
       metricUnavailable: "No values are available for this metric.",
       sourcesAndMethod: "Sources and method",
       hoveredEstimate: "Hovered area estimate details",
@@ -227,6 +231,8 @@ export const en = {
       scaleAriaRent: "Rent per square metre, from lower to higher",
       scaleAriaYield: "Gross yield, from lower to higher",
       scaleAriaLiquidity: "Geolocated sales per 250 m grid cell, from lower to higher",
+      priceUnit: "€/m²",
+      yieldUnit: "%",
       salesUnit: "sales",
       cellLiquidity: "Transactions retained in this 250 m grid cell",
       nearestCellLiquidity: "Transactions retained in the nearest DVF grid cell",
@@ -1266,7 +1272,7 @@ export const en = {
         "Loads BUS and Noctilien sections as you zoom out. This can use substantial CPU and memory.",
       deckAntialiasing: "Global plan antialiasing (Deck GL)",
       deckAntialiasingDescription:
-        "Smooths the GPU rendering edges shared with the basemap. Disable it to reduce GPU usage.",
+        "Smooths linework and real-estate zone edges. Disable it to reduce GPU usage.",
       deckAntialiasingAria: "Enable global plan antialiasing",
       realEstateColorTransitions: "Real-estate color transitions",
       realEstateColorTransitionsDescription:

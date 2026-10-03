@@ -405,7 +405,9 @@ function createServedCityBoundaryLayers(
   const cacheKey = `${styleBucket}\u0000${beforeId ?? ""}`;
   let byStyleAndOrder = servedCityBoundaryLayersByZones.get(zones);
   const cached = byStyleAndOrder?.get(cacheKey);
-  if (cached) return cached;
+  // Layer instances carry Deck's lifecycle state. A layer removed in another
+  // zoom bucket cannot be initialized a second time; cache props/data only.
+  if (cached) return cached.map((layer) => layer.clone({}));
 
   const administrative = administrativeData(zones);
   const { boundaries: data, innerBoundaries: innerData } = administrative;
@@ -511,7 +513,7 @@ function createServedCityBoundaryLayers(
     servedCityBoundaryLayersByZones.set(zones, byStyleAndOrder);
   }
   byStyleAndOrder.set(cacheKey, layers);
-  return layers;
+  return layers.map((layer) => layer.clone({}));
 }
 
 function createServedCityLabelLayer(

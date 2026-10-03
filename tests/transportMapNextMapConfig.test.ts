@@ -1,11 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { featureFilter, type FilterSpecification } from "@maplibre/maplibre-gl-style-spec";
 import {
   applyMapLibreLabelLocale,
   createMapLibreLocalizedTextField,
   localizeMapLibreTextField,
+  normalizeMapLibreReferenceFilters,
 } from "../src/features/transport-map/next/nextMapConfig";
 
 describe("MapLibre basemap label localization", () => {
+  it("rejects missing reference lengths without MapLibre type warnings and preserves valid shields", () => {
+    const original = { layers: [{ id: "road-ref", filter: ["all", ["<=", ["get", "ref_length"], 6]] }] };
+    const normalized = normalizeMapLibreReferenceFilters(original);
+    const compiled = featureFilter(normalized.layers[0]!.filter as FilterSpecification, "filter");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      for (const value of [undefined, null, "invalid", 7]) {
+        expect(compiled.filter({ zoom: 12 }, { type: 2, properties: { ref_length: value } })).toBe(false);
+      }
+      expect(compiled.filter({ zoom: 12 }, { type: 2, properties: { ref_length: 4 } })).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+      expect(original.layers[0]!.filter).toEqual(["all", ["<=", ["get", "ref_length"], 6]]);
+      expect(normalizeMapLibreReferenceFilters(normalized).layers[0]).toBe(normalized.layers[0]);
+    } finally { warn.mockRestore(); }
+  });
   it("uses localized name properties with a default-name fallback", () => {
     expect(createMapLibreLocalizedTextField("fr")).toEqual([
       "coalesce",

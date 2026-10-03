@@ -11,7 +11,31 @@ import {
 
 export interface DeckPathCompilePayload {
   key: string;
-  records: readonly TransportMapPathRenderRecord[];
+  records: readonly (Omit<TransportMapPathRenderRecord, "positions"> & { positionOffset: number; positionLength: number })[];
+  positions: Float64Array;
+}
+
+/** One owned transfer buffer, regardless of the number of bus subpaths. */
+export function packDeckPathCompilePayload(
+  records: readonly TransportMapPathRenderRecord[],
+  key: string,
+): DeckPathCompilePayload {
+  const positions = new Float64Array(records.reduce((length, record) => length + record.positions.length, 0));
+  let offset = 0;
+  const packedRecords = records.map(({ positions: source, ...record }) => {
+    positions.set(source, offset);
+    const packed = { ...record, positionOffset: offset, positionLength: source.length };
+    offset += source.length;
+    return packed;
+  });
+  return { key, positions, records: packedRecords };
+}
+
+export function compileDeckPathPayload(payload: DeckPathCompilePayload): TransportMapBinaryPathPacket {
+  return createDeckPathBinaryPacket(payload.records.map(({ positionOffset, positionLength, ...record }) => ({
+    ...record,
+    positions: payload.positions.subarray(positionOffset, positionOffset + positionLength),
+  })), payload.key);
 }
 
 export function createDeckPathBinaryPacket(
@@ -105,9 +129,9 @@ export function validateTransportMapBinaryPathPacket(
     packet.dashArrays.length !== vertexCount * 2 ||
     packet.pathIds.some((id) => typeof id !== "string") ||
     packet.lineIds.some((id) => typeof id !== "string") ||
-    [...packet.positions].some((value) => !Number.isFinite(value)) ||
-    [...packet.widths].some((value) => !Number.isFinite(value) || value < 0) ||
-    [...packet.dashArrays].some((value) => !Number.isFinite(value) || value < 0)
+    packet.positions.some((value) => !Number.isFinite(value)) ||
+    packet.widths.some((value) => !Number.isFinite(value) || value < 0) ||
+    packet.dashArrays.some((value) => !Number.isFinite(value) || value < 0)
   ) {
     throw new Error(`Invalid Deck binary path packet attributes: ${packet.key}`);
   }
@@ -203,14 +227,11 @@ export class WorkerBackedDeckPathPacketCompiler implements DeckPathPacketCompile
     }
     // The original scene owns these buffers. Give the worker explicit copies
     // so transfer-list ownership never detaches data still used by Deck.
-    const workerRecords = records.map((record) => ({
-      ...record,
-      positions: new Float64Array(record.positions),
-    }));
-    const transferList = workerRecords.map((record) => record.positions.buffer);
+    const payload = packDeckPathCompilePayload(records, key);
+    const transferList = [payload.positions.buffer];
     return this.workerPool.run(
       "compile-deck-paths",
-      { key, records: workerRecords },
+      payload,
       generation,
       "background",
       () => createDeckPathBinaryPacket(records, key),
