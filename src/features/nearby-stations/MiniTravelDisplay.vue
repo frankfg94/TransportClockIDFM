@@ -13,6 +13,7 @@ import {
 
 const props = defineProps<{
   journey: NearbyJourney;
+  hideTransitDuration?: boolean;
 }>();
 
 const { t } = useI18n();
@@ -85,7 +86,9 @@ function formatDuration(seconds: number): string {
           eager
         />
         <Footprints v-else :size="14" aria-hidden="true" />
-        <small>{{ formatDuration(section.durationSeconds) }}</small>
+        <small v-if="!props.hideTransitDuration || isNearbyJourneyWalkingSection(section)">
+          {{ formatDuration(section.durationSeconds) }}
+        </small>
       </span>
     </template>
   </div>

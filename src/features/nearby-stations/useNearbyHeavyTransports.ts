@@ -23,9 +23,11 @@ import {
   type JourneyProvider,
   type NearbyHeavyTransportAccess,
   type NearbyHeavyTransportCandidate,
+  type NearbyJourney,
   type NearbyWalkingRouteProvider,
 } from "./nearbyHeavyTransports";
 import type { NearbyHeavyTargetCandidate } from "./nearbyHeavyTransportRules";
+import { isNearbyJourneyTransitSection, isNearbyJourneyWalkingSection } from "./nearbyJourneyTiming";
 import type { PublicFutureGpeStation } from "./neighborhoodVerdictApi";
 
 // A heavy line can be reachable through a nearby feeder even when its
@@ -34,6 +36,8 @@ import type { PublicFutureGpeStation } from "./neighborhoodVerdictApi";
 const HEAVY_STATION_CANDIDATES_PER_LINE = 6;
 const HEAVY_RESOLUTION_CONCURRENCY = 6;
 const HEAVY_REFRESH_INTERVAL_MS = 5 * 60_000;
+const FUTURE_GPE_HUB_STOP_MAX_DISTANCE_METERS = 250;
+const FUTURE_GPE_DESTINATION_SNAP_MAX_DISTANCE_METERS = 100;
 // Target concurrency is already bounded by the resolver. This wrapper only
 // gives each provider call a deadline and releases it when the origin changes.
 const runHeavyProbe = createNetworkScheduler(Infinity);
@@ -100,11 +104,14 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
     const localLines = input.localEntries.flatMap((entry) => entry.lines)
       .filter((line) => activeFeederModes.includes(line.mode));
     const lineCandidates = new Map<string, NearbyHeavyTargetCandidate[]>();
-    const projectedFeederLinesCache = new Map<string, GlobalMapLine[]>();
+    const projectedStationLinesCache = new Map<string, { feederLines: GlobalMapLine[]; heavyLines: GlobalMapLine[] }>();
 
-    function projectedFeederLines(station: GlobalMapStation, distanceMeters: number): GlobalMapLine[] {
-      if (distanceMeters <= input.radiusMeters) return [];
-      const cached = projectedFeederLinesCache.get(station.id);
+    function projectedStationLines(
+      station: GlobalMapStation,
+      distanceMeters: number,
+    ): { feederLines: GlobalMapLine[]; heavyLines: GlobalMapLine[] } {
+      if (distanceMeters <= input.radiusMeters) return { feederLines: [], heavyLines: [] };
+      const cached = projectedStationLinesCache.get(station.id);
       if (cached) return cached;
 
       const nearbyStations = queryStationCorrespondenceStations(
@@ -116,10 +123,13 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
         [station],
         nearbyStations,
         input.network.linesById,
-        { allowedModes: activeFeederModes },
       );
-      projectedFeederLinesCache.set(station.id, correspondence.lines);
-      return correspondence.lines;
+      const projectedLines = {
+        feederLines: correspondence.lines.filter((line) => activeFeederModes.includes(line.mode)),
+        heavyLines: correspondence.lines.filter((line) => activeHeavyModes.has(line.mode)),
+      };
+      projectedStationLinesCache.set(station.id, projectedLines);
+      return projectedLines;
     }
 
     for (const station of input.network.stations) {
@@ -152,7 +162,8 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
       targets,
       HEAVY_RESOLUTION_CONCURRENCY,
       async ({ station, line, distanceMeters, futureProject }) => {
-        const correspondenceLines = projectedFeederLines(station, distanceMeters);
+        const projectedLines = projectedStationLines(station, distanceMeters);
+        const correspondenceLines = projectedLines.feederLines;
         const feederLines = mergeNearbyHeavyFeederLines(
           localLines,
           correspondenceLines,
@@ -180,11 +191,14 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
           if (input.signal?.aborted || isAbortError(cause) || isNavitiaRateLimit(cause)) throw cause;
           return [];
         });
-        const currentAlternatives = listNearbyHeavyJourneyAlternatives(journeys, {
-          stationDistanceMeters: distanceMeters,
-          localLineIds,
-          localLineCodes,
-        }).map((access) => normalizeNearbyHeavyAccessLine(access, feederLines));
+        const currentAlternatives = listNearbyHeavyJourneyAlternatives(
+          futureProject ? journeys.map((journey) => trimCoLocatedFutureStationEgress(journey, futureProject)) : journeys,
+          {
+            stationDistanceMeters: distanceMeters,
+            localLineIds,
+            localLineCodes,
+          },
+        ).map((access) => normalizeNearbyHeavyAccessLine(access, feederLines));
 
         // The live departure window is not enough to describe every valid
         // feeder: a daytime tram may be absent from a current-time response
@@ -201,11 +215,14 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
             if (input.signal?.aborted || isAbortError(cause) || isNavitiaRateLimit(cause)) throw cause;
             return [];
           });
-        const daytimeAlternatives = listNearbyHeavyJourneyAlternatives(daytimeJourneys, {
-          stationDistanceMeters: distanceMeters,
-          localLineIds,
-          localLineCodes,
-        }).map((access) => normalizeNearbyHeavyAccessLine(access, feederLines));
+        const daytimeAlternatives = listNearbyHeavyJourneyAlternatives(
+          futureProject ? daytimeJourneys.map((journey) => trimCoLocatedFutureStationEgress(journey, futureProject)) : daytimeJourneys,
+          {
+            stationDistanceMeters: distanceMeters,
+            localLineIds,
+            localLineCodes,
+          },
+        ).map((access) => normalizeNearbyHeavyAccessLine(access, feederLines));
         const currentAccess = currentAlternatives[0];
         const routedWalkingAccess = input.walkingRouteProvider
           ? await resolveDirectWalkingAccess(input.walkingRouteProvider, input.origin, station, input.signal)
@@ -231,7 +248,17 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
 
         const entry = createHeavyEntry(station, line, input.network, distanceMeters);
         if (!input.includeLocalCandidates && existingIds.has(entry.id)) return undefined;
-        return { entry, station, line, distanceMeters, access, accessAlternatives, correspondenceLines, futureProject };
+        return {
+          entry,
+          station,
+          line,
+          distanceMeters,
+          access,
+          accessAlternatives,
+          correspondenceLines,
+          coLocatedHeavyLines: futureProject ? projectedLines.heavyLines : [],
+          futureProject,
+        };
       },
       input.signal,
     );
@@ -243,6 +270,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
       accesses: Record<string, NearbyHeavyTransportAccess>;
       accessAlternatives: Record<string, NearbyHeavyTransportAccess[]>;
       correspondenceLines: GlobalMapLine[];
+      coLocatedHeavyLines: GlobalMapLine[];
       futureProjectsByLine: Record<string, PublicFutureGpeStation>;
       distanceMeters: number;
     }>();
@@ -258,6 +286,10 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
           existing.correspondenceLines,
           result.correspondenceLines,
         );
+        existing.coLocatedHeavyLines = mergeNearbyHeavyFeederLines(
+          existing.coLocatedHeavyLines,
+          result.coLocatedHeavyLines,
+        );
         existing.distanceMeters = Math.min(existing.distanceMeters, result.distanceMeters);
       } else {
         byStation.set(result.entry.id, {
@@ -267,6 +299,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
           accesses: { [result.line.id]: result.access },
           accessAlternatives: { [result.line.id]: result.accessAlternatives },
           correspondenceLines: result.correspondenceLines,
+          coLocatedHeavyLines: result.coLocatedHeavyLines,
           futureProjectsByLine: result.futureProject ? { [result.line.id]: result.futureProject } : {},
           distanceMeters: result.distanceMeters,
         });
@@ -294,6 +327,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
           accessAlternatives,
           accessAlternativesByLine,
           correspondenceLines: value.correspondenceLines,
+          coLocatedHeavyLines: value.coLocatedHeavyLines,
           futureProjectsByLine: Object.keys(value.futureProjectsByLine).length > 0
             ? value.futureProjectsByLine
             : undefined,
@@ -524,6 +558,59 @@ function normalizeSyntheticKey(value: string): string {
     .replace(/[^a-z0-9]+/giu, "-")
     .replace(/^-+|-+$/gu, "")
     .toLocaleLowerCase("fr-FR");
+}
+
+/**
+ * Coordinate journeys can append a long street-network leg after reaching a
+ * current station that is the same physical hub as a planned GPE station.
+ * In that case the transfer is already complete at the current station; the
+ * detour to the project's map coordinate must not count as passenger travel.
+ */
+function trimCoLocatedFutureStationEgress(
+  journey: NearbyJourney,
+  project: PublicFutureGpeStation,
+): NearbyJourney {
+  let lastTransitIndex = -1;
+  for (let index = 0; index < journey.sections.length; index++) {
+    if (isNearbyJourneyTransitSection(journey.sections[index]!)) lastTransitIndex = index;
+  }
+  if (lastTransitIndex < 0 || lastTransitIndex !== journey.sections.length - 2) return journey;
+
+  const lastTransit = journey.sections[lastTransitIndex]!;
+  const egress = journey.sections[lastTransitIndex + 1]!;
+  if (!isNearbyJourneyWalkingSection(egress)) return journey;
+  if (normalizeFutureStationName(lastTransit.toName) !== normalizeFutureStationName(project.name)) return journey;
+
+  const sameStopPoint = Boolean(lastTransit.toStopPointId && lastTransit.toStopPointId === egress.fromStopPointId);
+  const sameStopArea = Boolean(lastTransit.toStopAreaId && lastTransit.toStopAreaId === egress.fromStopAreaId);
+  if (!sameStopPoint && !sameStopArea) return journey;
+
+  const target = { lat: project.lat, lon: project.lon };
+  if (!egress.toPoint || !lastTransit.toPoint) return journey;
+  if (getCoordinatesDistanceMeters(target.lat, target.lon, egress.toPoint.lat, egress.toPoint.lon)
+    > FUTURE_GPE_DESTINATION_SNAP_MAX_DISTANCE_METERS) return journey;
+  if (getCoordinatesDistanceMeters(target.lat, target.lon, lastTransit.toPoint.lat, lastTransit.toPoint.lon)
+    > FUTURE_GPE_HUB_STOP_MAX_DISTANCE_METERS) return journey;
+
+  const durationSeconds = egress.durationSeconds;
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return journey;
+
+  return {
+    ...journey,
+    arrivalDateTime: lastTransit.arrivalDateTime ?? journey.arrivalDateTime,
+    durationSeconds: Math.max(0, journey.durationSeconds - durationSeconds),
+    sections: journey.sections.slice(0, lastTransitIndex + 1),
+  };
+}
+
+function normalizeFutureStationName(value: string | undefined): string {
+  return (value ?? "")
+    .replace(/\s*\([^)]*\)\s*$/u, "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleLowerCase("fr-FR")
+    .replace(/[^\p{Letter}\p{Number}]+/gu, " ")
+    .trim();
 }
 
 function representativeJourneyDateTime(): string {

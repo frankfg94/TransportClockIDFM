@@ -7,6 +7,7 @@ import { useI18n } from "../../i18n";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { getNearbyWalkingRoute } from "../../services/nearbyWalkingRoutes";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
+import { fetchGpeStations } from "../transport-map/gpeStationsApi";
 import AdressBook from "../address-book/AdressBook.vue";
 import { toAddressBookPoint, useAddressBook, type AddressBookEntry } from "../address-book/addressBook";
 import {
@@ -77,6 +78,20 @@ const journeyDateTime = getNearbyWorkdayJourneyDateTime();
 const nightJourneyDateTime = getNearbyNightJourneyDateTime();
 const futureProjects = ref<PublicFutureGpeStation[]>([]);
 const futureProjectsReady = ref(false);
+const backendFutureProjects = ref<PublicFutureGpeStation[]>([]);
+const gpeCatalogProjects = ref<PublicFutureGpeStation[]>([]);
+const backendFutureProjectsReady = ref(false);
+const gpeCatalogReady = ref(false);
+
+function updateFutureProjectTargets(): void {
+  const projectsById = new Map<string, PublicFutureGpeStation>();
+  for (const project of gpeCatalogProjects.value) projectsById.set(project.id, project);
+  for (const project of backendFutureProjects.value) {
+    projectsById.set(project.id, { ...projectsById.get(project.id), ...project });
+  }
+  futureProjects.value = [...projectsById.values()];
+  futureProjectsReady.value = gpeCatalogReady.value || backendFutureProjectsReady.value;
+}
 const routeComposer = useTravelRoutes({
   origin: nearby.selectedPlace,
   travelRoutesProvider: nearbyDataProviders.travelRoutes,
@@ -130,29 +145,51 @@ const score = useNearbyNeighborhoodScore({
   initialSnapshot: readNearbyNeighborhoodScoreSnapshot(initialOrigin),
 });
 
-// The verdict supplies the official GPE coordinates asynchronously. Feed
-// them back into the same heavy resolver used for stations outside the map;
-// do not reuse the backend's walking estimate as a transport duration.
+// Use the complete official GPE catalog for transit routing. The point verdict
+// only includes a small pedestrian-search radius, which misses stations that
+// are reachable by a short multi-line public-transport journey.
 watch(
   () => score.backendVerdict?.value?.futureProjects,
   (next) => {
-    if (next) futureProjects.value = [...next];
+    backendFutureProjects.value = (next ?? []).filter((project) => project.projectStatus !== "open");
+    updateFutureProjectTargets();
   },
   { immediate: true, deep: true, flush: "post" },
 );
 watch(
   () => score.backendVerdictReady?.value ?? true,
   (ready) => {
-    futureProjectsReady.value = ready;
-    if (!ready) futureProjects.value = [];
+    backendFutureProjectsReady.value = ready;
+    if (!ready) backendFutureProjects.value = [];
+    updateFutureProjectTargets();
   },
   { immediate: true, flush: "post" },
 );
 watch(
   () => [nearby.selectedPlace.value?.lon, nearby.selectedPlace.value?.lat] as const,
-  () => { futureProjects.value = []; },
+  () => {
+    backendFutureProjects.value = [];
+    backendFutureProjectsReady.value = false;
+    updateFutureProjectTargets();
+  },
   { flush: "post" },
 );
+
+onMounted(() => {
+  void fetchGpeStations()
+    .then((stations) => {
+      gpeCatalogProjects.value = stations
+        .filter((station) => station.projectStatus !== "open")
+        .map((station) => ({ ...station }));
+    })
+    .catch(() => {
+      gpeCatalogProjects.value = [];
+    })
+    .finally(() => {
+      gpeCatalogReady.value = true;
+      updateFutureProjectTargets();
+    });
+});
 
 watch(
   () => [

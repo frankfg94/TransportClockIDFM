@@ -248,6 +248,7 @@ function handleClusterGroupingDistanceUpdate(value: number): void {
         :stations="nearby.visibleStations.value"
         :city-view-network="nearby.transportMapNetwork?.value"
         :selected-line-ids="nearby.selectedLineIds"
+        line-selection-mode="multiple"
         :active-modes="nearby.activeModes.value"
         :basemap-style="props.basemapStyle"
         :show-isochrone-control="props.showIsochroneControl"

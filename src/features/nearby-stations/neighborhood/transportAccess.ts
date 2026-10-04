@@ -1,7 +1,8 @@
 import type { GlobalMapLine, GlobalMapMode } from "../../transport-map/contracts/manifest";
 import { NEARBY_HEAVY_TOTAL_MAX_SECONDS } from "../nearbyHeavyTransportRules";
-import type { NearbyHeavyTransportCandidate, NearbyJourney } from "../nearbyHeavyTransports";
+import type { NearbyHeavyTransportCandidate, NearbyJourney, NearbyJourneySection } from "../nearbyHeavyTransports";
 import { getNearbyHeavyAccessTravelSeconds } from "../nearbyHeavyTransports";
+import { isNearbyJourneyTransitSection } from "../nearbyJourneyTiming";
 import type { PublicFutureGpeStation } from "../neighborhoodVerdictApi";
 import type { NeighborhoodFact, NeighborhoodFactKind, NeighborhoodScoreInput } from "./contracts";
 import { HEAVY_SCORE_MODES } from "./contracts";
@@ -31,7 +32,7 @@ export interface NeighborhoodTransportAccessSignal {
 // resolver has already rejected routes beyond this limit; applying the same
 // limit here prevents a valid projected station (for example RER B via T10)
 // from disappearing merely because it is outside the 600 m map radius.
-const NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS = NEARBY_HEAVY_TOTAL_MAX_SECONDS;
+export const NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS = NEARBY_HEAVY_TOTAL_MAX_SECONDS;
 export const NEIGHBORHOOD_TRANSPORT_ACCESS_LIMIT_SECONDS = 15 * 60;
 const NEIGHBORHOOD_TRANSPORT_AT_FOOT_METERS = 400;
 const KNOWN_LINE_LABELS_BY_CODE: Readonly<Record<string, string>> = {
@@ -93,7 +94,9 @@ export function listTransportAccessSignals(input: NeighborhoodScoreInput): Neigh
           access.kind === "direct",
         ),
         distanceMeters: Math.max(0, Math.round(candidate.distanceMeters)),
-        via: access.kind === "connection" ? formatFeederLineName(input, access) : undefined,
+        via: access.kind === "connection"
+          ? formatJourneyTransitRoute(input, access.journey, line) ?? formatFeederLineName(input, access)
+          : undefined,
         journey: access.journey,
       };
       keepBestTransportSignal(byLine, signal);
@@ -107,7 +110,9 @@ function keepBestTransportSignal(
   byLine: Map<string, NeighborhoodTransportAccessSignal>,
   signal: NeighborhoodTransportAccessSignal,
 ): void {
-  const key = lineKey(signal.line);
+  const key = signal.futureProject
+    ? `future:${signal.futureProject.id}`
+    : lineKey(signal.line);
   const current = byLine.get(key);
   if (!current || compareTransportAccessSignals(signal, current) < 0) byLine.set(key, signal);
 }
@@ -189,6 +194,74 @@ function formatFeederLineName(
   return `${mode} ${reference}`;
 }
 
+function formatJourneyTransitRoute(
+  input: NeighborhoodScoreInput,
+  journey: NearbyJourney | undefined,
+  targetLine: GlobalMapLine,
+): string | undefined {
+  if (!journey) return undefined;
+  const knownLines = [
+    ...input.stations.flatMap((entry) => entry.lines),
+    ...(input.heavyCandidates ?? []).flatMap((candidate) => [
+      ...candidate.lines,
+      ...(candidate.correspondenceLines ?? []),
+    ]),
+  ];
+  const routeLabels: string[] = [];
+  const seenLabels = new Set<string>();
+
+  for (const section of journey.sections.filter(isNearbyJourneyTransitSection)) {
+    const line = knownLines.find((candidate) => journeySectionMatchesLine(section, candidate));
+    if (line && journeySectionMatchesLine(section, targetLine)) continue;
+    const label = line
+      ? formatTransportLineName(line)
+      : formatJourneySectionLineName(section);
+    if (!label) continue;
+    const key = normalizeScoreText(label);
+    if (seenLabels.has(key)) continue;
+    seenLabels.add(key);
+    routeLabels.push(label);
+  }
+
+  return routeLabels.join(" → ") || undefined;
+}
+
+function journeySectionMatchesLine(section: NearbyJourneySection, line: GlobalMapLine): boolean {
+  if (section.lineMode && section.lineMode !== line.mode) return false;
+  const sectionReferences = [section.lineId, section.lineCode, ...(section.lineAliases ?? [])]
+    .filter((value): value is string => Boolean(value?.trim()));
+  const lineReferences = [line.id, line.code, line.label, line.sourceLineId, ...line.aliases]
+    .filter((value): value is string => Boolean(value?.trim()));
+  return sectionReferences.some((sectionReference) => lineReferences.some((lineReference) =>
+    transportLineReferencesMatch(sectionReference, lineReference),
+  ));
+}
+
+function formatJourneySectionLineName(section: NearbyJourneySection): string | undefined {
+  const reference = [section.lineCode, ...(section.lineAliases ?? []), section.lineId]
+    .find((value) => value?.trim() && !isOpaqueTransportLineLabel(value));
+  if (!reference) return undefined;
+  const mode = section.lineMode ?? journeySectionMode(section.mode);
+  return mode ? `${transportModeLabel(mode)} ${reference.trim()}` : reference.trim();
+}
+
+function journeySectionMode(mode?: string): GlobalMapMode | undefined {
+  switch ((mode ?? "").trim().toLocaleLowerCase("fr-FR")) {
+    case "metro":
+    case "métro": return "METRO";
+    case "rer": return "RER";
+    case "train": return "TRAIN";
+    case "transilien": return "TRANSILIEN";
+    case "tram":
+    case "tramway": return "TRAM";
+    case "noctilien": return "NOCTILIEN";
+    case "cable":
+    case "câble": return "CABLE";
+    case "bus": return "BUS";
+    default: return undefined;
+  }
+}
+
 function formatTransportMinutes(seconds: number, directWalking: boolean): number {
   const rounded = directWalking ? Math.round(seconds / 60) : Math.ceil(seconds / 60);
   return Math.max(1, rounded);
@@ -216,7 +289,13 @@ export function coLocatedCurrentLines(
   }
   for (const candidate of input.heavyCandidates ?? []) {
     if (commercialDistanceMeters(candidate.station, project) > 100) continue;
-    for (const line of candidate.lines) addLine(line, true);
+    for (const line of [
+      ...candidate.lines,
+      ...(candidate.correspondenceLines ?? []),
+      ...(candidate.coLocatedHeavyLines ?? []),
+    ]) {
+      addLine(line, true);
+    }
   }
   return [...linesByKey.values()];
 }

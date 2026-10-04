@@ -299,6 +299,15 @@ const schedules = useNearbyStationSchedules({
 const displayedScheduleItems = computed(() => schedules.items.value.filter((item) =>
   nearby.activeModes.value.includes(item.line.mode),
 ));
+function scheduleItemsForStationFocus(activeStationId?: string) {
+  if (!activeStationId) return displayedScheduleItems.value;
+  const selectedLineIds = nearby.selectedLineIds(activeStationId);
+  if (selectedLineIds.length === 0) return displayedScheduleItems.value;
+  const selectedLineIdSet = new Set(selectedLineIds);
+  return displayedScheduleItems.value.filter((item) =>
+    item.stationId !== activeStationId || selectedLineIdSet.has(item.line.id),
+  );
+}
 const nearbyTrafficReports = ref<TrafficLineReport[]>([]);
 const nearbyTrafficModalOpen = ref(false);
 const nearbyTrafficModalAlert = ref<TrafficAlertModalData>();
@@ -1832,6 +1841,7 @@ onBeforeUnmount(() => {
         :hovered-line-id="lineFlow.hoveredLineId.value"
         :trace-action-label="t('nearbyStations.viewTrace')"
         :cluster-grouping-distance-meters="nearby.clusterGroupingDistanceMeters.value"
+        line-selection-mode="single"
         :station-has-upcoming-departure="stationHasUpcomingDeparture"
         :hide-stations-without-departures="hideStationsWithoutDepartures"
         v-model:hide-long-wait-transports="hideLongWaitTransports"
@@ -1916,7 +1926,7 @@ onBeforeUnmount(() => {
         </template>
         <template #station-schedules="{ activeStationId, fullscreen, active }">
           <NearbyStationSchedulePanel
-            :items="displayedScheduleItems"
+            :items="scheduleItemsForStationFocus(activeStationId)"
             :active="active"
             :active-modes="nearby.activeModes.value"
             :active-station-id="activeStationId"

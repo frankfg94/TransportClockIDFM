@@ -46,9 +46,15 @@ function sortFacts(facts: readonly NeighborhoodFact[]): NeighborhoodFact[] {
 }
 
 export function compareFacts(left: NeighborhoodFact, right: NeighborhoodFact): number {
-  return Number(right.emphasis === "exceptional") - Number(left.emphasis === "exceptional")
+  return Number(hasExceptionalFactMarker(right)) - Number(hasExceptionalFactMarker(left))
     || right.priority - left.priority
     || left.id.localeCompare(right.id);
+}
+
+export function hasExceptionalFactMarker(fact: Pick<NeighborhoodFact, "emphasis" | "markerEmphasis">): boolean {
+  const markerEmphasis = fact.markerEmphasis
+    ?? (fact.emphasis === "exceptional" ? "exceptional" : "standard");
+  return markerEmphasis === "exceptional";
 }
 
 export function makeFact(options: {
@@ -65,6 +71,7 @@ export function makeFact(options: {
   ruleValues: TranslationParams;
   action?: NeighborhoodFactAction;
   emphasis?: "exceptional";
+  markerEmphasis?: "standard" | "exceptional";
   travel?: NeighborhoodFactTravel;
   places?: readonly NeighborhoodFactPlace[];
   transportReliabilityLines?: readonly NeighborhoodFactTransportReliabilityLine[];
@@ -78,6 +85,7 @@ export function makeFact(options: {
     family: options.family,
     priority: options.priority,
     emphasis: options.emphasis,
+    markerEmphasis: options.markerEmphasis,
     labelKey: keys.label,
     labelValues: options.values,
     tooltipKey: keys.tooltip,

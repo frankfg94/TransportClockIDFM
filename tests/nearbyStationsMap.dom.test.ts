@@ -422,6 +422,7 @@ function mountMap(
       stations,
       supplementalStations,
       selectedLineIds: () => [],
+      lineSelectionMode: "multiple",
       activeModes,
       basemapStyle,
       activeLineId,

@@ -41,12 +41,16 @@ const props = withDefaults(defineProps<{
   tooltipTeleportTarget?: HTMLElement;
   /** Precomputed OSM commerce totals keyed by raw IRIS code. */
   commerceCounts?: Readonly<Record<string, number>>;
+  /** Total matching places for the selected activity in the displayed city. */
+  activityCityTotal?: number;
   /** True once the selected communeâ€™s compiled commerce data is available. */
   commerceDataAvailable?: boolean;
   /** When enabled, use the commerce totals to shade each displayed neighborhood. */
   commerceHighlight?: boolean;
   activityTotals?: Readonly<Record<string, number>>;
   activityLabel?: string;
+  /** Wait without pointer movement before showing a hover tooltip. */
+  tooltipHoverDelayMs?: number;
   realEstateMetrics?: ReadonlyMap<string, DvfNeighborhoodMetric>;
   realEstateActive?: boolean;
   realEstateMode?: "prices" | "liquidity";
@@ -64,6 +68,7 @@ const props = withDefaults(defineProps<{
   commerceCounts: () => ({}),
   commerceDataAvailable: false,
   commerceHighlight: false,
+  tooltipHoverDelayMs: 0,
   realEstateActive: false,
   realEstateMode: "prices",
   realEstateMeasure: "median",
@@ -90,9 +95,12 @@ const overlayRoot = ref<HTMLElement>();
 const tooltipElement = ref<HTMLElement>();
 const tooltipHeight = ref(0);
 const hoveredId = ref<string>();
+const tooltipReadyId = ref<string>();
 const tooltipPosition = ref<TooltipPosition>();
 const tooltipLocked = ref(false);
 let clearTimer: ReturnType<typeof setTimeout> | undefined;
+let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingHoveredId: string | undefined;
 let tooltipResizeObserver: ResizeObserver | undefined;
 
 const QUALITY_FACE_ICONS = [Smile, Meh, Frown] as const;
@@ -161,6 +169,23 @@ const transportCounts = computed(() => {
 const hoveredItem = computed(() => displayItems.value.find((item) => item.id === hoveredId.value));
 const hoveredCounts = computed(() => hoveredId.value ? transportCounts.value.get(hoveredId.value) : undefined);
 const hoveredCommerceCount = computed(() => hoveredId.value ? commerceCountByItem.value.get(hoveredId.value) : undefined);
+const hoveredActivityCityShare = computed(() => {
+  const total = props.activityCityTotal;
+  const count = hoveredCommerceCount.value;
+  if (typeof total !== "number" || !Number.isFinite(total) || total <= 0 || count === undefined) return undefined;
+  return count / total * 100;
+});
+const hoveredActivityText = computed(() => {
+  const count = hoveredCommerceCount.value;
+  if (count === undefined) return undefined;
+  if (!props.activityLabel) return t("globalMap.iris.tooltipCommerce", { count: n(count) });
+  if (hoveredActivityCityShare.value === undefined) return `${props.activityLabel} : ${n(count)}`;
+  return t("nearbyStations.cityActivity.tooltipCityShare", {
+    activity: props.activityLabel,
+    count: n(count),
+    percent: n(hoveredActivityCityShare.value, { maximumFractionDigits: 1 }),
+  });
+});
 const hoveredRealEstate = computed(() => {
   if (!props.realEstateActive) return undefined;
   const member = hoveredItem.value?.members[0];
@@ -320,6 +345,12 @@ function localPointerPosition(event: MouseEvent): TooltipPosition | undefined {
   };
 }
 
+function cancelPendingHover(): void {
+  if (hoverTimer) clearTimeout(hoverTimer);
+  hoverTimer = undefined;
+  pendingHoveredId = undefined;
+}
+
 function setHovered(id: string, event?: MouseEvent): void {
   if (tooltipLocked.value) return;
   if (clearTimer) clearTimeout(clearTimer);
@@ -327,23 +358,41 @@ function setHovered(id: string, event?: MouseEvent): void {
   hoveredId.value = id;
   const position = event ? localPointerPosition(event) : undefined;
   if (props.scope === "city" && position) tooltipPosition.value = position;
+  tooltipReadyId.value = undefined;
+  cancelPendingHover();
+  if (props.tooltipHoverDelayMs <= 0) {
+    tooltipReadyId.value = id;
+    return;
+  }
+  pendingHoveredId = id;
+  hoverTimer = setTimeout(() => {
+    if (!tooltipLocked.value && pendingHoveredId === id && hoveredId.value === id) {
+      tooltipReadyId.value = id;
+    }
+    hoverTimer = undefined;
+    pendingHoveredId = undefined;
+  }, props.tooltipHoverDelayMs);
 }
 
 function lockHovered(id: string, event: MouseEvent): void {
   if (props.scope !== "city") return;
   event.stopPropagation();
+  cancelPendingHover();
   if (clearTimer) clearTimeout(clearTimer);
   clearTimer = undefined;
   hoveredId.value = id;
+  tooltipReadyId.value = id;
   tooltipPosition.value = localPointerPosition(event) ?? tooltipPosition.value;
   tooltipLocked.value = true;
 }
 
 function unlockTooltip(): void {
+  cancelPendingHover();
   if (clearTimer) clearTimeout(clearTimer);
   clearTimer = undefined;
   tooltipLocked.value = false;
   hoveredId.value = undefined;
+  tooltipReadyId.value = undefined;
   tooltipPosition.value = undefined;
 }
 
@@ -361,10 +410,12 @@ function cancelClearHovered(): void {
 
 function scheduleClearHovered(id: string): void {
   if (tooltipLocked.value) return;
+  if (pendingHoveredId === id) cancelPendingHover();
   cancelClearHovered();
   clearTimer = setTimeout(() => {
     if (hoveredId.value === id) {
       hoveredId.value = undefined;
+      tooltipReadyId.value = undefined;
       tooltipPosition.value = undefined;
     }
     clearTimer = undefined;
@@ -518,7 +569,7 @@ onBeforeUnmount(() => {
     map edges nor paint above the station, place and comparison layers.
   -->
 
-  <template v-if="hoveredItem && (hoveredCounts || hoveredRealEstate) && tooltipStyle">
+  <template v-if="tooltipReadyId === hoveredId && hoveredItem && (hoveredCounts || hoveredRealEstate) && tooltipStyle">
     <Teleport :to="tooltipTeleportTarget ?? 'body'" :disabled="!tooltipTeleportTarget">
       <aside
       ref="tooltipElement"
@@ -551,7 +602,7 @@ onBeforeUnmount(() => {
     </span>
     <small v-if="hoveredCounts">{{ t("globalMap.iris.tooltipStations", { count: hoveredCounts.stationCount }) }}</small>
     <small v-if="commerceDataAvailable && hoveredCommerceCount !== undefined" class="iris-neighborhood-overlay__commerce-count">
-      {{ activityLabel ? `${activityLabel} : ${n(hoveredCommerceCount)}` : t("globalMap.iris.tooltipCommerce", { count: n(hoveredCommerceCount) }) }}
+      {{ hoveredActivityText }}
     </small>
     <div v-if="realEstateActive" class="iris-neighborhood-overlay__real-estate">
       <template v-if="hoveredRealEstate?.hasEnoughSales">

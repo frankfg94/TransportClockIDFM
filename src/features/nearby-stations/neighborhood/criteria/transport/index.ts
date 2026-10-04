@@ -5,10 +5,12 @@ import { category, makeFact, withFacts } from "../../facts";
 import { RULE_KEYS, SOURCE_KEYS } from "../../i18nKeys";
 import { chooseFastestJourney, findLineById, formatServiceTime, getReadyFrequencyEntries, summarizeJourney } from "../../journeys";
 import { clamp, normalizeScoreText, saturatingNeighborhoodBonus, weightedAverage } from "../../primitives";
-import { coLocatedCurrentLines, formatTransportLineName, lineKey, listTransportAccessSignals, makeTransportAccessFact, NEIGHBORHOOD_TRANSPORT_ACCESS_LIMIT_SECONDS, transportLineReferencesMatch } from "../../transportAccess";
+import { coLocatedCurrentLines, formatTransportLineName, lineKey, listTransportAccessSignals, makeTransportAccessFact, NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS, NEIGHBORHOOD_TRANSPORT_ACCESS_LIMIT_SECONDS, transportLineReferencesMatch } from "../../transportAccess";
 import { buildJourneyBenchmarkFacts } from "./benchmarks";
 import { buildNoctilienFacts } from "./noctilien";
 import { makeServiceQualityFact, summarizeNearbyServiceQuality } from "./serviceQuality";
+
+const TRANSPORT_HUB_EXCEPTIONAL_MAX_MINUTES = 10;
 
 export function buildTransportCategory(input: NeighborhoodScoreInput): NeighborhoodCategoryResult {
   const base = category("transport");
@@ -36,6 +38,9 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
   }
 
   const accessibleSignals = accessSignals.filter((signal) => signal.travelSeconds <= NEIGHBORHOOD_TRANSPORT_ACCESS_LIMIT_SECONDS);
+  const routedFutureAccessSignals = accessSignals.filter((signal) =>
+    signal.source === "route" && signal.futureProject
+    && signal.travelSeconds < NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS);
   const accessibleCurrentSignals = accessibleSignals.filter((signal) => !signal.futureProject);
   const accessibleLineKeys = new Set(accessibleCurrentSignals.map((signal) => lineKey(signal.line)));
   const accessibleModes = new Set(accessibleCurrentSignals.map((signal) => signal.line.mode));
@@ -47,8 +52,7 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
     Number.isFinite(project.walkingMinutes) && (project.walkingMinutes ?? Number.POSITIVE_INFINITY) >= 0);
   const accessibleFutureProjects = futureProjects.filter((project) =>
     Number.isFinite(project.walkingMinutes) && (project.walkingMinutes ?? Number.POSITIVE_INFINITY) <= 15);
-  const resolverFutureProjects = accessibleSignals
-    .filter((signal) => signal.source === "route" && signal.futureProject)
+  const resolverFutureProjects = routedFutureAccessSignals
     .map((signal) => signal.futureProject!);
   const allRoutedFutureProjects = [...new Map([
     ...routedFutureProjects.map((project) => [project.id, project] as const),
@@ -181,13 +185,13 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
     if (currentLineNames.length === 0) continue;
     const matchingAccess = accessibleSignals.find((signal) =>
       currentLines.some((line) => lineKey(line) === lineKey(signal.line)));
-    const futureAccess = accessibleSignals.find((signal) =>
-      signal.futureProject?.id === project.id && signal.source === "route");
-    const routeAccess = futureAccess ?? matchingAccess;
+    const futureAccess = routedFutureAccessSignals.find((signal) =>
+      signal.futureProject?.id === project.id);
     const walkingMinutes = Number.isFinite(project.walkingMinutes)
       && (project.walkingMinutes ?? Number.POSITIVE_INFINITY) <= 15
       ? project.walkingMinutes
       : undefined;
+    const routeAccess = walkingMinutes === undefined ? futureAccess ?? matchingAccess : undefined;
     // A project beyond the walking threshold must be backed by a real route
     // to the current line; a map-distance estimate is not enough to create a
     // future transport hub.
@@ -196,13 +200,15 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
       : undefined;
     const minutes = walkingMinutes ?? transitMinutes;
     if (!minutes) continue;
-    const via = routeAccess?.source === "route" && routeAccess.via
+    const routeJourneySummary = routeAccess?.journey ? summarizeJourney(routeAccess.journey) : undefined;
+    const hasRouteTransfer = (routeJourneySummary?.transfers ?? 0) > 0;
+    const via = walkingMinutes !== undefined
+      ? "à pied"
+      : routeAccess?.source === "route" && routeAccess.via
       ? routeAccess.via
-      : walkingMinutes !== undefined
-        ? "à pied"
-        : currentLineNames[0];
+      : currentLineNames[0];
     positiveFacts.push(makeFact({
-      id: `transport-hub-${normalizeScoreText(project.line).replace(/[^a-z0-9]+/gu, "-")}`,
+      id: `transport-hub-${normalizeScoreText(project.id).replace(/[^a-z0-9]+/gu, "-")}`,
       kind: "transportHub",
       category: "transport",
       polarity: "positive",
@@ -218,8 +224,15 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
       sourceKey: SOURCE_KEYS.heavyRoutes,
       proof: "direct",
       ruleKey: RULE_KEYS.transportHub,
-      ruleValues: { threshold: 15 },
+      ruleValues: {
+        threshold: futureAccess
+          ? NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS / 60
+          : NEIGHBORHOOD_TRANSPORT_ACCESS_LIMIT_SECONDS / 60,
+      },
       emphasis: "exceptional",
+      markerEmphasis: hasRouteTransfer && minutes > TRANSPORT_HUB_EXCEPTIONAL_MAX_MINUTES
+        ? "standard"
+        : undefined,
       travel: routeAccess?.journey ? { journey: routeAccess.journey } : undefined,
     }));
   }

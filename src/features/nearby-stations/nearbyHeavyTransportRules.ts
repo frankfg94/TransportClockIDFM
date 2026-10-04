@@ -187,10 +187,10 @@ export function getNearbyHeavyAccessPresentation(
 /**
  * Pure eligibility rule for a heavy target.
  *
- * A single local feeder keeps the historical rule. A two-transit-section
- * journey is a stricter business case: local TRAM/CABLE first, then one
- * heavy mode, with no BUS/NOCTILIEN section. This is what makes T10 -> RER B
- * reliable while excluding bus-based double connections.
+ * A single local feeder keeps the historical rule. A multi-transit journey is
+ * a stricter business case: local TRAM/CABLE first, then at most two heavy-mode
+ * sections, with no BUS/NOCTILIEN section. This admits up to two changes while
+ * excluding bus-based connections.
  */
 export function evaluateNearbyHeavyJourney(
   input: HeavyJourneyEvaluationInput,
@@ -235,22 +235,25 @@ export function evaluateNearbyHeavyJourney(
     );
   }
 
-  if (transitSections.length !== 2) return undefined;
+  if (
+    transitSections.length < 2 ||
+    transitSections.length > 3 ||
+    (input.journey.transferCount !== undefined && input.journey.transferCount > 2)
+  ) return undefined;
 
   const firstTransitIndex = sections.findIndex(isTransitSection);
-  const secondTransitIndex = findNextTransitIndex(sections, firstTransitIndex + 1);
   const feeder = transitSections[0]!;
-  const heavy = transitSections[1]!;
   const feederMode = sectionLineMode(feeder);
-  const heavyMode = sectionLineMode(heavy);
+  const heavySections = transitSections.slice(1);
 
   if (
-    secondTransitIndex < 0 ||
     !isLocalFeeder(feeder, input.localLineIds, input.localLineCodes) ||
     !isReliableFeederMode(feederMode) ||
-    !isHeavyMode(heavyMode) ||
     isBusLikeMode(feederMode) ||
-    isBusLikeMode(heavyMode)
+    heavySections.some((section) => {
+      const mode = sectionLineMode(section);
+      return !isHeavyMode(mode) || isBusLikeMode(mode);
+    })
   ) {
     return undefined;
   }
@@ -338,13 +341,6 @@ function compareHeavyJourneyEvaluations(
 
 function normalizeAccessLineKey(value: string): string {
   return value.trim().toLocaleLowerCase("fr-FR");
-}
-
-function findNextTransitIndex(sections: NearbyJourneySection[], start: number): number {
-  for (let index = start; index < sections.length; index += 1) {
-    if (isTransitSection(sections[index]!)) return index;
-  }
-  return -1;
 }
 
 function isLocalFeeder(

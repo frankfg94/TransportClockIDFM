@@ -15,22 +15,54 @@ interface NoctilienJourneyAccess {
 
 export function buildNoctilienFacts(journeys: readonly NearbyJourney[] | undefined): NeighborhoodFact[] {
   const bestAccessByLine = new Map<string, NoctilienJourneyAccess>();
+  const lineByKey = new Map<string, string>();
+  const directionsByLine = new Map<string, Set<string>>();
   for (const journey of journeys ?? []) {
     const access = analyzeNoctilienJourneyAccess(journey);
     if (!access) continue;
     for (const line of access.lines) {
-      const current = bestAccessByLine.get(normalizeScoreText(line));
+      const key = normalizeScoreText(line);
+      lineByKey.set(key, line);
+      const directions = directionsByLine.get(key) ?? new Set<string>();
+      for (const direction of noctilienDirections(journey, line)) directions.add(direction);
+      directionsByLine.set(key, directions);
+      const current = bestAccessByLine.get(key);
       const lineAccess = { ...access, lines: [line] };
       if (!current || compareNoctilienJourneyAccess(lineAccess, current) < 0) {
-        bestAccessByLine.set(normalizeScoreText(line), lineAccess);
+        bestAccessByLine.set(key, lineAccess);
       }
     }
   }
 
-  const accesses = [...bestAccessByLine.values()];
+  const accesses = [...bestAccessByLine.values()].sort((left, right) =>
+    left.lines[0]!.localeCompare(right.lines[0]!, "fr-FR", { numeric: true }));
   if (accesses.length === 0) return [];
   const lines = formatNoctilienLineList(accesses.map((access) => access.lines[0]!));
   const fastestAccess = [...accesses].sort(compareNoctilienJourneyAccess)[0]!;
+  const routes = accesses.map((access) => {
+    const line = access.lines[0]!;
+    const lineDirections = [...(directionsByLine.get(normalizeScoreText(line)) ?? [])]
+      .sort((left, right) => left.localeCompare(right, "fr-FR", { numeric: true }));
+    return {
+      line,
+      journey: journeyToNoctilienLine(access.journey, line),
+      direction: lineDirections.length === 2
+        ? lineDirections.join(" ↔ ")
+        : lineDirections.join(", "),
+    };
+  });
+  const directions = [...directionsByLine.entries()]
+    .map(([key, values]) => {
+      const lineDirections = [...values].sort((left, right) => left.localeCompare(right, "fr-FR", { numeric: true }));
+      return {
+        line: lineByKey.get(key)!,
+        label: lineDirections.length === 2
+          ? lineDirections.join(" ↔ ")
+          : lineDirections.join(", "),
+      };
+    })
+    .filter((item) => item.label)
+    .sort((left, right) => left.line.localeCompare(right.line, "fr-FR", { numeric: true }));
   return [makeFact({
     id: `noctilien-${normalizeScoreText(lines).replace(/[^a-z0-9]+/gu, "-")}`,
     kind: "noctilienAtNight",
@@ -46,8 +78,25 @@ export function buildNoctilienFacts(journeys: readonly NearbyJourney[] | undefin
     proof: "direct",
     ruleKey: RULE_KEYS.noctilienAtNight,
     ruleValues: { hour: "03:00", threshold: NEIGHBORHOOD_WALKING_LIMIT_MINUTES },
-    travel: { journey: fastestAccess.journey },
+    travel: {
+      journey: journeyToNoctilienLine(fastestAccess.journey, fastestAccess.lines[0]!),
+      routes,
+      directions,
+    },
   })];
+}
+
+function journeyToNoctilienLine(journey: NearbyJourney, line: string): NearbyJourney {
+  const noctilienIndex = journey.sections.findIndex((section) =>
+    normalizeScoreText(noctilienLineLabel(section) ?? "") === normalizeScoreText(line));
+  if (noctilienIndex < 0) return journey;
+  const sections = journey.sections.slice(0, noctilienIndex + 1);
+  return {
+    ...journey,
+    sections,
+    durationSeconds: sections.reduce((total, section) => total + section.durationSeconds, 0),
+    arrivalDateTime: sections.at(-1)?.arrivalDateTime ?? journey.arrivalDateTime,
+  };
 }
 
 function analyzeNoctilienJourneyAccess(journey: NearbyJourney): NoctilienJourneyAccess | undefined {
@@ -85,6 +134,13 @@ function noctilienLineLabel(section: NearbyJourney["sections"][number]): string 
   if (noctilienCode) return noctilienCode.replace(/\s+/gu, "").toLocaleUpperCase("fr-FR");
   if (section.lineMode?.toLocaleUpperCase("fr-FR") !== "NOCTILIEN") return undefined;
   return references.find((value) => !isOpaqueTransportLineLabel(value)) ?? "Noctilien";
+}
+
+function noctilienDirections(journey: NearbyJourney, line: string): string[] {
+  return [...new Set(journey.sections
+    .filter((section) => normalizeScoreText(noctilienLineLabel(section) ?? "") === normalizeScoreText(line))
+    .map((section) => section.direction?.trim())
+    .filter((direction): direction is string => Boolean(direction)))];
 }
 
 function compareNoctilienJourneyAccess(left: NoctilienJourneyAccess, right: NoctilienJourneyAccess): number {

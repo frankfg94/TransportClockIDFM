@@ -209,6 +209,7 @@ const props = withDefaults(defineProps<{
   cityViewNetwork?: TransportMapNetwork;
   supplementalStations?: NearbyHeavyTransportCandidate[];
   selectedLineIds: (stationId: string) => string[];
+  lineSelectionMode?: "single" | "multiple";
   basemapStyle?: TransportMapBasemapStyle;
   activeModes: GlobalMapMode[];
   availableModes?: GlobalMapMode[];
@@ -251,6 +252,7 @@ const props = withDefaults(defineProps<{
   travelWalkingSegments?: readonly NearbyWalkingMapSegment[];
   walkingRoute?: NearbyWalkingRoute;
 }>(), {
+  lineSelectionMode: "single",
   showNearbyBenches: false,
   showNearbyParkings: false,
   showNearbyPlaces: true,
@@ -1295,12 +1297,13 @@ const cityActivityCounts = computed(() => {
   const counts: Record<string, number> = {};
   const totals: Record<string, number> = {};
   const activity = cityViewActivity.value;
-  if (!cityViewEnabled.value || !activity) return { counts, totals };
+  if (!cityViewEnabled.value || !activity) return { counts, totals, cityTotal: undefined };
   for (const [code, places] of cityPlacesByNeighborhood.value) {
     totals[code] = places.length;
     counts[code] = places.filter((place) => isNearbyPlaceActivity(place, activity)).length;
   }
-  return { counts, totals };
+  const cityTotal = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  return { counts, totals, cityTotal };
 });
 const cityViewTransportStations = computed<IrisTransportStation[]>(() => {
   if (props.cityViewNetwork) {
@@ -3757,7 +3760,26 @@ function focusStation(stationId: string, lineId?: string): void {
   hoveredStationId.value = undefined;
   stationHoveredLineId.value = undefined;
   stationPinnedLineId.value = lineId ?? lineForStationFocus(stationId)?.id;
+  if (hasStationScheduleSlot.value) setSidebarTab("schedule");
   emit("stationFocus", stationId);
+}
+
+function selectStationLine(stationId: string, lineId: string): void {
+  const selectedLineIds = props.selectedLineIds(stationId);
+  if (props.lineSelectionMode === "multiple") {
+    emit("toggleLine", stationId, lineId);
+    return;
+  }
+
+  if (selectedLineIds.length === 1 && selectedLineIds[0] === lineId) {
+    emit("toggleLine", stationId, lineId);
+    return;
+  }
+
+  for (const selectedLineId of selectedLineIds) {
+    if (selectedLineId !== lineId) emit("toggleLine", stationId, selectedLineId);
+  }
+  if (!selectedLineIds.includes(lineId)) emit("toggleLine", stationId, lineId);
 }
 
 function triggerFeederPulse(candidate: NearbyHeavyTransportCandidate | undefined): void {
@@ -4918,9 +4940,11 @@ function mix(from: number, to: number, progress: number): number {
         :real-estate-neighborhood-percentiles="cityViewDvfNeighborhoodSalesPercentiles"
         :commerce-counts="cityViewActivity ? cityActivityCounts.counts : props.cityViewCommerceCounts"
         :activity-totals="cityActivityCounts.totals"
+        :activity-city-total="cityActivityCounts.cityTotal"
         :activity-label="cityViewActivity ? t(`nearbyStations.cityActivity.${cityViewActivity}`) : undefined"
         :commerce-data-available="props.cityViewPlaces !== undefined"
         :commerce-highlight="cityViewActivity !== null"
+        :tooltip-hover-delay-ms="100"
         :show-fill="!isochroneEnabled"
         :reveal-order="cityViewTransition === 'to-city' ? irisRevealOrder : undefined"
         :reveal-progress="cityViewTransition === 'to-city' ? irisRevealProgress : 1"
@@ -5956,7 +5980,7 @@ function mix(from: number, to: number, progress: number): number {
                 @mouseleave="leaveStationLine(line.id)"
                 @focus="hoverStationLine(line.id)"
                 @blur="leaveStationLine(line.id)"
-                @click.stop="focusStation(activeStation.id, line.id); emit('activateLine', line.id); emit('toggleLine', activeStation.id, line.id)"
+                @click.stop="focusStation(activeStation.id, line.id); emit('activateLine', line.id); selectStationLine(activeStation.id, line.id)"
               >
                 <LineIconBadge :line="lineBadge(line)" compact />
                 <Check v-if="selectedLineIds(activeStation.id).includes(line.id)" :size="14" />
@@ -5968,7 +5992,7 @@ function mix(from: number, to: number, progress: number): number {
           <Footprints :size="15" aria-hidden="true" />
           {{ heavyAccess(activeSupplementalStation, activeStation!) }}
         </p>
-        <footer v-if="!activeSupplementalStation">
+        <footer v-if="!activeSupplementalStation && lineSelectionMode === 'multiple'">
           <button
             class="nearby-map__select"
             type="button"

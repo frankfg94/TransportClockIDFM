@@ -3,6 +3,7 @@ import { CircleHelp } from "lucide-vue-next";
 import { useRouter } from "#imports";
 import { computed } from "vue";
 import { useI18n, type TranslationKey } from "../../i18n";
+import { hasExceptionalFactMarker } from "./neighborhood/facts";
 import type { NeighborhoodFact, NeighborhoodFactGeography, NeighborhoodFactPlace, NeighborhoodFactTransportReliabilityLine } from "./neighborhood";
 import MiniTravelDisplay from "./MiniTravelDisplay.vue";
 import type { ServiceQualityMode } from "./serviceQualityApi";
@@ -18,6 +19,7 @@ const emit = defineEmits<{
 
 const { d, n, t } = useI18n();
 const router = useRouter();
+const exceptionalMarker = computed(() => hasExceptionalFactMarker(props.fact));
 
 const transportModes: readonly ServiceQualityMode[] = ["METRO", "RER", "TRAIN", "TRAM"];
 const transportModeKeys: Record<ServiceQualityMode, TranslationKey> = {
@@ -144,10 +146,10 @@ function geographyLabel(): string {
     >
       <span
         class="nearby-neighborhood-score-fact__marker"
-        :class="{ 'nearby-neighborhood-score-fact__marker--exceptional': fact.emphasis === 'exceptional' }"
+        :class="{ 'nearby-neighborhood-score-fact__marker--exceptional': exceptionalMarker }"
         aria-hidden="true"
       >
-        {{ fact.emphasis === "exceptional" ? "+++" : fact.polarity === "positive" ? "+" : fact.polarity === "negative" ? "−" : "•" }}
+        {{ exceptionalMarker ? "+++" : fact.polarity === "positive" ? "+" : fact.polarity === "negative" ? "−" : "•" }}
       </span>
       <span>{{ factLabel() }}</span>
       <CircleHelp :size="15" aria-hidden="true" />
@@ -194,7 +196,30 @@ function geographyLabel(): string {
           {{ placeItemLabel(place) }}
         </li>
       </ul>
-      <MiniTravelDisplay v-if="fact.travel" :journey="fact.travel.journey" />
+      <div v-if="fact.travel?.routes?.length" class="nearby-neighborhood-score-fact__travel-routes">
+        <div
+          v-for="route in fact.travel.routes"
+          :key="route.line"
+          class="nearby-neighborhood-score-fact__travel-route"
+        >
+          <MiniTravelDisplay
+            :journey="route.journey"
+            :hide-transit-duration="fact.kind === 'noctilienAtNight'"
+          />
+          <span v-if="route.direction" class="nearby-neighborhood-score-fact__travel-direction">
+            {{ route.direction }}
+          </span>
+        </div>
+      </div>
+      <MiniTravelDisplay v-else-if="fact.travel" :journey="fact.travel.journey" />
+      <div v-if="fact.travel?.directions?.length && !fact.travel.routes?.length" class="nearby-neighborhood-score-fact__directions">
+        <strong>{{ t("nearbyStations.neighborhoodScore.miniTravel.directions") }}</strong>
+        <ul>
+          <li v-for="direction in fact.travel.directions" :key="direction.line">
+            {{ direction.line }} · {{ direction.label }}
+          </li>
+        </ul>
+      </div>
       <dl>
         <div>
           <dt>{{ t("nearbyStations.neighborhoodScore.evidence.sourceLabel") }}</dt>
@@ -254,6 +279,14 @@ function geographyLabel(): string {
 .nearby-neighborhood-score-fact__tooltip { background: #fff; border: 1px solid rgba(16,35,63,.16); border-radius: 11px; box-shadow: 0 14px 30px rgba(16,35,63,.16); color: #344054; left: 0; max-width: min(380px, calc(100vw - 42px)); opacity: 0; padding: 11px 12px; pointer-events: none; position: absolute; top: calc(100% + 4px); transform: translateY(-3px); transition: opacity .14s ease, transform .14s ease, visibility .14s ease; visibility: hidden; width: max-content; z-index: 8; }
 .nearby-neighborhood-score-fact:hover .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact:focus-within .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact--open .nearby-neighborhood-score-fact__tooltip { opacity: 1; pointer-events: auto; transform: translateY(0); visibility: visible; }
 .nearby-neighborhood-score-fact__tooltip strong { color: var(--ink); display: block; font-size: .78rem; line-height: 1.35; max-width: 355px; }
+.nearby-neighborhood-score-fact__travel-routes { border-top: 1px solid #e8ebf2; display: grid; gap: 5px; margin-top: 8px; max-width: 355px; padding-top: 4px; }
+.nearby-neighborhood-score-fact__travel-route { align-items: center; display: grid; gap: 8px; grid-template-columns: max-content minmax(0, 1fr); min-width: 0; }
+.nearby-neighborhood-score-fact__travel-route :deep(.mini-travel-display) { margin: 3px 0 0; max-width: 100%; }
+.nearby-neighborhood-score-fact__travel-direction { color: #344054; font-size: .66rem; line-height: 1.3; min-width: 0; overflow-wrap: anywhere; }
+.nearby-neighborhood-score-fact__directions { border-top: 1px solid #e8ebf2; margin-top: 8px; max-width: 355px; padding-top: 8px; }
+.nearby-neighborhood-score-fact__directions > strong { color: #667085; font-size: .64rem; font-weight: 900; letter-spacing: .03em; text-transform: uppercase; }
+.nearby-neighborhood-score-fact__directions ul { display: grid; gap: 3px; list-style: none; margin: 5px 0 0; padding: 0; }
+.nearby-neighborhood-score-fact__directions li { color: #344054; font-size: .68rem; line-height: 1.35; }
 .nearby-neighborhood-score-fact__transport-lines { border-top: 1px solid #e8ebf2; margin-top: 9px; max-width: 355px; padding-top: 8px; }
 .nearby-neighborhood-score-fact__transport-lines h4 { color: #667085; font-size: .64rem; font-weight: 900; letter-spacing: .03em; margin: 0 0 6px; text-transform: uppercase; }
 .nearby-neighborhood-score-fact__transport-line-group + .nearby-neighborhood-score-fact__transport-line-group { margin-top: 7px; }

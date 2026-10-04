@@ -1927,6 +1927,7 @@ export const fr = {
       commerce: "Commerces", economic: "Activité économique", leisure: "Loisirs",
       economicToggle: "Voir l’activité économique", leisureToggle: "Voir les loisirs",
       legend: "{activity} : part des lieux recensés du quartier (0–100 %)",
+      tooltipCityShare: "{activity} : {count} ({percent} % du total en ville)",
     },
     pageEyebrow: "À proximité",
     pageTitle: "Stations proches",
@@ -2583,6 +2584,7 @@ export const fr = {
         aria: "Itinéraire condensé : {lines}. Les temps d’attente sont masqués.",
         walking: "Marche",
         transport: "Transport",
+        directions: "Sens des lignes",
       },
       backToNearby: "Revenir aux stations proches",
       missingOriginTitle: "Adresse absente",
@@ -2715,7 +2717,7 @@ export const fr = {
         transportProximity: "Signal positif si l’accès piéton calculé est inférieur ou égal à {threshold} min.",
         transportDistance: "Distance cartographique utilisée avec un seuil de {threshold} m lorsque le temps piéton n’est pas disponible.",
         transportDiversity: "La diversité est plafonnée à {threshold} lignes ou modes structurants.",
-        transportHub: "Un pôle partagé est retenu lorsque la future gare et les lignes actuelles sont co-localisées et accessibles en {threshold} min.",
+        transportHub: "Une future gare est affichée lorsqu’un trajet réel jusqu’au pôle dure moins de {threshold} min et qu’une ligne actuelle y est co-localisée.",
         chateletUnder30: "Point fort si le meilleur itinéraire retenu vers Châtelet dure au plus {threshold} min.",
         chateletUnder45: "Point fort si le meilleur itinéraire retenu vers Châtelet dure au plus {threshold} min.",
         chateletContext: "Repère informatif lorsque le meilleur itinéraire retenu vers Châtelet dure entre {minimum} et {maximum} min.",
@@ -2797,7 +2799,7 @@ export const fr = {
           tooltip: "Aucune ligne métro, RER, train, Transilien, tram ou câble n’a été trouvée dans les stations chargées.",
         },
         transportHub: {
-          label: "{currentLines} et future ligne {futureLine} joignables en {minutes} min via {via}",
+          label: "Future gare {station} (ligne {futureLine}) et {currentLines} joignables en {minutes} min via {via}",
           tooltip: "Le pôle {station} regroupe {currentLines} et la future ligne {futureLine}. L’accès réel est estimé à {minutes} min via {via}.",
         },
         transportServiceQuality: {

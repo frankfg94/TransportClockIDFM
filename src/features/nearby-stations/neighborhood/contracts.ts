@@ -179,6 +179,21 @@ export interface NeighborhoodFactAction {
 
 export interface NeighborhoodFactTravel {
   journey: NearbyJourney;
+  /** Separate route simulations, used when one fact summarizes several lines. */
+  routes?: readonly NeighborhoodFactTravelRoute[];
+  /** Direction labels gathered from the source journeys, when available. */
+  directions?: readonly NeighborhoodFactTravelDirection[];
+}
+
+export interface NeighborhoodFactTravelRoute {
+  line: string;
+  journey: NearbyJourney;
+  direction?: string;
+}
+
+export interface NeighborhoodFactTravelDirection {
+  line: string;
+  label: string;
 }
 
 /**
@@ -212,6 +227,8 @@ export interface NeighborhoodFact {
   priority: number;
   /** Exceptional signals are promoted above ordinary strengths. */
   emphasis?: "exceptional";
+  /** Presentation-only badge emphasis; defaults to `emphasis` without changing fact ordering. */
+  markerEmphasis?: "standard" | "exceptional";
   labelKey?: TranslationKey;
   labelValues?: TranslationParams;
   tooltipKey?: TranslationKey;

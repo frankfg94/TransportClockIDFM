@@ -1899,6 +1899,7 @@ export const en = {
       commerce: "Shops", economic: "Economic activity", leisure: "Leisure",
       economicToggle: "Show economic activity", leisureToggle: "Show leisure",
       legend: "{activity}: share of recorded neighborhood places (0–100%)",
+      tooltipCityShare: "{activity}: {count} ({percent}% of the city total)",
     },
     pageEyebrow: "Nearby",
     pageTitle: "Nearby stations",
@@ -2551,6 +2552,7 @@ export const en = {
         aria: "Condensed journey: {lines}. Waiting times are hidden.",
         walking: "Walk",
         transport: "Transport",
+        directions: "Line directions",
       },
       backToNearby: "Back to nearby stations",
       missingOriginTitle: "Address missing",
@@ -2683,7 +2685,7 @@ export const en = {
         transportProximity: "Positive signal when the calculated walking access is at most {threshold} min.",
         transportDistance: "Map distance is used with a {threshold} m threshold when walking time is unavailable.",
         transportDiversity: "Diversity is capped at {threshold} structuring lines or modes.",
-        transportHub: "A shared hub is retained when the future station and current lines are co-located and reachable within {threshold} min.",
+        transportHub: "A future station is shown when a real journey to the hub takes under {threshold} min and a current line is co-located there.",
         chateletUnder30: "Strength when the selected best journey to Châtelet takes at most {threshold} min.",
         chateletUnder45: "Strength when the selected best journey to Châtelet takes at most {threshold} min.",
         chateletContext: "Informational reference when the selected best journey to Châtelet takes between {minimum} and {maximum} min.",
@@ -2765,7 +2767,7 @@ export const en = {
           tooltip: "No metro, RER, train, Transilien, tram or cable line was found in the loaded stations.",
         },
         transportHub: {
-          label: "{currentLines} and future line {futureLine} reachable in {minutes} min via {via}",
+          label: "Future station {station} (line {futureLine}) and {currentLines} reachable in {minutes} min via {via}",
           tooltip: "The {station} hub combines {currentLines} with future line {futureLine}. The real access is estimated at {minutes} min via {via}.",
         },
         transportServiceQuality: {

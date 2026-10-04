@@ -219,6 +219,8 @@ export interface NearbyHeavyTransportCandidate {
   accessAlternativesByLine?: Readonly<Record<string, readonly NearbyHeavyTransportAccess[]>>;
   /** Physical feeder lines found around a projected heavy station. */
   correspondenceLines?: readonly GlobalMapLine[];
+  /** Current heavy lines physically colocated with a projected target such as a future GPE station. */
+  coLocatedHeavyLines?: readonly GlobalMapLine[];
   /** Future GPE projects whose line access was resolved by the heavy resolver. */
   futureProjectsByLine?: Readonly<Record<string, PublicFutureGpeStation>>;
   projected: boolean;
