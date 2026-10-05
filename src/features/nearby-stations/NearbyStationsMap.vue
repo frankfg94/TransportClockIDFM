@@ -5390,7 +5390,7 @@ function mix(from: number, to: number, progress: number): number {
                 @click.stop="openMobileCityRealEstatePanel"
               >
                 <Euro :size="18" aria-hidden="true" />
-                <span>{{ t('nearbyStations.realEstate.toggle') }}</span>
+                <span>{{ t('nearbyStations.mobileActions.realEstate') }}</span>
               </button>
               <button
                 v-for="activity in (cityViewEnabled ? extraCityActivities : [])"
@@ -5404,7 +5404,7 @@ function mix(from: number, to: number, progress: number): number {
                 @click.stop="toggleCityActivity(activity)"
               >
                 <Store :size="18" aria-hidden="true" />
-                <span>{{ t(`nearbyStations.cityActivity.${activity}Toggle`) }}</span>
+                <span>{{ t(`nearbyStations.mobileActions.cityActivity.${activity}`) }}</span>
               </button>
               <button
                 v-if="props.showIsochroneControl"
@@ -5417,7 +5417,7 @@ function mix(from: number, to: number, progress: number): number {
                 @click.stop="toggleIsochrones"
               >
                 <Radar :size="18" aria-hidden="true" />
-                <span>{{ t(isochroneEnabled ? 'nearbyStations.walkingZonesHide' : 'nearbyStations.walkingZonesShow') }}</span>
+                <span>{{ t('nearbyStations.mobileActions.isochrone') }}</span>
               </button>
               <button
                 v-if="props.showNoiseControl"
@@ -5431,7 +5431,7 @@ function mix(from: number, to: number, progress: number): number {
                 @click.stop="toggleNoiseZones"
               >
                 <Ear :size="18" aria-hidden="true" />
-                <span>{{ t('nearbyStations.noiseZonesToggle') }}</span>
+                <span>{{ t('nearbyStations.mobileActions.noise') }}</span>
               </button>
               <button
                 v-if="props.showAirQualityControl"
@@ -5445,7 +5445,7 @@ function mix(from: number, to: number, progress: number): number {
                 @click.stop="toggleAirQualityZones"
               >
                 <Wind :size="18" aria-hidden="true" />
-                <span>{{ t('nearbyStations.airQualityZonesToggle') }}</span>
+                <span>{{ t('nearbyStations.mobileActions.airQuality') }}</span>
               </button>
               <button
                 v-if="props.showDirectoryControl && !cityViewEnabled"
@@ -5456,7 +5456,7 @@ function mix(from: number, to: number, progress: number): number {
                 @click.stop="openMobilePlacesDirectory"
               >
                 <Store :size="18" aria-hidden="true" />
-                <span>{{ t('nearbyStations.directory.launcher') }}</span>
+                <span>{{ t('nearbyStations.mobileActions.directory') }}</span>
               </button>
               <button
                 v-if="props.showNeighborhoodScoreControl && !cityViewEnabled"
@@ -5467,7 +5467,7 @@ function mix(from: number, to: number, progress: number): number {
                 @click.stop="openMobileNeighborhoodScore"
               >
                 <Gauge :size="18" aria-hidden="true" />
-                <span>{{ t('nearbyStations.neighborhoodScore.launcher') }}</span>
+                <span>{{ t('nearbyStations.mobileActions.neighborhoodScore') }}</span>
               </button>
               <button
                 v-if="props.showBasemapControl && !cityViewEnabled"
@@ -5494,7 +5494,7 @@ function mix(from: number, to: number, progress: number): number {
                 @click.stop="toggleMobileTravelPanel"
               >
                 <Route :size="18" aria-hidden="true" />
-                <span>{{ t('nearbyStations.travel.open') }}</span>
+                <span>{{ t('nearbyStations.mobileActions.travel') }}</span>
               </button>
               <button
                 v-if="!isPlacesPreview"
@@ -5508,7 +5508,7 @@ function mix(from: number, to: number, progress: number): number {
               >
                 <X v-if="nearbyChaosZoomRunning" :size="18" aria-hidden="true" />
                 <Activity v-else :size="18" aria-hidden="true" />
-                <span>{{ t(nearbyChaosZoomRunning ? 'nearbyStations.chaosZoom.cancel' : 'nearbyStations.chaosZoom.button') }}<template v-if="nearbyChaosZoomRunning"> {{ nearbyChaosZoomProgress }}/{{ nearbyChaosZoomTotal }}</template></span>
+                <span>{{ t(nearbyChaosZoomRunning ? 'nearbyStations.mobileActions.performanceCancel' : 'nearbyStations.mobileActions.performance') }}<template v-if="nearbyChaosZoomRunning"> {{ nearbyChaosZoomProgress }}/{{ nearbyChaosZoomTotal }}</template></span>
               </button>
               <button
                 v-if="!isPlacesPreview && nearbyChaosZoomReport"
@@ -5519,7 +5519,7 @@ function mix(from: number, to: number, progress: number): number {
                 @click.stop="downloadNearbyChaosZoomReport"
               >
                 <Download :size="18" aria-hidden="true" />
-                <span>{{ t('nearbyStations.chaosZoom.downloadReport') }}</span>
+                <span>{{ t('nearbyStations.mobileActions.performanceReport') }}</span>
               </button>
             </div>
             <div v-if="props.showDisplayControl && !cityViewEnabled" id="nearby-map-display-controls" class="nearby-map__display-panel-scroll nearby-map__mobile-menu-filters">
@@ -6906,7 +6906,8 @@ function mix(from: number, to: number, progress: number): number {
   .nearby-map__display-panel .nearby-map__cluster-grouping { border-top: 0; padding: 0 0 12px; }
   .nearby-map__display-panel .nearby-map__schedule-filter, .nearby-map__display-panel .nearby-map__station-visibility { padding-inline: 0; }
   .nearby-map__display-panel .nearby-map__station-visibility:first-of-type { border-top: 0; }
-  .nearby-map__mobile-menu :deep(.line-map-display-panel__modes--global) { grid-template-columns: minmax(0, 1fr); }
+  .nearby-map__mobile-menu :deep(.line-map-display-panel__modes--global),
+  .nearby-map__mobile-menu :deep(.line-map-display-panel__nearby-options) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .nearby-map__mobile-menu :deep(.line-map-display-panel__content--global) { padding: 0; }
   .nearby-map__mobile-menu .nearby-map__cluster-grouping { border-top: 0; padding: 0 0 12px; }
   .nearby-map__mobile-menu .nearby-map__schedule-filter, .nearby-map__mobile-menu .nearby-map__station-visibility { padding-inline: 0; }

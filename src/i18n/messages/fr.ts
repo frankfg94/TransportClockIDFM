@@ -1924,6 +1924,19 @@ export const fr = {
   nearbyStations: {
     optionalPlaces: { companies: "Afficher les entreprises", worship: "Afficher les lieux de culte", artworks: "Afficher les œuvres d’art" },
     accessibilityPlaces: "Afficher les lieux avec info d’accès fauteuil",
+    mobileActions: {
+      realEstate: "Immobilier",
+      cityActivity: { commerce: "Commerces", economic: "Économie", leisure: "Loisirs" },
+      isochrone: "Isochrones",
+      noise: "Bruit",
+      airQuality: "Qualité de l’air",
+      directory: "Commerces et lieux",
+      neighborhoodScore: "Score quartier",
+      travel: "Itinéraire",
+      performance: "Test performance",
+      performanceCancel: "Arrêter le test",
+      performanceReport: "Rapport du test",
+    },
     wheelchairAccessLabel: "Accès fauteuil",
     wheelchairAccess: { yes: "Accessible", limited: "Partiel", no: "Non accessible", designated: "Dédié" },
     cityActivity: {

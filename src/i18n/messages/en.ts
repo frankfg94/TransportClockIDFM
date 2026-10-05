@@ -1896,6 +1896,19 @@ export const en = {
   nearbyStations: {
     optionalPlaces: { companies: "Show businesses", worship: "Show places of worship", artworks: "Show artworks" },
     accessibilityPlaces: "Show places with wheelchair access info",
+    mobileActions: {
+      realEstate: "Property",
+      cityActivity: { commerce: "Shops", economic: "Economy", leisure: "Leisure" },
+      isochrone: "Isochrones",
+      noise: "Noise",
+      airQuality: "Air quality",
+      directory: "Shops and places",
+      neighborhoodScore: "Neighborhood score",
+      travel: "Directions",
+      performance: "Performance test",
+      performanceCancel: "Stop test",
+      performanceReport: "Test report",
+    },
     wheelchairAccessLabel: "Wheelchair access",
     wheelchairAccess: { yes: "Accessible", limited: "Limited", no: "Not accessible", designated: "Designated" },
     cityActivity: {
