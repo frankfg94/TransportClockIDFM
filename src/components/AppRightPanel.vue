@@ -81,7 +81,7 @@ onMounted(() => {
   overlayMedia = window.matchMedia("(max-width: 1100px)");
   syncOverlayMode(overlayMedia);
   overlayMedia.addEventListener?.("change", syncOverlayMode);
-  mobileMedia = window.matchMedia("(max-width: 720px)");
+  mobileMedia = window.matchMedia("(max-width: 720px), (pointer: coarse)");
   syncMobileMode(mobileMedia);
   mobileMedia.addEventListener?.("change", syncMobileMode);
 });
@@ -418,7 +418,7 @@ function handleKeydown(event: KeyboardEvent): void {
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), (pointer: coarse) {
   .app-right-panel {
     border-left: 0;
     max-width: none;

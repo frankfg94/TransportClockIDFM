@@ -468,6 +468,7 @@ const summaryFrequencyControllers = new Map<string, AbortController>();
 const activeSidebarTab = ref<NearbySidebarTab>("summary");
 const isFullscreen = ref(false);
 const displayControlsOpen = ref(false);
+const mobileControlsSheetStage = ref<"peek" | "mid" | "full">("mid");
 const displayPanel = ref<HTMLElement>();
 const displayToggleButton = ref<HTMLButtonElement>();
 const basemapLayer = ref<TransportMapBasemapLayer>("plan");
@@ -932,7 +933,9 @@ const hasVisiblePrimaryControls = computed(() => !isPlacesPreview.value && (
   || props.showBasemapControl
   || props.showDisplayControl
   || props.showFullscreenControl
+  || (isMobileDisplaySheet.value && !isPlacesPreview.value)
 ));
+const hasMobileMapMenuContent = computed(() => !isPlacesPreview.value);
 const canZoomIn = computed(() => camera.value.zoom < zoomRange.value.max - 0.001);
 const canZoomOut = computed(() => camera.value.zoom > zoomRange.value.min + 0.001);
 const zoomLevelLabel = computed(() => `${Math.round((2 ** (camera.value.zoom - zoomReference.value)) * 100)}%`);
@@ -2267,6 +2270,26 @@ function cancelSidebarSwipe(event?: PointerEvent): void {
 function closeDisplayControls(): void {
   displayControlsOpen.value = false;
   void nextTick(() => displayToggleButton.value?.focus({ preventScroll: true }));
+}
+
+function openMobilePlacesDirectory(): void {
+  closeDisplayControls();
+  void openPlacesDirectory();
+}
+
+function openMobileNeighborhoodScore(): void {
+  closeDisplayControls();
+  emit("openNeighborhoodScore");
+}
+
+function openMobileCityRealEstatePanel(): void {
+  toggleCityRealEstatePanel();
+  closeDisplayControls();
+}
+
+function toggleMobileTravelPanel(): void {
+  emit("toggleTravelPanel");
+  closeDisplayControls();
 }
 
 watch(cityViewEnabled, (enabled) => {
@@ -5125,7 +5148,7 @@ function mix(from: number, to: number, progress: number): number {
       />
       <div v-if="hasVisiblePrimaryControls" class="nearby-map__primary-controls">
         <NearbyNewsAlerts
-          v-if="props.showNewsNotifications"
+          v-if="props.showNewsNotifications && !isMobileDisplaySheet"
           :lines="nearbyNewsLines"
           :localities="nearbyNewsLocalities"
         />
@@ -5161,7 +5184,7 @@ function mix(from: number, to: number, progress: number): number {
           >{{ t('nearbyStations.neighborhoodViewLabel') }}</span>
         </button>
         <button
-          v-if="props.showCityViewControl && cityViewEnabled"
+          v-if="props.showCityViewControl && cityViewEnabled && !isMobileDisplaySheet"
           class="nearby-map__commerce-toggle"
           :class="{ 'nearby-map__commerce-toggle--active': cityViewCommerceVisible }"
           type="button"
@@ -5177,7 +5200,7 @@ function mix(from: number, to: number, progress: number): number {
           </span>
         </button>
         <button
-          v-if="props.showCityViewControl && cityViewEnabled"
+          v-if="props.showCityViewControl && cityViewEnabled && !isMobileDisplaySheet"
           class="nearby-map__real-estate-toggle"
           :class="{ 'nearby-map__real-estate-toggle--active': cityViewRealEstateLayerEnabled || (isMobileDisplaySheet && cityViewRealEstatePanelOpen) }"
           type="button"
@@ -5198,7 +5221,7 @@ function mix(from: number, to: number, progress: number): number {
           <span class="nearby-map__commerce-toggle-label">{{ t('nearbyStations.realEstate.toggle') }}</span>
         </button>
         <button
-          v-for="activity in (cityViewEnabled ? extraCityActivities : [])"
+          v-for="activity in (cityViewEnabled && !isMobileDisplaySheet ? extraCityActivities : [])"
           :key="activity"
           class="nearby-map__commerce-toggle"
           :class="{ 'nearby-map__commerce-toggle--active': cityViewActivity === activity }"
@@ -5207,7 +5230,7 @@ function mix(from: number, to: number, progress: number): number {
           @click.stop="toggleCityActivity(activity)"
         ><Store :size="18" aria-hidden="true" /><span class="nearby-map__commerce-toggle-label">{{ t(`nearbyStations.cityActivity.${activity}Toggle`) }}</span></button>
         <button
-          v-if="props.showIsochroneControl"
+          v-if="props.showIsochroneControl && !isMobileDisplaySheet"
           class="nearby-map__isochrone-toggle"
           type="button"
           :aria-pressed="isochroneEnabled"
@@ -5218,7 +5241,7 @@ function mix(from: number, to: number, progress: number): number {
           <Radar :size="18" aria-hidden="true" />
         </button>
         <button
-          v-if="props.showNoiseControl"
+          v-if="props.showNoiseControl && !isMobileDisplaySheet"
           class="nearby-map__noise-toggle"
           type="button"
           :aria-pressed="noiseZonesEnabled"
@@ -5230,7 +5253,7 @@ function mix(from: number, to: number, progress: number): number {
           <Ear :size="18" aria-hidden="true" />
         </button>
         <button
-          v-if="props.showAirQualityControl"
+          v-if="props.showAirQualityControl && !isMobileDisplaySheet"
           class="nearby-map__air-quality-toggle"
           type="button"
           :aria-pressed="airQualityZonesEnabled"
@@ -5242,7 +5265,7 @@ function mix(from: number, to: number, progress: number): number {
           <Wind :size="18" aria-hidden="true" />
         </button>
         <button
-          v-if="props.showDirectoryControl && !cityViewEnabled"
+          v-if="props.showDirectoryControl && !cityViewEnabled && !isMobileDisplaySheet"
           class="nearby-map__directory-toggle"
           type="button"
           :aria-label="t('nearbyStations.directory.launcher')"
@@ -5252,7 +5275,7 @@ function mix(from: number, to: number, progress: number): number {
           <Store :size="18" aria-hidden="true" />
         </button>
         <button
-          v-if="props.showNeighborhoodScoreControl && !cityViewEnabled"
+          v-if="props.showNeighborhoodScoreControl && !cityViewEnabled && !isMobileDisplaySheet"
           class="nearby-map__neighborhood-score-toggle"
           type="button"
           :aria-label="t('nearbyStations.neighborhoodScore.launcher')"
@@ -5262,7 +5285,7 @@ function mix(from: number, to: number, progress: number): number {
           <Gauge :size="18" aria-hidden="true" />
         </button>
         <button
-          v-if="props.showBasemapControl && !cityViewEnabled"
+          v-if="props.showBasemapControl && !cityViewEnabled && !isMobileDisplaySheet"
           class="nearby-map__basemap-toggle"
           :class="{ 'nearby-map__basemap-toggle--satellite': basemapLayer === 'satellite' }"
           type="button"
@@ -5277,17 +5300,18 @@ function mix(from: number, to: number, progress: number): number {
           <MapIcon v-else :size="18" aria-hidden="true" />
         </button>
         <button
-          v-if="props.showDisplayControl && !cityViewEnabled"
+          v-if="isMobileDisplaySheet ? hasMobileMapMenuContent : props.showDisplayControl && !cityViewEnabled"
           ref="displayToggleButton"
           class="nearby-map__display-toggle"
           type="button"
           :aria-expanded="displayControlsOpen"
-          :aria-controls="displayControlsOpen ? 'nearby-map-display-controls' : undefined"
-          :aria-label="t('nearbyStations.filtersAria')"
-          :title="t('nearbyStations.filtersAria')"
+          :aria-controls="displayControlsOpen ? isMobileDisplaySheet ? 'nearby-map-mobile-controls' : 'nearby-map-display-controls' : undefined"
+          :aria-label="t(isMobileDisplaySheet ? 'nearbyStations.mapControlsTitle' : 'nearbyStations.filtersAria')"
+          :title="t(isMobileDisplaySheet ? 'nearbyStations.mapControlsTitle' : 'nearbyStations.filtersAria')"
           @click.stop="displayControlsOpen = !displayControlsOpen"
         >
-          <Layers :size="18" aria-hidden="true" />
+          <EllipsisVertical v-if="isMobileDisplaySheet" :size="18" aria-hidden="true" />
+          <Layers v-else :size="18" aria-hidden="true" />
         </button>
         <button
           v-if="props.showFullscreenControl"
@@ -5324,9 +5348,267 @@ function mix(from: number, to: number, progress: number): number {
         @retry="retryIsochronesFromConfigurationModal"
       />
       <Teleport :disabled="!isMobileDisplaySheet" to="body">
+        <AppRightPanel
+          v-if="isMobileDisplaySheet"
+          :open="displayControlsOpen && hasMobileMapMenuContent"
+          :title="t('nearbyStations.mapControlsTitle')"
+          :close-label="t('nearbyStations.mapControlsClose')"
+          size="large"
+          mobile-sheet
+          :mobile-sheet-stage="mobileControlsSheetStage"
+          :mobile-sheet-resize-label="t('nearbyStations.mapControlsResize')"
+          @close="closeDisplayControls"
+          @mobile-sheet-stage-change="mobileControlsSheetStage = $event"
+        >
+          <div id="nearby-map-mobile-controls" class="nearby-map__mobile-menu" @click.stop>
+            <div class="nearby-map__mobile-action-grid" role="group" :aria-label="t('nearbyStations.mapControlsTitle')">
+              <div v-if="props.showNewsNotifications" class="nearby-map__mobile-action-alerts">
+                <NearbyNewsAlerts :lines="nearbyNewsLines" :localities="nearbyNewsLocalities" />
+              </div>
+              <button
+                v-if="props.showCityViewControl && cityViewEnabled"
+                class="nearby-map__mobile-action"
+                :class="{ 'nearby-map__mobile-action--active': cityViewCommerceVisible }"
+                type="button"
+                :aria-pressed="cityViewCommerceVisible"
+                :aria-label="t(cityViewCommerceVisible ? 'nearbyStations.cityViewCommerceHide' : 'nearbyStations.cityViewCommerceToggle')"
+                data-nearby-map-mobile-action="commerce"
+                @click.stop="toggleCityCommerce"
+              >
+                <Store :size="18" aria-hidden="true" />
+                <span>{{ t(cityViewCommerceVisible ? 'nearbyStations.cityViewCommerceHide' : 'nearbyStations.cityViewCommerceToggle') }}</span>
+              </button>
+              <button
+                v-if="props.showCityViewControl && cityViewEnabled"
+                class="nearby-map__mobile-action"
+                :class="{ 'nearby-map__mobile-action--active': cityViewRealEstateLayerEnabled || cityViewRealEstatePanelOpen }"
+                type="button"
+                :aria-expanded="cityViewRealEstatePanelOpen"
+                :aria-busy="cityViewDvfStatus === 'loading'"
+                :aria-label="t(cityViewRealEstatePanelOpen ? 'nearbyStations.realEstate.closePanel' : 'nearbyStations.realEstate.openPanel')"
+                data-nearby-map-mobile-action="real-estate"
+                @click.stop="openMobileCityRealEstatePanel"
+              >
+                <Euro :size="18" aria-hidden="true" />
+                <span>{{ t('nearbyStations.realEstate.toggle') }}</span>
+              </button>
+              <button
+                v-for="activity in (cityViewEnabled ? extraCityActivities : [])"
+                :key="activity"
+                class="nearby-map__mobile-action"
+                :class="{ 'nearby-map__mobile-action--active': cityViewActivity === activity }"
+                type="button"
+                :aria-pressed="cityViewActivity === activity"
+                :aria-label="t(`nearbyStations.cityActivity.${activity}Toggle`)"
+                :data-nearby-map-mobile-action="`activity-${activity}`"
+                @click.stop="toggleCityActivity(activity)"
+              >
+                <Store :size="18" aria-hidden="true" />
+                <span>{{ t(`nearbyStations.cityActivity.${activity}Toggle`) }}</span>
+              </button>
+              <button
+                v-if="props.showIsochroneControl"
+                class="nearby-map__mobile-action"
+                :class="{ 'nearby-map__mobile-action--active': isochroneEnabled }"
+                type="button"
+                :aria-pressed="isochroneEnabled"
+                :aria-label="t(isochroneEnabled ? 'nearbyStations.walkingZonesHide' : 'nearbyStations.walkingZonesShow')"
+                data-nearby-map-mobile-action="isochrones"
+                @click.stop="toggleIsochrones"
+              >
+                <Radar :size="18" aria-hidden="true" />
+                <span>{{ t(isochroneEnabled ? 'nearbyStations.walkingZonesHide' : 'nearbyStations.walkingZonesShow') }}</span>
+              </button>
+              <button
+                v-if="props.showNoiseControl"
+                class="nearby-map__mobile-action"
+                :class="{ 'nearby-map__mobile-action--active': noiseZonesEnabled }"
+                type="button"
+                :aria-pressed="noiseZonesEnabled"
+                :aria-busy="noiseZonesEnabled && noiseZonesStatus === 'loading'"
+                :aria-label="t('nearbyStations.noiseZonesToggle')"
+                data-nearby-map-mobile-action="noise"
+                @click.stop="toggleNoiseZones"
+              >
+                <Ear :size="18" aria-hidden="true" />
+                <span>{{ t('nearbyStations.noiseZonesToggle') }}</span>
+              </button>
+              <button
+                v-if="props.showAirQualityControl"
+                class="nearby-map__mobile-action"
+                :class="{ 'nearby-map__mobile-action--active': airQualityZonesEnabled }"
+                type="button"
+                :aria-pressed="airQualityZonesEnabled"
+                :aria-busy="airQualityZonesEnabled && noiseZonesStatus === 'loading'"
+                :aria-label="t('nearbyStations.airQualityZonesToggle')"
+                data-nearby-map-mobile-action="air-quality"
+                @click.stop="toggleAirQualityZones"
+              >
+                <Wind :size="18" aria-hidden="true" />
+                <span>{{ t('nearbyStations.airQualityZonesToggle') }}</span>
+              </button>
+              <button
+                v-if="props.showDirectoryControl && !cityViewEnabled"
+                class="nearby-map__mobile-action"
+                type="button"
+                :aria-label="t('nearbyStations.directory.launcher')"
+                data-nearby-map-mobile-action="directory"
+                @click.stop="openMobilePlacesDirectory"
+              >
+                <Store :size="18" aria-hidden="true" />
+                <span>{{ t('nearbyStations.directory.launcher') }}</span>
+              </button>
+              <button
+                v-if="props.showNeighborhoodScoreControl && !cityViewEnabled"
+                class="nearby-map__mobile-action"
+                type="button"
+                :aria-label="t('nearbyStations.neighborhoodScore.launcher')"
+                data-nearby-map-mobile-action="neighborhood-score"
+                @click.stop="openMobileNeighborhoodScore"
+              >
+                <Gauge :size="18" aria-hidden="true" />
+                <span>{{ t('nearbyStations.neighborhoodScore.launcher') }}</span>
+              </button>
+              <button
+                v-if="props.showBasemapControl && !cityViewEnabled"
+                class="nearby-map__mobile-action"
+                :class="{ 'nearby-map__mobile-action--active': basemapLayer === 'satellite' }"
+                type="button"
+                :aria-pressed="basemapLayer === 'satellite'"
+                :aria-label="basemapToggleLabel"
+                data-nearby-map-mobile-action="basemap"
+                @click.stop="basemapLayer = basemapLayer === 'plan' ? 'satellite' : 'plan'"
+              >
+                <Satellite v-if="basemapLayer === 'plan'" :size="18" aria-hidden="true" />
+                <MapIcon v-else :size="18" aria-hidden="true" />
+                <span>{{ basemapToggleLabel }}</span>
+              </button>
+              <button
+                v-if="!isPlacesPreview && !cityViewEnabled && $slots['travel-sidebar']"
+                class="nearby-map__mobile-action"
+                :class="{ 'nearby-map__mobile-action--active': travelPanelOpen }"
+                type="button"
+                :aria-pressed="travelPanelOpen"
+                :aria-label="t('nearbyStations.travel.open')"
+                data-nearby-map-mobile-action="travel-panel"
+                @click.stop="toggleMobileTravelPanel"
+              >
+                <Route :size="18" aria-hidden="true" />
+                <span>{{ t('nearbyStations.travel.open') }}</span>
+              </button>
+              <button
+                v-if="!isPlacesPreview"
+                class="nearby-map__mobile-action"
+                :class="{ 'nearby-map__mobile-action--active': nearbyChaosZoomRunning }"
+                type="button"
+                data-nearby-map-chaos-zoom-run
+                :aria-busy="nearbyChaosZoomRunning"
+                :aria-label="t(nearbyChaosZoomRunning ? 'nearbyStations.chaosZoom.cancel' : 'nearbyStations.chaosZoom.button')"
+                @click.stop="nearbyChaosZoomRunning ? cancelNearbyChaosZoom() : runNearbyChaosZoom()"
+              >
+                <X v-if="nearbyChaosZoomRunning" :size="18" aria-hidden="true" />
+                <Activity v-else :size="18" aria-hidden="true" />
+                <span>{{ t(nearbyChaosZoomRunning ? 'nearbyStations.chaosZoom.cancel' : 'nearbyStations.chaosZoom.button') }}<template v-if="nearbyChaosZoomRunning"> {{ nearbyChaosZoomProgress }}/{{ nearbyChaosZoomTotal }}</template></span>
+              </button>
+              <button
+                v-if="!isPlacesPreview && nearbyChaosZoomReport"
+                class="nearby-map__mobile-action"
+                type="button"
+                data-nearby-map-chaos-zoom-download
+                :aria-label="t('nearbyStations.chaosZoom.downloadReport')"
+                @click.stop="downloadNearbyChaosZoomReport"
+              >
+                <Download :size="18" aria-hidden="true" />
+                <span>{{ t('nearbyStations.chaosZoom.downloadReport') }}</span>
+              </button>
+            </div>
+            <div v-if="props.showDisplayControl && !cityViewEnabled" id="nearby-map-display-controls" class="nearby-map__display-panel-scroll nearby-map__mobile-menu-filters">
+              <details class="nearby-map__display-section" open data-nearby-map-filter-section="transport">
+                <summary>
+                  <span>{{ t('nearbyStations.displayFiltersTransport') }}</span>
+                  <ChevronRight :size="17" aria-hidden="true" />
+                </summary>
+                <div class="nearby-map__display-section-content">
+                  <LineMapDisplayControls
+                    variant="global"
+                    nearby-options
+                    :available-modes="availableModes"
+                    :selected-modes="activeModes"
+                    :hide-long-wait-transports="props.hideLongWaitTransports"
+                    :show-nearby-places="props.showNearbyPlaces"
+                    :show-nearby-benches="props.showNearbyBenches"
+                    :show-nearby-parkings="props.showNearbyParkings"
+                    :show-nearby-place-names="props.showNearbyPlaceNames"
+                    @update:selected-modes="emit('updateActiveModes', $event)"
+                    @update:hide-long-wait-transports="emit('update:hideLongWaitTransports', $event)"
+                    @update:show-nearby-places="emit('update:showNearbyPlaces', $event)"
+                    @update:show-nearby-benches="emit('update:showNearbyBenches', $event)"
+                    @update:show-nearby-parkings="emit('update:showNearbyParkings', $event)"
+                    @update:show-nearby-place-names="emit('update:showNearbyPlaceNames', $event)"
+                  >
+                    <template #nearby-options>
+                      <label class="nearby-map__optional-place">
+                        <input v-model="showAccessibilityPlaces" data-show-accessibility-places type="checkbox" :disabled="!props.showNearbyPlaces" />
+                        <span>{{ t('nearbyStations.accessibilityPlaces') }}</span>
+                      </label>
+                      <label v-for="option in optionalPlaceKinds" :key="option" class="nearby-map__optional-place">
+                        <input v-model="optionalPlaces[option]" type="checkbox" :disabled="!props.showNearbyPlaces" />
+                        <span>{{ t(`nearbyStations.optionalPlaces.${option}`) }}</span>
+                      </label>
+                    </template>
+                  </LineMapDisplayControls>
+                </div>
+              </details>
+              <details class="nearby-map__display-section" open data-nearby-map-filter-section="stations">
+                <summary>
+                  <span>{{ t('nearbyStations.displayFiltersStations') }}</span>
+                  <ChevronRight :size="17" aria-hidden="true" />
+                </summary>
+                <div class="nearby-map__display-section-content">
+                  <div class="nearby-map__cluster-grouping">
+                    <div class="nearby-map__cluster-grouping-label">
+                      <span>{{ t('nearbyStations.clusterGrouping') }}</span>
+                      <strong>{{ t('nearbyStations.clusterGroupingValue', { meters: clusterGroupingDistance }) }}</strong>
+                    </div>
+                    <input
+                      data-nearby-map-cluster-grouping
+                      :aria-label="t('nearbyStations.clusterGroupingAria')"
+                      :max="NEARBY_CLUSTER_GROUPING_MAX_METERS"
+                      :min="NEARBY_CLUSTER_GROUPING_MIN_METERS"
+                      :step="NEARBY_CLUSTER_GROUPING_STEP_METERS"
+                      :value="clusterGroupingDistance"
+                      type="range"
+                      @input="updateClusterGroupingDistance"
+                    />
+                  </div>
+                  <label class="nearby-map__schedule-filter">
+                    <input type="checkbox" :checked="hideStationsWithoutDepartures" @change="emit('updateHideStationsWithoutDepartures', ($event.target as HTMLInputElement).checked)" />
+                    <span>{{ t('nearbyStations.hideStationsWithoutDepartures') }}</span>
+                  </label>
+                </div>
+              </details>
+              <details class="nearby-map__display-section" open data-nearby-map-filter-section="map">
+                <summary>
+                  <span>{{ t('nearbyStations.displayFiltersMap') }}</span>
+                  <ChevronRight :size="17" aria-hidden="true" />
+                </summary>
+                <div class="nearby-map__display-section-content">
+                  <label class="nearby-map__station-visibility" data-nearby-map-show-map-stations>
+                    <input v-model="showMapStations" type="checkbox" />
+                    <span>{{ t('nearbyStations.showMapStations') }}</span>
+                  </label>
+                  <label class="nearby-map__station-visibility" data-nearby-map-show-projected-stations>
+                    <input v-model="showProjectedStations" type="checkbox" />
+                    <span>{{ t('nearbyStations.showProjectedStations') }}</span>
+                  </label>
+                </div>
+              </details>
+            </div>
+          </div>
+        </AppRightPanel>
         <Transition name="nearby-map-display-sheet">
           <div
-            v-if="displayControlsOpen && props.showDisplayControl && !cityViewEnabled"
+            v-if="!isMobileDisplaySheet && displayControlsOpen && props.showDisplayControl && !cityViewEnabled"
             class="nearby-map__display-overlay"
             @wheel.stop
           >
@@ -5499,7 +5781,7 @@ function mix(from: number, to: number, progress: number): number {
           <ZoomOut :size="18" aria-hidden="true" />
         </button>
         <button
-          v-if="!isPlacesPreview"
+          v-if="!isPlacesPreview && !isMobileDisplaySheet"
           class="nearby-map__zoom-button nearby-map__chaos-button"
           type="button"
           data-nearby-map-chaos-zoom-run
@@ -5515,7 +5797,7 @@ function mix(from: number, to: number, progress: number): number {
           </span>
         </button>
         <button
-          v-if="!isPlacesPreview && nearbyChaosZoomReport"
+          v-if="!isPlacesPreview && nearbyChaosZoomReport && !isMobileDisplaySheet"
           class="nearby-map__zoom-button nearby-map__chaos-download"
           type="button"
           data-nearby-map-chaos-zoom-download
@@ -5971,7 +6253,7 @@ function mix(from: number, to: number, progress: number): number {
         ? t('nearbyStations.scanningTimeout', { seconds: NEARBY_MAP_LOADING_TIMEOUT_MS / 1000 })
         : t('nearbyStations.scanning') }}</div>
       <button
-        v-if="!isPlacesPreview && !cityViewEnabled && $slots['travel-sidebar']"
+        v-if="!isPlacesPreview && !cityViewEnabled && !isMobileDisplaySheet && $slots['travel-sidebar']"
         class="nearby-map__travel-toggle"
         :class="{ 'nearby-map__travel-toggle--active': travelPanelOpen }"
         type="button"
@@ -6352,6 +6634,16 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__display-panel-header span { align-items: center; display: inline-flex; gap: 7px; }
 .nearby-map__display-panel-close, .nearby-map__display-sheet-handle { display: none; }
 .nearby-map__display-panel-scroll { min-width: 0; }
+.nearby-map__mobile-menu { min-width: 0; padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+.nearby-map__mobile-action-grid { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px 14px; }
+.nearby-map__mobile-action, .nearby-map__mobile-action-alerts { min-width: 0; }
+.nearby-map__mobile-action { align-items: center; background: #f6f7fb; border: 1px solid rgba(81,70,255,.16); border-radius: 11px; color: #334155; cursor: pointer; display: flex; gap: 8px; justify-content: flex-start; min-height: 48px; padding: 8px 10px; text-align: left; width: 100%; }
+.nearby-map__mobile-action > svg { color: #5146ff; flex: 0 0 auto; }
+.nearby-map__mobile-action > span { font-size: .7rem; font-weight: 800; line-height: 1.22; min-width: 0; overflow-wrap: anywhere; }
+.nearby-map__mobile-action:hover, .nearby-map__mobile-action:focus-visible { background: #ebe9ff; border-color: rgba(81,70,255,.36); outline: 0; }
+.nearby-map__mobile-action--active { background: #eeecff; border-color: rgba(81,70,255,.46); color: #3026c8; }
+.nearby-map__mobile-action-alerts { grid-column: 1 / -1; }
+.nearby-map__mobile-menu-filters { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 .nearby-map__display-section > summary { display: none; }
 .nearby-map__display-section-content { min-width: 0; }
 .nearby-map__optional-place { display: flex; align-items: center; gap: 7px; color: #334155; font-size: .75rem; font-weight: 750; }
@@ -6576,13 +6868,13 @@ function mix(from: number, to: number, progress: number): number {
   .nearby-map__sidebar { min-height: 0; }
   .nearby-map__sidebar-empty { min-height: 150px; }
 }
-@media (max-width: 680px) {
+@media (max-width: 680px), (pointer: coarse) {
   .nearby-map-shell { --nearby-map-height: clamp(540px, calc(100dvh - 64px), 960px); }
   .nearby-map__marker-line-icon { transform: scale(.5); }
   .nearby-map__sidebar { padding: 14px; }
   .nearby-map__travel-sidebar { left: 14px; max-width: calc(100% - 28px); width: min(460px, calc(100% - 28px)); }
   .nearby-map__top-control-zone { height: 112px; }
-  .nearby-map__primary-controls { flex-wrap: wrap; gap: 6px; justify-content: flex-end; left: 12px; right: 12px; }
+  .nearby-map__primary-controls { flex-wrap: nowrap; gap: 6px; justify-content: flex-end; left: 12px; right: 12px; }
   .nearby-map__city-view-toggle { width: 128px; }
   .nearby-map__real-estate-toggle { min-width: 38px; padding-inline: 0; width: 38px; }
   .nearby-map__real-estate-toggle .nearby-map__commerce-toggle-label { display: none; }
@@ -6601,6 +6893,7 @@ function mix(from: number, to: number, progress: number): number {
   .nearby-map__display-panel-close { align-items: center; background: #f5f7fb; border: 1px solid rgba(100, 116, 139, .2); border-radius: 50%; color: #334155; display: inline-flex; flex: 0 0 34px; height: 34px; justify-content: center; padding: 0; width: 34px; }
   .nearby-map__display-panel-close:hover, .nearby-map__display-panel-close:focus-visible { background: #ebe9ff; color: #4034df; outline: 0; }
   .nearby-map__display-panel-scroll { min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding-bottom: max(12px, env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+  .nearby-map__mobile-menu .nearby-map__display-panel-scroll { overflow: visible; padding-bottom: 0; touch-action: auto; }
   .nearby-map__display-panel :deep(.line-map-display-panel__modes--global) { grid-template-columns: minmax(0, 1fr); }
   .nearby-map__display-section { border-top: 1px solid rgba(100, 116, 139, .16); }
   .nearby-map__display-section > summary { align-items: center; color: #18233f; cursor: pointer; display: flex; font-size: .78rem; font-weight: 850; justify-content: space-between; list-style: none; min-height: 50px; padding: 9px 14px 9px 18px; }
@@ -6613,6 +6906,11 @@ function mix(from: number, to: number, progress: number): number {
   .nearby-map__display-panel .nearby-map__cluster-grouping { border-top: 0; padding: 0 0 12px; }
   .nearby-map__display-panel .nearby-map__schedule-filter, .nearby-map__display-panel .nearby-map__station-visibility { padding-inline: 0; }
   .nearby-map__display-panel .nearby-map__station-visibility:first-of-type { border-top: 0; }
+  .nearby-map__mobile-menu :deep(.line-map-display-panel__modes--global) { grid-template-columns: minmax(0, 1fr); }
+  .nearby-map__mobile-menu :deep(.line-map-display-panel__content--global) { padding: 0; }
+  .nearby-map__mobile-menu .nearby-map__cluster-grouping { border-top: 0; padding: 0 0 12px; }
+  .nearby-map__mobile-menu .nearby-map__schedule-filter, .nearby-map__mobile-menu .nearby-map__station-visibility { padding-inline: 0; }
+  .nearby-map__mobile-menu .nearby-map__station-visibility:first-of-type { border-top: 0; }
   .nearby-map-shell:not(.nearby-map-shell--city-view) .nearby-map__isochrone-status { top: 120px; }
   .nearby-map-shell:not(.nearby-map-shell--city-view) .nearby-map__noise-status { top: 160px; }
   .nearby-map__scale-control { bottom: 14px; gap: 6px; padding: 4px 6px 5px; }

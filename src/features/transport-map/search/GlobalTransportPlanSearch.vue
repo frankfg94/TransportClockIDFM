@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { ChevronRight, Search, Train, XIcon } from "lucide-vue-next";
 import LineIconBadge from "../../../components/LineIconBadge.vue";
 import { createLinePresentation, transitFamilyToMode } from "../../../services/linePresentation";
@@ -17,6 +17,7 @@ import {
   modeRank,
   normalizeGlobalMapSearchText,
   searchGlobalMapIndex,
+  type GlobalMapSearchIndex,
   type GlobalMapStationSearchGroup,
 } from "./globalMapSearch";
 import { useI18n } from "../../../i18n";
@@ -67,6 +68,7 @@ const RECENT_STORAGE_KEY = "transport-clock.global-map-search.recent.v1";
 const MAX_RECENT_SEARCHES = 8;
 const MAX_PLACE_SEARCH_CACHE_ENTRIES = 32;
 const MIN_PLACE_SEARCH_QUERY_LENGTH = 3;
+const EMPTY_GROUPS_BY_MEMBER_ID = new Map<string, GlobalMapStationSearchGroup>();
 
 const props = withDefaults(defineProps<{
   open?: boolean;
@@ -113,9 +115,17 @@ const placeSearchError = ref(false);
 const activeIndex = ref(-1);
 const recentSearches = ref<RecentSearchKey[]>(readRecentSearches());
 const expandedStationKeys = ref(new Set<string>());
+const searchIndex = shallowRef<GlobalMapSearchIndex>();
+const searchIndexBuilding = ref(false);
 const hoverTimers = new Map<string, number>();
 const placeSearchCache = new Map<string, GeocoderPoint[]>();
 let localSearchFrame: number | undefined;
+let searchIndexFirstFrame: number | undefined;
+let searchIndexBuildFrame: number | undefined;
+let searchIndexBuildTimer: number | undefined;
+let indexedStations: GlobalMapStation[] | undefined;
+let indexedLines: GlobalMapLine[] | undefined;
+let searchIndexBuildVersion = 0;
 let placeSearchTimer: number | undefined;
 let placeSearchController: AbortController | undefined;
 let searchVersion = 0;
@@ -123,6 +133,7 @@ const { presentPlace } = useNearbyPlacePresenter();
 
 onBeforeUnmount(() => {
   cancelScheduledSearch();
+  cancelScheduledSearchIndexBuild();
   cancelPlaceSearch();
   if (typeof document !== "undefined") document.removeEventListener("pointerdown", onDocumentPointerDown);
   if (typeof window !== "undefined") {
@@ -147,10 +158,9 @@ const searchOptions = {
   sameNameMergeMaxDistanceM: GLOBAL_TRANSPORT_PLAN_CONFIG.search.sameNameMergeMaxDistanceM,
   sameNameMergeMinHeavyLines: GLOBAL_TRANSPORT_PLAN_CONFIG.search.sameNameMergeMinHeavyLines,
 };
-const searchIndex = computed(() => createGlobalMapSearchIndex(props.stations, props.lines, searchOptions));
 const normalizedQuery = computed(() => normalizeGlobalMapSearchText(localQuery.value));
 const linesById = computed(() => new Map(props.lines.map((line) => [line.id, line])));
-const groupedStationByMemberId = computed(() => searchIndex.value.groupsByMemberId);
+const groupedStationByMemberId = computed(() => searchIndex.value?.groupsByMemberId ?? EMPTY_GROUPS_BY_MEMBER_ID);
 const entrancesByStationId = computed(() => {
   const counts = new Map<string, number>();
   for (const entrance of props.entrances) {
@@ -159,7 +169,9 @@ const entrancesByStationId = computed(() => {
   return counts;
 });
 
-const matchingResults = computed(() => searchGlobalMapIndex(searchIndex.value, normalizedQuery.value));
+const matchingResults = computed(() => searchIndex.value
+  ? searchGlobalMapIndex(searchIndex.value, normalizedQuery.value)
+  : { stations: [], lines: [] });
 
 const matchingPlaces = computed(() => placeResults.value.map((place, index): SearchResult => ({
   kind: "place",
@@ -199,11 +211,6 @@ const sections = computed<SearchSection[]>(() => {
   // search rendering into the map's update. Read no catalogue deps here.
   if (!props.open) return [];
 
-  // Warm the index as soon as the surface opens. The empty-query view now
-  // starts with recents and favourites, but the same catalogue must already
-  // be ready when the user begins typing.
-  void searchIndex.value;
-
   if (normalizedQuery.value) {
     return [
       { id: "stations", label: t("globalMap.search.stations"), results: matchingResults.value.stations.map((station, index) => createStationResult(station, `match-station-${index}`)) },
@@ -221,9 +228,104 @@ const sections = computed<SearchSection[]>(() => {
 
 const visibleResults = computed(() => sections.value.flatMap((section) => section.results));
 const activeResultKey = computed(() => visibleResults.value[activeIndex.value]?.key);
-const isLoading = computed(() => props.catalogLoading && visibleResults.value.length === 0);
-const noResults = computed(() => Boolean(normalizedQuery.value) && visibleResults.value.length === 0 && !props.catalogLoading && !placeSearchLoading.value && !placeSearchError.value);
+const isLoading = computed(() => (props.catalogLoading || searchIndexBuilding.value) && visibleResults.value.length === 0);
+const noResults = computed(() => Boolean(normalizedQuery.value) && visibleResults.value.length === 0 && !props.catalogLoading && !searchIndexBuilding.value && !placeSearchLoading.value && !placeSearchError.value);
 const catalogHint = computed(() => !props.catalogReady && !props.catalogLoading && props.stations.length === 0);
+
+function cancelScheduledSearchIndexBuild(): void {
+  searchIndexBuildVersion += 1;
+  if (typeof window === "undefined") return;
+
+  if (searchIndexFirstFrame !== undefined) {
+    if (typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(searchIndexFirstFrame);
+    window.clearTimeout(searchIndexFirstFrame);
+    searchIndexFirstFrame = undefined;
+  }
+  if (searchIndexBuildFrame !== undefined) {
+    if (typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(searchIndexBuildFrame);
+    window.clearTimeout(searchIndexBuildFrame);
+    searchIndexBuildFrame = undefined;
+  }
+  if (searchIndexBuildTimer !== undefined) {
+    window.clearTimeout(searchIndexBuildTimer);
+    searchIndexBuildTimer = undefined;
+  }
+}
+
+function scheduleSearchIndexBuild(): void {
+  if (!props.open || !props.showMapInteractions || typeof window === "undefined") {
+    searchIndexBuilding.value = false;
+    return;
+  }
+
+  if (searchIndex.value && indexedStations === props.stations && indexedLines === props.lines) {
+    searchIndexBuilding.value = false;
+    return;
+  }
+
+  cancelScheduledSearchIndexBuild();
+  searchIndexBuilding.value = true;
+  if (props.catalogLoading) return;
+
+  const version = searchIndexBuildVersion;
+  const build = () => {
+    searchIndexBuildFrame = undefined;
+    searchIndexBuildTimer = undefined;
+    if (version !== searchIndexBuildVersion) return;
+    if (!props.open || !props.showMapInteractions) {
+      searchIndexBuilding.value = false;
+      return;
+    }
+    if (props.catalogLoading) return;
+
+    const stations = props.stations;
+    const lines = props.lines;
+    searchIndex.value = createGlobalMapSearchIndex(stations, lines, searchOptions);
+    indexedStations = stations;
+    indexedLines = lines;
+    searchIndexBuilding.value = false;
+  };
+
+  if (typeof window.requestAnimationFrame === "function") {
+    // The second frame runs only after the open surface had a paint opportunity.
+    searchIndexFirstFrame = window.requestAnimationFrame(() => {
+      searchIndexFirstFrame = undefined;
+      if (version !== searchIndexBuildVersion) return;
+      searchIndexBuildFrame = window.requestAnimationFrame(build);
+    });
+  } else {
+    // Keep older WebViews responsive by yielding for at least one frame.
+    searchIndexBuildTimer = window.setTimeout(build, 32);
+  }
+}
+
+watch(
+  () => [props.open, props.showMapInteractions, props.stations, props.lines, props.catalogLoading] as const,
+  ([open, showMapInteractions, stations, lines, catalogLoading], previous) => {
+    const catalogueChanged = Boolean(previous && (stations !== previous[2] || lines !== previous[3]));
+    if (catalogueChanged) {
+      cancelScheduledSearchIndexBuild();
+      searchIndex.value = undefined;
+      indexedStations = undefined;
+      indexedLines = undefined;
+    }
+
+    if (!open || !showMapInteractions) {
+      cancelScheduledSearchIndexBuild();
+      searchIndexBuilding.value = false;
+      return;
+    }
+
+    if (searchIndex.value && indexedStations === stations && indexedLines === lines) return;
+    if (catalogLoading) {
+      cancelScheduledSearchIndexBuild();
+      searchIndexBuilding.value = true;
+      return;
+    }
+    scheduleSearchIndexBuild();
+  },
+  { flush: "pre", immediate: true },
+);
 
 watch(visibleResults, (results) => {
   if (activeIndex.value >= results.length) activeIndex.value = results.length - 1;

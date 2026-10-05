@@ -153,6 +153,11 @@ const savedMarker = {
 describe("GlobalTransportPlanSearch", () => {
   let wrapper: VueWrapper | undefined;
 
+  async function finishDeferredIndexBuild(): Promise<void> {
+    await vi.advanceTimersByTimeAsync(50);
+    await flushPromises();
+  }
+
   beforeEach(() => {
     vi.mocked(createGlobalMapSearchIndex).mockClear();
     vi.useFakeTimers();
@@ -175,6 +180,9 @@ describe("GlobalTransportPlanSearch", () => {
     expect(createGlobalMapSearchIndex).not.toHaveBeenCalled();
 
     await wrapper.setProps({ open: true });
+    expect(wrapper.find("input").exists()).toBe(true);
+    expect(createGlobalMapSearchIndex).not.toHaveBeenCalled();
+    await finishDeferredIndexBuild();
     expect(createGlobalMapSearchIndex).toHaveBeenCalledTimes(1);
     expect(wrapper.text()).toContain("Aucune station, ligne ou lieu disponible.");
 
@@ -184,6 +192,8 @@ describe("GlobalTransportPlanSearch", () => {
     expect(createGlobalMapSearchIndex).toHaveBeenCalledTimes(1);
 
     await wrapper.setProps({ open: true });
+    expect(createGlobalMapSearchIndex).toHaveBeenCalledTimes(1);
+    await finishDeferredIndexBuild();
     expect(createGlobalMapSearchIndex).toHaveBeenCalledTimes(2);
     expect(wrapper.text()).toContain("Aucune station, ligne ou lieu disponible.");
   });

@@ -633,6 +633,43 @@ describe("NearbyStationsMap pan interaction", () => {
     }
   });
 
+  it("groups mobile map actions in a draggable sheet and keeps view, fullscreen and zoom controls outside", async () => {
+    const restoreViewport = installMapViewport(390, 700);
+    const wrapper = mountMap([]);
+
+    try {
+      await wrapper.setProps({ showNeighborhoodScoreControl: true });
+      const primaryControls = wrapper.get(".nearby-map__primary-controls");
+      expect(primaryControls.findAll("button").map((button) => button.classes()[0])).toEqual([
+        "nearby-map__city-view-toggle",
+        "nearby-map__display-toggle",
+        "nearby-map__fullscreen",
+      ]);
+
+      const zoomControls = wrapper.get(".nearby-map__zoom-controls");
+      expect(zoomControls.findAll("button")).toHaveLength(2);
+      expect(zoomControls.find("[data-nearby-map-chaos-zoom-run]").exists()).toBe(false);
+
+      await wrapper.get(".nearby-map__display-toggle").trigger("click");
+      await flushPromises();
+
+      const menu = document.body.querySelector<HTMLElement>("#nearby-map-mobile-controls");
+      const sheet = document.body.querySelector<HTMLElement>("[data-testid='app-right-panel']");
+      const dragHandle = document.body.querySelector<HTMLButtonElement>("[data-testid='app-right-panel-drag-handle']");
+      expect(menu).not.toBeNull();
+      expect(sheet).not.toBeNull();
+      expect(dragHandle).not.toBeNull();
+      expect(menu?.querySelector("[data-nearby-map-mobile-action='directory']")).not.toBeNull();
+      expect(menu?.querySelector("[data-nearby-map-mobile-action='neighborhood-score']")).not.toBeNull();
+      expect(menu?.querySelector("[data-nearby-map-chaos-zoom-run]")).not.toBeNull();
+      expect(sheet?.classList.contains("app-right-panel--mobile-sheet")).toBe(true);
+      expect(sheet?.classList.contains("app-right-panel--mobile-mid")).toBe(true);
+    } finally {
+      wrapper.unmount();
+      restoreViewport();
+    }
+  });
+
   it("moves the marker layer with the compositor gesture transform without committing Vue camera state", async () => {
     const line = createLine("line:metro:1", "METRO");
     const station = createStationAt("station:dynamic", "Station dynamique", line, 2.351, 48.851);

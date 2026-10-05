@@ -274,6 +274,7 @@ function administrativeData(zones: readonly TransportMapServedCityZone[]): Admin
 export function createDeckTransportLayers(
   frame: TransportMapRenderFrame,
   beforeId: string | undefined,
+  stationLabelOpacity = 1,
 ): Layer[] {
   const model = frame.model;
   const layers: Layer[] = [];
@@ -347,8 +348,7 @@ export function createDeckTransportLayers(
   if (model.stations.length) layers.push(createStationLayer(model.stations, beforeId));
   if (model.quays.length) layers.push(createQuayLayer(model.quays, beforeId));
   if (model.entrances.length) layers.push(createEntranceLayer(model.entrances, beforeId));
-  const stationAndPathLabels = createDeckTransportLabelLayer(model.labels, beforeId);
-  if (stationAndPathLabels) layers.push(stationAndPathLabels);
+  layers.push(...createDeckTransportLabelLayers(model.labels, beforeId, stationLabelOpacity));
   // City names are deliberately last: station and entrance labels must not
   // visually cover the context the open "Villes desservies" accordion adds.
   const administrative = model.servedCityZones ? administrativeData(model.servedCityZones) : undefined;
@@ -360,11 +360,22 @@ export function createDeckTransportLayers(
   return layers;
 }
 
-export function createDeckTransportLabelLayer(
+export function createDeckTransportLabelLayers(
   labels: readonly TransportMapLabelRenderRecord[],
   beforeId: string | undefined,
-): Layer | undefined {
-  return labels.length ? createLabelLayer(labels, beforeId) : undefined;
+  stationLabelOpacity = 1,
+): Layer[] {
+  const stationLabels = labels.filter((label) => label.id.startsWith("station-label:"));
+  const entranceLabels = labels.filter((label) => label.id.startsWith("entrance-label:"));
+  const opacity = Math.max(0, Math.min(1, stationLabelOpacity));
+  return [
+    ...(stationLabels.length
+      ? [createLabelLayer(stationLabels, beforeId, "transport-labels", opacity)]
+      : []),
+    ...(entranceLabels.length
+      ? [createLabelLayer(entranceLabels, beforeId, "transport-entrance-labels", 1)]
+      : []),
+  ];
 }
 
 function createServedCityFillLayer(
@@ -708,9 +719,11 @@ function createEntranceLayer(
 function createLabelLayer(
   data: readonly TransportMapLabelRenderRecord[],
   beforeId: string | undefined,
+  id: string,
+  opacity: number,
 ): Layer {
   return new TextLayer<TransportMapLabelRenderRecord>({
-    id: "transport-labels",
+    id,
     data,
     coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
     billboard: true,
@@ -728,12 +741,22 @@ function createLabelLayer(
     // edge instead of clipping the outer pixels before they reach the map.
     fontSettings: TRANSPORT_LABEL_FONT_SETTINGS,
     outlineWidth: TRANSPORT_LABEL_SDF_OUTLINE_WIDTH,
-    outlineColor: TRANSPORT_LABEL_OUTLINE_COLOR,
+    outlineColor: [
+      TRANSPORT_LABEL_OUTLINE_COLOR[0],
+      TRANSPORT_LABEL_OUTLINE_COLOR[1],
+      TRANSPORT_LABEL_OUTLINE_COLOR[2],
+      Math.round(TRANSPORT_LABEL_OUTLINE_COLOR[3] * opacity),
+    ],
     getPosition: getLabelPosition,
     getPixelOffset: getLabelPixelOffset,
     getText: getLabelText,
     getSize: getLabelSize,
-    getColor: getLabelColor,
+    getColor: opacity >= 1
+      ? getLabelColor
+      : (record: TransportMapLabelRenderRecord) => {
+          const color = getLabelColor(record);
+          return [color[0], color[1], color[2], Math.round(color[3] * opacity)];
+        },
     getTextAnchor: getLabelTextAnchor,
     getAlignmentBaseline: "center",
     ...(beforeId ? { beforeId } : {}),

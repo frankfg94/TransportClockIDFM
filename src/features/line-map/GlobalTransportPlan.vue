@@ -662,9 +662,13 @@
         </Transition>
       </div>
 
-      <Transition name="global-map-picker-sidebar-slide" appear>
+      <Transition
+        name="global-map-picker-sidebar-slide"
+        appear
+        :css="!deferredLineSidebarLineId"
+      >
         <GlobalMapPickerSideBar
-          v-if="!routePreviewActive && (activeStationView || activeLine || selectedStations.length)"
+          v-if="showPickerSidebar"
           :station="activeStationView"
           :line="activeLineView"
           :direction-options="busDirectionSelection?.options ?? []"
@@ -1417,6 +1421,7 @@ const shareFeedback = ref("");
 const searchCatalogReady = ref(false);
 const searchCatalogLoading = ref(false);
 const sidebarPreviewLineId = ref<string>();
+const deferredLineSidebarLineId = ref<string>();
 const focusedEntranceId = ref<string>();
 const rendererMetrics = ref<TransportMapRendererMetrics>();
 const interactionActive = ref(false);
@@ -1984,6 +1989,17 @@ const {
   selectedLineGeometryBounds,
 } = globalTransportScene;
 
+const showPickerSidebar = computed(() => {
+  if (routePreviewActive.value) return false;
+  if (
+    activeLine.value &&
+    deferredLineSidebarLineId.value === activeLine.value.id
+  ) {
+    return false;
+  }
+  return Boolean(activeStationView.value || activeLine.value || selectedStations.value.length);
+});
+
 const globalTransportLegacyBasemap = useGlobalTransportLegacyBasemap({
   camera,
   getStage: () => stageElement.value,
@@ -2256,6 +2272,17 @@ watch(
       draw();
     }
   },
+);
+
+watch(
+  [deferredLineSidebarLineId, interactionActive],
+  ([lineId, cameraTransitionActive]) => {
+    // A pointer gesture can cancel the camera flight without invoking its
+    // completion callback. Treat that cancellation as the end of the fit so
+    // the selected-line sidebar cannot remain hidden.
+    if (lineId && !cameraTransitionActive) deferredLineSidebarLineId.value = undefined;
+  },
+  { flush: "post" },
 );
 
 function setServedCitiesAccordionExpanded(expanded: boolean): void {
@@ -3666,13 +3693,20 @@ function focusEntrance(entrance: GlobalMapEntrance): void {
   );
 }
 
-function zoomToLine(lineId: string, animate = false): void {
+function zoomToLine(
+  lineId: string,
+  animate = false,
+  onCameraFitComplete?: () => void,
+): void {
   const line = network.value?.linesById.get(lineId);
   const points =
     line?.stationIds
       .map((id) => network.value?.stationsById.get(id))
       .filter((station): station is GlobalMapStation => Boolean(station)) ?? [];
-  if (!points.length) return;
+  if (!points.length) {
+    onCameraFitComplete?.();
+    return;
+  }
   const geometryBounds = [...viewport.value.paths, ...preloadedLinePaths.value]
     .filter((path) => path.lineId === lineId)
     .map((path) => ({
@@ -3702,7 +3736,7 @@ function zoomToLine(lineId: string, animate = false): void {
     readGlobalMapCameraFitInsets(lineId),
   );
   if (animate && interactionController) {
-    cancelCameraAnimation();
+    cancelCameraAnimation({ preserveDeferredLineSidebar: Boolean(onCameraFitComplete) });
     captureSelectedLineBasemapCoverSnapshot();
     interactionController.animateCameraToTarget(
       {
@@ -3710,7 +3744,10 @@ function zoomToLine(lineId: string, animate = false): void {
         centerWorldY: targetCamera.centerWorldY,
         zoom: targetCamera.zoom,
       },
-      () => captureSelectedLineBasemapCoverSnapshot(),
+      () => {
+        captureSelectedLineBasemapCoverSnapshot();
+        onCameraFitComplete?.();
+      },
     );
     return;
   }
@@ -3718,6 +3755,7 @@ function zoomToLine(lineId: string, animate = false): void {
   cancelCameraAnimation();
   applyCamera(targetCamera);
   captureSelectedLineBasemapCoverSnapshot();
+  onCameraFitComplete?.();
 }
 
 function readGlobalMapCameraFitInsets(lineId?: string): CameraFitInsets {
@@ -4242,6 +4280,8 @@ async function selectLineFromSearch(
   connectedStationIds.value = [];
   sidebarPreviewLineId.value = undefined;
   activeTrafficDisruption.value = trafficDisruption;
+  const deferLineSidebarUntilFit = animateCamera && previousLineId !== currentLine.id;
+  deferredLineSidebarLineId.value = deferLineSidebarUntilFit ? currentLine.id : undefined;
   // Publish the target before starting the optional preload. The scene can
   // render the new line immediately and accept its decoded geometry while the
   // camera flight is still running.
@@ -4254,7 +4294,17 @@ async function selectLineFromSearch(
     preloadLineGeometry(currentLine.id);
   }
   if (!traffic.enabled.value) enableTraffic();
-  zoomToLine(currentLine.id, animateCamera);
+  zoomToLine(
+    currentLine.id,
+    animateCamera,
+    deferLineSidebarUntilFit
+      ? () => {
+          if (deferredLineSidebarLineId.value === currentLine.id) {
+            deferredLineSidebarLineId.value = undefined;
+          }
+        }
+      : undefined,
+  );
   syncUrl();
   draw();
 }
@@ -4774,8 +4824,11 @@ const cancelWheelZoom = interactionController.cancelWheelZoom;
 const cancelCameraAnimationImpl = interactionController.cancelCameraAnimation;
 const isMapInteractionScrolling = interactionController.isScrolling;
 
-function cancelCameraAnimation(): void {
+function cancelCameraAnimation(
+  options: { preserveDeferredLineSidebar?: boolean } = {},
+): void {
   cancelCameraAnimationImpl();
+  if (!options.preserveDeferredLineSidebar) deferredLineSidebarLineId.value = undefined;
   endItineraryFitTrace({ cancelled: true });
 }
 

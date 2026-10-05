@@ -661,6 +661,7 @@ function onMapLoad(): void {
   presenter.setNearbyPlaceLayers(nearbyPlaceLayers.value);
   presenter.setRealEstateLayers(realEstateLayers.value);
   presenter.setPerformanceTrace(props.performanceTrace);
+  presenter.setStationLabelFadeEnabled(!props.reduceMotion && !systemReducedMotion.value);
   if (props.performanceTrace) {
     mapLibreTraceProbe = new TransportMapMapLibreTraceProbe(
       activeMap as unknown as TransportMapMapLibreTraceMap,
@@ -742,6 +743,13 @@ onMounted(() => {
 watch(locale, () => {
   applyMapLocale();
 });
+
+watch(
+  [() => props.reduceMotion, () => systemReducedMotion.value],
+  ([reduceMotion, systemReduced]) => {
+    presenter?.setStationLabelFadeEnabled(!reduceMotion && !systemReduced);
+  },
+);
 
 onBeforeUnmount(() => {
   cancelRealEstateMetricTransition();

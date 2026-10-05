@@ -8,7 +8,7 @@ import type {
 import type { TransportMapPreparedRenderModel } from "../render/transportMapRenderModel";
 import { cameraStateToMapLibreView } from "./nextMapCamera";
 import {
-  createDeckTransportLabelLayer,
+  createDeckTransportLabelLayers,
   createDeckTransportLayers,
   deckAdministrativeBoundaryStyleBucket,
 } from "./deckMapLayers";
@@ -31,6 +31,12 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
   private nearbyPlaceLayers: readonly Layer[] = [];
   private deckMetrics?: Omit<TransportMapDeckMetrics, "sampleAgeMs">;
   private performanceTrace?: TransportMapPerformanceTrace;
+  private stationLabelFadeEnabled = true;
+  private activeLineId?: string;
+  private stationLabelFadeLineId?: string;
+  private stationLabelFadeOpacity = 1;
+  private stationLabelFadeStartedAt?: number;
+  private stationLabelFadeFrame?: number;
 
   constructor(
     private readonly map: MapLibreMap,
@@ -39,6 +45,16 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
 
   setPerformanceTrace(trace: TransportMapPerformanceTrace | undefined): void {
     this.performanceTrace = trace;
+  }
+
+  setStationLabelFadeEnabled(enabled: boolean): void {
+    if (this.stationLabelFadeEnabled === enabled) return;
+    this.stationLabelFadeEnabled = enabled;
+    if (enabled) return;
+    this.cancelStationLabelFade();
+    this.stationLabelFadeLineId = undefined;
+    this.stationLabelFadeOpacity = 1;
+    this.updateStationLabelLayers();
   }
 
   /** Place layers survive transport model updates and camera-only frames. */
@@ -65,6 +81,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
 
   present(frame: TransportMapRenderFrame): void {
     const previousFrame = this.lastFrame;
+    this.syncStationLabelFadeLine(frame.scene.activeLineId);
     this.lastFrame = frame;
     const cameraChanged = syncCameraToMapLibre(this.map, frame);
     const beforeId = firstSymbolLayerId(this.map);
@@ -118,12 +135,20 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
         labelCount: frame.model.labels.length,
       });
       if (labelOnlyUpdate && this.layers) {
-        this.layers = replaceTransportLabelLayer(
+        this.layers = replaceTransportLabelLayers(
           this.layers,
-          createDeckTransportLabelLayer(frame.model.labels, beforeId),
+          createDeckTransportLabelLayers(
+            frame.model.labels,
+            beforeId,
+            this.stationLabelOpacityFor(frame),
+          ),
         );
       } else {
-        this.layers = createDeckTransportLayers(frame, beforeId);
+        this.layers = createDeckTransportLayers(
+          frame,
+          beforeId,
+          this.stationLabelOpacityFor(frame),
+        );
       }
       this.activeTrace?.end(layerEventId, {
         reason,
@@ -155,6 +180,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
         vertexCount: frame.model.vertexCount,
       });
     }
+    this.startStationLabelFadeWhenReady(frame);
     // `jumpTo` already schedules a MapLibre render when the camera changes.
     // Avoid forcing another repaint for duplicate camera-only frames; this is
     // particularly important while the itinerary preview is being panned.
@@ -176,12 +202,94 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
   }
 
   dispose(): void {
+    this.cancelStationLabelFade();
     this.nearbyPlaceLayers = [];
     this.lastFrame = undefined;
     this.layers = undefined;
     this.lastLayerModel = undefined;
     this.lastBinaryPackets = undefined;
     this.deckMetrics = undefined;
+  }
+
+  private syncStationLabelFadeLine(lineId: string | undefined): void {
+    if (lineId === this.activeLineId) return;
+    this.cancelStationLabelFade();
+    this.activeLineId = lineId;
+    this.stationLabelFadeLineId = this.stationLabelFadeEnabled && lineId ? lineId : undefined;
+    this.stationLabelFadeOpacity = this.stationLabelFadeLineId ? 0 : 1;
+  }
+
+  private stationLabelOpacityFor(frame: TransportMapRenderFrame): number {
+    return this.stationLabelFadeLineId === frame.scene.activeLineId
+      ? this.stationLabelFadeOpacity
+      : 1;
+  }
+
+  private startStationLabelFadeWhenReady(frame: TransportMapRenderFrame): void {
+    if (
+      !this.stationLabelFadeEnabled ||
+      !this.stationLabelFadeLineId ||
+      this.stationLabelFadeLineId !== frame.scene.activeLineId ||
+      this.stationLabelFadeStartedAt !== undefined ||
+      this.stationLabelFadeOpacity >= 1 ||
+      !hasStationLabelsForActiveLine(frame) ||
+      typeof requestAnimationFrame !== "function"
+    ) return;
+
+    this.stationLabelFadeStartedAt = now();
+    this.stationLabelFadeFrame = requestAnimationFrame(this.advanceStationLabelFade);
+  }
+
+  private advanceStationLabelFade = (timestamp: number): void => {
+    const lineId = this.stationLabelFadeLineId;
+    if (
+      !lineId ||
+      !this.lastFrame ||
+      this.lastFrame.scene.activeLineId !== lineId ||
+      !this.stationLabelFadeEnabled
+    ) {
+      this.cancelStationLabelFade();
+      return;
+    }
+
+    const startedAt = this.stationLabelFadeStartedAt ?? timestamp;
+    const progress = Math.min(1, Math.max(0, (timestamp - startedAt) / 320));
+    this.stationLabelFadeOpacity = 1 - (1 - progress) ** 3;
+    this.updateStationLabelLayers();
+    if (progress >= 1) {
+      this.cancelStationLabelFade();
+      this.stationLabelFadeLineId = undefined;
+      this.stationLabelFadeOpacity = 1;
+      return;
+    }
+    this.stationLabelFadeFrame = requestAnimationFrame(this.advanceStationLabelFade);
+  };
+
+  private updateStationLabelLayers(): void {
+    const frame = this.lastFrame;
+    if (!frame || !this.layers) return;
+    this.layers = replaceTransportLabelLayers(
+      this.layers,
+      createDeckTransportLabelLayers(
+        frame.model.labels,
+        this.lastBeforeId,
+        this.stationLabelOpacityFor(frame),
+      ),
+    );
+    this.overlay.setProps({ layers: this.composeLayers() });
+    this.setPropsCount += 1;
+    this.map.triggerRepaint();
+  }
+
+  private cancelStationLabelFade(): void {
+    if (
+      this.stationLabelFadeFrame !== undefined &&
+      typeof cancelAnimationFrame === "function"
+    ) {
+      cancelAnimationFrame(this.stationLabelFadeFrame);
+    }
+    this.stationLabelFadeFrame = undefined;
+    this.stationLabelFadeStartedAt = undefined;
   }
 
   recordDeckMetrics(metrics: Omit<TransportMapDeckMetrics, "sampleAgeMs">): void {
@@ -257,17 +365,40 @@ function sameStringSequence(left?: readonly string[], right?: readonly string[])
   return true;
 }
 
-function replaceTransportLabelLayer(layers: Layer[], replacement: Layer | undefined): Layer[] {
-  const existingIndex = layers.findIndex((layer) => layer.id === "transport-labels");
-  if (existingIndex >= 0) {
-    if (replacement) layers[existingIndex] = replacement;
-    else layers.splice(existingIndex, 1);
-  } else if (replacement) {
-    const cityLabelsIndex = layers.findIndex((layer) => layer.id === "transport-served-city-labels");
-    if (cityLabelsIndex >= 0) layers.splice(cityLabelsIndex, 0, replacement);
-    else layers.push(replacement);
-  }
-  return layers;
+function replaceTransportLabelLayers(layers: Layer[], replacements: Layer[]): Layer[] {
+  const labelLayerIds = new Set(["transport-labels", "transport-entrance-labels"]);
+  const firstLabelIndex = layers.findIndex((layer) => labelLayerIds.has(layer.id));
+  const cityLabelsIndex = layers.findIndex((layer) => layer.id === "transport-served-city-labels");
+  const insertionIndex = firstLabelIndex >= 0
+    ? layers.slice(0, firstLabelIndex).filter((layer) => !labelLayerIds.has(layer.id)).length
+    : cityLabelsIndex >= 0
+      ? cityLabelsIndex
+      : layers.length;
+  const nextLayers = layers.filter((layer) => !labelLayerIds.has(layer.id));
+  nextLayers.splice(insertionIndex, 0, ...replacements);
+  return nextLayers;
+}
+
+function hasStationLabelsForActiveLine(frame: TransportMapRenderFrame): boolean {
+  const lineId = frame.scene.activeLineId;
+  if (!lineId) return false;
+  const line = frame.scene.lines.find((candidate) => candidate.id === lineId);
+  if (!line) return false;
+  const lineStationIds = line.stationIds.length
+    ? line.stationIds
+    : frame.scene.paths
+      .filter((path) => path.lineId === lineId)
+      .flatMap((path) => path.stationIds);
+  if (!lineStationIds.length) return false;
+  const lineStationIdSet = new Set(lineStationIds);
+  const stationLabelIds = frame.model.labels
+    .filter((label) => label.id.startsWith("station-label:"))
+    .map((label) => label.id.slice("station-label:".length));
+  return stationLabelIds.length > 0 && stationLabelIds.every((stationId) => lineStationIdSet.has(stationId));
+}
+
+function now(): number {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
 }
 
 function binaryPacketsChanged(
