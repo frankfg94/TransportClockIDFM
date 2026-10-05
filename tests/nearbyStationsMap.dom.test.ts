@@ -670,6 +670,29 @@ describe("NearbyStationsMap pan interaction", () => {
     }
   });
 
+  it("keeps the mobile controls sheet inside the map while fullscreen", async () => {
+    const restoreViewport = installMapViewport(390, 700);
+    const wrapper = mountMap([]);
+    const restoreFullscreen = await enterFullscreenForTest(wrapper);
+
+    try {
+      const shell = wrapper.get(".nearby-map-shell").element as HTMLElement;
+      expect(document.fullscreenElement).toBe(shell);
+
+      await wrapper.get(".nearby-map__display-toggle").trigger("click");
+      await flushPromises();
+
+      const panel = shell.querySelector<HTMLElement>("[data-testid='app-right-panel']");
+      expect(panel).not.toBeNull();
+      expect(panel?.classList.contains("app-right-panel--mobile-sheet")).toBe(true);
+      expect(shell.querySelector("#nearby-map-mobile-controls")).not.toBeNull();
+    } finally {
+      restoreFullscreen();
+      wrapper.unmount();
+      restoreViewport();
+    }
+  });
+
   it("moves the marker layer with the compositor gesture transform without committing Vue camera state", async () => {
     const line = createLine("line:metro:1", "METRO");
     const station = createStationAt("station:dynamic", "Station dynamique", line, 2.351, 48.851);

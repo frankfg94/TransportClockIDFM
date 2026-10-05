@@ -5106,7 +5106,7 @@ function mix(from: number, to: number, progress: number): number {
           @toggle-layer="toggleCityRealEstateLayer"
         />
       </aside>
-      <Teleport v-if="cityViewEnabled && isMobileDisplaySheet" to="body">
+      <Teleport v-if="cityViewEnabled && isMobileDisplaySheet" to="body" :disabled="isFullscreen">
         <AppRightPanel
           :open="cityViewRealEstatePanelOpen"
           :title="t('nearbyStations.realEstate.panelTitle')"
@@ -5347,7 +5347,7 @@ function mix(from: number, to: number, progress: number): number {
         @close-modal="closeIsochroneConfigurationModal"
         @retry="retryIsochronesFromConfigurationModal"
       />
-      <Teleport :disabled="!isMobileDisplaySheet" to="body">
+      <Teleport :disabled="!isMobileDisplaySheet || isFullscreen" to="body">
         <AppRightPanel
           v-if="isMobileDisplaySheet"
           :open="displayControlsOpen && hasMobileMapMenuContent"
