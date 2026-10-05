@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, readonly, ref, shallowReadonly, shallowRef, watch } from "vue";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { fetchGtfsLineFrequency } from "../../services/lineFrequency";
+import { runNetworkTask } from "../../services/networkScheduler";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
 import { useLineFrequencyTimetable } from "../line-map/useLineFrequencyTimetable";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
@@ -535,8 +536,13 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     if (active) return active.promise;
 
     const controller = new AbortController();
-    const promise = requestScheduler.schedule(async (signal) => {
-      const centres = await fetchNearbyShoppingCentres(origin, signal);
+    // Only the discovery call holds a network slot. Access enrichment schedules
+    // its own journeys; holding a parent slot here could starve those children.
+    const promise = (async () => {
+      const signal = controller.signal;
+      const centres = await requestScheduler.schedule(
+        (requestSignal) => fetchNearbyShoppingCentres(origin, requestSignal), signal, 4,
+      );
       signal.throwIfAborted();
       if (centres.length === 0) return { centres: [] };
 
@@ -614,7 +620,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
           journeyLookupFailed: failedJourneyIds.has(centre.id),
         })),
       };
-    }, controller.signal, 4)
+    })()
       .then((next) => {
         controller.signal.throwIfAborted();
         shoppingCentreResults.set(originKey, {
@@ -1486,9 +1492,6 @@ function createNeighborhoodRequestScheduler(maxConcurrency: number) {
       // Bound both the response and its body, even if a provider ignores abort.
       // A replaced batch must also release its slots immediately.
       const controller = request.controller;
-      const timeout = setTimeout(() => {
-        controller.abort(new DOMException("Neighborhood source timed out after 45 seconds", "TimeoutError"));
-      }, 45_000);
       let onAbort: () => void;
       const aborted = new Promise<never>((_, reject) => {
         onAbort = () => reject(controller.signal.reason ?? createNeighborhoodAbortError());
@@ -1499,12 +1502,11 @@ function createNeighborhoodRequestScheduler(maxConcurrency: number) {
         aborted,
         Promise.resolve().then(() => {
           controller.signal.throwIfAborted();
-          return request.run(controller.signal);
+          return runNetworkTask(request.run, controller.signal);
         }),
       ])
         .then(request.resolve, request.reject)
         .finally(() => {
-          clearTimeout(timeout);
           controller.signal.removeEventListener("abort", onAbort);
           active -= 1;
           request.cleanup();

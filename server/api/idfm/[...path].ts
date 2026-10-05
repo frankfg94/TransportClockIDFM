@@ -9,6 +9,7 @@ import {
   setResponseHeaders,
 } from "h3";
 import { getServerIdfmApiKey } from "../../services/idfm/resolveStopArea";
+import { getIdfmRateGateBinding } from "../../services/idfm/distributedRateGate";
 import {
   fetchIdfmMarketplaceWithRetry,
   IDFM_MARKETPLACE_BASE_URL,
@@ -76,12 +77,15 @@ export default defineEventHandler(async (event) => {
 
   headers.set("apikey", apiKey);
 
+  try {
   if (method === "GET" || method === "HEAD") {
     const cachedResponse = await fetchCachedGetResponse(
       `${method}:${upstreamUrl.href}`,
       upstreamUrl,
       headers,
       method,
+      getIdfmRateGateBinding(event),
+      !event.context.cloudflare,
     );
 
     return createResponseFromCache(cachedResponse);
@@ -92,9 +96,16 @@ export default defineEventHandler(async (event) => {
     headers,
     method,
     redirect: "follow",
-  });
+  }, { coordinator: getIdfmRateGateBinding(event) });
 
   return createPassthroughResponse(response);
+  } catch (cause) {
+    const timeout = cause instanceof Error && cause.name === "TimeoutError";
+    throw createError({ statusCode: timeout ? 504 : 502,
+      statusMessage: timeout ? "IDFM upstream request timed out." : "IDFM upstream request failed.",
+      data: { provider: "idfm", code: timeout ? "upstream-timeout" : "upstream-unavailable" }, cause,
+    });
+  }
 });
 
 async function fetchCachedGetResponse(
@@ -102,6 +113,8 @@ async function fetchCachedGetResponse(
   upstreamUrl: URL,
   headers: Headers,
   method: "GET" | "HEAD",
+  coordinator: ReturnType<typeof getIdfmRateGateBinding>,
+  deduplicate: boolean,
 ): Promise<CachedProxyResponse> {
   const cached = getResponseCache.get(cacheKey);
 
@@ -109,13 +122,17 @@ async function fetchCachedGetResponse(
     return cached;
   }
 
+  // A reload can cancel the invocation owning this I/O. Other Worker requests
+  // must never inherit that pending Promise. Completed response data is safe.
+  if (!deduplicate) return fetchAndCacheGetResponse(cacheKey, upstreamUrl, headers, method, coordinator);
+
   const inFlight = inFlightGetRequests.get(cacheKey);
 
   if (inFlight) {
     return inFlight;
   }
 
-  const request = fetchAndCacheGetResponse(cacheKey, upstreamUrl, headers, method);
+  const request = fetchAndCacheGetResponse(cacheKey, upstreamUrl, headers, method, coordinator);
 
   inFlightGetRequests.set(cacheKey, request);
 
@@ -131,12 +148,13 @@ async function fetchAndCacheGetResponse(
   upstreamUrl: URL,
   headers: Headers,
   method: "GET" | "HEAD",
+  coordinator: ReturnType<typeof getIdfmRateGateBinding>,
 ): Promise<CachedProxyResponse> {
   const response = await fetchIdfmMarketplaceWithRetry(upstreamUrl, {
     headers,
     method,
     redirect: "follow",
-  });
+  }, { coordinator });
   const cachedResponse = await createCachedResponse(response);
 
   if (response.ok) {

@@ -34,8 +34,8 @@ export class CompiledPlacesUnavailableError extends Error {
 }
 
 export interface CompiledPlacesAccess {
-  loadPlacesManifest(): Promise<CompiledPlacesManifest>;
-  loadPlacesCity(city: NearbyPlaceCityRef): Promise<CompiledPlacesCityFile>;
+  loadPlacesManifest(signal?: AbortSignal): Promise<CompiledPlacesManifest>;
+  loadPlacesCity(city: NearbyPlaceCityRef, signal?: AbortSignal): Promise<CompiledPlacesCityFile>;
   loadPlacesRanking(): Promise<PlacesRankingDocument>;
 }
 
@@ -63,19 +63,20 @@ export function createCompiledPlacesProvider(
   const cityCache = new Map<string, Promise<CompiledPlacesCityFile>>();
 
   async function loadJson<T>(asset: string, validate: (value: unknown) => asserts value is T, signal?: AbortSignal): Promise<T> {
-    const response = await runNetworkTask((requestSignal) => fetcher(assetUrl(basePath, asset), {
-      headers: { accept: "application/json" },
-      signal: requestSignal,
-    }), signal);
-    if (!response.ok) throw new CompiledPlacesUnavailableError(`Places asset ${asset}: ${response.status}`);
-    const payload = await response.json() as unknown;
-    validate(payload);
-    return payload;
+    return runNetworkTask(async (requestSignal) => {
+      const response = await fetcher(assetUrl(basePath, asset), {
+        headers: { accept: "application/json" }, signal: requestSignal,
+      });
+      if (!response.ok) throw new CompiledPlacesUnavailableError(`Places asset ${asset}: ${response.status}`);
+      const payload = await response.json() as unknown;
+      validate(payload);
+      return payload;
+    }, signal);
   }
 
-  function loadPlacesManifest(): Promise<CompiledPlacesManifest> {
+  function loadPlacesManifest(signal?: AbortSignal): Promise<CompiledPlacesManifest> {
     if (!manifestPromise) {
-      manifestPromise = loadJson("manifest.json", assertPlacesManifest).catch((error) => {
+      manifestPromise = loadJson("manifest.json", assertPlacesManifest, signal).catch((error) => {
         manifestPromise = undefined;
         throw error;
       });
@@ -83,8 +84,8 @@ export function createCompiledPlacesProvider(
     return manifestPromise;
   }
 
-  async function resolveCity(city: NearbyPlaceCityRef): Promise<CompiledPlacesManifest["cities"][number]> {
-    const manifest = await loadPlacesManifest();
+  async function resolveCity(city: NearbyPlaceCityRef, signal?: AbortSignal): Promise<CompiledPlacesManifest["cities"][number]> {
+    const manifest = await loadPlacesManifest(signal);
     if (city.code) {
       const byCode = manifest.cities.find((candidate) => candidate.code === city.code);
       if (byCode) return byCode;
@@ -111,8 +112,8 @@ export function createCompiledPlacesProvider(
     throw new CompiledPlacesUnavailableError(`No compiled commune for ${city.name ?? city.code ?? "origin"}.`);
   }
 
-  async function loadPlacesCity(city: NearbyPlaceCityRef): Promise<CompiledPlacesCityFile> {
-    const descriptor = await resolveCity(city);
+  async function loadPlacesCity(city: NearbyPlaceCityRef, signal?: AbortSignal): Promise<CompiledPlacesCityFile> {
+    const descriptor = await resolveCity(city, signal);
     const existing = cityCache.get(descriptor.code);
     if (existing) return existing;
     // Published city assets are relative to `public/data/places`. Keep
@@ -122,7 +123,7 @@ export function createCompiledPlacesProvider(
       ?? descriptor.assets
       ?? [descriptor.asset])
       .map((asset) => asset.replace(/^places\//u, ""));
-    const request = Promise.all(assets.map((asset) => loadJson(asset, assertCompiledPlacesCity)))
+    const request = Promise.all(assets.map((asset) => loadJson(asset, assertCompiledPlacesCity, signal)))
       .then((files) => mergeCompiledPlacesCityFiles(files))
       .catch((error) => {
       cityCache.delete(descriptor.code);
@@ -158,8 +159,8 @@ export function createCompiledPlacesProvider(
         name: request.origin.city,
         lat: request.origin.lat,
         lon: request.origin.lon,
-      });
-      const file = await loadPlacesCity({ code: city.code });
+      }, signal);
+      const file = await loadPlacesCity({ code: city.code }, signal);
       const radius = clampRadius(request.radiusMeters);
       return nearbyPlacesFromCity(file, [request.origin], radius, signal, createOriginGrid([request.origin], radius));
     },
@@ -167,7 +168,7 @@ export function createCompiledPlacesProvider(
     async searchNearbyCities(request: NearbyPlacesCitiesRequest, signal?: AbortSignal): Promise<NearbyPlace[]> {
       const cities = dedupeCityRefs(request.cities);
       if (cities.length === 0 || request.origins.length === 0) return [];
-      const loadedFiles = await Promise.all(cities.map((city) => loadPlacesCity(city)));
+      const loadedFiles = await Promise.all(cities.map((city) => loadPlacesCity(city, signal)));
       const files = [...new Map(loadedFiles.map((file) => [file.city.code, file])).values()];
       const radius = clampRadius(request.radiusMeters);
       const originGrid = createOriginGrid(request.origins, radius);

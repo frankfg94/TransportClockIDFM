@@ -1,5 +1,7 @@
 import type { H3Event } from "h3";
 import { getServerIdfmApiKey } from "../idfm/resolveStopArea";
+import { fetchBufferedWithTimeout } from "../idfm/boundedFetch";
+import { getIdfmRateGateBinding } from "../idfm/distributedRateGate";
 import {
   fetchIdfmMarketplaceWithRetry,
   IDFM_MARKETPLACE_BASE_URL,
@@ -100,19 +102,20 @@ export async function routeWalkingWithPreferredProvider(
   origin: NearbyJourneyPoint,
   destination: NearbyJourneyPoint,
   id?: string,
+  signal?: AbortSignal,
 ): Promise<NearbyWalkingRoute> {
   const fallback = createStraightLineWalkingRoute(origin, destination, id);
   const cacheKey = routeCacheKey(origin, destination);
   const cached = routeCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return { ...cached.route, id };
 
-  const navitiaRoute = await routeWalkingWithNavitia(event, origin, destination, id);
+  const navitiaRoute = await routeWalkingWithNavitia(event, origin, destination, id, signal);
   if (navitiaRoute) {
     saveCache(routeCache, cacheKey, navitiaRoute, ROUTE_CACHE_TTL_MS);
     return navitiaRoute;
   }
 
-  return routeWalkingWithOpenRouteService(event, origin, destination, id) ?? fallback;
+  return routeWalkingWithOpenRouteService(event, origin, destination, id, signal) ?? fallback;
 }
 
 async function routeWalkingWithNavitia(
@@ -120,6 +123,7 @@ async function routeWalkingWithNavitia(
   origin: NearbyJourneyPoint,
   destination: NearbyJourneyPoint,
   id?: string,
+  signal?: AbortSignal,
 ): Promise<NearbyWalkingRoute | undefined> {
   const apiKey = getServerIdfmApiKey(event);
   if (!apiKey) return undefined;
@@ -139,7 +143,8 @@ async function routeWalkingWithNavitia(
   try {
     const response = await fetchIdfmMarketplaceWithRetry(url, {
       headers: { accept: "application/json", apikey: apiKey },
-    });
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]) : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    }, { coordinator: getIdfmRateGateBinding(event) });
     if (!response.ok) return undefined;
     const payload = await response.json() as { journeys?: RawNavitiaJourney[] };
     const journey = (payload.journeys ?? []).find(isWalkingOnlyJourney);
@@ -176,6 +181,7 @@ export async function routeWalkingWithOpenRouteService(
   origin: NearbyJourneyPoint,
   destination: NearbyJourneyPoint,
   id?: string,
+  signal?: AbortSignal,
 ): Promise<NearbyWalkingRoute> {
   const fallback = createStraightLineWalkingRoute(origin, destination, id);
   const config = getOpenRouteServiceConfig(event);
@@ -187,6 +193,7 @@ export async function routeWalkingWithOpenRouteService(
 
   try {
     const response = await fetchWithTimeout(`${config.root}/v2/directions/${OPEN_ROUTE_SERVICE_PROFILE}/geojson`, {
+      signal,
       method: "POST",
       headers: {
         accept: "application/geo+json, application/json",
@@ -354,13 +361,21 @@ export async function matrixWalkingWithPreferredProvider(
   }
 
   const routes: NearbyWalkingRoute[] = [];
+  // Bound the whole server fan-out, even for callers sending a larger matrix.
+  // An expired batch returns explicit, uncached approximations for the remainder.
+  const deadline = AbortSignal.timeout(30_000);
   for (let index = 0; index < limitedDestinations.length; index += PREFERRED_MATRIX_CONCURRENCY) {
+    if (deadline.aborted) {
+      routes.push(...limitedDestinations.slice(index).map((destination) => createStraightLineWalkingRoute(origin, destination, destination.id)));
+      break;
+    }
     const batch = limitedDestinations.slice(index, index + PREFERRED_MATRIX_CONCURRENCY);
     routes.push(...await Promise.all(batch.map((destination) => routeWalkingWithPreferredProvider(
       event,
       origin,
       destination,
       destination.id,
+      deadline,
     ))));
   }
   return routes;
@@ -386,9 +401,7 @@ export async function fetchOpenRouteServiceHealth(event: H3Event): Promise<Respo
 }
 
 function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timeout));
+  return fetchBufferedWithTimeout(url, init, fetch, REQUEST_TIMEOUT_MS);
 }
 
 function normalizeCoordinates(value: unknown): NearbyJourneyPoint[] | undefined {

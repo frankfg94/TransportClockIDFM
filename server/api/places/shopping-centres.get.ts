@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: "Shopping centre query is outside the supported bounds." });
   }
   return {
-    provider: "openstreetmap-overpass",
-    centres: await loadNearbyShoppingCentres(lat, lon),
+    provider: "openstreetmap-compiled",
+    centres: await loadNearbyShoppingCentres(lat, lon, event),
   };
 });

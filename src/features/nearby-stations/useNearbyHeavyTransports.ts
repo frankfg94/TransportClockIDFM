@@ -1,6 +1,6 @@
 import { computed, onBeforeUnmount, onMounted, readonly, ref, watch } from "vue";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
-import { createNetworkScheduler } from "../../services/networkScheduler";
+import { runNetworkTask } from "../../services/networkScheduler";
 import { isNavitiaRateLimit } from "../../services/navitiaRateLimit";
 import { getCoordinatesDistanceMeters } from "../../services/distance";
 import { lonLatToWorld } from "../transport-map/geo/coordinateKernel";
@@ -40,7 +40,7 @@ const FUTURE_GPE_HUB_STOP_MAX_DISTANCE_METERS = 250;
 const FUTURE_GPE_DESTINATION_SNAP_MAX_DISTANCE_METERS = 100;
 // Target concurrency is already bounded by the resolver. This wrapper only
 // gives each provider call a deadline and releases it when the origin changes.
-const runHeavyProbe = createNetworkScheduler(Infinity);
+const runHeavyProbe = runNetworkTask;
 
 export interface NearbyHeavyTransportSource {
   origin: { value?: { lon: number; lat: number } };

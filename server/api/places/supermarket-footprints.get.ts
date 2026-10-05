@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: "Supermarket footprint query is outside the supported bounds." });
   }
   return {
-    provider: "openstreetmap-overpass",
-    supermarketFootprints: await loadNearbySupermarketFootprints(lat, lon),
+    provider: "openstreetmap-compiled",
+    supermarketFootprints: await loadNearbySupermarketFootprints(lat, lon, event),
   };
 });

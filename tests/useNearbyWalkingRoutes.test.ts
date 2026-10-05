@@ -66,7 +66,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 
 describe("useNearbyWalkingRoutes", () => {
   it("reports completed and remaining matrix items while a group is loading", async () => {
-    const places = Array.from({ length: 49 }, (_, index) => placeFor(index));
+    const places = Array.from({ length: 7 }, (_, index) => placeFor(index));
     let callCount = 0;
     let releaseSecondBatch: ((routes: NearbyWalkingRoute[]) => void) | undefined;
     mocks.matrix.mockImplementation(async (
@@ -88,23 +88,25 @@ describe("useNearbyWalkingRoutes", () => {
     await vi.waitFor(() => expect(mocks.matrix).toHaveBeenCalledTimes(2));
 
     expect(walking.placeLoadProgress.value["food-shopping"]).toEqual({
-      completed: 48,
-      total: 49,
+      completed: 6,
+      total: 7,
       remaining: 1,
     });
     expect(walking.isLoadingPlaces.value).toBe(true);
+    expect(walking.placeRoutes.value["place:0"]?.durationSeconds).toBe(360);
+    expect(walking.placeRoutes.value["place:6"]).toBeUndefined();
 
     vi.useFakeTimers();
-    releaseSecondBatch?.([routeFor("place:48", places[48]!.lon, places[48]!.lat)]);
+    releaseSecondBatch?.([routeFor("place:6", places[6]!.lon, places[6]!.lat)]);
     await pending;
 
     expect(walking.placeLoadProgress.value["food-shopping"]).toEqual({
-      completed: 49,
-      total: 49,
+      completed: 7,
+      total: 7,
       remaining: 0,
     });
     expect(walking.isLoadingPlaces.value).toBe(false);
-    expect(walking.placeRoutes.value["place:48"]?.durationSeconds).toBe(360);
+    expect(walking.placeRoutes.value["place:6"]?.durationSeconds).toBe(360);
 
     vi.advanceTimersByTime(620);
     expect(walking.placeLoadProgress.value["food-shopping"]).toBeUndefined();

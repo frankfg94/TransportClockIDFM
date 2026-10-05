@@ -15,6 +15,18 @@ function deferred() {
 afterEach(() => vi.useRealTimers());
 
 describe("nearby network scheduler", () => {
+  it("reuses a parent slot and gives queued work a fresh deadline", async () => {
+    vi.useFakeTimers();
+    const run = createNetworkScheduler(1, 100);
+    const first = run(async () => new Promise((resolve) => setTimeout(resolve, 80)));
+    const nested = run((signal) => run(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 90));
+      return "completed";
+    }, signal));
+    await vi.advanceTimersByTimeAsync(170);
+    await first;
+    expect(await nested).toBe("completed");
+  });
   it("changes concurrency without cancelling active work and drains FIFO when raised", async () => {
     const run = createNetworkScheduler(2);
     const bodies = Array.from({ length: 5 }, deferred);
@@ -113,8 +125,8 @@ describe("nearby network scheduler", () => {
     expect((await results).every((result) => result.status === "rejected")).toBe(true);
   });
 
-  it("defaults to unlimited only in dev and honors explicit overrides", () => {
-    expect(resolveUnlimitedNetwork(undefined, true)).toBe(true);
+  it("uses the same bounded default in dev and production and honors explicit overrides", () => {
+    expect(resolveUnlimitedNetwork(undefined, true)).toBe(false);
     expect(resolveUnlimitedNetwork(undefined, false)).toBe(false);
     expect(resolveUnlimitedNetwork("false", true)).toBe(false);
     expect(resolveUnlimitedNetwork(" TRUE ", false)).toBe(true);

@@ -646,10 +646,10 @@ describe("useNearbyNeighborhoodScore", () => {
       destination: expect.objectContaining({ id: expect.stringMatching(/^green-space:green-domaine:/u) }),
       datetime: "20260907T090000",
     }), expect.any(AbortSignal));
-    expect(score.result.value.categories
+    await vi.waitFor(() => expect(score.result.value.categories
       .find((category) => category.id === "nature-leisure")
-      ?.positiveFacts.some((fact) => fact.kind === "greenSpaceTransitNearby" && fact.labelValues?.lines === "T10"))
-      .toBe(true);
+      ?.positiveFacts.some((fact) => fact.kind === "greenSpaceTransitNearby" && fact.labelValues?.lines === "Tramway T10"))
+      .toBe(true));
     wrapper.unmount();
     vi.unstubAllGlobals();
   });

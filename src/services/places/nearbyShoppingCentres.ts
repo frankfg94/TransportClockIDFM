@@ -2,15 +2,18 @@ import type { NearbyMajorShoppingCentre } from "../../features/nearby-stations/n
 import type { NearbySupermarketFootprint } from "../../features/nearby-stations/neighborhood/supermarkets";
 import type { GeocoderPoint } from "../../features/transport-map/contracts/geocoder";
 import { toServerApiUrl } from "../serverApi";
+import { runNetworkTask } from "../networkScheduler";
 
 export async function fetchNearbyShoppingCentres(
   origin: Pick<GeocoderPoint, "lat" | "lon">,
   signal?: AbortSignal,
 ): Promise<NearbyMajorShoppingCentre[]> {
   const query = new URLSearchParams({ lat: String(origin.lat), lon: String(origin.lon) });
-  const response = await fetch(toServerApiUrl(`/api/places/shopping-centres?${query.toString()}`), { signal });
-  if (!response.ok) throw new Error(`shopping-centres-${response.status}`);
-  const payload = await response.json() as { centres?: unknown };
+  const payload = await runNetworkTask(async (requestSignal) => {
+    const response = await fetch(toServerApiUrl(`/api/places/shopping-centres?${query.toString()}`), { signal: requestSignal });
+    if (!response.ok) throw new Error(`shopping-centres-${response.status}`);
+    return await response.json() as { centres?: unknown };
+  }, signal);
   if (!Array.isArray(payload.centres)) throw new Error("shopping-centres-incomplete-response");
   return payload.centres.filter(isNearbyMajorShoppingCentre);
 }
@@ -20,9 +23,11 @@ export async function fetchNearbySupermarketFootprints(
   signal?: AbortSignal,
 ): Promise<NearbySupermarketFootprint[]> {
   const query = new URLSearchParams({ lat: String(origin.lat), lon: String(origin.lon) });
-  const response = await fetch(toServerApiUrl(`/api/places/supermarket-footprints?${query.toString()}`), { signal });
-  if (!response.ok) throw new Error(`supermarket-footprints-${response.status}`);
-  const payload = await response.json() as { supermarketFootprints?: unknown };
+  const payload = await runNetworkTask(async (requestSignal) => {
+    const response = await fetch(toServerApiUrl(`/api/places/supermarket-footprints?${query.toString()}`), { signal: requestSignal });
+    if (!response.ok) throw new Error(`supermarket-footprints-${response.status}`);
+    return await response.json() as { supermarketFootprints?: unknown };
+  }, signal);
   if (!Array.isArray(payload.supermarketFootprints)) throw new Error("supermarket-footprints-incomplete-response");
   return payload.supermarketFootprints.filter(isNearbySupermarketFootprint);
 }

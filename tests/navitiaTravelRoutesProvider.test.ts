@@ -6,6 +6,14 @@ beforeEach(() => { vi.resetModules(); mocks.fetch.mockReset(); });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("shared Navitia journeys", () => {
+  it("preserves the active scheduler signal across the real provider boundary", async () => {
+    const { runNetworkTask } = await import("../src/services/networkScheduler");
+    const { createNavitiaTravelRoutesProvider } = await import("../src/services/travelRoutes/navitiaTravelRoutesProvider");
+    mocks.fetch.mockImplementation((_request, { signal }) => runNetworkTask(async () => [], signal));
+    const result = await runNetworkTask((signal) => createNavitiaTravelRoutesProvider().findJourneys(request, signal));
+    expect(result).toEqual([]);
+    expect(mocks.fetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
   it("reuses persistent successes after reload and refreshes them after expiry", async () => {
     vi.useFakeTimers();
     const stored = new Map<string, string>();

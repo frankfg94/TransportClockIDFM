@@ -12,7 +12,8 @@ import {
   getNearbyWalkingRouteMatrix,
 } from "../../services/nearbyWalkingRoutes";
 
-const MATRIX_BATCH_SIZE = 48;
+// Keep one batch below the HTTP deadline even when each route needs PRIM.
+const MATRIX_BATCH_SIZE = 6;
 
 export interface NearbyWalkingLoadProgress {
   completed: number;
@@ -136,6 +137,14 @@ export function useNearbyWalkingRoutes() {
           if (route.id) next[route.id] = route;
         }
         if (token !== placeRequestTokens.get(scope)) return;
+        if (routes.some((route) => route.fallback || route.provider === "straight-line")) {
+          error.value = new Error("walking-routes-partial");
+        }
+        const merged = { ...placeRoutes.value };
+        for (const [placeId, route] of Object.entries(next)) {
+          if (!directPlaceRouteIds.has(placeId) && route) merged[placeId] = route;
+        }
+        placeRoutes.value = merged;
         completed += batch.length;
         updatePlaceLoadProgress(scope, { completed, total: missingPlaces.length });
       }

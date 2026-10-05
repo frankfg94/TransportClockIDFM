@@ -2,6 +2,7 @@ import type {
   GeocoderPlaceCategory,
   GeocoderPoint,
 } from "../../features/transport-map/contracts/geocoder.js";
+import { elementAreaSquareMeters } from "./placeSurface.js";
 
 export const PLACES_DATA_SCHEMA_VERSION = 1 as const;
 export const PLACES_DATASET_ID = "osm-places-by-commune" as const;
@@ -110,6 +111,8 @@ export interface CompiledPlaceRecord {
   lat: number;
   category: GeocoderPlaceCategory;
   kind: string;
+  /** Verified closed OSM footprint, computed during publication. Never inferred. */
+  areaM2?: number;
   rankingCategory?: PlacesRankingCategory;
   address?: string;
   city?: string;
@@ -165,6 +168,9 @@ export interface PlacesManifestUnassigned {
 }
 
 export interface CompiledPlacesManifest {
+  /** Compact commercial index derived from the same commune records. */
+  commercial?: PlaceAssetMetadata;
+  surfaceCoverage?: { generatedAt: string; eligible: number; observed: number; withSurface: number };
   schemaVersion: typeof PLACES_DATA_SCHEMA_VERSION;
   datasetId: typeof PLACES_DATASET_ID;
   generatedAt: string;
@@ -352,6 +358,7 @@ export function normalizeCompiledPlace(
     Object.entries(tags).filter(([key, value]) => OSM_PRESERVED_TAG_KEYS.has(key) && typeof value === "string"),
   );
   const address = formatAddress(tags);
+  const areaM2 = elementAreaSquareMeters(element);
   return {
     id: `${element.type ?? "element"}:${element.id}`,
     name,
@@ -362,6 +369,7 @@ export function normalizeCompiledPlace(
     lat,
     category: classifyPlaceCategory(tags),
     kind,
+    ...(areaM2 === undefined ? {} : { areaM2: Math.round(areaM2) }),
     ...(rankingCategory ? { rankingCategory } : {}),
     ...(address ? { address } : {}),
     ...(firstTagValue(tags["addr:city"]) ? { city: firstTagValue(tags["addr:city"]) } : {}),

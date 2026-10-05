@@ -108,16 +108,20 @@ par onglet en production, jusqu'à la lecture complète de la réponse. Chaque
 appel dispose de 45 secondes après son démarrage ; l'attente dans la file ne
 consomme pas ce délai. Les appels annulés en attente sont retirés de la file.
 
-`UNLIMITED_NETWORK` est activé par défaut avec le serveur de développement local,
-et désactivé par défaut dans les builds de production, quel que soit l'hébergeur
+`UNLIMITED_NETWORK` est désactivé par défaut avec le serveur de développement local
+et dans les builds de production, quel que soit l'hébergeur
 (y compris Capacitor). `UNLIMITED_NETWORK=true` supprime cette limite de concurrence ;
-`UNLIMITED_NETWORK=false` l'impose aussi en local. Redémarrer le serveur de
+`UNLIMITED_NETWORK=false` maintient cette limite. Redémarrer le serveur de
 développement ou reconstruire le frontend après modification. Sur Cloudflare
 payant, activer explicitement la variable de build si souhaité : le forfait
 n'est pas détecté automatiquement. Le délai maximal et les protections PRIM
 côté serveur restent actifs. Cette file réduit les rafales, pas le nombre total
 d'appels ni les quotas journaliers ; elle ne constitue pas une limite globale
 entre plusieurs utilisateurs.
+
+Les surfaces commerciales utilisent les JSON « places » précompilés. Voir
+[données, budgets et régulateur partagé PRIM](docs/nearby-network-and-places.md)
+pour la compilation des surfaces et l'activation du binding `IDFM_RATE_GATE`.
 
 Dans les paramètres « Écran et navigation », « Appels réseau simultanés » permet
 de choisir Automatique, Limités à 4 appels ou Illimités. Ce choix est enregistré

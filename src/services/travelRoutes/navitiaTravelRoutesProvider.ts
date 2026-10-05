@@ -1,4 +1,5 @@
 import { fetchNavitiaJourneys } from "../idfm";
+import { runNetworkTask } from "../networkScheduler";
 import type { NearbyJourney, NearbyJourneyRequest, TravelRoutesProvider } from "../../features/nearby-stations/nearbyHeavyTransports";
 
 interface CachedJourney { expiresAt: number; journeys: NearbyJourney[] }
@@ -74,14 +75,26 @@ export function createNavitiaTravelRoutesProvider(): TravelRoutesProvider {
       });
       const cached = cache.get(key);
       if (cached && cached.expiresAt > Date.now()) return Promise.resolve(structuredClone(cached.journeys));
+      const storeJourneys = (journeys: NearbyJourney[]) => {
+        cache.set(key, { journeys: structuredClone(journeys), expiresAt: Date.now() + (request.datetime ? 15 * 60_000 : 60_000) });
+        saveCache();
+        return journeys;
+      };
+      // An orchestrated source already owns a slot and deadline. Replacing its
+      // signal with an independent shared-request controller would queue the
+      // actual HTTP behind its parent, deadlocking when all four slots are used.
+      if (signal && runNetworkTask.ownsSignal(signal)) {
+        return fetchNavitiaJourneys(request, { signal }).then((journeys) => {
+          signal.throwIfAborted();
+          return storeJourneys(journeys);
+        });
+      }
       let entry = pending.get(key);
       if (!entry || entry.controller.signal.aborted) {
         const controller = new AbortController();
         const promise = fetchNavitiaJourneys(request, { signal: controller.signal }).then((journeys) => {
           controller.signal.throwIfAborted();
-          cache.set(key, { journeys: structuredClone(journeys), expiresAt: Date.now() + (request.datetime ? 15 * 60_000 : 60_000) });
-          saveCache();
-          return journeys;
+          return storeJourneys(journeys);
         });
         entry = { controller, promise, users: 0 };
         pending.set(key, entry);

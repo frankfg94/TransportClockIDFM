@@ -62,7 +62,7 @@ export function getHomeAssistantTransitApi(event: H3Event): HomeAssistantTransit
         status: snapshot.response.configured ? "normal" : "error",
       };
     },
-    requestOptions: createServerIdfmRequestOptions(apiKey),
+    requestOptions: createServerIdfmRequestOptions(apiKey, event),
   });
 
   apiInstances.set(apiKey, api);

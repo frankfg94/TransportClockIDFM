@@ -39,7 +39,7 @@ const mocks = vi.hoisted(() => ({
       id: `indicator-${index}`,
       status: "ready",
       datasets: [],
-    })) as Array<{ id: string; status: "ready" | "loading"; datasets: never[] }> },
+    })) as Array<{ id: string; status: "ready" | "loading"; datasets: Array<{ id: string; required: boolean; status: "ready" | "loading" }> }> },
     refresh: vi.fn(async () => undefined),
   },
 }));
@@ -67,6 +67,7 @@ vi.mock("../src/features/nearby-stations/useServiceQuality", () => ({
 }));
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
   mocks.routeState.query = {};
   mocks.nearby.selectedPlace.value = undefined;
@@ -85,6 +86,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
   mocks.useServiceQuality.mockReturnValue({ data: { value: undefined }, isLoading: { value: false }, error: { value: undefined }, retry: vi.fn(async () => undefined) });
 });
 
@@ -184,7 +186,7 @@ describe("NearbyNeighborhoodScorePage", () => {
     mocks.score.criteria.value = Array.from({ length: 7 }, (_, index) => ({
       id: `indicator-${index}`,
       status: index === 0 ? "loading" as const : "ready" as const,
-      datasets: [],
+      datasets: [{ id: `source-${index}`, required: true, status: index === 0 ? "loading" as const : "ready" as const }],
     }));
     mocks.score.error.value = new Error("navitia unavailable");
     mocks.score.errorSource.value = "routes";

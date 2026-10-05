@@ -1,3 +1,6 @@
+import { fetchBufferedWithTimeout } from "./boundedFetch";
+import { fetchWithDistributedRateGate, type IdfmRateGateNamespace } from "./distributedRateGate";
+
 export const IDFM_MARKETPLACE_BASE_URL =
   "https://prim.iledefrance-mobilites.fr/marketplace";
 
@@ -6,6 +9,7 @@ const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 30_000;
 const MAX_RATE_LIMIT_COOLDOWN_MS = 24 * 60 * 60_000;
 
 export interface IdfmMarketplaceFetchOptions {
+  coordinator?: IdfmRateGateNamespace;
   fetchImpl?: typeof fetch;
   rateGate?: IdfmMarketplaceRateGate;
   /** @deprecated 429 responses are circuit-broken instead of retried. */
@@ -35,7 +39,6 @@ export class IdfmMarketplaceRateGate {
   private readonly wait: (durationMs: number) => Promise<void>;
   private readonly cooldownUntilByScope = new Map<string, number>();
   private nextRequestAt = 0;
-  private reservationTail: Promise<void> = Promise.resolve();
 
   constructor(options: IdfmMarketplaceRateGateOptions = {}) {
     this.defaultCooldownMs = options.defaultCooldownMs ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS;
@@ -51,7 +54,7 @@ export class IdfmMarketplaceRateGate {
     fetchImpl: typeof fetch = fetch,
   ): Promise<Response> {
     const scope = getIdfmRateLimitScope(upstreamUrl);
-    const cooldownResponse = await this.reserveRequestSlot(scope);
+    const cooldownResponse = await this.reserveRequestSlot(scope, init.signal ?? undefined);
 
     if (cooldownResponse) {
       return cooldownResponse;
@@ -75,26 +78,22 @@ export class IdfmMarketplaceRateGate {
     return response;
   }
 
-  private async reserveRequestSlot(scope: string): Promise<Response | undefined> {
-    let releaseReservation: (() => void) | undefined;
-    const previousReservation = this.reservationTail;
-    this.reservationTail = new Promise<void>((resolve) => {
-      releaseReservation = resolve;
-    });
-
-    await previousReservation;
-
-    try {
+  private async reserveRequestSlot(scope: string, signal?: AbortSignal): Promise<Response | undefined> {
+      signal?.throwIfAborted();
       const initialCooldown = this.createCooldownResponse(scope);
 
       if (initialCooldown) {
         return initialCooldown;
       }
 
-      const waitMs = Math.max(0, this.nextRequestAt - this.now());
+      // Reserve synchronously. Never depend on a Promise owned by another
+      // Worker invocation, which may disappear when that client reloads.
+      const startsAt = Math.max(this.nextRequestAt, this.now());
+      this.nextRequestAt = startsAt + this.minRequestIntervalMs;
+      const waitMs = Math.max(0, startsAt - this.now());
 
       if (waitMs > 0) {
-        await this.wait(waitMs);
+        await waitForReservation(this.wait, waitMs, signal);
       }
 
       const delayedCooldown = this.createCooldownResponse(scope);
@@ -103,11 +102,8 @@ export class IdfmMarketplaceRateGate {
         return delayedCooldown;
       }
 
-      this.nextRequestAt = this.now() + this.minRequestIntervalMs;
+      signal?.throwIfAborted();
       return undefined;
-    } finally {
-      releaseReservation?.();
-    }
   }
 
   private createCooldownResponse(scope: string): Response | undefined {
@@ -150,11 +146,26 @@ export async function fetchIdfmMarketplaceWithRetry(
   init: RequestInit,
   options: IdfmMarketplaceFetchOptions = {},
 ): Promise<Response> {
-  return (options.rateGate ?? sharedIdfmMarketplaceRateGate).fetch(
-    upstreamUrl,
-    init,
-    options.fetchImpl ?? fetch,
-  );
+  return fetchBufferedWithTimeout(upstreamUrl, init, (input, boundedInit) =>
+    options.coordinator
+      ? fetchWithDistributedRateGate(options.coordinator, upstreamUrl, boundedInit ?? {}, options.fetchImpl ?? fetch)
+      : (options.rateGate ?? sharedIdfmMarketplaceRateGate).fetch(
+      new URL(String(input)), boundedInit ?? {}, options.fetchImpl ?? fetch,
+    ));
+}
+
+async function waitForReservation(waitImpl: (ms: number) => Promise<void>, ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return waitImpl(ms);
+  signal.throwIfAborted();
+  let cancel: () => void = () => {};
+  try {
+    await Promise.race([waitImpl(ms), new Promise<never>((_, reject) => {
+      cancel = () => reject(signal.reason);
+      signal.addEventListener("abort", cancel, { once: true });
+    })]);
+  } finally {
+    signal.removeEventListener("abort", cancel);
+  }
 }
 
 export function getIdfmRetryDelayMs(

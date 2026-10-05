@@ -1,0 +1,8 @@
+{
+  "name": "transport-clock-idfm-rate-gate",
+  "main": "index.js",
+  "compatibility_date": "2026-06-30",
+  "workers_dev": false,
+  "durable_objects": { "bindings": [{ "name": "IDFM_RATE_GATE", "class_name": "IdfmRateGate" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["IdfmRateGate"] }]
+}

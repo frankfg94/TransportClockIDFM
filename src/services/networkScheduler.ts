@@ -8,6 +8,7 @@ declare const __UNLIMITED_NETWORK__: boolean | undefined;
 export function createNetworkScheduler(concurrency = 4, timeoutMs = 45_000) {
   let active = 0;
   const queue: Array<() => void> = [];
+  const activeSignals = new WeakSet<AbortSignal>();
 
   function drain(): void {
     while (active < concurrency && queue.length > 0) queue.shift()!();
@@ -17,6 +18,14 @@ export function createNetworkScheduler(concurrency = 4, timeoutMs = 45_000) {
     task: (signal: AbortSignal) => Promise<T>,
     signal?: AbortSignal,
   ): Promise<T> {
+    // A source can call a provider which uses this same scheduler. Reuse its
+    // slot and deadline rather than waiting behind ourselves in a second FIFO.
+    if (signal && activeSignals.has(signal)) {
+      return Promise.resolve().then(() => {
+        signal.throwIfAborted();
+        return task(signal);
+      });
+    }
     return new Promise<T>((resolve, reject) => {
       if (signal?.aborted) {
         reject(signal.reason);
@@ -31,6 +40,7 @@ export function createNetworkScheduler(concurrency = 4, timeoutMs = 45_000) {
         signal?.removeEventListener("abort", cancelQueued);
         active++;
         const controller = new AbortController();
+        activeSignals.add(controller.signal);
         const cancel = () => controller.abort(signal?.reason);
         signal?.addEventListener("abort", cancel, { once: true });
         const timer = setTimeout(
@@ -53,6 +63,7 @@ export function createNetworkScheduler(concurrency = 4, timeoutMs = 45_000) {
           .then(resolve, reject)
           .finally(() => {
             clearTimeout(timer);
+            activeSignals.delete(controller.signal);
             signal?.removeEventListener("abort", cancel);
             active--;
             drain();
@@ -67,6 +78,7 @@ export function createNetworkScheduler(concurrency = 4, timeoutMs = 45_000) {
   }
 
   return Object.assign(run, {
+    ownsSignal(signal: AbortSignal): boolean { return activeSignals.has(signal); },
     setConcurrency(value: number): void {
       concurrency = value;
       drain();
@@ -75,7 +87,7 @@ export function createNetworkScheduler(concurrency = 4, timeoutMs = 45_000) {
 }
 
 // Vite embeds only this non-secret boolean. Production and standalone tests
-// default to bounded concurrency; Nuxt enables unlimited local development.
+// default to bounded concurrency in every environment.
 const environmentUnlimited = typeof __UNLIMITED_NETWORK__ !== "undefined" && __UNLIMITED_NETWORK__;
 export const runNetworkTask = createNetworkScheduler(environmentUnlimited ? Infinity : 4);
 

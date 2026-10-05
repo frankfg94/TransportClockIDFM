@@ -7,6 +7,7 @@ import {
   type NearbyWalkingRouteRequest,
 } from "../features/nearby-stations/nearbyWalkingRoutes";
 import { toServerApiUrl } from "./serverApi";
+import { runNetworkTask } from "./networkScheduler";
 
 // v3 invalidates routes generated before malformed provider geometry tails
 // were removed before connecting the route to the requested POI.
@@ -161,14 +162,14 @@ export async function getNearbyWalkingRoute(
   if (cached) return cached;
   const fallback = createStraightLineWalkingRoute(request.origin, request.destination, request.id);
   try {
-    const response = await fetch(toServerApiUrl("/api/walking/route"), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(request),
-      signal,
-    });
-    if (!response.ok) throw new Error(`walking-route-${response.status}`);
-    const route = await response.json() as NearbyWalkingRoute;
+    const route = await runNetworkTask(async (requestSignal) => {
+      const response = await fetch(toServerApiUrl("/api/walking/route"), {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify(request), signal: requestSignal,
+      });
+      if (!response.ok) throw new Error(`walking-route-${response.status}`);
+      return await response.json() as NearbyWalkingRoute;
+    }, signal);
     if (!isWalkingRoute(route)) return fallback;
     const resolved = cloneWalkingRoute(route, request.id);
     persistWalkingRoute(request, resolved);
@@ -198,14 +199,14 @@ export async function getNearbyWalkingRouteMatrix(
   }
 
   try {
-    const response = await fetch(toServerApiUrl("/api/walking/matrix"), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ origin, destinations: missingDestinations }),
-      signal,
-    });
-    if (!response.ok) throw new Error(`walking-matrix-${response.status}`);
-    const payload = await response.json() as { routes?: unknown };
+    const payload = await runNetworkTask(async (requestSignal) => {
+      const response = await fetch(toServerApiUrl("/api/walking/matrix"), {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ origin, destinations: missingDestinations }), signal: requestSignal,
+      });
+      if (!response.ok) throw new Error(`walking-matrix-${response.status}`);
+      return await response.json() as { routes?: unknown };
+    }, signal);
     const routes = Array.isArray(payload.routes) ? payload.routes : [];
     const routesById = new Map(routes.filter(isWalkingRoute).map((route) => [route.id, route]));
     const fetchedRoutes = new Map<string, NearbyWalkingRoute>();
