@@ -1,6 +1,7 @@
 import type { GlobalMapLine, GlobalMapMode, GlobalMapStation } from "../contracts/manifest.js";
 import type { TransportMapNetwork } from "../contracts/network.js";
 import { queryStationsWithinRadius, type RadiusQueryResult } from "./radiusQuery.js";
+import { GEODESIC_EARTH_RADIUS_METERS } from "../../../services/distance.js";
 
 /**
  * Keep station correspondences aligned with the radius used by the global map
@@ -32,8 +33,19 @@ export function queryStationCorrespondenceStations(
   anchor: Pick<GlobalMapStation, "lon" | "lat">,
   radiusMeters = STATION_CORRESPONDENCE_RADIUS_METERS,
 ): RadiusQueryResult[] {
+  // On a sphere the latitude separation is a lower bound on geodesic
+  // distance. Reject impossible candidates before allocating radius-query
+  // results and computing trigonometry for the entire network per hub.
+  // Retain the exact shared radius calculation and ordering for survivors.
+  // The tolerance protects points on the boundary from floating-point drift.
+  const latitudeDelta = radiusMeters / GEODESIC_EARTH_RADIUS_METERS * 180 / Math.PI + 1e-10;
+  const minLatitude = anchor.lat - latitudeDelta;
+  const maxLatitude = anchor.lat + latitudeDelta;
+  const candidates = Number.isFinite(radiusMeters) && radiusMeters >= 0 && Number.isFinite(anchor.lat)
+    ? network.stations.filter((station) => station.lat >= minLatitude && station.lat <= maxLatitude)
+    : network.stations;
   return queryStationsWithinRadius(
-    network.stations,
+    candidates,
     { lon: anchor.lon, lat: anchor.lat },
     radiusMeters,
   );

@@ -262,6 +262,7 @@ function handleClusterGroupingDistanceUpdate(value: number): void {
         :active-line-id="activeLineId"
         :hovered-line-id="hoveredLineId"
         :cluster-grouping-distance-meters="nearby.clusterGroupingDistanceMeters.value"
+        @update:radius="nearby.radius.value = $event"
         @camera-change="handleCameraChange"
         @hover-line="handleHoverLine"
         @leave-line="handleLeaveLine"

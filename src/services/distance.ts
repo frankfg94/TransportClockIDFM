@@ -2,6 +2,8 @@ const DISTANCE_KM_FORMATTER = new Intl.NumberFormat("fr-FR", {
   maximumFractionDigits: 1,
 });
 
+export const GEODESIC_EARTH_RADIUS_METERS = 6_371_000;
+
 export function getCoordinatesDistanceKm(
   sourceLatValue: number,
   sourceLonValue: number,
@@ -23,7 +25,6 @@ export function getCoordinatesDistanceMeters(
   targetLatValue: number,
   targetLonValue: number,
 ): number {
-  const earthRadiusMeters = 6_371_000;
   const sourceLat = toRadians(sourceLatValue);
   const targetLat = toRadians(targetLatValue);
   const deltaLat = toRadians(targetLatValue - sourceLatValue);
@@ -33,7 +34,7 @@ export function getCoordinatesDistanceMeters(
     Math.cos(sourceLat) * Math.cos(targetLat) * Math.sin(deltaLon / 2) ** 2;
 
   return (
-    2 * earthRadiusMeters * Math.atan2(
+    2 * GEODESIC_EARTH_RADIUS_METERS * Math.atan2(
       Math.sqrt(haversine),
       Math.sqrt(Math.max(0, 1 - haversine)),
     )

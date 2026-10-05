@@ -1929,6 +1929,14 @@ export const fr = {
       legend: "{activity} : part des lieux recensés du quartier (0–100 %)",
       tooltipCityShare: "{activity} : {count} ({percent} % du total en ville)",
     },
+    chaosZoom: {
+      button: "Lancer le test de performance de la carte Nearby",
+      cancel: "Arrêter le test de performance",
+      running: "Test de performance Nearby en cours… {step}/{total}",
+      downloadReport: "Télécharger le rapport de performance Nearby au format JSON",
+      reportReady: "Rapport JSON du test Nearby prêt à télécharger.",
+      failed: "Le test de performance Nearby a échoué; son rapport JSON est disponible.",
+    },
     pageEyebrow: "À proximité",
     pageTitle: "Stations proches",
     pageSubtitle:

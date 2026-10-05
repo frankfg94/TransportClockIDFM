@@ -1860,6 +1860,7 @@ onBeforeUnmount(() => {
         :travel-panel-open="travelPanelOpen"
         :travel-walking-segments="travelWalkingSegments"
         :schedule-state="schedules.scheduleState"
+        @update:radius="nearby.radius.value = $event"
         @camera-change="lineFlow.handleCameraChange"
         @hover-line="lineFlow.handleHoverLine"
         @leave-line="lineFlow.handleLeaveLine"

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useSlots, watch } from "vue";
-import { BusFront, Check, ChevronRight, Ear, EllipsisVertical, Euro, ExternalLink, Footprints, Gauge, Layers, LoaderCircle, Map as MapIcon, MapPin, Maximize2, Minimize2, Minus, Navigation, Plus, Radar, Route, Satellite, Store, TrainFront, TramFront, Wind, ZoomIn, ZoomOut, X } from "lucide-vue-next";
+import { Activity, BusFront, Check, ChevronRight, Download, Ear, EllipsisVertical, Euro, ExternalLink, Footprints, Gauge, Layers, LoaderCircle, Map as MapIcon, MapPin, Maximize2, Minimize2, Minus, Navigation, Plus, Radar, Route, Satellite, Store, TrainFront, TramFront, Wind, ZoomIn, ZoomOut, X } from "lucide-vue-next";
 import AppRightPanel from "../../components/AppRightPanel.vue";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import NearbyPlaceCanvas from "./NearbyPlaceCanvas.vue";
@@ -94,6 +94,7 @@ import {
 } from "./useNearbyStationIsochrones";
 import { mergeNearbyIsochroneGeometries } from "./nearbyIsochroneUnion";
 import { useNearbyNoiseZones } from "./useNearbyNoiseZones";
+import { useNearbyChaosZoom } from "./nearbyChaosZoom";
 import {
   DVF_GRID_CELL_SIZE_METERS,
   getDvfDataProvider,
@@ -273,6 +274,7 @@ const emit = defineEmits<{
   toggleLine: [stationId: string, lineId: string];
   details: [stationId: string, lineId: string];
   cameraChange: [camera: CameraState];
+  "update:radius": [value: number];
   hoverLine: [lineId: string];
   leaveLine: [lineId: string];
   activateLine: [lineId: string, focusedStationId?: string, ghostLineIds?: string | readonly string[]];
@@ -403,6 +405,55 @@ const zoomRange = ref({
   max: camera.value.zoom + NEARBY_ZOOM_IN_DELTA,
 });
 const zoomReference = ref(camera.value.zoom);
+const nearbyChaosZoom = useNearbyChaosZoom({
+  getElement: () => root.value,
+  getCamera: () => camera.value,
+  getRadius: () => props.radius,
+  getZoomRange: () => zoomRange.value,
+  getZoomReference: () => zoomReference.value,
+  getMapContext: () => ({
+    view: cityViewEnabled.value ? "city" : "neighborhood",
+    radiusMeters: props.radius,
+    basemap: basemapLayer.value,
+    loading: props.loading === true,
+    stationInputCount: props.stations.length,
+    visibleStationCount: displayedStations.value.length,
+    placeInputCount: eligibleMapPlaces.value.length,
+    activeModes: [...props.activeModes],
+    sidebarTab: activeSidebarTab.value,
+    layers: {
+      isochrone: isochroneEnabled.value,
+      noise: noiseZonesEnabled.value,
+      airQuality: airQualityZonesEnabled.value,
+      realEstate: cityViewRealEstateLayerEnabled.value,
+      optionalPlaces: { ...optionalPlaces.value },
+    },
+  }),
+  updateRadius: (value) => emit("update:radius", value),
+  beforeRun: () => {
+    cancelCameraAnimation();
+    flushGestureCamera();
+  },
+  flushCamera: flushGestureCamera,
+  restore: (initialCamera, initialZoomRange, initialZoomReference) => {
+    cancelCameraAnimation();
+    flushGestureCamera();
+    zoomRange.value = { ...initialZoomRange };
+    zoomReference.value = initialZoomReference;
+    const resizedCamera = resizeNearbyCamera(initialCamera) ?? initialCamera;
+    camera.value = clampNearbyCamera(resizedCamera);
+    syncNearbyBasemapReference(camera.value);
+  },
+});
+const {
+  running: nearbyChaosZoomRunning,
+  progress: nearbyChaosZoomProgress,
+  total: nearbyChaosZoomTotal,
+  report: nearbyChaosZoomReport,
+  run: runNearbyChaosZoom,
+  cancel: cancelNearbyChaosZoom,
+  downloadReport: downloadNearbyChaosZoomReport,
+} = nearbyChaosZoom;
 const hoveredStationId = ref<string>();
 const placeLayer = ref<InstanceType<typeof NearbyPlaceCanvas>>();
 const placesVisible = ref(false);
@@ -5447,7 +5498,45 @@ function mix(from: number, to: number, progress: number): number {
         >
           <ZoomOut :size="18" aria-hidden="true" />
         </button>
+        <button
+          v-if="!isPlacesPreview"
+          class="nearby-map__zoom-button nearby-map__chaos-button"
+          type="button"
+          data-nearby-map-chaos-zoom-run
+          :aria-busy="nearbyChaosZoomRunning"
+          :aria-label="t(nearbyChaosZoomRunning ? 'nearbyStations.chaosZoom.cancel' : 'nearbyStations.chaosZoom.button')"
+          :title="t(nearbyChaosZoomRunning ? 'nearbyStations.chaosZoom.cancel' : 'nearbyStations.chaosZoom.button')"
+          @click.stop="nearbyChaosZoomRunning ? cancelNearbyChaosZoom() : runNearbyChaosZoom()"
+        >
+          <X v-if="nearbyChaosZoomRunning" :size="15" aria-hidden="true" />
+          <Activity v-else :size="15" aria-hidden="true" />
+          <span v-if="nearbyChaosZoomRunning" class="nearby-map__chaos-progress">
+            {{ nearbyChaosZoomProgress }}/{{ nearbyChaosZoomTotal }}
+          </span>
+        </button>
+        <button
+          v-if="!isPlacesPreview && nearbyChaosZoomReport"
+          class="nearby-map__zoom-button nearby-map__chaos-download"
+          type="button"
+          data-nearby-map-chaos-zoom-download
+          :aria-label="t('nearbyStations.chaosZoom.downloadReport')"
+          :title="t('nearbyStations.chaosZoom.downloadReport')"
+          @click.stop="downloadNearbyChaosZoomReport"
+        >
+          <Download :size="15" aria-hidden="true" />
+        </button>
       </div>
+      <span class="nearby-map__chaos-sr-status" role="status" aria-live="polite">
+        <template v-if="nearbyChaosZoomRunning">
+          {{ t('nearbyStations.chaosZoom.running', { step: nearbyChaosZoomProgress, total: nearbyChaosZoomTotal }) }}
+        </template>
+        <template v-else-if="nearbyChaosZoomReport?.status === 'failed'">
+          {{ t('nearbyStations.chaosZoom.failed') }}
+        </template>
+        <template v-else-if="nearbyChaosZoomReport">
+          {{ t('nearbyStations.chaosZoom.reportReady') }}
+        </template>
+      </span>
       <div
         class="nearby-map__top-control-zone"
         data-nearby-map-control-zone="top"
@@ -6320,6 +6409,13 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__zoom-button { align-items: center; background: transparent; border: 0; border-radius: 9px; color: #4034df; display: flex; height: 36px; justify-content: center; padding: 0; width: 36px; }
 .nearby-map__zoom-button:hover:not(:disabled), .nearby-map__zoom-button:focus-visible { background: #ebe9ff; color: #3026c8; outline: 0; }
 .nearby-map__zoom-button:disabled { color: #a7abc5; cursor: not-allowed; opacity: .65; }
+.nearby-map__chaos-button { color: #64748b; margin-top: 2px; opacity: .72; position: relative; }
+.nearby-map__chaos-button:hover:not(:disabled), .nearby-map__chaos-button:focus-visible { background: #f1efff; color: #5146ff; opacity: 1; }
+.nearby-map__chaos-button[aria-busy="true"] { background: #f1efff; color: #5146ff; opacity: 1; }
+.nearby-map__chaos-progress { background: #5146ff; border: 1px solid #fff; border-radius: 999px; color: #fff; font-size: .48rem; font-variant-numeric: tabular-nums; font-weight: 900; line-height: 1; padding: 2px 3px; position: absolute; right: -5px; top: -4px; white-space: nowrap; }
+.nearby-map__chaos-download { color: #17864c; }
+.nearby-map__chaos-download:hover:not(:disabled), .nearby-map__chaos-download:focus-visible { background: #eaf8ef; color: #126c3c; }
+.nearby-map__chaos-sr-status { clip: rect(0, 0, 0, 0); clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
 .nearby-map__zoom-level { align-items: center; border-bottom: 1px solid rgba(81, 70, 255, .12); border-top: 1px solid rgba(81, 70, 255, .12); color: #18233f; display: flex; font-size: .68rem; font-variant-numeric: tabular-nums; font-weight: 850; justify-content: center; min-height: 28px; min-width: 36px; padding: 0 3px; }
 .nearby-map__travel-toggle { align-items: center; background: #fff; border: 1px solid rgba(81,70,255,.22); border-radius: 12px; bottom: 16px; box-shadow: 0 7px 20px rgba(15,23,42,.2); color: #4034df; display: flex; height: 44px; justify-content: center; left: 16px; padding: 0; position: absolute; width: 44px; z-index: 14; }
 .nearby-map__travel-toggle:hover, .nearby-map__travel-toggle:focus-visible, .nearby-map__travel-toggle--active { background: #5146ff; color: #fff; outline: 0; }

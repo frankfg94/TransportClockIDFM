@@ -106,8 +106,15 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
   });
 
   function scheduleStationScan(): void {
+    // Invalidate the old request immediately, including during the debounce.
+    // Otherwise a small-radius query can publish against a newly larger radius.
+    scanController?.abort();
+    isScanning.value = false;
     if (scanTimer !== undefined) window.clearTimeout(scanTimer);
-    scanTimer = window.setTimeout(() => void scanNearbyStations(), 120);
+    scanTimer = window.setTimeout(() => {
+      scanTimer = undefined;
+      void scanNearbyStations();
+    }, 120);
   }
 
   watch(enabled, (value) => {
@@ -203,38 +210,48 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
   async function scanNearbyStations(): Promise<void> {
     const place = selectedPlace.value;
     if (!place) return;
+    if (scanTimer !== undefined) window.clearTimeout(scanTimer);
+    scanTimer = undefined;
+    const requestedRadius = radius.value;
+    const requestedGrouping = clusterGroupingDistanceMeters.value;
     scanController?.abort();
     const controller = new AbortController();
     scanController = controller;
     isScanning.value = true;
+    const isCurrent = () => !disposed && !controller.signal.aborted && scanController === controller
+      && selectedPlace.value === place && radius.value === requestedRadius
+      && clusterGroupingDistanceMeters.value === requestedGrouping;
     try {
       // Source initialization is shared by all positions. Keep the manifest
       // and bootstrap request alive across a position change, while the
       // position-scoped radius query below remains abortable.
       const dataSource = await ensureSource();
+      if (!isCurrent()) return;
       const results = await dataSource.queryStationsWithinRadius(
         place.lon,
         place.lat,
-        radius.value + NEARBY_MAP_MARGIN_METERS,
+        requestedRadius + NEARBY_MAP_MARGIN_METERS,
         controller.signal,
         { catalog: options.stationCatalog ?? "full" },
       );
-      if (controller.signal.aborted) return;
+      if (!isCurrent()) return;
       transportMapNetwork.value = dataSource.getNetwork();
       stations.value = buildNearbyStationEntries(
         results,
         dataSource.getNetwork(),
         place,
-        radius.value,
-        { clusterGroupingDistanceMeters: clusterGroupingDistanceMeters.value },
+        requestedRadius,
+        { clusterGroupingDistanceMeters: requestedGrouping },
       );
       pruneSelections();
       error.value = undefined;
     } catch (cause) {
-      if (!controller.signal.aborted) error.value = normalizeError(cause, "map_data_unavailable");
+      if (isCurrent()) error.value = normalizeError(cause, "map_data_unavailable");
     } finally {
-      if (scanController === controller) scanController = undefined;
-      if (!controller.signal.aborted) isScanning.value = false;
+      if (scanController === controller) {
+        scanController = undefined;
+        isScanning.value = false;
+      }
     }
   }
 

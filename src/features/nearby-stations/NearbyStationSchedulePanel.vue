@@ -298,6 +298,7 @@ function boardContextMenu(itemId: string, event: MouseEvent): void {
         @contextmenu="boardContextMenu(item.id, $event)"
       >
         <TransitBoard
+          :active="active"
           :board="scheduleBoard(item)"
           :current-time-ms="now"
           :departures="scheduleDepartures(item)"
@@ -348,6 +349,7 @@ function boardContextMenu(itemId: string, event: MouseEvent): void {
           @contextmenu="boardContextMenu(item.id, $event)"
         >
           <TransitBoard
+            :active="active"
             :board="scheduleBoard(item)"
             :current-time-ms="now"
             :departures="scheduleDepartures(item)"

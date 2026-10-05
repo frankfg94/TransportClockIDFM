@@ -82,6 +82,8 @@ const props = withDefaults(
     trafficAlert?: BoardTrafficAlert;
     displayMode?: "grid" | "list";
     showStationChangeAction?: boolean;
+    /** Suspend layout measurements while a containing panel is inactive. */
+    active?: boolean;
   }>(),
   {
     closedSummaryMode: "last",
@@ -89,6 +91,7 @@ const props = withDefaults(
     hiddenDirectionIds: () => [],
     rateLimited: false,
     showStationChangeAction: true,
+    active: true,
   },
 );
 
@@ -114,6 +117,9 @@ const emit = defineEmits<{
 const directionFilterOpen = ref(false);
 const boardElement = ref<HTMLElement>();
 let boardHeightAnimation: BoardHeightAnimation | undefined;
+watch(() => props.active, (active) => {
+  if (!active) cancelBoardHeightAnimation();
+});
 const { d, t } = useI18n();
 
 const hiddenDirectionIdSet = computed(() => new Set(props.hiddenDirectionIds));
@@ -338,7 +344,7 @@ function finishBoardHeightAnimation(animation: BoardHeightAnimation): void {
 async function animateBoardHeight(): Promise<void> {
   const element = boardElement.value;
 
-  if (!element || prefersReducedMotion()) {
+  if (!props.active || !element || prefersReducedMotion()) {
     return;
   }
 
@@ -356,7 +362,7 @@ async function animateBoardHeight(): Promise<void> {
 
   await nextTick();
 
-  if (boardHeightAnimation !== animation || boardElement.value !== element) {
+  if (!props.active || boardHeightAnimation !== animation || boardElement.value !== element) {
     return;
   }
 
