@@ -18,9 +18,26 @@ const allowedHost = (host: string, initial: string) =>
   (initial === "94.citoyens.com" && host === "citoyens.com");
 let activeDocuments = 0;
 const documentQueue: (() => void)[] = [];
+const documentSlotWaitMs = 8_000;
 async function acquireDocumentSlot() {
-  if (activeDocuments >= 4) await new Promise<void>((resolve) => documentQueue.push(resolve));
-  else activeDocuments++;
+  if (activeDocuments < 4) {
+    activeDocuments++;
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const grant = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      resolve();
+    };
+    timer = setTimeout(() => {
+      const index = documentQueue.indexOf(grant);
+      if (index < 0) return;
+      documentQueue.splice(index, 1);
+      reject(new SourceError("timeout"));
+    }, documentSlotWaitMs);
+    documentQueue.push(grant);
+  });
 }
 function releaseDocumentSlot() {
   const next = documentQueue.shift();
@@ -178,7 +195,13 @@ export function createNewsCollector(readDocument = fetchNewsDocument, now = Date
 }
 export const newsCollector = createNewsCollector();
 let catalog:
-  { sources: NewsSource[]; state: NewsSourceResult["state"]; checkedAt: number } | undefined;
+  {
+    sources: NewsSource[];
+    state: NewsSourceResult["state"];
+    checkedAt: number;
+    errorMessage?: string;
+  }
+  | undefined;
 let catalogPending: Promise<NonNullable<typeof catalog>> | undefined;
 export async function getNewsCatalog() {
   if (catalog && Date.now() - catalog.checkedAt < NEWS_CACHE_MS) return catalog;
@@ -190,11 +213,16 @@ export async function getNewsCatalog() {
       );
       if (!sources.length) throw new Error("parse");
       catalog = { sources, state: "ready", checkedAt: Date.now() };
-    } catch {
+    } catch (error) {
+      const detail =
+        error instanceof Error && error.message.trim()
+          ? error.message.trim().slice(0, 240)
+          : "Unknown error.";
       catalog = {
         sources: catalog?.sources ?? [],
         state: catalog?.sources.length ? "stale" : "unavailable",
         checkedAt: Date.now(),
+        errorMessage: `IDFM project catalogue refresh failed: ${detail}`,
       };
     }
     return catalog;

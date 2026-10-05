@@ -29,6 +29,7 @@ const completed = ref(0);
 const total = ref(0);
 const catalogUnavailable = ref(false);
 const catalogError = ref(false);
+const catalogErrorMessage = ref("");
 const filterDialog = ref<HTMLDialogElement>();
 let requestController: AbortController | undefined;
 let generation = 0;
@@ -100,18 +101,39 @@ async function load(refresh = false) {
   loading.value = true;
   completed.value = 0;
   catalogError.value = false;
+  catalogErrorMessage.value = "";
   try {
     const response = await fetch(toServerApiUrl("/api/transport-news/sources"), {
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error("catalog");
-    const catalog = (await response.json()) as { sources: NewsSource[]; catalogState: string };
+    const catalog = (await response.json().catch(() => null)) as
+      | {
+          sources?: NewsSource[];
+          catalogState?: string;
+          catalogErrorMessage?: string;
+          message?: string;
+          detail?: string;
+        }
+      | null;
+    if (!response.ok) {
+      throw new Error(
+        [catalog?.message, catalog?.detail]
+          .filter((message): message is string => Boolean(message))
+          .join(" ") || t("news.catalogRequestFailed", { status: response.status }),
+      );
+    }
+    if (!catalog || !Array.isArray(catalog.sources)) {
+      throw new Error(t("news.catalogInvalidResponse"));
+    }
     if (run !== generation) return;
     sources.value = catalog.sources;
     catalogUnavailable.value = catalog.catalogState !== "ready";
-  } catch {
+    catalogErrorMessage.value = catalog.catalogErrorMessage ?? "";
+  } catch (error) {
     if (controller.signal.aborted) return;
     catalogError.value = true;
+    catalogErrorMessage.value =
+      error instanceof Error ? error.message : t("news.catalogInvalidResponse");
   }
   const queue = [...enabledSources.value];
   // A line-specific source is displayed first, while the other sources continue progressively.
@@ -245,7 +267,11 @@ onBeforeUnmount(() => {
       class="news-page__notice"
       role="status"
     >
-      {{ t("news.partial") }}
+      {{
+        catalogErrorMessage
+          ? t("news.catalogFailure", { message: catalogErrorMessage })
+          : t("news.partial")
+      }}
     </p>
     <section class="news-page__articles" :aria-label="t('news.title')" :aria-busy="loading">
       <article v-for="article in visibleArticles" :key="article.url" class="news-card">
