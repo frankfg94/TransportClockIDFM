@@ -169,7 +169,46 @@ describe("GlobalTransportPlanSearch", () => {
   afterEach(() => {
     wrapper?.unmount();
     wrapper = undefined;
+    vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it("keeps catalogue requests and index construction outside the opening transition", async () => {
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      transitionDuration: "0.32s",
+      transitionDelay: "0s",
+    } as CSSStyleDeclaration);
+    wrapper = mount(GlobalTransportPlanSearch, {
+      props: { stations: [station], lines: [line14], catalogReady: false },
+    });
+    const surface = wrapper.get("[data-global-map-search]").element;
+    await wrapper.get(".global-map-search__open").trigger("click");
+    await wrapper.setProps({ open: true });
+    await wrapper.get("input").trigger("focus");
+    await vi.advanceTimersByTimeAsync(300);
+    expect(wrapper.get("[data-global-map-search]").element).toBe(surface);
+    expect(wrapper.find(".global-map-search__results--skeleton").exists()).toBe(true);
+    expect(wrapper.emitted("request-catalog")).toBeUndefined();
+    expect(createGlobalMapSearchIndex).not.toHaveBeenCalled();
+    await wrapper.get("[data-global-map-search]").trigger("transitionend", { propertyName: "width" });
+    expect(wrapper.emitted("request-catalog")).toHaveLength(1);
+    await finishDeferredIndexBuild();
+    expect(createGlobalMapSearchIndex).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels deferred opening work when closed before the transition finishes", async () => {
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      transitionDuration: "320ms",
+      transitionDelay: "0s",
+    } as CSSStyleDeclaration);
+    wrapper = mount(GlobalTransportPlanSearch, {
+      props: { stations: [station], lines: [line14], catalogReady: false },
+    });
+    await wrapper.setProps({ open: true });
+    await wrapper.setProps({ open: false });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(wrapper.emitted("request-catalog")).toBeUndefined();
+    expect(createGlobalMapSearchIndex).not.toHaveBeenCalled();
   });
 
   it("does not index a hydrated catalogue while closed, including after reopening", async () => {

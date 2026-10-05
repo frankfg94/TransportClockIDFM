@@ -114,12 +114,12 @@ function analyzeNoctilienJourneyAccess(journey: NearbyJourney): NoctilienJourney
     .reduce((sum, section) => sum + (finiteNonNegative(section.durationSeconds) ?? 0), 0);
   if (!(walkingSeconds < NEIGHBORHOOD_WALKING_LIMIT_MINUTES * 60)) return undefined;
 
-  const lines = [...new Set(noctilienIndexes
-    .map((index) => noctilienLineLabel(journey.sections[index]!))
-    .filter((line): line is string => Boolean(line)))];
-  if (lines.length === 0) return undefined;
+  // Only the first boarded line is reachable on foot from the origin.
+  // Later Noctilien sections require a ride and cannot share this walk time.
+  const line = noctilienLineLabel(journey.sections[firstNoctilienIndex]!);
+  if (!line) return undefined;
   return {
-    lines,
+    lines: [line],
     minutes: Math.max(1, Math.ceil(walkingSeconds / 60)),
     journey,
   };

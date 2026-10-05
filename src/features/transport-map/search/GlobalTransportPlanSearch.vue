@@ -106,6 +106,9 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const searchSurface = ref<HTMLElement>();
+const openingTransition = ref(false);
+let openingTransitionTimer: number | undefined;
 const searchInput = ref<HTMLInputElement>();
 const query = ref("");
 const localQuery = ref("");
@@ -132,6 +135,7 @@ let searchVersion = 0;
 const { presentPlace } = useNearbyPlacePresenter();
 
 onBeforeUnmount(() => {
+  cancelOpeningTransition();
   cancelScheduledSearch();
   cancelScheduledSearchIndexBuild();
   cancelPlaceSearch();
@@ -144,7 +148,20 @@ onBeforeUnmount(() => {
 
 watch(
   () => props.open,
-  (open) => {
+  (open, previousOpen) => {
+    cancelOpeningTransition();
+    if (open && previousOpen === false) {
+      openingTransition.value = true;
+      void nextTick(() => {
+        if (!openingTransition.value || !searchSurface.value) return;
+        const style = window.getComputedStyle(searchSurface.value);
+        const durations = style.transitionDuration.split(",").map(cssTimeMs);
+        const delays = style.transitionDelay.split(",").map(cssTimeMs);
+        const duration = Math.max(0, ...durations.map((value, index) => value + (delays[index % delays.length] ?? 0)));
+        if (duration === 0) finishOpeningTransition();
+        else openingTransitionTimer = window.setTimeout(finishOpeningTransition, duration + 50);
+      });
+    }
     if (typeof document === "undefined") return;
     if (open) document.addEventListener("pointerdown", onDocumentPointerDown);
     else document.removeEventListener("pointerdown", onDocumentPointerDown);
@@ -209,7 +226,7 @@ const sections = computed<SearchSection[]>(() => {
   // The visibleResults watcher stays mounted while the panel is closed.
   // Do not let catalogue hydration at zoom 11 pull the full search index and
   // search rendering into the map's update. Read no catalogue deps here.
-  if (!props.open) return [];
+  if (!props.open || openingTransition.value) return [];
 
   if (normalizedQuery.value) {
     return [
@@ -228,7 +245,7 @@ const sections = computed<SearchSection[]>(() => {
 
 const visibleResults = computed(() => sections.value.flatMap((section) => section.results));
 const activeResultKey = computed(() => visibleResults.value[activeIndex.value]?.key);
-const isLoading = computed(() => (props.catalogLoading || searchIndexBuilding.value) && visibleResults.value.length === 0);
+const isLoading = computed(() => (openingTransition.value || props.catalogLoading || searchIndexBuilding.value) && visibleResults.value.length === 0);
 const noResults = computed(() => Boolean(normalizedQuery.value) && visibleResults.value.length === 0 && !props.catalogLoading && !searchIndexBuilding.value && !placeSearchLoading.value && !placeSearchError.value);
 const catalogHint = computed(() => !props.catalogReady && !props.catalogLoading && props.stations.length === 0);
 
@@ -265,7 +282,7 @@ function scheduleSearchIndexBuild(): void {
 
   cancelScheduledSearchIndexBuild();
   searchIndexBuilding.value = true;
-  if (props.catalogLoading) return;
+  if (props.catalogLoading || openingTransition.value) return;
 
   const version = searchIndexBuildVersion;
   const build = () => {
@@ -276,7 +293,7 @@ function scheduleSearchIndexBuild(): void {
       searchIndexBuilding.value = false;
       return;
     }
-    if (props.catalogLoading) return;
+    if (props.catalogLoading || openingTransition.value) return;
 
     const stations = props.stations;
     const lines = props.lines;
@@ -300,7 +317,7 @@ function scheduleSearchIndexBuild(): void {
 }
 
 watch(
-  () => [props.open, props.showMapInteractions, props.stations, props.lines, props.catalogLoading] as const,
+  () => [props.open, props.showMapInteractions, props.stations, props.lines, props.catalogLoading, openingTransition.value] as const,
   ([open, showMapInteractions, stations, lines, catalogLoading], previous) => {
     const catalogueChanged = Boolean(previous && (stations !== previous[2] || lines !== previous[3]));
     if (catalogueChanged) {
@@ -317,7 +334,7 @@ watch(
     }
 
     if (searchIndex.value && indexedStations === stations && indexedLines === lines) return;
-    if (catalogLoading) {
+    if (catalogLoading || openingTransition.value) {
       cancelScheduledSearchIndexBuild();
       searchIndexBuilding.value = true;
       return;
@@ -462,7 +479,29 @@ async function runPlaceSearch(searchValue: string, queryKey: string, version: nu
   }
 }
 
+function cssTimeMs(value: string): number {
+  const time = Number.parseFloat(value);
+  return Number.isFinite(time) ? time * (value.trim().endsWith("ms") ? 1 : 1000) : 0;
+}
+
+function cancelOpeningTransition(): void {
+  if (openingTransitionTimer !== undefined) window.clearTimeout(openingTransitionTimer);
+  openingTransitionTimer = undefined;
+  openingTransition.value = false;
+}
+
+function finishOpeningTransition(): void {
+  if (!openingTransition.value) return;
+  cancelOpeningTransition();
+  if (props.open && props.showMapInteractions) requestCatalogIfNeeded();
+}
+
+function onSearchTransitionEnd(event: TransitionEvent): void {
+  if (event.target === event.currentTarget && event.propertyName === "width") finishOpeningTransition();
+}
+
 function requestCatalogIfNeeded(): void {
+  if (openingTransition.value) return;
   if (!props.catalogReady && !props.catalogLoading) emit("request-catalog");
 }
 
@@ -745,26 +784,20 @@ function readRecentSearches(): RecentSearchKey[] {
 
 <template>
   <section
-    v-if="showMapInteractions && !open"
-    class="global-map-search global-map-search--closed"
+    v-if="showMapInteractions"
+    ref="searchSurface"
+    class="global-map-search"
+    :class="open ? 'global-map-search--open' : 'global-map-search--closed'"
+    @transitionend="onSearchTransitionEnd"
     data-global-map-search
     :aria-label="t('globalMap.search.aria')"
     @pointerdown.stop
   >
-    <button class="global-map-search__open" type="button" @click="openSearch">
+    <button v-if="!open" class="global-map-search__open" type="button" @click="openSearch">
       <Search :size="20" aria-hidden="true" />
       <span>{{ t("globalMap.search.open") }}</span>
     </button>
-  </section>
-
-  <section
-    v-else-if="showMapInteractions"
-    class="global-map-search global-map-search--open"
-    data-global-map-search
-    :aria-label="t('globalMap.search.aria')"
-    @pointerdown.stop
-  >
-    <div class="global-map-search__bar">
+    <div v-else class="global-map-search__bar">
       <Search class="global-map-search__icon" :size="24" aria-hidden="true" />
       <input
         ref="searchInput"
@@ -791,7 +824,7 @@ function readRecentSearches(): RecentSearchKey[] {
       </button>
     </div>
 
-    <div v-if="isLoading" class="global-map-search__results global-map-search__results--skeleton" role="status" aria-live="polite" :aria-label="t('globalMap.search.loading')">
+    <div v-if="open && isLoading" class="global-map-search__results global-map-search__results--skeleton" role="status" aria-live="polite" :aria-label="t('globalMap.search.loading')">
       <div v-for="index in 5" :key="index" class="global-map-search__skeleton-row">
         <span class="global-map-search__skeleton-icon"></span>
         <span class="global-map-search__skeleton-copy"><i></i><i></i></span>
@@ -799,7 +832,7 @@ function readRecentSearches(): RecentSearchKey[] {
       </div>
     </div>
 
-    <div v-else id="global-map-search-results" class="global-map-search__results" role="listbox" :aria-label="t('globalMap.search.resultsAria')" :aria-busy="placeSearchLoading">
+    <div v-else-if="open" id="global-map-search-results" class="global-map-search__results" role="listbox" :aria-label="t('globalMap.search.resultsAria')" :aria-busy="placeSearchLoading">
       <section v-for="section in sections" :key="section.id" class="global-map-search__section">
         <h2>{{ section.label }}</h2>
         <template v-for="result in section.results" :key="result.key">
@@ -971,13 +1004,14 @@ function readRecentSearches(): RecentSearchKey[] {
   transform: translateX(-50%);
   color: #17213d;
   pointer-events: auto;
+  transition: width 320ms cubic-bezier(0.22, 0.8, 0.26, 1);
 }
 
 .global-map-search--open { z-index: 1000; }
-.global-map-search--closed { width: auto; }
+.global-map-search--closed { width: min(520px, calc(100% - 32px)); }
 .global-map-search__open,
 .global-map-search__bar { display: flex; align-items: center; min-height: 58px; border: 1px solid rgba(217, 224, 237, .95); border-radius: 17px; background: rgba(255, 255, 255, .97); box-shadow: 0 10px 32px rgba(27, 48, 87, .15), 0 2px 6px rgba(27, 48, 87, .06); }
-.global-map-search__open { gap: 10px; padding: 0 18px; color: #17213d; font: 800 .82rem/1 inherit; cursor: pointer; }
+.global-map-search__open { box-sizing: border-box; width: 100%; gap: 10px; padding: 0 18px; color: #17213d; font: 800 .82rem/1 inherit; cursor: pointer; }
 .global-map-search__open:hover, .global-map-search__open:focus-visible { border-color: #7da5ed; outline: none; }
 .global-map-search__bar { padding: 0 10px 0 18px; }
 .global-map-search__icon { flex: 0 0 auto; color: #111c38; }
@@ -1055,6 +1089,9 @@ function readRecentSearches(): RecentSearchKey[] {
 .global-map-search__skeleton-copy i:last-child { width: 36%; height: 8px; border-radius: 5px; }
 .global-map-search__skeleton-chip { width: 42px; height: 24px; border-radius: 6px; }
 @keyframes global-map-search-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .global-map-search { transition: none; }
+}
 @media (max-width: 700px) {
   .global-map-search {
     position: absolute;
@@ -1067,6 +1104,7 @@ function readRecentSearches(): RecentSearchKey[] {
     padding: env(safe-area-inset-top, 0px) 10px env(safe-area-inset-bottom, 0px);
     transform: none;
     background: rgba(246, 248, 253, 0.98);
+    transition: none;
   }
   .global-map-search--open { z-index: 1000; }
   .global-map-search--closed {
