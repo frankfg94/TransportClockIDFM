@@ -55,7 +55,7 @@
         type="button"
         class="map-button map-button--chaos"
         data-global-map-chaos-zoom
-        :disabled="!hasNetwork || loading || chaosZoomRunning"
+        :disabled="!hasNetwork || loading || chaosZoomRunning || lineSelectionChaosRunning"
         :aria-busy="chaosZoomRunning && chaosZoomActiveProfile === 'standard'"
         @click="emit('run-chaos')"
       >
@@ -69,7 +69,7 @@
         type="button"
         class="map-button map-button--chaos map-button--chaos-extreme"
         data-global-map-chaos-zoom-extreme
-        :disabled="!hasNetwork || loading || chaosZoomRunning"
+        :disabled="!hasNetwork || loading || chaosZoomRunning || lineSelectionChaosRunning"
         :aria-busy="chaosZoomRunning && chaosZoomActiveProfile === 'extreme'"
         @click="emit('run-chaos-extreme')"
       >
@@ -78,6 +78,22 @@
             ? t("globalMap.page.chaosZoom.extremeRunning", { step: chaosZoomProgress, total: chaosZoomTotal })
             : t("globalMap.page.chaosZoom.extremeButton")
         }}
+      </button>
+      <button type="button" class="map-button map-button--chaos"
+        data-global-map-chaos-line-selection
+        :disabled="!hasNetwork || loading || chaosZoomRunning || lineSelectionChaosRunning"
+        :aria-busy="lineSelectionChaosRunning" @click="emit('run-line-selection-chaos')">
+        {{ lineSelectionChaosRunning
+          ? t("globalMap.page.chaosZoom.selectionRunning", { step: lineSelectionChaosProgress, total: lineSelectionChaosTotal })
+          : t("globalMap.page.chaosZoom.selectionButton") }}
+      </button>
+      <button v-if="lineSelectionChaosRunning" type="button" class="map-button"
+        data-global-map-chaos-line-selection-cancel @click="emit('cancel-line-selection-chaos')">
+        {{ t("globalMap.page.chaosZoom.selectionCancel") }}
+      </button>
+      <button v-if="lineSelectionChaosReportAvailable" type="button" class="map-button map-button--quiet"
+        data-global-map-chaos-line-selection-download @click="emit('download-line-selection-chaos')">
+        {{ t("globalMap.page.chaosZoom.selectionDownload") }}
       </button>
       <button
         v-if="chaosZoomReportAvailable"
@@ -249,6 +265,10 @@ withDefaults(defineProps<{
   chaosZoomTotal: number;
   chaosZoomActiveProfile: "standard" | "extreme";
   chaosZoomReportAvailable: boolean;
+  lineSelectionChaosRunning?: boolean;
+  lineSelectionChaosProgress?: number;
+  lineSelectionChaosTotal?: number;
+  lineSelectionChaosReportAvailable?: boolean;
   trafficCalendarOpen: boolean;
   trafficCalendarEventCount: number;
   trafficCalendarNextDelayLabel: string;
@@ -274,6 +294,9 @@ withDefaults(defineProps<{
 });
 
 const emit = defineEmits<{
+  "run-line-selection-chaos": [];
+  "cancel-line-selection-chaos": [];
+  "download-line-selection-chaos": [];
   "run-chaos": [];
   "run-chaos-extreme": [];
   "download-chaos-report": [];

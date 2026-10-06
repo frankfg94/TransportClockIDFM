@@ -252,6 +252,14 @@ export const FACT_KEYS: Record<NeighborhoodFactKind, { label: TranslationKey; to
     label: "nearbyStations.neighborhoodScore.facts.pharmacyNearbyApprox.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.pharmacyNearbyApprox.tooltip",
   },
+  pharmaciesNearby: {
+    label: "nearbyStations.neighborhoodScore.facts.pharmaciesNearby.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.pharmaciesNearby.tooltip",
+  },
+  pharmaciesNearbyApprox: {
+    label: "nearbyStations.neighborhoodScore.facts.pharmaciesNearbyApprox.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.pharmaciesNearbyApprox.tooltip",
+  },
   hospitalNearby: {
     label: "nearbyStations.neighborhoodScore.facts.hospitalNearby.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.hospitalNearby.tooltip",
@@ -280,6 +288,7 @@ export const SOURCE_KEYS = {
   placesAndWalking: "nearbyStations.neighborhoodScore.sources.placesAndWalking",
   shoppingCentres: "nearbyStations.neighborhoodScore.sources.shoppingCentres",
   supermarketFootprints: "nearbyStations.neighborhoodScore.sources.supermarketFootprints",
+  supermarketSizeRules: "nearbyStations.neighborhoodScore.sources.supermarketSizeRules",
   journeys: "nearbyStations.neighborhoodScore.sources.journeys",
   heavyRoutes: "nearbyStations.neighborhoodScore.sources.heavyRoutes",
   frequency: "nearbyStations.neighborhoodScore.sources.frequency",

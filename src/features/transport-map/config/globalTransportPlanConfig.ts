@@ -229,12 +229,12 @@ export const GLOBAL_TRANSPORT_PLAN_CONFIG = {
       NOCTILIEN: 100,
       BIKE: 250,
     } as Record<GlobalMapMode, number>,
-    // Rail paths skip the 250 m intermediate LOD as soon as the detailed
-    // chunk layer is available. The current pack stores LOD1 plus full
-    // vertices, so level 2 resolves to the full route geometry and keeps
-    // long GTFS corridors (including TER and Transilien J) from collapsing
-    // into a visibly misplaced straight segment during a global zoom.
+    // Metro and rail paths skip the 250 m intermediate LOD as soon as the
+    // detailed chunk layer is available. The current pack stores LOD1 plus
+    // full vertices, so level 2 resolves to the full route geometry and keeps
+    // focused and global views on the same trace at street-level zooms.
     minimumLevelByMode: {
+      METRO: 2,
       // Bus regional LOD1 is intentionally station-anchored, but its
       // station-to-station chords are not a street trace. Once `/map`
       // enters the chunked urban envelope, use LOD2 (or the full vertices
@@ -380,6 +380,9 @@ export const GLOBAL_TRANSPORT_PLAN_CONFIG = {
       minimumPointDistanceCssPx: 0.35,
       minimumCornerSegmentLengthCssPx: 1.2,
       maximumCornerRadiusCssPx: 10,
+      // Metro tunnels need a broad curve between coarse source vertices.
+      // Use the same radius in overview and focused rendering.
+      metroMaximumCornerRadiusCssPx: 40,
       cornerRadiusRatio: 0.3,
       // A focused GTFS route must keep short road bends while it is visible at
       // an intermediate zoom. Otherwise the active 10 px stroke makes a

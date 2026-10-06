@@ -286,6 +286,17 @@ describe("useGlobalTransportPerformanceScenarios", () => {
     expect(chaosController.runChaosZoomExtreme).toHaveBeenCalledTimes(1);
   });
 
+  it("isolates line selection Chaos from the automatic wheel and extreme scenarios", async () => {
+    if (!api) throw new Error("scenario harness was not created");
+    const wheelOptions = mocks.useSelectedLineZoomScenario.mock.calls[0]![0];
+    await api.prepareSelectionChaos(() => {});
+    expect(wheelOptions.isChaosRunning()).toBe(true);
+    config.value = { ...createConfig(), extremeChaosEnabled: true };
+    await nextTick(); api.scheduleExtremeChaosZoomScenario();
+    expect(chaosController.runChaosZoomExtreme).not.toHaveBeenCalled();
+    await api.restoreSelectionChaos();
+    expect(wheelOptions.isChaosRunning()).toBe(false);
+  });
   it("centralizes frame/timing probes, readiness ports and metadata", () => {
     if (!api) throw new Error("scenario harness was not created");
     api.recordFrame(metrics);

@@ -73,35 +73,8 @@ interface PreparedWorldLinePath {
   maxY: number;
 }
 
-export function createTransportMapPathRoundingOptions(
-  activeLine: boolean,
-  effectiveLineWidth: number,
-  mode?: GlobalMapMode,
-): RoundedPolylineOptions {
-  const pathRounding = GLOBAL_TRANSPORT_PLAN_CONFIG.renderer.pathRounding;
-  const preserveRailCurve = mode === "TRAIN" || mode === "TRANSILIEN";
-  const microSegmentLengthMultiplier = activeLine
-    ? pathRounding.activeLineMicroSegmentLengthMultiplier
-    : preserveRailCurve
-      ? pathRounding.railMicroSegmentLengthMultiplier
-      : pathRounding.microSegmentLengthMultiplier;
-
-  return {
-    minimumPointDistance: activeLine
-      ? pathRounding.activeLineMinimumPointDistanceCssPx
-      : pathRounding.minimumPointDistanceCssPx,
-    minimumCornerSegmentLength: pathRounding.minimumCornerSegmentLengthCssPx,
-    maximumCornerRadius: pathRounding.maximumCornerRadiusCssPx,
-    cornerRadiusRatio: pathRounding.cornerRadiusRatio,
-    maximumShortSegmentLength: microSegmentLengthMultiplier > 0
-      ? Math.max(
-        pathRounding.minimumCornerSegmentLengthCssPx * 4,
-        effectiveLineWidth * microSegmentLengthMultiplier,
-      )
-      : undefined,
-    maximumShortSegmentRatio: pathRounding.microSegmentMaxRatio,
-  };
-}
+export { createTransportMapPathRoundingOptions } from "../pathRounding";
+import { createTransportMapPathRoundingOptions } from "../pathRounding";
 
 interface StationLabelAtlasEntry {
   sourceX: number;

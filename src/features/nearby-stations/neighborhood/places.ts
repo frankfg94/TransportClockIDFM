@@ -14,15 +14,19 @@ export interface ScoredPlace {
 }
 
 export function formatSupermarketLabel(place: ScoredPlace): string {
-  const name = place.place.name.trim() || place.place.brand?.trim() || place.place.operator?.trim() || "Supermarché";
-  return `${name} (${place.routed ? "" : "≈"}${place.minutes} min${place.routed ? " à pied" : ""})`;
+  return formatPlaceAccessLabel(place, "Supermarché");
+}
+
+export function formatPharmacyLabel(place: ScoredPlace): string {
+  return formatPlaceAccessLabel(place, "Pharmacie");
 }
 
 export function formatEducationPlaceLabel(place: ScoredPlace): string {
-  const name = place.place.name.trim()
-    || place.place.brand?.trim()
-    || place.place.operator?.trim()
-    || "Établissement éducatif";
+  return formatPlaceAccessLabel(place, "Établissement éducatif");
+}
+
+function formatPlaceAccessLabel(place: ScoredPlace, fallbackName: string): string {
+  const name = place.place.name.trim() || place.place.brand?.trim() || place.place.operator?.trim() || fallbackName;
   return `${name} (${place.routed ? "" : "≈"}${place.minutes} min${place.routed ? " à pied" : ""})`;
 }
 

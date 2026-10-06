@@ -379,6 +379,11 @@ export const fr = {
       advancedHint: "Radar · trafic · outils",
       advancedMenuAria: "Options avancées de la carte",
       chaosZoom: {
+        selectionButton: "Chaos sélection de lignes",
+        selectionRunning: "Chaos sélection… {step}/{total}",
+        selectionCancel: "Arrêter le benchmark",
+        selectionDownload: "Rapport JSON sélection de lignes",
+
         button: "Chaos Zoom",
         running: "Chaos Zoom… {step}/{total}",
         extremeButton: "Chaos Zoom extrême",
@@ -2719,6 +2724,7 @@ export const fr = {
         placesAndWalking: "POI OpenStreetMap + temps piéton calculé",
         shoppingCentres: "Centres commerciaux OpenStreetMap précompilés",
         supermarketFootprints: "Surfaces de supermarchés OpenStreetMap précompilées",
+        supermarketSizeRules: "Surfaces OpenStreetMap et règles de taille par enseigne",
         journeys: "Itinéraires IDFM/Navitia vers Châtelet et les grandes gares",
         heavyRoutes: "Itinéraires IDFM/Navitia vers les transports lourds",
         frequency: "Horaires théoriques GTFS IDFM",
@@ -2763,7 +2769,7 @@ export const fr = {
         placeSaturation: "La contribution augmente avec le nombre de lieux et est plafonnée vers {target} occurrences pour {maximum} points.",
         commercialCluster: "Une rue commerçante riche exige une fromagerie, une boucherie, un traiteur et une boulangerie distincts à moins de {threshold} min à pied.",
         shoppingCentreAccess: "Un centre commercial shop=mall est retenu avec une emprise d'au moins {mallArea} m², ou au moins {shopCount} commerces distincts ou un cinéma dans un rayon de {supportDistance} m. Une zone landuse=retail nommée doit dépasser {retailArea} m². Observé dans OSM : emprise {area} m² (— si inconnue), {nearbyShops} commerces et {nearbyCinemas} cinéma(s) à proximité. Point fort si accessible en {walkingMinutes} min à pied ou {transitMinutes} min en transports.",
-        mediumSupermarketAccess: "Un supermarché est mis en valeur seulement si OSM fournit une emprise d’au moins {minimumSurface} m² et un itinéraire piéton vérifié de moins de {maximumWalkingMinutes} min. Une surface absente n’est pas estimée et le nom ou la marque ne servent pas à classer sa taille.",
+        mediumSupermarketAccess: "Un supermarché est mis en valeur si son emprise OSM atteint {minimumSurface} m² ou si une règle explicite de son enseigne garantit ce seuil, et s’il est à moins de {maximumWalkingMinutes} min à pied. Une emprise OSM renseignée est toujours prioritaire. Une taille déduite d’une enseigne est affichée comme une borne estimée, jamais comme une surface mesurée.",
         pharmacyPresence: "Une pharmacie est comptée jusqu’à {threshold} min ; une distance sans itinéraire est une estimation.",
         hospitalPresence: "Un hôpital est affiché lorsqu’un trajet réel ou piéton permet de le rejoindre en {threshold} min ou moins.",
         leisurePresence: "Un lieu culturel ou d’intérêt est compté jusqu’à {threshold} min ; une distance sans itinéraire est une estimation.",
@@ -2908,7 +2914,7 @@ export const fr = {
         },
         mediumSupermarketsNearby: {
           label: "Supermarchés de taille moyenne à moins de {minutes} min à pied : {supermarkets}",
-          tooltip: "{count} supermarché(s) dont l’emprise OSM vérifiée atteint au moins {minimumSurface} m² : {supermarkets}. Les durées sont arrondies à la minute supérieure ; les temps précédés de ≈ sont estimés à partir de la distance si aucun itinéraire piéton n’est disponible. Une surface absente n’est ni estimée ni déduite du nom ou de la marque.",
+          tooltip: "{count} supermarché(s) dont l’emprise OSM atteint au moins {minimumSurface} m² ou dont l’enseigne correspond à une règle de taille explicite : {supermarkets}. Les durées sont arrondies à la minute supérieure ; les temps précédés de ≈ sont estimés à partir de la distance si aucun itinéraire piéton n’est disponible. Une borne précédée de > est une estimation par enseigne, pas une surface mesurée. Toute emprise OSM renseignée reste prioritaire.",
         },
         dailyStores: {
           label: "{count} commerces du quotidien à moins de {minutes} min à pied",
@@ -3029,6 +3035,14 @@ export const fr = {
         pharmacyNearbyApprox: {
           label: "Pharmacie à environ {minutes} min",
           tooltip: "La pharmacie « {name} » est recensée à environ {minutes} min, calculées depuis la distance disponible ({meters} m) ; aucun itinéraire piéton n’a été fourni.",
+        },
+        pharmaciesNearby: {
+          label: "Pharmacies à moins de {minutes} min à pied : {pharmacies}",
+          tooltip: "{count} pharmacie(s) sont accessibles en moins de {minutes} min à pied. Du plus proche au plus éloigné : {pharmacies}.",
+        },
+        pharmaciesNearbyApprox: {
+          label: "Pharmacies à moins de {minutes} min à pied : {pharmacies}",
+          tooltip: "{count} pharmacie(s) sont recensées en moins de {minutes} min. Les durées précédées de ≈ sont estimées depuis la distance lorsqu’aucun itinéraire piéton n’est disponible : {pharmacies}.",
         },
         hospitalNearby: {
           label: "Hôpital {name} joignable en {minutes} min {via}",

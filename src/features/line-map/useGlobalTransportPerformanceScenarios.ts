@@ -162,7 +162,7 @@ export interface GlobalTransportPerformanceScenarioPreparationPort {
   draw: () => void;
   refreshViewport: () => Promise<void>;
   cancelScheduledViewportRefresh: () => void;
-  prepareExtremeState?: () => Promise<{
+  prepareExtremeState?: (lockFullNetwork?: boolean) => Promise<{
     availableModes: GlobalMapMode[];
     activeModes: GlobalMapMode[];
   }>;
@@ -249,6 +249,7 @@ export interface UseGlobalTransportPerformanceScenariosOptions {
 export function useGlobalTransportPerformanceScenarios(
   options: UseGlobalTransportPerformanceScenariosOptions,
 ) {
+  let selectionChaosActive = false;
   let selectedLineZoomController: ReturnType<typeof useSelectedLineZoomScenario> | undefined;
 
   function getPerformanceMetadata(): Record<string, unknown> {
@@ -316,7 +317,14 @@ export function useGlobalTransportPerformanceScenarios(
     captureBasemapSnapshot: options.basemap.captureSnapshot,
     readBasemapCoverage: options.basemap.readCoverage,
     performanceMetadata: getPerformanceMetadata,
-    prepareExtreme: options.preparation.prepareExtremeState,
+    prepareExtreme: options.preparation.prepareExtremeState
+      ? async (assertActive) => {
+          assertActive();
+          const state = await options.preparation.prepareExtremeState!();
+          assertActive();
+          return state;
+        }
+      : undefined,
     ensureExtremeFullNetworkState: options.preparation.ensureExtremeFullNetworkState,
     restoreExtreme: options.preparation.restoreExtremeState,
     getChunkIds: options.metadata.getChunkIds,
@@ -354,7 +362,7 @@ export function useGlobalTransportPerformanceScenarios(
     refreshViewport: options.camera.refreshViewport,
     cancelInteractions: options.preparation.cancelInteractions,
     setInteractionActive: options.camera.setInteractionActive,
-    isChaosRunning: () => chaosZoomController.running.value,
+    isChaosRunning: () => chaosZoomController.running.value || selectionChaosActive,
     isBasemapReady: options.basemap.isBasemapReady,
     isBasemapSettled: options.basemap.isBasemapSettled,
     isCoverEnabled: options.basemap.isCoverEnabled,
@@ -399,6 +407,7 @@ export function useGlobalTransportPerformanceScenarios(
   let extremeAutoStarted = false;
   function scheduleExtremeChaosZoomScenario(): void {
     if (
+      selectionChaosActive ||
       extremeAutoStarted ||
       !options.runtime.isMounted() ||
       !options.getConfig().extremeChaosEnabled ||
@@ -475,6 +484,18 @@ export function useGlobalTransportPerformanceScenarios(
     recordFrame,
     recordTiming,
     getPerformanceMetadata,
+    prepareSelectionChaos: async (assertActive: () => void) => {
+      selectionChaosActive = true;
+      selectedLineZoomController?.invalidate();
+      await options.preparation.ensureSearchCatalog();
+      assertActive();
+      options.preparation.cancelInteractions();
+      await options.preparation.prepareExtremeState?.(false);
+    },
+    restoreSelectionChaos: async () => {
+      try { await options.preparation.restoreExtremeState?.(); }
+      finally { selectionChaosActive = false; }
+    },
     dispose,
   };
 }

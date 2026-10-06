@@ -18,6 +18,10 @@
       :has-network="Boolean(network)"
       :loading="loading"
       :chaos-zoom-running="chaosZoomRunning"
+      :line-selection-chaos-running="lineSelectionChaos.running.value"
+      :line-selection-chaos-progress="lineSelectionChaos.progress.value"
+      :line-selection-chaos-total="lineSelectionChaos.total"
+      :line-selection-chaos-report-available="Boolean(lineSelectionChaos.report.value)"
       :chaos-zoom-progress="chaosZoomProgress"
       :chaos-zoom-total="chaosZoomTotal"
       :chaos-zoom-active-profile="chaosZoomActiveProfile"
@@ -41,8 +45,11 @@
       @open-radar="openGlobalRadar()"
       @toggle-iris="void toggleIrisView()"
       @toggle-iris-subdivisions="toggleIrisSubdivisions"
-      @run-chaos="void runChaosZoom()"
-      @run-chaos-extreme="void runChaosZoomExtreme()"
+      @run-chaos="!lineSelectionChaos.running.value && void runChaosZoom()"
+      @run-line-selection-chaos="void lineSelectionChaos.run()"
+      @cancel-line-selection-chaos="lineSelectionChaos.cancel()"
+      @download-line-selection-chaos="lineSelectionChaos.download()"
+      @run-chaos-extreme="!lineSelectionChaos.running.value && void runChaosZoomExtreme()"
       @download-chaos-report="downloadChaosZoomReport"
       @reset="resetView"
       @share="void shareViewport()"
@@ -814,6 +821,11 @@
         data-selected-line-zoom-report
       >{{ selectedLineZoomReportJson }}</pre>
       <pre
+        v-if="lineSelectionChaos.running.value || lineSelectionChaos.report.value"
+        hidden
+        data-global-map-chaos-line-selection-report
+      >{{ lineSelectionChaos.reportJson.value }}</pre>
+      <pre
         v-if="chaosZoomRunning || chaosZoomReport"
         hidden
         data-global-map-chaos-zoom-report
@@ -1022,6 +1034,7 @@ import {
   GLOBAL_TRANSPORT_PLAN_PANEL_MODES,
   type GlobalTransportPlanPreset,
 } from "./globalTransportPlanModes";
+import { useChaosLineSelection } from "./useChaosLineSelection";
 import {
   useGlobalTransportPerformanceScenarioConfig,
   useGlobalTransportPerformanceScenarios,
@@ -1757,6 +1770,7 @@ let resizeFallback: (() => void) | undefined;
 let mounted = false;
 let sharedViewportSignature: string | undefined;
 let searchCatalogPromise: Promise<void> | undefined;
+let selectionChaosRenderReader: ((durationMs: number) => void) | undefined;
 let extremeChaosState: {
   camera: CameraState;
   modes: GlobalMapMode[];
@@ -2504,6 +2518,7 @@ function drawNow(): void {
     loadingStage.value = metrics.binaryCompileInProgress ? "binary" : "ready";
   }
   globalTransportPerformanceScenarios?.recordFrame(metrics);
+  selectionChaosRenderReader?.(metrics.renderMs);
   if (!interactionActive.value) rendererMetrics.value = metrics;
 }
 
@@ -4263,6 +4278,7 @@ async function selectLineFromSearch(
   line: GlobalMapLine,
   trafficDisruption?: TrafficDisruption,
   animateCamera = false,
+  onCameraFitComplete?: () => void,
 ): Promise<void> {
   if (extremeChaosGuardActive.value) return;
   cancelCameraAnimation();
@@ -4297,11 +4313,12 @@ async function selectLineFromSearch(
   zoomToLine(
     currentLine.id,
     animateCamera,
-    deferLineSidebarUntilFit
+    deferLineSidebarUntilFit || onCameraFitComplete
       ? () => {
           if (deferredLineSidebarLineId.value === currentLine.id) {
             deferredLineSidebarLineId.value = undefined;
           }
+          onCameraFitComplete?.();
         }
       : undefined,
   );
@@ -5225,7 +5242,7 @@ const performanceScenarios = useGlobalTransportPerformanceScenarios({
     },
     cancelScheduledViewportRefresh,
     ensureExtremeFullNetworkState,
-    prepareExtremeState: async () => {
+    prepareExtremeState: async (lockFullNetwork = true) => {
       extremeChaosState = {
         camera: { ...camera.value },
         modes: [...filters.selectedModes.value],
@@ -5248,9 +5265,10 @@ const performanceScenarios = useGlobalTransportPerformanceScenarios({
       filters.selectedModes.value = [...availableModes.value];
       if (traffic.enabled.value) disableTraffic();
       syncUrl();
-      await refreshViewport();
+      if (lockFullNetwork) await refreshViewport();
+      else void refreshViewport().catch(() => undefined);
       cancelScheduledViewportRefresh();
-      extremeChaosGuardActive.value = true;
+      extremeChaosGuardActive.value = lockFullNetwork;
       return {
         availableModes: [...availableModes.value],
         activeModes: [...filters.selectedModes.value],
@@ -5408,6 +5426,20 @@ const {
   runChaosZoom,
   runChaosZoomExtreme,
 } = performanceScenarios;
+const lineSelectionChaos = useChaosLineSelection({
+  isAvailable: () => mounted && Boolean(network.value) && !chaosZoomRunning.value,
+  getLines: () => network.value?.lines ?? [],
+  prepare: performanceScenarios.prepareSelectionChaos,
+  restore: performanceScenarios.restoreSelectionChaos,
+  select: (line, complete) => selectLineFromSearch(line, undefined, true, complete),
+  deselect: clearSelection,
+  cancelInteractions: () => { cancelCameraAnimation(); cancelInertia(); cancelWheelZoom(); invalidatePendingViewportRequests(); },
+  getCamera: () => camera.value,
+  getMetrics: () => renderer.getMetrics(),
+  getMetadata: performanceScenarios.getPerformanceMetadata,
+  trace: performanceTrace,
+});
+selectionChaosRenderReader = lineSelectionChaos.recordRender;
 viewportTimingReader = (kind, durationMs) => {
   performanceScenarios.recordTiming(kind, durationMs);
 };

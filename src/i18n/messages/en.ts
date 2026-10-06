@@ -382,6 +382,11 @@ export const en = {
       advancedHint: "Radar · traffic · tools",
       advancedMenuAria: "Advanced map options",
       chaosZoom: {
+        selectionButton: "Chaos line selection",
+        selectionRunning: "Chaos selection… {step}/{total}",
+        selectionCancel: "Stop benchmark",
+        selectionDownload: "Line selection JSON report",
+
         button: "Chaos Zoom",
         running: "Chaos Zoom… {step}/{total}",
         extremeButton: "Extreme Chaos Zoom",
@@ -2687,6 +2692,7 @@ export const en = {
         placesAndWalking: "OpenStreetMap POIs + calculated walking time",
         shoppingCentres: "Precompiled OpenStreetMap shopping centres",
         supermarketFootprints: "Precompiled OpenStreetMap supermarket footprints",
+        supermarketSizeRules: "OpenStreetMap footprints and brand-based size rules",
         journeys: "IDFM/Navitia journeys to Châtelet and the major stations",
         heavyRoutes: "IDFM/Navitia journeys to heavy transport",
         frequency: "IDFM GTFS theoretical schedules",
@@ -2731,7 +2737,7 @@ export const en = {
         placeSaturation: "The contribution grows with the number of places and caps around {target} occurrences for {maximum} points.",
         commercialCluster: "A rich shopping street requires distinct cheese, butcher, deli and bakery places within {threshold} min on foot.",
         shoppingCentreAccess: "An OSM shop=mall or shop=shopping_centre feature qualifies when its footprint is at least {mallArea} m², or at least {shopCount} shops or one cinema are within {supportDistance} m. If its area is unavailable, the explicit tag is accepted. Observed OSM footprint: {area} m² (— when unavailable). Strength when reachable within {walkingMinutes} min on foot or {transitMinutes} min by transit.",
-        mediumSupermarketAccess: "A supermarket is highlighted only when OSM provides a footprint of at least {minimumSurface} m² and a verified walking route under {maximumWalkingMinutes} min. Missing surface is not estimated, and name or brand is not used to classify size.",
+        mediumSupermarketAccess: "A supermarket is highlighted when its OSM footprint reaches {minimumSurface} m² or an explicit rule for its brand guarantees that threshold, and it is under {maximumWalkingMinutes} min on foot. A mapped OSM footprint always takes precedence. Brand-based sizes are shown as estimated lower bounds, never as measured areas.",
         pharmacyPresence: "A pharmacy is counted up to {threshold} min; a distance without a route is an estimate.",
         hospitalPresence: "A hospital is shown when a real transit or walking journey reaches it in {threshold} min or less.",
         leisurePresence: "A cultural or notable place is counted up to {threshold} min; a distance without a route is an estimate.",
@@ -2876,7 +2882,7 @@ export const en = {
         },
         mediumSupermarketsNearby: {
           label: "Medium-sized supermarkets within {minutes} min on foot: {supermarkets}",
-          tooltip: "{count} supermarket(s) with a verified OSM footprint of at least {minimumSurface} m²: {supermarkets}. Durations are rounded up to the next minute; times marked with ≈ are estimated from distance when no walking route is available. Missing surface is neither estimated nor inferred from the name or brand.",
+          tooltip: "{count} supermarket(s) whose OSM footprint reaches at least {minimumSurface} m² or whose brand matches an explicit size rule: {supermarkets}. Durations are rounded up to the next minute; times marked with ≈ are estimated from distance when no walking route is available. A lower bound prefixed with > is a brand-based estimate, not a measured area. Any mapped OSM footprint takes precedence.",
         },
         dailyStores: {
           label: "{count} daily shops within {minutes} min on foot",
@@ -2997,6 +3003,14 @@ export const en = {
         pharmacyNearbyApprox: {
           label: "Pharmacy about {minutes} min away",
           tooltip: "Pharmacy “{name}” is listed about {minutes} min away, calculated from the available distance ({meters} m); no walking route was provided.",
+        },
+        pharmaciesNearby: {
+          label: "Pharmacies within {minutes} min on foot: {pharmacies}",
+          tooltip: "{count} pharmacies are reachable in under {minutes} min on foot. From nearest to farthest: {pharmacies}.",
+        },
+        pharmaciesNearbyApprox: {
+          label: "Pharmacies within {minutes} min on foot: {pharmacies}",
+          tooltip: "{count} pharmacies are listed within {minutes} min. Times prefixed with ≈ are estimated from distance when no walking route is available: {pharmacies}.",
         },
         hospitalNearby: {
           label: "Hospital {name}, reachable in {minutes} min {via}",

@@ -1,3 +1,4 @@
+import { roundTransportMapPositions } from "./pathRounding";
 import type {
   GlobalMapEntrance,
   GlobalMapLine,
@@ -213,7 +214,14 @@ export class TransportMapRenderModelBuilder {
     order: 0,
   };
 
+  private roundingLineId?: string;
+  private roundingZoom = 0;
+  private roundedPositions = new WeakMap<Float64Array, { zoom: number; positions: Float64Array }>();
+
   build(camera: TransportMapLabelPlacementCamera, scene: TransportMapRenderScene): TransportMapPreparedRenderModel {
+    this.roundingLineId = scene.activeLineId;
+    // Quarter-zoom buckets keep tessellation stable during camera movement.
+    this.roundingZoom = Math.ceil(camera.zoom * 4) / 4;
     this.sceneIndex.update(scene);
     this.worldGeometry.setStationsSource(scene.stations);
 
@@ -253,6 +261,7 @@ export class TransportMapRenderModelBuilder {
       stableIdList(scene.interruptionLineIds),
       stableIdList(scene.disturbanceLineIds),
       scene.activeLineId ?? "",
+      this.roundingZoom,
       scene.visibleModeMask,
       camera.zoom < GLOBAL_TRANSPORT_PLAN_CONFIG.renderer.overviewHeavyLineWidthMaxZoom ? 0 : 1,
     ].join("|");
@@ -275,6 +284,7 @@ export class TransportMapRenderModelBuilder {
       stableIdList(scene.interruptionLineIds),
       stableIdList(scene.disturbanceLineIds),
       scene.activeLineId ?? "",
+      this.roundingZoom,
       scene.hoveredLineId ?? "",
       scene.visibleModeMask,
       camera.zoom < GLOBAL_TRANSPORT_PLAN_CONFIG.renderer.overviewHeavyLineWidthMaxZoom ? 0 : 1,
@@ -874,6 +884,16 @@ export class TransportMapRenderModelBuilder {
     colorOverride: string | undefined,
     segmentKey: string | undefined,
   ): TransportMapPathRenderRecord {
+    const mode = this.sceneIndex.linesById.get(path.lineId)?.mode;
+    if (mode === "METRO" || path.lineId === this.roundingLineId) {
+      const cached = this.roundedPositions.get(positions);
+      if (cached?.zoom === this.roundingZoom) positions = cached.positions;
+      else {
+        const rounded = roundTransportMapPositions(positions, this.roundingZoom, mode);
+        this.roundedPositions.set(positions, { zoom: this.roundingZoom, positions: rounded });
+        positions = rounded;
+      }
+    }
     const cache = this.recordsByPath.get(path) ?? {
       base: new Map<string, TransportMapPathRenderRecord>(),
       highlight: new Map<string, TransportMapPathRenderRecord>(),

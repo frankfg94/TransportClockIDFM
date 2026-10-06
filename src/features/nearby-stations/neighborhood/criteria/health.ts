@@ -3,8 +3,10 @@ import { HOSPITAL_KINDS, NEIGHBORHOOD_WALKING_LIMIT_MINUTES, PHARMACY_KINDS } fr
 import { category, makeFact, withFacts } from "../facts";
 import { RULE_KEYS, SOURCE_KEYS } from "../i18nKeys";
 import { chooseFastestJourney, summarizeJourney } from "../journeys";
-import { makePlaceFact, placeKind, scorePlaces } from "../places";
+import { formatPharmacyLabel, makePlaceFact, placeKind, scorePlaces } from "../places";
 import { clamp, saturatingNeighborhoodBonus } from "../primitives";
+
+const PHARMACY_LIST_MAX_WALKING_MINUTES = 10;
 
 export function buildHealthCategory(input: NeighborhoodScoreInput): NeighborhoodCategoryResult {
   const base = category("health");
@@ -22,7 +24,28 @@ export function buildHealthCategory(input: NeighborhoodScoreInput): Neighborhood
   const positiveFacts: NeighborhoodFact[] = [];
   const negativeFacts: NeighborhoodFact[] = [];
   const nearest = pharmacies[0];
-  if (nearest) {
+  const pharmaciesUnderTenMinutes = pharmacies.filter((pharmacy) =>
+    pharmacy.minutes < PHARMACY_LIST_MAX_WALKING_MINUTES);
+  if (pharmaciesUnderTenMinutes.length > 0) {
+    const allRoutesAvailable = pharmaciesUnderTenMinutes.every((pharmacy) => pharmacy.routed);
+    positiveFacts.push(makeFact({
+      id: "pharmacy-nearby",
+      kind: allRoutesAvailable ? "pharmaciesNearby" : "pharmaciesNearbyApprox",
+      category: "health",
+      polarity: "positive",
+      family: "pharmacy",
+      priority: 8,
+      values: {
+        pharmacies: pharmaciesUnderTenMinutes.map(formatPharmacyLabel).join(" · "),
+        count: pharmaciesUnderTenMinutes.length,
+        minutes: PHARMACY_LIST_MAX_WALKING_MINUTES,
+      },
+      sourceKey: allRoutesAvailable ? SOURCE_KEYS.placesAndWalking : SOURCE_KEYS.places,
+      proof: allRoutesAvailable ? "direct" : "derived",
+      ruleKey: RULE_KEYS.pharmacyPresence,
+      ruleValues: { threshold: PHARMACY_LIST_MAX_WALKING_MINUTES },
+    }));
+  } else if (nearest) {
     positiveFacts.push(makePlaceFact({
       id: "pharmacy-nearby",
       category: "health",

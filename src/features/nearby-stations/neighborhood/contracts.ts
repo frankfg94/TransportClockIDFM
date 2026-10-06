@@ -150,6 +150,8 @@ export type NeighborhoodFactKind =
   | "tennisCourtsStack"
   | "pharmacyNearby"
   | "pharmacyNearbyApprox"
+  | "pharmaciesNearby"
+  | "pharmaciesNearbyApprox"
   | "hospitalNearby"
   | "hospitalNearbyWalking"
   | "hospitalNearbyApprox"

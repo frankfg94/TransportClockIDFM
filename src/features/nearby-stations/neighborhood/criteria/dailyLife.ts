@@ -8,6 +8,7 @@ import { isNearbyJourneyTransitSection } from "../../nearbyJourneyTiming";
 import type { NearbyJourney } from "../../nearbyHeavyTransports";
 import { MAJOR_SHOPPING_CENTRE_ACCESS_RULES, MAJOR_SHOPPING_CENTRE_DETECTION_RULES, type NeighborhoodShoppingCentreAccess } from "../shoppingCentres";
 import { MEDIUM_SUPERMARKET_ACCESS_RULES } from "../supermarkets";
+import { getSupermarketSizeAssumption } from "../supermarketSizeAssumptions";
 
 export function buildDailyLifeCategory(input: NeighborhoodScoreInput): NeighborhoodCategoryResult {
   const base = category("daily-life");
@@ -153,22 +154,36 @@ export function buildDailyLifeCategory(input: NeighborhoodScoreInput): Neighborh
     .map((footprint) => [footprint.placeId, footprint.surfaceM2] as const));
   const measuredSupermarketCandidates = scorePlaces(input, (place) =>
     place.tags?.shop === "supermarket" || place.tags?.shop === "hypermarket");
-  const mediumSupermarkets = measuredSupermarketCandidates.filter((supermarket) => {
-    const surfaceM2 = supermarketFootprintsById.get(supermarket.place.id);
+  const mediumSupermarkets = measuredSupermarketCandidates.map((supermarket) => {
+    const footprintSurfaceM2 = supermarketFootprintsById.get(supermarket.place.id);
+    const compiledSurfaceM2 = supermarket.place.areaM2;
+    const surfaceM2 = Number.isFinite(footprintSurfaceM2) && (footprintSurfaceM2 ?? 0) > 0
+      ? footprintSurfaceM2
+      : Number.isFinite(compiledSurfaceM2) && (compiledSurfaceM2 ?? 0) > 0
+        ? compiledSurfaceM2
+        : undefined;
+    return {
+      supermarket,
+      surfaceM2,
+      assumption: surfaceM2 === undefined ? getSupermarketSizeAssumption(supermarket.place) : undefined,
+    };
+  }).filter(({ supermarket, surfaceM2, assumption }) => {
     const walkingDurationSeconds = input.walkingRoutes?.[supermarket.place.id]?.durationSeconds;
     const isUnderWalkingLimit = typeof walkingDurationSeconds === "number"
       && Number.isFinite(walkingDurationSeconds)
       && walkingDurationSeconds >= 0
       ? walkingDurationSeconds < MEDIUM_SUPERMARKET_ACCESS_RULES.maximumWalkingMinutes * 60
       : supermarket.minutes < MEDIUM_SUPERMARKET_ACCESS_RULES.maximumWalkingMinutes;
+    const sizeQualifies = surfaceM2 !== undefined
+      ? surfaceM2 >= MEDIUM_SUPERMARKET_ACCESS_RULES.minimumSurfaceM2
+      : (assumption?.minimumSurfaceM2Exclusive ?? 0) >= MEDIUM_SUPERMARKET_ACCESS_RULES.minimumSurfaceM2;
     return isUnderWalkingLimit
-      && Number.isFinite(surfaceM2)
-      && (surfaceM2 ?? 0) >= MEDIUM_SUPERMARKET_ACCESS_RULES.minimumSurfaceM2;
+      && sizeQualifies;
   }).filter((candidate, index, candidates) => {
-    const candidateSurface = supermarketFootprintsById.get(candidate.place.id);
+    const candidateSize = candidate.surfaceM2 ?? candidate.assumption?.minimumSurfaceM2Exclusive;
     return !candidates.slice(0, index).some((existing) =>
-      supermarketFootprintsById.get(existing.place.id) === candidateSurface
-        && commercialDistanceMeters(existing.place, candidate.place) <= 25);
+      (existing.surfaceM2 ?? existing.assumption?.minimumSurfaceM2Exclusive) === candidateSize
+        && commercialDistanceMeters(existing.supermarket.place, candidate.supermarket.place) <= 25);
   });
   if (mediumSupermarkets.length > 0) {
     positiveFacts.push(makeFact({
@@ -179,17 +194,20 @@ export function buildDailyLifeCategory(input: NeighborhoodScoreInput): Neighborh
       family: "medium-supermarkets",
       priority: 12,
       values: {
-        supermarkets: mediumSupermarkets.map((supermarket) => {
-          const surfaceM2 = supermarketFootprintsById.get(supermarket.place.id)!;
-          const area = new Intl.NumberFormat("fr-FR").format(Math.round(surfaceM2));
-          return `${formatSupermarketLabel(supermarket)} · ${area} m²`;
+        supermarkets: mediumSupermarkets.map(({ supermarket, surfaceM2, assumption }) => {
+          const area = surfaceM2 !== undefined
+            ? `${new Intl.NumberFormat("fr-FR").format(Math.round(surfaceM2))} m²`
+            : `> ${new Intl.NumberFormat("fr-FR").format(assumption!.minimumSurfaceM2Exclusive)} m² (estimé)`;
+          return `${formatSupermarketLabel(supermarket)} · ${area}`;
         }).join(" · "),
         minutes: MEDIUM_SUPERMARKET_ACCESS_RULES.maximumWalkingMinutes,
         count: mediumSupermarkets.length,
         minimumSurface: MEDIUM_SUPERMARKET_ACCESS_RULES.minimumSurfaceM2,
       },
-      sourceKey: SOURCE_KEYS.supermarketFootprints,
-      proof: mediumSupermarkets.every((supermarket) => supermarket.routed) ? "direct" : "derived",
+      sourceKey: mediumSupermarkets.some(({ assumption }) => assumption)
+        ? SOURCE_KEYS.supermarketSizeRules
+        : SOURCE_KEYS.supermarketFootprints,
+      proof: mediumSupermarkets.every(({ supermarket, assumption }) => supermarket.routed && !assumption) ? "direct" : "derived",
       ruleKey: RULE_KEYS.mediumSupermarketAccess,
       ruleValues: {
         minimumSurface: MEDIUM_SUPERMARKET_ACCESS_RULES.minimumSurfaceM2,
