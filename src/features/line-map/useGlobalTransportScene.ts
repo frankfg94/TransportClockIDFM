@@ -108,10 +108,10 @@ function lineModeBit(mode: GlobalMapMode): number {
 }
 
 function restrictStationsToLineIds(
-  stations: readonly GlobalMapStation[],
+  stations: GlobalMapStation[],
   lineIds: readonly string[],
 ): GlobalMapStation[] {
-  if (lineIds.length === 0) return [...stations];
+  if (lineIds.length === 0) return stations;
   const allowed = new Set(lineIds);
   return stations.flatMap((station) => {
     const keptLineIds = station.lineIds.filter((lineId) => allowed.has(lineId));
@@ -278,6 +278,34 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
       .filter((lineId) => lineId !== activeLineId);
   });
 
+  // A regional viewport can contain the entire station catalogue. Index it
+  // once per viewport instead of scanning it for every line selection.
+  const viewportStationPositions = computed(() => {
+    // Network publication also invalidates membership after catalogue updates.
+    options.getNetwork();
+    const stations = options.getViewport().stations;
+    const byStationId = new Map<string, number[]>();
+    const byLineId = new Map<string, number[]>();
+    stations.forEach((station, position) => {
+      const positions = byStationId.get(station.id) ?? [];
+      positions.push(position);
+      byStationId.set(station.id, positions);
+      for (const lineId of station.lineIds) {
+        const linePositions = byLineId.get(lineId) ?? [];
+        linePositions.push(position);
+        byLineId.set(lineId, linePositions);
+      }
+    });
+    return { stations, byStationId, byLineId };
+  });
+  const overviewViewportStations = computed(() => {
+    const stations = options.getViewport().stations;
+    if (options.showBusOnlyStationNodesInOverview?.() ??
+      GLOBAL_TRANSPORT_PLAN_CONFIG.renderer.showBusOnlyStationNodesInOverview) return stations;
+    const network = options.getNetwork();
+    return stations.filter((station) => !isBusOnlyOverviewStation(station, network));
+  });
+
   const baseRenderStations = computed<GlobalMapStation[]>(() => {
     const startedAt = options.recordTiming ? nowMs() : Number.NaN;
     try {
@@ -307,6 +335,9 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
           ...hoveredGhostStations.map((station) => station.id),
           ...nearbyStationIds,
         ]);
+        if (!options.getActiveStationView() && forcedStationIds.size === 0) {
+          return overviewViewportStations.value;
+        }
         const overviewStations = [
           ...new Map(
             [...viewport.stations, ...contextStations, ...hoveredGhostStations, ...nearbyStations].map((station) => [
@@ -335,13 +366,21 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
 
       const focusedStationIds = options.getSelectedBusDirectionStationSet() ?? new Set(focusedLine.stationIds);
       const hasSelectedBusDirection = Boolean(options.getSelectedBusDirectionStationSet());
-      const focusedStations = viewport.stations.filter(
-        (station) =>
-          contextStationIds.has(station.id) ||
-          focusedStationIds.has(station.id) ||
-          (!hasSelectedBusDirection && station.lineIds.includes(focusedLine.id)) ||
-          station.id === options.getActiveStationId(),
+      const index = viewportStationPositions.value;
+      const positions = new Set<number>(
+        hasSelectedBusDirection ? [] : index.byLineId.get(focusedLine.id) ?? [],
       );
+      const activeStationId = options.getActiveStationId();
+      for (const stationId of [
+        ...contextStationIds,
+        ...focusedStationIds,
+        ...(activeStationId ? [activeStationId] : []),
+      ]) {
+        for (const position of index.byStationId.get(stationId) ?? []) positions.add(position);
+      }
+      // Preserve viewport order, including stations identified by lineIds but
+      // absent from the line's stationIds, and the existing duplicate handling.
+      const focusedStations = [...positions].sort((a, b) => a - b).map((position) => index.stations[position]!);
       const byId = new Map(
         [...focusedStations, ...contextStations, ...hoveredGhostStations, ...nearbyStations].map((station) => [
           station.id,

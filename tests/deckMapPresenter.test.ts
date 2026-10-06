@@ -50,11 +50,11 @@ describe("MapLibre Deck presenter", () => {
       viewportHeightCssPx: 600,
     });
     const firstLabels: readonly TransportMapLabelRenderRecord[] = [{
-      id: "station:alpha", text: "Alpha", position: [2, 48], sizeCssPx: 12,
+      id: "station-label:alpha", text: "Alpha", position: [2, 48], sizeCssPx: 12,
       color: [15, 23, 42, 255], priority: 1,
     }];
     const nextLabels: readonly TransportMapLabelRenderRecord[] = [{
-      id: "station:alpha", text: "Alpha", position: [2.001, 48], sizeCssPx: 12,
+      id: "station-label:alpha", text: "Alpha", position: [2.001, 48], sizeCssPx: 12,
       color: [15, 23, 42, 255], priority: 1,
     }];
     const sharedModelData: Omit<TransportMapPreparedRenderModel, "labels"> = {

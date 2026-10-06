@@ -487,6 +487,7 @@ const WALL_TIME_ONLY_EVENT_TYPES = new Set<TransportMapTraceEventType>([
   "chunk_request_batch",
   "chunk_fetch",
   "chunk_response_body",
+  "traffic_refresh",
 ]);
 const SCENE_EVENT_TYPES = new Set<TransportMapTraceEventType>([
   "scene_rebuild",

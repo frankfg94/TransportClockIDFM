@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { shallowRef } from "vue";
 import { useGlobalTransportScene, type UseGlobalTransportSceneOptions } from "../src/features/line-map/useGlobalTransportScene";
 import type { GlobalMapLine, GlobalMapPath, GlobalMapStation } from "../src/features/transport-map/contracts/manifest";
@@ -47,7 +47,7 @@ function fixture() {
     getInteractionActive: () => false, getSidebarPreviewLineId: () => undefined,
     getTrafficState: () => ({ interruptionLineIds: [], disturbanceLineIds: [], interruptedStationIds: [], disturbedStationIds: [], trafficPathSpans: [] }),
   };
-  return { state: useGlobalTransportScene(options), selected };
+  return { state: useGlobalTransportScene(options), selected, options, lines, stations };
 }
 
 describe("station selection map scope", () => {
@@ -73,5 +73,43 @@ describe("station selection map scope", () => {
     selected.value = { ...selected.value!, id: "unknown", lineIds: [] };
     expect(state.renderScene.value.lines).toEqual([]);
     expect(state.renderPaths.value).toEqual([]);
+  });
+
+  it("reuses the viewport index while preserving station order, correspondence membership and direction scope", () => {
+    const { options, lines, stations, selected } = fixture();
+    selected.value = undefined;
+    const activeLine = shallowRef(lines[0]);
+    const direction = shallowRef<ReadonlySet<string>>();
+    lines[0]!.stationIds = ["selected"];
+    const lineIds = stations[2]!.lineIds;
+    const readMembership = vi.fn(() => lineIds);
+    Object.defineProperty(stations[2], "lineIds", { get: readMembership });
+    const scene = useGlobalTransportScene({
+      ...options,
+      getActiveLine: () => activeLine.value,
+      getActiveLineId: () => activeLine.value?.id,
+      getSelectedBusDirectionStationSet: () => direction.value,
+      getSelectedBusDirectionStationIds: () => direction.value ? [...direction.value] : undefined,
+    });
+    expect(scene.renderStations.value.map(({ id }) => id)).toEqual(["selected", "shared"]);
+    const readsAfterIndexing = readMembership.mock.calls.length;
+    activeLine.value = lines[2];
+    expect(scene.renderStations.value.map(({ id }) => id)).toEqual(["shared", "elsewhere"]);
+    expect(readMembership).toHaveBeenCalledTimes(readsAfterIndexing);
+    activeLine.value = lines[0];
+    direction.value = new Set(["selected"]);
+    expect(scene.renderStations.value.map(({ id }) => id)).toEqual(["selected"]);
+  });
+
+  it("reuses the overview station filter after clearing successive lines", () => {
+    const { options, lines, selected } = fixture();
+    selected.value = undefined;
+    const activeLine = shallowRef<GlobalMapLine>();
+    const scene = useGlobalTransportScene({ ...options, getActiveLine: () => activeLine.value });
+    const overview = scene.renderStations.value;
+    activeLine.value = lines[0];
+    expect(scene.renderStations.value).not.toBe(overview);
+    activeLine.value = undefined;
+    expect(scene.renderStations.value).toBe(overview);
   });
 });

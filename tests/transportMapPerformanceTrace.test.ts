@@ -436,26 +436,31 @@ describe("transport map causal performance trace", () => {
     expect(spike.unattributedCategory).toBe("MAIN_THREAD_UNATTRIBUTED");
   });
 
-  it("does not count async orchestration or worker compile wall time as main-thread CPU", () => {
+  it("does not count async orchestration, traffic refresh, or worker compile wall time as main-thread CPU", () => {
     let now = 0;
     const trace = createTransportMapPerformanceTrace({ now: () => now, observeLongTasks: false });
     trace.start();
     const refresh = trace.begin("viewport_refresh", { generation: 1 });
     const transition = trace.begin("regional_to_detailed", { generation: 1 });
+    const trafficRefresh = trace.begin("traffic_refresh", { scope: "network" });
     const compile = trace.begin("binary_compile", { execution: "worker" });
     now = 200;
     trace.end(refresh);
     trace.end(transition);
+    trace.end(trafficRefresh);
     trace.end(compile);
     trace.recordFrame(200, 200);
-    const spike = trace.stop().spikes[0]!;
+    const report = trace.stop();
+    const spike = report.spikes[0]!;
 
+    expect(report.eventAggregates?.traffic_refresh?.timingKind).toBe("async-wall-time");
     expect(spike.measuredMainThreadMs).toBe(0);
     expect(spike.unattributedMs).toBe(200);
     expect(spike.directCauses).toHaveLength(0);
     expect(spike.correlatedEvents.map((event) => event.type)).toEqual(expect.arrayContaining([
       "viewport_refresh",
       "regional_to_detailed",
+      "traffic_refresh",
       "binary_compile",
     ]));
   });

@@ -181,7 +181,7 @@ export function useGlobalTransportTraffic(options: UseGlobalTransportTrafficOpti
     const refreshTraceId = trace
       ? trace.begin("traffic_refresh", { scope: "network", enabled: true })
       : undefined;
-    const refresh = traffic.refresh();
+    const refresh = traffic.enable();
     startTrafficPolling();
     options.draw();
     void refresh.finally(() => {
@@ -236,6 +236,7 @@ export function useGlobalTransportTraffic(options: UseGlobalTransportTrafficOpti
       lineId &&
       lineId !== previousLineId &&
       traffic.enabled.value &&
+      traffic.status.value !== "loading" &&
       traffic.snapshot.value &&
       isTrafficSnapshotOlderThan(TRAFFIC_DETAIL_REFRESH_AFTER_MS)
     ) {

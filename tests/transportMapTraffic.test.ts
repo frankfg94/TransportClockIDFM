@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { isReactive } from "vue";
 import type { TrafficDisruption, TrafficLineReport } from "../src/features/traffic/types";
 import { useTransportMapTraffic } from "../src/features/transport-map/state/useTransportMapTraffic";
 
 afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -136,6 +139,96 @@ describe("global transport optional traffic", () => {
     expect(traffic.enabled.value).toBe(false);
     expect(traffic.status.value).toBe("disabled");
     expect(traffic.snapshot.value).toBeUndefined();
+  });
+
+  it("reuses a recent immutable snapshot across line selection toggles, then refreshes after expiry", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("navigator", { onLine: true });
+    const fetchMock = vi.fn().mockImplementation(async () => trafficResponse([
+      report("line:IDFM:C01730", "disrupted", [disruption("red", "Trafic interrompu")]),
+    ]));
+    vi.stubGlobal("fetch", fetchMock);
+    const traffic = useTransportMapTraffic();
+    await traffic.enable();
+    const firstSnapshot = traffic.snapshot.value;
+    expect(isReactive(firstSnapshot)).toBe(false);
+
+    for (let index = 0; index < 30; index += 1) {
+      traffic.disable();
+      await traffic.enable();
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(traffic.snapshot.value).toBe(firstSnapshot);
+    expect(traffic.status.value).toBe("ready");
+
+    traffic.disable();
+    vi.setSystemTime(Date.now() + 60_000);
+    await traffic.enable();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reuse a snapshot after the source became unavailable", async () => {
+    vi.stubGlobal("navigator", { onLine: true });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(trafficResponse([]))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ configured: false }), { status: 200 }))
+      .mockResolvedValueOnce(trafficResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+    const traffic = useTransportMapTraffic();
+    await traffic.enable();
+    await traffic.refresh();
+    expect(traffic.status.value).toBe("stale");
+    traffic.disable();
+    await traffic.enable();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(traffic.status.value).toBe("ready");
+  });
+
+  it("aborts obsolete requests before parsing their payload", async () => {
+    vi.stubGlobal("navigator", { onLine: true });
+    let resolveResponse!: (response: Response) => void;
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal("fetch", (_input: unknown, init: RequestInit) => {
+      signal = init.signal as AbortSignal;
+      return new Promise<Response>((resolve) => { resolveResponse = resolve; });
+    });
+    const traffic = useTransportMapTraffic();
+    const refresh = traffic.refresh();
+    traffic.disable();
+    expect(signal?.aborted).toBe(true);
+    const response = trafficResponse([]);
+    const json = vi.spyOn(response, "json");
+    resolveResponse(response);
+    await refresh;
+    expect(json).not.toHaveBeenCalled();
+    expect(traffic.status.value).toBe("disabled");
+  });
+
+  it("yields large snapshot processing and cancels it without publishing a partial snapshot", async () => {
+    vi.stubGlobal("navigator", { onLine: true });
+    vi.stubGlobal("fetch", async () => trafficResponse([
+      report("line:IDFM:C01730", "disrupted", [disruption("red", "Trafic interrompu")]),
+      report("line:IDFM:C00001", "disrupted", [disruption("orange", "Trafic perturbé")]),
+    ]));
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => clock += 5);
+    let releaseSlice!: () => void;
+    let sliceScheduled!: () => void;
+    const yielded = new Promise<void>((resolve) => { sliceScheduled = resolve; });
+    vi.stubGlobal("setTimeout", (callback: () => void) => {
+      releaseSlice = callback;
+      sliceScheduled();
+      return 1;
+    });
+    const traffic = useTransportMapTraffic();
+    const refresh = traffic.refresh();
+    await yielded;
+    expect(traffic.snapshot.value).toBeUndefined();
+    traffic.disable();
+    releaseSlice();
+    await refresh;
+    expect(traffic.snapshot.value).toBeUndefined();
+    expect(traffic.status.value).toBe("disabled");
   });
 });
 
