@@ -677,7 +677,7 @@ export class TransportMapDataSource {
       ...focusedLineDetailBounds,
       ...(ghostDetailBounds ? [ghostDetailBounds] : []),
     ];
-    const focusedLineBounds = detailLine ? unionBounds(detailQueryBounds) : undefined;
+    const focusedLineBounds = detailQueryBounds.length > 0 ? unionBounds(detailQueryBounds) : undefined;
     const pathQueryBounds = focusedLineBounds ?? viewportBounds;
     const chunkOverscanRatio =
       detailLine && GLOBAL_TRANSPORT_PLAN_CONFIG.lineMap.biggerTiles

@@ -46,7 +46,11 @@ export function selectPreferredLinePaths(
   viewportPaths: readonly GlobalMapPath[],
   regionalPaths: readonly GlobalMapPath[],
   lineId: string,
-  options: { requiredStationIds?: readonly string[] } = {},
+  options: {
+    requiredStationIds?: readonly string[];
+    /** Local correspondences must not import schematic edges from outside their detail tiles. */
+    supplementalRegionalFallback?: boolean;
+  } = {},
 ): GlobalMapPath[] {
   const detailed = uniquePaths(viewportPaths.filter((path) => path.lineId === lineId));
   const regional = uniquePaths(regionalPaths.filter((path) => path.lineId === lineId));
@@ -65,7 +69,10 @@ export function selectPreferredLinePaths(
   const regionalPriority = sourcePriority(regional);
   const preferred = detailedPriority >= regionalPriority ? detailed : regional;
   const secondary = detailedPriority >= regionalPriority ? regional : detailed;
-  const preferredPaths = selectPathsWithinLayer(preferred, [...preferred, ...secondary]);
+  const preferredPaths = selectPathsWithinLayer(
+    preferred,
+    options.supplementalRegionalFallback === false ? preferred : [...preferred, ...secondary],
+  );
 
   // Detailed viewport queries can return some chunks for a line while other
   // chunks are still outside the query or failed to load. In that case the

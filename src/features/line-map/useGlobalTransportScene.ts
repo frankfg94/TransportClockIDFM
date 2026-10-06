@@ -451,9 +451,11 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
       const viewportPaths = options.getViewport().paths;
       const regionalPaths = network?.regionalPaths ?? [];
       return ghostLineIds.value.flatMap((lineId) => {
-        const line = network?.linesById.get(lineId);
+        // Ghosts are local viewport traces, not a complete selected-line map.
+        // Keep the regional schematic until detail arrives, then use the
+        // available local detail without requiring every remote terminus.
         return selectPreferredLinePaths(viewportPaths, regionalPaths, lineId, {
-          requiredStationIds: line?.stationIds,
+          supplementalRegionalFallback: false,
         });
       });
     } finally {
