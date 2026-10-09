@@ -810,6 +810,100 @@ describe("GlobalTransportPlan facade", () => {
     }
   });
 
+  it("previews a selected line connection as a ghost path on hover", async () => {
+    const originalLines = fixture.network.lines;
+    const originalLinesById = fixture.network.linesById;
+    const originalStationLineIds = [...fixture.network.stations[0]!.lineIds];
+    const originalViewportPaths = fixture.viewportPaths;
+    const extraBusLine = {
+      ...fixture.network.lines[1]!,
+      id: "line:bus:39",
+      code: "C039",
+      label: "39",
+      stationIds: [fixture.network.stations[0]!.id],
+      geometryIds: ["path:39"],
+    };
+    const noctilienLine = {
+      ...fixture.network.lines[1]!,
+      id: "line:noctilien:N1",
+      code: "CN1",
+      label: "N1",
+      mode: "NOCTILIEN",
+      stationIds: [fixture.network.stations[0]!.id],
+      geometryIds: ["path:N1"],
+    };
+    const extraBusPath = {
+      ...fixture.ghostPath,
+      id: "path:39",
+      lineId: extraBusLine.id,
+    };
+    const noctilienPath = {
+      ...fixture.ghostPath,
+      id: "path:N1",
+      lineId: noctilienLine.id,
+    };
+    fixture.network.lines = [...originalLines, extraBusLine, noctilienLine];
+    fixture.network.linesById = new Map(
+      fixture.network.lines.map((line) => [line.id, line]),
+    );
+    fixture.network.stations[0]!.lineIds = [
+      ...originalStationLineIds,
+      extraBusLine.id,
+      noctilienLine.id,
+    ];
+    fixture.viewportPaths = [fixture.path, fixture.ghostPath, extraBusPath, noctilienPath];
+    routeState.query = { line: fixture.network.lines[0]!.id };
+
+    try {
+      const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+      wrappers.push(wrapper);
+      await flushPromises();
+
+      const busCorrespondencesToggle = wrapper.get(
+        "[data-testid='global-map-bus-correspondences-toggle']",
+      );
+      expect(busCorrespondencesToggle.attributes("aria-checked")).toBe("false");
+      await busCorrespondencesToggle.trigger("click");
+      await flushPromises();
+
+      const connectionCases = [
+        { label: "38", lineId: fixture.network.lines[1]!.id, pathId: fixture.ghostPath.id },
+        { label: "39", lineId: extraBusLine.id, pathId: extraBusPath.id },
+        { label: "N1", lineId: noctilienLine.id, pathId: noctilienPath.id },
+      ];
+
+      for (const connectionCase of connectionCases) {
+        const connection = wrapper
+          .findAll(".global-map-picker-sidebar__connection")
+          .find((button) => button.text().includes(connectionCase.label));
+        expect(connection, `expected ${connectionCase.label} in the connection list`).toBeDefined();
+        await connection!.trigger("mouseenter");
+        await flushPromises();
+
+        const hoveredScene = fixture.renderer.render.mock.calls.at(-1)?.[1] as
+          | { hoveredLineId?: string; ghostLineIds?: string[]; paths?: Array<{ id: string }> }
+          | undefined;
+        expect(hoveredScene?.hoveredLineId).toBe(connectionCase.lineId);
+        expect(hoveredScene?.ghostLineIds).toContain(connectionCase.lineId);
+        expect(hoveredScene?.paths?.some((path) => path.id === connectionCase.pathId)).toBe(true);
+
+        await connection!.trigger("mouseleave");
+        await flushPromises();
+        const clearedScene = fixture.renderer.render.mock.calls.at(-1)?.[1] as
+          | { hoveredLineId?: string; ghostLineIds?: string[] }
+          | undefined;
+        expect(clearedScene?.hoveredLineId).toBeUndefined();
+        expect(clearedScene?.ghostLineIds).not.toContain(connectionCase.lineId);
+      }
+    } finally {
+      fixture.network.lines = originalLines;
+      fixture.network.linesById = originalLinesById;
+      fixture.network.stations[0]!.lineIds = originalStationLineIds;
+      fixture.viewportPaths = originalViewportPaths;
+      routeState.query = {};
+    }
+  });
+
   it("enables traffic by default when a line is selected and disables it in global mode", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
       String(input).includes("/api/traffic")

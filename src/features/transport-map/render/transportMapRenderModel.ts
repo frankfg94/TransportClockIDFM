@@ -13,7 +13,7 @@ import type {
 } from "../contracts/renderer";
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../config/globalTransportPlanConfig";
 import { cityZoneLodKey, selectCityZonesForZoom } from "../iris/servedCityZones";
-import { worldToLonLat, type LonLatPoint, type WorldPoint } from "../geo/coordinateKernel";
+import { worldScaleAtZoom, worldToLonLat, type LonLatPoint, type WorldPoint } from "../geo/coordinateKernel";
 import {
   PreparedWorldPathGeometryCache,
   type PreparedWorldPathSubpath,
@@ -330,6 +330,7 @@ export class TransportMapRenderModelBuilder {
       this.identityToken(scene.entrances),
       scene.activeLineId ?? "",
       scene.activeStationId ?? "",
+      scene.selectedLineAnnotationLayout?.key ?? "",
       stableIdList(scene.selectedStationIds),
       labelLayoutZoomKey(camera.zoom),
     ].join("|");
@@ -797,6 +798,7 @@ export class TransportMapRenderModelBuilder {
             sizeCssPx: 13,
             priority: terminalIds.has(station.id) || station.id === scene.activeStationId || this.sceneIndex.selectedStationIds.has(station.id) || station.isHub ? 10 : 1,
             order: index,
+            selectedLineLabelOrientation: scene.selectedLineAnnotationLayout?.orientation,
           };
           return { station, candidate };
         })
@@ -818,13 +820,28 @@ export class TransportMapRenderModelBuilder {
       });
     const layoutCamera = {
       ...camera,
-      // The layout key is monotonic: resolving at the bucket's lower zoom
-      // keeps the rectangles conservative until the next bucket is reached.
-      zoom: labelLayoutZoomKey(camera.zoom),
+      // HTML correspondence rows and Deck names must share the exact scale.
+      zoom: scene.selectedLineAnnotationLayout ? camera.zoom : labelLayoutZoomKey(camera.zoom),
     };
+    const connectionIconObstacles = scene.selectedLineAnnotationLayout?.connectionIconBoxes.flatMap((box) => {
+      const station = this.sceneIndex.stationsById.get(box.stationId);
+      if (!station) return [];
+      const scale = worldScaleAtZoom(layoutCamera.zoom);
+      const anchor = {
+        x: (station.worldX - layoutCamera.centerWorldX) * scale + layoutCamera.viewportWidthCssPx / 2,
+        y: (station.worldY - layoutCamera.centerWorldY) * scale + layoutCamera.viewportHeightCssPx / 2,
+      };
+      return [{
+        left: anchor.x + box.offsetX,
+        top: anchor.y + box.offsetY,
+        right: anchor.x + box.offsetX + box.width,
+        bottom: anchor.y + box.offsetY + box.height,
+      }];
+    });
     const placements = resolveTransportMapLabelPlacements(
       [...stationCandidates, ...entranceCandidates].map(({ candidate }) => candidate),
       layoutCamera,
+      connectionIconObstacles,
     );
     const labels = stationCandidates.flatMap(({ station, candidate }) => {
       const placement = placements.get(candidate.id);

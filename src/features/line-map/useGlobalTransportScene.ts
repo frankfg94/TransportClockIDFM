@@ -19,6 +19,7 @@ import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../transport-map/config/globalTran
 import { buildPathSpatialIndex, buildStationSpatialIndex } from "../transport-map/spatial/packedIndex";
 import { linePathsAreHighFidelity, selectPreferredLinePaths } from "../transport-map/data/pathPrecedence";
 import { filterPathsForGlobalBusDirection } from "./globalBusDirections";
+import { buildGlobalLineConnectionStations } from "./globalLineMetadata";
 import type { GlobalMapStationSearchGroup } from "../transport-map/search/globalMapSearch";
 import { modeRank } from "../transport-map/search/globalMapSearch";
 import {
@@ -270,12 +271,31 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
     }
   });
 
+  const selectedLineConnectionIds = computed<Set<string>>(() => {
+    const line = options.getActiveLine();
+    const network = options.getNetwork();
+    if (!line || !network) return new Set();
+    return new Set(
+      buildGlobalLineConnectionStations(line, network.stations)
+        .flatMap((group) => group.lineIds),
+    );
+  });
+
   const ghostLineIds = computed<string[]>(() => {
-    if (!options.getActiveStationView()) return [];
     const activeLineId = options.getActiveLineId();
-    return activeStationLines.value
+    const stationGhostLineIds = activeStationLines.value
       .map((line) => line.id)
       .filter((lineId) => lineId !== activeLineId);
+    const hoveredLineId = options.getHoveredLineId();
+    const hoveredSelectedLineConnectionId =
+      hoveredLineId &&
+      hoveredLineId !== activeLineId &&
+      selectedLineConnectionIds.value.has(hoveredLineId)
+        ? hoveredLineId
+        : undefined;
+    return hoveredSelectedLineConnectionId
+      ? [...new Set([...stationGhostLineIds, hoveredSelectedLineConnectionId])]
+      : stationGhostLineIds;
   });
 
   // A regional viewport can contain the entire station catalogue. Index it

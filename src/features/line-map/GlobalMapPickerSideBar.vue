@@ -66,6 +66,7 @@ const props = withDefaults(defineProps<{
   showGhostLineIcons?: boolean;
   showLineConnectionIcons?: boolean;
   showBusCorrespondences?: boolean;
+  showServedCityZones?: boolean;
   nearbyPlaces?: NearbyPlace[];
   nearbyPlacesLoading?: boolean;
   nearbyPlacesError?: boolean;
@@ -98,6 +99,7 @@ const props = withDefaults(defineProps<{
   showGhostLineIcons: false,
   showLineConnectionIcons: false,
   showBusCorrespondences: false,
+  showServedCityZones: false,
   nearbyPlaces: () => [],
   nearbyPlacesLoading: false,
   nearbyPlacesError: false,
@@ -130,6 +132,7 @@ const emit = defineEmits<{
   "toggle-ghost-line-icons": [];
   "toggle-line-connection-icons": [];
   "toggle-bus-correspondences": [];
+  "toggle-served-city-zones": [];
   "line-cities-expanded": [expanded: boolean];
   "update:nearby-radius-minutes": [minutes: NearbyLineRadiusMinutes];
 }>();
@@ -360,6 +363,7 @@ const sidebarBodyProps = computed<GlobalMapSidebarBodyProps>(() => ({
   showGhostLineIcons: props.showGhostLineIcons,
   showLineConnectionIcons: props.showLineConnectionIcons,
   showBusCorrespondences: props.showBusCorrespondences,
+  showServedCityZones: props.showServedCityZones,
   nearbyPlaces: props.nearbyPlaces,
   nearbyPlacesLoading: props.nearbyPlacesLoading,
   nearbyPlacesError: props.nearbyPlacesError,
@@ -751,6 +755,7 @@ onBeforeUnmount(() => {
         @toggle-ghost-line-icons="emit('toggle-ghost-line-icons')"
         @toggle-line-connection-icons="emit('toggle-line-connection-icons')"
         @toggle-bus-correspondences="emit('toggle-bus-correspondences')"
+        @toggle-served-city-zones="emit('toggle-served-city-zones')"
         @line-cities-expanded="emit('line-cities-expanded', $event)"
         @update:nearby-radius-minutes="emit('update:nearby-radius-minutes', $event)"
       />

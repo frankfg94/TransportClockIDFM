@@ -44,6 +44,8 @@ export interface NearbyJourneyRequest {
   count?: number;
   includeDisruptions?: boolean;
   includeGeoJson?: boolean;
+  /** Timetable routing stays the default; departure optimization requests live routing. */
+  dataFreshness?: "base_schedule" | "realtime";
   /** Optional transport-mode constraint forwarded to the journey provider. */
   allowedModes?: readonly GlobalMapMode[];
 }

@@ -67,7 +67,7 @@ export const GTFS_LINE_TIMETABLE_WINDOWS = [
   {
     key: "afterTwentyThreeThirty",
     startSeconds: 23.5 * 3600,
-    endSeconds: 24 * 3600,
+    endSeconds: Number.POSITIVE_INFINITY,
     label: "globalMap.sidebar.gtfsFrequency.timetableAfterTwentyThreeThirty",
   },
 ] as const satisfies readonly GtfsLineTimetableWindow[];
@@ -95,7 +95,7 @@ export function isBoardableGtfsTimetableCall(call: GtfsLineTimetableCall): boole
 
 /**
  * Builds a human-readable interval range for one direction and one time band.
- * Departures are compared at each station (parent stop when available), then
+ * Departures are compared at each individual GTFS stop, then
  * each station contributes its median headway. Taking the range of those
  * medians avoids letting one missed/duplicated departure at an endpoint make
  * the whole line look like it has an unusably wide interval. Gaps crossing a
@@ -140,9 +140,11 @@ export function calculateGtfsTimetableInterval(
       ) {
         continue;
       }
-      const departures = departuresByStation.get(stationKey) ?? new Set<number>();
+      // Parent stations can contain distinct successive stops on the same trip.
+      // Combining them mistakes travel time between those stops for headway.
+      const departures = departuresByStation.get(call.stopId) ?? new Set<number>();
       departures.add(departure);
-      departuresByStation.set(stationKey, departures);
+      departuresByStation.set(call.stopId, departures);
     }
   }
 
@@ -156,7 +158,7 @@ export function calculateGtfsTimetableInterval(
     }
     // A station with a single passage cannot tell us anything about a
     // frequency. It must not influence the range or create a fake interval.
-    if (gaps.length < 2) continue;
+    if (!gaps.length) continue;
     const value = median(gaps);
     if (value !== undefined) stationMedians.push(value);
   }
@@ -165,5 +167,41 @@ export function calculateGtfsTimetableInterval(
   return {
     minMinutes: Math.min(...stationMedians),
     maxMinutes: Math.max(...stationMedians),
+  };
+}
+
+/** First and last trip departures, at the section entry or trip origin. */
+export function calculateGtfsTimetableServiceBounds(
+  trips: readonly GtfsLineTimetableTrip[],
+  stopsById?: ReadonlyMap<string, GtfsLineTimetableStop>,
+  allowedStationIds?: ReadonlySet<string>,
+): { firstDeparture: number; lastDeparture: number; approximate: boolean } | undefined {
+  const allowed = allowedStationIds
+    ? new Set([...allowedStationIds].map(canonicalGtfsTimetableStationId))
+    : undefined;
+  const departures: number[] = [];
+  const origins = new Set<string>();
+  for (const trip of trips) {
+    const first = [...trip.calls]
+      .sort((a, b) => a.sequence - b.sequence)
+      .find((call) => {
+        if (!isBoardableGtfsTimetableCall(call) || call.departure! < 0) return false;
+        const stop = stopsById?.get(call.stopId);
+        return (
+          !allowed ||
+          [call.stopId, stop?.parentId, stop?.topologyId].some(
+            (id) => id !== undefined && allowed.has(canonicalGtfsTimetableStationId(id)),
+          )
+        );
+      });
+    if (!first) continue;
+    departures.push(first.departure!);
+    origins.add(first.stopId);
+  }
+  if (!departures.length) return undefined;
+  return {
+    firstDeparture: Math.min(...departures),
+    lastDeparture: Math.max(...departures),
+    approximate: origins.size > 1,
   };
 }

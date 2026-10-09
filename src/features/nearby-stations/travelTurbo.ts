@@ -15,6 +15,7 @@ export interface TurboCourse {
   source: "realtime" | "estimated" | "schedule";
   observedAt?: string;
   stopNames?: string[];
+  serviceType?: NearbyJourneySection["serviceType"];
   fromStopPointId?: string;
   toStopPointId?: string;
 }
@@ -212,7 +213,7 @@ export function optimizeTurbo(route: TravelRoute, courses: TurboCourse[][], star
       before[i]!.forEach((s) => append(s));
       if (course.departure > cursor) append({ type: "waiting", durationSeconds: 0 }, (course.departure - cursor) / 1000);
       const original = route.sections[transitIndexes[i]!]!;
-      append({ ...original, vehicleJourneyId: course.vehicleJourneyId ?? course.id, stopNames: course.stopNames ?? original.stopNames,
+      append({ ...original, vehicleJourneyId: course.vehicleJourneyId ?? course.id, stopNames: course.stopNames ?? original.stopNames, serviceType: course.serviceType,
         direction: course.direction ?? original.direction, mission: course.mission,
         fromStopPointId: course.fromStopPointId ?? original.fromStopPointId, toStopPointId: course.toStopPointId ?? original.toStopPointId,
         baseDepartureDateTime: new Date(course.baseDeparture).toISOString(), baseArrivalDateTime: new Date(course.baseArrival).toISOString(),

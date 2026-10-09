@@ -253,7 +253,9 @@
         v-if="!routePreviewActive && activeLine && !activeStationView"
         :enabled="showLineConnectionIcons"
         :groups="lineConnectionIconGroups"
-        :camera="camera"
+        :orientation="selectedLineLabelOrientationValue ?? 'vertical'"
+        :layout="selectedLineAnnotationLayout"
+        :reduce-motion="appSettings.reduceMotion"
       />
 
       <GlobalMapNearbyPlacesOverlay
@@ -687,6 +689,7 @@
           :show-ghost-line-icons="showGhostLineIcons"
           :show-line-connection-icons="showLineConnectionIcons"
           :show-bus-correspondences="showBusCorrespondences"
+          :show-served-city-zones="showServedCityZones"
           :nearby-places="nearbyLinePlaces.places.value"
           :nearby-places-loading="nearbyLinePlaces.isLoading.value"
           :nearby-places-error="Boolean(nearbyLinePlaces.error.value)"
@@ -733,8 +736,9 @@
           @mobile-sheet-snap-change="mobilePickerSidebarSnap = $event"
           @modal-open="sidebarModalOpen = $event"
           @toggle-ghost-line-icons="showGhostLineIcons = !showGhostLineIcons"
-          @toggle-line-connection-icons="showLineConnectionIcons = !showLineConnectionIcons"
-          @toggle-bus-correspondences="showBusCorrespondences = !showBusCorrespondences"
+          @toggle-line-connection-icons="toggleLineConnectionIcons"
+          @toggle-bus-correspondences="toggleBusCorrespondences"
+          @toggle-served-city-zones="toggleServedCityZones"
           @line-cities-expanded="setServedCitiesAccordionExpanded"
           @update:nearby-radius-minutes="nearbyLineRadiusMinutes = $event"
         />
@@ -928,10 +932,16 @@ import type {
   GlobalMapStation,
 } from "../transport-map/contracts/manifest";
 import { GLOBAL_MAP_MODE_ORDER } from "../transport-map/contracts/manifest";
+import { createGlobalLineConnectionIconEntries } from "./globalLineConnectionIcons";
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../transport-map/config/globalTransportPlanConfig";
+import { PreparedWorldPathGeometryCache } from "../transport-map/render/preparedPathGeometry";
 import { buildStationCorrespondenceContext } from "../transport-map/spatial/stationCorrespondences";
 import type { TransportMapViewportResult } from "../transport-map/contracts/network";
 import { TransportMapDataSource } from "../transport-map/data/createTransportMapDataSource";
+import {
+  createSelectedLineAnnotationLayout,
+  resolveSelectedLineLabelOrientation,
+} from "../transport-map/render/selectedLineLabelLayout";
 import {
   selectPreferredLinePaths,
 } from "../transport-map/data/pathPrecedence";
@@ -1412,7 +1422,7 @@ async function toggleRealEstateLayer(): Promise<void> {
   }
 }
 const irisSubdivisionsVisible = ref(false);
-const servedCitiesAccordionExpanded = ref(false);
+const showServedCityZones = ref(false);
 const cityZonesVisible = ref(false);
 const cityZonesLoading = ref(false);
 const cityZonesError = ref("");
@@ -2226,7 +2236,7 @@ const servedCityZones = computed<ReturnType<typeof buildServedCityZones> | undef
   if (
     mapExperience.kind !== "next" ||
     !sidebarOpen.value ||
-    !servedCitiesAccordionExpanded.value ||
+    !showServedCityZones.value ||
     routePreviewActive.value
   ) {
     return undefined;
@@ -2275,14 +2285,22 @@ const renderScene = computed<TransportMapRenderScene>(() => {
   const zones = realEstateLayerEnabled.value
     ? globalAdministrativeZones.value
     : servedCityZones.value ?? globalAdministrativeZones.value;
-  return zones.length > 0 ? { ...scene, servedCityZones: zones } : scene;
+  const selectedLineLayout = showLineConnectionIcons.value
+    ? selectedLineAnnotationLayout.value
+    : undefined;
+  if (zones.length === 0 && !selectedLineLayout) return scene;
+  return {
+    ...scene,
+    ...(zones.length > 0 ? { servedCityZones: zones } : {}),
+    ...(selectedLineLayout ? { selectedLineAnnotationLayout: selectedLineLayout } : {}),
+  };
 });
 
 watch(
   () => [activeLine.value?.id, activeStationView.value?.id] as const,
   ([lineId, stationId], previous) => {
     if (previous && (lineId !== previous[0] || stationId !== previous[1])) {
-      servedCitiesAccordionExpanded.value = false;
+      showServedCityZones.value = false;
       draw();
     }
   },
@@ -2300,9 +2318,19 @@ watch(
 );
 
 function setServedCitiesAccordionExpanded(expanded: boolean): void {
-  servedCitiesAccordionExpanded.value = expanded;
+  showServedCityZones.value = expanded;
   if (!expanded) cityZonesError.value = "";
   if (expanded) void ensureServedCitiesDataset();
+  draw();
+}
+
+function toggleServedCityZones(): void {
+  showServedCityZones.value = !showServedCityZones.value;
+  if (!showServedCityZones.value) {
+    cityZonesError.value = "";
+  } else {
+    void ensureServedCitiesDataset();
+  }
   draw();
 }
 
@@ -2323,15 +2351,15 @@ function ensureIrisDataset(): Promise<IrisDataset> {
 }
 
 async function ensureServedCitiesDataset(): Promise<void> {
-  if (!servedCitiesAccordionExpanded.value || irisDataset.value) return;
+  if (!showServedCityZones.value || irisDataset.value) return;
   try {
     await ensureIrisDataset();
-    if (servedCitiesAccordionExpanded.value) {
+    if (showServedCityZones.value) {
       cityZonesError.value = "";
       draw();
     }
   } catch {
-    if (servedCitiesAccordionExpanded.value) {
+    if (showServedCityZones.value) {
       cityZonesError.value = "unavailable";
       draw();
     }
@@ -2949,6 +2977,54 @@ const lineConnectionIconGroups = computed(() => {
     return visibleLines.length ? [{ ...group, lines: visibleLines }] : [];
   });
 });
+const selectedLineLabelOrientationValue = computed(() => {
+  const line = activeLine.value;
+  const currentNetwork = network.value;
+  if (!line || !currentNetwork) return undefined;
+  return resolveSelectedLineLabelOrientation(
+    line.stationIds
+      .map((stationId) => currentNetwork.stationsById.get(stationId))
+      .filter((station): station is GlobalMapStation => Boolean(station)),
+  );
+});
+const selectedLineAnnotationGeometryCache = new PreparedWorldPathGeometryCache();
+const selectedLineAnnotationSubpaths = computed(() => {
+  const line = activeLine.value;
+  const currentNetwork = network.value;
+  if (!showLineConnectionIcons.value || !line || !currentNetwork) return [];
+  selectedLineAnnotationGeometryCache.setStationsSource(currentNetwork.stations);
+  return renderPaths.value.filter((path) => path.lineId === line.id).flatMap((path) =>
+    selectedLineAnnotationGeometryCache.get(path, line.mode, currentNetwork.stationsById)
+      .subpaths.map((subpath) => subpath.worldPoints));
+});
+const selectedLineAnnotationLayout = computed(() => {
+  if (!showLineConnectionIcons.value) return undefined;
+  const line = activeLine.value;
+  const currentNetwork = network.value;
+  if (!line || !currentNetwork) return undefined;
+  const stations = line.stationIds
+    .map((stationId) => currentNetwork.stationsById.get(stationId))
+    .filter((station): station is GlobalMapStation => Boolean(station));
+  return createSelectedLineAnnotationLayout(
+    stations,
+    lineConnectionIconGroups.value.map((group) => ({
+      stationId: group.station.id,
+      lineCount: createGlobalLineConnectionIconEntries(group.lines).length,
+    })),
+    camera.value,
+    selectedLineAnnotationSubpaths.value,
+  );
+});
+
+function toggleLineConnectionIcons(): void {
+  showLineConnectionIcons.value = !showLineConnectionIcons.value;
+  draw();
+}
+
+function toggleBusCorrespondences(): void {
+  showBusCorrespondences.value = !showBusCorrespondences.value;
+  draw();
+}
 const nearbyLineRadiusMinutes = ref<NearbyLineRadiusMinutes>(0);
 const nearbyLineRadiusMeters = computed(() => walkingMinutesToMeters(nearbyLineRadiusMinutes.value));
 const nearbyLineAnchors = computed<GeocoderPoint[]>(() => {
@@ -4494,7 +4570,7 @@ function clearSelection(): void {
   cancelCameraAnimation();
   showLineConnectionIcons.value = false;
   showBusCorrespondences.value = false;
-  servedCitiesAccordionExpanded.value = false;
+  showServedCityZones.value = false;
   clearPreloadedLineGeometry();
   invalidatePendingViewportRequests();
   closeTrafficCalendar();

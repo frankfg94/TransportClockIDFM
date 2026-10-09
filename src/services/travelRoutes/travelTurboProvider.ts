@@ -51,6 +51,21 @@ export function applyTurboRealtime(course: TurboCourse, departure?: TurboObserva
   return updated.arrival >= updated.departure ? updated : undefined;
 }
 
+/** Preserve fresh Navitia predictions only for the exact dated official course
+ * when SIRI has no observation. Never map predictions by headsign alone. */
+export function applyNavitiaCourseTiming(course: TurboCourse,
+  section: Parameters<TravelTurboProvider["analyze"]>[0]["route"]["sections"][number],
+  now: number): TurboCourse {
+  const observedAt = section.timingObservedAt ? Date.parse(section.timingObservedAt) : NaN;
+  const departure = turboTime(section.departureDateTime);
+  const arrival = turboTime(section.arrivalDateTime);
+  if (section.timingSource !== "realtime" || !Number.isFinite(observedAt) || now - observedAt > 120_000 || observedAt > now + 30_000
+    || !section.vehicleJourneyId || !course.vehicleJourneyId || journeyKey(section.vehicleJourneyId) !== journeyKey(course.vehicleJourneyId)
+    || turboTime(section.baseDepartureDateTime) !== course.baseDeparture || turboTime(section.baseArrivalDateTime) !== course.baseArrival
+    || departure === undefined || arrival === undefined || arrival < departure) return course;
+  return { ...course, departure, arrival, source: "realtime", observedAt: section.timingObservedAt };
+}
+
 /** GTFS time is elapsed time from service-day noon minus 12h, including DST days. */
 export function gtfsTurboTime(civilDate: string, serviceDate: string, secondsFromCivilDay: number): number {
   const civilUtc = Date.UTC(+civilDate.slice(0, 4), +civilDate.slice(4, 6) - 1, +civilDate.slice(6, 8));
@@ -59,22 +74,49 @@ export function gtfsTurboTime(civilDate: string, serviceDate: string, secondsFro
   return turboTime(`${serviceDate}T120000`)! - 12 * 3600_000 + secondsFromServiceDay * 1000;
 }
 
+export interface TravelCourseSearchRequest {
+  route: Parameters<TravelTurboProvider["analyze"]>[0]["route"];
+  start: number;
+  signal: AbortSignal;
+  horizonSeconds?: number;
+}
+export interface TravelCourseSearchResult {
+  batches: TurboCourse[][];
+  complete: boolean;
+  analyzedAt: string;
+}
+
+/** Compare complete ordered stop sequences for identical endpoints. A shorter
+ * ordered subsequence proves skipped stops; incomparable branches stay unknown. */
+export function inferCourseServiceType(calls: string[], patterns: string[][]): TurboCourse["serviceType"] {
+  const subsequence = (shorter: string[], longer: string[]) => {
+    let index = 0;
+    for (const id of longer) if (id === shorter[index]) index++;
+    return index === shorter.length;
+  };
+  if (calls.length < 2) return undefined;
+  const compatible = patterns.filter((pattern) => pattern[0] === calls[0] && pattern.at(-1) === calls.at(-1));
+  if (compatible.some((pattern) => pattern.length > calls.length && subsequence(calls, pattern))) return "semi-direct";
+  if (compatible.some((pattern) => pattern.length < calls.length && subsequence(pattern, calls))) return "omnibus";
+  return undefined;
+}
+
 export function createTravelTurboProvider(dependencies: {
   timetable?: typeof fetchGtfsLineTimetable;
   monitoring?: typeof fetchTravelStopMonitoring;
   now?: () => number;
-} = {}): TravelTurboProvider {
+} = {}) {
   const timetable = dependencies.timetable ?? fetchGtfsLineTimetable;
   const monitoring = dependencies.monitoring ?? fetchTravelStopMonitoring;
   const now = dependencies.now ?? Date.now;
   // Resolved static responses only: one analysis cannot abort another's cached promise.
   const schedules = new Map<string, { at: number; value: GtfsLineTimetableResponse }>();
-  return {
-    async analyze({ route, start, signal }) {
+  const courseProvider = {
+    async loadCourses({ route, start, signal, horizonSeconds = 6 * 3600 }: TravelCourseSearchRequest): Promise<TravelCourseSearchResult> {
       const legs = route.sections.filter(isTurboTransit);
-      const unavailable = () => optimizeTurbo(route, [], start, false);
+      const unavailable = (): TravelCourseSearchResult => ({ batches: [], complete: false, analyzedAt: new Date(now()).toISOString() });
       if (!legs.length || legs.some((s) => !s.lineId || !s.fromStopPointId || !s.toStopPointId || !stopKey(s.fromStopPointId) || !stopKey(s.toStopPointId))) return unavailable();
-      const horizon = start + 6 * 3600_000;
+      const horizon = start + horizonSeconds * 1000;
       const dates = [...new Set([parisDateTime(start).slice(0, 8), parisDateTime(horizon).slice(0, 8)])];
       const observed = new Map<string, Promise<TurboObservation[]>>();
       const pendingSchedules = new Map<string, Promise<GtfsLineTimetableResponse>>();
@@ -110,6 +152,8 @@ export function createTravelTurboProvider(dependencies: {
         ]);
         signal.throwIfAborted();
         const courses = new Map<string, TurboCourse>();
+        const patterns: string[][] = [];
+        const coursePatterns = new Map<string, string[]>();
         // A single observation can still match several scheduled missions. Reject
         // that fallback in both directions, even when SIRI returned only one row.
         const fallbackCourses = new Map<string, Set<string>>();
@@ -136,6 +180,8 @@ export function createTravelTurboProvider(dependencies: {
             for (const startIndex of starts) {
               const endIndex = calls.findIndex((c, i) => i > startIndex && c.stopId === to[0]!.id && c.arrival !== null && c.dropOffType === 0);
               if (endIndex < 0) continue;
+              const pattern = calls.slice(startIndex, endIndex + 1).filter((call) => call.pickupType === 0 || call.dropOffType === 0).map((call) => stopKey(call.stopId) ?? call.stopId);
+              patterns.push(pattern);
               const departure = gtfsTurboTime(table.serviceDate, trip.serviceDate, calls[startIndex]!.departure!);
               const arrival = gtfsTurboTime(table.serviceDate, trip.serviceDate, calls[endIndex]!.arrival!);
               // Include delayed services which were scheduled before the window.
@@ -144,16 +190,18 @@ export function createTravelTurboProvider(dependencies: {
                 departure, arrival, baseDeparture: departure, baseArrival: arrival, source: "schedule",
                 direction: table.stops.find((s) => s.id === calls.at(-1)?.stopId)?.name, mission: trip.headsign,
                 fromStopPointId: leg.fromStopPointId, toStopPointId: leg.toStopPointId,
-                stopNames: calls.slice(startIndex, endIndex + 1).map((c) => table.stops.find((s) => s.id === c.stopId)?.name ?? "").filter(Boolean),
+                stopNames: calls.slice(startIndex, endIndex + 1).filter((call) => call.pickupType === 0 || call.dropOffType === 0).map((c) => table.stops.find((s) => s.id === c.stopId)?.name ?? "").filter(Boolean),
               };
               const departureObservation = matchTurboObservation(departures, course, trip, lineId, leg.fromStopPointId!, "departure", now(), fallbackCourses.get(fallbackKey("departure", departure, trip.headsign))?.size === 1);
               const arrivalObservation = matchTurboObservation(arrivals, course, trip, lineId, leg.toStopPointId!, "arrival", now(), fallbackCourses.get(fallbackKey("arrival", arrival, trip.headsign))?.size === 1);
-              const updated = applyTurboRealtime(course, departureObservation, arrivalObservation);
+              let updated = applyTurboRealtime(course, departureObservation, arrivalObservation);
+              if (updated && !departureObservation && !arrivalObservation) updated = applyNavitiaCourseTiming(updated, leg, now());
               if (!updated) continue;
               if (updated.departure < start) continue;
               // All relevant courses must be covered before claiming an optimum.
               if (updated.source !== "realtime") complete = false;
               courses.set(updated.id, updated);
+              coursePatterns.set(updated.id, pattern);
             }
           }
         }
@@ -169,21 +217,34 @@ export function createTravelTurboProvider(dependencies: {
             departure: baseDeparture, arrival: baseArrival, baseDeparture, baseArrival, source: "schedule", stopNames: leg.stopNames, direction: leg.direction, mission: leg.mission,
             fromStopPointId: leg.fromStopPointId, toStopPointId: leg.toStopPointId };
           const trip = { id: baselineId, headsign: leg.mission };
-          const updated = applyTurboRealtime(baseline,
-            matchTurboObservation(departures, baseline, trip, lineId, leg.fromStopPointId!, "departure", now(), !fallbackCourses.has(fallbackKey("departure", baseDeparture, trip.headsign))),
-            matchTurboObservation(arrivals, baseline, trip, lineId, leg.toStopPointId!, "arrival", now(), !fallbackCourses.has(fallbackKey("arrival", baseArrival, trip.headsign))));
-          if (updated) courses.set(updated.id, updated);
+          const departureObservation = matchTurboObservation(departures, baseline, trip, lineId, leg.fromStopPointId!, "departure", now(), !fallbackCourses.has(fallbackKey("departure", baseDeparture, trip.headsign)));
+          const arrivalObservation = matchTurboObservation(arrivals, baseline, trip, lineId, leg.toStopPointId!, "arrival", now(), !fallbackCourses.has(fallbackKey("arrival", baseArrival, trip.headsign)));
+          let updated = applyTurboRealtime(baseline, departureObservation, arrivalObservation);
+          if (updated && !departureObservation && !arrivalObservation) updated = applyNavitiaCourseTiming(updated, leg, now());
+          if (updated && updated.departure >= start) courses.set(updated.id, updated);
         }
         // Unknown schedule coverage cannot be filled by inventing another mission.
         if (!courses.size) complete = false;
+        for (const course of courses.values()) {
+          const pattern = coursePatterns.get(course.id);
+          if (pattern) course.serviceType = inferCourseServiceType(pattern, patterns);
+        }
         return [...courses.values()].sort((a, b) => a.departure - b.departure);
       }));
       signal.throwIfAborted();
-      const result = optimizeTurbo(route, batches, start, complete);
+      return { batches, complete, analyzedAt: new Date(now()).toISOString() };
+    },
+  };
+  return {
+    loadCourses: courseProvider.loadCourses,
+    async analyze(request: Parameters<TravelTurboProvider["analyze"]>[0]) {
+      const search = await courseProvider.loadCourses(request);
+      const horizon = request.start + 6 * 3600_000;
+      const result = optimizeTurbo(request.route, search.batches, request.start, search.complete);
       if (result.status === "ready" && result.proposals.some((p) => (turboTime(p.arrivalDateTime) ?? horizon) + 1800_000 >= horizon)) {
         result.status = "partial"; result.currentOptimal = {};
       }
-      result.analyzedAt = new Date(now()).toISOString();
+      result.analyzedAt = search.analyzedAt;
       return result;
     },
   };

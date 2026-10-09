@@ -28,6 +28,7 @@ export async function loadGtfsTimetableForDate(
   event: H3Event | undefined,
   lineId: string,
   serviceDate: string,
+  options: { serviceDayOnly?: boolean } = {},
 ): Promise<GtfsTimetableLoadResult> {
   const manifest = await getGtfsManifest(event);
   const unavailable = (
@@ -77,7 +78,7 @@ export async function loadGtfsTimetableForDate(
       cachedBytes += bytes;
     }
   }
-  const lookbackDays = Math.floor(index.maxTimeSeconds / 86400);
+  const lookbackDays = options.serviceDayOnly ? 0 : Math.floor(index.maxTimeSeconds / 86400);
   if (serviceDate < index.startDate || serviceDate > shiftGtfsDate(index.endDate, lookbackDays))
     return unavailable("out-of-coverage", index);
   const offsetsByService = new Map<string, number[]>();
@@ -104,6 +105,7 @@ export async function loadGtfsTimetableForDate(
       for (const daysBack of offsetsByService.get(trip.serviceId) ?? []) {
         const shift = daysBack * 86400;
         if (
+          !options.serviceDayOnly &&
           !trip.calls.some((call) => {
             const time = call[3] ?? call[2];
             return time !== null && time >= shift && time < shift + 86400;

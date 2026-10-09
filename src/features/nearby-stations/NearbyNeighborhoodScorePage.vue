@@ -435,6 +435,8 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
     <NearbyNeighborhoodScoreCard
       v-else
       :result="score.result.value"
+      :education-places="score.places.value"
+      :education-walking-routes="nearbyWalking.placeRoutes.value"
       :origin-label="originLabel"
       :workplace-label="workplaceLabel"
       :loading="scoreLoading"

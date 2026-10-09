@@ -31,7 +31,7 @@ import type {
   TransportMapBasemapStyle,
 } from "../transport-map/basemap/tileMath";
 import GhostLineFlowOverlay from "../transport-map/overlays/GhostLineFlowOverlay.vue";
-import type { GhostLineFlowModel } from "../transport-map/overlays/ghostLineFlow";
+import { createGhostLineFlowModel, type GhostLineFlowModel } from "../transport-map/overlays/ghostLineFlow";
 import { formatTransitDistanceMeters, getCoordinatesDistanceMeters } from "../../services/distance";
 import {
   NEARBY_CLUSTER_GROUPING_DEFAULT_METERS,
@@ -711,6 +711,35 @@ const nearbySummaryHeavyLines = computed<GlobalMapLine[]>(() => {
   });
 });
 
+const nearbySummaryHeavyLinePaths = computed(() => {
+  if (isPlacesPreview.value || cityViewEnabled.value || !showProjectedStations.value) return [];
+  const network = props.cityViewNetwork;
+  if (!network || nearbySummaryHeavyLines.value.length === 0) return [];
+
+  const pathsByLineId = new Map<string, typeof network.regionalPaths>();
+  for (const line of nearbySummaryHeavyLines.value) pathsByLineId.set(line.id, []);
+  for (const path of network.regionalPaths) {
+    pathsByLineId.get(path.lineId)?.push(path);
+  }
+
+  return nearbySummaryHeavyLines.value.flatMap((line) => {
+    const paths = pathsByLineId.get(line.id) ?? [];
+    return paths.length > 0 ? [{ line, paths }] : [];
+  });
+});
+const defaultNearbyHeavyLineFlowModels = computed<GhostLineFlowModel[]>(() => {
+  const network = props.cityViewNetwork;
+  if (!network) return [];
+
+  return nearbySummaryHeavyLinePaths.value.map(({ line, paths }) => createGhostLineFlowModel({
+    camera: camera.value,
+    line,
+    paths,
+    stationsById: network.stationsById,
+    directions: [],
+  }));
+});
+
 function lineForHoverCard(lineId: string | undefined): GlobalMapLine | undefined {
   if (!lineId) return undefined;
   return props.cityViewNetwork?.linesById.get(lineId)
@@ -967,19 +996,25 @@ const renderedLineFlowModels = computed<GhostLineFlowModel[]>(() => {
     ? cityViewPreferredLineId.value
     : summaryActiveLineId.value;
   if (cityViewEnabled.value && !activeFlowLineId) return [];
-  const models = props.lineFlowModels?.length
+  const suppliedModels = props.lineFlowModels?.length
     ? props.lineFlowModels
     : props.lineFlowModel
       ? [props.lineFlowModel]
       : [];
-  const seen = new Set<string>();
-  return models.filter((model) => {
-    if (activeFlowLineId && model.lineId !== activeFlowLineId) return false;
-    const key = model.lineId ?? `anonymous:${seen.size}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  if (activeFlowLineId) {
+    const focusedModel = suppliedModels.find((model) => model.lineId === activeFlowLineId)
+      ?? defaultNearbyHeavyLineFlowModels.value.find((model) => model.lineId === activeFlowLineId);
+    return focusedModel ? [focusedModel] : [];
+  }
+
+  const modelsByLineId = new Map<string, GhostLineFlowModel>();
+  for (const model of defaultNearbyHeavyLineFlowModels.value) {
+    if (model.lineId) modelsByLineId.set(model.lineId, model);
+  }
+  for (const model of suppliedModels) {
+    modelsByLineId.set(model.lineId ?? `anonymous:${modelsByLineId.size}`, model);
+  }
+  return [...modelsByLineId.values()];
 });
 const pinnedHeavyFeederLineKeys = computed(() => {
   const candidate = pinnedHeavyStation.value;
@@ -6559,6 +6594,50 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map :deep(.nearby-map__overlay-pill) {
   pointer-events: auto;
   z-index: 82;
+}
+.nearby-map :deep(.transport-ghost-flow__exit) {
+  backdrop-filter: blur(8px);
+  background: rgba(255, 255, 255, .97);
+  border: 1px solid color-mix(in srgb, var(--ghost-flow-color) 24%, white);
+  border-inline-start: 3px solid var(--ghost-flow-color);
+  border-radius: 10px;
+  box-shadow: 0 5px 15px rgba(16, 35, 63, .16);
+  font-size: .68rem;
+  line-height: 1.2;
+  max-width: min(214px, calc(100% - 18px));
+  min-width: min(148px, calc(100% - 18px));
+  padding: 6px 8px;
+  width: max-content;
+}
+.nearby-map :deep(.transport-ghost-flow__exit--fullscreen) {
+  font-size: .76rem;
+  max-width: min(260px, calc(100% - 24px));
+  min-width: min(180px, calc(100% - 24px));
+  padding: 7px 10px;
+}
+.nearby-map :deep(.transport-ghost-flow__exit-content) { gap: 2px; }
+.nearby-map :deep(.transport-ghost-flow__exit-direction) {
+  color: color-mix(in srgb, var(--ghost-flow-color) 84%, #18233f);
+  line-height: 1.2;
+}
+.nearby-map :deep(.transport-ghost-flow__exit-city) { font-size: .62rem; line-height: 1.15; }
+.nearby-map :deep(.transport-ghost-flow__trace-action) {
+  align-items: center;
+  background: color-mix(in srgb, var(--ghost-flow-color) 7%, white);
+  border: 1px solid color-mix(in srgb, var(--ghost-flow-color) 20%, white);
+  border-radius: 999px;
+  display: inline-flex;
+  margin-top: 3px;
+  min-height: 21px;
+  padding: 1px 8px;
+  text-decoration: none;
+}
+.nearby-map :deep(.transport-ghost-flow__trace-action:hover),
+.nearby-map :deep(.transport-ghost-flow__trace-action:focus-visible) {
+  background: color-mix(in srgb, var(--ghost-flow-color) 13%, white);
+  outline: 2px solid color-mix(in srgb, var(--ghost-flow-color) 55%, white);
+  outline-offset: 2px;
+  text-decoration: none;
 }
 .nearby-map__summary-line-station { color: #18233f; height: 0; position: absolute; width: 0; }
 .nearby-map__summary-line-station-dot { background: #fff; border: 3px solid var(--nearby-summary-line-color, #5146ff); border-radius: 50%; box-shadow: 0 2px 6px rgba(16,35,63,.28); box-sizing: border-box; display: block; height: 10px; left: 0; position: absolute; top: 0; transform: translate(-50%, -50%); width: 10px; }

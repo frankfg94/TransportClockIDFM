@@ -104,6 +104,7 @@ const primaryLinks = computed<PrimaryNavigationLink[]>(() => [
 const localizedSecondaryLinks = computed(() => [
   { to: "/feed", label: t("news.title"), icon: Rss },
   { to: "/nearby-stations", label: t("common.labels.nearbyStations"), icon: MapPin },
+  { to: "/optimizer/line/tram/T10", label: t("lineOptimizer.navigation"), icon: Activity },
   { to: "/settings", label: t("common.labels.settings"), icon: SlidersHorizontal },
   { to: "/health", label: t("common.labels.health"), icon: Activity },
 ]);

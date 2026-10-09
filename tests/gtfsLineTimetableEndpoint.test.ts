@@ -126,7 +126,9 @@ describe("GTFS timetable endpoint", () => {
     const request = event("line:L", "20260901");
     const result = await endpoint(request.event);
 
-    expect(mocks.timetable).toHaveBeenCalledExactlyOnceWith(request.event, "line:L", "20260901");
+    expect(mocks.timetable).toHaveBeenCalledExactlyOnceWith(request.event, "line:L", "20260901", {
+      serviceDayOnly: true,
+    });
     expect(result).toEqual({
       lineId: "line:L",
       serviceDate: "20260901",
@@ -172,7 +174,9 @@ describe("GTFS timetable endpoint", () => {
     const request = event("line:L");
     await endpoint(request.event);
     expect(mocks.serviceDate).toHaveBeenCalledOnce();
-    expect(mocks.timetable).toHaveBeenCalledWith(request.event, "line:L", "20260831");
+    expect(mocks.timetable).toHaveBeenCalledWith(request.event, "line:L", "20260831", {
+      serviceDayOnly: true,
+    });
   });
 
   it.each([undefined, " ", "../L", "L\\bad", "L\u0000bad", "L".repeat(201)])(

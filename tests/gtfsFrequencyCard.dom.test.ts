@@ -519,6 +519,44 @@ describe("GTFS frequency card", () => {
     ).toBeNull();
   });
 
+  it("shows service-day bounds after midnight and excludes previous-day trips", async () => {
+    const data = timetable();
+    const first = data.trips[0]!;
+    const late = {
+      ...first,
+      id: "late",
+      calls: first.calls.map((call) => ({
+        ...call,
+        departure: call.departure === null ? null : call.departure + 19 * 3600,
+        arrival: call.arrival === null ? null : call.arrival + 19 * 3600,
+      })),
+    };
+    const previous = {
+      ...first,
+      id: "previous",
+      serviceDate: "20260830",
+      calls: first.calls.map((call) => ({ ...call, departure: 60, arrival: 60 })),
+    };
+    data.trips.push(late, previous);
+    vi.spyOn(timetableClient, "fetchGtfsLineTimetable").mockResolvedValue(data);
+    const wrapper = card();
+    await expandFrequencyCard(wrapper);
+    await wrapper.get('[data-testid="gtfs-frequency-timetable"]').trigger("click");
+    await flushPromises();
+    expect(
+      document.body.querySelector('[data-testid="line-frequency-timetable-first-departure"]')
+        ?.textContent,
+    ).toContain("06:00");
+    expect(
+      document.body.querySelector('[data-testid="line-frequency-timetable-last-departure"]')
+        ?.textContent,
+    ).toContain("01:00 (+1 d)");
+    expect(
+      document.body.querySelector('[data-testid="line-frequency-timetable-first-departure"]')
+        ?.textContent,
+    ).not.toContain("00:01");
+  });
+
   it("pins an indeterminate loading bar to the timetable modal bottom", async () => {
     let resolveTimetable!: (value: GtfsLineTimetableResponse) => void;
     vi.spyOn(timetableClient, "fetchGtfsLineTimetable").mockImplementation(

@@ -79,6 +79,7 @@ export interface GlobalMapSidebarBodyProps {
   showGhostLineIcons: boolean;
   showLineConnectionIcons: boolean;
   showBusCorrespondences: boolean;
+  showServedCityZones: boolean;
   nearbyPlaces: NearbyPlace[];
   nearbyPlacesLoading: boolean;
   nearbyPlacesError: boolean;
@@ -100,6 +101,7 @@ export interface GlobalMapSidebarBodyEmits {
   "toggle-ghost-line-icons": [];
   "toggle-line-connection-icons": [];
   "toggle-bus-correspondences": [];
+  "toggle-served-city-zones": [];
   "line-cities-expanded": [expanded: boolean];
   "update:nearby-radius-minutes": [minutes: NearbyLineRadiusMinutes];
 }

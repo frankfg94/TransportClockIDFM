@@ -71,6 +71,7 @@ export function createNavitiaTravelRoutesProvider(): TravelRoutesProvider {
         count: request.count ?? 16,
         includeDisruptions: request.includeDisruptions ?? false,
         includeGeoJson: request.includeGeoJson ?? false,
+        dataFreshness: request.dataFreshness ?? "base_schedule",
         allowedModes: request.allowedModes ? [...request.allowedModes].sort() : undefined,
       });
       const cached = cache.get(key);

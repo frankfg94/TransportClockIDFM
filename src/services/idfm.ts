@@ -312,6 +312,9 @@ interface NavitiaJourneyLocation {
 }
 
 interface NavitiaJourneySection {
+  data_freshness?: string;
+  base_departure_date_time?: string;
+  base_arrival_date_time?: string;
   id?: string;
   links?: Array<{ type?: string; id?: string }>;
   type?: string;
@@ -550,7 +553,7 @@ export async function fetchNavitiaJourneys(
     // several local buses can serve the same heavy stop through different
     // physical quays, and the resolver deduplicates them by feeder line.
     count: String(Math.max(1, Math.min(20, Math.round(request.count ?? 16)))),
-    data_freshness: "base_schedule",
+    data_freshness: request.dataFreshness ?? "base_schedule",
     disable_disruption: request.includeDisruptions ? "false" : "true",
     disable_geojson: request.includeGeoJson ? "false" : "true",
     from: `${request.origin.lon};${request.origin.lat}`,
@@ -577,7 +580,7 @@ export async function fetchNavitiaJourneys(
     }
 
     const payload = (await response.json()) as NavitiaJourneysResponse;
-    return (payload.journeys ?? []).map(normalizeNavitiaJourney);
+    return (payload.journeys ?? []).map((journey) => normalizeNavitiaJourney(journey, new Date().toISOString()));
   }, options.signal);
 }
 
@@ -752,7 +755,7 @@ function resolveNavitiaPlaceCategory(kind: string | undefined): GeocoderPoint["c
   return undefined;
 }
 
-function normalizeNavitiaJourney(journey: NavitiaJourney): NearbyJourney {
+function normalizeNavitiaJourney(journey: NavitiaJourney, observedAt?: string): NearbyJourney {
   const sections: NearbyJourneySection[] = (journey.sections ?? []).map((section) => {
     const fromPoint = normalizeNavitiaJourneyPoint(section.from);
     const toPoint = normalizeNavitiaJourneyPoint(section.to);
@@ -791,9 +794,10 @@ function normalizeNavitiaJourney(journey: NavitiaJourney): NearbyJourney {
     toStopAreaId: section.to?.stop_area?.id ?? section.to?.stop_point?.stop_area?.id,
     vehicleJourneyId: section.links?.find((link) => link.type === "vehicle_journey")?.id,
     mission: section.display_informations?.headsign,
-    baseDepartureDateTime: section.departure_date_time,
-    baseArrivalDateTime: section.arrival_date_time,
-    timingSource: "schedule",
+    baseDepartureDateTime: section.base_departure_date_time ?? section.departure_date_time,
+    baseArrivalDateTime: section.base_arrival_date_time ?? section.arrival_date_time,
+    timingSource: section.data_freshness === "realtime" ? "realtime" : section.data_freshness === "adapted_schedule" ? "estimated" : "schedule",
+    timingObservedAt: section.data_freshness === "realtime" || section.data_freshness === "adapted_schedule" ? observedAt : undefined,
     fromPoint,
     toPoint,
     geometry: normalizeNavitiaJourneyGeometry(section),

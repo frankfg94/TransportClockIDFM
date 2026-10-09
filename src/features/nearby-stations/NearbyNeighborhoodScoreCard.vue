@@ -13,9 +13,14 @@ import type {
   NeighborhoodDatasetStatus,
 } from "./neighborhood/criterionRegistry";
 import NearbyNeighborhoodScoreFact from "./NearbyNeighborhoodScoreFact.vue";
+import NearbyNeighborhoodScoreEducation from "./NearbyNeighborhoodScoreEducation.vue";
+import type { NearbyPlace } from "./nearbyPlaces";
+import type { NeighborhoodWalkingMetrics } from "./neighborhood/contracts";
 
 const props = defineProps<{
   result: NeighborhoodScoreResult;
+  educationPlaces?: readonly NearbyPlace[];
+  educationWalkingRoutes?: Readonly<Record<string, NeighborhoodWalkingMetrics | undefined>>;
   originLabel?: string;
   workplaceLabel?: string;
   loading?: boolean;
@@ -35,6 +40,7 @@ const emit = defineEmits<{
 const { d, t } = useI18n();
 const selectedFactId = ref<string>();
 const criteriaById = computed(() => new Map((props.criteria ?? []).map((criterion) => [criterion.id, criterion])));
+const summaryPositiveFacts = computed(() => props.result.positiveFacts.filter((fact) => fact.category !== "education"));
 const diagnosticsOpen = ref(false);
 const diagnosticsDialog = ref<HTMLElement>();
 let previouslyFocused: HTMLElement | undefined;
@@ -285,11 +291,11 @@ onBeforeUnmount(() => {
       }) }}
     </p>
 
-    <section v-if="result.positiveFacts.length || result.negativeFacts.length || result.neutralFacts.length" class="nearby-neighborhood-score-card__highlights">
-      <div v-if="result.positiveFacts.length" class="nearby-neighborhood-score-card__highlight nearby-neighborhood-score-card__highlight--positive">
+    <section v-if="summaryPositiveFacts.length || result.negativeFacts.length || result.neutralFacts.length" class="nearby-neighborhood-score-card__highlights">
+      <div v-if="summaryPositiveFacts.length" class="nearby-neighborhood-score-card__highlight nearby-neighborhood-score-card__highlight--positive">
         <h3>{{ t("nearbyStations.neighborhoodScore.positives") }}</h3>
         <p
-          v-for="fact in result.positiveFacts"
+          v-for="fact in summaryPositiveFacts"
           :key="`summary:${fact.id}`"
           class="nearby-neighborhood-score-card__summary-fact"
         >
@@ -342,7 +348,18 @@ onBeforeUnmount(() => {
         </p>
         <div v-if="category.available || category.neutralFacts.length" class="nearby-neighborhood-score-card__facts">
           <div
-            v-if="category.positiveFacts.length"
+            v-if="category.id === 'education'"
+            class="nearby-neighborhood-score-card__fact-group nearby-neighborhood-score-card__fact-group--education"
+          >
+            <span>{{ t("nearbyStations.neighborhoodScore.positives") }}</span>
+            <NearbyNeighborhoodScoreEducation
+              :facts="category.positiveFacts"
+              :places="educationPlaces ?? []"
+              :walking-routes="educationWalkingRoutes ?? {}"
+            />
+          </div>
+          <div
+            v-else-if="category.positiveFacts.length"
             class="nearby-neighborhood-score-card__fact-group"
             :class="{ 'nearby-neighborhood-score-card__fact-group--positive-only': !category.negativeFacts.length }"
           >
@@ -375,7 +392,7 @@ onBeforeUnmount(() => {
               @toggle="toggleFact(fact.id)"
             />
           </div>
-          <p v-if="!category.positiveFacts.length && !category.negativeFacts.length && !category.neutralFacts.length" class="nearby-neighborhood-score-card__category-empty">
+          <p v-if="category.id !== 'education' && !category.positiveFacts.length && !category.negativeFacts.length && !category.neutralFacts.length" class="nearby-neighborhood-score-card__category-empty">
             {{ t("nearbyStations.neighborhoodScore.noDocumentedSignal") }}
           </p>
         </div>
@@ -506,6 +523,7 @@ onBeforeUnmount(() => {
 .nearby-neighborhood-score-card__facts { display: grid; gap: 4px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .nearby-neighborhood-score-card__fact-group--neutral { grid-column: 1 / -1; }
 .nearby-neighborhood-score-card__fact-group { min-width: 0; }
+.nearby-neighborhood-score-card__fact-group--education { grid-column: 1 / -1; }
 .nearby-neighborhood-score-card__fact-group--positive-only { display: grid; gap: 4px; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .nearby-neighborhood-score-card__fact-group--positive-only > span { grid-column: 1 / -1; }
 .nearby-neighborhood-score-card__footer { border-top: 1px solid rgba(16,35,63,.1); color: var(--muted); display: grid; font-size: .7rem; gap: 5px; line-height: 1.45; margin-top: 20px; padding: 14px 7px 0; }

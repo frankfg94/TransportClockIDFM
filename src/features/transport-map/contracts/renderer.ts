@@ -6,6 +6,7 @@ import type {
   TransportMapBinaryPathPacket,
   TransportMapPreparedRenderModel,
 } from "../render/transportMapRenderModel";
+import type { SelectedLineAnnotationLayout } from "../render/selectedLineLabelLayout";
 import type { TransportMapPerformanceTrace } from "../performance/transportMapPerformanceTrace";
 
 export type TransportMapRendererKind =
@@ -74,6 +75,8 @@ export interface TransportMapRenderScene {
   quays?: GlobalMapQuayMarker[];
   entrances?: GlobalMapEntrance[];
   activeLineId?: string;
+  /** Shared positions for selected-line labels and their correspondence lists. */
+  selectedLineAnnotationLayout?: SelectedLineAnnotationLayout;
   activeStationId?: string;
   /** Station currently under the pointer; rendered as a larger hover target. */
   hoveredStationId?: string;

@@ -18,6 +18,7 @@ import type {
 import {
   canonicalGtfsTimetableStationId,
   calculateGtfsTimetableInterval,
+  calculateGtfsTimetableServiceBounds,
   GTFS_LINE_TIMETABLE_WINDOWS,
   isBoardableGtfsTimetableCall,
   type GtfsTimetableInterval,
@@ -219,7 +220,9 @@ function sectionOrientation(
 }
 
 const timetableTrips = computed<TimetableTripEntry[]>(() => {
-  const trips = (props.timetable?.trips ?? []).filter((trip) => boardableCalls(trip).length > 0);
+  const trips = (props.timetable?.trips ?? []).filter(
+    (trip) => trip.serviceDate === props.timetable?.serviceDate && boardableCalls(trip).length > 0,
+  );
   const section = activeSection.value;
   if (!section) return trips.map((trip) => ({ trip }));
 
@@ -332,6 +335,26 @@ const timetableRows = computed(() =>
     ),
   })),
 );
+
+const serviceBounds = computed(() =>
+  directions.value.map((direction) =>
+    calculateGtfsTimetableServiceBounds(
+      direction.trips,
+      stopsById.value,
+      activeSectionStationIds.value,
+    ),
+  ),
+);
+const hasServiceBounds = computed(() => serviceBounds.value.some(Boolean));
+
+function formatServiceTime(seconds: number | undefined, approximate = false): string {
+  if (seconds === undefined) return t("globalMap.sidebar.gtfsFrequency.timetableNoInterval");
+  const minutes = Math.floor(seconds / 60);
+  const time = `${String(Math.floor(minutes / 60) % 24).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  const days = Math.floor(seconds / 86400);
+  const label = days ? t("globalMap.sidebar.gtfsFrequency.timetableNextDay", { time, days }) : time;
+  return approximate ? `≈ ${label}` : label;
+}
 
 const hasIntervals = computed(() =>
   timetableRows.value.some((row) => row.intervals.some((interval) => interval !== undefined)),
@@ -457,7 +480,11 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
           : t("globalMap.sidebar.gtfsFrequency.timetableNoDepartures")
       }}
     </p>
-    <p v-else-if="!hasIntervals" role="status" data-testid="line-frequency-timetable-unavailable">
+    <p
+      v-else-if="!hasIntervals && !hasServiceBounds"
+      role="status"
+      data-testid="line-frequency-timetable-unavailable"
+    >
       {{ t("globalMap.sidebar.gtfsFrequency.timetableNoIntervals") }}
     </p>
     <div
@@ -480,6 +507,18 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
           </tr>
         </thead>
         <tbody>
+          <tr data-testid="line-frequency-timetable-first-departure">
+            <th scope="row">{{ t("globalMap.sidebar.gtfsFrequency.timetableFirstDeparture") }}</th>
+            <td v-for="(bounds, index) in serviceBounds" :key="directions[index]?.key">
+              {{ formatServiceTime(bounds?.firstDeparture, bounds?.approximate) }}
+            </td>
+          </tr>
+          <tr data-testid="line-frequency-timetable-last-departure">
+            <th scope="row">{{ t("globalMap.sidebar.gtfsFrequency.timetableLastDeparture") }}</th>
+            <td v-for="(bounds, index) in serviceBounds" :key="directions[index]?.key">
+              {{ formatServiceTime(bounds?.lastDeparture, bounds?.approximate) }}
+            </td>
+          </tr>
           <tr v-for="row in timetableRows" :key="row.key">
             <th scope="row">{{ t(row.label) }}</th>
             <td
@@ -494,6 +533,9 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
         </tbody>
       </table>
     </div>
+    <p v-if="hasServiceBounds" data-testid="line-frequency-timetable-service-hint">
+      {{ t("globalMap.sidebar.gtfsFrequency.timetableServiceBoundsHint") }}
+    </p>
   </section>
 </template>
 

@@ -5,7 +5,8 @@ import type {
   TransportMapRenderFrame,
   TransportMapRendererHost,
 } from "../contracts/renderer";
-import type { TransportMapPreparedRenderModel } from "../render/transportMapRenderModel";
+import type { TransportMapLabelRenderRecord, TransportMapPreparedRenderModel } from "../render/transportMapRenderModel";
+import { interpolateStationLabelTranslation, STATION_LABEL_TRANSLATION_DURATION_MS } from "../render/stationLabelTranslation";
 import { cameraStateToMapLibreView } from "./nextMapCamera";
 import {
   createDeckTransportLabelLayers,
@@ -37,6 +38,13 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
   private stationLabelFadeOpacity = 1;
   private stationLabelFadeStartedAt?: number;
   private stationLabelFadeFrame?: number;
+  private stationLabelTranslation?: {
+    from: readonly TransportMapLabelRenderRecord[];
+    to: readonly TransportMapLabelRenderRecord[];
+    startedAt: number;
+  };
+  private translatedLabels?: readonly TransportMapLabelRenderRecord[];
+  private stationLabelTranslationFrame?: number;
 
   constructor(
     private readonly map: MapLibreMap,
@@ -51,6 +59,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
     if (this.stationLabelFadeEnabled === enabled) return;
     this.stationLabelFadeEnabled = enabled;
     if (enabled) return;
+    this.cancelStationLabelTranslation();
     this.cancelStationLabelFade();
     this.stationLabelFadeLineId = undefined;
     this.stationLabelFadeOpacity = 1;
@@ -83,6 +92,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
     const previousFrame = this.lastFrame;
     this.syncStationLabelFadeLine(frame.scene.activeLineId);
     this.lastFrame = frame;
+    this.syncStationLabelTranslation(previousFrame, frame);
     const cameraChanged = syncCameraToMapLibre(this.map, frame);
     const beforeId = firstSymbolLayerId(this.map);
     const binaryChanged = binaryPacketsChanged(this.lastBinaryPackets, frame.binaryPackets);
@@ -138,14 +148,14 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
         this.layers = replaceTransportLabelLayers(
           this.layers,
           createDeckTransportLabelLayers(
-            frame.model.labels,
+            this.translatedLabels ?? frame.model.labels,
             beforeId,
             this.stationLabelOpacityFor(frame),
           ),
         );
       } else {
         this.layers = createDeckTransportLayers(
-          frame,
+          this.translatedLabels ? { ...frame, model: { ...frame.model, labels: this.translatedLabels } } : frame,
           beforeId,
           this.stationLabelOpacityFor(frame),
         );
@@ -202,6 +212,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
   }
 
   dispose(): void {
+    this.cancelStationLabelTranslation();
     this.cancelStationLabelFade();
     this.nearbyPlaceLayers = [];
     this.lastFrame = undefined;
@@ -213,6 +224,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
 
   private syncStationLabelFadeLine(lineId: string | undefined): void {
     if (lineId === this.activeLineId) return;
+    this.cancelStationLabelTranslation();
     this.cancelStationLabelFade();
     this.activeLineId = lineId;
     this.stationLabelFadeLineId = this.stationLabelFadeEnabled && lineId ? lineId : undefined;
@@ -271,7 +283,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
     this.layers = replaceTransportLabelLayers(
       this.layers,
       createDeckTransportLabelLayers(
-        frame.model.labels,
+        this.translatedLabels ?? frame.model.labels,
         this.lastBeforeId,
         this.stationLabelOpacityFor(frame),
       ),
@@ -290,6 +302,48 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
     }
     this.stationLabelFadeFrame = undefined;
     this.stationLabelFadeStartedAt = undefined;
+  }
+
+  private syncStationLabelTranslation(previous: TransportMapRenderFrame | undefined, frame: TransportMapRenderFrame): void {
+    if (!previous || !frame.scene.activeLineId || previous.scene.activeLineId !== frame.scene.activeLineId) return;
+    if (!this.stationLabelFadeEnabled || typeof requestAnimationFrame !== "function"
+      || previous.camera.zoom !== frame.camera.zoom
+      || previous.camera.viewportWidthCssPx !== frame.camera.viewportWidthCssPx
+      || previous.camera.viewportHeightCssPx !== frame.camera.viewportHeightCssPx) {
+      const wasTranslating = Boolean(this.stationLabelTranslation);
+      this.cancelStationLabelTranslation();
+      if (wasTranslating) this.updateStationLabelLayers();
+      return;
+    }
+    const toggled = Boolean(previous.scene.selectedLineAnnotationLayout) !== Boolean(frame.scene.selectedLineAnnotationLayout);
+    if (!toggled && (!this.stationLabelTranslation || this.stationLabelTranslation.to === frame.model.labels)) return;
+    const from = this.translatedLabels ?? previous.model.labels;
+    this.cancelStationLabelTranslation();
+    this.stationLabelTranslation = { from, to: frame.model.labels, startedAt: now() };
+    this.translatedLabels = interpolateStationLabelTranslation(from, frame.model.labels, 0);
+    this.stationLabelTranslationFrame = requestAnimationFrame(this.advanceStationLabelTranslation);
+  }
+
+  private advanceStationLabelTranslation = (timestamp: number): void => {
+    const translation = this.stationLabelTranslation;
+    if (!translation || !this.lastFrame) return;
+    const progress = Math.min(1, Math.max(0, (timestamp - translation.startedAt) / STATION_LABEL_TRANSLATION_DURATION_MS));
+    this.translatedLabels = interpolateStationLabelTranslation(translation.from, translation.to, progress);
+    this.updateStationLabelLayers();
+    if (progress >= 1) {
+      this.cancelStationLabelTranslation();
+      return;
+    }
+    this.stationLabelTranslationFrame = requestAnimationFrame(this.advanceStationLabelTranslation);
+  };
+
+  private cancelStationLabelTranslation(): void {
+    if (this.stationLabelTranslationFrame !== undefined && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(this.stationLabelTranslationFrame);
+    }
+    this.stationLabelTranslationFrame = undefined;
+    this.stationLabelTranslation = undefined;
+    this.translatedLabels = undefined;
   }
 
   recordDeckMetrics(metrics: Omit<TransportMapDeckMetrics, "sampleAgeMs">): void {

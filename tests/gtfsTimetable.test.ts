@@ -148,6 +148,18 @@ describe("GTFS timetable import and calendar", () => {
       serviceDate: "20260830",
       calls: [{ departure: 930 }, { departure: 1530 }],
     });
+    const serviceDay = await loadGtfsTimetableForDate(undefined, "line:IDFM:A", "20260830", {
+      serviceDayOnly: true,
+    });
+    expect(serviceDay.trips.map((trip) => trip.id)).toEqual(["OVERNIGHT"]);
+    expect(serviceDay.trips[0]).toMatchObject({
+      serviceDate: "20260830",
+      calls: [{ departure: 87330 }, { departure: 87930 }],
+    });
+    const nextServiceDay = await loadGtfsTimetableForDate(undefined, "line:IDFM:A", "20260831", {
+      serviceDayOnly: true,
+    });
+    expect(nextServiceDay.trips.map((trip) => trip.id)).toEqual(["EXTRA"]);
     expect(getItem.mock.calls.every(([key]) => !key.includes("IDFM%3AB"))).toBe(true);
     const index: GtfsTimetableLineIndex = JSON.parse(
       await fs.readFile(join(output, "IDFM%3AA", "index.json"), "utf8"),

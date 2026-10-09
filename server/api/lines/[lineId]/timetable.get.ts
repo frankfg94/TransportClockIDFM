@@ -48,7 +48,9 @@ export default defineEventHandler(async (event): Promise<GtfsLineTimetableRespon
     throw createError({ statusCode: 400, statusMessage: "Invalid service date." });
   }
 
-  const timetable = await loadGtfsTimetableForDate(event, lineId, serviceDate);
+  const timetable = await loadGtfsTimetableForDate(event, lineId, serviceDate, {
+    serviceDayOnly: true,
+  });
   const descriptor = timetable.index ?? timetable.manifest?.timetable;
   setHeader(event, "Cache-Control", "no-cache");
   const topologyStopIds =

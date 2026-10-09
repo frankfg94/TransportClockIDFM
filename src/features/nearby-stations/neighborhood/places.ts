@@ -31,7 +31,7 @@ function formatPlaceAccessLabel(place: ScoredPlace, fallbackName: string): strin
 }
 
 export function scorePlaces(
-  input: NeighborhoodScoreInput,
+  input: Pick<NeighborhoodScoreInput, "places" | "walkingRoutes">,
   predicate: (place: NearbyPlace) => boolean,
   limitMinutes = NEIGHBORHOOD_WALKING_LIMIT_MINUTES,
 ): ScoredPlace[] {

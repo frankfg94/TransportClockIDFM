@@ -297,6 +297,24 @@ function updateNearbyRadius(value: string): void {
           <span>{{ showBusCorrespondences ? t("common.booleans.yes") : t("common.booleans.no") }}</span>
         </button>
       </div>
+      <div class="global-map-picker-sidebar__line-connection-setting">
+        <div>
+          <strong>{{ t("globalMap.sidebar.servedCityZones") }}</strong>
+          <small>{{ t("globalMap.sidebar.servedCityZonesDescription") }}</small>
+        </div>
+        <button
+          class="global-map-picker-sidebar__line-connection-icons-switch"
+          type="button"
+          role="switch"
+          :aria-checked="showServedCityZones"
+          :aria-label="t('globalMap.sidebar.servedCityZonesAria')"
+          data-testid="global-map-served-city-zones-toggle"
+          @click="emit('toggle-served-city-zones')"
+        >
+          <Building2 :size="15" aria-hidden="true" />
+          <span>{{ showServedCityZones ? t("common.booleans.yes") : t("common.booleans.no") }}</span>
+        </button>
+      </div>
     </section>
 
     <section
@@ -627,6 +645,10 @@ function updateNearbyRadius(value: string): void {
           type="button"
           class="global-map-picker-sidebar__connection"
           :disabled="isLinePreview"
+          @focus="emit('hover-line', connectedLine.id)"
+          @blur="emit('hover-line', undefined)"
+          @mouseenter="emit('hover-line', connectedLine.id)"
+          @mouseleave="emit('hover-line', undefined)"
           @click="emit('select-line', connectedLine.id)"
         >
           <span
