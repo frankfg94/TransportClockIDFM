@@ -57,6 +57,7 @@ import { NEARBY_ISOCHRONE_MINUTES, type NearbyWalkingMinutes } from "./nearbyWal
 import type { NearbyIsochroneGeometry } from "./nearbyIsochrones";
 import { parseNearbyAirQualityLevel, type NearbyAirQualityLevel, type NearbyNoiseGridCell, type NearbyNoiseLevel } from "./nearbyNoiseZones";
 import { useNearbyNoiseWms } from "./useNearbyNoiseWms";
+import { nearbyMapZoomPercent } from "./nearbyMapZoom";
 import { NearbyIsochronesError } from "../../services/nearbyIsochrones";
 import type { NearbyJourneyPoint } from "./nearbyHeavyTransports";
 import type { NearbyWalkingRoute } from "./nearbyWalkingRoutes";
@@ -971,7 +972,7 @@ const hasVisiblePrimaryControls = computed(() => !isPlacesPreview.value && (
 const hasMobileMapMenuContent = computed(() => !isPlacesPreview.value);
 const canZoomIn = computed(() => camera.value.zoom < zoomRange.value.max - 0.001);
 const canZoomOut = computed(() => camera.value.zoom > zoomRange.value.min + 0.001);
-const zoomLevelLabel = computed(() => `${Math.round((2 ** (camera.value.zoom - zoomReference.value)) * 100)}%`);
+const zoomLevelLabel = computed(() => `${nearbyMapZoomPercent(camera.value.zoom, zoomReference.value)}%`);
 const basemapToggleLabel = computed(() => basemapLayer.value === "plan"
   ? t("globalMap.page.layerSatellite")
   : t("globalMap.page.layerPlan"));

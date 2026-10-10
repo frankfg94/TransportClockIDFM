@@ -9,10 +9,10 @@ import {
 } from "../transport-map/geo/coordinateKernel";
 import type { GlobalMapBounds } from "../transport-map/contracts/manifest";
 import type { NearbyNoiseLevel } from "./nearbyNoiseZones";
+import { isNearbyNoiseDetailZoomActive } from "./nearbyMapZoom";
 
 const BRUITPARIF_WMS_URL = "https://raster.bruitparif.fr/mapproxy/service";
 const BRUITPARIF_LAYER = "CSAB_2024_wCSAB_cl_idf";
-const DETAIL_ZOOM_SCALE = 5;
 const VIEWPORT_BUFFER_RATIO = 0.18;
 const MAX_IMAGE_DIMENSION = 2_048;
 const OVERLAY_OPACITY = 0.25;
@@ -59,7 +59,7 @@ export function useNearbyNoiseWms(
   const isHighPrecisionActive = computed(() =>
     enabled.value
       && highPrecisionEnabled.value
-      && camera.value.zoom - referenceZoom.value >= Math.log2(DETAIL_ZOOM_SCALE),
+      && isNearbyNoiseDetailZoomActive(camera.value.zoom, referenceZoom.value),
   );
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let activeController: AbortController | undefined;

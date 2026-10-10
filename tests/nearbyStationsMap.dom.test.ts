@@ -3098,9 +3098,10 @@ describe("NearbyStationsMap line focus", () => {
       await zoomInButton.trigger("click");
       expect(wrapper.find(".nearby-map__zoom-level").text()).not.toBe("100%");
 
-      for (let index = 0; index < 8; index += 1) {
+      for (let index = 0; index < 10; index += 1) {
         await zoomInButton.trigger("click");
       }
+      expect(wrapper.find(".nearby-map__zoom-level").text()).toBe("339%");
       expect(Number.parseInt(wrapper.find(".nearby-map__zoom-level").text(), 10)).toBeGreaterThan(200);
       for (let index = 0; index < 100; index += 1) {
         await zoomInButton.trigger("click");
