@@ -7,13 +7,14 @@ import {
   type GlobalMapPath,
   type GlobalMapStation,
 } from "../contracts/manifest";
-import { worldToScreen, type ScreenPoint } from "../geo/coordinateKernel";
+import { worldToScreen, type ScreenPoint, type WorldPoint } from "../geo/coordinateKernel";
 
 export interface GhostLineFlowDirection {
   id: string;
   label: string;
   orderedStationIds: string[];
   destinationStationId?: string;
+  destinationWorld?: WorldPoint;
   destinationCity?: string;
 }
 
@@ -428,13 +429,12 @@ function createExitIndicators(
 
   for (const direction of directions) {
     if (!direction.label) continue;
-    const destination = direction.destinationStationId
-      ? stationsById.get(direction.destinationStationId)
-      : undefined;
-    const destinationScreen = destination
-      ? findProjectedStationPoint(fragments, direction.id, destination.id)
-        ?? worldToScreen({ x: destination.worldX, y: destination.worldY }, camera)
-      : undefined;
+    const destinationScreen = destinationScreenPoint(
+      direction,
+      fragments,
+      stationsById,
+      camera,
+    );
     if (destinationScreen && isInsideViewport(destinationScreen, width, height)) continue;
 
     const candidates = fragments
@@ -463,6 +463,26 @@ function createExitIndicators(
   return result;
 }
 
+function destinationScreenPoint(
+  direction: GhostLineFlowDirection,
+  fragments: readonly ProjectedFragment[],
+  stationsById: ReadonlyMap<string, GlobalMapStation>,
+  camera: CameraState,
+): ScreenPoint | undefined {
+  if (direction.destinationWorld) {
+    return worldToScreen(direction.destinationWorld, camera);
+  }
+
+  const stationId = direction.destinationStationId;
+  if (!stationId) return undefined;
+
+  const projectedPoint = findProjectedStationPoint(fragments, direction.id, stationId);
+  if (projectedPoint) return projectedPoint;
+
+  const station = stationsById.get(stationId);
+  return station ? worldToScreen({ x: station.worldX, y: station.worldY }, camera) : undefined;
+}
+
 function createTerminusIndicators(
   fragments: readonly ProjectedFragment[],
   directions: readonly GhostLineFlowDirection[],
@@ -474,14 +494,13 @@ function createTerminusIndicators(
   const result: GhostLineTerminusIndicator[] = [];
 
   for (const direction of directions) {
-    const destination = direction.destinationStationId
-      ? stationsById.get(direction.destinationStationId)
-      : undefined;
-    if (!destination) continue;
-
-    const destinationScreen = findProjectedStationPoint(fragments, direction.id, destination.id)
-      ?? worldToScreen({ x: destination.worldX, y: destination.worldY }, camera);
-    if (!isInsideViewport(destinationScreen, width, height)) continue;
+    const destinationScreen = destinationScreenPoint(
+      direction,
+      fragments,
+      stationsById,
+      camera,
+    );
+    if (!destinationScreen || !isInsideViewport(destinationScreen, width, height)) continue;
     if (!fragments.some((fragment) => fragment.directionId === direction.id)) continue;
 
     result.push({

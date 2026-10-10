@@ -1,4 +1,5 @@
 import { createLinePresentation, transitFamilyToMode } from "../../../services/linePresentation";
+import { lonLatToWorld } from "../geo/coordinateKernel";
 import { idfmLineToSiriRef } from "../../../services/idfmStopReferences";
 import type {
   LineRouteSequence,
@@ -104,6 +105,9 @@ export function createTransportLineFlowDirections(
     const destinationStation = destinationStationId
       ? stations.find((station) => station.id === destinationStationId)
       : undefined;
+    const destinationWorld = hasValidDestinationCoordinates(terminal)
+      ? lonLatToWorld(terminal)
+      : undefined;
     const destinationCity = terminal?.city?.trim() || destinationStation?.city?.trim();
 
     return [{
@@ -113,10 +117,24 @@ export function createTransportLineFlowDirections(
         label,
         orderedStationIds,
         destinationStationId,
+        ...(destinationWorld ? { destinationWorld } : {}),
         ...(destinationCity ? { destinationCity } : {}),
       },
     }];
   });
+}
+
+function hasValidDestinationCoordinates(
+  stop: { lon?: number; lat?: number } | undefined,
+): stop is { lon: number; lat: number } {
+  return typeof stop?.lon === "number"
+    && Number.isFinite(stop.lon)
+    && stop.lon >= -180
+    && stop.lon <= 180
+    && typeof stop.lat === "number"
+    && Number.isFinite(stop.lat)
+    && stop.lat >= -90
+    && stop.lat <= 90;
 }
 
 export function supportsTransportLineDirections(
