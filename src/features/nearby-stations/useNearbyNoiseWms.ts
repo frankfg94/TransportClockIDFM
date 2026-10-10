@@ -12,7 +12,7 @@ import type { NearbyNoiseLevel } from "./nearbyNoiseZones";
 
 const BRUITPARIF_WMS_URL = "https://raster.bruitparif.fr/mapproxy/service";
 const BRUITPARIF_LAYER = "CSAB_2024_wCSAB_cl_idf";
-const DETAIL_ZOOM_SCALE = 4; // Show the detailed layer from 400% of the reference scale.
+const DETAIL_ZOOM_SCALE = 5;
 const VIEWPORT_BUFFER_RATIO = 0.18;
 const MAX_IMAGE_DIMENSION = 2_048;
 const OVERLAY_OPACITY = 0.25;
