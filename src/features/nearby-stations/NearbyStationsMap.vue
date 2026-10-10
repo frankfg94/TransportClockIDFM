@@ -392,6 +392,7 @@ const root = ref<HTMLElement>();
 const shell = ref<HTMLElement>();
 const gestureCameraLayer = ref<HTMLElement>();
 const gestureMarkerLayer = ref<HTMLElement>();
+const gestureTooltipLayer = ref<HTMLElement>();
 const sidebarSplitter = ref<HTMLElement>();
 const sidebarActionButton = ref<HTMLButtonElement>();
 const camera = shallowRef<CameraState>(createCamera({ zoom: 14, viewportWidthCssPx: 720, viewportHeightCssPx: 380 }));
@@ -3336,6 +3337,7 @@ function applyGestureCameraTransform(nextCamera: CameraState): void {
     ratio * currentCamera.viewportHeightCssPx / 2;
   const transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${ratio})`;
   if (gestureCameraLayer.value) gestureCameraLayer.value.style.transform = transform;
+  if (gestureTooltipLayer.value) gestureTooltipLayer.value.style.transform = transform;
   if (gestureMarkerLayer.value) {
     gestureMarkerLayer.value.style.transform = dynamicIconMotionEnabled.value ? transform : "";
   }
@@ -3344,6 +3346,7 @@ function applyGestureCameraTransform(nextCamera: CameraState): void {
 function clearGestureCameraTransform(): void {
   if (gestureCameraLayer.value) gestureCameraLayer.value.style.transform = "";
   if (gestureMarkerLayer.value) gestureMarkerLayer.value.style.transform = "";
+  if (gestureTooltipLayer.value) gestureTooltipLayer.value.style.transform = "";
 }
 
 // Pointer devices may produce several events per display frame. Accumulate
@@ -4873,7 +4876,7 @@ function mix(from: number, to: number, progress: number): number {
         @coverage-audit="handleBasemapCoverageAudit"
       />
       <svg
-        v-if="!summaryLineHoverActive && airQualityZoneCells.length > 0"
+        v-if="airQualityZoneCells.length > 0"
         class="nearby-map__air-quality-zones"
         :viewBox="`0 0 ${isochroneViewport.width} ${isochroneViewport.height}`"
         preserveAspectRatio="none"
@@ -4897,7 +4900,7 @@ function mix(from: number, to: number, progress: number): number {
         </g>
       </svg>
       <svg
-        v-if="!summaryLineHoverActive && noiseZoneCells.length > 0"
+        v-if="noiseZoneCells.length > 0"
         class="nearby-map__noise-zones"
         :viewBox="`0 0 ${isochroneViewport.width} ${isochroneViewport.height}`"
         preserveAspectRatio="none"
@@ -4921,7 +4924,7 @@ function mix(from: number, to: number, progress: number): number {
         </g>
       </svg>
       <svg
-        v-if="!summaryLineHoverActive && noiseWmsImageVisible && noiseWmsImage"
+        v-if="noiseWmsImageVisible && noiseWmsImage"
         class="nearby-map__noise-wms"
         :viewBox="`0 0 ${isochroneViewport.width} ${isochroneViewport.height}`"
         preserveAspectRatio="none"
@@ -5061,6 +5064,7 @@ function mix(from: number, to: number, progress: number): number {
         v-for="model in renderedLineFlowModels"
         :key="`ghost-flow:${model.lineId ?? model.color}`"
         :model="model"
+        :render-labels="false"
         :direction-label="directionLabel"
         :terminus-label="t('nearbyStations.terminus')"
         :fullscreen="isFullscreen"
@@ -5995,7 +5999,7 @@ function mix(from: number, to: number, progress: number): number {
         <button type="button" @click.stop="retryIsochronesFromConfigurationModal">{{ t('nearbyStations.walkingZonesRetry') }}</button>
       </div>
       <div
-        v-if="!summaryLineHoverActive && noiseZonesEnabled && noiseZonesStatus === 'loading'"
+        v-if="noiseZonesEnabled && noiseZonesStatus === 'loading'"
         class="nearby-map__noise-status nearby-map__noise-status--loading"
         role="status"
         aria-live="polite"
@@ -6004,7 +6008,7 @@ function mix(from: number, to: number, progress: number): number {
         <span>{{ t('nearbyStations.noiseZonesLoading') }}</span>
       </div>
       <div
-        v-else-if="!summaryLineHoverActive && noiseZonesEnabled && noiseZonesStatus === 'error'"
+        v-else-if="noiseZonesEnabled && noiseZonesStatus === 'error'"
         class="nearby-map__noise-status nearby-map__noise-status--error"
         role="alert"
       >
@@ -6012,7 +6016,7 @@ function mix(from: number, to: number, progress: number): number {
         <button type="button" @click.stop="retryNoiseZones">{{ t('nearbyStations.noiseZonesRetry') }}</button>
       </div>
       <div
-        v-if="!summaryLineHoverActive && airQualityZonesEnabled && noiseZonesStatus === 'loading'"
+        v-if="airQualityZonesEnabled && noiseZonesStatus === 'loading'"
         class="nearby-map__noise-status nearby-map__air-quality-status nearby-map__noise-status--loading"
         role="status"
         aria-live="polite"
@@ -6021,7 +6025,7 @@ function mix(from: number, to: number, progress: number): number {
         <span>{{ t('nearbyStations.airQualityZonesLoading') }}</span>
       </div>
       <div
-        v-else-if="!summaryLineHoverActive && airQualityZonesEnabled && noiseZonesStatus === 'error'"
+        v-else-if="airQualityZonesEnabled && noiseZonesStatus === 'error'"
         class="nearby-map__noise-status nearby-map__air-quality-status nearby-map__noise-status--error"
         role="alert"
       >
@@ -6029,7 +6033,7 @@ function mix(from: number, to: number, progress: number): number {
         <button type="button" @click.stop="retryNoiseZones">{{ t('nearbyStations.airQualityZonesRetry') }}</button>
       </div>
       <div
-        v-if="!summaryLineHoverActive && noiseLegendVisible"
+        v-if="noiseLegendVisible"
         class="nearby-map__noise-legend"
         role="note"
         :title="noiseZonesResponse?.source.title ?? t('nearbyStations.noiseZonesMaxPrecision')"
@@ -6054,7 +6058,7 @@ function mix(from: number, to: number, progress: number): number {
         </small>
       </div>
       <div
-        v-if="!summaryLineHoverActive && airQualityZonesEnabled && noiseZonesResponse && airQualityZoneCells.length > 0"
+        v-if="airQualityZonesEnabled && noiseZonesResponse && airQualityZoneCells.length > 0"
         class="nearby-map__noise-legend nearby-map__air-quality-legend"
         role="note"
         :title="noiseZonesResponse.source.title"
@@ -6077,7 +6081,7 @@ function mix(from: number, to: number, progress: number): number {
         :style="isochroneTooltipStyle"
       />
       <div
-        v-if="!summaryLineHoverActive && hoveredEnvironmentTooltip && hoveredEnvironment?.position"
+        v-if="hoveredEnvironmentTooltip && hoveredEnvironment?.position"
         class="nearby-map__environment-tooltip"
         :class="`nearby-map__environment-tooltip--${hoveredEnvironmentTooltip.layer}`"
         :style="environmentTooltipStyle"
@@ -6360,6 +6364,24 @@ function mix(from: number, to: number, progress: number): number {
       </div>
 
       <div
+        v-if="renderedLineFlowModels.length > 0"
+        ref="gestureTooltipLayer"
+        class="nearby-map__line-tooltip-layer"
+      >
+        <GhostLineFlowOverlay
+          v-for="model in renderedLineFlowModels"
+          :key="`ghost-flow-labels:${model.lineId ?? model.color}`"
+          :model="model"
+          :render-paths="false"
+          :direction-label="directionLabel"
+          :terminus-label="t('nearbyStations.terminus')"
+          :fullscreen="isFullscreen"
+          :trace-action-label="traceActionLabel"
+          @view-trace="openLineTrace($event, model)"
+        />
+      </div>
+
+      <div
         v-if="loading && !isPlacesPreview && !cityViewEnabled"
         class="nearby-map__loading"
         :class="{ 'nearby-map__loading--timeout': nearbyMapLoadingTimedOut }"
@@ -6608,6 +6630,7 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map--dragging { cursor: grabbing; user-select: none; }
 .nearby-map__camera-layer { inset: 0; pointer-events: none; position: absolute; transform-origin: 0 0; will-change: transform; z-index: 0; }
 .nearby-map__marker-layer { inset: 0; pointer-events: none; position: absolute; transform-origin: 0 0; z-index: 5; }
+.nearby-map__line-tooltip-layer { inset: 0; pointer-events: none; position: absolute; transform-origin: 0 0; z-index: 11; }
 .nearby-map--interacting .nearby-map__marker-layer { will-change: transform; }
 .nearby-map__marker-layer .nearby-map__marker-anchor { pointer-events: auto; }
 .nearby-map__camera-layer :deep([data-city-code]), .nearby-map__camera-layer :deep([data-iris-neighborhood]), .nearby-map__camera-layer :deep(.nearby-map__overlay-pill) { pointer-events: auto; }
@@ -6680,9 +6703,9 @@ function mix(from: number, to: number, progress: number): number {
   z-index: 82;
 }
 .nearby-map :deep(.transport-ghost-flow__exit) {
-  backdrop-filter: blur(8px);
-  background: rgba(255, 255, 255, .97);
-  border: 1px solid color-mix(in srgb, var(--ghost-flow-color) 24%, white);
+  backdrop-filter: none;
+  background: #fff;
+  border: 1px solid rgba(16, 35, 63, .18);
   border-inline-start: 3px solid var(--ghost-flow-color);
   border-radius: 10px;
   box-shadow: 0 5px 15px rgba(16, 35, 63, .16);

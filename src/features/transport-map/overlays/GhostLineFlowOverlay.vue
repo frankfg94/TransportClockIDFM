@@ -8,10 +8,14 @@ const props = withDefaults(defineProps<{
   terminusLabel: string;
   fullscreen?: boolean;
   traceActionLabel?: string;
+  renderPaths?: boolean;
+  renderLabels?: boolean;
 }>(), {
   directionLabel: (destination: string) => destination,
   fullscreen: false,
   traceActionLabel: "",
+  renderPaths: true,
+  renderLabels: true,
 });
 
 const emit = defineEmits<{
@@ -21,6 +25,7 @@ const emit = defineEmits<{
 
 <template>
   <svg
+    v-if="props.renderPaths"
     class="transport-ghost-flow"
     :viewBox="`0 0 ${props.model.width} ${props.model.height}`"
     preserveAspectRatio="none"
@@ -51,6 +56,7 @@ const emit = defineEmits<{
   </svg>
 
   <LineOutOfBoundsDirectionTooltip
+    v-if="props.renderLabels"
     v-for="exit in props.model.exits"
     :key="exit.key"
     :x="exit.x"
@@ -67,6 +73,7 @@ const emit = defineEmits<{
   />
 
   <div
+    v-if="props.renderLabels"
     v-for="terminus in props.model.termini"
     :key="terminus.key"
     class="transport-ghost-flow__terminus"

@@ -696,7 +696,7 @@ describe("NearbyStationsMap pan interaction", () => {
   it("moves the marker layer with the compositor gesture transform without committing Vue camera state", async () => {
     const line = createLine("line:metro:1", "METRO");
     const station = createStationAt("station:dynamic", "Station dynamique", line, 2.351, 48.851);
-    const wrapper = mountMap([createEntry(station, line)]);
+    const wrapper = mountMap([createEntry(station, line)], undefined, createFlowModel());
     const map = wrapper.get(".nearby-map");
     const cameraChangesBeforeGesture = wrapper.emitted("cameraChange")?.length ?? 0;
 
@@ -718,18 +718,20 @@ describe("NearbyStationsMap pan interaction", () => {
 
     expect(wrapper.get(".nearby-map__camera-layer").attributes("style")).toContain("transform:");
     expect(wrapper.get(".nearby-map__marker-layer").attributes("style")).toContain("transform:");
+    expect(wrapper.get(".nearby-map__line-tooltip-layer").attributes("style")).toContain("transform:");
     expect(wrapper.emitted("cameraChange")?.length ?? 0).toBe(cameraChangesBeforeGesture);
 
     await map.trigger("pointerup", { pointerId: 3, pointerType: "mouse" });
     await nextTick();
     expect(wrapper.get(".nearby-map__marker-layer").attributes("style") ?? "").not.toContain("transform:");
+    expect(wrapper.get(".nearby-map__line-tooltip-layer").attributes("style") ?? "").not.toContain("transform:");
     wrapper.unmount();
   });
 
   it("keeps marker icons static during gestures when reduced motion is enabled", async () => {
     const line = createLine("line:metro:1", "METRO");
     const station = createStationAt("station:reduced", "Station sans mouvement", line, 2.351, 48.851);
-    const wrapper = mountMap([createEntry(station, line)]);
+    const wrapper = mountMap([createEntry(station, line)], undefined, createFlowModel());
     await wrapper.setProps({ reduceMotion: true });
     const map = wrapper.get(".nearby-map");
 
@@ -751,6 +753,7 @@ describe("NearbyStationsMap pan interaction", () => {
 
     expect(wrapper.get(".nearby-map__camera-layer").attributes("style")).toContain("transform:");
     expect(wrapper.get(".nearby-map__marker-layer").attributes("style") ?? "").not.toContain("transform:");
+    expect(wrapper.get(".nearby-map__line-tooltip-layer").attributes("style")).toContain("transform:");
 
     await map.trigger("pointerup", { pointerId: 4, pointerType: "mouse" });
     wrapper.unmount();
@@ -1395,6 +1398,62 @@ describe("NearbyStationsMap walking accessibility zones and controls", () => {
 
       await wrapper.get(".nearby-map__noise-toggle").trigger("click");
       expect(wrapper.find(".nearby-map__noise-zones").exists()).toBe(false);
+    } finally {
+      wrapper.unmount();
+      restoreViewport();
+    }
+  });
+
+  it("keeps noise exposure visible across repeated toggles while a summary line is pinned", async () => {
+    const metro = createLine("line:metro:noise-summary", "METRO");
+    const station = createStationAt("station:noise-summary", "République", metro, 2.35, 48.85);
+    metro.stationIds = [station.id];
+    const network = createNetwork([metro], [station]);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const body = String(input).includes("/api/neighborhood-verdict/noise-grid")
+        ? createNoiseZonesResponse()
+        : {};
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const restoreViewport = installMapViewport(720, 360);
+    const wrapper = mountMap(
+      [createEntry(station, metro)],
+      undefined,
+      undefined,
+      { "station-schedules": "<div data-testid='schedule-slot'>schedule</div>" },
+      undefined,
+      undefined,
+      [],
+      ["METRO"],
+      [],
+      network,
+    );
+
+    try {
+      await wrapper.get(".nearby-map__noise-toggle").trigger("click");
+      await flushPromises();
+      await nextTick();
+      expect(wrapper.findAll(".nearby-map__noise-zone")).toHaveLength(3);
+
+      await wrapper.get(".nearby-summary__line").trigger("click");
+      await flushPromises();
+      await nextTick();
+      expect(wrapper.findAll(".nearby-map__summary-line-station")).toHaveLength(1);
+
+      for (let cycle = 0; cycle < 4; cycle += 1) {
+        await wrapper.get(".nearby-map__noise-toggle").trigger("click");
+        await nextTick();
+        expect(wrapper.get(".nearby-map__noise-toggle").attributes("aria-pressed")).toBe("false");
+        expect(wrapper.find(".nearby-map__noise-zones").exists()).toBe(false);
+
+        await wrapper.get(".nearby-map__noise-toggle").trigger("click");
+        await flushPromises();
+        await nextTick();
+        expect(wrapper.get(".nearby-map__noise-toggle").attributes("aria-pressed")).toBe("true");
+        expect(wrapper.findAll(".nearby-map__noise-zone")).toHaveLength(3);
+        expect(wrapper.find(".nearby-map__noise-legend").exists()).toBe(true);
+      }
     } finally {
       wrapper.unmount();
       restoreViewport();
@@ -2851,6 +2910,9 @@ describe("NearbyStationsMap line focus", () => {
 
     expect(wrapper.find(".transport-ghost-flow__exit--terminus").exists()).toBe(false);
     expect(wrapper.find(".transport-ghost-flow__exit-terminus").exists()).toBe(false);
+    expect(wrapper.get(".nearby-map__camera-layer").find(".transport-ghost-flow").exists()).toBe(true);
+    expect(wrapper.get(".nearby-map__camera-layer").find(".transport-ghost-flow__exit").exists()).toBe(false);
+    expect(wrapper.get(".nearby-map__line-tooltip-layer").find(".transport-ghost-flow__exit").exists()).toBe(true);
     expect(wrapper.find(".transport-ghost-flow__terminus").exists()).toBe(true);
     expect(wrapper.find(".transport-ghost-flow__terminus-label").text()).toBe("Terminus");
 
