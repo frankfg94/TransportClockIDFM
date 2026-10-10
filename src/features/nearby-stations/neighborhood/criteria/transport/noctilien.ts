@@ -6,6 +6,7 @@ import { makeFact } from "../../facts";
 import { RULE_KEYS, SOURCE_KEYS } from "../../i18nKeys";
 import { finiteNonNegative, normalizeScoreText } from "../../primitives";
 import { isOpaqueTransportLineLabel } from "../../transportAccess";
+import { DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME } from "../../departureTimes";
 
 interface NoctilienJourneyAccess {
   lines: string[];
@@ -13,7 +14,10 @@ interface NoctilienJourneyAccess {
   journey: NearbyJourney;
 }
 
-export function buildNoctilienFacts(journeys: readonly NearbyJourney[] | undefined): NeighborhoodFact[] {
+export function buildNoctilienFacts(
+  journeys: readonly NearbyJourney[] | undefined,
+  departureTime = DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME,
+): NeighborhoodFact[] {
   const bestAccessByLine = new Map<string, NoctilienJourneyAccess>();
   const lineByKey = new Map<string, string>();
   const directionsByLine = new Map<string, Set<string>>();
@@ -73,11 +77,12 @@ export function buildNoctilienFacts(journeys: readonly NearbyJourney[] | undefin
     values: {
       line: lines,
       minutes: Math.max(...accesses.map((access) => access.minutes)),
+      hour: departureTime,
     },
     sourceKey: SOURCE_KEYS.journeys,
     proof: "direct",
     ruleKey: RULE_KEYS.noctilienAtNight,
-    ruleValues: { hour: "03:00", threshold: NEIGHBORHOOD_WALKING_LIMIT_MINUTES },
+    ruleValues: { hour: departureTime, threshold: NEIGHBORHOOD_WALKING_LIMIT_MINUTES },
     travel: {
       journey: journeyToNoctilienLine(fastestAccess.journey, fastestAccess.lines[0]!),
       routes,

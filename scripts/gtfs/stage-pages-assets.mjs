@@ -25,6 +25,13 @@ if (manifest.timetable !== undefined) {
   const timetablePath = validateRelativeGtfsPath(manifest.timetable?.path);
   sources.push({ relativePath: timetablePath, destinationPath: timetablePath });
 }
+if (manifest.routing !== undefined) {
+  const routingPath = manifest.routing.path;
+  if (typeof routingPath !== "string" || !/^routing\/v1\/[a-f0-9]{64}\/[a-zA-Z0-9-]+$/u.test(routingPath)) {
+    throw new Error("The current GTFS routing path is invalid.");
+  }
+  sources.push({ relativePath: routingPath, destinationPath: routingPath });
+}
 
 await rm(stagingDir, { recursive: true, force: true });
 await mkdir(stagingDir, { recursive: true });

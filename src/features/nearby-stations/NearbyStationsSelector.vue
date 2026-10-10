@@ -31,6 +31,7 @@ const props = withDefaults(defineProps<{
   showBasemapControl?: boolean;
   showDisplayControl?: boolean;
   showFullscreenControl?: boolean;
+  highPrecisionNoiseEnabled?: boolean;
 }>(), {
   adding: false,
   showIsochroneControl: true,
@@ -38,6 +39,7 @@ const props = withDefaults(defineProps<{
   showBasemapControl: true,
   showDisplayControl: true,
   showFullscreenControl: true,
+  highPrecisionNoiseEnabled: true,
 });
 
 const emit = defineEmits<{
@@ -256,6 +258,7 @@ function handleClusterGroupingDistanceUpdate(value: number): void {
         :show-basemap-control="props.showBasemapControl"
         :show-display-control="props.showDisplayControl"
         :show-fullscreen-control="props.showFullscreenControl"
+        :high-precision-noise-enabled="props.highPrecisionNoiseEnabled"
         :available-modes="NEARBY_SUPPORTED_MODES"
         :loading="nearby.isScanning.value || lineFlowLoading"
         :line-flow-model="lineFlowModel"

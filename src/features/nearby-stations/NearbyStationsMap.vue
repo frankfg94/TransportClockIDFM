@@ -25,7 +25,7 @@ import {
   zoomCameraAroundScreenPoint,
   type CameraState,
 } from "../transport-map/geo/camera";
-import { boundsIntersect, expandBounds, lonLatToWorld, metersToWorldUnits, screenToWorld, worldScaleAtZoom, worldToLonLat, worldToScreen, worldUnitsToMeters, type ScreenPoint } from "../transport-map/geo/coordinateKernel";
+import { boundsIntersect, expandBounds, lonLatToWorld, metersToWorldUnits, screenToWorld, visibleWorldBounds, worldScaleAtZoom, worldToLonLat, worldToScreen, worldUnitsToMeters, type ScreenPoint } from "../transport-map/geo/coordinateKernel";
 import type {
   TransportMapBasemapLayer,
   TransportMapBasemapStyle,
@@ -56,6 +56,7 @@ import {
 import { NEARBY_ISOCHRONE_MINUTES, type NearbyWalkingMinutes } from "./nearbyWalkingMinutes";
 import type { NearbyIsochroneGeometry } from "./nearbyIsochrones";
 import { parseNearbyAirQualityLevel, type NearbyAirQualityLevel, type NearbyNoiseGridCell, type NearbyNoiseLevel } from "./nearbyNoiseZones";
+import { useNearbyNoiseWms } from "./useNearbyNoiseWms";
 import { NearbyIsochronesError } from "../../services/nearbyIsochrones";
 import type { NearbyJourneyPoint } from "./nearbyHeavyTransports";
 import type { NearbyWalkingRoute } from "./nearbyWalkingRoutes";
@@ -232,6 +233,7 @@ const props = withDefaults(defineProps<{
   showIsochroneControl?: boolean;
   showCityViewControl?: boolean;
   showNoiseControl?: boolean;
+  highPrecisionNoiseEnabled?: boolean;
   showAirQualityControl?: boolean;
   showDirectoryControl?: boolean;
   showNeighborhoodScoreControl?: boolean;
@@ -260,6 +262,7 @@ const props = withDefaults(defineProps<{
   showIsochroneControl: true,
   showCityViewControl: true,
   showNoiseControl: true,
+  highPrecisionNoiseEnabled: true,
   showAirQualityControl: true,
   showDirectoryControl: true,
   showNeighborhoodScoreControl: false,
@@ -1950,6 +1953,18 @@ const {
   ),
   () => environmentQuery.value.radius,
 );
+const {
+  image: noiseWmsImage,
+  isHighPrecisionActive: noiseHighPrecisionActive,
+  levelAtScreenPoint: noiseWmsLevelAtScreenPoint,
+  retry: retryNoiseWms,
+  status: noiseWmsStatus,
+} = useNearbyNoiseWms(
+  camera,
+  noiseZonesEnabled,
+  zoomReference,
+  computed(() => props.highPrecisionNoiseEnabled),
+);
 const isochroneConfigurationError = computed(() => {
   const error = cityViewEnabled.value ? cityIsochroneError.value : isochroneError.value;
   return isNearbyIsochroneErrorCode(error, "not-configured");
@@ -2086,8 +2101,22 @@ const projectedEnvironmentCells = computed<NearbyProjectedEnvironmentCell[]>(() 
 });
 const noiseZoneCells = computed(() => {
   if (!noiseZonesEnabled.value) return [];
+  if (noiseWmsImageVisible.value) return [];
   return projectedEnvironmentCells.value;
 });
+const noiseWmsImageVisible = computed(() => {
+  const image = noiseWmsImage.value;
+  if (!noiseHighPrecisionActive.value || !image) return false;
+  const viewport = visibleWorldBounds(camera.value);
+  return image.bounds.minX <= viewport.minX
+    && image.bounds.minY <= viewport.minY
+    && image.bounds.maxX >= viewport.maxX
+    && image.bounds.maxY >= viewport.maxY;
+});
+const noiseLegendVisible = computed(() => noiseZonesEnabled.value
+  && (Boolean(noiseZonesResponse.value && noiseZoneCells.value.length > 0)
+    || noiseWmsImageVisible.value
+    || (noiseHighPrecisionActive.value && noiseWmsStatus.value !== "idle")));
 const airQualityZoneCells = computed(() => {
   if (!airQualityZonesEnabled.value) return [];
   return projectedEnvironmentCells.value;
@@ -3764,6 +3793,28 @@ function hoverEnvironmentCell(
     : { layer, cellKey: environmentCellKey(cell), level: cell.airQualityLevel, position };
 }
 
+function hoverDetailedNoiseImage(event: MouseEvent): void {
+  const position = localScreenPoint(event.clientX, event.clientY);
+  if (!position) return;
+  const level = noiseWmsLevelAtScreenPoint(position);
+  if (!level) {
+    if (hoveredEnvironment.value?.layer === "noise") clearEnvironmentHover();
+    return;
+  }
+  hoveredEnvironment.value = {
+    layer: "noise",
+    cellKey: `detailed:${Math.round(position.x)}:${Math.round(position.y)}:${level}`,
+    level,
+    position,
+  };
+}
+
+function clearDetailedNoiseHover(): void {
+  if (hoveredEnvironment.value?.layer === "noise" && hoveredEnvironment.value.cellKey.startsWith("detailed:")) {
+    clearEnvironmentHover();
+  }
+}
+
 function clearEnvironmentHover(): void {
   hoveredEnvironment.value = undefined;
 }
@@ -4870,6 +4921,28 @@ function mix(from: number, to: number, progress: number): number {
         </g>
       </svg>
       <svg
+        v-if="!summaryLineHoverActive && noiseWmsImageVisible && noiseWmsImage"
+        class="nearby-map__noise-wms"
+        :viewBox="`0 0 ${isochroneViewport.width} ${isochroneViewport.height}`"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+        data-noise-resolution="bruitparif-detail"
+      >
+        <g :transform="isochroneTransform">
+          <image
+            :href="noiseWmsImage.href"
+            :x="noiseWmsImage.bounds.minX"
+            :y="noiseWmsImage.bounds.minY"
+            :width="noiseWmsImage.bounds.maxX - noiseWmsImage.bounds.minX"
+            :height="noiseWmsImage.bounds.maxY - noiseWmsImage.bounds.minY"
+            preserveAspectRatio="none"
+            pointer-events="visiblePainted"
+            @mousemove="hoverDetailedNoiseImage"
+            @mouseleave="clearDetailedNoiseHover"
+          />
+        </g>
+      </svg>
+      <svg
         v-if="cityViewDvfMapCells.length > 0"
         class="nearby-map__real-estate-heatmap"
         :viewBox="`0 0 ${isochroneViewport.width} ${isochroneViewport.height}`"
@@ -5956,10 +6029,10 @@ function mix(from: number, to: number, progress: number): number {
         <button type="button" @click.stop="retryNoiseZones">{{ t('nearbyStations.airQualityZonesRetry') }}</button>
       </div>
       <div
-        v-if="!summaryLineHoverActive && noiseZonesEnabled && noiseZonesResponse && noiseZoneCells.length > 0"
+        v-if="!summaryLineHoverActive && noiseLegendVisible"
         class="nearby-map__noise-legend"
         role="note"
-        :title="noiseZonesResponse.source.title"
+        :title="noiseZonesResponse?.source.title ?? t('nearbyStations.noiseZonesMaxPrecision')"
       >
         <strong>{{ t('nearbyStations.noiseZonesLegend') }}</strong>
         <span v-for="level in NOISE_LEVELS" :key="level">
@@ -5967,9 +6040,17 @@ function mix(from: number, to: number, progress: number): number {
           {{ noiseLevelLabel(level) }}
         </span>
         <small>
-          <a :href="noiseZonesResponse.source.pageUrl" target="_blank" rel="noopener noreferrer">
-            {{ t('nearbyStations.noiseZonesSource', { producer: noiseZonesResponse.source.producer, period: noiseZonesResponse.source.referencePeriod ?? '—' }) }}
+          <a :href="noiseZonesResponse?.source.pageUrl ?? 'https://www.bruitparif.fr/opendata-air-bruit/'" target="_blank" rel="noopener noreferrer">
+            {{ noiseZonesResponse
+              ? t('nearbyStations.noiseZonesSource', { producer: noiseZonesResponse.source.producer, period: noiseZonesResponse.source.referencePeriod ?? '—' })
+              : t('nearbyStations.noiseZonesOfficialSource') }}
           </a>
+        </small>
+        <small v-if="noiseWmsImageVisible">{{ t('nearbyStations.noiseZonesMaxPrecision') }}</small>
+        <small v-else-if="noiseHighPrecisionActive && noiseWmsStatus === 'loading'">{{ t('nearbyStations.noiseZonesDetailedLoading') }}</small>
+        <small v-else-if="noiseHighPrecisionActive && noiseWmsStatus === 'error'" class="nearby-map__noise-detail-error">
+          {{ t('nearbyStations.noiseZonesDetailedUnavailable') }}
+          <button type="button" @click.stop="retryNoiseWms">{{ t('nearbyStations.noiseZonesRetry') }}</button>
         </small>
       </div>
       <div
@@ -6542,6 +6623,9 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map--satellite :deep(.transport-ghost-flow__chevron) { filter: drop-shadow(0 0 1px rgba(255,255,255,.88)); opacity: 1; }
 .nearby-map--isochrone .nearby-map__radius { background: transparent; border-color: rgba(72, 70, 255, .38); border-style: dashed; }
 .nearby-map__air-quality-zones, .nearby-map__noise-zones { height: 100%; inset: 0; overflow: visible; pointer-events: none; position: absolute; width: 100%; z-index: 1; }
+.nearby-map__noise-wms { height: 100%; inset: 0; overflow: hidden; pointer-events: auto; position: absolute; width: 100%; z-index: 1; }
+.nearby-map__noise-wms image { cursor: inherit; image-rendering: auto; }
+.nearby-map__noise-detail-error button { appearance: none; background: transparent; border: 0; color: inherit; cursor: pointer; font: inherit; font-weight: 700; margin-left: .25rem; padding: 0; text-decoration: underline; }
 .nearby-map__real-estate-heatmap { height: 100%; inset: 0; overflow: visible; pointer-events: none; position: absolute; width: 100%; z-index: 5; }
 .nearby-map__real-estate-haze { mix-blend-mode: normal; }
 .nearby-map--satellite .nearby-map__real-estate-haze { mix-blend-mode: screen; }

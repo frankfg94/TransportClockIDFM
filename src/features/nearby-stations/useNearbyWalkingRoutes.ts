@@ -5,6 +5,7 @@ import type { NearbyWalkingMapSegment } from "./nearbyTravelGeometry";
 import {
   createNearbyWalkingPlaceCacheKey,
   type NearbyWalkingRoute,
+  type NearbyWalkingRoutingPolicy,
 } from "./nearbyWalkingRoutes";
 import {
   getCachedNearbyWalkingRoute,
@@ -21,7 +22,8 @@ export interface NearbyWalkingLoadProgress {
   remaining: number;
 }
 
-export function useNearbyWalkingRoutes() {
+export function useNearbyWalkingRoutes(options: { routingPolicy?: NearbyWalkingRoutingPolicy } = {}) {
+  const matrixBatchSize = options.routingPolicy === "ors-only" ? 64 : MATRIX_BATCH_SIZE;
   const placeRoutes = ref<Record<string, NearbyWalkingRoute | undefined>>({});
   const segmentRoutes = ref<Record<string, NearbyWalkingRoute | undefined>>({});
   const placeLoadProgress = ref<Record<string, NearbyWalkingLoadProgress>>({});
@@ -110,7 +112,9 @@ export function useNearbyWalkingRoutes() {
     scope = "directory",
   ): Promise<void> {
     hydrateCachedPlaceRoutes(origin, places);
-    const missingPlaces = places.filter((place) => !placeRoutes.value[place.id] && !directPlaceRouteIds.has(place.id));
+    const missingPlaces = places.filter(place =>
+      (!placeRoutes.value[place.id] || placeRoutes.value[place.id]?.fallback || placeRoutes.value[place.id]?.provider === "straight-line")
+        && !directPlaceRouteIds.has(place.id));
     if (missingPlaces.length === 0) return;
     const token = (placeRequestTokens.get(scope) ?? 0) + 1;
     placeRequestTokens.set(scope, token);
@@ -125,20 +129,21 @@ export function useNearbyWalkingRoutes() {
     let completed = 0;
     let completedSuccessfully = false;
     try {
-      for (let index = 0; index < missingPlaces.length; index += MATRIX_BATCH_SIZE) {
-        const batch = missingPlaces.slice(index, index + MATRIX_BATCH_SIZE).map((place) => ({
+      for (let index = 0; index < missingPlaces.length; index += matrixBatchSize) {
+        const batch = missingPlaces.slice(index, index + matrixBatchSize).map((place) => ({
           id: place.id,
           cacheKey: createNearbyWalkingPlaceCacheKey(place),
           lon: place.lon,
           lat: place.lat,
         }));
-        const routes = await getNearbyWalkingRouteMatrix(origin, batch, controller.signal);
+        const routes = await getNearbyWalkingRouteMatrix(origin, batch, controller.signal, options.routingPolicy);
         for (const route of routes) {
           if (route.id) next[route.id] = route;
         }
         if (token !== placeRequestTokens.get(scope)) return;
         if (routes.some((route) => route.fallback || route.provider === "straight-line")) {
-          error.value = new Error("walking-routes-partial");
+          if (routes.some(route => route.unavailabilityReason === "quota-exceeded")) error.value = new Error("walking-routes-quota-exceeded");
+          else if (error.value?.message !== "walking-routes-quota-exceeded") error.value = new Error("walking-routes-partial");
         }
         const merged = { ...placeRoutes.value };
         for (const [placeId, route] of Object.entries(next)) {
@@ -208,7 +213,7 @@ export function useNearbyWalkingRoutes() {
         placeRoutes.value = { ...placeRoutes.value, [place.id]: cached };
         return cached;
       }
-      const route = await getNearbyWalkingRoute(request, controller.signal);
+      const route = await getNearbyWalkingRoute({ ...request, routingPolicy: options.routingPolicy }, controller.signal);
       if (!isCurrentDirectPlaceRequest(place.id, generation, token)) return undefined;
       placeRoutes.value = { ...placeRoutes.value, [place.id]: route };
       return route;
@@ -239,6 +244,7 @@ export function useNearbyWalkingRoutes() {
     const token = ++segmentRequestToken;
     const routes = await Promise.all(missing.map((segment) => getNearbyWalkingRoute({
       id: segment.id,
+      routingPolicy: options.routingPolicy,
       origin: segment.from,
       destination: segment.to,
     })));

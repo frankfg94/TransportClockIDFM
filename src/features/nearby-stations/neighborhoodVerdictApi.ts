@@ -107,9 +107,11 @@ export interface PublicNeighborhoodVerdict {
   warnings: string[];
 }
 
-export async function fetchNeighborhoodVerdict(lat: number, lon: number, signal?: AbortSignal): Promise<PublicNeighborhoodVerdict> {
+export async function fetchNeighborhoodVerdict(lat: number, lon: number, signal?: AbortSignal, options: { includeWalking?: boolean; routingPolicy?: "ors-only" } = {}): Promise<PublicNeighborhoodVerdict> {
   return runNetworkTask(async (signal) => {
     const params = new URLSearchParams({ lat: String(lat), lon: String(lon) });
+    if (options.includeWalking === false) params.set("includeWalking", "0");
+    if (options.routingPolicy) params.set("routingPolicy", options.routingPolicy);
     const response = await fetch(toServerApiUrl(`/api/neighborhood-verdict?${params}`), { signal });
     if (!response.ok) throw new Error(`Neighborhood verdict unavailable (${response.status})`);
     const payload = await response.json() as PublicNeighborhoodVerdict;

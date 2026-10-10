@@ -65,6 +65,19 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 }
 
 describe("useNearbyWalkingRoutes", () => {
+  it("exposes the quota reason and retries estimated places instead of treating them as cached routes", async () => {
+    const target = placeFor(1);
+    mocks.matrix.mockResolvedValueOnce([{ ...routeFor(target.id, target.lon, target.lat), provider: "straight-line", fallback: true, unavailabilityReason: "quota-exceeded" }]);
+    const walking = useNearbyWalkingRoutes({ routingPolicy: "ors-only" });
+    await walking.loadPlaceMetrics(origin, [target]);
+    expect(walking.error.value?.message).toBe("walking-routes-quota-exceeded");
+    mocks.matrix.mockResolvedValueOnce([routeFor(target.id, target.lon, target.lat)]);
+    await walking.loadPlaceMetrics(origin, [target]);
+    expect(mocks.matrix).toHaveBeenCalledTimes(2);
+    expect(walking.placeRoutes.value[target.id]?.provider).toBe("openrouteservice");
+    expect(walking.error.value).toBeUndefined();
+    walking.clear();
+  });
   it("reports completed and remaining matrix items while a group is loading", async () => {
     const places = Array.from({ length: 7 }, (_, index) => placeFor(index));
     let callCount = 0;

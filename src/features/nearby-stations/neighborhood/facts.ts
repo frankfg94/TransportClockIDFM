@@ -5,6 +5,21 @@ import { NEIGHBORHOOD_CATEGORY_WEIGHTS } from "./contracts";
 import { CATEGORY_KEYS, FACT_KEYS } from "./i18nKeys";
 import { getNeighborhoodScoreDisplay } from "./primitives";
 
+const gtfsTooltipKeys: Partial<Record<NeighborhoodFactKind, TranslationKey>> = {
+  transportHub: "nearbyStations.neighborhoodScore.gtfsFacts.transportHub",
+  majorStationUnder40: "nearbyStations.neighborhoodScore.gtfsFacts.majorStation",
+  noctilienAtNight: "nearbyStations.neighborhoodScore.gtfsFacts.noctilien",
+  greenSpaceTransitNearby: "nearbyStations.neighborhoodScore.gtfsFacts.greenSpace",
+  hospitalNearby: "nearbyStations.neighborhoodScore.gtfsFacts.hospital",
+};
+const gtfsRuleKeys: Partial<Record<TranslationKey, TranslationKey>> = {
+  "nearbyStations.neighborhoodScore.rules.transportHub": "nearbyStations.neighborhoodScore.gtfsRules.transportHub",
+  "nearbyStations.neighborhoodScore.rules.majorStationUnder40": "nearbyStations.neighborhoodScore.gtfsRules.majorStation",
+  "nearbyStations.neighborhoodScore.rules.noctilienAtNight": "nearbyStations.neighborhoodScore.gtfsRules.noctilien",
+  "nearbyStations.neighborhoodScore.rules.greenSpaceTransit": "nearbyStations.neighborhoodScore.gtfsRules.greenSpace",
+  "nearbyStations.neighborhoodScore.rules.hospitalPresence": "nearbyStations.neighborhoodScore.gtfsRules.hospital",
+};
+
 export function externalFact(fact: PublicVerdictEvidence, sources: PublicVerdictSource[]): NeighborhoodFact {
   const source = sources.find((candidate) => fact.sourceIds.includes(candidate.id));
   return {
@@ -77,6 +92,7 @@ export function makeFact(options: {
   transportReliabilityLines?: readonly NeighborhoodFactTransportReliabilityLine[];
 }): NeighborhoodFact {
   const keys = FACT_KEYS[options.kind];
+  const theoretical = options.travel?.journey.source === "gtfs";
   return {
     id: options.id,
     kind: options.kind,
@@ -88,7 +104,7 @@ export function makeFact(options: {
     markerEmphasis: options.markerEmphasis,
     labelKey: keys.label,
     labelValues: options.values,
-    tooltipKey: keys.tooltip,
+    tooltipKey: theoretical ? gtfsTooltipKeys[options.kind] ?? keys.tooltip : keys.tooltip,
     tooltipValues: options.values,
     action: options.action,
     travel: options.travel,
@@ -96,8 +112,8 @@ export function makeFact(options: {
     transportReliabilityLines: options.transportReliabilityLines,
     evidence: {
       sourceKey: options.sourceKey,
-      proof: options.proof,
-      ruleKey: options.ruleKey,
+      proof: options.travel?.journey.sections.some(section => section.timingSource === "estimated") ? "derived" : options.proof,
+      ruleKey: theoretical ? gtfsRuleKeys[options.ruleKey] ?? options.ruleKey : options.ruleKey,
       ruleValues: options.ruleValues,
       observedAt: Date.now(),
     },

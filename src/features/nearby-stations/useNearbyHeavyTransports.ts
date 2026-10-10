@@ -13,6 +13,7 @@ import {
   STATION_CORRESPONDENCE_RADIUS_METERS,
 } from "../transport-map/spatial/stationCorrespondences";
 import type { NearbyStationEntry } from "./nearbyStations";
+import { resolveNearbyJourneyDateTime, type NearbyJourneyDateTimeSource } from "./nearbyHeavyTransports";
 import {
   getNearbyHeavyAccessTravelSeconds,
   listNearbyHeavyJourneyAlternatives,
@@ -29,6 +30,7 @@ import {
 import type { NearbyHeavyTargetCandidate } from "./nearbyHeavyTransportRules";
 import { isNearbyJourneyTransitSection, isNearbyJourneyWalkingSection } from "./nearbyJourneyTiming";
 import type { PublicFutureGpeStation } from "./neighborhoodVerdictApi";
+import { createNeighborhoodStationReferenceResolver, type NeighborhoodStationReferenceResolver } from "./neighborhoodStationReferences";
 
 // A heavy line can be reachable through a nearby feeder even when its
 // closest station is a different branch/terminus. Keep enough candidates to
@@ -36,7 +38,7 @@ import type { PublicFutureGpeStation } from "./neighborhoodVerdictApi";
 const HEAVY_STATION_CANDIDATES_PER_LINE = 6;
 const HEAVY_RESOLUTION_CONCURRENCY = 6;
 const HEAVY_REFRESH_INTERVAL_MS = 5 * 60_000;
-const FUTURE_GPE_HUB_STOP_MAX_DISTANCE_METERS = 250;
+const HEAVY_HUB_STOP_MAX_DISTANCE_METERS = 250;
 const FUTURE_GPE_DESTINATION_SNAP_MAX_DISTANCE_METERS = 100;
 // Target concurrency is already bounded by the resolver. This wrapper only
 // gives each provider call a deadline and releases it when the origin changes.
@@ -67,6 +69,8 @@ export interface NearbyHeavyTransportResolverInput {
   walkingRouteProvider?: NearbyWalkingRouteProvider;
   /** Include routed access for in-radius stations as well as projected stations. */
   includeLocalCandidates?: boolean;
+  /** Let a page-scoped batching provider receive all destinations together. */
+  batchQueries?: boolean;
   /** Future GPE stations to resolve with the same heavy-station rules. */
   futureProjects?: readonly PublicFutureGpeStation[];
   /** Cancels every network and walking probe started by this resolution. */
@@ -80,12 +84,14 @@ export interface HeavyTransportResolver {
 export interface UseNearbyHeavyTransportsOptions {
   journeyProvider?: JourneyProvider;
   resolver?: HeavyTransportResolver;
-  /** Optional Navitia departure datetime used for every route probe. */
-  journeyDateTime?: string;
+  /** Optional departure datetime used for every route probe. */
+  journeyDateTime?: NearbyJourneyDateTimeSource;
   /** Optional real pedestrian router used for station access. */
   walkingRouteProvider?: NearbyWalkingRouteProvider;
   /** Include routed access for in-radius stations in the returned candidates. */
   includeLocalCandidates?: boolean;
+  /** Preserve the normal network queue unless the provider batches requests. */
+  batchQueries?: boolean;
   /** Future GPE stations to resolve with the same heavy-station rules. */
   futureProjects?: readonly PublicFutureGpeStation[];
 }
@@ -98,6 +104,10 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
       input.activeModes.filter((mode) => NEARBY_HEAVY_TRANSPORT_MODES.includes(mode)),
     );
     if (activeHeavyModes.size === 0) return [];
+
+    const resolveStationReference = input.batchQueries
+      ? createNeighborhoodStationReferenceResolver(input.network.stations, HEAVY_HUB_STOP_MAX_DISTANCE_METERS)
+      : undefined;
 
     const existingIds = new Set(input.localEntries.map((entry) => entry.id));
     const activeFeederModes = input.activeModes.filter((mode) => !NEARBY_HEAVY_TRANSPORT_MODES.includes(mode));
@@ -151,7 +161,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
     }
 
     const futureTargets = (input.futureProjects ?? [])
-      .map((project) => createFutureHeavyTargetCandidate(project, input.origin))
+      .map((project) => createFutureHeavyTargetCandidate(project, input.origin, resolveStationReference))
       .filter((candidate): candidate is NearbyHeavyTargetCandidate => Boolean(candidate));
     const targets = selectNearbyHeavyTargetCandidates(
       [...lineCandidates.values()].flat().concat(futureTargets),
@@ -160,7 +170,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
 
     const resolved = await mapWithConcurrency(
       targets,
-      HEAVY_RESOLUTION_CONCURRENCY,
+      input.batchQueries ? Math.max(1, targets.length) : HEAVY_RESOLUTION_CONCURRENCY,
       async ({ station, line, distanceMeters, futureProject }) => {
         const projectedLines = projectedStationLines(station, distanceMeters);
         const correspondenceLines = projectedLines.feederLines;
@@ -186,6 +196,10 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
         const journeys = await input.journeyProvider.findJourneys({
           origin: input.origin,
           destination: station,
+          ...(input.batchQueries ? {
+            destinationRef: resolveStationReference!(station),
+            arrivalAtPlatform: true,
+          } : {}),
           ...(scheduledDateTime ? { datetime: scheduledDateTime } : {}),
         }, input.signal).catch((cause: unknown) => {
           if (input.signal?.aborted || isAbortError(cause) || isNavitiaRateLimit(cause)) throw cause;
@@ -365,7 +379,8 @@ export function useNearbyHeavyTransports(
     requestToken.value = token;
     const origin = source.origin.value;
     const network = source.network?.value;
-    const originKey = origin ? `${origin.lon},${origin.lat}` : "";
+    const journeyDateTime = resolveNearbyJourneyDateTime(options.journeyDateTime);
+    const originKey = origin ? `${origin.lon},${origin.lat}|${journeyDateTime ?? ""}` : "";
     if (originKey !== candidateOriginKey) {
       candidates.value = [];
       candidateOriginKey = originKey;
@@ -382,7 +397,7 @@ export function useNearbyHeavyTransports(
     error.value = undefined;
     const probe = async <T>(run: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> => {
       try {
-        return await runHeavyProbe(run, signal);
+        return await (options.batchQueries ? run(signal ?? controller.signal) : runHeavyProbe(run, signal));
       } catch (cause) {
         if (token === requestToken.value && !controller.signal.aborted) {
           error.value = cause instanceof Error ? cause.message : "heavy-transport-unavailable";
@@ -400,11 +415,12 @@ export function useNearbyHeavyTransports(
         journeyProvider: {
           findJourneys: (request, signal) => probe((probeSignal) => journeyProvider.findJourneys(request, probeSignal), signal),
         },
-        journeyDateTime: options.journeyDateTime,
+        journeyDateTime,
         walkingRouteProvider: options.walkingRouteProvider
           ? (origin, destination, signal) => probe((probeSignal) => options.walkingRouteProvider!(origin, destination, probeSignal), signal)
           : undefined,
         includeLocalCandidates: options.includeLocalCandidates,
+        batchQueries: options.batchQueries,
         futureProjects: source.futureProjects?.value ?? [],
         signal: controller.signal,
       });
@@ -453,6 +469,7 @@ export function useNearbyHeavyTransports(
       source.stations.value.map((entry) => entry.id).join(","),
       source.futureProjects?.value.map((project) => `${project.id}:${project.line}:${project.lon}:${project.lat}`).join(",") ?? "",
       source.futureProjectsReady?.value ?? true,
+      resolveNearbyJourneyDateTime(options.journeyDateTime),
     ],
     refreshSoon,
     { immediate: true },
@@ -494,12 +511,14 @@ export function useNearbyHeavyTransports(
 /**
  * Keep GPE targets compatible with the global-map heavy resolver without
  * pretending that a future line already has active map geometry. The
- * station is only a coordinate target; its access is still obtained from the
- * same Navitia and walking probes as every projected heavy station.
+ * target uses the configured journey and walking providers. The verdict can
+ * attach a unique official reference to a nearby current station without
+ * inventing service on the future line.
  */
 function createFutureHeavyTargetCandidate(
   project: PublicFutureGpeStation,
   origin: { lon: number; lat: number },
+  resolveStationReference?: NeighborhoodStationReferenceResolver,
 ): NearbyHeavyTargetCandidate | undefined {
   const lineCode = project.line.trim();
   if (!lineCode || !Number.isFinite(project.lon) || !Number.isFinite(project.lat)) return undefined;
@@ -508,6 +527,7 @@ function createFutureHeavyTargetCandidate(
   if (!lineKey || !projectKey) return undefined;
   const lineId = `line:gpe:${lineKey}`;
   const stationId = `station:gpe:${projectKey}`;
+  const matchingRef = resolveStationReference?.({ name: project.name, aliases: [], rawRefs: [], lon: project.lon, lat: project.lat });
   const world = lonLatToWorld({ lon: project.lon, lat: project.lat });
   const line: GlobalMapLine = {
     id: lineId,
@@ -529,7 +549,7 @@ function createFutureHeavyTargetCandidate(
     name: project.name,
     normalizedName: project.name.trim().toLocaleLowerCase("fr-FR"),
     aliases: [],
-    rawRefs: [project.id],
+    rawRefs: matchingRef ? [matchingRef, project.id] : [project.id],
     lineIds: [lineId],
     ownerChunkId: "gpe-future",
     isHub: true,
@@ -590,7 +610,7 @@ function trimCoLocatedFutureStationEgress(
   if (getCoordinatesDistanceMeters(target.lat, target.lon, egress.toPoint.lat, egress.toPoint.lon)
     > FUTURE_GPE_DESTINATION_SNAP_MAX_DISTANCE_METERS) return journey;
   if (getCoordinatesDistanceMeters(target.lat, target.lon, lastTransit.toPoint.lat, lastTransit.toPoint.lon)
-    > FUTURE_GPE_HUB_STOP_MAX_DISTANCE_METERS) return journey;
+    > HEAVY_HUB_STOP_MAX_DISTANCE_METERS) return journey;
 
   const durationSeconds = egress.durationSeconds;
   if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return journey;

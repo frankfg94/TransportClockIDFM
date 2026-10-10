@@ -237,6 +237,21 @@ describe("FullscreenStationPanel", () => {
     wrapper.unmount();
   });
 
+  it("shows keep-screen-on enabled by default and emits the toggle change", async () => {
+    const wrapper = mountPanel();
+
+    await wrapper.find('[aria-label="Options du panneau"]').trigger("click");
+
+    const keepScreenOn = wrapper.get('input[aria-label="Maintenir l\'écran allumé"]');
+    expect((keepScreenOn.element as HTMLInputElement).checked).toBe(true);
+    expect(keepScreenOn.attributes("role")).toBe("switch");
+
+    await keepScreenOn.setValue(false);
+    expect(wrapper.emitted("keep-screen-on-change")?.[0]).toEqual([false]);
+
+    wrapper.unmount();
+  });
+
   it("shows service and loading states without fabricated dense departures", async () => {
     const wrapper = mountPanel({ design: "dense-list", directions: [], loading: true });
     expect(wrapper.text()).toContain("Chargement des passages");
@@ -252,7 +267,7 @@ describe("FullscreenStationPanel", () => {
     const wrapper = mountPanel();
 
     await wrapper.find('[aria-label="Options du panneau"]').trigger("click");
-    await wrapper.find('input[type="checkbox"]').setValue(true);
+    await wrapper.get('input[aria-label="Theme sombre du panneau"]').setValue(true);
 
     const doubleStopButton = wrapper.findAll('button').find(button => button.text().trim() === 'Double arret');
     expect(doubleStopButton).toBeTruthy();

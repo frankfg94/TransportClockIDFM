@@ -80,7 +80,8 @@ export function listTransportAccessSignals(input: NeighborhoodScoreInput): Neigh
       if (!HEAVY_SCORE_MODES.has(line.mode)) continue;
       const access = accessForHeavyLine(candidate, line);
       if (!Number.isFinite(access.totalSeconds) || access.totalSeconds < 0) continue;
-      if (access.totalSeconds > NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS) continue;
+      const eligibilitySeconds = access.journey?.source === "gtfs" ? getNearbyHeavyAccessTravelSeconds(access) : access.totalSeconds;
+      if (eligibilitySeconds > NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS) continue;
       const signal: NeighborhoodTransportAccessSignal = {
         line,
         lineName: formatTransportLineName(line),

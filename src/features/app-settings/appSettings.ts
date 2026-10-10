@@ -91,6 +91,7 @@ export interface AppSettings {
   nearbyMapShowBasemapControl: boolean;
   nearbyMapShowDisplayControl: boolean;
   nearbyMapShowFullscreenControl: boolean;
+  nearbyMapHighPrecisionNoiseEnabled: boolean;
   // Browser-side cache layer used before the backend bundle fallback.
   transferBundleLocalCacheEnabled: boolean;
   // Nuxt-side bundle cache shared by successive transfer requests.
@@ -117,6 +118,7 @@ export interface AppSettings {
   trafficWarningLookaheadDays: TrafficWarningLookaheadDays;
   fullscreenStationPanelDesign: FullscreenStationPanelDesign;
   fullscreenStationPanelDarkTheme: boolean;
+  fullscreenPanelKeepScreenOn: boolean;
   smartTrafficDetection: boolean;
   smartTrafficModalFormatting: boolean;
   transferResolverMode: TransferResolverMode;
@@ -308,6 +310,7 @@ export function createDefaultAppSettings(): AppSettings {
     nearbyMapShowBasemapControl: true,
     nearbyMapShowDisplayControl: true,
     nearbyMapShowFullscreenControl: true,
+    nearbyMapHighPrecisionNoiseEnabled: true,
     navigationAutoHide: "none",
     hiddenDirectionIdsByBoardId: {},
     reduceMotion: false,
@@ -331,6 +334,7 @@ export function createDefaultAppSettings(): AppSettings {
     trafficWarningLookaheadDays: TRAFFIC_WARNING_LOOKAHEAD_DAYS_DEFAULT,
     fullscreenStationPanelDesign: "all-directions",
     fullscreenStationPanelDarkTheme: false,
+    fullscreenPanelKeepScreenOn: true,
     smartTrafficDetection: true,
     smartTrafficModalFormatting: true,
     transferResolverMode: "auto",
@@ -437,6 +441,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       value.nearbyMapShowFullscreenControl,
       defaults.nearbyMapShowFullscreenControl,
     ),
+    nearbyMapHighPrecisionNoiseEnabled: readBoolean(
+      value.nearbyMapHighPrecisionNoiseEnabled,
+      defaults.nearbyMapHighPrecisionNoiseEnabled,
+    ),
     navigationAutoHide: isNavigationAutoHide(value.navigationAutoHide)
       ? value.navigationAutoHide
       : defaults.navigationAutoHide,
@@ -492,6 +500,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     fullscreenStationPanelDarkTheme: readBoolean(
       value.fullscreenStationPanelDarkTheme,
       defaults.fullscreenStationPanelDarkTheme,
+    ),
+    fullscreenPanelKeepScreenOn: readBoolean(
+      value.fullscreenPanelKeepScreenOn,
+      defaults.fullscreenPanelKeepScreenOn,
     ),
     smartTrafficDetection: readBoolean(value.smartTrafficDetection, defaults.smartTrafficDetection),
     smartTrafficModalFormatting: readBoolean(

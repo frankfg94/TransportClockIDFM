@@ -44,6 +44,7 @@ function manifest(overrides: Partial<GtfsManifest> = {}): GtfsManifest {
     sourceLastModified: "Mon, 31 Aug 2026 00:00:00 GMT",
     cacheGeneration: 4,
     lineCount: 1,
+    routing: { schemaVersion: 1, path: `routing/v1/${"a".repeat(64)}/previous-run`, startDate: "20260101", endDate: "20991231", connectionCount: 1, fileCount: 2, bytes: 512 },
     timetable: {
       schemaVersion: GTFS_TIMETABLE_SCHEMA_VERSION,
       path: `timetables/v1/${"a".repeat(64)}/previous-run`,
@@ -58,14 +59,14 @@ function manifest(overrides: Partial<GtfsManifest> = {}): GtfsManifest {
   };
 }
 
-async function fixture(invalidTimetable = false) {
+async function fixture(invalidTimetable = false, routeType = 3, extraFiles: Record<string, string> = {}) {
   const root = await fs.mkdtemp(join(tmpdir(), "gtfs-update-test-"));
   roots.push(root);
   const outputDir = join(root, "output");
   await fs.mkdir(outputDir);
   const files = {
     "routes.txt":
-      "route_id,route_short_name,route_long_name,route_type,route_color,route_text_color\nIDFM:TEST,42,Test line,3,123456,FFFFFF\n",
+      `route_id,route_short_name,route_long_name,route_type,route_color,route_text_color\nIDFM:TEST,42,Test line,${routeType},123456,FFFFFF\n`,
     "trips.txt":
       "route_id,service_id,trip_id,direction_id,trip_headsign,shape_id\nIDFM:TEST,S,T,0,Station B,SHAPE\n",
     "stops.txt":
@@ -76,6 +77,7 @@ async function fixture(invalidTimetable = false) {
     "calendar.txt":
       "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\nS,1,1,1,1,1,0,0,20260101,20991231\n",
     "calendar_dates.txt": "service_id,date,exception_type\nS,20260831,2\nS,20260905,1\n",
+    ...extraFiles,
   };
   const archive = zipSync(
     Object.fromEntries(Object.entries(files).map(([name, value]) => [name, strToU8(value)])),
@@ -227,6 +229,27 @@ describe("GTFS update publication", () => {
     },
   );
 
+  it.each([6, 7])("classifies GTFS route type %s as cable transport in the routing artifact", async routeType => {
+    const setup = await fixture(false, routeType); setup.fetchArchive();
+    await runGtfsUpdate({ outputDir: setup.outputDir, local: true });
+    const current = await readManifest(setup.outputDir);
+    const routing = JSON.parse(await fs.readFile(join(setup.outputDir, current.routing!.path, "index.json"), "utf8"));
+    expect(routing.lines[0].mode).toBe("CABLE");
+  });
+
+  it("retains pathway provenance separately from minimum transfer durations", async () => {
+    const setup = await fixture(false, 3, {
+      "transfers.txt": "from_stop_id,to_stop_id,transfer_type,min_transfer_time\nA,B,2,306\n",
+      "pathways.txt": "pathway_id,from_stop_id,to_stop_id,pathway_mode,is_bidirectional,traversal_time\nP,A,B,1,1,210\n",
+    });
+    setup.fetchArchive();
+    await runGtfsUpdate({ outputDir: setup.outputDir, local: true });
+    const current = await readManifest(setup.outputDir);
+    const routing = JSON.parse(await fs.readFile(join(setup.outputDir, current.routing!.path, "index.json"), "utf8"));
+    expect(routing.transfers).toEqual([[0, 1, 306], [0, 1, 210], [1, 0, 210]]);
+    expect(routing.pathwayTransferIndices).toEqual([1, 2]);
+  });
+
   it.each(["missing", "old-version"])(
     "upgrades a %s timetable for identical ZIP bytes without touching existing geometry",
     async (kind) => {
@@ -352,6 +375,8 @@ describe("GTFS update publication", () => {
     ).toHaveLength(current.timetable!.fileCount);
     expect(r2.writes).toContain(`gtfs/${current.timetable!.path}/${lineKey}/index.json`);
     expect(r2.writes).toContain(`gtfs/${current.timetable!.path}/${lineKey}/0000.json`);
+    expect(r2.writes.filter(key => key.startsWith(`gtfs/${current.routing!.path}/`))).toHaveLength(current.routing!.fileCount);
+    expect(r2.writes).toContain(`gtfs/${current.routing!.path}/index.json`);
   });
 
   it("does not rewrite active R2 geometry for a timetable-only migration", async () => {
@@ -379,7 +404,7 @@ describe("GTFS update publication", () => {
     expect(r2.writes.at(-1)).toBe("gtfs/current.json");
   });
 
-  it.each(["geometry", "timetable", "manifest"])(
+  it.each(["geometry", "timetable", "routing", "manifest"])(
     "keeps both current manifests when the %s upload fails",
     async (phase) => {
       const setup = await fixture();
@@ -388,7 +413,7 @@ describe("GTFS update publication", () => {
       const r2 = fakeR2(previous, (key) =>
         phase === "manifest"
           ? key === "gtfs/current.json"
-          : key.startsWith(`gtfs/${phase === "geometry" ? "versions" : "timetables"}/`),
+          : key.startsWith(`gtfs/${phase === "geometry" ? "versions" : phase === "routing" ? "routing" : "timetables"}/`),
       );
       const remoteOriginal = r2.objects.get("gtfs/current.json");
       setup.fetchArchive();

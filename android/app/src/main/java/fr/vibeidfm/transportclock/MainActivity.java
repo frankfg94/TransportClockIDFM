@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(DepartureAlarmPlugin.class);
+        registerPlugin(ScreenWakeLockPlugin.class);
         super.onCreate(savedInstanceState);
         DepartureAlarmService.ensureChannels(this);
         handleDepartureAlarmIntent(getIntent());

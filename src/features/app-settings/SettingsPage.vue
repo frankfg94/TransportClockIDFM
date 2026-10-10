@@ -1319,6 +1319,13 @@ const settingsSearchEntries = computed<SettingsSearchEntry[]>(() => [
     t("settings.display.nearbyMapShowFullscreenControlDescription"),
   ),
   createSettingsSearchEntry(
+    "map.nearby-noise-precision",
+    "map",
+    t("settings.display.nearbyMapHighPrecisionNoise"),
+    t("settings.display.nearbyMapHighPrecisionNoiseDescription"),
+    "son bruit sonore bruitparif contour détaillé détail précision rue maille WMS",
+  ),
+  createSettingsSearchEntry(
     "map.minimap",
     "map",
     t("settings.display.showMiniMap"),

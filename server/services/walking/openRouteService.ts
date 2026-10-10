@@ -65,6 +65,23 @@ type CachedIsochrones = { expiresAt: number; response: NearbyIsochronesResponse 
 const routeCache = new Map<string, CachedRoute>();
 const matrixCache = new Map<string, CachedMatrix>();
 const isochroneCache = new Map<string, CachedIsochrones>();
+const quotaBackoffs = new Map<string, number>();
+const quotaKey = (config: OpenRouteServiceConfig) => `${config.root}:${config.apiKey}`;
+function quotaBlocked(config: OpenRouteServiceConfig): boolean {
+  return (quotaBackoffs.get(quotaKey(config)) ?? 0) > Date.now();
+}
+async function rejectOrsResponse(response: Response, config: OpenRouteServiceConfig): Promise<never> {
+  const body = await response.text();
+  if (response.status === 429 || response.status === 403 && /quota\s+exceeded/iu.test(body)) {
+    const retryAfter = response.headers.get("retry-after");
+    const seconds = retryAfter && /^\d+$/u.test(retryAfter) ? Number(retryAfter) : undefined;
+    const deadline = seconds !== undefined ? Date.now() + seconds * 1000 : retryAfter ? Date.parse(retryAfter) : NaN;
+    quotaBackoffs.set(quotaKey(config), Number.isFinite(deadline) ? Math.max(Date.now() + 60_000, Math.min(deadline, Date.now() + 86_400_000)) : Date.now() + 60_000);
+    while (quotaBackoffs.size > 16) quotaBackoffs.delete(quotaBackoffs.keys().next().value!);
+    throw new Error("ors-quota-exceeded");
+  }
+  throw new Error(`ors-unavailable-${response.status}`);
+}
 
 export function getOpenRouteServiceConfig(event: H3Event): OpenRouteServiceConfig {
   const cfEnv = ((event.context as { cloudflare?: { env?: RuntimeEnv } }).cloudflare?.env ?? {});
@@ -185,11 +202,12 @@ export async function routeWalkingWithOpenRouteService(
 ): Promise<NearbyWalkingRoute> {
   const fallback = createStraightLineWalkingRoute(origin, destination, id);
   const config = getOpenRouteServiceConfig(event);
-  if (!config.apiKey) return fallback;
+  if (!config.apiKey) return { ...fallback, unavailabilityReason: "not-configured" };
 
   const cacheKey = routeCacheKey(origin, destination);
   const cached = routeCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return { ...cached.route, id };
+  if (quotaBlocked(config)) return { ...fallback, unavailabilityReason: "quota-exceeded" };
 
   try {
     const response = await fetchWithTimeout(`${config.root}/v2/directions/${OPEN_ROUTE_SERVICE_PROFILE}/geojson`, {
@@ -205,7 +223,7 @@ export async function routeWalkingWithOpenRouteService(
         instructions: false,
       }),
     });
-    if (!response.ok) throw new Error(`openrouteservice-directions-${response.status}`);
+    if (!response.ok) await rejectOrsResponse(response, config);
     const payload = await response.json() as DirectionsPayload;
     const feature = payload.features?.[0];
     const summary = feature?.properties?.summary;
@@ -224,7 +242,7 @@ export async function routeWalkingWithOpenRouteService(
     saveCache(routeCache, cacheKey, route, ROUTE_CACHE_TTL_MS);
     return route;
   } catch {
-    return fallback;
+    return { ...fallback, unavailabilityReason: quotaBlocked(config) ? "quota-exceeded" : "unavailable" };
   }
 }
 
@@ -232,18 +250,20 @@ export async function matrixWalkingWithOpenRouteService(
   event: H3Event,
   origin: NearbyJourneyPoint,
   destinations: readonly NearbyWalkingMatrixDestination[],
+  options: { reverse?: boolean } = {},
 ): Promise<NearbyWalkingRoute[]> {
   const limitedDestinations = destinations.slice(0, OPEN_ROUTE_SERVICE_MAX_MATRIX_DESTINATIONS);
-  const fallbacks = limitedDestinations.map((destination) => createStraightLineWalkingRoute(origin, destination, destination.id));
+  const fallbacks = limitedDestinations.map((destination) => options.reverse ? createStraightLineWalkingRoute(destination, origin, destination.id) : createStraightLineWalkingRoute(origin, destination, destination.id));
   const config = getOpenRouteServiceConfig(event);
-  if (!config.apiKey || limitedDestinations.length === 0) return fallbacks;
+  if (limitedDestinations.length === 0) return [];
+  if (!config.apiKey) return fallbacks.map(route => ({ ...route, unavailabilityReason: "not-configured" }));
 
-  const cacheKey = matrixCacheKey(origin, limitedDestinations);
+  const cacheKey = `${options.reverse ? "reverse:" : ""}${matrixCacheKey(origin, limitedDestinations)}`;
   const cached = matrixCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
-    const routesById = new Map(cached.routes.map((route) => [route.id, route]));
-    return limitedDestinations.map((destination) => routesById.get(destination.id) ?? createStraightLineWalkingRoute(origin, destination, destination.id));
+    return cached.routes.map((route, index) => ({ ...route, id: limitedDestinations[index]!.id }));
   }
+  if (quotaBlocked(config)) return fallbacks.map(route => ({ ...route, unavailabilityReason: "quota-exceeded" }));
 
   try {
     const response = await fetchWithTimeout(`${config.root}/v2/matrix/${OPEN_ROUTE_SERVICE_PROFILE}`, {
@@ -255,37 +275,38 @@ export async function matrixWalkingWithOpenRouteService(
       },
       body: JSON.stringify({
         locations: [[origin.lon, origin.lat], ...limitedDestinations.map((destination) => [destination.lon, destination.lat])],
-        sources: ["0"],
-        destinations: limitedDestinations.map((_, index) => String(index + 1)),
+        sources: options.reverse ? limitedDestinations.map((_, index) => String(index + 1)) : ["0"],
+        destinations: options.reverse ? ["0"] : limitedDestinations.map((_, index) => String(index + 1)),
         metrics: ["distance", "duration"],
         units: "m",
       }),
     });
-    if (!response.ok) throw new Error(`openrouteservice-matrix-${response.status}`);
+    if (!response.ok) await rejectOrsResponse(response, config);
     const payload = await response.json() as MatrixPayload;
-    const durations = payload.durations?.[0];
-    const distances = payload.distances?.[0];
+    const durations = options.reverse ? payload.durations?.map(row => row[0] ?? null) : payload.durations?.[0];
+    const distances = options.reverse ? payload.distances?.map(row => row[0] ?? null) : payload.distances?.[0];
     if (!durations || !distances || durations.length < limitedDestinations.length || distances.length < limitedDestinations.length) {
       throw new Error("openrouteservice-matrix-invalid");
     }
     const routes = limitedDestinations.map((destination, index) => {
       const distanceMeters = distances[index];
       const durationSeconds = durations[index];
-      if (!isPositiveNumber(distanceMeters) || !isPositiveNumber(durationSeconds)) {
-        return fallbacks[index]!;
+      if (typeof distanceMeters !== "number" || distanceMeters < 0 || !Number.isFinite(distanceMeters)
+        || typeof durationSeconds !== "number" || durationSeconds < 0 || !Number.isFinite(durationSeconds)) {
+        return { ...fallbacks[index]!, unavailabilityReason: "unreachable" as const };
       }
       return {
         id: destination.id,
         provider: "openrouteservice" as const,
         distanceMeters,
         durationSeconds,
-        coordinates: [origin, destination],
+        coordinates: options.reverse ? [destination, origin] : [origin, destination],
       } satisfies NearbyWalkingRoute;
     });
     saveMatrixCache(matrixCache, cacheKey, routes, MATRIX_CACHE_TTL_MS);
     return routes;
   } catch {
-    return fallbacks;
+    return fallbacks.map(route => ({ ...route, unavailabilityReason: quotaBlocked(config) ? "quota-exceeded" : "unavailable" }));
   }
 }
 

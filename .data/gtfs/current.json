@@ -1,21 +1,30 @@
 {
   "schemaVersion": 1,
-  "sha256": "59a9eacc281de2788efb8f6c3ad7b28824a2ead22792b33ab11a9fe2e12f5e72",
-  "datasetVersion": "2026-09-30",
-  "sourceUpdatedAt": "2026-09-30T14:23:44.000Z",
-  "installedAt": "2026-09-30T20:17:42.942Z",
-  "sourceEtag": "\"6abd1b70-843f361\"",
-  "sourceLastModified": "Wed, 30 Sep 2026 14:23:44 GMT",
-  "cacheGeneration": 6,
-  "lineCount": 2018,
+  "sha256": "4fb5d39ab86b822d2b256c6fcac3c31bdbc2010e95a15944b8a774e2d6501533",
+  "datasetVersion": "2026-10-09",
+  "sourceUpdatedAt": "2026-10-09T14:24:01.000Z",
+  "installedAt": "2026-10-09T23:34:13.598Z",
+  "sourceEtag": "\"6ac8f901-95ac7d9\"",
+  "sourceLastModified": "Fri, 09 Oct 2026 14:24:01 GMT",
+  "cacheGeneration": 8,
+  "lineCount": 2019,
   "timetable": {
     "schemaVersion": 1,
-    "startDate": "20260927",
-    "endDate": "20261029",
+    "startDate": "20261006",
+    "endDate": "20261107",
     "lineCount": 2026,
-    "tripCount": 505158,
-    "fileCount": 11249,
-    "bytes": 346700175,
-    "path": "timetables/v1/59a9eacc281de2788efb8f6c3ad7b28824a2ead22792b33ab11a9fe2e12f5e72/331e45cc-fa12-44fa-8889-e918858ed084"
+    "tripCount": 589169,
+    "fileCount": 13286,
+    "bytes": 406454835,
+    "path": "timetables/v1/4fb5d39ab86b822d2b256c6fcac3c31bdbc2010e95a15944b8a774e2d6501533/aa4b677f-c82e-40d4-ba21-4d9ee88e2b94"
+  },
+  "routing": {
+    "schemaVersion": 1,
+    "startDate": "20261006",
+    "endDate": "20261107",
+    "connectionCount": 12617486,
+    "fileCount": 213,
+    "bytes": 460909211,
+    "path": "routing/v1/4fb5d39ab86b822d2b256c6fcac3c31bdbc2010e95a15944b8a774e2d6501533/8741f1dd-4ce8-471b-83cd-9d2cf82b465e"
   }
 }

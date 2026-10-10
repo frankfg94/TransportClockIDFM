@@ -184,6 +184,30 @@ function formatCoefficient(value: number): string {
       </div>
     </label>
 
+    <label
+      v-if="isSettingVisible('map.nearby-noise-precision', 'map')"
+      class="settings-toggle"
+      data-settings-nearby-noise-precision
+    >
+      <input
+        type="checkbox"
+        role="switch"
+        :checked="settings.nearbyMapHighPrecisionNoiseEnabled"
+        :aria-checked="settings.nearbyMapHighPrecisionNoiseEnabled"
+        :aria-label="t('settings.display.nearbyMapHighPrecisionNoise')"
+        @change="
+          emit('update-settings', {
+            nearbyMapHighPrecisionNoiseEnabled: ($event.target as HTMLInputElement).checked,
+          })
+        "
+      />
+      <span></span>
+      <div>
+        <strong>{{ t("settings.display.nearbyMapHighPrecisionNoise") }}</strong>
+        <small>{{ t("settings.display.nearbyMapHighPrecisionNoiseDescription") }}</small>
+      </div>
+    </label>
+
     <div v-if="isSettingVisible('map.nearby-controls', 'map')" class="settings-subheading">
       <strong>{{ t("settings.display.nearbyMapControlsTitle") }}</strong>
       <span>{{ t("settings.display.nearbyMapControlsDescription") }}</span>

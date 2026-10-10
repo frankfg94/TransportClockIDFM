@@ -309,8 +309,10 @@ export interface NeighborhoodScoreInput {
   chateletJourneys?: readonly NearbyJourney[];
   chateletJourneyStatus?: "loading" | "ready" | "unavailable";
   journeyBenchmarks?: readonly NeighborhoodJourneyBenchmark[];
+  journeyDepartureTime?: string;
   greenSpaceJourneys?: readonly NeighborhoodGreenSpaceJourney[];
   noctilienJourneys?: readonly NearbyJourney[];
+  noctilienDepartureTime?: string;
   frequencyProfiles?: ReadonlyMap<string, GtfsLineFrequencyResponse | undefined>;
   lastServiceByLine?: ReadonlyMap<string, GtfsLastService | undefined>;
   hospitalJourneys?: Readonly<Record<string, readonly NearbyJourney[] | undefined>>;

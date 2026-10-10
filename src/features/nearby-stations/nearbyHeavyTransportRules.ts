@@ -204,7 +204,8 @@ export function evaluateNearbyHeavyJourney(
   const walkingDistanceMeters = walkingDistance(sections);
   const totalWalkingSeconds = walkingSections.reduce((sum, section) => sum + section.durationSeconds, 0);
 
-  if (totalSeconds > NEARBY_HEAVY_TOTAL_MAX_SECONDS) return undefined;
+  const eligibilitySeconds = input.journey.source === "gtfs" ? timing.scoreSeconds : totalSeconds;
+  if (eligibilitySeconds > NEARBY_HEAVY_TOTAL_MAX_SECONDS) return undefined;
 
   if (
     transitSections.length === 0 &&

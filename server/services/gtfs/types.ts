@@ -3,6 +3,7 @@ import type {
   LineGeometryEntrance,
 } from "../../../src/features/line-map/lineGeometry.js";
 import type { GtfsTimetableDescriptor } from "./timetableTypes.js";
+import type { GtfsRoutingDescriptor } from "./routingTypes.js";
 
 export interface GtfsManifest {
   schemaVersion: 1;
@@ -15,6 +16,7 @@ export interface GtfsManifest {
   cacheGeneration: number;
   lineCount: number;
   timetable?: GtfsTimetableDescriptor;
+  routing?: GtfsRoutingDescriptor;
 }
 
 export interface GtfsLineLookupIndex {

@@ -199,7 +199,7 @@ describe("useNearbyNeighborhoodScore", () => {
     wrapper.unmount();
   });
 
-  it("marks a stale backend dataset as degraded without hiding the criterion", async () => {
+  it("keeps a compiled documentary dataset older than 24h ready when its official sources are usable", async () => {
     const generatedAt = new Date(Date.now() - 2 * 24 * 60 * 60_000).toISOString();
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       schemaVersion: "1.3",
@@ -235,9 +235,9 @@ describe("useNearbyNeighborhoodScore", () => {
     });
     const wrapper = mount(Harness);
 
-    await vi.waitFor(() => expect(score.criteria.value.find((criterion) => criterion.id === "security")?.status).toBe("degraded"));
+    await vi.waitFor(() => expect(score.criteria.value.find((criterion) => criterion.id === "security")?.status).toBe("ready"));
     expect(score.criteria.value.find((criterion) => criterion.id === "security")?.datasets)
-      .toEqual(expect.arrayContaining([expect.objectContaining({ id: "neighborhood-verdict", status: "stale" })]));
+      .toEqual(expect.arrayContaining([expect.objectContaining({ id: "neighborhood-verdict", status: "ready" })]));
     wrapper.unmount();
   });
 

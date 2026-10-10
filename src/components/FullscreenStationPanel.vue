@@ -19,6 +19,7 @@ import UserFriendlyTrafficModal from "./UserFriendlyTrafficModal.vue";
 import { useI18n } from "../i18n";
 import type { FullscreenStationPanelDesign } from "../features/app-settings";
 import type { TrafficAlertModalData } from "../features/traffic";
+import { createFullscreenPanelWakeLockController } from "../features/app-settings/screenWakeLock";
 
 interface FullscreenPanelDeparture {
   id: string;
@@ -59,6 +60,7 @@ const props = withDefaults(
     hiddenDirectionIds?: string[];
     design?: FullscreenStationPanelDesign;
     darkTheme?: boolean;
+    keepScreenOn?: boolean;
     panamDirectionId?: string;
     trafficAlert?: TrafficAlertModalData;
     smartTrafficModalFormatting?: boolean;
@@ -78,6 +80,7 @@ const props = withDefaults(
     hiddenDirectionIds: () => [],
     design: "all-directions",
     darkTheme: false,
+    keepScreenOn: true,
     panamDirectionId: undefined,
     trafficAlert: undefined,
     smartTrafficModalFormatting: true,
@@ -100,6 +103,7 @@ const emit = defineEmits<{
     },
   ];
   "change-theme": [darkTheme: boolean];
+  "keep-screen-on-change": [enabled: boolean];
   refresh: [];
   "toggle-fullscreen": [];
   "schedule-alarm": [
@@ -107,6 +111,7 @@ const emit = defineEmits<{
   ];
 }>();
 const { t, d } = useI18n();
+const fullscreenPanelWakeLock = createFullscreenPanelWakeLockController();
 
 const denseDepartures = computed(() =>
   visibleDirections.value.flatMap((direction) =>
@@ -451,6 +456,17 @@ function toggleDarkTheme(event: Event): void {
   controlsVisible.value = true;
 }
 
+function toggleKeepScreenOn(event: Event): void {
+  const checked = (event.target as HTMLInputElement | null)?.checked ?? false;
+
+  emit("keep-screen-on-change", checked);
+  controlsVisible.value = true;
+}
+
+function syncFullscreenPanelWakeLock(): void {
+  void fullscreenPanelWakeLock.setEnabled(props.keepScreenOn);
+}
+
 function openTrafficModal(): void {
   if (!props.trafficAlert) {
     return;
@@ -512,13 +528,22 @@ watch(
 
 onMounted(() => {
   lockDocumentScroll();
+  document.addEventListener("visibilitychange", syncFullscreenPanelWakeLock);
+  syncFullscreenPanelWakeLock();
   scheduleControlsHide();
 });
 
 onBeforeUnmount(() => {
   clearControlsHideTimer();
+  document.removeEventListener("visibilitychange", syncFullscreenPanelWakeLock);
+  void fullscreenPanelWakeLock.dispose();
   restoreDocumentScroll();
 });
+
+watch(
+  () => props.keepScreenOn,
+  syncFullscreenPanelWakeLock,
+);
 </script>
 
 <template>
@@ -573,9 +598,23 @@ onBeforeUnmount(() => {
           :teleport="false"
           :z-index="12050"
         >
-          <label class="fullscreen-station-panel__theme-toggle">
+          <label class="fullscreen-station-panel__menu-switch">
             <input
               type="checkbox"
+              role="switch"
+              :aria-label="t('settings.display.panelKeepScreenOn')"
+              :checked="keepScreenOn"
+              @change="toggleKeepScreenOn"
+            />
+            <span aria-hidden="true"></span>
+            <strong>{{ t("settings.display.panelKeepScreenOn") }}</strong>
+          </label>
+
+          <label class="fullscreen-station-panel__menu-switch">
+            <input
+              type="checkbox"
+              role="switch"
+              :aria-label="t('settings.display.panelDarkTheme')"
               :checked="darkTheme"
               @change="toggleDarkTheme"
             />
@@ -1419,7 +1458,7 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
-:global(.fullscreen-station-panel__theme-toggle) {
+:global(.fullscreen-station-panel__menu-switch) {
   align-items: center;
   cursor: pointer;
   display: grid;
@@ -1429,7 +1468,7 @@ onBeforeUnmount(() => {
   padding: 8px 10px;
 }
 
-:global(.fullscreen-station-panel__theme-toggle input) {
+:global(.fullscreen-station-panel__menu-switch input) {
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
   height: 1px;
@@ -1439,7 +1478,7 @@ onBeforeUnmount(() => {
   width: 1px;
 }
 
-:global(.fullscreen-station-panel__theme-toggle > span) {
+:global(.fullscreen-station-panel__menu-switch > span) {
   background: #d8dee8;
   border-radius: 999px;
   display: block;
@@ -1448,7 +1487,7 @@ onBeforeUnmount(() => {
   width: 48px;
 }
 
-:global(.fullscreen-station-panel__theme-toggle > span::after) {
+:global(.fullscreen-station-panel__menu-switch > span::after) {
   background: #ffffff;
   border-radius: 999px;
   box-shadow: 0 3px 8px rgba(15, 23, 42, 0.24);
@@ -1461,11 +1500,11 @@ onBeforeUnmount(() => {
   width: 22px;
 }
 
-:global(.fullscreen-station-panel__theme-toggle input:checked + span) {
+:global(.fullscreen-station-panel__menu-switch input:checked + span) {
   background: #ffe600;
 }
 
-:global(.fullscreen-station-panel__theme-toggle input:checked + span::after) {
+:global(.fullscreen-station-panel__menu-switch input:checked + span::after) {
   transform: translateX(20px);
 }
 

@@ -91,7 +91,7 @@ beforeEach(() => {
 });
 
 describe("NearbyNeighborhoodScorePage", () => {
-  it.each(["heavy", "routes"])("asks users to retry later when %s is rate limited", (source) => {
+  it.each(["heavy", "routes"])("keeps GTFS retries independent from a PRIM rate limit (%s)", (source) => {
     mocks.routeState.query = { lat: "48.76591", lon: "2.26821" };
     if (source === "heavy") mocks.heavy.error.value = "navitia-journeys-429";
     else {
@@ -104,7 +104,7 @@ describe("NearbyNeighborhoodScorePage", () => {
     const wrapper = mount(NearbyNeighborhoodScorePage, { global: { stubs: {
       NearbyNeighborhoodScoreCard: { props: ["error"], template: "<div data-testid='score-card' :data-error='error' />" },
     } } });
-    expect(wrapper.get("[data-testid='score-card']").attributes("data-error")).toContain("Réessayez plus tard");
+    expect(wrapper.get("[data-testid='score-card']").attributes("data-error")).not.toContain("Navitia");
     wrapper.unmount();
   });
   it("loads the score component from exact coordinates and keeps the directory handoff", () => {
@@ -172,7 +172,7 @@ describe("NearbyNeighborhoodScorePage", () => {
       },
     });
 
-    expect(wrapper.get("[data-testid='score-card']").attributes("data-error")).toContain("itinéraires de transport (Navitia)");
+    expect(wrapper.get("[data-testid='score-card']").attributes("data-error")).toContain("GTFS");
     wrapper.unmount();
   });
 

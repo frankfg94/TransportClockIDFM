@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
-import { navitiaRetryAt } from "../../services/navitiaRateLimit";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "#imports";
 import { ArrowLeft, Gauge } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
-import { getNearbyWalkingRoute } from "../../services/nearbyWalkingRoutes";
+import { createGtfsNeighborhoodTravelRoutesProvider } from "../../services/travelRoutes/gtfsNeighborhoodTravelRoutesProvider";
+import { createNeighborhoodWalkingRoutesProvider } from "../../services/neighborhoodWalkingRoutesProvider";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import { fetchGpeStations } from "../transport-map/gpeStationsApi";
 import AdressBook from "../address-book/AdressBook.vue";
@@ -26,10 +26,14 @@ import { useNearbyWalkingRoutes } from "./useNearbyWalkingRoutes";
 import { useTravelRoutes } from "./useTravelRoutes";
 import NearbyNeighborhoodScoreCard from "./NearbyNeighborhoodScoreCard.vue";
 import NearbyRealEstateVerdict from "./NearbyRealEstateVerdict.vue";
+import NeighborhoodTrafficAnnex from "./NeighborhoodTrafficAnnex.vue";
 import {
-  getNearbyNightJourneyDateTime,
-  getNearbyWorkdayJourneyDateTime,
+  getNearbyParisJourneyDateTimeAtTime,
 } from "./nearbyHeavyTransports";
+import {
+  DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME,
+  DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME,
+} from "./neighborhood/departureTimes";
 
 const route = useRoute();
 const router = useRouter();
@@ -71,11 +75,19 @@ const nearby = useNearbyStations(initialOrigin ? {
     selections: [],
   },
 } : undefined);
-const nearbyDataProviders = createNearbyDataProviders();
-const nearbyWalking = useNearbyWalkingRoutes();
+const nearbyDataProviders = createNearbyDataProviders({ travelRoutes: createGtfsNeighborhoodTravelRoutesProvider() });
+const nearbyWalking = useNearbyWalkingRoutes({ routingPolicy: "ors-only" });
 const serviceQuality = useServiceQuality();
-const journeyDateTime = getNearbyWorkdayJourneyDateTime();
-const nightJourneyDateTime = getNearbyNightJourneyDateTime();
+const dayDepartureTime = ref(DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME);
+const nightDepartureTime = ref(DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME);
+const journeyDateTime = computed(() => getNearbyParisJourneyDateTimeAtTime(dayDepartureTime.value, "workday"));
+const nightJourneyDateTime = computed(() => getNearbyParisJourneyDateTimeAtTime(nightDepartureTime.value, "any-day"));
+function restoreDayDepartureTime(): void {
+  if (!dayDepartureTime.value) dayDepartureTime.value = DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME;
+}
+function restoreNightDepartureTime(): void {
+  if (!nightDepartureTime.value) nightDepartureTime.value = DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME;
+}
 const futureProjects = ref<PublicFutureGpeStation[]>([]);
 const futureProjectsReady = ref(false);
 const backendFutureProjects = ref<PublicFutureGpeStation[]>([]);
@@ -99,15 +111,7 @@ const routeComposer = useTravelRoutes({
 const journeyProvider = {
   findJourneys: routeComposer.probeJourneys,
 };
-const walkingRouteProvider = async (
-  origin: { lon: number; lat: number },
-  destination: { lon: number; lat: number },
-  signal?: AbortSignal,
-) => getNearbyWalkingRoute({
-  id: `station:${destination.lat.toFixed(5)}:${destination.lon.toFixed(5)}`,
-  origin,
-  destination,
-}, signal);
+const walkingRouteProvider = createNeighborhoodWalkingRoutesProvider();
 const heavy = useNearbyHeavyTransports({
   origin: nearby.selectedPlace,
   network: nearby.transportMapNetwork,
@@ -121,8 +125,12 @@ const heavy = useNearbyHeavyTransports({
   journeyDateTime,
   walkingRouteProvider,
   includeLocalCandidates: true,
+  batchQueries: true,
 });
 const score = useNearbyNeighborhoodScore({
+  journeySource: "gtfs",
+  documentaryFirst: true,
+  walkingPolicy: "ors-only",
   origin: nearby.selectedPlace,
   stations: nearby.stations,
   network: nearby.transportMapNetwork,
@@ -141,6 +149,8 @@ const score = useNearbyNeighborhoodScore({
   travelRoutesProvider: journeyProvider,
   journeyProbe: routeComposer,
   nightJourneyDateTime,
+  journeyDepartureTime: dayDepartureTime,
+  nightDepartureTime,
   serviceQuality: serviceQuality.data,
   initialSnapshot: readNearbyNeighborhoodScoreSnapshot(initialOrigin),
 });
@@ -252,22 +262,11 @@ const failedSource = computed<ScoreRetrySource | undefined>(() => {
   return score.error.value ? "routes" : undefined;
 });
 const retryingSource = ref<ScoreRetrySource>();
-const retryClock = ref(Date.now());
-let retryTimer: ReturnType<typeof setInterval> | undefined;
-onMounted(() => { retryTimer = setInterval(() => { retryClock.value = Date.now(); }, 1000); });
-onBeforeUnmount(() => { clearInterval(retryTimer); });
-const retrySeconds = computed(() => Math.max(0, Math.ceil((navitiaRetryAt.value - retryClock.value) / 1000)));
+const trafficLineRefs = computed(() => [...new Set([
+  ...nearby.stations.value.flatMap(entry => entry.lines.map(line => line.id)),
+  ...heavy.visibleCandidates.value.flatMap(candidate => candidate.lines.map(line => line.id)),
+])]);
 const scoreError = computed(() => {
-  if ([heavy.error.value, score.error.value?.message].some((message) => message && /\b429\b/u.test(message))) {
-    if (retrySeconds.value >= 3600) return t("nearbyStations.neighborhoodScore.partialErrorRateLimitCountdownHours", {
-      hours: Math.floor(retrySeconds.value / 3600), minutes: Math.floor(retrySeconds.value % 3600 / 60),
-      seconds: String(retrySeconds.value % 60).padStart(2, "0"),
-    });
-    if (retrySeconds.value > 0) return t("nearbyStations.neighborhoodScore.partialErrorRateLimitCountdown", {
-      minutes: Math.floor(retrySeconds.value / 60), seconds: String(retrySeconds.value % 60).padStart(2, "0"),
-    });
-    return t("nearbyStations.neighborhoodScore.partialErrorRateLimit");
-  }
   if (score.error.value?.name === "TimeoutError" && failedSource.value === score.errorSource.value) {
     return t("nearbyStations.neighborhoodScore.partialErrorTimeout", { seconds: 45 });
   }
@@ -277,7 +276,7 @@ const scoreError = computed(() => {
   if (heavy.error.value || score.errorSource?.value === "routes") {
     return heavy.error.value
       ? t("nearbyStations.neighborhoodScore.partialErrorHeavy")
-      : t("nearbyStations.neighborhoodScore.partialErrorRoutes");
+      : t("nearbyStations.neighborhoodScore.partialErrorGtfsRoutes");
   }
   if (score.errorSource?.value === "places") {
     return t("nearbyStations.neighborhoodScore.partialErrorPlaces");
@@ -289,6 +288,9 @@ const scoreError = computed(() => {
     return t("nearbyStations.neighborhoodScore.partialErrorVerdict");
   }
   if (nearbyWalking.error.value) {
+    if (nearbyWalking.error.value.message === "walking-routes-quota-exceeded") {
+      return t("nearbyStations.neighborhoodScore.partialErrorWalkingQuota");
+    }
     return t("nearbyStations.neighborhoodScore.partialErrorWalking");
   }
   if (serviceQuality.error.value) {
@@ -298,7 +300,6 @@ const scoreError = computed(() => {
 });
 
 async function retryFailedSource(): Promise<void> {
-  if (retrySeconds.value > 0) return;
   const source = failedSource.value;
   if (!source || retryingSource.value) return;
   retryingSource.value = source;
@@ -417,8 +418,19 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
         <p>{{ t("nearbyStations.neighborhoodScore.pageSubtitle") }}</p>
         <p v-if="originLabel" class="nearby-neighborhood-score-page__origin">{{ originLabel }}</p>
         <p class="nearby-neighborhood-score-page__journey-reference">
-          {{ t("nearbyStations.neighborhoodScore.journeyReference") }}
+          {{ t("nearbyStations.neighborhoodScore.gtfsJourneyReference", { dayTime: dayDepartureTime, nightTime: nightDepartureTime }) }}
         </p>
+        <fieldset class="nearby-neighborhood-score-page__departure-times">
+          <legend>{{ t("nearbyStations.neighborhoodScore.departureTimesTitle") }}</legend>
+          <label>
+            <span>{{ t("nearbyStations.neighborhoodScore.dayDepartureTime") }}</span>
+            <input v-model="dayDepartureTime" type="time" step="60" @change="restoreDayDepartureTime" />
+          </label>
+          <label>
+            <span>{{ t("nearbyStations.neighborhoodScore.nightDepartureTime") }}</span>
+            <input v-model="nightDepartureTime" type="time" step="60" @change="restoreNightDepartureTime" />
+          </label>
+        </fieldset>
       </div>
       <Gauge class="nearby-neighborhood-score-page__icon" :size="42" aria-hidden="true" />
     </header>
@@ -443,12 +455,13 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
       :progress-label="scoreProgressLabel"
       :error="scoreError"
       :retrying="Boolean(retryingSource)"
-      :retry-disabled="retrySeconds > 0"
+      :retry-disabled="false"
       :criteria="score.criteria?.value"
       :directory-url="directoryUrl"
       @change-origin="openAddressSelector"
       @retry-source="retryFailedSource"
     />
+    <NeighborhoodTrafficAnnex v-if="realEstateOrigin" :line-refs="trafficLineRefs" :origin-key="`${realEstateOrigin.lon}:${realEstateOrigin.lat}`" />
     <NearbyRealEstateVerdict
       v-if="initialOrigin"
       :origin="realEstateOrigin"
@@ -475,6 +488,11 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 .nearby-neighborhood-score-page__hero p:not(.nearby-neighborhood-score-page__eyebrow):not(.nearby-neighborhood-score-page__origin) { color: var(--muted); margin: 7px 0 0; max-width: 680px; }
 .nearby-neighborhood-score-page__origin { color: var(--ink); font-size: .82rem; font-weight: 800; margin: 9px 0 0; }
 .nearby-neighborhood-score-page__journey-reference { color: #5146ff; font-size: .72rem; font-weight: 750; margin: 7px 0 0; }
+.nearby-neighborhood-score-page__departure-times { border: 0; display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 12px 0 0; padding: 0; }
+.nearby-neighborhood-score-page__departure-times legend { color: var(--muted); flex: 1 0 100%; font-size: .68rem; font-weight: 800; margin-bottom: 5px; padding: 0; }
+.nearby-neighborhood-score-page__departure-times label { align-items: center; color: var(--ink); display: inline-flex; font-size: .75rem; font-weight: 750; gap: 8px; }
+.nearby-neighborhood-score-page__departure-times input { background: #fff; border: 1px solid rgba(81,70,255,.24); border-radius: 8px; color: var(--ink); font: inherit; min-height: 34px; padding: 4px 8px; }
+.nearby-neighborhood-score-page__departure-times input:focus-visible { border-color: #5146ff; outline: 2px solid rgba(81,70,255,.2); outline-offset: 1px; }
 .nearby-neighborhood-score-page__icon { color: #5146ff; margin-right: 10px; opacity: .8; }
 .nearby-neighborhood-score-page__empty { align-items: center; background: linear-gradient(135deg, #f7f7ff, #eef4fa); border: 1px dashed rgba(81,70,255,.3); border-radius: 14px; color: var(--muted); display: flex; flex-direction: column; gap: 8px; justify-content: center; min-height: 280px; padding: 28px; text-align: center; }
 .nearby-neighborhood-score-page__empty > svg { color: #5146ff; }

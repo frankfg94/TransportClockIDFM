@@ -1,15 +1,16 @@
 import { createError, defineEventHandler, readBody } from "h3";
 import type { NearbyJourneyPoint } from "../../../src/features/nearby-stations/nearbyHeavyTransports";
-import { routeWalkingWithPreferredProvider } from "../../services/walking/openRouteService";
+import { routeWalkingWithPreferredProvider, routeWalkingWithOpenRouteService } from "../../services/walking/openRouteService";
 
 export default defineEventHandler(async (event) => {
-  const body = await readBody<{ origin?: NearbyJourneyPoint; destination?: NearbyJourneyPoint; id?: string }>(event);
+  const body = await readBody<{ origin?: NearbyJourneyPoint; destination?: NearbyJourneyPoint; id?: string; routingPolicy?: string }>(event);
   const origin = validPoint(body?.origin);
   const destination = validPoint(body?.destination);
   if (!origin || !destination) {
     throw createError({ statusCode: 400, statusMessage: "origin and destination must be valid coordinates." });
   }
-  return routeWalkingWithPreferredProvider(event, origin, destination, typeof body?.id === "string" ? body.id : undefined);
+  const router = body.routingPolicy === "ors-only" ? routeWalkingWithOpenRouteService : routeWalkingWithPreferredProvider;
+  return router(event, origin, destination, typeof body?.id === "string" ? body.id : undefined);
 });
 
 function validPoint(value: unknown): NearbyJourneyPoint | undefined {

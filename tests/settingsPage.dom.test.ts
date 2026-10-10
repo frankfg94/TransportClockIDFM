@@ -250,6 +250,14 @@ describe("SettingsPage", () => {
       expect((toggle.element as HTMLInputElement).checked).toBe(false);
     }
 
+    const noisePrecisionToggle = wrapper.get("[data-settings-nearby-noise-precision] input");
+    expect(noisePrecisionToggle.attributes("role")).toBe("switch");
+    expect((noisePrecisionToggle.element as HTMLInputElement).checked).toBe(true);
+    expect(wrapper.text()).toContain("Contours sonores détaillés");
+    expect(wrapper.text()).toContain("au zoom rue à la place de la grille locale");
+    await noisePrecisionToggle.setValue(false);
+    expect((noisePrecisionToggle.element as HTMLInputElement).checked).toBe(false);
+
     const userLocationToggle = wrapper.get("[data-settings-user-location] input");
     expect((userLocationToggle.element as HTMLInputElement).checked).toBe(true);
     await userLocationToggle.setValue(false);

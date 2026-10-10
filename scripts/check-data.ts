@@ -576,6 +576,7 @@ function gtfsRow(
     Location: location,
     Details: [
       `${manifest.lineCount} lines · version ${manifest.datasetVersion}`,
+      manifest.routing ? `routing v${manifest.routing.schemaVersion}: ${manifest.routing.connectionCount} connections · ${manifest.routing.startDate}–${manifest.routing.endDate} · ${manifest.routing.fileCount} shards/files` : "Routing index missing: run gtfs:update",
       extraDetail,
     ].filter(Boolean).join(" · "),
   };

@@ -240,7 +240,7 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
   const benchmarkFacts = buildJourneyBenchmarkFacts(input);
   positiveFacts.push(...benchmarkFacts.positiveFacts);
   negativeFacts.push(...benchmarkFacts.negativeFacts);
-  positiveFacts.push(...buildNoctilienFacts(input.noctilienJourneys));
+  positiveFacts.push(...buildNoctilienFacts(input.noctilienJourneys, input.noctilienDepartureTime));
 
   if (!journeySummary && input.chateletJourneyStatus !== "loading") {
     neutralFacts.push(makeFact({

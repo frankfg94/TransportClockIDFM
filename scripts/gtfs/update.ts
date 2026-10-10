@@ -24,6 +24,7 @@ import { projectStopsMonotonically } from "../../server/services/lineGeometry/tr
 import { GTFS_TIMETABLE_SCHEMA_VERSION } from "../../server/services/gtfs/timetableTypes";
 import { readCsv } from "./csv";
 import { buildTimetableArtifacts } from "./timetableIndexer";
+import { buildRoutingArtifacts } from "./routingIndexer";
 
 export { parseCsvLine } from "./csv";
 
@@ -37,6 +38,7 @@ const REQUIRED_FILES = new Set([
   "calendar.txt",
   "calendar_dates.txt",
 ]);
+const OPTIONAL_FILES = new Set(["transfers.txt", "pathways.txt"]);
 const MAX_COMPRESSED_BYTES = 512 * 1024 * 1024;
 const MAX_UNCOMPRESSED_BYTES = 3 * 1024 * 1024 * 1024;
 const MAX_PATTERNS_PER_ROUTE = 80;
@@ -103,6 +105,7 @@ export function needsTimetableMigration(previous?: GtfsManifest): boolean {
   return Boolean(previous && (
     previous.timetable?.schemaVersion !== GTFS_TIMETABLE_SCHEMA_VERSION ||
     !previous.timetable.path
+    || previous.routing?.schemaVersion !== 1 || !previous.routing.path
   ));
 }
 
@@ -184,6 +187,10 @@ async function runGtfsUpdateUnlocked(options: GtfsUpdateOptions): Promise<void> 
         }),
         path: timetablePath,
       };
+      report("indexing", "Building the network-wide connection scan index.");
+      const routingPath = `routing/v1/${downloaded.sha256}/${randomUUID()}`;
+      const stagedRouting = join(stagingDir, "routing");
+      const routing = { ...await buildRoutingArtifacts(stagedTimetable, stagedRouting, timetable, extractedDir), path: routingPath };
       const sourceUpdatedAt = parseHttpDate(downloaded.lastModified) ?? new Date().toISOString();
       const manifest: GtfsManifest = {
         schemaVersion: 1,
@@ -196,6 +203,7 @@ async function runGtfsUpdateUnlocked(options: GtfsUpdateOptions): Promise<void> 
         cacheGeneration: (previous?.cacheGeneration ?? 0) + 1,
         lineCount,
         timetable,
+        routing,
       };
 
       // Install only complete builds. Never rebuild inside an immutable version.
@@ -206,6 +214,9 @@ async function runGtfsUpdateUnlocked(options: GtfsUpdateOptions): Promise<void> 
       const timetableDir = join(outputDir, timetablePath);
       await fs.mkdir(dirname(timetableDir), { recursive: true });
       await fs.rename(stagedTimetable, timetableDir);
+      const routingDir = join(outputDir, routingPath);
+      await fs.mkdir(dirname(routingDir), { recursive: true });
+      await fs.rename(stagedRouting, routingDir);
 
       report("publishing", `Publishing ${lineCount} geometry lines and ${timetable.fileCount} timetable files.`);
       // The active remote geometry is already complete and must not be rewritten.
@@ -213,6 +224,7 @@ async function runGtfsUpdateUnlocked(options: GtfsUpdateOptions): Promise<void> 
         await publishDirectory(versionDir, `versions/${downloaded.sha256}`, r2, true);
       }
       if (r2) await publishDirectory(timetableDir, timetablePath, r2);
+      if (r2) await publishDirectory(routingDir, routingPath, r2);
       await publishManifest(manifest, outputDir, r2);
       report("completed", `${lineCount} geometry lines and ${timetable.tripCount} timetable trips published.`);
     } finally {
@@ -259,7 +271,7 @@ export async function extractRequiredFiles(zipPath: string, destination: string)
       return;
     }
     const filename = basename(name);
-    if (!REQUIRED_FILES.has(filename)) return;
+    if (!REQUIRED_FILES.has(filename) && !OPTIONAL_FILES.has(filename)) return;
     if (found.has(filename)) {
       extractionError = new Error(`Duplicate GTFS file in archive: ${filename}`);
       return;

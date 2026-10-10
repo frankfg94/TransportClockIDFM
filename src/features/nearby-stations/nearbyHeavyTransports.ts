@@ -3,6 +3,10 @@ import type { GlobalMapLine, GlobalMapMode, GlobalMapStation } from "../transpor
 import type { NearbyStationEntry } from "./nearbyStations";
 import type { PublicFutureGpeStation } from "./neighborhoodVerdictApi";
 import {
+  DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME,
+  DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME,
+} from "./neighborhood/departureTimes";
+import {
   getNearbyHeavyAccessTravelSeconds,
   NEARBY_HEAVY_TRANSPORT_MODES,
 } from "./nearbyHeavyTransportRules";
@@ -39,6 +43,8 @@ export interface NearbyJourneyRequest {
   destination: Pick<GeocoderPoint, "id" | "lon" | "lat">;
   /** Optional Navitia stop-area URI used instead of the map centroid. */
   destinationRef?: string;
+  /** Verdict station benchmarks end at the arrival platform, without a street egress. */
+  arrivalAtPlatform?: boolean;
   /** Optional departure probe used to discover scheduled daytime feeders. */
   datetime?: string;
   count?: number;
@@ -87,6 +93,46 @@ export function getNearbyNightJourneyDateTime(now = new Date()): string {
     `T${pad(target.getHours())}${pad(target.getMinutes())}${pad(target.getSeconds())}`;
 }
 
+/** Fixed Paris civil-time probes for the standalone offline verdict, on any device timezone. */
+export type NearbyJourneyDateTimeSource = string | { readonly value: string };
+
+export function resolveNearbyJourneyDateTime(source?: NearbyJourneyDateTimeSource): string | undefined {
+  const value = typeof source === "string" ? source : source?.value;
+  return value?.trim() || undefined;
+}
+
+export function getNearbyParisJourneyDateTimeAtTime(
+  time: string,
+  serviceWindow: "workday" | "any-day",
+  now = new Date(),
+): string {
+  const match = /^(\d{2}):(\d{2})$/u.exec(time);
+  const requestedHour = Number(match?.[1]);
+  const requestedMinute = Number(match?.[2]);
+  const validTime = Boolean(match)
+    && requestedHour >= 0 && requestedHour <= 23
+    && requestedMinute >= 0 && requestedMinute <= 59;
+  const fallbackTime = serviceWindow === "workday"
+    ? DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME
+    : DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME;
+  const [hour, minute] = (validTime ? time : fallbackTime).split(":").map(Number);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(now).map(part => [part.type, part.value]));
+  const civilNow = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second));
+  const target = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), hour, minute));
+  if (target.getTime() <= civilNow) target.setUTCDate(target.getUTCDate() + 1);
+  if (serviceWindow === "workday") while ([0, 6].includes(target.getUTCDay())) target.setUTCDate(target.getUTCDate() + 1);
+  return target.toISOString().slice(0, 19).replace(/[-:]/gu, "");
+}
+
+/** Preserve the existing fixed-hour API used by other neighborhood routes. */
+export function getNearbyParisJourneyDateTime(hour: 3 | 9, now = new Date()): string {
+  return getNearbyParisJourneyDateTimeAtTime(
+    hour === 9 ? DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME : DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME,
+    hour === 9 ? "workday" : "any-day",
+    now,
+  );
+}
+
 export interface NearbyJourneyPoint {
   lon: number;
   lat: number;
@@ -114,6 +160,8 @@ export interface NearbyJourneySection {
   baseDepartureDateTime?: string;
   baseArrivalDateTime?: string;
   timingSource?: "realtime" | "estimated" | "schedule";
+  /** A GTFS minimum change time may include a margin; it is not a measured walk. */
+  transferDurationSource?: "gtfs-minimum";
   timingObservedAt?: string;
   type?: string;
   mode?: string;
@@ -143,6 +191,8 @@ export interface NearbyJourneySection {
 }
 
 export interface NearbyJourney {
+  source?: "gtfs";
+  datasetVersion?: string;
   id?: string;
   durationSeconds: number;
   departureDateTime?: string;

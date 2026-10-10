@@ -14,6 +14,7 @@ import type {
   TravelRoutesProvider,
 } from "./nearbyHeavyTransports";
 import { isNearbyJourneyTransitSection } from "./nearbyJourneyTiming";
+import { getOfficialStationReference } from "./neighborhoodStationReferences";
 import type { TravelRouteProbe } from "./useTravelRoutes";
 import type { NearbyPlace, PlacesProvider } from "./nearbyPlaces";
 import {
@@ -27,6 +28,7 @@ import {
   fetchNearbySupermarketFootprints,
 } from "../../services/places/nearbyShoppingCentres";
 import { getNearbyWalkingRouteMatrix } from "../../services/nearbyWalkingRoutes";
+import type { NearbyWalkingRoutingPolicy } from "./nearbyWalkingRoutes";
 import { placeDistanceMeters } from "../../services/places/compiledPlaces";
 import {
   NEARBY_DIRECTORY_MAX_RADIUS_METERS,
@@ -34,7 +36,13 @@ import {
 import {
   getNearbyNightJourneyDateTime,
   NEARBY_HEAVY_TRANSPORT_MODES,
+  resolveNearbyJourneyDateTime,
+  type NearbyJourneyDateTimeSource,
 } from "./nearbyHeavyTransports";
+import {
+  DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME,
+  DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME,
+} from "./neighborhood/departureTimes";
 import type { NearbyStationEntry } from "./nearbyStations";
 import {
   aggregateNeighborhoodScore,
@@ -72,15 +80,20 @@ interface ShoppingCentreLoadResult {
 export type NeighborhoodScoreErrorSource = "verdict" | "places" | "routes" | "timetables";
 
 export interface UseNearbyNeighborhoodScoreOptions {
+  journeySource?: "gtfs";
+  walkingPolicy?: NearbyWalkingRoutingPolicy;
+  documentaryFirst?: boolean;
   origin: ReadonlyValue<GeocoderPoint | undefined>;
   stations: ReadonlyValue<NearbyStationEntry[]>;
   network: ReadonlyValue<TransportMapNetwork | undefined>;
-  /** Optional Navitia departure datetime used for the Châtelet benchmark. */
-  journeyDateTime?: string;
+  /** Optional theoretical departure datetime used by route probes. */
+  journeyDateTime?: NearbyJourneyDateTimeSource;
+  journeyDepartureTime?: ReadonlyValue<string>;
   /** The same probe exposed by useTravelRoutes, shared by every benchmark. */
   journeyProbe?: TravelRouteProbe;
-  /** Optional Navitia departure datetime used for the real 03:00 Noctilien probe. */
-  nightJourneyDateTime?: string;
+  /** Optional theoretical departure datetime used for the Noctilien probe. */
+  nightJourneyDateTime?: NearbyJourneyDateTimeSource;
+  nightDepartureTime?: ReadonlyValue<string>;
   stationsLoading?: ReadonlyValue<boolean>;
   walkingRoutesLoading?: ReadonlyValue<boolean>;
   serviceQualityLoading?: ReadonlyValue<boolean>;
@@ -101,11 +114,12 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const travelRoutesProvider = options.travelRoutesProvider ?? defaultProviders.travelRoutes;
   const fetchFrequency = options.fetchFrequency ?? fetchGtfsLineFrequency;
   const frequencyTimetable = useLineFrequencyTimetable({ fetchFrequency });
-  const nightJourneyDateTime = options.nightJourneyDateTime ?? getNearbyNightJourneyDateTime();
+  const defaultNightJourneyDateTime = getNearbyNightJourneyDateTime();
   const places = ref<NearbyPlace[]>([]);
   const placesLoaded = ref(false);
   const shoppingCentres = ref<NeighborhoodShoppingCentreAccess[]>([]);
   const shoppingCentresLoaded = ref(false);
+  const shoppingCentresJourneyDateTime = ref<string | undefined>();
   const supermarketFootprints = ref<NearbySupermarketFootprint[]>([]);
   const supermarketFootprintsLoaded = ref(false);
   const walkingRoutes = ref<Record<string, NeighborhoodWalkingMetrics | undefined>>({});
@@ -190,8 +204,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       chateletJourneys: chateletJourneys.value,
       chateletJourneyStatus: chateletJourneyStatus.value,
       journeyBenchmarks: journeyBenchmarks.value,
+      journeyDepartureTime: options.journeyDepartureTime?.value ?? DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME,
       greenSpaceJourneys: greenSpaceJourneys.value,
       noctilienJourneys: noctilienJourneys.value,
+      noctilienDepartureTime: options.nightDepartureTime?.value ?? DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME,
       frequencyProfiles: frequencyProfiles.value,
       lastServiceByLine: lastServiceByLine.value,
       hospitalJourneys: hospitalJourneys.value,
@@ -241,6 +257,9 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     if (disposed) return;
     const origin = options.origin.value;
     const originKey = origin ? neighborhoodOriginKey(origin) : "";
+    const journeyDateTime = resolveNearbyJourneyDateTime(options.journeyDateTime);
+    const nightJourneyDateTime = resolveNearbyJourneyDateTime(options.nightJourneyDateTime)
+      ?? defaultNightJourneyDateTime;
     const token = ++requestToken;
     resetOriginState(originKey);
     chateletJourneyStatus.value = origin ? "loading" : undefined;
@@ -266,12 +285,16 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       (next) => {
         backendVerdict.value = next;
         backendVerdictReady.value = true;
+        if (options.documentaryFirst) {
+          trackTask("backend-walking", loadBackendVerdict(origin, `${originKey}:walking`, true), token,
+            enriched => { backendVerdict.value = enriched; updatedAt.value = Date.now(); }, false, "verdict", ["transport", "nature-leisure"]);
+        }
         updatedAt.value = Math.max(updatedAt.value, Date.parse(next.generatedAt) || Date.now());
         const greenSpaceTargets = resolveGreenSpaceTransitTargets(next.nearbyGreenSpaces);
         if (greenSpaceTargets.length > 0) {
           trackTask(
             "green-space-routes",
-            loadGreenSpaceJourneys(origin, greenSpaceTargets, originKey),
+            loadGreenSpaceJourneys(origin, greenSpaceTargets, originKey, journeyDateTime),
             token,
             (journeys) => {
               greenSpaceJourneys.value = journeys;
@@ -296,7 +319,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         (next) => {
           places.value = next;
           placesLoaded.value = true;
-          trackHospitalJourneys(origin, next, originKey, token);
+          trackHospitalJourneys(origin, next, originKey, token, journeyDateTime);
           updatedAt.value = Date.now();
         },
         true,
@@ -304,17 +327,18 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         PLACES_CRITERIA,
       );
     } else {
-      trackHospitalJourneys(origin, places.value, originKey, token);
+      trackHospitalJourneys(origin, places.value, originKey, token, journeyDateTime);
     }
 
-    if (!shoppingCentresLoaded.value) {
+    if (!shoppingCentresLoaded.value || shoppingCentresJourneyDateTime.value !== journeyDateTime) {
       trackTask(
         "shopping-centres",
-        loadShoppingCentreAccess(origin, originKey),
+        loadShoppingCentreAccess(origin, originKey, journeyDateTime),
         token,
         (next) => {
           shoppingCentres.value = next.centres;
           shoppingCentresLoaded.value = true;
+          shoppingCentresJourneyDateTime.value = journeyDateTime;
           updatedAt.value = Date.now();
         },
         false,
@@ -348,10 +372,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       scheduleRecompute();
     }
     for (const benchmark of benchmarkDestinations) {
-      const journeyKey = journeyCacheKey(originKey, benchmark.id, benchmark, options.journeyDateTime);
+      const journeyKey = journeyCacheKey(originKey, benchmark.id, benchmark, journeyDateTime);
       const taskId = `journey:${benchmark.id}`;
       nextBenchmarks.push({ id: benchmark.id, label: benchmark.label, journeys: [] });
-      const journeyPromise = loadJourneyProbe(origin, benchmark, options.journeyDateTime, journeyKey)
+      const journeyPromise = loadJourneyProbe(origin, benchmark, journeyDateTime, journeyKey)
         .then((next) => {
           if (benchmark.id === "chatelet" && token === requestToken) {
             chateletJourneyStatus.value = next.length > 0 ? "ready" : "unavailable";
@@ -467,6 +491,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     placesLoaded.value = false;
     shoppingCentres.value = [];
     shoppingCentresLoaded.value = false;
+    shoppingCentresJourneyDateTime.value = undefined;
     supermarketFootprints.value = [];
     supermarketFootprintsLoaded.value = false;
     walkingRoutes.value = {};
@@ -495,7 +520,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     places.value = [...snapshot.places];
     placesLoaded.value = snapshot.placesLoaded;
     walkingRoutes.value = { ...snapshot.walkingRoutes };
-    heavyCandidates.value = [...snapshot.heavyCandidates];
+    heavyCandidates.value = options.journeySource === "gtfs" ? [] : [...snapshot.heavyCandidates];
     if (snapshot.placesLoaded) placesResults.set(originKey, [...snapshot.places]);
   }
 
@@ -529,10 +554,12 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   function loadShoppingCentreAccess(
     origin: Pick<GeocoderPoint, "lon" | "lat">,
     originKey: string,
+    journeyDateTime?: string,
   ): Promise<ShoppingCentreLoadResult> {
-    const cached = shoppingCentreResults.get(originKey);
+    const cacheKey = `${originKey}|${journeyDateTime ?? ""}`;
+    const cached = shoppingCentreResults.get(cacheKey);
     if (cached) return Promise.resolve({ centres: [...cached.centres] });
-    const active = shoppingCentreRequests.get(originKey);
+    const active = shoppingCentreRequests.get(cacheKey);
     if (active) return active.promise;
 
     const controller = new AbortController();
@@ -565,6 +592,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
               lat: centre.lat,
             })),
             signal,
+            options.walkingPolicy,
           )
         : [];
       signal.throwIfAborted();
@@ -595,14 +623,14 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
           originKey,
           destination.id,
           destination,
-          options.journeyDateTime,
+          journeyDateTime,
           "shopping-centre",
         );
         try {
           journeysById.set(centre.id, await loadJourneyProbe(
             origin,
             destination,
-            options.journeyDateTime,
+            journeyDateTime,
             journeyKey,
             4,
           ));
@@ -623,15 +651,15 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     })()
       .then((next) => {
         controller.signal.throwIfAborted();
-        shoppingCentreResults.set(originKey, {
+        shoppingCentreResults.set(cacheKey, {
           centres: [...next.centres],
         });
         return next;
       })
       .finally(() => {
-        if (shoppingCentreRequests.get(originKey)?.promise === promise) shoppingCentreRequests.delete(originKey);
+        if (shoppingCentreRequests.get(cacheKey)?.promise === promise) shoppingCentreRequests.delete(cacheKey);
       });
-    shoppingCentreRequests.set(originKey, { controller, promise });
+    shoppingCentreRequests.set(cacheKey, { controller, promise });
     return promise;
   }
 
@@ -682,29 +710,31 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       includeDisruptions: true,
       includeGeoJson: false,
       ...(destination.destinationRef ? { destinationRef: destination.destinationRef } : {}),
+      ...(options.journeySource === "gtfs" && destination.destinationRef ? { arrivalAtPlatform: true } : {}),
       ...(datetime?.trim() ? { datetime: datetime.trim() } : {}),
     };
     const controller = new AbortController();
     const probeJourneys = (nextRequest: NearbyJourneyRequest, signal: AbortSignal) => options.journeyProbe
       ? options.journeyProbe.probeJourneys(nextRequest, signal)
       : travelRoutesProvider.findJourneys(nextRequest, signal);
-    const promise = requestScheduler.schedule(
-      async (signal) => {
-        if (destination.id !== "chatelet" || !request.destinationRef) return probeJourneys(request, signal);
-        try {
-          const byReference = await probeJourneys(request, signal);
-          if (byReference.length > 0) return byReference;
-        } catch {
-          signal.throwIfAborted();
-        }
+    const runProbe = async (signal: AbortSignal) => {
+      if (destination.id !== "chatelet" || !request.destinationRef) return probeJourneys(request, signal);
+      try {
+        const byReference = await probeJourneys(request, signal);
+        if (byReference.length > 0) return byReference;
+      } catch {
         signal.throwIfAborted();
-        const coordinateRequest: NearbyJourneyRequest = { ...request };
-        delete coordinateRequest.destinationRef;
-        return probeJourneys(coordinateRequest, signal);
-      },
-      controller.signal,
-      priority,
-    )
+      }
+      signal.throwIfAborted();
+      const coordinateRequest: NearbyJourneyRequest = { ...request };
+      delete coordinateRequest.destinationRef;
+      return probeJourneys(coordinateRequest, signal);
+    };
+    // The offline provider batches destinations itself; a per-destination
+    // network slot would serialize calls before that batch could be formed.
+    const promise = (options.journeySource === "gtfs"
+      ? runProbe(controller.signal)
+      : requestScheduler.schedule(runProbe, controller.signal, priority))
       .then((next) => {
         controller.signal.throwIfAborted();
         // Cache only an actual provider response. A 429, timeout or aborted
@@ -723,6 +753,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     origin: Pick<GeocoderPoint, "lon" | "lat">,
     targets: readonly PublicGreenSpaceAccess[],
     originKey: string,
+    journeyDateTime?: string,
   ): Promise<NeighborhoodGreenSpaceJourney[]> {
     return Promise.all(targets.map(async (greenSpace): Promise<NeighborhoodGreenSpaceJourney> => {
       const points = [
@@ -741,13 +772,13 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
           originKey,
           `green-space:${greenSpace.id}:${index}`,
           destination,
-          options.journeyDateTime,
+          journeyDateTime,
           "green-space",
         );
         return loadJourneyProbe(
           origin,
           destination,
-          options.journeyDateTime,
+          journeyDateTime,
           journeyKey,
           2,
         ).catch(() => []);
@@ -761,13 +792,14 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     sourcePlaces: readonly NearbyPlace[],
     originKey: string,
     token: number,
+    journeyDateTime?: string,
   ): void {
     const targets = sourcePlaces.filter((place) => normalizeScoreText(place.kind) === "hospital");
     if (targets.length === 0) return;
     const promise = Promise.all(targets.map(async (place) => {
       const destination = { id: place.id, lon: place.lon, lat: place.lat };
-      const journeyKey = journeyCacheKey(originKey, place.id, destination, options.journeyDateTime, "hospital");
-      return [place.id, await loadJourneyProbe(origin, destination, options.journeyDateTime, journeyKey, 3)] as const;
+      const journeyKey = journeyCacheKey(originKey, place.id, destination, journeyDateTime, "hospital");
+      return [place.id, await loadJourneyProbe(origin, destination, journeyDateTime, journeyKey, 3)] as const;
     })).then((entries) => Object.fromEntries(entries));
     trackTask(
       "hospital-routes",
@@ -832,16 +864,16 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     return promise;
   }
 
-  function loadBackendVerdict(origin: Pick<GeocoderPoint, "lon" | "lat">, originKey: string): Promise<PublicNeighborhoodVerdict> {
+  function loadBackendVerdict(origin: Pick<GeocoderPoint, "lon" | "lat">, originKey: string, walkingEnrichment = false): Promise<PublicNeighborhoodVerdict> {
     const cached = verdictResults.get(originKey);
     if (cached) return Promise.resolve(cached);
     const active = verdictRequests.get(originKey);
     if (active) return active.promise;
     const controller = new AbortController();
     const promise = requestScheduler.schedule(
-      (signal) => fetchNeighborhoodVerdict(origin.lat, origin.lon, signal),
+      (signal) => fetchNeighborhoodVerdict(origin.lat, origin.lon, signal, options.documentaryFirst ? { includeWalking: walkingEnrichment, routingPolicy: "ors-only" } : {}),
       controller.signal,
-      0,
+      walkingEnrichment ? 2 : 0,
     )
       .then((next) => {
         controller.signal.throwIfAborted();
@@ -989,10 +1021,13 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       const backendCategory = backendVerdict.value?.categories.find((entry) => entry.id === categoryId);
       if (backendCategory?.status === "stale") return "stale";
       if (backendCategory?.status !== "available") return "missing";
-      return freshnessStatus(backendVerdict.value?.generatedAt, maxAgeMs);
+      // The backend has already evaluated the relevant official sources. Annual
+      // observations do not expire 24h after their compiled artifact was written.
+      return "ready";
     }
     if (datasetId === "service-quality") {
-      return freshnessStatus(options.serviceQuality?.value?.generatedAt, maxAgeMs);
+      const quality = options.serviceQuality?.value;
+      return quality ? quality.sources.some(source => source.freshness.status === "stale") ? "stale" : "ready" : "missing";
     }
     if (datasetId === "gtfs-frequency") return frequencyResults.size > 0 ? "ready" : "missing";
     if (datasetId === "walking-routes") {
@@ -1049,6 +1084,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       options.origin.value?.lat,
       options.network.value,
       options.stations.value.map((entry) => entry.id).join(","),
+      resolveNearbyJourneyDateTime(options.journeyDateTime),
+      resolveNearbyJourneyDateTime(options.nightJourneyDateTime),
+      options.journeyDepartureTime?.value,
+      options.nightDepartureTime?.value,
     ] as const,
     () => {
       markCriteriaDirty(["transport"]);
@@ -1131,8 +1170,13 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         || [...taskErrors.values()].some((entry) => entry.categories.includes(definition.id));
       const datasets = definition.datasets.map((dataset) => ({
         ...dataset,
+        id: dataset.id === "navitia-journeys" && options.journeySource === "gtfs" ? "gtfs-journeys" : dataset.id,
         status: currentDatasetStatus(dataset.id, dataset.maxAgeMs, definition.id),
-      } satisfies typeof dataset & { status: NeighborhoodDatasetStatus }));
+      } satisfies typeof dataset & { status: NeighborhoodDatasetStatus })).filter(dataset =>
+        // Loaded categories with no documentary facts do not consume this
+        // optional source. Keep real loading/errors and mandatory coverage.
+        dataset.id !== "neighborhood-verdict" || dataset.required || dataset.status !== "missing"
+          || !backendVerdictReady.value || !backendVerdict.value);
       const categoryHasUsableData = Boolean(category?.available
         || category?.positiveFacts.length
         || category?.negativeFacts.length
@@ -1266,16 +1310,7 @@ function resolveJourneyBenchmarks(network: TransportMapNetwork | undefined): Jou
 function resolveNavitiaStopAreaReference(
   station: Pick<GlobalMapStation, "rawRefs">,
 ): string | undefined {
-  const rawReference = station.rawRefs
-    .map((reference) => reference.trim())
-    .find((reference) => reference.startsWith("stop_area:"))
-    ?? station.rawRefs
-      .map((reference) => reference.trim())
-      .find((reference) => /^\d+$/u.test(reference));
-  if (!rawReference) return undefined;
-  return rawReference.startsWith("stop_area:")
-    ? rawReference
-    : `stop_area:IDFM:${rawReference}`;
+  return getOfficialStationReference(station);
 }
 
 const NOCTILIEN_PROBE_MAX_METERS = 2_500;

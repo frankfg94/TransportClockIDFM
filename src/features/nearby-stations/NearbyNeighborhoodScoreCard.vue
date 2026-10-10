@@ -63,6 +63,7 @@ const datasetStatusKeys: Record<NeighborhoodDatasetStatus, TranslationKey> = {
 const datasetLabelKeys: Record<string, TranslationKey> = {
   "transport-bootstrap": "nearbyStations.neighborhoodScore.datasets.transport-bootstrap",
   "navitia-journeys": "nearbyStations.neighborhoodScore.datasets.navitia-journeys",
+  "gtfs-journeys": "nearbyStations.neighborhoodScore.datasets.gtfs-journeys",
   "heavy-access": "nearbyStations.neighborhoodScore.datasets.heavy-access",
   "gtfs-frequency": "nearbyStations.neighborhoodScore.datasets.gtfs-frequency",
   "service-quality": "nearbyStations.neighborhoodScore.datasets.service-quality",

@@ -5,6 +5,7 @@ import {
   type NearbyWalkingMatrixDestination,
   type NearbyWalkingRoute,
   type NearbyWalkingRouteRequest,
+  type NearbyWalkingRoutingPolicy,
 } from "../features/nearby-stations/nearbyWalkingRoutes";
 import { toServerApiUrl } from "./serverApi";
 import { runNetworkTask } from "./networkScheduler";
@@ -184,6 +185,7 @@ export async function getNearbyWalkingRouteMatrix(
   origin: NearbyJourneyPoint,
   destinations: readonly NearbyWalkingMatrixDestination[],
   signal?: AbortSignal,
+  routingPolicy?: NearbyWalkingRoutingPolicy,
 ): Promise<NearbyWalkingRoute[]> {
   if (destinations.length === 0) return [];
   const fallbacks = destinations.map((destination) => createStraightLineWalkingRoute(origin, destination, destination.id));
@@ -202,7 +204,7 @@ export async function getNearbyWalkingRouteMatrix(
     const payload = await runNetworkTask(async (requestSignal) => {
       const response = await fetch(toServerApiUrl("/api/walking/matrix"), {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ origin, destinations: missingDestinations }), signal: requestSignal,
+        body: JSON.stringify({ origin, destinations: missingDestinations, routingPolicy }), signal: requestSignal,
       });
       if (!response.ok) throw new Error(`walking-matrix-${response.status}`);
       return await response.json() as { routes?: unknown };

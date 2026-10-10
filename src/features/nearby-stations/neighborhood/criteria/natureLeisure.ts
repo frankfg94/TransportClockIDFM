@@ -10,12 +10,13 @@ import { chooseFastestJourney } from "../journeys";
 import type { ScoredPlace } from "../places";
 import { isSportsPlace, isTennisPlace, makePlaceFact, scorePlaces } from "../places";
 import { clamp, normalizeScoreText, saturatingNeighborhoodBonus } from "../primitives";
+import { DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME } from "../departureTimes";
 
 export function buildNatureLeisureCategory(input: NeighborhoodScoreInput): NeighborhoodCategoryResult {
   const base = category("nature-leisure");
   const greenSpaceFacts = [
     ...buildExceptionalGreenSpaceWalkingFacts(input.backendVerdict?.nearbyGreenSpaces),
-    ...buildGreenSpaceTransitFacts(input.greenSpaceJourneys),
+    ...buildGreenSpaceTransitFacts(input.greenSpaceJourneys, input.journeyDepartureTime),
   ];
   const sports = input.placesLoaded ? scorePlaces(input, isSportsPlace) : [];
   const sportsFacts = buildSportsFacts(sports);
@@ -109,6 +110,7 @@ function buildExceptionalGreenSpaceWalkingFacts(
 
 function buildGreenSpaceTransitFacts(
   greenSpaceJourneys: readonly NeighborhoodGreenSpaceJourney[] | undefined,
+  departureTime = DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME,
 ): NeighborhoodFact[] {
   return (greenSpaceJourneys ?? [])
     .map((candidate): NeighborhoodFact | undefined => {
@@ -143,6 +145,7 @@ function buildGreenSpaceTransitFacts(
         priority: 13,
         values: {
           name: candidate.greenSpace.name,
+          hour: departureTime,
           minutes: Math.max(1, Math.ceil(timing.scoreSeconds / 60)),
           lines,
           area: area ?? "surface non renseignée",

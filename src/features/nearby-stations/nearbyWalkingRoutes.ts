@@ -1,6 +1,7 @@
 import type { NearbyJourneyPoint } from "./nearbyHeavyTransports";
 
 export type NearbyWalkingRouteProvider = "idfm-navitia" | "openrouteservice" | "straight-line";
+export type NearbyWalkingRoutingPolicy = "preferred" | "ors-only";
 
 export interface NearbyWalkingRoute {
   id?: string;
@@ -9,6 +10,7 @@ export interface NearbyWalkingRoute {
   durationSeconds: number;
   coordinates: NearbyJourneyPoint[];
   fallback?: boolean;
+  unavailabilityReason?: "quota-exceeded" | "not-configured" | "unavailable" | "unreachable";
 }
 
 export interface NearbyWalkingPlaceCacheIdentity {
@@ -20,6 +22,7 @@ export interface NearbyWalkingPlaceCacheIdentity {
 }
 
 export interface NearbyWalkingRouteRequest {
+  routingPolicy?: NearbyWalkingRoutingPolicy;
   origin: NearbyJourneyPoint;
   destination: NearbyJourneyPoint;
   id?: string;
@@ -32,6 +35,7 @@ export interface NearbyWalkingMatrixDestination extends NearbyJourneyPoint {
 }
 
 export interface NearbyWalkingMatrixRequest {
+  routingPolicy?: NearbyWalkingRoutingPolicy;
   origin: NearbyJourneyPoint;
   destinations: NearbyWalkingMatrixDestination[];
 }

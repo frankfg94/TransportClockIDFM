@@ -29,6 +29,7 @@ const props = defineProps<{
   loading?: boolean;
   error?: string;
   basemapStyle?: TransportMapBasemapStyle;
+  highPrecisionNoiseEnabled?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -362,6 +363,7 @@ onBeforeUnmount(() => {
                   :walking-routes="walkingRoutes"
                   :walking-route="selectedWalkingRoute"
                   :basemap-style="basemapStyle"
+                  :high-precision-noise-enabled="highPrecisionNoiseEnabled"
                   allow-zoom
                   show-nearby-places
                   show-nearby-parkings

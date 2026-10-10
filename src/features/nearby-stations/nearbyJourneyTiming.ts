@@ -71,6 +71,7 @@ export function isNearbyJourneyWaitingSection(section: NearbyJourneySection): bo
 }
 
 export function isNearbyJourneyWalkingSection(section: NearbyJourneySection): boolean {
+  if (section.transferDurationSource === "gtfs-minimum") return false;
   const type = (section.type ?? "").toLocaleLowerCase("fr-FR");
   const mode = (section.mode ?? "").toLocaleLowerCase("fr-FR");
   if (

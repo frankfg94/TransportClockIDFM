@@ -1172,6 +1172,10 @@ function updateFullscreenPanelTheme(darkTheme: boolean): void {
   updateSettings({ fullscreenStationPanelDarkTheme: darkTheme });
 }
 
+function updateFullscreenPanelKeepScreenOn(enabled: boolean): void {
+  updateSettings({ fullscreenPanelKeepScreenOn: enabled });
+}
+
 function refreshFullscreenPanel(): void {
   if (!fullscreenPanelBoard.value) {
     return;
@@ -2952,6 +2956,7 @@ onBeforeUnmount(() => {
           :hidden-direction-ids="preferences.hiddenDirectionIdsByBoardId[fullscreenPanelBoard.id] ?? []"
           :design="fullscreenPanelDesign"
           :dark-theme="settings.fullscreenStationPanelDarkTheme"
+          :keep-screen-on="settings.fullscreenPanelKeepScreenOn"
           :panam-direction-id="fullscreenPanelPanamDirectionId"
           :traffic-alert="fullscreenPanelTrafficAlert"
           :smart-traffic-modal-formatting="settings.smartTrafficModalFormatting"
@@ -2964,6 +2969,7 @@ onBeforeUnmount(() => {
           @update:hidden-direction-ids="updateHiddenDirectionIdsForBoard(fullscreenPanelBoard.id, $event)"
           @change-design="updateFullscreenPanelDesign"
           @change-theme="updateFullscreenPanelTheme"
+          @keep-screen-on-change="updateFullscreenPanelKeepScreenOn"
           @refresh="refreshFullscreenPanel"
           @toggle-fullscreen="toggleFullscreenPanelMode"
           @close="closeFullscreenPanel"
@@ -3001,6 +3007,7 @@ onBeforeUnmount(() => {
         :show-basemap-control="settings.nearbyMapShowBasemapControl"
         :show-display-control="settings.nearbyMapShowDisplayControl"
         :show-fullscreen-control="settings.nearbyMapShowFullscreenControl"
+        :high-precision-noise-enabled="settings.nearbyMapHighPrecisionNoiseEnabled"
         @close="closeNearbyStations()"
         @manual="openManualStationSelector"
         @confirm="addNearbyStations"

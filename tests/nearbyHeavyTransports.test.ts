@@ -580,7 +580,7 @@ describe("nearby heavy transport eligibility", () => {
     expect(requests.some((request) => Boolean(request.datetime))).toBe(true);
   });
 
-  it("uses an explicit commute datetime instead of issuing a live-time probe", async () => {
+  it.each([false, true])("uses an explicit commute datetime without live probes (batch=%s)", async batchQueries => {
     const rerB = line("line:rer:B", "B", "RER");
     const target = station("station:rer", "La Croix de Berny", 2.31, [rerB.id]);
     const network: TransportMapNetwork = {
@@ -601,6 +601,7 @@ describe("nearby heavy transport eligibility", () => {
       activeModes: ["RER"],
       radiusMeters: 600,
       journeyDateTime: "20260902T090000",
+      batchQueries,
       journeyProvider: {
         async findJourneys(request) {
           requests.push({ datetime: request.datetime });
@@ -611,6 +612,27 @@ describe("nearby heavy transport eligibility", () => {
 
     expect(requests.length).toBeGreaterThan(0);
     expect(requests.every((request) => request.datetime === "20260902T090000")).toBe(true);
+  });
+
+  it.each([false, true])("resolves a co-located NeTEx quay to an official station only for the verdict provider (batch=%s)", async batchQueries => {
+    const rail = line("line:rail", "R", "RER");
+    const shuttle = line("line:shuttle", "S", "TRAIN");
+    const current = { ...station("station:rail", "Example Station", 2.31, [rail.id]), rawRefs: ["12345"] };
+    const quay = station("station:FR::Quay:123:FR1", "Example Station", 2.3101, [shuttle.id]);
+    const network: TransportMapNetwork = {
+      lines: [rail, shuttle], stations: [current, quay], entrances: [], regionalPaths: [], pathsById: new Map(),
+      linesById: new Map([[rail.id, rail], [shuttle.id, shuttle]]), stationsById: new Map([[current.id, current], [quay.id, quay]]),
+      bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 },
+    };
+    const requests: Array<{ destination: { id?: string }; destinationRef?: string; arrivalAtPlatform?: boolean }> = [];
+    await defaultNearbyHeavyTransportResolver.resolve({ origin: { lon: 2.3, lat: 48.8 }, network, localEntries: [],
+      activeModes: ["RER", "TRAIN"], radiusMeters: 600, journeyDateTime: "20261012T090000", batchQueries,
+      journeyProvider: { async findJourneys(request) { requests.push(request); return []; } },
+    });
+    const probe = requests.find(request => request.destination.id === quay.id);
+    expect(probe).toBeDefined();
+    expect(probe?.destinationRef).toBe(batchQueries ? "stop_area:IDFM:12345" : undefined);
+    expect(probe?.arrivalAtPlatform).toBe(batchQueries ? true : undefined);
   });
 
   it("prefers a confirmed walk under ten minutes over a bus access", async () => {

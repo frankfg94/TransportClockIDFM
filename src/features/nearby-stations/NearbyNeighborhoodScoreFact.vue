@@ -224,7 +224,8 @@ function geographyLabel(): string {
         <div>
           <dt>{{ t("nearbyStations.neighborhoodScore.evidence.sourceLabel") }}</dt>
           <dd>
-            <a v-if="fact.evidence.sourceUrl" :href="fact.evidence.sourceUrl" target="_blank" rel="noopener noreferrer">{{ fact.evidence.sourceName }}</a>
+            <template v-if="fact.travel?.journey.source === 'gtfs' || fact.travel?.routes?.some(route => route.journey.source === 'gtfs')">{{ t("nearbyStations.neighborhoodScore.sources.gtfsJourneys") }}</template>
+            <a v-else-if="fact.evidence.sourceUrl" :href="fact.evidence.sourceUrl" target="_blank" rel="noopener noreferrer">{{ fact.evidence.sourceName }}</a>
             <template v-else>{{ fact.evidence.sourceName ?? (fact.evidence.sourceKey ? t(fact.evidence.sourceKey) : "—") }}</template>
             <small v-if="fact.evidence.licence"> · {{ fact.evidence.licence }}</small>
           </dd>

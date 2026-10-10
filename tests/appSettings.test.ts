@@ -68,6 +68,7 @@ describe("app settings", () => {
       nearbyMapShowBasemapControl: true,
       nearbyMapShowDisplayControl: true,
       nearbyMapShowFullscreenControl: true,
+      nearbyMapHighPrecisionNoiseEnabled: true,
       pluginViewerMode: "grid",
       plugins: {
         "idfm-realtime-vehicles": {
@@ -97,6 +98,7 @@ describe("app settings", () => {
       trafficWarningLookaheadDays: 10,
       fullscreenStationPanelDesign: "all-directions",
       fullscreenStationPanelDarkTheme: false,
+      fullscreenPanelKeepScreenOn: true,
       smartTrafficDetection: true,
       smartTrafficModalFormatting: true,
       transferResolverMode: "auto",
@@ -186,6 +188,7 @@ describe("app settings", () => {
     expect(settings.nearbyMapShowBasemapControl).toBe(true);
     expect(settings.nearbyMapShowDisplayControl).toBe(true);
     expect(settings.nearbyMapShowFullscreenControl).toBe(true);
+    expect(settings.nearbyMapHighPrecisionNoiseEnabled).toBe(true);
     expect(settings.showUserLocation).toBe(true);
     expect(settings.showTravelRouteLineIcons).toBe(true);
     expect(settings.showPatternMiniMap).toBe(true);
@@ -304,6 +307,7 @@ describe("app settings", () => {
       nearbyMapShowBasemapControl: false,
       nearbyMapShowDisplayControl: false,
       nearbyMapShowFullscreenControl: false,
+      nearbyMapHighPrecisionNoiseEnabled: false,
     }));
 
     expect(normalizeAppSettings(persisted)).toMatchObject({
@@ -312,6 +316,7 @@ describe("app settings", () => {
       nearbyMapShowBasemapControl: false,
       nearbyMapShowDisplayControl: false,
       nearbyMapShowFullscreenControl: false,
+      nearbyMapHighPrecisionNoiseEnabled: false,
     });
 
     expect(normalizeAppSettings({
@@ -320,12 +325,14 @@ describe("app settings", () => {
       nearbyMapShowBasemapControl: null,
       nearbyMapShowDisplayControl: undefined,
       nearbyMapShowFullscreenControl: {},
+      nearbyMapHighPrecisionNoiseEnabled: "false",
     })).toMatchObject({
       nearbyMapShowIsochroneControl: true,
       nearbyMapShowDirectoryControl: true,
       nearbyMapShowBasemapControl: true,
       nearbyMapShowDisplayControl: true,
       nearbyMapShowFullscreenControl: true,
+      nearbyMapHighPrecisionNoiseEnabled: true,
     });
   });
 
@@ -465,6 +472,12 @@ describe("app settings", () => {
 
   it("normalizes the dense-list fullscreen design", () => {
     expect(normalizeAppSettings({ fullscreenStationPanelDesign: "dense-list" }).fullscreenStationPanelDesign).toBe("dense-list");
+  });
+
+  it("keeps the fullscreen panel wake lock enabled by default and preserves the user choice", () => {
+    expect(createDefaultAppSettings().fullscreenPanelKeepScreenOn).toBe(true);
+    expect(normalizeAppSettings({ fullscreenPanelKeepScreenOn: false }).fullscreenPanelKeepScreenOn).toBe(false);
+    expect(normalizeAppSettings({}).fullscreenPanelKeepScreenOn).toBe(true);
   });
 
   it("exposes every fullscreen station panel design option", () => {

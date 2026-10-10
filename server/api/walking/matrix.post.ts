@@ -2,12 +2,13 @@ import { createError, defineEventHandler, readBody } from "h3";
 import type { NearbyJourneyPoint } from "../../../src/features/nearby-stations/nearbyHeavyTransports";
 import {
   matrixWalkingWithPreferredProvider,
+  matrixWalkingWithOpenRouteService,
   OPEN_ROUTE_SERVICE_MAX_MATRIX_DESTINATIONS,
 } from "../../services/walking/openRouteService";
 import type { NearbyWalkingMatrixDestination } from "../../../src/features/nearby-stations/nearbyWalkingRoutes";
 
 export default defineEventHandler(async (event) => {
-  const body = await readBody<{ origin?: NearbyJourneyPoint; destinations?: NearbyWalkingMatrixDestination[] }>(event);
+  const body = await readBody<{ origin?: NearbyJourneyPoint; destinations?: NearbyWalkingMatrixDestination[]; routingPolicy?: string }>(event);
   const origin = validPoint(body?.origin);
   const destinations = Array.isArray(body?.destinations)
     ? body.destinations.slice(0, OPEN_ROUTE_SERVICE_MAX_MATRIX_DESTINATIONS).map((destination) => {
@@ -20,7 +21,8 @@ export default defineEventHandler(async (event) => {
   if (!origin || destinations.length === 0) {
     throw createError({ statusCode: 400, statusMessage: "origin and destinations must be valid coordinates." });
   }
-  return { routes: await matrixWalkingWithPreferredProvider(event, origin, destinations) };
+  const router = body.routingPolicy === "ors-only" ? matrixWalkingWithOpenRouteService : matrixWalkingWithPreferredProvider;
+  return { routes: await router(event, origin, destinations) };
 });
 
 function validPoint(value: unknown): NearbyJourneyPoint | undefined {
