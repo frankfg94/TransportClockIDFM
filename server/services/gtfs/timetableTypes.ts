@@ -60,6 +60,8 @@ export interface GtfsTimetableLineIndex {
   stops: GtfsTimetableStop[];
   services: GtfsTimetableService[];
   chunks: Array<{ file: string; serviceIds: string[]; bytes: number; tripCount: number }>;
+  /** Optional build-time mapping used to read Pages assets with fewer files. */
+  pagesChunkBundles?: Record<string, string>;
   startDate: string;
   endDate: string;
   maxTimeSeconds: number;

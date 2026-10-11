@@ -18,10 +18,40 @@ import {
 const MAX_INDEX_CACHE_BYTES = 16 * 1024 * 1024;
 const indexCache = new Map<string, { index: GtfsTimetableLineIndex; bytes: number }>();
 let cachedBytes = 0;
+let chunkBundleCache:
+  | { key: string; promise: Promise<Record<string, GtfsTimetableChunk> | undefined> }
+  | undefined;
 
 export function clearGtfsTimetableCaches(): void {
   indexCache.clear();
   cachedBytes = 0;
+  chunkBundleCache = undefined;
+}
+
+async function readTimetableChunk(
+  event: H3Event | undefined,
+  root: string,
+  file: string,
+  bundleFile: string | undefined,
+): Promise<GtfsTimetableChunk | undefined> {
+  if (!bundleFile) return (await readGtfsJson<GtfsTimetableChunk>(event, `${root}/${file}`)).value;
+  if (!/^chunks-pages-\d{4}\.json$/u.test(bundleFile)) return undefined;
+
+  const key = `${getGtfsRuntimeCacheEpoch()}:${root}/${bundleFile}`;
+  if (chunkBundleCache?.key !== key) {
+    const promise = readGtfsJson<Record<string, GtfsTimetableChunk>>(
+      event,
+      `${root}/${bundleFile}`,
+    ).then(({ value }) => value);
+    chunkBundleCache = { key, promise };
+    promise.then((value) => {
+      if (!value && chunkBundleCache?.promise === promise) chunkBundleCache = undefined;
+    });
+    promise.catch(() => {
+      if (chunkBundleCache?.promise === promise) chunkBundleCache = undefined;
+    });
+  }
+  return (await chunkBundleCache.promise)?.[file];
 }
 
 export async function loadGtfsTimetableForDate(
@@ -93,8 +123,12 @@ export async function loadGtfsTimetableForDate(
   for (const chunkInfo of index.chunks) {
     if (!chunkInfo.serviceIds.some((id) => offsetsByService.has(id))) continue;
     if (!/^\d+\.json$/u.test(chunkInfo.file)) return unavailable("missing", index);
-    const chunk = (await readGtfsJson<GtfsTimetableChunk>(event, `${root}/${chunkInfo.file}`))
-      .value;
+    const chunk = await readTimetableChunk(
+      event,
+      root,
+      chunkInfo.file,
+      index.pagesChunkBundles?.[chunkInfo.file],
+    );
     if (
       !chunk ||
       chunk.schemaVersion !== GTFS_TIMETABLE_SCHEMA_VERSION ||

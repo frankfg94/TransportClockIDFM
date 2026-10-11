@@ -26,6 +26,10 @@ Le troisième niveau permet à un déploiement Cloudflare Pages sans binding R2
 d'utiliser directement la version GTFS présente dans le dépôt. `npm run build`
 prépare `.nuxt-data-update/gtfs-pages-assets` depuis `current.json` et n'y copie
 que la version de géométrie et le dossier d'horaires référencés par ce manifeste.
+Pour rester sous la limite de fichiers Pages, le staging regroupe les fragments
+horaires dans des assets JSON locaux de 4 Mio maximum et inscrit leur chemin dans
+l'index de chaque ligne. Le runtime lit ces paquets directement via `ASSETS`,
+sans binding R2.
 Les versions immuables plus anciennes restent dans `.data/gtfs` mais ne sont pas
 publiées dans le déploiement. Ces fichiers sont publiés comme assets statiques
 plutôt qu'inlinés dans le Worker afin de ne pas ajouter environ 78 Mio au bundle
