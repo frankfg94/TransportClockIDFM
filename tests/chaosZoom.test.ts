@@ -56,6 +56,16 @@ describe("Chaos Zoom canvas diagnostics", () => {
     expect(result.isLagSpike).toBe(true);
   });
 
+  it("does not call an average above 120 FPS stable when individual frames miss the budget", () => {
+    const times = [6, 6, 12, 13, 6, 10, 6, 6, 6, 6];
+    const result = summarizeChaosFrameTimes(times, times.reduce((sum, time) => sum + time, 0));
+    expect(result.averageFps).toBeGreaterThan(120);
+    expect(result.frameBudget120Fps).toMatchObject({ missedFrames: 3, longestMissStreak: 2, stable: false });
+    expect(result.expectedFrameCount).toBeCloseTo(9.24, 2);
+    expect(summarizeChaosFrameTimes([6.1, 6.1, 8.3], 20.5).frameBudget120Fps.stable).toBe(true);
+    expect(summarizeChaosFrameTimes([], 0).frameBudget120Fps.stable).toBe(false);
+  });
+
   it("detects a 40% partial basemap blank persisting across 20 ms probes", () => {
     const samples = Array.from({ length: 12 }, (_, index) => ({
       sampledAtMs: index * 20,

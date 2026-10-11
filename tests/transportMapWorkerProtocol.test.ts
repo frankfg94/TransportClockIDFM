@@ -4,6 +4,8 @@ import {
   isCurrentGeneration,
   transferableBuffers,
   type TransportMapWorkerRequest,
+  type TransportMapWorkerPart,
+  type TransportMapWorkerContinue,
 } from "../src/features/transport-map/workers/protocol";
 import { TransportMapWorkerPool } from "../src/features/transport-map/workers/workerPool";
 import { createTransportMapPerformanceTrace } from "../src/features/transport-map/performance/transportMapPerformanceTrace";
@@ -25,6 +27,39 @@ describe("transport map Worker protocol", () => {
   it("keeps the remaining worker task types explicit at the protocol boundary", () => {
     const request = createWorkerRequest("decode-chunk", { raw: "{}" }, 1);
     expect(request.taskType).toBe("decode-chunk");
+  });
+
+  it("assembles acknowledged catalogue batches without publishing a partial result", async () => {
+    const worker = new ControlledWorker();
+    const pool = new TransportMapWorkerPool({ size: 1, workerFactory: () => worker as unknown as Worker });
+    let resolved = false;
+    const loading = pool.run("decode-catalog", {}, 1, "visible", () => ({}));
+    void loading.then(() => { resolved = true; });
+    const request = worker.requests[0]!;
+    const firstStation = { id: "a", name: "A" };
+    worker.respondPart(request.requestId, { collection: "stations", items: [firstStation] });
+    worker.respondPart(request.requestId, { collection: "stations", items: [{ id: "b", name: "B" }] });
+    worker.respondPart(request.requestId, { collection: "lines", items: [{ id: "line:1" }] });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    expect(worker.continuations).toHaveLength(3);
+    expect(pool.getMetrics()).toMatchObject({ active: 1, completed: 0 });
+    worker.respond(request.requestId, { bounds: { minX: 0 } });
+    const result = await loading as { stations: Array<{ id: string }>; stationsById: Map<string, unknown>; linesById: Map<string, unknown> };
+    expect(result.stations.map(station => station.id)).toEqual(["a", "b"]);
+    expect(result.stationsById.get("a")).toBe(result.stations[0]);
+    expect(result.linesById.has("line:1")).toBe(true);
+    expect(pool.getMetrics()).toMatchObject({ active: 0, completed: 1 });
+    pool.dispose();
+  });
+
+  it("rejects an unfinished asset stream on disposal", async () => {
+    const worker = new ControlledWorker();
+    const pool = new TransportMapWorkerPool({ size: 1, workerFactory: () => worker as unknown as Worker });
+    const loading = pool.run("decode-regional", {}, 1, "visible", () => ({}));
+    worker.respondPart(worker.requests[0]!.requestId, { collection: "paths", items: [{ id: "path:a" }] });
+    pool.dispose();
+    await expect(loading).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("falls back to the main thread after a Worker error and retires the bad Worker", async () => {
@@ -186,9 +221,18 @@ class ControlledWorker {
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: ErrorEvent) => void) | null = null;
   readonly requests: TransportMapWorkerRequest[] = [];
+  readonly continuations: TransportMapWorkerContinue[] = [];
 
-  postMessage(request: TransportMapWorkerRequest): void {
-    this.requests.push(request);
+  postMessage(request: TransportMapWorkerRequest | TransportMapWorkerContinue): void {
+    if ("continue" in request) this.continuations.push(request);
+    else this.requests.push(request);
+  }
+
+  respondPart(requestId: string, part: TransportMapWorkerPart): void {
+    const request = this.requests.find(candidate => candidate.requestId === requestId)!;
+    this.onmessage?.({ data: {
+      schemaVersion: 1, requestId, generation: request.generation, ok: true, part, durationMs: 1,
+    } } as MessageEvent);
   }
 
   respond(requestId: string, result: unknown): void {

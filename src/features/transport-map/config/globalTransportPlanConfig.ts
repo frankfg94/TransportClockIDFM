@@ -199,6 +199,8 @@ export const GLOBAL_TRANSPORT_PLAN_CONFIG = {
     vectorStyleUrl: DEFAULT_NEXT_VECTOR_STYLE_URL,
     deckInterleaved: true,
     binaryCacheMaxBytes: 64 * 1024 * 1024,
+    preparedPathCacheMaxBytes: 32 * 1024 * 1024,
+    preparedPathCacheMaxEntries: 32,
     prefetch: {
       // Keep /map on MapLibre's normal vector-tile loading path. The
       // application must not warm off-screen transport chunks or tiles ahead

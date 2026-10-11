@@ -12,6 +12,10 @@ import { getTrafficCacheStatus } from "../services/idfm/traffic";
 import { fetchOpenRouteServiceHealth } from "../services/walking/openRouteService";
 import { IDFM_MARKETPLACE_BASE_URL } from "../services/idfm/marketplaceClient";
 import { transportClockPluginHealthChecks } from "#transport-clock/plugin-server-registry";
+import {
+  NEARBY_NOISE_WMS_LAYER,
+  NEARBY_NOISE_WMS_URL,
+} from "../../src/features/nearby-stations/nearbyNoiseWmsConfig";
 
 const MARKETPLACE_ROOT = "https://prim.iledefrance-mobilites.fr/marketplace";
 const HEALTH_TIMEOUT_MS = 2_800;
@@ -82,6 +86,7 @@ export default defineEventHandler(async (event): Promise<HealthResponse> => {
     checkPrimGlobalStatus(),
     checkOpenMeteoWeather(),
     checkMapTiles(),
+    checkNearbyNoiseWms(),
     checkSatelliteTiles(),
     checkIgnGeocoding(),
     checkNearbyPlaces(),
@@ -569,6 +574,75 @@ async function checkMapTiles(): Promise<HealthCheck> {
   });
 }
 
+export async function checkNearbyNoiseWms(): Promise<HealthCheck> {
+  return timedCheck("nearby-noise-wms", "Bruitparif noise WMS", "Map", false, async () => {
+    const response = await fetchWithTimeout(buildNearbyNoiseWmsHealthUrl(), {
+      headers: { accept: "image/png" },
+    });
+    const quota = extractQuota(response.headers);
+
+    if (response.status === 429) {
+      return {
+        status: "warning",
+        message: "Bruitparif WMS is temporarily rate limited",
+        messageKey: "health.messages.bruitparifWmsRateLimited",
+        quota,
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        status: "warning",
+        message: `${response.status} ${response.statusText}`,
+        messageKey: "health.messages.bruitparifWmsBadStatus",
+        messageParams: { status: response.status },
+        quota,
+      };
+    }
+
+    if (!response.headers.get("content-type")?.toLowerCase().startsWith("image/png")) {
+      return {
+        status: "warning",
+        message: "Bruitparif WMS did not return a PNG image",
+        messageKey: "health.messages.bruitparifWmsUnexpectedResponse",
+        quota,
+      };
+    }
+
+    return {
+      status: "ok",
+      message: "Detailed noise contours reachable",
+      messageKey: "health.messages.bruitparifWmsReachable",
+      detail: "Short 32 × 32 Bruitparif WMS GetMap request.",
+      detailKey: "health.messages.bruitparifWmsTest",
+      quota,
+    };
+  });
+}
+
+function buildNearbyNoiseWmsHealthUrl(): string {
+  const url = new URL(NEARBY_NOISE_WMS_URL);
+  const parameters: Record<string, string> = {
+    SERVICE: "WMS",
+    REQUEST: "GetMap",
+    VERSION: "1.3.0",
+    LAYERS: NEARBY_NOISE_WMS_LAYER,
+    STYLES: "default",
+    CRS: "EPSG:3857",
+    BBOX: "258000,6248000,258100,6248100",
+    WIDTH: "32",
+    HEIGHT: "32",
+    FORMAT: "image/png",
+    TRANSPARENT: "TRUE",
+  };
+
+  for (const [key, value] of Object.entries(parameters)) {
+    url.searchParams.set(key, value);
+  }
+
+  return url.toString();
+}
+
 async function checkIgnGeocoding(): Promise<HealthCheck> {
   return timedCheck("ign-geocoding", "IGN address search", "Map", false, async () => {
     const response = await fetchWithTimeout(IGN_GEOCODING_HEALTH_URL, {
@@ -783,6 +857,7 @@ function getHealthCheckLabelKey(id: string): HealthCheck["labelKey"] {
     "satellite-tiles": "health.checks.satelliteTiles",
     "ign-geocoding": "health.checks.ignGeocoding",
     "overpass-places": "health.checks.overpassPlaces",
+    "nearby-noise-wms": "health.checks.nearbyNoiseWms",
     "walking-routes": "health.checks.walkingRoutes",
   }[id] as HealthCheck["labelKey"];
 }
@@ -827,6 +902,7 @@ function extractQuota(headers: Headers): HealthQuota {
       headers.get("x-ratelimit-reset") ??
       headers.get("x-rate-limit-reset") ??
       headers.get("ratelimit-reset") ??
+      headers.get("retry-after") ??
       undefined,
   };
 

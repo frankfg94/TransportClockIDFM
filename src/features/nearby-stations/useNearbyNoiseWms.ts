@@ -10,10 +10,9 @@ import {
 import type { GlobalMapBounds } from "../transport-map/contracts/manifest";
 import type { NearbyNoiseLevel } from "./nearbyNoiseZones";
 import { isNearbyNoiseDetailZoomActive } from "./nearbyMapZoom";
+import { NEARBY_NOISE_WMS_LAYER, NEARBY_NOISE_WMS_URL } from "./nearbyNoiseWmsConfig";
 import { NearbyNoiseWmsColorizer } from "./nearbyNoiseWmsColorizerClient";
 
-const BRUITPARIF_WMS_URL = "https://raster.bruitparif.fr/mapproxy/service";
-const BRUITPARIF_LAYER = "CSAB_2024_wCSAB_cl_idf";
 const VIEWPORT_BUFFER_RATIO = 0.18;
 const MAX_IMAGE_DIMENSION = 2_048;
 
@@ -163,7 +162,7 @@ function buildWmsUrl(bounds: GlobalMapBounds, camera: CameraState): string {
     SERVICE: "WMS",
     REQUEST: "GetMap",
     VERSION: "1.3.0",
-    LAYERS: BRUITPARIF_LAYER,
+    LAYERS: NEARBY_NOISE_WMS_LAYER,
     STYLES: "default",
     CRS: "EPSG:3857",
     BBOX: [minX, minY, maxX, maxY].map((value) => value.toFixed(2)).join(","),
@@ -172,5 +171,5 @@ function buildWmsUrl(bounds: GlobalMapBounds, camera: CameraState): string {
     FORMAT: "image/png",
     TRANSPARENT: "TRUE",
   });
-  return `${BRUITPARIF_WMS_URL}?${query.toString()}`;
+  return `${NEARBY_NOISE_WMS_URL}?${query.toString()}`;
 }

@@ -26,6 +26,10 @@
       :chaos-zoom-total="chaosZoomTotal"
       :chaos-zoom-active-profile="chaosZoomActiveProfile"
       :chaos-zoom-report-available="Boolean(chaosZoomReport)"
+      :cold-refresh-running="coldRefreshRunning"
+      :cold-refresh-report-json="coldRefreshReportJson"
+      @run-cold-refresh="requestColdRefresh"
+      @download-cold-refresh="downloadColdRefreshReport"
       :traffic-calendar-open="trafficCalendarOpen"
       :traffic-calendar-event-count="trafficCalendarEventCount"
       :traffic-calendar-next-delay-label="trafficCalendarNextDelayLabel"
@@ -1069,6 +1073,7 @@ import {
 } from "./useGlobalTransportScene";
 import { useGlobalTransportViewport } from "./useGlobalTransportViewport";
 import { createTransportMapPerformanceTrace } from "../transport-map/performance/transportMapPerformanceTrace";
+import { getColdRefreshRecorder, coldRefreshRunning, coldRefreshReportJson, requestColdRefresh, downloadColdRefreshReport } from "../transport-map/performance/coldRefreshState";
 import type {
   TransportMapTraceEventType,
   TransportMapTraceMetadata,
@@ -1203,7 +1208,7 @@ const mapExperience = typeof experienceFactory === "function"
 // used by both Chaos profiles. Legacy Canvas2D stays completely
 // uninstrumented in normal operation.
 const performanceTrace = mapExperience.kind === "next"
-  ? createTransportMapPerformanceTrace()
+  ? getColdRefreshRecorder()?.trace ?? createTransportMapPerformanceTrace()
   : undefined;
 const renderer = mapExperience.createRenderer();
 renderer.setPerformanceTrace?.(performanceTrace);
@@ -3623,17 +3628,23 @@ function resizeStage(): void {
     1,
     Math.min(GLOBAL_TRANSPORT_PLAN_CONFIG.camera.maxDevicePixelRatio, window.devicePixelRatio || 1),
   );
-  camera.value = resizeCamera(
-    camera.value,
+  const previousCamera = camera.value;
+  const resizedCamera = resizeCamera(
+    previousCamera,
     Math.max(1, rect.width),
     Math.max(1, rect.height),
     pixelRatio,
   );
   syncMobileItinerarySheetHeight();
+  // ResizeObserver also sends an initial notification with unchanged bounds.
+  // It must not invalidate an in-flight viewport or resize GPU buffers again.
+  if (resizedCamera === previousCamera) return;
+  camera.value = resizedCamera;
   captureSelectedLineBasemapCoverSnapshot();
   displayZoom.value = camera.value.zoom;
   renderer.resize(camera.value.viewportWidthCssPx, camera.value.viewportHeightCssPx, pixelRatio);
   draw();
+  if (network.value) scheduleViewportRefresh();
 }
 
 function resetView(): void {
@@ -5448,6 +5459,8 @@ const performanceScenarios = useGlobalTransportPerformanceScenarios({
     isTrafficEnabled: () => traffic.enabled.value,
     getRenderingConfiguration: () => ({
       antialiasing: appSettings.value.deckAntialiasing,
+      continuousRail: appSettings.value.globalMapContinuousRendering,
+      progressiveBus: appSettings.value.globalMapProgressiveBusRendering,
       realEstate: {
         enabled: realEstateLayerEnabled.value,
         metric: realEstateMetricMode.value,
@@ -5593,6 +5606,9 @@ defineExpose({ runChaosZoom, runChaosZoomExtreme });
 
 onMounted(async () => {
   mounted = true;
+  const coldRecorder = getColdRefreshRecorder();
+  coldRecorder?.mark("map-component-mounted");
+  coldRecorder?.bindContext(() => ({ camera: camera.value, metrics: renderer.getMetrics() }));
   document.addEventListener("pointerdown", closeLineChoiceOnDocumentPointerDown, true);
   await nextTick();
   mobileViewportActive.value = isMobileViewport();
@@ -5608,6 +5624,7 @@ onMounted(async () => {
   }
   try {
     network.value = await dataSource.initialize();
+    coldRecorder?.mark("network-initialized");
     (renderer as typeof renderer & {
       attachWorkerPool?: (workerPool: ReturnType<TransportMapDataSource["getWorkerPool"]>) => void;
     }).attachWorkerPool?.(dataSource.getWorkerPool());
@@ -5627,6 +5644,7 @@ onMounted(async () => {
     );
     restoreTemporaryMarkerFromUrl();
     await refreshViewport();
+    coldRecorder?.mark("viewport-ready");
     await restoreSelectionFromUrl();
     await restoreDebugLineFromUrl();
     if (restoreSharedViewportFromUrl()) await refreshViewport();

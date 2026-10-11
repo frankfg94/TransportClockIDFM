@@ -42,6 +42,16 @@ export interface ChaosFrameTimingSummary {
   framesOver50Ms: number;
   framesOver100Ms: number;
   framesOver500Ms: number;
+  /** RAF cadence, not an isolated GPU timer or a count of presented pixels. */
+  frameBudget120Fps: {
+    targetHz: 120;
+    budgetMs: number;
+    missedFrames: number;
+    missedFrameRatio: number;
+    longestMissStreak: number;
+    excessTimeMs: number;
+    stable: boolean;
+  };
   isLagSpike: boolean;
 }
 
@@ -229,11 +239,10 @@ export function analyzeChaosCanvas(
 export function summarizeChaosFrameTimes(
   frameTimesMs: number[],
   durationMs: number,
-  expectedHz = 60,
+  expectedHz = 120,
 ): ChaosFrameTimingSummary {
-  const sorted = frameTimesMs
-    .filter((value) => Number.isFinite(value) && value >= 0)
-    .sort((left, right) => left - right);
+  const ordered = frameTimesMs.filter((value) => Number.isFinite(value) && value >= 0);
+  const sorted = [...ordered].sort((left, right) => left - right);
   const duration = Math.max(0, durationMs);
   const seconds = duration / 1_000;
   const expectedFrameCount = seconds * expectedHz;
@@ -242,6 +251,18 @@ export function summarizeChaosFrameTimes(
   const minFps = fpsValues.length ? Math.min(...fpsValues) : 0;
   const maxFps = fpsValues.length ? Math.max(...fpsValues) : 0;
   const maxFrameTimeMs = sorted.length ? sorted[sorted.length - 1]! : 0;
+  const frameBudgetMs = 1_000 / 120;
+  let missedFrames = 0;
+  let longestMissStreak = 0;
+  let missStreak = 0;
+  let excessTimeMs = 0;
+  for (const interval of ordered) {
+    if (interval > frameBudgetMs) {
+      missedFrames += 1;
+      excessTimeMs += interval - frameBudgetMs;
+      longestMissStreak = Math.max(longestMissStreak, ++missStreak);
+    } else missStreak = 0;
+  }
 
   return {
     durationMs: round(duration),
@@ -261,6 +282,12 @@ export function summarizeChaosFrameTimes(
     framesOver50Ms: sorted.filter((value) => value > 50).length,
     framesOver100Ms: sorted.filter((value) => value > 100).length,
     framesOver500Ms: sorted.filter((value) => value > 500).length,
+    frameBudget120Fps: {
+      targetHz: 120, budgetMs: round(frameBudgetMs), missedFrames,
+      missedFrameRatio: round(ordered.length ? missedFrames / ordered.length : 0),
+      longestMissStreak, excessTimeMs: round(excessTimeMs),
+      stable: ordered.length > 0 && missedFrames === 0,
+    },
     isLagSpike: maxFrameTimeMs > 50 || percentile(sorted, 0.95) > 33.33,
   };
 }

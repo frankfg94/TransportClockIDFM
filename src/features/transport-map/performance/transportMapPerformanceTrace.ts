@@ -35,11 +35,13 @@ export type TransportMapTraceEventType =
   | "chunk_response_body"
   | "chunk_json_parse"
   | "chunk_decode"
+  | "bootstrap_decode"
   | "chunk_materialize"
   | "chunk_cache_hit"
   | "chunk_cache_miss"
   | "worker_job"
   | "worker_post_message"
+  | "worker_result_apply"
   | "worker_decode"
   | "worker_filter"
   | "filter_paths_local"
@@ -58,7 +60,10 @@ export type TransportMapTraceEventType =
   | "path_spatial_index_build"
   | "station_spatial_index_build"
   | "render_model_build"
+  | "render_model_prepare"
+  | "render_model_prepare_slice"
   | "binary_compile"
+  | "binary_compile_dispatch"
   | "binary_cache_key_build"
   | "binary_cache_hit"
   | "binary_cache_miss"
@@ -488,8 +493,10 @@ const WALL_TIME_ONLY_EVENT_TYPES = new Set<TransportMapTraceEventType>([
   "chunk_fetch",
   "chunk_response_body",
   "traffic_refresh",
+  "render_model_prepare",
 ]);
 const SCENE_EVENT_TYPES = new Set<TransportMapTraceEventType>([
+  "worker_result_apply",
   "scene_rebuild",
   "render_scene_resolve",
   "render_paths_compute",
@@ -502,6 +509,7 @@ const SCENE_EVENT_TYPES = new Set<TransportMapTraceEventType>([
   "path_spatial_index_build",
   "station_spatial_index_build",
   "render_model_build",
+  "render_model_prepare_slice",
   "renderer_render_call",
   "publish_network",
   "publish_viewport",
@@ -543,6 +551,7 @@ export class TransportMapPerformanceTrace {
   private readonly fastEventAggregates = new Map<string, TransportMapTraceFastEventAggregate>();
   private readonly eventAggregates = new Map<TransportMapTraceEventType, {
     timings: TimingDistribution; incompleteCount: number;
+    asyncExecution?: boolean;
     worst?: { offsetMs: number; metadata?: Record<string, TransportMapTraceMetadataValue> };
   }>();
   private readonly counters = new Map<string, number>();
@@ -756,7 +765,7 @@ export class TransportMapPerformanceTrace {
         ...aggregate.timings.snapshot(),
         timingKind: type === "deck_metrics_sample" || type === "deck_update_attributes"
           ? "sample-window" as const
-          : NON_MAIN_THREAD_EVENT_TYPES.has(type) || WALL_TIME_ONLY_EVENT_TYPES.has(type)
+          : NON_MAIN_THREAD_EVENT_TYPES.has(type) || WALL_TIME_ONLY_EVENT_TYPES.has(type) || aggregate.asyncExecution
             ? "async-wall-time" as const : "main-thread-span" as const,
         incompleteCount: aggregate.incompleteCount,
         worst: aggregate.worst,
@@ -1157,6 +1166,9 @@ export class TransportMapPerformanceTrace {
     if (!aggregate) {
       aggregate = { timings: new TimingDistribution(), incompleteCount: 0 };
       this.eventAggregates.set(event.type, aggregate);
+    }
+    if (event.type === "binary_compile" && (event.metadata?.execution === "worker" || event.metadata?.execution === "worker-fallback")) {
+      aggregate.asyncExecution = true;
     }
     if (event.metadata?.incomplete) aggregate.incompleteCount += 1;
     const duration = event.durationMs ?? 0;

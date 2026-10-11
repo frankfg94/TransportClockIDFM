@@ -112,4 +112,24 @@ describe("station selection map scope", () => {
     activeLine.value = undefined;
     expect(scene.renderStations.value).toBe(overview);
   });
+
+  it("keeps unknown memberships and reuses identical overview stations across viewport publications", () => {
+    const { options, stations, selected } = fixture();
+    selected.value = undefined;
+    const unknown = { ...stations[0]!, id: "unknown-lines", lineIds: ["bus", "missing"] };
+    const withoutLines = { ...stations[0]!, id: "no-lines", lineIds: [] };
+    const viewportStations = shallowRef([...stations, unknown, withoutLines]);
+    const originalViewport = options.getViewport();
+    const scene = useGlobalTransportScene({ ...options,
+      getViewport: () => ({ ...originalViewport, stations: viewportStations.value }),
+    });
+    const first = scene.renderStations.value;
+    expect(first.map(station => station.id)).toEqual(["selected", "shared", "elsewhere", "unknown-lines", "no-lines"]);
+    viewportStations.value = [...viewportStations.value];
+    expect(scene.renderStations.value).toBe(first);
+    const moved = { ...stations[0]!, worldX: 0.6 };
+    viewportStations.value = [moved, ...viewportStations.value.slice(1)];
+    expect(scene.renderStations.value).not.toBe(first);
+    expect(scene.renderStations.value[0]).toBe(moved);
+  });
 });

@@ -40,10 +40,26 @@ describe("Deck transport binary packets", () => {
     const records = [record("a"), { ...record("b", "traffic-interruption"), positions: new Float64Array([2, 48, 3, 49, 4, 50]) }];
     const original = records.map(({ positions }) => Array.from(positions));
     const packed = packDeckPathCompilePayload(records, "packed");
+    expect(packed.colors.buffer).toBe(packed.positions.buffer);
+    expect(packed.widths.buffer).toBe(packed.positions.buffer);
+    expect(packed.dashArrays.buffer).toBe(packed.positions.buffer);
+    expect(packed.startIndices.buffer).toBe(packed.positions.buffer);
     const received = structuredClone(packed, { transfer: [packed.positions.buffer] });
     expect(packed.positions.byteLength).toBe(0);
     expect(records.map(({ positions }) => Array.from(positions))).toEqual(original);
     expect(compileDeckPathPayload(received)).toEqual(createDeckPathBinaryPacket(records, "packed"));
+  });
+
+  it("preserves opacity, fractional widths and fixed-pixel dashes in the compact worker payload", () => {
+    const records = [
+      { ...record("faint", "traffic-interruption"), alpha: 0.25, color: [12, 34, 56, 64] as const, widthCssPx: 1.23456789 },
+      { ...record("opaque"), alpha: 0.9, color: [255, 0, 128, 200] as const, widthCssPx: 0.4 },
+    ];
+    const packed = packDeckPathCompilePayload(records, "styles");
+    const received = structuredClone(packed, { transfer: [packed.positions.buffer] });
+    expect(compileDeckPathPayload(received)).toEqual(createDeckPathBinaryPacket(records, "styles"));
+    expect(packed.widths.byteLength).toBe(0);
+    expect(records[0]!.positions.byteLength).toBeGreaterThan(0);
   });
 
   it("still rejects nonfinite coordinates and negative styles without expanding typed buffers", () => {
@@ -56,6 +72,26 @@ describe("Deck transport binary packets", () => {
     packet.widths[0] = 3;
     packet.dashArrays[0] = Number.POSITIVE_INFINITY;
     expect(() => validateTransportMapBinaryPathPacket(packet)).toThrow(/attributes/);
+  });
+
+  it("projects in the compiler with exactly the same Float64 coordinates as the former layer adapter", () => {
+    const records = [record("projected:a"), record("projected:b")];
+    const original = createDeckPathBinaryPacket(records, "projection");
+    const projected = compileDeckPathPayload(packDeckPathCompilePayload(records, "projection", true));
+    const model = { sceneVersion: 1, pathCount: 2, vertexCount: 4,
+      basePaths: records, trafficPaths: [], highlightPaths: [], stations: [], quays: [], entrances: [], labels: [] };
+    const frame = { camera: createCamera({ zoom: 13 }), scene: {} as TransportMapRenderFrame["scene"], model };
+    const oldLayer = createDeckTransportLayers({ ...frame, binaryPackets: { base: original } }, undefined)[0]!;
+    const layer = createDeckTransportLayers({ ...frame, binaryPackets: { base: projected } }, undefined)[0]!;
+    const oldData = oldLayer.props.data as unknown as { attributes: { getPath: { value: Float64Array } } };
+    const data = layer.props.data as unknown as { attributes: { getPath: { value: Float64Array } } };
+    expect(projected.positions).toEqual(original.positions);
+    expect(projected.commonPositions).toEqual(oldData.attributes.getPath.value);
+    expect(data.attributes.getPath.value).toBe(projected.commonPositions);
+    expect(projected.bytes).toBe(original.bytes + projected.commonPositions!.byteLength);
+    expect(projected).toEqual(createDeckPathBinaryPacket(records, "projection", true));
+    projected.commonPositions![0] = Number.NaN;
+    expect(() => validateTransportMapBinaryPathPacket(projected)).toThrow(/attributes/);
   });
 
   it("packs subpaths without joining fragments and preserves dash attributes", () => {
@@ -184,7 +220,13 @@ describe("Deck transport binary packets", () => {
 
     expect(baseData.length).toBe(1);
     expect(baseData.startIndices).toBe(basePacket.startIndices);
-    expect(baseData.attributes.getPath?.value).toBe(basePacket.positions);
+    const projected = baseData.attributes.getPath?.value as Float64Array;
+    for (let index = 0; index < basePacket.positions.length; index += 2) {
+      const world = lonLatToWorld({ lon: basePacket.positions[index]!, lat: basePacket.positions[index + 1]! });
+      expect(projected[index]).toBeCloseTo(world.x * 512, 10);
+      expect(projected[index + 1]).toBeCloseTo((1 - world.y) * 512, 10);
+    }
+    expect([...basePacket.positions]).toEqual([...base.positions]);
     expect(baseData.attributes.getColor?.value).toBe(basePacket.colors);
     expect(baseData.attributes.getWidth?.value).toBe(basePacket.widths);
     expect(trafficData.attributes.getDashArray?.value).toBe(trafficPacket.dashArrays);
@@ -206,7 +248,7 @@ describe("Deck transport binary packets", () => {
       quays: [],
       entrances: [],
       labels: [{
-        id: "label:test",
+        id: "station-label:test",
         text: "Cité Universitaire",
         position: [2.33, 48.81] as const,
         sizeCssPx: 13,
@@ -376,6 +418,141 @@ describe("Deck transport binary packets", () => {
     builder.dispose();
   });
 
+  it("reuses the exact rounded geometry and binary packet after a zoom reversal", async () => {
+    const scene = createRendererTestScene();
+    scene.lines[0]!.mode = "METRO";
+    scene.visibleModeMask = 2;
+    const bend = lonLatToWorld({ lon: 2.4, lat: 48.8 });
+    scene.paths[0]!.vertices.splice(1, 0, bend);
+    const calls: string[] = [];
+    const frames: TransportMapRenderFrame[] = [];
+    const renderer = new DeckGlRenderer(undefined, {
+      compile(records, key) {
+        calls.push(key);
+        return Promise.resolve(createDeckPathBinaryPacket(records, key));
+      },
+    });
+    renderer.attachHost({ present: (frame) => frames.push(frame), resize() {}, dispose() {} });
+    const camera = createCamera({ centerWorldX: 0.5, centerWorldY: 0.5, zoom: 13 });
+    renderer.render(camera, scene);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const first = frames.at(-1)!;
+    renderer.render({ ...camera, zoom: 13.5 }, scene);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const second = frames.at(-1)!;
+    expect(second.model.basePaths[0]!.positions).not.toEqual(first.model.basePaths[0]!.positions);
+    renderer.render(camera, scene);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(frames.at(-1)!.model.basePaths).toBe(first.model.basePaths);
+    expect(frames.at(-1)!.binaryPackets!.base).toBe(first.binaryPackets!.base);
+    expect(calls).toHaveLength(2);
+    renderer.dispose();
+  });
+
+  it("does not invalidate unrounded road geometry for each quarter zoom", () => {
+    const scene = createRendererTestScene();
+    const builder = new TransportMapRenderModelBuilder();
+    const camera = createCamera({ centerWorldX: 0.5, centerWorldY: 0.5, zoom: 13 });
+    const first = builder.build(camera, scene);
+    const next = builder.build({ ...camera, zoom: 13.5 }, scene);
+    expect(next.basePaths).toBe(first.basePaths);
+    expect(next.basePathIdentity).toBe(first.basePathIdentity);
+    builder.dispose();
+  });
+
+  it("updates only Metro curves during zoom and keeps road records in their exact order", () => {
+    const scene = createRendererTestScene();
+    const metroId = "line:metro";
+    scene.lines.push({ ...scene.lines[0]!, id: metroId, mode: "METRO" });
+    const bend = lonLatToWorld({ lon: 2.4, lat: 48.8 });
+    scene.paths.push({ ...scene.paths[0]!, id: "path:metro", lineId: metroId,
+      vertices: [scene.paths[0]!.vertices[0]!, bend, scene.paths[0]!.vertices[1]!] });
+    scene.visibleModeMask = 3;
+    const builder = new TransportMapRenderModelBuilder();
+    const camera = createCamera({ centerWorldX: 0.5, centerWorldY: 0.5, zoom: 13 });
+    const first = builder.build(camera, scene);
+    const next = builder.build({ ...camera, zoom: 13.25 }, scene);
+    expect(next.basePaths.map(record => record.pathId)).toEqual(first.basePaths.map(record => record.pathId));
+    expect(next.basePaths[0]).toBe(first.basePaths[0]);
+    expect(first.basePathBatches).toHaveLength(2);
+    expect(next.basePathBatches![0]).toBe(first.basePathBatches![0]);
+    expect(next.basePathBatches![1]!.identity).not.toBe(first.basePathBatches![1]!.identity);
+    expect(next.basePaths[1]!.positions).not.toEqual(first.basePaths[1]!.positions);
+    expect(builder.pathCacheMetrics()).toMatchObject({ zoomOnlyRefresh: true, pathsVisited: 0, roundingBuilds: 1 });
+    builder.build({ ...camera, zoom: 13.5 }, scene);
+    const reversed = builder.build({ ...camera, zoom: 13.25 }, scene);
+    expect(reversed.basePaths).toBe(next.basePaths);
+    expect(builder.pathCacheMetrics()).toMatchObject({ hit: true, roundingBuilds: 0 });
+    // Evict the complete bundle, while its small curve records remain cached.
+    for (let step = 1; step <= 34; step += 1) builder.build({ ...camera, zoom: 14 + step / 4 }, scene);
+    const afterBundleEviction = builder.build({ ...camera, zoom: 13.25 }, scene);
+    expect(builder.pathCacheMetrics().hit).toBe(false);
+    expect(afterBundleEviction.basePathBatches![1]!.identity).toBe(next.basePathBatches![1]!.identity);
+    expect(afterBundleEviction.basePathBatches![1]!.records[0]).toBe(next.basePathBatches![1]!.records[0]);
+    builder.dispose();
+  });
+
+  it("compiles only changed curve batches and publishes all batches atomically without changing draw order", async () => {
+    const scene = createRendererTestScene();
+    scene.lines.push({ ...scene.lines[0]!, id: "line:metro", mode: "METRO" });
+    const bend = lonLatToWorld({ lon: 2.4, lat: 48.8 });
+    scene.paths.push({ ...scene.paths[0]!, id: "path:metro", lineId: "line:metro",
+      vertices: [scene.paths[0]!.vertices[0]!, bend, scene.paths[0]!.vertices[1]!] },
+      { ...scene.paths[0]!, id: "path:road-after" });
+    scene.visibleModeMask = 3;
+    scene.continuousRendering = true;
+    const pending: Array<{ records: readonly TransportMapPathRenderRecord[]; resolve: () => void }> = [];
+    const frames: TransportMapRenderFrame[] = [];
+    const renderer = new DeckGlRenderer(undefined, {
+      compile(records, key) {
+        return new Promise(resolve => pending.push({ records, resolve: () => resolve(createDeckPathBinaryPacket(records, key)) }));
+      },
+    });
+    renderer.attachHost({ present: frame => frames.push(frame), resize() {}, dispose() {} });
+    const camera = createCamera({ zoom: 13 });
+    renderer.render(camera, scene);
+    await Promise.resolve();
+    expect(pending).toHaveLength(3);
+    pending[0]!.resolve();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    // Another camera frame while only one worker reply is ready stays entirely object data.
+    renderer.render({ ...camera, centerWorldX: camera.centerWorldX + 0.001 }, scene);
+    expect(frames.at(-1)!.binaryPackets).toBeUndefined();
+    pending.slice(1).forEach(entry => entry.resolve());
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const stable = frames.at(-1)!;
+    expect(stable.binaryPackets!.baseBatches).toHaveLength(3);
+    expect(stable.binaryPackets!.baseBatches!.flatMap(packet => packet!.pathIds)).toEqual(stable.model.basePaths.map(record => record.pathId));
+    const layers = createDeckTransportLayers(stable, "symbol");
+    const pathLayers = layers.filter(layer => layer.id.startsWith("transport-base:"));
+    expect(pathLayers.map(layer => layer.id)).toEqual(stable.model.basePathBatches!.map(batch => `${batch.id}-binary`));
+
+    renderer.render({ ...camera, zoom: 13.25 }, { ...scene, interactionActive: true });
+    await Promise.resolve();
+    expect(pending).toHaveLength(4);
+    expect(pending[3]!.records.map(record => record.pathId)).toEqual(["path:metro"]);
+    expect(frames.at(-1)!.model).toBe(stable.model);
+    pending[3]!.resolve();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const changed = frames.at(-1)!;
+    expect(changed.model).not.toBe(stable.model);
+    expect(changed.binaryPackets!.baseBatches![0]).toBe(stable.binaryPackets!.baseBatches![0]);
+    expect(changed.binaryPackets!.baseBatches![2]).toBe(stable.binaryPackets!.baseBatches![2]);
+
+    // The response for an obsolete zoom must never put that geometry back on screen.
+    renderer.render({ ...camera, zoom: 13.5 }, scene);
+    await Promise.resolve();
+    expect(pending).toHaveLength(5);
+    renderer.render(camera, scene);
+    const reversedModel = frames.at(-1)!.model;
+    expect(reversedModel.basePaths).toBe(stable.model.basePaths);
+    pending[4]!.resolve();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(frames.at(-1)!.model).toBe(reversedModel);
+    expect(frames.at(-1)!.binaryPackets!.baseBatches![1]).toBe(stable.binaryPackets!.baseBatches![1]);
+    renderer.dispose();
+  });
+
   it("does not recompile base packets for a station-only scene generation", async () => {
     const calls: string[] = [];
     const compiler: DeckPathPacketCompiler = {
@@ -429,6 +606,117 @@ describe("Deck transport binary packets", () => {
     renderer.render(camera, styleChanged);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(calls.filter((key) => key.startsWith("base:")).length).toBeGreaterThan(afterPathChangeCalls);
+    renderer.dispose();
+  });
+
+  it("prepares large source changes cooperatively and only publishes the latest request", async () => {
+    const scheduled: Array<() => void> = [];
+    const frames: TransportMapRenderFrame[] = [];
+    const compiledPaths: string[][] = [];
+    const renderer = new DeckGlRenderer(undefined, {
+      compile(records, key) {
+        compiledPaths.push(records.map(record => record.pathId));
+        return Promise.resolve(createDeckPathBinaryPacket(records, key));
+      },
+    }, { minPaths: 1, sliceBudgetMs: 0, schedule: work => scheduled.push(work) });
+    const camera = createCamera({ zoom: 13 });
+    const scene = createRendererTestScene();
+    renderer.attachHost({ present: frame => frames.push(frame), resize() {}, dispose() {} });
+    renderer.render(camera, { ...scene, paths: [] });
+    const empty = frames.at(-1)!.model;
+    renderer.render(camera, scene);
+    scheduled.shift()!(); // Suspend before processing the first path.
+    const latestScene = { ...scene, paths: [{ ...scene.paths[0]!, id: "latest:path" }] };
+    const latestCamera = { ...camera, centerWorldX: camera.centerWorldX + 0.02 };
+    renderer.render(latestCamera, latestScene);
+    expect(frames.at(-1)!.model).toBe(empty);
+    expect(frames.at(-1)!.camera).toBe(latestCamera);
+    while (scheduled.length) scheduled.shift()!();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(compiledPaths).toEqual([["latest:path"]]);
+    expect(frames.at(-1)!.model.basePaths.map(record => record.pathId)).toEqual(["latest:path"]);
+    expect(frames.at(-1)!.binaryPackets!.base).toBeDefined();
+    expect(renderer.getMetrics().modelPreparationSlices).toBeGreaterThan(1);
+    renderer.render(camera, { ...scene, paths: [{ ...scene.paths[0]!, id: "cancelled:path" }] });
+    const countBeforeDispose = frames.length;
+    renderer.dispose();
+    while (scheduled.length) scheduled.shift()!();
+    expect(frames).toHaveLength(countBeforeDispose);
+  });
+
+  it("yields between rounded paths on a zoom-only refresh and never publishes an obsolete zoom", async () => {
+    const scene = createRendererTestScene();
+    scene.lines[0]!.mode = "METRO";
+    scene.visibleModeMask = 2;
+    const bend = lonLatToWorld({ lon: 2.4, lat: 48.8 });
+    scene.paths = Array.from({ length: 5 }, (_, index) => ({ ...scene.paths[0]!,
+      id: `metro:${index}`, vertices: [scene.paths[0]!.vertices[0]!, bend, scene.paths[0]!.vertices[1]!] }));
+    const scheduled: Array<() => void> = [];
+    const frames: TransportMapRenderFrame[] = [];
+    const renderer = new DeckGlRenderer(undefined, { compile(records, key) {
+      return Promise.resolve(createDeckPathBinaryPacket(records, key));
+    } }, { minPaths: 1, sliceBudgetMs: 0, schedule: work => scheduled.push(work) });
+    renderer.attachHost({ present: frame => frames.push(frame), resize() {}, dispose() {} });
+    const camera = createCamera({ zoom: 13 });
+    renderer.render(camera, scene);
+    while (scheduled.length) scheduled.shift()!();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const original = frames.at(-1)!.model;
+    renderer.render({ ...camera, zoom: 13.25 }, scene);
+    expect(scheduled).toHaveLength(1);
+    expect(frames.at(-1)!.model).toBe(original);
+    scheduled.shift()!();
+    expect(scheduled).toHaveLength(1);
+    expect(frames.at(-1)!.model).toBe(original);
+    renderer.render({ ...camera, zoom: 13.5 }, scene);
+    while (scheduled.length) scheduled.shift()!();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const reference = new TransportMapRenderModelBuilder();
+    const expected = reference.build({ ...camera, zoom: 13.5 }, scene);
+    expect(frames.at(-1)!.model.basePaths.map(record => record.positions)).toEqual(expected.basePaths.map(record => record.positions));
+    expect(frames.at(-1)!.camera.zoom).toBe(13.5);
+    const slices = renderer.getMetrics().modelPreparationSlices;
+    renderer.render({ ...camera, zoom: 13.49 }, scene);
+    expect(scheduled).toHaveLength(0);
+    expect(renderer.getMetrics().modelPreparationSlices).toBe(slices);
+    reference.dispose();
+    renderer.dispose();
+  });
+
+  it("does not schedule curve preparation for a road-only quarter-zoom change", async () => {
+    const scene = createRendererTestScene();
+    const scheduled: Array<() => void> = [];
+    const frames: TransportMapRenderFrame[] = [];
+    const renderer = new DeckGlRenderer(undefined, { compile(records, key) {
+      return Promise.resolve(createDeckPathBinaryPacket(records, key));
+    } }, { minPaths: 1, sliceBudgetMs: 0, schedule: work => scheduled.push(work) });
+    renderer.attachHost({ present: frame => frames.push(frame), resize() {}, dispose() {} });
+    const camera = createCamera({ zoom: 13 });
+    renderer.render(camera, scene);
+    while (scheduled.length) scheduled.shift()!();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const original = frames.at(-1)!.model.basePaths;
+    renderer.render({ ...camera, zoom: 13.25 }, scene);
+    expect(scheduled).toHaveLength(0);
+    expect(frames.at(-1)!.model.basePaths).toBe(original);
+    renderer.dispose();
+  });
+
+  it("can present the first transport geometry directly as binary without a redundant object GPU upload", async () => {
+    let finish: (() => void) | undefined;
+    const frames: TransportMapRenderFrame[] = [];
+    const renderer = new DeckGlRenderer(undefined, { compile(records, key) {
+      return new Promise(resolve => { finish = () => resolve(createDeckPathBinaryPacket(records, key, true)); });
+    } }, { minPaths: 100, sliceBudgetMs: 2, schedule: work => work(), waitForInitialBinary: true });
+    renderer.attachHost({ present: frame => frames.push(frame), resize() {}, dispose() {} });
+    renderer.render(createCamera({ zoom: 13 }), createRendererTestScene());
+    expect(frames).toHaveLength(0);
+    await Promise.resolve();
+    finish!();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.binaryPackets!.base).toBeDefined();
+    expect(renderer.getMetrics().objectFallbackFrames).toBe(0);
     renderer.dispose();
   });
 

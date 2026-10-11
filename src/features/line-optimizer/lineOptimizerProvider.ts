@@ -42,26 +42,38 @@ export function createLineOptimizerProvider(
       signal: AbortSignal;
     }): Promise<LineOptimizerResult> {
       const { config, origin, destination, settings, start, signal } = request;
-      const realJourneys = await journeys(
-        {
-          origin,
-          destination,
-          datetime: parisDateTime(start + settings.exitSeconds * 1000),
-          count: 20,
-          includeDisruptions: true,
-          dataFreshness: "realtime",
-          allowedModes: [config.mode, config.connectingMode],
-        },
-        signal,
-      );
+      const discoveryRequest: NearbyJourneyRequest = {
+        origin,
+        destination,
+        datetime: parisDateTime(start + settings.exitSeconds * 1000),
+        count: 20,
+        includeDisruptions: true,
+        dataFreshness: "realtime",
+      };
+      const toRoutes = (items: NearbyJourney[]) =>
+        items
+          .map((journey, index): TravelRoute => ({
+            ...journey,
+            id: journey.id ?? `optimizer-route:${index}`,
+            transitSections: journey.sections.filter((s) => s.lineMode),
+          }))
+          .filter((route) => isOptimizerRoute(route, config));
+      let routes = toRoutes(await journeys(discoveryRequest, signal));
       signal.throwIfAborted();
-      const routes = realJourneys
-        .map((journey, index): TravelRoute => ({
-          ...journey,
-          id: journey.id ?? `optimizer-route:${index}`,
-          transitSections: journey.sections.filter((s) => s.lineMode),
-        }))
-        .filter((route) => isOptimizerRoute(route, config));
+      if (!routes.length) {
+        // A general search may prefer faster metros and omit the corridor.
+        // Retry the corridor modes without restricting the number of legs.
+        routes = toRoutes(
+          await journeys(
+            {
+              ...discoveryRequest,
+              allowedModes: [config.mode, config.connectingMode],
+            },
+            signal,
+          ),
+        );
+        signal.throwIfAborted();
+      }
       const groups = new Map<string, TravelRoute[]>();
       for (const route of routes) {
         const key = turboSignature(route);
@@ -78,9 +90,9 @@ export function createLineOptimizerProvider(
           signal.throwIfAborted();
           complete &&= search.complete;
           courseCount += search.batches.reduce((n, batch) => n + batch.length, 0);
-          if (search.batches.length === 2) {
+          if (search.batches.length === route.transitSections.length) {
             candidates.push(
-              ...enumerateOptimizerCandidates(route, search.batches, settings, start),
+              ...enumerateOptimizerCandidates(route, search.batches, settings, start, config),
             );
             continue;
           }
@@ -98,6 +110,7 @@ export function createLineOptimizerProvider(
               optimizerBaselineCourses(baseline),
               settings,
               start,
+              config,
             ),
           );
       }

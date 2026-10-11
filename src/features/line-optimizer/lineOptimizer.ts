@@ -31,6 +31,10 @@ export const DEFAULT_OPTIMIZER_SETTINGS: LineOptimizerSettings = {
 export interface LineOptimizerCandidate {
   id: string;
   route: TravelRoute;
+  courses: TurboCourse[];
+  waits: number[];
+  totalWaitSeconds: number;
+  corridorIndex: number;
   tram: TurboCourse;
   train: TurboCourse;
   leaveAt: number;
@@ -45,18 +49,23 @@ export interface LineOptimizerCandidate {
   serviceType?: NearbyJourneyServiceType;
 }
 
-export function isOptimizerRoute(route: TravelRoute, config: LineOptimizerConfig): boolean {
+export function optimizerCorridorIndex(route: TravelRoute, config: LineOptimizerConfig): number {
   const legs = route.sections.filter(isTurboTransit);
-  if (legs.length !== 2) return false;
-  const [tram, train] = legs;
-  return (
-    tram?.lineMode === config.mode &&
-    optimizerNameKey(tram.lineCode) === optimizerNameKey(config.lineCode) &&
-    train?.lineMode === config.connectingMode &&
-    optimizerNameKey(train.lineCode) === optimizerNameKey(config.connectingLineCode) &&
-    optimizerNameKey(tram.toName) === optimizerNameKey(config.transferName) &&
-    optimizerNameKey(train.fromName) === optimizerNameKey(config.transferName)
-  );
+  return legs.findIndex((tram, index) => {
+    const train = legs[index + 1];
+    return (
+      tram.lineMode === config.mode &&
+      optimizerNameKey(tram.lineCode) === optimizerNameKey(config.lineCode) &&
+      train?.lineMode === config.connectingMode &&
+      optimizerNameKey(train.lineCode) === optimizerNameKey(config.connectingLineCode) &&
+      optimizerNameKey(tram.toName) === optimizerNameKey(config.transferName) &&
+      optimizerNameKey(train.fromName) === optimizerNameKey(config.transferName)
+    );
+  });
+}
+
+export function isOptimizerRoute(route: TravelRoute, config: LineOptimizerConfig): boolean {
+  return optimizerCorridorIndex(route, config) >= 0;
 }
 
 /** Only dated provider evidence is eligible as the degraded baseline. */
@@ -94,13 +103,20 @@ export function enumerateOptimizerCandidates(
   batches: TurboCourse[][],
   settings: LineOptimizerSettings,
   start: number,
+  config?: LineOptimizerConfig,
 ): LineOptimizerCandidate[] {
   const indexes = route.sections.flatMap((section, index) =>
     isTurboTransit(section) ? [index] : [],
   );
-  if (indexes.length !== 2 || batches.length !== 2) return [];
+  const corridorIndex = config
+    ? optimizerCorridorIndex(route, config)
+    : indexes.length === 2
+      ? 0
+      : -1;
+  if (corridorIndex < 0 || batches.length !== indexes.length) return [];
   const first = indexes[0]!;
-  const second = indexes[1]!;
+  const tramIndex = indexes[corridorIndex]!;
+  const second = indexes[corridorIndex + 1]!;
   const movement = route.sections.filter(
     (section) => !isTurboTransit(section) && !isNearbyJourneyWaitingSection(section),
   );
@@ -111,8 +127,8 @@ export function enumerateOptimizerCandidates(
   )
     return [];
   const providerWalkSeconds = movementSeconds(route.sections.slice(0, first));
-  const providerTransferSeconds = movementSeconds(route.sections.slice(first + 1, second));
-  const egressSeconds = movementSeconds(route.sections.slice(second + 1));
+  const providerTransferSeconds = movementSeconds(route.sections.slice(tramIndex + 1, second));
+  const egressSeconds = movementSeconds(route.sections.slice(indexes.at(-1)! + 1));
   const walkSeconds = settings.walkSeconds ?? providerWalkSeconds;
   const transferSeconds = settings.transferSeconds ?? providerTransferSeconds;
   if (
@@ -128,31 +144,65 @@ export function enumerateOptimizerCandidates(
     ].every((value) => Number.isFinite(value) && value >= 0)
   )
     return [];
+  const valid = (course: TurboCourse) =>
+    [course.departure, course.arrival].every(Number.isFinite) && course.arrival >= course.departure;
+  const ordered = batches.map((batch) =>
+    batch.filter(valid).sort((a, b) => a.departure - b.departure),
+  );
+  const transfers = indexes
+    .slice(1)
+    .map((index, i) =>
+      i === corridorIndex
+        ? transferSeconds
+        : movementSeconds(route.sections.slice(indexes[i]! + 1, index)),
+    );
   const result: LineOptimizerCandidate[] = [];
-  for (const tram of batches[0]!) {
-    if (![tram.departure, tram.arrival].every(Number.isFinite) || tram.arrival < tram.departure)
-      continue;
-    const walkAt = tram.departure - walkSeconds * 1000;
+  for (const tram of ordered[corridorIndex]!) {
+    // Latest reachable feeder chain maximizes time at home for this tram.
+    const prefix: TurboCourse[] = [tram];
+    for (let i = corridorIndex - 1; i >= 0; i--) {
+      const next = prefix[0]!;
+      const previous = ordered[i]!.filter(
+        (c) => c.arrival + transfers[i]! * 1000 <= next.departure,
+      ).sort((a, b) => b.departure - a.departure)[0];
+      if (!previous) break;
+      prefix.unshift(previous);
+    }
+    if (prefix.length !== corridorIndex + 1) continue;
+    const walkAt = prefix[0]!.departure - walkSeconds * 1000;
     const leaveAt = walkAt - settings.exitSeconds * 1000;
     if (leaveAt < start || leaveAt > start + settings.departureWindowSeconds * 1000) continue;
     const platformAt = tram.arrival + transferSeconds * 1000;
-    for (const train of batches[1]!) {
-      if (
-        ![train.departure, train.arrival].every(Number.isFinite) ||
-        train.arrival < train.departure
-      )
-        continue;
+    for (const train of ordered[corridorIndex + 1]!) {
       const waitSeconds = (train.departure - platformAt) / 1000;
       if (waitSeconds < settings.marginSeconds) continue;
+      const chain = [...prefix, train];
+      // Earliest reachable onward course minimizes final arrival for this RER.
+      for (let i = corridorIndex + 2; i < ordered.length; i++) {
+        const previous = chain.at(-1)!;
+        const next = ordered[i]!.filter(
+          (c) => c.departure >= previous.arrival + transfers[i - 1]! * 1000,
+        ).sort((a, b) => a.arrival - b.arrival || a.departure - b.departure)[0];
+        if (!next) break;
+        chain.push(next);
+      }
+      if (chain.length !== indexes.length) continue;
+      const waits = chain.map((c, i) =>
+        i === 0 ? 0 : (c.departure - chain[i - 1]!.arrival) / 1000 - transfers[i - 1]!,
+      );
       result.push({
-        id: `${route.id}:${tram.id}:${train.id}`,
+        id: `${route.id}:${chain.map((c) => c.id).join(":")}`,
         route,
+        courses: chain,
+        waits,
+        totalWaitSeconds: waits.reduce((a, b) => a + b, 0),
+        corridorIndex,
         tram,
         train,
         leaveAt,
         walkAt,
         platformAt,
-        arriveAt: train.arrival + egressSeconds * 1000,
+        arriveAt: chain.at(-1)!.arrival + egressSeconds * 1000,
         walkSeconds,
         transferSeconds,
         providerWalkSeconds,
@@ -174,7 +224,7 @@ export function rankOptimizerCandidates(
   const unique = [
     ...new Map(
       candidates.map((candidate) => [
-        `${candidate.route.transitSections.map((s) => [s.lineId, s.fromStopPointId, s.toStopPointId].join(":"))}:${candidate.tram.departure}:${candidate.train.departure}:${candidate.train.arrival}`,
+        `${candidate.route.transitSections.map((s) => [s.lineId, s.fromStopPointId, s.toStopPointId].join(":"))}:${candidate.courses.map((c) => `${c.departure}:${c.arrival}`).join(":")}`,
         candidate,
       ]),
     ).values(),

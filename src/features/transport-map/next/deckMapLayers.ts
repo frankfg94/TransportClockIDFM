@@ -1,6 +1,9 @@
 import { COORDINATE_SYSTEM, type Layer, type Position } from "@deck.gl/core";
-import { GeoJsonLayer, PathLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
+import { GeoJsonLayer, TextLayer } from "@deck.gl/layers";
+import { FlatMapPathLayer as PathLayer, FlatMapScatterplotLayer as ScatterplotLayer } from "./flatMapLayers";
 import { PathStyleExtension } from "@deck.gl/extensions";
+import { lonLatToWorld } from "../geo/coordinateKernel";
+import { MAPLIBRE_VECTOR_WORLD_TILE_SIZE } from "./nextMapCamera";
 import type {
   TransportMapRenderFrame,
   TransportMapServedCityZone,
@@ -19,6 +22,7 @@ import {
   resolveDeckPathColor,
   resolveDeckPathDashArray,
 } from "../render/deckgl/deckPathAttributes";
+import { projectDeckPathPositions } from "../render/deckgl/deckPathPacket";
 
 type DeckBinaryPathData = {
   length: number;
@@ -85,8 +89,31 @@ const DARK_INNER_BOUNDARY = [45, 55, 72, 225] as const;
 const REGIONAL_INNER_BOUNDARY = [45, 55, 72, 142] as const;
 const DARK_CITY_BOUNDARY = [45, 55, 72, 235] as const;
 
+const commonFlatPaths = new WeakMap<Float64Array, Float64Array>();
+function commonPosition(position: readonly number[]): [number, number] {
+  const world = lonLatToWorld({ lon: position[0]!, lat: position[1]! });
+  return [world.x * MAPLIBRE_VECTOR_WORLD_TILE_SIZE, (1 - world.y) * MAPLIBRE_VECTOR_WORLD_TILE_SIZE];
+}
+function commonFlatPath(positions: Float64Array): Float64Array {
+  let common = commonFlatPaths.get(positions);
+  if (!common) {
+    common = projectDeckPathPositions(positions);
+    commonFlatPaths.set(positions, common);
+  }
+  return common;
+}
+const commonPaths = new WeakMap<AdministrativeBoundaryRecord["path"], Array<[number, number]>>();
+function commonPath(positions: AdministrativeBoundaryRecord["path"]): Array<[number, number]> {
+  let common = commonPaths.get(positions);
+  if (!common) {
+    common = positions.map(commonPosition);
+    commonPaths.set(positions, common);
+  }
+  return common;
+}
+
 function getAdministrativePath(record: AdministrativeBoundaryRecord): Position[] {
-  return record.path as Position[];
+  return commonPath(record.path);
 }
 
 function getAdministrativeColor(record: AdministrativeBoundaryRecord): readonly [number, number, number, number] {
@@ -106,7 +133,7 @@ function getCityBoundaryDashArray(): [number, number] {
 }
 
 function getTransportPath(record: TransportMapPathRenderRecord): Float64Array {
-  return record.positions;
+  return commonFlatPath(record.positions);
 }
 
 function getTransportPathColor(record: TransportMapPathRenderRecord): readonly [number, number, number, number] {
@@ -122,7 +149,7 @@ function getTransportPathDashArray(record: TransportMapPathRenderRecord): readon
 }
 
 function getStationPosition(record: TransportMapStationRenderRecord): Position {
-  return record.position as Position;
+  return commonPosition(record.position);
 }
 
 function getStationRadius(record: TransportMapStationRenderRecord): number {
@@ -142,7 +169,7 @@ function getStationLineWidth(record: TransportMapStationRenderRecord): number {
 }
 
 function getQuayPosition(record: TransportMapQuayRenderRecord): Position {
-  return record.position as Position;
+  return commonPosition(record.position);
 }
 
 function getQuayRadius(record: TransportMapQuayRenderRecord): number {
@@ -154,7 +181,7 @@ function getQuayLineColor(record: TransportMapQuayRenderRecord): readonly [numbe
 }
 
 function getEntrancePosition(record: TransportMapEntranceRenderRecord): Position {
-  return record.position as Position;
+  return commonPosition(record.position);
 }
 
 function getEntranceRadius(record: TransportMapEntranceRenderRecord): number {
@@ -318,7 +345,11 @@ export function createDeckTransportLayers(
     if (administrative.hasVisibleFill) layers.push(createServedCityFillLayer(model.servedCityZones, beforeId));
     layers.push(...createServedCityBoundaryLayers(model.servedCityZones, beforeId, frame.camera.zoom));
   }
-  if (model.basePaths.length) {
+  if (model.basePathBatches) {
+    model.basePathBatches.forEach((batch, index) => layers.push(createPathLayer(
+      batch.id, batch.records, frame.binaryPackets?.baseBatches?.[index], beforeId, false,
+    )));
+  } else if (model.basePaths.length) {
     layers.push(createPathLayer(
       "transport-base",
       model.basePaths,
@@ -427,7 +458,7 @@ function createServedCityBoundaryLayers(
     visibleInnerBoundaries, emphasizedInnerBoundaries } = administrative;
 
   const commonProps = {
-    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+    coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
     widthUnits: "pixels" as const,
     widthMinPixels: 1,
     pickable: false,
@@ -589,7 +620,7 @@ function createPathLayer(
     // the asynchronous packet is promoted, the same model remains available
     // through the object accessors below.
     data: binaryData ?? records,
-    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+    coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
     // `positions` is a flat [longitude, latitude, ...] array. Deck's layer
     // default is XYZ, which would consume every third value and turn the
     // network into long diagonal ribbons. Keep the prepared geometry flat,
@@ -637,7 +668,7 @@ function getBinaryPathData(
     length: packet.length,
     startIndices: packet.startIndices,
     attributes: {
-      getPath: { value: packet.positions, size: 2 },
+      getPath: { value: packet.commonPositions ?? commonFlatPath(packet.positions), size: 2 },
       getColor: { value: packet.colors, size: 4 },
       getWidth: { value: packet.widths, size: 1 },
       ...(dashed ? { getDashArray: { value: packet.dashArrays, size: 2 } } : {}),
@@ -658,7 +689,7 @@ function createStationLayer(
   return new ScatterplotLayer<TransportMapStationRenderRecord>({
     id: "transport-stations",
     data,
-    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+    coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
     radiusUnits: "pixels",
     lineWidthUnits: "pixels",
     stroked: true,
@@ -681,7 +712,7 @@ function createQuayLayer(
   return new ScatterplotLayer<TransportMapQuayRenderRecord>({
     id: "transport-quays",
     data,
-    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+    coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
     radiusUnits: "pixels",
     stroked: true,
     filled: true,
@@ -702,7 +733,7 @@ function createEntranceLayer(
   return new ScatterplotLayer<TransportMapEntranceRenderRecord>({
     id: "transport-entrances",
     data,
-    coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
+    coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
     radiusUnits: "pixels",
     stroked: true,
     filled: true,

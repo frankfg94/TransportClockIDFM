@@ -174,16 +174,11 @@ function restrictSceneToLineIds(
 
 function isBusOnlyOverviewStation(
   station: GlobalMapStation,
-  network: TransportMapNetwork | undefined,
+  busOnlyLineIds: ReadonlySet<string>,
 ): boolean {
-  const lines = station.lineIds
-    .map((lineId) => network?.linesById.get(lineId))
-    .filter((line): line is GlobalMapLine => Boolean(line));
-  return (
-    lines.length === station.lineIds.length &&
-    lines.length > 0 &&
-    lines.every((line) => BUS_ONLY_GLOBAL_MAP_MODES.has(line.mode))
-  );
+  // Unknown line IDs must keep the station, just as the former catalogue
+  // lookup did. Avoid allocating two temporary arrays for every bus stop.
+  return station.lineIds.length > 0 && station.lineIds.every(id => busOnlyLineIds.has(id));
 }
 
 function recordSceneTiming(
@@ -318,12 +313,40 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
     });
     return { stations, byStationId, byLineId };
   });
+  const overviewStationCache = computed(() => {
+    const network = options.getNetwork();
+    const busOnlyLineIds = new Set<string>();
+    for (const line of network?.linesById.values() ?? []) {
+      if (BUS_ONLY_GLOBAL_MAP_MODES.has(line.mode)) busOnlyLineIds.add(line.id);
+    }
+    const classification = new WeakMap<GlobalMapStation, boolean>();
+    return {
+      filtered: new WeakMap<GlobalMapStation[], GlobalMapStation[]>(),
+      previous: undefined as GlobalMapStation[] | undefined,
+      isBusOnly(station: GlobalMapStation) {
+        let result = classification.get(station);
+        if (result === undefined) {
+          result = isBusOnlyOverviewStation(station, busOnlyLineIds);
+          classification.set(station, result);
+        }
+        return result;
+      },
+    };
+  });
   const overviewViewportStations = computed(() => {
     const stations = options.getViewport().stations;
     if (options.showBusOnlyStationNodesInOverview?.() ??
       GLOBAL_TRANSPORT_PLAN_CONFIG.renderer.showBusOnlyStationNodesInOverview) return stations;
-    const network = options.getNetwork();
-    return stations.filter((station) => !isBusOnlyOverviewStation(station, network));
+    const cache = overviewStationCache.value;
+    const cached = cache.filtered.get(stations);
+    if (cached) return cached;
+    const filtered = stations.filter(station => !cache.isBusOnly(station));
+    const previous = cache.previous;
+    const result = previous?.length === filtered.length && filtered.every((station, index) => station === previous[index])
+      ? previous : filtered;
+    cache.filtered.set(stations, result);
+    cache.previous = result;
+    return result;
   });
 
   const baseRenderStations = computed<GlobalMapStation[]>(() => {
@@ -380,7 +403,7 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
           return overviewStations;
         }
         return overviewStations.filter(
-          (station) => !isBusOnlyOverviewStation(station, network) || forcedStationIds.has(station.id),
+          (station) => !overviewStationCache.value.isBusOnly(station) || forcedStationIds.has(station.id),
         );
       }
 

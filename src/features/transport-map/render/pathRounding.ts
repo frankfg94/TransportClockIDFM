@@ -1,8 +1,12 @@
-import { appendRoundedPolylineToPath } from "../../line-map/lineGeometry";
-import type { RoundedPolylineOptions } from "../../line-map/lineGeometry";
+import { appendRoundedPolylineToPathDirect } from "../../line-map/lineGeometry";
+import type { RoundedPolylineOptions, RoundedPolylineScratch } from "../../line-map/lineGeometry";
 import type { GlobalMapMode } from "../contracts/manifest";
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../config/globalTransportPlanConfig";
 import { lonLatToWorld, worldToLonLat, worldScaleAtZoom } from "../geo/coordinateKernel";
+
+// Rounding is synchronous and has no external callbacks: reuse only index
+// scratch, while each invocation keeps its coordinates and output private.
+const roundingScratch: RoundedPolylineScratch = { retainedIndices: [], dedupedIndices: [] };
 
 export function createTransportMapPathRoundingOptions(
   activeLine: boolean,
@@ -50,7 +54,7 @@ export function roundTransportMapPositions(positions: Float64Array, zoom: number
     output.push(point.lon, point.lat);
     previous = { x, y };
   };
-  appendRoundedPolylineToPath({
+  appendRoundedPolylineToPathDirect({
     moveTo: append,
     lineTo: append,
     quadraticCurveTo: (cx, cy, x, y) => {
@@ -62,7 +66,7 @@ export function roundTransportMapPositions(positions: Float64Array, zoom: number
           u * u * from.y + 2 * u * t * cy + t * t * y);
       }
     },
-  }, points, createTransportMapPathRoundingOptions(true, 0, mode));
+  }, points, createTransportMapPathRoundingOptions(true, 0, mode), roundingScratch);
   if (output.length >= 4) {
     output[0] = positions[0]!;
     output[1] = positions[1]!;

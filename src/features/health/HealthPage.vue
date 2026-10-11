@@ -29,6 +29,7 @@ const overallStatus = computed<HealthStatus>(() => {
 const navitiaJourneysCheck = computed(() => checks.value.find((check) => check.id === "navitia-journeys"));
 const nearbyPlacesCheck = computed(() => checks.value.find((check) => check.id === "overpass-places"));
 const walkingRoutesCheck = computed(() => checks.value.find((check) => check.id === "walking-routes"));
+const nearbyNoiseWmsCheck = computed(() => checks.value.find((check) => check.id === "nearby-noise-wms"));
 
 onMounted(() => {
   void loadHealth();
@@ -180,6 +181,18 @@ function formatGeneratedAt(value: string): string {
         <strong>{{ t("health.nearbyWalkingRoutes.body") }}</strong>
       </div>
       <span>{{ statusLabel(walkingRoutesCheck.status) }}</span>
+    </section>
+
+    <section
+      v-if="nearbyNoiseWmsCheck"
+      class="health-capability"
+      :class="`health-capability--${nearbyNoiseWmsCheck.status}`"
+    >
+      <div>
+        <p class="eyebrow">{{ t("health.nearbyNoiseWms.title") }}</p>
+        <strong>{{ t("health.nearbyNoiseWms.body") }}</strong>
+      </div>
+      <span>{{ statusLabel(nearbyNoiseWmsCheck.status) }}</span>
     </section>
 
     <section v-if="loading" class="health-state" role="status">

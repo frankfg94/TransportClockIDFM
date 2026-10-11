@@ -148,15 +148,6 @@ export function useLineOptimizer(config: LineOptimizerConfig) {
   }
   onMounted(() => {
     active = true;
-    const home =
-      addressBook.primaryAddress.value ??
-      addressBook.entries.value.find(
-        (entry) => entry.kind === "address" && /^(home|House)$/iu.test(entry.icon),
-      );
-    if (home) {
-      originQuery.value = home.address || home.name;
-      originPoint.value = toAddressBookPoint(home);
-    }
     document.addEventListener("visibilitychange", visibilityChanged);
     clockTimer = setInterval(() => {
       now.value = Date.now();

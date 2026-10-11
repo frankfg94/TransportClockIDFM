@@ -55,6 +55,7 @@ interface WorkerTask {
   settled: boolean;
   stale: boolean;
   sequence: number;
+  parts?: Record<string, unknown>;
 }
 
 const PRIORITY_RANK: Record<TransportMapWorkerRequest["priority"], number> = {
@@ -320,6 +321,26 @@ export class TransportMapWorkerPool {
   private handleResponse(response: TransportMapWorkerResponse, worker: Worker): void {
     const task = this.active.get(response.requestId);
     if (!task) return;
+    if (response.part && response.ok) {
+      const startedAt = nowMs();
+      const parts = task.parts ??= {};
+      const { collection, items } = response.part;
+      const records = (parts[collection] ??= []) as unknown[];
+      const indexKey = task.taskType === "decode-catalog"
+        ? collection === "lines" ? "linesById" : collection === "stations" ? "stationsById" : undefined
+        : undefined;
+      const index = indexKey ? (parts[indexKey] ??= new Map<string, unknown>()) as Map<string, unknown> : undefined;
+      for (const item of items) {
+        records.push(item);
+        if (index) index.set((item as { id: string }).id, item);
+      }
+      task.trace?.recordDuration("worker_result_apply", nowMs() - startedAt, {
+        taskType: task.taskType, collection, recordCount: items.length,
+      }, task.taskTraceEventId);
+      // Backpressure keeps deserialization as separate, bounded browser tasks.
+      worker.postMessage({ schemaVersion: 1, requestId: response.requestId, continue: true });
+      return;
+    }
     this.active.delete(response.requestId);
     if (this.workerTasks.get(worker) === task) this.workerTasks.delete(worker);
 
@@ -362,7 +383,7 @@ export class TransportMapWorkerPool {
     this.completedCount += 1;
     if (response.ok) {
       this.finishTrace(task, { execution: "worker", ...timing });
-      task.resolve(response.result);
+      task.resolve(task.parts ? { ...(response.result as object), ...task.parts } : response.result);
     } else {
       this.runFallback(task, "worker-fallback", false, timing);
     }
@@ -500,7 +521,7 @@ function transferableByteLength(transferList: readonly Transferable[]): number {
 }
 
 function workerEventType(taskType: TransportMapWorkerTaskType): "worker_job" | "worker_decode" | "worker_binary_compile" {
-  if (taskType === "decode-chunk") return "worker_decode";
+  if (taskType === "decode-chunk" || taskType === "decode-catalog" || taskType === "decode-regional") return "worker_decode";
   if (taskType === "compile-deck-paths") return "worker_binary_compile";
   return "worker_job";
 }

@@ -12,6 +12,32 @@ import { createDeckTransportLayers } from "../src/features/transport-map/next/de
 import type { TransportMapRenderFrame } from "../src/features/transport-map/contracts/renderer";
 
 describe("MapLibre Deck presenter", () => {
+  it("publishes only the latest scene after shader preparation, including auxiliary updates", async () => {
+    const camera = createCamera({ centerWorldX: 0.5, centerWorldY: 0.5, zoom: 8, viewportWidthCssPx: 800, viewportHeightCssPx: 600 });
+    const frame: TransportMapRenderFrame = {
+      camera, scene: { lines: [], paths: [], stations: [], selectedStationIds: [], visibleModeMask: 0 },
+      model: { sceneVersion: 1, pathCount: 0, vertexCount: 0, basePaths: [], trafficPaths: [], highlightPaths: [], stations: [], quays: [], entrances: [], labels: [] },
+    };
+    const map = { getCenter: () => ({ lng: 0, lat: 0 }), getZoom: () => 8, jumpTo: () => undefined, getStyle: () => ({ layers: [] }), triggerRepaint: () => undefined } as unknown as MapLibreMap;
+    const published: Layer[][] = [];
+    const presenter = new MapLibreDeckOverlayPresenter(map, { setProps: (props) => published.push(props.layers) });
+    const resolves: Array<() => void> = [];
+    presenter.setShaderPreparation({ prepare: () => new Promise<void>((resolve) => resolves.push(resolve)) });
+    presenter.present(frame);
+    presenter.present({ ...frame, model: { ...frame.model, sceneVersion: 2 } });
+    const auxiliary = { id: "nearby-while-preparing" } as Layer;
+    presenter.setNearbyPlaceLayers([auxiliary]);
+    resolves[0]!(); resolves[1]!();
+    await Promise.resolve();
+    expect(published).toHaveLength(0);
+    resolves[2]!(); await Promise.resolve();
+    expect(published).toHaveLength(1);
+    expect(published[0]).toContain(auxiliary);
+    expect(presenter.isPreparingShaders).toBe(false);
+    presenter.present({ ...frame, model: { ...frame.model, sceneVersion: 3 } });
+    presenter.dispose(); resolves[3]!(); await Promise.resolve();
+    expect(published).toHaveLength(1);
+  });
   it("does not resurrect initialized administrative layers after crossing zoom buckets", () => {
     const frame: TransportMapRenderFrame = {
       camera: createCamera({ centerWorldX: 0.5, centerWorldY: 0.5, zoom: 13, viewportWidthCssPx: 800, viewportHeightCssPx: 600 }),

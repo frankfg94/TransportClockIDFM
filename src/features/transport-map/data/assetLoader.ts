@@ -16,7 +16,6 @@ import {
   type GlobalMapStation,
 } from "../contracts/manifest";
 import type { TransportMapNetwork } from "../contracts/network";
-import { createLinePresentation } from "../../../services/linePresentation";
 import type { TransportMapPerformanceTrace } from "../performance/transportMapPerformanceTrace";
 import type { TransportMapTraceEventId } from "../performance/transportMapPerformanceTrace";
 
@@ -89,6 +88,20 @@ export class GlobalMapAssetLoader {
     const regional = manifest.files.regional;
     if (!regional) return undefined;
     return assertRegionalPayload(await this.getJson<GlobalMapRegionalPayload>(regional.asset, signal), manifest);
+  }
+
+  /** Keep the large JSON parse/validation outside the browser's render loop. */
+  async loadRegionalText(
+    manifest: GlobalMapManifest,
+    layer: "core" | "bus" | "bike",
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    const descriptor = layer === "bus" ? manifest.files.regionalBus
+      : layer === "bike" ? manifest.files.regionalBike : manifest.files.regional;
+    if (!descriptor) return undefined;
+    const response = await this.fetcher(this.resolveAsset(descriptor.asset), { signal });
+    if (!response.ok) throw new Error(`Global map asset ${descriptor.asset} returned ${response.status}`);
+    return response.text();
   }
 
   async loadRegionalBusPayload(
@@ -235,14 +248,14 @@ export function assertManifestCompatible(manifest: GlobalMapManifest): void {
 
 export function parseCatalogPayload(
   raw: string,
-  manifest: GlobalMapManifest,
+  manifest: Pick<GlobalMapManifest, "schemaVersion" | "dataVersion">,
 ): GlobalMapCatalog {
   return assertCatalogPayload(JSON.parse(raw) as GlobalMapCatalog, manifest);
 }
 
 export function assertCatalogPayload(
   payload: GlobalMapCatalog,
-  manifest: GlobalMapManifest,
+  manifest: Pick<GlobalMapManifest, "schemaVersion" | "dataVersion">,
 ): GlobalMapCatalog {
   if (
     payload.schemaVersion !== GLOBAL_MAP_SCHEMA_VERSION ||
@@ -256,7 +269,7 @@ export function assertCatalogPayload(
 
 export function assertRegionalPayload(
   payload: GlobalMapRegionalPayload,
-  manifest: GlobalMapManifest,
+  manifest: Pick<GlobalMapManifest, "schemaVersion" | "dataVersion">,
 ): GlobalMapRegionalPayload {
   const encoding = (payload as { encoding?: unknown }).encoding;
   if (
@@ -308,7 +321,7 @@ export function assertRegionalPayload(
 
 export function decodeRegionalPaths(
   payload: GlobalMapRegionalPayload,
-  bootstrap: GlobalMapBootstrap,
+  bootstrap: Pick<GlobalMapBootstrap, "lines">,
 ): GlobalMapPath[] {
   // Bike paths are intentionally omitted from bootstrap.paths to keep the
   // first frame small. Line rows still carry the global path index, so derive
@@ -429,7 +442,7 @@ function nowMs(): number {
 
 export function decodeBootstrap(
   payload: GlobalMapBootstrap,
-  manifest: GlobalMapManifest,
+  manifest: Pick<GlobalMapManifest, "bounds">,
   catalog?: GlobalMapCatalog,
   palette?: GlobalMapLinePaletteDocument,
 ): TransportMapNetwork {
@@ -504,17 +517,9 @@ function decodeLineRow(
   // The packed colors are compiled from GTFS routes.txt and are authoritative
   // for the global map. The optional line palette may enrich labels/icons but
   // must not replace the GTFS color values.
-  const presentation = createLinePresentation({
-    id,
-    code,
-    longName: label,
-    shortName: label,
-    ref: id,
-    mode,
-    color,
-    textColor,
-    officialPalette: { color, textColor },
-  });
+  // These packed values are already authoritative. createLinePresentation's
+  // officialPalette branch returned them unchanged while also generating icon
+  // candidates for every line; those candidates were discarded here.
   const decodedStationIds = stationIndices
     .map((stationIndex) => stationsByIndex.get(stationIndex)?.id)
     .filter((value): value is string => Boolean(value));
@@ -525,8 +530,8 @@ function decodeLineRow(
     code: paletteEntry?.code ?? code,
     label: paletteEntry?.label ?? label,
     mode: paletteEntry?.mode ?? mode,
-    color: presentation.color,
-    textColor: presentation.textColor,
+    color,
+    textColor,
     pictogram: paletteEntry?.pictogram ?? pictogram ?? null,
     aliases: [code, label],
     stationIds: decodedStationIds.length > 0 ? decodedStationIds : catalogStationIds,
@@ -546,7 +551,9 @@ function createPaletteIndex(
 }
 
 function normalizePaletteKey(value: string): string {
-  return value.trim().replace(/^line:/iu, "").toLocaleLowerCase("en-US");
+  // English casing uses the default Unicode mapping; avoid constructing an
+  // Intl locale operation twice per packed line and once per palette entry.
+  return value.trim().replace(/^line:/iu, "").toLowerCase();
 }
 
 function indexStationIdsByLine(stations: GlobalMapStation[]): Map<string, string[]> {
@@ -594,5 +601,5 @@ function decodeStationRow(
 }
 
 function normalizeName(value: string): string {
-  return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").trim().toLocaleLowerCase("fr");
+  return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").trim().toLowerCase();
 }

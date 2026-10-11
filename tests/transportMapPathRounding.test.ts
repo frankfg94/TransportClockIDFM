@@ -7,8 +7,22 @@ import { lonLatToWorld, worldToLonLat, worldScaleAtZoom } from "../src/features/
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../src/features/transport-map/config/globalTransportPlanConfig";
 import { materializeLod } from "../src/features/transport-map/data/createTransportMapDataSource";
 import type { GlobalMapPath } from "../src/features/transport-map/contracts/manifest";
+import { appendRoundedPolylineToPath } from "../src/features/line-map/lineGeometry";
+import type { GlobalMapMode } from "../src/features/transport-map/contracts/manifest";
 
 describe("focused line rounding", () => {
+  it.each(["METRO", "RER", "TRAIN", "TRANSILIEN", "TRAM", "BUS", "NOCTILIEN"] as GlobalMapMode[])("preserves every Float64 coordinate of the command-based rounding for %s", (mode) => {
+    const source = new Float64Array(Array.from({ length: 80 }, (_, index) => [
+      2.35 + Math.floor(index / 2) * 0.00006,
+      48.85 + Math.sin(Math.floor(index / 2) * 0.7) * 0.0002,
+    ]).flat());
+    const unchanged = source.slice();
+    for (const zoom of [8, 12.25, 16, 19.5]) {
+      const expected = commandBasedRounding(source, zoom, mode);
+      expect(roundTransportMapPositions(source, zoom, mode)).toEqual(expected);
+      expect(source).toEqual(unchanged);
+    }
+  });
   it("keeps metro curve coordinates identical when selecting and deselecting a line", () => {
     const builder = new TransportMapRenderModelBuilder();
     const vertices = [
@@ -76,3 +90,35 @@ describe("focused line rounding", () => {
     expect(insideBend.some(({ x, y }) => x > 30 && x < 40 && y > 0 && y < 10)).toBe(true);
   });
 });
+
+/** The original shared command API is an independent geometry reference. */
+function commandBasedRounding(positions: Float64Array, zoom: number, mode: GlobalMapMode): Float64Array {
+  const scale = worldScaleAtZoom(zoom);
+  const points = Array.from({ length: positions.length / 2 }, (_, index) => {
+    const world = lonLatToWorld({ lon: positions[index * 2]!, lat: positions[index * 2 + 1]! });
+    return { x: world.x * scale, y: world.y * scale };
+  });
+  const output: number[] = [];
+  let previous = { x: 0, y: 0 };
+  const append = (x: number, y: number) => {
+    const point = worldToLonLat({ x: x / scale, y: y / scale });
+    output.push(point.lon, point.lat);
+    previous = { x, y };
+  };
+  appendRoundedPolylineToPath({ moveTo: append, lineTo: append, quadraticCurveTo: (cx, cy, x, y) => {
+    const from = previous;
+    for (let step = 1; step <= 8; step += 1) {
+      const t = step / 8;
+      const u = 1 - t;
+      append(u * u * from.x + 2 * u * t * cx + t * t * x,
+        u * u * from.y + 2 * u * t * cy + t * t * y);
+    }
+  } }, points, createTransportMapPathRoundingOptions(true, 0, mode));
+  if (output.length >= 4) {
+    output[0] = positions[0]!;
+    output[1] = positions[1]!;
+    output[output.length - 2] = positions[positions.length - 2]!;
+    output[output.length - 1] = positions[positions.length - 1]!;
+  }
+  return new Float64Array(output);
+}

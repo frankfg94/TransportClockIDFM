@@ -454,6 +454,7 @@ describe("transport map causal performance trace", () => {
     const spike = report.spikes[0]!;
 
     expect(report.eventAggregates?.traffic_refresh?.timingKind).toBe("async-wall-time");
+    expect(report.eventAggregates?.binary_compile?.timingKind).toBe("async-wall-time");
     expect(spike.measuredMainThreadMs).toBe(0);
     expect(spike.unattributedMs).toBe(200);
     expect(spike.directCauses).toHaveLength(0);

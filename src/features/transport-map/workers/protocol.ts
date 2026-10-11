@@ -1,6 +1,20 @@
 export const TRANSPORT_MAP_WORKER_PROTOCOL_VERSION = 1 as const;
 
-export type TransportMapWorkerTaskType = "decode-chunk" | "compile-deck-paths" | "identity";
+export type TransportMapWorkerTaskType = "decode-chunk" | "decode-catalog" | "decode-regional" | "compile-deck-paths" | "identity";
+
+export type TransportMapWorkerCollection = "lines" | "stations" | "entrances" | "paths";
+
+/** An acknowledged batch bounds structured-clone work on the receiving thread. */
+export interface TransportMapWorkerPart {
+  collection: TransportMapWorkerCollection;
+  items: unknown[];
+}
+
+export interface TransportMapWorkerContinue {
+  schemaVersion: typeof TRANSPORT_MAP_WORKER_PROTOCOL_VERSION;
+  requestId: string;
+  continue: true;
+}
 
 export interface TransportMapWorkerRequest<T = unknown> {
   schemaVersion: typeof TRANSPORT_MAP_WORKER_PROTOCOL_VERSION;
@@ -17,6 +31,7 @@ export interface TransportMapWorkerResponse<T = unknown> {
   generation: number;
   ok: boolean;
   result?: T;
+  part?: TransportMapWorkerPart;
   error?: { code: string; message: string };
   durationMs: number;
 }

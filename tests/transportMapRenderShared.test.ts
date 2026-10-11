@@ -7,7 +7,7 @@ import {
 } from "../src/features/transport-map/contracts/manifest";
 import type { TransportMapRenderScene } from "../src/features/transport-map/contracts/renderer";
 import type { TransportMapNetwork } from "../src/features/transport-map/contracts/network";
-import { createCamera } from "../src/features/transport-map/geo/camera";
+import { createCamera, resizeCamera } from "../src/features/transport-map/geo/camera";
 import {
   PreparedWorldPathGeometryCache,
 } from "../src/features/transport-map/render/preparedPathGeometry";
@@ -350,6 +350,36 @@ describe("shared transport-map renderer state", () => {
     await first;
 
     expect(published).toEqual([1]);
+    controller.dispose();
+  });
+
+  it("publishes initial data when an identical resize arrives during the query", async () => {
+    let camera = createCamera({ viewportWidthCssPx: 452, viewportHeightCssPx: 768, pixelRatio: 1.25, generation: 3 });
+    const network = {} as TransportMapNetwork;
+    const initialPaths = [path("path:initial", "line:initial", [{ x: 0.49, y: 0.5 }, { x: 0.5, y: 0.5 }])];
+    const published: GlobalMapPath[][] = [];
+    let complete!: (result: { generation: number; chunkIds: string[]; paths: GlobalMapPath[]; stations: GlobalMapStation[]; bytes: number; fromCache: boolean }) => void;
+    const controller = useGlobalTransportViewport({
+      isMounted: () => true,
+      getNetwork: () => network,
+      getCamera: () => camera,
+      getVisibleModeMask: () => 0,
+      getActiveLineId: () => undefined,
+      getForcedLineIds: () => [],
+      queryViewport: () => new Promise(resolve => { complete = resolve; }),
+      getNetworkAfterQuery: () => network,
+      publishNetwork: () => undefined,
+      publishViewport: result => { published.push(result.paths); },
+      setLoading: () => undefined,
+      clearError: () => undefined,
+      setError: () => undefined,
+      debounceMs: 0,
+    });
+    const initial = controller.refreshViewport();
+    camera = resizeCamera(camera, 452, 768, 1.25);
+    complete({ generation: 3, chunkIds: [], paths: initialPaths, stations: [], bytes: 0, fromCache: true });
+    expect(await initial).toBe(true);
+    expect(published).toEqual([initialPaths]);
     controller.dispose();
   });
 

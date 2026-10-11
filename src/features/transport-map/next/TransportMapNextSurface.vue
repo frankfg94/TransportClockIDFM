@@ -65,6 +65,7 @@ import {
   type NextMapStyle,
 } from "./nextMapConfig";
 import { firstSymbolLayerId, MapLibreDeckOverlayPresenter } from "./deckMapPresenter";
+import { DeckShaderPreparation } from "./deckShaderPreparation";
 import { cameraStateToMapLibreView } from "./nextMapCamera";
 import { screenToLonLat, visibleWorldBounds, worldToLonLat } from "../geo/coordinateKernel";
 import {
@@ -72,6 +73,7 @@ import {
   type TransportMapMapLibreTraceMap,
 } from "../performance/transportMapMapLibreTrace";
 import type { TransportMapPerformanceTrace } from "../performance/transportMapPerformanceTrace";
+import { getColdRefreshRecorder } from "../performance/coldRefreshState";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 type SurfaceStatus = "initializing" | "ready" | "unsupported";
@@ -170,6 +172,7 @@ let realEstatePurchasePointsTimer: ReturnType<typeof setTimeout> | undefined;
 let realEstatePurchasePointsRevision = 0;
 let map: MapLibreMap | undefined;
 let overlay: MapboxOverlay | undefined;
+let shaderPreparation: DeckShaderPreparation | undefined;
 let presenter: MapLibreDeckOverlayPresenter | undefined;
 let overlayAdded = false;
 let fallbackStyleAttempted = false;
@@ -622,6 +625,15 @@ function onMapLoad(): void {
   applyMapLocale();
 
   overlay = new MapboxOverlay({
+    deviceProps: { debug: false },
+    onDeviceInitialized: (device) => {
+      shaderPreparation = getColdRefreshRecorder()?.prepareDeckShaders === false ? undefined : DeckShaderPreparation.create(device);
+      presenter?.setShaderPreparation(shaderPreparation);
+    },
+    onAfterRender: () => {
+      const recorder = getColdRefreshRecorder();
+      if (recorder?.hasTransportDraw) recorder.mark("transport-first-render");
+    },
     interleaved: props.interleaved ?? GLOBAL_TRANSPORT_PLAN_CONFIG.nextMap.deckInterleaved,
     layers: [],
     onError: (error, layer) => {
@@ -658,6 +670,7 @@ function onMapLoad(): void {
   activeMap.addControl(overlay as unknown as IControl);
   overlayAdded = true;
   presenter = new MapLibreDeckOverlayPresenter(activeMap, overlay);
+  presenter.setShaderPreparation(shaderPreparation);
   presenter.setNearbyPlaceLayers(nearbyPlaceLayers.value);
   presenter.setRealEstateLayers(realEstateLayers.value);
   presenter.setPerformanceTrace(props.performanceTrace);
@@ -723,6 +736,9 @@ onMounted(() => {
         antialias: props.antialias ?? true,
       },
     });
+    const gl = map.getCanvas().getContext("webgl2");
+    if (gl) getColdRefreshRecorder()?.instrumentGl(gl);
+    getColdRefreshRecorder()?.mark("maplibre-created");
     map.on("error", onMapError);
     map.on("webglcontextlost", onContextLost);
     map.on("webglcontextrestored", onContextRestored);
@@ -773,6 +789,8 @@ onBeforeUnmount(() => {
   presenter?.dispose();
   if (map && overlay && overlayAdded) map.removeControl(overlay as unknown as IControl);
   overlay?.finalize();
+  shaderPreparation?.dispose();
+  shaderPreparation = undefined;
   if (map) {
     map.off("error", onMapError);
     map.off("webglcontextlost", onContextLost);

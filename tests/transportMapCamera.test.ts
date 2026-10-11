@@ -72,4 +72,21 @@ describe("transport map camera", () => {
     expect(worldToScreen(point, resized)).toEqual(first);
     expect(resized.pixelRatio).toBe(3);
   });
+
+  it("retains the camera and generation for duplicate resize notifications", () => {
+    const camera = createCamera({ viewportWidthCssPx: 452, viewportHeightCssPx: 768, pixelRatio: 1.25, generation: 3 });
+    expect(resizeCamera(camera, 452, 768, 1.25)).toBe(camera);
+    expect(camera.generation).toBe(3);
+  });
+
+  it.each([[453, 768, 1.25], [452, 769, 1.25], [452, 768, 2]])(
+    "invalidates the viewport for a real resize to %s x %s at DPR %s", (width, height, dpr) => {
+      const camera = createCamera({ viewportWidthCssPx: 452, viewportHeightCssPx: 768, pixelRatio: 1.25, generation: 3 });
+      const resized = resizeCamera(camera, width, height, dpr);
+      expect(resized).not.toBe(camera);
+      expect(resized.generation).toBe(4);
+      expect([resized.centerWorldX, resized.centerWorldY, resized.zoom]).toEqual([camera.centerWorldX, camera.centerWorldY, camera.zoom]);
+      expect([resized.viewportWidthCssPx, resized.viewportHeightCssPx, resized.pixelRatio]).toEqual([width, height, dpr]);
+    },
+  );
 });

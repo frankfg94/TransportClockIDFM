@@ -60,7 +60,7 @@ afterEach(() => {
 });
 
 describe("optimizer origin and request lifecycle", () => {
-  it("starts from the saved Home coordinates and calculates walking for that address", async () => {
+  it("keeps the configured default origin even when a primary Home address exists", async () => {
     mocks.home = {
       id: "home",
       kind: "address",
@@ -73,15 +73,10 @@ describe("optimizer origin and request lifecycle", () => {
     };
     wrapper = makePage();
     await flushPromises();
-    expect(optimizer.originQuery.value).toBe("12 rue des Écoles");
-    expect(optimizer.originPoint.value).toMatchObject({
-      lon: 2.31,
-      lat: 48.81,
-      provider: "address-book",
-    });
-    expect(mocks.geocode).not.toHaveBeenCalled();
-    expect(mocks.analyze.mock.calls[0]![0].origin).toMatchObject({ lon: 2.31, lat: 48.81 });
-    expect(optimizer.settings.value.walkSeconds).toBeUndefined();
+    expect(optimizer.originQuery.value).toBe(config.defaultOrigin);
+    expect(mocks.geocode).toHaveBeenCalledWith(config.defaultOrigin, expect.any(AbortSignal));
+    expect(mocks.analyze.mock.calls[0]![0].origin).toMatchObject({ lon: 2.27, lat: 48.77 });
+    expect(optimizer.settings.value.walkSeconds).toBe(90);
   });
   it("keeps the requested 90-second walk for the default origin and uses calculated walking for other favorites", async () => {
     wrapper = makePage();

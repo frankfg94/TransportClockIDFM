@@ -6,9 +6,9 @@ import {
   Footprints,
   House,
   RefreshCw,
-  TrainFront,
   TramFront,
 } from "lucide-vue-next";
+import LineIconBadge from "../../components/LineIconBadge.vue";
 import AdressBook from "../address-book/AdressBook.vue";
 import { useI18n } from "../../i18n";
 import { useLineOptimizer } from "./useLineOptimizer";
@@ -263,8 +263,18 @@ const remaining = computed(() =>
         >
       </div>
       <div class="line-optimizer__totals">
-        <div><span>{{ t("lineOptimizer.totalTravel") }}</span><strong>{{ duration((winner.arriveAt - winner.leaveAt) / 1000) }}</strong><small>{{ t("lineOptimizer.doorToDoor") }}</small></div>
-        <div><span>{{ t("lineOptimizer.totalWaiting") }}</span><strong>{{ duration(winner.waitSeconds) }}</strong><small>{{ t("lineOptimizer.waitingBreakdown", { duration: duration(winner.waitSeconds) }) }}</small></div>
+        <div>
+          <span>{{ t("lineOptimizer.totalTravel") }}</span
+          ><strong>{{ duration((winner.arriveAt - winner.leaveAt) / 1000) }}</strong
+          ><small>{{ t("lineOptimizer.doorToDoor") }}</small>
+        </div>
+        <div>
+          <span>{{ t("lineOptimizer.totalWaiting") }}</span
+          ><strong>{{ duration(winner.totalWaitSeconds) }}</strong
+          ><small>{{
+            t("lineOptimizer.waitingBreakdown", { duration: duration(winner.waitSeconds) })
+          }}</small>
+        </div>
       </div>
       <h2>{{ t("lineOptimizer.leaveAt", { time: clock(winner.leaveAt) }) }}</h2>
       <p>{{ t("lineOptimizer.stayHome", { duration: remaining }) }}</p>
@@ -289,58 +299,62 @@ const remaining = computed(() =>
             ><small>{{ duration(winner.walkSeconds) }}</small>
           </div>
         </li>
-        <li>
-          <TramFront :size="22" aria-hidden="true" />
-          <div>
-            <strong>{{ clock(winner.tram.departure) }}</strong
-            ><span>{{
-              t("lineOptimizer.boardTram", {
-                line: config.lineCode,
-                direction: winner.tram.direction ?? legs[0]?.direction ?? config.transferName,
-              })
-            }}</span
-            ><small
-              >{{
-                t("lineOptimizer.arriveTransfer", {
-                  time: clock(winner.tram.arrival),
-                  station: config.transferName,
-                })
-              }}
-              · {{ timingLabel(winner.tram.source) }}</small
-            >
-          </div>
-        </li>
-        <li>
-          <Footprints :size="22" aria-hidden="true" />
-          <div>
-            <strong>{{ clock(winner.platformAt) }}</strong
-            ><span>{{ t("lineOptimizer.platformReady") }}</span
-            ><small>{{
-              t("lineOptimizer.transferDuration", {
-                duration: duration(winner.transferSeconds),
-                margin: duration(settings.marginSeconds),
-              })
-            }}</small>
-          </div>
-        </li>
-        <li>
-          <TrainFront :size="22" aria-hidden="true" />
-          <div>
-            <strong>{{ clock(winner.train.departure) }}</strong
-            ><span
-              >{{
-                t("lineOptimizer.boardRer", {
-                  line: config.connectingLineCode,
-                  mission: winner.train.mission ?? "—",
-                })
-              }}
-              · {{ serviceLabel(winner) }}</span
-            ><small
-              >{{ winner.train.direction ?? legs[1]?.direction }} ·
-              {{ timingLabel(winner.train.source) }}</small
-            >
-          </div>
-        </li>
+        <template v-for="(course, index) in winner.courses" :key="`${index}:${course.id}`">
+          <li v-if="index > 0">
+            <Footprints :size="22" aria-hidden="true" />
+            <div>
+              <strong>{{ clock(course.departure - winner.waits[index]! * 1000) }}</strong>
+              <span>{{
+                t("lineOptimizer.transferTo", { station: legs[index]?.fromName ?? "" })
+              }}</span>
+              <small>{{
+                t("lineOptimizer.connectionWait", { duration: duration(winner.waits[index]!) })
+              }}</small>
+            </div>
+          </li>
+          <li>
+            <LineIconBadge
+              v-if="legs[index]"
+              class="line-optimizer__line-badge"
+              :line="{
+                id: legs[index]!.lineId,
+                ref: legs[index]!.lineId,
+                label: legs[index]!.lineCode,
+                mode: legs[index]!.lineMode,
+                color: legs[index]!.lineColor,
+                textColor: legs[index]!.lineTextColor,
+              }"
+              compact
+              eager
+            />
+            <div>
+              <strong>{{ clock(course.departure) }}</strong>
+              <span
+                >{{
+                  t("lineOptimizer.boardTram", {
+                    line:
+                      legs[index]?.lineMode === "RER"
+                        ? t("lineOptimizer.rer", { line: legs[index]?.lineCode ?? "" })
+                        : (legs[index]?.lineCode ?? ""),
+                    direction:
+                      course.direction ?? legs[index]?.direction ?? legs[index]?.toName ?? "",
+                  })
+                }}<template v-if="index === winner.corridorIndex + 1">
+                  · {{ serviceLabel(winner) }}</template
+                ></span
+              >
+              <small
+                >{{
+                  t("lineOptimizer.arriveTransfer", {
+                    time: clock(course.arrival),
+                    station: legs[index]?.toName ?? "",
+                  })
+                }}
+                · {{ timingLabel(course.source) }}</small
+              >
+            </div>
+          </li>
+        </template>
         <li>
           <Clock3 :size="22" aria-hidden="true" />
           <div>
@@ -577,10 +591,26 @@ button:disabled {
   margin-top: var(--space-4);
   border-top: 4px solid var(--idfm-blue);
 }
-.line-optimizer__totals { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); margin: var(--space-5) 0; }
-.line-optimizer__totals > div { display: grid; gap: var(--space-2); padding: var(--space-3); background: var(--surface-soft); border-radius: var(--radius-sm); }
-.line-optimizer__totals strong { font-size: 1.7rem; font-variant-numeric: tabular-nums; }
-.line-optimizer__totals small { line-height: 1.4; }
+.line-optimizer__totals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  margin: var(--space-5) 0;
+}
+.line-optimizer__totals > div {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface-soft);
+  border-radius: var(--radius-sm);
+}
+.line-optimizer__totals strong {
+  font-size: 1.7rem;
+  font-variant-numeric: tabular-nums;
+}
+.line-optimizer__totals small {
+  line-height: 1.4;
+}
 .line-optimizer__recommendation-head {
   display: flex;
   flex-wrap: wrap;
@@ -611,7 +641,7 @@ h2 {
 }
 .line-optimizer__timeline li {
   display: grid;
-  grid-template-columns: 30px 1fr;
+  grid-template-columns: 58px minmax(0, 1fr);
   gap: var(--space-3);
 }
 .line-optimizer__timeline li > svg {

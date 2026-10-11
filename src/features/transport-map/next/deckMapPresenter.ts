@@ -13,7 +13,7 @@ import {
   createDeckTransportLayers,
   deckAdministrativeBoundaryStyleBucket,
 } from "./deckMapLayers";
-import type { TransportMapPerformanceTrace } from "../performance/transportMapPerformanceTrace";
+import type { TransportMapPerformanceTrace, TransportMapTraceEventId } from "../performance/transportMapPerformanceTrace";
 
 export interface DeckOverlayLike {
   setProps(props: any): void;
@@ -21,6 +21,43 @@ export interface DeckOverlayLike {
 
 /** Bridges the shared renderer strategy to MapLibre's official overlay. */
 export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
+  private shaderPreparation?: { prepare: (layers: readonly Layer[]) => Promise<void> | undefined };
+  private layerPublicationVersion = 0;
+  private disposed = false;
+  isPreparingShaders = false;
+  hasPublishedTransportLayers = false;
+
+  setShaderPreparation(preparation: MapLibreDeckOverlayPresenter["shaderPreparation"]): void {
+    this.shaderPreparation = preparation;
+  }
+
+  private publishTransportLayers(reason = "auxiliary_or_labels_changed", parentEventId?: TransportMapTraceEventId): void {
+    const version = ++this.layerPublicationVersion;
+    const publish = () => {
+      if (this.disposed || version !== this.layerPublicationVersion) return;
+      this.isPreparingShaders = false;
+      const layers = this.composeLayers();
+      const trace = this.activeTrace;
+      const eventId = trace?.begin("deck_set_props", { reason, layerCount: layers.length }, parentEventId);
+      try { this.overlay.setProps({ layers }); }
+      finally { trace?.end(eventId, { reason, layerCount: layers.length }); }
+      this.hasPublishedTransportLayers = (this.lastFrame?.model.pathCount ?? 0) > 0;
+      this.setPropsCount += 1;
+      trace?.instant("scene_publish", {
+        reason, sceneVersion: this.lastFrame?.model.sceneVersion,
+        pathCount: this.lastFrame?.model.pathCount, stationCount: this.lastFrame?.model.stations.length,
+        vertexCount: this.lastFrame?.model.vertexCount,
+      });
+      if (pending) this.map.triggerRepaint();
+    };
+    const pending = this.shaderPreparation?.prepare(this.layers ?? []);
+    this.isPreparingShaders = Boolean(pending);
+    if (pending) void pending.then(publish).catch((error) => {
+      console.error("Deck shader preparation failed", error);
+      publish(); // Preserve the standard renderer fallback on unsupported/error paths.
+    });
+    else publish();
+  }
   private lastFrame?: TransportMapRenderFrame;
   private layers?: ReturnType<typeof createDeckTransportLayers>;
   private lastLayerModel?: TransportMapPreparedRenderModel;
@@ -70,8 +107,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
   setNearbyPlaceLayers(layers: readonly Layer[]): void {
     if (layers === this.nearbyPlaceLayers) return;
     this.nearbyPlaceLayers = layers;
-    this.overlay.setProps({ layers: this.composeLayers() });
-    this.setPropsCount += 1;
+    this.publishTransportLayers();
     this.map.triggerRepaint();
   }
 
@@ -79,8 +115,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
   setRealEstateLayers(layers: readonly Layer[]): void {
     if (layers === this.realEstateLayers) return;
     this.realEstateLayers = layers;
-    this.overlay.setProps({ layers: this.composeLayers() });
-    this.setPropsCount += 1;
+    this.publishTransportLayers();
     this.map.triggerRepaint();
   }
 
@@ -165,30 +200,11 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
         layerCount: this.layers.length,
         labelCount: frame.model.labels.length,
       });
-      const setPropsEventId = this.activeTrace?.begin("deck_set_props", {
-        reason,
-        layerCount: this.layers.length,
-      }, layerEventId);
-      this.overlay.setProps({ layers: this.composeLayers() });
-      this.activeTrace?.end(setPropsEventId, {
-        reason,
-        layerCount: this.layers.length,
-        setPropsTime: this.deckMetrics?.setPropsTime,
-        cpuTime: this.deckMetrics?.cpuTime,
-        gpuTime: this.deckMetrics?.gpuTime,
-      });
+      this.publishTransportLayers(reason, layerEventId);
       this.lastLayerModel = frame.model;
       this.lastBinaryPackets = frame.binaryPackets;
       this.lastBeforeId = beforeId;
       if (!labelOnlyUpdate) this.layerRebuilds += 1;
-      this.setPropsCount += 1;
-      this.activeTrace?.instant("scene_publish", {
-        reason,
-        sceneVersion: frame.model.sceneVersion,
-        pathCount: frame.model.pathCount,
-        stationCount: frame.model.stations.length,
-        vertexCount: frame.model.vertexCount,
-      });
     }
     this.startStationLabelFadeWhenReady(frame);
     // `jumpTo` already schedules a MapLibre render when the camera changes.
@@ -212,6 +228,9 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
   }
 
   dispose(): void {
+    this.disposed = true;
+    this.hasPublishedTransportLayers = false;
+    this.layerPublicationVersion += 1;
     this.cancelStationLabelTranslation();
     this.cancelStationLabelFade();
     this.nearbyPlaceLayers = [];
@@ -288,8 +307,7 @@ export class MapLibreDeckOverlayPresenter implements TransportMapRendererHost {
         this.stationLabelOpacityFor(frame),
       ),
     );
-    this.overlay.setProps({ layers: this.composeLayers() });
-    this.setPropsCount += 1;
+    this.publishTransportLayers();
     this.map.triggerRepaint();
   }
 
@@ -460,8 +478,14 @@ function binaryPacketsChanged(
   next: TransportMapRenderFrame["binaryPackets"],
 ): boolean {
   return previous?.base !== next?.base ||
+    !samePacketSequence(previous?.baseBatches, next?.baseBatches) ||
     previous?.traffic !== next?.traffic ||
     previous?.highlight !== next?.highlight;
+}
+
+function samePacketSequence(left?: NonNullable<TransportMapRenderFrame["binaryPackets"]>["baseBatches"], right?: NonNullable<TransportMapRenderFrame["binaryPackets"]>["baseBatches"]): boolean {
+  if (left === right) return true;
+  return Boolean(left && right && left.length === right.length && left.every((packet, index) => packet === right[index]));
 }
 
 export function syncCameraToMapLibre(

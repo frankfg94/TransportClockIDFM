@@ -55,7 +55,7 @@
         type="button"
         class="map-button map-button--chaos"
         data-global-map-chaos-zoom
-        :disabled="!hasNetwork || loading || chaosZoomRunning || lineSelectionChaosRunning"
+        :disabled="!hasNetwork || loading || chaosZoomRunning || lineSelectionChaosRunning || coldRefreshRunning"
         :aria-busy="chaosZoomRunning && chaosZoomActiveProfile === 'standard'"
         @click="emit('run-chaos')"
       >
@@ -69,7 +69,7 @@
         type="button"
         class="map-button map-button--chaos map-button--chaos-extreme"
         data-global-map-chaos-zoom-extreme
-        :disabled="!hasNetwork || loading || chaosZoomRunning || lineSelectionChaosRunning"
+        :disabled="!hasNetwork || loading || chaosZoomRunning || lineSelectionChaosRunning || coldRefreshRunning"
         :aria-busy="chaosZoomRunning && chaosZoomActiveProfile === 'extreme'"
         @click="emit('run-chaos-extreme')"
       >
@@ -80,8 +80,22 @@
         }}
       </button>
       <button type="button" class="map-button map-button--chaos"
+        data-global-map-cold-refresh :disabled="coldRefreshRunning || chaosZoomRunning || lineSelectionChaosRunning"
+        :aria-busy="coldRefreshRunning" @click="emit('run-cold-refresh')">
+        {{ t(coldRefreshRunning ? "globalMap.page.chaosZoom.coldRunning" : "globalMap.page.chaosZoom.coldButton") }}
+      </button>
+      <div v-if="coldRefreshReportJson" class="global-transport-plan__cold-report" @click.stop>
+        <button type="button" class="map-button map-button--quiet" data-global-map-cold-download @click="emit('download-cold-refresh')">
+          {{ t("globalMap.page.chaosZoom.coldDownload") }}
+        </button>
+        <details>
+          <summary>{{ t("globalMap.page.chaosZoom.coldReport") }}</summary>
+          <textarea readonly rows="12" data-global-map-cold-report :aria-label="t('globalMap.page.chaosZoom.coldReport')" :value="coldRefreshReportJson" />
+        </details>
+      </div>
+      <button type="button" class="map-button map-button--chaos"
         data-global-map-chaos-line-selection
-        :disabled="!hasNetwork || loading || chaosZoomRunning || lineSelectionChaosRunning"
+        :disabled="!hasNetwork || loading || chaosZoomRunning || lineSelectionChaosRunning || coldRefreshRunning"
         :aria-busy="lineSelectionChaosRunning" @click="emit('run-line-selection-chaos')">
         {{ lineSelectionChaosRunning
           ? t("globalMap.page.chaosZoom.selectionRunning", { step: lineSelectionChaosProgress, total: lineSelectionChaosTotal })
@@ -246,7 +260,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ChevronDown, Map as MapIcon, Radar, SlidersHorizontal } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
 import PatternTrafficCalendarToggle from "../service-pattern/PatternTrafficCalendarToggle.vue";
@@ -254,7 +268,7 @@ import type { TransportMapBasemapLayer } from "../transport-map/basemap/tileMath
 import type { TransportMapRendererMetrics } from "../transport-map/contracts/renderer";
 import type { TransportMapTrafficStatus } from "../transport-map/state/useTransportMapTraffic";
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   statusLabel: string;
   rendererMetrics?: TransportMapRendererMetrics;
   displayZoom: number;
@@ -265,6 +279,8 @@ withDefaults(defineProps<{
   chaosZoomTotal: number;
   chaosZoomActiveProfile: "standard" | "extreme";
   chaosZoomReportAvailable: boolean;
+  coldRefreshRunning?: boolean;
+  coldRefreshReportJson?: string;
   lineSelectionChaosRunning?: boolean;
   lineSelectionChaosProgress?: number;
   lineSelectionChaosTotal?: number;
@@ -294,6 +310,8 @@ withDefaults(defineProps<{
 });
 
 const emit = defineEmits<{
+  "run-cold-refresh": [];
+  "download-cold-refresh": [];
   "run-line-selection-chaos": [];
   "cancel-line-selection-chaos": [];
   "download-line-selection-chaos": [];
@@ -313,6 +331,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const advancedOpen = ref(false);
+watch(() => props.coldRefreshReportJson, (json, previous) => { if (json && json !== previous) advancedOpen.value = true; });
 const actionsElement = ref<HTMLElement>();
 
 function toggleAdvanced(): void {
@@ -342,6 +361,16 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.global-transport-plan__cold-report {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.global-transport-plan__cold-report textarea {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  font: 0.7rem monospace;
+}
 .global-transport-plan__toolbar {
   position: absolute;
   z-index: 3;
@@ -542,6 +571,11 @@ onBeforeUnmount(() => {
 }
 .map-button--quiet {
   background: transparent;
+  color: #334155;
+}
+.map-button--quiet:hover,
+.map-button--quiet:focus-visible {
+  background: #f1f5f9;
   color: #334155;
 }
 .map-button--radar {

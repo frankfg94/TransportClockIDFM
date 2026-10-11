@@ -17,6 +17,16 @@ export class PackedSpatialIndex {
   readonly maxY: Float64Array;
   readonly indices: Uint32Array;
 
+  /** Reuse worker-sorted transferable arrays; do not sort the catalogue again. */
+  static fromTransferred(data: Pick<PackedSpatialIndex, "ids" | "minX" | "minY" | "maxX" | "maxY" | "indices">): PackedSpatialIndex {
+    const size = data.ids.length;
+    if ([data.minX, data.minY, data.maxX, data.maxY].some((array) => !(array instanceof Float64Array) || array.length !== size)
+      || !(data.indices instanceof Uint32Array) || data.indices.length !== size) {
+      throw new Error("Invalid transferred station spatial index");
+    }
+    return Object.assign(Object.create(PackedSpatialIndex.prototype) as PackedSpatialIndex, data);
+  }
+
   constructor(entries: PackedSpatialEntry[]) {
     const sorted = [...entries].sort((left, right) => left.id.localeCompare(right.id));
     this.ids = sorted.map((entry) => entry.id);

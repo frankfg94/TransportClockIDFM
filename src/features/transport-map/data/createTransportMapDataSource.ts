@@ -1,5 +1,4 @@
 import type {
-  GlobalMapCatalog,
   GlobalMapBounds,
   GlobalMapChunkDescriptor,
   GlobalMapChunkPayload,
@@ -17,16 +16,14 @@ import { selectLodForZoom } from "../geo/lod";
 import { buildStationSpatialIndex, PackedSpatialIndex } from "../spatial/packedIndex";
 import { queryStationsWithinRadius } from "../spatial/radiusQuery";
 import {
-  assertCatalogPayload,
   assertChunkPayload,
   GlobalMapAssetLoader,
   decodeBootstrap,
-  decodeRegionalPaths,
-  parseCatalogPayload,
   parseChunkPayload,
 } from "./assetLoader";
 import { TransportMapChunkScheduler, type ChunkRequest } from "./chunkScheduler";
 import { TransportMapWorkerPool } from "../workers/workerPool";
+import { decodeCatalogAsset, decodeRegionalAsset } from "../workers/assetDecodeTasks";
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../config/globalTransportPlanConfig";
 import { filterPathsByBounds } from "./filterPathsByBounds";
 import type {
@@ -95,7 +92,7 @@ export class TransportMapDataSource {
   private manifest?: GlobalMapManifest;
   private bootstrapPayload?: Awaited<ReturnType<GlobalMapAssetLoader["loadBootstrapPayload"]>>;
   private linePalette?: GlobalMapLinePaletteDocument;
-  private catalog?: GlobalMapCatalog;
+  private catalogLoaded = false;
   private scheduler?: TransportMapChunkScheduler;
   private network?: TransportMapNetwork;
   private networkVersion = 0;
@@ -153,12 +150,15 @@ export class TransportMapDataSource {
     this.bootstrapPayload = bootstrapPayload;
     this.linePalette = linePalette;
     const decodeStartedAt = nowMs();
+    const decodeTrace = this.options.trace?.isRunning ? this.options.trace : undefined;
+    const decodeEvent = decodeTrace?.begin("bootstrap_decode", { lineCount: bootstrapPayload.lines.length, stationCount: bootstrapPayload.stations.length });
     const network = measureDevPerformance("transport-map-bootstrap-decode", () => decodeBootstrap(
       bootstrapPayload,
       manifest,
       undefined,
       linePalette,
     ));
+    decodeTrace?.end(decodeEvent);
     this.network = network;
     this.decodeTimeMs += nowMs() - decodeStartedAt;
     this.stationIndex = buildStationSpatialIndex(network.stations);
@@ -213,7 +213,7 @@ export class TransportMapDataSource {
   async ensureCatalog(signal?: AbortSignal): Promise<TransportMapNetwork> {
     if (!this.manifest || !this.network)
       throw new Error("Global map data source is not initialized");
-    if (this.catalog) return this.network;
+    if (this.catalogLoaded) return this.network;
     if (this.catalogPromise) return this.catalogPromise;
     const lifecycleToken = this.lifecycleToken;
     const manifest = this.manifest;
@@ -224,31 +224,37 @@ export class TransportMapDataSource {
     const promise = (async () => {
       const raw = await loader.loadCatalogText(manifest, signal);
       if (lifecycleToken !== this.lifecycleToken) throw createLifecycleAbortError();
-      // The compact global catalogue is only 6.3 MiB and its indexed decode
-      // is cheaper than a structured-clone round trip on Android WebView.
-      // Workers remain reserved for chunk decoding and viewport culling, where
-      // the payload is bounded to the active viewport.
-      const catalog = measureDevPerformance(
-        "transport-map-catalog-parse-and-index",
-        () => assertCatalogPayload(parseCatalogPayload(raw, manifest), manifest),
-      );
-      if (lifecycleToken !== this.lifecycleToken) throw createLifecycleAbortError();
-      this.catalog = catalog;
-      // Decode a fresh network so all line/station relationships use the full
-      // dense catalog while regional paths remain unchanged.
       if (bootstrapPayload) {
-        const decodeStartedAt = nowMs();
-        const nextNetwork = decodeBootstrap(
-          bootstrapPayload,
-          manifest,
-          catalog,
-          linePalette,
-        );
+        const payload = {
+          raw, bootstrap: { ...bootstrapPayload, stations: [], paths: [] }, palette: linePalette,
+          manifest: { schemaVersion: manifest.schemaVersion, dataVersion: manifest.dataVersion, bounds: manifest.bounds },
+        };
+        const fallback = () => {
+          const decoded = decodeCatalogAsset(payload);
+          return { ...decoded.network, stationIndex: decoded.stationIndex };
+        };
+        const startedAt = nowMs();
+        const decoded = this.workerPool
+          ? await this.workerPool.run<typeof payload, Omit<TransportMapNetwork, "regionalPaths" | "pathsById"> & { stationIndex: PackedSpatialIndex }>(
+            "decode-catalog", payload, lifecycleToken, "visible", fallback,
+          )
+          : fallback();
+        if (lifecycleToken !== this.lifecycleToken) throw createLifecycleAbortError();
+        if (this.workerPool) this.workerTimeMs += nowMs() - startedAt;
+        else this.decodeTimeMs += nowMs() - startedAt;
+        const { stationIndex: transferredIndex, ...catalogNetwork } = decoded;
+        const stationIndex = PackedSpatialIndex.fromTransferred(transferredIndex);
+        const nextNetwork: TransportMapNetwork = {
+          ...catalogNetwork,
+          lines: catalogNetwork.lines ?? [], stations: catalogNetwork.stations ?? [], entrances: catalogNetwork.entrances ?? [],
+          linesById: catalogNetwork.linesById ?? new Map(), stationsById: catalogNetwork.stationsById ?? new Map(),
+          regionalPaths: network.regionalPaths, pathsById: network.pathsById,
+        };
+        this.catalogLoaded = true;
         this.network = nextNetwork;
         this.syncLoadedRegionalPaths();
         this.networkVersion += 1;
-        this.decodeTimeMs += nowMs() - decodeStartedAt;
-        this.stationIndex = buildStationSpatialIndex(nextNetwork.stations);
+        this.stationIndex = stationIndex;
         this.nearbyStationCandidateCache.clear();
         return nextNetwork;
       }
@@ -296,24 +302,35 @@ export class TransportMapDataSource {
     });
     const lifecycleToken = this.lifecycleToken;
     const loader = this.options.loader ?? new GlobalMapAssetLoader({ trace: this.options.trace });
-    const loadPayload =
-      layer === "bus"
-        ? loader.loadRegionalBusPayload(this.manifest)
-        : layer === "bike"
-          ? loader.loadRegionalBikePayload(this.manifest)
-          : loader.loadRegionalPayload(this.manifest);
-    const promise = loadPayload.then((payload) => {
+    const manifest = this.manifest;
+    const bootstrap = this.bootstrapPayload;
+    const promise = (async () => {
+      const raw = await loader.loadRegionalText(manifest, layer);
       if (lifecycleToken !== this.lifecycleToken) return fallback;
-      const paths =
-        payload && this.bootstrapPayload
-          ? decodeRegionalPaths(payload, this.bootstrapPayload)
-          : fallback;
+      let paths = fallback;
+      if (raw && bootstrap) {
+        const payload = {
+          raw, bootstrap: { lines: bootstrap.lines },
+          manifest: { schemaVersion: manifest.schemaVersion, dataVersion: manifest.dataVersion },
+        };
+        const decodeFallback = () => ({ paths: decodeRegionalAsset(payload) });
+        const startedAt = nowMs();
+        const decoded = this.workerPool
+          ? await this.workerPool.run<typeof payload, { paths?: GlobalMapPath[] }>(
+            "decode-regional", payload, lifecycleToken, "visible", decodeFallback,
+          )
+          : decodeFallback();
+        if (lifecycleToken !== this.lifecycleToken) return fallback;
+        if (this.workerPool) this.workerTimeMs += nowMs() - startedAt;
+        else this.decodeTimeMs += nowMs() - startedAt;
+        paths = decoded.paths ?? [];
+      }
       if (layer === "bus") this.regionalBusPaths = paths;
       else if (layer === "bike") this.regionalBikePaths = paths;
       else this.regionalCorePaths = paths;
       this.syncLoadedRegionalPaths();
       return paths;
-    });
+    })();
     if (layer === "bus") this.regionalBusPromise = promise;
     else if (layer === "bike") this.regionalBikePromise = promise;
     else this.regionalCorePromise = promise;
@@ -1036,7 +1053,7 @@ export class TransportMapDataSource {
   metrics(): TransportMapDataSourceMetrics {
     return {
       manifestLoaded: Boolean(this.manifest),
-      catalogLoaded: Boolean(this.catalog),
+      catalogLoaded: this.catalogLoaded,
       lastGeneration: this.lastGeneration,
       lastChunkCount: this.lastChunkCount,
       bytes: this.bytes,
@@ -1080,7 +1097,7 @@ export class TransportMapDataSource {
     this.network = undefined;
     this.networkVersion = 0;
     this.manifest = undefined;
-    this.catalog = undefined;
+    this.catalogLoaded = false;
     this.catalogPromise = undefined;
     this.regionalCorePromise = undefined;
     this.regionalBusPromise = undefined;

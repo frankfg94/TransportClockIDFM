@@ -23,6 +23,20 @@ import {
 import type { TransportMapPerformanceTrace } from "../../performance/transportMapPerformanceTrace";
 
 type PacketRole = "base" | "traffic" | "highlight";
+type PacketInput = {
+  records: readonly TransportMapPathRenderRecord[];
+  role: PacketRole;
+  identity?: string;
+  batchIndex?: number;
+  zoomDependent?: boolean;
+};
+
+export interface DeckModelPreparationScheduler {
+  schedule(work: () => void): void;
+  sliceBudgetMs: number;
+  minPaths: number;
+  waitForInitialBinary?: boolean;
+}
 
 /**
  * Deck strategy for the next experience. It owns prepared data and the host
@@ -37,6 +51,7 @@ export class DeckGlRenderer implements TransportMapRenderer {
   );
   private packetCompiler: DeckPathPacketCompiler;
   private readonly pendingPackets = new Map<string, Promise<void>>();
+  private readonly recordStats = new WeakMap<readonly TransportMapPathRenderRecord[], { vertexCount: number; inputBytes: number }>();
   /** Failed keys may safely fall back to one complete object-data frame. */
   private readonly failedPacketKeys = new Set<string>();
   /** Keys that have been used by a visible binary PathLayer at least once. */
@@ -72,6 +87,13 @@ export class DeckGlRenderer implements TransportMapRenderer {
   private pathModelWorstMs = 0;
   private metrics: TransportMapRendererMetrics;
   private packetGeneration = 0;
+  private readonly preparationScheduler?: DeckModelPreparationScheduler;
+  private preparationTask?: Generator<void, TransportMapRenderFrame["model"]>;
+  private latestRequest?: Pick<TransportMapRenderFrame, "camera" | "scene">;
+  private preparedInputs?: Pick<TransportMapRenderFrame, "camera" | "scene">;
+  private modelPreparationSlices = 0;
+  private modelPreparationCpuMs = 0;
+  private modelPreparationWorstSliceMs = 0;
   private performanceTrace?: TransportMapPerformanceTrace;
   private readonly tracedBinaryCacheHits = new Set<string>();
   private readonly tracedBinaryCacheMisses = new Set<string>();
@@ -80,9 +102,11 @@ export class DeckGlRenderer implements TransportMapRenderer {
   constructor(
     workerPool?: TransportMapWorkerPool,
     packetCompiler?: DeckPathPacketCompiler,
+    preparationScheduler?: DeckModelPreparationScheduler,
   ) {
     this.packetCompiler = packetCompiler ?? new WorkerBackedDeckPathPacketCompiler(workerPool);
     this.metrics = this.createMetrics();
+    this.preparationScheduler = preparationScheduler ?? browserModelPreparationScheduler();
   }
 
   mount(canvas: HTMLCanvasElement): void {
@@ -127,12 +151,90 @@ export class DeckGlRenderer implements TransportMapRenderer {
 
   render(camera: CameraState, scene: TransportMapRenderScene): void {
     if (this.disposed) return;
+    this.latestRequest = { camera, scene };
+    if (this.preparationTask) {
+      this.presentWhilePreparing(camera, scene);
+      return;
+    }
+    const previous = this.preparedInputs;
+    if (this.preparationScheduler && scene.paths.length >= this.preparationScheduler.minPaths
+      && (!previous || !samePathPreparationInputs(previous.camera, previous.scene, camera, scene, this.modelBuilder.hasZoomDependentPaths))) {
+      this.prepareModel(camera, scene);
+      this.presentWhilePreparing(camera, scene);
+      return;
+    }
+    this.renderNow(camera, scene);
+  }
+
+  private prepareModel(camera: CameraState, scene: TransportMapRenderScene): void {
+    const task = this.modelBuilder.buildCooperatively(camera, scene, this.preparationScheduler!.sliceBudgetMs);
+    this.preparationTask = task;
+    const trace = this.activeTrace;
+    const sessionId = trace?.sessionId;
+    const event = trace?.begin("render_model_prepare", { pathCount: scene.paths.length });
+    const run = () => {
+      if (this.disposed || this.preparationTask !== task) return;
+      const activeTrace = this.activeTrace;
+      const parentId = activeTrace === trace && trace?.sessionId === sessionId ? event : undefined;
+      const slice = activeTrace?.begin("render_model_prepare_slice", { pathCount: scene.paths.length }, parentId);
+      const startedAt = nowMs();
+      let step: IteratorResult<void, TransportMapRenderFrame["model"]>;
+      try {
+        step = task.next();
+      } catch (error) {
+        this.preparationTask = undefined;
+        activeTrace?.end(slice, { failed: true });
+        if (parentId) trace?.end(event, { failed: true });
+        throw error;
+      }
+      const durationMs = nowMs() - startedAt;
+      this.modelPreparationSlices += 1;
+      this.modelPreparationCpuMs += durationMs;
+      this.modelPreparationWorstSliceMs = Math.max(this.modelPreparationWorstSliceMs, durationMs);
+      activeTrace?.end(slice, { completed: step.done === true });
+      if (!step.done) {
+        this.preparationScheduler!.schedule(run);
+        return;
+      }
+      this.preparationTask = undefined;
+      const latest = this.latestRequest!;
+      const current = samePathPreparationInputs(camera, scene, latest.camera, latest.scene, this.modelBuilder.hasZoomDependentPaths);
+      if (parentId) trace?.end(event, { superseded: !current, pathCount: step.value.pathCount });
+      if (current) {
+        // The completed bundle is now cached. Apply the newest quarter zoom,
+        // camera and marker state without revisiting all stable road paths.
+        this.renderNow(latest.camera, latest.scene);
+      } else {
+        // Only one task can own the builder. Never publish obsolete geometry
+        // or run a second mutable builder task alongside the first one.
+        this.render(latest.camera, latest.scene);
+      }
+    };
+    this.preparationScheduler!.schedule(run);
+  }
+
+  private presentWhilePreparing(camera: CameraState, scene: TransportMapRenderScene): void {
+    this.activeTrace?.recordRendererFrame();
+    const startedAt = nowMs();
+    if (this.presentedFrame) {
+      const frame = { ...this.presentedFrame, camera, scene: { ...this.presentedFrame.scene,
+        interactionActive: scene.interactionActive, continuousRendering: scene.continuousRendering } };
+      if (this.currentFrame) this.currentFrame = { ...this.currentFrame, camera };
+      this.presentToHost(frame);
+    }
+    this.metrics = { ...this.metrics, renderMs: Number((nowMs() - startedAt).toFixed(3)),
+      renderSequence: (this.metrics.renderSequence ?? 0) + 1 };
+  }
+
+  private renderNow(camera: CameraState, scene: TransportMapRenderScene): void {
+    if (this.disposed) return;
     this.activeTrace?.recordRendererFrame();
     const startedAt = nowMs();
     const trace = this.activeTrace;
     const previousModel = this.currentFrame?.model;
     const modelStartedAt = nowMs();
     const model = this.modelBuilder.build(camera, scene);
+    this.preparedInputs = { camera, scene };
     const modelBuildMs = nowMs() - modelStartedAt;
     const pathModelReused = Boolean(
       previousModel &&
@@ -155,6 +257,7 @@ export class DeckGlRenderer implements TransportMapRenderer {
       pathCount: model.pathCount,
       stationCount: model.stations.length,
       vertexCount: model.vertexCount,
+      preparedPathCache: this.modelBuilder.pathCacheMetrics(),
     });
     if (model !== previousModel) {
       this.activeTrace?.recordDuration("scene_rebuild", nowMs() - startedAt, {
@@ -182,11 +285,13 @@ export class DeckGlRenderer implements TransportMapRenderer {
     }
     if (!previousModel || previousModel.stations !== model.stations) this.stationPacketBuilds += 1;
 
-    const binaryPackets = {
-      base: this.ensurePacket(model.basePaths, "base", scene.interactionActive === true && !scene.continuousRendering, camera.zoom, model.basePathIdentity ?? model.pathIdentity),
-      traffic: this.ensurePacket(model.trafficPaths, "traffic", scene.interactionActive === true && !scene.continuousRendering, camera.zoom, model.trafficPathIdentity ?? model.pathIdentity),
-      highlight: this.ensurePacket(model.highlightPaths, "highlight", scene.interactionActive === true && !scene.continuousRendering, camera.zoom, model.highlightPathIdentity ?? model.pathIdentity),
-    };
+    // Camera/marker frames must not scan thousands of unchanged path records
+    // or touch every LRU entry just to rediscover the already published packets.
+    const traceSessionChanged = trace && this.tracedBinaryCacheSessionId !== trace.sessionId;
+    const resolvedPackets = pathModelReused && !traceSessionChanged && this.currentFrame && this.arePathPacketsReady(model, this.currentFrame.binaryPackets)
+      ? this.currentFrame.binaryPackets
+      : this.resolvePackets(model, scene.interactionActive === true && !scene.continuousRendering, camera.zoom, true);
+    const binaryPackets = this.arePathPacketsReady(model, resolvedPackets) ? resolvedPackets : undefined;
     const frame: TransportMapRenderFrame = { camera, scene, model, binaryPackets };
     this.currentFrame = frame;
     this.metrics = {
@@ -221,7 +326,13 @@ export class DeckGlRenderer implements TransportMapRenderer {
       pathModelBuildMs: Number(this.pathModelBuildMs.toFixed(3)),
       pathModelWorstMs: Number(this.pathModelWorstMs.toFixed(3)),
     };
-    if (this.shouldHoldForAtomicBinarySwap(frame)) {
+    if (this.preparationScheduler?.waitForInitialBinary && !binaryPackets
+      && !scene.allowGeometrySwapDuringInteraction && !this.presentedFrame?.model.pathCount) {
+      // The basemap is already visible. Compile the first transport set once,
+      // instead of initializing object GPU buffers and replacing them with
+      // incompatible binary strides immediately after the lines appear.
+      if (this.presentedFrame) this.presentToHost({ ...this.presentedFrame, camera, scene });
+    } else if (this.shouldHoldForAtomicBinarySwap(frame)) {
       // Camera updates still flow through the presenter, but the layer model
       // stays untouched until every path packet for the new frame is ready.
       // This prevents Deck from reconciling object records and binary
@@ -264,12 +375,19 @@ export class DeckGlRenderer implements TransportMapRenderer {
       pathModelReuseCount: this.pathModelReuseCount,
       pathModelBuildMs: Number(this.pathModelBuildMs.toFixed(3)),
       pathModelWorstMs: Number(this.pathModelWorstMs.toFixed(3)),
+      modelPreparationSlices: this.modelPreparationSlices,
+      modelPreparationCpuMs: Number(this.modelPreparationCpuMs.toFixed(3)),
+      modelPreparationWorstSliceMs: Number(this.modelPreparationWorstSliceMs.toFixed(3)),
       deck: presentationMetrics?.deck,
     };
   }
 
   dispose(): void {
     this.disposed = true;
+    this.preparationTask?.return(undefined as never);
+    this.preparationTask = undefined;
+    this.latestRequest = undefined;
+    this.preparedInputs = undefined;
     this.pendingPackets.clear();
     this.failedPacketKeys.clear();
     this.promotedPacketKeys.clear();
@@ -291,9 +409,10 @@ export class DeckGlRenderer implements TransportMapRenderer {
     interactionActive: boolean,
     zoom: number,
     stableIdentity?: string,
+    zoomDependent?: boolean,
   ): TransportMapBinaryPathPacket | undefined {
     if (records.length === 0) return undefined;
-    const vertexCount = records.reduce((sum, record) => sum + record.positions.length / 2, 0);
+    const { vertexCount, inputBytes } = this.getRecordStats(records);
     const key = this.buildPacketKey(records, role, stableIdentity, vertexCount);
     const trace = this.activeTrace;
     if (trace && this.tracedBinaryCacheSessionId !== trace.sessionId) {
@@ -344,11 +463,10 @@ export class DeckGlRenderer implements TransportMapRenderer {
     this.deferredPacketKeys.delete(key);
     this.failedPacketKeys.delete(key);
 
-    // A worker-backed compiler is asynchronous, so keep the first frame
-    // immediately presentable with the ordinary Deck data records. The
-    // completed binary packet is installed into the next host update.
+    // Compilation is asynchronous. The host retains its complete geometry
+    // until the current packet set can be promoted together. The ordinary
+    // records remain available for the synchronous/error fallback.
     const startedAt = nowMs();
-    const inputBytes = records.reduce((sum, record) => sum + record.positions.byteLength, 0);
     const traceSessionId = trace?.sessionId;
     const traceForSession = trace
       ? (): TransportMapPerformanceTrace | undefined =>
@@ -363,9 +481,18 @@ export class DeckGlRenderer implements TransportMapRenderer {
       inputBytes,
       zoom,
       execution: this.packetCompiler.executionContext ?? "main-thread",
+      zoomDependent,
     });
     const pending = Promise.resolve()
-      .then(() => this.packetCompiler.compile(records, key, ++this.packetGeneration, compileTraceId))
+      .then(() => {
+        const sessionTrace = traceForSession?.();
+        const dispatch = sessionTrace?.begin("binary_compile_dispatch", { role, pathCount: records.length, inputBytes }, compileTraceId);
+        try {
+          return this.packetCompiler.compile(records, key, ++this.packetGeneration, compileTraceId);
+        } finally {
+          sessionTrace?.end(dispatch);
+        }
+      })
       .then((packet) => {
         const sessionTrace = traceForSession?.();
         if (this.disposed) {
@@ -455,46 +582,57 @@ export class DeckGlRenderer implements TransportMapRenderer {
       role,
       keyLength: key.length,
       pathCount: records.length,
-      vertexCount: vertexCount ?? records.reduce((sum, record) => sum + record.positions.length / 2, 0),
+      vertexCount: vertexCount ?? this.getRecordStats(records).vertexCount,
     });
     return key;
+  }
+
+  private getRecordStats(records: readonly TransportMapPathRenderRecord[]) {
+    let stats = this.recordStats.get(records);
+    if (!stats) {
+      const inputBytes = records.reduce((sum, record) => sum + record.positions.byteLength, 0);
+      stats = { inputBytes, vertexCount: inputBytes / Float64Array.BYTES_PER_ELEMENT / 2 };
+      this.recordStats.set(records, stats);
+    }
+    return stats;
+  }
+
+  private packetInputs(model: TransportMapRenderFrame["model"]): PacketInput[] {
+    return [
+      ...(model.basePathBatches
+        ? model.basePathBatches.map((batch, batchIndex) => ({ records: batch.records, role: "base" as const,
+            identity: batch.identity, batchIndex, zoomDependent: batch.zoomDependent }))
+        : [{ records: model.basePaths, role: "base" as const, identity: model.basePathIdentity ?? model.pathIdentity }]),
+      { records: model.trafficPaths, role: "traffic", identity: model.trafficPathIdentity ?? model.pathIdentity },
+      { records: model.highlightPaths, role: "highlight", identity: model.highlightPathIdentity ?? model.pathIdentity },
+    ];
+  }
+
+  private resolvePackets(model: TransportMapRenderFrame["model"], defer: boolean, zoom: number, compileMissing: boolean): NonNullable<TransportMapRenderFrame["binaryPackets"]> {
+    const packets: NonNullable<TransportMapRenderFrame["binaryPackets"]> = {};
+    const baseBatches: (TransportMapBinaryPathPacket | undefined)[] | undefined = model.basePathBatches ? [] : undefined;
+    for (const input of this.packetInputs(model)) {
+      const packet = input.records.length === 0 ? undefined : compileMissing
+        ? this.ensurePacket(input.records, input.role, defer, zoom, input.identity, input.zoomDependent)
+        : this.binaryCache.get(this.buildPacketKey(input.records, input.role, input.identity));
+      if (input.batchIndex !== undefined) baseBatches![input.batchIndex] = packet;
+      else packets[input.role] = packet;
+    }
+    if (baseBatches) packets.baseBatches = baseBatches;
+    return packets;
   }
 
   private presentCurrentFrameWithCachedPackets(): void {
     const frame = this.currentFrame;
     if (!frame || (frame.scene.interactionActive === true && !frame.scene.continuousRendering)) return;
-    const binaryPackets = {
-      base: frame.model.basePaths.length
-        ? this.binaryCache.get(this.buildPacketKey(frame.model.basePaths, "base", frame.model.basePathIdentity ?? frame.model.pathIdentity))
-        : undefined,
-      traffic: frame.model.trafficPaths.length
-        ? this.binaryCache.get(this.buildPacketKey(frame.model.trafficPaths, "traffic", frame.model.trafficPathIdentity ?? frame.model.pathIdentity))
-        : undefined,
-      highlight: frame.model.highlightPaths.length
-        ? this.binaryCache.get(this.buildPacketKey(frame.model.highlightPaths, "highlight", frame.model.highlightPathIdentity ?? frame.model.pathIdentity))
-        : undefined,
-    };
+    const binaryPackets = this.resolvePackets(frame.model, false, frame.camera.zoom, false);
     // Publish a complete packet set atomically. A PathLayer must see either
     // its complete object-record data or its complete binary packet; mixing
     // the two while Deck is reconciling rapid hover updates can leave stale
     // tesselator state attached to the new geometry.
     if (!this.arePathPacketsReady(frame.model, binaryPackets)) return;
-    for (const [records, role, packet] of [
-      [frame.model.basePaths, "base", binaryPackets.base],
-      [frame.model.trafficPaths, "traffic", binaryPackets.traffic],
-      [frame.model.highlightPaths, "highlight", binaryPackets.highlight],
-    ] as const) {
-      if (records.length > 0 && packet) {
-        this.promotePacket(this.buildPacketKey(
-          records,
-          role,
-          role === "base"
-            ? frame.model.basePathIdentity ?? frame.model.pathIdentity
-            : role === "traffic"
-              ? frame.model.trafficPathIdentity ?? frame.model.pathIdentity
-              : frame.model.highlightPathIdentity ?? frame.model.pathIdentity,
-        ));
-      }
+    for (const input of this.packetInputs(frame.model)) {
+      if (input.records.length) this.promotePacket(this.buildPacketKey(input.records, input.role, input.identity));
     }
     const nextFrame = { ...frame, binaryPackets };
     this.currentFrame = nextFrame;
@@ -504,24 +642,8 @@ export class DeckGlRenderer implements TransportMapRenderer {
   private presentCurrentFrameWithObjectFallback(failedKey: string): void {
     const frame = this.currentFrame;
     if (!frame || frame.scene.interactionActive === true) return;
-    const currentKeys = [
-      [frame.model.basePaths, "base"],
-      [frame.model.trafficPaths, "traffic"],
-      [frame.model.highlightPaths, "highlight"],
-    ].flatMap(([records, role]) => {
-      const typedRecords = records as readonly TransportMapPathRenderRecord[];
-      return typedRecords.length > 0
-        ? [this.buildPacketKey(
-            typedRecords,
-            role as PacketRole,
-            role === "base"
-              ? frame.model.basePathIdentity ?? frame.model.pathIdentity
-              : role === "traffic"
-                ? frame.model.trafficPathIdentity ?? frame.model.pathIdentity
-                : frame.model.highlightPathIdentity ?? frame.model.pathIdentity,
-          )]
-        : [];
-    });
+    const currentKeys = this.packetInputs(frame.model).filter(input => input.records.length)
+      .map(input => this.buildPacketKey(input.records, input.role, input.identity));
     if (!currentKeys.includes(failedKey)) return;
     const nextFrame: TransportMapRenderFrame = {
       ...frame,
@@ -543,7 +665,9 @@ export class DeckGlRenderer implements TransportMapRenderer {
     packets: TransportMapRenderFrame["binaryPackets"],
   ): boolean {
     return (
-      (model.basePaths.length === 0 || Boolean(packets?.base)) &&
+      (model.basePathBatches
+        ? packets?.baseBatches?.length === model.basePathBatches.length && packets.baseBatches.every(Boolean)
+        : model.basePaths.length === 0 || Boolean(packets?.base)) &&
       (model.trafficPaths.length === 0 || Boolean(packets?.traffic)) &&
       (model.highlightPaths.length === 0 || Boolean(packets?.highlight))
     );
@@ -552,6 +676,7 @@ export class DeckGlRenderer implements TransportMapRenderer {
   private hasAnyBinaryPathPacket(frame: TransportMapRenderFrame): boolean {
     return Boolean(
       frame.binaryPackets?.base ||
+      frame.binaryPackets?.baseBatches?.some(Boolean) ||
       frame.binaryPackets?.traffic ||
       frame.binaryPackets?.highlight,
     );
@@ -560,14 +685,12 @@ export class DeckGlRenderer implements TransportMapRenderer {
   private presentToHost(frame: TransportMapRenderFrame): void {
     this.presentedFrame = frame;
     if (!this.host) return;
-    const pathRecords = [frame.model.basePaths, frame.model.trafficPaths, frame.model.highlightPaths];
-    const hasPathRecords = pathRecords.some((records) => records.length > 0);
-    const hasBinaryPathLayer = pathRecords.some((records, index) =>
-      records.length > 0 && Boolean([frame.binaryPackets?.base, frame.binaryPackets?.traffic, frame.binaryPackets?.highlight][index]),
-    );
-    const hasObjectFallbackPathLayer = pathRecords.some((records, index) =>
-      records.length > 0 && ![frame.binaryPackets?.base, frame.binaryPackets?.traffic, frame.binaryPackets?.highlight][index],
-    );
+    const pathInputs = this.packetInputs(frame.model).filter(input => input.records.length);
+    const hasPathRecords = pathInputs.length > 0;
+    const hasBinaryPathLayer = pathInputs.some(input => Boolean(input.batchIndex !== undefined
+      ? frame.binaryPackets?.baseBatches?.[input.batchIndex] : frame.binaryPackets?.[input.role]));
+    const hasObjectFallbackPathLayer = pathInputs.some(input => !(input.batchIndex !== undefined
+      ? frame.binaryPackets?.baseBatches?.[input.batchIndex] : frame.binaryPackets?.[input.role]));
     if (hasPathRecords && hasBinaryPathLayer) this.binaryLayerFrames += 1;
     if (hasPathRecords && hasObjectFallbackPathLayer) this.objectFallbackFrames += 1;
     this.host.present(frame);
@@ -634,11 +757,36 @@ function traceCacheKey(key: string): string {
   return `${key.slice(0, 80)}…${key.slice(-40)}`;
 }
 
-function countDeckLayers(model: { basePaths: readonly unknown[]; trafficPaths: readonly unknown[]; highlightPaths: readonly unknown[]; stations: readonly unknown[]; quays: readonly unknown[]; entrances: readonly unknown[]; labels: readonly unknown[] }): number {
-  return [model.basePaths, model.trafficPaths, model.highlightPaths, model.stations, model.quays, model.entrances, model.labels]
+function countDeckLayers(model: TransportMapRenderFrame["model"]): number {
+  return (model.basePathBatches?.length ?? (model.basePaths.length ? 1 : 0)) + [model.trafficPaths, model.highlightPaths, model.stations, model.quays, model.entrances, model.labels]
     .filter((items) => items.length > 0).length;
 }
 
 function nowMs(): number {
   return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
+function browserModelPreparationScheduler(): DeckModelPreparationScheduler | undefined {
+  if (typeof window === "undefined") return undefined;
+  return { sliceBudgetMs: 2, minPaths: 256, waitForInitialBinary: true, schedule(work) {
+    if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(work, { timeout: 100 });
+    else window.setTimeout(work, 0);
+  } };
+}
+
+function samePathPreparationInputs(leftCamera: CameraState, left: TransportMapRenderScene, rightCamera: CameraState, right: TransportMapRenderScene, zoomDependent: boolean): boolean {
+  const widthThreshold = GLOBAL_TRANSPORT_PLAN_CONFIG.renderer.overviewHeavyLineWidthMaxZoom;
+  return left.paths === right.paths && left.lines === right.lines && left.stations === right.stations
+    && left.visibleModeMask === right.visibleModeMask && left.activeLineId === right.activeLineId
+    && left.hoveredLineId === right.hoveredLineId && left.trafficPathSpans === right.trafficPathSpans
+    && (!zoomDependent || Math.ceil(leftCamera.zoom * 4) === Math.ceil(rightCamera.zoom * 4))
+    && (leftCamera.zoom < widthThreshold) === (rightCamera.zoom < widthThreshold)
+    && sameIdSequence(left.ghostLineIds, right.ghostLineIds)
+    && sameIdSequence(left.interruptionLineIds, right.interruptionLineIds)
+    && sameIdSequence(left.disturbanceLineIds, right.disturbanceLineIds);
+}
+
+function sameIdSequence(left?: readonly string[], right?: readonly string[]): boolean {
+  if (left === right) return true;
+  return (left?.length ?? 0) === (right?.length ?? 0) && (left ?? []).every((id, index) => id === right?.[index]);
 }

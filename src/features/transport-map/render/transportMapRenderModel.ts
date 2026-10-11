@@ -102,6 +102,8 @@ export interface TransportMapBinaryPathPacket {
   readonly length: number;
   readonly pathCount: number;
   readonly positions: Float64Array;
+  /** Optional preprojected XY for the flat MapLibre world (512 px at zoom 0). */
+  readonly commonPositions?: Float64Array;
   readonly startIndices: Uint32Array;
   readonly colors: Uint8Array;
   readonly widths: Float32Array;
@@ -110,6 +112,17 @@ export interface TransportMapBinaryPathPacket {
   readonly pathIds: readonly string[];
   readonly lineIds: readonly string[];
   readonly bytes: number;
+}
+
+/** Consecutive records: splitting must never change their compositing order. */
+export interface TransportMapPathRenderBatch {
+  readonly id: string;
+  readonly identity: string;
+  readonly records: readonly TransportMapPathRenderRecord[];
+  readonly vertexCount: number;
+  readonly zoomDependent: boolean;
+  readonly start: number;
+  readonly end: number;
 }
 
 /** Backend-neutral data prepared from TransportMapRenderScene. */
@@ -128,6 +141,8 @@ export interface TransportMapPreparedRenderModel {
   readonly pathCount: number;
   readonly vertexCount: number;
   readonly basePaths: readonly TransportMapPathRenderRecord[];
+  /** Only mixed stable/rounded geometry needs separate binary packets. */
+  readonly basePathBatches?: readonly TransportMapPathRenderBatch[];
   readonly trafficPaths: readonly TransportMapPathRenderRecord[];
   readonly highlightPaths: readonly TransportMapPathRenderRecord[];
   readonly stations: readonly TransportMapStationRenderRecord[];
@@ -142,17 +157,22 @@ interface PathGeometryCacheEntry {
 }
 
 interface PathRecordCacheEntry {
-  readonly base: Map<string, TransportMapPathRenderRecord>;
-  readonly highlight: Map<string, TransportMapPathRenderRecord>;
-  readonly traffic: Map<string, TransportMapPathRenderRecord>;
+  base?: Map<string, TransportMapPathRenderRecord>;
+  highlight?: Map<string, TransportMapPathRenderRecord>;
+  traffic?: Map<string, TransportMapPathRenderRecord>;
 }
 
 interface PathBuildCache {
   readonly source: GlobalMapPath[];
+  readonly stationsSource: GlobalMapStation[];
   readonly baseKey: string;
   readonly trafficKey: string;
   readonly highlightKey: string;
+  readonly styleKey: string;
+  readonly roundedIndices: readonly (readonly number[])[];
+  readonly estimatedBytes: number;
   readonly basePaths: readonly TransportMapPathRenderRecord[];
+  readonly basePathBatches?: readonly TransportMapPathRenderBatch[];
   readonly trafficPaths: readonly TransportMapPathRenderRecord[];
   readonly highlightPaths: readonly TransportMapPathRenderRecord[];
   readonly pathCount: number;
@@ -169,10 +189,22 @@ export class TransportMapRenderModelBuilder {
   private readonly worldGeometry = new PreparedWorldPathGeometryCache();
   private readonly lonLatBySubpath = new WeakMap<object, PathGeometryCacheEntry>();
   private readonly recordsByPath = new WeakMap<GlobalMapPath, PathRecordCacheEntry>();
+  private readonly pathColors = new Map<string, TransportMapRgba>();
   private readonly identityTokens = new WeakMap<object, number>();
   private nextIdentity = 1;
   /** Last complete path bundle; each role has its own dependency key. */
   private previousPathBuild?: PathBuildCache;
+  private readonly pathBuilds = new Map<string, { bundle: PathBuildCache; bytes: number }>();
+  private pathBuildBytes = 0;
+  private readonly roundedSources = new WeakMap<GlobalMapPath[], { lines: GlobalMapLine[]; hasMetro: boolean }>();
+  private lastPathCacheHit = false;
+  private roundingBuilds = 0;
+  private roundingCacheHits = 0;
+  private roundingMs = 0;
+  private zoomOnlyRefresh = false;
+  private pathsVisited = 0;
+  private colorParses = 0;
+  private recordsCreated = 0;
   private previousStationsSource?: GlobalMapStation[];
   private previousStations: readonly TransportMapStationRenderRecord[] = [];
   private previousQuaysSource?: GlobalMapQuayMarker[];
@@ -216,14 +248,40 @@ export class TransportMapRenderModelBuilder {
 
   private roundingLineId?: string;
   private roundingZoom = 0;
-  private roundedPositions = new WeakMap<Float64Array, { zoom: number; positions: Float64Array }>();
+  private readonly roundedRecords = new Map<string, TransportMapPathRenderRecord>();
+  private roundedRecordBytes = 0;
+  private readonly roundedRecordSources = new WeakMap<TransportMapPathRenderRecord, { original: TransportMapPathRenderRecord; mode: GlobalMapMode | undefined }>();
 
   build(camera: TransportMapLabelPlacementCamera, scene: TransportMapRenderScene): TransportMapPreparedRenderModel {
+    const task = this.buildCooperatively(camera, scene, Number.POSITIVE_INFINITY);
+    let step = task.next();
+    while (!step.done) step = task.next();
+    return step.value;
+  }
+
+  get hasZoomDependentPaths(): boolean {
+    return this.previousPathBuild?.roundedIndices.some(indices => indices.length > 0) ?? false;
+  }
+
+  /** The owner must not interleave another build while this task is suspended. */
+  *buildCooperatively(camera: TransportMapLabelPlacementCamera, scene: TransportMapRenderScene, sliceBudgetMs = 2): Generator<void, TransportMapPreparedRenderModel> {
+    this.lastPathCacheHit = false;
+    this.roundingBuilds = this.roundingCacheHits = this.roundingMs = this.pathsVisited = 0;
+    this.zoomOnlyRefresh = false;
+    this.colorParses = this.recordsCreated = 0;
     this.roundingLineId = scene.activeLineId;
     // Quarter-zoom buckets keep tessellation stable during camera movement.
     this.roundingZoom = Math.ceil(camera.zoom * 4) / 4;
     this.sceneIndex.update(scene);
     this.worldGeometry.setStationsSource(scene.stations);
+    let roundedSource = this.roundedSources.get(scene.paths);
+    if (roundedSource?.lines !== scene.lines) {
+      roundedSource = { lines: scene.lines, hasMetro: scene.paths.some(path => this.sceneIndex.linesById.get(path.lineId)?.mode === "METRO") };
+      this.roundedSources.set(scene.paths, roundedSource);
+    }
+    // Road and ordinary rail coordinates do not depend on zoom. Only Metro
+    // curves and the selected line use the CSS-pixel rounding tessellation.
+    const pathRoundingZoom = scene.activeLineId || roundedSource.hasMetro ? this.roundingZoom : 0;
 
     // The itinerary preview deliberately suppresses the transport network.
     // Its camera still changes while the route is fitted or panned, but there
@@ -257,11 +315,12 @@ export class TransportMapRenderModelBuilder {
     const basePathDependencyKey = [
       this.identityToken(scene.paths),
       this.identityToken(scene.lines),
+      this.identityToken(scene.stations),
       stableIdList(scene.ghostLineIds),
       stableIdList(scene.interruptionLineIds),
       stableIdList(scene.disturbanceLineIds),
       scene.activeLineId ?? "",
-      this.roundingZoom,
+      pathRoundingZoom,
       scene.visibleModeMask,
       camera.zoom < GLOBAL_TRANSPORT_PLAN_CONFIG.renderer.overviewHeavyLineWidthMaxZoom ? 0 : 1,
     ].join("|");
@@ -284,7 +343,7 @@ export class TransportMapRenderModelBuilder {
       stableIdList(scene.interruptionLineIds),
       stableIdList(scene.disturbanceLineIds),
       scene.activeLineId ?? "",
-      this.roundingZoom,
+      pathRoundingZoom,
       scene.hoveredLineId ?? "",
       scene.visibleModeMask,
       camera.zoom < GLOBAL_TRANSPORT_PLAN_CONFIG.renderer.overviewHeavyLineWidthMaxZoom ? 0 : 1,
@@ -297,6 +356,13 @@ export class TransportMapRenderModelBuilder {
       basePathDependencyKey,
       trafficPathDependencyKey,
       highlightPathDependencyKey,
+    ].join("|");
+    const styleKey = [
+      this.identityToken(scene.paths), this.identityToken(scene.lines),
+      stableIdList(scene.ghostLineIds), stableIdList(scene.interruptionLineIds), stableIdList(scene.disturbanceLineIds),
+      scene.activeLineId ?? "", scene.hoveredLineId ?? "", scene.visibleModeMask,
+      this.identityToken(scene.trafficPathSpans),
+      camera.zoom < GLOBAL_TRANSPORT_PLAN_CONFIG.renderer.overviewHeavyLineWidthMaxZoom ? 0 : 1,
     ].join("|");
     if (this.previousPathDependencyKey !== pathDependencyKey) {
       this.previousPathDependencyKey = pathDependencyKey;
@@ -349,14 +415,19 @@ export class TransportMapRenderModelBuilder {
       this.previousCityZones = selectCityZonesForZoom(scene.servedCityZones, camera.zoom);
     }
     const modelKey = `${pathKey}|${markerKey}|${labelKey}|iso:${this.identityToken(scene.walkingIsochrones)}|iso-hover:${stableIdList(scene.hoveredIsochroneIds)}|served-cities:${this.identityToken(this.previousCityZones)}|city-lod:${currentCityZoneLodKey}`;
-    if (this.previousModel && this.previousModelKey === modelKey) return this.previousModel;
+    if (this.previousModel && this.previousModelKey === modelKey) {
+      this.lastPathCacheHit = true;
+      return this.previousModel;
+    }
 
-    const pathBundle = this.buildPaths(
+    const pathBundle = yield* this.buildPaths(
       basePathDependencyKey,
       trafficPathDependencyKey,
       highlightPathDependencyKey,
+      styleKey,
       scene,
       camera.zoom,
+      sliceBudgetMs,
     );
     const markers = this.buildMarkers(markerKey, scene, camera.zoom);
     const labels = this.buildLabels(labelKey, scene, camera);
@@ -364,14 +435,15 @@ export class TransportMapRenderModelBuilder {
       walkingIsochrones: scene.walkingIsochrones,
       servedCityZones: this.previousCityZones,
       sceneVersion: this.sceneIndex.version,
-      pathIdentity: `base-path-${this.basePathGeneration}`,
-      basePathIdentity: `base-path-${this.basePathGeneration}`,
-      trafficPathIdentity: `traffic-path-${this.trafficPathGeneration}`,
-      highlightPathIdentity: `highlight-path-${this.highlightPathGeneration}`,
+      pathIdentity: `base-path-${this.identityToken(pathBundle.basePaths)}`,
+      basePathIdentity: `base-path-${this.identityToken(pathBundle.basePaths)}`,
+      trafficPathIdentity: `traffic-path-${this.identityToken(pathBundle.trafficPaths)}`,
+      highlightPathIdentity: `highlight-path-${this.identityToken(pathBundle.highlightPaths)}`,
       geometryVersion: this.geometryVersion,
       pathCount: pathBundle.pathCount,
       vertexCount: pathBundle.vertexCount,
       basePaths: pathBundle.basePaths,
+      basePathBatches: pathBundle.basePathBatches,
       trafficPaths: pathBundle.trafficPaths,
       highlightPaths: pathBundle.highlightPaths,
       stations: markers.stations,
@@ -389,6 +461,11 @@ export class TransportMapRenderModelBuilder {
     this.worldGeometry.clear();
     this.previousModel = undefined;
     this.previousPathBuild = undefined;
+    this.pathBuilds.clear();
+    this.pathBuildBytes = 0;
+    this.roundedRecords.clear();
+    this.roundedRecordBytes = 0;
+    this.pathColors.clear();
     this.previousStationsSource = undefined;
     this.previousQuaysSource = undefined;
     this.previousEntrancesSource = undefined;
@@ -424,14 +501,63 @@ export class TransportMapRenderModelBuilder {
     return String(token);
   }
 
-  private buildPaths(
+  private *buildPaths(
     baseKey: string,
     trafficKey: string,
     highlightKey: string,
+    styleKey: string,
     scene: TransportMapRenderScene,
     zoom: number,
-  ) {
+    sliceBudgetMs: number,
+  ): Generator<void, PathBuildCache> {
+    const cacheKey = [baseKey, trafficKey, highlightKey].join("|");
+    const cached = this.pathBuilds.get(cacheKey);
+    this.lastPathCacheHit = Boolean(cached);
+    if (cached) {
+      this.pathBuilds.delete(cacheKey);
+      this.pathBuilds.set(cacheKey, cached);
+      this.previousPathBuild = cached.bundle;
+      return cached.bundle;
+    }
     const previous = this.previousPathBuild;
+    if (previous?.source === scene.paths && previous.stationsSource === scene.stations && previous.styleKey === styleKey) {
+      this.zoomOnlyRefresh = true;
+      // A quarter-zoom change only affects curves. Keep the exact path order
+      // and road records, without resolving every bus style or station anchor.
+      const roles = [previous.basePaths, previous.trafficPaths, previous.highlightPaths];
+      let estimatedBytes = previous.estimatedBytes;
+      const nextRoles: Array<readonly TransportMapPathRenderRecord[]> = [];
+      const sliced = Number.isFinite(sliceBudgetMs);
+      let sliceStartedAt = performance.now();
+      for (const [role, records] of roles.entries()) {
+        const indices = previous.roundedIndices[role]!;
+        if (indices.length === 0) {
+          nextRoles.push(records);
+          continue;
+        }
+        const next = records.slice();
+        for (const index of indices) {
+          if (sliced && performance.now() - sliceStartedAt >= sliceBudgetMs) {
+            yield;
+            sliceStartedAt = performance.now();
+          }
+          const old = records[index]!;
+          const source = this.roundedRecordSources.get(old)!;
+          const rounded = this.getRoundedRecord(source.original, source.mode);
+          next[index] = rounded;
+          estimatedBytes += rounded.positions.byteLength - old.positions.byteLength;
+        }
+        nextRoles.push(next);
+      }
+      const next: PathBuildCache = { ...previous, baseKey, trafficKey, highlightKey,
+        basePaths: nextRoles[0]!, trafficPaths: nextRoles[1]!, highlightPaths: nextRoles[2]!, estimatedBytes,
+        basePathBatches: previous.basePathBatches?.map(batch => batch.zoomDependent
+          ? this.createPathBatch(nextRoles[0]!.slice(batch.start, batch.end), batch.start, batch.end, true)
+          : batch) };
+      this.previousPathBuild = next;
+      this.retainPathBuild(cacheKey, next);
+      return next;
+    }
     if (previous?.source === scene.paths && previous.baseKey === baseKey) {
       let next = previous;
       if (previous.trafficKey !== trafficKey) {
@@ -448,7 +574,11 @@ export class TransportMapRenderModelBuilder {
           highlightPaths: this.buildHighlightPaths(scene, zoom),
         };
       }
-      if (next !== previous) this.previousPathBuild = next;
+      if (next !== previous) {
+        next = { ...next, styleKey, ...this.describePathRoles(next.basePaths, next.trafficPaths, next.highlightPaths) };
+        this.previousPathBuild = next;
+      }
+      this.retainPathBuild(cacheKey, next);
       return next;
     }
 
@@ -456,10 +586,16 @@ export class TransportMapRenderModelBuilder {
     const trafficPaths: TransportMapPathRenderRecord[] = [];
     const highlightPaths: TransportMapPathRenderRecord[] = [];
     let vertexCount = 0;
+    this.pathsVisited = scene.paths.length;
+    const sliced = Number.isFinite(sliceBudgetMs);
+    let sliceStartedAt = performance.now();
     for (const path of scene.paths) {
+      if (sliced && performance.now() - sliceStartedAt >= sliceBudgetMs) {
+        yield;
+        sliceStartedAt = performance.now();
+      }
       const line = this.sceneIndex.linesById.get(path.lineId);
       if (!line) continue;
-      const prepared = this.worldGeometry.get(path, line.mode, this.sceneIndex.stationsById);
       if (!resolveTransportMapPathStyle({
         line,
         scene,
@@ -470,6 +606,7 @@ export class TransportMapRenderModelBuilder {
         visibleLineIds: this.sceneIndex.visibleLineIds,
         zoom,
       }, this.styleScratch)) continue;
+      const prepared = this.worldGeometry.get(path, line.mode, this.sceneIndex.stationsById);
 
       for (let subpathIndex = 0; subpathIndex < prepared.subpaths.length; subpathIndex += 1) {
         const subpath = prepared.subpaths[subpathIndex]!;
@@ -523,19 +660,95 @@ export class TransportMapRenderModelBuilder {
       }
     }
 
+    const stationOnlyChange = previous?.source === scene.paths && previous.styleKey === styleKey;
+    const stableBase = reuseEquivalentRecords(stationOnlyChange ? previous.basePaths : undefined, basePaths);
+    const stableTraffic = reuseEquivalentRecords(stationOnlyChange ? previous.trafficPaths : undefined, trafficPaths);
+    const stableHighlight = reuseEquivalentRecords(stationOnlyChange ? previous.highlightPaths : undefined, highlightPaths);
     const bundle: PathBuildCache = {
       source: scene.paths,
+      stationsSource: scene.stations,
       baseKey,
       trafficKey,
       highlightKey,
-      basePaths,
-      trafficPaths,
-      highlightPaths,
+      styleKey,
+      ...this.describePathRoles(stableBase, stableTraffic, stableHighlight),
+      basePaths: stableBase,
+      basePathBatches: this.buildBasePathBatches(stableBase, previous?.basePathBatches),
+      trafficPaths: stableTraffic,
+      highlightPaths: stableHighlight,
       pathCount: basePaths.length,
       vertexCount,
     };
     this.previousPathBuild = bundle;
+    this.retainPathBuild(cacheKey, bundle);
     return bundle;
+  }
+
+  pathCacheMetrics() {
+    return { hit: this.lastPathCacheHit, entries: this.pathBuilds.size, bytes: this.pathBuildBytes,
+      roundedEntries: this.roundedRecords.size, roundedBytes: this.roundedRecordBytes,
+      roundingBuilds: this.roundingBuilds, roundingCacheHits: this.roundingCacheHits,
+      roundingMs: Number(this.roundingMs.toFixed(3)), zoomOnlyRefresh: this.zoomOnlyRefresh,
+      pathsVisited: this.pathsVisited, colorParses: this.colorParses, recordsCreated: this.recordsCreated,
+      baseBatchCount: this.previousPathBuild?.basePathBatches?.length ?? 1 };
+  }
+
+  private createPathBatch(records: readonly TransportMapPathRenderRecord[], start: number, end: number, zoomDependent: boolean): TransportMapPathRenderBatch {
+    // The curve-record LRU can outlive a full bundle. Returning to those same
+    // records must recover their binary packet even if this slice is new.
+    const identity = zoomDependent ? records.map(record => this.identityToken(record)).join(",") : this.identityToken(records);
+    return { id: `transport-base:${records[0]!.id}`, identity: `base-batch-${zoomDependent ? "curves" : "stable"}-${identity}`,
+      records, start, end, zoomDependent,
+      vertexCount: records.reduce((sum, record) => sum + record.positions.length / 2, 0) };
+  }
+
+  private buildBasePathBatches(records: readonly TransportMapPathRenderRecord[], previous?: readonly TransportMapPathRenderBatch[]): readonly TransportMapPathRenderBatch[] | undefined {
+    if (!records.length) return undefined;
+    const batches: TransportMapPathRenderBatch[] = [];
+    const previousById = new Map(previous?.map(batch => [batch.id, batch]));
+    let start = 0;
+    let rounded = this.roundedRecordSources.has(records[0]!);
+    for (let end = 1; end <= records.length; end += 1) {
+      const nextRounded = end < records.length && this.roundedRecordSources.has(records[end]!);
+      if (end < records.length && rounded === nextRounded) continue;
+      // A homogeneous role keeps the original single-packet/layer contract.
+      if (start === 0 && end === records.length) return undefined;
+      const old = previousById.get(`transport-base:${records[start]!.id}`);
+      const unchanged = old?.zoomDependent === rounded && old.records.length === end - start
+        && old.records.every((record, index) => record === records[start + index]);
+      batches.push(unchanged && old.start === start ? old
+        : this.createPathBatch(unchanged ? old.records : records.slice(start, end), start, end, rounded));
+      start = end;
+      rounded = nextRounded;
+    }
+    return previous?.length === batches.length && batches.every((batch, index) => batch === previous[index]) ? previous : batches;
+  }
+
+  private describePathRoles(...roles: readonly (readonly TransportMapPathRenderRecord[])[]) {
+    let estimatedBytes = 0;
+    const roundedIndices = roles.map(records => {
+      const indices: number[] = [];
+      for (let index = 0; index < records.length; index += 1) {
+        const record = records[index]!;
+        estimatedBytes += 96 + record.positions.byteLength;
+        if (this.roundedRecordSources.has(record)) indices.push(index);
+      }
+      return indices;
+    });
+    return { estimatedBytes, roundedIndices };
+  }
+
+  private retainPathBuild(key: string, bundle: PathBuildCache): void {
+    const bytes = bundle.estimatedBytes;
+    const limits = GLOBAL_TRANSPORT_PLAN_CONFIG.nextMap;
+    if (bytes > limits.preparedPathCacheMaxBytes) return;
+    this.pathBuilds.set(key, { bundle, bytes });
+    this.pathBuildBytes += bytes;
+    while (this.pathBuildBytes > limits.preparedPathCacheMaxBytes || this.pathBuilds.size > limits.preparedPathCacheMaxEntries) {
+      const oldest = this.pathBuilds.keys().next().value!;
+      this.pathBuildBytes -= this.pathBuilds.get(oldest)!.bytes;
+      this.pathBuilds.delete(oldest);
+    }
   }
 
   private buildTrafficPaths(
@@ -902,33 +1115,21 @@ export class TransportMapRenderModelBuilder {
     segmentKey: string | undefined,
   ): TransportMapPathRenderRecord {
     const mode = this.sceneIndex.linesById.get(path.lineId)?.mode;
-    if (mode === "METRO" || path.lineId === this.roundingLineId) {
-      const cached = this.roundedPositions.get(positions);
-      if (cached?.zoom === this.roundingZoom) positions = cached.positions;
-      else {
-        const rounded = roundTransportMapPositions(positions, this.roundingZoom, mode);
-        this.roundedPositions.set(positions, { zoom: this.roundingZoom, positions: rounded });
-        positions = rounded;
-      }
-    }
-    const cache = this.recordsByPath.get(path) ?? {
-      base: new Map<string, TransportMapPathRenderRecord>(),
-      highlight: new Map<string, TransportMapPathRenderRecord>(),
-      traffic: new Map<string, TransportMapPathRenderRecord>(),
-    } satisfies PathRecordCacheEntry;
+    const rounded = mode === "METRO" || path.lineId === this.roundingLineId;
+    const cache: PathRecordCacheEntry = this.recordsByPath.get(path) ?? {};
     this.recordsByPath.set(path, cache);
-    const color = parseCssColor(colorOverride ?? style.nativeColor, style.alpha);
     const recordKey = [subpathIndex, style.lineWidthCssPx, style.alpha, style.nativeColor, style.order, trafficKind ?? "", dash ?? style.dash, colorOverride ?? "", segmentKey ?? ""].join(":");
-    const records = trafficKind ? cache.traffic : highlight ? cache.highlight : cache.base;
+    const records = trafficKind ? cache.traffic ??= new Map()
+      : highlight ? cache.highlight ??= new Map() : cache.base ??= new Map();
     const existing = records.get(recordKey);
-    if (existing && existing.positions === positions) return existing;
+    if (existing && existing.positions === positions) return rounded ? this.getRoundedRecord(existing, mode) : existing;
     const record: TransportMapPathRenderRecord = {
       id: `${path.id}:${subpathIndex}:${trafficKind ?? (highlight ? "highlight" : "base")}:${dash ?? style.dash}:${segmentKey ?? "full"}`,
       pathId: path.id,
       lineId: path.lineId,
       subpathIndex,
       positions,
-      color,
+      color: this.getPathColor(colorOverride ?? style.nativeColor, style.alpha),
       widthCssPx: style.lineWidthCssPx,
       alpha: style.alpha,
       order: style.order,
@@ -936,6 +1137,44 @@ export class TransportMapRenderModelBuilder {
       trafficKind,
     };
     records.set(recordKey, record);
+    this.recordsCreated += 1;
+    return rounded ? this.getRoundedRecord(record, mode) : record;
+  }
+
+  private getPathColor(nativeColor: string, alpha: number): TransportMapRgba {
+    const key = `${nativeColor}|${alpha}`;
+    const cached = this.pathColors.get(key);
+    if (cached) return cached;
+    const color = parseCssColor(nativeColor, alpha);
+    this.colorParses += 1;
+    this.pathColors.set(key, color);
+    // A changing catalogue/palette must not grow this shared cache forever.
+    if (this.pathColors.size > 4096) this.pathColors.delete(this.pathColors.keys().next().value!);
+    return color;
+  }
+
+  private getRoundedRecord(original: TransportMapPathRenderRecord, mode: GlobalMapMode | undefined): TransportMapPathRenderRecord {
+    const key = `${this.identityToken(original)}:${this.roundingZoom}:${mode ?? ""}`;
+    const cached = this.roundedRecords.get(key);
+    if (cached) {
+      this.roundingCacheHits += 1;
+      this.roundedRecords.delete(key);
+      this.roundedRecords.set(key, cached);
+      return cached;
+    }
+    const started = performance.now();
+    const record = { ...original, positions: roundTransportMapPositions(original.positions, this.roundingZoom, mode) };
+    this.roundingMs += performance.now() - started;
+    this.roundingBuilds += 1;
+    this.roundedRecordSources.set(record, { original, mode });
+    this.roundedRecords.set(key, record);
+    this.roundedRecordBytes += 96 + record.positions.byteLength;
+    const limits = GLOBAL_TRANSPORT_PLAN_CONFIG.nextMap;
+    while (this.roundedRecordBytes > limits.preparedPathCacheMaxBytes) {
+      const oldest = this.roundedRecords.keys().next().value!;
+      this.roundedRecordBytes -= 96 + this.roundedRecords.get(oldest)!.positions.byteLength;
+      this.roundedRecords.delete(oldest);
+    }
     return record;
   }
 
@@ -1068,6 +1307,14 @@ function parseCssColor(value: string, alpha: number): TransportMapRgba {
 
 function clampByte(value: number): number {
   return Math.max(0, Math.min(255, Math.round(Number.isFinite(value) ? value : 0)));
+}
+
+function reuseEquivalentRecords(
+  previous: readonly TransportMapPathRenderRecord[] | undefined,
+  next: readonly TransportMapPathRenderRecord[],
+): readonly TransportMapPathRenderRecord[] {
+  return previous?.length === next.length && next.every((record, index) => record === previous[index])
+    ? previous : next;
 }
 
 export function lonLatPosition(point: WorldPoint): readonly [number, number] {

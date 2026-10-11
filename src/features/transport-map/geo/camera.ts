@@ -109,6 +109,8 @@ export function resizeCamera(
   if (!Number.isFinite(widthCssPx) || widthCssPx <= 0) throw new Error("Invalid camera width");
   if (!Number.isFinite(heightCssPx) || heightCssPx <= 0) throw new Error("Invalid camera height");
   if (!Number.isFinite(pixelRatio) || pixelRatio <= 0) throw new Error("Invalid pixel ratio");
+  if (camera.viewportWidthCssPx === widthCssPx && camera.viewportHeightCssPx === heightCssPx
+    && camera.pixelRatio === pixelRatio) return camera;
   return updateCamera(camera, {
     viewportWidthCssPx: widthCssPx,
     viewportHeightCssPx: heightCssPx,

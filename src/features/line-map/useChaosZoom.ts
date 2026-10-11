@@ -1303,7 +1303,7 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
         ownsPerformanceTrace = true;
       }
       diagnostics = new ChaosZoomDiagnostics(chaosNow(), chaosNow);
-      chaosPerformanceProbe = createTransportMapPerformanceProbe({ expectedHz: 60, warmupMs: 0, trace: performanceTrace });
+      chaosPerformanceProbe = createTransportMapPerformanceProbe({ expectedHz: 120, warmupMs: 0, trace: performanceTrace });
       chaosPerformanceProbe.start();
       publishChaosZoomLiveStatus("running", "standard", "standard");
 
@@ -1826,7 +1826,7 @@ export function useChaosZoom(options: UseChaosZoomOptions) {
       chaosZoomPhase.value = currentPhase;
       chaosPerformanceProbe?.dispose();
       chaosPerformanceProbe = createTransportMapPerformanceProbe({
-        expectedHz: 60,
+        expectedHz: 120,
         warmupMs: 0,
         trace: performanceTrace,
       });

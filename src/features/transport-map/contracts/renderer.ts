@@ -153,6 +153,9 @@ export interface TransportMapRendererMetrics {
   pathModelReuseCount?: number;
   pathModelBuildMs?: number;
   pathModelWorstMs?: number;
+  modelPreparationSlices?: number;
+  modelPreparationCpuMs?: number;
+  modelPreparationWorstSliceMs?: number;
   /** Latest one-second performance window reported by Deck itself. */
   deck?: TransportMapDeckMetrics;
 }
@@ -185,6 +188,8 @@ export interface TransportMapRenderFrame {
   model: TransportMapPreparedRenderModel;
   binaryPackets?: {
     base?: TransportMapBinaryPathPacket;
+    /** Same order as model.basePathBatches; published as a complete set. */
+    baseBatches?: readonly (TransportMapBinaryPathPacket | undefined)[];
     traffic?: TransportMapBinaryPathPacket;
     highlight?: TransportMapBinaryPathPacket;
   };

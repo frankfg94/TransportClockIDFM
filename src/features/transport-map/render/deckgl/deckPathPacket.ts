@@ -1,5 +1,7 @@
 import type { TransportMapWorkerPool } from "../../workers/workerPool";
 import type { TransportMapTraceEventId } from "../../performance/transportMapPerformanceTrace";
+import { lonLatToWorld } from "../../geo/coordinateKernel";
+import { MAPLIBRE_VECTOR_WORLD_TILE_SIZE } from "../../next/nextMapCamera";
 import type {
   TransportMapBinaryPathPacket,
   TransportMapPathRenderRecord,
@@ -11,36 +13,93 @@ import {
 
 export interface DeckPathCompilePayload {
   key: string;
-  records: readonly (Omit<TransportMapPathRenderRecord, "positions"> & { positionOffset: number; positionLength: number })[];
   positions: Float64Array;
+  startIndices: Uint32Array;
+  colors: Uint8Array;
+  widths: Float32Array;
+  dashArrays: Float32Array;
+  pathIds: string[];
+  lineIds: string[];
+  projectToCommon?: boolean;
 }
 
 /** One owned transfer buffer, regardless of the number of bus subpaths. */
 export function packDeckPathCompilePayload(
   records: readonly TransportMapPathRenderRecord[],
   key: string,
+  projectToCommon = false,
 ): DeckPathCompilePayload {
-  const positions = new Float64Array(records.reduce((length, record) => length + record.positions.length, 0));
-  let offset = 0;
-  const packedRecords = records.map(({ positions: source, ...record }) => {
-    positions.set(source, offset);
-    const packed = { ...record, positionOffset: offset, positionLength: source.length };
-    offset += source.length;
-    return packed;
-  });
-  return { key, positions, records: packedRecords };
+  const coordinateCount = records.reduce((length, record) => length + record.positions.length, 0);
+  // Transfer numeric styles with coordinates. Structured-cloning thousands
+  // of record objects/colors was synchronous even though compilation ran in
+  // a worker. All views share one owned buffer; source data is never detached.
+  const buffer = new ArrayBuffer(coordinateCount * 8 + (records.length + 1) * 4 + records.length * 16);
+  const positions = new Float64Array(buffer, 0, coordinateCount);
+  let offset = positions.byteLength;
+  const startIndices = new Uint32Array(buffer, offset, records.length + 1);
+  offset += startIndices.byteLength;
+  const colors = new Uint8Array(buffer, offset, records.length * 4);
+  offset += colors.byteLength;
+  const widths = new Float32Array(buffer, offset, records.length);
+  offset += widths.byteLength;
+  const dashArrays = new Float32Array(buffer, offset, records.length * 2);
+  const pathIds: string[] = [];
+  const lineIds: string[] = [];
+  let vertexCursor = 0;
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index]!;
+    const count = record.positions.length / 2;
+    if (!Number.isInteger(count) || count < 2) {
+      throw new Error(`Deck path record must contain at least two XY vertices: ${record.id}`);
+    }
+    positions.set(record.positions, vertexCursor * 2);
+    startIndices[index] = vertexCursor;
+    colors.set(resolveDeckPathColor(record), index * 4);
+    widths[index] = record.widthCssPx;
+    dashArrays.set(resolveDeckPathDashArray(record), index * 2);
+    pathIds.push(record.pathId);
+    lineIds.push(record.lineId);
+    vertexCursor += count;
+  }
+  startIndices[records.length] = vertexCursor;
+  return { key, positions, startIndices, colors, widths, dashArrays, pathIds, lineIds, projectToCommon };
 }
 
 export function compileDeckPathPayload(payload: DeckPathCompilePayload): TransportMapBinaryPathPacket {
-  return createDeckPathBinaryPacket(payload.records.map(({ positionOffset, positionLength, ...record }) => ({
-    ...record,
-    positions: payload.positions.subarray(positionOffset, positionOffset + positionLength),
-  })), payload.key);
+  const vertexCount = payload.positions.length / 2;
+  const colors = new Uint8Array(vertexCount * 4);
+  const widths = new Float32Array(vertexCount);
+  const dashArrays = new Float32Array(vertexCount * 2);
+  for (let pathIndex = 0; pathIndex < payload.pathIds.length; pathIndex += 1) {
+    const start = payload.startIndices[pathIndex]!;
+    const end = payload.startIndices[pathIndex + 1]!;
+    for (let vertexIndex = start; vertexIndex < end; vertexIndex += 1) {
+      const colorOffset = vertexIndex * 4;
+      const pathColorOffset = pathIndex * 4;
+      colors[colorOffset] = payload.colors[pathColorOffset]!;
+      colors[colorOffset + 1] = payload.colors[pathColorOffset + 1]!;
+      colors[colorOffset + 2] = payload.colors[pathColorOffset + 2]!;
+      colors[colorOffset + 3] = payload.colors[pathColorOffset + 3]!;
+      widths[vertexIndex] = payload.widths[pathIndex]!;
+      dashArrays[vertexIndex * 2] = payload.dashArrays[pathIndex * 2]!;
+      dashArrays[vertexIndex * 2 + 1] = payload.dashArrays[pathIndex * 2 + 1]!;
+    }
+  }
+  const positions = payload.positions.slice();
+  const startIndices = payload.startIndices.slice();
+  const commonPositions = payload.projectToCommon ? projectDeckPathPositions(positions) : undefined;
+  const bytes = positions.byteLength + startIndices.byteLength + colors.byteLength + widths.byteLength + dashArrays.byteLength + (commonPositions?.byteLength ?? 0);
+  return validateTransportMapBinaryPathPacket({
+    key: payload.key, length: payload.pathIds.length, pathCount: payload.pathIds.length,
+    positions, commonPositions, startIndices, colors, widths, dashArrays,
+    pathIds: payload.pathIds, lineIds: payload.lineIds, bytes,
+  });
 }
 
 export function createDeckPathBinaryPacket(
   records: readonly TransportMapPathRenderRecord[],
   key: string,
+  projectToCommon = false,
 ): TransportMapBinaryPathPacket {
   const recordVertexCounts = records.map((record) => {
     const count = record.positions.length / 2;
@@ -80,13 +139,15 @@ export function createDeckPathBinaryPacket(
   });
   startIndices[records.length] = vertexCursor;
 
+  const commonPositions = projectToCommon ? projectDeckPathPositions(positions) : undefined;
   const bytes = positions.byteLength + startIndices.byteLength + colors.byteLength +
-    widths.byteLength + dashArrays.byteLength;
+    widths.byteLength + dashArrays.byteLength + (commonPositions?.byteLength ?? 0);
   return validateTransportMapBinaryPathPacket({
     key,
     length: records.length,
     pathCount: records.length,
     positions,
+    commonPositions,
     startIndices,
     colors,
     widths,
@@ -95,6 +156,17 @@ export function createDeckPathBinaryPacket(
     lineIds,
     bytes,
   });
+}
+
+/** Same Float64 projection used by the flat Deck layer's object-data adapter. */
+export function projectDeckPathPositions(positions: Float64Array): Float64Array {
+  const common = new Float64Array(positions.length);
+  for (let index = 0; index < positions.length; index += 2) {
+    const world = lonLatToWorld({ lon: positions[index]!, lat: positions[index + 1]! });
+    common[index] = world.x * MAPLIBRE_VECTOR_WORLD_TILE_SIZE;
+    common[index + 1] = (1 - world.y) * MAPLIBRE_VECTOR_WORLD_TILE_SIZE;
+  }
+  return common;
 }
 
 /** Validate the exact binary shape consumed by Deck's PathLayer. */
@@ -109,6 +181,7 @@ export function validateTransportMapBinaryPathPacket(
     packet.length !== pathCount ||
     pathCount < 0 ||
     !(packet.positions instanceof Float64Array) ||
+    (packet.commonPositions !== undefined && (!(packet.commonPositions instanceof Float64Array) || packet.commonPositions.length !== packet.positions.length)) ||
     !(packet.startIndices instanceof Uint32Array) ||
     !(packet.colors instanceof Uint8Array) ||
     !(packet.widths instanceof Float32Array) ||
@@ -130,6 +203,7 @@ export function validateTransportMapBinaryPathPacket(
     packet.pathIds.some((id) => typeof id !== "string") ||
     packet.lineIds.some((id) => typeof id !== "string") ||
     packet.positions.some((value) => !Number.isFinite(value)) ||
+    packet.commonPositions?.some((value) => !Number.isFinite(value)) ||
     packet.widths.some((value) => !Number.isFinite(value) || value < 0) ||
     packet.dashArrays.some((value) => !Number.isFinite(value) || value < 0)
   ) {
@@ -155,7 +229,7 @@ export function validateTransportMapBinaryPathPacket(
     packet.startIndices.byteLength +
     packet.colors.byteLength +
     packet.widths.byteLength +
-    packet.dashArrays.byteLength;
+    packet.dashArrays.byteLength + (packet.commonPositions?.byteLength ?? 0);
   if (packet.bytes !== expectedBytes) {
     throw new Error(`Invalid Deck binary path packet byte count: ${packet.key}`);
   }
@@ -223,18 +297,18 @@ export class WorkerBackedDeckPathPacketCompiler implements DeckPathPacketCompile
     parentId?: TransportMapTraceEventId,
   ): Promise<TransportMapBinaryPathPacket> {
     if (!this.workerPool || this.workerPool.workerCount === 0) {
-      return Promise.resolve(createDeckPathBinaryPacket(records, key));
+      return Promise.resolve(createDeckPathBinaryPacket(records, key, true));
     }
     // The original scene owns these buffers. Give the worker explicit copies
     // so transfer-list ownership never detaches data still used by Deck.
-    const payload = packDeckPathCompilePayload(records, key);
+    const payload = packDeckPathCompilePayload(records, key, true);
     const transferList = [payload.positions.buffer];
     return this.workerPool.run(
       "compile-deck-paths",
       payload,
       generation,
       "background",
-      () => createDeckPathBinaryPacket(records, key),
+      () => createDeckPathBinaryPacket(records, key, true),
       transferList,
       parentId,
     ) as Promise<TransportMapBinaryPathPacket>;

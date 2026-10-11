@@ -168,6 +168,61 @@ describe("line optimizer", () => {
     );
     expect(rankOptimizerCandidates(candidates, settings)[0]!.train.id).toBe("earlyRer");
   });
+  it("accepts feeder and onward services and checks every connection", () => {
+    const chained = route();
+    const feeder = {
+      ...chained.transitSections[0]!,
+      lineCode: "T6",
+      fromName: "Parc André Malraux",
+      toName: "La Vallée",
+    };
+    const onward = {
+      ...chained.transitSections[1]!,
+      lineCode: "1",
+      lineMode: "METRO" as const,
+      fromName: "Châtelet les Halles",
+      toName: "Destination",
+    };
+    chained.sections.splice(2, 0, feeder, { type: "transfer", durationSeconds: 120 });
+    chained.sections.splice(
+      chained.sections.length - 1,
+      0,
+      { type: "transfer", durationSeconds: 180 },
+      onward,
+    );
+    chained.transitSections = chained.sections.filter((s) => s.lineMode);
+    expect(isOptimizerRoute(chained, config)).toBe(true);
+    const batches = [
+      [course("feeder", 5, 10)],
+      [course("tram", 12, 22)],
+      [course("rer", 30, 55)],
+      [course("onward", 58, 65)],
+    ];
+    const candidate = enumerateOptimizerCandidates(chained, batches, settings, start, config)[0]!;
+    expect(candidate.courses.map((c) => c.id)).toEqual(["feeder", "tram", "rer", "onward"]);
+    expect(candidate.leaveAt).toBe(at(2.5));
+    expect(candidate.arriveAt).toBe(at(66));
+    expect(candidate.waitSeconds).toBe(300);
+    expect(candidate.totalWaitSeconds).toBe(300);
+    expect(
+      enumerateOptimizerCandidates(
+        chained,
+        [batches[0]!, batches[1]!, batches[2]!, [course("missed", 57, 65)]],
+        settings,
+        start,
+        config,
+      ),
+    ).toEqual([]);
+    expect(
+      enumerateOptimizerCandidates(
+        chained,
+        [[course("lateFeeder", 5, 11)], ...batches.slice(1)],
+        settings,
+        start,
+        config,
+      ),
+    ).toEqual([]);
+  });
   it("requires the actual two-leg T10/RER B corridor and supports future route shapes without guessing", () => {
     expect(isOptimizerRoute(route(), config)).toBe(true);
     const wrong = route();
@@ -217,7 +272,6 @@ describe("real-journey provider", () => {
     expect(journeys.mock.calls[0]![0]).toMatchObject({
       datetime: "20261008T100100",
       count: 20,
-      allowedModes: ["TRAM", "RER"],
       includeDisruptions: true,
       dataFreshness: "realtime",
     });
@@ -232,6 +286,30 @@ describe("real-journey provider", () => {
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]!.tram.departure).toBe(at(5));
     expect(result.complete).toBe(false);
+  });
+  it("retries corridor discovery and enumerates all three legs", async () => {
+    const chained = route();
+    const feeder = {
+      ...chained.transitSections[0]!,
+      lineCode: "T6",
+      fromName: "Parc André Malraux",
+      toName: "La Vallée",
+    };
+    chained.sections.splice(2, 0, feeder, { type: "transfer", durationSeconds: 120 });
+    chained.transitSections = chained.sections.filter((s) => s.lineMode);
+    const journeys = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([chained]);
+    const result = await createLineOptimizerProvider({
+      journeys,
+      courses: async () => ({
+        batches: [[course("feeder", 5, 10)], [course("tram", 12, 22)], [course("rer", 30, 55)]],
+        complete: true,
+        analyzedAt: new Date(start).toISOString(),
+      }),
+    }).analyze(request());
+    expect(journeys.mock.calls[0]![0].allowedModes).toBeUndefined();
+    expect(journeys.mock.calls[1]![0].allowedModes).toEqual(["TRAM", "RER"]);
+    expect(result.courseCount).toBe(3);
+    expect(result.candidates[0]!.courses.map((c) => c.id)).toEqual(["feeder", "tram", "rer"]);
   });
   it("does not revive a cancelled service when enumeration returned no courses", async () => {
     const result = await createLineOptimizerProvider({

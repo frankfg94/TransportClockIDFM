@@ -97,6 +97,18 @@ const healthResponse: HealthResponse = {
       quota: { exposed: false },
     },
     {
+      id: "nearby-noise-wms",
+      label: "Bruitparif noise WMS",
+      labelKey: "health.checks.nearbyNoiseWms",
+      category: "Map",
+      required: false,
+      status: "ok",
+      latencyMs: 32,
+      message: "Detailed noise contours reachable",
+      messageKey: "health.messages.bruitparifWmsReachable",
+      quota: { exposed: true, remaining: "97", limit: "100" },
+    },
+    {
       id: "open-meteo",
       label: "Open-Meteo weather",
       category: "Weather",
@@ -150,6 +162,9 @@ describe("HealthPage", () => {
     expect(wrapper.text()).toContain("Open-Meteo weather");
     expect(wrapper.text()).toContain("Vector map");
     expect(wrapper.text()).toContain("Satellite imagery");
+    expect(wrapper.text()).toContain("WMS Bruitparif · contours sonores détaillés");
+    expect(wrapper.text()).toContain("Précision sonore avancée");
+    expect(wrapper.text()).toContain("Restant 97");
     expect(wrapper.text()).toContain("Commerces et lieux à proximité");
     expect(wrapper.text()).toContain("OpenStreetMap nearby places");
     expect(wrapper.text()).toContain("Quota");

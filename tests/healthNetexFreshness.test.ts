@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   checkSatelliteTiles,
   checkNavitiaJourneys,
+  checkNearbyNoiseWms,
   getNetexDatasetFreshness,
   parsePrimGlobalRequestAvailability,
   runPluginHealthCheck,
@@ -185,5 +186,57 @@ describe("checkSatelliteTiles", () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain(
       "World_Imagery/MapServer/tile/12/1408/2074",
     );
+  });
+});
+
+describe("checkNearbyNoiseWms", () => {
+  it("checks the detailed Bruitparif layer and exposes returned quota headers", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      new Response(new Uint8Array([137, 80, 78, 71]), {
+        status: 200,
+        headers: {
+          "content-type": "image/png",
+          "ratelimit-limit": "100",
+          "ratelimit-remaining": "97",
+          "ratelimit-reset": "60",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(checkNearbyNoiseWms()).resolves.toMatchObject({
+      id: "nearby-noise-wms",
+      labelKey: "health.checks.nearbyNoiseWms",
+      category: "Map",
+      required: false,
+      status: "ok",
+      quota: { exposed: true, limit: "100", remaining: "97", reset: "60" },
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.origin).toBe("https://raster.bruitparif.fr");
+    expect(url.pathname).toBe("/mapproxy/service");
+    expect(url.searchParams.get("SERVICE")).toBe("WMS");
+    expect(url.searchParams.get("REQUEST")).toBe("GetMap");
+    expect(url.searchParams.get("LAYERS")).toBe("CSAB_2024_wCSAB_cl_idf");
+    expect(url.searchParams.get("WIDTH")).toBe("32");
+    expect(url.searchParams.get("HEIGHT")).toBe("32");
+  });
+
+  it("reports rate limiting and uses Retry-After when the quota is otherwise hidden", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      new Response("", {
+        status: 429,
+        headers: { "retry-after": "30" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(checkNearbyNoiseWms()).resolves.toMatchObject({
+      id: "nearby-noise-wms",
+      status: "warning",
+      messageKey: "health.messages.bruitparifWmsRateLimited",
+      quota: { exposed: true, reset: "30" },
+    });
   });
 });

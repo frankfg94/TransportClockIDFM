@@ -1967,6 +1967,34 @@ const {
   zoomReference,
   computed(() => props.highPrecisionNoiseEnabled),
 );
+const noiseWmsCursorPosition = ref<ScreenPoint>();
+const noiseWmsCursorLoaderVisible = computed(() =>
+  noiseHighPrecisionActive.value
+    && noiseWmsStatus.value === "loading"
+    && noiseWmsCursorPosition.value !== undefined,
+);
+const noiseWmsCursorLoaderStyle = computed(() => {
+  const position = noiseWmsCursorPosition.value;
+  return position
+    ? { left: `${position.x}px`, top: `${position.y}px` }
+    : undefined;
+});
+let lastNoiseWmsPointerClientX: number | undefined;
+let lastNoiseWmsPointerClientY: number | undefined;
+watch(
+  [noiseWmsStatus, noiseHighPrecisionActive],
+  ([status, highPrecisionActive]) => {
+    if (!highPrecisionActive || status !== "loading") {
+      noiseWmsCursorPosition.value = undefined;
+      return;
+    }
+
+    if (lastNoiseWmsPointerClientX !== undefined && lastNoiseWmsPointerClientY !== undefined) {
+      positionNoiseWmsCursorLoader(lastNoiseWmsPointerClientX, lastNoiseWmsPointerClientY);
+    }
+  },
+  { immediate: true },
+);
 const isochroneConfigurationError = computed(() => {
   const error = cityViewEnabled.value ? cityIsochroneError.value : isochroneError.value;
   return isNearbyIsochroneErrorCode(error, "not-configured");
@@ -3221,7 +3249,7 @@ function handlePointerDown(event: PointerEvent): void {
 
 function handlePointerMove(event: PointerEvent): void {
   if (!canInteractWithMap.value) return;
-  // Hovering the map is not a camera gesture and must not force a layout read.
+  // Hovering the map is not a camera gesture and must not force a layout read here.
   if (event.pointerType === "touch") {
     if (!activePointers.has(event.pointerId)) return;
   } else if (panPointerId !== event.pointerId) return;
@@ -3267,6 +3295,49 @@ function handlePointerMove(event: PointerEvent): void {
   event.preventDefault();
   panMoved = true;
   queueGestureCamera(panCameraByScreen(pendingGestureCamera ?? camera.value, delta));
+}
+
+function handleMapPointerMove(event: PointerEvent): void {
+  rememberNoiseWmsPointer(event);
+  handlePointerMove(event);
+}
+
+function rememberNoiseWmsPointer(event: PointerEvent): void {
+  if (event.pointerType === "touch") return;
+  lastNoiseWmsPointerClientX = event.clientX;
+  lastNoiseWmsPointerClientY = event.clientY;
+  if (noiseHighPrecisionActive.value && noiseWmsStatus.value === "loading") {
+    positionNoiseWmsCursorLoader(event.clientX, event.clientY);
+  }
+}
+
+function clearNoiseWmsPointer(event: PointerEvent): void {
+  if (event.pointerType === "touch") return;
+  lastNoiseWmsPointerClientX = undefined;
+  lastNoiseWmsPointerClientY = undefined;
+  noiseWmsCursorPosition.value = undefined;
+}
+
+function positionNoiseWmsCursorLoader(clientX: number, clientY: number): void {
+  const element = root.value;
+  if (!element) return;
+
+  const bounds = element.getBoundingClientRect();
+  const loaderWidth = 220;
+  const loaderHeight = 38;
+  const offset = 14;
+  const pointerX = clientX - bounds.left;
+  const pointerY = clientY - bounds.top;
+  let left = pointerX + offset;
+  let top = pointerY + offset;
+
+  if (left + loaderWidth > bounds.width - 8) left = pointerX - loaderWidth - offset;
+  if (top + loaderHeight > bounds.height - 8) top = pointerY - loaderHeight - offset;
+
+  noiseWmsCursorPosition.value = {
+    x: Math.max(8, Math.min(left, Math.max(8, bounds.width - loaderWidth - 8))),
+    y: Math.max(8, Math.min(top, Math.max(8, bounds.height - loaderHeight - 8))),
+  };
 }
 
 function handlePointerEnd(event: PointerEvent): void {
@@ -4854,7 +4925,9 @@ function mix(from: number, to: number, progress: number): number {
     :aria-label="t('nearbyStations.mapAria')"
       @pointercancel="handlePointerEnd"
       @pointerdown="handlePointerDown"
-      @pointermove="handlePointerMove"
+      @pointerenter="rememberNoiseWmsPointer"
+      @pointerleave="clearNoiseWmsPointer"
+      @pointermove="handleMapPointerMove"
       @pointerup="handlePointerEnd"
       @click.capture="handleMapClick"
       @wheel="handleWheel"
@@ -6034,6 +6107,22 @@ function mix(from: number, to: number, progress: number): number {
         <button type="button" @click.stop="retryNoiseZones">{{ t('nearbyStations.airQualityZonesRetry') }}</button>
       </div>
       <div
+        v-if="noiseWmsCursorLoaderVisible"
+        class="nearby-map__noise-cursor-loader"
+        :style="noiseWmsCursorLoaderStyle"
+        role="status"
+        aria-live="polite"
+        data-testid="nearby-map-noise-wms-cursor-loader"
+      >
+        <LoaderCircle
+          class="nearby-map__noise-cursor-spinner"
+          :class="{ 'nearby-map__noise-cursor-spinner--static': reducedMotion }"
+          :size="15"
+          aria-hidden="true"
+        />
+        <span>{{ t('nearbyStations.noiseZonesDetailedLoading') }}</span>
+      </div>
+      <div
         v-if="noiseLegendVisible"
         class="nearby-map__noise-legend"
         role="note"
@@ -6855,6 +6944,9 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__noise-status button:hover, .nearby-map__noise-status button:focus-visible { background: #b74b24; color: #fff; outline: 0; }
 .nearby-map__noise-progress { background: #f1ddd4; border-radius: 999px; display: block; height: 5px; overflow: hidden; width: 60px; }
 .nearby-map__noise-progress span { animation: nearby-map-isochrone-progress 1.2s ease-in-out infinite; background: #b74b24; border-radius: inherit; display: block; height: 100%; width: 45%; }
+.nearby-map__noise-cursor-loader { align-items: center; backdrop-filter: blur(5px); background: rgba(255,255,255,.96); border: 1px solid rgba(183,75,36,.28); border-radius: 999px; box-shadow: 0 5px 16px rgba(16,35,63,.18); box-sizing: border-box; color: #9a3e1e; display: flex; font-size: .68rem; font-weight: 820; gap: 7px; max-width: calc(100% - 16px); padding: 7px 10px; pointer-events: none; position: absolute; width: 220px; z-index: 30; }
+.nearby-map__noise-cursor-spinner { animation: nearby-map-city-view-spin 900ms linear infinite; flex: 0 0 auto; }
+.nearby-map__noise-cursor-spinner--static { animation: none; }
 .nearby-map__noise-legend { align-items: center; backdrop-filter: blur(5px); background: rgba(255,255,255,.94); border: 1px solid rgba(183,75,36,.2); border-radius: 10px; bottom: 34px; color: #334155; display: flex; flex-wrap: wrap; font-size: .62rem; font-weight: 760; gap: 4px 8px; left: 8px; max-width: calc(100% - 16px); padding: 6px 8px; position: absolute; z-index: 12; }
 .nearby-map__noise-legend strong { color: #18233f; font-weight: 850; }
 .nearby-map__noise-legend span { align-items: center; display: inline-flex; gap: 4px; }
@@ -7120,7 +7212,7 @@ function mix(from: number, to: number, progress: number): number {
   .nearby-map-shell:fullscreen .nearby-map__sidebar { max-height: none; }
  }
 @media (prefers-reduced-motion: reduce) {
-  .nearby-map__city-view-spinner, .nearby-map__real-estate-spinner { animation: none; }
+  .nearby-map__city-view-spinner, .nearby-map__real-estate-spinner, .nearby-map__noise-cursor-spinner { animation: none; }
   .nearby-map-display-sheet-enter-active, .nearby-map-display-sheet-leave-active { transition: none; }
   .nearby-map__sidebar-tab-track { transition: none; }
   .nearby-map__city-view-slider { transition: none; }
