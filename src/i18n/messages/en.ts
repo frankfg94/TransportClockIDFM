@@ -2881,6 +2881,7 @@ export const en = {
         chateletUnavailable: "Neutral reference when no journey to Châtelet could be calculated.",
         majorStationUnder40: "A real journey strictly under {threshold} min to a major station is shown as a strength.",
         majorStationContext: "A real journey of at least {threshold} min to a major station stays visible as a neutral reference.",
+        majorStationUnavailable: "A neutral reference is shown when no verifiable journey to the major station is available.",
         noctilienAtNight: "Displayed Noctilien lines have a real journey dated {hour} and a walking access under {threshold} minutes.",
         frequencyHigh: "Strength when the concerned line's peak theoretical frequency is at most {threshold} min.",
         frequencyLow: "Watch point when the concerned line's peak theoretical frequency is at least {threshold} min.",
@@ -2970,6 +2971,10 @@ export const en = {
         majorStationContext: {
           label: "{destination} in {duration} min",
           tooltip: "The best real journey to {destination} takes {duration} min (elapsed: {elapsed} min, initial wait removed: {initialWait} min), including {walking} min walking, with {transfers} transfer(s) · lines: {lines}.",
+        },
+        majorStationUnavailable: {
+          label: "Journey time to {destination} unavailable",
+          tooltip: "No verifiable journey to {destination} was returned at calculation time. No duration is invented and no journey verdict is assigned.",
         },
         noctilienAtNight: {
           label: "Noctilien {line} available all night with a {minutes}-minute walk",

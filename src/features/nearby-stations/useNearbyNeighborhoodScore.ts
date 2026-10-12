@@ -374,7 +374,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     for (const benchmark of benchmarkDestinations) {
       const journeyKey = journeyCacheKey(originKey, benchmark.id, benchmark, journeyDateTime);
       const taskId = `journey:${benchmark.id}`;
-      nextBenchmarks.push({ id: benchmark.id, label: benchmark.label, journeys: [] });
+      nextBenchmarks.push({ id: benchmark.id, label: benchmark.label, journeys: [], status: "loading" });
       const journeyPromise = loadJourneyProbe(origin, benchmark, journeyDateTime, journeyKey)
         .then((next) => {
           if (benchmark.id === "chatelet" && token === requestToken) {
@@ -383,7 +383,12 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
           return next;
         })
         .catch((cause: unknown) => {
-          if (benchmark.id === "chatelet" && token === requestToken) chateletJourneyStatus.value = "unavailable";
+          if (token === requestToken) {
+            const current = nextBenchmarks.find((candidate) => candidate.id === benchmark.id);
+            if (current) current.status = "unavailable";
+            journeyBenchmarks.value = [...nextBenchmarks];
+            if (benchmark.id === "chatelet") chateletJourneyStatus.value = "unavailable";
+          }
           throw cause;
         });
       trackTask(
@@ -392,7 +397,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         token,
         (next) => {
           const current = nextBenchmarks.find((candidate) => candidate.id === benchmark.id);
-          if (current) current.journeys = next;
+          if (current) {
+            current.journeys = next;
+            current.status = next.length > 0 ? "ready" : "unavailable";
+          }
           journeyBenchmarks.value = [...nextBenchmarks];
           if (benchmark.id === "chatelet") chateletJourneys.value = next;
           updatedAt.value = Date.now();
@@ -401,6 +409,15 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         "routes",
         ["transport"],
       );
+    }
+    for (const benchmark of MAJOR_STATION_BENCHMARKS) {
+      if (nextBenchmarks.some((candidate) => candidate.id === benchmark.id)) continue;
+      nextBenchmarks.push({
+        id: benchmark.id,
+        label: benchmark.label,
+        journeys: [],
+        status: options.stationsLoading?.value === true ? "loading" : "unavailable",
+      });
     }
     journeyBenchmarks.value = nextBenchmarks;
 
@@ -1127,6 +1144,13 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     () => {
       if (options.origin.value && !options.network.value && !journeyBenchmarks.value.some((benchmark) => benchmark.id === "chatelet")) {
         chateletJourneyStatus.value = options.stationsLoading?.value === true ? "loading" : "unavailable";
+      }
+      if (options.origin.value && options.stationsLoading?.value !== true) {
+        journeyBenchmarks.value = journeyBenchmarks.value.map((benchmark) =>
+          benchmark.status === "loading" && !pendingTasks.has(`journey:${benchmark.id}`)
+            ? { ...benchmark, status: "unavailable" }
+            : benchmark,
+        );
       }
       markCriteriaDirty(["transport"]);
       scheduleRecompute();

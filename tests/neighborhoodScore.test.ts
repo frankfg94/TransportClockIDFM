@@ -913,6 +913,29 @@ describe("neighborhood score", () => {
     }
   });
 
+  it("shows every major station as a neutral unavailable reference when no route is returned", () => {
+    const benchmarks = [
+      { id: "montparnasse", label: "Gare Montparnasse", journeys: [], status: "unavailable" as const },
+      { id: "saint-lazare", label: "Gare Saint-Lazare", journeys: [], status: "unavailable" as const },
+      { id: "gare-de-lyon", label: "Gare de Lyon", journeys: [], status: "unavailable" as const },
+      { id: "gare-du-nord", label: "Gare du Nord", journeys: [], status: "unavailable" as const },
+    ];
+    const result = buildNeighborhoodScore(input({ journeyBenchmarks: benchmarks }));
+    const transport = result.categories.find((category) => category.id === "transport");
+    const majorFacts = transport?.neutralFacts.filter((fact) => fact.family.startsWith("major-station:")) ?? [];
+
+    expect(majorFacts).toHaveLength(4);
+    expect(majorFacts.every((fact) => fact.kind === "majorStationUnavailable" && fact.polarity === "neutral")).toBe(true);
+    expect(new Set(majorFacts.map((fact) => fact.labelValues?.destination))).toEqual(new Set(benchmarks.map((benchmark) => benchmark.label)));
+    expect(majorFacts.every((fact) => fact.labelValues?.duration === undefined && !fact.travel)).toBe(true);
+    expect(result.neutralFacts.filter((fact) => fact.family.startsWith("major-station:"))).toHaveLength(4);
+
+    const loading = buildNeighborhoodScore(input({
+      journeyBenchmarks: benchmarks.map((benchmark) => ({ ...benchmark, status: "loading" as const })),
+    }));
+    expect(loading.neutralFacts.some((fact) => fact.family.startsWith("major-station:"))).toBe(false);
+  });
+
   it("combines distinct Noctilien lines when each stop is reached on foot in under 15 minutes", () => {
     const result = buildNeighborhoodScore(input({
       noctilienJourneys: [

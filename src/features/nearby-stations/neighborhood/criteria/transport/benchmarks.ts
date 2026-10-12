@@ -14,7 +14,24 @@ export function buildJourneyBenchmarkFacts(input: NeighborhoodScoreInput): {
   for (const benchmark of benchmarks) {
     if (benchmark.id === "chatelet") continue;
     const journey = chooseFastestJourney(benchmark.journeys);
-    if (!journey) continue;
+    if (!journey) {
+      if (benchmark.status === "unavailable") {
+        neutralFacts.push(makeFact({
+          id: `major-station-${benchmark.id}`,
+          kind: "majorStationUnavailable",
+          category: "transport",
+          polarity: "neutral",
+          family: `major-station:${benchmark.id}`,
+          priority: 9,
+          values: { destination: benchmark.label },
+          sourceKey: SOURCE_KEYS.journeys,
+          proof: "direct",
+          ruleKey: RULE_KEYS.majorStationUnavailable,
+          ruleValues: {},
+        }));
+      }
+      continue;
+    }
     const summary = summarizeJourney(journey);
     const timing = analyzeNearbyJourneyTiming(journey);
     const isPositive = timing.scoreSeconds < 40 * 60;

@@ -2913,6 +2913,7 @@ export const fr = {
         chateletUnavailable: "Repère neutre lorsqu’aucun itinéraire vers Châtelet n’a pu être calculé.",
         majorStationUnder40: "Un trajet réel strictement inférieur à {threshold} min vers une grande gare est affiché comme point fort.",
         majorStationContext: "Un trajet réel d’au moins {threshold} min vers une grande gare reste affiché comme repère neutre.",
+        majorStationUnavailable: "Un repère neutre est affiché lorsqu’aucun itinéraire vérifiable vers la grande gare n’est disponible.",
         noctilienAtNight: "Les lignes Noctilien affichées ont un trajet réel daté de {hour} et un accès à pied inférieur à {threshold} min.",
         frequencyHigh: "Point fort si la fréquence théorique de pointe de la ligne concernée est inférieure ou égale à {threshold} min.",
         frequencyLow: "Point de vigilance si la fréquence théorique de pointe de la ligne concernée est d’au moins {threshold} min.",
@@ -3002,6 +3003,10 @@ export const fr = {
         majorStationContext: {
           label: "{destination} en {duration} min",
           tooltip: "Le meilleur itinéraire réel vers {destination} dure {duration} min (temps écoulé : {elapsed} min, attente initiale retirée : {initialWait} min), dont {walking} min de marche, avec {transfers} correspondance(s) · lignes : {lines}.",
+        },
+        majorStationUnavailable: {
+          label: "Temps vers {destination} indisponible",
+          tooltip: "Aucun itinéraire vérifiable vers {destination} n’a été renvoyé à l’heure du calcul. Aucune durée n’est inventée et aucun verdict de trajet n’est attribué.",
         },
         noctilienAtNight: {
           label: "Noctilien {line} accessibles toute la nuit en {minutes} min de marche",

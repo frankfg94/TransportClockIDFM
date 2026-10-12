@@ -167,6 +167,39 @@ describe("NearbyNeighborhoodScoreCard", () => {
     wrapper.unmount();
   });
 
+  it("renders an unavailable major-station time with the neutral gray marker", () => {
+    const result = buildNeighborhoodScore({
+      places: [],
+      placesLoaded: false,
+      stations: [],
+      stationsLoaded: true,
+      journeyBenchmarks: [{
+        id: "gare-du-nord",
+        label: "Gare du Nord",
+        journeys: [],
+        status: "unavailable",
+      }],
+      generatedAt: 1,
+    });
+    const wrapper = mount(NearbyNeighborhoodScoreCard, {
+      props: { result, directoryUrl: "/nearby-stations" },
+      global: {
+        stubs: {
+          NuxtLink: {
+            props: ["to"],
+            template: "<a :href='to'><slot /></a>",
+          },
+        },
+      },
+    });
+
+    const stationFact = wrapper.findAll(".nearby-neighborhood-score-fact--neutral")
+      .find((fact) => fact.text().includes("Temps vers Gare du Nord indisponible"));
+    expect(stationFact).toBeDefined();
+    expect(stationFact!.get(".nearby-neighborhood-score-fact__marker").text()).toBe("•");
+    wrapper.unmount();
+  });
+
   it("splits positive facts into two columns only when the category has no negative fact", () => {
     const result = buildNeighborhoodScore({
       places: [{
