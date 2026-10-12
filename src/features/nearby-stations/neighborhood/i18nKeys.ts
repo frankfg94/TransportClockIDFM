@@ -60,6 +60,10 @@ export const FACT_KEYS: Record<NeighborhoodFactKind, { label: TranslationKey; to
     label: "nearbyStations.neighborhoodScore.facts.majorStationUnder40.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.majorStationUnder40.tooltip",
   },
+  majorStationContext: {
+    label: "nearbyStations.neighborhoodScore.facts.majorStationContext.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.majorStationContext.tooltip",
+  },
   noctilienAtNight: {
     label: "nearbyStations.neighborhoodScore.facts.noctilienAtNight.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.noctilienAtNight.tooltip",
@@ -307,6 +311,7 @@ export const RULE_KEYS = {
   chateletOver60: "nearbyStations.neighborhoodScore.rules.chateletOver60",
   chateletUnavailable: "nearbyStations.neighborhoodScore.rules.chateletUnavailable",
   majorStationUnder40: "nearbyStations.neighborhoodScore.rules.majorStationUnder40",
+  majorStationContext: "nearbyStations.neighborhoodScore.rules.majorStationContext",
   noctilienAtNight: "nearbyStations.neighborhoodScore.rules.noctilienAtNight",
   frequencyHigh: "nearbyStations.neighborhoodScore.rules.frequencyHigh",
   frequencyLow: "nearbyStations.neighborhoodScore.rules.frequencyLow",

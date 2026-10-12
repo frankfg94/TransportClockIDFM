@@ -8,6 +8,7 @@ import { getNeighborhoodScoreDisplay } from "./primitives";
 const gtfsTooltipKeys: Partial<Record<NeighborhoodFactKind, TranslationKey>> = {
   transportHub: "nearbyStations.neighborhoodScore.gtfsFacts.transportHub",
   majorStationUnder40: "nearbyStations.neighborhoodScore.gtfsFacts.majorStation",
+  majorStationContext: "nearbyStations.neighborhoodScore.gtfsFacts.majorStation",
   noctilienAtNight: "nearbyStations.neighborhoodScore.gtfsFacts.noctilien",
   greenSpaceTransitNearby: "nearbyStations.neighborhoodScore.gtfsFacts.greenSpace",
   hospitalNearby: "nearbyStations.neighborhoodScore.gtfsFacts.hospital",
@@ -15,6 +16,7 @@ const gtfsTooltipKeys: Partial<Record<NeighborhoodFactKind, TranslationKey>> = {
 const gtfsRuleKeys: Partial<Record<TranslationKey, TranslationKey>> = {
   "nearbyStations.neighborhoodScore.rules.transportHub": "nearbyStations.neighborhoodScore.gtfsRules.transportHub",
   "nearbyStations.neighborhoodScore.rules.majorStationUnder40": "nearbyStations.neighborhoodScore.gtfsRules.majorStation",
+  "nearbyStations.neighborhoodScore.rules.majorStationContext": "nearbyStations.neighborhoodScore.gtfsRules.majorStationContext",
   "nearbyStations.neighborhoodScore.rules.noctilienAtNight": "nearbyStations.neighborhoodScore.gtfsRules.noctilien",
   "nearbyStations.neighborhoodScore.rules.greenSpaceTransit": "nearbyStations.neighborhoodScore.gtfsRules.greenSpace",
   "nearbyStations.neighborhoodScore.rules.hospitalPresence": "nearbyStations.neighborhoodScore.gtfsRules.hospital",

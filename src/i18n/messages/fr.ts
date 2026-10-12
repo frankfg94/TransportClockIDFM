@@ -2726,6 +2726,7 @@ export const fr = {
       gtfsRules: {
         transportHub: "Une future gare est affichée lorsque l’itinéraire théorique jusqu’au pôle dure moins de {threshold} min et qu’une ligne actuelle y est co-localisée.",
         majorStation: "Un itinéraire théorique strictement inférieur à {threshold} min vers une grande gare est affiché comme point fort.",
+        majorStationContext: "Un itinéraire théorique d’au moins {threshold} min vers une grande gare reste affiché comme repère neutre.",
         noctilien: "Les lignes Noctilien affichées ont un itinéraire théorique daté de {hour} et un accès à pied inférieur à {threshold} min.",
         greenSpace: "Un grand espace vert est retenu si un itinéraire théorique non-BUS le rejoint en {threshold} min ou moins après retrait de l’attente initiale.",
         hospital: "Un hôpital est affiché lorsqu’un itinéraire théorique ou piéton permet de le rejoindre en {threshold} min ou moins.",
@@ -2911,6 +2912,7 @@ export const fr = {
         chateletOver60: "Point de vigilance si le meilleur itinéraire retenu vers Châtelet dure au moins {threshold} min.",
         chateletUnavailable: "Repère neutre lorsqu’aucun itinéraire vers Châtelet n’a pu être calculé.",
         majorStationUnder40: "Un trajet réel strictement inférieur à {threshold} min vers une grande gare est affiché comme point fort.",
+        majorStationContext: "Un trajet réel d’au moins {threshold} min vers une grande gare reste affiché comme repère neutre.",
         noctilienAtNight: "Les lignes Noctilien affichées ont un trajet réel daté de {hour} et un accès à pied inférieur à {threshold} min.",
         frequencyHigh: "Point fort si la fréquence théorique de pointe de la ligne concernée est inférieure ou égale à {threshold} min.",
         frequencyLow: "Point de vigilance si la fréquence théorique de pointe de la ligne concernée est d’au moins {threshold} min.",
@@ -2994,6 +2996,10 @@ export const fr = {
           openRanking: "Voir le classement des lignes",
         },
         majorStationUnder40: {
+          label: "{destination} en {duration} min",
+          tooltip: "Le meilleur itinéraire réel vers {destination} dure {duration} min (temps écoulé : {elapsed} min, attente initiale retirée : {initialWait} min), dont {walking} min de marche, avec {transfers} correspondance(s) · lignes : {lines}.",
+        },
+        majorStationContext: {
           label: "{destination} en {duration} min",
           tooltip: "Le meilleur itinéraire réel vers {destination} dure {duration} min (temps écoulé : {elapsed} min, attente initiale retirée : {initialWait} min), dont {walking} min de marche, avec {transfers} correspondance(s) · lignes : {lines}.",
         },

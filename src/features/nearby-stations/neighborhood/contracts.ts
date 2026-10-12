@@ -102,6 +102,7 @@ export type NeighborhoodFactKind =
   | "transportHub"
   | "transportServiceQuality"
   | "majorStationUnder40"
+  | "majorStationContext"
   | "noctilienAtNight"
   | "greenSpaceExceptional"
   | "greenSpaceTransitNearby"

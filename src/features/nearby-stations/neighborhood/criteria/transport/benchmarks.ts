@@ -6,10 +6,10 @@ import { chooseFastestJourney, summarizeJourney } from "../../journeys";
 
 export function buildJourneyBenchmarkFacts(input: NeighborhoodScoreInput): {
   positiveFacts: NeighborhoodFact[];
-  negativeFacts: NeighborhoodFact[];
+  neutralFacts: NeighborhoodFact[];
 } {
   const positiveFacts: NeighborhoodFact[] = [];
-  const negativeFacts: NeighborhoodFact[] = [];
+  const neutralFacts: NeighborhoodFact[] = [];
   const benchmarks = input.journeyBenchmarks ?? [];
   for (const benchmark of benchmarks) {
     if (benchmark.id === "chatelet") continue;
@@ -17,12 +17,12 @@ export function buildJourneyBenchmarkFacts(input: NeighborhoodScoreInput): {
     if (!journey) continue;
     const summary = summarizeJourney(journey);
     const timing = analyzeNearbyJourneyTiming(journey);
-    if (timing.scoreSeconds >= 40 * 60) continue;
-    positiveFacts.push(makeFact({
+    const isPositive = timing.scoreSeconds < 40 * 60;
+    const fact = makeFact({
       id: `major-station-${benchmark.id}`,
-      kind: "majorStationUnder40",
+      kind: isPositive ? "majorStationUnder40" : "majorStationContext",
       category: "transport",
-      polarity: "positive",
+      polarity: isPositive ? "positive" : "neutral",
       family: `major-station:${benchmark.id}`,
       priority: 9,
       values: {
@@ -36,11 +36,13 @@ export function buildJourneyBenchmarkFacts(input: NeighborhoodScoreInput): {
       },
       sourceKey: SOURCE_KEYS.journeys,
       proof: "direct",
-      ruleKey: RULE_KEYS.majorStationUnder40,
+      ruleKey: isPositive ? RULE_KEYS.majorStationUnder40 : RULE_KEYS.majorStationContext,
       ruleValues: { threshold: 40 },
       emphasis: summary.durationMinutes <= 20 ? "exceptional" : undefined,
       travel: { journey },
-    }));
+    });
+    if (isPositive) positiveFacts.push(fact);
+    else neutralFacts.push(fact);
   }
-  return { positiveFacts, negativeFacts };
+  return { positiveFacts, neutralFacts };
 }

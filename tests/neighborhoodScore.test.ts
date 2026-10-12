@@ -834,6 +834,85 @@ describe("neighborhood score", () => {
     expect(majorStationFact?.labelValues?.walking).toBe(8);
   });
 
+  it("keeps every major station visible and uses neutral facts at or above 40 minutes", () => {
+    const benchmarks = [
+      { id: "montparnasse", label: "Gare Montparnasse", journeys: [journey(39 * 60)] },
+      { id: "saint-lazare", label: "Gare Saint-Lazare", journeys: [journey(40 * 60)] },
+      { id: "gare-de-lyon", label: "Gare de Lyon", journeys: [journey(51 * 60)] },
+      { id: "gare-du-nord", label: "Gare du Nord", journeys: [journey(72 * 60)] },
+    ];
+    const result = buildNeighborhoodScore(input({
+      chateletJourneys: [journey(52 * 60)],
+      journeyBenchmarks: benchmarks,
+    }));
+    const transport = result.categories.find((category) => category.id === "transport");
+    const majorStationFacts = [
+      ...result.positiveFacts,
+      ...result.neutralFacts,
+    ].filter((fact) => fact.family.startsWith("major-station:"));
+
+    expect(transport?.positiveFacts.find((fact) => fact.family === "major-station:montparnasse")?.polarity).toBe("positive");
+    expect(transport?.neutralFacts.filter((fact) => fact.family.startsWith("major-station:")).map((fact) => fact.labelValues?.destination)).toEqual(expect.arrayContaining([
+      "Gare Saint-Lazare",
+      "Gare de Lyon",
+      "Gare du Nord",
+    ]));
+    expect(transport?.neutralFacts.find((fact) => fact.family === "major-station:saint-lazare")?.kind).toBe("majorStationContext");
+    expect(transport?.neutralFacts.find((fact) => fact.family === "major-station:saint-lazare")?.polarity).toBe("neutral");
+    expect(new Set(majorStationFacts.map((fact) => fact.labelValues?.destination))).toEqual(new Set([
+      "Gare de Lyon",
+      "Gare du Nord",
+      "Gare Montparnasse",
+      "Gare Saint-Lazare",
+    ]));
+  });
+
+  it("preserves every neutral major-station journey when backend facts fill the verdict", () => {
+    const benchmarks = [
+      { id: "montparnasse", label: "Gare Montparnasse", journeys: [journey(41 * 60)] },
+      { id: "saint-lazare", label: "Gare Saint-Lazare", journeys: [journey(48 * 60)] },
+      { id: "gare-de-lyon", label: "Gare de Lyon", journeys: [journey(55 * 60)] },
+      { id: "gare-du-nord", label: "Gare du Nord", journeys: [journey(65 * 60)] },
+    ];
+    const externalNeutralFacts = Array.from({ length: 6 }, (_, index) => ({
+      id: `transport-neutral-${index}`,
+      category: "transport" as const,
+      polarity: "neutral" as const,
+      family: `external:transport:${index}`,
+      priority: 20 - index,
+      label: `Repère neutre ${index}`,
+      explanation: "Fixture de verdict externe.",
+      rule: "Fixture.",
+      proof: "direct" as const,
+      observedAt: "2026-10-12T08:00:00.000Z",
+      sourceIds: [],
+    }));
+    const result = buildNeighborhoodScore(input({
+      journeyBenchmarks: benchmarks,
+      backendVerdict: {
+        schemaVersion: "1.3",
+        generatedAt: "2026-10-12T08:00:00.000Z",
+        warnings: [],
+        sources: [],
+        categories: [{
+          id: "transport",
+          status: "available",
+          score: 6,
+          positiveFacts: [],
+          negativeFacts: [],
+          neutralFacts: externalNeutralFacts,
+          limitations: [],
+        }],
+      },
+    }));
+    const transport = result.categories.find((category) => category.id === "transport");
+
+    for (const benchmark of benchmarks) {
+      expect(transport?.neutralFacts.some((fact) => fact.family === `major-station:${benchmark.id}`)).toBe(true);
+      expect(result.neutralFacts.some((fact) => fact.family === `major-station:${benchmark.id}`)).toBe(true);
+    }
+  });
+
   it("combines distinct Noctilien lines when each stop is reached on foot in under 15 minutes", () => {
     const result = buildNeighborhoodScore(input({
       noctilienJourneys: [

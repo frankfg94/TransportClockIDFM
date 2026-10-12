@@ -121,6 +121,7 @@ function aggregateNeighborhoodScoreInternal(
     4,
   );
   preserveChateletJourneyFact(selectedNeutralFacts, categories.flatMap((category) => category.neutralFacts), "neutral", 4);
+  preserveJourneyBenchmarkFacts(selectedNeutralFacts, categories.flatMap((category) => category.neutralFacts));
 
   return {
     score,
@@ -188,6 +189,7 @@ function mergeBackendVerdict(categories: NeighborhoodCategoryResult[], verdict: 
       "neutral",
       4,
     );
+    preserveJourneyBenchmarkFacts(neutralFacts, [...local.neutralFacts, ...externalFacts]);
     if (local.id === "transport" && external.scoreDelta !== undefined) {
       const score = local.score === undefined ? undefined : clamp(local.score + external.scoreDelta);
       return withFacts({ ...local, score, positiveFacts, negativeFacts, neutralFacts });

@@ -2694,6 +2694,7 @@ export const en = {
       gtfsRules: {
         transportHub: "A future station is shown when the theoretical journey to its hub takes less than {threshold} min and a current line shares the location.",
         majorStation: "A theoretical journey strictly under {threshold} min to a major station is shown as a strength.",
+        majorStationContext: "A theoretical journey of at least {threshold} min to a major station stays visible as a neutral reference.",
         noctilien: "The displayed Noctilien lines have a theoretical journey dated {hour} and walking access under {threshold} min.",
         greenSpace: "A large green space is included when a theoretical non-BUS journey reaches it in {threshold} min or less after removing the initial wait.",
         hospital: "A hospital is shown when a theoretical or walking journey reaches it in {threshold} min or less.",
@@ -2879,6 +2880,7 @@ export const en = {
         chateletOver60: "Watch point when the selected best journey to Châtelet takes at least {threshold} min.",
         chateletUnavailable: "Neutral reference when no journey to Châtelet could be calculated.",
         majorStationUnder40: "A real journey strictly under {threshold} min to a major station is shown as a strength.",
+        majorStationContext: "A real journey of at least {threshold} min to a major station stays visible as a neutral reference.",
         noctilienAtNight: "Displayed Noctilien lines have a real journey dated {hour} and a walking access under {threshold} minutes.",
         frequencyHigh: "Strength when the concerned line's peak theoretical frequency is at most {threshold} min.",
         frequencyLow: "Watch point when the concerned line's peak theoretical frequency is at least {threshold} min.",
@@ -2962,6 +2964,10 @@ export const en = {
           openRanking: "View line ranking",
         },
         majorStationUnder40: {
+          label: "{destination} in {duration} min",
+          tooltip: "The best real journey to {destination} takes {duration} min (elapsed: {elapsed} min, initial wait removed: {initialWait} min), including {walking} min walking, with {transfers} transfer(s) · lines: {lines}.",
+        },
+        majorStationContext: {
           label: "{destination} in {duration} min",
           tooltip: "The best real journey to {destination} takes {duration} min (elapsed: {elapsed} min, initial wait removed: {initialWait} min), including {walking} min walking, with {transfers} transfer(s) · lines: {lines}.",
         },
