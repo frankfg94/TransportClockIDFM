@@ -936,6 +936,31 @@ describe("neighborhood score", () => {
     expect(loading.neutralFacts.some((fact) => fact.family.startsWith("major-station:"))).toBe(false);
   });
 
+  it("fills missing or unsettled major-station benchmarks after route loading ends", () => {
+    const result = buildNeighborhoodScore(input({
+      stationsLoaded: true,
+      journeyBenchmarksLoading: false,
+      journeyBenchmarks: [{
+        id: "saint-lazare",
+        label: "Gare Saint-Lazare",
+        journeys: [],
+        status: "loading",
+      }],
+    }));
+    const majorFacts = result.categories
+      .find((category) => category.id === "transport")
+      ?.neutralFacts.filter((fact) => fact.family.startsWith("major-station:")) ?? [];
+
+    expect(majorFacts.map((fact) => fact.labelValues?.destination)).toEqual(expect.arrayContaining([
+      "Gare Montparnasse",
+      "Gare Saint-Lazare",
+      "Gare de Lyon",
+      "Gare du Nord",
+    ]));
+    expect(majorFacts).toHaveLength(4);
+    expect(majorFacts.every((fact) => fact.kind === "majorStationUnavailable" && fact.polarity === "neutral")).toBe(true);
+  });
+
   it("combines distinct Noctilien lines when each stop is reached on foot in under 15 minutes", () => {
     const result = buildNeighborhoodScore(input({
       noctilienJourneys: [

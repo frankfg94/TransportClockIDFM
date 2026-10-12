@@ -312,6 +312,7 @@ export interface NeighborhoodScoreInput {
   chateletJourneys?: readonly NearbyJourney[];
   chateletJourneyStatus?: "loading" | "ready" | "unavailable";
   journeyBenchmarks?: readonly NeighborhoodJourneyBenchmark[];
+  journeyBenchmarksLoading?: boolean;
   journeyDepartureTime?: string;
   greenSpaceJourneys?: readonly NeighborhoodGreenSpaceJourney[];
   noctilienJourneys?: readonly NearbyJourney[];

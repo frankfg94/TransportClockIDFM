@@ -3,6 +3,7 @@ import type { NeighborhoodFact, NeighborhoodScoreInput } from "../../contracts";
 import { makeFact } from "../../facts";
 import { RULE_KEYS, SOURCE_KEYS } from "../../i18nKeys";
 import { chooseFastestJourney, summarizeJourney } from "../../journeys";
+import { MAJOR_STATION_BENCHMARKS } from "./majorStationBenchmarks";
 
 export function buildJourneyBenchmarkFacts(input: NeighborhoodScoreInput): {
   positiveFacts: NeighborhoodFact[];
@@ -10,12 +11,19 @@ export function buildJourneyBenchmarkFacts(input: NeighborhoodScoreInput): {
 } {
   const positiveFacts: NeighborhoodFact[] = [];
   const neutralFacts: NeighborhoodFact[] = [];
-  const benchmarks = input.journeyBenchmarks ?? [];
+  const providedBenchmarks = input.journeyBenchmarks;
+  const benchmarksById = new Map((providedBenchmarks ?? []).map((benchmark) => [benchmark.id, benchmark]));
+  const canReportUnavailable = input.stationsLoaded && input.journeyBenchmarksLoading === false;
+  const benchmarks = providedBenchmarks === undefined
+    ? []
+    : MAJOR_STATION_BENCHMARKS.map((station) => benchmarksById.get(station.id) ?? (canReportUnavailable
+      ? { id: station.id, label: station.label, journeys: [], status: "unavailable" as const }
+      : undefined)).filter((benchmark): benchmark is NonNullable<typeof benchmark> => benchmark !== undefined);
   for (const benchmark of benchmarks) {
     if (benchmark.id === "chatelet") continue;
     const journey = chooseFastestJourney(benchmark.journeys);
     if (!journey) {
-      if (benchmark.status === "unavailable") {
+      if (benchmark.status === "unavailable" || (benchmark.status === "loading" && canReportUnavailable)) {
         neutralFacts.push(makeFact({
           id: `major-station-${benchmark.id}`,
           kind: "majorStationUnavailable",

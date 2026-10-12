@@ -44,6 +44,7 @@ import {
   DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME,
 } from "./neighborhood/departureTimes";
 import type { NearbyStationEntry } from "./nearbyStations";
+import { MAJOR_STATION_BENCHMARKS } from "./neighborhood/criteria/transport/majorStationBenchmarks";
 import {
   aggregateNeighborhoodScore,
   buildNeighborhoodCategories,
@@ -204,6 +205,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       chateletJourneys: chateletJourneys.value,
       chateletJourneyStatus: chateletJourneyStatus.value,
       journeyBenchmarks: journeyBenchmarks.value,
+      journeyBenchmarksLoading: [...pendingTasks].some((taskId) => taskId.startsWith("journey:")),
       journeyDepartureTime: options.journeyDepartureTime?.value ?? DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME,
       greenSpaceJourneys: greenSpaceJourneys.value,
       noctilienJourneys: noctilienJourneys.value,
@@ -1292,13 +1294,6 @@ interface JourneyBenchmarkDestination extends Pick<GlobalMapStation, "id" | "lon
   label: string;
   destinationRef?: string;
 }
-
-const MAJOR_STATION_BENCHMARKS: readonly { id: string; label: string; names: readonly string[] }[] = [
-  { id: "montparnasse", label: "Gare Montparnasse", names: ["gare montparnasse", "montparnasse bienvenue", "montparnasse"] },
-  { id: "saint-lazare", label: "Gare Saint-Lazare", names: ["gare saint lazare", "saint lazare"] },
-  { id: "gare-de-lyon", label: "Gare de Lyon", names: ["gare de lyon", "lyon"] },
-  { id: "gare-du-nord", label: "Gare du Nord", names: ["gare du nord", "du nord"] },
-];
 
 function resolveJourneyBenchmarks(network: TransportMapNetwork | undefined): JourneyBenchmarkDestination[] {
   if (!network) return [];

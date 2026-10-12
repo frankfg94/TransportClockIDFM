@@ -173,6 +173,7 @@ describe("NearbyNeighborhoodScoreCard", () => {
       placesLoaded: false,
       stations: [],
       stationsLoaded: true,
+      journeyBenchmarksLoading: false,
       journeyBenchmarks: [{
         id: "gare-du-nord",
         label: "Gare du Nord",
@@ -197,6 +198,9 @@ describe("NearbyNeighborhoodScoreCard", () => {
       .find((fact) => fact.text().includes("Temps vers Gare du Nord indisponible"));
     expect(stationFact).toBeDefined();
     expect(stationFact!.get(".nearby-neighborhood-score-fact__marker").text()).toBe("•");
+    for (const station of ["Gare Montparnasse", "Gare Saint-Lazare", "Gare de Lyon", "Gare du Nord"]) {
+      expect(wrapper.text()).toContain(`Temps vers ${station} indisponible`);
+    }
     wrapper.unmount();
   });
 
