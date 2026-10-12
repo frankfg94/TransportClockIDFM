@@ -1,22 +1,17 @@
 import type { GtfsLineFrequencyResponse, FrequencySection } from "../../types/lineFrequency";
-import type {
-  GtfsLineTimetableResponse,
-  GtfsLineTimetableStop,
-} from "../../types/lineFrequencyTimetable";
+import type { GtfsLineTimetableResponse } from "../../types/lineFrequencyTimetable";
 import { fetchGtfsLineFrequency } from "../../services/lineFrequency";
 import { fetchGtfsLineTimetable } from "../../services/lineFrequencyTimetable";
 import { canonicalGtfsTimetableStationId } from "./lineFrequencyTimetableIntervals";
+import { findGtfsLastService, type GtfsLastService } from "../../../shared/gtfs/lastService";
 
-export interface GtfsLastService {
-  seconds: number;
-  stopName?: string;
-}
+export type { GtfsLastService } from "../../../shared/gtfs/lastService";
 
 export interface UseLineFrequencyTimetableOptions {
   fetchFrequency?: typeof fetchGtfsLineFrequency;
   fetchTimetable?: typeof fetchGtfsLineTimetable;
+  fetchLastService?: (lineId: string, stationId?: string, options?: { serviceDate?: string; signal?: AbortSignal }) => Promise<GtfsLastService | undefined>;
 }
-
 /**
  * Shared GTFS source for line frequency cards and nearby-neighborhood facts.
  * A station lookup prefers the exact station cadence and keeps the serving
@@ -73,30 +68,9 @@ export function useLineFrequencyTimetable(options: UseLineFrequencyTimetableOpti
     stationId?: string,
     requestOptions: { serviceDate?: string; signal?: AbortSignal } = {},
   ): Promise<GtfsLastService | undefined> {
+    if (options.fetchLastService) return options.fetchLastService(lineId, stationId, requestOptions);
     const timetable = await getTimetable(lineId, requestOptions);
-    if (timetable.status !== "ready") return undefined;
-
-    const matchingStops = stationId
-      ? timetable.stops.filter((stop) => stopMatchesStation(stop, stationId))
-      : timetable.stops;
-    const stopIds = new Set(matchingStops.map((stop) => stop.id));
-    if (stopIds.size === 0 && stationId) return undefined;
-
-    let latest: GtfsLastService | undefined;
-    for (const trip of timetable.trips) {
-      for (const call of trip.calls) {
-        if (!stopIds.has(call.stopId)) continue;
-        const seconds = call.departure ?? call.arrival;
-        if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) continue;
-        if (!latest || seconds > latest.seconds) {
-          latest = {
-            seconds,
-            stopName: timetable.stops.find((stop) => stop.id === call.stopId)?.name,
-          };
-        }
-      }
-    }
-    return latest;
+    return findGtfsLastService(timetable, stationId);
   }
 
   return { getFrequencies, getTimetable, getLastService, selectFrequencySection };
@@ -138,11 +112,4 @@ function compareFrequencySections(left: FrequencySection, right: FrequencySectio
   return Number(right.kind === "central") - Number(left.kind === "central")
     || right.stationIds.length - left.stationIds.length
     || left.id.localeCompare(right.id);
-}
-
-function stopMatchesStation(stop: GtfsLineTimetableStop, stationId: string): boolean {
-  const wanted = canonicalGtfsTimetableStationId(stationId);
-  return [stop.id, stop.parentId, stop.topologyId]
-    .filter((value): value is string => Boolean(value))
-    .some((value) => canonicalGtfsTimetableStationId(value) === wanted);
 }

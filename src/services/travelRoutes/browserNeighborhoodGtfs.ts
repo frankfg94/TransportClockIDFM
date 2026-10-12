@@ -1,8 +1,8 @@
 import type { NeighborhoodJourneysRequest, NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
 import { toServerApiUrl } from "../serverApi";
-import type { NeighborhoodGtfsWorkerRequest, NeighborhoodGtfsWorkerResponse } from "./neighborhoodGtfsWorkerProtocol";
+import type { NeighborhoodGtfsWorkerAction, NeighborhoodGtfsWorkerRequest, NeighborhoodGtfsWorkerResponse } from "./neighborhoodGtfsWorkerProtocol";
 
-interface Pending { resolve(payload: NeighborhoodJourneysResponse): void; reject(error: unknown): void; cleanup(): void }
+interface Pending { resolve(payload: unknown): void; reject(error: unknown): void; cleanup(): void }
 let worker: Worker | undefined, nextId = 0;
 const pending = new Map<number, Pending>();
 function ensureWorker(): Worker {
@@ -23,6 +23,9 @@ function ensureWorker(): Worker {
 }
 export function canUseBrowserNeighborhoodGtfs(): boolean { return typeof window !== "undefined" && typeof Worker !== "undefined"; }
 export function routeBrowserNeighborhoodGtfs(request: NeighborhoodJourneysRequest, signal: AbortSignal): Promise<NeighborhoodJourneysResponse> {
+  return requestBrowserNeighborhoodGtfs({ kind: "routes", request }, signal);
+}
+export function requestBrowserNeighborhoodGtfs<T>(action: NeighborhoodGtfsWorkerAction, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(signal.reason);
   return new Promise((resolve, reject) => {
     const id = ++nextId;
@@ -30,13 +33,13 @@ export function routeBrowserNeighborhoodGtfs(request: NeighborhoodJourneysReques
     const timer = setTimeout(() => { pending.delete(id); cleanup(); reject(new Error("GTFS browser routing timed out")); }, 180_000);
     const cleanup = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); };
     signal.addEventListener("abort", abort, { once: true });
-    pending.set(id, { resolve, reject, cleanup });
+    pending.set(id, { resolve: payload => resolve(payload as T), reject, cleanup });
     try {
       const baseUrl = new URL(toServerApiUrl("/"), window.location.href).href;
       // Vue reactive points cannot cross the structured-clone boundary. The
       // request is the same JSON contract accepted by the server endpoint.
-      const plainRequest = JSON.parse(JSON.stringify(request)) as NeighborhoodJourneysRequest;
-      ensureWorker().postMessage({ id, baseUrl, request: plainRequest } satisfies NeighborhoodGtfsWorkerRequest);
+      const plainAction = JSON.parse(JSON.stringify(action)) as NeighborhoodGtfsWorkerAction;
+      ensureWorker().postMessage({ id, baseUrl, ...plainAction } satisfies NeighborhoodGtfsWorkerRequest);
     } catch (error) { pending.delete(id); cleanup(); reject(error); }
   });
 }

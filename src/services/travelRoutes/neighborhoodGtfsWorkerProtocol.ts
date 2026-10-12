@@ -1,4 +1,8 @@
-import type { NeighborhoodJourneysRequest, NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
+import type { NeighborhoodJourneysRequest } from "../../features/nearby-stations/neighborhoodJourneys";
 
-export interface NeighborhoodGtfsWorkerRequest { id: number; baseUrl: string; request: NeighborhoodJourneysRequest }
-export type NeighborhoodGtfsWorkerResponse = { id: number; payload: NeighborhoodJourneysResponse } | { id: number; error: string };
+export type NeighborhoodGtfsWorkerAction =
+  | { kind: "routes"; request: NeighborhoodJourneysRequest }
+  | { kind: "frequency"; lineId: string }
+  | { kind: "last-service"; lineId: string; stationId?: string; serviceDate?: string };
+export type NeighborhoodGtfsWorkerRequest = { id: number; baseUrl: string } & NeighborhoodGtfsWorkerAction;
+export type NeighborhoodGtfsWorkerResponse = { id: number; payload: unknown } | { id: number; error: string };

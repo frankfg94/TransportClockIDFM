@@ -3,7 +3,7 @@ import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { fetchGtfsLineFrequency } from "../../services/lineFrequency";
 import { runNetworkTask } from "../../services/networkScheduler";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
-import { useLineFrequencyTimetable } from "../line-map/useLineFrequencyTimetable";
+import { useLineFrequencyTimetable, type UseLineFrequencyTimetableOptions } from "../line-map/useLineFrequencyTimetable";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import type { GlobalMapMode, GlobalMapStation } from "../transport-map/contracts/manifest";
 import type { TransportMapNetwork } from "../transport-map/contracts/network";
@@ -105,6 +105,7 @@ export interface UseNearbyNeighborhoodScoreOptions {
   placesProvider?: PlacesProvider;
   travelRoutesProvider?: TravelRoutesProvider;
   fetchFrequency?: typeof fetchGtfsLineFrequency;
+  fetchLastService?: UseLineFrequencyTimetableOptions["fetchLastService"];
   serviceQuality?: ReadonlyValue<PublicServiceQuality | undefined>;
   initialSnapshot?: NearbyNeighborhoodScoreSnapshot;
 }
@@ -114,7 +115,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const placesProvider = options.placesProvider ?? defaultProviders.places;
   const travelRoutesProvider = options.travelRoutesProvider ?? defaultProviders.travelRoutes;
   const fetchFrequency = options.fetchFrequency ?? fetchGtfsLineFrequency;
-  const frequencyTimetable = useLineFrequencyTimetable({ fetchFrequency });
+  const frequencyTimetable = useLineFrequencyTimetable({ fetchFrequency, fetchLastService: options.fetchLastService });
   const defaultNightJourneyDateTime = getNearbyNightJourneyDateTime();
   const places = ref<NearbyPlace[]>([]);
   const placesLoaded = ref(false);

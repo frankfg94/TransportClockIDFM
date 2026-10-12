@@ -5,6 +5,7 @@ import { ArrowLeft, Gauge } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { createGtfsNeighborhoodTravelRoutesProvider } from "../../services/travelRoutes/gtfsNeighborhoodTravelRoutesProvider";
+import { fetchNeighborhoodGtfsFrequency, fetchNeighborhoodGtfsLastService } from "../../services/travelRoutes/browserNeighborhoodTimetable";
 import { createNeighborhoodWalkingRoutesProvider } from "../../services/neighborhoodWalkingRoutesProvider";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import { fetchGpeStations } from "../transport-map/gpeStationsApi";
@@ -128,6 +129,8 @@ const heavy = useNearbyHeavyTransports({
   batchQueries: true,
 });
 const score = useNearbyNeighborhoodScore({
+  fetchFrequency: fetchNeighborhoodGtfsFrequency,
+  fetchLastService: fetchNeighborhoodGtfsLastService,
   journeySource: "gtfs",
   documentaryFirst: true,
   walkingPolicy: "ors-only",
