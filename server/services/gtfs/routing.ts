@@ -8,11 +8,13 @@ import { getGtfsManifest, isGtfsEnabled, readGtfsJson, getGtfsRuntimeCacheEpoch 
 import { isGtfsServiceActive, shiftGtfsDate } from "./timetableCalendar";
 import type { GtfsManifest } from "./types";
 import { CONNECTION_COLUMNS, type GtfsRoutingIndex, type GtfsRoutingShard } from "./routingTypes";
-import { scanConnections, routingSections, type RoutingConnection, type RoutingNode, type RoutingFootpath, type ConnectionScanResult, type TransitArrival } from "./connectionScan";
+import { scanConnections, routingSections, type RoutingConnection, type RoutingConnectionBatch, type RoutingNode, type RoutingFootpath, type ConnectionScanResult, type TransitArrival } from "./connectionScan";
 import { gtfsServiceEpoch, parisCivilEpoch, parisDateTime } from "./routingTime";
 
 export const NEIGHBORHOOD_ROUTING_HORIZON_SECONDS = 4 * 3600;
 const WALK_RADIUS_METERS = 1200;
+const CONNECTION_BATCH_SIZE = 1024;
+const SHARD_PREFETCH_COUNT = 3;
 let indexCache: { key: string; promise: Promise<GtfsRoutingIndex | undefined> } | undefined;
 const trees = new Map<string, { expires: number; promise: Promise<ConnectionScanResult> }>();
 
@@ -29,14 +31,12 @@ function buildFootpaths(index: GtfsRoutingIndex) {
   for (let i = 1; i < offsets.length; i++) offsets[i]! += offsets[i - 1]!;
   const edges = new Int32Array(index.transfers.length * 2), pathwayEdges = new Uint8Array(index.transfers.length);
   const pathwayIndices = new Set(index.pathwayTransferIndices ?? []), cursor = offsets.slice(), margins = new Map<number, number>();
-  const forbidden = new Map<string, number>(), restrictedOrigins = new Set<number>();
-  const minimumTransfers = new Map<string, number>();
+  const restrictedOrigins = new Set<number>();
   for (const [ordinal, [from, to, seconds]] of index.transfers.entries()) {
     const position = cursor[from]!++ * 2; edges[position] = to; edges[position + 1] = seconds;
     pathwayEdges[position / 2] = Number(pathwayIndices.has(ordinal));
-    if (!pathwayIndices.has(ordinal)) minimumTransfers.set(`${from}:${to}`, seconds);
     if (from === to) margins.set(from, seconds);
-    if (seconds < 0) { forbidden.set(`${from}:${to}`, -1); restrictedOrigins.add(from); }
+    if (seconds < 0) restrictedOrigins.add(from);
   }
   const parents = new Map<string, number[]>();
   for (const i of index.boardingStops) {
@@ -89,7 +89,14 @@ function buildFootpaths(index: GtfsRoutingIndex) {
       const rank = (rule.fromTrip || rule.toTrip ? 4 : 0) + (rule.fromRoute ? 1 : 0) + (rule.toRoute ? 1 : 0);
       if (rank > specificity || rank === specificity && rule.seconds === -1) { specificity = rank; selected = rule.seconds; }
     }
-    return selected ?? minimumTransfers.get(`${from.stop}:${to.from}`) ?? forbidden.get(`${from.stop}:${to.from}`);
+    if (selected !== undefined) return selected;
+    // Reuse the compact directed graph instead of retaining another map with
+    // one string key for every transfer in the complete regional catalogue.
+    let generic: number | undefined;
+    for (let i = offsets[from.stop]!; i < offsets[from.stop + 1]!; i++) {
+      if (edges[i * 2] === to.from && !pathwayEdges[i]) generic = edges[i * 2 + 1];
+    }
+    return generic;
   };
   return { paths, margins, transferRule, context };
 }
@@ -106,42 +113,57 @@ function nearbyStops(index: GtfsRoutingIndex, point: NearbyJourneyPoint, limit: 
   return candidates.sort((a, b) => a.distance - b.distance || a.id - b.id).slice(0, limit);
 }
 
-async function* dayConnections(event: H3Event | undefined, manifest: GtfsManifest, index: GtfsRoutingIndex, day: string, start: number, end: number, modes: NeighborhoodJourneysRequest["allowedModes"]): AsyncGenerator<RoutingConnection> {
+async function* dayConnections(event: H3Event | undefined, manifest: GtfsManifest, index: GtfsRoutingIndex, day: string, start: number, end: number, modes: NeighborhoodJourneysRequest["allowedModes"]): AsyncGenerator<RoutingConnectionBatch> {
   const anchor = gtfsServiceEpoch(day);
   const active = index.services.map(service => isGtfsServiceActive(service, day));
   if (!active.some(Boolean)) return;
   const hours = Object.keys(index.hours).map(Number).filter(hour => anchor + (hour + 1) * 3600 > start && anchor + hour * 3600 <= end).sort((a, b) => a - b);
-  for (const hour of hours) for (const filename of index.hours[String(hour)]!) {
-    if (!/^\d+-\d+\.json$/u.test(filename)) throw new Error("Invalid GTFS routing shard path");
-    const shard = (await readGtfsJson<GtfsRoutingShard>(event, `${manifest.routing!.path}/${filename}`)).value;
+  const files = hours.flatMap(hour => index.hours[String(hour)]!);
+  const prefetched = new Map<number, Promise<GtfsRoutingShard | undefined>>();
+  for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+    for (let next = fileIndex; next < Math.min(files.length, fileIndex + SHARD_PREFETCH_COUNT); next++) {
+      if (prefetched.has(next)) continue;
+      const filename = files[next]!;
+      if (!/^\d+-\d+\.json$/u.test(filename)) throw new Error("Invalid GTFS routing shard path");
+      const promise = readGtfsJson<GtfsRoutingShard>(event, `${manifest.routing!.path}/${filename}`).then(result => result.value);
+      void promise.catch(() => {});
+      prefetched.set(next, promise);
+    }
+    const shard = await prefetched.get(fileIndex)!;
+    prefetched.delete(fileIndex);
     if (!shard || shard.schemaVersion !== 1 || shard.encoding !== "gzip-base64-u32le" || shard.count > 65_536 || shard.count < 0) throw new Error("GTFS routing shard unavailable");
-    const compressed = Uint8Array.from(atob(shard.data), c => c.charCodeAt(0));
+    const encoded = atob(shard.data);
+    const compressed = new Uint8Array(encoded.length);
+    for (let i = 0; i < encoded.length; i++) compressed[i] = encoded.charCodeAt(i);
     const binary = gunzipSync(compressed);
     if (binary.length !== shard.count * CONNECTION_COLUMNS * 4) throw new Error("Invalid GTFS routing shard length");
     const view = new DataView(binary.buffer, binary.byteOffset, binary.byteLength);
-    const tripNames = new Map(shard.trips.map(([id, name, headsign]) => [id, { name, headsign }]));
+    const tripNames = new Map(shard.trips.map(([id, name, headsign]) => [id, { name, headsign, key: `${day}:${id}` }]));
+    let batch: RoutingConnection[] = [];
     for (let i = 0; i < shard.count; i++) {
-      const value = (column: number) => view.getUint32((i * CONNECTION_COLUMNS + column) * 4, true);
-      if (!active[value(5)]) continue;
-      const line = index.lines[value(6)];
+      const offset = i * CONNECTION_COLUMNS * 4;
+      if (!active[view.getUint32(offset + 20, true)]) continue;
+      const line = index.lines[view.getUint32(offset + 24, true)];
       if (!line || modes?.length && !modes.includes(line.mode)) continue;
-      const departure = anchor + value(2), arrival = anchor + value(3);
+      const departure = anchor + view.getUint32(offset + 8, true), arrival = anchor + view.getUint32(offset + 12, true);
       if (departure < start || departure > end) continue;
-      const from = value(0), to = value(1), flags = value(7), trip = tripNames.get(value(4));
+      const from = view.getUint32(offset, true), to = view.getUint32(offset + 4, true), flags = view.getUint32(offset + 28, true), trip = tripNames.get(view.getUint32(offset + 16, true));
       if (!index.stops[from] || !index.stops[to] || !trip || arrival < departure) throw new Error("Invalid GTFS connection");
       let section: NearbyJourneySection | undefined;
-      yield { from, to, departure, arrival, routeId: line.id, tripId: trip.name, tripKey: `${day}:${value(4)}`, pickup: flags & 3, dropOff: (flags >> 2) & 3, last: Boolean(flags & 16),
+      batch.push({ from, to, departure, arrival, routeId: line.id, tripId: trip.name, tripKey: trip.key, pickup: flags & 3, dropOff: (flags >> 2) & 3, last: Boolean(flags & 16),
         get section() { return section ??= { type: "public_transport", timingSource: "schedule", mode: line.mode.toLowerCase(), lineMode: line.mode, lineId: line.id, lineCode: line.code, lineColor: line.color,
           durationSeconds: arrival - departure,
           vehicleJourneyId: `${day}:${trip.name}`, direction: trip.headsign, mission: trip.headsign, fromStopPointId: index.stops[from]!.id, toStopPointId: index.stops[to]!.id,
           fromStopAreaId: index.stops[from]!.parentId, toStopAreaId: index.stops[to]!.parentId,
-          fromName: index.stops[from]!.name, toName: index.stops[to]!.name, fromPoint: coordinate(index.stops[from]!), toPoint: coordinate(index.stops[to]!) }; } };
+          fromName: index.stops[from]!.name, toName: index.stops[to]!.name, fromPoint: coordinate(index.stops[from]!), toPoint: coordinate(index.stops[to]!) }; } });
+      if (batch.length === CONNECTION_BATCH_SIZE) { yield batch; batch = []; }
     }
+    if (batch.length) yield batch;
   }
 }
 
 async function* connections(event: H3Event | undefined, manifest: GtfsManifest, index: GtfsRoutingIndex, serviceDate: string, start: number, modes: NeighborhoodJourneysRequest["allowedModes"]) {
-  const iterators: AsyncGenerator<RoutingConnection>[] = [];
+  const iterators: AsyncGenerator<RoutingConnectionBatch>[] = [];
   const lookback = Math.floor(index.maxTimeSeconds / 86400);
   for (let delta = -lookback; delta <= 1; delta++) {
     const day = shiftGtfsDate(serviceDate, delta);
@@ -149,12 +171,18 @@ async function* connections(event: H3Event | undefined, manifest: GtfsManifest, 
     iterators.push(dayConnections(event, manifest, index, day, start, start + NEIGHBORHOOD_ROUTING_HORIZON_SECONDS, modes));
   }
   const heads = await Promise.all(iterators.map(it => it.next()));
+  const positions = iterators.map(() => 0);
+  let batch: RoutingConnection[] = [];
   while (true) {
     let best = -1;
-    for (let i = 0; i < heads.length; i++) if (!heads[i]!.done && (best < 0 || heads[i]!.value.departure < heads[best]!.value.departure)) best = i;
+    for (let i = 0; i < heads.length; i++) if (!heads[i]!.done && (best < 0 || heads[i]!.value[positions[i]!]!.departure < heads[best]!.value[positions[best]!]!.departure)) best = i;
     if (best < 0) break;
-    yield heads[best]!.value; heads[best] = await iterators[best]!.next();
+    batch.push(heads[best]!.value[positions[best]!]!);
+    positions[best]!++;
+    if (positions[best] === heads[best]!.value.length) { heads[best] = await iterators[best]!.next(); positions[best] = 0; }
+    if (batch.length === CONNECTION_BATCH_SIZE) { yield batch; batch = []; }
   }
+  if (batch.length) yield batch;
 }
 
 export async function routeNeighborhoodJourneys(event: H3Event | undefined, request: NeighborhoodJourneysRequest): Promise<NeighborhoodJourneysResponse> {

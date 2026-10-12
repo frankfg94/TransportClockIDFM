@@ -162,6 +162,34 @@ function readyFrequency(lineId: string): GtfsLineFrequencyResponse {
 }
 
 describe("useNearbyNeighborhoodScore", () => {
+  it("probes major stations whose official names contain typographic separators", async () => {
+    const line = createLine();
+    const network = createNetwork(line);
+    network.stations[0]!.name = "Saint‑Lazare";
+    const findJourneys = vi.fn(async () => [{
+      id: "saint-lazare-route", durationSeconds: 30 * 60,
+      sections: [{ type: "public_transport", mode: "metro", durationSeconds: 30 * 60, lineCode: "13" }],
+    }] as NearbyJourney[]);
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const Harness = defineComponent({
+      setup() {
+        score = useNearbyNeighborhoodScore({
+          origin: ref({ lon: 2.30, lat: 48.82, label: "Origine" }),
+          stations: ref([]), network: ref(network),
+          placesProvider: { searchDestinations: vi.fn(async () => []), searchNearby: vi.fn(async () => []) },
+          travelRoutesProvider: { findJourneys },
+        });
+        return () => null;
+      },
+    });
+    const wrapper = mount(Harness);
+    await vi.waitFor(() => expect(score.result.value.positiveFacts.some(fact => fact.family === "major-station:saint-lazare")).toBe(true));
+    expect(findJourneys).toHaveBeenCalledWith(expect.objectContaining({
+      destination: expect.objectContaining({ lon: network.stations[0]!.lon, lat: network.stations[0]!.lat }),
+    }), expect.any(AbortSignal));
+    expect(score.result.value.neutralFacts.some(fact => fact.family === "major-station:saint-lazare")).toBe(false);
+    wrapper.unmount();
+  });
   it("reports a source timeout instead of leaving its criterion loading", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({

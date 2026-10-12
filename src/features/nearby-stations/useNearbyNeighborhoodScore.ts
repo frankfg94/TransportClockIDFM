@@ -14,7 +14,7 @@ import type {
   TravelRoutesProvider,
 } from "./nearbyHeavyTransports";
 import { isNearbyJourneyTransitSection } from "./nearbyJourneyTiming";
-import { getOfficialStationReference } from "./neighborhoodStationReferences";
+import { getOfficialStationReference, normalizeStationName } from "./neighborhoodStationReferences";
 import type { TravelRouteProbe } from "./useTravelRoutes";
 import type { NearbyPlace, PlacesProvider } from "./nearbyPlaces";
 import {
@@ -1310,8 +1310,8 @@ function resolveJourneyBenchmarks(network: TransportMapNetwork | undefined): Jou
     const destination = [...network.stations]
       .filter((station) => isHeavyTransportStation(network, station))
       .filter((station) => {
-        const name = normalizeScoreText(station.name);
-        return benchmark.names.some((candidate) => name === candidate || name.includes(candidate));
+        const names = [station.name, ...station.aliases].map(normalizeStationName);
+        return benchmark.names.some((candidate) => names.some((name) => name === candidate || name.includes(candidate)));
       })
       .sort((left, right) => Number(right.isHub) - Number(left.isHub)
         || right.lineIds.length - left.lineIds.length

@@ -174,6 +174,15 @@ describe("connection scan transfers and branches", () => {
     ({ from, to, departure: dep, arrival: arr, tripKey, routeId: tripKey, tripId: tripKey, pickup: 0, dropOff: 0, last: true,
       section: { type: "public_transport", lineId: tripKey, vehicleJourneyId: tripKey, durationSeconds: arr - dep } });
   async function* stream(values: RoutingConnection[]) { yield* values; }
+  it("preserves transfers and route reconstruction across connection batch boundaries", async () => {
+    const values = [connection(0, 1, 10, 100, "a"), connection(1, 3, 110, 200, "miss"), connection(1, 2, 250, 350, "b")];
+    async function* batches() { yield values.slice(0, 1); yield []; yield values.slice(1); }
+    const individual = await scanConnections(stream(values), seed, new Map());
+    const batched = await scanConnections(batches(), seed, new Map());
+    expect(batched.scannedConnections).toBe(individual.scannedConnections);
+    expect(batched.labels.has(3)).toBe(false);
+    expect(routingSections(batched.labels.get(2)!)).toEqual(routingSections(individual.labels.get(2)!));
+  });
   it("retains a genuine platform arrival when an earlier footpath masks its general label", async () => {
     const paths = new Map([[1, [{ to: 2, seconds: 10, section: { type: "walking", durationSeconds: 10 } }]]]);
     const result = await scanConnections(stream([connection(0, 1, 10, 100, "nearby"), connection(0, 2, 20, 200, "platform")]), seed, paths);

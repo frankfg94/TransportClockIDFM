@@ -9,11 +9,12 @@ export interface RoutingConnection {
   routeId?: string; tripId?: string;
 }
 export interface RoutingFootpath { to: number; seconds: number; section: NearbyJourneySection }
+export type RoutingConnectionBatch = readonly RoutingConnection[];
 export interface ConnectionScanResult { labels: Map<number, RoutingNode>; transitLabels: Map<number, RoutingNode>; platformLabels: Map<number, RoutingNode>; nightLabels: Map<number, Map<string, RoutingNode>>; scannedConnections: number }
 
 /** One earliest-arrival tree answers every destination of the same origin/time/mode query. */
 export async function scanConnections(
-  connections: AsyncIterable<RoutingConnection>,
+  connections: AsyncIterable<RoutingConnection | RoutingConnectionBatch>,
   access: Map<number, RoutingNode>,
   footpaths: { get(stop: number): Iterable<RoutingFootpath> | undefined },
   sameStopMargins: ReadonlyMap<number, number> = new Map(),
@@ -58,29 +59,32 @@ export async function scanConnections(
       }
   };
   for (const [stop, node] of access) { put(stop, node); relax(stop, node); }
-  for await (const connection of connections) {
-    scannedConnections++;
-    const riding = onTrip.get(connection.tripKey);
-    let previous = riding;
-    if (!previous && connection.pickup === 0) for (const candidate of boarding.get(connection.from)?.values() ?? []) {
-      const origin = candidate.transferOrigin;
-      const margin = origin ? (transferRule?.(origin, connection) ?? (origin.stop === connection.from ? sameStopMargins.get(connection.from) ?? 120 : 0)) : 0;
-      if (margin < 0 || candidate.arrival > connection.departure || origin && origin.arrival + margin > connection.departure) continue;
-      if (!previous || candidate.arrival < previous.arrival) previous = candidate;
+  for await (const item of connections) {
+    const batch: RoutingConnectionBatch = Array.isArray(item) ? item : [item as RoutingConnection];
+    for (const connection of batch) {
+      scannedConnections++;
+      const riding = onTrip.get(connection.tripKey);
+      let previous = riding;
+      if (!previous && connection.pickup === 0) for (const candidate of boarding.get(connection.from)?.values() ?? []) {
+        const origin = candidate.transferOrigin;
+        const margin = origin ? (transferRule?.(origin, connection) ?? (origin.stop === connection.from ? sameStopMargins.get(connection.from) ?? 120 : 0)) : 0;
+        if (margin < 0 || candidate.arrival > connection.departure || origin && origin.arrival + margin > connection.departure) continue;
+        if (!previous || candidate.arrival < previous.arrival) previous = candidate;
+      }
+      if (!previous || previous.arrival > connection.departure) continue;
+      if (!riding && previous.arrival < connection.departure) previous = {
+        previous, arrival: connection.departure,
+        section: { type: "waiting", durationSeconds: connection.departure - previous.arrival },
+      };
+      const node: RoutingNode = riding
+        ? { previous: riding.previous, arrival: connection.arrival, section: { ...riding.section, durationSeconds: riding.section.durationSeconds + connection.arrival - riding.arrival, arrivalDateTime: connection.section.arrivalDateTime, toStopPointId: connection.section.toStopPointId, toStopAreaId: connection.section.toStopAreaId, toPoint: connection.section.toPoint, toName: connection.section.toName } }
+        : { previous, arrival: connection.arrival, section: connection.section };
+      node.transferOrigin = { stop: connection.to, arrival: connection.arrival, routeId: connection.routeId, tripId: connection.tripId };
+      onTrip.set(connection.tripKey, node);
+      if (connection.last) onTrip.delete(connection.tripKey);
+      if (connection.dropOff !== 0 || !put(connection.to, node)) continue;
+      relax(connection.to, node);
     }
-    if (!previous || previous.arrival > connection.departure) continue;
-    if (!riding && previous.arrival < connection.departure) previous = {
-      previous, arrival: connection.departure,
-      section: { type: "waiting", durationSeconds: connection.departure - previous.arrival },
-    };
-    const node: RoutingNode = riding
-      ? { previous: riding.previous, arrival: connection.arrival, section: { ...riding.section, durationSeconds: riding.section.durationSeconds + connection.arrival - riding.arrival, arrivalDateTime: connection.section.arrivalDateTime, toStopPointId: connection.section.toStopPointId, toStopAreaId: connection.section.toStopAreaId, toPoint: connection.section.toPoint, toName: connection.section.toName } }
-      : { previous, arrival: connection.arrival, section: connection.section };
-    node.transferOrigin = { stop: connection.to, arrival: connection.arrival, routeId: connection.routeId, tripId: connection.tripId };
-    onTrip.set(connection.tripKey, node);
-    if (connection.last) onTrip.delete(connection.tripKey);
-    if (connection.dropOff !== 0 || !put(connection.to, node)) continue;
-    relax(connection.to, node);
   }
   return { labels, transitLabels, platformLabels, nightLabels, scannedConnections };
 }

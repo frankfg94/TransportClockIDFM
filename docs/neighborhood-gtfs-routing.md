@@ -18,6 +18,8 @@ Le moteur emploie un [Connection Scan Algorithm](https://arxiv.org/abs/1703.0599
 
 Un arbre origine/date/modes répond à toutes les destinations. Les requêtes simultanées partagent sa promesse. Le cache conserve au plus deux arbres pendant dix minutes ; son identité inclut le chemin des artefacts, la génération du manifeste et l’époque du cache GTFS. Le fournisseur de la page groupe les demandes et conserve les réponses pendant une minute, avec invalidation à réception d’une nouvelle version. L’annulation d’une adresse empêche l’application de ses anciennes réponses.
 
+La lecture conserve au plus trois tranches horaires préchargées et le scan reçoit les connexions par lots de 1 024. Les jours de service restent fusionnés dans l’ordre des départs. Le graphe compact de correspondances sert aussi à consulter les durées minimales ; aucune seconde table de chaînes pour toutes les paires d’arrêts n’est conservée. Ces bornes réduisent les allocations et les lectures séquentielles du Worker sans changer les itinéraires recherchés.
+
 Les files d’attente par destination sont contournées seulement pour ce fournisseur. L’option `batchQueries` du résolveur de pôles lui permet de présenter toutes ses destinations au fournisseur, qui envoie des lots de 64. Les abonnés d’un même point sont dédupliqués, y compris avec annulation et lorsque l’origine porte des métadonnées différentes. Le fournisseur piéton de cette page groupe aussi les pôles par origine et par portée d’annulation avant d’appeler les matrices ORS.
 
 Les accès et sorties utilisent les matrices ORS dirigées et les caches piétons partagés. La politique optionnelle `ors-only` est aussi transmise aux lieux, centres commerciaux, parcs et futurs pôles du verdict. Une indisponibilité ORS produit une marche explicitement estimée, sans repli PRIM et sans enregistrer cette estimation comme parcours documenté.
@@ -33,6 +35,8 @@ Les seuils d'accès aux pôles du verdict GTFS utilisent aussi cette durée apr�
 Le même rattachement s'applique aux stations de la carte qui ne possèdent qu'une référence de quai NeTEx non reconnue par le GTFS. Une référence officielle déjà présente est prioritaire ; un nom partiel, une station éloignée ou plusieurs références possibles ne permettent pas de rattachement. Cette règle reste propre aux requêtes groupées du verdict.
 
 Les noms et alias officiels sont indexés une seule fois par résolution groupée, uniquement si une destination a besoin du rattachement. Les pôles actuels et futurs partagent cet index ; les sondes suivantes ne parcourent que les homonymes. L'index appartient au lot courant pour conserver la bonne version du catalogue.
+
+La sélection des grandes gares utilise la même normalisation des accents, espaces et signes de ponctuation sur leurs noms et alias. Un tiret typographique dans un nom officiel ne doit pas empêcher de lancer sa sonde de trajet.
 
 Deux segments consécutifs sur la même ligne restent distincts lorsque leurs courses officielles diffèrent. Les détails indiquent le changement de train, la gare, l'attente et les missions disponibles. Un trajet direct peut ainsi arriver plus tard qu'une combinaison express puis omnibus, selon le départ de référence ; aucune durée de trajet ou de correspondance n'est remplacée par une valeur propre à une gare.
 

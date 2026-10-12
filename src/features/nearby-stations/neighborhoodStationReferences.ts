@@ -14,7 +14,7 @@ export function getOfficialStationReference(station: Pick<GlobalMapStation, "raw
 type StationReferenceQuery = Pick<GlobalMapStation, "rawRefs" | "name" | "aliases" | "lat" | "lon">;
 export type NeighborhoodStationReferenceResolver = (station: StationReferenceQuery) => string | undefined;
 
-function normalizeStationName(name: string): string {
+export function normalizeStationName(name: string): string {
   return name.normalize("NFD").replace(/\p{Diacritic}/gu, "")
     .toLocaleLowerCase("fr-FR").replace(/[^\p{Letter}\p{Number}]+/gu, " ").trim();
 }
