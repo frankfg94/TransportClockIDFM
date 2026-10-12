@@ -233,6 +233,8 @@ export interface NeighborhoodFact {
   emphasis?: "exceptional";
   /** Presentation-only badge emphasis; defaults to `emphasis` without changing fact ordering. */
   markerEmphasis?: "standard" | "exceptional";
+  /** Relative positive contribution, defaulting to 1. */
+  contributionWeight?: number;
   labelKey?: TranslationKey;
   labelValues?: TranslationParams;
   tooltipKey?: TranslationKey;

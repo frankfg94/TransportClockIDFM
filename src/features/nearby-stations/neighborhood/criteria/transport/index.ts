@@ -44,6 +44,14 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
   const accessibleCurrentSignals = accessibleSignals.filter((signal) => !signal.futureProject);
   const accessibleLineKeys = new Set(accessibleCurrentSignals.map((signal) => lineKey(signal.line)));
   const accessibleModes = new Set(accessibleCurrentSignals.map((signal) => signal.line.mode));
+  const reducedCurrentSignals = accessSignals.filter(signal => !signal.futureProject && (signal.contributionWeight ?? 1) < 1);
+  const lineWeights = new Map(accessibleCurrentSignals.map(signal => [lineKey(signal.line), 1]));
+  const modeWeights = new Map<string, number>([...accessibleModes].map(mode => [mode, 1]));
+  for (const signal of reducedCurrentSignals) {
+    const weight = signal.contributionWeight ?? 1;
+    lineWeights.set(lineKey(signal.line), Math.max(lineWeights.get(lineKey(signal.line)) ?? 0, weight));
+    modeWeights.set(signal.line.mode, Math.max(modeWeights.get(signal.line.mode) ?? 0, weight));
+  }
   const futureProjects = input.backendVerdict?.futureProjects ?? [];
   // The verdict keeps nearby GPE stations with a real walking route even
   // when that walking leg exceeds 15 minutes. Such a station can still be a
@@ -69,6 +77,9 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
   const futureLineKeys = new Set(effectiveFutureProjects.map((project) => `future:${normalizeScoreText(project.line)}`));
   const structuralLineCount = accessibleLineKeys.size + [...futureLineKeys].filter((key) =>
     ![...accessibleLineKeys].some((currentKey) => currentKey.endsWith(`:${key.slice("future:".length)}`))).length;
+  const structuralLineWeight = [...lineWeights.values()].reduce((sum, weight) => sum + weight, 0)
+    + structuralLineCount - accessibleLineKeys.size;
+  const accessibleModeWeight = [...modeWeights.values()].reduce((sum, weight) => sum + weight, 0);
   const sharedHubEvidence = coLocatedFutureProjects.length > 0;
   const reliableConnectionEvidence = accessibleSignals.some((signal) => signal.source === "route" && Boolean(signal.via));
 
@@ -92,10 +103,10 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
     });
   }
   if (linesByKey.size > 0) {
-    scoreParts.push({ value: saturatingNeighborhoodBonus(structuralLineCount, 4, 10), weight: 0.25 * 0.85 });
+    scoreParts.push({ value: saturatingNeighborhoodBonus(structuralLineWeight, 4, 10), weight: 0.25 * 0.85 });
   }
-  if (accessibleModes.size > 0) {
-    scoreParts.push({ value: saturatingNeighborhoodBonus(accessibleModes.size, 3, 10), weight: 0.15 * 0.85 });
+  if (accessibleModeWeight > 0) {
+    scoreParts.push({ value: saturatingNeighborhoodBonus(accessibleModeWeight, 3, 10), weight: 0.15 * 0.85 });
   }
   if (journeySummary) {
     scoreParts.push({

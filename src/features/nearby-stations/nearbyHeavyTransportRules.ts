@@ -40,9 +40,10 @@ export const NEARBY_HEAVY_BUS_MODES: readonly GlobalMapMode[] = [
 
 export const NEARBY_HEAVY_DIRECT_WALK_MAX_METERS = 2_000;
 export const NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS = 15 * 60;
-/** Bus and Noctilien are useful only for a genuinely short station access. */
+/** Full-strength proximity threshold; longer bus accesses remain discoverable. */
 export const NEARBY_HEAVY_BUS_ACCESS_MAX_SECONDS = 15 * 60;
 export const NEARBY_HEAVY_TOTAL_MAX_SECONDS = 30 * 60;
+export const NEARBY_HEAVY_REDUCED_ACCESS_WEIGHT = 0.5;
 export const NEARBY_HEAVY_LONG_WALK_HIDE_SECONDS = 20 * 60;
 export const NEARBY_HEAVY_SEARCH_MAX_METERS = 5_000;
 
@@ -62,6 +63,16 @@ export function getNearbyHeavyAccessTravelSeconds(
   return Number.isFinite(access.travelSeconds) && (access.travelSeconds ?? 0) >= 0
     ? access.travelSeconds!
     : access.totalSeconds;
+}
+
+/** Common scoring policy for every routed bus/Noctilien station access. */
+export function getNearbyHeavyAccessContributionWeight(
+  access: Pick<NearbyHeavyTransportAccess, "scoreSeconds" | "travelSeconds" | "totalSeconds" | "feederMode">,
+): number {
+  const seconds = getNearbyHeavyAccessTravelSeconds(access);
+  if (!Number.isFinite(seconds) || seconds < 0 || seconds > NEARBY_HEAVY_TOTAL_MAX_SECONDS) return 0;
+  return access.feederMode && NEARBY_HEAVY_BUS_MODES.includes(access.feederMode)
+    && seconds > NEARBY_HEAVY_BUS_ACCESS_MAX_SECONDS ? NEARBY_HEAVY_REDUCED_ACCESS_WEIGHT : 1;
 }
 
 export interface NearbyHeavyTargetCandidate {
@@ -308,8 +319,7 @@ function evaluateSingleLocalFeeder(
   const feederMode = sectionLineMode(feeder);
   if (
     !isLocalFeeder(feeder, input.localLineIds, input.localLineCodes) ||
-    feederWalkingSeconds > NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS ||
-    (isBusLikeMode(feederMode) && travelSeconds > NEARBY_HEAVY_BUS_ACCESS_MAX_SECONDS)
+    feederWalkingSeconds > NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS
   ) return undefined;
 
   return {

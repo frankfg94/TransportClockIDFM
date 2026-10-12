@@ -2902,6 +2902,7 @@ export const fr = {
       },
       rules: {
         transportProximity: "Signal positif si l’accès piéton calculé est inférieur ou égal à {threshold} min.",
+        transportBusReduced: "Un accès en bus de plus de {threshold} min et jusqu’à {maximum} min apporte un demi bonus de proximité. La marche et les attentes après le premier transport sont conservées.",
         transportDistance: "Distance cartographique utilisée avec un seuil de {threshold} m lorsque le temps piéton n’est pas disponible.",
         transportDiversity: "La diversité est plafonnée à {threshold} lignes ou modes structurants.",
         transportHub: "Une future gare est affichée lorsqu’un trajet réel jusqu’au pôle dure moins de {threshold} min et qu’une ligne actuelle y est co-localisée.",

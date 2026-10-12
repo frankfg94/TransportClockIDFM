@@ -3,7 +3,7 @@ import { CircleHelp } from "lucide-vue-next";
 import { useRouter } from "#imports";
 import { computed } from "vue";
 import { useI18n, type TranslationKey } from "../../i18n";
-import { hasExceptionalFactMarker } from "./neighborhood/facts";
+import { getNeighborhoodFactMarker, hasExceptionalFactMarker } from "./neighborhood/facts";
 import type { NeighborhoodFact, NeighborhoodFactGeography, NeighborhoodFactPlace, NeighborhoodFactTransportReliabilityLine } from "./neighborhood";
 import MiniTravelDisplay from "./MiniTravelDisplay.vue";
 import type { ServiceQualityMode } from "./serviceQualityApi";
@@ -149,7 +149,7 @@ function geographyLabel(): string {
         :class="{ 'nearby-neighborhood-score-fact__marker--exceptional': exceptionalMarker }"
         aria-hidden="true"
       >
-        {{ exceptionalMarker ? "+++" : fact.polarity === "positive" ? "+" : fact.polarity === "negative" ? "−" : "•" }}
+        {{ getNeighborhoodFactMarker(fact) }}
       </span>
       <span>{{ factLabel() }}</span>
       <CircleHelp :size="15" aria-hidden="true" />

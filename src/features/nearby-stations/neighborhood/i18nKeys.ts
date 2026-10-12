@@ -305,6 +305,7 @@ export const SOURCE_KEYS = {
 
 export const RULE_KEYS = {
   transportProximity: "nearbyStations.neighborhoodScore.rules.transportProximity",
+  transportBusReduced: "nearbyStations.neighborhoodScore.rules.transportBusReduced",
   transportDistance: "nearbyStations.neighborhoodScore.rules.transportDistance",
   transportDiversity: "nearbyStations.neighborhoodScore.rules.transportDiversity",
   transportHub: "nearbyStations.neighborhoodScore.rules.transportHub",

@@ -2639,6 +2639,29 @@ describe("NearbyStationsMap line focus", () => {
     }
   });
 
+  it("keeps south-west heavy badges above the route button", async () => {
+    const restoreViewport = installMapViewport(720, 360);
+    let wrapper: ReturnType<typeof mount> | undefined;
+    try {
+      const targetLine = createLine("line:generic:heavy", "RER");
+      const station = createStation("station:generic:heavy", "Generic heavy station", targetLine);
+      const originWorld = lonLatToWorld({ lon: 2.35, lat: 48.85 });
+      station.worldX = originWorld.x - 0.01;
+      station.worldY = originWorld.y + 0.01;
+      wrapper = mountMap([], undefined, undefined,
+        { "travel-sidebar": "<div>Route planner</div>" }, undefined, undefined,
+        [createProjectedHeavyCandidate(station, targetLine)], ["RER"]);
+      await nextTick();
+      const anchor = wrapper.get(".nearby-map__marker-anchor--supplemental");
+      expect(anchor.classes()).toContain("nearby-map__marker-anchor--projection-bottom-left");
+      expect(wrapper.find(".nearby-map__travel-toggle").exists()).toBe(true);
+      expect(Number.parseFloat((anchor.element as HTMLElement).style.top)).toBeLessThanOrEqual(360 - 76);
+    } finally {
+      wrapper?.unmount();
+      restoreViewport();
+    }
+  });
+
   it("pulses local feeder stations after selecting a reachable heavy station", async () => {
     vi.useFakeTimers();
     try {

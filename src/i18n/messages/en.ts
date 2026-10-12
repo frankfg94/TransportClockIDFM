@@ -2870,6 +2870,7 @@ export const en = {
       },
       rules: {
         transportProximity: "Positive signal when the calculated walking access is at most {threshold} min.",
+        transportBusReduced: "Bus access over {threshold} min and up to {maximum} min contributes half a proximity bonus. Walking and waits after the first vehicle are retained.",
         transportDistance: "Map distance is used with a {threshold} m threshold when walking time is unavailable.",
         transportDiversity: "Diversity is capped at {threshold} structuring lines or modes.",
         transportHub: "A future station is shown when a real journey to the hub takes under {threshold} min and a current line is co-located there.",

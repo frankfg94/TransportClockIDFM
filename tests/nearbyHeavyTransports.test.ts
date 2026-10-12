@@ -225,9 +225,9 @@ describe("nearby heavy transport eligibility", () => {
     expect(evaluation).toMatchObject({ kind: "connection", walkingSeconds: 900, totalSeconds: 1_800 });
   });
 
-  it("accepts a bus access only when the corrected duration is at most 15 minutes", () => {
+  it("retains a bus access up to the general 30-minute limit", () => {
     const tooLong = evaluateNearbyHeavyJourney({
-      journey: { durationSeconds: 1_440, sections: [walk(300, 250), feeder(1_140, "38", "BUS")] },
+      journey: { durationSeconds: 1_860, sections: [walk(300, 250), feeder(1_560, "38", "BUS")] },
       stationDistanceMeters: 2_500,
       localLineCodes: new Set(["38"]),
     });
@@ -690,7 +690,7 @@ describe("nearby heavy transport eligibility", () => {
     expect(candidate?.access).toMatchObject({ kind: "direct", scoreSeconds: 360, walkingSeconds: 360 });
   });
 
-  it("keeps the daytime T10 and rejects a current bus 412 over the 15-minute access limit", async () => {
+  it("keeps the fastest daytime tram and retains a longer bus alternative below 30 minutes", async () => {
     const t10 = line("line:tram:T10", "T10", "TRAM");
     const bus412 = line("line:bus:412", "412", "BUS");
     const rerB = line("line:rer:B", "B", "RER");
@@ -733,8 +733,8 @@ describe("nearby heavy transport eligibility", () => {
 
     const candidate = candidates.find((item) => item.lines.some((itemLine) => itemLine.id === rerB.id));
     expect(candidate?.access.feederLineCode).toBe("T10");
-    expect(candidate?.accessAlternatives?.map((access) => access.feederLineCode)).toEqual(["T10"]);
-    expect(candidate?.accessAlternativesByLine?.[rerB.id]?.map((access) => access.feederLineCode)).toEqual(["T10"]);
+    expect(candidate?.accessAlternatives?.map((access) => access.feederLineCode)).toEqual(["T10", "412"]);
+    expect(candidate?.accessAlternativesByLine?.[rerB.id]?.map((access) => access.feederLineCode)).toEqual(["T10", "412"]);
   });
 
   it("uses the shared 350 m station correspondence radius for a projected Transilien target", async () => {

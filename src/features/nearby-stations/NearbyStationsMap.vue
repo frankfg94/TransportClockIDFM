@@ -322,6 +322,8 @@ const NEARBY_MAP_MOBILE_TOP_CONTROL_RESERVE = 112;
 const NEARBY_MAP_LOADING_TIMEOUT_MS = 45_000;
 const NEARBY_MAP_HORIZONTAL_MARKER_CLEARANCE = 20;
 const NEARBY_MAP_FULLSCREEN_BOTTOM_CONTROL_RESERVE = 148;
+// Route button: 16px bottom margin + 44px height + 16px marker clearance.
+const NEARBY_MAP_TRAVEL_CONTROL_RESERVE = 76;
 const NEARBY_MAP_SCALE_MAX_WIDTH_PX = 190;
 const NEARBY_MAP_SCALE_HORIZONTAL_RESERVE_PX = 88;
 const NEARBY_MAP_SCALE_FACTORS = [1, 2, 5] as const;
@@ -4569,6 +4571,8 @@ function markerStyleForSupplemental(candidate: NearbyHeavyTransportCandidate, in
     projection.anchor === "top" || projection.anchor === "top-left"
   );
   const protectsZoomControls = candidate.projected && isFullscreen.value && projection?.anchor === "bottom-right";
+  const protectsTravelControl = candidate.projected && projection?.anchor === "bottom-left"
+    && !isMobileDisplaySheet.value && Boolean(slots["travel-sidebar"]);
   const positionedPoint = usesFreeNorthBand
     ? {
       x: projectedPoint.x,
@@ -4579,6 +4583,8 @@ function markerStyleForSupplemental(candidate: NearbyHeavyTransportCandidate, in
     }
     : protectsZoomControls
       ? { x: projectedPoint.x, y: Math.min(projectedPoint.y, height - NEARBY_MAP_FULLSCREEN_BOTTOM_CONTROL_RESERVE) }
+    : protectsTravelControl
+      ? { x: projectedPoint.x, y: Math.min(projectedPoint.y, height - NEARBY_MAP_TRAVEL_CONTROL_RESERVE) }
     : projectedPoint;
   const edgeSafePoint = projection
     ? keepProjectedMarkerInsideHorizontalEdges(positionedPoint, projection.anchor, width)
@@ -6995,12 +7001,15 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__radius--fade-in { animation: nearby-map-radius-fade-in var(--nearby-city-transition-duration, 980ms) cubic-bezier(.65, 0, .35, 1) both; }
 .nearby-map__radius--fade-out { animation: nearby-map-radius-fade-out var(--nearby-city-transition-duration, 980ms) cubic-bezier(.65, 0, .35, 1) both; }
 .nearby-map__origin { align-items: center; background: #d92d20; border: 3px solid #fff; border-radius: 50% 50% 50% 0; box-shadow: 0 6px 16px rgba(146, 34, 26, .34); color: #fff; display: flex; height: 38px; justify-content: center; position: absolute; transform: translate(-50%, -70%) rotate(-45deg); width: 38px; z-index: 4; }
+.nearby-map__origin--moving { transition: left var(--nearby-origin-move-duration, 680ms) cubic-bezier(.22,1,.36,1), top var(--nearby-origin-move-duration, 680ms) cubic-bezier(.22,1,.36,1); }
 .nearby-map-shell--city-view .nearby-map__origin { z-index: 9; }
 .nearby-map__origin svg { transform: rotate(45deg); }
 .nearby-map__marker-body { display: inline-block; height: max-content; position: relative; width: max-content; }
 .nearby-map__marker-anchor { position: absolute; transform: translate(-50%, -50%); z-index: 5; }
 .nearby-map__marker-anchor--active { z-index: 90 !important; }
 .nearby-map__marker-anchor--heavy { z-index: 8; }
+/* Keep heavy access badges above projected line direction cards (layer 11). */
+.nearby-map__marker-anchor--supplemental { z-index: 12; }
 .nearby-map__marker-anchor--feeder-pulse { z-index: 11; }
 .nearby-map__marker-anchor--supplemental { --nearby-marker-edge-angle: 0deg; }
 .nearby-map__marker-anchor .nearby-map__marker { position: relative; transform: none; }

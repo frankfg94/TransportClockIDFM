@@ -74,6 +74,12 @@ export function hasExceptionalFactMarker(fact: Pick<NeighborhoodFact, "emphasis"
   return markerEmphasis === "exceptional";
 }
 
+export function getNeighborhoodFactMarker(fact: Pick<NeighborhoodFact, "polarity" | "contributionWeight" | "emphasis" | "markerEmphasis">): string {
+  if (hasExceptionalFactMarker(fact)) return "+++";
+  if (fact.polarity === "positive") return fact.contributionWeight === 0.5 ? "½+" : "+";
+  return fact.polarity === "negative" ? "−" : "•";
+}
+
 export function makeFact(options: {
   id: string;
   kind: NeighborhoodFactKind;
@@ -89,6 +95,7 @@ export function makeFact(options: {
   action?: NeighborhoodFactAction;
   emphasis?: "exceptional";
   markerEmphasis?: "standard" | "exceptional";
+  contributionWeight?: number;
   travel?: NeighborhoodFactTravel;
   places?: readonly NeighborhoodFactPlace[];
   transportReliabilityLines?: readonly NeighborhoodFactTransportReliabilityLine[];
@@ -104,6 +111,7 @@ export function makeFact(options: {
     priority: options.priority,
     emphasis: options.emphasis,
     markerEmphasis: options.markerEmphasis,
+    contributionWeight: options.contributionWeight,
     labelKey: keys.label,
     labelValues: options.values,
     tooltipKey: theoretical ? gtfsTooltipKeys[options.kind] ?? keys.tooltip : keys.tooltip,

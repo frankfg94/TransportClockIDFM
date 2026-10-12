@@ -13,6 +13,7 @@ import type {
   NeighborhoodDatasetStatus,
 } from "./neighborhood/criterionRegistry";
 import NearbyNeighborhoodScoreFact from "./NearbyNeighborhoodScoreFact.vue";
+import { getNeighborhoodFactMarker } from "./neighborhood/facts";
 import NearbyNeighborhoodScoreEducation from "./NearbyNeighborhoodScoreEducation.vue";
 import type { NearbyPlace } from "./nearbyPlaces";
 import type { NeighborhoodWalkingMetrics } from "./neighborhood/contracts";
@@ -300,7 +301,7 @@ onBeforeUnmount(() => {
           :key="`summary:${fact.id}`"
           class="nearby-neighborhood-score-card__summary-fact"
         >
-          <span aria-hidden="true">{{ fact.emphasis === "exceptional" ? "+++" : "+" }}</span>
+          <span aria-hidden="true">{{ getNeighborhoodFactMarker(fact) }}</span>
           {{ factLabel(fact) }}
         </p>
       </div>

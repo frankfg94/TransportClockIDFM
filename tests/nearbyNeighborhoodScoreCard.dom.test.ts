@@ -5,6 +5,17 @@ import type { NearbyPlace } from "../src/features/nearby-stations/nearbyPlaces";
 import { buildNeighborhoodScore, type NeighborhoodFact } from "../src/features/nearby-stations/neighborhood";
 
 describe("NearbyNeighborhoodScoreCard", () => {
+  it("shows the half-positive marker in the summary and the category", () => {
+    const result = buildNeighborhoodScore({ places: [], placesLoaded: false, stations: [], stationsLoaded: true, generatedAt: 1 });
+    const fact: NeighborhoodFact = { id: "reduced-access", kind: "transportLineNearby", category: "transport", polarity: "positive", family: "transport-proximity:fixture", priority: 6,
+      contributionWeight: 0.5, label: "Accès calculé au transport", tooltip: "Bonus réduit", evidence: { proof: "direct", observedAt: 1 } };
+    result.positiveFacts = [fact];
+    result.categories.find(category => category.id === "transport")!.positiveFacts = [fact];
+    const wrapper = mount(NearbyNeighborhoodScoreCard, { props: { result, directoryUrl: "/nearby-stations" }, global: { stubs: { NuxtLink: { template: "<a><slot /></a>" } } } });
+    expect(wrapper.get(".nearby-neighborhood-score-card__summary-fact").text()).toContain("½+");
+    expect(wrapper.get(".nearby-neighborhood-score-fact__marker").text()).toBe("½+");
+    wrapper.unmount();
+  });
   it("shows a deterministic score and exposes source/rule/proof on focus or tap", async () => {
     const result = buildNeighborhoodScore({
       places: [{

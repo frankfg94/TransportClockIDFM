@@ -1,5 +1,5 @@
 import type { GlobalMapLine, GlobalMapMode } from "../../transport-map/contracts/manifest";
-import { NEARBY_HEAVY_TOTAL_MAX_SECONDS } from "../nearbyHeavyTransportRules";
+import { getNearbyHeavyAccessContributionWeight, NEARBY_HEAVY_BUS_ACCESS_MAX_SECONDS, NEARBY_HEAVY_TOTAL_MAX_SECONDS } from "../nearbyHeavyTransportRules";
 import type { NearbyHeavyTransportCandidate, NearbyJourney, NearbyJourneySection } from "../nearbyHeavyTransports";
 import { getNearbyHeavyAccessTravelSeconds } from "../nearbyHeavyTransports";
 import { isNearbyJourneyTransitSection } from "../nearbyJourneyTiming";
@@ -26,6 +26,8 @@ export interface NeighborhoodTransportAccessSignal {
   distanceMeters: number;
   via?: string;
   journey?: NearbyJourney;
+  /** Reduced bus accesses contribute half as much as short accesses. */
+  contributionWeight?: number;
 }
 
 // Keep the verdict aligned with the resolver used by NearbyStationsMap. The
@@ -99,6 +101,7 @@ export function listTransportAccessSignals(input: NeighborhoodScoreInput): Neigh
           ? formatJourneyTransitRoute(input, access.journey, line) ?? formatFeederLineName(input, access)
           : undefined,
         journey: access.journey,
+        contributionWeight: getNearbyHeavyAccessContributionWeight(access),
       };
       keepBestTransportSignal(byLine, signal);
     }
@@ -333,6 +336,8 @@ function transportModeLabel(mode: GlobalMapMode): string {
 }
 
 export function makeTransportAccessFact(signal: NeighborhoodTransportAccessSignal): NeighborhoodFact {
+  const contributionWeight = signal.contributionWeight ?? 1;
+  const reduced = contributionWeight < 1;
   const atAddress = signal.accessKind === "walking" && signal.minutes <= 2;
   const kind: NeighborhoodFactKind = atAddress
     ? "transportLineAtAddress"
@@ -354,15 +359,16 @@ export function makeTransportAccessFact(signal: NeighborhoodTransportAccessSigna
     kind,
     category: "transport",
     polarity: "positive",
+    contributionWeight,
     family: `transport-proximity:${lineKey(signal.line)}`,
-    priority: atAddress
+    priority: (atAddress
       ? 13
-      : signal.source === "route" ? 12 : signal.distanceMeters <= NEIGHBORHOOD_TRANSPORT_AT_FOOT_METERS ? 11 : 10,
+      : signal.source === "route" ? 12 : signal.distanceMeters <= NEIGHBORHOOD_TRANSPORT_AT_FOOT_METERS ? 11 : 10) * contributionWeight,
     values,
     sourceKey: signal.source === "route" ? SOURCE_KEYS.heavyRoutes : SOURCE_KEYS.stations,
     proof: signal.source === "route" ? "direct" : "derived",
-    ruleKey: signal.source === "route" ? RULE_KEYS.transportProximity : RULE_KEYS.transportDistance,
-    ruleValues: { threshold: signal.source === "route" ? 15 : 1_500 },
+    ruleKey: reduced ? RULE_KEYS.transportBusReduced : signal.source === "route" ? RULE_KEYS.transportProximity : RULE_KEYS.transportDistance,
+    ruleValues: { threshold: reduced ? NEARBY_HEAVY_BUS_ACCESS_MAX_SECONDS / 60 : signal.source === "route" ? 15 : 1_500, maximum: NEARBY_HEAVY_TOTAL_MAX_SECONDS / 60 },
     emphasis: atAddress ? "exceptional" : undefined,
     travel: signal.journey ? { journey: signal.journey } : undefined,
   });
