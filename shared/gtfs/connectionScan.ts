@@ -10,7 +10,12 @@ export interface RoutingConnection {
 }
 export interface RoutingFootpath { to: number; seconds: number; section: NearbyJourneySection }
 export type RoutingConnectionBatch = readonly RoutingConnection[];
-export interface ConnectionScanResult { labels: Map<number, RoutingNode>; transitLabels: Map<number, RoutingNode>; platformLabels: Map<number, RoutingNode>; nightLabels: Map<number, Map<string, RoutingNode>>; scannedConnections: number }
+export interface ConnectionScanResult { labels: Map<number, RoutingNode>; transitLabels: Map<number, RoutingNode>; platformLabels: Map<number, RoutingNode>; nightLabels: Map<number, Map<string, RoutingNode>>; feederLabels: Map<number, Map<string, RoutingNode>>; scannedConnections: number }
+
+interface DirectFeederNode extends RoutingNode { scoreSeconds: number }
+function continueTrip(riding: RoutingNode, connection: RoutingConnection): RoutingNode {
+  return { previous: riding.previous, arrival: connection.arrival, section: { ...riding.section, durationSeconds: riding.section.durationSeconds + connection.arrival - riding.arrival, arrivalDateTime: connection.section.arrivalDateTime, toStopPointId: connection.section.toStopPointId, toStopAreaId: connection.section.toStopAreaId, toPoint: connection.section.toPoint, toName: connection.section.toName } };
+}
 
 /** One earliest-arrival tree answers every destination of the same origin/time/mode query. */
 export async function scanConnections(
@@ -20,11 +25,15 @@ export async function scanConnections(
   sameStopMargins: ReadonlyMap<number, number> = new Map(),
   transferRule?: (from: TransitArrival, to: RoutingConnection) => number | undefined,
   transferContext: (from: TransitArrival) => string = from => String(from.stop),
-  limits: { arrival?: number; walkingSeconds?: number } = {},
+  limits: { arrival?: number; walkingSeconds?: number; feederWalkingSeconds?: number; feederTravelSeconds?: number } = {},
 ): Promise<ConnectionScanResult> {
   const labels = new Map(access), onTrip = new Map<string, RoutingNode>();
   const transitLabels = new Map<number, RoutingNode>(), nightLabels = new Map<number, Map<string, RoutingNode>>();
   const platformLabels = new Map<number, RoutingNode>();
+  // Single-vehicle bus alternatives do not expand the transfer search tree.
+  // Keep one first arrival per stop/line, even when another line arrives earlier.
+  const feederLabels = new Map<number, Map<string, RoutingNode>>();
+  const feederOnTrip = new Map<string, DirectFeederNode>();
   const boarding = new Map<number, Map<string, RoutingNode>>();
   let scannedConnections = 0;
   const put = (stop: number, node: RoutingNode) => {
@@ -63,6 +72,37 @@ export async function scanConnections(
     const batch: RoutingConnectionBatch = Array.isArray(item) ? item : [item as RoutingConnection];
     for (const connection of batch) {
       scannedConnections++;
+      if (connection.section.lineMode === "BUS" || connection.section.lineMode === "NOCTILIEN") {
+        const ridingFeeder = feederOnTrip.get(connection.tripKey);
+        let feeder: DirectFeederNode | undefined = ridingFeeder
+          ? { ...continueTrip(ridingFeeder, connection), scoreSeconds: ridingFeeder.scoreSeconds + connection.arrival - ridingFeeder.arrival }
+          : undefined;
+        const walkingAccess = boarding.get(connection.from)?.get("access");
+        const walkingSeconds = walkingAccess?.walkingSeconds ?? walkingAccess?.section.durationSeconds ?? 0;
+        if (connection.pickup === 0 && walkingAccess && !walkingAccess.transferOrigin && walkingAccess.arrival <= connection.departure
+          && walkingSeconds <= (limits.feederWalkingSeconds ?? Infinity)) {
+          const scoreSeconds = walkingSeconds + connection.arrival - connection.departure;
+          if (!feeder || scoreSeconds < feeder.scoreSeconds) {
+            const previous: RoutingNode = walkingAccess.arrival < connection.departure
+              ? { previous: walkingAccess, arrival: connection.departure, section: { type: "waiting", durationSeconds: connection.departure - walkingAccess.arrival } }
+              : walkingAccess;
+            feeder = { previous, arrival: connection.arrival, section: connection.section, scoreSeconds };
+          }
+        }
+        if (feeder) {
+          feederOnTrip.set(connection.tripKey, feeder);
+          const line = connection.routeId ?? connection.section.lineId;
+          if (line && connection.dropOff === 0 && feeder.arrival <= (limits.arrival ?? Infinity)
+            && feeder.scoreSeconds <= (limits.feederTravelSeconds ?? Infinity)) {
+            const lines = feederLabels.get(connection.to) ?? new Map<string, RoutingNode>();
+            const current = lines.get(line) as DirectFeederNode | undefined;
+            if (!current || feeder.arrival < current.arrival || feeder.arrival === current.arrival && feeder.scoreSeconds < current.scoreSeconds) {
+              lines.set(line, feeder); feederLabels.set(connection.to, lines);
+            }
+          }
+        }
+        if (connection.last) feederOnTrip.delete(connection.tripKey);
+      }
       const riding = onTrip.get(connection.tripKey);
       let previous = riding;
       if (!previous && connection.pickup === 0) for (const candidate of boarding.get(connection.from)?.values() ?? []) {
@@ -77,7 +117,7 @@ export async function scanConnections(
         section: { type: "waiting", durationSeconds: connection.departure - previous.arrival },
       };
       const node: RoutingNode = riding
-        ? { previous: riding.previous, arrival: connection.arrival, section: { ...riding.section, durationSeconds: riding.section.durationSeconds + connection.arrival - riding.arrival, arrivalDateTime: connection.section.arrivalDateTime, toStopPointId: connection.section.toStopPointId, toStopAreaId: connection.section.toStopAreaId, toPoint: connection.section.toPoint, toName: connection.section.toName } }
+        ? continueTrip(riding, connection)
         : { previous, arrival: connection.arrival, section: connection.section };
       node.transferOrigin = { stop: connection.to, arrival: connection.arrival, routeId: connection.routeId, tripId: connection.tripId };
       onTrip.set(connection.tripKey, node);
@@ -86,7 +126,7 @@ export async function scanConnections(
       relax(connection.to, node);
     }
   }
-  return { labels, transitLabels, platformLabels, nightLabels, scannedConnections };
+  return { labels, transitLabels, platformLabels, nightLabels, feederLabels, scannedConnections };
 }
 
 export function routingSections(node: RoutingNode): NearbyJourneySection[] {

@@ -2814,6 +2814,8 @@ export const fr = {
       negatives: "Points faibles",
       neutralFacts: "Repères et données",
       transportReliabilityBreakdown: "Régularité par mode et par ligne",
+      transportAccessChoices: "Options d’accès à cette gare",
+      transportAccessChoice: "{line} · {minutes} min",
       regularityLineAria: "{mode}, ligne {line}, régularité : {score} %",
       categoriesLabel: "Catégories du score du quartier",
       categoryUnavailable: "Non disponible",

@@ -5,6 +5,18 @@ import type { NearbyPlace } from "../src/features/nearby-stations/nearbyPlaces";
 import { buildNeighborhoodScore, type NeighborhoodFact } from "../src/features/nearby-stations/neighborhood";
 
 describe("NearbyNeighborhoodScoreCard", () => {
+  it("shows each independent bus access and its own duration in the tooltip", () => {
+    const result = buildNeighborhoodScore({ places: [], placesLoaded: false, stations: [], stationsLoaded: true, generatedAt: 1 });
+    const journey = { source: "gtfs" as const, durationSeconds: 1500, sections: [{ type: "public_transport", durationSeconds: 900, lineCode: "express", lineMode: "BUS" as const }] };
+    const fact: NeighborhoodFact = { id: "bus-options", kind: "transportLineNearby", category: "transport", polarity: "positive", family: "transport-proximity:options", priority: 6,
+      label: "RER accessible via BUS express, BUS ordinary", evidence: { proof: "direct", observedAt: 1 },
+      travel: { journey, routes: [{ line: "BUS express", accessMinutes: 23, journey }, { line: "BUS ordinary", accessMinutes: 25, journey }] } };
+    result.categories.find(category => category.id === "transport")!.positiveFacts = [fact];
+    const wrapper = mount(NearbyNeighborhoodScoreCard, { props: { result, directoryUrl: "/nearby-stations" }, global: { stubs: { NuxtLink: { template: "<a><slot /></a>" } } } });
+    expect(wrapper.findAll("[data-testid='nearby-transport-access-option']").map(option => option.text())).toEqual(["BUS express · 23 min", "BUS ordinary · 25 min"]);
+    expect(wrapper.text()).toContain("Options d’accès à cette gare");
+    wrapper.unmount();
+  });
   it("shows the half-positive marker in the summary and the category", () => {
     const result = buildNeighborhoodScore({ places: [], placesLoaded: false, stations: [], stationsLoaded: true, generatedAt: 1 });
     const fact: NeighborhoodFact = { id: "reduced-access", kind: "transportLineNearby", category: "transport", polarity: "positive", family: "transport-proximity:fixture", priority: 6,

@@ -7,6 +7,7 @@ import { parisCivilEpoch, parisDateTime, gtfsServiceEpoch } from "../server/serv
 import type { GtfsRoutingIndex } from "../server/services/gtfs/routingTypes";
 import type { GtfsManifest } from "../server/services/gtfs/types";
 import { createStraightLineWalkingRoute } from "../src/features/nearby-stations/nearbyWalkingRoutes";
+import { analyzeNearbyJourneyTiming } from "../src/features/nearby-stations/nearbyJourneyTiming";
 
 const mocks = vi.hoisted(() => ({ manifest: vi.fn(), read: vi.fn(), matrix: vi.fn(), epoch: 0 }));
 vi.mock("../server/services/gtfs/runtime", () => ({
@@ -46,6 +47,35 @@ const request = () => ({ origin: { lon: 2.3, lat: 48.8 }, datetime: "20261012T09
   destinations: [{ id: "c", lon: 2.4, lat: 48.8, destinationRef: "stop_area:IDFM:PC" }] });
 
 describe("offline neighborhood routing", () => {
+  it("keeps the closer boarding stop when bus paths share an arrival and signature", async () => {
+    index.stops[1]!.lon = 2.301;
+    index.lines[0]!.mode = "BUS";
+    rows = [[0, 1, 33120, 33300, 0, 0, 0, 0], [1, 2, 33360, 33600, 0, 0, 0, 16]];
+    mocks.matrix.mockImplementation(async (_event, origin, destinations) => destinations.map((destination: { lon: number; lat: number; id: string }) => ({
+      ...createStraightLineWalkingRoute(origin, destination, destination.id), durationSeconds: destination.id === "0" ? 600 : 180, fallback: false, provider: "openrouteservice",
+    })));
+    const result = await routeNeighborhoodJourneys({} as H3Event, { ...request(), destinations: [{ ...request().destinations[0]!, arrivalAtPlatform: true }] });
+    expect(result.destinations[0]!.journeys).toHaveLength(1);
+    const journey = result.destinations[0]!.journeys[0]!;
+    expect(journey.sections.find(s => s.type === "walking")!.durationSeconds).toBe(180);
+    expect(journey.sections.find(s => s.type === "public_transport")!.fromStopPointId).toBe("IDFM:B");
+    expect(analyzeNearbyJourneyTiming(journey).scoreSeconds).toBe(420);
+  });
+  it("returns independent bus accesses from a shared scan while retaining earliest-arrival coordinate routing", async () => {
+    index.lines = [{ id: "ordinary", code: "ordinary", mode: "BUS" }, { id: "express", code: "express", mode: "BUS" }];
+    rows = [[0, 2, 33120, 34020, 0, 0, 0, 16], [0, 2, 33360, 34140, 1, 0, 1, 16]];
+    mocks.matrix.mockImplementation(async (_event, origin, destinations) => destinations.map((destination: { lon: number; lat: number; id: string }) => ({
+      ...createStraightLineWalkingRoute(origin, destination, destination.id), durationSeconds: 600, fallback: false, provider: "openrouteservice",
+    })));
+    const destination = { ...request().destinations[0]!, arrivalAtPlatform: true };
+    const result = await routeNeighborhoodJourneys({} as H3Event, { ...request(), destinations: [destination] });
+    expect(result.destinations[0]!.journeys.map(journey => analyzeNearbyJourneyTiming(journey).scoreSeconds)).toEqual([1500, 1380]);
+    expect(result.diagnostics?.scannedConnections).toBe(2);
+    const reused = await routeNeighborhoodJourneys({} as H3Event, request());
+    expect(reused.diagnostics?.cacheHit).toBe(true);
+    expect(mocks.read.mock.calls.filter(([, path]) => path.endsWith("9-0.json"))).toHaveLength(1);
+    expect(reused.destinations[0]!.journeys[0]!.sections.filter(s => s.type === "public_transport").map(s => s.lineId)).toEqual(["ordinary"]);
+  });
   it("uses a pathway for walking while still enforcing the official minimum change time", async () => {
     index.stops.push({ id: "IDFM:D", parentId: "IDFM:PD", name: "D", lon: 2.45, lat: 48.8 });
     index.boardingStops.push(3);

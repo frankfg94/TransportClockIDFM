@@ -8,6 +8,7 @@ import type { GtfsManifest } from "../../server/services/gtfs/types";
 import { CONNECTION_COLUMNS, type GtfsRoutingIndex, type GtfsRoutingShard } from "./routingTypes";
 import { scanConnections, routingSections, type RoutingConnection, type RoutingConnectionBatch, type RoutingNode, type RoutingFootpath, type ConnectionScanResult, type TransitArrival } from "./connectionScan";
 import { gtfsServiceEpoch, parisCivilEpoch, parisDateTime } from "./routingTime";
+import { NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS, NEARBY_HEAVY_TOTAL_MAX_SECONDS } from "../../src/features/nearby-stations/nearbyHeavyTransportRules";
 
 export const NEIGHBORHOOD_ROUTING_HORIZON_SECONDS = 4 * 3600;
 const WALK_RADIUS_METERS = 1200;
@@ -224,7 +225,8 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
       if (!graph) { graph = buildFootpaths(index); transferGraphs.set(index, graph); index.transfers = []; }
       const { paths, margins, transferRule, context } = graph;
       return scanConnections(connections(event, manifest, index, serviceDate, start, request.allowedModes), access, paths, margins, transferRule, context,
-        { arrival: start + NEIGHBORHOOD_ROUTING_HORIZON_SECONDS, walkingSeconds: 1200 });
+        { arrival: start + NEIGHBORHOOD_ROUTING_HORIZON_SECONDS, walkingSeconds: 1200,
+          feederWalkingSeconds: NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS, feederTravelSeconds: NEARBY_HEAVY_TOTAL_MAX_SECONDS });
     })();
     entry = { expires: Date.now() + 10 * 60_000, promise };
     trees.set(key, entry);
@@ -244,7 +246,9 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
     const egress = platformArrival ? [] : await runtime.matrix(event, destination, candidates.map(c => ({ ...c.point, id: String(c.id) })), { reverse: true });
     const routes: RoutingNode[] = candidates.flatMap((candidate, i) => {
       if (platformArrival) {
-        return [tree.platformLabels.get(candidate.id), ...(tree.nightLabels.get(candidate.id)?.values() ?? [])]
+        // For the same arrival/line, retain its shortest direct access path
+        // before the general earliest-arrival path is deduplicated.
+        return [...(tree.feederLabels.get(candidate.id)?.values() ?? []), tree.platformLabels.get(candidate.id), ...(tree.nightLabels.get(candidate.id)?.values() ?? [])]
           .filter((node): node is RoutingNode => Boolean(node && node.section.type === "public_transport"));
       }
       const route = egress[i]!;

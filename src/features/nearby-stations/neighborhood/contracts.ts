@@ -192,6 +192,8 @@ export interface NeighborhoodFactTravel {
 export interface NeighborhoodFactTravelRoute {
   line: string;
   journey: NearbyJourney;
+  /** Scoring duration of an independent station-access option. */
+  accessMinutes?: number;
   direction?: string;
 }
 

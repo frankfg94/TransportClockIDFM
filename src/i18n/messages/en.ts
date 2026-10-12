@@ -2782,6 +2782,8 @@ export const en = {
       negatives: "Watch points",
       neutralFacts: "Data and reference points",
       transportReliabilityBreakdown: "Regularity by mode and line",
+      transportAccessChoices: "Access options to this station",
+      transportAccessChoice: "{line} · {minutes} min",
       regularityLineAria: "{mode}, line {line}, regularity: {score}%",
       categoriesLabel: "Neighbourhood score categories",
       categoryUnavailable: "Unavailable",
