@@ -7,13 +7,18 @@ import { buildNeighborhoodScore, type NeighborhoodFact } from "../src/features/n
 describe("NearbyNeighborhoodScoreCard", () => {
   it("shows each independent bus access and its own duration in the tooltip", () => {
     const result = buildNeighborhoodScore({ places: [], placesLoaded: false, stations: [], stationsLoaded: true, generatedAt: 1 });
-    const journey = { source: "gtfs" as const, durationSeconds: 1500, sections: [{ type: "public_transport", durationSeconds: 900, lineCode: "express", lineMode: "BUS" as const }] };
+    const journey = { source: "gtfs" as const, durationSeconds: 1500, sections: [{ type: "walking", durationSeconds: 600, timingSource: "schedule" as const }, { type: "public_transport", fromName: "Arrêt proche", durationSeconds: 900, lineCode: "express", lineMode: "BUS" as const }] };
+    const alternate = { ...journey, durationSeconds: 1800, sections: [{ type: "walking", durationSeconds: 780, timingSource: "estimated" as const }, { type: "waiting", durationSeconds: 120 }, { type: "public_transport", fromName: "Arrêt éloigné", durationSeconds: 900, lineCode: "ordinary", lineMode: "BUS" as const }] };
     const fact: NeighborhoodFact = { id: "bus-options", kind: "transportLineNearby", category: "transport", polarity: "positive", family: "transport-proximity:options", priority: 6,
       label: "RER accessible via BUS express, BUS ordinary", evidence: { proof: "direct", observedAt: 1 },
-      travel: { journey, routes: [{ line: "BUS express", accessMinutes: 23, journey }, { line: "BUS ordinary", accessMinutes: 25, journey }] } };
+      travel: { journey, routes: [{ line: "BUS express", accessMinutes: 23, journey }, { line: "BUS ordinary", accessMinutes: 28, journey: alternate }] } };
     result.categories.find(category => category.id === "transport")!.positiveFacts = [fact];
     const wrapper = mount(NearbyNeighborhoodScoreCard, { props: { result, directoryUrl: "/nearby-stations" }, global: { stubs: { NuxtLink: { template: "<a><slot /></a>" } } } });
-    expect(wrapper.findAll("[data-testid='nearby-transport-access-option']").map(option => option.text())).toEqual(["BUS express · 23 min", "BUS ordinary · 25 min"]);
+    const options = wrapper.findAll("[data-testid='nearby-transport-access-option']");
+    expect(options[0]!.text()).toContain("Marche 10 min + bus 15 min · Arrêt proche");
+    expect(options[1]!.text()).toContain("Marche estimée ≈ 13 min + bus 15 min · Arrêt éloigné");
+    expect(options[1]!.text()).toContain("Durée totale 30 min · attente initiale retirée 2 min");
+    expect(wrapper.text()).toContain("calculée à vol d’oiseau");
     expect(wrapper.text()).toContain("Options d’accès à cette gare");
     wrapper.unmount();
   });

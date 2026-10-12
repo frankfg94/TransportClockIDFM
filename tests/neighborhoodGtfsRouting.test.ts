@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({ manifest: vi.fn(), read: vi.fn(), matrix: vi.f
 vi.mock("../server/services/gtfs/runtime", () => ({
   getGtfsManifest: mocks.manifest, readGtfsJson: mocks.read, isGtfsEnabled: () => true, getGtfsRuntimeCacheEpoch: () => mocks.epoch,
 }));
-vi.mock("../server/services/walking/openRouteService", () => ({ matrixWalkingWithOpenRouteService: mocks.matrix }));
+vi.mock("../server/services/walking/openRouteService", () => ({ matrixWalkingForGtfs: mocks.matrix }));
 let index: GtfsRoutingIndex, manifest: GtfsManifest, rows: number[][];
 beforeEach(() => {
   mocks.epoch++; vi.clearAllMocks();

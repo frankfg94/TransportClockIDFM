@@ -2,6 +2,7 @@ import { createError, defineEventHandler, readBody } from "h3";
 import type { NearbyJourneyPoint } from "../../../src/features/nearby-stations/nearbyHeavyTransports";
 import {
   matrixWalkingWithPreferredProvider,
+  matrixWalkingForGtfs,
   matrixWalkingWithOpenRouteService,
   OPEN_ROUTE_SERVICE_MAX_MATRIX_DESTINATIONS,
 } from "../../services/walking/openRouteService";
@@ -21,7 +22,8 @@ export default defineEventHandler(async (event) => {
   if (!origin || destinations.length === 0) {
     throw createError({ statusCode: 400, statusMessage: "origin and destinations must be valid coordinates." });
   }
-  const router = body.routingPolicy === "ors-only" ? matrixWalkingWithOpenRouteService : matrixWalkingWithPreferredProvider;
+  const router = body.routingPolicy === "gtfs-access" ? matrixWalkingForGtfs
+    : body.routingPolicy === "ors-only" ? matrixWalkingWithOpenRouteService : matrixWalkingWithPreferredProvider;
   return { routes: await router(event, origin, destinations, { reverse: body.reverse === true }) };
 });
 

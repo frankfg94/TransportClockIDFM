@@ -6,6 +6,7 @@ import { useI18n, type TranslationKey } from "../../i18n";
 import { getNeighborhoodFactMarker, hasExceptionalFactMarker } from "./neighborhood/facts";
 import type { NeighborhoodFact, NeighborhoodFactGeography, NeighborhoodFactPlace, NeighborhoodFactTransportReliabilityLine } from "./neighborhood";
 import MiniTravelDisplay from "./MiniTravelDisplay.vue";
+import { summarizeNearbyStationAccess } from "./nearbyJourneyTiming";
 import type { ServiceQualityMode } from "./serviceQualityApi";
 
 const props = defineProps<{
@@ -20,7 +21,11 @@ const emit = defineEmits<{
 const { d, n, t } = useI18n();
 const router = useRouter();
 const exceptionalMarker = computed(() => hasExceptionalFactMarker(props.fact));
-const transportAccessChoices = computed(() => props.fact.travel?.routes?.filter(route => route.accessMinutes !== undefined) ?? []);
+const transportAccessChoices = computed(() => props.fact.travel?.routes?.filter(route => route.accessMinutes !== undefined)
+  .map(route => ({ ...route, ...summarizeNearbyStationAccess(route.journey) })) ?? []);
+const hasEstimatedWalking = computed(() => (props.fact.travel?.routes?.map(route => route.journey)
+  ?? (props.fact.travel ? [props.fact.travel.journey] : []))
+  .some(journey => summarizeNearbyStationAccess(journey).walkingEstimated));
 
 const transportModes: readonly ServiceQualityMode[] = ["METRO", "RER", "TRAIN", "TRAM"];
 const transportModeKeys: Record<ServiceQualityMode, TranslationKey> = {
@@ -202,8 +207,11 @@ function geographyLabel(): string {
         <ul>
           <li v-for="route in transportAccessChoices" :key="route.line" data-testid="nearby-transport-access-option">
             {{ t("nearbyStations.neighborhoodScore.transportAccessChoice", { line: route.line, minutes: route.accessMinutes }) }}
+            <small>{{ t(route.walkingEstimated ? "nearbyStations.neighborhoodScore.transportAccessWalkingEstimated" : "nearbyStations.neighborhoodScore.transportAccessWalking", { walking: route.walkingMinutes, transit: route.transitMinutes }) }}<template v-if="route.boardingStop"> · {{ route.boardingStop }}</template></small>
+            <small>{{ t("nearbyStations.neighborhoodScore.transportAccessElapsed", { elapsed: route.elapsedMinutes, wait: route.initialWaitMinutes }) }}</small>
           </li>
         </ul>
+        <p class="nearby-neighborhood-score-fact__walking-estimate">{{ t("nearbyStations.neighborhoodScore.transportAccessRounding") }}</p>
       </section>
       <div v-if="fact.travel?.routes?.length && !transportAccessChoices.length" class="nearby-neighborhood-score-fact__travel-routes">
         <div
@@ -221,6 +229,7 @@ function geographyLabel(): string {
         </div>
       </div>
       <MiniTravelDisplay v-else-if="fact.travel" :journey="fact.travel.journey" />
+      <p v-if="hasEstimatedWalking" class="nearby-neighborhood-score-fact__walking-estimate">{{ t("nearbyStations.neighborhoodScore.transportAccessEstimateWarning") }}</p>
       <div v-if="fact.travel?.directions?.length && !fact.travel.routes?.length" class="nearby-neighborhood-score-fact__directions">
         <strong>{{ t("nearbyStations.neighborhoodScore.miniTravel.directions") }}</strong>
         <ul>
@@ -293,6 +302,8 @@ function geographyLabel(): string {
 .nearby-neighborhood-score-fact__travel-route { align-items: center; display: grid; gap: 8px; grid-template-columns: max-content minmax(0, 1fr); min-width: 0; }
 .nearby-neighborhood-score-fact__access-choices { border-top: 1px solid #e8ebf2; margin-top: 8px; padding-top: 4px; }
 .nearby-neighborhood-score-fact__access-choices ul { display: grid; gap: 4px; list-style: none; margin: 5px 0 0; padding: 0; }
+.nearby-neighborhood-score-fact__access-choices small { color: #667085; display: block; font-size: .68rem; line-height: 1.4; }
+.nearby-neighborhood-score-fact__walking-estimate { color: #667085; font-size: .68rem; line-height: 1.4; margin: 8px 0 0; }
 .nearby-neighborhood-score-fact__travel-route :deep(.mini-travel-display) { margin: 3px 0 0; max-width: 100%; }
 .nearby-neighborhood-score-fact__travel-direction { color: #344054; font-size: .66rem; line-height: 1.3; min-width: 0; overflow-wrap: anywhere; }
 .nearby-neighborhood-score-fact__directions { border-top: 1px solid #e8ebf2; margin-top: 8px; max-width: 355px; padding-top: 8px; }

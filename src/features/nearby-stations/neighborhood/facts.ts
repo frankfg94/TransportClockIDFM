@@ -9,6 +9,7 @@ const gtfsTooltipKeys: Partial<Record<NeighborhoodFactKind, TranslationKey>> = {
   transportHub: "nearbyStations.neighborhoodScore.gtfsFacts.transportHub",
   majorStationUnder40: "nearbyStations.neighborhoodScore.gtfsFacts.majorStation",
   majorStationContext: "nearbyStations.neighborhoodScore.gtfsFacts.majorStation",
+  employmentHubContext: "nearbyStations.neighborhoodScore.gtfsFacts.employmentHub",
   noctilienAtNight: "nearbyStations.neighborhoodScore.gtfsFacts.noctilien",
   greenSpaceTransitNearby: "nearbyStations.neighborhoodScore.gtfsFacts.greenSpace",
   hospitalNearby: "nearbyStations.neighborhoodScore.gtfsFacts.hospital",

@@ -403,7 +403,8 @@ export function makeTransportAccessFact(signal: NeighborhoodTransportAccessSigna
     values,
     sourceKey: signal.source === "route" ? SOURCE_KEYS.heavyRoutes : SOURCE_KEYS.stations,
     proof: signal.source === "route" ? "direct" : "derived",
-    ruleKey: reduced ? RULE_KEYS.transportBusReduced : signal.source === "route" ? RULE_KEYS.transportProximity : RULE_KEYS.transportDistance,
+    ruleKey: reduced ? RULE_KEYS.transportBusReduced : signal.accessKind === "connection" && signal.journey?.sections.some(section => section.lineMode === "BUS" || section.lineMode === "NOCTILIEN")
+      ? RULE_KEYS.transportBusAccess : signal.source === "route" ? RULE_KEYS.transportProximity : RULE_KEYS.transportDistance,
     ruleValues: { threshold: reduced ? NEARBY_HEAVY_BUS_ACCESS_MAX_SECONDS / 60 : signal.source === "route" ? 15 : 1_500, maximum: NEARBY_HEAVY_TOTAL_MAX_SECONDS / 60 },
     emphasis: atAddress ? "exceptional" : undefined,
     travel: signal.journey ? { journey: signal.journey,

@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import route from "../server/api/walking/route.post";
 import matrix from "../server/api/walking/matrix.post";
 import verdict from "../server/api/neighborhood-verdict.get";
-const mocks = vi.hoisted(() => ({ body: vi.fn(), query: vi.fn(), ors: vi.fn(), orsMatrix: vi.fn(), preferred: vi.fn(), preferredMatrix: vi.fn(),
+const mocks = vi.hoisted(() => ({ body: vi.fn(), query: vi.fn(), ors: vi.fn(), orsMatrix: vi.fn(), gtfsMatrix: vi.fn(), preferred: vi.fn(), preferredMatrix: vi.fn(),
   compiled: vi.fn(), geo: vi.fn(), build: vi.fn() }));
 vi.mock("h3", async original => ({ ...await original<typeof import("h3")>(), readBody: mocks.body, getQuery: mocks.query }));
 vi.mock("../server/services/walking/openRouteService", () => ({
+  matrixWalkingForGtfs: mocks.gtfsMatrix,
   routeWalkingWithOpenRouteService: mocks.ors, matrixWalkingWithOpenRouteService: mocks.orsMatrix,
   routeWalkingWithPreferredProvider: mocks.preferred, matrixWalkingWithPreferredProvider: mocks.preferredMatrix, OPEN_ROUTE_SERVICE_MAX_MATRIX_DESTINATIONS: 64,
 }));
@@ -23,6 +24,15 @@ beforeEach(() => {
   mocks.build.mockResolvedValue({ categories: [] });
 });
 describe("verdict ORS-only policy", () => {
+  it("selects the bounded GTFS pedestrian fallback independently of the documentary ORS-only policy", async () => {
+    const origin = { lon: 2.3, lat: 48.8 }, destinations = [{ id: "x", lon: 2.4, lat: 48.9 }];
+    mocks.body.mockResolvedValue({ origin, destinations, routingPolicy: "gtfs-access", reverse: true });
+    mocks.gtfsMatrix.mockResolvedValue([]);
+    const event = {} as H3Event;
+    await matrix(event);
+    expect(mocks.gtfsMatrix).toHaveBeenCalledWith(event, origin, destinations, { reverse: true });
+    expect(mocks.orsMatrix).not.toHaveBeenCalled();
+  });
   it("keeps the directed egress matrix from station platforms to the destination", async () => {
     const origin = { lon: 2.3, lat: 48.8 }, destinations = [{ id: "x", lon: 2.4, lat: 48.9 }];
     mocks.body.mockResolvedValue({ origin, destinations, routingPolicy: "ors-only", reverse: true });

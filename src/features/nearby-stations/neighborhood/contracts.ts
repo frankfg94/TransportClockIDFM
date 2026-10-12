@@ -104,6 +104,8 @@ export type NeighborhoodFactKind =
   | "majorStationUnder40"
   | "majorStationContext"
   | "majorStationUnavailable"
+  | "employmentHubContext"
+  | "employmentHubUnavailable"
   | "noctilienAtNight"
   | "greenSpaceExceptional"
   | "greenSpaceTransitNearby"
@@ -293,6 +295,7 @@ export interface NeighborhoodWalkingMetrics {
 export interface NeighborhoodJourneyBenchmark {
   id: string;
   label: string;
+  stationLabel?: string;
   journeys: readonly NearbyJourney[];
   status?: "loading" | "ready" | "unavailable";
 }

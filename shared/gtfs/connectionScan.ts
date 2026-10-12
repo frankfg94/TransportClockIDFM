@@ -34,6 +34,18 @@ export async function scanConnections(
   // Keep one first arrival per stop/line, even when another line arrives earlier.
   const feederLabels = new Map<number, Map<string, RoutingNode>>();
   const feederOnTrip = new Map<string, DirectFeederNode>();
+  const verifiedAccess = new WeakMap<RoutingNode, boolean>();
+  function hasVerifiedWalkingAccess(node: RoutingNode): boolean {
+    const cached = verifiedAccess.get(node);
+    if (cached !== undefined) return cached;
+    let current: RoutingNode | undefined = node;
+    while (current) {
+      if (current.section.timingSource === "estimated") { verifiedAccess.set(node, false); return false; }
+      current = current.previous;
+    }
+    verifiedAccess.set(node, true);
+    return true;
+  }
   const boarding = new Map<number, Map<string, RoutingNode>>();
   let scannedConnections = 0;
   const put = (stop: number, node: RoutingNode) => {
@@ -80,6 +92,7 @@ export async function scanConnections(
         const walkingAccess = boarding.get(connection.from)?.get("access");
         const walkingSeconds = walkingAccess?.walkingSeconds ?? walkingAccess?.section.durationSeconds ?? 0;
         if (connection.pickup === 0 && walkingAccess && !walkingAccess.transferOrigin && walkingAccess.arrival <= connection.departure
+          && hasVerifiedWalkingAccess(walkingAccess)
           && walkingSeconds <= (limits.feederWalkingSeconds ?? Infinity)) {
           const scoreSeconds = walkingSeconds + connection.arrival - connection.departure;
           if (!feeder || scoreSeconds < feeder.scoreSeconds) {

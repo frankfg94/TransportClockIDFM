@@ -60,6 +60,21 @@ export function analyzeNearbyJourneyTiming(journey: NearbyJourney): NearbyJourne
   };
 }
 
+/** Lightweight detail for each independent bus access, from its own sections. */
+export function summarizeNearbyStationAccess(journey: NearbyJourney) {
+  const walking = journey.sections.filter(isNearbyJourneyWalkingSection);
+  const transit = journey.sections.filter(isNearbyJourneyTransitSection);
+  const timing = analyzeNearbyJourneyTiming(journey);
+  return {
+    walkingMinutes: Math.ceil(walking.reduce((sum, section) => sum + (finiteNonNegative(section.durationSeconds) ?? 0), 0) / 60),
+    transitMinutes: Math.ceil(transit.reduce((sum, section) => sum + (finiteNonNegative(section.durationSeconds) ?? 0), 0) / 60),
+    boardingStop: transit[0]?.fromName,
+    walkingEstimated: walking.some(section => section.timingSource === "estimated"),
+    elapsedMinutes: Math.ceil(timing.elapsedSeconds / 60),
+    initialWaitMinutes: Math.round(timing.initialWaitSeconds / 60),
+  };
+}
+
 export function isNearbyJourneyWaitingSection(section: NearbyJourneySection): boolean {
   const type = (section.type ?? "").toLocaleLowerCase("fr-FR");
   const mode = (section.mode ?? "").toLocaleLowerCase("fr-FR");

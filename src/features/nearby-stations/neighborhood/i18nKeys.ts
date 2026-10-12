@@ -68,6 +68,14 @@ export const FACT_KEYS: Record<NeighborhoodFactKind, { label: TranslationKey; to
     label: "nearbyStations.neighborhoodScore.facts.majorStationUnavailable.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.majorStationUnavailable.tooltip",
   },
+  employmentHubContext: {
+    label: "nearbyStations.neighborhoodScore.facts.employmentHubContext.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.employmentHubContext.tooltip",
+  },
+  employmentHubUnavailable: {
+    label: "nearbyStations.neighborhoodScore.facts.employmentHubUnavailable.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.employmentHubUnavailable.tooltip",
+  },
   noctilienAtNight: {
     label: "nearbyStations.neighborhoodScore.facts.noctilienAtNight.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.noctilienAtNight.tooltip",
@@ -306,6 +314,7 @@ export const SOURCE_KEYS = {
 export const RULE_KEYS = {
   transportProximity: "nearbyStations.neighborhoodScore.rules.transportProximity",
   transportBusReduced: "nearbyStations.neighborhoodScore.rules.transportBusReduced",
+  transportBusAccess: "nearbyStations.neighborhoodScore.rules.transportBusAccess",
   transportDistance: "nearbyStations.neighborhoodScore.rules.transportDistance",
   transportDiversity: "nearbyStations.neighborhoodScore.rules.transportDiversity",
   transportHub: "nearbyStations.neighborhoodScore.rules.transportHub",
@@ -317,6 +326,7 @@ export const RULE_KEYS = {
   chateletUnavailable: "nearbyStations.neighborhoodScore.rules.chateletUnavailable",
   majorStationUnder40: "nearbyStations.neighborhoodScore.rules.majorStationUnder40",
   majorStationContext: "nearbyStations.neighborhoodScore.rules.majorStationContext",
+  employmentHubContext: "nearbyStations.neighborhoodScore.rules.employmentHubContext",
   majorStationUnavailable: "nearbyStations.neighborhoodScore.rules.majorStationUnavailable",
   noctilienAtNight: "nearbyStations.neighborhoodScore.rules.noctilienAtNight",
   frequencyHigh: "nearbyStations.neighborhoodScore.rules.frequencyHigh",

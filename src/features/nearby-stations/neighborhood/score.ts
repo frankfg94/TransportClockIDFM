@@ -159,7 +159,7 @@ function preserveJourneyBenchmarkFacts(
   selected: NeighborhoodFact[],
   facts: readonly NeighborhoodFact[],
 ): void {
-  for (const benchmark of facts.filter((fact) => fact.family.startsWith("major-station:"))) {
+  for (const benchmark of facts.filter((fact) => fact.family.startsWith("major-station:") || fact.family.startsWith("employment-hub:"))) {
     if (!selected.some((fact) => fact.id === benchmark.id)) selected.push(benchmark);
   }
   selected.sort(compareFacts);

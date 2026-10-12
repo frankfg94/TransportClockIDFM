@@ -48,8 +48,8 @@ const route = createNeighborhoodGtfsRouter<string>({
       : createStraightLineWalkingRoute(origin, destination, destination.id));
     try {
       const response = await fetch(new URL("/api/walking/matrix", baseUrl), {
-        method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(15_000),
-        body: JSON.stringify({ origin, destinations, routingPolicy: "ors-only", reverse: options?.reverse === true }),
+        method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(30_000),
+        body: JSON.stringify({ origin, destinations, routingPolicy: "gtfs-access", reverse: options?.reverse === true }),
       });
       if (!response.ok) return estimated;
       const payload = await response.json() as { routes?: NearbyWalkingRoute[] };

@@ -44,7 +44,7 @@ import {
   DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME,
 } from "./neighborhood/departureTimes";
 import type { NearbyStationEntry } from "./nearbyStations";
-import { MAJOR_STATION_BENCHMARKS } from "./neighborhood/criteria/transport/majorStationBenchmarks";
+import { JOURNEY_REFERENCE_BENCHMARKS, resolveReferenceBenchmarkDestinations } from "./neighborhood/criteria/transport/majorStationBenchmarks";
 import {
   aggregateNeighborhoodScore,
   buildNeighborhoodCategories,
@@ -380,7 +380,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     for (const benchmark of benchmarkDestinations) {
       const journeyKey = journeyCacheKey(originKey, benchmark.id, benchmark, journeyDateTime);
       const taskId = `journey:${benchmark.id}`;
-      nextBenchmarks.push({ id: benchmark.id, label: benchmark.label, journeys: [], status: "loading" });
+      nextBenchmarks.push({ id: benchmark.id, label: benchmark.label, stationLabel: benchmark.stationLabel, journeys: [], status: "loading" });
       const journeyPromise = loadJourneyProbe(origin, benchmark, journeyDateTime, journeyKey)
         .then((next) => {
           if (benchmark.id === "chatelet" && token === requestToken) {
@@ -416,7 +416,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         ["transport"],
       );
     }
-    for (const benchmark of MAJOR_STATION_BENCHMARKS) {
+    for (const benchmark of JOURNEY_REFERENCE_BENCHMARKS) {
       if (nextBenchmarks.some((candidate) => candidate.id === benchmark.id)) continue;
       nextBenchmarks.push({
         id: benchmark.id,
@@ -1301,6 +1301,7 @@ function resolveChateletDestination(network: TransportMapNetwork | undefined): G
 
 interface JourneyBenchmarkDestination extends Pick<GlobalMapStation, "id" | "lon" | "lat"> {
   label: string;
+  stationLabel?: string;
   destinationRef?: string;
 }
 
@@ -1315,23 +1316,7 @@ function resolveJourneyBenchmarks(network: TransportMapNetwork | undefined): Jou
     destinationRef: resolveNavitiaStopAreaReference(chatelet),
   });
 
-  for (const benchmark of MAJOR_STATION_BENCHMARKS) {
-    const destination = [...network.stations]
-      .filter((station) => isHeavyTransportStation(network, station))
-      .filter((station) => {
-        const names = [station.name, ...station.aliases].map(normalizeStationName);
-        return benchmark.names.some((candidate) => names.some((name) => name === candidate || name.includes(candidate)));
-      })
-      .sort((left, right) => Number(right.isHub) - Number(left.isHub)
-        || right.lineIds.length - left.lineIds.length
-        || left.id.localeCompare(right.id))[0];
-    if (destination) destinations.push({
-      ...destination,
-      id: benchmark.id,
-      label: benchmark.label,
-      destinationRef: resolveNavitiaStopAreaReference(destination),
-    });
-  }
+  destinations.push(...resolveReferenceBenchmarkDestinations(network));
   return destinations;
 }
 

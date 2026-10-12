@@ -64,6 +64,7 @@ type CachedMatrix = { expiresAt: number; routes: NearbyWalkingRoute[] };
 type CachedIsochrones = { expiresAt: number; response: NearbyIsochronesResponse };
 const routeCache = new Map<string, CachedRoute>();
 const matrixCache = new Map<string, CachedMatrix>();
+const gtfsMatrixRequests = new Map<string, Promise<NearbyWalkingRoute[]>>();
 const isochroneCache = new Map<string, CachedIsochrones>();
 const quotaBackoffs = new Map<string, number>();
 const quotaKey = (config: OpenRouteServiceConfig) => `${config.root}:${config.apiKey}`;
@@ -307,6 +308,64 @@ export async function matrixWalkingWithOpenRouteService(
     return routes;
   } catch {
     return fallbacks.map(route => ({ ...route, unavailabilityReason: quotaBlocked(config) ? "quota-exceeded" : "unavailable" }));
+  }
+}
+
+/**
+ * Keep the fast matrix path for GTFS, but resolve its approximations on the
+ * pedestrian network before boarding feasibility is computed. One bounded
+ * fallback batch is shared by every destination of an origin's routing tree.
+ */
+export async function matrixWalkingForGtfs(
+  event: H3Event,
+  origin: NearbyJourneyPoint,
+  destinations: readonly NearbyWalkingMatrixDestination[],
+  options: { reverse?: boolean } = {},
+): Promise<NearbyWalkingRoute[]> {
+  const limited = destinations.slice(0, OPEN_ROUTE_SERVICE_MAX_MATRIX_DESTINATIONS);
+  const key = `gtfs:${options.reverse ? "reverse:" : ""}${matrixCacheKey(origin, limited)}`;
+  const cached = matrixCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.routes.map((route, i) => ({ ...route, id: limited[i]!.id }));
+  const active = gtfsMatrixRequests.get(key);
+  if (active) return (await active).map((route, i) => ({ ...route, id: limited[i]!.id }));
+  const promise = (async () => {
+    const routes = await matrixWalkingWithOpenRouteService(event, origin, limited, options);
+    if (!getServerIdfmApiKey(event) || !routes.some(route => route.fallback)) return routes;
+    // Deduplicate identical stop coordinates (several lines/platform refs can
+    // describe the same pedestrian destination). Preserve matrix order/ids.
+    const pending = new Map<string, { destination: NearbyWalkingMatrixDestination; indices: number[] }>();
+    routes.forEach((route, i) => {
+      if (!route.fallback) return;
+      const destination = limited[i]!;
+      const routeKey = options.reverse ? routeCacheKey(destination, origin) : routeCacheKey(origin, destination);
+      const entry = pending.get(routeKey);
+      if (entry) entry.indices.push(i);
+      else pending.set(routeKey, { destination, indices: [i] });
+    });
+    const groups = [...pending.values()];
+    const deadline = AbortSignal.timeout(12_000);
+    let cursor = 0;
+    await Promise.all(Array.from({ length: Math.min(PREFERRED_MATRIX_CONCURRENCY, groups.length) }, async () => {
+      while (cursor < groups.length && !deadline.aborted) {
+        const group = groups[cursor++]!;
+        const route = await routeWalkingWithPreferredProvider(event,
+          options.reverse ? group.destination : origin,
+          options.reverse ? origin : group.destination,
+          group.destination.id, deadline);
+        if (!route.fallback) for (const i of group.indices) routes[i] = { ...route, id: limited[i]!.id };
+      }
+    }));
+    return routes;
+  })();
+  gtfsMatrixRequests.set(key, promise);
+  try {
+    const routes = await promise;
+    // Failed street routing remains explicit and retryable after one minute;
+    // successful batches and individual traces use the existing caches.
+    saveMatrixCache(matrixCache, key, routes, routes.some(route => route.fallback) ? 60_000 : MATRIX_CACHE_TTL_MS);
+    return routes;
+  } finally {
+    gtfsMatrixRequests.delete(key);
   }
 }
 

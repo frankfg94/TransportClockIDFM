@@ -3,7 +3,7 @@ import type { NeighborhoodFact, NeighborhoodScoreInput } from "../../contracts";
 import { makeFact } from "../../facts";
 import { RULE_KEYS, SOURCE_KEYS } from "../../i18nKeys";
 import { chooseFastestJourney, summarizeJourney } from "../../journeys";
-import { MAJOR_STATION_BENCHMARKS } from "./majorStationBenchmarks";
+import { JOURNEY_REFERENCE_BENCHMARKS } from "./majorStationBenchmarks";
 
 export function buildJourneyBenchmarkFacts(input: NeighborhoodScoreInput): {
   positiveFacts: NeighborhoodFact[];
@@ -16,25 +16,27 @@ export function buildJourneyBenchmarkFacts(input: NeighborhoodScoreInput): {
   const canReportUnavailable = input.stationsLoaded && input.journeyBenchmarksLoading === false;
   const benchmarks = providedBenchmarks === undefined
     ? []
-    : MAJOR_STATION_BENCHMARKS.map((station) => benchmarksById.get(station.id) ?? (canReportUnavailable
+    : JOURNEY_REFERENCE_BENCHMARKS.map((station) => benchmarksById.get(station.id) ?? (canReportUnavailable
       ? { id: station.id, label: station.label, journeys: [], status: "unavailable" as const }
       : undefined)).filter((benchmark): benchmark is NonNullable<typeof benchmark> => benchmark !== undefined);
   for (const benchmark of benchmarks) {
     if (benchmark.id === "chatelet") continue;
+    const employment = JOURNEY_REFERENCE_BENCHMARKS.find(reference => reference.id === benchmark.id)?.employment === true;
+    const family = `${employment ? "employment-hub" : "major-station"}:${benchmark.id}`;
     const journey = chooseFastestJourney(benchmark.journeys);
     if (!journey) {
       if (benchmark.status === "unavailable" || (benchmark.status === "loading" && canReportUnavailable)) {
         neutralFacts.push(makeFact({
-          id: `major-station-${benchmark.id}`,
-          kind: "majorStationUnavailable",
+          id: employment ? family : `major-station-${benchmark.id}`,
+          kind: employment ? "employmentHubUnavailable" : "majorStationUnavailable",
           category: "transport",
           polarity: "neutral",
-          family: `major-station:${benchmark.id}`,
+          family,
           priority: 9,
           values: { destination: benchmark.label },
           sourceKey: SOURCE_KEYS.journeys,
           proof: "direct",
-          ruleKey: RULE_KEYS.majorStationUnavailable,
+          ruleKey: employment ? RULE_KEYS.employmentHubContext : RULE_KEYS.majorStationUnavailable,
           ruleValues: {},
         }));
       }
@@ -42,16 +44,17 @@ export function buildJourneyBenchmarkFacts(input: NeighborhoodScoreInput): {
     }
     const summary = summarizeJourney(journey);
     const timing = analyzeNearbyJourneyTiming(journey);
-    const isPositive = timing.scoreSeconds < 40 * 60;
+    const isPositive = !employment && timing.scoreSeconds < 40 * 60;
     const fact = makeFact({
-      id: `major-station-${benchmark.id}`,
-      kind: isPositive ? "majorStationUnder40" : "majorStationContext",
+      id: employment ? family : `major-station-${benchmark.id}`,
+      kind: employment ? "employmentHubContext" : isPositive ? "majorStationUnder40" : "majorStationContext",
       category: "transport",
       polarity: isPositive ? "positive" : "neutral",
-      family: `major-station:${benchmark.id}`,
+      family,
       priority: 9,
       values: {
         destination: benchmark.label,
+        station: benchmark.stationLabel ?? benchmark.label,
         duration: summary.durationMinutes,
         elapsed: summary.elapsedMinutes,
         walking: summary.walkingMinutes,
@@ -61,9 +64,9 @@ export function buildJourneyBenchmarkFacts(input: NeighborhoodScoreInput): {
       },
       sourceKey: SOURCE_KEYS.journeys,
       proof: "direct",
-      ruleKey: isPositive ? RULE_KEYS.majorStationUnder40 : RULE_KEYS.majorStationContext,
+      ruleKey: employment ? RULE_KEYS.employmentHubContext : isPositive ? RULE_KEYS.majorStationUnder40 : RULE_KEYS.majorStationContext,
       ruleValues: { threshold: 40 },
-      emphasis: summary.durationMinutes <= 20 ? "exceptional" : undefined,
+      emphasis: !employment && summary.durationMinutes <= 20 ? "exceptional" : undefined,
       travel: { journey },
     });
     if (isPositive) positiveFacts.push(fact);

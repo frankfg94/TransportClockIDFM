@@ -93,8 +93,8 @@ function sectionBadge(section: NearbyJourneySection) {
   };
 }
 
-function formatDuration(seconds: number): string {
-  const minutes = Math.max(1, Math.round(seconds / 60));
+function formatDuration(seconds: number, walking = false): string {
+  const minutes = Math.max(1, walking ? Math.ceil(seconds / 60) : Math.round(seconds / 60));
   return minutes >= 60
     ? t("nearbyStations.travel.hoursMinutes", { hours: Math.floor(minutes / 60), minutes: minutes % 60 })
     : t("nearbyStations.travel.minutes", { minutes });
@@ -125,7 +125,7 @@ function formatDuration(seconds: number): string {
         <ArrowLeftRight v-else-if="section.transferDurationSource === 'gtfs-minimum'" :size="14" :aria-label="t('nearbyStations.neighborhoodScore.gtfsTransferLabel')" />
         <Footprints v-else :size="14" aria-hidden="true" />
         <small v-if="!props.hideTransitDuration || !isNearbyJourneyTransitSection(section)">
-          {{ section.transferDurationSource === "gtfs-minimum" ? formatTransferDuration(section.durationSeconds) : formatDuration(section.durationSeconds) }}
+          {{ section.transferDurationSource === "gtfs-minimum" ? formatTransferDuration(section.durationSeconds) : formatDuration(section.durationSeconds, isNearbyJourneyWalkingSection(section)) }}
         </small>
       </span>
     </template>

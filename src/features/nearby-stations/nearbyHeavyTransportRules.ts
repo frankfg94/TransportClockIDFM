@@ -317,6 +317,11 @@ function evaluateSingleLocalFeeder(
       .filter(isWalkingSection)
       .reduce((sum, section) => sum + section.durationSeconds, 0);
   const feederMode = sectionLineMode(feeder);
+  // Straight-line access is a lower bound, not proof that a bus stop is
+  // reachable within the walking threshold. Keep it in journey diagnostics,
+  // but do not promote an unverified bus access into a proximity advantage.
+  if (input.journey.source === "gtfs" && isBusLikeMode(feederMode)
+    && sections.some(section => isWalkingSection(section) && section.timingSource === "estimated")) return undefined;
   if (
     !isLocalFeeder(feeder, input.localLineIds, input.localLineCodes) ||
     feederWalkingSeconds > NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS

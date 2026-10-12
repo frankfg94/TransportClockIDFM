@@ -4,6 +4,11 @@ import MiniTravelDisplay from "../src/features/nearby-stations/MiniTravelDisplay
 import type { NearbyJourney } from "../src/features/nearby-stations/nearbyHeavyTransports";
 
 describe("MiniTravelDisplay", () => {
+  it("rounds walking upward consistently with the access option detail", () => {
+    const wrapper = mount(MiniTravelDisplay, { props: { journey: { source: "gtfs", durationSeconds: 491, sections: [{ type: "walking", durationSeconds: 131 }, { type: "public_transport", lineCode: "bus", durationSeconds: 360 }] } }, global: { stubs: { LineIconBadge: true } } });
+    expect(wrapper.findAll(".mini-travel-display__leg")[0]!.text()).toBe("3 min");
+    expect(wrapper.text()).toContain("marche 3 min");
+  });
   it("explains an actual change between two trains of the same line and preserves its waiting", async () => {
     const journey: NearbyJourney = { source: "gtfs", durationSeconds: 900, transferCount: 1, sections: [
       { type: "public_transport", lineId: "rail", lineCode: "B", vehicleJourneyId: "express", mission: "EXP", durationSeconds: 225,

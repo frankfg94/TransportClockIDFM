@@ -2687,6 +2687,7 @@ export const en = {
       gtfsFacts: {
         transportHub: "The {station} hub combines {currentLines} and future line {futureLine}. Access calculated with the theoretical timetable is {minutes} min via {via}.",
         majorStation: "The selected theoretical journey to {destination} takes {duration} min after removing the initial wait (total: {elapsed} min, initial wait: {initialWait} min), including {walking} min walking and {transfers} transfer(s) · lines: {lines}.",
+        employmentHub: "To the {destination} employment hub, as far as {station} station: {duration} min according to the theoretical timetable, with the initial wait removed ({initialWait} min). Total duration: {elapsed} min, including {walking} min walking, with {transfers} transfer(s) · lines: {lines}. The onward journey to the office depends on its address.",
         noctilien: "The theoretical timetable at {hour} confirms Noctilien lines {line}, with at most {minutes} min walking access; no frequency is invented.",
         greenSpace: "The theoretical journey at {hour} reaches {name} in {minutes} min via {lines}, with initial wait removed: {initialWait} min, total: {elapsed} min. The site is about {walking} min on foot and covers {area}. Bus and Noctilien lines are excluded from this signal.",
         hospital: "The hospital “{name}” is reachable from the address in {minutes} min via {via}, according to the theoretical timetable.",
@@ -2784,6 +2785,11 @@ export const en = {
       transportReliabilityBreakdown: "Regularity by mode and line",
       transportAccessChoices: "Access options to this station",
       transportAccessChoice: "{line} · {minutes} min",
+      transportAccessWalking: "Walk {walking} min + bus {transit} min",
+      transportAccessRounding: "Durations are rounded to minutes. Access time retains all walking and removes only the initial wait.",
+      transportAccessWalkingEstimated: "Estimated walk ≈ {walking} min + bus {transit} min",
+      transportAccessElapsed: "Total duration {elapsed} min · initial wait removed {wait} min",
+      transportAccessEstimateWarning: "Estimated walking uses a straight-line calculation when pedestrian routing is unavailable. Detours may lengthen the journey; this access remains approximate.",
       regularityLineAria: "{mode}, line {line}, regularity: {score}%",
       categoriesLabel: "Neighbourhood score categories",
       categoryUnavailable: "Unavailable",
@@ -2871,6 +2877,7 @@ export const en = {
         derived: "Deterministic calculation from the source",
       },
       rules: {
+        transportBusAccess: "Full bonus for bus access of at most 15 min, with verified walking of at most 15 min. Unverified straight-line walking cannot validate this bonus.",
         transportProximity: "Positive signal when the calculated walking access is at most {threshold} min.",
         transportBusReduced: "Bus access over {threshold} min and up to {maximum} min contributes half a proximity bonus. Walking and waits after the first vehicle are retained.",
         transportDistance: "Map distance is used with a {threshold} m threshold when walking time is unavailable.",
@@ -2884,6 +2891,7 @@ export const en = {
         chateletUnavailable: "Neutral reference when no journey to Châtelet could be calculated.",
         majorStationUnder40: "A real journey strictly under {threshold} min to a major station is shown as a strength.",
         majorStationContext: "A real journey of at least {threshold} min to a major station stays visible as a neutral reference.",
+        employmentHubContext: "Descriptive reference to the station serving the employment hub, without a score bonus. Walking and waits between connections are retained; only the initial wait is removed from the displayed time.",
         majorStationUnavailable: "A neutral reference is shown when no verifiable journey to the major station is available.",
         noctilienAtNight: "Displayed Noctilien lines have a real journey dated {hour} and a walking access under {threshold} minutes.",
         frequencyHigh: "Strength when the concerned line's peak theoretical frequency is at most {threshold} min.",
@@ -2978,6 +2986,14 @@ export const en = {
         majorStationUnavailable: {
           label: "Journey time to {destination} unavailable",
           tooltip: "No verifiable journey to {destination} was returned at calculation time. No duration is invented and no journey verdict is assigned.",
+        },
+        employmentHubContext: {
+          label: "Employment hub: {destination} in {duration} min",
+          tooltip: "To the {destination} employment hub, as far as {station} station: {duration} min with the initial wait removed ({initialWait} min). Total duration: {elapsed} min, including {walking} min walking, with {transfers} transfer(s) · lines: {lines}. The onward journey to the office depends on its address.",
+        },
+        employmentHubUnavailable: {
+          label: "Employment hub: travel time to {destination} unavailable",
+          tooltip: "No verifiable journey to the {destination} employment hub was returned at calculation time. No duration is invented.",
         },
         noctilienAtNight: {
           label: "Noctilien {line} available all night with a {minutes}-minute walk",

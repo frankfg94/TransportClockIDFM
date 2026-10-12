@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { scanConnections, routingSections, type RoutingConnection, type RoutingNode } from "../shared/gtfs/connectionScan";
 import { listTransportAccessSignals, makeTransportAccessFact } from "../src/features/nearby-stations/neighborhood/transportAccess";
 import { analyzeNearbyJourneyTiming } from "../src/features/nearby-stations/nearbyJourneyTiming";
+import { evaluateNearbyHeavyJourney } from "../src/features/nearby-stations/nearbyHeavyTransportRules";
 import type { GlobalMapLine } from "../src/features/transport-map/contracts/manifest";
 import type { NeighborhoodScoreInput } from "../src/features/nearby-stations/neighborhood/contracts";
 import type { NearbyHeavyTransportAccess, NearbyJourney } from "../src/features/nearby-stations/nearbyHeavyTransports";
@@ -16,6 +17,17 @@ const seed = (seconds = 600) => new Map<number, RoutingNode>([[0, {
 }]]);
 
 describe("shared direct bus alternatives", () => {
+  it("does not let an earlier unverified boarding hide a later bus with measured walking", async () => {
+    const access = seed(600);
+    access.get(0)!.section.timingSource = "estimated";
+    access.set(2, { arrival: 780, walkingSeconds: 780, section: { type: "walking", timingSource: "schedule", durationSeconds: 780 } });
+    const first = bus("same-line", 660, 900);
+    const later = { ...bus("same-line", 960, 1200, 2), tripKey: "later-vehicle" };
+    const result = await scanConnections(stream([first, later]), access, new Map());
+    expect(result.platformLabels.get(1)?.arrival).toBe(900);
+    expect(result.feederLabels.get(1)?.get("same-line")?.arrival).toBe(1200);
+    expect(routingSections(result.feederLabels.get(1)!.get("same-line")!).find(section => section.type === "walking")?.durationSeconds).toBe(780);
+  });
   it("retains a later arriving but faster bus in the same scan without expanding transfer contexts", async () => {
     const values = [bus("ordinary", 720, 1620), bus("express", 960, 1740)];
     const result = await scanConnections(stream(values), seed(), new Map());
@@ -59,6 +71,16 @@ function access(line: string, seconds: number): NearbyHeavyTransportAccess {
   return { kind: "connection", feederMode: "BUS", feederLineCode: line, walkingSeconds: 600, totalSeconds: seconds + 120, scoreSeconds: seconds, journey };
 }
 describe("transport access choice facts", () => {
+  it("does not reward a GTFS bus access whose origin walking is still a straight-line estimate", () => {
+    const journey = access("express", 1380).journey!;
+    const input = { journey, stationDistanceMeters: 3500, localLineCodes: new Set(["express"]) };
+    expect(evaluateNearbyHeavyJourney(input)).toBeDefined();
+    journey.sections[0]!.timingSource = "estimated";
+    expect(evaluateNearbyHeavyJourney(input)).toBeUndefined();
+    journey.sections[0]!.timingSource = "schedule";
+    journey.sections[0]!.durationSeconds = 901;
+    expect(evaluateNearbyHeavyJourney(input)).toBeUndefined();
+  });
   it("lists unique bus choices with separate durations and keeps one weighted signal for the heavy line", () => {
     const fast = access("express", 1380), slow = access("ordinary", 1500);
     const signals = listTransportAccessSignals({ stations: [], heavyCandidates: [{
