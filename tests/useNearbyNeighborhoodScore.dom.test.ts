@@ -162,6 +162,41 @@ function readyFrequency(lineId: string): GtfsLineFrequencyResponse {
 }
 
 describe("useNearbyNeighborhoodScore", () => {
+  it("loads the documentary response before serializing heavy timetable requests", async () => {
+    let releaseDocumentary!: () => void;
+    const documentary = new Promise<void>(resolve => { releaseDocumentary = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async url => {
+      if (String(url).includes("/api/neighborhood-verdict")) {
+        await documentary;
+        return Response.json({ schemaVersion: "1.3", generatedAt: new Date().toISOString(), categories: [], sources: [], warnings: [] });
+      }
+      return new Response("", { status: 404 });
+    }));
+    const first = createLine(), second = { ...createLine(), id: "line:metro:6", code: "6", label: "6" };
+    const network = createNetwork(first);
+    network.lines.push(second); network.linesById.set(second.id, second);
+    network.stations[0]!.lineIds.push(second.id);
+    let active = 0, maximum = 0;
+    const fetchFrequency = vi.fn(async (lineId: string) => {
+      active++; maximum = Math.max(maximum, active);
+      await new Promise(resolve => setTimeout(resolve, 20));
+      active--; return readyFrequency(lineId);
+    });
+    const wrapper = mount(defineComponent({ setup() {
+      useNearbyNeighborhoodScore({
+        documentaryFirst: true, journeySource: "gtfs", origin: ref({ lon: 2.3, lat: 48.8 }),
+        network: ref(network), stations: ref([{ ...createEntry(first), lines: [first, second] }]), fetchFrequency,
+        placesProvider: { searchNearby: async () => [], searchDestinations: async () => [] },
+        travelRoutesProvider: { findJourneys: async () => [] },
+      });
+      return () => null;
+    } }));
+    await flushPromises(); expect(fetchFrequency).not.toHaveBeenCalled();
+    releaseDocumentary();
+    await vi.waitFor(() => expect(fetchFrequency).toHaveBeenCalledTimes(2));
+    expect(maximum).toBe(1);
+    wrapper.unmount();
+  });
   it("probes major stations whose official names contain typographic separators", async () => {
     const line = createLine();
     const network = createNetwork(line);

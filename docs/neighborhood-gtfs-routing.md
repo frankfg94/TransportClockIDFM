@@ -58,6 +58,8 @@ Les statuts distinguent résultat disponible, partiel, artefacts manquants, date
 
 La première requête documentaire utilise `includeWalking=0`. Sécurité et environnement deviennent utilisables dès cette réponse, indépendamment des trajets. L’enrichissement piéton arrive ensuite et ne recalcule que les catégories concernées. Les échecs peuvent être relancés par source, et les requêtes de l’ancienne adresse sont annulées.
 
+Les sondes de fréquence et de dernier passage attendent que cette première réponse documentaire soit terminée. Leur file ne conserve qu'une requête horaire active à la fois : la lecture d'une grande ligne ne doit pas faire échouer simultanément plusieurs sources dans le même Worker serveur. Les trajets du navigateur continuent indépendamment de cette file.
+
 La commune est obtenue depuis les géométries IRIS lorsque les correspondances donnent un unique code communal. L’API Géo reste disponible seulement lorsque cette correspondance manque ou est ambiguë. La fraîcheur documentaire dépend du statut des sources officielles, et non de l’âge de 24 h du fichier compilé. Chargement, erreur, absence de couverture et obsolescence sont des états distincts.
 
 Une catégorie documentaire vide après une réponse réussie n'est pas une source en échec. Sa ligne facultative est omise du diagnostic si d'autres sources alimentent cette catégorie. Les sources obligatoires, les chargements, les erreurs et l'obsolescence restent visibles.

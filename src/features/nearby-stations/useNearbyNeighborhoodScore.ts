@@ -178,6 +178,9 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   }>();
   const criterionRevision = ref(0);
   const requestScheduler = createNeighborhoodRequestScheduler(6);
+  // Timetables can load a complete regional line. Do not overlap those large
+  // requests, or let them compete with the first documentary response.
+  const timetableRequestScheduler = createNeighborhoodRequestScheduler(1);
   const PLACES_CRITERIA: readonly NeighborhoodCategoryId[] = ["daily-life", "nature-leisure", "health", "education"];
   const ROUTE_CRITERIA: readonly NeighborhoodCategoryId[] = ["nature-leisure", "health", "transport"];
 
@@ -464,6 +467,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
    */
   function loadTransportLineDetails(token = requestToken): void {
     if (disposed || token !== requestToken) return;
+    if (options.documentaryFirst && !backendVerdictReady.value) return;
     const lineTargets = getRelevantLineTargets(
       options.stations.value,
       options.heavyCandidates?.value ?? heavyCandidates.value,
@@ -840,7 +844,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     const active = frequencyRequests.get(lineId);
     if (active) return active.promise;
     const controller = new AbortController();
-    const promise = requestScheduler.schedule(
+    const promise = timetableRequestScheduler.schedule(
       (signal) => frequencyTimetable.getFrequencies(lineId, stationId, { signal }),
       controller.signal,
       2,
@@ -866,7 +870,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     const active = lastServiceRequests.get(lineId);
     if (active) return active.promise;
     const controller = new AbortController();
-    const promise = requestScheduler.schedule(
+    const promise = timetableRequestScheduler.schedule(
       (signal) => frequencyTimetable.getLastService(lineId, stationId, { signal }),
       controller.signal,
       priority,
@@ -1123,6 +1127,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       markCriteriaDirty(ROUTE_CRITERIA);
       scheduleRecompute();
     },
+  );
+  watch(
+    () => backendVerdictReady.value,
+    (ready) => { if (ready) loadTransportLineDetails(); },
   );
   watch(
     () => (options.heavyCandidates?.value ?? heavyCandidates.value)
