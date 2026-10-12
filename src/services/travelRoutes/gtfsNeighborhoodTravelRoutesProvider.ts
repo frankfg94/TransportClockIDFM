@@ -2,6 +2,7 @@ import type { NearbyJourney, NearbyJourneyRequest, TravelRoutesProvider } from "
 import { getNearbyParisJourneyDateTime } from "../../features/nearby-stations/nearbyHeavyTransports";
 import type { NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
 import { toServerApiUrl } from "../serverApi";
+import { canUseBrowserNeighborhoodGtfs, routeBrowserNeighborhoodGtfs } from "./browserNeighborhoodGtfs";
 
 interface Subscriber { request: NearbyJourneyRequest; resolve: (journeys: NearbyJourney[]) => void; reject: (cause: unknown) => void; signal?: AbortSignal; abort: () => void; done: boolean }
 /** Page-scoped provider: no live fallback, including on coverage or HTTP failure. */
@@ -33,13 +34,18 @@ export function createGtfsNeighborhoodTravelRoutesProvider(): TravelRoutesProvid
       subscriber.signal?.addEventListener("abort", subscriber.abort, { once: true });
     }
     void (async () => {
-      const response = await fetch(toServerApiUrl("/api/neighborhood-journeys"), {
-        method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]),
-        body: JSON.stringify({ origin: first.origin, datetime: first.datetime ?? getNearbyParisJourneyDateTime(9), allowedModes: first.allowedModes,
-          destinations: unique.map((s, i) => ({ ...s.request.destination, id: String(i), destinationRef: s.request.destinationRef, arrivalAtPlatform: s.request.arrivalAtPlatform })) }),
-      });
-      if (!response.ok) throw new Error(`GTFS neighborhood routing unavailable (${response.status})`);
-      const payload = await response.json() as NeighborhoodJourneysResponse;
+      const request = { origin: first.origin, datetime: first.datetime ?? getNearbyParisJourneyDateTime(9), allowedModes: first.allowedModes,
+        destinations: unique.map((s, i) => ({ ...s.request.destination, id: String(i), destinationRef: s.request.destinationRef, arrivalAtPlatform: s.request.arrivalAtPlatform })) };
+      const payload = canUseBrowserNeighborhoodGtfs()
+        ? await routeBrowserNeighborhoodGtfs(request, controller.signal)
+        : await (async () => {
+          const response = await fetch(toServerApiUrl("/api/neighborhood-journeys"), {
+            method: "POST", headers: { "content-type": "application/json" },
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]), body: JSON.stringify(request),
+          });
+          if (!response.ok) throw new Error(`GTFS neighborhood routing unavailable (${response.status})`);
+          return await response.json() as NeighborhoodJourneysResponse;
+        })();
       if (payload.source !== "gtfs" || !Array.isArray(payload.destinations)) throw new Error("Unsupported GTFS routing contract");
       const nextVersion = payload.routingPath ?? payload.datasetVersion;
       if (nextVersion !== artifactVersion) { cache.clear(); artifactVersion = nextVersion; }
@@ -52,7 +58,10 @@ export function createGtfsNeighborhoodTravelRoutesProvider(): TravelRoutesProvid
         while (cache.size > 256) cache.delete(cache.keys().next().value!);
         s.resolve(result.journeys);
       });
-    })().catch(cause => subscribers.forEach(s => { if (!s.done) { s.done = true; s.reject(cause); } }))
+    })().catch(cause => {
+      if (!controller.signal.aborted) console.warn("Neighborhood GTFS routing failed", cause);
+      subscribers.forEach(s => { if (!s.done) { s.done = true; s.reject(cause); } });
+    })
       .finally(() => subscribers.forEach(s => s.signal?.removeEventListener("abort", s.abort)));
   }
   return { findJourneys(request, signal) {

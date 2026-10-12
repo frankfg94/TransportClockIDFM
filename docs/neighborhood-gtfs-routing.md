@@ -10,7 +10,15 @@ Le descripteur `current.json.routing` expose le schéma, le chemin immuable, les
 
 La publication envoie tous les artefacts avant de remplacer `current.json`, aussi bien en local que sur R2. Un échec de publication du routage conserve les anciens manifestes. `npm run gtfs:stage-pages-assets`, inclus dans `npm run build`, copie uniquement les générations actives dans les assets Cloudflare Pages. Le lecteur serveur réutilise le lecteur GTFS partagé : stockage local, R2 ou binding `ASSETS` de Cloudflare.
 
-## Calcul serveur
+## Moteur partagé et calcul dans le navigateur
+
+Le moteur pur se trouve dans `shared/gtfs/`. Le serveur lui injecte son stockage GTFS et ses matrices ORS. Dans un navigateur compatible, le verdict utilise le même moteur dans `neighborhoodGtfs.worker.ts`, pour éviter les limites CPU/mémoire des fonctions Cloudflare Pages. Aucun horaire ni temps de trajet n'est remplacé par une estimation de transport.
+
+Le Web Worker lit les artefacts publics `/_gtfs-data/`, conserve les fichiers immuables dans Cache Storage et recharge le manifeste courant chaque minute. Les lots sont traités dans une file unique, avec au plus deux arbres en mémoire. Les accès et sorties restent calculés via `/api/walking/matrix` avec `ors-only` et le sens de marche explicite. Si ORS échoue, seule la marche est estimée et son statut reste indiqué. Les messages du Worker utilisent le contrat JSON pour accepter les coordonnées réactives Vue.
+
+Le premier calcul peut télécharger plusieurs tranches du dataset. Les suivantes réutilisent le cache local du navigateur. Une date hors couverture, un artefact absent ou l'absence réelle d'itinéraire dans la fenêtre conserve un état explicite ; les données théoriques ne peuvent pas justifier un temps inventé. Les environnements sans Web Worker gardent l'API serveur.
+
+## API serveur
 
 `POST /api/neighborhood-journeys` accepte une origine, une date civile `YYYYMMDDTHHMMSS` dans `Europe/Paris`, de 1 à 64 destinations et les modes autorisés. Une destination peut fournir `destinationRef` pour identifier officiellement une station. Avec `arrivalAtPlatform=true` et une référence reconnue, le trajet s'arrête au dernier débarquement dans cette station ; aucune marche de sortie vers son centre géographique n'est ajoutée. Les identifiants monomodaux restent distincts des identifiants de quais. Les caches du fournisseur distinguent cette politique d'arrivée.
 

@@ -8,7 +8,7 @@ import {
 import type { NearbyWalkingMatrixDestination } from "../../../src/features/nearby-stations/nearbyWalkingRoutes";
 
 export default defineEventHandler(async (event) => {
-  const body = await readBody<{ origin?: NearbyJourneyPoint; destinations?: NearbyWalkingMatrixDestination[]; routingPolicy?: string }>(event);
+  const body = await readBody<{ origin?: NearbyJourneyPoint; destinations?: NearbyWalkingMatrixDestination[]; routingPolicy?: string; reverse?: boolean }>(event);
   const origin = validPoint(body?.origin);
   const destinations = Array.isArray(body?.destinations)
     ? body.destinations.slice(0, OPEN_ROUTE_SERVICE_MAX_MATRIX_DESTINATIONS).map((destination) => {
@@ -22,7 +22,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: "origin and destinations must be valid coordinates." });
   }
   const router = body.routingPolicy === "ors-only" ? matrixWalkingWithOpenRouteService : matrixWalkingWithPreferredProvider;
-  return { routes: await router(event, origin, destinations) };
+  return { routes: await router(event, origin, destinations, { reverse: body.reverse === true }) };
 });
 
 function validPoint(value: unknown): NearbyJourneyPoint | undefined {

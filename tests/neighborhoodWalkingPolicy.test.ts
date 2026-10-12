@@ -23,6 +23,14 @@ beforeEach(() => {
   mocks.build.mockResolvedValue({ categories: [] });
 });
 describe("verdict ORS-only policy", () => {
+  it("keeps the directed egress matrix from station platforms to the destination", async () => {
+    const origin = { lon: 2.3, lat: 48.8 }, destinations = [{ id: "x", lon: 2.4, lat: 48.9 }];
+    mocks.body.mockResolvedValue({ origin, destinations, routingPolicy: "ors-only", reverse: true });
+    const event = {} as H3Event;
+    await matrix(event);
+    expect(mocks.orsMatrix).toHaveBeenCalledWith(event, origin, destinations, { reverse: true });
+    expect(mocks.preferredMatrix).not.toHaveBeenCalled();
+  });
   it("selects ORS for both HTTP walking adapters", async () => {
     mocks.body.mockResolvedValue({ origin: { lon: 2.3, lat: 48.8 }, destination: { lon: 2.4, lat: 48.9 }, destinations: [{ id: "x", lon: 2.4, lat: 48.9 }], routingPolicy: "ors-only" });
     await route({} as H3Event); await matrix({} as H3Event);
