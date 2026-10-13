@@ -112,7 +112,15 @@ export async function fetchNeighborhoodVerdict(lat: number, lon: number, signal?
     const params = new URLSearchParams({ lat: String(lat), lon: String(lon) });
     if (options.includeWalking === false) params.set("includeWalking", "0");
     if (options.routingPolicy) params.set("routingPolicy", options.routingPolicy);
-    const response = await fetch(toServerApiUrl(`/api/neighborhood-verdict?${params}`), { signal });
+    const url = toServerApiUrl(`/api/neighborhood-verdict?${params}`);
+    let response = await fetch(url, { signal });
+    // One transient gateway failure must not leave all documentary categories
+    // failed until a manual retry. Keep the same cancellation and deadline.
+    if ([502, 503, 504].includes(response.status) && !signal.aborted) {
+      await response.body?.cancel();
+      signal.throwIfAborted();
+      response = await fetch(url, { signal });
+    }
     if (!response.ok) throw new Error(`Neighborhood verdict unavailable (${response.status})`);
     const payload = await response.json() as PublicNeighborhoodVerdict;
     if (payload.schemaVersion !== PUBLIC_NEIGHBORHOOD_VERDICT_SCHEMA_VERSION || !Array.isArray(payload.categories) || !Array.isArray(payload.sources)) throw new Error("Unsupported neighborhood verdict contract");

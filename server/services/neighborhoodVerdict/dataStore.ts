@@ -2,7 +2,7 @@ import type { H3Event } from "h3";
 import { createR2SignedHeaders, getNetexRuntimeEnv, type NetexRuntimeEnv } from "../topology/netexCache";
 import { IRIS_SOURCE_ID, VERDICT_SCHEMA_VERSION, type CompiledNeighborhoodVerdictData } from "./contracts";
 
-let cached: { key: string; data: CompiledNeighborhoodVerdictData; expires: number } | undefined;
+let cached: { key: string; data: CompiledNeighborhoodVerdictData; expires: number; etag?: string } | undefined;
 const pending = new Map<string, Promise<CompiledNeighborhoodVerdictData>>();
 
 export function getNeighborhoodVerdictSource(env: NetexRuntimeEnv, localPath?: string) {
@@ -28,8 +28,10 @@ export async function loadCompiledNeighborhoodVerdictData(env: NetexRuntimeEnv, 
   if (cached?.key === key && cached.expires > Date.now()) return cached.data;
   const existing = pending.get(key);
   if (existing) return existing;
+  const previous = cached?.key === key ? cached : undefined;
   const request = (async () => {
     let data: CompiledNeighborhoodVerdictData;
+    let etag: string | undefined;
     if (source.kind === "directory") {
       const { readFile } = await import("node:fs/promises");
       data = JSON.parse(await readFile(source.location, "utf8"));
@@ -49,13 +51,21 @@ export async function loadCompiledNeighborhoodVerdictData(env: NetexRuntimeEnv, 
         headers = await createR2SignedHeaders(url, env);
       }
       if (!/^https?:$/u.test(url.protocol)) throw new Error("Verdict cache requires r2:// or HTTP(S).");
+      // Revalidate the artifact without downloading/parsing its full geometry
+      // every minute when its contents have not changed.
+      if (previous?.etag) headers.set("If-None-Match", previous.etag);
       // Workers supports manual/follow only. Reject 3xx below without forwarding credentials.
       const response = await fetch(url, { headers, redirect: "manual", signal: AbortSignal.timeout(30_000) });
+      if (response.status === 304 && previous) {
+        cached = { ...previous, expires: Date.now() + 60_000 };
+        return previous.data;
+      }
       if (!response.ok) throw new Error(`Verdict cache request failed: HTTP ${response.status}`);
+      etag = response.headers.get("etag") || undefined;
       data = await response.json() as CompiledNeighborhoodVerdictData;
     }
     validateCompiledNeighborhoodVerdictData(data);
-    cached = { key, data, expires: Date.now() + 60_000 };
+    cached = { key, data, expires: Date.now() + 60_000, etag };
     return data;
   })();
   pending.set(key, request);

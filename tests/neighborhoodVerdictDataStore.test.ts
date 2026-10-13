@@ -1,8 +1,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadCompiledNeighborhoodVerdictData } from "../server/services/neighborhoodVerdict/dataStore";
-const data = { schemaVersion: "1.3", generatedAt: "2026-09-05", sources: [], greenSpaces: [{}], gpeStations: [{}], airNoiseCommunes: { a: {} }, security: { communes: { a: {} } }, serviceQuality: { lines: [] }, iris: { sourceId: "insee-iris", bbox: [2, 48, 3, 49], neighborhoods: [{}] } };
-afterEach(() => vi.unstubAllGlobals());
+const data = { schemaVersion: "1.3", generatedAt: "2026-09-05", sources: [], greenSpaces: [{}], gpeStations: [{}], airNoiseCommunes: { a: {} }, security: { communes: { a: {} } }, serviceQuality: { lines: [{ lineId: "IDFM:test", lineName: "Test", reliabilityScore: 95 }] }, iris: { sourceId: "insee-iris", bbox: [2, 48, 3, 49], neighborhoods: [{}] } };
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe("verdict remote cache", () => {
+  it("revalidates unchanged remote artifacts using their ETag without parsing them again", async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(data), { headers: { ETag: '"version-one"' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 304 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...data, generatedAt: "2026-10-13" }), { headers: { ETag: '"version-two"' } }));
+    vi.stubGlobal("fetch", fetcher);
+    const env = { IDFM_NEIGHBORHOOD_VERDICT_CACHE_REMOTE: "https://example.test/conditional.json" };
+    const first = await loadCompiledNeighborhoodVerdictData(env);
+    vi.advanceTimersByTime(60_001);
+    expect(await loadCompiledNeighborhoodVerdictData(env)).toBe(first);
+    expect(new Headers(fetcher.mock.calls[1]![1].headers).get("If-None-Match")).toBe('"version-one"');
+    vi.advanceTimersByTime(60_001);
+    expect((await loadCompiledNeighborhoodVerdictData(env)).generatedAt).toBe("2026-10-13");
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
   it("rejects redirects without forwarding R2 credentials on Workers", async () => {
     const fetcher = vi.fn(async (_url: unknown, init?: RequestInit) => {
       expect(init?.redirect).toBe("manual");
