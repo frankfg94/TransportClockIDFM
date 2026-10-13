@@ -12,6 +12,9 @@ let preloadPromise: Promise<void> | undefined;
 
 export default defineNitroPlugin((nitroApp) => {
   nitroApp.hooks.hook("request", async (event) => {
+    // Comprehensive status logging belongs to the explicit data diagnostic.
+    // Ordinary pages/assets/APIs must not wait for unrelated regional datasets.
+    if (event.path.split("?")[0] !== "/api/datasets") return;
     preloadPromise ??= preloadDataStatuses(event);
     await preloadPromise;
   });

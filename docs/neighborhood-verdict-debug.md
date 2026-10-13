@@ -72,3 +72,7 @@ matrices after joining a shared tree, without cancelling a live subscriber's
 tree or changing its search limits. Frequency topology and timetable reads run
 in parallel within the existing single timetable slot. Documentary GPE and park
 walks start together and retain their original candidate order.
+
+The global dataset status preloader runs only for the explicit `/api/datasets`
+diagnostic. Pages, assets and other APIs load their own required sources without
+awaiting unrelated GTFS/NeTEx/ridership status reads.
