@@ -1131,6 +1131,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       options.origin.value?.lon,
       options.origin.value?.lat,
       options.network.value,
+      options.stationsLoading?.value,
       options.stations.value.map((entry) => entry.id).join(","),
       resolveNearbyJourneyDateTime(options.journeyDateTime),
       resolveNearbyJourneyDateTime(options.nightJourneyDateTime),

@@ -226,7 +226,7 @@ describe("useNearbyNeighborhoodScore", () => {
     wrapper.unmount();
   });
   it("waits for the GTFS station catalogue and then retains the entire benchmark set", async () => {
-    const network = ref<TransportMapNetwork>(), stationsLoading = ref(true);
+    const network = ref<TransportMapNetwork>(createNetwork(createLine())), stationsLoading = ref(true);
     const findJourneys = vi.fn(async (_input: NearbyJourneyRequest) => [] as NearbyJourney[]);
     let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
     const wrapper = mount(defineComponent({ setup() {
@@ -237,7 +237,7 @@ describe("useNearbyNeighborhoodScore", () => {
       return () => null;
     } }));
     await flushPromises(); expect(findJourneys).not.toHaveBeenCalled();
-    network.value = createNetwork(createLine()); stationsLoading.value = false;
+    stationsLoading.value = false;
     await vi.waitFor(() => expect(score.diagnostics.value.benchmarks).toHaveLength(9));
     await vi.waitFor(() => expect(score.diagnostics.value.benchmarks.every(target => target.status !== "loading")).toBe(true));
     expect(score.diagnostics.value.benchmarks.map(target => target.id)).toContain("employment-val-de-fontenay");
