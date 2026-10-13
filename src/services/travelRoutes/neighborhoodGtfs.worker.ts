@@ -7,13 +7,18 @@ import { findGtfsLastService } from "../../../shared/gtfs/lastService";
 import type { GtfsManifest } from "../../../server/services/gtfs/types";
 import type { LineTopology } from "../../../server/services/topology/types";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
-import { createStraightLineWalkingRoute, type NearbyWalkingRoute } from "../../features/nearby-stations/nearbyWalkingRoutes";
-import type { NeighborhoodGtfsWorkerRequest, NeighborhoodGtfsWorkerResponse } from "./neighborhoodGtfsWorkerProtocol";
+import type { NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
+import type { NeighborhoodGtfsWorkerDiagnostics, NeighborhoodGtfsWorkerRequest, NeighborhoodGtfsWorkerResponse } from "./neighborhoodGtfsWorkerProtocol";
+import { createNeighborhoodGtfsTaskQueue } from "./neighborhoodGtfsTaskQueue";
+import { createNeighborhoodGtfsWalkingMatrix } from "./neighborhoodGtfsWalkingMatrix";
+import { createNeighborhoodTimetableCache, selectNeighborhoodCivilTimetable, selectNeighborhoodServiceTimetable } from "./neighborhoodTimetableCache";
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 const CACHE_NAME = "neighborhood-gtfs-routing-v1";
 let manifest: { baseUrl: string; expires: number; value?: GtfsManifest } | undefined;
+let activeDiagnostics: NeighborhoodGtfsWorkerDiagnostics | undefined;
 async function readAsset<T>(baseUrl: string, path: string): Promise<T | undefined> {
+  if (activeDiagnostics) activeDiagnostics.assetReads++;
   const url = new URL("/_gtfs-data/" + path.split("/").map(encodeURIComponent).join("/"), baseUrl).href;
   const cache = typeof caches === "undefined" ? undefined : await caches.open(CACHE_NAME).catch(() => undefined);
   const cached = await cache?.match(url).catch(() => undefined);
@@ -39,24 +44,18 @@ const runtime = {
   isEnabled: () => true, cacheEpoch: () => 0, readJson: readAsset,
 };
 const timetable = createGtfsTimetableLoader<string>(runtime);
+const loadTimetable = createNeighborhoodTimetableCache(timetable.loadForDate);
+const matrix = createNeighborhoodGtfsWalkingMatrix(fetch, (cached, reused, requested) => {
+  if (activeDiagnostics) {
+    activeDiagnostics.matrixCalls++;
+    if (cached) activeDiagnostics.matrixCacheHits++;
+    activeDiagnostics.walkingPairsReused += reused;
+    activeDiagnostics.walkingPairsRequested += requested;
+  }
+});
 const route = createNeighborhoodGtfsRouter<string>({
   ...runtime,
-  matrix: async (baseUrl, origin, destinations, options) => {
-    if (!destinations.length) return [];
-    const estimated = destinations.map(destination => options?.reverse
-      ? createStraightLineWalkingRoute(destination, origin, destination.id)
-      : createStraightLineWalkingRoute(origin, destination, destination.id));
-    try {
-      const response = await fetch(new URL("/api/walking/matrix", baseUrl), {
-        method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(30_000),
-        body: JSON.stringify({ origin, destinations, routingPolicy: "gtfs-access", reverse: options?.reverse === true }),
-      });
-      if (!response.ok) return estimated;
-      const payload = await response.json() as { routes?: NearbyWalkingRoute[] };
-      const routes = new Map(payload.routes?.map(item => [item.id, item]));
-      return destinations.map((destination, i) => routes.get(destination.id) ?? estimated[i]!);
-    } catch { return estimated; }
-  },
+  matrix,
 });
 
 const topologies = new Map<string, Promise<LineTopology | undefined>>();
@@ -87,7 +86,7 @@ async function frequency(baseUrl: string, lineId: string): Promise<GtfsLineFrequ
   const version = `${current?.timetable?.path}:${current?.cacheGeneration}`;
   const key = `${baseUrl}:${lineId}:${serviceDate}:${version}`;
   if (frequencies.has(key)) return frequencies.get(key)!;
-  const loaded = await timetable.loadForDate(baseUrl, lineId, serviceDate);
+  const loaded = selectNeighborhoodCivilTimetable(await loadTimetable(baseUrl, lineId, serviceDate, version));
   const profile = computeGtfsLineFrequency({ lineId, serviceDate, timetable: loaded, topology: await topology(baseUrl, lineId, version) });
   if (profile.status === "ready" && profile.topologyAvailable) frequencies.set(key, profile);
   while (frequencies.size > 16) frequencies.delete(frequencies.keys().next().value!);
@@ -95,8 +94,8 @@ async function frequency(baseUrl: string, lineId: string): Promise<GtfsLineFrequ
 }
 async function lastService(baseUrl: string, request: Extract<NeighborhoodGtfsWorkerRequest, { kind: "last-service" }>) {
   const serviceDate = request.serviceDate ?? getGtfsFrequencyServiceDate();
-  const loaded = await timetable.loadForDate(baseUrl, request.lineId, serviceDate, { serviceDayOnly: true });
-  const current = loaded.manifest, version = `${current?.timetable?.path}:${current?.cacheGeneration}`;
+  const current = await runtime.getManifest(baseUrl), version = `${current?.timetable?.path}:${current?.cacheGeneration}`;
+  const loaded = selectNeighborhoodServiceTimetable(await loadTimetable(baseUrl, request.lineId, serviceDate, version), serviceDate);
   const stopIds = loaded.index && loaded.status === "ready" ? mapFrequencyStops(loaded.index.stops, await topology(baseUrl, request.lineId, version)) : new Map<string,string>();
   return findGtfsLastService({ status: loaded.status,
     stops: (loaded.index?.stops ?? []).map(stop => ({ id: stop.id, parentId: stop.parentId, name: stop.name, topologyId: stopIds.get(stop.id) })),
@@ -105,16 +104,30 @@ async function lastService(baseUrl: string, request: Extract<NeighborhoodGtfsWor
 }
 
 // Serialize routes and timetable computations to bound the retained datasets.
-let queue = Promise.resolve();
+const queue = createNeighborhoodGtfsTaskQueue();
 scope.addEventListener("message", (event: MessageEvent<NeighborhoodGtfsWorkerRequest>) => {
-  const message = event.data, { id, baseUrl } = message;
-  queue = queue.then(async () => {
+  const message = event.data;
+  if (message.kind === "cancel") { queue.cancel(message.id); return; }
+  const { id, baseUrl } = message, enqueued = performance.now();
+  queue.enqueue(id, async isCancelled => {
+    const started = performance.now();
+    const diagnostics: NeighborhoodGtfsWorkerDiagnostics = { kind: message.kind, queueMs: Math.round(started - enqueued), taskMs: 0, assetReads: 0, matrixCalls: 0, matrixCacheHits: 0, walkingPairsReused: 0, walkingPairsRequested: 0 };
+    activeDiagnostics = diagnostics;
     try {
       const payload = message.kind === "frequency" ? await frequency(baseUrl, message.lineId)
         : message.kind === "last-service" ? await lastService(baseUrl, message)
         : await route(baseUrl, message.request);
-      scope.postMessage({ id, payload } satisfies NeighborhoodGtfsWorkerResponse);
+      if (message.kind === "routes") {
+        const routing = (payload as NeighborhoodJourneysResponse).diagnostics;
+        diagnostics.cacheHit = routing?.cacheHit;
+        diagnostics.scannedConnections = routing?.scannedConnections;
+      }
+      diagnostics.taskMs = Math.round(performance.now() - started);
+      if (!isCancelled()) scope.postMessage({ id, payload, diagnostics } satisfies NeighborhoodGtfsWorkerResponse);
     }
-    catch (error) { scope.postMessage({ id, error: error instanceof Error ? error.message : "GTFS routing failed" } satisfies NeighborhoodGtfsWorkerResponse); }
+    catch (error) {
+      diagnostics.taskMs = Math.round(performance.now() - started);
+      if (!isCancelled()) scope.postMessage({ id, error: error instanceof Error ? error.message : "GTFS routing failed", diagnostics } satisfies NeighborhoodGtfsWorkerResponse);
+    } finally { activeDiagnostics = undefined; }
   });
 });

@@ -316,6 +316,8 @@ export async function matrixWalkingWithOpenRouteService(
  * pedestrian network before boarding feasibility is computed. One bounded
  * fallback batch is shared by every destination of an origin's routing tree.
  */
+const gtfsStreetRequests = new Map<string, Promise<NearbyWalkingRoute>>();
+
 export async function matrixWalkingForGtfs(
   event: H3Event,
   origin: NearbyJourneyPoint,
@@ -348,10 +350,18 @@ export async function matrixWalkingForGtfs(
     await Promise.all(Array.from({ length: Math.min(PREFERRED_MATRIX_CONCURRENCY, groups.length) }, async () => {
       while (cursor < groups.length && !deadline.aborted) {
         const group = groups[cursor++]!;
-        const route = await routeWalkingWithPreferredProvider(event,
-          options.reverse ? group.destination : origin,
-          options.reverse ? origin : group.destination,
-          group.destination.id, deadline);
+        const from = options.reverse ? group.destination : origin;
+        const to = options.reverse ? origin : group.destination;
+        const pairKey = routeCacheKey(from, to);
+        let streetRequest = gtfsStreetRequests.get(pairKey);
+        if (!streetRequest) {
+          streetRequest = routeWalkingWithPreferredProvider(event, from, to, group.destination.id, deadline);
+          gtfsStreetRequests.set(pairKey, streetRequest);
+          void streetRequest.finally(() => {
+            if (gtfsStreetRequests.get(pairKey) === streetRequest) gtfsStreetRequests.delete(pairKey);
+          }).catch(() => {});
+        }
+        const route = await streetRequest;
         if (!route.fallback) for (const i of group.indices) routes[i] = { ...route, id: limited[i]!.id };
       }
     }));

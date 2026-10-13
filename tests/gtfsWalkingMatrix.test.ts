@@ -48,4 +48,18 @@ describe("GTFS pedestrian matrix", () => {
     const failed = await matrixWalkingForGtfs(env, { ...origin, lon: 2.37 }, [destination]);
     expect(failed[0]).toMatchObject({ provider: "straight-line", fallback: true });
   });
+  it("shares a pending street route between overlapping matrices with different stop lists", async () => {
+    const fetcher = vi.fn(async url => walkingResponse(url));
+    vi.stubGlobal("fetch", fetcher);
+    const { matrixWalkingForGtfs } = await import("../server/services/walking/openRouteService");
+    const env = event({ NUXT_ORS_API_KEY: "", NUXT_IDFM_API_KEY: "fixture" });
+    const extra = { ...destination, id: "extra", lon: 2.38 };
+    const [one, two] = await Promise.all([
+      matrixWalkingForGtfs(env, origin, [destination, extra]),
+      matrixWalkingForGtfs(env, origin, [{ ...destination, id: "remapped" }]),
+    ]);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(one.map(route => route.id)).toEqual(["one", "extra"]);
+    expect(two[0]).toMatchObject({ id: "remapped", provider: "idfm-navitia", durationSeconds: 840 });
+  });
 });

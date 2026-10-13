@@ -11,6 +11,9 @@ function ensureWorker(): Worker {
   created.onmessage = (event: MessageEvent<NeighborhoodGtfsWorkerResponse>) => {
     const response = event.data, subscriber = pending.get(response.id);
     if (!subscriber) return;
+    if (response.diagnostics && new URL(window.location.href).searchParams.has("debugGtfs")) {
+      console.debug("[neighborhood-gtfs]", JSON.stringify(response.diagnostics));
+    }
     pending.delete(response.id); subscriber.cleanup();
     if ("error" in response) subscriber.reject(new Error(response.error)); else subscriber.resolve(response.payload);
   };
@@ -29,8 +32,9 @@ export function requestBrowserNeighborhoodGtfs<T>(action: NeighborhoodGtfsWorker
   if (signal.aborted) return Promise.reject(signal.reason);
   return new Promise((resolve, reject) => {
     const id = ++nextId;
-    const abort = () => { pending.delete(id); cleanup(); reject(signal.reason); };
-    const timer = setTimeout(() => { pending.delete(id); cleanup(); reject(new Error("GTFS browser routing timed out")); }, 180_000);
+    const cancel = () => { if (pending.delete(id)) worker?.postMessage({ id, kind: "cancel" } satisfies NeighborhoodGtfsWorkerRequest); cleanup(); };
+    const abort = () => { cancel(); reject(signal.reason); };
+    const timer = setTimeout(() => { cancel(); reject(new Error("GTFS browser routing timed out")); }, 180_000);
     const cleanup = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); };
     signal.addEventListener("abort", abort, { once: true });
     pending.set(id, { resolve: payload => resolve(payload as T), reject, cleanup });

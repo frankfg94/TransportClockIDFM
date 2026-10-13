@@ -56,7 +56,7 @@ export function createGtfsTimetableLoader<Context>(runtime: GtfsTimetableRuntime
     event: Context,
     lineId: string,
     serviceDate: string,
-    options: { serviceDayOnly?: boolean } = {},
+    options: { serviceDayOnly?: boolean; retainServiceDayTrips?: boolean } = {},
   ): Promise<GtfsTimetableLoadResult> {
     const manifest = await runtime.getManifest(event);
     const unavailable = (
@@ -138,6 +138,7 @@ export function createGtfsTimetableLoader<Context>(runtime: GtfsTimetableRuntime
           const shift = daysBack * 86400;
           if (
             !options.serviceDayOnly &&
+            !(options.retainServiceDayTrips && daysBack === 0) &&
             !trip.calls.some((call) => {
               const time = call[3] ?? call[2];
               return time !== null && time >= shift && time < shift + 86400;

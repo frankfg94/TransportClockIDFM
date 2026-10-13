@@ -32,6 +32,7 @@ describe("browser neighborhood GTFS", () => {
     const next = router.routeBrowserNeighborhoodGtfs(request(), new AbortController().signal);
     const worker = instances[0]!, messages = worker.messages as { id: number }[];
     controller.abort(new Error("address changed")); await expect(old).rejects.toThrow("address changed");
+    expect(worker.messages.at(-1)).toEqual({ id: messages[0]!.id, kind: "cancel" });
     worker.onmessage!({ data: { id: messages[0]!.id, payload: { source: "gtfs", destinations: [] } } });
     worker.onmessage!({ data: { id: messages[1]!.id, payload: { source: "gtfs", destinations: [] } } });
     await expect(next).resolves.toMatchObject({ source: "gtfs" }); expect(instances).toHaveLength(1);

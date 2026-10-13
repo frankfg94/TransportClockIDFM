@@ -865,7 +865,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   function loadLastService(
     lineId: string,
     stationId?: string,
-    priority = 3,
+    priority = 2,
   ): Promise<Awaited<ReturnType<typeof frequencyTimetable.getLastService>>> {
     if (lastServiceResults.has(lineId)) return Promise.resolve(lastServiceResults.get(lineId));
     const active = lastServiceRequests.get(lineId);
