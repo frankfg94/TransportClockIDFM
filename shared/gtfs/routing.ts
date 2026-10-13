@@ -35,7 +35,13 @@ function coordinate(stop: GtfsRoutingIndex["stops"][number]): NearbyJourneyPoint
   return Number.isFinite(stop.lon) && Number.isFinite(stop.lat) ? { lon: stop.lon!, lat: stop.lat! } : undefined;
 }
 function walkingSection(from: NearbyJourneyPoint, to: NearbyJourneyPoint, seconds: number, estimated = false, route?: NearbyWalkingRoute): NearbyJourneySection {
-  return { type: "walking", mode: "walking", durationSeconds: seconds, timingSource: estimated ? "estimated" : "schedule", fromPoint: from, toPoint: to,
+  const name = (point: NearbyJourneyPoint) => {
+    const metadata = point as NearbyJourneyPoint & { name?: string; label?: string };
+    return metadata.name ?? metadata.label;
+  };
+  return { type: "walking", mode: "walking", durationSeconds: seconds, timingSource: estimated ? "estimated" : "schedule",
+    fromPoint: { lon: from.lon, lat: from.lat }, toPoint: { lon: to.lon, lat: to.lat },
+    ...(name(from) ? { fromName: name(from) } : {}), ...(name(to) ? { toName: name(to) } : {}),
     ...(route ? { distanceMeters: route.distanceMeters, walkingProvider: route.provider, walkingDatasetVersion: route.datasetVersion,
       walkingUnavailabilityReason: route.unavailabilityReason } : {}) };
 }
@@ -289,7 +295,9 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
       let time = start;
       for (const section of sections) { section.departureDateTime = parisDateTime(time * 1000); time += section.durationSeconds; section.arrivalDateTime = parisDateTime(time * 1000); }
       const partial = Boolean(officialRef && !officialStops.length) || index.hasConditionalService || sections.some(s => s.timingSource === "estimated");
-      journeys.push({ id: `gtfs:${manifest.routing!.path}:${destination.id}:${node.arrival}:${signature}`, status: partial ? "partial" : "theoretical", source: "gtfs", datasetVersion: manifest.datasetVersion, durationSeconds: node.arrival - start, departureDateTime: request.datetime, arrivalDateTime: parisDateTime(node.arrival * 1000), transferCount: Math.max(0, sections.filter(s => s.type === "public_transport").length - 1), sections });
+      // Provider batch ordinals depend on which independent task starts first.
+      // Journey identity belongs to its actual destination/time, not that order.
+      journeys.push({ id: `gtfs:${manifest.routing!.path}:${request.datetime}:${destination.lon},${destination.lat}:${destination.destinationRef ?? ""}:${node.arrival}:${signature}`, status: partial ? "partial" : "theoretical", source: "gtfs", datasetVersion: manifest.datasetVersion, durationSeconds: node.arrival - start, departureDateTime: request.datetime, arrivalDateTime: parisDateTime(node.arrival * 1000), transferCount: Math.max(0, sections.filter(s => s.type === "public_transport").length - 1), sections });
       if (journeys.length === 8) break;
     }
     return { id: destination.id, status: !journeys.length ? "outside-search-window" as const : journeys.some(j => j.status === "partial") ? "partial" as const : "ready" as const, journeys };

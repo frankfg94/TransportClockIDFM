@@ -49,6 +49,14 @@ const request = () => ({ origin: { lon: 2.3, lat: 48.8 }, datetime: "20261012T09
   destinations: [{ id: "c", lon: 2.4, lat: 48.8, destinationRef: "stop_area:IDFM:PC" }] });
 
 describe("offline neighborhood routing", () => {
+  it("keeps journey identity stable when independent batches use different destination ids", async () => {
+    const first = await routeNeighborhoodJourneys({} as H3Event, request());
+    const second = await routeNeighborhoodJourneys({} as H3Event, { ...request(), destinations: [{ ...request().destinations[0]!, id: "different-batch-ordinal" }] });
+    expect(first.destinations[0]!.id).toBe("c");
+    expect(second.destinations[0]!.id).toBe("different-batch-ordinal");
+    expect(first.destinations[0]!.journeys.map(journey => journey.id)).toEqual(second.destinations[0]!.journeys.map(journey => journey.id));
+    expect(second.destinations[0]!.journeys.map(({ id, ...journey }) => journey)).toEqual(first.destinations[0]!.journeys.map(({ id, ...journey }) => journey));
+  });
   it("prefetches while walking and drops obsolete egress without cancelling the shared tree or losing live journeys", async () => {
     type Context = { cancelled: boolean };
     let release!: () => void;
