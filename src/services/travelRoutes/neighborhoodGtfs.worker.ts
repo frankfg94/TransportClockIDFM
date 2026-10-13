@@ -66,6 +66,11 @@ const route = createNeighborhoodGtfsRouter<RoutingContext>({
       } });
       details.verified = routes.filter(route => !route.fallback).length;
       details.estimated = routes.filter(route => route.fallback).length;
+      details.providers = [...new Set(routes.map(route => route.provider))];
+      details.datasetVersions = [...new Set(routes.map(route => route.datasetVersion).filter(Boolean))];
+      details.unavailabilityReasons = [...new Set(routes.filter(route => route.fallback).map(route => route.unavailabilityReason ?? "unavailable"))];
+      if (details.estimated) details.estimatedPairs = routes.flatMap((route, i) => route.fallback ? [{ destination: destinations[i],
+        durationSeconds: route.durationSeconds, provider: route.provider, reason: route.unavailabilityReason ?? "unavailable" }] : []);
       return routes;
     });
   },
@@ -145,6 +150,7 @@ scope.addEventListener("message", (event: MessageEvent<NeighborhoodGtfsWorkerReq
         const routing = (payload as NeighborhoodJourneysResponse).diagnostics;
         diagnostics.cacheHit = routing?.cacheHit;
         diagnostics.scannedConnections = routing?.scannedConnections;
+        if (message.debug) diagnostics.excludedFeederAccesses = routing?.excludedFeederAccesses;
       }
       diagnostics.taskMs = Math.round(performance.now() - started);
       if (message.debug) diagnostics.endedEpochMs = performance.timeOrigin + performance.now();

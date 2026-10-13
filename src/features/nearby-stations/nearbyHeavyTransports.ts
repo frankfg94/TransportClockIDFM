@@ -165,6 +165,9 @@ export interface NearbyJourneySection {
   /** A GTFS minimum change time may include a margin; it is not a measured walk. */
   transferDurationSource?: "gtfs-minimum";
   timingObservedAt?: string;
+  walkingProvider?: string;
+  walkingDatasetVersion?: string;
+  walkingUnavailabilityReason?: string;
   type?: string;
   mode?: string;
   durationSeconds: number;
@@ -399,6 +402,7 @@ export interface HeavyJourneyEvaluationInput {
   stationDistanceMeters: number;
   localLineIds?: ReadonlySet<string>;
   localLineCodes?: ReadonlySet<string>;
+  onRejected?: (reason: string) => void;
 }
 
 export interface HeavyJourneyEvaluation {

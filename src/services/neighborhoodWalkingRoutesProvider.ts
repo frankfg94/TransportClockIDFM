@@ -30,7 +30,7 @@ export function createNeighborhoodWalkingRoutesProvider(): NearbyWalkingRoutePro
           })).values()];
           const routes: NearbyWalkingRoute[] = [];
           for (let i = 0; i < destinations.length; i += 64) {
-            routes.push(...await getNearbyWalkingRouteMatrix(origin, destinations.slice(i, i + 64), signal, "ors-only"));
+            routes.push(...await getNearbyWalkingRouteMatrix(origin, destinations.slice(i, i + 64), signal, "gtfs-access"));
           }
           signal?.throwIfAborted();
           const byId = new Map(routes.map(route => [route.id, route]));

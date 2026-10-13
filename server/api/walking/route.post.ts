@@ -1,6 +1,6 @@
 import { createError, defineEventHandler, readBody } from "h3";
 import type { NearbyJourneyPoint } from "../../../src/features/nearby-stations/nearbyHeavyTransports";
-import { routeWalkingWithPreferredProvider, routeWalkingWithOpenRouteService } from "../../services/walking/openRouteService";
+import { routeWalkingWithPreferredProvider, routeWalkingWithOpenRouteService, matrixWalkingForGtfs } from "../../services/walking/openRouteService";
 
 export default defineEventHandler(async (event) => {
   const body = await readBody<{ origin?: NearbyJourneyPoint; destination?: NearbyJourneyPoint; id?: string; routingPolicy?: string }>(event);
@@ -9,6 +9,8 @@ export default defineEventHandler(async (event) => {
   if (!origin || !destination) {
     throw createError({ statusCode: 400, statusMessage: "origin and destination must be valid coordinates." });
   }
+  if (body.routingPolicy === "gtfs-access") return (await matrixWalkingForGtfs(event, origin,
+    [{ ...destination, id: typeof body.id === "string" ? body.id : "destination" }]))[0];
   const router = body.routingPolicy === "ors-only" ? routeWalkingWithOpenRouteService : routeWalkingWithPreferredProvider;
   return router(event, origin, destination, typeof body?.id === "string" ? body.id : undefined);
 });

@@ -8,7 +8,7 @@ describe("verdict station walking matrices", () => {
   it("groups many station probes into ORS-only matrices and deduplicates coordinates", async () => {
     const fetcher = vi.fn(async (url, init) => {
       expect(String(url)).toContain("/api/walking/matrix");
-      const body = JSON.parse(init.body); expect(body.routingPolicy).toBe("ors-only");
+      const body = JSON.parse(init.body); expect(body.routingPolicy).toBe("gtfs-access");
       expect(body.destinations.length).toBeLessThanOrEqual(64);
       return Response.json({ routes: body.destinations.map((p: { lon: number; lat: number; id: string }) => createStraightLineWalkingRoute(body.origin, p, p.id)) });
     });

@@ -36,7 +36,7 @@ export function createNeighborhoodGtfsWalkingMatrix(fetcher: typeof fetch = fetc
         options.reverse ? destination : origin, options.reverse ? origin : destination, destination.id));
       try {
         const response = await fetcher(new URL("/api/walking/matrix", baseUrl), {
-          method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(30_000),
+          method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(120_000),
           body: JSON.stringify({ origin, destinations: missing, routingPolicy: "gtfs-access", reverse: options.reverse === true }),
         });
         if (!response.ok) return estimated;

@@ -1,6 +1,10 @@
 # Itinéraires théoriques du verdict de quartier
 
-La page `/nearby-neighborhood-score` injecte son propre `TravelRoutesProvider` GTFS. Les trajets de transport sont calculés depuis les horaires théoriques. Leurs accès piétons utilisent ORS puis, si nécessaire, une vérification piétonne Navitia bornée via la politique `gtfs-access`. Les autres marches du verdict conservent leur politique `ors-only`. L’annexe trafic peut utiliser PRIM après un clic, via le cache partagé `/api/traffic`.
+La page `/nearby-neighborhood-score` injecte son propre `TravelRoutesProvider` GTFS. Les trajets de transport sont calculés depuis les horaires théoriques. Leurs accès piétons utilisent une source publique commune IGN BD TOPO via la politique `gtfs-access`, indépendante des clés et quotas ORS/Navitia de chaque environnement. Les autres marches du verdict conservent leur politique `ors-only`. L’annexe trafic peut utiliser PRIM après un clic, via le cache partagé `/api/traffic`.
+
+`server/services/walking/ignWalkingMatrix.ts` utilise le profil piéton officiel de la Géoplateforme. Huit destinations sont calculées dans une requête avec 15 points intermédiaires au maximum : les portions aller et retour restent indépendantes et le sens demandé est respecté. Les courts raccordements aux coordonnées exactes sont inclus dans la distance et la durée ; un snap supérieur à 100 m reste explicitement non vérifié. Les paires dirigées partagent un cache borné pour toutes les coordonnées, sans résultat propre à une adresse. Les départs de requêtes sont espacés de 250 ms, conformément à la limite publiée de 5 requêtes/s/IP. Le quota et les échecs restent visibles dans les diagnostics.
+
+Source du contrat : https://cartes.gouv.fr/aide/fr/guides-utilisateur/utiliser-les-services-de-la-geoplateforme/calcul-itineraire/ . Le client laisse jusqu’à 120 s à une matrice pour respecter cette file publique sans convertir une attente en estimation après seulement 30 s ; le calcul GTFS garde son plafond général de trois minutes.
 
 ## Artefacts et publication
 

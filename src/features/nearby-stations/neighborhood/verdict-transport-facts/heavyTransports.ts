@@ -160,7 +160,17 @@ function keepBestTransportSignal(
     ? `future:${signal.futureProject.id}`
     : lineKey(signal.line);
   const current = byLine.get(key);
-  if (!current || compareTransportAccessSignals(signal, current) < 0) byLine.set(key, signal);
+  if (!current) { byLine.set(key, signal); return; }
+  const winner = compareTransportAccessSignals(signal, current) < 0 ? signal : current;
+  // Every qualifying station can offer a distinct feeder to the same heavy
+  // line. Keep those options when selecting the best line-level signal.
+  const options = new Map<string, NeighborhoodTransportAccessOption>();
+  for (const option of [...(current.accessOptions ?? []), ...(signal.accessOptions ?? [])]) {
+    const optionKey = normalizeScoreText(option.via), previous = options.get(optionKey);
+    if (!previous || option.travelSeconds < previous.travelSeconds) options.set(optionKey, option);
+  }
+  const accessOptions = [...options.values()].sort((a, b) => a.travelSeconds - b.travelSeconds || a.via.localeCompare(b.via, "fr-FR"));
+  byLine.set(key, { ...winner, ...(accessOptions.length ? { accessOptions } : {}) });
 }
 
 function compareTransportAccessSignals(

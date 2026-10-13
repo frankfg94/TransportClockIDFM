@@ -1,4 +1,4 @@
-import type { NeighborhoodJourneysRequest } from "../../features/nearby-stations/neighborhoodJourneys";
+import type { NeighborhoodJourneysRequest, NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
 
 export type NeighborhoodGtfsWorkerAction =
   | { kind: "routes"; request: NeighborhoodJourneysRequest }
@@ -23,5 +23,6 @@ export interface NeighborhoodGtfsWorkerDiagnostics {
   steps?: { task: string; startEpochMs: number; endEpochMs: number; durationMs: number; status: "ready" | "error"; details?: Record<string, unknown> }[];
   cacheHit?: boolean;
   scannedConnections?: number;
+  excludedFeederAccesses?: NonNullable<NeighborhoodJourneysResponse["diagnostics"]>["excludedFeederAccesses"];
 }
 export type NeighborhoodGtfsWorkerResponse = ({ id: number; payload: unknown } | { id: number; error: string } | { id: number; cancelled: true }) & { diagnostics?: NeighborhoodGtfsWorkerDiagnostics };

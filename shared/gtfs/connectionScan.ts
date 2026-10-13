@@ -10,7 +10,8 @@ export interface RoutingConnection {
 }
 export interface RoutingFootpath { to: number; seconds: number; section: NearbyJourneySection }
 export type RoutingConnectionBatch = readonly RoutingConnection[];
-export interface ConnectionScanResult { labels: Map<number, RoutingNode>; transitLabels: Map<number, RoutingNode>; platformLabels: Map<number, RoutingNode>; nightLabels: Map<number, Map<string, RoutingNode>>; feederLabels: Map<number, Map<string, RoutingNode>>; scannedConnections: number }
+export interface ConnectionScanResult { labels: Map<number, RoutingNode>; transitLabels: Map<number, RoutingNode>; platformLabels: Map<number, RoutingNode>; nightLabels: Map<number, Map<string, RoutingNode>>; feederLabels: Map<number, Map<string, RoutingNode>>; scannedConnections: number;
+  excludedFeederAccesses: { lineId?: string; lineCode?: string; stopId?: string; stopName?: string; walkingSeconds: number; reason: string }[] }
 
 interface DirectFeederNode extends RoutingNode { scoreSeconds: number }
 function continueTrip(riding: RoutingNode, connection: RoutingConnection): RoutingNode {
@@ -34,6 +35,7 @@ export async function scanConnections(
   // Keep one first arrival per stop/line, even when another line arrives earlier.
   const feederLabels = new Map<number, Map<string, RoutingNode>>();
   const feederOnTrip = new Map<string, DirectFeederNode>();
+  const excludedFeederAccesses = new Map<string, ConnectionScanResult["excludedFeederAccesses"][number]>();
   const verifiedAccess = new WeakMap<RoutingNode, boolean>();
   function hasVerifiedWalkingAccess(node: RoutingNode): boolean {
     const cached = verifiedAccess.get(node);
@@ -92,6 +94,13 @@ export async function scanConnections(
         const walkingAccess = boarding.get(connection.from)?.get("access");
         const walkingSeconds = walkingAccess?.walkingSeconds ?? walkingAccess?.section.durationSeconds ?? 0;
         if (connection.pickup === 0 && walkingAccess && !walkingAccess.transferOrigin && walkingAccess.arrival <= connection.departure
+          && walkingSeconds <= (limits.feederWalkingSeconds ?? Infinity) && !hasVerifiedWalkingAccess(walkingAccess)) {
+          const key = `${connection.section.lineId}:${connection.from}`;
+          if (!excludedFeederAccesses.has(key)) excludedFeederAccesses.set(key, { lineId: connection.section.lineId, lineCode: connection.section.lineCode,
+            stopId: connection.section.fromStopPointId, stopName: connection.section.fromName, walkingSeconds,
+            reason: walkingAccess.section.walkingUnavailabilityReason ?? "unverified-walking" });
+        }
+        if (connection.pickup === 0 && walkingAccess && !walkingAccess.transferOrigin && walkingAccess.arrival <= connection.departure
           && hasVerifiedWalkingAccess(walkingAccess)
           && walkingSeconds <= (limits.feederWalkingSeconds ?? Infinity)) {
           const scoreSeconds = walkingSeconds + connection.arrival - connection.departure;
@@ -139,7 +148,7 @@ export async function scanConnections(
       relax(connection.to, node);
     }
   }
-  return { labels, transitLabels, platformLabels, nightLabels, feederLabels, scannedConnections };
+  return { labels, transitLabels, platformLabels, nightLabels, feederLabels, scannedConnections, excludedFeederAccesses: [...excludedFeederAccesses.values()] };
 }
 
 export function routingSections(node: RoutingNode): NearbyJourneySection[] {

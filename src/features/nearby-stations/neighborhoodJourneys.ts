@@ -18,5 +18,6 @@ export interface NeighborhoodJourneysResponse {
   serviceDate: string;
   searchHorizonSeconds: number;
   destinations: Array<{ id: string; status: NeighborhoodJourneyStatus; journeys: NearbyJourney[] }>;
-  diagnostics?: { scannedConnections: number; calculationMs: number; cacheHit: boolean };
+  diagnostics?: { scannedConnections: number; calculationMs: number; cacheHit: boolean;
+    excludedFeederAccesses?: { lineId?: string; lineCode?: string; stopId?: string; stopName?: string; walkingSeconds: number; reason: string }[] };
 }

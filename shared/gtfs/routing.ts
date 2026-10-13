@@ -34,8 +34,10 @@ function assertCurrent(context: Context): void {
 function coordinate(stop: GtfsRoutingIndex["stops"][number]): NearbyJourneyPoint | undefined {
   return Number.isFinite(stop.lon) && Number.isFinite(stop.lat) ? { lon: stop.lon!, lat: stop.lat! } : undefined;
 }
-function walkingSection(from: NearbyJourneyPoint, to: NearbyJourneyPoint, seconds: number, estimated = false): NearbyJourneySection {
-  return { type: "walking", mode: "walking", durationSeconds: seconds, timingSource: estimated ? "estimated" : "schedule", fromPoint: from, toPoint: to };
+function walkingSection(from: NearbyJourneyPoint, to: NearbyJourneyPoint, seconds: number, estimated = false, route?: NearbyWalkingRoute): NearbyJourneySection {
+  return { type: "walking", mode: "walking", durationSeconds: seconds, timingSource: estimated ? "estimated" : "schedule", fromPoint: from, toPoint: to,
+    ...(route ? { distanceMeters: route.distanceMeters, walkingProvider: route.provider, walkingDatasetVersion: route.datasetVersion,
+      walkingUnavailabilityReason: route.unavailabilityReason } : {}) };
 }
 const transferGraphs = new WeakMap<GtfsRoutingIndex, ReturnType<typeof buildFootpaths>>();
 function buildFootpaths(index: GtfsRoutingIndex) {
@@ -227,7 +229,7 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
         if (route.durationSeconds > 20 * 60) continue;
         const id = Number(route.id), point = coordinate(index.stops[id]!);
         if (!point) continue;
-        access.set(id, { arrival: start + route.durationSeconds, walkingSeconds: route.durationSeconds, section: walkingSection(request.origin, point, route.durationSeconds, route.fallback) });
+        access.set(id, { arrival: start + route.durationSeconds, walkingSeconds: route.durationSeconds, section: walkingSection(request.origin, point, route.durationSeconds, route.fallback, route) });
       }
       let graph = transferGraphs.get(index);
       if (!graph) { graph = buildFootpaths(index); transferGraphs.set(index, graph); index.transfers = []; }
@@ -245,7 +247,8 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
   // An obsolete page probe can join a useful tree, then release its queue slot
   // without issuing dozens of destination-specific pedestrian matrices.
   assertCurrent(event);
-  base.diagnostics = { scannedConnections: tree.scannedConnections, calculationMs: Math.round(performance.now() - calculationStart), cacheHit };
+  base.diagnostics = { scannedConnections: tree.scannedConnections, calculationMs: Math.round(performance.now() - calculationStart), cacheHit,
+    excludedFeederAccesses: tree.excludedFeederAccesses };
   base.destinations = await Promise.all(request.destinations.map(async destination => {
     const officialRef = destination.destinationRef?.replace(/^(stop_area|stop_point):/u, "");
     const officialStops = officialRef ? index.boardingStops.filter(id => index.stops[id]!.id === officialRef || index.stops[id]!.parentId === officialRef) : [];
@@ -267,14 +270,14 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
       if (route.durationSeconds > 20 * 60) return [];
       const alternatives = [tree.labels.get(candidate.id), tree.transitLabels.get(candidate.id), ...(tree.nightLabels.get(candidate.id)?.values() ?? [])].filter((node): node is RoutingNode => Boolean(node));
       return alternatives.map(previous => ({ previous, arrival: previous.arrival + route.durationSeconds,
-        section: { ...walkingSection(candidate.point, destination, route.durationSeconds, route.fallback),
+        section: { ...walkingSection(candidate.point, destination, route.durationSeconds, route.fallback, route),
           fromStopPointId: index.stops[candidate.id]!.id, fromStopAreaId: index.stops[candidate.id]!.parentId } } satisfies RoutingNode));
     });
     const direct = createStraightLineWalkingRoute(request.origin, destination);
     // A direct walk is only offered for a genuinely nearby target, and is explicitly estimated.
     if (direct.distanceMeters <= WALK_RADIUS_METERS) {
       const route = (await runtime.matrix(event, request.origin, [{ ...destination, id: destination.id }]))[0]!;
-      if (route.durationSeconds <= 20 * 60) routes.push({ arrival: start + route.durationSeconds, section: walkingSection(request.origin, destination, route.durationSeconds, route.fallback) });
+      if (route.durationSeconds <= 20 * 60) routes.push({ arrival: start + route.durationSeconds, section: walkingSection(request.origin, destination, route.durationSeconds, route.fallback, route) });
     }
     const sorted = routes.filter(node => node.arrival <= start + NEIGHBORHOOD_ROUTING_HORIZON_SECONDS).sort((a, b) => a.arrival - b.arrival);
     const signatures = new Set<string>(), journeys: NearbyJourney[] = [];

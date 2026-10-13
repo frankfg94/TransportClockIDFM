@@ -91,12 +91,13 @@ function walkingRouteCacheKey(
   origin: NearbyJourneyPoint,
   destination: Pick<NearbyJourneyPoint, "lon" | "lat"> & { cacheKey?: string },
   requestCacheKey?: string,
+  routingPolicy: NearbyWalkingRoutingPolicy = "preferred",
 ): string {
   const sanitizedDestinationKey = (requestCacheKey ?? destination.cacheKey)
     ? sanitizeNearbyWalkingCacheKey(requestCacheKey ?? destination.cacheKey ?? "")
     : "";
   const destinationKey = sanitizedDestinationKey || coordinateCacheKey(destination);
-  return `${coordinateCacheKey(origin)}::${destinationKey}`;
+  return `${routingPolicy}:${coordinateCacheKey(origin)}::${destinationKey}`;
 }
 
 function cloneWalkingRoute(route: NearbyWalkingRoute, id?: string): NearbyWalkingRoute {
@@ -116,7 +117,7 @@ function persistWalkingRoute(request: NearbyWalkingRouteRequest, route: NearbyWa
   if (!isPersistableWalkingRoute(route)) return;
   const storage = ensurePersistentRouteCacheLoaded();
   if (!storage) return;
-  const key = walkingRouteCacheKey(request.origin, request.destination, request.cacheKey);
+  const key = walkingRouteCacheKey(request.origin, request.destination, request.cacheKey, request.routingPolicy);
   persistentRouteCache[key] = {
     expiresAt: Date.now() + PERSISTED_ROUTE_CACHE_TTL_MS,
     route: cloneWalkingRoute(route),
@@ -136,7 +137,7 @@ export function getCachedNearbyWalkingRoute(
   if (isNeighborhoodGtfsColdStart()) return undefined;
   const storage = ensurePersistentRouteCacheLoaded();
   if (!storage) return undefined;
-  const key = walkingRouteCacheKey(request.origin, request.destination, request.cacheKey);
+  const key = walkingRouteCacheKey(request.origin, request.destination, request.cacheKey, request.routingPolicy);
   const entry = persistentRouteCache[key];
   if (!entry) return undefined;
   if (entry.expiresAt <= Date.now() || !isPersistableWalkingRoute(entry.route)) {
@@ -193,6 +194,7 @@ export async function getNearbyWalkingRouteMatrix(
   if (destinations.length === 0) return [];
   const fallbacks = destinations.map((destination) => createStraightLineWalkingRoute(origin, destination, destination.id));
   const cachedRoutes = destinations.map((destination) => getCachedNearbyWalkingRoute({
+    routingPolicy,
     id: destination.id,
     cacheKey: destination.cacheKey,
     origin,
@@ -221,6 +223,7 @@ export async function getNearbyWalkingRouteMatrix(
         ? cloneWalkingRoute(route, destination.id)
         : createStraightLineWalkingRoute(origin, destination, destination.id);
       const request = {
+        routingPolicy,
         id: destination.id,
         cacheKey: destination.cacheKey,
         origin,
@@ -241,7 +244,7 @@ export async function getNearbyWalkingRouteMatrix(
 function isWalkingRoute(value: unknown): value is NearbyWalkingRoute & { id?: string } {
   if (!value || typeof value !== "object") return false;
   const route = value as Partial<NearbyWalkingRoute>;
-  return (route.provider === "idfm-navitia" || route.provider === "openrouteservice" || route.provider === "straight-line")
+  return (route.provider === "idfm-navitia" || route.provider === "openrouteservice" || route.provider === "ign-bdtopo" || route.provider === "straight-line")
     && Number.isFinite(route.distanceMeters)
     && Number.isFinite(route.durationSeconds)
     && Array.isArray(route.coordinates)

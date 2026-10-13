@@ -29,6 +29,7 @@ import { useNearbyStations } from "./useNearbyStations";
 import { useNearbyWalkingRoutes } from "./useNearbyWalkingRoutes";
 import { useTravelRoutes } from "./useTravelRoutes";
 import NearbyNeighborhoodScoreCard from "./NearbyNeighborhoodScoreCard.vue";
+import { buildVerdictTransportIntegrity, compareVerdictTransportSnapshots } from "./verdictTransportDebug";
 import NearbyRealEstateVerdict from "./NearbyRealEstateVerdict.vue";
 import NeighborhoodTrafficAnnex from "./NeighborhoodTrafficAnnex.vue";
 import {
@@ -354,9 +355,8 @@ watch(() => [score.transportPending.value.join(","), heavy.isLoading.value, near
   serviceQuality.isLoading.value, futureProjectsReady.value, scoreLoading.value], updateDebugPerformance, { flush: "post" });
 onMounted(() => { debugMounted = true; updateDebugPerformance(); });
 onUnmounted(() => { if (debugSettleTimer) clearTimeout(debugSettleTimer); });
-const debugPayload = computed(() => debugVerdict.value ? JSON.stringify(debugTiming.value && scoreLoading.value ? {
-  performance: debugPerformance.value, loading: true,
-} : {
+const debugReference = ref("");
+const debugSnapshot = computed(() => debugVerdict.value ? {
   performance: debugPerformance.value,
   revision: typeof __APP_SOURCE_REVISION__ === "undefined" ? "" : __APP_SOURCE_REVISION__,
   apiBase: toServerApiUrl("/"),
@@ -376,7 +376,21 @@ const debugPayload = computed(() => debugVerdict.value ? JSON.stringify(debugTim
   futureProjects: futureProjects.value,
   walkingRoutes: nearbyWalking.placeRoutes.value,
   serviceQuality: serviceQuality.data.value,
-}, null, 2) : "");
+} : {});
+const debugIntegrity = computed(() => debugVerdict.value ? buildVerdictTransportIntegrity(debugSnapshot.value, verdictDebugTimeline.tasks.value) : undefined);
+const debugParsedReference = computed(() => {
+  try { return debugReference.value.trim() ? JSON.parse(debugReference.value) : undefined; } catch { return undefined; }
+});
+const debugComparison = computed(() => {
+  if (!debugVerdict.value || !debugReference.value.trim()) return { status: "not-compared" as const };
+  const reference = debugParsedReference.value;
+  if (!reference?.result?.categories?.some((category: { id: string }) => category.id === "transport")) return { status: "invalid" as const };
+  if (debugIntegrity.value?.status === "loading") return { status: "loading" as const };
+  return compareVerdictTransportSnapshots(debugSnapshot.value, reference);
+});
+const debugPayload = computed(() => debugVerdict.value ? JSON.stringify(debugTiming.value && scoreLoading.value ? {
+  performance: debugPerformance.value, loading: true, transportIntegrity: debugIntegrity.value, transportComparison: debugComparison.value,
+} : { ...debugSnapshot.value, transportIntegrity: debugIntegrity.value, transportComparison: debugComparison.value }, null, 2) : "");
 const debugTimelinePayload = computed(() => debugVerdict.value ? JSON.stringify({
   clock: "milliseconds since navigation (performance.now)",
   performance: debugPerformance.value,
@@ -487,6 +501,18 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 
 <template>
   <main class="nearby-neighborhood-score-page" :aria-busy="scoreLoading">
+    <section v-if="debugVerdict" class="nearby-neighborhood-score-page__debug-checks" data-testid="verdict-debug-checks">
+      <p data-testid="verdict-debug-integrity" :data-status="debugIntegrity?.status">
+        {{ t("nearbyStations.neighborhoodScore.debugIntegrityTitle") }} :
+        {{ t(debugIntegrity?.status === 'loading' ? "nearbyStations.neighborhoodScore.debugIntegrityLoading" : debugIntegrity?.status === 'degraded' ? "nearbyStations.neighborhoodScore.debugIntegrityDegraded" : "nearbyStations.neighborhoodScore.debugIntegrityComplete") }}
+      </p>
+      <label for="verdict-debug-reference">{{ t("nearbyStations.neighborhoodScore.debugReferenceLabel") }}</label>
+      <textarea id="verdict-debug-reference" v-model="debugReference" data-testid="verdict-debug-reference" rows="3" :placeholder="t('nearbyStations.neighborhoodScore.debugReferencePlaceholder')" />
+      <p data-testid="verdict-debug-comparison" :data-status="debugComparison.status">
+        {{ t("nearbyStations.neighborhoodScore.debugComparisonTitle") }} :
+        {{ t(debugComparison.status === 'equal' ? "nearbyStations.neighborhoodScore.debugComparisonEqual" : debugComparison.status === 'different' ? "nearbyStations.neighborhoodScore.debugComparisonDifferent" : debugComparison.status === 'invalid' ? "nearbyStations.neighborhoodScore.debugComparisonInvalid" : debugComparison.status === 'loading' ? "nearbyStations.neighborhoodScore.debugIntegrityLoading" : "nearbyStations.neighborhoodScore.debugComparisonMissing") }}
+      </p>
+    </section>
     <details v-if="debugVerdict">
       <summary>{{ t("nearbyStations.neighborhoodScore.debugDataTitle") }}</summary>
       <pre data-testid="verdict-debug" class="nearby-neighborhood-score-page__debug">{{ debugPayload }}</pre>
@@ -600,6 +626,9 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 .nearby-neighborhood-score-page__empty-link { background: #5146ff; border-radius: 9px; color: #fff; font-size: .78rem; font-weight: 850; margin-top: 5px; padding: 9px 12px; text-decoration: none; }
 .nearby-neighborhood-score-page__empty-link:hover, .nearby-neighborhood-score-page__empty-link:focus-visible { background: #4034df; color: #fff; }
 .nearby-neighborhood-score-page__debug { background: var(--surface); color: var(--ink); font-size: .75rem; max-height: 24rem; overflow: auto; padding: 12px; white-space: pre-wrap; }
+.nearby-neighborhood-score-page__debug-checks { padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.nearby-neighborhood-score-page__debug-checks textarea { width: 100%; color: var(--ink); background: var(--surface); }
+.nearby-neighborhood-score-page__debug-checks [data-status="degraded"], .nearby-neighborhood-score-page__debug-checks [data-status="different"], .nearby-neighborhood-score-page__debug-checks [data-status="invalid"] { color: var(--danger); font-weight: 700; }
 @media (max-width: 680px) {
   .nearby-neighborhood-score-page { padding: 18px 12px 108px; }
   .nearby-neighborhood-score-page__hero { padding: 19px; }

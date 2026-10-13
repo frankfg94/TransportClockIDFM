@@ -26,6 +26,26 @@ Noctilien, frequencies, last departures, documentary sources and service quality
 Worker tasks also include queue delay, execution duration, destination count,
 asset reads, connection scans, walking pairs requested/reused and per-asset and
 per-matrix start/end times. Matrices distinguish verified and estimated walks.
+They also retain providers, street dataset versions, fallback reasons and the
+affected coordinates. `heavy-targets` records each station/line eligibility
+decision; GTFS worker diagnostics list boarding stops excluded for unverified
+walking, including their bus codes.
+
+## Data integrity and local/production parity
+
+`transportIntegrity` distinguishes `loading`, `complete` and `degraded`, with
+missing benchmarks, estimated walks and excluded accesses listed explicitly.
+Without a reference snapshot the page displays **parity not verified**, even
+when all tasks completed. A fallback is not proof of data completeness.
+
+Paste the other environment's full first-panel JSON in the debug reference
+field. `transportComparison` compares the transport category, all heavy
+candidates, every benchmark/night journey, frequencies, last services, line
+targets, future projects and service quality. It retains travel durations,
+departure times and provider dataset versions; only observation clocks are
+excluded. Differences and missing/additional fact IDs are included, and a
+visible alert reports a mismatch. The reference is parsed once per edit,
+and comparison waits for the current transport calculation to settle.
 
 `performance.transportSettledMs` waits for every transport task, heavy resolver,
 station catalogue, service quality and GPE target readiness. It includes

@@ -216,7 +216,7 @@ export function evaluateNearbyHeavyJourney(
   const totalWalkingSeconds = walkingSections.reduce((sum, section) => sum + section.durationSeconds, 0);
 
   const eligibilitySeconds = input.journey.source === "gtfs" ? timing.scoreSeconds : totalSeconds;
-  if (eligibilitySeconds > NEARBY_HEAVY_TOTAL_MAX_SECONDS) return undefined;
+  if (eligibilitySeconds > NEARBY_HEAVY_TOTAL_MAX_SECONDS) { input.onRejected?.("travel-over-30-minutes"); return undefined; }
 
   if (
     transitSections.length === 0 &&
@@ -251,7 +251,7 @@ export function evaluateNearbyHeavyJourney(
     transitSections.length < 2 ||
     transitSections.length > 3 ||
     (input.journey.transferCount !== undefined && input.journey.transferCount > 2)
-  ) return undefined;
+  ) { input.onRejected?.("unsupported-transfer-count"); return undefined; }
 
   const firstTransitIndex = sections.findIndex(isTransitSection);
   const feeder = transitSections[0]!;
@@ -267,6 +267,7 @@ export function evaluateNearbyHeavyJourney(
       return !isHeavyMode(mode) || isBusLikeMode(mode);
     })
   ) {
+    input.onRejected?.("unsupported-feeder-or-correspondence");
     return undefined;
   }
 
@@ -274,7 +275,7 @@ export function evaluateNearbyHeavyJourney(
     .slice(0, firstTransitIndex)
     .filter(isWalkingSection)
     .reduce((sum, section) => sum + section.durationSeconds, 0);
-  if (feederWalkingSeconds > NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS) return undefined;
+  if (feederWalkingSeconds > NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS) { input.onRejected?.("boarding-walk-over-15-minutes"); return undefined; }
 
   return {
     kind: "connection",
@@ -321,11 +322,11 @@ function evaluateSingleLocalFeeder(
   // reachable within the walking threshold. Keep it in journey diagnostics,
   // but do not promote an unverified bus access into a proximity advantage.
   if (input.journey.source === "gtfs" && isBusLikeMode(feederMode)
-    && sections.some(section => isWalkingSection(section) && section.timingSource === "estimated")) return undefined;
+    && sections.some(section => isWalkingSection(section) && section.timingSource === "estimated")) { input.onRejected?.("unverified-bus-walking-access"); return undefined; }
   if (
     !isLocalFeeder(feeder, input.localLineIds, input.localLineCodes) ||
     feederWalkingSeconds > NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS
-  ) return undefined;
+  ) { input.onRejected?.(feederWalkingSeconds > NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS ? "boarding-walk-over-15-minutes" : "non-local-feeder"); return undefined; }
 
   return {
     kind: "connection",

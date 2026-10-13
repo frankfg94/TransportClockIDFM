@@ -209,12 +209,18 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
           if (input.signal?.aborted || isAbortError(cause) || isNavitiaRateLimit(cause)) throw cause;
           return [];
         });
+        const rejected: { reason: string; count: number }[] = [];
+        const onRejected = (reason: string) => {
+          const entry = rejected.find(value => value.reason === reason);
+          if (entry) entry.count++; else rejected.push({ reason, count: 1 });
+        };
         const currentAlternatives = listNearbyHeavyJourneyAlternatives(
           futureProject ? journeys.map((journey) => trimCoLocatedFutureStationEgress(journey, futureProject)) : journeys,
           {
             stationDistanceMeters: distanceMeters,
             localLineIds,
             localLineCodes,
+            onRejected,
           },
         ).map((access) => normalizeNearbyHeavyAccessLine(access, feederLines));
 
@@ -240,6 +246,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
             stationDistanceMeters: distanceMeters,
             localLineIds,
             localLineCodes,
+            onRejected,
           },
         ).map((access) => normalizeNearbyHeavyAccessLine(access, feederLines));
         const currentAccess = currentAlternatives[0];
@@ -263,6 +270,12 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
             routedWalkingAccess ? [routedWalkingAccess] : [],
           );
         const access = accessAlternatives[0];
+        beginVerdictDebugTask("heavy-targets", "eligibility", { station: station.id, stationName: station.name,
+          lineId: line.id, lineCode: line.code, journeys: journeys.length + daytimeJourneys.length,
+          eligibleAlternatives: accessAlternatives.length, rejected,
+          walkingSources: [...new Set([...journeys, ...daytimeJourneys].flatMap(journey => journey.sections
+            .filter(isNearbyJourneyWalkingSection).map(section => section.walkingProvider ?? section.timingSource)))],
+          accepted: Boolean(access), scoreSeconds: access && getNearbyHeavyAccessTravelSeconds(access) })("ready");
         if (!access) return undefined;
 
         const entry = createHeavyEntry(station, line, input.network, distanceMeters);

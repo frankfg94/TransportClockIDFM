@@ -1,7 +1,7 @@
 import type { NearbyJourneyPoint } from "./nearbyHeavyTransports";
 
-export type NearbyWalkingRouteProvider = "idfm-navitia" | "openrouteservice" | "straight-line";
-export type NearbyWalkingRoutingPolicy = "preferred" | "ors-only";
+export type NearbyWalkingRouteProvider = "idfm-navitia" | "openrouteservice" | "ign-bdtopo" | "straight-line";
+export type NearbyWalkingRoutingPolicy = "preferred" | "ors-only" | "gtfs-access";
 
 export interface NearbyWalkingRoute {
   id?: string;
@@ -10,6 +10,7 @@ export interface NearbyWalkingRoute {
   durationSeconds: number;
   coordinates: NearbyJourneyPoint[];
   fallback?: boolean;
+  datasetVersion?: string;
   unavailabilityReason?: "quota-exceeded" | "not-configured" | "unavailable" | "unreachable";
 }
 

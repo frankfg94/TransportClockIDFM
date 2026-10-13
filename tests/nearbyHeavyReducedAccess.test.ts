@@ -43,4 +43,18 @@ describe("reduced bus station access", () => {
     expect(fact.evidence.ruleKey).toBe("nearbyStations.neighborhoodScore.rules.transportBusReduced");
     expect(getNeighborhoodFactMarker(full.positiveFacts.find(f => f.labelValues?.line === "Transilien additional")!)).toBe("+");
   });
+  it("keeps feeder alternatives from different stations of the same heavy line", () => {
+    const target = line("shared-heavy", "RER");
+    const accessCandidate = (bus: string, seconds: number) => {
+      const c = candidate(target, seconds);
+      const access = { ...c.access, feederLineCode: bus, journey: { source: "gtfs" as const, durationSeconds: seconds,
+        sections: [{ type: "walking", durationSeconds: 60 }, { type: "public_transport", lineMode: "BUS" as const, lineCode: bus, durationSeconds: seconds - 60 }] } };
+      return { ...c, id: bus, access, accessByLine: { [target.id]: access }, accessAlternativesByLine: { [target.id]: [access] } };
+    };
+    const result = score([accessCandidate("short", 840), accessCandidate("long", 1769)]);
+    const fact = result.positiveFacts.find(f => f.labelValues?.line === "RER shared-heavy")!;
+    expect(fact.travel?.routes?.map(route => route.line)).toEqual(["BUS short", "BUS long"]);
+    expect(fact.travel?.routes?.map(route => route.accessMinutes)).toEqual([14, 30]);
+    expect(fact.labelValues?.minutes).toBe(14);
+  });
 });

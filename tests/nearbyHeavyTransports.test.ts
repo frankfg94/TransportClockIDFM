@@ -147,7 +147,7 @@ describe("nearby heavy transport eligibility", () => {
     expect(evaluation).toBeUndefined();
   });
 
-  it("rejects a third transport segment after a reliable feeder and heavy line", () => {
+  it("accepts two heavy segments after a reliable feeder and rejects a fourth vehicle", () => {
     const evaluation = evaluateNearbyHeavyJourney({
       journey: {
         durationSeconds: 1_800,
@@ -163,7 +163,12 @@ describe("nearby heavy transport eligibility", () => {
       localLineCodes: new Set(["T10"]),
     });
 
-    expect(evaluation).toBeUndefined();
+    expect(evaluation).toMatchObject({ kind: "connection", scoreSeconds: 1800 });
+    expect(evaluateNearbyHeavyJourney({
+      journey: { durationSeconds: 1500, sections: [walk(300, 400), feeder(300, "T10", "TRAM"),
+        heavy(300, "B", "RER"), heavy(300, "C", "RER"), heavy(300, "D", "RER")] },
+      stationDistanceMeters: 4346, localLineIds: new Set(["line:T10"]), localLineCodes: new Set(["T10"]),
+    })).toBeUndefined();
   });
 
   it("retains a multi-heavy-line hub outside one line's nearest-six candidates", () => {
