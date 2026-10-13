@@ -2,11 +2,14 @@ import type { NeighborhoodJourneysRequest, NeighborhoodJourneysResponse } from "
 import { toServerApiUrl } from "../serverApi";
 import type { NeighborhoodGtfsWorkerAction, NeighborhoodGtfsWorkerRequest, NeighborhoodGtfsWorkerResponse } from "./neighborhoodGtfsWorkerProtocol";
 
-interface Pending { resolve(payload: unknown): void; reject(error: unknown): void; cleanup(): void }
-let worker: Worker | undefined, nextId = 0;
+interface Pending { worker: Worker; resolve(payload: unknown): void; reject(error: unknown): void; cleanup(): void }
+type WorkerGroup = "routes" | "timetable";
+const workers = new Map<WorkerGroup, Worker>();
+let nextId = 0;
 const pending = new Map<number, Pending>();
-function ensureWorker(): Worker {
-  if (worker) return worker;
+function ensureWorker(group: WorkerGroup): Worker {
+  const existing = workers.get(group);
+  if (existing) return existing;
   const created = new Worker(new URL("./neighborhoodGtfs.worker.ts", import.meta.url), { type: "module" });
   created.onmessage = (event: MessageEvent<NeighborhoodGtfsWorkerResponse>) => {
     const response = event.data, subscriber = pending.get(response.id);
@@ -18,10 +21,13 @@ function ensureWorker(): Worker {
     if ("error" in response) subscriber.reject(new Error(response.error)); else subscriber.resolve(response.payload);
   };
   created.onerror = () => {
-    for (const subscriber of pending.values()) { subscriber.cleanup(); subscriber.reject(new Error("GTFS browser worker failed")); }
-    pending.clear(); created.terminate(); worker = undefined;
+    for (const [id, subscriber] of pending) {
+      if (subscriber.worker !== created) continue;
+      pending.delete(id); subscriber.cleanup(); subscriber.reject(new Error("GTFS browser worker failed"));
+    }
+    created.terminate(); if (workers.get(group) === created) workers.delete(group);
   };
-  worker = created;
+  workers.set(group, created);
   return created;
 }
 export function canUseBrowserNeighborhoodGtfs(): boolean { return typeof window !== "undefined" && typeof Worker !== "undefined"; }
@@ -32,18 +38,25 @@ export function requestBrowserNeighborhoodGtfs<T>(action: NeighborhoodGtfsWorker
   if (signal.aborted) return Promise.reject(signal.reason);
   return new Promise((resolve, reject) => {
     const id = ++nextId;
-    const cancel = () => { if (pending.delete(id)) worker?.postMessage({ id, kind: "cancel" } satisfies NeighborhoodGtfsWorkerRequest); cleanup(); };
+    const cancel = () => {
+      const subscriber = pending.get(id);
+      if (pending.delete(id)) subscriber?.worker.postMessage({ id, kind: "cancel" } satisfies NeighborhoodGtfsWorkerRequest);
+      cleanup();
+    };
     const abort = () => { cancel(); reject(signal.reason); };
     const timer = setTimeout(() => { cancel(); reject(new Error("GTFS browser routing timed out")); }, 180_000);
     const cleanup = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); };
     signal.addEventListener("abort", abort, { once: true });
-    pending.set(id, { resolve: payload => resolve(payload as T), reject, cleanup });
     try {
       const baseUrl = new URL(toServerApiUrl("/"), window.location.href).href;
       // Vue reactive points cannot cross the structured-clone boundary. The
       // request is the same JSON contract accepted by the server endpoint.
       const plainAction = JSON.parse(JSON.stringify(action)) as NeighborhoodGtfsWorkerAction;
-      ensureWorker().postMessage({ id, baseUrl, ...plainAction } satisfies NeighborhoodGtfsWorkerRequest);
+      // Street-routing HTTP waits must not block the independently scheduled
+      // frequency/last-departure pair. Each worker retains only its own data.
+      const target = ensureWorker(action.kind === "routes" ? "routes" : "timetable");
+      pending.set(id, { worker: target, resolve: payload => resolve(payload as T), reject, cleanup });
+      target.postMessage({ id, baseUrl, ...plainAction } satisfies NeighborhoodGtfsWorkerRequest);
     } catch (error) { pending.delete(id); cleanup(); reject(error); }
   });
 }

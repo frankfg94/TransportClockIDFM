@@ -46,4 +46,21 @@ describe("browser neighborhood GTFS", () => {
     worker.onmessage!({ data: { id: message.id, payload: { source: "gtfs", destinations: [] } } });
     await expect(next).resolves.toMatchObject({ source: "gtfs" });
   });
+  it("keeps timetable responses available while routes are pending and isolates worker failures and cancellation", async () => {
+    const router = await setup(), controller = new AbortController();
+    const routes = router.routeBrowserNeighborhoodGtfs(request(), new AbortController().signal);
+    const frequency = router.requestBrowserNeighborhoodGtfs({ kind: "frequency", lineId: "line" }, controller.signal);
+    const last = router.requestBrowserNeighborhoodGtfs({ kind: "last-service", lineId: "line" }, new AbortController().signal);
+    expect(instances).toHaveLength(2);
+    const routingWorker = instances[0]!, timetableWorker = instances[1]!;
+    const timetableMessages = timetableWorker.messages as { id: number; kind: string }[];
+    expect(timetableMessages.map(message => message.kind)).toEqual(["frequency", "last-service"]);
+    controller.abort(new Error("frequency cancelled")); await expect(frequency).rejects.toThrow("frequency cancelled");
+    expect(timetableWorker.messages.at(-1)).toEqual({ id: timetableMessages[0]!.id, kind: "cancel" });
+    expect(routingWorker.messages).toHaveLength(1);
+    routingWorker.onerror!(); await expect(routes).rejects.toThrow("worker failed");
+    expect(timetableWorker.terminate).not.toHaveBeenCalled();
+    timetableWorker.onmessage!({ data: { id: timetableMessages[1]!.id, payload: { seconds: 90000 } } });
+    await expect(last).resolves.toEqual({ seconds: 90000 });
+  });
 });
