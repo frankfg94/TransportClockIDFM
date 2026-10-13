@@ -2719,7 +2719,7 @@ export const fr = {
       gtfsFacts: {
         transportHub: "Le pôle {station} regroupe {currentLines} et la future ligne {futureLine}. L’accès calculé avec les horaires théoriques est de {minutes} min via {via}.",
         majorStation: "L’itinéraire théorique retenu vers {destination} dure {duration} min après retrait de l’attente initiale (durée totale : {elapsed} min, attente initiale : {initialWait} min), dont {walking} min de marche, avec {transfers} correspondance(s) · lignes : {lines}.",
-        employmentHub: "Vers le pôle d’emploi {destination}, jusqu’à la gare {station} : {duration} min selon les horaires théoriques, attente initiale retirée ({initialWait} min). Durée totale : {elapsed} min, dont {walking} min de marche, avec {transfers} correspondance(s) · lignes : {lines}. Le trajet jusqu’au bureau dépend ensuite de son adresse.",
+        employmentHub: "Vers le hub d’emplois {destination}, jusqu’à la gare {station} : {duration} min selon les horaires théoriques, attente initiale retirée ({initialWait} min). Durée totale : {elapsed} min, dont {walking} min de marche, avec {transfers} correspondance(s) · lignes : {lines}. Le trajet jusqu’au bureau dépend ensuite de son adresse.",
         noctilien: "Les horaires théoriques à {hour} confirment les Noctiliens {line}, accessibles à pied en {minutes} min au plus ; aucune fréquence n’est inventée.",
         greenSpace: "L’itinéraire théorique à {hour} rejoint {name} en {minutes} min via {lines}, attente initiale retirée : {initialWait} min, durée totale : {elapsed} min. Le site est estimé à {walking} min à pied et couvre {area}. Les lignes de bus et Noctilien sont exclues de ce signal.",
         hospital: "L’hôpital « {name} » est accessible depuis l’adresse en {minutes} min via {via}, selon les horaires théoriques.",
@@ -2923,7 +2923,7 @@ export const fr = {
         chateletUnavailable: "Repère neutre lorsqu’aucun itinéraire vers Châtelet n’a pu être calculé.",
         majorStationUnder40: "Un trajet réel strictement inférieur à {threshold} min vers une grande gare est affiché comme point fort.",
         majorStationContext: "Un trajet réel d’au moins {threshold} min vers une grande gare reste affiché comme repère neutre.",
-        employmentHubContext: "Repère descriptif vers la gare desservant le pôle d’emploi, sans bonus de note. La marche et les attentes entre correspondances sont conservées ; seule l’attente initiale est retirée du temps affiché.",
+        employmentHubContext: "Repère descriptif vers la gare desservant le hub d’emplois, sans bonus de note. La marche et les attentes entre correspondances sont conservées ; seule l’attente initiale est retirée du temps affiché.",
         majorStationUnavailable: "Un repère neutre est affiché lorsqu’aucun itinéraire vérifiable vers la grande gare n’est disponible.",
         noctilienAtNight: "Les lignes Noctilien affichées ont un trajet réel daté de {hour} et un accès à pied inférieur à {threshold} min.",
         frequencyHigh: "Point fort si la fréquence théorique de pointe de la ligne concernée est inférieure ou égale à {threshold} min.",
@@ -3020,12 +3020,12 @@ export const fr = {
           tooltip: "Aucun itinéraire vérifiable vers {destination} n’a été renvoyé à l’heure du calcul. Aucune durée n’est inventée et aucun verdict de trajet n’est attribué.",
         },
         employmentHubContext: {
-          label: "Pôle d’emploi : {destination} en {duration} min",
-          tooltip: "Vers le pôle d’emploi {destination}, jusqu’à la gare {station} : {duration} min, attente initiale retirée ({initialWait} min). Durée totale : {elapsed} min, dont {walking} min de marche, avec {transfers} correspondance(s) · lignes : {lines}. Le trajet jusqu’au bureau dépend ensuite de son adresse.",
+          label: "Hub d’emplois : {destination} en {duration} min",
+          tooltip: "Vers le hub d’emplois {destination}, jusqu’à la gare {station} : {duration} min, attente initiale retirée ({initialWait} min). Durée totale : {elapsed} min, dont {walking} min de marche, avec {transfers} correspondance(s) · lignes : {lines}. Le trajet jusqu’au bureau dépend ensuite de son adresse.",
         },
         employmentHubUnavailable: {
-          label: "Pôle d’emploi : temps vers {destination} indisponible",
-          tooltip: "Aucun itinéraire vérifiable vers le pôle d’emploi {destination} n’a été renvoyé à l’heure du calcul. Aucune durée n’est inventée.",
+          label: "Hub d’emplois : temps vers {destination} indisponible",
+          tooltip: "Aucun itinéraire vérifiable vers le hub d’emplois {destination} n’a été renvoyé à l’heure du calcul. Aucune durée n’est inventée.",
         },
         noctilienAtNight: {
           label: "Noctilien {line} accessibles toute la nuit en {minutes} min de marche",

@@ -45,7 +45,7 @@ import {
   DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME,
 } from "./neighborhood/departureTimes";
 import type { NearbyStationEntry } from "./nearbyStations";
-import { JOURNEY_REFERENCE_BENCHMARKS, resolveReferenceBenchmarkDestinations } from "./neighborhood/criteria/transport/majorStationBenchmarks";
+import { JOURNEY_REFERENCE_BENCHMARKS, resolveReferenceBenchmarkDestinations } from "./neighborhood/verdict-transport-facts/benchmarkDestinations";
 import {
   aggregateNeighborhoodScore,
   buildNeighborhoodCategories,

@@ -4,7 +4,7 @@ import { buildDailyLifeCategory } from "./criteria/dailyLife";
 import { buildEducationCategory } from "./criteria/education";
 import { buildHealthCategory } from "./criteria/health";
 import { buildNatureLeisureCategory } from "./criteria/natureLeisure";
-import { buildTransportCategory } from "./criteria/transport/index";
+import { buildTransportCategory } from "./verdict-transport-facts";
 import { buildUnavailableCategory } from "./criteria/unavailable";
 import { category, compareFacts, externalFact, selectFacts, withFacts } from "./facts";
 import { clamp, getNeighborhoodScoreDisplay, weightedAverage } from "./primitives";
