@@ -9,7 +9,7 @@ import type { LineTopology } from "../../../server/services/topology/types";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
 import type { NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
 import type { NeighborhoodGtfsWorkerDiagnostics, NeighborhoodGtfsWorkerRequest, NeighborhoodGtfsWorkerResponse } from "./neighborhoodGtfsWorkerProtocol";
-import { createNeighborhoodGtfsTaskQueue } from "./neighborhoodGtfsTaskQueue";
+import { createNeighborhoodGtfsSchedulingQueues } from "./neighborhoodGtfsTaskQueue";
 import { createNeighborhoodGtfsWalkingMatrix } from "./neighborhoodGtfsWalkingMatrix";
 import { createNeighborhoodGtfsAssetReader } from "./neighborhoodGtfsAssets";
 import { createNeighborhoodTimetableCache, selectNeighborhoodCivilTimetable, selectNeighborhoodServiceTimetable } from "./neighborhoodTimetableCache";
@@ -122,17 +122,15 @@ async function lastService(baseUrl: string, request: Extract<NeighborhoodGtfsWor
 
 // Route batches overlap their street-network waits, sharing the same routing
 // trees and in-flight assets. Timetables still retain one normalized line.
-const transportQueue = createNeighborhoodGtfsTaskQueue(3);
-const placesQueue = createNeighborhoodGtfsTaskQueue();
-const timetableQueue = createNeighborhoodGtfsTaskQueue();
+const queues = createNeighborhoodGtfsSchedulingQueues();
 scope.addEventListener("message", (event: MessageEvent<NeighborhoodGtfsWorkerRequest>) => {
   const message = event.data;
-  if (message.kind === "cancel") { transportQueue.cancel(message.id); placesQueue.cancel(message.id); timetableQueue.cancel(message.id); return; }
+  if (message.kind === "cancel") { queues.cancel(message.id); return; }
   coldStart = message.coldStart === true;
   const { id, baseUrl } = message, enqueued = performance.now();
   // Parks/shops/hospitals keep one slot; their egress HTTP matrices cannot
   // occupy all the transport slots. All destinations are still computed.
-  const queue = message.kind !== "routes" ? timetableQueue : message.request.purpose === "places" ? placesQueue : transportQueue;
+  const queue = queues.select(message.kind, message.kind === "routes" ? message.request.purpose : undefined);
   queue.enqueue(id, async isCancelled => {
     const started = performance.now();
     const diagnostics: NeighborhoodGtfsWorkerDiagnostics = { kind: message.kind, queueMs: Math.round(started - enqueued), taskMs: 0, assetReads: 0, matrixCalls: 0, matrixCacheHits: 0, walkingPairsReused: 0, walkingPairsRequested: 0 };

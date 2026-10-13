@@ -33,3 +33,20 @@ export function createNeighborhoodGtfsTaskQueue(concurrency = 1) {
     idle() { return !active && !waiting.length ? Promise.resolve() : new Promise<void>(resolve => idleWaiters.push(resolve)); },
   };
 }
+
+/** Independent lanes keep a night-time tree from waiting for daytime egress.
+ * These limits bound work, not the returned routes or the two shared trees. */
+export function createNeighborhoodGtfsSchedulingQueues() {
+  const transport = createNeighborhoodGtfsTaskQueue(3);
+  const night = createNeighborhoodGtfsTaskQueue();
+  const places = createNeighborhoodGtfsTaskQueue();
+  const timetable = createNeighborhoodGtfsTaskQueue();
+  const all = [transport, night, places, timetable];
+  return {
+    select(kind: "routes" | "frequency" | "last-service", purpose?: "transport" | "night-transport" | "places") {
+      return kind !== "routes" ? timetable : purpose === "places" ? places : purpose === "night-transport" ? night : transport;
+    },
+    cancel(id: number) { for (const queue of all) queue.cancel(id); },
+    idle() { return Promise.all(all.map(queue => queue.idle())); },
+  };
+}

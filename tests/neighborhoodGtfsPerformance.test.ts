@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createNeighborhoodGtfsTaskQueue } from "../src/services/travelRoutes/neighborhoodGtfsTaskQueue";
+import { createNeighborhoodGtfsTaskQueue, createNeighborhoodGtfsSchedulingQueues } from "../src/services/travelRoutes/neighborhoodGtfsTaskQueue";
 import { createNeighborhoodGtfsAssetReader } from "../src/services/travelRoutes/neighborhoodGtfsAssets";
 import { createNeighborhoodGtfsWalkingMatrix } from "../src/services/travelRoutes/neighborhoodGtfsWalkingMatrix";
 import { createNeighborhoodTimetableCache, selectNeighborhoodCivilTimetable, selectNeighborhoodServiceTimetable } from "../src/services/travelRoutes/neighborhoodTimetableCache";
@@ -98,6 +98,17 @@ describe("overlapping walking matrices", () => {
 });
 
 describe("cancelled GTFS work", () => {
+  it("starts the night and places lanes even when every daytime slot is waiting", async () => {
+    const queues = createNeighborhoodGtfsSchedulingQueues(), calls: number[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    for (let id = 0; id < 4; id++) queues.select("routes", "transport").enqueue(id, async () => { calls.push(id); await gate; });
+    queues.select("routes", "night-transport").enqueue(4, async () => { calls.push(4); });
+    queues.select("routes", "places").enqueue(5, async () => { calls.push(5); });
+    await Promise.resolve();
+    expect(calls).toEqual([0,1,2,4,5]);
+    release(); await queues.idle(); expect(calls).toContain(3);
+  });
   it("overlaps waits within a fixed bound, retains every result and waits for active and queued work", async () => {
     const queue = createNeighborhoodGtfsTaskQueue(4), releases: (() => void)[] = [], replies: number[] = [];
     let active = 0, peak = 0;

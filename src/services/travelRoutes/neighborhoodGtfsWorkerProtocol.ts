@@ -15,7 +15,7 @@ export interface NeighborhoodGtfsWorkerDiagnostics {
   walkingPairsReused: number;
   walkingPairsRequested: number;
   walkingPairsExamined?: number;
-  purpose?: "transport" | "places";
+  purpose?: "transport" | "night-transport" | "places";
   destinations?: number;
   enqueuedEpochMs?: number;
   startedEpochMs?: number;

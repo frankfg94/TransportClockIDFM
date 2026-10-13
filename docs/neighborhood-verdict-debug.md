@@ -56,7 +56,8 @@ as well as the duration: a quick fallback or error is not a successful speedup.
 
 ## Scheduling and retained data
 
-Three transport batches and one other-category batch can overlap HTTP waits
+Three daytime transport batches, one night-time batch and one other-category
+batch can overlap HTTP waits
 inside the route worker. Timetables retain their separate single-slot worker.
 All destinations, candidate stations, alternatives, walking verification,
 calendars and search limits remain unchanged. The only removed probes are
@@ -72,6 +73,15 @@ matrices after joining a shared tree, without cancelling a live subscriber's
 tree or changing its search limits. Frequency topology and timetable reads run
 in parallel within the existing single timetable slot. Documentary GPE and park
 walks start together and retain their original candidate order.
+
+The `night-transport` scheduling purpose reserves its own slot without changing
+the routing engine, destinations, calendars, walking budgets or two-tree limit.
+It is assigned by the Noctilien probe, not inferred from an address or hour.
+The asset reader negotiates encoded directory paths on HTTP 404: Cloudflare
+and Nitro expose the same timetable files using different URL conventions.
+An unrelated HTTP failure remains an error. Server IRIS lookups reuse bounds
+for the immutable dataset, then apply the original exact polygon predicate to
+every possible match; no point-specific match result is cached.
 
 The global dataset status preloader runs only for the explicit `/api/datasets`
 diagnostic. Pages, assets and other APIs load their own required sources without

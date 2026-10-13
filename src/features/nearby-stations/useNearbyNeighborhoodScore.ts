@@ -740,7 +740,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     const active = journeyRequests.get(journeyKey);
     if (active) return active.promise;
     const request: NearbyJourneyRequest = {
-      purpose: priority <= 1 ? "transport" : "places",
+      purpose: priority === 1 ? "night-transport" : priority === 0 ? "transport" : "places",
       origin,
       destination,
       count: 4,

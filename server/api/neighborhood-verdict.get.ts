@@ -2,7 +2,7 @@ import { createError, defineEventHandler, getQuery } from "h3";
 import type { NearbyJourneyPoint } from "../../src/features/nearby-stations/nearbyHeavyTransports";
 import { routeWalkingWithPreferredProvider } from "../services/walking/openRouteService";
 import { routeWalkingWithOpenRouteService, matrixWalkingWithOpenRouteService } from "../services/walking/openRouteService";
-import { pointInIrisGeometry } from "../../src/features/transport-map/iris/irisGeometry";
+import { findPointIrisNeighborhoods } from "../services/neighborhoodVerdict/irisPointLookup";
 import { resolveAdministrativeLocation } from "../services/neighborhoodVerdict/geoApi";
 import { getCompiledNeighborhoodVerdictData } from "../services/neighborhoodVerdict/dataStore";
 import { buildNeighborhoodVerdict } from "../services/neighborhoodVerdict/score";
@@ -16,7 +16,7 @@ export default defineEventHandler(async (event) => {
   }
   try {
     const data = await getCompiledNeighborhoodVerdictData(event);
-    const matches = data.iris.neighborhoods.filter(n => pointInIrisGeometry({ lat, lon }, n.geometry));
+    const matches = findPointIrisNeighborhoods(data.iris, { lat, lon });
     const iris = new Set(matches.map(n => n.communeCode)).size === 1 ? matches[0] : undefined;
     const administrativeLocation = iris ? { commune: { code: iris.communeCode, name: iris.communeName }, departmentCode: iris.departmentCode } : await resolveAdministrativeLocation(lat, lon);
     type Walk = { durationSeconds: number; distanceMeters: number } | undefined;

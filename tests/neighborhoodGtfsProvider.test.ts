@@ -48,9 +48,10 @@ describe("verdict GTFS provider", () => {
     });
     vi.stubGlobal("fetch", fetcher);
     const provider = createGtfsNeighborhoodTravelRoutesProvider();
-    const results = await Promise.all([provider.findJourneys({ ...request(), purpose: "transport" }), provider.findJourneys({ ...request("b"), destination: { id: "b", lon: 2.45, lat: 48.95 }, purpose: "places" })]);
-    expect(fetcher).toHaveBeenCalledTimes(2); expect(results.map(routes => routes.length)).toEqual([1, 1]);
-    expect(fetcher.mock.calls.map(([, init]) => JSON.parse(init.body).purpose).sort()).toEqual(["places", "transport"]);
+    const results = await Promise.all([provider.findJourneys({ ...request(), purpose: "transport" }), provider.findJourneys({ ...request("b"), destination: { id: "b", lon: 2.45, lat: 48.95 }, purpose: "places" }),
+      provider.findJourneys({ ...request("c"), datetime: "20261013T030000", purpose: "night-transport" })]);
+    expect(fetcher).toHaveBeenCalledTimes(3); expect(results.map(routes => routes.length)).toEqual([1, 1, 1]);
+    expect(fetcher.mock.calls.map(([, init]) => JSON.parse(init.body).purpose).sort()).toEqual(["night-transport", "places", "transport"]);
   });
   it("never falls back when GTFS has no coverage or fails", async () => {
     const fetcher = vi.fn(async () => Response.json({ source: "gtfs", destinations: [{ id: "0", status: "missing", journeys: [] }] }));

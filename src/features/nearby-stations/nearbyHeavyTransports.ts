@@ -40,7 +40,7 @@ export type NearbyHeavyCardinalDirection = "N" | "E" | "S" | "W";
 
 export interface NearbyJourneyRequest {
   /** Scheduling only; never changes routing limits or returned journeys. */
-  purpose?: "transport" | "places";
+  purpose?: "transport" | "night-transport" | "places";
   origin: Pick<GeocoderPoint, "lon" | "lat">;
   destination: Pick<GeocoderPoint, "id" | "lon" | "lat">;
   /** Optional Navitia stop-area URI used instead of the map centroid. */
