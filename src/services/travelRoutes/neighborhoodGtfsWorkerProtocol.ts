@@ -24,4 +24,4 @@ export interface NeighborhoodGtfsWorkerDiagnostics {
   cacheHit?: boolean;
   scannedConnections?: number;
 }
-export type NeighborhoodGtfsWorkerResponse = ({ id: number; payload: unknown } | { id: number; error: string }) & { diagnostics?: NeighborhoodGtfsWorkerDiagnostics };
+export type NeighborhoodGtfsWorkerResponse = ({ id: number; payload: unknown } | { id: number; error: string } | { id: number; cancelled: true }) & { diagnostics?: NeighborhoodGtfsWorkerDiagnostics };

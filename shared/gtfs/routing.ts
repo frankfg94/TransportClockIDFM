@@ -8,6 +8,7 @@ import type { GtfsManifest } from "../../server/services/gtfs/types";
 import { CONNECTION_COLUMNS, type GtfsRoutingIndex, type GtfsRoutingShard } from "./routingTypes";
 import { scanConnections, routingSections, type RoutingConnection, type RoutingConnectionBatch, type RoutingNode, type RoutingFootpath, type ConnectionScanResult, type TransitArrival } from "./connectionScan";
 import { gtfsServiceEpoch, parisCivilEpoch, parisDateTime } from "./routingTime";
+import { prefetchGtfsConnectionBatch } from "./connectionPrefetch";
 import { NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS, NEARBY_HEAVY_TOTAL_MAX_SECONDS } from "../../src/features/nearby-stations/nearbyHeavyTransportRules";
 
 export const NEIGHBORHOOD_ROUTING_HORIZON_SECONDS = 4 * 3600;
@@ -17,6 +18,8 @@ const SHARD_PREFETCH_COUNT = 3;
 export interface NeighborhoodGtfsRuntime<Context> {
   getManifest(context: Context): Promise<GtfsManifest | undefined>;
   isEnabled(context: Context): boolean;
+  /** Cancels only this subscriber; shared origin trees keep loading. */
+  isCancelled?(context: Context): boolean;
   cacheEpoch(): number;
   readJson<T>(context: Context, path: string): Promise<T | undefined>;
   matrix(context: Context, origin: NearbyJourneyPoint, destinations: NearbyWalkingMatrixDestination[], options?: { reverse?: boolean }): Promise<NearbyWalkingRoute[]>;
@@ -24,6 +27,9 @@ export interface NeighborhoodGtfsRuntime<Context> {
 export function createNeighborhoodGtfsRouter<Context>(runtime: NeighborhoodGtfsRuntime<Context>) {
 let indexCache: { key: string; promise: Promise<GtfsRoutingIndex | undefined> } | undefined;
 const trees = new Map<string, { expires: number; promise: Promise<ConnectionScanResult> }>();
+function assertCurrent(context: Context): void {
+  if (runtime.isCancelled?.(context)) throw new DOMException("GTFS route subscriber cancelled", "AbortError");
+}
 
 function coordinate(stop: GtfsRoutingIndex["stops"][number]): NearbyJourneyPoint | undefined {
   return Number.isFinite(stop.lon) && Number.isFinite(stop.lat) ? { lon: stop.lon!, lat: stop.lat! } : undefined;
@@ -204,6 +210,7 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
     indexCache = { key: versionKey, promise: runtime.readJson<GtfsRoutingIndex>(event, `${manifest.routing.path}/index.json`) };
   }
   const index = await indexCache.promise;
+  assertCurrent(event);
   if (!index || index.schemaVersion !== 1 || !index.stops.length || !index.lines.length) { indexCache = undefined; return unavailable("missing"); }
   if (serviceDate < manifest.routing.startDate || serviceDate > shiftGtfsDate(manifest.routing.endDate, Math.floor(index.maxTimeSeconds / 86400))) return unavailable("out-of-coverage");
   const key = JSON.stringify([versionKey, request.origin.lon, request.origin.lat, request.datetime, [...(request.allowedModes ?? [])].sort()]);
@@ -212,6 +219,7 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
   const cacheHit = Boolean(entry), calculationStart = performance.now();
   if (!entry) {
     const promise = (async () => {
+      const stream = prefetchGtfsConnectionBatch(connections(event, manifest, index, serviceDate, start, request.allowedModes));
       const nearby = nearbyStops(index, request.origin, 64);
       const routes = await runtime.matrix(event, request.origin, nearby.map(s => ({ ...s.point, id: String(s.id) })));
       const access = new Map<number, RoutingNode>();
@@ -224,7 +232,7 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
       let graph = transferGraphs.get(index);
       if (!graph) { graph = buildFootpaths(index); transferGraphs.set(index, graph); index.transfers = []; }
       const { paths, margins, transferRule, context } = graph;
-      return scanConnections(connections(event, manifest, index, serviceDate, start, request.allowedModes), access, paths, margins, transferRule, context,
+      return scanConnections(stream, access, paths, margins, transferRule, context,
         { arrival: start + NEIGHBORHOOD_ROUTING_HORIZON_SECONDS, walkingSeconds: 1200,
           feederWalkingSeconds: NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS, feederTravelSeconds: NEARBY_HEAVY_TOTAL_MAX_SECONDS });
     })();
@@ -234,6 +242,9 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
     promise.catch(() => { if (trees.get(key)?.promise === promise) trees.delete(key); });
   }
   const tree = await entry.promise;
+  // An obsolete page probe can join a useful tree, then release its queue slot
+  // without issuing dozens of destination-specific pedestrian matrices.
+  assertCurrent(event);
   base.diagnostics = { scannedConnections: tree.scannedConnections, calculationMs: Math.round(performance.now() - calculationStart), cacheHit };
   base.destinations = await Promise.all(request.destinations.map(async destination => {
     const officialRef = destination.destinationRef?.replace(/^(stop_area|stop_point):/u, "");
@@ -244,6 +255,7 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
       .sort((a, b) => (platformArrival ? tree.platformLabels : tree.labels).get(a.id)!.arrival - (platformArrival ? tree.platformLabels : tree.labels).get(b.id)!.arrival).slice(0, 16);
     // Matrix is directed: egress walks from each stop towards the destination.
     const egress = platformArrival ? [] : await runtime.matrix(event, destination, candidates.map(c => ({ ...c.point, id: String(c.id) })), { reverse: true });
+    assertCurrent(event);
     const routes: RoutingNode[] = candidates.flatMap((candidate, i) => {
       if (platformArrival) {
         // For the same arrival/line, retain its shortest direct access path

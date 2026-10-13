@@ -2755,6 +2755,8 @@ export const fr = {
       criterionLoading: "Chargement…",
       loadingProgress: "{completed} indicateurs traités sur {total}",
       criterionError: "Chargement incomplet",
+      debugDataTitle: "debugVerdict · Données complètes (JSON)",
+      debugTimelineTitle: "debugVerdict · Chronologie des opérations (JSON)",
       diagnosticsButton: "Afficher l’état de chargement des critères",
       diagnosticsTitle: "État des critères et des données",
       diagnosticsDescription: "Chaque catégorie indique ses sources de données, leur état de chargement et leur caractère obligatoire ou facultatif.",

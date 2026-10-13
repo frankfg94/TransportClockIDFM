@@ -8,7 +8,7 @@ import type { GtfsRoutingIndex } from "../server/services/gtfs/routingTypes";
 import type { GtfsManifest } from "../server/services/gtfs/types";
 import { createStraightLineWalkingRoute } from "../src/features/nearby-stations/nearbyWalkingRoutes";
 import { analyzeNearbyJourneyTiming } from "../src/features/nearby-stations/nearbyJourneyTiming";
-import { createNeighborhoodGtfsRouter } from "../shared/gtfs/routing";
+import { createNeighborhoodGtfsRouter, type NeighborhoodGtfsRuntime } from "../shared/gtfs/routing";
 import { createNeighborhoodGtfsTaskQueue } from "../src/services/travelRoutes/neighborhoodGtfsTaskQueue";
 
 const mocks = vi.hoisted(() => ({ manifest: vi.fn(), read: vi.fn(), matrix: vi.fn(), epoch: 0 }));
@@ -49,6 +49,31 @@ const request = () => ({ origin: { lon: 2.3, lat: 48.8 }, datetime: "20261012T09
   destinations: [{ id: "c", lon: 2.4, lat: 48.8, destinationRef: "stop_area:IDFM:PC" }] });
 
 describe("offline neighborhood routing", () => {
+  it("prefetches while walking and drops obsolete egress without cancelling the shared tree or losing live journeys", async () => {
+    type Context = { cancelled: boolean };
+    let release!: () => void;
+    const access = new Promise<void>(resolve => { release = resolve; });
+    const matrix = vi.fn<NeighborhoodGtfsRuntime<Context>["matrix"]>(async (context, origin, destinations, options) => {
+      if (!options?.reverse) await access;
+      return mocks.matrix(context, origin, destinations, options);
+    });
+    const router = createNeighborhoodGtfsRouter<Context>({ getManifest: async () => manifest, isEnabled: () => true, cacheEpoch: () => 0,
+      isCancelled: context => context.cancelled,
+      readJson: async <T>(context: Context, path: string) => structuredClone((await mocks.read(context, path)).value) as T, matrix });
+    const obsoleteContext = { cancelled: false };
+    const obsolete = router(obsoleteContext, request());
+    // Attach the handler before releasing the shared async tree.
+    const rejected = expect(obsolete).rejects.toMatchObject({ name: "AbortError" });
+    const live = router({ cancelled: false }, { ...request(), destinations: [{ ...request().destinations[0]!, arrivalAtPlatform: true }] });
+    await vi.waitFor(() => expect(mocks.read.mock.calls.some(call => String(call[1]).endsWith("9-0.json"))).toBe(true));
+    expect(matrix).toHaveBeenCalledTimes(1);
+    obsoleteContext.cancelled = true; release();
+    await rejected;
+    const result = await live;
+    expect(result.destinations[0]!.journeys[0]!.durationSeconds).toBe(900);
+    expect(result.destinations[0]!.journeys[0]!.sections.at(-1)?.type).toBe("public_transport");
+    expect(matrix).toHaveBeenCalledTimes(1);
+  });
   it("returns exactly the same destinations and every journey/section with serial or overlapping batches", async () => {
     index.lines = [{ id: "ordinary", code: "1401", mode: "BUS" }, { id: "express", code: "1433", mode: "BUS" }];
     rows = [[0, 2, 33000, 33900, 0, 0, 0, 16], [0, 2, 33120, 33840, 1, 0, 1, 16]];

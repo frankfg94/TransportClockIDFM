@@ -2,6 +2,8 @@
 
 Append `debugVerdict=1` to a verdict URL to expose public page results and a
 second panel, `data-testid="verdict-debug-timeline"`, with a common timeline.
+The two JSON panels are collapsible and initially closed; their full DOM text
+remains available for snapshots without expanding a multi-megabyte AX tree.
 No credentials, server configuration or additional diagnostic HTTP requests
 are exposed. Normal pages do not record this history.
 
@@ -13,6 +15,10 @@ and `status` (`running`, `ready`, `error`, `cancelled`). System summaries show
 their earliest start, latest finish and counts of pending/completed tasks.
 Overlapping intervals demonstrate concurrency; an unfinished task has no end.
 Cancelled work is retained in the debug history, never counted as successful.
+When an active worker releases cancelled work, its entry is annotated with
+`workerReleased`, the actual worker end, queue/execution duration and steps.
+The subscriber cancellation time/status stay unchanged; queued work skipped
+before execution does not have worker execution steps.
 
 Systems cover the station catalogue, GPE catalogue, heavy-station resolution,
 individual heavy journey/walking probes, major stations, employment hubs,
@@ -27,6 +33,8 @@ follow-up frequencies selected after the heavy candidates arrive. It means
 settled, not necessarily successful: inspect errors and route coverage too.
 `pageSettledMs` includes the other categories. These times reset when a refresh
 starts; save the panel before the existing five-minute periodic refresh.
+`firstTransportSettledMs` and `firstPageSettledMs` retain the first completion
+across those later refreshes. They also mean settled, not error-free.
 
 ## Measuring a client cold start
 
@@ -40,8 +48,10 @@ and day/night stop pairs may share work within that same load for any address.
 
 Server/provider caches, public CDN assets, quotas and shared rate gates are not
 reset. Report this scope explicitly; it is not a cold restart of the complete
-external infrastructure. Do not run builds/typechecks or simultaneous address
-benchmarks while measuring. Preserve raw results, statuses and walking sources
+external infrastructure. Do not run builds/typechecks while measuring. Measure
+one address for isolated latency; when testing several addresses concurrently,
+record the number of tabs and the shared CPU/network load. Preserve raw results,
+statuses and walking sources
 as well as the duration: a quick fallback or error is not a successful speedup.
 
 ## Scheduling and retained data
@@ -53,3 +63,12 @@ calendars and search limits remain unchanged. The only removed probes are
 temporary centroid requests superseded by the catalogue that was still loading.
 No address-specific result cache, coordinates table or precomputed verdict is
 used by this scheduling policy.
+
+Data loading and score recomputation use coalesced microtasks rather than
+animation frames, so inactive tabs do not depend on a display frame. The first
+bounded connection batch starts while origin walking loads; subsequent batches
+retain the existing backpressure. Cancelled subscribers stop before destination
+matrices after joining a shared tree, without cancelling a live subscriber's
+tree or changing its search limits. Frequency topology and timetable reads run
+in parallel within the existing single timetable slot. Documentary GPE and park
+walks start together and retain their original candidate order.

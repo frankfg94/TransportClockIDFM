@@ -9,22 +9,37 @@ type WorkerGroup = "routes" | "timetable";
 const workers = new Map<WorkerGroup, Worker>();
 let nextId = 0;
 const pending = new Map<number, Pending>();
+const cancelledDebugTasks = new Map<number, Pick<Pending, "worker" | "finish">>();
+function publicWorkerDiagnostics(diagnostics: NeighborhoodGtfsWorkerResponse["diagnostics"]): Record<string, unknown> | undefined {
+  return diagnostics ? {
+    ...diagnostics,
+    workerEnqueuedMs: diagnostics.enqueuedEpochMs === undefined ? undefined : Math.round(diagnostics.enqueuedEpochMs - performance.timeOrigin),
+    workerStartedMs: diagnostics.startedEpochMs === undefined ? undefined : Math.round(diagnostics.startedEpochMs - performance.timeOrigin),
+    workerEndedMs: diagnostics.endedEpochMs === undefined ? undefined : Math.round(diagnostics.endedEpochMs - performance.timeOrigin),
+    steps: diagnostics.steps?.map(step => ({ task: step.task, startMs: Math.round(step.startEpochMs - performance.timeOrigin),
+      endMs: Math.round(step.endEpochMs - performance.timeOrigin), durationMs: step.durationMs, status: step.status, details: step.details })),
+  } : undefined;
+}
 function ensureWorker(group: WorkerGroup): Worker {
   const existing = workers.get(group);
   if (existing) return existing;
   const created = new Worker(new URL("./neighborhoodGtfs.worker.ts", import.meta.url), { type: "module" });
   created.onmessage = (event: MessageEvent<NeighborhoodGtfsWorkerResponse>) => {
-    const response = event.data, subscriber = pending.get(response.id);
-    if (!subscriber) return;
+    const response = event.data;
+    if ("cancelled" in response) {
+      cancelledDebugTasks.get(response.id)?.finish.annotate({ ...publicWorkerDiagnostics(response.diagnostics), workerReleased: true });
+      cancelledDebugTasks.delete(response.id);
+      return;
+    }
+    const subscriber = pending.get(response.id);
+    if (!subscriber) {
+      // Completion can cross a cancellation while the message is in transit.
+      cancelledDebugTasks.get(response.id)?.finish.annotate({ ...publicWorkerDiagnostics(response.diagnostics), workerReleased: true });
+      cancelledDebugTasks.delete(response.id);
+      return;
+    }
     const diagnostics = response.diagnostics;
-    subscriber.finish("error" in response ? "error" : "ready", diagnostics ? {
-      ...diagnostics,
-      workerEnqueuedMs: diagnostics.enqueuedEpochMs === undefined ? undefined : Math.round(diagnostics.enqueuedEpochMs - performance.timeOrigin),
-      workerStartedMs: diagnostics.startedEpochMs === undefined ? undefined : Math.round(diagnostics.startedEpochMs - performance.timeOrigin),
-      workerEndedMs: diagnostics.endedEpochMs === undefined ? undefined : Math.round(diagnostics.endedEpochMs - performance.timeOrigin),
-      steps: diagnostics.steps?.map(step => ({ task: step.task, startMs: Math.round(step.startEpochMs - performance.timeOrigin),
-        endMs: Math.round(step.endEpochMs - performance.timeOrigin), durationMs: step.durationMs, status: step.status, details: step.details })),
-    } : undefined);
+    subscriber.finish("error" in response ? "error" : "ready", publicWorkerDiagnostics(diagnostics));
     if (response.diagnostics && new URL(window.location.href).searchParams.has("debugGtfs")) {
       console.debug("[neighborhood-gtfs]", JSON.stringify(response.diagnostics));
     }
@@ -32,6 +47,7 @@ function ensureWorker(group: WorkerGroup): Worker {
     if ("error" in response) subscriber.reject(new Error(response.error)); else subscriber.resolve(response.payload);
   };
   created.onerror = () => {
+    for (const [id, task] of cancelledDebugTasks) if (task.worker === created) cancelledDebugTasks.delete(id);
     for (const [id, subscriber] of pending) {
       if (subscriber.worker !== created) continue;
       subscriber.finish("error");
@@ -55,6 +71,10 @@ export function requestBrowserNeighborhoodGtfs<T>(action: NeighborhoodGtfsWorker
     const cancel = () => {
       const subscriber = pending.get(id);
       finish(signal.aborted ? "cancelled" : "error");
+      if (subscriber && isVerdictDebugEnabled()) {
+        cancelledDebugTasks.set(id, subscriber);
+        while (cancelledDebugTasks.size > 128) cancelledDebugTasks.delete(cancelledDebugTasks.keys().next().value!);
+      }
       if (pending.delete(id)) subscriber?.worker.postMessage({ id, kind: "cancel" } satisfies NeighborhoodGtfsWorkerRequest);
       cleanup();
     };

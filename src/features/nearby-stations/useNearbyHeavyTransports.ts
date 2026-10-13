@@ -369,7 +369,8 @@ export function useNearbyHeavyTransports(
   const hiddenStationIds = ref<Set<string>>(new Set());
   const requestToken = ref(0);
   let refreshInterval: number | undefined;
-  let refreshFrame: number | undefined;
+  let refreshQueued = false;
+  let disposed = false;
   let requestController: AbortController | undefined;
   let candidateOriginKey = "";
 
@@ -378,6 +379,7 @@ export function useNearbyHeavyTransports(
   const visibleCandidates = computed(() => candidates.value.filter((candidate) => !hiddenStationIds.value.has(candidate.id)));
 
   async function refresh(): Promise<void> {
+    if (disposed) return;
     requestController?.abort();
     requestController = undefined;
     const token = requestToken.value + 1;
@@ -453,11 +455,13 @@ export function useNearbyHeavyTransports(
   }
 
   function refreshSoon(): void {
-    if (typeof window === "undefined") return;
-    if (refreshFrame !== undefined) window.cancelAnimationFrame(refreshFrame);
-    refreshFrame = window.requestAnimationFrame(() => {
-      refreshFrame = undefined;
-      void refresh();
+    if (typeof window === "undefined" || disposed || refreshQueued) return;
+    refreshQueued = true;
+    // Data loading also starts in inactive tabs, where frames can be suspended.
+    // Catalogue watchers in the same turn still share a single refresh.
+    queueMicrotask(() => {
+      refreshQueued = false;
+      if (!disposed) void refresh();
     });
   }
 
@@ -500,10 +504,10 @@ export function useNearbyHeavyTransports(
   });
 
   onBeforeUnmount(() => {
+    disposed = true;
     requestToken.value += 1;
     requestController?.abort();
     requestController = undefined;
-    if (refreshFrame !== undefined) window.cancelAnimationFrame(refreshFrame);
     if (refreshInterval !== undefined) window.clearInterval(refreshInterval);
     document.removeEventListener("visibilitychange", handleVisibilityChange);
   });

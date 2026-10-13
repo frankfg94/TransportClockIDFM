@@ -48,8 +48,10 @@ export async function buildNeighborhoodVerdict(
       .filter((source) => source.freshness.status === "stale")
       .map((source) => source.id),
   );
-  const transport = await transportSignal(data, point, routeWalking, stale);
-  const nature = await natureSignal(data, point, admin, stale, routeWalking);
+  const [transport, nature] = await Promise.all([
+    transportSignal(data, point, routeWalking, stale),
+    natureSignal(data, point, admin, stale, routeWalking),
+  ]);
   const categories: VerdictCategorySignal[] = [
     transport.signal,
     unavailable("daily-life"),
@@ -127,11 +129,14 @@ async function transportSignal(
   const futureProjects: PublicFutureGpeStation[] = [];
   const walkAccessibleFutureProjects: PublicFutureGpeStation[] = [];
   const facts: VerdictEvidence[] = [];
-  for (const { station } of candidates) {
-    const route = await routeWalking(
+  // All candidates enter the endpoint's same-turn ORS matrix, retaining the
+  // original distance order and every verified walking result.
+  const routes = await Promise.all(candidates.map(({ station }) => routeWalking(
       [point.lon, point.lat],
       [station.lon, station.lat],
-    );
+  )));
+  for (const [index, { station }] of candidates.entries()) {
+    const route = routes[index];
     if (!route) continue;
     const minutes = route.durationSeconds / 60;
     const project: PublicFutureGpeStation = {

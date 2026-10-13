@@ -2723,6 +2723,8 @@ export const en = {
       criterionLoading: "Loading…",
       loadingProgress: "{completed} of {total} indicators processed",
       criterionError: "Loading incomplete",
+      debugDataTitle: "debugVerdict · Complete data (JSON)",
+      debugTimelineTitle: "debugVerdict · Operation timeline (JSON)",
       diagnosticsButton: "Show criteria loading status",
       diagnosticsTitle: "Criteria and data status",
       diagnosticsDescription: "Each category lists its data sources, their loading state, and whether they are required or optional.",

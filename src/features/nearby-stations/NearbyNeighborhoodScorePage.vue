@@ -327,6 +327,7 @@ observeDebugLoading("station-catalogue", () => nearby.isScanning.value);
 observeDebugLoading("service-quality", () => serviceQuality.isLoading.value);
 observeDebugLoading("place-walking", () => nearbyWalking.isLoadingPlaces.value);
 const debugPerformance = ref<{ coldStart: boolean; transportSettledMs?: number; pageSettledMs?: number;
+  firstTransportSettledMs?: number; firstPageSettledMs?: number;
   transitions: { ms: number; transportPending: string[]; heavy: boolean; stations: boolean; serviceQuality: boolean; futureProjects: boolean }[] }>({ coldStart: isNeighborhoodGtfsColdStart(), transitions: [] });
 let debugSettleTimer: ReturnType<typeof setTimeout> | undefined;
 let debugMounted = false;
@@ -341,9 +342,13 @@ function updateDebugPerformance(): void {
     debugPerformance.value.transportSettledMs = undefined;
   } else {
     // Let dependent heavy-target/frequency watchers enqueue their follow-up.
-    debugSettleTimer = setTimeout(() => { debugPerformance.value.transportSettledMs = state.ms; }, 250);
+    debugSettleTimer = setTimeout(() => {
+      debugPerformance.value.transportSettledMs = state.ms;
+      debugPerformance.value.firstTransportSettledMs ??= state.ms;
+    }, 250);
   }
   debugPerformance.value.pageSettledMs = scoreLoading.value ? undefined : state.ms;
+  if (!scoreLoading.value) debugPerformance.value.firstPageSettledMs ??= state.ms;
 }
 watch(() => [score.transportPending.value.join(","), heavy.isLoading.value, nearby.isScanning.value,
   serviceQuality.isLoading.value, futureProjectsReady.value, scoreLoading.value], updateDebugPerformance, { flush: "post" });
@@ -482,8 +487,14 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 
 <template>
   <main class="nearby-neighborhood-score-page" :aria-busy="scoreLoading">
-    <pre v-if="debugVerdict" data-testid="verdict-debug" class="nearby-neighborhood-score-page__debug">{{ debugPayload }}</pre>
-    <pre v-if="debugVerdict" data-testid="verdict-debug-timeline" class="nearby-neighborhood-score-page__debug">{{ debugTimelinePayload }}</pre>
+    <details v-if="debugVerdict">
+      <summary>{{ t("nearbyStations.neighborhoodScore.debugDataTitle") }}</summary>
+      <pre data-testid="verdict-debug" class="nearby-neighborhood-score-page__debug">{{ debugPayload }}</pre>
+    </details>
+    <details v-if="debugVerdict">
+      <summary>{{ t("nearbyStations.neighborhoodScore.debugTimelineTitle") }}</summary>
+      <pre data-testid="verdict-debug-timeline" class="nearby-neighborhood-score-page__debug">{{ debugTimelinePayload }}</pre>
+    </details>
     <div
       v-if="scoreLoading"
       class="nearby-neighborhood-score-page__loading-bar"

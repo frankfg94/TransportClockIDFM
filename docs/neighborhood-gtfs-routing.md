@@ -1,6 +1,6 @@
 # Itinéraires théoriques du verdict de quartier
 
-La page `/nearby-neighborhood-score` injecte son propre `TravelRoutesProvider` GTFS. Elle n’utilise pas PRIM pour calculer ses trajets ou ses accès piétons. Les autres consommateurs gardent leur fournisseur et leur politique piétonne par défaut. L’annexe trafic est la seule fonction du verdict qui puisse utiliser PRIM, après un clic, via le cache partagé `/api/traffic`.
+La page `/nearby-neighborhood-score` injecte son propre `TravelRoutesProvider` GTFS. Les trajets de transport sont calculés depuis les horaires théoriques. Leurs accès piétons utilisent ORS puis, si nécessaire, une vérification piétonne Navitia bornée via la politique `gtfs-access`. Les autres marches du verdict conservent leur politique `ors-only`. L’annexe trafic peut utiliser PRIM après un clic, via le cache partagé `/api/traffic`.
 
 ## Artefacts et publication
 
@@ -14,7 +14,7 @@ La publication envoie tous les artefacts avant de remplacer `current.json`, auss
 
 Le moteur pur se trouve dans `shared/gtfs/`. Le serveur lui injecte son stockage GTFS et ses matrices ORS. Dans un navigateur compatible, le verdict utilise le même moteur dans `neighborhoodGtfs.worker.ts`, pour éviter les limites CPU/mémoire des fonctions Cloudflare Pages. Aucun horaire ni temps de trajet n'est remplacé par une estimation de transport.
 
-Le Web Worker lit les artefacts publics `/_gtfs-data/`, conserve les fichiers immuables dans Cache Storage et recharge le manifeste courant chaque minute. Les lots sont traités dans une file unique, avec au plus deux arbres en mémoire. Les accès et sorties restent calculés via `/api/walking/matrix` avec `ors-only` et le sens de marche explicite. Si ORS échoue, seule la marche est estimée et son statut reste indiqué. Les messages du Worker utilisent le contrat JSON pour accepter les coordonnées réactives Vue.
+Le Web Worker lit les artefacts publics `/_gtfs-data/`, conserve les fichiers immuables dans Cache Storage et recharge le manifeste courant chaque minute. Trois lots de transports et un lot d'autres catégories peuvent attendre leurs marches en parallèle, avec au plus deux arbres en mémoire. Les fréquences et derniers passages ont un Worker et une file séparés. Les accès et sorties utilisent `/api/walking/matrix` avec `gtfs-access` et le sens de marche explicite. Si aucune source piétonne ne répond, seule la marche est estimée et son statut reste indiqué. Les messages du Worker utilisent le contrat JSON pour accepter les coordonnées réactives Vue.
 
 Le premier calcul peut télécharger plusieurs tranches du dataset. Les suivantes réutilisent le cache local du navigateur. Une date hors couverture, un artefact absent ou l'absence réelle d'itinéraire dans la fenêtre conserve un état explicite ; les données théoriques ne peuvent pas justifier un temps inventé. Les environnements sans Web Worker gardent l'API serveur.
 

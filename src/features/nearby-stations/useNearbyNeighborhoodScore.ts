@@ -167,7 +167,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   let activeOriginKey = "";
   let requestToken = 0;
   let refreshQueued = false;
-  let recomputeFrame: number | undefined;
+  let recomputeQueued = false;
   let disposed = false;
   const localCategories = new Map<NeighborhoodCategoryId, NeighborhoodCategoryResult>();
   const dirtyCriteria = new Set<NeighborhoodCategoryId>(NEIGHBORHOOD_CATEGORY_IDS);
@@ -238,15 +238,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   }
 
   function scheduleRecompute(): void {
-    if (disposed || recomputeFrame !== undefined) return;
-    if (typeof window === "undefined") {
-      queueMicrotask(() => {
-        if (!disposed) recompute();
-      });
-      return;
-    }
-    recomputeFrame = window.requestAnimationFrame(() => {
-      recomputeFrame = undefined;
+    if (disposed || recomputeQueued) return;
+    recomputeQueued = true;
+    queueMicrotask(() => {
+      recomputeQueued = false;
       if (!disposed) recompute();
     });
   }
@@ -1204,7 +1199,6 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     disposed = true;
     requestToken += 1;
     refreshQueued = false;
-    if (recomputeFrame !== undefined && typeof window !== "undefined") window.cancelAnimationFrame(recomputeFrame);
     for (const request of placeRequests.values()) request.controller.abort();
     for (const request of shoppingCentreRequests.values()) request.controller.abort();
     for (const request of frequencyRequests.values()) request.controller.abort();

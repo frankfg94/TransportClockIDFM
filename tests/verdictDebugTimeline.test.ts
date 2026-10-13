@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest";
 import { createVerdictDebugTimeline } from "../src/services/verdictDebugTimeline";
 
 describe("common verdict timeline", () => {
+  it("records a later worker release while preserving the subscriber cancellation time and status", () => {
+    let clock = 10;
+    const timeline = createVerdictDebugTimeline(() => clock);
+    const finish = timeline.begin("gtfs-worker", "routes");
+    clock = 20; finish("cancelled");
+    clock = 100; finish.annotate({ workerReleased: true, workerEndedMs: 100 });
+    expect(timeline.tasks.value[0]).toMatchObject({ startMs: 10, endMs: 20, durationMs: 10, status: "cancelled",
+      details: { workerReleased: true, workerEndedMs: 100 } });
+  });
   it("retains overlapping task starts, finishes, durations and failures on the same clock", () => {
     let clock = 100;
     const timeline = createVerdictDebugTimeline(() => clock);
