@@ -3,6 +3,8 @@ import type { GlobalMapMode } from "../transport-map/contracts/manifest";
 
 export interface NeighborhoodJourneyDestination extends NearbyJourneyPoint { id: string; destinationRef?: string; arrivalAtPlatform?: boolean }
 export interface NeighborhoodJourneysRequest {
+  /** Browser worker scheduling only, ignored by the routing algorithm. */
+  purpose?: "transport" | "places";
   origin: NearbyJourneyPoint;
   datetime: string;
   destinations: NeighborhoodJourneyDestination[];

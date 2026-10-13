@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "#imports";
 import { ArrowLeft, Gauge } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
@@ -8,6 +8,8 @@ import { toServerApiUrl } from "../../services/serverApi";
 import { createGtfsNeighborhoodTravelRoutesProvider } from "../../services/travelRoutes/gtfsNeighborhoodTravelRoutesProvider";
 import { fetchNeighborhoodGtfsFrequency, fetchNeighborhoodGtfsLastService } from "../../services/travelRoutes/browserNeighborhoodTimetable";
 import { createNeighborhoodWalkingRoutesProvider } from "../../services/neighborhoodWalkingRoutesProvider";
+import { isNeighborhoodGtfsColdStart } from "../../services/travelRoutes/neighborhoodGtfsDebug";
+import { beginVerdictDebugTask, isVerdictDebugEnabled, verdictDebugTimeline } from "../../services/verdictDebugTimeline";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import { fetchGpeStations } from "../transport-map/gpeStationsApi";
 import AdressBook from "../address-book/AdressBook.vue";
@@ -65,6 +67,7 @@ function queryOrigin(): GeocoderPoint | undefined {
 }
 
 const initialOrigin = queryOrigin();
+if (isVerdictDebugEnabled()) verdictDebugTimeline.clear();
 const nearby = useNearbyStations(initialOrigin ? {
   // This page needs the complete station catalog for non-local benchmarks
   // (metro, rail, and future-project access) and keeps that choice explicit.
@@ -118,6 +121,7 @@ const heavy = useNearbyHeavyTransports({
   origin: nearby.selectedPlace,
   network: nearby.transportMapNetwork,
   stations: nearby.visibleStations,
+  stationsLoading: nearby.isScanning,
   activeModes: nearby.activeModes,
   radius: nearby.radius,
   futureProjects,
@@ -156,7 +160,7 @@ const score = useNearbyNeighborhoodScore({
   journeyDepartureTime: dayDepartureTime,
   nightDepartureTime,
   serviceQuality: serviceQuality.data,
-  initialSnapshot: readNearbyNeighborhoodScoreSnapshot(initialOrigin),
+  initialSnapshot: isNeighborhoodGtfsColdStart() ? undefined : readNearbyNeighborhoodScoreSnapshot(initialOrigin),
 });
 
 // Use the complete official GPE catalog for transit routing. The point verdict
@@ -190,14 +194,17 @@ watch(
 );
 
 onMounted(() => {
+  const finish = beginVerdictDebugTask("gpe", "catalogue");
   void fetchGpeStations()
     .then((stations) => {
       gpeCatalogProjects.value = stations
         .filter((station) => station.projectStatus !== "open")
         .map((station) => ({ ...station }));
+      finish("ready", { stations: stations.length, futureStations: gpeCatalogProjects.value.length });
     })
     .catch(() => {
       gpeCatalogProjects.value = [];
+      finish("error");
     })
     .finally(() => {
       gpeCatalogReady.value = true;
@@ -306,7 +313,46 @@ const scoreError = computed(() => {
 // No diagnostic serialization or extra requests on the normal verdict page.
 // This exposes only public page inputs/results, never server configuration.
 const debugVerdict = computed(() => queryString(route.query.debugVerdict) === "1");
-const debugPayload = computed(() => debugVerdict.value ? JSON.stringify({
+const debugTiming = computed(() => queryString(route.query.debugTiming) === "1");
+function observeDebugLoading(system: string, loading: () => boolean): void {
+  let finish: ReturnType<typeof beginVerdictDebugTask> | undefined;
+  watch(loading, active => {
+    if (!debugVerdict.value) return;
+    if (active && !finish) finish = beginVerdictDebugTask(system, "load");
+    if (!active && finish) { finish("ready"); finish = undefined; }
+  }, { immediate: true, flush: "sync" });
+  onUnmounted(() => finish?.("cancelled"));
+}
+observeDebugLoading("station-catalogue", () => nearby.isScanning.value);
+observeDebugLoading("service-quality", () => serviceQuality.isLoading.value);
+observeDebugLoading("place-walking", () => nearbyWalking.isLoadingPlaces.value);
+const debugPerformance = ref<{ coldStart: boolean; transportSettledMs?: number; pageSettledMs?: number;
+  transitions: { ms: number; transportPending: string[]; heavy: boolean; stations: boolean; serviceQuality: boolean; futureProjects: boolean }[] }>({ coldStart: isNeighborhoodGtfsColdStart(), transitions: [] });
+let debugSettleTimer: ReturnType<typeof setTimeout> | undefined;
+let debugMounted = false;
+function updateDebugPerformance(): void {
+  if (!debugMounted || !debugVerdict.value) return;
+  if (debugSettleTimer) clearTimeout(debugSettleTimer);
+  const state = { ms: Math.round(performance.now()), transportPending: [...score.transportPending.value],
+    heavy: heavy.isLoading.value, stations: nearby.isScanning.value, serviceQuality: serviceQuality.isLoading.value,
+    futureProjects: !futureProjectsReady.value };
+  debugPerformance.value.transitions.push(state);
+  if (state.transportPending.length || state.heavy || state.stations || state.serviceQuality || state.futureProjects) {
+    debugPerformance.value.transportSettledMs = undefined;
+  } else {
+    // Let dependent heavy-target/frequency watchers enqueue their follow-up.
+    debugSettleTimer = setTimeout(() => { debugPerformance.value.transportSettledMs = state.ms; }, 250);
+  }
+  debugPerformance.value.pageSettledMs = scoreLoading.value ? undefined : state.ms;
+}
+watch(() => [score.transportPending.value.join(","), heavy.isLoading.value, nearby.isScanning.value,
+  serviceQuality.isLoading.value, futureProjectsReady.value, scoreLoading.value], updateDebugPerformance, { flush: "post" });
+onMounted(() => { debugMounted = true; updateDebugPerformance(); });
+onUnmounted(() => { if (debugSettleTimer) clearTimeout(debugSettleTimer); });
+const debugPayload = computed(() => debugVerdict.value ? JSON.stringify(debugTiming.value && scoreLoading.value ? {
+  performance: debugPerformance.value, loading: true,
+} : {
+  performance: debugPerformance.value,
   revision: typeof __APP_SOURCE_REVISION__ === "undefined" ? "" : __APP_SOURCE_REVISION__,
   apiBase: toServerApiUrl("/"),
   origin: nearby.selectedPlace.value,
@@ -325,6 +371,19 @@ const debugPayload = computed(() => debugVerdict.value ? JSON.stringify({
   futureProjects: futureProjects.value,
   walkingRoutes: nearbyWalking.placeRoutes.value,
   serviceQuality: serviceQuality.data.value,
+}, null, 2) : "");
+const debugTimelinePayload = computed(() => debugVerdict.value ? JSON.stringify({
+  clock: "milliseconds since navigation (performance.now)",
+  performance: debugPerformance.value,
+  systems: [...new Set(verdictDebugTimeline.tasks.value.map(task => task.system))].map(system => {
+    const tasks = verdictDebugTimeline.tasks.value.filter(task => task.system === system);
+    const startMs = Math.min(...tasks.map(task => task.startMs));
+    const endMs = tasks.some(task => task.status === "running") ? undefined : Math.max(...tasks.map(task => task.endMs ?? task.startMs));
+    return { system, startMs, endMs, durationMs: endMs === undefined ? undefined : endMs - startMs,
+      running: tasks.filter(task => task.status === "running").length, completed: tasks.filter(task => task.status === "ready").length,
+      failed: tasks.filter(task => task.status === "error").length, cancelled: tasks.filter(task => task.status === "cancelled").length };
+  }),
+  tasks: verdictDebugTimeline.tasks.value,
 }, null, 2) : "");
 
 async function retryFailedSource(): Promise<void> {
@@ -424,6 +483,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 <template>
   <main class="nearby-neighborhood-score-page" :aria-busy="scoreLoading">
     <pre v-if="debugVerdict" data-testid="verdict-debug" class="nearby-neighborhood-score-page__debug">{{ debugPayload }}</pre>
+    <pre v-if="debugVerdict" data-testid="verdict-debug-timeline" class="nearby-neighborhood-score-page__debug">{{ debugTimelinePayload }}</pre>
     <div
       v-if="scoreLoading"
       class="nearby-neighborhood-score-page__loading-bar"

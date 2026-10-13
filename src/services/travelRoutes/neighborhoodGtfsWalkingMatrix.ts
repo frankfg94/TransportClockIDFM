@@ -5,7 +5,7 @@ import { createStraightLineWalkingRoute, type NearbyWalkingMatrixDestination, ty
  * and different destination lists can share their overlapping stop pairs. */
 export function createNeighborhoodGtfsWalkingMatrix(fetcher: typeof fetch = fetch, observe?: (cached: boolean, reused: number, requested: number) => void) {
   const cache = new Map<string, { expires: number; promise: Promise<NearbyWalkingRoute> }>();
-  return async (baseUrl: string, origin: NearbyJourneyPoint, destinations: NearbyWalkingMatrixDestination[], options: { reverse?: boolean } = {}) => {
+  return async (baseUrl: string, origin: NearbyJourneyPoint, destinations: NearbyWalkingMatrixDestination[], options: { reverse?: boolean; observe?: typeof observe } = {}) => {
     if (!destinations.length) return [];
     const missing: NearbyWalkingMatrixDestination[] = [];
     const promises = destinations.map(destination => {
@@ -29,7 +29,7 @@ export function createNeighborhoodGtfsWalkingMatrix(fetcher: typeof fetch = fetc
       while (cache.size > 1024) cache.delete(cache.keys().next().value!);
       return entry.promise;
     });
-    observe?.(missing.length === 0, destinations.length - missing.length, destinations.length);
+    (options.observe ?? observe)?.(missing.length === 0, destinations.length - missing.length, destinations.length);
     const batch = (async () => {
       if (!missing.length) return [];
       const estimated = missing.map(destination => createStraightLineWalkingRoute(

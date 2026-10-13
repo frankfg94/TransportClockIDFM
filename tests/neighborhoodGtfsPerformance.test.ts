@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createNeighborhoodGtfsTaskQueue } from "../src/services/travelRoutes/neighborhoodGtfsTaskQueue";
+import { createNeighborhoodGtfsAssetReader } from "../src/services/travelRoutes/neighborhoodGtfsAssets";
 import { createNeighborhoodGtfsWalkingMatrix } from "../src/services/travelRoutes/neighborhoodGtfsWalkingMatrix";
 import { createNeighborhoodTimetableCache, selectNeighborhoodCivilTimetable, selectNeighborhoodServiceTimetable } from "../src/services/travelRoutes/neighborhoodTimetableCache";
 import { createGtfsTimetableLoader } from "../shared/gtfs/timetableRuntime";
@@ -97,6 +98,23 @@ describe("overlapping walking matrices", () => {
 });
 
 describe("cancelled GTFS work", () => {
+  it("overlaps waits within a fixed bound, retains every result and waits for active and queued work", async () => {
+    const queue = createNeighborhoodGtfsTaskQueue(4), releases: (() => void)[] = [], replies: number[] = [];
+    let active = 0, peak = 0;
+    for (let id = 0; id < 9; id++) queue.enqueue(id, async cancelled => {
+      peak = Math.max(peak, ++active);
+      await new Promise<void>(resolve => { releases.push(resolve); });
+      active--; if (!cancelled()) replies.push(id);
+    });
+    await Promise.resolve(); expect(active).toBe(4);
+    queue.cancel(6); queue.cancel(1);
+    let finished = false; const idle = queue.idle().then(() => { finished = true; });
+    while (!finished) {
+      for (const release of releases.splice(0)) release();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    await idle; expect(peak).toBe(4); expect(replies.sort()).toEqual([0, 2, 3, 4, 5, 7, 8]);
+  });
   it("skips cancelled queued work and preserves serialization", async () => {
     const queue = createNeighborhoodGtfsTaskQueue(), calls: number[] = [];
     let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
@@ -113,5 +131,25 @@ describe("cancelled GTFS work", () => {
     queue.cancel(999); queue.enqueue(999, async () => { reply(); });
     queue.enqueue(2, async () => { throw new Error("failed"); }); queue.enqueue(3, async () => { reply(); });
     await queue.idle(); expect(reply).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("GTFS public asset reads", () => {
+  it("joins only in-flight reads, preserves complete content and retries failures", async () => {
+    const value = { services: [1, 2, 3], trips: [{ id: "all", calls: [0, 120, 240] }] };
+    const fetcher = vi.fn(async () => Response.json(value)), read = createNeighborhoodGtfsAssetReader(fetcher);
+    const results = await Promise.all([read("https://host.test", "routing/index.json", true), read("https://host.test", "routing/index.json", true)]);
+    expect(results).toEqual([value, value]); expect(fetcher).toHaveBeenCalledTimes(1);
+    await read("https://host.test", "routing/index.json", true); expect(fetcher).toHaveBeenCalledTimes(2);
+    fetcher.mockRejectedValueOnce(new Error("unavailable"));
+    await expect(read("https://host.test", "routing/index.json", true)).rejects.toThrow("unavailable");
+    expect(await read("https://host.test", "routing/index.json", true)).toEqual(value);
+  });
+  it("ignores CacheStorage and HTTP cache at cold start without touching existing entries", async () => {
+    const open = vi.fn(), storage = { open } as unknown as CacheStorage;
+    const fetcher = vi.fn(async () => Response.json({ full: true }));
+    const read = createNeighborhoodGtfsAssetReader(fetcher, storage);
+    await read("https://host.test", "current.json", true);
+    expect(open).not.toHaveBeenCalled(); expect(fetcher).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ cache: "no-store" }));
   });
 });

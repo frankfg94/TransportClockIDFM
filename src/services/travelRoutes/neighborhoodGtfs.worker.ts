@@ -11,51 +11,63 @@ import type { NeighborhoodJourneysResponse } from "../../features/nearby-station
 import type { NeighborhoodGtfsWorkerDiagnostics, NeighborhoodGtfsWorkerRequest, NeighborhoodGtfsWorkerResponse } from "./neighborhoodGtfsWorkerProtocol";
 import { createNeighborhoodGtfsTaskQueue } from "./neighborhoodGtfsTaskQueue";
 import { createNeighborhoodGtfsWalkingMatrix } from "./neighborhoodGtfsWalkingMatrix";
+import { createNeighborhoodGtfsAssetReader } from "./neighborhoodGtfsAssets";
 import { createNeighborhoodTimetableCache, selectNeighborhoodCivilTimetable, selectNeighborhoodServiceTimetable } from "./neighborhoodTimetableCache";
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
-const CACHE_NAME = "neighborhood-gtfs-routing-v1";
-let manifest: { baseUrl: string; expires: number; value?: GtfsManifest } | undefined;
+let manifest: { baseUrl: string; expires: number; promise: Promise<GtfsManifest | undefined> } | undefined;
 let activeDiagnostics: NeighborhoodGtfsWorkerDiagnostics | undefined;
-async function readAsset<T>(baseUrl: string, path: string): Promise<T | undefined> {
-  if (activeDiagnostics) activeDiagnostics.assetReads++;
-  const url = new URL("/_gtfs-data/" + path.split("/").map(encodeURIComponent).join("/"), baseUrl).href;
-  const cache = typeof caches === "undefined" ? undefined : await caches.open(CACHE_NAME).catch(() => undefined);
-  const cached = await cache?.match(url).catch(() => undefined);
-  // GTFS files are immutable and keyed by dataset hash + generator version.
-  if (path !== "current.json" && cached) return await cached.json() as T;
-  try {
-    const response = await fetch(url, { cache: path === "current.json" ? "no-cache" : "default", signal: AbortSignal.timeout(60_000) });
-    if (!response.ok) throw new Error(`GTFS asset unavailable (${response.status})`);
-    if (cache) void cache.put(url, response.clone()).catch(() => {});
-    return await response.json() as T;
-  } catch (error) {
-    if (cached) return await cached.json() as T;
-    throw error;
+let coldStart = false;
+const assets = createNeighborhoodGtfsAssetReader();
+async function readAsset<T>(baseUrl: string, path: string, diagnostics = activeDiagnostics): Promise<T | undefined> {
+  if (diagnostics) diagnostics.assetReads++;
+  return observeWorkerStep(diagnostics, "asset", { path }, () => assets<T>(baseUrl, path, coldStart));
+}
+async function observeWorkerStep<T>(diagnostics: NeighborhoodGtfsWorkerDiagnostics | undefined, task: string, details: Record<string, unknown>, work: () => Promise<T>): Promise<T> {
+  if (!diagnostics?.steps) return work();
+  const startEpochMs = performance.timeOrigin + performance.now();
+  let status: "ready" | "error" = "ready";
+  try { return await work(); } catch (error) { status = "error"; throw error; }
+  finally {
+    const endEpochMs = performance.timeOrigin + performance.now();
+    diagnostics.steps.push({ task, startEpochMs, endEpochMs, durationMs: Math.round(endEpochMs - startEpochMs), status, details });
   }
 }
 const runtime = {
-  getManifest: async (baseUrl: string) => {
+  getManifest: async (baseUrl: string, diagnostics = activeDiagnostics) => {
     if (!manifest || manifest.baseUrl !== baseUrl || manifest.expires <= Date.now()) {
-      manifest = { baseUrl, expires: Date.now() + 60_000, value: await readAsset<GtfsManifest>(baseUrl, "current.json") };
+      const promise = readAsset<GtfsManifest>(baseUrl, "current.json", diagnostics);
+      manifest = { baseUrl, expires: Date.now() + 60_000, promise };
+      void promise.catch(() => { if (manifest?.promise === promise) manifest = undefined; });
     }
-    return manifest.value;
+    return manifest.promise;
   },
   isEnabled: () => true, cacheEpoch: () => 0, readJson: readAsset,
 };
 const timetable = createGtfsTimetableLoader<string>(runtime);
 const loadTimetable = createNeighborhoodTimetableCache(timetable.loadForDate);
-const matrix = createNeighborhoodGtfsWalkingMatrix(fetch, (cached, reused, requested) => {
-  if (activeDiagnostics) {
-    activeDiagnostics.matrixCalls++;
-    if (cached) activeDiagnostics.matrixCacheHits++;
-    activeDiagnostics.walkingPairsReused += reused;
-    activeDiagnostics.walkingPairsRequested += requested;
-  }
-});
-const route = createNeighborhoodGtfsRouter<string>({
+const matrix = createNeighborhoodGtfsWalkingMatrix();
+type RoutingContext = { baseUrl: string; diagnostics: NeighborhoodGtfsWorkerDiagnostics };
+const route = createNeighborhoodGtfsRouter<RoutingContext>({
   ...runtime,
-  matrix,
+  getManifest: context => runtime.getManifest(context.baseUrl, context.diagnostics),
+  readJson: <T>(context: RoutingContext, path: string) => readAsset<T>(context.baseUrl, path, context.diagnostics),
+  matrix: (context, origin, destinations, options) => {
+    const details: Record<string, unknown> = { destinations: destinations.length, reverse: options?.reverse === true };
+    return observeWorkerStep(context.diagnostics, "walking-matrix", details, async () => {
+      const routes = await matrix(context.baseUrl, origin, destinations, { ...options, observe: (cached, reused, examined) => {
+        context.diagnostics.matrixCalls++;
+        if (cached) context.diagnostics.matrixCacheHits++;
+        context.diagnostics.walkingPairsReused += reused;
+        context.diagnostics.walkingPairsExamined = (context.diagnostics.walkingPairsExamined ?? 0) + examined;
+        context.diagnostics.walkingPairsRequested += examined - reused;
+        details.reusedPairs = reused; details.requestedPairs = examined - reused;
+      } });
+      details.verified = routes.filter(route => !route.fallback).length;
+      details.estimated = routes.filter(route => route.fallback).length;
+      return routes;
+    });
+  },
 });
 
 const topologies = new Map<string, Promise<LineTopology | undefined>>();
@@ -103,31 +115,42 @@ async function lastService(baseUrl: string, request: Extract<NeighborhoodGtfsWor
   }, request.stationId);
 }
 
-// Serialize routes and timetable computations to bound the retained datasets.
-const queue = createNeighborhoodGtfsTaskQueue();
+// Route batches overlap their street-network waits, sharing the same routing
+// trees and in-flight assets. Timetables still retain one normalized line.
+const transportQueue = createNeighborhoodGtfsTaskQueue(3);
+const placesQueue = createNeighborhoodGtfsTaskQueue();
+const timetableQueue = createNeighborhoodGtfsTaskQueue();
 scope.addEventListener("message", (event: MessageEvent<NeighborhoodGtfsWorkerRequest>) => {
   const message = event.data;
-  if (message.kind === "cancel") { queue.cancel(message.id); return; }
+  if (message.kind === "cancel") { transportQueue.cancel(message.id); placesQueue.cancel(message.id); timetableQueue.cancel(message.id); return; }
+  coldStart = message.coldStart === true;
   const { id, baseUrl } = message, enqueued = performance.now();
+  // Parks/shops/hospitals keep one slot; their egress HTTP matrices cannot
+  // occupy all the transport slots. All destinations are still computed.
+  const queue = message.kind !== "routes" ? timetableQueue : message.request.purpose === "places" ? placesQueue : transportQueue;
   queue.enqueue(id, async isCancelled => {
     const started = performance.now();
     const diagnostics: NeighborhoodGtfsWorkerDiagnostics = { kind: message.kind, queueMs: Math.round(started - enqueued), taskMs: 0, assetReads: 0, matrixCalls: 0, matrixCacheHits: 0, walkingPairsReused: 0, walkingPairsRequested: 0 };
-    activeDiagnostics = diagnostics;
+    if (message.debug) { diagnostics.enqueuedEpochMs = performance.timeOrigin + enqueued; diagnostics.startedEpochMs = performance.timeOrigin + started; diagnostics.steps = []; }
+    if (message.kind === "routes") { diagnostics.purpose = message.request.purpose; diagnostics.destinations = message.request.destinations.length; }
+    if (message.kind !== "routes") activeDiagnostics = diagnostics;
     try {
       const payload = message.kind === "frequency" ? await frequency(baseUrl, message.lineId)
         : message.kind === "last-service" ? await lastService(baseUrl, message)
-        : await route(baseUrl, message.request);
+        : await route({ baseUrl, diagnostics }, message.request);
       if (message.kind === "routes") {
         const routing = (payload as NeighborhoodJourneysResponse).diagnostics;
         diagnostics.cacheHit = routing?.cacheHit;
         diagnostics.scannedConnections = routing?.scannedConnections;
       }
       diagnostics.taskMs = Math.round(performance.now() - started);
+      if (message.debug) diagnostics.endedEpochMs = performance.timeOrigin + performance.now();
       if (!isCancelled()) scope.postMessage({ id, payload, diagnostics } satisfies NeighborhoodGtfsWorkerResponse);
     }
     catch (error) {
       diagnostics.taskMs = Math.round(performance.now() - started);
+      if (message.debug) diagnostics.endedEpochMs = performance.timeOrigin + performance.now();
       if (!isCancelled()) scope.postMessage({ id, error: error instanceof Error ? error.message : "GTFS routing failed", diagnostics } satisfies NeighborhoodGtfsWorkerResponse);
-    } finally { activeDiagnostics = undefined; }
+    } finally { if (activeDiagnostics === diagnostics) activeDiagnostics = undefined; }
   });
 });

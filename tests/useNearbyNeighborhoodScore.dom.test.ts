@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GtfsLineFrequencyResponse } from "../src/types/lineFrequency";
 import type { GlobalMapLine, GlobalMapStation } from "../src/features/transport-map/contracts/manifest";
 import type { TransportMapNetwork } from "../src/features/transport-map/contracts/network";
-import type { NearbyHeavyTransportCandidate, NearbyJourney, TravelRoutesProvider } from "../src/features/nearby-stations/nearbyHeavyTransports";
+import type { NearbyHeavyTransportCandidate, NearbyJourney, NearbyJourneyRequest, TravelRoutesProvider } from "../src/features/nearby-stations/nearbyHeavyTransports";
 import type { NearbyPlace, PlacesProvider } from "../src/features/nearby-stations/nearbyPlaces";
 import type { NearbyStationEntry } from "../src/features/nearby-stations/nearbyStations";
 import { useNearbyNeighborhoodScore } from "../src/features/nearby-stations/useNearbyNeighborhoodScore";
@@ -223,6 +223,25 @@ describe("useNearbyNeighborhoodScore", () => {
       destination: expect.objectContaining({ lon: network.stations[0]!.lon, lat: network.stations[0]!.lat }),
     }), expect.any(AbortSignal));
     expect(score.result.value.neutralFacts.some(fact => fact.family === "major-station:saint-lazare")).toBe(false);
+    wrapper.unmount();
+  });
+  it("waits for the GTFS station catalogue and then retains the entire benchmark set", async () => {
+    const network = ref<TransportMapNetwork>(), stationsLoading = ref(true);
+    const findJourneys = vi.fn(async (_input: NearbyJourneyRequest) => [] as NearbyJourney[]);
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const wrapper = mount(defineComponent({ setup() {
+      score = useNearbyNeighborhoodScore({ journeySource: "gtfs", origin: ref({ lon: 2.3, lat: 48.82 }),
+        stations: ref([]), network, stationsLoading,
+        placesProvider: { searchDestinations: vi.fn(async () => []), searchNearby: vi.fn(async () => []) },
+        travelRoutesProvider: { findJourneys } });
+      return () => null;
+    } }));
+    await flushPromises(); expect(findJourneys).not.toHaveBeenCalled();
+    network.value = createNetwork(createLine()); stationsLoading.value = false;
+    await vi.waitFor(() => expect(score.diagnostics.value.benchmarks).toHaveLength(9));
+    await vi.waitFor(() => expect(score.diagnostics.value.benchmarks.every(target => target.status !== "loading")).toBe(true));
+    expect(score.diagnostics.value.benchmarks.map(target => target.id)).toContain("employment-val-de-fontenay");
+    expect(findJourneys.mock.calls.every(([input]) => input.purpose === "transport")).toBe(true);
     wrapper.unmount();
   });
   it("reports a source timeout instead of leaving its criterion loading", async () => {

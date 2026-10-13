@@ -4,7 +4,7 @@ export type NeighborhoodGtfsWorkerAction =
   | { kind: "routes"; request: NeighborhoodJourneysRequest }
   | { kind: "frequency"; lineId: string }
   | { kind: "last-service"; lineId: string; stationId?: string; serviceDate?: string };
-export type NeighborhoodGtfsWorkerRequest = ({ id: number; baseUrl: string } & NeighborhoodGtfsWorkerAction) | { id: number; kind: "cancel" };
+export type NeighborhoodGtfsWorkerRequest = ({ id: number; baseUrl: string; coldStart?: boolean; debug?: boolean } & NeighborhoodGtfsWorkerAction) | { id: number; kind: "cancel" };
 export interface NeighborhoodGtfsWorkerDiagnostics {
   kind: NeighborhoodGtfsWorkerAction["kind"];
   queueMs: number;
@@ -14,6 +14,13 @@ export interface NeighborhoodGtfsWorkerDiagnostics {
   matrixCacheHits: number;
   walkingPairsReused: number;
   walkingPairsRequested: number;
+  walkingPairsExamined?: number;
+  purpose?: "transport" | "places";
+  destinations?: number;
+  enqueuedEpochMs?: number;
+  startedEpochMs?: number;
+  endedEpochMs?: number;
+  steps?: { task: string; startEpochMs: number; endEpochMs: number; durationMs: number; status: "ready" | "error"; details?: Record<string, unknown> }[];
   cacheHit?: boolean;
   scannedConnections?: number;
 }

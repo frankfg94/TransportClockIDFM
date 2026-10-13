@@ -34,7 +34,7 @@ export function createGtfsNeighborhoodTravelRoutesProvider(): TravelRoutesProvid
       subscriber.signal?.addEventListener("abort", subscriber.abort, { once: true });
     }
     void (async () => {
-      const request = { origin: first.origin, datetime: first.datetime ?? getNearbyParisJourneyDateTime(9), allowedModes: first.allowedModes,
+      const request = { origin: first.origin, purpose: first.purpose, datetime: first.datetime ?? getNearbyParisJourneyDateTime(9), allowedModes: first.allowedModes,
         destinations: unique.map((s, i) => ({ ...s.request.destination, id: String(i), destinationRef: s.request.destinationRef, arrivalAtPlatform: s.request.arrivalAtPlatform })) };
       const payload = canUseBrowserNeighborhoodGtfs()
         ? await routeBrowserNeighborhoodGtfs(request, controller.signal)
@@ -69,7 +69,7 @@ export function createGtfsNeighborhoodTravelRoutesProvider(): TravelRoutesProvid
     const key = requestKey(request), cached = cache.get(key);
     if (cached && cached.expires > Date.now()) return Promise.resolve(cached.journeys);
     if (!signal && pending.has(key)) return pending.get(key)!;
-    const groupKey = JSON.stringify([request.origin.lon, request.origin.lat, request.datetime, [...(request.allowedModes ?? [])].sort()]);
+    const groupKey = JSON.stringify([request.origin.lon, request.origin.lat, request.datetime, [...(request.allowedModes ?? [])].sort(), request.purpose]);
     const promise = new Promise<NearbyJourney[]>((resolve, reject) => {
       const subscriber: Subscriber = { request, resolve, reject, signal, done: false, abort: () => {} };
       subscriber.abort = () => { subscriber.done = true; reject(signal?.reason); };

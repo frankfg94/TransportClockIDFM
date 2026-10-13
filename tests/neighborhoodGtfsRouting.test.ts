@@ -8,6 +8,8 @@ import type { GtfsRoutingIndex } from "../server/services/gtfs/routingTypes";
 import type { GtfsManifest } from "../server/services/gtfs/types";
 import { createStraightLineWalkingRoute } from "../src/features/nearby-stations/nearbyWalkingRoutes";
 import { analyzeNearbyJourneyTiming } from "../src/features/nearby-stations/nearbyJourneyTiming";
+import { createNeighborhoodGtfsRouter } from "../shared/gtfs/routing";
+import { createNeighborhoodGtfsTaskQueue } from "../src/services/travelRoutes/neighborhoodGtfsTaskQueue";
 
 const mocks = vi.hoisted(() => ({ manifest: vi.fn(), read: vi.fn(), matrix: vi.fn(), epoch: 0 }));
 vi.mock("../server/services/gtfs/runtime", () => ({
@@ -47,6 +49,28 @@ const request = () => ({ origin: { lon: 2.3, lat: 48.8 }, datetime: "20261012T09
   destinations: [{ id: "c", lon: 2.4, lat: 48.8, destinationRef: "stop_area:IDFM:PC" }] });
 
 describe("offline neighborhood routing", () => {
+  it("returns exactly the same destinations and every journey/section with serial or overlapping batches", async () => {
+    index.lines = [{ id: "ordinary", code: "1401", mode: "BUS" }, { id: "express", code: "1433", mode: "BUS" }];
+    rows = [[0, 2, 33000, 33900, 0, 0, 0, 16], [0, 2, 33120, 33840, 1, 0, 1, 16]];
+    const requests = Array.from({ length: 7 }, (_, i) => ({ ...request(), datetime: i % 2 ? "20261013T090000" : "20261012T090000",
+      destinations: [{ ...request().destinations[0]!, id: `station-${i}`, arrivalAtPlatform: i % 3 !== 0 }, { id: `coordinate-${i}`, lon: 2.35, lat: 48.8 }] }));
+    async function run(concurrency: number) {
+      const router = createNeighborhoodGtfsRouter<undefined>({ getManifest: async () => manifest, isEnabled: () => true, cacheEpoch: () => 0,
+        readJson: async <T>(event: undefined, path: string) => structuredClone((await mocks.read(event, path)).value) as T,
+        matrix: async (event, origin, destinations, options) => {
+          await new Promise(resolve => setTimeout(resolve, 1));
+          return mocks.matrix(event, origin, destinations, options);
+        } });
+      const queue = createNeighborhoodGtfsTaskQueue(concurrency), results: unknown[] = [];
+      requests.forEach((input, id) => queue.enqueue(id, async () => {
+        const { diagnostics: _, ...output } = await router(undefined, input); results[id] = output;
+      }));
+      await queue.idle(); return results;
+    }
+    const sequential = await run(1), concurrent = await run(4);
+    expect(concurrent).toEqual(sequential);
+    expect((concurrent[1] as { destinations: { journeys: unknown[] }[] }).destinations[0]!.journeys).toHaveLength(2);
+  });
   it("keeps the closer boarding stop when bus paths share an arrival and signature", async () => {
     index.stops[1]!.lon = 2.301;
     index.lines[0]!.mode = "BUS";

@@ -2,6 +2,7 @@ import { computed, onBeforeUnmount, readonly, ref, shallowReadonly, shallowRef, 
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { fetchGtfsLineFrequency } from "../../services/lineFrequency";
 import { runNetworkTask } from "../../services/networkScheduler";
+import { beginVerdictDebugTask } from "../../services/verdictDebugTimeline";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
 import { useLineFrequencyTimetable, type UseLineFrequencyTimetableOptions } from "../line-map/useLineFrequencyTimetable";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
@@ -368,7 +369,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       );
     }
 
-    const benchmarkDestinations = resolveJourneyBenchmarks(options.network.value);
+    // The catalogue arrival schedules this same full set. Starting centroid
+    // fallbacks now would leave obsolete street matrices running afterwards.
+    const waitingForCatalog = options.journeySource === "gtfs" && options.stationsLoading?.value === true;
+    const benchmarkDestinations = waitingForCatalog ? [] : resolveJourneyBenchmarks(options.network.value);
     const nextBenchmarks: NeighborhoodJourneyBenchmark[] = [];
     if (!benchmarkDestinations.some((benchmark) => benchmark.id === "chatelet")) {
       chateletJourneyStatus.value = options.network.value || options.stationsLoading?.value !== true
@@ -427,7 +431,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     }
     journeyBenchmarks.value = nextBenchmarks;
 
-    const noctilienTargets = resolveNoctilienTargets(options.network.value, origin);
+    const noctilienTargets = waitingForCatalog ? [] : resolveNoctilienTargets(options.network.value, origin);
     const noctilienResults: NearbyJourney[] = [];
     for (const target of noctilienTargets) {
       const journeyKey = journeyCacheKey(originKey, target.id, target, nightJourneyDateTime, "night");
@@ -741,6 +745,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     const active = journeyRequests.get(journeyKey);
     if (active) return active.promise;
     const request: NearbyJourneyRequest = {
+      purpose: priority <= 1 ? "transport" : "places",
       origin,
       destination,
       count: 4,
@@ -931,19 +936,25 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     source?: NeighborhoodScoreErrorSource,
     dirtyCategories: readonly NeighborhoodCategoryId[] = NEIGHBORHOOD_CATEGORY_IDS,
   ): void {
+    const system = taskId.startsWith("journey:employment-") ? "employment-hubs" : taskId.startsWith("journey:") ? "large-stations"
+      : taskId.startsWith("noctilien:") ? "night-transit" : taskId.startsWith("frequency:") ? "frequencies"
+      : taskId.startsWith("last-service:") ? "last-services" : dirtyCategories.includes("transport") ? "transport-sources" : "other-sources";
+    const finishDebug = beginVerdictDebugTask(system, taskId, { categories: dirtyCategories, source });
     pendingTasks.add(taskId);
     activeCriteriaTasks.set(taskId, dirtyCategories);
     updateLoadingState();
     const completion = promise
       .then((value) => {
-        if (token !== requestToken) return;
+        if (token !== requestToken) { finishDebug("cancelled"); return; }
         apply(value);
         taskErrors.delete(taskId);
         markCriteriaDirty(dirtyCategories);
         scheduleRecompute();
+        finishDebug("ready");
       })
       .catch((cause: unknown) => {
-        if (token !== requestToken) return;
+        if (token !== requestToken) { finishDebug("cancelled"); return; }
+        finishDebug(cause instanceof Error && cause.name === "AbortError" ? "cancelled" : "error");
         if (taskId === "backend-verdict") backendVerdictReady.value = true;
         taskErrors.set(taskId, {
           categories: dirtyCategories,
@@ -1266,6 +1277,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
 
   return {
     result: shallowReadonly(result),
+    transportPending: computed(() => {
+      criterionRevision.value;
+      return [...activeCriteriaTasks].filter(([, categories]) => categories.includes("transport")).map(([id]) => id);
+    }),
     /** Evaluated only by the opt-in verdict diagnostic panel. */
     diagnostics: computed(() => {
       criterionRevision.value;
@@ -1277,6 +1292,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         frequencies: [...frequencyProfiles.value.values()],
         lastServices: [...lastServiceByLine.value.entries()],
         benchmarks: journeyBenchmarks.value,
+        noctilienJourneys: noctilienJourneys.value,
         backendVerdict: backendVerdict.value,
       };
     }),

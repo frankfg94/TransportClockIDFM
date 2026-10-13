@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, readonly, ref, watch } from "vue";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { runNetworkTask } from "../../services/networkScheduler";
+import { beginVerdictDebugTask } from "../../services/verdictDebugTimeline";
 import { isNavitiaRateLimit } from "../../services/navitiaRateLimit";
 import { getCoordinatesDistanceMeters } from "../../services/distance";
 import { lonLatToWorld } from "../transport-map/geo/coordinateKernel";
@@ -48,6 +49,8 @@ export interface NearbyHeavyTransportSource {
   origin: { value?: { lon: number; lat: number } };
   network?: { value?: TransportMapNetwork };
   stations: { value: NearbyStationEntry[] };
+  /** Wait for the full catalogue scan, including its nearby station entries. */
+  stationsLoading?: { value: boolean };
   activeModes: { value: GlobalMapMode[] };
   radius: { value: number };
   /** Future heavy stations supplied by the verdict data source. */
@@ -194,6 +197,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
         );
         const scheduledDateTime = input.journeyDateTime?.trim();
         const journeys = await input.journeyProvider.findJourneys({
+          purpose: "transport",
           origin: input.origin,
           destination: station,
           ...(input.batchQueries ? {
@@ -222,6 +226,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
         const daytimeJourneys = scheduledDateTime
           ? []
           : await input.journeyProvider.findJourneys({
+            purpose: "transport",
             origin: input.origin,
             destination: station,
             datetime: representativeJourneyDateTime(),
@@ -385,7 +390,7 @@ export function useNearbyHeavyTransports(
       candidates.value = [];
       candidateOriginKey = originKey;
     }
-    if (!origin || !network || (source.futureProjectsReady && !source.futureProjectsReady.value)) {
+    if (!origin || !network || source.stationsLoading?.value || (source.futureProjectsReady && !source.futureProjectsReady.value)) {
       candidates.value = [];
       isLoading.value = false;
       return;
@@ -395,10 +400,19 @@ export function useNearbyHeavyTransports(
     requestController = controller;
     isLoading.value = true;
     error.value = undefined;
-    const probe = async <T>(run: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> => {
+    const finishDebug = beginVerdictDebugTask("heavy-transports", "resolve", { localStations: source.stations.value.length, futureStations: source.futureProjects?.value.length ?? 0 });
+    const probe = async <T>(run: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal, task = "probe", details?: Record<string, unknown>): Promise<T> => {
+      const finishProbe = beginVerdictDebugTask("heavy-subtasks", task, details);
       try {
-        return await (options.batchQueries ? run(signal ?? controller.signal) : runHeavyProbe(run, signal));
+        const result = await (options.batchQueries ? run(signal ?? controller.signal) : runHeavyProbe(run, signal));
+        finishProbe("ready", Array.isArray(result) ? { journeys: result.length }
+          : result && typeof result === "object" && "provider" in result ? {
+            provider: result.provider, fallback: "fallback" in result ? result.fallback : undefined,
+            durationSeconds: "durationSeconds" in result ? result.durationSeconds : undefined,
+          } : undefined);
+        return result;
       } catch (cause) {
+        finishProbe(controller.signal.aborted || isAbortError(cause) ? "cancelled" : "error");
         if (token === requestToken.value && !controller.signal.aborted) {
           error.value = cause instanceof Error ? cause.message : "heavy-transport-unavailable";
         }
@@ -413,11 +427,11 @@ export function useNearbyHeavyTransports(
         activeModes: source.activeModes.value,
         radiusMeters: source.radius.value,
         journeyProvider: {
-          findJourneys: (request, signal) => probe((probeSignal) => journeyProvider.findJourneys(request, probeSignal), signal),
+          findJourneys: (request, signal) => probe((probeSignal) => journeyProvider.findJourneys(request, probeSignal), signal, "journey", { destination: request.destination.id, destinationRef: request.destinationRef, datetime: request.datetime }),
         },
         journeyDateTime,
         walkingRouteProvider: options.walkingRouteProvider
-          ? (origin, destination, signal) => probe((probeSignal) => options.walkingRouteProvider!(origin, destination, probeSignal), signal)
+          ? (origin, destination, signal) => probe((probeSignal) => options.walkingRouteProvider!(origin, destination, probeSignal), signal, "walking-access", { destination })
           : undefined,
         includeLocalCandidates: options.includeLocalCandidates,
         batchQueries: options.batchQueries,
@@ -425,7 +439,9 @@ export function useNearbyHeavyTransports(
         signal: controller.signal,
       });
       if (token === requestToken.value && !controller.signal.aborted) candidates.value = next;
+      finishDebug(controller.signal.aborted ? "cancelled" : "ready", { candidates: next.length, alternatives: next.reduce((count, candidate) => count + (candidate.accessAlternatives?.length ?? 0), 0) });
     } catch (cause) {
+      finishDebug(controller.signal.aborted || isAbortError(cause) ? "cancelled" : "error");
       if (token === requestToken.value && !controller.signal.aborted && !isAbortError(cause)) {
         if (!isNavitiaRateLimit(cause)) candidates.value = [];
         error.value = cause instanceof Error ? cause.message : "heavy-transport-unavailable";
@@ -467,6 +483,7 @@ export function useNearbyHeavyTransports(
       source.network?.value,
       source.activeModes.value.join(","),
       source.stations.value.map((entry) => entry.id).join(","),
+      source.stationsLoading?.value ?? false,
       source.futureProjects?.value.map((project) => `${project.id}:${project.line}:${project.lon}:${project.lat}`).join(",") ?? "",
       source.futureProjectsReady?.value ?? true,
       resolveNearbyJourneyDateTime(options.journeyDateTime),

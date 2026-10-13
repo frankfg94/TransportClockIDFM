@@ -9,6 +9,7 @@ import {
 } from "../features/nearby-stations/nearbyWalkingRoutes";
 import { toServerApiUrl } from "./serverApi";
 import { runNetworkTask } from "./networkScheduler";
+import { isNeighborhoodGtfsColdStart } from "./travelRoutes/neighborhoodGtfsDebug";
 
 // v3 invalidates routes generated before malformed provider geometry tails
 // were removed before connecting the route to the requested POI.
@@ -111,6 +112,7 @@ function isPersistableWalkingRoute(route: NearbyWalkingRoute): boolean {
 }
 
 function persistWalkingRoute(request: NearbyWalkingRouteRequest, route: NearbyWalkingRoute): void {
+  if (isNeighborhoodGtfsColdStart()) return;
   if (!isPersistableWalkingRoute(route)) return;
   const storage = ensurePersistentRouteCacheLoaded();
   if (!storage) return;
@@ -131,6 +133,7 @@ function persistWalkingRoute(request: NearbyWalkingRouteRequest, route: NearbyWa
 export function getCachedNearbyWalkingRoute(
   request: NearbyWalkingRouteRequest,
 ): NearbyWalkingRoute | undefined {
+  if (isNeighborhoodGtfsColdStart()) return undefined;
   const storage = ensurePersistentRouteCacheLoaded();
   if (!storage) return undefined;
   const key = walkingRouteCacheKey(request.origin, request.destination, request.cacheKey);

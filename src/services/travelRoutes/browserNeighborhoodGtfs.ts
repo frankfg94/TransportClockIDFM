@@ -1,8 +1,10 @@
 import type { NeighborhoodJourneysRequest, NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
 import { toServerApiUrl } from "../serverApi";
+import { isNeighborhoodGtfsColdStart } from "./neighborhoodGtfsDebug";
+import { beginVerdictDebugTask, isVerdictDebugEnabled } from "../verdictDebugTimeline";
 import type { NeighborhoodGtfsWorkerAction, NeighborhoodGtfsWorkerRequest, NeighborhoodGtfsWorkerResponse } from "./neighborhoodGtfsWorkerProtocol";
 
-interface Pending { worker: Worker; resolve(payload: unknown): void; reject(error: unknown): void; cleanup(): void }
+interface Pending { worker: Worker; resolve(payload: unknown): void; reject(error: unknown): void; cleanup(): void; finish: ReturnType<typeof beginVerdictDebugTask> }
 type WorkerGroup = "routes" | "timetable";
 const workers = new Map<WorkerGroup, Worker>();
 let nextId = 0;
@@ -14,6 +16,15 @@ function ensureWorker(group: WorkerGroup): Worker {
   created.onmessage = (event: MessageEvent<NeighborhoodGtfsWorkerResponse>) => {
     const response = event.data, subscriber = pending.get(response.id);
     if (!subscriber) return;
+    const diagnostics = response.diagnostics;
+    subscriber.finish("error" in response ? "error" : "ready", diagnostics ? {
+      ...diagnostics,
+      workerEnqueuedMs: diagnostics.enqueuedEpochMs === undefined ? undefined : Math.round(diagnostics.enqueuedEpochMs - performance.timeOrigin),
+      workerStartedMs: diagnostics.startedEpochMs === undefined ? undefined : Math.round(diagnostics.startedEpochMs - performance.timeOrigin),
+      workerEndedMs: diagnostics.endedEpochMs === undefined ? undefined : Math.round(diagnostics.endedEpochMs - performance.timeOrigin),
+      steps: diagnostics.steps?.map(step => ({ task: step.task, startMs: Math.round(step.startEpochMs - performance.timeOrigin),
+        endMs: Math.round(step.endEpochMs - performance.timeOrigin), durationMs: step.durationMs, status: step.status, details: step.details })),
+    } : undefined);
     if (response.diagnostics && new URL(window.location.href).searchParams.has("debugGtfs")) {
       console.debug("[neighborhood-gtfs]", JSON.stringify(response.diagnostics));
     }
@@ -23,6 +34,7 @@ function ensureWorker(group: WorkerGroup): Worker {
   created.onerror = () => {
     for (const [id, subscriber] of pending) {
       if (subscriber.worker !== created) continue;
+      subscriber.finish("error");
       pending.delete(id); subscriber.cleanup(); subscriber.reject(new Error("GTFS browser worker failed"));
     }
     created.terminate(); if (workers.get(group) === created) workers.delete(group);
@@ -38,8 +50,11 @@ export function requestBrowserNeighborhoodGtfs<T>(action: NeighborhoodGtfsWorker
   if (signal.aborted) return Promise.reject(signal.reason);
   return new Promise((resolve, reject) => {
     const id = ++nextId;
+    const finish = beginVerdictDebugTask("gtfs-worker", action.kind, action.kind === "routes" ? { destinations: action.request.destinations.length, purpose: action.request.purpose }
+      : { lineId: action.lineId, ...(action.kind === "last-service" ? { stationId: action.stationId } : {}) });
     const cancel = () => {
       const subscriber = pending.get(id);
+      finish(signal.aborted ? "cancelled" : "error");
       if (pending.delete(id)) subscriber?.worker.postMessage({ id, kind: "cancel" } satisfies NeighborhoodGtfsWorkerRequest);
       cleanup();
     };
@@ -55,8 +70,8 @@ export function requestBrowserNeighborhoodGtfs<T>(action: NeighborhoodGtfsWorker
       // Street-routing HTTP waits must not block the independently scheduled
       // frequency/last-departure pair. Each worker retains only its own data.
       const target = ensureWorker(action.kind === "routes" ? "routes" : "timetable");
-      pending.set(id, { worker: target, resolve: payload => resolve(payload as T), reject, cleanup });
-      target.postMessage({ id, baseUrl, ...plainAction } satisfies NeighborhoodGtfsWorkerRequest);
-    } catch (error) { pending.delete(id); cleanup(); reject(error); }
+      pending.set(id, { worker: target, resolve: payload => resolve(payload as T), reject, cleanup, finish });
+      target.postMessage({ id, baseUrl, coldStart: isNeighborhoodGtfsColdStart(), debug: isVerdictDebugEnabled(), ...plainAction } satisfies NeighborhoodGtfsWorkerRequest);
+    } catch (error) { finish("error"); pending.delete(id); cleanup(); reject(error); }
   });
 }

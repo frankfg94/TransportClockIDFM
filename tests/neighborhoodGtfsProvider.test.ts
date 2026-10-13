@@ -41,6 +41,17 @@ describe("verdict GTFS provider", () => {
       provider.findJourneys({ ...request(), origin: { ...origin, label: "same point" } } as ReturnType<typeof request>, controller.signal)]);
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+  it("separates scheduling purposes without removing any destinations or journeys", async () => {
+    const fetcher = vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      return Response.json({ source: "gtfs", datasetVersion: "v1", destinations: body.destinations.map((d: { id: string }) => ({ id: d.id, status: "ready", journeys: [{ id: d.id, durationSeconds: 600, sections: [] }] })) });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const provider = createGtfsNeighborhoodTravelRoutesProvider();
+    const results = await Promise.all([provider.findJourneys({ ...request(), purpose: "transport" }), provider.findJourneys({ ...request("b"), destination: { id: "b", lon: 2.45, lat: 48.95 }, purpose: "places" })]);
+    expect(fetcher).toHaveBeenCalledTimes(2); expect(results.map(routes => routes.length)).toEqual([1, 1]);
+    expect(fetcher.mock.calls.map(([, init]) => JSON.parse(init.body).purpose).sort()).toEqual(["places", "transport"]);
+  });
   it("never falls back when GTFS has no coverage or fails", async () => {
     const fetcher = vi.fn(async () => Response.json({ source: "gtfs", destinations: [{ id: "0", status: "missing", journeys: [] }] }));
     vi.stubGlobal("fetch", fetcher); const provider = createGtfsNeighborhoodTravelRoutesProvider();
