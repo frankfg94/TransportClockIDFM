@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   },
   score: {
     result: { value: {} },
+    diagnostics: { value: { pendingTasks: [] as string[], frequencies: [] } },
     places: { value: [] },
     isLoading: { value: false },
     error: { value: undefined as Error | undefined },
@@ -91,6 +92,25 @@ beforeEach(() => {
 });
 
 describe("NearbyNeighborhoodScorePage", () => {
+  it.each([undefined, "0", "1"])("exposes public diagnostic data only for debugVerdict=1 (%s)", (flag) => {
+    mocks.routeState.query = { lat: "48.76591", lon: "2.26821", debugVerdict: flag };
+    mocks.nearby.selectedPlace.value = { lat: 48.76591, lon: 2.26821, label: "Adresse test" };
+    mocks.useNearbyStations.mockReturnValue(mocks.nearby);
+    mocks.useNearbyHeavyTransports.mockReturnValue(mocks.heavy);
+    mocks.useNearbyNeighborhoodScore.mockReturnValue(mocks.score);
+    const wrapper = mount(NearbyNeighborhoodScorePage, { global: { stubs: {
+      NuxtLink: true, NearbyNeighborhoodScoreCard: true,
+    } } });
+    expect(wrapper.find('[data-testid="verdict-debug"]').exists()).toBe(flag === "1");
+    if (flag === "1") {
+      const diagnostic = JSON.parse(wrapper.get('[data-testid="verdict-debug"]').text());
+      expect(diagnostic.origin).toEqual(mocks.nearby.selectedPlace.value);
+      expect(diagnostic.loading.page).toBe(false);
+      expect(diagnostic.diagnostics).toEqual(mocks.score.diagnostics.value);
+      expect(diagnostic).not.toHaveProperty("runtimeConfig");
+    }
+    wrapper.unmount();
+  });
   it.each(["heavy", "routes"])("keeps GTFS retries independent from a PRIM rate limit (%s)", (source) => {
     mocks.routeState.query = { lat: "48.76591", lon: "2.26821" };
     if (source === "heavy") mocks.heavy.error.value = "navitia-journeys-429";

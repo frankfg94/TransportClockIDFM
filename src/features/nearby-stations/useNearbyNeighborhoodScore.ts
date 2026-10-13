@@ -1253,6 +1253,20 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
 
   return {
     result: shallowReadonly(result),
+    /** Evaluated only by the opt-in verdict diagnostic panel. */
+    diagnostics: computed(() => {
+      criterionRevision.value;
+      return {
+        pendingTasks: [...pendingTasks],
+        errors: [...taskErrors].map(([taskId, entry]) => ({ taskId, source: entry.source,
+          categories: entry.categories, name: entry.cause.name, message: entry.cause.message })),
+        lineTargets: getRelevantLineTargets(options.stations.value, options.heavyCandidates?.value ?? heavyCandidates.value),
+        frequencies: [...frequencyProfiles.value.values()],
+        lastServices: [...lastServiceByLine.value.entries()],
+        benchmarks: journeyBenchmarks.value,
+        backendVerdict: backendVerdict.value,
+      };
+    }),
     places: readonly(places),
     /** Public GPE metadata is also consumed by the heavy-access resolver. */
     backendVerdict: readonly(backendVerdict),

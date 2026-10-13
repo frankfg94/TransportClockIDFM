@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "#imports";
 import { ArrowLeft, Gauge } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
+import { toServerApiUrl } from "../../services/serverApi";
 import { createGtfsNeighborhoodTravelRoutesProvider } from "../../services/travelRoutes/gtfsNeighborhoodTravelRoutesProvider";
 import { fetchNeighborhoodGtfsFrequency, fetchNeighborhoodGtfsLastService } from "../../services/travelRoutes/browserNeighborhoodTimetable";
 import { createNeighborhoodWalkingRoutesProvider } from "../../services/neighborhoodWalkingRoutesProvider";
@@ -302,6 +303,30 @@ const scoreError = computed(() => {
   return score.error.value ? t("nearbyStations.neighborhoodScore.partialError") : undefined;
 });
 
+// No diagnostic serialization or extra requests on the normal verdict page.
+// This exposes only public page inputs/results, never server configuration.
+const debugVerdict = computed(() => queryString(route.query.debugVerdict) === "1");
+const debugPayload = computed(() => debugVerdict.value ? JSON.stringify({
+  revision: typeof __APP_SOURCE_REVISION__ === "undefined" ? "" : __APP_SOURCE_REVISION__,
+  apiBase: toServerApiUrl("/"),
+  origin: nearby.selectedPlace.value,
+  journeyDateTime: journeyDateTime.value,
+  nightJourneyDateTime: nightJourneyDateTime.value,
+  loading: { page: scoreLoading.value, score: score.isLoading.value, stations: nearby.isScanning.value,
+    heavy: heavy.isLoading.value, walking: nearbyWalking.isLoadingPlaces.value, serviceQuality: serviceQuality.isLoading.value },
+  progress: scoreProgress.value,
+  error: { source: failedSource.value, label: scoreError.value, heavy: heavy.error.value,
+    score: score.error.value?.message, walking: nearbyWalking.error.value?.message, serviceQuality: serviceQuality.error.value?.message },
+  result: score.result.value,
+  criteria: score.criteria.value,
+  diagnostics: score.diagnostics.value,
+  stations: nearby.stations.value,
+  heavyCandidates: heavy.visibleCandidates.value,
+  futureProjects: futureProjects.value,
+  walkingRoutes: nearbyWalking.placeRoutes.value,
+  serviceQuality: serviceQuality.data.value,
+}, null, 2) : "");
+
 async function retryFailedSource(): Promise<void> {
   const source = failedSource.value;
   if (!source || retryingSource.value) return;
@@ -398,6 +423,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 
 <template>
   <main class="nearby-neighborhood-score-page" :aria-busy="scoreLoading">
+    <pre v-if="debugVerdict" data-testid="verdict-debug" class="nearby-neighborhood-score-page__debug">{{ debugPayload }}</pre>
     <div
       v-if="scoreLoading"
       class="nearby-neighborhood-score-page__loading-bar"
@@ -502,6 +528,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 .nearby-neighborhood-score-page__empty strong { color: var(--ink); }
 .nearby-neighborhood-score-page__empty-link { background: #5146ff; border-radius: 9px; color: #fff; font-size: .78rem; font-weight: 850; margin-top: 5px; padding: 9px 12px; text-decoration: none; }
 .nearby-neighborhood-score-page__empty-link:hover, .nearby-neighborhood-score-page__empty-link:focus-visible { background: #4034df; color: #fff; }
+.nearby-neighborhood-score-page__debug { background: var(--surface); color: var(--ink); font-size: .75rem; max-height: 24rem; overflow: auto; padding: 12px; white-space: pre-wrap; }
 @media (max-width: 680px) {
   .nearby-neighborhood-score-page { padding: 18px 12px 108px; }
   .nearby-neighborhood-score-page__hero { padding: 19px; }
