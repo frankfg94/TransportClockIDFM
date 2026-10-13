@@ -345,6 +345,35 @@ describe("useNearbyNeighborhoodScore", () => {
     wrapper.unmount();
   });
 
+  it("reselects a cached line frequency when its retained access station changes", async () => {
+    const line = createLine();
+    const first = createHeavyCandidate(line);
+    first.station.id = "station:first";
+    const second = createHeavyCandidate(line);
+    second.id = "heavy:second";
+    second.station.id = "station:second";
+    const heavyCandidates = ref([first]);
+    const fetchFrequency = vi.fn(async () => ({ ...readyFrequency(line.id), stations: [
+      { id: first.station.id, average: { peakMinutes: 12 }, directions: [] },
+      { id: second.station.id, average: { peakMinutes: 4 }, directions: [] },
+    ] }));
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const wrapper = mount(defineComponent({ setup() {
+      score = useNearbyNeighborhoodScore({ origin: ref({ lon: 2.3, lat: 48.82 }),
+        stations: ref([]), network: ref(createNetwork(line)), heavyCandidates, fetchFrequency,
+        fetchLastService: async () => undefined,
+        placesProvider: { searchNearby: async () => [], searchDestinations: async () => [] },
+        travelRoutesProvider: { findJourneys: async () => [] },
+      });
+      return () => null;
+    } }));
+    await vi.waitFor(() => expect(score.diagnostics.value.frequencies[0]?.average.peakMinutes).toBe(12));
+    heavyCandidates.value = [second];
+    await vi.waitFor(() => expect(score.diagnostics.value.frequencies[0]?.average.peakMinutes).toBe(4));
+    expect(fetchFrequency).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
   it("deduplicates POI loading while adding the Châtelet and frequency stages", async () => {
     const origin = ref({ lon: 2.30, lat: 48.82, label: "Origine" });
     const stations = ref<NearbyStationEntry[]>([]);

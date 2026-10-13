@@ -473,16 +473,17 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       options.stations.value,
       options.heavyCandidates?.value ?? heavyCandidates.value,
     );
+    updateFrequencyTargets(lineTargets);
     for (const { lineId, stationId } of lineTargets) {
       const frequencyTaskId = `frequency:${lineId}`;
       if (!frequencyResults.has(lineId) && !pendingTasks.has(frequencyTaskId)) {
         trackTask(
           frequencyTaskId,
-          loadFrequency(lineId, stationId),
+          loadFrequency(lineId),
           token,
           (next) => {
             frequencyResults.set(lineId, next);
-            frequencyProfiles.value = new Map(frequencyResults);
+            updateFrequencyTargets();
             updatedAt.value = Date.now();
           },
           true,
@@ -506,6 +507,18 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         );
       }
     }
+  }
+
+  function updateFrequencyTargets(targets = getRelevantLineTargets(
+    options.stations.value, options.heavyCandidates?.value ?? heavyCandidates.value,
+  )): void {
+    // Keep the complete per-line profile in the cache. Project it onto the
+    // current station after every heavy-access update, so response order
+    // cannot freeze the cadence of an earlier, discarded station.
+    frequencyProfiles.value = new Map(targets.flatMap(({ lineId, stationId }) => {
+      const profile = frequencyResults.get(lineId);
+      return profile ? [[lineId, frequencyTimetable.selectFrequencySection(profile, stationId)] as const] : [];
+    }));
   }
 
   function resetOriginState(originKey: string): void {
@@ -839,14 +852,14 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     );
   }
 
-  function loadFrequency(lineId: string, stationId?: string): Promise<GtfsLineFrequencyResponse> {
+  function loadFrequency(lineId: string): Promise<GtfsLineFrequencyResponse> {
     const cached = frequencyResults.get(lineId);
     if (cached) return Promise.resolve(cached);
     const active = frequencyRequests.get(lineId);
     if (active) return active.promise;
     const controller = new AbortController();
     const promise = timetableRequestScheduler.schedule(
-      (signal) => frequencyTimetable.getFrequencies(lineId, stationId, { signal }),
+      (signal) => frequencyTimetable.getFrequencies(lineId, undefined, { signal }),
       controller.signal,
       2,
     )
