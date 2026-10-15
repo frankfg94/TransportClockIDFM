@@ -1,7 +1,9 @@
 import type { NeighborhoodJourneysRequest, NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
+import type { NightAccessRequest } from "../../../shared/gtfs/nightAccess";
 
 export type NeighborhoodGtfsWorkerAction =
   | { kind: "routes"; request: NeighborhoodJourneysRequest }
+  | { kind: "night-access"; request: NightAccessRequest }
   | { kind: "frequency"; lineId: string }
   | { kind: "last-service"; lineId: string; stationId?: string; serviceDate?: string };
 export type NeighborhoodGtfsWorkerRequest = ({ id: number; baseUrl: string; coldStart?: boolean; debug?: boolean } & NeighborhoodGtfsWorkerAction) | { id: number; kind: "cancel" };

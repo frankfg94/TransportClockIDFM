@@ -47,6 +47,8 @@ export interface NearbyJourneyRequest {
   destinationRef?: string;
   /** Verdict station benchmarks end at the arrival platform, without a street egress. */
   arrivalAtPlatform?: boolean;
+  /** End at a stop served by this current line, including its final station transfer. */
+  destinationLineId?: string;
   /** Optional departure probe used to discover scheduled daytime feeders. */
   datetime?: string;
   count?: number;
@@ -153,6 +155,12 @@ export interface RouteExit {
 }
 
 export interface NearbyJourneySection {
+  /** Only the final access to destinationLineId; unrelated to intermediate changes. */
+  finalLineAccess?: {
+    status: "documented" | "estimated" | "incomplete";
+    entranceIds?: string[];
+    pathwayIds?: string[];
+  };
   fromStopPointId?: string;
   toStopPointId?: string;
   fromStopAreaId?: string;
@@ -399,6 +407,8 @@ function compareNearbyHeavyCandidates(
 
 export interface HeavyJourneyEvaluationInput {
   journey: NearbyJourney;
+  /** Future hubs may be retained as context outside the proximity threshold. */
+  maxTravelSeconds?: number;
   stationDistanceMeters: number;
   localLineIds?: ReadonlySet<string>;
   localLineCodes?: ReadonlySet<string>;

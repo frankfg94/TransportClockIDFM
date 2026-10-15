@@ -681,6 +681,106 @@ describe("neighborhood score", () => {
     expect(accessFacts.some((fact) => fact.labelValues?.line === "Métro 15")).toBe(false);
   });
 
+  it("keeps one physical at-address tram signal when routed walking data replaces its estimate", () => {
+    const tram = line("tram:local", "TA", "TRAM"), local = stationEntry([tram], 120);
+    const access = { kind: "direct" as const, walkingSeconds: 240, totalSeconds: 240, scoreSeconds: 240 };
+    const nearby: NearbyHeavyTransportCandidate = { id: local.id, entry: local, station: local.memberStations[0]!, lines: [tram],
+      distanceMeters: 120, access, accessByLine: { [tram.id]: access }, projected: false };
+    const remote: NearbyHeavyTransportCandidate = { ...nearby, id: "remote", entry: { ...local, id: "remote" },
+      station: { ...nearby.station, id: "remote", name: "Remote stop" }, distanceMeters: 1500 };
+    const result = buildNeighborhoodScore(input({ stations: [local], heavyCandidates: [nearby, remote] }));
+    const facts = result.categories.find(category => category.id === "transport")!.positiveFacts.filter(fact => fact.labelValues?.line === "Tramway TA");
+    expect(facts).toHaveLength(1);
+    expect(facts[0]?.kind).toBe("transportLineAtAddress");
+    expect(facts[0]?.labelValues?.minutes).toBe(4);
+  });
+  it("shows a routed future hub beyond thirty minutes as context without increasing the proximity score", () => {
+    const rer = line("rer:current", "R", "RER"), future = line("future:rail", "F", "METRO");
+    const project = { id: "future:hub", name: "Future hub", line: "F", lon: 2.36, lat: 48.85, coLocatedCurrentLineCodes: ["R"] };
+    const entry = stationEntry([future], 4000, project);
+    const access = { kind: "connection" as const, walkingSeconds: 120, totalSeconds: 2400, scoreSeconds: 2400,
+      journey: { source: "gtfs" as const, durationSeconds: 2400, sections: [{ type: "walking", durationSeconds: 120 },
+        { type: "public_transport", durationSeconds: 2280, lineCode: "R", lineMode: "RER" as const }] } };
+    const candidate: NearbyHeavyTransportCandidate = { id: entry.id, entry, station: entry.memberStations[0]!, lines: [future], distanceMeters: 4000,
+      access, accessByLine: { [future.id]: access }, futureProjectsByLine: { [future.id]: project }, coLocatedHeavyLines: [rer], projected: true };
+    const base = input({ stations: [stationEntry([rer], 100)] });
+    const before = buildNeighborhoodScore(base).categories.find(category => category.id === "transport")!;
+    const after = buildNeighborhoodScore({ ...base, heavyCandidates: [candidate] }).categories.find(category => category.id === "transport")!;
+    expect(after.positiveFacts.some(fact => fact.kind === "transportHub")).toBe(false);
+    expect(after.neutralFacts.find(fact => fact.kind === "transportHub")?.labelValues).toMatchObject({ station: "Future hub", minutes: 40 });
+    expect(after.score).toBe(before.score);
+  });
+  it("keeps a routed future hub when the current line's first platform access exceeds fifteen minutes", () => {
+    const current = line("current:rail", "R", "RER"), future = line("future:metro", "F", "METRO"), tram = line("current:tram", "T", "TRAM");
+    const project = { id: "future:hub", name: "Future interchange", line: "F", lon: 2.36, lat: 48.85 };
+    const entry = stationEntry([future], 4000, project);
+    const access = { kind: "connection" as const, walkingSeconds: 120, totalSeconds: 1740, scoreSeconds: 1740,
+      journey: { source: "gtfs" as const, durationSeconds: 1740, sections: [{ type: "walking", durationSeconds: 120 },
+        { type: "public_transport", durationSeconds: 1620, lineCode: "R", lineMode: "RER" as const }] } };
+    const candidate: NearbyHeavyTransportCandidate = { id: entry.id, entry, station: entry.memberStations[0]!, lines: [future], distanceMeters: 4000,
+      access, accessByLine: { [future.id]: access }, futureProjectsByLine: { [future.id]: project }, coLocatedHeavyLines: [current, tram], projected: true };
+    const result = buildNeighborhoodScore(input({ heavyCandidates: [candidate] }));
+    const facts = result.categories.find(category => category.id === "transport")!.positiveFacts;
+    expect(facts.find(fact => fact.kind === "transportHub")?.labelValues).toMatchObject({ station: project.name, currentLines: "RER R", futureLine: "F", minutes: 29 });
+    expect(facts.some(fact => fact.kind.startsWith("transportLine") && fact.labelValues?.line === "Métro F")).toBe(false);
+  });
+  it.each(["TRAM", "CABLE", "METRO", "RER", "TRAIN", "TRANSILIEN"] as const)("shows only the fastest station for access to a %s line", mode => {
+    const targetLine = line("line:target", "TARGET", mode);
+    const candidate = (id: string, distance: number, seconds: number): NearbyHeavyTransportCandidate => {
+      const entry = stationEntry([targetLine], distance);
+      entry.id = id; entry.station = { ...entry.station, id, name: id };
+      entry.memberStations = [{ ...entry.memberStations[0]!, id, name: id }];
+      const access = { kind: "connection" as const, walkingSeconds: 120, totalSeconds: seconds, scoreSeconds: seconds,
+        feederLineCode: "FEEDER", feederMode: "TRAM" as const,
+        journey: { source: "gtfs" as const, durationSeconds: seconds, sections: [
+          { type: "walking", durationSeconds: 120 },
+          { type: "public_transport", durationSeconds: seconds - 120, lineCode: "FEEDER", lineMode: "TRAM" as const },
+        ] } };
+      return { id, entry, station: entry.memberStations[0]!, lines: [targetLine], distanceMeters: distance,
+        access, accessByLine: { [targetLine.id]: access }, projected: true };
+    };
+    // Geographic proximity and input ordering must not override travel time.
+    const candidates = [candidate("near-slower", 1500, 1440), candidate("interchange", 2500, 960), candidate("far-slower", 3500, 1320)];
+    const result = buildNeighborhoodScore(input({ heavyCandidates: candidates }));
+    const facts = result.categories.find(category => category.id === "transport")!.positiveFacts.filter(fact => fact.kind.startsWith("transportLine"));
+    expect(facts).toHaveLength(1);
+    expect(facts[0]?.labelValues).toMatchObject({ station: "interchange", minutes: 16 });
+    expect(facts[0]?.travel?.journey).toBe(candidates[1]!.access.journey);
+  });
+  it("keeps current access to a different final station and every positive fact after the documentary merge", () => {
+    const rerB = line("line:rer:B", "B", "RER"), future15 = line("line:gpe:15", "15", "METRO");
+    const project = { id: "gpe:arcueil", name: "Arcueil - Cachan", line: "15", lon: 2.328, lat: 48.798, coLocatedCurrentLineCodes: ["B"] };
+    const candidate = (id: string, name: string, transport: GlobalMapLine, lon: number, seconds: number, future = false): NearbyHeavyTransportCandidate => {
+      const entry = stationEntry([transport], 2000, { lon, lat: 48.798 });
+      entry.id = id; entry.station = { ...entry.station, id, name };
+      entry.memberStations = [{ ...entry.memberStations[0]!, id, name }];
+      const access = { kind: "connection" as const, walkingSeconds: 120, totalSeconds: seconds, scoreSeconds: seconds,
+        feederLineCode: "T10", feederMode: "TRAM" as const,
+        journey: { source: "gtfs" as const, durationSeconds: seconds, sections: [
+          { type: "walking", durationSeconds: 120 },
+          { type: "public_transport", durationSeconds: 480, lineCode: "T10", lineMode: "TRAM" as const },
+          ...(seconds > 600 ? [{ type: "public_transport", durationSeconds: seconds - 600, lineCode: "B", lineMode: "RER" as const }] : []),
+        ] } };
+      return { id, entry, station: entry.memberStations[0]!, lines: [transport], distanceMeters: 2000,
+        access, accessByLine: { [transport.id]: access }, projected: true,
+        ...(future ? { futureProjectsByLine: { [transport.id]: project }, coLocatedHeavyLines: [rerB] } : {}) };
+    };
+    const candidates = [candidate("croix", "La Croix de Berny", rerB, 2.304, 600),
+      candidate("arcueil", "Arcueil - Cachan", rerB, 2.328, 1300),
+      candidate("future-arcueil", "Arcueil - Cachan", future15, 2.328, 1300, true),
+      ...Array.from({ length: 6 }, (_, i) => candidate(`metro-${i}`, `Station ${i}`, line(`line:metro:${i}`, String(i), "METRO"), 2.4 + i / 100, 700 + i))];
+    const result = buildNeighborhoodScore(input({ heavyCandidates: candidates,
+      backendVerdict: { schemaVersion: "1.3", generatedAt: "2026-09-01T00:00:00.000Z", warnings: [], sources: [], futureProjects: [project],
+        categories: [{ id: "transport", status: "available", scoreDelta: 0, positiveFacts: [], negativeFacts: [], limitations: [] }] } }));
+    const facts = result.categories.find(c => c.id === "transport")!.positiveFacts;
+    expect(facts.some(f => f.labelValues?.line === "RER B" && f.labelValues.station === "La Croix de Berny")).toBe(true);
+    expect(facts.some(f => f.kind === "transportHub" && f.labelValues?.station === "Arcueil - Cachan")).toBe(true);
+    expect(facts.some(f => f.kind === "transportLineNearby" && f.labelValues?.station === "Arcueil - Cachan")).toBe(false);
+    expect(facts.filter(f => f.kind === "transportLineNearby")).toHaveLength(7);
+    expect(facts.find(f => f.labelValues?.station === "La Croix de Berny")?.evidence.ruleValues).toMatchObject({ threshold: 30, maximum: 30 });
+    expect(result.positiveFacts.filter(f => f.category === "transport")).toHaveLength(facts.length);
+  });
+
   it("uses a real current-line access for a co-located GPE station beyond 15 minutes on foot", () => {
     const metro13 = line("line:metro:13", "13", "METRO");
     const local = stationEntry([metro13], 900, { lon: 2.30177, lat: 48.81077 });
@@ -1025,7 +1125,7 @@ describe("neighborhood score", () => {
 
     expect(nature?.available).toBe(true);
     expect(fact?.labelValues?.name).toBe("Domaine de Sceaux");
-    expect(fact?.labelValues?.lines).toBe("T10");
+    expect(fact?.labelValues?.lines).toBe("Tramway T10");
     expect(fact?.labelValues?.minutes).toBe(14);
     expect(fact?.labelValues?.area).toBe("165 ha");
   });

@@ -2,6 +2,7 @@ import type { NearbyJourney, NearbyJourneyRequest, TravelRoutesProvider } from "
 import { getNearbyParisJourneyDateTime } from "../../features/nearby-stations/nearbyHeavyTransports";
 import type { NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
 import { toServerApiUrl } from "../serverApi";
+import { NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS } from "../../../shared/gtfs/neighborhoodTimeout";
 import { canUseBrowserNeighborhoodGtfs, routeBrowserNeighborhoodGtfs } from "./browserNeighborhoodGtfs";
 
 interface Subscriber { request: NearbyJourneyRequest; resolve: (journeys: NearbyJourney[]) => void; reject: (cause: unknown) => void; signal?: AbortSignal; abort: () => void; done: boolean }
@@ -11,7 +12,7 @@ export function createGtfsNeighborhoodTravelRoutesProvider(): TravelRoutesProvid
   const pending = new Map<string, Promise<NearbyJourney[]>>();
   const cache = new Map<string, { expires: number; journeys: NearbyJourney[] }>();
   let artifactVersion: string | undefined;
-  const requestKey = (request: NearbyJourneyRequest) => JSON.stringify([artifactVersion, request.origin.lon, request.origin.lat, request.destination.lon, request.destination.lat, request.destinationRef, request.arrivalAtPlatform, request.datetime, [...(request.allowedModes ?? [])].sort()]);
+  const requestKey = (request: NearbyJourneyRequest) => JSON.stringify([artifactVersion, request.origin.lon, request.origin.lat, request.destination.lon, request.destination.lat, request.destinationRef, request.arrivalAtPlatform, request.destinationLineId, request.datetime, [...(request.allowedModes ?? [])].sort()]);
   function flush(groupKey: string) {
     const subscribers = (groups.get(groupKey) ?? []).filter(s => !s.done);
     groups.delete(groupKey);
@@ -35,13 +36,13 @@ export function createGtfsNeighborhoodTravelRoutesProvider(): TravelRoutesProvid
     }
     void (async () => {
       const request = { origin: first.origin, purpose: first.purpose, datetime: first.datetime ?? getNearbyParisJourneyDateTime(9), allowedModes: first.allowedModes,
-        destinations: unique.map((s, i) => ({ ...s.request.destination, id: String(i), destinationRef: s.request.destinationRef, arrivalAtPlatform: s.request.arrivalAtPlatform })) };
+        destinations: unique.map((s, i) => ({ ...s.request.destination, id: String(i), destinationRef: s.request.destinationRef, arrivalAtPlatform: s.request.arrivalAtPlatform, destinationLineId: s.request.destinationLineId })) };
       const payload = canUseBrowserNeighborhoodGtfs()
         ? await routeBrowserNeighborhoodGtfs(request, controller.signal)
         : await (async () => {
           const response = await fetch(toServerApiUrl("/api/neighborhood-journeys"), {
             method: "POST", headers: { "content-type": "application/json" },
-            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]), body: JSON.stringify(request),
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS)]), body: JSON.stringify(request),
           });
           if (!response.ok) throw new Error(`GTFS neighborhood routing unavailable (${response.status})`);
           return await response.json() as NeighborhoodJourneysResponse;

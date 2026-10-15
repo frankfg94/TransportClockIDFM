@@ -10,6 +10,7 @@ import { createStraightLineWalkingRoute } from "../src/features/nearby-stations/
 import { analyzeNearbyJourneyTiming } from "../src/features/nearby-stations/nearbyJourneyTiming";
 import { createNeighborhoodGtfsRouter, type NeighborhoodGtfsRuntime } from "../shared/gtfs/routing";
 import { createNeighborhoodGtfsTaskQueue } from "../src/services/travelRoutes/neighborhoodGtfsTaskQueue";
+import { chooseFastestJourney } from "../src/features/nearby-stations/neighborhood/journeys";
 
 const mocks = vi.hoisted(() => ({ manifest: vi.fn(), read: vi.fn(), matrix: vi.fn(), epoch: 0 }));
 vi.mock("../server/services/gtfs/runtime", () => ({
@@ -49,6 +50,60 @@ const request = () => ({ origin: { lon: 2.3, lat: 48.8 }, datetime: "20261012T09
   destinations: [{ id: "c", lon: 2.4, lat: 48.8, destinationRef: "stop_area:IDFM:PC" }] });
 
 describe("offline neighborhood routing", () => {
+  function interchange() {
+    index.stops.push({ id: "IDFM:D", parentId: "IDFM:PC", name: "Target line platform", lon: 2.401, lat: 48.8 },
+      { id: "IDFM:E", parentId: "IDFM:PE", name: "Next station", lon: 2.45, lat: 48.8 });
+    index.boardingStops.push(3, 4);
+    index.lines.push({ id: "IDFM:TARGET", code: "TARGET", mode: "TRAM" });
+    index.transfers = [[2, 3, 383]];
+    rows = [[0, 2, 32700, 33300, 0, 0, 0, 16], [3, 4, 34200, 34500, 1, 0, 1, 16]];
+    return { ...request().destinations[0]!, arrivalAtPlatform: true, destinationLineId: "line:IDFM:TARGET" };
+  }
+  it("includes the published final transfer to the requested line while keeping station benchmarks at arrival", async () => {
+    const destination = interchange();
+    const result = await routeNeighborhoodJourneys({} as H3Event, { ...request(), destinations: [destination,
+      { ...request().destinations[0]!, id: "station-benchmark", arrivalAtPlatform: true }] });
+    const journey = result.destinations[0]!.journeys[0]!;
+    expect(journey.durationSeconds).toBe(1283);
+    expect(journey.sections.at(-1)).toMatchObject({ durationSeconds: 383, transferDurationSource: "gtfs-minimum",
+      fromStopPointId: "IDFM:C", toStopPointId: "IDFM:D" });
+    expect(journey.sections.some(section => section.lineId === "IDFM:TARGET")).toBe(false);
+    expect(result.destinations[1]!.journeys[0]!.durationSeconds).toBe(900);
+    expect(mocks.matrix).toHaveBeenCalledTimes(1);
+  });
+  it("uses physical final walking after the shared scan without changing full station-arrival journeys", async () => {
+    const destination = interchange();
+    index.pedestrianGraphVersion = 1;
+    index.stops[2]!.stopAccess = 1; index.stops[3]!.stopAccess = 0;
+    index.stops.push({ id: "ENTRANCE", name: "Entrance", parentId: "IDFM:PC", lon: 2.4001, lat: 48.8, locationType: 2 });
+    index.pathways = [{ id: "inside", from: 5, to: 3, mode: 1, bidirectional: true, seconds: 90 }];
+    const result = await routeNeighborhoodJourneys({} as H3Event, { ...request(), destinations: [destination,
+      { ...request().destinations[0]!, id: "complete", arrivalAtPlatform: true }] });
+    expect(result.destinations[0]!.journeys[0]!.durationSeconds).toBe(990);
+    expect(result.destinations[0]!.journeys[0]!.sections.at(-1)).toMatchObject({ durationSeconds: 90, finalLineAccess: { status: "documented", entranceIds: ["ENTRANCE"] } });
+    expect(result.destinations[1]!.journeys[0]!.durationSeconds).toBe(900);
+    expect(result.destinations[1]!.journeys.every(journey => !journey.sections.some(section => section.finalLineAccess))).toBe(true);
+    const matrixCalls = mocks.matrix.mock.calls.length;
+    const again = await routeNeighborhoodJourneys({} as H3Event, { ...request(), destinations: [destination] });
+    expect(again.diagnostics?.cacheHit).toBe(true);
+    expect(mocks.matrix.mock.calls).toHaveLength(matrixCalls);
+  });
+  it("keeps the final walking access when a faster arrival label has already ridden the target line", async () => {
+    const destination = interchange();
+    rows.unshift([0, 3, 32500, 32700, 1, 0, 1, 16]);
+    const result = await routeNeighborhoodJourneys({} as H3Event, { ...request(), destinations: [destination] });
+    expect(result.destinations[0]!.journeys[0]!.durationSeconds).toBe(1283);
+    expect(result.destinations[0]!.journeys[0]!.sections.at(-1)?.toStopPointId).toBe("IDFM:D");
+    expect(result.destinations[0]!.journeys.every(journey => !journey.sections.some(section => section.lineId === "IDFM:TARGET"))).toBe(true);
+  });
+  it.each(["unknown-line", "forbidden-transfer", "route-specific-prohibition"])("does not claim access at another line's platform for %s", async policy => {
+    const destination = interchange();
+    if (policy === "unknown-line") destination.destinationLineId = "IDFM:UNKNOWN";
+    if (policy === "forbidden-transfer") index.transfers = [[2, 3, -1]];
+    if (policy === "route-specific-prohibition") index.scopedTransfers = [{ from: 2, to: 3, seconds: -1, toRoute: "IDFM:TARGET" }];
+    const result = await routeNeighborhoodJourneys({} as H3Event, { ...request(), destinations: [destination] });
+    expect(result.destinations[0]!.journeys).toEqual([]);
+  });
   it("keeps journey identity stable when independent batches use different destination ids", async () => {
     const first = await routeNeighborhoodJourneys({} as H3Event, request());
     const second = await routeNeighborhoodJourneys({} as H3Event, { ...request(), destinations: [{ ...request().destinations[0]!, id: "different-batch-ordinal" }] });
@@ -103,6 +158,22 @@ describe("offline neighborhood routing", () => {
     const sequential = await run(1), concurrent = await run(4);
     expect(concurrent).toEqual(sequential);
     expect((concurrent[1] as { destinations: { journeys: unknown[] }[] }).destinations[0]!.journeys).toHaveLength(2);
+  });
+  it("retains the nearest tram boarding even when the same vehicle was already reached at another stop", async () => {
+    index.stops[0]!.lon = 2.29;
+    index.stops[1]!.lon = 2.301;
+    index.lines[0]!.mode = "TRAM";
+    rows = [[0, 1, 32880, 33000, 0, 0, 0, 0], [1, 2, 33060, 33600, 0, 0, 0, 16]];
+    mocks.matrix.mockImplementation(async (_event, origin, destinations) => destinations.map((destination: { lon: number; lat: number; id: string }) => ({
+      ...createStraightLineWalkingRoute(origin, destination, destination.id), durationSeconds: destination.id === "0" ? 300 : 120,
+      fallback: false, provider: "ign-bdtopo",
+    })));
+    const result = await routeNeighborhoodJourneys({} as H3Event, { ...request(),
+      destinations: [{ ...request().destinations[0]!, destinationRef: "stop_area:IDFM:PC", arrivalAtPlatform: true }] });
+    const journeys = result.destinations[0]!.journeys;
+    expect(journeys).toHaveLength(2);
+    expect(chooseFastestJourney(journeys)?.sections.find(section => section.type === "public_transport")?.fromStopPointId).toBe("IDFM:B");
+    expect(chooseFastestJourney(journeys)?.sections[0]?.durationSeconds).toBe(60);
   });
   it("keeps the closer boarding stop when bus paths share an arrival and signature", async () => {
     index.stops[1]!.lon = 2.301;
@@ -261,6 +332,39 @@ describe("connection scan transfers and branches", () => {
     ({ from, to, departure: dep, arrival: arr, tripKey, routeId: tripKey, tripId: tripKey, pickup: 0, dropOff: 0, last: true,
       section: { type: "public_transport", lineId: tripKey, vehicleJourneyId: tripKey, durationSeconds: arr - dep } });
   async function* stream(values: RoutingConnection[]) { yield* values; }
+  it("uses explicit map access for an immediate tram before testing departure reachability, while retaining routed bus access", async () => {
+    const access = new Map<number, RoutingNode>([[0, { arrival: 247, walkingSeconds: 247,
+      section: { type: "walking", durationSeconds: 247, timingSource: "schedule", walkingProvider: "ign-bdtopo",
+        fromPoint: { lon: 2.35, lat: 48.85 }, toPoint: { lon: 2.3515, lat: 48.85 } } }]]);
+    const tram = connection(0, 1, 150, 500, "surface"); tram.section.lineMode = "TRAM";
+    const result = await scanConnections(stream([tram]), access, new Map());
+    const walk = routingSections(result.platformLabels.get(1)!)[0]!;
+    expect(walk).toMatchObject({ durationSeconds: 120, timingSource: "estimated", walkingProvider: "straight-line" });
+    const bus = { ...tram, section: { ...tram.section, lineMode: "BUS" as const } };
+    expect((await scanConnections(stream([bus]), access, new Map())).platformLabels.has(1)).toBe(false);
+  });
+  it("does not add vehicle-transfer minima to an initial pedestrian access", async () => {
+    const paths = new Map([[0, [
+      { to: 1, seconds: 127, section: { type: "walking", durationSeconds: 127, transferDurationSource: "gtfs-minimum" as const } },
+      { to: 2, seconds: 30, allowsInitialAccess: true, section: { type: "walking", durationSeconds: 30 } },
+    ]]]);
+    const result = await scanConnections(stream([]), seed, paths);
+    expect(result.labels.has(1)).toBe(false);
+    expect(result.labels.get(2)?.arrival).toBe(30);
+  });
+  it("retains each tram feeder through a RER change when a bus reaches the platform earlier", async () => {
+    const values = [connection(0, 1, 10, 100, "bus"), connection(0, 1, 20, 150, "T10"),
+      connection(0, 1, 30, 160, "T6"), connection(1, 2, 400, 500, "B")];
+    values[0]!.section.lineMode = "BUS";
+    values[1]!.section.lineMode = values[2]!.section.lineMode = "TRAM";
+    values[3]!.section.lineMode = "RER";
+    const result = await scanConnections(stream(values), seed, new Map());
+    expect(routingSections(result.platformLabels.get(2)!).filter(s => s.type === "public_transport").map(s => s.lineId)).toEqual(["bus", "B"]);
+    for (const tram of ["T10", "T6"]) {
+      expect(routingSections(result.tramPlatformLabels.get(2)!.get(tram)!).filter(s => s.type === "public_transport").map(s => s.lineId)).toEqual([tram, "B"]);
+      expect(result.feederLabels.get(1)?.has(tram)).toBe(true);
+    }
+  });
   it("preserves transfers and route reconstruction across connection batch boundaries", async () => {
     const values = [connection(0, 1, 10, 100, "a"), connection(1, 3, 110, 200, "miss"), connection(1, 2, 250, 350, "b")];
     async function* batches() { yield values.slice(0, 1); yield []; yield values.slice(1); }

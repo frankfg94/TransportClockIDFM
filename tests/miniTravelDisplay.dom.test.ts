@@ -4,6 +4,18 @@ import MiniTravelDisplay from "../src/features/nearby-stations/MiniTravelDisplay
 import type { NearbyJourney } from "../src/features/nearby-stations/nearbyHeavyTransports";
 
 describe("MiniTravelDisplay", () => {
+  it.each(["documented", "estimated", "incomplete"] as const)("explains %s final walking with its entrance and provenance", status => {
+    const wrapper = mount(MiniTravelDisplay, { props: { journey: { source: "gtfs", durationSeconds: 134, sections: [
+      { type: "walking", durationSeconds: 3, fromStopPointId: "bus", toStopPointId: "E", toName: "Entrée test", timingSource: status === "estimated" ? "estimated" : "schedule",
+        finalLineAccess: { status, entranceIds: ["E"], pathwayIds: ["P"] } },
+      { type: "walking", durationSeconds: 131, fromStopPointId: "E", fromName: "Entrée test", toStopPointId: "rail", walkingProvider: "gtfs-pathways",
+        finalLineAccess: { status, entranceIds: ["E"], pathwayIds: ["P"] } },
+    ] } }, global: { stubs: { LineIconBadge: true } } });
+    if (status === "documented") expect(wrapper.text()).toContain("Accès final à pied documenté · entrée(s) : Entrée test");
+    if (status === "estimated") { expect(wrapper.text()).toContain("marche extérieure est estimée à vol d’oiseau"); expect(wrapper.text()).toContain("aucun bonus"); }
+    if (status === "incomplete") expect(wrapper.text()).toContain("sans certifier une durée de marche");
+    wrapper.unmount();
+  });
   it("rounds walking upward consistently with the access option detail", () => {
     const wrapper = mount(MiniTravelDisplay, { props: { journey: { source: "gtfs", durationSeconds: 491, sections: [{ type: "walking", durationSeconds: 131 }, { type: "public_transport", lineCode: "bus", durationSeconds: 360 }] } }, global: { stubs: { LineIconBadge: true } } });
     expect(wrapper.findAll(".mini-travel-display__leg")[0]!.text()).toBe("3 min");

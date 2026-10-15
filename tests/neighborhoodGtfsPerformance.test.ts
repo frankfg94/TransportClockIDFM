@@ -58,6 +58,61 @@ describe("shared frequency and last-departure timetable", () => {
 
 describe("worker walking matrix reuse", () => {
   const origin = { lon: 2.3, lat: 48.8 }, destination = { id: "first", lon: 2.31, lat: 48.81 };
+  it("keeps a complete verdict on disk even when its pairs exceed the live worker cache", async () => {
+    const entries = new Map<string, Response>();
+    const storage = { open: async () => ({ match: async (key: string) => entries.get(key)?.clone(),
+      put: async (key: string, value: Response) => { entries.set(key, value.clone()); },
+      keys: async () => [...entries.keys()].map(url => new Request(url)),
+      delete: async (key: Request) => entries.delete(key.url) }) } as unknown as CacheStorage;
+    const fetcher = vi.fn(async (_url, init) => Response.json({ routes: JSON.parse(String(init?.body)).destinations.map((d: typeof destination) => ({
+      ...d, provider: "ign-bdtopo", fallback: false, durationSeconds: 300, distanceMeters: 400,
+      coordinates: [origin, d], datasetVersion: "actual-version",
+    })) }));
+    const matrix = createNeighborhoodGtfsWalkingMatrix(fetcher, undefined, storage);
+    for (let batch = 0; batch < 17; batch++) await matrix("https://host.test", origin,
+      Array.from({ length: 64 }, (_, i) => ({ ...destination, id: `pair-${batch * 64 + i}`, lon: 2.31 + (batch * 64 + i) / 100000 })));
+    expect(entries.size).toBe(1088);
+    fetcher.mockClear();
+    const reloaded = await createNeighborhoodGtfsWalkingMatrix(fetcher, undefined, storage)("https://host.test", origin, [{ ...destination, id: "reloaded" }]);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(reloaded[0]?.datasetVersion).toBe("actual-version");
+  });
+  it("preserves verified route provenance across workers for five minutes, retries estimates and bypasses storage at cold start", async () => {
+    vi.useFakeTimers();
+    const entries = new Map<string, Response>();
+    const disk = { match: vi.fn(async (key: string) => entries.get(key)?.clone()),
+      put: vi.fn(async (key: string, value: Response) => { entries.set(key, value.clone()); }),
+      keys: vi.fn(async () => [...entries.keys()].map(url => new Request(url))),
+      delete: vi.fn(async (key: Request) => entries.delete(key.url)) };
+    const storage = { open: vi.fn(async () => disk) } as unknown as CacheStorage;
+    let version = "documented-v1", estimated = false;
+    const fetcher = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      return Response.json({ routes: body.destinations.map((d: typeof destination) => ({
+        ...d, provider: estimated ? "straight-line" : "ign-bdtopo", fallback: estimated,
+        durationSeconds: 300, distanceMeters: 400, coordinates: [origin, d], datasetVersion: version,
+      })) });
+    });
+    const first = await createNeighborhoodGtfsWalkingMatrix(fetcher, undefined, storage)("https://host.test", origin, [destination]);
+    version = "documented-v2";
+    const reloaded = await createNeighborhoodGtfsWalkingMatrix(fetcher, undefined, storage)("https://host.test", origin, [{ ...destination, id: "reloaded" }]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(reloaded[0]).toEqual({ ...first[0], id: "reloaded" });
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 1);
+    const renewed = await createNeighborhoodGtfsWalkingMatrix(fetcher, undefined, storage)("https://host.test", origin, [destination]);
+    expect(renewed[0]?.datasetVersion).toBe("documented-v2");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const beforeCold = storage.open;
+    vi.mocked(beforeCold).mockClear();
+    await createNeighborhoodGtfsWalkingMatrix(fetcher, undefined, storage)("https://host.test", origin, [destination], { coldStart: true });
+    expect(beforeCold).not.toHaveBeenCalled();
+    estimated = true;
+    const missing = { ...destination, lon: 2.32 };
+    await createNeighborhoodGtfsWalkingMatrix(fetcher, undefined, storage)("https://host.test", origin, [missing]);
+    const calls = fetcher.mock.calls.length;
+    await createNeighborhoodGtfsWalkingMatrix(fetcher, undefined, storage)("https://host.test", origin, [missing]);
+    expect(fetcher).toHaveBeenCalledTimes(calls + 1);
+  });
   it("shares concurrent and day/night reads, remaps subscriber ids and retains direction/coordinate distinctions", async () => {
     const fetcher = vi.fn(async (_url, init) => { const body = JSON.parse(String(init?.body)); return Response.json({ routes: body.destinations.map((point: typeof destination) => ({ ...point, provider: "idfm-navitia", durationSeconds: 600, distanceMeters: 800, coordinates: [body.origin, point] })) }); });
     const matrix = createNeighborhoodGtfsWalkingMatrix(fetcher);

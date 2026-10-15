@@ -69,10 +69,26 @@ export function summarizeNearbyStationAccess(journey: NearbyJourney) {
     walkingMinutes: Math.ceil(walking.reduce((sum, section) => sum + (finiteNonNegative(section.durationSeconds) ?? 0), 0) / 60),
     transitMinutes: Math.ceil(transit.reduce((sum, section) => sum + (finiteNonNegative(section.durationSeconds) ?? 0), 0) / 60),
     boardingStop: transit[0]?.fromName,
+    boardingMode: transit[0]?.lineMode,
     walkingEstimated: walking.some(section => section.timingSource === "estimated"),
     elapsedMinutes: Math.ceil(timing.elapsedSeconds / 60),
     initialWaitMinutes: Math.round(timing.initialWaitSeconds / 60),
   };
+}
+
+/** Compare access to the first tram only; later transfer/egress walks differ. */
+export function compareNearbyTramBoardingWalk(left: NearbyJourney | undefined, right: NearbyJourney | undefined): number {
+  if (!left || !right) return 0;
+  const beforeTram = (journey: NearbyJourney) => {
+    const index = journey.sections.findIndex(isNearbyJourneyTransitSection), first = journey.sections[index];
+    if (first?.lineMode !== "TRAM" && first?.lineMode !== "CABLE") return undefined;
+    const line = first.lineId ?? first.lineCode;
+    const walking = journey.sections.slice(0, index).filter(isNearbyJourneyWalkingSection)
+      .reduce((sum, section) => sum + section.durationSeconds, 0);
+    return { line, walking };
+  };
+  const a = beforeTram(left), b = beforeTram(right);
+  return a?.line && a.line === b?.line ? a.walking - b.walking : 0;
 }
 
 export function isNearbyJourneyWaitingSection(section: NearbyJourneySection): boolean {

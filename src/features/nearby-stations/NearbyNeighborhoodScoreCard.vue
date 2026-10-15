@@ -14,7 +14,9 @@ import type {
 } from "./neighborhood/criterionRegistry";
 import NearbyNeighborhoodScoreFact from "./NearbyNeighborhoodScoreFact.vue";
 import { getNeighborhoodFactMarker } from "./neighborhood/facts";
+import { transportSectionValues } from "./neighborhood/factPresentation";
 import NearbyNeighborhoodScoreEducation from "./NearbyNeighborhoodScoreEducation.vue";
+import NeighborhoodTransportLoading from "./NeighborhoodTransportLoading.vue";
 import type { NearbyPlace } from "./nearbyPlaces";
 import type { NeighborhoodWalkingMetrics } from "./neighborhood/contracts";
 
@@ -30,6 +32,7 @@ const props = defineProps<{
   retrying?: boolean;
   retryDisabled?: boolean;
   criteria?: readonly NeighborhoodCriterionState[];
+  transportLoadingTasks?: readonly { id: string; labelKey: TranslationKey }[];
   directoryUrl: string;
 }>();
 
@@ -103,7 +106,7 @@ function bandColor(band: NeighborhoodScoreBand | undefined): string | undefined 
 }
 
 function factLabel(fact: NeighborhoodScoreResult["positiveFacts"][number]): string {
-  return fact.label ?? (fact.labelKey ? t(fact.labelKey, fact.labelValues) : "");
+  return fact.label ?? (fact.labelKey ? t(fact.labelKey, transportSectionValues(fact, fact.labelValues, t)) : "");
 }
 
 function datasetLabel(datasetId: string): string {
@@ -345,6 +348,7 @@ onBeforeUnmount(() => {
             </small>
           </div>
         </header>
+        <NeighborhoodTransportLoading v-if="category.id === 'transport'" :tasks="transportLoadingTasks ?? []" />
         <p v-if="!category.available && !category.neutralFacts.length" class="nearby-neighborhood-score-card__category-empty">
           {{ category.unavailableReasonKey ? t(category.unavailableReasonKey) : t("nearbyStations.neighborhoodScore.noData") }}
         </p>

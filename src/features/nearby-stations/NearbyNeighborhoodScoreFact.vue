@@ -3,6 +3,7 @@ import { CircleHelp } from "lucide-vue-next";
 import { useRouter } from "#imports";
 import { computed } from "vue";
 import { useI18n, type TranslationKey } from "../../i18n";
+import { transportSectionValues } from "./neighborhood/factPresentation";
 import { getNeighborhoodFactMarker, hasExceptionalFactMarker } from "./neighborhood/facts";
 import type { NeighborhoodFact, NeighborhoodFactGeography, NeighborhoodFactPlace, NeighborhoodFactTransportReliabilityLine } from "./neighborhood";
 import MiniTravelDisplay from "./MiniTravelDisplay.vue";
@@ -58,13 +59,13 @@ function toggle(): void {
 }
 
 function factLabel(): string {
-  return props.fact.label ?? (props.fact.labelKey ? t(props.fact.labelKey, props.fact.labelValues) : "");
+  return props.fact.label ?? (props.fact.labelKey ? t(props.fact.labelKey, transportSectionValues(props.fact, props.fact.labelValues, t)) : "");
 }
 
 function factTooltip(): string {
   if (props.fact.tooltip) return props.fact.tooltip;
   if (!props.fact.tooltipKey) return "";
-  const values = props.fact.tooltipValues;
+  const values = transportSectionValues(props.fact, props.fact.tooltipValues, t);
   if (props.fact.kind === "transportServiceQuality" && typeof values?.trend === "string") {
     const trendKey: Record<string, TranslationKey> = {
       improving: "nearbyStations.linesRanking.trends.improving",
@@ -207,7 +208,10 @@ function geographyLabel(): string {
         <ul>
           <li v-for="route in transportAccessChoices" :key="route.line" data-testid="nearby-transport-access-option">
             {{ t("nearbyStations.neighborhoodScore.transportAccessChoice", { line: route.line, minutes: route.accessMinutes }) }}
-            <small>{{ t(route.walkingEstimated ? "nearbyStations.neighborhoodScore.transportAccessWalkingEstimated" : "nearbyStations.neighborhoodScore.transportAccessWalking", { walking: route.walkingMinutes, transit: route.transitMinutes }) }}<template v-if="route.boardingStop"> · {{ route.boardingStop }}</template></small>
+            <small>{{ t(route.boardingMode === 'BUS' || route.boardingMode === 'NOCTILIEN'
+              ? route.walkingEstimated ? "nearbyStations.neighborhoodScore.transportAccessWalkingEstimated" : "nearbyStations.neighborhoodScore.transportAccessWalking"
+              : route.walkingEstimated ? "nearbyStations.neighborhoodScore.transportAccessWalkingTransitEstimated" : "nearbyStations.neighborhoodScore.transportAccessWalkingTransit",
+              { walking: route.walkingMinutes, transit: route.transitMinutes }) }}<template v-if="route.boardingStop"> · {{ route.boardingStop }}</template></small>
             <small>{{ t("nearbyStations.neighborhoodScore.transportAccessElapsed", { elapsed: route.elapsedMinutes, wait: route.initialWaitMinutes }) }}</small>
           </li>
         </ul>
@@ -299,7 +303,7 @@ function geographyLabel(): string {
 .nearby-neighborhood-score-fact:hover .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact:focus-within .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact--open .nearby-neighborhood-score-fact__tooltip { opacity: 1; pointer-events: auto; transform: translateY(0); visibility: visible; }
 .nearby-neighborhood-score-fact__tooltip strong { color: var(--ink); display: block; font-size: .78rem; line-height: 1.35; max-width: 355px; }
 .nearby-neighborhood-score-fact__travel-routes { border-top: 1px solid #e8ebf2; display: grid; gap: 5px; margin-top: 8px; max-width: 355px; padding-top: 4px; }
-.nearby-neighborhood-score-fact__travel-route { align-items: center; display: grid; gap: 8px; grid-template-columns: max-content minmax(0, 1fr); min-width: 0; }
+.nearby-neighborhood-score-fact__travel-route { align-items: start; display: grid; gap: 4px; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .nearby-neighborhood-score-fact__access-choices { border-top: 1px solid #e8ebf2; margin-top: 8px; padding-top: 4px; }
 .nearby-neighborhood-score-fact__access-choices ul { display: grid; gap: 4px; list-style: none; margin: 5px 0 0; padding: 0; }
 .nearby-neighborhood-score-fact__access-choices small { color: #667085; display: block; font-size: .68rem; line-height: 1.4; }

@@ -90,7 +90,27 @@ export function buildFrequencyGraph(topology: LineTopology): FrequencyGraph {
   }
   sections.sort((a, b) => a.id.localeCompare(b.id));
   if (sections.length === 1) sections[0]!.kind = "shared";
-  return { neighbors, sections, edges, terminals };
+  const graph = { neighbors, sections, edges, terminals };
+  // In a Y, the common arm also ends at a physical terminal. Identify it
+  // using complete terminal-to-terminal topology paths. Intermediate short
+  // workings are ignored; express calls cannot add edges or create sections.
+  const terminalPairs = new Map<string, [string, string]>();
+  for (const pattern of topology.patterns) {
+    const from = pattern.stops[0], to = pattern.stops.at(-1);
+    if (!from || !to || from === to || !terminals.has(from) || !terminals.has(to)) continue;
+    const pair = [from, to].sort() as [string, string];
+    terminalPairs.set(JSON.stringify(pair), pair);
+  }
+  const coveredTerminals = new Set([...terminalPairs.values()].flat());
+  if (terminalPairs.size > 1 && coveredTerminals.size === terminals.size) {
+    const paths = [...terminalPairs.values()].map(([from, to]) => findFrequencyPath(graph, from, to));
+    if (paths.every((path): path is string[] => Boolean(path))) {
+      for (const section of sections) {
+        if (paths.every(path => section.stationIds.every(id => path.includes(id)))) section.kind = "shared";
+      }
+    }
+  }
+  return graph;
 }
 
 /** Do not choose arbitrarily between equally plausible routes around a loop. */

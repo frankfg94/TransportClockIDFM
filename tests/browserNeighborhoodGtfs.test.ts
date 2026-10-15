@@ -9,7 +9,7 @@ class FakeWorker {
   constructor() { instances.push(this); }
   postMessage(message: unknown) { this.messages.push(structuredClone(message)); }
 }
-afterEach(() => { vi.unstubAllGlobals(); vi.resetModules(); instances.length = 0; });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.resetModules(); instances.length = 0; });
 async function setup() {
   vi.stubGlobal("window", { location: { href: "https://transportclockidfm.pages.dev/verdict" } });
   vi.stubGlobal("Worker", FakeWorker);
@@ -17,6 +17,34 @@ async function setup() {
 }
 const request = () => reactive({ origin: { lat: 48.8, lon: 2.3 }, datetime: "20261013T090000", destinations: [{ id: "a", lat: 48.9, lon: 2.4 }] });
 describe("browser neighborhood GTFS", () => {
+  it("runs night access in its own worker independently of heavy routes and timetables", async () => {
+    const router = await setup(), signal = new AbortController().signal;
+    const day = router.routeBrowserNeighborhoodGtfs(request(), signal);
+    const frequency = router.requestBrowserNeighborhoodGtfs({ kind: "frequency", lineId: "line" }, signal);
+    const night = router.requestBrowserNeighborhoodGtfs({ kind: "night-access", request: { origin: { lat: 48.8, lon: 2.3 },
+      datetime: "20261015T030000", lines: [{ id: "night", code: "N1" }] } }, signal);
+    expect(instances).toHaveLength(3);
+    const nightMessage = instances[2]!.messages[0] as { id: number; kind: string };
+    expect(nightMessage.kind).toBe("night-access");
+    instances[2]!.onmessage!({ data: { id: nightMessage.id, payload: { journeys: [], status: "ready" } } });
+    await expect(night).resolves.toMatchObject({ status: "ready" });
+    for (const worker of instances.slice(0, 2)) {
+      const message = worker.messages[0] as { id: number };
+      worker.onmessage!({ data: { id: message.id, payload: {} } });
+    }
+    await Promise.all([day, frequency]);
+  });
+  it("allows a transport load for five minutes before cancelling its worker task", async () => {
+    vi.useFakeTimers();
+    const router = await setup();
+    const result = router.routeBrowserNeighborhoodGtfs(request(), new AbortController().signal);
+    const rejected = expect(result).rejects.toThrow("timed out");
+    await vi.advanceTimersByTimeAsync(299_999);
+    expect(instances[0]!.messages).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await rejected;
+    expect(instances[0]!.messages.at(-1)).toMatchObject({ kind: "cancel" });
+  });
   it("sends a cloneable JSON contract for reactive coordinates and resolves the theoretical payload", async () => {
     const router = await setup();
     const result = router.routeBrowserNeighborhoodGtfs(request(), new AbortController().signal);

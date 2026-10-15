@@ -17,6 +17,7 @@ export function createNetworkScheduler(concurrency = 4, timeoutMs = 45_000) {
   function run<T>(
     task: (signal: AbortSignal) => Promise<T>,
     signal?: AbortSignal,
+    requestTimeoutMs = timeoutMs,
   ): Promise<T> {
     // A source can call a provider which uses this same scheduler. Reuse its
     // slot and deadline rather than waiting behind ourselves in a second FIFO.
@@ -45,7 +46,7 @@ export function createNetworkScheduler(concurrency = 4, timeoutMs = 45_000) {
         signal?.addEventListener("abort", cancel, { once: true });
         const timer = setTimeout(
           () => controller.abort(new DOMException("Network request timed out", "TimeoutError")),
-          timeoutMs,
+          requestTimeoutMs,
         );
         const aborted = new Promise<never>((_, fail) => {
           controller.signal.addEventListener("abort", () => fail(controller.signal.reason), {

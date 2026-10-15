@@ -32,6 +32,7 @@ import NearbyNeighborhoodScoreCard from "./NearbyNeighborhoodScoreCard.vue";
 import { buildVerdictTransportIntegrity, compareVerdictTransportSnapshots } from "./verdictTransportDebug";
 import NearbyRealEstateVerdict from "./NearbyRealEstateVerdict.vue";
 import NeighborhoodTrafficAnnex from "./NeighborhoodTrafficAnnex.vue";
+import { neighborhoodTransportLoadingTasks } from "./neighborhood/transportLoadingTasks";
 import {
   getNearbyParisJourneyDateTimeAtTime,
 } from "./nearbyHeavyTransports";
@@ -133,6 +134,9 @@ const heavy = useNearbyHeavyTransports({
   walkingRouteProvider,
   includeLocalCandidates: true,
   batchQueries: true,
+  retainAllCandidates: true,
+  includeContextAccess: true,
+  includeTramTargets: true,
 });
 const score = useNearbyNeighborhoodScore({
   fetchFrequency: fetchNeighborhoodGtfsFrequency,
@@ -163,6 +167,13 @@ const score = useNearbyNeighborhoodScore({
   serviceQuality: serviceQuality.data,
   initialSnapshot: isNeighborhoodGtfsColdStart() ? undefined : readNearbyNeighborhoodScoreSnapshot(initialOrigin),
 });
+const transportLoadingTasks = computed(() => neighborhoodTransportLoadingTasks({
+  pendingTaskIds: score.transportPending?.value ?? [],
+  stations: nearby.isScanning.value,
+  heavyAccess: heavy.isLoading.value,
+  futureProjects: !futureProjectsReady.value,
+  serviceQuality: serviceQuality.isLoading.value,
+}));
 
 // Use the complete official GPE catalog for transit routing. The point verdict
 // only includes a small pedestrian-search radius, which misses stations that
@@ -571,7 +582,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
     </section>
 
     <NearbyNeighborhoodScoreCard
-      v-else
+      v-if="initialOrigin"
       :result="score.result.value"
       :education-places="score.places.value"
       :education-walking-routes="nearbyWalking.placeRoutes.value"
@@ -583,6 +594,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
       :retrying="Boolean(retryingSource)"
       :retry-disabled="false"
       :criteria="score.criteria?.value"
+      :transport-loading-tasks="transportLoadingTasks"
       :directory-url="directoryUrl"
       @change-origin="openAddressSelector"
       @retry-source="retryFailedSource"

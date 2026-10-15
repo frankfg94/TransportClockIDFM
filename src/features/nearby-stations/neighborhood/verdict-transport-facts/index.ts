@@ -23,11 +23,15 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
   facts.positiveFacts.push(...regularity.positiveFacts);
   facts.negativeFacts.push(...regularity.negativeFacts);
   facts.neutralFacts.push(...regularity.neutralFacts);
-  facts.positiveFacts.push(...buildHeavyTransportFacts(context));
+  for (const fact of buildHeavyTransportFacts(context)) {
+    (fact.polarity === "neutral" ? facts.neutralFacts : facts.positiveFacts).push(fact);
+  }
   const diversity = buildTransportDiversityFacts(context);
   facts.positiveFacts.push(...diversity.positiveFacts);
   facts.negativeFacts.push(...diversity.negativeFacts);
-  facts.positiveFacts.push(...buildGpeExpressFacts(context));
+  for (const fact of buildGpeExpressFacts(context)) {
+    (fact.polarity === "neutral" ? facts.neutralFacts : facts.positiveFacts).push(fact);
+  }
   const benchmarks = buildJourneyBenchmarkFacts(input);
   facts.positiveFacts.push(...benchmarks.positiveFacts);
   facts.neutralFacts.push(...benchmarks.neutralFacts);

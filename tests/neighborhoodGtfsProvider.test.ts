@@ -4,6 +4,22 @@ const origin = { lon: 2.3, lat: 48.8 };
 const request = (id = "a") => ({ origin, destination: { id, lon: 2.4, lat: 48.9 }, datetime: "20261012T090000" });
 afterEach(() => vi.unstubAllGlobals());
 describe("verdict GTFS provider", () => {
+  it("forwards the target line and keeps each line's access separate in batching and caches", async () => {
+    const fetcher = vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      return Response.json({ source: "gtfs", datasetVersion: "v1", destinations: body.destinations.map((d: { id: string; destinationLineId?: string }) => ({
+        id: d.id, status: "ready", journeys: [{ id: d.destinationLineId ?? "whole-station", sections: [] }],
+      })) });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const provider = createGtfsNeighborhoodTravelRoutesProvider();
+    const requests = ["line-a", "line-b", undefined].map(destinationLineId => ({ ...request(), arrivalAtPlatform: true, destinationLineId }));
+    const results = await Promise.all(requests.map(input => provider.findJourneys(input)));
+    expect(results.map(journeys => journeys[0]?.id)).toEqual(["line-a", "line-b", "whole-station"]);
+    expect(JSON.parse(fetcher.mock.calls[0]![1].body).destinations).toHaveLength(3);
+    expect((await provider.findJourneys(requests[0]!))[0]?.id).toBe("line-a");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
   it("keeps platform arrival and coordinate arrival in separate cache entries", async () => {
     const fetcher = vi.fn(async (_url, init) => {
       const body = JSON.parse(init.body);

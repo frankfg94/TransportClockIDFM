@@ -2,9 +2,9 @@ import { clamp, saturatingNeighborhoodBonus, weightedAverage } from "../primitiv
 import type { TransportFactsContext } from "./context";
 
 export function calculateTransportScore(context: TransportFactsContext): number {
-  const { accessSignals, linesByKey, structuralLineWeight, accessibleModeWeight, journeySummary, readyFrequencies, serviceQuality,
+  const { scoredAccessSignals, linesByKey, structuralLineWeight, accessibleModeWeight, journeySummary, readyFrequencies, serviceQuality,
     structuralLineCount, sharedHubEvidence, reliableConnectionEvidence, effectiveFutureProjects } = context;
-  const nearestAccess = accessSignals[0];
+  const nearestAccess = scoredAccessSignals[0];
   const scoreParts: Array<{ value: number; weight: number }> = [];
 
   if (nearestAccess) {

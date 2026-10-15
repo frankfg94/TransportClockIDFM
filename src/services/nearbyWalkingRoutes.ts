@@ -1,4 +1,5 @@
 import type { NearbyJourneyPoint } from "../features/nearby-stations/nearbyHeavyTransports";
+import { NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS } from "../../shared/gtfs/neighborhoodTimeout";
 import {
   createStraightLineWalkingRoute,
   sanitizeNearbyWalkingCacheKey,
@@ -213,7 +214,7 @@ export async function getNearbyWalkingRouteMatrix(
       });
       if (!response.ok) throw new Error(`walking-matrix-${response.status}`);
       return await response.json() as { routes?: unknown };
-    }, signal);
+    }, signal, routingPolicy === "gtfs-access" ? NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS : undefined);
     const routes = Array.isArray(payload.routes) ? payload.routes : [];
     const routesById = new Map(routes.filter(isWalkingRoute).map((route) => [route.id, route]));
     const fetchedRoutes = new Map<string, NearbyWalkingRoute>();

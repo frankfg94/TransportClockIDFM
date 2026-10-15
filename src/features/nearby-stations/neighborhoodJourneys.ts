@@ -1,7 +1,7 @@
 import type { NearbyJourney, NearbyJourneyPoint } from "./nearbyHeavyTransports";
 import type { GlobalMapMode } from "../transport-map/contracts/manifest";
 
-export interface NeighborhoodJourneyDestination extends NearbyJourneyPoint { id: string; destinationRef?: string; arrivalAtPlatform?: boolean }
+export interface NeighborhoodJourneyDestination extends NearbyJourneyPoint { id: string; destinationRef?: string; arrivalAtPlatform?: boolean; destinationLineId?: string }
 export interface NeighborhoodJourneysRequest {
   /** Browser worker scheduling only, ignored by the routing algorithm. */
   purpose?: "transport" | "night-transport" | "places";

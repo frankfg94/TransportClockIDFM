@@ -19,6 +19,9 @@ export interface RoutingLine {
 }
 export interface GtfsRoutingIndex {
   schemaVersion: 1;
+  /** Final line access only. Never substitute this graph for scan transfer rules. */
+  pedestrianGraphVersion?: 1;
+  pathways?: GtfsRoutingPathway[];
   stops: GtfsTimetableStop[];
   services: GtfsTimetableService[];
   lines: RoutingLine[];
@@ -31,6 +34,15 @@ export interface GtfsRoutingIndex {
   hasConditionalService: boolean;
   hours: Record<string, string[]>;
   maxTimeSeconds: number;
+}
+export interface GtfsRoutingPathway {
+  id: string;
+  from: number;
+  to: number;
+  mode: number;
+  bidirectional: boolean;
+  seconds?: number;
+  lengthMeters?: number;
 }
 /** Eight uint32 columns: from, to, departure, arrival, trip, service, line, flags. */
 export const CONNECTION_COLUMNS = 8;

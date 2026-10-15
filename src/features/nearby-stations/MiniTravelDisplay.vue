@@ -18,9 +18,20 @@ const props = defineProps<{
 
 const { t } = useI18n();
 
-const displaySections = computed(() => props.journey.sections.filter((section) =>
-  isNearbyJourneyTransitSection(section) || isNearbyJourneyWalkingSection(section) || section.transferDurationSource === "gtfs-minimum",
-));
+const displaySections = computed(() => {
+  const display: NearbyJourneySection[] = [];
+  for (const section of props.journey.sections) {
+    if (!isNearbyJourneyTransitSection(section) && !isNearbyJourneyWalkingSection(section) && section.transferDurationSource !== "gtfs-minimum") continue;
+    const previous = display.at(-1);
+    if (previous?.finalLineAccess && section.finalLineAccess && isNearbyJourneyWalkingSection(previous) && isNearbyJourneyWalkingSection(section)
+      && !previous.transferDurationSource && !section.transferDurationSource) {
+      previous.durationSeconds += section.durationSeconds;
+      previous.timingSource = previous.timingSource === "estimated" || section.timingSource === "estimated" ? "estimated" : "schedule";
+      previous.toName = section.toName; previous.toStopPointId = section.toStopPointId;
+    } else display.push({ ...section });
+  }
+  return display;
+});
 
 const journeyLabel = computed(() => displaySections.value.map((section) =>
   section.transferDurationSource === "gtfs-minimum" ? t("nearbyStations.neighborhoodScore.gtfsTransferLabel") : isNearbyJourneyWalkingSection(section)
@@ -34,7 +45,20 @@ const summary = computed(() => ({
   transfers: props.journey.transferCount ?? Math.max(0, props.journey.sections.filter(isNearbyJourneyTransitSection).length - 1),
 }));
 const referenceDate = computed(() => props.journey.departureDateTime?.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2}).*$/u, "$3/$2/$1 $4:$5") ?? "—");
+const boardingStop = computed(() => props.journey.sections.find(isNearbyJourneyTransitSection)?.fromName);
 const minimumTransferSeconds = computed(() => props.journey.sections.filter(section => section.transferDurationSource === "gtfs-minimum").reduce((sum, section) => sum + section.durationSeconds, 0));
+const finalAccess = computed(() => {
+  const sections = props.journey.sections.filter(section => section.finalLineAccess);
+  if (!sections.length) return undefined;
+  const status = sections.some(section => section.finalLineAccess!.status === "incomplete") ? "incomplete"
+    : sections.some(section => section.finalLineAccess!.status === "estimated") ? "estimated" : "documented";
+  const ids = new Set(sections.flatMap(section => section.finalLineAccess?.entranceIds ?? []));
+  const names = [...new Set(sections.flatMap(section => [
+    ids.has(section.fromStopPointId ?? "") ? section.fromName : undefined,
+    ids.has(section.toStopPointId ?? "") ? section.toName : undefined,
+  ]).filter((name): name is string => Boolean(name)))];
+  return { status, entrances: names.join(" → ") || "—" };
+});
 const sameLineChanges = computed(() => {
   const changes: Array<{ section: NearbyJourneySection; line: string; station: string; from?: string; to?: string; waitingSeconds: number }> = [];
   let preceding: NearbyJourneySection | undefined, waitingSeconds = 0;
@@ -125,7 +149,7 @@ function formatDuration(seconds: number, walking = false): string {
         <ArrowLeftRight v-else-if="section.transferDurationSource === 'gtfs-minimum'" :size="14" :aria-label="t('nearbyStations.neighborhoodScore.gtfsTransferLabel')" />
         <Footprints v-else :size="14" aria-hidden="true" />
         <small v-if="!props.hideTransitDuration || !isNearbyJourneyTransitSection(section)">
-          {{ section.transferDurationSource === "gtfs-minimum" ? formatTransferDuration(section.durationSeconds) : formatDuration(section.durationSeconds, isNearbyJourneyWalkingSection(section)) }}
+          <template v-if="section.timingSource === 'estimated' && isNearbyJourneyWalkingSection(section)">≈ </template>{{ section.transferDurationSource === "gtfs-minimum" || section.finalLineAccess ? formatTransferDuration(section.durationSeconds) : formatDuration(section.durationSeconds, isNearbyJourneyWalkingSection(section)) }}
         </small>
       </span>
     </template>
@@ -133,8 +157,12 @@ function formatDuration(seconds: number, walking = false): string {
   <p v-if="journey.source === 'gtfs'" class="mini-travel-display__summary">
     {{ t("nearbyStations.neighborhoodScore.gtfsJourneyDate", { date: referenceDate, version: journey.datasetVersion ?? "—" }) }}<br>
     {{ t("nearbyStations.neighborhoodScore.gtfsJourneySummary", summary) }}
+    <template v-if="boardingStop"><br>{{ t("nearbyStations.neighborhoodScore.gtfsBoardingStop", { station: boardingStop }) }}</template>
     <span v-if="journey.status === 'partial'"> · {{ t("nearbyStations.neighborhoodScore.gtfsJourneyPartial") }}</span>
     <template v-if="minimumTransferSeconds"><br>{{ t("nearbyStations.neighborhoodScore.gtfsTransferMinimum", { duration: formatTransferDuration(minimumTransferSeconds) }) }}</template>
+    <template v-if="finalAccess"><br>{{ t(finalAccess.status === 'documented'
+      ? "nearbyStations.neighborhoodScore.finalAccessDocumented" : finalAccess.status === 'estimated'
+        ? "nearbyStations.neighborhoodScore.finalAccessEstimated" : "nearbyStations.neighborhoodScore.finalAccessIncomplete", finalAccess) }}</template>
     <template v-for="(change, index) in sameLineChanges" :key="index">
       <br>{{ t("nearbyStations.neighborhoodScore.gtfsSameLineChange", { line: change.line, station: change.station, duration: formatTransferDuration(change.waitingSeconds) }) }}
       <template v-if="change.from && change.to && change.from !== change.to"> {{ t("nearbyStations.neighborhoodScore.gtfsMissionChange", { from: change.from, to: change.to }) }}</template>

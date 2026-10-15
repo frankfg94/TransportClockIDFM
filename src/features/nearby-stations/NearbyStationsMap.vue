@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useSlots, watch } from "vue";
 import { Activity, BusFront, Check, ChevronRight, Download, Ear, EllipsisVertical, Euro, ExternalLink, Footprints, Gauge, Layers, LoaderCircle, Map as MapIcon, MapPin, Maximize2, Minimize2, Minus, Navigation, Plus, Radar, Route, Satellite, Store, TrainFront, TramFront, Wind, ZoomIn, ZoomOut, X } from "lucide-vue-next";
 import AppRightPanel from "../../components/AppRightPanel.vue";
+import ContextMenu from "../../components/ContextMenu.vue";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import NearbyPlaceCanvas from "./NearbyPlaceCanvas.vue";
 import MapItemTransitionGroup from "../../components/MapItemTransitionGroup";
@@ -193,6 +194,11 @@ type NearbyEnvironmentHover =
 
 type NearbySidebarTab = "summary" | "schedule";
 
+interface NearbyMapOrigin {
+  lon: number;
+  lat: number;
+}
+
 type SummaryFrequencyState =
   | { status: "loading" }
   | { status: "ready"; profile: GtfsLineFrequencyResponse }
@@ -201,6 +207,7 @@ type SummaryFrequencyState =
 const props = withDefaults(defineProps<{
   variant?: "transit" | "places-preview";
   allowZoom?: boolean;
+  allowOriginMove?: boolean;
   suspendResizeWork?: boolean;
   reduceMotion?: boolean;
   selectedPlaceId?: string;
@@ -256,6 +263,7 @@ const props = withDefaults(defineProps<{
   travelWalkingSegments?: readonly NearbyWalkingMapSegment[];
   walkingRoute?: NearbyWalkingRoute;
 }>(), {
+  allowOriginMove: false,
   lineSelectionMode: "single",
   showNearbyBenches: false,
   showNearbyParkings: false,
@@ -303,12 +311,26 @@ const emit = defineEmits<{
   openPlacesRanking: [populationByCity?: Readonly<Record<string, number>>];
   toggleCityCommerce: [visible: boolean];
   selectPlace: [placeId?: string];
+  moveOrigin: [origin: NearbyMapOrigin];
 }>();
 
 const { n, t } = useI18n();
 const slots = useSlots();
 const isPlacesPreview = computed(() => props.variant === "places-preview");
 const canInteractWithMap = computed(() => !isPlacesPreview.value || props.allowZoom === true);
+const moveOriginContextMenuOpen = ref(false);
+const moveOriginContextMenuPoint = ref<{ x: number; y: number }>();
+const moveOriginContextTarget = ref<NearbyMapOrigin>();
+const moveOriginContextScreenPoint = ref<ScreenPoint>();
+const moveOriginContextAnotherCity = ref(false);
+const moveOriginContextClassificationPending = ref(false);
+let moveOriginContextRequestToken = 0;
+const originMarkerMoveActive = ref(false);
+const originMarkerScreenOverride = ref<ScreenPoint>();
+let pendingMapOriginMoveKey: string | undefined;
+let originMarkerMoveTimer: number | undefined;
+let pendingMapOriginMoveTimer: number | undefined;
+const NEARBY_ORIGIN_MARKER_MOVE_DURATION_MS = 680;
 const NEARBY_ZOOM_OUT_RATIO = 1.2;
 // Let the nearby map zoom in to twice its reference scale while keeping the
 // zoom range bounded for touch and mouse interactions.
@@ -468,6 +490,8 @@ const pinnedStationId = ref<string>();
 const stationHoveredLineId = ref<string>();
 const stationPinnedLineId = ref<string>();
 const stationTooltipsSuppressed = ref(false);
+const lineFrequencyCardSuppressed = ref(false);
+const NEARBY_LINE_FREQUENCY_CARD_SUPPRESSION_MS = 10_000;
 const summaryHoveredLineId = ref<string>();
 const summaryPinnedLineId = ref<string>();
 const summaryFrequencyStates = ref(new Map<string, SummaryFrequencyState>());
@@ -585,6 +609,7 @@ let feederPulseTimer: number | undefined;
 let feederPulseToken = 0;
 let sidebarResizePointerId: number | undefined;
 let stationTooltipSuppressionTimer: number | undefined;
+let lineFrequencyCardSuppressionTimer: number | undefined;
 let sidebarSwipe: {
   pointerId: number;
   startX: number;
@@ -1079,6 +1104,7 @@ const activeStationLineGroups = computed(() => {
   });
 });
 const originScreen = computed(() => worldToScreen(lonLatToWorld(props.origin), camera.value));
+const originMarkerScreen = computed(() => originMarkerScreenOverride.value ?? originScreen.value);
 // Eligibility and world projection do not depend on camera position.
 const eligibleMapPlaces = computed(() => {
   if (summaryLineHoverActive.value || !props.showNearbyPlaces) return [];
@@ -2222,7 +2248,25 @@ watch(isochroneConfigurationError, (isMissing) => {
 
 watch(
   () => [props.origin.lon, props.origin.lat, props.radius, root.value?.clientWidth, root.value?.clientHeight],
-  () => {
+  (_, [previousLon, previousLat]) => {
+    const originChanged = props.origin.lon !== previousLon || props.origin.lat !== previousLat;
+    const isMapOriginMove = originChanged
+      && pendingMapOriginMoveKey === nearbyOriginCoordinateKey(props.origin);
+    if (originChanged && pendingMapOriginMoveKey) {
+      pendingMapOriginMoveKey = undefined;
+      if (pendingMapOriginMoveTimer !== undefined) window.clearTimeout(pendingMapOriginMoveTimer);
+      pendingMapOriginMoveTimer = undefined;
+      originMarkerScreenOverride.value = undefined;
+      if (originMarkerMoveTimer !== undefined) window.clearTimeout(originMarkerMoveTimer);
+      originMarkerMoveTimer = undefined;
+      originMarkerMoveActive.value = isMapOriginMove && !reducedMotion.value;
+      if (originMarkerMoveActive.value) {
+        originMarkerMoveTimer = window.setTimeout(() => {
+          originMarkerMoveActive.value = false;
+          originMarkerMoveTimer = undefined;
+        }, NEARBY_ORIGIN_MARKER_MOVE_DURATION_MS + 60);
+      }
+    }
     if (cityViewEnabled.value && irisDataset.value) {
       cityViewSelectionExact.value = selectIrisNeighborhoodsForPoint(
         irisDataset.value,
@@ -2232,6 +2276,7 @@ watch(
     }
     if (props.suspendResizeWork) return;
     void nextTick(() => {
+      if (isMapOriginMove) return;
       fitView(!isPlacesPreview.value);
       if (isPlacesPreview.value && props.selectedPlaceId) focusSelectedPlace(true);
     });
@@ -2555,6 +2600,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  moveOriginContextRequestToken += 1;
   document.removeEventListener("fullscreenchange", syncFullscreenState);
   stopSidebarResize();
   resizeObserver?.disconnect();
@@ -2569,6 +2615,9 @@ onBeforeUnmount(() => {
   if (feederPulseTimer !== undefined) window.clearTimeout(feederPulseTimer);
   if (suppressClickTimer !== undefined) window.clearTimeout(suppressClickTimer);
   if (stationTooltipSuppressionTimer !== undefined) window.clearTimeout(stationTooltipSuppressionTimer);
+  if (lineFrequencyCardSuppressionTimer !== undefined) window.clearTimeout(lineFrequencyCardSuppressionTimer);
+  if (originMarkerMoveTimer !== undefined) window.clearTimeout(originMarkerMoveTimer);
+  if (pendingMapOriginMoveTimer !== undefined) window.clearTimeout(pendingMapOriginMoveTimer);
   if (nearbyMapLoadingTimeout !== undefined) clearTimeout(nearbyMapLoadingTimeout);
   for (const controller of summaryFrequencyControllers.values()) controller.abort();
   summaryFrequencyControllers.clear();
@@ -3501,6 +3550,75 @@ function localScreenPoint(clientX: number, clientY: number): ScreenPoint | undef
   return { x: clientX - bounds.left, y: clientY - bounds.top };
 }
 
+function nearbyOriginCoordinateKey(point: NearbyMapOrigin): string {
+  return `${point.lon.toFixed(7)}:${point.lat.toFixed(7)}`;
+}
+
+async function classifyOriginContextTarget(point: NearbyMapOrigin, requestToken: number): Promise<void> {
+  try {
+    const dataset = irisDataset.value ?? await fetchIrisDataset();
+    if (requestToken !== moveOriginContextRequestToken) return;
+    irisDataset.value = dataset;
+
+    const originSelection = selectIrisNeighborhoodsForPoint(dataset, props.origin, { scope: "commune" });
+    const targetSelection = selectIrisNeighborhoodsForPoint(dataset, point, { scope: "commune" });
+    const originCommuneCode = originSelection.exact ? originSelection.neighborhoods[0]?.communeCode : undefined;
+    const targetCommuneCode = targetSelection.exact ? targetSelection.neighborhoods[0]?.communeCode : undefined;
+    moveOriginContextAnotherCity.value = Boolean(
+      originCommuneCode && targetCommuneCode && originCommuneCode !== targetCommuneCode,
+    );
+  } catch {
+    if (requestToken === moveOriginContextRequestToken) moveOriginContextAnotherCity.value = false;
+  } finally {
+    if (requestToken === moveOriginContextRequestToken) moveOriginContextClassificationPending.value = false;
+  }
+}
+
+function openOriginContextMenu(event: MouseEvent): void {
+  if (!props.allowOriginMove || !canInteractWithMap.value || isInteractiveMapTarget(event.target)) return;
+  const position = localScreenPoint(event.clientX, event.clientY);
+  if (!position) return;
+  const point = worldToLonLat(screenToWorld(position, camera.value));
+  if (!Number.isFinite(point.lon) || !Number.isFinite(point.lat)) return;
+
+  event.preventDefault();
+  moveOriginContextTarget.value = point;
+  moveOriginContextScreenPoint.value = position;
+  moveOriginContextMenuPoint.value = { x: event.clientX, y: event.clientY };
+  moveOriginContextAnotherCity.value = false;
+  moveOriginContextClassificationPending.value = true;
+  moveOriginContextMenuOpen.value = true;
+  const requestToken = ++moveOriginContextRequestToken;
+  void classifyOriginContextTarget(point, requestToken);
+}
+
+function moveOriginHere(): void {
+  if (moveOriginContextClassificationPending.value) return;
+  const point = moveOriginContextTarget.value;
+  const screenPoint = moveOriginContextScreenPoint.value;
+  moveOriginContextMenuOpen.value = false;
+  moveOriginContextTarget.value = undefined;
+  moveOriginContextScreenPoint.value = undefined;
+  if (!point || !screenPoint) return;
+  if (nearbyOriginCoordinateKey(point) === nearbyOriginCoordinateKey(props.origin)) return;
+
+  pendingMapOriginMoveKey = nearbyOriginCoordinateKey(point);
+  originMarkerScreenOverride.value = screenPoint;
+  originMarkerMoveActive.value = !reducedMotion.value;
+  if (originMarkerMoveTimer !== undefined) window.clearTimeout(originMarkerMoveTimer);
+  originMarkerMoveTimer = window.setTimeout(() => {
+    originMarkerMoveActive.value = false;
+    originMarkerMoveTimer = undefined;
+  }, NEARBY_ORIGIN_MARKER_MOVE_DURATION_MS + 60);
+  if (pendingMapOriginMoveTimer !== undefined) window.clearTimeout(pendingMapOriginMoveTimer);
+  pendingMapOriginMoveTimer = window.setTimeout(() => {
+    pendingMapOriginMoveKey = undefined;
+    originMarkerScreenOverride.value = undefined;
+    pendingMapOriginMoveTimer = undefined;
+  }, 12_000);
+  emit("moveOrigin", point);
+}
+
 function distanceBetween(first: ScreenPoint, second: ScreenPoint): number {
   return Math.hypot(second.x - first.x, second.y - first.y);
 }
@@ -3707,6 +3825,15 @@ function suppressStationTooltips(): void {
     stationTooltipsSuppressed.value = false;
     stationTooltipSuppressionTimer = undefined;
   }, 10_000);
+}
+
+function suppressLineFrequencyCard(): void {
+  lineFrequencyCardSuppressed.value = true;
+  if (lineFrequencyCardSuppressionTimer !== undefined) window.clearTimeout(lineFrequencyCardSuppressionTimer);
+  lineFrequencyCardSuppressionTimer = window.setTimeout(() => {
+    lineFrequencyCardSuppressed.value = false;
+    lineFrequencyCardSuppressionTimer = undefined;
+  }, NEARBY_LINE_FREQUENCY_CARD_SUPPRESSION_MS);
 }
 
 function updateSummaryFrequencyState(lineId: string, state: SummaryFrequencyState): void {
@@ -3964,6 +4091,7 @@ function updateClusterGroupingDistance(event: Event): void {
 
 function pinStation(stationId: string): void {
   const supplemental = displayedSupplementalStations.value.find((candidate) => candidate.id === stationId);
+  if (supplemental?.projected) suppressLineFrequencyCard();
   const entry = (cityViewEnabled.value
     ? cityViewStationEntries.value.find((candidate) => candidate.id === stationId)
     : undefined)
@@ -4914,6 +5042,7 @@ function mix(from: number, to: number, progress: number): number {
     :style="{
       '--nearby-sidebar-width': `${sidebarWidth}px`,
       '--nearby-city-transition-duration': `${CITY_VIEW_CAMERA_TRANSITION_DURATION_MS}ms`,
+      '--nearby-origin-move-duration': `${NEARBY_ORIGIN_MARKER_MOVE_DURATION_MS}ms`,
     }"
   >
     <div
@@ -4936,6 +5065,7 @@ function mix(from: number, to: number, progress: number): number {
       @pointermove="handleMapPointerMove"
       @pointerup="handlePointerEnd"
       @click.capture="handleMapClick"
+      @contextmenu="openOriginContextMenu"
       @wheel="handleWheel"
     >
       <slot
@@ -5255,7 +5385,7 @@ function mix(from: number, to: number, progress: number): number {
         </div>
       </div>
       <NearbyLineHoverCard
-        v-if="!cityViewEnabled && lineHoverCardLine"
+        v-if="!cityViewEnabled && !lineFrequencyCardSuppressed && lineHoverCardLine"
         :line="lineBadge(lineHoverCardLine)"
         :profile="summaryLineFrequencyProfile"
         :loading="summaryLineFrequencyLoading"
@@ -6206,7 +6336,8 @@ function mix(from: number, to: number, progress: number): number {
       />
       <div
         class="nearby-map__origin"
-        :style="{ left: `${originScreen.x}px`, top: `${originScreen.y}px` }"
+        :class="{ 'nearby-map__origin--moving': originMarkerMoveActive }"
+        :style="{ left: `${originMarkerScreen.x}px`, top: `${originMarkerScreen.y}px` }"
         :title="t('nearbyStations.origin')"
         aria-hidden="true"
       >
@@ -6499,6 +6630,28 @@ function mix(from: number, to: number, progress: number): number {
         <Route :size="20" aria-hidden="true" />
       </button>
     </div>
+
+    <ContextMenu
+      v-if="props.allowOriginMove"
+      v-model:open="moveOriginContextMenuOpen"
+      :point="moveOriginContextMenuPoint"
+      :aria-label="t('nearbyStations.mapContextMenuAria')"
+      teleport-to=".nearby-map-shell"
+      class="nearby-map__move-context-menu"
+      :z-index="12040"
+    >
+      <button
+        data-testid="nearby-map-move-here"
+        type="button"
+        role="menuitem"
+        :disabled="moveOriginContextClassificationPending"
+        :aria-busy="moveOriginContextClassificationPending"
+        @click="moveOriginHere"
+      >
+        <Navigation :size="16" aria-hidden="true" />
+        {{ t(moveOriginContextAnotherCity ? "nearbyStations.moveToCity" : "nearbyStations.moveHere") }}
+      </button>
+    </ContextMenu>
 
     <aside
       v-if="!isPlacesPreview && !cityViewEnabled && travelPanelOpen && $slots['travel-sidebar']"

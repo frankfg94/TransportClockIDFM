@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import { createNeighborhoodGtfsRouter } from "../../../shared/gtfs/routing";
+import { NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS } from "../../../shared/gtfs/neighborhoodTimeout";
 import { createGtfsTimetableLoader } from "../../../shared/gtfs/timetableRuntime";
 import { computeGtfsLineFrequency, getGtfsFrequencyServiceDate } from "../../../shared/gtfs/frequencyComputation";
 import { mapFrequencyStops } from "../../../shared/gtfs/frequencyTopology";
@@ -13,6 +14,7 @@ import { createNeighborhoodGtfsSchedulingQueues } from "./neighborhoodGtfsTaskQu
 import { createNeighborhoodGtfsWalkingMatrix } from "./neighborhoodGtfsWalkingMatrix";
 import { createNeighborhoodGtfsAssetReader } from "./neighborhoodGtfsAssets";
 import { createNeighborhoodTimetableCache, selectNeighborhoodCivilTimetable, selectNeighborhoodServiceTimetable } from "./neighborhoodTimetableCache";
+import { resolveNightAccess } from "../../../shared/gtfs/nightAccess";
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 let manifest: { baseUrl: string; expires: number; promise: Promise<GtfsManifest | undefined> } | undefined;
@@ -56,7 +58,8 @@ const route = createNeighborhoodGtfsRouter<RoutingContext>({
   matrix: (context, origin, destinations, options) => {
     const details: Record<string, unknown> = { destinations: destinations.length, reverse: options?.reverse === true };
     return observeWorkerStep(context.diagnostics, "walking-matrix", details, async () => {
-      const routes = await matrix(context.baseUrl, origin, destinations, { ...options, observe: (cached, reused, examined) => {
+      const routes = await matrix(context.baseUrl, origin, destinations, { ...options, coldStart,
+        observeStorage: available => { details.persistentStorageAvailable = available; }, observe: (cached, reused, examined) => {
         context.diagnostics.matrixCalls++;
         if (cached) context.diagnostics.matrixCacheHits++;
         context.diagnostics.walkingPairsReused += reused;
@@ -84,7 +87,7 @@ async function topology(baseUrl: string, lineId: string, version: string): Promi
       try {
         const url = new URL(`/api/lines/${encodeURIComponent(lineId)}/topology`, baseUrl);
         url.searchParams.set("gtfsVersion", version);
-        const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+        const response = await fetch(url, { signal: AbortSignal.timeout(NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS) });
         if (!response.ok) return undefined;
         const value = await response.json() as LineTopology;
         return Array.isArray(value.stations) && Array.isArray(value.segments) && Array.isArray(value.patterns) ? value : undefined;
@@ -143,7 +146,18 @@ scope.addEventListener("message", (event: MessageEvent<NeighborhoodGtfsWorkerReq
     if (message.kind === "routes") { diagnostics.purpose = message.request.purpose; diagnostics.destinations = message.request.destinations.length; }
     if (message.kind !== "routes") activeDiagnostics = diagnostics;
     try {
-      const payload = message.kind === "frequency" ? await frequency(baseUrl, message.lineId)
+      const payload = message.kind === "night-access" ? await resolveNightAccess(message.request, {
+        loadLine: async (lineId, date) => {
+          const current = await runtime.getManifest(baseUrl);
+          return selectNeighborhoodCivilTimetable(await loadTimetable(baseUrl, lineId, date, `${current?.timetable?.path}:${current?.cacheGeneration}`));
+        },
+        matrix: (origin, destinations) => matrix(baseUrl, origin, destinations, { coldStart,
+          observe: (cached, reused, examined) => {
+            diagnostics.matrixCalls++; if (cached) diagnostics.matrixCacheHits++;
+            diagnostics.walkingPairsReused += reused; diagnostics.walkingPairsRequested += examined - reused;
+          } }),
+        assertCurrent: () => { if (isCancelled()) throw new DOMException("Obsolete night access", "AbortError"); },
+      }) : message.kind === "frequency" ? await frequency(baseUrl, message.lineId)
         : message.kind === "last-service" ? await lastService(baseUrl, message)
         : await route({ baseUrl, diagnostics, isCancelled }, message.request);
       if (message.kind === "routes") {

@@ -20,6 +20,8 @@ export interface GtfsTimetableStop {
   name: string;
   lat?: number;
   lon?: number;
+  locationType?: number;
+  stopAccess?: 0 | 1;
 }
 
 export interface GtfsTimetableService {

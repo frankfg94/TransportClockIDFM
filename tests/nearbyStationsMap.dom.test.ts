@@ -2288,6 +2288,38 @@ describe("NearbyStationsMap summary sidebar", () => {
   });
 });
 
+describe("NearbyStationsMap origin context menu", () => {
+  it("emits the clicked map coordinates and animates the origin marker there", async () => {
+    const restoreViewport = installMapViewport(720, 380);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(createIrisResponse()), { status: 200 })));
+    const wrapper = mountMap([]);
+
+    try {
+      await wrapper.setProps({ allowOriginMove: true });
+      await wrapper.get(".nearby-map").trigger("contextmenu", { clientX: 430, clientY: 220 });
+      await flushPromises();
+
+      const moveHere = document.body.querySelector<HTMLButtonElement>("[data-testid='nearby-map-move-here']");
+      expect(moveHere?.textContent).toContain("Se déplacer ici");
+      moveHere?.click();
+      await nextTick();
+      expect(wrapper.get(".nearby-map__origin").classes()).toContain("nearby-map__origin--moving");
+
+      const point = wrapper.emitted("moveOrigin")?.at(-1)?.[0] as { lon: number; lat: number } | undefined;
+      expect(point).toBeDefined();
+      expect(Number.isFinite(point?.lon)).toBe(true);
+      expect(Number.isFinite(point?.lat)).toBe(true);
+
+      await wrapper.setProps({ origin: point! });
+      expect(wrapper.get(".nearby-map__origin").classes()).toContain("nearby-map__origin--moving");
+    } finally {
+      wrapper.unmount();
+      restoreViewport();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("NearbyStationsMap line focus", () => {
   it("emits fullscreen state changes for overlays that must stay inside the fullscreen element", async () => {
     const metro = createLine("line:metro:1", "METRO");

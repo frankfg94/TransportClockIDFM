@@ -1,11 +1,12 @@
 import type { NeighborhoodJourneysRequest, NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
+import { NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS } from "../../../shared/gtfs/neighborhoodTimeout";
 import { toServerApiUrl } from "../serverApi";
 import { isNeighborhoodGtfsColdStart } from "./neighborhoodGtfsDebug";
 import { beginVerdictDebugTask, isVerdictDebugEnabled } from "../verdictDebugTimeline";
 import type { NeighborhoodGtfsWorkerAction, NeighborhoodGtfsWorkerRequest, NeighborhoodGtfsWorkerResponse } from "./neighborhoodGtfsWorkerProtocol";
 
 interface Pending { worker: Worker; resolve(payload: unknown): void; reject(error: unknown): void; cleanup(): void; finish: ReturnType<typeof beginVerdictDebugTask> }
-type WorkerGroup = "routes" | "timetable";
+type WorkerGroup = "routes" | "timetable" | "night";
 const workers = new Map<WorkerGroup, Worker>();
 let nextId = 0;
 const pending = new Map<number, Pending>();
@@ -67,7 +68,8 @@ export function requestBrowserNeighborhoodGtfs<T>(action: NeighborhoodGtfsWorker
   return new Promise((resolve, reject) => {
     const id = ++nextId;
     const finish = beginVerdictDebugTask("gtfs-worker", action.kind, action.kind === "routes" ? { destinations: action.request.destinations.length, purpose: action.request.purpose }
-      : { lineId: action.lineId, ...(action.kind === "last-service" ? { stationId: action.stationId } : {}) });
+      : action.kind === "night-access" ? { lines: action.request.lines.length, datetime: action.request.datetime }
+        : { lineId: action.lineId, ...(action.kind === "last-service" ? { stationId: action.stationId } : {}) });
     const cancel = () => {
       const subscriber = pending.get(id);
       finish(signal.aborted ? "cancelled" : "error");
@@ -79,7 +81,7 @@ export function requestBrowserNeighborhoodGtfs<T>(action: NeighborhoodGtfsWorker
       cleanup();
     };
     const abort = () => { cancel(); reject(signal.reason); };
-    const timer = setTimeout(() => { cancel(); reject(new Error("GTFS browser routing timed out")); }, 180_000);
+    const timer = setTimeout(() => { cancel(); reject(new Error("GTFS browser routing timed out")); }, NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS);
     const cleanup = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); };
     signal.addEventListener("abort", abort, { once: true });
     try {
@@ -89,7 +91,7 @@ export function requestBrowserNeighborhoodGtfs<T>(action: NeighborhoodGtfsWorker
       const plainAction = JSON.parse(JSON.stringify(action)) as NeighborhoodGtfsWorkerAction;
       // Street-routing HTTP waits must not block the independently scheduled
       // frequency/last-departure pair. Each worker retains only its own data.
-      const target = ensureWorker(action.kind === "routes" ? "routes" : "timetable");
+      const target = ensureWorker(action.kind === "night-access" ? "night" : action.kind === "routes" ? "routes" : "timetable");
       pending.set(id, { worker: target, resolve: payload => resolve(payload as T), reject, cleanup, finish });
       target.postMessage({ id, baseUrl, coldStart: isNeighborhoodGtfsColdStart(), debug: isVerdictDebugEnabled(), ...plainAction } satisfies NeighborhoodGtfsWorkerRequest);
     } catch (error) { finish("error"); pending.delete(id); cleanup(); reject(error); }

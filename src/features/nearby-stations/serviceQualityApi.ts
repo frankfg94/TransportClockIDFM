@@ -1,4 +1,5 @@
 import { runNetworkTask } from "../../services/networkScheduler";
+import { NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS } from "../../../shared/gtfs/neighborhoodTimeout";
 import { toServerApiUrl } from "../../services/serverApi";
 import type { PublicVerdictSource } from "./neighborhoodVerdictApi";
 
@@ -81,5 +82,5 @@ export async function fetchServiceQuality(signal?: AbortSignal): Promise<PublicS
       )
     ) throw new Error("Unsupported service-quality contract");
     return payload;
-  }, signal);
+  }, signal, NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS);
 }

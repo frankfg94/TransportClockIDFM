@@ -1,7 +1,7 @@
 import type { GtfsLineFrequencyResponse } from "../../../types/lineFrequency";
 import type { GlobalMapLine, GlobalMapMode } from "../../transport-map/contracts/manifest";
 import type { NearbyHeavyTransportCandidate, NearbyJourney } from "../nearbyHeavyTransports";
-import { analyzeNearbyJourneyTiming, isNearbyJourneyTransitSection, isNearbyJourneyWalkingSection } from "../nearbyJourneyTiming";
+import { analyzeNearbyJourneyTiming, compareNearbyTramBoardingWalk, isNearbyJourneyTransitSection, isNearbyJourneyWalkingSection } from "../nearbyJourneyTiming";
 import type { NearbyStationEntry } from "../nearbyStations";
 import type { NeighborhoodScoreInput } from "./contracts";
 import { getNeighborhoodFrequencyRelevanceWeight, HEAVY_SCORE_MODES } from "./contracts";
@@ -10,11 +10,27 @@ import type { NeighborhoodTransportAccessSignal } from "./transportAccess";
 import { formatTransportLineName, lineKey } from "./transportAccess";
 
 export function chooseFastestJourney(journeys: readonly NearbyJourney[] | undefined): NearbyJourney | undefined {
-  return [...(journeys ?? [])]
+  const byPattern = new Map<string, NearbyJourney>();
+  for (const journey of journeys ?? []) {
+    const pattern = journey.sections.filter(isNearbyJourneyTransitSection).map(section => section.lineId ?? section.lineCode).join("|");
+    const previous = byPattern.get(pattern);
+    if (!previous || compareJourneyPreference(journey, previous) < 0) byPattern.set(pattern, journey);
+  }
+  return [...byPattern.values()]
     .filter((journey) => finiteNonNegative(analyzeNearbyJourneyTiming(journey).scoreSeconds) !== undefined)
-    .sort((left, right) => analyzeNearbyJourneyTiming(left).scoreSeconds - analyzeNearbyJourneyTiming(right).scoreSeconds
-      || (left.transferCount ?? Number.POSITIVE_INFINITY) - (right.transferCount ?? Number.POSITIVE_INFINITY)
-      || (left.id ?? "").localeCompare(right.id ?? ""))[0];
+    .sort(compareJourneyPreference)[0];
+}
+
+function compareJourneyPreference(left: NearbyJourney, right: NearbyJourney): number {
+  const leftTiming = analyzeNearbyJourneyTiming(left);
+  const rightTiming = analyzeNearbyJourneyTiming(right);
+  const transfers = (journey: NearbyJourney) => journey.transferCount
+    ?? Math.max(0, journey.sections.filter(isNearbyJourneyTransitSection).length - 1);
+  return leftTiming.scoreSeconds - rightTiming.scoreSeconds
+    || leftTiming.elapsedSeconds - rightTiming.elapsedSeconds
+    || transfers(left) - transfers(right)
+    || compareNearbyTramBoardingWalk(left, right)
+    || (left.id ?? "").localeCompare(right.id ?? "");
 }
 
 interface JourneySummary {
@@ -67,8 +83,10 @@ export function getReadyFrequencyEntries(
 }> {
   const lines = [...stations.flatMap((entry) => entry.lines), ...(candidates ?? []).flatMap((candidate) => candidate.lines)];
   const linesById = new Map(lines.map((line) => [line.id, line]));
-  const accessByLineId = new Map(accessSignals.map((signal) => [signal.line.id, signal]));
-  const accessByLineKey = new Map(accessSignals.map((signal) => [lineKey(signal.line), signal]));
+  // Frequency belongs to the line once, using its fastest scored access.
+  const fastestFirst = [...accessSignals].sort((a, b) => b.totalSeconds - a.totalSeconds);
+  const accessByLineId = new Map(fastestFirst.map((signal) => [signal.line.id, signal]));
+  const accessByLineKey = new Map(fastestFirst.map((signal) => [lineKey(signal.line), signal]));
   return [...(profiles?.values() ?? [])]
     .filter((profile): profile is GtfsLineFrequencyResponse =>
       profile?.status === "ready" && finitePositive(profile.average.peakMinutes) !== undefined)
@@ -93,7 +111,8 @@ export function getReadyFrequencyEntries(
       };
     })
     .filter((entry): entry is { lineId: string; minutes: number; label: string; mode: GlobalMapMode; accessSeconds: number; relevanceWeight: number } => Boolean(entry))
-    .filter((entry): entry is { lineId: string; minutes: number; label: string; mode: GlobalMapMode; accessSeconds: number; relevanceWeight: number } => Number.isFinite(entry.minutes));
+    .filter((entry): entry is { lineId: string; minutes: number; label: string; mode: GlobalMapMode; accessSeconds: number; relevanceWeight: number } => Number.isFinite(entry.minutes))
+    .filter((entry, index, entries) => entries.findIndex(other => lineKey(linesById.get(other.lineId)!) === lineKey(linesById.get(entry.lineId)!)) === index);
 }
 
 export function findLineById(input: NeighborhoodScoreInput, lineId: string): GlobalMapLine | undefined {

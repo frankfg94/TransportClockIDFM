@@ -8,6 +8,8 @@ import type { NearbyHeavyTransportCandidate, NearbyJourney, NearbyJourneyRequest
 import type { NearbyPlace, PlacesProvider } from "../src/features/nearby-stations/nearbyPlaces";
 import type { NearbyStationEntry } from "../src/features/nearby-stations/nearbyStations";
 import { useNearbyNeighborhoodScore } from "../src/features/nearby-stations/useNearbyNeighborhoodScore";
+import { buildLineTopologyFromFixture } from "../server/services/topology/buildLineTopology";
+import type { LineTopology } from "../server/services/topology/types";
 
 // Each test may provide its own verdict response; never use a live backend.
 beforeEach(() => {
@@ -162,6 +164,38 @@ function readyFrequency(lineId: string): GtfsLineFrequencyResponse {
 }
 
 describe("useNearbyNeighborhoodScore", () => {
+  it("loads full topology with transport tasks, aborts stale origins and reuses the completed cache", async () => {
+    const line = createLine(), origin = ref({ lon: 2.3, lat: 48.82 });
+    const graph = buildLineTopologyFromFixture({ line: { id: line.id, name: "Test", shortName: "Test", aliases: [], mode: "METRO" },
+      stations: [{ id: "a", name: "A" }, { id: "b", name: "B" }],
+      patterns: [{ id: "full", terminalFrom: "a", terminalTo: "b", stops: ["a", "b"], tripCount: 1 }] });
+    const pending: { signal: AbortSignal; resolve: (value: LineTopology) => void }[] = [];
+    const fetchTopology = vi.fn((_lineId: string, signal?: AbortSignal) => new Promise<LineTopology>((resolve, reject) => {
+      pending.push({ signal: signal!, resolve });
+      signal!.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    }));
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const wrapper = mount(defineComponent({ setup() {
+      score = useNearbyNeighborhoodScore({ origin, stations: ref([createEntry(line)]), network: ref(createNetwork(line)), fetchTopology,
+        fetchFrequency: async () => readyFrequency(line.id), fetchLastService: async () => undefined,
+        placesProvider: { searchNearby: async () => [], searchDestinations: async () => [] },
+        travelRoutesProvider: { findJourneys: async () => [] } });
+      return () => null;
+    } }));
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    expect(score.transportPending.value).toContain(`branches:${line.id}`);
+    origin.value = { lon: 2.31, lat: 48.82 };
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    expect(pending[0]!.signal.aborted).toBe(true);
+    pending[1]!.resolve(graph);
+    await vi.waitFor(() => expect(score.diagnostics.value.topologies[0]).toMatchObject({ lineId: line.id, available: true, stations: 2 }));
+    expect(score.transportPending.value).not.toContain(`branches:${line.id}`);
+    origin.value = { lon: 2.32, lat: 48.82 };
+    await flushPromises();
+    expect(fetchTopology).toHaveBeenCalledTimes(2);
+    expect(score.diagnostics.value.topologies[0]?.available).toBe(true);
+    wrapper.unmount();
+  });
   it("loads the documentary response before serializing heavy timetable requests", async () => {
     let releaseDocumentary!: () => void;
     const documentary = new Promise<void>(resolve => { releaseDocumentary = resolve; });

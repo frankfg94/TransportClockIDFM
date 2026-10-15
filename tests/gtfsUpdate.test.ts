@@ -246,8 +246,29 @@ describe("GTFS update publication", () => {
     await runGtfsUpdate({ outputDir: setup.outputDir, local: true });
     const current = await readManifest(setup.outputDir);
     const routing = JSON.parse(await fs.readFile(join(setup.outputDir, current.routing!.path, "index.json"), "utf8"));
-    expect(routing.transfers).toEqual([[0, 1, 306], [0, 1, 210], [1, 0, 210]]);
-    expect(routing.pathwayTransferIndices).toEqual([1, 2]);
+    expect(routing.transfers).toEqual([[0, 1, 306]]);
+    expect(routing.pedestrianGraphVersion).toBe(1);
+    expect(routing.pathways).toEqual([{ id: "P", from: 0, to: 1, mode: 1, bidirectional: true, seconds: 210 }]);
+    expect(routing.pathwayTransferIndices).toBeUndefined();
+  });
+
+  it("appends entrances and intermediate pathway nodes without renumbering timetable or boarding stops", async () => {
+    const setup = await fixture(false, 3, {
+      "stops.txt": "stop_id,stop_name,stop_lat,stop_lon,location_type,parent_station,stop_access\nA,Station A,48.8,2.3,0,,1\nB,Station B,48.81,2.31,0,P,0\nP,Parent,48.81,2.31,1,,\nE,Entrance,48.8101,2.3101,2,P,\nN,Intermediate,48.8102,2.3102,3,P,\n",
+      "transfers.txt": "from_stop_id,to_stop_id,transfer_type,min_transfer_time\nA,B,2,364\n",
+      "pathways.txt": "pathway_id,from_stop_id,to_stop_id,pathway_mode,is_bidirectional,traversal_time,length\nfirst,E,N,1,1,30,20\nlast,N,B,7,0,45,30\nunknown,E,B,2,0,,10\n",
+    });
+    setup.fetchArchive(); await runGtfsUpdate({ outputDir: setup.outputDir, local: true });
+    const current = await readManifest(setup.outputDir);
+    const routing = JSON.parse(await fs.readFile(join(setup.outputDir, current.routing!.path, "index.json"), "utf8"));
+    expect(routing.stops.slice(0, 3).map((stop: { id: string }) => stop.id)).toEqual(["A", "B", "P"]);
+    expect(routing.boardingStops).toEqual([0, 1]);
+    expect(routing.stops.find((stop: { id: string }) => stop.id === "E")).toMatchObject({ locationType: 2, parentId: "P" });
+    expect(routing.stops[1].stopAccess).toBe(0);
+    expect(routing.transfers).toEqual([[0, 1, 364]]);
+    expect(routing.pathways).toHaveLength(3);
+    expect(routing.pathways[1]).toMatchObject({ mode: 7, bidirectional: false });
+    expect(routing.pathways[2].seconds).toBeUndefined();
   });
 
   it.each(["missing", "old-version"])(

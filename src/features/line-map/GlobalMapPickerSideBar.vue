@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
-import { XIcon } from "lucide-vue-next";
+import { ArrowLeftIcon, XIcon } from "lucide-vue-next";
 import GlobalMapSidebarBodyLine from "./GlobalMapSidebarBodyLine.vue";
 import GlobalMapSidebarBodyStation from "./GlobalMapSidebarBodyStation.vue";
 import GlobalMapSidebarTrafficCalendarBody from "./GlobalMapSidebarTrafficCalendarBody.vue";
@@ -37,6 +37,7 @@ const MOBILE_SHEET_OVERSCROLL_PX = 56;
 const props = withDefaults(defineProps<{
   station?: GlobalMapStation;
   line?: GlobalMapLine;
+  canGoBack?: boolean;
   lines?: GlobalMapLine[];
   allLines?: GlobalMapLine[];
   stations?: GlobalMapStation[];
@@ -72,6 +73,7 @@ const props = withDefaults(defineProps<{
   nearbyPlacesError?: boolean;
   nearbyPlacesRadiusMinutes?: NearbyLineRadiusMinutes;
 }>(), {
+  canGoBack: false,
   lines: () => [],
   allLines: () => [],
   stations: () => [],
@@ -108,6 +110,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   close: [];
+  back: [];
   "select-line": [lineId: string];
   "change-line": [];
   "view-line-schema": [];
@@ -716,9 +719,22 @@ onBeforeUnmount(() => {
       <span aria-hidden="true" />
     </button>
     <header class="global-map-picker-sidebar__header" :class="{ 'global-map-picker-sidebar__header--line': panelLine || trafficCalendarOpen }">
-      <div>
-        <p class="global-map-picker-sidebar__eyebrow">{{ panelEyebrow }}</p>
-        <h2>{{ panelTitle }}</h2>
+      <div class="global-map-picker-sidebar__header-main">
+        <button
+          v-if="props.canGoBack && !isLinePreview"
+          class="global-map-picker-sidebar__back"
+          type="button"
+          data-global-map-sidebar-back
+          :aria-label="t('globalMap.sidebar.back')"
+          @click="emit('back')"
+        >
+          <ArrowLeftIcon :size="17" :stroke-width="2.25" aria-hidden="true" />
+          <span>{{ t("globalMap.sidebar.back") }}</span>
+        </button>
+        <div class="global-map-picker-sidebar__heading">
+          <p class="global-map-picker-sidebar__eyebrow">{{ panelEyebrow }}</p>
+          <h2>{{ panelTitle }}</h2>
+        </div>
       </div>
       <button v-if="!isLinePreview" class="global-map-picker-sidebar__close" type="button" :aria-label="trafficCalendarOpen ? t('globalMap.sidebar.closeTrafficCalendar') : t('globalMap.sidebar.close')" @click="emit('close')">
         <XIcon :size="20" :stroke-width="2.25" aria-hidden="true" />
@@ -818,8 +834,29 @@ onBeforeUnmount(() => {
 }
 .global-map-picker-sidebar__header h2,
 .global-map-picker-sidebar__header p { margin: 0; }
+.global-map-picker-sidebar__header-main { display: grid; min-width: 0; gap: 8px; }
+.global-map-picker-sidebar__heading { min-width: 0; }
 .global-map-picker-sidebar__header h2 { max-width: 310px; font-size: 1.12rem; letter-spacing: -.02em; }
 .global-map-picker-sidebar__eyebrow { margin-bottom: 6px !important; color: #71809d; font-size: .64rem; font-weight: 950; letter-spacing: .12em; text-transform: uppercase; }
+.global-map-picker-sidebar__back {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+  min-height: 30px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: #4a5872;
+  font-size: .82rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+.global-map-picker-sidebar__back:hover,
+.global-map-picker-sidebar__back:focus-visible { border-color: #d8dfec; outline: 0; background: #f1f4fa; color: #18233f; }
+.global-map-picker-sidebar__back svg { display: block; flex: 0 0 auto; }
 .global-map-picker-sidebar__sheet-handle { display: none; }
 .global-map-picker-sidebar__close {
   display: inline-flex;

@@ -1,4 +1,7 @@
 import type { NearbyJourneyPoint } from "./nearbyHeavyTransports";
+import type { GlobalMapMode } from "../transport-map/contracts/manifest";
+
+export const NEARBY_IMMEDIATE_BOARDING_MAX_SECONDS = 2 * 60;
 
 export type NearbyWalkingRouteProvider = "idfm-navitia" | "openrouteservice" | "ign-bdtopo" | "straight-line";
 export type NearbyWalkingRoutingPolicy = "preferred" | "ors-only" | "gtfs-access";
@@ -55,6 +58,13 @@ export function createStraightLineWalkingRoute(
     coordinates: [origin, destination],
     fallback: true,
   };
+}
+
+/** Explicit map-distance policy for immediately nearby surface boarding. */
+export function createImmediateTramWalkingRoute(origin: NearbyJourneyPoint, destination: NearbyJourneyPoint, mode?: GlobalMapMode): NearbyWalkingRoute | undefined {
+  if (mode !== "TRAM" && mode !== "CABLE") return undefined;
+  const route = createStraightLineWalkingRoute(origin, destination);
+  return route.durationSeconds <= NEARBY_IMMEDIATE_BOARDING_MAX_SECONDS ? route : undefined;
 }
 
 export function haversineMeters(left: NearbyJourneyPoint, right: NearbyJourneyPoint): number {

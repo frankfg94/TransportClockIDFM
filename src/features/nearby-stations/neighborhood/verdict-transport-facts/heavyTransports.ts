@@ -1,4 +1,4 @@
-import type { GlobalMapLine, GlobalMapMode } from "../../../transport-map/contracts/manifest";
+import type { GlobalMapLine, GlobalMapMode, GlobalMapStation } from "../../../transport-map/contracts/manifest";
 import { getNearbyHeavyAccessContributionWeight, NEARBY_HEAVY_BUS_ACCESS_MAX_SECONDS, NEARBY_HEAVY_TOTAL_MAX_SECONDS } from "../../nearbyHeavyTransportRules";
 import type { NearbyHeavyTransportCandidate, NearbyJourney, NearbyJourneySection } from "../../nearbyHeavyTransports";
 import { getNearbyHeavyAccessTravelSeconds } from "../../nearbyHeavyTransports";
@@ -11,14 +11,20 @@ import { RULE_KEYS, SOURCE_KEYS } from "../i18nKeys";
 import { commercialDistanceMeters } from "../places";
 import { normalizeScoreText } from "../primitives";
 import type { TransportFactsContext } from "./context";
+import { resolveTransportSection, type NeighborhoodTransportSection } from "../transportSections";
 
 export interface NeighborhoodTransportAccessSignal {
   line: GlobalMapLine;
   lineName: string;
+  section?: NeighborhoodTransportSection;
+  /** The final station matters when a future hub covers only one access. */
+  station?: Pick<GlobalMapStation, "id" | "name" | "lon" | "lat">;
   /** Present when this line came from a GPE target resolved by the heavy router. */
   futureProject?: PublicFutureGpeStation;
   source: "route" | "map";
   accessKind: "walking" | "connection" | "map";
+  /** Physical proximity survives replacement of a map estimate by a route. */
+  atAddress?: boolean;
   /** Elapsed route duration, retained for eligibility and provenance. */
   totalSeconds: number;
   /** Display duration: walking and riding sections, excluding waits. */
@@ -40,10 +46,8 @@ export interface NeighborhoodTransportAccessOption {
   journey: NearbyJourney;
 }
 
-// Keep the verdict aligned with the resolver used by NearbyStationsMap. The
-// resolver has already rejected routes beyond this limit; applying the same
-// limit here prevents a valid projected station (for example RER B via T10)
-// from disappearing merely because it is outside the 600 m map radius.
+// Shared bonus threshold. The verdict may retain longer approaches as neutral
+// context, independently of the map radius and the resolver's default filter.
 export const NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS = NEARBY_HEAVY_TOTAL_MAX_SECONDS;
 export const NEIGHBORHOOD_TRANSPORT_ACCESS_LIMIT_SECONDS = 15 * 60;
 const NEIGHBORHOOD_TRANSPORT_AT_FOOT_METERS = 400;
@@ -82,12 +86,14 @@ export function listTransportAccessSignals(input: NeighborhoodScoreInput): Neigh
       const signal: NeighborhoodTransportAccessSignal = {
         line,
         lineName: formatTransportLineName(line),
+        station: { ...entry.station, id: entry.id },
         source: "map",
         accessKind: distanceMeters <= NEIGHBORHOOD_TRANSPORT_AT_FOOT_METERS ? "walking" : "map",
         totalSeconds: Math.max(60, Math.round(distanceMeters / 80) * 60),
         travelSeconds: Math.max(60, Math.round(distanceMeters / 80) * 60),
         distanceMeters: Math.round(distanceMeters),
         minutes: Math.max(1, Math.round(distanceMeters / 80)),
+        atAddress: distanceMeters <= NEIGHBORHOOD_TRANSPORT_AT_FOOT_METERS && Math.round(distanceMeters / 80) <= 2,
       };
       keepBestTransportSignal(byLine, signal);
     }
@@ -99,10 +105,14 @@ export function listTransportAccessSignals(input: NeighborhoodScoreInput): Neigh
       const access = accessForHeavyLine(candidate, line);
       if (!Number.isFinite(access.totalSeconds) || access.totalSeconds < 0) continue;
       const eligibilitySeconds = access.journey?.source === "gtfs" ? getNearbyHeavyAccessTravelSeconds(access) : access.totalSeconds;
-      if (eligibilitySeconds > NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS) continue;
+      if (!Number.isFinite(eligibilitySeconds) || eligibilitySeconds < 0) continue;
+      // A current-line access cannot be created by riding that same line.
+      if (!candidate.futureProjectsByLine?.[line.id] && access.journey?.sections
+        .filter(isNearbyJourneyTransitSection).some(section => journeySectionMatchesLine(section, line))) continue;
       const signal: NeighborhoodTransportAccessSignal = {
         line,
         lineName: formatTransportLineName(line),
+        station: { ...candidate.station, id: candidate.entry.id },
         futureProject: candidate.futureProjectsByLine?.[line.id],
         source: "route",
         accessKind: access.kind === "direct" ? "walking" : "connection",
@@ -126,7 +136,18 @@ export function listTransportAccessSignals(input: NeighborhoodScoreInput): Neigh
     }
   }
 
-  return [...byLine.values()].sort(compareTransportAccessSignalsForDisplay);
+  const signals = [...byLine.values()].map(signal => ({ ...signal,
+    section: signal.futureProject || !signal.station ? undefined : resolveTransportSection(
+      input.lineTopologies?.get(signal.line.id) ?? input.lineTopologies?.get(signal.line.sourceLineId ?? ""), signal.station, signal.journey,
+    ),
+  }));
+  const immediateByLine = new Map<string, NeighborhoodTransportAccessSignal>();
+  for (const signal of signals.filter(signal => signal.atAddress && !signal.futureProject)) {
+    const key = transportAccessGroupKey(signal), previous = immediateByLine.get(key);
+    if (!previous || signal.distanceMeters < previous.distanceMeters) immediateByLine.set(key, signal);
+  }
+  return signals.filter(signal => signal.futureProject || !immediateByLine.has(transportAccessGroupKey(signal))
+    || immediateByLine.get(transportAccessGroupKey(signal)) === signal).sort(compareTransportAccessSignalsForDisplay);
 }
 
 function transportAccessOptions(
@@ -140,7 +161,7 @@ function transportAccessOptions(
     if (access.kind !== "connection" || !access.journey) continue;
     const seconds = getNearbyHeavyAccessTravelSeconds(access);
     const eligibility = access.journey.source === "gtfs" ? seconds : access.totalSeconds;
-    if (!Number.isFinite(seconds) || seconds < 0 || !Number.isFinite(eligibility) || eligibility < 0 || eligibility > NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS) continue;
+    if (!Number.isFinite(seconds) || seconds < 0 || !Number.isFinite(eligibility) || eligibility < 0) continue;
     const via = formatJourneyTransitRoute(knownLines, access.journey, line) ?? formatFeederLineName(input, access);
     if (!via) continue;
     const key = normalizeScoreText(via);
@@ -158,26 +179,26 @@ function keepBestTransportSignal(
 ): void {
   const key = signal.futureProject
     ? `future:${signal.futureProject.id}`
-    : lineKey(signal.line);
+    : transportAccessSignalKey(signal);
   const current = byLine.get(key);
   if (!current) { byLine.set(key, signal); return; }
   const winner = compareTransportAccessSignals(signal, current) < 0 ? signal : current;
-  // Every qualifying station can offer a distinct feeder to the same heavy
-  // line. Keep those options when selecting the best line-level signal.
+  // Merge alternatives only for the same line and final station.
   const options = new Map<string, NeighborhoodTransportAccessOption>();
   for (const option of [...(current.accessOptions ?? []), ...(signal.accessOptions ?? [])]) {
     const optionKey = normalizeScoreText(option.via), previous = options.get(optionKey);
     if (!previous || option.travelSeconds < previous.travelSeconds) options.set(optionKey, option);
   }
   const accessOptions = [...options.values()].sort((a, b) => a.travelSeconds - b.travelSeconds || a.via.localeCompare(b.via, "fr-FR"));
-  byLine.set(key, { ...winner, ...(accessOptions.length ? { accessOptions } : {}) });
+  byLine.set(key, { ...winner, atAddress: current.atAddress || signal.atAddress, ...(accessOptions.length ? { accessOptions } : {}) });
 }
 
 function compareTransportAccessSignals(
   left: NeighborhoodTransportAccessSignal,
   right: NeighborhoodTransportAccessSignal,
 ): number {
-  return Number(right.source === "route") - Number(left.source === "route")
+  const unverified = (signal: NeighborhoodTransportAccessSignal) => Number(Boolean(signal.journey?.sections.some(section => section.finalLineAccess && section.finalLineAccess.status !== "documented")));
+  return unverified(left) - unverified(right) || Number(right.source === "route") - Number(left.source === "route")
     || left.travelSeconds - right.travelSeconds
     || left.totalSeconds - right.totalSeconds
     || left.minutes - right.minutes
@@ -275,7 +296,7 @@ function formatJourneyTransitRoute(
   return routeLabels.join(" → ") || undefined;
 }
 
-function journeySectionMatchesLine(section: NearbyJourneySection, line: GlobalMapLine): boolean {
+export function journeySectionMatchesLine(section: NearbyJourneySection, line: GlobalMapLine): boolean {
   if (section.lineMode && section.lineMode !== line.mode) return false;
   const sectionReferences = [section.lineId, section.lineCode, ...(section.lineAliases ?? [])]
     .filter((value): value is string => Boolean(value?.trim()));
@@ -382,8 +403,11 @@ function transportModeLabel(mode: GlobalMapMode): string {
 
 export function makeTransportAccessFact(signal: NeighborhoodTransportAccessSignal): NeighborhoodFact {
   const contributionWeight = signal.contributionWeight ?? 1;
-  const reduced = contributionWeight < 1;
-  const atAddress = signal.accessKind === "walking" && signal.minutes <= 2;
+  const contextOnly = signal.travelSeconds > NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS;
+  const finalStatus = signal.journey?.sections.find(section => section.finalLineAccess && section.finalLineAccess.status !== "documented")?.finalLineAccess?.status;
+  const unclassified = signal.section?.kind === "unclassified";
+  const reduced = contributionWeight === 0.5;
+  const atAddress = signal.atAddress || signal.accessKind === "walking" && signal.minutes <= 2;
   const kind: NeighborhoodFactKind = atAddress
     ? "transportLineAtAddress"
     : signal.source === "route"
@@ -395,37 +419,47 @@ export function makeTransportAccessFact(signal: NeighborhoodTransportAccessSigna
   const displayedVia = options.length > 1 ? options.map(option => option.via).join(", ") : signal.via;
   const values = {
     line: signal.lineName,
-    minutes: signal.minutes,
+    minutes: finalStatus === "estimated" ? `≈${signal.minutes}` : signal.minutes,
     meters: signal.distanceMeters,
     via: signal.accessKind === "walking"
       ? " à pied"
       : displayedVia ? ` via ${displayedVia}` : "",
+    station: signal.station?.name ?? "",
   };
   const fact = makeFact({
-    id: `transport-line-${lineKey(signal.line).replace(/[^a-z0-9]+/giu, "-")}`,
+    id: `transport-line-${encodeURIComponent(transportAccessGroupKey(signal))}`,
     kind,
     category: "transport",
-    polarity: "positive",
-    contributionWeight,
-    family: `transport-proximity:${lineKey(signal.line)}`,
+    polarity: contextOnly || contributionWeight === 0 ? "neutral" : "positive",
+    contributionWeight: contextOnly ? 0 : contributionWeight,
+    family: `transport-proximity:${transportAccessGroupKey(signal)}`,
     priority: (atAddress
       ? 13
       : signal.source === "route" ? 12 : signal.distanceMeters <= NEIGHBORHOOD_TRANSPORT_AT_FOOT_METERS ? 11 : 10) * contributionWeight,
     values,
     sourceKey: signal.source === "route" ? SOURCE_KEYS.heavyRoutes : SOURCE_KEYS.stations,
     proof: signal.source === "route" ? "direct" : "derived",
-    ruleKey: reduced ? RULE_KEYS.transportBusReduced : signal.accessKind === "connection" && signal.journey?.sections.some(section => section.lineMode === "BUS" || section.lineMode === "NOCTILIEN")
+    ruleKey: finalStatus ? "nearbyStations.neighborhoodScore.rules.transportFinalAccessUnverified" : contextOnly ? "nearbyStations.neighborhoodScore.rules.transportAccessContext" : unclassified ? "nearbyStations.neighborhoodScore.rules.transportAccessUnclassified" : atAddress ? "nearbyStations.neighborhoodScore.rules.transportAtAddress" : reduced ? RULE_KEYS.transportBusReduced : signal.accessKind === "connection" && signal.journey?.sections.some(section => section.lineMode === "BUS" || section.lineMode === "NOCTILIEN")
       ? RULE_KEYS.transportBusAccess : signal.source === "route" ? RULE_KEYS.transportProximity : RULE_KEYS.transportDistance,
-    ruleValues: { threshold: reduced ? NEARBY_HEAVY_BUS_ACCESS_MAX_SECONDS / 60 : signal.source === "route" ? 15 : 1_500, maximum: NEARBY_HEAVY_TOTAL_MAX_SECONDS / 60 },
-    emphasis: atAddress ? "exceptional" : undefined,
+    ruleValues: { threshold: reduced ? NEARBY_HEAVY_BUS_ACCESS_MAX_SECONDS / 60 : signal.source === "route" ? NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS / 60 : 1_500, maximum: NEARBY_HEAVY_TOTAL_MAX_SECONDS / 60 },
+    emphasis: atAddress && !contextOnly && contributionWeight > 0 ? "exceptional" : undefined,
     travel: signal.journey ? { journey: signal.journey,
       routes: options.length > 1 ? options.map(option => ({ line: option.via, accessMinutes: option.minutes, journey: option.journey })) : undefined,
     } : undefined,
   });
+  fact.transportSection = signal.section;
+  if (signal.station && signal.source === "route" && !atAddress) {
+    fact.labelKey = "nearbyStations.neighborhoodScore.facts.transportStationNearby.label";
+  }
+  if (atAddress && signal.source === "route") fact.tooltipKey = "nearbyStations.neighborhoodScore.facts.transportLineAtAddressRouted.tooltip";
   // The tooltip describes the recommended route; its list details the choices.
   return options.length > 1
     ? { ...fact, tooltipValues: { ...values, via: signal.via ? ` via ${signal.via}` : "" } }
     : fact;
+}
+
+export function transportAccessSignalKey(signal: NeighborhoodTransportAccessSignal): string {
+  return `${lineKey(signal.line)}${signal.station ? `:station:${signal.station.id}` : ""}`;
 }
 
 export function lineKey(line: Pick<GlobalMapLine, "id" | "code">): string {
@@ -434,11 +468,30 @@ export function lineKey(line: Pick<GlobalMapLine, "id" | "code">): string {
     : `id:${line.id}`;
 }
 
-export function buildHeavyTransportFacts(context: TransportFactsContext): NeighborhoodFact[] {
-  const { accessSignals, hubCoveredLineKeys } = context;
-  const positiveFacts: NeighborhoodFact[] = [];
-  for (const signal of accessSignals.filter((candidate) => !hubCoveredLineKeys.has(lineKey(candidate.line))).slice(0, 4)) {
-    positiveFacts.push(makeTransportAccessFact(signal));
+export function transportAccessGroupKey(signal: NeighborhoodTransportAccessSignal): string {
+  return signal.futureProject ? `future:${signal.futureProject.id}`
+    : `${lineKey(signal.line)}${signal.section ? `:${signal.section.id}` : ""}`;
+}
+
+/** One winning station per physical section; retain station signals for GPE destinations. */
+export function selectBestTransportAccessSignals(signals: readonly NeighborhoodTransportAccessSignal[]): NeighborhoodTransportAccessSignal[] {
+  const best = new Map<string, NeighborhoodTransportAccessSignal>();
+  for (const signal of signals) {
+    const key = transportAccessGroupKey(signal), previous = best.get(key);
+    const unverified = (value: NeighborhoodTransportAccessSignal) => Number(Boolean(value.journey?.sections.some(section => section.finalLineAccess && section.finalLineAccess.status !== "documented")));
+    if (!previous || unverified(signal) < unverified(previous) || unverified(signal) === unverified(previous) && (signal.travelSeconds < previous.travelSeconds
+      || signal.travelSeconds === previous.travelSeconds && compareTransportAccessSignals(signal, previous) < 0)) best.set(key, signal);
   }
-  return positiveFacts;
+  return [...best.values()].sort(compareTransportAccessSignalsForDisplay);
+}
+
+export function buildHeavyTransportFacts(context: TransportFactsContext): NeighborhoodFact[] {
+  const { accessSignals, scoredAccessSignals, hubCoveredAccessKeys } = context;
+  const scoredKeys = new Set(scoredAccessSignals.map(transportAccessGroupKey));
+  // Select before hub suppression, so a slower station of the same branch
+  // does not reappear merely because its winner is described by a GPE fact.
+  return selectBestTransportAccessSignals(accessSignals)
+    .filter(signal => !hubCoveredAccessKeys.has(transportAccessSignalKey(signal)))
+    .map(signal => makeTransportAccessFact(signal.section?.kind === "unclassified" && !scoredKeys.has(transportAccessGroupKey(signal))
+      ? { ...signal, contributionWeight: 0 } : signal));
 }

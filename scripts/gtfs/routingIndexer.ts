@@ -64,6 +64,14 @@ export async function buildRoutingArtifacts(timetableDir: string, destination: s
     }
     flush();
     if (sourceDir) {
+      const sourceStops = new Map<string, Record<string, string>>();
+      await readCsv(join(sourceDir, "stops.txt"), row => { sourceStops.set(row.stop_id, row); });
+      const metadata = (id: string) => {
+        const row = sourceStops.get(id);
+        return row ? { locationType: Number(row.location_type || 0),
+          stopAccess: row.stop_access === "0" ? 0 as const : row.stop_access === "1" ? 1 as const : undefined } : {};
+      };
+      for (const stop of index.stops) Object.assign(stop, metadata(stop.id));
       const children = new Map<string, number[]>();
       index.stops.forEach((s, i) => { const ids = children.get(s.parentId ?? s.id) ?? []; ids.push(i); children.set(s.parentId ?? s.id, ids); });
       const expand = (id: string) => children.get(id) ?? (stops.has(id) ? [stops.get(id)!] : []);
@@ -84,19 +92,31 @@ export async function buildRoutingArtifacts(timetableDir: string, destination: s
         });
       }
       if (await fs.stat(join(sourceDir, "pathways.txt")).catch(() => undefined)) {
+        // Append physical nodes AFTER expanding transfer rules. Entrances must
+        // neither renumber timetable stops nor become vehicle boarding stops.
+        const addPhysicalStop = (id: string): number => {
+          const existing = stops.get(id);
+          if (existing !== undefined) return existing;
+          const row = sourceStops.get(id);
+          if (!row) throw new Error(`Unknown pathway stop: ${id}`);
+          const number = index.stops.length;
+          stops.set(id, number);
+          index.stops.push({ id, name: row.stop_name || id, parentId: row.parent_station || undefined,
+            lat: row.stop_lat?.trim() ? Number(row.stop_lat) : undefined,
+            lon: row.stop_lon?.trim() ? Number(row.stop_lon) : undefined, ...metadata(id) });
+          if (row.parent_station) addPhysicalStop(row.parent_station);
+          return number;
+        };
+        index.pathways = [];
         await readCsv(join(sourceDir, "pathways.txt"), row => {
           const seconds = Number(row.traversal_time);
-          if (!row.traversal_time || !Number.isFinite(seconds) || seconds < 0) return;
-          for (const a of expand(row.from_stop_id)) for (const b of expand(row.to_stop_id)) if (a !== b) {
-            (index.pathwayTransferIndices ??= []).push(index.transfers.length);
-            index.transfers.push([a, b, seconds]);
-            if (row.is_bidirectional === "1") {
-              index.pathwayTransferIndices.push(index.transfers.length);
-              index.transfers.push([b, a, seconds]);
-            }
-          }
+          index.pathways!.push({ id: row.pathway_id, from: addPhysicalStop(row.from_stop_id), to: addPhysicalStop(row.to_stop_id),
+            mode: Number(row.pathway_mode), bidirectional: row.is_bidirectional === "1" && row.pathway_mode !== "7",
+            seconds: row.traversal_time && Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined,
+            lengthMeters: row.length && Number.isFinite(Number(row.length)) && Number(row.length) >= 0 ? Number(row.length) : undefined });
         });
       }
+      index.pedestrianGraphVersion = 1;
     }
     for (const file of await fs.readdir(spool)) {
       const hour = file.replace(/\.jsonl$/u, "");

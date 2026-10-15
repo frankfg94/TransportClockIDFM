@@ -1,7 +1,10 @@
 import { computed, onBeforeUnmount, readonly, ref, shallowReadonly, shallowRef, watch } from "vue";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { fetchGtfsLineFrequency } from "../../services/lineFrequency";
+import { fetchLineTopology } from "../../services/lineTopology";
+import type { LineTopology } from "../../../server/services/topology/types";
 import { runNetworkTask } from "../../services/networkScheduler";
+import { NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS } from "../../../shared/gtfs/neighborhoodTimeout";
 import { beginVerdictDebugTask } from "../../services/verdictDebugTimeline";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
 import { useLineFrequencyTimetable, type UseLineFrequencyTimetableOptions } from "../line-map/useLineFrequencyTimetable";
@@ -72,6 +75,7 @@ import {
   type PublicNeighborhoodVerdict,
 } from "./neighborhoodVerdictApi";
 import type { PublicServiceQuality } from "./serviceQualityApi";
+import { loadNoctilienAccess } from "./noctilienAccess";
 
 type ReadonlyValue<T> = { readonly value: T };
 
@@ -106,6 +110,8 @@ export interface UseNearbyNeighborhoodScoreOptions {
   placesProvider?: PlacesProvider;
   travelRoutesProvider?: TravelRoutesProvider;
   fetchFrequency?: typeof fetchGtfsLineFrequency;
+  fetchTopology?: typeof fetchLineTopology;
+  fetchNightAccess?: typeof loadNoctilienAccess;
   fetchLastService?: UseLineFrequencyTimetableOptions["fetchLastService"];
   serviceQuality?: ReadonlyValue<PublicServiceQuality | undefined>;
   initialSnapshot?: NearbyNeighborhoodScoreSnapshot;
@@ -116,6 +122,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const placesProvider = options.placesProvider ?? defaultProviders.places;
   const travelRoutesProvider = options.travelRoutesProvider ?? defaultProviders.travelRoutes;
   const fetchFrequency = options.fetchFrequency ?? fetchGtfsLineFrequency;
+  const fetchTopology = options.fetchTopology ?? fetchLineTopology;
   const frequencyTimetable = useLineFrequencyTimetable({ fetchFrequency, fetchLastService: options.fetchLastService });
   const defaultNightJourneyDateTime = getNearbyNightJourneyDateTime();
   const places = ref<NearbyPlace[]>([]);
@@ -132,7 +139,9 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const journeyBenchmarks = ref<NeighborhoodJourneyBenchmark[]>([]);
   const greenSpaceJourneys = ref<NeighborhoodGreenSpaceJourney[]>([]);
   const noctilienJourneys = ref<NearbyJourney[]>([]);
+  let noctilienController: AbortController | undefined;
   const frequencyProfiles = shallowRef(new Map<string, GtfsLineFrequencyResponse | undefined>());
+  const lineTopologies = shallowRef(new Map<string, LineTopology | undefined>());
   const lastServiceByLine = shallowRef(new Map<string, Awaited<ReturnType<typeof frequencyTimetable.getLastService>>>());
   const hospitalJourneys = ref<Record<string, NearbyJourney[] | undefined>>({});
   const backendVerdict = shallowRef<PublicNeighborhoodVerdict>();
@@ -157,6 +166,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const journeyResults = new Map<string, NearbyJourney[]>();
   const journeyRequests = new Map<string, { controller: AbortController; promise: Promise<NearbyJourney[]> }>();
   const frequencyResults = new Map<string, GtfsLineFrequencyResponse>();
+  const topologyResults = new Map<string, LineTopology | undefined>();
+  const topologyRequests = new Map<string, { controller: AbortController; promise: Promise<LineTopology | undefined> }>();
   const frequencyRequests = new Map<string, { controller: AbortController; promise: Promise<GtfsLineFrequencyResponse> }>();
   const lastServiceResults = new Map<string, Awaited<ReturnType<typeof frequencyTimetable.getLastService>>>();
   const lastServiceRequests = new Map<string, { controller: AbortController; promise: Promise<Awaited<ReturnType<typeof frequencyTimetable.getLastService>>> }>();
@@ -182,7 +193,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const requestScheduler = createNeighborhoodRequestScheduler(6);
   // Timetables can load a complete regional line. Do not overlap those large
   // requests, or let them compete with the first documentary response.
-  const timetableRequestScheduler = createNeighborhoodRequestScheduler(1);
+  const timetableRequestScheduler = createNeighborhoodRequestScheduler(1, NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS);
   const PLACES_CRITERIA: readonly NeighborhoodCategoryId[] = ["daily-life", "nature-leisure", "health", "education"];
   const ROUTE_CRITERIA: readonly NeighborhoodCategoryId[] = ["nature-leisure", "health", "transport"];
 
@@ -216,6 +227,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       noctilienJourneys: noctilienJourneys.value,
       noctilienDepartureTime: options.nightDepartureTime?.value ?? DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME,
       frequencyProfiles: frequencyProfiles.value,
+      lineTopologies: lineTopologies.value,
       lastServiceByLine: lastServiceByLine.value,
       hospitalJourneys: hospitalJourneys.value,
       serviceQuality: options.serviceQuality?.value,
@@ -426,30 +438,41 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     }
     journeyBenchmarks.value = nextBenchmarks;
 
-    const noctilienTargets = waitingForCatalog ? [] : resolveNoctilienTargets(options.network.value, origin);
-    const noctilienResults: NearbyJourney[] = [];
-    for (const target of noctilienTargets) {
-      const journeyKey = journeyCacheKey(originKey, target.id, target, nightJourneyDateTime, "night");
-      trackTask(
-        `noctilien:${target.id}`,
-        loadJourneyProbe(origin, target, nightJourneyDateTime, journeyKey, 1),
-        token,
-        (next) => {
-          for (const journey of next) {
-            if (hasNoctilienTransitSection(journey)
-              && !noctilienResults.some((candidate) => nearbyJourneyDeduplicationKey(candidate) === nearbyJourneyDeduplicationKey(journey))) {
-              noctilienResults.push(journey);
-            }
-          }
-          noctilienJourneys.value = [...noctilienResults];
-          updatedAt.value = Date.now();
-        },
-        true,
-        "routes",
-        ["transport"],
-      );
-    }
     noctilienJourneys.value = [];
+    if (options.journeySource === "gtfs") {
+      if (!waitingForCatalog) {
+        noctilienController = new AbortController();
+        trackTask("noctilien:access", (options.fetchNightAccess ?? loadNoctilienAccess)(options.network.value,
+          origin, nightJourneyDateTime, noctilienController.signal), token, next => {
+          noctilienJourneys.value = next.journeys;
+          updatedAt.value = Date.now();
+        }, true, "routes", ["transport"]);
+      }
+    } else {
+      const noctilienTargets = waitingForCatalog ? [] : resolveNoctilienTargets(options.network.value, origin);
+      const noctilienResults: NearbyJourney[] = [];
+      for (const target of noctilienTargets) {
+        const journeyKey = journeyCacheKey(originKey, target.id, target, nightJourneyDateTime, "night");
+        trackTask(
+          `noctilien:${target.id}`,
+          loadJourneyProbe(origin, target, nightJourneyDateTime, journeyKey, 1),
+          token,
+          (next) => {
+            for (const journey of next) {
+              if (hasNoctilienTransitSection(journey)
+                && !noctilienResults.some((candidate) => nearbyJourneyDeduplicationKey(candidate) === nearbyJourneyDeduplicationKey(journey))) {
+                noctilienResults.push(journey);
+              }
+            }
+            noctilienJourneys.value = [...noctilienResults];
+            updatedAt.value = Date.now();
+          },
+          true,
+          "routes",
+          ["transport"],
+        );
+      }
+    }
 
     loadTransportLineDetails(token);
     // Include follow-up tasks discovered by the verdict and places responses.
@@ -474,6 +497,17 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     );
     updateFrequencyTargets(lineTargets);
     for (const { lineId, stationId } of lineTargets) {
+      const topologyTaskId = `branches:${lineId}`;
+      if (topologyResults.has(lineId)) {
+        lineTopologies.value = new Map(lineTopologies.value).set(lineId, topologyResults.get(lineId));
+        markCriteriaDirty(["transport"]);
+        scheduleRecompute();
+      } else if (!pendingTasks.has(topologyTaskId)) {
+        trackTask(topologyTaskId, loadTopology(lineId), token, next => {
+          lineTopologies.value = new Map(lineTopologies.value).set(lineId, next);
+          updatedAt.value = Date.now();
+        }, false, "timetables", ["transport"]);
+      }
       const frequencyTaskId = `frequency:${lineId}`;
       if (!frequencyResults.has(lineId) && !pendingTasks.has(frequencyTaskId)) {
         trackTask(
@@ -538,6 +572,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     greenSpaceJourneys.value = [];
     noctilienJourneys.value = [];
     frequencyProfiles.value = new Map();
+    lineTopologies.value = new Map();
     lastServiceByLine.value = new Map();
     hospitalJourneys.value = {};
     frequencyResults.clear();
@@ -852,6 +887,22 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     );
   }
 
+  function loadTopology(lineId: string): Promise<LineTopology | undefined> {
+    const active = topologyRequests.get(lineId);
+    if (active) return active.promise;
+    const controller = new AbortController();
+    const promise = requestScheduler.schedule(signal => fetchTopology(lineId, signal), controller.signal, 2)
+      .then(next => {
+        controller.signal.throwIfAborted();
+        topologyResults.set(lineId, next);
+        return next;
+      }).finally(() => {
+        if (topologyRequests.get(lineId)?.promise === promise) topologyRequests.delete(lineId);
+      });
+    topologyRequests.set(lineId, { controller, promise });
+    return promise;
+  }
+
   function loadFrequency(lineId: string): Promise<GtfsLineFrequencyResponse> {
     const cached = frequencyResults.get(lineId);
     if (cached) return Promise.resolve(cached);
@@ -1091,6 +1142,12 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   }
 
   function abortActiveRequests(): void {
+    noctilienController?.abort();
+    noctilienController = undefined;
+    for (const [key, request] of topologyRequests) {
+      request.controller.abort();
+      topologyRequests.delete(key);
+    }
     for (const [key, request] of placeRequests) {
       request.controller.abort();
       placeRequests.delete(key);
@@ -1202,6 +1259,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     for (const request of placeRequests.values()) request.controller.abort();
     for (const request of shoppingCentreRequests.values()) request.controller.abort();
     for (const request of frequencyRequests.values()) request.controller.abort();
+    for (const request of topologyRequests.values()) request.controller.abort();
     for (const request of lastServiceRequests.values()) request.controller.abort();
     for (const request of verdictRequests.values()) request.controller.abort();
     for (const request of journeyRequests.values()) request.controller.abort();
@@ -1285,6 +1343,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
           categories: entry.categories, name: entry.cause.name, message: entry.cause.message })),
         lineTargets: getRelevantLineTargets(options.stations.value, options.heavyCandidates?.value ?? heavyCandidates.value),
         frequencies: [...frequencyProfiles.value.values()],
+        topologies: [...lineTopologies.value].map(([lineId, topology]) => ({ lineId, available: Boolean(topology), stations: topology?.stations.length })),
         lastServices: [...lastServiceByLine.value.entries()],
         benchmarks: journeyBenchmarks.value,
         noctilienJourneys: noctilienJourneys.value,
@@ -1559,7 +1618,7 @@ interface NeighborhoodScheduledRequest {
   cleanup: () => void;
 }
 
-function createNeighborhoodRequestScheduler(maxConcurrency: number) {
+function createNeighborhoodRequestScheduler(maxConcurrency: number, timeoutMs?: number) {
   let active = 0;
   let sequence = 0;
   const queue: NeighborhoodScheduledRequest[] = [];
@@ -1588,7 +1647,7 @@ function createNeighborhoodRequestScheduler(maxConcurrency: number) {
         aborted,
         Promise.resolve().then(() => {
           controller.signal.throwIfAborted();
-          return runNetworkTask(request.run, controller.signal);
+          return runNetworkTask(request.run, controller.signal, timeoutMs);
         }),
       ])
         .then(request.resolve, request.reject)

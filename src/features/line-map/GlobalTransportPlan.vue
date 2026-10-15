@@ -684,6 +684,7 @@
           v-if="showPickerSidebar"
           :station="activeStationView"
           :line="activeLineView"
+          :can-go-back="canReturnToPreviousSelection"
           :direction-options="busDirectionSelection?.options ?? []"
           :direction-variants="directionMergeEnabled ? [] : (busDirectionSelection?.variants ?? [])"
           :direction-loading="busDirectionLoading"
@@ -718,6 +719,7 @@
           :traffic-disruption="activeTrafficDisruption"
           :traffic-calendar="globalTrafficCalendar"
           @close="clearSelection"
+          @back="void returnToPreviousSelection()"
           @select-line="selectLineById"
           @change-line="openLineSelector"
           @view-line-schema="viewActiveLineSchema"
@@ -1713,6 +1715,22 @@ let globalMapContextFeedbackTimer: number | undefined;
 let measurementCompletionPointerId: number | undefined;
 const globalTravelAllowedModes = ref<GlobalMapMode[]>([]);
 const activeStationGroup = ref<GlobalMapStationSearchGroup>();
+type GlobalMapSelectionHistoryEntry =
+  | { kind: "line"; lineId: string }
+  | {
+      kind: "station";
+      stationId: string;
+      lineId?: string;
+      stationGroup?: GlobalMapStationSearchGroup;
+    };
+type GlobalMapSelectionIdentity =
+  | { kind: "line"; lineId: string }
+  | { kind: "station"; stationId: string };
+const selectionHistory = ref<GlobalMapSelectionHistoryEntry[]>([]);
+const restoringSelectionHistory = ref(false);
+const canReturnToPreviousSelection = computed(
+  () => selectionHistory.value.length > 0 && !restoringSelectionHistory.value,
+);
 const linePanelMode = ref<GlobalMapMode>();
 const leftControlsTransitionName = ref("global-map-controls-slide-forward");
 type GlobalTransportPlanPanelView = "presets" | "customization" | "lines";
@@ -1850,6 +1868,35 @@ const activeLine = computed(() => {
   const id = selection.activeLineId.value;
   return id ? network.value?.linesById.get(id) : undefined;
 });
+function currentSelectionHistoryEntry(): GlobalMapSelectionHistoryEntry | undefined {
+  const stationId = selection.activeStationId.value;
+  if (stationId) {
+    const lineId = selection.activeLineId.value;
+    return {
+      kind: "station",
+      stationId,
+      ...(lineId ? { lineId } : {}),
+      ...(activeStationGroup.value ? { stationGroup: activeStationGroup.value } : {}),
+    };
+  }
+  const lineId = selection.activeLineId.value;
+  return lineId ? { kind: "line", lineId } : undefined;
+}
+function sameSelectionHistoryTarget(
+  entry: GlobalMapSelectionHistoryEntry | GlobalMapSelectionIdentity,
+  target: GlobalMapSelectionIdentity,
+): boolean {
+  if (entry.kind !== target.kind) return false;
+  if (entry.kind === "line" && target.kind === "line") return entry.lineId === target.lineId;
+  if (entry.kind === "station" && target.kind === "station") return entry.stationId === target.stationId;
+  return false;
+}
+function rememberCurrentSelectionBefore(target: GlobalMapSelectionIdentity): void {
+  if (restoringSelectionHistory.value) return;
+  const current = currentSelectionHistoryEntry();
+  if (!current || sameSelectionHistoryTarget(current, target)) return;
+  selectionHistory.value = [...selectionHistory.value, current];
+}
 const irisTransportStations = computed(() => network.value
   ? transportStationsFromNetwork(network.value.stations, network.value.linesById)
   : []);
@@ -4376,6 +4423,7 @@ async function selectLineFromSearch(
   clearPreloadedLineGeometry();
   const currentLine = network.value?.linesById.get(line.id);
   if (!currentLine) return;
+  rememberCurrentSelectionBefore({ kind: "line", lineId: currentLine.id });
   if (!filters.selectedModes.value.includes(currentLine.mode)) filters.toggle(currentLine.mode);
   resetBusDirectionState();
   activeStationGroup.value = undefined;
@@ -4461,6 +4509,7 @@ function selectStation(
   loadConnections = true,
   preserveActiveLine = false,
 ): void {
+  rememberCurrentSelectionBefore({ kind: "station", stationId });
   cancelCameraAnimation();
   closeTrafficCalendar();
   resetTrafficCalendarSelection();
@@ -4490,6 +4539,50 @@ function selectStation(
   if (loadConnections) {
     const station = network.value?.stationsById.get(stationId);
     if (station) void loadStationConnections(station, stationGroup);
+  }
+}
+
+async function returnToPreviousSelection(): Promise<void> {
+  if (restoringSelectionHistory.value) return;
+
+  while (selectionHistory.value.length > 0) {
+    const previous = selectionHistory.value.pop();
+    const current = currentSelectionHistoryEntry();
+    if (!previous || (current && sameSelectionHistoryTarget(previous, current))) continue;
+
+    if (previous.kind === "line") {
+      const line = network.value?.linesById.get(previous.lineId);
+      if (!line) continue;
+      restoringSelectionHistory.value = true;
+      try {
+        await selectLineFromSearch(line, undefined, true);
+      } finally {
+        restoringSelectionHistory.value = false;
+      }
+      return;
+    }
+
+    const station = network.value?.stationsById.get(previous.stationId);
+    if (!station) continue;
+    restoringSelectionHistory.value = true;
+    try {
+      const line = previous.lineId
+        ? network.value?.linesById.get(previous.lineId)
+        : undefined;
+      if (line) await selectLineFromSearch(line, undefined, false);
+      resetLeftControlsToPresetView();
+      selectStation(
+        station.id,
+        undefined,
+        previous.stationGroup,
+        true,
+        Boolean(line),
+      );
+      animateCameraToStation(station);
+    } finally {
+      restoringSelectionHistory.value = false;
+    }
+    return;
   }
 }
 
@@ -4589,6 +4682,7 @@ function clearSelection(): void {
   disableTraffic();
   resetBusDirectionState();
   selection.clear();
+  selectionHistory.value = [];
   activeStationGroup.value = undefined;
   focusedEntranceId.value = undefined;
   resetLeftControlsToPresetView();

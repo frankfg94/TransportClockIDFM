@@ -1249,7 +1249,25 @@ async function selectCustomPlace(place: GeocoderPoint): Promise<void> {
     // Links opened from a raw map click historically carried only coordinates.
     // Reverse-resolve those coordinates before the static provider chooses a
     // commune: neighbouring bboxes overlap around municipal boundaries.
-    await nearby.selectPlace(await enrichCustomPlace(place));
+    if (place.provider === "coordinates") {
+      const enrichedPlacePromise = enrichCustomPlace(place);
+      // Move the live origin immediately so the map can animate from the click.
+      // The reverse-geocoded metadata is applied below without running the same
+      // coordinate-scoped station scan a second time.
+      void nearby.selectPlace(place);
+      const enrichedPlace = await enrichedPlacePromise;
+      if (token !== presetRequestToken.value) return;
+      customAddressLabel.value = enrichedPlace.label ?? customAddressLabel.value;
+      nearby.query.value = customAddressLabel.value;
+      nearby.selectedPlace.value = enrichedPlace;
+      return;
+    }
+
+    const enrichedPlace = await enrichCustomPlace(place);
+    if (token !== presetRequestToken.value) return;
+    customAddressLabel.value = enrichedPlace.label ?? customAddressLabel.value;
+    nearby.query.value = customAddressLabel.value;
+    await nearby.selectPlace(enrichedPlace);
   } catch {
     if (token === presetRequestToken.value) {
       placeError.value = t("nearbyStations.errors.geocodingUnavailable");
@@ -1259,14 +1277,20 @@ async function selectCustomPlace(place: GeocoderPoint): Promise<void> {
   }
 }
 
+function moveNearbyOrigin(point: Pick<GeocoderPoint, "lon" | "lat">): void {
+  const coordinateLabel = `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}`;
+  void selectCustomPlace({ ...point, label: coordinateLabel, provider: "coordinates" });
+}
+
 async function enrichCustomPlace(place: GeocoderPoint): Promise<GeocoderPoint> {
-  if (place.city?.trim() || !geocoder.reverseGeocode) return place;
+  if ((place.city?.trim() && place.provider !== "coordinates") || !geocoder.reverseGeocode) return place;
   try {
     const resolved = (await geocoder.reverseGeocode({ lon: place.lon, lat: place.lat }))[0];
-    if (!resolved?.city?.trim()) return place;
+    if (!resolved) return place;
     return {
       ...place,
-      city: resolved.city,
+      ...(place.provider === "coordinates" && resolved.label?.trim() ? { label: resolved.label } : {}),
+      ...(place.city?.trim() ? {} : resolved.city?.trim() ? { city: resolved.city } : {}),
       ...(place.postcode ? {} : resolved.postcode ? { postcode: resolved.postcode } : {}),
       ...(place.code ? {} : resolved.code ? { code: resolved.code } : {}),
     };
@@ -1814,6 +1838,7 @@ onBeforeUnmount(() => {
 
     <section v-if="nearby.selectedPlace.value && !nearbyDirectoryOpen" class="my-nearby-stations-page__map-section">
       <NearbyStationsMap
+        :allow-origin-move="true"
         :origin="nearby.selectedPlace.value"
         :origin-label="selectedAddressLabel"
         :radius="nearby.radius.value"
@@ -1862,6 +1887,7 @@ onBeforeUnmount(() => {
         :travel-walking-segments="travelWalkingSegments"
         :schedule-state="schedules.scheduleState"
         @update:radius="nearby.radius.value = $event"
+        @move-origin="moveNearbyOrigin"
         @camera-change="lineFlow.handleCameraChange"
         @hover-line="lineFlow.handleHoverLine"
         @leave-line="lineFlow.handleLeaveLine"

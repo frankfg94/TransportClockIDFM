@@ -105,7 +105,7 @@ function aggregateNeighborhoodScoreInternal(
   const selectedPositiveFacts = selectFacts(
     availableCategories.flatMap((category) => category.positiveFacts),
     "positive",
-    3,
+    Number.POSITIVE_INFINITY,
   );
   preserveChateletJourneyFact(selectedPositiveFacts, availableCategories.flatMap((category) => category.positiveFacts), "positive", 3);
   preserveJourneyBenchmarkFacts(selectedPositiveFacts, availableCategories.flatMap((category) => category.positiveFacts));
@@ -159,7 +159,7 @@ function preserveJourneyBenchmarkFacts(
   selected: NeighborhoodFact[],
   facts: readonly NeighborhoodFact[],
 ): void {
-  for (const benchmark of facts.filter((fact) => fact.family.startsWith("major-station:") || fact.family.startsWith("employment-hub:"))) {
+  for (const benchmark of facts.filter((fact) => fact.family.startsWith("major-station:") || fact.family.startsWith("employment-hub:") || fact.family.startsWith("transport-hub:") || fact.family.startsWith("transport-proximity:"))) {
     if (!selected.some((fact) => fact.id === benchmark.id)) selected.push(benchmark);
   }
   selected.sort(compareFacts);
@@ -202,9 +202,7 @@ function mergeBackendVerdict(categories: NeighborhoodCategoryResult[], verdict: 
 
 /**
  * Local nature-leisure facts that must survive `mergePositiveFactsWithBackend`.
- * That merge keeps only two positive facts, and a backend green space outranks
- * an ordinary local one, so any local nature advantage that has to stay visible
- * next to a documented park must be listed here.
+ * Preserve these local families when matching documentary facts are merged.
  */
 const NATURE_LOCAL_PROTECTED_FACT_KINDS: ReadonlySet<NeighborhoodFactKind> = new Set([
   "sportsFacilitiesNearby",
@@ -226,7 +224,7 @@ function mergePositiveFactsWithBackend(
   const selectableFacts = [...localFacts, ...externalFacts].filter(
     (fact) => !protectedFamilies.has(fact.family),
   );
-  return [...protectedLocalFacts, ...selectFacts(selectableFacts, "positive", 2)].sort(compareFacts);
+  return [...protectedLocalFacts, ...selectFacts(selectableFacts, "positive", Number.POSITIVE_INFINITY)].sort(compareFacts);
 }
 
 function preserveSelectedFamilyFact(

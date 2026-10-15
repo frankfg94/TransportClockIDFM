@@ -1,5 +1,7 @@
 import type { TranslationKey, TranslationParams } from "../../../i18n";
 import type { GtfsLineFrequencyResponse } from "../../../types/lineFrequency";
+import type { LineTopology } from "../../../../server/services/topology/types";
+import type { NeighborhoodTransportSection } from "./transportSections";
 import type { GtfsLastService } from "../../line-map/useLineFrequencyTimetable";
 import type { GlobalMapMode } from "../../transport-map/contracts/manifest";
 import type { NearbyHeavyTransportCandidate, NearbyJourney } from "../nearbyHeavyTransports";
@@ -227,6 +229,7 @@ export type NeighborhoodFactTransportReliabilityLine = Pick<
 
 export interface NeighborhoodFact {
   id: string;
+  transportSection?: NeighborhoodTransportSection;
   kind: NeighborhoodFactKind;
   category: NeighborhoodCategoryId;
   polarity: NeighborhoodFactPolarity;
@@ -325,6 +328,7 @@ export interface NeighborhoodScoreInput {
   noctilienJourneys?: readonly NearbyJourney[];
   noctilienDepartureTime?: string;
   frequencyProfiles?: ReadonlyMap<string, GtfsLineFrequencyResponse | undefined>;
+  lineTopologies?: ReadonlyMap<string, LineTopology | undefined>;
   lastServiceByLine?: ReadonlyMap<string, GtfsLastService | undefined>;
   hospitalJourneys?: Readonly<Record<string, readonly NearbyJourney[] | undefined>>;
   serviceQuality?: PublicServiceQuality;

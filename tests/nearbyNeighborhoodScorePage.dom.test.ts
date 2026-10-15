@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
     refresh: vi.fn(async () => undefined),
   },
   score: {
+    transportPending: { value: [] as string[] },
     result: { value: {} },
     diagnostics: { value: { pendingTasks: [] as string[], frequencies: [] } },
     places: { value: [] },
@@ -77,6 +78,7 @@ afterEach(() => {
   mocks.heavy.isLoading.value = false;
   mocks.heavy.error.value = undefined;
   mocks.score.isLoading.value = false;
+  mocks.score.transportPending.value = [];
   mocks.score.error.value = undefined;
   mocks.score.errorSource.value = undefined;
   mocks.score.criteria.value = Array.from({ length: 7 }, (_, index) => ({ id: `indicator-${index}`, status: "ready" as const, datasets: [] }));
@@ -92,6 +94,20 @@ beforeEach(() => {
 });
 
 describe("NearbyNeighborhoodScorePage", () => {
+  it("passes the active transport tasks to the score card instead of rendering them above it", () => {
+    mocks.routeState.query = { lat: "48.764151", lon: "2.267785" };
+    mocks.useNearbyStations.mockReturnValue(mocks.nearby);
+    mocks.useNearbyHeavyTransports.mockReturnValue(mocks.heavy);
+    mocks.useNearbyNeighborhoodScore.mockReturnValue(mocks.score);
+    mocks.heavy.isLoading.value = true;
+    mocks.score.transportPending.value = ["journey:employment-la-defense", "journey:chatelet", "frequency:rer-b", "branches:rer-b"];
+    const wrapper = mount(NearbyNeighborhoodScorePage, { global: { stubs: { NuxtLink: true, NearbyNeighborhoodScoreCard: true } } });
+    const tasks = wrapper.findComponent({ name: "NearbyNeighborhoodScoreCard" }).props("transportLoadingTasks");
+    expect(tasks.map((task: { id: string }) => task.id)).toEqual(expect.arrayContaining(["heavyAccess", "employmentHubs", "majorStations", "frequencies", "branches"]));
+    expect(wrapper.find(".transport-loading").exists()).toBe(false);
+    expect(mocks.useNearbyHeavyTransports.mock.calls.at(-1)?.[1]).toMatchObject({ retainAllCandidates: true, includeContextAccess: true });
+    wrapper.unmount();
+  });
   it.each([undefined, "0", "1"])("exposes public diagnostic data only for debugVerdict=1 (%s)", (flag) => {
     mocks.routeState.query = { lat: "48.76591", lon: "2.26821", debugVerdict: flag };
     mocks.nearby.selectedPlace.value = { lat: 48.76591, lon: 2.26821, label: "Adresse test" };

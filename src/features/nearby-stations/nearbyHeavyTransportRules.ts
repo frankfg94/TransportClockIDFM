@@ -14,6 +14,7 @@ import type {
 } from "./nearbyHeavyTransports";
 import {
   analyzeNearbyJourneyTiming,
+  compareNearbyTramBoardingWalk,
   isNearbyJourneyTransitSection as isTransitSection,
   isNearbyJourneyWalkingSection as isWalkingSection,
 } from "./nearbyJourneyTiming";
@@ -45,7 +46,7 @@ export const NEARBY_HEAVY_BUS_ACCESS_MAX_SECONDS = 15 * 60;
 export const NEARBY_HEAVY_TOTAL_MAX_SECONDS = 30 * 60;
 export const NEARBY_HEAVY_REDUCED_ACCESS_WEIGHT = 0.5;
 export const NEARBY_HEAVY_LONG_WALK_HIDE_SECONDS = 20 * 60;
-export const NEARBY_HEAVY_SEARCH_MAX_METERS = 5_000;
+export const NEARBY_HEAVY_SEARCH_MAX_METERS = 7_000;
 
 /**
  * Return the duration used for nearby-heavy labels and eligibility.
@@ -67,8 +68,9 @@ export function getNearbyHeavyAccessTravelSeconds(
 
 /** Common scoring policy for every routed bus/Noctilien station access. */
 export function getNearbyHeavyAccessContributionWeight(
-  access: Pick<NearbyHeavyTransportAccess, "scoreSeconds" | "travelSeconds" | "totalSeconds" | "feederMode">,
+  access: Pick<NearbyHeavyTransportAccess, "scoreSeconds" | "travelSeconds" | "totalSeconds" | "feederMode"> & { journey?: NearbyJourney },
 ): number {
+  if (access.journey?.sections.some(section => section.finalLineAccess && section.finalLineAccess.status !== "documented")) return 0;
   const seconds = getNearbyHeavyAccessTravelSeconds(access);
   if (!Number.isFinite(seconds) || seconds < 0 || seconds > NEARBY_HEAVY_TOTAL_MAX_SECONDS) return 0;
   return access.feederMode && NEARBY_HEAVY_BUS_MODES.includes(access.feederMode)
@@ -92,12 +94,13 @@ export interface NearbyHeavyTargetCandidate {
 export function selectNearbyHeavyTargetCandidates(
   candidates: readonly NearbyHeavyTargetCandidate[],
   perLineLimit = 6,
+  targetModes: readonly GlobalMapMode[] = NEARBY_HEAVY_TRANSPORT_MODES,
 ): NearbyHeavyTargetCandidate[] {
   const unique = new Map<string, NearbyHeavyTargetCandidate>();
   const heavyLinesByStation = new Map<string, Set<string>>();
 
   for (const candidate of candidates) {
-    if (!NEARBY_HEAVY_TRANSPORT_MODES.includes(candidate.line.mode)) continue;
+    if (!targetModes.includes(candidate.line.mode)) continue;
     const key = `${candidate.station.id}:${candidate.line.id}`;
     if (!unique.has(key)) unique.set(key, candidate);
     const lineIds = heavyLinesByStation.get(candidate.station.id) ?? new Set<string>();
@@ -199,9 +202,8 @@ export function getNearbyHeavyAccessPresentation(
  * Pure eligibility rule for a heavy target.
  *
  * A single local feeder keeps the historical rule. A multi-transit journey is
- * a stricter business case: local TRAM/CABLE first, then at most two heavy-mode
- * sections, with no BUS/NOCTILIEN section. This admits up to two changes while
- * excluding bus-based connections.
+ * a stricter business case: local TRAM/CABLE first, then at most two rail/tram
+ * sections, with no BUS/NOCTILIEN section. This admits up to two changes.
  */
 export function evaluateNearbyHeavyJourney(
   input: HeavyJourneyEvaluationInput,
@@ -216,7 +218,7 @@ export function evaluateNearbyHeavyJourney(
   const totalWalkingSeconds = walkingSections.reduce((sum, section) => sum + section.durationSeconds, 0);
 
   const eligibilitySeconds = input.journey.source === "gtfs" ? timing.scoreSeconds : totalSeconds;
-  if (eligibilitySeconds > NEARBY_HEAVY_TOTAL_MAX_SECONDS) { input.onRejected?.("travel-over-30-minutes"); return undefined; }
+  if (eligibilitySeconds > (input.maxTravelSeconds ?? NEARBY_HEAVY_TOTAL_MAX_SECONDS)) { input.onRejected?.("travel-over-30-minutes"); return undefined; }
 
   if (
     transitSections.length === 0 &&
@@ -264,7 +266,7 @@ export function evaluateNearbyHeavyJourney(
     isBusLikeMode(feederMode) ||
     heavySections.some((section) => {
       const mode = sectionLineMode(section);
-      return !isHeavyMode(mode) || isBusLikeMode(mode);
+      return !(isHeavyMode(mode) || isReliableFeederMode(mode)) || isBusLikeMode(mode);
     })
   ) {
     input.onRejected?.("unsupported-feeder-or-correspondence");
@@ -322,7 +324,7 @@ function evaluateSingleLocalFeeder(
   // reachable within the walking threshold. Keep it in journey diagnostics,
   // but do not promote an unverified bus access into a proximity advantage.
   if (input.journey.source === "gtfs" && isBusLikeMode(feederMode)
-    && sections.some(section => isWalkingSection(section) && section.timingSource === "estimated")) { input.onRejected?.("unverified-bus-walking-access"); return undefined; }
+    && sections.some(section => isWalkingSection(section) && section.timingSource === "estimated" && !section.finalLineAccess)) { input.onRejected?.("unverified-bus-walking-access"); return undefined; }
   if (
     !isLocalFeeder(feeder, input.localLineIds, input.localLineCodes) ||
     feederWalkingSeconds > NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS
@@ -349,9 +351,16 @@ function compareHeavyJourneyEvaluations(
   left: HeavyJourneyEvaluation,
   right: HeavyJourneyEvaluation,
 ): number {
-  return left.scoreSeconds - right.scoreSeconds ||
+  const unverified = (access: HeavyJourneyEvaluation) => Number(Boolean(access.journey?.sections.some(section => section.finalLineAccess && section.finalLineAccess.status !== "documented")));
+  const transfers = (access: HeavyJourneyEvaluation) => {
+    const transitCount = access.journey?.sections.filter(isTransitSection).length ?? 0;
+    return access.journey?.transferCount ?? Math.max(0, transitCount - 1);
+  };
+  return unverified(left) - unverified(right) || left.scoreSeconds - right.scoreSeconds ||
     left.totalSeconds - right.totalSeconds ||
+    transfers(left) - transfers(right) ||
     left.walkingSeconds - right.walkingSeconds ||
+    compareNearbyTramBoardingWalk(left.journey, right.journey) ||
     (left.feederRideSeconds ?? Number.POSITIVE_INFINITY) - (right.feederRideSeconds ?? Number.POSITIVE_INFINITY) ||
     (left.feederLineCode ?? left.feederLineId ?? "").localeCompare(right.feederLineCode ?? right.feederLineId ?? "", "fr");
 }

@@ -103,6 +103,110 @@ function projectedCandidate(
 }
 
 describe("nearby heavy transport eligibility", () => {
+  it("retains valid long bus approaches only when contextual access is enabled", async () => {
+    const bus = line("line:bus", "FEEDER", "BUS"), rail = line("line:rail", "RAIL", "RER");
+    const local = station("local", "Local", 2.3005, [bus.id]), target = station("target", "Target", 2.32, [rail.id]);
+    const lines = [bus, rail], stations = [local, target];
+    const network: TransportMapNetwork = { lines, stations, entrances: [], regionalPaths: [], pathsById: new Map(),
+      linesById: new Map(lines.map(item => [item.id, item])), stationsById: new Map(stations.map(item => [item.id, item])), bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
+    const resolve = (includeContextAccess?: boolean, estimated = false) => defaultNearbyHeavyTransportResolver.resolve({
+      origin: { lon: 2.3, lat: 48.8 }, network, includeContextAccess, retainAllCandidates: true,
+      localEntries: [{ id: local.id, station: { ...local, memberStationIds: [local.id] }, memberStations: [local], lines: [bus], distanceMeters: 100, insideRadius: true }],
+      activeModes: ["BUS", "RER"], radiusMeters: 600, journeyDateTime: "20261015T090000",
+      journeyProvider: { async findJourneys() { return [{ source: "gtfs", durationSeconds: 2400,
+        sections: [{ ...walk(120, 100), timingSource: estimated ? "estimated" : "schedule" }, feeder(2100, "FEEDER", "BUS"),
+          { ...walk(180, 150), timingSource: "schedule" }] }]; } },
+    });
+    expect(await resolve()).toEqual([]);
+    expect((await resolve(true)).find(candidate => candidate.id === target.id)?.access.totalSeconds).toBe(2400);
+    expect(await resolve(true, true)).toEqual([]);
+  });
+  it("discards a tram's own rides while keeping a bus feeder and a different tram", async () => {
+    const tram = line("line:IDFM:C90001", "C90001", "TRAM"), bus = line("line:bus", "B1", "BUS"), other = line("line:tram", "TB", "TRAM");
+    tram.label = "TA";
+    const local = station("local", "Local", 2.3005, [tram.id, bus.id, other.id]), target = station("target", "Target", 2.32, [tram.id]);
+    const lines = [tram, bus, other], stations = [local, target];
+    const network: TransportMapNetwork = { lines, stations, entrances: [], regionalPaths: [], pathsById: new Map(),
+      linesById: new Map(lines.map(item => [item.id, item])), stationsById: new Map(stations.map(item => [item.id, item])), bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
+    const result = await defaultNearbyHeavyTransportResolver.resolve({ origin: { lon: 2.3, lat: 48.8 }, network,
+      localEntries: [{ id: local.id, station: { ...local, memberStationIds: [local.id] }, memberStations: [local], lines, distanceMeters: 100, insideRadius: true }],
+      activeModes: ["TRAM", "BUS"], radiusMeters: 600, retainAllCandidates: true, includeTramTargets: true, journeyDateTime: "20261015T090000",
+      journeyProvider: { async findJourneys() { return [
+        { durationSeconds: 600, sections: [walk(120, 100), { ...feeder(480, "TA"), lineId: "IDFM:C90001" }] },
+        { durationSeconds: 800, sections: [walk(120, 100), { ...feeder(480, "TA"), lineId: "IDFM:C90001" }, feeder(200, "TB")] },
+        { durationSeconds: 650, sections: [walk(120, 100), feeder(300, "TB"), { ...feeder(230, "TA"), lineId: "IDFM:C90001" }] },
+        { durationSeconds: 700, sections: [walk(120, 100), feeder(580, "B1", "BUS")] },
+        { durationSeconds: 800, sections: [walk(120, 100), feeder(680, "TB")] },
+      ]; } } });
+    expect(result.find(candidate => candidate.id === target.id)?.accessAlternatives?.map(access => access.feederLineCode)).toEqual(["B1", "TB"]);
+  });
+  it("retains future-hub routes beyond the proximity limit without changing current-target eligibility", () => {
+    const journey: NearbyJourney = { source: "gtfs", durationSeconds: 2400, sections: [walk(120, 100), feeder(480), heavy(1800)] };
+    expect(evaluateNearbyHeavyJourney({ journey, stationDistanceMeters: 5500 })).toBeUndefined();
+    expect(evaluateNearbyHeavyJourney({ journey, stationDistanceMeters: 5500, maxTravelSeconds: Infinity, localLineCodes: new Set(["T10"]) })?.scoreSeconds).toBe(2400);
+  });
+  it.each(["TRAM", "CABLE", "METRO", "RER", "TRAIN", "TRANSILIEN"] as const)("rejects riding the target %s after a feeder while keeping an independent access", async mode => {
+    const localLine = line("line:local", "LOCAL", "TRAM"), targetLine = line("line:target", "TARGET", mode);
+    const local = station("local", "Local", 2.3005, [localLine.id]), target = station("target", "Target", 2.32, [targetLine.id]);
+    const lines = [localLine, targetLine], stations = [local, target];
+    const network: TransportMapNetwork = { lines, stations, entrances: [], regionalPaths: [], pathsById: new Map(),
+      linesById: new Map(lines.map(item => [item.id, item])), stationsById: new Map(stations.map(item => [item.id, item])), bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
+    const candidates = await defaultNearbyHeavyTransportResolver.resolve({ origin: { lon: 2.3, lat: 48.8 }, network,
+      localEntries: [{ id: local.id, station: { ...local, memberStationIds: [local.id] }, memberStations: [local], lines: [localLine], distanceMeters: 100, insideRadius: true }],
+      activeModes: ["TRAM", mode], radiusMeters: 600, retainAllCandidates: true, includeTramTargets: true, journeyDateTime: "20261015T090000",
+      journeyProvider: { async findJourneys() { return [
+        { durationSeconds: 700, sections: [walk(120, 100), feeder(300, "LOCAL"),
+          { ...feeder(280, "TARGET"), lineId: targetLine.id, lineMode: mode }] },
+        { durationSeconds: 900, sections: [walk(120, 100), feeder(580, "LOCAL"), walk(200, 200)] },
+      ]; } } });
+    const candidate = candidates.find(item => item.id === target.id);
+    expect(candidate?.access.totalSeconds).toBe(900);
+    expect(candidate?.accessAlternatives).toHaveLength(1);
+    expect(candidate?.access.journey?.sections.some(section => section.lineCode === "TARGET")).toBe(false);
+  });
+  it("joins another tram at the interchange without riding it to a downstream station", async () => {
+    const t10 = line("line:t10", "T10", "TRAM"), t6 = line("line:t6", "T6", "TRAM");
+    const local = station("local", "Les Peintres", 2.3005, [t10.id]), target = station("target", "Hôpital Béclère", 2.32, [t6.id]);
+    const downstream = station("downstream", "Soleil Levant", 2.33, [t6.id]);
+    const stations = [local, target, downstream];
+    const network: TransportMapNetwork = { lines: [t10, t6], stations, entrances: [], regionalPaths: [], pathsById: new Map(),
+      linesById: new Map([[t10.id, t10], [t6.id, t6]]), stationsById: new Map(stations.map(s => [s.id, s])), bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
+    const candidates = await defaultNearbyHeavyTransportResolver.resolve({ origin: { lon: 2.3, lat: 48.8 }, network,
+      localEntries: [{ id: local.id, station: { ...local, memberStationIds: [local.id] }, memberStations: [local], lines: [t10], distanceMeters: 100, insideRadius: true }],
+      activeModes: ["TRAM"], radiusMeters: 600, retainAllCandidates: true, includeTramTargets: true, journeyDateTime: "20261015T090000",
+      journeyProvider: { async findJourneys(request) { return request.destination.id === target.id
+        ? [{ durationSeconds: 1000, sections: [walk(200, 150), feeder(500), walk(300, 100)] }]
+        : request.destination.id === downstream.id
+          ? [{ durationSeconds: 1200, sections: [walk(200, 150), feeder(500), walk(300, 100), feeder(200, "T6")] }]
+          : [{ durationSeconds: 120, sections: [walk(120, 100)] }]; } } });
+    expect(candidates.find(c => c.id === target.id)?.access.feederLineCode).toBe("T10");
+    expect(candidates.some(c => c.id === downstream.id)).toBe(false);
+  });
+  it("keeps a local tram followed by another tram and a metro within the existing time and transfer bounds", () => {
+    const access = evaluateNearbyHeavyJourney({ journey: { source: "gtfs", durationSeconds: 1700, transferCount: 2,
+      sections: [walk(200, 150), feeder(500, "T10"), feeder(500, "T6"), heavy(500, "13", "METRO")] },
+      stationDistanceMeters: 6000, localLineCodes: new Set(["T10"]) });
+    expect(access?.feederLineCode).toBe("T10");
+    expect(access?.scoreSeconds).toBe(1700);
+  });
+  it("searches seven kilometres and keeps every eligible verdict station beyond the map's per-line and sector limits", async () => {
+    const t10 = line("line:t10", "T10", "TRAM"), rerB = line("line:rer:B", "B", "RER");
+    const local = station("local", "Local tram", 2.3005, [t10.id]);
+    const targets = Array.from({ length: 8 }, (_, i) => station(`target-${i}`, `Target ${i}`, 2.33 + i * .007, [rerB.id]));
+    const outside = station("outside", "Outside", 2.41, [rerB.id]);
+    const stations = [local, ...targets, outside];
+    const network: TransportMapNetwork = { lines: [t10, rerB], stations, entrances: [], regionalPaths: [], pathsById: new Map(),
+      linesById: new Map([[t10.id, t10], [rerB.id, rerB]]), stationsById: new Map(stations.map(s => [s.id, s])), bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
+    const queried: string[] = [];
+    const candidates = await defaultNearbyHeavyTransportResolver.resolve({ origin: { lon: 2.3, lat: 48.8 }, network,
+      localEntries: [{ id: local.id, station: { ...local, memberStationIds: [local.id] }, memberStations: [local], lines: [t10], distanceMeters: 100, insideRadius: true }],
+      activeModes: ["TRAM", "RER"], radiusMeters: 600, retainAllCandidates: true, journeyDateTime: "20261015T090000",
+      journeyProvider: { async findJourneys(request) { queried.push(request.destination.id!); return [{ durationSeconds: 900, sections: [walk(300, 200), feeder(600)] }]; } } });
+    expect(queried).toHaveLength(8);
+    expect(queried).not.toContain("outside");
+    expect(candidates).toHaveLength(8);
+    expect(candidates.some(c => c.distanceMeters > 5000)).toBe(true);
+  });
   it("chooses the next weekday at 09:00 for a typical work commute", () => {
     expect(getNearbyWorkdayJourneyDateTime(new Date(2026, 8, 2, 0, 30))).toBe("20260902T090000");
     expect(getNearbyWorkdayJourneyDateTime(new Date(2026, 8, 4, 10, 0))).toBe("20260907T090000");
@@ -306,11 +410,11 @@ describe("nearby heavy transport eligibility", () => {
     expect(tooLong).toBeUndefined();
   });
 
-  it("rejects an additional transfer and keeps the best valid option", () => {
+  it("rejects a bus correspondence and keeps the best valid option", () => {
     const journeys: NearbyJourney[] = [
       {
         durationSeconds: 1_500,
-        sections: [walk(600, 700), feeder(500, "T10"), feeder(400, "BUS 194")],
+        sections: [walk(600, 700), feeder(500, "T10"), feeder(400, "194", "BUS")],
       },
       {
         durationSeconds: 1_700,
@@ -629,7 +733,7 @@ describe("nearby heavy transport eligibility", () => {
       linesById: new Map([[rail.id, rail], [shuttle.id, shuttle]]), stationsById: new Map([[current.id, current], [quay.id, quay]]),
       bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 },
     };
-    const requests: Array<{ destination: { id?: string }; destinationRef?: string; arrivalAtPlatform?: boolean }> = [];
+    const requests: Array<{ destination: { id?: string }; destinationRef?: string; arrivalAtPlatform?: boolean; destinationLineId?: string }> = [];
     await defaultNearbyHeavyTransportResolver.resolve({ origin: { lon: 2.3, lat: 48.8 }, network, localEntries: [],
       activeModes: ["RER", "TRAIN"], radiusMeters: 600, journeyDateTime: "20261012T090000", batchQueries,
       journeyProvider: { async findJourneys(request) { requests.push(request); return []; } },
@@ -638,6 +742,7 @@ describe("nearby heavy transport eligibility", () => {
     expect(probe).toBeDefined();
     expect(probe?.destinationRef).toBe(batchQueries ? "stop_area:IDFM:12345" : undefined);
     expect(probe?.arrivalAtPlatform).toBe(batchQueries ? true : undefined);
+    expect(probe?.destinationLineId).toBe(batchQueries ? shuttle.id : undefined);
   });
 
   it("prefers a confirmed walk under ten minutes over a bus access", async () => {

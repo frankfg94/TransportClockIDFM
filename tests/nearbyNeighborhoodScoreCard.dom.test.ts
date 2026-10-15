@@ -5,20 +5,59 @@ import type { NearbyPlace } from "../src/features/nearby-stations/nearbyPlaces";
 import { buildNeighborhoodScore, type NeighborhoodFact } from "../src/features/nearby-stations/neighborhood";
 
 describe("NearbyNeighborhoodScoreCard", () => {
+  it("names branches in the summary, category and tooltip, with neutral context beyond 30 minutes", () => {
+    const result = buildNeighborhoodScore({ places: [], placesLoaded: false, stations: [], stationsLoaded: true });
+    const fact: NeighborhoodFact = { id: "section", kind: "transportLineNearby", category: "transport", polarity: "neutral",
+      contributionWeight: 0, family: "transport-proximity:section", priority: 0,
+      transportSection: { id: "branch:fixture", kind: "branch", label: "Terminus test" },
+      labelKey: "nearbyStations.neighborhoodScore.facts.transportStationNearby.label",
+      labelValues: { line: "RER X", station: "Gare test", minutes: 34, via: " via Bus Y" },
+      tooltipKey: "nearbyStations.neighborhoodScore.facts.transportLineNearby.tooltip",
+      tooltipValues: { line: "RER X", minutes: 34, via: " via Bus Y", meters: 2000 },
+      evidence: { proof: "direct", observedAt: 1, ruleKey: "nearbyStations.neighborhoodScore.rules.transportAccessContext", ruleValues: { maximum: 30 } } };
+    result.neutralFacts = [fact];
+    result.negativeFacts = [];
+    result.categories.find(category => category.id === "transport")!.negativeFacts = [];
+    result.categories.find(category => category.id === "transport")!.neutralFacts = [fact];
+    const wrapper = mount(NearbyNeighborhoodScoreCard, { props: { result, directoryUrl: "/nearby-stations" }, global: { stubs: { NuxtLink: true } } });
+    expect(wrapper.get(".nearby-neighborhood-score-card__summary-fact").text()).toContain("RER X — branche Terminus test");
+    expect(wrapper.get(".nearby-neighborhood-score-fact__marker").text()).toBe("•");
+    expect(wrapper.text()).toContain("Cet accès dépasse 30 min");
+    expect(wrapper.text()).toContain("sans effet sur la note");
+    expect(wrapper.text().match(/RER X — branche Terminus test/gu)!.length).toBeGreaterThanOrEqual(3);
+    wrapper.unmount();
+  });
+  it("renders named spinners inside the transport category, including before its data arrives", () => {
+    const result = buildNeighborhoodScore({ places: [], placesLoaded: false, stations: [], stationsLoaded: false, generatedAt: 1 });
+    const wrapper = mount(NearbyNeighborhoodScoreCard, { props: { result, directoryUrl: "/nearby-stations",
+      transportLoadingTasks: [{ id: "heavyAccess", labelKey: "nearbyStations.neighborhoodScore.transportTasks.heavyAccess" }] },
+      global: { stubs: { NuxtLink: true } } });
+    const categories = wrapper.findAll(".nearby-neighborhood-score-card__category");
+    const transport = categories.find(category => category.find("h3").text() === "Transports")!;
+    expect(transport.find("[data-transport-task='heavyAccess'] [data-testid='spinner']").exists()).toBe(true);
+    expect(transport.text()).toContain("Chargement des temps d’accès");
+    expect(categories.filter(category => category.find(".transport-loading").exists())).toHaveLength(1);
+    wrapper.unmount();
+  });
   it("shows each independent bus access and its own duration in the tooltip", () => {
     const result = buildNeighborhoodScore({ places: [], placesLoaded: false, stations: [], stationsLoaded: true, generatedAt: 1 });
     const journey = { source: "gtfs" as const, durationSeconds: 1500, sections: [{ type: "walking", durationSeconds: 600, timingSource: "schedule" as const }, { type: "public_transport", fromName: "Arrêt proche", durationSeconds: 900, lineCode: "express", lineMode: "BUS" as const }] };
     const alternate = { ...journey, durationSeconds: 1800, sections: [{ type: "walking", durationSeconds: 780, timingSource: "estimated" as const }, { type: "waiting", durationSeconds: 120 }, { type: "public_transport", fromName: "Arrêt éloigné", durationSeconds: 900, lineCode: "ordinary", lineMode: "BUS" as const }] };
+    const tram = { ...journey, durationSeconds: 1020, sections: [{ type: "walking", durationSeconds: 120, timingSource: "estimated" as const },
+      { type: "public_transport", fromName: "Arrêt tram", durationSeconds: 900, lineCode: "TA", lineMode: "TRAM" as const }] };
     const fact: NeighborhoodFact = { id: "bus-options", kind: "transportLineNearby", category: "transport", polarity: "positive", family: "transport-proximity:options", priority: 6,
       label: "RER accessible via BUS express, BUS ordinary", evidence: { proof: "direct", observedAt: 1 },
-      travel: { journey, routes: [{ line: "BUS express", accessMinutes: 23, journey }, { line: "BUS ordinary", accessMinutes: 28, journey: alternate }] } };
+      travel: { journey, routes: [{ line: "BUS express", accessMinutes: 23, journey }, { line: "BUS ordinary", accessMinutes: 28, journey: alternate },
+        { line: "Tramway TA", accessMinutes: 17, journey: tram }] } };
     result.categories.find(category => category.id === "transport")!.positiveFacts = [fact];
     const wrapper = mount(NearbyNeighborhoodScoreCard, { props: { result, directoryUrl: "/nearby-stations" }, global: { stubs: { NuxtLink: { template: "<a><slot /></a>" } } } });
     const options = wrapper.findAll("[data-testid='nearby-transport-access-option']");
     expect(options[0]!.text()).toContain("Marche 10 min + bus 15 min · Arrêt proche");
     expect(options[1]!.text()).toContain("Marche estimée ≈ 13 min + bus 15 min · Arrêt éloigné");
     expect(options[1]!.text()).toContain("Durée totale 30 min · attente initiale retirée 2 min");
+    expect(options[2]!.text()).toContain("Marche estimée ≈ 2 min + trajet 15 min · Arrêt tram");
     expect(wrapper.text()).toContain("calculée à vol d’oiseau");
+    expect(wrapper.text()).toContain("Premier embarquement : Arrêt proche");
     expect(wrapper.text()).toContain("Options d’accès à cette gare");
     wrapper.unmount();
   });

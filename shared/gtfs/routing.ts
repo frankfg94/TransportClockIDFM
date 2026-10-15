@@ -9,7 +9,8 @@ import { CONNECTION_COLUMNS, type GtfsRoutingIndex, type GtfsRoutingShard } from
 import { scanConnections, routingSections, type RoutingConnection, type RoutingConnectionBatch, type RoutingNode, type RoutingFootpath, type ConnectionScanResult, type TransitArrival } from "./connectionScan";
 import { gtfsServiceEpoch, parisCivilEpoch, parisDateTime } from "./routingTime";
 import { prefetchGtfsConnectionBatch } from "./connectionPrefetch";
-import { NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS, NEARBY_HEAVY_TOTAL_MAX_SECONDS } from "../../src/features/nearby-stations/nearbyHeavyTransportRules";
+import { NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS } from "../../src/features/nearby-stations/nearbyHeavyTransportRules";
+import { createFinalLineAccessResolver } from "./finalLineAccess";
 
 export const NEIGHBORHOOD_ROUTING_HORIZON_SECONDS = 4 * 3600;
 const WALK_RADIUS_METERS = 1200;
@@ -74,7 +75,7 @@ function buildFootpaths(index: GtfsRoutingIndex) {
       const a = coordinate(index.stops[from]!); if (!a) return;
       const seen = new Set<number>();
       const path = (to: number, seconds: number, estimated: boolean, minimum = !estimated): RoutingFootpath => ({
-        to, seconds, get section() { return {
+        to, seconds, allowsInitialAccess: !estimated && !minimum, get section() { return {
           ...walkingSection(a, coordinate(index.stops[to]!)!, seconds, estimated),
           fromStopPointId: index.stops[from]!.id, toStopPointId: index.stops[to]!.id,
           fromStopAreaId: index.stops[from]!.parentId, toStopAreaId: index.stops[to]!.parentId,
@@ -103,7 +104,7 @@ function buildFootpaths(index: GtfsRoutingIndex) {
   } };
   const context = (from: TransitArrival) => byStop.has(from.stop) || restrictedOrigins.has(from.stop)
     ? `${from.stop}:${scopedRoutes.has(from.routeId ?? "") ? from.routeId : ""}:${scopedTrips.has(from.tripId ?? "") ? from.tripId : ""}` : "transfer";
-  const transferRule = (from: TransitArrival, to: RoutingConnection) => {
+  const transferRule = (from: TransitArrival, to: Pick<RoutingConnection, "from" | "routeId" | "tripId">) => {
     let selected: number | undefined, specificity = -1;
     for (const rule of byStop.get(from.stop) ?? []) {
       if (rule.to !== to.from || rule.fromRoute && rule.fromRoute !== from.routeId || rule.toRoute && rule.toRoute !== to.routeId || rule.fromTrip && rule.fromTrip !== from.tripId || rule.toTrip && rule.toTrip !== to.tripId) continue;
@@ -119,7 +120,53 @@ function buildFootpaths(index: GtfsRoutingIndex) {
     }
     return generic;
   };
-  return { paths, margins, transferRule, context };
+  return { paths, margins, transferRule, context, finalLineAccess: createFinalLineAccessResolver(index) };
+}
+
+function lineAccessNodes(index: GtfsRoutingIndex, tree: ConnectionScanResult, stationStops: readonly number[], lineId: string, end: number): RoutingNode[] {
+  const servingStops = tree.stopsByLine.get(lineId);
+  const targets = new Set(stationStops.filter(stop => servingStops?.has(stop)));
+  const result = new Set<RoutingNode>();
+  const add = (node: RoutingNode | undefined) => {
+    if (!node || node.arrival > end) return;
+    // Access ends where the line is joined, before boarding that line.
+    for (let previous: RoutingNode | undefined = node; previous; previous = previous.previous) {
+      if (previous.section.lineId === lineId) return;
+    }
+    result.add(node);
+  };
+  for (const stop of targets) {
+    add(tree.accessLabels.get(stop));
+    const walkingAccess = tree.labels.get(stop);
+    if (walkingAccess && !walkingAccess.transferOrigin) add(walkingAccess);
+    for (const node of [tree.platformLabels.get(stop), ...(tree.tramPlatformLabels.get(stop)?.values() ?? []),
+      ...(tree.feederLabels.get(stop)?.values() ?? []), ...(tree.nightLabels.get(stop)?.values() ?? [])]) {
+      if (node?.section.type === "public_transport") add(node);
+    }
+  }
+  const graph = transferGraphs.get(index)!;
+  for (const stop of stationStops) {
+    const arrivals = new Set([tree.platformLabels.get(stop), ...(tree.tramPlatformLabels.get(stop)?.values() ?? []),
+      ...(tree.feederLabels.get(stop)?.values() ?? []), ...(tree.nightLabels.get(stop)?.values() ?? [])]);
+    // Preserve the final platform transfer even if the scan's earliest label
+    // at the target was reached by riding the target line from another stop.
+    for (const path of graph.paths.get(stop)) {
+      if (!targets.has(path.to) || path.seconds < 0) continue;
+      for (const node of arrivals) {
+        if (!node || node.section.type !== "public_transport") continue;
+        const minimum = node.transferOrigin ? graph.transferRule(node.transferOrigin, { from: path.to, routeId: lineId }) : undefined;
+        if (minimum !== undefined && minimum < 0) continue;
+        const seconds = Math.max(path.seconds, minimum ?? 0);
+        if ((node.walkingSeconds ?? 0) + seconds > 1200) continue;
+        add({ previous: node, arrival: node.arrival + seconds, walkingSeconds: (node.walkingSeconds ?? 0) + seconds,
+          transferOrigin: node.transferOrigin, tramFeederLineId: node.tramFeederLineId, tramBoardingWalkingSeconds: node.tramBoardingWalkingSeconds,
+          section: { ...path.section, durationSeconds: seconds,
+            ...(seconds > path.seconds ? { transferDurationSource: "gtfs-minimum" as const } : {}),
+            fromName: index.stops[stop]!.name, toName: index.stops[path.to]!.name } });
+      }
+    }
+  }
+  return [...result];
 }
 
 function nearbyStops(index: GtfsRoutingIndex, point: NearbyJourneyPoint, limit: number) {
@@ -235,14 +282,17 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
         if (route.durationSeconds > 20 * 60) continue;
         const id = Number(route.id), point = coordinate(index.stops[id]!);
         if (!point) continue;
-        access.set(id, { arrival: start + route.durationSeconds, walkingSeconds: route.durationSeconds, section: walkingSection(request.origin, point, route.durationSeconds, route.fallback, route) });
+        access.set(id, { arrival: start + route.durationSeconds, walkingSeconds: route.durationSeconds, section: {
+          ...walkingSection(request.origin, { ...point, name: index.stops[id]!.name } as NearbyJourneyPoint, route.durationSeconds, route.fallback, route),
+          toStopPointId: index.stops[id]!.id, toStopAreaId: index.stops[id]!.parentId,
+        } });
       }
       let graph = transferGraphs.get(index);
       if (!graph) { graph = buildFootpaths(index); transferGraphs.set(index, graph); index.transfers = []; }
       const { paths, margins, transferRule, context } = graph;
       return scanConnections(stream, access, paths, margins, transferRule, context,
         { arrival: start + NEIGHBORHOOD_ROUTING_HORIZON_SECONDS, walkingSeconds: 1200,
-          feederWalkingSeconds: NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS, feederTravelSeconds: NEARBY_HEAVY_TOTAL_MAX_SECONDS });
+          feederWalkingSeconds: NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS, feederTravelSeconds: NEIGHBORHOOD_ROUTING_HORIZON_SECONDS });
     })();
     entry = { expires: Date.now() + 10 * 60_000, promise };
     trees.set(key, entry);
@@ -258,38 +308,63 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
   base.destinations = await Promise.all(request.destinations.map(async destination => {
     const officialRef = destination.destinationRef?.replace(/^(stop_area|stop_point):/u, "");
     const officialStops = officialRef ? index.boardingStops.filter(id => index.stops[id]!.id === officialRef || index.stops[id]!.parentId === officialRef) : [];
+    const lineAccess = destination.destinationLineId !== undefined;
+    const targetLineId = lineAccess ? index.lines.find(line => line.id === destination.destinationLineId
+      || line.id === destination.destinationLineId!.replace(/^line:/u, ""))?.id : undefined;
     const platformArrival = destination.arrivalAtPlatform === true && officialStops.length > 0;
-    const candidates = (officialStops.length ? officialStops.map(id => ({ id, point: coordinate(index.stops[id]!)! })).filter(s => Boolean(s.point)) : nearbyStops(index, destination, 32))
+    const stationCandidates = officialStops.length ? officialStops.map(id => ({ id, point: coordinate(index.stops[id]!)! })).filter(s => Boolean(s.point)) : nearbyStops(index, destination, 32);
+    const candidates = stationCandidates
       .filter(s => (platformArrival ? tree.platformLabels : tree.labels).has(s.id))
       .sort((a, b) => (platformArrival ? tree.platformLabels : tree.labels).get(a.id)!.arrival - (platformArrival ? tree.platformLabels : tree.labels).get(b.id)!.arrival).slice(0, 16);
     // Matrix is directed: egress walks from each stop towards the destination.
-    const egress = platformArrival ? [] : await runtime.matrix(event, destination, candidates.map(c => ({ ...c.point, id: String(c.id) })), { reverse: true });
+    const egress = platformArrival || lineAccess ? [] : await runtime.matrix(event, destination, candidates.map(c => ({ ...c.point, id: String(c.id) })), { reverse: true });
     assertCurrent(event);
-    const routes: RoutingNode[] = candidates.flatMap((candidate, i) => {
+    // FINAL ACCESS ONLY: physical walking below must never alter the shared
+    // scan's intermediate transfer constraints or complete destination routes.
+    const physical = transferGraphs.get(index)!;
+    const routes: RoutingNode[] = lineAccess
+      ? targetLineId ? physical.finalLineAccess
+        ? await physical.finalLineAccess({ tree, stationStops: stationCandidates.map(stop => stop.id), lineId: targetLineId,
+          origin: request.origin, start, end: start + NEIGHBORHOOD_ROUTING_HORIZON_SECONDS,
+          matrix: (origin, targets) => { assertCurrent(event); return runtime.matrix(event, origin, targets); },
+          assertCurrent: () => assertCurrent(event), transferRule: physical.transferRule })
+        : lineAccessNodes(index, tree, stationCandidates.map(stop => stop.id), targetLineId, start + NEIGHBORHOOD_ROUTING_HORIZON_SECONDS) : []
+      : candidates.flatMap((candidate, i) => {
       if (platformArrival) {
         // For the same arrival/line, retain its shortest direct access path
         // before the general earliest-arrival path is deduplicated.
-        return [...(tree.feederLabels.get(candidate.id)?.values() ?? []), tree.platformLabels.get(candidate.id), ...(tree.nightLabels.get(candidate.id)?.values() ?? [])]
-          .filter((node): node is RoutingNode => Boolean(node && node.section.type === "public_transport"));
+        const walk = tree.labels.get(candidate.id);
+        return [...(tree.feederLabels.get(candidate.id)?.values() ?? []), tree.platformLabels.get(candidate.id), ...(tree.tramPlatformLabels.get(candidate.id)?.values() ?? []), ...(tree.nightLabels.get(candidate.id)?.values() ?? []),
+          walk && !walk.transferOrigin ? walk : undefined]
+          .filter((node): node is RoutingNode => Boolean(node));
       }
       const route = egress[i]!;
       if (route.durationSeconds > 20 * 60) return [];
-      const alternatives = [tree.labels.get(candidate.id), tree.transitLabels.get(candidate.id), ...(tree.nightLabels.get(candidate.id)?.values() ?? [])].filter((node): node is RoutingNode => Boolean(node));
+      const alternatives = [tree.labels.get(candidate.id), tree.transitLabels.get(candidate.id), ...(tree.tramLabels.get(candidate.id)?.values() ?? []), ...(tree.nightLabels.get(candidate.id)?.values() ?? [])].filter((node): node is RoutingNode => Boolean(node));
       return alternatives.map(previous => ({ previous, arrival: previous.arrival + route.durationSeconds,
         section: { ...walkingSection(candidate.point, destination, route.durationSeconds, route.fallback, route),
           fromStopPointId: index.stops[candidate.id]!.id, fromStopAreaId: index.stops[candidate.id]!.parentId } } satisfies RoutingNode));
     });
     const direct = createStraightLineWalkingRoute(request.origin, destination);
     // A direct walk is only offered for a genuinely nearby target, and is explicitly estimated.
-    if (direct.distanceMeters <= WALK_RADIUS_METERS) {
+    if (!lineAccess && direct.distanceMeters <= WALK_RADIUS_METERS) {
       const route = (await runtime.matrix(event, request.origin, [{ ...destination, id: destination.id }]))[0]!;
       if (route.durationSeconds <= 20 * 60) routes.push({ arrival: start + route.durationSeconds, section: walkingSection(request.origin, destination, route.durationSeconds, route.fallback, route) });
     }
-    const sorted = routes.filter(node => node.arrival <= start + NEIGHBORHOOD_ROUTING_HORIZON_SECONDS).sort((a, b) => a.arrival - b.arrival);
+    const unverifiedFinal = (node: RoutingNode) => {
+      for (let n: RoutingNode | undefined = node; n; n = n.previous) if (n.section.finalLineAccess && n.section.finalLineAccess.status !== "documented") return 1;
+      return 0;
+    };
+    const sorted = routes.filter(node => node.arrival <= start + NEIGHBORHOOD_ROUTING_HORIZON_SECONDS)
+      .sort((a, b) => (lineAccess ? unverifiedFinal(a) - unverifiedFinal(b) : 0) || a.arrival - b.arrival);
     const signatures = new Set<string>(), journeys: NearbyJourney[] = [];
     for (const node of sorted) {
       const sections = routingSections(node);
-      const signature = sections.filter(s => s.type === "public_transport").map(s => s.lineId).join(":");
+      const transit = sections.filter(s => s.type === "public_transport");
+      // Different boarding stops on the same lines can have very different
+      // access walks. Preserve them until the nearest-access rule is applied.
+      const first = transit[0], tramBoarding = first?.lineMode === "TRAM" || first?.lineMode === "CABLE";
+      const signature = transit.map(s => s.lineId).join(":") + (tramBoarding ? `@${first.fromStopPointId ?? ""}` : "");
       if (signatures.has(signature)) continue;
       signatures.add(signature);
       let time = start;
@@ -297,8 +372,7 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
       const partial = Boolean(officialRef && !officialStops.length) || index.hasConditionalService || sections.some(s => s.timingSource === "estimated");
       // Provider batch ordinals depend on which independent task starts first.
       // Journey identity belongs to its actual destination/time, not that order.
-      journeys.push({ id: `gtfs:${manifest.routing!.path}:${request.datetime}:${destination.lon},${destination.lat}:${destination.destinationRef ?? ""}:${node.arrival}:${signature}`, status: partial ? "partial" : "theoretical", source: "gtfs", datasetVersion: manifest.datasetVersion, durationSeconds: node.arrival - start, departureDateTime: request.datetime, arrivalDateTime: parisDateTime(node.arrival * 1000), transferCount: Math.max(0, sections.filter(s => s.type === "public_transport").length - 1), sections });
-      if (journeys.length === 8) break;
+      journeys.push({ id: `gtfs:${manifest.routing!.path}:${request.datetime}:${destination.lon},${destination.lat}:${destination.destinationRef ?? ""}${lineAccess ? `:line:${targetLineId ?? ""}` : ""}:${node.arrival}:${signature}`, status: partial ? "partial" : "theoretical", source: "gtfs", datasetVersion: manifest.datasetVersion, durationSeconds: node.arrival - start, departureDateTime: request.datetime, arrivalDateTime: parisDateTime(node.arrival * 1000), transferCount: Math.max(0, sections.filter(s => s.type === "public_transport").length - 1), sections });
     }
     return { id: destination.id, status: !journeys.length ? "outside-search-window" as const : journeys.some(j => j.status === "partial") ? "partial" as const : "ready" as const, journeys };
   }));

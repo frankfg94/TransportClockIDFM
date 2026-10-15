@@ -1,3 +1,5 @@
+import { NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS } from "../../../shared/gtfs/neighborhoodTimeout";
+
 /** Share only in-flight public asset reads. No address results or retained
  * shard catalogue: the routing/timetable runtimes own their bounded caches. */
 export function createNeighborhoodGtfsAssetReader(fetcher: typeof fetch = fetch, storage: CacheStorage | undefined = typeof caches === "undefined" ? undefined : caches) {
@@ -18,7 +20,7 @@ export function createNeighborhoodGtfsAssetReader(fetcher: typeof fetch = fetch,
       const cached = await cache?.match(url).catch(() => undefined);
       if (path !== "current.json" && cached) return await cached.json() as T;
       try {
-        const init: RequestInit = { cache: coldStart ? "no-store" : path === "current.json" ? "no-cache" : "default", signal: AbortSignal.timeout(60_000) };
+        const init: RequestInit = { cache: coldStart ? "no-store" : path === "current.json" ? "no-cache" : "default", signal: AbortSignal.timeout(NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS) };
         let fetchedUrl = url;
         let response = await fetcher(fetchedUrl, init);
         // Cloudflare addresses encoded directory names literally; Nitro's

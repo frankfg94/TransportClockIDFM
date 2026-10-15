@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, readonly, ref, watch } from "vue";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { runNetworkTask } from "../../services/networkScheduler";
+import { NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS } from "../../../shared/gtfs/neighborhoodTimeout";
 import { beginVerdictDebugTask } from "../../services/verdictDebugTimeline";
 import { isNavitiaRateLimit } from "../../services/navitiaRateLimit";
 import { getCoordinatesDistanceMeters } from "../../services/distance";
@@ -30,6 +31,8 @@ import {
 } from "./nearbyHeavyTransports";
 import type { NearbyHeavyTargetCandidate } from "./nearbyHeavyTransportRules";
 import { isNearbyJourneyTransitSection, isNearbyJourneyWalkingSection } from "./nearbyJourneyTiming";
+import { NEARBY_HEAVY_RELIABLE_FEEDER_MODES } from "./nearbyHeavyTransportRules";
+import { createImmediateTramWalkingRoute } from "./nearbyWalkingRoutes";
 import type { PublicFutureGpeStation } from "./neighborhoodVerdictApi";
 import { createNeighborhoodStationReferenceResolver, type NeighborhoodStationReferenceResolver } from "./neighborhoodStationReferences";
 
@@ -43,7 +46,8 @@ const HEAVY_HUB_STOP_MAX_DISTANCE_METERS = 250;
 const FUTURE_GPE_DESTINATION_SNAP_MAX_DISTANCE_METERS = 100;
 // Target concurrency is already bounded by the resolver. This wrapper only
 // gives each provider call a deadline and releases it when the origin changes.
-const runHeavyProbe = runNetworkTask;
+const runHeavyProbe = <T>(run: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal) =>
+  runNetworkTask(run, signal, NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS);
 
 export interface NearbyHeavyTransportSource {
   origin: { value?: { lon: number; lat: number } };
@@ -74,6 +78,12 @@ export interface NearbyHeavyTransportResolverInput {
   includeLocalCandidates?: boolean;
   /** Let a page-scoped batching provider receive all destinations together. */
   batchQueries?: boolean;
+  /** Verdict destinations are not constrained by the map's badge selection. */
+  retainAllCandidates?: boolean;
+  /** Keep valid long approaches for context, independently of score eligibility. */
+  includeContextAccess?: boolean;
+  /** Also discover structuring trams reached via another local tram. */
+  includeTramTargets?: boolean;
   /** Future GPE stations to resolve with the same heavy-station rules. */
   futureProjects?: readonly PublicFutureGpeStation[];
   /** Cancels every network and walking probe started by this resolution. */
@@ -95,6 +105,9 @@ export interface UseNearbyHeavyTransportsOptions {
   includeLocalCandidates?: boolean;
   /** Preserve the normal network queue unless the provider batches requests. */
   batchQueries?: boolean;
+  retainAllCandidates?: boolean;
+  includeContextAccess?: boolean;
+  includeTramTargets?: boolean;
   /** Future GPE stations to resolve with the same heavy-station rules. */
   futureProjects?: readonly PublicFutureGpeStation[];
 }
@@ -104,7 +117,8 @@ const defaultJourneyProvider: JourneyProvider = createNearbyDataProviders().trav
 export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
   async resolve(input) {
     const activeHeavyModes = new Set(
-      input.activeModes.filter((mode) => NEARBY_HEAVY_TRANSPORT_MODES.includes(mode)),
+      input.activeModes.filter((mode) => NEARBY_HEAVY_TRANSPORT_MODES.includes(mode)
+        || input.includeTramTargets && NEARBY_HEAVY_RELIABLE_FEEDER_MODES.includes(mode)),
     );
     if (activeHeavyModes.size === 0) return [];
 
@@ -165,10 +179,12 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
 
     const futureTargets = (input.futureProjects ?? [])
       .map((project) => createFutureHeavyTargetCandidate(project, input.origin, resolveStationReference))
-      .filter((candidate): candidate is NearbyHeavyTargetCandidate => Boolean(candidate));
+      .filter((candidate): candidate is NearbyHeavyTargetCandidate => candidate !== undefined
+        && candidate.distanceMeters <= NEARBY_HEAVY_SEARCH_MAX_METERS);
     const targets = selectNearbyHeavyTargetCandidates(
       [...lineCandidates.values()].flat().concat(futureTargets),
-      HEAVY_STATION_CANDIDATES_PER_LINE,
+      input.retainAllCandidates ? Number.POSITIVE_INFINITY : HEAVY_STATION_CANDIDATES_PER_LINE,
+      [...activeHeavyModes],
     );
 
     const resolved = await mapWithConcurrency(
@@ -203,6 +219,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
           ...(input.batchQueries ? {
             destinationRef: resolveStationReference!(station),
             arrivalAtPlatform: true,
+            ...(!futureProject ? { destinationLineId: line.sourceLineId ?? line.id } : {}),
           } : {}),
           ...(scheduledDateTime ? { datetime: scheduledDateTime } : {}),
         }, input.signal).catch((cause: unknown) => {
@@ -214,9 +231,22 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
           const entry = rejected.find(value => value.reason === reason);
           if (entry) entry.count++; else rejected.push({ reason, count: 1 });
         };
+        const targetReferences = [line.id, line.code, line.label, line.sourceLineId ?? "", ...line.aliases].flatMap(lineReferenceVariants);
+        const usefulJourneys = (values: readonly NearbyJourney[]) => values.filter(journey => {
+          // Reaching another stop of a line aboard that same line adds no
+          // access option, even when a different feeder precedes it. Future
+          // hubs are destinations and retain their complete approach route.
+          if (futureProject) return true;
+          return !journey.sections.filter(isNearbyJourneyTransitSection).some(section => [
+            section.lineId, section.lineCode, ...(section.lineAliases ?? []),
+          ]
+            .filter((value): value is string => Boolean(value)).flatMap(lineReferenceVariants)
+            .some(reference => targetReferences.includes(reference)));
+        });
         const currentAlternatives = listNearbyHeavyJourneyAlternatives(
-          futureProject ? journeys.map((journey) => trimCoLocatedFutureStationEgress(journey, futureProject)) : journeys,
+          usefulJourneys(futureProject ? journeys.map((journey) => trimCoLocatedFutureStationEgress(journey, futureProject)) : journeys),
           {
+            maxTravelSeconds: futureProject || input.includeContextAccess ? Number.POSITIVE_INFINITY : undefined,
             stationDistanceMeters: distanceMeters,
             localLineIds,
             localLineCodes,
@@ -241,8 +271,9 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
             return [];
           });
         const daytimeAlternatives = listNearbyHeavyJourneyAlternatives(
-          futureProject ? daytimeJourneys.map((journey) => trimCoLocatedFutureStationEgress(journey, futureProject)) : daytimeJourneys,
+          usefulJourneys(futureProject ? daytimeJourneys.map((journey) => trimCoLocatedFutureStationEgress(journey, futureProject)) : daytimeJourneys),
           {
+            maxTravelSeconds: futureProject || input.includeContextAccess ? Number.POSITIVE_INFINITY : undefined,
             stationDistanceMeters: distanceMeters,
             localLineIds,
             localLineCodes,
@@ -250,9 +281,11 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
           },
         ).map((access) => normalizeNearbyHeavyAccessLine(access, feederLines));
         const currentAccess = currentAlternatives[0];
-        const routedWalkingAccess = input.walkingRouteProvider
-          ? await resolveDirectWalkingAccess(input.walkingRouteProvider, input.origin, station, input.signal)
-          : undefined;
+        // A rail platform's street coordinate is not an entrance. Batched
+        // current-line queries already resolve its complete physical access.
+        const routedWalkingAccess = input.batchQueries && !futureProject && line.mode !== "TRAM" && line.mode !== "CABLE"
+          ? undefined : await resolveDirectWalkingAccess(input.walkingRouteProvider, input.origin, station, input.signal,
+            { mode: line.mode, datetime: scheduledDateTime, template: journeys.find(journey => journey.source === "gtfs") });
         const accessAlternatives = currentAccess && isNoctilienAccess(currentAccess, feederLines)
           ? daytimeAlternatives.length > 0
             ? mergeNearbyHeavyAccessAlternatives(
@@ -368,7 +401,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
       })
       .sort((left, right) => left.distanceMeters - right.distanceMeters || left.station.name.localeCompare(right.station.name, "fr"));
 
-    return limitNearbyHeavyProjectedStations(resolvedCandidates, input.origin);
+    return input.retainAllCandidates ? resolvedCandidates : limitNearbyHeavyProjectedStations(resolvedCandidates, input.origin);
   },
 };
 
@@ -450,6 +483,9 @@ export function useNearbyHeavyTransports(
           : undefined,
         includeLocalCandidates: options.includeLocalCandidates,
         batchQueries: options.batchQueries,
+        retainAllCandidates: options.retainAllCandidates,
+        includeContextAccess: options.includeContextAccess,
+        includeTramTargets: options.includeTramTargets,
         futureProjects: source.futureProjects?.value ?? [],
         signal: controller.signal,
       });
@@ -741,6 +777,7 @@ function normalizeNearbyHeavyAccessLine(
 function lineReferenceVariants(value: string): string[] {
   const normalized = value.trim().toLocaleLowerCase("fr-FR");
   const variants = new Set([normalized]);
+  variants.add(normalized.split(":").at(-1)!);
   const parenthetical = /\((?:ex(?:\.|\s+)?|anciennement\s+)?([^)]*)\)/giu;
   for (const match of normalized.matchAll(parenthetical)) {
     const alias = match[1]?.trim();
@@ -773,6 +810,8 @@ function compareNearbyHeavyAccess(
   left: NearbyHeavyTransportAccess,
   right: NearbyHeavyTransportAccess,
 ): number {
+  const unverified = (access: NearbyHeavyTransportAccess) => Number(Boolean(access.journey?.sections.some(section => section.finalLineAccess && section.finalLineAccess.status !== "documented")));
+  if (unverified(left) !== unverified(right)) return unverified(left) - unverified(right);
   const leftShortWalk = left.kind === "direct" && left.walkingSeconds < 10 * 60;
   const rightShortWalk = right.kind === "direct" && right.walkingSeconds < 10 * 60;
   const leftBusConnection = left.kind === "connection" && (left.feederMode === "BUS" || left.feederMode === "NOCTILIEN");
@@ -789,16 +828,19 @@ function compareNearbyHeavyAccess(
 }
 
 async function resolveDirectWalkingAccess(
-  provider: NearbyWalkingRouteProvider,
+  provider: NearbyWalkingRouteProvider | undefined,
   origin: { lon: number; lat: number },
-  station: Pick<GlobalMapStation, "lon" | "lat">,
+  station: Pick<GlobalMapStation, "lon" | "lat" | "name">,
   signal?: AbortSignal,
+  options?: { mode: GlobalMapMode; datetime?: string; template?: NearbyJourney },
 ): Promise<NearbyHeavyTransportAccess | undefined> {
-  const route = await provider(origin, station, signal).catch((cause: unknown) => {
+  const immediate = createImmediateTramWalkingRoute(origin, station, options?.mode);
+  if (!provider && !immediate) return undefined;
+  const route = immediate ?? await provider!(origin, station, signal).catch((cause: unknown) => {
     if (signal?.aborted || isAbortError(cause)) throw cause;
     return undefined;
   });
-  if (!route || route.provider === "straight-line" || route.fallback === true) return undefined;
+  if (!route || !immediate && (route.provider === "straight-line" || route.fallback === true)) return undefined;
   if (!Number.isFinite(route.durationSeconds) || route.durationSeconds < 0) return undefined;
   const durationSeconds = Math.round(route.durationSeconds);
   if (durationSeconds > 30 * 60) return undefined;
@@ -811,6 +853,11 @@ async function resolveDirectWalkingAccess(
     initialWaitSeconds: 0,
     scoreSeconds: durationSeconds,
     travelSeconds: durationSeconds,
+    journey: immediate ? { source: options?.template?.source, datasetVersion: options?.template?.datasetVersion,
+      status: "partial", departureDateTime: options?.datetime, durationSeconds, transferCount: 0,
+      sections: [{ type: "walking", mode: "walking", durationSeconds, distanceMeters: route.distanceMeters,
+        fromPoint: origin, toPoint: { lon: station.lon, lat: station.lat }, toName: station.name,
+        timingSource: "estimated", walkingProvider: route.provider }] } : undefined,
   };
 }
 

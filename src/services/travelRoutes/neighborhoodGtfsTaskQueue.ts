@@ -43,8 +43,8 @@ export function createNeighborhoodGtfsSchedulingQueues() {
   const timetable = createNeighborhoodGtfsTaskQueue();
   const all = [transport, night, places, timetable];
   return {
-    select(kind: "routes" | "frequency" | "last-service", purpose?: "transport" | "night-transport" | "places") {
-      return kind !== "routes" ? timetable : purpose === "places" ? places : purpose === "night-transport" ? night : transport;
+    select(kind: "routes" | "frequency" | "last-service" | "night-access", purpose?: "transport" | "night-transport" | "places") {
+      return kind === "night-access" ? night : kind !== "routes" ? timetable : purpose === "places" ? places : purpose === "night-transport" ? night : transport;
     },
     cancel(id: number) { for (const queue of all) queue.cancel(id); },
     idle() { return Promise.all(all.map(queue => queue.idle())); },
