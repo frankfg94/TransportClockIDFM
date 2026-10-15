@@ -9,11 +9,13 @@ withDefaults(
     title: string;
     panelClass?: string;
     closeLabel?: string;
+    teleportDisabled?: boolean;
   }>(),
   {
     eyebrow: "",
     panelClass: "",
     closeLabel: "",
+    teleportDisabled: false,
   },
 );
 
@@ -25,7 +27,7 @@ const resolvedCloseLabel = computed(() => t("common.actions.close"));
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport to="body" :disabled="teleportDisabled">
     <Transition name="modal-scale">
       <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
         <section

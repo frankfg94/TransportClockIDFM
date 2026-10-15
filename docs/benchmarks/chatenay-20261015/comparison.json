@@ -1,0 +1,76 @@
+{
+  "status": "not-validated",
+  "beforeMs": 36631,
+  "afterMs": 274351,
+  "beforeFacts": 58,
+  "afterFacts": 58,
+  "missing": [],
+  "changed": [
+    {
+      "before": {
+        "category": "education",
+        "id": "education-elementary",
+        "labelKey": "nearbyStations.neighborhoodScore.facts.educationElementaryApprox.label",
+        "labelValues": {
+          "count": 3,
+          "establishments": "École élémentaire Thomas Masaryk (≈4 min) · École élémentaire publique Jules Verne (≈4 min) · École primaire Pierre Brossolette (≈13 min)",
+          "minutes": 20
+        }
+      },
+      "after": {
+        "category": "education",
+        "id": "education-elementary",
+        "labelKey": "nearbyStations.neighborhoodScore.facts.educationElementaryApprox.label",
+        "labelValues": {
+          "establishments": "École élémentaire Thomas Masaryk (≈4 min) · École élémentaire publique Jules Verne (≈4 min) · École primaire Pierre Brossolette (17 min à pied)",
+          "count": 3,
+          "minutes": 20
+        }
+      }
+    },
+    {
+      "before": {
+        "category": "education",
+        "id": "education-college",
+        "labelKey": "nearbyStations.neighborhoodScore.facts.educationCollegesApprox.label",
+        "labelValues": {
+          "count": 3,
+          "establishments": "Collège Thomas Masaryk (≈5 min) · Collège Pierre Brossolette (≈14 min) · Collège Léonard de Vinci (≈14 min)",
+          "minutes": 20
+        }
+      },
+      "after": {
+        "category": "education",
+        "id": "education-college",
+        "labelKey": "nearbyStations.neighborhoodScore.facts.educationCollegesApprox.label",
+        "labelValues": {
+          "establishments": "Collège Thomas Masaryk (≈5 min) · Collège Léonard de Vinci (15 min à pied) · Collège Pierre Brossolette (17 min à pied)",
+          "count": 3,
+          "minutes": 20
+        }
+      }
+    },
+    {
+      "before": {
+        "category": "education",
+        "id": "education-other",
+        "labelKey": "nearbyStations.neighborhoodScore.facts.educationOtherApprox.label",
+        "labelValues": {
+          "count": 5,
+          "establishments": "Groupe scolaire Sophie Barat (≈9 min) · Pierre Mendes France (≈9 min) · La Maison des Sciences (≈11 min) · École Léonard de Vinci (≈15 min) · Permistar (≈15 min)",
+          "minutes": 20
+        }
+      },
+      "after": {
+        "category": "education",
+        "id": "education-other",
+        "labelKey": "nearbyStations.neighborhoodScore.facts.educationOtherApprox.label",
+        "labelValues": {
+          "establishments": "Groupe scolaire Sophie Barat (≈9 min) · Pierre Mendes France (≈9 min) · La Maison des Sciences (≈11 min) · École Léonard de Vinci (18 min à pied) · Permistar (18 min à pied)",
+          "count": 5,
+          "minutes": 20
+        }
+      }
+    }
+  ]
+}

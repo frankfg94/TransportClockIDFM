@@ -1,0 +1,584 @@
+[
+  {
+    "category": "transport",
+    "id": "transport-line-code%3Ac02528%3Asection%3A%5B%22FR%3A%3AQuay%3A50175615%3AFR1%22%2C%22FR%3A%3AQuay%3A50175594%3AFR1%22%2C%22FR%3A%3AQuay%3A50175597%3AFR1%22%2C%22FR%3A%3AQuay%3A50175566%3AFR1%22%2C%22FR%3A%3AQuay%3A50175611%3AFR1%22%2C%22FR%3A%3AQuay%3A50175607%3AFR1%22%2C%22FR%3A%3AQuay%3A50175610%3AFR1%22%2C%22FR%3A%3AQuay%3A50175609%3AFR1%22%2C%22FR%3A%3AQuay%3A50175571%3AFR1%22%2C%22FR%3A%3AQuay%3A50175579%3AFR1%22%2C%22FR%3A%3AQuay%3A50175578%3AFR1%22%2C%22FR%3A%3AQuay%3A50175608%3AFR1%22%2C%22FR%3A%3AQuay%3A50197862%3AFR1%22%5D",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportLineAtAddress.label",
+    "labelValues": {
+      "line": "Tramway T10",
+      "meters": 139,
+      "minutes": 2,
+      "station": "Les Peintres",
+      "via": " à pied"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "transport-hub-gpe-ga18",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportHub.label",
+    "labelValues": {
+      "currentLines": "RER B",
+      "futureLine": "15",
+      "minutes": 29,
+      "station": "Arcueil - Cachan",
+      "via": "Tramway T10 → RER B"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "transport-hub-gpe-ga49",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportHub.label",
+    "labelValues": {
+      "currentLines": "Transilien V et RER C et RER B",
+      "futureLine": "18",
+      "minutes": 23,
+      "station": "Massy - Palaiseau",
+      "via": "Tramway T10 → RER B"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "transport-line-code%3Ac01388%3Asection%3A%5B%22FR%3A%3AQuay%3A50025874%3AFR1%22%2C%22FR%3A%3AQuay%3A50147181%3AFR1%22%2C%22FR%3A%3AQuay%3A50147183%3AFR1%22%5D",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportStationNearby.label",
+    "labelValues": {
+      "line": "Train ORLYVAL",
+      "meters": 2646,
+      "minutes": 18,
+      "station": "Antony",
+      "via": " via Tramway T10 → RER B, BUS 412"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "transport-line-code%3Ac01743%3Asection%3A%5B%22FR%3A%3AmonomodalStopPlace%3A43097%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A43177%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A46007%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A43066%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A43124%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A43228%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A47940%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A58774%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A47009%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A43175%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A474069%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A43232%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A43086%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A43103%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A47046%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A47888%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A47052%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A47889%3AFR1%22%5D",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportStationNearby.label",
+    "labelValues": {
+      "line": "RER B",
+      "meters": 2684,
+      "minutes": 17,
+      "station": "La Croix de Berny",
+      "via": " via Tramway T10, BUS 412"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "transport-line-code%3Ac01794%3Asection%3A%5B%22FR%3A%3AQuay%3A50146480%3AFR1%22%2C%22FR%3A%3AQuay%3A50146479%3AFR1%22%2C%22FR%3A%3AQuay%3A50146319%3AFR1%22%2C%22FR%3A%3AQuay%3A50146336%3AFR1%22%2C%22FR%3A%3AQuay%3A50146335%3AFR1%22%2C%22FR%3A%3AQuay%3A50146316%3AFR1%22%2C%22FR%3A%3AQuay%3A50146333%3AFR1%22%2C%22FR%3A%3AQuay%3A50146314%3AFR1%22%2C%22FR%3A%3AQuay%3A50146313%3AFR1%22%2C%22FR%3A%3AQuay%3A50146330%3AFR1%22%2C%22FR%3A%3AQuay%3A50146329%3AFR1%22%2C%22FR%3A%3AQuay%3A50146328%3AFR1%22%2C%22FR%3A%3AQuay%3A50146327%3AFR1%22%2C%22FR%3A%3AQuay%3A50146308%3AFR1%22%2C%22FR%3A%3AQuay%3A50146307%3AFR1%22%2C%22FR%3A%3AQuay%3A50146324%3AFR1%22%2C%22FR%3A%3AQuay%3A50146305%3AFR1%22%2C%22FR%3A%3AQuay%3A50146304%3AFR1%22%2C%22FR%3A%3AQuay%3A50146303%3AFR1%22%2C%22FR%3A%3AQuay%3A50146320%3AFR1%22%2C%22FR%3A%3AQuay%3A50149051%3AFR1%22%5D",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportStationNearby.label",
+    "labelValues": {
+      "line": "Tramway T6",
+      "meters": 2688,
+      "minutes": 16,
+      "station": "Hôpital Béclère",
+      "via": " via Tramway T10"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "transport-line-code%3Ac02529%3Asection%3A%5B%22FR%3A%3AQuay%3A50234394%3AFR1%22%2C%22FR%3A%3AQuay%3A50234395%3AFR1%22%5D",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportStationNearby.label",
+    "labelValues": {
+      "line": "Tramway T12",
+      "meters": 4302,
+      "minutes": 26,
+      "station": "Massy-Palaiseau - BV voie 3",
+      "via": " via Tramway T10 → RER B"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "transport-service-quality",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportServiceQuality.label",
+    "labelValues": {
+      "latest": 91.8,
+      "lines": 5,
+      "score": 91,
+      "trend": "improving",
+      "weighted": 90.9
+    }
+  },
+  {
+    "category": "transport",
+    "id": "chatelet-under-45",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.chateletUnder45.label",
+    "labelValues": {
+      "duration": 39,
+      "elapsed": 41,
+      "initialWait": 2,
+      "lines": "T10 · B",
+      "transfers": 1,
+      "walking": 2
+    }
+  },
+  {
+    "category": "transport",
+    "id": "major-station-montparnasse",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.majorStationUnder40.label",
+    "labelValues": {
+      "destination": "Gare Montparnasse",
+      "duration": 40,
+      "elapsed": 42,
+      "initialWait": 2,
+      "lines": "T10 · B · 4",
+      "station": "Gare Montparnasse",
+      "transfers": 2,
+      "walking": 2
+    }
+  },
+  {
+    "category": "transport",
+    "id": "transport-offer",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportOffer.label",
+    "labelValues": {
+      "lines": 9,
+      "modes": "GPE, RER, TRAIN, TRAM, TRANSILIEN"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "noctilien-n62-et-n63",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.noctilienAtNight.label",
+    "labelValues": {
+      "hour": "03:00",
+      "line": "N62 et N63",
+      "minutes": 8
+    }
+  },
+  {
+    "category": "transport",
+    "id": "transport-line-code%3Ac01743%3Asection%3A%5B%22FR%3A%3AmonomodalStopPlace%3A43097%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A59206%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A43125%3AFR1%22%2C%22FR%3A%3AmonomodalStopPlace%3A43186%3AFR1%22%5D",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportStationNearby.label",
+    "labelValues": {
+      "line": "RER B",
+      "meters": 2047,
+      "minutes": 28,
+      "station": "Robinson",
+      "via": " via BUS 194"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "transport-hub-gpe-ga19",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportHub.label",
+    "labelValues": {
+      "currentLines": "Métro 4",
+      "futureLine": "15",
+      "minutes": 54,
+      "station": "Bagneux",
+      "via": "Tramway T10 → RER B → Métro 4"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "transport-hub-gpe-ga20",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportHub.label",
+    "labelValues": {
+      "currentLines": "Tramway T6",
+      "futureLine": "15",
+      "minutes": 35,
+      "station": "Châtillon - Montrouge",
+      "via": "Tramway T10 → Tramway T6"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "employment-hub:employment-la-defense",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.employmentHubContext.label",
+    "labelValues": {
+      "destination": "La Défense",
+      "duration": 51,
+      "elapsed": 53,
+      "initialWait": 2,
+      "lines": "T10 · B · A",
+      "station": "La Défense",
+      "transfers": 2,
+      "walking": 2
+    }
+  },
+  {
+    "category": "transport",
+    "id": "employment-hub:employment-nanterre",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.employmentHubContext.label",
+    "labelValues": {
+      "destination": "Nanterre La Folie",
+      "duration": 57,
+      "elapsed": 59,
+      "initialWait": 2,
+      "lines": "T10 · B · A · E",
+      "station": "Nanterre-La-Folie",
+      "transfers": 3,
+      "walking": 2
+    }
+  },
+  {
+    "category": "transport",
+    "id": "employment-hub:employment-plaine-saint-denis",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.employmentHubContext.label",
+    "labelValues": {
+      "destination": "La Plaine Saint-Denis",
+      "duration": 60,
+      "elapsed": 62,
+      "initialWait": 2,
+      "lines": "T10 · B · 14",
+      "station": "Saint-Denis - Pleyel",
+      "transfers": 2,
+      "walking": 2
+    }
+  },
+  {
+    "category": "transport",
+    "id": "employment-hub:employment-val-de-fontenay",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.employmentHubContext.label",
+    "labelValues": {
+      "destination": "Val de Fontenay",
+      "duration": 58,
+      "elapsed": 60,
+      "initialWait": 2,
+      "lines": "T10 · B · A",
+      "station": "Val de Fontenay",
+      "transfers": 2,
+      "walking": 2
+    }
+  },
+  {
+    "category": "transport",
+    "id": "employment-hub:employment-velizy",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.employmentHubContext.label",
+    "labelValues": {
+      "destination": "Vélizy",
+      "duration": 31,
+      "elapsed": 31,
+      "initialWait": 0,
+      "lines": "T10 · T6",
+      "station": "Vélizy 2",
+      "transfers": 1,
+      "walking": 2
+    }
+  },
+  {
+    "category": "transport",
+    "id": "major-station-gare-de-lyon",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.majorStationContext.label",
+    "labelValues": {
+      "destination": "Gare de Lyon",
+      "duration": 45,
+      "elapsed": 47,
+      "initialWait": 2,
+      "lines": "T10 · B · A",
+      "station": "Gare de Lyon",
+      "transfers": 2,
+      "walking": 2
+    }
+  },
+  {
+    "category": "transport",
+    "id": "major-station-gare-du-nord",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.majorStationContext.label",
+    "labelValues": {
+      "destination": "Gare du Nord",
+      "duration": 43,
+      "elapsed": 44,
+      "initialWait": 2,
+      "lines": "T10 · B",
+      "station": "Gare du Nord",
+      "transfers": 1,
+      "walking": 2
+    }
+  },
+  {
+    "category": "transport",
+    "id": "major-station-saint-lazare",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.majorStationContext.label",
+    "labelValues": {
+      "destination": "Gare Saint-Lazare",
+      "duration": 50,
+      "elapsed": 52,
+      "initialWait": 2,
+      "lines": "T10 · B · 14",
+      "station": "Gare Saint-Lazare",
+      "transfers": 2,
+      "walking": 2
+    }
+  },
+  {
+    "category": "transport",
+    "id": "frequency-context:line:IDFM:C02528",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.frequencyContext.label",
+    "labelValues": {
+      "lines": "Tramway T10",
+      "minutes": 6,
+      "transport": "Tramway T10"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "frequency-context:line:IDFM:C01388",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.frequencyRemote.label",
+    "labelValues": {
+      "lines": "Train ORLYVAL",
+      "minutes": 5,
+      "transport": "Train ORLYVAL"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "frequency-context:line:IDFM:C01727",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.frequencyRemote.label",
+    "labelValues": {
+      "lines": "RER C",
+      "minutes": 30,
+      "transport": "RER C"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "frequency-context:line:IDFM:C01743",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.frequencyRemote.label",
+    "labelValues": {
+      "lines": "RER B",
+      "minutes": 12,
+      "transport": "RER B"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "frequency-context:line:IDFM:C01794",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.frequencyRemote.label",
+    "labelValues": {
+      "lines": "Tramway T6",
+      "minutes": 4,
+      "transport": "Tramway T6"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "frequency-context:line:IDFM:C02711",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.frequencyRemote.label",
+    "labelValues": {
+      "lines": "Transilien V",
+      "minutes": 15,
+      "transport": "Transilien V"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "transport-line-code%3Ac01383%3Asection%3A%5B%22FR%3A%3AQuay%3A50025768%3AFR1%22%2C%22FR%3A%3AQuay%3A50026612%3AFR1%22%2C%22FR%3A%3AQuay%3A50025935%3AFR1%22%2C%22FR%3A%3AQuay%3A50026083%3AFR1%22%2C%22FR%3A%3AQuay%3A50026788%3AFR1%22%2C%22FR%3A%3AQuay%3A50026077%3AFR1%22%2C%22FR%3A%3AQuay%3A50026439%3AFR1%22%2C%22FR%3A%3AQuay%3A50026611%3AFR1%22%2C%22FR%3A%3AQuay%3A50088157%3AFR1%22%2C%22FR%3A%3AQuay%3A50026436%3AFR1%22%2C%22FR%3A%3AQuay%3A50026085%3AFR1%22%2C%22FR%3A%3AQuay%3A50088152%3AFR1%22%2C%22FR%3A%3AQuay%3A50026432%3AFR1%22%2C%22FR%3A%3AQuay%3A50026262%3AFR1%22%2C%22FR%3A%3AQuay%3A50026952%3AFR1%22%2C%22FR%3A%3AQuay%3A50026951%3AFR1%22%2C%22FR%3A%3AQuay%3A50026259%3AFR1%22%2C%22FR%3A%3AQuay%3A50026616%3AFR1%22%5D",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportStationNearby.label",
+    "labelValues": {
+      "line": "Métro 13",
+      "meters": 5742,
+      "minutes": 38,
+      "station": "Châtillon Montrouge",
+      "via": " via Tramway T10 → Tramway T6, BUS 194"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "transport-line-code%3Ac01774%3Asection%3A%5B%22FR%3A%3AQuay%3A50146167%3AFR1%22%2C%22FR%3A%3AQuay%3A50146183%3AFR1%22%2C%22FR%3A%3AQuay%3A50146182%3AFR1%22%2C%22FR%3A%3AQuay%3A50146164%3AFR1%22%2C%22FR%3A%3AQuay%3A50146163%3AFR1%22%2C%22FR%3A%3AQuay%3A50146179%3AFR1%22%2C%22FR%3A%3AQuay%3A50146161%3AFR1%22%2C%22FR%3A%3AQuay%3A50146177%3AFR1%22%2C%22FR%3A%3AQuay%3A50146176%3AFR1%22%2C%22FR%3A%3AQuay%3A50146158%3AFR1%22%2C%22FR%3A%3AQuay%3A50146174%3AFR1%22%2C%22FR%3A%3AQuay%3A50146173%3AFR1%22%2C%22FR%3A%3AQuay%3A50146155%3AFR1%22%2C%22FR%3A%3AQuay%3A50146154%3AFR1%22%2C%22FR%3A%3AQuay%3A50146153%3AFR1%22%2C%22FR%3A%3AQuay%3A50146169%3AFR1%22%2C%22FR%3A%3AQuay%3A50146151%3AFR1%22%2C%22FR%3A%3AQuay%3A50146168%3AFR1%22%5D",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportStationNearby.label",
+    "labelValues": {
+      "line": "Tramway T7",
+      "meters": 6536,
+      "minutes": 55,
+      "station": "Robert Schuman (Parc Silic Centre)",
+      "via": " via Tramway T10 → RER B → RER C"
+    }
+  },
+  {
+    "category": "transport",
+    "id": "transport-line-future%3Agpe-GA48",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.transportStationNearby.label",
+    "labelValues": {
+      "line": "Métro 18",
+      "meters": 4005,
+      "minutes": 47,
+      "station": "Massy Opéra",
+      "via": " via Tramway T10 → RER B"
+    }
+  },
+  {
+    "category": "daily-life",
+    "id": "medium-supermarkets-nearby",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.mediumSupermarketsNearby.label",
+    "labelValues": {
+      "count": 1,
+      "minimumSurface": 1000,
+      "minutes": 10,
+      "supermarkets": "Lidl (≈4 min) · 1 127 m²"
+    }
+  },
+  {
+    "category": "daily-life",
+    "id": "supermarkets-nearby",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.supermarketsNearby.label",
+    "labelValues": {
+      "count": 5,
+      "minutes": 10,
+      "supermarkets": "RCH Distribution (≈3 min) · Lidl (≈4 min) · Carrefour City (≈6 min) · Le Relais Exotique (≈8 min) · Ô marché de la butte (9 min à pied)"
+    }
+  },
+  {
+    "category": "daily-life",
+    "id": "daily-stores",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.dailyStores.label",
+    "labelValues": {
+      "count": 54,
+      "minutes": 15
+    }
+  },
+  {
+    "category": "daily-life",
+    "id": "restaurants-nearby",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.restaurantsNearbyApprox.label",
+    "labelValues": {
+      "count": 17,
+      "minutes": 15
+    }
+  },
+  {
+    "category": "nature-leisure",
+    "id": "green-space-transit-green-63f80d38209a",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.greenSpaceTransitNearby.label",
+    "labelValues": {
+      "area": "165 ha",
+      "areaLabel": " · 165 ha",
+      "elapsed": 14,
+      "hour": "09:00",
+      "initialWait": 2,
+      "lines": "Tramway T10",
+      "minutes": 12,
+      "name": "Domaine de Sceaux",
+      "walking": 20
+    }
+  },
+  {
+    "category": "nature-leisure",
+    "id": "backend:green-site-green-8537a25d0b2b"
+  },
+  {
+    "category": "nature-leisure",
+    "id": "backend:green-green-7d29ff72015f"
+  },
+  {
+    "category": "nature-leisure",
+    "id": "leisure-nearby",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.leisurePlaceNearbyApprox.label",
+    "labelValues": {
+      "meters": 82,
+      "minutes": 2,
+      "name": "Conservatoire Musique et Danse"
+    }
+  },
+  {
+    "category": "nature-leisure",
+    "id": "backend:green-site-green-63f80d38209a"
+  },
+  {
+    "category": "nature-leisure",
+    "id": "backend:green-reference-green-7d29ff72015f"
+  },
+  {
+    "category": "health",
+    "id": "pharmacy-nearby",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.pharmaciesNearbyApprox.label",
+    "labelValues": {
+      "count": 2,
+      "minutes": 10,
+      "pharmacies": "Pharmacie du Stade (≈5 min) · Pharmacie de la Division Leclerc (≈7 min)"
+    }
+  },
+  {
+    "category": "education",
+    "id": "education-elementary",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.educationElementaryApprox.label",
+    "labelValues": {
+      "count": 3,
+      "establishments": "École élémentaire Thomas Masaryk (≈4 min) · École élémentaire publique Jules Verne (≈4 min) · École primaire Pierre Brossolette (≈13 min)",
+      "minutes": 20
+    }
+  },
+  {
+    "category": "education",
+    "id": "education-college",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.educationCollegesApprox.label",
+    "labelValues": {
+      "count": 3,
+      "establishments": "Collège Thomas Masaryk (≈5 min) · Collège Pierre Brossolette (≈14 min) · Collège Léonard de Vinci (≈14 min)",
+      "minutes": 20
+    }
+  },
+  {
+    "category": "education",
+    "id": "education-maternelle",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.educationMaternelleApprox.label",
+    "labelValues": {
+      "count": 1,
+      "establishments": "École maternelle Pierre Brossolette (≈13 min)",
+      "minutes": 20
+    }
+  },
+  {
+    "category": "education",
+    "id": "education-nursery",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.educationNurseriesApprox.label",
+    "labelValues": {
+      "count": 3,
+      "establishments": "Crèche municipale Les Coccinelles (≈9 min) · Micro-Crèche Ségoline (≈11 min) · La Maison Bleue (≈12 min)",
+      "minutes": 20
+    }
+  },
+  {
+    "category": "education",
+    "id": "education-high-school",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.educationHighSchoolsApprox.label",
+    "labelValues": {
+      "count": 2,
+      "establishments": "Lycée général et technologique Emmanuel Mounier (≈11 min) · Lycée Missak et Mélinée Manouchian (≈13 min)",
+      "minutes": 20
+    }
+  },
+  {
+    "category": "education",
+    "id": "education-other",
+    "labelKey": "nearbyStations.neighborhoodScore.facts.educationOtherApprox.label",
+    "labelValues": {
+      "count": 5,
+      "establishments": "Groupe scolaire Sophie Barat (≈9 min) · Pierre Mendes France (≈9 min) · La Maison des Sciences (≈11 min) · École Léonard de Vinci (≈15 min) · Permistar (≈15 min)",
+      "minutes": 20
+    }
+  },
+  {
+    "category": "living-environment",
+    "id": "backend:air-92019-point"
+  },
+  {
+    "category": "living-environment",
+    "id": "backend:noise-92019-point"
+  },
+  {
+    "category": "living-environment",
+    "id": "backend:noise-92019-variation"
+  },
+  {
+    "category": "security",
+    "id": "backend:security-burglary"
+  },
+  {
+    "category": "security",
+    "id": "backend:security-violent-theft-without-weapon"
+  },
+  {
+    "category": "security",
+    "id": "backend:security-physical-violence-outside-family"
+  },
+  {
+    "category": "security",
+    "id": "backend:security-nonviolent-theft"
+  },
+  {
+    "category": "security",
+    "id": "backend:security-vehicle-theft"
+  },
+  {
+    "category": "security",
+    "id": "backend:security-damage"
+  }
+]

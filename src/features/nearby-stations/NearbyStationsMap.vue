@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useSlots, watch } from "vue";
 import { Activity, BusFront, Check, ChevronRight, Download, Ear, EllipsisVertical, Euro, ExternalLink, Footprints, Gauge, Layers, LoaderCircle, Map as MapIcon, MapPin, Maximize2, Minimize2, Minus, Navigation, Plus, Radar, Route, Satellite, Store, TrainFront, TramFront, Wind, ZoomIn, ZoomOut, X } from "lucide-vue-next";
 import AppRightPanel from "../../components/AppRightPanel.vue";
+import AppModal from "../../components/AppModal.vue";
 import ContextMenu from "../../components/ContextMenu.vue";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import NearbyPlaceCanvas from "./NearbyPlaceCanvas.vue";
@@ -515,6 +516,8 @@ const hoveredEnvironment = ref<NearbyEnvironmentHover>();
 const showMapStations = ref(true);
 const showProjectedStations = ref(true);
 const cityViewEnabled = ref(false);
+const cityInfoLightboxOpen = ref(false);
+const cityInfoLightboxTrigger = shallowRef<HTMLButtonElement>();
 const nearbyMapLoadingTimedOut = ref(false);
 let nearbyMapLoadingTimeout: ReturnType<typeof setTimeout> | undefined;
 const cityViewSelectedTransportMode = ref<GlobalMapMode>();
@@ -2435,6 +2438,7 @@ function toggleMobileTravelPanel(): void {
 
 watch(cityViewEnabled, (enabled) => {
   if (!enabled) {
+    cityInfoLightboxOpen.value = false;
     cityViewRealEstatePanelOpen.value = false;
     cityViewRealEstateLayerEnabled.value = false;
     clearCityComparison();
@@ -2455,9 +2459,35 @@ watch(cityViewEnabled, (enabled) => {
   activeSidebarTab.value = "summary";
 });
 watch(isMobileDisplaySheet, (isMobile) => {
-  if (!isMobile) cityViewRealEstatePanelOpen.value = false;
+  if (!isMobile) {
+    cityInfoLightboxOpen.value = false;
+    cityViewRealEstatePanelOpen.value = false;
+  }
 });
 
+watch(cityInfoLightboxOpen, async (open, _previous, onCleanup) => {
+  if (!open) {
+    if (cityInfoLightboxTrigger.value?.isConnected) cityInfoLightboxTrigger.value.focus();
+    return;
+  }
+
+  const closeOnEscape = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    cityInfoLightboxOpen.value = false;
+  };
+  window.addEventListener("keydown", closeOnEscape);
+  let stillOpen = true;
+  onCleanup(() => {
+    stillOpen = false;
+    window.removeEventListener("keydown", closeOnEscape);
+  });
+
+  await nextTick();
+  if (stillOpen) {
+    document.querySelector<HTMLButtonElement>(".nearby-city-info-lightbox .icon-button")?.focus();
+  }
+});
 watch(() => cityViewEnabled.value ? cityViewDvfCommuneCode.value : undefined, async (communeCode) => {
   const requestId = ++cityViewDvfRequestId;
   if (!communeCode) {
@@ -3721,7 +3751,13 @@ function toggleCityCommerce(): void {
 
 function handleCityInfoAction(action: "places-ranking"): void {
   if (action !== "places-ranking") return;
+  cityInfoLightboxOpen.value = false;
   emit("openPlacesRanking", cityViewPopulationByCode.value);
+}
+
+function openCityInfoLightbox(trigger: HTMLButtonElement): void {
+  cityInfoLightboxTrigger.value = trigger;
+  cityInfoLightboxOpen.value = true;
 }
 
 /**
@@ -5400,10 +5436,37 @@ function mix(from: number, to: number, progress: number): number {
         :expand-label="t('nearbyStations.cityInfoExpand')"
         :eyebrow="cityViewInfoCard.eyebrow"
         :items="cityViewInfoCard.items"
+        :mobile-lightbox="isMobileDisplaySheet"
+        :mobile-lightbox-open="cityInfoLightboxOpen"
         :selected-transport-mode="cityViewSelectedTransportMode"
         @transport-mode-toggle="toggleCityViewTransportMode"
         @item-action="handleCityInfoAction"
+        @open-lightbox="openCityInfoLightbox"
       />
+      <AppModal
+        :open="cityInfoLightboxOpen && isMobileDisplaySheet && cityViewEnabled && Boolean(cityViewInfoCard)"
+        :title="cityViewInfoCard?.cityName ?? ''"
+        :eyebrow="cityViewInfoCard?.eyebrow"
+        panel-class="nearby-city-info-lightbox"
+        :teleport-disabled="isFullscreen"
+        @close="cityInfoLightboxOpen = false"
+      >
+        <NearbyCityInfoCard
+          v-if="cityViewInfoCard"
+          :ariaLabel="cityViewInfoCard.ariaLabel"
+          :city-name="cityViewInfoCard.cityName"
+          :collapse-label="t('nearbyStations.cityInfoCollapse')"
+          :expand-label="t('nearbyStations.cityInfoExpand')"
+          :eyebrow="cityViewInfoCard.eyebrow"
+          :items="cityViewInfoCard.items"
+          lightbox
+          :mobile-lightbox="isMobileDisplaySheet"
+          :mobile-lightbox-open="true"
+          :selected-transport-mode="cityViewSelectedTransportMode"
+          @transport-mode-toggle="toggleCityViewTransportMode"
+          @item-action="handleCityInfoAction"
+        />
+      </AppModal>
       <aside
         v-if="cityViewEnabled && cityViewRealEstateLayerEnabled && !isMobileDisplaySheet"
         class="nearby-map__real-estate-legend"
@@ -7406,5 +7469,14 @@ function mix(from: number, to: number, progress: number): number {
 @media (prefers-reduced-motion: reduce) {
   .nearby-map-shell:not(.nearby-map-shell--places-preview) { transition: none; }
   .nearby-map__sidebar { animation: none; }
+}
+:global(.modal-panel.nearby-city-info-lightbox) {
+  max-width: 620px;
+  width: min(100%, 620px);
+}
+
+:global(.nearby-city-info-lightbox .app-modal__body) {
+  gap: 0;
+  padding: 14px 16px max(14px, env(safe-area-inset-bottom));
 }
 </style>

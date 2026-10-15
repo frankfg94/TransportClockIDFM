@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Bike, BusFront, CableCar, Info, Minus, Search, TrainFront, TramFront } from "lucide-vue-next";
 import type { GlobalMapMode } from "../transport-map/contracts/manifest";
 
@@ -29,7 +29,7 @@ export interface NearbyCityInfoCardItem {
   actionLabel?: string;
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   ariaLabel: string;
   cityName: string;
   eyebrow: string;
@@ -37,25 +37,44 @@ const props = defineProps<{
   collapseLabel: string;
   expandLabel: string;
   selectedTransportMode?: GlobalMapMode;
-}>();
+  mobileLightbox?: boolean;
+  mobileLightboxOpen?: boolean;
+  lightbox?: boolean;
+}>(), {
+  mobileLightbox: false,
+  mobileLightboxOpen: false,
+  lightbox: false,
+});
 
 const emit = defineEmits<{
   "transport-mode-toggle": [mode: GlobalMapMode];
   "item-action": [action: NonNullable<NearbyCityInfoCardItem["action"]>];
+  "open-lightbox": [trigger: HTMLButtonElement];
 }>();
 
-const isCollapsed = ref(false);
+const isCollapsed = ref(props.mobileLightbox && !props.lightbox);
 let hasUserToggled = false;
 let mobileMedia: MediaQueryList | undefined;
 
 function syncMobileDefault(media: { matches: boolean }): void {
-  if (!hasUserToggled) isCollapsed.value = media.matches;
+  if (!hasUserToggled && !props.lightbox) isCollapsed.value = props.mobileLightbox || media.matches;
 }
 
-function toggleCollapsed(): void {
+function toggleCollapsed(event: MouseEvent): void {
+  if (isCollapsed.value && props.mobileLightbox) {
+    emit("open-lightbox", event.currentTarget as HTMLButtonElement);
+    return;
+  }
+
   hasUserToggled = true;
   isCollapsed.value = !isCollapsed.value;
 }
+
+watch(() => props.mobileLightbox, (mobile) => {
+  if (props.lightbox) return;
+  if (mobile) isCollapsed.value = true;
+  else if (!hasUserToggled) isCollapsed.value = false;
+});
 
 onMounted(() => {
   if (typeof window.matchMedia !== "function") return;
@@ -73,7 +92,10 @@ onBeforeUnmount(() => {
 <template>
   <article
     class="nearby-city-info-card"
-    :class="{ 'nearby-city-info-card--collapsed': isCollapsed }"
+    :class="{
+      'nearby-city-info-card--collapsed': isCollapsed,
+      'nearby-city-info-card--lightbox': props.lightbox,
+    }"
     data-testid="nearby-city-info-card"
     :aria-label="ariaLabel"
   >
@@ -82,7 +104,7 @@ onBeforeUnmount(() => {
       class="nearby-city-info-card__collapsed-toggle"
       data-testid="nearby-city-info-card-expand"
       type="button"
-      :aria-expanded="false"
+      :aria-expanded="props.mobileLightbox ? props.mobileLightboxOpen : false"
       :aria-label="expandLabel"
       :title="expandLabel"
       @click.stop="toggleCollapsed"
@@ -90,7 +112,7 @@ onBeforeUnmount(() => {
       <Info :size="21" :stroke-width="2.4" aria-hidden="true" />
     </button>
     <template v-else>
-      <header class="nearby-city-info-card__header">
+      <header v-if="!props.lightbox" class="nearby-city-info-card__header">
         <p class="nearby-city-info-card__eyebrow">{{ eyebrow }}</p>
         <h2>{{ cityName }}</h2>
         <button
@@ -472,6 +494,67 @@ onBeforeUnmount(() => {
   font-weight: 950;
 }
 
+.nearby-city-info-card--lightbox {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  display: block;
+  gap: 0;
+  left: auto;
+  max-width: none;
+  padding: 0;
+  pointer-events: auto;
+  position: relative;
+  top: auto;
+  width: 100%;
+}
+
+.nearby-city-info-card--lightbox .nearby-city-info-card__facts {
+  gap: 9px;
+}
+
+.nearby-city-info-card--lightbox .nearby-city-info-card__fact {
+  border-radius: 11px;
+  font-size: .84rem;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.nearby-city-info-card--lightbox .nearby-city-info-card__fact dt {
+  font-size: .8rem;
+}
+
+.nearby-city-info-card--lightbox .nearby-city-info-card__fact dd {
+  font-size: .84rem;
+}
+
+.nearby-city-info-card--lightbox .nearby-city-info-card__fact--wide dd {
+  font-size: .78rem;
+}
+
+.nearby-city-info-card--lightbox .nearby-city-info-card__market-price span,
+.nearby-city-info-card--lightbox .nearby-city-info-card__market-volume span {
+  font-size: .7rem;
+}
+
+.nearby-city-info-card--lightbox .nearby-city-info-card__market-price strong {
+  font-size: .94rem;
+}
+
+.nearby-city-info-card--lightbox .nearby-city-info-card__market-context {
+  font-size: .7rem;
+}
+
+.nearby-city-info-card--lightbox .nearby-city-info-card__transport-mode {
+  min-height: 38px;
+  padding: 6px 8px;
+}
+
+.nearby-city-info-card--lightbox .nearby-city-info-card__transport-label {
+  font-size: .74rem;
+}
+
 @media (max-width: 680px) {
   .nearby-city-info-card {
     gap: 8px;
@@ -491,6 +574,10 @@ onBeforeUnmount(() => {
   .nearby-city-info-card__transport-mode {
     min-height: 32px;
     padding: 3px 5px;
+  }
+
+  .nearby-city-info-card--lightbox .nearby-city-info-card__fact {
+    padding: 11px 12px;
   }
 }
 </style>

@@ -405,7 +405,11 @@ function handleCanvasPointerLeave(): void {
 function handleCanvasClick(event: MouseEvent): void {
   const entry = hitTest(event);
   if (!entry) return;
-  emit("selectPlace", props.selectedPlaceId === entry.place.id ? undefined : entry.place.id);
+  const isSelected = props.selectedPlaceId === entry.place.id;
+  // Coarse-pointer devices do not produce the hover state used to render the
+  // place tooltip, so make the tapped place active until it is deselected.
+  hoveredId.value = isSelected ? undefined : entry.place.id;
+  emit("selectPlace", isSelected ? undefined : entry.place.id);
 }
 
 function handleCanvasContextMenu(event: MouseEvent): void {

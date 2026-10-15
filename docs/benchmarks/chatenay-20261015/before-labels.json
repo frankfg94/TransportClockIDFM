@@ -1,0 +1,111 @@
+[
+  {
+    "buttons": [
+      "+++Tramway T10 au pied de l’adresse",
+      "+Future gare Arcueil - Cachan (ligne 15) et RER B joignables en 29 min via Tramway T10 → RER B",
+      "+Future gare Massy - Palaiseau (ligne 18) et Transilien V et RER C et RER B joignables en 23 min via Tramway T10 → RER B",
+      "+Train ORLYVAL à Antony joignable en 18 min via Tramway T10 → RER B, BUS 412",
+      "+RER B — branche Saint-Rémy-lès-Chevreuse à La Croix de Berny joignable en 17 min via Tramway T10, BUS 412",
+      "+Tramway T6 à Hôpital Béclère joignable en 16 min via Tramway T10",
+      "+Tramway T12 — branche Massy - Palaiseau à Massy-Palaiseau - BV voie 3 joignable en 26 min via Tramway T10 → RER B",
+      "+Régularité des transports proches : 91 %",
+      "Voir le classement des lignes",
+      "+Châtelet en 39 min",
+      "+Gare Montparnasse en 40 min",
+      "+9 lignes structurantes à proximité",
+      "+Noctilien N62 et N63 accessibles toute la nuit en 8 min de marche",
+      "½+RER B — branche Robinson à Robinson joignable en 28 min via BUS 194",
+      "•Future gare Bagneux (ligne 15) et Métro 4 joignables en 54 min via Tramway T10 → RER B → Métro 4",
+      "•Future gare Châtillon - Montrouge (ligne 15) et Tramway T6 joignables en 35 min via Tramway T10 → Tramway T6",
+      "•Hub d’emplois : La Défense en 51 min",
+      "•Hub d’emplois : Nanterre La Folie en 57 min",
+      "•Hub d’emplois : La Plaine Saint-Denis en 60 min",
+      "•Hub d’emplois : Val de Fontenay en 58 min",
+      "•Hub d’emplois : Vélizy en 31 min",
+      "•Gare de Lyon en 45 min",
+      "•Gare du Nord en 43 min",
+      "•Gare Saint-Lazare en 50 min",
+      "•Fréquence théorique en pointe (Tramway T10) : 6 min",
+      "•Fréquence théorique en pointe (Train ORLYVAL) : 5 min",
+      "•Fréquence théorique en pointe (RER C) : 30 min",
+      "•Fréquence théorique en pointe (RER B) : 12 min",
+      "•Fréquence théorique en pointe (Tramway T6) : 4 min",
+      "•Fréquence théorique en pointe (Transilien V) : 15 min",
+      "•Métro 13 — tronçon commun La Fourche – Châtillon Montrouge à Châtillon Montrouge joignable en 38 min via Tramway T10 → Tramway T6, BUS 194",
+      "•Tramway T7 à Robert Schuman (Parc Silic Centre) joignable en 55 min via Tramway T10 → RER B → RER C",
+      "•Métro 18 à Massy Opéra joignable en 47 min via Tramway T10 → RER B"
+    ],
+    "name": "Transports"
+  },
+  {
+    "buttons": [
+      "+Supermarchés de taille moyenne à moins de 10 min à pied : Lidl (≈4 min) · 1 127 m²",
+      "+Supermarchés à moins de 10 min à pied : RCH Distribution (≈3 min) · Lidl (≈4 min) · Carrefour City (≈6 min) · Le Relais Exotique (≈8 min) · Ô marché de la butte (9 min à pied)",
+      "+51 commerces du quotidien à moins de 15 min à pied",
+      "+16 restaurants ou cafés à environ 15 min"
+    ],
+    "name": "Vie quotidienne"
+  },
+  {
+    "buttons": [
+      "+++Domaine de Sceaux accessible en 12 min via Tramway T10 · 165 ha",
+      "+Parc de la Vallée-aux-Loups à environ 6 min à pied · 60 ha",
+      "+Collège Thomas-Masaryk, espace vert géré à 257 m",
+      "+Lieu culturel, sportif ou d’intérêt « Conservatoire Musique et Danse » à environ 2 min",
+      "•Domaine de Sceaux à environ 20 min à pied · 165 ha",
+      "•Collège Thomas-Masaryk : emprise verte gérée à 257 m"
+    ],
+    "name": "Nature & loisirs"
+  },
+  {
+    "buttons": [
+      "+Pharmacies à moins de 10 min à pied : Pharmacie du Stade (≈5 min) · Pharmacie de la Division Leclerc (≈7 min)"
+    ],
+    "name": "Santé"
+  },
+  {
+    "buttons": [
+      "Afficher la liste de Écoles primaires (3 établissements)",
+      "Afficher les détails de École élémentaire Thomas Masaryk — Écoles primaires",
+      "Afficher les détails de École élémentaire publique Jules Verne — Écoles primaires",
+      "Afficher les détails de École primaire Pierre Brossolette — Écoles primaires",
+      "Afficher la liste de Maternelles & crèches (4 établissements)",
+      "Afficher les détails de Crèche municipale Les Coccinelles — Maternelles & crèches",
+      "Afficher les détails de Micro-Crèche Ségoline — Maternelles & crèches",
+      "Afficher les détails de La Maison Bleue — Maternelles & crèches",
+      "Afficher les détails de École maternelle Pierre Brossolette — Maternelles & crèches",
+      "Afficher la liste de Collèges & lycées (5 établissements)",
+      "Afficher les détails de Collège Thomas Masaryk — Collèges & lycées",
+      "Afficher les détails de Lycée général et technologique Emmanuel Mounier — Collèges & lycées",
+      "Afficher les détails de Lycée Missak et Mélinée Manouchian — Collèges & lycées",
+      "Afficher les détails de Collège Léonard de Vinci — Collèges & lycées",
+      "Afficher les détails de Collège Pierre Brossolette — Collèges & lycées",
+      "Afficher la liste de Enseignement supérieur & formations (5 établissements)",
+      "Afficher les détails de Groupe scolaire Sophie Barat — Enseignement supérieur & formations",
+      "Afficher les détails de Pierre Mendes France — Enseignement supérieur & formations",
+      "Afficher les détails de La Maison des Sciences — Enseignement supérieur & formations",
+      "Afficher les détails de École Léonard de Vinci — Enseignement supérieur & formations",
+      "Afficher les détails de Permistar — Enseignement supérieur & formations"
+    ],
+    "name": "Éducation"
+  },
+  {
+    "buttons": [
+      "•Qualité de l’air au point : intermédiaire (5/10)",
+      "•Environnement sonore au point : intermédiaire (5/10)",
+      "•Variation sonore autour de l’adresse : de très calme à bruyant (0–10/10)"
+    ],
+    "name": "Cadre de vie"
+  },
+  {
+    "buttons": [
+      "+Cambriolages de logements : parmi les 21 % de communes avec le moins de faits enregistrés",
+      "−Vols violents sans arme : parmi les 20 % de communes avec le plus de faits enregistrés",
+      "•Violences physiques hors cadre familial : parmi les 51 % de communes avec le moins de faits enregistrés",
+      "•Vols sans violence contre les personnes : parmi les 56 % de communes avec le moins de faits enregistrés",
+      "•Vols liés aux véhicules : parmi les 56 % de communes avec le moins de faits enregistrés",
+      "•Destructions et dégradations volontaires : parmi les 51 % de communes avec le moins de faits enregistrés"
+    ],
+    "name": "Sécurité"
+  }
+]

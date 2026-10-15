@@ -1,0 +1,53 @@
+import { NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS } from "../../../shared/gtfs/neighborhoodTimeout";
+
+/** Share only in-flight public asset reads. No address results or retained
+ * shard catalogue: the routing/timetable runtimes own their bounded caches. */
+export function createNeighborhoodGtfsAssetReader(fetcher: typeof fetch = fetch, storage: CacheStorage | undefined = typeof caches === "undefined" ? undefined : caches) {
+  const pending = new Map<string, Promise<unknown>>();
+  const literalPaths = new Set<string>();
+  return async function readAsset<T>(baseUrl: string, path: string, coldStart = false): Promise<T | undefined> {
+    const literalPath = path.split("/").map(segment => {
+      try { return encodeURIComponent(decodeURIComponent(segment)); } catch { return encodeURIComponent(segment); }
+    }).join("/");
+    const escapedPath = path.split("/").map(encodeURIComponent).join("/");
+    const origin = new URL(baseUrl).origin;
+    const url = new URL("/_gtfs-data/" + (literalPaths.has(origin) ? literalPath : escapedPath), baseUrl).href;
+    const key = `${coldStart}:${url}`;
+    const joined = pending.get(key);
+    if (joined) return await joined as T | undefined;
+    const request = (async () => {
+      const cachePromise = coldStart ? Promise.resolve(undefined)
+        : storage?.open("neighborhood-gtfs-routing-v1").catch(() => undefined) ?? Promise.resolve(undefined);
+      // current.json must be revalidated anyway. Start that request without
+      // waiting for cache storage, which may be busy persisting route shards.
+      const cache = path === "current.json" ? undefined : await cachePromise;
+      const cached = await cache?.match(url).catch(() => undefined);
+      if (path !== "current.json" && cached) return await cached.json() as T;
+      try {
+        const init: RequestInit = { cache: coldStart ? "no-store" : path === "current.json" ? "no-cache" : "default", signal: AbortSignal.timeout(NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS) };
+        let fetchedUrl = url;
+        let response = await fetcher(fetchedUrl, init);
+        // Cloudflare addresses encoded directory names literally; Nitro's
+        // static manifest addresses their decoded names. Negotiate on 404,
+        // then reuse that server convention without changing any artifact.
+        const compatibleUrl = new URL("/_gtfs-data/" + literalPath, baseUrl).href;
+        if (response.status === 404 && compatibleUrl !== fetchedUrl) {
+          fetchedUrl = compatibleUrl;
+          response = await fetcher(fetchedUrl, init);
+          if (response.ok) literalPaths.add(origin);
+        }
+        if (!response.ok) throw new Error(`GTFS asset unavailable (${response.status})`);
+        const copy = response.clone();
+        void cachePromise.then(cache => cache?.put(fetchedUrl, copy)).catch(() => {});
+        return await response.json() as T;
+      } catch (error) {
+        const fallback = cached ?? (path === "current.json" ? await (await cachePromise)?.match(url).catch(() => undefined) : undefined);
+        if (fallback) return await fallback.json() as T;
+        throw error;
+      }
+    })();
+    pending.set(key, request);
+    try { return await request; }
+    finally { if (pending.get(key) === request) pending.delete(key); }
+  };
+}

@@ -1,0 +1,82 @@
+import { describe, expect, it, vi } from "vitest";
+import { createNeighborhoodGtfsWalkingMatrix } from "../src/services/travelRoutes/neighborhoodGtfsWalkingMatrix";
+import { createNeighborhoodGtfsAssetReader } from "../src/services/travelRoutes/neighborhoodGtfsAssets";
+
+describe("walking cache under a full verdict load", () => {
+  const origin = { lon: 2.3, lat: 48.8 };
+  const destination = { id: "first", lon: 2.31, lat: 48.81 };
+  it("does not evict unresolved pairs when more than 1024 pairs overlap", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const fetcher = vi.fn(async (_url, init) => {
+      await gate;
+      const body = JSON.parse(String(init?.body));
+      return Response.json({ routes: body.destinations.map((point: typeof destination) => ({
+        id: point.id, provider: "ign-bdtopo", fallback: false, durationSeconds: 123,
+        distanceMeters: 100, coordinates: [origin, point],
+      })) });
+    });
+    const matrix = createNeighborhoodGtfsWalkingMatrix(fetcher, undefined, undefined);
+    const pending = Array.from({ length: 17 }, (_, batch) => matrix("https://host.test", origin,
+      Array.from({ length: 64 }, (_, i) => ({ ...destination, lon: destination.lon + (batch * 64 + i) / 100000 }))));
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(17));
+    const joined = matrix("https://host.test", origin, [{ ...destination, id: "joined" }]);
+    release();
+    await Promise.all(pending);
+    expect((await joined)[0]).toMatchObject({ id: "joined", durationSeconds: 123, fallback: false });
+    expect(fetcher).toHaveBeenCalledTimes(17);
+  });
+
+  it("returns verified routes without waiting for disk housekeeping", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const disk = { match: async () => undefined, put: async () => {},
+      keys: vi.fn(async () => { await gate; return []; }), delete: async () => true };
+    const storage = { open: async () => disk } as unknown as CacheStorage;
+    const fetcher = vi.fn(async () => Response.json({ routes: [{ id: "first", provider: "ign-bdtopo", fallback: false,
+      durationSeconds: 123, distanceMeters: 100, coordinates: [origin, destination] }] }));
+    let ready = false;
+    const pending = createNeighborhoodGtfsWalkingMatrix(fetcher, undefined, storage)("https://host.test", origin, [destination])
+      .then(routes => { ready = true; return routes; });
+    try { await vi.waitFor(() => expect(ready).toBe(true), { timeout: 100 }); }
+    finally { release(); await pending; }
+  });
+
+  it("does not hold a calculated route behind a slow persistent write", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const disk = { match: async () => undefined, put: async () => { await gate; }, keys: async () => [], delete: async () => true };
+    const storage = { open: async () => disk } as unknown as CacheStorage;
+    const fetcher = vi.fn(async () => Response.json({ routes: [{ id: "first", provider: "ign-bdtopo", fallback: false,
+      durationSeconds: 123, distanceMeters: 100, coordinates: [origin, destination] }] }));
+    let ready = false;
+    const pending = createNeighborhoodGtfsWalkingMatrix(fetcher, undefined, storage)("https://host.test", origin, [destination])
+      .then(routes => { ready = true; return routes; });
+    try { await vi.waitFor(() => expect(ready).toBe(true), { timeout: 100 }); }
+    finally { release(); await pending; }
+  });
+});
+
+describe("manifest revalidation during disk contention", () => {
+  it("fetches the current manifest without waiting for storage to open", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const disk = { match: async () => undefined, put: async () => {} };
+    const storage = { open: async () => { await gate; return disk; } } as unknown as CacheStorage;
+    const fetcher = vi.fn(async () => Response.json({ datasetVersion: "new" }));
+    let ready = false;
+    const request = createNeighborhoodGtfsAssetReader(fetcher, storage)("https://host.test", "current.json")
+      .then(value => { ready = true; return value; });
+    try { await vi.waitFor(() => expect(ready).toBe(true), { timeout: 100 }); }
+    finally { release(); }
+    expect(await request).toEqual({ datasetVersion: "new" });
+  });
+
+  it("still uses the cached manifest when the server is unavailable", async () => {
+    const disk = { match: async () => Response.json({ datasetVersion: "cached" }) };
+    const storage = { open: async () => disk } as unknown as CacheStorage;
+    const fetcher = vi.fn(async () => { throw new Error("offline"); });
+    expect(await createNeighborhoodGtfsAssetReader(fetcher, storage)("https://host.test", "current.json"))
+      .toEqual({ datasetVersion: "cached" });
+  });
+});

@@ -799,6 +799,50 @@ describe("NearbyStationsMap walking accessibility zones and controls", () => {
     }
   });
 
+  it("opens mobile city information in a readable lightbox and closes it back to the info button", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload = url.includes("/api/iris")
+        ? createIrisResponse()
+        : url.includes("/api/neighborhood-verdict?")
+          ? createNeighborhoodVerdictResponse()
+          : createNoiseZonesResponse();
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const restoreViewport = installMapViewport(390, 700);
+    const wrapper = mountMap([], undefined, undefined, {}, undefined, undefined, [], ["BUS"], [], createNetwork([], []));
+
+    try {
+      await wrapper.get(".nearby-map__city-view-toggle").trigger("click");
+      await flushPromises();
+      await nextTick();
+
+      const infoButton = wrapper.get("[data-testid='nearby-city-info-card-expand']");
+      expect(infoButton.attributes("aria-expanded")).toBe("false");
+      await infoButton.trigger("click");
+      await nextTick();
+
+      const dialog = document.body.querySelector<HTMLElement>(".modal-panel.nearby-city-info-lightbox");
+      expect(dialog?.getAttribute("role")).toBe("dialog");
+      expect(dialog?.getAttribute("aria-modal")).toBe("true");
+      expect(infoButton.attributes("aria-expanded")).toBe("true");
+      const lightboxCard = dialog?.querySelector<HTMLElement>("[data-testid='nearby-city-info-card']");
+      expect(lightboxCard?.classList.contains("nearby-city-info-card--lightbox")).toBe(true);
+      expect(dialog?.textContent).toContain("Fixture");
+      expect(lightboxCard?.textContent).toContain("Habitants");
+
+      document.body.querySelector<HTMLButtonElement>(".nearby-city-info-lightbox .modal-panel__header .icon-button")?.click();
+      await nextTick();
+      await flushPromises();
+      expect(document.body.querySelector(".modal-panel.nearby-city-info-lightbox")).toBeNull();
+      expect(wrapper.find("[data-testid='nearby-city-info-card-expand']").exists()).toBe(true);
+    } finally {
+      wrapper.unmount();
+      restoreViewport();
+    }
+  });
+
   it("keeps only in-viewport rail stops in city view and hides next departures", async () => {
     const metro13 = createLine("line:metro:13", "METRO");
     metro13.code = "13";

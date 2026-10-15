@@ -1,30 +1,30 @@
 {
   "schemaVersion": 1,
-  "sha256": "4fb5d39ab86b822d2b256c6fcac3c31bdbc2010e95a15944b8a774e2d6501533",
-  "datasetVersion": "2026-10-09",
-  "sourceUpdatedAt": "2026-10-09T14:24:01.000Z",
-  "installedAt": "2026-10-09T23:34:13.598Z",
-  "sourceEtag": "\"6ac8f901-95ac7d9\"",
-  "sourceLastModified": "Fri, 09 Oct 2026 14:24:01 GMT",
-  "cacheGeneration": 8,
-  "lineCount": 2019,
+  "sha256": "295dace4e8e2ffdae4dffc5f7b1c23c1e305a1add12b9170235c20febf2d8dd8",
+  "datasetVersion": "2026-10-14",
+  "sourceUpdatedAt": "2026-10-14T14:24:08.000Z",
+  "installedAt": "2026-10-15T00:29:44.407Z",
+  "sourceEtag": "\"6acf9088-99160ed\"",
+  "sourceLastModified": "Wed, 14 Oct 2026 14:24:08 GMT",
+  "cacheGeneration": 9,
+  "lineCount": 2020,
   "timetable": {
     "schemaVersion": 1,
-    "startDate": "20261006",
-    "endDate": "20261107",
-    "lineCount": 2026,
-    "tripCount": 589169,
-    "fileCount": 13286,
-    "bytes": 406454835,
-    "path": "timetables/v1/4fb5d39ab86b822d2b256c6fcac3c31bdbc2010e95a15944b8a774e2d6501533/aa4b677f-c82e-40d4-ba21-4d9ee88e2b94"
+    "startDate": "20261011",
+    "endDate": "20261112",
+    "lineCount": 2027,
+    "tripCount": 607160,
+    "fileCount": 14058,
+    "bytes": 417876629,
+    "path": "timetables/v1/295dace4e8e2ffdae4dffc5f7b1c23c1e305a1add12b9170235c20febf2d8dd8/7970397c-6b56-448c-a548-7cae18af9fdb"
   },
   "routing": {
     "schemaVersion": 1,
-    "startDate": "20261006",
-    "endDate": "20261107",
-    "connectionCount": 12617486,
-    "fileCount": 213,
-    "bytes": 460909211,
-    "path": "routing/v1/4fb5d39ab86b822d2b256c6fcac3c31bdbc2010e95a15944b8a774e2d6501533/8741f1dd-4ce8-471b-83cd-9d2cf82b465e"
+    "startDate": "20261011",
+    "endDate": "20261112",
+    "connectionCount": 12987553,
+    "fileCount": 218,
+    "bytes": 487994577,
+    "path": "routing/v1/295dace4e8e2ffdae4dffc5f7b1c23c1e305a1add12b9170235c20febf2d8dd8/98e90576-f845-4fdd-9250-3b10fccb43a7"
   }
 }
