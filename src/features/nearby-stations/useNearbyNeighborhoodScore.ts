@@ -19,6 +19,7 @@ import type {
 } from "./nearbyHeavyTransports";
 import { isNearbyJourneyTransitSection } from "./nearbyJourneyTiming";
 import { getOfficialStationReference, normalizeStationName } from "./neighborhoodStationReferences";
+import { createFutureGpeProjectFilter, reconcileFutureGpeVerdict } from "./futureGpeProjects";
 import type { TravelRouteProbe } from "./useTravelRoutes";
 import type { NearbyPlace, PlacesProvider } from "./nearbyPlaces";
 import {
@@ -146,6 +147,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const lastServiceByLine = shallowRef(new Map<string, Awaited<ReturnType<typeof frequencyTimetable.getLastService>>>());
   const hospitalJourneys = ref<Record<string, NearbyJourney[] | undefined>>({});
   const backendVerdict = shallowRef<PublicNeighborhoodVerdict>();
+  const isFutureGpeProject = computed(() => createFutureGpeProjectFilter(options.network.value));
+  const effectiveBackendVerdict = computed(() => reconcileFutureGpeVerdict(backendVerdict.value, isFutureGpeProject.value));
   const backendVerdictReady = ref(false);
   const result = ref<NeighborhoodScoreResult>(buildNeighborhoodScore({
     places: [],
@@ -234,7 +237,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       hospitalJourneys: hospitalJourneys.value,
       serviceQuality: options.serviceQuality?.value,
       generatedAt: updatedAt.value,
-      backendVerdict: backendVerdict.value,
+      backendVerdict: effectiveBackendVerdict.value,
     };
   }
 

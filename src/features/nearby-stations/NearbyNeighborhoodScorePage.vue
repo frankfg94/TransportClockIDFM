@@ -12,6 +12,7 @@ import { isNeighborhoodGtfsColdStart } from "../../services/travelRoutes/neighbo
 import { beginVerdictDebugTask, isVerdictDebugEnabled, verdictDebugTimeline } from "../../services/verdictDebugTimeline";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import { fetchGpeStations } from "../transport-map/gpeStationsApi";
+import { createFutureGpeProjectFilter } from "./futureGpeProjects";
 import AdressBook from "../address-book/AdressBook.vue";
 import VerdictPersonalJourneys from "./VerdictPersonalJourneys.vue";
 import { useVerdictPersonalJourneys } from "./useVerdictPersonalJourneys";
@@ -113,15 +114,18 @@ const gpeCatalogProjects = ref<PublicFutureGpeStation[]>([]);
 const backendFutureProjectsReady = ref(false);
 const gpeCatalogReady = ref(false);
 
+const isFutureGpeProject = computed(() => createFutureGpeProjectFilter(nearby.transportMapNetwork.value));
+
 function updateFutureProjectTargets(): void {
   const projectsById = new Map<string, PublicFutureGpeStation>();
   for (const project of gpeCatalogProjects.value) projectsById.set(project.id, project);
   for (const project of backendFutureProjects.value) {
     projectsById.set(project.id, { ...projectsById.get(project.id), ...project });
   }
-  futureProjects.value = [...projectsById.values()];
+  futureProjects.value = [...projectsById.values()].filter(isFutureGpeProject.value);
   futureProjectsReady.value = gpeCatalogReady.value || backendFutureProjectsReady.value;
 }
+watch(isFutureGpeProject, updateFutureProjectTargets);
 const routeComposer = useTravelRoutes({
   origin: nearby.selectedPlace,
   travelRoutesProvider: nearbyDataProviders.travelRoutes,

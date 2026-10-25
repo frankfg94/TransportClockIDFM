@@ -223,6 +223,33 @@ describe("useNearbyNeighborhoodScore", () => {
     expect(score.diagnostics.value.topologies[0]?.available).toBe(true);
     wrapper.unmount();
   });
+  it("reconciles obsolete future facts against the current catalogue while preserving another future line", async () => {
+    const line = createLine();
+    const projects = ["4", "15"].map(code => ({ id: "project-" + code, name: "Châtelet", line: code,
+      lon: 2.347, lat: 48.858, walkingMinutes: 3, projectStatus: "under-construction" }));
+    vi.stubGlobal("fetch", vi.fn(async url => String(url).includes("/api/neighborhood-verdict")
+      ? Response.json({ schemaVersion: "1.3", generatedAt: "2026-10-23", futureProjects: projects, sources: [], warnings: [], categories: [{
+        id: "transport", status: "available", scoreDelta: 1, negativeFacts: [], limitations: [],
+        positiveFacts: projects.map(project => ({ id: "gpe-" + project.id, family: "future-gpe", category: "transport", polarity: "positive",
+          priority: 9, label: "Future " + project.line, explanation: "Projet", rule: "bonus", proof: "direct", observedAt: "2026-10-23", sourceIds: [] })),
+      }] }) : new Response("", { status: 404 })));
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const wrapper = mount(defineComponent({ setup() {
+      score = useNearbyNeighborhoodScore({ origin: ref({ lon: 2.347, lat: 48.858 }), stations: ref([createEntry(line)]), network: ref(createNetwork(line)),
+        fetchFrequency: async () => readyFrequency(line.id), fetchLastService: async () => undefined, fetchTopology: async () => { throw new Error("No topology fixture"); },
+        placesProvider: { searchNearby: async () => [], searchDestinations: async () => [] }, travelRoutesProvider: { findJourneys: async () => [] } });
+      return () => null;
+    } }));
+    try {
+      await vi.waitFor(() => expect(score.backendVerdictReady.value).toBe(true));
+      await flushPromises();
+      const transport = score.result.value.categories.find(category => category.id === "transport")!;
+      expect(transport.positiveFacts.some(fact => fact.id === "backend:gpe-project-4")).toBe(false);
+      expect(transport.positiveFacts.some(fact => fact.id === "backend:gpe-project-15")).toBe(true);
+      expect(transport.positiveFacts.filter(fact => fact.kind === "transportHub").map(fact => fact.labelValues?.futureLine)).toEqual(["15"]);
+    } finally { wrapper.unmount(); }
+  });
+
   it("loads the documentary response before serializing heavy timetable requests", async () => {
     let releaseDocumentary!: () => void;
     const documentary = new Promise<void>(resolve => { releaseDocumentary = resolve; });
