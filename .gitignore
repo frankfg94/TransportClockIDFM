@@ -21,3 +21,8 @@ graphify-web/
 
 # All alternate Nuxt build directories may embed local runtime credentials.
 .nuxt-*/
+
+# Local test caches and historical validation artifacts.
+.tmp-vitest/
+docs/tasks/2026-10-22/proofs/
+docs/tasks/2026-10-22/git-delivery/

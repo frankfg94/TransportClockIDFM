@@ -961,7 +961,7 @@
   "automation": {
     "id": "transportclock-encha-ner-les-13-lots-sol-6-1",
     "kind": "heartbeat",
-    "status": "ACTIVE",
+    "status": "DELETED",
     "intervalMinutes": 10,
     "pauseRequestedAt": "2026-10-23T20:01:08.026514+00:00",
     "pauseReason": "Only mandatory remaining progression requires currently unresolved officialIGNcontract/nonestimatedwalking availability. Allindependentlots02-11completed; no active sourcework or correctable confirmeddefect. User instructed suspendinsteadrepeat.",
@@ -976,13 +976,18 @@
     "waiverPromptVerified": true,
     "acceptedValidationWaivers": [
       "lot01-ign-user-waiver-2026-10-23"
-    ]
+    ],
+    "stopRequestedAt": "2026-10-25T00:36:31.612905+00:00",
+    "stopReason": "All 13 lots accepted (01 explicit IGN validation waiver), final APK installation/publication/download verified, Git delivery pushed and remotely verified.",
+    "deletedAt": "2026-10-25T00:36:44.921814+00:00",
+    "deletionVerified": true,
+    "deletionResult": "automation_update mode=delete returned deleteStatus=deleted"
   },
   "gitDelivery": {
     "authorized": true,
     "authorization": "Utilisateur : une fois que 100% des lots seront faits tu auras le droit de commit & push",
     "condition": "Lot01 explicitly accepted with uservalidationwaiver; all02-13 fully realised andvalidated including actualintegratedAndroidsmoke,finalAPK install/launch,R2publication/download/version/reference checks. Then coordinatorreviews finaldiff and commit/pushes justifiedlotchanges, preservingunrelatedpreexistinghunks.",
-    "status": "committing",
+    "status": "completed",
     "scope": "Changes belonging to the 13 lots and their task documentation; preserve unrelated pre-existing changes.",
     "pushPolicy": "Normal push to the verified configured branch and remote; no force-push.",
     "preexistingBaselineRoot": "C:\\Users\\franc\\.codex\\visualizations\\2026\\10\\22\\01a16428-91e4-7e81-b9d0-1a1329c07c20\\transport-lots-preexisting",
@@ -1043,7 +1048,35 @@
     },
     "branch": "main",
     "remote": "origin",
-    "remoteUrl": "https://github.com/frankfg94/TransportClockIDFM.git"
+    "remoteUrl": "https://github.com/frankfg94/TransportClockIDFM.git",
+    "commit": "886f952a01a446740fc0a4701cd8672180fee2d0",
+    "tree": "9d618b242c31bfa9a565ebb1479973acb56c9a88",
+    "committedAt": "2026-10-25T00:32:34.288184+00:00",
+    "stagedTreeMatchedCommittedTree": true,
+    "pushedAt": "2026-10-25T00:36:31.612905+00:00",
+    "remoteVerifiedAt": "2026-10-25T00:36:31.612905+00:00",
+    "remoteRevision": "886f952a01a446740fc0a4701cd8672180fee2d0",
+    "ahead": 0,
+    "behind": 0,
+    "indexEmptyAfterCommit": true,
+    "pushResult": "Normal push origin main succeeded; ls-remote confirms exact commit; no force/history rewrite.",
+    "pushSandboxRecovery": "First sandbox credential-manager access failed; identical normal push succeeded with approved escalation.",
+    "postPushReleaseVerification": {
+      "checkedAt": "2026-10-25T00:36:31.612905+00:00",
+      "r2LatestHttpStatus": 200,
+      "publicReleaseApiHttpStatus": 200,
+      "versionCode": 1003,
+      "sha256": "93067da0b87bc99a72d68b0613e22d6f7b366a1019dbed8bbbbf66c2c4237489",
+      "githubWorkflowRunsForCommit": 0,
+      "automaticApkReplacementPrevented": true
+    },
+    "verificationCopyCleanup": {
+      "removed": true,
+      "originalDependenciesPreserved": true,
+      "originalGtfsPreserved": true
+    },
+    "retainedUnstagedWork": "Unrelated traffic caches, separate Pont Cardinet/GPE/last-service changes, original sourceSnapshot EOF whitespace, local proof/admin files; no original source changes removed.",
+    "finalRegistryResultPolicy": "Post-push outcome kept in local execution.json after the delivery commit, avoiding a duplicate delivery or a second workflow-triggering push."
   },
   "sharedDevServer": {
     "url": "http://localhost:3000/",
@@ -2097,7 +2130,7 @@
       "details": "11 broader failures persist with old MaterialCombobox injected into current consumers:5pattern,1detailedpicker,4globalmap,1traffic icon. This is not a whole-worktree baseline. 150focused+6settings isolated pass; combined intermediate run async reset rejected; final split runs exit0. reports/08.md records limits."
     }
   ],
-  "lastCoordinatorCheckAt": "2026-10-25T00:18:35.965633+00:00",
+  "lastCoordinatorCheckAt": "2026-10-25T00:36:31.612905+00:00",
   "coordinationSuspension": {
     "requestedAt": "2026-10-23T20:01:08.026514+00:00",
     "reason": "IGN generic404 on both minimalpoint-to-point andmatrixshape; no specific justifiedappfix. No independent admissible lots left.",
