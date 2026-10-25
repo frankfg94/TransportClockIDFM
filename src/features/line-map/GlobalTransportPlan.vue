@@ -1140,6 +1140,7 @@ import {
   parseGlobalMapTemporaryMarker,
   parseGlobalMapTemporaryMarkerRadius,
 } from "./globalMapTemporaryMarker";
+import { createPlaceAutocompleteSearch } from "../transport-map/search/usePlaceAutocomplete";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { createIgnTransportMapGeocoder } from "../../services/geocoding/ign";
 import { useGlobalTransportItinerary } from "./useGlobalTransportItinerary";
@@ -2889,19 +2890,7 @@ async function ensureSearchCatalog(): Promise<void> {
   }
 }
 
-async function searchGlobalPlaces(query: string, signal?: AbortSignal): Promise<GeocoderPoint[]> {
-  const points = await globalNearbyProviders.places.searchDestinations(
-    query,
-    {
-      includeStations: true,
-      includePlaces: true,
-      includeAddresses: true,
-      count: 8,
-    },
-    signal,
-  );
-  return points;
-}
+const searchGlobalPlaces = createPlaceAutocompleteSearch();
 
 const globalVisibleTravelRoutes = computed(() => {
   const allowed = globalTravelAllowedModes.value.length > 0

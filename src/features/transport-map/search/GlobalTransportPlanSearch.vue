@@ -24,6 +24,7 @@ import { useI18n } from "../../../i18n";
 import { resolveGlobalMapMarkerIcon } from "../../line-map/globalMapMarkerIcons";
 import type { GlobalMapMarker } from "../../line-map/globalMapMarkers";
 import { useNearbyPlacePresenter } from "../../nearby-stations/useNearbyPlacePresenter";
+import { usePlaceAutocomplete } from "./usePlaceAutocomplete";
 import { fuzzyMatches } from "../../../services/fuzzySearch";
 
 interface RecentSearchKey {
@@ -66,8 +67,6 @@ interface SearchSection {
 
 const RECENT_STORAGE_KEY = "transport-clock.global-map-search.recent.v1";
 const MAX_RECENT_SEARCHES = 8;
-const MAX_PLACE_SEARCH_CACHE_ENTRIES = 32;
-const MIN_PLACE_SEARCH_QUERY_LENGTH = 3;
 const EMPTY_GROUPS_BY_MEMBER_ID = new Map<string, GlobalMapStationSearchGroup>();
 
 const props = withDefaults(defineProps<{
@@ -112,16 +111,13 @@ let openingTransitionTimer: number | undefined;
 const searchInput = ref<HTMLInputElement>();
 const query = ref("");
 const localQuery = ref("");
-const placeResults = ref<GeocoderPoint[]>([]);
-const placeSearchLoading = ref(false);
-const placeSearchError = ref(false);
+const { results: placeResults, loading: placeSearchLoading, error: placeSearchError, search: searchPlaces, reset: cancelPlaceSearch } = usePlaceAutocomplete(() => props.searchPlaces);
 const activeIndex = ref(-1);
 const recentSearches = ref<RecentSearchKey[]>(readRecentSearches());
 const expandedStationKeys = ref(new Set<string>());
 const searchIndex = shallowRef<GlobalMapSearchIndex>();
 const searchIndexBuilding = ref(false);
 const hoverTimers = new Map<string, number>();
-const placeSearchCache = new Map<string, GeocoderPoint[]>();
 let localSearchFrame: number | undefined;
 let searchIndexFirstFrame: number | undefined;
 let searchIndexBuildFrame: number | undefined;
@@ -129,9 +125,6 @@ let searchIndexBuildTimer: number | undefined;
 let indexedStations: GlobalMapStation[] | undefined;
 let indexedLines: GlobalMapLine[] | undefined;
 let searchIndexBuildVersion = 0;
-let placeSearchTimer: number | undefined;
-let placeSearchController: AbortController | undefined;
-let searchVersion = 0;
 const { presentPlace } = useNearbyPlacePresenter();
 
 onBeforeUnmount(() => {
@@ -406,79 +399,6 @@ function scheduleLocalSearch(): void {
     : window.setTimeout(commit, 0);
 }
 
-function cancelPlaceSearch(): void {
-  if (placeSearchTimer !== undefined && typeof window !== "undefined") window.clearTimeout(placeSearchTimer);
-  placeSearchTimer = undefined;
-  placeSearchController?.abort();
-  placeSearchController = undefined;
-  placeSearchLoading.value = false;
-}
-
-function cachePlaceResults(queryKey: string, places: GeocoderPoint[]): GeocoderPoint[] {
-  const cached = [...places];
-  placeSearchCache.delete(queryKey);
-  placeSearchCache.set(queryKey, cached);
-  while (placeSearchCache.size > MAX_PLACE_SEARCH_CACHE_ENTRIES) {
-    const oldest = placeSearchCache.keys().next().value;
-    if (oldest === undefined) break;
-    placeSearchCache.delete(oldest);
-  }
-  return cached;
-}
-
-function filterPlaceResults(points: GeocoderPoint[]): GeocoderPoint[] {
-  const seen = new Set<string>();
-  return points
-    .filter((point) => Number.isFinite(point.lon) && Number.isFinite(point.lat)
-      && point.lon >= -180 && point.lon <= 180
-      && point.lat >= -90 && point.lat <= 90)
-    .filter((point) => {
-      const key = placeResultKey(point);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .slice(0, 8);
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
-async function runPlaceSearch(searchValue: string, queryKey: string, version: number): Promise<void> {
-  const searchPlaces = props.searchPlaces;
-  if (!searchPlaces || version !== searchVersion) return;
-
-  const cached = placeSearchCache.get(queryKey);
-  if (cached) {
-    placeSearchCache.delete(queryKey);
-    placeSearchCache.set(queryKey, cached);
-    placeResults.value = cached;
-    placeSearchError.value = false;
-    placeSearchLoading.value = false;
-    return;
-  }
-
-  const controller = new AbortController();
-  placeSearchController = controller;
-  placeSearchLoading.value = true;
-  try {
-    const points = await searchPlaces(searchValue, controller.signal);
-    if (version !== searchVersion || controller.signal.aborted) return;
-    placeResults.value = cachePlaceResults(queryKey, filterPlaceResults(points));
-    placeSearchError.value = false;
-  } catch (error) {
-    if (version !== searchVersion || controller.signal.aborted || isAbortError(error)) return;
-    placeResults.value = [];
-    placeSearchError.value = true;
-  } finally {
-    if (version === searchVersion && placeSearchController === controller) {
-      placeSearchController = undefined;
-      placeSearchLoading.value = false;
-    }
-  }
-}
-
 function cssTimeMs(value: string): number {
   const time = Number.parseFloat(value);
   return Number.isFinite(time) ? time * (value.trim().endsWith("ms") ? 1 : 1000) : 0;
@@ -511,32 +431,9 @@ function onInput(event: Event): void {
   activeIndex.value = -1;
   requestCatalogIfNeeded();
 
-  searchVersion += 1;
   cancelScheduledSearch();
-  cancelPlaceSearch();
-  placeResults.value = [];
-  placeSearchError.value = false;
   scheduleLocalSearch();
-
-  const searchValue = value.trim();
-  const queryKey = normalizeGlobalMapSearchText(searchValue);
-  if (!props.searchPlaces || queryKey.length < MIN_PLACE_SEARCH_QUERY_LENGTH) return;
-
-  const version = searchVersion;
-  const cached = placeSearchCache.get(queryKey);
-  if (cached) {
-    placeSearchCache.delete(queryKey);
-    placeSearchCache.set(queryKey, cached);
-    placeResults.value = cached;
-    placeSearchLoading.value = false;
-    return;
-  }
-
-  placeSearchLoading.value = true;
-  placeSearchTimer = window.setTimeout(() => {
-    placeSearchTimer = undefined;
-    void runPlaceSearch(searchValue, queryKey, version);
-  }, GLOBAL_TRANSPORT_PLAN_CONFIG.search.debounceMs);
+  searchPlaces(value);
 }
 
 function onFocus(): void {
@@ -648,7 +545,6 @@ function routeToResult(result: SearchResult): void {
 }
 
 function clearQuery(focus = true): void {
-  searchVersion += 1;
   cancelScheduledSearch();
   cancelPlaceSearch();
   query.value = "";

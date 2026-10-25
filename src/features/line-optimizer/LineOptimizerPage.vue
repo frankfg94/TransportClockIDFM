@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, ref } from "vue";
 import { BookUser, Clock3, Footprints, House, RefreshCw, TramFront } from "lucide-vue-next";
 import LineIconBadge from "../../components/LineIconBadge.vue";
+import PlaceAutocompleteInput from "../transport-map/search/PlaceAutocompleteInput.vue";
 import AdressBook from "../address-book/AdressBook.vue";
 import { useI18n } from "../../i18n";
 import { useLineOptimizer } from "./useLineOptimizer";
@@ -126,11 +127,11 @@ const remaining = computed(() =>
         <div class="line-optimizer__field">
           <label for="optimizer-origin">{{ t("lineOptimizer.origin") }}</label>
           <div class="line-optimizer__address-control">
-            <input
+            <PlaceAutocompleteInput
               id="optimizer-origin"
               v-model="originQuery"
               required
-              autocomplete="street-address"
+              @select="optimizer.selectPoint($event, 'origin')"
             /><button
               type="button"
               :aria-label="t('lineOptimizer.originBook')"
@@ -144,7 +145,7 @@ const remaining = computed(() =>
         <div class="line-optimizer__field">
           <label for="optimizer-destination">{{ t("lineOptimizer.destination") }}</label>
           <div class="line-optimizer__address-control">
-            <input id="optimizer-destination" v-model="destinationQuery" required /><button
+            <PlaceAutocompleteInput id="optimizer-destination" v-model="destinationQuery" @select="optimizer.selectPoint($event, 'destination')" /><button
               type="button"
               :aria-label="t('lineOptimizer.destinationBook')"
               @click="addressSide = 'destination'"

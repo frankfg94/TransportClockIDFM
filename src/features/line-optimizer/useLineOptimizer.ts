@@ -65,16 +65,19 @@ export function useLineOptimizer(config: LineOptimizerConfig) {
   );
   watch(settings, invalidate, { deep: true, flush: "sync" });
 
-  function selectAddress(entry: AddressBookEntry, side: "origin" | "destination") {
-    const point = toAddressBookPoint(entry);
+  function selectPoint(point: GeocoderPoint, side: "origin" | "destination") {
     if (side === "origin") {
-      originQuery.value = entry.address || entry.name;
+      originQuery.value = point.label ?? point.address ?? originQuery.value;
       originPoint.value = point;
     } else {
-      destinationQuery.value = entry.address || entry.name;
+      destinationQuery.value = point.label ?? point.address ?? destinationQuery.value;
       destinationPoint.value = point;
     }
     void refresh();
+  }
+
+  function selectAddress(entry: AddressBookEntry, side: "origin" | "destination") {
+    selectPoint({ ...toAddressBookPoint(entry), label: entry.address || entry.name }, side);
   }
 
   async function resolveDestination(signal: AbortSignal): Promise<GeocoderPoint | undefined> {
@@ -173,6 +176,7 @@ export function useLineOptimizer(config: LineOptimizerConfig) {
     winner,
     now,
     selectAddress,
+    selectPoint,
     refresh,
   };
 }
