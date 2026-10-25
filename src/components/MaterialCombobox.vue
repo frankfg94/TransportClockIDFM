@@ -6,6 +6,8 @@ export interface MaterialComboboxOption {
   id: string;
   label: string;
   disabled?: boolean;
+  /** CSS color used for the option's subtle hover background (e.g. a line color). */
+  hoverColor?: string;
 }
 
 const props = withDefaults(
@@ -17,6 +19,7 @@ const props = withDefaults(
     disabled?: boolean;
     teleport?: boolean;
     menuClass?: string;
+    hoverColor?: string;
     id?: string;
   }>(),
   {
@@ -130,7 +133,7 @@ function scrollActiveOptionIntoView(): void {
 }
 
 function updateMenuPosition(): void {
-  if (!props.teleport || !open.value || !root.value) {
+  if (!open.value || !root.value) {
     return;
   }
 
@@ -145,7 +148,14 @@ function updateMenuPosition(): void {
     96,
     Math.min(desiredMenuHeight, opensAbove ? spaceAbove : spaceBelow),
   );
-  const width = Math.min(rect.width, window.innerWidth - viewportPadding * 2);
+  const viewportWidth = window.innerWidth - viewportPadding * 2;
+  const minWidth = Math.min(rect.width, viewportWidth);
+  const maxWidth = Math.min(Math.max(rect.width, 640), viewportWidth);
+  if (menu.value) {
+    menu.value.style.minWidth = `${minWidth}px`;
+    menu.value.style.maxWidth = `${maxWidth}px`;
+  }
+  const width = menu.value?.getBoundingClientRect().width || minWidth;
   const left = Math.min(
     Math.max(viewportPadding, rect.left),
     window.innerWidth - viewportPadding - width,
@@ -160,18 +170,19 @@ function updateMenuPosition(): void {
 
   menuStyle.value = {
     zIndex: String(zIndex),
-    left: `${left}px`,
+    left: `${props.teleport ? left : left - rect.left}px`,
     maxHeight: `${availableHeight}px`,
-    top: opensAbove ? "auto" : `${rect.bottom + gap}px`,
-    bottom: opensAbove ? `${window.innerHeight - rect.top + gap}px` : "auto",
-    width: `${width}px`,
+    top: opensAbove ? "auto" : props.teleport ? `${rect.bottom + gap}px` : `calc(100% + ${gap}px)`,
+    bottom: opensAbove ? props.teleport ? `${window.innerHeight - rect.top + gap}px` : `calc(100% + ${gap}px)` : "auto",
+    minWidth: `${minWidth}px`,
+    maxWidth: `${maxWidth}px`,
   };
 }
 
 watch(
-  [open, () => props.teleport, () => props.options.map((option) => option.id).join("|")],
+  [open, () => props.teleport, () => props.options.map((option) => `${option.id}:${option.label}`).join("|")],
   ([isOpen]) => {
-    if (isOpen && props.teleport) {
+    if (isOpen) {
       void nextTick(updateMenuPosition);
     }
   },
@@ -292,7 +303,7 @@ watch(() => [props.disabled, props.options] as const, () => {
           :id="listId"
           class="material-combobox__menu"
           :class="[{ 'material-combobox__menu--teleported': teleport }, menuClass]"
-          :style="teleport ? menuStyle : undefined"
+          :style="menuStyle"
           role="listbox"
           :aria-label="resolvedAriaLabel"
         >
@@ -305,6 +316,7 @@ watch(() => [props.disabled, props.options] as const, () => {
             role="option"
             tabindex="-1"
             :disabled="option.disabled"
+            :style="{ '--combobox-option-accent': option.hoverColor || hoverColor || 'var(--combobox-accent, var(--line-color, var(--idfm-blue)))' }"
             :aria-selected="option.id === modelValue"
             :data-combobox-active="index === activeIndex ? 'true' : undefined"
             @mouseenter="activeIndex = index"
@@ -401,6 +413,7 @@ watch(() => [props.disabled, props.options] as const, () => {
 }
 
 .material-combobox__menu {
+  box-sizing: border-box;
   background: #ffffff;
   border: 1px solid rgba(16, 35, 63, 0.14);
   border-radius: 10px;
@@ -414,7 +427,10 @@ watch(() => [props.disabled, props.options] as const, () => {
   overflow: auto;
   padding: 6px;
   position: absolute;
-  right: 0;
+  right: auto;
+  width: max-content;
+  min-width: 100%;
+  max-width: min(40rem, calc(100vw - 24px));
   top: calc(100% + 6px);
   z-index: 40;
 }
@@ -438,23 +454,35 @@ watch(() => [props.disabled, props.options] as const, () => {
   overflow: hidden;
   padding: 9px 10px;
   text-align: left;
-  text-overflow: ellipsis;
   transform: none;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   width: 100%;
+  transition: background-color 140ms ease;
 }
 
 .material-combobox__option:hover:not(:disabled),
 .material-combobox__option[data-combobox-active="true"]:not(:disabled) {
-  background: color-mix(in srgb, var(--combobox-accent), transparent 90%);
+  background: color-mix(in srgb, var(--combobox-option-accent), transparent 94%);
   color: var(--ink);
   transform: none;
 }
 
 .material-combobox__option[aria-selected="true"] {
-  background: color-mix(in srgb, var(--combobox-accent), transparent 84%);
-  color: color-mix(in srgb, var(--combobox-accent), black 18%);
+  background: color-mix(in srgb, var(--combobox-option-accent), transparent 90%);
+  color: var(--ink);
   font-weight: 920;
+}
+
+.material-combobox__option[aria-selected="true"]:hover:not(:disabled),
+.material-combobox__option[aria-selected="true"][data-combobox-active="true"]:not(:disabled) {
+  background: color-mix(in srgb, var(--combobox-option-accent), transparent 86%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .material-combobox__option {
+    transition: none;
+  }
 }
 
 .material-combobox-menu-enter-active,
