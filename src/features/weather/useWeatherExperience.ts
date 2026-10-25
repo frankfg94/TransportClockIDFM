@@ -1,5 +1,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useAppSettings, type WeatherTestMode } from "../app-settings";
+import { advanceWeatherAlert } from "./alertTiming";
 import { useI18n } from "../../i18n";
 import { resolveWeatherLocation } from "./weatherLocations";
 import { toServerApiUrl } from "../../services/serverApi";
@@ -15,6 +16,24 @@ export function useWeatherExperience() {
   const { settings } = useAppSettings();
   const { t } = useI18n();
   const weather = ref<WeatherResponse>();
+  const receivedAt = ref(Date.now());
+  const clock = ref(receivedAt.value);
+  let clockTimer: ReturnType<typeof setInterval> | undefined;
+  const alert = computed(() =>
+    advanceWeatherAlert(
+      weather.value?.alert,
+      clock.value - receivedAt.value,
+      weather.value?.generatedAt,
+    ),
+  );
+  watch(
+    weather,
+    () => {
+      receivedAt.value = Date.now();
+      clock.value = receivedAt.value;
+    },
+    { flush: "sync" },
+  );
   const loading = ref(false);
   const error = ref("");
   const dismissedAlertKey = ref("");
@@ -38,6 +57,9 @@ export function useWeatherExperience() {
   );
 
   onMounted(() => {
+    clockTimer = setInterval(() => {
+      clock.value = Date.now();
+    }, 1000);
     if (enabled.value) {
       void loadWeather();
     }
@@ -64,7 +86,10 @@ export function useWeatherExperience() {
     },
   );
 
-  onBeforeUnmount(invalidateWeatherRequest);
+  onBeforeUnmount(() => {
+    invalidateWeatherRequest();
+    if (clockTimer !== undefined) clearInterval(clockTimer);
+  });
 
   async function loadWeather(): Promise<void> {
     const requestGenerationAtStart = ++requestGeneration;
@@ -137,6 +162,7 @@ export function useWeatherExperience() {
   return {
     settings,
     weather,
+    alert,
     loading,
     error,
     enabled,

@@ -15,11 +15,23 @@ describe("shared GTFS last service", () => {
   it("matches official parent and topology references and retains service hours beyond midnight", () => {
     expect(findGtfsLastService(timetable, "station-a")).toEqual({ seconds: 90000, stopName: "A" });
     expect(findGtfsLastService(timetable, "123")).toEqual({ seconds: 90000, stopName: "A" });
-    expect(findGtfsLastService(timetable)).toEqual({ seconds: 90100, stopName: "B" });
+    expect(findGtfsLastService(timetable)).toEqual({ seconds: 90000, stopName: "A" });
   });
   it("keeps missing stations and unavailable datasets explicit", () => {
     expect(findGtfsLastService(timetable, "unknown")).toBeUndefined();
     expect(findGtfsLastService({ ...timetable, status: "out-of-coverage" })).toBeUndefined();
+  });
+  it("excludes arrivals, no-pickup calls and invalid times while retaining a partial valid timetable", () => {
+    const calls = [
+      { stopId: "platform-a", sequence: 1, arrival: null, departure: 88000, pickupType: 0, dropOffType: 0 },
+      { stopId: "platform-a", sequence: 2, arrival: null, departure: 96000, pickupType: 1, dropOffType: 0 },
+      { stopId: "platform-a", sequence: 3, arrival: 97000, departure: null, pickupType: 0, dropOffType: 0 },
+      { stopId: "platform-a", sequence: 4, arrival: null, departure: NaN, pickupType: 0, dropOffType: 0 },
+      { stopId: "platform-a", sequence: 5, arrival: null, departure: -1, pickupType: 0, dropOffType: 0 },
+    ];
+    expect(findGtfsLastService({ ...timetable, trips: [{ id: "partial", serviceDate: "20261013", calls }] }, "station-a"))
+      .toEqual({ seconds: 88000, stopName: "A" });
+    expect(findGtfsLastService({ ...timetable, trips: [] })).toBeUndefined();
   });
   it("uses the injected browser summary without requesting the entire timetable", async () => {
     const fetchLastService = vi.fn().mockResolvedValue({ seconds: 90000 }), fetchTimetable = vi.fn();

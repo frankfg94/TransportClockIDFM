@@ -26,6 +26,7 @@ import {
 } from "../topology/netexCache";
 import { createLinePresentation } from "../../../src/services/linePresentation";
 import { LINE_PATTERN_VIEW_SCHEMA_VERSION } from "../../../src/types/transit";
+import { classifyRemainingStops } from "../../../src/features/service-pattern/serviceClassification";
 import type {
   LineTopology,
   TopologyPattern,
@@ -237,22 +238,7 @@ function inferPatternServiceType(
   const routeStopsCount =
     countTopologyCorridorStops(activeStops, lineTopology) ?? servedStopsCount;
 
-  return getServiceType(servedStopsCount, routeStopsCount);
-}
-
-function getServiceType(
-  servedStopsCount: number,
-  routeStopsCount: number,
-): DepartureServiceType {
-  if (servedStopsCount <= 2 && routeStopsCount > 2) {
-    return "direct";
-  }
-
-  if (servedStopsCount < Math.max(2, routeStopsCount - 1)) {
-    return "semi-direct";
-  }
-
-  return "omnibus";
+  return classifyRemainingStops(servedStopsCount, routeStopsCount);
 }
 
 function countTopologyCorridorStops(

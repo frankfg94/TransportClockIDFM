@@ -7,6 +7,11 @@ import type { NearbyPlace } from "../src/features/nearby-stations/nearbyPlaces";
 import type { TransportMapRenderFrame } from "../src/features/transport-map/contracts/renderer";
 
 describe("Deck nearby places", () => {
+  it("uses the commerce predicate for the circle while retaining the line outing filter by default", () => {
+    const place: NearbyPlace = { id: "fuel-shop", name: "Shop", lon: 2.3, lat: 48.8, category: "shop", kind: "fuel", distanceMeters: 100 };
+    expect(prepareDeckNearbyPlaces([place])).toEqual([]);
+    expect(prepareDeckNearbyPlaces([place], true).map(entry => entry.place.id)).toEqual([place.id]);
+  });
   it("retains every eligible place and reuses the exact layer and data through pan, zoom and transport updates", () => {
     const places: NearbyPlace[] = Array.from({ length: 10_000 }, (_, i) => ({
       id: `shop:${i}`, name: `Shop ${i}`, lon: 2.3 + i / 100_000, lat: 48.85,

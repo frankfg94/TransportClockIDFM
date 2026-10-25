@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   Cloud,
   CloudFog,
@@ -14,6 +14,7 @@ import {
 } from "lucide-vue-next";
 import { useAppSettings } from "../app-settings";
 import { useI18n } from "../../i18n";
+import { usePanelFocus } from "../../components/usePanelFocus";
 import { toServerApiUrl } from "../../services/serverApi";
 import { resolveWeatherLocation } from "./weatherLocations";
 import type {
@@ -29,6 +30,19 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: [];
 }>();
+const weatherDialog = ref<HTMLElement>();
+const { handleTab } = usePanelFocus(weatherDialog, () => props.open, () => true);
+onMounted(() => {
+  if (props.open) weatherDialog.value?.focus({ preventScroll: true });
+});
+
+function handleDialogKeydown(event: KeyboardEvent): void {
+  handleTab(event);
+  if (event.key !== "Escape" || event.defaultPrevented) return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit("close");
+}
 
 type ForecastMetric = "temperature" | "precipitation" | "wind";
 
@@ -504,10 +518,13 @@ function weatherIcon(code?: number) {
       @click.self="emit('close')"
     >
       <section
+        ref="weatherDialog"
         class="weather-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="weather-modal-title"
+        tabindex="-1"
+        @keydown="handleDialogKeydown"
       >
         <button
           class="weather-modal__close icon-button"

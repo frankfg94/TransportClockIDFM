@@ -49,6 +49,41 @@ export interface LineOptimizerCandidate {
   serviceType?: NearbyJourneyServiceType;
 }
 
+export interface LineOptimizerConnectionStep {
+  kind: "walk" | "wait";
+  startAt: number;
+  endAt: number;
+  durationSeconds: number;
+}
+
+/** Split each connection at platform arrival. Provider waits have already been
+ * removed from movement time; use the selected courses, not discovery timings. */
+export function optimizerConnectionSteps(
+  candidate: LineOptimizerCandidate,
+  courseIndex: number,
+): LineOptimizerConnectionStep[] {
+  const previous = candidate.courses[courseIndex - 1];
+  const course = candidate.courses[courseIndex];
+  const waitSeconds = candidate.waits[courseIndex];
+  if (!previous || !course || waitSeconds === undefined) return [];
+  const platformAt = course.departure - waitSeconds * 1000;
+  const steps: LineOptimizerConnectionStep[] = [
+    {
+      kind: "walk",
+      startAt: previous.arrival,
+      endAt: platformAt,
+      durationSeconds: (platformAt - previous.arrival) / 1000,
+    },
+    {
+      kind: "wait",
+      startAt: platformAt,
+      endAt: course.departure,
+      durationSeconds: waitSeconds,
+    },
+  ];
+  return steps.filter((step) => step.durationSeconds > 0);
+}
+
 export function optimizerCorridorIndex(route: TravelRoute, config: LineOptimizerConfig): number {
   const legs = route.sections.filter(isTurboTransit);
   return legs.findIndex((tram, index) => {

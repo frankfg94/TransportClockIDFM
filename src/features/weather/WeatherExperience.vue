@@ -21,6 +21,7 @@ import type { WeatherAlert, WeatherConditionKind } from "./types";
 const {
   settings,
   weather,
+  alert,
   enabled,
   alertKey,
   dismissedAlertKey,
@@ -31,7 +32,6 @@ const emit = defineEmits<{
   "open-weather": [];
 }>();
 
-const alert = computed(() => weather.value?.alert);
 const effectiveMode = computed(() =>
   settings.value.reduceMotion && settings.value.weatherMode === "animated"
     ? "static"
@@ -359,6 +359,15 @@ function alertTitle(value: WeatherAlert): string {
     return t("weather.alert.stormIn", { duration: formatAlertDuration(value.startsInMinutes) });
   }
 
+  if (value.startsInMinutes <= 0) {
+    const key = value.intensity === 3
+      ? "weather.alert.rainHeavyNow"
+      : value.intensity === 2
+        ? "weather.alert.rainModerateNow"
+        : "weather.alert.rainLightNow";
+    return t(key);
+  }
+
   return t("weather.alert.rainIn", { duration: formatAlertDuration(value.startsInMinutes) });
 }
 
@@ -382,10 +391,8 @@ function alertAdvice(value: WeatherAlert): string {
     return t("weather.alert.snowAdvice");
   }
 
-  if (value.kind === "storm") {
-    return t("weather.alert.umbrellaAdvice", {
-      time: formatTime(value.umbrellaAfter ?? value.startsAt),
-    });
+  if (value.startsInMinutes <= 0) {
+    return t("weather.alert.umbrellaNow");
   }
 
   return t("weather.alert.umbrellaAdvice", {
@@ -394,6 +401,9 @@ function alertAdvice(value: WeatherAlert): string {
 }
 
 function formatEnd(value: WeatherAlert): string {
+  if (value.kind === "rain" && value.startsInMinutes > 0) {
+    return t("weather.alert.startsIn", { duration: formatAlertDuration(value.startsInMinutes) });
+  }
   return typeof value.endsInMinutes === "number"
     ? t("weather.alert.endsIn", { duration: formatAlertDuration(value.endsInMinutes) })
     : "";

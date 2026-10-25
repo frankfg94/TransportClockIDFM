@@ -1,0 +1,2550 @@
+{
+  "reproductionUrl": "/nearby-neighborhood-score?lat=48.793710645211405&lon=2.28830452778152&address=48.79371,+2.28830&city=Fontenay-aux-Roses",
+  "capturedAt": "2026-10-22",
+  "journeyDateTime": "20261023T090000",
+  "datasetVersion": "2026-10-14",
+  "stations": [
+    {
+      "id": "station:FR::monomodalStopPlace:45102:FR1",
+      "index": 249,
+      "name": "Châtelet - Les Halles",
+      "normalizedName": "chatelet - les halles",
+      "city": "Paris 1er",
+      "aliases": [
+        "Châtelet - Les Halles"
+      ],
+      "rawRefs": [
+        "474151"
+      ],
+      "lineIds": [
+        "line:IDFM:C01728",
+        "line:IDFM:C01742",
+        "line:IDFM:C01743"
+      ],
+      "ownerChunkId": "z11-1037-704",
+      "isHub": true,
+      "sourceCrs": "EPSG:2154",
+      "sourceX": 652090.5,
+      "sourceY": 6862610.5,
+      "lon": 2.346976510435329,
+      "lat": 48.86174503191322,
+      "worldX": 0.5065193791956537,
+      "worldY": 0.3440066801710856,
+      "coordinateSource": "netex",
+      "coordinateAccuracyM": 1,
+      "transformVersion": "lambert93-ntf-v1"
+    },
+    {
+      "id": "station:FR::monomodalStopPlace:43238:FR1",
+      "index": 213,
+      "name": "Gare Montparnasse",
+      "normalizedName": "gare montparnasse",
+      "city": "Paris 15e",
+      "aliases": [
+        "Gare Montparnasse"
+      ],
+      "rawRefs": [
+        "71139"
+      ],
+      "lineIds": [
+        "line:IDFM:C01736",
+        "line:IDFM:C01744",
+        "line:IDFM:C02370"
+      ],
+      "ownerChunkId": "z11-1037-704",
+      "isHub": true,
+      "sourceCrs": "EPSG:2154",
+      "sourceX": 649824,
+      "sourceY": 6860035,
+      "lon": 2.3163887313829665,
+      "lat": 48.83841119933772,
+      "worldX": 0.5064344131427305,
+      "worldY": 0.34410518031225523,
+      "coordinateSource": "netex",
+      "coordinateAccuracyM": 1,
+      "transformVersion": "lambert93-ntf-v1"
+    },
+    {
+      "id": "station:FR::monomodalStopPlace:58566:FR1",
+      "index": 750,
+      "name": "Gare Saint-Lazare",
+      "normalizedName": "gare saint-lazare",
+      "city": "Paris 8e",
+      "aliases": [
+        "Gare Saint-Lazare"
+      ],
+      "rawRefs": [
+        "71370"
+      ],
+      "lineIds": [
+        "line:IDFM:C01739",
+        "line:IDFM:C01740",
+        "line:IDFM:C01748",
+        "line:IDFM:C02375"
+      ],
+      "ownerChunkId": "z11-1037-704",
+      "isHub": true,
+      "sourceCrs": "EPSG:2154",
+      "sourceX": 650452,
+      "sourceY": 6864373.5374,
+      "lon": 2.3244386552397676,
+      "lat": 48.8774756863521,
+      "worldX": 0.5064567740423327,
+      "worldY": 0.34394024974537707,
+      "coordinateSource": "netex",
+      "coordinateAccuracyM": 1,
+      "transformVersion": "lambert93-ntf-v1"
+    },
+    {
+      "id": "station:FR::monomodalStopPlace:470195:FR1",
+      "index": 329,
+      "name": "Gare de Lyon",
+      "normalizedName": "gare de lyon",
+      "city": "Paris 12e",
+      "aliases": [
+        "Gare de Lyon"
+      ],
+      "rawRefs": [
+        "73626"
+      ],
+      "lineIds": [
+        "line:IDFM:C01728",
+        "line:IDFM:C01731",
+        "line:IDFM:C01742",
+        "line:IDFM:C01745"
+      ],
+      "ownerChunkId": "z11-1037-704",
+      "isHub": true,
+      "sourceCrs": "EPSG:2154",
+      "sourceX": 654230.5,
+      "sourceY": 6860553.5,
+      "lon": 2.3763656609312003,
+      "lat": 48.84340211646563,
+      "worldX": 0.506601015724809,
+      "worldY": 0.34408411579133635,
+      "coordinateSource": "netex",
+      "coordinateAccuracyM": 1,
+      "transformVersion": "lambert93-ntf-v1"
+    },
+    {
+      "id": "station:FR::monomodalStopPlace:462394:FR1",
+      "index": 284,
+      "name": "Gare du Nord",
+      "normalizedName": "gare du nord",
+      "city": "Paris 10e",
+      "aliases": [
+        "Gare du Nord"
+      ],
+      "rawRefs": [
+        "71410"
+      ],
+      "lineIds": [
+        "line:IDFM:C01728",
+        "line:IDFM:C01737",
+        "line:IDFM:C01738",
+        "line:IDFM:C01743",
+        "line:IDFM:C01746",
+        "line:IDFM:C01863",
+        "line:IDFM:C02372"
+      ],
+      "ownerChunkId": "z11-1037-704",
+      "isHub": true,
+      "sourceCrs": "EPSG:2154",
+      "sourceX": 652822,
+      "sourceY": 6864890.976799998,
+      "lon": 2.3566934375285626,
+      "lat": 48.88230685842713,
+      "worldX": 0.5065463706598016,
+      "worldY": 0.3439198435520121,
+      "coordinateSource": "netex",
+      "coordinateAccuracyM": 1,
+      "transformVersion": "lambert93-ntf-v1"
+    },
+    {
+      "id": "station:FR::monomodalStopPlace:470549:FR1",
+      "index": 336,
+      "name": "La Défense",
+      "normalizedName": "la defense",
+      "city": "Puteaux",
+      "aliases": [
+        "La Défense"
+      ],
+      "rawRefs": [
+        "71517"
+      ],
+      "lineIds": [
+        "line:IDFM:C01729",
+        "line:IDFM:C01740",
+        "line:IDFM:C01741",
+        "line:IDFM:C01742"
+      ],
+      "ownerChunkId": "z11-1036-704",
+      "isHub": true,
+      "sourceCrs": "EPSG:2154",
+      "sourceX": 644159,
+      "sourceY": 6866071.5,
+      "lon": 2.2384185962504066,
+      "lat": 48.89222980156816,
+      "worldX": 0.5062178294340289,
+      "worldY": 0.3438779242485642,
+      "coordinateSource": "netex",
+      "coordinateAccuracyM": 1,
+      "transformVersion": "lambert93-ntf-v1"
+    },
+    {
+      "id": "station:FR::monomodalStopPlace:47900:FR1",
+      "index": 665,
+      "name": "Val de Fontenay",
+      "normalizedName": "val de fontenay",
+      "city": "Fontenay-sous-Bois",
+      "aliases": [
+        "Val de Fontenay"
+      ],
+      "rawRefs": [
+        "71718"
+      ],
+      "lineIds": [
+        "line:IDFM:C01729",
+        "line:IDFM:C01742"
+      ],
+      "ownerChunkId": "z11-1038-704",
+      "isHub": true,
+      "sourceCrs": "EPSG:2154",
+      "sourceX": 662508.5209000036,
+      "sourceY": 6861699.895399999,
+      "lon": 2.4890536307751607,
+      "lat": 48.854246540320226,
+      "worldX": 0.5069140378632644,
+      "worldY": 0.3440383388916625,
+      "coordinateSource": "netex",
+      "coordinateAccuracyM": 1,
+      "transformVersion": "lambert93-ntf-v1"
+    },
+    {
+      "id": "station:FR::Quay:50149974:FR1",
+      "index": 5182,
+      "name": "Saint-Denis - Pleyel",
+      "normalizedName": "saint-denis - pleyel",
+      "city": "Saint-Denis",
+      "aliases": [
+        "Saint-Denis - Pleyel"
+      ],
+      "rawRefs": [
+        "station:FR::Quay:50149974:FR1"
+      ],
+      "lineIds": [
+        "line:IDFM:C01384"
+      ],
+      "ownerChunkId": "z11-1037-704",
+      "isHub": false,
+      "sourceCrs": "EPSG:2154",
+      "sourceX": 652061,
+      "sourceY": 6868805,
+      "lon": 2.345875004500752,
+      "lat": 48.917447693910994,
+      "worldX": 0.5065163194569465,
+      "worldY": 0.3437713542403123,
+      "coordinateSource": "netex",
+      "coordinateAccuracyM": 1,
+      "transformVersion": "lambert93-ntf-v1"
+    },
+    {
+      "id": "station:FR::monomodalStopPlace:487011:FR1",
+      "index": 723,
+      "name": "Nanterre-La-Folie",
+      "normalizedName": "nanterre-la-folie",
+      "city": "Nanterre",
+      "aliases": [
+        "Nanterre-La-Folie"
+      ],
+      "rawRefs": [
+        "488087"
+      ],
+      "lineIds": [
+        "line:IDFM:C01729"
+      ],
+      "ownerChunkId": "z11-1036-704",
+      "isHub": false,
+      "sourceCrs": "EPSG:2154",
+      "sourceX": 643296,
+      "sourceY": 6866675,
+      "lon": 2.226568794458684,
+      "lat": 48.89758132477411,
+      "worldX": 0.5061849133179408,
+      "worldY": 0.3438553133768907,
+      "coordinateSource": "netex",
+      "coordinateAccuracyM": 1,
+      "transformVersion": "lambert93-ntf-v1"
+    },
+    {
+      "id": "station:FR::Quay:50146313:FR1",
+      "index": 4894,
+      "name": "Vélizy 2",
+      "normalizedName": "velizy 2",
+      "city": "Vélizy-Villacoublay",
+      "aliases": [
+        "Vélizy 2"
+      ],
+      "rawRefs": [
+        "station:FR::Quay:50146313:FR1"
+      ],
+      "lineIds": [
+        "line:IDFM:C01794"
+      ],
+      "ownerChunkId": "z11-1036-705",
+      "isHub": false,
+      "sourceCrs": "EPSG:2154",
+      "sourceX": 642691,
+      "sourceY": 6854163,
+      "lon": 2.2200029992750467,
+      "lat": 48.785008689992715,
+      "worldX": 0.5061666749979862,
+      "worldY": 0.34433043815308073,
+      "coordinateSource": "netex",
+      "coordinateAccuracyM": 1,
+      "transformVersion": "lambert93-ntf-v1"
+    }
+  ],
+  "lines": [
+    {
+      "id": "line:IDFM:C01384",
+      "index": 1018,
+      "code": "C01384",
+      "label": "14",
+      "mode": "METRO",
+      "color": "#640082",
+      "textColor": "#ffffff",
+      "pictogram": null,
+      "aliases": [
+        "C01384",
+        "14"
+      ],
+      "stationIds": [
+        "station:FR::Quay:50025876:FR1",
+        "station:FR::Quay:50025877:FR1",
+        "station:FR::Quay:50026539:FR1",
+        "station:FR::Quay:50026541:FR1",
+        "station:FR::Quay:50026544:FR1",
+        "station:FR::Quay:50026883:FR1",
+        "station:FR::Quay:50027054:FR1",
+        "station:FR::Quay:50087894:FR1",
+        "station:FR::Quay:50088164:FR1",
+        "station:FR::Quay:50147700:FR1",
+        "station:FR::Quay:50147706:FR1",
+        "station:FR::Quay:50147712:FR1",
+        "station:FR::Quay:50147723:FR1",
+        "station:FR::Quay:50149902:FR1",
+        "station:FR::Quay:50149905:FR1",
+        "station:FR::Quay:50149908:FR1",
+        "station:FR::Quay:50149911:FR1",
+        "station:FR::Quay:50149915:FR1",
+        "station:FR::Quay:50149918:FR1",
+        "station:FR::Quay:50149953:FR1",
+        "station:FR::Quay:50149974:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:8495"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01728",
+      "index": 1300,
+      "code": "C01728",
+      "label": "D",
+      "mode": "RER",
+      "color": "#008b5b",
+      "textColor": "#ffffff",
+      "pictogram": null,
+      "aliases": [
+        "C01728",
+        "D"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:411418:FR1",
+        "station:FR::monomodalStopPlace:411421:FR1",
+        "station:FR::monomodalStopPlace:411428:FR1",
+        "station:FR::monomodalStopPlace:411440:FR1",
+        "station:FR::monomodalStopPlace:411485:FR1",
+        "station:FR::monomodalStopPlace:412743:FR1",
+        "station:FR::monomodalStopPlace:42516:FR1",
+        "station:FR::monomodalStopPlace:43087:FR1",
+        "station:FR::monomodalStopPlace:43092:FR1",
+        "station:FR::monomodalStopPlace:43102:FR1",
+        "station:FR::monomodalStopPlace:43115:FR1",
+        "station:FR::monomodalStopPlace:43132:FR1",
+        "station:FR::monomodalStopPlace:43142:FR1",
+        "station:FR::monomodalStopPlace:43154:FR1",
+        "station:FR::monomodalStopPlace:43156:FR1",
+        "station:FR::monomodalStopPlace:43179:FR1",
+        "station:FR::monomodalStopPlace:43204:FR1",
+        "station:FR::monomodalStopPlace:43222:FR1",
+        "station:FR::monomodalStopPlace:43225:FR1",
+        "station:FR::monomodalStopPlace:43226:FR1",
+        "station:FR::monomodalStopPlace:43251:FR1",
+        "station:FR::monomodalStopPlace:44628:FR1",
+        "station:FR::monomodalStopPlace:45067:FR1",
+        "station:FR::monomodalStopPlace:45102:FR1",
+        "station:FR::monomodalStopPlace:45735:FR1",
+        "station:FR::monomodalStopPlace:45739:FR1",
+        "station:FR::monomodalStopPlace:45745:FR1",
+        "station:FR::monomodalStopPlace:45759:FR1",
+        "station:FR::monomodalStopPlace:45761:FR1",
+        "station:FR::monomodalStopPlace:45763:FR1",
+        "station:FR::monomodalStopPlace:45771:FR1",
+        "station:FR::monomodalStopPlace:45784:FR1",
+        "station:FR::monomodalStopPlace:45812:FR1",
+        "station:FR::monomodalStopPlace:45814:FR1",
+        "station:FR::monomodalStopPlace:45820:FR1",
+        "station:FR::monomodalStopPlace:45824:FR1",
+        "station:FR::monomodalStopPlace:45850:FR1",
+        "station:FR::monomodalStopPlace:45860:FR1",
+        "station:FR::monomodalStopPlace:462394:FR1",
+        "station:FR::monomodalStopPlace:46286:FR1",
+        "station:FR::monomodalStopPlace:46304:FR1",
+        "station:FR::monomodalStopPlace:464040:FR1",
+        "station:FR::monomodalStopPlace:470195:FR1",
+        "station:FR::monomodalStopPlace:47665:FR1",
+        "station:FR::monomodalStopPlace:47669:FR1",
+        "station:FR::monomodalStopPlace:47684:FR1",
+        "station:FR::monomodalStopPlace:47876:FR1",
+        "station:FR::monomodalStopPlace:47895:FR1",
+        "station:FR::monomodalStopPlace:47899:FR1",
+        "station:FR::monomodalStopPlace:47904:FR1",
+        "station:FR::monomodalStopPlace:47906:FR1",
+        "station:FR::monomodalStopPlace:47909:FR1",
+        "station:FR::monomodalStopPlace:47924:FR1",
+        "station:FR::monomodalStopPlace:47948:FR1",
+        "station:FR::monomodalStopPlace:47958:FR1",
+        "station:FR::monomodalStopPlace:47967:FR1",
+        "station:FR::monomodalStopPlace:47968:FR1",
+        "station:FR::monomodalStopPlace:48489:FR1",
+        "station:FR::monomodalStopPlace:58873:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10672",
+        "path:regional:10673",
+        "path:regional:10674",
+        "path:regional:10675",
+        "path:regional:10676",
+        "path:regional:10677",
+        "path:regional:10678",
+        "path:regional:10679"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01729",
+      "index": 1301,
+      "code": "C01729",
+      "label": "E",
+      "mode": "RER",
+      "color": "#b94e9a",
+      "textColor": "#ffffff",
+      "pictogram": null,
+      "aliases": [
+        "C01729",
+        "E"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:415093:FR1",
+        "station:FR::monomodalStopPlace:42356:FR1",
+        "station:FR::monomodalStopPlace:43044:FR1",
+        "station:FR::monomodalStopPlace:43074:FR1",
+        "station:FR::monomodalStopPlace:43096:FR1",
+        "station:FR::monomodalStopPlace:43127:FR1",
+        "station:FR::monomodalStopPlace:43131:FR1",
+        "station:FR::monomodalStopPlace:43176:FR1",
+        "station:FR::monomodalStopPlace:43208:FR1",
+        "station:FR::monomodalStopPlace:43211:FR1",
+        "station:FR::monomodalStopPlace:43223:FR1",
+        "station:FR::monomodalStopPlace:44201:FR1",
+        "station:FR::monomodalStopPlace:462901:FR1",
+        "station:FR::monomodalStopPlace:46552:FR1",
+        "station:FR::monomodalStopPlace:46568:FR1",
+        "station:FR::monomodalStopPlace:470519:FR1",
+        "station:FR::monomodalStopPlace:470549:FR1",
+        "station:FR::monomodalStopPlace:47877:FR1",
+        "station:FR::monomodalStopPlace:47900:FR1",
+        "station:FR::monomodalStopPlace:47901:FR1",
+        "station:FR::monomodalStopPlace:487011:FR1",
+        "station:FR::monomodalStopPlace:58267:FR1",
+        "station:FR::monomodalStopPlace:58288:FR1",
+        "station:FR::monomodalStopPlace:58498:FR1",
+        "station:FR::monomodalStopPlace:58572:FR1",
+        "station:FR::monomodalStopPlace:58718:FR1",
+        "station:FR::monomodalStopPlace:58879:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10680",
+        "path:regional:10681",
+        "path:regional:10682",
+        "path:regional:10683",
+        "path:regional:10684"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01731",
+      "index": 1303,
+      "code": "C01731",
+      "label": "R",
+      "mode": "TRANSILIEN",
+      "color": "#f49fb3",
+      "textColor": "#000000",
+      "pictogram": null,
+      "aliases": [
+        "C01731",
+        "R"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:411482:FR1",
+        "station:FR::monomodalStopPlace:411488:FR1",
+        "station:FR::monomodalStopPlace:43106:FR1",
+        "station:FR::monomodalStopPlace:43107:FR1",
+        "station:FR::monomodalStopPlace:43123:FR1",
+        "station:FR::monomodalStopPlace:43144:FR1",
+        "station:FR::monomodalStopPlace:43218:FR1",
+        "station:FR::monomodalStopPlace:43245:FR1",
+        "station:FR::monomodalStopPlace:45804:FR1",
+        "station:FR::monomodalStopPlace:470195:FR1",
+        "station:FR::monomodalStopPlace:47118:FR1",
+        "station:FR::monomodalStopPlace:47119:FR1",
+        "station:FR::monomodalStopPlace:47124:FR1",
+        "station:FR::monomodalStopPlace:47125:FR1",
+        "station:FR::monomodalStopPlace:47130:FR1",
+        "station:FR::monomodalStopPlace:47136:FR1",
+        "station:FR::monomodalStopPlace:47145:FR1",
+        "station:FR::monomodalStopPlace:47654:FR1",
+        "station:FR::monomodalStopPlace:47909:FR1",
+        "station:FR::monomodalStopPlace:47910:FR1",
+        "station:FR::monomodalStopPlace:47911:FR1",
+        "station:FR::monomodalStopPlace:47953:FR1",
+        "station:FR::monomodalStopPlace:47961:FR1",
+        "station:FR::monomodalStopPlace:58955:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10690",
+        "path:regional:10691",
+        "path:regional:10692",
+        "path:regional:10693",
+        "path:regional:10694",
+        "path:regional:10695"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01736",
+      "index": 1305,
+      "code": "C01736",
+      "label": "N",
+      "mode": "TRANSILIEN",
+      "color": "#00b297",
+      "textColor": "#ffffff",
+      "pictogram": null,
+      "aliases": [
+        "C01736",
+        "N"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:411492:FR1",
+        "station:FR::monomodalStopPlace:411495:FR1",
+        "station:FR::monomodalStopPlace:427870:FR1",
+        "station:FR::monomodalStopPlace:43088:FR1",
+        "station:FR::monomodalStopPlace:43108:FR1",
+        "station:FR::monomodalStopPlace:43111:FR1",
+        "station:FR::monomodalStopPlace:43147:FR1",
+        "station:FR::monomodalStopPlace:43157:FR1",
+        "station:FR::monomodalStopPlace:43162:FR1",
+        "station:FR::monomodalStopPlace:43181:FR1",
+        "station:FR::monomodalStopPlace:43195:FR1",
+        "station:FR::monomodalStopPlace:43209:FR1",
+        "station:FR::monomodalStopPlace:43214:FR1",
+        "station:FR::monomodalStopPlace:43219:FR1",
+        "station:FR::monomodalStopPlace:43221:FR1",
+        "station:FR::monomodalStopPlace:43229:FR1",
+        "station:FR::monomodalStopPlace:43235:FR1",
+        "station:FR::monomodalStopPlace:43238:FR1",
+        "station:FR::monomodalStopPlace:461504:FR1",
+        "station:FR::monomodalStopPlace:462388:FR1",
+        "station:FR::monomodalStopPlace:46847:FR1",
+        "station:FR::monomodalStopPlace:46850:FR1",
+        "station:FR::monomodalStopPlace:46857:FR1",
+        "station:FR::monomodalStopPlace:46884:FR1",
+        "station:FR::monomodalStopPlace:46886:FR1",
+        "station:FR::monomodalStopPlace:46990:FR1",
+        "station:FR::monomodalStopPlace:47882:FR1",
+        "station:FR::monomodalStopPlace:47884:FR1",
+        "station:FR::monomodalStopPlace:47885:FR1",
+        "station:FR::monomodalStopPlace:47903:FR1",
+        "station:FR::monomodalStopPlace:47921:FR1",
+        "station:FR::monomodalStopPlace:47932:FR1",
+        "station:FR::monomodalStopPlace:47935:FR1",
+        "station:FR::monomodalStopPlace:47944:FR1",
+        "station:FR::monomodalStopPlace:47959:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10709",
+        "path:regional:10710",
+        "path:regional:10711",
+        "path:regional:10712",
+        "path:regional:10713"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01737",
+      "index": 1306,
+      "code": "C01737",
+      "label": "H",
+      "mode": "TRANSILIEN",
+      "color": "#84653d",
+      "textColor": "#ffffff",
+      "pictogram": null,
+      "aliases": [
+        "C01737",
+        "H"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:411326:FR1",
+        "station:FR::monomodalStopPlace:411329:FR1",
+        "station:FR::monomodalStopPlace:411332:FR1",
+        "station:FR::monomodalStopPlace:411440:FR1",
+        "station:FR::monomodalStopPlace:412743:FR1",
+        "station:FR::monomodalStopPlace:43073:FR1",
+        "station:FR::monomodalStopPlace:43075:FR1",
+        "station:FR::monomodalStopPlace:43078:FR1",
+        "station:FR::monomodalStopPlace:43090:FR1",
+        "station:FR::monomodalStopPlace:43105:FR1",
+        "station:FR::monomodalStopPlace:43120:FR1",
+        "station:FR::monomodalStopPlace:43126:FR1",
+        "station:FR::monomodalStopPlace:43133:FR1",
+        "station:FR::monomodalStopPlace:43150:FR1",
+        "station:FR::monomodalStopPlace:43166:FR1",
+        "station:FR::monomodalStopPlace:43168:FR1",
+        "station:FR::monomodalStopPlace:43178:FR1",
+        "station:FR::monomodalStopPlace:43180:FR1",
+        "station:FR::monomodalStopPlace:43190:FR1",
+        "station:FR::monomodalStopPlace:43206:FR1",
+        "station:FR::monomodalStopPlace:44411:FR1",
+        "station:FR::monomodalStopPlace:462394:FR1",
+        "station:FR::monomodalStopPlace:46470:FR1",
+        "station:FR::monomodalStopPlace:46477:FR1",
+        "station:FR::monomodalStopPlace:46482:FR1",
+        "station:FR::monomodalStopPlace:473159:FR1",
+        "station:FR::monomodalStopPlace:47517:FR1",
+        "station:FR::monomodalStopPlace:47522:FR1",
+        "station:FR::monomodalStopPlace:47524:FR1",
+        "station:FR::monomodalStopPlace:47525:FR1",
+        "station:FR::monomodalStopPlace:47528:FR1",
+        "station:FR::monomodalStopPlace:47530:FR1",
+        "station:FR::monomodalStopPlace:47533:FR1",
+        "station:FR::monomodalStopPlace:47580:FR1",
+        "station:FR::monomodalStopPlace:47582:FR1",
+        "station:FR::monomodalStopPlace:47585:FR1",
+        "station:FR::monomodalStopPlace:47588:FR1",
+        "station:FR::monomodalStopPlace:47589:FR1",
+        "station:FR::monomodalStopPlace:47590:FR1",
+        "station:FR::monomodalStopPlace:47591:FR1",
+        "station:FR::monomodalStopPlace:47595:FR1",
+        "station:FR::monomodalStopPlace:47596:FR1",
+        "station:FR::monomodalStopPlace:47599:FR1",
+        "station:FR::monomodalStopPlace:47898:FR1",
+        "station:FR::monomodalStopPlace:47918:FR1",
+        "station:FR::monomodalStopPlace:47920:FR1",
+        "station:FR::monomodalStopPlace:47946:FR1",
+        "station:FR::monomodalStopPlace:47951:FR1",
+        "station:FR::monomodalStopPlace:47963:FR1",
+        "station:FR::monomodalStopPlace:48964:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10714",
+        "path:regional:10715",
+        "path:regional:10716",
+        "path:regional:10717",
+        "path:regional:10718",
+        "path:regional:10719",
+        "path:regional:10720",
+        "path:regional:10721",
+        "path:regional:10722",
+        "path:regional:10723",
+        "path:regional:10724"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01738",
+      "index": 1307,
+      "code": "C01738",
+      "label": "K",
+      "mode": "TRANSILIEN",
+      "color": "#9b9842",
+      "textColor": "#ffffff",
+      "pictogram": null,
+      "aliases": [
+        "C01738",
+        "K"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:411387:FR1",
+        "station:FR::monomodalStopPlace:411390:FR1",
+        "station:FR::monomodalStopPlace:411396:FR1",
+        "station:FR::monomodalStopPlace:411405:FR1",
+        "station:FR::monomodalStopPlace:43071:FR1",
+        "station:FR::monomodalStopPlace:43164:FR1",
+        "station:FR::monomodalStopPlace:462394:FR1",
+        "station:FR::monomodalStopPlace:46731:FR1",
+        "station:FR::monomodalStopPlace:46736:FR1",
+        "station:FR::monomodalStopPlace:47960:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10725"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01739",
+      "index": 1308,
+      "code": "C01739",
+      "label": "J",
+      "mode": "TRANSILIEN",
+      "color": "#cec73d",
+      "textColor": "#000000",
+      "pictogram": null,
+      "aliases": [
+        "C01739",
+        "J"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:411338:FR1",
+        "station:FR::monomodalStopPlace:411342:FR1",
+        "station:FR::monomodalStopPlace:411345:FR1",
+        "station:FR::monomodalStopPlace:411348:FR1",
+        "station:FR::monomodalStopPlace:43069:FR1",
+        "station:FR::monomodalStopPlace:43070:FR1",
+        "station:FR::monomodalStopPlace:43079:FR1",
+        "station:FR::monomodalStopPlace:43082:FR1",
+        "station:FR::monomodalStopPlace:43113:FR1",
+        "station:FR::monomodalStopPlace:43114:FR1",
+        "station:FR::monomodalStopPlace:43116:FR1",
+        "station:FR::monomodalStopPlace:43129:FR1",
+        "station:FR::monomodalStopPlace:43137:FR1",
+        "station:FR::monomodalStopPlace:43143:FR1",
+        "station:FR::monomodalStopPlace:43151:FR1",
+        "station:FR::monomodalStopPlace:43157:FR1",
+        "station:FR::monomodalStopPlace:43160:FR1",
+        "station:FR::monomodalStopPlace:43189:FR1",
+        "station:FR::monomodalStopPlace:43191:FR1",
+        "station:FR::monomodalStopPlace:43212:FR1",
+        "station:FR::monomodalStopPlace:43217:FR1",
+        "station:FR::monomodalStopPlace:43236:FR1",
+        "station:FR::monomodalStopPlace:44161:FR1",
+        "station:FR::monomodalStopPlace:44411:FR1",
+        "station:FR::monomodalStopPlace:46801:FR1",
+        "station:FR::monomodalStopPlace:46897:FR1",
+        "station:FR::monomodalStopPlace:46902:FR1",
+        "station:FR::monomodalStopPlace:46926:FR1",
+        "station:FR::monomodalStopPlace:46965:FR1",
+        "station:FR::monomodalStopPlace:46975:FR1",
+        "station:FR::monomodalStopPlace:46984:FR1",
+        "station:FR::monomodalStopPlace:473109:FR1",
+        "station:FR::monomodalStopPlace:47447:FR1",
+        "station:FR::monomodalStopPlace:47603:FR1",
+        "station:FR::monomodalStopPlace:47874:FR1",
+        "station:FR::monomodalStopPlace:47875:FR1",
+        "station:FR::monomodalStopPlace:47881:FR1",
+        "station:FR::monomodalStopPlace:47882:FR1",
+        "station:FR::monomodalStopPlace:47898:FR1",
+        "station:FR::monomodalStopPlace:479059:FR1",
+        "station:FR::monomodalStopPlace:47916:FR1",
+        "station:FR::monomodalStopPlace:47922:FR1",
+        "station:FR::monomodalStopPlace:47929:FR1",
+        "station:FR::monomodalStopPlace:47930:FR1",
+        "station:FR::monomodalStopPlace:47949:FR1",
+        "station:FR::monomodalStopPlace:47955:FR1",
+        "station:FR::monomodalStopPlace:47964:FR1",
+        "station:FR::monomodalStopPlace:47966:FR1",
+        "station:FR::monomodalStopPlace:51238:FR1",
+        "station:FR::monomodalStopPlace:51494:FR1",
+        "station:FR::monomodalStopPlace:54249:FR1",
+        "station:FR::monomodalStopPlace:58566:FR1",
+        "station:FR::monomodalStopPlace:59038:FR1",
+        "station:FR::monomodalStopPlace:59301:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10726",
+        "path:regional:10727",
+        "path:regional:10728",
+        "path:regional:10729",
+        "path:regional:10730",
+        "path:regional:10731",
+        "path:regional:10732",
+        "path:regional:10733"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01740",
+      "index": 1309,
+      "code": "C01740",
+      "label": "L",
+      "mode": "TRANSILIEN",
+      "color": "#c4a4cc",
+      "textColor": "#000000",
+      "pictogram": null,
+      "aliases": [
+        "C01740",
+        "L"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:422065:FR1",
+        "station:FR::monomodalStopPlace:43069:FR1",
+        "station:FR::monomodalStopPlace:43082:FR1",
+        "station:FR::monomodalStopPlace:43104:FR1",
+        "station:FR::monomodalStopPlace:43112:FR1",
+        "station:FR::monomodalStopPlace:43114:FR1",
+        "station:FR::monomodalStopPlace:43118:FR1",
+        "station:FR::monomodalStopPlace:43167:FR1",
+        "station:FR::monomodalStopPlace:43170:FR1",
+        "station:FR::monomodalStopPlace:43184:FR1",
+        "station:FR::monomodalStopPlace:43191:FR1",
+        "station:FR::monomodalStopPlace:43196:FR1",
+        "station:FR::monomodalStopPlace:43205:FR1",
+        "station:FR::monomodalStopPlace:43216:FR1",
+        "station:FR::monomodalStopPlace:43241:FR1",
+        "station:FR::monomodalStopPlace:43248:FR1",
+        "station:FR::monomodalStopPlace:44559:FR1",
+        "station:FR::monomodalStopPlace:44602:FR1",
+        "station:FR::monomodalStopPlace:45493:FR1",
+        "station:FR::monomodalStopPlace:46647:FR1",
+        "station:FR::monomodalStopPlace:46689:FR1",
+        "station:FR::monomodalStopPlace:470549:FR1",
+        "station:FR::monomodalStopPlace:473109:FR1",
+        "station:FR::monomodalStopPlace:473506:FR1",
+        "station:FR::monomodalStopPlace:47412:FR1",
+        "station:FR::monomodalStopPlace:47767:FR1",
+        "station:FR::monomodalStopPlace:47770:FR1",
+        "station:FR::monomodalStopPlace:47790:FR1",
+        "station:FR::monomodalStopPlace:47879:FR1",
+        "station:FR::monomodalStopPlace:47880:FR1",
+        "station:FR::monomodalStopPlace:47897:FR1",
+        "station:FR::monomodalStopPlace:47923:FR1",
+        "station:FR::monomodalStopPlace:47937:FR1",
+        "station:FR::monomodalStopPlace:47954:FR1",
+        "station:FR::monomodalStopPlace:47969:FR1",
+        "station:FR::monomodalStopPlace:58566:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10734",
+        "path:regional:10735",
+        "path:regional:10736",
+        "path:regional:10737",
+        "path:regional:10738"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01741",
+      "index": 1310,
+      "code": "C01741",
+      "label": "U",
+      "mode": "TRANSILIEN",
+      "color": "#b6134c",
+      "textColor": "#ffffff",
+      "pictogram": null,
+      "aliases": [
+        "C01741",
+        "U"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:427870:FR1",
+        "station:FR::monomodalStopPlace:43147:FR1",
+        "station:FR::monomodalStopPlace:43184:FR1",
+        "station:FR::monomodalStopPlace:43196:FR1",
+        "station:FR::monomodalStopPlace:43205:FR1",
+        "station:FR::monomodalStopPlace:43209:FR1",
+        "station:FR::monomodalStopPlace:43219:FR1",
+        "station:FR::monomodalStopPlace:43229:FR1",
+        "station:FR::monomodalStopPlace:43235:FR1",
+        "station:FR::monomodalStopPlace:43241:FR1",
+        "station:FR::monomodalStopPlace:461504:FR1",
+        "station:FR::monomodalStopPlace:46990:FR1",
+        "station:FR::monomodalStopPlace:470549:FR1",
+        "station:FR::monomodalStopPlace:47767:FR1",
+        "station:FR::monomodalStopPlace:47932:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10739"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01742",
+      "index": 1311,
+      "code": "C01742",
+      "label": "A",
+      "mode": "RER",
+      "color": "#eb2132",
+      "textColor": "#ffffff",
+      "pictogram": null,
+      "aliases": [
+        "C01742",
+        "A"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:43082:FR1",
+        "station:FR::monomodalStopPlace:43094:FR1",
+        "station:FR::monomodalStopPlace:43101:FR1",
+        "station:FR::monomodalStopPlace:43104:FR1",
+        "station:FR::monomodalStopPlace:43114:FR1",
+        "station:FR::monomodalStopPlace:43135:FR1",
+        "station:FR::monomodalStopPlace:43146:FR1",
+        "station:FR::monomodalStopPlace:43152:FR1",
+        "station:FR::monomodalStopPlace:43169:FR1",
+        "station:FR::monomodalStopPlace:43170:FR1",
+        "station:FR::monomodalStopPlace:43171:FR1",
+        "station:FR::monomodalStopPlace:43172:FR1",
+        "station:FR::monomodalStopPlace:43191:FR1",
+        "station:FR::monomodalStopPlace:43198:FR1",
+        "station:FR::monomodalStopPlace:43207:FR1",
+        "station:FR::monomodalStopPlace:43213:FR1",
+        "station:FR::monomodalStopPlace:43224:FR1",
+        "station:FR::monomodalStopPlace:43234:FR1",
+        "station:FR::monomodalStopPlace:43237:FR1",
+        "station:FR::monomodalStopPlace:43239:FR1",
+        "station:FR::monomodalStopPlace:44199:FR1",
+        "station:FR::monomodalStopPlace:44559:FR1",
+        "station:FR::monomodalStopPlace:44801:FR1",
+        "station:FR::monomodalStopPlace:45102:FR1",
+        "station:FR::monomodalStopPlace:45873:FR1",
+        "station:FR::monomodalStopPlace:46647:FR1",
+        "station:FR::monomodalStopPlace:470195:FR1",
+        "station:FR::monomodalStopPlace:470549:FR1",
+        "station:FR::monomodalStopPlace:47238:FR1",
+        "station:FR::monomodalStopPlace:473109:FR1",
+        "station:FR::monomodalStopPlace:473875:FR1",
+        "station:FR::monomodalStopPlace:474082:FR1",
+        "station:FR::monomodalStopPlace:47874:FR1",
+        "station:FR::monomodalStopPlace:47879:FR1",
+        "station:FR::monomodalStopPlace:47886:FR1",
+        "station:FR::monomodalStopPlace:47897:FR1",
+        "station:FR::monomodalStopPlace:47900:FR1",
+        "station:FR::monomodalStopPlace:47915:FR1",
+        "station:FR::monomodalStopPlace:53783:FR1",
+        "station:FR::monomodalStopPlace:53784:FR1",
+        "station:FR::monomodalStopPlace:58270:FR1",
+        "station:FR::monomodalStopPlace:58759:FR1",
+        "station:FR::monomodalStopPlace:58792:FR1",
+        "station:FR::monomodalStopPlace:58874:FR1",
+        "station:FR::monomodalStopPlace:58875:FR1",
+        "station:FR::monomodalStopPlace:58937:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10740",
+        "path:regional:10741",
+        "path:regional:10742",
+        "path:regional:10743",
+        "path:regional:10744",
+        "path:regional:10745",
+        "path:regional:10746"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01743",
+      "index": 1312,
+      "code": "C01743",
+      "label": "B",
+      "mode": "RER",
+      "color": "#5091cb",
+      "textColor": "#ffffff",
+      "pictogram": null,
+      "aliases": [
+        "C01743",
+        "B"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:43066:FR1",
+        "station:FR::monomodalStopPlace:43067:FR1",
+        "station:FR::monomodalStopPlace:43071:FR1",
+        "station:FR::monomodalStopPlace:43086:FR1",
+        "station:FR::monomodalStopPlace:43097:FR1",
+        "station:FR::monomodalStopPlace:43103:FR1",
+        "station:FR::monomodalStopPlace:43122:FR1",
+        "station:FR::monomodalStopPlace:43124:FR1",
+        "station:FR::monomodalStopPlace:43125:FR1",
+        "station:FR::monomodalStopPlace:43140:FR1",
+        "station:FR::monomodalStopPlace:43145:FR1",
+        "station:FR::monomodalStopPlace:43164:FR1",
+        "station:FR::monomodalStopPlace:43175:FR1",
+        "station:FR::monomodalStopPlace:43177:FR1",
+        "station:FR::monomodalStopPlace:43186:FR1",
+        "station:FR::monomodalStopPlace:43193:FR1",
+        "station:FR::monomodalStopPlace:43194:FR1",
+        "station:FR::monomodalStopPlace:43228:FR1",
+        "station:FR::monomodalStopPlace:43231:FR1",
+        "station:FR::monomodalStopPlace:43232:FR1",
+        "station:FR::monomodalStopPlace:43607:FR1",
+        "station:FR::monomodalStopPlace:43833:FR1",
+        "station:FR::monomodalStopPlace:44493:FR1",
+        "station:FR::monomodalStopPlace:44500:FR1",
+        "station:FR::monomodalStopPlace:44877:FR1",
+        "station:FR::monomodalStopPlace:45102:FR1",
+        "station:FR::monomodalStopPlace:45877:FR1",
+        "station:FR::monomodalStopPlace:46007:FR1",
+        "station:FR::monomodalStopPlace:46163:FR1",
+        "station:FR::monomodalStopPlace:46222:FR1",
+        "station:FR::monomodalStopPlace:462394:FR1",
+        "station:FR::monomodalStopPlace:462398:FR1",
+        "station:FR::monomodalStopPlace:46725:FR1",
+        "station:FR::monomodalStopPlace:47009:FR1",
+        "station:FR::monomodalStopPlace:47046:FR1",
+        "station:FR::monomodalStopPlace:47052:FR1",
+        "station:FR::monomodalStopPlace:473364:FR1",
+        "station:FR::monomodalStopPlace:473843:FR1",
+        "station:FR::monomodalStopPlace:473890:FR1",
+        "station:FR::monomodalStopPlace:474069:FR1",
+        "station:FR::monomodalStopPlace:47878:FR1",
+        "station:FR::monomodalStopPlace:47888:FR1",
+        "station:FR::monomodalStopPlace:47889:FR1",
+        "station:FR::monomodalStopPlace:47940:FR1",
+        "station:FR::monomodalStopPlace:58774:FR1",
+        "station:FR::monomodalStopPlace:58793:FR1",
+        "station:FR::monomodalStopPlace:59206:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10747",
+        "path:regional:10748",
+        "path:regional:10749",
+        "path:regional:10750",
+        "path:regional:10751"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01744",
+      "index": 1313,
+      "code": "C01744",
+      "label": "TER",
+      "mode": "TRAIN",
+      "color": "#aaaaaa",
+      "textColor": "#000000",
+      "pictogram": null,
+      "aliases": [
+        "C01744",
+        "TER"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:411498:FR1",
+        "station:FR::monomodalStopPlace:411501:FR1",
+        "station:FR::monomodalStopPlace:411504:FR1",
+        "station:FR::monomodalStopPlace:411507:FR1",
+        "station:FR::monomodalStopPlace:411511:FR1",
+        "station:FR::monomodalStopPlace:427870:FR1",
+        "station:FR::monomodalStopPlace:43219:FR1",
+        "station:FR::monomodalStopPlace:43238:FR1",
+        "station:FR::monomodalStopPlace:461504:FR1",
+        "station:FR::monomodalStopPlace:46832:FR1",
+        "station:FR::monomodalStopPlace:59302:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10752",
+        "path:regional:10753",
+        "path:regional:10754",
+        "path:regional:10755"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01745",
+      "index": 1314,
+      "code": "C01745",
+      "label": "TER",
+      "mode": "TRAIN",
+      "color": "#aaaaaa",
+      "textColor": "#000000",
+      "pictogram": null,
+      "aliases": [
+        "C01745",
+        "TER"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:411452:FR1",
+        "station:FR::monomodalStopPlace:411455:FR1",
+        "station:FR::monomodalStopPlace:411458:FR1",
+        "station:FR::monomodalStopPlace:411461:FR1",
+        "station:FR::monomodalStopPlace:411464:FR1",
+        "station:FR::monomodalStopPlace:411467:FR1",
+        "station:FR::monomodalStopPlace:411473:FR1",
+        "station:FR::monomodalStopPlace:411476:FR1",
+        "station:FR::monomodalStopPlace:411479:FR1",
+        "station:FR::monomodalStopPlace:43106:FR1",
+        "station:FR::monomodalStopPlace:470195:FR1",
+        "station:FR::monomodalStopPlace:479035:FR1",
+        "station:FR::monomodalStopPlace:47910:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10756",
+        "path:regional:10757",
+        "path:regional:10758"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01746",
+      "index": 1315,
+      "code": "C01746",
+      "label": "TER",
+      "mode": "TRAIN",
+      "color": "#aaaaaa",
+      "textColor": "#000000",
+      "pictogram": null,
+      "aliases": [
+        "C01746",
+        "TER"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:411317:FR1",
+        "station:FR::monomodalStopPlace:411440:FR1",
+        "station:FR::monomodalStopPlace:43178:FR1",
+        "station:FR::monomodalStopPlace:462394:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10759",
+        "path:regional:10760"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01748",
+      "index": 1317,
+      "code": "C01748",
+      "label": "TER",
+      "mode": "TRAIN",
+      "color": "#aaaaaa",
+      "textColor": "#000000",
+      "pictogram": null,
+      "aliases": [
+        "C01748",
+        "TER"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:43157:FR1",
+        "station:FR::monomodalStopPlace:46984:FR1",
+        "station:FR::monomodalStopPlace:479059:FR1",
+        "station:FR::monomodalStopPlace:58566:FR1",
+        "station:FR::monomodalStopPlace:59038:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10763"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01794",
+      "index": 1346,
+      "code": "C01794",
+      "label": "T6",
+      "mode": "TRAM",
+      "color": "#ff0000",
+      "textColor": "#ffffff",
+      "pictogram": null,
+      "aliases": [
+        "C01794",
+        "T6"
+      ],
+      "stationIds": [
+        "station:FR::Quay:50146303:FR1",
+        "station:FR::Quay:50146304:FR1",
+        "station:FR::Quay:50146305:FR1",
+        "station:FR::Quay:50146307:FR1",
+        "station:FR::Quay:50146308:FR1",
+        "station:FR::Quay:50146313:FR1",
+        "station:FR::Quay:50146314:FR1",
+        "station:FR::Quay:50146316:FR1",
+        "station:FR::Quay:50146319:FR1",
+        "station:FR::Quay:50146320:FR1",
+        "station:FR::Quay:50146324:FR1",
+        "station:FR::Quay:50146327:FR1",
+        "station:FR::Quay:50146328:FR1",
+        "station:FR::Quay:50146329:FR1",
+        "station:FR::Quay:50146330:FR1",
+        "station:FR::Quay:50146333:FR1",
+        "station:FR::Quay:50146335:FR1",
+        "station:FR::Quay:50146336:FR1",
+        "station:FR::Quay:50146479:FR1",
+        "station:FR::Quay:50146480:FR1",
+        "station:FR::Quay:50149051:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:10925"
+      ]
+    },
+    {
+      "id": "line:IDFM:C01863",
+      "index": 1392,
+      "code": "C01863",
+      "label": "TER",
+      "mode": "TRAIN",
+      "color": "#aaaaaa",
+      "textColor": "#000000",
+      "pictogram": null,
+      "aliases": [
+        "C01863",
+        "TER"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:411390:FR1",
+        "station:FR::monomodalStopPlace:411396:FR1",
+        "station:FR::monomodalStopPlace:411405:FR1",
+        "station:FR::monomodalStopPlace:462394:FR1",
+        "station:FR::monomodalStopPlace:46736:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:11215"
+      ]
+    },
+    {
+      "id": "line:IDFM:C02370",
+      "index": 1677,
+      "code": "C02370",
+      "label": "TER",
+      "mode": "TRAIN",
+      "color": "#aaaaaa",
+      "textColor": "#000000",
+      "pictogram": null,
+      "aliases": [
+        "C02370",
+        "TER"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:411492:FR1",
+        "station:FR::monomodalStopPlace:43219:FR1",
+        "station:FR::monomodalStopPlace:43238:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:12920"
+      ]
+    },
+    {
+      "id": "line:IDFM:C02372",
+      "index": 1678,
+      "code": "C02372",
+      "label": "TER",
+      "mode": "TRAIN",
+      "color": "#b45309",
+      "textColor": "#ffffff",
+      "pictogram": null,
+      "aliases": [
+        "C02372",
+        "TER"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:411421:FR1",
+        "station:FR::monomodalStopPlace:411428:FR1",
+        "station:FR::monomodalStopPlace:411440:FR1",
+        "station:FR::monomodalStopPlace:462394:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:12921"
+      ]
+    },
+    {
+      "id": "line:IDFM:C02375",
+      "index": 1679,
+      "code": "C02375",
+      "label": "TER",
+      "mode": "TRAIN",
+      "color": "#aaaaaa",
+      "textColor": "#000000",
+      "pictogram": null,
+      "aliases": [
+        "C02375",
+        "TER"
+      ],
+      "stationIds": [
+        "station:FR::monomodalStopPlace:411362:FR1",
+        "station:FR::monomodalStopPlace:411365:FR1",
+        "station:FR::monomodalStopPlace:43100:FR1",
+        "station:FR::monomodalStopPlace:43157:FR1",
+        "station:FR::monomodalStopPlace:58566:FR1"
+      ],
+      "geometryIds": [
+        "path:regional:12922"
+      ]
+    }
+  ],
+  "benchmarks": [
+    {
+      "id": "chatelet",
+      "label": "Châtelet",
+      "journeys": [
+        {
+          "id": "gtfs:routing/v1/295dace4e8e2ffdae4dffc5f7b1c23c1e305a1add12b9170235c20febf2d8dd8/98e90576-f845-4fdd-9250-3b10fccb43a7:20261023T090000:2.346976510435329,48.86174503191322:stop_area:IDFM:474151:1792741229:IDFM:C01743",
+          "status": "partial",
+          "source": "gtfs",
+          "datasetVersion": "2026-10-14",
+          "durationSeconds": 2429,
+          "departureDateTime": "20261023T090000",
+          "arrivalDateTime": "20261023T094029",
+          "transferCount": 0,
+          "sections": [
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 600,
+              "timingSource": "estimated",
+              "fromPoint": {
+                "lon": 2.28830452778152,
+                "lat": 48.793710645211405
+              },
+              "toPoint": {
+                "lon": 2.2929083820455323,
+                "lat": 48.78756698215643
+              },
+              "fromName": "48.79371, 2.28830",
+              "toName": "Fontenay-aux-Roses",
+              "distanceMeters": 762,
+              "walkingProvider": "straight-line",
+              "walkingUnavailabilityReason": "quota-exceeded",
+              "toStopPointId": "IDFM:monomodalStopPlace:43125",
+              "toStopAreaId": "IDFM:70133",
+              "departureDateTime": "20261023T090000",
+              "arrivalDateTime": "20261023T091000"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 449,
+              "departureDateTime": "20261023T091000",
+              "arrivalDateTime": "20261023T091729"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "rer",
+              "lineMode": "RER",
+              "lineId": "IDFM:C01743",
+              "lineCode": "B",
+              "lineColor": "#5091CB",
+              "durationSeconds": 1380,
+              "vehicleJourneyId": "20261023:IDFM:TN:SNCF:f505886f-5c7b-4c91-80cd-7f1519faa692",
+              "direction": "ILUS",
+              "mission": "ILUS",
+              "fromStopPointId": "IDFM:monomodalStopPlace:43125",
+              "toStopPointId": "IDFM:monomodalStopPlace:45102",
+              "fromStopAreaId": "IDFM:70133",
+              "toStopAreaId": "IDFM:474151",
+              "fromName": "Fontenay-aux-Roses",
+              "toName": "Châtelet - Les Halles",
+              "fromPoint": {
+                "lon": 2.2929083820455323,
+                "lat": 48.78756698215643
+              },
+              "toPoint": {
+                "lon": 2.34697651043533,
+                "lat": 48.86174503191322
+              },
+              "arrivalDateTime": "20261023T094029",
+              "departureDateTime": "20261023T091729"
+            }
+          ]
+        }
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "montparnasse",
+      "label": "Gare Montparnasse",
+      "stationLabel": "Gare Montparnasse",
+      "journeys": [
+        {
+          "id": "gtfs:routing/v1/295dace4e8e2ffdae4dffc5f7b1c23c1e305a1add12b9170235c20febf2d8dd8/98e90576-f845-4fdd-9250-3b10fccb43a7:20261023T090000:2.3163887313829665,48.83841119933772:stop_area:IDFM:71139:1792740700:IDFM:C01215:IDFM:C01366:IDFM:C01383",
+          "status": "partial",
+          "source": "gtfs",
+          "datasetVersion": "2026-10-14",
+          "durationSeconds": 1900,
+          "departureDateTime": "20261023T090000",
+          "arrivalDateTime": "20261023T093140",
+          "transferCount": 2,
+          "sections": [
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 120,
+              "timingSource": "estimated",
+              "fromPoint": {
+                "lon": 2.28830452778152,
+                "lat": 48.793710645211405
+              },
+              "toPoint": {
+                "lon": 2.2889166872120743,
+                "lat": 48.79481952025696
+              },
+              "fromName": "48.79371, 2.28830",
+              "toName": "Pierrelais - Blanchard",
+              "distanceMeters": 131,
+              "walkingProvider": "straight-line",
+              "walkingUnavailabilityReason": "quota-exceeded",
+              "toStopPointId": "IDFM:29833",
+              "toStopAreaId": "IDFM:70225",
+              "departureDateTime": "20261023T090000",
+              "arrivalDateTime": "20261023T090200"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "bus",
+              "lineMode": "BUS",
+              "lineId": "IDFM:C01215",
+              "lineCode": "195",
+              "lineColor": "#A0006E",
+              "durationSeconds": 300,
+              "vehicleJourneyId": "20261023:IDFM:stif:local-264587-C01215-63186",
+              "direction": "Pierre Sémard - Châtillon-Montrouge",
+              "mission": "Pierre Sémard - Châtillon-Montrouge",
+              "fromStopPointId": "IDFM:29833",
+              "toStopPointId": "IDFM:24665",
+              "fromStopAreaId": "IDFM:70225",
+              "toStopAreaId": "IDFM:70345",
+              "fromName": "Pierrelais - Blanchard",
+              "toName": "République - Deforges",
+              "fromPoint": {
+                "lon": 2.2889166872120743,
+                "lat": 48.79481952025696
+              },
+              "toPoint": {
+                "lon": 2.297620408542606,
+                "lat": 48.80355921710857
+              },
+              "arrivalDateTime": "20261023T090700",
+              "departureDateTime": "20261023T090200"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 180,
+              "departureDateTime": "20261023T090700",
+              "arrivalDateTime": "20261023T091000"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "bus",
+              "lineMode": "BUS",
+              "lineId": "IDFM:C01366",
+              "lineCode": "AMIBUS",
+              "lineColor": "#3C91DC",
+              "durationSeconds": 180,
+              "vehicleJourneyId": "20261023:IDFM:BIEVRE_BUS_MOBILITES:21972781",
+              "direction": "Châtillon Montrouge Métro",
+              "mission": "Châtillon Montrouge Métro",
+              "fromStopPointId": "IDFM:24665",
+              "toStopPointId": "IDFM:486590",
+              "fromStopAreaId": "IDFM:70345",
+              "toStopAreaId": "IDFM:461505",
+              "fromName": "République - Deforges",
+              "toName": "Châtillon - Montrouge - Métro",
+              "fromPoint": {
+                "lon": 2.297620408542606,
+                "lat": 48.80355921710857
+              },
+              "toPoint": {
+                "lon": 2.300916878874268,
+                "lat": 48.80954153925826
+              },
+              "arrivalDateTime": "20261023T091300",
+              "departureDateTime": "20261023T091000"
+            },
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 482,
+              "timingSource": "schedule",
+              "fromPoint": {
+                "lon": 2.300916878874268,
+                "lat": 48.80954153925826
+              },
+              "toPoint": {
+                "lon": 2.301717705004608,
+                "lat": 48.81075140670139
+              },
+              "fromStopPointId": "IDFM:486590",
+              "toStopPointId": "IDFM:22237",
+              "fromStopAreaId": "IDFM:461505",
+              "toStopAreaId": "IDFM:461505",
+              "transferDurationSource": "gtfs-minimum",
+              "departureDateTime": "20261023T091300",
+              "arrivalDateTime": "20261023T092102"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 18,
+              "departureDateTime": "20261023T092102",
+              "arrivalDateTime": "20261023T092120"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "metro",
+              "lineMode": "METRO",
+              "lineId": "IDFM:C01383",
+              "lineCode": "13",
+              "lineColor": "#82C8E6",
+              "durationSeconds": 620,
+              "vehicleJourneyId": "20261023:IDFM:RATP:COU_RATP_13JOSECLIN1_2026_Mont13Univ06-5",
+              "direction": "Saint-Denis - Université",
+              "mission": "Saint-Denis - Université",
+              "fromStopPointId": "IDFM:22237",
+              "toStopPointId": "IDFM:22157",
+              "fromStopAreaId": "IDFM:461505",
+              "toStopAreaId": "IDFM:71139",
+              "fromName": "Châtillon - Montrouge",
+              "toName": "Montparnasse Bienvenue",
+              "fromPoint": {
+                "lon": 2.301717705004608,
+                "lat": 48.81075140670139
+              },
+              "toPoint": {
+                "lon": 2.32114972111642,
+                "lat": 48.84213471311308
+              },
+              "arrivalDateTime": "20261023T093140",
+              "departureDateTime": "20261023T092120"
+            }
+          ]
+        }
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "saint-lazare",
+      "label": "Gare Saint-Lazare",
+      "stationLabel": "Gare Saint-Lazare",
+      "journeys": [
+        {
+          "id": "gtfs:routing/v1/295dace4e8e2ffdae4dffc5f7b1c23c1e305a1add12b9170235c20febf2d8dd8/98e90576-f845-4fdd-9250-3b10fccb43a7:20261023T090000:2.3244386552397676,48.8774756863521:stop_area:IDFM:71370:1792741361:IDFM:C01215:IDFM:C01366:IDFM:C01383",
+          "status": "partial",
+          "source": "gtfs",
+          "datasetVersion": "2026-10-14",
+          "durationSeconds": 2561,
+          "departureDateTime": "20261023T090000",
+          "arrivalDateTime": "20261023T094241",
+          "transferCount": 2,
+          "sections": [
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 120,
+              "timingSource": "estimated",
+              "fromPoint": {
+                "lon": 2.28830452778152,
+                "lat": 48.793710645211405
+              },
+              "toPoint": {
+                "lon": 2.2889166872120743,
+                "lat": 48.79481952025696
+              },
+              "fromName": "48.79371, 2.28830",
+              "toName": "Pierrelais - Blanchard",
+              "distanceMeters": 131,
+              "walkingProvider": "straight-line",
+              "walkingUnavailabilityReason": "quota-exceeded",
+              "toStopPointId": "IDFM:29833",
+              "toStopAreaId": "IDFM:70225",
+              "departureDateTime": "20261023T090000",
+              "arrivalDateTime": "20261023T090200"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "bus",
+              "lineMode": "BUS",
+              "lineId": "IDFM:C01215",
+              "lineCode": "195",
+              "lineColor": "#A0006E",
+              "durationSeconds": 300,
+              "vehicleJourneyId": "20261023:IDFM:stif:local-264587-C01215-63186",
+              "direction": "Pierre Sémard - Châtillon-Montrouge",
+              "mission": "Pierre Sémard - Châtillon-Montrouge",
+              "fromStopPointId": "IDFM:29833",
+              "toStopPointId": "IDFM:24665",
+              "fromStopAreaId": "IDFM:70225",
+              "toStopAreaId": "IDFM:70345",
+              "fromName": "Pierrelais - Blanchard",
+              "toName": "République - Deforges",
+              "fromPoint": {
+                "lon": 2.2889166872120743,
+                "lat": 48.79481952025696
+              },
+              "toPoint": {
+                "lon": 2.297620408542606,
+                "lat": 48.80355921710857
+              },
+              "arrivalDateTime": "20261023T090700",
+              "departureDateTime": "20261023T090200"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 180,
+              "departureDateTime": "20261023T090700",
+              "arrivalDateTime": "20261023T091000"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "bus",
+              "lineMode": "BUS",
+              "lineId": "IDFM:C01366",
+              "lineCode": "AMIBUS",
+              "lineColor": "#3C91DC",
+              "durationSeconds": 180,
+              "vehicleJourneyId": "20261023:IDFM:BIEVRE_BUS_MOBILITES:21972781",
+              "direction": "Châtillon Montrouge Métro",
+              "mission": "Châtillon Montrouge Métro",
+              "fromStopPointId": "IDFM:24665",
+              "toStopPointId": "IDFM:486590",
+              "fromStopAreaId": "IDFM:70345",
+              "toStopAreaId": "IDFM:461505",
+              "fromName": "République - Deforges",
+              "toName": "Châtillon - Montrouge - Métro",
+              "fromPoint": {
+                "lon": 2.297620408542606,
+                "lat": 48.80355921710857
+              },
+              "toPoint": {
+                "lon": 2.300916878874268,
+                "lat": 48.80954153925826
+              },
+              "arrivalDateTime": "20261023T091300",
+              "departureDateTime": "20261023T091000"
+            },
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 482,
+              "timingSource": "schedule",
+              "fromPoint": {
+                "lon": 2.300916878874268,
+                "lat": 48.80954153925826
+              },
+              "toPoint": {
+                "lon": 2.301717705004608,
+                "lat": 48.81075140670139
+              },
+              "fromStopPointId": "IDFM:486590",
+              "toStopPointId": "IDFM:22237",
+              "fromStopAreaId": "IDFM:461505",
+              "toStopAreaId": "IDFM:461505",
+              "transferDurationSource": "gtfs-minimum",
+              "departureDateTime": "20261023T091300",
+              "arrivalDateTime": "20261023T092102"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 18,
+              "departureDateTime": "20261023T092102",
+              "arrivalDateTime": "20261023T092120"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "metro",
+              "lineMode": "METRO",
+              "lineId": "IDFM:C01383",
+              "lineCode": "13",
+              "lineColor": "#82C8E6",
+              "durationSeconds": 1281,
+              "vehicleJourneyId": "20261023:IDFM:RATP:COU_RATP_13JOSECLIN1_2026_Mont13Univ06-5",
+              "direction": "Saint-Denis - Université",
+              "mission": "Saint-Denis - Université",
+              "fromStopPointId": "IDFM:22237",
+              "toStopPointId": "IDFM:22218",
+              "fromStopAreaId": "IDFM:461505",
+              "toStopAreaId": "IDFM:71370",
+              "fromName": "Châtillon - Montrouge",
+              "toName": "Saint-Lazare",
+              "fromPoint": {
+                "lon": 2.301717705004608,
+                "lat": 48.81075140670139
+              },
+              "toPoint": {
+                "lon": 2.3246310106162915,
+                "lat": 48.87525956784242
+              },
+              "arrivalDateTime": "20261023T094241",
+              "departureDateTime": "20261023T092120"
+            }
+          ]
+        }
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "gare-de-lyon",
+      "label": "Gare de Lyon",
+      "stationLabel": "Gare de Lyon",
+      "journeys": [
+        {
+          "id": "gtfs:routing/v1/295dace4e8e2ffdae4dffc5f7b1c23c1e305a1add12b9170235c20febf2d8dd8/98e90576-f845-4fdd-9250-3b10fccb43a7:20261023T090000:2.3763656609312003,48.84340211646563:stop_area:IDFM:73626:1792741578:IDFM:C01743:IDFM:C01742",
+          "status": "partial",
+          "source": "gtfs",
+          "datasetVersion": "2026-10-14",
+          "durationSeconds": 2778,
+          "departureDateTime": "20261023T090000",
+          "arrivalDateTime": "20261023T094618",
+          "transferCount": 1,
+          "sections": [
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 600,
+              "timingSource": "estimated",
+              "fromPoint": {
+                "lon": 2.28830452778152,
+                "lat": 48.793710645211405
+              },
+              "toPoint": {
+                "lon": 2.2929083820455323,
+                "lat": 48.78756698215643
+              },
+              "fromName": "48.79371, 2.28830",
+              "toName": "Fontenay-aux-Roses",
+              "distanceMeters": 762,
+              "walkingProvider": "straight-line",
+              "walkingUnavailabilityReason": "quota-exceeded",
+              "toStopPointId": "IDFM:monomodalStopPlace:43125",
+              "toStopAreaId": "IDFM:70133",
+              "departureDateTime": "20261023T090000",
+              "arrivalDateTime": "20261023T091000"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 449,
+              "departureDateTime": "20261023T091000",
+              "arrivalDateTime": "20261023T091729"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "rer",
+              "lineMode": "RER",
+              "lineId": "IDFM:C01743",
+              "lineCode": "B",
+              "lineColor": "#5091CB",
+              "durationSeconds": 1380,
+              "vehicleJourneyId": "20261023:IDFM:TN:SNCF:f505886f-5c7b-4c91-80cd-7f1519faa692",
+              "direction": "ILUS",
+              "mission": "ILUS",
+              "fromStopPointId": "IDFM:monomodalStopPlace:43125",
+              "toStopPointId": "IDFM:monomodalStopPlace:45102",
+              "fromStopAreaId": "IDFM:70133",
+              "toStopAreaId": "IDFM:474151",
+              "fromName": "Fontenay-aux-Roses",
+              "toName": "Châtelet - Les Halles",
+              "fromPoint": {
+                "lon": 2.2929083820455323,
+                "lat": 48.78756698215643
+              },
+              "toPoint": {
+                "lon": 2.34697651043533,
+                "lat": 48.86174503191322
+              },
+              "arrivalDateTime": "20261023T094029",
+              "departureDateTime": "20261023T091729"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 189,
+              "departureDateTime": "20261023T094029",
+              "arrivalDateTime": "20261023T094338"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "rer",
+              "lineMode": "RER",
+              "lineId": "IDFM:C01742",
+              "lineCode": "A",
+              "lineColor": "#EB2132",
+              "durationSeconds": 160,
+              "vehicleJourneyId": "20261023:IDFM:TN:SNCF:9f3b12f0-13c3-4661-b804-fbb423f08b6f",
+              "direction": "NOTE",
+              "mission": "NOTE",
+              "fromStopPointId": "IDFM:monomodalStopPlace:45102",
+              "toStopPointId": "IDFM:monomodalStopPlace:470195",
+              "fromStopAreaId": "IDFM:474151",
+              "toStopAreaId": "IDFM:73626",
+              "fromName": "Châtelet - Les Halles",
+              "toName": "Gare de Lyon",
+              "fromPoint": {
+                "lon": 2.34697651043533,
+                "lat": 48.86174503191322
+              },
+              "toPoint": {
+                "lon": 2.376365660931201,
+                "lat": 48.84340211646564
+              },
+              "departureDateTime": "20261023T094338",
+              "arrivalDateTime": "20261023T094618"
+            }
+          ]
+        }
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "gare-du-nord",
+      "label": "Gare du Nord",
+      "stationLabel": "Gare du Nord",
+      "journeys": [
+        {
+          "id": "gtfs:routing/v1/295dace4e8e2ffdae4dffc5f7b1c23c1e305a1add12b9170235c20febf2d8dd8/98e90576-f845-4fdd-9250-3b10fccb43a7:20261023T090000:2.3566934375285626,48.88230685842713:stop_area:IDFM:71410:1792741440:IDFM:C01743",
+          "status": "partial",
+          "source": "gtfs",
+          "datasetVersion": "2026-10-14",
+          "durationSeconds": 2640,
+          "departureDateTime": "20261023T090000",
+          "arrivalDateTime": "20261023T094400",
+          "transferCount": 0,
+          "sections": [
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 600,
+              "timingSource": "estimated",
+              "fromPoint": {
+                "lon": 2.28830452778152,
+                "lat": 48.793710645211405
+              },
+              "toPoint": {
+                "lon": 2.2929083820455323,
+                "lat": 48.78756698215643
+              },
+              "fromName": "48.79371, 2.28830",
+              "toName": "Fontenay-aux-Roses",
+              "distanceMeters": 762,
+              "walkingProvider": "straight-line",
+              "walkingUnavailabilityReason": "quota-exceeded",
+              "toStopPointId": "IDFM:monomodalStopPlace:43125",
+              "toStopAreaId": "IDFM:70133",
+              "departureDateTime": "20261023T090000",
+              "arrivalDateTime": "20261023T091000"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 449,
+              "departureDateTime": "20261023T091000",
+              "arrivalDateTime": "20261023T091729"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "rer",
+              "lineMode": "RER",
+              "lineId": "IDFM:C01743",
+              "lineCode": "B",
+              "lineColor": "#5091CB",
+              "durationSeconds": 1591,
+              "vehicleJourneyId": "20261023:IDFM:TN:SNCF:f505886f-5c7b-4c91-80cd-7f1519faa692",
+              "direction": "ILUS",
+              "mission": "ILUS",
+              "fromStopPointId": "IDFM:monomodalStopPlace:43125",
+              "toStopPointId": "IDFM:monomodalStopPlace:462394",
+              "fromStopAreaId": "IDFM:70133",
+              "toStopAreaId": "IDFM:71410",
+              "fromName": "Fontenay-aux-Roses",
+              "toName": "Gare du Nord",
+              "fromPoint": {
+                "lon": 2.2929083820455323,
+                "lat": 48.78756698215643
+              },
+              "toPoint": {
+                "lon": 2.356693437528564,
+                "lat": 48.88230685842714
+              },
+              "arrivalDateTime": "20261023T094400",
+              "departureDateTime": "20261023T091729"
+            }
+          ]
+        }
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "employment-la-defense",
+      "label": "La Défense",
+      "stationLabel": "La Défense",
+      "journeys": [
+        {
+          "id": "gtfs:routing/v1/295dace4e8e2ffdae4dffc5f7b1c23c1e305a1add12b9170235c20febf2d8dd8/98e90576-f845-4fdd-9250-3b10fccb43a7:20261023T090000:2.2384185962504066,48.89222980156816:stop_area:IDFM:71517:1792741949:IDFM:C01743:IDFM:C01742",
+          "status": "partial",
+          "source": "gtfs",
+          "datasetVersion": "2026-10-14",
+          "durationSeconds": 3149,
+          "departureDateTime": "20261023T090000",
+          "arrivalDateTime": "20261023T095229",
+          "transferCount": 1,
+          "sections": [
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 600,
+              "timingSource": "estimated",
+              "fromPoint": {
+                "lon": 2.28830452778152,
+                "lat": 48.793710645211405
+              },
+              "toPoint": {
+                "lon": 2.2929083820455323,
+                "lat": 48.78756698215643
+              },
+              "fromName": "48.79371, 2.28830",
+              "toName": "Fontenay-aux-Roses",
+              "distanceMeters": 762,
+              "walkingProvider": "straight-line",
+              "walkingUnavailabilityReason": "quota-exceeded",
+              "toStopPointId": "IDFM:monomodalStopPlace:43125",
+              "toStopAreaId": "IDFM:70133",
+              "departureDateTime": "20261023T090000",
+              "arrivalDateTime": "20261023T091000"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 449,
+              "departureDateTime": "20261023T091000",
+              "arrivalDateTime": "20261023T091729"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "rer",
+              "lineMode": "RER",
+              "lineId": "IDFM:C01743",
+              "lineCode": "B",
+              "lineColor": "#5091CB",
+              "durationSeconds": 1380,
+              "vehicleJourneyId": "20261023:IDFM:TN:SNCF:f505886f-5c7b-4c91-80cd-7f1519faa692",
+              "direction": "ILUS",
+              "mission": "ILUS",
+              "fromStopPointId": "IDFM:monomodalStopPlace:43125",
+              "toStopPointId": "IDFM:monomodalStopPlace:45102",
+              "fromStopAreaId": "IDFM:70133",
+              "toStopAreaId": "IDFM:474151",
+              "fromName": "Fontenay-aux-Roses",
+              "toName": "Châtelet - Les Halles",
+              "fromPoint": {
+                "lon": 2.2929083820455323,
+                "lat": 48.78756698215643
+              },
+              "toPoint": {
+                "lon": 2.34697651043533,
+                "lat": 48.86174503191322
+              },
+              "arrivalDateTime": "20261023T094029",
+              "departureDateTime": "20261023T091729"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 146,
+              "departureDateTime": "20261023T094029",
+              "arrivalDateTime": "20261023T094255"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "rer",
+              "lineMode": "RER",
+              "lineId": "IDFM:C01742",
+              "lineCode": "A",
+              "lineColor": "#EB2132",
+              "durationSeconds": 574,
+              "vehicleJourneyId": "20261023:IDFM:TN:SNCF:69fc69b1-7da0-45a3-9c6b-6ba9c8956b69",
+              "direction": "YROC",
+              "mission": "YROC",
+              "fromStopPointId": "IDFM:monomodalStopPlace:45102",
+              "toStopPointId": "IDFM:monomodalStopPlace:470549",
+              "fromStopAreaId": "IDFM:474151",
+              "toStopAreaId": "IDFM:71517",
+              "fromName": "Châtelet - Les Halles",
+              "toName": "La Défense",
+              "fromPoint": {
+                "lon": 2.34697651043533,
+                "lat": 48.86174503191322
+              },
+              "toPoint": {
+                "lon": 2.238418596250407,
+                "lat": 48.892229801568206
+              },
+              "arrivalDateTime": "20261023T095229",
+              "departureDateTime": "20261023T094255"
+            }
+          ]
+        }
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "employment-val-de-fontenay",
+      "label": "Val de Fontenay",
+      "stationLabel": "Val de Fontenay",
+      "journeys": [
+        {
+          "id": "gtfs:routing/v1/295dace4e8e2ffdae4dffc5f7b1c23c1e305a1add12b9170235c20febf2d8dd8/98e90576-f845-4fdd-9250-3b10fccb43a7:20261023T090000:2.4890536307751607,48.854246540320226:stop_area:IDFM:71718:1792742353:IDFM:C01743:IDFM:C01742",
+          "status": "partial",
+          "source": "gtfs",
+          "datasetVersion": "2026-10-14",
+          "durationSeconds": 3553,
+          "departureDateTime": "20261023T090000",
+          "arrivalDateTime": "20261023T095913",
+          "transferCount": 1,
+          "sections": [
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 600,
+              "timingSource": "estimated",
+              "fromPoint": {
+                "lon": 2.28830452778152,
+                "lat": 48.793710645211405
+              },
+              "toPoint": {
+                "lon": 2.2929083820455323,
+                "lat": 48.78756698215643
+              },
+              "fromName": "48.79371, 2.28830",
+              "toName": "Fontenay-aux-Roses",
+              "distanceMeters": 762,
+              "walkingProvider": "straight-line",
+              "walkingUnavailabilityReason": "quota-exceeded",
+              "toStopPointId": "IDFM:monomodalStopPlace:43125",
+              "toStopAreaId": "IDFM:70133",
+              "departureDateTime": "20261023T090000",
+              "arrivalDateTime": "20261023T091000"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 449,
+              "departureDateTime": "20261023T091000",
+              "arrivalDateTime": "20261023T091729"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "rer",
+              "lineMode": "RER",
+              "lineId": "IDFM:C01743",
+              "lineCode": "B",
+              "lineColor": "#5091CB",
+              "durationSeconds": 1380,
+              "vehicleJourneyId": "20261023:IDFM:TN:SNCF:f505886f-5c7b-4c91-80cd-7f1519faa692",
+              "direction": "ILUS",
+              "mission": "ILUS",
+              "fromStopPointId": "IDFM:monomodalStopPlace:43125",
+              "toStopPointId": "IDFM:monomodalStopPlace:45102",
+              "fromStopAreaId": "IDFM:70133",
+              "toStopAreaId": "IDFM:474151",
+              "fromName": "Fontenay-aux-Roses",
+              "toName": "Châtelet - Les Halles",
+              "fromPoint": {
+                "lon": 2.2929083820455323,
+                "lat": 48.78756698215643
+              },
+              "toPoint": {
+                "lon": 2.34697651043533,
+                "lat": 48.86174503191322
+              },
+              "arrivalDateTime": "20261023T094029",
+              "departureDateTime": "20261023T091729"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 339,
+              "departureDateTime": "20261023T094029",
+              "arrivalDateTime": "20261023T094608"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "rer",
+              "lineMode": "RER",
+              "lineId": "IDFM:C01742",
+              "lineCode": "A",
+              "lineColor": "#EB2132",
+              "durationSeconds": 785,
+              "vehicleJourneyId": "20261023:IDFM:TN:SNCF:835625ec-f008-473a-8c5e-91c883d2c87a",
+              "direction": "QIWI",
+              "mission": "QIWI",
+              "fromStopPointId": "IDFM:monomodalStopPlace:45102",
+              "toStopPointId": "IDFM:monomodalStopPlace:47900",
+              "fromStopAreaId": "IDFM:474151",
+              "toStopAreaId": "IDFM:71718",
+              "fromName": "Châtelet - Les Halles",
+              "toName": "Val de Fontenay",
+              "fromPoint": {
+                "lon": 2.34697651043533,
+                "lat": 48.86174503191322
+              },
+              "toPoint": {
+                "lon": 2.4890536307751616,
+                "lat": 48.85424654032024
+              },
+              "arrivalDateTime": "20261023T095913",
+              "departureDateTime": "20261023T094608"
+            }
+          ]
+        }
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "employment-plaine-saint-denis",
+      "label": "La Plaine Saint-Denis",
+      "stationLabel": "Saint-Denis - Pleyel",
+      "journeys": [
+        {
+          "id": "gtfs:routing/v1/295dace4e8e2ffdae4dffc5f7b1c23c1e305a1add12b9170235c20febf2d8dd8/98e90576-f845-4fdd-9250-3b10fccb43a7:20261023T090000:2.345875004500752,48.917447693910994:stop_area:IDFM:490784:1792742228:IDFM:C01215:IDFM:C01366:IDFM:C01383:IDFM:C01384",
+          "status": "partial",
+          "source": "gtfs",
+          "datasetVersion": "2026-10-14",
+          "durationSeconds": 3428,
+          "departureDateTime": "20261023T090000",
+          "arrivalDateTime": "20261023T095708",
+          "transferCount": 3,
+          "sections": [
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 120,
+              "timingSource": "estimated",
+              "fromPoint": {
+                "lon": 2.28830452778152,
+                "lat": 48.793710645211405
+              },
+              "toPoint": {
+                "lon": 2.2889166872120743,
+                "lat": 48.79481952025696
+              },
+              "fromName": "48.79371, 2.28830",
+              "toName": "Pierrelais - Blanchard",
+              "distanceMeters": 131,
+              "walkingProvider": "straight-line",
+              "walkingUnavailabilityReason": "quota-exceeded",
+              "toStopPointId": "IDFM:29833",
+              "toStopAreaId": "IDFM:70225",
+              "departureDateTime": "20261023T090000",
+              "arrivalDateTime": "20261023T090200"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "bus",
+              "lineMode": "BUS",
+              "lineId": "IDFM:C01215",
+              "lineCode": "195",
+              "lineColor": "#A0006E",
+              "durationSeconds": 300,
+              "vehicleJourneyId": "20261023:IDFM:stif:local-264587-C01215-63186",
+              "direction": "Pierre Sémard - Châtillon-Montrouge",
+              "mission": "Pierre Sémard - Châtillon-Montrouge",
+              "fromStopPointId": "IDFM:29833",
+              "toStopPointId": "IDFM:24665",
+              "fromStopAreaId": "IDFM:70225",
+              "toStopAreaId": "IDFM:70345",
+              "fromName": "Pierrelais - Blanchard",
+              "toName": "République - Deforges",
+              "fromPoint": {
+                "lon": 2.2889166872120743,
+                "lat": 48.79481952025696
+              },
+              "toPoint": {
+                "lon": 2.297620408542606,
+                "lat": 48.80355921710857
+              },
+              "arrivalDateTime": "20261023T090700",
+              "departureDateTime": "20261023T090200"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 180,
+              "departureDateTime": "20261023T090700",
+              "arrivalDateTime": "20261023T091000"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "bus",
+              "lineMode": "BUS",
+              "lineId": "IDFM:C01366",
+              "lineCode": "AMIBUS",
+              "lineColor": "#3C91DC",
+              "durationSeconds": 180,
+              "vehicleJourneyId": "20261023:IDFM:BIEVRE_BUS_MOBILITES:21972781",
+              "direction": "Châtillon Montrouge Métro",
+              "mission": "Châtillon Montrouge Métro",
+              "fromStopPointId": "IDFM:24665",
+              "toStopPointId": "IDFM:486590",
+              "fromStopAreaId": "IDFM:70345",
+              "toStopAreaId": "IDFM:461505",
+              "fromName": "République - Deforges",
+              "toName": "Châtillon - Montrouge - Métro",
+              "fromPoint": {
+                "lon": 2.297620408542606,
+                "lat": 48.80355921710857
+              },
+              "toPoint": {
+                "lon": 2.300916878874268,
+                "lat": 48.80954153925826
+              },
+              "arrivalDateTime": "20261023T091300",
+              "departureDateTime": "20261023T091000"
+            },
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 482,
+              "timingSource": "schedule",
+              "fromPoint": {
+                "lon": 2.300916878874268,
+                "lat": 48.80954153925826
+              },
+              "toPoint": {
+                "lon": 2.301717705004608,
+                "lat": 48.81075140670139
+              },
+              "fromStopPointId": "IDFM:486590",
+              "toStopPointId": "IDFM:22237",
+              "fromStopAreaId": "IDFM:461505",
+              "toStopAreaId": "IDFM:461505",
+              "transferDurationSource": "gtfs-minimum",
+              "departureDateTime": "20261023T091300",
+              "arrivalDateTime": "20261023T092102"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 18,
+              "departureDateTime": "20261023T092102",
+              "arrivalDateTime": "20261023T092120"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "metro",
+              "lineMode": "METRO",
+              "lineId": "IDFM:C01383",
+              "lineCode": "13",
+              "lineColor": "#82C8E6",
+              "durationSeconds": 1281,
+              "vehicleJourneyId": "20261023:IDFM:RATP:COU_RATP_13JOSECLIN1_2026_Mont13Univ06-5",
+              "direction": "Saint-Denis - Université",
+              "mission": "Saint-Denis - Université",
+              "fromStopPointId": "IDFM:22237",
+              "toStopPointId": "IDFM:22218",
+              "fromStopAreaId": "IDFM:461505",
+              "toStopAreaId": "IDFM:71370",
+              "fromName": "Châtillon - Montrouge",
+              "toName": "Saint-Lazare",
+              "fromPoint": {
+                "lon": 2.301717705004608,
+                "lat": 48.81075140670139
+              },
+              "toPoint": {
+                "lon": 2.3246310106162915,
+                "lat": 48.87525956784242
+              },
+              "arrivalDateTime": "20261023T094241",
+              "departureDateTime": "20261023T092120"
+            },
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 300,
+              "timingSource": "schedule",
+              "fromPoint": {
+                "lon": 2.3246310106162915,
+                "lat": 48.87525956784242
+              },
+              "toPoint": {
+                "lon": 2.3243109129971637,
+                "lat": 48.8757613910029
+              },
+              "fromStopPointId": "IDFM:22218",
+              "toStopPointId": "IDFM:21962",
+              "fromStopAreaId": "IDFM:71370",
+              "toStopAreaId": "IDFM:71370",
+              "transferDurationSource": "gtfs-minimum",
+              "departureDateTime": "20261023T094241",
+              "arrivalDateTime": "20261023T094741"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 12,
+              "departureDateTime": "20261023T094741",
+              "arrivalDateTime": "20261023T094753"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "metro",
+              "lineMode": "METRO",
+              "lineId": "IDFM:C01384",
+              "lineCode": "14",
+              "lineColor": "#640082",
+              "durationSeconds": 555,
+              "vehicleJourneyId": "20261023:IDFM:RATP:COU_RATP_14VECHABAT01_2026_Pl1406Or1423-4",
+              "direction": "Saint-Denis - Pleyel",
+              "mission": "Saint-Denis - Pleyel",
+              "fromStopPointId": "IDFM:21962",
+              "toStopPointId": "IDFM:490794",
+              "fromStopAreaId": "IDFM:71370",
+              "toStopAreaId": "IDFM:490784",
+              "fromName": "Saint-Lazare",
+              "toName": "Saint-Denis - Pleyel",
+              "fromPoint": {
+                "lon": 2.3243109129971637,
+                "lat": 48.8757613910029
+              },
+              "toPoint": {
+                "lon": 2.3458750045007535,
+                "lat": 48.91744769391101
+              },
+              "arrivalDateTime": "20261023T095708",
+              "departureDateTime": "20261023T094753"
+            }
+          ]
+        }
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "employment-nanterre",
+      "label": "Nanterre La Folie",
+      "stationLabel": "Nanterre-La-Folie",
+      "journeys": [
+        {
+          "id": "gtfs:routing/v1/295dace4e8e2ffdae4dffc5f7b1c23c1e305a1add12b9170235c20febf2d8dd8/98e90576-f845-4fdd-9250-3b10fccb43a7:20261023T090000:2.226568794458684,48.89758132477411:stop_area:IDFM:488087:1792742310:IDFM:C01743:IDFM:C01742:IDFM:C01729",
+          "status": "partial",
+          "source": "gtfs",
+          "datasetVersion": "2026-10-14",
+          "durationSeconds": 3510,
+          "departureDateTime": "20261023T090000",
+          "arrivalDateTime": "20261023T095830",
+          "transferCount": 2,
+          "sections": [
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 600,
+              "timingSource": "estimated",
+              "fromPoint": {
+                "lon": 2.28830452778152,
+                "lat": 48.793710645211405
+              },
+              "toPoint": {
+                "lon": 2.2929083820455323,
+                "lat": 48.78756698215643
+              },
+              "fromName": "48.79371, 2.28830",
+              "toName": "Fontenay-aux-Roses",
+              "distanceMeters": 762,
+              "walkingProvider": "straight-line",
+              "walkingUnavailabilityReason": "quota-exceeded",
+              "toStopPointId": "IDFM:monomodalStopPlace:43125",
+              "toStopAreaId": "IDFM:70133",
+              "departureDateTime": "20261023T090000",
+              "arrivalDateTime": "20261023T091000"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 449,
+              "departureDateTime": "20261023T091000",
+              "arrivalDateTime": "20261023T091729"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "rer",
+              "lineMode": "RER",
+              "lineId": "IDFM:C01743",
+              "lineCode": "B",
+              "lineColor": "#5091CB",
+              "durationSeconds": 1380,
+              "vehicleJourneyId": "20261023:IDFM:TN:SNCF:f505886f-5c7b-4c91-80cd-7f1519faa692",
+              "direction": "ILUS",
+              "mission": "ILUS",
+              "fromStopPointId": "IDFM:monomodalStopPlace:43125",
+              "toStopPointId": "IDFM:monomodalStopPlace:45102",
+              "fromStopAreaId": "IDFM:70133",
+              "toStopAreaId": "IDFM:474151",
+              "fromName": "Fontenay-aux-Roses",
+              "toName": "Châtelet - Les Halles",
+              "fromPoint": {
+                "lon": 2.2929083820455323,
+                "lat": 48.78756698215643
+              },
+              "toPoint": {
+                "lon": 2.34697651043533,
+                "lat": 48.86174503191322
+              },
+              "arrivalDateTime": "20261023T094029",
+              "departureDateTime": "20261023T091729"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 146,
+              "departureDateTime": "20261023T094029",
+              "arrivalDateTime": "20261023T094255"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "rer",
+              "lineMode": "RER",
+              "lineId": "IDFM:C01742",
+              "lineCode": "A",
+              "lineColor": "#EB2132",
+              "durationSeconds": 574,
+              "vehicleJourneyId": "20261023:IDFM:TN:SNCF:69fc69b1-7da0-45a3-9c6b-6ba9c8956b69",
+              "direction": "YROC",
+              "mission": "YROC",
+              "fromStopPointId": "IDFM:monomodalStopPlace:45102",
+              "toStopPointId": "IDFM:monomodalStopPlace:470549",
+              "fromStopAreaId": "IDFM:474151",
+              "toStopAreaId": "IDFM:71517",
+              "fromName": "Châtelet - Les Halles",
+              "toName": "La Défense",
+              "fromPoint": {
+                "lon": 2.34697651043533,
+                "lat": 48.86174503191322
+              },
+              "toPoint": {
+                "lon": 2.238418596250407,
+                "lat": 48.892229801568206
+              },
+              "arrivalDateTime": "20261023T095229",
+              "departureDateTime": "20261023T094255"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 221,
+              "departureDateTime": "20261023T095229",
+              "arrivalDateTime": "20261023T095610"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "rer",
+              "lineMode": "RER",
+              "lineId": "IDFM:C01729",
+              "lineCode": "E",
+              "lineColor": "#B94E9A",
+              "durationSeconds": 140,
+              "vehicleJourneyId": "20261023:IDFM:TN:SNCF:9ca80a9a-9d4d-4cfb-95ed-2e81ef5b47ff",
+              "direction": "NOCY",
+              "mission": "NOCY",
+              "fromStopPointId": "IDFM:monomodalStopPlace:470549",
+              "toStopPointId": "IDFM:monomodalStopPlace:487011",
+              "fromStopAreaId": "IDFM:71517",
+              "toStopAreaId": "IDFM:488087",
+              "fromName": "La Défense",
+              "toName": "Nanterre-La-Folie",
+              "fromPoint": {
+                "lon": 2.238418596250407,
+                "lat": 48.892229801568206
+              },
+              "toPoint": {
+                "lon": 2.226568794458685,
+                "lat": 48.897581324774116
+              },
+              "departureDateTime": "20261023T095610",
+              "arrivalDateTime": "20261023T095830"
+            }
+          ]
+        }
+      ],
+      "status": "ready"
+    },
+    {
+      "id": "employment-velizy",
+      "label": "Vélizy",
+      "stationLabel": "Vélizy 2",
+      "journeys": [
+        {
+          "id": "gtfs:routing/v1/295dace4e8e2ffdae4dffc5f7b1c23c1e305a1add12b9170235c20febf2d8dd8/98e90576-f845-4fdd-9250-3b10fccb43a7:20261023T090000:2.2200029992750467,48.785008689992715::1792740780:IDFM:C01794@IDFM:2338",
+          "status": "partial",
+          "source": "gtfs",
+          "datasetVersion": "2026-10-14",
+          "durationSeconds": 1980,
+          "departureDateTime": "20261023T090000",
+          "arrivalDateTime": "20261023T093300",
+          "transferCount": 0,
+          "sections": [
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 660,
+              "timingSource": "estimated",
+              "fromPoint": {
+                "lon": 2.28830452778152,
+                "lat": 48.793710645211405
+              },
+              "toPoint": {
+                "lon": 2.2819172935381395,
+                "lat": 48.79992226990009
+              },
+              "fromName": "48.79371, 2.28830",
+              "toName": "Parc André Malraux",
+              "distanceMeters": 834,
+              "walkingProvider": "straight-line",
+              "walkingUnavailabilityReason": "quota-exceeded",
+              "toStopPointId": "IDFM:2338",
+              "toStopAreaId": "IDFM:70310",
+              "departureDateTime": "20261023T090000",
+              "arrivalDateTime": "20261023T091100"
+            },
+            {
+              "type": "waiting",
+              "durationSeconds": 78,
+              "departureDateTime": "20261023T091100",
+              "arrivalDateTime": "20261023T091218"
+            },
+            {
+              "type": "public_transport",
+              "timingSource": "schedule",
+              "mode": "tram",
+              "lineMode": "TRAM",
+              "lineId": "IDFM:C01794",
+              "lineCode": "T6",
+              "lineColor": "#FF0000",
+              "durationSeconds": 1182,
+              "vehicleJourneyId": "20261023:IDFM:RATP:COU_RATP_016LAJ02L-Ma-Me-J11T062026_49_545479684",
+              "direction": "Viroflay - Rive Droite",
+              "mission": "Viroflay - Rive Droite",
+              "fromStopPointId": "IDFM:2338",
+              "toStopPointId": "IDFM:41854",
+              "fromStopAreaId": "IDFM:70310",
+              "toStopAreaId": "IDFM:420144",
+              "fromName": "Parc André Malraux",
+              "toName": "Vélizy 2",
+              "fromPoint": {
+                "lon": 2.2819172935381395,
+                "lat": 48.79992226990009
+              },
+              "toPoint": {
+                "lon": 2.2199893897850744,
+                "lat": 48.78500860115217
+              },
+              "arrivalDateTime": "20261023T093200",
+              "departureDateTime": "20261023T091218"
+            },
+            {
+              "type": "walking",
+              "mode": "walking",
+              "durationSeconds": 60,
+              "timingSource": "estimated",
+              "fromPoint": {
+                "lon": 2.2199893897850744,
+                "lat": 48.78500860115217
+              },
+              "toPoint": {
+                "lon": 2.2200029992750467,
+                "lat": 48.785008689992715
+              },
+              "toName": "Vélizy",
+              "distanceMeters": 1,
+              "walkingProvider": "straight-line",
+              "walkingUnavailabilityReason": "quota-exceeded",
+              "fromStopPointId": "IDFM:41854",
+              "fromStopAreaId": "IDFM:420144",
+              "departureDateTime": "20261023T093200",
+              "arrivalDateTime": "20261023T093300"
+            }
+          ]
+        }
+      ],
+      "status": "ready"
+    }
+  ]
+}

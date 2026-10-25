@@ -346,6 +346,7 @@ function updateNearbyRadius(value: string): void {
       <div
         v-if="nearbyPlacesExpanded"
         id="global-map-picker-sidebar-nearby-places"
+        :aria-busy="nearbyPlacesLoading"
         role="region"
         aria-labelledby="global-map-picker-sidebar-nearby-toggle"
       >
@@ -544,10 +545,14 @@ function updateNearbyRadius(value: string): void {
           >
           <ChevronDown :size="16" aria-hidden="true" />
         </button>
-        <small>{{ servedCitiesPattern.length }}</small>
+        <small v-if="!servedCitiesLoading">{{ servedCitiesPattern.length }}</small>
+      </div>
+      <div v-if="lineCitiesExpanded && servedCitiesLoading" id="global-map-picker-sidebar-line-cities" class="global-map-picker-sidebar__nearby-loading" role="status" aria-live="polite" aria-busy="true">
+        <span class="global-map-picker-sidebar__nearby-loading-bar" aria-hidden="true"><span /></span>
+        <span>{{ t('globalMap.sidebar.lineCitiesLoading') }}</span>
       </div>
       <div
-        v-if="lineCitiesExpanded && servedCitiesPattern.length"
+        v-else-if="lineCitiesExpanded && !servedCitiesError && servedCitiesPattern.length"
         id="global-map-picker-sidebar-line-cities"
         role="region"
         aria-labelledby="global-map-picker-sidebar-line-cities-toggle"

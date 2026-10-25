@@ -26,6 +26,32 @@ function fixture() {
 }
 
 describe("final access to a line, separate from intermediate transfer rules", () => {
+  it("does not evict pending physical pairs when concurrent searches exceed 1024 entries", async () => {
+    const f = fixture();
+    const inputs = [f.input];
+    for (let i = 0; i < 529; i++) {
+      const stop = f.index.stops.length;
+      f.index.stops.push({ id: `BUS${i}`, name: "Arrival", lat: 48.8, lon: 2.3 + (i + 1) / 1000000, locationType: 0, stopAccess: 1 });
+      f.index.transfers.push([stop, 1, 364]);
+      const node = { ...f.node, transferOrigin: { stop, arrival: 1000, routeId: "FEEDER" } };
+      inputs.push({ ...f.input, tree: { ...f.tree, platformLabels: new Map([[stop, node]]) } });
+    }
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    f.matrix.mockImplementation(async (_from, targets) => {
+      await gate;
+      return targets.map(to => ({ id: to.id, provider: "ign-bdtopo", fallback: false, durationSeconds: 30, distanceMeters: 40, coordinates: [to] }));
+    });
+    const resolve = createFinalLineAccessResolver(f.index)!;
+    const work = inputs.map(input => resolve(input));
+    await vi.waitFor(() => expect(f.matrix).toHaveBeenCalledTimes(530));
+    const second = resolve(f.input);
+    await Promise.resolve(); await Promise.resolve();
+    release();
+    await Promise.all([...work, second]);
+    expect(f.matrix.mock.calls.reduce((sum, call) => sum + call[1].length, 0)).toBe(1060);
+    expect(f.matrix.mock.calls[0]![1][0]).toHaveProperty("walkingPhase", "final-line-access");
+  });
   it("chooses the shortest complete documented path across different station parents", async () => {
     const f = fixture(), result = await createFinalLineAccessResolver(f.index)!(f.input);
     expect(result).toHaveLength(1);

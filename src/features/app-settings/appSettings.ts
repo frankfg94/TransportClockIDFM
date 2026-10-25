@@ -17,6 +17,7 @@ import {
 } from "../transport-map/config/globalTransportPlanConfig";
 
 import { normalizeNewsPreferences, type NewsPreferences } from "../transport-news/types";
+import { normalizePersonalJourneyPreferences, type PersonalJourneyPreference } from "../nearby-stations/neighborhood/personalJourneyPreferences";
 
 export { transferResolverModeOptions };
 export type { TransportMapBasemapStyle };
@@ -92,6 +93,7 @@ export interface AppSettings {
   nearbyMapShowDisplayControl: boolean;
   nearbyMapShowFullscreenControl: boolean;
   nearbyMapHighPrecisionNoiseEnabled: boolean;
+  verdictPersonalJourneys: PersonalJourneyPreference[];
   // Browser-side cache layer used before the backend bundle fallback.
   transferBundleLocalCacheEnabled: boolean;
   // Nuxt-side bundle cache shared by successive transfer requests.
@@ -141,6 +143,7 @@ export interface AppPluginSettingsEntry {
 
 export interface AppSettingsApi {
   settings: Ref<AppSettings>;
+  storageError: Ref<boolean>;
   effectiveMaxDeparturesPerDirection: ComputedRef<number | undefined>;
   updateSettings: (patch: Partial<AppSettings>) => void;
   resetSettings: () => void;
@@ -311,6 +314,7 @@ export function createDefaultAppSettings(): AppSettings {
     nearbyMapShowDisplayControl: true,
     nearbyMapShowFullscreenControl: true,
     nearbyMapHighPrecisionNoiseEnabled: true,
+    verdictPersonalJourneys: [],
     navigationAutoHide: "none",
     hiddenDirectionIdsByBoardId: {},
     reduceMotion: false,
@@ -441,6 +445,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       value.nearbyMapShowFullscreenControl,
       defaults.nearbyMapShowFullscreenControl,
     ),
+    verdictPersonalJourneys: normalizePersonalJourneyPreferences(value.verdictPersonalJourneys),
     nearbyMapHighPrecisionNoiseEnabled: readBoolean(
       value.nearbyMapHighPrecisionNoiseEnabled,
       defaults.nearbyMapHighPrecisionNoiseEnabled,
@@ -739,6 +744,7 @@ export function getWakeLockDurationMs(duration: WakeLockDuration): number | unde
 }
 
 export function useAppSettings(): AppSettingsApi {
+  const storageError = useState<boolean>("transport-clock.app-settings.storage-error", () => false);
   const settings = useState<AppSettings>("transport-clock.app-settings", () =>
     createDefaultAppSettings(),
   );
@@ -748,8 +754,8 @@ export function useAppSettings(): AppSettingsApi {
 
   if (import.meta.client) {
     onMounted(() => {
-      loadSettingsFromLocalStorage(settings);
-      registerSettingsStorageWatcher(settings);
+      loadSettingsFromLocalStorage(settings, storageError);
+      registerSettingsStorageWatcher(settings, storageError);
     });
   }
 
@@ -767,13 +773,14 @@ export function useAppSettings(): AppSettingsApi {
 
   return {
     settings,
+    storageError,
     effectiveMaxDeparturesPerDirection,
     updateSettings,
     resetSettings,
   };
 }
 
-function loadSettingsFromLocalStorage(settings: Ref<AppSettings>): void {
+function loadSettingsFromLocalStorage(settings: Ref<AppSettings>, storageError: Ref<boolean>): void {
   if (storageLoaded) {
     return;
   }
@@ -787,12 +794,13 @@ function loadSettingsFromLocalStorage(settings: Ref<AppSettings>): void {
       settings.value = normalizeAppSettings(JSON.parse(rawValue));
     }
   } catch (error) {
+    storageError.value = true;
     console.warn("[app-settings] Unable to read saved settings", error);
     settings.value = createDefaultAppSettings();
   }
 }
 
-function registerSettingsStorageWatcher(settings: Ref<AppSettings>): void {
+function registerSettingsStorageWatcher(settings: Ref<AppSettings>, storageError: Ref<boolean>): void {
   if (storageWatcherRegistered) {
     return;
   }
@@ -807,7 +815,9 @@ function registerSettingsStorageWatcher(settings: Ref<AppSettings>): void {
           APP_SETTINGS_STORAGE_KEY,
           JSON.stringify(normalizeAppSettings(nextSettings)),
         );
+        storageError.value = false;
       } catch (error) {
+        storageError.value = true;
         console.warn("[app-settings] Unable to persist settings", error);
       }
     },

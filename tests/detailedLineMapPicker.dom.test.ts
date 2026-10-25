@@ -425,7 +425,12 @@ describe("DetailedLineMapPicker sidebar", () => {
     wrapper.unmount();
   });
 
-  it("uses the generic right panel with the mobile bottom-sheet drag handle", async () => {
+  it("uses the generic bottom sheet for station details on mobile", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation((media) => ({
+      matches: true, media, onchange: null,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(),
+      addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(() => true),
+    }));
     const wrapper = mount(DetailedLineMapPicker, {
       props: { line, mode: "explorer", selectable: false },
       attachTo: document.body,
@@ -435,10 +440,10 @@ describe("DetailedLineMapPicker sidebar", () => {
     await wrapper.findAll(".line-map-hit-target")[0].trigger("click");
     await flushPromises();
 
-    expect(wrapper.find('[data-testid="app-right-panel"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="app-right-panel-drag-handle"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="responsive-side-panel"], [data-testid="draggable-bottom-sheet"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="draggable-bottom-sheet-drag-handle"]').exists()).toBe(true);
 
-    await wrapper.get('[data-testid="app-right-panel-close"]').trigger("click");
+    await wrapper.get('[data-testid="responsive-side-panel-close"], [data-testid="draggable-bottom-sheet-close"]').trigger("click");
     await flushPromises();
 
     expect(wrapper.find('[data-testid="line-map-sidebar"]').exists()).toBe(false);
@@ -476,10 +481,10 @@ describe("DetailedLineMapPicker sidebar", () => {
     });
     await flushPromises();
 
-    await wrapper.get(".app-right-panel__backdrop").trigger("click");
+    await wrapper.get(".responsive-side-panel__backdrop").trigger("click");
     await flushPromises();
 
-    expect(wrapper.find('[data-testid="app-right-panel"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="responsive-side-panel"], [data-testid="draggable-bottom-sheet"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="line-map-sidebar"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="network-ghost-layer"]').exists()).toBe(true);
     expect(loadStationTransfers).toHaveBeenCalledTimes(1);
@@ -1234,7 +1239,7 @@ describe("DetailedLineMapPicker sidebar", () => {
     await wrapper.get(".pattern-traffic-calendar-toggle").trigger("click");
     await flushPromises();
 
-    expect(wrapper.find('[data-testid="app-right-panel"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="responsive-side-panel"], [data-testid="draggable-bottom-sheet"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="pattern-traffic-calendar"]').exists()).toBe(true);
     expect(
       wrapper
@@ -1255,7 +1260,7 @@ describe("DetailedLineMapPicker sidebar", () => {
     await flushPromises();
     expect(wrapper.find('[data-testid="pattern-traffic-calendar"]').exists()).toBe(false);
     expect(wrapper.get('[data-testid="line-map-sidebar"]').text()).toContain("Station A");
-    expect(wrapper.findAll('[data-testid="app-right-panel"]')).toHaveLength(1);
+    expect(wrapper.findAll('[data-testid="responsive-side-panel"], [data-testid="draggable-bottom-sheet"]')).toHaveLength(1);
 
     wrapper.unmount();
     vi.useRealTimers();
@@ -1940,7 +1945,7 @@ describe("DetailedLineMapPicker sidebar", () => {
 
     expect(wrapper.find(".network-ghost-line--active").exists()).toBe(true);
 
-    await wrapper.get('[data-testid="app-right-panel-close"]').trigger("click");
+    await wrapper.get('[data-testid="responsive-side-panel-close"], [data-testid="draggable-bottom-sheet-close"]').trigger("click");
     await flushPromises();
 
     expect(wrapper.find('[data-testid="line-map-sidebar"]').exists()).toBe(false);

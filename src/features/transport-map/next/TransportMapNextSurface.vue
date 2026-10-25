@@ -83,6 +83,7 @@ const props = defineProps<{
   renderer: TransportMapRenderer;
   camera: CameraState;
   nearbyPlaces?: readonly NearbyPlace[];
+  nearbyPlacesCommerceOnly?: boolean;
   realEstateCells?: readonly DvfMapGridCell[];
   realEstateMetricRange?: DvfMapMetricRange;
   realEstateMetricMode?: DvfMapMetricMode;
@@ -275,7 +276,7 @@ watch(realEstateTransitionDurationMs, (duration) => {
 // This computed never reads camera: panning neither prepares POIs nor updates
 // Deck data/accessors. The presenter retains the same layer and GPU buffers.
 const nearbyPlaceLayers = computed(() => {
-  const data = prepareDeckNearbyPlaces(props.nearbyPlaces ?? []);
+  const data = prepareDeckNearbyPlaces(props.nearbyPlaces ?? [], props.nearbyPlacesCommerceOnly);
   return data.length ? [createDeckNearbyPlacesLayer(data)] : [];
 });
 watch(nearbyPlaceLayers, layers => presenter?.setNearbyPlaceLayers(layers));

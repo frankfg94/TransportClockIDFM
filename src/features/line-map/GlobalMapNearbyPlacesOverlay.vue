@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { useI18n } from "../../i18n";
 import { useNearbyPlacePresenter } from "../nearby-stations/useNearbyPlacePresenter";
-import { isNearbyPlaceVisibleForGlobalLine, nearbyPlaceWalkingMinutes } from "../nearby-stations/nearbyPlacePresentation";
+import { isNearbyPlaceCommerce, isNearbyPlaceVisibleForGlobalLine, nearbyPlaceWalkingMinutes } from "../nearby-stations/nearbyPlacePresentation";
 import type { NearbyPlace } from "../nearby-stations/nearbyPlaces";
 import type { CameraState } from "../transport-map/geo/camera";
 import { lonLatToWorld, worldToScreen } from "../transport-map/geo/coordinateKernel";
@@ -12,6 +12,7 @@ const props = defineProps<{
   places: readonly NearbyPlace[];
   camera: CameraState;
   gpu?: boolean;
+  commerceOnly?: boolean;
   pickPlace?: (x: number, y: number) => NearbyPlace | undefined;
 }>();
 
@@ -20,7 +21,7 @@ const { t } = useI18n();
 const { presentPlace } = useNearbyPlacePresenter();
 
 const eligiblePlaces = computed(() => props.places
-  .filter(isNearbyPlaceVisibleForGlobalLine)
+  .filter(props.commerceOnly ? isNearbyPlaceCommerce : isNearbyPlaceVisibleForGlobalLine)
   .filter((place) => Number.isFinite(place.lon) && Number.isFinite(place.lat)));
 const preparedPlaces = computed(() => props.gpu ? [] : eligiblePlaces.value
   .map((place) => {
@@ -96,6 +97,8 @@ defineExpose({ onPointerMove, clearHover });
     v-if="eligiblePlaces.length"
     class="global-map-nearby-places-overlay"
     data-testid="global-map-nearby-places"
+    :data-place-count="eligiblePlaces.length"
+    :data-max-distance-meters="eligiblePlaces.reduce((maximum, place) => Math.max(maximum, place.distanceMeters), 0)"
     role="group"
     :aria-label="t('globalMap.sidebar.nearbyPlaces')"
   >

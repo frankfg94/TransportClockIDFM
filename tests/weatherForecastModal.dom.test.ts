@@ -6,6 +6,7 @@ import type { AppSettings } from "../src/features/app-settings/appSettings";
 import type { WeatherResponse } from "../src/features/weather/types";
 
 const baseSettings: AppSettings = {
+  verdictPersonalJourneys: [],
   version: 2,
   networkConcurrencyMode: "auto",
   language: "fr",

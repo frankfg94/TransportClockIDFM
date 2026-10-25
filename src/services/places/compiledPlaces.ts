@@ -81,6 +81,12 @@ export const OSM_PRESERVED_TAG_KEYS = new Set([
   "healthcare:speciality",
   "cuisine",
   "website",
+  "contact:website",
+  "email",
+  "contact:email",
+  "phone",
+  "contact:phone",
+  "brand:wikidata",
   "opening_hours",
   "wheelchair",
 ]);

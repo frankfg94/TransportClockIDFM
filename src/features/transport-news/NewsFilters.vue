@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from "vue";
+import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import { useI18n } from "../../i18n";
 import {
   NEWS_MODES,
@@ -13,6 +15,7 @@ export interface NewsFilterValues {
   topic: string;
   sourceId: string;
   lineKey: string;
+  period: string;
 }
 const props = defineProps<{
   modelValue: NewsFilterValues;
@@ -22,12 +25,29 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ "update:modelValue": [value: NewsFilterValues] }>();
 const { t } = useI18n();
-function update(key: keyof NewsFilterValues, event: Event) {
+function update(key: keyof NewsFilterValues, value: string) {
   emit("update:modelValue", {
     ...props.modelValue,
-    [key]: (event.target as HTMLInputElement).value,
+    [key]: value,
   });
 }
+const filters = computed(() => [
+  { key: "period" as const, label: t("news.period"), options: [
+    { id: "30", label: t("news.last30Days") }, { id: "90", label: t("news.last90Days") }, { id: "all", label: t("news.allDates") },
+  ] },
+  { key: "mode" as const, label: t("news.mode"), options: [
+    { id: "", label: t("news.allModes") }, ...NEWS_MODES.filter(mode => props.preferences.modes.includes(mode)).map(mode => ({ id: mode, label: t(`news.modes.${mode}`) })),
+  ] },
+  { key: "lineKey" as const, label: t("news.line"), options: [
+    { id: "", label: t("news.allLines") }, ...props.lines.map(line => ({ id: `${line.mode}:${line.code}`, label: `${t(`news.modes.${line.mode}`)} ${line.code}` })),
+  ] },
+  { key: "topic" as const, label: t("news.topic"), options: [
+    { id: "", label: t("news.allTopics") }, ...NEWS_TOPICS.filter(topic => props.preferences.topics.includes(topic)).map(topic => ({ id: topic, label: t(`news.topics.${topic}`) })),
+  ] },
+  { key: "sourceId" as const, label: t("news.source"), options: [
+    { id: "", label: t("news.allSources") }, ...props.sources.filter(source => !props.preferences.disabledSources.includes(source.id)).map(source => ({ id: source.id, label: source.name })),
+  ] },
+]);
 </script>
 <template>
   <div class="news-filters">
@@ -37,62 +57,19 @@ function update(key: keyof NewsFilterValues, event: Event) {
         type="search"
         :value="modelValue.query"
         :placeholder="t('news.searchPlaceholder')"
-        @input="update('query', $event)"
+        @input="update('query', ($event.target as HTMLInputElement).value)"
     /></label>
-    <label
-      ><span>{{ t("news.mode") }}</span
-      ><select :value="modelValue.mode" @change="update('mode', $event)">
-        <option value="">{{ t("news.allModes") }}</option>
-        <option
-          v-for="mode in NEWS_MODES.filter((mode) => preferences.modes.includes(mode))"
-          :key="mode"
-          :value="mode"
-        >
-          {{ t(`news.modes.${mode}`) }}
-        </option>
-      </select></label
-    >
-    <label
-      ><span>{{ t("news.line") }}</span
-      ><select :value="modelValue.lineKey" @change="update('lineKey', $event)">
-        <option value="">{{ t("news.allLines") }}</option>
-        <option
-          v-for="line in lines"
-          :key="`${line.mode}:${line.code}`"
-          :value="`${line.mode}:${line.code}`"
-        >
-          {{ t(`news.modes.${line.mode}`) }} {{ line.code }}
-        </option>
-      </select></label
-    >
-    <label
-      ><span>{{ t("news.topic") }}</span
-      ><select :value="modelValue.topic" @change="update('topic', $event)">
-        <option value="">{{ t("news.allTopics") }}</option>
-        <option
-          v-for="topic in NEWS_TOPICS.filter((topic) => preferences.topics.includes(topic))"
-          :key="topic"
-          :value="topic"
-        >
-          {{ t(`news.topics.${topic}`) }}
-        </option>
-      </select></label
-    >
-    <label
-      ><span>{{ t("news.source") }}</span
-      ><select :value="modelValue.sourceId" @change="update('sourceId', $event)">
-        <option value="">{{ t("news.allSources") }}</option>
-        <option
-          v-for="source in sources.filter(
-            (source) => !preferences.disabledSources.includes(source.id),
-          )"
-          :key="source.id"
-          :value="source.id"
-        >
-          {{ source.name }}
-        </option>
-      </select></label
-    >
+    <label v-for="filter in filters" :key="filter.key">
+      <span>{{ filter.label }}</span>
+      <MaterialCombobox
+        :model-value="modelValue[filter.key]"
+        :options="filter.options"
+        :aria-label="filter.label"
+        :data-news-filter="filter.key"
+        teleport
+        @update:model-value="update(filter.key, $event)"
+      />
+    </label>
   </div>
 </template>
 <style scoped>
@@ -112,8 +89,7 @@ function update(key: keyof NewsFilterValues, event: Event) {
 .news-filters__search {
   grid-column: 1/-1;
 }
-.news-filters input,
-.news-filters select {
+.news-filters input {
   width: 100%;
   min-width: 0;
   height: var(--control-height);

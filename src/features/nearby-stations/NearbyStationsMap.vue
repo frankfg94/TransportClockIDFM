@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useSlots, watch } from "vue";
 import { Activity, BusFront, Check, ChevronRight, Download, Ear, EllipsisVertical, Euro, ExternalLink, Footprints, Gauge, Layers, LoaderCircle, Map as MapIcon, MapPin, Maximize2, Minimize2, Minus, Navigation, Plus, Radar, Route, Satellite, Store, TrainFront, TramFront, Wind, ZoomIn, ZoomOut, X } from "lucide-vue-next";
-import AppRightPanel from "../../components/AppRightPanel.vue";
+import DraggableBottomSheet from "../../components/DraggableBottomSheet.vue";
 import AppModal from "../../components/AppModal.vue";
 import ContextMenu from "../../components/ContextMenu.vue";
 import LineIconBadge from "../../components/LineIconBadge.vue";
@@ -63,6 +63,8 @@ import { nearbyMapZoomPercent } from "./nearbyMapZoom";
 import { NearbyIsochronesError } from "../../services/nearbyIsochrones";
 import type { NearbyJourneyPoint } from "./nearbyHeavyTransports";
 import type { NearbyWalkingRoute } from "./nearbyWalkingRoutes";
+import { fitNearbyPlaceRoute } from "./nearbyPlaceFocus";
+import NearbyPlaceDetails from "./NearbyPlaceDetails.vue";
 import IrisNeighborhoodOverlay from "../transport-map/overlays/IrisNeighborhoodOverlay.vue";
 import { fetchIrisDataset, type IrisAirNoiseStatistics, type IrisDataset, type IrisNeighborhood } from "../transport-map/iris/irisApi";
 import { fetchNeighborhoodVerdict } from "./neighborhoodVerdictApi";
@@ -318,6 +320,10 @@ const emit = defineEmits<{
 const { n, t } = useI18n();
 const slots = useSlots();
 const isPlacesPreview = computed(() => props.variant === "places-preview");
+const selectedMapPlace = computed(() => props.selectedPlaceId
+  ? props.places?.find(place => place.id === props.selectedPlaceId)
+    ?? props.cityViewPlaces?.find(place => place.id === props.selectedPlaceId)
+  : undefined);
 const canInteractWithMap = computed(() => !isPlacesPreview.value || props.allowZoom === true);
 const moveOriginContextMenuOpen = ref(false);
 const moveOriginContextMenuPoint = ref<{ x: number; y: number }>();
@@ -1913,7 +1919,7 @@ const circleDiameter = computed(() => {
   return Math.abs(worldToScreen(east, camera.value).x - worldToScreen(center, camera.value).x) * 2;
 });
 const walkingMapPaths = computed(() => {
-  if (cityViewEnabled.value || summaryLineHoverActive.value || (isPlacesPreview.value && !props.walkingRoute)) return [];
+  if ((!selectedMapPlace.value && (cityViewEnabled.value || summaryLineHoverActive.value)) || (isPlacesPreview.value && !props.walkingRoute)) return [];
   const width = camera.value.viewportWidthCssPx;
   const height = camera.value.viewportHeightCssPx;
   const segments: NearbyWalkingMapSegment[] = [
@@ -2281,7 +2287,7 @@ watch(
     void nextTick(() => {
       if (isMapOriginMove) return;
       fitView(!isPlacesPreview.value);
-      if (isPlacesPreview.value && props.selectedPlaceId) focusSelectedPlace(true);
+      if (props.selectedPlaceId) focusSelectedPlace(true);
     });
   },
 );
@@ -2332,16 +2338,19 @@ watch(
     if (!wasSuspended) return;
     void nextTick(() => {
       fitView(false);
-      if (isPlacesPreview.value && props.selectedPlaceId) focusSelectedPlace(false);
+      if (props.selectedPlaceId) focusSelectedPlace(false);
       void nextTick(containGhostFlowTooltips);
     });
   },
 );
 
 watch(
-  () => props.selectedPlaceId,
-  (placeId) => {
-    if (!isPlacesPreview.value) return;
+  () => [props.selectedPlaceId, props.walkingRoute] as const,
+  ([placeId]) => {
+    if (placeId) {
+      clearStationFocus();
+      clearSummaryLineHover();
+    }
     void nextTick(() => placeId ? focusSelectedPlace(true) : fitView(true));
   },
 );
@@ -2612,12 +2621,12 @@ onMounted(() => {
       return;
     }
     fitView(false);
-    if (isPlacesPreview.value && props.selectedPlaceId) focusSelectedPlace(false);
+    if (props.selectedPlaceId) focusSelectedPlace(false);
     void nextTick(containGhostFlowTooltips);
   });
   if (root.value) resizeObserver.observe(root.value);
   fitView(false);
-  if (isPlacesPreview.value && props.selectedPlaceId) focusSelectedPlace(false);
+  if (props.selectedPlaceId) focusSelectedPlace(false);
   void nextTick(containGhostFlowTooltips);
   if (!isPlacesPreview.value) {
     // Warm the shared IRIS promise after the initial map paint so the first
@@ -3026,17 +3035,12 @@ function schedulePreviewResize(): void {
 }
 
 function focusSelectedPlace(animate: boolean): void {
-  const place = (props.places ?? []).find((entry) => entry.id === props.selectedPlaceId);
+  const place = selectedMapPlace.value;
   if (!place) {
     fitView(animate);
     return;
   }
-  const center = lonLatToWorld(place);
-  const target = updateCamera(camera.value, {
-    centerWorldX: center.x,
-    centerWorldY: center.y,
-    zoom: clamp(zoomReference.value + 1, zoomRange.value.min, zoomRange.value.max),
-  });
+  const target = fitNearbyPlaceRoute(resizeNearbyCamera(camera.value) ?? camera.value, props.origin, place, props.walkingRoute);
   if (!animate || reducedMotion.value) camera.value = target;
   else animateCamera(target, { duration: 480, easing: easeInOutCubic });
 }
@@ -3172,6 +3176,7 @@ function syncFullscreenState(): void {
   setFullscreenState(document.fullscreenElement === shell.value);
   void nextTick(() => {
     fitView(false);
+    if (props.selectedPlaceId) focusSelectedPlace(false);
     containGhostFlowTooltips();
   });
 }
@@ -4157,6 +4162,7 @@ function pinStation(stationId: string): void {
 }
 
 function focusStation(stationId: string, lineId?: string): void {
+  if (props.selectedPlaceId) emit("selectPlace", undefined);
   pinnedStationId.value = stationId;
   hoveredStationId.value = undefined;
   stationHoveredLineId.value = undefined;
@@ -5072,6 +5078,7 @@ function mix(from: number, to: number, progress: number): number {
     :class="{
       'nearby-map-shell--resizing': sidebarResizeActive,
       'nearby-map-shell--places-preview': isPlacesPreview,
+      'nearby-map-shell--place-selected': Boolean(selectedMapPlace),
       'nearby-map-shell--city-view': cityViewEnabled,
       'nearby-map-shell--environment-active': cityViewEnabled && (noiseZonesEnabled || airQualityZonesEnabled),
     }"
@@ -5421,7 +5428,7 @@ function mix(from: number, to: number, progress: number): number {
         </div>
       </div>
       <NearbyLineHoverCard
-        v-if="!cityViewEnabled && !lineFrequencyCardSuppressed && lineHoverCardLine"
+        v-if="!selectedMapPlace && !cityViewEnabled && !lineFrequencyCardSuppressed && lineHoverCardLine"
         :line="lineBadge(lineHoverCardLine)"
         :profile="summaryLineFrequencyProfile"
         :loading="summaryLineFrequencyLoading"
@@ -5492,16 +5499,14 @@ function mix(from: number, to: number, progress: number): number {
         />
       </aside>
       <Teleport v-if="cityViewEnabled && isMobileDisplaySheet" to="body" :disabled="isFullscreen">
-        <AppRightPanel
+        <DraggableBottomSheet
           :open="cityViewRealEstatePanelOpen"
           :title="t('nearbyStations.realEstate.panelTitle')"
-          size="medium"
-          :mobile-sheet="true"
-          :mobile-sheet-stage="cityViewRealEstatePanelStage"
-          :mobile-sheet-resize-label="t('nearbyStations.realEstate.panelResize')"
+          :stage="cityViewRealEstatePanelStage"
+          :resize-label="t('nearbyStations.realEstate.panelResize')"
           :close-label="t('nearbyStations.realEstate.closePanel')"
           @close="cityViewRealEstatePanelOpen = false"
-          @mobile-sheet-stage-change="cityViewRealEstatePanelStage = $event"
+          @update:stage="cityViewRealEstatePanelStage = $event"
         >
           <div id="nearby-map-real-estate-panel-content" class="nearby-map__real-estate-sheet-content">
             <NearbyRealEstateControls
@@ -5515,7 +5520,7 @@ function mix(from: number, to: number, progress: number): number {
               @toggle-layer="toggleCityRealEstateLayer"
             />
           </div>
-        </AppRightPanel>
+        </DraggableBottomSheet>
       </Teleport>
       <NearbyCityComparisonModal
         v-if="cityViewComparisonCurrent && cityViewComparisonTarget"
@@ -5733,17 +5738,15 @@ function mix(from: number, to: number, progress: number): number {
         @retry="retryIsochronesFromConfigurationModal"
       />
       <Teleport :disabled="!isMobileDisplaySheet || isFullscreen" to="body">
-        <AppRightPanel
+        <DraggableBottomSheet
           v-if="isMobileDisplaySheet"
           :open="displayControlsOpen && hasMobileMapMenuContent"
           :title="t('nearbyStations.mapControlsTitle')"
           :close-label="t('nearbyStations.mapControlsClose')"
-          size="large"
-          mobile-sheet
-          :mobile-sheet-stage="mobileControlsSheetStage"
-          :mobile-sheet-resize-label="t('nearbyStations.mapControlsResize')"
+          :stage="mobileControlsSheetStage"
+          :resize-label="t('nearbyStations.mapControlsResize')"
           @close="closeDisplayControls"
-          @mobile-sheet-stage-change="mobileControlsSheetStage = $event"
+          @update:stage="mobileControlsSheetStage = $event"
         >
           <div id="nearby-map-mobile-controls" class="nearby-map__mobile-menu" @click.stop>
             <div class="nearby-map__mobile-action-grid" role="group" :aria-label="t('nearbyStations.mapControlsTitle')">
@@ -5990,7 +5993,7 @@ function mix(from: number, to: number, progress: number): number {
               </details>
             </div>
           </div>
-        </AppRightPanel>
+        </DraggableBottomSheet>
         <Transition name="nearby-map-display-sheet">
           <div
             v-if="!isMobileDisplaySheet && displayControlsOpen && props.showDisplayControl && !cityViewEnabled"
@@ -6017,16 +6020,6 @@ function mix(from: number, to: number, progress: number): number {
             @pointerdown.stop
             @keydown.esc.stop="closeDisplayControls"
           >
-            <button
-              class="nearby-map__display-sheet-handle"
-              type="button"
-              :aria-label="t('nearbyStations.displayFiltersClose')"
-              data-nearby-map-display-sheet-handle
-              @click.stop="closeDisplayControls"
-              @pointerdown.stop
-            >
-              <span aria-hidden="true"></span>
-            </button>
             <header class="nearby-map__display-panel-header">
               <span id="nearby-map-display-controls-title"><Layers :size="16" aria-hidden="true" />{{ t('lineMap.picker.display') }}</span>
               <button
@@ -6743,7 +6736,9 @@ function mix(from: number, to: number, progress: number): number {
       <span aria-hidden="true" />
     </div>
 
-    <aside v-if="!isPlacesPreview && !cityViewEnabled" class="nearby-map__sidebar" :aria-label="t('nearbyStations.stationDetailsAria')">
+    <aside v-if="!isPlacesPreview && (!cityViewEnabled || selectedMapPlace)" class="nearby-map__sidebar" :aria-label="t(selectedMapPlace ? 'nearbyStations.placeDetails.title' : 'nearbyStations.stationDetailsAria')">
+      <NearbyPlaceDetails v-if="selectedMapPlace" class="nearby-map__place-details" :place="selectedMapPlace" :route="walkingRoute" @close="emit('selectPlace', undefined)" />
+      <template v-else>
       <div v-if="$slots['sidebar-actions']" class="nearby-map__sidebar-toolbar">
         <button
           ref="sidebarActionButton"
@@ -6918,6 +6913,7 @@ function mix(from: number, to: number, progress: number): number {
         </div>
       </div>
       <slot name="city-pattern" />
+      </template>
     </aside>
     <slot v-if="!isPlacesPreview && !cityViewEnabled" name="line-trace-modal" />
     <slot v-if="!isPlacesPreview && !cityViewEnabled" name="traffic-modal" />
@@ -6989,6 +6985,14 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__walking-flow { height: 100%; inset: 0; overflow: visible; pointer-events: none; position: absolute; width: 100%; z-index: 3; }
 .nearby-map__walking-flow-halo { display: none; fill: none; stroke: rgba(255,255,255,.98); stroke-dasharray: 2 8; stroke-linecap: round; stroke-linejoin: round; stroke-width: 10; filter: drop-shadow(0 0 4px rgba(255,255,255,.95)) drop-shadow(0 0 7px rgba(81,70,255,.75)); }
 .nearby-map__walking-flow-path { fill: none; stroke: #5146ff; stroke-dasharray: 2 8; stroke-linecap: round; stroke-width: 3; }
+.nearby-map-shell--places-preview .nearby-map__walking-flow-halo { display: block; stroke-dasharray: none; filter: none; stroke-width: 8; }
+.nearby-map-shell--places-preview .nearby-map__walking-flow { z-index: 7; }
+.nearby-map-shell--places-preview .nearby-map__origin { z-index: 8; }
+.nearby-map-shell--places-preview .nearby-map__walking-flow-path { stroke-width: 4; }
+.nearby-map-shell--place-selected .nearby-map__walking-flow { z-index: 9; }
+.nearby-map-shell--place-selected .nearby-map__walking-flow-halo { display: block; stroke-dasharray: none; filter: none; stroke-width: 8; }
+.nearby-map-shell--place-selected .nearby-map__origin { z-index: 10; }
+.nearby-map__place-details { max-height: 100%; position: static; }
 .nearby-map__walking-flow-node { fill: #fff; stroke: #5146ff; stroke-width: 2; }
 .nearby-map--satellite .nearby-map__walking-flow-halo { display: block; }
 .nearby-map--satellite .nearby-map__walking-flow-path { filter: drop-shadow(0 0 2px rgba(255,255,255,.98)); stroke: #5146ff; stroke-width: 4; }
@@ -7130,7 +7134,7 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__display-panel { background: #fff; border: 1px solid rgba(100, 116, 139, .24); border-radius: 14px; box-shadow: 0 8px 24px rgba(15, 23, 42, .18); overflow: hidden; pointer-events: auto; position: absolute; right: 12px; top: 58px; width: min(270px, calc(100% - 24px)); z-index: 9002; }
 .nearby-map__display-panel-header { align-items: center; border-bottom: 1px solid rgba(100, 116, 139, .16); color: #18233f; display: flex; font-size: .76rem; font-weight: 850; justify-content: space-between; min-height: 38px; padding: 8px 11px; }
 .nearby-map__display-panel-header span { align-items: center; display: inline-flex; gap: 7px; }
-.nearby-map__display-panel-close, .nearby-map__display-sheet-handle { display: none; }
+.nearby-map__display-panel-close { display: none; }
 .nearby-map__display-panel-scroll { min-width: 0; }
 .nearby-map__mobile-menu { min-width: 0; padding-bottom: max(14px, env(safe-area-inset-bottom)); }
 .nearby-map__mobile-action-grid { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px 14px; }
@@ -7389,9 +7393,6 @@ function mix(from: number, to: number, progress: number): number {
   .nearby-map-display-sheet-enter-from .nearby-map__display-panel-backdrop, .nearby-map-display-sheet-leave-to .nearby-map__display-panel-backdrop { opacity: 0; }
   .nearby-map__display-panel-backdrop { background: transparent; border: 0; display: block; inset: 0; padding: 0; pointer-events: none; position: absolute; width: 100%; z-index: 0; }
   .nearby-map__display-panel { border: 0; border-radius: 22px 22px 0 0; bottom: 0; box-shadow: 0 -20px 48px rgba(15, 23, 42, .25); display: grid; grid-template-rows: auto auto minmax(0, 1fr); left: 0; max-height: min(82dvh, 620px); pointer-events: auto; right: 0; top: auto; width: 100%; }
-  .nearby-map__display-sheet-handle { align-items: center; appearance: none; background: #fff; border: 0; display: flex; flex: 0 0 27px; justify-content: center; padding: 0; touch-action: none; width: 100%; }
-  .nearby-map__display-sheet-handle span { background: rgba(100, 116, 139, .42); border-radius: 999px; display: block; height: 5px; width: 46px; }
-  .nearby-map__display-sheet-handle:focus-visible { outline: 2px solid #5146ff; outline-offset: -3px; }
   .nearby-map__display-panel-header { min-height: 50px; padding: 7px 14px 9px 18px; }
   .nearby-map__display-panel-header > span { font-size: .84rem; }
   .nearby-map__display-panel-close { align-items: center; background: #f5f7fb; border: 1px solid rgba(100, 116, 139, .2); border-radius: 50%; color: #334155; display: inline-flex; flex: 0 0 34px; height: 34px; justify-content: center; padding: 0; width: 34px; }
@@ -7459,6 +7460,10 @@ function mix(from: number, to: number, progress: number): number {
   .nearby-map-shell.nearby-map-shell--city-view:fullscreen {
     grid-template-columns: minmax(0, 1fr) 0px minmax(0, 0px);
   }
+  .nearby-map-shell.nearby-map-shell--city-view.nearby-map-shell--place-selected {
+    grid-template-columns: minmax(0, 1fr) 12px minmax(0, var(--nearby-sidebar-width));
+  }
+  .nearby-map-shell--place-selected:not(.nearby-map-shell--places-preview) { transition: none; }
   .nearby-map__sidebar { grid-column: 3; }
 }
 .nearby-map__sidebar { animation: nearby-sidebar-reveal 420ms ease both; }

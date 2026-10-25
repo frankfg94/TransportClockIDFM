@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import AppModal from "../../components/AppModal.vue";
-import AppRightPanel from "../../components/AppRightPanel.vue";
+import ResponsiveSidePanel from "../../components/ResponsiveSidePanel.vue";
 import LoadingClock, { type LoadingClockDirection } from "../../components/LoadingClock.vue";
 import { useI18n } from "../../i18n";
 import type { TrafficDisruption } from "../traffic";
@@ -51,7 +51,7 @@ const { t } = useI18n();
 </script>
 
 <template>
-  <AppRightPanel
+  <ResponsiveSidePanel
     :open="open && !expanded"
     :title="t('pattern.trafficCalendarTitle')"
     size="large"
@@ -77,7 +77,7 @@ const { t } = useI18n();
       @expand="emit('expand')"
       @focus-disruption="emit('focusDisruption', $event)"
     />
-  </AppRightPanel>
+  </ResponsiveSidePanel>
 
   <AppModal
     :open="open && expanded"

@@ -94,6 +94,24 @@ beforeEach(() => {
 });
 
 describe("NearbyNeighborhoodScorePage", () => {
+  it("preserves the exact Fontenay reproduction coordinates and requests the complete benchmark catalogue", () => {
+    const url = new URL("http://localhost/nearby-neighborhood-score?lat=48.793710645211405&lon=2.28830452778152&address=48.79371,+2.28830&city=Fontenay-aux-Roses");
+    mocks.routeState.query = Object.fromEntries(url.searchParams);
+    mocks.useNearbyStations.mockReturnValue(mocks.nearby);
+    mocks.useNearbyHeavyTransports.mockReturnValue(mocks.heavy);
+    mocks.useNearbyNeighborhoodScore.mockReturnValue(mocks.score);
+    const wrapper = mount(NearbyNeighborhoodScorePage, { global: { stubs: {
+      NuxtLink: true, NearbyNeighborhoodScoreCard: true, NearbyRealEstateVerdict: true,
+    } } });
+    expect(mocks.useNearbyStations).toHaveBeenCalledWith(expect.objectContaining({ stationCatalog: "full",
+      initialDraft: expect.objectContaining({ selectedPlace: expect.objectContaining({
+        lat: 48.793710645211405, lon: 2.28830452778152, label: "48.79371, 2.28830", city: "Fontenay-aux-Roses",
+      }) }) }));
+    expect(mocks.useNearbyNeighborhoodScore).toHaveBeenCalledWith(expect.objectContaining({ journeySource: "gtfs",
+      journeyProbe: expect.objectContaining({ probeJourneys: expect.any(Function) }) }));
+    wrapper.unmount();
+  });
+
   it("passes the active transport tasks to the score card instead of rendering them above it", () => {
     mocks.routeState.query = { lat: "48.764151", lon: "2.267785" };
     mocks.useNearbyStations.mockReturnValue(mocks.nearby);
@@ -121,7 +139,7 @@ describe("NearbyNeighborhoodScorePage", () => {
     if (flag === "1") {
       const diagnostic = JSON.parse(wrapper.get('[data-testid="verdict-debug"]').text());
       expect(diagnostic.origin).toEqual(mocks.nearby.selectedPlace.value);
-      expect(diagnostic.loading.page).toBe(false);
+      expect(diagnostic.loading.page).toBe(true); // Personal address hydration is still pending on initial mount.
       expect(diagnostic.diagnostics).toEqual(mocks.score.diagnostics.value);
       expect(diagnostic).not.toHaveProperty("runtimeConfig");
     }

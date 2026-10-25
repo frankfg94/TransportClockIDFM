@@ -4,7 +4,11 @@ import { ref } from "vue";
 import LineOptimizerPage from "../src/features/line-optimizer/LineOptimizerPage.vue";
 import { resolveLineOptimizerConfig } from "../src/features/line-optimizer/optimizerConfig";
 import type { LineOptimizerCandidate } from "../src/features/line-optimizer/lineOptimizer";
-import { DEFAULT_OPTIMIZER_SETTINGS } from "../src/features/line-optimizer/lineOptimizer";
+import {
+  DEFAULT_OPTIMIZER_SETTINGS,
+  enumerateOptimizerCandidates,
+} from "../src/features/line-optimizer/lineOptimizer";
+import type { TravelRoute } from "../src/features/nearby-stations/useTravelRoutes";
 import { translate } from "../src/i18n/i18n";
 
 const mocks = vi.hoisted(() => ({
@@ -33,7 +37,8 @@ vi.mock("../src/i18n", () => ({
   useI18n: () => ({
     t: (key: Parameters<typeof translate>[1], params?: Parameters<typeof translate>[2]) =>
       translate("fr", key, params),
-    d: (date: Date) => date.toLocaleTimeString("fr-FR"),
+    d: (date: Date, options?: Intl.DateTimeFormatOptions) =>
+      date.toLocaleTimeString("fr-FR", options),
     n: (value: number) => String(value),
   }),
 }));
@@ -43,6 +48,92 @@ afterEach(() => {
   mocks.winner = undefined;
 });
 describe("standalone optimizer page", () => {
+  it.each([0, 120])(
+    "renders separate T10 platform steps with %i seconds waiting",
+    (waitSeconds) => {
+      const base = Date.parse("2026-10-22T08:00:00Z");
+      const at = (seconds: number) => base + seconds * 1000;
+      const sections = [
+        {
+          type: "public_transport",
+          durationSeconds: 300,
+          lineCode: "T6",
+          lineMode: "TRAM" as const,
+          fromName: "Parc André Malraux",
+          toName: "La Vallée",
+        },
+        { type: "transfer", durationSeconds: 120 },
+        {
+          type: "public_transport",
+          durationSeconds: 600,
+          lineCode: "T10",
+          lineMode: "TRAM" as const,
+          fromName: "La Vallée",
+          toName: "La Croix de Berny",
+        },
+        { type: "transfer", durationSeconds: 180 },
+        {
+          type: "public_transport",
+          durationSeconds: 1500,
+          lineCode: "B",
+          lineMode: "RER" as const,
+          fromName: "La Croix de Berny",
+          toName: "Châtelet les Halles",
+        },
+      ];
+      const route: TravelRoute = {
+        id: "t10",
+        sections,
+        transitSections: sections.filter((s) => s.lineMode),
+        durationSeconds: 2700,
+      };
+      const course = (id: string, departure: number, arrival: number) => ({
+        id,
+        departure: at(departure),
+        arrival: at(arrival),
+        baseDeparture: at(departure),
+        baseArrival: at(arrival),
+        source: "schedule" as const,
+      });
+      mocks.winner = enumerateOptimizerCandidates(
+        route,
+        [
+          [course("feeder", 300, 600)],
+          [course("tram", 720 + waitSeconds, 1320 + waitSeconds)],
+          [course("rer", 1800 + waitSeconds, 3300 + waitSeconds)],
+        ],
+        { ...DEFAULT_OPTIMIZER_SETTINGS },
+        base,
+        resolveLineOptimizerConfig("tram", "T10")!,
+      )[0]!;
+      const wrapper = mount(LineOptimizerPage, {
+        props: { config: resolveLineOptimizerConfig("tram", "T10")! },
+        global: { stubs: { AdressBook: true } },
+      });
+      const walk = wrapper.get('[data-connection-kind="walk"][data-course-index="1"]');
+      expect(walk.get("strong").text()).toBe("10:10");
+      expect(walk.get("span").text()).toBe("Rejoindre le quai à La Vallée");
+      expect(walk.get("small").text()).toBe("2 min");
+      const wait = wrapper.find('[data-connection-kind="wait"][data-course-index="1"]');
+      expect(wait.exists()).toBe(waitSeconds > 0);
+      if (waitSeconds > 0) {
+        expect(wait.get("strong").text()).toBe("10:12");
+        expect(wait.text()).toContain("2 min d’attente avant ce transport");
+        expect(wait.get("small").text()).toBe("La Vallée");
+      }
+      expect(wrapper.find('[data-connection-kind="wait"][data-course-index="0"]').exists()).toBe(
+        false,
+      );
+      const rerWalk = wrapper.get('[data-connection-kind="walk"][data-course-index="2"]');
+      expect(rerWalk.get("small").text()).toBe("3 min");
+      const rerWait = wrapper.get('[data-connection-kind="wait"][data-course-index="2"]');
+      expect(rerWait.text()).toContain("5 min d’attente avant ce transport");
+      expect(
+        wrapper.findAll(".line-optimizer__totals strong").map((total) => total.text()),
+      ).toEqual([`${52.5 + waitSeconds / 60} min`, `${5 + waitSeconds / 60} min`]);
+      wrapper.unmount();
+    },
+  );
   it("renders translated labels and the user's timing defaults", async () => {
     const wrapper = mount(LineOptimizerPage, {
       props: { config: resolveLineOptimizerConfig("tram", "T10")! },

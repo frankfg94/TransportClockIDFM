@@ -68,8 +68,26 @@ export function buildVerdictTransportIntegrity(snapshot: Snapshot, tasks: readon
   const benchmarks = snapshot.diagnostics?.benchmarks ?? [];
   const missingBenchmarks = benchmarks.filter((benchmark: Snapshot) => benchmark.status !== "loading" && !benchmark.journeys?.length)
     .map((benchmark: Snapshot) => ({ id: benchmark.id, status: benchmark.status }));
+  const heavyRuns = tasks.filter(task => task.system === "heavy-transports" && task.task === "resolve");
+  const initialCompleted = heavyRuns.some(task => task.details?.phase === "initial" && task.status === "ready");
+  const currentHeavyRun = heavyRuns.at(-1);
+  const refreshInProgress = Boolean(snapshot.loading?.heavy && initialCompleted && currentHeavyRun?.details?.phase === "refresh");
   const loading = snapshot.loading?.heavy || snapshot.loading?.stations || snapshot.loading?.serviceQuality
     || (snapshot.performance?.transitions?.at(-1)?.transportPending?.length ?? 0) > 0;
+  const phases = [...new Set(matrices.map((step: Snapshot) => step.details?.phase ?? "unclassified"))].map(phase => {
+    const steps = matrices.filter((step: Snapshot) => (step.details?.phase ?? "unclassified") === phase);
+    const requests = new Map(steps.flatMap((step: Snapshot) => (step.details?.proxyRequests ?? []).map((request: Snapshot) => [request.requestId, request])));
+    return { phase, consultations: steps.length,
+      pairUsages: steps.reduce((sum: number, step: Snapshot) => sum + Number(step.details?.destinations ?? 0), 0),
+      uniquePairs: steps.every((step: Snapshot) => Array.isArray(step.details?.pairIds))
+        ? new Set(steps.flatMap((step: Snapshot) => step.details.pairIds)).size : undefined,
+      proxyHttpRequests: steps.every((step: Snapshot) => Array.isArray(step.details?.proxyRequests)) ? requests.size : undefined,
+      proxyFailures: [...requests.values()].filter((request: any) => request.cause !== "success"),
+      // These reference upstream work, including server cache hits, not new HTTP requests.
+      providerResponses: [...new Map(steps.flatMap((step: Snapshot) => (step.details?.providerResponses ?? [])
+        .map((response: Snapshot) => [JSON.stringify([response.requestId, response.cacheState, response.cause, response.observedAt]), response]))).values()],
+      estimatedPairUsages: steps.reduce((sum: number, step: Snapshot) => sum + Number(step.details?.estimated ?? 0), 0) };
+  });
   const issues = [
     ...(degradedMatrices.length ? [{ code: "estimated-transport-walking", matrices: degradedMatrices.length,
       estimatedPairs: degradedMatrices.reduce((count: number, step: Snapshot) => count + Number(step.details?.estimated ?? 0), 0),
@@ -79,6 +97,9 @@ export function buildVerdictTransportIntegrity(snapshot: Snapshot, tasks: readon
     ...(missingBenchmarks.length ? [{ code: "missing-benchmark-journeys", destinations: missingBenchmarks }] : []),
   ];
   return { status: loading ? "loading" as const : issues.length ? "degraded" as const : "complete" as const,
+    calculation: { initialCompleted, initialInProgress: Boolean(snapshot.loading?.heavy && !initialCompleted),
+      refreshInProgress, reason: currentHeavyRun?.details?.reason, phase: currentHeavyRun?.details?.phase },
+    walkingVolumes: { semantics: "consultations and pair usages are cumulative; unique IDs deduplicate within each phase", phases },
     comparison: "not-compared", issues,
     counts: { benchmarks: benchmarks.length, readyBenchmarks: benchmarks.filter((benchmark: Snapshot) => Boolean(benchmark.journeys?.length)).length,
       heavyStations: snapshot.heavyCandidates?.length ?? 0, frequencies: snapshot.diagnostics?.frequencies?.length ?? 0,

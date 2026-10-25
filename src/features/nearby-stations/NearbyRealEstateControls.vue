@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import { computed } from "vue";
 import {
   DVF_MARKET_SCOPES,
@@ -38,12 +39,12 @@ function scopeLabelKey(scope: DvfMarketScope): "nearbyStations.realEstate.parisS
   return "nearbyStations.realEstate.idfScope";
 }
 
-function updateReference(event: Event): void {
-  emit("update:reference", (event.target as HTMLSelectElement).value as DvfComparisonScope);
+function updateReference(value: string): void {
+  emit("update:reference", value as DvfComparisonScope);
 }
 
-function updateMeasure(event: Event): void {
-  emit("update:measure", (event.target as HTMLSelectElement).value as "median" | "mean");
+function updateMeasure(value: string): void {
+  emit("update:measure", value as "median" | "mean");
 }
 </script>
 
@@ -75,17 +76,11 @@ function updateMeasure(event: Event): void {
     <div class="nearby-map__real-estate-selects">
       <label>
         <span>{{ t('nearbyStations.realEstate.reference') }}</span>
-        <select :value="reference" :aria-label="t('nearbyStations.realEstate.reference')" @change="updateReference" @click.stop>
-          <option value="city">{{ t('nearbyStations.realEstate.cityScope') }}</option>
-          <option v-for="scope in DVF_MARKET_SCOPES" :key="scope" :value="scope">{{ t(scopeLabelKey(scope)) }}</option>
-        </select>
+        <MaterialCombobox :model-value="reference" :options="[{ id: 'city', label: t('nearbyStations.realEstate.cityScope') }, ...DVF_MARKET_SCOPES.map(scope => ({ id: scope, label: t(scopeLabelKey(scope)) }))]" :aria-label="t('nearbyStations.realEstate.reference')" teleport @update:model-value="updateReference" @click.stop />
       </label>
       <label v-if="mode === 'prices'">
         <span>{{ t('nearbyStations.realEstate.measure') }}</span>
-        <select :value="measure" :aria-label="t('nearbyStations.realEstate.measure')" @change="updateMeasure" @click.stop>
-          <option value="median">{{ t('nearbyStations.realEstate.median') }}</option>
-          <option value="mean">{{ t('nearbyStations.realEstate.mean') }}</option>
-        </select>
+        <MaterialCombobox :model-value="measure" :options="[{ id: 'median', label: t('nearbyStations.realEstate.median') }, { id: 'mean', label: t('nearbyStations.realEstate.mean') }]" :aria-label="t('nearbyStations.realEstate.measure')" teleport @update:model-value="updateMeasure" @click.stop />
       </label>
     </div>
     <div

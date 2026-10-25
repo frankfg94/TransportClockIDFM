@@ -1,6 +1,6 @@
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { defineComponent, nextTick } from "vue";
+import { defineComponent, nextTick, toRaw } from "vue";
 import type { GeocoderPoint } from "../src/features/transport-map/contracts/geocoder";
 import type { NearbyJourney } from "../src/features/nearby-stations/nearbyHeavyTransports";
 import type { NearbyPlace } from "../src/features/nearby-stations/nearbyPlaces";
@@ -250,6 +250,8 @@ vi.mock("../src/services/nearbyDataProviders", () => ({
 
 import GlobalTransportPlan from "../src/features/line-map/GlobalTransportPlan.vue";
 import { resolveGlobalDirection } from "../src/features/line-map/globalBusDirections";
+import { createLineOptimizerTimeline } from "../src/features/line-optimizer/lineOptimizerTimeline";
+import { optimizerItineraryCandidate, optimizerOrigin, optimizerDestination } from "./fixtures/optimizerItinerary";
 
 const stationBoardModalStub = defineComponent({
   name: "StationBoardModal",
@@ -299,6 +301,40 @@ describe("GlobalTransportPlan facade", () => {
     fixture.viewportPaths = [fixture.path];
     fixture.network.stations[0]!.lineIds = [fixture.network.lines[0]!.id, fixture.network.lines[1]!.id];
     fixture.network.stations[1]!.lineIds = [fixture.network.lines[0]!.id];
+  });
+
+  it("projects a supplied itinerary without planning, exits, query restoration or URL writes", async () => {
+    routeState.query = { line: "line:metro:1", station: "station:a" };
+    const timeline = createLineOptimizerTimeline(optimizerItineraryCandidate(), optimizerOrigin, optimizerDestination);
+    const itinerary = { ...timeline, origin: optimizerOrigin, destination: optimizerDestination, totalWaitSeconds: 150 };
+    const wrapper = mount(GlobalTransportPlan, { props: { itinerary }, attachTo: document.body });
+    wrappers.push(wrapper);
+    await flushPromises();
+    const overlay = wrapper.findComponent({ name: "GlobalTransportItineraryOverlay" });
+    expect(toRaw(overlay.props("route"))).toBe(itinerary.route);
+    expect(toRaw(overlay.props("steps"))).toBe(itinerary.steps);
+    expect(toRaw(overlay.props("origin"))).toBe(itinerary.origin);
+    expect(toRaw(overlay.props("destination"))).toBe(itinerary.destination);
+    expect(overlay.props("getSectionExits")).toBeUndefined();
+    expect(wrapper.find(".global-transport-plan__itinerary-panel").exists()).toBe(false);
+    expect(wrapper.find(".global-transport-plan__left-controls").exists()).toBe(false);
+    expect(wrapper.findComponent({ name: "GlobalTransportPlanSearch" }).exists()).toBe(false);
+    expect(wrapper.findAll('[data-step-kind="wait"]')).toHaveLength(2);
+    expect(fixture.travelRoutesSearch).not.toHaveBeenCalled();
+    expect(fixture.placesSearch).not.toHaveBeenCalled();
+    expect(fixture.router.replace).not.toHaveBeenCalled();
+    const nextOrigin = { ...optimizerOrigin, lon: 2.28, label: "Origine B" };
+    const nextDestination = { ...optimizerDestination, lat: 48.88, label: "Destination B" };
+    const nextTimeline = createLineOptimizerTimeline({ ...optimizerItineraryCandidate(), id: "selected-b" }, nextOrigin, nextDestination);
+    await wrapper.setProps({ itinerary: { ...nextTimeline, origin: nextOrigin, destination: nextDestination, totalWaitSeconds: 150 } });
+    await flushPromises();
+    expect(toRaw(overlay.props("route"))).toBe(nextTimeline.route);
+    expect(toRaw(overlay.props("origin"))).toBe(nextOrigin);
+    expect(toRaw(overlay.props("destination"))).toBe(nextDestination);
+    expect(wrapper.find('[data-itinerary-step="optimizer:selected-a:0"]').exists()).toBe(false);
+    expect(fixture.travelRoutesSearch).not.toHaveBeenCalled();
+    expect(fixture.placesSearch).not.toHaveBeenCalled();
+    expect(fixture.router.replace).not.toHaveBeenCalled();
   });
 
   it("mounts one canvas facade, announces ready state and filters modes by keyboard", async () => {
@@ -420,7 +456,7 @@ describe("GlobalTransportPlan facade", () => {
     expect(wrapper.find("[data-global-map-preset='METRO']").exists()).toBe(true);
   });
 
-  it("reduces the mobile line selector to a Layers button and centers it on open", async () => {
+  it("opens the mobile network selector in the generic bottom sheet and keeps its views usable", async () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     try {
@@ -434,11 +470,38 @@ describe("GlobalTransportPlan facade", () => {
 
       await compactSelector.trigger("click");
       await nextTick();
-      expect(wrapper.find("[data-global-map-mobile-line-selector]").exists()).toBe(false);
-      expect(wrapper.get(".global-transport-plan__left-controls").classes()).toContain(
-        "global-transport-plan__left-controls--mobile-open",
-      );
+      expect(wrapper.get("[data-global-map-mobile-line-selector]").isVisible()).toBe(false);
+      const sheet = wrapper.get(".global-transport-plan__networks-sheet");
+      expect(sheet.classes()).toContain("draggable-bottom-sheet");
+      expect(sheet.classes()).toContain("draggable-bottom-sheet--mid");
+      expect(wrapper.find(".global-transport-plan__left-controls").exists()).toBe(false);
       expect(wrapper.find("[data-global-map-filters]").exists()).toBe(true);
+
+      expect(sheet.find("[data-global-map-filters-toggle]").exists()).toBe(false);
+      await sheet.get('[data-global-map-preset="METRO"] .global-transport-plan__mode-preset-select').trigger("click");
+      expect(sheet.get('[data-global-map-preset="METRO"] .global-transport-plan__mode-preset-select').attributes("aria-pressed")).toBe("true");
+
+      await sheet.get('[data-testid="draggable-bottom-sheet-drag-handle"]').trigger("click");
+      expect(sheet.classes()).toContain("draggable-bottom-sheet--full");
+      await sheet.get('[data-global-map-preset="METRO"] .global-transport-plan__mode-preset-detail').trigger("click");
+      await flushPromises();
+      expect(sheet.find("[data-global-map-line-panel]").exists()).toBe(true);
+      await sheet.get(".global-map-line-panel__header-action--back").trigger("click");
+      await flushPromises();
+      await sheet.get("[data-global-map-customize]").trigger("click");
+      await flushPromises();
+      expect(sheet.find("[data-global-map-customization]").exists()).toBe(true);
+      await sheet.get('[data-testid="draggable-bottom-sheet-close"]').trigger("click");
+      await nextTick();
+      expect(wrapper.find(".global-transport-plan__networks-sheet").exists()).toBe(false);
+      expect(wrapper.find("[data-global-map-mobile-line-selector]").exists()).toBe(true);
+      expect(document.activeElement).toBe(wrapper.get("[data-global-map-mobile-line-selector]").element);
+      await wrapper.get("[data-global-map-mobile-line-selector]").trigger("click");
+      await nextTick();
+      expect(wrapper.get(".global-transport-plan__networks-sheet").classes()).toContain("draggable-bottom-sheet--mid");
+      await wrapper.get('[data-testid="draggable-bottom-sheet"]').trigger("keydown", { key: "Escape" });
+      await nextTick();
+      expect(wrapper.find(".global-transport-plan__networks-sheet").exists()).toBe(false);
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
     }
@@ -2031,6 +2094,7 @@ describe("GlobalTransportPlan facade", () => {
       await twoMinuteOption!.trigger("mousedown");
       await nextTick();
       expect(nearbyCard.get(".material-combobox__value").text()).toBe("2 min à pied");
+      expect(nearbyCard.find(".global-map-picker-sidebar__nearby-loading").exists()).toBe(true);
 
       await vi.advanceTimersByTimeAsync(2_500);
       await flushPromises();
@@ -2038,6 +2102,22 @@ describe("GlobalTransportPlan facade", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("loads commerces for the exact temporary-marker circle without selecting a line", async () => {
+    const place = { id: "shop:circle", name: "Commerce cercle", lon: 2.35, lat: 48.85, category: "shop" as const, kind: "bakery", distanceMeters: 100 };
+    let finish!: (places: NearbyPlace[]) => void;
+    fixture.nearbyPlacesSearch.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    routeState.query = { temporaryMarker: "2.35;48.85", temporaryMarkerRadius: "600" };
+    const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+    wrappers.push(wrapper);
+    await flushPromises();
+    expect(fixture.nearbyPlacesSearch).toHaveBeenCalledWith(expect.objectContaining({ radiusMeters: 600, origin: expect.objectContaining({ lon: 2.35, lat: 48.85 }) }), expect.any(AbortSignal));
+    expect(wrapper.get(".global-transport-plan__circle-places-status").text()).toContain("Recherche des commerces");
+    finish([place, { ...place, id: "park", category: "attraction", kind: "park" }]);
+    await flushPromises();
+    expect(wrapper.find(".global-transport-plan__circle-places-status").exists()).toBe(false);
+    expect(wrapper.getComponent({ name: "GlobalMapNearbyPlacesOverlay" }).props("places")).toEqual([place]);
   });
 
   it("shows places up to five minutes even when over 120 places are closer to the line", async () => {
@@ -2813,6 +2893,14 @@ describe("GlobalTransportPlan facade", () => {
       await flushPromises();
       await nextTick();
 
+      const sheet = wrapper.get('[data-mobile-itinerary-sheet="medium"]');
+      expect(sheet.classes()).toContain("draggable-bottom-sheet");
+      const handle = wrapper.get("[data-global-map-itinerary-sheet-handle]");
+      await handle.trigger("click");
+      expect(wrapper.get('[data-mobile-itinerary-sheet="expanded"]').classes()).toContain("draggable-bottom-sheet--full");
+      await handle.trigger("click");
+      expect(wrapper.get('[data-mobile-itinerary-sheet="collapsed"]').classes()).toContain("draggable-bottom-sheet--peek");
+      await handle.trigger("click");
       expect(wrapper.find('[data-mobile-itinerary-sheet="medium"]').exists()).toBe(true);
       expect(wrapper.findAll(".left-nearby-travel__route")).toHaveLength(8);
       expect(wrapper.get(".left-nearby-travel__routes").classes()).not.toContain("left-nearby-travel__routes--detail");

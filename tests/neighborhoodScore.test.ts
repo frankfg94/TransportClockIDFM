@@ -579,6 +579,31 @@ describe("neighborhood score", () => {
     expect(transport?.negativeFacts.some((candidate) => candidate.kind.startsWith("frequency"))).toBe(false);
   });
 
+  it("documents normal, partial and unavailable service endings without changing the score", () => {
+    const metro = line("metro", "4", "METRO"), tram = line("tram", "T6", "TRAM");
+    const base = input({ stations: [stationEntry([metro, tram])] });
+    for (const observations of [
+      new Map([[metro.id, { seconds: 90000, stopName: "Station test" }], [tram.id, { seconds: 86400 }]]),
+      new Map([[metro.id, { seconds: 90000 }], [tram.id, undefined]]),
+      new Map([[metro.id, undefined], [tram.id, undefined]]),
+    ]) {
+      const result = buildNeighborhoodScore({ ...base, lastServiceByLine: observations });
+      const transport = result.categories.find(category => category.id === "transport")!;
+      const fact = transport.neutralFacts.find(fact => fact.kind === "lastServices")!;
+      expect(fact.lastServices).toHaveLength(2);
+      expect(fact.labelValues).toMatchObject({ available: [...observations.values()].filter(Boolean).length, total: 2 });
+      expect(transport.score).toBe(buildNeighborhoodScore(base).categories.find(category => category.id === "transport")!.score);
+    }
+  });
+
+  it("counts exactly the unique structural lines detailed by the offer, across modes and duplicate stations", () => {
+    const lines = [line("metro", "4", "METRO"), line("rer", "B", "RER"), line("train", "N", "TRANSILIEN"), line("tram", "T6", "TRAM"), line("cable", "C1", "CABLE")];
+    const result = buildNeighborhoodScore(input({ stations: [stationEntry(lines), stationEntry([lines[0]!])] }));
+    const fact = result.categories.find(category => category.id === "transport")!.positiveFacts.find(fact => fact.kind === "transportOffer")!;
+    expect(fact.labelValues?.lines).toBe(5);
+    expect(fact.transportLines?.map(line => line.id).sort()).toEqual(lines.map(line => line.id).sort());
+  });
+
   it("marks a heavy line with an early last service as a transport watch point", () => {
     const metro = line("line:metro:4", "4", "METRO");
     const result = buildNeighborhoodScore(input({
@@ -635,6 +660,10 @@ describe("neighborhood score", () => {
     const transport = result.categories.find((category) => category.id === "transport");
 
     expect(transport?.positiveFacts.some((fact) => fact.kind === "transportHub" && fact.labelValues?.futureLine === "15")).toBe(true);
+    const offer = transport?.positiveFacts.find(fact => fact.kind === "transportOffer");
+    expect(offer?.labelValues?.lines).toBe(4);
+    expect(offer?.transportLines).toHaveLength(4);
+    expect(offer?.transportLines?.filter(line => line.future).map(line => line.code)).toEqual(["15"]);
     expect(transport?.displayScore).toBeGreaterThanOrEqual(9);
   });
 

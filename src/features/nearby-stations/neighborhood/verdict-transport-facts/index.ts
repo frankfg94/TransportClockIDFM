@@ -12,10 +12,20 @@ import { buildChateletFacts } from "./chatelet";
 import { buildFrequencyFacts } from "./frequencies";
 import { buildLastServiceFacts } from "./lastServices";
 import { createTransportFactCollection } from "./types";
+import { personalJourneyFact, scoreWithPersonalJourneys } from "../personalJourneys";
 
 export function buildTransportCategory(input: NeighborhoodScoreInput): NeighborhoodCategoryResult {
   const base = category("transport");
-  if (!input.stationsLoaded) return { ...base, available: false, unavailableReasonKey: "nearbyStations.neighborhoodScore.unavailable.transport", positiveFacts: [], negativeFacts: [] };
+  if (!input.stationsLoaded) {
+    const personalFacts = (input.personalJourneys ?? []).filter(row => row.status !== "loading").map(personalJourneyFact);
+    const score = scoreWithPersonalJourneys(undefined, input.personalJourneys ?? []);
+    return withFacts({ ...base, available: score !== undefined, score,
+      unavailableReasonKey: "nearbyStations.neighborhoodScore.unavailable.transport",
+      positiveFacts: personalFacts.filter(fact => fact.polarity === "positive"),
+      negativeFacts: personalFacts.filter(fact => fact.polarity === "negative"),
+      neutralFacts: personalFacts.filter(fact => fact.polarity === "neutral"),
+    });
+  }
   const context = buildTransportFactsContext(input);
   const score = calculateTransportScore(context);
   const facts = createTransportFactCollection();
@@ -41,5 +51,10 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
     facts.negativeFacts.push(...family.negativeFacts);
     facts.neutralFacts.push(...family.neutralFacts);
   }
-  return withFacts({ ...base, available: true, score, ...facts });
+  for (const row of input.personalJourneys ?? []) {
+    if (row.status === "loading") continue;
+    const fact = personalJourneyFact(row);
+    (fact.polarity === "positive" ? facts.positiveFacts : fact.polarity === "negative" ? facts.negativeFacts : facts.neutralFacts).push(fact);
+  }
+  return withFacts({ ...base, available: true, score: scoreWithPersonalJourneys(score, input.personalJourneys ?? []), ...facts });
 }

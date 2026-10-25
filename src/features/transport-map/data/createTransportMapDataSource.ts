@@ -108,6 +108,10 @@ export class TransportMapDataSource {
   private filterPathsLocal: TransportMapFilterPathsLocalMetrics = createEmptyFilterPathsLocalMetrics();
   private readonly workerPool?: TransportMapWorkerPool;
   private catalogPromise?: Promise<TransportMapNetwork>;
+  private initializationPromise?: Promise<TransportMapNetwork>;
+  private initializationController?: AbortController;
+  private catalogController?: AbortController;
+  private disposed = false;
   private regionalCorePaths?: GlobalMapPath[];
   private regionalBusPaths?: GlobalMapPath[];
   private regionalBikePaths?: GlobalMapPath[];
@@ -135,7 +139,23 @@ export class TransportMapDataSource {
     this.workerPool = createWorkerPool(options.trace);
   }
 
-  async initialize(signal?: AbortSignal): Promise<TransportMapNetwork> {
+  initialize(signal?: AbortSignal): Promise<TransportMapNetwork> {
+    if (this.disposed) return Promise.reject(createLifecycleAbortError());
+    if (signal?.aborted) return Promise.reject(signal.reason ?? createLifecycleAbortError());
+    if (this.manifest && this.network) return Promise.resolve(this.network);
+    if (!this.initializationPromise) {
+      const controller = new AbortController();
+      this.initializationController = controller;
+      const promise = this.initializeNetwork(controller.signal).finally(() => {
+        if (this.initializationPromise === promise) this.initializationPromise = undefined;
+        if (this.initializationController === controller) this.initializationController = undefined;
+      });
+      this.initializationPromise = promise;
+    }
+    return waitForSharedLoad(this.initializationPromise, signal);
+  }
+
+  private async initializeNetwork(signal: AbortSignal): Promise<TransportMapNetwork> {
     const lifecycleToken = ++this.lifecycleToken;
     this.nearbyStationCandidateCache.clear();
     const loader = this.options.loader ?? new GlobalMapAssetLoader({ trace: this.options.trace });
@@ -211,10 +231,15 @@ export class TransportMapDataSource {
   }
 
   async ensureCatalog(signal?: AbortSignal): Promise<TransportMapNetwork> {
+    if (signal?.aborted) throw signal.reason ?? createLifecycleAbortError();
+    if (this.disposed) throw createLifecycleAbortError();
+    if (!this.manifest || !this.network) await this.initialize(signal);
     if (!this.manifest || !this.network)
-      throw new Error("Global map data source is not initialized");
+      throw createLifecycleAbortError();
     if (this.catalogLoaded) return this.network;
-    if (this.catalogPromise) return this.catalogPromise;
+    if (this.catalogPromise) return waitForSharedLoad(this.catalogPromise, signal);
+    const controller = new AbortController();
+    this.catalogController = controller;
     const lifecycleToken = this.lifecycleToken;
     const manifest = this.manifest;
     const bootstrapPayload = this.bootstrapPayload;
@@ -222,7 +247,7 @@ export class TransportMapDataSource {
     const network = this.network;
     const loader = this.options.loader ?? new GlobalMapAssetLoader({ trace: this.options.trace });
     const promise = (async () => {
-      const raw = await loader.loadCatalogText(manifest, signal);
+      const raw = await loader.loadCatalogText(manifest, controller.signal);
       if (lifecycleToken !== this.lifecycleToken) throw createLifecycleAbortError();
       if (bootstrapPayload) {
         const payload = {
@@ -259,13 +284,12 @@ export class TransportMapDataSource {
         return nextNetwork;
       }
       return network;
-    })();
-    this.catalogPromise = promise;
-    try {
-      return await promise;
-    } finally {
+    })().finally(() => {
       if (this.catalogPromise === promise) this.catalogPromise = undefined;
-    }
+      if (this.catalogController === controller) this.catalogController = undefined;
+    });
+    this.catalogPromise = promise;
+    return waitForSharedLoad(promise, signal);
   }
 
   private async ensureRegionalPaths(includeBus: boolean, includeBike: boolean): Promise<GlobalMapPath[]> {
@@ -1085,6 +1109,12 @@ export class TransportMapDataSource {
   }
 
   dispose(): void {
+    this.disposed = true;
+    this.initializationController?.abort();
+    this.catalogController?.abort();
+    this.initializationPromise = undefined;
+    this.initializationController = undefined;
+    this.catalogController = undefined;
     this.lifecycleToken += 1;
     this.completeCorePaths = undefined;
     this.previousOverviewPaths = undefined;
@@ -1277,6 +1307,18 @@ function isLineVisible(
 ): boolean {
   if (detailLineId) return lineId === detailLineId || forcedLineIds.has(lineId);
   return forcedLineIds.has(lineId) || (mask & modeBitForLine(lineMode)) !== 0;
+}
+
+/** Caller cancellation must not cancel another consumer of the shared load. */
+function waitForSharedLoad<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason ?? createLifecycleAbortError());
+  return new Promise<T>((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", abort);
+    const abort = () => { cleanup(); reject(signal.reason ?? createLifecycleAbortError()); };
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
+  });
 }
 
 function createLifecycleAbortError(): DOMException {

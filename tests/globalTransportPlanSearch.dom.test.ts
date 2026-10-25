@@ -622,6 +622,26 @@ describe("GlobalTransportPlanSearch", () => {
     expect(wrapper.emitted("request-catalog")).toHaveLength(1);
   });
 
+  it("cancels a pending place search when the map search unmounts during catalogue loading", async () => {
+    let finish!: (places: GeocoderPoint[]) => void;
+    let signal: AbortSignal | undefined;
+    const searchPlaces = vi.fn((_query: string, requestSignal?: AbortSignal) => {
+      signal = requestSignal;
+      return new Promise<GeocoderPoint[]>(resolve => { finish = resolve; });
+    });
+    wrapper = mount(GlobalTransportPlanSearch, {
+      props: { open: true, stations: [], lines: [line14], catalogReady: false, catalogLoading: true, searchPlaces },
+    });
+    await wrapper.get("input").setValue("louvre");
+    await vi.advanceTimersByTimeAsync(GLOBAL_TRANSPORT_PLAN_CONFIG.search.debounceMs);
+    expect(signal?.aborted).toBe(false);
+    wrapper.unmount();
+    expect(signal?.aborted).toBe(true);
+    finish([louvrePlace]);
+    await flushPromises();
+    expect(wrapper.emitted("request-catalog")).toBeUndefined();
+  });
+
   it("keeps bus chips hidden until hover delay, with focus as an accessible shortcut", async () => {
     const stationWithBus = { ...station, lineIds: [lineRerA.id, line14.id, lineBus20.id] } satisfies GlobalMapStation;
     wrapper = mount(GlobalTransportPlanSearch, {

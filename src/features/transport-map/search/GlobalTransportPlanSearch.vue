@@ -501,7 +501,7 @@ function onSearchTransitionEnd(event: TransitionEvent): void {
 }
 
 function requestCatalogIfNeeded(): void {
-  if (openingTransition.value) return;
+  if (!props.open || openingTransition.value) return;
   if (!props.catalogReady && !props.catalogLoading) emit("request-catalog");
 }
 

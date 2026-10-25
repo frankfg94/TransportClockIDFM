@@ -219,11 +219,12 @@
   </aside>
 
   <Teleport to="body">
-    <AppRightPanel
+    <ResponsiveSidePanel
       :open="metricPickerOpen"
       :title="t('globalMap.realEstate.title')"
       :close-label="t('globalMap.realEstate.closePicker')"
       :mobile-sheet="true"
+      mobile-backdrop
       mobile-sheet-stage="full"
       :mobile-sheet-resize-label="t('globalMap.realEstate.closePicker')"
       @close="closeMetricPicker"
@@ -369,7 +370,7 @@
           </div>
         </details>
       </div>
-    </AppRightPanel>
+    </ResponsiveSidePanel>
   </Teleport>
 
   <AppModal
@@ -407,7 +408,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { Building2, Check, ChevronDown, Info } from "lucide-vue-next";
 import AppModal from "../../components/AppModal.vue";
-import AppRightPanel from "../../components/AppRightPanel.vue";
+import ResponsiveSidePanel from "../../components/ResponsiveSidePanel.vue";
 import MaterialCombobox, { type MaterialComboboxOption } from "../../components/MaterialCombobox.vue";
 import { useI18n, type TranslationKey } from "../../i18n";
 import { REAL_ESTATE_METRIC_CSS_GRADIENT } from "../transport-map/real-estate/realEstateMetricColors";
@@ -1323,7 +1324,7 @@ function formatPercent(value: number): string {
     font-size: 0.72rem;
   }
 
-  :global(body:has(.global-map-real-estate__picker-content) .app-right-panel__backdrop--mobile-sheet) {
+  :global(body:has(.global-map-real-estate__picker-content) .draggable-bottom-sheet__backdrop) {
     display: block;
     background: rgba(15, 23, 42, 0.2);
   }
@@ -1332,7 +1333,7 @@ function formatPercent(value: number): string {
     z-index: 9410;
   }
 
-  :global(.app-right-panel--mobile-sheet:has(.global-map-real-estate__picker-content)) {
+  :global(.draggable-bottom-sheet:has(.global-map-real-estate__picker-content)) {
     height: 92dvh;
     max-height: calc(100dvh - max(10px, env(safe-area-inset-top, 0px)));
     min-height: min(92dvh, 180px);
@@ -1340,18 +1341,18 @@ function formatPercent(value: number): string {
     box-shadow: 0 -16px 46px rgba(15, 23, 42, 0.16);
   }
 
-  :global(.app-right-panel--mobile-sheet:has(.global-map-real-estate__picker-content) .app-right-panel__header) {
+  :global(.draggable-bottom-sheet:has(.global-map-real-estate__picker-content) .draggable-bottom-sheet__header) {
     min-height: 58px;
     padding: 4px 14px 11px 18px;
   }
 
-  :global(.app-right-panel--mobile-sheet:has(.global-map-real-estate__picker-content) .app-right-panel__close) {
+  :global(.draggable-bottom-sheet:has(.global-map-real-estate__picker-content) .draggable-bottom-sheet__close) {
     width: 44px;
     height: 44px;
     min-height: 44px;
   }
 
-  :global(.app-right-panel--mobile-sheet:has(.global-map-real-estate__picker-content) .app-right-panel__body) {
+  :global(.draggable-bottom-sheet:has(.global-map-real-estate__picker-content) .draggable-bottom-sheet__body) {
     padding: 0 18px calc(18px + env(safe-area-inset-bottom, 0px));
     overscroll-behavior: contain;
   }

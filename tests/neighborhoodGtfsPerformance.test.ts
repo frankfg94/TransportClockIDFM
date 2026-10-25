@@ -58,6 +58,27 @@ describe("shared frequency and last-departure timetable", () => {
 
 describe("worker walking matrix reuse", () => {
   const origin = { lon: 2.3, lat: 48.8 }, destination = { id: "first", lon: 2.31, lat: 48.81 };
+  it("retains in-flight pairs beyond the settled-cache budget instead of issuing duplicate HTTP requests", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const fetcher = vi.fn(async (_url, init) => {
+      await gate;
+      return Response.json({ routes: JSON.parse(String(init?.body)).destinations.map((d: typeof destination) => ({
+        id: d.id, provider: "ign-bdtopo", fallback: false, durationSeconds: 300, distanceMeters: 400, coordinates: [origin, d],
+      })) });
+    });
+    const matrix = createNeighborhoodGtfsWalkingMatrix(fetcher, undefined, undefined);
+    const work = Array.from({ length: 17 }, (_, batch) => matrix("https://host.test", origin,
+      Array.from({ length: 64 }, (_, i) => ({ ...destination, id: `${batch}:${i}`, lon: 2.31 + (batch * 64 + i) / 100000 })), { coldStart: true }));
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(17));
+    const duplicate = matrix("https://host.test", origin, [{ ...destination, id: "subscriber" }], { coldStart: true });
+    await Promise.resolve(); await Promise.resolve();
+    const callsBeforeRelease = fetcher.mock.calls.length;
+    release();
+    const results = await Promise.all([...work, duplicate]);
+    expect(callsBeforeRelease).toBe(17);
+    expect(results.at(-1)?.[0]).toMatchObject({ id: "subscriber", provider: "ign-bdtopo", fallback: false });
+  });
   it("keeps a complete verdict on disk even when its pairs exceed the live worker cache", async () => {
     const entries = new Map<string, Response>();
     const storage = { open: async () => ({ match: async (key: string) => entries.get(key)?.clone(),
@@ -131,6 +152,23 @@ describe("worker walking matrix reuse", () => {
     await matrix("https://host.test", origin, [destination]); expect(fetcher).toHaveBeenCalledTimes(1);
     vi.setSystemTime(Date.now() + 60001);
     await matrix("https://host.test", origin, [destination]); expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+  it.each(["http", "timeout", "network", "invalid-response"] as const)("retains a safe %s diagnostic and counts only the actual proxy request", async failure => {
+    const fetcher = vi.fn(async () => {
+      if (failure === "timeout") throw new DOMException("https://secret.test/?token=private", "TimeoutError");
+      if (failure === "network") throw new TypeError("https://secret.test/?token=private");
+      return failure === "http" ? new Response("private response", { status: 503 }) : new Response("not json");
+    });
+    const observation = vi.fn(), matrix = createNeighborhoodGtfsWalkingMatrix(fetcher);
+    const one = await matrix("https://host.test", origin, [destination], { observeRequest: observation, phase: "final-line-access" });
+    expect(one[0]).toMatchObject({ fallback: true, unavailabilityReason: "unavailable", walkingDiagnostic: {
+      source: "walking-matrix-proxy", cause: failure, ...(failure === "http" ? { httpStatus: 503 } : {}),
+    } });
+    await matrix("https://host.test", origin, [{ ...destination, id: "again" }], { observeRequest: observation });
+    expect(observation).toHaveBeenCalledTimes(1);
+    expect(observation.mock.calls[0]?.[0]).toMatchObject({ phase: "final-line-access", pairs: 1, cause: failure });
+    expect(JSON.stringify(one)).not.toContain("private");
+    expect(JSON.stringify(one)).not.toContain("secret.test");
   });
 });
 

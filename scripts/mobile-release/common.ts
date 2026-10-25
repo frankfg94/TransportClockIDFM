@@ -3,6 +3,7 @@ import { access, readFile, stat } from "node:fs/promises";
 import { constants, existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readAndVerifySnapshot, releaseConfiguration, snapshotArgument, type SourceSnapshot } from "./sourceSnapshot";
 import {
   ANDROID_MIN_SDK,
   MAX_ANDROID_APK_BYTES,
@@ -17,6 +18,7 @@ export const projectRoot = resolve(fileURLToPath(new URL("../../", import.meta.u
 export const mobileReleaseOutputDir = join(projectRoot, "dist", "mobile-release");
 export const mobileReleaseManifestPath = join(mobileReleaseOutputDir, "manifest.json");
 export const mobileReleaseEnvPath = join(projectRoot, ".env.mobile-release");
+export const mobileReleaseProvenancePath = join(mobileReleaseOutputDir, "provenance.json");
 
 // Local publishing should be as ergonomic as the CI workflow. Environment
 // variables explicitly supplied by the shell or GitHub Actions always win.
@@ -108,6 +110,18 @@ export function getCurrentSourceRevision(): string {
   const revision = runOutput("git", ["rev-parse", "HEAD"]).toLowerCase();
   if (!isSourceRevision(revision)) throw new Error("Impossible de déterminer le SHA de commit Git.");
   return revision;
+}
+
+export function getReleaseSource(): { sourceRevision: string; snapshot?: SourceSnapshot } {
+  const path = snapshotArgument();
+  if (!path) {
+    assertCleanGitWorktree();
+    return { sourceRevision: getCurrentSourceRevision() };
+  }
+  if (process.env.GITHUB_ACTIONS === "true") throw new Error("Worktree snapshots are an explicit local workflow only.");
+  requireEnv("MOBILE_RELEASE_EXPECTED_CERTIFICATE_SHA256");
+  const snapshot = readAndVerifySnapshot(path, projectRoot, releaseConfiguration());
+  return { sourceRevision: snapshot.sourceRevision, snapshot };
 }
 
 export function getVersionCode(): number {

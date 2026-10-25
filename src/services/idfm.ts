@@ -43,6 +43,7 @@ import type { GeocoderPoint } from "../features/transport-map/contracts/geocoder
 import type { GlobalMapMode } from "../features/transport-map/contracts/manifest";
 import type { TurboObservation } from "../features/nearby-stations/travelTurbo";
 import { fuzzyMatches } from "./fuzzySearch";
+import { classifyRemainingStops, inferSkippedStopSection } from "../features/service-pattern/serviceClassification";
 
 type SiriTextValue =
   | string
@@ -1495,21 +1496,48 @@ function isResolvableNavitiaStopAreaRef(value: string): boolean {
   return /^stop_area:IDFM:\d+$/u.test(value);
 }
 
+interface DeparturePatternOptions {
+  lineTopology?: LineRouteSequence[];
+  hydrateTransfers?: boolean;
+  signal?: AbortSignal;
+}
+
+const callingPatternRequests = new Map<string, { expiresAt: number; request: Promise<unknown> }>();
+
+/** Share route tables between consecutive trains, while refreshing realtime changes. */
+function cacheCallingPatternRequest<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const cached = callingPatternRequests.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.request as Promise<T>;
+  if (callingPatternRequests.size >= 128) {
+    callingPatternRequests.delete(callingPatternRequests.keys().next().value!);
+  }
+  const request = load();
+  callingPatternRequests.set(key, { expiresAt: Date.now() + 30_000, request });
+  void request.catch(() => {
+    if (callingPatternRequests.get(key)?.request === request) callingPatternRequests.delete(key);
+  });
+  return request;
+}
+
 export async function fetchDepartureCallingPattern(
   board: TransitBoardConfig,
   departure: Departure,
+  options: DeparturePatternOptions = {},
 ): Promise<DepartureCallingPattern> {
   const patternDeparture: Departure = {
     ...departure,
     stopName: board.title || departure.stopName,
   };
   const lineId = board.schedule?.lineRef ?? navitiaLineIdFromSiriRef(board.line.ref);
-  const routes = await fetchLineRoutesById(lineId);
-  const lineTopologyPromise = fetchLineRouteSequencesByLineId(
+  options.signal?.throwIfAborted();
+  const routes = await cacheCallingPatternRequest(`routes:${lineId}`, () =>
+    fetchLineRoutesById(lineId, { signal: AbortSignal.timeout(10_000) }),
+  );
+  const lineTopologyPromise = options.lineTopology ? Promise.resolve(options.lineTopology) : fetchLineRouteSequencesByLineId(
     lineId,
     board.line.shortName || board.line.longName,
   )
-    .then((sequences) => hydrateLineTopologyTransfers(sequences, lineId))
+    .then((sequences) => options.hydrateTransfers === false ? sequences : hydrateLineTopologyTransfers(sequences, lineId))
     .catch(() =>
       fetchLineTopologyFromRoutes(routes, board.line.shortName || board.line.longName)
         .then((sequences) => hydrateLineTopologyTransfers(sequences, lineId)),
@@ -1517,7 +1545,8 @@ export async function fetchDepartureCallingPattern(
   const candidateRoutes = sortRoutesForDeparture(routes, patternDeparture);
 
   for (const route of candidateRoutes) {
-    const schedules = await fetchRouteSchedulesForDeparture(route, patternDeparture).catch(
+    options.signal?.throwIfAborted();
+    const schedules = await fetchRouteSchedulesForDeparture(route, patternDeparture, options.signal).catch(
       () => [],
     );
 
@@ -1525,7 +1554,7 @@ export async function fetchDepartureCallingPattern(
       const pattern = mapRouteScheduleToCallingPattern(schedule, patternDeparture);
 
       if (pattern && patternMatchesDepartureDestination(pattern, patternDeparture)) {
-        const hydratedPattern = await hydrateCallingPatternTransfers(
+        const hydratedPattern = options.hydrateTransfers === false ? pattern : await hydrateCallingPatternTransfers(
           pattern,
           lineId,
         );
@@ -1537,7 +1566,7 @@ export async function fetchDepartureCallingPattern(
         );
 
         return {
-          ...applyTopologyCorridorFallback(
+          ...classifyPatternOnwardStops(
             mergedPattern,
             lineTopology,
             patternDeparture,
@@ -1548,21 +1577,31 @@ export async function fetchDepartureCallingPattern(
     }
   }
 
+  options.signal?.throwIfAborted();
+  // The caller already has a NeTEx diagram. Do not invent calls from another route.
+  if (options.lineTopology) {
+    return {
+      departureId: departure.id,
+      destination: departure.destination,
+      serviceType: "inconnu",
+      calls: [],
+      lineTopology: options.lineTopology,
+    };
+  }
+
   const fallbackRoute = candidateRoutes[0] ?? routes[0];
 
   if (fallbackRoute) {
     const stops = await fetchOrderedRouteStops(fallbackRoute).catch(() => []);
 
     if (stops.length > 0) {
-      const fallbackPattern = await hydrateCallingPatternTransfers(
-        {
-          departureId: departure.id,
-          destination: departure.destination,
-          serviceType: "inconnu",
-          calls: mapFallbackRouteStopsToCalls(stops, patternDeparture),
-        },
-        lineId,
-      );
+      const rawFallback: DepartureCallingPattern = {
+        departureId: departure.id,
+        destination: departure.destination,
+        serviceType: "inconnu",
+        calls: mapFallbackRouteStopsToCalls(stops, patternDeparture),
+      };
+      const fallbackPattern = options.hydrateTransfers === false ? rawFallback : await hydrateCallingPatternTransfers(rawFallback, lineId);
       const lineTopology = await lineTopologyPromise;
 
       const mergedPattern = mergePatternWithTopologyTransfers(
@@ -1571,7 +1610,7 @@ export async function fetchDepartureCallingPattern(
       );
 
       return {
-        ...applyTopologyCorridorFallback(
+        ...classifyPatternOnwardStops(
           mergedPattern,
           lineTopology,
           patternDeparture,
@@ -1591,87 +1630,62 @@ export async function fetchDepartureCallingPattern(
   };
 }
 
-function applyTopologyCorridorFallback(
+function classifyPatternOnwardStops(
   pattern: DepartureCallingPattern,
   lineTopology: LineRouteSequence[],
   departure: Departure,
 ): DepartureCallingPattern {
+  // A line's theoretical stops are no evidence of what an unmatched train serves.
+  if (pattern.serviceType === "inconnu") return pattern;
   const servedCalls = pattern.calls.filter((call) => call.served);
   const currentCall = pattern.calls.find((call) => call.current);
-  const currentMatchesDeparture =
-    currentCall !== undefined &&
-    labelsMatchStation(currentCall.label, departure.stopName);
+  const currentMatchesDeparture = currentCall !== undefined &&
+    createTopologyTransferStationKey(currentCall.label) === createTopologyTransferStationKey(departure.stopName);
   const servedDestination = servedCalls[servedCalls.length - 1];
-  const destinationMatches =
-    servedDestination !== undefined &&
-    directionMatchesRule(servedDestination.label, departure.destination);
 
   if (
     currentMatchesDeparture &&
-    destinationMatches &&
+    servedDestination &&
     servedCalls.length > 1
   ) {
-    return pattern;
-  }
-
-  const corridorStops = findTopologyCorridorStops(lineTopology, departure);
-
-  if (!corridorStops || corridorStops.length === 0) {
-    return pattern;
-  }
-
-  const corridorKeys = new Set(corridorStops.map((stop) => stop.id));
-  const callsByStationKey = new Map(
-    pattern.calls.map((call) => [createTopologyTransferStationKey(call.label), call]),
-  );
-  const corridorCalls = corridorStops.map((stop, index) => {
-    const existing = callsByStationKey.get(createTopologyTransferStationKey(stop.label));
-
+    const corridor = findTopologyCorridorStops(lineTopology, currentCall!, servedDestination, servedCalls);
+    if (!corridor?.length) return { ...pattern, serviceType: "inconnu" };
+    const matches = (call: DepartureCall, stop: LineRouteStop) =>
+      call.stopAreaRef === stop.id || call.id === stop.id ||
+      createTopologyTransferStationKey(call.label) === createTopologyTransferStationKey(stop.label);
+    if (!servedCalls.every((call) => corridor.some((stop) => matches(call, stop)))) {
+      return { ...pattern, serviceType: "inconnu" };
+    }
+    const skippedStops = corridor.filter((stop) => !servedCalls.some((call) => matches(call, stop)));
+    const serviceType = classifyRemainingStops(corridor.length - skippedStops.length, corridor.length);
     return {
-      id: existing?.id ?? stop.id,
-      label: existing?.label ?? stop.label,
-      city: existing?.city ?? stop.city,
-      current: index === 0,
-      served: true,
-      stopAreaRef: existing?.stopAreaRef ?? stop.station.scheduleStopAreaRef ?? stop.id,
-      time:
-        existing?.time ??
-        (index === 0 ? getDepartureTimeValue(departure) : undefined),
-      transferLines: existing?.transferLines ?? stop.transferLines,
-    } satisfies DepartureCall;
-  });
-  const remainingCalls = pattern.calls
-    .filter((call) => !corridorKeys.has(call.stopAreaRef ?? call.id))
-    .filter(
-      (call) =>
-        !corridorStops.some((stop) => labelsMatchStation(stop.label, call.label)),
-    )
-    .map((call) => ({
-      ...call,
-      current: false,
-      served: false,
-      time: undefined,
-    }));
+      ...pattern,
+      serviceType,
+      serviceSection: serviceType === "semi-direct" ? inferSkippedStopSection(skippedStops, lineTopology) : undefined,
+    };
+  }
 
-  return {
-    ...pattern,
-    serviceType: getServiceType(corridorCalls.length, corridorStops.length),
-    calls: [...corridorCalls, ...remainingCalls],
-  };
+  return { ...pattern, serviceType: "inconnu" };
 }
 
 function findTopologyCorridorStops(
   lineTopology: LineRouteSequence[],
-  departure: Departure,
+  current: DepartureCall,
+  destination: DepartureCall,
+  served: DepartureCall[],
 ): LineRouteStop[] | undefined {
+  const matches = (stop: LineRouteStop, call: DepartureCall) =>
+    [stop.id, stop.station.id, stop.station.scheduleStopAreaRef].some((id) =>
+      id && (id === call.id || id === call.stopAreaRef),
+    ) || createTopologyTransferStationKey(stop.label) === createTopologyTransferStationKey(call.label);
   const candidates = lineTopology
     .map((sequence) => dedupeStopSequence(sequence.stops))
     .flatMap((stops) => {
       const startIndex = stops.findIndex((stop) =>
-        lineStopMatchesDepartureStation(stop, departure),
+        matches(stop, current),
       );
       const destinationIndex = stops.findIndex((stop) =>
-        directionMatchesRule(stop.label, departure.destination),
+        matches(stop, destination),
       );
 
       if (startIndex < 0 || destinationIndex < 0 || startIndex === destinationIndex) {
@@ -1681,6 +1695,7 @@ function findTopologyCorridorStops(
       const minIndex = Math.min(startIndex, destinationIndex);
       const maxIndex = Math.max(startIndex, destinationIndex);
       const corridor = stops.slice(minIndex, maxIndex + 1);
+      if (!served.every((call) => corridor.some((stop) => matches(stop, call)))) return [];
 
       return [
         {
@@ -1691,7 +1706,38 @@ function findTopologyCorridorStops(
     })
     .sort((left, right) => right.distance - left.distance);
 
-  return candidates[0]?.stops;
+  if (candidates[0]) return candidates[0].stops;
+
+  // NeTEx also exposes a line as adjacent segments plus branches, rather than
+  // one end-to-end sequence. Stitch only the corridor between the two calls.
+  const stopsById = new Map(lineTopology.flatMap((sequence) => sequence.stops).map((stop) => [stop.id, stop]));
+  const first = [...stopsById.values()].find((stop) => matches(stop, current));
+  const last = [...stopsById.values()].find((stop) => matches(stop, destination));
+  if (!first || !last) return undefined;
+  const neighbors = new Map<string, Set<string>>();
+  for (const sequence of lineTopology) {
+    sequence.stops.slice(1).forEach((stop, index) => {
+      const previous = sequence.stops[index];
+      if (!neighbors.has(previous.id)) neighbors.set(previous.id, new Set());
+      if (!neighbors.has(stop.id)) neighbors.set(stop.id, new Set());
+      neighbors.get(previous.id)!.add(stop.id);
+      neighbors.get(stop.id)!.add(previous.id);
+    });
+  }
+  const queue = [first.id];
+  const parent = new Map<string, string | undefined>([[first.id, undefined]]);
+  for (let index = 0; index < queue.length && !parent.has(last.id); index++) {
+    for (const neighbor of neighbors.get(queue[index]) ?? []) {
+      if (parent.has(neighbor)) continue;
+      parent.set(neighbor, queue[index]);
+      queue.push(neighbor);
+    }
+  }
+  if (!parent.has(last.id)) return undefined;
+  const corridor: LineRouteStop[] = [];
+  for (let id: string | undefined = last.id; id; id = parent.get(id)) corridor.push(stopsById.get(id)!);
+  corridor.reverse();
+  return served.every((call) => corridor.some((stop) => matches(stop, call))) ? corridor : undefined;
 }
 
 export function lineStopMatchesDepartureStation(
@@ -2474,7 +2520,7 @@ async function fetchLineRoutes(line: LineSearchOption): Promise<NavitiaRoute[]> 
   return fetchLineRoutesById(line.navitiaId);
 }
 
-async function fetchLineRoutesById(lineId: string): Promise<NavitiaRoute[]> {
+async function fetchLineRoutesById(lineId: string, options: NavitiaRequestOptions = {}): Promise<NavitiaRoute[]> {
   const searchParams = new URLSearchParams({
     count: "100",
     disable_disruption: "true",
@@ -2486,6 +2532,7 @@ async function fetchLineRoutesById(lineId: string): Promise<NavitiaRoute[]> {
     searchParams,
     "routes",
     MAX_MAP_ROUTES,
+    options,
   );
 }
 
@@ -2533,33 +2580,31 @@ async function fetchRouteScheduleStops(
 async function fetchRouteSchedulesForDeparture(
   route: NavitiaRoute,
   departure: Departure,
+  signal?: AbortSignal,
 ): Promise<NavitiaRouteSchedule[]> {
   const targetTime = getDepartureTimestamp(departure);
   const fromDate = new Date(
     Number.isFinite(targetTime) && targetTime !== Number.MAX_SAFE_INTEGER
-      ? targetTime - 45 * 60_000
+      ? Math.floor((targetTime - 45 * 60_000) / 3_600_000) * 3_600_000
       : Date.now(),
   );
   const searchParams = new URLSearchParams({
     count: "1",
-    data_freshness: "base_schedule",
-    disable_disruption: "true",
+    data_freshness: "realtime",
     disable_geojson: "true",
     duration: "10800",
     from_datetime: formatParisNavitiaDateTime(fromDate),
-    items_per_schedule: "12",
+    items_per_schedule: "40",
   });
-  const response = await fetch(
-    `${NAVITIA_API_BASE}/routes/${encodeURIComponent(route.id)}/route_schedules?${searchParams}`,
-  );
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  const payload = (await response.json()) as NavitiaRouteSchedulesResponse;
-
-  return payload.route_schedules ?? [];
+  const url = `${NAVITIA_API_BASE}/routes/${encodeURIComponent(route.id)}/route_schedules?${searchParams}`;
+  const schedules = await cacheCallingPatternRequest(url, async () => {
+    const response = await navitiaFetchWithRetry(url, { signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = (await response.json()) as NavitiaRouteSchedulesResponse;
+    return payload.route_schedules ?? [];
+  });
+  signal?.throwIfAborted();
+  return schedules;
 }
 
 function mapRouteScheduleToCallingPattern(
@@ -2579,12 +2624,20 @@ function mapRouteScheduleToCallingPattern(
   if (!match) {
     return null;
   }
+  if (!findMatchingRowDateTime(rows[match.rowIndex], match)?.date_time) {
+    return null;
+  }
 
-  const terminalRowIndex = findDestinationRowIndex(
-    rows,
-    departure,
-    match.rowIndex,
-  );
+  // Resolve the end of this course by its calls, independent of mission naming
+  // and of other branches present in the route table.
+  const terminalRowIndex = rows.map((row, index) => {
+    const value = findMatchingRowDateTime(row, match)?.date_time;
+    return { index, time: value ? Date.parse(parseNavitiaDateTime(value) ?? "") : NaN };
+  }).filter((row) => Number.isFinite(row.time))
+    .sort((left, right) => right.time - left.time || right.index - left.index)[0]?.index;
+  if (terminalRowIndex === undefined) return null;
+  const onRemainingPath = (index: number) => index >= Math.min(match.rowIndex, terminalRowIndex) &&
+    index <= Math.max(match.rowIndex, terminalRowIndex);
   const calls = rows
     .map((row, rowIndex) => {
       if (!row.stop_point) {
@@ -2595,22 +2648,16 @@ function mapRouteScheduleToCallingPattern(
       const isCurrentRow = rowIndex === match.rowIndex;
       const served =
         (Boolean(dateTime?.date_time) || isCurrentRow) &&
-        rowMatchesDeparturePath(
-          row,
-          rowIndex,
-          match.rowIndex,
-          terminalRowIndex,
-          departure,
-        );
+        onRemainingPath(rowIndex);
 
       return mapStopPointToDepartureCall(
         row.stop_point,
         isCurrentRow ||
         (served && stopMatchesDepartureStation(row.stop_point, departure)),
-        served && dateTime?.date_time
-          ? parseNavitiaDateTime(dateTime.date_time)
-          : isCurrentRow
-            ? getDepartureTimeValue(departure)
+        isCurrentRow
+          ? getDepartureTimeValue(departure)
+          : served && dateTime?.date_time
+            ? parseNavitiaDateTime(dateTime.date_time)
           : undefined,
         served,
       );
@@ -2621,15 +2668,14 @@ function mapRouteScheduleToCallingPattern(
     return null;
   }
 
-  const servedCalls = calls.filter((call) => call.served);
+  const scopedCalls = calls.filter((_call, index) => onRemainingPath(index));
+  const servedCalls = scopedCalls.filter((call) => call.served);
 
   return {
     departureId: departure.id,
-    destination:
-      cleanNavitiaDirection(schedule.display_informations?.direction ?? "") ||
-      departure.destination,
-    serviceType: getServiceType(servedCalls.length, calls.length),
-    calls,
+    destination: departure.destination,
+    serviceType: classifyRemainingStops(servedCalls.length, scopedCalls.length),
+    calls: terminalRowIndex < match.rowIndex ? calls.reverse() : calls,
   };
 }
 
@@ -2641,19 +2687,13 @@ function findMatchingScheduleDateTime(
   journeyId?: string;
   rowIndex: number;
 } | null {
-  const targetTimestamp = getDepartureTimestamp(departure);
+  const targetTimestamp = departure.aimedDepartureTime
+    ? Date.parse(departure.aimedDepartureTime)
+    : getDepartureTimestamp(departure);
   const currentRows = rows
     .map((row, index) => ({ row, index }))
-    .filter(({ row, index }) => {
-      if (row.stop_point && stopMatchesDepartureStation(row.stop_point, departure)) {
-        return true;
-      }
-
-      return departure.callOrder ? index === departure.callOrder - 1 : false;
-    });
-  const candidates = currentRows.length > 0
-    ? currentRows
-    : rows.map((row, index) => ({ row, index }));
+    .filter(({ row }) => row.stop_point && stopMatchesDepartureStation(row.stop_point, departure));
+  const candidates = currentRows;
   const journeyKey = getDepartureJourneyKey(departure);
 
   if (journeyKey) {
@@ -2662,6 +2702,8 @@ function findMatchingScheduleDateTime(
     if (journeyMatch) {
       return journeyMatch;
     }
+    // A nearby time may belong to a different mission with the same destination.
+    return null;
   }
 
   let bestMatch:
@@ -2696,14 +2738,7 @@ function findMatchingScheduleDateTime(
     });
   }
 
-  if (!bestMatch || bestMatch.delta > 25 * 60_000) {
-    if (currentRows.length > 0) {
-      return {
-        dateTimeIndex: 0,
-        rowIndex: currentRows[0].index,
-      };
-    }
-
+  if (!bestMatch || bestMatch.delta > 60_000 || currentRows.length === 0) {
     return null;
   }
 
@@ -2724,17 +2759,11 @@ function findMatchingRowDateTime(
   const dateTimes = asArray(row.date_times);
 
   if (match.journeyId) {
-    const linkedDateTime = dateTimes.find(
-      (dateTime) =>
-        dateTime.date_time &&
-        getDateTimeVehicleJourneyId(dateTime) === match.journeyId,
-    );
-
-    if (linkedDateTime) {
-      return linkedDateTime;
-    }
-
-    return undefined;
+    const freshness = (dateTime: NavitiaDateTime) => dateTime.data_freshness === "realtime"
+      ? 2 : dateTime.data_freshness === "adapted_schedule" ? 1 : 0;
+    // Keep an empty realtime entry: it can remove a theoretical stop.
+    return dateTimes.filter((dateTime) => getDateTimeVehicleJourneyId(dateTime) === match.journeyId)
+      .sort((left, right) => freshness(right) - freshness(left))[0];
   }
 
   return dateTimes[match.dateTimeIndex];
@@ -2772,10 +2801,13 @@ function dateTimeMatchesJourneyKey(
 ): boolean {
   const vehicleJourneyId = getDateTimeVehicleJourneyId(dateTime);
 
-  return Boolean(vehicleJourneyId && vehicleJourneyId.includes(journeyKey));
+  return Boolean(vehicleJourneyId && (
+    vehicleJourneyId === journeyKey || vehicleJourneyId.endsWith(`:${journeyKey}`)
+  ));
 }
 
 function getDepartureJourneyKey(departure: Departure): string | undefined {
+  if (departure.journeyRef?.startsWith("vehicle_journey:")) return departure.journeyRef;
   return departure.journeyRef?.match(
     /VehicleJourney::([^:]+):/u,
   )?.[1];
@@ -2916,21 +2948,6 @@ function mapFallbackRouteStopsToCalls(
         : true,
     ),
   );
-}
-
-function getServiceType(
-  servedStopsCount: number,
-  routeStopsCount: number,
-): DepartureCallingPattern["serviceType"] {
-  if (servedStopsCount <= 2 && routeStopsCount > 2) {
-    return "direct";
-  }
-
-  if (servedStopsCount < Math.max(2, routeStopsCount - 1)) {
-    return "semi-direct";
-  }
-
-  return "omnibus";
 }
 
 async function fetchRouteStopPoints(
@@ -4491,19 +4508,10 @@ function patternMatchesDepartureDestination(
   if (!terminal) {
     return false;
   }
-
-  if (directionMatchesRule(terminal, departure.destination)) {
-    return true;
-  }
-
-  const departureKey = getDestinationBranchKey(departure.destination);
-  const terminalKey = getDestinationBranchKey(terminal);
-
-  if (departureKey && terminalKey) {
-    return departureKey === terminalKey;
-  }
-
-  return !departureKey;
+  // A matched dated journey is stronger evidence than differently named termini
+  // across SIRI, Navitia and NeTEx. Time-only matches must agree on destination.
+  return Boolean(getDepartureJourneyKey(departure)) ||
+    createTopologyTransferStationKey(terminal) === createTopologyTransferStationKey(departure.destination);
 }
 
 function getDestinationBranchKey(value?: string): string | undefined {

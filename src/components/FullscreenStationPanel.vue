@@ -6,6 +6,7 @@ import {
   Check,
   Bell,
   BellRing,
+  Clock3,
   EllipsisVertical,
   Maximize2,
   Minimize2,
@@ -20,6 +21,9 @@ import { useI18n } from "../i18n";
 import type { FullscreenStationPanelDesign } from "../features/app-settings";
 import type { TrafficAlertModalData } from "../features/traffic";
 import { createFullscreenPanelWakeLockController } from "../features/app-settings/screenWakeLock";
+import LineFrequencyTimetableModal from "../features/line-map/LineFrequencyTimetableModal.vue";
+import { fetchGtfsLineFrequency } from "../services/lineFrequency";
+import type { GtfsLineFrequencyResponse } from "../types/lineFrequency";
 
 interface FullscreenPanelDeparture {
   id: string;
@@ -49,6 +53,8 @@ interface FitTextOptions {
 const props = withDefaults(
   defineProps<{
     stationName: string;
+    stationId?: string;
+    lineId?: string;
     city?: string;
     lineName: string;
     lineShortName: string;
@@ -139,6 +145,18 @@ const menuOpen = ref(false);
 const menuTrigger = ref<HTMLElement>();
 const fitTextFrames = new WeakMap<HTMLElement, number>();
 const trafficModalOpen = ref(false);
+const timetableOpen = ref(false);
+const timetableContainer = ref<HTMLElement>();
+const timetableProfile = ref<GtfsLineFrequencyResponse>();
+const timetableProfileLoading = ref(false);
+const timetableProfileError = ref(false);
+let timetableProfileController: AbortController | undefined;
+const timetableDestinations = computed(() => {
+  const direction = props.design === "double-stop"
+    ? selectedDoubleStopDirection.value
+    : visibleDirections.value.length === 1 ? visibleDirections.value[0] : undefined;
+  return direction ? [...new Set([direction.label, ...direction.departures.map((departure) => departure.destination ?? "")].filter(Boolean))] : undefined;
+});
 const fitTextObservers = new WeakMap<HTMLElement, ResizeObserver>();
 let hideTimer: number | undefined;
 let previousHtmlOverflow = "";
@@ -373,7 +391,7 @@ function revealControls(): void {
 function scheduleControlsHide(): void {
   clearControlsHideTimer();
 
-  if (menuOpen.value || directionFilterOpen.value) {
+  if (menuOpen.value || directionFilterOpen.value || timetableOpen.value) {
     return;
   }
 
@@ -481,6 +499,41 @@ function closeTrafficModal(): void {
   scheduleControlsHide();
 }
 
+async function loadTimetableProfile(): Promise<void> {
+  timetableProfileController?.abort();
+  const controller = new AbortController();
+  timetableProfileController = controller;
+  timetableProfile.value = undefined;
+  timetableProfileLoading.value = true;
+  timetableProfileError.value = false;
+  try {
+    if (!props.lineId) throw new Error("Missing line context");
+    // Match /map's date/coverage policy and reuse its exact timetable provider.
+    const profile = await fetchGtfsLineFrequency(props.lineId, { signal: controller.signal, allowCoverageFallback: true });
+    if (!controller.signal.aborted) timetableProfile.value = profile;
+  } catch {
+    if (!controller.signal.aborted) timetableProfileError.value = true;
+  } finally {
+    if (!controller.signal.aborted) timetableProfileLoading.value = false;
+  }
+}
+function openTimetable(): void {
+  closeMenu();
+  timetableOpen.value = true;
+  controlsVisible.value = true;
+  clearControlsHideTimer();
+  void nextTick(() => timetableContainer.value?.querySelector<HTMLButtonElement>('.modal-panel__header button')?.focus());
+}
+function closeTimetable(): void {
+  timetableOpen.value = false;
+  timetableProfileController?.abort();
+  scheduleControlsHide();
+  void nextTick(() => menuTrigger.value?.focus());
+}
+watch([timetableOpen, () => props.lineId, () => props.stationId], ([open]) => {
+  if (open) void loadTimetableProfile();
+});
+
 function handleKeydown(event: KeyboardEvent): void {
   revealControls();
 
@@ -489,6 +542,12 @@ function handleKeydown(event: KeyboardEvent): void {
   }
 
   event.preventDefault();
+
+  if (timetableOpen.value) {
+    event.stopPropagation();
+    closeTimetable();
+    return;
+  }
 
   if (directionFilterOpen.value) {
     closeDirectionFilter();
@@ -534,6 +593,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  timetableProfileController?.abort();
   clearControlsHideTimer();
   document.removeEventListener("visibilitychange", syncFullscreenPanelWakeLock);
   void fullscreenPanelWakeLock.dispose();
@@ -563,6 +623,7 @@ watch(
   >
     <div
       class="fullscreen-station-panel__controls"
+      :inert="timetableOpen || undefined"
       :class="{
         'fullscreen-station-panel__controls--hidden':
           !controlsVisible && !menuOpen,
@@ -598,6 +659,10 @@ watch(
           :teleport="false"
           :z-index="12050"
         >
+          <button v-if="lineId" type="button" role="menuitem" @click="openTimetable">
+            <Clock3 :size="17" aria-hidden="true" />
+            {{ t('app.panelTimetable') }}
+          </button>
           <label class="fullscreen-station-panel__menu-switch">
             <input
               type="checkbox"
@@ -700,6 +765,7 @@ watch(
     <div
       v-if="design === 'all-directions'"
       class="fullscreen-station-panel__surface fullscreen-station-panel__surface--all"
+      :inert="timetableOpen || undefined"
     >
       <header class="fullscreen-station-panel__header">
         <div class="fullscreen-station-panel__logo">
@@ -823,6 +889,7 @@ watch(
     <div
       v-else-if="design === 'double-stop'"
       class="fullscreen-station-panel__surface fullscreen-station-panel__surface--double"
+      :inert="timetableOpen || undefined"
     >
       <header class="fullscreen-station-panel__panam-header">
         <div class="fullscreen-station-panel__logo">
@@ -974,6 +1041,7 @@ watch(
     <div
       v-else-if="design === 'dense-list'"
       class="fullscreen-station-panel__surface fullscreen-station-panel__dense"
+      :inert="timetableOpen || undefined"
     >
       <header class="fullscreen-station-panel__dense-header">
         <div class="fullscreen-station-panel__logo">
@@ -1093,6 +1161,7 @@ watch(
     <div
       v-else
       class="fullscreen-station-panel__surface fullscreen-station-panel__surface--home"
+      :inert="timetableOpen || undefined"
     >
       <article class="fullscreen-station-panel__home-card">
         <header>
@@ -1228,6 +1297,21 @@ watch(
       @close="closeDirectionFilter"
     />
 
+    <div v-if="timetableOpen" ref="timetableContainer" class="fullscreen-station-panel__timetable">
+      <LineFrequencyTimetableModal
+        :open="timetableOpen"
+        :profile="timetableProfile"
+        :profile-loading="timetableProfileLoading"
+        :profile-error="timetableProfileError"
+        :station-id="stationId"
+        :station-name="stationName"
+        :direction-destinations="timetableDestinations"
+        :line-color="lineColor"
+        teleport-disabled
+        @close="closeTimetable"
+      />
+    </div>
+
     <UserFriendlyTrafficModal
       :open="trafficModalOpen"
       :alert="trafficAlert"
@@ -1256,6 +1340,12 @@ watch(
 .fullscreen-station-panel__surface {
   min-height: 100dvh;
   overflow: hidden;
+}
+
+.fullscreen-station-panel__timetable {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
 }
 
 .fullscreen-station-panel__controls {
@@ -2544,6 +2634,9 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 20px;
+  box-sizing: border-box;
+  height: 100dvh;
+  min-height: 0;
 }
 .fullscreen-station-panel--dark .fullscreen-station-panel__dense {
   --dense-bg: #080f1b;
@@ -2554,6 +2647,7 @@ watch(
   --dense-time: #f4db55;
 }
 .fullscreen-station-panel__dense-header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 24px;
@@ -2580,12 +2674,16 @@ watch(
   overflow-wrap: anywhere;
 }
 .fullscreen-station-panel__dense-list {
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-height: 0;
   list-style: none;
   padding: 0;
   margin: 0;
   border-radius: 18px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
 }
 .fullscreen-station-panel__dense-row {
   position: relative;
@@ -2666,6 +2764,7 @@ watch(
   transform: none;
 }
 .fullscreen-station-panel__dense-footer {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -2675,6 +2774,7 @@ watch(
   padding-top: 8px;
 }
 .fullscreen-station-panel__dense-traffic {
+  flex-shrink: 0;
   text-align: left;
   color: var(--dense-ink);
   background: var(--dense-alt);
@@ -2726,10 +2826,10 @@ watch(
     padding: 3px 7px;
   }
   .fullscreen-station-panel__dense-row .fullscreen-station-panel__alarm-button {
-    position: absolute;
-    right: 10px;
-    top: auto;
-    bottom: 8px;
+    position: static;
+    grid-column: 3;
+    grid-row: 2;
+    justify-self: end;
     transform: none;
   }
 }

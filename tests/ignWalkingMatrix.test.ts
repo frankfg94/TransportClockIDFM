@@ -7,11 +7,27 @@ function ignResponse(url: unknown) {
   const query = new URL(String(url)).searchParams;
   const parse = (p: string) => p.split(",").map(Number);
   const points = [parse(query.get("start")!), ...query.get("intermediates")!.split("|").map(parse), parse(query.get("end")!)];
-  return Response.json({ resource: "bdtopo-osrm", resourceVersion: "fixture", distanceUnit: "meter", timeUnit: "second",
+  return Response.json({ resource: "bdtopo-valhalla", resourceVersion: "fixture", distanceUnit: "meter", timeUnit: "second",
     portions: points.slice(1).map((to, i) => ({ start: points[i]!.join(","), end: to.join(","), distance: 100,
       duration: i % 2 ? 180 : 120, steps: [{ geometry: { type: "LineString", coordinates: [points[i], to] } }] })) });
 }
 describe("common IGN GTFS pedestrian matrix", () => {
+  it.each(["http", "timeout", "network", "invalid-response"] as const)("preserves safe upstream %s evidence, including its observation date on cache hits", async cause => {
+    const fetcher = vi.fn(async () => {
+      if (cause === "timeout") throw new DOMException("private token", "TimeoutError");
+      if (cause === "network") throw new TypeError("private token");
+      return cause === "http" ? new Response("private token", { status: 502 }) : new Response("not JSON");
+    });
+    const matrix = createIgnWalkingMatrix(fetcher as typeof fetch);
+    const route = (await matrix(origin, [destination]))[0]!;
+    expect(route).toMatchObject({ fallback: true, walkingDiagnostic: { source: "ign-navigation", cause,
+      cacheState: "requested", ...(cause === "http" ? { httpStatus: 502 } : {}) } });
+    const cached = (await matrix(origin, [destination]))[0]!;
+    expect(cached.walkingDiagnostic?.observedAt).toBe(route.walkingDiagnostic?.observedAt);
+    expect(cached.walkingDiagnostic?.cacheState).toBe("hit");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(route)).not.toContain("private token");
+  });
   it("batches every eight independent destinations, retains ids and uses outward portions", async () => {
     const fetcher = vi.fn(async url => ignResponse(url));
     const matrix = createIgnWalkingMatrix(fetcher as typeof fetch);
@@ -20,9 +36,35 @@ describe("common IGN GTFS pedestrian matrix", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(routes.map(route => route.id)).toEqual(destinations.map(p => p.id));
     expect(routes.every(route => route.provider === "ign-bdtopo" && route.durationSeconds === 120 && route.datasetVersion === "fixture" && !route.fallback)).toBe(true);
-    expect(new URL(String(fetcher.mock.calls[0]![0])).searchParams.get("intermediates")!.split("|")).toHaveLength(15);
+    const request = new URL(String(fetcher.mock.calls[0]![0]));
+    expect(request.origin + request.pathname).toBe("https://data.geopf.fr/navigation/itineraire");
+    expect(Object.fromEntries(request.searchParams)).toMatchObject({ resource: "bdtopo-valhalla", profile: "pedestrian", optimization: "fastest",
+      geometryFormat: "geojson", getSteps: "true", getBbox: "false", distanceUnit: "meter", timeUnit: "second", crs: "EPSG:4326" });
+    expect(request.searchParams.get("intermediates")!.split("|")).toEqual(destinations.slice(0, 8).flatMap(to => [
+      `${to.lon},${to.lat}`, `${origin.lon},${origin.lat}`,
+    ]).slice(0, -1));
     expect(routes[0]!.coordinates[0]).toEqual(origin);
     expect(routes[0]!.coordinates.at(-1)).toEqual({ lon: destination.lon, lat: destination.lat });
+  });
+  it.each([
+    { resource: "bdtopo-osrm" }, { resource: "graphe_routier_r100_IGN" },
+    { distanceUnit: "kilometer" }, { timeUnit: "minute" }, { portions: [] },
+  ])("rejects responses outside the selected BD TOPO contract: %j", async changed => {
+    const fetcher = vi.fn(async url => Response.json({ ...await ignResponse(url).json(), ...changed }));
+    const route = (await createIgnWalkingMatrix(fetcher as typeof fetch)(origin, [destination]))[0]!;
+    expect(route).toMatchObject({ provider: "straight-line", fallback: true, unavailabilityReason: "unavailable",
+      walkingDiagnostic: { cause: "invalid-response", httpStatus: 200, phase: "response" } });
+    expect(route.datasetVersion).toBeUndefined();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("does not invent a version when IGN omits resourceVersion", async () => {
+    const fetcher = vi.fn(async url => {
+      const payload = await ignResponse(url).json(); delete payload.resourceVersion;
+      return Response.json(payload);
+    });
+    const route = (await createIgnWalkingMatrix(fetcher as typeof fetch)(origin, [destination]))[0]!;
+    expect(route).toMatchObject({ provider: "ign-bdtopo", fallback: false });
+    expect(route.datasetVersion).toBeUndefined();
   });
   it("deduplicates coordinates and pending subscribers, caches both directed routes independently", async () => {
     const fetcher = vi.fn(async url => ignResponse(url));
@@ -44,17 +86,17 @@ describe("common IGN GTFS pedestrian matrix", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
   it("rejects malformed units, missing portions and far-away snap points", async () => {
-    const fetcher = vi.fn(async () => Response.json({ resource: "bdtopo-osrm", distanceUnit: "kilometer", timeUnit: "second", portions: [] }));
+    const fetcher = vi.fn(async () => Response.json({ resource: "bdtopo-valhalla", distanceUnit: "kilometer", timeUnit: "second", portions: [] }));
     const matrix = createIgnWalkingMatrix(fetcher as typeof fetch);
     expect((await matrix(origin, [destination]))[0]!.fallback).toBe(true);
     const far = { lon: 3, lat: 49 };
-    const malformed = createIgnWalkingMatrix(vi.fn(async () => Response.json({ resource: "bdtopo-osrm", distanceUnit: "meter", timeUnit: "second",
+    const malformed = createIgnWalkingMatrix(vi.fn(async () => Response.json({ resource: "bdtopo-valhalla", distanceUnit: "meter", timeUnit: "second",
       portions: [0, 1].map(() => ({ distance: 100, duration: 120, steps: [{ geometry: { type: "LineString", coordinates: [toArray(far), toArray(far)] } }] })) })) as typeof fetch);
     expect((await malformed(origin, [destination]))[0]).toMatchObject({ fallback: true, unavailabilityReason: "unreachable" });
   });
   it("includes short off-network connectors in the time and distance", async () => {
     const offset = { lon: origin.lon + .00001, lat: origin.lat };
-    const fetcher = vi.fn(async () => Response.json({ resource: "bdtopo-osrm", distanceUnit: "meter", timeUnit: "second",
+    const fetcher = vi.fn(async () => Response.json({ resource: "bdtopo-valhalla", distanceUnit: "meter", timeUnit: "second",
       portions: [{ distance: 100, duration: 120, steps: [{ geometry: { type: "LineString", coordinates: [toArray(offset), toArray(destination)] } }] },
         { distance: 100, duration: 180, steps: [{ geometry: { type: "LineString", coordinates: [toArray(destination), toArray(offset)] } }] }] }));
     const route = (await createIgnWalkingMatrix(fetcher as typeof fetch)(origin, [destination]))[0]!;

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { BellOff, BellRing, ShieldCheck, Volume2 } from "lucide-vue-next";
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import LineIconBadge from "./LineIconBadge.vue";
+import { usePanelFocus } from "./usePanelFocus";
 import { useI18n } from "../i18n";
 import type {
   AlarmDraft,
@@ -37,6 +38,7 @@ const draft = reactive<AlarmDraft>({
   soundEnabled: true,
 });
 const dialog = ref<HTMLElement>();
+const { handleTab } = usePanelFocus(dialog, () => props.open, () => true);
 const { d, t } = useI18n();
 const isRemovalMode = computed(() => Boolean(props.activeAlarm));
 const displayDestination = computed(
@@ -75,6 +77,8 @@ const remainingAlarmMinutes = computed(() => {
 let currentTimestampTimer: ReturnType<typeof setInterval> | undefined;
 
 onMounted(() => {
+  // Async first mounts can resolve the focus watcher before DOM insertion.
+  if (props.open) dialog.value?.focus({ preventScroll: true });
   currentTimestamp.value = Date.now();
   currentTimestampTimer = setInterval(() => {
     currentTimestamp.value = Date.now();
@@ -93,7 +97,6 @@ watch(
     if (open) {
       draft.minutesBefore = normalizeMinutesBefore(props.initialMinutesBefore);
       draft.soundEnabled = true;
-      void nextTick(() => dialog.value?.focus());
     }
   },
   { immediate: true },
@@ -114,6 +117,14 @@ function closeModal(): void {
   if (!props.busy) {
     emit("cancel");
   }
+}
+
+function handleDialogKeydown(event: KeyboardEvent): void {
+  handleTab(event);
+  if (event.key !== "Escape" || event.defaultPrevented) return;
+  event.preventDefault();
+  event.stopPropagation();
+  closeModal();
 }
 
 function formatClock(value?: string): string {
@@ -159,7 +170,7 @@ function normalizeMinutesBefore(value?: unknown): number {
           role="dialog"
           tabindex="-1"
           :aria-busy="busy || nativePermissionState === 'checking'"
-          @keydown.esc.prevent="closeModal"
+          @keydown="handleDialogKeydown"
         >
           <header class="modal-panel__header">
             <div>

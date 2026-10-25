@@ -1,3 +1,4 @@
+import MaterialCombobox from "../src/components/MaterialCombobox.vue";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { defineComponent, h, nextTick, ref } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -182,9 +183,10 @@ describe("walking radar controls and accessibility", () => {
     await wrapper.setProps({ open: true, focusMode: "RER" });
     await flushPromises();
     expect(document.activeElement).toBe(wrapper.get('[data-radar-mode="RER"] input').element);
-    const duration = wrapper.get('[data-radar-mode="RER"] select');
-    expect(duration.findAll("option").map((option) => option.attributes("value"))).toEqual(["standard", "extended"]);
-    await duration.setValue("extended");
+    const duration = wrapper.getComponent<typeof MaterialCombobox>('[data-radar-mode="RER"] .material-combobox');
+    expect(duration.props("options").map((option: { id: string }) => option.id)).toEqual(["standard", "extended"]);
+    duration.vm.$emit("update:modelValue", "extended");
+    await flushPromises();
     expect(wrapper.emitted("update:mode")).toEqual([["RER", { enabled: true, preset: "extended" }]]);
     expect(wrapper.find("[data-radar-master]").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("Afficher les zones à pied");
@@ -192,6 +194,12 @@ describe("walking radar controls and accessibility", () => {
     expect(wrapper.emitted("update:enabled")).toEqual([[false]]);
     expect(wrapper.emitted("update:open")).toEqual([[false]]);
     expect(wrapper.emitted("select-preset")).toBeUndefined();
+    const trigger = duration.get('[role="combobox"]');
+    await trigger.trigger("click");
+    const closedCount = wrapper.emitted("update:open")?.length ?? 0;
+    await trigger.trigger("keydown", { key: "Escape" });
+    expect(wrapper.emitted("update:open")?.length ?? 0).toBe(closedCount);
+    expect(trigger.attributes("aria-expanded")).toBe("false");
     await duration.trigger("keydown", { key: "Escape" });
     expect(wrapper.emitted("update:open")?.at(-1)).toEqual([false]);
   });

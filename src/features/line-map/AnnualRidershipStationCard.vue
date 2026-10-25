@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import { computed } from "vue";
-import { BarChart3, ChevronDown, UsersRound } from "lucide-vue-next";
+import { BarChart3, UsersRound } from "lucide-vue-next";
 import { useI18n, type TranslationKey } from "../../i18n";
 import type {
   AnnualRidershipRankingScope,
@@ -98,8 +99,7 @@ function levelDescription(level: RidershipRankingPresentation["level"]): string 
   });
 }
 
-function handleScopeChange(event: Event): void {
-  const value = (event.target as HTMLSelectElement | null)?.value;
+function handleScopeChange(value: string): void {
   if (value === "network" || value === "mode" || value === "line") {
     emit("update:scope", value);
   }
@@ -136,12 +136,7 @@ function handleScopeChange(event: Event): void {
 
       <label v-if="scopeOptions.length > 1" class="annual-ridership-station-card__scope">
         <span>{{ t("globalMap.sidebar.annualRidershipComparison") }}</span>
-        <span class="annual-ridership-station-card__select-wrap">
-          <select :value="scope" :aria-label="t('globalMap.sidebar.annualRidershipComparison')" @change="handleScopeChange">
-            <option v-for="option in scopeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-          </select>
-          <ChevronDown :size="14" aria-hidden="true" />
-        </span>
+        <MaterialCombobox :model-value="scope" :options="scopeOptions.map(option => ({ id: option.value, label: option.label }))" :aria-label="t('globalMap.sidebar.annualRidershipComparison')" teleport @update:model-value="handleScopeChange" />
       </label>
 
       <div v-if="ranking" class="annual-ridership-station-card__ranking">

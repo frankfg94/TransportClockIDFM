@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "../i18n";
+import { usePanelFocus } from "./usePanelFocus";
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     open: boolean;
     eyebrow?: string;
@@ -24,6 +25,20 @@ const emit = defineEmits<{
 }>();
 const { t } = useI18n();
 const resolvedCloseLabel = computed(() => t("common.actions.close"));
+const dialogPanel = ref<HTMLElement>();
+const { handleTab } = usePanelFocus(dialogPanel, () => props.open, () => true);
+onMounted(() => {
+  // A first async mount may resolve the focus watcher before DOM insertion.
+  if (props.open) dialogPanel.value?.focus({ preventScroll: true });
+});
+
+function handleDialogKeydown(event: KeyboardEvent): void {
+  handleTab(event);
+  if (event.key !== "Escape" || event.defaultPrevented) return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit("close");
+}
 </script>
 
 <template>
@@ -31,11 +46,14 @@ const resolvedCloseLabel = computed(() => t("common.actions.close"));
     <Transition name="modal-scale">
       <div v-if="open" class="modal-backdrop" @click.self="emit('close')">
         <section
+          ref="dialogPanel"
           class="modal-panel"
           :class="panelClass"
           role="dialog"
           aria-modal="true"
           :aria-label="title"
+          tabindex="-1"
+          @keydown="handleDialogKeydown"
         >
           <header class="modal-panel__header">
             <slot name="header">

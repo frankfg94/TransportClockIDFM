@@ -1,3 +1,4 @@
+import MaterialCombobox from "../src/components/MaterialCombobox.vue";
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -149,8 +150,8 @@ describe("GlobalMapPickerSideBar annual ridership", () => {
 
     await flushPromises();
 
-    const comparison = wrapper.get('.annual-ridership-station-card select');
-    expect((comparison.element as HTMLSelectElement).value).toBe("line");
+    const comparison = wrapper.getComponent<typeof MaterialCombobox>('.annual-ridership-station-card .material-combobox');
+    expect(comparison.props("modelValue")).toBe("line");
     expect(wrapper.text()).toContain("2 / 47");
     wrapper.unmount();
   });
@@ -457,7 +458,8 @@ describe("GlobalMapPickerSideBar annual ridership", () => {
     expect(wrapper.text()).toContain("2 / 8");
     expect(wrapper.get('[role="meter"]').attributes("aria-valuenow")).toBe("85.7");
     expect(wrapper.get(".annual-ridership-station-card__meter-fill").attributes("style")).toContain("width: 85.7%");
-    await wrapper.get("select").setValue("mode");
+    wrapper.getComponent<typeof MaterialCombobox>('.material-combobox').vm.$emit("update:modelValue", "mode");
+    await flushPromises();
     expect(wrapper.emitted("update:scope")?.[0]).toEqual(["mode"]);
     wrapper.unmount();
   });
@@ -471,6 +473,7 @@ describe("GlobalMapPickerSideBar annual ridership", () => {
       props: { mobileSheet: true },
     });
 
+    expect(wrapper.findComponent({ name: "DraggableBottomSheet" }).exists()).toBe(true);
     const sidebar = wrapper.get("[data-global-map-picker-sidebar]");
     const handle = wrapper.get("[data-global-map-sidebar-sheet-handle]");
     expect(sidebar.attributes("data-mobile-sidebar-sheet")).toBe("collapsed");
@@ -485,16 +488,19 @@ describe("GlobalMapPickerSideBar annual ridership", () => {
       button: 0,
       clientY: 500,
       pointerId: 3,
+      isPrimary: true,
       pointerType: "touch",
     });
     await handle.trigger("pointermove", {
       clientY: 120,
       pointerId: 3,
+      isPrimary: true,
       pointerType: "touch",
     });
     await handle.trigger("pointerup", {
       clientY: 120,
       pointerId: 3,
+      isPrimary: true,
       pointerType: "touch",
     });
     expect(wrapper.emitted("mobile-sheet-snap-change")?.at(-1)).toEqual(["expanded"]);

@@ -11,7 +11,7 @@ import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
 import type { NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
 import type { NeighborhoodGtfsWorkerDiagnostics, NeighborhoodGtfsWorkerRequest, NeighborhoodGtfsWorkerResponse } from "./neighborhoodGtfsWorkerProtocol";
 import { createNeighborhoodGtfsSchedulingQueues } from "./neighborhoodGtfsTaskQueue";
-import { createNeighborhoodGtfsWalkingMatrix } from "./neighborhoodGtfsWalkingMatrix";
+import { createNeighborhoodGtfsWalkingMatrix, type DiagnosticWalkingRoute, type WalkingMatrixObservation } from "./neighborhoodGtfsWalkingMatrix";
 import { createNeighborhoodGtfsAssetReader } from "./neighborhoodGtfsAssets";
 import { createNeighborhoodTimetableCache, selectNeighborhoodCivilTimetable, selectNeighborhoodServiceTimetable } from "./neighborhoodTimetableCache";
 import { resolveNightAccess } from "../../../shared/gtfs/nightAccess";
@@ -29,7 +29,12 @@ async function observeWorkerStep<T>(diagnostics: NeighborhoodGtfsWorkerDiagnosti
   if (!diagnostics?.steps) return work();
   const startEpochMs = performance.timeOrigin + performance.now();
   let status: "ready" | "error" = "ready";
-  try { return await work(); } catch (error) { status = "error"; throw error; }
+  try { return await work(); } catch (error) {
+    status = "error";
+    details.failure = { cause: error instanceof Error && error.name === "TimeoutError" ? "timeout"
+      : error instanceof Error && error.name === "AbortError" ? "cancelled" : "exception" };
+    throw error;
+  }
   finally {
     const endEpochMs = performance.timeOrigin + performance.now();
     diagnostics.steps.push({ task, startEpochMs, endEpochMs, durationMs: Math.round(endEpochMs - startEpochMs), status, details });
@@ -49,34 +54,62 @@ const runtime = {
 const timetable = createGtfsTimetableLoader<string>(runtime);
 const loadTimetable = createNeighborhoodTimetableCache(timetable.loadForDate);
 const matrix = createNeighborhoodGtfsWalkingMatrix();
+const walkingPairIds = new Map<string, string>();
+const walkingWorkerId = crypto.randomUUID();
+let nextWalkingPair = 0;
+async function observedMatrix(baseUrl: string, diagnostics: NeighborhoodGtfsWorkerDiagnostics,
+  origin: Parameters<typeof matrix>[1], destinations: Parameters<typeof matrix>[2],
+  options: { reverse?: boolean; phase?: WalkingMatrixObservation["phase"] } = {}) {
+  const phase = options.phase ?? (destinations.some(to => (to as typeof to & { walkingPhase?: string }).walkingPhase === "final-line-access")
+    ? "final-line-access" : options.reverse ? "egress" : "initial-access");
+  const pairIds = diagnostics.steps ? destinations.map(to => {
+    const from = options.reverse ? to : origin, end = options.reverse ? origin : to;
+    const key = JSON.stringify([baseUrl, from.lon, from.lat, end.lon, end.lat]);
+    if (!walkingPairIds.has(key)) walkingPairIds.set(key, `${walkingWorkerId}:${++nextWalkingPair}`);
+    return walkingPairIds.get(key)!;
+  }) : [];
+  const requests: WalkingMatrixObservation[] = [];
+  const details: Record<string, unknown> = { phase, destinations: destinations.length, reverse: options.reverse === true,
+    pairIds: [...new Set(pairIds)], proxyRequests: requests };
+  return observeWorkerStep(diagnostics, "walking-matrix", details, async () => {
+    const routes = await matrix(baseUrl, origin, destinations, { ...options, phase, coldStart,
+      observeRequest: request => requests.push(request),
+      observeStorage: available => { details.persistentStorageAvailable = available; },
+      observe: (cached, reused, examined) => {
+        diagnostics.matrixCalls++;
+        if (cached) diagnostics.matrixCacheHits++;
+        diagnostics.walkingPairsReused += reused;
+        diagnostics.walkingPairsExamined = (diagnostics.walkingPairsExamined ?? 0) + examined;
+        diagnostics.walkingPairsRequested += examined - reused;
+        details.reusedPairs = reused; details.requestedPairs = examined - reused;
+      } });
+    details.verified = routes.filter(route => !route.fallback).length;
+    details.estimated = routes.filter(route => route.fallback).length;
+    details.providers = [...new Set(routes.map(route => route.provider))];
+    details.datasetVersions = [...new Set(routes.map(route => route.datasetVersion).filter(Boolean))];
+    details.unavailabilityReasons = [...new Set(routes.filter(route => route.fallback).map(route => route.unavailabilityReason ?? "unavailable"))];
+    const upstream = new Map<string, NonNullable<DiagnosticWalkingRoute["walkingDiagnostic"]>>();
+    for (const route of routes) {
+      const d = route.walkingDiagnostic;
+      // Only the explicitly safe schema crosses the diagnostic boundary.
+      if (d) upstream.set(`${d.requestId}:${d.cacheState}:${d.cause}`, { source: d.source, phase: d.phase, cause: d.cause,
+        requestId: d.requestId, httpStatus: d.httpStatus, observedAt: d.observedAt, queuedMs: d.queuedMs,
+        durationMs: d.durationMs, retryAfterMs: d.retryAfterMs, cacheState: d.cacheState });
+    }
+    details.providerResponses = [...upstream.values()];
+    if (details.estimated) details.estimatedPairs = routes.flatMap((route, i) => route.fallback ? [{ destination: destinations[i],
+      pairId: pairIds[i], durationSeconds: route.durationSeconds, provider: route.provider, reason: route.unavailabilityReason ?? "unavailable",
+      diagnostic: route.walkingDiagnostic && upstream.get(`${route.walkingDiagnostic.requestId}:${route.walkingDiagnostic.cacheState}:${route.walkingDiagnostic.cause}`) }] : []);
+    return routes;
+  });
+}
 type RoutingContext = { baseUrl: string; diagnostics: NeighborhoodGtfsWorkerDiagnostics; isCancelled: () => boolean };
 const route = createNeighborhoodGtfsRouter<RoutingContext>({
   ...runtime,
   isCancelled: context => context.isCancelled(),
   getManifest: context => runtime.getManifest(context.baseUrl, context.diagnostics),
   readJson: <T>(context: RoutingContext, path: string) => readAsset<T>(context.baseUrl, path, context.diagnostics),
-  matrix: (context, origin, destinations, options) => {
-    const details: Record<string, unknown> = { destinations: destinations.length, reverse: options?.reverse === true };
-    return observeWorkerStep(context.diagnostics, "walking-matrix", details, async () => {
-      const routes = await matrix(context.baseUrl, origin, destinations, { ...options, coldStart,
-        observeStorage: available => { details.persistentStorageAvailable = available; }, observe: (cached, reused, examined) => {
-        context.diagnostics.matrixCalls++;
-        if (cached) context.diagnostics.matrixCacheHits++;
-        context.diagnostics.walkingPairsReused += reused;
-        context.diagnostics.walkingPairsExamined = (context.diagnostics.walkingPairsExamined ?? 0) + examined;
-        context.diagnostics.walkingPairsRequested += examined - reused;
-        details.reusedPairs = reused; details.requestedPairs = examined - reused;
-      } });
-      details.verified = routes.filter(route => !route.fallback).length;
-      details.estimated = routes.filter(route => route.fallback).length;
-      details.providers = [...new Set(routes.map(route => route.provider))];
-      details.datasetVersions = [...new Set(routes.map(route => route.datasetVersion).filter(Boolean))];
-      details.unavailabilityReasons = [...new Set(routes.filter(route => route.fallback).map(route => route.unavailabilityReason ?? "unavailable"))];
-      if (details.estimated) details.estimatedPairs = routes.flatMap((route, i) => route.fallback ? [{ destination: destinations[i],
-        durationSeconds: route.durationSeconds, provider: route.provider, reason: route.unavailabilityReason ?? "unavailable" }] : []);
-      return routes;
-    });
-  },
+  matrix: (context, origin, destinations, options) => observedMatrix(context.baseUrl, context.diagnostics, origin, destinations, options),
 });
 
 const topologies = new Map<string, Promise<LineTopology | undefined>>();
@@ -144,6 +177,7 @@ scope.addEventListener("message", (event: MessageEvent<NeighborhoodGtfsWorkerReq
     const diagnostics: NeighborhoodGtfsWorkerDiagnostics = { kind: message.kind, queueMs: Math.round(started - enqueued), taskMs: 0, assetReads: 0, matrixCalls: 0, matrixCacheHits: 0, walkingPairsReused: 0, walkingPairsRequested: 0 };
     if (message.debug) { diagnostics.enqueuedEpochMs = performance.timeOrigin + enqueued; diagnostics.startedEpochMs = performance.timeOrigin + started; diagnostics.steps = []; }
     if (message.kind === "routes") { diagnostics.purpose = message.request.purpose; diagnostics.destinations = message.request.destinations.length; }
+    if (message.kind === "night-access") diagnostics.purpose = "night-transport";
     if (message.kind !== "routes") activeDiagnostics = diagnostics;
     try {
       const payload = message.kind === "night-access" ? await resolveNightAccess(message.request, {
@@ -151,11 +185,7 @@ scope.addEventListener("message", (event: MessageEvent<NeighborhoodGtfsWorkerReq
           const current = await runtime.getManifest(baseUrl);
           return selectNeighborhoodCivilTimetable(await loadTimetable(baseUrl, lineId, date, `${current?.timetable?.path}:${current?.cacheGeneration}`));
         },
-        matrix: (origin, destinations) => matrix(baseUrl, origin, destinations, { coldStart,
-          observe: (cached, reused, examined) => {
-            diagnostics.matrixCalls++; if (cached) diagnostics.matrixCacheHits++;
-            diagnostics.walkingPairsReused += reused; diagnostics.walkingPairsRequested += examined - reused;
-          } }),
+        matrix: (origin, destinations) => observedMatrix(baseUrl, diagnostics, origin, destinations, { phase: "night-access" }),
         assertCurrent: () => { if (isCancelled()) throw new DOMException("Obsolete night access", "AbortError"); },
       }) : message.kind === "frequency" ? await frequency(baseUrl, message.lineId)
         : message.kind === "last-service" ? await lastService(baseUrl, message)

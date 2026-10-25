@@ -1,10 +1,9 @@
 import { cp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  assertCleanGitWorktree,
   assertReadableFile,
   assertValidatedArtifact,
-  getCurrentSourceRevision,
+  getReleaseSource,
   getApkSignerCertificateSha256,
   getVersionCode,
   getVersionName,
@@ -12,16 +11,18 @@ import {
   isOversizeApproved,
   mobileReleaseManifestPath,
   mobileReleaseOutputDir,
-  npxCommand,
+  mobileReleaseProvenancePath,
   projectRoot,
   requireEnv,
   run,
 } from "./common";
 import { createAndroidReleaseManifest } from "./releaseMetadata";
+import { releaseConfiguration, sha256 } from "./sourceSnapshot";
 
 async function main(): Promise<void> {
-  assertCleanGitWorktree();
-  const sourceRevision = getCurrentSourceRevision();
+  const source = getReleaseSource();
+  const { sourceRevision } = source;
+  releaseConfiguration();
   const versionCode = getVersionCode();
   const versionName = getVersionName(versionCode);
   const apiBaseUrl = requireEnv("NUXT_PUBLIC_API_BASE_URL");
@@ -33,12 +34,17 @@ async function main(): Promise<void> {
 
   const buildEnvironment = {
     ...process.env,
+    NODE_ENV: "production",
     CAPACITOR_BUILD: "true",
+    CAPACITOR_LIVE_RELOAD: "false",
+    CF_PAGES_COMMIT_SHA: sourceRevision,
+    NUXT_BUILD_DIR: ".nuxt-mobile-release",
     NUXT_PUBLIC_API_BASE_URL: apiBaseUrl,
     NUXT_PUBLIC_APP_SOURCE_REVISION: sourceRevision,
   };
-  run(npxCommand(), ["nuxt", "generate"], buildEnvironment);
-  run(npxCommand(), ["cap", "sync", "android"], buildEnvironment);
+  // Avoid changing the shared dev server's .nuxt directory.
+  run(process.execPath, [join(projectRoot, "node_modules/nuxt/bin/nuxt.mjs"), "generate"], buildEnvironment);
+  run(process.execPath, [join(projectRoot, "node_modules/@capacitor/cli/bin/capacitor"), "sync", "android"], buildEnvironment);
   run(gradleCommand(), [
     "assembleRelease",
     `-PMOBILE_RELEASE_VERSION_CODE=${versionCode}`,
@@ -71,6 +77,11 @@ async function main(): Promise<void> {
     signingCertificateSha256,
     oversizeApproved: false,
   });
+  if (source.snapshot) {
+    manifest.sourceKind = "worktree-snapshot";
+    manifest.baseCommit = source.snapshot.baseCommit;
+    manifest.snapshotSha256 = source.snapshot.snapshotSha256;
+  }
   if (manifest.sizeBytes > 25 * 1024 * 1024 && isOversizeApproved()) {
     manifest.oversizeApproved = true;
   }
@@ -80,7 +91,14 @@ async function main(): Promise<void> {
     apkPath,
     expectedRevision: sourceRevision,
     approveOversize: isOversizeApproved(),
+    expectedCertificateSha256: process.env.MOBILE_RELEASE_EXPECTED_CERTIFICATE_SHA256,
   });
+  const after = getReleaseSource();
+  if (after.sourceRevision !== sourceRevision) throw new Error("Sources changed during build.");
+  if (source.snapshot) {
+    const provenance = { schemaVersion: 1, snapshot: source.snapshot, artifact: manifest, manifestSha256: sha256(JSON.stringify(manifest)) };
+    await writeFile(mobileReleaseProvenancePath, `${JSON.stringify(provenance, null, 2)}\n`);
+  }
 
   console.log(`APK validée : ${apkPath}`);
   console.log(`Manifest : ${mobileReleaseManifestPath}`);

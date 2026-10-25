@@ -777,6 +777,26 @@ function crossProduct(
 }
 
 describe("DeparturePatternModal settings", () => {
+  it("shows the countdown in the current station black badge", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-10-22T09:20:00+02:00"));
+    const wrapper = mount(DeparturePatternModal, {
+      props: { open: true, board, pattern, embedded: true, smartTrafficDetection: false, showMiniMap: false, departure: {
+        id: "next-departure", destination: "Terminus", lineRef: "line:test",
+        monitoringRef: "stop:test", stopName: "Station test", monitoringLabel: "Station test", vehicleAtStop: false, expectedDepartureTime: "2026-10-22T09:24:00+02:00",
+      } },
+      global: { stubs: { Teleport: true, VueFlow: VueFlowNodeStub, Handle: true, MiniMap: true } },
+    });
+    expect(wrapper.get(".travel-details").text()).toContain("dans 4 min");
+    expect(wrapper.get(".travel-details").element.tagName).toBe("EM");
+    expect(wrapper.find("header .travel-details").exists()).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(wrapper.get(".travel-details").text()).toContain("dans 3 min");
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(wrapper.get(".travel-details").text()).toContain("Imminent");
+    wrapper.unmount();
+  });
+
   it.each([
     { lineId: "line:IDFM:C01737", label: "Transilien H", transportType: "train" },
     { lineId: "line:IDFM:C01731", label: "Transilien R", transportType: "train" },

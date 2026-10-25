@@ -9,6 +9,11 @@ import type { NeighborhoodFact, NeighborhoodFactGeography, NeighborhoodFactPlace
 import MiniTravelDisplay from "./MiniTravelDisplay.vue";
 import { summarizeNearbyStationAccess } from "./nearbyJourneyTiming";
 import type { ServiceQualityMode } from "./serviceQualityApi";
+import LineIconBadge from "../../components/LineIconBadge.vue";
+import { createLinePresentation } from "../../services/linePresentation";
+import type { TransitFamily } from "../../types/transit";
+import { formatServiceTime } from "./neighborhood/journeys";
+import { formatTransportLineName } from "./neighborhood/verdict-transport-facts/heavyTransports";
 
 const props = defineProps<{
   fact: NeighborhoodFact;
@@ -27,6 +32,35 @@ const transportAccessChoices = computed(() => props.fact.travel?.routes?.filter(
 const hasEstimatedWalking = computed(() => (props.fact.travel?.routes?.map(route => route.journey)
   ?? (props.fact.travel ? [props.fact.travel.journey] : []))
   .some(journey => summarizeNearbyStationAccess(journey).walkingEstimated));
+
+type StructuralLine = NonNullable<NeighborhoodFact["transportLines"]>[number];
+const structuralModeKeys = {
+  METRO: "nearbyStations.neighborhoodScore.structuralModes.metro",
+  RER: "nearbyStations.neighborhoodScore.structuralModes.rer",
+  TRAIN: "nearbyStations.neighborhoodScore.structuralModes.train",
+  TRAM: "nearbyStations.neighborhoodScore.structuralModes.tram",
+  CABLE: "nearbyStations.neighborhoodScore.structuralModes.cable",
+  OTHER: "nearbyStations.neighborhoodScore.structuralModes.other",
+} as const;
+const structuralGroups = computed(() => Object.entries(structuralModeKeys).map(([mode, labelKey]) => ({
+  mode, labelKey,
+  lines: (props.fact.transportLines ?? []).filter(line => {
+    const group = line.mode === "TRANSILIEN" ? "TRAIN" : line.mode in structuralModeKeys ? line.mode : "OTHER";
+    return group === mode;
+  }).sort((a, b) => a.code.localeCompare(b.code, "fr", { numeric: true })),
+})).filter(group => group.lines.length));
+
+function lineIcon(line: StructuralLine) {
+  const family = (line.mode === "TRAIN" ? "TRANSILIEN" : line.mode) as TransitFamily;
+  const label = formatTransportLineName(line).replace(/^(?:métro|metro|rer|train|transilien|tramway|tram|câble|cable)\s+/iu, "");
+  return { id: line.id, label, family,
+    ...createLinePresentation({ id: line.id, code: label, family,
+      color: line.color || undefined, textColor: line.textColor || undefined }) };
+}
+
+function lastServiceTime(seconds: number): string {
+  return `${formatServiceTime(seconds)}${seconds >= 86400 ? ` ${t("nearbyStations.neighborhoodScore.nextServiceDay")}` : ""}`;
+}
 
 const transportModes: readonly ServiceQualityMode[] = ["METRO", "RER", "TRAIN", "TRAM"];
 const transportModeKeys: Record<ServiceQualityMode, TranslationKey> = {
@@ -167,6 +201,28 @@ function geographyLabel(): string {
       role="tooltip"
     >
       <strong>{{ factTooltip() }}</strong>
+      <section v-if="structuralGroups.length" class="nearby-neighborhood-score-fact__transport-lines" data-testid="structural-lines">
+        <h4>{{ t("nearbyStations.neighborhoodScore.structuralBreakdown") }}</h4>
+        <div v-for="group in structuralGroups" :key="group.mode" class="nearby-neighborhood-score-fact__transport-line-group" :data-structural-mode="group.mode">
+          <h5>{{ t(group.labelKey) }}</h5>
+          <ul class="nearby-neighborhood-score-fact__transport-line-list">
+            <li v-for="line in group.lines" :key="line.id" class="nearby-neighborhood-score-fact__line-detail" data-testid="structural-line">
+              <LineIconBadge :line="lineIcon(line)" compact eager />
+              <span>{{ formatTransportLineName(line) }}<small v-if="line.future"> · {{ t("nearbyStations.neighborhoodScore.futureLine") }}</small></span>
+            </li>
+          </ul>
+        </div>
+      </section>
+      <section v-if="fact.lastServices?.length" class="nearby-neighborhood-score-fact__transport-lines" data-testid="last-services">
+        <ul class="nearby-neighborhood-score-fact__transport-line-list">
+          <li v-for="item in fact.lastServices" :key="item.line.id" class="nearby-neighborhood-score-fact__line-detail" data-testid="last-service-line">
+            <LineIconBadge :line="lineIcon(item.line)" compact eager />
+            <span>{{ formatTransportLineName(item.line) }} · {{ item.seconds !== undefined ? lastServiceTime(item.seconds) : t("nearbyStations.neighborhoodScore.lastServiceUnavailable") }}
+              <small>{{ item.stopName ?? t("nearbyStations.neighborhoodScore.lastServiceStationUnknown") }}</small>
+            </span>
+          </li>
+        </ul>
+      </section>
       <section
         v-if="transportReliabilityGroups.length"
         class="nearby-neighborhood-score-fact__transport-lines"
@@ -323,6 +379,8 @@ function geographyLabel(): string {
 .nearby-neighborhood-score-fact__transport-line-name { color: #344054; font-size: .7rem; min-width: 0; overflow-wrap: anywhere; }
 .nearby-neighborhood-score-fact__transport-line-score { color: #4034df; font-size: .7rem; font-variant-numeric: tabular-nums; font-weight: 900; white-space: nowrap; }
 .nearby-neighborhood-score-fact__transport-line-label { color: #667085; font-size: .64rem; grid-column: 1 / -1; margin-top: -2px; }
+.nearby-neighborhood-score-fact__line-detail { align-items: center; display: flex; gap: 8px; padding: 3px 0; font-size: .72rem; }
+.nearby-neighborhood-score-fact__line-detail small { color: #667085; display: block; font-size: .66rem; }
 .nearby-neighborhood-score-fact__places { display: grid; gap: 3px; list-style: none; margin: 8px 0 0; max-width: 355px; padding: 0; }
 .nearby-neighborhood-score-fact__places li { color: #344054; font-size: .68rem; line-height: 1.35; padding-left: 10px; position: relative; }
 .nearby-neighborhood-score-fact__places li::before { color: #8490a4; content: "·"; left: 0; position: absolute; }
@@ -334,7 +392,7 @@ function geographyLabel(): string {
 .nearby-neighborhood-score-fact__action:hover, .nearby-neighborhood-score-fact__action:focus-visible { background: #4034df; outline: 2px solid rgba(81,70,255,.24); outline-offset: 2px; }
 @media (max-width: 680px) {
   .nearby-neighborhood-score-fact__tooltip { left: 0; max-width: calc(100vw - 42px); position: absolute; top: calc(100% + 4px); transform: none; width: calc(100vw - 42px); }
-  .nearby-neighborhood-score-fact:hover .nearby-neighborhood-score-fact__tooltip { opacity: 0; pointer-events: none; visibility: hidden; }
-  .nearby-neighborhood-score-fact:focus-within .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact--open .nearby-neighborhood-score-fact__tooltip { opacity: 1; pointer-events: auto; position: relative; top: auto; visibility: visible; width: auto; }
+  .nearby-neighborhood-score-fact:hover .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact:focus-within .nearby-neighborhood-score-fact__tooltip { opacity: 0; pointer-events: none; visibility: hidden; }
+  .nearby-neighborhood-score-fact.nearby-neighborhood-score-fact--open .nearby-neighborhood-score-fact__tooltip { opacity: 1; pointer-events: auto; position: relative; top: auto; visibility: visible; width: auto; }
 }
 </style>

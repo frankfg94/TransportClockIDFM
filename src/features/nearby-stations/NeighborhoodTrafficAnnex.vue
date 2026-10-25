@@ -5,7 +5,9 @@ import { toServerApiUrl } from "../../services/serverApi";
 import TrafficDisruptionCard from "../traffic/TrafficDisruptionCard.vue";
 import { getCurrentTrafficDisruptions } from "../traffic/trafficTiming";
 import type { TrafficResponse } from "../traffic/types";
+import type { NearbyTrafficPdfState, NeighborhoodScorePdfSection } from "./neighborhoodScorePdf";
 const props = defineProps<{ lineRefs: string[]; originKey: string }>();
+const emit = defineEmits<{ "export-state": [state: NearbyTrafficPdfState] }>();
 const { d, t } = useI18n();
 const response = ref<TrafficResponse>();
 const loading = ref(false), failed = ref(false);
@@ -15,13 +17,17 @@ const disruptions = computed(() => getCurrentTrafficDisruptions(response.value?.
 const incomplete = computed(() => response.value?.cache?.lastError
   || ["stale", "rate-limited", "error", "refreshing"].includes(response.value?.cache?.state ?? "")
   || response.value?.lines.some(line => line.error || line.status === "error" || line.status === "unknown"));
-function reset() { controller?.abort(); controller = undefined; loading.value = false; failed.value = false; response.value = undefined; }
+function reset() {
+  controller?.abort(); controller = undefined; loading.value = false; failed.value = false; response.value = undefined;
+  emit("export-state", { loading: false });
+}
 watch(() => props.originKey, reset);
 onBeforeUnmount(reset);
 async function load() {
   controller?.abort();
   const request = new AbortController(); controller = request;
   loading.value = true; failed.value = false;
+  emit("export-state", { loading: true });
   try {
     const query = new URLSearchParams({ lineRefs: props.lineRefs.join(",") });
     const result = await fetch(toServerApiUrl("/api/traffic?" + query), { signal: request.signal });
@@ -30,7 +36,32 @@ async function load() {
     if (!payload.configured || !Array.isArray(payload.lines)) throw new Error("Traffic unavailable");
     if (controller === request) response.value = payload;
   } catch { if (controller === request && !request.signal.aborted) failed.value = true; }
-  finally { if (controller === request) loading.value = false; }
+  finally {
+    if (controller === request) {
+      loading.value = false;
+      emit("export-state", { loading: false, section: createPdfSection() });
+    }
+  }
+}
+
+function createPdfSection(): NeighborhoodScorePdfSection {
+  const items: string[] = [];
+  if (failed.value) items.push(t("nearbyStations.neighborhoodScore.trafficAnnex.error"));
+  if (response.value) {
+    items.push(t("nearbyStations.neighborhoodScore.updatedAt", {
+      time: d(response.value.cache?.refreshedAt ?? response.value.generatedAt, { dateStyle: "short", timeStyle: "short" }),
+    }));
+    if (incomplete.value) items.push(t("nearbyStations.neighborhoodScore.trafficAnnex.stale"));
+    if (!disruptions.value.length) items.push(t("nearbyStations.neighborhoodScore.trafficAnnex.empty"));
+    for (const disruption of disruptions.value) {
+      items.push(disruption.title);
+      if (disruption.message) items.push(disruption.message);
+      if (disruption.impactedStopNames.length) {
+        items.push(`${t("traffic.affectedStops")} ${disruption.impactedStopNames.slice(0, 8).join(", ")}`);
+      }
+    }
+  }
+  return { title: t("nearbyStations.neighborhoodScore.trafficAnnex.title"), items };
 }
 </script>
 <template>

@@ -115,6 +115,7 @@ function aggregateNeighborhoodScoreInternal(
     3,
   );
   preserveChateletJourneyFact(selectedNegativeFacts, availableCategories.flatMap((category) => category.negativeFacts), "negative", 3);
+  preservePersonalJourneyFacts(selectedNegativeFacts, categories.flatMap(category => category.negativeFacts));
   const selectedNeutralFacts = selectFacts(
     categories.flatMap((category) => category.neutralFacts),
     "neutral",
@@ -159,10 +160,17 @@ function preserveJourneyBenchmarkFacts(
   selected: NeighborhoodFact[],
   facts: readonly NeighborhoodFact[],
 ): void {
+  preservePersonalJourneyFacts(selected, facts);
   for (const benchmark of facts.filter((fact) => fact.family.startsWith("major-station:") || fact.family.startsWith("employment-hub:") || fact.family.startsWith("transport-hub:") || fact.family.startsWith("transport-proximity:"))) {
     if (!selected.some((fact) => fact.id === benchmark.id)) selected.push(benchmark);
   }
   selected.sort(compareFacts);
+}
+
+function preservePersonalJourneyFacts(selected: NeighborhoodFact[], facts: readonly NeighborhoodFact[]): void {
+  for (const fact of facts.filter(fact => fact.family.startsWith("personal-journey:"))) {
+    if (!selected.some(candidate => candidate.id === fact.id)) selected.push(fact);
+  }
 }
 
 function mergeBackendVerdict(categories: NeighborhoodCategoryResult[], verdict: PublicNeighborhoodVerdict | undefined): NeighborhoodCategoryResult[] {
@@ -183,6 +191,7 @@ function mergeBackendVerdict(categories: NeighborhoodCategoryResult[], verdict: 
       "negative",
       2,
     );
+    preservePersonalJourneyFacts(negativeFacts, local.negativeFacts);
     const neutralFacts = preserveSelectedFamilyFact(
       selectFacts([...local.neutralFacts, ...externalFacts], "neutral", 4),
       [...local.neutralFacts, ...externalFacts],

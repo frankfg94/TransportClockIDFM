@@ -342,7 +342,7 @@ function findPriorityAlert(
     startsAt: effectiveStart.toISOString(),
     startsInMinutes: Math.max(
       0,
-      Math.round((effectiveStart.getTime() - now.getTime()) / 60_000),
+      Math.ceil((effectiveStart.getTime() - now.getTime()) / 60_000),
     ),
     umbrellaAfter:
       selected.kind === "rain" || selected.kind === "storm"

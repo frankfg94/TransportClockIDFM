@@ -14,6 +14,7 @@ import { Handle, Position, VueFlow } from "@vue-flow/core";
 import type { Edge, Node } from "@vue-flow/core";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import MaterialCombobox from "../../components/MaterialCombobox.vue";
+import { usePanelFocus } from "../../components/usePanelFocus";
 import MobileActionsMenu from "../../components/MobileActionsMenu.vue";
 import StationTransferDetails from "../../components/StationTransferDetails.vue";
 import {
@@ -492,6 +493,27 @@ const emit = defineEmits<{
   close: [];
   directionChange: [directionId: string];
 }>();
+const serviceDialog = ref<HTMLElement>();
+const { handleTab } = usePanelFocus(
+  serviceDialog,
+  () => props.open && !props.embedded,
+  () => !props.embedded,
+);
+
+function handleDialogKeydown(event: KeyboardEvent): void {
+  if (event.key === "Escape" && !event.defaultPrevented && isPatternFlowFullscreen.value && document.fullscreenElement) {
+    event.preventDefault();
+    event.stopPropagation();
+    void document.exitFullscreen();
+    return;
+  }
+  if (props.embedded) return;
+  handleTab(event);
+  if (event.key !== "Escape" || event.defaultPrevented) return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit("close");
+}
 const { d, locale, t } = useI18n();
 const { settings: appSettings } = useAppSettings();
 
@@ -610,6 +632,19 @@ const hasDirectionPicker = computed(
 const isFullLineMode = computed(() =>
   Boolean(props.embedded && props.fullLine),
 );
+const departureNow = ref(Date.now());
+let departureCountdownTimer: ReturnType<typeof setInterval> | undefined;
+const departureWaitLabel = computed(() => {
+  if (props.departure?.vehicleAtStop) {
+    return `${t("alarm.fallbackDeparture")} · ${t("board.docked")}`;
+  }
+  const timestamp = Date.parse(departureTime(props.departure) ?? "");
+  if (!Number.isFinite(timestamp)) return t("alarm.fallbackDeparture");
+  const minutes = Math.max(0, Math.round((timestamp - departureNow.value) / 60_000));
+  return minutes > 0
+    ? t("pattern.passageIn", { minutes })
+    : t("pattern.passageNow");
+});
 const departureClock = computed(() =>
   formatClock(departureTime(props.departure)),
 );
@@ -7104,6 +7139,10 @@ watch(
 );
 
 onMounted(() => {
+  if (props.open && !props.embedded) serviceDialog.value?.focus({ preventScroll: true });
+  departureCountdownTimer = setInterval(() => {
+    departureNow.value = Date.now();
+  }, 1000);
   document.addEventListener("fullscreenchange", syncPatternFlowFullscreenState);
   if (isInfoCardsDebugQueryEnabled()) {
     infoCardsDebugEnabled.value = true;
@@ -7116,6 +7155,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (departureCountdownTimer !== undefined) clearInterval(departureCountdownTimer);
   transferHydrationRequest += 1;
   clearPatternDistanceLabelHideTimer();
   resetTransferHydrationStallState();
@@ -7142,6 +7182,7 @@ onBeforeUnmount(() => {
         @click.self="!embedded && emit('close')"
       >
         <section
+          ref="serviceDialog"
           :class="
             embedded
               ? 'pattern-page-embed__panel pattern-modal'
@@ -7149,6 +7190,8 @@ onBeforeUnmount(() => {
           "
           aria-modal="true"
           role="dialog"
+          :tabindex="embedded ? undefined : -1"
+          @keydown="handleDialogKeydown"
         >
           <header v-if="!embedded" class="modal-panel__header">
             <div class="pattern-modal__title">
@@ -7672,7 +7715,10 @@ onBeforeUnmount(() => {
                           <small v-else-if="!data.served && data.branchEnd">
                             {{ t("pattern.skipped") }}
                           </small>
-                          <em v-if="data.branchChip">{{ data.branchChip }}</em>
+                          <em
+                            v-if="data.branchChip"
+                            :class="{ 'travel-details': data.current && departureClock }"
+                          >{{ data.current && departureClock ? departureWaitLabel : data.branchChip }}</em>
                           <Transition name="pattern-flow-tooltip-open" appear>
                             <article
                               v-if="

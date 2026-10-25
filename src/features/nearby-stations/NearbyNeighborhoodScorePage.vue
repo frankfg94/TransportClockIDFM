@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "#imports";
-import { ArrowLeft, Gauge } from "lucide-vue-next";
+import { ArrowLeft, Download, Gauge } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { toServerApiUrl } from "../../services/serverApi";
@@ -13,12 +13,16 @@ import { beginVerdictDebugTask, isVerdictDebugEnabled, verdictDebugTimeline } fr
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import { fetchGpeStations } from "../transport-map/gpeStationsApi";
 import AdressBook from "../address-book/AdressBook.vue";
+import VerdictPersonalJourneys from "./VerdictPersonalJourneys.vue";
+import { useVerdictPersonalJourneys } from "./useVerdictPersonalJourneys";
+import type { NeighborhoodCriterionState } from "./neighborhood/criterionRegistry";
 import { toAddressBookPoint, useAddressBook, type AddressBookEntry } from "../address-book/addressBook";
 import {
   NEARBY_RADIUS_DEFAULT_METERS,
   NEARBY_SUPPORTED_MODES,
 } from "./nearbyStations";
 import type { NearbyPlace } from "./nearbyPlaces";
+import type { NeighborhoodFact } from "./neighborhood/contracts";
 import type { PublicFutureGpeStation } from "./neighborhoodVerdictApi";
 import { resolveNearbyPlaceGroupId } from "./nearbyPlacePresentation";
 import { readNearbyNeighborhoodScoreSnapshot } from "./nearbyNeighborhoodScoreSnapshot";
@@ -29,6 +33,13 @@ import { useNearbyStations } from "./useNearbyStations";
 import { useNearbyWalkingRoutes } from "./useNearbyWalkingRoutes";
 import { useTravelRoutes } from "./useTravelRoutes";
 import NearbyNeighborhoodScoreCard from "./NearbyNeighborhoodScoreCard.vue";
+import { transportSectionValues } from "./neighborhood/factPresentation";
+import {
+  downloadNeighborhoodScorePdf,
+  type NearbyRealEstatePdfState,
+  type NearbyTrafficPdfState,
+  type NeighborhoodScorePdfSection,
+} from "./neighborhoodScorePdf";
 import { buildVerdictTransportIntegrity, compareVerdictTransportSnapshots } from "./verdictTransportDebug";
 import NearbyRealEstateVerdict from "./NearbyRealEstateVerdict.vue";
 import NeighborhoodTrafficAnnex from "./NeighborhoodTrafficAnnex.vue";
@@ -43,7 +54,7 @@ import {
 
 const route = useRoute();
 const router = useRouter();
-const { t } = useI18n();
+const { d, n, t } = useI18n();
 const addressBook = useAddressBook();
 
 function queryString(value: unknown): string | undefined {
@@ -138,7 +149,11 @@ const heavy = useNearbyHeavyTransports({
   includeContextAccess: true,
   includeTramTargets: true,
 });
+const personalJourneys = useVerdictPersonalJourneys({
+  origin: nearby.selectedPlace, datetime: journeyDateTime, provider: nearbyDataProviders.travelRoutes,
+});
 const score = useNearbyNeighborhoodScore({
+  personalJourneys: personalJourneys.rows,
   fetchFrequency: fetchNeighborhoodGtfsFrequency,
   fetchLastService: fetchNeighborhoodGtfsLastService,
   journeySource: "gtfs",
@@ -174,6 +189,18 @@ const transportLoadingTasks = computed(() => neighborhoodTransportLoadingTasks({
   futureProjects: !futureProjectsReady.value,
   serviceQuality: serviceQuality.isLoading.value,
 }));
+const criteriaWithPersonalJourneys = computed<NeighborhoodCriterionState[]>(() => (score.criteria?.value ?? []).map(criterion => criterion.id !== "transport" ? criterion : {
+  ...criterion,
+  status: personalJourneys.loading.value ? "loading" : personalJourneys.hasError.value ? "degraded" : criterion.status,
+  datasets: [...criterion.datasets, ...personalJourneys.datasets.value],
+}));
+// The dedicated rows retain edit/delete controls even for unavailable journeys.
+const cardResult = computed(() => ({ ...score.result.value, categories: score.result.value.categories?.map(category => category.id !== "transport" ? category : {
+  ...category,
+  positiveFacts: category.positiveFacts.filter(fact => !fact.family.startsWith("personal-journey:")),
+  negativeFacts: category.negativeFacts.filter(fact => !fact.family.startsWith("personal-journey:")),
+  neutralFacts: category.neutralFacts.filter(fact => !fact.family.startsWith("personal-journey:")),
+}) }));
 
 // Use the complete official GPE catalog for transit routing. The point verdict
 // only includes a small pedestrian-search radius, which misses stations that
@@ -257,6 +284,20 @@ const directoryUrl = computed(() => {
 });
 const addressBookOpen = ref(false);
 type ScoreRetrySource = "stations" | "places" | "routes" | "verdict" | "timetables" | "walking" | "heavy" | "service-quality";
+const realEstateExportLoading = ref(Boolean(initialOrigin));
+const realEstatePdfSection = ref<NeighborhoodScorePdfSection>();
+const trafficExportLoading = ref(false);
+const trafficPdfSection = ref<NeighborhoodScorePdfSection>();
+
+function updateRealEstateExportState(state: NearbyRealEstatePdfState): void {
+  realEstateExportLoading.value = state.loading;
+  realEstatePdfSection.value = state.section;
+}
+
+function updateTrafficExportState(state: NearbyTrafficPdfState): void {
+  trafficExportLoading.value = state.loading;
+  trafficPdfSection.value = state.section;
+}
 
 const scoreLoading = computed(() => Boolean(initialOrigin && (
   nearby.isScanning.value
@@ -264,7 +305,28 @@ const scoreLoading = computed(() => Boolean(initialOrigin && (
   || heavy.isLoading.value
   || nearbyWalking.isLoadingPlaces.value
   || serviceQuality.isLoading.value
+  || personalJourneys.loading.value
 )));
+const exportReady = computed(() => Boolean(initialOrigin
+  && !personalJourneys.loading.value
+  && !scoreLoading.value
+  && futureProjectsReady.value
+  && !realEstateExportLoading.value
+  && !trafficExportLoading.value
+  && score.transportPending.value.length === 0
+  && score.criteria.value.every(criterion => criterion.status !== "loading"
+    && criterion.datasets.every(dataset => dataset.status !== "loading"))));
+const exportingPdf = ref(false);
+const pdfExportStatus = ref<"saved" | "cancelled" | "downloaded" | "error">();
+const pdfExportMessage = computed(() => {
+  const keys = {
+    saved: "nearbyStations.neighborhoodScore.exportPdfSaved",
+    cancelled: "nearbyStations.neighborhoodScore.exportPdfCancelled",
+    downloaded: "nearbyStations.neighborhoodScore.exportPdfDownloaded",
+    error: "nearbyStations.neighborhoodScore.exportPdfError",
+  } as const;
+  return pdfExportStatus.value ? t(keys[pdfExportStatus.value]) : "";
+});
 const scoreProgress = computed(() => {
   const datasets = score.criteria.value.flatMap((criterion) => criterion.datasets);
   return {
@@ -321,6 +383,86 @@ const scoreError = computed(() => {
   }
   return score.error.value ? t("nearbyStations.neighborhoodScore.partialError") : undefined;
 });
+
+const scoreBandKeys = {
+  excellent: "nearbyStations.neighborhoodScore.bands.excellent",
+  good: "nearbyStations.neighborhoodScore.bands.good",
+  medium: "nearbyStations.neighborhoodScore.bands.medium",
+  weak: "nearbyStations.neighborhoodScore.bands.weak",
+  "very-weak": "nearbyStations.neighborhoodScore.bands.veryWeak",
+} as const;
+
+async function exportScorePdf(): Promise<void> {
+  if (!exportReady.value || exportingPdf.value) return;
+  exportingPdf.value = true;
+  pdfExportStatus.value = undefined;
+  try {
+    const result = score.result.value;
+    const factLabel = (fact: NeighborhoodFact): string =>
+      fact.label ?? (fact.labelKey
+        ? t(fact.labelKey, transportSectionValues(fact, fact.labelValues, t))
+        : "");
+    const categorySections: NeighborhoodScorePdfSection[] = result.categories.map(category => {
+      const items = [
+        ...category.positiveFacts.map(fact => `${t("nearbyStations.neighborhoodScore.positives")} : ${factLabel(fact)}`),
+        ...category.negativeFacts.map(fact => `${t("nearbyStations.neighborhoodScore.negatives")} : ${factLabel(fact)}`),
+        ...category.neutralFacts.map(fact => `${t("nearbyStations.neighborhoodScore.neutralFacts")} : ${factLabel(fact)}`),
+      ].filter(item => !item.endsWith(" : "));
+      if (!items.length) {
+        items.push(t(category.available
+          ? "nearbyStations.neighborhoodScore.noDocumentedSignal"
+          : "nearbyStations.neighborhoodScore.categoryUnavailable"));
+      }
+      return {
+        title: t(category.labelKey),
+        value: category.available && typeof category.displayScore === "number"
+          ? `${n(category.displayScore, { maximumFractionDigits: 1 })} / 10`
+          : t("nearbyStations.neighborhoodScore.categoryUnavailable"),
+        items,
+      };
+    });
+    const bandLabel = result.band
+      ? t(scoreBandKeys[result.band])
+      : t("nearbyStations.neighborhoodScore.pdfScoreUnavailable");
+    const scoreValue = typeof result.displayScore === "number"
+      ? `${n(result.displayScore, { maximumFractionDigits: 1 })} / 10`
+      : t("nearbyStations.neighborhoodScore.pdfScoreUnavailable");
+    const sections = [
+      ...categorySections,
+      ...(trafficPdfSection.value ? [trafficPdfSection.value] : []),
+      ...(realEstatePdfSection.value ? [realEstatePdfSection.value] : []),
+    ];
+    const fileAddress = (originLabel.value ?? "")
+      .normalize("NFKD")
+      .replace(/\p{M}/gu, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 64);
+
+    const outcome = await downloadNeighborhoodScorePdf({
+      title: t("nearbyStations.neighborhoodScore.pageTitle"),
+      location: originLabel.value,
+      scoreLabel: t("nearbyStations.neighborhoodScore.pdfScoreLabel"),
+      scoreValue,
+      bandLabel,
+      coverageLine: t("nearbyStations.neighborhoodScore.coverage", {
+        available: result.availableCategoryCount,
+        total: result.totalCategoryCount,
+      }),
+      updatedLine: t("nearbyStations.neighborhoodScore.updatedAt", {
+        time: d(result.generatedAt, { dateStyle: "short", timeStyle: "short" }),
+      }),
+      sections,
+      pageLabel: (current, total) => t("nearbyStations.neighborhoodScore.pdfPage", { current, total }),
+    }, `score-quartier${fileAddress ? `-${fileAddress}` : ""}.pdf`);
+    pdfExportStatus.value = outcome.status;
+  } catch {
+    pdfExportStatus.value = "error";
+  } finally {
+    exportingPdf.value = false;
+  }
+}
 
 // No diagnostic serialization or extra requests on the normal verdict page.
 // This exposes only public page inputs/results, never server configuration.
@@ -569,7 +711,23 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
           </label>
         </fieldset>
       </div>
-      <Gauge class="nearby-neighborhood-score-page__icon" :size="42" aria-hidden="true" />
+      <div class="nearby-neighborhood-score-page__hero-actions">
+        <button
+          v-if="initialOrigin"
+          class="nearby-neighborhood-score-page__export-button"
+          type="button"
+          data-testid="verdict-export-pdf"
+          :disabled="!exportReady || exportingPdf"
+          :aria-busy="exportingPdf"
+          :title="exportingPdf ? t('nearbyStations.neighborhoodScore.exportPdfSaving') : exportReady ? t('nearbyStations.neighborhoodScore.exportPdfReady') : t('nearbyStations.neighborhoodScore.exportPdfWaiting')"
+          @click="exportScorePdf"
+        >
+          <Download :size="16" aria-hidden="true" />
+          {{ t(exportingPdf ? "nearbyStations.neighborhoodScore.exportPdfSaving" : "nearbyStations.neighborhoodScore.exportPdf") }}
+        </button>
+        <p v-if="pdfExportMessage" data-testid="verdict-pdf-export-status" :role="pdfExportStatus === 'error' ? 'alert' : 'status'">{{ pdfExportMessage }}</p>
+        <Gauge class="nearby-neighborhood-score-page__icon" :size="42" aria-hidden="true" />
+      </div>
     </header>
 
     <section v-if="!initialOrigin" class="nearby-neighborhood-score-page__empty" role="status">
@@ -583,7 +741,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 
     <NearbyNeighborhoodScoreCard
       v-if="initialOrigin"
-      :result="score.result.value"
+      :result="cardResult"
       :education-places="score.places.value"
       :education-walking-routes="nearbyWalking.placeRoutes.value"
       :origin-label="originLabel"
@@ -593,17 +751,25 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
       :error="scoreError"
       :retrying="Boolean(retryingSource)"
       :retry-disabled="false"
-      :criteria="score.criteria?.value"
+      :criteria="criteriaWithPersonalJourneys"
       :transport-loading-tasks="transportLoadingTasks"
       :directory-url="directoryUrl"
       @change-origin="openAddressSelector"
       @retry-source="retryFailedSource"
+    >
+      <template #personal-journeys><VerdictPersonalJourneys :journeys="personalJourneys" /></template>
+    </NearbyNeighborhoodScoreCard>
+    <NeighborhoodTrafficAnnex
+      v-if="realEstateOrigin"
+      :line-refs="trafficLineRefs"
+      :origin-key="`${realEstateOrigin.lon}:${realEstateOrigin.lat}`"
+      @export-state="updateTrafficExportState"
     />
-    <NeighborhoodTrafficAnnex v-if="realEstateOrigin" :line-refs="trafficLineRefs" :origin-key="`${realEstateOrigin.lon}:${realEstateOrigin.lat}`" />
     <NearbyRealEstateVerdict
       v-if="initialOrigin"
       :origin="realEstateOrigin"
       :radius-meters="realEstateRadiusMeters"
+      @export-state="updateRealEstateExportState"
     />
   </main>
   <AdressBook
@@ -632,6 +798,11 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 .nearby-neighborhood-score-page__departure-times input { background: #fff; border: 1px solid rgba(81,70,255,.24); border-radius: 8px; color: var(--ink); font: inherit; min-height: 34px; padding: 4px 8px; }
 .nearby-neighborhood-score-page__departure-times input:focus-visible { border-color: #5146ff; outline: 2px solid rgba(81,70,255,.2); outline-offset: 1px; }
 .nearby-neighborhood-score-page__icon { color: #5146ff; margin-right: 10px; opacity: .8; }
+.nearby-neighborhood-score-page__hero-actions { align-items: center; display: flex; flex-direction: column; gap: 18px; }
+.nearby-neighborhood-score-page__export-button { align-items: center; background: #5146ff; border: 1px solid #5146ff; border-radius: 10px; color: #fff; cursor: pointer; display: inline-flex; font: inherit; font-size: .78rem; font-weight: 800; gap: 8px; justify-content: center; min-height: 40px; padding: 8px 12px; white-space: nowrap; }
+.nearby-neighborhood-score-page__export-button:hover:not(:disabled), .nearby-neighborhood-score-page__export-button:focus-visible { background: #4034df; border-color: #4034df; }
+.nearby-neighborhood-score-page__export-button:focus-visible { outline: 2px solid rgba(81,70,255,.3); outline-offset: 2px; }
+.nearby-neighborhood-score-page__export-button:disabled { cursor: not-allowed; opacity: .52; }
 .nearby-neighborhood-score-page__empty { align-items: center; background: linear-gradient(135deg, #f7f7ff, #eef4fa); border: 1px dashed rgba(81,70,255,.3); border-radius: 14px; color: var(--muted); display: flex; flex-direction: column; gap: 8px; justify-content: center; min-height: 280px; padding: 28px; text-align: center; }
 .nearby-neighborhood-score-page__empty > svg { color: #5146ff; }
 .nearby-neighborhood-score-page__empty strong { color: var(--ink); }
@@ -644,6 +815,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 @media (max-width: 680px) {
   .nearby-neighborhood-score-page { padding: 18px 12px 108px; }
   .nearby-neighborhood-score-page__hero { padding: 19px; }
+  .nearby-neighborhood-score-page__hero-actions { align-items: flex-end; gap: 0; }
   .nearby-neighborhood-score-page__icon { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {

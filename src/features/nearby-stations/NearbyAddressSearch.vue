@@ -25,6 +25,7 @@ const props = defineProps<{
 const emit = defineEmits<{ "update:modelValue": [point: GeocoderPoint] }>();
 const { t } = useI18n();
 const geocoder = createIgnTransportMapGeocoder();
+const searchRoot = ref<HTMLFormElement>();
 const query = ref(props.modelValue?.label ?? "");
 const suggestions = ref<GeocoderPoint[]>([]);
 const focused = ref(false);
@@ -37,6 +38,7 @@ let reverseController: AbortController | undefined;
 let token = 0;
 let reverseToken = 0;
 let blurTimer: number | undefined;
+let lastSuggestionsQuery: string | undefined;
 
 function searchPoints(value: string, signal?: AbortSignal): Promise<GeocoderPoint[]> {
   if (props.search) return props.search(value, signal);
@@ -140,9 +142,12 @@ async function humanizeCoordinateLabel(): Promise<void> {
 }
 
 function scheduleSuggestions(): void {
+  const value = query.value.trim();
+  // Android can emit the same input again when composition ends during blur.
+  if (value === lastSuggestionsQuery) return;
+  lastSuggestionsQuery = value;
   cancelCoordinateResolution();
   if (timer !== undefined) window.clearTimeout(timer);
-  const value = query.value.trim();
   suggestions.value = savedSuggestionsFor(value);
   if (value.length < 3) {
     return;
@@ -184,6 +189,7 @@ async function submit(): Promise<void> {
 
 function select(point: GeocoderPoint): void {
   cancelCoordinateResolution();
+  cancelPendingSuggestions();
   query.value = point.label ?? query.value;
   suggestions.value = [];
   error.value = "";
@@ -191,15 +197,41 @@ function select(point: GeocoderPoint): void {
 }
 
 function handleFocus(): void {
-  if (blurTimer !== undefined) window.clearTimeout(blurTimer);
+  cancelPendingBlur();
+  lastSuggestionsQuery = undefined;
   focused.value = true;
   if (timer !== undefined) window.clearTimeout(timer);
   suggestions.value = savedSuggestionsFor(query.value.trim());
 }
 
-function handleBlur(): void {
+function cancelPendingBlur(): void {
+  if (blurTimer !== undefined) window.clearTimeout(blurTimer);
+  blurTimer = undefined;
+}
+
+function focusFirstSuggestion(event: KeyboardEvent): void {
+  if (event.shiftKey) return;
+  const first = searchRoot.value?.querySelector<HTMLButtonElement>(".nearby-address-search__suggestions button");
+  if (!first) return;
+  event.preventDefault();
+  first.focus();
+}
+
+function cancelPendingSuggestions(): void {
+  if (timer !== undefined) window.clearTimeout(timer);
+  timer = undefined;
+  token += 1;
+  controller?.abort();
+  loading.value = false;
+}
+
+function handleBlur(event: FocusEvent): void {
+  if (event.relatedTarget instanceof Node && searchRoot.value?.contains(event.relatedTarget)) return;
+  cancelPendingBlur();
   blurTimer = window.setTimeout(() => {
+    if (searchRoot.value?.contains(document.activeElement)) return;
     focused.value = false;
+    cancelPendingSuggestions();
     suggestions.value = [];
   }, 120);
 }
@@ -215,7 +247,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <form class="nearby-address-search" role="search" @submit.prevent="submit">
+  <form ref="searchRoot" class="nearby-address-search" role="search" @submit.prevent="submit" @focusin="cancelPendingBlur" @focusout="handleBlur">
     <label v-if="label">{{ label }}</label>
     <div class="nearby-address-search__field">
       <Search :size="17" aria-hidden="true" />
@@ -227,13 +259,13 @@ onBeforeUnmount(() => {
         :aria-label="label ?? t('nearbyStations.addressLabel')"
         @input="scheduleSuggestions"
         @focus="handleFocus"
-        @blur="handleBlur"
+        @keydown.tab="focusFirstSuggestion"
       />
       <LoaderCircle v-if="loading || resolvingCoordinates" class="nearby-address-search__spin" :size="16" aria-hidden="true" />
     </div>
     <ul v-if="suggestions.length" class="nearby-address-search__suggestions">
       <li v-for="suggestion in suggestions" :key="suggestion.id ?? `${suggestion.lon}:${suggestion.lat}`">
-        <button type="button" @click="select(suggestion)">
+        <button type="button" @pointerdown.prevent @click.prevent="select(suggestion)">
           <TrainFront v-if="suggestion.type === 'station'" :size="15" aria-hidden="true" />
           <Store v-else-if="suggestion.type === 'place'" :size="15" aria-hidden="true" />
           <MapPin v-else :size="15" aria-hidden="true" />

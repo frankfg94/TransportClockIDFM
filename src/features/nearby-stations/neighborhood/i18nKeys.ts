@@ -12,6 +12,10 @@ export const CATEGORY_KEYS: Record<NeighborhoodCategoryId, TranslationKey> = {
 };
 
 export const FACT_KEYS: Record<NeighborhoodFactKind, { label: TranslationKey; tooltip: TranslationKey }> = {
+  lastServices: {
+    label: "nearbyStations.neighborhoodScore.facts.lastServices.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.lastServices.tooltip",
+  },
   external: {
     label: "nearbyStations.neighborhoodScore.external.label",
     tooltip: "nearbyStations.neighborhoodScore.external.tooltip",

@@ -14,6 +14,12 @@ const props = defineProps<{
   profile?: GtfsLineFrequencyResponse;
   lineColor?: string;
   stationCoordinates?: readonly LineFrequencyStationCoordinate[];
+  stationId?: string;
+  stationName?: string;
+  directionDestinations?: readonly string[];
+  teleportDisabled?: boolean;
+  profileLoading?: boolean;
+  profileError?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -34,7 +40,7 @@ async function loadTimetable(): Promise<void> {
   if (!lineId) {
     timetable.value = undefined;
     loading.value = false;
-    error.value = true;
+    error.value = !props.profileLoading;
     return;
   }
 
@@ -59,7 +65,7 @@ async function loadTimetable(): Promise<void> {
 }
 
 watch(
-  [() => props.open, () => props.profile?.lineId, () => props.profile?.serviceDate],
+  [() => props.open, () => props.profile?.lineId, () => props.profile?.serviceDate, () => props.profileLoading],
   ([open]) => {
     if (open) {
       void loadTimetable();
@@ -84,17 +90,21 @@ onBeforeUnmount(() => {
     :open="open"
     :title="t('globalMap.sidebar.gtfsFrequency.timetableTitle')"
     panel-class="line-frequency-timetable-modal"
+    :teleport-disabled="teleportDisabled"
     @close="emit('close')"
   >
     <LineFrequencyTimetable
       :profile="profile"
       :line-color="lineColor"
       :station-coordinates="stationCoordinates"
+      :station-id="stationId"
+      :station-name="stationName"
+      :direction-destinations="directionDestinations"
       :timetable="timetable"
-      :loading="loading"
-      :error="error"
+      :loading="loading || profileLoading"
+      :error="error || profileError"
     />
-    <template v-if="loading" #footer>
+    <template v-if="loading || profileLoading" #footer>
       <LoadingBar
         class="line-frequency-timetable-modal__loading-bar"
         indeterminate

@@ -235,8 +235,17 @@ function createForwardedResponseHeaders(sourceHeaders: Headers): Array<[string, 
   return Array.from(responseHeaders.entries());
 }
 
+function isRealtimeRouteSchedule(upstreamUrl: URL): boolean {
+  return upstreamUrl.pathname.endsWith("/route_schedules") &&
+    upstreamUrl.searchParams.get("data_freshness") === "realtime";
+}
+
 function getCacheTtl(upstreamUrl: URL): number {
   const pathname = upstreamUrl.pathname;
+
+  if (isRealtimeRouteSchedule(upstreamUrl)) {
+    return GET_CACHE_REALTIME_TTL_MS;
+  }
 
   if (pathname.includes("/stop-monitoring")) {
     return GET_CACHE_REALTIME_TTL_MS;
@@ -266,6 +275,11 @@ function getCacheTtl(upstreamUrl: URL): number {
 
 function getStaleCacheTtl(upstreamUrl: URL): number {
   const pathname = upstreamUrl.pathname;
+
+  // An old course table can incorrectly certify stops removed in realtime.
+  if (isRealtimeRouteSchedule(upstreamUrl)) {
+    return 0;
+  }
 
   if (pathname.includes("/stop-monitoring")) {
     return GET_CACHE_REALTIME_STALE_TTL_MS;

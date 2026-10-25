@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 import { useI18n } from "../i18n";
 
 export interface MaterialComboboxOption {
@@ -17,6 +17,7 @@ const props = withDefaults(
     disabled?: boolean;
     teleport?: boolean;
     menuClass?: string;
+    id?: string;
   }>(),
   {
     placeholder: "",
@@ -32,10 +33,16 @@ const emit = defineEmits<{
 }>();
 
 const root = ref<HTMLElement>();
+const trigger = ref<HTMLButtonElement>();
+const listId = `combobox-${useId()}`;
+let searchPrefix = "";
+let lastSearchTime = 0;
 const menu = ref<HTMLElement>();
 const open = ref(false);
 const activeIndex = ref(-1);
 const menuStyle = ref<Record<string, string>>({});
+// Native modal dialogs live in the browser top layer, above every body z-index.
+const teleportTarget = computed(() => root.value?.closest("dialog") ?? "body");
 const { t } = useI18n();
 
 const selectedOption = computed(() =>
@@ -89,10 +96,9 @@ function toggleOpen(): void {
 }
 
 function focusSelectedOption(): void {
-  activeIndex.value = Math.max(
-    0,
-    props.options.findIndex((option) => !option.disabled && option.id === props.modelValue),
-  );
+  const selected = props.options.findIndex((option) => !option.disabled && option.id === props.modelValue);
+  activeIndex.value = selected >= 0 ? selected : props.options.findIndex((option) => !option.disabled);
+  void nextTick(scrollActiveOptionIntoView);
 }
 
 function moveActive(delta: number): void {
@@ -120,7 +126,7 @@ function moveActive(delta: number): void {
 function scrollActiveOptionIntoView(): void {
   (menu.value ?? root.value)
     ?.querySelector<HTMLElement>("[data-combobox-active='true']")
-    ?.scrollIntoView({ block: "nearest" });
+    ?.scrollIntoView?.({ block: "nearest" });
 }
 
 function updateMenuPosition(): void {
@@ -145,7 +151,15 @@ function updateMenuPosition(): void {
     window.innerWidth - viewportPadding - width,
   );
 
+  // A body-level menu must sit above the modal/sheet hosting its trigger.
+  let zIndex = 1000;
+  for (let parent: HTMLElement | null = root.value; parent; parent = parent.parentElement) {
+    const parentZIndex = Number.parseInt(window.getComputedStyle(parent).zIndex, 10);
+    if (Number.isFinite(parentZIndex)) zIndex = Math.max(zIndex, parentZIndex + 1);
+  }
+
   menuStyle.value = {
+    zIndex: String(zIndex),
     left: `${left}px`,
     maxHeight: `${availableHeight}px`,
     top: opensAbove ? "auto" : `${rect.bottom + gap}px`,
@@ -165,16 +179,33 @@ watch(
 );
 
 function selectOption(option: MaterialComboboxOption): void {
-  if (option.disabled) {
+  if (!open.value || props.disabled || option.disabled) {
     return;
   }
 
   emit("update:modelValue", option.id);
   emit("change", option.id);
   open.value = false;
+  trigger.value?.focus({ preventScroll: true });
 }
 
 function handleKeydown(event: KeyboardEvent): void {
+  if (props.disabled || enabledOptions.value.length === 0) return;
+  if (event.key === "Tab") { open.value = false; return; }
+  if (event.key === "Escape") {
+    if (open.value) { event.preventDefault(); event.stopPropagation(); }
+    open.value = false;
+    return;
+  }
+  if (event.key === "Home" || event.key === "End") {
+    event.preventDefault();
+    open.value = true;
+    activeIndex.value = event.key === "Home"
+      ? props.options.findIndex((option) => !option.disabled)
+      : props.options.findLastIndex((option) => !option.disabled);
+    void nextTick(scrollActiveOptionIntoView);
+    return;
+  }
   if (event.key === "ArrowDown") {
     event.preventDefault();
     moveActive(1);
@@ -203,23 +234,44 @@ function handleKeydown(event: KeyboardEvent): void {
     return;
   }
 
-  if (event.key === "Escape") {
-    open.value = false;
+  if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    const now = Date.now();
+    searchPrefix = now - lastSearchTime > 700 ? event.key : searchPrefix + event.key;
+    lastSearchTime = now;
+    const normalize = (value: string) => value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase();
+    const index = props.options.findIndex((option) => !option.disabled && normalize(option.label).startsWith(normalize(searchPrefix)));
+    if (index >= 0) {
+      event.preventDefault();
+      open.value = true;
+      activeIndex.value = index;
+      void nextTick(scrollActiveOptionIntoView);
+    }
   }
 }
+
+watch(() => [props.disabled, props.options] as const, () => {
+  if (props.disabled || !enabledOptions.value.length) open.value = false;
+  else if (!props.options[activeIndex.value] || props.options[activeIndex.value]?.disabled) focusSelectedOption();
+});
 </script>
 
 <template>
   <div ref="root" class="material-combobox">
     <button
+      :id="id"
+      ref="trigger"
       class="material-combobox__trigger"
       type="button"
       role="combobox"
       :aria-label="resolvedAriaLabel"
       :aria-expanded="open"
+      aria-haspopup="listbox"
+      :aria-controls="open ? listId : undefined"
+      :aria-activedescendant="open && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined"
       :disabled="disabled"
       @click="toggleOpen"
       @keydown="handleKeydown"
+      @blur="open = false"
     >
       <span
         class="material-combobox__value"
@@ -232,27 +284,33 @@ function handleKeydown(event: KeyboardEvent): void {
       <span class="material-combobox__chevron" aria-hidden="true"></span>
     </button>
 
-    <Teleport to="body" :disabled="!teleport">
+    <Teleport :to="teleportTarget" :disabled="!teleport">
       <Transition name="material-combobox-menu">
         <div
           v-if="open"
           ref="menu"
+          :id="listId"
           class="material-combobox__menu"
           :class="[{ 'material-combobox__menu--teleported': teleport }, menuClass]"
           :style="teleport ? menuStyle : undefined"
           role="listbox"
+          :aria-label="resolvedAriaLabel"
         >
           <button
             v-for="(option, index) in options"
             :key="option.id"
+            :id="`${listId}-${index}`"
             class="material-combobox__option"
             type="button"
             role="option"
+            tabindex="-1"
             :disabled="option.disabled"
             :aria-selected="option.id === modelValue"
             :data-combobox-active="index === activeIndex ? 'true' : undefined"
             @mouseenter="activeIndex = index"
+            @pointerdown.prevent
             @mousedown.prevent="selectOption(option)"
+            @click="selectOption(option)"
           >
             <slot
               name="option"
@@ -274,7 +332,7 @@ function handleKeydown(event: KeyboardEvent): void {
 .material-combobox {
   --combobox-accent: var(--line-color, var(--idfm-blue));
   display: block;
-  min-width: min(360px, 100%);
+  min-width: 0;
   position: relative;
 }
 
@@ -316,7 +374,7 @@ function handleKeydown(event: KeyboardEvent): void {
 .material-combobox__value {
   color: var(--ink);
   display: block;
-  font-size: 1.25rem;
+  font-size: 1rem;
   font-weight: 950;
   line-height: 1.08;
   min-width: 0;

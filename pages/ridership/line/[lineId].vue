@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MaterialCombobox from "../../../src/components/MaterialCombobox.vue";
 import { computed, defineAsyncComponent, onMounted, ref, watch } from "vue";
 import { ArrowLeft, ChevronDown, Edit2, ExternalLink, Info, LineChart, MapPin, ShieldCheck } from "lucide-vue-next";
 import { navigateTo, useRoute } from "#imports";
@@ -207,9 +208,7 @@ function milestoneDate(value: string): string {
       <section class="monthly-page__controls" :aria-label="t('ridershipMonthly.controlsAria')">
         <label>
           <span>{{ t("ridershipMonthly.stepLabel") }}</span>
-          <select v-model="displayStepKey">
-            <option v-for="step in displaySteps" :key="step" :value="String(step)">{{ windowLabel(step) }} · {{ chartRangeLabel(step) }}</option>
-          </select>
+          <MaterialCombobox v-model="displayStepKey" :options="displaySteps.map(step => ({ id: String(step), label: `${windowLabel(step)} · ${chartRangeLabel(step)}` }))" :aria-label="t('ridershipMonthly.stepLabel')" teleport />
         </label>
         <label class="monthly-page__check">
           <input v-model="showMovingAverage" type="checkbox" />

@@ -1,11 +1,12 @@
 import type { GlobalMapLine } from "../../../transport-map/contracts/manifest";
-import type { NeighborhoodScoreInput } from "../contracts";
+import type { NeighborhoodFact, NeighborhoodScoreInput } from "../contracts";
 import { HEAVY_SCORE_MODES } from "../contracts";
 import { getReadyFrequencyEntries } from "../journeys";
 import { lineKey, listTransportAccessSignals, selectBestTransportAccessSignals, transportAccessGroupKey, NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS } from "./heavyTransports";
 import { buildGpeExpressContext } from "./gpeExpress";
 import { buildChateletContext } from "./chatelet";
 import { summarizeNearbyServiceQuality } from "./lineRegularity";
+import { normalizeScoreText } from "../primitives";
 
 export function buildTransportFactsContext(input: NeighborhoodScoreInput) {
   const accessSignals = listTransportAccessSignals(input);
@@ -43,8 +44,19 @@ export function buildTransportFactsContext(input: NeighborhoodScoreInput) {
   }
   const gpe = buildGpeExpressContext(input, accessSignals, accessibleLineKeys);
   const { futureLineKeys, effectiveFutureProjects, coLocatedFutureProjects } = gpe;
-  const structuralLineCount = accessibleLineKeys.size + [...futureLineKeys].filter((key) =>
-    ![...accessibleLineKeys].some((currentKey) => currentKey.endsWith(`:${key.slice("future:".length)}`))).length;
+  const structuralLines: NonNullable<NeighborhoodFact["transportLines"]>[number][] = [
+    ...new Map(accessibleCurrentSignals.map(signal => [lineKey(signal.line), signal.line])).values(),
+  ];
+  for (const key of futureLineKeys) {
+    const code = key.slice("future:".length);
+    if ([...accessibleLineKeys].some(currentKey => currentKey.endsWith(`:${code}`))) continue;
+    const project = effectiveFutureProjects.find(candidate => normalizeScoreText(candidate.line) === code);
+    if (!project) continue;
+    const knownLine = accessSignals.find(signal => signal.futureProject?.id === project.id)?.line;
+    structuralLines.push({ id: key, code: project.line, label: project.line, aliases: knownLine?.aliases ?? [], mode: knownLine?.mode ?? "METRO",
+      color: knownLine?.color ?? "", textColor: knownLine?.textColor ?? "", future: true });
+  }
+  const structuralLineCount = structuralLines.length;
   const structuralLineWeight = [...branchWeights.values()].reduce((sum, weight) => sum + weight, 0)
     + structuralLineCount - accessibleLineKeys.size;
   const accessibleModeWeight = [...modeWeights.values()].reduce((sum, weight) => sum + weight, 0);
@@ -60,7 +72,7 @@ export function buildTransportFactsContext(input: NeighborhoodScoreInput) {
   );
   const serviceQuality = summarizeNearbyServiceQuality(input, [...linesByKey.values()]);
   return { input, accessSignals, scoredAccessSignals, linesByKey, accessibleSignals, accessibleLineKeys, accessibleModes, lineWeights, modeWeights,
-    structuralLineCount, structuralLineWeight, accessibleModeWeight, sharedHubEvidence, reliableConnectionEvidence, readyFrequencies, serviceQuality, ...gpe, ...chatelet };
+    structuralLines, structuralLineCount, structuralLineWeight, accessibleModeWeight, sharedHubEvidence, reliableConnectionEvidence, readyFrequencies, serviceQuality, ...gpe, ...chatelet };
 }
 
 export type TransportFactsContext = ReturnType<typeof buildTransportFactsContext>;

@@ -4,6 +4,7 @@ import {
   enumerateOptimizerCandidates,
   rankOptimizerCandidates,
   isOptimizerRoute,
+  optimizerConnectionSteps,
 } from "../src/features/line-optimizer/lineOptimizer";
 import { resolveLineOptimizerConfig } from "../src/features/line-optimizer/optimizerConfig";
 import { createLineOptimizerProvider } from "../src/features/line-optimizer/lineOptimizerProvider";
@@ -73,6 +74,97 @@ const route = (): TravelRoute => {
 const settings = { ...DEFAULT_OPTIMIZER_SETTINGS };
 
 describe("line optimizer", () => {
+  it.each([0, 1, 120])(
+    "separates walking to the T10 platform from %i seconds of actual waiting",
+    (tramWaitSeconds) => {
+      const chained = route();
+      const feeder = {
+        ...chained.transitSections[0]!,
+        lineCode: "T6",
+        fromName: "Parc André Malraux",
+        toName: "La Vallée",
+      };
+      chained.sections.splice(2, 0, feeder, { type: "transfer", durationSeconds: 120 });
+      chained.transitSections = chained.sections.filter((section) => section.lineMode);
+      const offset = tramWaitSeconds / 60;
+      const candidate = enumerateOptimizerCandidates(
+        chained,
+        [
+          [course("feeder", 5, 10)],
+          [course("tram-to-croix-de-berny", 12 + offset, 22 + offset)],
+          [course("rer", 30 + offset, 55 + offset)],
+        ],
+        settings,
+        start,
+        config,
+      )[0]!;
+      expect(candidate).toBeDefined();
+      expect(optimizerConnectionSteps(candidate, 0)).toEqual([]);
+      const tramSteps = optimizerConnectionSteps(candidate, 1);
+      expect(tramSteps[0]).toEqual({
+        kind: "walk",
+        startAt: at(10),
+        endAt: at(12),
+        durationSeconds: 120,
+      });
+      expect(tramSteps.slice(1)).toEqual(
+        tramWaitSeconds > 0
+          ? [
+              {
+                kind: "wait",
+                startAt: at(12),
+                endAt: at(12 + offset),
+                durationSeconds: tramWaitSeconds,
+              },
+            ]
+          : [],
+      );
+      const rerSteps = optimizerConnectionSteps(candidate, 2);
+      expect(rerSteps).toEqual([
+        { kind: "walk", startAt: at(22 + offset), endAt: at(25 + offset), durationSeconds: 180 },
+        { kind: "wait", startAt: at(25 + offset), endAt: at(30 + offset), durationSeconds: 300 },
+      ]);
+      const connectionSteps = [...tramSteps, ...rerSteps];
+      expect(
+        connectionSteps
+          .filter((step) => step.kind === "wait")
+          .reduce((sum, step) => sum + step.durationSeconds, 0),
+      ).toBe(candidate.totalWaitSeconds);
+      const transitSeconds = candidate.courses.reduce(
+        (sum, c) => sum + (c.arrival - c.departure) / 1000,
+        0,
+      );
+      const egressSeconds = (candidate.arriveAt - candidate.courses.at(-1)!.arrival) / 1000;
+      const timelineSeconds =
+        settings.exitSeconds +
+        candidate.walkSeconds +
+        transitSeconds +
+        egressSeconds +
+        connectionSteps.reduce((sum, step) => sum + step.durationSeconds, 0);
+      expect(timelineSeconds).toBe((candidate.arriveAt - candidate.leaveAt) / 1000);
+      expect(candidate.totalWaitSeconds).toBe(tramWaitSeconds + 300);
+      expect(tramSteps[0]!.endAt).toBe(
+        tramWaitSeconds ? tramSteps[1]!.startAt : candidate.tram.departure,
+      );
+    },
+  );
+  it.each([0, 180])(
+    "omits waiting at an immediate RER connection after %i seconds walking",
+    (transferSeconds) => {
+      const candidate = enumerateOptimizerCandidates(
+        route(),
+        [[course("tram", 5, 15)], [course("rer", 15 + transferSeconds / 60, 40)]],
+        { ...settings, transferSeconds, marginSeconds: 0 },
+        start,
+      )[0]!;
+      expect(optimizerConnectionSteps(candidate, 1)).toEqual(
+        transferSeconds
+          ? [{ kind: "walk", startAt: at(15), endAt: at(18), durationSeconds: transferSeconds }]
+          : [],
+      );
+      expect(candidate.totalWaitSeconds).toBe(0);
+    },
+  );
   it("chooses the second real tram for the same RER and accounts for leaving home", () => {
     const candidates = enumerateOptimizerCandidates(
       route(),

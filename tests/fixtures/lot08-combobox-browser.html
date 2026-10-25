@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Lot 08 — données factices</title>
+<body><div id="app"></div><script type="module">
+import { createApp } from "/_nuxt/node_modules/vue/dist/vue.runtime.esm-bundler.js";
+import { createNuxtApp } from "/_nuxt/node_modules/nuxt/dist/app/nuxt.js";
+import Fixture from "/_nuxt/tests/fixtures/lot08-combobox-browser.vue";
+import "/_nuxt/src/styles.css";
+const app = createApp(Fixture);
+window.__NUXT__ = { config: { public: {}, app: {} } };
+const nuxt = createNuxtApp({ vueApp: app });
+nuxt.runWithContext(() => app.mount("#app"));
+</script></body></html>

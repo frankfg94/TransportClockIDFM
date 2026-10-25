@@ -45,7 +45,8 @@ import {
 } from "./features/traffic";
 import { createBoardFromDraft } from "./services/boardBuilder";
 import { transitModeToFamily } from "./services/linePresentation";
-import { fetchBoardDepartures, fetchDirectionGroupsForStation } from "./services/idfm";
+import { fetchBoardDepartures, fetchDepartureCallingPattern, fetchDirectionGroupsForStation } from "./services/idfm";
+import { createDeparturePatternCacheKey, createDepartureServiceIdentity } from "./features/service-pattern/serviceClassification";
 import { createNetworkScheduler } from "./services/networkScheduler";
 import {
   getNavitiaRetryDelay,
@@ -99,6 +100,7 @@ import type {
   AlarmDraft,
   BoardDeparturesResult,
   Departure,
+  DepartureCall,
   DepartureAlarm,
   DepartureCallingPattern,
   DepartureServiceType,
@@ -273,7 +275,8 @@ let boardRevealCleanup: (() => void) | undefined;
 let boardRevealRequest = 0;
 let mobileBreakpointQuery: MediaQueryList | undefined;
 let desktopDragBreakpointQuery: MediaQueryList | undefined;
-const departureServiceTypeCache = new Map<string, Promise<DepartureServiceType | undefined>>();
+type DepartureServiceDetails = Pick<DepartureCallingPattern, "serviceType" | "serviceSection">;
+const departureServiceTypeCache = new Map<string, Promise<DepartureServiceDetails | undefined>>();
 const runPatternRequest = createNetworkScheduler(3, 10_000);
 const boardEnrichmentVersions = new Map<string, symbol>();
 const boardRefreshPromises = new Map<string, Promise<void>>();
@@ -864,17 +867,34 @@ async function refreshBoard(boardId: string): Promise<void> {
     try {
       const version = Symbol(board.id);
       boardEnrichmentVersions.set(board.id, version);
-      const publish = (result: BoardDeparturesResult) => {
+      const publish = (result: BoardDeparturesResult, pending = false) => {
         if (boardEnrichmentVersions.get(board.id) !== version) return;
-        state.departures = result.departures;
-        state.directionGroups = result.directionGroups;
+        const previous = new Map(state.departures.map((departure) => [createDepartureServiceIdentity(board, departure), departure]));
+        const merge = (departure: Departure): Departure => {
+          if (board.line.mode === "bus" || (!pending && departure.serviceTypeStatus !== "loading")) return departure;
+          const known = previous.get(createDepartureServiceIdentity(board, departure));
+          const source = departure.serviceType && departure.serviceType !== "inconnu" ? departure
+            : known?.serviceType && known.serviceType !== "inconnu" ? known : undefined;
+          return {
+            ...departure,
+            serviceType: source?.serviceType,
+            serviceSection: source?.serviceSection,
+            serviceTypeStatus: "loading",
+          };
+        };
+        const departures = result.departures.map(merge);
+        const byId = new Map(departures.map((departure) => [departure.id, departure]));
+        state.departures = departures;
+        state.directionGroups = result.directionGroups.map((group) => ({
+          ...group, departures: group.departures.map((departure) => byId.get(departure.id) ?? merge(departure)),
+        }));
         state.updatedAt = new Date();
       };
-      const result = await fetchBoardDepartures(createBoardRequestForSettings(board), { onUpdate: publish });
-      publish(result);
+      const result = await fetchBoardDepartures(createBoardRequestForSettings(board), { onUpdate: (result) => publish(result, true) });
+      publish(result, true);
       updateAlarms(reconcileBoardAlarms(board, result.departures, departureAlarms.value));
       // Service labels are optional: never hold back times or other boards.
-      void enrichBoardDeparturesWithServiceTypes(board, result).then((enriched) => {
+      void enrichBoardDeparturesWithServiceTypes(board, result, (enriched) => publish(enriched)).then((enriched) => {
         if (boardEnrichmentVersions.get(board.id) === version) publish(enriched);
       }).catch(() => undefined);
     } catch (error) {
@@ -902,50 +922,60 @@ async function refreshBoard(boardId: string): Promise<void> {
 async function enrichBoardDeparturesWithServiceTypes(
   board: TransitBoardConfig,
   result: BoardDeparturesResult,
+  onUpdate?: (result: BoardDeparturesResult) => void,
 ): Promise<BoardDeparturesResult> {
   if (board.line.mode === "bus") {
     return result;
   }
 
   const departuresById = new Map<string, Departure>();
+  const snapshot = (): BoardDeparturesResult => ({
+    departures: result.departures.map((departure): Departure => departuresById.get(departure.id) ?? { ...departure, serviceTypeStatus: "loading" }),
+    directionGroups: result.directionGroups.map((group) => ({
+      ...group,
+      departures: group.departures.map((departure): Departure => departuresById.get(departure.id) ?? { ...departure, serviceTypeStatus: "loading" }),
+    })),
+  });
   const entries = result.directionGroups.flatMap((group) =>
     group.departures.map((departure) => ({ departure, group })),
   );
 
   await Promise.all(
     entries.map(async ({ departure, group }) => {
-      const serviceType = await fetchCachedDepartureServiceType(board, group, departure);
+      const serviceDetails = await fetchCachedDepartureServiceType(board, group, departure);
 
-      departuresById.set(departure.id, serviceType ? { ...departure, serviceType } : departure);
+      const confirmed = serviceDetails && serviceDetails.serviceType !== "inconnu";
+      departuresById.set(departure.id, {
+        ...departure,
+        serviceType: serviceDetails?.serviceType ?? "inconnu",
+        serviceSection: confirmed ? serviceDetails.serviceSection : undefined,
+        serviceTypeStatus: confirmed ? undefined : "unavailable",
+      });
+      onUpdate?.(snapshot());
     }),
   );
 
-  return {
-    departures: result.departures.map((departure) => departuresById.get(departure.id) ?? departure),
-    directionGroups: result.directionGroups.map((group) => ({
-      ...group,
-      departures: group.departures.map(
-        (departure) => departuresById.get(departure.id) ?? departure,
-      ),
-    })),
-  };
+  return snapshot();
 }
 
 async function fetchCachedDepartureServiceType(
   board: TransitBoardConfig,
   directionGroup: DirectionDepartureGroup,
   departure: Departure,
-): Promise<DepartureServiceType | undefined> {
+): Promise<DepartureServiceDetails | undefined> {
   const cacheKey = createDepartureServiceTypeCacheKey(board, directionGroup, departure);
   let request = departureServiceTypeCache.get(cacheKey);
 
   if (!request) {
     request = runPatternRequest((signal) => fetchLinePatternView(board, departure, directionGroup, signal))
-      .then((patternView) => patternView.pattern.serviceType)
+      .then(({ pattern }) => ({ serviceType: pattern.serviceType, serviceSection: pattern.serviceSection }))
       .catch(() => undefined);
+    if (departureServiceTypeCache.size >= 256) {
+      departureServiceTypeCache.delete(departureServiceTypeCache.keys().next().value!);
+    }
     departureServiceTypeCache.set(cacheKey, request);
-    request.then((serviceType) => {
-      if (!serviceType) {
+    request.then((details) => {
+      if (!details || details.serviceType === "inconnu") {
         departureServiceTypeCache.delete(cacheKey);
       }
     });
@@ -964,7 +994,7 @@ function createDepartureServiceTypeCacheKey(
     board.schedule?.lineRef ?? board.line.ref,
     board.title,
     directionGroup.id,
-    departure.destination,
+    createDeparturePatternCacheKey(board, departure),
   ].join("|");
 }
 
@@ -1316,9 +1346,13 @@ function getDepartureTime(departure: Departure): string | undefined {
 }
 
 function formatPanelDepartureMeta(departure: Departure): string {
+  const section = departure.serviceType === "semi-direct" && departure.serviceSection
+    ? t(`board.serviceSection.${departure.serviceSection}`) : "";
   const parts = [
     getDepartureMonitoringLabel(departure),
-    formatDepartureServiceType(departure.serviceType),
+    [formatDepartureServiceType(departure.serviceType) ||
+      (departure.serviceTypeStatus === "loading" ? t("pattern.loadingPattern") :
+        departure.serviceTypeStatus === "unavailable" ? t("lineOptimizer.unknownService") : ""), section].filter(Boolean).join(" "),
     formatRemainingStopCount(departure),
   ].filter(Boolean);
 
@@ -2126,7 +2160,24 @@ async function fetchLinePatternView(
     throw new Error(t("app.errors.pattern"));
   }
 
-  return response.json() as Promise<LinePatternViewResponse>;
+  const view = await response.json() as LinePatternViewResponse;
+  const pattern = await fetchDepartureCallingPattern(board, departure, {
+    lineTopology: view.pattern.lineTopology,
+    hydrateTransfers: false,
+    signal,
+  });
+  return {
+    ...view,
+    pattern: {
+      ...pattern,
+      lineTopologyLayout: view.pattern.lineTopologyLayout,
+      calls: pattern.calls.length ? pattern.calls : view.pattern.calls.map((call): DepartureCall => ({
+        ...call,
+        served: call.current,
+        status: call.current ? "current" : "unknown",
+      })),
+    },
+  };
 }
 
 function closePatternModal(): void {
@@ -2945,6 +2996,8 @@ onBeforeUnmount(() => {
         <FullscreenStationPanel
           v-if="fullscreenPanelBoard"
           :station-name="fullscreenPanelBoard.title"
+          :station-id="fullscreenPanelBoard.schedule?.stopAreaRef ?? fullscreenPanelBoard.monitoringPoints[0]?.ref"
+          :line-id="fullscreenPanelBoard.schedule?.lineRef ?? fullscreenPanelBoard.line.ref"
           :city="fullscreenPanelBoard.city"
           :line-name="fullscreenPanelBoard.line.longName"
           :line-short-name="fullscreenPanelBoard.line.shortName"

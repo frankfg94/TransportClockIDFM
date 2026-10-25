@@ -3,7 +3,7 @@ import { navigateTo, useRoute, useRouter } from "#imports";
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { CircleCheck, Eye, Minus, Plus, Settings, X } from "lucide-vue-next";
 import DistanceToggle from "../../components/DistanceToggle.vue";
-import AppRightPanel from "../../components/AppRightPanel.vue";
+import ResponsiveSidePanel from "../../components/ResponsiveSidePanel.vue";
 import MobileActionsMenu from "../../components/MobileActionsMenu.vue";
 import StationBoardModal from "../../components/StationBoardModal.vue";
 import {
@@ -3366,7 +3366,7 @@ function getEntranceDisplayKey(entrance: LineMapEntranceView): string {
       </aside>
     </div>
 
-    <AppRightPanel
+    <ResponsiveSidePanel
       v-if="isExplorerMode && lineMap && activeStop && stationDetailsPanelOpen"
       :open="stationDetailsPanelOpen"
       :title="t('lineMap.sidebar.stationDetails')"
@@ -3411,7 +3411,7 @@ function getEntranceDisplayKey(entrance: LineMapEntranceView): string {
         @focus-entrances="focusEntrances"
         @focus-entrance="focusEntrance"
       />
-    </AppRightPanel>
+    </ResponsiveSidePanel>
 
     <PatternTrafficCalendarSurface
       v-if="trafficCalendarEventCount > 0"

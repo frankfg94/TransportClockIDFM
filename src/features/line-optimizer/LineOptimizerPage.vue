@@ -1,19 +1,18 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import {
-  BookUser,
-  Clock3,
-  Footprints,
-  House,
-  RefreshCw,
-  TramFront,
-} from "lucide-vue-next";
+import { computed, defineAsyncComponent, ref } from "vue";
+import { BookUser, Clock3, Footprints, House, RefreshCw, TramFront } from "lucide-vue-next";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import AdressBook from "../address-book/AdressBook.vue";
 import { useI18n } from "../../i18n";
 import { useLineOptimizer } from "./useLineOptimizer";
 import type { LineOptimizerConfig } from "./optimizerConfig";
 import type { LineOptimizerCandidate } from "./lineOptimizer";
+import { createLineOptimizerTimeline } from "./lineOptimizerTimeline";
+import { itineraryStepAttributes } from "../line-map/globalTransportPlanItinerary";
+
+const GlobalTransportPlanTravel = defineAsyncComponent(
+  () => import("../line-map/GlobalTransportPlanTravel.vue"),
+);
 
 const props = defineProps<{ config: LineOptimizerConfig }>();
 const { t, d, n } = useI18n();
@@ -76,7 +75,29 @@ const timingLabel = (source: string) =>
     : source === "estimated"
       ? t("lineOptimizer.estimated")
       : t("lineOptimizer.schedule");
-const legs = computed(() => winner.value?.route.transitSections ?? []);
+const timeline = computed(() =>
+  winner.value
+    ? createLineOptimizerTimeline(winner.value, originPoint.value, destinationPoint.value)
+    : undefined,
+);
+const legs = computed(() => timeline.value?.route.transitSections ?? []);
+const connections = computed(() => timeline.value?.connections ?? []);
+const accessWalk = computed(() =>
+  timeline.value?.steps.find((step) => step.kind === "walk" && step.courseIndex === 0),
+);
+const finalWalk = computed(() =>
+  timeline.value?.steps.find((step) => step.kind === "walk" && step.courseIndex === undefined),
+);
+const mapItinerary = computed(() =>
+  timeline.value && originPoint.value && destinationPoint.value && winner.value
+    ? {
+        ...timeline.value,
+        origin: originPoint.value,
+        destination: destinationPoint.value,
+        totalWaitSeconds: winner.value.totalWaitSeconds,
+      }
+    : undefined,
+);
 const remaining = computed(() =>
   winner.value ? duration(Math.max(0, (winner.value.leaveAt - now.value) / 1000)) : "",
 );
@@ -278,100 +299,136 @@ const remaining = computed(() =>
       </div>
       <h2>{{ t("lineOptimizer.leaveAt", { time: clock(winner.leaveAt) }) }}</h2>
       <p>{{ t("lineOptimizer.stayHome", { duration: remaining }) }}</p>
-      <ol class="line-optimizer__timeline">
-        <li>
-          <House :size="22" aria-hidden="true" />
-          <div>
-            <strong>{{ clock(winner.leaveAt) }}</strong
-            ><span>{{ t("lineOptimizer.leaveHome") }}</span
-            ><small>{{
-              t("lineOptimizer.preparation", { duration: duration(settings.exitSeconds) })
-            }}</small>
-          </div>
-        </li>
-        <li>
-          <Footprints :size="22" aria-hidden="true" />
-          <div>
-            <strong>{{ clock(winner.walkAt) }}</strong
-            ><span>{{
-              t("lineOptimizer.walkTo", { station: legs[0]?.fromName ?? config.lineCode })
-            }}</span
-            ><small>{{ duration(winner.walkSeconds) }}</small>
-          </div>
-        </li>
-        <template v-for="(course, index) in winner.courses" :key="`${index}:${course.id}`">
-          <li v-if="index > 0">
-            <Footprints :size="22" aria-hidden="true" />
-            <div>
-              <strong>{{ clock(course.departure - winner.waits[index]! * 1000) }}</strong>
-              <span>{{
-                t("lineOptimizer.transferTo", { station: legs[index]?.fromName ?? "" })
-              }}</span>
-              <small>{{
-                t("lineOptimizer.connectionWait", { duration: duration(winner.waits[index]!) })
-              }}</small>
-            </div>
-          </li>
-          <li>
-            <LineIconBadge
-              v-if="legs[index]"
-              class="line-optimizer__line-badge"
-              :line="{
-                id: legs[index]!.lineId,
-                ref: legs[index]!.lineId,
-                label: legs[index]!.lineCode,
-                mode: legs[index]!.lineMode,
-                color: legs[index]!.lineColor,
-                textColor: legs[index]!.lineTextColor,
-              }"
-              compact
-              eager
-            />
-            <div>
-              <strong>{{ clock(course.departure) }}</strong>
-              <span
-                >{{
-                  t("lineOptimizer.boardTram", {
-                    line:
-                      legs[index]?.lineMode === "RER"
-                        ? t("lineOptimizer.rer", { line: legs[index]?.lineCode ?? "" })
-                        : (legs[index]?.lineCode ?? ""),
-                    direction:
-                      course.direction ?? legs[index]?.direction ?? legs[index]?.toName ?? "",
-                  })
-                }}<template v-if="index === winner.corridorIndex + 1">
-                  · {{ serviceLabel(winner) }}</template
-                ></span
+      <div class="line-optimizer__journey" :data-itinerary-id="timeline?.route.id">
+        <div class="line-optimizer__chronology">
+          <ol class="line-optimizer__timeline">
+            <li v-bind="itineraryStepAttributes(timeline?.steps[0])">
+              <House :size="22" aria-hidden="true" />
+              <div>
+                <strong>{{ clock(winner.leaveAt) }}</strong
+                ><span>{{ t("lineOptimizer.leaveHome") }}</span
+                ><small>{{
+                  t("lineOptimizer.preparation", { duration: duration(settings.exitSeconds) })
+                }}</small>
+              </div>
+            </li>
+            <li v-if="accessWalk" v-bind="itineraryStepAttributes(accessWalk)">
+              <Footprints :size="22" aria-hidden="true" />
+              <div>
+                <strong>{{ clock(winner.walkAt) }}</strong
+                ><span>{{
+                  t("lineOptimizer.walkTo", { station: legs[0]?.fromName ?? config.lineCode })
+                }}</span
+                ><small>{{ duration(winner.walkSeconds) }}</small>
+              </div>
+            </li>
+            <template v-for="(course, index) in winner.courses" :key="`${index}:${course.id}`">
+              <li
+                v-for="step in connections[index]"
+                v-bind="itineraryStepAttributes(step)"
+                :key="step.kind"
+                :data-connection-kind="step.kind"
+                :data-course-index="index"
               >
-              <small
-                >{{
-                  t("lineOptimizer.arriveTransfer", {
-                    time: clock(course.arrival),
-                    station: legs[index]?.toName ?? "",
+                <Footprints v-if="step.kind === 'walk'" :size="22" aria-hidden="true" />
+                <Clock3 v-else :size="22" aria-hidden="true" />
+                <div>
+                  <strong>{{ clock(step.startAt) }}</strong>
+                  <span v-if="step.kind === 'walk'">{{
+                    t("lineOptimizer.transferTo", { station: legs[index]?.fromName ?? "" })
+                  }}</span>
+                  <span v-else>{{
+                    t("lineOptimizer.connectionWait", { duration: duration(step.durationSeconds) })
+                  }}</span>
+                  <small v-if="step.kind === 'walk'">{{ duration(step.durationSeconds) }}</small>
+                  <small v-else>{{ legs[index]?.fromName }}</small>
+                </div>
+              </li>
+              <li v-bind="itineraryStepAttributes(timeline?.transitSteps[index])">
+                <LineIconBadge
+                  v-if="legs[index]"
+                  class="line-optimizer__line-badge"
+                  :line="{
+                    id: legs[index]!.lineId,
+                    ref: legs[index]!.lineId,
+                    label: legs[index]!.lineCode,
+                    mode: legs[index]!.lineMode,
+                    color: legs[index]!.lineColor,
+                    textColor: legs[index]!.lineTextColor,
+                  }"
+                  compact
+                  eager
+                />
+                <div>
+                  <strong>{{ clock(course.departure) }}</strong>
+                  <span
+                    >{{
+                      t("lineOptimizer.boardTram", {
+                        line:
+                          legs[index]?.lineMode === "RER"
+                            ? t("lineOptimizer.rer", { line: legs[index]?.lineCode ?? "" })
+                            : (legs[index]?.lineCode ?? ""),
+                        direction:
+                          course.direction ?? legs[index]?.direction ?? legs[index]?.toName ?? "",
+                      })
+                    }}<template v-if="index === winner.corridorIndex + 1">
+                      · {{ serviceLabel(winner) }}</template
+                    ></span
+                  >
+                  <small
+                    >{{
+                      t("lineOptimizer.arriveTransfer", {
+                        time: clock(course.arrival),
+                        station: legs[index]?.toName ?? "",
+                      })
+                    }}
+                    · {{ timingLabel(course.source) }}</small
+                  >
+                </div>
+              </li>
+            </template>
+            <li v-if="finalWalk" v-bind="itineraryStepAttributes(finalWalk)" data-final-walk>
+              <Footprints :size="22" aria-hidden="true" />
+              <div>
+                <strong>{{ clock(finalWalk.startAt) }}</strong>
+                <span>{{
+                  t("lineOptimizer.walkTo", {
+                    station: destinationPoint?.label ?? destinationQuery,
                   })
-                }}
-                · {{ timingLabel(course.source) }}</small
-              >
-            </div>
-          </li>
-        </template>
-        <li>
-          <Clock3 :size="22" aria-hidden="true" />
-          <div>
-            <strong>{{ clock(winner.arriveAt) }}</strong
-            ><span>{{
-              t("lineOptimizer.arrival", {
-                destination: destinationPoint?.label ?? destinationQuery,
-              })
-            }}</span
-            ><small>{{
-              t("lineOptimizer.totalDuration", {
-                duration: duration((winner.arriveAt - winner.leaveAt) / 1000),
-              })
-            }}</small>
-          </div>
-        </li>
-      </ol>
+                }}</span>
+                <small>{{ duration(finalWalk.durationSeconds) }}</small>
+              </div>
+            </li>
+            <li>
+              <Clock3 :size="22" aria-hidden="true" />
+              <div>
+                <strong>{{ clock(winner.arriveAt) }}</strong
+                ><span>{{
+                  t("lineOptimizer.arrival", {
+                    destination: destinationPoint?.label ?? destinationQuery,
+                  })
+                }}</span
+                ><small>{{
+                  t("lineOptimizer.totalDuration", {
+                    duration: duration((winner.arriveAt - winner.leaveAt) / 1000),
+                  })
+                }}</small>
+              </div>
+            </li>
+          </ol>
+        </div>
+        <div
+          v-if="mapItinerary"
+          class="line-optimizer__divider"
+          role="separator"
+          aria-orientation="vertical"
+        />
+        <GlobalTransportPlanTravel
+          v-if="mapItinerary"
+          class="line-optimizer__map"
+          :itinerary="mapItinerary"
+        />
+      </div>
       <p class="line-optimizer__evidence">
         {{
           t("lineOptimizer.providerDurations", {
@@ -455,7 +512,7 @@ const remaining = computed(() =>
 
 <style scoped>
 .line-optimizer {
-  max-width: 980px;
+  max-width: 1480px;
   margin: 0 auto;
   padding: var(--space-6) var(--space-4) 120px;
   color: var(--ink);
@@ -639,6 +696,30 @@ h2 {
   display: grid;
   gap: var(--space-4);
 }
+.line-optimizer__journey {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1.2fr);
+  gap: var(--space-5);
+  margin: var(--space-6) 0;
+}
+.line-optimizer__chronology {
+  min-width: 0;
+}
+.line-optimizer__journey .line-optimizer__timeline {
+  margin: 0;
+}
+.line-optimizer__divider {
+  background: var(--border);
+}
+.line-optimizer__map {
+  min-height: 560px;
+  position: sticky;
+  top: var(--space-4);
+  align-self: start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
 .line-optimizer__timeline li {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
@@ -696,6 +777,18 @@ td {
 @keyframes optimizer-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+@media (max-width: 1000px) {
+  .line-optimizer__journey {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .line-optimizer__divider {
+    height: 1px;
+  }
+  .line-optimizer__map {
+    position: static;
+    min-height: 500px;
   }
 }
 @media (max-width: 600px) {

@@ -56,10 +56,12 @@ const props = withDefaults(defineProps<{
   initial?: AddressBookInitialEntry;
   selectionMode?: boolean;
   selectionDescription?: string;
+  selectionTarget?: "origin" | "destination";
 }>(), {
   initial: undefined,
   selectionMode: false,
   selectionDescription: undefined,
+  selectionTarget: "origin",
 });
 
 const emit = defineEmits<{
@@ -373,7 +375,7 @@ function viewNeighborhood(entry: AddressBookEntry): void {
               v-if="selectionMode && entry.kind === 'address'"
               class="address-book-entry__select"
               type="button"
-              :aria-label="t('addressBook.selectForUseAria', { name: entry.name })"
+              :aria-label="t(selectionTarget === 'destination' ? 'addressBook.selectDestinationAria' : 'addressBook.selectForUseAria', { name: entry.name })"
               @click="selectEntry(entry)"
             >
               <Check :size="16" aria-hidden="true" />

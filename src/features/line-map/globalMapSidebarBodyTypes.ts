@@ -80,6 +80,8 @@ export interface GlobalMapSidebarBodyProps {
   showLineConnectionIcons: boolean;
   showBusCorrespondences: boolean;
   showServedCityZones: boolean;
+  servedCitiesLoading?: boolean;
+  servedCitiesError?: boolean;
   nearbyPlaces: NearbyPlace[];
   nearbyPlacesLoading: boolean;
   nearbyPlacesError: boolean;

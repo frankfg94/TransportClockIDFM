@@ -1,6 +1,6 @@
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
-import { h, nextTick } from "vue";
+import { defineAsyncComponent, defineComponent, h, nextTick, ref } from "vue";
 import DepartureAlarmModal from "../src/components/DepartureAlarmModal.vue";
 import type { Departure, DepartureAlarm } from "../src/types/transit";
 
@@ -40,6 +40,53 @@ afterEach(() => {
 });
 
 describe("DepartureAlarmModal", () => {
+  it("focuses its first async opening, traps Tab, and restores the opener after Escape", async () => {
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    opener.focus();
+    const Subject = defineAsyncComponent(async () => DepartureAlarmModal);
+    const open = ref(true);
+    const wrapper = mount(defineComponent({
+      components: { Subject },
+      setup: () => ({ open, close: () => { open.value = false; } }),
+      template: `<Subject :open="open" @cancel="close" />`,
+    }), { attachTo: document.body });
+    try {
+      await flushPromises(); await nextTick();
+      const dialog = document.querySelector<HTMLElement>(".alarm-modal")!;
+      expect(document.activeElement).toBe(dialog);
+      const controls = Array.from(dialog.querySelectorAll<HTMLElement>("button,input"));
+      const backwards = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
+      dialog.dispatchEvent(backwards);
+      expect(backwards.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(controls.at(-1));
+      const forwards = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+      document.activeElement!.dispatchEvent(forwards);
+      expect(forwards.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(controls[0]);
+      const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+      document.activeElement!.dispatchEvent(escape);
+      expect(escape.defaultPrevented).toBe(true);
+      await nextTick(); await nextTick();
+      expect(open.value).toBe(false);
+      expect(document.querySelector(".alarm-modal")).toBeNull();
+      expect(document.activeElement).toBe(opener);
+    } finally { wrapper.unmount(); }
+  });
+
+  it("consumes Escape while busy without cancelling or changing the alarm", async () => {
+    const wrapper = mount(DepartureAlarmModal, { attachTo: document.body, props: { open: true, busy: true } });
+    try {
+      await nextTick();
+      const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+      document.querySelector(".alarm-modal")!.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      expect(wrapper.emitted("cancel")).toBeUndefined();
+      expect(wrapper.emitted("confirm")).toBeUndefined();
+      expect(wrapper.emitted("remove")).toBeUndefined();
+    } finally { wrapper.unmount(); }
+  });
+
   it("uses activeAlarm as the single switch for cancellation mode", async () => {
     const wrapper = mount(DepartureAlarmModal, {
       attachTo: document.body,

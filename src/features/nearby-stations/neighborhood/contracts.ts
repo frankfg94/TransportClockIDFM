@@ -3,7 +3,7 @@ import type { GtfsLineFrequencyResponse } from "../../../types/lineFrequency";
 import type { LineTopology } from "../../../../server/services/topology/types";
 import type { NeighborhoodTransportSection } from "./transportSections";
 import type { GtfsLastService } from "../../line-map/useLineFrequencyTimetable";
-import type { GlobalMapMode } from "../../transport-map/contracts/manifest";
+import type { GlobalMapLine, GlobalMapMode } from "../../transport-map/contracts/manifest";
 import type { NearbyHeavyTransportCandidate, NearbyJourney } from "../nearbyHeavyTransports";
 import type { NearbyPlace } from "../nearbyPlaces";
 import type { NeighborhoodShoppingCentreAccess } from "./shoppingCentres";
@@ -122,6 +122,7 @@ export type NeighborhoodFactKind =
   | "frequencyContext"
   | "frequencyRemote"
   | "lastServiceEarly"
+  | "lastServices"
   | "supermarketNearby"
   | "supermarketNearbyApprox"
   | "supermarketsNearby"
@@ -254,6 +255,10 @@ export interface NeighborhoodFact {
   places?: readonly NeighborhoodFactPlace[];
   /** Nearby service-quality lines, ordered by decreasing reliability. */
   transportReliabilityLines?: readonly NeighborhoodFactTransportReliabilityLine[];
+  /** Exact unique members counted by the structural offer fact, including future projects. */
+  transportLines?: readonly (Pick<GlobalMapLine, "id" | "code" | "label" | "mode" | "color" | "textColor" | "sourceLineId" | "aliases"> & { future?: boolean })[];
+  /** One observation per requested operating line; undefined seconds means unavailable. */
+  lastServices?: readonly { line: GlobalMapLine; seconds?: number; stopName?: string }[];
   evidence: NeighborhoodFactEvidence;
 }
 
@@ -309,6 +314,7 @@ export interface NeighborhoodGreenSpaceJourney {
 }
 
 export interface NeighborhoodScoreInput {
+  personalJourneys?: readonly import("./personalJourneys").PersonalJourneyResult[];
   places: readonly NearbyPlace[];
   placesLoaded: boolean;
   shoppingCentres?: readonly NeighborhoodShoppingCentreAccess[];

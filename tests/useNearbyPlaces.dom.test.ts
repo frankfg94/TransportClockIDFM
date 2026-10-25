@@ -1,13 +1,47 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { defineComponent, ref } from "vue";
 import { describe, expect, it, vi } from "vitest";
-import type { PlacesProvider } from "../src/features/nearby-stations/nearbyPlaces";
+import type { NearbyPlace, PlacesProvider } from "../src/features/nearby-stations/nearbyPlaces";
 import {
   NEARBY_PLACES_REFRESH_DEBOUNCE_MS,
   useNearbyPlaces,
 } from "../src/features/nearby-stations/useNearbyPlaces";
 
 describe("useNearbyPlaces", () => {
+  it("keeps loading through debounce and every anchor, ignoring a superseded response", async () => {
+    vi.useFakeTimers();
+    try {
+      const releases: Array<() => void> = [];
+      const provider: PlacesProvider = {
+        searchDestinations: async () => [],
+        searchNearby: vi.fn(() => new Promise<NearbyPlace[]>(resolve => releases.push(() => resolve([])))),
+      };
+      const radius = ref(160);
+      const enabled = ref(true);
+      let nearby!: ReturnType<typeof useNearbyPlaces>;
+      const wrapper = mount(defineComponent({ setup() {
+        nearby = useNearbyPlaces({ origins: ref([{ lon: 2.3, lat: 48.81 }, { lon: 2.4, lat: 48.82 }]), radius, enabled, provider });
+        return () => null;
+      } }));
+      expect(nearby.isLoading.value).toBe(true);
+      radius.value = 400;
+      await flushPromises();
+      releases[0]!(); releases[1]!();
+      await flushPromises();
+      expect(nearby.isLoading.value).toBe(true);
+      await vi.advanceTimersByTimeAsync(NEARBY_PLACES_REFRESH_DEBOUNCE_MS);
+      releases[2]!();
+      await flushPromises();
+      expect(nearby.isLoading.value).toBe(true);
+      releases[3]!();
+      await flushPromises();
+      expect(nearby.isLoading.value).toBe(false);
+      enabled.value = false;
+      await flushPromises();
+      expect(nearby.isLoading.value).toBe(false);
+      wrapper.unmount();
+    } finally { vi.useRealTimers(); }
+  });
   it("delegates nearby loading to the injected PlacesProvider", async () => {
     const provider: PlacesProvider = {
       searchDestinations: vi.fn(async () => []),

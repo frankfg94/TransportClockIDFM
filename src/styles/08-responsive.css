@@ -186,6 +186,16 @@
     white-space: nowrap;
   }
 
+  .departure__main--service-detail {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .departure__main--service-detail .departure__meta {
+    flex-basis: 100%;
+    margin-top: 0;
+  }
+
   .departure__time {
     align-items: baseline;
     display: flex;

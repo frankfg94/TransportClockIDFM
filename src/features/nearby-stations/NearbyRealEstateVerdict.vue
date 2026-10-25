@@ -6,12 +6,14 @@ import { getDvfDataProvider, liquidityBand, type DvfCityDescriptor, type DvfMark
 import { fetchIrisDataset, type IrisNeighborhood } from "../transport-map/iris/irisApi";
 import { pointInIrisGeometry } from "../transport-map/iris/irisGeometry";
 import { calculateDvfPriceChanges, formatDvfPriceChange, type DvfPriceTrendChange } from "../../services/real-estate/priceTrends";
+import type { NearbyRealEstatePdfState, NeighborhoodScorePdfSection } from "./neighborhoodScorePdf";
 
 const props = withDefaults(defineProps<{
   origin?: { lon: number; lat: number };
   communeCode?: string;
   radiusMeters?: number;
 }>(), { radiusMeters: 500 });
+const emit = defineEmits<{ "export-state": [state: NearbyRealEstatePdfState] }>();
 
 const { n, t } = useI18n();
 const provider = getDvfDataProvider();
@@ -67,6 +69,7 @@ async function loadMarketFacts(): Promise<void> {
   if (!origin || !Number.isFinite(origin.lon) || !Number.isFinite(origin.lat) || typeof window === "undefined") return;
   const id = ++requestId;
   loading.value = true;
+  emit("export-state", { loading: true });
   unavailable.value = false;
   city.value = undefined;
   neighborhood.value = undefined;
@@ -125,8 +128,80 @@ async function loadMarketFacts(): Promise<void> {
   } catch {
     if (id === requestId) unavailable.value = true;
   } finally {
-    if (id === requestId) loading.value = false;
+    if (id === requestId) {
+      loading.value = false;
+      emit("export-state", { loading: false, section: createPdfSection() });
+    }
   }
+}
+
+function createPdfSection(): NeighborhoodScorePdfSection {
+  const items: string[] = [];
+  let subtitle: string | undefined;
+
+  if (unavailable.value) {
+    items.push(t("nearbyStations.realEstate.scoreUnavailable"));
+  } else if (city.value && neighborhood.value) {
+    subtitle = `${neighborhoodName.value} · ${cityName.value ?? city.value.name}`;
+    if (showLocalComparison.value) {
+      items.push(`${t("nearbyStations.realEstate.scoreLocalPrice")} : ${formatPrice(localPrice.value)}`);
+      items.push(`${t("nearbyStations.realEstate.scoreRestPrice")} : ${formatPrice(remainderPrice.value)}`);
+    } else {
+      items.push(`${t("nearbyStations.realEstate.scoreNeighborhoodMedian")} : ${formatPrice(neighborhood.value.medianPriceM2)}`);
+      items.push(`${t("nearbyStations.realEstate.scoreCityMedian")} : ${formatPrice(city.value.medianPriceM2)}`);
+    }
+    items.push(`${t("nearbyStations.realEstate.scoreRent")} : ${formatRent(rentPerSquareMeter.value)}`);
+    items.push(`${t("nearbyStations.realEstate.scoreYield")} : ${formatYield(grossRentalYield.value)}`);
+
+    const difference = showLocalComparison.value
+      ? priceDifference(localPrice.value, remainderPrice.value)
+      : priceDifference(neighborhood.value.medianPriceM2, city.value.medianPriceM2);
+    if (difference) {
+      items.push(t(
+        showLocalComparison.value
+          ? "nearbyStations.realEstate.scorePriceDifference"
+          : "nearbyStations.realEstate.scoreVsCity",
+        { difference },
+      ));
+    }
+    if (threeYearPriceChange.value) {
+      items.push(t(threeYearTrendKey.value, { change: formatChange(threeYearPriceChange.value.percent) }));
+    }
+    if (neighborhood.value.transactionCount !== undefined) {
+      const activity = frequencyCopy(frequency.value);
+      if (activity) items.push(activity);
+      const level = frequencyLevel(frequency.value);
+      if (level) items.push(t("nearbyStations.realEstate.scoreFrequencyScope", { level, scope: frequencyScopeLabel.value }));
+      items.push(`${t("nearbyStations.realEstate.transactionCount")} : ${n(neighborhood.value.transactionCount)}`);
+    }
+    if (city.value.transactionCount !== undefined && cityFrequency.value && cityFrequency.value !== "low") {
+      items.push(t(cityFrequency.value === "high" || cityFrequency.value === "very-high"
+        ? "nearbyStations.realEstate.scoreFrequencyCityHigh"
+        : "nearbyStations.realEstate.scoreFrequencyCityTypical"));
+    }
+    if (!neighborhood.value.hasEnoughSales) items.push(t("nearbyStations.realEstate.noNeighborhoodData"));
+  } else if (city.value) {
+    subtitle = city.value.name;
+    items.push(`${t("nearbyStations.realEstate.scoreCityMedian")} : ${formatPrice(city.value.medianPriceM2)}`);
+    items.push(`${t("nearbyStations.realEstate.mean")} : ${formatPrice(city.value.meanPriceM2)}`);
+    items.push(`${t("nearbyStations.realEstate.scoreRent")} : ${formatRent(rentPerSquareMeter.value)}`);
+    items.push(`${t("nearbyStations.realEstate.scoreYield")} : ${formatYield(grossRentalYield.value)}`);
+    if (city.value.transactionCount !== undefined && cityFrequency.value) {
+      const cityActivityKey = cityFrequency.value === "high" || cityFrequency.value === "very-high"
+        ? "nearbyStations.realEstate.scoreFrequencyCityHigh"
+        : cityFrequency.value === "low"
+          ? "nearbyStations.realEstate.scoreFrequencyCityLow"
+          : "nearbyStations.realEstate.scoreFrequencyCityTypical";
+      items.push(t(cityActivityKey));
+      const level = frequencyLevel(cityFrequency.value);
+      if (level) items.push(t("nearbyStations.realEstate.scoreFrequencyScope", { level, scope: frequencyScopeLabel.value }));
+    }
+    items.push(t("nearbyStations.realEstate.noNeighborhoodData"));
+  } else {
+    items.push(t("nearbyStations.realEstate.scoreUnavailable"));
+  }
+
+  return { title: t("nearbyStations.realEstate.scoreTitle"), subtitle, items };
 }
 
 function findNeighborhoodAtOrigin(

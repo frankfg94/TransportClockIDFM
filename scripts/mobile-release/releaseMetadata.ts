@@ -20,6 +20,9 @@ export interface AndroidReleaseManifest {
   fileName: string;
   signingCertificateSha256: string;
   oversizeApproved: boolean;
+  sourceKind?: "worktree-snapshot";
+  baseCommit?: string;
+  snapshotSha256?: string;
 }
 
 export function isSourceRevision(value: string): boolean {

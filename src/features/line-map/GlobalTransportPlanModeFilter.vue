@@ -10,7 +10,7 @@
       role="group"
       :aria-label="t('globalMap.page.primaryModesAria')"
     >
-      <header class="global-transport-plan__filter-heading">
+      <header v-if="showHeading" class="global-transport-plan__filter-heading">
         <span class="global-transport-plan__filter-heading-icon" aria-hidden="true">
           <Layers :size="22" :stroke-width="2.15" />
         </span>
@@ -173,6 +173,7 @@ const {
   modeLabel,
   modeColor,
   embedded = false,
+  showHeading = true,
   radarEnabledModes = [],
   showCityZonesFilter = true,
   cityZonesVisible = false,
@@ -185,6 +186,7 @@ const {
   modeLabel: (mode: GlobalMapMode) => string;
   modeColor: (mode: GlobalMapMode) => string;
   embedded?: boolean;
+  showHeading?: boolean;
   radarEnabledModes?: readonly GlobalMapMode[];
   showCityZonesFilter?: boolean;
   cityZonesVisible?: boolean;

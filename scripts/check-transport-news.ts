@@ -7,12 +7,14 @@ const selected = process.argv
   ?.slice(10)
   .split(",");
 const queue = NEWS_SOURCES.filter((source) => !selected || selected.includes(source.id));
+const selectedSources = queue.length;
+const now = Date.now();
 let available = 0;
 let articles = 0;
 async function worker() {
   while (queue.length) {
     const source = queue.shift()!;
-    const result = await newsCollector.collect(source);
+    const result = await newsCollector.collect(source, process.argv.includes("--refresh"));
     if (result.state === "ready") available++;
     articles += result.articles.length;
     console.log(
@@ -23,6 +25,14 @@ async function worker() {
         error: result.error,
         httpStatus: result.httpStatus,
         articles: result.articles.length,
+        checkedAt: result.checkedAt,
+        fetchedAt: result.fetchedAt,
+        recent90Days: result.articles.filter((article) => {
+          const date = Date.parse(article.publishedAt ?? "");
+          return date >= now - 90 * 86_400_000 && date <= now;
+        }).length,
+        undated: result.articles.filter((article) => !article.publishedAt).length,
+        newestPublishedAt: result.articles[0]?.publishedAt,
         example: process.argv.includes("--details")
           ? result.articles.slice(0, 3)
           : result.articles[0]?.title,
@@ -36,6 +46,7 @@ console.log(
   JSON.stringify({
     available,
     sources: NEWS_SOURCES.length,
+    selectedSources,
     articles,
     projectCatalog: catalog.state,
     discoveredProjects: catalog.sources.length,

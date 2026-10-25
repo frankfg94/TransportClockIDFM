@@ -22,6 +22,7 @@ const filters = ref<NewsFilterValues>({
   topic: "",
   sourceId: "",
   lineKey: "",
+  period: "90",
 });
 const pageSize = ref(30);
 const loading = ref(false);
@@ -66,6 +67,7 @@ const articles = computed(() =>
     topic: (filters.value.topic as NewsTopic) || undefined,
     sourceId: filters.value.sourceId || undefined,
     line: selectedLine.value,
+    recentDays: filters.value.period === "all" ? undefined : Number(filters.value.period),
   }),
 );
 const visibleArticles = computed(() => articles.value.slice(0, pageSize.value));
@@ -106,15 +108,13 @@ async function load(refresh = false) {
     const response = await fetch(toServerApiUrl("/api/transport-news/sources"), {
       signal: controller.signal,
     });
-    const catalog = (await response.json().catch(() => null)) as
-      | {
-          sources?: NewsSource[];
-          catalogState?: string;
-          catalogErrorMessage?: string;
-          message?: string;
-          detail?: string;
-        }
-      | null;
+    const catalog = (await response.json().catch(() => null)) as {
+      sources?: NewsSource[];
+      catalogState?: string;
+      catalogErrorMessage?: string;
+      message?: string;
+      detail?: string;
+    } | null;
     if (!response.ok) {
       throw new Error(
         [catalog?.message, catalog?.detail]
@@ -224,6 +224,7 @@ onBeforeUnmount(() => {
         <p class="eyebrow"><Rss :size="16" aria-hidden="true" /> {{ t("news.eyebrow") }}</p>
         <h1>{{ t("news.title") }}</h1>
         <p class="news-page__subtitle">{{ t("news.description") }}</p>
+        <p class="news-page__subtitle">{{ t("news.recencyHint") }}</p>
       </div>
       <button type="button" class="news-page__refresh" :disabled="loading" @click="load(true)">
         <RefreshCw :size="18" :class="{ 'news-spin': loading }" aria-hidden="true" />{{

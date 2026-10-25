@@ -1,4 +1,4 @@
-import { computed, effectScope, type ComputedRef } from "vue";
+import { computed, effectScope, ref, type ComputedRef, type Ref } from "vue";
 import { useLocalStorage } from "@vueuse/core";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 
@@ -71,6 +71,7 @@ export interface AddressBookStorageState {
 export interface LoadedAddressBookState {
   state: AddressBookStorageState;
   migratedLegacy: boolean;
+  error?: boolean;
 }
 
 let entrySequence = 0;
@@ -166,12 +167,13 @@ export function normalizeAddressBookEntries(values: unknown): AddressBookEntry[]
 
 export function loadAddressBookState(storage?: Storage): LoadedAddressBookState {
   const target = storage ?? getBrowserStorage();
-  if (!target) return { state: emptyAddressBookState(), migratedLegacy: false };
+  if (!target) return { state: emptyAddressBookState(), migratedLegacy: false, ...(typeof window !== "undefined" ? { error: true } : {}) };
 
   try {
     const currentRaw = target.getItem(ADDRESS_BOOK_STORAGE_KEY);
     if (currentRaw) {
       const parsed = JSON.parse(currentRaw) as unknown;
+      if (!Array.isArray(parsed) && (!parsed || typeof parsed !== "object" || (parsed as AddressBookStorageState).version !== ADDRESS_BOOK_STORAGE_VERSION || !Array.isArray((parsed as AddressBookStorageState).entries))) throw new Error("invalid-address-book-state");
       const values = extractCurrentEntries(parsed);
       return {
         state: {
@@ -193,7 +195,7 @@ export function loadAddressBookState(storage?: Storage): LoadedAddressBookState 
       migratedLegacy: legacyEntries.length > 0,
     };
   } catch {
-    return { state: emptyAddressBookState(), migratedLegacy: false };
+    return { state: emptyAddressBookState(), migratedLegacy: false, error: true };
   }
 }
 
@@ -231,6 +233,7 @@ export function toAddressBookPoint(entry: AddressBookEntry): GeocoderPoint {
 }
 
 interface AddressBookStateApi {
+  error: Ref<boolean>;
   entries: ComputedRef<AddressBookEntry[]>;
   primaryAddress: ComputedRef<AddressBookEntry | undefined>;
   workplaceAddress: ComputedRef<AddressBookEntry | undefined>;
@@ -266,10 +269,11 @@ function createAddressBookState(): { scope: ReturnType<typeof effectScope>; api:
   const api = scope.run(() => {
     const target = getBrowserStorage();
     const loaded = loadAddressBookState(target);
+    const error = ref(Boolean(loaded.error));
     const storage = useLocalStorage<AddressBookStorageState>(
       ADDRESS_BOOK_STORAGE_KEY,
       loaded.state,
-      { deep: true },
+      { deep: true, onError: () => { error.value = true; } },
     );
 
     if (loaded.migratedLegacy && target) {
@@ -284,7 +288,11 @@ function createAddressBookState(): { scope: ReturnType<typeof effectScope>; api:
     const entries = computed(() => normalizeAddressBookEntries(storage.value?.entries));
     const primaryAddress = computed(() => entries.value.find((entry) => entry.isPrimary));
     const workplaceAddress = computed(() => entries.value.find((entry) => entry.isWorkplace));
-    let lastRaw = target?.getItem(ADDRESS_BOOK_STORAGE_KEY) ?? null;
+    function readRaw(): string | null {
+      try { return target?.getItem(ADDRESS_BOOK_STORAGE_KEY) ?? null; }
+      catch { error.value = true; return null; }
+    }
+    let lastRaw = readRaw();
 
     function replaceEntries(nextEntries: readonly AddressBookEntry[]): void {
       const normalized = normalizeAddressBookEntries(nextEntries.map((entry) => ({ ...entry })));
@@ -292,15 +300,16 @@ function createAddressBookState(): { scope: ReturnType<typeof effectScope>; api:
         version: ADDRESS_BOOK_STORAGE_VERSION,
         entries: normalized,
       };
-      lastRaw = target?.getItem(ADDRESS_BOOK_STORAGE_KEY) ?? null;
+      lastRaw = readRaw();
     }
 
     function reloadFromStorage(): void {
       if (!target) return;
-      const raw = target.getItem(ADDRESS_BOOK_STORAGE_KEY);
-      if (raw === lastRaw) return;
-      const loadedCurrent = loadAddressBookState(target).state;
-      storage.value = loadedCurrent;
+      const raw = readRaw();
+      if (raw === lastRaw && !error.value) return;
+      const loadedCurrent = loadAddressBookState(target);
+      error.value = Boolean(loadedCurrent.error);
+      if (!loadedCurrent.error) storage.value = loadedCurrent.state;
       lastRaw = raw;
     }
 
@@ -370,6 +379,7 @@ function createAddressBookState(): { scope: ReturnType<typeof effectScope>; api:
     }
 
     return {
+      error,
       entries,
       primaryAddress,
       workplaceAddress,

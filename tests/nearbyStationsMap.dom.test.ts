@@ -1,3 +1,4 @@
+import MaterialCombobox from "../src/components/MaterialCombobox.vue";
 import { flushPromises, mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -450,6 +451,27 @@ function mountMap(
 }
 
 describe("NearbyStationsMap walking route overlay", () => {
+  it("opens commerce details in the main sidebar and reframes a late walking route", async () => {
+    const restoreViewport = installMapViewport(720, 420);
+    const line = createLine("1", "METRO");
+    const station = createStation("station:shop", "Station du commerce", line);
+    const wrapper = mountMap([createEntry(station, line)]);
+    const place = { id: "shop:main", name: "Commerce réel", lon: 2.354, lat: 48.852, category: "shop" as const, kind: "supermarket", distanceMeters: 300, tags: { opening_hours: "24/7" } };
+    await wrapper.setProps({ places: [place], selectedPlaceId: place.id, reduceMotion: true });
+    await nextTick();
+    expect(wrapper.get('.nearby-map__sidebar [data-testid="nearby-place-details"]').text()).toContain('24/7');
+    expect(wrapper.find('.nearby-map__sidebar-tabs').exists()).toBe(false);
+    await wrapper.setProps({ walkingRoute: { provider: "ign-bdtopo", distanceMeters: 600, durationSeconds: 450, coordinates: [{ lon: 2.35, lat: 48.85 }, { lon: 2.36, lat: 48.855 }, place] } });
+    await nextTick();
+    expect(wrapper.get('.nearby-map__walking-flow-path').attributes('d')).toContain('L');
+    expect(wrapper.get('.nearby-map__sidebar [data-testid="nearby-place-details"]').text()).toContain('8 min');
+    await wrapper.get('[data-testid="nearby-place-details"] button').trigger('click');
+    expect(wrapper.emitted('selectPlace')?.at(-1)).toEqual([undefined]);
+    await wrapper.get('.nearby-map__marker').trigger('click');
+    expect(wrapper.emitted('selectPlace')).toHaveLength(2);
+    expect(wrapper.emitted('selectPlace')?.at(-1)).toEqual([undefined]);
+    wrapper.unmount(); restoreViewport();
+  });
   it("renders a dotted walking path between route endpoints", async () => {
     const restoreViewport = installMapViewport(720, 360);
     const wrapper = mountMap(
@@ -654,16 +676,16 @@ describe("NearbyStationsMap pan interaction", () => {
       await flushPromises();
 
       const menu = document.body.querySelector<HTMLElement>("#nearby-map-mobile-controls");
-      const sheet = document.body.querySelector<HTMLElement>("[data-testid='app-right-panel']");
-      const dragHandle = document.body.querySelector<HTMLButtonElement>("[data-testid='app-right-panel-drag-handle']");
+      const sheet = document.body.querySelector<HTMLElement>("[data-testid='draggable-bottom-sheet']");
+      const dragHandle = document.body.querySelector<HTMLButtonElement>("[data-testid='draggable-bottom-sheet-drag-handle']");
       expect(menu).not.toBeNull();
       expect(sheet).not.toBeNull();
       expect(dragHandle).not.toBeNull();
       expect(menu?.querySelector("[data-nearby-map-mobile-action='directory']")).not.toBeNull();
       expect(menu?.querySelector("[data-nearby-map-mobile-action='neighborhood-score']")).not.toBeNull();
       expect(menu?.querySelector("[data-nearby-map-chaos-zoom-run]")).not.toBeNull();
-      expect(sheet?.classList.contains("app-right-panel--mobile-sheet")).toBe(true);
-      expect(sheet?.classList.contains("app-right-panel--mobile-mid")).toBe(true);
+      expect(sheet?.classList.contains("draggable-bottom-sheet")).toBe(true);
+      expect(sheet?.classList.contains("draggable-bottom-sheet--mid")).toBe(true);
     } finally {
       wrapper.unmount();
       restoreViewport();
@@ -682,9 +704,9 @@ describe("NearbyStationsMap pan interaction", () => {
       await wrapper.get(".nearby-map__display-toggle").trigger("click");
       await flushPromises();
 
-      const panel = shell.querySelector<HTMLElement>("[data-testid='app-right-panel']");
+      const panel = shell.querySelector<HTMLElement>("[data-testid='draggable-bottom-sheet']");
       expect(panel).not.toBeNull();
-      expect(panel?.classList.contains("app-right-panel--mobile-sheet")).toBe(true);
+      expect(panel?.classList.contains("draggable-bottom-sheet")).toBe(true);
       expect(shell.querySelector("#nearby-map-mobile-controls")).not.toBeNull();
     } finally {
       restoreFullscreen();
@@ -1113,7 +1135,8 @@ describe("NearbyStationsMap walking accessibility zones and controls", () => {
       const mergedCityZone = wrapper.get(".nearby-map__walking-zones--city .nearby-map__walking-zone");
       expect(mergedCityZone.attributes("fill-rule")).toBe("evenodd");
       expect(mergedCityZone.attributes("stroke")).toBe("none");
-      await isochronePanel.get("[data-radar-mode='TRAM'] select").setValue("extended");
+      isochronePanel.getComponent<typeof MaterialCombobox>("[data-radar-mode='TRAM'] .material-combobox").vm.$emit("update:modelValue", "extended");
+      await flushPromises();
       await vi.waitFor(() => expect(walkingRequests.some((request) => request.minutes.join(",") === "5,10,15,20,25")).toBe(true), { timeout: 4_000 });
       await vi.waitFor(() => expect(wrapper.findAll(".nearby-map__walking-zones--city .nearby-map__walking-zone")).toHaveLength(6), { timeout: 4_000 });
       expect(wrapper.findAll(".nearby-map__walking-zones--city .nearby-map__walking-zone").map((path) => path.attributes("data-walking-zone")))

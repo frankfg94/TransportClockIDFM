@@ -164,6 +164,33 @@ function readyFrequency(lineId: string): GtfsLineFrequencyResponse {
 }
 
 describe("useNearbyNeighborhoodScore", () => {
+  it("recomputes the final score when personal journey thresholds change without restarting route probes", async () => {
+    const personalJourneys = ref<import("../src/features/nearby-stations/neighborhood/personalJourneys").PersonalJourneyResult[]>([]);
+    const findJourneys = vi.fn(async () => []);
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const wrapper = mount(defineComponent({ setup() {
+      score = useNearbyNeighborhoodScore({ origin: ref({ lon: 2.3, lat: 48.8 }),
+        network: ref(createNetwork(createLine())), stations: ref([]), personalJourneys,
+        placesProvider: { searchNearby: async () => [], searchDestinations: async () => [] },
+        travelRoutesProvider: { findJourneys }, fetchFrequency: async lineId => readyFrequency(lineId),
+      });
+      return () => null;
+    } }));
+    await flushPromises();
+    const callsBefore = findJourneys.mock.calls.length;
+    personalJourneys.value = [{ id: "test", destinationId: "test", commute: false,
+      positiveBelowMinutes: 20, neutralThroughMinutes: 30, status: "ready",
+      journey: { source: "gtfs", durationSeconds: 2700, sections: [{ type: "public_transport", mode: "metro", lineCode: "4", durationSeconds: 2700 }] },
+    }];
+    await flushPromises();
+    const strict = score.result.value.score!;
+    expect(score.result.value.categories.find(category => category.id === "transport")?.negativeFacts.some(fact => fact.family === "personal-journey:test")).toBe(true);
+    personalJourneys.value = personalJourneys.value.map(row => ({ ...row, positiveBelowMinutes: 50, neutralThroughMinutes: 75 }));
+    await flushPromises();
+    expect(score.result.value.score).toBeGreaterThan(strict);
+    expect(findJourneys.mock.calls.length).toBe(callsBefore);
+    wrapper.unmount();
+  });
   it("loads full topology with transport tasks, aborts stale origins and reuses the completed cache", async () => {
     const line = createLine(), origin = ref({ lon: 2.3, lat: 48.82 });
     const graph = buildLineTopologyFromFixture({ line: { id: line.id, name: "Test", shortName: "Test", aliases: [], mode: "METRO" },
@@ -424,6 +451,35 @@ describe("useNearbyNeighborhoodScore", () => {
     heavyCandidates.value = [second];
     await vi.waitFor(() => expect(score.diagnostics.value.frequencies[0]?.average.peakMinutes).toBe(4));
     expect(fetchFrequency).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it("refreshes the last departure for a changed reference station and documents request failures", async () => {
+    const line = createLine(), first = createHeavyCandidate(line), second = createHeavyCandidate(line);
+    first.station.id = "station:first";
+    second.id = "heavy:second"; second.station.id = "station:second";
+    const candidates = ref([first]);
+    const fetchLastService = vi.fn(async (_line: string, station?: string) => {
+      if (station === second.station.id) throw new Error("Unavailable timetable");
+      return { seconds: 90000, stopName: "First station" };
+    });
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const wrapper = mount(defineComponent({ setup() {
+      score = useNearbyNeighborhoodScore({ origin: ref({ lon: 2.3, lat: 48.82 }),
+        stations: ref([]), network: ref(createNetwork(line)), heavyCandidates: candidates,
+        fetchFrequency: async () => readyFrequency(line.id), fetchLastService,
+        placesProvider: { searchNearby: async () => [], searchDestinations: async () => [] },
+        travelRoutesProvider: { findJourneys: async () => [] },
+      });
+      return () => null;
+    } }));
+    await vi.waitFor(() => expect(score.diagnostics.value.lastServices[0]?.[1]?.stopName).toBe("First station"));
+    candidates.value = [second];
+    await vi.waitFor(() => expect(fetchLastService).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(score.diagnostics.value.lastServices).toEqual([[line.id, undefined]]));
+    candidates.value = [first];
+    await vi.waitFor(() => expect(score.diagnostics.value.lastServices[0]?.[1]?.seconds).toBe(90000));
+    expect(fetchLastService).toHaveBeenCalledTimes(2);
     wrapper.unmount();
   });
 

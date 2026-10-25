@@ -35,6 +35,30 @@ afterEach(() => {
 });
 
 describe("FullscreenStationPanel", () => {
+  it("keeps all dense departures and the controls available while the page stays locked", async () => {
+    const wrapper = mountPanel({
+      design: "dense-list",
+      directions: [{
+        id: "dense", label: "Jardin Parisien",
+        departures: Array.from({ length: 60 }, (_, index) => ({
+          id: `dense-${index}`, waitLabel: String(index + 1),
+          destination: `Destination ${index + 1}`,
+          departureTime: new Date(Date.UTC(2026, 9, 22, 10, index)).toISOString(),
+        })),
+      }],
+    });
+    expect(wrapper.findAll(".fullscreen-station-panel__dense-row")).toHaveLength(60);
+    expect(wrapper.get(".fullscreen-station-panel__dense-list").text()).toContain("Destination 60");
+    expect(wrapper.get(".fullscreen-station-panel__dense-header").text()).toContain("Les Peintres");
+    expect(document.body.style.overflow).toBe("hidden");
+    await wrapper.get('[aria-label="Rafraichir le panneau"]').trigger("click");
+    expect(wrapper.emitted("refresh")).toHaveLength(1);
+    await wrapper.get('[aria-label="Fermer le panneau"]').trigger("click");
+    expect(wrapper.emitted("close")).toHaveLength(1);
+    wrapper.unmount();
+    expect(document.body.style.overflow).toBe("");
+  });
+
   it("renders the logo slot and every direction in all-directions design", () => {
     const wrapper = mountPanel();
 

@@ -10,17 +10,16 @@ import {
   type CompiledPlacesManifest,
   type PlacesRankingDocument,
 } from "./compiledPlaces";
-import type {
-  NearbyPlace,
-  NearbyPlaceCityRef,
-  NearbyPlacesCitiesRequest,
-  NearbyPlacesRequest,
-  PlacesProvider,
+import {
+  mergeNearbyPlaces,
+  type NearbyPlace,
+  type NearbyPlaceCityRef,
+  type NearbyPlacesCitiesRequest,
+  type NearbyPlacesRequest,
+  type PlacesProvider,
 } from "../../features/nearby-stations/nearbyPlaces";
 
 const DEFAULT_BASE_PATH = "/data/places";
-const MIN_RADIUS_METERS = 100;
-const MAX_RADIUS_METERS = 2_000;
 const MAX_CITY_CACHE_ENTRIES = 24;
 const ORIGIN_GRID_CELL_METERS = 2_000;
 
@@ -160,25 +159,49 @@ export function createCompiledPlacesProvider(
         lat: request.origin.lat,
         lon: request.origin.lon,
       }, signal);
-      const file = await loadPlacesCity({ code: city.code }, signal);
       const radius = clampRadius(request.radiusMeters);
-      return nearbyPlacesFromCity(file, [request.origin], radius, signal, createOriginGrid([request.origin], radius));
+      const manifest = await loadPlacesManifest(signal);
+      const cities = new Map([[city.code, city], ...intersectingCities(manifest, [request.origin], radius).map((entry) => [entry.code, entry] as const)]);
+      const files = await Promise.all([...cities.keys()].map((code) => loadPlacesCity({ code }, signal)));
+      const grid = createOriginGrid([request.origin], radius);
+      return mergeNearbyPlaces(...files.map((file) => nearbyPlacesFromCity(file, [request.origin], radius, signal, grid)));
     },
 
     async searchNearbyCities(request: NearbyPlacesCitiesRequest, signal?: AbortSignal): Promise<NearbyPlace[]> {
       const cities = dedupeCityRefs(request.cities);
       if (cities.length === 0 || request.origins.length === 0) return [];
-      const loadedFiles = await Promise.all(cities.map((city) => loadPlacesCity(city, signal)));
-      const files = [...new Map(loadedFiles.map((file) => [file.city.code, file])).values()];
       const radius = clampRadius(request.radiusMeters);
+      const manifest = await loadPlacesManifest(signal);
+      const neighboringCities = intersectingCities(manifest, request.origins, radius).map((city) => ({ code: city.code }));
+      const loadedFiles = await Promise.all([...cities, ...neighboringCities].map((city) => loadPlacesCity(city, signal)));
+      const files = [...new Map(loadedFiles.map((file) => [file.city.code, file])).values()];
       const originGrid = createOriginGrid(request.origins, radius);
-      return files.flatMap((file) => nearbyPlacesFromCity(file, request.origins, radius, signal, originGrid));
+      return mergeNearbyPlaces(...files.map((file) => nearbyPlacesFromCity(file, request.origins, radius, signal, originGrid)));
     },
   };
 }
 
 function clampRadius(radiusMeters: number): number {
-  return Math.max(MIN_RADIUS_METERS, Math.min(MAX_RADIUS_METERS, Math.round(radiusMeters)));
+  return Number.isFinite(radiusMeters) ? Math.max(0, radiusMeters) : 0;
+}
+
+function intersectingCities(
+  manifest: CompiledPlacesManifest,
+  origins: readonly Pick<NearbyPlace, "lon" | "lat">[],
+  radius: number,
+): CompiledPlacesManifest["cities"] {
+  // Conservative spherical bounding boxes select assets; the final haversine
+  // test below remains authoritative for membership in the displayed circle.
+  const angle = radius / 6_371_000;
+  const latDelta = angle * 180 / Math.PI;
+  const bounds = origins.map((origin) => {
+    const lonDelta = Math.asin(Math.min(1, Math.sin(angle) / Math.cos(origin.lat * Math.PI / 180))) * 180 / Math.PI;
+    return [origin.lon - lonDelta, origin.lat - latDelta, origin.lon + lonDelta, origin.lat + latDelta];
+  });
+  return manifest.cities.filter((city) => bounds.some((box) =>
+    city.bbox[0] <= box[2]! && city.bbox[2] >= box[0]!
+    && city.bbox[1] <= box[3]! && city.bbox[3] >= box[1]!,
+  ));
 }
 
 interface OriginGrid {

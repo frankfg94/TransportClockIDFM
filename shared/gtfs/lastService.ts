@@ -10,8 +10,10 @@ export function findGtfsLastService(timetable: Pick<GtfsLineTimetableResponse, "
   let latest: GtfsLastService | undefined;
   for (const trip of timetable.trips) for (const call of trip.calls) {
     if (!stopIds.has(call.stopId)) continue;
-    const seconds = call.departure ?? call.arrival;
-    if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) continue;
+    // An arrival-only terminal or a no-pickup call is not a usable departure.
+    if (call.pickupType === 1) continue;
+    const seconds = call.departure;
+    if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) continue;
     if (!latest || seconds > latest.seconds) latest = { seconds, stopName: timetable.stops.find(stop => stop.id === call.stopId)?.name };
   }
   return latest;

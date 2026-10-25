@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MaterialCombobox from "../../../components/MaterialCombobox.vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { AlertTriangle, LoaderCircle, Power, Radar, X } from "lucide-vue-next";
 import AppModal from "../../../components/AppModal.vue";
@@ -115,8 +116,7 @@ function presetLabel(preset: GlobalIsochronePresetId): string {
   return (copy.value.presetMinutes ?? t("globalMap.radar.presetMinutes", { values })).replace("{values}", values);
 }
 
-function changePreset(mode: GlobalMapMode, event: Event): void {
-  const preset = (event.target as HTMLSelectElement).value;
+function changePreset(mode: GlobalMapMode, preset: string): void {
   if (GLOBAL_ISOCHRONE_PRESET_ORDER.includes(preset as GlobalIsochronePresetId)) {
     emit("update:mode", mode, { ...props.settings[mode], preset: preset as GlobalIsochronePresetId });
   }
@@ -146,6 +146,8 @@ watch(() => props.modalOpen, async (open) => {
 });
 
 function onKeydown(event: KeyboardEvent): void {
+  // Let the nested combobox consume its first Escape before closing the panel.
+  if (event.key === "Escape" && event.target instanceof Element && event.target.closest('[role="combobox"][aria-expanded="true"]')) return;
   const dialog = props.modalOpen ? modalBody.value?.closest<HTMLElement>("[role=dialog]") : undefined;
   if (event.key === "Escape" && (dialog || (props.open && panel.value?.contains(event.target as Node)))) {
     event.preventDefault();
@@ -217,19 +219,17 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown, true));
             <small v-if="!effectiveEligibleModes.includes(mode)">{{ copy.outsideSelection ?? t("globalMap.radar.outsideSelection") }}</small>
           </span>
         </label>
-        <select
-          :value="settings[mode].preset"
+        <MaterialCombobox
+          :model-value="settings[mode].preset"
+          :options="GLOBAL_ISOCHRONE_PRESET_ORDER.map(preset => ({ id: preset, label: presetLabel(preset) }))"
+          teleport
           :aria-label="copy.presetMode
             ? copy.presetMode.replace('{mode}', modeLabel(mode))
             : copy.durationMode
               ? copy.durationMode.replace('{mode}', modeLabel(mode))
               : t('globalMap.radar.durationMode', { mode: modeLabel(mode) })"
-          @change="changePreset(mode, $event)"
-        >
-          <option v-for="preset in GLOBAL_ISOCHRONE_PRESET_ORDER" :key="preset" :value="preset">
-            {{ presetLabel(preset) }}
-          </option>
-        </select>
+          @update:model-value="changePreset(mode, $event)"
+        />
         <span class="walking-radar__preset-colors" aria-hidden="true">
           <i v-for="zoneIndex in 3" :key="zoneIndex" :data-zone-index="zoneIndex - 1" />
         </span>

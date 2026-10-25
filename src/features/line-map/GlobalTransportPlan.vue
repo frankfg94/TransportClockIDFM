@@ -1,7 +1,10 @@
 <template>
-  <main
+  <component
+    :is="props.itinerary ? 'div' : 'main'"
     ref="rootElement"
     class="global-transport-plan"
+    :class="{ 'global-transport-plan--supplied-itinerary': Boolean(props.itinerary) }"
+    :data-itinerary-source="props.itinerary ? 'supplied' : undefined"
     :data-map-experience="mapExperience.kind"
     :data-transport-renderer="mapExperience.rendererKind"
     :data-map-basemap="mapExperience.basemap"
@@ -11,6 +14,7 @@
     @keydown="onKeydown"
   >
     <GlobalTransportPlanToolbar
+      v-if="!props.itinerary"
       :show-map-interactions="showMapInteractions"
       :status-label="statusLabel"
       :renderer-metrics="rendererMetrics"
@@ -104,7 +108,8 @@
         class="global-transport-plan__next-surface"
         :renderer="renderer"
         :camera="camera"
-        :nearby-places="!routePreviewActive && activeLine ? nearbyLinePlaces.places.value : undefined"
+        :nearby-places="!routePreviewActive ? displayedNearbyPlaces : undefined"
+        :nearby-places-commerce-only="Boolean(temporaryMarker && temporaryMarkerRadius)"
         :real-estate-cells="realEstateLayerEnabled ? realEstateGridCells : undefined"
         :real-estate-metric-range="realEstateMetricRange"
         :real-estate-metric-mode="realEstateMetricMode"
@@ -118,7 +123,7 @@
         @ready="nextRendererReady = true"
       />
       <GlobalMapRealEstateControl
-        v-if="mapExperience.kind === 'next'"
+        v-if="!props.itinerary && mapExperience.kind === 'next'"
         :enabled="realEstateLayerEnabled"
         :loading="realEstateLayerLoading"
         :error="realEstateLayerError"
@@ -168,6 +173,7 @@
         @retry="retryRealEstateSalesLoad"
       />
       <GlobalTransportPlanSearch
+        v-if="!props.itinerary"
         v-model:open="searchOpen"
         :show-map-interactions="showMapInteractions"
         :lines="network?.lines ?? []"
@@ -186,12 +192,15 @@
         @select-marker="selectMarkerFromSearch($event)"
       />
       <button
-        v-if="showMapInteractions && mobileViewportActive && !mobileLineSelectorOpen"
+        v-if="showMapInteractions && mobileViewportActive"
+        v-show="!mobileLineSelectorOpen"
+        ref="mobileLineSelectorButton"
         type="button"
         class="global-transport-plan__mobile-line-selector"
         data-global-map-mobile-line-selector
         :aria-label="t('globalMap.page.openMobileLineSelector')"
         :title="t('globalMap.page.openMobileLineSelector')"
+        @keydown.stop
         @click="openMobileLineSelector"
       >
         <Layers :size="22" :stroke-width="2.15" aria-hidden="true" />
@@ -219,11 +228,12 @@
 
       <GlobalTransportItineraryOverlay
         :route="globalSelectedTravelRoute"
-        :origin="globalItinerary.origin.value"
-        :destination="globalItinerary.travelRoutes.destination.value"
+        :origin="globalItineraryOrigin"
+        :destination="globalItineraryDestination"
         :segments="globalItinerarySegments"
+        :steps="props.itinerary?.steps"
         :camera="camera"
-        :get-section-exits="getGlobalSectionExits"
+        :get-section-exits="props.itinerary ? undefined : getGlobalSectionExits"
       />
 
       <GlobalMapDistanceMeasurementOverlay
@@ -263,13 +273,18 @@
       />
 
       <GlobalMapNearbyPlacesOverlay
-        v-if="!routePreviewActive && activeLine"
+        v-if="!routePreviewActive && (activeLine || temporaryMarkerRadius)"
         ref="nearbyPlacesOverlayRef"
         :gpu="mapExperience.kind === 'next'"
         :pick-place="pickNearbyLinePlace"
-        :places="nearbyLinePlaces.places.value"
+        :places="displayedNearbyPlaces"
+        :commerce-only="Boolean(temporaryMarker && temporaryMarkerRadius)"
         :camera="camera"
       />
+      <div v-if="!routePreviewActive && temporaryMarkerRadius && (nearbyCirclePlaces.isLoading.value || nearbyCirclePlaces.error.value)" class="global-transport-plan__circle-places-status" role="status" aria-live="polite">
+        <progress v-if="nearbyCirclePlaces.isLoading.value" :aria-label="t('globalMap.sidebar.nearbyPlacesLoading')" />
+        {{ t(nearbyCirclePlaces.isLoading.value ? 'globalMap.sidebar.nearbyPlacesLoading' : 'globalMap.sidebar.nearbyPlacesUnavailable') }}
+      </div>
 
       <GlobalMapGpeStationsOverlay
         v-if="gpeStationOverlayVisible && gpeStations.length > 0"
@@ -365,37 +380,33 @@
         }}
       </div>
 
-      <Transition name="global-map-itinerary-slide">
-        <div
-          v-if="globalItinerary.open.value"
-          ref="itineraryPanelElement"
+        <DraggableBottomSheet
+          v-if="!props.itinerary && globalItinerary.open.value"
+          :enabled="mobileViewportActive"
+          inactive-transition="global-map-itinerary-slide"
+          :stage="itineraryToGenericStage[mobileItinerarySheetSnap]"
+          :snap-heights="mobileItinerarySnapHeights"
+          :show-close-button="false"
+          :dismiss-on-swipe="false"
+          cycle-stages
+          unwrapped-content
+          :resize-label="t('globalMap.itinerary.dragHandle')"
+          :handle-attrs="{ 'data-global-map-itinerary-sheet-handle': '', 'aria-expanded': mobileItinerarySheetSnap !== 'collapsed', 'aria-controls': 'global-map-itinerary-content' }"
+          @update:stage="setMobileItinerarySheetSnap(itineraryFromGenericStage[$event])"
+          @resize="onItinerarySheetResize"
+          @close="globalItinerary.close"
+          ref="itinerarySheetComponent"
           class="global-transport-plan__itinerary-panel"
           :class="[
             `global-transport-plan__itinerary-panel--${mobileItinerarySheetSnap}`,
             { 'global-transport-plan__itinerary-panel--dragging': mobileItinerarySheetDragging },
           ]"
           :data-mobile-itinerary-sheet="mobileItinerarySheetSnap"
-          :style="mobileItinerarySheetStyle"
           @transitionrun="onItinerarySheetTransition"
           @transitionstart="onItinerarySheetTransition"
           @transitionend="onItinerarySheetTransition"
           @transitioncancel="onItinerarySheetTransition"
         >
-          <button
-            type="button"
-            class="global-transport-plan__itinerary-sheet-handle"
-            :aria-label="t('globalMap.itinerary.dragHandle')"
-            :aria-expanded="mobileItinerarySheetSnap !== 'collapsed'"
-            aria-controls="global-map-itinerary-content"
-            data-global-map-itinerary-sheet-handle
-            @click="cycleMobileItinerarySheet"
-            @pointerdown="onItinerarySheetPointerDown"
-            @pointermove="onItinerarySheetPointerMove"
-            @pointerup="onItinerarySheetPointerUp"
-            @pointercancel="onItinerarySheetPointerCancel"
-          >
-            <span aria-hidden="true" />
-          </button>
           <div class="global-transport-plan__itinerary-mobile-summary" aria-live="polite">
             <div class="global-transport-plan__itinerary-mobile-endpoints">
               <span><small>{{ t("globalMap.itinerary.from") }}</small>{{ globalItinerary.origin.value?.label || t("globalMap.itinerary.myPosition") }}</span>
@@ -452,10 +463,10 @@
               @use-current-location="void useCurrentLocationAsItineraryOrigin()"
             />
           </LeftNearbySidebar>
-        </div>
-      </Transition>
+        </DraggableBottomSheet>
 
       <ContextMenu
+        v-if="!props.itinerary"
         :open="globalContextMenuOpen"
         :point="globalContextMenuPoint"
         :aria-label="t('globalMap.contextMenu.aria')"
@@ -610,10 +621,17 @@
         {{ t("globalMap.page.loading") }}
       </div>
 
-      <div
-        v-if="!mobileViewportActive || mobileLineSelectorOpen"
-        class="global-transport-plan__left-controls"
-        :class="{ 'global-transport-plan__left-controls--mobile-open': mobileLineSelectorOpen }"
+      <component
+        :is="mobileViewportActive ? DraggableBottomSheet : 'div'"
+        v-if="!props.itinerary && (!mobileViewportActive || mobileLineSelectorOpen)"
+        v-bind="mobileViewportActive ? {
+          open: mobileLineSelectorOpen,
+          title: t('globalMap.page.exploreNetworks'),
+          class: 'global-transport-plan__networks-sheet',
+          stage: mobileNetworksSheetStage,
+        } : { class: 'global-transport-plan__left-controls' }"
+        @close="collapseMobileLineSelector"
+        @update:stage="mobileNetworksSheetStage = $event"
       >
         <Transition :name="leftControlsTransitionName" mode="out-in">
           <div
@@ -623,6 +641,7 @@
           >
             <GlobalTransportPlanModeFilter
               embedded
+              :show-heading="!mobileViewportActive"
               :primary-modes="primaryModes"
               :available-modes="availableModes"
               :active-preset="activePreset"
@@ -673,7 +692,7 @@
             />
           </div>
         </Transition>
-      </div>
+      </component>
 
       <Transition
         name="global-map-picker-sidebar-slide"
@@ -699,6 +718,8 @@
           :nearby-places-loading="nearbyLinePlaces.isLoading.value"
           :nearby-places-error="Boolean(nearbyLinePlaces.error.value)"
           :nearby-places-radius-minutes="nearbyLineRadiusMinutes"
+          :served-cities-loading="servedCitiesLoading || busDirectionLoading"
+          :served-cities-error="Boolean(cityZonesError)"
           :lines="activeStationLines"
           :all-lines="network?.lines ?? []"
           :stations="network?.stations ?? []"
@@ -782,7 +803,7 @@
         :style="tooltipStyle"
       />
 
-      <footer class="global-transport-plan__legend">
+      <footer v-if="!props.itinerary" class="global-transport-plan__legend">
         <span><i class="legend-dot legend-dot--hub" /> {{ t("globalMap.page.hub") }}</span>
         <span
           ><i class="legend-dot legend-dot--entrance" /> {{ t("globalMap.page.entrance") }}</span
@@ -888,7 +909,7 @@
         </template>
       </details>
     </section>
-  </main>
+  </component>
 </template>
 
 <script setup lang="ts">
@@ -1083,6 +1104,8 @@ import type {
 import { useGlobalTransportMapInteraction } from "./useGlobalTransportMapInteraction";
 import ContextMenu from "../../components/ContextMenu.vue";
 import AppModal from "../../components/AppModal.vue";
+import DraggableBottomSheet from "../../components/DraggableBottomSheet.vue";
+import type { BottomSheetStage } from "../../components/draggableBottomSheet";
 import LeftNearbySidebar from "../nearby-stations/LeftNearbySidebar.vue";
 import LeftNearbySidebarBodyTravel from "../nearby-stations/LeftNearbySidebarBodyTravel.vue";
 import AdressBook, { type AddressBookInitialEntry } from "../address-book/AdressBook.vue";
@@ -1123,12 +1146,14 @@ import { useGlobalTransportItinerary } from "./useGlobalTransportItinerary";
 import { useNearbyPlaces } from "../nearby-stations/useNearbyPlaces";
 import { walkingMinutesToMeters } from "../nearby-stations/nearbyPlacePresentation";
 import type { NearbyPlace, NearbyPlaceCityRef } from "../nearby-stations/nearbyPlaces";
+import { isNearbyPlaceCommerce } from "../nearby-stations/nearbyPlacePresentation";
 import { normalizeCityName } from "../../services/places/compiledPlaces";
 import {
   buildGlobalLineConnectionStations,
   filterGlobalLineConnections,
 } from "./globalLineMetadata";
 import type { TravelRoute } from "../nearby-stations/useTravelRoutes";
+import type { GlobalTransportPlanItinerary } from "./globalTransportPlanItinerary";
 import { useGlobalMapMarkers, type GlobalMapMarker } from "./globalMapMarkers";
 import {
   createGlobalMapDistanceMeasurement,
@@ -1175,6 +1200,7 @@ const props = withDefaults(
     basemapStyle?: TransportMapBasemapStyle;
     experience?: TransportMapExperienceKind;
     nextMapStyle?: NextMapStyle;
+    itinerary?: GlobalTransportPlanItinerary;
   }>(),
   {
     basemapContrast: GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.default,
@@ -1260,7 +1286,7 @@ function isBusOnlyOverviewStation(station: GlobalMapStation): boolean {
 
 const rootElement = ref<HTMLElement>();
 const stageElement = ref<HTMLElement>();
-const itineraryPanelElement = ref<HTMLElement>();
+const itinerarySheetComponent = ref<InstanceType<typeof DraggableBottomSheet>>();
 const canvasElement = ref<HTMLCanvasElement>();
 const legacyBasemapRef = ref<{
   getStackElement: () => HTMLElement | undefined;
@@ -1737,6 +1763,8 @@ type GlobalTransportPlanPanelView = "presets" | "customization" | "lines";
 const leftControlsView = ref<GlobalTransportPlanPanelView>("presets");
 const mobileViewportActive = ref(false);
 const mobileLineSelectorOpen = ref(false);
+const mobileLineSelectorButton = ref<HTMLButtonElement>();
+const mobileNetworksSheetStage = ref<"peek" | "mid" | "full">("mid");
 type GlobalMapSidebarSheetSnap = "collapsed" | "medium" | "expanded";
 const mobilePickerSidebarSnap = ref<GlobalMapSidebarSheetSnap>("collapsed");
 const lineSelectorOpen = ref(false);
@@ -1787,6 +1815,9 @@ const globalItinerary = useGlobalTransportItinerary({
   },
   searchAddresses: true,
 });
+const globalItineraryOrigin = computed(() => props.itinerary?.origin ?? globalItinerary.origin.value);
+const globalItineraryDestination = computed(() => props.itinerary?.destination ?? globalItinerary.travelRoutes.destination.value);
+const globalItineraryActive = computed(() => Boolean(props.itinerary) || globalItinerary.open.value);
 const dataSource = new TransportMapDataSource({
   maxChunkConcurrency: GLOBAL_TRANSPORT_PLAN_CONFIG.data.maxChunkConcurrency,
   decodedChunkCacheMaxEntries: GLOBAL_TRANSPORT_PLAN_CONFIG.data.decodedChunkCacheMaxEntries,
@@ -2402,8 +2433,10 @@ function ensureIrisDataset(): Promise<IrisDataset> {
   return pending;
 }
 
+const servedCitiesLoading = ref(false);
 async function ensureServedCitiesDataset(): Promise<void> {
   if (!showServedCityZones.value || irisDataset.value) return;
+  servedCitiesLoading.value = true;
   try {
     await ensureIrisDataset();
     if (showServedCityZones.value) {
@@ -2415,6 +2448,8 @@ async function ensureServedCitiesDataset(): Promise<void> {
       cityZonesError.value = "unavailable";
       draw();
     }
+  } finally {
+    servedCitiesLoading.value = false;
   }
 }
 
@@ -2835,7 +2870,9 @@ async function ensureSearchCatalog(): Promise<void> {
       await ensureCatalog.call(dataSource);
     } catch (error) {
       if (isAbortError(error)) return;
-      throw error;
+      if (mounted) errorMessage.value = error instanceof Error
+        ? error.message : t("globalMap.page.status.unavailable");
+      return;
     }
     if (mounted) {
       network.value = dataSource.getNetwork();
@@ -2878,6 +2915,7 @@ const globalVisibleTravelRoutes = computed(() => {
 });
 
 const globalSelectedTravelRoute = computed(() => {
+  if (props.itinerary) return props.itinerary.route;
   if (!globalItinerary.open.value || globalItinerary.travelRoutes.isLoading.value) return undefined;
   const selected = globalItinerary.travelRoutes.selectedRoute.value;
   return selected && globalVisibleTravelRoutes.value.some((candidate) => candidate.id === selected.id)
@@ -2886,13 +2924,10 @@ const globalSelectedTravelRoute = computed(() => {
 });
 
 type GlobalItinerarySheetSnap = "collapsed" | "medium" | "expanded";
+const itineraryToGenericStage = { collapsed: "peek", medium: "mid", expanded: "full" } as const;
+const itineraryFromGenericStage = { peek: "collapsed", mid: "medium", full: "expanded" } as const;
 const mobileItinerarySheetSnap = ref<GlobalItinerarySheetSnap>("collapsed");
 const mobileItinerarySheetDragging = ref(false);
-const mobileItinerarySheetHeight = ref<number>();
-let itinerarySheetPointerId: number | undefined;
-let itinerarySheetPointerStartY = 0;
-let itinerarySheetPointerStartHeight = 0;
-let itinerarySheetPointerMoved = false;
 let itinerarySheetMapSyncFrame: number | undefined;
 let itinerarySheetTransitionSyncUntil = 0;
 
@@ -2914,20 +2949,12 @@ const mobileItineraryDuration = computed(() => {
     : t("nearbyStations.travel.minutes", { minutes });
 });
 
-const mobileItinerarySheetStyle = computed<Record<string, string>>(() => {
-  const style: Record<string, string> = {};
-  if (mobileItinerarySheetHeight.value && isMobileViewport()) {
-    style.height = `${mobileItinerarySheetHeight.value}px`;
-  }
-  return style;
-});
-
 const globalItineraryLinePaths = shallowRef(new Map<string, GlobalMapPath[]>());
 
 watch(globalSelectedTravelRoute, async (selectedRoute, _previous, onCleanup) => {
   let cancelled = false;
   onCleanup(() => { cancelled = true; });
-  if (!selectedRoute) {
+  if (props.itinerary || !selectedRoute) {
     globalItineraryLinePaths.value = new Map();
     return;
   }
@@ -2988,9 +3015,9 @@ const globalItinerarySegments = computed<GlobalTransportItinerarySegment[]>(() =
   const startedAt = performanceTrace?.isRunning ? transportMapNowMs() : undefined;
   const segments = createGlobalTransportItinerarySegments(
     globalSelectedTravelRoute.value,
-    globalItinerary.origin.value,
-    globalItinerary.travelRoutes.destination.value,
-    {
+    globalItineraryOrigin.value,
+    globalItineraryDestination.value,
+    props.itinerary ? { preserveSections: true } : {
       resolveTransitGeometry: resolveItineraryLineGeometry,
       resolveTransitExitPoint: (section, target) => selectFastestRouteExit(
         getGlobalSectionExits(section),
@@ -3108,6 +3135,15 @@ const nearbyLinePlaces = useNearbyPlaces({
   )),
   provider: globalNearbyProviders.places,
 });
+const nearbyCirclePlaces = useNearbyPlaces({
+  origin: computed(() => temporaryMarker.value ? { ...temporaryMarker.value, label: temporaryMarker.value.text } : undefined),
+  radius: computed(() => temporaryMarkerRadius.value ?? 0),
+  enabled: computed(() => Boolean(temporaryMarker.value && temporaryMarkerRadius.value && !routePreviewActive.value)),
+  provider: globalNearbyProviders.places,
+});
+const displayedNearbyPlaces = computed(() => temporaryMarker.value && temporaryMarkerRadius.value
+  ? nearbyCirclePlaces.places.value.filter(isNearbyPlaceCommerce)
+  : nearbyLinePlaces.places.value);
 const globalMapPickerSidebarVisible = computed(() =>
   !routePreviewActive.value && Boolean(activeStationView.value || activeLine.value || selectedStations.value.length),
 );
@@ -3126,7 +3162,7 @@ const globalMapModalOpen = computed(() =>
   || globalMapIsochrones.modalOpen.value,
 );
 const showMapInteractions = computed(() =>
-  !globalMapModalOpen.value && !mobileRightSidebarFullscreen.value,
+  !props.itinerary && !globalMapModalOpen.value && !mobileRightSidebarFullscreen.value,
 );
 
 watch(showMapInteractions, (visible) => {
@@ -3355,6 +3391,7 @@ function setGlobalTravelAllowedModes(modes: GlobalMapMode[]): void {
 }
 
 async function openGlobalItineraryTo(destination: GeocoderPoint): Promise<void> {
+  if (props.itinerary) return;
   if (
     !Number.isFinite(destination.lon) ||
     !Number.isFinite(destination.lat) ||
@@ -3457,27 +3494,23 @@ function isMobileViewport(): boolean {
     && window.matchMedia("(max-width: 700px)").matches;
 }
 
-function mobileItinerarySnapHeight(snap: GlobalItinerarySheetSnap): number {
-  const stageHeight = stageElement.value?.getBoundingClientRect().height
-    || (typeof window !== "undefined" ? window.innerHeight : 720);
-  if (snap === "collapsed") return Math.min(210, Math.max(168, stageHeight * 0.24));
-  if (snap === "medium") return Math.min(520, Math.max(360, stageHeight * 0.56));
-  return Math.min(760, Math.max(500, stageHeight * 0.86));
+function mobileItinerarySnapHeights(viewportHeight: number): Record<BottomSheetStage, number> {
+  const height = stageElement.value?.getBoundingClientRect().height || viewportHeight;
+  return {
+    peek: Math.min(210, Math.max(168, height * 0.24)),
+    mid: Math.min(520, Math.max(360, height * 0.56)),
+    full: Math.min(760, Math.max(500, height * 0.86)),
+  };
 }
 
 function readItinerarySheetHeight(): number {
-  if (!isMobileViewport()) return 0;
-  const panel = itineraryPanelElement.value;
+  if (props.itinerary || !isMobileViewport()) return 0;
+  const panel = itinerarySheetComponent.value?.element;
   const stage = stageElement.value;
-  if (!panel || !stage) return mobileItinerarySnapHeight(mobileItinerarySheetSnap.value);
+  if (!panel || !stage) return mobileItinerarySnapHeights(camera.value.viewportHeightCssPx || 720)[itineraryToGenericStage[mobileItinerarySheetSnap.value]];
   const panelRect = panel.getBoundingClientRect();
   const stageRect = stage.getBoundingClientRect();
   return Math.max(0, Math.min(stageRect.height, stageRect.bottom - panelRect.top));
-}
-
-function syncMobileItinerarySheetHeight(): void {
-  if (!isMobileViewport() || !globalItinerary.open.value) return;
-  mobileItinerarySheetHeight.value = mobileItinerarySnapHeight(mobileItinerarySheetSnap.value);
 }
 
 function scheduleItineraryMapSync(force = true): void {
@@ -3509,68 +3542,11 @@ function startItinerarySheetTransitionSync(): void {
 
 function setMobileItinerarySheetSnap(snap: GlobalItinerarySheetSnap): void {
   mobileItinerarySheetSnap.value = snap;
-  syncMobileItinerarySheetHeight();
   scheduleItineraryMapSync();
 }
 
-function cycleMobileItinerarySheet(): void {
-  if (itinerarySheetPointerMoved) {
-    itinerarySheetPointerMoved = false;
-    return;
-  }
-  const next: Record<GlobalItinerarySheetSnap, GlobalItinerarySheetSnap> = {
-    collapsed: "medium",
-    medium: "expanded",
-    expanded: "collapsed",
-  };
-  setMobileItinerarySheetSnap(next[mobileItinerarySheetSnap.value]);
-}
-
-function onItinerarySheetPointerDown(event: PointerEvent): void {
-  if (!isMobileViewport() || !event.isPrimary) return;
-  const currentTarget = event.currentTarget as HTMLElement | null;
-  if (!currentTarget) return;
-  itinerarySheetPointerId = event.pointerId;
-  itinerarySheetPointerStartY = event.clientY;
-  itinerarySheetPointerStartHeight = readItinerarySheetHeight() || mobileItinerarySnapHeight(mobileItinerarySheetSnap.value);
-  itinerarySheetPointerMoved = false;
-  mobileItinerarySheetDragging.value = true;
-  currentTarget.setPointerCapture?.(event.pointerId);
-  event.preventDefault();
-}
-
-function onItinerarySheetPointerMove(event: PointerEvent): void {
-  if (!mobileItinerarySheetDragging.value || event.pointerId !== itinerarySheetPointerId) return;
-  const delta = itinerarySheetPointerStartY - event.clientY;
-  if (Math.abs(delta) > 4) itinerarySheetPointerMoved = true;
-  const minHeight = Math.max(112, mobileItinerarySnapHeight("collapsed") - 56);
-  const maxHeight = mobileItinerarySnapHeight("expanded");
-  mobileItinerarySheetHeight.value = Math.max(minHeight, Math.min(maxHeight, itinerarySheetPointerStartHeight + delta));
-  scheduleItineraryMapSync();
-  event.preventDefault();
-}
-
-function onItinerarySheetPointerUp(event: PointerEvent): void {
-  if (!mobileItinerarySheetDragging.value || event.pointerId !== itinerarySheetPointerId) return;
-  const currentTarget = event.currentTarget as HTMLElement | null;
-  currentTarget?.releasePointerCapture?.(event.pointerId);
-  const currentHeight = mobileItinerarySheetHeight.value ?? itinerarySheetPointerStartHeight;
-  const nextSnap = (["collapsed", "medium", "expanded"] as GlobalItinerarySheetSnap[]).reduce((closest, snap) =>
-    Math.abs(mobileItinerarySnapHeight(snap) - currentHeight) < Math.abs(mobileItinerarySnapHeight(closest) - currentHeight)
-      ? snap
-      : closest,
-  "collapsed");
-  mobileItinerarySheetDragging.value = false;
-  itinerarySheetPointerId = undefined;
-  setMobileItinerarySheetSnap(nextSnap);
-  event.preventDefault();
-}
-
-function onItinerarySheetPointerCancel(event: PointerEvent): void {
-  if (!mobileItinerarySheetDragging.value || event.pointerId !== itinerarySheetPointerId) return;
-  mobileItinerarySheetDragging.value = false;
-  itinerarySheetPointerId = undefined;
-  syncMobileItinerarySheetHeight();
+function onItinerarySheetResize(_height: number, dragging: boolean): void {
+  mobileItinerarySheetDragging.value = dragging;
   scheduleItineraryMapSync();
 }
 
@@ -3589,8 +3565,8 @@ function onItinerarySheetTransition(event: TransitionEvent): void {
 
 function fitGlobalItineraryToRoute(options: { force?: boolean; animate?: boolean } = {}): void {
   const route = globalSelectedTravelRoute.value;
-  const origin = globalItinerary.origin.value;
-  const destination = globalItinerary.travelRoutes.destination.value;
+  const origin = globalItineraryOrigin.value;
+  const destination = globalItineraryDestination.value;
   const sheetHeight = readItinerarySheetHeight();
   if (!route || !origin || !destination) {
     globalItineraryFitKey = undefined;
@@ -3682,7 +3658,6 @@ function resizeStage(): void {
     Math.max(1, rect.height),
     pixelRatio,
   );
-  syncMobileItinerarySheetHeight();
   // ResizeObserver also sends an initial notification with unchanged bounds.
   // It must not invalidate an in-flight viewport or resize GPU buffers again.
   if (resizedCamera === previousCamera) return;
@@ -4844,11 +4819,14 @@ function requestPresetInstall(mode: GlobalMapMode): void {
 function openMobileLineSelector(): void {
   if (!isMobileViewport()) return;
   searchOpen.value = false;
+  mobileNetworksSheetStage.value = "mid";
   mobileLineSelectorOpen.value = true;
 }
 
 function collapseMobileLineSelector(): void {
-  if (isMobileViewport()) mobileLineSelectorOpen.value = false;
+  if (!isMobileViewport()) return;
+  mobileLineSelectorOpen.value = false;
+  void nextTick(() => mobileLineSelectorButton.value?.focus({ preventScroll: true }));
 }
 
 function openCustomization(): void {
@@ -5192,6 +5170,7 @@ const globalTransportRouteState = useGlobalTransportRouteState({
 });
 
 function syncUrl(): void {
+  if (props.itinerary) return;
   globalTransportRouteState.syncUrl();
 }
 
@@ -5346,28 +5325,26 @@ watch(
 );
 watch(
   [
-    () => globalItinerary.open.value,
+    () => globalItineraryActive.value,
     () => routePreviewActive.value,
     () => globalSelectedTravelRoute.value?.id,
-    () => globalItinerary.origin.value?.lon,
-    () => globalItinerary.origin.value?.lat,
-    () => globalItinerary.travelRoutes.destination.value?.lon,
-    () => globalItinerary.travelRoutes.destination.value?.lat,
+    () => globalItineraryOrigin.value?.lon,
+    () => globalItineraryOrigin.value?.lat,
+    () => globalItineraryDestination.value?.lon,
+    () => globalItineraryDestination.value?.lat,
     mobileItinerarySheetSnap,
     () => camera.value.viewportWidthCssPx,
     () => camera.value.viewportHeightCssPx,
   ],
   () => {
-    if (!globalItinerary.open.value) {
+    if (!globalItineraryActive.value) {
       globalItineraryFitKey = undefined;
-      mobileItinerarySheetHeight.value = undefined;
       mobileItinerarySheetSnap.value = "collapsed";
       draw();
       scheduleViewportRefresh();
       return;
     }
     void nextTick(() => {
-      syncMobileItinerarySheetHeight();
       fitGlobalItineraryToRoute();
       draw();
       if (!routePreviewActive.value) scheduleViewportRefresh();
@@ -5706,7 +5683,7 @@ onMounted(async () => {
   document.addEventListener("pointerdown", closeLineChoiceOnDocumentPointerDown, true);
   await nextTick();
   mobileViewportActive.value = isMobileViewport();
-  requestMobileLocationOnArrival();
+  if (!props.itinerary) requestMobileLocationOnArrival();
   if (canvasElement.value) renderer.mount(canvasElement.value);
   resizeStage();
   resizeObserver =
@@ -5736,15 +5713,19 @@ onMounted(async () => {
       ),
       false,
     );
-    restoreTemporaryMarkerFromUrl();
+    if (!props.itinerary) restoreTemporaryMarkerFromUrl();
     await refreshViewport();
     coldRecorder?.mark("viewport-ready");
-    await restoreSelectionFromUrl();
-    await restoreDebugLineFromUrl();
-    if (restoreSharedViewportFromUrl()) await refreshViewport();
-    restoreAddressBookFocusFromUrl();
-    performanceScenarios.scheduleSelectedLineZoomScenario();
-    performanceScenarios.scheduleExtremeChaosZoomScenario();
+    if (props.itinerary) {
+      fitGlobalItineraryToRoute({ force: true });
+    } else {
+      await restoreSelectionFromUrl();
+      await restoreDebugLineFromUrl();
+      if (restoreSharedViewportFromUrl()) await refreshViewport();
+      restoreAddressBookFocusFromUrl();
+      performanceScenarios.scheduleSelectedLineZoomScenario();
+      performanceScenarios.scheduleExtremeChaosZoomScenario();
+    }
   } catch (error) {
     if (isAbortError(error)) return;
     loading.value = false;
@@ -5780,6 +5761,8 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.global-transport-plan__circle-places-status { align-items: center; background: var(--surface, #fff); border-radius: 10px; color: var(--ink); display: flex; font-size: .8rem; gap: 10px; left: 16px; max-width: calc(100% - 32px); padding: 10px 14px; position: absolute; top: 80px; z-index: 8; }
+.global-transport-plan__circle-places-status progress { width: 70px; }
 .global-transport-plan {
   --map-ink: #0f172a;
   --map-muted: #64748b;
@@ -5799,6 +5782,12 @@ onBeforeUnmount(() => {
 .global-transport-plan h2,
 .global-transport-plan p {
   margin: 0;
+}
+.global-transport-plan--supplied-itinerary {
+  height: 440px;
+  min-height: 360px;
+  max-height: none;
+  flex: 1 1 auto;
 }
 .global-transport-plan h1 {
   font-size: clamp(1.1rem, 2vw, 1.55rem);
@@ -5863,7 +5852,7 @@ onBeforeUnmount(() => {
   font: inherit;
   text-decoration: underline;
 }
-.global-transport-plan__itinerary-panel {
+:deep(aside.global-transport-plan__itinerary-panel) {
   position: absolute;
   z-index: 8;
   top: 16px;
@@ -5877,12 +5866,11 @@ onBeforeUnmount(() => {
   overflow: hidden;
   pointer-events: auto;
 }
-.global-transport-plan__itinerary-panel > .left-nearby-sidebar {
+:deep(.global-transport-plan__itinerary-panel .left-nearby-sidebar) {
   flex: 1 1 auto;
   min-height: 0;
   height: auto;
 }
-.global-transport-plan__itinerary-sheet-handle,
 .global-transport-plan__itinerary-mobile-summary {
   display: none;
 }
@@ -6375,7 +6363,7 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 700px) {
-  .global-transport-plan__itinerary-panel {
+  :deep(aside.global-transport-plan__itinerary-panel) {
     top: auto;
     right: 0;
     bottom: 0;
@@ -6386,42 +6374,15 @@ onBeforeUnmount(() => {
     border-radius: 20px 20px 0 0;
     transition: height 260ms cubic-bezier(0.22, 0.8, 0.26, 1);
   }
-  .global-transport-plan__itinerary-panel--collapsed { height: 184px; }
-  .global-transport-plan__itinerary-panel--medium { height: 56dvh; }
-  .global-transport-plan__itinerary-panel--expanded { height: 86dvh; }
-  .global-transport-plan__itinerary-panel:not(.global-transport-plan__itinerary-panel--collapsed) {
+  :deep(.global-transport-plan__itinerary-panel:not(.global-transport-plan__itinerary-panel--collapsed)) {
     padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
     box-sizing: border-box;
   }
-  .global-transport-plan__itinerary-panel:not(.global-transport-plan__itinerary-panel--collapsed) .global-transport-plan__itinerary-mobile-summary {
+  :deep(.global-transport-plan__itinerary-panel:not(.global-transport-plan__itinerary-panel--collapsed) .global-transport-plan__itinerary-mobile-summary) {
     display: none;
   }
-  .global-transport-plan__itinerary-panel--dragging { transition: none; }
-  .global-transport-plan__itinerary-sheet-handle {
-    display: flex;
-    flex: 0 0 25px;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    padding: 0;
-    border: 0;
-    border-radius: 20px 20px 0 0;
-    background: rgba(255, 255, 255, 0.98);
-    cursor: grab;
-    touch-action: none;
-  }
-  .global-transport-plan__itinerary-sheet-handle:active { cursor: grabbing; }
-  .global-transport-plan__itinerary-sheet-handle span {
-    display: block;
-    width: 42px;
-    height: 5px;
-    border-radius: 999px;
-    background: #c4c9d8;
-  }
-  .global-transport-plan__itinerary-sheet-handle:focus-visible {
-    outline: 2px solid #5146ff;
-    outline-offset: -3px;
-  }
+  :deep(.global-transport-plan__itinerary-panel--dragging) { transition: none; }
+  :deep(.global-transport-plan__itinerary-panel .draggable-bottom-sheet__drag-handle) { flex: 0 0 25px; padding: 0; }
   .global-transport-plan__itinerary-mobile-summary {
     display: grid;
     flex: 0 0 auto;
@@ -6476,24 +6437,9 @@ onBeforeUnmount(() => {
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .global-transport-plan__itinerary-panel > .left-nearby-sidebar {
+  :deep(.global-transport-plan__itinerary-panel .left-nearby-sidebar) {
     border-radius: 0;
     box-shadow: none;
-  }
-  .global-transport-plan__left-controls {
-    z-index: 21;
-    top: 50%;
-    left: 50%;
-    width: min(360px, calc(100% - 24px));
-    max-width: none;
-    max-height: min(72dvh, calc(100% - 112px));
-    border-color: rgba(148, 163, 184, 0.38);
-    background: rgba(255, 255, 255, 0.97);
-    box-shadow: 0 22px 58px rgba(15, 23, 42, 0.24);
-    transform: translate(-50%, -50%);
-  }
-  .global-transport-plan__left-controls--mobile-open {
-    pointer-events: auto;
   }
   .global-transport-plan__mobile-line-selector {
     position: absolute;

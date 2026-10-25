@@ -31,7 +31,7 @@ export interface NewsSource {
   name: string;
   url: string;
   method: "rss" | "html" | "article";
-  kind: "official" | "press";
+  kind: "official" | "press" | "association";
   modes: NewsMode[];
   lines?: NewsLine[];
   /** Primary themes advertised by this source, when its publisher has a clear focus. */

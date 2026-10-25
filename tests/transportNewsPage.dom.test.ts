@@ -1,3 +1,4 @@
+import MaterialCombobox from "../src/components/MaterialCombobox.vue";
 import { flushPromises, mount } from "@vue/test-utils";
 import { ref } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -58,11 +59,13 @@ const global = {
   },
 };
 beforeEach(() => {
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-22T12:00:00Z"));
   mocks.settings = ref(createDefaultAppSettings());
   mocks.route.query = {};
   mocks.replace.mockReset();
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   document.body.innerHTML = "";
 });
@@ -84,6 +87,47 @@ function mockFetch(sources = [source], articles = [article]) {
   );
 }
 describe("transport news UI", () => {
+  it("renders the neighborhood title and period choices in English", async () => {
+    mocks.settings.value.language = "en";
+    mockFetch();
+    const wrapper = mount(TransportNewsPage, { global });
+    await flushPromises();
+    expect(wrapper.find("h1").text()).toBe("Neighborhood feed");
+    const period = wrapper.getComponent<typeof MaterialCombobox>('.news-page__desktop-filters [data-news-filter=period]');
+    expect(period.props("options").map((option: { label: string }) => option.label).join(" ")).toContain("Last 90 days");
+    expect(period.props("options").map((option: { label: string }) => option.label).join(" ")).toContain("All dates and undated dossiers");
+    wrapper.unmount();
+  });
+  it("defaults to recent articles and restores old and undated dossiers through the period filter", async () => {
+    mockFetch(
+      [source],
+      [
+        article,
+        {
+          ...article,
+          id: "old",
+          url: "https://news.example/old",
+          publishedAt: "2025-05-06T00:00:00Z",
+        },
+        { ...article, id: "undated", url: "https://news.example/undated", publishedAt: undefined },
+      ],
+    );
+    const wrapper = mount(TransportNewsPage, { global });
+    await flushPromises();
+    expect(wrapper.find("h1").text()).toBe("Feed quartier");
+    expect(wrapper.getComponent<typeof MaterialCombobox>('.news-page__desktop-filters [data-news-filter=period]').props("options").map((option: { label: string }) => option.label).join(" ")).toContain("90 derniers jours");
+    expect(wrapper.findAll(".news-card")).toHaveLength(1);
+    const calls = vi.mocked(fetch).mock.calls.length;
+    wrapper.getComponent<typeof MaterialCombobox>('.news-page__desktop-filters [data-news-filter=period]').vm.$emit("update:modelValue", "all");
+    await flushPromises();
+    expect(wrapper.findAll(".news-card")).toHaveLength(3);
+    expect(wrapper.text()).toContain("Date non précisée");
+    expect(vi.mocked(fetch).mock.calls.length).toBe(calls);
+    wrapper.getComponent<typeof MaterialCombobox>('.news-page__desktop-filters [data-news-filter=period]').vm.$emit("update:modelValue", "30");
+    await flushPromises();
+    expect(wrapper.findAll(".news-card")).toHaveLength(1);
+    wrapper.unmount();
+  });
   it("loads real-shaped articles, overrides the disabled card mode, then clears the line", async () => {
     mocks.route.query = { mode: "metro", line: "4" };
     mocks.settings.value.transportNews.modes = ["bus"];
@@ -176,7 +220,7 @@ describe("transport news UI", () => {
     const wrapper = mount(AppNavigationMenu, { global });
     expect(wrapper.find('a[href="/feed"]').exists()).toBe(false);
     await wrapper.find(".app-navigation__menu-button").trigger("click");
-    expect(wrapper.find('a[href="/feed"]').text()).toBe("Feed transports");
+    expect(wrapper.find('a[href="/feed"]').text()).toBe("Feed quartier");
     wrapper.unmount();
   });
   it("closes the card menu and emits the selected board for news navigation", async () => {

@@ -9,6 +9,85 @@ import type {
 } from "../src/types/transit";
 
 describe("TransitBoard departure metadata", () => {
+  it.each([
+    ["loading", "Chargement de la desserte"],
+    ["unavailable", "Desserte non confirmée"],
+  ] as const)("makes the %s service state explicit instead of showing an empty row", (serviceTypeStatus, text) => {
+    const departure: Departure = {
+      id: "service-state", lineRef: "line:test", monitoringRef: "stop:test", stopName: "Station test",
+      destination: "Destination", monitoringLabel: "Tous quais", vehicleAtStop: false,
+      expectedDepartureTime: new Date(Date.now() + 300_000).toISOString(), serviceTypeStatus,
+    };
+    const wrapper = mount(TransitBoard, {
+      props: { board: createBoard(), departures: [departure], directionGroups: [createDirectionGroup(departure)], collapsedDirectionIds: [], loading: false },
+      global: { stubs: { LineIconBadge: true } },
+    });
+    expect(wrapper.get(".departure__meta").text()).toBe(text);
+    expect(wrapper.find(".departure__section").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it.each([
+    ["north", "(tronçon nord)"], ["south", "(tronçon sud)"],
+    ["east", "(tronçon est)"], ["west", "(tronçon ouest)"],
+  ] as const)("adds a separate muted %s section immediately after the semi-direct label", (serviceSection, text) => {
+    const departure: Departure = {
+      id: "geographic-section", lineRef: "line:test", monitoringRef: "stop:test", stopName: "Station test",
+      destination: "Destination", monitoringLabel: "Tous quais", vehicleAtStop: false,
+      expectedDepartureTime: new Date(Date.now() + 300_000).toISOString(), serviceType: "semi-direct", serviceSection,
+    };
+    const wrapper = mount(TransitBoard, {
+      props: { board: createBoard(), departures: [departure], directionGroups: [createDirectionGroup(departure)], collapsedDirectionIds: [], loading: false },
+      global: { stubs: { LineIconBadge: true } },
+    });
+    const meta = wrapper.get(".departure__meta");
+    expect(meta.get(".departure__section").text()).toBe(text);
+    expect(meta.findAll("span").map((span) => span.text())).toEqual(["Semi direct", text]);
+    wrapper.unmount();
+  });
+
+  it.each(["omnibus", "direct", "inconnu"] as const)("does not show a leftover section on an %s train", (serviceType) => {
+    const departure: Departure = {
+      id: "no-section", lineRef: "line:test", monitoringRef: "stop:test", stopName: "Station test",
+      destination: "Destination", monitoringLabel: "Tous quais", vehicleAtStop: false,
+      expectedDepartureTime: new Date(Date.now() + 300_000).toISOString(), serviceType, serviceSection: "north",
+    };
+    const wrapper = mount(TransitBoard, {
+      props: { board: createBoard(), departures: [departure], directionGroups: [createDirectionGroup(departure)], collapsedDirectionIds: [], loading: false },
+      global: { stubs: { LineIconBadge: true } },
+    });
+    expect(wrapper.find(".departure__section").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("keeps the section visible in the compact row alongside the separate pattern action", async () => {
+    const media = vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      matches: query === "(max-width: 1024px)", media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(),
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }));
+    const departure: Departure = {
+      id: "compact-section", lineRef: "line:test", monitoringRef: "stop:test", stopName: "Station test",
+      destination: "Destination", monitoringLabel: "Tous quais", vehicleAtStop: false,
+      expectedDepartureTime: new Date(Date.now() + 300_000).toISOString(), serviceType: "semi-direct", serviceSection: "west",
+    };
+    const wrapper = mount(TransitBoard, {
+      props: { board: createBoard(), departures: [departure], directionGroups: [createDirectionGroup(departure)], collapsedDirectionIds: [], loading: false },
+      global: { stubs: { LineIconBadge: true } },
+    });
+    try {
+      await nextTick();
+      expect(wrapper.get("div.departure__main .departure__section").text()).toBe("(tronçon ouest)");
+      await wrapper.get('[aria-label="Afficher la desserte"]').trigger("click");
+      expect(wrapper.emitted("show-pattern")?.[0]).toEqual([{
+        board: createBoard(), directionGroup: createDirectionGroup(departure), departure,
+      }]);
+    } finally {
+      wrapper.unmount();
+      media.mockRestore();
+    }
+  });
+
   it("keeps the imminent label in expanded rows while the summary shows zero", () => {
     const departure: Departure = {
       id: "departure-now",

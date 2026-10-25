@@ -2,7 +2,7 @@ import { COORDINATE_SYSTEM } from "@deck.gl/core";
 import { IconLayer } from "@deck.gl/layers";
 import { h, render } from "vue";
 import type { NearbyPlace } from "../../nearby-stations/nearbyPlaces";
-import { isNearbyPlaceVisibleForGlobalLine, nearbyPlaceMarkerIconId, type NearbyPlaceMarkerIconId } from "../../nearby-stations/nearbyPlacePresentation";
+import { isNearbyPlaceCommerce, isNearbyPlaceVisibleForGlobalLine, nearbyPlaceMarkerIconId, type NearbyPlaceMarkerIconId } from "../../nearby-stations/nearbyPlacePresentation";
 import { PLACE_ICON_COMPONENTS } from "../../nearby-stations/useNearbyPlacePresenter";
 
 export const NEARBY_PLACES_LAYER_ID = "transport-nearby-places";
@@ -13,8 +13,8 @@ export interface DeckNearbyPlace {
 }
 
 // No camera dependency: Deck projects these geographic positions on the GPU.
-export function prepareDeckNearbyPlaces(places: readonly NearbyPlace[]): DeckNearbyPlace[] {
-  return places.filter(isNearbyPlaceVisibleForGlobalLine)
+export function prepareDeckNearbyPlaces(places: readonly NearbyPlace[], commerceOnly = false): DeckNearbyPlace[] {
+  return places.filter(commerceOnly ? isNearbyPlaceCommerce : isNearbyPlaceVisibleForGlobalLine)
     .filter(place => Number.isFinite(place.lon) && Number.isFinite(place.lat))
     .map(place => ({ place, position: [place.lon, place.lat], iconId: nearbyPlaceMarkerIconId(place) }));
 }

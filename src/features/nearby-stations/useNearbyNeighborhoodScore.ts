@@ -86,6 +86,7 @@ interface ShoppingCentreLoadResult {
 export type NeighborhoodScoreErrorSource = "verdict" | "places" | "routes" | "timetables";
 
 export interface UseNearbyNeighborhoodScoreOptions {
+  personalJourneys?: ReadonlyValue<readonly import("./neighborhood/personalJourneys").PersonalJourneyResult[]>;
   journeySource?: "gtfs";
   walkingPolicy?: NearbyWalkingRoutingPolicy;
   documentaryFirst?: boolean;
@@ -208,6 +209,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     const stationsLoaded = Boolean(currentNetwork)
       || (!stationsLoading && activeOriginKey !== "" && options.stations.value.length > 0);
     return {
+      personalJourneys: options.personalJourneys?.value,
       places: places.value,
       placesLoaded: placesLoaded.value,
       shoppingCentres: shoppingCentres.value,
@@ -496,6 +498,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       options.heavyCandidates?.value ?? heavyCandidates.value,
     );
     updateFrequencyTargets(lineTargets);
+    updateLastServiceTargets(lineTargets);
     for (const { lineId, stationId } of lineTargets) {
       const topologyTaskId = `branches:${lineId}`;
       if (topologyResults.has(lineId)) {
@@ -524,14 +527,16 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
           ["transport"],
         );
       }
-      const lastServiceTaskId = `last-service:${lineId}`;
-      if (!lastServiceResults.has(lineId) && !pendingTasks.has(lastServiceTaskId)) {
+      const lastServiceKey = JSON.stringify([lineId, stationId]);
+      const lastServiceTaskId = `last-service:${lastServiceKey}`;
+      if (!lastServiceResults.has(lastServiceKey) && !pendingTasks.has(lastServiceTaskId)) {
         trackTask(
           lastServiceTaskId,
           loadLastService(lineId, stationId),
           token,
           (next) => {
-            lastServiceByLine.value = new Map(lastServiceResults.set(lineId, next));
+            lastServiceResults.set(lastServiceKey, next);
+            updateLastServiceTargets();
             updatedAt.value = Date.now();
           },
           true,
@@ -540,6 +545,17 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         );
       }
     }
+  }
+
+  function updateLastServiceTargets(targets = getRelevantLineTargets(
+    options.stations.value, options.heavyCandidates?.value ?? heavyCandidates.value,
+  )): void {
+    // A line's last departure belongs to the retained reference station.
+    // Late responses for an earlier station must never overwrite this view.
+    lastServiceByLine.value = new Map(targets.flatMap(({ lineId, stationId }) => {
+      const key = JSON.stringify([lineId, stationId]);
+      return lastServiceResults.has(key) ? [[lineId, lastServiceResults.get(key)] as const] : [];
+    }));
   }
 
   function updateFrequencyTargets(targets = getRelevantLineTargets(
@@ -931,8 +947,9 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     stationId?: string,
     priority = 2,
   ): Promise<Awaited<ReturnType<typeof frequencyTimetable.getLastService>>> {
-    if (lastServiceResults.has(lineId)) return Promise.resolve(lastServiceResults.get(lineId));
-    const active = lastServiceRequests.get(lineId);
+    const key = JSON.stringify([lineId, stationId]);
+    if (lastServiceResults.has(key)) return Promise.resolve(lastServiceResults.get(key));
+    const active = lastServiceRequests.get(key);
     if (active) return active.promise;
     const controller = new AbortController();
     const promise = timetableRequestScheduler.schedule(
@@ -940,15 +957,19 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       controller.signal,
       priority,
     )
+      .catch(() => {
+        controller.signal.throwIfAborted();
+        return undefined;
+      })
       .then((next) => {
         controller.signal.throwIfAborted();
-        lastServiceResults.set(lineId, next);
+        lastServiceResults.set(key, next);
         return next;
       })
       .finally(() => {
-        if (lastServiceRequests.get(lineId)?.promise === promise) lastServiceRequests.delete(lineId);
+        if (lastServiceRequests.get(key)?.promise === promise) lastServiceRequests.delete(key);
       });
-    lastServiceRequests.set(lineId, { controller, promise });
+    lastServiceRequests.set(key, { controller, promise });
     return promise;
   }
 
@@ -1243,6 +1264,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       markCriteriaDirty(["transport"]);
       scheduleRecompute();
     },
+  );
+  watch(
+    () => options.personalJourneys?.value,
+    () => { markCriteriaDirty(["transport"]); scheduleRecompute(); },
   );
   watch(
     () => options.serviceQuality?.value,
@@ -1553,7 +1578,7 @@ function getRelevantLineTargets(
         || entry.lineInsideRadius?.[line.id] === false
         || lineDistance > NEIGHBORHOOD_FREQUENCY_WALKING_LIMIT_METERS) continue;
       const station = entry.memberStations.find((candidate) => candidate.lineIds.includes(line.id));
-      add(line.id, station?.id);
+      add(line.id, station?.id ?? entry.station.id);
     }
   }
   for (const candidate of candidates) {

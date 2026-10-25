@@ -98,6 +98,14 @@ export function useNearbyPlaces(options: {
 
   function scheduleRefresh(): void {
     clearRefreshTimer();
+    // A superseded request must not publish stale results or clear the loader
+    // during the debounce window of the next radius.
+    ++requestToken;
+    controller?.abort();
+    controller = undefined;
+    places.value = [];
+    error.value = undefined;
+    isLoading.value = options.enabled.value && resolvedOrigins.value.length > 0;
     refreshTimer = window.setTimeout(() => {
       refreshTimer = undefined;
       void refresh();

@@ -8,7 +8,7 @@ import {
   saveTransitPresetState,
 } from "../src/storage/transitPreferences";
 import { transitBoards } from "../src/config/transitBoards";
-import type { TransitBoardConfig } from "../src/types/transit";
+import type { Departure, DepartureCallingPattern, TransitBoardConfig } from "../src/types/transit";
 
 let route: {
   path: string;
@@ -35,6 +35,117 @@ afterEach(() => {
 });
 
 describe("dashboard presets", () => {
+  it("publishes a train's service label while another train's pattern is still pending", async () => {
+    const { fetchBoardDepartures, fetchDepartureCallingPattern } = installDashboardMocks({}, {}, { apiConfigured: true });
+    const board = transitBoards.find((item) => item.line.mode === "rer")!;
+    let releaseSlow!: (pattern: DepartureCallingPattern) => void;
+    fetchBoardDepartures.mockImplementation(async (item: TransitBoardConfig) => {
+      const departures: Departure[] = item.id === board.id ? ["fast", "slow"].map((id) => ({
+        id, lineRef: item.line.ref, monitoringRef: "stop", monitoringLabel: "", stopName: item.title,
+        destination: "Destination", journeyRef: id, vehicleAtStop: false,
+        expectedDepartureTime: new Date(Date.now() + 300_000).toISOString(),
+      })) : [];
+      return { departures, directionGroups: [{ ...item.directionGroups[0], departures, serviceEnded: false }] };
+    });
+    fetchDepartureCallingPattern.mockImplementation(async (_item: TransitBoardConfig, departure: Departure) =>
+      departure.id === "slow" ? new Promise<DepartureCallingPattern>((resolve) => { releaseSlow = resolve; }) : {
+        departureId: departure.id, destination: departure.destination, calls: [], serviceType: "semi-direct", serviceSection: "east",
+      });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => Response.json(
+      String(input).includes("/pattern") ? { pattern: { calls: [], lineTopology: [] } } : { available: true, configured: true, lines: [] },
+    )));
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+    try {
+      await vi.waitFor(() => expect(wrapper.find('[data-services="semi-direct,"]').exists()).toBe(true));
+      expect(wrapper.find('[data-sections="east,"]').attributes("data-service-statuses")).toBe(",loading");
+      releaseSlow({ departureId: "slow", destination: "Destination", calls: [], serviceType: "omnibus" });
+      await vi.waitFor(() => expect(wrapper.find('[data-services="semi-direct,omnibus"]').exists()).toBe(true));
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("retains the same journey's label through updated times, without lending it to a new train or hiding a failed update", async () => {
+    vi.useFakeTimers();
+    const { fetchBoardDepartures, fetchDepartureCallingPattern } = installDashboardMocks({}, {}, { apiConfigured: true });
+    const board = transitBoards.find((item) => item.line.mode === "rer")!;
+    const aimed = new Date(Date.now() + 300_000).toISOString();
+    let round = 0;
+    let releaseUpdate!: (pattern: DepartureCallingPattern) => void;
+    fetchBoardDepartures.mockImplementation(async (item: TransitBoardConfig, options?: { onUpdate?: (result: unknown) => void }) => {
+      if (item.id === board.id) round++;
+      const departures: Departure[] = item.id === board.id ? ["same", ...(round > 1 ? ["new"] : [])].map((journeyRef) => ({
+        id: `${journeyRef}:${round}`, lineRef: item.line.ref, monitoringRef: "stop", monitoringLabel: "", stopName: item.title,
+        destination: "Same destination", journeyRef, aimedDepartureTime: aimed, vehicleAtStop: false,
+        expectedDepartureTime: new Date(Date.parse(aimed) + round * 60_000).toISOString(),
+      })) : [];
+      const result = { departures, directionGroups: [{ ...item.directionGroups[0], departures, serviceEnded: false }] };
+      options?.onUpdate?.(result);
+      return result;
+    });
+    fetchDepartureCallingPattern.mockImplementation(async (_item: TransitBoardConfig, departure: Departure) => ({
+      departureId: departure.id, destination: departure.destination, calls: [], serviceType: "semi-direct", serviceSection: "west",
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => Response.json(
+      String(input).includes("/pattern") ? { pattern: { calls: [], lineTopology: [] } } : { available: true, configured: true, lines: [] },
+    )));
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+    try {
+      await flushPromises();
+      await vi.waitFor(() => expect(wrapper.find('[data-services="semi-direct"]').exists()).toBe(true));
+      fetchDepartureCallingPattern.mockImplementation(async (_item: TransitBoardConfig, departure: Departure) =>
+        departure.journeyRef === "same" ? new Promise<DepartureCallingPattern>((resolve) => { releaseUpdate = resolve; }) :
+          new Promise<DepartureCallingPattern>(() => {}));
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flushPromises();
+      const pending = wrapper.find('[data-services="semi-direct,"]');
+      expect(pending.exists()).toBe(true);
+      expect(pending.attributes("data-sections")).toBe("west,");
+      expect(pending.attributes("data-service-statuses")).toBe("loading,loading");
+      releaseUpdate({ departureId: `same:${round}`, destination: "Same destination", calls: [], serviceType: "inconnu" });
+      await flushPromises();
+      const failed = wrapper.find('[data-services="inconnu,"]');
+      expect(failed.exists()).toBe(true);
+      expect(failed.attributes("data-sections")).toBe(",");
+      expect(failed.attributes("data-service-statuses")).toBe("unavailable,loading");
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("classifies consecutive trains independently of the theoretical destination diagram", async () => {
+    const { fetchBoardDepartures, fetchDepartureCallingPattern } = installDashboardMocks({}, {}, { apiConfigured: true });
+    fetchBoardDepartures.mockImplementation(async (board: TransitBoardConfig) => {
+      const departures = board.line.mode === "rer" ? ["all", "express"].map((id) => ({
+        id, lineRef: board.line.ref, monitoringRef: "stop", monitoringLabel: "",
+        stopName: board.title, destination: "Same destination", vehicleAtStop: false,
+        journeyRef: id, expectedDepartureTime: new Date(Date.now() + 300_000).toISOString(),
+      })) : [];
+      return {
+        departures,
+        directionGroups: [{ ...board.directionGroups[0], departures, serviceEnded: false }],
+      };
+    });
+    fetchDepartureCallingPattern.mockImplementation(async (_board: TransitBoardConfig, train: Departure) => ({
+      departureId: train.id, destination: train.destination, calls: [],
+      serviceType: train.id === "all" ? "omnibus" : "semi-direct",
+      serviceSection: train.id === "express" ? "north" : undefined,
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+      String(input).includes("/pattern")
+        ? { pattern: { serviceType: "semi-direct", calls: [], lineTopology: [] } }
+        : { available: true, configured: true, lines: [] },
+    ))));
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+    await vi.waitFor(() => expect(wrapper.find('[data-services="omnibus,semi-direct"]').exists()).toBe(true));
+    expect(wrapper.find('[data-sections=",north"]').exists()).toBe(true);
+    expect(fetchDepartureCallingPattern).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  });
+
   it("shows departures and releases refresh while optional service labels remain pending", async () => {
     const { fetchBoardDepartures } = installDashboardMocks({}, {}, { apiConfigured: true });
     fetchBoardDepartures.mockImplementation(async (board: TransitBoardConfig) => {
@@ -824,6 +935,7 @@ function installDashboardMocks(
 ): {
   fetchBoardDepartures: ReturnType<typeof vi.fn>;
   fetchDirectionGroupsForStation: ReturnType<typeof vi.fn>;
+  fetchDepartureCallingPattern: ReturnType<typeof vi.fn>;
 } {
   route = reactive({
     path: "/",
@@ -917,7 +1029,7 @@ function installDashboardMocks(
       props: ["board", "trafficAlert", "departures", "loading"],
       emits: ["open-fullscreen-panel", "open-traffic"],
       template: `
-        <article class="mock-board" :data-loading="loading" :data-departures="departures?.length ?? 0">
+        <article class="mock-board" :data-loading="loading" :data-departures="departures?.length ?? 0" :data-services="(departures ?? []).map(departure => departure.serviceType).join(',')" :data-sections="(departures ?? []).map(departure => departure.serviceSection).join(',')" :data-service-statuses="(departures ?? []).map(departure => departure.serviceTypeStatus).join(',')">
           {{ board.title }}
           <button
             v-if="trafficAlert"
@@ -949,12 +1061,16 @@ function installDashboardMocks(
     })),
   }));
   const fetchDirectionGroupsForStation = vi.fn(async () => []);
+  const fetchDepartureCallingPattern = vi.fn(async (_board: TransitBoardConfig, departure: Departure): Promise<DepartureCallingPattern> => ({
+    departureId: departure.id, destination: departure.destination, calls: [], serviceType: "inconnu",
+  }));
   vi.doMock("../src/services/idfm", () => ({
     fetchBoardDepartures,
     fetchDirectionGroupsForStation,
+    fetchDepartureCallingPattern,
   }));
 
-  return { fetchBoardDepartures, fetchDirectionGroupsForStation };
+  return { fetchBoardDepartures, fetchDirectionGroupsForStation, fetchDepartureCallingPattern };
 }
 
 function createBoard(id: string, stopAreaRef: string): TransitBoardConfig {

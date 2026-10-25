@@ -1,0 +1,2144 @@
+{
+  "schemaVersion": 1,
+  "projectRoot": "C:/Users/franc/AndroidStudioProjects/VibeIDFM/TransportClockGPT",
+  "projectId": "local-8d14527893bc91c08d9016dcc3815394",
+  "coordinatorThreadId": "01a16428-91e4-7e81-b9d0-1a1329c07c20",
+  "model": "gpt-6.1-sol",
+  "executionOrder": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    9,
+    10,
+    11,
+    8,
+    12,
+    13
+  ],
+  "strategy": "bounded-parallel-shared-local-checkout",
+  "apkGate": "Lot01 remaining externalIGNvalidation explicitly accepted by userwaiver lot01-ign-user-waiver-2026-10-23. FinalAPK13 may start only after02-12fullycompleted and finalintegratedAndroidsmoke12 passed under documented01exception; any laterappchange requires affectedrevalidation. No finalAPKbuild/upload/R2 beforethat.",
+  "lots": [
+    {
+      "n": 1,
+      "file": "01-verdict-bug-hubs-et-grandes-gares.md",
+      "title": "Lot 01 — Verdict : hubs et grandes gares",
+      "effort": "xhigh",
+      "order": 1,
+      "threadId": "01a1644e-ab2d-78a0-8654-f69e19571e53",
+      "hostId": "local",
+      "status": "accepted_with_validation_waiver",
+      "report": "reports/01.md",
+      "cursor": "9b3e9f0b-d3de-43f4-91c5-3582558cbea7:20",
+      "lastObservedStatus": "idle",
+      "latestMessage": "User explicitly waived remaining01validation becauseIGNdown and authorised nextlot. Code/tests achieved; external walking/Verdict validation not passed. No further01probe or sourcework pending.",
+      "lastCheckedAt": "2026-10-23T20:39:58.287385+00:00",
+      "implementationStatus": "diagnostic_cache_and_published_ign_adaptation_complete",
+      "validationBlocker": "Retained as technical limitation only: officialIGNrouting outage and unvalidated live walking/Fontenay result. User waived this as delivery/sequencing blocker.",
+      "followUp": "Do not resume01IGNdiagnosis or block12/13 solely on waived01externalvalidation. Preserve honest unavailable/estimated statuses. No technicalsuccess inferred from waiver.",
+      "scopeReview": {
+        "at": "2026-10-22T19:44:00.778177+00:00",
+        "requirements": "Exact Fontenay URL, raw routing, nearby/distant employment hubs and large station, propagation to facts/score/status and regression URL test.",
+        "existingEvidence": "Report shows all required day destinations and propagation, under declared walking quota degradation.",
+        "remainingAssessment": "Keep partial as reported; revalidate the required destinations without degraded walking when conditions permit rather than infer full walking accuracy from GTFS/browser fallback success."
+      },
+      "executionMode": "closed_by_explicit_user_validation_waiver",
+      "externalRevalidationRequestedAt": "2026-10-22T21:16:02.203074+00:00",
+      "resumeRequestedAt": "2026-10-23T20:28:59.567244+00:00",
+      "coordinationStatus": "human_ign_validation_waiver_accepted",
+      "coordinationRequestedAt": "2026-10-23T20:28:59.567244+00:00",
+      "coordinationSentAt": "2026-10-23T20:29:26.984696+00:00",
+      "resumedAt": "2026-10-23T20:29:26.984696+00:00",
+      "reservationsReleased": true,
+      "externalRevalidationEvidence": {
+        "reviewedAt": "2026-10-22T21:30:17.058391+00:00",
+        "report": "reports/01.md",
+        "handoff": "handoffs/01.md",
+        "walkingPreflight": "reports/evidence/01/walking-preflight-20261022-evening.json",
+        "browser": "reports/evidence/01/cold-revalidation-20261022-evening.json",
+        "outcome": "partial",
+        "sourceWrites": false,
+        "browserClosed": true,
+        "scopeLimit": "Current IGN sample and three selected journeys are documented, no certification of final wider transport access or final score."
+      },
+      "prerequisiteAssessment": "08 full audit completed and idle; sole01 source/global owner. Earlier diagnostic/caches validated; new source change must revalidate affected behavior and Fontenay replay.12/13 remain queued.",
+      "interruptionReview": {
+        "reviewedAt": "2026-10-23T17:47:02.523429+00:00",
+        "turnId": "01a1659e-4231-7443-ac09-e3737637159b",
+        "status": "interrupted",
+        "evidence": "wait_threads inactive/notLoaded with cursor reset; read_thread last turn contains only reads and existing graph query; reports/01.md and handoffs/01.md unchanged since previous validation."
+      },
+      "currentTurnId": "01a16a73-ecdd-7c33-9ef8-bad67f2be88e",
+      "sourceWorkFinishedAt": "2026-10-23T18:18:59.229869+00:00",
+      "diagnosticReview": {
+        "at": "2026-10-23T18:18:59.229869+00:00",
+        "report": "reports/01.md",
+        "handoff": "handoffs/01.md",
+        "sourceEvidence": "reports/evidence/01/source-validation.json",
+        "verifiedSourceHashes": 11,
+        "mismatches": [],
+        "commandTraceReviewed": true,
+        "targetedTests": 137,
+        "testFiles": 9,
+        "typecheckExitCode": 0,
+        "diffCheckExitCode": 0,
+        "browserReplayStarted": false,
+        "upstreamStatus": 404,
+        "currentComponent11Hash": "5ca78ef556d6e17c1765bb2954be202050538e9a40f3766f9e1ee8c08385bc6d"
+      },
+      "contractReview": {
+        "at": "2026-10-23T19:08:17.712989+00:00",
+        "evidence": "reports/evidence/01/contract-validation.json",
+        "adaptation": "reports/evidence/01/ign-contract-adaptation.json",
+        "sourceHashesVerified": 2,
+        "mismatches": [],
+        "testsReported": 35,
+        "testFiles": 2,
+        "typecheckExitCode": 0,
+        "diffCheckExitCode": 0,
+        "finalLiveProbeMissing": true,
+        "note": "Validation continuation explicitly dispatched; final-contract unavailability not yet established."
+      },
+      "finalContractProbeReview": {
+        "at": "2026-10-23T19:13:48.385557+00:00",
+        "evidence": "reports/evidence/01/walking-preflight-final-contract.json",
+        "testedAtLocal": "2026-10-23 21:08:27 Europe/Paris",
+        "proxyStatus": 200,
+        "upstreamStatus": 404,
+        "estimated": true,
+        "sourceChangesThisTurn": false,
+        "sourceHashMismatches": [],
+        "fullBrowserReplayStarted": false
+      },
+      "lastFailureReview": {
+        "at": "2026-10-23T20:01:08.026514+00:00",
+        "evidence": "reports/evidence/01/ign-contract-shape-validation.json",
+        "controls": 2,
+        "pointToPointStatus": 404,
+        "matrixStatus": 404,
+        "sanitizedPublicBody": {
+          "error": "Not found"
+        },
+        "causeDisambiguated": false,
+        "specificApplicationDefectEstablished": false,
+        "sourceHashesVerified": 2,
+        "mismatches": [],
+        "codeChecksRetained": "35targeted+tsc/diff0; no sourcechanges since",
+        "noFullBrowserReplay": true
+      },
+      "acceptedAt": "2026-10-23T20:39:58.287385+00:00",
+      "validationWaiverId": "lot01-ign-user-waiver-2026-10-23"
+    },
+    {
+      "n": 2,
+      "file": "02-verdict-fins-de-service-et-facts.md",
+      "title": "Lot 02 — Verdict : fins de service et facts",
+      "effort": "high",
+      "order": 2,
+      "threadId": "01a16452-a2bf-7a13-b606-9775d8c1f4a5",
+      "hostId": "local",
+      "status": "completed",
+      "report": "reports/02.md",
+      "cursor": "bea804b6-6be7-43b7-9064-abbce6fef71a:7",
+      "lastObservedStatus": "idle",
+      "dispatchRequestedAt": "2026-10-22T16:13:25.784606+00:00",
+      "startedAt": "2026-10-22T16:14:10.296696+00:00",
+      "latestMessage": "Lot 02 terminé : fins de service affichées, données manquantes explicites et lignes structurantes détaillées avec leurs icônes. 123 tests réussis, TypeScript et contrôle du diff validés. Vérifications navigateur réalisées sur bureau et mobile. Aucun commit/push ni publication. Rapport complet Horaire GTFS vérifié dans le Verdict",
+      "lastCheckedAt": "2026-10-22T16:39:17.799Z",
+      "completedAt": "2026-10-22T16:40:25.615263+00:00",
+      "validationSummary": "123 tests across 9 files, TypeScript and diff check passed; real Verdict and controlled complete/partial/absent states verified in desktop/mobile browser; evidence files checked."
+    },
+    {
+      "n": 3,
+      "file": "03-verdict-trajets-personnalises-et-annuaire.md",
+      "title": "Lot 03 — Verdict : trajets personnalisés et annuaire",
+      "effort": "xhigh",
+      "order": 3,
+      "threadId": "01a16452-c353-7190-a641-8c5b8f969525",
+      "hostId": "local",
+      "status": "completed",
+      "report": "reports/03.md",
+      "dispatchRequestedAt": "2026-10-22T16:40:25.615281+00:00",
+      "prerequisiteAssessment": "Lot 01 routing implementation and day benchmark propagation verified; external walking quota revalidation remains pending and does not prevent implementing this independent feature. Release remains gated on full validation of lot 01.",
+      "startedAt": "2026-10-22T16:40:32.183845+00:00",
+      "cursor": "081994ae-ae63-4ff9-bb2b-b069992791d3:14",
+      "lastObservedStatus": "idle",
+      "lastCheckedAt": "2026-10-22T21:16:02.203074+00:00",
+      "latestMessage": "completed — création IGN réelle et trajet GTFS de 35 min validés, avec seuils 25/75. Données temporaires supprimées ; les 5 adresses existantes et leurs rôles sont inchangés. Réserve de marche du lot 01 maintenue. Rapport actualisé Trajet réellement géocodé et calculé",
+      "implementationStatus": "complete",
+      "sourceWorkFinishedAt": "2026-10-22T17:19:52.407787+00:00",
+      "reservationsReleased": true,
+      "validationSummary": "187 prior focused tests, shared tsc and controlled desktop/mobile/scoring/roles states previously accepted. Actual public address created with IGN provider (independent autocomplete/search HTTP200), selected with25/75 thresholds and real35min GTFS journey. Reports/MD/handoff and image/API/cleanup proof reviewed; five existing entries/roles unchanged, temporary entry/journey removed.",
+      "validationBlocker": null,
+      "followUp": "No remaining mandatory 03 validation. Walking provider degradation remains explicitly scoped to01; later shared UI changes require affected validation by their owner and integrated smoke12.",
+      "executionMode": "complete",
+      "externalRevalidationRequestedAt": "2026-10-22T21:01:44.695186+00:00",
+      "resumeRequestedAt": "2026-10-22T21:01:44.695186+00:00",
+      "coordinationStatus": "real_geocoding_validation_reviewed",
+      "coordinationRequestedAt": "2026-10-22T21:01:44.695186+00:00",
+      "coordinationSentAt": "2026-10-22T21:02:16.488308+00:00",
+      "resumedAt": "2026-10-22T21:02:16.488308+00:00",
+      "completedAt": "2026-10-22T21:16:02.203074+00:00",
+      "externalValidationEvidence": "proofs/03/ign-20261022-real-validation.json"
+    },
+    {
+      "n": 4,
+      "file": "04-home-prochain-passage-et-pluie.md",
+      "title": "Lot 04 — Home : prochain passage et pluie",
+      "effort": "medium",
+      "order": 4,
+      "threadId": "01a16452-d75d-7102-bc52-19ef13f45f8f",
+      "hostId": "local",
+      "status": "completed",
+      "report": "reports/04.md",
+      "dispatchRequestedAt": "2026-10-22T17:14:29.223387+00:00",
+      "startedAt": "2026-10-22T17:14:36.405272+00:00",
+      "cursor": "f9c78b2f-7899-4c61-965c-d5647650e308:5",
+      "lastObservedStatus": "idle",
+      "latestMessage": "Lot 04 completed and report/proofs reviewed; shared catalogues and global validation released.",
+      "lastCheckedAt": "2026-10-22T17:37:20.342425+00:00",
+      "validationConcerns": [
+        "Five existing departure-pattern DOM assertions failed during current work; require a before/after baseline comparison or a fix before accepting them as unrelated."
+      ],
+      "completedAt": "2026-10-22T17:37:20.342425+00:00",
+      "reservationsReleased": true,
+      "validationSummary": "Own requirements completed: 23 weather tests, immediate departure DOM regression, global typecheck and diff check passed; real Home and controlled weather browser scenarios verified. Proofs/logs checked.",
+      "validationConcernsResolved": "The five plan DOM failures were reproduced unchanged without the added header; negative-control header test fails without it and passes with it. Full plan suite remains non-green for those known baseline failures."
+    },
+    {
+      "n": 5,
+      "file": "05-home-classification-rer-omnibus-semi-direct.md",
+      "title": "Lot 05 — Home : classification omnibus et semi-direct",
+      "effort": "xhigh",
+      "order": 5,
+      "threadId": "01a16452-e881-7493-93ac-0ccf483bbc9d",
+      "hostId": "local",
+      "status": "completed",
+      "report": "reports/05.md",
+      "dispatchRequestedAt": "2026-10-22T17:37:27.229351+00:00",
+      "prerequisiteAssessment": "Allsourcewriters idle,08complete. Existing05source/extension validated; remainingmandatory4trainA/B may be rechecked on current reference/provider without app edits. No APK/Gitcondition relaxed.",
+      "startedAt": "2026-10-22T17:38:01.304165+00:00",
+      "cursor": "6056f57e-cbae-4c87-a949-38b1fc449689:9",
+      "lastObservedStatus": "idle",
+      "lastCheckedAt": "2026-10-23T19:52:30.010580+00:00",
+      "latestMessage": "Lot05 completed after direct consent authorization:4futuretrain reference/SNCF/rawUUID/local comparisons passed,18/23/12/24served and0missing/extra. Report/checklist/screenshots/audit reviewed, no source changes.",
+      "coordinationRequestedAt": "2026-10-23T19:13:48.385557+00:00",
+      "coordinationStatus": "authorized_external_ab_completed_reviewed",
+      "sharedFileAssessment": "Handoff 05 reviewed: realtime route_schedules currently uses structural /routes cache; grant narrowly scoped proxy freshness rule and focused test. No change to shared response schema or lot10 modules.",
+      "followUp": "Only integrated native smoke12 remains globally: Home labels/load/refresh/progressive states, portrait/landscape. No mandatory05 requirement open.",
+      "coordinationSentAt": "2026-10-23T19:14:02.151596+00:00",
+      "implementationStatus": "complete",
+      "sourceWorkFinishedAt": "2026-10-22T20:12:32.425723+00:00",
+      "reservationsReleased": true,
+      "validationSummary": "57 targeted tests, final typecheck and diff check passed. Four future consecutive trains checked in local Home/modal with SIRI and exactly matched theoretical calling schedules; proof files present and report reviewed.",
+      "validationBlocker": null,
+      "sourceWorkReopenedAt": "2026-10-22T19:49:04.781791+00:00",
+      "directUserExtension": {
+        "turnId": "01a164e8-4855-7ff2-8f2c-6af26b2942a3",
+        "request": "Add light-grey north/south/east/west section suffix to semi-direct when skipped stops cluster reliably; generic across lines, no suffix when dispersed.",
+        "verifiedAt": "2026-10-22T19:11:46.871826+00:00"
+      },
+      "sharedFileIntegrationOwnerLot": 11,
+      "extensionSourceStatus": "complete_validated",
+      "extensionTargetedValidation": "74 tests plus final 18 board tests pass; two negative controls fail as expected. Real Home refresh, desktop/mobile and current provider capture reviewed; image checked. Wrappers removed.",
+      "extensionSourceHashEvidence": "reports/05/refresh-code-sha256.json",
+      "extensionSourceHashVerification": {
+        "at": "2026-10-22T20:12:32.425723+00:00",
+        "count": 13,
+        "mismatches": []
+      },
+      "directUserFollowUps": [
+        {
+          "turnId": "01a16525-e08e-7791-a6f2-0cd619bb6d09",
+          "request": "Human live capture shows no service indications; investigate loss of all labels and cover north/south/east/west when justified.",
+          "verifiedAt": "2026-10-22T19:49:04.781791+00:00"
+        }
+      ],
+      "reportedTargetedValidation": "74 targeted tests and final 18 board tests passed; two negative controls demonstrate prior batch failure. Real Home refresh and desktop/mobile proofs reported.",
+      "reportedSourceStableAt": "2026-10-22T20:03:04.861932+00:00",
+      "executionMode": "complete",
+      "resumeRequestedAt": "2026-10-23T19:13:48.385557+00:00",
+      "pendingSharedValidationEvidence": {
+        "command": "npm.cmd run tsc",
+        "ownerLot": 11,
+        "coveredLots": [
+          5,
+          6,
+          11
+        ],
+        "exitCode": 0,
+        "log": "proofs/11/typecheck-final.log",
+        "exitCodeEvidence": "proofs/11/typecheck-final-exit-code.txt",
+        "before": "proofs/11/typecheck-final-before-sources.json",
+        "after": "proofs/11/typecheck-final-after-sources.json",
+        "verifiedAt": "2026-10-22T20:57:11.771158+00:00",
+        "unchangedBeforeAfterAndCurrentSourceCount": 42,
+        "catalogueAudit": "Only two common generic keys plus LF normalization; removal and CRLF normalization exactly reproduce both 05 catalogue hashes. Four own 06 sources unchanged; shared keys preserved.",
+        "nativeEvidence": "14 fullscreen Android checks plus 26 final extraction checks (18 Android, 8 web), report/MD/proofs reviewed. Three exact timetable row parities verified, context alias context versus gtfs:0 expected.",
+        "cleanup": "Temporary debug manifest/assets/network config and routes absent; original debug APK SHA256 restored.",
+        "scopeLimit": "Valid before new direct human sitewide sheet audit; new modifications require their affected validation."
+      },
+      "resumedAt": "2026-10-23T19:14:02.151596+00:00",
+      "currentTurnId": "01a16a43-26f8-7632-a74c-472b3a85a1a4",
+      "directConsentAuthorization": {
+        "verifiedAt": "2026-10-23T19:39:39.977914+00:00",
+        "turnId": "01a16a43-26f8-7632-a74c-472b3a85a1a4",
+        "userMessageId": "01a16a43-279b-7013-9cc4-2b577941db87",
+        "request": "tu as le droit d'accepter hein les consentements",
+        "scope": "Consent necessary for reference pages consulted by05; replaces previous lack of consent authorization."
+      },
+      "completedAt": "2026-10-23T19:52:30.010580+00:00",
+      "externalAbReview": {
+        "at": "2026-10-23T19:52:30.010580+00:00",
+        "evidence": "reports/05/ab-2026-10-23-authorized/raw-ui-external-comparison.json",
+        "summary": "reports/05/ab-2026-10-23-authorized/validation-summary.json",
+        "audit": "compare-evidence.py rerun passed",
+        "missions": [
+          "ICAL79",
+          "INAS85",
+          "EKLO87",
+          "ECER93"
+        ],
+        "servedCounts": [
+          18,
+          23,
+          12,
+          24
+        ],
+        "referenceIntermediates": [
+          2,
+          7,
+          2,
+          7
+        ],
+        "missing": 0,
+        "extra": 0,
+        "orderedIndependentMatch": true,
+        "imagesInspected": [
+          "INAS85-local.png",
+          "INAS85-sncf.png"
+        ],
+        "currentSourceWrites": false,
+        "limits": "Reference short corridor versus full downstream distinguished; predicted delays differ and cells base_schedule. No claim of fresh realtime service mutation or native proof.",
+        "openMdCheckboxes": 0
+      }
+    },
+    {
+      "n": 6,
+      "file": "06-commerces-cartes-sidebars-et-loaders.md",
+      "title": "Lot 06 — Commerces : cartes, sidebars et loaders",
+      "effort": "high",
+      "order": 6,
+      "threadId": "01a16452-fd0f-7760-9ece-b06c3b9c1f70",
+      "hostId": "local",
+      "status": "completed",
+      "report": "reports/06.md",
+      "dispatchRequestedAt": "2026-10-22T18:06:00.697870+00:00",
+      "prerequisiteAssessment": "10 finished and idle; all 15 source hashes match proof. Global map and nearby commerces scopes available; service-pattern including DeparturePatternModal remains read-only while 05 active. No App.vue/idfm/proxy edits for 06 without arbitration.",
+      "startedAt": "2026-10-22T18:06:43.213276+00:00",
+      "cursor": "66303eba-eb9c-4c97-894f-61f986b2438a:22",
+      "lastObservedStatus": "idle",
+      "lastCheckedAt": "2026-10-22T21:01:44.695186+00:00",
+      "latestMessage": "La finition est clôturée : un jour par ligne, créneaux alignés et design simple, vérifiés sur ordinateur et mobile. Les 12 tests ciblés et le typecheck final partagé ont réussi. Documentation mise à jour ; sources libres, aucune nouvelle commande lancée.",
+      "coordinationStatus": "documentary_closure_reviewed",
+      "coordinationRequestedAt": "2026-10-22T20:57:11.771158+00:00",
+      "coordinationSentAt": "2026-10-22T20:58:15.996615+00:00",
+      "currentValidationConcern": null,
+      "implementationStatus": "complete",
+      "sourceWorkFinishedAt": "2026-10-22T19:23:27.664489+00:00",
+      "reservationsReleased": true,
+      "validationSummary": "84 original and 12 opening-hours focused tests; original map/commerce/circle/loaders proof and real annuary desktop/mobile extension reviewed. Final shared tsc exit0 covers final hours source/current catalogues; report/handoff/MD fully closed. Known baseline failures/data absences remain explicit.",
+      "followUp": "No remaining requirement in 06. Subsequent 11 migrations must preserve/revalidate affected behavior; integrated Android smoke remains 12.",
+      "pendingSharedValidationEvidence": {
+        "command": "npm.cmd run tsc",
+        "ownerLot": 11,
+        "coveredLots": [
+          5,
+          6,
+          11
+        ],
+        "exitCode": 0,
+        "log": "proofs/11/typecheck-final.log",
+        "exitCodeEvidence": "proofs/11/typecheck-final-exit-code.txt",
+        "before": "proofs/11/typecheck-final-before-sources.json",
+        "after": "proofs/11/typecheck-final-after-sources.json",
+        "verifiedAt": "2026-10-22T20:57:11.771158+00:00",
+        "unchangedBeforeAfterAndCurrentSourceCount": 42,
+        "catalogueAudit": "Only two common generic keys plus LF normalization; removal and CRLF normalization exactly reproduce both 05 catalogue hashes. Four own 06 sources unchanged; shared keys preserved.",
+        "nativeEvidence": "14 fullscreen Android checks plus 26 final extraction checks (18 Android, 8 web), report/MD/proofs reviewed. Three exact timetable row parities verified, context alias context versus gtfs:0 expected.",
+        "cleanup": "Temporary debug manifest/assets/network config and routes absent; original debug APK SHA256 restored.",
+        "scopeLimit": "Valid before new direct human sitewide sheet audit; new modifications require their affected validation."
+      },
+      "resumeRequestedAt": "2026-10-22T20:57:11.771158+00:00",
+      "resumedAt": "2026-10-22T20:58:15.996615+00:00",
+      "executionMode": "complete",
+      "sourceWorkReopenedAt": "2026-10-22T19:09:37.684214+00:00",
+      "directUserExtension": {
+        "turnId": "01a16502-8a0e-76f1-a882-a4f0215c1928",
+        "request": "fais en sorte que les horaires soient plus UX en faisant un retour à la ligne entre chaque jour de la semaine et un design meilleur mais simple",
+        "verifiedAt": "2026-10-22T19:09:37.684214+00:00"
+      },
+      "extensionSourceStatus": "complete_validated",
+      "extensionValidationPending": [],
+      "extensionSourceHashEvidence": "proofs/06/opening-hours-source-sha256.json",
+      "extensionTargetedValidation": "12 final formatter/details tests passed; isolated real component preview checked. Report and evidence reviewed; full annuary interaction and final global tsc pending.",
+      "extensionSourceHashVerification": {
+        "at": "2026-10-22T20:12:32.425723+00:00",
+        "count": 6,
+        "mismatches": [
+          "src/i18n/messages/fr.ts",
+          "src/i18n/messages/en.ts"
+        ],
+        "assessment": "Four own formatter/details/test sources unchanged; catalogues currently owned and being edited by 11, review preservation of 06 keys and final shared hashes before accepting tsc."
+      },
+      "extensionBrowserValidation": {
+        "reviewedAt": "2026-10-22T20:19:35.387817+00:00",
+        "evidence": [
+          "proofs/06/opening-hours-real-mobile.png",
+          "proofs/06/opening-hours-real-mobile-navigation.json",
+          "proofs/06/opening-hours-real-mobile.json",
+          "proofs/06/opening-hours-browser-source-comparison.json"
+        ],
+        "result": "passed",
+        "responsiveViewport": "390x844",
+        "weekRows": 7,
+        "clientAndScrollWidth": 303,
+        "ownSourcesUnchanged": 4,
+        "sharedCataloguesChanged": 2,
+        "historicalSplash": "No longer reproduced without restart, original cause unknown."
+      },
+      "completedAt": "2026-10-22T21:01:44.695186+00:00"
+    },
+    {
+      "n": 7,
+      "file": "07-feed-quartier-et-sources-recentes.md",
+      "title": "Lot 07 — Feed quartier : sources récentes",
+      "effort": "medium",
+      "order": 7,
+      "threadId": "01a16453-10c0-73b2-b9f1-595e9d866131",
+      "hostId": "local",
+      "status": "completed",
+      "report": "reports/07.md",
+      "dispatchRequestedAt": "2026-10-22T16:44:59.707999+00:00",
+      "startedAt": "2026-10-22T16:46:05.338635+00:00",
+      "cursor": "8324a014-dd66-4c54-a3de-6ec0ff7a5f83:8",
+      "lastObservedStatus": "idle",
+      "latestMessage": "Lot 07 terminé : sources améliorées, renommage et filtres récent/archives validés en français et en anglais. 30 tests réussis, TypeScript partagé code 0. Le refus IDFM HTTP 403 reste documenté. Rapport et preuves. Aucun commit, push ou déploiement. Feed quartier validé",
+      "lastCheckedAt": "2026-10-22T17:17:18.326Z",
+      "validationSummary": "30 focused tests, successful shared global typecheck, final real Chrome FR/EN recent/archive/source and rename checks; proof files verified. IDFM upstream 403 remains explicitly reported.",
+      "sharedFileIntegrationOwnerLot": 3,
+      "followUp": "News translations integrated by owner 03 and checked in both catalogues. Resume own tests and final browser; global validation still reserved to 03.",
+      "resumeRequestedAt": "2026-10-22T17:03:33.146964+00:00",
+      "resumedAt": "2026-10-22T17:03:41.610696+00:00",
+      "completedAt": "2026-10-22T17:19:52.407787+00:00"
+    },
+    {
+      "n": 8,
+      "file": "08-combobox-harmonisation-globale.md",
+      "title": "Lot 08 — Combobox : harmonisation globale",
+      "effort": "high",
+      "order": 11,
+      "threadId": "01a16453-24de-74b0-bd53-f690c6eef325",
+      "hostId": "local",
+      "status": "completed",
+      "report": "reports/08.md",
+      "dispatchRequestedAt": "2026-10-23T18:18:59.229869+00:00",
+      "coordinationRequestedAt": "2026-10-23T18:18:59.229869+00:00",
+      "coordinationStatus": "completion_report_and_browser_proofs_reviewed",
+      "prerequisiteAssessment": "UI additions02-07/09-11 implemented and idle;01 source corrections complete/idle,05 partial external A/B only. No strict01 completion prerequisite for08 MD. Sole source writer/global validation owner08;12/13 remain gated by partial01/05.",
+      "scopeReview": {
+        "at": "2026-10-23T18:18:59.229869+00:00",
+        "method": "MD08 plus current rg select/listbox/MaterialCombobox usage inventory",
+        "paths": [
+          "pages/nearby-stations.vue",
+          "src/features/nearby-stations/MyNearbyStationsPage.vue",
+          "src/components/MaterialCombobox.vue",
+          "src/components/StationCombobox.vue",
+          "src/components/LineCombobox.vue",
+          "src/components/FamilyCombobox.vue",
+          "pages/ridership/line/[lineId].vue",
+          "src/features/line-map/AnnualRidershipStationCard.vue",
+          "src/features/transport-news/NewsFilters.vue",
+          "src/features/nearby-stations/NearbyCityCityPicker.vue",
+          "src/features/line-map/GlobalMapPickerSideBar.vue",
+          "src/features/transport-map/isochrones/TransportIsochronePanel.vue",
+          "src/features/transport-map/search/GlobalTransportPlanSearch.vue",
+          "src/features/nearby-stations/NearbyRealEstateControls.vue",
+          "src/features/line-map/LineFrequencyTimetable.vue",
+          "src/features/address-book/**",
+          "src/i18n/messages/fr.ts",
+          "src/i18n/messages/en.ts"
+        ],
+        "protectedReadOnly": [
+          "src/components/DraggableBottomSheet.vue",
+          "src/components/ResponsiveSidePanel.vue",
+          "routing/provider modules of01"
+        ],
+        "next": "Owner records precise inventory, justified replacements and own targeted test paths before edits."
+      },
+      "coordinationSentAt": "2026-10-23T18:19:21.586881+00:00",
+      "startedAt": "2026-10-23T18:19:21.586881+00:00",
+      "latestMessage": "Lot08 completed:9sources harmonised, specialised adapters preserved;150tests plus6settings isolated, tsc/diff0, real desktop/mobile and explicit fixture proof reviewed. No native/global-suite claim.",
+      "cursor": "48f1e993-51fc-4a92-80f6-5f0be9f6865c:8",
+      "lastObservedStatus": "idle",
+      "lastCheckedAt": "2026-10-23T18:54:27.515796+00:00",
+      "currentTurnId": "01a169fc-fb27-76f0-82c1-e2087c113003",
+      "completedAt": "2026-10-23T18:54:27.515796+00:00",
+      "implementationStatus": "complete",
+      "executionMode": "complete",
+      "reservationsReleased": true,
+      "validationSummary": "All mandatory08 checklist requirements reviewed: actual existing generic, nearby origin migration, sitewide inventory/justified exceptions; browser keyboard/select/focus/mobile/scroll/drag. 11 component-isolated broader failures documented. Android integrated smoke12 pending globally.",
+      "sourceHashesEvidence": "reports/08-evidence/coordinator-review.json"
+    },
+    {
+      "n": 9,
+      "file": "09-optimizer-separer-marche-et-attente.md",
+      "title": "Lot 09 — Optimizer : marche et attente",
+      "effort": "high",
+      "order": 8,
+      "threadId": "01a16453-3ceb-71c3-adea-b239b634d201",
+      "hostId": "local",
+      "status": "completed",
+      "report": "reports/09.md",
+      "dispatchRequestedAt": "2026-10-22T16:44:59.707999+00:00",
+      "startedAt": "2026-10-22T16:46:10.444582+00:00",
+      "cursor": "5aa08fc0-b13f-446c-8919-5acd2bd0b931:6",
+      "lastObservedStatus": "idle",
+      "latestMessage": "Lot 09 terminé. Marche jusqu’au quai et attente sont séparées, sans attente artificielle en prise immédiate ni double comptage. 28 tests ciblés réussis. Deux cas T10 validés dans Chrome. Typecheck partagé réussi par le lot 03, code 0 ; les quatre empreintes SHA256 correspondent. Rapport final et checklist actualisés. Aucun code source modifié pendant cette clôture. Le lot 10 peut prendre la suite.",
+      "lastCheckedAt": "2026-10-22T17:12:18.254Z",
+      "validationSummary": "28 targeted tests, diff check, two real T10 browser scenarios and shared global typecheck passed. Final report/checklist updated; source hashes verified unchanged.",
+      "followUp": "Finalise report and checklist using successful shared typecheck from lot 03 at 19:05 Europe/Paris, covering unchanged lot 09 code. No source edits or duplicate typecheck needed.",
+      "resumeRequestedAt": "2026-10-22T17:09:19.900332+00:00",
+      "resumedAt": "2026-10-22T17:09:30.324528+00:00",
+      "completedAt": "2026-10-22T17:14:29.223374+00:00"
+    },
+    {
+      "n": 10,
+      "file": "10-optimizer-carte-synchronisee-sur-chronologie.md",
+      "title": "Lot 10 — Optimizer : carte synchronisée",
+      "effort": "xhigh",
+      "order": 9,
+      "threadId": "01a16453-56db-72f3-b552-e1fca3af099e",
+      "hostId": "local",
+      "status": "completed",
+      "report": "reports/10.md",
+      "dispatchRequestedAt": "2026-10-22T17:19:52.407787+00:00",
+      "prerequisiteAssessment": "09 fully completed: pure optimizerConnectionSteps contract, tests and real browser proof available. Current 04 Home/weather scope is disjoint from optimizer/global-map implementation; shared catalogues and global checks belong to 04.",
+      "startedAt": "2026-10-22T17:20:02.357185+00:00",
+      "cursor": "8c659f31-e304-47ab-ae19-13164bf7b7a3:11",
+      "lastObservedStatus": "idle",
+      "latestMessage": "Vérifié : l’Optimizer utilise /journeys, GTFS et StopMonitoring, sans route_schedules. Le correctif ciblé du lot 05 ne remet donc pas en cause la parité validée. État testé précisé dans le rapport 10. Catalogues FR/EN et créneau global libérés.",
+      "lastCheckedAt": "2026-10-22T18:05:54.947866+00:00",
+      "coordinationRequestedAt": "2026-10-22T17:59:54.748164+00:00",
+      "coordinationStatus": "proxy_cache_notice_sent",
+      "coordinationSentAt": "2026-10-22T17:59:59.758204+00:00",
+      "completedAt": "2026-10-22T18:05:54.947866+00:00",
+      "reservationsReleased": true,
+      "validationSummary": "51 focused tests plus 3 supplied/normal-map regressions, global typecheck and diff check passed. Two real-browser journeys compared identically before/after origin change; source hashes, logs, DOM JSON parity and proof files verified. Four full-map baseline failures reproduced against HEAD and documented.",
+      "sourceHashesVerifiedAt": "2026-10-22T18:05:54.947866+00:00",
+      "sourceHashesEvidence": "proofs/10/source-sha256.json"
+    },
+    {
+      "n": 11,
+      "file": "11-station-fullscreen-scroll-et-horaires.md",
+      "title": "Lot 11 — Station fullscreen : scroll et horaires",
+      "effort": "high",
+      "order": 10,
+      "threadId": "01a16453-6c6f-7e41-9744-2c1465d5a73b",
+      "hostId": "local",
+      "status": "completed",
+      "report": "reports/11.md",
+      "dispatchRequestedAt": "2026-10-22T18:15:20.619391+00:00",
+      "prerequisiteAssessment": "05 source work finished and chat idle; App.vue and fullscreen panel available. 06 active on commerces/map/modal, so line-map timetable components read-only for 11 pending arbitration. Global/native validation reserved to 06 first.",
+      "startedAt": "2026-10-22T18:16:09.685126+00:00",
+      "cursor": "0235b7f2-74c9-4a04-925b-85f452b3d0dc:56",
+      "lastObservedStatus": "idle",
+      "lastCheckedAt": "2026-10-22T21:58:22.933559+00:00",
+      "latestMessage": "All3documents updated to completed, controlled editor-resume stability documented, reservations released. No source modification or validation rerun.",
+      "coordinationStatus": "post_resume_documentary_closure_reviewed",
+      "coordinationRequestedAt": "2026-10-22T21:56:08.182046+00:00",
+      "coordinationSentAt": "2026-10-22T21:56:15.045530+00:00",
+      "sharedFileIntegrationOwnerLot": 6,
+      "resumeRequestedAt": "2026-10-22T18:57:01.251293+00:00",
+      "followUp": "Documentary closure only using coordinator post-resume evidence, no source/test/build/native command. Source priority completed; any generic-file change/reversion requires explicit coordinated reopening.",
+      "resumedAt": "2026-10-22T18:57:08.079948+00:00",
+      "implementationStatus": "complete",
+      "directUserExtension": {
+        "turnId": "01a164f9-5635-7b92-b2a3-16e218d68ae8",
+        "request": "Use existing generic bottom sheet for Explore networks on mobile button entry; preserve filters/customization subviews; then resume previous work.",
+        "verifiedAt": "2026-10-22T19:42:33.824661+00:00"
+      },
+      "sourceWorkReopenedAt": "2026-10-22T20:57:11.771158+00:00",
+      "directUserFollowUps": [
+        {
+          "turnId": "01a16537-7bbb-7ae1-944f-9987a3d93000",
+          "request": "Fully generic component renamed DraggableBottomSheet.vue, with slotted content where appropriate; preserve desktop/mobile adaptation.",
+          "verifiedAt": "2026-10-22T20:12:32.425723+00:00"
+        },
+        {
+          "turnId": "01a16564-9748-7220-a286-ced27f92edf3",
+          "request": "Verify throughout the site that every draggable sheet uses the generic component.",
+          "verifiedAt": "2026-10-22T20:57:11.771158+00:00"
+        }
+      ],
+      "reportedAuditValidation": {
+        "checks": 20,
+        "typecheck": "reported_pass",
+        "unchangedBeforeAfterSources": 44,
+        "reviewStatus": "pending_final_report_and_idle"
+      },
+      "validationBlocker": null,
+      "auditReview": {
+        "at": "2026-10-22T21:46:18.932128+00:00",
+        "targetedTests": 34,
+        "acceptanceChecks": 20,
+        "beforeAfterStableSources": 44,
+        "currentSourceMismatches": [
+          "src/components/DraggableBottomSheet.vue"
+        ],
+        "typecheckExitCode": 0,
+        "androidPermissionConsentVerified": true,
+        "cleanupOriginalDebugApkHashVerified": true,
+        "finalLinePng": "Misnamed old permission screenshot; true native final rawJSON and otherstagePNG should be used."
+      },
+      "correctiveRestorationEvidence": {
+        "reviewedAt": "2026-10-22T21:54:14.712040+00:00",
+        "before": "proofs/11/sheet-audit-editor-restoration-before.json",
+        "after": "proofs/11/sheet-audit-editor-restoration-after.json",
+        "testLog": "proofs/11/sheet-audit-editor-restoration-tests.log",
+        "exitCode": 0,
+        "tests": 24,
+        "webChecks": 6,
+        "browser": "proofs/11/sheet-audit-editor-restoration-web.json",
+        "helperCheck": "proofs/11/sheet-audit-editor-helper-check.json",
+        "captureReferenceFix": "proofs/11/sheet-audit-editor-capture-reference-fix.json",
+        "current44HashMismatches": []
+      },
+      "executionMode": "complete",
+      "completedAt": "2026-10-22T21:56:08.182046+00:00",
+      "reservationsReleased": true,
+      "validationSummary": "Original fullscreen/timetable native proofs plus final7surface generic audit accepted.34focused tests,20acceptance checks, globaltsc0 with44unchanged source hashes. Exact restoration verified;24recovery tests/6web checks passed. Editor resumed without error and component hash/mtime unchanged across56samples over55seconds; all44current hashes independently match. No final APK/publication validation claimed.",
+      "postEditorResumeValidation": {
+        "reviewedAt": "2026-10-22T21:56:08.182046+00:00",
+        "editorResumedAt": "2026-10-22T21:54:14.9621813Z",
+        "resumeErrors": [],
+        "stabilityProof": "proofs/11/coordinator-editor-resume-stability.json",
+        "samples": 56,
+        "first": "2026-10-22T21:54:17.433007+00:00",
+        "last": "2026-10-22T21:55:12.496729+00:00",
+        "all44CurrentHashesMatch": true,
+        "laterReversionPolicy": "Check generic fingerprint before new source work and integrated smoke; reopen11 if it reverts. No assertion of permanent external writer attribution."
+      }
+    },
+    {
+      "n": 12,
+      "file": "12-android-rebuild-et-smoke-e2e.md",
+      "title": "Lot 12 — Android : rebuild et smoke E2E",
+      "effort": "high",
+      "order": 12,
+      "threadId": "01a16453-82f4-79a2-a9e5-443c9751595c",
+      "hostId": "local",
+      "status": "completed",
+      "report": "reports/12.md",
+      "prerequisiteAssessment": "Direct user waiver accepts remaining01externalIGNvalidation;02-11fullycompleted.01confirmedidle,08and01hashes unchanged,protected11hashunchanged. Allappsourcewriters stopped,12exclusiveheavyowner.",
+      "dispatchRequestedAt": "2026-10-23T20:39:58.287385+00:00",
+      "coordinationRequestedAt": "2026-10-24T21:01:20.633855+00:00",
+      "coordinationStatus": "smoke9_native_completion_reviewed",
+      "executionMode": "exclusive_integrated_android_validation",
+      "acceptedPrerequisiteWaivers": [
+        "lot01-ign-user-waiver-2026-10-23"
+      ],
+      "scopeReview": {
+        "at": "2026-10-23T20:39:58.287385+00:00",
+        "mdRead": true,
+        "paths": [
+          "android/",
+          "capacitor.config.ts",
+          "nuxt.config.ts",
+          "scripts/mobile-release/",
+          "src/features/mobile-release/",
+          "docs/tasks/2026-10-22/reports/12.md",
+          "docs/tasks/2026-10-22/handoffs/12.md",
+          "docs/tasks/2026-10-22/proofs/12/"
+        ],
+        "notes": "BuildvalidationAPK only; finalreleaseAPK/R2 reserved13. Recordexacttestedstate andsourcefingerprints; nativeinteractionproof mandatory."
+      },
+      "coordinationSentAt": "2026-10-24T21:01:47.702834+00:00",
+      "startedAt": "2026-10-23T20:43:53.258221+00:00",
+      "latestMessage": "Completed and accepted after coordinator final smoke9 source/binary/native/PDF/cleanup review. Required native smoke passed with documented findings;13prerequisite satisfied.",
+      "cursor": "3d06f93d-d67b-4f12-9111-e850e86104dc:12",
+      "lastObservedStatus": "idle",
+      "lastCheckedAt": "2026-10-24T23:15:52.950957+00:00",
+      "currentTurnId": "01a16fa0-562b-72f1-aac0-166a1ece9283",
+      "externalSourceReview": "proofs/12/coordinator-external-source-review.json",
+      "resumeRequestedAt": "2026-10-24T20:34:57.962936+00:00",
+      "interruptionReview": {
+        "at": "2026-10-23T21:15:49.414982+00:00",
+        "turnId": "01a16a7e-09af-7042-9b8e-babad7262963",
+        "status": "interrupted",
+        "lastTool": "exec-258af598-9a12-48ec-b7f1-e3378d471f43",
+        "lastCommand": "npx.cmd cap sync android",
+        "exitCode": -1,
+        "stage": "Capacitor web asset copy19000/77958files",
+        "reportExists": false,
+        "sourceSnapshot": "proofs/12/source-effective.json",
+        "reviewedFileCount": 1232,
+        "plan": "Resume samechat; check lingering own copy process before duplicate; content-identical Windows copy then full native update/hash verification if justified, Gradle/debug install and all mandatory native smoke."
+      },
+      "resumedAt": "2026-10-24T20:35:49.742042+00:00",
+      "validationBlocker": null,
+      "buildFixScopeReview": {
+        "at": "2026-10-23T21:45:38.878530+00:00",
+        "handoff": "handoffs/12.md",
+        "diagnosis": "proofs/12/gtfs-packaging-diagnosis.json",
+        "failedCommand": "gradlew.bat :app:assembleDebug --no-daemon --max-workers=1",
+        "error": "Too many zip entries78485(MAX65535)",
+        "scope": [
+          "android/app/build.gradle"
+        ],
+        "withinExistingReservation": true,
+        "decision": "Native build-only resource-selection correction is admissible; preserve manifest-selected geometry/timetable/routing and all other current assets. No hardcoded version, no source datasets removed, no business/runtime change. Rebuild and verify actual APK archive before install/smoke.",
+        "validationRequirements": [
+          "Finalsourcefingerprint includes build.gradle change",
+          "Currentmanifest and all active resource trees present in APK",
+          "Historicalresources excluded only according to current manifest",
+          "All mandatory native scenarios still pending; finalAPK13 and Git gates unchanged"
+        ]
+      },
+      "packagingFixProgress": {
+        "reportedAt": "2026-10-23T21:55:15.921826+00:00",
+        "status": "debug_apk_archive_audit_reported_passed",
+        "zipEntries": 22407,
+        "expectedWebFiles": 21880,
+        "sizeMismatches": 0,
+        "contentControls": 223,
+        "crcValid": true,
+        "currentGtfsFiles": 16298,
+        "historicalRevisionsPackaged": false,
+        "approxApkSizeMiB": 422,
+        "sharedServerHttpStatus": 200,
+        "coordinatorFullReview": "deferred_until_owner_completion",
+        "functionalSmoke": "still_pending"
+      },
+      "affectedValidationAfterNativeChange": {
+        "reportedAt": "2026-10-23T22:35:20.344922+00:00",
+        "change": "Android Back adapter",
+        "scope": "native files already reserved to12",
+        "requiredRevalidation": "Panel closures, native back/navigation and affected integrated scenarios on newly installed exact APK; old native proof historical for changed adapter.",
+        "status": "owner actively revalidating",
+        "releaseGate": "13 remains queued"
+      },
+      "modalBackScopeReview": {
+        "at": "2026-10-23T22:46:04.527264+00:00",
+        "handoff": "handoffs/12.md",
+        "sourcePaths": [
+          "src/features/weather/WeatherForecastModal.vue",
+          "src/features/service-pattern/DeparturePatternModal.vue",
+          "src/components/AppModal.vue"
+        ],
+        "existingHelper": "src/components/usePanelFocus.ts (read-only)",
+        "requiredValidation": "Meaningful keyboard/focus/topmost/nested-control regressions, final rebuilt installed native APK with hardware Back closure/navigation and focus/scroll restoration; preserve prior lot UI/service/weather logic.",
+        "status": "assigned_not_validated"
+      },
+      "additionalUiScopeReview": {
+        "at": "2026-10-23T23:06:04.636252+00:00",
+        "focusHelper": "src/components/usePanelFocus.ts handleTab only",
+        "cssUtility": "src/styles/01-tokens-base.css .sr-only only",
+        "limits": "Preserve helper API/trap opt-in/restore logic and existing scoped styles; no broad layout or business changes.",
+        "validation": "11modal regressions, relevant focus helper consumers overlay/nonoverlay, actual Android search empty/text/clear/IME portraitlandscape and affected labels; final source fingerprint/build/native smoke required.",
+        "status": "assigned_not_validated"
+      },
+      "latestValidationApkProgress": {
+        "reportedAt": "2026-10-23T23:55:14.516734+00:00",
+        "sha256DisplayOnly": "fee95b10...57e7627",
+        "archiveAuditReportedPassed": true,
+        "installation": "reported_installed",
+        "nativeSmoke": "in_progress_cold_start_and_dense_station_list",
+        "releasePublication": "not_started_lot13_queued",
+        "signatureV2ReportedValid": true
+      },
+      "qaEnvironmentProgress": {
+        "reportedAt": "2026-10-24T00:39:17.814738+00:00",
+        "issue": "Local static GTFS CORS differs from deployed public headers",
+        "resolution": "Owner adapting temporary QA relay only; preserve shared3000server and record exact environment",
+        "status": "in_progress",
+        "nativeVerdictCertification": "pending"
+      },
+      "openAcceptanceConcerns": [
+        {
+          "at": "2026-10-24T01:09:31.728059+00:00",
+          "scenario": "Android Verdict PDF export",
+          "observation": "Button clicked, no observable downloaded file; not validated.",
+          "reviewRequirement": "Final report must distinguish missing observation from application failure, record actual output/destination or diagnose concrete cause before any completion claim. Preserve preexisting PDF work; no new write reservation granted yet.",
+          "status": "resolved_native_smoke9_file_verified",
+          "resolvedAt": "2026-10-24T23:17:54.724227+00:00",
+          "evidence": "proofs/12/coordinator-smoke9-acceptance-review.json"
+        }
+      ],
+      "alarmModalFocusScopeReview": {
+        "at": "2026-10-24T01:40:12.936717+00:00",
+        "paths": [
+          "src/components/DepartureAlarmModal.vue",
+          "tests/departureAlarmModal.dom.test.ts"
+        ],
+        "scope": "Diagnose and minimally correct initial focus/first mount/restore/topmost Back behavior, no scheduling logic or unrelated UI change.",
+        "validation": "Open from final departure on exact rebuilt APK,coldfirstmount/focus,TabShiftTab,Back closes top level only,add/remove alarm observed in Android scheduler,no test reminder left.",
+        "status": "assigned_not_validated"
+      },
+      "implementationStatus": "complete",
+      "partialCompletionReview": "proofs/12/coordinator-partial-review.json",
+      "followUp": "No remaining12sourcework.13mustpreserve accepted application state and revalidate any affected behavior after subsequent application change.",
+      "gtfsAndPackagingDiagnosticProgress": {
+        "reportedAt": "2026-10-24T03:09:35.193002+00:00",
+        "cacheModeWorkerTasksCompleted": 91,
+        "workerErrorsReported": 0,
+        "networkGtfsAssetsBlockedInControl": true,
+        "walking": "degraded_not_technically_validated_user_waiver_retained",
+        "embeddedGtfsUse": "not used in two owner-observed paths",
+        "action": "Exclude duplicate GTFS copy from Capacitor package within reserved configuration; retain datasets/mapassets",
+        "coordinatorProofReview": "pending_end_of_followup",
+        "finalNativeRevalidation": "pending"
+      },
+      "correctiveApkProgress": {
+        "reportedAt": "2026-10-24T04:09:20.911498+00:00",
+        "sizeMiB": 86.5,
+        "previousSizeMiB": 421.9,
+        "webFiles": 5582,
+        "installed": true,
+        "mapAssetsReportedUnchanged": true,
+        "pdfPluginPresent": true,
+        "earlyMapSearch": "reported_passed_on_new_APK",
+        "nativePdfOutput": "actual_native_saved_file_verified_by_coordinator_hash_and_audit",
+        "releaseGate": "13queued; final integrated acceptance incomplete",
+        "pdfBytes": 61175,
+        "pdfPages": 6,
+        "pdfSha256": "b07a0a4e616fa4f81e2785de284dbf2e170502fdcafccf79a083f5bace8985fe",
+        "pdfProof": "proofs/12/smoke5-pdf-save-result.json",
+        "pdfAudit": "proofs/12/smoke5-exported-pdf-audit.json",
+        "reviewedAt": "2026-10-24T20:31:57.793674+00:00"
+      },
+      "interruptionHistory": [
+        {
+          "reviewedAt": "2026-10-24T20:31:57.793674+00:00",
+          "turnId": "01a16bcc-e311-78c3-92c3-dfad1532ed3b",
+          "turnStatus": "failed",
+          "cause": "usage_limit",
+          "currentOrdinaryUsageAllowed": true,
+          "restartDispatched": false,
+          "reportStatus": "old smoke4 report plus followup handoff; smoke5 proof files exist but closure incomplete"
+        }
+      ],
+      "resumeReadinessReview": {
+        "at": "2026-10-24T20:34:57.962936+00:00",
+        "failedTurnInspected": true,
+        "noOtherActiveProjectChatObserved": true,
+        "localhost3000Status": 200,
+        "testedPathsChecked": 1239,
+        "testedPathMismatches": 0,
+        "sourceProof": "proofs/12/coordinator-resume-source-drift.json",
+        "protectedSheetHash": "5ca78ef556d6e17c1765bb2954be202050538e9a40f3766f9e1ee8c08385bc6d",
+        "fullNewSourceInventoryStillRequired": true
+      },
+      "addressTouchScopeReview": {
+        "at": "2026-10-24T21:01:20.633855+00:00",
+        "paths": [
+          "src/features/nearby-stations/NearbyAddressSearch.vue",
+          "tests/nearbyAddressSearch.dom.test.ts"
+        ],
+        "handoff": "handoffs/12.md",
+        "evidence": [
+          "proofs/12/late-smoke5-address-tap-events.json",
+          "proofs/12/late-smoke5-address-hidden-keyboard-events.json"
+        ],
+        "observed": "Trusted pointerdown/up on suggestion; no click; focusout and unresolvedorigin. Later click with keyboardhidden resolves. Exact WebView retargeting cause remains inference.",
+        "consumers": [
+          "src/features/nearby-stations/LeftNearbySidebarBodyTravel.vue origin",
+          "src/features/nearby-stations/LeftNearbySidebarBodyTravel.vue destination"
+        ],
+        "graphConsultedWithoutRebuild": true,
+        "validation": "Regression pointer/focus/blur/keyboard plus scrolling/cancel preservation; tsc,new debug build/install,first tap with IME open/closed,origin/destination/addressbook/Back and affected integrated smoke."
+      },
+      "addressTouchRevalidationProgress": {
+        "reportedAt": "2026-10-24T22:00:12.331254+00:00",
+        "validationApk": "smoke8",
+        "installedReported": true,
+        "hashVerifiedReported": true,
+        "webFilesAuditedReported": 5582,
+        "nativeAffectedChecks": "first_touch_and_keyboard_in_progress",
+        "coordinatorAcceptance": "pending_owner_completion",
+        "nativeIdentityConfirmedReported": true,
+        "earlyMapSearch": "reported_no_exception_while_loading",
+        "suggestionScroll": "reported_no_unwanted_selection"
+      },
+      "latestNativeProgress": {
+        "reportedAt": "2026-10-24T23:00:11.543676+00:00",
+        "validationApk": "smoke9",
+        "t10Timetable": "reported_loaded_backend_service26Oct_last23h58",
+        "backSequence": "reported_combobox_then_modal",
+        "servicePattern": "loaded_fullscreen_checks_in_progress",
+        "acceptance": "pending_final_report_and_review",
+        "nearbyMap": "reported_loaded_and_Back_keeps_page",
+        "cleanup": "restoration_check_in_progress",
+        "documents": "being_finalised"
+      },
+      "completedAt": "2026-10-24T23:15:52.950957+00:00",
+      "acceptedAt": "2026-10-24T23:15:52.950957+00:00",
+      "reservationsReleased": true,
+      "completionReview": "proofs/12/coordinator-smoke9-acceptance-review.json",
+      "validationSummary": "Final1238sourcehashes current/no drift; exactdebugAPK hash/CRC/installedidentity verified;55focused+tsc/diff0;actualnativecore/address/PDF/normalVerdict/cleanup reviewed. Historical OOM/externalIGN waiver/freshnessbaseline/sourcefailures remain explicit findings,not fabricated passes."
+    },
+    {
+      "n": 13,
+      "file": "13-android-apk-final-et-publication-r2.md",
+      "title": "Lot 13 — Android : APK final et publication R2",
+      "effort": "high",
+      "order": 13,
+      "threadId": "01a16453-9b02-7881-81c3-684ad9e25c53",
+      "hostId": "local",
+      "status": "completed",
+      "report": "reports/13.md",
+      "prerequisiteAssessment": "01accepted userwaiver;02-11completed;12completed/accepted after finalsourcehash+native/PDF/cleanup review on smoke9. Absolute finalAPK gate satisfied before dispatch.",
+      "dispatchRequestedAt": "2026-10-24T23:15:52.950957+00:00",
+      "coordinationRequestedAt": "2026-10-24T23:15:52.950957+00:00",
+      "coordinationStatus": "final_release_completion_reviewed",
+      "executionMode": "exclusive_final_android_release",
+      "acceptedPrerequisiteWaivers": [
+        "lot01-ign-user-waiver-2026-10-23"
+      ],
+      "prerequisiteProof": "proofs/12/coordinator-smoke9-acceptance-review.json",
+      "scopeReview": {
+        "at": "2026-10-24T23:15:52.950957+00:00",
+        "mdRead": true,
+        "releaseDocsRead": true,
+        "actualWorkflowPathsInspected": [
+          "scripts/mobile-release/build.ts",
+          "scripts/mobile-release/publish.ts",
+          "scripts/mobile-release/common.ts",
+          "scripts/mobile-release/releaseMetadata.ts",
+          "android/app/build.gradle"
+        ],
+        "paths": [
+          "scripts/mobile-release/",
+          "tests/mobileReleaseMetadata.test.ts",
+          "tests/mobileReleaseRuntime.test.ts",
+          "tests/mobileReleaseSourceSnapshot.test.ts",
+          "docs/mobile-release.md",
+          "android/",
+          "docs/tasks/2026-10-22/13-android-apk-final-et-publication-r2.md",
+          "docs/tasks/2026-10-22/reports/13.md",
+          "docs/tasks/2026-10-22/handoffs/13.md",
+          "docs/tasks/2026-10-22/proofs/13/"
+        ],
+        "appSourcePolicy": "Frozen to accepted12; ask internal scope coordination and revalidate affected native scenarios before publish if appchange necessary."
+      },
+      "startedAt": "2026-10-24T23:17:24.064509+00:00",
+      "coordinationSentAt": "2026-10-24T23:17:24.064509+00:00",
+      "latestMessage": "Completed/accepted: signedAPK1003 installed andnative tested,publishedR2,twofullpublicdownloads match,livepublicJSON200/source6586hashes stable,cleanup reviewed. Gitgate satisfied;coordinator selective review/staging now.",
+      "cursor": "626a7abd-c944-4b89-998b-17a088c02cc5:8",
+      "lastObservedStatus": "idle",
+      "lastCheckedAt": "2026-10-25T00:18:35.965633+00:00",
+      "currentTurnId": "01a17034-39e7-76e3-85ef-c19ff9a614a4",
+      "releaseProgress": {
+        "reportedAt": "2026-10-25T00:00:25.527372+00:00",
+        "stage": "publication_automatic_review_in_progress",
+        "publicBaselineVersionCode": 1002,
+        "productionNativeValidation": "pending",
+        "r2Publication": "not_yet_confirmed",
+        "publicDownloadVerification": "pending",
+        "publicationAuthorization": "original_human_instruction_evidence_retrieved",
+        "coordinatorAcceptance": "pending_final_report"
+      },
+      "completedAt": "2026-10-25T00:18:35.965633+00:00",
+      "acceptedAt": "2026-10-25T00:18:35.965633+00:00",
+      "reservationsReleased": true,
+      "completionReview": "proofs/13/coordinator-release-acceptance-review.json",
+      "validationBlocker": null
+    }
+  ],
+  "automation": {
+    "id": "transportclock-encha-ner-les-13-lots-sol-6-1",
+    "kind": "heartbeat",
+    "status": "ACTIVE",
+    "intervalMinutes": 10,
+    "pauseRequestedAt": "2026-10-23T20:01:08.026514+00:00",
+    "pauseReason": "Only mandatory remaining progression requires currently unresolved officialIGNcontract/nonestimatedwalking availability. Allindependentlots02-11completed; no active sourcework or correctable confirmeddefect. User instructed suspendinsteadrepeat.",
+    "pausedAt": "2026-10-23T20:01:31.390168+00:00",
+    "pauseVerified": true,
+    "existingPromptAndSchedulePreserved": true,
+    "resumeRequestedAt": "2026-10-23T20:28:59.567244+00:00",
+    "resumeReason": "Direct human01validation waiver; exclusive integrated Android12 now active. Follow-up must preserve waiver and remaining APK/Git conditions.",
+    "resumedAt": "2026-10-23T20:29:47.881240+00:00",
+    "resumeVerified": true,
+    "waiverPromptUpdatedAt": "2026-10-23T20:44:15.869225+00:00",
+    "waiverPromptVerified": true,
+    "acceptedValidationWaivers": [
+      "lot01-ign-user-waiver-2026-10-23"
+    ]
+  },
+  "gitDelivery": {
+    "authorized": true,
+    "authorization": "Utilisateur : une fois que 100% des lots seront faits tu auras le droit de commit & push",
+    "condition": "Lot01 explicitly accepted with uservalidationwaiver; all02-13 fully realised andvalidated including actualintegratedAndroidsmoke,finalAPK install/launch,R2publication/download/version/reference checks. Then coordinatorreviews finaldiff and commit/pushes justifiedlotchanges, preservingunrelatedpreexistinghunks.",
+    "status": "committing",
+    "scope": "Changes belonging to the 13 lots and their task documentation; preserve unrelated pre-existing changes.",
+    "pushPolicy": "Normal push to the verified configured branch and remote; no force-push.",
+    "preexistingBaselineRoot": "C:\\Users\\franc\\.codex\\visualizations\\2026\\10\\22\\01a16428-91e4-7e81-b9d0-1a1329c07c20\\transport-lots-preexisting",
+    "preexistingPaths": [
+      ".data/traffic/v1-8aabbcca-fr",
+      "src/features/nearby-stations/NearbyNeighborhoodScorePage.vue",
+      "src/features/nearby-stations/NearbyRealEstateVerdict.vue",
+      "src/features/nearby-stations/NeighborhoodTrafficAnnex.vue",
+      "src/i18n/messages/en.ts",
+      "src/i18n/messages/fr.ts",
+      "src/features/nearby-stations/neighborhoodScorePdf.ts"
+    ],
+    "acceptedValidationWaivers": [
+      "lot01-ign-user-waiver-2026-10-23"
+    ],
+    "foreignConcurrentChanges": [
+      {
+        "at": "2026-10-23T21:06:48.913455+00:00",
+        "sourceThreadId": "01a16a79-c113-7a80-a92d-db70655d5c65",
+        "proof": "proofs/12/coordinator-external-source-review.json",
+        "paths": [
+          "src/features/nearby-stations/futureGpeProjects.ts",
+          "src/features/nearby-stations/NearbyNeighborhoodScorePage.vue",
+          "src/features/nearby-stations/useNearbyNeighborhoodScore.ts",
+          "tests/futureGpeProjects.test.ts",
+          "tests/useNearbyNeighborhoodScore.dom.test.ts",
+          "src/features/line-map/lineFrequencyTimetableIntervals.ts",
+          "tests/gtfsLastService.test.ts"
+        ],
+        "policy": "Preserve all. Native integration must use current state. Later staging must distinguish these separate human-task changes from lot hunks; do not blindly include or remove."
+      }
+    ],
+    "postPushAutomationRisk": "Existing mobile-release workflow publishes on main pushes. Coordinator must review before finalGitpush so automatic release cannot silently replace the tested snapshot APK or misrepresent preserved foreign hunks.",
+    "gateSatisfiedAt": "2026-10-25T00:18:35.965633+00:00",
+    "lot13Acceptance": "proofs/13/coordinator-release-acceptance-review.json",
+    "ciDisposition": "One delivery commit [skip actions] prevents automaticAPKreplacement on thispush only; permanentworkflow unchanged.",
+    "ciReference": "https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs",
+    "reviewedAt": "2026-10-25T00:31:37.454683+00:00",
+    "stagingSelection": "git-delivery/selection.md",
+    "stagedPaths": 230,
+    "validatedSelection": {
+      "typecheckExit": 0,
+      "targetedTestsPassed": 53,
+      "targetedTestFiles": 5,
+      "testsExit": 0,
+      "mode": "exported exact index with existing dependency junction; original worktree untouched"
+    },
+    "preexistingDependencyAssessment": {
+      "includedAsRequiredLot12Dependencies": [
+        "src/features/nearby-stations/neighborhoodScorePdf.ts",
+        "src/features/nearby-stations/NearbyRealEstateVerdict.vue PDFexport-state hooks",
+        "src/features/nearby-stations/NeighborhoodTrafficAnnex.vue PDFexport-state hooks",
+        "src/features/nearby-stations/NearbyNeighborhoodScorePage.vue PDFmodel/gating/nativecaller",
+        "src/i18n/messages/fr.ts PDFkeys",
+        "src/i18n/messages/en.ts PDFkeys"
+      ],
+      "reason": "Minimal direct prerequisites of mandatory nativePDF correction; excluding these would leave missing module or incomplete loader gating. All verified12/13; unrelated preexisting caches and separate GPE/normalization changes remain excluded."
+    },
+    "branch": "main",
+    "remote": "origin",
+    "remoteUrl": "https://github.com/frankfg94/TransportClockIDFM.git"
+  },
+  "sharedDevServer": {
+    "url": "http://localhost:3000/",
+    "reuseExisting": true,
+    "restartPolicy": "Check availability first; start or restart only if confirmed unavailable or required by configuration change.",
+    "lastCheckHttpStatus": 200,
+    "updatedAt": "2026-10-22T16:21:41.967937+00:00",
+    "androidBuildsStillRequired": true,
+    "notifiedLots": [
+      2,
+      1,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13
+    ],
+    "instructionsSentAt": "2026-10-22T16:23:20.412443+00:00",
+    "reportedClientIssues": {
+      "checkedAt": "2026-10-22T19:19:23.428299+00:00",
+      "lot05": "Transient dynamic-module load error during final mobile capture; recovery being investigated by owning chat.",
+      "lot06": "Full page preparation splash despite HTTP200; isolated real-component preview passed, whole annuary flow pending.",
+      "lot11": "IPv6 Nuxt/IPv4 ADB forwarding mismatch; local test relay being diagnosed without another dev instance."
+    },
+    "lastReportedAvailability": {
+      "at": "2026-10-23T18:02:10.774244+00:00",
+      "ownerLot": 1,
+      "state": "connection_refused",
+      "action": "Owner restarting shared server on port3000 after confirmed unavailability; no extra per-lot instance."
+    }
+  },
+  "parallelism": {
+    "authorized": true,
+    "maxActiveLots": 3,
+    "currentWave": [],
+    "countAsActive": [
+      "running",
+      "starting",
+      "awaiting_shared_files",
+      "awaiting_validation"
+    ],
+    "globalValidationOwnerLot": null,
+    "sharedFileReservations": [],
+    "ownership": {
+      "03": [
+        "src/features/nearby-stations/**",
+        "src/features/address-book/**",
+        "src/features/app-settings/**",
+        "tests/nearby*.test.ts",
+        "tests/neighborhood*.test.ts",
+        "tests/addressBook*.test.ts"
+      ],
+      "07": [
+        "src/features/transport-news/**",
+        "server/services/transportNews/**",
+        "server/api/transport-news/**",
+        "pages/feed.vue",
+        "scripts/check-transport-news.ts",
+        "docs/transport-news.md",
+        "tests/transportNews*.test.ts"
+      ],
+      "09": [
+        "src/features/line-optimizer/**",
+        "pages/optimizer/line/**",
+        "tests/lineOptimizer*.test.ts",
+        "tests/useLineOptimizer*.test.ts"
+      ],
+      "04": [
+        "src/App.vue",
+        "pages/index.vue",
+        "src/features/service-pattern/DeparturePatternModal.vue",
+        "src/features/weather/**",
+        "server/api/weather.get.ts",
+        "tests/weather*.test.ts",
+        "tests/departurePattern*.test.ts"
+      ],
+      "10": [
+        "src/features/line-optimizer/**",
+        "src/features/line-map/GlobalTransportPlan.vue",
+        "src/features/transport-map/**",
+        "docs/global-transport-plan/**",
+        "tests/lineOptimizer*.test.ts",
+        "tests/globalTransportPlan*.test.ts"
+      ],
+      "05": [
+        "src/App.vue",
+        "server/services/servicePattern/**",
+        "src/services/idfm.ts",
+        "tests/departurePatternWorkflow.test.ts",
+        "server/api/idfm/[...path].ts",
+        "src/features/service-pattern/serviceClassification.ts",
+        "src/components/TransitBoard.vue",
+        "src/styles/05-transit-board.css",
+        "src/types/transit.ts",
+        "tests/transitBoardMeta.dom.test.ts",
+        "tests/dashboardPresets.dom.test.ts",
+        "tests/departureServiceClassification.test.ts",
+        "tests/departureServiceSection.test.ts",
+        "src/styles/08-responsive.css"
+      ],
+      "06": [
+        "src/features/nearby-stations/NearbyStationsMap.vue",
+        "src/features/nearby-stations/nearbyPlaces*.ts",
+        "src/features/line-map/**",
+        "docs/nearby-network-and-places.md",
+        "tests/nearbyPlaces*.test.ts",
+        "tests/globalTransportPlan*.test.ts",
+        "src/features/service-pattern/DeparturePatternModal.vue",
+        "tests/departurePatternSettings.dom.test.ts",
+        "src/services/places/compiledPlaces.ts",
+        "scripts/places/compile.ts",
+        "src/features/line-map/GlobalMapSidebarBodyLine.vue",
+        "src/features/nearby-stations/NearbyPlaceDetails.vue",
+        "tests/nearbyPlaceDetails.dom.test.ts",
+        "src/features/nearby-stations/nearbyOpeningHours.ts",
+        "tests/nearbyOpeningHours.test.ts"
+      ],
+      "11": [
+        "src/App.vue",
+        "src/components/FullscreenStationPanel.vue",
+        "tests/fullscreenStation*.test.ts",
+        "src/features/line-map/LineFrequencyTimetableModal.vue",
+        "src/features/line-map/LineFrequencyTimetable.vue",
+        "src/features/line-map/useLineFrequencyTimetable.ts",
+        "tests/lineFrequencyTimetable*.test.ts",
+        "src/components/AppRightPanel.vue",
+        "src/features/line-map/GlobalTransportPlan.vue",
+        "tests/globalTransportPlan.dom.test.ts",
+        "tests/appRightPanel.dom.test.ts",
+        "src/components/DraggableBottomSheet.vue",
+        "tests/draggableBottomSheet.dom.test.ts",
+        "src/features/line-map/GlobalTransportPlanModeFilter.vue",
+        "src/features/line-map/DetailedLineMapPicker.vue",
+        "src/features/line-map/GlobalMapRealEstateControl.vue",
+        "src/features/line-map/line-map.css",
+        "src/features/service-pattern/PatternTrafficCalendarSurface.vue",
+        "src/features/nearby-stations/NearbyStationsMap.vue",
+        "tests/detailedLineMapPicker.dom.test.ts",
+        "tests/nearbyStationsMap.dom.test.ts",
+        "src/components/ResponsiveSidePanel.vue"
+      ],
+      "01": [
+        "src/services/travelRoutes/neighborhoodGtfsWalkingMatrix.ts",
+        "server/services/walking/ignWalkingMatrix.ts",
+        "shared/gtfs/finalLineAccess.ts",
+        "src/features/nearby-stations/useNearbyHeavyTransports.ts",
+        "src/services/travelRoutes/neighborhoodGtfs.worker.ts",
+        "src/features/nearby-stations/verdictTransportDebug.ts",
+        "focused tests for the six assigned diagnostic modules only; exact paths recorded by01 before source changes"
+      ],
+      "08": [
+        "pages/nearby-stations.vue",
+        "src/features/nearby-stations/MyNearbyStationsPage.vue",
+        "src/components/MaterialCombobox.vue",
+        "src/components/StationCombobox.vue",
+        "src/components/LineCombobox.vue",
+        "src/components/FamilyCombobox.vue",
+        "pages/ridership/line/[lineId].vue",
+        "src/features/line-map/AnnualRidershipStationCard.vue",
+        "src/features/transport-news/NewsFilters.vue",
+        "src/features/nearby-stations/NearbyCityCityPicker.vue",
+        "src/features/line-map/GlobalMapPickerSideBar.vue",
+        "src/features/transport-map/isochrones/TransportIsochronePanel.vue",
+        "src/features/transport-map/search/GlobalTransportPlanSearch.vue",
+        "src/features/nearby-stations/NearbyRealEstateControls.vue",
+        "src/features/line-map/LineFrequencyTimetable.vue",
+        "src/features/address-book/**",
+        "src/i18n/messages/fr.ts",
+        "src/i18n/messages/en.ts",
+        "Focused combobox DOM tests; exact paths listed in handoffs/08.md before edit"
+      ],
+      "12": [
+        "android/",
+        "capacitor.config.ts",
+        "nuxt.config.ts",
+        "scripts/mobile-release/",
+        "src/features/mobile-release/",
+        "docs/tasks/2026-10-22/reports/12.md",
+        "docs/tasks/2026-10-22/handoffs/12.md",
+        "docs/tasks/2026-10-22/proofs/12/"
+      ]
+    },
+    "sharedReadOnlyFor09": [
+      "src/features/address-book/**",
+      "src/features/nearby-stations/nearbyHeavyTransports.ts",
+      "src/features/nearby-stations/nearbyJourneyTiming.ts",
+      "src/features/nearby-stations/travelTurbo.ts",
+      "src/features/nearby-stations/useTravelRoutes.ts"
+    ],
+    "handoffDirectory": "handoffs",
+    "exclusiveLots": [
+      8,
+      12,
+      13
+    ],
+    "doNotOverlap": [
+      [
+        4,
+        5
+      ],
+      [
+        4,
+        11
+      ],
+      [
+        5,
+        11
+      ],
+      [
+        6,
+        10
+      ],
+      [
+        9,
+        10
+      ],
+      [
+        4,
+        6
+      ]
+    ],
+    "reviewBeforeNewSlot": "Check actual changed files, reservations and prerequisites; prioritise finishing existing handoffs.",
+    "graphifyPolicy": "Query/traverse the existing graph only during this run; no global graph rebuild, update or tool installation in a parallel checkout.",
+    "reservationHistory": [
+      {
+        "releasedAt": "2026-10-22T17:19:52.407787+00:00",
+        "reservations": [
+          {
+            "ownerLot": 3,
+            "paths": [
+              "src/i18n/messages/fr.ts",
+              "src/i18n/messages/en.ts",
+              "src/features/nearby-stations/**",
+              "src/features/address-book/**",
+              "src/features/app-settings/**"
+            ],
+            "waitingLots": [
+              7,
+              9
+            ],
+            "pendingIntegrationRequests": [
+              {
+                "requestingLot": 7,
+                "integrationOwnerLot": 3,
+                "handoff": "handoffs/07.md",
+                "status": "integrated",
+                "requestedAt": "2026-10-22T16:59:41.321699+00:00",
+                "confirmedAt": "2026-10-22T17:03:33.146944+00:00"
+              }
+            ]
+          }
+        ],
+        "reason": "03 idle after implementation/report; 07 integrated and completed; external IGN validation remains partial."
+      },
+      {
+        "releasedAt": "2026-10-22T17:37:20.342425+00:00",
+        "reservations": [
+          {
+            "ownerLot": 4,
+            "paths": [
+              "src/i18n/messages/fr.ts",
+              "src/i18n/messages/en.ts"
+            ],
+            "waitingLots": [
+              10
+            ]
+          }
+        ],
+        "reason": "04 completed, idle, report and baseline/browser evidence reviewed."
+      },
+      {
+        "releasedAt": "2026-10-22T18:05:54.947866+00:00",
+        "reservations": [
+          {
+            "ownerLot": 10,
+            "paths": [
+              "src/i18n/messages/fr.ts",
+              "src/i18n/messages/en.ts"
+            ],
+            "waitingLots": []
+          }
+        ],
+        "reason": "10 idle and fully completed; report, source hashes and browser parity proofs verified."
+      },
+      {
+        "releasedAt": "2026-10-22T18:15:16.098823+00:00",
+        "reservations": [
+          {
+            "ownerLot": 5,
+            "paths": [
+              "server/api/idfm/[...path].ts"
+            ],
+            "waitingLots": [],
+            "reason": "Realtime route_schedules cache freshness only; no shared schema change; disjoint from 10 ownership."
+          }
+        ],
+        "reason": "05 idle, source complete, final tests/typecheck passed; detailed reference A/B remains partial."
+      },
+      {
+        "releasedAt": "2026-10-22T18:57:01.251293+00:00",
+        "reservations": [
+          {
+            "ownerLot": 6,
+            "paths": [
+              "src/i18n/messages/fr.ts",
+              "src/i18n/messages/en.ts"
+            ],
+            "waitingLots": [],
+            "pendingIntegrationRequests": [
+              {
+                "requestingLot": 11,
+                "integrationOwnerLot": 6,
+                "handoff": "handoffs/11.md",
+                "status": "integrated",
+                "requestedAt": "2026-10-22T18:24:34.509245+00:00",
+                "keys": [
+                  "app.panelTimetable"
+                ],
+                "confirmedAt": "2026-10-22T18:29:28.899081+00:00"
+              }
+            ]
+          },
+          {
+            "ownerLot": 6,
+            "paths": [
+              "src/features/service-pattern/DeparturePatternModal.vue",
+              "tests/departurePatternSettings.dom.test.ts"
+            ],
+            "waitingLots": [],
+            "reason": "05 handoff confirms no planned modal writes; classification modules stabilized."
+          }
+        ],
+        "reason": "06 idle and implementation/browser checks done; final global typecheck awaits fixed 11 test. Source hashes captured."
+      },
+      {
+        "releasedAt": "2026-10-22T19:24:23.619355+00:00",
+        "reservations": [
+          {
+            "ownerLot": 5,
+            "paths": [
+              "src/App.vue",
+              "src/components/TransitBoard.vue",
+              "src/styles/05-transit-board.css",
+              "src/types/transit.ts"
+            ],
+            "waitingLots": [],
+            "reason": "Direct human section-suffix extension verified; 11 is validating Android and must request coordination before any App/model/board rewrite."
+          }
+        ],
+        "reason": "05 idle, extension sources/UI/docs finished; final shared tsc and original external A/B remain pending."
+      },
+      {
+        "releasedAt": "2026-10-22T20:12:32.425723+00:00",
+        "reservations": [
+          {
+            "ownerLot": 5,
+            "paths": [
+              "src/App.vue",
+              "src/services/idfm.ts",
+              "src/features/service-pattern/serviceClassification.ts",
+              "src/components/TransitBoard.vue",
+              "src/types/transit.ts",
+              "src/styles/05-transit-board.css",
+              "src/styles/08-responsive.css",
+              "tests/departureServiceSection.test.ts",
+              "tests/departureServiceClassification.test.ts",
+              "tests/transitBoardMeta.dom.test.ts",
+              "tests/dashboardPresets.dom.test.ts"
+            ],
+            "waitingLots": [],
+            "reason": "Direct human live Home capture missing all service labels; targeted diagnosis/resolution. 11 must coordinate before writing these files."
+          }
+        ],
+        "reason": "05 idle, implementation/browser proofs and new 13 hashes reviewed; final shared tsc and original external A/B still pending."
+      },
+      {
+        "releasedAt": "2026-10-22T21:56:08.182046+00:00",
+        "reservations": [
+          {
+            "ownerLot": 11,
+            "paths": [
+              "src/features/line-map/LineFrequencyTimetableModal.vue",
+              "src/features/line-map/LineFrequencyTimetable.vue",
+              "src/features/line-map/useLineFrequencyTimetable.ts"
+            ],
+            "waitingLots": [],
+            "reason": "handoffs/06.md confirms no planned writes and files free for 11."
+          },
+          {
+            "ownerLot": 11,
+            "paths": [
+              "src/i18n/messages/fr.ts",
+              "src/i18n/messages/en.ts"
+            ],
+            "waitingLots": [],
+            "reason": "06 idle and released catalogues; existing requested action key already integrated.",
+            "pendingIntegrationRequests": [
+              {
+                "requestingLot": 5,
+                "integrationOwnerLot": 11,
+                "handoff": "handoffs/05.md",
+                "status": "integrated",
+                "requestedAt": "2026-10-22T19:11:46.871826+00:00",
+                "keys": [
+                  "board.serviceSection.north",
+                  "board.serviceSection.south",
+                  "board.serviceSection.east",
+                  "board.serviceSection.west"
+                ],
+                "confirmedAt": "2026-10-22T19:14:33.591366+00:00",
+                "verification": "All four values verified in FR/EN; three hours keys from 06 also preserved."
+              }
+            ]
+          },
+          {
+            "ownerLot": 11,
+            "paths": [
+              "src/components/AppRightPanel.vue",
+              "src/features/line-map/GlobalTransportPlan.vue",
+              "tests/globalTransportPlan.dom.test.ts",
+              "tests/appRightPanel.dom.test.ts"
+            ],
+            "waitingLots": [],
+            "reason": "Direct human mobile Explore networks bottom-sheet request verified; 06 and 10 idle and their map behavior must be preserved."
+          },
+          {
+            "ownerLot": 11,
+            "paths": [
+              "src/components/DraggableBottomSheet.vue",
+              "tests/draggableBottomSheet.dom.test.ts",
+              "src/features/line-map/GlobalTransportPlanModeFilter.vue",
+              "src/features/line-map/DetailedLineMapPicker.vue",
+              "src/features/line-map/GlobalMapRealEstateControl.vue",
+              "src/features/line-map/line-map.css",
+              "src/features/service-pattern/PatternTrafficCalendarSurface.vue",
+              "src/features/nearby-stations/NearbyStationsMap.vue",
+              "tests/detailedLineMapPicker.dom.test.ts",
+              "tests/nearbyStationsMap.dom.test.ts",
+              "src/components/ResponsiveSidePanel.vue"
+            ],
+            "waitingLots": [],
+            "reason": "Direct user priority request: only11 may write or restore DraggableBottomSheet.vue until its validations and end of writes.",
+            "wrapperNameResolved": "ResponsiveSidePanel.vue",
+            "exclusive": true,
+            "priority": "absolute_user_requested"
+          },
+          {
+            "ownerLot": 11,
+            "paths": [
+              "sitewide draggable-sheet consumers only; exact inventory to be recorded in handoffs/11.md"
+            ],
+            "waitingLots": [],
+            "reason": "Direct human sitewide generic-sheet reuse audit; 05/06 documentary-only, no other source writer. Existing generic component sources remain reserved to 11."
+          }
+        ],
+        "reason": "11 implementation, native/web evidence, exact restoration and controlled editor-resume stability reviewed. Source/global reservations released; doc-only closure notice pending."
+      },
+      {
+        "releasedAt": "2026-10-23T18:18:59.229869+00:00",
+        "reservations": [
+          {
+            "ownerLot": 1,
+            "paths": [
+              "src/services/travelRoutes/neighborhoodGtfsWalkingMatrix.ts",
+              "server/services/walking/ignWalkingMatrix.ts",
+              "shared/gtfs/finalLineAccess.ts",
+              "src/features/nearby-stations/useNearbyHeavyTransports.ts",
+              "src/services/travelRoutes/neighborhoodGtfs.worker.ts",
+              "src/features/nearby-stations/verdictTransportDebug.ts"
+            ],
+            "waitingLots": [],
+            "reason": "Targeted walking HTTP/timeout diagnostics and access-phase volume assessment from handoff01; no UI/catalogue/generic-sheet writes. Focused related tests allowed, record exact paths."
+          }
+        ],
+        "reason": "01 source complete and idle; report, command results and11source hashes reviewed. Validation remains partial; internal IGN contract assessment queued after exclusive08."
+      },
+      {
+        "releasedAt": "2026-10-23T18:54:27.515796+00:00",
+        "reservations": [
+          {
+            "ownerLot": 8,
+            "paths": [
+              "pages/nearby-stations.vue",
+              "src/features/nearby-stations/MyNearbyStationsPage.vue",
+              "src/components/MaterialCombobox.vue",
+              "src/components/StationCombobox.vue",
+              "src/components/LineCombobox.vue",
+              "src/components/FamilyCombobox.vue",
+              "pages/ridership/line/[lineId].vue",
+              "src/features/line-map/AnnualRidershipStationCard.vue",
+              "src/features/transport-news/NewsFilters.vue",
+              "src/features/nearby-stations/NearbyCityCityPicker.vue",
+              "src/features/line-map/GlobalMapPickerSideBar.vue",
+              "src/features/transport-map/isochrones/TransportIsochronePanel.vue",
+              "src/features/transport-map/search/GlobalTransportPlanSearch.vue",
+              "src/features/nearby-stations/NearbyRealEstateControls.vue",
+              "src/features/line-map/LineFrequencyTimetable.vue",
+              "src/features/address-book/**",
+              "src/i18n/messages/fr.ts",
+              "src/i18n/messages/en.ts"
+            ],
+            "waitingLots": [],
+            "reason": "Exclusive UI audit after all functional UI additions. Native/select/listbox candidates and generic adapters identified by current rg inventory; relevance and exact changes to be documented before editing. No other source writer."
+          }
+        ],
+        "reason": "08 fully completed and idle; report/checklist/inventory, tests/tsc/diff, desktop/mobile screenshots and fixture reviewed. Catalogues unchanged and protected sheet hash intact."
+      },
+      {
+        "releasedAt": "2026-10-23T19:13:48.385557+00:00",
+        "reservations": [
+          {
+            "ownerLot": 1,
+            "paths": [
+              "server/services/walking/ignWalkingMatrix.ts",
+              "tests/ignWalkingMatrix.test.ts"
+            ],
+            "waitingLots": [],
+            "reason": "Targeted arbitration to inspect/adapt currently published official IGN BD TOPO pedestrian operation/resource after old contract404. Preserve provider and semantics, provenance/version; exact extra paths require internal handoff before editing."
+          }
+        ],
+        "reason": "01 idle, final-contract live failure actually observed/reviewed; no source writes remaining. Partial still blocks12/13/Git."
+      },
+      {
+        "releasedAt": "2026-10-23T19:52:30.010580+00:00",
+        "reservations": [],
+        "globalOwnerLot": 5,
+        "reason": "05idle and all mandatory requirements completed; fresh authorized reference/SNCF/IDFM/realUI evidence reviewed, evidence audit rerun passed."
+      },
+      {
+        "releasedAt": "2026-10-23T20:01:08.026514+00:00",
+        "reservations": [
+          {
+            "ownerLot": 1,
+            "paths": [
+              "server/services/walking/ignWalkingMatrix.ts",
+              "tests/ignWalkingMatrix.test.ts"
+            ],
+            "waitingLots": [],
+            "reason": "Last targeted control distinguishing official point-to-point request from current loop/intermediate matrix before declaring only external. Sanitized404cause/body not yet examined in evidence; minimal adapter correction allowed only if demonstrated."
+          }
+        ],
+        "reason": "01idle, two final distinct control responses reviewed; no justified application fix, no pending sourcewrites. Partial remainsreleaseblocker."
+      },
+      {
+        "releasedAt": "2026-10-23T20:39:58.287385+00:00",
+        "reservations": [
+          {
+            "ownerLot": 1,
+            "paths": [
+              "server/services/walking/ignWalkingMatrix.ts",
+              "tests/ignWalkingMatrix.test.ts"
+            ],
+            "waitingLots": [],
+            "reason": "Direct humancontinue resumes same chat with documentedPOST/GETmethod distinction and officialclient request inspection. Minimal demonstrated adapter correction only; extra paths require internalhand off."
+          }
+        ],
+        "reason": "01idle/completedturn confirmed, no source changes; direct humanwaiver closesremainingvalidationforsequencing.12exclusive begins."
+      }
+    ],
+    "globalValidationWaitingLots": [],
+    "pendingScopeArbitrations": [
+      {
+        "requestingLot": 6,
+        "currentOwnerLot": 5,
+        "paths": [
+          "src/features/service-pattern/DeparturePatternModal.vue"
+        ],
+        "status": "assigned_to_06",
+        "reason": "06 commerce/cities loading UI; must not overlap current 05 service-pattern reservation.",
+        "resolvedAt": "2026-10-22T18:09:40.031989+00:00",
+        "evidence": "handoffs/05.md: no need to modify DeparturePatternModal; classifier and server builder stabilized"
+      },
+      {
+        "requestingLot": 11,
+        "currentOwnerLot": 6,
+        "paths": [
+          "src/features/line-map/LineFrequencyTimetableModal.vue",
+          "src/features/line-map/LineFrequencyTimetable.vue",
+          "src/features/line-map/useLineFrequencyTimetable.ts"
+        ],
+        "status": "assigned_to_11",
+        "reason": "Reuse timetable from fullscreen; 06 owns line-map domain but planned commerce modifications should not require timetable source writes.",
+        "resolvedAt": "2026-10-22T18:19:47.739653+00:00",
+        "evidence": "handoffs/06.md: all three timetable files read-only for 06 and free for 11"
+      },
+      {
+        "requestingLot": 1,
+        "currentOwnerLot": 11,
+        "paths": [
+          "src/services/travelRoutes/neighborhoodGtfsWalkingMatrix.ts",
+          "server/services/walking/ignWalkingMatrix.ts",
+          "shared/gtfs/finalLineAccess.ts",
+          "src/features/nearby-stations/useNearbyHeavyTransports.ts",
+          "src/services/travelRoutes/neighborhoodGtfs.worker.ts",
+          "src/features/nearby-stations/verdictTransportDebug.ts"
+        ],
+        "status": "assigned_to_01",
+        "requestedAt": "2026-10-22T21:30:17.058391+00:00",
+        "handoff": "handoffs/01.md",
+        "reason": "Correctable observability gap identified by01; current11 absolute write priority and sole source/global work retained. Review narrow diagnostic scope before dispatch, preserve routing rules/providers and no blind load retries.",
+        "resolvedAt": "2026-10-22T21:57:09.601647+00:00",
+        "evidence": "11 source/native/web validations and controlled editor resume accepted, idle before documentary-only closure. Six diagnostic module paths exist; no overlap with generic/wrapper source contract."
+      },
+      {
+        "requestingLot": 1,
+        "currentOwnerLot": 8,
+        "paths": [
+          "server/services/walking/ignWalkingMatrix.ts",
+          "tests/ignWalkingMatrix.test.ts"
+        ],
+        "status": "assigned_to_01_contract_review",
+        "requestedAt": "2026-10-23T18:18:59.229869+00:00",
+        "handoff": "handoffs/01.md",
+        "reason": "Review current official IGN BD TOPO pedestrian resource/operation to resolve upstream404; not a user-permission requirement. Preserve provider, provenance and equivalent semantics; no source overlap during exclusive08.",
+        "resolvedAt": "2026-10-23T18:54:27.515796+00:00",
+        "evidence": "08 completed and idle; current adapter hardcodes /itineraire +bdtopo-osrm while capabilities advertise /route with BD TOPO resources. Authorise grounded equivalent same-provider adaptation, not arbitrary provider/resource substitution."
+      },
+      {
+        "requestingLot": 12,
+        "currentOwnerLot": null,
+        "paths": [
+          "src/features/weather/WeatherForecastModal.vue",
+          "src/features/service-pattern/DeparturePatternModal.vue",
+          "src/components/AppModal.vue",
+          "tests/modalBackNavigation.dom.test.ts",
+          "tests/weatherForecastModal.dom.test.ts",
+          "tests/appModal.dom.test.ts"
+        ],
+        "status": "assigned_to_12",
+        "requestedAt": "2026-10-23T22:46:04.527264+00:00",
+        "resolvedAt": "2026-10-23T22:46:04.527264+00:00",
+        "evidence": "handoffs/12.md real weather/departure Back and Escape proofs; three files exist and lack handler;usePanelFocus.ts exists. Other lots completed and idle; no reservation overlap."
+      },
+      {
+        "requestingLot": 12,
+        "currentOwnerLot": null,
+        "paths": [
+          "src/components/usePanelFocus.ts",
+          "src/styles/01-tokens-base.css",
+          "tests/responsiveSidePanel.dom.test.ts",
+          "tests/draggableBottomSheet.dom.test.ts",
+          "tests/settingsPage.dom.test.ts"
+        ],
+        "status": "assigned_to_12",
+        "requestedAt": "2026-10-23T23:06:04.636252+00:00",
+        "resolvedAt": "2026-10-23T23:06:04.636252+00:00",
+        "evidence": "handoffs/12.md;helper code confirms container not included in first/last branches;CSS path exists and rg finds only scoped sr-only definitions. Existing consumers ResponsiveSidePanel/DraggableBottomSheet/manualmodals and LoadingClock/SettingsPage/Traffic/IconSelector/PluginViewer reviewed."
+      },
+      {
+        "requestingLot": 12,
+        "currentOwnerLot": null,
+        "paths": [
+          "src/components/DepartureAlarmModal.vue",
+          "tests/departureAlarmModal.dom.test.ts"
+        ],
+        "status": "assigned_to_12",
+        "requestedAt": "2026-10-24T01:40:12.936717+00:00",
+        "resolvedAt": "2026-10-24T01:40:12.936717+00:00",
+        "evidence": "Current native commentary, existing DepartureAlarmModal ref/dialog/watch/nextTickfocus/Escape handler and focused DOM test verified."
+      }
+    ],
+    "ownershipExceptions": [
+      {
+        "lot": 6,
+        "readOnlyPaths": [
+          "src/features/line-map/LineFrequencyTimetableModal.vue",
+          "src/features/line-map/LineFrequencyTimetable.vue",
+          "src/features/line-map/useLineFrequencyTimetable.ts"
+        ],
+        "reason": "Reserved to lot11, confirmed handoffs/06.md"
+      }
+    ],
+    "sourceReopenEvents": [
+      {
+        "lot": 6,
+        "at": "2026-10-22T19:09:37.684214+00:00",
+        "reason": "Direct human follow-up verified with read_thread, new opening-hours layout requested after documentary closure. Revalidation required."
+      },
+      {
+        "lot": 5,
+        "at": "2026-10-22T19:11:46.871826+00:00",
+        "reason": "Direct human generic section suffix follow-up verified by read_thread; old hashes/typecheck do not cover updated sources."
+      },
+      {
+        "lot": 11,
+        "at": "2026-10-22T19:42:33.824661+00:00",
+        "reason": "Direct human mobile Explore networks bottom-sheet request during native validation; generic AppRightPanel and GlobalTransportPlan changes follow previous native checks, require affected regressions."
+      },
+      {
+        "lot": 5,
+        "at": "2026-10-22T19:49:04.781791+00:00",
+        "reason": "New direct human Home missing-label capture verified by read_thread; previous source hash evidence no longer final."
+      },
+      {
+        "lot": 11,
+        "at": "2026-10-22T20:12:32.425723+00:00",
+        "reason": "Direct human generic DraggableBottomSheet request verified; prior Explore native proof is historical for the old component structure, affected checks must cover final extraction."
+      },
+      {
+        "lot": 11,
+        "at": "2026-10-22T20:57:11.771158+00:00",
+        "reason": "Direct human sitewide draggable-sheet reuse audit after extraction completion; do not close 11 or start exclusive 08 while new audit/source work active."
+      }
+    ],
+    "coordinationNotes": [
+      {
+        "at": "2026-10-22T19:14:33.591366+00:00",
+        "lot": 6,
+        "note": "Three hours keys added before ownership notice; no further catalogue writes planned, current owner11 notified via prior scope notice; all keys preserved alongside 05 section keys. Interrupted tsc was not treated as a pass."
+      },
+      {
+        "at": "2026-10-22T21:24:42.803294+00:00",
+        "lot": 11,
+        "note": "Human explicitly prioritised exclusive writes to DraggableBottomSheet.vue after reported recurrent old-content reversion. Only other active lot01 has no application-source edits in current turn. Do not start08 or another source writer until11 releases."
+      }
+    ],
+    "pendingSharedTypecheckBatch": {
+      "ownerLot": 11,
+      "coveredLots": [
+        11
+      ],
+      "status": "completed_verified",
+      "requestedAt": "2026-10-22T19:23:27.664489+00:00",
+      "sourceEvidence": {
+        "05": "reports/05/refresh-code-sha256.json",
+        "06": "proofs/06/opening-hours-source-sha256.json"
+      },
+      "updatedAt": "2026-10-22T21:01:44.695186+00:00",
+      "priorBatchVerifiedAt": "2026-10-22T20:57:11.771158+00:00",
+      "verifiedAt": "2026-10-22T21:56:08.182046+00:00"
+    },
+    "validationOnlyAssignments": [
+      {
+        "lot": 3,
+        "at": "2026-10-22T21:01:44.695186+00:00",
+        "scope": "Real IGN geocoding/address creation browser validation only; sources/tests/catalogues/config read-only; own report/MD/handoff/proofs may be updated.",
+        "reason": "Initial provider failure several hours earlier; 06 fully completed and 05 idle partial, two slots available, no source conflict with active 11."
+      },
+      {
+        "lot": 1,
+        "at": "2026-10-22T21:16:02.203074+00:00",
+        "scope": "Limited current walking-provider diagnostic then required live Verdict destination validation; all application/test/config/catalogue files read-only, own docs/proofs only.",
+        "reason": "Initial quota failure several hours earlier;03 real geocoding validation now completed, no shared browser test data remains; 11 is the sole source/global owner."
+      }
+    ],
+    "priorityWriteReservation": {
+      "ownerLot": 11,
+      "path": "src/components/DraggableBottomSheet.vue",
+      "mode": "released_after_validation",
+      "priority": "absolute_user_requested",
+      "requestedAt": "2026-10-22T21:24:42.803294+00:00",
+      "releaseCondition": "Lot11 explicitly confirms migration, final validations and end of writes.",
+      "otherLotsPolicy": "Validated generic component remains read-only for other lots unless a new reservation is explicitly coordinated; never restore old versions.",
+      "activeOtherLot": null,
+      "activeOtherLotMode": "All other lots idle or queued; none assigned application-source writes.",
+      "coordinationStatus": "migration_validated_and_writes_finished",
+      "osFileLockHeld": false,
+      "unknownWriterStatus": "No other active source-writing chat found among available threads; writer of reversion not identified.",
+      "notifiedLots": [
+        1,
+        11
+      ],
+      "notifiedAt": "2026-10-22T21:25:24.140658+00:00",
+      "lastVerifiedAt": "2026-10-22T21:58:22.933559+00:00",
+      "lastObservedFile": {
+        "observedAt": "2026-10-22T21:58:22.933559+00:00",
+        "sha256": "5ca78ef556d6e17c1765bb2954be202050538e9a40f3766f9e1ee8c08385bc6d",
+        "bytes": 10665,
+        "oldRevertedHashPresent": false,
+        "coordinatorSourceWrites": false
+      },
+      "releasedAt": "2026-10-22T21:56:08.182046+00:00",
+      "releaseEvidence": "proofs/11/coordinator-editor-resume-stability.json"
+    },
+    "editorPause": {
+      "kind": "bounded_temporary_vscode_project_pause",
+      "statePath": ".tmp-vitest/coordinator-vscode-pause-state.json",
+      "resumeFlag": ".tmp-vitest/coordinator-vscode-resume.flag",
+      "helperScript": ".tmp-vitest/coordinator-vscode-pause-20261022.ps1",
+      "editorRootId": 26208,
+      "helperId": 43184,
+      "status": "resumed",
+      "startedAt": "2026-10-22T21:45:22.5197824Z",
+      "automaticResumeAt": "2026-10-22T22:00:22.5439898Z",
+      "processCount": 12,
+      "scope": "Code.exe editor processes only; shell, node, Nuxt and Codex remain running",
+      "serverHttpStatusAfterPause": 200,
+      "attribution": "Editor temporarily paused as user requested; actual writer not yet proven.",
+      "lastCheckedAt": "2026-10-22T21:58:22.933559+00:00",
+      "resumeRequestedAt": "2026-10-22T21:54:14.712040+00:00",
+      "resumedAt": "2026-10-22T21:54:14.9621813Z",
+      "resumeReason": "coordinator_release",
+      "resumeErrors": []
+    },
+    "documentaryOnlyActiveLots": [],
+    "sourceFreeze": {
+      "ownerLot": null,
+      "reason": "Alllots completed/accepted; coordinatorGitdelivery only. Application worktree preserved unchanged."
+    },
+    "sourceFreezeEvents": [
+      {
+        "at": "2026-10-23T21:05:02.004211+00:00",
+        "ownerLot": 12,
+        "type": "external_source_drift_reported",
+        "files": [
+          "futureGpeProjects.ts",
+          "lineFrequencyTimetableIntervals.ts"
+        ],
+        "source": "lot12 current commentary",
+        "response": "Owner checking actual compiled content and rebuilding if required; no source restore or false validation."
+      }
+    ],
+    "releasedReservationHistory": [
+      {
+        "releasedAt": "2026-10-24T02:44:47.107788+00:00",
+        "reservations": [
+          {
+            "ownerLot": 12,
+            "paths": [
+              "android/",
+              "capacitor.config.ts",
+              "nuxt.config.ts",
+              "scripts/mobile-release/",
+              "src/features/mobile-release/",
+              "docs/tasks/2026-10-22/reports/12.md",
+              "docs/tasks/2026-10-22/handoffs/12.md",
+              "docs/tasks/2026-10-22/proofs/12/"
+            ],
+            "waitingLots": [],
+            "reason": "Exclusive integrated native validation. Existing native/config paths inspected; build/sync/debug generated outputs allowed, no finalrelease/APKpublish. Any permanent appfix needs exactpath/diagnosis arbitration before sourcewrite."
+          },
+          {
+            "ownerLot": 12,
+            "paths": [
+              "src/features/weather/WeatherForecastModal.vue",
+              "src/features/service-pattern/DeparturePatternModal.vue",
+              "src/components/AppModal.vue",
+              "tests/modalBackNavigation.dom.test.ts",
+              "tests/weatherForecastModal.dom.test.ts",
+              "tests/appModal.dom.test.ts"
+            ],
+            "waitingLots": [],
+            "reason": "Verified real Android Back/Escape modal defect in handoffs/12.md;12exclusive remains sole source/heavy owner. Minimal shared modal Escape/focus restoration using existing usePanelFocus helper read-only; no business/provider/translation changes. Final web/native rebuild and affected real Android revalidation required."
+          },
+          {
+            "ownerLot": 12,
+            "paths": [
+              "src/components/usePanelFocus.ts",
+              "src/styles/01-tokens-base.css",
+              "tests/responsiveSidePanel.dom.test.ts",
+              "tests/draggableBottomSheet.dom.test.ts",
+              "tests/settingsPage.dom.test.ts"
+            ],
+            "waitingLots": [],
+            "reason": "Real failing ShiftTab focus-trap regression and393pxnative search4px width. Limited usePanelFocus.handleTab fix and existing global sr-only utility, plus affected focused tests. No other source owner; all further changes need finalbuild/native affectedvalidation."
+          },
+          {
+            "ownerLot": 12,
+            "paths": [
+              "src/components/DepartureAlarmModal.vue",
+              "tests/departureAlarmModal.dom.test.ts"
+            ],
+            "waitingLots": [],
+            "reason": "Native alarm dialog first-open focus issue reported; actual component already has open watcher/focus and Escape close. Minimal first-mount focus/lifecycle fix only, preserve alarm actions/runtime and contracts; targeted test and affected final APK checks."
+          }
+        ],
+        "reason": "12idle and cleanup/sourceproof reviewed; prior smoke stayspartial. Reassigning precise corrective follow-up to same12chat."
+      },
+      {
+        "releasedAt": "2026-10-24T23:15:52.950957+00:00",
+        "reservations": [
+          {
+            "ownerLot": 12,
+            "paths": [
+              "android/",
+              "capacitor.config.ts",
+              "nuxt.config.ts",
+              "scripts/mobile-release/",
+              "src/features/mobile-release/",
+              "src/features/nearby-stations/neighborhoodScorePdf.ts",
+              "src/features/nearby-stations/NearbyNeighborhoodScorePage.vue",
+              "src/services/pdfExport.ts",
+              "src/features/line-map/GlobalTransportPlan.vue",
+              "src/features/transport-map/search/GlobalTransportPlanSearch.vue",
+              "src/features/transport-map/data/createTransportMapDataSource.ts",
+              "src/i18n/messages/fr.ts",
+              "src/i18n/messages/en.ts",
+              "tests/pdfExport.test.ts",
+              "tests/verdictPdfExport.dom.test.ts",
+              "tests/transportMapDataSource.test.ts",
+              "tests/globalTransportPlanSearch.dom.test.ts",
+              "docs/tasks/2026-10-22/reports/12.md",
+              "docs/tasks/2026-10-22/handoffs/12.md",
+              "docs/tasks/2026-10-22/proofs/12/"
+            ],
+            "waitingLots": [],
+            "reason": "Exclusive12follow-up: minimal native PDF output adapter/caller and early-map-search race correction. Preserve all original PDF model/gating, maps/optimizer contracts and shared catalogues; nativeGTFS/size initially diagnostic except already reserved build config. No worker/routing source write without diagnosed exactpath arbitration."
+          },
+          {
+            "ownerLot": 12,
+            "paths": [
+              "src/features/nearby-stations/NearbyAddressSearch.vue",
+              "tests/nearbyAddressSearch.dom.test.ts"
+            ],
+            "waitingLots": [],
+            "reason": "Native first-touch address suggestion failure reproduced with trusted pointerdown/up but no click while IME/focus changes; minimal pointer/focus/keyboard activation correction only. Preserve click commit,scroll/cancel semantics,geocoder/address-book/model contracts. New debug build/install and affected native consumers required."
+          }
+        ],
+        "reason": "12completed,idle,finalsource/native/cleanup proof reviewed;13exclusivehandoff."
+      },
+      {
+        "releasedAt": "2026-10-25T00:18:35.965633+00:00",
+        "reservations": [
+          {
+            "ownerLot": 13,
+            "paths": [
+              "scripts/mobile-release/",
+              "tests/mobileReleaseMetadata.test.ts",
+              "tests/mobileReleaseRuntime.test.ts",
+              "tests/mobileReleaseSourceSnapshot.test.ts",
+              "docs/mobile-release.md",
+              "android/",
+              "docs/tasks/2026-10-22/13-android-apk-final-et-publication-r2.md",
+              "docs/tasks/2026-10-22/reports/13.md",
+              "docs/tasks/2026-10-22/handoffs/13.md",
+              "docs/tasks/2026-10-22/proofs/13/"
+            ],
+            "waitingLots": [],
+            "reason": "Exclusive final signedAPK build/install/launch/R2/publicdownload/version references. Release scripts may implement explicit validated-worktree-snapshot provenance to respect no-commit-before13; strict clean-tree default/signature/hash/size protections preserved. android limited to release packaging/version/signing/generated outputs and own QA; application Java/Vue/TS business sources remain frozen unless further coordinated."
+          }
+        ],
+        "reason": "13completed,idle,finalAPK/publicdownload/provenance/cleanup reviewed."
+      }
+    ],
+    "pendingSharedRequests": [
+      {
+        "requestingLot": 12,
+        "currentOwnerLot": null,
+        "paths": [
+          "src/features/nearby-stations/NearbyAddressSearch.vue",
+          "tests/nearbyAddressSearch.dom.test.ts"
+        ],
+        "status": "assigned_to_12",
+        "requestedAt": "2026-10-24T21:01:20.633855+00:00",
+        "resolvedAt": "2026-10-24T21:01:20.633855+00:00",
+        "evidence": "handoffs/12.md evening resume; trusted tap traces reviewed; source click-only/120msblur and two Nearby travel consumers verified. ExistingGraphify query insufficient coverage; targeted rg confirms scope."
+      }
+    ]
+  },
+  "sharedValidationEvidence": [
+    {
+      "kind": "typecheck",
+      "command": "npm.cmd run tsc",
+      "result": "passed",
+      "exitCode": 0,
+      "ownerLot": 3,
+      "reportedAtLocal": "2026-10-22 19:05 Europe/Paris",
+      "proof": "handoffs/03.md",
+      "toolMarker": "exec-899e77c6-0807-49c6-857a-455d899c3f6d",
+      "coveredLots": [
+        3,
+        7,
+        9
+      ],
+      "lot09Hashes": {
+        "src/features/line-optimizer/lineOptimizer.ts": "bf81897011495d8383b3ac8dcfe48d8a4befd82214faf8a6a1e062420f1b47ce",
+        "src/features/line-optimizer/LineOptimizerPage.vue": "ac691716bca2acc6afbb5275a53e9591d802abfad0dff2aec39760660ff521ba",
+        "tests/lineOptimizer.test.ts": "b3a41aaa1d957fb77c7ef48b76e2cf7f4277d2a37c062627a778df8462fe0427",
+        "tests/lineOptimizer.dom.test.ts": "7b953019d8d968a71ab06e77fb15cb228cebc8417272b67e1361172cd19f5413"
+      },
+      "verifiedCommandTrace": true
+    },
+    {
+      "command": "npm.cmd run tsc",
+      "ownerLot": 11,
+      "coveredLots": [
+        6,
+        11
+      ],
+      "exitCode": 0,
+      "log": "proofs/11/typecheck.log",
+      "exitCodeEvidence": "proofs/11/typecheck-exit-code.txt",
+      "sourceComparison": "proofs/11/lot06-shared-typecheck-source-comparison.json",
+      "verifiedAt": "2026-10-22T19:04:25.492770+00:00",
+      "lot06UnchangedSourceCount": 16
+    },
+    {
+      "command": "npm.cmd run tsc",
+      "ownerLot": 11,
+      "coveredLots": [
+        5,
+        6,
+        11
+      ],
+      "exitCode": 0,
+      "log": "proofs/11/typecheck-final.log",
+      "exitCodeEvidence": "proofs/11/typecheck-final-exit-code.txt",
+      "before": "proofs/11/typecheck-final-before-sources.json",
+      "after": "proofs/11/typecheck-final-after-sources.json",
+      "verifiedAt": "2026-10-22T20:57:11.771158+00:00",
+      "unchangedBeforeAfterAndCurrentSourceCount": 42,
+      "catalogueAudit": "Only two common generic keys plus LF normalization; removal and CRLF normalization exactly reproduce both 05 catalogue hashes. Four own 06 sources unchanged; shared keys preserved.",
+      "nativeEvidence": "14 fullscreen Android checks plus 26 final extraction checks (18 Android, 8 web), report/MD/proofs reviewed. Three exact timetable row parities verified, context alias context versus gtfs:0 expected.",
+      "cleanup": "Temporary debug manifest/assets/network config and routes absent; original debug APK SHA256 restored.",
+      "scopeLimit": "Valid before new direct human sitewide sheet audit; new modifications require their affected validation."
+    },
+    {
+      "ownerLot": 11,
+      "coveredLots": [
+        5,
+        6,
+        11
+      ],
+      "command": "npm.cmd run tsc",
+      "exitCode": 0,
+      "log": "proofs/11/sheet-audit-typecheck.log",
+      "before": "proofs/11/sheet-audit-typecheck-before.json",
+      "after": "proofs/11/sheet-audit-typecheck-after.json",
+      "unchangedBeforeAfterAndCurrentSourceCount": 44,
+      "verifiedAt": "2026-10-22T21:56:08.182046+00:00",
+      "postRestoration": "proofs/11/sheet-audit-editor-ready-for-resume.json",
+      "editorResumeStability": "proofs/11/coordinator-editor-resume-stability.json",
+      "scopeLimit": "Valid current exact sources; further changes require affected validation."
+    }
+  ],
+  "knownValidationIssues": [
+    {
+      "lot": 4,
+      "status": "baseline_reproduced",
+      "details": "Five departurePatternSettings DOM failures persist with/without lot04 header: H/J/D geometry, RER A fork, interruption-marker merge. Logs proofs/04/before-header.log and after.log. Do not claim suite wholly green."
+    },
+    {
+      "lot": 10,
+      "status": "baseline_reproduced",
+      "details": "Four full global-map DOM failures reproduced with HEAD component and tests: button order, nearby-line tooltip, ghost-line hover, customization checkbox count. Logs proofs/10/map-facade-tests.log and map-baseline-tests.log."
+    },
+    {
+      "lot": 5,
+      "status": "baseline_reproduced",
+      "details": "Existing RER E/Chelles departure-pattern workflow failure reproduced against temporary HEAD service; 9/10 passed, not certified globally green."
+    },
+    {
+      "lot": 8,
+      "status": "component_isolated_comparison",
+      "details": "11 broader failures persist with old MaterialCombobox injected into current consumers:5pattern,1detailedpicker,4globalmap,1traffic icon. This is not a whole-worktree baseline. 150focused+6settings isolated pass; combined intermediate run async reset rejected; final split runs exit0. reports/08.md records limits."
+    }
+  ],
+  "lastCoordinatorCheckAt": "2026-10-25T00:18:35.965633+00:00",
+  "coordinationSuspension": {
+    "requestedAt": "2026-10-23T20:01:08.026514+00:00",
+    "reason": "IGN generic404 on both minimalpoint-to-point andmatrixshape; no specific justifiedappfix. No independent admissible lots left.",
+    "completedLots": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "remainingLots": {
+      "01": "partial, externalcontract +browserreplay",
+      "12": "queued,01prerequisite",
+      "13": "queued,all01-12andfinalAndroidsmoke"
+    },
+    "gitDelivery": "waiting-for-all-lots",
+    "reportsPreserved": true,
+    "resumeCondition": "New officialIGNcontract or availability evidence permits targeted01revalidation; preserveallAPK/Gitgates.",
+    "confirmedAt": "2026-10-23T20:01:31.390168+00:00",
+    "resumedAt": "2026-10-23T20:28:59.567244+00:00",
+    "resumedBy": "Direct human request: continue ?",
+    "status": "resumed"
+  },
+  "validationWaivers": [
+    {
+      "id": "lot01-ign-user-waiver-2026-10-23",
+      "lot": 1,
+      "recordedAt": "2026-10-23T20:39:58.287385+00:00",
+      "authorization": "ignore la validation du lot 1 le serveur IGN est down en ce moment tu peux passer à la suite",
+      "status": "accepted_by_direct_human_instruction",
+      "scope": "Remaining lot01 external IGN walking and real Verdict validation waived for continuing this delivery; no technical pass asserted.",
+      "sequencingAccepted": true,
+      "technicalValidation": "not_completed_external_IGN_unavailable",
+      "otherRequirementsUnchanged": "02-11 completed;12 actual integrated Android build/smoke still required;13 finalAPK install/launch/R2/download/version references still required. Commit/push after all other lot requirements and accepted01 waiver.",
+      "noMoreIgnDiagnostics": true,
+      "document": "validation-waivers.md"
+    }
+  ]
+}

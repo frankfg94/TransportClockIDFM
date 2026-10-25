@@ -48,6 +48,7 @@ export function createLineOptimizerProvider(
         datetime: parisDateTime(start + settings.exitSeconds * 1000),
         count: 20,
         includeDisruptions: true,
+        includeGeoJson: true,
         dataFreshness: "realtime",
       };
       const toRoutes = (items: NearbyJourney[]) =>

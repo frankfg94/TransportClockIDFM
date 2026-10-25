@@ -88,6 +88,12 @@ export function createFinalLineAccessResolver(index: GtfsRoutingIndex) {
   });
   // Physical pairs are independent of the address and of departure timetables.
   const streetCache = new Map<string, { expires: number; promise: Promise<NearbyWalkingRoute> }>();
+  function trimStreetCache() {
+    for (const [key, entry] of streetCache) {
+      if (streetCache.size <= 1024) break;
+      if (entry.expires !== Infinity) streetCache.delete(key);
+    }
+  }
   type MatrixBatch = { from: Point; matrix: Matrix; destinations: Map<string, Point>;
     waiters: { destinations: Point[]; resolve: (routes: (NearbyWalkingRoute | undefined)[]) => void }[] };
   const pendingMatrices = new Map<string, MatrixBatch>();
@@ -104,7 +110,8 @@ export function createFinalLineAccessResolver(index: GtfsRoutingIndex) {
         const points = [...current.destinations.values()], routes = new Map<string, NearbyWalkingRoute>();
         for (let start = 0; start < points.length; start += 64) {
           const chunk = points.slice(start, start + 64);
-          const values = await Promise.resolve().then(() => current.matrix(current.from, chunk)).catch(() => []);
+          // Diagnostic tag only: the matrix proxy still receives the same coordinates/IDs.
+          const values = await Promise.resolve().then(() => current.matrix(current.from, chunk.map(to => ({ ...to, walkingPhase: "final-line-access" })))).catch(() => []);
           const byId = new Map(values.map(value => [value.id, value]));
           chunk.forEach((to, i) => {
             const value = byId.get(to.id) ?? (values[i]?.id === undefined ? values[i] : undefined);
@@ -129,10 +136,11 @@ export function createFinalLineAccessResolver(index: GtfsRoutingIndex) {
       const entry = { expires: Infinity, promise: Promise.resolve().then(async () => {
         const value = (await batch)[ordinal]!;
         entry.expires = Date.now() + (value.fallback ? 60_000 : 300_000);
+        trimStreetCache();
         return value;
       }) };
       streetCache.set(key, entry); promises.push(entry.promise);
-      while (streetCache.size > 1024) streetCache.delete(streetCache.keys().next().value!);
+      trimStreetCache();
     }
     const batch = (async () => {
       const output: NearbyWalkingRoute[] = [];
@@ -143,7 +151,7 @@ export function createFinalLineAccessResolver(index: GtfsRoutingIndex) {
           const to = chunk[i]!, value = values[i];
           const distance = haversineMeters(from, to);
           output.push(value && value.fallback === false && value.provider !== "straight-line" && Number.isFinite(value.durationSeconds) && value.durationSeconds >= 0
-            ? value : { id: to.id, provider: "straight-line", fallback: true, distanceMeters: distance,
+            ? value : { ...value, id: to.id, provider: "straight-line", fallback: true, distanceMeters: distance,
               durationSeconds: Math.ceil(distance / (80 / 60)), coordinates: [from, to] });
         }
       }

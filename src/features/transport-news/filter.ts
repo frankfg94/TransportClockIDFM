@@ -51,11 +51,14 @@ export interface NewsFilters {
   topic?: NewsTopic;
   sourceId?: string;
   line?: NewsLine;
+  /** Undefined keeps archives for existing consumers; the feed page defaults to 90 days. */
+  recentDays?: number;
 }
 export function filterNewsArticles(
   articles: NewsArticle[],
   preferences: NewsPreferences,
   filters: NewsFilters = {},
+  now = Date.now(),
 ): NewsArticle[] {
   const search = (filters.query ?? "")
     .normalize("NFD")
@@ -73,6 +76,10 @@ export function filterNewsArticles(
       (!filters.topic || article.topics.includes(filters.topic)) &&
       (!filters.sourceId || article.sourceId === filters.sourceId) &&
       (!filters.line || article.lines.some((line) => sameNewsLine(line, filters.line!))) &&
+      (filters.recentDays === undefined ||
+        (Number.isFinite(Date.parse(article.publishedAt ?? "")) &&
+          Date.parse(article.publishedAt!) >= now - filters.recentDays * 86_400_000 &&
+          Date.parse(article.publishedAt!) <= now)) &&
       (!search ||
         `${article.title} ${article.excerpt}`
           .normalize("NFD")

@@ -31,13 +31,39 @@ export function canonicalNewsUrl(value: unknown, base: string): string | undefin
 }
 export function newsDate(value: unknown): string | undefined {
   if (typeof value !== "string" || !value.trim()) return;
+  const french = value
+    .trim()
+    .toLowerCase()
+    .match(
+      /^(\d{1,2})(?:er)?\s+(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)\s+(\d{4})$/u,
+    );
+  if (french) {
+    const month = [
+      "janvier",
+      "février",
+      "mars",
+      "avril",
+      "mai",
+      "juin",
+      "juillet",
+      "août",
+      "septembre",
+      "octobre",
+      "novembre",
+      "décembre",
+    ].indexOf(french[2]!);
+    const date = new Date(Date.UTC(Number(french[3]), month, Number(french[1])));
+    return date.getUTCMonth() === month && date.getUTCDate() === Number(french[1])
+      ? date.toISOString()
+      : undefined;
+  }
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined;
 }
 const regionPattern =
   /île[- ]de[- ]france|ile[- ]de[- ]france|francilien|paris|transilien|ratp|idfm|clamart|châtenay|chatenay|bagneux|sceaux|bourg.la.reine|hauts.de.seine|val.de.marne|seine.saint.denis|essonne|yvelines|val.d.oise|seine.et.marne/iu;
 const transportPattern =
-  /métro|metro|tram|\brer\b|transilien|\bbus\b|noctilien|téléphérique|telepherique|transport|ferroviaire|\bgare[s]?\b|\brame[s]?\b|grand paris express|\bt\s?\d{1,2}\b|\bmi\s?\d{2}\b|\bmr\s?\d{2}\b/iu;
+  /métro|metro|tram|\brer\b|transilien|\bbus\b|noctilien|téléphérique|telepherique|transport|ferroviaire|\bgare[s]?\b|\brame[s]?\b|grand paris express|\b[tm]\s?\d{1,2}\b|\bmi\s?\d{2}\b|\bmr\s?\d{2}\b/iu;
 
 export function identifyNewsLines(text: string, source: NewsSource): NewsLine[] {
   text = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -59,8 +85,11 @@ export function identifyNewsLines(text: string, source: NewsSource): NewsLine[] 
     add("metro", match[1]!.replace(/\s/g, ""));
   for (const match of text.matchAll(/ligne\s*(\d{1,2}(?:\s?bis)?)\s*(?:du|de|de la)?\s*metro/giu))
     add("metro", match[1]!.replace(/\s/g, ""));
-  if (/grand paris express/iu.test(text))
-    for (const match of text.matchAll(/ligne\s*(1[5678])\b/giu)) add("metro", match[1]!);
+  if (/grand paris express/iu.test(text) || (source.modes.length === 1 && source.modes[0] === "metro"))
+    for (const match of text.matchAll(/lignes?\s*(1[5678])\b(?:\s*(?:et|&|\/)\s*(1[5678])\b)?/giu)) {
+      add("metro", match[1]!);
+      if (match[2]) add("metro", match[2]);
+    }
   for (const match of text.matchAll(/tram(?:way)?\s*(?:ligne\s*)?(\d{1,2})\b/giu))
     add("tram", match[1]!);
   if (/\bRER\b/iu.test(text))
@@ -98,7 +127,7 @@ export function identifyNewsTopics(text: string): NewsTopic[] {
     ],
     [
       "vehicles",
-      /materiel roulant|rame|nouveaux trains|nouveau train|mi\s?\d{2}|mr\s?\d{2}|alstom|caf\b|automatis|electri|hydrogene|biomethane/,
+      /materiel roulant|rame|atelier de maintenance|nouveaux trains|nouveau train|mi\s?\d{2}|mr\s?\d{2}|alstom|caf\b|automatis|electri|hydrogene|biomethane/,
     ],
     [
       "service",
@@ -145,7 +174,9 @@ export function createNewsArticle(
   const url = canonicalNewsUrl(urlValue, source.url);
   const text = `${title} ${excerpt}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const topics = identifyNewsTopics(text);
-  const isUrbanismOrRealEstate = topics.some((topic) => topic === "urbanism" || topic === "realEstate");
+  const isUrbanismOrRealEstate = topics.some(
+    (topic) => topic === "urbanism" || topic === "realEstate",
+  );
   if (
     !url ||
     title.length < 6 ||
@@ -156,7 +187,7 @@ export function createNewsArticle(
   const lines = identifyNewsLines(text, source);
   const modes = new Set<NewsMode>(lines.map((line) => line.mode));
   for (const [mode, pattern] of [
-    ["metro", /métro|metro/iu],
+    ["metro", /métro|metro|\bm\s?\d{1,2}\b/iu],
     ["rer", /\brer\b/iu],
     ["train", /transilien/iu],
     ["tram", /tram/iu],
@@ -275,7 +306,11 @@ export function parseNewsArticleHtml(
     description,
     structured?.datePublished ??
       meta("article:published_time") ??
-      article?.querySelector("time")?.getAttribute("datetime"),
+      meta("datePublished") ??
+      root.querySelector(".article-date time[datetime], .content-header__date time[datetime]")?.getAttribute("datetime") ??
+      article?.querySelector("time")?.getAttribute("datetime") ??
+      root.querySelector(".post-info .post-list-info li span, .entry-date, .published")
+        ?.textContent,
   );
 }
 export function newsHtmlLinks(body: string, source: NewsSource): string[] {

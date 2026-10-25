@@ -77,6 +77,10 @@ const datasetLabelKeys: Record<string, TranslationKey> = {
   "supermarket-footprints": "nearbyStations.neighborhoodScore.datasets.supermarket-footprints",
   "neighborhood-green-spaces": "nearbyStations.neighborhoodScore.datasets.neighborhood-green-spaces",
   "walking-routes": "nearbyStations.neighborhoodScore.datasets.walking-routes",
+  "address-book": "nearbyStations.neighborhoodScore.personalJourneys.directoryDataset",
+  "personal-addresses": "nearbyStations.neighborhoodScore.personalJourneys.addressesDataset",
+  "home-work-journey": "nearbyStations.neighborhoodScore.personalJourneys.commuteDataset",
+  "personal-journeys": "nearbyStations.neighborhoodScore.personalJourneys.journeysDataset",
 };
 const diagnosticsSummary = computed(() => {
   const datasets = (props.criteria ?? []).flatMap((criterion) => criterion.datasets);
@@ -349,6 +353,7 @@ onBeforeUnmount(() => {
           </div>
         </header>
         <NeighborhoodTransportLoading v-if="category.id === 'transport'" :tasks="transportLoadingTasks ?? []" />
+        <slot v-if="category.id === 'transport'" name="personal-journeys" />
         <p v-if="!category.available && !category.neutralFacts.length" class="nearby-neighborhood-score-card__category-empty">
           {{ category.unavailableReasonKey ? t(category.unavailableReasonKey) : t("nearbyStations.neighborhoodScore.noData") }}
         </p>

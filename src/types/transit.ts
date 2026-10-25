@@ -78,6 +78,8 @@ export interface Departure {
   callOrder?: number;
   remainingStopCount?: number;
   serviceType?: DepartureServiceType;
+  serviceSection?: DepartureServiceSection;
+  serviceTypeStatus?: "loading" | "unavailable";
   navitiaStopPointRef?: string;
 }
 
@@ -86,6 +88,8 @@ export type DepartureServiceType =
   | "semi-direct"
   | "direct"
   | "inconnu";
+
+export type DepartureServiceSection = "north" | "south" | "east" | "west";
 
 export interface DepartureCall {
   id: string;
@@ -110,6 +114,7 @@ export interface DepartureCallingPattern {
   departureId: string;
   destination: string;
   serviceType: DepartureServiceType;
+  serviceSection?: DepartureServiceSection;
   calls: DepartureCall[];
   lineTopology?: LineRouteSequence[];
   lineTopologyLayout?: LineTopologyLayout;

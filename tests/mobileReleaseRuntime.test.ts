@@ -57,6 +57,11 @@ describe("Android mobile release runtime", () => {
     });
   });
 
+  it("keeps existing public contracts compatible with explicit snapshot provenance", async () => {
+    const payload = { ...manifest(), sourceKind: "worktree-snapshot", baseCommit: otherRevision, snapshotSha256: "a".repeat(64) };
+    await expect(findAndroidRelease(bucketFor(payload), revision)).resolves.toMatchObject({ available: true, manifest: { sourceRevision: revision } });
+  });
+
   it("keeps an APK unavailable when its manifest targets another source revision", async () => {
     const mismatched = manifest({ sourceRevision: otherRevision });
     await expect(findAndroidRelease(bucketFor(mismatched), revision)).resolves.toEqual({

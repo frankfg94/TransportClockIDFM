@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { Clock3 } from "lucide-vue-next";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import {
   createLinePresentation,
@@ -23,6 +24,8 @@ import type {
   GlobalTransportItinerarySegment,
 } from "./globalTransportItineraryGeometry";
 import { createGlobalTransportItinerarySegments } from "./globalTransportItineraryGeometry";
+import { useI18n } from "../../i18n";
+import { itineraryStepAttributes, type GlobalTransportItineraryStep } from "./globalTransportPlanItinerary";
 
 type ScreenPoint = { x: number; y: number };
 
@@ -61,9 +64,24 @@ const props = defineProps<{
   origin?: GeocoderPoint;
   destination?: GeocoderPoint;
   segments?: readonly GlobalTransportItinerarySegment[];
+  steps?: readonly GlobalTransportItineraryStep[];
   camera: CameraState;
   getSectionExits?: (section: NearbyJourneySection) => readonly RouteExit[];
 }>();
+const { t, d, n } = useI18n();
+const stepNodes = computed(() => (props.steps ?? []).map((step) => {
+  const point = step.section.fromPoint;
+  return { step, point: point ? worldToScreen(lonLatToWorld(point), props.camera) : undefined };
+}));
+const minutes = (seconds: number) => t("lineOptimizer.minutes", { value: n(seconds / 60, { maximumFractionDigits: 1 }) });
+const clock = (epoch: number) => d(new Date(epoch), { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" });
+function stepTitle(step: GlobalTransportItineraryStep) {
+  const label = step.kind === "wait" ? t("lineOptimizer.connectionWait", { duration: minutes(step.durationSeconds) })
+    : step.kind === "preparation" ? t("lineOptimizer.leaveHome")
+    : step.kind === "walk" ? t("lineOptimizer.walkTo", { station: step.section.toName ?? "" })
+    : step.section.lineCode ?? "";
+  return `${label} · ${clock(step.startAt)} → ${clock(step.endAt)} · ${minutes(step.durationSeconds)} · ${step.section.fromName ?? ""} → ${step.section.toName ?? ""}${step.section.stopNames?.length ? ` · ${step.section.stopNames.join(" → ")}` : ""}`;
+}
 
 // Route normalization (including walking geometry alignment) is independent
 // from the camera. Cache it so a pan/zoom only has to project the already
@@ -321,6 +339,14 @@ function isFiniteScreenPoint(point: ScreenPoint): boolean {
           />
         </g>
       </g>
+      <g v-for="node in stepNodes" :key="node.step.id" v-bind="itineraryStepAttributes(node.step)">
+        <title>{{ stepTitle(node.step) }}</title>
+        <g v-if="node.step.kind === 'wait' && node.point" class="global-transport-itinerary-overlay__wait" :transform="`translate(${node.point.x + 12} ${node.point.y - 20})`">
+          <rect x="-4" y="-14" :width="32 + minutes(node.step.durationSeconds).length * 7" height="24" rx="8" />
+          <Clock3 x="3" y="-9" :size="14" aria-hidden="true" />
+          <text x="23" y="2">{{ minutes(node.step.durationSeconds) }}</text>
+        </g>
+      </g>
       <circle
         v-for="node in endpointNodes"
         :key="node.id"
@@ -388,6 +414,8 @@ function isFiniteScreenPoint(point: ScreenPoint): boolean {
 .global-transport-itinerary-overlay__underlay { fill: none; stroke: rgba(255,255,255,.9); stroke-linecap: round; stroke-linejoin: round; stroke-width: 10; vector-effect: non-scaling-stroke; }
 .global-transport-itinerary-overlay__path { fill: none; stroke: #5146ff; stroke-linecap: round; stroke-linejoin: round; stroke-width: 6; vector-effect: non-scaling-stroke; }
 .global-transport-itinerary-overlay__path--walking { stroke: #5146ff; stroke-dasharray: 2 8; stroke-width: 4; }
+.global-transport-itinerary-overlay__wait rect { fill: var(--surface, white); stroke: var(--border, #cbd5e1); }
+.global-transport-itinerary-overlay__wait text { fill: var(--ink, #0f172a); font-size: 12px; font-weight: 700; }
 .global-transport-itinerary-overlay__segment--walking .global-transport-itinerary-overlay__underlay { stroke-dasharray: 2 8; stroke-width: 8; }
 .global-transport-itinerary-overlay__node { fill: #fff; stroke: #5146ff; stroke-width: 3; }
 .global-transport-itinerary-overlay__node--origin { fill: #d92d20; stroke: #fff; }

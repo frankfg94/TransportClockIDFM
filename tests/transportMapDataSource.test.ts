@@ -33,6 +33,85 @@ function createLocalAssetLoader(
 }
 
 describe("global transport progressive data source", () => {
+  it("shares initialization with early catalogue requests", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolveGate => { release = resolveGate; });
+    const requested: string[] = [];
+    const source = new TransportMapDataSource({ loader: createLocalAssetLoader(async asset => {
+      requested.push(asset);
+      if (asset === "manifest.json") await gate;
+    }) });
+    const catalogues = Promise.all([source.ensureCatalog(), source.ensureCatalog()]);
+    const initializing = source.initialize();
+    await Promise.resolve();
+    expect(requested.filter(asset => asset === "manifest.json")).toHaveLength(1);
+    release();
+    const [first, second] = await catalogues;
+    await initializing;
+    expect(first).toBe(second);
+    expect(source.getNetwork()).toBe(first);
+    expect(requested.filter(asset => asset === "catalog.json")).toHaveLength(1);
+    expect(source.metrics().catalogLoaded).toBe(true);
+    source.dispose();
+  }, 30_000);
+
+  it("lets one early catalogue caller cancel without cancelling the shared load", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolveGate => { release = resolveGate; });
+    const source = new TransportMapDataSource({ loader: createLocalAssetLoader(async asset => {
+      if (asset === "manifest.json") await gate;
+    }) });
+    const controller = new AbortController();
+    const cancelled = source.ensureCatalog(controller.signal);
+    const remaining = source.ensureCatalog();
+    const cancelledAssertion = expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort();
+    await cancelledAssertion;
+    release();
+    const network = await remaining;
+    expect(source.getNetwork()).toBe(network);
+    expect(source.metrics().catalogLoaded).toBe(true);
+    source.dispose();
+  }, 30_000);
+
+  it("keeps a shared catalogue fetch alive when its first caller cancels", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolveGate => { release = resolveGate; });
+    const source = new TransportMapDataSource({ loader: createLocalAssetLoader(async asset => {
+      if (asset === "catalog.json") await gate;
+    }) });
+    await source.initialize();
+    const controller = new AbortController();
+    const cancelled = source.ensureCatalog(controller.signal);
+    const remaining = source.ensureCatalog();
+    const assertion = expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort();
+    await assertion;
+    release();
+    expect(await remaining).toBe(source.getNetwork());
+    expect(source.metrics().catalogLoaded).toBe(true);
+    source.dispose();
+  }, 30_000);
+
+  it("aborts early catalogue requests on disposal without restarting the source", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolveGate => { release = resolveGate; });
+    const requested: string[] = [];
+    const source = new TransportMapDataSource({ loader: createLocalAssetLoader(async asset => {
+      requested.push(asset);
+      if (asset === "manifest.json") await gate;
+    }) });
+    const catalog = source.ensureCatalog();
+    const assertion = expect(catalog).rejects.toMatchObject({ name: "AbortError" });
+    await Promise.resolve();
+    source.dispose();
+    release();
+    await assertion;
+    await expect(source.ensureCatalog()).rejects.toMatchObject({ name: "AbortError" });
+    expect(requested).toEqual(["manifest.json"]);
+    expect(source.metrics()).toMatchObject({ manifestLoaded: false, catalogLoaded: false });
+  }, 30_000);
+
   it("does not repopulate the source when disposed during manifest loading", async () => {
     let releaseManifest!: () => void;
     let manifestRequested = false;

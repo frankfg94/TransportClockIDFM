@@ -1,7 +1,7 @@
-import { mount } from "@vue/test-utils";
-import { nextTick } from "vue";
+import { flushPromises, mount } from "@vue/test-utils";
+import { defineComponent, nextTick, ref } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import AppRightPanel from "../src/components/AppRightPanel.vue";
+import ResponsiveSidePanel from "../src/components/ResponsiveSidePanel.vue";
 
 function createMediaQueryList(matches: boolean, media = "(max-width: 1100px)"): MediaQueryList {
   return {
@@ -21,16 +21,61 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("AppRightPanel", () => {
+describe("ResponsiveSidePanel", () => {
+  it("preserves parent-owned slot data while switching between desktop and mobile", async () => {
+    const listeners = new Map<string, (event: MediaQueryListEvent) => void>();
+    vi.spyOn(window, "matchMedia").mockImplementation(query => ({
+      ...createMediaQueryList(false, query),
+      addEventListener: vi.fn((_name, callback) => listeners.set(query, callback as (event: MediaQueryListEvent) => void)),
+    }));
+    const wrapper = mount(defineComponent({
+      components: { ResponsiveSidePanel },
+      setup: () => ({ text: ref("Valeur conservée") }),
+      template: `<ResponsiveSidePanel open title="Fiche" mobile-sheet><input v-model="text" /></ResponsiveSidePanel>`,
+    }), { attachTo: document.body });
+    await flushPromises();
+    expect(wrapper.find('[data-testid="responsive-side-panel"]').exists()).toBe(true);
+    const mobileQuery = [...listeners.keys()].find(query => query.includes("720px"))!;
+    listeners.get(mobileQuery)!({ matches: true } as MediaQueryListEvent);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="draggable-bottom-sheet"]').exists()).toBe(true);
+    expect((wrapper.get("input").element as HTMLInputElement).value).toBe("Valeur conservée");
+    await wrapper.get("input").setValue("Modifiée sur mobile");
+    listeners.get(mobileQuery)!({ matches: false } as MediaQueryListEvent);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="responsive-side-panel"]').exists()).toBe(true);
+    expect((wrapper.get("input").element as HTMLInputElement).value).toBe("Modifiée sur mobile");
+    wrapper.unmount();
+  });
+
+  it("traps Tab only in the modal desktop overlay", async () => {
+    vi.spyOn(window, "matchMedia").mockReturnValue(createMediaQueryList(true));
+    const wrapper = mount(ResponsiveSidePanel, {
+      props: { open: true, title: "Panneau superposé" },
+      slots: { default: "<button data-testid='last-control'>Dernière action</button>" },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    const first = wrapper.get('[data-testid="responsive-side-panel-close"]');
+    const last = wrapper.get('[data-testid="last-control"]');
+    (last.element as HTMLButtonElement).focus();
+    await last.trigger("keydown", { key: "Tab" });
+    expect(document.activeElement).toBe(first.element);
+    await first.trigger("keydown", { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last.element);
+    wrapper.unmount();
+  });
+
   it("renders arbitrary content and closes from its controls and Escape", async () => {
     vi.spyOn(window, "matchMedia").mockReturnValue(createMediaQueryList(false));
-    const wrapper = mount(AppRightPanel, {
+    const wrapper = mount(ResponsiveSidePanel, {
       props: {
         open: true,
         title: "Panneau générique",
         closeLabel: "Fermer le panneau",
         busy: true,
       },
+      attrs: { class: "custom-panel" },
       slots: {
         header: "<span data-testid='custom-header'>En-tête</span>",
         default: "<button data-testid='arbitrary-content'>Action</button>",
@@ -39,17 +84,22 @@ describe("AppRightPanel", () => {
       attachTo: document.body,
     });
 
-    const panel = wrapper.get('[data-testid="app-right-panel"]');
+    const panel = wrapper.get('[data-testid="responsive-side-panel"]');
+    expect(panel.classes()).toContain("custom-panel");
     expect(panel.attributes("role")).toBe("complementary");
     expect(panel.attributes("aria-busy")).toBe("true");
     expect(wrapper.get('[data-testid="custom-header"]').text()).toBe("En-tête");
     expect(wrapper.get('[data-testid="arbitrary-content"]').text()).toBe("Action");
     expect(wrapper.get('[data-testid="custom-footer"]').text()).toBe("Pied");
 
+    const parentKeydown = vi.fn();
+    document.body.addEventListener("keydown", parentKeydown);
     await panel.trigger("keydown", { key: "Escape" });
+    document.body.removeEventListener("keydown", parentKeydown);
     expect(wrapper.emitted("close")).toHaveLength(1);
+    expect(parentKeydown).not.toHaveBeenCalled();
 
-    await wrapper.get('[data-testid="app-right-panel-close"]').trigger("click");
+    await wrapper.get('[data-testid="responsive-side-panel-close"]').trigger("click");
     expect(wrapper.emitted("close")).toHaveLength(2);
   });
 
@@ -60,7 +110,7 @@ describe("AppRightPanel", () => {
     document.body.append(trigger);
     trigger.focus();
 
-    const wrapper = mount(AppRightPanel, {
+    const wrapper = mount(ResponsiveSidePanel, {
       props: {
         open: false,
         title: "Panneau superposé",
@@ -70,7 +120,7 @@ describe("AppRightPanel", () => {
 
     await wrapper.setProps({ open: true });
     await nextTick();
-    const panel = wrapper.get('[data-testid="app-right-panel"]');
+    const panel = wrapper.get('[data-testid="responsive-side-panel"]');
     expect(panel.attributes("role")).toBe("dialog");
     expect(panel.attributes("aria-modal")).toBe("true");
     expect(document.activeElement).toBe(panel.element);
@@ -85,7 +135,7 @@ describe("AppRightPanel", () => {
     vi.spyOn(window, "matchMedia").mockImplementation((query) =>
       createMediaQueryList(query.includes("1100px"), query),
     );
-    const wrapper = mount(AppRightPanel, {
+    const wrapper = mount(ResponsiveSidePanel, {
       props: {
         open: false,
         title: "Panneau tablette",
@@ -95,11 +145,11 @@ describe("AppRightPanel", () => {
 
     await wrapper.setProps({ open: true });
     await nextTick();
-    await wrapper.get(".app-right-panel__backdrop").trigger("click");
+    await wrapper.get(".responsive-side-panel__backdrop").trigger("click");
     expect(wrapper.emitted("close")).toBeUndefined();
 
     vi.advanceTimersByTime(351);
-    await wrapper.get(".app-right-panel__backdrop").trigger("click");
+    await wrapper.get(".responsive-side-panel__backdrop").trigger("click");
     expect(wrapper.emitted("close")).toHaveLength(1);
 
     wrapper.unmount();
@@ -108,7 +158,7 @@ describe("AppRightPanel", () => {
 
   it("supports the mobile bottom-sheet stages and drag gestures", async () => {
     vi.spyOn(window, "matchMedia").mockImplementation((query) => createMediaQueryList(true, query));
-    const wrapper = mount(AppRightPanel, {
+    const wrapper = mount(ResponsiveSidePanel, {
       props: {
         open: true,
         title: "Fiche station",
@@ -117,11 +167,12 @@ describe("AppRightPanel", () => {
       },
       attachTo: document.body,
     });
-    await nextTick();
+    await flushPromises();
 
-    const panel = wrapper.get('[data-testid="app-right-panel"]');
-    const handle = wrapper.get('[data-testid="app-right-panel-drag-handle"]');
-    expect(panel.classes()).toContain("app-right-panel--mobile-mid");
+    const panel = wrapper.get('[data-testid="draggable-bottom-sheet"]');
+    const handle = wrapper.get('[data-testid="draggable-bottom-sheet-drag-handle"]');
+    expect(panel.classes()).toContain("draggable-bottom-sheet--mid");
+    expect(document.activeElement).toBe(panel.element);
     expect(panel.attributes("role")).toBe("complementary");
     expect(panel.attributes("aria-modal")).toBeUndefined();
 
@@ -134,16 +185,19 @@ describe("AppRightPanel", () => {
       clientY: 100,
       pointerId: 3,
       pointerType: "touch",
+      isPrimary: true,
     });
     await handle.trigger("pointermove", {
       clientY: 180,
       pointerId: 3,
       pointerType: "touch",
+      isPrimary: true,
     });
     await handle.trigger("pointerup", {
       clientY: 180,
       pointerId: 3,
       pointerType: "touch",
+      isPrimary: true,
     });
     expect(wrapper.emitted("mobileSheetStageChange")?.at(-1)).toEqual(["mid"]);
 
@@ -153,11 +207,13 @@ describe("AppRightPanel", () => {
       clientY: 100,
       pointerId: 4,
       pointerType: "touch",
+      isPrimary: true,
     });
     await handle.trigger("pointerup", {
       clientY: 180,
       pointerId: 4,
       pointerType: "touch",
+      isPrimary: true,
     });
     expect(wrapper.emitted("close")).toHaveLength(1);
   });

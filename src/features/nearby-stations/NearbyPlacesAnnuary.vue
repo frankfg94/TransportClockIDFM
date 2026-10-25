@@ -49,6 +49,7 @@ import type { NearbyWalkingRoute } from "./nearbyWalkingRoutes";
 import type { NearbyWalkingLoadProgress } from "./useNearbyWalkingRoutes";
 import { useNearbyPlacePresenter } from "./useNearbyPlacePresenter";
 import NearbyWalkingProgressIndicator from "./NearbyWalkingProgressIndicator.vue";
+import NearbyPlaceDetails from "./NearbyPlaceDetails.vue";
 import {
   buildNearbyPlacesExportHtml,
   nearbyPlacesExportPolicy,
@@ -622,6 +623,12 @@ onBeforeUnmount(() => {
     </div>
 
     <section class="nearby-directory__results" :aria-label="t('nearbyStations.directory.resultsLabel')">
+      <NearbyPlaceDetails
+        v-if="selectedPlaceId && places.some(place => place.id === selectedPlaceId)"
+        :place="places.find(place => place.id === selectedPlaceId)!"
+        :route="walkingRoutes?.[selectedPlaceId]"
+        @close="emit('selectPlace', undefined)"
+      />
       <div v-if="loading" class="nearby-directory__state" role="status">
         <strong>{{ t("nearbyStations.directory.loading") }}</strong>
       </div>

@@ -34,6 +34,8 @@ export interface GlobalTransportItinerarySegment {
 }
 
 export interface GlobalTransportItineraryGeometryOptions {
+  /** Controlled routes retain exactly the supplied endpoints and geometry. */
+  preserveSections?: boolean;
   resolveTransitGeometry?: (
     section: NearbyJourneySection,
     from: NearbyJourneyPoint,
@@ -64,10 +66,10 @@ export function createGlobalTransportItinerarySegments(
   if (!route || !origin || !destination) return [];
 
   const walkingSegments = new Map(
-    createNearbyTravelWalkingSegments(route, origin, destination, {
+    (options.preserveSections ? [] : createNearbyTravelWalkingSegments(route, origin, destination, {
       resolveTransitExitPoint: options.resolveTransitExitPoint,
       resolveFinalTransitExitPoint: options.resolveFinalTransitExitPoint,
-    })
+    }))
       .map((segment) => [segment.id, segment] as const),
   );
 
@@ -76,10 +78,10 @@ export function createGlobalTransportItinerarySegments(
     if (kind === "transit" && !hasTransitIdentity(section)) return [];
 
     const walking = walkingSegments.get(`${route.id}:walk:${index}`);
-    const fallbackFrom = kind === "walking" && walking
+    const fallbackFrom = options.preserveSections ? section.fromPoint : kind === "walking" && walking
       ? walking.from
       : section.fromPoint ?? (index === 0 ? origin : route.sections[index - 1]?.toPoint);
-    const fallbackTo = kind === "walking" && walking
+    const fallbackTo = options.preserveSections ? section.toPoint : kind === "walking" && walking
       ? walking.to
       : section.toPoint ?? (index === route.sections.length - 1 ? destination : route.sections[index + 1]?.fromPoint);
     if (!fallbackFrom || !fallbackTo || samePoint(fallbackFrom, fallbackTo)) return [];
@@ -136,6 +138,9 @@ function resolveCoordinates(
   to: NearbyJourneyPoint,
   options: GlobalTransportItineraryGeometryOptions,
 ): NearbyJourneyPoint[] {
+  if (options.preserveSections) {
+    return (section.geometry?.length ?? 0) >= 2 ? section.geometry! : [from, to];
+  }
   if (kind === "walking" && walking?.coordinates && walking.coordinates.length >= 2) {
     return alignNearbyWalkingGeometryToEndpoints(walking.coordinates, from, to);
   }

@@ -4,6 +4,7 @@ import { useI18n, type TranslationKey } from "../../i18n";
 import MaterialCombobox, {
   type MaterialComboboxOption,
 } from "../../components/MaterialCombobox.vue";
+import { monitoringRefToNavitiaStopPointRef } from "../../services/idfmStopReferences";
 import type {
   FrequencyDirection,
   FrequencySection,
@@ -38,6 +39,9 @@ const props = withDefaults(
     timetable?: GtfsLineTimetableResponse;
     loading?: boolean;
     error?: boolean;
+    stationId?: string;
+    stationName?: string;
+    directionDestinations?: readonly string[];
   }>(),
   {
     loading: false,
@@ -100,6 +104,43 @@ function sectionOptionFor(id: string): TimetableSectionOption | undefined {
 const stopsById = computed(
   () => new Map((props.timetable?.stops ?? []).map((stop) => [stop.id, stop])),
 );
+const selectedStationId = ref("");
+const selectedDirectionKey = ref("all");
+function contextStationKey(id: string): string {
+  const reference = monitoringRefToNavitiaStopPointRef(id) ?? id;
+  return canonicalGtfsTimetableStationId(reference.replace(/^stop_(?:area|point):(?=IDFM:)/u, ""));
+}
+const requestedStationId = computed(() => {
+  const requested = props.stationId?.trim();
+  if (!requested) return "";
+  const key = contextStationKey(requested);
+  const stop = props.timetable?.stops.find((candidate) =>
+    [candidate.id, candidate.parentId, candidate.topologyId].some((id) => id && contextStationKey(id) === key),
+  );
+  return canonicalGtfsTimetableStationId(stop ? stop.topologyId ?? stop.parentId ?? stop.id : requested);
+});
+watch(
+  [() => props.profile?.lineId, requestedStationId, () => props.directionDestinations?.join("\u0000")],
+  () => {
+    selectedStationId.value = requestedStationId.value;
+    selectedDirectionKey.value = props.directionDestinations?.length ? "context" : "all";
+  },
+  { immediate: true },
+);
+const stationOptions = computed(() => {
+  const stations = new Map<string, string>();
+  for (const stop of props.timetable?.stops ?? []) {
+    const id = canonicalGtfsTimetableStationId(stop.topologyId ?? stop.parentId ?? stop.id);
+    if (!stations.has(id)) stations.set(id, stop.name);
+  }
+  // Preserve an unresolved context rather than silently displaying the whole line.
+  const requested = requestedStationId.value;
+  if (requested) stations.set(requested, props.stationName || stations.get(requested) || requested);
+  return [...stations].map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label));
+});
+watch(selectedStationId, () => {
+  selectedDirectionKey.value = props.directionDestinations?.length ? "context" : "all";
+});
 const sections = computed(() => props.profile?.sections ?? []);
 const selectedSectionKey = ref("");
 
@@ -147,6 +188,7 @@ watch(
 );
 
 const activeSection = computed<FrequencySection | undefined>(() => {
+  if (selectedStationId.value) return undefined;
   if (selectedSectionKey.value === "all") return undefined;
   return (
     sections.value.find((section) => section.id === selectedSectionKey.value) ??
@@ -154,7 +196,9 @@ const activeSection = computed<FrequencySection | undefined>(() => {
   );
 });
 const activeSectionStationIds = computed<ReadonlySet<string> | undefined>(() =>
-  activeSection.value ? new Set(activeSection.value.stationIds) : undefined,
+  selectedStationId.value
+    ? new Set([canonicalGtfsTimetableStationId(selectedStationId.value)])
+    : activeSection.value ? new Set(activeSection.value.stationIds) : undefined,
 );
 const lineColorStyle = computed<Record<string, string>>(() => {
   const style: Record<string, string> = {};
@@ -221,7 +265,13 @@ function sectionOrientation(
 
 const timetableTrips = computed<TimetableTripEntry[]>(() => {
   const trips = (props.timetable?.trips ?? []).filter(
-    (trip) => trip.serviceDate === props.timetable?.serviceDate && boardableCalls(trip).length > 0,
+    (trip) => trip.serviceDate === props.timetable?.serviceDate && boardableCalls(trip).some((call) => {
+      if (!selectedStationId.value) return true;
+      const stop = stopsById.value.get(call.stopId);
+      return [call.stopId, stop?.parentId, stop?.topologyId].some((id) =>
+        id && canonicalGtfsTimetableStationId(id) === canonicalGtfsTimetableStationId(selectedStationId.value),
+      );
+    }),
   );
   const section = activeSection.value;
   if (!section) return trips.map((trip) => ({ trip }));
@@ -293,12 +343,27 @@ function profileDirectionFor(
   return candidates.find((candidate) => sameLabel(candidate.to, destination));
 }
 
-const directions = computed<TimetableDirection[]>(() => {
+function groupDirections(entriesToGroup: TimetableTripEntry[]): TimetableDirection[] {
+  // A GTFS direction id can contain several termini, including short turns.
+  // At a selected station keep those destinations separately selectable.
+  const destinationsByDirection = new Map<string, Set<string>>();
+  const destinationFor = (trip: GtfsLineTimetableTrip) => normalizedLabel(terminalName([trip]) ?? trip.headsign ?? "");
+  if (selectedStationId.value) {
+    for (const { trip } of timetableTrips.value) {
+      const key = directionKey(trip);
+      const destinations = destinationsByDirection.get(key) ?? new Set<string>();
+      destinations.add(destinationFor(trip));
+      destinationsByDirection.set(key, destinations);
+    }
+  }
   const grouped = new Map<string, TimetableTripEntry[]>();
-  for (const entry of timetableTrips.value) {
+  for (const entry of entriesToGroup) {
+    const baseKey = directionKey(entry.trip);
     const key = activeSection.value
       ? `section:${entry.orientation ?? "unknown"}`
-      : directionKey(entry.trip);
+      : (destinationsByDirection.get(baseKey)?.size ?? 0) > 1
+        ? `${baseKey}:to:${destinationFor(entry.trip)}`
+        : baseKey;
     grouped.set(key, [...(grouped.get(key) ?? []), entry]);
   }
 
@@ -306,7 +371,9 @@ const directions = computed<TimetableDirection[]>(() => {
     const trips = entries.map((entry) => entry.trip);
     const orientation = entries[0]?.orientation;
     const profileDirection = profileDirectionFor(trips, orientation);
-    const destination = profileDirection?.to ?? terminalName(trips);
+    const destination = selectedStationId.value
+      ? terminalName(trips) ?? profileDirection?.to
+      : profileDirection?.to ?? terminalName(trips);
     const label = destination
       ? t("globalMap.sidebar.gtfsFrequency.timetableDirectionTo", { destination })
       : profileDirection?.from && profileDirection.to
@@ -320,6 +387,16 @@ const directions = computed<TimetableDirection[]>(() => {
 
     return { key, label, trips, orientation };
   });
+}
+const allDirections = computed(() => groupDirections(timetableTrips.value));
+const directions = computed(() => {
+  if (selectedDirectionKey.value === "all") return allDirections.value;
+  if (selectedDirectionKey.value !== "context") return allDirections.value.filter((direction) => direction.key === selectedDirectionKey.value);
+  return groupDirections(timetableTrips.value.filter(({ trip }) => {
+    const lastStop = orderedCalls(trip).at(-1);
+    const terminal = lastStop ? stopsById.value.get(lastStop.stopId)?.name : undefined;
+    return props.directionDestinations?.some((destination) => sameLabel(destination, trip.headsign) || sameLabel(destination, terminal));
+  }));
 });
 
 const timetableRows = computed(() =>
@@ -398,7 +475,7 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
       }}
     </p>
 
-    <div v-if="hasSectionSelector" class="line-frequency-timetable__segment-picker">
+    <div v-if="hasSectionSelector && !selectedStationId" class="line-frequency-timetable__segment-picker">
       <span class="line-frequency-timetable__segment-label">
         {{ t("globalMap.sidebar.gtfsFrequency.timetableSegment") }}
       </span>
@@ -445,6 +522,17 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
       {{ t("globalMap.sidebar.gtfsFrequency.timetableHint") }}
     </p>
 
+    <div v-if="timetable?.status === 'ready'" class="line-frequency-timetable__context">
+      <label class="line-frequency-timetable__segment-picker">
+        <span class="line-frequency-timetable__segment-label">{{ t('common.labels.station') }}</span>
+        <MaterialCombobox v-model="selectedStationId" :options="[{ id: '', label: t('app.allStations') }, ...stationOptions]" :aria-label="t('common.labels.station')" teleport data-testid="line-frequency-timetable-station" />
+      </label>
+      <label class="line-frequency-timetable__segment-picker">
+        <span class="line-frequency-timetable__segment-label">{{ t('board.direction') }}</span>
+        <MaterialCombobox v-model="selectedDirectionKey" :options="[{ id: 'all', label: t('settings.options.fullscreenPanel.allDirections') }, ...(directionDestinations?.length ? [{ id: 'context', label: directionDestinations.join(' / ') }] : []), ...allDirections.map(direction => ({ id: direction.key, label: direction.label }))]" :aria-label="t('board.direction')" teleport data-testid="line-frequency-timetable-direction" />
+      </label>
+    </div>
+
     <p v-if="loading" role="status" data-testid="line-frequency-timetable-loading">
       {{ t("globalMap.sidebar.gtfsFrequency.timetableLoading") }}
     </p>
@@ -490,6 +578,7 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
     <div
       v-else
       class="line-frequency-timetable__table-wrap"
+      :class="{ 'line-frequency-timetable__table-wrap--compact': directions.length <= 2 }"
       data-testid="line-frequency-timetable-table"
     >
       <table>
@@ -565,6 +654,25 @@ p {
   display: grid;
   gap: var(--space-1);
   min-width: 0;
+}
+
+.line-frequency-timetable__context {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: var(--space-2);
+}
+.line-frequency-timetable__context select {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  min-width: 0;
+  min-height: 44px;
+  width: 100%;
+}
+:global(.line-frequency-timetable__segment-menu) {
+  z-index: 12080;
 }
 
 .line-frequency-timetable__segment-label {
@@ -701,6 +809,19 @@ tbody tr:nth-child(even) td {
   th,
   td {
     padding: 8px;
+  }
+
+  .line-frequency-timetable__table-wrap--compact table {
+    min-width: 0;
+    table-layout: fixed;
+  }
+  .line-frequency-timetable__table-wrap--compact th {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .line-frequency-timetable__table-wrap--compact td {
+    white-space: normal;
   }
 }
 </style>

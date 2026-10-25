@@ -43,6 +43,28 @@ const ranking: PlacesRankingDocument = {
 };
 
 describe("compiled places provider", () => {
+  it("includes a neighboring commune and filters exactly to the requested circle beyond 2 km", async () => {
+    const neighbor = { ...city, city: { ...city.city, code: "92002" }, places: [
+      { ...city.places[0]!, cityCode: "92002", id: "neighbor", lon: 2.251, tags: { email: "hello@example.test" } },
+      { ...city.places[0]!, cityCode: "92002", id: "far", lon: 2.29 },
+    ] };
+    const extendedManifest = { ...manifest, cities: [manifest.cities[0]!, {
+      ...manifest.cities[0]!, code: "92002", asset: "92002.json", bbox: [2.2505, 48.74, 2.4, 48.76],
+    }] };
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+      String(input).endsWith("manifest.json") ? extendedManifest : String(input).endsWith("92002.json") ? neighbor : city,
+    )));
+    const provider = createCompiledPlacesProvider({ fetcher });
+    const origin = { lon: 2.25, lat: 48.75, code: "92019" };
+    const nearby = await provider.searchNearby({ origin, radiusMeters: 160 });
+    expect(nearby.map(p => p.id)).toContain("neighbor");
+    expect(nearby.map(p => p.id)).not.toContain("far");
+    expect(nearby.find(p => p.id === "neighbor")?.tags?.email).toBe("hello@example.test");
+    const large = await provider.searchNearby({ origin, radiusMeters: 3_000 });
+    expect(large.map(p => p.id)).toContain("far");
+    const line = await provider.searchNearbyCities({ cities: [{ code: "92019" }], origins: [origin], radiusMeters: 160 });
+    expect(line.map(p => p.id)).toContain("neighbor");
+  });
   it("loads the manifest and only the selected commune JSON", async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

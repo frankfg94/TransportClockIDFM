@@ -32,6 +32,24 @@ function payloadWithSeries(
 }
 
 describe("Open-Meteo weather normalization", () => {
+  it.each([[0.3, 1], [1.5, 2], [5, 3]])("derives ongoing rain intensity from %s mm", (amount, intensity) => {
+    const response = normalizeOpenMeteoWeather(
+      payloadWithSeries([now.toISOString(), "2026-05-28T10:15:00.000Z"], {
+        precipitation: [amount, 0], rain: [amount, 0], weather_code: [61, 0],
+      }), { location, lookaheadMinutes: 120, now },
+    );
+    expect(response.alert).toMatchObject({ kind: "rain", startsInMinutes: 0, intensity });
+  });
+
+  it("does not round a future start down to zero minutes", () => {
+    const response = normalizeOpenMeteoWeather(
+      payloadWithSeries(["2026-05-28T10:00:20.000Z", "2026-05-28T10:15:00.000Z"], {
+        precipitation: [1, 0], rain: [1, 0], weather_code: [61, 0],
+      }), { location, lookaheadMinutes: 120, now },
+    );
+    expect(response.alert?.startsInMinutes).toBe(1);
+  });
+
   it("detects future rain, intensity and end time", () => {
     const response = normalizeOpenMeteoWeather(
       payloadWithSeries(

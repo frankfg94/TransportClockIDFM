@@ -43,6 +43,12 @@ const enabledPluginPackages = (process.env.ENABLED_PLUGINS ?? "")
 if (isCapacitorBuild && !serverApiBaseUrl.trim()) {
   throw new Error("NUXT_PUBLIC_API_BASE_URL est requis pour construire l'application Capacitor.");
 }
+if (isCapacitorBuild) {
+  let absoluteBackend = false;
+  try { absoluteBackend = ["http:", "https:"].includes(new URL(serverApiBaseUrl.trim()).protocol); }
+  catch { /* A static native package cannot provide its own Nitro backend. */ }
+  if (!absoluteBackend) throw new Error("Capacitor requires an absolute HTTP(S) NUXT_PUBLIC_API_BASE_URL.");
+}
 
 export default defineNuxtConfig({
   modules: [
@@ -73,14 +79,25 @@ export default defineNuxtConfig({
   sourcemap: { server: false },
   // Generated GTFS data can contain tens of thousands of files and must not be
   // traversed by Nuxt's project watcher during development.
-  ignore: [".data", ".nuxt-data-update", ...(customBuildDir ? [customBuildDir] : [])],
+  ignore: [
+    ".data",
+    ".nuxt-data-update",
+    // Nuxt's own watcher is independent of vite.server.watch below. Native
+    // builds contain many generated copies of the public datasets.
+    "android/**",
+    "dist/**",
+    ".nuxt-capacitor/**",
+    ...(customBuildDir ? [customBuildDir] : []),
+  ],
   nitro: {
     preset: isCapacitorBuild
       ? "static"
       : process.env.NODE_ENV === "production"
         ? "cloudflare-pages"
         : undefined,
-    publicAssets: [
+    // Native GTFS workers use the mandatory backend API base and its URL-keyed
+    // CacheStorage. A second, unreachable copy in the APK adds no offline mode.
+    publicAssets: isCapacitorBuild ? [] : [
       {
         // Pages only needs the version referenced by current.json. The full
         // local directory also retains historical immutable versions, which

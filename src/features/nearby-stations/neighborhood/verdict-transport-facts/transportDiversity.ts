@@ -7,7 +7,7 @@ export function buildTransportDiversityFacts(context: TransportFactsContext) {
   const { positiveFacts, negativeFacts, neutralFacts } = createTransportFactCollection();
   const { input, structuralLineCount, accessibleModes, effectiveFutureProjects, linesByKey } = context;
   if (structuralLineCount >= 3) {
-    positiveFacts.push(makeFact({
+    const fact = makeFact({
       id: "transport-offer",
       kind: "transportOffer",
       category: "transport",
@@ -25,7 +25,9 @@ export function buildTransportDiversityFacts(context: TransportFactsContext) {
       proof: "direct",
       ruleKey: RULE_KEYS.transportDiversity,
       ruleValues: { threshold: 3 },
-    }));
+    });
+    fact.transportLines = context.structuralLines;
+    positiveFacts.push(fact);
   } else if (linesByKey.size === 0 && !input.heavyCandidatesLoading) {
     negativeFacts.push(makeFact({
       id: "transport-limited",

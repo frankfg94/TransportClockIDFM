@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { useRoute, useRouter } from "#imports";
 import { BookOpen, Building2, Check, Copy, Eye, EyeOff, LoaderCircle, Map as MapIcon, MapPin, RefreshCw, Route, RotateCcw, Trash2 } from "lucide-vue-next";
@@ -1753,19 +1754,15 @@ onBeforeUnmount(() => {
       <div class="my-nearby-stations-page__address">
         <label for="my-nearby-address-preset">{{ t("nearbyStations.addressPresetLabel") }}</label>
         <div class="my-nearby-stations-page__address-controls">
-          <select
+          <MaterialCombobox
             id="my-nearby-address-preset"
-            :value="selectedPresetId"
+            :model-value="selectedPresetId"
+            :options="[...(selectedPresetId === NEARBY_CUSTOM_PRESET_ID ? [{ id: NEARBY_CUSTOM_PRESET_ID, label: customAddressLabel }] : []), ...presetOptions]"
+            :aria-label="t('nearbyStations.addressPresetLabel')"
             :disabled="placeLoading"
-            @change="selectPreset(($event.target as HTMLSelectElement).value as NearbyAddressPresetId)"
-          >
-            <option v-if="selectedPresetId === NEARBY_CUSTOM_PRESET_ID" :value="NEARBY_CUSTOM_PRESET_ID">
-              {{ customAddressLabel }}
-            </option>
-            <option v-for="preset in presetOptions" :key="preset.id" :value="preset.id">
-              {{ preset.label }}
-            </option>
-          </select>
+            teleport
+            @update:model-value="selectPreset($event as NearbyAddressPresetId)"
+          />
           <button
             class="my-nearby-stations-page__address-book"
             type="button"
@@ -2260,7 +2257,7 @@ onBeforeUnmount(() => {
 .my-nearby-stations-page__address { display: grid; gap: 6px; min-width: min(100%, 560px); }
 .my-nearby-stations-page__address > label, .my-nearby-stations-page__radius label { color: var(--muted); font-size: .74rem; font-weight: 850; }
 .my-nearby-stations-page__address-controls { align-items: stretch; display: flex; gap: 8px; min-width: 0; }
-.my-nearby-stations-page__address select { background: #f8f9fd; border: 1px solid rgba(16,35,63,.14); border-radius: 9px; color: var(--ink); flex: 1 1 auto; font: inherit; min-height: 42px; min-width: 0; padding: 8px 11px; }
+.my-nearby-stations-page__address .material-combobox { flex: 1 1 auto; min-width: 0; }
 .my-nearby-stations-page__address-book { align-items: center; background: #f1f0ff; border: 1px solid rgba(81,70,255,.2); border-radius: 9px; color: #4034df; display: inline-flex; flex: 0 0 auto; font: inherit; font-size: .74rem; font-weight: 850; gap: 6px; justify-content: center; min-height: 42px; padding: 8px 11px; white-space: nowrap; }
 .my-nearby-stations-page__address-book:hover, .my-nearby-stations-page__address-book:focus-visible { background: #e8e5ff; border-color: #5146ff; outline: 0; }
 .my-nearby-stations-page__address-book:disabled { cursor: not-allowed; opacity: .6; }

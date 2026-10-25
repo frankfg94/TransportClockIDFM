@@ -500,7 +500,9 @@ function formatDepartureMeta(departure: Departure): string {
   const normalizedLabel = normalizeText(departure.monitoringLabel);
   const normalizedDestination = normalizeText(departure.destination);
   const parts: string[] = [];
-  const serviceLabel = formatDepartureServiceType(departure.serviceType);
+  const serviceLabel = formatDepartureServiceType(departure.serviceType) ||
+    (departure.serviceTypeStatus === "loading" ? t("pattern.loadingPattern") :
+      departure.serviceTypeStatus === "unavailable" ? t("lineOptimizer.unknownService") : "");
 
   if (
     departure.monitoringLabel &&
@@ -535,6 +537,16 @@ function formatDepartureServiceType(
   }
 
   return "";
+}
+
+function formatDepartureSection(departure: Departure): string {
+  return departure.serviceType === "semi-direct" && departure.serviceSection
+    ? t(`board.serviceSection.${departure.serviceSection}`)
+    : "";
+}
+
+function needsSeparateServiceRow(departure: Departure): boolean {
+  return Boolean(formatDepartureServiceType(departure.serviceType) || departure.serviceTypeStatus);
 }
 
 function formatRemainingStopCount(departure: Departure): string {
@@ -1001,6 +1013,7 @@ onUnmounted(() => {
                 <button
                   v-if="canOpenPatternFromRow"
                   class="departure__main departure__main-button"
+                  :class="{ 'departure__main--service-detail': needsSeparateServiceRow(departure) }"
                   type="button"
                   @click.stop="
                     openPatternForDeparture({
@@ -1037,13 +1050,17 @@ onUnmounted(() => {
                       {{ formatDepartureMeta(departure) }}
                     </span>
 
+                    <span v-if="formatDepartureSection(departure)" class="departure__section">
+                      {{ formatDepartureSection(departure) }}
+                    </span>
+
                     <small v-if="formatRemainingStopCount(departure)">
                       {{ formatRemainingStopCount(departure) }}
                     </small>
                   </span>
                 </button>
 
-                <div v-else class="departure__main">
+                <div v-else class="departure__main" :class="{ 'departure__main--service-detail': needsSeparateServiceRow(departure) }">
                   <strong>{{ departure.destination }}</strong>
 
                   <span
@@ -1055,6 +1072,10 @@ onUnmounted(() => {
                   >
                     <span v-if="formatDepartureMeta(departure)">
                       {{ formatDepartureMeta(departure) }}
+                    </span>
+
+                    <span v-if="formatDepartureSection(departure)" class="departure__section">
+                      {{ formatDepartureSection(departure) }}
                     </span>
 
                     <small v-if="formatRemainingStopCount(departure)">

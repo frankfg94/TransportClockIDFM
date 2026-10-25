@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import DraggableBottomSheet from "../../components/DraggableBottomSheet.vue";
+import type { BottomSheetStage } from "../../components/draggableBottomSheet";
 import { ArrowLeftIcon, XIcon } from "lucide-vue-next";
 import GlobalMapSidebarBodyLine from "./GlobalMapSidebarBodyLine.vue";
 import GlobalMapSidebarBodyStation from "./GlobalMapSidebarBodyStation.vue";
@@ -32,7 +35,8 @@ import type {
 } from "../../types/ridership";
 
 type GlobalMapSidebarSheetSnap = "collapsed" | "medium" | "expanded";
-const MOBILE_SHEET_OVERSCROLL_PX = 56;
+const toGenericStage = { collapsed: "peek", medium: "mid", expanded: "full" } as const;
+const fromGenericStage = { peek: "collapsed", mid: "medium", full: "expanded" } as const;
 
 const props = withDefaults(defineProps<{
   station?: GlobalMapStation;
@@ -68,6 +72,8 @@ const props = withDefaults(defineProps<{
   showLineConnectionIcons?: boolean;
   showBusCorrespondences?: boolean;
   showServedCityZones?: boolean;
+  servedCitiesLoading?: boolean;
+  servedCitiesError?: boolean;
   nearbyPlaces?: NearbyPlace[];
   nearbyPlacesLoading?: boolean;
   nearbyPlacesError?: boolean;
@@ -143,32 +149,14 @@ const emit = defineEmits<{
 const { t } = useI18n();
 
 const SIDEBAR_PREVIEW_SWITCH_DEBOUNCE_MS = 100;
-const mobileSheetDragging = ref(false);
-const mobileSheetHeight = ref<number>();
 const mobileSheetStage = ref<GlobalMapSidebarSheetSnap>(props.mobileSheetSnap);
-const sidebarElement = ref<HTMLElement>();
-const suppressMobileSheetClick = ref(false);
-let mobileSheetPointerId: number | undefined;
-let mobileSheetPointerStartY = 0;
-let mobileSheetPointerStartHeight = 0;
-let mobileSheetPointerMoved = false;
-let mobileSheetResizeListener: (() => void) | undefined;
-
-const mobileSheetStyle = computed<Record<string, string>>(() => {
-  const style: Record<string, string> = {};
-  if (mobileSheetHeight.value && isMobileViewport()) {
-    style.height = `${mobileSheetHeight.value}px`;
-  }
-  return style;
-});
-
-watch(
-  () => props.mobileSheetSnap,
-  (snap) => {
-    mobileSheetStage.value = snap;
-    mobileSheetHeight.value = undefined;
-  },
-);
+const mobileViewportActive = ref(isMobileViewport());
+function updateMobileViewport(): void { mobileViewportActive.value = isMobileViewport(); }
+watch(() => props.mobileSheetSnap, snap => { mobileSheetStage.value = snap; });
+function setGenericSheetStage(stage: BottomSheetStage): void {
+  mobileSheetStage.value = fromGenericStage[stage];
+  emit("mobile-sheet-snap-change", mobileSheetStage.value);
+}
 
 // The tooltip can briefly lose its hovered line while the pointer crosses the
 // small gap between two overlapping line choices. Keep the current body
@@ -367,6 +355,8 @@ const sidebarBodyProps = computed<GlobalMapSidebarBodyProps>(() => ({
   showLineConnectionIcons: props.showLineConnectionIcons,
   showBusCorrespondences: props.showBusCorrespondences,
   showServedCityZones: props.showServedCityZones,
+  servedCitiesLoading: props.servedCitiesLoading,
+  servedCitiesError: props.servedCitiesError,
   nearbyPlaces: props.nearbyPlaces,
   nearbyPlacesLoading: props.nearbyPlacesLoading,
   nearbyPlacesError: props.nearbyPlacesError,
@@ -569,97 +559,12 @@ function isMobileViewport(): boolean {
     && window.matchMedia("(max-width: 700px)").matches;
 }
 
-function mobileSheetSnapHeight(snap: GlobalMapSidebarSheetSnap): number {
-  const viewportHeight = Math.max(
-    1,
-    typeof document !== "undefined" ? document.documentElement.clientHeight : 0,
-    typeof window !== "undefined" ? window.innerHeight : 720,
-  );
-  if (snap === "collapsed") return Math.min(210, Math.max(168, viewportHeight * 0.24));
-  if (snap === "medium") return Math.min(520, Math.max(360, viewportHeight * 0.56));
-  return Math.min(760, Math.max(500, viewportHeight * 0.92));
-}
-
-function setMobileSheetStage(stage: GlobalMapSidebarSheetSnap): void {
-  mobileSheetStage.value = stage;
-  mobileSheetHeight.value = mobileSheetSnapHeight(stage);
-  emit("mobile-sheet-snap-change", stage);
-}
-
-function cycleMobileSheetStage(): void {
-  if (suppressMobileSheetClick.value) {
-    suppressMobileSheetClick.value = false;
-    return;
-  }
-  if (mobileSheetPointerMoved) {
-    mobileSheetPointerMoved = false;
-    return;
-  }
-
-  const next: Record<GlobalMapSidebarSheetSnap, GlobalMapSidebarSheetSnap> = {
-    collapsed: "medium",
-    medium: "expanded",
-    expanded: "collapsed",
+function mobileSheetSnapHeights(viewportHeight: number): Record<BottomSheetStage, number> {
+  return {
+    peek: Math.min(210, Math.max(168, viewportHeight * 0.24)),
+    mid: Math.min(520, Math.max(360, viewportHeight * 0.56)),
+    full: Math.min(760, Math.max(500, viewportHeight * 0.92)),
   };
-  setMobileSheetStage(next[mobileSheetStage.value]);
-}
-
-function startMobileSheetDrag(event: PointerEvent): void {
-  if (!props.mobileSheet || !isMobileViewport()) return;
-  if (event.pointerType === "mouse" && event.button !== 0) return;
-
-  mobileSheetPointerId = event.pointerId;
-  mobileSheetPointerStartY = event.clientY;
-  mobileSheetPointerStartHeight = sidebarElement.value?.getBoundingClientRect().height
-    || mobileSheetSnapHeight(mobileSheetStage.value);
-  mobileSheetPointerMoved = false;
-  mobileSheetDragging.value = true;
-  (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
-  event.preventDefault();
-}
-
-function moveMobileSheetDrag(event: PointerEvent): void {
-  if (!mobileSheetDragging.value || event.pointerId !== mobileSheetPointerId) return;
-  const delta = mobileSheetPointerStartY - event.clientY;
-  if (Math.abs(delta) > 4) mobileSheetPointerMoved = true;
-  const minHeight = Math.max(112, mobileSheetSnapHeight("collapsed") - MOBILE_SHEET_OVERSCROLL_PX);
-  const maxHeight = mobileSheetSnapHeight("expanded");
-  mobileSheetHeight.value = Math.max(
-    minHeight,
-    Math.min(maxHeight, mobileSheetPointerStartHeight + delta),
-  );
-  event.preventDefault();
-}
-
-function finishMobileSheetDrag(event: PointerEvent): void {
-  if (!mobileSheetDragging.value || event.pointerId !== mobileSheetPointerId) return;
-  const currentTarget = event.currentTarget as HTMLElement | null;
-  currentTarget?.releasePointerCapture?.(event.pointerId);
-  const currentHeight = mobileSheetHeight.value ?? mobileSheetPointerStartHeight;
-  const stages: GlobalMapSidebarSheetSnap[] = ["collapsed", "medium", "expanded"];
-  const nearest = stages.reduce((closest, stage) =>
-    Math.abs(mobileSheetSnapHeight(stage) - currentHeight) < Math.abs(mobileSheetSnapHeight(closest) - currentHeight)
-      ? stage
-      : closest,
-  "collapsed" as GlobalMapSidebarSheetSnap);
-
-  mobileSheetDragging.value = false;
-  mobileSheetPointerId = undefined;
-  suppressMobileSheetClick.value = mobileSheetPointerMoved;
-  setMobileSheetStage(nearest);
-  if (suppressMobileSheetClick.value && typeof window !== "undefined") {
-    window.setTimeout(() => {
-      suppressMobileSheetClick.value = false;
-    }, 120);
-  }
-  event.preventDefault();
-}
-
-function cancelMobileSheetDrag(event: PointerEvent): void {
-  if (!mobileSheetDragging.value || event.pointerId !== mobileSheetPointerId) return;
-  mobileSheetDragging.value = false;
-  mobileSheetPointerId = undefined;
-  mobileSheetHeight.value = undefined;
 }
 
 // Refresh the date even while the same pinned line remains open overnight.
@@ -667,19 +572,15 @@ onMounted(() => {
   frequencyDateTimer = setInterval(() => {
     if (frequencyDate !== getGtfsRequestDate()) scheduleFrequencyLoad();
   }, 30_000);
-  mobileSheetResizeListener = () => {
-    if (!mobileSheetDragging.value) mobileSheetHeight.value = undefined;
-  };
-  window.addEventListener("resize", mobileSheetResizeListener);
+  updateMobileViewport();
+  window.addEventListener("resize", updateMobileViewport);
 });
 
 onBeforeUnmount(() => {
   clearPreviewSwitchTimer();
   if (frequencyTimer !== undefined) clearTimeout(frequencyTimer);
   if (frequencyDateTimer !== undefined) clearInterval(frequencyDateTimer);
-  if (mobileSheetResizeListener && typeof window !== "undefined") {
-    window.removeEventListener("resize", mobileSheetResizeListener);
-  }
+  window.removeEventListener("resize", updateMobileViewport);
   frequencyController?.abort();
   frequencyRequestToken.value += 1;
   ridershipRequestToken.value += 1;
@@ -689,13 +590,22 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <aside
-    ref="sidebarElement"
+  <DraggableBottomSheet
+    :enabled="props.mobileSheet && mobileViewportActive"
+    :stage="toGenericStage[mobileSheetStage]"
+    :snap-heights="mobileSheetSnapHeights"
+    :show-close-button="false"
+    :dismiss-on-swipe="false"
+    cycle-stages
+    unwrapped-content
+    :resize-label="t('globalMap.sidebar.dragHandle')"
+    :handle-attrs="{ 'data-global-map-sidebar-sheet-handle': '', 'aria-expanded': mobileSheetStage !== 'collapsed' }"
+    @update:stage="setGenericSheetStage"
+    @close="emit('close')"
     class="global-map-picker-sidebar"
     :class="{
       'global-map-picker-sidebar--mobile-sheet': props.mobileSheet,
       [`global-map-picker-sidebar--mobile-${mobileSheetStage}`]: props.mobileSheet,
-      'global-map-picker-sidebar--mobile-dragging': props.mobileSheet && mobileSheetDragging,
     }"
     data-global-map-picker-sidebar
     :data-mobile-sidebar-sheet="mobileSheetStage"
@@ -703,21 +613,6 @@ onBeforeUnmount(() => {
     :aria-label="t('globalMap.sidebar.aria')"
     @pointerleave="emit('hover-line', undefined)"
   >
-    <button
-      v-if="props.mobileSheet"
-      class="global-map-picker-sidebar__sheet-handle"
-      type="button"
-      :aria-label="t('globalMap.sidebar.dragHandle')"
-      :aria-expanded="mobileSheetStage !== 'collapsed'"
-      data-global-map-sidebar-sheet-handle
-      @click="cycleMobileSheetStage"
-      @pointerdown="startMobileSheetDrag"
-      @pointermove="moveMobileSheetDrag"
-      @pointerup="finishMobileSheetDrag"
-      @pointercancel="cancelMobileSheetDrag"
-    >
-      <span aria-hidden="true" />
-    </button>
     <header class="global-map-picker-sidebar__header" :class="{ 'global-map-picker-sidebar__header--line': panelLine || trafficCalendarOpen }">
       <div class="global-map-picker-sidebar__header-main">
         <button
@@ -778,19 +673,18 @@ onBeforeUnmount(() => {
 
       <section v-if="selectedStationCount && !trafficCalendarOpen" class="global-map-picker-sidebar__dashboard">
         <strong>{{ t("globalMap.sidebar.dashboardCount", { count: selectedStationCount }) }}</strong>
-        <select :value="dashboardPlaceId" :aria-label="t('globalMap.sidebar.dashboardPlace')" @change="emit('update:dashboardPlaceId', ($event.target as HTMLSelectElement).value)">
-          <option v-for="place in dashboardPlaces" :key="place.id" :value="place.id">{{ place.label }}</option>
-        </select>
+        <MaterialCombobox :model-value="dashboardPlaceId" :options="dashboardPlaces" :aria-label="t('globalMap.sidebar.dashboardPlace')" :disabled="dashboardBusy || !dashboardPlaces.length" teleport @update:model-value="emit('update:dashboardPlaceId', $event)" />
         <button class="global-map-picker-sidebar__primary-action" type="button" :disabled="dashboardBusy || !dashboardPlaces.length" @click="emit('add-selection')">{{ t("globalMap.sidebar.addSelection") }}</button>
         <button v-if="lastDashboardUndo" class="global-map-picker-sidebar__secondary-action" type="button" :disabled="dashboardBusy" @click="emit('undo-dashboard')">{{ t("globalMap.sidebar.undo") }}</button>
         <p v-if="dashboardMessage" aria-live="polite">{{ dashboardMessage }}</p>
       </section>
     </div>
-  </aside>
+  </DraggableBottomSheet>
 </template>
 
 <style>
-.global-map-picker-sidebar {
+.global-map-picker-sidebar,
+.global-map-picker-sidebar.draggable-bottom-sheet {
   --sidebar-border: #e5e9f2;
   position: absolute;
   z-index: 6;
@@ -857,7 +751,6 @@ onBeforeUnmount(() => {
 .global-map-picker-sidebar__back:hover,
 .global-map-picker-sidebar__back:focus-visible { border-color: #d8dfec; outline: 0; background: #f1f4fa; color: #18233f; }
 .global-map-picker-sidebar__back svg { display: block; flex: 0 0 auto; }
-.global-map-picker-sidebar__sheet-handle { display: none; }
 .global-map-picker-sidebar__close {
   display: inline-flex;
   flex: 0 0 auto;
@@ -1099,7 +992,7 @@ onBeforeUnmount(() => {
   .global-map-picker-sidebar { width: min(430px, calc(100% - 16px)); }
 }
 @media (max-width: 700px) {
-  .global-map-picker-sidebar--mobile-sheet {
+  .global-map-picker-sidebar.global-map-picker-sidebar--mobile-sheet {
     top: auto;
     right: 0;
     bottom: 0;
@@ -1107,42 +1000,15 @@ onBeforeUnmount(() => {
     width: 100%;
     max-width: none;
     height: 184px;
+    min-height: 0;
     max-height: 100%;
     border-left: 0;
     border-radius: 20px 20px 0 0;
     box-shadow: 0 -24px 70px rgba(15, 23, 42, .24);
     transition: height 260ms cubic-bezier(.22, .8, .26, 1);
   }
-  .global-map-picker-sidebar--mobile-collapsed { height: 184px; }
-  .global-map-picker-sidebar--mobile-medium { height: 56dvh; }
-  .global-map-picker-sidebar--mobile-expanded { height: 92dvh; }
-  .global-map-picker-sidebar--mobile-dragging { transition: none; }
-  .global-map-picker-sidebar__sheet-handle {
-    display: flex;
-    flex: 0 0 25px;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    padding: 0;
-    border: 0;
-    border-radius: 20px 20px 0 0;
-    background: rgba(255, 255, 255, .98);
-    color: #65718a;
-    cursor: grab;
-    touch-action: none;
-  }
-  .global-map-picker-sidebar__sheet-handle:active { cursor: grabbing; }
-  .global-map-picker-sidebar__sheet-handle span {
-    display: block;
-    width: 42px;
-    height: 5px;
-    border-radius: 999px;
-    background: #c4c9d8;
-  }
-  .global-map-picker-sidebar__sheet-handle:focus-visible {
-    outline: 2px solid #5146ff;
-    outline-offset: -3px;
-  }
+  .global-map-picker-sidebar.draggable-bottom-sheet--dragging { transition: none; }
+  .global-map-picker-sidebar.draggable-bottom-sheet .draggable-bottom-sheet__drag-handle { flex: 0 0 25px; padding: 0; }
   .global-map-picker-sidebar--mobile-sheet .global-map-picker-sidebar__header {
     flex: 0 0 auto;
     min-height: 58px;

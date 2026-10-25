@@ -419,12 +419,13 @@ export function useNearbyHeavyTransports(
   let disposed = false;
   let requestController: AbortController | undefined;
   let candidateOriginKey = "";
+  let completedOriginKey: string | undefined;
 
   const resolver = options.resolver ?? defaultNearbyHeavyTransportResolver;
   const journeyProvider = options.journeyProvider ?? defaultJourneyProvider;
   const visibleCandidates = computed(() => candidates.value.filter((candidate) => !hiddenStationIds.value.has(candidate.id)));
 
-  async function refresh(): Promise<void> {
+  async function refresh(reason: "manual" | "inputs" | "interval" | "visibility" = "manual"): Promise<void> {
     if (disposed) return;
     requestController?.abort();
     requestController = undefined;
@@ -448,7 +449,9 @@ export function useNearbyHeavyTransports(
     requestController = controller;
     isLoading.value = true;
     error.value = undefined;
-    const finishDebug = beginVerdictDebugTask("heavy-transports", "resolve", { localStations: source.stations.value.length, futureStations: source.futureProjects?.value.length ?? 0 });
+    const phase = completedOriginKey === originKey ? "refresh" : "initial";
+    const finishDebug = beginVerdictDebugTask("heavy-transports", "resolve", { phase, reason, generation: token,
+      localStations: source.stations.value.length, futureStations: source.futureProjects?.value.length ?? 0 });
     const probe = async <T>(run: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal, task = "probe", details?: Record<string, unknown>): Promise<T> => {
       const finishProbe = beginVerdictDebugTask("heavy-subtasks", task, details);
       try {
@@ -489,7 +492,7 @@ export function useNearbyHeavyTransports(
         futureProjects: source.futureProjects?.value ?? [],
         signal: controller.signal,
       });
-      if (token === requestToken.value && !controller.signal.aborted) candidates.value = next;
+      if (token === requestToken.value && !controller.signal.aborted) { candidates.value = next; completedOriginKey = originKey; }
       finishDebug(controller.signal.aborted ? "cancelled" : "ready", { candidates: next.length, alternatives: next.reduce((count, candidate) => count + (candidate.accessAlternatives?.length ?? 0), 0) });
     } catch (cause) {
       finishDebug(controller.signal.aborted || isAbortError(cause) ? "cancelled" : "error");
@@ -510,7 +513,7 @@ export function useNearbyHeavyTransports(
     // Catalogue watchers in the same turn still share a single refresh.
     queueMicrotask(() => {
       refreshQueued = false;
-      if (!disposed) void refresh();
+      if (!disposed) void refresh("inputs");
     });
   }
 
@@ -547,7 +550,7 @@ export function useNearbyHeavyTransports(
 
   onMounted(() => {
     refreshInterval = window.setInterval(() => {
-      if (document.visibilityState !== "hidden" && !isLoading.value) void refresh();
+      if (document.visibilityState !== "hidden" && !isLoading.value) void refresh("interval");
     }, HEAVY_REFRESH_INTERVAL_MS);
     document.addEventListener("visibilitychange", handleVisibilityChange);
   });
@@ -562,7 +565,7 @@ export function useNearbyHeavyTransports(
   });
 
   function handleVisibilityChange(): void {
-    if (document.visibilityState !== "hidden" && !isLoading.value) void refresh();
+    if (document.visibilityState !== "hidden" && !isLoading.value) void refresh("visibility");
   }
 
   return {

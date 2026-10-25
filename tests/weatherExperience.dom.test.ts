@@ -6,6 +6,7 @@ import type { AppSettings } from "../src/features/app-settings/appSettings";
 import type { WeatherResponse } from "../src/features/weather/types";
 
 const baseSettings: AppSettings = {
+  verdictPersonalJourneys: [],
   version: 2,
   networkConcurrencyMode: "auto",
   language: "fr",
@@ -93,9 +94,9 @@ const rainResponse: WeatherResponse = {
   alert: {
     kind: "rain",
     label: "Pluie",
-    startsAt: "2026-05-28T00:35:00.000Z",
+    startsAt: "2026-05-28T00:34:00.000Z",
     startsInMinutes: 14,
-    umbrellaAfter: "2026-05-28T00:35:00.000Z",
+    umbrellaAfter: "2026-05-28T00:34:00.000Z",
     endsAt: "2026-05-28T01:50:00.000Z",
     endsInMinutes: 90,
     intensity: 2,
@@ -142,6 +143,7 @@ let updateWeatherSettings:
   | undefined;
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.resetModules();
   vi.unstubAllGlobals();
   vi.doUnmock("../src/features/app-settings");
@@ -184,6 +186,42 @@ async function mountWeatherExperience(settingsPatch: Partial<AppSettings>) {
 }
 
 describe("WeatherExperience", () => {
+  it.each([[1, "légère"], [2, "moyenne"], [3, "forte"]] as const)("renders ongoing rain intensity %s without a future departure condition", async (intensity, label) => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, json: async () => ({ ...rainResponse, alert: { ...rainResponse.alert!, startsInMinutes: 0, intensity } }),
+    })));
+    const wrapper = await mountWeatherExperience({});
+    await flushPromises();
+    expect(wrapper.text()).toContain(`Pluie ${label} en cours`);
+    expect(wrapper.text()).toContain("Prends un parapluie");
+    expect(wrapper.text()).not.toContain("si tu pars");
+    expect(wrapper.text()).not.toContain("dans 0 min");
+    expect(wrapper.text()).toContain("fin dans");
+    wrapper.unmount();
+  });
+
+  it("transitions from a future minute to ongoing rain without a second request", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-10-22T09:20:00Z"));
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({
+      ...rainResponse, generatedAt: "2026-10-22T09:20:00Z",
+      alert: { ...rainResponse.alert!, startsAt: "2026-10-22T09:20:01Z", startsInMinutes: 1 },
+    }) }));
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = await mountWeatherExperience({});
+    await flushPromises();
+    expect(wrapper.text()).toContain("Pluie prevue dans 1 min");
+    expect(wrapper.text()).toContain("début dans 1 min");
+    expect(wrapper.text()).toContain("si tu pars");
+    await vi.advanceTimersByTimeAsync(1000);
+    await nextTick();
+    expect(wrapper.text()).toContain("Pluie moyenne en cours");
+    expect(wrapper.text()).not.toContain("si tu pars");
+    expect(wrapper.text()).not.toContain("dans 0 min");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
   it("does not fetch weather when the feature is disabled", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -258,7 +296,7 @@ describe("WeatherExperience", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(wrapper.text()).toContain("Pluie prevue dans 14 min");
     expect(wrapper.text()).toContain("Prends un parapluie");
-    expect(wrapper.text()).toContain("fin dans 1 h 30");
+    expect(wrapper.text()).toContain("début dans 14 min");
     expect(wrapper.findAll(".weather-alert__icon span")).toHaveLength(2);
     expect(wrapper.find("#weather-rain-particles").exists()).toBe(true);
 
@@ -273,6 +311,7 @@ describe("WeatherExperience", () => {
         ...rainResponse,
         alert: {
           ...rainResponse.alert!,
+          startsAt: "2026-05-28T02:20:00.000Z",
           startsInMinutes: 120,
           endsInMinutes: 150,
         },
@@ -284,7 +323,7 @@ describe("WeatherExperience", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("Pluie prevue dans 2 h");
-    expect(wrapper.text()).toContain("fin dans 2 h 30");
+    expect(wrapper.text()).toContain("début dans 2 h");
 
     await wrapper.get(".weather-alert__title").trigger("click");
     expect(wrapper.emitted("open-weather")).toHaveLength(1);
