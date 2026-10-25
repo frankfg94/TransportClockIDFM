@@ -17,6 +17,20 @@ describe("shared GTFS last service", () => {
     expect(findGtfsLastService(timetable, "123")).toEqual({ seconds: 90000, stopName: "A" });
     expect(findGtfsLastService(timetable)).toEqual({ seconds: 90000, stopName: "A" });
   });
+  it.each(["METRO", "TRAM"])("matches map-wrapped NeTEx reference stations to the %s timetable", () => {
+    const reference = "FR::Quay:50123456:FR1";
+    const source = { ...timetable, stops: [{ ...timetable.stops[0]!, topologyId: reference }] };
+    expect(findGtfsLastService(source, "station:" + reference)).toEqual({ seconds: 90000, stopName: "A" });
+    expect(findGtfsLastService(source, "station:FR::Quay:50123457:FR1")).toBeUndefined();
+  });
+  it("recognizes IDFM transport wrappers without conflating quay and stop-place namespaces", () => {
+    const source = { ...timetable, stops: [{ ...timetable.stops[0]!, id: "IDFM:77", parentId: "IDFM:88" }],
+      trips: timetable.trips.map(trip => ({ ...trip, calls: trip.calls.map(call => ({ ...call, stopId: "IDFM:77" })) })) };
+    expect(findGtfsLastService(source, "stop_point:IDFM:77")?.seconds).toBe(90000);
+    expect(findGtfsLastService(source, "stop_area:IDFM:88")?.seconds).toBe(90000);
+    expect(findGtfsLastService(source, "FR::Quay:77:FR1")).toBeUndefined();
+    expect(findGtfsLastService(source, "IDFM:monomodalStopPlace:77")).toBeUndefined();
+  });
   it("keeps missing stations and unavailable datasets explicit", () => {
     expect(findGtfsLastService(timetable, "unknown")).toBeUndefined();
     expect(findGtfsLastService({ ...timetable, status: "out-of-coverage" })).toBeUndefined();

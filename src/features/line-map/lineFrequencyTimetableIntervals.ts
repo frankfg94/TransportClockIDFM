@@ -18,8 +18,12 @@ export interface GtfsLineTimetableWindow {
  * section can be matched without a line-specific alias table.
  */
 export function canonicalGtfsTimetableStationId(value: string): string {
-  const monomodal = value.match(/monomodalStopPlace:(\d+)/iu);
-  return monomodal ? `monomodalStopPlace:${monomodal[1]}` : value;
+  // The map adds station: to NeTEx identities; Navitia adds stop-area/point
+  // wrappers to IDFM identities. These wrappers do not change the station.
+  // Keep the inner namespace: a quay must not equal an unrelated stop place.
+  const reference = value.trim().replace(/^station:/u, "").replace(/^stop_(?:area|point):(?=IDFM:)/u, "");
+  const monomodal = reference.match(/monomodalStopPlace:(\d+)/iu);
+  return monomodal ? `monomodalStopPlace:${monomodal[1]}` : reference;
 }
 
 /**
