@@ -34,7 +34,7 @@ export interface GlobalTransportItinerarySegment {
 }
 
 export interface GlobalTransportItineraryGeometryOptions {
-  /** Controlled routes retain exactly the supplied endpoints and geometry. */
+  /** Controlled routes retain supplied endpoints and walking geometry. Transit geometry may be resolved from the map. */
   preserveSections?: boolean;
   resolveTransitGeometry?: (
     section: NearbyJourneySection,
@@ -139,7 +139,13 @@ function resolveCoordinates(
   options: GlobalTransportItineraryGeometryOptions,
 ): NearbyJourneyPoint[] {
   if (options.preserveSections) {
-    return (section.geometry?.length ?? 0) >= 2 ? section.geometry! : [from, to];
+    if (kind === "transit") {
+      const detailed = options.resolveTransitGeometry?.(section, from, to);
+      // An empty resolved path denotes a known disconnected geometry; do not
+      // replace it with a fabricated line across the gap.
+      if (detailed !== undefined) return detailed;
+    }
+    return (section.geometry?.length ?? 0) >= 2 ? section.geometry! : kind === "transit" ? [] : [from, to];
   }
   if (kind === "walking" && walking?.coordinates && walking.coordinates.length >= 2) {
     return alignNearbyWalkingGeometryToEndpoints(walking.coordinates, from, to);

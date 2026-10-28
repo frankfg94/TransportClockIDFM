@@ -75,6 +75,17 @@ describe("global transport itinerary geometry", () => {
     expect(bounds?.minY).toBeLessThan(bounds?.maxY ?? 0);
   });
 
+  it("uses resolved detailed transit geometry in a controlled itinerary without changing its walking geometry", () => {
+    const walk = { type: "street_network", mode: "walking", durationSeconds: 60, fromPoint: origin, toPoint: tramStop, geometry: [origin, tramStop] };
+    const transit = { type: "public_transport", lineMode: "TRAM" as const, lineCode: "T10", durationSeconds: 60, fromPoint: tramStop, toPoint: destination, geometry: [tramStop, destination] };
+    const detail = [tramStop, rerStop, destination];
+    const segments = createGlobalTransportItinerarySegments({ id: "controlled", sections: [walk, transit] }, origin, destination, { preserveSections: true, resolveTransitGeometry: () => detail });
+    expect(segments.map(segment => segment.coordinates)).toEqual([[origin, tramStop], detail]);
+    expect(createGlobalTransportItinerarySegments({ id: "controlled", sections: [transit] }, origin, destination, { preserveSections: true, resolveTransitGeometry: () => [] })).toEqual([]);
+    expect(createGlobalTransportItinerarySegments({ id: "controlled", sections: [transit] }, origin, destination, { preserveSections: true, resolveTransitGeometry: () => undefined })[0]?.coordinates).toEqual(transit.geometry);
+    expect(createGlobalTransportItinerarySegments({ id: "controlled", sections: [{ ...transit, geometry: undefined }] }, origin, destination, { preserveSections: true })).toEqual([]);
+  });
+
   it("ignores non-transport sections without inventing a map segment", () => {
     const segments = createGlobalTransportItinerarySegments(
       {
@@ -205,6 +216,33 @@ describe("global transport itinerary geometry", () => {
     expect(resolveGlobalTransportItineraryLine(section, [line])).toBe(line);
     expect(resolveGlobalTransportItineraryLine(section, [line, { ...line, id: "other" }])).toBeUndefined();
     expect(resolveGlobalTransportItineraryLine({ ...section, lineId: "other" }, [line, { ...line, id: "other" }])?.id).toBe("other");
+  });
+
+  it.each([
+    ["T10", "TRAM", "Les Peintres", "Croix de Berny"],
+    ["B", "RER", "La Croix de Berny", "Châtelet - Les Halles"],
+  ] as const)("uses available detailed geometry for %s between actual itinerary stops", async (code, mode, fromName, toName) => {
+    const source = new TransportMapDataSource({ maxChunkConcurrency: 1, loader: new GlobalMapAssetLoader({ fetcher: async (input) => {
+      const asset = String(input).split("/global-map/v1/")[1];
+      return asset ? new Response(readFileSync(resolve("public/data/global-map/v1", asset))) : new Response(null, { status: 404 });
+    } }) });
+    try {
+      await source.initialize();
+      const section = { durationSeconds: 900, lineCode: code, lineMode: mode };
+      const mapLine = resolveGlobalTransportItineraryLine(section, source.getNetwork().lines)!;
+      expect(mapLine).toBeDefined();
+      const detailed = await source.queryViewport(createCamera({ zoom: 14.2 }), 0, 1, mapLine.id, [mapLine.id]);
+      const network = source.getNetwork();
+      const findStation = (name: string) => network.stations.find(station => station.name === name && station.lineIds.includes(mapLine.id));
+      const from = findStation(fromName);
+      const to = findStation(toName);
+      expect(from).toBeDefined();
+      expect(to).toBeDefined();
+      const paths = selectPreferredLinePaths(detailed.paths, network.regionalPaths, mapLine.id);
+      const clipped = clipGlobalTransportItineraryLine(paths, mapLine, network.stationsById, section, from!, to!);
+      expect(clipped?.length).toBeGreaterThan(2);
+      expect(paths.some(path => path.geometrySource === "gtfs")).toBe(true);
+    } finally { source.dispose(); }
   });
 
   it("uses the actual detailed map vertices for Herblay–Saint-Lazare instead of the regional LOD", async () => {

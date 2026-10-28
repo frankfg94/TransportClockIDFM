@@ -76,6 +76,15 @@ describe("AppNavigation", () => {
     expect(menuPanel?.querySelector('a[href="/health"]')).toBeTruthy();
     expect(menuPanel?.querySelector('a[href="/nearby-stations"]')).toBeTruthy();
     expect(menuPanel?.textContent).toContain("Stations proches");
+    const optimizer = menuPanelWrapper.get("button.app-navigation__optimizer-toggle");
+    expect(optimizer.text()).toContain("Optimizer");
+    await optimizer.element.parentElement!.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "touch" }));
+    expect(optimizer.attributes("aria-expanded")).toBe("false");
+    await optimizer.trigger("click");
+    expect(optimizer.attributes("aria-expanded")).toBe("true");
+    expect(menuPanel?.querySelector('a[href="/optimizer/line/tram/T10"]')?.textContent).toContain("T10 Châtelet");
+    expect(menuPanel?.querySelector('a[href="/optimizer/velizy"]')?.textContent).toContain("T10 Vélizy");
+    expect(menuPanel?.querySelector('a[href="/optimizer/new"]')?.textContent).toContain("Nouveau");
     expect(menuPanel?.textContent).toContain("Health");
 
     await vi.advanceTimersByTimeAsync(60_000);

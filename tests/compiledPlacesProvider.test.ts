@@ -43,6 +43,25 @@ const ranking: PlacesRankingDocument = {
 };
 
 describe("compiled places provider", () => {
+  it("lets queued browser work run during a large scan without losing results", async () => {
+    const largeCity = { ...city, places: Array.from({ length: 2000 }, (_, index) => ({ ...city.places[0]!, id: `large:${index}` })) };
+    const provider = createCompiledPlacesProvider({ fetcher: vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
+      String(input).endsWith('manifest.json') ? manifest : largeCity,
+    ))) });
+    let clock = 0;
+    const timing = vi.spyOn(performance, 'now').mockImplementation(() => clock += 10);
+    let browserWorkRan = false;
+    const pendingBrowserWork = setTimeout(() => { browserWorkRan = true; }, 0);
+    try {
+      const results = await provider.searchNearby({ origin: { lon: 2.25, lat: 48.75, code: '92019' }, radiusMeters: 600 });
+      expect(browserWorkRan).toBe(true);
+      expect(results).toHaveLength(2000);
+      expect(new Set(results.map(place => place.id)).size).toBe(2000);
+    } finally {
+      timing.mockRestore();
+      clearTimeout(pendingBrowserWork);
+    }
+  });
   it("includes a neighboring commune and filters exactly to the requested circle beyond 2 km", async () => {
     const neighbor = { ...city, city: { ...city.city, code: "92002" }, places: [
       { ...city.places[0]!, cityCode: "92002", id: "neighbor", lon: 2.251, tags: { email: "hello@example.test" } },
@@ -62,8 +81,10 @@ describe("compiled places provider", () => {
     expect(nearby.find(p => p.id === "neighbor")?.tags?.email).toBe("hello@example.test");
     const large = await provider.searchNearby({ origin, radiusMeters: 3_000 });
     expect(large.map(p => p.id)).toContain("far");
-    const line = await provider.searchNearbyCities({ cities: [{ code: "92019" }], origins: [origin], radiusMeters: 160 });
+    const onProgress = vi.fn();
+    const line = await provider.searchNearbyCities({ cities: [{ code: "92019" }], origins: [origin], radiusMeters: 160, onProgress });
     expect(line.map(p => p.id)).toContain("neighbor");
+    expect(onProgress.mock.calls).toEqual([[0, 2], [1, 2], [2, 2]]);
   });
   it("loads the manifest and only the selected commune JSON", async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {

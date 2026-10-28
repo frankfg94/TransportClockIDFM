@@ -1249,16 +1249,26 @@ export function materializeLod(path: GlobalMapPath, lodLevel: number): GlobalMap
 export function breakIncompleteGtfsConnectors(path: GlobalMapPath): GlobalMapPath {
   if (
     path.geometrySource !== "gtfs" ||
-    path.quality.complete ||
-    // rows-v2 and current chunk assets carry compiler-authored breaks. Keep
-    // them verbatim; adding station-boundary breaks here would alter the
-    // source subpaths and could erase valid geometry around the gap.
-    path.subpathStarts !== undefined
+    path.quality.complete
   ) return path;
 
-  const connectorBreaks = path.vertices.flatMap((vertex, index) =>
-    index > 0 && path.vertices[index - 1]?.stationId && vertex.stationId ? [index] : [],
-  );
+  const providerStationIds = path.renderStationAnchors
+    ? new Set(path.renderStationAnchors.map((anchor) => anchor.stationId))
+    : undefined;
+  // A chunk's [0] declares clipping continuity, not provider coverage. In an
+  // incomplete provider-anchored path, a station absent from these anchors
+  // has no validated provider endpoint. A direct station pair touching it is
+  // a topology connector, even if the chunk declares one continuous subpath.
+  // Without that evidence, preserve explicit compiler breaks verbatim.
+  const connectorBreaks = path.vertices.flatMap((vertex, index) => {
+    const previousStationId = path.vertices[index - 1]?.stationId;
+    if (!previousStationId || !vertex.stationId) return [];
+    const unsupported = path.subpathStarts === undefined || (
+      providerStationIds !== undefined &&
+      (!providerStationIds.has(previousStationId) || !providerStationIds.has(vertex.stationId))
+    );
+    return unsupported && !path.subpathStarts?.includes(index) ? [index] : [];
+  });
   if (connectorBreaks.length === 0) return path;
 
   // The pack marks a topology connector as incomplete when a physical edge

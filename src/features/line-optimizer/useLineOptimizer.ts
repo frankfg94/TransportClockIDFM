@@ -11,6 +11,24 @@ import { DEFAULT_OPTIMIZER_SETTINGS } from "./lineOptimizer";
 import { createLineOptimizerProvider, type LineOptimizerResult } from "./lineOptimizerProvider";
 import { optimizerNameKey, type LineOptimizerConfig } from "./optimizerConfig";
 
+// A geocoder can return unrelated streets when it cannot find the requested address.
+// For numbered addresses, require the number and street to match before routing.
+function matchingAddress(query: string, points: GeocoderPoint[]): GeocoderPoint | undefined {
+  const street = query.split(",")[0]!.replace(/\b\d{5}\b.*$/, "").trim();
+  if (!/^\d+\b/.test(street)) return points[0];
+  const key = optimizerNameKey(street);
+  const fullKey = optimizerNameKey(query);
+  const hasLocality = fullKey !== key;
+  return points.find((point) => {
+    const label = optimizerNameKey(point.label ?? point.address);
+    if (!hasLocality) return label === key || label.startsWith(`${key} `);
+    const postcode = query.match(/\b\d{5}\b/)?.[0];
+    if (postcode && !label.split(" ").includes(postcode)) return false;
+    const withoutPostcode = (value: string) => value.replace(/\b\d{5}\b/g, "").replace(/\s+/g, " ").trim();
+    return withoutPostcode(label) === withoutPostcode(fullKey);
+  });
+}
+
 export function useLineOptimizer(config: LineOptimizerConfig) {
   const addressBook = useAddressBook();
   const geocoder = createIgnTransportMapGeocoder();
@@ -19,7 +37,7 @@ export function useLineOptimizer(config: LineOptimizerConfig) {
   const destinationQuery = ref(config.defaultDestination);
   const originPoint = shallowRef<GeocoderPoint>();
   const destinationPoint = shallowRef<GeocoderPoint>();
-  const settings = ref({ ...DEFAULT_OPTIMIZER_SETTINGS });
+  const settings = ref({ ...DEFAULT_OPTIMIZER_SETTINGS, ...(config.destinationOptimizer ? { walkSeconds: undefined, transferSeconds: undefined, preferSemiDirect: false, minimizeBusTransfers: true, limitConnections: true } : {}) });
   const result = shallowRef<LineOptimizerResult>();
   const status = ref<"idle" | "loading" | "ready" | "partial" | "empty" | "error">("idle");
   const errorPhase = ref<"locations" | "journeys">("locations");
@@ -92,8 +110,8 @@ export function useLineOptimizer(config: LineOptimizerConfig) {
       (station) => optimizerNameKey(station.label) === optimizerNameKey(query),
     );
     if (exact.length === 1) return exact[0];
-    if (optimizerNameKey(query) === optimizerNameKey(config.defaultDestination)) return undefined;
-    return (await geocoder.geocode(query, signal))[0];
+    if (!config.destinationOptimizer && optimizerNameKey(query) === optimizerNameKey(config.defaultDestination)) return undefined;
+    return matchingAddress(query, await geocoder.geocode(query, signal));
   }
 
   async function refresh() {
@@ -103,14 +121,13 @@ export function useLineOptimizer(config: LineOptimizerConfig) {
     controller = new AbortController();
     const signal = controller.signal;
     status.value = "loading";
-    result.value = undefined;
     errorPhase.value = "locations";
     try {
       if (!originQuery.value.trim() || !destinationQuery.value.trim())
         throw new Error("optimizer-location-required");
       const [origin, destination] = await Promise.all([
         originPoint.value ??
-          geocoder.geocode(originQuery.value.trim(), signal).then((points) => points[0]),
+          geocoder.geocode(originQuery.value.trim(), signal).then((points) => matchingAddress(originQuery.value.trim(), points)),
         destinationPoint.value ?? resolveDestination(signal),
       ]);
       signal.throwIfAborted();

@@ -117,10 +117,18 @@ export function createCurrentPlacesProvider(
 
     async searchNearbyCities(request: NearbyPlacesCitiesRequest, signal?: AbortSignal): Promise<NearbyPlace[]> {
       if (compiledProvider.searchNearbyCities) {
+        let compiledProgressActive = true;
         try {
-          return await compiledProvider.searchNearbyCities(request, signal);
+          return await compiledProvider.searchNearbyCities({
+            ...request,
+            onProgress: (completed, total) => {
+              if (compiledProgressActive) request.onProgress?.(completed, total);
+            },
+          }, signal);
         } catch (error) {
           if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
+        } finally {
+          compiledProgressActive = false;
         }
       }
       // The compiled provider receives every station so its static spatial
@@ -128,10 +136,14 @@ export function createCurrentPlacesProvider(
       // invalid, keep the legacy HTTP fallback on representative origins
       // instead of turning one line into hundreds of rate-limited calls.
       const fallbackOrigins = representativeOrigins(request.origins, MAX_FALLBACK_CITY_ORIGINS);
+      let completed = 0;
+      request.onProgress?.(completed, fallbackOrigins.length);
       const settled = await Promise.allSettled(fallbackOrigins.map((origin) => searchNearbyFallback({
         origin,
         radiusMeters: request.radiusMeters,
-      }, signal)));
+      }, signal).finally(() => {
+        if (!signal?.aborted) request.onProgress?.(++completed, fallbackOrigins.length);
+      })));
       const failure = settled.find((result): result is PromiseRejectedResult => result.status === "rejected");
       if (failure && settled.every((result) => result.status === "rejected")) throw failure.reason;
       return settled.flatMap((result) => result.status === "fulfilled" ? result.value : []);

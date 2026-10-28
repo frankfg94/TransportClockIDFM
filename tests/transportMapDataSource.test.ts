@@ -8,9 +8,11 @@ import {
 } from "../src/features/transport-map/data/createTransportMapDataSource";
 import { selectPreferredLinePaths } from "../src/features/transport-map/data/pathPrecedence";
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../src/features/transport-map/config/globalTransportPlanConfig";
-import { GLOBAL_MAP_MODE_ORDER, resolveGlobalMapVertex } from "../src/features/transport-map/contracts/manifest";
+import { GLOBAL_MAP_MODE_ORDER, getGlobalMapPathSubpathRanges, resolveGlobalMapVertex } from "../src/features/transport-map/contracts/manifest";
 import { createCamera, fitCameraToBounds } from "../src/features/transport-map/geo/camera";
-import { lonLatToWorld, worldToLonLat } from "../src/features/transport-map/geo/coordinateKernel";
+import { lonLatToWorld, worldToLonLat, worldToScreen } from "../src/features/transport-map/geo/coordinateKernel";
+import { hitTestTransportMap } from "../src/features/transport-map/spatial/hitTest";
+import { buildPathSpatialIndex } from "../src/features/transport-map/spatial/packedIndex";
 import { buildStationCorrespondenceContext } from "../src/features/transport-map/spatial/stationCorrespondences";
 
 const assetRoot = resolve(process.cwd(), "public/data/global-map/v1");
@@ -623,6 +625,92 @@ describe("global transport progressive data source", () => {
     }
     source.dispose();
   }, 60_000);
+
+  it("keeps the detailed Pont Neuf trace when the rest of line 58 is outside the viewport", async () => {
+    const source = new TransportMapDataSource({ loader: createLocalAssetLoader(), useRegionalOverview: true });
+    const center = lonLatToWorld({ lon: 2.3418, lat: 48.8575 });
+    const camera = createCamera({
+      centerWorldX: center.x,
+      centerWorldY: center.y,
+      zoom: 8,
+      viewportWidthCssPx: 1_280,
+      viewportHeightCssPx: 720,
+    });
+    const busMask = 1 << GLOBAL_MAP_MODE_ORDER.indexOf("BUS");
+    try {
+      await source.initialize();
+      await source.queryViewport(camera, busMask, 1);
+      const result = await source.queryViewport({ ...camera, zoom: 17 }, busMask, 2);
+      const network = source.getNetwork();
+      const line = network.linesById.get("line:IDFM:C01095")!;
+      const preferred = selectPreferredLinePaths(result.paths, network.regionalPaths, line.id, {
+        requiredStationIds: line.stationIds,
+      });
+
+      expect(preferred.length).toBeGreaterThan(0);
+      expect(preferred.every((path) => !path.id.startsWith("path:regional:"))).toBe(true);
+      const coordinates = preferred.flatMap((path) => path.vertices.map((vertex) =>
+        worldToLonLat(resolveGlobalMapVertex(path, vertex, network.stationsById.get(vertex.stationId ?? ""), "BUS")),
+      ));
+      // The bridge's northern bend is absent from the regional three-point
+      // route. Checking the coordinate catches a return to that water chord.
+      expect(coordinates.some(({ lon, lat }) =>
+        Math.abs(lon - 2.342457) < 0.00001 && Math.abs(lat - 48.858486) < 0.00001,
+      )).toBe(true);
+    } finally {
+      source.dispose();
+    }
+  }, 30_000);
+
+  it.each([
+    ["74", "C01109", "station:FR::Quay:50218742:FR1", "station:FR::Quay:50218275:FR1"],
+    ["85", "C01117", "station:FR::Quay:50218741:FR1", "station:FR::Quay:50218727:FR1"],
+    ["39", "C01084", "station:FR::Quay:50143118:FR1", "station:FR::Quay:50114759:FR1"],
+    ["47", "C01088", "station:FR::Quay:50236386:FR1", "station:FR::Quay:50237192:FR1"],
+  ])("does not render or hit-test the unaudited line %s topology connector", async (_label, code, from, to) => {
+    const source = new TransportMapDataSource({ loader: createLocalAssetLoader(), useRegionalOverview: true });
+    const lineId = `line:IDFM:${code}`;
+    try {
+      await source.initialize();
+      const network = await source.ensureCatalog();
+      const station = network.stationsById.get(from)!;
+      const camera = createCamera({
+        centerWorldX: station.worldX,
+        centerWorldY: station.worldY,
+        zoom: 17,
+        viewportWidthCssPx: 1_280,
+        viewportHeightCssPx: 720,
+      });
+      let generation = 0;
+      for (const detailLineId of [undefined, lineId]) {
+        for (const zoom of [12, 17, 19]) {
+          const result = await source.queryViewport({ ...camera, zoom },
+            1 << GLOBAL_MAP_MODE_ORDER.indexOf("BUS"), ++generation, detailLineId);
+          const targetPaths = result.paths.filter((path) => path.lineId === lineId &&
+            path.vertices.some((v, i) => i > 0 && path.vertices[i - 1]?.stationId === from && v.stationId === to));
+          expect(targetPaths.length, `${lineId} zoom ${zoom} focused ${Boolean(detailLineId)}`).toBeGreaterThan(0);
+          for (const path of targetPaths) {
+            const connectorIndex = path.vertices.findIndex((v, i) =>
+              i > 0 && path.vertices[i - 1]?.stationId === from && v.stationId === to);
+            expect(path.quality.complete).toBe(false);
+            expect(getGlobalMapPathSubpathRanges(path).some(({ start, end }) =>
+              start < connectorIndex && end > connectorIndex)).toBe(false);
+            expect(path.vertices.length).toBeGreaterThan(2);
+            expect(getGlobalMapPathSubpathRanges(path).length).toBeGreaterThan(0);
+            if (zoom >= 17) {
+              const a = resolveGlobalMapVertex(path, path.vertices[connectorIndex - 1]!, undefined, "BUS");
+              const b = resolveGlobalMapVertex(path, path.vertices[connectorIndex]!, undefined, "BUS");
+              const midpoint = worldToScreen({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, { ...camera, zoom });
+              expect(hitTestTransportMap(midpoint, { ...camera, zoom }, [], [network.linesById.get(lineId)!],
+                [path], undefined, buildPathSpatialIndex([path]), { lineToleranceCssPx: 0.5 })).toBeUndefined();
+            }
+          }
+        }
+      }
+    } finally {
+      source.dispose();
+    }
+  }, 30_000);
 
   it("hides unvalidated road fallback at detailed zoom, even for a focused edge", async () => {
     const loader = new GlobalMapAssetLoader({

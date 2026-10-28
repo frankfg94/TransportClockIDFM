@@ -6,6 +6,7 @@ import {
   Database,
   Edit2,
   GitBranch,
+  LoaderCircle,
   MapPinned,
   Route,
   Shuffle,
@@ -22,12 +23,10 @@ import UserFriendlyTraffic from "../../components/UserFriendlyTraffic.vue";
 import MaterialCombobox, { type MaterialComboboxOption } from "../../components/MaterialCombobox.vue";
 import { useI18n } from "../../i18n";
 import { formatTransitDistance } from "../../services/distance";
-import { useNearbyPlacePresenter } from "../nearby-stations/useNearbyPlacePresenter";
+import GlobalMapNearbyPlacesList from "./GlobalMapNearbyPlacesList.vue";
 import {
   isNearbyPlaceVisibleForGlobalLine,
-  nearbyPlaceWalkingMinutes,
 } from "../nearby-stations/nearbyPlacePresentation";
-import type { NearbyPlace } from "../nearby-stations/nearbyPlaces";
 import type { GlobalMapLine } from "../transport-map/contracts/manifest";
 import type { TransitFamily } from "../../types/transit";
 import {
@@ -44,8 +43,7 @@ import type {
 
 const props = defineProps<GlobalMapSidebarBodyProps>();
 const emit = defineEmits<GlobalMapSidebarBodyEmits>();
-const { t, locale } = useI18n();
-const { presentPlace } = useNearbyPlacePresenter();
+const { t } = useI18n();
 
 const displayLine = computed(() => props.displayLine);
 const isLinePreview = computed(() => props.isLinePreview);
@@ -64,7 +62,7 @@ const cityPatternRouteStations = computed(() =>
     : (lineMetadata.value?.stations ?? []),
 );
 const servedCitiesPattern = computed(() =>
-  buildCitiesLinePatternCities(cityPatternRouteStations.value),
+  buildCitiesLinePatternCities(cityPatternRouteStations.value, [], props.cityPatternOrdered ?? false),
 );
 const lineConnectionOptions = computed(() => {
   const linesById = new Map(props.allLines.map((line) => [line.id, line]));
@@ -109,13 +107,7 @@ const nearbyRadiusOptions = computed<MaterialComboboxOption[]>(() => [
   { id: "2", label: t("globalMap.sidebar.nearbyPlacesRadius", { minutes: 2 }) },
   { id: "5", label: t("globalMap.sidebar.nearbyPlacesRadius", { minutes: 5 }) },
 ]);
-const presentedNearbyPlaces = computed(() => props.nearbyPlaces
-  .filter((place) => isNearbyPlaceVisibleForGlobalLine(place))
-  .map((place: NearbyPlace) => ({
-  place,
-  presentation: presentPlace(place),
-  minutes: nearbyPlaceWalkingMinutes(place),
-  })));
+const hasNearbyPlaces = computed(() => props.nearbyPlaces.some(isNearbyPlaceVisibleForGlobalLine));
 
 watch(
   () => [props.displayLine?.id, props.displayLine?.mode] as const,
@@ -307,12 +299,16 @@ function updateNearbyRadius(value: string): void {
           type="button"
           role="switch"
           :aria-checked="showServedCityZones"
+          :aria-busy="showServedCityZones && servedCitiesLoading"
           :aria-label="t('globalMap.sidebar.servedCityZonesAria')"
           data-testid="global-map-served-city-zones-toggle"
           @click="emit('toggle-served-city-zones')"
         >
           <Building2 :size="15" aria-hidden="true" />
-          <span>{{ showServedCityZones ? t("common.booleans.yes") : t("common.booleans.no") }}</span>
+          <span v-if="showServedCityZones && servedCitiesLoading" role="status" :aria-label="t('globalMap.sidebar.lineCitiesLoading')">
+            <LoaderCircle class="global-map-picker-sidebar__city-zones-spinner" :size="15" aria-hidden="true" />
+          </span>
+          <span v-else>{{ showServedCityZones ? t("common.booleans.yes") : t("common.booleans.no") }}</span>
         </button>
       </div>
     </section>
@@ -364,20 +360,10 @@ function updateNearbyRadius(value: string): void {
           <p v-else-if="nearbyPlacesError" class="global-map-picker-sidebar__line-empty" role="status">
             {{ t("globalMap.sidebar.nearbyPlacesUnavailable") }}
           </p>
-          <p v-else-if="presentedNearbyPlaces.length === 0" class="global-map-picker-sidebar__line-empty">
+          <p v-else-if="!hasNearbyPlaces" class="global-map-picker-sidebar__line-empty">
             {{ t("globalMap.sidebar.nearbyPlacesEmpty") }}
           </p>
-          <ul v-else v-memo="[presentedNearbyPlaces, locale]" class="global-map-picker-sidebar__nearby-list">
-            <li v-for="entry in presentedNearbyPlaces" :key="entry.place.id">
-              <span class="global-map-picker-sidebar__nearby-icon" aria-hidden="true">
-                <component :is="entry.presentation.icon" :size="12" stroke-width="2" />
-              </span>
-              <span>
-                <strong>{{ entry.presentation.name }}</strong>
-                <small>{{ entry.presentation.typeLabel }} · {{ t("nearbyStations.walkingTime", { minutes: entry.minutes }) }}</small>
-              </span>
-            </li>
-          </ul>
+          <GlobalMapNearbyPlacesList v-else :places="nearbyPlaces" />
         </template>
       </div>
     </section>
@@ -552,7 +538,7 @@ function updateNearbyRadius(value: string): void {
         <span>{{ t('globalMap.sidebar.lineCitiesLoading') }}</span>
       </div>
       <div
-        v-else-if="lineCitiesExpanded && !servedCitiesError && servedCitiesPattern.length"
+        v-else-if="lineCitiesExpanded && servedCitiesPattern.length"
         id="global-map-picker-sidebar-line-cities"
         role="region"
         aria-labelledby="global-map-picker-sidebar-line-cities-toggle"
@@ -566,6 +552,9 @@ function updateNearbyRadius(value: string): void {
       </div>
       <p v-else-if="lineCitiesExpanded" class="global-map-picker-sidebar__line-empty">
         {{ t("globalMap.sidebar.lineUnavailable") }}
+      </p>
+      <p v-if="lineCitiesExpanded && servedCitiesError" role="alert" class="global-map-picker-sidebar__line-empty">
+        {{ t("globalMap.sidebar.lineCityBoundariesUnavailable") }}
       </p>
     </section>
 
@@ -709,6 +698,16 @@ function updateNearbyRadius(value: string): void {
 </template>
 
 <style scoped>
+.global-map-picker-sidebar__city-zones-spinner {
+  display: block;
+  animation: global-map-picker-sidebar-city-zones-spin 0.8s linear infinite;
+}
+@keyframes global-map-picker-sidebar-city-zones-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .global-map-picker-sidebar__city-zones-spinner { animation: none; }
+}
 .global-map-picker-sidebar__nearby-card {
   gap: 9px;
 }
@@ -783,53 +782,6 @@ function updateNearbyRadius(value: string): void {
   color: var(--muted, #71809d);
   font-size: .68rem;
   line-height: 1.35;
-}
-.global-map-picker-sidebar__nearby-list {
-  display: grid;
-  gap: 7px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.global-map-picker-sidebar__nearby-list li {
-  display: grid;
-  grid-template-columns: 26px minmax(0, 1fr);
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  color: #4b5563;
-}
-.global-map-picker-sidebar__nearby-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 24px;
-  width: 24px;
-  height: 24px;
-  aspect-ratio: 1;
-  box-sizing: border-box;
-  border: 1px solid rgba(100, 116, 139, .2);
-  border-radius: 50%;
-  background: #e7e9ee;
-  color: #596579;
-}
-.global-map-picker-sidebar__nearby-list li > span {
-  display: grid;
-  min-width: 0;
-}
-.global-map-picker-sidebar__nearby-list strong,
-.global-map-picker-sidebar__nearby-list small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.global-map-picker-sidebar__nearby-list strong {
-  color: var(--ink, #18233f);
-  font-size: .72rem;
-}
-.global-map-picker-sidebar__nearby-list small {
-  color: var(--muted, #71809d);
-  font-size: .62rem;
 }
 .global-map-picker-sidebar__nearby-loading {
   display: grid;

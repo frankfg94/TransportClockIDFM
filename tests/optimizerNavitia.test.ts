@@ -9,6 +9,7 @@ describe("optimizer live routing", () => {
       const url = new URL(String(input), "http://localhost");
       expect(url.searchParams.get("data_freshness")).toBe("realtime");
       expect(url.searchParams.get("disable_disruption")).toBe("false");
+      expect(url.searchParams.get("max_nb_transfers")).toBe("1");
       return new Response(
         JSON.stringify({
           journeys: [
@@ -38,6 +39,7 @@ describe("optimizer live routing", () => {
         destination: { lon: 2.35, lat: 48.86 },
         dataFreshness: "realtime",
         includeDisruptions: true,
+        maxTransfers: 1,
       },
       { fetcher },
     );

@@ -9,13 +9,15 @@ import { useLineOptimizer } from "./useLineOptimizer";
 import type { LineOptimizerConfig } from "./optimizerConfig";
 import type { LineOptimizerCandidate } from "./lineOptimizer";
 import { createLineOptimizerTimeline } from "./lineOptimizerTimeline";
+import OptimizerAnimatedValue from "./OptimizerAnimatedValue.vue";
+import { turboSignature } from "../nearby-stations/travelTurbo";
 import { itineraryStepAttributes } from "../line-map/globalTransportPlanItinerary";
 
 const GlobalTransportPlanTravel = defineAsyncComponent(
   () => import("../line-map/GlobalTransportPlanTravel.vue"),
 );
 
-const props = defineProps<{ config: LineOptimizerConfig }>();
+const props = defineProps<{ config: LineOptimizerConfig; title?: string }>();
 const { t, d, n } = useI18n();
 const optimizer = useLineOptimizer(props.config);
 const {
@@ -69,7 +71,7 @@ const serviceLabel = (candidate: LineOptimizerCandidate) =>
     ? t("lineOptimizer.semiDirect")
     : candidate.serviceType === "omnibus"
       ? t("lineOptimizer.omnibus")
-      : t("lineOptimizer.unknownService");
+      : t("lineOptimizer.unknownStoppingPattern");
 const timingLabel = (source: string) =>
   source === "realtime"
     ? t("lineOptimizer.realtime")
@@ -81,6 +83,7 @@ const timeline = computed(() =>
     ? createLineOptimizerTimeline(winner.value, originPoint.value, destinationPoint.value)
     : undefined,
 );
+const itineraryIdentity = computed(() => winner.value ? turboSignature(winner.value.route) : "");
 const legs = computed(() => timeline.value?.route.transitSections ?? []);
 const connections = computed(() => timeline.value?.connections ?? []);
 const accessWalk = computed(() =>
@@ -110,10 +113,10 @@ const remaining = computed(() =>
       <span class="line-optimizer__eyebrow"
         ><TramFront :size="18" aria-hidden="true" /> {{ t("lineOptimizer.eyebrow") }}</span
       >
-      <h1>{{ t("lineOptimizer.title", { line: config.lineCode }) }}</h1>
+      <h1>{{ title || (config.destinationOptimizer ? t("lineOptimizer.velizyTitle") : t("lineOptimizer.title", { line: config.lineCode })) }}</h1>
       <p>
         {{
-          t("lineOptimizer.description", {
+          config.destinationOptimizer ? t(title ? "lineOptimizer.customDescription" : "lineOptimizer.velizyDescription") : t("lineOptimizer.description", {
             line: config.lineCode,
             connection: config.connectingLineCode,
             station: config.transferName,
@@ -179,7 +182,7 @@ const remaining = computed(() =>
             :required="!useProviderWalk"
         /></label>
         <label
-          >{{ t("lineOptimizer.transferSeconds")
+          >{{ t(config.destinationOptimizer ? "lineOptimizer.genericTransfer" : "lineOptimizer.transferSeconds")
           }}<input
             v-model.number="settings.transferSeconds"
             type="number"
@@ -190,7 +193,7 @@ const remaining = computed(() =>
             :required="!useProviderTransfer"
         /></label>
         <label
-          >{{ t("lineOptimizer.marginSeconds")
+          >{{ t(config.destinationOptimizer ? "lineOptimizer.genericMargin" : "lineOptimizer.marginSeconds")
           }}<input
             v-model.number="settings.marginSeconds"
             type="number"
@@ -211,7 +214,17 @@ const remaining = computed(() =>
             t("lineOptimizer.providerTransfer")
           }}</label
         >
-        <label
+        <label v-if="config.destinationOptimizer"
+          ><input v-model="settings.minimizeBusTransfers" type="checkbox" @change="optimizer.refresh()" />{{
+            t("lineOptimizer.minimizeBusTransfers")
+          }}</label
+        >
+        <label v-if="config.destinationOptimizer"
+          ><input v-model="settings.limitConnections" type="checkbox" @change="optimizer.refresh()" />{{
+            t("lineOptimizer.limitConnections")
+          }}</label
+        >
+        <label v-if="!config.destinationOptimizer"
           ><input v-model="settings.preferSemiDirect" type="checkbox" />{{
             t("lineOptimizer.preferSemiDirect")
           }}</label
@@ -220,11 +233,11 @@ const remaining = computed(() =>
       <details class="line-optimizer__advanced">
         <summary>{{ t("lineOptimizer.advanced") }}</summary>
         <div class="line-optimizer__parameters">
-          <label
+          <label v-if="!config.destinationOptimizer"
             >{{ t("lineOptimizer.arrivalDelay")
             }}<input v-model.number="arrivalDelayMinutes" type="number" min="0" max="60" required
           /></label>
-          <label
+          <label v-if="!config.destinationOptimizer"
             >{{ t("lineOptimizer.semiDirectTolerance")
             }}<input
               v-model.number="settings.semiDirectWaitToleranceSeconds"
@@ -255,18 +268,18 @@ const remaining = computed(() =>
     </form>
 
     <div class="line-optimizer__state" role="status" aria-live="polite">
-      <p v-if="status === 'loading'">{{ t("lineOptimizer.loadingDetails") }}</p>
+      <p v-if="status === 'loading'">{{ t(winner ? "lineOptimizer.refreshingPrevious" : "lineOptimizer.loadingDetails") }}</p>
       <p v-else-if="status === 'error'" class="line-optimizer__error">
         {{
           t(
-            errorPhase === "locations"
+            winner ? "lineOptimizer.refreshFailedPrevious" : errorPhase === "locations"
               ? "lineOptimizer.locationError"
               : "lineOptimizer.journeyError",
           )
         }}
       </p>
       <p v-else-if="status === 'empty' || (result && !winner)">
-        {{ t("lineOptimizer.empty", { line: config.lineCode, station: config.transferName }) }}
+        {{ config.destinationOptimizer ? t("lineOptimizer.genericEmpty") : t("lineOptimizer.empty", { line: config.lineCode, station: config.transferName }) }}
       </p>
       <p v-else-if="status === 'idle'">{{ t("lineOptimizer.idle") }}</p>
     </div>
@@ -276,25 +289,24 @@ const remaining = computed(() =>
       class="line-optimizer__recommendation"
       :aria-label="t('lineOptimizer.recommendation')"
     >
+      <p v-if="config.destinationOptimizer && settings.limitConnections && winner.route.transitSections.length > 2" class="line-optimizer__evidence">{{ t("lineOptimizer.limitConnectionsFallback") }}</p>
       <div class="line-optimizer__recommendation-head">
         <span>{{ t("lineOptimizer.recommendation") }}</span
         ><span class="line-optimizer__wait"
           ><Clock3 :size="16" aria-hidden="true" />{{
-            t("lineOptimizer.waitAtRer", { duration: duration(winner.waitSeconds) })
+            t(config.destinationOptimizer ? "lineOptimizer.genericWait" : "lineOptimizer.waitAtRer", { duration: duration(winner.waitSeconds) })
           }}</span
         >
       </div>
       <div class="line-optimizer__totals">
         <div>
           <span>{{ t("lineOptimizer.totalTravel") }}</span
-          ><strong>{{ duration((winner.arriveAt - winner.leaveAt) / 1000) }}</strong
-          ><small>{{ t("lineOptimizer.doorToDoor") }}</small>
+          ><OptimizerAnimatedValue :value="duration((winner.arriveAt - winner.leaveAt) / 1000)" :itinerary="itineraryIdentity" /><small>{{ t("lineOptimizer.doorToDoor") }}</small>
         </div>
         <div>
           <span>{{ t("lineOptimizer.totalWaiting") }}</span
-          ><strong>{{ duration(winner.totalWaitSeconds) }}</strong
-          ><small>{{
-            t("lineOptimizer.waitingBreakdown", { duration: duration(winner.waitSeconds) })
+          ><OptimizerAnimatedValue :value="duration(winner.totalWaitSeconds)" :itinerary="itineraryIdentity" /><small>{{
+            t(config.destinationOptimizer ? "lineOptimizer.genericBreakdown" : "lineOptimizer.waitingBreakdown", { duration: duration(winner.waitSeconds) })
           }}</small>
         </div>
       </div>
@@ -306,8 +318,7 @@ const remaining = computed(() =>
             <li v-bind="itineraryStepAttributes(timeline?.steps[0])">
               <House :size="22" aria-hidden="true" />
               <div>
-                <strong>{{ clock(winner.leaveAt) }}</strong
-                ><span>{{ t("lineOptimizer.leaveHome") }}</span
+                <OptimizerAnimatedValue :value="clock(winner.leaveAt)" :itinerary="itineraryIdentity" /><span>{{ t("lineOptimizer.leaveHome") }}</span
                 ><small>{{
                   t("lineOptimizer.preparation", { duration: duration(settings.exitSeconds) })
                 }}</small>
@@ -316,14 +327,13 @@ const remaining = computed(() =>
             <li v-if="accessWalk" v-bind="itineraryStepAttributes(accessWalk)">
               <Footprints :size="22" aria-hidden="true" />
               <div>
-                <strong>{{ clock(winner.walkAt) }}</strong
-                ><span>{{
+                <OptimizerAnimatedValue :value="clock(winner.walkAt)" :itinerary="itineraryIdentity" /><span>{{
                   t("lineOptimizer.walkTo", { station: legs[0]?.fromName ?? config.lineCode })
                 }}</span
                 ><small>{{ duration(winner.walkSeconds) }}</small>
               </div>
             </li>
-            <template v-for="(course, index) in winner.courses" :key="`${index}:${course.id}`">
+            <template v-for="(course, index) in winner.courses" :key="index">
               <li
                 v-for="step in connections[index]"
                 v-bind="itineraryStepAttributes(step)"
@@ -334,7 +344,7 @@ const remaining = computed(() =>
                 <Footprints v-if="step.kind === 'walk'" :size="22" aria-hidden="true" />
                 <Clock3 v-else :size="22" aria-hidden="true" />
                 <div>
-                  <strong>{{ clock(step.startAt) }}</strong>
+                  <OptimizerAnimatedValue :value="clock(step.startAt)" :itinerary="itineraryIdentity" />
                   <span v-if="step.kind === 'walk'">{{
                     t("lineOptimizer.transferTo", { station: legs[index]?.fromName ?? "" })
                   }}</span>
@@ -361,7 +371,7 @@ const remaining = computed(() =>
                   eager
                 />
                 <div>
-                  <strong>{{ clock(course.departure) }}</strong>
+                  <OptimizerAnimatedValue :value="clock(course.departure)" :itinerary="itineraryIdentity" />
                   <span
                     >{{
                       t("lineOptimizer.boardTram", {
@@ -372,7 +382,7 @@ const remaining = computed(() =>
                         direction:
                           course.direction ?? legs[index]?.direction ?? legs[index]?.toName ?? "",
                       })
-                    }}<template v-if="index === winner.corridorIndex + 1">
+                    }}<template v-if="index === winner.corridorIndex + 1 && legs[index]?.lineMode === 'RER'">
                       · {{ serviceLabel(winner) }}</template
                     ></span
                   >
@@ -391,7 +401,7 @@ const remaining = computed(() =>
             <li v-if="finalWalk" v-bind="itineraryStepAttributes(finalWalk)" data-final-walk>
               <Footprints :size="22" aria-hidden="true" />
               <div>
-                <strong>{{ clock(finalWalk.startAt) }}</strong>
+                <OptimizerAnimatedValue :value="clock(finalWalk.startAt)" :itinerary="itineraryIdentity" />
                 <span>{{
                   t("lineOptimizer.walkTo", {
                     station: destinationPoint?.label ?? destinationQuery,
@@ -403,8 +413,7 @@ const remaining = computed(() =>
             <li>
               <Clock3 :size="22" aria-hidden="true" />
               <div>
-                <strong>{{ clock(winner.arriveAt) }}</strong
-                ><span>{{
+                <OptimizerAnimatedValue :value="clock(winner.arriveAt)" :itinerary="itineraryIdentity" /><span>{{
                   t("lineOptimizer.arrival", {
                     destination: destinationPoint?.label ?? destinationQuery,
                   })
@@ -448,7 +457,7 @@ const remaining = computed(() =>
         {{ t("lineOptimizer.personalTiming") }}
       </p>
       <details v-if="winner.train.stopNames?.length" class="line-optimizer__stops">
-        <summary>{{ t("lineOptimizer.stops") }}</summary>
+        <summary>{{ t(config.destinationOptimizer ? "lineOptimizer.genericStops" : "lineOptimizer.stops") }}</summary>
         <p>{{ winner.train.stopNames.join(" → ") }}</p>
       </details>
       <p class="line-optimizer__evidence">
@@ -467,9 +476,9 @@ const remaining = computed(() =>
           <thead>
             <tr>
               <th>{{ t("lineOptimizer.home") }}</th>
-              <th>{{ config.lineCode }}</th>
-              <th>{{ t("lineOptimizer.rer", { line: config.connectingLineCode }) }}</th>
-              <th>{{ t("lineOptimizer.wait") }}</th>
+              <th>{{ config.destinationOptimizer ? t("lineOptimizer.genericFirst") : config.lineCode }}</th>
+              <th>{{ config.destinationOptimizer ? t("lineOptimizer.genericNext") : t("lineOptimizer.rer", { line: config.connectingLineCode }) }}</th>
+              <th>{{ t(config.destinationOptimizer ? "lineOptimizer.genericWaitColumn" : "lineOptimizer.wait") }}</th>
               <th>{{ t("lineOptimizer.arrivalColumn") }}</th>
               <th>{{ t("lineOptimizer.service") }}</th>
             </tr>
@@ -478,10 +487,10 @@ const remaining = computed(() =>
             <tr v-for="candidate in candidates.slice(1, 6)" :key="candidate.id">
               <td>{{ clock(candidate.leaveAt) }}</td>
               <td>{{ clock(candidate.tram.departure) }}</td>
-              <td>{{ clock(candidate.train.departure) }}</td>
+              <td>{{ config.destinationOptimizer && candidate.courses.length === 1 ? "—" : clock(candidate.train.departure) }}</td>
               <td>{{ duration(candidate.waitSeconds) }}</td>
               <td>{{ clock(candidate.arriveAt) }}</td>
-              <td>{{ serviceLabel(candidate) }}</td>
+              <td>{{ candidate.route.transitSections[candidate.corridorIndex + 1]?.lineMode === "RER" ? serviceLabel(candidate) : "—" }}</td>
             </tr>
           </tbody>
         </table>
@@ -493,7 +502,8 @@ const remaining = computed(() =>
           t("lineOptimizer.updated", { time: clock(result.analyzedAt), count: result.courseCount })
         }}
       </p>
-      <p>{{ t("lineOptimizer.method") }}</p>
+      <p>{{ t(config.destinationOptimizer ? (settings.minimizeBusTransfers ? "lineOptimizer.genericMethodMinBus" : "lineOptimizer.genericMethod") : "lineOptimizer.method") }}</p>
+      <p v-if="config.destinationOptimizer && settings.limitConnections">{{ t("lineOptimizer.limitConnectionsMethod") }}</p>
       <p>{{ t("lineOptimizer.autoRefresh") }}</p>
     </footer>
     <AdressBook

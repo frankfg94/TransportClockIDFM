@@ -1,4 +1,5 @@
 import type { GlobalMapStation } from "../contracts/manifest";
+import type { CityBoundary } from "../contracts/cityBoundary";
 import type { TransportMapServedCityZone } from "../contracts/renderer";
 import {
   boundarySegmentsForIrisNeighborhoods,
@@ -14,6 +15,7 @@ interface IrisCityGroup {
   key: string;
   name: string;
   neighborhoods: IrisNeighborhood[];
+  boundary?: CityBoundary;
 }
 
 interface Rgb {
@@ -51,6 +53,8 @@ export interface BuildCityZonesOptions {
   lineColor?: string;
   /** Keep contextual labels for served-city mode; global mode opts out. */
   showLabels?: boolean;
+  /** Official commune contours for stations outside the IRIS coverage. */
+  additionalCities?: readonly CityBoundary[];
 }
 
 export interface BuildGlobalZonesOptions {
@@ -88,6 +92,16 @@ export function buildCityZones(
     addCityAlias(groupsByName, neighborhood.communeName, group);
   }
 
+  const additionalGroups: IrisCityGroup[] = [];
+  for (const boundary of options.additionalCities ?? []) {
+    if (groupsByKey.has(boundary.code)) continue;
+    const group: IrisCityGroup = {
+      key: boundary.code, name: boundary.name, neighborhoods: [], boundary,
+    };
+    groupsByKey.set(boundary.code, group);
+    additionalGroups.push(group);
+  }
+
   const selectedGroups: IrisCityGroup[] = [];
   const selectedKeys = new Set<string>();
   const stationsByGroupKey = new Map<string, GlobalMapStation[]>();
@@ -98,7 +112,11 @@ export function buildCityZones(
       const city = station.city?.trim();
       const directGroups = city ? groupsByName.get(normalizeCityName(city)) : undefined;
       const directGroup = directGroups?.length === 1 ? directGroups[0] : undefined;
-      const spatialGroup = directGroup ?? groupForStation(
+      // Supplemental contours are matched spatially, never by a homonymous
+      // commune in another department.
+      const officialGroup = additionalGroups.find((group) => group.boundary &&
+        pointInIrisGeometry(station, group.boundary.geometry));
+      const spatialGroup = officialGroup ?? directGroup ?? groupForStation(
         dataset,
         station,
         groupByNeighborhoodId,
@@ -120,9 +138,9 @@ export function buildCityZones(
   );
   const idPrefix = options.stations === undefined ? "city" : "served-city";
   return selectedGroups.flatMap((group, index) => {
-    const geometry = combineNeighborhoodGeometry(group.neighborhoods);
+    const geometry = group.boundary?.geometry ?? combineNeighborhoodGeometry(group.neighborhoods);
     if (!geometry) return [];
-    const centroid = averageCentroid(group.neighborhoods);
+    const centroid = group.boundary?.centroid ?? averageCentroid(group.neighborhoods);
     const colors = cityColors(hues[index] ?? DEFAULT_LINE_HUE);
     return [{
       id: `${idPrefix}:${normalizeCityName(group.key) || normalizeCityName(group.name)}`,
@@ -130,7 +148,10 @@ export function buildCityZones(
       kind: "city",
       showLabel: options.showLabels ?? true,
       geometry,
-      boundaryPaths: joinAdministrativeBoundarySegments(boundarySegmentsForIrisNeighborhoods(group.neighborhoods)),
+      boundaryPaths: group.boundary
+        ? (geometry.type === "Polygon" ? geometry.coordinates : geometry.coordinates.flat())
+          .map((ring) => ring.map((point): [number, number] => [point[0]!, point[1]!]))
+        : joinAdministrativeBoundarySegments(boundarySegmentsForIrisNeighborhoods(group.neighborhoods)),
       centroid,
       labelPixelOffset: labelPixelOffsetForGroup(
         centroid,
@@ -146,8 +167,9 @@ export function buildServedCityZones(
   dataset: IrisDataset,
   stations: readonly GlobalMapStation[],
   lineColor = DEFAULT_LINE_COLOR,
+  additionalCities: readonly CityBoundary[] = [],
 ): TransportMapServedCityZone[] {
-  return buildCityZones(dataset, { stations, lineColor });
+  return buildCityZones(dataset, { stations, lineColor, additionalCities });
 }
 
 export function buildAllCityZones(dataset: IrisDataset): TransportMapServedCityZone[] {

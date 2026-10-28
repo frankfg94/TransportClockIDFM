@@ -74,15 +74,15 @@ export function selectPreferredLinePaths(
     options.supplementalRegionalFallback === false ? preferred : [...preferred, ...secondary],
   );
 
-  // Detailed viewport queries can return some chunks for a line while other
-  // chunks are still outside the query or failed to load. In that case the
-  // high-priority partial set must not hide the complete regional route.
-  // Choose one complete layer instead of painting the two representations on
-  // top of each other.
+  // Coverage and spatial fidelity are independent. Missing off-screen stops
+  // must never replace an available road/bridge trace with regional chords.
+  // A complete secondary layer may replace the preferred layer only when it
+  // preserves detail, or when no detailed geometry has arrived yet.
   const requiredStationIds = options.requiredStationIds ?? [];
   if (
     preferred === detailed &&
     requiredStationIds.length > 1 &&
+    (!detailed.some(isHighFidelityTransportPath) || regional.every(isHighFidelityTransportPath)) &&
     !pathsConnectStations(selectPathsWithinLayer(detailed, detailed), requiredStationIds) &&
     pathsConnectStations(selectPathsWithinLayer(regional, regional), requiredStationIds)
   ) {

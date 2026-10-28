@@ -135,6 +135,7 @@ describe("CitiesLinePattern", () => {
         line,
         stations: routeStations,
         cityPatternStations: [...routeStations].reverse(),
+        cityPatternOrdered: true,
       },
       global: {
         stubs: {
@@ -153,6 +154,13 @@ describe("CitiesLinePattern", () => {
       "Créteil",
     ]);
     expect(wrapper.findAll(".cities-line-pattern__dot")).toHaveLength(3);
+    expect(wrapper.findAll(".cities-line-pattern__content small").map((node) => node.text())).toEqual([
+      expect.stringContaining("Clamart-Gare"), expect.stringContaining("Créteil-Centre"),
+    ]);
+    await wrapper.setProps({ cityPatternOrdered: false, servedCitiesError: true });
+    expect(wrapper.findAll(".cities-line-pattern__dot")).toHaveLength(3);
+    expect(wrapper.findAll(".cities-line-pattern__content small")).toHaveLength(0);
+    expect(wrapper.get('[role="alert"]').text()).toContain("lineCityBoundariesUnavailable");
     await wrapper.get("#global-map-picker-sidebar-line-cities-toggle").trigger("click");
     expect(wrapper.emitted("line-cities-expanded")).toEqual([[true], [false]]);
     wrapper.unmount();

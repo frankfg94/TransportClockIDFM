@@ -2,7 +2,7 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ref } from "vue";
 import LineOptimizerPage from "../src/features/line-optimizer/LineOptimizerPage.vue";
-import { resolveLineOptimizerConfig } from "../src/features/line-optimizer/optimizerConfig";
+import { velizyOptimizerConfig, resolveLineOptimizerConfig } from "../src/features/line-optimizer/optimizerConfig";
 import type { LineOptimizerCandidate } from "../src/features/line-optimizer/lineOptimizer";
 import {
   DEFAULT_OPTIMIZER_SETTINGS,
@@ -112,7 +112,7 @@ describe("standalone optimizer page", () => {
       });
       const walk = wrapper.get('[data-connection-kind="walk"][data-course-index="1"]');
       expect(walk.get("strong").text()).toBe("10:10");
-      expect(walk.get("span").text()).toBe("Rejoindre le quai à La Vallée");
+      expect(walk.get("div > span").text()).toBe("Rejoindre le quai à La Vallée");
       expect(walk.get("small").text()).toBe("2 min");
       const wait = wrapper.find('[data-connection-kind="wait"][data-course-index="1"]');
       expect(wait.exists()).toBe(waitSeconds > 0);
@@ -222,4 +222,16 @@ describe("standalone optimizer page", () => {
     expect(mocks.selectAddress).toHaveBeenCalledWith(entry, "destination");
     wrapper.unmount();
   });
+});
+
+
+it.each(["BUS", "TRAM"] as const)("does not describe a %s stopping pattern as unconfirmed", (mode) => {
+  const base = Date.now() + 600_000;
+  const courses = [0, 1].map((i) => ({ id: String(i), departure: base + i * 600_000, arrival: base + i * 600_000 + 300_000, baseDeparture: base + i * 600_000, baseArrival: base + i * 600_000 + 300_000, source: "schedule" as const }));
+  const sections = [{ type: "public_transport", durationSeconds: 300, lineCode: "T10", lineMode: "TRAM" as const }, { type: "public_transport", durationSeconds: 300, lineCode: "179", lineMode: mode }];
+  mocks.winner = { id: "route", route: { id: "route", sections, transitSections: sections, durationSeconds: 900 }, courses, corridorIndex: 0, waits: [0, 300], totalWaitSeconds: 300, tram: courses[0]!, train: courses[1]!, leaveAt: base - 150000, walkAt: base - 90000, platformAt: base + 300000, arriveAt: base + 900000, walkSeconds: 90, transferSeconds: 0, providerWalkSeconds: 90, providerTransferSeconds: 0, waitSeconds: 300 };
+  const wrapper = mount(LineOptimizerPage, { props: { config: velizyOptimizerConfig }, global: { stubs: { AdressBook: true } } });
+  expect(wrapper.text()).not.toContain("Desserte non confirmée");
+  expect(wrapper.text()).not.toContain("Type de desserte inconnu");
+  wrapper.unmount();
 });

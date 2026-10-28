@@ -2684,6 +2684,44 @@ describe("GlobalTransportPlan facade", () => {
     expect(wrapper.find(".global-map-picker-sidebar").text()).toContain(fixture.network.stations[0].name);
   });
 
+  it("refits the selected line from the floating control above a mobile bottom sheet", async () => {
+    vi.useFakeTimers();
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 390, bottom: 844,
+      width: 390, height: 844, toJSON: () => ({}),
+    });
+    routeState.query = { line: fixture.network.lines[0]!.id };
+    try {
+      const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+      wrappers.push(wrapper);
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(3000);
+      await flushPromises();
+      const canvas = wrapper.get("canvas.global-transport-plan__canvas");
+      for (let i = 0; i < 6; i++) await canvas.trigger("keydown", { key: "+" });
+      await vi.advanceTimersByTimeAsync(100);
+      await flushPromises();
+      await wrapper.get("[data-global-map-fit-line]").trigger("click");
+      expect(wrapper.findComponent({ name: "GlobalMapFitLineButton" }).props("fitting")).toBe(true);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(wrapper.findComponent({ name: "GlobalMapFitLineButton" }).props("fitting")).toBe(true);
+      await vi.advanceTimersByTimeAsync(3000);
+      await flushPromises();
+      const camera = fixture.renderer.render.mock.calls.at(-1)?.[0] as { zoom: number };
+      expect(camera.zoom).toBeGreaterThan(GLOBAL_TRANSPORT_PLAN_CONFIG.lineView.minZoom);
+      expect(wrapper.findComponent({ name: "GlobalMapFitLineButton" }).props("fitting")).toBe(false);
+      expect(wrapper.find("[data-global-map-fit-line]").exists()).toBe(false);
+      expect(wrapper.find(".global-map-picker-sidebar").text()).toContain("Voir toute la ligne");
+    } finally {
+      rect.mockRestore();
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      routeState.query = {};
+      vi.useRealTimers();
+    }
+  });
+
   it("routes search line clicks through the animated whole-line selection view", async () => {
     vi.useFakeTimers();
     try {
@@ -3013,6 +3051,24 @@ describe("GlobalTransportPlan facade", () => {
     await nextTick();
     expect(sidebar.props("cityPatternStations").map((station: { id: string }) => station.id))
       .toEqual([stations[0]!.id, stations[0]!.id]);
+  });
+
+  it("orders a merged line by its regional route instead of its station catalogue", async () => {
+    const line = fixture.network.lines[0]!;
+    const originalStationIds = line.stationIds;
+    line.stationIds = [...originalStationIds].reverse();
+    routeState.query = { line: line.id };
+    try {
+      const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+      wrappers.push(wrapper);
+      await flushPromises();
+      const sidebar = wrapper.findComponent({ name: "GlobalMapPickerSideBar" });
+      expect(sidebar.props("cityPatternStations").map((station: { id: string }) => station.id))
+        .toEqual(originalStationIds);
+      expect(sidebar.props("cityPatternOrdered")).toBe(true);
+    } finally {
+      line.stationIds = originalStationIds;
+    }
   });
 
   it("keeps the itinerary expanded by default for a bus line", async () => {
@@ -3792,6 +3848,43 @@ describe("GlobalTransportPlan facade", () => {
     expect(document.body.querySelector(".address-book-modal")).not.toBeNull();
     expect(wrapper.find("[data-global-map-advanced-toggle]").exists()).toBe(false);
     expect(wrapper.find("[data-global-map-search]").exists()).toBe(false);
+  });
+
+  it("closes the address book and flies continuously to the address selected with the eye", async () => {
+    vi.useFakeTimers();
+    try {
+      const entry = { id: "flight-home", kind: "address", name: "Adresse animation", address: "Adresse test", lon: 2.27, lat: 48.766, icon: "home" };
+      window.localStorage.setItem(ADDRESS_BOOK_STORAGE_KEY, JSON.stringify({ version: ADDRESS_BOOK_STORAGE_VERSION, entries: [entry] }));
+      const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+      wrappers.push(wrapper);
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(32);
+      const canvas = wrapper.get('canvas.global-transport-plan__canvas');
+      vi.spyOn(canvas.element, 'getBoundingClientRect').mockReturnValue({ x: 40, y: 60, left: 40, top: 60, right: 840, bottom: 660, width: 800, height: 600, toJSON: () => ({}) });
+      await canvas.trigger('contextmenu', { clientX: 160, clientY: 190 });
+      await nextTick();
+      const open = [...document.querySelectorAll<HTMLButtonElement>('.global-transport-plan__context-menu button')].find(button => button.textContent?.includes('Ouvrir l’annuaire'));
+      expect(open).toBeDefined();
+      open!.click();
+      await flushPromises();
+      const eye = document.querySelector<HTMLButtonElement>('.address-book-entry__actions button[title="Voir l’emplacement"]');
+      expect(eye).not.toBeNull();
+      const before = fixture.renderer.render.mock.calls.at(-1)![0];
+      eye!.click();
+      await flushPromises();
+      expect(document.querySelector('.address-book-modal')).toBeNull();
+      await vi.advanceTimersByTimeAsync(100);
+      const intermediate = fixture.renderer.render.mock.calls.at(-1)![0];
+      const target = lonLatToWorld(entry);
+      expect(intermediate.centerWorldX).not.toBeCloseTo(before.centerWorldX, 8);
+      expect(intermediate.centerWorldX).not.toBeCloseTo(target.x, 8);
+      await vi.advanceTimersByTimeAsync(GLOBAL_TRANSPORT_PLAN_CONFIG.camera.progressiveNavigation.zoomDurationMs + GLOBAL_TRANSPORT_PLAN_CONFIG.camera.progressiveNavigation.panDurationMs + 32);
+      const final = fixture.renderer.render.mock.calls.at(-1)![0];
+      expect(final.centerWorldX).toBeCloseTo(target.x, 8);
+      expect(final.centerWorldY).toBeCloseTo(target.y, 8);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("offers to hide a marker from its context menu and persists the hidden state", async () => {

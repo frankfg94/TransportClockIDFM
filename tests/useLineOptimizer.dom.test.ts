@@ -2,7 +2,7 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { computed, defineComponent, h, ref } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useLineOptimizer } from "../src/features/line-optimizer/useLineOptimizer";
-import { resolveLineOptimizerConfig } from "../src/features/line-optimizer/optimizerConfig";
+import { velizyOptimizerConfig, resolveLineOptimizerConfig } from "../src/features/line-optimizer/optimizerConfig";
 import type { AddressBookEntry } from "../src/features/address-book/addressBook";
 
 const mocks = vi.hoisted(() => ({
@@ -35,11 +35,11 @@ const config = resolveLineOptimizerConfig("tram", "T10")!;
 const result = { candidates: [], complete: false, analyzedAt: Date.now(), courseCount: 0 };
 let wrapper: ReturnType<typeof mount> | undefined;
 let optimizer: ReturnType<typeof useLineOptimizer>;
-const makePage = () =>
+const makePage = (pageConfig = config) =>
   mount(
     defineComponent({
       setup() {
-        optimizer = useLineOptimizer(config);
+        optimizer = useLineOptimizer(pageConfig);
         return () => h("div", optimizer.status.value);
       },
     }),
@@ -115,4 +115,53 @@ describe("optimizer origin and request lifecycle", () => {
     expect(optimizer.status.value).toBe("idle");
     expect(optimizer.result.value).toBeUndefined();
   });
+});
+
+
+it("does not route to an unrelated geocoder result for a numbered destination", async () => {
+  mocks.station.mockResolvedValue([]);
+  mocks.geocode.mockImplementation(async (query: string) => query === config.defaultOrigin
+    ? [{ lon: 2.27, lat: 48.77, label: config.defaultOrigin }]
+    : [{ lon: 2.18, lat: 48.78, label: "1 Avenue du Capitaine Tarron 78140 Vélizy-Villacoublay" }]);
+  wrapper = makePage(velizyOptimizerConfig);
+  await flushPromises();
+  expect(mocks.analyze).not.toHaveBeenCalled();
+  expect(optimizer.status.value).toBe("error");
+  expect(optimizer.destinationPoint.value).toBeUndefined();
+});
+
+
+it("routes to the confirmed Meudon destination", async () => {
+  mocks.station.mockResolvedValue([]);
+  mocks.geocode.mockImplementation(async (query: string) => query === config.defaultOrigin
+    ? [{ lon: 2.27, lat: 48.77, label: config.defaultOrigin }]
+    : [{ lon: 2.210006, lat: 48.787995, label: "1 Avenue du Maréchal Juin 92360 Meudon" }]);
+  wrapper = makePage(velizyOptimizerConfig);
+  await flushPromises();
+  expect(optimizer.settings.value.minimizeBusTransfers).toBe(true);
+  expect(optimizer.settings.value.limitConnections).toBe(true);
+  expect(optimizer.destinationQuery.value).toBe("1 avenue du Maréchal Juin, 92360 Meudon");
+  expect(mocks.analyze.mock.calls[0]![0].destination).toMatchObject({ lon: 2.210006, lat: 48.787995 });
+});
+
+
+it("keeps the previous reachable recommendation while refreshing and on failure, but clears it when the destination changes", async () => {
+  const candidate = { leaveAt: Date.now() + 600_000 };
+  const previous = { ...result, candidates: [candidate] };
+  mocks.analyze.mockResolvedValueOnce(previous);
+  wrapper = makePage();
+  await flushPromises();
+  expect(optimizer.winner.value).toBe(candidate);
+  let fail!: (reason: Error) => void;
+  mocks.analyze.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+  const pending = optimizer.refresh();
+  await flushPromises();
+  expect(optimizer.status.value).toBe("loading");
+  expect(optimizer.winner.value).toBe(candidate);
+  fail(new Error("offline"));
+  await pending;
+  expect(optimizer.status.value).toBe("error");
+  expect(optimizer.winner.value).toBe(candidate);
+  optimizer.destinationQuery.value = "Une autre destination";
+  expect(optimizer.result.value).toBeUndefined();
 });

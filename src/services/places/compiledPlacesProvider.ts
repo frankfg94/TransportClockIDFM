@@ -164,7 +164,7 @@ export function createCompiledPlacesProvider(
       const cities = new Map([[city.code, city], ...intersectingCities(manifest, [request.origin], radius).map((entry) => [entry.code, entry] as const)]);
       const files = await Promise.all([...cities.keys()].map((code) => loadPlacesCity({ code }, signal)));
       const grid = createOriginGrid([request.origin], radius);
-      return mergeNearbyPlaces(...files.map((file) => nearbyPlacesFromCity(file, [request.origin], radius, signal, grid)));
+      return collectNearbyPlaces(files, [request.origin], radius, signal, grid);
     },
 
     async searchNearbyCities(request: NearbyPlacesCitiesRequest, signal?: AbortSignal): Promise<NearbyPlace[]> {
@@ -173,10 +173,18 @@ export function createCompiledPlacesProvider(
       const radius = clampRadius(request.radiusMeters);
       const manifest = await loadPlacesManifest(signal);
       const neighboringCities = intersectingCities(manifest, request.origins, radius).map((city) => ({ code: city.code }));
-      const loadedFiles = await Promise.all([...cities, ...neighboringCities].map((city) => loadPlacesCity(city, signal)));
+      const resolvedCities = await Promise.all([...cities, ...neighboringCities].map((city) => resolveCity(city, signal)));
+      const cityCodes = [...new Set(resolvedCities.map((city) => city.code))];
+      let completed = 0;
+      request.onProgress?.(completed, cityCodes.length);
+      const loadedFiles = await Promise.all(cityCodes.map(async (code) => {
+        const file = await loadPlacesCity({ code }, signal);
+        if (!signal?.aborted) request.onProgress?.(++completed, cityCodes.length);
+        return file;
+      }));
       const files = [...new Map(loadedFiles.map((file) => [file.city.code, file])).values()];
       const originGrid = createOriginGrid(request.origins, radius);
-      return mergeNearbyPlaces(...files.map((file) => nearbyPlacesFromCity(file, request.origins, radius, signal, originGrid)));
+      return collectNearbyPlaces(files, request.origins, radius, signal, originGrid);
     },
   };
 }
@@ -262,16 +270,43 @@ function nearbyOriginIndexes(
   return indexes;
 }
 
-function nearbyPlacesFromCity(
+async function collectNearbyPlaces(
+  files: readonly CompiledPlacesCityFile[],
+  origins: readonly Pick<NearbyPlace, "lon" | "lat">[],
+  radius: number,
+  signal: AbortSignal | undefined,
+  grid: OriginGrid,
+): Promise<NearbyPlace[]> {
+  const results: NearbyPlace[][] = [];
+  let sliceStarted = performance.now();
+  for (const file of files) {
+    results.push(await nearbyPlacesFromCity(file, origins, radius, signal, grid));
+    if (performance.now() - sliceStarted >= 8) {
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      sliceStarted = performance.now();
+    }
+  }
+  if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+  return mergeNearbyPlaces(...results);
+}
+
+async function nearbyPlacesFromCity(
   file: CompiledPlacesCityFile,
   origins: readonly Pick<NearbyPlace, "lon" | "lat">[],
   radiusMeters: number,
   signal?: AbortSignal,
   originGrid?: OriginGrid,
-): NearbyPlace[] {
+): Promise<NearbyPlace[]> {
   const radius = clampRadius(radiusMeters);
   const results: NearbyPlace[] = [];
+  let sliceStarted = performance.now();
+  let visited = 0;
   for (const place of file.places) {
+    // Let pointer events, the map and cancellation run during large city scans.
+    if (++visited % 128 === 0 && performance.now() - sliceStarted >= 8) {
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      sliceStarted = performance.now();
+    }
     if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
     let distance = Number.POSITIVE_INFINITY;
     const candidates = originGrid ? nearbyOriginIndexes(place, originGrid) : origins.map((_, index) => index);
@@ -286,7 +321,7 @@ function nearbyPlacesFromCity(
       distanceMeters: Math.round(distance),
     });
   }
-  return results.sort((left, right) => left.distanceMeters - right.distanceMeters || left.name.localeCompare(right.name, "fr-FR"));
+  return results;
 }
 
 function mergeCompiledPlacesCityFiles(files: readonly CompiledPlacesCityFile[]): CompiledPlacesCityFile {

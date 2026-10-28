@@ -46,6 +46,7 @@ const props = withDefaults(defineProps<{
   allLines?: GlobalMapLine[];
   stations?: GlobalMapStation[];
   cityPatternStations?: GlobalMapStation[];
+  cityPatternOrdered?: boolean;
   paths?: GlobalMapPath[];
   previewLine?: GlobalMapLine;
   previewPaths?: GlobalMapPath[];
@@ -323,6 +324,7 @@ const sidebarBodyProps = computed<GlobalMapSidebarBodyProps>(() => ({
   allLines: props.allLines,
   stations: props.stations,
   cityPatternStations: props.cityPatternStations,
+  cityPatternOrdered: props.cityPatternOrdered,
   paths: props.paths,
   previewPaths: bodyPreviewPaths.value,
   entrances: stationEntrances.value,

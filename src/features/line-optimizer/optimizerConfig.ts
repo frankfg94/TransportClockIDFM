@@ -1,6 +1,7 @@
 import type { GlobalMapMode } from "../transport-map/contracts/manifest";
 
 export interface LineOptimizerConfig {
+  destinationOptimizer?: boolean;
   transportType: string;
   lineCode: string;
   mode: GlobalMapMode;
@@ -43,3 +44,9 @@ export function optimizerNameKey(value?: string): string {
     .replace(/[^a-z0-9]+/gu, " ")
     .trim();
 }
+
+export const velizyOptimizerConfig: LineOptimizerConfig = {
+  ...configs[0]!,
+  destinationOptimizer: true,
+  defaultDestination: "1 avenue du Maréchal Juin, 92360 Meudon",
+};

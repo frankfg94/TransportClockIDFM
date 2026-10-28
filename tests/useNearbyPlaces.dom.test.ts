@@ -203,10 +203,43 @@ describe("useNearbyPlaces", () => {
     expect(provider.searchNearbyCities).toHaveBeenCalledTimes(1);
     expect(provider.searchNearby).not.toHaveBeenCalled();
     expect(provider.searchNearbyCities).toHaveBeenCalledWith(
-      { cities: cityRefs.value, origins: origins.value, radiusMeters: 600 },
+      { cities: cityRefs.value, origins: origins.value, radiusMeters: 600, onProgress: expect.any(Function) },
       expect.any(AbortSignal),
     );
     expect(nearby.places.value[0]?.name).toBe("Commerce compilé");
+    wrapper.unmount();
+  });
+
+  it("exposes city progress and ignores callbacks after disabling the search", async () => {
+    let report!: (completed: number, total: number) => void;
+    let finish!: (places: NearbyPlace[]) => void;
+    const enabled = ref(true);
+    let nearby!: ReturnType<typeof useNearbyPlaces>;
+    const provider: PlacesProvider = {
+      searchDestinations: async () => [],
+      searchNearby: async () => [],
+      searchNearbyCities: (request) => {
+        report = request.onProgress!;
+        return new Promise((resolve) => { finish = resolve; });
+      },
+    };
+    const wrapper = mount(defineComponent({
+      setup() {
+        nearby = useNearbyPlaces({ origins: ref([{ lon: 2.3, lat: 48.81 }]), cityRefs: ref([{ code: "92001" }]), radius: ref(600), enabled, provider });
+        return () => null;
+      },
+    }));
+    expect(nearby.isLoading.value).toBe(true);
+    expect(nearby.progress.value).toBeNull();
+    report(1, 4);
+    expect(nearby.progress.value).toBe(0.25);
+    enabled.value = false;
+    await flushPromises();
+    report(4, 4);
+    finish([]);
+    await flushPromises();
+    expect(nearby.progress.value).toBeNull();
+    expect(nearby.isLoading.value).toBe(false);
     wrapper.unmount();
   });
 });

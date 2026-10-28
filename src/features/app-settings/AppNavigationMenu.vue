@@ -7,6 +7,8 @@ import {
   Map,
   MapPin,
   MoreVertical,
+  Plus,
+  ChevronRight,
   Rss,
   SlidersHorizontal,
   TriangleAlert,
@@ -15,6 +17,7 @@ import { useRoute } from "#imports";
 import ContextMenu from "../../components/ContextMenu.vue";
 import { useAppSettings } from "./appSettings";
 import { useI18n } from "../../i18n";
+import { useCustomOptimizers } from "../line-optimizer/customOptimizers";
 import { transitBoards } from "../../config/transitBoards";
 import {
   TRANSIT_PREFERENCES_CHANGED_EVENT,
@@ -46,6 +49,10 @@ const { settings } = useAppSettings();
 const { t } = useI18n();
 const hidden = ref(false);
 const menuOpen = ref(false);
+const optimizerOpen = ref(false);
+const optimizerOpensLeft = ref(false);
+const optimizerMenuWidth = ref(190);
+const customOptimizers = useCustomOptimizers();
 const navigationRoot = ref<HTMLElement>();
 const menuTrigger = ref<HTMLElement>();
 const presetState = ref<TransitPresetState>(
@@ -104,7 +111,7 @@ const primaryLinks = computed<PrimaryNavigationLink[]>(() => [
 const localizedSecondaryLinks = computed(() => [
   { to: "/feed", label: t("news.title"), icon: Rss },
   { to: "/nearby-stations", label: t("common.labels.nearbyStations"), icon: MapPin },
-  { to: "/optimizer/line/tram/T10", label: t("lineOptimizer.navigation"), icon: Activity },
+  { to: "/optimizer", label: t("lineOptimizer.menuTitle"), icon: Activity },
   { to: "/settings", label: t("common.labels.settings"), icon: SlidersHorizontal },
   { to: "/health", label: t("common.labels.health"), icon: Activity },
 ]);
@@ -227,6 +234,32 @@ function revealNavigation(): void {
   resetAutoHideTimer();
 }
 
+function openOptimizer(event: MouseEvent, toggle = false): void {
+  const target = event.currentTarget as HTMLElement;
+  const anchor = target.closest(".app-navigation__optimizer");
+  if (anchor) {
+    const rect = anchor.getBoundingClientRect();
+    optimizerOpensLeft.value = window.innerWidth - rect.right < 210;
+    const space = optimizerOpensLeft.value ? rect.left : window.innerWidth - rect.right;
+    optimizerMenuWidth.value = Math.max(100, Math.min(190, space - 8));
+  }
+  optimizerOpen.value = toggle ? !optimizerOpen.value : true;
+}
+
+function optimizerClick(event: MouseEvent): void {
+  const touch = "pointerType" in event && (event as PointerEvent).pointerType === "touch";
+  // Hover can open the menu before a mouse click reaches the button.
+  openOptimizer(event, touch || event.detail === 0);
+}
+
+function optimizerPointerEnter(event: PointerEvent): void {
+  if (event.pointerType === "mouse") openOptimizer(event);
+}
+
+function optimizerPointerLeave(event: PointerEvent): void {
+  if (event.pointerType === "mouse") optimizerOpen.value = false;
+}
+
 function toggleMenu(): void {
   menuOpen.value = !menuOpen.value;
   revealNavigation();
@@ -234,6 +267,7 @@ function toggleMenu(): void {
 
 function closeMenu(): void {
   menuOpen.value = false;
+  optimizerOpen.value = false;
 }
 
 function resetAutoHideTimer(): void {
@@ -358,18 +392,22 @@ function handleVisibilityChange(): void {
         placement="top-end"
         :z-index="9500"
       >
-        <NuxtLink
-          v-for="link in localizedSecondaryLinks"
-          :key="link.to"
-          class="app-navigation__menu-link"
-          :class="{ 'app-navigation__menu-link--active': isActive(link.to) }"
-          :to="link.to"
-          role="menuitem"
-          @click="closeMenu"
-        >
-          <component :is="link.icon" aria-hidden="true" />
-          <span>{{ link.label }}</span>
-        </NuxtLink>
+        <template v-for="link in localizedSecondaryLinks" :key="link.to">
+          <div v-if="link.to === '/optimizer'" class="app-navigation__optimizer" @pointerenter="optimizerPointerEnter($event)" @pointerleave="optimizerPointerLeave($event)">
+            <button type="button" role="menuitem" class="app-navigation__menu-link app-navigation__optimizer-toggle" :class="{ 'app-navigation__menu-link--active': isActive('/optimizer') }" :aria-expanded="optimizerOpen" aria-haspopup="menu" @click="optimizerClick($event)" @keydown.esc.stop="optimizerOpen = false">
+              <Activity aria-hidden="true" /><span>{{ link.label }}</span><ChevronRight class="app-navigation__chevron" aria-hidden="true" />
+            </button>
+            <div v-if="optimizerOpen" class="app-navigation__optimizer-items" :class="{ 'app-navigation__optimizer-items--left': optimizerOpensLeft }" :style="{ width: `${optimizerMenuWidth}px` }" role="menu" :aria-label="t('lineOptimizer.menuTitle')">
+              <NuxtLink class="app-navigation__menu-link" to="/optimizer/line/tram/T10" role="menuitem" @click="closeMenu">{{ t("lineOptimizer.chateletMenu") }}</NuxtLink>
+              <NuxtLink class="app-navigation__menu-link" to="/optimizer/velizy" role="menuitem" @click="closeMenu">{{ t("lineOptimizer.velizyMenu") }}</NuxtLink>
+              <NuxtLink v-for="item in customOptimizers" :key="item.id" class="app-navigation__menu-link" :to="`/optimizer/custom/${item.id}`" role="menuitem" @click="closeMenu">{{ item.name }}</NuxtLink>
+              <NuxtLink class="app-navigation__menu-link" to="/optimizer/new" role="menuitem" @click="closeMenu"><Plus aria-hidden="true" /><span>{{ t("lineOptimizer.newMenu") }}</span></NuxtLink>
+            </div>
+          </div>
+          <NuxtLink v-else class="app-navigation__menu-link" :class="{ 'app-navigation__menu-link--active': isActive(link.to) }" :to="link.to" role="menuitem" @click="closeMenu">
+            <component :is="link.icon" aria-hidden="true" /><span>{{ link.label }}</span>
+          </NuxtLink>
+        </template>
       </ContextMenu>
     </div>
   </nav>
@@ -622,6 +660,7 @@ function handleVisibilityChange(): void {
   display: grid;
   gap: 4px;
   min-width: 190px;
+  overflow: visible !important;
   padding: 8px;
   position: absolute;
   right: 0;
@@ -643,6 +682,26 @@ function handleVisibilityChange(): void {
     color 160ms ease;
 }
 
+.app-navigation__optimizer-toggle { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.app-navigation__chevron { margin-left: auto; }
+.app-navigation__optimizer { position: relative; }
+.app-navigation__optimizer-items {
+  position: absolute; left: 100%; top: 0; z-index: 2;
+  display: grid; gap: 4px; min-width: 0; box-sizing: border-box; padding: 8px;
+  max-height: min(60vh, 400px); overflow-y: auto;
+  animation: optimizer-pop 160ms ease-out both; transform-origin: left top;
+  background: #fff; border: 1px solid rgba(16, 35, 63, .1); border-radius: 8px;
+  box-shadow: 0 22px 50px rgba(16, 35, 63, .16), 0 2px 10px rgba(16, 35, 63, .08);
+}
+.app-navigation__optimizer-items--left { left: auto; right: 100%; transform-origin: right top; }
+@keyframes optimizer-pop {
+  from { opacity: 0; transform: scale(.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-navigation__optimizer-items { animation: none; }
+}
+.app-navigation__optimizer-items .app-navigation__menu-link { min-height: 38px; }
 .app-navigation__menu-link:hover,
 .app-navigation__menu-link--active {
   background: #eef3fb;

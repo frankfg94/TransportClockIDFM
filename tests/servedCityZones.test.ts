@@ -120,6 +120,22 @@ function station(
 }
 
 describe("served city zones", () => {
+  it("adds official out-of-region communes without changing the IRIS dataset or losing polygon holes", () => {
+    const iris = dataset([neighborhood("IRIS____A1", "A", "Ville Alpha", 2)]);
+    const outer = neighborhood("outside", "60176", "Crépy-en-Valois", 3).geometry;
+    if (outer.type !== "Polygon") throw new Error("Expected fixture polygon");
+    outer.coordinates.push([[3.001, 48.001], [3.002, 48.001], [3.002, 48.002], [3.001, 48.002], [3.001, 48.001]]);
+    const zones = buildServedCityZones(iris, [
+      station("idf", "Ville Alpha", 2.005),
+      station("oise", "Crépy-en-Valois", 3.005),
+    ], "#aaaaaa", [{ code: "60176", name: "Crépy-en-Valois", centroid: [3.005, 48.005], geometry: outer }]);
+    expect(zones.map((zone) => zone.name)).toEqual(["Ville Alpha", "Crépy-en-Valois"]);
+    expect(zones[1]?.geometry).toEqual(outer);
+    expect(zones[1]?.boundaryPaths).toHaveLength(2);
+    expect(zones[0]?.borderColor).not.toEqual(zones[1]?.borderColor);
+    expect(iris.neighborhoods).toHaveLength(1);
+  });
+
   it("keeps boundary layers stable until their real style thresholds", () => {
     expect(deckAdministrativeBoundaryStyleBucket(9.99)).toBe(0);
     expect(deckAdministrativeBoundaryStyleBucket(10)).toBe(1);

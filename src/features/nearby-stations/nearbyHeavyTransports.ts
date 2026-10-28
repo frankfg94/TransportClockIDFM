@@ -58,6 +58,8 @@ export interface NearbyJourneyRequest {
   dataFreshness?: "base_schedule" | "realtime";
   /** Optional transport-mode constraint forwarded to the journey provider. */
   allowedModes?: readonly GlobalMapMode[];
+  /** Maximum number of transfers between public transport vehicles. */
+  maxTransfers?: number;
 }
 
 /**

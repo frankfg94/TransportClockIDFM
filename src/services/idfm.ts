@@ -564,6 +564,9 @@ export async function fetchNavitiaJourneys(
     params.set("datetime", request.datetime);
     params.set("datetime_represents", "departure");
   }
+  if (request.maxTransfers !== undefined && Number.isInteger(request.maxTransfers) && request.maxTransfers >= 0) {
+    params.set("max_nb_transfers", String(request.maxTransfers));
+  }
   const allowedIds = navitiaAllowedModeIds(request.allowedModes);
   if (allowedIds?.length) {
     for (const id of allowedIds) params.append("allowed_id[]", id);

@@ -42,6 +42,7 @@ export interface GlobalMapSidebarBodyProps {
   allLines: GlobalMapLine[];
   stations: GlobalMapStation[];
   cityPatternStations: GlobalMapStation[];
+  cityPatternOrdered?: boolean;
   paths: GlobalMapPath[];
   previewPaths: GlobalMapPath[];
   entrances: GlobalMapEntrance[];

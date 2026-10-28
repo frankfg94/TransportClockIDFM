@@ -61,7 +61,18 @@ export function createLineOptimizerProvider(
           .filter((route) => isOptimizerRoute(route, config));
       let routes = toRoutes(await journeys(discoveryRequest, signal));
       signal.throwIfAborted();
-      if (!routes.length) {
+      let discoveryComplete = true;
+      if (config.destinationOptimizer && settings.limitConnections) {
+        try {
+          const simpler = await journeys({ ...discoveryRequest, maxTransfers: 1 }, signal);
+          signal.throwIfAborted();
+          routes.push(...toRoutes(simpler));
+        } catch {
+          signal.throwIfAborted();
+          discoveryComplete = false;
+        }
+      }
+      if (!routes.length && !config.destinationOptimizer) {
         // A general search may prefer faster metros and omit the corridor.
         // Retry the corridor modes without restricting the number of legs.
         routes = toRoutes(
@@ -80,7 +91,7 @@ export function createLineOptimizerProvider(
         const key = turboSignature(route);
         groups.set(key, [...(groups.get(key) ?? []), route]);
       }
-      let complete = groups.size > 0;
+      let complete = groups.size > 0 && discoveryComplete;
       let courseCount = 0;
       const candidates: LineOptimizerCandidate[] = [];
       for (const group of groups.values()) {
@@ -116,7 +127,7 @@ export function createLineOptimizerProvider(
           );
       }
       return {
-        candidates: rankOptimizerCandidates(candidates, settings),
+        candidates: rankOptimizerCandidates(candidates, settings, config.destinationOptimizer),
         complete,
         analyzedAt: now(),
         courseCount,

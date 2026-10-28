@@ -41,11 +41,14 @@ export interface NearbyPlacesCitiesRequest {
   cities: readonly NearbyPlaceCityRef[];
   origins: readonly Pick<GeocoderPoint, "lon" | "lat">[];
   radiusMeters: number;
+  /** Completed city assets or fallback queries; total 0 means preparation. */
+  onProgress?: (completed: number, total: number) => void;
 }
 
 export type NearbyPlace = CompiledPlaceRecord & GeocoderPlaceMetadata & {
   distanceMeters: number;
 };
+const nearbyPlaceNameCollator = new Intl.Collator("fr-FR");
 
 /**
  * Merge normalized place collections while keeping one canonical record per
@@ -62,7 +65,7 @@ export function mergeNearbyPlaces(...collections: readonly (readonly NearbyPlace
     }
   }
   return [...byId.values()].sort(
-    (left, right) => left.distanceMeters - right.distanceMeters || left.name.localeCompare(right.name, "fr-FR"),
+    (left, right) => left.distanceMeters - right.distanceMeters || nearbyPlaceNameCollator.compare(left.name, right.name),
   );
 }
 

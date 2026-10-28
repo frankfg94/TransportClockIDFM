@@ -6,7 +6,7 @@ import {
   isOptimizerRoute,
   optimizerConnectionSteps,
 } from "../src/features/line-optimizer/lineOptimizer";
-import { resolveLineOptimizerConfig } from "../src/features/line-optimizer/optimizerConfig";
+import { velizyOptimizerConfig, resolveLineOptimizerConfig } from "../src/features/line-optimizer/optimizerConfig";
 import { createLineOptimizerProvider } from "../src/features/line-optimizer/lineOptimizerProvider";
 import { inferCourseServiceType } from "../src/services/travelRoutes/travelTurboProvider";
 import { turboTime, type TurboCourse } from "../src/features/nearby-stations/travelTurbo";
@@ -424,4 +424,68 @@ describe("real-journey provider", () => {
     });
     await expect(provider.analyze({ ...request(), signal: controller.signal })).rejects.toThrow();
   });
+});
+
+
+describe("Vélizy destination optimizer", () => {
+  it("compares tram and bus connections by arrival time", () => {
+    const tram = route();
+    tram.transitSections[1]!.lineCode = "T6";
+    tram.transitSections[1]!.lineMode = "TRAM";
+    const bus = route();
+    bus.id = "bus";
+    bus.transitSections[1]!.lineCode = "379";
+    bus.transitSections[1]!.lineMode = "BUS";
+    expect(isOptimizerRoute(tram, velizyOptimizerConfig)).toBe(true);
+    expect(isOptimizerRoute(bus, velizyOptimizerConfig)).toBe(true);
+    const a = enumerateOptimizerCandidates(tram, [[course("t10", 5, 15)], [course("t6", 20, 45)]], settings, start, velizyOptimizerConfig);
+    const b = enumerateOptimizerCandidates(bus, [[course("t10", 5, 15)], [course("bus", 22, 35)]], settings, start, velizyOptimizerConfig);
+    expect(rankOptimizerCandidates([...a, ...b], settings, true)[0]!.train.id).toBe("bus");
+  });
+  it("accepts a direct bus and preserves its actual arrival", () => {
+    const direct = route();
+    direct.sections = [direct.sections[0]!, direct.transitSections[1]!, direct.sections.at(-1)!];
+    direct.transitSections = direct.sections.filter(s => s.lineMode);
+    const result = enumerateOptimizerCandidates(direct, [[course("bus", 5, 35)]], settings, start, velizyOptimizerConfig);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.arriveAt).toBe(at(36));
+  });
+});
+
+
+it("prefers at most one bus when requested and still ranks all alternatives", () => {
+  const candidate = enumerateOptimizerCandidates(route(), [[course("tram", 5, 15)], [course("bus", 20, 35)]], settings, start, velizyOptimizerConfig)[0]!;
+  const oneBus = { ...candidate, id: "one", arriveAt: at(50), route: { ...candidate.route, transitSections: [{ ...candidate.route.transitSections[0]!, lineMode: "TRAM" as const }, { ...candidate.route.transitSections[1]!, lineMode: "BUS" as const, lineId: "one" }] } };
+  const twoBuses = { ...candidate, id: "two", arriveAt: at(40), route: { ...candidate.route, transitSections: [{ ...candidate.route.transitSections[0]!, lineMode: "BUS" as const, lineId: "other" }, { ...candidate.route.transitSections[1]!, lineMode: "BUS" as const }] } };
+  expect(rankOptimizerCandidates([twoBuses, oneBus], { ...settings, minimizeBusTransfers: true }, true).map(c => c.id)).toEqual(["one", "two"]);
+  expect(rankOptimizerCandidates([twoBuses, oneBus], { ...settings, minimizeBusTransfers: false }, true)[0]!.id).toBe("two");
+  expect(rankOptimizerCandidates([twoBuses], { ...settings, minimizeBusTransfers: true }, true)[0]!.id).toBe("two");
+});
+
+
+it("prefers up to two vehicles only within ten minutes of the earliest arrival", () => {
+  const base = enumerateOptimizerCandidates(route(), [[course("tram", 5, 15)], [course("bus", 20, 35)]], settings, start, velizyOptimizerConfig)[0]!;
+  const leg = base.route.transitSections[0]!;
+  const fast = { ...base, id: "fast", arriveAt: at(40), route: { ...base.route, transitSections: [leg, leg, { ...leg, lineId: "extra" }] } };
+  const simple = { ...base, id: "simple", arriveAt: at(50), route: { ...base.route, transitSections: [leg, { ...leg, lineId: "simple" }] } };
+  const withPreference = { ...settings, limitConnections: true };
+  expect(rankOptimizerCandidates([fast, simple], withPreference, true).map(c => c.id)).toEqual(["simple", "fast"]);
+  expect(rankOptimizerCandidates([fast, { ...simple, arriveAt: at(50) + 1000 }], withPreference, true)[0]!.id).toBe("fast");
+  expect(rankOptimizerCandidates([fast, simple], { ...settings, limitConnections: false }, true)[0]!.id).toBe("fast");
+});
+
+
+it("discovers simpler journeys separately when the two-vehicle preference is active", async () => {
+  const simple = route();
+  const three = route();
+  three.id = "three";
+  three.sections.splice(three.sections.length - 1, 0, { type: "transfer", durationSeconds: 60 }, { ...three.transitSections[1]!, lineId: "extra", lineCode: "6140", lineMode: "BUS" });
+  three.transitSections = three.sections.filter(s => s.lineMode);
+  const journeys = vi.fn().mockResolvedValueOnce([three]).mockResolvedValueOnce([simple]);
+  const result = await createLineOptimizerProvider({ journeys, courses: async () => { throw new Error("no schedules"); } }).analyze({
+    config: velizyOptimizerConfig, origin: { lon: 2.27, lat: 48.77 }, destination: { lon: 2.21, lat: 48.78 },
+    settings: { ...settings, limitConnections: true }, start, signal: new AbortController().signal,
+  });
+  expect(journeys.mock.calls[1]![0].maxTransfers).toBe(1);
+  expect(result.candidates[0]?.route.id).toBe("real");
 });

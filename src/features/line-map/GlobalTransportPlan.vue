@@ -13,6 +13,17 @@
     :aria-label="t('globalMap.page.aria')"
     @keydown="onKeydown"
   >
+    <GlobalMapLoadingCursor
+      :active="cityZonesCursorLoading || nearbyLinePlaces.isLoading.value"
+      :progress="cityZonesCursorLoading
+        ? (servedCitiesLoading || busDirectionLoading ? null : servedCityBoundaryProgress)
+        : nearbyLinePlaces.progress.value"
+      :label="!cityZonesCursorLoading ? t('globalMap.sidebar.nearbyPlacesLoading')
+        : servedCityBoundaryTotal && !servedCitiesLoading && !busDirectionLoading
+        ? t('globalMap.sidebar.lineCityContoursProgress', { completed: servedCityBoundaryCompleted, total: servedCityBoundaryTotal })
+        : t('globalMap.sidebar.lineCitiesLoading')"
+      :reduce-motion="appSettings.reduceMotion"
+    />
     <GlobalTransportPlanToolbar
       v-if="!props.itinerary"
       :show-map-interactions="showMapInteractions"
@@ -235,6 +246,10 @@
         :camera="camera"
         :get-section-exits="props.itinerary ? undefined : getGlobalSectionExits"
       />
+
+      <p v-if="props.itinerary && missingControlledTransitGeometry" class="global-transport-plan__itinerary-geometry-status" role="status">
+        {{ t("lineOptimizer.mapGeometryPartial") }}
+      </p>
 
       <GlobalMapDistanceMeasurementOverlay
         v-if="!routePreviewActive"
@@ -718,12 +733,13 @@
           :nearby-places-loading="nearbyLinePlaces.isLoading.value"
           :nearby-places-error="Boolean(nearbyLinePlaces.error.value)"
           :nearby-places-radius-minutes="nearbyLineRadiusMinutes"
-          :served-cities-loading="servedCitiesLoading || busDirectionLoading"
-          :served-cities-error="Boolean(cityZonesError)"
+          :served-cities-loading="servedCitiesLoading || servedCityBoundariesLoading || busDirectionLoading"
+          :served-cities-error="Boolean(cityZonesError) || servedCityBoundariesError"
           :lines="activeStationLines"
           :all-lines="network?.lines ?? []"
           :stations="network?.stations ?? []"
           :city-pattern-stations="sidebarCityPatternStations"
+          :city-pattern-ordered="sidebarCityPattern.ordered"
           :paths="lineMetadataPaths"
           :preview-line="sidebarPreviewLine"
           :preview-paths="sidebarPreviewPaths"
@@ -823,6 +839,15 @@
           t("globalMap.page.satelliteAttribution")
         }}</span>
       </footer>
+
+      <GlobalMapFitLineButton
+        v-if="activeLine && selectedLineFitBounds && !activeStationView && !routePreviewActive"
+        :bounds="selectedLineFitBounds"
+        :camera="camera"
+        :fitting="lineFitPending"
+        :reduce-motion="appSettings.reduceMotion"
+        @fit="refitSelectedLine"
+      />
 
       <GlobalTransportDebugPanel
         v-if="debugPerformanceEnabled"
@@ -952,6 +977,7 @@ import { useGlobalTransportHover } from "./useGlobalTransportHover";
 import { hitTestGlobalIsochrones } from "../transport-map/isochrones/hitTest";
 import { globalIsochroneZoneIndex } from "../transport-map/isochrones/palette";
 import type {
+  GlobalMapBounds,
   GlobalMapEntrance,
   GlobalMapLine,
   GlobalMapMode,
@@ -1010,6 +1036,8 @@ import {
   type GlobalMapStationSearchGroup,
 } from "../transport-map/search/globalMapSearch";
 import GlobalMapPickerSideBar from "./GlobalMapPickerSideBar.vue";
+import GlobalMapFitLineButton from "./GlobalMapFitLineButton.vue";
+import GlobalMapLoadingCursor from "./GlobalMapLoadingCursor.vue";
 import GlobalTransportDebugPanel from "./GlobalTransportDebugPanel.vue";
 import GlobalTransportPlanLinePanel from "./GlobalTransportPlanLinePanel.vue";
 import IrisNeighborhoodOverlay from "../transport-map/overlays/IrisNeighborhoodOverlay.vue";
@@ -1039,6 +1067,9 @@ import {
   GLOBAL_CITY_VIEW_MIN_ZOOM,
   selectCityZonesForZoom,
 } from "../transport-map/iris/servedCityZones";
+import { fetchServedCityBoundaries, stationsMissingCityGeometry } from "../transport-map/iris/servedCityBoundaries";
+import type { CityBoundary } from "../transport-map/contracts/cityBoundary";
+import { orderLineCityStations } from "./citiesLinePattern";
 import TransportMapStationPulseOverlay from "./TransportMapStationPulseOverlay.vue";
 import TransportMapUserLocationOverlay from "./TransportMapUserLocationOverlay.vue";
 import TransportMapTooltip from "../transport-map/overlays/TransportMapTooltip.vue";
@@ -1482,6 +1513,7 @@ const deferredLineSidebarLineId = ref<string>();
 const focusedEntranceId = ref<string>();
 const rendererMetrics = ref<TransportMapRendererMetrics>();
 const interactionActive = ref(false);
+const lineFitPending = ref(false);
 const wheelScrolling = ref(false);
 
 function queryGlobalMapHitCandidates(point: { x: number; y: number }): TransportMapHitCandidates {
@@ -2289,16 +2321,15 @@ const sidebarPreviewLine = computed<GlobalMapLine | undefined>(() => {
   if (!line || line.id === activeLine.value?.id) return undefined;
   return line;
 });
-const sidebarCityPatternStations = computed<GlobalMapStation[]>(() => {
+const sidebarCityPattern = computed(() => {
   const previewLine = sidebarPreviewLine.value;
   const line = previewLine ?? activeLine.value;
   const allStations = network.value?.stations ?? [];
-  if (!line) return [];
+  if (!line) return { stations: [], ordered: false };
 
   if (previewLine) {
-    return previewLine.stationIds
-      .map((stationId) => network.value?.stationsById.get(stationId))
-      .filter((station): station is GlobalMapStation => Boolean(station));
+    const regional = orderLineCityStations(previewLine, allStations, network.value?.regionalPaths ?? []);
+    return regional.ordered ? regional : orderLineCityStations(previewLine, allStations, sidebarPreviewPaths.value);
   }
 
   const direction = busDirectionSelection.value;
@@ -2307,13 +2338,51 @@ const sidebarCityPatternStations = computed<GlobalMapStation[]>(() => {
   const directionalStationIds = direction && !directionMergeEnabled.value
     ? getGlobalBusDirectionOrderedStopIds(line, direction, allStations)
     : [];
-  const stationIds = directionalStationIds.length > 1
-    ? directionalStationIds
-    : line.stationIds;
-
-  return stationIds
-    .map((stationId) => network.value?.stationsById.get(stationId))
-    .filter((station): station is GlobalMapStation => Boolean(station));
+  if (directionalStationIds.length > 1) {
+    return {
+      stations: directionalStationIds.map((id) => network.value?.stationsById.get(id))
+        .filter((station): station is GlobalMapStation => Boolean(station)),
+      ordered: true,
+    };
+  }
+  // Provider geometry can contain overlapping fragments with different stop
+  // memberships. Prefer the complete regional route sequence for city order.
+  const regional = orderLineCityStations(line, allStations, network.value?.regionalPaths ?? []);
+  return regional.ordered ? regional : orderLineCityStations(line, allStations, lineMetadataPaths.value);
+});
+const sidebarCityPatternStations = computed(() => sidebarCityPattern.value.stations);
+const servedCityBoundaries = shallowRef<CityBoundary[]>([]);
+const servedCityBoundariesLoading = ref(false);
+const servedCityBoundaryCompleted = ref(0);
+const servedCityBoundaryTotal = ref(0);
+const servedCityBoundaryProgress = computed(() => servedCityBoundaryTotal.value
+  ? servedCityBoundaryCompleted.value / servedCityBoundaryTotal.value : null);
+const servedCityBoundariesError = ref(false);
+let servedCityBoundariesRequest = 0;
+watch([showServedCityZones, irisDataset, sidebarCityPatternStations], async ([enabled, dataset, stations]) => {
+  const token = ++servedCityBoundariesRequest;
+  servedCityBoundaries.value = [];
+  servedCityBoundariesError.value = false;
+  servedCityBoundariesLoading.value = false;
+  servedCityBoundaryCompleted.value = 0;
+  servedCityBoundaryTotal.value = 0;
+  if (!enabled || !dataset) return;
+  const missing = stationsMissingCityGeometry(dataset, stations);
+  if (!missing.length) return;
+  servedCityBoundariesLoading.value = true;
+  const result = await fetchServedCityBoundaries(missing, (progress) => {
+    if (token !== servedCityBoundariesRequest) return;
+    servedCityBoundaryCompleted.value = progress.completed;
+    servedCityBoundaryTotal.value = progress.total;
+    servedCityBoundaries.value = progress.boundaries;
+    servedCityBoundariesError.value = progress.unavailable;
+    if (progress.completed) draw();
+  });
+  if (token !== servedCityBoundariesRequest) return;
+  servedCityBoundaries.value = result.boundaries;
+  servedCityBoundariesError.value = result.unavailable;
+  servedCityBoundariesLoading.value = false;
+  draw();
 });
 
 const servedCityZones = computed<ReturnType<typeof buildServedCityZones> | undefined>(() => {
@@ -2331,6 +2400,7 @@ const servedCityZones = computed<ReturnType<typeof buildServedCityZones> | undef
     irisDataset.value,
     sidebarCityPatternStations.value,
     line.color,
+    servedCityBoundaries.value,
   );
 });
 
@@ -2397,6 +2467,7 @@ watch(
     // completion callback. Treat that cancellation as the end of the fit so
     // the selected-line sidebar cannot remain hidden.
     if (lineId && !cameraTransitionActive) deferredLineSidebarLineId.value = undefined;
+    if (!cameraTransitionActive) lineFitPending.value = false;
   },
   { flush: "post" },
 );
@@ -2435,6 +2506,8 @@ function ensureIrisDataset(): Promise<IrisDataset> {
 }
 
 const servedCitiesLoading = ref(false);
+const cityZonesCursorLoading = computed(() => showServedCityZones.value
+  && (servedCitiesLoading.value || servedCityBoundariesLoading.value || busDirectionLoading.value));
 async function ensureServedCitiesDataset(): Promise<void> {
   if (!showServedCityZones.value || irisDataset.value) return;
   servedCitiesLoading.value = true;
@@ -2943,7 +3016,7 @@ const globalItineraryLinePaths = shallowRef(new Map<string, GlobalMapPath[]>());
 watch(globalSelectedTravelRoute, async (selectedRoute, _previous, onCleanup) => {
   let cancelled = false;
   onCleanup(() => { cancelled = true; });
-  if (props.itinerary || !selectedRoute) {
+  if (!selectedRoute) {
     globalItineraryLinePaths.value = new Map();
     return;
   }
@@ -3006,7 +3079,7 @@ const globalItinerarySegments = computed<GlobalTransportItinerarySegment[]>(() =
     globalSelectedTravelRoute.value,
     globalItineraryOrigin.value,
     globalItineraryDestination.value,
-    props.itinerary ? { preserveSections: true } : {
+    props.itinerary ? { preserveSections: true, resolveTransitGeometry: resolveItineraryLineGeometry } : {
       resolveTransitGeometry: resolveItineraryLineGeometry,
       resolveTransitExitPoint: (section, target) => selectFastestRouteExit(
         getGlobalSectionExits(section),
@@ -3025,6 +3098,11 @@ const globalItinerarySegments = computed<GlobalTransportItinerarySegment[]>(() =
     });
   }
   return segments;
+});
+
+const missingControlledTransitGeometry = computed(() => {
+  const expected = props.itinerary?.steps.filter((step) => step.kind === "transit").length ?? 0;
+  return globalItinerarySegments.value.filter((segment) => segment.kind === "transit").length < expected;
 });
 
 /** During a route detail preview the renderer intentionally receives no map layers. */
@@ -3254,11 +3332,16 @@ function viewAddressBookLocation(entry: AddressBookEntry): void {
   if (globalItinerary.open.value) globalItinerary.close();
   cancelCameraAnimation();
   const world = lonLatToWorld(entry);
-  applyCamera(updateCamera(camera.value, {
+  const target = {
     centerWorldX: world.x,
     centerWorldY: world.y,
     zoom: Math.max(camera.value.zoom, GLOBAL_TRANSPORT_PLAN_CONFIG.selection.stationZoom),
-  }), false);
+  };
+  if (interactionController && !appSettings.value.reduceMotion) {
+    interactionController.animateCameraToTarget(target);
+  } else {
+    applyCamera(updateCamera(camera.value, target), false);
+  }
 }
 
 function viewAddressBookNeighborhood(entry: AddressBookEntry): void {
@@ -3806,19 +3889,20 @@ function focusEntrance(entrance: GlobalMapEntrance): void {
   );
 }
 
-function zoomToLine(
-  lineId: string,
-  animate = false,
-  onCameraFitComplete?: () => void,
-): void {
+// Cache geometry bounds independently of the camera: pan/zoom only compares
+// four edges in the floating control, without scanning paths or reading layout.
+const selectedLineFitBounds = computed(() => activeLine.value
+  ? readLineFitBounds(activeLine.value.id)
+  : undefined);
+
+function readLineFitBounds(lineId: string): GlobalMapBounds | undefined {
   const line = network.value?.linesById.get(lineId);
   const points =
     line?.stationIds
       .map((id) => network.value?.stationsById.get(id))
       .filter((station): station is GlobalMapStation => Boolean(station)) ?? [];
   if (!points.length) {
-    onCameraFitComplete?.();
-    return;
+    return undefined;
   }
   const geometryBounds = [...viewport.value.paths, ...preloadedLinePaths.value]
     .filter((path) => path.lineId === lineId)
@@ -3828,7 +3912,7 @@ function zoomToLine(
       maxX: path.maxX,
       maxY: path.maxY,
     }));
-  const bounds = [...geometryBounds, {
+  return [...geometryBounds, {
     minX: Math.min(...points.map((point) => point.worldX)),
     minY: Math.min(...points.map((point) => point.worldY)),
     maxX: Math.max(...points.map((point) => point.worldX)),
@@ -3839,6 +3923,29 @@ function zoomToLine(
     maxX: Math.max(current.maxX, bound.maxX),
     maxY: Math.max(current.maxY, bound.maxY),
   }));
+}
+
+function refitSelectedLine(): void {
+  const lineId = activeLine.value?.id;
+  if (!lineId || lineFitPending.value) return;
+  lineFitPending.value = true;
+  zoomToLine(lineId, !appSettings.value.reduceMotion, () => {
+    lineFitPending.value = false;
+  });
+}
+
+function zoomToLine(
+  lineId: string,
+  animate = false,
+  onCameraFitComplete?: () => void,
+): void {
+  const bounds = lineId === activeLine.value?.id
+    ? selectedLineFitBounds.value
+    : readLineFitBounds(lineId);
+  if (!bounds) {
+    onCameraFitComplete?.();
+    return;
+  }
 
   const targetCamera = fitCameraToBounds(
     camera.value,
@@ -3883,7 +3990,9 @@ function readGlobalMapCameraFitInsets(lineId?: string): CameraFitInsets {
     const rect = leftControls.getBoundingClientRect();
     insets.left = Math.max(0, rect.right - stageRect.left + 12);
   }
-  if (sidebar) {
+  // Mobile uses a bottom sheet; treating its full width as a right inset
+  // would reduce the fit rectangle to one pixel and force the minimum zoom.
+  if (sidebar && !isMobileViewport()) {
     const rect = sidebar.getBoundingClientRect();
     insets.right = Math.max(0, stageRect.right - rect.left + 12);
   } else if (lineId && activeLine.value?.id === lineId && !isMobileViewport()) {
@@ -5750,6 +5859,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.global-transport-plan__itinerary-geometry-status { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 8; padding: 8px 12px; background: var(--surface, #fff); color: var(--ink); border-radius: 8px; font-size: .8rem; }
 .global-transport-plan__circle-places-status { align-items: center; background: var(--surface, #fff); border-radius: 10px; color: var(--ink); display: flex; font-size: .8rem; gap: 10px; left: 16px; max-width: calc(100% - 32px); padding: 10px 14px; position: absolute; top: 80px; z-index: 8; }
 .global-transport-plan__circle-places-status progress { width: 70px; }
 .global-transport-plan {

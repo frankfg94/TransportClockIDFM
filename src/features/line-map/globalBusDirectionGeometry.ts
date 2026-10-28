@@ -94,11 +94,9 @@ export function createGlobalBusDirectionGeometryRequest(
 /**
  * Converts a resolved V1/provider route into one V2 render path. The provider
  * may project the same stop to a different quay on each adjacent edge. Those
- * two endpoints must be reconciled before the segments are concatenated;
- * otherwise the global map falls back to several clipped static fragments and
- * exposes a visible gap. A direct fallback chord is still rejected because it
- * would invent the whole edge, whereas reconciling two validated provider
- * edges only joins their shared stop.
+ * nearby endpoints can be reconciled at their shared stop. Distant endpoints
+ * remain independent subpaths: moving either of them would turn a validated
+ * provider edge into an invented chord.
  */
 export function createGlobalBusDirectionGeometryPath(
   line: GlobalMapLine,
@@ -155,6 +153,7 @@ export function createGlobalBusDirectionGeometryPath(
   // the road trace continuous without replacing either validated edge with a
   // direct stop-to-stop chord.
   const joinPoints = new Map<number, { x: number; y: number }>();
+  const disconnectedStops = new Set<number>();
   let maximumRawJoinGapMeters = 0;
   let maximumStationDistanceMeters = 0;
   for (let index = 1; index < stops.length - 1; index += 1) {
@@ -163,6 +162,7 @@ export function createGlobalBusDirectionGeometryPath(
     if (!previous || !next) return undefined;
 
     const rawGapMeters = worldDistanceMeters(previous, next);
+    if (rawGapMeters > MAX_JOIN_DISTANCE_METERS) disconnectedStops.add(index);
     maximumRawJoinGapMeters = Math.max(maximumRawJoinGapMeters, rawGapMeters);
     const reference = requestedStopPoints.get(index);
     const join = chooseClosestGlobalBusEndpoint(previous, next, reference);
@@ -176,19 +176,21 @@ export function createGlobalBusDirectionGeometryPath(
   }
 
   const vertices: GlobalMapPath["vertices"] = [];
+  const subpathStarts = [0];
   const anchors = new Map<string, { stationId: string; x: number; y: number }>();
 
   orderedSegments.forEach((segment, index) => {
     const projected = [...segment.points];
-    const first = index === 0 ? projected[0]! : joinPoints.get(index)!;
-    const last = index === orderedSegments.length - 1
+    const first = index === 0 || disconnectedStops.has(index) ? projected[0]! : joinPoints.get(index)!;
+    const last = index === orderedSegments.length - 1 || disconnectedStops.has(index + 1)
       ? projected.at(-1)!
       : joinPoints.get(index + 1)!;
     projected[0] = first;
     projected[projected.length - 1] = last;
 
+    if (disconnectedStops.has(index)) subpathStarts.push(vertices.length);
     projected.forEach((point, pointIndex) => {
-      if (vertices.length > 0 && pointIndex === 0) return;
+      if (vertices.length > 0 && pointIndex === 0 && !disconnectedStops.has(index)) return;
       const stationId = pointIndex === 0
         ? segment.fromStationId
         : pointIndex === projected.length - 1
@@ -196,8 +198,8 @@ export function createGlobalBusDirectionGeometryPath(
           : undefined;
       vertices.push({ ...point, ...(stationId ? { stationId } : {}) });
     });
-    anchors.set(segment.fromStationId, { stationId: segment.fromStationId, ...first });
-    anchors.set(segment.toStationId, { stationId: segment.toStationId, ...last });
+    anchors.set(segment.fromStationId, { stationId: segment.fromStationId, ...(joinPoints.get(index) ?? first) });
+    anchors.set(segment.toStationId, { stationId: segment.toStationId, ...(joinPoints.get(index + 1) ?? last) });
     if (requestedStopPoints.has(index)) {
       maximumStationDistanceMeters = Math.max(
         maximumStationDistanceMeters,
@@ -213,8 +215,17 @@ export function createGlobalBusDirectionGeometryPath(
   });
 
   if (vertices.length < 2) return undefined;
-  const joinQuality = maximumRawJoinGapMeters > MAX_JOIN_DISTANCE_METERS
-    ? `reconciled-${Math.round(maximumRawJoinGapMeters)}m`
+  // One station may occur on two distant provider endpoints. Only its chosen
+  // render anchor gets the station id; retain the other endpoint as an ordinary
+  // provider vertex so resolveGlobalMapVertex cannot move it across the gap.
+  const anchoredVertices = vertices.map((vertex) => {
+    const anchor = vertex.stationId ? anchors.get(vertex.stationId) : undefined;
+    return anchor && (anchor.x !== vertex.x || anchor.y !== vertex.y)
+      ? { x: vertex.x, y: vertex.y }
+      : vertex;
+  });
+  const joinQuality = disconnectedStops.size > 0
+    ? `disconnected-${Math.round(maximumRawJoinGapMeters)}m`
     : "aligned";
   return {
     id: `path:${line.id}:direction:${selection.selectedDirectionId}`,
@@ -222,13 +233,14 @@ export function createGlobalBusDirectionGeometryPath(
     geometrySource: "gtfs",
     sourceVersion: `direction:${resolution.source}:${resolution.datasetVersion ?? "unknown"}:${joinQuality}`,
     quality: {
-      complete: true,
+      complete: disconnectedStops.size === 0,
       fallback: false,
-      gapMeters: 0,
+      gapMeters: disconnectedStops.size > 0 ? maximumRawJoinGapMeters : 0,
       stationDistanceMaxMeters: maximumStationDistanceMeters,
     },
     stationIds: [...new Set(stationIds)],
-    vertices,
+    vertices: anchoredVertices,
+    ...(subpathStarts.length > 1 ? { subpathStarts } : {}),
     renderStationAnchors: [...anchors.values()],
     minX: Math.min(...vertices.map((vertex) => vertex.x)),
     minY: Math.min(...vertices.map((vertex) => vertex.y)),

@@ -54,7 +54,7 @@ describe("optimizer shared timeline and map model", () => {
     expect(timeline.connections[1]!.map((s) => s.kind)).toEqual(["walk"]);
     expect(timeline.steps.find((s) => s.kind === "wait" && s.courseIndex === 0)).toBeUndefined();
   });
-  it("renders supplied walking and transit vertices without line or exit resolution", () => {
+  it("uses supplied vertices when detailed line geometry is unavailable, without changing walking exits", () => {
     const candidate = optimizerItineraryCandidate();
     const timeline = createLineOptimizerTimeline(candidate, optimizerOrigin, optimizerDestination);
     const resolveTransitGeometry = vi.fn();
@@ -80,7 +80,7 @@ describe("optimizer shared timeline and map model", () => {
     ]);
     expect(segments[1]!.coordinates).toBe(candidate.route.transitSections[0]!.geometry);
     expect(segments[0]!.coordinates).toEqual(candidate.route.sections[0]!.geometry);
-    expect(resolveTransitGeometry).not.toHaveBeenCalled();
+    expect(resolveTransitGeometry).toHaveBeenCalledTimes(candidate.courses.length);
     expect(resolveTransitExitPoint).not.toHaveBeenCalled();
   });
 });

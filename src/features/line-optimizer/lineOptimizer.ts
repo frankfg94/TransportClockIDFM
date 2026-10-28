@@ -13,6 +13,8 @@ export interface LineOptimizerSettings {
   transferSeconds?: number;
   marginSeconds: number;
   preferSemiDirect: boolean;
+  minimizeBusTransfers: boolean;
+  limitConnections: boolean;
   semiDirectWaitToleranceSeconds: number;
   maxArrivalDelaySeconds: number;
   departureWindowSeconds: number;
@@ -23,6 +25,8 @@ export const DEFAULT_OPTIMIZER_SETTINGS: LineOptimizerSettings = {
   transferSeconds: 180,
   marginSeconds: 30,
   preferSemiDirect: true,
+  minimizeBusTransfers: false,
+  limitConnections: false,
   semiDirectWaitToleranceSeconds: 120,
   maxArrivalDelaySeconds: 600,
   departureWindowSeconds: 3600,
@@ -86,6 +90,7 @@ export function optimizerConnectionSteps(
 
 export function optimizerCorridorIndex(route: TravelRoute, config: LineOptimizerConfig): number {
   const legs = route.sections.filter(isTurboTransit);
+  if (config.destinationOptimizer) return legs.length >= 1 ? 0 : -1;
   return legs.findIndex((tram, index) => {
     const train = legs[index + 1];
     return (
@@ -151,7 +156,7 @@ export function enumerateOptimizerCandidates(
   if (corridorIndex < 0 || batches.length !== indexes.length) return [];
   const first = indexes[0]!;
   const tramIndex = indexes[corridorIndex]!;
-  const second = indexes[corridorIndex + 1]!;
+  const second = indexes[corridorIndex + 1];
   const movement = route.sections.filter(
     (section) => !isTurboTransit(section) && !isNearbyJourneyWaitingSection(section),
   );
@@ -162,7 +167,7 @@ export function enumerateOptimizerCandidates(
   )
     return [];
   const providerWalkSeconds = movementSeconds(route.sections.slice(0, first));
-  const providerTransferSeconds = movementSeconds(route.sections.slice(tramIndex + 1, second));
+  const providerTransferSeconds = second === undefined ? 0 : movementSeconds(route.sections.slice(tramIndex + 1, second));
   const egressSeconds = movementSeconds(route.sections.slice(indexes.at(-1)! + 1));
   const walkSeconds = settings.walkSeconds ?? providerWalkSeconds;
   const transferSeconds = settings.transferSeconds ?? providerTransferSeconds;
@@ -192,6 +197,19 @@ export function enumerateOptimizerCandidates(
         : movementSeconds(route.sections.slice(indexes[i]! + 1, index)),
     );
   const result: LineOptimizerCandidate[] = [];
+  if (indexes.length === 1 && config?.destinationOptimizer) {
+    for (const trip of ordered[0]!) {
+      const walkAt = trip.departure - walkSeconds * 1000;
+      const leaveAt = walkAt - settings.exitSeconds * 1000;
+      if (leaveAt < start || leaveAt > start + settings.departureWindowSeconds * 1000) continue;
+      result.push({ id: `${route.id}:${trip.id}`, route, courses: [trip], waits: [0],
+        totalWaitSeconds: 0, corridorIndex: 0, tram: trip, train: trip, leaveAt, walkAt,
+        platformAt: trip.departure, arriveAt: trip.arrival + egressSeconds * 1000,
+        walkSeconds, transferSeconds: 0, providerWalkSeconds, providerTransferSeconds: 0,
+        waitSeconds: 0, serviceType: trip.serviceType });
+    }
+    return result;
+  }
   for (const tram of ordered[corridorIndex]!) {
     // Latest reachable feeder chain maximizes time at home for this tram.
     const prefix: TurboCourse[] = [tram];
@@ -255,6 +273,7 @@ export function enumerateOptimizerCandidates(
 export function rankOptimizerCandidates(
   candidates: LineOptimizerCandidate[],
   settings: LineOptimizerSettings,
+  destinationOptimizer = false,
 ) {
   const unique = [
     ...new Map(
@@ -264,6 +283,25 @@ export function rankOptimizerCandidates(
       ]),
     ).values(),
   ];
+  if (destinationOptimizer) {
+    const busCount = (candidate: LineOptimizerCandidate) =>
+      candidate.route.transitSections.filter((section) => section.lineMode === "BUS").length;
+    const earliestArrival = Math.min(...unique.map((candidate) => candidate.arriveAt));
+    const preferredConnection = (candidate: LineOptimizerCandidate) =>
+      candidate.route.transitSections.length <= 2 &&
+      candidate.arriveAt <= earliestArrival + 10 * 60_000;
+    return unique.sort((a, b) => {
+      const connectionPreference = settings.limitConnections
+        ? Number(preferredConnection(b)) - Number(preferredConnection(a))
+        : 0;
+      // Prefer at most one bus, without imposing a bus when a tram-only route exists.
+      const busPreference = settings.minimizeBusTransfers
+        ? Math.max(0, busCount(a) - 1) - Math.max(0, busCount(b) - 1)
+        : 0;
+      return connectionPreference || busPreference || a.arriveAt - b.arriveAt ||
+        a.totalWaitSeconds - b.totalWaitSeconds || b.leaveAt - a.leaveAt;
+    });
+  }
   const earliestArrival = Math.min(...unique.map((candidate) => candidate.arriveAt));
   const eligible = unique.filter(
     (candidate) => candidate.arriveAt <= earliestArrival + settings.maxArrivalDelaySeconds * 1000,

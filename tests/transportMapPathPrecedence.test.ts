@@ -55,6 +55,40 @@ describe("global map path source precedence", () => {
     expect(breakIncompleteGtfsConnectors(connector).subpathStarts).toEqual([0]);
     expect(breakIncompleteGtfsConnectors(materializeLod(connector, 1)).subpathStarts).toEqual([0]);
   });
+
+  it("splits an incomplete provider path at an edge with no provider endpoint, even with explicit chunk starts", () => {
+    const incomplete = {
+      ...path("provider", "gtfs"),
+      quality: { ...path("provider", "gtfs").quality, complete: false },
+      vertices: [
+        { x: 0, y: 0, stationId: "a" },
+        { x: 0, y: 1 },
+        { x: 1, y: 1, stationId: "b" },
+        { x: 2, y: 2, stationId: "c" },
+        { x: 3, y: 2 },
+      ],
+      subpathStarts: [0],
+      renderStationAnchors: [{ stationId: "a", x: 0, y: 0 }, { stationId: "b", x: 1, y: 1 }],
+    };
+    const result = breakIncompleteGtfsConnectors(incomplete);
+    expect(result.subpathStarts).toEqual([0, 3]);
+    expect(result.vertices).toBe(incomplete.vertices);
+    expect(result.quality.complete).toBe(false);
+  });
+
+  it("retains provider-backed two-point edges around an incomplete edge", () => {
+    const incomplete = {
+      ...path("provider", "gtfs"),
+      quality: { ...path("provider", "gtfs").quality, complete: false },
+      vertices: ["a", "b", "c", "d"].map((stationId, x) => ({ stationId, x, y: 0 })),
+      subpathStarts: [0],
+      renderStationAnchors: ["a", "b"].map((stationId, x) => ({ stationId, x, y: 0 })),
+    };
+    expect(breakIncompleteGtfsConnectors(incomplete).subpathStarts).toEqual([0, 2, 3]);
+    expect(breakIncompleteGtfsConnectors({ ...incomplete, quality: { ...incomplete.quality, complete: true } })).toEqual({
+      ...incomplete, quality: { ...incomplete.quality, complete: true },
+    });
+  });
   it("does not paint regional and detailed representations together", () => {
     const regional = path("path:regional:1", "gtfs");
     const detailed = path("path:line:metro:1:segment:1#chunk", "gtfs");
@@ -62,11 +96,56 @@ describe("global map path source precedence", () => {
     expect(selectPreferredLinePaths([detailed], [regional], lineId)).toEqual([detailed]);
   });
 
+  it("keeps a detailed road bend when an off-screen station is only covered by the regional layer", () => {
+    const detailed = {
+      ...path("path:line:test:segment:1#chunk", "gtfs"),
+      vertices: [
+        { x: 0, y: 0, stationId: "station:a" },
+        { x: 0, y: 1 },
+        { x: 1, y: 1, stationId: "station:b" },
+      ],
+    };
+    const regional = {
+      ...path("path:regional:1", "gtfs"),
+      stationIds: ["station:a", "station:b", "station:c"],
+      vertices: [
+        { x: 0, y: 0, stationId: "station:a" },
+        { x: 1, y: 1, stationId: "station:b" },
+        { x: 2, y: 1, stationId: "station:c" },
+      ],
+    };
+
+    // Completeness outside the loaded tiles must not replace a bridge/road
+    // bend in those tiles with the regional station-to-station chord.
+    expect(selectPreferredLinePaths([detailed], [regional], lineId, {
+      requiredStationIds: ["station:a", "station:b", "station:c"],
+    })).toEqual([detailed]);
+  });
+
   it("keeps GTFS when the competing representation is NeTEx", () => {
     const regional = path("path:regional:1", "gtfs");
     const detailed = path("path:line:metro:1:segment:1#chunk", "netex-schematic-fallback");
 
     expect(selectPreferredLinePaths([detailed], [regional], lineId)).toEqual([regional]);
+  });
+
+  it("can still restore full coverage from a secondary layer that retains detailed geometry", () => {
+    const partial = {
+      ...path("path:line:test:segment:1#local", "gtfs"),
+      vertices: [
+        { x: 0, y: 0, stationId: "station:a" },
+        { x: 1, y: 1, stationId: "station:b" },
+      ],
+    };
+    const complete = {
+      ...partial,
+      id: "path:line:test:segment:1#preloaded",
+      stationIds: ["station:a", "station:b", "station:c"],
+      vertices: [...partial.vertices, { x: 2, y: 1, stationId: "station:c" }],
+    };
+    expect(selectPreferredLinePaths([partial], [complete], lineId, {
+      requiredStationIds: complete.stationIds,
+    })).toEqual([complete]);
   });
 
   it("never mixes a complete GTFS trace with a NeTEx fallback", () => {

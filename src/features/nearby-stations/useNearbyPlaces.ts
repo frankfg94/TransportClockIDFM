@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref, watch, type Ref } from "vue";
+import { computed, onBeforeUnmount, ref, shallowRef, watch, type Ref } from "vue";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import { mergeNearbyPlaces, type NearbyPlace, type NearbyPlaceCityRef, type PlacesProvider } from "./nearbyPlaces";
@@ -17,8 +17,10 @@ export function useNearbyPlaces(options: {
   enabled: Ref<boolean>;
   provider?: PlacesProvider;
 }) {
-  const places = ref<NearbyPlace[]>([]);
+  // Results are replaced as a whole; avoid proxying every POI during map/list preparation.
+  const places = shallowRef<NearbyPlace[]>([]);
   const isLoading = ref(false);
+  const progress = ref<number | null>(null);
   const error = ref<Error>();
   let controller: AbortController | undefined;
   let requestToken = 0;
@@ -34,6 +36,7 @@ export function useNearbyPlaces(options: {
     const token = ++requestToken;
     controller?.abort();
     controller = undefined;
+    progress.value = null;
     const origins = resolvedOrigins.value;
     if (origins.length === 0 || !options.enabled.value) {
       places.value = [];
@@ -53,6 +56,11 @@ export function useNearbyPlaces(options: {
             cities: resolvedCityRefs.value,
             origins,
             radiusMeters: options.radius.value,
+            onProgress: (completed, total) => {
+              if (token === requestToken && !requestController.signal.aborted) {
+                progress.value = total > 0 ? completed / total : null;
+              }
+            },
           }, requestController.signal),
         ])
         : await Promise.allSettled(origins.map((origin) =>
@@ -105,6 +113,7 @@ export function useNearbyPlaces(options: {
     controller = undefined;
     places.value = [];
     error.value = undefined;
+    progress.value = null;
     isLoading.value = options.enabled.value && resolvedOrigins.value.length > 0;
     refreshTimer = window.setTimeout(() => {
       refreshTimer = undefined;
@@ -139,5 +148,5 @@ export function useNearbyPlaces(options: {
     controller?.abort();
   });
 
-  return { places, isLoading, error, refresh };
+  return { places, isLoading, progress, error, refresh };
 }
