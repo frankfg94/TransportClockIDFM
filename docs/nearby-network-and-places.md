@@ -69,6 +69,14 @@ d’Île-de-France. La requête `out body geom` conserve les membres des relatio
 et leurs géométries. `--endpoint=https://…/api/interpreter` sélectionne le serveur
 OSM ; le serveur local reste la valeur par défaut. `--cached` réutilise la
 réponse source située dans `.data/place-footprints-overpass.json`.
+Les anciennes réponses sans relations de bâtiment doivent être renouvelées.
+Les relations OSM `type=building` peuvent regrouper plusieurs emprises de
+centre commercial via leurs membres `outline`. Lorsque tous ces membres sont
+des centres connus avec une géométrie complète, leur union est compilée une
+seule fois géométriquement, sans compter les recouvrements deux fois. Chaque
+identifiant conserve son accès au groupe ; les boutiques intérieures restent
+indépendantes. La carte affiche un seul contour pour un groupe actif, et la
+fiche indique l'emprise du groupe. Les noms et la proximité ne créent pas de lien.
 
 Le pack publié se trouve dans `public/data/place-footprints/` : un manifeste
 et des morceaux identifiés par checksum, limités à 24 MiB chacun. Le manifeste

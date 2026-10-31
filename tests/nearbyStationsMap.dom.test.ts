@@ -453,6 +453,23 @@ function mountMap(
 }
 
 describe("NearbyStationsMap walking route overlay", () => {
+  it('draws an explicit mall group only once when another member is hovered', async () => {
+    const restoreViewport = installMapViewport(720, 420);
+    const wrapper = mountMap([]);
+    const footprintRings: [number, number][][] = [[[2.349,48.849],[2.351,48.849],[2.351,48.851],[2.349,48.851],[2.349,48.849]]];
+    const first = { id:'way:first', name:'Centre', kind:'mall', category:'shop' as const, lon:2.35, lat:48.85, distanceMeters:0, areaM2:1200, footprintRings, footprintGroupId:'relation:group' };
+    const second = {...first,id:'way:second'};
+    await wrapper.setProps({places:[first,second],selectedPlaceId:first.id,reduceMotion:true});
+    wrapper.findComponent({name:'NearbyPlaceCanvas'}).vm.$emit('hoverPlace',second.id);
+    await nextTick();
+    expect(wrapper.findAll('[data-place-footprint-id]')).toHaveLength(1);
+    expect(wrapper.get('[data-place-footprint-id]').attributes('data-place-footprint-id')).toBe(first.id);
+    expect(wrapper.get('[data-place-footprint-id]').classes()).toContain('is-selected');
+    await wrapper.setProps({selectedPlaceId:second.id});
+    expect(wrapper.findAll('[data-place-footprint-id]')).toHaveLength(1);
+    expect(wrapper.get('[data-place-footprint-id]').attributes('data-place-footprint-id')).toBe(second.id);
+    wrapper.unmount(); restoreViewport();
+  });
   it.each(['supermarket', 'park', 'garden', 'mall', 'forest'])('selects a %s footprint and displays its measured area', async kind => {
     const restoreViewport = installMapViewport(720, 420);
     const wrapper = mountMap([]);

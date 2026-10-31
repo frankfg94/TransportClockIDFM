@@ -27,8 +27,13 @@ const targets = ['relation:2768926','way:150389811','way:678745793','way:1503807
 const examples = targets.map(id => {
   const place = places.find(place=>place.id===id);
   if (!place) throw new Error(`Missing proof target ${id}`);
-  return { id, name: place.name, kind: place.kind, areaM2: place.areaM2, vertices: place.footprintRings!.reduce((sum,ring)=>sum+ring.length,0) };
+  return { id, name: place.name, kind: place.kind, areaM2: place.areaM2, footprintGroupId: place.footprintGroupId, vertices: place.footprintRings!.reduce((sum,ring)=>sum+ring.length,0) };
 });
+const mainMall = places.find(place => place.id === 'way:150389811')!;
+const northMall = places.find(place => place.id === 'way:678745793')!;
+if (mainMall.footprintGroupId !== 'relation:3595109' || northMall.footprintGroupId !== mainMall.footprintGroupId
+  || mainMall.areaM2 !== northMall.areaM2 || JSON.stringify(mainMall.footprintRings) !== JSON.stringify(northMall.footprintRings)
+  || places.find(place => place.id === 'way:150380716')!.footprintGroupId) throw new Error('Invalid mall grouping or interior supermarket association');
 const report = { passed: true, counts: manifest.counts, places: places.length, observed: manifest.observed, withoutVerifiedFootprint: manifest.observed-places.length, examples };
 await mkdir(resolve('.data-update-evidence/place-footprints'),{recursive:true});
 await writeFile(resolve('.data-update-evidence/place-footprints/dataset-validation.json'),JSON.stringify(report,null,2));

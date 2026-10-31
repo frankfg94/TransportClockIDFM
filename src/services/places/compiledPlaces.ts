@@ -121,6 +121,8 @@ export interface CompiledPlaceRecord {
   areaM2?: number;
   /** Closed OSM rings in longitude/latitude, where available. */
   footprintRings?: readonly (readonly (readonly [number, number])[])[];
+  /** Explicit OSM building relation supplying the complete shared outline. */
+  footprintGroupId?: string;
   rankingCategory?: PlacesRankingCategory;
   address?: string;
   city?: string;

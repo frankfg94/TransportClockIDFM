@@ -322,10 +322,12 @@ const emit = defineEmits<{
 const { n, t } = useI18n();
 const slots = useSlots();
 const isPlacesPreview = computed(() => props.variant === "places-preview");
-const selectedMapPlace = computed(() => props.selectedPlaceId
-  ? mapPlacesWithFootprints.value.find(place => place.id === props.selectedPlaceId)
-    ?? props.cityViewPlaces?.find(place => place.id === props.selectedPlaceId)
-  : undefined);
+const selectedMapPlace = computed(() => {
+  if (!props.selectedPlaceId) return undefined;
+  const place = mapPlacesWithFootprints.value.find(place => place.id === props.selectedPlaceId)
+    ?? props.cityViewPlaces?.find(place => place.id === props.selectedPlaceId);
+  return place ? withPlaceFootprint(place) : undefined;
+});
 const canInteractWithMap = computed(() => !isPlacesPreview.value || props.allowZoom === true);
 const moveOriginContextMenuOpen = ref(false);
 const moveOriginContextMenuPoint = ref<{ x: number; y: number }>();
@@ -1119,12 +1121,16 @@ const originMarkerScreen = computed(() => originMarkerScreenOverride.value ?? or
 // Eligibility and world projection do not depend on camera position.
 const footprintPlaces = shallowRef<Awaited<ReturnType<typeof loadPlaceFootprints>>>([]);
 onMounted(() => { loadPlaceFootprints().then(places => { footprintPlaces.value = places; }).catch(error => console.warn('Place footprints unavailable', error)); });
+const footprintsById = computed(() => new Map(footprintPlaces.value.map(place => [place.id, place])));
+function withPlaceFootprint(place: NearbyPlace): NearbyPlace {
+  const footprint = footprintsById.value.get(place.id);
+  return footprint ? { ...place, footprintRings: footprint.footprintRings, areaM2: footprint.areaM2, footprintGroupId: footprint.footprintGroupId } : place;
+}
 const mapPlacesWithFootprints = computed(() => {
-  const byId = new Map(footprintPlaces.value.map(place => [place.id, place]));
+  const byId = new Map(footprintsById.value);
   const result = (props.places ?? []).map(place => {
-    const footprint = byId.get(place.id);
     byId.delete(place.id);
-    return footprint ? { ...place, footprintRings: footprint.footprintRings, areaM2: footprint.areaM2 } : place;
+    return withPlaceFootprint(place);
   });
   for (const place of byId.values()) {
     const distanceMeters = placeDistanceMeters(props.origin, place);
@@ -1139,7 +1145,7 @@ const eligibleMapPlaces = computed(() => {
     if (!activity) return [];
     // Reuse exact commune membership from the activity layer, including holes
     // and disconnected polygons; provider records can straddle city limits.
-    return [...cityPlacesByNeighborhood.value.values()].flat().filter((place) =>
+    return [...cityPlacesByNeighborhood.value.values()].flat().map(withPlaceFootprint).filter((place) =>
       isNearbyPlaceVisibleOnMap(place, props.showNearbyBenches === true, props.showNearbyParkings === true)
       && isNearbyPlaceActivity(place, activity))
       .sort((a, b) => a.distanceMeters - b.distanceMeters || a.name.localeCompare(b.name, "fr-FR"));
@@ -1160,9 +1166,15 @@ watch(() => props.selectedPlaceId, (next, previous) => {
     placeLayer.value?.clearHover();
   }
 });
-const supermarketFootprints = computed(() => eligibleMapPlaces.value.flatMap((place) => {
-  if (place.id !== props.selectedPlaceId && place.id !== hoveredFootprintPlaceId.value) return [];
+const supermarketFootprints = computed(() => {
+ const seenGroups = new Set<string>();
+ return eligibleMapPlaces.value.filter(place => place.id === props.selectedPlaceId || place.id === hoveredFootprintPlaceId.value)
+ .sort((a,b) => Number(b.id === props.selectedPlaceId)-Number(a.id === props.selectedPlaceId)).flatMap((place) => {
   if (!place.footprintRings?.length) return [];
+  if (place.footprintGroupId) {
+    if (seenGroups.has(place.footprintGroupId)) return [];
+    seenGroups.add(place.footprintGroupId);
+  }
   const d = place.footprintRings.map((ring) => {
     if (ring.length < 4) return "";
     const points = ring.map(([lon, lat]) => worldToScreen(lonLatToWorld({ lon, lat }), camera.value));
@@ -1170,7 +1182,8 @@ const supermarketFootprints = computed(() => eligibleMapPlaces.value.flatMap((pl
     return `${points.map(({ x, y }, index) => `${index ? "L" : "M"} ${x} ${y}`).join(" ")} Z`;
   }).filter(Boolean).join(" ");
   return d ? [{ id: place.id, name: place.name, d }] : [];
-}));
+ });
+});
 const cityViewNeighborhoods = computed(() => {
   if (!irisDataset.value) return [];
   return selectIrisNeighborhoodsForPoint(irisDataset.value, props.origin, { scope: "commune" }).neighborhoods;
