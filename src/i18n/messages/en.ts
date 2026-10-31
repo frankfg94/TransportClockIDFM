@@ -940,6 +940,10 @@ export const en = {
       undo: "Undo",
     },
     linePanel: {
+      countLoading: "Loading…",
+      countUnavailable: "Stop count unavailable",
+      stopOne: "{count} stop",
+      stopOther: "{count} stops",
       aria: "Lines in family",
       eyebrow: "Transport family",
       back: "Back to transport networks",
@@ -2402,7 +2406,7 @@ export const en = {
     zoomLevel: "Zoom level: {level}",
     linesAria: "Lines serving this station",
     scanning: "Searching for stations…",
-    scanningTimeout: "Search timed out after {seconds} seconds. Some data may be missing.",
+    scanningTimeout: "Search is still running after {seconds} seconds. Some data may still be missing.",
     emptyTitle: "Choose your starting point",
     emptyBody: "Select a suggested address or use geolocation.",
     selected: "Selected stations ({count})",
@@ -2478,6 +2482,7 @@ export const en = {
       sportsFacility: "Sports facility",
     },
     placeTypes: {
+      forest: "Forest / woodland",
       shop: "Shop",
       food: "Food",
       culture: "Culture",

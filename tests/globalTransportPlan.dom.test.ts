@@ -194,6 +194,7 @@ vi.mock("../src/features/transport-map/data/createTransportMapDataSource", () =>
     initialize = fixture.dataSourceCalls.initialize.mockResolvedValue(fixture.network);
     getManifest = vi.fn(() => fixture.manifest);
     getNetwork = vi.fn(() => fixture.network);
+    ensureCatalog = vi.fn(async () => fixture.network);
     getStationSpatialIndex = vi.fn(() => undefined);
     queryViewport = fixture.dataSourceCalls.queryViewport.mockImplementation(async (_camera, _mask, generation) => ({
       generation,
@@ -479,19 +480,24 @@ describe("GlobalTransportPlan facade", () => {
 
       expect(sheet.find("[data-global-map-filters-toggle]").exists()).toBe(false);
       await sheet.get('[data-global-map-preset="METRO"] .global-transport-plan__mode-preset-select').trigger("click");
-      expect(sheet.get('[data-global-map-preset="METRO"] .global-transport-plan__mode-preset-select').attributes("aria-pressed")).toBe("true");
+      await nextTick();
+      expect(wrapper.find(".global-transport-plan__networks-sheet").exists()).toBe(false);
+      await wrapper.get("[data-global-map-mobile-line-selector]").trigger("click");
+      await nextTick();
+      const reopenedSheet = wrapper.get(".global-transport-plan__networks-sheet");
+      expect(reopenedSheet.get('[data-global-map-preset="METRO"] .global-transport-plan__mode-preset-select').attributes("aria-pressed")).toBe("true");
 
-      await sheet.get('[data-testid="draggable-bottom-sheet-drag-handle"]').trigger("click");
-      expect(sheet.classes()).toContain("draggable-bottom-sheet--full");
-      await sheet.get('[data-global-map-preset="METRO"] .global-transport-plan__mode-preset-detail').trigger("click");
+      await reopenedSheet.get('[data-testid="draggable-bottom-sheet-drag-handle"]').trigger("click");
+      expect(reopenedSheet.classes()).toContain("draggable-bottom-sheet--full");
+      await reopenedSheet.get('[data-global-map-preset="METRO"] .global-transport-plan__mode-preset-detail').trigger("click");
       await flushPromises();
-      expect(sheet.find("[data-global-map-line-panel]").exists()).toBe(true);
-      await sheet.get(".global-map-line-panel__header-action--back").trigger("click");
+      expect(reopenedSheet.find("[data-global-map-line-panel]").exists()).toBe(true);
+      await reopenedSheet.get(".global-map-line-panel__header-action--back").trigger("click");
       await flushPromises();
-      await sheet.get("[data-global-map-customize]").trigger("click");
+      await reopenedSheet.get("[data-global-map-customize]").trigger("click");
       await flushPromises();
-      expect(sheet.find("[data-global-map-customization]").exists()).toBe(true);
-      await sheet.get('[data-testid="draggable-bottom-sheet-close"]').trigger("click");
+      expect(reopenedSheet.find("[data-global-map-customization]").exists()).toBe(true);
+      await reopenedSheet.get('[data-testid="draggable-bottom-sheet-close"]').trigger("click");
       await nextTick();
       expect(wrapper.find(".global-transport-plan__networks-sheet").exists()).toBe(false);
       expect(wrapper.find("[data-global-map-mobile-line-selector]").exists()).toBe(true);
@@ -502,6 +508,17 @@ describe("GlobalTransportPlan facade", () => {
       await wrapper.get('[data-testid="draggable-bottom-sheet"]').trigger("keydown", { key: "Escape" });
       await nextTick();
       expect(wrapper.find(".global-transport-plan__networks-sheet").exists()).toBe(false);
+      await wrapper.get("[data-global-map-mobile-line-selector]").trigger("click");
+      await wrapper.get("[data-global-map-customization-finish]").trigger("click");
+      await flushPromises();
+      await wrapper.get('[data-global-map-preset="METRO"] .global-transport-plan__mode-preset-detail').trigger("click");
+      await flushPromises();
+      await wrapper.get("[data-global-map-line-panel] .global-map-line-panel__line").trigger("click");
+      await nextTick();
+      expect(wrapper.find(".global-transport-plan__networks-sheet").exists()).toBe(false);
+      await wrapper.get("[data-global-map-mobile-line-selector]").trigger("click");
+      await nextTick();
+      expect(wrapper.get("[data-global-map-line-panel] .global-map-line-panel__line").attributes("aria-pressed")).toBe("true");
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
     }

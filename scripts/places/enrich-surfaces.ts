@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { assertCompiledPlacesCity, assertPlacesManifest, MAX_PLACES_ASSET_BYTES, type OverpassElement } from "../../src/services/places/compiledPlaces";
-import { elementAreaSquareMeters } from "../../src/services/places/placeSurface";
+import { elementAreaSquareMeters, elementFootprintRings } from "../../src/services/places/placeSurface";
 
 export async function enrichCompiledPlaceSurfaces(options: { root?: string; endpoint?: string; fetcher?: typeof fetch } = {}) {
   const root = resolve(options.root ?? "public/data/places");
@@ -29,6 +29,7 @@ export async function enrichCompiledPlaceSurfaces(options: { root?: string; endp
   const targets = [...selected.values()];
   console.log(`Compiling verified footprints for ${targets.length} places`);
   const surfaces = new Map<string, number>();
+  const footprints = new Map<string, [number, number][][]>();
   const seen = new Set<string>();
   // ID lookups avoid a spatial scan. A single batch fits the IDF commercial
   // footprints and avoids hitting public Overpass's per-client slot cooldown.
@@ -51,6 +52,8 @@ export async function enrichCompiledPlaceSurfaces(options: { root?: string; endp
       seen.add(id);
       const area = elementAreaSquareMeters(element);
       if (area !== undefined && Number.isFinite(area) && area > 0) surfaces.set(id, Math.round(area));
+      const rings = elementFootprintRings(element);
+      if (rings) footprints.set(id, rings);
     }
     console.log(`Surfaces: ${Math.min(index + batch.length, targets.length)}/${targets.length}`);
   }
@@ -72,6 +75,14 @@ export async function enrichCompiledPlaceSurfaces(options: { root?: string; endp
         if (area === undefined) delete place.areaM2;
         else place.areaM2 = area;
         changed = true;
+      }
+      if (["supermarket", "hypermarket"].includes(place.tags?.shop ?? place.kind)) {
+        const rings = footprints.get(place.id);
+        if (JSON.stringify(place.footprintRings) !== JSON.stringify(rings)) {
+          if (rings) place.footprintRings = rings;
+          else delete place.footprintRings;
+          changed = true;
+        }
       }
     }
     const bytes = Buffer.from(changed ? JSON.stringify(file) : original);

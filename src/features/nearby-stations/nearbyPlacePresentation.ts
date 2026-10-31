@@ -156,11 +156,13 @@ const KINDS_BY_GROUP: Readonly<Record<Exclude<NearbyPlaceGroupId, "other">, Read
   "home-tech-mobility": new Set(["electronics", "computer", "computer_repair", "mobile_phone", "appliance", "laundry", "photo", "photographer", "camera", "hifi", "video", "software", "internet_cafe", "repair"]),
   "daily-services": new Set(["bank", "insurance", "post_office", "post_box", "police", "fire_station", "dry_cleaning", "locksmith", "key_cutter", "estate_agent", "stationery", "paper", "office_supplies", "newsagent", "funeral_directors", "travel_agency", "travel_agent", "copyshop", "print", "employment_agency", "lawyer", "notary", "accountant", "government", "association", "charity", "ngo", "research", "coworking", "ticket", "parcel_locker"]),
   "culture-leisure": new Set(["cinema", "theatre", "library", "public_bookcase", "arts_centre", "community_centre", "social_centre", "events_venue", "conference_centre", "museum", "gallery", "antiques"]),
-  "green-spaces": new Set(["park", "garden", "nature_reserve", "dog_park", "picnic_site", "picnic_table", "square"]),
+  "green-spaces": new Set(["park", "garden", "forest", "wood", "nature_reserve", "dog_park", "picnic_site", "picnic_table", "square"]),
   attractions: new Set(["attraction", "viewpoint", "artwork", "amusement_park", "theme_park", "zoo", "aquarium", "shelter"]),
 };
 
 export const NEARBY_PLACE_TYPE_KEYS: Readonly<Record<string, TranslationKey>> = {
+  forest: "nearbyStations.placeTypes.forest",
+  wood: "nearbyStations.placeTypes.forest",
   supermarket: "nearbyStations.placeTypes.supermarket",
   convenience: "nearbyStations.placeTypes.convenience",
   alcohol: "nearbyStations.placeTypes.alcohol",

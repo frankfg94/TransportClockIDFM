@@ -939,6 +939,10 @@ export const fr = {
       undo: "Annuler",
     },
     linePanel: {
+      countLoading: "Chargement…",
+      countUnavailable: "Nombre d’arrêts indisponible",
+      stopOne: "{count} arrêt",
+      stopOther: "{count} arrêts",
       aria: "Lignes de la famille",
       eyebrow: "Famille de transport",
       back: "Retour aux réseaux de transport",
@@ -2433,7 +2437,7 @@ export const fr = {
     zoomLevel: "Niveau de zoom : {level}",
     linesAria: "Lignes de cette station",
     scanning: "Recherche des stations…",
-    scanningTimeout: "Délai de recherche dépassé après {seconds} s. Certaines données peuvent manquer.",
+    scanningTimeout: "Recherche toujours en cours après {seconds} s. Certaines données peuvent encore manquer.",
     emptyTitle: "Indiquez votre point de départ",
     emptyBody: "Choisissez une adresse suggérée ou utilisez la géolocalisation.",
     selected: "Stations sélectionnées ({count})",
@@ -2510,6 +2514,7 @@ export const fr = {
       sportsFacility: "Équipement sportif",
     },
     placeTypes: {
+      forest: "Forêt / bois",
       shop: "Commerce",
       food: "Restauration",
       culture: "Culture",

@@ -61,6 +61,34 @@ endpoint explicite. `manifest.surfaceCoverage` indique la date et les nombres de
 lieux vérifiés et de surfaces connues ; les checksums et tailles sont recalculés.
 Tous les appels OSM terminent avant la modification des fichiers publiés.
 
+## Contours des lieux
+
+`npm.cmd run places:compile-footprints` compile un pack séparé pour les
+supermarchés/hypermarchés, centres commerciaux, parcs, jardins, forêts et bois
+d’Île-de-France. La requête `out body geom` conserve les membres des relations
+et leurs géométries. `--endpoint=https://…/api/interpreter` sélectionne le serveur
+OSM ; le serveur local reste la valeur par défaut. `--cached` réutilise la
+réponse source située dans `.data/place-footprints-overpass.json`.
+
+Le pack publié se trouve dans `public/data/place-footprints/` : un manifeste
+et des morceaux identifiés par checksum, limités à 24 MiB chacun. Le manifeste
+donne les effectifs par catégorie, le nombre d’objets observés et le nombre
+d’emprises fermées exploitables. Les points OSM et les contours non fermés ne
+deviennent pas des surfaces inventées. Les anneaux intérieurs sont conservés.
+
+NearbyStationsMap charge ce pack statique, rapproche les identifiants OSM des
+lieux existants et ajoute les emprises proches absentes de l’ancien fichier.
+Un clic sur l’emprise ouvre la fiche et cadre tous ses sommets. La surface est
+une emprise au sol et non une surface de vente. Aucune requête Overpass ne part
+du navigateur.
+
+`npm.cmd run places:validate-footprints` vérifie tous les checksums, effectifs,
+catégories, coordonnées et anneaux fermés, ainsi que les exemples Sceaux,
+Vélizy 2, Auchan et Aldi. `npm.cmd run pages:validate-assets -- --root=dist`
+contrôle **tout le dossier de déploiement**, après construction : 20 000
+fichiers au maximum et 25 MiB par fichier (plafonds conservateurs Pages/Wrangler).
+Les rapports sont écrits dans `.data-update-evidence/place-footprints/`.
+
 ## Budgets et concurrence
 
 Le réglage automatique est limité à quatre tâches dans tous les environnements.

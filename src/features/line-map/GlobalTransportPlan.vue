@@ -325,6 +325,7 @@
         :marker-visible="userLocationMarkerVisible"
         :stale="userGeolocation.isStale.value"
         :marker-style="userLocationMarkerStyle"
+        :heading="userHeading.heading.value"
         :show-map-interactions="showMapInteractions"
         @request="void userGeolocation.askGeolocation()"
       />
@@ -638,7 +639,7 @@
 
       <component
         :is="mobileViewportActive ? DraggableBottomSheet : 'div'"
-        v-if="!props.itinerary && (!mobileViewportActive || mobileLineSelectorOpen)"
+        v-if="!props.itinerary"
         v-bind="mobileViewportActive ? {
           open: mobileLineSelectorOpen,
           title: t('globalMap.page.exploreNetworks'),
@@ -702,6 +703,8 @@
               :mode="linePanelMode!"
               :lines="linePanelLines"
               :selected-line-id="activeLine?.id"
+              :station-counts="lineStationCounts"
+              :counts-status="lineStationCountsStatus"
               @close="returnToModeList"
               @select-line="selectLineFromPanel"
             />
@@ -1085,6 +1088,7 @@ import { useTransportMapFilters } from "../transport-map/state/useTransportMapFi
 import { useTransportMapSelection } from "../transport-map/state/useTransportMapSelection";
 import { useGlobalTransportTraffic } from "./useGlobalTransportTraffic";
 import { useUserGeolocation } from "../../composables/useUserGeolocation";
+import { useMapHeading } from "../../composables/useMapHeading";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import type {
   TransportMapRenderScene,
@@ -1796,6 +1800,7 @@ type GlobalTransportPlanPanelView = "presets" | "customization" | "lines";
 const leftControlsView = ref<GlobalTransportPlanPanelView>("presets");
 const mobileViewportActive = ref(false);
 const mobileLineSelectorOpen = ref(false);
+const userHeading = useMapHeading(computed(() => mobileViewportActive.value && userLocationMarkerVisible.value && !userGeolocation.isStale.value));
 const mobileLineSelectorButton = ref<HTMLButtonElement>();
 const mobileNetworksSheetStage = ref<"peek" | "mid" | "full">("mid");
 type GlobalMapSidebarSheetSnap = "collapsed" | "medium" | "expanded";
@@ -1859,6 +1864,17 @@ const dataSource = new TransportMapDataSource({
   getContinuousRendering: () => mapExperience.kind === "next" && (appSettings.value.globalMapContinuousRendering || appSettings.value.globalMapProgressiveBusRendering),
   trace: performanceTrace,
 });
+const lineStationCounts = ref<Record<string, number>>({});
+const lineStationCountsStatus = ref<"loading" | "ready" | "error">("loading");
+let lineStationCountsPromise: Promise<void> | undefined;
+function loadLineStationCounts(): void {
+  if (lineStationCountsStatus.value === "ready" || lineStationCountsPromise) return;
+  lineStationCountsStatus.value = "loading";
+  lineStationCountsPromise = dataSource.ensureCatalog().then((catalog) => {
+    lineStationCounts.value = Object.fromEntries(catalog.lines.map((line) => [line.id, new Set(line.stationIds).size]));
+    lineStationCountsStatus.value = "ready";
+  }).catch(() => { lineStationCountsStatus.value = "error"; }).finally(() => { lineStationCountsPromise = undefined; });
+}
 let interactionController: ReturnType<typeof useGlobalTransportMapInteraction> | undefined;
 let resizeObserver: ResizeObserver | undefined;
 let ghostLineRefreshPending = false;
@@ -4903,11 +4919,13 @@ function selectPreset(preset: GlobalTransportPlanPreset): void {
   if (preset === "ALL") {
     globalRadarPreset.value = undefined;
     filters.setAllVisible();
+    void nextTick(collapseMobileLineSelector);
     return;
   }
   if (!availableModes.value.includes(preset)) return;
   globalRadarPreset.value = preset;
   filters.selectedModes.value = [preset];
+  void nextTick(collapseMobileLineSelector);
 }
 
 function requestPresetInstall(mode: GlobalMapMode): void {
@@ -4917,6 +4935,7 @@ function requestPresetInstall(mode: GlobalMapMode): void {
 function openMobileLineSelector(): void {
   if (!isMobileViewport()) return;
   searchOpen.value = false;
+  void userHeading.requestPermission();
   mobileNetworksSheetStage.value = "mid";
   mobileLineSelectorOpen.value = true;
 }
@@ -4936,6 +4955,7 @@ function openCustomization(): void {
 
 function openLinePanel(mode: GlobalMapMode): void {
   if (!availableModes.value.includes(mode)) return;
+  loadLineStationCounts();
   leftControlsTransitionName.value = "global-map-controls-slide-forward";
   linePanelMode.value = mode;
   leftControlsView.value = "lines";
@@ -4972,6 +4992,7 @@ function selectLineFromPanel(lineId: string): void {
   const line = network.value?.linesById.get(lineId);
   if (!line) return;
   void selectLineFromSearch(line, undefined, true);
+  void nextTick(collapseMobileLineSelector);
 }
 
 function selectLineById(lineId: string): void {

@@ -3,6 +3,8 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock('../src/services/places/placeFootprints', () => ({ loadPlaceFootprints: vi.fn(async () => []) }));
+
 const { walkingMatrixMock } = vi.hoisted(() => ({
   walkingMatrixMock: vi.fn(async () => [] as NearbyWalkingRoute[]),
 }));
@@ -451,6 +453,26 @@ function mountMap(
 }
 
 describe("NearbyStationsMap walking route overlay", () => {
+  it.each(['supermarket', 'park', 'garden', 'mall', 'forest'])('selects a %s footprint and displays its measured area', async kind => {
+    const restoreViewport = installMapViewport(720, 420);
+    const wrapper = mountMap([]);
+    const footprintRings: [number, number][][] = [[[2.349,48.849],[2.351,48.849],[2.351,48.851],[2.349,48.851],[2.349,48.849]]];
+    const place = { id: 'way:footprint', name: 'Lieu mesuré', kind, category: 'attraction' as const, lon: 2.35, lat: 48.85, distanceMeters: 0, areaM2: 1200, footprintRings };
+    await wrapper.setProps({ places: [place], reduceMotion: true });
+    await nextTick();
+    expect(wrapper.find('[data-place-footprint-id="way:footprint"]').exists()).toBe(false);
+    await wrapper.setProps({ selectedPlaceId: place.id });
+    const path = wrapper.get('[data-place-footprint-id="way:footprint"]');
+    await path.trigger('click');
+    expect(wrapper.emitted('selectPlace')?.at(-1)).toEqual([place.id]);
+    await wrapper.setProps({ selectedPlaceId: place.id });
+    expect(wrapper.get('[data-testid="nearby-place-details"]').text()).toContain('m²');
+    expect(wrapper.get('[data-testid="nearby-place-details"]').text()).toContain('Lieu mesuré');
+    expect(wrapper.get('[data-place-footprint-id="way:footprint"]').classes()).toContain('is-selected');
+    await wrapper.setProps({ selectedPlaceId: undefined });
+    expect(wrapper.find('[data-place-footprint-id="way:footprint"]').exists()).toBe(false);
+    wrapper.unmount(); restoreViewport();
+  });
   it("opens commerce details in the main sidebar and reframes a late walking route", async () => {
     const restoreViewport = installMapViewport(720, 420);
     const line = createLine("1", "METRO");
@@ -2371,6 +2393,8 @@ describe("NearbyStationsMap origin context menu", () => {
       moveHere?.click();
       await nextTick();
       expect(wrapper.get(".nearby-map__origin").classes()).toContain("nearby-map__origin--moving");
+      expect(wrapper.emitted("moveOrigin")).toBeUndefined();
+      await new Promise(resolve => setTimeout(resolve, 800));
 
       const point = wrapper.emitted("moveOrigin")?.at(-1)?.[0] as { lon: number; lat: number } | undefined;
       expect(point).toBeDefined();
@@ -2378,7 +2402,7 @@ describe("NearbyStationsMap origin context menu", () => {
       expect(Number.isFinite(point?.lat)).toBe(true);
 
       await wrapper.setProps({ origin: point! });
-      expect(wrapper.get(".nearby-map__origin").classes()).toContain("nearby-map__origin--moving");
+      expect(wrapper.get(".nearby-map__origin").classes()).not.toContain("nearby-map__origin--moving");
     } finally {
       wrapper.unmount();
       restoreViewport();
@@ -2671,7 +2695,7 @@ describe("NearbyStationsMap line focus", () => {
     expect(wrapper.get(".nearby-map__loading").text()).toBe("Recherche des stations…");
   });
 
-  it("shows a timeout when the nearby map search keeps loading", async () => {
+  it("reports continued loading without claiming a timeout", async () => {
     vi.useFakeTimers();
     const metro = createLine("line:metro:loading-timeout", "METRO");
     const station = createStation("station:metro:loading-timeout", "Châtillon–Montrouge", metro);
@@ -2683,8 +2707,8 @@ describe("NearbyStationsMap line focus", () => {
       await nextTick();
 
       const status = wrapper.get(".nearby-map__loading");
-      expect(status.text()).toBe("Délai de recherche dépassé après 45 s. Certaines données peuvent manquer.");
-      expect(status.attributes("role")).toBe("alert");
+      expect(status.text()).toBe("Recherche toujours en cours après 45 s. Certaines données peuvent encore manquer.");
+      expect(status.attributes("role")).toBe("status");
 
       await wrapper.setProps({ loading: false });
       expect(wrapper.find(".nearby-map__loading").exists()).toBe(false);

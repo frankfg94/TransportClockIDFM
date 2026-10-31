@@ -43,6 +43,7 @@ const format = computed(() => {
       <dt>{{ t('nearbyStations.placeDetails.category') }}</dt><dd>{{ t(nearbyPlaceTypeKey(place)) }}</dd>
       <dt>{{ t('nearbyStations.placeDetails.format') }}</dt><dd>{{ format }}</dd>
       <template v-if="place.areaM2"><dt>{{ t('nearbyStations.placeDetails.footprint') }}</dt><dd>{{ n(place.areaM2, { maximumFractionDigits: 0 }) }} m²</dd></template>
+      <template v-else-if="['supermarket', 'hypermarket'].includes(place.kind)"><dt>{{ t('nearbyStations.placeDetails.footprint') }}</dt><dd>{{ t('nearbyStations.placeDetails.unknown') }}</dd></template>
       <template v-if="place.address || place.city"><dt>{{ t('nearbyStations.placeDetails.address') }}</dt><dd>{{ [place.address, place.city].filter(Boolean).join(', ') }}</dd></template>
       <dt class="nearby-place-details__hours-title">{{ t('nearbyStations.placeDetails.hours') }}</dt>
       <dd class="nearby-place-details__hours">

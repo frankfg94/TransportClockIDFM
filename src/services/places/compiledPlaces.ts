@@ -2,7 +2,7 @@ import type {
   GeocoderPlaceCategory,
   GeocoderPoint,
 } from "../../features/transport-map/contracts/geocoder.js";
-import { elementAreaSquareMeters } from "./placeSurface.js";
+import { elementAreaSquareMeters, elementFootprintRings } from "./placeSurface.js";
 
 export const PLACES_DATA_SCHEMA_VERSION = 1 as const;
 export const PLACES_DATASET_ID = "osm-places-by-commune" as const;
@@ -119,6 +119,8 @@ export interface CompiledPlaceRecord {
   kind: string;
   /** Verified closed OSM footprint, computed during publication. Never inferred. */
   areaM2?: number;
+  /** Closed OSM rings in longitude/latitude, where available. */
+  footprintRings?: readonly (readonly (readonly [number, number])[])[];
   rankingCategory?: PlacesRankingCategory;
   address?: string;
   city?: string;
@@ -365,6 +367,7 @@ export function normalizeCompiledPlace(
   );
   const address = formatAddress(tags);
   const areaM2 = elementAreaSquareMeters(element);
+  const footprintRings = ["supermarket", "hypermarket"].includes(kind) ? elementFootprintRings(element) : undefined;
   return {
     id: `${element.type ?? "element"}:${element.id}`,
     name,
@@ -376,6 +379,7 @@ export function normalizeCompiledPlace(
     category: classifyPlaceCategory(tags),
     kind,
     ...(areaM2 === undefined ? {} : { areaM2: Math.round(areaM2) }),
+    ...(footprintRings ? { footprintRings } : {}),
     ...(rankingCategory ? { rankingCategory } : {}),
     ...(address ? { address } : {}),
     ...(firstTagValue(tags["addr:city"]) ? { city: firstTagValue(tags["addr:city"]) } : {}),

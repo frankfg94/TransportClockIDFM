@@ -26,6 +26,7 @@
     role="img"
     :aria-label="t('globalMap.page.location.markerAria')"
   >
+    <span v-if="heading !== undefined && !stale" class="global-transport-plan__user-location-cone" :style="{ transform: `rotate(${heading}deg)` }" aria-hidden="true" />
     <span class="global-transport-plan__user-location-halo" aria-hidden="true" />
     <span class="global-transport-plan__user-location-dot" aria-hidden="true" />
   </div>
@@ -38,6 +39,7 @@ withDefaults(defineProps<{
   requestVisible: boolean;
   loading: boolean;
   markerVisible: boolean;
+  heading?: number;
   stale: boolean;
   markerStyle: Record<string, string>;
   showMapInteractions?: boolean;
@@ -109,6 +111,11 @@ const { t } = useI18n();
   height: 24px;
   transform: translate(-50%, -50%);
   pointer-events: none;
+}
+.global-transport-plan__user-location-cone {
+  position: absolute; left: -28px; top: -28px; width: 80px; height: 80px;
+  background: conic-gradient(from -32deg, rgba(37, 99, 235, 0.30), rgba(59, 130, 246, 0.14) 64deg, transparent 64deg);
+  border-radius: 50%; transition: transform 150ms linear;
 }
 .global-transport-plan__user-location-halo {
   position: absolute;
@@ -187,6 +194,7 @@ const { t } = useI18n();
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .global-transport-plan__user-location-cone,
   .global-transport-plan__user-location-halo,
   .global-transport-plan__user-location-dot,
   .global-map-location-request-enter-active,

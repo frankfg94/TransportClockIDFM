@@ -16,6 +16,8 @@ const props = withDefaults(defineProps<{
   lines?: GlobalMapLine[];
   embedded?: boolean;
   selectedLineId?: string;
+  stationCounts?: Record<string, number>;
+  countsStatus?: "loading" | "ready" | "error";
 }>(), { lines: () => [] });
 
 const emit = defineEmits<{
@@ -43,14 +45,11 @@ function toFamily(mode: GlobalMapMode): "METRO" | "RER" | "BUS" | "TRAM" | "NOCT
   return undefined;
 }
 
-function lineCount(line: GlobalMapLine): number {
-  return line.mode === "BIKE" ? line.geometryIds.length : line.stationIds.length;
-}
-
-function lineCountLabel(mode: GlobalMapMode): string {
-  return mode === "BIKE"
-    ? t("globalMap.sidebar.bikeSegments")
-    : t("globalMap.sidebar.stations");
+function lineCountLabel(line: GlobalMapLine): string {
+  if (line.mode === "BIKE") return `${line.geometryIds.length} ${t("globalMap.sidebar.bikeSegments")}`;
+  const count = props.stationCounts?.[line.id];
+  if (count === undefined) return t(props.countsStatus === "error" || props.countsStatus === "ready" ? "globalMap.linePanel.countUnavailable" : "globalMap.linePanel.countLoading");
+  return t(count === 1 ? "globalMap.linePanel.stopOne" : "globalMap.linePanel.stopOther", { count });
 }
 
 const presentedLines = computed(() =>
@@ -222,7 +221,7 @@ function closeWithEscape(event: KeyboardEvent): void {
         @click="emit('select-line', presented.line.id)"
       >
         <LineIconBadge :line="presented.badge" compact />
-        <span><strong>{{ presented.line.label || presented.line.code }}</strong><small>{{ lineCount(presented.line) }} {{ lineCountLabel(presented.line.mode) }}</small></span>
+        <span><strong>{{ presented.line.label || presented.line.code }}</strong><small>{{ lineCountLabel(presented.line) }}</small></span>
       </button>
       <p v-if="!filteredPresentedLines.length" class="global-map-line-panel__empty">
         {{ lineSearchQuery.trim() ? t("globalMap.linePanel.searchEmpty") : t("globalMap.linePanel.empty") }}

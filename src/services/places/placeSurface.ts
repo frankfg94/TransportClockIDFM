@@ -1,5 +1,16 @@
 import type { OverpassElement } from "./compiledPlaces";
 
+/** Closed OSM rings, with inner rings retained for even-odd rendering. */
+export function elementFootprintRings(element: OverpassElement): [number, number][][] | undefined {
+  const rings = element.geometry?.length
+    ? stitchRings([element.geometry])
+    : ["outer", "inner"].flatMap(role => stitchRings((element.members ?? [])
+      .filter(member => (member.role || "outer") === role && member.geometry?.length)
+      .map(member => member.geometry!)));
+  if (!rings.length || !elementAreaSquareMeters(element)) return undefined;
+  return rings.map((ring) => ring.map(({ lon, lat }) => [lon, lat]));
+}
+
 export function elementAreaSquareMeters(element: OverpassElement): number | undefined {
   if (element.geometry?.length) {
     const area = ringArea(element.geometry);
@@ -42,7 +53,7 @@ function stitchRings(segments: Array<Array<{ lat: number; lon: number }>>): Arra
 }
 
 function ringArea(points: readonly { lat: number; lon: number }[]): number {
-  if (points.length < 4 || !sameCoordinate(points[0]!, points.at(-1)!)) return 0;
+  if (points.length < 4 || points.some(point => !Number.isFinite(point.lat) || !Number.isFinite(point.lon)) || !sameCoordinate(points[0]!, points.at(-1)!)) return 0;
   const radius = 6_371_008.8;
   let sum = 0;
   for (let index = 0; index < points.length - 1; index += 1) {

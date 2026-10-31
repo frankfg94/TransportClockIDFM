@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { shoppingCentresFromPlaces, supermarketFootprintsFromPlaces } from "../server/services/places/shoppingCentres";
 import { loadCompiledPlacesAround } from "../server/services/places/compiledDataset";
 import { normalizeCompiledPlace, type CompiledPlaceRecord } from "../src/services/places/compiledPlaces";
-import { elementAreaSquareMeters } from "../src/services/places/placeSurface";
+import { elementAreaSquareMeters, elementFootprintRings } from "../src/services/places/placeSurface";
 
 const origin = { lat: 48.798422, lon: 2.278538 };
 const place = (id: string, kind: string, areaM2?: number): CompiledPlaceRecord => ({ id, name: id, ...origin, category: "shop", kind, areaM2 });
@@ -28,6 +28,8 @@ describe("precompiled commercial footprints", () => {
     expect(normalizeCompiledPlace(element)?.areaM2).toBeGreaterThan(8000);
     expect(elementAreaSquareMeters({ geometry: geometry.slice(0, -1) })).toBeUndefined();
     expect(elementAreaSquareMeters({ members: [{ role: "outer", geometry }, { role: "inner", geometry }] })).toBeUndefined();
+    expect(normalizeCompiledPlace({ ...element, tags: { shop: "supermarket" } })?.footprintRings?.[0]).toEqual(geometry.map(({ lon, lat }) => [lon, lat]));
+    expect(elementFootprintRings({ geometry: geometry.slice(0, -1) })).toBeUndefined();
   });
   it("uses the same compact compiled asset through the Pages ASSETS binding", async () => {
     const manifest = JSON.parse(await readFile("public/data/places/manifest.json", "utf8"));

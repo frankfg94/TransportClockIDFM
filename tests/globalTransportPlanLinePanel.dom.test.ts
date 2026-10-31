@@ -116,4 +116,22 @@ describe("GlobalTransportPlanLinePanel", () => {
 
     wrapper.unmount();
   });
+  it("shows pending, unavailable, and verified stop counts without false zeroes", async () => {
+    const wrapper = mount(GlobalTransportPlanLinePanel, { props: { mode: "TRANSILIEN", lines: transilienLines, embedded: true, countsStatus: "loading" } });
+    expect(wrapper.text()).not.toContain("0 arrêt");
+    expect(wrapper.text()).toContain("Chargement");
+    await wrapper.setProps({ countsStatus: "ready", stationCounts: { [transilienLines[0]!.id]: 0, [transilienLines[1]!.id]: 1, [transilienLines[2]!.id]: 12 } });
+    expect(wrapper.text()).toContain("0 arrêts");
+    expect(wrapper.text()).toContain("1 arrêt");
+    expect(wrapper.text()).toContain("12 arrêts");
+    await wrapper.get(".global-map-line-panel__header-action[aria-expanded]").trigger("click");
+    await wrapper.get("input").setValue("J");
+    await wrapper.get(".global-map-line-panel__line").trigger("click");
+    expect(wrapper.emitted("select-line")?.at(-1)).toEqual([transilienLines[1]!.id]);
+    await wrapper.setProps({ countsStatus: "error", stationCounts: {} });
+    expect(wrapper.text()).toContain("indisponible");
+    expect(wrapper.text()).not.toContain("0 arrêt");
+    wrapper.unmount();
+  });
+
 });

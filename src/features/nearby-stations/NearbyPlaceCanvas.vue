@@ -31,6 +31,7 @@ const emit = defineEmits<{
   selectPlace: [id?: string];
   placeContextMenu: [id: string, event: MouseEvent];
   visibilityChange: [visible: boolean];
+  hoverPlace: [id?: string];
 }>();
 const { t, locale } = useI18n();
 const { presentPlace } = useNearbyPlacePresenter();
@@ -54,6 +55,7 @@ const targets = ref<HTMLElement>();
 const iconDefinitions = ref<SVGSVGElement>();
 const entries = shallowRef<Entry[]>([]);
 const hoveredId = ref<string>();
+watch(hoveredId, id => emit('hoverPlace', id));
 const index = computed(() => indexNearbyPlaceViewport(props.places));
 const entryById = computed(() => new Map(entries.value.map(entry => [entry.place.id, entry])));
 const activeEntries = computed(() => {

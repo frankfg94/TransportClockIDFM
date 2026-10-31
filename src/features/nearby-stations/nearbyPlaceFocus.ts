@@ -1,15 +1,17 @@
 import { fitCameraToBounds, type CameraState } from "../transport-map/geo/camera";
 import { lonLatToWorld } from "../transport-map/geo/coordinateKernel";
 import type { NearbyWalkingRoute } from "./nearbyWalkingRoutes";
+import type { CompiledPlaceRecord } from "../../services/places/compiledPlaces";
 
 /** Include the entire routed detour, even when it extends outside the discovery circle. */
 export function fitNearbyPlaceRoute(
   camera: CameraState,
   origin: { lon: number; lat: number },
-  place: { lon: number; lat: number },
+  place: { lon: number; lat: number; footprintRings?: CompiledPlaceRecord['footprintRings'] },
   route?: NearbyWalkingRoute,
 ): CameraState {
-  const points = [origin, place, ...(route?.coordinates ?? [])]
+  const footprint = (place.footprintRings ?? []).flatMap(ring => ring.map(([lon, lat]) => ({ lon, lat })));
+  const points = [origin, place, ...footprint, ...(route?.coordinates ?? [])]
     .filter((point) => Number.isFinite(point.lon) && Number.isFinite(point.lat))
     .map(lonLatToWorld);
   // Leave the origin pin and endpoints clear of the top controls and the

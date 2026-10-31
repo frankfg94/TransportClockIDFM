@@ -27,6 +27,7 @@ import {
   type NearbyHeavyTransportAccess,
   type NearbyHeavyTransportCandidate,
   type NearbyJourney,
+  type NearbyJourneyRequest,
   type NearbyWalkingRouteProvider,
 } from "./nearbyHeavyTransports";
 import type { NearbyHeavyTargetCandidate } from "./nearbyHeavyTransportRules";
@@ -132,6 +133,19 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
       .filter((line) => activeFeederModes.includes(line.mode));
     const lineCandidates = new Map<string, NearbyHeavyTargetCandidate[]>();
     const projectedStationLinesCache = new Map<string, { feederLines: GlobalMapLine[]; heavyLines: GlobalMapLine[] }>();
+    // A hub may be selected once per heavy line. Share identical provider
+    // queries within this resolution, but keep different dates and line-specific
+    // batch requests separate. The cache never survives an input change.
+    const journeyRequests = new Map<string, Promise<NearbyJourney[]>>();
+    const findJourneys = (request: NearbyJourneyRequest) => {
+      const key = JSON.stringify(request);
+      let pending = journeyRequests.get(key);
+      if (!pending) {
+        pending = input.journeyProvider.findJourneys(request, input.signal);
+        journeyRequests.set(key, pending);
+      }
+      return pending;
+    };
 
     function projectedStationLines(
       station: GlobalMapStation,
@@ -212,7 +226,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
           ].filter((value): value is string => Boolean(value))),
         );
         const scheduledDateTime = input.journeyDateTime?.trim();
-        const journeys = await input.journeyProvider.findJourneys({
+        const journeys = await findJourneys({
           purpose: "transport",
           origin: input.origin,
           destination: station,
@@ -222,7 +236,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
             ...(!futureProject ? { destinationLineId: line.sourceLineId ?? line.id } : {}),
           } : {}),
           ...(scheduledDateTime ? { datetime: scheduledDateTime } : {}),
-        }, input.signal).catch((cause: unknown) => {
+        }).catch((cause: unknown) => {
           if (input.signal?.aborted || isAbortError(cause) || isNavitiaRateLimit(cause)) throw cause;
           return [];
         });
@@ -261,12 +275,12 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
         // representative daytime window and retain both sets of feeders.
         const daytimeJourneys = scheduledDateTime
           ? []
-          : await input.journeyProvider.findJourneys({
+          : await findJourneys({
             purpose: "transport",
             origin: input.origin,
             destination: station,
             datetime: representativeJourneyDateTime(),
-          }, input.signal).catch((cause: unknown) => {
+          }).catch((cause: unknown) => {
             if (input.signal?.aborted || isAbortError(cause) || isNavitiaRateLimit(cause)) throw cause;
             return [];
           });

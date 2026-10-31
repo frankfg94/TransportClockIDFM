@@ -6,6 +6,8 @@ import AppModal from "../../components/AppModal.vue";
 import ContextMenu from "../../components/ContextMenu.vue";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import NearbyPlaceCanvas from "./NearbyPlaceCanvas.vue";
+import { loadPlaceFootprints } from "../../services/places/placeFootprints";
+import { placeDistanceMeters } from "../../services/places/compiledPlaces";
 import MapItemTransitionGroup from "../../components/MapItemTransitionGroup";
 import NearbyStationsBasemap from "./NearbyStationsBasemap.vue";
 import { fetchGtfsLineFrequency } from "../../services/lineFrequency";
@@ -321,7 +323,7 @@ const { n, t } = useI18n();
 const slots = useSlots();
 const isPlacesPreview = computed(() => props.variant === "places-preview");
 const selectedMapPlace = computed(() => props.selectedPlaceId
-  ? props.places?.find(place => place.id === props.selectedPlaceId)
+  ? mapPlacesWithFootprints.value.find(place => place.id === props.selectedPlaceId)
     ?? props.cityViewPlaces?.find(place => place.id === props.selectedPlaceId)
   : undefined);
 const canInteractWithMap = computed(() => !isPlacesPreview.value || props.allowZoom === true);
@@ -1115,6 +1117,21 @@ const activeStationLineGroups = computed(() => {
 const originScreen = computed(() => worldToScreen(lonLatToWorld(props.origin), camera.value));
 const originMarkerScreen = computed(() => originMarkerScreenOverride.value ?? originScreen.value);
 // Eligibility and world projection do not depend on camera position.
+const footprintPlaces = shallowRef<Awaited<ReturnType<typeof loadPlaceFootprints>>>([]);
+onMounted(() => { loadPlaceFootprints().then(places => { footprintPlaces.value = places; }).catch(error => console.warn('Place footprints unavailable', error)); });
+const mapPlacesWithFootprints = computed(() => {
+  const byId = new Map(footprintPlaces.value.map(place => [place.id, place]));
+  const result = (props.places ?? []).map(place => {
+    const footprint = byId.get(place.id);
+    byId.delete(place.id);
+    return footprint ? { ...place, footprintRings: footprint.footprintRings, areaM2: footprint.areaM2 } : place;
+  });
+  for (const place of byId.values()) {
+    const distanceMeters = placeDistanceMeters(props.origin, place);
+    if (distanceMeters <= props.radius + NEARBY_MAP_MARGIN_METERS) result.push({ ...place, distanceMeters });
+  }
+  return result;
+});
 const eligibleMapPlaces = computed(() => {
   if (summaryLineHoverActive.value || !props.showNearbyPlaces) return [];
   if (cityViewEnabled.value) {
@@ -1128,7 +1145,7 @@ const eligibleMapPlaces = computed(() => {
       .sort((a, b) => a.distanceMeters - b.distanceMeters || a.name.localeCompare(b.name, "fr-FR"));
   }
   const radiusLimit = props.radius + NEARBY_MAP_MARGIN_METERS;
-  return (props.places ?? []).filter((place) => {
+  return mapPlacesWithFootprints.value.filter((place) => {
     if (!isPlacesPreview.value && place.distanceMeters > radiusLimit) return false;
     if (showAccessibilityPlaces.value) return nearbyPlaceWheelchairAccess(place) !== undefined;
     const option = nearbyOptionalPlace(place);
@@ -1136,6 +1153,24 @@ const eligibleMapPlaces = computed(() => {
       && isNearbyPlaceVisibleOnMap(place, props.showNearbyBenches === true, props.showNearbyParkings === true);
   });
 });
+const hoveredFootprintPlaceId = ref<string>();
+watch(() => props.selectedPlaceId, (next, previous) => {
+  if (previous && !next) {
+    hoveredFootprintPlaceId.value = undefined;
+    placeLayer.value?.clearHover();
+  }
+});
+const supermarketFootprints = computed(() => eligibleMapPlaces.value.flatMap((place) => {
+  if (place.id !== props.selectedPlaceId && place.id !== hoveredFootprintPlaceId.value) return [];
+  if (!place.footprintRings?.length) return [];
+  const d = place.footprintRings.map((ring) => {
+    if (ring.length < 4) return "";
+    const points = ring.map(([lon, lat]) => worldToScreen(lonLatToWorld({ lon, lat }), camera.value));
+    if (points.some(({ x, y }) => !Number.isFinite(x) || !Number.isFinite(y))) return "";
+    return `${points.map(({ x, y }, index) => `${index ? "L" : "M"} ${x} ${y}`).join(" ")} Z`;
+  }).filter(Boolean).join(" ");
+  return d ? [{ id: place.id, name: place.name, d }] : [];
+}));
 const cityViewNeighborhoods = computed(() => {
   if (!irisDataset.value) return [];
   return selectIrisNeighborhoodsForPoint(irisDataset.value, props.origin, { scope: "commune" }).neighborhoods;
@@ -2268,13 +2303,7 @@ watch(
       originMarkerScreenOverride.value = undefined;
       if (originMarkerMoveTimer !== undefined) window.clearTimeout(originMarkerMoveTimer);
       originMarkerMoveTimer = undefined;
-      originMarkerMoveActive.value = isMapOriginMove && !reducedMotion.value;
-      if (originMarkerMoveActive.value) {
-        originMarkerMoveTimer = window.setTimeout(() => {
-          originMarkerMoveActive.value = false;
-          originMarkerMoveTimer = undefined;
-        }, NEARBY_ORIGIN_MARKER_MOVE_DURATION_MS + 60);
-      }
+      originMarkerMoveActive.value = false;
     }
     if (cityViewEnabled.value && irisDataset.value) {
       cityViewSelectionExact.value = selectIrisNeighborhoodsForPoint(
@@ -3610,7 +3639,7 @@ async function classifyOriginContextTarget(point: NearbyMapOrigin, requestToken:
 }
 
 function openOriginContextMenu(event: MouseEvent): void {
-  if (!props.allowOriginMove || !canInteractWithMap.value || isInteractiveMapTarget(event.target)) return;
+  if (!props.allowOriginMove || !canInteractWithMap.value || (isInteractiveMapTarget(event.target) && !isMapGeometryTarget(event.target))) return;
   const position = localScreenPoint(event.clientX, event.clientY);
   if (!position) return;
   const point = worldToLonLat(screenToWorld(position, camera.value));
@@ -3641,17 +3670,19 @@ function moveOriginHere(): void {
   originMarkerScreenOverride.value = screenPoint;
   originMarkerMoveActive.value = !reducedMotion.value;
   if (originMarkerMoveTimer !== undefined) window.clearTimeout(originMarkerMoveTimer);
-  originMarkerMoveTimer = window.setTimeout(() => {
+  const commitMove = () => {
     originMarkerMoveActive.value = false;
     originMarkerMoveTimer = undefined;
-  }, NEARBY_ORIGIN_MARKER_MOVE_DURATION_MS + 60);
+    emit("moveOrigin", point);
+  };
   if (pendingMapOriginMoveTimer !== undefined) window.clearTimeout(pendingMapOriginMoveTimer);
   pendingMapOriginMoveTimer = window.setTimeout(() => {
     pendingMapOriginMoveKey = undefined;
     originMarkerScreenOverride.value = undefined;
     pendingMapOriginMoveTimer = undefined;
   }, 12_000);
-  emit("moveOrigin", point);
+  if (reducedMotion.value) commitMove();
+  else originMarkerMoveTimer = window.setTimeout(commitMove, NEARBY_ORIGIN_MARKER_MOVE_DURATION_MS + 60);
 }
 
 function distanceBetween(first: ScreenPoint, second: ScreenPoint): number {
@@ -6400,6 +6431,14 @@ function mix(from: number, to: number, progress: number): number {
         <MapPin :size="25" />
       </div>
 
+      <svg v-if="supermarketFootprints.length" class="nearby-map__supermarket-footprints">
+        <path v-for="footprint in supermarketFootprints" :key="footprint.id" :d="footprint.d"
+          :data-place-footprint-id="footprint.id" role="button" :aria-label="footprint.name" tabindex="0"
+          fill-rule="evenodd" :class="{ 'is-selected': footprint.id === selectedPlaceId }"
+          @pointerdown.stop @keydown.enter.stop.prevent="emit('selectPlace', footprint.id)"
+          @keydown.space.stop.prevent="emit('selectPlace', footprint.id)"
+          @click.stop="emit('selectPlace', footprint.id)" />
+      </svg>
       <NearbyPlaceCanvas
         ref="placeLayer"
         :places="eligibleMapPlaces"
@@ -6416,6 +6455,7 @@ function mix(from: number, to: number, progress: number): number {
         :selected-place-id="selectedPlaceId"
         :walking-routes="props.walkingRoutes"
         @visibility-change="placesVisible = $event"
+        @hover-place="hoveredFootprintPlaceId = $event"
         @select-place="emit('selectPlace', $event)"
         @place-context-menu="openPlaceContextMenu"
       />
@@ -6669,7 +6709,7 @@ function mix(from: number, to: number, progress: number): number {
         class="nearby-map__loading"
         :class="{ 'nearby-map__loading--timeout': nearbyMapLoadingTimedOut }"
         :style="{ top: `${nearbyMapLoadingTop()}px` }"
-        :role="nearbyMapLoadingTimedOut ? 'alert' : 'status'"
+        role="status"
       >{{ nearbyMapLoadingTimedOut
         ? t('nearbyStations.scanningTimeout', { seconds: NEARBY_MAP_LOADING_TIMEOUT_MS / 1000 })
         : t('nearbyStations.scanning') }}</div>
@@ -6923,6 +6963,11 @@ function mix(from: number, to: number, progress: number): number {
 <style scoped>
 .nearby-map-shell { --nearby-map-height: clamp(520px, calc(100dvh - 80px), 820px); --nearby-sidebar-width: 310px; align-items: stretch; display: grid; gap: 0; grid-template-columns: minmax(0, 1fr) 12px minmax(260px, var(--nearby-sidebar-width)); position: relative; }
 .nearby-map-shell--places-preview { --nearby-map-height: 100%; display: block; height: 100%; }
+.nearby-map__supermarket-footprints { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; pointer-events: none; z-index: 5; }
+.nearby-map__supermarket-footprints path { fill: rgba(37, 99, 235, .16); stroke: #2563eb; stroke-width: 2; pointer-events: visiblePainted; cursor: pointer; }
+.nearby-map__supermarket-footprints path.is-selected { fill: rgba(37, 99, 235, .28); stroke-width: 3; }
+.nearby-map__supermarket-footprints path:focus { outline: none; }
+.nearby-map__supermarket-footprints path:focus-visible { stroke: #1e40af; stroke-width: 4; }
 .nearby-map-shell--city-view { grid-template-columns: minmax(0, 1fr) 0px 0px; }
 .nearby-map-shell--city-view .nearby-map__marker-anchor { z-index: 8; }
 .nearby-map-shell--places-preview .nearby-map { cursor: default; height: 100%; touch-action: auto; }
@@ -7221,7 +7266,7 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__radius--fade-in { animation: nearby-map-radius-fade-in var(--nearby-city-transition-duration, 980ms) cubic-bezier(.65, 0, .35, 1) both; }
 .nearby-map__radius--fade-out { animation: nearby-map-radius-fade-out var(--nearby-city-transition-duration, 980ms) cubic-bezier(.65, 0, .35, 1) both; }
 .nearby-map__origin { align-items: center; background: #d92d20; border: 3px solid #fff; border-radius: 50% 50% 50% 0; box-shadow: 0 6px 16px rgba(146, 34, 26, .34); color: #fff; display: flex; height: 38px; justify-content: center; position: absolute; transform: translate(-50%, -70%) rotate(-45deg); width: 38px; z-index: 4; }
-.nearby-map__origin--moving { transition: left var(--nearby-origin-move-duration, 680ms) cubic-bezier(.22,1,.36,1), top var(--nearby-origin-move-duration, 680ms) cubic-bezier(.22,1,.36,1); }
+.nearby-map__origin--moving { z-index: 100; transition: left var(--nearby-origin-move-duration, 680ms) ease-in-out, top var(--nearby-origin-move-duration, 680ms) ease-in-out; }
 .nearby-map-shell--city-view .nearby-map__origin { z-index: 9; }
 .nearby-map__origin svg { transform: rotate(45deg); }
 .nearby-map__marker-body { display: inline-block; height: max-content; position: relative; width: max-content; }
