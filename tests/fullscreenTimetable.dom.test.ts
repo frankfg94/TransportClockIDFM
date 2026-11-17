@@ -28,12 +28,15 @@ const stationId = "stop_area:IDFM:monomodalStopPlace:123";
 const directions = [{ id: "east", label: "East", departures: [{ id: "departure", waitLabel: "4", destination: "East" }] }];
 const wrappers: { unmount(): void }[] = [];
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-22T10:00:00Z"));
   vi.spyOn(frequencyClient, "fetchGtfsLineFrequency").mockResolvedValue(profile);
   vi.spyOn(timetableClient, "fetchGtfsLineTimetable").mockResolvedValue(timetable);
 });
 afterEach(() => {
   wrappers.splice(0).forEach((wrapper) => wrapper.unmount());
   vi.restoreAllMocks();
+  vi.useRealTimers();
   document.body.style.overflow = "";
   document.documentElement.style.overflow = "";
 });
@@ -58,6 +61,7 @@ describe("fullscreen shared timetable", () => {
     await flushPromises();
     expect(frequencyClient.fetchGtfsLineFrequency).toHaveBeenCalledWith(profile.lineId, { signal: expect.any(AbortSignal), allowCoverageFallback: true });
     expect(timetableClient.fetchGtfsLineTimetable).toHaveBeenCalledWith(profile.lineId, { serviceDate: profile.serviceDate, signal: expect.any(AbortSignal) });
+    expect(timetableClient.fetchGtfsLineTimetable).toHaveBeenCalledWith(profile.lineId, { serviceDate: "20261023", signal: expect.any(AbortSignal) });
     const shared = wrapper.getComponent(LineFrequencyTimetable);
     expect(shared.props()).toMatchObject({ stationId, stationName: "Middle", directionDestinations: ["East"] });
     expect(shared.getComponent<typeof MaterialCombobox>('[data-testid="line-frequency-timetable-station"]').props("modelValue")).toBe("monomodalStopPlace:123");
