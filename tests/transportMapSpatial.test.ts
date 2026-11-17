@@ -168,8 +168,8 @@ describe("global transport spatial primitive", () => {
     expect(result?.distanceCssPx).toBeCloseTo(14, 5);
   });
 
-  it("groups nearby rendered lines by id around the primary path", () => {
-    const camera = createCamera({ centerWorldX: 0.5062, centerWorldY: 0.342, zoom: 15, viewportWidthCssPx: 600, viewportHeightCssPx: 400 });
+  it.each([[0, 0], [50, 30], [55, -80]])("groups nearby rendered lines at pitch %d and bearing %d", (pitch, bearing) => {
+    const camera = createCamera({ centerWorldX: 0.5062, centerWorldY: 0.34191, zoom: 15, pitch, bearing, viewportWidthCssPx: 600, viewportHeightCssPx: 400 });
     const primaryPoint = { x: 0.5062, y: 0.3419 };
     const point = worldToScreen(primaryPoint, camera);
     const fourMeters = metersToWorldUnits(4, primaryPoint);

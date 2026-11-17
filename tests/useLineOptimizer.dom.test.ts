@@ -57,6 +57,8 @@ beforeEach(() => {
 afterEach(() => {
   wrapper?.unmount();
   wrapper = undefined;
+  vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe("optimizer origin and request lifecycle", () => {
@@ -164,4 +166,57 @@ it("keeps the previous reachable recommendation while refreshing and on failure,
   expect(optimizer.winner.value).toBe(candidate);
   optimizer.destinationQuery.value = "Une autre destination";
   expect(optimizer.result.value).toBeUndefined();
+});
+
+
+it("freezes a Paris simulation across clock ticks and returns to live time when cleared", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-11-15T14:00:00Z")); // 15:00 in Paris
+  wrapper = makePage();
+  await vi.advanceTimersByTimeAsync(0);
+  const liveStart = mocks.analyze.mock.calls[0]![0].start;
+  expect(liveStart).toBe(Date.parse("2026-11-15T14:00:00Z"));
+
+  optimizer.simulationTime.value = "08:30";
+  const start = Date.parse("2026-11-15T07:30:00Z");
+  const candidate = { leaveAt: start + 300_000 };
+  mocks.analyze.mockResolvedValueOnce({ ...result, candidates: [candidate], complete: true });
+  await optimizer.refresh();
+  expect(mocks.analyze.mock.lastCall?.[0].start).toBe(start);
+  expect(optimizer.now.value).toBe(start);
+  expect(optimizer.winner.value).toBe(candidate);
+  const calls = mocks.analyze.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(31_000);
+  expect(optimizer.now.value).toBe(start);
+  expect(optimizer.winner.value).toBe(candidate);
+  expect(mocks.analyze).toHaveBeenCalledTimes(calls);
+
+  optimizer.simulationTime.value = "";
+  expect(optimizer.result.value).toBeUndefined();
+  await optimizer.refresh();
+  expect(mocks.analyze.mock.lastCall?.[0].start).toBe(Date.parse("2026-11-15T14:00:31Z"));
+});
+
+it("rejects a nonexistent Paris daylight-saving time", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-03-29T12:00:00Z"));
+  wrapper = makePage();
+  await vi.advanceTimersByTimeAsync(0);
+  const calls = mocks.analyze.mock.calls.length;
+  optimizer.simulationTime.value = "02:30";
+  await optimizer.refresh();
+  expect(optimizer.status.value).toBe("error");
+  expect(optimizer.errorPhase.value).toBe("simulation");
+  expect(mocks.analyze).toHaveBeenCalledTimes(calls);
+});
+
+
+it("uses the current Paris date even when UTC is on the previous day", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-11-14T23:30:00Z"));
+  wrapper = makePage();
+  await vi.advanceTimersByTimeAsync(0);
+  optimizer.simulationTime.value = "08:30";
+  await optimizer.refresh();
+  expect(mocks.analyze.mock.lastCall?.[0].start).toBe(Date.parse("2026-11-15T07:30:00Z"));
 });

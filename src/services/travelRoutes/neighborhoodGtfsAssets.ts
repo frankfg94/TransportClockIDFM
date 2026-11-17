@@ -5,6 +5,7 @@ import { NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS } from "../../../shared/gtfs/neighbor
 export function createNeighborhoodGtfsAssetReader(fetcher: typeof fetch = fetch, storage: CacheStorage | undefined = typeof caches === "undefined" ? undefined : caches) {
   const pending = new Map<string, Promise<unknown>>();
   const literalPaths = new Set<string>();
+  const invalidResponses = new Set<string>();
   return async function readAsset<T>(baseUrl: string, path: string, coldStart = false): Promise<T | undefined> {
     const literalPath = path.split("/").map(segment => {
       try { return encodeURIComponent(decodeURIComponent(segment)); } catch { return encodeURIComponent(segment); }
@@ -16,11 +17,23 @@ export function createNeighborhoodGtfsAssetReader(fetcher: typeof fetch = fetch,
     const joined = pending.get(key);
     if (joined) return await joined as T | undefined;
     const request = (async () => {
-      const cache = coldStart ? undefined : await storage?.open("neighborhood-gtfs-routing-v1").catch(() => undefined);
+      const isManifest = path === "current.json";
+      const openCache = coldStart ? undefined : storage?.open("neighborhood-gtfs-routing-v1").catch(() => undefined);
+      const cache = isManifest ? undefined : await openCache;
       const cached = await cache?.match(url).catch(() => undefined);
-      if (path !== "current.json" && cached) return await cached.json() as T;
+      if (cached) {
+        try { return await cached.json() as T; }
+        catch {
+          await cache?.delete(url).catch(() => {});
+          invalidResponses.add(url);
+        }
+      }
       try {
-        const init: RequestInit = { cache: coldStart ? "no-store" : path === "current.json" ? "no-cache" : "default", signal: AbortSignal.timeout(NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS) };
+        const init: RequestInit = {
+          cache: coldStart ? "no-store" : invalidResponses.has(url) ? "reload" : isManifest ? "no-cache" : "default",
+          ...(isManifest ? { priority: "high" } as const : {}),
+          signal: AbortSignal.timeout(NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS),
+        };
         let fetchedUrl = url;
         let response = await fetcher(fetchedUrl, init);
         // Cloudflare addresses encoded directory names literally; Nitro's
@@ -33,10 +46,27 @@ export function createNeighborhoodGtfsAssetReader(fetcher: typeof fetch = fetch,
           if (response.ok) literalPaths.add(origin);
         }
         if (!response.ok) throw new Error(`GTFS asset unavailable (${response.status})`);
-        if (cache) void cache.put(fetchedUrl, response.clone()).catch(() => {});
-        return await response.json() as T;
+        const copy = (isManifest ? openCache : cache) ? response.clone() : undefined;
+        const value = await response.json().catch(cause => {
+          // Bypass the separate HTTP cache after a malformed successful response.
+          invalidResponses.add(url);
+          void copy?.body?.cancel().catch(() => {});
+          throw cause;
+        }) as T;
+        invalidResponses.delete(url);
+        if (copy) void openCache?.then(bucket => bucket?.put(fetchedUrl, copy)).catch(() => {});
+        return value;
       } catch (error) {
-        if (cached) return await cached.json() as T;
+        if (isManifest) {
+          // Only wait for disk on failure. Long timetable writes must not
+          // postpone an online check for newly published service dates.
+          const bucket = await openCache;
+          const previous = await bucket?.match(url).catch(() => undefined);
+          if (previous) {
+            try { return await previous.json() as T; }
+            catch { await bucket?.delete(url).catch(() => {}); }
+          }
+        }
         throw error;
       }
     })();

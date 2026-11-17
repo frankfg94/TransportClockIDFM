@@ -14,6 +14,35 @@ function source(): NearbyHeavyTransportSource {
     radius: ref(600), stationsLoading: ref(true), futureProjectsReady: ref(false), futureProjects: ref([]) };
 }
 describe("heavy loading without display frames", () => {
+  it("retries an early failure after the current group finishes, even on two clicks", async () => {
+    const input = source();
+    input.stationsLoading!.value = false;
+    input.futureProjectsReady!.value = true;
+    let finish!: () => void;
+    const currentGroup = new Promise<void>(resolve => { finish = resolve; });
+    const findJourneys = vi.fn().mockRejectedValueOnce(new Error("GTFS unavailable")).mockResolvedValue([]);
+    const resolve = vi.fn(async ({ journeyProvider, signal, origin }: NearbyHeavyTransportResolverInput) => {
+      await journeyProvider.findJourneys({ origin, destination: { ...origin, id: "test" } }, signal).catch(() => []);
+      await currentGroup;
+      return [];
+    });
+    let heavy!: ReturnType<typeof useNearbyHeavyTransports>;
+    const wrapper = mount(defineComponent({ setup() {
+      heavy = useNearbyHeavyTransports(input, { journeyProvider: { findJourneys }, resolver: { resolve }, batchQueries: true });
+      return () => null;
+    } }));
+    try {
+      await vi.waitFor(() => expect(heavy.error.value).toBe("GTFS unavailable"));
+      expect(heavy.isLoading.value).toBe(true);
+      const retries = Promise.all([heavy.retryFailed(), heavy.retryFailed()]);
+      expect(resolve).toHaveBeenCalledTimes(1);
+      finish();
+      await retries;
+      expect(resolve).toHaveBeenCalledTimes(2);
+      expect(heavy.error.value).toBeUndefined();
+      expect(heavy.isLoading.value).toBe(false);
+    } finally { finish(); wrapper.unmount(); }
+  });
   it("labels initial and manual/visibility/periodic refreshes without changing their work", async () => {
     vi.useFakeTimers();
     const previousUrl = window.location.href;

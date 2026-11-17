@@ -20,6 +20,8 @@ vi.mock("../src/services/nearbyWalkingRoutes", async () => {
 });
 
 import NearbyStationsMap from "../src/features/nearby-stations/NearbyStationsMap.vue";
+import NearbyPlaceCanvas from "../src/features/nearby-stations/NearbyPlaceCanvas.vue";
+import IrisNeighborhoodOverlay from "../src/features/transport-map/overlays/IrisNeighborhoodOverlay.vue";
 import NearbyCityComparisonOverlay from "../src/features/nearby-stations/NearbyCityComparisonOverlay.vue";
 import NearbyCityCityPicker from "../src/features/nearby-stations/NearbyCityCityPicker.vue";
 import type { NearbyStationEntry } from "../src/features/nearby-stations/nearbyStations";
@@ -453,6 +455,27 @@ function mountMap(
 }
 
 describe("NearbyStationsMap walking route overlay", () => {
+  it("hides closed places on the map while retaining open and unknown places", async () => {
+    const restoreViewport = installMapViewport(720, 420);
+    const wrapper = mountMap([]);
+    const common = { lon: 2.35, lat: 48.85, category: "shop" as const, kind: "bakery", distanceMeters: 10 };
+    try {
+      await wrapper.setProps({ places: [
+        { ...common, id: "open", name: "Ouvert", tags: { opening_hours: "24/7" } },
+        { ...common, id: "closed", name: "Fermé", tags: { opening_hours: "Mo-Su off" } },
+        { ...common, id: "unknown", name: "Inconnu" },
+      ], selectedPlaceId: "closed" });
+      const canvas = wrapper.getComponent(NearbyPlaceCanvas);
+      expect(canvas.props("places").map(place => place.id)).toEqual(["open", "closed", "unknown"]);
+      await wrapper.setProps({ hideClosedPlaces: true });
+      expect(canvas.props("places").map(place => place.id)).toEqual(["open", "unknown"]);
+      expect(wrapper.emitted("selectPlace")?.at(-1)).toEqual([undefined]);
+      await wrapper.setProps({ hideClosedPlaces: false });
+      expect(canvas.props("places").map(place => place.id)).toEqual(["open", "closed", "unknown"]);
+    } finally {
+      wrapper.unmount(); restoreViewport();
+    }
+  });
   it('draws an explicit mall group only once when another member is hovered', async () => {
     const restoreViewport = installMapViewport(720, 420);
     const wrapper = mountMap([]);
@@ -723,6 +746,11 @@ describe("NearbyStationsMap pan interaction", () => {
       expect(menu?.querySelector("[data-nearby-map-mobile-action='directory']")).not.toBeNull();
       expect(menu?.querySelector("[data-nearby-map-mobile-action='neighborhood-score']")).not.toBeNull();
       expect(menu?.querySelector("[data-nearby-map-chaos-zoom-run]")).not.toBeNull();
+      const hideClosed = menu?.querySelector<HTMLInputElement>("[data-hide-closed-places]");
+      expect(hideClosed).not.toBeNull();
+      hideClosed!.checked = true;
+      hideClosed!.dispatchEvent(new Event("change", { bubbles: true }));
+      expect(wrapper.emitted("update:hideClosedPlaces")?.at(-1)).toEqual([true]);
       expect(sheet?.classList.contains("draggable-bottom-sheet")).toBe(true);
       expect(sheet?.classList.contains("draggable-bottom-sheet--mid")).toBe(true);
     } finally {
@@ -878,6 +906,17 @@ describe("NearbyStationsMap walking accessibility zones and controls", () => {
       await wrapper.get(".nearby-map__city-view-toggle").trigger("click");
       await flushPromises();
       await nextTick();
+
+      const comparison = wrapper.get("[data-testid='city-open-neighborhood-comparison']");
+      expect(comparison.attributes("aria-label")).toMatch(/comparer|compare/i);
+      await comparison.trigger("click");
+      expect(wrapper.emitted("openNeighborhoodComparison")).toHaveLength(1);
+      await wrapper.setProps({ cityViewPlacesCode: "99999", cityViewCommerceTotal: 5 });
+      expect(wrapper.getComponent(IrisNeighborhoodOverlay).props("commerceDataAvailable")).toBe(false);
+      await wrapper.setProps({ cityViewPlacesCode: "92001" });
+      expect(wrapper.getComponent(IrisNeighborhoodOverlay).props("commerceDataAvailable")).toBe(true);
+      wrapper.getComponent(IrisNeighborhoodOverlay).vm.$emit("compare", "920010001");
+      expect(wrapper.emitted("openNeighborhoodComparison")?.[1]).toEqual(["920010001"]);
 
       const infoButton = wrapper.get("[data-testid='nearby-city-info-card-expand']");
       expect(infoButton.attributes("aria-expanded")).toBe("false");
@@ -3285,7 +3324,7 @@ describe("NearbyStationsMap line focus", () => {
       expect(filterSections[1]!.attributes("open")).toBeUndefined();
       await filterSections[1]!.get("summary").trigger("click");
       expect(filterSections[1]!.attributes("open")).toBe("");
-      expect(panel.findAll("input[type='checkbox']")).toHaveLength(20);
+      expect(panel.findAll("input[type='checkbox']")).toHaveLength(21);
       expect((panel.find("input[type='checkbox']").element as HTMLInputElement).checked).toBe(true);
 
       const busCheckbox = panel.findAll("input[type='checkbox']")[0]!;
@@ -3334,6 +3373,7 @@ describe("NearbyStationsMap line focus", () => {
       const benchesToggle = panel.get("[data-show-nearby-benches]");
       const parkingsToggle = panel.get("[data-show-nearby-parkings]");
       const placeNamesToggle = panel.get("[data-show-nearby-place-names]");
+      const hideClosedToggle = panel.get("[data-hide-closed-places]");
       expect((longWaitToggle.element as HTMLInputElement).checked).toBe(true);
       expect((placesToggle.element as HTMLInputElement).checked).toBe(true);
       expect((benchesToggle.element as HTMLInputElement).checked).toBe(false);
@@ -3346,14 +3386,17 @@ describe("NearbyStationsMap line focus", () => {
       await benchesToggle.setValue(true);
       await parkingsToggle.setValue(true);
       await placeNamesToggle.setValue(true);
+      await hideClosedToggle.setValue(true);
       expect(wrapper.emitted("update:hideLongWaitTransports")).toEqual([[false]]);
       expect(wrapper.emitted("update:showNearbyPlaces")).toEqual([[false]]);
       expect(wrapper.emitted("update:showNearbyBenches")).toEqual([[true]]);
       expect(wrapper.emitted("update:showNearbyParkings")).toEqual([[true]]);
       expect(wrapper.emitted("update:showNearbyPlaceNames")).toEqual([[true]]);
+      expect(wrapper.emitted("update:hideClosedPlaces")).toEqual([[true]]);
 
       await wrapper.setProps({ showNearbyPlaces: false });
       expect((placeNamesToggle.element as HTMLInputElement).disabled).toBe(true);
+      expect((hideClosedToggle.element as HTMLInputElement).disabled).toBe(true);
     } finally {
       restoreFullscreen();
     }

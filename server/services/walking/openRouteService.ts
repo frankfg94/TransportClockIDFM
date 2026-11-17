@@ -121,19 +121,20 @@ export async function routeWalkingWithPreferredProvider(
   destination: NearbyJourneyPoint,
   id?: string,
   signal?: AbortSignal,
+  options: { cache?: boolean } = {},
 ): Promise<NearbyWalkingRoute> {
   const fallback = createStraightLineWalkingRoute(origin, destination, id);
   const cacheKey = routeCacheKey(origin, destination);
-  const cached = routeCache.get(cacheKey);
+  const cached = options.cache === false ? undefined : routeCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return { ...cached.route, id };
 
   const navitiaRoute = await routeWalkingWithNavitia(event, origin, destination, id, signal);
   if (navitiaRoute) {
-    saveCache(routeCache, cacheKey, navitiaRoute, ROUTE_CACHE_TTL_MS);
+    if (options.cache !== false) saveCache(routeCache, cacheKey, navitiaRoute, ROUTE_CACHE_TTL_MS);
     return navitiaRoute;
   }
 
-  return routeWalkingWithOpenRouteService(event, origin, destination, id, signal) ?? fallback;
+  return routeWalkingWithOpenRouteService(event, origin, destination, id, signal, options) ?? fallback;
 }
 
 async function routeWalkingWithNavitia(
@@ -200,13 +201,14 @@ export async function routeWalkingWithOpenRouteService(
   destination: NearbyJourneyPoint,
   id?: string,
   signal?: AbortSignal,
+  options: { cache?: boolean } = {},
 ): Promise<NearbyWalkingRoute> {
   const fallback = createStraightLineWalkingRoute(origin, destination, id);
   const config = getOpenRouteServiceConfig(event);
   if (!config.apiKey) return { ...fallback, unavailabilityReason: "not-configured" };
 
   const cacheKey = routeCacheKey(origin, destination);
-  const cached = routeCache.get(cacheKey);
+  const cached = options.cache === false ? undefined : routeCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return { ...cached.route, id };
   if (quotaBlocked(config)) return { ...fallback, unavailabilityReason: "quota-exceeded" };
 
@@ -240,7 +242,7 @@ export async function routeWalkingWithOpenRouteService(
       durationSeconds: summary.duration,
       coordinates,
     };
-    saveCache(routeCache, cacheKey, route, ROUTE_CACHE_TTL_MS);
+    if (options.cache !== false) saveCache(routeCache, cacheKey, route, ROUTE_CACHE_TTL_MS);
     return route;
   } catch {
     return { ...fallback, unavailabilityReason: quotaBlocked(config) ? "quota-exceeded" : "unavailable" };
@@ -251,7 +253,7 @@ export async function matrixWalkingWithOpenRouteService(
   event: H3Event,
   origin: NearbyJourneyPoint,
   destinations: readonly NearbyWalkingMatrixDestination[],
-  options: { reverse?: boolean } = {},
+  options: { reverse?: boolean; cache?: boolean } = {},
 ): Promise<NearbyWalkingRoute[]> {
   const limitedDestinations = destinations.slice(0, OPEN_ROUTE_SERVICE_MAX_MATRIX_DESTINATIONS);
   const fallbacks = limitedDestinations.map((destination) => options.reverse ? createStraightLineWalkingRoute(destination, origin, destination.id) : createStraightLineWalkingRoute(origin, destination, destination.id));
@@ -260,7 +262,7 @@ export async function matrixWalkingWithOpenRouteService(
   if (!config.apiKey) return fallbacks.map(route => ({ ...route, unavailabilityReason: "not-configured" }));
 
   const cacheKey = `${options.reverse ? "reverse:" : ""}${matrixCacheKey(origin, limitedDestinations)}`;
-  const cached = matrixCache.get(cacheKey);
+  const cached = options.cache === false ? undefined : matrixCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.routes.map((route, index) => ({ ...route, id: limitedDestinations[index]!.id }));
   }
@@ -304,7 +306,7 @@ export async function matrixWalkingWithOpenRouteService(
         coordinates: options.reverse ? [destination, origin] : [origin, destination],
       } satisfies NearbyWalkingRoute;
     });
-    saveMatrixCache(matrixCache, cacheKey, routes, MATRIX_CACHE_TTL_MS);
+    if (options.cache !== false) saveMatrixCache(matrixCache, cacheKey, routes, MATRIX_CACHE_TTL_MS);
     return routes;
   } catch {
     return fallbacks.map(route => ({ ...route, unavailabilityReason: quotaBlocked(config) ? "quota-exceeded" : "unavailable" }));
@@ -384,10 +386,11 @@ export async function matrixWalkingWithPreferredProvider(
   event: H3Event,
   origin: NearbyJourneyPoint,
   destinations: readonly NearbyWalkingMatrixDestination[],
+  options: { reverse?: boolean; cache?: boolean } = {},
 ): Promise<NearbyWalkingRoute[]> {
   const limitedDestinations = destinations.slice(0, OPEN_ROUTE_SERVICE_MAX_MATRIX_DESTINATIONS);
   if (!getServerIdfmApiKey(event) || limitedDestinations.length === 0) {
-    return matrixWalkingWithOpenRouteService(event, origin, limitedDestinations);
+    return matrixWalkingWithOpenRouteService(event, origin, limitedDestinations, options);
   }
 
   const routes: NearbyWalkingRoute[] = [];
@@ -406,6 +409,7 @@ export async function matrixWalkingWithPreferredProvider(
       destination,
       destination.id,
       deadline,
+      options,
     ))));
   }
   return routes;

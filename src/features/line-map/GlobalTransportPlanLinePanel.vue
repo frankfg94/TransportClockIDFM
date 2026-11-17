@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { ArrowLeft, Search, XIcon } from "lucide-vue-next";
-import LineIconBadge from "../../components/LineIconBadge.vue";
+import GlobalMapLineBadges from "../transport-map/overlays/GlobalMapLineBadges.vue";
+import { globalMapLineDisplayLabel } from "../transport-map/overlays/globalMapLinePresentation";
 import { useI18n } from "../../i18n";
 import {
   createLinePresentation,
@@ -56,7 +57,7 @@ const presentedLines = computed(() =>
   props.lines.map((line) => {
     const family = toFamily(line.mode);
     const mode = family ? transitFamilyToMode(family) : undefined;
-    const label = line.label || line.code;
+    const label = globalMapLineDisplayLabel(line);
     const presentation = createLinePresentation({
       code: line.code,
       color: line.color,
@@ -102,6 +103,8 @@ const filteredPresentedLines = computed(() => {
   return fuzzyFilter(presentedLines.value, lineSearchQuery.value, ({ line }) => [
     line.label,
     line.code,
+    line.commercialNetworkLabel ?? "",
+    ...(line.commercialRoutes ?? []).flatMap((route) => [route.code, route.name]),
     line.id,
     ...line.aliases,
   ]);
@@ -220,8 +223,8 @@ function closeWithEscape(event: KeyboardEvent): void {
         type="button"
         @click="emit('select-line', presented.line.id)"
       >
-        <LineIconBadge :line="presented.badge" compact />
-        <span><strong>{{ presented.line.label || presented.line.code }}</strong><small>{{ lineCountLabel(presented.line) }}</small></span>
+        <GlobalMapLineBadges :line="presented.line" :fallback="presented.badge" compact />
+        <span><strong>{{ globalMapLineDisplayLabel(presented.line) }}</strong><small>{{ lineCountLabel(presented.line) }}</small></span>
       </button>
       <p v-if="!filteredPresentedLines.length" class="global-map-line-panel__empty">
         {{ lineSearchQuery.trim() ? t("globalMap.linePanel.searchEmpty") : t("globalMap.linePanel.empty") }}
@@ -396,7 +399,7 @@ function closeWithEscape(event: KeyboardEvent): void {
   border-color: rgba(125, 177, 245, 0.62);
   background: #eaf3ff;
 }
-.global-map-line-panel__line span {
+.global-map-line-panel__line > span:last-child {
   display: grid;
   gap: 2px;
 }

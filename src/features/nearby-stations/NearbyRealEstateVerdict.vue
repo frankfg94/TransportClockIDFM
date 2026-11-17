@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Activity, Euro, Info } from "lucide-vue-next";
+import { Euro, Info } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
 import { getDvfDataProvider, liquidityBand, type DvfCityDescriptor, type DvfMarketScope, type DvfNeighborhoodMetric } from "../../services/real-estate/compiledRealEstate";
 import { fetchIrisDataset, type IrisNeighborhood } from "../transport-map/iris/irisApi";
 import { pointInIrisGeometry } from "../transport-map/iris/irisGeometry";
-import { calculateDvfPriceChanges, formatDvfPriceChange, type DvfPriceTrendChange } from "../../services/real-estate/priceTrends";
+import { formatDvfPriceChange } from "../../services/real-estate/priceTrends";
+import { VERDICT_MARKET_SCORE_EFFECT, verdictMarketChange } from "../../services/real-estate/verdictMarketFacts";
 import type { NearbyRealEstatePdfState, NeighborhoodScorePdfSection } from "./neighborhoodScorePdf";
 
 const props = withDefaults(defineProps<{
@@ -21,33 +22,64 @@ const loading = ref(false);
 const unavailable = ref(false);
 const city = ref<DvfCityDescriptor>();
 const neighborhood = ref<DvfNeighborhoodMetric>();
+const undividedCommune = ref(false);
 const localPrice = ref<number>();
 const remainderPrice = ref<number>();
+const localSales = ref(0);
+const remainderSales = ref(0);
 const rentPerSquareMeter = ref<number>();
 const rentalReferencePeriod = ref<string>();
+const referencePeriod = ref<string>();
+const sourceUpdatedAt = ref<string>();
+const isStale = computed(() => {
+  const lastYear = Number(referencePeriod.value?.match(/\d{4}/g)?.at(-1));
+  return Number.isFinite(lastYear) && lastYear > 0 && lastYear < new Date().getFullYear() - 2;
+});
+const rentFailed = ref(false);
+const sourceFailed = ref(false);
 const scope = ref<DvfMarketScope>("idf");
 const frequency = ref<ReturnType<typeof liquidityBand>>();
 const cityFrequency = ref<ReturnType<typeof liquidityBand>>();
 const frequencyScopeLabel = ref("");
-const threeYearPriceChange = computed<DvfPriceTrendChange | undefined>(() =>
-  calculateDvfPriceChanges(neighborhood.value?.yearlyPrices).find((change) => change.period === 3));
-const threeYearTrendKey = computed(() => {
-  const change = threeYearPriceChange.value;
-  if (!change || Math.abs(change.percent) < .05) return "nearbyStations.realEstate.scoreTrendStable";
-  return change.percent > 0
-    ? "nearbyStations.realEstate.scoreTrendUp"
-    : "nearbyStations.realEstate.scoreTrendDown";
+const marketSeries = computed(() => neighborhood.value?.hasEnoughSales ? neighborhood.value.yearlyPrices : city.value?.yearlyPrices);
+const marketScale = computed(() => neighborhood.value?.hasEnoughSales ? t("nearbyStations.realEstate.marketIris") : t("nearbyStations.realEstate.marketCity"));
+const marketChanges = computed(() => [4, 5, 11].map(vintages => verdictMarketChange(marketSeries.value, referencePeriod.value, vintages)));
+const marketLines = computed(() => {
+  const lines = [t("nearbyStations.realEstate.marketContext", { period: referencePeriod.value ?? "—" }),
+    t("nearbyStations.realEstate.marketTypesUnavailable"),
+    t("nearbyStations.realEstate.marketMethod")];
+  if (sourceUpdatedAt.value) lines.push(t("nearbyStations.realEstate.marketSourceDate", { date: sourceUpdatedAt.value.slice(0, 10) }));
+  if (isStale.value) lines.push(t("nearbyStations.realEstate.marketStale"));
+  const sales = neighborhood.value?.hasEnoughSales ? neighborhood.value.transactionCount : city.value?.transactionCount;
+  if (sales !== undefined) lines.push(t("nearbyStations.realEstate.marketSalesCount", { scale: marketScale.value, count: n(sales) }));
+  if (showLocalComparison.value) lines.push(t("nearbyStations.realEstate.marketCellCoverage", { radius: Math.max(250, Math.min(800, props.radiusMeters)), local: n(localSales.value), rest: n(remainderSales.value) }));
+  if (neighborhood.value && !neighborhood.value.hasEnoughSales) lines.push(t("nearbyStations.realEstate.marketCityFallback"));
+  for (const [index, change] of marketChanges.value.entries()) {
+    lines.push(change
+      ? t("nearbyStations.realEstate.marketChange", { scale: marketScale.value, from: change.fromYear, to: change.toYear,
+        price: formatChange(change.pricePercent), sales: formatChange(change.salesPercent),
+        fromSales: n(change.fromSales), toSales: n(change.toSales) })
+      : t(index === 0 ? "nearbyStations.realEstate.marketThreeUnavailable" : index === 1 ? "nearbyStations.realEstate.marketFiveUnavailable" : "nearbyStations.realEstate.marketTenUnavailable"));
+  }
+  if (isPositiveFinite(rentPerSquareMeter.value) && isPositiveFinite(referencePurchasePrice.value)) {
+    lines.push(t("nearbyStations.realEstate.marketYieldDetail", { rent: formatRent(rentPerSquareMeter.value),
+      price: formatPrice(referencePurchasePrice.value), scale: purchaseScale.value, period: rentalReferencePeriod.value ?? "—" }));
+  }
+  if (VERDICT_MARKET_SCORE_EFFECT === "descriptive") lines.push(t("nearbyStations.realEstate.marketScoreEffect"));
+  return lines;
 });
 let requestId = 0;
 
 const showLocalComparison = computed(() =>
-  typeof localPrice.value === "number" && typeof remainderPrice.value === "number",
+  neighborhood.value?.hasEnoughSales && typeof localPrice.value === "number" && typeof remainderPrice.value === "number",
 );
 const referencePurchasePrice = computed(() => [
-  localPrice.value,
-  neighborhood.value?.medianPriceM2,
+  showLocalComparison.value ? localPrice.value : undefined,
+  neighborhood.value?.hasEnoughSales ? neighborhood.value.medianPriceM2 : undefined,
   city.value?.medianPriceM2,
 ].find(isPositiveFinite));
+const purchaseScale = computed(() => showLocalComparison.value ? t("nearbyStations.realEstate.marketLocal")
+  : neighborhood.value?.hasEnoughSales && isPositiveFinite(neighborhood.value.medianPriceM2) ? t("nearbyStations.realEstate.marketIris") : t("nearbyStations.realEstate.marketCity"));
 const grossRentalYield = computed(() => {
   const rent = rentPerSquareMeter.value;
   const price = referencePurchasePrice.value;
@@ -57,7 +89,7 @@ const cityName = computed(() => city.value?.name);
 const neighborhoodName = ref("");
 
 watch(
-  () => [props.origin?.lon, props.origin?.lat, props.communeCode] as const,
+  () => [props.origin?.lon, props.origin?.lat, props.communeCode, props.radiusMeters] as const,
   () => { void loadMarketFacts(); },
   { immediate: true },
 );
@@ -66,17 +98,34 @@ onBeforeUnmount(() => { requestId += 1; });
 
 async function loadMarketFacts(): Promise<void> {
   const origin = props.origin;
-  if (!origin || !Number.isFinite(origin.lon) || !Number.isFinite(origin.lat) || typeof window === "undefined") return;
   const id = ++requestId;
+  const startedAt = Date.now();
+  if (!origin || !Number.isFinite(origin.lon) || !Number.isFinite(origin.lat) || typeof window === "undefined") {
+    loading.value = false;
+    unavailable.value = true;
+    city.value = undefined;
+    neighborhood.value = undefined;
+    rentPerSquareMeter.value = undefined;
+    rentalReferencePeriod.value = undefined;
+    emit("export-state", { loading: false });
+    return;
+  }
   loading.value = true;
-  emit("export-state", { loading: true });
+  emit("export-state", { loading: true, market: { status: "loading", rentStatus: "loading" } });
   unavailable.value = false;
   city.value = undefined;
   neighborhood.value = undefined;
+  undividedCommune.value = false;
   localPrice.value = undefined;
   remainderPrice.value = undefined;
+  localSales.value = 0;
+  remainderSales.value = 0;
   rentPerSquareMeter.value = undefined;
   rentalReferencePeriod.value = undefined;
+  referencePeriod.value = undefined;
+  sourceUpdatedAt.value = undefined;
+  rentFailed.value = false;
+  sourceFailed.value = false;
   frequency.value = undefined;
   cityFrequency.value = undefined;
   neighborhoodName.value = "";
@@ -84,13 +133,13 @@ async function loadMarketFacts(): Promise<void> {
   try {
     const [manifest, iris, rentalIndicators] = await Promise.all([
       provider.loadManifest(),
-      fetchIrisDataset(),
-      provider.loadRentalIndicators().catch(() => undefined),
+      fetchIrisDataset().catch((error) => { if (props.communeCode) return { neighborhoods: [] }; throw error; }),
+      provider.loadRentalIndicators().catch(() => { if (id === requestId) rentFailed.value = true; return undefined; }),
     ]);
     if (id !== requestId) return;
     const neighborhoodAtOrigin = findNeighborhoodAtOrigin(iris.neighborhoods, origin, props.communeCode);
     const communeCode = props.communeCode || neighborhoodAtOrigin?.communeCode;
-    if (!communeCode || !neighborhoodAtOrigin) {
+    if (!communeCode) {
       unavailable.value = true;
       return;
     }
@@ -102,16 +151,21 @@ async function loadMarketFacts(): Promise<void> {
     const cityFile = await provider.loadCity(communeCode);
     if (id !== requestId) return;
     city.value = descriptor;
+    referencePeriod.value = cityFile.referencePeriod;
+    sourceUpdatedAt.value = manifest.source?.sourceUpdatedAt;
     const rentalEstimate = rentalIndicators?.cities.find((entry) => entry.code === communeCode);
     rentPerSquareMeter.value = rentalEstimate?.rentPerSquareMeter;
     rentalReferencePeriod.value = rentalIndicators?.referencePeriod;
-    neighborhoodName.value = neighborhoodAtOrigin.name;
-    const neighborhoodMetric = cityFile.neighborhoods.find((entry) => entry.codeIris === neighborhoodAtOrigin.codeIris);
+    neighborhoodName.value = neighborhoodAtOrigin?.name ?? "";
+    undividedCommune.value = neighborhoodAtOrigin?.codeIris === `${communeCode}0000`;
+    const neighborhoodMetric = undividedCommune.value ? undefined : cityFile.neighborhoods.find((entry) => entry.codeIris === neighborhoodAtOrigin?.codeIris);
     neighborhood.value = neighborhoodMetric;
     const maxLocalRadius = Math.max(250, Math.min(800, props.radiusMeters));
-    const cellsInNeighborhood = cityFile.cells.filter((cell) => cell.codeIris === neighborhoodAtOrigin.codeIris);
+    const cellsInNeighborhood = neighborhoodAtOrigin ? cityFile.cells.filter((cell) => cell.codeIris === neighborhoodAtOrigin.codeIris) : [];
     const localCells = cellsInNeighborhood.filter((cell) => distanceMeters(origin, cell) <= maxLocalRadius);
     const outsideCells = cellsInNeighborhood.filter((cell) => distanceMeters(origin, cell) > maxLocalRadius);
+    localSales.value = localCells.reduce((sum, cell) => sum + cell.transactionCount, 0);
+    remainderSales.value = outsideCells.reduce((sum, cell) => sum + cell.transactionCount, 0);
     localPrice.value = weightedMedian(localCells.map((cell) => ({ value: cell.medianPriceM2, weight: cell.transactionCount })));
     remainderPrice.value = weightedMedian(outsideCells.map((cell) => ({ value: cell.medianPriceM2, weight: cell.transactionCount })));
 
@@ -126,11 +180,18 @@ async function loadMarketFacts(): Promise<void> {
     }
     frequencyScopeLabel.value = scopeLabel(marketScope);
   } catch {
-    if (id === requestId) unavailable.value = true;
+    if (id === requestId) { unavailable.value = true; sourceFailed.value = true; }
   } finally {
     if (id === requestId) {
       loading.value = false;
-      emit("export-state", { loading: false, section: createPdfSection() });
+      emit("export-state", { loading: false, section: createPdfSection(), market: {
+        status: unavailable.value ? (sourceFailed.value ? "error" : "missing") : isStale.value ? "stale" : "ready",
+        rentStatus: rentFailed.value ? "error" : rentPerSquareMeter.value ? "ready" : "missing",
+        historyStatus: marketChanges.value[1] ? "ready" : "missing",
+        typeStatus: "missing",
+        durationMs: Date.now() - startedAt,
+        coverage: city.value ? (undividedCommune.value ? "undivided-city" : neighborhood.value?.hasEnoughSales ? "neighborhood" : "city") : undefined,
+      } });
     }
   }
 }
@@ -164,9 +225,6 @@ function createPdfSection(): NeighborhoodScorePdfSection {
         { difference },
       ));
     }
-    if (threeYearPriceChange.value) {
-      items.push(t(threeYearTrendKey.value, { change: formatChange(threeYearPriceChange.value.percent) }));
-    }
     if (neighborhood.value.transactionCount !== undefined) {
       const activity = frequencyCopy(frequency.value);
       if (activity) items.push(activity);
@@ -196,11 +254,12 @@ function createPdfSection(): NeighborhoodScorePdfSection {
       const level = frequencyLevel(cityFrequency.value);
       if (level) items.push(t("nearbyStations.realEstate.scoreFrequencyScope", { level, scope: frequencyScopeLabel.value }));
     }
-    items.push(t("nearbyStations.realEstate.noNeighborhoodData"));
+    items.push(t(undividedCommune.value ? "nearbyStations.realEstate.marketUndivided" : "nearbyStations.realEstate.marketCityFallback"));
   } else {
     items.push(t("nearbyStations.realEstate.scoreUnavailable"));
   }
 
+  if (!unavailable.value && city.value) items.push(...marketLines.value);
   return { title: t("nearbyStations.realEstate.scoreTitle"), subtitle, items };
 }
 
@@ -357,15 +416,6 @@ function distanceMeters(left: { lon: number; lat: number }, right: { lon: number
       <p v-else-if="!showLocalComparison && priceDifference(neighborhood.medianPriceM2, city.medianPriceM2)" class="nearby-real-estate-verdict__difference">
         {{ t("nearbyStations.realEstate.scoreVsCity", { difference: priceDifference(neighborhood.medianPriceM2, city.medianPriceM2) }) }}
       </p>
-      <p
-        v-if="threeYearPriceChange"
-        class="nearby-real-estate-verdict__trend"
-        :data-trend-direction="threeYearPriceChange.percent > .05 ? 'up' : threeYearPriceChange.percent < -.05 ? 'down' : 'stable'"
-        :title="t('nearbyStations.realEstate.trendIntervalTitle', { from: threeYearPriceChange.fromYear, to: threeYearPriceChange.toYear })"
-      >
-        <Activity :size="15" :stroke-width="2.2" aria-hidden="true" />
-        {{ t(threeYearTrendKey, { change: formatChange(threeYearPriceChange.percent) }) }}
-      </p>
       <div v-if="neighborhood.transactionCount !== undefined" class="nearby-real-estate-verdict__frequency" :data-frequency="frequency">
         <strong>{{ frequencyCopy(frequency) }}</strong>
         <span v-if="frequencyLevel(frequency)" :title="t('nearbyStations.realEstate.scoreFrequencyScope', { level: frequencyLevel(frequency), scope: frequencyScopeLabel })">{{ t("nearbyStations.realEstate.scoreFrequencyScope", { level: frequencyLevel(frequency), scope: frequencyScopeLabel }) }}</span>
@@ -407,8 +457,11 @@ function distanceMeters(left: { lon: number; lat: number }, right: { lon: number
           : cityFrequency === "low" ? "nearbyStations.realEstate.scoreFrequencyCityLow" : "nearbyStations.realEstate.scoreFrequencyCityTypical") }}
         <span v-if="frequencyLevel(cityFrequency)" :title="t('nearbyStations.realEstate.scoreFrequencyScope', { level: frequencyLevel(cityFrequency), scope: frequencyScopeLabel })">{{ t("nearbyStations.realEstate.scoreFrequencyScope", { level: frequencyLevel(cityFrequency), scope: frequencyScopeLabel }) }}</span>
       </div>
-      <p class="nearby-real-estate-verdict__sample-note">{{ t("nearbyStations.realEstate.noNeighborhoodData") }}</p>
+      <p class="nearby-real-estate-verdict__sample-note">{{ t(undividedCommune ? "nearbyStations.realEstate.marketUndivided" : "nearbyStations.realEstate.marketCityFallback") }}</p>
     </template>
+    <div v-if="!loading && !unavailable && city" class="nearby-real-estate-verdict__details" data-testid="market-details">
+      <p v-for="line in marketLines" :key="line">{{ line }}</p>
+    </div>
     <p class="nearby-real-estate-verdict__footnote">
       {{ t("nearbyStations.realEstate.priceDisclaimer") }} {{ t("nearbyStations.realEstate.scoreLimit") }}
       <template v-if="rentPerSquareMeter && rentalReferencePeriod">
@@ -442,12 +495,14 @@ function distanceMeters(left: { lon: number; lat: number }, right: { lon: number
 .nearby-real-estate-verdict__difference { color: #525f73; font-size: .77rem; margin: 9px 2px 0; }
 .nearby-real-estate-verdict__trend { align-items: center; background: #f4f5f8; border: 1px solid rgba(100, 116, 139, .14); border-radius: 9px; color: #536176; display: flex; font-size: .75rem; font-weight: 720; gap: 7px; line-height: 1.4; margin: 10px 0 0; padding: 8px 10px; }
 .nearby-real-estate-verdict__trend svg { color: #8b4254; flex: 0 0 auto; }
-.nearby-real-estate-verdict__frequency { background: #f1f8f3; border: 1px solid rgba(42, 120, 71, .14); border-radius: 12px; color: #315d42; display: grid; gap: 4px; margin-top: 12px; padding: 11px 12px; }
+.nearby-real-estate-verdict__frequency { background: #f6f7f9; border: 1px solid rgba(100,116,139,.16); border-radius: 12px; color: #596579; display: grid; gap: 4px; margin-top: 12px; padding: 11px 12px; }
 .nearby-real-estate-verdict__frequency[data-frequency="low"], .nearby-real-estate-verdict__frequency[data-frequency="typical"] { background: #f6f7f9; border-color: rgba(100,116,139,.16); color: #596579; }
 .nearby-real-estate-verdict__frequency strong { font-size: .8rem; }
 .nearby-real-estate-verdict__frequency span, .nearby-real-estate-verdict__frequency small, .nearby-real-estate-verdict__city-frequency span { color: #687589; font-size: .7rem; }
-.nearby-real-estate-verdict__city-frequency { color: #315d42; display: grid; font-size: .77rem; font-weight: 740; gap: 3px; margin-top: 9px; }
+.nearby-real-estate-verdict__city-frequency { color: #596579; display: grid; font-size: .77rem; font-weight: 740; gap: 3px; margin-top: 9px; }
 .nearby-real-estate-verdict__sample-note { color: #687589; font-size: .75rem; margin: 8px 2px 0; }
+.nearby-real-estate-verdict__details { color: #596579; font-size: .75rem; line-height: 1.45; margin-top: 12px; }
+.nearby-real-estate-verdict__details p { margin: 6px 0; }
 .nearby-real-estate-verdict__footnote { border-top: 1px solid rgba(100,116,139,.12); color: #788397; font-size: .68rem; line-height: 1.45; margin: 13px 0 0; padding-top: 10px; }
 @keyframes dvf-spin { to { transform: rotate(360deg); } }
 @media (max-width: 440px) { .nearby-real-estate-verdict__prices { grid-template-columns: 1fr; } }

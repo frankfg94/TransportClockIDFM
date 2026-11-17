@@ -8,7 +8,7 @@ import { findGtfsLastService } from "../../../shared/gtfs/lastService";
 import type { GtfsManifest } from "../../../server/services/gtfs/types";
 import type { LineTopology } from "../../../server/services/topology/types";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
-import type { NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
+import { assertNeighborhoodTimetableAvailable, NeighborhoodGtfsCoverageError, type NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
 import type { NeighborhoodGtfsWorkerDiagnostics, NeighborhoodGtfsWorkerRequest, NeighborhoodGtfsWorkerResponse } from "./neighborhoodGtfsWorkerProtocol";
 import { createNeighborhoodGtfsSchedulingQueues } from "./neighborhoodGtfsTaskQueue";
 import { createNeighborhoodGtfsWalkingMatrix, type DiagnosticWalkingRoute, type WalkingMatrixObservation } from "./neighborhoodGtfsWalkingMatrix";
@@ -135,8 +135,8 @@ async function topology(baseUrl: string, lineId: string, version: string): Promi
   return topologies.get(key)!;
 }
 const frequencies = new Map<string, GtfsLineFrequencyResponse>();
-async function frequency(baseUrl: string, lineId: string): Promise<GtfsLineFrequencyResponse> {
-  const current = await runtime.getManifest(baseUrl), serviceDate = getGtfsFrequencyServiceDate();
+async function frequency(baseUrl: string, lineId: string, serviceDate = getGtfsFrequencyServiceDate()): Promise<GtfsLineFrequencyResponse> {
+  const current = await runtime.getManifest(baseUrl);
   const version = `${current?.timetable?.path}:${current?.cacheGeneration}`;
   const key = `${baseUrl}:${lineId}:${serviceDate}:${version}`;
   if (frequencies.has(key)) return frequencies.get(key)!;
@@ -154,6 +154,7 @@ async function lastService(baseUrl: string, request: Extract<NeighborhoodGtfsWor
   const serviceDate = request.serviceDate ?? getGtfsFrequencyServiceDate();
   const current = await runtime.getManifest(baseUrl), version = `${current?.timetable?.path}:${current?.cacheGeneration}`;
   const loaded = selectNeighborhoodServiceTimetable(await loadTimetable(baseUrl, request.lineId, serviceDate, version), serviceDate);
+  assertNeighborhoodTimetableAvailable(loaded.status, serviceDate);
   const stopIds = loaded.index && loaded.status === "ready" ? mapFrequencyStops(loaded.index.stops, await topology(baseUrl, request.lineId, version)) : new Map<string,string>();
   return findGtfsLastService({ status: loaded.status,
     stops: (loaded.index?.stops ?? []).map(stop => ({ id: stop.id, parentId: stop.parentId, name: stop.name, topologyId: stopIds.get(stop.id) })),
@@ -167,6 +168,7 @@ const queues = createNeighborhoodGtfsSchedulingQueues();
 scope.addEventListener("message", (event: MessageEvent<NeighborhoodGtfsWorkerRequest>) => {
   const message = event.data;
   if (message.kind === "cancel") { queues.cancel(message.id); return; }
+  if (message.kind === "refresh-manifest") { manifest = undefined; return; }
   coldStart = message.coldStart === true;
   const { id, baseUrl } = message, enqueued = performance.now();
   // Parks/shops/hospitals keep one slot; their egress HTTP matrices cannot
@@ -187,7 +189,7 @@ scope.addEventListener("message", (event: MessageEvent<NeighborhoodGtfsWorkerReq
         },
         matrix: (origin, destinations) => observedMatrix(baseUrl, diagnostics, origin, destinations, { phase: "night-access" }),
         assertCurrent: () => { if (isCancelled()) throw new DOMException("Obsolete night access", "AbortError"); },
-      }) : message.kind === "frequency" ? await frequency(baseUrl, message.lineId)
+      }) : message.kind === "frequency" ? await frequency(baseUrl, message.lineId, message.serviceDate)
         : message.kind === "last-service" ? await lastService(baseUrl, message)
         : await route({ baseUrl, diagnostics, isCancelled }, message.request);
       if (message.kind === "routes") {
@@ -204,7 +206,8 @@ scope.addEventListener("message", (event: MessageEvent<NeighborhoodGtfsWorkerReq
     catch (error) {
       diagnostics.taskMs = Math.round(performance.now() - started);
       if (message.debug) diagnostics.endedEpochMs = performance.timeOrigin + performance.now();
-      if (!isCancelled()) scope.postMessage({ id, error: error instanceof Error ? error.message : "GTFS routing failed", diagnostics } satisfies NeighborhoodGtfsWorkerResponse);
+      if (!isCancelled()) scope.postMessage({ id, error: error instanceof Error ? error.message : "GTFS routing failed",
+        uncoveredServiceDate: error instanceof NeighborhoodGtfsCoverageError ? error.serviceDate : undefined, diagnostics } satisfies NeighborhoodGtfsWorkerResponse);
       else if (message.debug) scope.postMessage({ id, cancelled: true, diagnostics } satisfies NeighborhoodGtfsWorkerResponse);
     } finally { if (activeDiagnostics === diagnostics) activeDiagnostics = undefined; }
   });

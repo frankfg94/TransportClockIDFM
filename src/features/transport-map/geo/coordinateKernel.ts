@@ -80,6 +80,17 @@ export function worldScaleAtZoom(zoom: number): number {
 
 export function worldToScreen(point: WorldPoint, camera: CameraState): ScreenPoint {
   const scale = worldScaleAtZoom(camera.zoom);
+  if (camera.pitch || camera.bearing) {
+    const { cosB, sinB, cosP, sinP, distance } = perspective(camera);
+    const dx = (point.x - camera.centerWorldX) * scale;
+    const dy = (point.y - camera.centerWorldY) * scale;
+    const y = -dx * sinB + dy * cosB;
+    const factor = distance / Math.max(0.001, distance - y * sinP);
+    return {
+      x: camera.viewportWidthCssPx / 2 + (dx * cosB + dy * sinB) * factor,
+      y: camera.viewportHeightCssPx / 2 + y * cosP * factor,
+    };
+  }
   return {
     x: (point.x - camera.centerWorldX) * scale + camera.viewportWidthCssPx / 2,
     y: (point.y - camera.centerWorldY) * scale + camera.viewportHeightCssPx / 2,
@@ -88,6 +99,16 @@ export function worldToScreen(point: WorldPoint, camera: CameraState): ScreenPoi
 
 export function screenToWorld(point: ScreenPoint, camera: CameraState): WorldPoint {
   const scale = worldScaleAtZoom(camera.zoom);
+  if (camera.pitch || camera.bearing) {
+    const { cosB, sinB, cosP, sinP, distance } = perspective(camera);
+    const sy = point.y - camera.viewportHeightCssPx / 2;
+    const y = sy / (cosP + sy * sinP / distance);
+    const x = (point.x - camera.viewportWidthCssPx / 2) * (1 - y * sinP / distance);
+    return {
+      x: camera.centerWorldX + (x * cosB - y * sinB) / scale,
+      y: camera.centerWorldY + (x * sinB + y * cosB) / scale,
+    };
+  }
   return {
     x: camera.centerWorldX + (point.x - camera.viewportWidthCssPx / 2) / scale,
     y: camera.centerWorldY + (point.y - camera.viewportHeightCssPx / 2) / scale,
@@ -96,6 +117,23 @@ export function screenToWorld(point: ScreenPoint, camera: CameraState): WorldPoi
 
 export function lonLatToScreen(point: LonLatPoint, camera: CameraState): ScreenPoint {
   return worldToScreen(lonLatToWorld(point), camera);
+}
+
+// MapLibre's default vertical field of view is 2 * atan(1/3). Cache the
+// ground-plane transform across the many projections in one camera frame.
+const perspectiveCache = new WeakMap<CameraState, ReturnType<typeof makePerspective>>();
+function makePerspective(camera: CameraState) {
+  const bearing = camera.bearing * Math.PI / 180;
+  const pitch = (camera.pitch ?? 0) * Math.PI / 180;
+  return { cosB: Math.cos(bearing), sinB: Math.sin(bearing), cosP: Math.cos(pitch),
+    sinP: Math.sin(pitch), distance: camera.viewportHeightCssPx * 1.5 };
+}
+function perspective(camera: CameraState) {
+  const cached = perspectiveCache.get(camera);
+  if (cached) return cached;
+  const transform = makePerspective(camera);
+  perspectiveCache.set(camera, transform);
+  return transform;
 }
 
 export function screenToLonLat(point: ScreenPoint, camera: CameraState): LonLatPoint {
@@ -115,6 +153,14 @@ export function writeVisibleWorldBounds(
   target.minY = Math.min(topLeft.y, bottomRight.y);
   target.maxX = Math.max(topLeft.x, bottomRight.x);
   target.maxY = Math.max(topLeft.y, bottomRight.y);
+  if (camera.pitch || camera.bearing) {
+    const tr = screenToWorld({ x: camera.viewportWidthCssPx, y: 0 }, camera);
+    const bl = screenToWorld({ x: 0, y: camera.viewportHeightCssPx }, camera);
+    target.minX = Math.min(target.minX, tr.x, bl.x);
+    target.minY = Math.min(target.minY, tr.y, bl.y);
+    target.maxX = Math.max(target.maxX, tr.x, bl.x);
+    target.maxY = Math.max(target.maxY, tr.y, bl.y);
+  }
   return target;
 }
 
@@ -125,6 +171,13 @@ export function visibleWorldBounds(camera: CameraState): GlobalMapBounds {
     maxX: 0,
     maxY: 0,
   });
+}
+
+export function boundsCorners(bounds: GlobalMapBounds): WorldPoint[] {
+  return [
+    { x: bounds.minX, y: bounds.minY }, { x: bounds.maxX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.maxY }, { x: bounds.minX, y: bounds.maxY },
+  ];
 }
 
 export function expandBounds(bounds: GlobalMapBounds, ratio: number): GlobalMapBounds {

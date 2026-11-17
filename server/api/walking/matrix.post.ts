@@ -9,7 +9,7 @@ import {
 import type { NearbyWalkingMatrixDestination } from "../../../src/features/nearby-stations/nearbyWalkingRoutes";
 
 export default defineEventHandler(async (event) => {
-  const body = await readBody<{ origin?: NearbyJourneyPoint; destinations?: NearbyWalkingMatrixDestination[]; routingPolicy?: string; reverse?: boolean }>(event);
+  const body = await readBody<{ origin?: NearbyJourneyPoint; destinations?: NearbyWalkingMatrixDestination[]; routingPolicy?: string; reverse?: boolean; cache?: boolean }>(event);
   const origin = validPoint(body?.origin);
   const destinations = Array.isArray(body?.destinations)
     ? body.destinations.slice(0, OPEN_ROUTE_SERVICE_MAX_MATRIX_DESTINATIONS).map((destination) => {
@@ -24,7 +24,10 @@ export default defineEventHandler(async (event) => {
   }
   const router = body.routingPolicy === "gtfs-access" ? matrixWalkingForGtfs
     : body.routingPolicy === "ors-only" ? matrixWalkingWithOpenRouteService : matrixWalkingWithPreferredProvider;
-  return { routes: await router(event, origin, destinations, { reverse: body.reverse === true }) };
+  return { routes: await router(event, origin, destinations, {
+    reverse: body.reverse === true,
+    ...(body.cache === false ? { cache: false } : {}),
+  }) };
 });
 
 function validPoint(value: unknown): NearbyJourneyPoint | undefined {

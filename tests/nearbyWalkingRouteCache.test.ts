@@ -52,6 +52,20 @@ afterEach(() => {
 });
 
 describe("nearby walking route cache", () => {
+  it("keeps session-only matrix origins out of persistent storage", async () => {
+    const storage = new MemoryStorage();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ routes: [{
+      id: destination.id, provider: "openrouteservice", distanceMeters: 640,
+      durationSeconds: 480, coordinates: [origin, { lon: destination.lon, lat: destination.lat }],
+    }] }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("localStorage", storage);
+    vi.stubGlobal("fetch", fetchMock);
+    const service = await import("../src/services/nearbyWalkingRoutes");
+    await service.getNearbyWalkingRouteMatrix(origin, [destination], undefined, "preferred", { persistentCache: false });
+    await service.getNearbyWalkingRouteMatrix(origin, [destination], undefined, "preferred", { persistentCache: false });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(storage.length).toBe(0);
+  });
   it("sanitizes a place name and address into a stable key", () => {
     expect(destinationCacheKey).toBe("cafe-republique-12-rue-d-alesia");
   });

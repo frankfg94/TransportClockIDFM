@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { shiftGtfsDate } from "../../../shared/gtfs/timetableCalendar";
 import AppModal from "../../components/AppModal.vue";
 import LoadingBar from "../../components/LoadingBar.vue";
+import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import { useI18n } from "../../i18n";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
 import type { GtfsLineTimetableResponse } from "../../types/lineFrequencyTimetable";
 import type { LineFrequencyStationCoordinate } from "./lineFrequencyCompass";
 import { useLineFrequencyTimetable } from "./useLineFrequencyTimetable";
 import LineFrequencyTimetable from "./LineFrequencyTimetable.vue";
+import { getGtfsRequestDate } from "../../services/lineFrequency";
 
 const props = defineProps<{
   open: boolean;
@@ -16,6 +19,7 @@ const props = defineProps<{
   stationCoordinates?: readonly LineFrequencyStationCoordinate[];
   stationId?: string;
   stationName?: string;
+  contextLabel?: string;
   directionDestinations?: readonly string[];
   teleportDisabled?: boolean;
   profileLoading?: boolean;
@@ -26,9 +30,36 @@ const emit = defineEmits<{
   close: [];
 }>();
 
-const { t } = useI18n();
+const { t, d } = useI18n();
 const { getTimetable } = useLineFrequencyTimetable();
 const timetable = ref<GtfsLineTimetableResponse>();
+const nextTimetable = ref<GtfsLineTimetableResponse>();
+// Monday is zero; formatting uses a known Monday independent of browser timezone.
+const selectedWeekday = ref("0");
+const weekdays = computed(() => Array.from({ length: 7 }, (_, day) => ({
+  id: String(day),
+  label: d(new Date(Date.UTC(2024, 0, 1 + day)), { weekday: "long", timeZone: "UTC" }),
+})));
+
+function weekdayOf(date: string): number {
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(4, 6)) - 1;
+  const day = Number(date.slice(6, 8));
+  return (new Date(Date.UTC(year, month, day)).getUTCDay() + 6) % 7;
+}
+function dateForWeekday(weekday: number): string {
+  const today = getGtfsRequestDate();
+  const date = shiftGtfsDate(today, weekday - weekdayOf(today));
+  const coverage = props.profile?.coverage;
+  if (!coverage) return date;
+  if (date < coverage.startDate) {
+    return shiftGtfsDate(coverage.startDate, (weekday - weekdayOf(coverage.startDate) + 7) % 7);
+  }
+  if (date > coverage.endDate) {
+    return shiftGtfsDate(coverage.endDate, -((weekdayOf(coverage.endDate) - weekday + 7) % 7));
+  }
+  return date;
+}
 const loading = ref(false);
 const error = ref(false);
 let requestController: AbortController | undefined;
@@ -48,14 +79,20 @@ async function loadTimetable(): Promise<void> {
   const controller = new AbortController();
   requestController = controller;
   timetable.value = undefined;
+  nextTimetable.value = undefined;
   loading.value = true;
   error.value = false;
 
   try {
-    timetable.value = await getTimetable(lineId, {
-      serviceDate: props.profile?.serviceDate,
-      signal: controller.signal,
-    });
+    const serviceDate = dateForWeekday(Number(selectedWeekday.value));
+    const nextDate = shiftGtfsDate(serviceDate, 1);
+    const [current, next] = await Promise.all([
+      getTimetable(lineId, { serviceDate, signal: controller.signal }),
+      getTimetable(lineId, { serviceDate: nextDate, signal: controller.signal }).catch(() => undefined),
+    ]);
+    if (controller.signal.aborted || sequence !== requestSequence) return;
+    timetable.value = current;
+    nextTimetable.value = next;
   } catch {
     if (controller.signal.aborted || sequence !== requestSequence) return;
     error.value = true;
@@ -65,16 +102,22 @@ async function loadTimetable(): Promise<void> {
 }
 
 watch(
-  [() => props.open, () => props.profile?.lineId, () => props.profile?.serviceDate, () => props.profileLoading],
+  () => props.open,
+  (open) => {
+    if (open) selectedWeekday.value = String(weekdayOf(getGtfsRequestDate()));
+  },
+  { immediate: true },
+);
+watch(
+  [() => props.open, () => props.profile, selectedWeekday],
   ([open]) => {
-    if (open) {
-      void loadTimetable();
-    } else {
+    if (!open) {
       requestSequence += 1;
       requestController?.abort();
-      requestController = undefined;
       loading.value = false;
+      return;
     }
+    void loadTimetable();
   },
   { immediate: true },
 );
@@ -93,6 +136,17 @@ onBeforeUnmount(() => {
     :teleport-disabled="teleportDisabled"
     @close="emit('close')"
   >
+    <p v-if="contextLabel">{{ contextLabel }}</p>
+    <div class="line-frequency-timetable-modal__date">
+      <span>{{ t("globalMap.sidebar.gtfsFrequency.timetableChooseDate") }}</span>
+      <MaterialCombobox
+        v-model="selectedWeekday"
+        :options="weekdays"
+        :aria-label="t('globalMap.sidebar.gtfsFrequency.timetableChooseDate')"
+        teleport
+        data-testid="frequency-weekday"
+      />
+    </div>
     <LineFrequencyTimetable
       :profile="profile"
       :line-color="lineColor"
@@ -101,6 +155,7 @@ onBeforeUnmount(() => {
       :station-name="stationName"
       :direction-destinations="directionDestinations"
       :timetable="timetable"
+      :next-timetable="nextTimetable"
       :loading="loading || profileLoading"
       :error="error || profileError"
     />
@@ -133,6 +188,7 @@ onBeforeUnmount(() => {
   border-top: 0;
 }
 
+.line-frequency-timetable-modal__date { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); color: var(--ink); }
 .line-frequency-timetable-modal__loading-bar {
   width: 100%;
 }

@@ -1,5 +1,6 @@
+import type { TranslationKey } from "../../../i18n";
 import type { PublicNeighborhoodVerdict } from "../neighborhoodVerdictApi";
-import type { NeighborhoodCategoryId, NeighborhoodCategoryResult, NeighborhoodFact, NeighborhoodFactKind, NeighborhoodScoreBand, NeighborhoodScoreInput, NeighborhoodScoreResult } from "./contracts";
+import type { NeighborhoodCategoryId, NeighborhoodCategoryResult, NeighborhoodFact, NeighborhoodFactKind, NeighborhoodScoreBand, NeighborhoodScoreInput, NeighborhoodScoreResult, NeighborhoodScoreDetailGroup } from "./contracts";
 import { buildDailyLifeCategory } from "./criteria/dailyLife";
 import { buildEducationCategory } from "./criteria/education";
 import { buildHealthCategory } from "./criteria/health";
@@ -201,12 +202,86 @@ function mergeBackendVerdict(categories: NeighborhoodCategoryResult[], verdict: 
     preserveJourneyBenchmarkFacts(neutralFacts, [...local.neutralFacts, ...externalFacts]);
     if (local.id === "transport" && external.scoreDelta !== undefined) {
       const score = local.score === undefined ? undefined : clamp(local.score + external.scoreDelta);
-      return withFacts({ ...local, score, positiveFacts, negativeFacts, neutralFacts });
+      const before = local.score;
+      const rows = before === undefined ? [] : [
+        { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.local" as const, points: before },
+        { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.serverDelta" as const, points: external.scoreDelta },
+        ...(score !== undefined && score !== before + external.scoreDelta ? [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.cap" as const, points: score - before - external.scoreDelta }] : []),
+      ];
+      return withFacts({ ...local, score, positiveFacts, negativeFacts, neutralFacts,
+        scoreDetails: [...(local.scoreDetails ?? []), { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.merge", method: "sum", rows, score }] });
     }
     if (external.score === undefined) return { ...local, positiveFacts, negativeFacts, neutralFacts };
     const score = local.available && local.score !== undefined ? weightedAverage([{ value: local.score, weight: 1 }, { value: external.score, weight: 1 }]) : external.score;
-    return withFacts({ ...local, available: true, unavailableReasonKey: undefined, score, positiveFacts, negativeFacts, neutralFacts });
+    const both = local.available && local.score !== undefined;
+    const groups = [...(local.scoreDetails ?? []), ...serverScoreDetails(local.id, verdict), ...securityScoreDetails(local.id, verdict)];
+    groups.push({ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.merge", method: "average", score, rows: [
+      ...(both ? [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.local" as const, value: local.score!, weight: 0.5, points: local.score! * 0.5 }] : []),
+      { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.server" as const, value: external.score, weight: both ? 0.5 : 1, points: external.score * (both ? 0.5 : 1) },
+    ] });
+    return withFacts({ ...local, available: true, unavailableReasonKey: undefined, score, positiveFacts, negativeFacts, neutralFacts, scoreDetails: groups });
   });
+}
+
+/** Explain server measurements only when the public response contains the necessary evidence. */
+function serverScoreDetails(id: NeighborhoodCategoryId, verdict: PublicNeighborhoodVerdict): NeighborhoodScoreDetailGroup[] {
+  const external = verdict.categories.find(category => category.id === id && category.status === "available");
+  if (!external || external.score === undefined) return [];
+  const facts = [...external.positiveFacts, ...external.negativeFacts, ...(external.neutralFacts ?? [])];
+  if (id === "nature-leisure") {
+    const reference = facts.find(fact => fact.family === "managed-green-space-reference" && typeof fact.value === "number" && Number.isFinite(fact.value));
+    return reference && typeof reference.value === "number" ? [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.server", method: "average", score: external.score, rows: [
+      { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.nearestGreen", measurement: reference.value, measurementUnit: "meters", value: external.score, weight: 1, points: external.score },
+    ] }] : [];
+  }
+  if (id === "living-environment") {
+    const air = facts.find(fact => fact.family === "air" && typeof fact.value === "number" && Number.isFinite(fact.value));
+    const noise = facts.find(fact => fact.family === "noise" && typeof fact.value === "number" && Number.isFinite(fact.value));
+    if (!air || typeof air.value !== "number" || !noise || typeof noise.value !== "number") return [];
+    const mean = (air.value + noise.value) / 2;
+    return [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.server", method: "average", score: external.score, rows: [
+      { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.air", value: air.value, weight: 0.5, points: air.value / 2 },
+      { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.noise", value: noise.value, weight: 0.5, points: noise.value / 2 },
+      ...(Math.abs(mean - external.score) > 1e-9 ? [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.rounding" as const, points: external.score - mean }] : []),
+    ] }];
+  }
+  return [];
+}
+
+const SECURITY_INDICATOR_LABELS: Readonly<Record<string, TranslationKey>> = {
+  burglary: "nearbyStations.neighborhoodScore.scoreHelp.detail.burglary",
+  "vehicle-theft": "nearbyStations.neighborhoodScore.scoreHelp.detail.vehicleTheft",
+  damage: "nearbyStations.neighborhoodScore.scoreHelp.detail.damage",
+  "physical-violence-outside-family": "nearbyStations.neighborhoodScore.scoreHelp.detail.physicalViolence",
+  "violent-theft-without-weapon": "nearbyStations.neighborhoodScore.scoreHelp.detail.violentTheft",
+  "nonviolent-theft": "nearbyStations.neighborhoodScore.scoreHelp.detail.nonviolentTheft",
+};
+
+/** Uses the artifact's own indicator weights and compiled score; no duplicated compiler constants. */
+function securityScoreDetails(id: NeighborhoodCategoryId, verdict: PublicNeighborhoodVerdict): NeighborhoodScoreDetailGroup[] {
+  const commune = verdict.security?.commune;
+  if (id !== "security" || !commune || typeof commune !== "object" || !Array.isArray(commune.indicators)) return [];
+  const indicators = commune.indicators.filter(item => Number.isFinite(item.weight) && item.weight > 0 && Number.isFinite(item.percentile));
+  const total = indicators.reduce((sum, item) => sum + item.weight, 0);
+  if (!total || !Number.isFinite(commune.localScore) || indicators.length !== commune.indicators.length || !Number.isFinite(commune.availableWeight) || Math.abs(total - commune.availableWeight) > 1e-6) return [];
+  const rows = indicators.map(item => ({ labelKey: SECURITY_INDICATOR_LABELS[item.id] ?? "nearbyStations.neighborhoodScore.scoreHelp.detail.securityIndicator" as const,
+    ...(SECURITY_INDICATOR_LABELS[item.id] ? {} : { label: item.label }), measurement: item.percentile * 100, measurementUnit: "percent" as const,
+    value: 10 * (1 - item.percentile), weight: item.weight / total, points: 10 * (1 - item.percentile) * item.weight / total }));
+  const sum = rows.reduce((result, row) => result + row.points, 0);
+  const groups: NeighborhoodScoreDetailGroup[] = [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.securityLocal", method: "average", score: commune.localScore,
+    rows: [...rows, ...(Math.abs(sum - commune.localScore) > 1e-9 ? [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.rounding" as const, points: commune.localScore - sum }] : [])] }];
+  const trend = verdict.security?.trend;
+  const external = verdict.categories.find(category => category.id === "security" && category.status === "available");
+  if (external?.score !== undefined) {
+    const adjustment = trend && typeof trend === "object" && Number.isFinite(trend.adjustment) ? trend.adjustment : 0;
+    const raw = commune.localScore + adjustment;
+    groups.push({ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.securityFinal", method: "sum", score: external.score, rows: [
+      { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.securityLocal", points: commune.localScore },
+      { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.securityTrend", ...(trend && typeof trend === "object" && Number.isFinite(trend.deltaPercent) ? { measurement: trend.deltaPercent, measurementUnit: "percent" as const } : { unavailable: true }), points: adjustment },
+      ...(Math.abs(raw - external.score) > 1e-9 ? [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.cap" as const, points: external.score - raw }] : []),
+    ] });
+  }
+  return groups;
 }
 
 /**

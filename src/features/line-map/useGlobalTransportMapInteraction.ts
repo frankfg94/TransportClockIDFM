@@ -2,6 +2,7 @@ import { getCurrentInstance, onBeforeUnmount } from "vue";
 import {
   panCameraByScreen,
   transformCameraForPinch,
+  updateCamera,
   zoomCameraAroundScreenPoint,
   type CameraState,
 } from "../transport-map/geo/camera";
@@ -70,10 +71,14 @@ export interface GlobalTransportCameraTarget {
   zoom: number;
 }
 
+export function normalizeBearing(angle: number): number {
+  return ((angle + 180) % 360 + 360) % 360 - 180;
+}
+
 export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapInteractionOptions) {
   const pointers = new Map<number, ScreenPoint>();
   let pinchState:
-    | { distance: number; midpoint: ScreenPoint; anchorWorld: WorldPoint; camera: CameraState }
+    | { distance: number; angle: number; midpoint: ScreenPoint; anchorWorld: WorldPoint; camera: CameraState }
     | undefined;
   let inertiaState: InertiaState = createInertiaState();
   let inertiaFrame: number | undefined;
@@ -526,6 +531,7 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
       const initialMidpoint = midpoint(values[0]!, values[1]!);
       const anchor = options.getCamera();
       pinchState = {
+        angle: Math.atan2(values[1]!.y - values[0]!.y, values[1]!.x - values[0]!.x),
         distance: distanceBetween(values[0]!, values[1]!),
         midpoint: initialMidpoint,
         anchorWorld: screenToWorld(initialMidpoint, anchor),
@@ -552,9 +558,13 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
       const values = [...pointers.values()];
       const distance = distanceBetween(values[0]!, values[1]!);
       const currentMidpoint = midpoint(values[0]!, values[1]!);
+      const pinchCamera = pinchState.camera;
+      const angle = Math.atan2(values[1]!.y - values[0]!.y, values[1]!.x - values[0]!.x);
       options.applyCamera(
         transformCameraForPinch(
-          pinchState.camera,
+          pinchCamera.pitch ? { ...pinchCamera,
+            bearing: normalizeBearing(pinchCamera.bearing - (angle - pinchState.angle) * 180 / Math.PI),
+          } : pinchCamera,
           pinchState.distance,
           pinchState.anchorWorld,
           distance,
@@ -584,9 +594,16 @@ export function useGlobalTransportMapInteraction(options: UseGlobalTransportMapI
         dragMoved = dragMoved || dragDistance > tapSlop;
         const panSensitivity = GLOBAL_TRANSPORT_PLAN_CONFIG.camera.panSensitivity;
         const panDelta = { x: dx * panSensitivity, y: dy * panSensitivity };
-        const nextCamera = panCameraByScreen(options.getCamera(), panDelta);
+        const camera = options.getCamera();
+        const rotating = Boolean(camera.pitch && event.shiftKey);
+        const nextCamera = rotating
+          ? updateCamera(camera, {
+              bearing: normalizeBearing(camera.bearing + dx * 0.45),
+              pitch: Math.max(20, Math.min(60, (camera.pitch ?? 50) - dy * 0.25)),
+            })
+          : panCameraByScreen(camera, panDelta, dragLast);
         options.applyCamera(nextCamera, false, false);
-        dragVelocity = clampInertiaVelocity(panDelta.x / elapsed, panDelta.y / elapsed);
+        dragVelocity = rotating ? { x: 0, y: 0 } : clampInertiaVelocity(panDelta.x / elapsed, panDelta.y / elapsed);
       }
       dragLast = point;
       lastPointerTime = now;

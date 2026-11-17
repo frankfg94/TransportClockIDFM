@@ -1,5 +1,6 @@
 import { mount } from "@vue/test-utils";
 import { createCamera } from "../src/features/transport-map/geo/camera";
+import * as coordinateKernel from "../src/features/transport-map/geo/coordinateKernel";
 import { lonLatToWorld, worldToScreen } from "../src/features/transport-map/geo/coordinateKernel";
 import GlobalTransportItineraryOverlay from "../src/features/line-map/GlobalTransportItineraryOverlay.vue";
 import type { GlobalTransportItineraryRoute } from "../src/features/line-map/globalTransportItineraryGeometry";
@@ -78,34 +79,69 @@ describe("GlobalTransportItineraryOverlay", () => {
     expect(wrapper.find(".global-transport-itinerary-overlay__exit-connector").exists()).toBe(true);
   });
 
-  it("keeps world geometry and exit resolution stable during camera changes", async () => {
+  it("projects walking, transit and markers together across camera and route changes", async () => {
     const getSectionExits = vi.fn(() => [exit]);
+    const center = lonLatToWorld(stop);
+    const camera = createCamera({
+      centerWorldX: center.x, centerWorldY: center.y, zoom: 14,
+      viewportWidthCssPx: 800, viewportHeightCssPx: 600,
+    });
+    const route = createOverlayRoute();
+    const sourceGeometry = JSON.stringify(route);
+    const projectWorld = vi.spyOn(coordinateKernel, "lonLatToWorld");
     const wrapper = mount(GlobalTransportItineraryOverlay, {
-      props: {
-        origin,
-        destination,
-        camera: createOverlayCamera(),
-        route: createOverlayRoute(),
-        getSectionExits,
-      },
+      props: { origin, destination, camera, route, getSectionExits },
     });
 
-    const initialPathData = wrapper.find(".global-transport-itinerary-overlay__path").attributes("d");
-    const initialTransitPathData = wrapper.findAll(".global-transport-itinerary-overlay__path")[1]!.attributes("d");
-    const initialTransform = wrapper.find("svg > g").attributes("transform");
+    function assertAligned(currentCamera: typeof camera) {
+      const paths = wrapper.findAll(".global-transport-itinerary-overlay__path");
+      const expectedPath = (points: typeof origin[]) => points.map((point) => {
+        const screen = worldToScreen(lonLatToWorld(point), currentCamera);
+        return [screen.x, screen.y];
+      });
+      const parse = (d: string) => Array.from(d.matchAll(/[ML] (-?[\d.]+) (-?[\d.]+)/g),
+        (match) => [Number(match[1]), Number(match[2])]);
+      for (const [actual, expected] of [
+        [parse(paths[0]!.attributes("d") ?? ""), expectedPath([origin, stop])],
+        [parse(paths[1]!.attributes("d") ?? ""), expectedPath([stop, destination])],
+      ]) {
+        expect(actual).toHaveLength(expected.length);
+        expected.forEach((point, index) => {
+          expect(actual[index]![0]).toBeCloseTo(point[0]!, 3);
+          expect(actual[index]![1]).toBeCloseTo(point[1]!, 3);
+        });
+      }
+      const originScreen = worldToScreen(lonLatToWorld(origin), currentCamera);
+      const marker = wrapper.find(".global-transport-itinerary-overlay__node--origin");
+      expect(Number(marker.attributes("cx"))).toBeCloseTo(originScreen.x, 6);
+      expect(Number(marker.attributes("cy"))).toBeCloseTo(originScreen.y, 6);
+      const destinationScreen = worldToScreen(lonLatToWorld(destination), currentCamera);
+      const connector = wrapper.find(".global-transport-itinerary-overlay__exit-connector");
+      expect(Number(connector.attributes("x1"))).toBeCloseTo(destinationScreen.x, 6);
+      expect(Number(connector.attributes("y1"))).toBeCloseTo(destinationScreen.y, 6);
+      expect(wrapper.find("svg > g").attributes("transform")).toBeUndefined();
+    }
+
+    assertAligned(camera);
     expect(getSectionExits).toHaveBeenCalledTimes(1);
-
-    await wrapper.setProps({ camera: createOverlayCamera(9) });
-
-    expect(wrapper.find(".global-transport-itinerary-overlay__path").attributes("d")).toBe(initialPathData);
-    expect(wrapper.find("svg > g").attributes("transform")).not.toBe(initialTransform);
+    projectWorld.mockClear();
+    const movedCamera = createCamera({
+      centerWorldX: center.x + 0.0001, centerWorldY: center.y - 0.0001, zoom: 15,
+      viewportWidthCssPx: 1000, viewportHeightCssPx: 700,
+    });
+    await wrapper.setProps({ camera: movedCamera });
+    expect(projectWorld).not.toHaveBeenCalled();
+    expect(JSON.stringify(route)).toBe(sourceGeometry);
     expect(getSectionExits).toHaveBeenCalledTimes(1);
+    assertAligned(movedCamera);
 
+    const previousTransitPath = wrapper.findAll(".global-transport-itinerary-overlay__path")[1]!.attributes("d");
     const nextRoute = createOverlayRoute("journey:overlay:next");
     nextRoute.sections[1]!.geometry = [stop, { lon: 2.22, lat: 48.81 }, destination];
     await wrapper.setProps({ route: nextRoute });
     expect(getSectionExits).toHaveBeenCalledTimes(2);
-    expect(wrapper.findAll(".global-transport-itinerary-overlay__path")[1]!.attributes("d")).not.toBe(initialTransitPathData);
+    expect(wrapper.findAll(".global-transport-itinerary-overlay__path")[1]!.attributes("d")).not.toBe(previousTransitPath);
+    projectWorld.mockRestore();
   });
 
   it("anchors exit connectors to the rendered transit endpoint", () => {
@@ -141,7 +177,7 @@ describe("GlobalTransportItineraryOverlay", () => {
     expect(Number(connector.attributes("y1"))).toBeCloseTo(expected.y, 6);
   });
 
-  it("does not rebuild a long path when the camera pans", async () => {
+  it("reprojects a dense path when the camera pans", async () => {
     const longGeometry = Array.from({ length: 1_200 }, (_, index) => ({
       lon: 2.21 + index * 0.000001,
       lat: 48.801 + Math.sin(index / 20) * 0.000001,
@@ -169,6 +205,7 @@ describe("GlobalTransportItineraryOverlay", () => {
       }),
     });
 
-    expect(wrapper.findAll(".global-transport-itinerary-overlay__path")[1]!.attributes("d")).toBe(initialPathData);
+    expect(wrapper.findAll(".global-transport-itinerary-overlay__path")[1]!.attributes("d")).not.toBe(initialPathData);
+    expect(route.sections[1]!.geometry).toHaveLength(1_202);
   });
 });

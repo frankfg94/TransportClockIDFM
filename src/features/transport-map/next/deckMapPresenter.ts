@@ -489,7 +489,7 @@ function samePacketSequence(left?: NonNullable<TransportMapRenderFrame["binaryPa
 }
 
 export function syncCameraToMapLibre(
-  map: Pick<MapLibreMap, "getCenter" | "getZoom" | "jumpTo">,
+  map: Pick<MapLibreMap, "getCenter" | "getZoom" | "getBearing" | "getPitch" | "jumpTo">,
   frame: Pick<TransportMapRenderFrame, "camera">,
 ): boolean {
   const view = cameraStateToMapLibreView(frame.camera);
@@ -497,7 +497,9 @@ export function syncCameraToMapLibre(
   const changed =
     Math.abs(currentCenter.lng - view.center[0]) > 1e-10 ||
     Math.abs(currentCenter.lat - view.center[1]) > 1e-10 ||
-    Math.abs(map.getZoom() - view.zoom) > 1e-6;
+    Math.abs(map.getZoom() - view.zoom) > 1e-6 ||
+    Math.abs((map.getBearing?.() ?? 0) - view.bearing) > 1e-6 ||
+    Math.abs((map.getPitch?.() ?? 0) - view.pitch) > 1e-6;
   if (changed) map.jumpTo(view);
   return changed;
 }

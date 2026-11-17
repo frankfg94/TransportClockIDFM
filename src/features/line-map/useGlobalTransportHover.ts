@@ -81,6 +81,13 @@ export function useGlobalTransportHover(options: UseGlobalTransportHoverOptions)
       ? worldToScreen({ x: point.worldX, y: point.worldY }, camera)
       : hoveredPointer.value;
     if (!screen) return {} as Record<string, string>;
+    if (point && camera.pitch) {
+      const align = screen.x < 140 ? "8%" : screen.x > camera.viewportWidthCssPx - 140 ? "92%" : "50%";
+      return {
+        left: `${screen.x}px`, top: `${screen.y}px`,
+        "--station-tooltip-anchor": align,
+      };
+    }
     const tooltipWidth = 300;
     return {
       left: `${Math.max(8, Math.min(camera.viewportWidthCssPx - tooltipWidth, screen.x + 12))}px`,

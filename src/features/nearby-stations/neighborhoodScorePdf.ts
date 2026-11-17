@@ -10,6 +10,7 @@ export interface NeighborhoodScorePdfSection {
 export interface NearbyRealEstatePdfState {
   loading: boolean;
   section?: NeighborhoodScorePdfSection;
+  market?: { status: "ready" | "loading" | "missing" | "stale" | "error"; rentStatus: "ready" | "loading" | "missing" | "error"; historyStatus?: "ready" | "missing"; typeStatus?: "missing"; durationMs?: number; coverage?: "neighborhood" | "city" | "undivided-city" };
 }
 
 export type NearbyTrafficPdfState = NearbyRealEstatePdfState;
@@ -39,6 +40,7 @@ const winAnsiSpecialCharacters: Record<string, number> = {
   "Ž": 0x8e, "‘": 0x91, "’": 0x92, "“": 0x93, "”": 0x94, "•": 0x95,
   "–": 0x96, "—": 0x97, "˜": 0x98, "™": 0x99, "š": 0x9a, "›": 0x9b,
   "œ": 0x9c, "ž": 0x9e, "Ÿ": 0x9f, " ": 0xa0, "·": 0xb7,
+  "−": 0x2d,
 };
 
 function cleanText(value: string): string {

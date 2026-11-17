@@ -1,3 +1,4 @@
+import { VERDICT_SERVER_SCORE_RULES } from "../../../shared/neighborhoodVerdictScoreRules";
 import {
   AIR_NOISE_GRID_SOURCE_ID,
   AIR_NOISE_STATISTICS_SOURCE_ID,
@@ -145,7 +146,7 @@ async function transportSignal(
       hubId: `${station.lon.toFixed(4)}:${station.lat.toFixed(4)}`,
     };
     futureProjects.push(project);
-    if (minutes <= 15) {
+    if (minutes <= VERDICT_SERVER_SCORE_RULES.futureStation.walkingMinutes) {
       walkAccessibleFutureProjects.push(project);
       facts.push(
         evidence({
@@ -171,7 +172,7 @@ async function transportSignal(
     }
   }
   return walkAccessibleFutureProjects.length
-    ? { signal: available("transport", undefined, facts, [], 1), futureProjects }
+    ? { signal: available("transport", undefined, facts, [], VERDICT_SERVER_SCORE_RULES.futureStation.bonus), futureProjects }
     : {
         signal: unavailable("transport", [
           "Aucun bonus GPE documenté ; cela ne constitue pas un point faible.",
@@ -225,16 +226,8 @@ async function natureSignal(
   if (!nearest) return { signal: unavailable("nature-leisure"), nearbyGreenSpaces: [] };
   const distance = Math.round(nearest.distanceMeters);
   const nearestSourceId = greenSpaceSourceId(nearest.space);
-  const score =
-    distance <= 300
-      ? 10
-      : distance <= 600
-        ? 8
-        : distance <= 1_200
-          ? 6
-          : distance <= 2_000
-            ? 4
-            : 2;
+  const score = VERDICT_SERVER_SCORE_RULES.natureDistances.find(rule => distance <= rule.maximumMeters)?.score
+    ?? VERDICT_SERVER_SCORE_RULES.natureBeyondScore;
   const facts: VerdictEvidence[] = [];
   const neutral: VerdictEvidence[] = [
     evidence({
@@ -667,19 +660,19 @@ function securitySignal(
     "security",
     score,
     commune.indicators
-      .filter((indicator) => indicator.percentile < 0.25)
+      .filter((indicator) => indicator.percentile < VERDICT_SERVER_SCORE_RULES.security.positivePercentile)
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 2)
       .map((indicator) => make("positive", indicator)),
     commune.indicators
-      .filter((indicator) => indicator.percentile > 0.75)
+      .filter((indicator) => indicator.percentile > VERDICT_SERVER_SCORE_RULES.security.negativePercentile)
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 2)
       .map((indicator) => make("negative", indicator)),
     undefined,
     trend ? [] : ["Tendance départementale indisponible ; le niveau communal reste utilisable."],
     commune.indicators
-      .filter((indicator) => indicator.percentile >= 0.25 && indicator.percentile <= 0.75)
+      .filter((indicator) => indicator.percentile >= VERDICT_SERVER_SCORE_RULES.security.positivePercentile && indicator.percentile <= VERDICT_SERVER_SCORE_RULES.security.negativePercentile)
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 4)
       .map((indicator) => make("neutral", indicator)),
@@ -690,11 +683,11 @@ function contextualTrend(
   trend: SecurityTrendResult,
   localScore: number,
 ): SecurityTrendResult {
-  const trendScore = Math.max(0, Math.min(10, 5 - trend.deltaPercent / 10));
-  const mixed = 0.9 * localScore + 0.1 * trendScore;
+  const trendScore = Math.max(0, Math.min(10, VERDICT_SERVER_SCORE_RULES.security.trendMidpoint - trend.deltaPercent / VERDICT_SERVER_SCORE_RULES.security.trendDivisor));
+  const mixed = VERDICT_SERVER_SCORE_RULES.security.localWeight * localScore + VERDICT_SERVER_SCORE_RULES.security.trendWeight * trendScore;
   return {
     ...trend,
-    adjustment: roundNumber(Math.max(-0.5, Math.min(0.5, mixed - localScore))),
+    adjustment: roundNumber(Math.max(-VERDICT_SERVER_SCORE_RULES.security.maximumAdjustment, Math.min(VERDICT_SERVER_SCORE_RULES.security.maximumAdjustment, mixed - localScore))),
   };
 }
 

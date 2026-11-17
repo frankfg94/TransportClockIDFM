@@ -82,6 +82,26 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+describe("TransitBoard frequency action", () => {
+  it("opens the menu and emits its board and focus target", async () => {
+    const board = createBoard();
+    const wrapper = mount(TransitBoard, {
+      props: { board, collapsedDirectionIds: [], departures: [], directionGroups: [], loading: false },
+      attachTo: document.body,
+    });
+    const trigger = wrapper.get(".board-actions__trigger");
+    await trigger.trigger("click");
+    const action = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((button) => /fréquences|frequencies/i.test(button.textContent ?? ""));
+    expect(action).toBeDefined();
+    action!.click();
+    await flushPromises();
+    expect(wrapper.emitted("open-frequencies")?.[0]).toEqual([board, trigger.element]);
+    expect(trigger.attributes("aria-expanded")).toBe("false");
+    wrapper.unmount();
+  });
+});
+
 describe("TransitBoard station change", () => {
   it("does not leave the change button loading forever when direction lookup hangs", async () => {
     vi.useFakeTimers();

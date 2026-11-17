@@ -23,7 +23,7 @@ import { Scan } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
 import type { GlobalMapBounds } from "../transport-map/contracts/manifest";
 import type { CameraState } from "../transport-map/geo/camera";
-import { worldScaleAtZoom } from "../transport-map/geo/coordinateKernel";
+import { boundsCorners, worldToScreen } from "../transport-map/geo/coordinateKernel";
 
 const props = defineProps<{ bounds: GlobalMapBounds; camera: CameraState; fitting?: boolean; reduceMotion?: boolean }>();
 const emit = defineEmits<{ fit: [] }>();
@@ -32,13 +32,10 @@ const { t } = useI18n();
 // Constant work per camera sample: no geometry traversal, DOM reads or timers.
 const outsideViewport = computed(() => {
   const camera = props.camera;
-  const scale = worldScaleAtZoom(camera.zoom);
-  const halfWidth = camera.viewportWidthCssPx / (2 * scale);
-  const halfHeight = camera.viewportHeightCssPx / (2 * scale);
-  return props.bounds.minX < camera.centerWorldX - halfWidth
-    || props.bounds.maxX > camera.centerWorldX + halfWidth
-    || props.bounds.minY < camera.centerWorldY - halfHeight
-    || props.bounds.maxY > camera.centerWorldY + halfHeight;
+  return boundsCorners(props.bounds).some(corner => {
+    const { x, y } = worldToScreen(corner, camera);
+    return x < 0 || x > camera.viewportWidthCssPx || y < 0 || y > camera.viewportHeightCssPx;
+  });
 });
 </script>
 

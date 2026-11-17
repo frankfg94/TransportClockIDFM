@@ -74,9 +74,9 @@ export async function getGtfsLineFrequency(
   event: H3Event | undefined,
   lineId: string,
   now: Date = new Date(),
-  options: { allowCoverageFallback?: boolean } = {},
+  options: { allowCoverageFallback?: boolean; serviceDate?: string } = {},
 ): Promise<GtfsLineFrequencyResponse> {
-  const serviceDate = getGtfsFrequencyServiceDate(now);
+  const serviceDate = options.serviceDate ?? getGtfsFrequencyServiceDate(now);
   const manifest = await getGtfsManifest(event);
   if (!isGtfsEnabled(event) || !manifest?.timetable) {
     const timetable = await loadGtfsTimetableForDate(event, lineId, serviceDate);

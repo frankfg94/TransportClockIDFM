@@ -191,10 +191,11 @@ export async function getNearbyWalkingRouteMatrix(
   destinations: readonly NearbyWalkingMatrixDestination[],
   signal?: AbortSignal,
   routingPolicy?: NearbyWalkingRoutingPolicy,
+  options: { persistentCache?: boolean } = {},
 ): Promise<NearbyWalkingRoute[]> {
   if (destinations.length === 0) return [];
   const fallbacks = destinations.map((destination) => createStraightLineWalkingRoute(origin, destination, destination.id));
-  const cachedRoutes = destinations.map((destination) => getCachedNearbyWalkingRoute({
+  const cachedRoutes = destinations.map((destination) => options.persistentCache === false ? undefined : getCachedNearbyWalkingRoute({
     routingPolicy,
     id: destination.id,
     cacheKey: destination.cacheKey,
@@ -210,7 +211,8 @@ export async function getNearbyWalkingRouteMatrix(
     const payload = await runNetworkTask(async (requestSignal) => {
       const response = await fetch(toServerApiUrl("/api/walking/matrix"), {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ origin, destinations: missingDestinations, routingPolicy }), signal: requestSignal,
+        body: JSON.stringify({ origin, destinations: missingDestinations, routingPolicy,
+          ...(options.persistentCache === false ? { cache: false } : {}) }), signal: requestSignal,
       });
       if (!response.ok) throw new Error(`walking-matrix-${response.status}`);
       return await response.json() as { routes?: unknown };
@@ -230,7 +232,7 @@ export async function getNearbyWalkingRouteMatrix(
         origin,
         destination,
       } satisfies NearbyWalkingRouteRequest;
-      persistWalkingRoute(request, resolved);
+      if (options.persistentCache !== false) persistWalkingRoute(request, resolved);
       fetchedRoutes.set(walkingRouteCacheKey(origin, destination, destination.cacheKey), resolved);
     }
     return destinations.map((destination, index) => cachedRoutes[index]

@@ -3,6 +3,7 @@ import {
   calculateGtfsTimetableInterval,
   calculateGtfsTimetableServiceBounds,
   GTFS_LINE_TIMETABLE_WINDOWS,
+  operatingDayTrips,
 } from "../src/features/line-map/lineFrequencyTimetableIntervals";
 import type {
   GtfsLineTimetableCall,
@@ -86,6 +87,17 @@ describe("GTFS human-readable timetable intervals", () => {
 });
 
 describe("GTFS service-day regressions", () => {
+  it("uses the following day's early calls for the night interval", () => {
+    const stop = "stop";
+    const trips = operatingDayTrips(
+      [trip("previous-night", [call(stop, 60)]), trip("night", [call(stop, 23 * 3600 + 54 * 60)])],
+      [trip("next-night", [call(stop, 6 * 60)]), trip("next-morning", [call(stop, 4 * 3600)])],
+    );
+    expect(calculateGtfsTimetableInterval(trips, GTFS_LINE_TIMETABLE_WINDOWS.at(-1)!))
+      .toEqual({ minMinutes: 12, maxMinutes: 12 });
+    expect(calculateGtfsTimetableServiceBounds(trips)?.lastDeparture).toBe(24 * 3600 + 6 * 60);
+  });
+
   it("does not confuse successive stops sharing a parent with separate buses", () => {
     const stops = new Map<string, GtfsLineTimetableStop>([
       ["mermoz", { id: "mermoz", parentId: "parent", name: "Mermoz" }],

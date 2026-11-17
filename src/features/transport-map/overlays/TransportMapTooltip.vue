@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import LineIconBadge from "../../../components/LineIconBadge.vue";
+import GlobalMapLineBadges from "./GlobalMapLineBadges.vue";
+import { globalMapLineDisplayLabel } from "./globalMapLinePresentation";
 import type { TransitFamily } from "../../../types/transit";
 import { createLinePresentation, transitFamilyToMode } from "../../../services/linePresentation";
 import type { GlobalMapLine, GlobalMapMode } from "../contracts/manifest";
@@ -9,6 +10,7 @@ import { useI18n } from "../../../i18n";
 const props = withDefaults(
   defineProps<{
     stationLabel?: string;
+    floating?: boolean;
     lines?: GlobalMapLine[];
     activeLineId?: string;
   }>(),
@@ -40,7 +42,7 @@ function lineFamily(mode: GlobalMapMode): TransitFamily | undefined {
 
 const presentedLines = computed(() => props.lines.map((line) => {
   const family = lineFamily(line.mode);
-  const label = line.label || line.code;
+  const label = globalMapLineDisplayLabel(line);
   const presentation = createLinePresentation({
     code: line.code,
     color: line.color,
@@ -91,6 +93,7 @@ const tooltipLabel = computed(() => props.stationLabel ?? (
     class="global-transport-plan__tooltip"
     :class="{
       'global-transport-plan__tooltip--interactive': isInteractive,
+      'global-transport-plan__tooltip--floating': floating,
       'global-transport-plan__tooltip--material': true,
     }"
     :role="isInteractive ? 'dialog' : 'status'"
@@ -103,7 +106,7 @@ const tooltipLabel = computed(() => props.stationLabel ?? (
     </template>
 
     <template v-else-if="presentedLines.length === 1">
-      <LineIconBadge :line="presentedLines[0]!.badge" compact />
+      <GlobalMapLineBadges :line="presentedLines[0]!.line" :fallback="presentedLines[0]!.badge" compact />
       <span>{{ presentedLines[0]!.label }}</span>
     </template>
 
@@ -130,8 +133,8 @@ const tooltipLabel = computed(() => props.stationLabel ?? (
           @blur="emit('leave-line')"
           @click.stop="emit('select-line', presented.line.id)"
         >
-          <LineIconBadge :line="presented.badge" compact />
-          <span>{{ presented.label }}</span>
+          <GlobalMapLineBadges :line="presented.line" :fallback="presented.badge" compact />
+          <span class="global-transport-plan__tooltip-choice-name">{{ presented.label }}</span>
         </button>
       </div>
     </template>
@@ -165,6 +168,24 @@ const tooltipLabel = computed(() => props.stationLabel ?? (
   max-width: min(640px, calc(100vw - 16px));
   padding: 7px;
   white-space: normal;
+}
+
+.global-transport-plan__tooltip--floating {
+  transform: translate(calc(-1 * var(--station-tooltip-anchor)), calc(-100% - 26px));
+  background: rgba(13, 37, 54, 0.93);
+  border-color: #8ce3ed;
+  color: #effeff;
+  box-shadow: 0 0 10px rgba(68, 202, 223, 0.36);
+}
+.global-transport-plan__tooltip--floating::after {
+  content: "";
+  position: absolute;
+  left: var(--station-tooltip-anchor);
+  top: 100%;
+  width: 2px;
+  height: 26px;
+  background: linear-gradient(#8ce3ed, #2ba8bf);
+  box-shadow: 0 0 4px #8ce3ed;
 }
 
 .global-transport-plan__tooltip-choice-label {
@@ -201,7 +222,7 @@ const tooltipLabel = computed(() => props.stationLabel ?? (
   text-align: left;
 }
 
-.global-transport-plan__tooltip-choice > span {
+.global-transport-plan__tooltip-choice-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -297,11 +297,31 @@ describe("offline neighborhood routing", () => {
     expect((await routeNeighborhoodJourneys(undefined, request())).destinations[0]!.status).toBe("missing");
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("retains the final overnight service only up to the last covered instant", async () => {
+    manifest.routing!.endDate = "20261012";
+    index.maxTimeSeconds = 25 * 3600;
+    index.hours = { "24": ["24-0.json"] };
+    rows = [[0, 2, 24 * 3600 + 900, 25 * 3600, 0, 0, 0, 16]];
+    const overnight = await routeNeighborhoodJourneys(undefined, { ...request(), datetime: "20261013T001000" });
+    expect(overnight.destinations[0]?.journeys).toHaveLength(1);
+    mocks.matrix.mockClear();
+    const expired = await routeNeighborhoodJourneys(undefined, { ...request(), datetime: "20261013T010001" });
+    expect(expired.destinations[0]?.status).toBe("out-of-coverage");
+    expect(mocks.matrix).not.toHaveBeenCalled();
+  });
   it("does not hide a missing shard behind a live provider", async () => {
     const read = mocks.read.getMockImplementation()!;
     mocks.read.mockImplementation((event, path) => path.endsWith("index.json") ? read(event, path) : Promise.resolve({ value: undefined }));
     await expect(routeNeighborhoodJourneys(undefined, request())).rejects.toThrow("shard unavailable");
     expect(fetch).not.toHaveBeenCalled();
+  });
+  it("reloads the routing index after a transient read failure", async () => {
+    mocks.read.mockRejectedValueOnce(new Error("GTFS index temporarily unavailable"));
+    await expect(routeNeighborhoodJourneys(undefined, request())).rejects.toThrow("GTFS index temporarily unavailable");
+    const retry = await routeNeighborhoodJourneys(undefined, request());
+    expect(retry.destinations[0]?.journeys).toHaveLength(1);
+    expect(mocks.read.mock.calls.filter(([, path]) => path.endsWith("index.json"))).toHaveLength(2);
   });
   it("respects the permitted modes", async () => {
     const result = await routeNeighborhoodJourneys(undefined, { ...request(), allowedModes: ["TRAM"] });

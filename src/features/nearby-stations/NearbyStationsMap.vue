@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useSlots, watch } from "vue";
-import { Activity, BusFront, Check, ChevronRight, Download, Ear, EllipsisVertical, Euro, ExternalLink, Footprints, Gauge, Layers, LoaderCircle, Map as MapIcon, MapPin, Maximize2, Minimize2, Minus, Navigation, Plus, Radar, Route, Satellite, Store, TrainFront, TramFront, Wind, ZoomIn, ZoomOut, X } from "lucide-vue-next";
+import { Activity, BarChart3, BusFront, Check, ChevronRight, Download, Ear, EllipsisVertical, Euro, ExternalLink, Footprints, Gauge, Layers, LoaderCircle, Map as MapIcon, MapPin, Maximize2, Minimize2, Minus, Navigation, Plus, Radar, Route, Satellite, Store, TrainFront, TramFront, Wind, ZoomIn, ZoomOut, X } from "lucide-vue-next";
 import DraggableBottomSheet from "../../components/DraggableBottomSheet.vue";
 import AppModal from "../../components/AppModal.vue";
 import ContextMenu from "../../components/ContextMenu.vue";
@@ -67,7 +67,9 @@ import type { NearbyJourneyPoint } from "./nearbyHeavyTransports";
 import type { NearbyWalkingRoute } from "./nearbyWalkingRoutes";
 import { fitNearbyPlaceRoute } from "./nearbyPlaceFocus";
 import NearbyPlaceDetails from "./NearbyPlaceDetails.vue";
+import { useNearbyOpeningStatus } from "./useNearbyOpeningStatus";
 import IrisNeighborhoodOverlay from "../transport-map/overlays/IrisNeighborhoodOverlay.vue";
+import { placesCityCode } from "./neighborhood-comparison/geometry";
 import { fetchIrisDataset, type IrisAirNoiseStatistics, type IrisDataset, type IrisNeighborhood } from "../transport-map/iris/irisApi";
 import { fetchNeighborhoodVerdict } from "./neighborhoodVerdictApi";
 import { measureDevPerformance } from "../../services/devPerformance";
@@ -240,6 +242,7 @@ const props = withDefaults(defineProps<{
   hideStationsWithoutDepartures?: boolean;
   hideLongWaitTransports?: boolean;
   showNearbyPlaces?: boolean;
+  hideClosedPlaces?: boolean;
   showNearbyBenches?: boolean;
   showNearbyParkings?: boolean;
   showNearbyPlaceNames?: boolean;
@@ -257,6 +260,7 @@ const props = withDefaults(defineProps<{
   places?: readonly NearbyPlace[];
   /** Full selected-commune places used by the city view. */
   cityViewPlaces?: readonly NearbyPlace[];
+  cityViewPlacesCode?: string;
   cityViewCommerceCounts?: Readonly<Record<string, number>>;
   cityViewCommerceTotal?: number;
   /** Optional lazy loader for target commune counts from the compiled places asset. */
@@ -273,6 +277,7 @@ const props = withDefaults(defineProps<{
   showNearbyBenches: false,
   showNearbyParkings: false,
   showNearbyPlaces: true,
+  hideClosedPlaces: false,
   showIsochroneControl: true,
   showCityViewControl: true,
   showNoiseControl: true,
@@ -306,6 +311,7 @@ const emit = defineEmits<{
   updateHideStationsWithoutDepartures: [value: boolean];
   "update:hideLongWaitTransports": [value: boolean];
   "update:showNearbyPlaces": [value: boolean];
+  "update:hideClosedPlaces": [value: boolean];
   "update:showNearbyBenches": [value: boolean];
   "update:showNearbyParkings": [value: boolean];
   "update:showNearbyPlaceNames": [value: boolean];
@@ -313,6 +319,7 @@ const emit = defineEmits<{
   "fullscreen-change": [fullscreen: boolean];
   openPlacesDirectory: [];
   openNeighborhoodScore: [];
+  openNeighborhoodComparison: [code?: string];
   openPlacesRanking: [populationByCity?: Readonly<Record<string, number>>];
   toggleCityCommerce: [visible: boolean];
   selectPlace: [placeId?: string];
@@ -320,6 +327,7 @@ const emit = defineEmits<{
 }>();
 
 const { n, t } = useI18n();
+const openingStatus = useNearbyOpeningStatus();
 const slots = useSlots();
 const isPlacesPreview = computed(() => props.variant === "places-preview");
 const selectedMapPlace = computed(() => {
@@ -1140,6 +1148,7 @@ const mapPlacesWithFootprints = computed(() => {
 });
 const eligibleMapPlaces = computed(() => {
   if (summaryLineHoverActive.value || !props.showNearbyPlaces) return [];
+  const statusFor = props.hideClosedPlaces ? openingStatus.value : undefined;
   if (cityViewEnabled.value) {
     const activity = cityViewActivity.value;
     if (!activity) return [];
@@ -1147,18 +1156,23 @@ const eligibleMapPlaces = computed(() => {
     // and disconnected polygons; provider records can straddle city limits.
     return [...cityPlacesByNeighborhood.value.values()].flat().map(withPlaceFootprint).filter((place) =>
       isNearbyPlaceVisibleOnMap(place, props.showNearbyBenches === true, props.showNearbyParkings === true)
+      && (!statusFor || statusFor(place.tags?.opening_hours) !== "closed")
       && isNearbyPlaceActivity(place, activity))
       .sort((a, b) => a.distanceMeters - b.distanceMeters || a.name.localeCompare(b.name, "fr-FR"));
   }
   const radiusLimit = props.radius + NEARBY_MAP_MARGIN_METERS;
   return mapPlacesWithFootprints.value.filter((place) => {
     if (!isPlacesPreview.value && place.distanceMeters > radiusLimit) return false;
+    if (statusFor?.(place.tags?.opening_hours) === "closed") return false;
     if (showAccessibilityPlaces.value) return nearbyPlaceWheelchairAccess(place) !== undefined;
     const option = nearbyOptionalPlace(place);
     return (isPlacesPreview.value || !option || optionalPlaces.value[option])
       && isNearbyPlaceVisibleOnMap(place, props.showNearbyBenches === true, props.showNearbyParkings === true);
   });
 });
+watch([() => props.hideClosedPlaces, selectedMapPlace, openingStatus], ([hide, place, status]) => {
+  if (!isPlacesPreview.value && hide && place && status(place.tags?.opening_hours) === "closed") emit("selectPlace", undefined);
+}, { immediate: true });
 const hoveredFootprintPlaceId = ref<string>();
 watch(() => props.selectedPlaceId, (next, previous) => {
   if (previous && !next) {
@@ -1484,6 +1498,9 @@ const cityActivityCounts = computed(() => {
   const cityTotal = Object.values(counts).reduce((sum, count) => sum + count, 0);
   return { counts, totals, cityTotal };
 });
+const cityCommerceCounts = computed(() => Object.fromEntries(
+  [...cityPlacesByNeighborhood.value].map(([code, places]) => [code, places.filter(place => isNearbyPlaceActivity(place, "commerce")).length]),
+));
 const cityViewTransportStations = computed<IrisTransportStation[]>(() => {
   if (props.cityViewNetwork) {
     return transportStationsFromNetwork(props.cityViewNetwork.stations, props.cityViewNetwork.linesById);
@@ -5421,11 +5438,13 @@ function mix(from: number, to: number, progress: number): number {
         :real-estate-reference-label="dvfReferenceLabel(cityViewRealEstateReference)"
         :real-estate-measure="cityViewRealEstateMeasure"
         :real-estate-neighborhood-percentiles="cityViewDvfNeighborhoodSalesPercentiles"
-        :commerce-counts="cityViewActivity ? cityActivityCounts.counts : props.cityViewCommerceCounts"
+        :commerce-counts="cityViewActivity ? cityActivityCounts.counts : cityCommerceCounts"
         :activity-totals="cityActivityCounts.totals"
         :activity-city-total="cityActivityCounts.cityTotal"
         :activity-label="cityViewActivity ? t(`nearbyStations.cityActivity.${cityViewActivity}`) : undefined"
-        :commerce-data-available="props.cityViewPlaces !== undefined"
+        :commerce-data-available="props.cityViewCommerceTotal !== undefined && props.cityViewPlacesCode === placesCityCode(cityViewNeighborhoods[0]?.communeCode ?? '')"
+        show-verdict-summary
+        @compare="emit('openNeighborhoodComparison', $event)"
         :commerce-highlight="cityViewActivity !== null"
         :tooltip-hover-delay-ms="100"
         :show-fill="!isochroneEnabled"
@@ -5617,6 +5636,15 @@ function mix(from: number, to: number, progress: number): number {
             data-nearby-map-view-option="neighborhood"
           >{{ t('nearbyStations.neighborhoodViewLabel') }}</span>
         </button>
+        <button
+          v-if="props.showCityViewControl && cityViewEnabled"
+          class="nearby-map__commerce-toggle"
+          type="button"
+          data-testid="city-open-neighborhood-comparison"
+          :aria-label="t('nearbyStations.comparison.open')"
+          :title="t('nearbyStations.comparison.open')"
+          @click.stop="emit('openNeighborhoodComparison')"
+        ><BarChart3 :size="18" aria-hidden="true" /></button>
         <button
           v-if="props.showCityViewControl && cityViewEnabled && !isMobileDisplaySheet"
           class="nearby-map__commerce-toggle"
@@ -5980,6 +6008,10 @@ function mix(from: number, to: number, progress: number): number {
                   >
                     <template #nearby-options>
                       <label class="nearby-map__optional-place">
+                        <input data-hide-closed-places type="checkbox" :checked="props.hideClosedPlaces" :disabled="!props.showNearbyPlaces" @change="emit('update:hideClosedPlaces', ($event.target as HTMLInputElement).checked)" />
+                        <span>{{ t('nearbyStations.placeDetails.hideClosed') }}</span>
+                      </label>
+                      <label class="nearby-map__optional-place">
                         <input v-model="showAccessibilityPlaces" data-show-accessibility-places type="checkbox" :disabled="!props.showNearbyPlaces" />
                         <span>{{ t('nearbyStations.accessibilityPlaces') }}</span>
                       </label>
@@ -6100,6 +6132,10 @@ function mix(from: number, to: number, progress: number): number {
                     @update:show-nearby-place-names="emit('update:showNearbyPlaceNames', $event)"
                   >
                     <template #nearby-options>
+                      <label class="nearby-map__optional-place">
+                        <input data-hide-closed-places type="checkbox" :checked="props.hideClosedPlaces" :disabled="!props.showNearbyPlaces" @change="emit('update:hideClosedPlaces', ($event.target as HTMLInputElement).checked)" />
+                        <span>{{ t('nearbyStations.placeDetails.hideClosed') }}</span>
+                      </label>
                       <label class="nearby-map__optional-place">
                         <input
                           v-model="showAccessibilityPlaces"

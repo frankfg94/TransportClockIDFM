@@ -237,6 +237,20 @@ interface NearestLine {
   distanceCssPx: number;
 }
 
+function pointerBounds(point: ScreenPoint, camera: CameraState, tolerance: number) {
+  if (!camera.pitch && !camera.bearing) {
+    const world = screenToWorld(point, camera);
+    const radius = cssPixelsToWorldUnits(tolerance, camera);
+    return { minX: world.x - radius, minY: world.y - radius, maxX: world.x + radius, maxY: world.y + radius };
+  }
+  const corners = [-tolerance, tolerance].flatMap(dx => [-tolerance, tolerance].map(dy =>
+    screenToWorld({ x: point.x + dx, y: point.y + dy }, camera)));
+  return {
+    minX: Math.min(...corners.map(p => p.x)), maxX: Math.max(...corners.map(p => p.x)),
+    minY: Math.min(...corners.map(p => p.y)), maxY: Math.max(...corners.map(p => p.y)),
+  };
+}
+
 function findNearestStation(
   point: ScreenPoint,
   camera: CameraState,
@@ -244,14 +258,7 @@ function findNearestStation(
   stationIndex: PackedSpatialIndex,
   stationTolerance: number,
 ): HitTestResult & { type: "station" } | undefined {
-  const worldPoint = screenToWorld(point, camera);
-  const stationWorldRadius = cssPixelsToWorldUnits(stationTolerance, camera);
-  const stationCandidates = stationIndex.query({
-    minX: worldPoint.x - stationWorldRadius,
-    minY: worldPoint.y - stationWorldRadius,
-    maxX: worldPoint.x + stationWorldRadius,
-    maxY: worldPoint.y + stationWorldRadius,
-  });
+  const stationCandidates = stationIndex.query(pointerBounds(point, camera, stationTolerance));
   let bestStation: (HitTestResult & { type: "station" }) | undefined;
   for (const stationIndexValue of stationCandidates) {
     const station = stations.find((candidate) => candidate.index === stationIndexValue);
@@ -281,13 +288,7 @@ function findNearestLine(
   modeMask: number | undefined,
 ): NearestLine | undefined {
   const worldPoint = screenToWorld(point, camera);
-  const lineWorldRadius = cssPixelsToWorldUnits(lineTolerance, camera);
-  const lineCandidates = pathIndex.query({
-    minX: worldPoint.x - lineWorldRadius,
-    minY: worldPoint.y - lineWorldRadius,
-    maxX: worldPoint.x + lineWorldRadius,
-    maxY: worldPoint.y + lineWorldRadius,
-  });
+  const lineCandidates = pathIndex.query(pointerBounds(point, camera, lineTolerance));
   const stationsById = new Map(stations.map((station) => [station.id, station]));
   const linesById = new Map(lines.map((line) => [line.id, line]));
   let bestLine: NearestLine | undefined;

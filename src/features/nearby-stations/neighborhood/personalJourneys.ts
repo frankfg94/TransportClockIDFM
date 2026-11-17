@@ -1,9 +1,10 @@
 import type { AddressBookEntry } from "../../address-book/addressBook";
 import type { GeocoderPoint } from "../../transport-map/contracts/geocoder";
 import type { NearbyJourney } from "../nearbyHeavyTransports";
-import type { NeighborhoodFact, NeighborhoodFactPolarity } from "./contracts";
+import type { NeighborhoodFact, NeighborhoodFactPolarity, NeighborhoodScoreDetailGroup, NeighborhoodScoreDetailRow } from "./contracts";
 import { chooseFastestJourney } from "./journeys";
 import { analyzeNearbyJourneyTiming } from "../nearbyJourneyTiming";
+import type { NeighborhoodQualification } from "./qualification";
 
 import type { PersonalJourneyPreference, PersonalJourneyThresholds } from "./personalJourneyPreferences";
 export * from "./personalJourneyPreferences";
@@ -21,9 +22,16 @@ export function samePersonalJourneyDestination(a: Pick<GeocoderPoint, "lon" | "l
   return Math.abs(a.lon - b.lon) < 0.000001 && Math.abs(a.lat - b.lat) < 0.000001;
 }
 
+export const PERSONAL_JOURNEY_SCORES = { bonus: 10, neutral: 5, penalty: 0 } as const;
+
+export function qualifyPersonalJourney(minutes: number, thresholds: PersonalJourneyThresholds): NeighborhoodQualification {
+  return minutes < thresholds.positiveBelowMinutes ? { kind: "bonus" }
+    : minutes <= thresholds.neutralThroughMinutes ? { kind: "neutral" } : { kind: "penalty" };
+}
+
 export function personalJourneyPolarity(minutes: number, thresholds: PersonalJourneyThresholds): NeighborhoodFactPolarity {
-  return minutes < thresholds.positiveBelowMinutes ? "positive"
-    : minutes <= thresholds.neutralThroughMinutes ? "neutral" : "negative";
+  const qualification = qualifyPersonalJourney(minutes, thresholds);
+  return qualification.kind === "bonus" ? "positive" : qualification.kind === "penalty" ? "negative" : "neutral";
 }
 
 export function personalJourneyFact(row: PersonalJourneyResult): NeighborhoodFact {
@@ -52,12 +60,27 @@ export function personalJourneyFact(row: PersonalJourneyResult): NeighborhoodFac
 
 /** Each measured personal criterion has equal weight; missing journeys have no invented score. */
 export function scoreWithPersonalJourneys(baseScore: number | undefined, rows: readonly PersonalJourneyResult[]): number | undefined {
-  const scores = rows.filter(row => row.status === "ready" && row.journey).map(row => {
-    const polarity = personalJourneyPolarity(analyzeNearbyJourneyTiming(row.journey!).scoreSeconds / 60, row);
-    return polarity === "positive" ? 10 : polarity === "negative" ? 0 : 5;
+  return personalJourneyScoreDetails(baseScore, rows).score;
+}
+
+export function personalJourneyScoreDetails(baseScore: number | undefined, rows: readonly PersonalJourneyResult[]): { score?: number; group?: NeighborhoodScoreDetailGroup } {
+  const measured = rows.filter(row => row.status === "ready" && row.journey).map(row => {
+    const minutes = analyzeNearbyJourneyTiming(row.journey!).scoreSeconds / 60;
+    const polarity = personalJourneyPolarity(minutes, row);
+    return { row, minutes, value: polarity === "positive" ? PERSONAL_JOURNEY_SCORES.bonus : polarity === "negative" ? PERSONAL_JOURNEY_SCORES.penalty : PERSONAL_JOURNEY_SCORES.neutral };
   });
-  const count = scores.length + (baseScore === undefined ? 0 : 1);
-  return count ? ((baseScore ?? 0) + scores.reduce<number>((sum, score) => sum + score, 0)) / count : undefined;
+  const count = measured.length + (baseScore === undefined ? 0 : 1);
+  const score = count ? ((baseScore ?? 0) + measured.reduce<number>((sum, entry) => sum + entry.value, 0)) / count : undefined;
+  if (!rows.length) return { score };
+  const detailRows: NeighborhoodScoreDetailRow[] = [];
+  if (baseScore !== undefined) detailRows.push({ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.transportBase", value: baseScore, weight: 1 / count, points: baseScore / count });
+  for (const row of rows) {
+    const found = measured.find(entry => entry.row === row);
+    detailRows.push({ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.personalJourney", label: row.destination?.name ?? row.destinationId,
+      ...(found ? { measurement: found.minutes, measurementUnit: "minutes" as const, value: found.value, weight: 1 / count, points: found.value / count } : {}),
+      thresholds: { positive: row.positiveBelowMinutes, neutral: row.neutralThroughMinutes } });
+  }
+  return { score, group: { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.personalGroup", method: "average", rows: detailRows, score } };
 }
 
 export function resolvedPersonalJourney(journeys: readonly NearbyJourney[]): NearbyJourney | undefined {

@@ -12,6 +12,33 @@ export interface GtfsLineTimetableWindow {
   label: TranslationKey;
 }
 
+const DAY_SECONDS = 24 * 3600;
+const OPERATING_DAY_START = 4 * 3600;
+
+/** Place both GTFS encodings of late-night departures on the same time axis. */
+export function operatingDayTrips(
+  trips: readonly GtfsLineTimetableTrip[],
+  nextDayTrips: readonly GtfsLineTimetableTrip[],
+): GtfsLineTimetableTrip[] {
+  return [
+    ...trips.map((trip) => ({
+      ...trip,
+      calls: trip.calls.filter(({ departure }) =>
+        departure !== null && departure >= OPERATING_DAY_START &&
+        departure < DAY_SECONDS + OPERATING_DAY_START,
+      ),
+    })),
+    ...nextDayTrips.map((trip) => ({
+      ...trip,
+      calls: trip.calls.flatMap((call) =>
+        call.departure !== null && call.departure >= 0 && call.departure < OPERATING_DAY_START
+          ? [{ ...call, departure: call.departure + DAY_SECONDS }]
+          : [],
+      ),
+    })),
+  ];
+}
+
 /**
  * NeTEx and GTFS can prefix the same stop-place identifier differently. Keep
  * the conservative, identifier-based part when it is available so a line
@@ -34,9 +61,9 @@ export function canonicalGtfsTimetableStationId(value: string): string {
 export const GTFS_LINE_TIMETABLE_WINDOWS = [
   {
     key: "beforeFive",
-    startSeconds: 0,
+    startSeconds: OPERATING_DAY_START,
     endSeconds: 5 * 3600,
-    label: "globalMap.sidebar.gtfsFrequency.timetableBeforeFive",
+    label: "globalMap.sidebar.gtfsFrequency.timetableFourToFive",
   },
   {
     key: "fiveToSeven",
@@ -71,7 +98,7 @@ export const GTFS_LINE_TIMETABLE_WINDOWS = [
   {
     key: "afterTwentyThreeThirty",
     startSeconds: 23.5 * 3600,
-    endSeconds: Number.POSITIVE_INFINITY,
+    endSeconds: DAY_SECONDS + OPERATING_DAY_START,
     label: "globalMap.sidebar.gtfsFrequency.timetableAfterTwentyThreeThirty",
   },
 ] as const satisfies readonly GtfsLineTimetableWindow[];

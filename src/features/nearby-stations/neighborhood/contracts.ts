@@ -60,15 +60,18 @@ export const NEIGHBORHOOD_TENNIS_STACK_RULES = {
  * fades before the context-only threshold so a remote rail line cannot drive
  * the transport score or create a misleading weakness.
  */
+export const NEIGHBORHOOD_FREQUENCY_RELEVANCE_RULES = [
+  { minutes: 5, weight: 1 },
+  { minutes: 10, weight: 0.9 },
+  { minutes: 15, weight: 0.7 },
+  { minutes: 20, weight: 0.3 },
+  { minutes: NEIGHBORHOOD_FREQUENCY_CONTEXT_MAX_SECONDS / 60, weight: 0.1 },
+] as const;
+
 export function getNeighborhoodFrequencyRelevanceWeight(accessSeconds: number): number {
   if (!Number.isFinite(accessSeconds) || accessSeconds < 0) return 0;
   const minutes = accessSeconds / 60;
-  if (minutes <= 5) return 1;
-  if (minutes <= 10) return 0.9;
-  if (minutes <= 15) return 0.7;
-  if (minutes <= 20) return 0.3;
-  if (accessSeconds <= NEIGHBORHOOD_FREQUENCY_CONTEXT_MAX_SECONDS) return 0.1;
-  return 0;
+  return NEIGHBORHOOD_FREQUENCY_RELEVANCE_RULES.find(rule => minutes <= rule.minutes)?.weight ?? 0;
 }
 
 export const NEIGHBORHOOD_CATEGORY_WEIGHTS = {
@@ -262,6 +265,26 @@ export interface NeighborhoodFact {
   evidence: NeighborhoodFactEvidence;
 }
 
+/** An optional, additive explanation of the already-computed score. */
+export interface NeighborhoodScoreDetailRow {
+  labelKey: TranslationKey;
+  label?: string;
+  measurement?: number;
+  measurementUnit?: "count" | "minutes" | "meters" | "percent";
+  value?: number;
+  weight?: number;
+  points?: number;
+  thresholds?: { positive: number; neutral: number };
+  provisional?: boolean;
+  unavailable?: boolean;
+}
+export interface NeighborhoodScoreDetailGroup {
+  labelKey: TranslationKey;
+  method: "sum" | "average" | "adjustment";
+  rows: NeighborhoodScoreDetailRow[];
+  score?: number;
+}
+
 export interface NeighborhoodCategoryResult {
   id: NeighborhoodCategoryId;
   labelKey: TranslationKey;
@@ -269,6 +292,8 @@ export interface NeighborhoodCategoryResult {
   available: boolean;
   score?: number;
   displayScore?: number;
+  /** Optional to retain compatibility with older snapshots and consumers. */
+  scoreDetails?: NeighborhoodScoreDetailGroup[];
   unavailableReasonKey?: TranslationKey;
   positiveFacts: NeighborhoodFact[];
   negativeFacts: NeighborhoodFact[];

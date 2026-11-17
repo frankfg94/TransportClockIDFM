@@ -54,6 +54,31 @@ afterEach(() => {
 });
 
 describe("NearbyPlacesDirectoryOverlay", () => {
+  it("filters closed places through the shared filter panel and retains unknown hours", async () => {
+    const common = { lon: 2.3, lat: 48.81, category: "shop" as const, kind: "bakery", distanceMeters: 200 };
+    const wrapper = mountOverlay({ places: [
+      { ...common, id: "open", name: "Ouvert", tags: { opening_hours: "24/7" } },
+      { ...common, id: "closed", name: "Fermé", tags: { opening_hours: "Mo-Su off" } },
+      { ...common, id: "unknown", name: "Inconnu" },
+    ] });
+    try {
+      await flushPromises();
+      await wrapper.get("[data-place-id='closed']").trigger("click");
+      expect(wrapper.get('[data-testid="place-opening-status"]').text()).toBe("Fermé");
+      await wrapper.get(".nearby-directory__filter-trigger").trigger("click");
+      await wrapper.get("[data-hide-closed-places]").setValue(true);
+      expect(wrapper.emitted("update:hideClosedPlaces")?.at(-1)).toEqual([true]);
+      await wrapper.setProps({ hideClosedPlaces: true });
+      await nextTick();
+      expect(wrapper.find("[data-place-id='closed']").exists()).toBe(false);
+      expect(wrapper.find("[data-place-id='open']").exists()).toBe(true);
+      expect(wrapper.find("[data-place-id='unknown']").exists()).toBe(true);
+      expect(wrapper.find('[data-testid="nearby-place-details"]').exists()).toBe(false);
+      expect(wrapper.emitted("selectPlace")?.at(-1)).toEqual([undefined]);
+    } finally {
+      wrapper.unmount();
+    }
+  });
   it("renders only supplied data, groups it and filters locally without fetch", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

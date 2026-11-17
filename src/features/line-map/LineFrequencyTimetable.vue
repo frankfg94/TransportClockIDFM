@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n, type TranslationKey } from "../../i18n";
 import MaterialCombobox, {
   type MaterialComboboxOption,
@@ -22,6 +22,7 @@ import {
   calculateGtfsTimetableServiceBounds,
   GTFS_LINE_TIMETABLE_WINDOWS,
   isBoardableGtfsTimetableCall,
+  operatingDayTrips,
   type GtfsTimetableInterval,
 } from "./lineFrequencyTimetableIntervals";
 import {
@@ -37,6 +38,7 @@ const props = withDefaults(
     lineColor?: string;
     stationCoordinates?: readonly LineFrequencyStationCoordinate[];
     timetable?: GtfsLineTimetableResponse;
+    nextTimetable?: GtfsLineTimetableResponse;
     loading?: boolean;
     error?: boolean;
     stationId?: string;
@@ -202,7 +204,7 @@ const activeSectionStationIds = computed<ReadonlySet<string> | undefined>(() =>
 );
 const lineColorStyle = computed<Record<string, string>>(() => {
   const style: Record<string, string> = {};
-  if (props.lineColor) style["--line-frequency-color"] = props.lineColor;
+  if (props.lineColor && /^#[0-9a-f]{6}$/iu.test(props.lineColor)) style["--line-frequency-color"] = props.lineColor;
   return style;
 });
 
@@ -399,27 +401,64 @@ const directions = computed(() => {
   }));
 });
 
+// Keep the clock separate from interval calculations so a tick does not recompute them.
+const clock = ref(Date.now());
+let clockTimer: ReturnType<typeof setInterval> | undefined;
+onMounted(() => { clockTimer = setInterval(() => { clock.value = Date.now(); }, 30_000); });
+onUnmounted(() => { if (clockTimer) clearInterval(clockTimer); });
+const currentWindowKey = computed(() => {
+  const serviceDate = props.timetable?.serviceDate;
+  if (!serviceDate || props.timetable?.status !== "ready") return undefined;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).formatToParts(new Date(clock.value));
+  const part = (name: string) => parts.find((item) => item.type === name)?.value ?? "";
+  const today = `${part("year")}${part("month")}${part("day")}`;
+  const civil = new Date(Date.UTC(Number(part("year")), Number(part("month")) - 1, Number(part("day"))));
+  civil.setUTCDate(civil.getUTCDate() - 1);
+  const yesterday = civil.toISOString().slice(0, 10).replaceAll("-", "");
+  let seconds = Number(part("hour")) * 3600 + Number(part("minute")) * 60 + Number(part("second"));
+  if (serviceDate === yesterday) {
+    seconds += 86400;
+    // Yesterday is active only while its selected service still has departures.
+    if (!serviceBounds.value.some((bounds) => bounds && bounds.lastDeparture >= seconds)) return undefined;
+  } else if (serviceDate !== today) return undefined;
+  return GTFS_LINE_TIMETABLE_WINDOWS.find((window) => seconds >= window.startSeconds && seconds < window.endSeconds)?.key;
+});
+
+const nextDirections = computed(() => {
+  const next = props.nextTimetable;
+  if (next?.status !== "ready") return [];
+  const entries = next.trips.flatMap((trip) => {
+    if (trip.serviceDate !== next.serviceDate) return [];
+    if (selectedStationId.value && !boardableCalls(trip).some((call) => {
+      const stop = stopsById.value.get(call.stopId);
+      return [call.stopId, stop?.parentId, stop?.topologyId].some((id) => id && canonicalGtfsTimetableStationId(id) === canonicalGtfsTimetableStationId(selectedStationId.value));
+    })) return [];
+    const orientation = activeSection.value ? sectionOrientation(trip, activeSection.value) : undefined;
+    if (activeSection.value && !orientation) return [];
+    return [{ trip, orientation }];
+  });
+  return groupDirections(entries);
+});
+const operatingDirections = computed(() => directions.value.map((direction) =>
+  operatingDayTrips(
+    direction.trips,
+    nextDirections.value.find((candidate) => candidate.key === direction.key)?.trips ?? [],
+  ),
+));
 const timetableRows = computed(() =>
   GTFS_LINE_TIMETABLE_WINDOWS.map((window) => ({
     ...window,
-    intervals: directions.value.map((direction) =>
-      calculateGtfsTimetableInterval(
-        direction.trips,
-        window,
-        stopsById.value,
-        activeSectionStationIds.value,
-      ),
+    intervals: operatingDirections.value.map((trips) =>
+      calculateGtfsTimetableInterval(trips, window, stopsById.value, activeSectionStationIds.value),
     ),
   })),
 );
-
 const serviceBounds = computed(() =>
-  directions.value.map((direction) =>
-    calculateGtfsTimetableServiceBounds(
-      direction.trips,
-      stopsById.value,
-      activeSectionStationIds.value,
-    ),
+  operatingDirections.value.map((trips) =>
+    calculateGtfsTimetableServiceBounds(trips, stopsById.value, activeSectionStationIds.value),
   ),
 );
 const hasServiceBounds = computed(() => serviceBounds.value.some(Boolean));
@@ -467,6 +506,7 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
     :style="lineColorStyle"
     data-testid="line-frequency-timetable"
   >
+    <p v-if="timetable?.status === 'ready'" class="line-frequency-timetable__hint">{{ t(nextTimetable?.status === "ready" ? "globalMap.sidebar.gtfsFrequency.timetableOperatingDay" : "globalMap.sidebar.gtfsFrequency.timetableNextDayUnavailable") }}</p>
     <p v-if="timetable" class="line-frequency-timetable__service-date">
       {{
         t("globalMap.sidebar.gtfsFrequency.serviceDate", {
@@ -563,7 +603,9 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
       data-testid="line-frequency-timetable-unavailable"
     >
       {{
-        activeSection
+        selectedStationId || selectedDirectionKey === "context"
+          ? t("globalMap.sidebar.gtfsFrequency.timetableContextUnavailable")
+          : activeSection
           ? t("globalMap.sidebar.gtfsFrequency.timetableNoSegmentDepartures")
           : t("globalMap.sidebar.gtfsFrequency.timetableNoDepartures")
       }}
@@ -605,11 +647,11 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
           <tr data-testid="line-frequency-timetable-last-departure">
             <th scope="row">{{ t("globalMap.sidebar.gtfsFrequency.timetableLastDeparture") }}</th>
             <td v-for="(bounds, index) in serviceBounds" :key="directions[index]?.key">
-              {{ formatServiceTime(bounds?.lastDeparture, bounds?.approximate) }}
+              {{ formatServiceTime(nextTimetable?.status === "ready" ? bounds?.lastDeparture : undefined, bounds?.approximate) }}
             </td>
           </tr>
-          <tr v-for="row in timetableRows" :key="row.key">
-            <th scope="row">{{ t(row.label) }}</th>
+          <tr v-for="row in timetableRows" :key="row.key" :class="{ 'line-frequency-timetable__current': row.key === currentWindowKey }" :data-current="row.key === currentWindowKey ? 'true' : undefined">
+            <th scope="row">{{ t(row.label) }} <span v-if="row.key === currentWindowKey" class="line-frequency-timetable__current-label">{{ t("globalMap.sidebar.gtfsFrequency.timetableCurrent") }}</span></th>
             <td
               v-for="(interval, directionIndex) in row.intervals"
               :key="directions[directionIndex]?.key ?? directionIndex"
@@ -800,6 +842,12 @@ tbody td {
 tbody tr:nth-child(even) td {
   background: color-mix(in srgb, var(--surface-soft) 56%, transparent);
 }
+
+tbody tr.line-frequency-timetable__current > th,
+tbody tr.line-frequency-timetable__current > td {
+  background: color-mix(in srgb, var(--line-frequency-color, var(--idfm-blue)) 13%, var(--surface-soft));
+}
+.line-frequency-timetable__current-label { display: block; font-size: 0.65rem; }
 
 @media (max-width: 520px) {
   table {

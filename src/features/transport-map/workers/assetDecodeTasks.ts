@@ -1,4 +1,4 @@
-import type { GlobalMapBootstrap, GlobalMapLinePaletteDocument, GlobalMapManifest } from "../contracts/manifest";
+import type { GlobalMapBootstrap, GlobalMapCommercialLinesDocument, GlobalMapLinePaletteDocument, GlobalMapManifest } from "../contracts/manifest";
 import { assertRegionalPayload, decodeBootstrap, decodeRegionalPaths, parseCatalogPayload } from "../data/assetLoader";
 import { buildStationSpatialIndex } from "../spatial/packedIndex";
 import type { TransportMapWorkerCollection, TransportMapWorkerPart } from "./protocol";
@@ -8,6 +8,7 @@ export interface CatalogDecodePayload {
   bootstrap: GlobalMapBootstrap;
   manifest: Pick<GlobalMapManifest, "schemaVersion" | "dataVersion" | "bounds">;
   palette?: GlobalMapLinePaletteDocument;
+  commercialLines?: GlobalMapCommercialLinesDocument;
 }
 
 export interface RegionalDecodePayload {
@@ -20,7 +21,7 @@ export function decodeCatalogAsset(payload: CatalogDecodePayload) {
   const catalog = parseCatalogPayload(payload.raw, payload.manifest);
   // The data source retains its already loaded regional geometry. Do not
   // rebuild thousands of fallback paths while upgrading only the catalogue.
-  const network = decodeBootstrap({ ...payload.bootstrap, paths: [] }, payload.manifest, catalog, payload.palette);
+  const network = decodeBootstrap({ ...payload.bootstrap, paths: [] }, payload.manifest, catalog, payload.palette, payload.commercialLines);
   return { network, stationIndex: buildStationSpatialIndex(network.stations) };
 }
 

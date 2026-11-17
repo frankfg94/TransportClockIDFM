@@ -7,9 +7,25 @@ import {
   resizeCamera,
   zoomCameraAroundScreenPoint,
 } from "../src/features/transport-map/geo/camera";
-import { screenToWorld, worldToScreen } from "../src/features/transport-map/geo/coordinateKernel";
+import { boundsCorners, screenToWorld, worldToScreen } from "../src/features/transport-map/geo/coordinateKernel";
 
 describe("transport map camera", () => {
+  it("keeps a drag anchored and fits a line into a tilted viewport with a sidebar", () => {
+    const camera = createCamera({ zoom: 14, bearing: -65, pitch: 50, viewportWidthCssPx: 930, viewportHeightCssPx: 610 });
+    const from = { x: 650, y: 112 };
+    const anchor = screenToWorld(from, camera);
+    const panned = panCameraByScreen(camera, { x: -120, y: 70 }, from);
+    expect(cameraAnchorError(panned, anchor, { x: 530, y: 182 })).toBeLessThan(1e-6);
+    const bounds = { minX: 0.50, maxX: 0.504, minY: 0.33, maxY: 0.336 };
+    const fitted = fitCameraToBounds(camera, bounds, 24, 0, 20, { left: 280 });
+    for (const corner of boundsCorners(bounds)) {
+      const pixel = worldToScreen(corner, fitted);
+      expect(pixel.x).toBeGreaterThanOrEqual(304);
+      expect(pixel.x).toBeLessThanOrEqual(906);
+      expect(pixel.y).toBeGreaterThanOrEqual(24);
+      expect(pixel.y).toBeLessThanOrEqual(586);
+    }
+  });
   it("keeps the geographic point below the cursor during zoom", () => {
     const anchor = { x: 87, y: 413 };
     const camera = createCamera({

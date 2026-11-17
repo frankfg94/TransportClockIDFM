@@ -63,11 +63,24 @@ describe("GTFS runtime status", () => {
     });
   });
 
-  it("marks data stale only after the 20-day boundary", async () => {
-    stubManifest(createManifest("2026-07-03T12:00:00.000Z"));
-    await expect(getGtfsPublicStatus()).resolves.toMatchObject({ stale: false, ageDays: 20 });
+  it("checks the server's current calendar immediately when the Verdict requests an update", async () => {
+    const first = createManifest("2026-07-23T00:00:00.000Z");
+    const routing = { schemaVersion: 1 as const, path: "published/routing", startDate: "20260723", endDate: "20260823",
+      maxTimeSeconds: 90000, fileCount: 4, bytes: 42, connectionCount: 3 };
+    stubManifest(first);
+    expect((await getGtfsPublicStatus()).calendar).toBeUndefined();
+    stubManifest({ ...first, cacheGeneration: 2, routing });
+    const status = await getGtfsPublicStatus(undefined, { fresh: true, calendar: true });
+    expect(status.calendar).toEqual({ schemaVersion: 1, cacheGeneration: 2, routing, timetable: undefined });
+    expect((await getGtfsManifest())?.routing).toEqual(routing);
+  });
 
-    vi.setSystemTime(new Date("2026-07-23T12:00:00.001Z"));
+  it("marks data stale at the shared 20-day boundary", async () => {
+    stubManifest(createManifest("2026-07-03T12:00:00.000Z"));
+    vi.setSystemTime(new Date("2026-07-23T11:59:59.999Z"));
+    await expect(getGtfsPublicStatus()).resolves.toMatchObject({ stale: false, ageDays: 19 });
+
+    vi.setSystemTime(new Date("2026-07-23T12:00:00.000Z"));
     clearGtfsRuntimeCaches();
     await expect(getGtfsPublicStatus()).resolves.toMatchObject({ stale: true, ageDays: 20 });
   });

@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildNeighborMap } from "../server/services/topology/buildLineTopology";
 import { getLineTopology } from "../server/services/topology/getLineTopology";
-import { loadNetexLineCache } from "../server/services/topology/netexCache";
+import { loadNetexLineCache, NetexLineNotFoundError } from "../server/services/topology/netexCache";
 import { createDetailedLineMapViewModel } from "../src/features/line-map/lineMapData";
 import type { LineMapViewModel } from "../src/features/line-map/types";
 import { createPatternFlowStructure } from "../src/features/service-pattern/patternFlowStructure";
@@ -475,24 +475,16 @@ describe("NeTEx cache topology adapter", () => {
 
   it("attaches raw NeTEx quays to their consolidated station", async () => {
     const topology = await getLineTopology("line:IDFM:C00025");
+    const raw = await loadNetexLineCache("line:IDFM:C00025");
     const beauregard = topology.stations.find(
       (station) => normalizeName(station.name) === normalizeName("Beauregard"),
     );
 
-    expect(beauregard?.quays).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: "FR::Quay:50187203:FR1",
-          projectedX: 692475,
-          projectedY: 6850339,
-        }),
-        expect.objectContaining({
-          id: "FR::Quay:50187204:FR1",
-          projectedX: 692518,
-          projectedY: 6850363,
-        }),
-      ]),
-    );
+    for (const id of ["FR::Quay:50187203:FR1", "FR::Quay:50187204:FR1"]) {
+      const quay = raw.stations?.find(station => station.id === id);
+      expect(quay).toMatchObject({ x: expect.any(Number), y: expect.any(Number) });
+      expect(beauregard?.quays).toContainEqual(expect.objectContaining({ id, projectedX: quay!.x, projectedY: quay!.y }));
+    }
   });
 
   it("converts cache topology into VueFlow input without orphan nodes", async () => {
@@ -520,9 +512,19 @@ describe("NeTEx cache topology adapter", () => {
   });
 
   it("throws for an unknown line instead of performing a network fallback", async () => {
-    await expect(getLineTopology("line:IDFM:UNKNOWN")).rejects.toThrow(
-      /No stable NeTEx cache line mapping/,
-    );
+    await expect(getLineTopology("line:IDFM:UNKNOWN")).rejects.toBeInstanceOf(NetexLineNotFoundError);
+  });
+
+  it("reopens a failed catalogue before deciding whether a line exists", async () => {
+    const fetcher = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ lines: [] }));
+    const env = { IDFM_NETEX_CACHE_REMOTE: "https://catalogue.test/lines" };
+    try {
+      await expect(getLineTopology("line:IDFM:C99999", env)).rejects.toThrow(/503/u);
+      await expect(getLineTopology("line:IDFM:C99999", env)).rejects.toBeInstanceOf(NetexLineNotFoundError);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally { fetcher.mockRestore(); }
   });
 });
 

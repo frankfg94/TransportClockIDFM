@@ -55,7 +55,7 @@ export function compareVerdictTransportSnapshots(current: Snapshot, reference: S
  * access must never be mistaken for a fully verified transport result. */
 export function buildVerdictTransportIntegrity(snapshot: Snapshot, tasks: readonly VerdictDebugTask[]) {
   const workers = tasks.filter(task => task.system === "gtfs-worker" && task.status === "ready"
-    && ["transport", "night-transport"].includes(String(task.details?.purpose)));
+    && ["transport", "transport-benchmark", "night-transport"].includes(String(task.details?.purpose)));
   const matrices = workers.flatMap(task => Array.isArray(task.details?.steps) ? task.details.steps : [])
     .filter((step: Snapshot) => step.task === "walking-matrix");
   const degradedMatrices = matrices.filter((step: Snapshot) => Number(step.details?.estimated) > 0);
@@ -89,6 +89,11 @@ export function buildVerdictTransportIntegrity(snapshot: Snapshot, tasks: readon
       estimatedPairUsages: steps.reduce((sum: number, step: Snapshot) => sum + Number(step.details?.estimated ?? 0), 0) };
   });
   const issues = [
+    ...(snapshot.diagnostics?.errors ?? []).filter((error: Snapshot) => error.categories?.includes("transport"))
+      .map((error: Snapshot) => ({ code: "transport-task-error", taskId: error.taskId, message: error.message })),
+    ...(["heavy", "serviceQuality"] as const).filter(source => snapshot.error?.[source])
+      .map(source => ({ code: "transport-source-error", source })),
+    ...(snapshot.gtfsReference ? [{ code: "historical-gtfs", ...snapshot.gtfsReference }] : []),
     ...(degradedMatrices.length ? [{ code: "estimated-transport-walking", matrices: degradedMatrices.length,
       estimatedPairs: degradedMatrices.reduce((count: number, step: Snapshot) => count + Number(step.details?.estimated ?? 0), 0),
       reasons: [...new Set(degradedMatrices.flatMap((step: Snapshot) => step.details?.unavailabilityReasons ?? ["unspecified"]))] }] : []),

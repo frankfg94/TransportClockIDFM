@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { ChevronRight, Search, Train, XIcon } from "lucide-vue-next";
-import LineIconBadge from "../../../components/LineIconBadge.vue";
+import GlobalMapLineBadges from "../overlays/GlobalMapLineBadges.vue";
+import { globalMapLineDisplayLabel } from "../overlays/globalMapLinePresentation";
 import { createLinePresentation, transitFamilyToMode } from "../../../services/linePresentation";
 import type { TransitFamily } from "../../../types/transit";
 import type { GeocoderPoint } from "../contracts/geocoder";
@@ -564,7 +565,7 @@ function resultDomId(result: SearchResult): string {
 }
 
 function lineLabel(line: GlobalMapLine): string {
-  return line.label || line.code;
+  return globalMapLineDisplayLabel(line);
 }
 
 function lineFamily(mode: GlobalMapMode): TransitFamily | undefined {
@@ -759,7 +760,7 @@ function readRecentSearches(): RecentSearchKey[] {
               </small>
             </span>
             <span class="global-map-search__chips" :aria-label="t('globalMap.search.servingLinesAria')">
-              <LineIconBadge v-for="line in (isBusExpanded(result.key) ? result.lines : result.railLines).slice(0, 8)" :key="line.id" class="global-map-search__line-chip" :line="lineBadge(line)" compact />
+              <GlobalMapLineBadges v-for="line in (isBusExpanded(result.key) ? result.lines : result.railLines).slice(0, 8)" :key="line.id" class="global-map-search__line-chip" :line="line" :fallback="lineBadge(line)" compact />
               <span v-if="result.busLines.length && !isBusExpanded(result.key)" class="global-map-search__bus-more" role="button" tabindex="0" @click.stop="expandBusLines(result.key)" @keydown.enter.stop="expandBusLines(result.key)">{{ t("globalMap.search.showOtherLines", { count: result.busLines.length }) }}</span>
             </span>
             <button
@@ -787,7 +788,7 @@ function readRecentSearches(): RecentSearchKey[] {
             @keydown.enter="selectResult(result)"
             @keydown.space.prevent="selectResult(result)"
           >
-            <LineIconBadge class="global-map-search__line-chip global-map-search__line-chip--large" :line="lineBadge(result.line)" />
+            <GlobalMapLineBadges class="global-map-search__line-chip global-map-search__line-chip--large" :line="result.line" :fallback="lineBadge(result.line)" />
             <span class="global-map-search__result-copy"><strong>{{ t("globalMap.search.lineName", { line: lineLabel(result.line) }) }}</strong><small>{{ modeLabel(result.line.mode) }} · {{ result.stationCount || t("globalMap.search.network") }}</small></span>
             <span class="global-map-search__result-action">{{ t("globalMap.search.viewLine") }}</span>
             <button

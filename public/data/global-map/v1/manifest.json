@@ -3456,6 +3456,11 @@
         "maxY": 0.34779412999873827
       },
       "asset": "indexes/paths.json"
+    },
+    "commercialLines": {
+      "asset": "commercial-lines-8f6a8516cb6a15a2.json",
+      "bytes": 4616,
+      "checksum": "8f6a8516cb6a15a20dc18efbcef91ae58abbaf9f38a37414e26872aecaf30c3f"
     }
   },
   "palette": {

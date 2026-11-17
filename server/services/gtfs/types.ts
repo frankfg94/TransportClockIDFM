@@ -68,5 +68,6 @@ export interface GtfsPublicStatus {
   stale: boolean;
   lineCount?: number;
   cacheGeneration?: number;
+  calendar?: Pick<GtfsManifest, "schemaVersion" | "cacheGeneration" | "timetable" | "routing">;
   storage: "r2" | "local" | "nitro" | "unconfigured";
 }

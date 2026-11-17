@@ -1,4 +1,4 @@
-import type { NeighborhoodCategoryResult, NeighborhoodFact, NeighborhoodScoreInput } from "../contracts";
+import type { NeighborhoodCategoryResult, NeighborhoodFact, NeighborhoodScoreInput, NeighborhoodScoreDetailRow } from "../contracts";
 import { DAILY_STORE_KINDS, NEIGHBORHOOD_WALKING_LIMIT_MINUTES, RESTAURANT_KINDS } from "../contracts";
 import { category, makeFact, withFacts } from "../facts";
 import { RULE_KEYS, SOURCE_KEYS } from "../i18nKeys";
@@ -9,6 +9,8 @@ import type { NearbyJourney } from "../../nearbyHeavyTransports";
 import { MAJOR_SHOPPING_CENTRE_ACCESS_RULES, MAJOR_SHOPPING_CENTRE_DETECTION_RULES, type NeighborhoodShoppingCentreAccess } from "../shoppingCentres";
 import { MEDIUM_SUPERMARKET_ACCESS_RULES } from "../supermarkets";
 import { getSupermarketSizeAssumption } from "../supermarketSizeAssumptions";
+
+export const DAILY_LIFE_SCORE_RULES = { base: 2, supermarkets: { target: 2, maximum: 3 }, stores: { target: 6, maximum: 3 }, restaurants: { target: 5, maximum: 2 }, estimatedCentreFactor: 0.5 } as const;
 
 export function buildDailyLifeCategory(input: NeighborhoodScoreInput): NeighborhoodCategoryResult {
   const base = category("daily-life");
@@ -36,13 +38,16 @@ export function buildDailyLifeCategory(input: NeighborhoodScoreInput): Neighborh
     return nearbyShopCount >= MAJOR_SHOPPING_CENTRE_DETECTION_RULES.minimumNearbyShopCount || nearbyCinemaCount > 0;
   });
   const shoppingCentre = selectAccessibleShoppingCentre(shoppingCentreCandidates);
-  const score = clamp(
-    2
-      + saturatingNeighborhoodBonus(supermarkets.length, 2, 3)
-      + saturatingNeighborhoodBonus(nearby.length, 6, 3)
-      + saturatingNeighborhoodBonus(restaurants.length, 5, 2)
-      + (shoppingCentre ? MAJOR_SHOPPING_CENTRE_ACCESS_RULES.scoreBonus * (shoppingCentre.mode === "walking-approx" ? 0.5 : 1) : 0),
-  );
+  const scoreParts: Array<NeighborhoodScoreDetailRow & { points: number }> = [
+    { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.base" as const, points: DAILY_LIFE_SCORE_RULES.base },
+    { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.supermarkets" as const, measurement: supermarkets.length, measurementUnit: "count", points: saturatingNeighborhoodBonus(supermarkets.length, DAILY_LIFE_SCORE_RULES.supermarkets.target, DAILY_LIFE_SCORE_RULES.supermarkets.maximum) },
+    { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.stores" as const, measurement: nearby.length, measurementUnit: "count", points: saturatingNeighborhoodBonus(nearby.length, DAILY_LIFE_SCORE_RULES.stores.target, DAILY_LIFE_SCORE_RULES.stores.maximum) },
+    { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.restaurants" as const, measurement: restaurants.length, measurementUnit: "count", points: saturatingNeighborhoodBonus(restaurants.length, DAILY_LIFE_SCORE_RULES.restaurants.target, DAILY_LIFE_SCORE_RULES.restaurants.maximum) },
+    { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.shoppingCentre" as const, provisional: !input.shoppingCentresLoaded, points: shoppingCentre ? MAJOR_SHOPPING_CENTRE_ACCESS_RULES.scoreBonus * (shoppingCentre.mode === "walking-approx" ? DAILY_LIFE_SCORE_RULES.estimatedCentreFactor : 1) : 0 },
+  ];
+  const rawScore = scoreParts.reduce((sum, part) => sum + part.points, 0);
+  const score = clamp(rawScore);
+  if (score !== rawScore) scoreParts.push({ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.cap", points: score - rawScore });
   const positiveFacts: NeighborhoodFact[] = [];
   const negativeFacts: NeighborhoodFact[] = [];
   if (richCommercialCluster) {
@@ -244,6 +249,7 @@ export function buildDailyLifeCategory(input: NeighborhoodScoreInput): Neighborh
     ...base,
     available: true,
     score,
+    scoreDetails: [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.local", method: "sum", rows: scoreParts, score }],
     positiveFacts,
     negativeFacts,
   });

@@ -1,9 +1,27 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import NearbyPlaceDetails from "../src/features/nearby-stations/NearbyPlaceDetails.vue";
 import { normalizeCompiledPlace } from "../src/services/places/compiledPlaces";
 
 describe("commerce metadata", () => {
+  it("updates the opening label at the next time boundary and omits unknown status", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-16T07:59:50Z"));
+    const place = { id: "shop", name: "Commerce", lon: 2.29, lat: 48.8, category: "shop" as const, kind: "bakery", distanceMeters: 100, tags: { opening_hours: "Mo-Fr 09:00-18:00" } };
+    const wrapper = mount(NearbyPlaceDetails, { props: { place } });
+    try {
+      expect(wrapper.get('[data-testid="place-opening-status"]').text()).toBe("Fermé");
+      expect(wrapper.get('[data-testid="place-opening-status"]').classes()).toContain("nearby-place-details__opening-status--closed");
+      await vi.advanceTimersByTimeAsync(10_050);
+      expect(wrapper.get('[data-testid="place-opening-status"]').text()).toBe("Ouvert");
+      expect(wrapper.get('[data-testid="place-opening-status"]').classes()).toContain("nearby-place-details__opening-status--open");
+      await wrapper.setProps({ place: { ...place, tags: { opening_hours: "sur rendez-vous" } } });
+      expect(wrapper.find('[data-testid="place-opening-status"]').exists()).toBe(false);
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
   it("shows seven localized day rows, aligned hours, and separate holiday exceptions", () => {
     const wrapper = mount(NearbyPlaceDetails, { props: { place: {
       id: "hours", name: "Commerce", lon: 2.29, lat: 48.8, category: "shop", kind: "supermarket", distanceMeters: 100,

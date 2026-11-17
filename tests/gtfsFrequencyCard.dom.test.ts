@@ -1,6 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { nextTick } from "vue";
+import LineFrequencyTimetable from "../src/features/line-map/LineFrequencyTimetable.vue";
 import GtfsFrequencyCard from "../src/features/line-map/GtfsFrequencyCard.vue";
 import GlobalMapPickerSideBar from "../src/features/line-map/GlobalMapPickerSideBar.vue";
 import type {
@@ -321,6 +322,50 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("current timetable band", () => {
+  it("updates on Paris band boundaries and clears for an archived date", async () => {
+    vi.setSystemTime(new Date("2026-08-31T15:29:50Z"));
+    const wrapper = mount(LineFrequencyTimetable, { props: { profile: profile(), timetable: timetable() } });
+    wrappers.push(wrapper);
+    expect(wrapper.get('[data-current="true"]').text()).toContain("9:30");
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(wrapper.get('[data-current="true"]').text()).toContain("17:30");
+    vi.setSystemTime(new Date("2026-09-02T12:00:00Z"));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(wrapper.find('[data-current="true"]').exists()).toBe(false);
+  });
+  it("continues a service past midnight only when its departures extend into the next day", async () => {
+    const data = timetable();
+    data.trips[0]!.calls[0]!.departure = 25 * 3600;
+    vi.setSystemTime(new Date("2026-08-31T22:30:00Z"));
+    const wrapper = mount(LineFrequencyTimetable, { props: { profile: profile(), timetable: data } });
+    wrappers.push(wrapper);
+    expect(wrapper.get('[data-current="true"]').text()).toContain("23:30");
+    vi.setSystemTime(new Date("2026-08-31T23:30:00Z"));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(wrapper.find('[data-current="true"]').exists()).toBe(false);
+  });
+});
+
+describe("operating-day departures", () => {
+  it("uses the morning first departure and the following calendar day for the last one", () => {
+    const day = timetable();
+    const early = structuredClone(day.trips[0]!);
+    early.id = "early";
+    early.calls.forEach((call) => { call.departure = 8 * 60; });
+    day.trips.push(early);
+    const next = structuredClone(day);
+    next.serviceDate = "20260901";
+    next.trips = [structuredClone(early)];
+    next.trips[0]!.serviceDate = next.serviceDate;
+    next.trips[0]!.calls.forEach((call) => { call.departure = 38 * 60; });
+    const wrapper = mount(LineFrequencyTimetable, { props: { profile: profile(), timetable: day, nextTimetable: next, stationId: "west" } });
+    wrappers.push(wrapper);
+    expect(wrapper.get('[data-testid="line-frequency-timetable-first-departure"]').text()).toContain("06:00");
+    expect(wrapper.get('[data-testid="line-frequency-timetable-last-departure"]').text()).toContain("00:38 (+1 d)");
+  });
+});
+
 describe("GTFS frequency card", () => {
   it("renders one compact grid for a simple line, with direction ranges and expandable labelled details", async () => {
     const wrapper = card();
@@ -499,10 +544,9 @@ describe("GTFS frequency card", () => {
     await wrapper.get('[data-testid="gtfs-frequency-timetable"]').trigger("click");
     await flushPromises();
 
-    expect(request).toHaveBeenCalledExactlyOnceWith("line:IDFM:C01371", {
-      serviceDate: "20260831",
-      signal: expect.any(AbortSignal),
-    });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledWith("line:IDFM:C01371", { serviceDate: "20260831", signal: expect.any(AbortSignal) });
+    expect(request).toHaveBeenCalledWith("line:IDFM:C01371", { serviceDate: "20260901", signal: expect.any(AbortSignal) });
     const modal = document.body.querySelector('[data-testid="line-frequency-timetable"]');
     expect(modal).not.toBeNull();
     expect(document.body.querySelector(".line-frequency-timetable-modal")?.textContent).toContain(
@@ -517,6 +561,40 @@ describe("GTFS frequency card", () => {
     expect(
       document.body.querySelector('[data-testid="line-frequency-timetable-departures"]'),
     ).toBeNull();
+  });
+
+  it("shows the weekday peak frequency and reloads the selected weekend", async () => {
+    const request = vi.spyOn(timetableClient, "fetchGtfsLineTimetable").mockImplementation(async (_line, options) => {
+      const data = timetable();
+      data.serviceDate = options?.serviceDate ?? "20260831";
+      const cadence = data.serviceDate === "20260905" ? 10 : 6;
+      const trip = data.trips[0]!;
+      data.trips = [0, 1, 2].map((index) => ({
+        ...trip,
+        id: `peak-${index}`,
+        serviceDate: data.serviceDate,
+        calls: trip.calls.map((call) => ({ ...call, departure: 8 * 3600 + index * cadence * 60 })),
+      }));
+      return data;
+    });
+    const wrapper = card();
+    await expandFrequencyCard(wrapper);
+    await wrapper.get('[data-testid="gtfs-frequency-timetable"]').trigger("click");
+    await flushPromises();
+    const weekday = document.body.querySelector<HTMLButtonElement>('[data-testid="frequency-weekday"] [role="combobox"]')!;
+    const peakRow = () => [...document.body.querySelectorAll(".line-frequency-timetable tbody tr")]
+      .find((row) => row.textContent?.includes("7:00–9:30"));
+    expect(weekday.textContent).toContain("Monday");
+    expect(peakRow()?.textContent).toContain("6 min");
+    weekday.click();
+    await nextTick();
+    const options = document.getElementById(weekday.getAttribute("aria-controls")!)!;
+    [...options.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+      .find((option) => option.textContent?.includes("Saturday"))!.click();
+    await flushPromises();
+    expect(request).toHaveBeenCalledWith("line:IDFM:C01371", { serviceDate: "20260905", signal: expect.any(AbortSignal) });
+    expect(request).toHaveBeenCalledWith("line:IDFM:C01371", { serviceDate: "20260906", signal: expect.any(AbortSignal) });
+    expect(peakRow()?.textContent).toContain("10 min");
   });
 
   it("shows service-day bounds after midnight and excludes previous-day trips", async () => {
@@ -558,12 +636,9 @@ describe("GTFS frequency card", () => {
   });
 
   it("pins an indeterminate loading bar to the timetable modal bottom", async () => {
-    let resolveTimetable!: (value: GtfsLineTimetableResponse) => void;
+    const resolvers: Array<(value: GtfsLineTimetableResponse) => void> = [];
     vi.spyOn(timetableClient, "fetchGtfsLineTimetable").mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveTimetable = resolve;
-        }),
+      () => new Promise((resolve) => { resolvers.push(resolve); }),
     );
     const wrapper = card(profile(), false, "#123456");
 
@@ -576,7 +651,7 @@ describe("GTFS frequency card", () => {
     expect(loadingBar?.getAttribute("aria-valuenow")).toBeNull();
     expect(loadingBar?.getAttribute("style")).toContain("--loading-bar-color: #123456;");
 
-    resolveTimetable(timetable());
+    resolvers.forEach((resolve) => resolve(timetable()));
     await flushPromises();
     expect(document.body.querySelector(".line-frequency-timetable-modal .loading-bar")).toBeNull();
   });
@@ -609,7 +684,7 @@ describe("GTFS frequency card", () => {
     await wrapper.get('[data-testid="gtfs-frequency-timetable"]').trigger("click");
     await flushPromises();
 
-    expect(request).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledTimes(2);
     expect(
       document.body.querySelector('[data-testid="line-frequency-timetable-table"]'),
     ).not.toBeNull();
@@ -783,6 +858,7 @@ describe("GTFS pinned sidebar requests", () => {
     await wrapper.setProps({ line: line() });
     await vi.advanceTimersByTimeAsync(100);
     expect(request).toHaveBeenCalledExactlyOnceWith("line:IDFM:C01371", {
+      allowCoverageFallback: true,
       signal: expect.any(AbortSignal),
     });
     await wrapper.setProps({ previewLine: line("another-preview"), stations: [station()] });

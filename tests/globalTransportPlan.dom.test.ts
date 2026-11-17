@@ -1954,8 +1954,9 @@ describe("GlobalTransportPlan facade", () => {
         | { activeLineId?: string }
         | undefined;
       expect(selectedScene?.activeLineId).toBe(fixture.network.lines[1]!.id);
+      // Selecting a transfer mounts the new sidebar after the camera flight.
+      await vi.waitFor(() => expect(wrapper.find(".global-map-picker-sidebar__line-profile").exists()).toBe(true), { timeout: 2500 });
       expect(wrapper.get("[data-global-map-picker-sidebar]").attributes("data-global-map-line-preview")).toBeUndefined();
-      expect(wrapper.find(".global-map-picker-sidebar__line-profile").exists()).toBe(true);
       expect(wrapper.get(".global-map-picker-sidebar").text()).toContain(fixture.network.lines[1]!.label);
     } finally {
       fixture.viewportPaths = originalPaths;

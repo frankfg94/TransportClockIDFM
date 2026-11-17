@@ -6,12 +6,15 @@ import type { NearbyPlace } from "./nearbyPlaces";
 import type { NearbyWalkingRoute } from "./nearbyWalkingRoutes";
 import { nearbyPlaceDisplayName, nearbyPlaceTypeKey, nearbyPlaceWalkingMinutes } from "./nearbyPlacePresentation";
 import { nearbyOpeningHours } from "./nearbyOpeningHours";
+import { useNearbyOpeningStatus } from "./useNearbyOpeningStatus";
 
 const props = defineProps<{ place: NearbyPlace; route?: NearbyWalkingRoute }>();
 defineEmits<{ close: [] }>();
 const { t, n, d } = useI18n();
 const tags = computed(() => props.place.tags ?? {});
 const openingHours = computed(() => nearbyOpeningHours(tags.value.opening_hours ?? ""));
+const statusLookup = useNearbyOpeningStatus();
+const openingStatus = computed(() => statusLookup.value(tags.value.opening_hours));
 const rawOpeningHours = computed(() => (tags.value.opening_hours ?? "").split(";").map(rule => rule.trim()).filter(Boolean));
 function dayLabel(day: number): string {
   return day === 7 ? t("nearbyStations.placeDetails.hoursHolidays") : d(new Date(2026, 0, 5 + day, 12), { weekday: "long" });
@@ -35,7 +38,10 @@ const format = computed(() => {
 <template>
   <article class="nearby-place-details" data-testid="nearby-place-details" :aria-label="t('nearbyStations.placeDetails.title')">
     <header>
-      <h3>{{ nearbyPlaceDisplayName(place, t) }}</h3>
+      <div>
+        <h3>{{ nearbyPlaceDisplayName(place, t) }}</h3>
+        <span v-if="openingStatus" class="nearby-place-details__opening-status" :class="`nearby-place-details__opening-status--${openingStatus}`" data-testid="place-opening-status">{{ t(openingStatus === 'open' ? 'nearbyStations.placeDetails.openNow' : 'nearbyStations.placeDetails.closedNow') }}</span>
+      </div>
       <button type="button" :aria-label="t('common.actions.close')" @click="$emit('close')"><X :size="18" aria-hidden="true" /></button>
     </header>
     <p><Footprints :size="16" aria-hidden="true" />{{ t('nearbyStations.walkingTime', { minutes: nearbyPlaceWalkingMinutes(place, route) }) }}<span v-if="!route || route.fallback"> · {{ t('nearbyStations.placeDetails.estimatedWalk') }}</span></p>
@@ -77,6 +83,9 @@ const format = computed(() => {
 .nearby-place-details { background: var(--surface, #fff); border-bottom: 2px solid var(--accent, #5146ff); color: var(--ink); padding: 14px; position: sticky; top: 0; z-index: 2; max-height: 80%; overflow: auto; }
 header { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; }
 h3 { font-size: 1rem; margin: 0; }
+.nearby-place-details__opening-status { display: inline-block; font-size: .8rem; font-weight: 700; margin-top: 4px; }
+.nearby-place-details__opening-status--open { color: #137a43; }
+.nearby-place-details__opening-status--closed { color: var(--danger, #b91c1c); }
 header button { flex: 0 0 auto; padding: 4px; }
 p { align-items: center; display: flex; flex-wrap: wrap; font-size: .8rem; gap: 4px; }
 dl { display: grid; font-size: .8rem; gap: 6px 12px; grid-template-columns: minmax(80px, .7fr) minmax(0, 1.3fr); }

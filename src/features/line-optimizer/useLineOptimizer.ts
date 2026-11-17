@@ -10,6 +10,7 @@ import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import { DEFAULT_OPTIMIZER_SETTINGS } from "./lineOptimizer";
 import { createLineOptimizerProvider, type LineOptimizerResult } from "./lineOptimizerProvider";
 import { optimizerNameKey, type LineOptimizerConfig } from "./optimizerConfig";
+import { parisDateTime, turboTime } from "../nearby-stations/travelTurbo";
 
 // A geocoder can return unrelated streets when it cannot find the requested address.
 // For numbered addresses, require the number and street to match before routing.
@@ -40,7 +41,9 @@ export function useLineOptimizer(config: LineOptimizerConfig) {
   const settings = ref({ ...DEFAULT_OPTIMIZER_SETTINGS, ...(config.destinationOptimizer ? { walkSeconds: undefined, transferSeconds: undefined, preferSemiDirect: false, minimizeBusTransfers: true, limitConnections: true } : {}) });
   const result = shallowRef<LineOptimizerResult>();
   const status = ref<"idle" | "loading" | "ready" | "partial" | "empty" | "error">("idle");
-  const errorPhase = ref<"locations" | "journeys">("locations");
+  const errorPhase = ref<"locations" | "journeys" | "simulation">("locations");
+  // Empty means live mode; a simulation uses today’s civil time in Paris.
+  const simulationTime = ref("");
   const now = ref(Date.now());
   const candidates = computed(
     () => result.value?.candidates.filter((candidate) => candidate.leaveAt >= now.value) ?? [],
@@ -82,6 +85,10 @@ export function useLineOptimizer(config: LineOptimizerConfig) {
     { flush: "sync" },
   );
   watch(settings, invalidate, { deep: true, flush: "sync" });
+  watch(simulationTime, () => {
+    invalidate();
+    now.value = Date.now();
+  }, { flush: "sync" });
 
   function selectPoint(point: GeocoderPoint, side: "origin" | "destination") {
     if (side === "origin") {
@@ -123,6 +130,20 @@ export function useLineOptimizer(config: LineOptimizerConfig) {
     status.value = "loading";
     errorPhase.value = "locations";
     try {
+      const actualNow = Date.now();
+      let start = actualNow;
+      if (simulationTime.value) {
+        errorPhase.value = "simulation";
+        const time = simulationTime.value;
+        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error("optimizer-invalid-time");
+        const civil = `${parisDateTime(actualNow).slice(0, 8)}T${time.replace(":", "")}00`;
+        const simulated = turboTime(civil);
+        // Reject nonexistent civil times at the spring daylight-saving change.
+        if (simulated === undefined || parisDateTime(simulated) !== civil) throw new Error("optimizer-invalid-time");
+        start = simulated;
+      }
+      now.value = start;
+      errorPhase.value = "locations";
       if (!originQuery.value.trim() || !destinationQuery.value.trim())
         throw new Error("optimizer-location-required");
       const [origin, destination] = await Promise.all([
@@ -136,18 +157,18 @@ export function useLineOptimizer(config: LineOptimizerConfig) {
       originPoint.value = origin;
       destinationPoint.value = destination;
       errorPhase.value = "journeys";
-      now.value = Date.now();
+      if (!simulationTime.value) start = now.value = Date.now();
       const next = await provider.analyze({
         config,
         origin,
         destination,
         settings: { ...settings.value },
-        start: now.value,
+        start,
         signal,
       });
       signal.throwIfAborted();
       if (token !== generation) return;
-      now.value = Date.now();
+      now.value = simulationTime.value ? start : Date.now();
       result.value = next;
       status.value = !candidates.value.length ? "empty" : next.complete ? "ready" : "partial";
     } catch {
@@ -156,7 +177,7 @@ export function useLineOptimizer(config: LineOptimizerConfig) {
     } finally {
       if (token === generation && active && enabled && !document.hidden) {
         // Errors wait for an explicit retry, including upstream quota failures.
-        if (status.value !== "error") refreshTimer = setTimeout(() => void refresh(), 30_000);
+        if (status.value !== "error" && !simulationTime.value) refreshTimer = setTimeout(() => void refresh(), 30_000);
       }
     }
   }
@@ -164,13 +185,13 @@ export function useLineOptimizer(config: LineOptimizerConfig) {
     if (document.hidden) {
       stop();
       if (status.value === "loading") status.value = "idle";
-    } else if (active && enabled) void refresh();
+    } else if (active && enabled && (!simulationTime.value || status.value === "idle")) void refresh();
   }
   onMounted(() => {
     active = true;
     document.addEventListener("visibilitychange", visibilityChanged);
     clockTimer = setInterval(() => {
-      now.value = Date.now();
+      if (!simulationTime.value) now.value = Date.now();
     }, 1000);
     if (!document.hidden) void refresh();
   });
@@ -189,6 +210,7 @@ export function useLineOptimizer(config: LineOptimizerConfig) {
     result,
     status,
     errorPhase,
+    simulationTime,
     candidates,
     winner,
     now,

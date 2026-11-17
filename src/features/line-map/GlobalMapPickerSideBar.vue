@@ -894,7 +894,7 @@ onBeforeUnmount(() => {
 }
 .global-map-picker-sidebar__line-hero-main p { margin: 0 0 3px; color: #71809d; font-size: .62rem; font-weight: 950; letter-spacing: .1em; text-transform: uppercase; }
 .global-map-picker-sidebar__line-hero-main h3 { margin: 0; color: var(--line-color); font-size: 1.65rem; line-height: 1; letter-spacing: -.04em; }
-.global-map-picker-sidebar__line-hero-main span { display: block; margin-top: 6px; color: #53627e; font-size: .75rem; font-weight: 800; }
+.global-map-picker-sidebar__line-hero-main > div > span { display: block; margin-top: 6px; color: #53627e; font-size: .75rem; font-weight: 800; }
 .global-map-picker-sidebar__line-hero-main i { font-style: normal; color: #a1aec3; }
 .global-map-picker-sidebar__line-code {
   position: relative;

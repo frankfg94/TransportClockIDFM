@@ -7,6 +7,8 @@ export interface GtfsRoutingDescriptor {
   path: string;
   startDate: string;
   endDate: string;
+  /** Present in new manifests. Older packs store it in the routing index. */
+  maxTimeSeconds?: number;
   connectionCount: number;
   fileCount: number;
   bytes: number;

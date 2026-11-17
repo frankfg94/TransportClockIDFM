@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "#imports";
 import { ArrowLeft, Download, Gauge } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
@@ -7,6 +7,8 @@ import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { toServerApiUrl } from "../../services/serverApi";
 import { createGtfsNeighborhoodTravelRoutesProvider } from "../../services/travelRoutes/gtfsNeighborhoodTravelRoutesProvider";
 import { fetchNeighborhoodGtfsFrequency, fetchNeighborhoodGtfsLastService } from "../../services/travelRoutes/browserNeighborhoodTimetable";
+import { refreshBrowserNeighborhoodGtfsManifest } from "../../services/travelRoutes/browserNeighborhoodGtfs";
+import { useVerdictGtfsCalendar } from "../../services/travelRoutes/verdictGtfsCalendar";
 import { createNeighborhoodWalkingRoutesProvider } from "../../services/neighborhoodWalkingRoutesProvider";
 import { isNeighborhoodGtfsColdStart } from "../../services/travelRoutes/neighborhoodGtfsDebug";
 import { beginVerdictDebugTask, isVerdictDebugEnabled, verdictDebugTimeline } from "../../services/verdictDebugTimeline";
@@ -54,6 +56,7 @@ import {
 } from "./neighborhood/departureTimes";
 
 const route = useRoute();
+const NeighborhoodComparison = defineAsyncComponent(() => import("./neighborhood-comparison/NeighborhoodComparison.vue"));
 const router = useRouter();
 const { d, n, t } = useI18n();
 const addressBook = useAddressBook();
@@ -73,6 +76,7 @@ function queryOrigin(): GeocoderPoint | undefined {
   return {
     label: label ?? `${lat.toFixed(5)}, ${lon.toFixed(5)}`,
     city: queryString(route.query.city),
+    code: queryString(route.query.code),
     lon,
     lat,
     provider: "global-map",
@@ -81,6 +85,7 @@ function queryOrigin(): GeocoderPoint | undefined {
 }
 
 const initialOrigin = queryOrigin();
+const comparisonOpen = ref(queryString(route.query.compare) === "1");
 if (isVerdictDebugEnabled()) verdictDebugTimeline.clear();
 const nearby = useNearbyStations(initialOrigin ? {
   // This page needs the complete station catalog for non-local benchmarks
@@ -94,13 +99,30 @@ const nearby = useNearbyStations(initialOrigin ? {
     selections: [],
   },
 } : undefined);
-const nearbyDataProviders = createNearbyDataProviders({ travelRoutes: createGtfsNeighborhoodTravelRoutesProvider() });
 const nearbyWalking = useNearbyWalkingRoutes({ routingPolicy: "ors-only" });
 const serviceQuality = useServiceQuality();
 const dayDepartureTime = ref(DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME);
 const nightDepartureTime = ref(DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME);
-const journeyDateTime = computed(() => getNearbyParisJourneyDateTimeAtTime(dayDepartureTime.value, "workday"));
-const nightJourneyDateTime = computed(() => getNearbyParisJourneyDateTimeAtTime(nightDepartureTime.value, "any-day"));
+const referenceNow = ref(new Date());
+watch([dayDepartureTime, nightDepartureTime], () => { referenceNow.value = new Date(); }, { flush: "sync" });
+const requestedDay = computed(() => getNearbyParisJourneyDateTimeAtTime(dayDepartureTime.value, "workday", referenceNow.value));
+const requestedNight = computed(() => getNearbyParisJourneyDateTimeAtTime(nightDepartureTime.value, "any-day", referenceNow.value));
+const calendar = useVerdictGtfsCalendar(requestedDay, requestedNight);
+const { day: journeyDateTime, night: nightJourneyDateTime } = calendar;
+const transportBootstrapping = computed(() => nearby.isScanning.value || !calendar.ready.value);
+let gtfsRoutes = createGtfsNeighborhoodTravelRoutesProvider();
+watch(calendar.version, () => { gtfsRoutes = createGtfsNeighborhoodTravelRoutesProvider(); }, { flush: "sync" });
+const nearbyDataProviders = createNearbyDataProviders({ travelRoutes: { findJourneys: (request, signal) => gtfsRoutes.findJourneys(request, signal) } });
+const gtfsReference = computed(() => calendar.historical.value ? {
+  day: journeyDateTime.value.slice(0, 8), night: nightJourneyDateTime.value.slice(0, 8), timetable: calendar.timetable.value,
+} : undefined);
+const gtfsWarning = computed(() => {
+  const dates = gtfsReference.value;
+  if (!dates) return undefined;
+  const format = (day: string) => d(new Date(Date.UTC(+day.slice(0, 4), +day.slice(4, 6) - 1, +day.slice(6, 8), 12)),
+    { dateStyle: "medium", timeZone: "Europe/Paris" });
+  return t("nearbyStations.neighborhoodScore.historicalGtfs", { day: format(dates.day), night: format(dates.night), timetable: format(dates.timetable) });
+});
 function restoreDayDepartureTime(): void {
   if (!dayDepartureTime.value) dayDepartureTime.value = DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME;
 }
@@ -138,7 +160,7 @@ const heavy = useNearbyHeavyTransports({
   origin: nearby.selectedPlace,
   network: nearby.transportMapNetwork,
   stations: nearby.visibleStations,
-  stationsLoading: nearby.isScanning,
+  stationsLoading: transportBootstrapping,
   activeModes: nearby.activeModes,
   radius: nearby.radius,
   futureProjects,
@@ -146,6 +168,7 @@ const heavy = useNearbyHeavyTransports({
 }, {
   journeyProvider,
   journeyDateTime,
+  gtfsVersion: calendar.version,
   walkingRouteProvider,
   includeLocalCandidates: true,
   batchQueries: true,
@@ -155,6 +178,7 @@ const heavy = useNearbyHeavyTransports({
 });
 const personalJourneys = useVerdictPersonalJourneys({
   origin: nearby.selectedPlace, datetime: journeyDateTime, provider: nearbyDataProviders.travelRoutes,
+  gtfsVersion: calendar.version, calendarReady: calendar.ready,
 });
 const score = useNearbyNeighborhoodScore({
   personalJourneys: personalJourneys.rows,
@@ -167,7 +191,10 @@ const score = useNearbyNeighborhoodScore({
   stations: nearby.stations,
   network: nearby.transportMapNetwork,
   journeyDateTime,
-  stationsLoading: nearby.isScanning,
+  stationsLoading: transportBootstrapping,
+  gtfsVersion: calendar.version,
+  calendarReady: calendar.ready,
+  timetableDate: calendar.timetable,
   walkingRoutesLoading: nearbyWalking.isLoadingPlaces,
   serviceQualityLoading: serviceQuality.isLoading,
   failedCriteria: computed(() => [
@@ -177,6 +204,7 @@ const score = useNearbyNeighborhoodScore({
   walkingRoutes: nearbyWalking.placeRoutes,
   heavyCandidates: heavy.visibleCandidates,
   heavyCandidatesLoading: heavy.isLoading,
+  heavyCandidatesError: heavy.error,
   placesProvider: nearbyDataProviders.places,
   travelRoutesProvider: journeyProvider,
   journeyProbe: routeComposer,
@@ -193,10 +221,21 @@ const transportLoadingTasks = computed(() => neighborhoodTransportLoadingTasks({
   futureProjects: !futureProjectsReady.value,
   serviceQuality: serviceQuality.isLoading.value,
 }));
+const historicalDatasets = computed(() => {
+  const ids = new Set<string>();
+  if (journeyDateTime.value !== requestedDay.value) {
+    for (const id of ["heavy-access", "gtfs-journeys", "home-work-journey", "personal-journeys"]) ids.add(id);
+  }
+  if (nightJourneyDateTime.value !== requestedNight.value) ids.add("gtfs-journeys");
+  if (calendar.timetable.value !== calendar.requestedTimetable.value) ids.add("gtfs-frequency");
+  return ids;
+});
 const criteriaWithPersonalJourneys = computed<NeighborhoodCriterionState[]>(() => (score.criteria?.value ?? []).map(criterion => criterion.id !== "transport" ? criterion : {
   ...criterion,
-  status: personalJourneys.loading.value ? "loading" : personalJourneys.hasError.value ? "degraded" : criterion.status,
-  datasets: [...criterion.datasets, ...personalJourneys.datasets.value],
+  status: personalJourneys.loading.value ? "loading" : personalJourneys.hasError.value || (gtfsReference.value && criterion.status === "ready") ? "degraded" : criterion.status,
+  datasets: [...criterion.datasets, ...personalJourneys.datasets.value].map(dataset =>
+    dataset.status === "ready" && historicalDatasets.value.has(dataset.id)
+      ? { ...dataset, status: "stale" as const } : dataset),
 }));
 // The dedicated rows retain edit/delete controls even for unavailable journeys.
 const cardResult = computed(() => ({ ...score.result.value, categories: score.result.value.categories?.map(category => category.id !== "transport" ? category : {
@@ -287,15 +326,17 @@ const directoryUrl = computed(() => {
   return url === "/nearby-stations" ? url : `${url}&annuary=`;
 });
 const addressBookOpen = ref(false);
-type ScoreRetrySource = "stations" | "places" | "routes" | "verdict" | "timetables" | "walking" | "heavy" | "service-quality";
+type ScoreRetrySource = "stations" | "places" | "routes" | "verdict" | "timetables" | "walking" | "heavy" | "service-quality" | "coverage";
 const realEstateExportLoading = ref(Boolean(initialOrigin));
 const realEstatePdfSection = ref<NeighborhoodScorePdfSection>();
+const realEstateMarket = ref<NearbyRealEstatePdfState["market"]>();
 const trafficExportLoading = ref(false);
 const trafficPdfSection = ref<NeighborhoodScorePdfSection>();
 
 function updateRealEstateExportState(state: NearbyRealEstatePdfState): void {
   realEstateExportLoading.value = state.loading;
   realEstatePdfSection.value = state.section;
+  realEstateMarket.value = state.market;
 }
 
 function updateTrafficExportState(state: NearbyTrafficPdfState): void {
@@ -304,7 +345,8 @@ function updateTrafficExportState(state: NearbyTrafficPdfState): void {
 }
 
 const scoreLoading = computed(() => Boolean(initialOrigin && (
-  nearby.isScanning.value
+  !calendar.ready.value
+  || nearby.isScanning.value
   || score.isLoading.value
   || heavy.isLoading.value
   || nearbyWalking.isLoadingPlaces.value
@@ -341,7 +383,10 @@ const scoreProgress = computed(() => {
 const scoreProgressLabel = computed(() => t("nearbyStations.neighborhoodScore.loadingProgress", scoreProgress.value));
 const failedSource = computed<ScoreRetrySource | undefined>(() => {
   if (nearby.error?.value) return "stations";
+  if (score.gtfsCoverageMissing.value) return "coverage";
   if (heavy.error.value) return "heavy";
+  const transportSource = score.transportErrorSource?.value;
+  if (transportSource === "routes" || transportSource === "timetables") return transportSource;
   if (score.errorSource?.value === "routes") return "routes";
   if (score.errorSource?.value === "timetables") return "timetables";
   if (score.errorSource?.value === "places") return "places";
@@ -356,33 +401,37 @@ const trafficLineRefs = computed(() => [...new Set([
   ...heavy.visibleCandidates.value.flatMap(candidate => candidate.lines.map(line => line.id)),
 ])]);
 const scoreError = computed(() => {
+  const source = failedSource.value;
   if (score.error.value?.name === "TimeoutError" && failedSource.value === score.errorSource.value) {
-    return t("nearbyStations.neighborhoodScore.partialErrorTimeout", { seconds: 45 });
+    return t("nearbyStations.neighborhoodScore.partialErrorTimeout", { seconds: source === "timetables" ? 300 : 45 });
   }
-  if (nearby.error?.value) {
+  if (source === "stations") {
     return t("nearbyStations.neighborhoodScore.partialErrorStations");
   }
-  if (heavy.error.value || score.errorSource?.value === "routes") {
-    return heavy.error.value
+  if (source === "coverage") {
+    return t("nearbyStations.neighborhoodScore.partialErrorGtfsCoverage");
+  }
+  if (source === "heavy" || source === "routes") {
+    return source === "heavy"
       ? t("nearbyStations.neighborhoodScore.partialErrorHeavy")
       : t("nearbyStations.neighborhoodScore.partialErrorGtfsRoutes");
   }
-  if (score.errorSource?.value === "places") {
+  if (source === "places") {
     return t("nearbyStations.neighborhoodScore.partialErrorPlaces");
   }
-  if (score.errorSource?.value === "timetables") {
+  if (source === "timetables") {
     return t("nearbyStations.neighborhoodScore.partialErrorTimetables");
   }
-  if (score.errorSource?.value === "verdict") {
+  if (source === "verdict") {
     return t("nearbyStations.neighborhoodScore.partialErrorVerdict");
   }
-  if (nearbyWalking.error.value) {
-    if (nearbyWalking.error.value.message === "walking-routes-quota-exceeded") {
+  if (source === "walking") {
+    if (nearbyWalking.error.value?.message === "walking-routes-quota-exceeded") {
       return t("nearbyStations.neighborhoodScore.partialErrorWalkingQuota");
     }
     return t("nearbyStations.neighborhoodScore.partialErrorWalking");
   }
-  if (serviceQuality.error.value) {
+  if (source === "service-quality") {
     return t("nearbyStations.neighborhoodScore.partialErrorServiceQuality");
   }
   return score.error.value ? t("nearbyStations.neighborhoodScore.partialError") : undefined;
@@ -412,6 +461,7 @@ async function exportScorePdf(): Promise<void> {
         ...category.negativeFacts.map(fact => `${t("nearbyStations.neighborhoodScore.negatives")} : ${factLabel(fact)}`),
         ...category.neutralFacts.map(fact => `${t("nearbyStations.neighborhoodScore.neutralFacts")} : ${factLabel(fact)}`),
       ].filter(item => !item.endsWith(" : "));
+      if (category.id === "transport" && gtfsWarning.value) items.unshift(gtfsWarning.value);
       if (!items.length) {
         items.push(t(category.available
           ? "nearbyStations.neighborhoodScore.noDocumentedSignal"
@@ -520,13 +570,14 @@ const debugSnapshot = computed(() => debugVerdict.value ? {
   origin: nearby.selectedPlace.value,
   journeyDateTime: journeyDateTime.value,
   nightJourneyDateTime: nightJourneyDateTime.value,
+  gtfsReference: gtfsReference.value,
   loading: { page: scoreLoading.value, score: score.isLoading.value, stations: nearby.isScanning.value,
     heavy: heavy.isLoading.value, walking: nearbyWalking.isLoadingPlaces.value, serviceQuality: serviceQuality.isLoading.value },
   progress: scoreProgress.value,
   error: { source: failedSource.value, label: scoreError.value, heavy: heavy.error.value,
     score: score.error.value?.message, walking: nearbyWalking.error.value?.message, serviceQuality: serviceQuality.error.value?.message },
   result: score.result.value,
-  criteria: score.criteria.value,
+  criteria: criteriaWithPersonalJourneys.value,
   diagnostics: score.diagnostics.value,
   stations: nearby.stations.value,
   heavyCandidates: heavy.visibleCandidates.value,
@@ -562,21 +613,36 @@ const debugTimelinePayload = computed(() => debugVerdict.value ? JSON.stringify(
   tasks: verdictDebugTimeline.tasks.value,
 }, null, 2) : "");
 
-async function retryFailedSource(): Promise<void> {
-  const source = failedSource.value;
+async function retryFailedSource(source = failedSource.value): Promise<void> {
   if (!source || retryingSource.value) return;
   retryingSource.value = source;
   try {
     if (source === "stations") {
       await nearby.scanNearbyStations();
-    } else if (source === "places" || source === "routes" || source === "verdict" || source === "timetables") {
+    } else if (source === "places" || source === "verdict") {
       // The score composable keeps successful origin-scoped responses in
       // memory, so this retries failed score work without reloading the page.
       await score.refresh();
-    } else if (source === "heavy") {
-      await heavy.refresh();
-    } else if (source === "service-quality") {
-      await serviceQuality.retry();
+    } else if (source === "heavy" || source === "routes" || source === "timetables" || source === "service-quality" || source === "coverage") {
+      referenceNow.value = new Date();
+      refreshBrowserNeighborhoodGtfsManifest();
+      const changed = await calendar.reload(true);
+      await nextTick();
+      const retries: Promise<void>[] = [];
+      if (!changed) {
+        retries.push(score.retryFailedTransport());
+        if (heavy.error.value) retries.push(heavy.retryFailed());
+      } else {
+        // The version watcher already started the new probes. Heavy access
+        // can discover additional timetable targets after it finishes.
+        retries.push((async () => {
+          await heavy.whenSettled();
+          await nextTick();
+          await score.waitForTransport();
+        })());
+      }
+      if (serviceQuality.error.value && !serviceQuality.isLoading.value) retries.push(serviceQuality.retry());
+      await Promise.all(retries);
     } else {
       nearbyWalking.clear();
       const origin = nearby.selectedPlace.value;
@@ -611,6 +677,7 @@ function originQuery(origin: GeocoderPoint): Record<string, string> {
     lon: String(origin.lon),
     ...(origin.label ? { address: origin.label } : {}),
     ...(origin.city ? { city: origin.city } : {}),
+    ...(origin.code ? { code: origin.code } : {}),
   };
 }
 
@@ -756,13 +823,28 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
       :retrying="Boolean(retryingSource)"
       :retry-disabled="false"
       :criteria="criteriaWithPersonalJourneys"
+      :real-estate-market="realEstateMarket"
       :transport-loading-tasks="transportLoadingTasks"
       :directory-url="directoryUrl"
       @change-origin="openAddressSelector"
       @retry-source="retryFailedSource"
     >
-      <template #personal-journeys><VerdictPersonalJourneys :journeys="personalJourneys" /></template>
+      <template #personal-journeys>
+        <div v-if="gtfsWarning" class="nearby-neighborhood-score-page__gtfs-warning" role="status" data-testid="verdict-gtfs-reference">
+          <p>{{ gtfsWarning }}</p>
+          <button type="button" class="button-secondary" :disabled="Boolean(retryingSource)" @click="retryFailedSource('coverage')">{{ t('nearbyStations.neighborhoodScore.checkGtfsUpdate') }}</button>
+        </div>
+        <VerdictPersonalJourneys :journeys="personalJourneys" />
+      </template>
     </NearbyNeighborhoodScoreCard>
+    <template v-if="initialOrigin">
+      <button type="button" class="nearby-neighborhood-score-page__export-button" :aria-expanded="comparisonOpen" aria-controls="neighborhood-comparison-panel" data-testid="verdict-open-comparison" @click="comparisonOpen = !comparisonOpen">
+        {{ t(comparisonOpen ? 'nearbyStations.comparison.close' : 'nearbyStations.comparison.open') }}
+      </button>
+      <div v-if="comparisonOpen" id="neighborhood-comparison-panel">
+        <NeighborhoodComparison :origin="nearby.selectedPlace.value" :network="nearby.transportMapNetwork.value" :transport-ready="!nearby.isScanning.value && Boolean(nearby.transportMapNetwork.value)" :transport-error="Boolean(nearby.error?.value)" />
+      </div>
+    </template>
     <NeighborhoodTrafficAnnex
       v-if="realEstateOrigin"
       :line-refs="trafficLineRefs"
@@ -785,7 +867,9 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 </template>
 
 <style scoped>
-.nearby-neighborhood-score-page { display: grid; gap: 16px; margin: 0 auto; max-width: 920px; padding: 28px 22px 118px; }
+.nearby-neighborhood-score-page__gtfs-warning { background: var(--surface-soft); border-inline-start: 3px solid var(--warning, #a66312); padding: 8px 12px; margin-block: 12px; }
+.nearby-neighborhood-score-page__gtfs-warning p { margin: 0 0 6px; }
+.nearby-neighborhood-score-page { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); margin: 0 auto; max-width: 920px; min-width: 0; padding: 28px 22px 118px; }
 .nearby-neighborhood-score-page__loading-bar { background: rgba(81,70,255,.12); height: 2px; left: 0; overflow: hidden; pointer-events: none; position: fixed; right: 0; top: 0; z-index: 1100; }
 .nearby-neighborhood-score-page__loading-bar span { background: #5146ff; height: 100%; left: 0; position: absolute; transition: width 200ms ease; }
 .nearby-neighborhood-score-page__hero { align-items: center; background: linear-gradient(135deg, #f4f2ff, #edf7ff); border: 1px solid rgba(81,70,255,.14); border-radius: 20px; display: flex; justify-content: space-between; overflow: hidden; padding: 24px 26px; }
@@ -818,8 +902,8 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 .nearby-neighborhood-score-page__debug-checks [data-status="degraded"], .nearby-neighborhood-score-page__debug-checks [data-status="different"], .nearby-neighborhood-score-page__debug-checks [data-status="invalid"] { color: var(--danger); font-weight: 700; }
 @media (max-width: 680px) {
   .nearby-neighborhood-score-page { padding: 18px 12px 108px; }
-  .nearby-neighborhood-score-page__hero { padding: 19px; }
-  .nearby-neighborhood-score-page__hero-actions { align-items: flex-end; gap: 0; }
+  .nearby-neighborhood-score-page__hero { align-items: stretch; flex-direction: column; padding: 19px; }
+  .nearby-neighborhood-score-page__hero-actions { align-items: flex-start; gap: 0; margin-top: 14px; }
   .nearby-neighborhood-score-page__icon { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {

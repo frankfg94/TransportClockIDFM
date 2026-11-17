@@ -1,6 +1,6 @@
 import type { NearbyJourney, NearbyJourneyRequest, TravelRoutesProvider } from "../../features/nearby-stations/nearbyHeavyTransports";
 import { getNearbyParisJourneyDateTime } from "../../features/nearby-stations/nearbyHeavyTransports";
-import type { NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
+import { NeighborhoodGtfsCoverageError, type NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
 import { toServerApiUrl } from "../serverApi";
 import { NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS } from "../../../shared/gtfs/neighborhoodTimeout";
 import { canUseBrowserNeighborhoodGtfs, routeBrowserNeighborhoodGtfs } from "./browserNeighborhoodGtfs";
@@ -53,7 +53,13 @@ export function createGtfsNeighborhoodTravelRoutesProvider(): TravelRoutesProvid
       subscribers.forEach((s, i) => {
         if (s.done) return;
         const result = payload.destinations.find(d => d.id === subscriberIds[i]);
-        if (!result || result.status === "missing" || result.status === "out-of-coverage") { s.done = true; s.reject(new Error(`GTFS neighborhood routing ${result?.status ?? "missing"}`)); return; }
+        if (!result || result.status === "missing" || result.status === "out-of-coverage") {
+          s.done = true;
+          s.reject(result?.status === "out-of-coverage"
+            ? new NeighborhoodGtfsCoverageError(payload.serviceDate)
+            : new Error("GTFS neighborhood routing missing"));
+          return;
+        }
         s.done = true;
         cache.set(requestKey(s.request), { expires: Date.now() + 60_000, journeys: result.journeys });
         while (cache.size > 256) cache.delete(cache.keys().next().value!);

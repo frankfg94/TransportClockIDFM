@@ -54,7 +54,7 @@ const DEFAULT_BASEMAP_LAYER: TransportMapBasemapLayer = "plan";
 const DEFAULT_BASEMAP_PROVIDER: TransportMapBasemapProvider = "carto";
 const DEFAULT_BASEMAP_STYLE: TransportMapBasemapStyle =
   GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.style.default;
-const ESRI_SATELLITE_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile";
+export const ESRI_SATELLITE_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile";
 // CSS/device-pixel rounding can leave a hairline gap between adjacent raster
 // tiles at fractional camera zooms. A small overlap keeps the basemap covered
 // while preserving the exact camera projection at each tile's top-left edge.

@@ -13,12 +13,14 @@ import type {
   NeighborhoodDatasetStatus,
 } from "./neighborhood/criterionRegistry";
 import NearbyNeighborhoodScoreFact from "./NearbyNeighborhoodScoreFact.vue";
+import NeighborhoodScoreHelp from "./NeighborhoodScoreHelp.vue";
 import { getNeighborhoodFactMarker } from "./neighborhood/facts";
 import { transportSectionValues } from "./neighborhood/factPresentation";
 import NearbyNeighborhoodScoreEducation from "./NearbyNeighborhoodScoreEducation.vue";
 import NeighborhoodTransportLoading from "./NeighborhoodTransportLoading.vue";
 import type { NearbyPlace } from "./nearbyPlaces";
 import type { NeighborhoodWalkingMetrics } from "./neighborhood/contracts";
+import type { NearbyRealEstatePdfState } from "./neighborhoodScorePdf";
 
 const props = defineProps<{
   result: NeighborhoodScoreResult;
@@ -32,6 +34,7 @@ const props = defineProps<{
   retrying?: boolean;
   retryDisabled?: boolean;
   criteria?: readonly NeighborhoodCriterionState[];
+  realEstateMarket?: NearbyRealEstatePdfState["market"];
   transportLoadingTasks?: readonly { id: string; labelKey: TranslationKey }[];
   directoryUrl: string;
 }>();
@@ -46,6 +49,7 @@ const selectedFactId = ref<string>();
 const criteriaById = computed(() => new Map((props.criteria ?? []).map((criterion) => [criterion.id, criterion])));
 const summaryPositiveFacts = computed(() => props.result.positiveFacts.filter((fact) => fact.category !== "education"));
 const diagnosticsOpen = ref(false);
+const scoreHelpOpen = ref(false);
 const diagnosticsDialog = ref<HTMLElement>();
 let previouslyFocused: HTMLElement | undefined;
 
@@ -83,7 +87,10 @@ const datasetLabelKeys: Record<string, TranslationKey> = {
   "personal-journeys": "nearbyStations.neighborhoodScore.personalJourneys.journeysDataset",
 };
 const diagnosticsSummary = computed(() => {
-  const datasets = (props.criteria ?? []).flatMap((criterion) => criterion.datasets);
+  const datasets = [...(props.criteria ?? []).flatMap((criterion) => criterion.datasets),
+    ...(props.realEstateMarket ? [{ status: props.realEstateMarket.status }, { status: props.realEstateMarket.rentStatus },
+      ...(props.realEstateMarket.historyStatus ? [{ status: props.realEstateMarket.historyStatus }] : []),
+      ...(props.realEstateMarket.typeStatus ? [{ status: props.realEstateMarket.typeStatus }] : [])] : [])];
   const ready = datasets.filter((dataset) => dataset.status === "ready").length;
   const loading = datasets.filter((dataset) => dataset.status === "loading").length;
   return t("nearbyStations.neighborhoodScore.diagnosticsSummary", {
@@ -182,6 +189,18 @@ onBeforeUnmount(() => {
           <span>/10</span>
         </div>
         <button
+          class="nearby-neighborhood-score-card__diagnostics-trigger nearby-neighborhood-score-card__help-trigger"
+          type="button"
+          :aria-label="t('nearbyStations.neighborhoodScore.scoreHelp.title')"
+          :title="t('nearbyStations.neighborhoodScore.scoreHelp.title')"
+          aria-haspopup="dialog"
+          :aria-expanded="scoreHelpOpen"
+          @click="scoreHelpOpen = true"
+        >
+          <CircleHelp :size="19" aria-hidden="true" />
+          <span>{{ t("nearbyStations.neighborhoodScore.scoreHelp.button") }}</span>
+        </button>
+        <button
           class="nearby-neighborhood-score-card__diagnostics-trigger"
           type="button"
           :aria-label="t('nearbyStations.neighborhoodScore.diagnosticsButton')"
@@ -194,6 +213,8 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </header>
+
+    <NeighborhoodScoreHelp :open="scoreHelpOpen" :result="result" :criteria="criteria" @close="scoreHelpOpen = false" />
 
     <Teleport to="body">
       <div
@@ -226,6 +247,32 @@ onBeforeUnmount(() => {
             </button>
           </header>
           <div class="nearby-neighborhood-score-card__diagnostics-list">
+            <article v-if="realEstateMarket" class="nearby-neighborhood-score-card__diagnostics-category" data-testid="real-estate-diagnostics">
+              <header><h3>{{ t("nearbyStations.realEstate.scoreTitle") }}</h3></header>
+              <p>{{ t("nearbyStations.realEstate.marketScoreEffect") }}</p>
+              <ul>
+                <li class="nearby-neighborhood-score-card__diagnostic-dataset" :data-status="realEstateMarket.status">
+                  <CircleHelp :size="16" aria-hidden="true" />
+                  <span>{{ t("nearbyStations.realEstate.marketDvfSource") }}</span><small>{{ t("nearbyStations.neighborhoodScore.datasetRequirements.optional") }}</small>
+                  <strong>{{ datasetStatusLabel(realEstateMarket.status) }}</strong>
+                </li>
+                <li class="nearby-neighborhood-score-card__diagnostic-dataset" :data-status="realEstateMarket.rentStatus">
+                  <CircleHelp :size="16" aria-hidden="true" />
+                  <span>{{ t("nearbyStations.realEstate.marketRentSource") }}</span><small>{{ t("nearbyStations.neighborhoodScore.datasetRequirements.optional") }}</small>
+                  <strong>{{ datasetStatusLabel(realEstateMarket.rentStatus) }}</strong>
+                </li>
+                <li v-if="realEstateMarket.historyStatus" class="nearby-neighborhood-score-card__diagnostic-dataset" :data-status="realEstateMarket.historyStatus">
+                  <CircleHelp :size="16" aria-hidden="true" /><span>{{ t("nearbyStations.realEstate.marketHistorySource") }}</span>
+                  <small>{{ t("nearbyStations.neighborhoodScore.datasetRequirements.optional") }}</small><strong>{{ datasetStatusLabel(realEstateMarket.historyStatus) }}</strong>
+                </li>
+                <li v-if="realEstateMarket.typeStatus" class="nearby-neighborhood-score-card__diagnostic-dataset" :data-status="realEstateMarket.typeStatus">
+                  <CircleHelp :size="16" aria-hidden="true" /><span>{{ t("nearbyStations.realEstate.marketTypesSource") }}</span>
+                  <small>{{ t("nearbyStations.neighborhoodScore.datasetRequirements.optional") }}</small><strong>{{ datasetStatusLabel(realEstateMarket.typeStatus) }}</strong>
+                </li>
+              </ul>
+              <p v-if="realEstateMarket.coverage">{{ t(realEstateMarket.coverage === 'undivided-city' ? 'nearbyStations.realEstate.marketUndivided' : realEstateMarket.coverage === 'city' ? 'nearbyStations.realEstate.marketCityFallback' : 'nearbyStations.realEstate.marketIrisCoverage') }}</p>
+              <p v-if="realEstateMarket.durationMs !== undefined">{{ t("nearbyStations.realEstate.marketLoadDuration", { duration: (realEstateMarket.durationMs / 1000).toFixed(1) }) }}</p>
+            </article>
             <article
               v-for="category in result.categories"
               :key="`diagnostic:${category.id}`"
@@ -372,7 +419,7 @@ onBeforeUnmount(() => {
           <div
             v-else-if="category.positiveFacts.length"
             class="nearby-neighborhood-score-card__fact-group"
-            :class="{ 'nearby-neighborhood-score-card__fact-group--positive-only': !category.negativeFacts.length }"
+            :class="{ 'nearby-neighborhood-score-card__fact-group--full-width': category.negativeFacts.length < 3 }"
           >
             <span>{{ t("nearbyStations.neighborhoodScore.positives") }}</span>
             <NearbyNeighborhoodScoreFact
@@ -383,7 +430,11 @@ onBeforeUnmount(() => {
               @toggle="toggleFact(fact.id)"
             />
           </div>
-          <div v-if="category.negativeFacts.length" class="nearby-neighborhood-score-card__fact-group">
+          <div
+            v-if="category.negativeFacts.length"
+            class="nearby-neighborhood-score-card__fact-group"
+            :class="{ 'nearby-neighborhood-score-card__fact-group--full-width': category.negativeFacts.length < 3 }"
+          >
             <span>{{ t("nearbyStations.neighborhoodScore.negatives") }}</span>
             <NearbyNeighborhoodScoreFact
               v-for="fact in category.negativeFacts"
@@ -462,6 +513,7 @@ onBeforeUnmount(() => {
 .nearby-neighborhood-score-card h2 { color: var(--ink); font-size: clamp(1.35rem, 3vw, 1.9rem); margin: 0; }
 .nearby-neighborhood-score-card__header-actions { align-items: flex-start; display: flex; flex: 0 0 auto; gap: 8px; }
 .nearby-neighborhood-score-card__diagnostics-trigger, .nearby-neighborhood-score-card__diagnostics-close { align-items: center; background: #f7f8fc; border: 1px solid rgba(16,35,63,.12); border-radius: 10px; color: var(--muted); cursor: pointer; display: inline-flex; height: 38px; justify-content: center; padding: 0; width: 38px; }
+.nearby-neighborhood-score-card__help-trigger { font: inherit; font-size: .72rem; font-weight: 750; gap: 4px; padding: 0 8px; width: auto; }
 .nearby-neighborhood-score-card__diagnostics-trigger:hover, .nearby-neighborhood-score-card__diagnostics-trigger:focus-visible, .nearby-neighborhood-score-card__diagnostics-close:hover, .nearby-neighborhood-score-card__diagnostics-close:focus-visible { background: #f2efff; border-color: rgba(81,70,255,.38); color: #5146ff; outline: 2px solid rgba(81,70,255,.25); outline-offset: 2px; }
 .nearby-neighborhood-score-card__diagnostics-overlay { align-items: center; background: rgba(15,23,42,.54); display: flex; inset: 0; justify-content: center; padding: 18px; position: fixed; z-index: 9500; }
 .nearby-neighborhood-score-card__diagnostics-dialog { background: #fff; border: 1px solid rgba(81,70,255,.16); border-radius: 18px; box-shadow: 0 28px 70px rgba(15,23,42,.28); display: flex; flex-direction: column; max-height: min(90vh, 820px); max-width: 760px; outline: none; overflow: hidden; padding: 20px; width: min(100%, 760px); }
@@ -535,8 +587,8 @@ onBeforeUnmount(() => {
 .nearby-neighborhood-score-card__fact-group--neutral { grid-column: 1 / -1; }
 .nearby-neighborhood-score-card__fact-group { min-width: 0; }
 .nearby-neighborhood-score-card__fact-group--education { grid-column: 1 / -1; }
-.nearby-neighborhood-score-card__fact-group--positive-only { display: grid; gap: 4px; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.nearby-neighborhood-score-card__fact-group--positive-only > span { grid-column: 1 / -1; }
+.nearby-neighborhood-score-card__fact-group--full-width { display: grid; gap: 4px; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.nearby-neighborhood-score-card__fact-group--full-width > span { grid-column: 1 / -1; }
 .nearby-neighborhood-score-card__footer { border-top: 1px solid rgba(16,35,63,.1); color: var(--muted); display: grid; font-size: .7rem; gap: 5px; line-height: 1.45; margin-top: 20px; padding: 14px 7px 0; }
 .nearby-neighborhood-score-card__footer p { margin: 0; }
 .nearby-neighborhood-score-card__footer details { margin-top: 4px; }
@@ -556,9 +608,10 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 680px) {
   .nearby-neighborhood-score-card { padding: 16px; }
-  .nearby-neighborhood-score-card__header > div:first-child { min-width: 0; }
+  .nearby-neighborhood-score-card__header { flex-wrap: wrap; gap: 12px; }
+  .nearby-neighborhood-score-card__header > div:first-child { flex: 1 1 100%; min-width: 0; }
   .nearby-neighborhood-score-card__header h2 { overflow-wrap: anywhere; }
-  .nearby-neighborhood-score-card__highlights, .nearby-neighborhood-score-card__facts, .nearby-neighborhood-score-card__fact-group--positive-only { grid-template-columns: 1fr; }
+  .nearby-neighborhood-score-card__highlights, .nearby-neighborhood-score-card__facts, .nearby-neighborhood-score-card__fact-group--full-width { grid-template-columns: 1fr; }
   .nearby-neighborhood-score-card__score { min-width: 74px; padding-left: 9px; padding-right: 9px; }
   .nearby-neighborhood-score-card__score strong { font-size: 1.9rem; }
   .nearby-neighborhood-score-card__error { align-items: flex-start; flex-direction: column; }

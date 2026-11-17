@@ -20,6 +20,48 @@ function event(env: Record<string, string>): TestEvent {
 const origin = { lon: 2.3001, lat: 48.8101 };
 
 describe("nearby walking route providers", () => {
+  it("bypasses the shared server cache for session-only walking origins", async () => {
+    const originalFetch = globalThis.fetch;
+    let requests = 0;
+    const point = { lon: 2.401234, lat: 48.801234 };
+    const target = { lon: 2.402345, lat: 48.802345 };
+    globalThis.fetch = (async () => {
+      requests++;
+      return Response.json({ journeys: [{ type: "non_pt_walk", duration: 180, sections: [{
+        type: "street_network", mode: "walking", duration: 180, length: 240,
+        geojson: { type: "LineString", coordinates: [[point.lon, point.lat], [target.lon, target.lat]] },
+      }] }] });
+    }) as typeof fetch;
+    try {
+      const testEvent = event({ NUXT_IDFM_API_KEY: "prim-test" }) as never;
+      await routeWalkingWithPreferredProvider(testEvent, point, target);
+      await routeWalkingWithPreferredProvider(testEvent, point, target, undefined, undefined, { cache: false });
+      await routeWalkingWithPreferredProvider(testEvent, point, target, undefined, undefined, { cache: false });
+      await routeWalkingWithPreferredProvider(testEvent, point, target);
+      expect(requests).toBe(3);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("also bypasses the ORS matrix cache for session-only requests", async () => {
+    const originalFetch = globalThis.fetch;
+    let requests = 0;
+    globalThis.fetch = (async () => {
+      requests++;
+      return Response.json({ distances: [[240]], durations: [[180]] });
+    }) as typeof fetch;
+    try {
+      const testEvent = event({ NUXT_ORS_API_KEY: "ors-test" }) as never;
+      const point = { lon: 2.409876, lat: 48.809876 };
+      const target = { id: "session-test", lon: 2.408765, lat: 48.808765 };
+      await matrixWalkingWithOpenRouteService(testEvent, point, [target], { cache: false });
+      await matrixWalkingWithOpenRouteService(testEvent, point, [target], { cache: false });
+      expect(requests).toBe(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
   it("uses the IDFM/Navitia walking geometry before any ORS fallback", async () => {
     const originalFetch = globalThis.fetch;
     const requests: Array<{ url: string; init?: RequestInit }> = [];

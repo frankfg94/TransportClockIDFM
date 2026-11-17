@@ -17,6 +17,21 @@ async function setup() {
 }
 
 describe("browser verdict timetable", () => {
+  it("preserves HTTP coverage errors, successful empty timetables and subsequent published departures", async () => {
+    const adapter = await import("../src/services/travelRoutes/browserNeighborhoodTimetable");
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    const payload = { lineId: "T6", serviceDate: "20261217", source: "gtfs", stops: [{ id: "stop", name: "Stop" }], trips: [] };
+    fetcher.mockResolvedValueOnce(Response.json({ ...payload, status: "out-of-coverage" }))
+      .mockResolvedValueOnce(Response.json({ ...payload, status: "missing" }))
+      .mockResolvedValueOnce(Response.json({ ...payload, status: "ready" }))
+      .mockResolvedValueOnce(Response.json({ ...payload, status: "ready", trips: [{ calls: [{ stopId: "stop", departure: 90000, pickupType: 0 }] }] }));
+    const last = () => adapter.fetchNeighborhoodGtfsLastService("T6", "stop", { serviceDate: payload.serviceDate });
+    await expect(last()).rejects.toMatchObject({ name: "NeighborhoodGtfsCoverageError", serviceDate: "20261217" });
+    await expect(last()).rejects.toThrow("unavailable");
+    await expect(last()).resolves.toBeUndefined();
+    await expect(last()).resolves.toMatchObject({ seconds: 90000 });
+  });
   it("shares one worker for frequencies and the last service, keeping station and date constraints", async () => {
     const adapter = await setup();
     const frequency = adapter.fetchNeighborhoodGtfsFrequency("IDFM:C01743");

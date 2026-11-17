@@ -7,6 +7,7 @@ import { formatPharmacyLabel, makePlaceFact, placeKind, scorePlaces } from "../p
 import { clamp, saturatingNeighborhoodBonus } from "../primitives";
 
 const PHARMACY_LIST_MAX_WALKING_MINUTES = 10;
+export const HEALTH_SCORE_RULES = { missing: 2, base: 6, extraTarget: 3, extraMaximum: 2, hospitalMinutes: 30 } as const;
 
 export function buildHealthCategory(input: NeighborhoodScoreInput): NeighborhoodCategoryResult {
   const base = category("health");
@@ -20,7 +21,7 @@ export function buildHealthCategory(input: NeighborhoodScoreInput): Neighborhood
     };
   }
   const pharmacies = scorePlaces(input, (place) => PHARMACY_KINDS.has(placeKind(place)));
-  const hospitals = scorePlaces(input, (place) => HOSPITAL_KINDS.has(placeKind(place)), 30);
+  const hospitals = scorePlaces(input, (place) => HOSPITAL_KINDS.has(placeKind(place)), HEALTH_SCORE_RULES.hospitalMinutes);
   const positiveFacts: NeighborhoodFact[] = [];
   const negativeFacts: NeighborhoodFact[] = [];
   const nearest = pharmacies[0];
@@ -76,7 +77,7 @@ export function buildHealthCategory(input: NeighborhoodScoreInput): Neighborhood
 
   const hospital = hospitals
     .map((candidate) => ({ candidate, journey: chooseFastestJourney(input.hospitalJourneys?.[candidate.place.id]) }))
-    .filter(({ candidate, journey }) => candidate.minutes <= 30 || (journey && journey.durationSeconds <= 30 * 60))
+    .filter(({ candidate, journey }) => candidate.minutes <= HEALTH_SCORE_RULES.hospitalMinutes || (journey && journey.durationSeconds <= HEALTH_SCORE_RULES.hospitalMinutes * 60))
     .sort((left, right) => (left.journey?.durationSeconds ?? left.candidate.minutes * 60)
       - (right.journey?.durationSeconds ?? right.candidate.minutes * 60))[0];
   if (hospital) {
@@ -106,12 +107,18 @@ export function buildHealthCategory(input: NeighborhoodScoreInput): Neighborhood
       travel: hospital.journey ? { journey: hospital.journey } : undefined,
     }));
   }
+  const serviceCount = pharmacies.length + (hospital ? 1 : 0);
+  const baseScore = serviceCount ? HEALTH_SCORE_RULES.base : HEALTH_SCORE_RULES.missing;
+  const bonus = serviceCount ? saturatingNeighborhoodBonus(serviceCount - 1, HEALTH_SCORE_RULES.extraTarget, HEALTH_SCORE_RULES.extraMaximum) : 0;
+  const score = clamp(baseScore + bonus);
   return withFacts({
     ...base,
     available: true,
-    score: pharmacies.length > 0 || hospital
-      ? clamp(6 + saturatingNeighborhoodBonus(pharmacies.length + (hospital ? 1 : 0) - 1, 3, 2))
-      : 2,
+    score,
+    scoreDetails: [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.local", method: "sum", score, rows: [
+      { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.base", points: baseScore },
+      { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.healthServices", measurement: serviceCount, measurementUnit: "count", points: bonus },
+    ] }],
     positiveFacts,
     negativeFacts,
   });

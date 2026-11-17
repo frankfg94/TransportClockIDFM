@@ -271,7 +271,7 @@ describe("NearbyNeighborhoodScoreCard", () => {
     wrapper.unmount();
   });
 
-  it("splits positive facts into two columns only when the category has no negative fact", () => {
+  it.each([0, 1, 2, 3])("lays out a category with %i negative facts", (negativeCount) => {
     const result = buildNeighborhoodScore({
       places: [{
         id: "place:supermarket",
@@ -290,31 +290,13 @@ describe("NearbyNeighborhoodScoreCard", () => {
     const categoryIndex = result.categories.findIndex((category) => category.id === "daily-life");
     const category = result.categories[categoryIndex]!;
     expect(category.positiveFacts.length).toBeGreaterThan(0);
-    category.negativeFacts = [];
-    category.neutralFacts = [];
-
-    const positiveOnlyWrapper = mount(NearbyNeighborhoodScoreCard, {
-      props: { result, directoryUrl: "/nearby-stations" },
-      global: {
-        stubs: {
-          NuxtLink: {
-            props: ["to"],
-            template: "<a :href='to'><slot /></a>",
-          },
-        },
-      },
-    });
-    expect(positiveOnlyWrapper.findAll(".nearby-neighborhood-score-card__category")[categoryIndex]
-      ?.find(".nearby-neighborhood-score-card__fact-group--positive-only").exists()).toBe(true);
-    positiveOnlyWrapper.unmount();
-
     const positiveFact = category.positiveFacts[0]!;
-    category.negativeFacts = [{
+    category.negativeFacts = Array.from({ length: negativeCount }, (_, index) => ({
       ...positiveFact,
-      id: "negative-fixture",
+      id: `negative-fixture-${index}`,
       polarity: "negative",
-    } satisfies NeighborhoodFact];
-    const splitWrapper = mount(NearbyNeighborhoodScoreCard, {
+    } satisfies NeighborhoodFact));
+    const wrapper = mount(NearbyNeighborhoodScoreCard, {
       props: { result, directoryUrl: "/nearby-stations" },
       global: {
         stubs: {
@@ -325,9 +307,10 @@ describe("NearbyNeighborhoodScoreCard", () => {
         },
       },
     });
-    expect(splitWrapper.findAll(".nearby-neighborhood-score-card__category")[categoryIndex]
-      ?.find(".nearby-neighborhood-score-card__fact-group--positive-only").exists()).toBe(false);
-    splitWrapper.unmount();
+    const groups = wrapper.findAll(".nearby-neighborhood-score-card__category")[categoryIndex]!
+      .findAll(".nearby-neighborhood-score-card__fact-group--full-width");
+    expect(groups).toHaveLength(negativeCount === 0 ? 1 : negativeCount < 3 ? 2 : 0);
+    wrapper.unmount();
   });
 
   it("acknowledges a saved workplace in the limitations", () => {

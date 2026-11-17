@@ -2,6 +2,7 @@ import type {
   GlobalMapBounds,
   GlobalMapChunkDescriptor,
   GlobalMapChunkPayload,
+  GlobalMapCommercialLinesDocument,
   GlobalMapLinePaletteDocument,
   GlobalMapManifest,
   GlobalMapMode,
@@ -92,6 +93,7 @@ export class TransportMapDataSource {
   private manifest?: GlobalMapManifest;
   private bootstrapPayload?: Awaited<ReturnType<GlobalMapAssetLoader["loadBootstrapPayload"]>>;
   private linePalette?: GlobalMapLinePaletteDocument;
+  private commercialLines?: GlobalMapCommercialLinesDocument;
   private catalogLoaded = false;
   private scheduler?: TransportMapChunkScheduler;
   private network?: TransportMapNetwork;
@@ -161,14 +163,16 @@ export class TransportMapDataSource {
     const loader = this.options.loader ?? new GlobalMapAssetLoader({ trace: this.options.trace });
     const manifest = await loader.loadManifest(signal);
     if (lifecycleToken !== this.lifecycleToken) throw createLifecycleAbortError();
-    const [bootstrapPayload, linePalette] = await Promise.all([
+    const [bootstrapPayload, linePalette, commercialLines] = await Promise.all([
       loader.loadBootstrapPayload(manifest, signal),
       loader.loadLinePalette(manifest, signal),
+      manifest.files.commercialLines ? loader.loadCommercialLines(manifest, signal) : undefined,
     ]);
     if (lifecycleToken !== this.lifecycleToken) throw createLifecycleAbortError();
     this.manifest = manifest;
     this.bootstrapPayload = bootstrapPayload;
     this.linePalette = linePalette;
+    this.commercialLines = commercialLines;
     const decodeStartedAt = nowMs();
     const decodeTrace = this.options.trace?.isRunning ? this.options.trace : undefined;
     const decodeEvent = decodeTrace?.begin("bootstrap_decode", { lineCount: bootstrapPayload.lines.length, stationCount: bootstrapPayload.stations.length });
@@ -177,6 +181,7 @@ export class TransportMapDataSource {
       manifest,
       undefined,
       linePalette,
+      commercialLines,
     ));
     decodeTrace?.end(decodeEvent);
     this.network = network;
@@ -244,6 +249,7 @@ export class TransportMapDataSource {
     const manifest = this.manifest;
     const bootstrapPayload = this.bootstrapPayload;
     const linePalette = this.linePalette;
+    const commercialLines = this.commercialLines;
     const network = this.network;
     const loader = this.options.loader ?? new GlobalMapAssetLoader({ trace: this.options.trace });
     const promise = (async () => {
@@ -251,7 +257,7 @@ export class TransportMapDataSource {
       if (lifecycleToken !== this.lifecycleToken) throw createLifecycleAbortError();
       if (bootstrapPayload) {
         const payload = {
-          raw, bootstrap: { ...bootstrapPayload, stations: [], paths: [] }, palette: linePalette,
+          raw, bootstrap: { ...bootstrapPayload, stations: [], paths: [] }, palette: linePalette, commercialLines,
           manifest: { schemaVersion: manifest.schemaVersion, dataVersion: manifest.dataVersion, bounds: manifest.bounds },
         };
         const fallback = () => {
@@ -1136,6 +1142,7 @@ export class TransportMapDataSource {
     this.regionalBusPaths = undefined;
     this.regionalBikePaths = undefined;
     this.bootstrapPayload = undefined;
+    this.commercialLines = undefined;
     this.stationIndex = undefined;
     this.decodeTimeMs = 0;
     this.workerTimeMs = 0;

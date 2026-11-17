@@ -28,6 +28,8 @@ const mocks = vi.hoisted(() => ({
     isLoading: { value: false },
     error: { value: undefined as string | undefined },
     refresh: vi.fn(async () => undefined),
+    retryFailed: vi.fn(async () => undefined),
+    whenSettled: vi.fn(async () => undefined),
   },
   score: {
     transportPending: { value: [] as string[] },
@@ -37,12 +39,15 @@ const mocks = vi.hoisted(() => ({
     isLoading: { value: false },
     error: { value: undefined as Error | undefined },
     errorSource: { value: undefined as "verdict" | "places" | "routes" | "timetables" | undefined },
+    gtfsCoverageMissing: { value: false },
     criteria: { value: Array.from({ length: 7 }, (_, index) => ({
       id: `indicator-${index}`,
       status: "ready",
       datasets: [],
     })) as Array<{ id: string; status: "ready" | "loading"; datasets: Array<{ id: string; required: boolean; status: "ready" | "loading" }> }> },
     refresh: vi.fn(async () => undefined),
+    retryFailedTransport: vi.fn(async () => undefined),
+    waitForTransport: vi.fn(async () => undefined),
   },
 }));
 
@@ -81,6 +86,7 @@ afterEach(() => {
   mocks.score.transportPending.value = [];
   mocks.score.error.value = undefined;
   mocks.score.errorSource.value = undefined;
+  mocks.score.gtfsCoverageMissing.value = false;
   mocks.score.criteria.value = Array.from({ length: 7 }, (_, index) => ({ id: `indicator-${index}`, status: "ready" as const, datasets: [] }));
   mocks.useNearbyStations.mockReturnValue(mocks.nearby);
   mocks.useNearbyHeavyTransports.mockReturnValue(mocks.heavy);
@@ -94,6 +100,78 @@ beforeEach(() => {
 });
 
 describe("NearbyNeighborhoodScorePage", () => {
+  it("keeps the last dated timetable through a failed check and switches to the published HTTP calendar", async () => {
+    vi.stubGlobal("Worker", undefined);
+    let publication: "old" | "offline" | "new" = "old";
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (!url.includes("/api/gtfs/status") || publication === "offline") return new Response("", { status: 503 });
+      const range = publication === "old" ? { startDate: "20190501", endDate: "20190531" } : { startDate: "20200101", endDate: "20991231" };
+      return Response.json({ calendar: { schemaVersion: 1, cacheGeneration: 1,
+        routing: { ...range, path: `routing/${publication}`, maxTimeSeconds: 92000 }, timetable: { ...range, path: `timetables/${publication}` } } });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    mocks.routeState.query = { lat: "48.798965", lon: "2.279473", debugVerdict: "1" };
+    mocks.nearby.selectedPlace.value = { lat: 48.798965, lon: 2.279473, label: "Châtillon" };
+    mocks.useNearbyStations.mockReturnValue(mocks.nearby);
+    mocks.useNearbyHeavyTransports.mockReturnValue(mocks.heavy);
+    mocks.useNearbyNeighborhoodScore.mockReturnValue(mocks.score);
+    const wrapper = mount(NearbyNeighborhoodScorePage, { global: { stubs: {
+      NuxtLink: true, VerdictPersonalJourneys: true,
+      NearbyNeighborhoodScoreCard: { template: '<section><slot name="personal-journeys" /></section>' },
+    } } });
+    try {
+      const notice = "[data-testid=verdict-gtfs-reference]";
+      await vi.waitFor(() => expect(wrapper.get(notice).text()).toContain("2019"));
+      const archived = wrapper.get(notice).text();
+      publication = "offline";
+      await wrapper.get(notice + " button").trigger("click");
+      await vi.waitFor(() => expect(mocks.score.retryFailedTransport).toHaveBeenCalledOnce());
+      expect(wrapper.get(notice).text()).toBe(archived);
+      publication = "new";
+      await wrapper.get(notice + " button").trigger("click");
+      await vi.waitFor(() => expect(wrapper.find(notice).exists()).toBe(false));
+      expect(mocks.score.waitForTransport).toHaveBeenCalledOnce();
+      expect(fetcher.mock.calls.some(([url]) => String(url).includes("calendar=1&fresh=1"))).toBe(true);
+      expect(JSON.parse(wrapper.get("[data-testid=verdict-debug]").text()).gtfsReference).toBeUndefined();
+    } finally { wrapper.unmount(); }
+  });
+  it("presents the GTFS coverage retry when places also fail", async () => {
+    mocks.routeState.query = { lat: "48.798965", lon: "2.279473" };
+    mocks.nearby.selectedPlace.value = { lat: 48.798965, lon: 2.279473, label: "Châtillon" };
+    mocks.score.gtfsCoverageMissing.value = true;
+    mocks.score.errorSource.value = "places";
+    mocks.score.error.value = new Error("places unavailable");
+    mocks.useNearbyStations.mockReturnValue(mocks.nearby);
+    mocks.useNearbyHeavyTransports.mockReturnValue(mocks.heavy);
+    mocks.useNearbyNeighborhoodScore.mockReturnValue(mocks.score);
+    const wrapper = mount(NearbyNeighborhoodScorePage, { global: { stubs: { NuxtLink: true, NearbyNeighborhoodScoreCard: {
+      props: ["error"], emits: ["retry-source"], template: "<button data-testid='retry' @click=\"$emit('retry-source')\">{{ error }}</button>",
+    } } } });
+    try {
+      expect(wrapper.get("[data-testid=retry]").text()).toContain("calendrier GTFS");
+      await wrapper.get("[data-testid=retry]").trigger("click");
+      await vi.waitFor(() => expect(mocks.score.retryFailedTransport).toHaveBeenCalledOnce());
+      expect(mocks.score.refresh).not.toHaveBeenCalled();
+    } finally { wrapper.unmount(); }
+  });
+  it("opens comparison lazily for the selected address", async () => {
+    mocks.routeState.query = { lat: "48.7814", lon: "2.1967", address: "Louvois" };
+    mocks.nearby.selectedPlace.value = { lat: 48.7814, lon: 2.1967, label: "Louvois" };
+    mocks.useNearbyStations.mockReturnValue(mocks.nearby);
+    mocks.useNearbyHeavyTransports.mockReturnValue(mocks.heavy);
+    mocks.useNearbyNeighborhoodScore.mockReturnValue(mocks.score);
+    const wrapper = mount(NearbyNeighborhoodScorePage, { global: { stubs: {
+      NuxtLink: true, NearbyNeighborhoodScoreCard: true, NearbyRealEstateVerdict: true,
+      NeighborhoodComparison: { name: "NeighborhoodComparison", props: ["origin"], template: "<div data-testid='comparison-stub' />" },
+    } } });
+    expect(wrapper.find("[data-testid=comparison-stub]").exists()).toBe(false);
+    await wrapper.get("[data-testid=verdict-open-comparison]").trigger("click");
+    expect(wrapper.getComponent({ name: "NeighborhoodComparison" }).props("origin")).toMatchObject({ lat: 48.7814, lon: 2.1967 });
+    await wrapper.get("[data-testid=verdict-open-comparison]").trigger("click");
+    expect(wrapper.find("[data-testid=comparison-stub]").exists()).toBe(false);
+    wrapper.unmount();
+  });
   it("preserves the exact Fontenay reproduction coordinates and requests the complete benchmark catalogue", () => {
     const url = new URL("http://localhost/nearby-neighborhood-score?lat=48.793710645211405&lon=2.28830452778152&address=48.79371,+2.28830&city=Fontenay-aux-Roses");
     mocks.routeState.query = Object.fromEntries(url.searchParams);
@@ -230,7 +308,7 @@ describe("NearbyNeighborhoodScorePage", () => {
     wrapper.unmount();
   });
 
-  it("shows a discrete loading bar and retries the failed score source", async () => {
+  it("shows a discrete loading bar and retries both failed transport sources", async () => {
     mocks.routeState.query = {
       lat: "48.76591",
       lon: "2.26821",
@@ -244,6 +322,7 @@ describe("NearbyNeighborhoodScorePage", () => {
     }));
     mocks.score.error.value = new Error("navitia unavailable");
     mocks.score.errorSource.value = "routes";
+    mocks.heavy.error.value = "heavy access unavailable";
 
     const wrapper = mount(NearbyNeighborhoodScorePage, {
       global: {
@@ -265,7 +344,9 @@ describe("NearbyNeighborhoodScorePage", () => {
     expect(wrapper.get(".nearby-neighborhood-score-page__loading-bar").attributes("aria-valuenow")).toBe("6");
     expect(wrapper.get(".nearby-neighborhood-score-page__loading-bar").attributes("aria-valuemax")).toBe("7");
     await wrapper.get("[data-testid='retry-source']").trigger("click");
-    expect(mocks.score.refresh).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mocks.score.retryFailedTransport).toHaveBeenCalledTimes(1));
+    expect(mocks.heavy.retryFailed).toHaveBeenCalledTimes(1);
+    expect(mocks.score.refresh).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 });

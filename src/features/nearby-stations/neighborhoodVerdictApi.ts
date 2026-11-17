@@ -99,8 +99,8 @@ export interface PublicNeighborhoodVerdict {
   futureProjects?: PublicFutureGpeStation[];
   nearbyGreenSpaces?: PublicGreenSpaceAccess[];
   security?: {
-    commune?: string;
-    trend?: string;
+    commune?: { localScore: number; availableWeight: number; indicators: Array<{ id: string; label: string; weight: number; percentile: number }> } | string;
+    trend?: { deltaPercent: number; adjustment: number } | string;
     indicators?: Array<Record<string, unknown>>;
   };
   sources: PublicVerdictSource[];

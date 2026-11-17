@@ -29,6 +29,7 @@ const {
   result,
   status,
   errorPhase,
+  simulationTime,
   candidates,
   winner,
   now,
@@ -203,6 +204,12 @@ const remaining = computed(() =>
             required
         /></label>
       </div>
+      <div class="line-optimizer__parameters">
+        <label for="optimizer-simulation-time">{{ t("lineOptimizer.simulationTime") }}
+          <input id="optimizer-simulation-time" v-model="simulationTime" type="time" />
+          <small>{{ t("lineOptimizer.simulationHint") }}</small>
+        </label>
+      </div>
       <div class="line-optimizer__checks">
         <label
           ><input v-model="useProviderWalk" type="checkbox" />{{
@@ -272,7 +279,8 @@ const remaining = computed(() =>
       <p v-else-if="status === 'error'" class="line-optimizer__error">
         {{
           t(
-            winner ? "lineOptimizer.refreshFailedPrevious" : errorPhase === "locations"
+            winner ? "lineOptimizer.refreshFailedPrevious" : errorPhase === "simulation"
+              ? "lineOptimizer.simulationInvalid" : errorPhase === "locations"
               ? "lineOptimizer.locationError"
               : "lineOptimizer.journeyError",
           )
@@ -310,8 +318,8 @@ const remaining = computed(() =>
           }}</small>
         </div>
       </div>
-      <h2>{{ t("lineOptimizer.leaveAt", { time: clock(winner.leaveAt) }) }}</h2>
-      <p>{{ t("lineOptimizer.stayHome", { duration: remaining }) }}</p>
+      <h2>{{ t(simulationTime ? "lineOptimizer.simulatedLeaveAt" : "lineOptimizer.leaveAt", { time: clock(winner.leaveAt) }) }}</h2>
+      <p>{{ t(simulationTime ? "lineOptimizer.simulatedWait" : "lineOptimizer.stayHome", { duration: remaining }) }}</p>
       <div class="line-optimizer__journey" :data-itinerary-id="timeline?.route.id">
         <div class="line-optimizer__chronology">
           <ol class="line-optimizer__timeline">
@@ -504,7 +512,7 @@ const remaining = computed(() =>
       </p>
       <p>{{ t(config.destinationOptimizer ? (settings.minimizeBusTransfers ? "lineOptimizer.genericMethodMinBus" : "lineOptimizer.genericMethod") : "lineOptimizer.method") }}</p>
       <p v-if="config.destinationOptimizer && settings.limitConnections">{{ t("lineOptimizer.limitConnectionsMethod") }}</p>
-      <p>{{ t("lineOptimizer.autoRefresh") }}</p>
+      <p>{{ t(simulationTime ? "lineOptimizer.simulationActive" : "lineOptimizer.autoRefresh") }}</p>
     </footer>
     <AdressBook
       :open="Boolean(addressSide)"

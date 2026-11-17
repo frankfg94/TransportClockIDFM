@@ -31,6 +31,7 @@ import NearbyStationScheduleInline from "./NearbyStationScheduleInline.vue";
 import NearbyHeavyAccessGuide from "./NearbyHeavyAccessGuide.vue";
 import NearbyLineTraceModal from "./NearbyLineTraceModal.vue";
 import NearbyStationsMap from "./NearbyStationsMap.vue";
+import { placesCityCode } from "./neighborhood-comparison/geometry";
 import NearbyCityCityPicker from "./NearbyCityCityPicker.vue";
 import NearbyPlacesDirectoryOverlay from "./NearbyPlacesDirectoryOverlay.vue";
 import NearbyPlacesRankingModal from "./NearbyPlacesRankingModal.vue";
@@ -347,6 +348,7 @@ const focusedScheduleStationId = ref<string>();
 const hideStationsWithoutDepartures = ref(false);
 const hideLongWaitTransports = ref(true);
 const showNearbyPlaces = ref(true);
+const hideClosedPlaces = ref(false);
 const showNearbyBenches = ref(false);
 const showNearbyParkings = ref(false);
 const showNearbyPlaceNames = ref(false);
@@ -392,6 +394,7 @@ async function loadSelectedCityPlaces(): Promise<void> {
   if (!origin || !placesAccess.loadPlacesCity) return;
   try {
     const cityFile: CompiledPlacesCityFile = await placesAccess.loadPlacesCity({
+      code: origin.code ? placesCityCode(origin.code) : undefined,
       name: origin.city,
       lat: origin.lat,
       lon: origin.lon,
@@ -1124,7 +1127,18 @@ function openNearbyNeighborhoodScore(): void {
   });
   if (origin.label) params.set("address", origin.label);
   if (origin.city) params.set("city", origin.city);
+  if (origin.code) params.set("code", origin.code);
   window.open(`/nearby-neighborhood-score?${params.toString()}`, "_blank", "noopener,noreferrer");
+}
+
+function openNearbyNeighborhoodComparison(code?: string): void {
+  const origin = nearby.selectedPlace.value;
+  if (!origin) return;
+  const params = new URLSearchParams({ lat: String(origin.lat), lon: String(origin.lon) });
+  if (origin.code) params.set("code", origin.code);
+  if (code) params.set("iris", code);
+  if (origin.label) params.set("address", origin.label);
+  window.open(`/neighborhood-comparison?${params.toString()}`, "_blank", "noopener,noreferrer");
 }
 
 watch(
@@ -1869,11 +1883,13 @@ onBeforeUnmount(() => {
         :hide-stations-without-departures="hideStationsWithoutDepartures"
         v-model:hide-long-wait-transports="hideLongWaitTransports"
         v-model:show-nearby-places="showNearbyPlaces"
+        v-model:hide-closed-places="hideClosedPlaces"
         v-model:show-nearby-benches="showNearbyBenches"
         v-model:show-nearby-parkings="showNearbyParkings"
         v-model:show-nearby-place-names="showNearbyPlaceNames"
         :places="nearbyMapPlaces"
         :city-view-places="cityViewPlaces"
+        :city-view-places-code="cityViewCode"
         :city-view-commerce-counts="cityViewCommerceCounts"
         :city-view-commerce-total="cityViewCommerceTotal"
         :load-city-view-place-counts="loadCityViewComparisonPlaceCounts"
@@ -1905,6 +1921,7 @@ onBeforeUnmount(() => {
         @fullscreen-change="handleNearbyMapFullscreen"
         @open-places-directory="openNearbyDirectory"
         @open-neighborhood-score="openNearbyNeighborhoodScore"
+        @open-neighborhood-comparison="openNearbyNeighborhoodComparison"
         @open-places-ranking="openPlacesRanking"
         @select-place="selectNearbyPlace"
       >
@@ -2037,6 +2054,7 @@ onBeforeUnmount(() => {
       :error="nearbyPlacesErrorMessage"
       :basemap-style="basemapStyle"
       :high-precision-noise-enabled="settings.nearbyMapHighPrecisionNoiseEnabled"
+      v-model:hide-closed-places="hideClosedPlaces"
       @close="closeNearbyDirectory"
       @retry="nearbyPlaces.refresh"
       @update:walking-minutes="nearbyDirectoryWalkingMinutes = $event"

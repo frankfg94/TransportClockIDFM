@@ -4,9 +4,12 @@ import type { NightAccessRequest } from "../../../shared/gtfs/nightAccess";
 export type NeighborhoodGtfsWorkerAction =
   | { kind: "routes"; request: NeighborhoodJourneysRequest }
   | { kind: "night-access"; request: NightAccessRequest }
-  | { kind: "frequency"; lineId: string }
+  | { kind: "frequency"; lineId: string; serviceDate?: string }
   | { kind: "last-service"; lineId: string; stationId?: string; serviceDate?: string };
-export type NeighborhoodGtfsWorkerRequest = ({ id: number; baseUrl: string; coldStart?: boolean; debug?: boolean } & NeighborhoodGtfsWorkerAction) | { id: number; kind: "cancel" };
+export type NeighborhoodGtfsWorkerRequest =
+  | ({ id: number; baseUrl: string; coldStart?: boolean; debug?: boolean } & NeighborhoodGtfsWorkerAction)
+  | { id: number; kind: "cancel" }
+  | { kind: "refresh-manifest" };
 export interface NeighborhoodGtfsWorkerDiagnostics {
   kind: NeighborhoodGtfsWorkerAction["kind"];
   queueMs: number;
@@ -17,7 +20,7 @@ export interface NeighborhoodGtfsWorkerDiagnostics {
   walkingPairsReused: number;
   walkingPairsRequested: number;
   walkingPairsExamined?: number;
-  purpose?: "transport" | "night-transport" | "places";
+  purpose?: NeighborhoodJourneysRequest["purpose"];
   destinations?: number;
   enqueuedEpochMs?: number;
   startedEpochMs?: number;
@@ -27,4 +30,4 @@ export interface NeighborhoodGtfsWorkerDiagnostics {
   scannedConnections?: number;
   excludedFeederAccesses?: NonNullable<NeighborhoodJourneysResponse["diagnostics"]>["excludedFeederAccesses"];
 }
-export type NeighborhoodGtfsWorkerResponse = ({ id: number; payload: unknown } | { id: number; error: string } | { id: number; cancelled: true }) & { diagnostics?: NeighborhoodGtfsWorkerDiagnostics };
+export type NeighborhoodGtfsWorkerResponse = ({ id: number; payload: unknown } | { id: number; error: string; uncoveredServiceDate?: string } | { id: number; cancelled: true }) & { diagnostics?: NeighborhoodGtfsWorkerDiagnostics };

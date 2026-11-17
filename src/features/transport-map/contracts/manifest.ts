@@ -42,6 +42,25 @@ export interface GlobalMapLinePaletteDocument {
   entries: GlobalMapLinePaletteEntry[];
 }
 
+/** Commercial SNCF routes observed on a dated IDFM service, not an exhaustive line mapping. */
+export interface GlobalMapCommercialLine {
+  code: string;
+  name: string;
+  color: string;
+  textColor: string;
+  sourceRouteId: string;
+  observedTrips: number;
+}
+
+export interface GlobalMapCommercialLinesDocument {
+  schemaVersion: 1;
+  dataVersion: string;
+  serviceDate: string;
+  idfmSha256: string;
+  sncfSha256: string;
+  entries: Array<{ lineId: string; networkLabel: string; routes: GlobalMapCommercialLine[] }>;
+}
+
 export interface GlobalMapPaletteManifest {
   version: string;
   source: string;
@@ -103,6 +122,10 @@ export interface GlobalMapLine {
   geometryIds: string[];
   sourceLineId?: string | null;
   sourceMode?: string | null;
+  /** Observed commercial routes; their coverage of this IDFM line may be incomplete. */
+  commercialRoutes?: GlobalMapCommercialLine[];
+  commercialNetworkLabel?: string;
+  commercialServiceDate?: string;
 }
 
 export interface GlobalMapEntrance {
@@ -217,6 +240,8 @@ export interface GlobalMapManifest {
     regionalBike?: { asset: string; bytes: number; checksum: string };
     /** Official per-line presentation palette, when the pack was compiled with one. */
     linePalette?: { asset: string; bytes: number; checksum: string };
+    /** Optional dated cross-feed observations, independently compiled for this pack. */
+    commercialLines?: { asset: string; bytes: number; checksum: string };
     chunks: GlobalMapChunkDescriptor[];
     stationIndex: GlobalMapSpatialIndexHeader;
     pathIndex: GlobalMapSpatialIndexHeader;

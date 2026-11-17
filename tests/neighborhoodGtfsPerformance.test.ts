@@ -239,6 +239,39 @@ describe("cancelled GTFS work", () => {
 });
 
 describe("GTFS public asset reads", () => {
+  it("checks the manifest while disk storage is busy and keeps the last copy on network failure", async () => {
+    let release!: (value: Cache) => void;
+    const written = new Map<string, Response>();
+    const bucket = { put: async (url: string, response: Response) => { written.set(url, response); },
+      match: async (url: string) => written.get(url)?.clone() } as unknown as Cache;
+    const open = new Promise<Cache>(resolve => { release = resolve; });
+    const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ generation: 2 })).mockRejectedValueOnce(new Error("offline"));
+    const read = createNeighborhoodGtfsAssetReader(fetcher, { open: () => open } as unknown as CacheStorage);
+    const online = read("https://host.test", "current.json");
+    try {
+      await expect(online).resolves.toEqual({ generation: 2 });
+      expect(fetcher).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ priority: "high" }));
+    } finally { release(bucket); }
+    await expect(read("https://host.test", "current.json")).resolves.toEqual({ generation: 2 });
+  });
+  it("evicts an existing corrupt entry and only persists a parsed network response", async () => {
+    const url = "https://host.test/_gtfs-data/routing/index.json";
+    const entries = new Map([[url, new Response("old broken JSON")]]);
+    const bucket = {
+      match: async (key: string) => entries.get(key)?.clone(),
+      delete: async (key: string) => entries.delete(key),
+      put: async (key: string, response: Response) => { entries.set(key, response); },
+    };
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response("<html>unavailable</html>"))
+      .mockResolvedValueOnce(Response.json({ schemaVersion: 1 }));
+    const read = createNeighborhoodGtfsAssetReader(fetcher, { open: async () => bucket } as unknown as CacheStorage);
+    await expect(read("https://host.test", "routing/index.json")).rejects.toThrow();
+    expect(entries.has(url)).toBe(false);
+    await expect(read("https://host.test", "routing/index.json")).resolves.toEqual({ schemaVersion: 1 });
+    await expect(read("https://host.test", "routing/index.json")).resolves.toEqual({ schemaVersion: 1 });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[1]?.[1]).toMatchObject({ cache: "reload" });
+  });
   it("joins only in-flight reads, preserves complete content and retries failures", async () => {
     const value = { services: [1, 2, 3], trips: [{ id: "all", calls: [0, 120, 240] }] };
     const fetcher = vi.fn(async () => Response.json(value)), read = createNeighborhoodGtfsAssetReader(fetcher);

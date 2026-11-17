@@ -5,6 +5,14 @@ const snapshot = () => ({ revision: "fixture", origin: { lon: 2.3, lat: 48.8 }, 
   result: { categories: [{ id: "transport", score: 8, positiveFacts: [{ id: "rer-b", label: "RER B via BUS 162", observedAt: "before" }], neutralFacts: [], negativeFacts: [] }] },
   diagnostics: { benchmarks: [{ id: "chatelet", status: "ready", journeys: [{ durationSeconds: 1800 }] }], frequencies: [{ lineId: "b" }], lastServices: [] }, heavyCandidates: [] });
 describe("transport data integrity and environment comparison", () => {
+  it("reports an active timetable error even after every benchmark succeeds, and clears it on recovery", () => {
+    const data = snapshot();
+    const failure = { taskId: "last-service:T6", categories: ["transport"], message: "timeout" };
+    const withError = { ...data, diagnostics: { ...data.diagnostics, errors: [failure] } };
+    expect(buildVerdictTransportIntegrity(withError, [])).toMatchObject({ status: "degraded",
+      issues: [expect.objectContaining({ code: "transport-task-error", taskId: failure.taskId })] });
+    expect(buildVerdictTransportIntegrity(data, []).status).toBe("complete");
+  });
   it("distinguishes a completed initial calculation from a visibility refresh without hiding current loading", () => {
     const data = snapshot(); data.loading.heavy = true;
     const runs = [

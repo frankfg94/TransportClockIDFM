@@ -23,6 +23,9 @@ import LineIconBadge from "./components/LineIconBadge.vue";
 import PlaceNameModal from "./components/PlaceNameModal.vue";
 import PlaceSwitcher from "./components/PlaceSwitcher.vue";
 import TransitBoard from "./components/TransitBoard.vue";
+import LineFrequencyTimetableModal from "./features/line-map/LineFrequencyTimetableModal.vue";
+import { fetchGtfsLineFrequency } from "./services/lineFrequency";
+import type { GtfsLineFrequencyResponse } from "./types/lineFrequency";
 import { usePlaceSwipeNavigation } from "./composables/usePlaceSwipeNavigation";
 import { transitBoards } from "./config/transitBoards";
 import {
@@ -47,6 +50,7 @@ import { createBoardFromDraft } from "./services/boardBuilder";
 import { transitModeToFamily } from "./services/linePresentation";
 import { fetchBoardDepartures, fetchDepartureCallingPattern, fetchDirectionGroupsForStation } from "./services/idfm";
 import { createDeparturePatternCacheKey, createDepartureServiceIdentity } from "./features/service-pattern/serviceClassification";
+import { shouldShowUnconfirmedServiceFallback } from "./features/service-pattern/departureServicePresentation";
 import { createNetworkScheduler } from "./services/networkScheduler";
 import {
   getNavitiaRetryDelay,
@@ -110,6 +114,7 @@ import type {
   StationSearchOption,
   TransitBoardPreferences,
   TransitBoardConfig,
+  TransitMode,
 } from "./types/transit";
 import type {
   TrafficLineReport,
@@ -141,6 +146,9 @@ const DeparturePatternModal = defineAsyncComponent(
 const StationBoardModal = defineAsyncComponent(() => import("./components/StationBoardModal.vue"));
 const NearbyStationsSelector = defineAsyncComponent(
   () => import("./features/nearby-stations/NearbyStationsSelector.vue"),
+);
+const AutoDashboard = defineAsyncComponent(
+  () => import("./features/auto-dashboard/AutoDashboard.vue"),
 );
 const WeatherForecastModal = defineAsyncComponent(
   () => import("./features/weather/WeatherForecastModal.vue"),
@@ -202,6 +210,11 @@ const states = reactive<Record<string, BoardState>>({});
 const refreshing = ref(false);
 const lastRefresh = ref<Date>();
 const activePlaceId = ref(DEFAULT_TRANSIT_PLACE_ID);
+const AUTO_DASHBOARD_ID = "__auto_dashboard__";
+const LAST_MANUAL_PLACE_KEY = "transport-clock:auto-last-manual-place";
+const isAutoDashboard = computed(() => getRoutePlaceId() === AUTO_DASHBOARD_ID);
+const displayedPlaceId = computed(() => isAutoDashboard.value ? AUTO_DASHBOARD_ID : activePlaceId.value);
+let previousRouteWasAuto = false;
 const stationModalOpen = ref(false);
 const nearbyStationsModalOpen = ref(false);
 const nearbyStationsAdding = ref(false);
@@ -288,21 +301,21 @@ const fullscreenPanelDesign = computed<FullscreenStationPanelDesign>(
 );
 
 const placeOptions = computed(() =>
-  presetState.places.map((place) => ({
+  [...presetState.places.map((place) => ({
     id: place.id,
     kind: place.kind,
     label: getPlaceLabel(place),
-  })),
+  })), { id: AUTO_DASHBOARD_ID, kind: "custom" as const, label: t("autoDashboard.title") }],
 );
 const activePlace = computed<TransitPlacePreset | undefined>(() =>
   getTransitPlaceById(presetState, activePlaceId.value),
 );
-const activePlaceLabel = computed(() => getPlaceLabel(activePlace.value));
+const activePlaceLabel = computed(() => isAutoDashboard.value ? t("autoDashboard.title") : getPlaceLabel(activePlace.value));
 const placeDropdownEnabled = computed(() => settings.value.placePresetNavigationMode !== "swipe");
 const placeSwipeEnabled = computed(() => settings.value.placePresetNavigationMode !== "dropdown");
 const placeSwipe = usePlaceSwipeNavigation({
   places: placeOptions,
-  activePlaceId,
+  activePlaceId: displayedPlaceId,
   enabled: placeSwipeEnabled,
   reduceMotion: computed(() => settings.value.reduceMotion),
   selectPlace: selectTransitPlace,
@@ -528,18 +541,31 @@ function replaceRoutePlace(placeId: string): void {
 
 function syncActivePlaceFromRoute(options?: { refresh: boolean }): void {
   const requestedPlaceId = getRoutePlaceId();
+  if (requestedPlaceId === AUTO_DASHBOARD_ID) {
+    previousRouteWasAuto = true;
+    stopRefreshTimer();
+    let previous: string | null = null;
+    try { previous = sessionStorage.getItem(LAST_MANUAL_PLACE_KEY); } catch { /* Storage is optional. */ }
+    activePlaceId.value = resolveTransitPlaceId(presetState, previous ?? activePlaceId.value);
+    syncActivePreferencesFromState();
+    closeTopbarMenu();
+    return;
+  }
   const resolvedPlaceId = resolveTransitPlaceId(presetState, requestedPlaceId);
-  const placeChanged = activePlaceId.value !== resolvedPlaceId;
+  const placeChanged = previousRouteWasAuto || activePlaceId.value !== resolvedPlaceId;
+  previousRouteWasAuto = false;
 
   if (requestedPlaceId !== resolvedPlaceId) {
     replaceRoutePlace(resolvedPlaceId);
   }
 
   activePlaceId.value = resolvedPlaceId;
+  try { sessionStorage.setItem(LAST_MANUAL_PLACE_KEY, resolvedPlaceId); } catch { /* Storage is optional. */ }
   syncActivePreferencesFromState();
   closeTopbarMenu();
 
   if (placeChanged && options?.refresh !== false) {
+    if (primApiKeyConfigured && isPageVisible()) startRefreshTimer();
     void refreshAll();
   }
 
@@ -999,7 +1025,7 @@ function createDepartureServiceTypeCacheKey(
 }
 
 async function refreshAll(): Promise<void> {
-  if (!primApiKeyConfigured || !isPageVisible() || isFullscreenPanelOpen.value) {
+  if (!primApiKeyConfigured || !isPageVisible() || isFullscreenPanelOpen.value || isAutoDashboard.value) {
     refreshing.value = false;
     return;
   }
@@ -1295,7 +1321,7 @@ function getFullscreenPanelDirections(board: TransitBoardConfig): FullscreenPane
         mission: departure.journeyName,
         platform: departure.platform,
         destination: departure.destination,
-        meta: formatPanelDepartureMeta(departure),
+        meta: formatPanelDepartureMeta(departure, board.line.mode),
         statusLabel: statusLabel(departure.status),
       })),
     }));
@@ -1345,14 +1371,17 @@ function getDepartureTime(departure: Departure): string | undefined {
   );
 }
 
-function formatPanelDepartureMeta(departure: Departure): string {
+function formatPanelDepartureMeta(departure: Departure, mode: TransitMode): string {
   const section = departure.serviceType === "semi-direct" && departure.serviceSection
     ? t(`board.serviceSection.${departure.serviceSection}`) : "";
+  const serviceLabel = formatDepartureServiceType(departure.serviceType) ||
+    (departure.serviceTypeStatus === "loading" ? t("pattern.loadingPattern") :
+      shouldShowUnconfirmedServiceFallback(mode, departure)
+        ? t("lineOptimizer.unknownService")
+        : "");
   const parts = [
     getDepartureMonitoringLabel(departure),
-    [formatDepartureServiceType(departure.serviceType) ||
-      (departure.serviceTypeStatus === "loading" ? t("pattern.loadingPattern") :
-        departure.serviceTypeStatus === "unavailable" ? t("lineOptimizer.unknownService") : ""), section].filter(Boolean).join(" "),
+    [serviceLabel, section].filter(Boolean).join(" "),
     formatRemainingStopCount(departure),
   ].filter(Boolean);
 
@@ -1859,6 +1888,43 @@ function setBoardDisplayMode(displayMode: TransitBoardPreferences["boardDisplayM
   preferences.boardDisplayMode = displayMode;
   saveActiveTransitPreferences();
   closeTopbarMenu();
+}
+
+const frequencyBoard = ref<TransitBoardConfig>();
+const frequencyProfile = ref<GtfsLineFrequencyResponse>();
+const frequencyLoading = ref(false);
+const frequencyError = ref(false);
+const frequencyDestinations = ref<string[]>([]);
+let frequencyController: AbortController | undefined;
+let frequencyTrigger: HTMLElement | undefined;
+async function openBoardFrequencies(board: TransitBoardConfig, trigger?: HTMLElement): Promise<void> {
+  frequencyController?.abort();
+  const controller = new AbortController();
+  frequencyController = controller;
+  frequencyTrigger = trigger;
+  frequencyBoard.value = board;
+  const visibleGroups = getVisibleDirectionGroupsForBoard(board.id);
+  frequencyDestinations.value = visibleGroups.length === 1
+    ? [...new Set(visibleGroups[0]!.departures.map((departure) => departure.destination).filter(Boolean))]
+    : [];
+  frequencyProfile.value = undefined;
+  frequencyError.value = false;
+  const lineId = board.schedule?.lineRef;
+  if (!lineId) { frequencyLoading.value = false; frequencyError.value = true; return; }
+  frequencyLoading.value = true;
+  try {
+    const profile = await fetchGtfsLineFrequency(lineId, { signal: controller.signal, allowCoverageFallback: true });
+    if (!controller.signal.aborted) frequencyProfile.value = profile;
+  } catch {
+    if (!controller.signal.aborted) frequencyError.value = true;
+  } finally {
+    if (!controller.signal.aborted) frequencyLoading.value = false;
+  }
+}
+function closeBoardFrequencies(): void {
+  frequencyController?.abort();
+  frequencyBoard.value = undefined;
+  void nextTick(() => { if (frequencyTrigger?.isConnected) frequencyTrigger.focus(); });
 }
 
 function openBoardNews(board: TransitBoardConfig): void {
@@ -2412,7 +2478,7 @@ function isPageVisible(): boolean {
 function startRefreshTimer(): void {
   stopRefreshTimer();
 
-  if (isFullscreenPanelOpen.value) {
+  if (isFullscreenPanelOpen.value || isAutoDashboard.value) {
     return;
   }
 
@@ -2628,6 +2694,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  frequencyController?.abort();
   if (typeof document !== "undefined" && originalDocumentTitle !== undefined) {
     document.title = originalDocumentTitle;
     originalDocumentTitle = undefined;
@@ -2687,7 +2754,7 @@ onBeforeUnmount(() => {
 
           <PlaceSwitcher
             v-if="placeDropdownEnabled"
-            :active-place-id="activePlaceId"
+            :active-place-id="displayedPlaceId"
             :places="placeOptions"
             @add="openPlaceNameModal"
             @select="selectTransitPlace"
@@ -2697,7 +2764,7 @@ onBeforeUnmount(() => {
             <span>{{ formatClock(lastRefresh) }}</span>
             <small>{{ t("app.lastUpdated") }}</small>
           </div>
-          <div class="topbar-inline-buttons">
+          <div v-if="!isAutoDashboard" class="topbar-inline-buttons">
             <button class="button-secondary" type="button" @click="stationModalOpen = true">
               <Plus />
               {{ t("app.addBoard") }}
@@ -2770,7 +2837,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div
-          v-if="!boardTogglesInContextMenu && visibleBoards.length > 0"
+          v-if="!isAutoDashboard && !boardTogglesInContextMenu && visibleBoards.length > 0"
           class="topbar__controls-shell"
         >
           <div
@@ -2892,7 +2959,7 @@ onBeforeUnmount(() => {
         </button>
 
         <Transition :name="placeSwipe.transitionName.value">
-          <div :key="activePlaceId" class="place-swipe-page" :style="placeSwipe.pageStyle.value">
+          <div :key="displayedPlaceId" class="place-swipe-page" :style="placeSwipe.pageStyle.value">
             <section v-if="netexCacheAlert" class="netex-cache-alert" role="status">
               <strong>{{ t("app.netexMissingTitle") }}</strong>
               <span>
@@ -2920,6 +2987,8 @@ onBeforeUnmount(() => {
               <span>{{ t("app.gtfsStaleBody", { days: gtfsStaleAlert.ageDays ?? 20 }) }}</span>
             </section>
 
+            <AutoDashboard v-if="isAutoDashboard" :display-mode="preferences.boardDisplayMode" :closed-summary-mode="preferences.closedDirectionSummaryMode" :terminal-directions-only="preferences.terminalDirectionsOnly" :max-departures-per-direction="preferences.maxDeparturesPerDirection" @back="selectTransitPlace(activePlaceId)" @show-pattern="openPatternModal" />
+            <template v-else>
             <EmptyStationsState
               v-if="visibleBoards.length === 0"
               :place-label="activePlaceLabel"
@@ -2980,6 +3049,7 @@ onBeforeUnmount(() => {
                     @remove="removeCustomBoard(board.id)"
                     @open-line-page="openLinePage"
                     @open-news="openBoardNews"
+                    @open-frequencies="openBoardFrequencies"
                     @open-fullscreen-panel="openFullscreenPanel"
                     @schedule-alarm="openAlarmModal"
                     @show-pattern="openPatternModal"
@@ -2988,6 +3058,7 @@ onBeforeUnmount(() => {
                 </div>
               </template>
             </Draggable>
+            </template>
           </div>
         </Transition>
       </section>
@@ -3033,6 +3104,19 @@ onBeforeUnmount(() => {
           </template>
         </FullscreenStationPanel>
       </Teleport>
+      <LineFrequencyTimetableModal
+        v-if="frequencyBoard"
+        :open="true"
+        :profile="frequencyProfile"
+        :profile-loading="frequencyLoading"
+        :profile-error="frequencyError"
+        :line-color="frequencyBoard.line.color"
+        :station-id="frequencyBoard.schedule?.stopAreaRef || '__unresolved_station__'"
+        :station-name="frequencyBoard.title"
+        :context-label="`${frequencyBoard.line.shortName} · ${frequencyBoard.title}`"
+        :direction-destinations="frequencyDestinations"
+        @close="closeBoardFrequencies"
+      />
       <UserFriendlyTrafficModal
         :open="homeTrafficModalOpen"
         :alert="homeTrafficModalAlert"

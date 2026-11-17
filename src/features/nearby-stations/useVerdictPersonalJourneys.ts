@@ -13,6 +13,8 @@ import {
 export function useVerdictPersonalJourneys(options: {
   origin: { readonly value: GeocoderPoint | undefined };
   datetime: { readonly value: string };
+  gtfsVersion?: { readonly value: string };
+  calendarReady?: { readonly value: boolean };
   provider: TravelRoutesProvider;
 }) {
   const directory = useAddressBook();
@@ -21,7 +23,7 @@ export function useVerdictPersonalJourneys(options: {
   const revision = ref(0);
   const measurements = shallowRef(new Map<string, Pick<PersonalJourneyResult, "status" | "journey">>());
   const routeKey = (row: PersonalJourneyResult) => JSON.stringify([
-    row.origin?.lon, row.origin?.lat, row.destination?.lon, row.destination?.lat, options.datetime.value,
+    row.origin?.lon, row.origin?.lat, row.destination?.lon, row.destination?.lat, options.datetime.value, options.gtfsVersion?.value,
   ]);
   const preferences = computed(() => settings.settings.value.verdictPersonalJourneys ?? []);
   const targets = computed<PersonalJourneyResult[]>(() => {
@@ -65,8 +67,8 @@ export function useVerdictPersonalJourneys(options: {
     ];
   });
 
-  watch(() => [initialized.value, revision.value, targets.value.map(routeKey).join("|")], async (_, __, onCleanup) => {
-    if (!initialized.value) return;
+  watch(() => [initialized.value, revision.value, options.calendarReady?.value, targets.value.map(routeKey).join("|")], async (_, __, onCleanup) => {
+    if (!initialized.value || options.calendarReady?.value === false) return;
     const controller = new AbortController();
     onCleanup(() => controller.abort());
     await Promise.allSettled(targets.value.map(async row => {

@@ -19,6 +19,12 @@ beforeEach(() => { native.platform.mockReturnValue("android"); native.save.mockR
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("PDF export platform boundary", () => {
+  it("preserves the sign of negative market changes in the exported PDF", () => {
+    const bytes = buildNeighborhoodScorePdf({ ...input, sections: [{ title: "Immobilier", items: ["Prix −12,9 % ; activité −4,3 %"] }] });
+    const pdf = new TextDecoder().decode(bytes);
+    const rendered = [...pdf.matchAll(/<([0-9a-f]+)> Tj/gi)].map(match => Buffer.from(match[1]!, "hex").toString("latin1")).join(" ");
+    expect(rendered).toContain("Prix -12,9 % ; activité -4,3 %");
+  });
   it("passes the actual final document bytes and filename to Android", async () => {
     native.save.mockResolvedValue({ status: "saved", uri: "content://qa/document/1", fileName: "resultats.pdf" });
     await expect(downloadNeighborhoodScorePdf(input, "resultats.pdf")).resolves.toMatchObject({ status: "saved" });

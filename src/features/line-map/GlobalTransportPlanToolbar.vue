@@ -197,7 +197,6 @@
         {{ t("globalMap.page.clear") }}
       </button>
       <div
-        v-if="legacyBasemap"
         class="global-transport-plan__layer-control"
         data-global-map-layer-control
         role="group"
@@ -224,7 +223,19 @@
         >
           {{ t("globalMap.page.layerSatellite") }}
         </button>
-        </div>
+      </div>
+      <div v-if="!legacyBasemap" class="global-transport-plan__layer-control" @click.stop>
+        <button type="button" class="global-transport-plan__layer-button"
+          :class="{ 'global-transport-plan__layer-button--active': perspective }"
+          :aria-pressed="!!perspective" :title="t('globalMap.page.perspectiveHint')"
+          @click="emit('toggle-perspective')">{{ t("globalMap.page.perspective") }}</button>
+        <template v-if="perspective">
+          <button v-for="step in [-30, 30]" :key="step" type="button" class="global-transport-plan__layer-button"
+            :aria-label="t(step < 0 ? 'globalMap.page.rotateLeft' : 'globalMap.page.rotateRight')"
+            :title="t(step < 0 ? 'globalMap.page.rotateLeft' : 'globalMap.page.rotateRight')"
+            @click="emit('rotate', step)"><component :is="step < 0 ? RotateCcw : RotateCw" :size="15" /></button>
+        </template>
+      </div>
         <span
           v-if="shareFeedback"
           class="global-transport-plan__share-feedback"
@@ -261,7 +272,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ChevronDown, Map as MapIcon, Radar, SlidersHorizontal } from "lucide-vue-next";
+import { ChevronDown, Map as MapIcon, Radar, RotateCcw, RotateCw, SlidersHorizontal } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
 import PatternTrafficCalendarToggle from "../service-pattern/PatternTrafficCalendarToggle.vue";
 import type { TransportMapBasemapLayer } from "../transport-map/basemap/tileMath";
@@ -295,6 +306,7 @@ const props = withDefaults(defineProps<{
   trafficStatusLabel: string;
   basemapLayer: TransportMapBasemapLayer;
   legacyBasemap: boolean;
+  perspective?: boolean;
   shareFeedback: string;
   radarEnabled?: boolean;
   radarPanelOpen?: boolean;
@@ -327,6 +339,8 @@ const emit = defineEmits<{
   "toggle-iris-subdivisions": [];
   clear: [];
   "update:basemap-layer": [value: TransportMapBasemapLayer];
+  "toggle-perspective": [];
+  rotate: [degrees: number];
 }>();
 
 const { t } = useI18n();

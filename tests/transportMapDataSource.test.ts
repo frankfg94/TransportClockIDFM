@@ -446,7 +446,7 @@ describe("global transport progressive data source", () => {
     source.dispose();
   }, 60_000);
 
-  it("boots from two global assets and promotes to cached chunks without line requests", async () => {
+  it("boots from global assets and promotes to cached chunks without line requests", async () => {
     const calls: string[] = [];
     const loader = new GlobalMapAssetLoader({
       fetcher: async (input: RequestInfo | URL) => {
@@ -476,7 +476,8 @@ describe("global transport progressive data source", () => {
       mask,
       1,
     );
-    expect(calls).toEqual(["manifest.json", "bootstrap.json", "regional.json"]);
+    expect(calls).toEqual(["manifest.json", "bootstrap.json", expect.stringMatching(/^commercial-lines-.*\.json$/u), "regional.json"]);
+    expect(source.getNetwork().linesById.get("line:IDFM:C02370")?.commercialRoutes?.[0]?.code).toBe("K4");
     expect(
       regional.paths.some((path) => path.geometrySource === "gtfs" && path.vertices.length > 2),
     ).toBe(true);
@@ -510,6 +511,7 @@ describe("global transport progressive data source", () => {
     });
     const firstDetailed = await source.queryViewport(detailedCamera, mask, 2);
     expect(calls.some((asset) => asset === "catalog.json")).toBe(true);
+    expect(source.getNetwork().linesById.get("line:IDFM:C02370")?.commercialRoutes?.[0]?.code).toBe("K4");
     expect(calls.some((asset) => asset.startsWith("chunks/"))).toBe(true);
     expect(calls.some((asset) => asset.includes("/lines/") || asset.startsWith("lines/"))).toBe(
       false,

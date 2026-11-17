@@ -96,6 +96,7 @@ export interface HeavyTransportResolver {
 }
 
 export interface UseNearbyHeavyTransportsOptions {
+  gtfsVersion?: { readonly value: string };
   journeyProvider?: JourneyProvider;
   resolver?: HeavyTransportResolver;
   /** Optional departure datetime used for every route probe. */
@@ -439,7 +440,20 @@ export function useNearbyHeavyTransports(
   const journeyProvider = options.journeyProvider ?? defaultJourneyProvider;
   const visibleCandidates = computed(() => candidates.value.filter((candidate) => !hiddenStationIds.value.has(candidate.id)));
 
-  async function refresh(reason: "manual" | "inputs" | "interval" | "visibility" = "manual"): Promise<void> {
+  type RefreshReason = "manual" | "inputs" | "interval" | "visibility";
+  let currentRun: Promise<void> | undefined;
+  function refresh(reason: RefreshReason = "manual"): Promise<void> {
+    currentRun = resolveCandidates(reason);
+    return currentRun;
+  }
+
+  async function retryFailed(): Promise<void> {
+    const token = requestToken.value;
+    if (isLoading.value) await currentRun;
+    if (!disposed && token === requestToken.value && error.value) await refresh();
+  }
+
+  async function resolveCandidates(reason: RefreshReason): Promise<void> {
     if (disposed) return;
     requestController?.abort();
     requestController = undefined;
@@ -448,9 +462,10 @@ export function useNearbyHeavyTransports(
     const origin = source.origin.value;
     const network = source.network?.value;
     const journeyDateTime = resolveNearbyJourneyDateTime(options.journeyDateTime);
-    const originKey = origin ? `${origin.lon},${origin.lat}|${journeyDateTime ?? ""}` : "";
+    const originKey = origin ? `${origin.lon},${origin.lat}|${journeyDateTime ?? ""}|${options.gtfsVersion?.value ?? ""}` : "";
     if (originKey !== candidateOriginKey) {
       candidates.value = [];
+      error.value = undefined;
       candidateOriginKey = originKey;
     }
     if (!origin || !network || source.stationsLoading?.value || (source.futureProjectsReady && !source.futureProjectsReady.value)) {
@@ -557,6 +572,7 @@ export function useNearbyHeavyTransports(
       source.futureProjects?.value.map((project) => `${project.id}:${project.line}:${project.lon}:${project.lat}`).join(",") ?? "",
       source.futureProjectsReady?.value ?? true,
       resolveNearbyJourneyDateTime(options.journeyDateTime),
+      options.gtfsVersion?.value,
     ],
     refreshSoon,
     { immediate: true },
@@ -589,6 +605,8 @@ export function useNearbyHeavyTransports(
     isLoading: readonly(isLoading),
     error: readonly(error),
     refresh,
+    retryFailed,
+    whenSettled: () => currentRun,
     hideStation,
     toggleStation,
     resetVisibility,

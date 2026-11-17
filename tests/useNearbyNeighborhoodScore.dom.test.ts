@@ -8,6 +8,7 @@ import type { NearbyHeavyTransportCandidate, NearbyJourney, NearbyJourneyRequest
 import type { NearbyPlace, PlacesProvider } from "../src/features/nearby-stations/nearbyPlaces";
 import type { NearbyStationEntry } from "../src/features/nearby-stations/nearbyStations";
 import { useNearbyNeighborhoodScore } from "../src/features/nearby-stations/useNearbyNeighborhoodScore";
+import { NeighborhoodGtfsCoverageError } from "../src/features/nearby-stations/neighborhoodJourneys";
 import { buildLineTopologyFromFixture } from "../server/services/topology/buildLineTopology";
 import type { LineTopology } from "../server/services/topology/types";
 
@@ -329,7 +330,7 @@ describe("useNearbyNeighborhoodScore", () => {
     await vi.waitFor(() => expect(score.diagnostics.value.benchmarks).toHaveLength(9));
     await vi.waitFor(() => expect(score.diagnostics.value.benchmarks.every(target => target.status !== "loading")).toBe(true));
     expect(score.diagnostics.value.benchmarks.map(target => target.id)).toContain("employment-val-de-fontenay");
-    expect(findJourneys.mock.calls.every(([input]) => input.purpose === "transport")).toBe(true);
+    expect(findJourneys.mock.calls.every(([input]) => input.purpose === "transport-benchmark")).toBe(true);
     wrapper.unmount();
   });
   it("reports a source timeout instead of leaving its criterion loading", async () => {
@@ -503,11 +504,58 @@ describe("useNearbyNeighborhoodScore", () => {
     await vi.waitFor(() => expect(score.diagnostics.value.lastServices[0]?.[1]?.stopName).toBe("First station"));
     candidates.value = [second];
     await vi.waitFor(() => expect(fetchLastService).toHaveBeenCalledTimes(2));
-    await vi.waitFor(() => expect(score.diagnostics.value.lastServices).toEqual([[line.id, undefined]]));
+    await vi.waitFor(() => expect(score.diagnostics.value.errors).toContainEqual(expect.objectContaining({
+      taskId: `last-service:${JSON.stringify([line.id, second.station.id])}`,
+      message: "Unavailable timetable",
+    })));
+    expect(score.diagnostics.value.lastServices).toEqual([]);
     candidates.value = [first];
     await vi.waitFor(() => expect(score.diagnostics.value.lastServices[0]?.[1]?.seconds).toBe(90000));
+    expect(score.diagnostics.value.errors.some(error => error.taskId.startsWith("last-service:"))).toBe(false);
     expect(fetchLastService).toHaveBeenCalledTimes(2);
     wrapper.unmount();
+  });
+
+  it("replaces a pending last departure as soon as the station changes and stops night access on unmount", async () => {
+    const line = createLine(), first = createHeavyCandidate(line), second = createHeavyCandidate(line);
+    first.station.id = "station:first";
+    second.id = "heavy:second";
+    second.station.id = "station:second";
+    const heavyCandidates = ref([first]);
+    let oldStation: AbortSignal | undefined;
+    let nightSignal: AbortSignal | undefined;
+    let finishOld!: () => void;
+    const oldPending = new Promise<void>(resolve => { finishOld = resolve; });
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const wrapper = mount(defineComponent({ setup() {
+      score = useNearbyNeighborhoodScore({ origin: ref({ lon: 2.3, lat: 48.82 }), journeySource: "gtfs",
+        stations: ref([]), network: ref(createNetwork(line)), heavyCandidates,
+        fetchFrequency: async () => readyFrequency(line.id), fetchTopology: async () => undefined,
+        fetchLastService: async (_line, station, options) => {
+          if (station === first.station.id) { oldStation = options?.signal; await oldPending; }
+          return { seconds: 91000, stopName: station };
+        },
+        fetchNightAccess: async (_network, _origin, _datetime, signal) => {
+          nightSignal = signal;
+          await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+          return { journeys: [], status: "ready", linesExamined: 0, walkingStops: 0 };
+        },
+        placesProvider: { searchNearby: async () => [], searchDestinations: async () => [] },
+        travelRoutesProvider: { findJourneys: async () => [] },
+      });
+      return () => null;
+    } }));
+    try {
+      await vi.waitFor(() => { expect(oldStation?.aborted).toBe(false); expect(nightSignal?.aborted).toBe(false); });
+      heavyCandidates.value = [second];
+      await vi.waitFor(() => expect(score.diagnostics.value.lastServices[0]?.[1]?.stopName).toBe(second.station.id));
+      expect(oldStation?.aborted).toBe(true);
+      finishOld();
+      await flushPromises();
+      expect(score.diagnostics.value.lastServices[0]?.[1]?.stopName).toBe(second.station.id);
+      expect(score.transportPending.value.some(id => id.includes(first.station.id))).toBe(false);
+    } finally { finishOld(); wrapper.unmount(); }
+    expect(nightSignal?.aborted).toBe(true);
   });
 
   it("deduplicates POI loading while adding the Châtelet and frequency stages", async () => {
@@ -631,13 +679,67 @@ describe("useNearbyNeighborhoodScore", () => {
     await vi.waitFor(() => expect(findJourneys).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(score.error.value).toBeInstanceOf(Error));
     expect(score.errorSource.value).toBe("routes");
-    await score.refresh();
+    await score.retryFailedTransport();
     await vi.waitFor(() => expect(findJourneys).toHaveBeenCalledTimes(2));
     await vi.waitFor(() => expect(score.result.value.positiveFacts.some((fact) => fact.kind === "chateletUnder30")).toBe(true));
     expect(score.error.value).toBeUndefined();
     expect(score.errorSource.value).toBeUndefined();
 
     wrapper.unmount();
+  });
+
+  it("retries failed GTFS tasks once and preserves successful empty routes and frequencies", async () => {
+    const line = createLine();
+    const findJourneys = vi.fn(async (request: NearbyJourneyRequest): Promise<NearbyJourney[]> => {
+      if (request.destination.id === "chatelet" && !coverageAvailable) {
+        throw new NeighborhoodGtfsCoverageError("20261118");
+      }
+      return [];
+    });
+    let coverageAvailable = false;
+    const fetchTopology = vi.fn().mockRejectedValueOnce(new Error("topology temporarily unavailable")).mockResolvedValue(undefined);
+    const fetchFrequency = vi.fn(async () => readyFrequency(line.id));
+    const fetchLastService = vi.fn()
+      .mockRejectedValueOnce(new Error("last service timed out"))
+      .mockResolvedValue(undefined);
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const wrapper = mount(defineComponent({ setup() {
+      score = useNearbyNeighborhoodScore({
+        journeySource: "gtfs",
+        origin: ref({ lon: 2.30, lat: 48.82, label: "Origine" }),
+        stations: ref([createEntry(line)]),
+        network: ref(createNetwork(line)),
+        placesProvider: { searchDestinations: vi.fn(async () => []), searchNearby: vi.fn(async () => []) },
+        travelRoutesProvider: { findJourneys },
+        fetchNightAccess: vi.fn(async () => ({ journeys: [], status: "ready" as const, linesExamined: 0, walkingStops: 0 })),
+        fetchTopology,
+        fetchFrequency,
+        fetchLastService,
+      });
+      return () => null;
+    } }));
+    try {
+      await vi.waitFor(() => {
+        expect(score.gtfsCoverageMissing.value).toBe(true);
+        expect(score.diagnostics.value.errors.some(error => error.taskId.startsWith("last-service:"))).toBe(true);
+        expect(score.diagnostics.value.errors.some(error => error.taskId === `branches:${line.id}`)).toBe(true);
+        expect(score.isLoading.value).toBe(false);
+      });
+      const frequency = score.diagnostics.value.frequencies[0];
+      expect(frequency).toBeDefined();
+      const probesBeforeRetry = findJourneys.mock.calls.length;
+      coverageAvailable = true;
+      await Promise.all([score.retryFailedTransport(), score.retryFailedTransport()]);
+      expect(findJourneys.mock.calls.slice(probesBeforeRetry).map(([request]) => request.destination.id)).toEqual(["chatelet"]);
+      expect(fetchLastService).toHaveBeenCalledTimes(2);
+      expect(fetchTopology).toHaveBeenCalledTimes(2);
+      expect(fetchFrequency).toHaveBeenCalledTimes(1);
+      expect(score.diagnostics.value.frequencies[0]).toBe(frequency);
+      expect(score.gtfsCoverageMissing.value).toBe(false);
+      expect(score.diagnostics.value.errors.filter(error => error.source === "routes" || error.source === "timetables")).toEqual([]);
+    } finally {
+      wrapper.unmount();
+    }
   });
 
   it("aborts origin-scoped probes when a refresh replaces the origin", async () => {

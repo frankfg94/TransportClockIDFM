@@ -139,6 +139,6 @@ export async function buildRoutingArtifacts(timetableDir: string, destination: s
     const text = JSON.stringify(index);
     await fs.writeFile(join(destination, "index.json"), text); bytes += Buffer.byteLength(text); fileCount++;
     if (!connectionCount) throw new Error("GTFS routing index has no connections");
-    return { schemaVersion: 1, startDate: timetable.startDate, endDate: timetable.endDate, connectionCount, fileCount, bytes };
+    return { schemaVersion: 1, startDate: timetable.startDate, endDate: timetable.endDate, maxTimeSeconds: index.maxTimeSeconds, connectionCount, fileCount, bytes };
   } finally { await fs.rm(spool, { recursive: true, force: true }); }
 }

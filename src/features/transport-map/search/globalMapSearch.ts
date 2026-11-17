@@ -190,6 +190,8 @@ export function createGlobalMapSearchIndex(
     const normalizedValues = normalizeSearchValues([
       line.code,
       line.label,
+      line.commercialNetworkLabel ?? "",
+      ...(line.commercialRoutes ?? []).flatMap((route) => [route.code, route.name]),
       line.id,
       line.mode,
       `${line.mode} ${line.code}`,

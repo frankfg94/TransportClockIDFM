@@ -26,6 +26,7 @@ vi.mock("../src/features/line-optimizer/useLineOptimizer", () => ({
     result: ref(),
     status: ref("idle"),
     errorPhase: ref("locations"),
+    simulationTime: ref(""),
     candidates: ref([]),
     winner: ref(mocks.winner),
     now: ref(Date.now()),
@@ -147,6 +148,9 @@ describe("standalone optimizer page", () => {
         .slice(0, 4)
         .map((input) => (input.element as HTMLInputElement).value),
     ).toEqual(["60", "90", "180", "30"]);
+    expect(wrapper.get('label[for="optimizer-simulation-time"]').text()).toContain("Heure de simulation");
+    await wrapper.get('#optimizer-simulation-time').setValue("08:30");
+    expect((wrapper.get('#optimizer-simulation-time').element as HTMLInputElement).value).toBe("08:30");
     await wrapper.get("form").trigger("submit");
     expect(mocks.refresh).toHaveBeenCalledOnce();
     wrapper.unmount();

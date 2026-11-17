@@ -1,5 +1,6 @@
 import type { GlobalMapBounds } from "../contracts/manifest.js";
 import {
+  boundsCorners,
   screenToWorld,
   visibleWorldBounds,
   worldScaleAtZoom,
@@ -12,7 +13,8 @@ export interface CameraState {
   centerWorldX: number;
   centerWorldY: number;
   zoom: number;
-  bearing: 0;
+  bearing: number;
+  pitch?: number;
   viewportWidthCssPx: number;
   viewportHeightCssPx: number;
   pixelRatio: number;
@@ -20,6 +22,8 @@ export interface CameraState {
 }
 
 export interface CameraViewportOptions {
+  bearing?: number;
+  pitch?: number;
   centerWorldX?: number;
   centerWorldY?: number;
   zoom?: number;
@@ -51,7 +55,6 @@ export function createCamera(options: CameraViewportOptions = {}): CameraState {
   return {
     ...DEFAULT_CAMERA,
     ...options,
-    bearing: 0,
   };
 }
 
@@ -61,12 +64,11 @@ export function cloneCamera(camera: CameraState): CameraState {
 
 export function updateCamera(
   camera: CameraState,
-  patch: Partial<Omit<CameraState, "bearing">>,
+  patch: Partial<CameraState>,
 ): CameraState {
   return {
     ...camera,
     ...patch,
-    bearing: 0,
     generation: patch.generation ?? camera.generation + 1,
   };
 }
@@ -74,7 +76,11 @@ export function updateCamera(
 export function panCameraByScreen(
   camera: CameraState,
   delta: ScreenPoint,
+  from = { x: camera.viewportWidthCssPx / 2, y: camera.viewportHeightCssPx / 2 },
 ): CameraState {
+  if (camera.pitch || camera.bearing) {
+    return preserveScreenAnchor(camera, screenToWorld(from, camera), { x: from.x + delta.x, y: from.y + delta.y });
+  }
   const scale = worldScaleAtZoom(camera.zoom);
   return updateCamera(camera, {
     centerWorldX: camera.centerWorldX - delta.x / scale,
@@ -88,6 +94,9 @@ export function zoomCameraAroundScreenPoint(
   anchorScreen: ScreenPoint,
 ): CameraState {
   const anchorWorld = screenToWorld(anchorScreen, camera);
+  if (camera.pitch || camera.bearing) {
+    return preserveScreenAnchor({ ...camera, zoom: nextZoom }, anchorWorld, anchorScreen);
+  }
   const newScale = worldScaleAtZoom(nextZoom);
   // Apply the zoom and anchor correction as one camera update. Apart from
   // avoiding a short-lived intermediate object, this keeps one wheel sample
@@ -134,6 +143,24 @@ export function fitCameraToBounds(
   const bottomInset = Math.max(0, insets.bottom ?? 0);
   const availableWidth = Math.max(1, camera.viewportWidthCssPx - leftInset - rightInset - paddingCssPx * 2);
   const availableHeight = Math.max(1, camera.viewportHeightCssPx - topInset - bottomInset - paddingCssPx * 2);
+  if (camera.pitch || camera.bearing) {
+    const anchor = { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 };
+    const screen = { x: leftInset + paddingCssPx + availableWidth / 2, y: topInset + paddingCssPx + availableHeight / 2 };
+    const corners = boundsCorners(bounds);
+    let low = minZoom;
+    let high = maxZoom;
+    for (let i = 0; i < 20; i++) {
+      const zoom = (low + high) / 2;
+      const trial = preserveScreenAnchor({ ...camera, zoom }, anchor, screen);
+      const fits = corners.every(corner => {
+        const pixel = worldToScreen(corner, trial);
+        return Math.abs(pixel.x - screen.x) <= availableWidth / 2 && Math.abs(pixel.y - screen.y) <= availableHeight / 2;
+      });
+      if (fits) low = zoom;
+      else high = zoom;
+    }
+    return preserveScreenAnchor({ ...camera, zoom: low }, anchor, screen);
+  }
   const scale = Math.min(availableWidth / width, availableHeight / height);
   const zoom = Math.max(minZoom, Math.min(maxZoom, Math.log2(scale / 256)));
   const worldScale = worldScaleAtZoom(zoom);
@@ -152,6 +179,12 @@ export function clampCameraToBounds(
   bounds: GlobalMapBounds,
   paddingRatio = 0.15,
 ): CameraState {
+  // The tilted footprint is asymmetric and may span the whole region.
+  // Constrain the pivot without moving it when the camera turns.
+  if (camera.pitch) return updateCamera(camera, {
+    centerWorldX: Math.max(bounds.minX, Math.min(bounds.maxX, camera.centerWorldX)),
+    centerWorldY: Math.max(bounds.minY, Math.min(bounds.maxY, camera.centerWorldY)),
+  });
   const viewportBounds = visibleWorldBounds(camera);
   const width = viewportBounds.maxX - viewportBounds.minX;
   const height = viewportBounds.maxY - viewportBounds.minY;
@@ -173,6 +206,13 @@ export function preserveScreenAnchor(
   anchorWorld: WorldPoint,
   anchorScreen: ScreenPoint,
 ): CameraState {
+  if (camera.pitch || camera.bearing) {
+    const actual = screenToWorld(anchorScreen, camera);
+    return updateCamera(camera, {
+      centerWorldX: camera.centerWorldX + anchorWorld.x - actual.x,
+      centerWorldY: camera.centerWorldY + anchorWorld.y - actual.y,
+    });
+  }
   const scale = worldScaleAtZoom(camera.zoom);
   return updateCamera(camera, {
     centerWorldX: anchorWorld.x - (anchorScreen.x - camera.viewportWidthCssPx / 2) / scale,

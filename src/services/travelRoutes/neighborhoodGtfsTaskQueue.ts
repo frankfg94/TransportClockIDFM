@@ -1,3 +1,5 @@
+import type { NeighborhoodJourneysRequest } from "../../features/nearby-stations/neighborhoodJourneys";
+
 /** Bound concurrent datasets without blocking every caller behind an HTTP
  * walking wait. The timetable worker keeps the default single slot.
  * Cancellation never interrupts a routing tree shared by other subscribers. */
@@ -38,13 +40,21 @@ export function createNeighborhoodGtfsTaskQueue(concurrency = 1) {
  * These limits bound work, not the returned routes or the two shared trees. */
 export function createNeighborhoodGtfsSchedulingQueues() {
   const transport = createNeighborhoodGtfsTaskQueue(3);
+  // Large-station and job-hub probes share the origin tree with heavy
+  // access but can publish before its destination-specific walking batches.
+  const benchmarks = createNeighborhoodGtfsTaskQueue();
   const night = createNeighborhoodGtfsTaskQueue();
   const places = createNeighborhoodGtfsTaskQueue();
   const timetable = createNeighborhoodGtfsTaskQueue();
-  const all = [transport, night, places, timetable];
+  const all = [transport, benchmarks, night, places, timetable];
   return {
-    select(kind: "routes" | "frequency" | "last-service" | "night-access", purpose?: "transport" | "night-transport" | "places") {
-      return kind === "night-access" ? night : kind !== "routes" ? timetable : purpose === "places" ? places : purpose === "night-transport" ? night : transport;
+    select(kind: "routes" | "frequency" | "last-service" | "night-access", purpose?: NeighborhoodJourneysRequest["purpose"]) {
+      if (kind === "night-access") return night;
+      if (kind !== "routes") return timetable;
+      if (purpose === "night-transport") return night;
+      if (purpose === "places") return places;
+      if (purpose === "transport-benchmark") return benchmarks;
+      return transport;
     },
     cancel(id: number) { for (const queue of all) queue.cancel(id); },
     idle() { return Promise.all(all.map(queue => queue.idle())); },

@@ -18,7 +18,8 @@ import GtfsFrequencyCard from "./GtfsFrequencyCard.vue";
 import AnnualRidershipStationCard from "./AnnualRidershipStationCard.vue";
 import CitiesLinePattern from "./CitiesLinePattern.vue";
 import GlobalMapSidebarLineStats from "./GlobalMapSidebarLineStats.vue";
-import LineIconBadge from "../../components/LineIconBadge.vue";
+import GlobalMapLineBadges from "../transport-map/overlays/GlobalMapLineBadges.vue";
+import { globalMapCommercialDate, globalMapLineDisplayLabel } from "../transport-map/overlays/globalMapLinePresentation";
 import UserFriendlyTraffic from "../../components/UserFriendlyTraffic.vue";
 import MaterialCombobox, { type MaterialComboboxOption } from "../../components/MaterialCombobox.vue";
 import { useI18n } from "../../i18n";
@@ -194,8 +195,9 @@ function updateNearbyRadius(value: string): void {
     <section class="global-map-picker-sidebar__line-hero">
       <div class="global-map-picker-sidebar__line-hero-main">
         <span class="global-map-picker-sidebar__line-hero-badge">
-          <LineIconBadge
-            :line="{
+          <GlobalMapLineBadges
+            :line="displayLine"
+            :fallback="{
               id: displayLine.id,
               label: displayLine.label || displayLine.code,
               mode: displayLine.mode,
@@ -209,7 +211,10 @@ function updateNearbyRadius(value: string): void {
         </span>
         <div>
           <p>{{ t("globalMap.sidebar.lineProfile") }}</p>
-          <h3>{{ displayLine.label || displayLine.code }}</h3>
+          <h3>{{ globalMapLineDisplayLabel(displayLine) }}</h3>
+          <span v-if="displayLine.commercialRoutes?.length">{{ globalMapCommercialDate(displayLine)
+            ? t("globalMap.sidebar.observedTerLinesDate", { date: globalMapCommercialDate(displayLine)! })
+            : t("globalMap.sidebar.observedTerLines") }}</span>
           <span
             >{{ modeLabel(displayLine.mode) }} <i aria-hidden="true">·</i> {{ lineCount }}
             {{ lineCountLabel }}</span
@@ -217,7 +222,7 @@ function updateNearbyRadius(value: string): void {
         </div>
       </div>
       <span
-        v-if="displayLine.code && displayLine.code !== displayLine.label"
+        v-if="!displayLine.commercialRoutes?.length && displayLine.code && displayLine.code !== displayLine.label"
         class="global-map-picker-sidebar__line-code"
         >{{ displayLine.code }}</span
       >

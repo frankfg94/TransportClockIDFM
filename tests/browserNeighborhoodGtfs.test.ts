@@ -17,6 +17,18 @@ async function setup() {
 }
 const request = () => reactive({ origin: { lat: 48.8, lon: 2.3 }, datetime: "20261013T090000", destinations: [{ id: "a", lat: 48.9, lon: 2.4 }] });
 describe("browser neighborhood GTFS", () => {
+  it("releases the serial timetable worker when its last station is cancelled", async () => {
+    const router = await setup(), controller = new AbortController();
+    const old = router.requestBrowserNeighborhoodGtfs({ kind: "last-service", lineId: "T6", stationId: "first" }, controller.signal);
+    const oldWorker = instances[0]!;
+    controller.abort();
+    await expect(old).rejects.toMatchObject({ name: "AbortError" });
+    expect(oldWorker.terminate).toHaveBeenCalledOnce();
+    const next = router.requestBrowserNeighborhoodGtfs({ kind: "last-service", lineId: "T6", stationId: "second" }, new AbortController().signal);
+    const replacement = instances[1]!, message = replacement.messages[0] as { id: number };
+    replacement.onmessage!({ data: { id: message.id, payload: { seconds: 91000 } } });
+    await expect(next).resolves.toEqual({ seconds: 91000 });
+  });
   it("runs night access in its own worker independently of heavy routes and timetables", async () => {
     const router = await setup(), signal = new AbortController().signal;
     const day = router.routeBrowserNeighborhoodGtfs(request(), signal);

@@ -12,6 +12,8 @@ import { isSportsPlace, isTennisPlace, makePlaceFact, scorePlaces } from "../pla
 import { clamp, normalizeScoreText, saturatingNeighborhoodBonus } from "../primitives";
 import { DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME } from "../departureTimes";
 
+export const NATURE_LEISURE_SCORE_RULES = { base: 4, target: 3, maximumBonus: 6, factsOnlyBase: 7, factsMaximum: 2 } as const;
+
 export function buildNatureLeisureCategory(input: NeighborhoodScoreInput): NeighborhoodCategoryResult {
   const base = category("nature-leisure");
   const greenSpaceFacts = [
@@ -58,12 +60,19 @@ export function buildNatureLeisureCategory(input: NeighborhoodScoreInput): Neigh
     }));
   }
   const baseScore = leisure.length > 0
-    ? 4 + saturatingNeighborhoodBonus(leisure.length, 3, 6)
-    : 7;
+    ? NATURE_LEISURE_SCORE_RULES.base + saturatingNeighborhoodBonus(leisure.length, NATURE_LEISURE_SCORE_RULES.target, NATURE_LEISURE_SCORE_RULES.maximumBonus)
+    : NATURE_LEISURE_SCORE_RULES.factsOnlyBase;
+  const factBonus = Math.min(NATURE_LEISURE_SCORE_RULES.factsMaximum, greenSpaceFacts.length + sportsFacts.length);
+  const score = clamp(baseScore + factBonus);
   return withFacts({
     ...base,
     available: true,
-    score: clamp(baseScore + Math.min(2, greenSpaceFacts.length + sportsFacts.length)),
+    score,
+    scoreDetails: [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.local", method: "sum", score, rows: [
+      { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.leisure", measurement: leisure.length, measurementUnit: "count", points: baseScore },
+      { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.natureFacts", measurement: greenSpaceFacts.length + sportsFacts.length, measurementUnit: "count", points: factBonus },
+      ...(score < baseScore + factBonus ? [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.cap" as const, points: score - baseScore - factBonus }] : []),
+    ] }],
     positiveFacts,
     negativeFacts: [],
   });

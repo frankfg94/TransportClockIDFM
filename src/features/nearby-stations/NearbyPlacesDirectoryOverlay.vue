@@ -30,12 +30,14 @@ const props = defineProps<{
   error?: string;
   basemapStyle?: TransportMapBasemapStyle;
   highPrecisionNoiseEnabled?: boolean;
+  hideClosedPlaces?: boolean;
 }>();
 
 const emit = defineEmits<{
   close: [];
   retry: [];
   "update:walkingMinutes": [value: NearbyWalkingMinutes];
+  "update:hideClosedPlaces": [value: boolean];
   placeContextMenu: [placeId: string, anchor: HTMLElement];
   requestGroupWalkingRoutes: [groupId: NearbyPlaceGroupId, places: NearbyPlace[]];
   selectPlace: [placeId?: string];
@@ -359,6 +361,7 @@ onBeforeUnmount(() => {
                   :selected-line-ids="() => []"
                   :active-modes="[]"
                   :places="mapPlaces"
+                  :hide-closed-places="hideClosedPlaces"
                   :selected-place-id="selectedPlaceId"
                   :walking-routes="walkingRoutes"
                   :walking-route="selectedWalkingRoute"
@@ -404,6 +407,7 @@ onBeforeUnmount(() => {
 
             <NearbyPlacesAnnuary
               :places="places"
+              :hide-closed-places="hideClosedPlaces"
               :walking-minutes="walkingMinutes"
               :origin-city="origin.city"
               :query="query"
@@ -417,6 +421,7 @@ onBeforeUnmount(() => {
               :error="error"
               @update:query="query = $event"
               @update:walking-minutes="updateWalkingMinutes"
+              @update:hide-closed-places="emit('update:hideClosedPlaces', $event)"
               @update:visible-places="directoryVisiblePlaces = $event"
               @request-group-walking-routes="(groupId, groupPlaces) => emit('requestGroupWalkingRoutes', groupId, groupPlaces)"
               @place-context-menu="handlePlaceContextMenu"

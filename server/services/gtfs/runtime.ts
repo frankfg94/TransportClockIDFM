@@ -82,8 +82,8 @@ export async function getGtfsManifest(
   return loaded.value;
 }
 
-export async function getGtfsPublicStatus(event?: H3Event): Promise<GtfsPublicStatus> {
-  const manifest = await getGtfsManifest(event);
+export async function getGtfsPublicStatus(event?: H3Event, options: { fresh?: boolean; calendar?: boolean } = {}): Promise<GtfsPublicStatus> {
+  const manifest = await getGtfsManifest(event, options);
   const freshness = datasetFreshness("gtfs", manifest ?? {});
 
   return {
@@ -98,6 +98,8 @@ export async function getGtfsPublicStatus(event?: H3Event): Promise<GtfsPublicSt
           ageDays: freshness.ageDays,
           lineCount: manifest.lineCount,
           cacheGeneration: manifest.cacheGeneration,
+          ...(options.calendar ? { calendar: { schemaVersion: manifest.schemaVersion, cacheGeneration: manifest.cacheGeneration,
+            timetable: manifest.timetable, routing: manifest.routing } } : {}),
         }
       : {}),
     stale: freshness.status === "stale",

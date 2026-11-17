@@ -6,6 +6,7 @@ import {
   type GlobalMapCatalog,
   type GlobalMapChunkDescriptor,
   type GlobalMapChunkPayload,
+  type GlobalMapCommercialLinesDocument,
   type GlobalMapLine,
   type GlobalMapLinePaletteDocument,
   type GlobalMapManifest,
@@ -46,11 +47,36 @@ export class GlobalMapAssetLoader {
     manifest: GlobalMapManifest,
     signal?: AbortSignal,
   ): Promise<TransportMapNetwork> {
-    const [payload, palette] = await Promise.all([
+    const [payload, palette, commercialLines] = await Promise.all([
       this.loadBootstrapPayload(manifest, signal),
       this.loadLinePalette(manifest, signal),
+      this.loadCommercialLines(manifest, signal),
     ]);
-    return decodeBootstrap(payload, manifest, undefined, palette);
+    return decodeBootstrap(payload, manifest, undefined, palette, commercialLines);
+  }
+
+  async loadCommercialLines(
+    manifest: GlobalMapManifest,
+    signal?: AbortSignal,
+  ): Promise<GlobalMapCommercialLinesDocument | undefined> {
+    const descriptor = manifest.files.commercialLines;
+    if (!descriptor) return undefined;
+    const document = await this.getJson<GlobalMapCommercialLinesDocument>(descriptor.asset, signal);
+    if (
+      document.schemaVersion !== 1 || document.dataVersion !== manifest.dataVersion ||
+      !/^\d{8}$/u.test(document.serviceDate) || !/^[a-f0-9]{64}$/iu.test(document.idfmSha256) ||
+      !/^[a-f0-9]{64}$/iu.test(document.sncfSha256) || !Array.isArray(document.entries) ||
+      document.entries.some((entry) => !entry || typeof entry.lineId !== "string" ||
+        typeof entry.networkLabel !== "string" || !Array.isArray(entry.routes) ||
+        entry.routes.some((route) => !route || typeof route.code !== "string" || !route.code.trim() ||
+          typeof route.name !== "string" || typeof route.color !== "string" ||
+          typeof route.textColor !== "string" || typeof route.sourceRouteId !== "string" ||
+          !Number.isInteger(route.observedTrips) || route.observedTrips < 1)) ||
+      new Set(document.entries.map((entry) => entry.lineId)).size !== document.entries.length
+    ) {
+      throw new Error("Global map commercial lines version mismatch");
+    }
+    return document;
   }
 
   async loadBootstrapPayload(
@@ -445,17 +471,22 @@ export function decodeBootstrap(
   manifest: Pick<GlobalMapManifest, "bounds">,
   catalog?: GlobalMapCatalog,
   palette?: GlobalMapLinePaletteDocument,
+  commercialLines?: GlobalMapCommercialLinesDocument,
 ): TransportMapNetwork {
   const stations = (catalog?.stations ?? payload.stations).map((row, index) => decodeStationRow(row, index, payload.lines));
   const stationsByIndex = new Map(stations.map((station) => [station.index, station]));
   const stationIdsByLineId = indexStationIdsByLine(stations);
   const paletteByKey = createPaletteIndex(palette);
+  const commercialById = new Map((commercialLines?.entries ?? []).map((entry) => [entry.lineId, {
+    ...entry, serviceDate: commercialLines!.serviceDate,
+  }]));
   const lines = payload.lines.map((row, index) => decodeLineRow(
     row,
     stationsByIndex,
     stationIdsByLineId,
     index,
     paletteByKey,
+    commercialById,
   ));
   const paths = payload.paths.map((row) => {
     const [pathIndex, lineIndex, startX, startY, endX, endY] = row;
@@ -511,6 +542,7 @@ function decodeLineRow(
   stationIdsByLineId: Map<string, string[]>,
   index: number,
   paletteByKey: Map<string, GlobalMapLinePaletteDocument["entries"][number]>,
+  commercialById: Map<string, GlobalMapCommercialLinesDocument["entries"][number] & { serviceDate: string }>,
 ): GlobalMapLine {
   const [id, code, label, mode, color, textColor, stationIndices, pathIndices, pictogram] = row;
   const paletteEntry = paletteByKey.get(normalizePaletteKey(id)) ?? paletteByKey.get(normalizePaletteKey(code));
@@ -524,6 +556,7 @@ function decodeLineRow(
     .map((stationIndex) => stationsByIndex.get(stationIndex)?.id)
     .filter((value): value is string => Boolean(value));
   const catalogStationIds = stationIdsByLineId.get(id) ?? [];
+  const commercial = (paletteEntry?.mode ?? mode) === "TRAIN" ? commercialById.get(id) : undefined;
   return {
     id,
     index,
@@ -536,6 +569,11 @@ function decodeLineRow(
     aliases: [code, label],
     stationIds: decodedStationIds.length > 0 ? decodedStationIds : catalogStationIds,
     geometryIds: pathIndices.map((index) => `path:regional:${index}`),
+    ...(commercial?.routes?.length ? {
+      commercialRoutes: commercial.routes,
+      commercialNetworkLabel: commercial.networkLabel,
+      commercialServiceDate: commercial.serviceDate,
+    } : {}),
   };
 }
 

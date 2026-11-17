@@ -20,6 +20,7 @@ vi.mock("maplibre-gl", () => ({
     once(_event: string, callback: () => void) { fixture.load = callback; }
     getCanvas() { return { getContext: () => ({}) }; }
     getStyle() { return { version: 8, sources: {}, layers: [] }; }
+    getLayer() { return undefined; }
     isStyleLoaded() { return true; }
     addControl() {}
     removeControl() {}

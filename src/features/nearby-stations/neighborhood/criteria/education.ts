@@ -6,6 +6,8 @@ import type { ScoredPlace } from "../places";
 import { classifyEducationPlace, formatEducationPlaceLabel, isEducationPlace, scorePlaces } from "../places";
 import { clamp, saturatingNeighborhoodBonus } from "../primitives";
 
+export const EDUCATION_SCORE_RULES = { base: 4, target: 3, maximumBonus: 6 } as const;
+
 export function buildEducationCategory(input: NeighborhoodScoreInput): NeighborhoodCategoryResult {
   const base = category("education");
   if (!input.placesLoaded) {
@@ -33,10 +35,16 @@ export function buildEducationCategory(input: NeighborhoodScoreInput): Neighborh
     };
   }
 
+  const bonus = saturatingNeighborhoodBonus(establishments.length, EDUCATION_SCORE_RULES.target, EDUCATION_SCORE_RULES.maximumBonus);
+  const score = clamp(EDUCATION_SCORE_RULES.base + bonus);
   return withFacts({
     ...base,
     available: true,
-    score: clamp(4 + saturatingNeighborhoodBonus(establishments.length, 3, 6)),
+    score,
+    scoreDetails: [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.local", method: "sum", score, rows: [
+      { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.base", points: EDUCATION_SCORE_RULES.base },
+      { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.establishments", measurement: establishments.length, measurementUnit: "count", points: bonus },
+    ] }],
     positiveFacts: buildEducationGroupFacts(establishments),
     negativeFacts: [],
   });

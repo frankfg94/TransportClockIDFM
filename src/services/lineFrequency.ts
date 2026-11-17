@@ -54,27 +54,29 @@ function isCoveredEarlierServiceDate(
 /** Cache completed responses only: each caller owns its cancellation signal. */
 export async function fetchGtfsLineFrequency(
   lineId: string,
-  options: { signal?: AbortSignal; allowCoverageFallback?: boolean } = {},
+  options: { signal?: AbortSignal; allowCoverageFallback?: boolean; serviceDate?: string } = {},
 ): Promise<GtfsLineFrequencyResponse> {
   options.signal?.throwIfAborted();
   const now = Date.now();
   const requestDate = getGtfsRequestDate(new Date(now));
-  const serviceDate = getGtfsServiceDate(new Date(now));
+  const serviceDate = options.serviceDate ?? getGtfsServiceDate(new Date(now));
   const cacheKey = JSON.stringify([lineId, options.allowCoverageFallback === true]);
   for (const [key, entry] of cache) {
     if (entry.expiresAt <= now || entry.requestDate !== requestDate) cache.delete(key);
   }
-  const cached = cache.get(cacheKey);
+  const cached = options.serviceDate ? undefined : cache.get(cacheKey);
   if (cached) {
     cache.delete(cacheKey);
     cache.set(cacheKey, cached);
     return cached.value;
   }
 
-  const fallbackQuery = options.allowCoverageFallback ? "?allowCoverageFallback=1" : "";
+  const query = new URLSearchParams();
+  if (options.serviceDate) query.set("serviceDate", options.serviceDate);
+  if (options.allowCoverageFallback) query.set("allowCoverageFallback", "1");
   const value = await runNetworkTask(async (signal) => {
     const response = await fetch(
-      toServerApiUrl(`/api/lines/${encodeURIComponent(lineId)}/frequency${fallbackQuery}`),
+      toServerApiUrl(`/api/lines/${encodeURIComponent(lineId)}/frequency${query.size ? "?" + query : ""}`),
       {
         signal,
         cache: "no-store",
@@ -94,6 +96,8 @@ export async function fetchGtfsLineFrequency(
   ) {
     throw new Error("GTFS frequency response has an outdated service date");
   }
+  // The Verdict owns its explicitly dated cache and invalidates it on pack changes.
+  if (options.serviceDate) return value;
   cache.delete(cacheKey);
   cache.set(cacheKey, {
     value,

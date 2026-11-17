@@ -68,6 +68,12 @@ const rerA = {
 } satisfies GlobalMapLine;
 
 describe("global map offline search", () => {
+  it("finds a TER line by an observed commercial code without changing its IDFM identity", () => {
+    const ter = { ...metro14, id: "line:IDFM:C02370", code: "C02370", label: "TER", mode: "TRAIN",
+      commercialNetworkLabel: "TER Normandie", commercialRoutes: [{ code: "K4", name: "Paris - Granville",
+        color: "BF005F", textColor: "FFFFFF", sourceRouteId: "sncf:1", observedTrips: 1 }] } satisfies GlobalMapLine;
+    expect(searchGlobalMapNetwork([], [ter], "K4").lines.map((line) => line.id)).toEqual([ter.id]);
+  });
   it("normalizes accents and punctuation for station searches", () => {
     expect(normalizeGlobalMapSearchText("Châtelet–Les Halles")).toBe("chatelet les halles");
 

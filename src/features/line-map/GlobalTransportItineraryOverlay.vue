@@ -9,7 +9,6 @@ import {
 import type { CameraState } from "../transport-map/geo/camera";
 import {
   lonLatToWorld,
-  worldScaleAtZoom,
   worldToScreen,
   type WorldPoint,
 } from "../transport-map/geo/coordinateKernel";
@@ -43,7 +42,7 @@ type ItineraryLineBadge = {
 };
 
 type PreparedItineraryPath = ReturnType<typeof createGlobalTransportItinerarySegments>[number] & {
-  d: string;
+  worldPoints: WorldPoint[];
   fromWorld: WorldPoint;
   toWorld: WorldPoint;
   iconWorldPoint?: WorldPoint;
@@ -98,8 +97,8 @@ const itineraryLineBadges = computed(() => new Map(
     .map((segment) => [segment.id, createItineraryLineBadge(segment)] as const),
 ));
 
-// Keep the expensive part of the overlay camera-independent. A pan or zoom
-// can then update one SVG matrix instead of rebuilding every route path.
+// Prepare world coordinates and badge positions only when the itinerary changes.
+// Camera changes project these points into the same CSS pixel space as the markers.
 const paths = computed<PreparedItineraryPath[]>(() => {
   const lineBadges = itineraryLineBadges.value;
 
@@ -114,7 +113,7 @@ const paths = computed<PreparedItineraryPath[]>(() => {
       : undefined;
     return [{
       ...segment,
-      d: createWorldPathData(worldPoints),
+      worldPoints,
       fromWorld: worldPoints[0]!,
       toWorld: worldPoints.at(-1)!,
       ...(iconPlacement
@@ -135,11 +134,10 @@ const lineIconPaths = computed(() => paths.value.flatMap((path) => {
   return [{ ...path, iconPoint }];
 }));
 
-const itineraryTransform = computed(() => {
-  const { centerWorldX, centerWorldY, zoom, viewportWidthCssPx, viewportHeightCssPx } = props.camera;
-  const scale = worldScaleAtZoom(zoom);
-  return `matrix(${scale} 0 0 ${scale} ${viewportWidthCssPx / 2 - centerWorldX * scale} ${viewportHeightCssPx / 2 - centerWorldY * scale})`;
-});
+const projectedPaths = computed(() => paths.value.map((path) => ({
+  ...path,
+  d: createScreenPathData(path.worldPoints, props.camera),
+})));
 
 const endpointWorldNodes = computed(() => {
   const route = props.route;
@@ -244,9 +242,12 @@ function createItineraryLineBadge(
   };
 }
 
-function createWorldPathData(points: readonly WorldPoint[]): string {
+function createScreenPathData(points: readonly WorldPoint[], camera: CameraState): string {
   return points
-    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(12)} ${point.y.toFixed(12)}`)
+    .map((point, index) => {
+      const screen = worldToScreen(point, camera);
+      return `${index === 0 ? "M" : "L"} ${screen.x.toFixed(3)} ${screen.y.toFixed(3)}`;
+    })
     .join(" ");
 }
 
@@ -328,8 +329,8 @@ function isFiniteScreenPoint(point: ScreenPoint): boolean {
       :viewBox="`0 0 ${camera.viewportWidthCssPx} ${camera.viewportHeightCssPx}`"
       preserveAspectRatio="none"
     >
-      <g :transform="itineraryTransform">
-        <g v-for="path in paths" :key="path.id" :class="`global-transport-itinerary-overlay__segment--${path.kind}`">
+      <g>
+        <g v-for="path in projectedPaths" :key="path.id" :class="`global-transport-itinerary-overlay__segment--${path.kind}`">
           <path class="global-transport-itinerary-overlay__underlay" :d="path.d" />
           <path
             class="global-transport-itinerary-overlay__path"
@@ -411,8 +412,8 @@ function isFiniteScreenPoint(point: ScreenPoint): boolean {
 .global-transport-itinerary-overlay__line-icon :deep(.line-icon-badge img) { max-height: 27px; max-width: 52px; }
 .global-transport-itinerary-overlay__line-icon :deep(.line-icon-badge__fallback) { height: 27px; }
 .global-transport-itinerary-overlay__line-icon :deep(.line-icon-badge__label) { font-size: .9rem; min-width: 34px; }
-.global-transport-itinerary-overlay__underlay { fill: none; stroke: rgba(255,255,255,.9); stroke-linecap: round; stroke-linejoin: round; stroke-width: 10; vector-effect: non-scaling-stroke; }
-.global-transport-itinerary-overlay__path { fill: none; stroke: #5146ff; stroke-linecap: round; stroke-linejoin: round; stroke-width: 6; vector-effect: non-scaling-stroke; }
+.global-transport-itinerary-overlay__underlay { fill: none; stroke: rgba(255,255,255,.9); stroke-linecap: round; stroke-linejoin: round; stroke-width: 10; }
+.global-transport-itinerary-overlay__path { fill: none; stroke: #5146ff; stroke-linecap: round; stroke-linejoin: round; stroke-width: 6; }
 .global-transport-itinerary-overlay__path--walking { stroke: #5146ff; stroke-dasharray: 2 8; stroke-width: 4; }
 .global-transport-itinerary-overlay__wait rect { fill: var(--surface, white); stroke: var(--border, #cbd5e1); }
 .global-transport-itinerary-overlay__wait text { fill: var(--ink, #0f172a); font-size: 12px; font-weight: 700; }

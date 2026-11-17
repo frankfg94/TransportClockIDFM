@@ -1,4 +1,4 @@
-import type { NeighborhoodJourneysRequest, NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
+import { NeighborhoodGtfsCoverageError, type NeighborhoodJourneysRequest, type NeighborhoodJourneysResponse } from "../../features/nearby-stations/neighborhoodJourneys";
 import { NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS } from "../../../shared/gtfs/neighborhoodTimeout";
 import { toServerApiUrl } from "../serverApi";
 import { isNeighborhoodGtfsColdStart } from "./neighborhoodGtfsDebug";
@@ -45,7 +45,9 @@ function ensureWorker(group: WorkerGroup): Worker {
       console.debug("[neighborhood-gtfs]", JSON.stringify(response.diagnostics));
     }
     pending.delete(response.id); subscriber.cleanup();
-    if ("error" in response) subscriber.reject(new Error(response.error)); else subscriber.resolve(response.payload);
+    if ("error" in response) subscriber.reject(response.uncoveredServiceDate
+      ? new NeighborhoodGtfsCoverageError(response.uncoveredServiceDate) : new Error(response.error));
+    else subscriber.resolve(response.payload);
   };
   created.onerror = () => {
     for (const [id, task] of cancelledDebugTasks) if (task.worker === created) cancelledDebugTasks.delete(id);
@@ -60,6 +62,11 @@ function ensureWorker(group: WorkerGroup): Worker {
   return created;
 }
 export function canUseBrowserNeighborhoodGtfs(): boolean { return typeof window !== "undefined" && typeof Worker !== "undefined"; }
+export function refreshBrowserNeighborhoodGtfsManifest(): void {
+  for (const worker of workers.values()) {
+    worker.postMessage({ kind: "refresh-manifest" } satisfies NeighborhoodGtfsWorkerRequest);
+  }
+}
 export function routeBrowserNeighborhoodGtfs(request: NeighborhoodJourneysRequest, signal: AbortSignal): Promise<NeighborhoodJourneysResponse> {
   return requestBrowserNeighborhoodGtfs({ kind: "routes", request }, signal);
 }
@@ -67,6 +74,7 @@ export function requestBrowserNeighborhoodGtfs<T>(action: NeighborhoodGtfsWorker
   if (signal.aborted) return Promise.reject(signal.reason);
   return new Promise((resolve, reject) => {
     const id = ++nextId;
+    const group: WorkerGroup = action.kind === "night-access" ? "night" : action.kind === "routes" ? "routes" : "timetable";
     const finish = beginVerdictDebugTask("gtfs-worker", action.kind, action.kind === "routes" ? { destinations: action.request.destinations.length, purpose: action.request.purpose }
       : action.kind === "night-access" ? { lines: action.request.lines.length, datetime: action.request.datetime }
         : { lineId: action.lineId, ...(action.kind === "last-service" ? { stationId: action.stationId } : {}) });
@@ -77,7 +85,18 @@ export function requestBrowserNeighborhoodGtfs<T>(action: NeighborhoodGtfsWorker
         cancelledDebugTasks.set(id, subscriber);
         while (cancelledDebugTasks.size > 128) cancelledDebugTasks.delete(cancelledDebugTasks.keys().next().value!);
       }
-      if (pending.delete(id)) subscriber?.worker.postMessage({ id, kind: "cancel" } satisfies NeighborhoodGtfsWorkerRequest);
+      if (pending.delete(id) && subscriber) {
+        const worker = subscriber.worker;
+        if (group !== "routes" && ![...pending.values()].some(other => other.worker === worker)) {
+          // The serial worker may still be awaiting a large timetable or a
+          // street matrix. Release its slot immediately when nobody needs it.
+          worker.terminate();
+          if (workers.get(group) === worker) workers.delete(group);
+          for (const [taskId, task] of cancelledDebugTasks) {
+            if (task.worker === worker) { task.finish.annotate({ workerReleased: true }); cancelledDebugTasks.delete(taskId); }
+          }
+        } else worker.postMessage({ id, kind: "cancel" } satisfies NeighborhoodGtfsWorkerRequest);
+      }
       cleanup();
     };
     const abort = () => { cancel(); reject(signal.reason); };
@@ -91,7 +110,7 @@ export function requestBrowserNeighborhoodGtfs<T>(action: NeighborhoodGtfsWorker
       const plainAction = JSON.parse(JSON.stringify(action)) as NeighborhoodGtfsWorkerAction;
       // Street-routing HTTP waits must not block the independently scheduled
       // frequency/last-departure pair. Each worker retains only its own data.
-      const target = ensureWorker(action.kind === "night-access" ? "night" : action.kind === "routes" ? "routes" : "timetable");
+      const target = ensureWorker(group);
       pending.set(id, { worker: target, resolve: payload => resolve(payload as T), reject, cleanup, finish });
       target.postMessage({ id, baseUrl, coldStart: isNeighborhoodGtfsColdStart(), debug: isVerdictDebugEnabled(), ...plainAction } satisfies NeighborhoodGtfsWorkerRequest);
     } catch (error) { finish("error"); pending.delete(id); cleanup(); reject(error); }

@@ -6,8 +6,13 @@ export default defineEventHandler(async (event) => {
   if (!lineId || lineId.length > 200 || /[\x00-\x1f/\\]/u.test(lineId)) {
     throw createError({ statusCode: 400, statusMessage: "Invalid or missing line id." });
   }
+  const query = getQuery(event);
+  const serviceDate = query.serviceDate;
+  if (serviceDate !== undefined && (typeof serviceDate !== "string" || !/^\d{8}$/u.test(serviceDate))) {
+    throw createError({ statusCode: 400, statusMessage: "Invalid service date." });
+  }
   const frequency = await getGtfsLineFrequency(event, lineId, undefined, {
-    allowCoverageFallback: getQuery(event).allowCoverageFallback === "1",
+    allowCoverageFallback: query.allowCoverageFallback === "1", serviceDate,
   });
   // Availability, dataset switches and the Paris Monday rollover must be
   // observable; expensive calculation is cached by version on the server.

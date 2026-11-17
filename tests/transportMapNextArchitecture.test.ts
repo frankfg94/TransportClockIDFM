@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import { WebMercatorViewport } from "@deck.gl/core";
 import { createTransportMapExperience, createTransportMapRenderer } from "../src/features/transport-map/render/createRenderer";
 import { createCamera } from "../src/features/transport-map/geo/camera";
 import {
   lonLatToWorld,
+  screenToWorld,
+  worldToLonLat,
   worldToScreen,
 } from "../src/features/transport-map/geo/coordinateKernel";
 import { TRANSPORT_MAP_PRECISION } from "../src/features/transport-map/geo/precisionContract";
@@ -77,6 +80,23 @@ describe("transport map next factory and projection strategy", () => {
           );
         }
       }
+    }
+  });
+
+  it.each([-135, 0, 35, 90])("matches Deck projection and picking at bearing %d", bearing => {
+    const center = lonLatToWorld({ lon: 2.35, lat: 48.86 });
+    const camera = createCamera({ centerWorldX: center.x, centerWorldY: center.y, zoom: 15,
+      bearing, pitch: 55, viewportWidthCssPx: 900, viewportHeightCssPx: 600 });
+    const viewport = new WebMercatorViewport({ longitude: 2.35, latitude: 48.86, zoom: 14,
+      bearing, pitch: 55, width: 900, height: 600 });
+    for (const [x, y] of [[12, 14], [450, 300], [780, 578]] as const) {
+      const world = screenToWorld({ x, y }, camera);
+      const geo = worldToLonLat(world);
+      const projected = viewport.project([geo.lon, geo.lat]);
+      expect(projected[0]).toBeCloseTo(x, 5);
+      expect(projected[1]).toBeCloseTo(y, 5);
+      expect(worldToScreen(world, camera).x).toBeCloseTo(x, 5);
+      expect(worldToScreen(world, camera).y).toBeCloseTo(y, 5);
     }
   });
 

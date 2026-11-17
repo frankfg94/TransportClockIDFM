@@ -262,12 +262,21 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
   const versionKey = `${runtime.cacheEpoch()}:${manifest.routing.path}:${manifest.cacheGeneration}`;
   if (indexCache?.key !== versionKey) {
     trees.clear();
-    indexCache = { key: versionKey, promise: runtime.readJson<GtfsRoutingIndex>(event, `${manifest.routing.path}/index.json`) };
+    const promise = runtime.readJson<GtfsRoutingIndex>(event, `${manifest.routing.path}/index.json`);
+    indexCache = { key: versionKey, promise };
+    void promise.catch(() => {
+      if (indexCache?.promise === promise) indexCache = undefined;
+    });
   }
-  const index = await indexCache.promise;
+  const indexPromise = indexCache.promise;
+  const index = await indexPromise;
   assertCurrent(event);
-  if (!index || index.schemaVersion !== 1 || !index.stops.length || !index.lines.length) { indexCache = undefined; return unavailable("missing"); }
-  if (serviceDate < manifest.routing.startDate || serviceDate > shiftGtfsDate(manifest.routing.endDate, Math.floor(index.maxTimeSeconds / 86400))) return unavailable("out-of-coverage");
+  if (!index || index.schemaVersion !== 1 || !index.stops.length || !index.lines.length) {
+    if (indexCache?.promise === indexPromise) indexCache = undefined;
+    return unavailable("missing");
+  }
+  if (serviceDate < manifest.routing.startDate || (serviceDate > manifest.routing.endDate
+    && start > gtfsServiceEpoch(manifest.routing.endDate) + index.maxTimeSeconds)) return unavailable("out-of-coverage");
   const key = JSON.stringify([versionKey, request.origin.lon, request.origin.lat, request.datetime, [...(request.allowedModes ?? [])].sort()]);
   for (const [k, value] of trees) if (value.expires <= Date.now()) trees.delete(k);
   let entry = trees.get(key);

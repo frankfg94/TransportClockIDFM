@@ -67,6 +67,7 @@ import {
 import { firstSymbolLayerId, MapLibreDeckOverlayPresenter } from "./deckMapPresenter";
 import { DeckShaderPreparation } from "./deckShaderPreparation";
 import { cameraStateToMapLibreView } from "./nextMapCamera";
+import { addMapPresentationLayers, imageryId, buildingsId } from "./mapPresentationStyle";
 import { screenToLonLat, visibleWorldBounds, worldToLonLat } from "../geo/coordinateKernel";
 import {
   TransportMapMapLibreTraceProbe,
@@ -82,6 +83,7 @@ const EMPTY_REAL_ESTATE_CELLS: readonly DvfMapGridCell[] = [];
 const props = defineProps<{
   renderer: TransportMapRenderer;
   camera: CameraState;
+  satellite?: boolean;
   nearbyPlaces?: readonly NearbyPlace[];
   nearbyPlacesCommerceOnly?: boolean;
   realEstateCells?: readonly DvfMapGridCell[];
@@ -550,7 +552,7 @@ function onMapError(): void {
   // path attach Deck; this is not a raster fallback.
   if (!fallbackStyleAttempted && map && !overlay && !map.isStyleLoaded()) {
     fallbackStyleAttempted = true;
-    map.setStyle(FALLBACK_VECTOR_SURFACE_STYLE as never);
+    map.setStyle(addMapPresentationLayers(FALLBACK_VECTOR_SURFACE_STYLE as never, !!props.satellite, !!props.camera.pitch));
   }
 }
 
@@ -614,6 +616,7 @@ function installDeckMapLibreCompatibility(activeMap: MapLibreMap): void {
 function onMapLoad(): void {
   const activeMap = map;
   if (!activeMap) return;
+  syncPresentation();
   syncRealEstateLayerOrder();
   installDeckMapLibreCompatibility(activeMap);
   const webgl2 = activeMap.getCanvas().getContext("webgl2");
@@ -626,6 +629,9 @@ function onMapLoad(): void {
   applyMapLocale();
 
   overlay = new MapboxOverlay({
+    // Transit and POIs are thematic overlays, including underground routes.
+    // Keep them legible across the depth buffer populated by buildings.
+    parameters: { depthCompare: "always", depthWriteEnabled: false },
     deviceProps: { debug: false },
     onDeviceInitialized: (device) => {
       shaderPreparation = getColdRefreshRecorder()?.prepareDeckShaders === false ? undefined : DeckShaderPreparation.create(device);
@@ -746,7 +752,9 @@ onMounted(() => {
     map.on("styledata", onStyleData);
     map.once("load", onMapLoad);
     map.setStyle(resolveNextMapStyle(props.styleUrl ?? configuredStyle) as never, {
-      transformStyle: (_previous, next) => normalizeMapLibreReferenceFilters(next),
+      transformStyle: (_previous, next) => addMapPresentationLayers(
+        normalizeMapLibreReferenceFilters(next), !!props.satellite, !!props.camera.pitch,
+      ),
     });
     if (typeof ResizeObserver !== "undefined") {
       mapResizeObserver = new ResizeObserver(() => map?.resize());
@@ -756,6 +764,17 @@ onMounted(() => {
     status.value = "unsupported";
   }
 });
+
+function syncPresentation(): void {
+  if (!map) return;
+  for (const [layer, visible] of [[imageryId, props.satellite], [buildingsId, props.camera.pitch]] as const) {
+    const visibility = visible ? "visible" : "none";
+    if (map.getLayer(layer) && map.getLayoutProperty(layer, "visibility") !== visibility) {
+      map.setLayoutProperty(layer, "visibility", visibility);
+    }
+  }
+}
+watch([() => props.satellite, () => Boolean(props.camera.pitch)], syncPresentation);
 
 watch(locale, () => {
   applyMapLocale();

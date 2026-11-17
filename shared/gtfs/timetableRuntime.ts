@@ -42,10 +42,9 @@ export function createGtfsTimetableLoader<Context>(runtime: GtfsTimetableRuntime
     if (chunkBundleCache?.key !== key) {
       const promise = runtime.readJson<Record<string, GtfsTimetableChunk>>(event, `${root}/${bundleFile}`);
       chunkBundleCache = { key, promise };
-      promise.then((value) => {
+      void promise.then((value) => {
         if (!value && chunkBundleCache?.promise === promise) chunkBundleCache = undefined;
-      });
-      promise.catch(() => {
+      }, () => {
         if (chunkBundleCache?.promise === promise) chunkBundleCache = undefined;
       });
     }

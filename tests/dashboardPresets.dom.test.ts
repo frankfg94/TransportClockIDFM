@@ -23,18 +23,44 @@ afterEach(() => {
   vi.useRealTimers();
   document.body.innerHTML = "";
   window.localStorage.clear();
+  window.sessionStorage.clear();
   vi.unstubAllGlobals();
   vi.resetModules();
   vi.doUnmock("nuxt/app");
   vi.doUnmock("vuedraggable");
   vi.doUnmock("../src/components/StationBoardModal.vue");
   vi.doUnmock("../src/components/TransitBoard.vue");
+  vi.doUnmock("../src/config/transitBoards");
   vi.doUnmock("../src/features/app-settings");
   vi.doUnmock("../src/features/weather");
   vi.doUnmock("../src/services/idfm");
 });
 
 describe("dashboard presets", () => {
+  it("selects AUTO and returns to the last manual dashboard without saving generated boards", async () => {
+    const state = createDefaultTransitPresetState(transitBoards);
+    saveTransitPresetState(state);
+    installDashboardMocks({ place: "work" });
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushPromises();
+    const before = window.localStorage.getItem("transport-clock.preferences.v2");
+    await wrapper.get(".place-switcher__trigger").trigger("click");
+    const option = wrapper.findAll(".place-switcher__item").find((button) => button.text().includes("AUTO Dashboard"));
+    expect(option).toBeTruthy();
+    await option!.trigger("click");
+    await flushPromises();
+    expect(route.query.place).toBe("__auto_dashboard__");
+    expect(window.localStorage.getItem("transport-clock.preferences.v2")).toBe(before);
+    await vi.waitFor(() => expect(wrapper.find(".auto-dashboard").exists()).toBe(true), { timeout: 10000 });
+    const back = wrapper.findAll(".auto-dashboard button").find((button) => button.text().includes("tableau manuel"));
+    expect(back).toBeTruthy();
+    await back!.trigger("click");
+    await flushPromises();
+    expect(route.query.place).toBe("work");
+    expect(window.localStorage.getItem("transport-clock.preferences.v2")).toBe(before);
+    wrapper.unmount();
+  }, 15000);
   it("publishes a train's service label while another train's pattern is still pending", async () => {
     const { fetchBoardDepartures, fetchDepartureCallingPattern } = installDashboardMocks({}, {}, { apiConfigured: true });
     const board = transitBoards.find((item) => item.line.mode === "rer")!;
@@ -63,6 +89,74 @@ describe("dashboard presets", () => {
       await vi.waitFor(() => expect(wrapper.find('[data-services="semi-direct,omnibus"]').exists()).toBe(true));
     } finally {
       wrapper.unmount();
+    }
+  });
+
+  it("updates the fullscreen metro row from loading to no generic fallback while preserving destination, time, and platform", async () => {
+    const metroBoard = createMetroBoard();
+    let wrapper: ReturnType<typeof mount> | undefined;
+    let resolvePattern!: (pattern: DepartureCallingPattern) => void;
+    const departure: Departure = {
+      id: "metro-9-next",
+      lineRef: metroBoard.line.ref,
+      monitoringRef: metroBoard.monitoringPoints[0]!.ref,
+      stopName: metroBoard.title,
+      destination: "Mairie de Montreuil",
+      monitoringLabel: "Tous quais",
+      platform: "2",
+      expectedDepartureTime: new Date(Date.now() + 300_000).toISOString(),
+      vehicleAtStop: false,
+    };
+
+    try {
+      const { fetchBoardDepartures, fetchDepartureCallingPattern } = installDashboardMocks(
+        { place: "home", fullscreen: metroBoard.id, fullscreenDisplay: "dense-list" },
+        {},
+        { apiConfigured: true },
+      );
+      vi.doMock("../src/config/transitBoards", () => ({ transitBoards: [...transitBoards, metroBoard] }));
+      fetchBoardDepartures.mockImplementation(async (board: TransitBoardConfig) => {
+        const departures = board.id === metroBoard.id ? [departure] : [];
+        return {
+          departures,
+          directionGroups: board.directionGroups.map((group) => ({
+            ...group,
+            departures: board.id === metroBoard.id ? [departure] : [],
+            serviceEnded: false,
+          })),
+        };
+      });
+      fetchDepartureCallingPattern.mockImplementation(async () => new Promise<DepartureCallingPattern>((resolve) => {
+        resolvePattern = resolve;
+      }));
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => Response.json(
+        String(input).includes("/pattern")
+          ? { pattern: { calls: [], lineTopology: [] } }
+          : { available: true, configured: true, lines: [] },
+      )));
+
+      const { default: App } = await import("../src/App.vue");
+      wrapper = mount(App, { attachTo: document.body });
+      await flushPromises();
+      await vi.waitFor(() => expect(document.body.querySelector(".fullscreen-station-panel__dense-row")).toBeTruthy());
+      const row = document.body.querySelector<HTMLElement>(".fullscreen-station-panel__dense-row")!;
+      const details = row.querySelector<HTMLElement>(".fullscreen-station-panel__dense-details")!;
+      await vi.waitFor(() => expect(details.textContent).toBe("Chargement de la desserte"));
+
+      resolvePattern({
+        departureId: departure.id,
+        destination: departure.destination,
+        calls: [],
+        serviceType: "inconnu",
+      });
+      await vi.waitFor(() => expect(details.textContent).toBe(""));
+
+      expect(row.textContent).toContain("Mairie de Montreuil");
+      expect(row.textContent).toContain("Quai 2");
+      expect(row.querySelector("time")?.getAttribute("datetime")).toBe(departure.expectedDepartureTime);
+      expect(document.body.textContent).not.toContain("Desserte non confirmée");
+    } finally {
+      wrapper?.unmount();
     }
   });
 
@@ -290,7 +384,7 @@ describe("dashboard presets", () => {
 
     expect(route.query.place).toBe("work");
     expect(wrapper.find(".place-swipe-arrow--previous").exists()).toBe(true);
-    expect(wrapper.find(".place-swipe-arrow--next").exists()).toBe(false);
+    expect(wrapper.find(".place-swipe-arrow--next").exists()).toBe(true);
 
     const shell = wrapper.get(".place-swipe-shell");
     await shell.trigger("pointerdown", {
@@ -311,7 +405,7 @@ describe("dashboard presets", () => {
     });
     await flushPromises();
 
-    expect(route.query.place).toBe("work");
+    expect(route.query.place).toBe("__auto_dashboard__");
 
     await shell.trigger("pointerdown", {
       button: 0,
@@ -331,7 +425,7 @@ describe("dashboard presets", () => {
     });
     await flushPromises();
 
-    expect(route.query.place).toBe("home");
+    expect(route.query.place).toBe("work");
   });
 
   it("keeps custom presets between home and work for arrow navigation", async () => {
@@ -358,7 +452,7 @@ describe("dashboard presets", () => {
 
     expect(route.query.place).toBe("work");
     expect(wrapper.find(".place-swipe-arrow--previous").exists()).toBe(true);
-    expect(wrapper.find(".place-swipe-arrow--next").exists()).toBe(false);
+    expect(wrapper.find(".place-swipe-arrow--next").exists()).toBe(true);
   });
 
   it("uses dropdown-only mode without swipe controls", async () => {
@@ -1093,6 +1187,33 @@ function createBoard(id: string, stopAreaRef: string): TransitBoardConfig {
       stopAreaRef,
     },
     maxDepartures: 8,
+  };
+}
+
+function createMetroBoard(): TransitBoardConfig {
+  return {
+    id: "metro-9-michel-ange-molitor",
+    title: "Michel-Ange–Molitor",
+    city: "Paris",
+    line: {
+      ref: "line:IDFM:C01389",
+      shortName: "9",
+      longName: "Métro 9",
+      mode: "metro",
+      color: "#b6bd00",
+      textColor: "#ffffff",
+    },
+    monitoringPoints: [{ ref: "stop:michel-ange-molitor", label: "Tous quais" }],
+    directionGroups: [{
+      id: "mairie-de-montreuil",
+      label: "Mairie de Montreuil",
+      match: {
+        monitoringRefs: ["stop:michel-ange-molitor"],
+        destinationIncludes: ["Mairie de Montreuil"],
+      },
+    }],
+    schedule: { lineRef: "line:IDFM:C01389", stopAreaRef: "stop:michel-ange-molitor" },
+    maxDepartures: 4,
   };
 }
 

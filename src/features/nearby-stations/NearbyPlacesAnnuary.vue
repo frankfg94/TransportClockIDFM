@@ -50,6 +50,7 @@ import type { NearbyWalkingLoadProgress } from "./useNearbyWalkingRoutes";
 import { useNearbyPlacePresenter } from "./useNearbyPlacePresenter";
 import NearbyWalkingProgressIndicator from "./NearbyWalkingProgressIndicator.vue";
 import NearbyPlaceDetails from "./NearbyPlaceDetails.vue";
+import { useNearbyOpeningStatus } from "./useNearbyOpeningStatus";
 import {
   buildNearbyPlacesExportHtml,
   nearbyPlacesExportPolicy,
@@ -71,11 +72,13 @@ const props = defineProps<{
   initialPreloadGroupCount?: number;
   loading?: boolean;
   error?: string;
+  hideClosedPlaces?: boolean;
 }>();
 
 const emit = defineEmits<{
   "update:query": [value: string];
   "update:walkingMinutes": [value: NearbyWalkingMinutes];
+  "update:hideClosedPlaces": [value: boolean];
   "update:visiblePlaces": [places: NearbyPlace[]];
   requestGroupWalkingRoutes: [groupId: NearbyPlaceGroupId, places: NearbyPlace[]];
   placeContextMenu: [placeId: string, anchor: HTMLElement];
@@ -84,6 +87,7 @@ const emit = defineEmits<{
 }>();
 
 const { t, locale } = useI18n();
+const openingStatus = useNearbyOpeningStatus();
 const { presentPlace } = useNearbyPlacePresenter();
 const expandedGroupIds = ref<Set<NearbyPlaceGroupId>>(new Set());
 const expandedBeforeSearch = ref<Set<NearbyPlaceGroupId>>(new Set());
@@ -144,10 +148,14 @@ const subcategoriesByGroup = computed(() => {
   return result;
 });
 
-const groups = computed(() => baseGroups.value.map((group) => ({
-  ...group,
-  places: group.places.filter((place) => isPlaceKindVisible(group.id, place)),
-})).filter((group) => group.places.length > 0));
+const groups = computed(() => {
+  const statusFor = props.hideClosedPlaces ? openingStatus.value : undefined;
+  return baseGroups.value.map((group) => ({
+    ...group,
+    places: group.places.filter((place) => isPlaceKindVisible(group.id, place)
+      && statusFor?.(place.tags?.opening_hours) !== "closed"),
+  })).filter((group) => group.places.length > 0);
+});
 const visiblePlaces = computed(() => groups.value.flatMap((group) => group.places));
 const visiblePlaceCounts = computed(() => countNearbyPlaces(visiblePlaces.value));
 
@@ -218,6 +226,7 @@ function isSubcategorySelected(groupId: NearbyPlaceGroupId, key: string): boolea
 
 function resetSubcategories(): void {
   hiddenSubcategoryKeys.value = new Set();
+  emit("update:hideClosedPlaces", false);
 }
 
 function isGroupExpanded(groupId: NearbyPlaceGroupId): boolean {
@@ -592,6 +601,10 @@ onBeforeUnmount(() => {
               <strong>{{ t("nearbyStations.directory.filterSubcategoriesTitle") }}</strong>
               <button type="button" @click="resetSubcategories">{{ t("nearbyStations.directory.resetSubcategories") }}</button>
             </header>
+            <label class="nearby-directory__hide-closed">
+              <input data-hide-closed-places type="checkbox" :checked="hideClosedPlaces" @change="emit('update:hideClosedPlaces', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('nearbyStations.placeDetails.hideClosed') }}</span>
+            </label>
             <section v-for="group in baseGroups" :key="group.id" class="nearby-directory__subcategory-section">
               <h4>{{ t(group.labelKey) }}</h4>
               <label v-for="subcategory in groupSubcategories(group.id)" :key="subcategory.key">
@@ -757,6 +770,7 @@ onBeforeUnmount(() => {
 .nearby-directory__subcategory-panel--global { grid-template-columns: repeat(2,minmax(0,1fr)); max-height: min(62vh,480px); min-width: 420px; overflow: auto; }
 .nearby-directory__subcategory-panel header { align-items: center; border-bottom: 1px solid rgba(16,35,63,.09); display: flex; gap: 8px; justify-content: space-between; padding-bottom: 7px; }
 .nearby-directory__subcategory-panel--global > header { grid-column: 1 / -1; }
+.nearby-directory__hide-closed { grid-column: 1 / -1; padding: 3px 0 7px; border-bottom: 1px solid rgba(16,35,63,.09); }
 .nearby-directory__subcategory-panel header strong { color: var(--ink); font-size: .7rem; }
 .nearby-directory__subcategory-panel header button { background: transparent; color: #5146ff; font-size: .62rem; font-weight: 850; padding: 2px; }
 .nearby-directory__subcategory-section { border-bottom: 1px solid rgba(16,35,63,.08); display: grid; gap: 7px; min-width: 0; padding: 2px 0 8px; }

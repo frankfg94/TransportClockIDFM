@@ -26,6 +26,7 @@ import LineCombobox from "./LineCombobox.vue";
 import LineIconBadge from "./LineIconBadge.vue";
 import StationCombobox from "./StationCombobox.vue";
 import { useI18n } from "../i18n";
+import { shouldShowUnconfirmedServiceFallback } from "../features/service-pattern/departureServicePresentation";
 import { createBoardFromDraft } from "../services/boardBuilder";
 import {
   fetchDirectionGroupsForStation,
@@ -82,6 +83,8 @@ const props = withDefaults(
     trafficAlert?: BoardTrafficAlert;
     displayMode?: "grid" | "list";
     showStationChangeAction?: boolean;
+    showActions?: boolean;
+    showAlarmAction?: boolean;
     /** Suspend layout measurements while a containing panel is inactive. */
     active?: boolean;
   }>(),
@@ -91,6 +94,8 @@ const props = withDefaults(
     hiddenDirectionIds: () => [],
     rateLimited: false,
     showStationChangeAction: true,
+    showActions: true,
+    showAlarmAction: true,
     active: true,
   },
 );
@@ -101,6 +106,7 @@ const emit = defineEmits<{
   remove: [];
   "open-line-page": [board: TransitBoardConfig];
   "open-news": [board: TransitBoardConfig];
+  "open-frequencies": [board: TransitBoardConfig, trigger: HTMLElement | undefined];
   "open-fullscreen-panel": [board: TransitBoardConfig];
   "schedule-alarm": [
     payload: {
@@ -500,9 +506,7 @@ function formatDepartureMeta(departure: Departure): string {
   const normalizedLabel = normalizeText(departure.monitoringLabel);
   const normalizedDestination = normalizeText(departure.destination);
   const parts: string[] = [];
-  const serviceLabel = formatDepartureServiceType(departure.serviceType) ||
-    (departure.serviceTypeStatus === "loading" ? t("pattern.loadingPattern") :
-      departure.serviceTypeStatus === "unavailable" ? t("lineOptimizer.unknownService") : "");
+  const serviceLabel = formatDepartureServiceLabel(departure);
 
   if (
     departure.monitoringLabel &&
@@ -539,6 +543,14 @@ function formatDepartureServiceType(
   return "";
 }
 
+function formatDepartureServiceLabel(departure: Departure): string {
+  return formatDepartureServiceType(departure.serviceType) ||
+    (departure.serviceTypeStatus === "loading" ? t("pattern.loadingPattern") :
+      shouldShowUnconfirmedServiceFallback(props.board.line.mode, departure)
+        ? t("lineOptimizer.unknownService")
+        : "");
+}
+
 function formatDepartureSection(departure: Departure): string {
   return departure.serviceType === "semi-direct" && departure.serviceSection
     ? t(`board.serviceSection.${departure.serviceSection}`)
@@ -546,7 +558,7 @@ function formatDepartureSection(departure: Departure): string {
 }
 
 function needsSeparateServiceRow(departure: Departure): boolean {
-  return Boolean(formatDepartureServiceType(departure.serviceType) || departure.serviceTypeStatus);
+  return Boolean(formatDepartureServiceLabel(departure));
 }
 
 function formatRemainingStopCount(departure: Departure): string {
@@ -571,6 +583,11 @@ function openNews(): void {
 function openLinePage(): void {
   actionsOpen.value = false;
   emit("open-line-page", props.board);
+}
+
+function openFrequencies(): void {
+  actionsOpen.value = false;
+  emit("open-frequencies", props.board, actionsTrigger.value);
 }
 
 function openStationEditor(): void {
@@ -837,7 +854,7 @@ onUnmounted(() => {
         <p class="board__city">{{ board.city }}</p>
       </div>
 
-      <div class="board-actions">
+      <div v-if="showActions" class="board-actions">
         <button
           ref="actionsTrigger"
           class="board-actions__trigger"
@@ -863,6 +880,11 @@ onUnmounted(() => {
           <button type="button" role="menuitem" @click="openLinePage">
             <Map :size="17" aria-hidden="true" />
             {{ t("board.lineMap") }}
+          </button>
+
+          <button type="button" role="menuitem" @click="openFrequencies">
+            <Route :size="17" aria-hidden="true" />
+            {{ t("board.viewFrequencies") }}
           </button>
 
           <button v-if="showStationChangeAction" type="button" role="menuitem" @click="openStationEditor">
@@ -1119,6 +1141,7 @@ onUnmounted(() => {
                 </button>
 
                 <button
+                  v-if="showAlarmAction"
                   class="departure-alarm-button"
                   :class="{
                     'departure-alarm-button--active': hasAlarm(departure),

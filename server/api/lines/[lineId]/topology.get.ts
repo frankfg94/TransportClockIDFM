@@ -2,7 +2,7 @@ import { createError, defineEventHandler, getRouterParam, setHeader } from "h3";
 import { loadGtfsLineArtifact } from "../../../services/gtfs/runtime";
 import { attachGtfsMonitoringRefs } from "../../../services/topology/attachGtfsMonitoringRefs";
 import { getLineTopology } from "../../../services/topology/getLineTopology";
-import { getNetexRuntimeEnv } from "../../../services/topology/netexCache";
+import { getNetexRuntimeEnv, NetexLineNotFoundError } from "../../../services/topology/netexCache";
 
 export default defineEventHandler(async (event) => {
   const lineId = getRouterParam(event, "lineId");
@@ -23,10 +23,11 @@ export default defineEventHandler(async (event) => {
 
     return gtfsArtifact ? attachGtfsMonitoringRefs(topology, gtfsArtifact) : topology;
   } catch (error) {
+    const missing = error instanceof NetexLineNotFoundError;
     throw createError({
       cause: error,
-      statusCode: 404,
-      statusMessage: `No topology fixture found for line ${lineId}.`,
+      statusCode: missing ? 404 : 503,
+      statusMessage: missing ? "Line not found in the topology catalogue." : "Line topology temporarily unavailable.",
     });
   }
 });

@@ -33,7 +33,7 @@ function fixture() {
         available: true, displayScore: 7, positiveFacts: [{ family: "rail", label: "Métro accessible" }], negativeFacts: [], neutralFacts: [] }],
       displayScore: 7, band: "good", availableCategoryCount: 7, totalCategoryCount: 7, generatedAt: "2026-10-24T08:00:00Z" }),
       isLoading: ref(false), transportPending: ref<string[]>([]), backendVerdictReady: ref(true), places: ref([]),
-      diagnostics: ref({ pendingTasks: [], frequencies: [] }), error: ref(), errorSource: ref(),
+      diagnostics: ref({ pendingTasks: [], frequencies: [] }), error: ref(), errorSource: ref(), gtfsCoverageMissing: ref(false),
       criteria: ref([{ id: "transport", status: "ready", datasets: [{ id: "gtfs", required: true, status: "ready" }] }]), refresh: vi.fn() },
     quality: { data: ref(), isLoading: ref(false), error: ref(), retry: vi.fn() },
     walking: { placeRoutes: ref({}), isLoadingPlaces: ref(false), error: ref(), loadPlaceMetricsForGroup: vi.fn(), clear: vi.fn() },
@@ -70,6 +70,22 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
 describe("Verdict PDF asynchronous export", () => {
+  it("exports the dated historical warning in the transport section with its facts", async () => {
+    vi.stubGlobal("Worker", undefined);
+    const old = { startDate: "20190501", endDate: "20190531" };
+    let publish!: (response: Response) => void;
+    const calendar = new Promise<Response>(resolve => { publish = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async () => calendar));
+    const button = await openPage();
+    expect(button.element.disabled).toBe(true);
+    publish(Response.json({ calendar: { schemaVersion: 1, cacheGeneration: 1,
+      routing: { ...old, path: "routing/old", maxTimeSeconds: 90000 }, timetable: { ...old, path: "timetables/old" } } }));
+    await vi.waitFor(() => expect(button.element.disabled).toBe(false));
+    await button.trigger("click");
+    const [transport] = mocks.download.mock.calls[0]![0].sections;
+    expect(transport.items[0]).toMatch(/GTFS a expiré.*2019.*indicatifs/u);
+    expect(transport.items[1]).toContain("Métro accessible");
+  });
   it("keeps final document sections and prevents duplicate export while the picker is pending", async () => {
     let finish!: (value: { status: string }) => void;
     mocks.download.mockReturnValue(new Promise(resolve => { finish = resolve; }));

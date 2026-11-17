@@ -47,6 +47,7 @@ const props = withDefaults(defineProps<{
   commerceDataAvailable?: boolean;
   /** When enabled, use the commerce totals to shade each displayed neighborhood. */
   commerceHighlight?: boolean;
+  showVerdictSummary?: boolean;
   activityTotals?: Readonly<Record<string, number>>;
   activityLabel?: string;
   /** Wait without pointer movement before showing a hover tooltip. */
@@ -73,6 +74,7 @@ const props = withDefaults(defineProps<{
   realEstateMode: "prices",
   realEstateMeasure: "median",
 });
+const emit = defineEmits<{ compare: [code?: string] }>();
 
 interface IrisDisplayItem {
   id: string;
@@ -151,16 +153,20 @@ const commerceMaximum = computed(() => Math.max(1, ...commerceCountByItem.value.
 const detailedTransportCounts = computed(() => countIrisTransport(props.neighborhoods, props.transportStations));
 const transportCounts = computed(() => {
   const counts = new Map<string, { stationCount: number; lineCount: number; modes: Partial<Record<GlobalMapMode, number>> }>();
+  const modesByLine = new Map(props.transportStations.flatMap(station => station.lines.map(line => [line.id, line.mode] as const)));
   for (const item of displayItems.value) {
     const aggregate = { stationCount: 0, lineCount: 0, modes: {} as Partial<Record<GlobalMapMode, number>> };
+    const lineIds = new Set<string>();
     for (const member of item.members) {
       const memberCounts = detailedTransportCounts.value.get(member.id);
       if (!memberCounts) continue;
       aggregate.stationCount += memberCounts.stationCount;
-      aggregate.lineCount += memberCounts.lineCount;
-      for (const [mode, count] of Object.entries(memberCounts.modes) as [GlobalMapMode, number][]) {
-        aggregate.modes[mode] = (aggregate.modes[mode] ?? 0) + count;
-      }
+      for (const lineId of memberCounts.lineIds) lineIds.add(lineId);
+    }
+    aggregate.lineCount = lineIds.size;
+    for (const lineId of lineIds) {
+      const mode = modesByLine.get(lineId);
+      if (mode) aggregate.modes[mode] = (aggregate.modes[mode] ?? 0) + 1;
     }
     counts.set(item.id, aggregate);
   }
@@ -579,7 +585,8 @@ onBeforeUnmount(() => {
         'iris-neighborhood-overlay__tooltip--below': tooltipBelow,
       }"
       :style="tooltipStyle"
-      role="tooltip"
+      :role="showVerdictSummary ? 'region' : 'tooltip'"
+      :aria-label="showVerdictSummary ? hoveredItem.name : undefined"
       :data-tooltip-locked="tooltipLocked ? 'true' : 'false'"
       @pointerenter="cancelClearHovered"
       @pointerleave="scheduleClearHoveredTooltip"
@@ -604,6 +611,11 @@ onBeforeUnmount(() => {
     <small v-if="commerceDataAvailable && hoveredCommerceCount !== undefined" class="iris-neighborhood-overlay__commerce-count">
       {{ hoveredActivityText }}
     </small>
+    <small v-if="showVerdictSummary">{{ t("nearbyStations.comparison.citySummary") }}</small>
+    <small v-if="showVerdictSummary && !commerceDataAvailable">{{ t("nearbyStations.comparison.cityPlacesUnavailable") }}</small>
+    <button v-if="showVerdictSummary" type="button" class="iris-neighborhood-overlay__compare" @click.stop="emit('compare', hoveredItem.members.length === 1 ? hoveredItem.members[0]?.codeIris : undefined)">
+      {{ t(hoveredItem.members.length === 1 ? 'nearbyStations.comparison.openSelected' : 'nearbyStations.comparison.open') }}
+    </button>
     <div v-if="realEstateActive" class="iris-neighborhood-overlay__real-estate">
       <template v-if="hoveredRealEstate?.hasEnoughSales">
         <template v-if="realEstateMode === 'prices'">
@@ -673,6 +685,7 @@ onBeforeUnmount(() => {
         <small v-if="hoveredAirNoiseClass.cellCount !== undefined" class="iris-neighborhood-overlay__environment-coverage">
           {{ t("globalMap.iris.environmentCoverage", { count: n(hoveredAirNoiseClass.cellCount, { maximumFractionDigits: 0 }) }) }}
         </small>
+        <small v-else-if="showVerdictSummary" class="iris-neighborhood-overlay__environment-coverage">{{ t("nearbyStations.comparison.communalAirNoise") }}</small>
       </div>
       <span v-else class="iris-neighborhood-overlay__environment-empty">
         {{ t("globalMap.iris.airNoiseUnavailable") }}
@@ -973,6 +986,8 @@ onBeforeUnmount(() => {
   color: #92400e !important;
   font-size: .64rem !important;
 }
+.iris-neighborhood-overlay__compare { justify-self: start; padding: 4px 7px; border: 1px solid #9e91df; border-radius: 5px; background: var(--surface); color: #4034aa; cursor: pointer; font: inherit; }
+.iris-neighborhood-overlay__compare:focus-visible { outline: 2px solid #eea417; outline-offset: 2px; }
 .iris-neighborhood-overlay__source-link {
   justify-self: end;
   color: #64748b;

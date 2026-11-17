@@ -6,6 +6,7 @@ import type {
   Departure,
   DirectionDepartureGroup,
   TransitBoardConfig,
+  TransitMode,
 } from "../src/types/transit";
 
 describe("TransitBoard departure metadata", () => {
@@ -24,6 +25,151 @@ describe("TransitBoard departure metadata", () => {
     });
     expect(wrapper.get(".departure__meta").text()).toBe(text);
     expect(wrapper.find(".departure__section").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it.each([
+    ["Tous quais", false],
+    ["Quai 2", true],
+  ] as const)("hides the unavailable metro fallback for a known destination and preserves quay metadata (%s)", (monitoringLabel, hasMeta) => {
+    const departure = createServiceDeparture({
+      monitoringLabel,
+      serviceType: "inconnu",
+      serviceTypeStatus: "unavailable",
+    });
+    const wrapper = mount(TransitBoard, {
+      props: {
+        board: createBoard("metro"),
+        departures: [departure],
+        directionGroups: [createDirectionGroup(departure)],
+        collapsedDirectionIds: [],
+        loading: false,
+      },
+      global: { stubs: { LineIconBadge: true } },
+    });
+
+    expect(wrapper.find(".departure__meta").exists()).toBe(hasMeta);
+    if (hasMeta) {
+      const meta = wrapper.get(".departure__meta");
+      expect(meta.text()).toBe("Quai 2");
+      expect(meta.text()).not.toContain("·");
+    }
+    expect(wrapper.text()).not.toContain("Desserte non confirmée");
+    expect(wrapper.get(".departure__main strong").text()).toBe("Mairie de Montreuil");
+    expect(wrapper.get(".departure__time strong").text()).not.toBe("--");
+    expect(wrapper.find(".departure-pattern-button").exists()).toBe(true);
+    expect(wrapper.find(".departure__main--service-detail").exists()).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it("keeps the metro fallback when the destination is still unknown and updates it when the direction changes", async () => {
+    const departure = createServiceDeparture({
+      destination: "Destination inconnue",
+      serviceType: "inconnu",
+      serviceTypeStatus: "unavailable",
+    });
+    const wrapper = mount(TransitBoard, {
+      props: {
+        board: createBoard("metro"),
+        departures: [departure],
+        directionGroups: [createDirectionGroup(departure)],
+        collapsedDirectionIds: [],
+        loading: false,
+      },
+      global: { stubs: { LineIconBadge: true } },
+    });
+
+    expect(wrapper.get(".departure__meta").text()).toBe("Desserte non confirmée");
+
+    const updatedDeparture = { ...departure, destination: "Mairie de Montreuil" };
+    await wrapper.setProps({
+      departures: [updatedDeparture],
+      directionGroups: [createDirectionGroup(updatedDeparture)],
+    });
+
+    expect(wrapper.find(".departure__meta").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("Desserte non confirmée");
+    wrapper.unmount();
+  });
+
+  it("keeps metro loading and confirmed service details visible", () => {
+    const loadingDeparture = createServiceDeparture({ serviceTypeStatus: "loading" });
+    const loadingWrapper = mount(TransitBoard, {
+      props: {
+        board: createBoard("metro"),
+        departures: [loadingDeparture],
+        directionGroups: [createDirectionGroup(loadingDeparture)],
+        collapsedDirectionIds: [],
+        loading: false,
+      },
+      global: { stubs: { LineIconBadge: true } },
+    });
+    expect(loadingWrapper.get(".departure__meta").text()).toBe("Chargement de la desserte");
+    loadingWrapper.unmount();
+
+    const confirmedDeparture = createServiceDeparture({
+      id: "metro-confirmed-service",
+      serviceType: "semi-direct",
+      serviceSection: "west",
+      remainingStopCount: 4,
+    });
+    const confirmedWrapper = mount(TransitBoard, {
+      props: {
+        board: createBoard("metro"),
+        departures: [confirmedDeparture],
+        directionGroups: [createDirectionGroup(confirmedDeparture)],
+        collapsedDirectionIds: [],
+        loading: false,
+      },
+      global: { stubs: { LineIconBadge: true } },
+    });
+    const meta = confirmedWrapper.get(".departure__meta");
+    expect(meta.text()).toContain("Semi direct");
+    expect(meta.get(".departure__section").text()).toBe("(tronçon ouest)");
+    expect(meta.find("small").exists()).toBe(true);
+    confirmedWrapper.unmount();
+  });
+
+  it.each(["rer", "train"] as const)("preserves unavailable and confirmed service labels on %s departures", async (mode) => {
+    const unavailable = createServiceDeparture({
+      id: `${mode}-unavailable`,
+      serviceType: "inconnu",
+      serviceTypeStatus: "unavailable",
+    });
+    const wrapper = mount(TransitBoard, {
+      props: {
+        board: createBoard(mode),
+        departures: [unavailable],
+        directionGroups: [createDirectionGroup(unavailable)],
+        collapsedDirectionIds: [],
+        loading: false,
+      },
+      global: { stubs: { LineIconBadge: true } },
+    });
+    expect(wrapper.get(".departure__meta").text()).toBe("Desserte non confirmée");
+
+    for (const [serviceType, label] of [
+      ["omnibus", "Toutes stations"],
+      ["direct", "Direct"],
+      ["semi-direct", "Semi direct"],
+    ] as const) {
+      const confirmed = createServiceDeparture({
+        id: `${mode}-${serviceType}`,
+        serviceType,
+        serviceSection: serviceType === "semi-direct" ? "east" : undefined,
+      });
+      await wrapper.setProps({
+        departures: [confirmed],
+        directionGroups: [createDirectionGroup(confirmed)],
+      });
+      const meta = wrapper.get(".departure__meta");
+      expect(meta.text()).toContain(label);
+      if (serviceType === "semi-direct") {
+        expect(meta.get(".departure__section").text()).toBe("(tronçon est)");
+      }
+    }
+
     wrapper.unmount();
   });
 
@@ -81,6 +227,44 @@ describe("TransitBoard departure metadata", () => {
       await wrapper.get('[aria-label="Afficher la desserte"]').trigger("click");
       expect(wrapper.emitted("show-pattern")?.[0]).toEqual([{
         board: createBoard(), directionGroup: createDirectionGroup(departure), departure,
+      }]);
+    } finally {
+      wrapper.unmount();
+      media.mockRestore();
+    }
+  });
+
+  it("omits the unavailable metro fallback in the compact mobile row without hiding its action", async () => {
+    const media = vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      matches: query === "(max-width: 1024px)", media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(),
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }));
+    const departure = createServiceDeparture({
+      serviceType: "inconnu",
+      serviceTypeStatus: "unavailable",
+    });
+    const wrapper = mount(TransitBoard, {
+      props: {
+        board: createBoard("metro"),
+        departures: [departure],
+        directionGroups: [createDirectionGroup(departure)],
+        collapsedDirectionIds: [],
+        loading: false,
+      },
+      global: { stubs: { LineIconBadge: true } },
+    });
+    try {
+      await nextTick();
+      expect(wrapper.find(".departure__meta").exists()).toBe(false);
+      expect(wrapper.find(".departure__main--service-detail").exists()).toBe(false);
+      expect(wrapper.get(".departure__main strong").text()).toBe("Mairie de Montreuil");
+      const patternButton = wrapper.get(".departure-pattern-button");
+      await patternButton.trigger("click");
+      expect(wrapper.emitted("show-pattern")?.[0]).toEqual([{
+        board: createBoard("metro"),
+        directionGroup: createDirectionGroup(departure),
+        departure,
       }]);
     } finally {
       wrapper.unmount();
@@ -407,7 +591,7 @@ describe("TransitBoard departure metadata", () => {
   });
 });
 
-function createBoard(): TransitBoardConfig {
+function createBoard(mode: TransitMode = "rer"): TransitBoardConfig {
   return {
     id: "board-test",
     title: "Station test",
@@ -416,13 +600,27 @@ function createBoard(): TransitBoardConfig {
       ref: "line:test",
       shortName: "T",
       longName: "Ligne test",
-      mode: "rer",
+      mode,
       color: "#0064ff",
       textColor: "#ffffff",
     },
     monitoringPoints: [{ ref: "stop:test", label: "Tous quais" }],
     directionGroups: [],
     maxDepartures: 4,
+  };
+}
+
+function createServiceDeparture(overrides: Partial<Departure> = {}): Departure {
+  return {
+    id: "service-display",
+    lineRef: "line:test",
+    monitoringRef: "stop:test",
+    stopName: "Station test",
+    destination: "Mairie de Montreuil",
+    monitoringLabel: "Tous quais",
+    vehicleAtStop: false,
+    expectedDepartureTime: new Date(Date.now() + 300_000).toISOString(),
+    ...overrides,
   };
 }
 

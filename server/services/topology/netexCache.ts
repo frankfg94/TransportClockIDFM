@@ -44,6 +44,9 @@ interface NetexCacheConfig {
 
 export type NetexRuntimeEnv = Record<string, string | undefined>;
 
+/** The catalogue was read successfully, but contains no uniquely matching line. */
+export class NetexLineNotFoundError extends Error {}
+
 type CloudflareEventLike = {
   context?: {
     cloudflare?: {
@@ -538,7 +541,7 @@ async function loadNetexLineByCode(
   const entry = index.lines.find((line) => line.code === code);
 
   if (!entry) {
-    throw new Error(`Line ${code} is not present in NeTEx cache index.`);
+    throw new NetexLineNotFoundError(`Line ${code} is not present in NeTEx cache index.`);
   }
 
   return readCacheJson<NetexLineCache>(source, entry.file);
@@ -963,7 +966,7 @@ function resolveLineCode(lineId: string, index: NetexCacheIndex): string {
     }
   }
 
-  throw new Error(`No stable NeTEx cache line mapping found for ${lineId}.`);
+  throw new NetexLineNotFoundError(`No stable NeTEx cache line mapping found for ${lineId}.`);
 }
 
 function extractLineCode(value: string): string | undefined {

@@ -55,6 +55,9 @@
       :traffic-status-label="trafficStatusLabel"
       :basemap-layer="basemapLayer"
       :legacy-basemap="mapExperience.kind === 'legacy'"
+      :perspective="Boolean(camera.pitch)"
+      @toggle-perspective="changePerspective()"
+      @rotate="changePerspective($event)"
       :share-feedback="shareFeedback"
       :radar-enabled="globalMapIsochrones.enabled.value"
       :radar-panel-open="globalMapIsochrones.panelOpen.value"
@@ -117,6 +120,7 @@
         ref="nextSurfaceRef"
         :key="`transport-map-antialias-${appSettings.deckAntialiasing ? 'on' : 'off'}`"
         class="global-transport-plan__next-surface"
+        :satellite="basemapLayer === 'satellite'"
         :renderer="renderer"
         :camera="camera"
         :nearby-places="!routePreviewActive ? displayedNearbyPlaces : undefined"
@@ -806,6 +810,7 @@
       <TransportMapTooltip
         v-if="!routePreviewActive && hoveredFeature && hoveredFeature.type !== 'isochrone'"
         :station-label="hoveredFeature.type === 'station' ? hoveredFeatureLabel : undefined"
+        :floating="Boolean(camera.pitch && hoveredFeature.type === 'station')"
         :lines="hoveredTooltipLines"
         :active-line-id="hoveredFeature.type === 'line' ? hoveredFeature.id : undefined"
         :style="tooltipStyle"
@@ -1136,7 +1141,7 @@ import type {
   TransportMapTraceEventType,
   TransportMapTraceMetadata,
 } from "../transport-map/performance/transportMapPerformanceTrace";
-import { useGlobalTransportMapInteraction } from "./useGlobalTransportMapInteraction";
+import { normalizeBearing, useGlobalTransportMapInteraction } from "./useGlobalTransportMapInteraction";
 import ContextMenu from "../../components/ContextMenu.vue";
 import AppModal from "../../components/AppModal.vue";
 import DraggableBottomSheet from "../../components/DraggableBottomSheet.vue";
@@ -1335,6 +1340,15 @@ const legacyBasemapRef = ref<{
 const camera = shallowRef<CameraState>(createCamera());
 const selectedLineInteractionScene = shallowRef<TransportMapRenderScene>();
 const basemapLayer = ref<TransportMapBasemapLayer>("plan");
+function changePerspective(rotation?: number): void {
+  cancelCameraAnimation();
+  cancelWheelZoom();
+  cancelInertia();
+  const current = camera.value;
+  const pitch = rotation === undefined ? (current.pitch ? 0 : 50) : current.pitch;
+  const bearing = pitch ? normalizeBearing(current.bearing + (rotation ?? 0)) : 0;
+  applyCamera(updateCamera(current, { pitch, bearing }), false);
+}
 // Camera changes are intentionally kept out of the Vue render tree while a
 // gesture is active. The canvas needs every camera sample; the legend does
 // not, and patching it for every pointer event can consume a frame on WebView.
@@ -5920,7 +5934,7 @@ onBeforeUnmount(() => {
   position: relative;
   flex: 1 1 0;
   min-height: 0;
-  overflow: hidden;
+  overflow: clip;
 }
 .global-transport-plan__iris-status {
   position: absolute;
