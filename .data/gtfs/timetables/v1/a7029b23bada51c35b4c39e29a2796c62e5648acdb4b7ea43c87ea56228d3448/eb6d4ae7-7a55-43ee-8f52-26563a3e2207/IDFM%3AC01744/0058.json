@@ -1,0 +1,1 @@
+{"schemaVersion":1,"trips":[{"id":"IDFM:TN:SNCF:5a28d5bd-2700-4dfb-aadf-e2ac80366582","serviceId":"IDFM:TN:52733653","directionId":"0","headsign":"Gare Montparnasse","calls":[[0,1,60540,60660,0,1],[2,2,61410,61470,0,0],[4,3,61860,61920,0,0],[6,4,62430,62490,0,0],[8,5,63540,63660,0,0],[10,6,64380,64380,1,0]]}]}
