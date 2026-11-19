@@ -2870,7 +2870,17 @@ export const fr = {
     placesAttribution: "Données © contributeurs OpenStreetMap · dataset communal compilé",
     placeAria: "{name}, {type}, à {meters} mètres, {walking}",
     neighborhoodScore: {
+      venueAnalysis: {
+        marketLoading: "Analyse des marchés alimentaires…",
+        cinemaLoading: "Analyse de l’accessibilité des cinémas…",
+        marketSource: "OpenStreetMap · données municipales · itinéraires piétons",
+        cinemaSource: "OpenStreetMap · itinéraires piétons et transports en commun",
+        marketSize: { unknown: "Inconnue", small: "Petit", medium: "Moyen", large: "Grand", exceptional: "Exceptionnel" },
+        weekdays: { Mo: "Lundi", Tu: "Mardi", We: "Mercredi", Th: "Jeudi", Fr: "Vendredi", Sa: "Samedi", Su: "Dimanche" },
+      },
       scoreHelp: {
+        foodMarkets: "Marché à {minutes} min à pied au plus : +{bonus} point, ou +{premium} si au moins {sessions} séances par semaine et {area} m² ou {traders} commerçants. Un marché plus loin est informatif.",
+        cinemas: "Un cinéma à {walking} min à pied ou {transit} min en transports porte-à-porte au plus ajoute {bonus} point une seule fois. Le temps en transports inclut la marche, l’attente et les correspondances.",
         title: "Comment fonctionne la note ?",
         button: "Aide",
         intro: "La note sur {max} est la moyenne pondérée des notes de catégories disponibles, puis arrondie à l’entier pour l’affichage. Chaque catégorie est bornée entre zéro et {max}.",
@@ -3073,6 +3083,8 @@ export const fr = {
         optional: "Facultative",
       },
       datasets: {
+        "food-markets": "Marchés alimentaires",
+        "cinema-access": "Accessibilité des cinémas",
         "transport-bootstrap": "Stations et lignes IDFM",
         "navitia-journeys": "Itinéraires Navitia",
         "gtfs-journeys": "Itinéraires théoriques GTFS",
@@ -3464,6 +3476,34 @@ export const fr = {
         richCommercialStreetApprox: {
           label: "Rue commerçante riche : fromagerie, boucherie, traiteur et boulangerie à environ {minutes} min",
           tooltip: "Une concentration de {count} spécialités alimentaires — fromagerie, boucherie, traiteur et boulangerie — est recensée dans une zone d’environ {minutes} min ; les temps sans itinéraire piéton sont des estimations.",
+        },
+        foodMarketPremium: {
+          label: "{name} · marché premium · {minutes} min à pied",
+          tooltip: "Taille : {size}. Surface : {area}. Commerçants : {traders}. Séances par semaine : {sessions}. Horaires : {hours}. Marche mesurée : {minutes} min. Un tiret indique une donnée inconnue.",
+        },
+        foodMarketPremiumContext: {
+          label: "{name} · marché premium",
+          tooltip: "Taille : {size}. Surface : {area}. Commerçants : {traders}. Séances par semaine : {sessions}. Horaires : {hours}. Marche mesurée : {minutes} min. Un tiret indique une donnée inconnue.",
+        },
+        foodMarketNearby: {
+          label: "{name} · {minutes} min à pied",
+          tooltip: "Taille : {size}. Surface : {area}. Commerçants : {traders}. Séances par semaine : {sessions}. Horaires : {hours}. Marche mesurée : {minutes} min. Un tiret indique une donnée inconnue.",
+        },
+        foodMarketContext: {
+          label: "{name} · marché recensé",
+          tooltip: "Taille : {size}. Surface : {area}. Commerçants : {traders}. Séances par semaine : {sessions}. Horaires : {hours}. Marche mesurée : {minutes} min. Un tiret indique une donnée inconnue.",
+        },
+        cinemaWalking: {
+          label: "{name} · {minutes} min à pied",
+          tooltip: "Temps mesuré sur le réseau piéton.",
+        },
+        cinemaTransit: {
+          label: "{name} · {minutes} min en transports",
+          tooltip: "Temps théorique porte-à-porte, avec marche, attente et correspondances.",
+        },
+        cinemaAccessUnknown: {
+          label: "{name} · accès non évalué",
+          tooltip: "Cinéma recensé, durée d’accès insuffisamment documentée.",
         },
         shoppingCentreNearby: {
           label: "Grand centre commercial « {name} » à {minutes} min à pied",

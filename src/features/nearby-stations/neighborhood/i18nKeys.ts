@@ -12,6 +12,34 @@ export const CATEGORY_KEYS: Record<NeighborhoodCategoryId, TranslationKey> = {
 };
 
 export const FACT_KEYS: Record<NeighborhoodFactKind, { label: TranslationKey; tooltip: TranslationKey }> = {
+  foodMarketPremium: {
+    label: "nearbyStations.neighborhoodScore.facts.foodMarketPremium.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.foodMarketPremium.tooltip",
+  },
+  foodMarketPremiumContext: {
+    label: "nearbyStations.neighborhoodScore.facts.foodMarketPremiumContext.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.foodMarketPremiumContext.tooltip",
+  },
+  foodMarketNearby: {
+    label: "nearbyStations.neighborhoodScore.facts.foodMarketNearby.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.foodMarketNearby.tooltip",
+  },
+  foodMarketContext: {
+    label: "nearbyStations.neighborhoodScore.facts.foodMarketContext.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.foodMarketContext.tooltip",
+  },
+  cinemaWalking: {
+    label: "nearbyStations.neighborhoodScore.facts.cinemaWalking.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.cinemaWalking.tooltip",
+  },
+  cinemaTransit: {
+    label: "nearbyStations.neighborhoodScore.facts.cinemaTransit.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.cinemaTransit.tooltip",
+  },
+  cinemaAccessUnknown: {
+    label: "nearbyStations.neighborhoodScore.facts.cinemaAccessUnknown.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.cinemaAccessUnknown.tooltip",
+  },
   lastServices: {
     label: "nearbyStations.neighborhoodScore.facts.lastServices.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.lastServices.tooltip",

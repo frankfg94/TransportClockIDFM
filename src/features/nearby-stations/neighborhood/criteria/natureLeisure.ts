@@ -11,11 +11,14 @@ import type { ScoredPlace } from "../places";
 import { isSportsPlace, isTennisPlace, makePlaceFact, scorePlaces } from "../places";
 import { clamp, normalizeScoreText, saturatingNeighborhoodBonus } from "../primitives";
 import { DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME } from "../departureTimes";
+import { isCinema, scoreCinemas } from "./cinemas";
 
 export const NATURE_LEISURE_SCORE_RULES = { base: 4, target: 3, maximumBonus: 6, factsOnlyBase: 7, factsMaximum: 2 } as const;
 
 export function buildNatureLeisureCategory(input: NeighborhoodScoreInput): NeighborhoodCategoryResult {
   const base = category("nature-leisure");
+  const cinemas = scoreCinemas(input.cinemas);
+  base.neutralFacts = cinemas.facts.filter(fact => fact.polarity === "neutral");
   const greenSpaceFacts = [
     ...buildExceptionalGreenSpaceWalkingFacts(input.backendVerdict?.nearbyGreenSpaces),
     ...buildGreenSpaceTransitFacts(input.greenSpaceJourneys, input.journeyDepartureTime),
@@ -32,9 +35,9 @@ export function buildNatureLeisureCategory(input: NeighborhoodScoreInput): Neigh
     };
   }
   const leisure = input.placesLoaded
-    ? scorePlaces(input, (place) => place.category === "culture" || place.category === "attraction")
+    ? scorePlaces(input, (place) => !isCinema(place) && (place.category === "culture" || place.category === "attraction"))
     : [];
-  if (leisure.length === 0 && greenSpaceFacts.length === 0 && sportsFacts.length === 0) {
+  if (leisure.length === 0 && greenSpaceFacts.length === 0 && sportsFacts.length === 0 && cinemas.points === 0) {
     return {
       ...base,
       available: false,
@@ -44,7 +47,7 @@ export function buildNatureLeisureCategory(input: NeighborhoodScoreInput): Neigh
     };
   }
   const nearest = leisure[0];
-  const positiveFacts = [...greenSpaceFacts, ...sportsFacts];
+  const positiveFacts = [...greenSpaceFacts, ...sportsFacts, ...cinemas.facts.filter(fact => fact.polarity === "positive")];
   if (nearest) {
     positiveFacts.push(makePlaceFact({
       id: "leisure-nearby",
@@ -61,9 +64,10 @@ export function buildNatureLeisureCategory(input: NeighborhoodScoreInput): Neigh
   }
   const baseScore = leisure.length > 0
     ? NATURE_LEISURE_SCORE_RULES.base + saturatingNeighborhoodBonus(leisure.length, NATURE_LEISURE_SCORE_RULES.target, NATURE_LEISURE_SCORE_RULES.maximumBonus)
-    : NATURE_LEISURE_SCORE_RULES.factsOnlyBase;
+    : greenSpaceFacts.length || sportsFacts.length ? NATURE_LEISURE_SCORE_RULES.factsOnlyBase : NATURE_LEISURE_SCORE_RULES.base;
   const factBonus = Math.min(NATURE_LEISURE_SCORE_RULES.factsMaximum, greenSpaceFacts.length + sportsFacts.length);
-  const score = clamp(baseScore + factBonus);
+  const rawScore = baseScore + factBonus + cinemas.points;
+  const score = clamp(rawScore);
   return withFacts({
     ...base,
     available: true,
@@ -71,7 +75,8 @@ export function buildNatureLeisureCategory(input: NeighborhoodScoreInput): Neigh
     scoreDetails: [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.local", method: "sum", score, rows: [
       { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.leisure", measurement: leisure.length, measurementUnit: "count", points: baseScore },
       { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.natureFacts", measurement: greenSpaceFacts.length + sportsFacts.length, measurementUnit: "count", points: factBonus },
-      ...(score < baseScore + factBonus ? [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.cap" as const, points: score - baseScore - factBonus }] : []),
+      ...(input.cinemas !== undefined ? [{ labelKey: "nearbyStations.neighborhoodScore.datasets.cinema-access" as const, points: cinemas.points }] : []),
+      ...(score < rawScore ? [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.cap" as const, points: score - rawScore }] : []),
     ] }],
     positiveFacts,
     negativeFacts: [],

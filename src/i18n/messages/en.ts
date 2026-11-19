@@ -2838,7 +2838,17 @@ export const en = {
     placesAttribution: "Data © OpenStreetMap contributors · compiled commune dataset",
     placeAria: "{name}, {type}, {meters} metres away, {walking}",
     neighborhoodScore: {
+      venueAnalysis: {
+        marketLoading: "Checking food markets…",
+        cinemaLoading: "Checking cinema access…",
+        marketSource: "OpenStreetMap · municipal data · pedestrian routing",
+        cinemaSource: "OpenStreetMap · pedestrian and public transport routing",
+        marketSize: { unknown: "Unknown", small: "Small", medium: "Medium", large: "Large", exceptional: "Exceptional" },
+        weekdays: { Mo: "Monday", Tu: "Tuesday", We: "Wednesday", Th: "Thursday", Fr: "Friday", Sa: "Saturday", Su: "Sunday" },
+      },
       scoreHelp: {
+        foodMarkets: "Market within {minutes} min on foot: +{bonus} points, or +{premium} for at least {sessions} sessions a week and {area} m² or {traders} traders. Farther markets are shown for context.",
+        cinemas: "A cinema within {walking} min on foot or {transit} min by public transport door to door adds {bonus} point once. Public transport includes walking, waiting and transfers.",
         title: "How does the score work?",
         button: "Help",
         intro: "The score out of {max} is the weighted average of available category scores, rounded to a whole number for display. Each category is bounded between zero and {max}.",
@@ -3041,6 +3051,8 @@ export const en = {
         optional: "Optional",
       },
       datasets: {
+        "food-markets": "Food markets",
+        "cinema-access": "Cinema access",
         "transport-bootstrap": "IDFM stations and lines",
         "navitia-journeys": "Navitia journeys",
         "gtfs-journeys": "Theoretical GTFS journeys",
@@ -3432,6 +3444,34 @@ export const en = {
         richCommercialStreetApprox: {
           label: "Rich shopping street: cheese shop, butcher, deli and bakery within about {minutes} min",
           tooltip: "A concentration of {count} food specialties — cheese shop, butcher, deli and bakery — is listed within an area of about {minutes} min; times without a walking route are estimates.",
+        },
+        foodMarketPremium: {
+          label: "{name} · premium market · {minutes} min on foot",
+          tooltip: "Size: {size}. Area: {area}. Traders: {traders}. Sessions per week: {sessions}. Hours: {hours}. Measured walk: {minutes} min. A dash indicates unknown data.",
+        },
+        foodMarketPremiumContext: {
+          label: "{name} · premium market",
+          tooltip: "Size: {size}. Area: {area}. Traders: {traders}. Sessions per week: {sessions}. Hours: {hours}. Measured walk: {minutes} min. A dash indicates unknown data.",
+        },
+        foodMarketNearby: {
+          label: "{name} · {minutes} min on foot",
+          tooltip: "Size: {size}. Area: {area}. Traders: {traders}. Sessions per week: {sessions}. Hours: {hours}. Measured walk: {minutes} min. A dash indicates unknown data.",
+        },
+        foodMarketContext: {
+          label: "{name} · listed market",
+          tooltip: "Size: {size}. Area: {area}. Traders: {traders}. Sessions per week: {sessions}. Hours: {hours}. Measured walk: {minutes} min. A dash indicates unknown data.",
+        },
+        cinemaWalking: {
+          label: "{name} · {minutes} min on foot",
+          tooltip: "Time measured on the pedestrian network.",
+        },
+        cinemaTransit: {
+          label: "{name} · {minutes} min by public transport",
+          tooltip: "Theoretical door-to-door time, including walking, waiting and transfers.",
+        },
+        cinemaAccessUnknown: {
+          label: "{name} · access not assessed",
+          tooltip: "Cinema listed, access time insufficiently documented.",
         },
         shoppingCentreNearby: {
           label: "Major shopping centre “{name}”, {minutes} min on foot",

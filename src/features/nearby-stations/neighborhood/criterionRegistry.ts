@@ -20,7 +20,7 @@ export interface NeighborhoodCriterionState {
   score?: number;
   confidence: number;
   reasons: readonly NeighborhoodFact[];
-  datasets: readonly (NeighborhoodDatasetRequirement & { status: NeighborhoodDatasetStatus })[];
+  datasets: readonly (NeighborhoodDatasetRequirement & { status: NeighborhoodDatasetStatus; durationMs?: number; source?: string; error?: string })[];
 }
 
 /**
@@ -46,6 +46,7 @@ export const NEIGHBORHOOD_CRITERION_REGISTRY: readonly NeighborhoodCriterionDefi
     datasets: [
       { id: "osm-places", required: true, maxAgeMs: 24 * 60 * 60_000 },
       { id: "shopping-centres", required: false, maxAgeMs: 24 * 60 * 60_000 },
+      { id: "food-markets", required: false },
       { id: "supermarket-footprints", required: false, maxAgeMs: 24 * 60 * 60_000 },
       { id: "neighborhood-verdict", required: false, maxAgeMs: 24 * 60 * 60_000 },
     ],
@@ -55,6 +56,7 @@ export const NEIGHBORHOOD_CRITERION_REGISTRY: readonly NeighborhoodCriterionDefi
     datasets: [
       { id: "osm-places", required: true, maxAgeMs: 24 * 60 * 60_000 },
       { id: "neighborhood-green-spaces", required: false, maxAgeMs: 24 * 60 * 60_000 },
+      { id: "cinema-access", required: false },
       { id: "neighborhood-verdict", required: false, maxAgeMs: 24 * 60 * 60_000 },
     ],
   },

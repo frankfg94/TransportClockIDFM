@@ -7,6 +7,16 @@ export function transportSectionValues(
   values: TranslationParams | undefined,
   t: (key: TranslationKey, values?: TranslationParams) => string,
 ): TranslationParams | undefined {
+  if (fact.family === "food-market" && values && typeof values.size === "string") {
+    const sizes = ["unknown", "small", "medium", "large", "exceptional"] as const;
+    const size = sizes.find(item => item === values.size);
+    const days = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] as const;
+    const localizedHours = typeof values.hours === "string" ? values.hours.replace(/\b(Mo|Tu|We|Th|Fr|Sa|Su)\b/gu, token => {
+      const day = days.find(item => item === token);
+      return day ? t(`nearbyStations.neighborhoodScore.venueAnalysis.weekdays.${day}`) : token;
+    }) : values.hours;
+    if (size) return { ...values, hours: localizedHours ?? "—", size: t(`nearbyStations.neighborhoodScore.venueAnalysis.marketSize.${size}`) };
+  }
   const section = fact.transportSection;
   if (!section || typeof values?.line !== "string" || !section.label && section.kind !== "unclassified") return values;
   const keys: Record<typeof section.kind, TranslationKey> = {

@@ -7,6 +7,8 @@ import { NATURE_LEISURE_SCORE_RULES as nature } from "./criteria/natureLeisure";
 import { TRANSPORT_SCORE_RULES as transport } from "./verdict-transport-facts/scoring";
 import { MAJOR_SHOPPING_CENTRE_ACCESS_RULES as centre } from "./shoppingCentres";
 import { PERSONAL_JOURNEY_SCORES as personal } from "./personalJourneys";
+import { FOOD_MARKET_RULES as market } from "./criteria/foodMarkets";
+import { CINEMA_RULES as cinema } from "./criteria/cinemas";
 
 export interface NeighborhoodScoreHelpRule { key: TranslationKey; values: TranslationParams }
 export interface NeighborhoodScoreHelpDefinition { id: NeighborhoodCategoryId; rules: NeighborhoodScoreHelpRule[] }
@@ -21,8 +23,14 @@ export function neighborhoodScoreHelpDefinitions(format: { percent(value: number
       { key: "nearbyStations.neighborhoodScore.scoreHelp.frequency", values: { m1: frequency[0].minutes, w1: percent(frequency[0].weight), m2: frequency[1].minutes, w2: percent(frequency[1].weight), m3: frequency[2].minutes, w3: percent(frequency[2].weight), m4: frequency[3].minutes, w4: percent(frequency[3].weight), m5: frequency[4].minutes, w5: percent(frequency[4].weight) } },
       { key: "nearbyStations.neighborhoodScore.scoreHelp.personal", values: { bonus: personal.bonus, neutral: personal.neutral, penalty: personal.penalty } },
     ] },
-    { id: "daily-life", rules: [{ key: "nearbyStations.neighborhoodScore.scoreHelp.daily", values: { minutes: NEIGHBORHOOD_WALKING_LIMIT_MINUTES, base: daily.base, supermarkets: daily.supermarkets.target, supermarketPoints: daily.supermarkets.maximum, stores: daily.stores.target, storePoints: daily.stores.maximum, restaurants: daily.restaurants.target, restaurantPoints: daily.restaurants.maximum, centre: number(centre.scoreBonus), estimated: number(centre.scoreBonus * daily.estimatedCentreFactor), walking: centre.maximumWalkingMinutes, transit: centre.maximumTransitMinutes } }] },
-    { id: "nature-leisure", rules: [{ key: "nearbyStations.neighborhoodScore.scoreHelp.nature", values: { minutes: NEIGHBORHOOD_WALKING_LIMIT_MINUTES, base: nature.base, target: nature.target, bonus: nature.maximumBonus, factsBase: nature.factsOnlyBase, max: nature.factsMaximum } }] },
+    { id: "daily-life", rules: [
+      { key: "nearbyStations.neighborhoodScore.scoreHelp.daily", values: { minutes: NEIGHBORHOOD_WALKING_LIMIT_MINUTES, base: daily.base, supermarkets: daily.supermarkets.target, supermarketPoints: daily.supermarkets.maximum, stores: daily.stores.target, storePoints: daily.stores.maximum, restaurants: daily.restaurants.target, restaurantPoints: daily.restaurants.maximum, centre: number(centre.scoreBonus), estimated: number(centre.scoreBonus * daily.estimatedCentreFactor), walking: centre.maximumWalkingMinutes, transit: centre.maximumTransitMinutes } },
+      { key: "nearbyStations.neighborhoodScore.scoreHelp.foodMarkets", values: { minutes: market.walkingMinutes, bonus: number(market.bonus), premium: number(market.exceptionalBonus), area: market.exceptionalAreaM2, traders: market.exceptionalTraders, sessions: market.exceptionalSessions } },
+    ] },
+    { id: "nature-leisure", rules: [
+      { key: "nearbyStations.neighborhoodScore.scoreHelp.nature", values: { minutes: NEIGHBORHOOD_WALKING_LIMIT_MINUTES, base: nature.base, target: nature.target, bonus: nature.maximumBonus, factsBase: nature.factsOnlyBase, max: nature.factsMaximum } },
+      { key: "nearbyStations.neighborhoodScore.scoreHelp.cinemas", values: { walking: cinema.walkingMinutes, transit: cinema.transitMinutes, bonus: cinema.bonus } },
+    ] },
     { id: "health", rules: [{ key: "nearbyStations.neighborhoodScore.scoreHelp.health", values: { minutes: NEIGHBORHOOD_WALKING_LIMIT_MINUTES, hospital: health.hospitalMinutes, missing: health.missing, base: health.base, target: health.extraTarget, bonus: health.extraMaximum } }] },
     { id: "education", rules: [{ key: "nearbyStations.neighborhoodScore.scoreHelp.education", values: { minutes: EDUCATION_WALKING_LIMIT_MINUTES, base: education.base, target: education.target, bonus: education.maximumBonus } }] },
   ];

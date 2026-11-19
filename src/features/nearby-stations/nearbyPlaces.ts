@@ -88,6 +88,8 @@ export interface PlacesProvider {
     signal?: AbortSignal,
   ): Promise<GeocoderPoint[]>;
   searchNearby(request: NearbyPlacesRequest, signal?: AbortSignal): Promise<NearbyPlace[]>;
+  /** Optional full commune inventory for city-wide context. */
+  loadPlacesCity?(city: NearbyPlaceCityRef, signal?: AbortSignal): Promise<import("../../services/places/compiledPlaces").CompiledPlacesCityFile>;
   /** Optional batch path used by line views to load each served city once. */
   searchNearbyCities?(
     request: NearbyPlacesCitiesRequest,

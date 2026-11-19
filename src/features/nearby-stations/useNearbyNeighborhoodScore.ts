@@ -78,6 +78,9 @@ import {
 import type { PublicServiceQuality } from "./serviceQualityApi";
 import { loadNoctilienAccess } from "./noctilienAccess";
 import { assertNeighborhoodTimetableAvailable, NeighborhoodGtfsCoverageError } from "./neighborhoodJourneys";
+import { analyzeCinemas, analyzeFoodMarkets, type VenueAnalysis } from "./neighborhood/venueAccess";
+import type { FoodMarketAccess } from "./neighborhood/criteria/foodMarkets";
+import type { CinemaAccess } from "./neighborhood/criteria/cinemas";
 
 type ReadonlyValue<T> = { readonly value: T };
 
@@ -147,6 +150,11 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const shoppingCentres = ref<NeighborhoodShoppingCentreAccess[]>([]);
   const shoppingCentresLoaded = ref(false);
   const shoppingCentresJourneyDateTime = ref<string | undefined>();
+  const foodMarkets = shallowRef<VenueAnalysis<FoodMarketAccess>>();
+  const cinemas = shallowRef<VenueAnalysis<CinemaAccess>>();
+  let cinemaDate: string | undefined;
+  let venuesController: AbortController | undefined;
+  const venueDurations = new Map<string, number>();
   const supermarketFootprints = ref<NearbySupermarketFootprint[]>([]);
   const supermarketFootprintsLoaded = ref(false);
   const walkingRoutes = ref<Record<string, NeighborhoodWalkingMetrics | undefined>>({});
@@ -234,6 +242,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       placesLoaded: placesLoaded.value,
       shoppingCentres: shoppingCentres.value,
       shoppingCentresLoaded: shoppingCentresLoaded.value,
+      foodMarkets: foodMarkets.value?.items,
+      cinemas: cinemas.value?.items,
       supermarketFootprints: supermarketFootprints.value,
       walkingRoutes: currentWalkingRoutes,
       stations: options.stations.value,
@@ -300,6 +310,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     resetOriginState(originKey);
     const packChanged = currentVersion !== options.gtfsVersion?.value;
     if (packChanged) {
+      cinemas.value = undefined;
       journeyResults.clear();
       shoppingCentreResults.clear();
       shoppingCentresLoaded.value = false;
@@ -386,6 +397,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       trackHospitalJourneys(origin, places.value, originKey, token, journeyDateTime);
     }
 
+    trackVenueAnalysis(origin, originKey, journeyDateTime, token);
     if (!shoppingCentresLoaded.value || shoppingCentresJourneyDateTime.value !== journeyDateTime) {
       trackTask(
         "shopping-centres",
@@ -625,6 +637,9 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     shoppingCentres.value = [];
     shoppingCentresLoaded.value = false;
     shoppingCentresJourneyDateTime.value = undefined;
+    foodMarkets.value = undefined;
+    cinemas.value = undefined;
+    venueDurations.clear();
     supermarketFootprints.value = [];
     supermarketFootprintsLoaded.value = false;
     walkingRoutes.value = {};
@@ -683,6 +698,31 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       });
     placeRequests.set(originKey, { controller, promise });
     return promise;
+  }
+
+  function trackVenueAnalysis(origin: GeocoderPoint, originKey: string, datetime: string | undefined, token: number): void {
+    const needMarkets = !foodMarkets.value || foodMarkets.value.status === "error";
+    const needCinemas = options.calendarReady?.value !== false
+      && (!cinemas.value || cinemas.value.status === "error" || cinemaDate !== datetime);
+    if (!needMarkets && !needCinemas) return;
+    const controller = new AbortController();
+    venuesController = controller;
+    const { signal } = controller;
+    const nearby = loadPlaces(origin, originKey);
+    if (needMarkets) trackTask("food-markets", nearby.then(places =>
+      analyzeFoodMarkets(origin, places, placesProvider, signal)), token,
+    value => { foodMarkets.value = value; }, false, "places", ["daily-life"]);
+    if (needCinemas) {
+      cinemas.value = undefined;
+      trackTask("cinema-access", nearby.then(places => analyzeCinemas(origin, places, (place, requestSignal) => {
+        const request: NearbyJourneyRequest = {
+          purpose: "places", origin, destination: place, datetime, count: 3, includeGeoJson: false,
+        };
+        return options.journeyProbe ? options.journeyProbe.probeJourneys(request, requestSignal)
+          : travelRoutesProvider.findJourneys(request, requestSignal);
+      }, signal)), token,
+      value => { cinemas.value = value; cinemaDate = datetime; }, false, "places", ["nature-leisure"]);
+    }
   }
 
   function loadShoppingCentreAccess(
@@ -1087,6 +1127,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       : taskId.startsWith("noctilien:") ? "night-transit" : taskId.startsWith("frequency:") ? "frequencies"
       : taskId.startsWith("last-service:") ? "last-services" : dirtyCategories.includes("transport") ? "transport-sources" : "other-sources";
     const finishDebug = beginVerdictDebugTask(system, taskId, { categories: dirtyCategories, source });
+    const venueTask = taskId === "food-markets" || taskId === "cinema-access";
+    const venueStarted = venueTask ? performance.now() : undefined;
     taskErrors.delete(taskId);
     pendingTasks.add(taskId);
     activeCriteriaTasks.set(taskId, dirtyCategories);
@@ -1119,6 +1161,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       })
       .finally(() => {
         if (token !== requestToken || taskPromises.get(taskId) !== completion) return;
+        if (venueStarted !== undefined) venueDurations.set(taskId, Math.round(performance.now() - venueStarted));
         pendingTasks.delete(taskId);
         taskPromises.delete(taskId);
         activeCriteriaTasks.delete(taskId);
@@ -1202,6 +1245,16 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     return false;
   }
 
+  function venueDiagnostics(datasetId: string) {
+    if (datasetId !== "food-markets" && datasetId !== "cinema-access") return {};
+    const venue = datasetId === "food-markets" ? foodMarkets.value : cinemas.value;
+    return {
+      durationMs: pendingTasks.has(datasetId) ? undefined : venueDurations.get(datasetId),
+      source: venue?.source,
+      error: taskErrors.get(datasetId)?.cause.message ?? venue?.error,
+    };
+  }
+
   function currentDatasetStatus(
     datasetId: string,
     maxAgeMs: number | undefined,
@@ -1209,6 +1262,11 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   ): NeighborhoodDatasetStatus {
     if (isDatasetLoading(datasetId, categoryId)) return "loading";
     if (isDatasetFailed(datasetId, categoryId)) return "error";
+    if (datasetId === "food-markets" || datasetId === "cinema-access") {
+      if (pendingTasks.has(datasetId) || (datasetId === "cinema-access" && options.calendarReady?.value === false)) return "loading";
+      const venue = datasetId === "food-markets" ? foodMarkets.value : cinemas.value;
+      return taskErrors.has(datasetId) ? "error" : venue?.status ?? "missing";
+    }
     if (datasetId === "transport-bootstrap") return options.network.value ? "ready" : "missing";
     if (datasetId === "osm-places") return placesLoaded.value ? "ready" : "missing";
     if (datasetId === "shopping-centres") return shoppingCentresLoaded.value ? "ready" : "missing";
@@ -1250,6 +1308,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   }
 
   function abortActiveRequests(): void {
+    venuesController?.abort();
+    venuesController = undefined;
     noctilienController?.abort();
     noctilienController = undefined;
     for (const [key, request] of topologyRequests) {
@@ -1298,6 +1358,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       options.journeyDepartureTime?.value,
       options.nightDepartureTime?.value,
       options.gtfsVersion?.value,
+      options.calendarReady?.value,
       options.timetableDate?.value,
     ] as const,
     () => {
@@ -1392,6 +1453,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         ...dataset,
         id: dataset.id === "navitia-journeys" && options.journeySource === "gtfs" ? "gtfs-journeys" : dataset.id,
         status: currentDatasetStatus(dataset.id, dataset.maxAgeMs, definition.id),
+        ...venueDiagnostics(dataset.id),
       } satisfies typeof dataset & { status: NeighborhoodDatasetStatus })).filter(dataset =>
         // Loaded categories with no documentary facts do not consume this
         // optional source. Keep real loading/errors and mandatory coverage.
@@ -1447,6 +1509,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       criterionRevision.value;
       return {
         pendingTasks: [...pendingTasks],
+        foodMarkets: foodMarkets.value,
+        cinemas: cinemas.value,
         errors: [...taskErrors].map(([taskId, entry]) => ({ taskId, source: entry.source,
           categories: entry.categories, name: entry.cause.name, message: entry.cause.message })),
         lineTargets: getRelevantLineTargets(options.stations.value, options.heavyCandidates?.value ?? heavyCandidates.value),

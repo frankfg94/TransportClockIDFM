@@ -78,6 +78,8 @@ const datasetLabelKeys: Record<string, TranslationKey> = {
   "neighborhood-verdict": "nearbyStations.neighborhoodScore.datasets.neighborhood-verdict",
   "osm-places": "nearbyStations.neighborhoodScore.datasets.osm-places",
   "shopping-centres": "nearbyStations.neighborhoodScore.datasets.shopping-centres",
+  "food-markets": "nearbyStations.neighborhoodScore.datasets.food-markets",
+  "cinema-access": "nearbyStations.neighborhoodScore.datasets.cinema-access",
   "supermarket-footprints": "nearbyStations.neighborhoodScore.datasets.supermarket-footprints",
   "neighborhood-green-spaces": "nearbyStations.neighborhoodScore.datasets.neighborhood-green-spaces",
   "walking-routes": "nearbyStations.neighborhoodScore.datasets.walking-routes",
@@ -306,6 +308,9 @@ onBeforeUnmount(() => {
                   <span class="nearby-neighborhood-score-card__diagnostic-label">{{ datasetLabel(dataset.id) }}</span>
                   <small>{{ t(dataset.required ? "nearbyStations.neighborhoodScore.datasetRequirements.required" : "nearbyStations.neighborhoodScore.datasetRequirements.optional") }}</small>
                   <strong>{{ datasetStatusLabel(dataset.status) }}</strong>
+                  <small v-if="dataset.durationMs !== undefined">{{ dataset.durationMs }} ms</small>
+                  <small v-if="dataset.source">{{ t(dataset.id === 'food-markets' ? 'nearbyStations.neighborhoodScore.venueAnalysis.marketSource' : 'nearbyStations.neighborhoodScore.venueAnalysis.cinemaSource') }}</small>
+                  <small v-if="dataset.error">{{ datasetStatusLabel('error') }}</small>
                 </li>
               </ul>
               <p v-else class="nearby-neighborhood-score-card__diagnostics-empty">
@@ -400,6 +405,10 @@ onBeforeUnmount(() => {
           </div>
         </header>
         <NeighborhoodTransportLoading v-if="category.id === 'transport'" :tasks="transportLoadingTasks ?? []" />
+        <p v-if="criterion?.datasets.some(dataset => dataset.status === 'loading' && (dataset.id === 'food-markets' || dataset.id === 'cinema-access'))"
+          class="nearby-neighborhood-score-card__category-loading" role="status">
+          {{ t(category.id === 'daily-life' ? 'nearbyStations.neighborhoodScore.venueAnalysis.marketLoading' : 'nearbyStations.neighborhoodScore.venueAnalysis.cinemaLoading') }}
+        </p>
         <slot v-if="category.id === 'transport'" name="personal-journeys" />
         <p v-if="!category.available && !category.neutralFacts.length" class="nearby-neighborhood-score-card__category-empty">
           {{ category.unavailableReasonKey ? t(category.unavailableReasonKey) : t("nearbyStations.neighborhoodScore.noData") }}

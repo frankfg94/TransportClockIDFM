@@ -9,6 +9,7 @@ import type { NearbyJourney } from "../../nearbyHeavyTransports";
 import { MAJOR_SHOPPING_CENTRE_ACCESS_RULES, MAJOR_SHOPPING_CENTRE_DETECTION_RULES, type NeighborhoodShoppingCentreAccess } from "../shoppingCentres";
 import { MEDIUM_SUPERMARKET_ACCESS_RULES } from "../supermarkets";
 import { getSupermarketSizeAssumption } from "../supermarketSizeAssumptions";
+import { isMarketPlace, scoreFoodMarkets } from "./foodMarkets";
 
 export const DAILY_LIFE_SCORE_RULES = { base: 2, supermarkets: { target: 2, maximum: 3 }, stores: { target: 6, maximum: 3 }, restaurants: { target: 5, maximum: 2 }, estimatedCentreFactor: 0.5 } as const;
 
@@ -25,10 +26,11 @@ export function buildDailyLifeCategory(input: NeighborhoodScoreInput): Neighborh
   }
 
   const nearby = collapseCommercialLocations(scorePlaces(input, (place) =>
-    DAILY_STORE_KINDS.has(placeKind(place)) || place.category === "shop"));
+    !isMarketPlace(place) && (DAILY_STORE_KINDS.has(placeKind(place)) || place.category === "shop")));
   const richCommercialCluster = findRichCommercialStreetCluster(input);
   const supermarkets = scorePlaces(input, isSupermarketLike);
-  const restaurants = scorePlaces(input, (place) => RESTAURANT_KINDS.has(placeKind(place)) || place.category === "food");
+  const restaurants = scorePlaces(input, (place) => !isMarketPlace(place) && (RESTAURANT_KINDS.has(placeKind(place)) || place.category === "food"));
+  const markets = scoreFoodMarkets(input.foodMarkets);
   const shoppingCentreCandidates = (input.shoppingCentres ?? []).filter((centre) => {
     if (centre.areaM2 === undefined || centre.areaM2 >= MAJOR_SHOPPING_CENTRE_DETECTION_RULES.minimumMallSurfaceM2) return true;
     const supportingPlaces = input.places.filter((place) =>
@@ -44,11 +46,12 @@ export function buildDailyLifeCategory(input: NeighborhoodScoreInput): Neighborh
     { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.stores" as const, measurement: nearby.length, measurementUnit: "count", points: saturatingNeighborhoodBonus(nearby.length, DAILY_LIFE_SCORE_RULES.stores.target, DAILY_LIFE_SCORE_RULES.stores.maximum) },
     { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.restaurants" as const, measurement: restaurants.length, measurementUnit: "count", points: saturatingNeighborhoodBonus(restaurants.length, DAILY_LIFE_SCORE_RULES.restaurants.target, DAILY_LIFE_SCORE_RULES.restaurants.maximum) },
     { labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.shoppingCentre" as const, provisional: !input.shoppingCentresLoaded, points: shoppingCentre ? MAJOR_SHOPPING_CENTRE_ACCESS_RULES.scoreBonus * (shoppingCentre.mode === "walking-approx" ? DAILY_LIFE_SCORE_RULES.estimatedCentreFactor : 1) : 0 },
+    ...(input.foodMarkets !== undefined ? [{ labelKey: "nearbyStations.neighborhoodScore.datasets.food-markets" as const, points: markets.points }] : []),
   ];
   const rawScore = scoreParts.reduce((sum, part) => sum + part.points, 0);
   const score = clamp(rawScore);
   if (score !== rawScore) scoreParts.push({ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.cap", points: score - rawScore });
-  const positiveFacts: NeighborhoodFact[] = [];
+  const positiveFacts: NeighborhoodFact[] = markets.facts.filter(fact => fact.polarity === "positive");
   const negativeFacts: NeighborhoodFact[] = [];
   if (richCommercialCluster) {
     const exactWalking = richCommercialCluster.every((place) => place.routed);
@@ -247,6 +250,7 @@ export function buildDailyLifeCategory(input: NeighborhoodScoreInput): Neighborh
 
   return withFacts({
     ...base,
+    neutralFacts: markets.facts.filter(fact => fact.polarity === "neutral"),
     available: true,
     score,
     scoreDetails: [{ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.local", method: "sum", rows: scoreParts, score }],

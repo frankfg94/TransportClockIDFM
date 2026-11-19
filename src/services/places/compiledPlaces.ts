@@ -70,6 +70,7 @@ export const OSM_PRESERVED_TAG_KEYS = new Set([
   "operator",
   "shop",
   "amenity",
+  "marketplace",
   "tourism",
   "leisure",
   "sport",
