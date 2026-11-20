@@ -16,17 +16,17 @@ export const FACT_KEYS: Record<NeighborhoodFactKind, { label: TranslationKey; to
     label: "nearbyStations.neighborhoodScore.facts.foodMarketPremium.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.foodMarketPremium.tooltip",
   },
-  foodMarketPremiumContext: {
-    label: "nearbyStations.neighborhoodScore.facts.foodMarketPremiumContext.label",
-    tooltip: "nearbyStations.neighborhoodScore.facts.foodMarketPremiumContext.tooltip",
+  foodMarketPremiumTransit: {
+    label: "nearbyStations.neighborhoodScore.facts.foodMarketPremiumTransit.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.foodMarketPremiumTransit.tooltip",
   },
   foodMarketNearby: {
     label: "nearbyStations.neighborhoodScore.facts.foodMarketNearby.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.foodMarketNearby.tooltip",
   },
-  foodMarketContext: {
-    label: "nearbyStations.neighborhoodScore.facts.foodMarketContext.label",
-    tooltip: "nearbyStations.neighborhoodScore.facts.foodMarketContext.tooltip",
+  foodMarketDirectTransit: {
+    label: "nearbyStations.neighborhoodScore.facts.foodMarketDirectTransit.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.foodMarketDirectTransit.tooltip",
   },
   cinemaWalking: {
     label: "nearbyStations.neighborhoodScore.facts.cinemaWalking.label",

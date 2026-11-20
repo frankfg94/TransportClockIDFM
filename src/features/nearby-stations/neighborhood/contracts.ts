@@ -138,9 +138,9 @@ export type NeighborhoodFactKind =
   | "shoppingCentreNearbyApprox"
   | "shoppingCentreNearbyTransit"
   | "foodMarketPremium"
-  | "foodMarketPremiumContext"
+  | "foodMarketPremiumTransit"
   | "foodMarketNearby"
-  | "foodMarketContext"
+  | "foodMarketDirectTransit"
   | "cinemaWalking"
   | "cinemaTransit"
   | "cinemaAccessUnknown"
@@ -356,6 +356,7 @@ export interface NeighborhoodScoreInput {
   shoppingCentres?: readonly NeighborhoodShoppingCentreAccess[];
   shoppingCentresLoaded?: boolean;
   foodMarkets?: readonly import("./criteria/foodMarkets").FoodMarketAccess[];
+  marketTransit?: readonly import("./criteria/foodMarkets").FoodMarketTransit[];
   cinemas?: readonly import("./criteria/cinemas").CinemaAccess[];
   supermarketFootprints?: readonly NearbySupermarketFootprint[];
   walkingRoutes?: Readonly<Record<string, NeighborhoodWalkingMetrics | undefined>>;

@@ -193,13 +193,16 @@ function mergeBackendVerdict(categories: NeighborhoodCategoryResult[], verdict: 
       2,
     );
     preservePersonalJourneyFacts(negativeFacts, local.negativeFacts);
+    const localMarketFacts = local.neutralFacts.filter(fact => fact.family === "food-market");
+    const otherNeutralFacts = [...local.neutralFacts, ...externalFacts].filter(fact => fact.family !== "food-market");
     const neutralFacts = preserveSelectedFamilyFact(
-      selectFacts([...local.neutralFacts, ...externalFacts], "neutral", 4),
-      [...local.neutralFacts, ...externalFacts],
+      selectFacts(otherNeutralFacts, "neutral", 4),
+      otherNeutralFacts,
       "neutral",
       4,
     );
-    preserveJourneyBenchmarkFacts(neutralFacts, [...local.neutralFacts, ...externalFacts]);
+    neutralFacts.push(...localMarketFacts);
+    preserveJourneyBenchmarkFacts(neutralFacts, otherNeutralFacts);
     if (local.id === "transport" && external.scoreDelta !== undefined) {
       const score = local.score === undefined ? undefined : clamp(local.score + external.scoreDelta);
       const before = local.score;
@@ -299,7 +302,9 @@ function mergePositiveFactsWithBackend(
   localFacts: readonly NeighborhoodFact[],
   externalFacts: readonly NeighborhoodFact[],
 ): NeighborhoodFact[] {
-  const protectedLocalFacts = categoryId === "nature-leisure"
+  const protectedLocalFacts = categoryId === "daily-life"
+    ? localFacts.filter(fact => fact.family === "food-market")
+    : categoryId === "nature-leisure"
     ? localFacts.filter((fact) => NATURE_LOCAL_PROTECTED_FACT_KINDS.has(fact.kind))
     : categoryId === "transport"
       ? localFacts.filter((fact) => fact.family === "chatelet-access" || fact.family.startsWith("major-station:"))

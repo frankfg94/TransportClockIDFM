@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "markets": [
+    {
+      "name": "Marché Colbert",
+      "address": "64 rue Jean Longuet",
+      "sessionsPerWeek": 2,
+      "openingHours": "Nov-Mar Fr,Su 08:00-13:00; Apr-Oct Fr,Su 08:00-14:00",
+      "listedTraders": 14,
+      "id": "municipal-market:92019:19449",
+      "city": "Châtenay-Malabry",
+      "cityCode": "92019",
+      "lon": 2.279908,
+      "lat": 48.768932,
+      "sourceUrl": "https://www.chatenay-malabry.fr/economie-et-emploi/marche-colbert/"
+    },
+    {
+      "id": "tourism-market:92060:way:70206513",
+      "osmPlaceId": "way:70206513",
+      "name": "Marché du Plessis",
+      "address": "Place de la Libération",
+      "city": "Le Plessis-Robinson",
+      "cityCode": "92060",
+      "lat": 48.7769154,
+      "lon": 2.2554634,
+      "openingHours": "Tu, Fr 08:30-13:00; Su 08:00-13:00",
+      "sessionsPerWeek": 3,
+      "sourceUrl": "https://destination.hauts-de-seine.fr/grand-marche-plessis-robinson-hauts-de-seine-92.html",
+      "sourceName": "Destination Hauts-de-Seine"
+    }
+  ]
+}

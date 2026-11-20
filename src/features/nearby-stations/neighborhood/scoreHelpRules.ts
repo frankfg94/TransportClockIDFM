@@ -28,7 +28,7 @@ export function neighborhoodScoreHelpDefinitions(format: { percent(value: number
     ] },
     { id: "daily-life", rules: [
       { key: "nearbyStations.neighborhoodScore.scoreHelp.daily", values: { minutes: NEIGHBORHOOD_WALKING_LIMIT_MINUTES, base: daily.base, supermarkets: daily.supermarkets.target, supermarketPoints: daily.supermarkets.maximum, stores: daily.stores.target, storePoints: daily.stores.maximum, restaurants: daily.restaurants.target, restaurantPoints: daily.restaurants.maximum, centre: number(centre.scoreBonus), estimated: number(centre.scoreBonus * daily.estimatedCentreFactor), walking: centre.maximumWalkingMinutes, transit: centre.maximumTransitMinutes } },
-      { key: "nearbyStations.neighborhoodScore.scoreHelp.foodMarkets", values: { minutes: market.walkingMinutes, bonus: number(market.bonus), premium: number(market.exceptionalBonus), area: market.exceptionalAreaM2, traders: market.exceptionalTraders, sessions: market.exceptionalSessions } },
+      { key: "nearbyStations.neighborhoodScore.scoreHelp.foodMarkets", values: { minutes: market.advantageMinutes, contextMinutes: market.contextMinutes, bonus: number(market.bonus), extended: number(market.extendedBonus), premium: number(market.exceptionalBonus), area: market.premiumAreaM2, traders: market.premiumTraders, sessions: market.exceptionalSessions } },
     ] },
     { id: "nature-leisure", rules: [
       { key: "nearbyStations.neighborhoodScore.scoreHelp.nature", values: { minutes: NEIGHBORHOOD_WALKING_LIMIT_MINUTES, base: nature.base, target: nature.target, bonus: nature.maximumBonus, factsBase: nature.factsOnlyBase, max: nature.factsMaximum } },

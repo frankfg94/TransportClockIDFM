@@ -103,6 +103,33 @@ describe("compiled places provider", () => {
     expect(fetcher).not.toHaveBeenCalledWith(expect.stringContaining("api/places/nearby"), expect.anything());
   });
 
+  it.each(["manifest.json", "92019.json"])("retries %s for a second consumer when the first cancels", async asset => {
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>(resolve => { markFirstStarted = resolve; });
+    let attempts = 0;
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith(asset) && ++attempts === 1) {
+        markFirstStarted();
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        });
+      }
+      return new Response(JSON.stringify(url.endsWith("manifest.json") ? manifest : city));
+    });
+    const provider = createCompiledPlacesProvider({ fetcher });
+    const controller = new AbortController();
+    const first = provider.loadPlacesCity({ code: city.city.code }, controller.signal);
+    const cancellation = expect(first).rejects.toMatchObject({ name: "AbortError" });
+    await firstStarted;
+    const second = provider.loadPlacesCity({ code: city.city.code });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    controller.abort();
+    await cancellation;
+    await expect(second).resolves.toMatchObject({ city: city.city });
+    expect(attempts).toBe(2);
+  });
+
   it("batches unique served communes and loads the ranking lazily", async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

@@ -126,6 +126,16 @@ export function isNearbyJourneyTransitSection(section: NearbyJourneySection): bo
     || Boolean(section.lineId || section.lineCode || section.lineMode);
 }
 
+export function directNearbyJourneySection(journey: NearbyJourney): NearbyJourneySection | undefined {
+  if ((journey.transferCount ?? 0) !== 0) return undefined;
+  const sections = journey.sections.filter(isNearbyJourneyTransitSection);
+  return sections.length === 1 ? sections[0] : undefined;
+}
+
+export function hasEstimatedNearbyJourney(journey: NearbyJourney): boolean {
+  return journey.sections.some(section => section.timingSource === "estimated" || section.walkingProvider === "straight-line");
+}
+
 function parseJourneyDateTime(value: string | undefined): number | undefined {
   if (!value?.trim()) return undefined;
   const compact = value.trim().match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?$/u);

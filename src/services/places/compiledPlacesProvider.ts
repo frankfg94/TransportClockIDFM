@@ -73,14 +73,13 @@ export function createCompiledPlacesProvider(
     }, signal);
   }
 
-  function loadPlacesManifest(signal?: AbortSignal): Promise<CompiledPlacesManifest> {
-    if (!manifestPromise) {
-      manifestPromise = loadJson("manifest.json", assertPlacesManifest, signal).catch((error) => {
-        manifestPromise = undefined;
-        throw error;
-      });
-    }
-    return manifestPromise;
+  async function loadPlacesManifest(signal?: AbortSignal): Promise<CompiledPlacesManifest> {
+    signal?.throwIfAborted();
+    const load = () => manifestPromise ??= loadJson("manifest.json", assertPlacesManifest, signal).catch((error) => {
+      manifestPromise = undefined;
+      throw error;
+    });
+    return manifestPromise ? retryCancelledAsset(manifestPromise, load, signal) : load();
   }
 
   async function resolveCity(city: NearbyPlaceCityRef, signal?: AbortSignal): Promise<CompiledPlacesManifest["cities"][number]> {
@@ -113,8 +112,13 @@ export function createCompiledPlacesProvider(
 
   async function loadPlacesCity(city: NearbyPlaceCityRef, signal?: AbortSignal): Promise<CompiledPlacesCityFile> {
     const descriptor = await resolveCity(city, signal);
+    signal?.throwIfAborted();
     const existing = cityCache.get(descriptor.code);
-    if (existing) return existing;
+    const load = () => cityCache.get(descriptor.code) ?? requestPlacesCity(descriptor, signal);
+    return existing ? retryCancelledAsset(existing, load, signal) : load();
+  }
+
+  function requestPlacesCity(descriptor: CompiledPlacesManifest["cities"][number], signal?: AbortSignal) {
     // Published city assets are relative to `public/data/places`. Keep
     // accepting the older nested `places/` prefix for forward-compatible
     // manifests while fetching the canonical `/data/places/{code}.json`.
@@ -125,9 +129,9 @@ export function createCompiledPlacesProvider(
     const request = Promise.all(assets.map((asset) => loadJson(asset, assertCompiledPlacesCity, signal)))
       .then((files) => mergeCompiledPlacesCityFiles(files))
       .catch((error) => {
-      cityCache.delete(descriptor.code);
-      throw error;
-    });
+        if (cityCache.get(descriptor.code) === request) cityCache.delete(descriptor.code);
+        throw error;
+      });
     cityCache.set(descriptor.code, request);
     while (cityCache.size > MAX_CITY_CACHE_ENTRIES) cityCache.delete(cityCache.keys().next().value as string);
     return request;
@@ -187,6 +191,19 @@ export function createCompiledPlacesProvider(
       return collectNearbyPlaces(files, request.origins, radius, signal, originGrid);
     },
   };
+}
+
+async function retryCancelledAsset<T>(shared: Promise<T>, reload: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  try {
+    const asset = await shared;
+    signal?.throwIfAborted();
+    return asset;
+  } catch (error) {
+    signal?.throwIfAborted();
+    // When a previous consumer cancels a shared fetch, a current consumer can still read the asset.
+    if (error instanceof Error && error.name === "AbortError") return reload();
+    throw error;
+  }
 }
 
 function clampRadius(radiusMeters: number): number {
@@ -317,6 +334,7 @@ async function nearbyPlacesFromCity(
     if (distance > radius) continue;
     results.push({
       ...restoreCompiledPlaceName(place),
+      ...(place.kind === "marketplace" && !place.city ? { city: file.city.name } : {}),
       cityCode: place.cityCode ?? file.city.code,
       distanceMeters: Math.round(distance),
     });

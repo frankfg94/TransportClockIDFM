@@ -30,7 +30,7 @@ export function buildDailyLifeCategory(input: NeighborhoodScoreInput): Neighborh
   const richCommercialCluster = findRichCommercialStreetCluster(input);
   const supermarkets = scorePlaces(input, isSupermarketLike);
   const restaurants = scorePlaces(input, (place) => !isMarketPlace(place) && (RESTAURANT_KINDS.has(placeKind(place)) || place.category === "food"));
-  const markets = scoreFoodMarkets(input.foodMarkets);
+  const markets = scoreFoodMarkets(input.foodMarkets, input.marketTransit);
   const shoppingCentreCandidates = (input.shoppingCentres ?? []).filter((centre) => {
     if (centre.areaM2 === undefined || centre.areaM2 >= MAJOR_SHOPPING_CENTRE_DETECTION_RULES.minimumMallSurfaceM2) return true;
     const supportingPlaces = input.places.filter((place) =>

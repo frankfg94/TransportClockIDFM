@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { CircleHelp } from "lucide-vue-next";
+import { CalendarDays, CircleHelp, Clapperboard, Footprints } from "lucide-vue-next";
 import { useRouter } from "#imports";
 import { computed } from "vue";
 import { useI18n, type TranslationKey } from "../../i18n";
-import { transportSectionValues } from "./neighborhood/factPresentation";
+import { foodMarketSchedule, transportSectionValues } from "./neighborhood/factPresentation";
 import { getNeighborhoodFactMarker, hasExceptionalFactMarker } from "./neighborhood/facts";
 import type { NeighborhoodFact, NeighborhoodFactGeography, NeighborhoodFactPlace, NeighborhoodFactTransportReliabilityLine } from "./neighborhood";
 import MiniTravelDisplay from "./MiniTravelDisplay.vue";
@@ -25,6 +25,31 @@ const emit = defineEmits<{
 }>();
 
 const { d, n, t } = useI18n();
+const cinemaSize = computed(() => {
+  const values = props.fact.tooltipValues;
+  if (props.fact.family !== "cinema" || typeof values?.area !== "number") return undefined;
+  const size = (["small", "medium", "large"] as const).find(size => size === values.size);
+  if (!size) return undefined;
+  return {
+    label: t(`nearbyStations.neighborhoodScore.venueAnalysis.cinemaArea.${size}`),
+    surface: t("nearbyStations.neighborhoodScore.venueAnalysis.cinemaSurface", { area: n(values.area) }),
+  };
+});
+const marketTooltip = computed(() => {
+  const values = props.fact.tooltipValues;
+  if (props.fact.family !== "food-market" || !values || typeof values.hours !== "string") return undefined;
+  const localized = transportSectionValues(props.fact, values, t);
+  const formatMonth = (month: number) => d(new Date(Date.UTC(2024, month, 1)), { month: "short", timeZone: "UTC" });
+  const area = typeof values.area === "number"
+    ? t("nearbyStations.neighborhoodScore.venueAnalysis.marketArea", { area: `${values.areaFromFootprint ? "≈" : ""}${n(values.area)}` })
+    : localized?.area;
+  return {
+    size: localized?.size, area, minutes: values.minutes, sessions: values.sessions, areaFromFootprint: Boolean(values.areaFromFootprint),
+    traders: typeof values.listedTraders === "number" && values.traders === "—"
+      ? t("nearbyStations.neighborhoodScore.venueAnalysis.tradersListed", { count: values.listedTraders }) : values.traders,
+    schedule: values.hours === "—" ? undefined : foodMarketSchedule(values.hours, t, formatMonth),
+  };
+});
 const router = useRouter();
 const exceptionalMarker = computed(() => hasExceptionalFactMarker(props.fact));
 const transportAccessChoices = computed(() => props.fact.travel?.routes?.filter(route => route.accessMinutes !== undefined)
@@ -32,6 +57,8 @@ const transportAccessChoices = computed(() => props.fact.travel?.routes?.filter(
 const hasEstimatedWalking = computed(() => (props.fact.travel?.routes?.map(route => route.journey)
   ?? (props.fact.travel ? [props.fact.travel.journey] : []))
   .some(journey => summarizeNearbyStationAccess(journey).walkingEstimated));
+const hasGtfsJourney = computed(() => props.fact.travel?.journey.source === "gtfs"
+  || props.fact.travel?.routes?.some(route => route.journey.source === "gtfs"));
 
 type StructuralLine = NonNullable<NeighborhoodFact["transportLines"]>[number];
 const structuralModeKeys = {
@@ -204,9 +231,50 @@ function geographyLabel(): string {
     <div
       :id="`neighborhood-score-fact-${fact.id}`"
       class="nearby-neighborhood-score-fact__tooltip"
+      :class="{ 'nearby-neighborhood-score-fact__tooltip--market': marketTooltip }"
       role="tooltip"
     >
-      <strong>{{ factTooltip() }}</strong>
+      <div v-if="marketTooltip" class="nearby-neighborhood-score-fact__market" data-testid="food-market-tooltip">
+        <p v-if="marketTooltip.minutes !== '—'" class="nearby-neighborhood-score-fact__market-walk">
+          <Footprints :size="14" aria-hidden="true" />
+          {{ t("nearbyStations.neighborhoodScore.venueAnalysis.measuredWalk", { minutes: marketTooltip.minutes }) }}
+        </p>
+        <div v-if="marketTooltip.schedule" class="nearby-neighborhood-score-fact__market-schedule">
+          <strong class="nearby-neighborhood-score-fact__market-schedule-title">
+            <CalendarDays :size="14" aria-hidden="true" />
+            {{ t("nearbyStations.neighborhoodScore.venueAnalysis.hours") }}
+          </strong>
+          <ul v-if="marketTooltip.schedule.rows.length">
+            <li v-for="row in marketTooltip.schedule.rows" :key="row.day" data-testid="food-market-schedule-day">
+              <span>{{ row.label }}</span>
+              <div class="nearby-neighborhood-score-fact__market-slots">
+                <div v-for="slot in row.slots" :key="`${slot.period}:${slot.time}`">
+                  <small v-if="slot.period">{{ slot.period }}</small>
+                  <span>{{ slot.time }}</span>
+                </div>
+              </div>
+            </li>
+          </ul>
+          <p v-for="(item, index) in marketTooltip.schedule.other" :key="index" class="nearby-neighborhood-score-fact__market-extra-hour">{{ item }}</p>
+        </div>
+        <dl class="nearby-neighborhood-score-fact__market-stats">
+          <div>
+            <dt>{{ t("nearbyStations.neighborhoodScore.venueAnalysis.area") }}</dt>
+            <dd>{{ marketTooltip.area }}<small v-if="marketTooltip.areaFromFootprint">{{ t("nearbyStations.neighborhoodScore.venueAnalysis.marketFootprintNote") }}</small></dd>
+          </div>
+          <div v-if="fact.tooltipValues?.size !== 'unknown'"><dt>{{ t("nearbyStations.neighborhoodScore.venueAnalysis.size") }}</dt><dd>{{ marketTooltip.size }}</dd></div>
+          <div v-if="marketTooltip.sessions !== '—'"><dt>{{ t("nearbyStations.neighborhoodScore.venueAnalysis.sessions") }}</dt><dd>{{ marketTooltip.sessions }}</dd></div>
+          <div v-if="marketTooltip.traders !== '—'"><dt>{{ t("nearbyStations.neighborhoodScore.venueAnalysis.traders") }}</dt><dd>{{ marketTooltip.traders }}</dd></div>
+        </dl>
+      </div>
+      <strong v-else>{{ factTooltip() }}</strong>
+      <div v-if="cinemaSize" class="nearby-neighborhood-score-fact__cinema-size">
+        <span class="nearby-neighborhood-score-fact__cinema-icon"><Clapperboard :size="19" aria-hidden="true" /></span>
+        <div>
+          <strong>{{ cinemaSize.label }}</strong>
+          <small>{{ cinemaSize.surface }}</small>
+        </div>
+      </div>
       <section v-if="structuralGroups.length" class="nearby-neighborhood-score-fact__transport-lines" data-testid="structural-lines">
         <h4>{{ t("nearbyStations.neighborhoodScore.structuralBreakdown") }}</h4>
         <div v-for="group in structuralGroups" :key="group.mode" class="nearby-neighborhood-score-fact__transport-line-group" :data-structural-mode="group.mode">
@@ -295,7 +363,7 @@ function geographyLabel(): string {
         </div>
       </div>
       <MiniTravelDisplay v-else-if="fact.travel" :journey="fact.travel.journey" />
-      <p v-if="hasEstimatedWalking" class="nearby-neighborhood-score-fact__walking-estimate">{{ t("nearbyStations.neighborhoodScore.transportAccessEstimateWarning") }}</p>
+      <p v-if="hasEstimatedWalking" class="nearby-neighborhood-score-fact__walking-estimate">{{ t(marketTooltip ? "nearbyStations.neighborhoodScore.venueAnalysis.marketEstimatedWalk" : "nearbyStations.neighborhoodScore.transportAccessEstimateWarning") }}</p>
       <div v-if="fact.travel?.directions?.length && !fact.travel.routes?.length" class="nearby-neighborhood-score-fact__directions">
         <strong>{{ t("nearbyStations.neighborhoodScore.miniTravel.directions") }}</strong>
         <ul>
@@ -308,9 +376,9 @@ function geographyLabel(): string {
         <div>
           <dt>{{ t("nearbyStations.neighborhoodScore.evidence.sourceLabel") }}</dt>
           <dd>
-            <template v-if="fact.travel?.journey.source === 'gtfs' || fact.travel?.routes?.some(route => route.journey.source === 'gtfs')">{{ t("nearbyStations.neighborhoodScore.sources.gtfsJourneys") }}</template>
-            <a v-else-if="fact.evidence.sourceUrl" :href="fact.evidence.sourceUrl" target="_blank" rel="noopener noreferrer">{{ fact.evidence.sourceName }}</a>
-            <template v-else>{{ fact.evidence.sourceName ?? (fact.evidence.sourceKey ? t(fact.evidence.sourceKey) : "—") }}</template>
+            <template v-if="hasGtfsJourney">{{ t("nearbyStations.neighborhoodScore.sources.gtfsJourneys") }}</template>
+            <a v-if="fact.evidence.sourceUrl && (marketTooltip || !hasGtfsJourney)" :href="fact.evidence.sourceUrl" target="_blank" rel="noopener noreferrer"><template v-if="hasGtfsJourney"> · </template>{{ fact.evidence.sourceName }}</a>
+            <template v-else-if="!hasGtfsJourney">{{ fact.evidence.sourceName ?? (fact.evidence.sourceKey ? t(fact.evidence.sourceKey) : "—") }}</template>
             <small v-if="fact.evidence.licence"> · {{ fact.evidence.licence }}</small>
           </dd>
         </div>
@@ -365,6 +433,20 @@ function geographyLabel(): string {
 .nearby-neighborhood-score-fact__tooltip { background: #fff; border: 1px solid rgba(16,35,63,.16); border-radius: 11px; box-shadow: 0 14px 30px rgba(16,35,63,.16); color: #344054; left: 0; max-width: min(380px, calc(100vw - 42px)); opacity: 0; padding: 11px 12px; pointer-events: none; position: absolute; top: calc(100% + 4px); transform: translateY(-3px); transition: opacity .14s ease, transform .14s ease, visibility .14s ease; visibility: hidden; width: max-content; z-index: 8; }
 .nearby-neighborhood-score-fact:hover .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact:focus-within .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact--open .nearby-neighborhood-score-fact__tooltip { opacity: 1; pointer-events: auto; transform: translateY(0); visibility: visible; }
 .nearby-neighborhood-score-fact__tooltip strong { color: var(--ink); display: block; font-size: .78rem; line-height: 1.35; max-width: 355px; }
+.nearby-neighborhood-score-fact__market { font-size: .74rem; }
+.nearby-neighborhood-score-fact__cinema-size { display: flex; align-items: center; gap: 10px; margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-soft); }
+.nearby-neighborhood-score-fact__cinema-icon { display: grid; place-items: center; flex: 0 0 34px; height: 34px; border-radius: 8px; background: #ebe8fc; color: #5146b8; }
+.nearby-neighborhood-score-fact__cinema-size small { display: block; color: var(--muted); font-size: .69rem; }
+.nearby-neighborhood-score-fact__market-walk { align-items: center; display: flex; gap: 6px; margin: 0 0 8px; }
+.nearby-neighborhood-score-fact__market-schedule { padding: 7px 10px; border-radius: 8px; background: var(--surface-soft); }
+.nearby-neighborhood-score-fact__market-schedule .nearby-neighborhood-score-fact__market-schedule-title { align-items: center; display: flex; gap: 6px; margin-bottom: 3px; }
+.nearby-neighborhood-score-fact__market-schedule ul { list-style: none; margin: 0; padding: 0; }
+.nearby-neighborhood-score-fact__market-schedule li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); gap: 8px; padding: 4px 0; }
+.nearby-neighborhood-score-fact__market-schedule li + li { border-top: 1px solid #e2e6ef; }
+.nearby-neighborhood-score-fact__market-slots { display: grid; gap: 2px; text-align: right; }
+.nearby-neighborhood-score-fact__market-slots > div { display: flex; flex-wrap: wrap; gap: 2px 6px; justify-content: flex-end; font-variant-numeric: tabular-nums; }
+.nearby-neighborhood-score-fact__market-slots small, .nearby-neighborhood-score-fact__market-stats small { color: var(--muted); font-size: .65rem; }
+.nearby-neighborhood-score-fact__market-extra-hour { margin: 3px 0 0; }
 .nearby-neighborhood-score-fact__travel-routes { border-top: 1px solid #e8ebf2; display: grid; gap: 5px; margin-top: 8px; max-width: 355px; padding-top: 4px; }
 .nearby-neighborhood-score-fact__travel-route { align-items: start; display: grid; gap: 4px; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .nearby-neighborhood-score-fact__access-choices { border-top: 1px solid #e8ebf2; margin-top: 8px; padding-top: 4px; }
@@ -395,6 +477,12 @@ function geographyLabel(): string {
 .nearby-neighborhood-score-fact__tooltip dl > div { display: grid; gap: 2px; grid-template-columns: auto 1fr; }
 .nearby-neighborhood-score-fact__tooltip dt { color: #8490a4; font-size: .64rem; font-weight: 850; }
 .nearby-neighborhood-score-fact__tooltip dd { color: #344054; font-size: .68rem; margin: 0; }
+.nearby-neighborhood-score-fact__tooltip .nearby-neighborhood-score-fact__market-stats { gap: 6px; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); }
+.nearby-neighborhood-score-fact__tooltip .nearby-neighborhood-score-fact__market-stats > div { align-content: start; background: var(--surface-soft); border-radius: 8px; grid-template-columns: 1fr; padding: 6px 8px; }
+.nearby-neighborhood-score-fact__market-stats dd { color: var(--ink); font-size: .75rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.nearby-neighborhood-score-fact__market-stats small { display: block; font-weight: 500; }
+.nearby-neighborhood-score-fact__tooltip--market > dl { border-top: 1px solid #e2e6ef; padding-top: 8px; }
+.nearby-neighborhood-score-fact__tooltip--market > dl > div { column-gap: 8px; }
 .nearby-neighborhood-score-fact__action { background: #5146ff; border: 0; border-radius: 8px; color: #fff; cursor: pointer; font: inherit; font-size: .7rem; font-weight: 850; margin-top: 10px; padding: 7px 9px; }
 .nearby-neighborhood-score-fact__action:hover, .nearby-neighborhood-score-fact__action:focus-visible { background: #4034df; outline: 2px solid rgba(81,70,255,.24); outline-offset: 2px; }
 @media (max-width: 680px) {

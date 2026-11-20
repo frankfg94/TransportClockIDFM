@@ -2917,14 +2917,33 @@ export const en = {
       venueAnalysis: {
         marketLoading: "Checking food markets…",
         cinemaLoading: "Checking cinema access…",
-        marketSource: "OpenStreetMap · municipal data · pedestrian routing",
+        marketSource: "OpenStreetMap · municipal data · walking and public transport routing",
         cinemaSource: "OpenStreetMap · pedestrian and public transport routing",
         marketSize: { unknown: "Unknown", small: "Small", medium: "Medium", large: "Large", exceptional: "Exceptional" },
         weekdays: { Mo: "Monday", Tu: "Tuesday", We: "Wednesday", Th: "Thursday", Fr: "Friday", Sa: "Saturday", Su: "Sunday" },
+        hours: "Hours",
+        measuredWalk: "{minutes} min on foot",
+        directVenueTransit: "{approx}{minutes} min {seconds} s direct via {line}",
+        cinemaWalkPrefix: "{minutes} min on foot · ",
+        cinemaArea: {
+          small: "Small cinema",
+          medium: "Medium-sized cinema",
+          large: "Large cinema",
+        },
+        cinemaSurface: "Estimated footprint of {area} m²",
+        traders: "Traders",
+        tradersListed: "{count} listed by the city",
+        area: "Area",
+        marketArea: "{area} m²",
+        marketFootprintArea: "≈{area} m² (OSM footprint)",
+        marketFootprintNote: "OSM footprint",
+        marketEstimatedWalk: "Part of the walk is estimated.",
+        size: "Size",
+        sessions: "Sessions per week",
       },
       scoreHelp: {
-        foodMarkets: "Market within {minutes} min on foot: +{bonus} points, or +{premium} for at least {sessions} sessions a week and {area} m² or {traders} traders. Farther markets are shown for context.",
-        cinemas: "A cinema within {walking} min on foot or {transit} min by public transport door to door adds {bonus} point once. Public transport includes walking, waiting and transfers.",
+        foodMarkets: "Verified access in {minutes} min or less, on foot or by direct transit, adds {bonus} points, or {premium} for a premium market. A premium food market has at least {sessions} sessions a week and {area} m² or {traders} traders. It adds {extended} points when the journey takes more than {minutes} min and less than {contextMinutes} min. Only the highest bonus counts.",
+        cinemas: "A cinema within {walking} min on foot adds {bonus} point. By direct transit under {transit} min, a small cinema adds 0.5 points and a medium or large cinema adds {bonus} point. For an unknown size, a verified trip of {transit} min or less adds {bonus} point. Only the best access counts.",
         title: "How does the score work?",
         button: "Help",
         intro: "The score out of {max} is the weighted average of available category scores, rounded to a whole number for display. Each category is bounded between zero and {max}.",
@@ -3357,6 +3376,7 @@ export const en = {
         derived: "Deterministic calculation from the source",
       },
       rules: {
+        foodMarketAccess: "Up to {minutes} min, +{bonus} points or +{premium} if premium. Beyond that and under {contextMinutes} min, +{extended} points if premium.",
         transportBusAccess: "Full bonus for bus access of at most 15 min, with verified walking of at most 15 min. Unverified straight-line walking cannot validate this bonus.",
         transportProximity: "Positive signal when the calculated access is at most {threshold} min.",
         transportBusReduced: "Bus access over {threshold} min and up to {maximum} min contributes half a proximity bonus. Walking and waits after the first vehicle are retained.",
@@ -3580,31 +3600,31 @@ export const en = {
           tooltip: "A concentration of {count} food specialties — cheese shop, butcher, deli and bakery — is listed within an area of about {minutes} min; times without a walking route are estimates.",
         },
         foodMarketPremium: {
-          label: "{name} · premium market · {minutes} min on foot",
+          label: "{name} · premium market · {minutes} min on foot{transitSuffix}",
           tooltip: "Size: {size}. Area: {area}. Traders: {traders}. Sessions per week: {sessions}. Hours: {hours}. Measured walk: {minutes} min. A dash indicates unknown data.",
         },
-        foodMarketPremiumContext: {
-          label: "{name} · premium market",
-          tooltip: "Size: {size}. Area: {area}. Traders: {traders}. Sessions per week: {sessions}. Hours: {hours}. Measured walk: {minutes} min. A dash indicates unknown data.",
+        foodMarketPremiumTransit: {
+          label: "{name} · premium market · {transit}",
+          tooltip: "Door-to-door time at the Verdict departure time, including walking and waiting.",
         },
         foodMarketNearby: {
-          label: "{name} · {minutes} min on foot",
+          label: "{name} · {minutes} min on foot{transitSuffix}",
           tooltip: "Size: {size}. Area: {area}. Traders: {traders}. Sessions per week: {sessions}. Hours: {hours}. Measured walk: {minutes} min. A dash indicates unknown data.",
         },
-        foodMarketContext: {
-          label: "{name} · listed market",
-          tooltip: "Size: {size}. Area: {area}. Traders: {traders}. Sessions per week: {sessions}. Hours: {hours}. Measured walk: {minutes} min. A dash indicates unknown data.",
+        foodMarketDirectTransit: {
+          label: "{name} · {transit}",
+          tooltip: "Door-to-door time at the Verdict departure time, including walking and waiting.",
         },
         cinemaWalking: {
-          label: "{name} · {minutes} min on foot",
+          label: "{name} · {minutes} min on foot{sizeSuffix}",
           tooltip: "Time measured on the pedestrian network.",
         },
         cinemaTransit: {
-          label: "{name} · {minutes} min by public transport",
-          tooltip: "Theoretical door-to-door time, including walking, waiting and transfers.",
+          label: "{name} · {walkPrefix}{transit}{sizeSuffix}",
+          tooltip: "Direct door-to-door trip, including walking and waiting.",
         },
         cinemaAccessUnknown: {
-          label: "{name} · access not assessed",
+          label: "{name} · access not assessed{sizeSuffix}",
           tooltip: "Cinema listed, access time insufficiently documented.",
         },
         shoppingCentreNearby: {

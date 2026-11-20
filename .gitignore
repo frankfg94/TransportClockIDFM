@@ -25,5 +25,11 @@ graphify-web/
 
 # Local test caches and historical validation artifacts.
 .tmp-vitest/
+__pycache__/
+/.data/*.log
+/.output-footprints/
+/.data/verdict-review-output/
+/.data/verdict-review-vite-cache/
+/.data/verdict-review-pdf-page-*.png
 docs/tasks/2026-10-22/proofs/
 docs/tasks/2026-10-22/git-delivery/
