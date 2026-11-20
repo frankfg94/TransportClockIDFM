@@ -127,6 +127,7 @@ describe("worker walking matrix reuse", () => {
     vi.mocked(beforeCold).mockClear();
     await createNeighborhoodGtfsWalkingMatrix(fetcher, undefined, storage)("https://host.test", origin, [destination], { coldStart: true });
     expect(beforeCold).not.toHaveBeenCalled();
+    expect(JSON.parse(fetcher.mock.calls.at(-1)![1].body)).toHaveProperty("cache", false);
     estimated = true;
     const missing = { ...destination, lon: 2.32 };
     await createNeighborhoodGtfsWalkingMatrix(fetcher, undefined, storage)("https://host.test", origin, [missing]);

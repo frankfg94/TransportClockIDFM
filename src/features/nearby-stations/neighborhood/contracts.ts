@@ -261,6 +261,8 @@ export interface NeighborhoodFact {
   tooltip?: string;
   action?: NeighborhoodFactAction;
   travel?: NeighborhoodFactTravel;
+  /** Closer stations offering a different distance/time trade-off on this section. */
+  nearerStationAccesses?: readonly TranslationParams[];
   /** Members of a stacked signal, ordered from the closest to the farthest. */
   places?: readonly NeighborhoodFactPlace[];
   /** Nearby service-quality lines, ordered by decreasing reliability. */
@@ -301,6 +303,7 @@ export interface NeighborhoodCategoryResult {
   displayScore?: number;
   /** Optional to retain compatibility with older snapshots and consumers. */
   scoreDetails?: NeighborhoodScoreDetailGroup[];
+  passengerSatisfaction?: import("./verdict-transport-facts/passengerSatisfaction").PassengerSatisfaction;
   unavailableReasonKey?: TranslationKey;
   positiveFacts: NeighborhoodFact[];
   negativeFacts: NeighborhoodFact[];
@@ -338,6 +341,7 @@ export interface NeighborhoodJourneyBenchmark {
   stationLabel?: string;
   journeys: readonly NearbyJourney[];
   status?: "loading" | "ready" | "unavailable";
+  failed?: boolean;
 }
 
 export interface NeighborhoodGreenSpaceJourney {
@@ -372,6 +376,11 @@ export interface NeighborhoodScoreInput {
   lastServiceByLine?: ReadonlyMap<string, GtfsLastService | undefined>;
   hospitalJourneys?: Readonly<Record<string, readonly NearbyJourney[] | undefined>>;
   serviceQuality?: PublicServiceQuality;
+  passengerSatisfaction?: {
+    observations?: readonly import("../../../../shared/passengerSatisfaction").PassengerSatisfactionObservation[];
+    state?: "loading" | "error";
+    accessIncomplete?: boolean;
+  };
   generatedAt?: number;
   backendVerdict?: PublicNeighborhoodVerdict;
 }

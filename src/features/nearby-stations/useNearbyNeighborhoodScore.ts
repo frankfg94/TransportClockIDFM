@@ -50,6 +50,7 @@ import {
 } from "./neighborhood/departureTimes";
 import type { NearbyStationEntry } from "./nearbyStations";
 import { JOURNEY_REFERENCE_BENCHMARKS, resolveReferenceBenchmarkDestinations } from "./neighborhood/verdict-transport-facts/benchmarkDestinations";
+import { buildTransportFactsContext } from "./neighborhood/verdict-transport-facts/context";
 import {
   aggregateNeighborhoodScore,
   buildNeighborhoodCategories,
@@ -81,6 +82,8 @@ import { assertNeighborhoodTimetableAvailable, NeighborhoodGtfsCoverageError } f
 import { analyzeCinemas, analyzeFoodMarkets, type VenueAnalysis } from "./neighborhood/venueAccess";
 import type { FoodMarketAccess } from "./neighborhood/criteria/foodMarkets";
 import type { CinemaAccess } from "./neighborhood/criteria/cinemas";
+import { PASSENGER_SATISFACTION_SOURCE, type PassengerSatisfactionObservation } from "../../../shared/passengerSatisfaction";
+import type { fetchPassengerSatisfaction } from "./passengerSatisfactionApi";
 
 type ReadonlyValue<T> = { readonly value: T };
 
@@ -88,7 +91,7 @@ interface ShoppingCentreLoadResult {
   centres: NeighborhoodShoppingCentreAccess[];
 }
 
-export type NeighborhoodScoreErrorSource = "verdict" | "places" | "routes" | "timetables";
+export type NeighborhoodScoreErrorSource = "verdict" | "places" | "routes" | "timetables" | "satisfaction";
 
 export interface UseNearbyNeighborhoodScoreOptions {
   personalJourneys?: ReadonlyValue<readonly import("./neighborhood/personalJourneys").PersonalJourneyResult[]>;
@@ -115,6 +118,8 @@ export interface UseNearbyNeighborhoodScoreOptions {
   failedCriteria?: ReadonlyValue<readonly NeighborhoodCategoryId[]>;
   walkingRoutes?: ReadonlyValue<Record<string, NeighborhoodWalkingMetrics | undefined>>;
   heavyCandidates?: ReadonlyValue<NearbyHeavyTransportCandidate[]>;
+  /** Provisional access facts, kept separate from timetable request targets. */
+  heavyCandidatesPreview?: ReadonlyValue<NearbyHeavyTransportCandidate[] | undefined>;
   heavyCandidatesLoading?: ReadonlyValue<boolean>;
   heavyCandidatesError?: ReadonlyValue<string | undefined>;
   placesProvider?: PlacesProvider;
@@ -124,6 +129,7 @@ export interface UseNearbyNeighborhoodScoreOptions {
   fetchNightAccess?: typeof loadNoctilienAccess;
   fetchLastService?: UseLineFrequencyTimetableOptions["fetchLastService"];
   serviceQuality?: ReadonlyValue<PublicServiceQuality | undefined>;
+  fetchPassengerSatisfaction?: typeof fetchPassengerSatisfaction;
   initialSnapshot?: NearbyNeighborhoodScoreSnapshot;
 }
 
@@ -154,7 +160,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const cinemas = shallowRef<VenueAnalysis<CinemaAccess>>();
   let cinemaDate: string | undefined;
   let venuesController: AbortController | undefined;
-  const venueDurations = new Map<string, number>();
+  const datasetDurations = new Map<string, number>();
+  let satisfactionController: AbortController | undefined;
+  let satisfactionRequest: Promise<PassengerSatisfactionObservation[]> | undefined;
+  const satisfactionObservations = shallowRef<PassengerSatisfactionObservation[]>();
   const supermarketFootprints = ref<NearbySupermarketFootprint[]>([]);
   const supermarketFootprintsLoaded = ref(false);
   const walkingRoutes = ref<Record<string, NeighborhoodWalkingMetrics | undefined>>({});
@@ -162,6 +171,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const chateletJourneys = ref<NearbyJourney[]>([]);
   const chateletJourneyStatus = ref<"loading" | "ready" | "unavailable">();
   const journeyBenchmarks = ref<NeighborhoodJourneyBenchmark[]>([]);
+  const benchmarkRun = shallowRef<{ token: number; origin: GeocoderPoint; destinations: JourneyBenchmarkDestination[] }>();
   const greenSpaceJourneys = ref<NeighborhoodGreenSpaceJourney[]>([]);
   const noctilienJourneys = ref<NearbyJourney[]>([]);
   let noctilienController: AbortController | undefined;
@@ -233,7 +243,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       ...walkingRoutes.value,
       ...(options.walkingRoutes?.value ?? {}),
     };
-    const currentHeavyCandidates = options.heavyCandidates?.value ?? heavyCandidates.value;
+    const currentHeavyCandidates = options.heavyCandidatesPreview?.value
+      ?? options.heavyCandidates?.value ?? heavyCandidates.value;
     const stationsLoaded = Boolean(currentNetwork)
       || (!stationsLoading && activeOriginKey !== "" && options.stations.value.length > 0);
     return {
@@ -263,6 +274,12 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       lastServiceByLine: lastServiceByLine.value,
       hospitalJourneys: hospitalJourneys.value,
       serviceQuality: options.serviceQuality?.value,
+      passengerSatisfaction: options.fetchPassengerSatisfaction && {
+        observations: satisfactionObservations.value,
+        state: taskErrors.has("passenger-satisfaction") ? "error"
+          : !satisfactionObservations.value || stationsLoading ? "loading" : undefined,
+        accessIncomplete: Boolean(options.heavyCandidatesError?.value),
+      },
       generatedAt: updatedAt.value,
       backendVerdict: effectiveBackendVerdict.value,
     };
@@ -308,6 +325,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       ?? defaultNightJourneyDateTime;
     const token = ++requestToken;
     resetOriginState(originKey);
+    benchmarkRun.value = undefined;
     const packChanged = currentVersion !== options.gtfsVersion?.value;
     if (packChanged) {
       cinemas.value = undefined;
@@ -344,6 +362,23 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     recompute();
 
     if (!origin) return;
+
+    const fetchSurvey = options.fetchPassengerSatisfaction;
+    if (fetchSurvey && !satisfactionObservations.value) {
+      trackTransportTask("passenger-satisfaction", () => {
+        markCriteriaDirty(["transport"]);
+        scheduleRecompute();
+        if (satisfactionRequest) return satisfactionRequest;
+        const started = performance.now();
+        satisfactionController = new AbortController();
+        satisfactionRequest = fetchSurvey(satisfactionController.signal).finally(() => {
+          datasetDurations.set("passenger-satisfaction", Math.round(performance.now() - started));
+          satisfactionRequest = undefined;
+          satisfactionController = undefined;
+        });
+        return satisfactionRequest;
+      }, token, observations => { satisfactionObservations.value = observations; }, "satisfaction");
+    }
 
     trackTask(
       "backend-verdict",
@@ -434,6 +469,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     // fallbacks now would leave obsolete street matrices running afterwards.
     const waitingForCatalog = options.journeySource === "gtfs" && options.stationsLoading?.value === true;
     const benchmarkDestinations = waitingForCatalog ? [] : resolveJourneyBenchmarks(options.network.value);
+    benchmarkRun.value = { token, origin, destinations: benchmarkDestinations };
     const nextBenchmarks: NeighborhoodJourneyBenchmark[] = [];
     if (!benchmarkDestinations.some((benchmark) => benchmark.id === "chatelet")) {
       chateletJourneyStatus.value = options.network.value || options.stationsLoading?.value !== true
@@ -448,9 +484,9 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       const current: NeighborhoodJourneyBenchmark = {
         id: benchmark.id, label: benchmark.label, stationLabel: benchmark.stationLabel, journeys: [], status: "loading",
       };
-      nextBenchmarks.push(current);
-      const setBenchmarkStatus = (status: NeighborhoodJourneyBenchmark["status"]): void => {
-        current.status = status;
+      const index = nextBenchmarks.push(current) - 1;
+      const setBenchmarkStatus = (status: NeighborhoodJourneyBenchmark["status"], failed?: true, journeys: NearbyJourney[] = []): void => {
+        nextBenchmarks[index] = { ...current, status, failed, journeys };
         journeyBenchmarks.value = [...nextBenchmarks];
         if (benchmark.id === "chatelet") chateletJourneyStatus.value = status;
       };
@@ -461,14 +497,13 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
           try {
             return await loadJourneyProbe(origin, benchmark, journeyDateTime, journeyKey);
           } catch (cause) {
-            if (token === requestToken) setBenchmarkStatus("unavailable");
+            if (token === requestToken) setBenchmarkStatus("unavailable", true);
             throw cause;
           }
         },
         token,
         (next) => {
-          current.journeys = next;
-          setBenchmarkStatus(next.length > 0 ? "ready" : "unavailable");
+          setBenchmarkStatus(next.length > 0 ? "ready" : "unavailable", undefined, next);
           if (benchmark.id === "chatelet") chateletJourneys.value = next;
           updatedAt.value = Date.now();
         },
@@ -484,7 +519,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         status: options.stationsLoading?.value === true ? "loading" : "unavailable",
       });
     }
-    journeyBenchmarks.value = nextBenchmarks;
+    journeyBenchmarks.value = [...nextBenchmarks];
 
     noctilienJourneys.value = [];
     if (options.journeySource === "gtfs") {
@@ -639,7 +674,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     shoppingCentresJourneyDateTime.value = undefined;
     foodMarkets.value = undefined;
     cinemas.value = undefined;
-    venueDurations.clear();
+    datasetDurations.delete("food-markets");
+    datasetDurations.delete("cinema-access");
     supermarketFootprints.value = [];
     supermarketFootprintsLoaded.value = false;
     walkingRoutes.value = {};
@@ -1085,7 +1121,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     load: () => Promise<T>,
     token: number,
     apply: (value: T) => void,
-    source: "routes" | "timetables",
+    source: "routes" | "timetables" | "satisfaction",
   ): void {
     const run = (): Promise<void> => {
       if (disposed || token !== requestToken || pendingTasks.has(taskId)) return Promise.resolve();
@@ -1093,14 +1129,14 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         if (token !== requestToken || taskPromises.get(taskId) !== completion) throw createNeighborhoodAbortError();
         return load();
       });
-      const completion: Promise<void> = trackTask(taskId, promise, token, apply, true, source, ["transport"], run);
+      const completion: Promise<void> = trackTask(taskId, promise, token, apply, source !== "satisfaction", source, ["transport"], run);
       return completion;
     };
     void run();
   }
 
-  async function retryFailedTransport(): Promise<void> {
-    const retries = [...taskErrors.values()].flatMap(({ retry }) => retry ? [retry] : []);
+  async function retryFailedTransport(source?: NeighborhoodScoreErrorSource): Promise<void> {
+    const retries = [...taskErrors.values()].flatMap(entry => entry.retry && (!source || entry.source === source) ? [entry.retry] : []);
     await Promise.all(retries.map(retry => retry()));
   }
 
@@ -1123,12 +1159,12 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     dirtyCategories: readonly NeighborhoodCategoryId[] = NEIGHBORHOOD_CATEGORY_IDS,
     retry?: () => Promise<void>,
   ): Promise<void> {
-    const system = taskId.startsWith("journey:employment-") ? "employment-hubs" : taskId.startsWith("journey:") ? "large-stations"
+    const system = taskId === "passenger-satisfaction" ? "passenger-satisfaction" : taskId.startsWith("journey:employment-") ? "employment-hubs" : taskId.startsWith("journey:") ? "large-stations"
       : taskId.startsWith("noctilien:") ? "night-transit" : taskId.startsWith("frequency:") ? "frequencies"
       : taskId.startsWith("last-service:") ? "last-services" : dirtyCategories.includes("transport") ? "transport-sources" : "other-sources";
     const finishDebug = beginVerdictDebugTask(system, taskId, { categories: dirtyCategories, source });
-    const venueTask = taskId === "food-markets" || taskId === "cinema-access";
-    const venueStarted = venueTask ? performance.now() : undefined;
+    const timed = taskId === "food-markets" || taskId === "cinema-access";
+    const started = timed ? performance.now() : undefined;
     taskErrors.delete(taskId);
     pendingTasks.add(taskId);
     activeCriteriaTasks.set(taskId, dirtyCategories);
@@ -1161,7 +1197,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       })
       .finally(() => {
         if (token !== requestToken || taskPromises.get(taskId) !== completion) return;
-        if (venueStarted !== undefined) venueDurations.set(taskId, Math.round(performance.now() - venueStarted));
+        if (started !== undefined) datasetDurations.set(taskId, Math.round(performance.now() - started));
         pendingTasks.delete(taskId);
         taskPromises.delete(taskId);
         activeCriteriaTasks.delete(taskId);
@@ -1245,11 +1281,20 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     return false;
   }
 
-  function venueDiagnostics(datasetId: string) {
+  function datasetDiagnostics(datasetId: string, category?: NeighborhoodCategoryResult) {
+    if (datasetId === "passenger-satisfaction") {
+      const coverage = category?.passengerSatisfaction;
+      return {
+        durationMs: pendingTasks.has(datasetId) ? undefined : datasetDurations.get(datasetId),
+        source: PASSENGER_SATISFACTION_SOURCE,
+        error: taskErrors.get(datasetId)?.cause.message,
+        satisfactionCoverage: coverage && { coverage: coverage.coverage, covered: coverage.covered, total: coverage.total },
+      };
+    }
     if (datasetId !== "food-markets" && datasetId !== "cinema-access") return {};
     const venue = datasetId === "food-markets" ? foodMarkets.value : cinemas.value;
     return {
-      durationMs: pendingTasks.has(datasetId) ? undefined : venueDurations.get(datasetId),
+      durationMs: pendingTasks.has(datasetId) ? undefined : datasetDurations.get(datasetId),
       source: venue?.source,
       error: taskErrors.get(datasetId)?.cause.message ?? venue?.error,
     };
@@ -1260,6 +1305,14 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     maxAgeMs: number | undefined,
     categoryId: NeighborhoodCategoryId,
   ): NeighborhoodDatasetStatus {
+    if (datasetId === "passenger-satisfaction") {
+      if (pendingTasks.has(datasetId)) return "loading";
+      if (taskErrors.has(datasetId)) return "error";
+      const coverage = result.value.categories.find(category => category.id === categoryId)?.passengerSatisfaction;
+      if (coverage?.coverage === "loading") return "loading";
+      if (coverage?.coverage === "stale") return "stale";
+      return coverage?.covered ? "ready" : "missing";
+    }
     if (isDatasetLoading(datasetId, categoryId)) return "loading";
     if (isDatasetFailed(datasetId, categoryId)) return "error";
     if (datasetId === "food-markets" || datasetId === "cinema-access") {
@@ -1392,12 +1445,18 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     },
   );
   watch(
-    () => options.heavyCandidatesLoading?.value,
+    () => [options.heavyCandidatesLoading?.value, options.heavyCandidatesError?.value] as const,
     () => {
       markCriteriaDirty(["transport"]);
       scheduleRecompute();
     },
   );
+  if (options.heavyCandidatesPreview) {
+    watch(() => options.heavyCandidatesPreview?.value, () => {
+      markCriteriaDirty(["transport"]);
+      scheduleRecompute();
+    });
+  }
   watch(
     () => options.stationsLoading?.value,
     () => {
@@ -1431,6 +1490,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     disposed = true;
     requestToken += 1;
     refreshQueued = false;
+    satisfactionController?.abort();
     abortActiveRequests();
   });
 
@@ -1449,11 +1509,11 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         || [...activeCriteriaTasks.values()].some((ids) => ids.includes(definition.id));
       const failed = options.failedCriteria?.value.includes(definition.id) === true
         || [...taskErrors.values()].some((entry) => entry.categories.includes(definition.id));
-      const datasets = definition.datasets.map((dataset) => ({
+      const datasets = definition.datasets.filter(dataset => dataset.id !== "passenger-satisfaction" || options.fetchPassengerSatisfaction).map((dataset) => ({
         ...dataset,
         id: dataset.id === "navitia-journeys" && options.journeySource === "gtfs" ? "gtfs-journeys" : dataset.id,
         status: currentDatasetStatus(dataset.id, dataset.maxAgeMs, definition.id),
-        ...venueDiagnostics(dataset.id),
+        ...datasetDiagnostics(dataset.id, category),
       } satisfies typeof dataset & { status: NeighborhoodDatasetStatus })).filter(dataset =>
         // Loaded categories with no documentary facts do not consume this
         // optional source. Keep real loading/errors and mandatory coverage.
@@ -1500,6 +1560,25 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
 
   return {
     result: shallowReadonly(result),
+    countStructuralLinesFor(heavyCandidates: readonly NearbyHeavyTransportCandidate[]) {
+      return buildTransportFactsContext({
+        stations: options.stations.value,
+        stationsLoaded: Boolean(options.network.value),
+        places: [],
+        placesLoaded: false,
+        heavyCandidates,
+        backendVerdict: effectiveBackendVerdict.value,
+      }).structuralLineCount;
+    },
+    journeyPreview: computed(() => {
+      const run = benchmarkRun.value;
+      const origin = options.origin.value;
+      if (!run || !origin || run.origin.lat !== origin.lat || run.origin.lon !== origin.lon || !run.destinations.length) return undefined;
+      const benchmarks = journeyBenchmarks.value;
+      const hasChatelet = benchmarks.some(benchmark => benchmark.id === "chatelet");
+      return { ...run, benchmarks: hasChatelet ? benchmarks : [{ id: "chatelet", label: "Châtelet", journeys: [], status: "unavailable" as const }, ...benchmarks],
+        active: benchmarks.some(benchmark => benchmark.status === "loading") };
+    }),
     transportPending: computed(() => {
       criterionRevision.value;
       return [...activeCriteriaTasks].filter(([, categories]) => categories.includes("transport")).map(([id]) => id);
@@ -1531,7 +1610,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     errorSource: readonly(errorSource),
     transportErrorSource: computed(() => {
       criterionRevision.value;
-      return [...taskErrors.values()].find(entry => entry.retry)?.source;
+      const retryable = [...taskErrors.values()].filter(entry => entry.retry);
+      return (retryable.find(entry => entry.source !== "satisfaction") ?? retryable[0])?.source;
     }),
     gtfsCoverageMissing: computed(() => {
       criterionRevision.value;

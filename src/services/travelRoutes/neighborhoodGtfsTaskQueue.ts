@@ -42,7 +42,7 @@ export function createNeighborhoodGtfsSchedulingQueues() {
   const transport = createNeighborhoodGtfsTaskQueue(3);
   // Large-station and job-hub probes share the origin tree with heavy
   // access but can publish before its destination-specific walking batches.
-  const benchmarks = createNeighborhoodGtfsTaskQueue();
+  const benchmarks = createNeighborhoodGtfsTaskQueue(10);
   const night = createNeighborhoodGtfsTaskQueue();
   const places = createNeighborhoodGtfsTaskQueue();
   const timetable = createNeighborhoodGtfsTaskQueue();

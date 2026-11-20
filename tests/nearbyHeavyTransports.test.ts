@@ -16,6 +16,7 @@ import {
   type NearbyJourney,
 } from "../src/features/nearby-stations/nearbyHeavyTransports";
 import { defaultNearbyHeavyTransportResolver } from "../src/features/nearby-stations/useNearbyHeavyTransports";
+import { NavitiaRateLimitError } from "../src/services/navitiaRateLimit";
 import type { NearbyStationEntry } from "../src/features/nearby-stations/nearbyStations";
 import type { GlobalMapLine, GlobalMapStation } from "../src/features/transport-map/contracts/manifest";
 import type { TransportMapNetwork } from "../src/features/transport-map/contracts/network";
@@ -924,14 +925,31 @@ describe("nearby heavy transport eligibility", () => {
 });
 
 
-it("shares identical journey searches for different heavy lines at the same station", async () => {
+it.each([false, true])("shares hub queries and retains successful map results after a rate limit (%s)", async (rateLimited) => {
   const a = line("line:a", "A", "RER"), b = line("line:b", "B", "RER"), bus = line("line:bus", "10", "BUS");
   const local = station("local", "Local", 2.3005, [bus.id]);
   const hub = station("hub", "Hub", 2.32, [a.id, b.id]);
-  const lines = [a, b, bus], stations = [local, hub];
+  const extra = station("far", "Another hub", 2.33, [a.id]);
+  const lines = [a, b, bus], stations = rateLimited ? [local, hub, extra] : [local, hub];
   const network: TransportMapNetwork = { lines, stations, entrances: [], regionalPaths: [], pathsById: new Map(), linesById: new Map(lines.map(x => [x.id, x])), stationsById: new Map(stations.map(x => [x.id, x])), bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
-  const findJourneys = vi.fn(async () => [{ durationSeconds: 900, sections: [walk(300, 200), feeder(600, "10", "BUS")] }]);
-  const candidates = await defaultNearbyHeavyTransportResolver.resolve({ origin: { lon: 2.3, lat: 48.8 }, network, localEntries: [{ id: local.id, station: { ...local, memberStationIds: [local.id] }, memberStations: [local], lines: [bus], distanceMeters: 100, insideRadius: true }], activeModes: ["BUS", "RER"], radiusMeters: 600, journeyDateTime: "20261015T090000", journeyProvider: { findJourneys } });
-  expect(findJourneys).toHaveBeenCalledTimes(1);
+  let releaseSlowProbe!: () => void;
+  const slowProbe = new Promise<void>(resolve => { releaseSlowProbe = resolve; });
+  const findJourneys = vi.fn(async ({ destination }: { destination: { id?: string } }) => {
+    if (destination.id === extra.id) {
+      await slowProbe;
+      throw new NavitiaRateLimitError(Date.now() + 30_000);
+    }
+    return [{ durationSeconds: 900, sections: [walk(300, 200), feeder(600, "10", "BUS")] }];
+  });
+  const onAccessResolved = vi.fn();
+  const result = defaultNearbyHeavyTransportResolver.resolve({ origin: { lon: 2.3, lat: 48.8 }, network, localEntries: [{ id: local.id, station: { ...local, memberStationIds: [local.id] }, memberStations: [local], lines: [bus], distanceMeters: 100, insideRadius: true }], activeModes: ["BUS", "RER"], radiusMeters: 600, journeyDateTime: "20261015T090000", journeyProvider: { findJourneys }, partialResultsDeadline: rateLimited ? new AbortController().signal : undefined, onAccessResolved });
+  try {
+    await vi.waitFor(() => expect(onAccessResolved).toHaveBeenCalledTimes(2));
+    expect(onAccessResolved.mock.calls.map(([access]) => access.id)).toEqual([hub.id, hub.id]);
+  } finally {
+    releaseSlowProbe();
+  }
+  const candidates = await result;
+  expect(findJourneys).toHaveBeenCalledTimes(rateLimited ? 2 : 1);
   expect(candidates.find(candidate => candidate.id === hub.id)?.lines.map(x => x.id)).toEqual(expect.arrayContaining([a.id, b.id]));
 });

@@ -36,13 +36,14 @@ export function createNeighborhoodGtfsWalkingMatrix(fetcher: typeof fetch = fetc
     }
   }
   let persisted: Promise<Cache | undefined> | undefined;
+  let nextDiskTrimAt = 0;
   const persistentCache = () => persisted ??= storage?.open("neighborhood-gtfs-walking-v1").catch(() => undefined) ?? Promise.resolve(undefined);
   const cacheUrl = (baseUrl: string, key: string) => new URL("/_neighborhood-walking-cache/" + encodeURIComponent(key), baseUrl).href;
   const pairKey = (baseUrl: string, origin: NearbyJourneyPoint, destination: NearbyJourneyPoint, reverse?: boolean) => {
     const from = reverse ? destination : origin, to = reverse ? origin : destination;
     return JSON.stringify([baseUrl, from.lon, from.lat, to.lon, to.lat]);
   };
-  return async (baseUrl: string, origin: NearbyJourneyPoint, destinations: NearbyWalkingMatrixDestination[], options: { reverse?: boolean; coldStart?: boolean; phase?: WalkingMatrixObservation["phase"]; observe?: typeof observe; observeStorage?: (available: boolean) => void; observeRequest?: (event: WalkingMatrixObservation) => void } = {}) => {
+  return async (baseUrl: string, origin: NearbyJourneyPoint, destinations: NearbyWalkingMatrixDestination[], options: { reverse?: boolean; coldStart?: boolean; measureSharedWalks?: boolean; signal?: AbortSignal; phase?: WalkingMatrixObservation["phase"]; observe?: typeof observe; observeStorage?: (available: boolean) => void; observeRequest?: (event: WalkingMatrixObservation) => void } = {}) => {
     if (!destinations.length) return [];
     // Preserve a documented route and its real provider version across page
     // reloads. Estimates remain retryable; cold-start diagnostics bypass disk.
@@ -101,8 +102,9 @@ export function createNeighborhoodGtfsWalkingMatrix(fetcher: typeof fetch = fetc
       };
       try {
         const response = await fetcher(new URL("/api/walking/matrix", baseUrl), {
-          method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS),
-          body: JSON.stringify({ origin, destinations: missing, routingPolicy: "gtfs-access", reverse: options.reverse === true }),
+          method: "POST", headers: { "content-type": "application/json" }, signal: options.signal ?? AbortSignal.timeout(NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS),
+          body: JSON.stringify({ origin, destinations: missing, routingPolicy: "gtfs-access", reverse: options.reverse === true,
+            ...(options.coldStart && !(options.measureSharedWalks && missing.some(point => point.stationWalk)) ? { cache: false } : {}) }),
         });
         httpStatus = response.status;
         if (!response.ok) return failed("http");
@@ -113,15 +115,18 @@ export function createNeighborhoodGtfsWalkingMatrix(fetcher: typeof fetch = fetc
         let invalid: DiagnosticWalkingRoute[] | undefined;
         const resolved = missing.map((destination, i) => routes.get(destination.id) ?? (invalid ??= failed("invalid-response"))[i]!);
         if (disk) {
-          await Promise.all(resolved.map(async (route, i) => {
+          // Returning routes must not wait for disk writes or a full cache scan.
+          // Heavy-access batches can complete hundreds of street matrices.
+          void Promise.all(resolved.map(async (route, i) => {
             if (route.fallback || route.provider === "straight-line") return;
             const key = pairKey(baseUrl, origin, missing[i]!, options.reverse);
             await disk.put(cacheUrl(baseUrl, key), Response.json({ expires: Date.now() + 5 * 60_000, route })).catch(() => {});
-          }));
-          const keys = await disk.keys().catch(() => []);
-          // The disk budget must cover a complete multi-destination verdict;
-          // the live worker cache remains capped at 1024 pairs.
-          await Promise.all(keys.slice(0, Math.max(0, keys.length - 4096)).map(key => disk.delete(key).catch(() => false)));
+          })).then(async () => {
+            if (Date.now() < nextDiskTrimAt) return;
+            nextDiskTrimAt = Date.now() + 30_000;
+            const keys = await disk.keys();
+            await Promise.all(keys.slice(0, Math.max(0, keys.length - 4096)).map(key => disk.delete(key)));
+          }).catch(() => {});
         }
         return resolved;
       } catch (error) { return failed(error instanceof Error && error.name === "TimeoutError" ? "timeout" : "network"); }

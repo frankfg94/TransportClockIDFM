@@ -44,13 +44,32 @@ describe("final access to a line, separate from intermediate transfer rules", ()
     });
     const resolve = createFinalLineAccessResolver(f.index)!;
     const work = inputs.map(input => resolve(input));
-    await vi.waitFor(() => expect(f.matrix).toHaveBeenCalledTimes(530));
+    // Both entrances receive 530 directed approaches, in chunks of at most 64.
+    await vi.waitFor(() => expect(f.matrix).toHaveBeenCalledTimes(18));
     const second = resolve(f.input);
     await Promise.resolve(); await Promise.resolve();
     release();
     await Promise.all([...work, second]);
     expect(f.matrix.mock.calls.reduce((sum, call) => sum + call[1].length, 0)).toBe(1060);
     expect(f.matrix.mock.calls[0]![1][0]).toHaveProperty("walkingPhase", "final-line-access");
+  });
+  it("uses the inbound leg when several feeder stops approach the same entrance", async () => {
+    const f = fixture();
+    f.index.pathways = [f.index.pathways![0]!];
+    f.index.stops.push({ id: "SECOND_BUS", name: "Bus 2", lat: 48.801, lon: 2.30, stopAccess: 1 });
+    f.index.transfers.push([4, 1, 364]);
+    f.tree.platformLabels.set(4, { ...f.node, transferOrigin: { stop: 4, arrival: 1000 }, section: { ...f.node.section, lineId: "SECOND" } });
+    const matrix = vi.fn(async (center: { lon: number; lat: number }, points: NearbyWalkingMatrixDestination[], options?: { reverse?: boolean }) => {
+      return points.map(p => ({ id: p.id, provider: "ign-bdtopo" as const, fallback: false,
+        durationSeconds: options?.reverse ? p.id === "BUS" ? 20 : 40 : 400, distanceMeters: 50,
+        coordinates: options?.reverse ? [p, center] : [center, p] }));
+    });
+    const arrivals = await createFinalLineAccessResolver(f.index)!({ ...f.input, matrix });
+    expect(matrix).toHaveBeenCalledTimes(1);
+    expect(matrix.mock.calls[0]).toMatchObject([{ id: "E1" }, [{ id: "BUS" }, { id: "SECOND_BUS" }], { reverse: true }]);
+    const walks = arrivals.map(n => routingSections(n).find(s => s.walkingProvider === "ign-bdtopo")!);
+    expect(walks.map(w => [w.fromStopPointId, w.toStopPointId, w.durationSeconds])).toEqual([["BUS", "E1", 20], ["SECOND_BUS", "E1", 40]]);
+    expect(walks[0]?.geometry?.[0]).toMatchObject({ lon: 2.3 });
   });
   it("chooses the shortest complete documented path across different station parents", async () => {
     const f = fixture(), result = await createFinalLineAccessResolver(f.index)!(f.input);
@@ -165,6 +184,21 @@ describe("final access to a line, separate from intermediate transfer rules", ()
     expect(await resolve({ ...f.input, transferRule: () => -1 })).toEqual([]);
     f.node.previous = { arrival: 0, section: { type: "public_transport", lineId: "TARGET", durationSeconds: 0 } };
     expect(await resolve(f.input)).toEqual([]);
+  });
+  it("avoids street queries only for feeder sequences already excluded by the verdict", async () => {
+    const f = fixture();
+    const resolve = createFinalLineAccessResolver(f.index)!;
+    const nearbyAccessFeeders = { lineIds: ["FEEDER"], lineCodes: [] };
+    f.node.previous = { arrival: 100, section: { type: "public_transport", lineMode: "BUS", lineId: "FEEDER", durationSeconds: 100 } };
+    expect(await resolve({ ...f.input, nearbyAccessFeeders })).toEqual([]);
+    expect(f.matrix).not.toHaveBeenCalled();
+    const unrestricted = await resolve(f.input);
+    expect(unrestricted).toHaveLength(1);
+    expect(f.matrix).toHaveBeenCalledOnce();
+    f.node.previous = { arrival: 100, section: { type: "public_transport", lineMode: "TRAM", lineCode: "T6", durationSeconds: 100 } };
+    f.node.section = { ...f.node.section, lineId: "M13", lineMode: "METRO" };
+    const allowed = await createFinalLineAccessResolver(f.index)!({ ...f.input, nearbyAccessFeeders: { lineIds: [], lineCodes: ["T6"] } });
+    expect(allowed.map(n => routingSections(n).map(section => section.lineMode).filter(Boolean))).toEqual([["TRAM", "METRO"]]);
   });
 
   it("supports cancellation and leaves old artifacts to the compatibility path", async () => {

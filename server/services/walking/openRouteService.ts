@@ -1,5 +1,6 @@
 import type { H3Event } from "h3";
 import { matrixWalkingWithIgn } from "./ignWalkingMatrix";
+import { cachedStationWalkMatrix, stationWalkStore } from "./stationWalkCache";
 import { getServerIdfmApiKey } from "../idfm/resolveStopArea";
 import { fetchBufferedWithTimeout } from "../idfm/boundedFetch";
 import { getIdfmRateGateBinding } from "../idfm/distributedRateGate";
@@ -316,9 +317,13 @@ export async function matrixWalkingWithOpenRouteService(
 /** A common, keyless pedestrian source keeps verdict walking inputs identical. */
 export async function matrixWalkingForGtfs(
   _event: H3Event, origin: NearbyJourneyPoint,
-  destinations: readonly NearbyWalkingMatrixDestination[], options: { reverse?: boolean } = {},
+  destinations: readonly NearbyWalkingMatrixDestination[], options: { reverse?: boolean; cache?: boolean } = {},
 ): Promise<NearbyWalkingRoute[]> {
-  return matrixWalkingWithIgn(origin, destinations.slice(0, OPEN_ROUTE_SERVICE_MAX_MATRIX_DESTINATIONS), options);
+  const points = destinations.slice(0, OPEN_ROUTE_SERVICE_MAX_MATRIX_DESTINATIONS);
+  const store = options.cache !== false && points.some(p => p.stationWalk) && stationWalkStore(_event);
+  if (store) return cachedStationWalkMatrix(store, origin, points, options.reverse === true,
+    missing => matrixWalkingWithIgn(origin, missing, { ...options, cache: false }));
+  return matrixWalkingWithIgn(origin, points, options);
 }
 
 /**

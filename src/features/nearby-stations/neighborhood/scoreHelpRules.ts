@@ -9,6 +9,7 @@ import { MAJOR_SHOPPING_CENTRE_ACCESS_RULES as centre } from "./shoppingCentres"
 import { PERSONAL_JOURNEY_SCORES as personal } from "./personalJourneys";
 import { FOOD_MARKET_RULES as market } from "./criteria/foodMarkets";
 import { CINEMA_RULES as cinema } from "./criteria/cinemas";
+import { PASSENGER_SATISFACTION_RULES as satisfaction } from "./verdict-transport-facts/passengerSatisfaction";
 
 export interface NeighborhoodScoreHelpRule { key: TranslationKey; values: TranslationParams }
 export interface NeighborhoodScoreHelpDefinition { id: NeighborhoodCategoryId; rules: NeighborhoodScoreHelpRule[] }
@@ -22,6 +23,8 @@ export function neighborhoodScoreHelpDefinitions(format: { percent(value: number
       { key: "nearbyStations.neighborhoodScore.scoreHelp.transportRules", values: { accessMinutes: transport.accessMinutes, accessMeters: transport.accessMeters, lines: transport.linesTarget, modes: transport.modesTarget, journeyFull: transport.journeyFullMinutes, journeyZero: transport.journeyFullMinutes + transport.journeyRangeMinutes, frequencyFull: transport.frequencyFullMinutes, frequencyZero: transport.frequencyFullMinutes + transport.frequencyRangeMinutes, fallback: number(transport.noSignals), exceptionalLines: transport.exceptionalLines, floor: transport.exceptionalFloor } },
       { key: "nearbyStations.neighborhoodScore.scoreHelp.frequency", values: { m1: frequency[0].minutes, w1: percent(frequency[0].weight), m2: frequency[1].minutes, w2: percent(frequency[1].weight), m3: frequency[2].minutes, w3: percent(frequency[2].weight), m4: frequency[3].minutes, w4: percent(frequency[3].weight), m5: frequency[4].minutes, w5: percent(frequency[4].weight) } },
       { key: "nearbyStations.neighborhoodScore.scoreHelp.personal", values: { bonus: personal.bonus, neutral: personal.neutral, penalty: personal.penalty } },
+      { key: "nearbyStations.neighborhoodScore.scoreHelp.satisfaction", values: { years: satisfaction.maxAnnualAge, bonusAt: satisfaction.bonusAt,
+        penaltyBelow: satisfaction.penaltyBelow, bonus: satisfaction.bonus, neutral: satisfaction.neutral, penalty: satisfaction.penalty, quality: percent(transport.qualityWeight) } },
     ] },
     { id: "daily-life", rules: [
       { key: "nearbyStations.neighborhoodScore.scoreHelp.daily", values: { minutes: NEIGHBORHOOD_WALKING_LIMIT_MINUTES, base: daily.base, supermarkets: daily.supermarkets.target, supermarketPoints: daily.supermarkets.maximum, stores: daily.stores.target, storePoints: daily.stores.maximum, restaurants: daily.restaurants.target, restaurantPoints: daily.restaurants.maximum, centre: number(centre.scoreBonus), estimated: number(centre.scoreBonus * daily.estimatedCentreFactor), walking: centre.maximumWalkingMinutes, transit: centre.maximumTransitMinutes } },

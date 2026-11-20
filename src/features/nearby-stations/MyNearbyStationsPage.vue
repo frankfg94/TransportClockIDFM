@@ -285,10 +285,12 @@ const heavy = useNearbyHeavyTransports({
   origin: nearby.selectedPlace,
   network: nearby.transportMapNetwork,
   stations: nearby.visibleStations,
+  stationsLoading: nearby.isScanning,
   activeModes: nearby.activeModes,
   radius: nearby.radius,
 }, {
   journeyProvider: nearbyDataProviders.travelRoutes,
+  partialResultsTimeoutMs: 45_000,
 });
 const hiddenStationIds = ref<Set<string>>(new Set());
 const scheduleStations = computed(() => nearby.visibleStations.value.filter((entry) => !hiddenStationIds.value.has(entry.id)));
@@ -564,7 +566,7 @@ const errorMessage = computed(() => {
     default: return "";
   }
 });
-const heavyErrorMessage = computed(() => heavy.error.value ? t("nearbyStations.heavyTransportUnavailable") : "");
+const heavyErrorMessage = computed(() => heavy.error.value ? t("nearbyStations.heavyTransportIncomplete") : "");
 function stationHasUpcomingDeparture(stationId: string): boolean | undefined {
   const stationItems = displayedScheduleItems.value.filter((item) => item.stationId === stationId);
   if (stationItems.length === 0 || stationItems.some((item) => item.state === "loading")) return undefined;
@@ -1814,6 +1816,7 @@ onBeforeUnmount(() => {
     </p>
     <p v-if="heavyErrorMessage" class="my-nearby-stations-page__notice" role="status">
       {{ heavyErrorMessage }}
+      <button type="button" :disabled="heavy.isLoading.value" @click="heavy.retryFailed()">{{ t("common.actions.retry") }}</button>
     </p>
     <p v-if="stationCopyFeedback" class="my-nearby-stations-page__notice" role="status">
       {{ stationCopyFeedback }}

@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
     error: { value: undefined as Error | undefined },
   },
   heavy: {
+    accessProgress: { value: [] as { id: string }[] },
     visibleCandidates: { value: [] },
     isLoading: { value: false },
     error: { value: undefined as string | undefined },
@@ -32,6 +33,7 @@ const mocks = vi.hoisted(() => ({
     whenSettled: vi.fn(async () => undefined),
   },
   score: {
+    countStructuralLinesFor: vi.fn(() => 2),
     transportPending: { value: [] as string[] },
     result: { value: {} },
     diagnostics: { value: { pendingTasks: [] as string[], frequencies: [] } },
@@ -81,6 +83,7 @@ afterEach(() => {
   mocks.nearby.error.value = undefined;
   mocks.nearby.isScanning.value = false;
   mocks.heavy.isLoading.value = false;
+  mocks.heavy.accessProgress.value = [];
   mocks.heavy.error.value = undefined;
   mocks.score.isLoading.value = false;
   mocks.score.transportPending.value = [];
@@ -196,10 +199,12 @@ describe("NearbyNeighborhoodScorePage", () => {
     mocks.useNearbyHeavyTransports.mockReturnValue(mocks.heavy);
     mocks.useNearbyNeighborhoodScore.mockReturnValue(mocks.score);
     mocks.heavy.isLoading.value = true;
+    mocks.heavy.accessProgress.value = [{ id: "a" }, { id: "a" }, { id: "b" }];
     mocks.score.transportPending.value = ["journey:employment-la-defense", "journey:chatelet", "frequency:rer-b", "branches:rer-b"];
     const wrapper = mount(NearbyNeighborhoodScorePage, { global: { stubs: { NuxtLink: true, NearbyNeighborhoodScoreCard: true } } });
     const tasks = wrapper.findComponent({ name: "NearbyNeighborhoodScoreCard" }).props("transportLoadingTasks");
     expect(tasks.map((task: { id: string }) => task.id)).toEqual(expect.arrayContaining(["heavyAccess", "employmentHubs", "majorStations", "frequencies", "branches"]));
+    expect(tasks.find((task: { id: string }) => task.id === "heavyAccess")).toMatchObject({ counts: { accesses: 2, lines: 2 } });
     expect(wrapper.find(".transport-loading").exists()).toBe(false);
     expect(mocks.useNearbyHeavyTransports.mock.calls.at(-1)?.[1]).toMatchObject({ retainAllCandidates: true, includeContextAccess: true });
     wrapper.unmount();

@@ -65,7 +65,7 @@ export async function scanConnections(
     if (!route) return node;
     const estimated: RoutingNode = { ...node, arrival: node.arrival - node.section.durationSeconds + route.durationSeconds, walkingSeconds: route.durationSeconds,
       section: { ...node.section, durationSeconds: route.durationSeconds, distanceMeters: route.distanceMeters, timingSource: "estimated",
-        walkingProvider: route.provider, walkingDatasetVersion: undefined, walkingUnavailabilityReason: undefined } };
+        walkingProvider: route.provider, walkingDatasetVersion: undefined, walkingUnavailabilityReason: undefined, geometry: undefined } };
     immediateAccessCache.set(node, estimated);
     return estimated;
   };

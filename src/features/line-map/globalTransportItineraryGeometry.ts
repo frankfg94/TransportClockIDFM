@@ -4,6 +4,7 @@ import { getCoordinatesDistanceMeters } from "../../services/distance";
 import { normalizeGlobalMapSearchText } from "../transport-map/search/globalMapSearch";
 import { globalMapLineFamily } from "../transport-map/overlays/ghostLineDirections";
 import { MAX_RELIABLE_BOUNDARY_DISTANCE_METERS } from "../nearby-stations/travelBoundary";
+import { projectPointOntoSegment } from "./lineGeometry";
 import {
   alignNearbyWalkingGeometryToEndpoints,
   createNearbyTravelWalkingSegments,
@@ -51,6 +52,57 @@ export interface GlobalTransportItineraryGeometryOptions {
   ) => NearbyJourneyPoint | undefined;
 }
 
+const MAX_STATION_JOIN_METERS = 60;
+const PROVIDER_QUAY_TOLERANCE_METERS = 15;
+const MAP_QUAY_TOLERANCE_METERS = 25;
+
+function separation(left: NearbyJourneyPoint, right: NearbyJourneyPoint): number {
+  return getCoordinatesDistanceMeters(left.lat, left.lon, right.lat, right.lon);
+}
+
+function matchesBoundaries(
+  coordinates: readonly NearbyJourneyPoint[],
+  from: NearbyJourneyPoint,
+  to: NearbyJourneyPoint,
+  tolerance: number,
+): boolean {
+  return coordinates.length >= 2 && separation(coordinates[0]!, from) <= tolerance &&
+    separation(coordinates.at(-1)!, to) <= tolerance;
+}
+
+/** A monomodal stop place is a station-level position. When the supplied
+ * walking path starts beside the track, use that junction for the drawing. */
+function clipStationArrival(
+  coordinates: NearbyJourneyPoint[],
+  section: NearbyJourneySection,
+  walkingStart: NearbyJourneyPoint,
+  stopPoint: NearbyJourneyPoint,
+): NearbyJourneyPoint[] {
+  if (!section.toStopPointId?.includes(":monomodalStopPlace:") ||
+    separation(walkingStart, stopPoint) > MAX_STATION_JOIN_METERS) return coordinates;
+
+  const walkingWorld = lonLatToWorld(walkingStart);
+  let tailLength = 0;
+  let closestDistance = separation(coordinates.at(-1)!, walkingStart);
+  let closest: { index: number; point: NearbyJourneyPoint } | undefined;
+  for (let index = coordinates.length - 2; index >= 0 && tailLength <= MAX_STATION_JOIN_METERS; index -= 1) {
+    const from = coordinates[index]!;
+    const to = coordinates[index + 1]!;
+    const projection = worldToLonLat(projectPointOntoSegment(walkingWorld, lonLatToWorld(from), lonLatToWorld(to)));
+    const distance = separation(projection, walkingStart);
+    if (distance < closestDistance && distance <= MAP_QUAY_TOLERANCE_METERS &&
+      tailLength + separation(projection, to) <= MAX_STATION_JOIN_METERS) {
+      closest = { index, point: projection };
+      closestDistance = distance;
+    }
+    tailLength += separation(from, to);
+  }
+  if (!closest) return coordinates;
+  const clipped = coordinates.slice(0, closest.index + 1);
+  if (!samePoint(clipped.at(-1)!, closest.point)) clipped.push(closest.point);
+  return clipped.length >= 2 ? clipped : coordinates;
+}
+
 /**
  * Normalize a provider journey into map-ready segments. Walking links reuse
  * the same boundary and geometry rules as NearbyStationsMap; transit links
@@ -72,6 +124,7 @@ export function createGlobalTransportItinerarySegments(
     }))
       .map((segment) => [segment.id, segment] as const),
   );
+  const controlledWalkStarts = new Map<number, NearbyJourneyPoint>();
 
   return route.sections.flatMap((section, index) => {
     const kind = isNearbyJourneyWalkingSection(section) ? "walking" : "transit";
@@ -86,7 +139,7 @@ export function createGlobalTransportItinerarySegments(
       : section.toPoint ?? (index === route.sections.length - 1 ? destination : route.sections[index + 1]?.fromPoint);
     if (!fallbackFrom || !fallbackTo || samePoint(fallbackFrom, fallbackTo)) return [];
 
-    const coordinates = resolveCoordinates(
+    let coordinates = resolveCoordinates(
       section,
       kind,
       walking,
@@ -95,6 +148,21 @@ export function createGlobalTransportItinerarySegments(
       options,
     );
     if (coordinates.length < 2) return [];
+    if (options.preserveSections && kind === "transit") {
+      const next = route.sections[index + 1];
+      if (next && isNearbyJourneyWalkingSection(next) && (next.geometry?.length ?? 0) >= 2) {
+        const walkingStart = next.geometry![0]!;
+        coordinates = clipStationArrival(coordinates, section, walkingStart, fallbackTo);
+        const arrival = coordinates.at(-1)!;
+        if (separation(arrival, walkingStart) <= MAP_QUAY_TOLERANCE_METERS) {
+          controlledWalkStarts.set(index + 1, arrival);
+        }
+      }
+    }
+    const controlledStart = controlledWalkStarts.get(index);
+    if (controlledStart && !samePoint(controlledStart, coordinates[0]!)) {
+      coordinates = [controlledStart, ...coordinates];
+    }
 
     return [{
       id: `${route.id}:${kind}:${index}`,
@@ -143,7 +211,15 @@ function resolveCoordinates(
       const detailed = options.resolveTransitGeometry?.(section, from, to);
       // An empty resolved path denotes a known disconnected geometry; do not
       // replace it with a fabricated line across the gap.
-      if (detailed !== undefined) return detailed;
+      if (detailed !== undefined) {
+        if (!detailed.length || matchesBoundaries(detailed, from, to, MAP_QUAY_TOLERANCE_METERS)) return detailed;
+        // The static network can use a representative platform farther down
+        // the track. Prefer a provider shape that matches the actual quays.
+        if (section.geometry && matchesBoundaries(section.geometry, from, to, PROVIDER_QUAY_TOLERANCE_METERS)) {
+          return section.geometry;
+        }
+        return detailed;
+      }
     }
     return (section.geometry?.length ?? 0) >= 2 ? section.geometry! : kind === "transit" ? [] : [from, to];
   }

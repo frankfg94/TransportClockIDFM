@@ -84,6 +84,7 @@ describe("AppNavigation", () => {
     expect(optimizer.attributes("aria-expanded")).toBe("true");
     expect(menuPanel?.querySelector('a[href="/optimizer/line/tram/T10"]')?.textContent).toContain("T10 Châtelet");
     expect(menuPanel?.querySelector('a[href="/optimizer/velizy"]')?.textContent).toContain("T10 Vélizy");
+    expect(menuPanel?.querySelector('a[href="/optimizer/station-access"]')?.textContent).toContain("Accès aux stations");
     expect(menuPanel?.querySelector('a[href="/optimizer/new"]')?.textContent).toContain("Nouveau");
     expect(menuPanel?.textContent).toContain("Health");
 

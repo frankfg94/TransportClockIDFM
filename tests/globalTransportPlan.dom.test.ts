@@ -338,6 +338,34 @@ describe("GlobalTransportPlan facade", () => {
     expect(fixture.router.replace).not.toHaveBeenCalled();
   });
 
+  it("projects selectable station candidates before and after a comparison route resolves", async () => {
+    const stationComparison = {
+      origin: optimizerOrigin,
+      mode: "METRO" as const,
+      stations: [
+        { id: "future-a", point: { ...optimizerDestination, label: "Future A" }, future: true },
+        { id: "open-b", point: { ...optimizerDestination, lon: optimizerDestination.lon + 0.01, label: "Open B" }, future: false },
+      ],
+      fitAllVersion: 0,
+    };
+    const wrapper = mount(GlobalTransportPlan, { props: { stationComparison }, attachTo: document.body });
+    wrappers.push(wrapper);
+    await flushPromises();
+    expect(wrapper.findAll(".global-map-marker:not(.global-map-marker--search-place)")).toHaveLength(2);
+    expect(wrapper.get('button[aria-label="Future A"]').find(".lucide-train-front").exists()).toBe(true);
+    await wrapper.get('button[aria-label="Future A"]').trigger("click");
+    expect(wrapper.emitted("select-comparison-station")).toEqual([["future-a"]]);
+    const timeline = createLineOptimizerTimeline(optimizerItineraryCandidate(), optimizerOrigin, optimizerDestination);
+    await wrapper.setProps({
+      stationComparison: { ...stationComparison, activeId: "future-a" },
+      itinerary: { ...timeline, origin: optimizerOrigin, destination: optimizerDestination, totalWaitSeconds: 150 },
+    });
+    expect(wrapper.get('button[aria-label="Future A"]').attributes("aria-pressed")).toBe("true");
+    expect(wrapper.get('button[aria-label="Open B"]').attributes("aria-pressed")).toBe("false");
+    expect(fixture.travelRoutesSearch).not.toHaveBeenCalled();
+    expect(fixture.placesSearch).not.toHaveBeenCalled();
+  });
+
   it("mounts one canvas facade, announces ready state and filters modes by keyboard", async () => {
     const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
     wrappers.push(wrapper);
@@ -3206,6 +3234,21 @@ describe("GlobalTransportPlan facade", () => {
     await customButton.trigger("click");
     await flushPromises();
     expect(wrapper.find("[data-global-map-customization]").exists()).toBe(true);
+  });
+
+  it("renders intermediate pitches in both directions when switching perspective", async () => {
+    const wrapper = mount(GlobalTransportPlan, { attachTo: document.body });
+    wrappers.push(wrapper);
+    await flushPromises();
+    const toolbar = wrapper.getComponent({ name: "GlobalTransportPlanToolbar" });
+    const pitches = () => fixture.renderer.render.mock.calls.map(call => (call[0] as { pitch?: number }).pitch ?? 0);
+    toolbar.vm.$emit("toggle-perspective");
+    await vi.waitFor(() => expect(pitches().at(-1)).toBe(50), { timeout: 2500 });
+    expect(pitches().some(p => p > 0 && p < 50)).toBe(true);
+    fixture.renderer.render.mockClear();
+    toolbar.vm.$emit("toggle-perspective");
+    await vi.waitFor(() => expect(pitches().at(-1)).toBe(0), { timeout: 2500 });
+    expect(pitches().some(p => p > 0 && p < 50)).toBe(true);
   });
 
   it("switches between plan and satellite basemap layers", async () => {

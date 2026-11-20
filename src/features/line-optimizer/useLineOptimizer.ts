@@ -14,20 +14,31 @@ import { parisDateTime, turboTime } from "../nearby-stations/travelTurbo";
 
 // A geocoder can return unrelated streets when it cannot find the requested address.
 // For numbered addresses, require the number and street to match before routing.
-function matchingAddress(query: string, points: GeocoderPoint[]): GeocoderPoint | undefined {
+export function matchingAddress(query: string, points: GeocoderPoint[]): GeocoderPoint | undefined {
   const street = query.split(",")[0]!.replace(/\b\d{5}\b.*$/, "").trim();
   if (!/^\d+\b/.test(street)) return points[0];
   const key = optimizerNameKey(street);
   const fullKey = optimizerNameKey(query);
   const hasLocality = fullKey !== key;
+  const postcode = query.match(/\b\d{5}\b/)?.[0];
+  const withoutPostcode = (value: string) => value.replace(/\b\d{5}\b/g, "").replace(/\s+/g, " ").trim();
+  const addressKey = withoutPostcode(fullKey);
   return points.find((point) => {
     const label = optimizerNameKey(point.label ?? point.address);
-    if (!hasLocality) return label === key || label.startsWith(`${key} `);
-    const postcode = query.match(/\b\d{5}\b/)?.[0];
-    if (postcode && !label.split(" ").includes(postcode)) return false;
-    const withoutPostcode = (value: string) => value.replace(/\b\d{5}\b/g, "").replace(/\s+/g, " ").trim();
-    return withoutPostcode(label) === withoutPostcode(fullKey);
+    if (postcode && postcode !== point.postcode && !label.split(" ").includes(postcode)) return false;
+    if (withoutPostcode(label) === addressKey) return true;
+    return !hasLocality && (label === key || label.startsWith(`${key} `));
   });
+}
+
+export function resolveOptimizerStart(simulationTime: string, now: number): number {
+  if (!simulationTime) return now;
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(simulationTime)) throw new Error("optimizer-invalid-time");
+  const civil = `${parisDateTime(now).slice(0, 8)}T${simulationTime.replace(":", "")}00`;
+  const simulated = turboTime(civil);
+  // Reject nonexistent civil times at the spring daylight-saving change.
+  if (simulated === undefined || parisDateTime(simulated) !== civil) throw new Error("optimizer-invalid-time");
+  return simulated;
 }
 
 export function useLineOptimizer(config: LineOptimizerConfig) {
@@ -131,17 +142,8 @@ export function useLineOptimizer(config: LineOptimizerConfig) {
     errorPhase.value = "locations";
     try {
       const actualNow = Date.now();
-      let start = actualNow;
-      if (simulationTime.value) {
-        errorPhase.value = "simulation";
-        const time = simulationTime.value;
-        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error("optimizer-invalid-time");
-        const civil = `${parisDateTime(actualNow).slice(0, 8)}T${time.replace(":", "")}00`;
-        const simulated = turboTime(civil);
-        // Reject nonexistent civil times at the spring daylight-saving change.
-        if (simulated === undefined || parisDateTime(simulated) !== civil) throw new Error("optimizer-invalid-time");
-        start = simulated;
-      }
+      if (simulationTime.value) errorPhase.value = "simulation";
+      let start = resolveOptimizerStart(simulationTime.value, actualNow);
       now.value = start;
       errorPhase.value = "locations";
       if (!originQuery.value.trim() || !destinationQuery.value.trim())

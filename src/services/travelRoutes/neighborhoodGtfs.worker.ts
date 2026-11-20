@@ -13,6 +13,7 @@ import type { NeighborhoodGtfsWorkerDiagnostics, NeighborhoodGtfsWorkerRequest, 
 import { createNeighborhoodGtfsSchedulingQueues } from "./neighborhoodGtfsTaskQueue";
 import { createNeighborhoodGtfsWalkingMatrix, type DiagnosticWalkingRoute, type WalkingMatrixObservation } from "./neighborhoodGtfsWalkingMatrix";
 import { createNeighborhoodGtfsAssetReader } from "./neighborhoodGtfsAssets";
+import { createNetworkScheduler } from "../networkScheduler";
 import { createNeighborhoodTimetableCache, selectNeighborhoodCivilTimetable, selectNeighborhoodServiceTimetable } from "./neighborhoodTimetableCache";
 import { resolveNightAccess } from "../../../shared/gtfs/nightAccess";
 
@@ -20,6 +21,7 @@ const scope = self as unknown as DedicatedWorkerGlobalScope;
 let manifest: { baseUrl: string; expires: number; promise: Promise<GtfsManifest | undefined> } | undefined;
 let activeDiagnostics: NeighborhoodGtfsWorkerDiagnostics | undefined;
 let coldStart = false;
+let measureSharedWalks = false;
 const assets = createNeighborhoodGtfsAssetReader();
 async function readAsset<T>(baseUrl: string, path: string, diagnostics = activeDiagnostics): Promise<T | undefined> {
   if (diagnostics) diagnostics.assetReads++;
@@ -54,6 +56,10 @@ const runtime = {
 const timetable = createGtfsTimetableLoader<string>(runtime);
 const loadTimetable = createNeighborhoodTimetableCache(timetable.loadForDate);
 const matrix = createNeighborhoodGtfsWalkingMatrix();
+// One central station can generate hundreds of independent pedestrian matrices.
+// Limit their disk reads and HTTP submissions before they enter Chrome's queues.
+const backgroundWalking = createNetworkScheduler(3, NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS);
+const referenceWalking = createNetworkScheduler(2, NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS);
 const walkingPairIds = new Map<string, string>();
 const walkingWorkerId = crypto.randomUUID();
 let nextWalkingPair = 0;
@@ -72,7 +78,9 @@ async function observedMatrix(baseUrl: string, diagnostics: NeighborhoodGtfsWork
   const details: Record<string, unknown> = { phase, destinations: destinations.length, reverse: options.reverse === true,
     pairIds: [...new Set(pairIds)], proxyRequests: requests };
   return observeWorkerStep(diagnostics, "walking-matrix", details, async () => {
-    const routes = await matrix(baseUrl, origin, destinations, { ...options, phase, coldStart,
+    const schedule = diagnostics.purpose === "transport-benchmark" || options.phase === "initial-access"
+      ? referenceWalking : backgroundWalking;
+    const routes = await schedule(signal => matrix(baseUrl, origin, destinations, { ...options, phase, coldStart, measureSharedWalks, signal,
       observeRequest: request => requests.push(request),
       observeStorage: available => { details.persistentStorageAvailable = available; },
       observe: (cached, reused, examined) => {
@@ -82,7 +90,7 @@ async function observedMatrix(baseUrl: string, diagnostics: NeighborhoodGtfsWork
         diagnostics.walkingPairsExamined = (diagnostics.walkingPairsExamined ?? 0) + examined;
         diagnostics.walkingPairsRequested += examined - reused;
         details.reusedPairs = reused; details.requestedPairs = examined - reused;
-      } });
+      } }));
     details.verified = routes.filter(route => !route.fallback).length;
     details.estimated = routes.filter(route => route.fallback).length;
     details.providers = [...new Set(routes.map(route => route.provider))];
@@ -170,6 +178,7 @@ scope.addEventListener("message", (event: MessageEvent<NeighborhoodGtfsWorkerReq
   if (message.kind === "cancel") { queues.cancel(message.id); return; }
   if (message.kind === "refresh-manifest") { manifest = undefined; return; }
   coldStart = message.coldStart === true;
+  measureSharedWalks = message.measureSharedWalks === true;
   const { id, baseUrl } = message, enqueued = performance.now();
   // Parks/shops/hospitals keep one slot; their egress HTTP matrices cannot
   // occupy all the transport slots. All destinations are still computed.

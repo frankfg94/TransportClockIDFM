@@ -23,7 +23,7 @@ export interface NeighborhoodGtfsRuntime<Context> {
   isCancelled?(context: Context): boolean;
   cacheEpoch(): number;
   readJson<T>(context: Context, path: string): Promise<T | undefined>;
-  matrix(context: Context, origin: NearbyJourneyPoint, destinations: NearbyWalkingMatrixDestination[], options?: { reverse?: boolean }): Promise<NearbyWalkingRoute[]>;
+  matrix(context: Context, origin: NearbyJourneyPoint, destinations: NearbyWalkingMatrixDestination[], options?: { reverse?: boolean; phase?: "initial-access" }): Promise<NearbyWalkingRoute[]>;
 }
 export function createNeighborhoodGtfsRouter<Context>(runtime: NeighborhoodGtfsRuntime<Context>) {
 let indexCache: { key: string; promise: Promise<GtfsRoutingIndex | undefined> } | undefined;
@@ -44,7 +44,8 @@ function walkingSection(from: NearbyJourneyPoint, to: NearbyJourneyPoint, second
     fromPoint: { lon: from.lon, lat: from.lat }, toPoint: { lon: to.lon, lat: to.lat },
     ...(name(from) ? { fromName: name(from) } : {}), ...(name(to) ? { toName: name(to) } : {}),
     ...(route ? { distanceMeters: route.distanceMeters, walkingProvider: route.provider, walkingDatasetVersion: route.datasetVersion,
-      walkingUnavailabilityReason: route.unavailabilityReason } : {}) };
+      walkingUnavailabilityReason: route.unavailabilityReason,
+      ...(!route.fallback && route.coordinates.length >= 2 ? { geometry: route.coordinates } : {}) } : {}) };
 }
 const transferGraphs = new WeakMap<GtfsRoutingIndex, ReturnType<typeof buildFootpaths>>();
 function buildFootpaths(index: GtfsRoutingIndex) {
@@ -285,7 +286,7 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
     const promise = (async () => {
       const stream = prefetchGtfsConnectionBatch(connections(event, manifest, index, serviceDate, start, request.allowedModes));
       const nearby = nearbyStops(index, request.origin, 64);
-      const routes = await runtime.matrix(event, request.origin, nearby.map(s => ({ ...s.point, id: String(s.id) })));
+      const routes = await runtime.matrix(event, request.origin, nearby.map(s => ({ ...s.point, id: String(s.id) })), { phase: "initial-access" });
       const access = new Map<number, RoutingNode>();
       for (const route of routes) {
         if (route.durationSeconds > 20 * 60) continue;
@@ -334,8 +335,8 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
     const routes: RoutingNode[] = lineAccess
       ? targetLineId ? physical.finalLineAccess
         ? await physical.finalLineAccess({ tree, stationStops: stationCandidates.map(stop => stop.id), lineId: targetLineId,
-          origin: request.origin, start, end: start + NEIGHBORHOOD_ROUTING_HORIZON_SECONDS,
-          matrix: (origin, targets) => { assertCurrent(event); return runtime.matrix(event, origin, targets); },
+          origin: request.origin, start, end: start + NEIGHBORHOOD_ROUTING_HORIZON_SECONDS, nearbyAccessFeeders: destination.nearbyAccessFeeders,
+          matrix: (origin, targets, options) => runtime.matrix(event, origin, targets, options),
           assertCurrent: () => assertCurrent(event), transferRule: physical.transferRule })
         : lineAccessNodes(index, tree, stationCandidates.map(stop => stop.id), targetLineId, start + NEIGHBORHOOD_ROUTING_HORIZON_SECONDS) : []
       : candidates.flatMap((candidate, i) => {
@@ -369,6 +370,11 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
     const signatures = new Set<string>(), journeys: NearbyJourney[] = [];
     for (const node of sorted) {
       const sections = routingSections(node);
+      // Only the reference preview needs street polylines for ordinary access
+      // walks. Keep bulk station/venue results and final-line access as before.
+      if (request.purpose !== "transport-benchmark") {
+        for (const section of sections) if (section.type === "walking" && !section.finalLineAccess) delete section.geometry;
+      }
       const transit = sections.filter(s => s.type === "public_transport");
       // Different boarding stops on the same lines can have very different
       // access walks. Preserve them until the nearest-access rule is applied.

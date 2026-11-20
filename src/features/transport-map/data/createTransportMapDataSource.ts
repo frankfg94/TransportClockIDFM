@@ -306,7 +306,7 @@ export class TransportMapDataSource {
     return [...corePaths, ...extraPaths];
   }
 
-  private async ensureRegionalLayer(layer: "core" | "bus" | "bike"): Promise<GlobalMapPath[]> {
+  async ensureRegionalLayer(layer: "core" | "bus" | "bike"): Promise<GlobalMapPath[]> {
     if (!this.manifest || !this.network)
       throw new Error("Global map data source is not initialized");
     const loadedPaths = layer === "bus"

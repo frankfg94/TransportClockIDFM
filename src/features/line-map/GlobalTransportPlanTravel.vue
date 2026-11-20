@@ -2,12 +2,13 @@
 import { computed } from "vue";
 import { useI18n } from "../../i18n";
 import GlobalTransportPlan from "./GlobalTransportPlan.vue";
-import type { GlobalTransportPlanItinerary } from "./globalTransportPlanItinerary";
+import type { GlobalTransportPlanItinerary, TransportStationComparison } from "./globalTransportPlanItinerary";
 
-const props = defineProps<{ itinerary: GlobalTransportPlanItinerary }>();
+const props = defineProps<{ itinerary?: GlobalTransportPlanItinerary; stationComparison?: TransportStationComparison }>();
+const emit = defineEmits<{ "select-comparison-station": [id: string] }>();
 const { t, n } = useI18n();
 const partialGeometry = computed(() =>
-  props.itinerary.steps.some(
+  props.itinerary?.steps.some(
     (step) =>
       (step.kind === "transit" || step.kind === "walk") &&
       (!step.section.fromPoint ||
@@ -19,7 +20,7 @@ const partialGeometry = computed(() =>
 
 <template>
   <section class="global-transport-plan-travel" :aria-label="t('lineOptimizer.journeyMap')">
-    <header class="global-transport-plan-travel__header">
+    <header v-if="itinerary && !stationComparison" class="global-transport-plan-travel__header">
       <h3>{{ t("lineOptimizer.journeyMap") }}</h3>
       <div>
         <small>{{ t("globalMap.itinerary.from") }}</small
@@ -48,7 +49,12 @@ const partialGeometry = computed(() =>
         {{ t("lineOptimizer.mapGeometryPartial") }}
       </p>
     </header>
-    <GlobalTransportPlan experience="next" :itinerary="itinerary" />
+    <GlobalTransportPlan
+      experience="next"
+      :itinerary="itinerary"
+      :station-comparison="stationComparison"
+      @select-comparison-station="emit('select-comparison-station', $event)"
+    />
   </section>
 </template>
 

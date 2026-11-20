@@ -1,9 +1,9 @@
 <template>
   <component
-    :is="props.itinerary ? 'div' : 'main'"
+    :is="controlledView ? 'div' : 'main'"
     ref="rootElement"
     class="global-transport-plan"
-    :class="{ 'global-transport-plan--supplied-itinerary': Boolean(props.itinerary) }"
+    :class="{ 'global-transport-plan--supplied-itinerary': controlledView }"
     :data-itinerary-source="props.itinerary ? 'supplied' : undefined"
     :data-map-experience="mapExperience.kind"
     :data-transport-renderer="mapExperience.rendererKind"
@@ -25,7 +25,7 @@
       :reduce-motion="appSettings.reduceMotion"
     />
     <GlobalTransportPlanToolbar
-      v-if="!props.itinerary"
+      v-if="!controlledView"
       :show-map-interactions="showMapInteractions"
       :status-label="statusLabel"
       :renderer-metrics="rendererMetrics"
@@ -55,7 +55,7 @@
       :traffic-status-label="trafficStatusLabel"
       :basemap-layer="basemapLayer"
       :legacy-basemap="mapExperience.kind === 'legacy'"
-      :perspective="Boolean(camera.pitch)"
+      :perspective="perspectiveTarget ?? Boolean(camera.pitch)"
       @toggle-perspective="changePerspective()"
       @rotate="changePerspective($event)"
       :share-feedback="shareFeedback"
@@ -138,7 +138,7 @@
         @ready="nextRendererReady = true"
       />
       <GlobalMapRealEstateControl
-        v-if="!props.itinerary && mapExperience.kind === 'next'"
+        v-if="!controlledView && mapExperience.kind === 'next'"
         :enabled="realEstateLayerEnabled"
         :loading="realEstateLayerLoading"
         :error="realEstateLayerError"
@@ -188,7 +188,7 @@
         @retry="retryRealEstateSalesLoad"
       />
       <GlobalTransportPlanSearch
-        v-if="!props.itinerary"
+        v-if="!controlledView"
         v-model:open="searchOpen"
         :show-map-interactions="showMapInteractions"
         :lines="network?.lines ?? []"
@@ -263,7 +263,19 @@
       />
 
       <GlobalMapMarkersOverlay
-        v-if="!routePreviewActive"
+        v-if="props.stationComparison"
+        :markers="comparisonMarkers"
+        :selected-place="props.itinerary ? undefined : props.stationComparison.origin"
+        :active-id="props.stationComparison.activeId"
+        :station-mode="props.stationComparison.mode"
+        :camera="camera"
+        :reduce-motion="appSettings.reduceMotion"
+        selectable
+        @select-marker="emit('select-comparison-station', $event)"
+        @wheel="onWheel"
+      />
+      <GlobalMapMarkersOverlay
+        v-else-if="!routePreviewActive"
         :markers="globalMapMarkers.markers.value"
         :selected-place="selectedSearchPlace"
         :camera="camera"
@@ -401,7 +413,7 @@
       </div>
 
         <DraggableBottomSheet
-          v-if="!props.itinerary && globalItinerary.open.value"
+          v-if="!controlledView && globalItinerary.open.value"
           :enabled="mobileViewportActive"
           inactive-transition="global-map-itinerary-slide"
           :stage="itineraryToGenericStage[mobileItinerarySheetSnap]"
@@ -486,7 +498,7 @@
         </DraggableBottomSheet>
 
       <ContextMenu
-        v-if="!props.itinerary"
+        v-if="!controlledView"
         :open="globalContextMenuOpen"
         :point="globalContextMenuPoint"
         :aria-label="t('globalMap.contextMenu.aria')"
@@ -643,7 +655,7 @@
 
       <component
         :is="mobileViewportActive ? DraggableBottomSheet : 'div'"
-        v-if="!props.itinerary"
+        v-if="!controlledView"
         v-bind="mobileViewportActive ? {
           open: mobileLineSelectorOpen,
           title: t('globalMap.page.exploreNetworks'),
@@ -827,7 +839,7 @@
         :style="tooltipStyle"
       />
 
-      <footer v-if="!props.itinerary" class="global-transport-plan__legend">
+      <footer v-if="!controlledView" class="global-transport-plan__legend">
         <span><i class="legend-dot legend-dot--hub" /> {{ t("globalMap.page.hub") }}</span>
         <span
           ><i class="legend-dot legend-dot--entrance" /> {{ t("globalMap.page.entrance") }}</span
@@ -1194,7 +1206,7 @@ import {
   filterGlobalLineConnections,
 } from "./globalLineMetadata";
 import type { TravelRoute } from "../nearby-stations/useTravelRoutes";
-import type { GlobalTransportPlanItinerary } from "./globalTransportPlanItinerary";
+import type { GlobalTransportPlanItinerary, TransportStationComparison } from "./globalTransportPlanItinerary";
 import { useGlobalMapMarkers, type GlobalMapMarker } from "./globalMapMarkers";
 import {
   createGlobalMapDistanceMeasurement,
@@ -1242,12 +1254,25 @@ const props = withDefaults(
     experience?: TransportMapExperienceKind;
     nextMapStyle?: NextMapStyle;
     itinerary?: GlobalTransportPlanItinerary;
+    stationComparison?: TransportStationComparison;
   }>(),
   {
     basemapContrast: GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.contrast.default,
     basemapStyle: GLOBAL_TRANSPORT_PLAN_CONFIG.basemap.style.default,
     experience: "legacy" as TransportMapExperienceKind,
   },
+);
+const emit = defineEmits<{ "select-comparison-station": [id: string] }>();
+const controlledView = computed(() => Boolean(props.itinerary || props.stationComparison));
+const comparisonMarkers = computed<GlobalMapMarker[]>(() =>
+  (props.stationComparison?.stations ?? []).map(({ id, point, future }) => ({
+    id,
+    name: point.label,
+    lon: point.lon,
+    lat: point.lat,
+    icon: future ? "pin" : "TrainFront",
+    color: future ? "#876037" : "#3163b5",
+  })),
 );
 
 // Keep the legacy facade compatible with existing renderer test doubles that
@@ -1340,14 +1365,39 @@ const legacyBasemapRef = ref<{
 const camera = shallowRef<CameraState>(createCamera());
 const selectedLineInteractionScene = shallowRef<TransportMapRenderScene>();
 const basemapLayer = ref<TransportMapBasemapLayer>("plan");
+const perspectiveTarget = ref<boolean>();
+let perspectiveFrame: number | undefined;
+
 function changePerspective(rotation?: number): void {
+  const enable = rotation !== undefined || !(perspectiveTarget.value ?? Boolean(camera.value.pitch));
+  if (perspectiveFrame !== undefined) cancelAnimationFrame(perspectiveFrame);
   cancelCameraAnimation();
   cancelWheelZoom();
   cancelInertia();
   const current = camera.value;
-  const pitch = rotation === undefined ? (current.pitch ? 0 : 50) : current.pitch;
-  const bearing = pitch ? normalizeBearing(current.bearing + (rotation ?? 0)) : 0;
-  applyCamera(updateCamera(current, { pitch, bearing }), false);
+  const initialPitch = current.pitch ?? 0;
+  const pitch = enable ? (rotation === undefined ? 50 : initialPitch || 50) : 0;
+  const bearing = enable ? normalizeBearing(current.bearing + (rotation ?? 0)) : 0;
+  const turn = normalizeBearing(bearing - current.bearing);
+  const duration = rotation === undefined ? 650 : 280;
+  const start = performance.now();
+  perspectiveTarget.value = enable;
+  function animate(progress: number): void {
+    const eased = progress * progress * (3 - 2 * progress);
+    camera.value = updateCamera(camera.value, {
+      pitch: progress === 1 ? pitch : initialPitch + (pitch - initialPitch) * eased,
+      bearing: progress === 1 ? bearing : normalizeBearing(current.bearing + turn * eased),
+    });
+    draw();
+    if (progress < 1) {
+      perspectiveFrame = requestAnimationFrame(now => animate(Math.min(1, Math.max(0, (now - start) / duration))));
+    } else {
+      perspectiveFrame = undefined;
+      perspectiveTarget.value = undefined;
+      scheduleViewportRefresh();
+    }
+  }
+  animate(appSettings.value.reduceMotion || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 1 : 0);
 }
 // Camera changes are intentionally kept out of the Vue render tree while a
 // gesture is active. The canvas needs every camera sample; the legend does
@@ -3007,7 +3057,7 @@ const globalVisibleTravelRoutes = computed(() => {
 });
 
 const globalSelectedTravelRoute = computed(() => {
-  if (props.itinerary) return props.itinerary.route;
+  if (controlledView.value) return props.itinerary?.route;
   if (!globalItinerary.open.value || globalItinerary.travelRoutes.isLoading.value) return undefined;
   const selected = globalItinerary.travelRoutes.selectedRoute.value;
   return selected && globalVisibleTravelRoutes.value.some((candidate) => candidate.id === selected.id)
@@ -3259,7 +3309,7 @@ const globalMapModalOpen = computed(() =>
   || globalMapIsochrones.modalOpen.value,
 );
 const showMapInteractions = computed(() =>
-  !props.itinerary && !globalMapModalOpen.value && !mobileRightSidebarFullscreen.value,
+  !controlledView.value && !globalMapModalOpen.value && !mobileRightSidebarFullscreen.value,
 );
 
 watch(showMapInteractions, (visible) => {
@@ -3493,7 +3543,7 @@ function setGlobalTravelAllowedModes(modes: GlobalMapMode[]): void {
 }
 
 async function openGlobalItineraryTo(destination: GeocoderPoint): Promise<void> {
-  if (props.itinerary) return;
+  if (controlledView.value) return;
   if (
     !Number.isFinite(destination.lon) ||
     !Number.isFinite(destination.lat) ||
@@ -3606,7 +3656,7 @@ function mobileItinerarySnapHeights(viewportHeight: number): Record<BottomSheetS
 }
 
 function readItinerarySheetHeight(): number {
-  if (props.itinerary || !isMobileViewport()) return 0;
+  if (controlledView.value || !isMobileViewport()) return 0;
   const panel = itinerarySheetComponent.value?.element;
   const stage = stageElement.value;
   if (!panel || !stage) return mobileItinerarySnapHeights(camera.value.viewportHeightCssPx || 720)[itineraryToGenericStage[mobileItinerarySheetSnap.value]];
@@ -3735,6 +3785,19 @@ function fitGlobalItineraryToRoute(options: { force?: boolean; animate?: boolean
   }
   applyCamera(targetCamera, false);
   endItineraryFitTrace({ completed: true });
+}
+
+function fitStationComparison(all: boolean): void {
+  const comparison = props.stationComparison;
+  if (!comparison) return;
+  const selected = comparison.stations.find(({ id }) => id === comparison.activeId);
+  const points = all || !selected ? comparison.stations.map(({ point }) => point) : [selected.point];
+  const bounds = getGlobalTransportItineraryBounds([], [comparison.origin, ...points]);
+  if (!bounds) return;
+  const fitted = fitCameraToBounds(camera.value, bounds, 55,
+    GLOBAL_TRANSPORT_PLAN_CONFIG.lineView.minZoom,
+    GLOBAL_TRANSPORT_PLAN_CONFIG.lineView.maxZoom);
+  applyCamera(fitted, false);
 }
 
 function animateCameraToStation(station: Pick<GlobalMapStation, "worldX" | "worldY">): void {
@@ -5303,7 +5366,7 @@ const globalTransportRouteState = useGlobalTransportRouteState({
 });
 
 function syncUrl(): void {
-  if (props.itinerary) return;
+  if (controlledView.value) return;
   globalTransportRouteState.syncUrl();
 }
 
@@ -5456,6 +5519,12 @@ watch(
   },
   { flush: "post", immediate: true },
 );
+watch(() => props.stationComparison?.fitAllVersion, (version) => {
+  if (version !== undefined) fitStationComparison(true);
+}, { flush: "post", immediate: true });
+watch(() => props.stationComparison?.activeId, (id) => {
+  if (id && !props.itinerary) fitStationComparison(false);
+}, { flush: "post" });
 watch(
   [
     () => globalItineraryActive.value,
@@ -5816,7 +5885,7 @@ onMounted(async () => {
   document.addEventListener("pointerdown", closeLineChoiceOnDocumentPointerDown, true);
   await nextTick();
   mobileViewportActive.value = isMobileViewport();
-  if (!props.itinerary) requestMobileLocationOnArrival();
+  if (!controlledView.value) requestMobileLocationOnArrival();
   if (canvasElement.value) renderer.mount(canvasElement.value);
   resizeStage();
   resizeObserver =
@@ -5846,11 +5915,13 @@ onMounted(async () => {
       ),
       false,
     );
-    if (!props.itinerary) restoreTemporaryMarkerFromUrl();
+    if (!controlledView.value) restoreTemporaryMarkerFromUrl();
     await refreshViewport();
     coldRecorder?.mark("viewport-ready");
     if (props.itinerary) {
       fitGlobalItineraryToRoute({ force: true });
+    } else if (props.stationComparison) {
+      fitStationComparison(true);
     } else {
       await restoreSelectionFromUrl();
       await restoreDebugLineFromUrl();
@@ -5868,6 +5939,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  if (perspectiveFrame !== undefined) cancelAnimationFrame(perspectiveFrame);
   mounted = false;
   document.removeEventListener("pointerdown", closeLineChoiceOnDocumentPointerDown, true);
   if (itinerarySheetMapSyncFrame !== undefined) {

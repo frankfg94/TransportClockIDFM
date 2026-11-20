@@ -705,9 +705,16 @@ describe("SettingsPage", () => {
     });
 
     const { default: SettingsPage } = await import("../src/features/app-settings/SettingsPage.vue");
+    const sharedActions: string[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(JSON.stringify({ bundles: [] }))),
+      vi.fn(async (url, options) => {
+        if (String(url).includes("/api/walking/shared-cache")) {
+          sharedActions.push(JSON.parse(options.body).action);
+          return Response.json({ available: true, authorized: true });
+        }
+        return Response.json({ bundles: [] });
+      }),
     );
     const wrapper = mount(SettingsPage, { attachTo: document.body });
     expect(
@@ -737,12 +744,20 @@ describe("SettingsPage", () => {
 
     const resetButton = wrapper
       .findAll("button")
-      .find((button) => button.text().includes("initialiser"));
+      .find((button) => button.text() === "Reinitialiser");
 
     expect(resetButton).toBeTruthy();
     await resetButton?.trigger("click");
     expect(clearWalkingCache).toHaveBeenCalledTimes(2);
     expect(document.body.textContent).toContain("Parametres reinitialises");
+    expect(sharedActions).toEqual(["status"]);
+    await wrapper.get(".settings-page__footer input[type=checkbox]").setValue(true);
+    await resetButton!.trigger("click");
+    await flushPromises();
+    expect(sharedActions).toEqual(["status", "reset"]);
+    await wrapper.get(".settings-page__footer details button").trigger("click");
+    await flushPromises();
+    expect(sharedActions).toEqual(["status", "reset", "reset"]);
   });
 
   it("manages presets from the settings modal", async () => {

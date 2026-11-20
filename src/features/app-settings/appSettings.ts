@@ -94,6 +94,7 @@ export interface AppSettings {
   nearbyMapShowFullscreenControl: boolean;
   nearbyMapHighPrecisionNoiseEnabled: boolean;
   verdictPersonalJourneys: PersonalJourneyPreference[];
+  verdictJourneyPreviewEnabled: boolean;
   // Browser-side cache layer used before the backend bundle fallback.
   transferBundleLocalCacheEnabled: boolean;
   // Nuxt-side bundle cache shared by successive transfer requests.
@@ -315,6 +316,7 @@ export function createDefaultAppSettings(): AppSettings {
     nearbyMapShowFullscreenControl: true,
     nearbyMapHighPrecisionNoiseEnabled: true,
     verdictPersonalJourneys: [],
+    verdictJourneyPreviewEnabled: false,
     navigationAutoHide: "none",
     hiddenDirectionIdsByBoardId: {},
     reduceMotion: false,
@@ -446,6 +448,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       defaults.nearbyMapShowFullscreenControl,
     ),
     verdictPersonalJourneys: normalizePersonalJourneyPreferences(value.verdictPersonalJourneys),
+    verdictJourneyPreviewEnabled: readBoolean(value.verdictJourneyPreviewEnabled, defaults.verdictJourneyPreviewEnabled),
     nearbyMapHighPrecisionNoiseEnabled: readBoolean(
       value.nearbyMapHighPrecisionNoiseEnabled,
       defaults.nearbyMapHighPrecisionNoiseEnabled,

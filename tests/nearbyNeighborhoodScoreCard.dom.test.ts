@@ -27,15 +27,19 @@ describe("NearbyNeighborhoodScoreCard", () => {
     expect(wrapper.text().match(/RER X — branche Terminus test/gu)!.length).toBeGreaterThanOrEqual(3);
     wrapper.unmount();
   });
-  it("renders named spinners inside the transport category, including before its data arrives", () => {
+  it("updates the two access counters beside the transport spinner", async () => {
     const result = buildNeighborhoodScore({ places: [], placesLoaded: false, stations: [], stationsLoaded: false, generatedAt: 1 });
+    const task = { id: "heavyAccess", labelKey: "nearbyStations.neighborhoodScore.transportTasks.heavyAccess" } as const;
     const wrapper = mount(NearbyNeighborhoodScoreCard, { props: { result, directoryUrl: "/nearby-stations",
-      transportLoadingTasks: [{ id: "heavyAccess", labelKey: "nearbyStations.neighborhoodScore.transportTasks.heavyAccess" }] },
+      transportLoadingTasks: [{ ...task, counts: { accesses: 0, lines: 2 } }] },
       global: { stubs: { NuxtLink: true } } });
     const categories = wrapper.findAll(".nearby-neighborhood-score-card__category");
     const transport = categories.find(category => category.find("h3").text() === "Transports")!;
     expect(transport.find("[data-transport-task='heavyAccess'] [data-testid='spinner']").exists()).toBe(true);
     expect(transport.text()).toContain("Chargement des temps d’accès");
+    expect(transport.get(".transport-loading__counts").text()).toBe("Accès calculés : 0 · Lignes structurantes : 2");
+    await wrapper.setProps({ transportLoadingTasks: [{ ...task, counts: { accesses: 7, lines: 4, targets: { completed: 30, total: 214 } } }] });
+    expect(transport.get(".transport-loading__counts").text()).toMatch(/Recherches terminées : 30\/214\s*·\s*Accès calculés : 7 · Lignes structurantes : 4/);
     expect(categories.filter(category => category.find(".transport-loading").exists())).toHaveLength(1);
     wrapper.unmount();
   });

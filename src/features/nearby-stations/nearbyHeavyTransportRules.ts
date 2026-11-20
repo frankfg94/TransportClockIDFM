@@ -258,17 +258,7 @@ export function evaluateNearbyHeavyJourney(
   const firstTransitIndex = sections.findIndex(isTransitSection);
   const feeder = transitSections[0]!;
   const feederMode = sectionLineMode(feeder);
-  const heavySections = transitSections.slice(1);
-
-  if (
-    !isLocalFeeder(feeder, input.localLineIds, input.localLineCodes) ||
-    !isReliableFeederMode(feederMode) ||
-    isBusLikeMode(feederMode) ||
-    heavySections.some((section) => {
-      const mode = sectionLineMode(section);
-      return !(isHeavyMode(mode) || isReliableFeederMode(mode)) || isBusLikeMode(mode);
-    })
-  ) {
+  if (!supportsNearbyHeavyFeederSequence(transitSections, input.localLineIds, input.localLineCodes)) {
     input.onRejected?.("unsupported-feeder-or-correspondence");
     return undefined;
   }
@@ -301,6 +291,20 @@ export function chooseBestNearbyHeavyJourney(
   input: Omit<HeavyJourneyEvaluationInput, "journey">,
 ): HeavyJourneyEvaluation | undefined {
   return listNearbyHeavyJourneyAlternatives(journeys, input)[0];
+}
+
+/** The final walk cannot change the vehicles already used to reach a station. */
+export function supportsNearbyHeavyFeederSequence(
+  transit: readonly NearbyJourneySection[], localLineIds?: ReadonlySet<string>, localLineCodes?: ReadonlySet<string>,
+): boolean {
+  const first = transit[0];
+  if (!first) return true;
+  if (!isLocalFeeder(first, localLineIds, localLineCodes)) return false;
+  if (transit.length === 1) return true;
+  return transit.length <= 3 && isReliableFeederMode(sectionLineMode(first)) && transit.slice(1).every(section => {
+    const mode = sectionLineMode(section);
+    return isHeavyMode(mode) || isReliableFeederMode(mode);
+  });
 }
 
 function evaluateSingleLocalFeeder(

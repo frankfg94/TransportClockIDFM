@@ -195,6 +195,12 @@ function geographyLabel(): string {
       <span>{{ factLabel() }}</span>
       <CircleHelp :size="15" aria-hidden="true" />
     </button>
+    <ul v-if="fact.nearerStationAccesses?.length" class="nearby-neighborhood-score-fact__nearer-stations"
+      :aria-label="t('nearbyStations.neighborhoodScore.nearerStationAccesses')">
+      <li v-for="access in fact.nearerStationAccesses" :key="`${access.station}:${access.meters}`">
+        {{ t("nearbyStations.neighborhoodScore.facts.transportStationNearby.label", transportSectionValues(fact, access, t)) }}
+      </li>
+    </ul>
     <div
       :id="`neighborhood-score-fact-${fact.id}`"
       class="nearby-neighborhood-score-fact__tooltip"
@@ -346,6 +352,7 @@ function geographyLabel(): string {
 
 <style scoped>
 .nearby-neighborhood-score-fact { position: relative; }
+.nearby-neighborhood-score-fact__nearer-stations { margin: 0 0 6px 45px; padding-inline-start: 1em; color: var(--muted); font-size: .75rem; line-height: 1.45; }
 .nearby-neighborhood-score-fact__trigger { align-items: center; background: transparent; border-radius: 9px; color: var(--ink); display: grid; font-size: .8rem; gap: 7px; grid-template-columns: 31px minmax(0, 1fr) auto; justify-content: flex-start; line-height: 1.35; min-height: 35px; padding: 6px 7px; text-align: left; width: 100%; }
 .nearby-neighborhood-score-fact__trigger:hover, .nearby-neighborhood-score-fact__trigger:focus-visible { background: #f6f7fb; outline: 0; }
 .nearby-neighborhood-score-fact__trigger > span:nth-child(2) { min-width: 0; }

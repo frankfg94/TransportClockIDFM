@@ -1,9 +1,55 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createGtfsNeighborhoodTravelRoutesProvider } from "../src/services/travelRoutes/gtfsNeighborhoodTravelRoutesProvider";
+import * as browserGtfs from "../src/services/travelRoutes/browserNeighborhoodGtfs";
 const origin = { lon: 2.3, lat: 48.8 };
 const request = (id = "a") => ({ origin, destination: { id, lon: 2.4, lat: 48.9 }, datetime: "20261012T090000" });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe("verdict GTFS provider", () => {
+  it("delivers a completed heavy-access batch while another is still waiting", async () => {
+    vi.spyOn(browserGtfs, "canUseBrowserNeighborhoodGtfs").mockReturnValue(true);
+    let release!: () => void;
+    const slowBatch = new Promise<void>(resolve => { release = resolve; });
+    const router = vi.spyOn(browserGtfs, "routeBrowserNeighborhoodGtfs").mockImplementation(async ({ destinations }) => {
+      if (destinations.length === 16) await slowBatch;
+      return { source: "gtfs", serviceDate: "20261012", searchHorizonSeconds: 14400, destinations: destinations.map(destination => ({
+        id: destination.id, status: "ready", journeys: [{ durationSeconds: 600, sections: [] }],
+      })) };
+    });
+    const provider = createGtfsNeighborhoodTravelRoutesProvider();
+    const results = Array.from({ length: 17 }, (_, i) => provider.findJourneys({
+      ...request(), purpose: "transport", arrivalAtPlatform: true,
+      destination: { id: String(i), lon: 2.4 + i / 1000, lat: 48.9 },
+    }));
+    try {
+      await expect(results[16]).resolves.toHaveLength(1);
+      expect(router.mock.calls.map(([batch]) => batch.destinations.length)).toEqual([16, 1]);
+    } finally {
+      release();
+      await Promise.allSettled(results);
+    }
+  });
+  it("publishes each browser reference result even when another destination is still waiting for a walk", async () => {
+    vi.spyOn(browserGtfs, "canUseBrowserNeighborhoodGtfs").mockReturnValue(true);
+    let release!: () => void;
+    const walk = new Promise<void>(resolve => { release = resolve; });
+    const router = vi.spyOn(browserGtfs, "routeBrowserNeighborhoodGtfs").mockImplementation(async batch => {
+      const [target] = batch.destinations;
+      expect(batch.destinations).toHaveLength(1);
+      if (target!.lon === 2.4) await walk;
+      return { source: "gtfs", serviceDate: "20261012", searchHorizonSeconds: 14400, destinations: [
+        { id: target!.id, status: "ready", journeys: [{ id: String(target!.lon), durationSeconds: 600, sections: [] }] },
+      ] };
+    });
+    const provider = createGtfsNeighborhoodTravelRoutesProvider();
+    const first = { ...request(), purpose: "transport-benchmark" as const };
+    const slow = provider.findJourneys(first);
+    const duplicate = provider.findJourneys(first, new AbortController().signal);
+    const fast = provider.findJourneys({ ...first, destination: { ...first.destination, lon: 2.5 } });
+    await expect(fast).resolves.toMatchObject([{ id: "2.5" }]);
+    release();
+    expect(await duplicate).toEqual(await slow);
+    expect(router).toHaveBeenCalledTimes(2);
+  });
   it("forwards the target line and keeps each line's access separate in batching and caches", async () => {
     const fetcher = vi.fn(async (_url, init) => {
       const body = JSON.parse(init.body);
@@ -19,6 +65,22 @@ describe("verdict GTFS provider", () => {
     expect(JSON.parse(fetcher.mock.calls[0]![1].body).destinations).toHaveLength(3);
     expect((await provider.findJourneys(requests[0]!))[0]?.id).toBe("line-a");
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("keeps unrestricted and locally eligible feeder probes separate for the same platform", async () => {
+    const router = vi.spyOn(browserGtfs, "routeBrowserNeighborhoodGtfs").mockImplementation(async batch => ({
+      source: "gtfs", serviceDate: "20261012", searchHorizonSeconds: 14400,
+      destinations: batch.destinations.map(d => ({ id: d.id, status: "ready", journeys: [{
+        id: d.nearbyAccessFeeders?.lineCodes.join(",") ?? "all", durationSeconds: 900, sections: [],
+      }] })),
+    }));
+    vi.spyOn(browserGtfs, "canUseBrowserNeighborhoodGtfs").mockReturnValue(true);
+    const platform = { ...request(), destinationLineId: "L", arrivalAtPlatform: true };
+    const scoped = { ...platform, nearbyAccessFeeders: { lineIds: ["official-162"], lineCodes: ["162"] } };
+    const provider = createGtfsNeighborhoodTravelRoutesProvider();
+    const result = await Promise.all([provider.findJourneys(platform), provider.findJourneys(scoped)]);
+    expect(result.map(routes => routes[0]?.id)).toEqual(["all", "162"]);
+    expect((await provider.findJourneys(scoped))[0]?.id).toBe("162");
+    expect(router).toHaveBeenCalledTimes(1);
   });
   it("keeps platform arrival and coordinate arrival in separate cache entries", async () => {
     const fetcher = vi.fn(async (_url, init) => {

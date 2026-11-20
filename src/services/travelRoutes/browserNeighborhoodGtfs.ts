@@ -100,7 +100,14 @@ export function requestBrowserNeighborhoodGtfs<T>(action: NeighborhoodGtfsWorker
       cleanup();
     };
     const abort = () => { cancel(); reject(signal.reason); };
-    const timer = setTimeout(() => { cancel(); reject(new Error("GTFS browser routing timed out")); }, NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS);
+    // A reference journey stays subscribed until its own result, an actual
+    // provider error or an address change. Asset and walking I/O have their
+    // own deadlines; time spent waiting for the shared scan is not a failure.
+    const monitoredJourney = action.kind === "routes" && (action.request.purpose === "transport-benchmark"
+      || action.request.purpose === "transport" && action.request.destinations.some(d => d.nearbyAccessFeeders));
+    // The heavy resolver also has a stall deadline. An active batch may wait
+    // for earlier destinations in the worker without using any network time.
+    const timer = monitoredJourney ? undefined : setTimeout(() => { cancel(); reject(new Error("GTFS browser routing timed out")); }, NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS);
     const cleanup = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); };
     signal.addEventListener("abort", abort, { once: true });
     try {
@@ -112,7 +119,7 @@ export function requestBrowserNeighborhoodGtfs<T>(action: NeighborhoodGtfsWorker
       // frequency/last-departure pair. Each worker retains only its own data.
       const target = ensureWorker(group);
       pending.set(id, { worker: target, resolve: payload => resolve(payload as T), reject, cleanup, finish });
-      target.postMessage({ id, baseUrl, coldStart: isNeighborhoodGtfsColdStart(), debug: isVerdictDebugEnabled(), ...plainAction } satisfies NeighborhoodGtfsWorkerRequest);
+      target.postMessage({ id, baseUrl, coldStart: isNeighborhoodGtfsColdStart(), measureSharedWalks: new URL(window.location.href).searchParams.get("debugSharedWalks") === "1", debug: isVerdictDebugEnabled(), ...plainAction } satisfies NeighborhoodGtfsWorkerRequest);
     } catch (error) { finish("error"); pending.delete(id); cleanup(); reject(error); }
   });
 }

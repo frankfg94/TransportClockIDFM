@@ -50,6 +50,16 @@ const request = () => ({ origin: { lon: 2.3, lat: 48.8 }, datetime: "20261012T09
   destinations: [{ id: "c", lon: 2.4, lat: 48.8, destinationRef: "stop_area:IDFM:PC" }] });
 
 describe("offline neighborhood routing", () => {
+  it("returns the verified access path for a reference destination sharing a compact station scan", async () => {
+    const input = { ...request(), destinations: [{ ...request().destinations[0]!, arrivalAtPlatform: true }] };
+    const bulk = await routeNeighborhoodJourneys({} as H3Event, input);
+    const reference = await routeNeighborhoodJourneys({} as H3Event, { ...input, purpose: "transport-benchmark" });
+    expect(reference.diagnostics?.cacheHit).toBe(true);
+    const access = reference.destinations[0]!.journeys[0]!.sections[0]!;
+    expect(access.walkingProvider).toBe("openrouteservice");
+    expect(access.geometry).toMatchObject([input.origin, access.toPoint!]);
+    expect(bulk.destinations[0]!.journeys[0]!.sections[0]!.geometry).toBeUndefined();
+  });
   function interchange() {
     index.stops.push({ id: "IDFM:D", parentId: "IDFM:PC", name: "Target line platform", lon: 2.401, lat: 48.8 },
       { id: "IDFM:E", parentId: "IDFM:PE", name: "Next station", lon: 2.45, lat: 48.8 });

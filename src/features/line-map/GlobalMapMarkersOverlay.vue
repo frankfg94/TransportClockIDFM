@@ -3,6 +3,8 @@ import { computed } from "vue";
 import type { CameraState } from "../transport-map/geo/camera";
 import { lonLatToWorld, worldToScreen } from "../transport-map/geo/coordinateKernel";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
+import type { GlobalMapMode } from "../transport-map/contracts/manifest";
+import GlobalTransportPlanModeIcon from "./GlobalTransportPlanModeIcon.vue";
 import { resolveGlobalMapMarkerIcon } from "./globalMapMarkerIcons";
 import type { GlobalMapMarker } from "./globalMapMarkers";
 
@@ -11,12 +13,16 @@ const props = defineProps<{
   selectedPlace?: GeocoderPoint;
   camera: CameraState;
   reduceMotion?: boolean;
+  activeId?: string;
+  selectable?: boolean;
+  stationMode?: GlobalMapMode;
 }>();
 
 const emit = defineEmits<{
   "marker-context-menu": [marker: GlobalMapMarker, event: MouseEvent];
   "place-context-menu": [place: GeocoderPoint, event: MouseEvent];
   wheel: [event: WheelEvent];
+  "select-marker": [id: string];
 }>();
 
 function position(point: Pick<GeocoderPoint, "lon" | "lat">): Record<string, string> {
@@ -34,7 +40,7 @@ function markerStyle(marker: GlobalMapMarker): Record<string, string> {
 
 const selectedPlacePosition = computed(() => props.selectedPlace ? position(props.selectedPlace) : undefined);
 const visibleMarkers = computed(() => props.markers.filter((marker) => !marker.isHidden));
-const compactMarkers = computed(() => props.camera.zoom < 11);
+const compactMarkers = computed(() => props.camera.zoom < 11 || (props.selectable && props.camera.viewportWidthCssPx < 500));
 </script>
 
 <template>
@@ -51,14 +57,17 @@ const compactMarkers = computed(() => props.camera.zoom < 11);
       v-for="marker in visibleMarkers"
       :key="marker.id"
       class="global-map-marker"
-      :class="{ 'global-map-marker--compact': compactMarkers }"
+      :class="{ 'global-map-marker--compact': compactMarkers, 'global-map-marker--active': marker.id === activeId }"
       :style="markerStyle(marker)"
       type="button"
       :aria-label="marker.name"
+      :aria-pressed="selectable ? marker.id === activeId : undefined"
       :title="marker.address ? `${marker.name} · ${marker.address}` : marker.name"
       @contextmenu.prevent.stop="emit('marker-context-menu', marker, $event)"
+      @click="selectable && emit('select-marker', marker.id)"
     >
-      <component :is="resolveGlobalMapMarkerIcon(marker.icon)" :size="18" aria-hidden="true" />
+      <GlobalTransportPlanModeIcon v-if="stationMode" :mode="stationMode" :size="18" />
+      <component v-else :is="resolveGlobalMapMarkerIcon(marker.icon)" :size="18" aria-hidden="true" />
       <span class="global-map-marker__label">{{ marker.name }}</span>
     </button>
     <button
@@ -84,6 +93,9 @@ button.global-map-marker:hover:not(:disabled), button.global-map-marker:focus-vi
 .global-map-marker__label { max-width: 132px; overflow: hidden; text-overflow: ellipsis; transition: max-width 180ms ease, opacity 140ms ease, transform 180ms ease; }
 .global-map-marker--compact { gap: 0; padding-left: 7px; padding-right: 7px; }
 .global-map-marker--compact .global-map-marker__label { max-width: 0; opacity: 0; transform: translateX(-4px); }
+.global-map-marker--active { z-index: 1; background: var(--global-map-marker-color); color: #fff; }
+.global-map-marker--active .global-map-marker__label { max-width: 132px; opacity: 1; transform: none; }
+.global-map-marker--active:is(:hover, :focus-visible) { color: var(--global-map-marker-color); }
 .global-map-marker--search-place { border-color: #c2410c; color: #c2410c; transform: translate(-50%, -50%); transform-origin: 50% 50%; }
 button.global-map-marker--search-place:hover:not(:disabled), button.global-map-marker--search-place:focus-visible { transform: translate(-50%, -50%) scale(1.06); }
 .global-map-markers-overlay--reduce-motion .global-map-marker,

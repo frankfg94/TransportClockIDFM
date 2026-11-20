@@ -7,6 +7,7 @@ import type { WeatherResponse } from "../src/features/weather/types";
 
 const baseSettings: AppSettings = {
   verdictPersonalJourneys: [],
+  verdictJourneyPreviewEnabled: false,
   version: 2,
   networkConcurrencyMode: "auto",
   language: "fr",

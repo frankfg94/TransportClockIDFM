@@ -15,7 +15,7 @@ export default defineEventHandler(async (event) => {
     ? body.destinations.slice(0, OPEN_ROUTE_SERVICE_MAX_MATRIX_DESTINATIONS).map((destination) => {
       const point = validPoint(destination);
       return point && typeof destination.id === "string" && destination.id.trim()
-        ? { ...point, id: destination.id.trim() }
+        ? { ...point, id: destination.id.trim(), ...(destination.stationWalk === true ? { stationWalk: true } : {}) }
         : undefined;
     }).filter((destination): destination is NearbyWalkingMatrixDestination => Boolean(destination))
     : [];

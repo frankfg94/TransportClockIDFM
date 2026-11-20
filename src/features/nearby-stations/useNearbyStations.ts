@@ -423,6 +423,7 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
     useCoordinates,
     scanNearbyStations,
     queryTransportMapViewport,
+    loadJourneyPreviewPaths: async (layer: "core" | "bus") => (await ensureSource()).ensureRegionalLayer(layer),
     toggleStation,
     toggleLine,
     toggleMode,

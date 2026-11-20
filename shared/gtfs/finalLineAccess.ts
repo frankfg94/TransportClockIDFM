@@ -1,13 +1,16 @@
 import type { GtfsRoutingIndex, GtfsRoutingPathway } from "./routingTypes";
 import type { ConnectionScanResult, RoutingNode, TransitArrival } from "./connectionScan";
 import type { NearbyJourneyPoint, NearbyJourneySection } from "../../src/features/nearby-stations/nearbyHeavyTransports";
-import { haversineMeters, type NearbyWalkingMatrixDestination, type NearbyWalkingRoute } from "../../src/features/nearby-stations/nearbyWalkingRoutes";
+import { haversineMeters } from "../../src/features/nearby-stations/nearbyWalkingRoutes";
+import { createFinalAccessStreetRouter, type FinalAccessMatrix } from "./finalAccessStreets";
+import { routingSections } from "./connectionScan";
+import { supportsNearbyHeavyFeederSequence } from "../../src/features/nearby-stations/nearbyHeavyTransportRules";
+import { isNearbyJourneyTransitSection } from "../../src/features/nearby-stations/nearbyJourneyTiming";
 
 type Edge = { from: number; to: number; path: GtfsRoutingPathway };
 type Path = { seconds: number; edges: Edge[] };
 type StreetEnd = { stop: number; path: Path };
 type Point = NearbyJourneyPoint & { id: string; name: string };
-type Matrix = (origin: NearbyJourneyPoint, destinations: NearbyWalkingMatrixDestination[]) => Promise<NearbyWalkingRoute[]>;
 
 /** FINAL ACCESS ONLY (destinationLineId).
  * Agent/maintainer warning: this is not a replacement for connectionScan's
@@ -86,87 +89,26 @@ export function createFinalLineAccessResolver(index: GtfsRoutingIndex) {
     fromName: index.stops[edge.from]!.name, toName: index.stops[edge.to]!.name,
     fromPoint: point(edge.from), toPoint: point(edge.to),
   });
-  // Physical pairs are independent of the address and of departure timetables.
-  const streetCache = new Map<string, { expires: number; promise: Promise<NearbyWalkingRoute> }>();
-  function trimStreetCache() {
-    for (const [key, entry] of streetCache) {
-      if (streetCache.size <= 1024) break;
-      if (entry.expires !== Infinity) streetCache.delete(key);
-    }
-  }
-  type MatrixBatch = { from: Point; matrix: Matrix; destinations: Map<string, Point>;
-    waiters: { destinations: Point[]; resolve: (routes: (NearbyWalkingRoute | undefined)[]) => void }[] };
-  const pendingMatrices = new Map<string, MatrixBatch>();
-  function groupedMatrix(from: Point, destinations: Point[], matrix: Matrix): Promise<(NearbyWalkingRoute | undefined)[]> {
-    const key = JSON.stringify([from.lon, from.lat]);
-    let batch = pendingMatrices.get(key);
-    if (!batch) {
-      batch = { from, matrix, destinations: new Map(), waiters: [] };
-      pendingMatrices.set(key, batch);
-      const current = batch;
-      // Coalesce different destination/arrival searches before performing I/O.
-      void Promise.resolve().then(async () => {
-        pendingMatrices.delete(key);
-        const points = [...current.destinations.values()], routes = new Map<string, NearbyWalkingRoute>();
-        for (let start = 0; start < points.length; start += 64) {
-          const chunk = points.slice(start, start + 64);
-          // Diagnostic tag only: the matrix proxy still receives the same coordinates/IDs.
-          const values = await Promise.resolve().then(() => current.matrix(current.from, chunk.map(to => ({ ...to, walkingPhase: "final-line-access" })))).catch(() => []);
-          const byId = new Map(values.map(value => [value.id, value]));
-          chunk.forEach((to, i) => {
-            const value = byId.get(to.id) ?? (values[i]?.id === undefined ? values[i] : undefined);
-            if (value) routes.set(to.id, value);
-          });
-        }
-        for (const waiter of current.waiters) waiter.resolve(waiter.destinations.map(to => routes.get(to.id)));
-      });
-    }
-    for (const to of destinations) batch.destinations.set(to.id, to);
-    const waiters = batch.waiters;
-    return new Promise(resolve => { waiters.push({ destinations, resolve }); });
-  }
-  async function streets(from: Point, destinations: Point[], matrix: Matrix): Promise<Map<string, NearbyWalkingRoute>> {
-    const missing: Point[] = [], promises: Promise<NearbyWalkingRoute>[] = [];
-    const now = Date.now();
-    for (const to of destinations) {
-      const key = JSON.stringify([from.lon, from.lat, to.lon, to.lat]);
-      const cached = streetCache.get(key);
-      if (cached && cached.expires > now) { promises.push(cached.promise); continue; }
-      const ordinal = missing.length; missing.push(to);
-      const entry = { expires: Infinity, promise: Promise.resolve().then(async () => {
-        const value = (await batch)[ordinal]!;
-        entry.expires = Date.now() + (value.fallback ? 60_000 : 300_000);
-        trimStreetCache();
-        return value;
-      }) };
-      streetCache.set(key, entry); promises.push(entry.promise);
-      trimStreetCache();
-    }
-    const batch = (async () => {
-      const output: NearbyWalkingRoute[] = [];
-      for (let start = 0; start < missing.length; start += 64) {
-        const chunk = missing.slice(start, start + 64);
-        const values = await groupedMatrix(from, chunk, matrix);
-        for (let i = 0; i < chunk.length; i++) {
-          const to = chunk[i]!, value = values[i];
-          const distance = haversineMeters(from, to);
-          output.push(value && value.fallback === false && value.provider !== "straight-line" && Number.isFinite(value.durationSeconds) && value.durationSeconds >= 0
-            ? value : { ...value, id: to.id, provider: "straight-line", fallback: true, distanceMeters: distance,
-              durationSeconds: Math.ceil(distance / (80 / 60)), coordinates: [from, to] });
-        }
-      }
-      return output;
-    })();
-    const values = await Promise.all(promises);
-    return new Map(destinations.map((to, i) => [to.id, values[i]!]));
-  }
+  const streets = createFinalAccessStreetRouter();
+  const transitByArrival = new WeakMap<RoutingNode, NearbyJourneySection[]>();
 
   return async function resolve(input: {
     tree: ConnectionScanResult; stationStops: readonly number[]; lineId: string;
-    origin: NearbyJourneyPoint; start: number; end: number; matrix: Matrix; assertCurrent: () => void;
+    origin: NearbyJourneyPoint; start: number; end: number; matrix: FinalAccessMatrix; assertCurrent: () => void;
+    nearbyAccessFeeders?: { lineIds: readonly string[]; lineCodes: readonly string[] };
     transferRule: (from: TransitArrival, to: { from: number; routeId: string }) => number | undefined;
   }): Promise<RoutingNode[]> {
     const { tree, lineId } = input, result: RoutingNode[] = [];
+    const feederIds = new Set(input.nearbyAccessFeeders?.lineIds), feederCodes = new Set(input.nearbyAccessFeeders?.lineCodes);
+    const acceptsArrival = (node: RoutingNode) => {
+      if (!input.nearbyAccessFeeders) return true;
+      let transit = transitByArrival.get(node);
+      if (!transit) {
+        transit = routingSections(node).filter(isNearbyJourneyTransitSection);
+        transitByArrival.set(node, transit);
+      }
+      return supportsNearbyHeavyFeederSequence(transit, feederIds, feederCodes);
+    };
     const targets = input.stationStops.filter(stop => tree.stopsByLine.get(lineId)?.has(stop));
     const containsTarget = (node: RoutingNode) => {
       for (let n: RoutingNode | undefined = node; n; n = n.previous) if (n.section.lineId === lineId) return true;
@@ -189,7 +131,7 @@ export function createFinalLineAccessResolver(index: GtfsRoutingIndex) {
       const sources = [...sourcesFor(target)].flatMap(source => {
         const nodes = new Set([tree.platformLabels.get(source), ...(tree.tramPlatformLabels.get(source)?.values() ?? []),
           ...(tree.feederLabels.get(source)?.values() ?? []), ...(tree.nightLabels.get(source)?.values() ?? [])]);
-        return [...nodes].filter((node): node is RoutingNode => Boolean(node && node.section.type === "public_transport" && !containsTarget(node)))
+        return [...nodes].filter((node): node is RoutingNode => Boolean(node && node.section.type === "public_transport" && !containsTarget(node) && acceptsArrival(node)))
           .map(node => ({ source, node }));
       });
       // Direct walking is an address-to-entrance path, never an old scan label

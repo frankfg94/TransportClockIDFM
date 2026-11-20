@@ -35,6 +35,8 @@ export interface NearbyWalkingRouteRequest {
 
 export interface NearbyWalkingMatrixDestination extends NearbyJourneyPoint {
   id: string;
+  /** Both endpoints are public stops or station entrances. */
+  stationWalk?: boolean;
   cacheKey?: string;
 }
 

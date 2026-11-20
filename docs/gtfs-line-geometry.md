@@ -16,6 +16,13 @@ directory to `dist/_gtfs-data` and the runtime reads those same-version assets
 from the deployed application. Bind a KV namespace as `LINE_GEOMETRY_CACHE_KV`
 to persist public-IDFM and Navitia fallback caches across isolates.
 
+The shared cache for verified IGN walks between public station points uses
+`WALKING_CACHE_KV` or the existing `LINE_GEOMETRY_CACHE_KV` binding under its
+own key prefix. Local development uses `.data/station-walks`. Entries expire
+after 30 days independently of GTFS timetable updates. Set the server secret
+`WALKING_CACHE_ADMIN_TOKEN` to authorize resets from Settings. A personal reset
+includes this shared cache only when the administrator selects that option.
+
 ## Update and reset
 
 GTFS publication is deliberately command-driven; only the following commands can write data:

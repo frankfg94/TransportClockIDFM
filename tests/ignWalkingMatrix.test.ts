@@ -12,6 +12,24 @@ function ignResponse(url: unknown) {
       duration: i % 2 ? 180 : 120, steps: [{ geometry: { type: "LineString", coordinates: [points[i], to] } }] })) });
 }
 describe("common IGN GTFS pedestrian matrix", () => {
+  it("expires verified walks 24 hours after calculation even after a recent hit", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const start = Date.UTC(2026, 0, 1);
+      vi.setSystemTime(start);
+      const fetcher = vi.fn(async url => ignResponse(url));
+      const matrix = createIgnWalkingMatrix(fetcher as typeof fetch);
+      await matrix(origin, [destination]);
+      vi.setSystemTime(start + 86_400_000 - 1);
+      await matrix(origin, [destination]);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(start + 86_400_000);
+      await matrix(origin, [destination]);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it.each(["http", "timeout", "network", "invalid-response"] as const)("preserves safe upstream %s evidence, including its observation date on cache hits", async cause => {
     const fetcher = vi.fn(async () => {
       if (cause === "timeout") throw new DOMException("private token", "TimeoutError");
@@ -107,5 +125,16 @@ describe("common IGN GTFS pedestrian matrix", () => {
     const fetcher = vi.fn(); const matrix = createIgnWalkingMatrix(fetcher as typeof fetch);
     expect((await matrix(origin, [{ ...origin, id: "same" }]))[0]).toMatchObject({ durationSeconds: 0, fallback: false });
     expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("bypasses warm pairs for cold measurements without overwriting the ordinary cache", async () => {
+    const fetcher = vi.fn(async url => ignResponse(url));
+    const matrix = createIgnWalkingMatrix(fetcher as typeof fetch);
+    const warm = await matrix(origin, [destination]);
+    const cold = await matrix(origin, [destination, { ...destination, id: "same-place" }], { cache: false });
+    const reused = await matrix(origin, [destination]);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(cold.map(route => route.id)).toEqual(["one", "same-place"]);
+    expect(cold[0]?.walkingDiagnostic?.requestId).not.toBe(warm[0]?.walkingDiagnostic?.requestId);
+    expect(reused[0]?.walkingDiagnostic?.requestId).toBe(warm[0]?.walkingDiagnostic?.requestId);
   });
 });

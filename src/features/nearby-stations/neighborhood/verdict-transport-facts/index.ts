@@ -13,6 +13,7 @@ import { buildFrequencyFacts } from "./frequencies";
 import { buildLastServiceFacts } from "./lastServices";
 import { createTransportFactCollection } from "./types";
 import { personalJourneyFact, personalJourneyScoreDetails } from "../personalJourneys";
+import { assessPassengerSatisfaction } from "./passengerSatisfaction";
 
 export function buildTransportCategory(input: NeighborhoodScoreInput): NeighborhoodCategoryResult {
   const base = category("transport");
@@ -20,7 +21,9 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
     const personalFacts = (input.personalJourneys ?? []).filter(row => row.status !== "loading").map(personalJourneyFact);
     const personal = personalJourneyScoreDetails(undefined, input.personalJourneys ?? []);
     const score = personal.score;
+    const survey = input.passengerSatisfaction;
     return withFacts({ ...base, available: score !== undefined, score, scoreDetails: personal.group ? [personal.group] : undefined,
+      passengerSatisfaction: survey && assessPassengerSatisfaction([], survey.observations, survey.state, input.generatedAt ?? Date.now()),
       unavailableReasonKey: "nearbyStations.neighborhoodScore.unavailable.transport",
       positiveFacts: personalFacts.filter(fact => fact.polarity === "positive"),
       negativeFacts: personalFacts.filter(fact => fact.polarity === "negative"),
@@ -58,5 +61,6 @@ export function buildTransportCategory(input: NeighborhoodScoreInput): Neighborh
     const fact = personalJourneyFact(row);
     (fact.polarity === "positive" ? facts.positiveFacts : fact.polarity === "negative" ? facts.negativeFacts : facts.neutralFacts).push(fact);
   }
-  return withFacts({ ...base, available: true, score: personal.score, scoreDetails: [transport.group, ...(personal.group ? [personal.group] : [])], ...facts });
+  return withFacts({ ...base, available: true, score: personal.score, passengerSatisfaction: context.passengerSatisfaction,
+    scoreDetails: [transport.group, ...(personal.group ? [personal.group] : [])], ...facts });
 }

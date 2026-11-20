@@ -119,6 +119,7 @@ export default defineNuxtConfig({
         : {
             lineGeometry: { driver: "fs", base: "./.data/line-geometry" },
             gtfs: { driver: "fs", base: "./.data/gtfs" },
+            stationWalks: { driver: "fs", base: "./.data/station-walks" },
             traffic: { driver: "fs", base: "./.data/traffic" },
           },
   },

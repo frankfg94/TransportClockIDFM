@@ -7,11 +7,20 @@ import { buildGpeExpressContext } from "./gpeExpress";
 import { buildChateletContext } from "./chatelet";
 import { summarizeNearbyServiceQuality } from "./lineRegularity";
 import { normalizeScoreText } from "../primitives";
+import { assessPassengerSatisfaction } from "./passengerSatisfaction";
 
 export function buildTransportFactsContext(input: NeighborhoodScoreInput) {
-  const accessSignals = listTransportAccessSignals(input);
+  const passengerSurvey = input.passengerSatisfaction;
+  const surveyLines = new Map<string, GlobalMapLine>();
+  const isScorableAccess = (signal: ReturnType<typeof listTransportAccessSignals>[number]) =>
+    signal.travelSeconds <= NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS && (signal.contributionWeight ?? 1) > 0;
+  // Use the same access evidence and thresholds before grouping branches by
+  // commercial code. The survey keys on official IDs, which can share a code.
+  const accessSignals = listTransportAccessSignals(input, passengerSurvey ? signal => {
+    if (!signal.futureProject && isScorableAccess(signal)) surveyLines.set(signal.line.id, signal.line);
+  } : undefined);
   const eligibleSignals = selectBestTransportAccessSignals(accessSignals)
-    .filter(signal => signal.travelSeconds <= NEIGHBORHOOD_ROUTED_TRANSPORT_LIMIT_SECONDS && (signal.contributionWeight ?? 1) > 0);
+    .filter(isScorableAccess);
   const classifiedLines = new Set(eligibleSignals.filter(signal => signal.section && signal.section.kind !== "unclassified")
     .map(signal => lineKey(signal.line)));
   // An unidentified station may retain the historical line bonus, but cannot
@@ -71,8 +80,10 @@ export function buildTransportFactsContext(input: NeighborhoodScoreInput) {
     scoredAccessSignals,
   );
   const serviceQuality = summarizeNearbyServiceQuality(input, [...linesByKey.values()]);
+  const passengerSatisfaction = passengerSurvey && assessPassengerSatisfaction([...surveyLines.values()], passengerSurvey.observations,
+    passengerSurvey.state ?? (input.heavyCandidatesLoading ? "loading" : undefined), input.generatedAt ?? Date.now(), passengerSurvey.accessIncomplete);
   return { input, accessSignals, scoredAccessSignals, linesByKey, accessibleSignals, accessibleLineKeys, accessibleModes, lineWeights, modeWeights,
-    structuralLines, structuralLineCount, structuralLineWeight, accessibleModeWeight, sharedHubEvidence, reliableConnectionEvidence, readyFrequencies, serviceQuality, ...gpe, ...chatelet };
+    structuralLines, structuralLineCount, structuralLineWeight, accessibleModeWeight, sharedHubEvidence, reliableConnectionEvidence, readyFrequencies, serviceQuality, passengerSatisfaction, ...gpe, ...chatelet };
 }
 
 export type TransportFactsContext = ReturnType<typeof buildTransportFactsContext>;

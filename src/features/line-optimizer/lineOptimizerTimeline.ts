@@ -13,6 +13,7 @@ export function createLineOptimizerTimeline(
   candidate: LineOptimizerCandidate,
   origin?: GeocoderPoint,
   destination?: GeocoderPoint,
+  referenceStart = candidate.leaveAt,
 ) {
   const routeId = `optimizer:${candidate.id}`;
   const steps: GlobalTransportItineraryStep[] = [];
@@ -71,7 +72,11 @@ export function createLineOptimizerTimeline(
       ...(geometry.length >= 2 ? { geometry } : {}),
     };
   }
-  append("preparation", candidate.leaveAt, candidate.walkAt, {
+  const initialWait = candidate.leaveAt - referenceStart;
+  const walkAt = candidate.walkAt - initialWait;
+  const firstDeparture = candidate.courses[0]!.departure;
+  const firstPlatformAt = firstDeparture - initialWait;
+  append("preparation", referenceStart, walkAt, {
     type: "preparation",
     durationSeconds: 0,
     fromPoint: origin,
@@ -82,11 +87,21 @@ export function createLineOptimizerTimeline(
   if (candidate.walkSeconds > 0) {
     append(
       "walk",
-      candidate.walkAt,
-      candidate.courses[0]!.departure,
+      walkAt,
+      firstPlatformAt,
       walkingSection(-1, transitIndices[0]!),
       0,
     );
+  }
+  if (initialWait > 0) {
+    append("wait", firstPlatformAt, firstDeparture, {
+      type: "waiting",
+      durationSeconds: 0,
+      fromPoint: legs[0]?.fromPoint,
+      toPoint: legs[0]?.fromPoint,
+      fromName: legs[0]?.fromName,
+      toName: legs[0]?.fromName,
+    }, 0);
   }
   const connections = candidate.courses.map((_, index) => {
     const sharedSteps: GlobalTransportItineraryStep[] = [];
@@ -125,9 +140,9 @@ export function createLineOptimizerTimeline(
     id: routeId,
     sections,
     transitSections: sections.filter(isTurboTransit),
-    departureDateTime: new Date(candidate.leaveAt).toISOString(),
+    departureDateTime: new Date(referenceStart).toISOString(),
     arrivalDateTime: new Date(candidate.arriveAt).toISOString(),
-    durationSeconds: (candidate.arriveAt - candidate.leaveAt) / 1000,
+    durationSeconds: (candidate.arriveAt - referenceStart) / 1000,
   };
   return {
     steps,

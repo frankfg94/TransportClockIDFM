@@ -6,12 +6,14 @@ import type { TransportMapNetwork } from "../src/features/transport-map/contract
 import type { NeighborhoodJourneyBenchmark } from "../src/features/nearby-stations/neighborhood/contracts";
 import { buildNeighborhoodScore } from "../src/features/nearby-stations/neighborhood";
 import { useNearbyNeighborhoodScore } from "../src/features/nearby-stations/useNearbyNeighborhoodScore";
-import { useTravelRoutes } from "../src/features/nearby-stations/useTravelRoutes";
+import { useTravelRoutes, type TravelRouteProbe } from "../src/features/nearby-stations/useTravelRoutes";
+import type { NearbyJourney } from "../src/features/nearby-stations/nearbyHeavyTransports";
+import type { fetchPassengerSatisfaction } from "../src/features/nearby-stations/passengerSatisfactionApi";
 import { createGtfsNeighborhoodTravelRoutesProvider } from "../src/services/travelRoutes/gtfsNeighborhoodTravelRoutesProvider";
 
 afterEach(() => vi.unstubAllGlobals());
 
-function harness(failRouting = false) {
+function harness(failRouting = false, probe?: TravelRouteProbe, fetchSurvey?: typeof fetchPassengerSatisfaction) {
   const query = new URL(fixture.reproductionUrl, "http://localhost").searchParams;
   const origin = ref({ lat: Number(query.get("lat")), lon: Number(query.get("lon")),
     label: query.get("address")!, city: query.get("city")! });
@@ -47,7 +49,8 @@ function harness(failRouting = false) {
     const routeComposer = useTravelRoutes({ origin, travelRoutesProvider: createGtfsNeighborhoodTravelRoutesProvider() });
     score = useNearbyNeighborhoodScore({ origin, network, stations: ref([]), stationsLoading,
       journeySource: "gtfs", documentaryFirst: true, journeyDateTime: fixture.journeyDateTime,
-      journeyProbe: routeComposer,
+      journeyProbe: probe ?? routeComposer,
+      fetchPassengerSatisfaction: fetchSurvey,
       placesProvider: { searchDestinations: async () => [], searchNearby: async () => [] },
       fetchNightAccess: async () => ({ status: "ready", journeys: [], linesExamined: 0, walkingStops: 0 }),
     });
@@ -57,6 +60,56 @@ function harness(failRouting = false) {
 }
 
 describe("Fontenay Verdict benchmark regression (exact reported URL)", () => {
+  it("reveals settled destinations independently and discards an obsolete response after an address change", async () => {
+    type Pending = { id: string; signal?: AbortSignal; finish: (value: NearbyJourney[]) => void; reject: (error: Error) => void };
+    const pending: Pending[] = [];
+    const h = harness(false, { probeJourneys: (request, signal) => new Promise((finish, reject) => {
+      pending.push({ id: request.destination.id!, signal, finish, reject });
+    }) });
+    try {
+      await flushPromises();
+      h.stationsLoading.value = false;
+      await vi.waitFor(() => expect(pending.filter(entry => !entry.signal?.aborted)).toHaveLength(10));
+      const original = h.score.journeyPreview.value!;
+      expect(original.benchmarks.filter(b => b.status === "loading")).toHaveLength(10);
+      const journeys = fixture.benchmarks.find(benchmark => benchmark.id === "montparnasse")!.journeys as NearbyJourney[];
+      const active = pending.filter(entry => !entry.signal?.aborted);
+      active.find(p => p.id === "montparnasse")!.finish(journeys);
+      active.find(p => p.id === "saint-lazare")!.reject(new Error("failed probe"));
+      await vi.waitFor(() => expect(h.score.journeyPreview.value?.benchmarks.filter(b => b.status !== "loading")).toMatchObject([
+        { id: "montparnasse", status: "ready" }, { id: "saint-lazare", status: "unavailable", failed: true },
+      ]));
+      expect(original.benchmarks.find(b => b.id === "montparnasse")?.status).toBe("loading");
+      const nextLat = h.origin.value.lat + 0.01;
+      h.origin.value = { ...h.origin.value, lat: nextLat };
+      expect(h.score.journeyPreview.value).toBeUndefined();
+      await vi.waitFor(() => expect(h.score.journeyPreview.value?.origin.lat).toBe(nextLat));
+      active.find(p => p.id === "gare-de-lyon")!.finish(journeys);
+      await flushPromises();
+      expect(h.score.journeyPreview.value?.token).not.toBe(original.token);
+      expect(h.score.journeyPreview.value?.benchmarks.every(b => b.status === "loading" && !b.journeys.length)).toBe(true);
+    } finally {
+      h.wrapper.unmount();
+      pending.forEach(entry => entry.finish([]));
+    }
+  });
+
+  it("diagnoses the passenger survey independently and retries a source error", async () => {
+    const fetchSurvey = vi.fn<typeof fetchPassengerSatisfaction>()
+      .mockRejectedValueOnce(new Error("Survey unavailable"))
+      .mockResolvedValueOnce([]);
+    const h = harness(false, undefined, fetchSurvey);
+    const dataset = () => h.score.criteria.value.find(c => c.id === "transport")!.datasets.find(d => d.id === "passenger-satisfaction");
+    try {
+      await vi.waitFor(() => expect(dataset()).toMatchObject({ status: "error", error: "Survey unavailable", durationMs: expect.any(Number),
+        source: expect.stringContaining("indicateurs-de-perception-qs") }));
+      await h.score.retryFailedTransport("satisfaction");
+      expect(fetchSurvey).toHaveBeenCalledTimes(2);
+      expect(dataset()).toMatchObject({ status: "loading", error: undefined });
+      h.stationsLoading.value = false;
+      await vi.waitFor(() => expect(dataset()).toMatchObject({ status: "missing", satisfactionCoverage: { coverage: "missing", total: 0, covered: 0 } }));
+    } finally { h.wrapper.unmount(); }
+  });
   it("resumes all destinations on catalogue completion and propagates GTFS durations into facts and criterion reasons", async () => {
     const h = harness();
     try {

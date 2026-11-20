@@ -1326,6 +1326,12 @@ const settingsSearchEntries = computed<SettingsSearchEntry[]>(() => [
     "son bruit sonore bruitparif contour détaillé détail précision rue maille WMS",
   ),
   createSettingsSearchEntry(
+    "map.verdict-journey-preview",
+    "map",
+    t("settings.display.verdictJourneyPreview"),
+    t("settings.display.verdictJourneyPreviewDescription"),
+  ),
+  createSettingsSearchEntry(
     "map.minimap",
     "map",
     t("settings.display.showMiniMap"),
@@ -1917,9 +1923,36 @@ function updateWeatherCustomLocation(
   });
 }
 
+const sharedWalkAvailable = ref(false);
+const sharedWalkAdmin = ref(false);
+const sharedWalkTokenConfigured = ref(false);
+const sharedWalkToken = ref("");
+const includeSharedWalks = ref(false);
+const sharedWalkBusy = ref(false);
+async function sharedWalkAction(action: "status" | "reset", notify = true) {
+  sharedWalkBusy.value = true;
+  try {
+    const response = await fetch(toServerApiUrl("/api/walking/shared-cache"), { method: "POST",
+      headers: { "Content-Type": "application/json", "x-station-walk-action": action,
+        ...(sharedWalkToken.value ? { Authorization: `Bearer ${sharedWalkToken.value}` } : {}) },
+      body: JSON.stringify({ action }) });
+    if (!response.ok) throw new Error();
+    const result = await response.json();
+    sharedWalkAvailable.value = result.available;
+    sharedWalkAdmin.value = result.authorized;
+    if (action === "status") sharedWalkTokenConfigured.value = Boolean(result.tokenConfigured);
+    if (action === "reset") {
+      includeSharedWalks.value = false;
+      showSettingsNotification(t("settings.walkingCache.sharedCleared"));
+    } else if (notify && !result.authorized) showSettingsNotification(t("settings.walkingCache.sharedFailed"));
+  } catch {
+    if (notify) showSettingsNotification(t("settings.walkingCache.sharedFailed"));
+  } finally { sharedWalkBusy.value = false; }
+}
 function resetSettingsWithNotification(): void {
   resetSettings();
   clearNearbyWalkingRouteCache();
+  if (includeSharedWalks.value && sharedWalkAdmin.value) { void sharedWalkAction("reset"); return; }
   showSettingsNotification(t("settings.notifications.reset"));
 }
 
@@ -1937,6 +1970,7 @@ function showSettingsNotification(message: string, tone: AppNotificationTone = "
 }
 
 onMounted(() => {
+  void sharedWalkAction("status", false);
   presetState.value = loadTransitPresetState(transitBoards);
   selectedDisplayPlaceId.value = resolveTransitPlaceId(
     presetState.value,
@@ -2204,7 +2238,19 @@ onBeforeUnmount(() => {
     />
 
     <footer class="settings-page__footer">
-      <button class="button-secondary" type="button" @click="resetSettingsWithNotification">
+      <details v-if="sharedWalkAvailable">
+        <summary>{{ t("settings.walkingCache.sharedTitle") }}</summary>
+        <template v-if="sharedWalkAdmin">
+          <button class="button-secondary" type="button" :disabled="sharedWalkBusy" @click="sharedWalkAction('reset')">{{ t("settings.walkingCache.sharedReset") }}</button>
+          <label><input v-model="includeSharedWalks" type="checkbox" /> {{ t("settings.walkingCache.includeShared") }}</label>
+        </template>
+        <form v-else-if="sharedWalkTokenConfigured" @submit.prevent="sharedWalkAction('status')">
+          <label>{{ t("settings.walkingCache.adminToken") }} <input v-model="sharedWalkToken" type="password" autocomplete="off" /></label>
+          <button class="button-secondary" type="submit" :disabled="sharedWalkBusy">{{ t("settings.walkingCache.unlock") }}</button>
+        </form>
+        <p v-else>{{ t("settings.walkingCache.configureAdmin") }}</p>
+      </details>
+      <button class="button-secondary" type="button" :disabled="includeSharedWalks && sharedWalkBusy" @click="resetSettingsWithNotification">
         {{ t("common.actions.reset") }}
       </button>
     </footer>

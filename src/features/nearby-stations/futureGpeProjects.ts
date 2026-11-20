@@ -8,7 +8,7 @@ import type { PublicFutureGpeStation, PublicNeighborhoodVerdict } from "./neighb
 // Require both a compatible name and the same metro line within this radius.
 const STATION_MATCH_RADIUS_METERS = 500;
 
-function metroLineCode(value: string): string {
+export function metroLineCode(value: string): string {
   return normalizeStationName(value).replace(/^(?:metro|ligne|m)\s*(?=\d)/u, "").replace(/\s+/gu, "");
 }
 

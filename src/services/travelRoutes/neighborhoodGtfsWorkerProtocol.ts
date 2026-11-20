@@ -7,7 +7,7 @@ export type NeighborhoodGtfsWorkerAction =
   | { kind: "frequency"; lineId: string; serviceDate?: string }
   | { kind: "last-service"; lineId: string; stationId?: string; serviceDate?: string };
 export type NeighborhoodGtfsWorkerRequest =
-  | ({ id: number; baseUrl: string; coldStart?: boolean; debug?: boolean } & NeighborhoodGtfsWorkerAction)
+  | ({ id: number; baseUrl: string; coldStart?: boolean; measureSharedWalks?: boolean; debug?: boolean } & NeighborhoodGtfsWorkerAction)
   | { id: number; kind: "cancel" }
   | { kind: "refresh-manifest" };
 export interface NeighborhoodGtfsWorkerDiagnostics {

@@ -49,6 +49,8 @@ export interface NearbyJourneyRequest {
   arrivalAtPlatform?: boolean;
   /** End at a stop served by this current line, including its final station transfer. */
   destinationLineId?: string;
+  /** Verdict feeder eligibility, when searching for a physical access to a line. */
+  nearbyAccessFeeders?: { lineIds: string[]; lineCodes: string[] };
   /** Optional departure probe used to discover scheduled daytime feeders. */
   datetime?: string;
   count?: number;

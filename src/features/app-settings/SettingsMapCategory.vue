@@ -208,6 +208,17 @@ function formatCoefficient(value: number): string {
       </div>
     </label>
 
+    <label v-if="isSettingVisible('map.verdict-journey-preview', 'map')" class="settings-toggle" data-settings-verdict-journey-preview>
+      <input type="checkbox" role="switch" :checked="settings.verdictJourneyPreviewEnabled"
+        :aria-label="t('settings.display.verdictJourneyPreview')"
+        @change="emit('update-settings', { verdictJourneyPreviewEnabled: ($event.target as HTMLInputElement).checked })" />
+      <span></span>
+      <div>
+        <strong>{{ t('settings.display.verdictJourneyPreview') }}</strong>
+        <small>{{ t('settings.display.verdictJourneyPreviewDescription') }}</small>
+      </div>
+    </label>
+
     <div v-if="isSettingVisible('map.nearby-controls', 'map')" class="settings-subheading">
       <strong>{{ t("settings.display.nearbyMapControlsTitle") }}</strong>
       <span>{{ t("settings.display.nearbyMapControlsDescription") }}</span>

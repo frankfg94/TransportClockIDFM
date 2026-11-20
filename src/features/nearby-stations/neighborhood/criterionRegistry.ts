@@ -20,7 +20,8 @@ export interface NeighborhoodCriterionState {
   score?: number;
   confidence: number;
   reasons: readonly NeighborhoodFact[];
-  datasets: readonly (NeighborhoodDatasetRequirement & { status: NeighborhoodDatasetStatus; durationMs?: number; source?: string; error?: string })[];
+  datasets: readonly (NeighborhoodDatasetRequirement & { status: NeighborhoodDatasetStatus; durationMs?: number; source?: string; error?: string;
+    satisfactionCoverage?: Pick<import("./verdict-transport-facts/passengerSatisfaction").PassengerSatisfaction, "coverage" | "total" | "covered"> })[];
 }
 
 /**
@@ -38,6 +39,7 @@ export const NEIGHBORHOOD_CRITERION_REGISTRY: readonly NeighborhoodCriterionDefi
       { id: "heavy-access", required: false },
       { id: "gtfs-frequency", required: false, maxAgeMs: 24 * 60 * 60_000 },
       { id: "service-quality", required: false, maxAgeMs: 7 * 24 * 60 * 60_000 },
+      { id: "passenger-satisfaction", required: false },
       { id: "neighborhood-verdict", required: false, maxAgeMs: 24 * 60 * 60_000 },
     ],
   },

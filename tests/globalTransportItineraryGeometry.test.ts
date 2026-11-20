@@ -86,6 +86,43 @@ describe("global transport itinerary geometry", () => {
     expect(createGlobalTransportItinerarySegments({ id: "controlled", sections: [{ ...transit, geometry: undefined }] }, origin, destination, { preserveSections: true })).toEqual([]);
   });
 
+  it("uses the itinerary's T6 alighting point when the map path continues past the pedestrian junction", () => {
+    const from = { lon: 2.281986, lat: 48.79986 };
+    const to = { lon: 2.300167, lat: 48.810661 };
+    const futureStation = { lon: 2.30236, lat: 48.811218 };
+    const overshoot = { lon: 2.300482599, lat: 48.810447386 };
+    const transit = {
+      type: "public_transport", lineCode: "T6", lineMode: "TRAM" as const,
+      durationSeconds: 300, fromPoint: from, toPoint: to, toStopPointId: "stop_point:IDFM:2336", geometry: [from, to],
+    };
+    const walk = { type: "street_network", mode: "walking", durationSeconds: 202, fromPoint: to, toPoint: futureStation, geometry: [to, futureStation] };
+    const segments = createGlobalTransportItinerarySegments(
+      { id: "chatillon", sections: [transit, walk] }, from, futureStation,
+      { preserveSections: true, resolveTransitGeometry: () => [from, to, overshoot] },
+    );
+    expect(segments.map(({ coordinates }) => coordinates)).toEqual([[from, to], [to, futureStation]]);
+  });
+
+  it("clips an aggregate RER station anchor when the supplied pedestrian path starts beside the last track segment", () => {
+    const from = { lon: 2.328093, lat: 48.795 };
+    const stationPosition = { lon: 2.328093, lat: 48.798698 };
+    const pedestrianStart = { lon: 2.327914, lat: 48.798355 };
+    const crossing = { lon: 2.328314, lat: 48.796705 };
+    const futureStation = { lon: 2.328342, lat: 48.797458 };
+    const transit = {
+      type: "public_transport", lineCode: "B", lineMode: "RER" as const, durationSeconds: 300,
+      fromPoint: from, toPoint: stationPosition, toStopPointId: "stop_point:IDFM:monomodalStopPlace:43067",
+      geometry: [from, stationPosition],
+    };
+    const walk = { type: "street_network", mode: "walking", durationSeconds: 583, fromPoint: stationPosition, toPoint: futureStation, geometry: [pedestrianStart, crossing, futureStation] };
+    const [ride, egress] = createGlobalTransportItinerarySegments(
+      { id: "arcueil", sections: [transit, walk] }, from, futureStation, { preserveSections: true },
+    );
+    expect(ride!.coordinates.at(-1)!.lat).toBeCloseTo(pedestrianStart.lat, 6);
+    expect(ride!.coordinates.at(-1)!.lon).toBeCloseTo(stationPosition.lon, 6);
+    expect(egress!.coordinates).toEqual([ride!.coordinates.at(-1), ...walk.geometry]);
+  });
+
   it("ignores non-transport sections without inventing a map segment", () => {
     const segments = createGlobalTransportItinerarySegments(
       {

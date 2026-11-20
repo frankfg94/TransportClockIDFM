@@ -18,7 +18,7 @@ const ENDPOINT = "https://data.geopf.fr/navigation/itineraire";
 const RESOURCE = "bdtopo-valhalla";
 const CACHE_CONTRACT = [ENDPOINT, RESOURCE, "pedestrian", "fastest", "EPSG:4326", "meter", "second"];
 const BATCH_SIZE = 8;
-const CACHE_TTL_MS = 15 * 60_000;
+const CACHE_TTL_MS = 24 * 60 * 60_000;
 const MAX_CACHE_ENTRIES = 4096;
 const MAX_SNAP_METERS = 100;
 const CONNECTOR_METERS_PER_SECOND = 4_000 / 3_600;
@@ -27,7 +27,7 @@ interface IgnStep { geometry?: { type?: string; coordinates?: unknown }; distanc
 interface IgnPortion { start?: string; end?: string; distance?: number; duration?: number; steps?: IgnStep[] }
 interface IgnRoute { resource?: string; resourceVersion?: string; distanceUnit?: string; timeUnit?: string; portions?: IgnPortion[] }
 type RouteResult = { outward: DiagnosticWalkingRoute; inward: DiagnosticWalkingRoute };
-type MatrixOptions = { reverse?: boolean; signal?: AbortSignal };
+type MatrixOptions = { reverse?: boolean; signal?: AbortSignal; cache?: boolean };
 
 function coordinates(value: unknown): NearbyJourneyPoint[] {
   if (!Array.isArray(value)) return [];
@@ -49,7 +49,8 @@ function parsePortion(portion: IgnPortion | undefined, from: NearbyJourneyPoint,
 /** One common, public street-network source for every verdict environment.
  * The caches are bounded directed coordinate pairs, never address results. */
 export function createIgnWalkingMatrix(fetcher: typeof fetch = fetch) {
-  const cache = new Map<string, { expires: number; promise: Promise<DiagnosticWalkingRoute> }>();
+  type PairCache = Map<string, { expires: number; promise: Promise<DiagnosticWalkingRoute> }>;
+  const sharedPairs: PairCache = new Map();
   const instanceId = crypto.randomUUID();
   let nextRequestId = 0;
   let cooldownDiagnostic: WalkingRouteDiagnostic | undefined;
@@ -114,6 +115,8 @@ export function createIgnWalkingMatrix(fetcher: typeof fetch = fetch) {
   }
 
   return async (origin: NearbyJourneyPoint, destinations: readonly NearbyWalkingMatrixDestination[], options: MatrixOptions = {}): Promise<DiagnosticWalkingRoute[]> => {
+    // A cold measurement still shares the provider's rate limiter and cooldown.
+    const cache: PairCache = options.cache === false ? new Map() : sharedPairs;
     const missing = new Map<string, NearbyJourneyPoint>();
     const reuse = new Map<string, "hit" | "pending">();
     const now = Date.now();

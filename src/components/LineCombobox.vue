@@ -14,6 +14,7 @@ const props = defineProps<{
   enableGrid?: boolean;
   compact?: boolean;
   inline?: boolean;
+  showOptionNames?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -169,9 +170,10 @@ function getLineDisplayName(line: LineSearchOption): string {
           role="option"
           :aria-selected="line.id === modelValue?.id"
           @mousedown.prevent="selectLine(line)"
+          @click="!$event.detail && selectLine(line)"
         >
           <LineIconBadge :line="line" />
-          <!-- <span>{{ getLineDisplayName(line) }}</span> -->
+          <span v-if="showOptionNames">{{ getLineDisplayName(line) }}</span>
         </button>
       </template>
       <div v-if="!loading && options.length === 0" class="rich-combobox__state">

@@ -46,6 +46,14 @@ const accesses = (value: NeighborhoodScoreInput) => {
 };
 
 describe("physical transport access sections", () => {
+  it("retains nearer neutral stations when a longer search finds a faster access farther away", () => {
+    const options = [["near", 2100, 44], ["slower", 3000, 47], ["middle", 4000, 38], ["fast", 6500, 35]] as const;
+    const candidates = options.map(([id, distance, minutes]) => ({ ...candidate(id, minutes * 60), distanceMeters: distance }));
+    const facts = accesses(input(candidates, null));
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).toMatchObject({ polarity: "neutral", contributionWeight: 0, labelValues: { station: "FAST", minutes: 35 },
+      nearerStationAccesses: [{ station: "NEAR", minutes: 44 }, { station: "MIDDLE", minutes: 38 }] });
+  });
   it("splits a Y into two branches and a common trunk, counting its fork once", () => {
     const graph = topology();
     expect(section(graph, "a")).toMatchObject({ kind: "branch", label: "AA" });

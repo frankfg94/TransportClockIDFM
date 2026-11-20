@@ -25,6 +25,12 @@ import {
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../src/features/transport-map/config/globalTransportPlanConfig";
 
 describe("app settings", () => {
+  it("persists the opt-in Verdict journey preview and defaults legacy settings to off", () => {
+    expect(normalizeAppSettings({ version: 2 }).verdictJourneyPreviewEnabled).toBe(false);
+    expect(normalizeAppSettings({ verdictJourneyPreviewEnabled: "true" }).verdictJourneyPreviewEnabled).toBe(false);
+    const stored = JSON.stringify(normalizeAppSettings({ verdictJourneyPreviewEnabled: true }));
+    expect(normalizeAppSettings(JSON.parse(stored)).verdictJourneyPreviewEnabled).toBe(true);
+  });
   it("persists continuous map rendering and falls back on invalid stored values", () => {
     expect(createDefaultAppSettings().globalMapContinuousRendering).toBe(true);
     expect(createDefaultAppSettings().globalMapProgressiveBusRendering).toBe(false);

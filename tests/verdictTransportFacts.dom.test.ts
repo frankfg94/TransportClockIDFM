@@ -24,6 +24,17 @@ function render(fact: NeighborhoodFact) {
   }));
 }
 describe("Verdict transport fact details", () => {
+  it("shows the station, duration and feeder of a closer access with the tooltip closed", () => {
+    const fact: NeighborhoodFact = { id: "metro8", kind: "transportLineNearby", category: "transport", polarity: "neutral",
+      family: "transport-proximity:8", priority: 1, labelKey: "nearbyStations.neighborhoodScore.facts.transportStationNearby.label",
+      labelValues: { line: "Métro 8", station: "La Tour-Maubourg", minutes: 35, via: " via Tramway T6 → Métro 13" },
+      nearerStationAccesses: [{ line: "Métro 8", station: "Commerce", minutes: 38, via: " via Tramway T6 → Métro 13 → Métro 6" }],
+      evidence: { proof: "direct", observedAt: 1 } };
+    const wrapper = render(fact);
+    expect(wrapper.get("button").attributes("aria-expanded")).toBe("false");
+    expect(wrapper.get('ul[aria-label="Autres stations plus proches de l’adresse"] li').text())
+      .toBe("Métro 8 à Commerce joignable en 38 min via Tramway T6 → Métro 13 → Métro 6");
+  });
   it("reuses the existing commercial line-name resolver for opaque IDFM codes", () => {
     const opaque = line("IDFM:C01743", "RER");
     const fact = buildLastServiceFacts({ ...input([opaque]), lastServiceByLine: new Map([[opaque.id, { seconds: 87000 }]]) }).neutralFacts[0]!;

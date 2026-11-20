@@ -400,6 +400,7 @@ function handleVisibilityChange(): void {
             <div v-if="optimizerOpen" class="app-navigation__optimizer-items" :class="{ 'app-navigation__optimizer-items--left': optimizerOpensLeft }" :style="{ width: `${optimizerMenuWidth}px` }" role="menu" :aria-label="t('lineOptimizer.menuTitle')">
               <NuxtLink class="app-navigation__menu-link" to="/optimizer/line/tram/T10" role="menuitem" @click="closeMenu">{{ t("lineOptimizer.chateletMenu") }}</NuxtLink>
               <NuxtLink class="app-navigation__menu-link" to="/optimizer/velizy" role="menuitem" @click="closeMenu">{{ t("lineOptimizer.velizyMenu") }}</NuxtLink>
+              <NuxtLink class="app-navigation__menu-link" to="/optimizer/station-access" role="menuitem" @click="closeMenu">{{ t("stationAccess.title") }}</NuxtLink>
               <NuxtLink v-for="item in customOptimizers" :key="item.id" class="app-navigation__menu-link" :to="`/optimizer/custom/${item.id}`" role="menuitem" @click="closeMenu">{{ item.name }}</NuxtLink>
               <NuxtLink class="app-navigation__menu-link" to="/optimizer/new" role="menuitem" @click="closeMenu"><Plus aria-hidden="true" /><span>{{ t("lineOptimizer.newMenu") }}</span></NuxtLink>
             </div>

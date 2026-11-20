@@ -943,7 +943,7 @@ function pointDistance(left: LineGeometryPoint, right: LineGeometryPoint): numbe
   return Math.hypot(right.x - left.x, right.y - left.y);
 }
 
-function projectPointOntoSegment(
+export function projectPointOntoSegment(
   point: LineGeometryPoint,
   from: LineGeometryPoint,
   to: LineGeometryPoint,

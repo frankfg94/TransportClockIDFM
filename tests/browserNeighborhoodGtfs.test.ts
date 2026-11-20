@@ -57,6 +57,22 @@ describe("browser neighborhood GTFS", () => {
     await rejected;
     expect(instances[0]!.messages.at(-1)).toMatchObject({ kind: "cancel" });
   });
+  it("keeps the preview subscribed to a slow shared scan until it replies or the address changes", async () => {
+    vi.useFakeTimers();
+    const router = await setup(), controller = new AbortController();
+    const benchmark = { ...request(), purpose: "transport-benchmark" as const };
+    const first = router.routeBrowserNeighborhoodGtfs(benchmark, controller.signal);
+    const second = router.routeBrowserNeighborhoodGtfs(benchmark, new AbortController().signal);
+    await vi.advanceTimersByTimeAsync(360_000);
+    const worker = instances[0]!;
+    expect(worker.messages).toHaveLength(2);
+    const [obsolete, current] = worker.messages as { id: number }[];
+    controller.abort();
+    await expect(first).rejects.toMatchObject({ name: "AbortError" });
+    expect(worker.messages.at(-1)).toMatchObject({ id: obsolete!.id, kind: "cancel" });
+    worker.onmessage!({ data: { id: current!.id, payload: { destinations: ["ready"] } } });
+    await expect(second).resolves.toEqual({ destinations: ["ready"] });
+  });
   it("sends a cloneable JSON contract for reactive coordinates and resolves the theoretical payload", async () => {
     const router = await setup();
     const result = router.routeBrowserNeighborhoodGtfs(request(), new AbortController().signal);

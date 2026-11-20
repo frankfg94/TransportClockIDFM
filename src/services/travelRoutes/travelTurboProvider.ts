@@ -1,5 +1,6 @@
 import { fetchGtfsLineTimetable } from "../lineFrequencyTimetable";
 import { fetchTravelStopMonitoring } from "../idfm";
+import { runNetworkTask } from "../networkScheduler";
 import { extractIdfmStopPointCode, idfmLineToSiriRef, navitiaStopPointToMonitoringRef } from "../idfmStopReferences";
 import type { GtfsLineTimetableResponse, GtfsLineTimetableTrip } from "../../types/lineFrequencyTimetable";
 import { isTurboTransit, optimizeTurbo, parisDateTime, turboTime, type TravelTurboProvider, type TurboCourse, type TurboObservation } from "../../features/nearby-stations/travelTurbo";
@@ -79,6 +80,7 @@ export interface TravelCourseSearchRequest {
   start: number;
   signal: AbortSignal;
   horizonSeconds?: number;
+  realtime?: boolean;
 }
 export interface TravelCourseSearchResult {
   batches: TurboCourse[][];
@@ -111,37 +113,66 @@ export function createTravelTurboProvider(dependencies: {
   const now = dependencies.now ?? Date.now;
   // Resolved static responses only: one analysis cannot abort another's cached promise.
   const schedules = new Map<string, { at: number; value: GtfsLineTimetableResponse }>();
-  const courseProvider = {
-    async loadCourses({ route, start, signal, horizonSeconds = 6 * 3600 }: TravelCourseSearchRequest): Promise<TravelCourseSearchResult> {
+
+  function createCourseSession({ limitRequests = false } = {}) {
+    const observed = new Map<string, Promise<TurboObservation[]>>();
+    const schedulesBySignal = new WeakMap<AbortSignal, Map<string, Promise<GtfsLineTimetableResponse>>>();
+    return async function loadCourses({ route, start, signal, horizonSeconds = 6 * 3600, realtime = true }: TravelCourseSearchRequest): Promise<TravelCourseSearchResult> {
       const legs = route.sections.filter(isTurboTransit);
       const unavailable = (): TravelCourseSearchResult => ({ batches: [], complete: false, analyzedAt: new Date(now()).toISOString() });
       if (!legs.length || legs.some((s) => !s.lineId || !s.fromStopPointId || !s.toStopPointId || !stopKey(s.fromStopPointId) || !stopKey(s.toStopPointId))) return unavailable();
       const horizon = start + horizonSeconds * 1000;
       const dates = [...new Set([parisDateTime(start).slice(0, 8), parisDateTime(horizon).slice(0, 8)])];
-      const observed = new Map<string, Promise<TurboObservation[]>>();
-      const pendingSchedules = new Map<string, Promise<GtfsLineTimetableResponse>>();
       let complete = true;
+      const pendingSchedules = schedulesBySignal.get(signal) ?? new Map<string, Promise<GtfsLineTimetableResponse>>();
+      schedulesBySignal.set(signal, pendingSchedules);
+      const offsets = new Map<string, number>();
+      const timeOffset = (civilDate: string, serviceDate: string) => {
+        const key = `${civilDate}:${serviceDate}`;
+        const cached = offsets.get(key);
+        if (cached !== undefined) return cached;
+        const offset = gtfsTurboTime(civilDate, serviceDate, 0);
+        offsets.set(key, offset);
+        return offset;
+      };
+      const request = <T>(task: (requestSignal: AbortSignal) => Promise<T>) =>
+        limitRequests ? runNetworkTask(task, signal) : task(signal);
       const readMonitoring = (lineId: string, stopId: string) => {
+        if (!realtime) return Promise.resolve([]);
         const area = stopId.match(/monomodalStopPlace:([^:]+)/iu)?.[1];
         const ref = area ? `STIF:StopArea:SP:${area}:` : navitiaStopPointToMonitoringRef(stopId);
         if (!ref) { complete = false; return Promise.resolve([]); }
         const key = `${lineId}:${ref}`;
-        if (!observed.has(key)) observed.set(key, monitoring(idfmLineToSiriRef(lineId), ref, signal).catch(() => {
-          signal.throwIfAborted(); complete = false; return [];
+        if (!observed.has(key)) observed.set(key, request((requestSignal) =>
+          monitoring(idfmLineToSiriRef(lineId), ref, requestSignal)).catch((error) => {
+          observed.delete(key);
+          throw error;
         }));
-        return observed.get(key)!;
+        return observed.get(key)!.catch(() => {
+          signal.throwIfAborted();
+          complete = false;
+          return [];
+        });
       };
       const readSchedule = (lineId: string, serviceDate: string) => {
         const key = `${lineId}:${serviceDate}`;
+        const cached = schedules.get(key);
+        if (cached && now() - cached.at < 300_000) {
+          schedules.delete(key);
+          schedules.set(key, cached);
+          return Promise.resolve(cached.value);
+        }
         if (!pendingSchedules.has(key)) pendingSchedules.set(key, (async () => {
-          const cached = schedules.get(key);
-          if (cached && now() - cached.at < 300_000) return cached.value;
-          const value = await timetable(lineId, { serviceDate, signal });
+          const value = await request((requestSignal) => timetable(lineId, { serviceDate, signal: requestSignal }));
           signal.throwIfAborted();
+          schedules.delete(key);
           if (schedules.size >= 12) schedules.delete(schedules.keys().next().value!);
           schedules.set(key, { value, at: now() });
           return value;
-        })());
+        })().finally(() => {
+          // Only the bounded provider cache owns completed timetables.
+          pendingSchedules.delete(key);
+        }));
         return pendingSchedules.get(key)!;
       };
       const batches = await Promise.all(legs.map(async (leg): Promise<TurboCourse[]> => {
@@ -152,21 +183,30 @@ export function createTravelTurboProvider(dependencies: {
         ]);
         signal.throwIfAborted();
         const courses = new Map<string, TurboCourse>();
-        const patterns: string[][] = [];
+        const patterns = new Map<string, string[]>();
         const coursePatterns = new Map<string, string[]>();
         // A single observation can still match several scheduled missions. Reject
         // that fallback in both directions, even when SIRI returned only one row.
         const fallbackCourses = new Map<string, Set<string>>();
         const fallbackKey = (side: string, time: number, mission?: string) => `${side}:${time}:${mission ?? ""}`;
-        for (const table of tables) for (const trip of table.trips) {
-          for (const call of trip.calls) for (const side of ["departure", "arrival"] as const) {
-            const stop = side === "departure" ? leg.fromStopPointId! : leg.toStopPointId!;
-            const value = call[side];
-            if (value === null || stopKey(call.stopId) !== stopKey(stop)) continue;
-            const key = fallbackKey(side, gtfsTurboTime(table.serviceDate, trip.serviceDate, value), trip.headsign);
-            const ids = fallbackCourses.get(key) ?? new Set<string>();
-            ids.add(`${trip.serviceDate}:${trip.id}`);
-            fallbackCourses.set(key, ids);
+        const monitoredStops = [
+          ...(departures.length ? [{ side: "departure" as const, key: stopKey(leg.fromStopPointId!) }] : []),
+          ...(arrivals.length ? [{ side: "arrival" as const, key: stopKey(leg.toStopPointId!) }] : []),
+        ];
+        if (monitoredStops.length) {
+          for (const table of tables) for (const trip of table.trips) {
+            const offset = timeOffset(table.serviceDate, trip.serviceDate);
+            for (const call of trip.calls) {
+              const callKey = stopKey(call.stopId);
+              for (const { side, key: stop } of monitoredStops) {
+                const value = call[side];
+                if (value === null || callKey !== stop) continue;
+                const key = fallbackKey(side, offset + value * 1000, trip.headsign);
+                const ids = fallbackCourses.get(key) ?? new Set<string>();
+                ids.add(`${trip.serviceDate}:${trip.id}`);
+                fallbackCourses.set(key, ids);
+              }
+            }
           }
         }
         for (const table of tables) {
@@ -175,15 +215,18 @@ export function createTravelTurboProvider(dependencies: {
           const to = table.stops.filter((s) => stopKey(s.id) === stopKey(leg.toStopPointId!));
           if (from.length !== 1 || to.length !== 1) { complete = false; continue; }
           for (const trip of table.trips) {
+            const offset = timeOffset(table.serviceDate, trip.serviceDate);
             const calls = trip.calls;
             const starts = calls.flatMap((c, i) => c.stopId === from[0]!.id && c.departure !== null && c.pickupType === 0 ? [i] : []);
             for (const startIndex of starts) {
               const endIndex = calls.findIndex((c, i) => i > startIndex && c.stopId === to[0]!.id && c.arrival !== null && c.dropOffType === 0);
               if (endIndex < 0) continue;
               const pattern = calls.slice(startIndex, endIndex + 1).filter((call) => call.pickupType === 0 || call.dropOffType === 0).map((call) => stopKey(call.stopId) ?? call.stopId);
-              patterns.push(pattern);
-              const departure = gtfsTurboTime(table.serviceDate, trip.serviceDate, calls[startIndex]!.departure!);
-              const arrival = gtfsTurboTime(table.serviceDate, trip.serviceDate, calls[endIndex]!.arrival!);
+              const patternKey = JSON.stringify(pattern);
+              const knownPattern = patterns.get(patternKey) ?? pattern;
+              if (knownPattern === pattern) patterns.set(patternKey, knownPattern);
+              const departure = offset + calls[startIndex]!.departure! * 1000;
+              const arrival = offset + calls[endIndex]!.arrival! * 1000;
               // Include delayed services which were scheduled before the window.
               if (departure < start - 2 * 3600_000 || departure > horizon || arrival > horizon) continue;
               const course: TurboCourse = { id: `${trip.serviceDate}:${trip.id}:${calls[startIndex]!.sequence}:${calls[endIndex]!.sequence}`, vehicleJourneyId: trip.id,
@@ -195,13 +238,13 @@ export function createTravelTurboProvider(dependencies: {
               const departureObservation = matchTurboObservation(departures, course, trip, lineId, leg.fromStopPointId!, "departure", now(), fallbackCourses.get(fallbackKey("departure", departure, trip.headsign))?.size === 1);
               const arrivalObservation = matchTurboObservation(arrivals, course, trip, lineId, leg.toStopPointId!, "arrival", now(), fallbackCourses.get(fallbackKey("arrival", arrival, trip.headsign))?.size === 1);
               let updated = applyTurboRealtime(course, departureObservation, arrivalObservation);
-              if (updated && !departureObservation && !arrivalObservation) updated = applyNavitiaCourseTiming(updated, leg, now());
+              if (realtime && updated && !departureObservation && !arrivalObservation) updated = applyNavitiaCourseTiming(updated, leg, now());
               if (!updated) continue;
               if (updated.departure < start) continue;
               // All relevant courses must be covered before claiming an optimum.
-              if (updated.source !== "realtime") complete = false;
+              if (realtime && updated.source !== "realtime") complete = false;
               courses.set(updated.id, updated);
-              coursePatterns.set(updated.id, pattern);
+              coursePatterns.set(updated.id, knownPattern);
             }
           }
         }
@@ -220,25 +263,29 @@ export function createTravelTurboProvider(dependencies: {
           const departureObservation = matchTurboObservation(departures, baseline, trip, lineId, leg.fromStopPointId!, "departure", now(), !fallbackCourses.has(fallbackKey("departure", baseDeparture, trip.headsign)));
           const arrivalObservation = matchTurboObservation(arrivals, baseline, trip, lineId, leg.toStopPointId!, "arrival", now(), !fallbackCourses.has(fallbackKey("arrival", baseArrival, trip.headsign)));
           let updated = applyTurboRealtime(baseline, departureObservation, arrivalObservation);
-          if (updated && !departureObservation && !arrivalObservation) updated = applyNavitiaCourseTiming(updated, leg, now());
+          if (realtime && updated && !departureObservation && !arrivalObservation) updated = applyNavitiaCourseTiming(updated, leg, now());
           if (updated && updated.departure >= start) courses.set(updated.id, updated);
         }
         // Unknown schedule coverage cannot be filled by inventing another mission.
         if (!courses.size) complete = false;
+        const uniquePatterns = [...patterns.values()];
+        const serviceTypes = new Map(uniquePatterns.map((pattern) => [pattern, inferCourseServiceType(pattern, uniquePatterns)]));
         for (const course of courses.values()) {
           const pattern = coursePatterns.get(course.id);
-          if (pattern) course.serviceType = inferCourseServiceType(pattern, patterns);
+          if (pattern) course.serviceType = serviceTypes.get(pattern);
         }
         return [...courses.values()].sort((a, b) => a.departure - b.departure);
       }));
       signal.throwIfAborted();
       return { batches, complete, analyzedAt: new Date(now()).toISOString() };
-    },
-  };
+    };
+  }
+  const loadCourses = (request: TravelCourseSearchRequest) => createCourseSession()(request);
   return {
-    loadCourses: courseProvider.loadCourses,
+    loadCourses,
+    createCourseSession,
     async analyze(request: Parameters<TravelTurboProvider["analyze"]>[0]) {
-      const search = await courseProvider.loadCourses(request);
+      const search = await loadCourses(request);
       const horizon = request.start + 6 * 3600_000;
       const result = optimizeTurbo(request.route, search.batches, request.start, search.complete);
       if (result.status === "ready" && result.proposals.some((p) => (turboTime(p.arrivalDateTime) ?? horizon) + 1800_000 >= horizon)) {

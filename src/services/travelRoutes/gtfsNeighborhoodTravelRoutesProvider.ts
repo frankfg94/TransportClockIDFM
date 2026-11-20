@@ -12,7 +12,7 @@ export function createGtfsNeighborhoodTravelRoutesProvider(): TravelRoutesProvid
   const pending = new Map<string, Promise<NearbyJourney[]>>();
   const cache = new Map<string, { expires: number; journeys: NearbyJourney[] }>();
   let artifactVersion: string | undefined;
-  const requestKey = (request: NearbyJourneyRequest) => JSON.stringify([artifactVersion, request.origin.lon, request.origin.lat, request.destination.lon, request.destination.lat, request.destinationRef, request.arrivalAtPlatform, request.destinationLineId, request.datetime, [...(request.allowedModes ?? [])].sort()]);
+  const requestKey = (request: NearbyJourneyRequest) => JSON.stringify([artifactVersion, request.origin.lon, request.origin.lat, request.destination.lon, request.destination.lat, request.destinationRef, request.arrivalAtPlatform, request.destinationLineId, request.nearbyAccessFeeders, request.datetime, [...(request.allowedModes ?? [])].sort(), request.purpose === "transport-benchmark"]);
   function flush(groupKey: string) {
     const subscribers = (groups.get(groupKey) ?? []).filter(s => !s.done);
     groups.delete(groupKey);
@@ -36,7 +36,8 @@ export function createGtfsNeighborhoodTravelRoutesProvider(): TravelRoutesProvid
     }
     void (async () => {
       const request = { origin: first.origin, purpose: first.purpose, datetime: first.datetime ?? getNearbyParisJourneyDateTime(9), allowedModes: first.allowedModes,
-        destinations: unique.map((s, i) => ({ ...s.request.destination, id: String(i), destinationRef: s.request.destinationRef, arrivalAtPlatform: s.request.arrivalAtPlatform, destinationLineId: s.request.destinationLineId })) };
+        destinations: unique.map((s, i) => ({ ...s.request.destination, id: String(i), destinationRef: s.request.destinationRef, arrivalAtPlatform: s.request.arrivalAtPlatform,
+          destinationLineId: s.request.destinationLineId, nearbyAccessFeeders: s.request.nearbyAccessFeeders })) };
       const payload = canUseBrowserNeighborhoodGtfs()
         ? await routeBrowserNeighborhoodGtfs(request, controller.signal)
         : await (async () => {
@@ -76,13 +77,20 @@ export function createGtfsNeighborhoodTravelRoutesProvider(): TravelRoutesProvid
     const key = requestKey(request), cached = cache.get(key);
     if (cached && cached.expires > Date.now()) return Promise.resolve(cached.journeys);
     if (!signal && pending.has(key)) return pending.get(key)!;
-    const groupKey = JSON.stringify([request.origin.lon, request.origin.lat, request.datetime, [...(request.allowedModes ?? [])].sort(), request.purpose]);
+    // The browser shares a single origin scan across these probes. Deliver each
+    // reference destination as soon as its own platform/egress work finishes.
+    const independentDestination = request.purpose === "transport-benchmark" && canUseBrowserNeighborhoodGtfs();
+    // Heavy access waits for physical routes to each platform. A slow station
+    // must not hold back an entire group of 64 otherwise usable destinations.
+    const platformAccess = request.purpose === "transport" && request.arrivalAtPlatform === true;
+    const batchSize = platformAccess ? 16 : 64;
+    const groupKey = JSON.stringify([request.origin.lon, request.origin.lat, request.datetime, [...(request.allowedModes ?? [])].sort(), request.purpose, independentDestination ? key : undefined, platformAccess]);
     const promise = new Promise<NearbyJourney[]>((resolve, reject) => {
       const subscriber: Subscriber = { request, resolve, reject, signal, done: false, abort: () => {} };
       subscriber.abort = () => { subscriber.done = true; reject(signal?.reason); };
       signal?.addEventListener("abort", subscriber.abort, { once: true });
       const group = groups.get(groupKey);
-      if (group && group.length < 64) group.push(subscriber);
+      if (group && group.length < batchSize) group.push(subscriber);
       else { if (group) flush(groupKey); groups.set(groupKey, [subscriber]); setTimeout(() => flush(groupKey), 0); }
     });
     if (!signal) { pending.set(key, promise); void promise.finally(() => { if (pending.get(key) === promise) pending.delete(key); }).catch(() => {}); }

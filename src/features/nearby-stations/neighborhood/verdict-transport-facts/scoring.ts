@@ -9,7 +9,7 @@ export function calculateTransportScore(context: TransportFactsContext): number 
 }
 
 export function calculateTransportScoreDetails(context: TransportFactsContext): { score: number; group: NeighborhoodScoreDetailGroup } {
-  const { scoredAccessSignals, linesByKey, structuralLineWeight, accessibleModeWeight, journeySummary, readyFrequencies, serviceQuality,
+  const { scoredAccessSignals, linesByKey, structuralLineWeight, accessibleModeWeight, journeySummary, readyFrequencies, serviceQuality, passengerSatisfaction,
     structuralLineCount, sharedHubEvidence, reliableConnectionEvidence, effectiveFutureProjects } = context;
   const nearestAccess = scoredAccessSignals[0];
   const scoreParts: Array<NeighborhoodScoreDetailRow & { value: number; weight: number }> = [];
@@ -51,7 +51,11 @@ export function calculateTransportScoreDetails(context: TransportFactsContext): 
     });
   }
 
-  if (serviceQuality) scoreParts.push({ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.transportQuality", measurement: serviceQuality.score, measurementUnit: "percent", value: serviceQuality.score / 10, weight: TRANSPORT_SCORE_RULES.qualityWeight });
+  // The survey composite includes perceived regularity. Use one quality share.
+  if (passengerSatisfaction?.score !== undefined) {
+    scoreParts.push({ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.transportSatisfaction", measurement: passengerSatisfaction.percent,
+      measurementUnit: "percent", value: passengerSatisfaction.score, weight: TRANSPORT_SCORE_RULES.qualityWeight });
+  } else if (serviceQuality) scoreParts.push({ labelKey: "nearbyStations.neighborhoodScore.scoreHelp.detail.transportQuality", measurement: serviceQuality.score, measurementUnit: "percent", value: serviceQuality.score / 10, weight: TRANSPORT_SCORE_RULES.qualityWeight });
 
   const weightedScore = scoreParts.length > 0 ? weightedAverage(scoreParts) : TRANSPORT_SCORE_RULES.noSignals;
   const exceptionalTransport = structuralLineCount >= TRANSPORT_SCORE_RULES.exceptionalLines
@@ -59,7 +63,8 @@ export function calculateTransportScoreDetails(context: TransportFactsContext): 
   const score = exceptionalTransport ? Math.max(TRANSPORT_SCORE_RULES.exceptionalFloor, weightedScore) : weightedScore;
   const totalWeight = scoreParts.filter(part => Number.isFinite(part.value) && part.weight > 0).reduce((sum, part) => sum + part.weight, 0);
   const rows: NeighborhoodScoreDetailRow[] = scoreParts.map(part => ({ ...part, weight: totalWeight && part.weight > 0 && Number.isFinite(part.value) ? part.weight / totalWeight : 0, points: totalWeight && part.weight > 0 && Number.isFinite(part.value) ? part.value * part.weight / totalWeight : 0 }));
-  const labels = ["transportAccess", "transportLines", "transportModes", "transportJourney", "transportFrequency", "transportQuality"] as const;
+  const labels = ["transportAccess", "transportLines", "transportModes", "transportJourney", "transportFrequency", "transportQuality",
+    ...(passengerSatisfaction ? ["transportSatisfaction"] as const : [])] as const;
   for (const label of labels) {
     const key = `nearbyStations.neighborhoodScore.scoreHelp.detail.${label}` as const;
     if (!rows.some(row => row.labelKey === key)) rows.push({ labelKey: key });

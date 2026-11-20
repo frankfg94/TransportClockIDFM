@@ -28,11 +28,12 @@ function fixture() {
   return {
     nearby: { selectedPlace: ref({ lon: 2.35, lat: 48.85, label: "Adresse de test" }), stations: ref([]),
       transportMapNetwork: ref(), visibleStations: ref([]), activeModes: ref([]), radius: ref(600), isScanning: ref(false), error: ref() },
-    heavy: { visibleCandidates: ref([]), isLoading: ref(false), error: ref(), refresh: vi.fn() },
+    heavy: { visibleCandidates: ref([]), accessProgress: ref([]), isLoading: ref(false), error: ref(), refresh: vi.fn() },
     score: { result: ref({ categories: [{ id: "transport", labelKey: "nearbyStations.neighborhoodScore.categories.transport",
         available: true, displayScore: 7, positiveFacts: [{ family: "rail", label: "Métro accessible" }], negativeFacts: [], neutralFacts: [] }],
       displayScore: 7, band: "good", availableCategoryCount: 7, totalCategoryCount: 7, generatedAt: "2026-10-24T08:00:00Z" }),
       isLoading: ref(false), transportPending: ref<string[]>([]), backendVerdictReady: ref(true), places: ref([]),
+      countStructuralLinesFor: vi.fn(() => 0),
       diagnostics: ref({ pendingTasks: [], frequencies: [] }), error: ref(), errorSource: ref(), gtfsCoverageMissing: ref(false),
       criteria: ref([{ id: "transport", status: "ready", datasets: [{ id: "gtfs", required: true, status: "ready" }] }]), refresh: vi.fn() },
     quality: { data: ref(), isLoading: ref(false), error: ref(), retry: vi.fn() },

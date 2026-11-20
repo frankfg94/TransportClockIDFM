@@ -1,6 +1,7 @@
 import type { NearbyJourneySection } from "../nearby-stations/nearbyHeavyTransports";
 import type { TravelRoute } from "../nearby-stations/useTravelRoutes";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
+import type { GlobalMapMode } from "../transport-map/contracts/manifest";
 
 /** A calculated step supplied by the itinerary owner. The map only projects it. */
 export interface GlobalTransportItineraryStep {
@@ -20,6 +21,14 @@ export interface GlobalTransportPlanItinerary {
   route: TravelRoute;
   steps: readonly GlobalTransportItineraryStep[];
   totalWaitSeconds: number;
+}
+
+export interface TransportStationComparison {
+  origin: GeocoderPoint;
+  mode?: GlobalMapMode;
+  stations: readonly { id: string; point: GeocoderPoint & { label: string }; future: boolean }[];
+  activeId?: string;
+  fitAllVersion: number;
 }
 
 /** Shared DOM evidence for the owner timeline and its supplementary map. */

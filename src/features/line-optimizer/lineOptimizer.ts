@@ -88,9 +88,11 @@ export function optimizerConnectionSteps(
   return steps.filter((step) => step.durationSeconds > 0);
 }
 
-export function optimizerCorridorIndex(route: TravelRoute, config: LineOptimizerConfig): number {
+export type OptimizerRouteProfile = LineOptimizerConfig | "station-access";
+
+export function optimizerCorridorIndex(route: TravelRoute, config: OptimizerRouteProfile): number {
   const legs = route.sections.filter(isTurboTransit);
-  if (config.destinationOptimizer) return legs.length >= 1 ? 0 : -1;
+  if (config === "station-access" || config.destinationOptimizer) return legs.length >= 1 ? 0 : -1;
   return legs.findIndex((tram, index) => {
     const train = legs[index + 1];
     return (
@@ -104,7 +106,7 @@ export function optimizerCorridorIndex(route: TravelRoute, config: LineOptimizer
   });
 }
 
-export function isOptimizerRoute(route: TravelRoute, config: LineOptimizerConfig): boolean {
+export function isOptimizerRoute(route: TravelRoute, config: OptimizerRouteProfile): boolean {
   return optimizerCorridorIndex(route, config) >= 0;
 }
 
@@ -137,13 +139,31 @@ const movementSeconds = (sections: NearbyJourneySection[]) =>
     .filter((section) => !isNearbyJourneyWaitingSection(section))
     .reduce((total, section) => total + section.durationSeconds, 0);
 
+function earliestCourseAfter(ordered: TurboCourse[]) {
+  const best = ordered.slice();
+  for (let i = best.length - 2; i >= 0; i--) {
+    if (best[i + 1]!.arrival < best[i]!.arrival) best[i] = best[i + 1]!;
+  }
+  return (departure: number) => {
+    let low = 0;
+    let high = ordered.length;
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      if (ordered[mid]!.departure < departure) low = mid + 1;
+      else high = mid;
+    }
+    return best[low];
+  };
+}
+
 /** Enumerate real fixed-leg courses; never infer frequency or manufacture times. */
 export function enumerateOptimizerCandidates(
   route: TravelRoute,
   batches: TurboCourse[][],
   settings: LineOptimizerSettings,
   start: number,
-  config?: LineOptimizerConfig,
+  config?: OptimizerRouteProfile,
+  dayEnd?: number,
 ): LineOptimizerCandidate[] {
   const indexes = route.sections.flatMap((section, index) =>
     isTurboTransit(section) ? [index] : [],
@@ -197,11 +217,14 @@ export function enumerateOptimizerCandidates(
         : movementSeconds(route.sections.slice(indexes[i]! + 1, index)),
     );
   const result: LineOptimizerCandidate[] = [];
-  if (indexes.length === 1 && config?.destinationOptimizer) {
+  const latestLeaveAt = config === "station-access" ? Infinity : start + settings.departureWindowSeconds * 1000;
+  const inWindow = (leaveAt: number) => leaveAt >= start && leaveAt <= latestLeaveAt &&
+    (dayEnd === undefined || leaveAt < dayEnd);
+  if (indexes.length === 1 && (config === "station-access" || config?.destinationOptimizer)) {
     for (const trip of ordered[0]!) {
       const walkAt = trip.departure - walkSeconds * 1000;
       const leaveAt = walkAt - settings.exitSeconds * 1000;
-      if (leaveAt < start || leaveAt > start + settings.departureWindowSeconds * 1000) continue;
+      if (!inWindow(leaveAt)) continue;
       result.push({ id: `${route.id}:${trip.id}`, route, courses: [trip], waits: [0],
         totalWaitSeconds: 0, corridorIndex: 0, tram: trip, train: trip, leaveAt, walkAt,
         platformAt: trip.departure, arriveAt: trip.arrival + egressSeconds * 1000,
@@ -210,6 +233,9 @@ export function enumerateOptimizerCandidates(
     }
     return result;
   }
+  // For a fixed first departure and route, reaching any intermediate stop
+  // earlier preserves every feasible connection, even if an express overtakes.
+  const onward = dayEnd === undefined ? undefined : ordered.map(earliestCourseAfter);
   for (const tram of ordered[corridorIndex]!) {
     // Latest reachable feeder chain maximizes time at home for this tram.
     const prefix: TurboCourse[] = [tram];
@@ -224,18 +250,21 @@ export function enumerateOptimizerCandidates(
     if (prefix.length !== corridorIndex + 1) continue;
     const walkAt = prefix[0]!.departure - walkSeconds * 1000;
     const leaveAt = walkAt - settings.exitSeconds * 1000;
-    if (leaveAt < start || leaveAt > start + settings.departureWindowSeconds * 1000) continue;
+    if (!inWindow(leaveAt)) continue;
     const platformAt = tram.arrival + transferSeconds * 1000;
-    for (const train of ordered[corridorIndex + 1]!) {
+    const next = onward?.[corridorIndex + 1]!(platformAt + settings.marginSeconds * 1000);
+    const connecting = onward ? (next ? [next] : []) : ordered[corridorIndex + 1]!;
+    for (const train of connecting) {
       const waitSeconds = (train.departure - platformAt) / 1000;
       if (waitSeconds < settings.marginSeconds) continue;
       const chain = [...prefix, train];
       // Earliest reachable onward course minimizes final arrival for this RER.
       for (let i = corridorIndex + 2; i < ordered.length; i++) {
         const previous = chain.at(-1)!;
-        const next = ordered[i]!.filter(
-          (c) => c.departure >= previous.arrival + transfers[i - 1]! * 1000,
-        ).sort((a, b) => a.arrival - b.arrival || a.departure - b.departure)[0];
+        const readyAt = previous.arrival + transfers[i - 1]! * 1000;
+        const next = onward ? onward[i]!(readyAt) :
+          ordered[i]!.filter((c) => c.departure >= readyAt)
+            .sort((a, b) => a.arrival - b.arrival || a.departure - b.departure)[0];
         if (!next) break;
         chain.push(next);
       }
@@ -268,8 +297,6 @@ export function enumerateOptimizerCandidates(
   return result;
 }
 
-/** Waiting is primary, bounded by an explicit arrival ceiling. Express service
- * can win only within the user's small allowed additional platform wait. */
 export function rankOptimizerCandidates(
   candidates: LineOptimizerCandidate[],
   settings: LineOptimizerSettings,
@@ -302,23 +329,32 @@ export function rankOptimizerCandidates(
         a.totalWaitSeconds - b.totalWaitSeconds || b.leaveAt - a.leaveAt;
     });
   }
-  const earliestArrival = Math.min(...unique.map((candidate) => candidate.arriveAt));
-  const eligible = unique.filter(
+  return rankOptimizerByWait(unique, settings, (candidate) => candidate.waitSeconds,
+    (candidate) => candidate.serviceType === "semi-direct");
+}
+
+/** Prefer low waiting time within the arrival ceiling, then favor a confirmed
+ * semi-direct service within the allowed additional wait. */
+export function rankOptimizerByWait<T extends { arriveAt: number; leaveAt: number }>(
+  candidates: readonly T[],
+  settings: Pick<LineOptimizerSettings, "maxArrivalDelaySeconds" | "preferSemiDirect" | "semiDirectWaitToleranceSeconds">,
+  waitSeconds: (candidate: T) => number,
+  isSemiDirect: (candidate: T) => boolean,
+): T[] {
+  const earliestArrival = Math.min(...candidates.map((candidate) => candidate.arriveAt));
+  const eligible = candidates.filter(
     (candidate) => candidate.arriveAt <= earliestArrival + settings.maxArrivalDelaySeconds * 1000,
   );
   eligible.sort(
-    (a, b) => a.waitSeconds - b.waitSeconds || a.arriveAt - b.arriveAt || b.leaveAt - a.leaveAt,
+    (a, b) => waitSeconds(a) - waitSeconds(b) || a.arriveAt - b.arriveAt || b.leaveAt - a.leaveAt,
   );
   if (settings.preferSemiDirect && eligible.length) {
-    const express = eligible.filter(
+    const express = eligible.find(
       (candidate) =>
-        candidate.serviceType === "semi-direct" &&
-        candidate.waitSeconds <= eligible[0]!.waitSeconds + settings.semiDirectWaitToleranceSeconds,
+        isSemiDirect(candidate) &&
+        waitSeconds(candidate) <= waitSeconds(eligible[0]!) + settings.semiDirectWaitToleranceSeconds,
     );
-    if (express.length) {
-      const winner = express[0]!;
-      return [winner, ...eligible.filter((candidate) => candidate !== winner)];
-    }
+    if (express) return [express, ...eligible.filter((candidate) => candidate !== express)];
   }
   return eligible;
 }

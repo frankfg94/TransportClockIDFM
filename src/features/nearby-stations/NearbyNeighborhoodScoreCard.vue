@@ -18,6 +18,7 @@ import { getNeighborhoodFactMarker } from "./neighborhood/facts";
 import { transportSectionValues } from "./neighborhood/factPresentation";
 import NearbyNeighborhoodScoreEducation from "./NearbyNeighborhoodScoreEducation.vue";
 import NeighborhoodTransportLoading from "./NeighborhoodTransportLoading.vue";
+import type { NeighborhoodTransportLoadingTask } from "./neighborhood/transportLoadingTasks";
 import type { NearbyPlace } from "./nearbyPlaces";
 import type { NeighborhoodWalkingMetrics } from "./neighborhood/contracts";
 import type { NearbyRealEstatePdfState } from "./neighborhoodScorePdf";
@@ -35,7 +36,7 @@ const props = defineProps<{
   retryDisabled?: boolean;
   criteria?: readonly NeighborhoodCriterionState[];
   realEstateMarket?: NearbyRealEstatePdfState["market"];
-  transportLoadingTasks?: readonly { id: string; labelKey: TranslationKey }[];
+  transportLoadingTasks?: readonly NeighborhoodTransportLoadingTask[];
   directoryUrl: string;
 }>();
 
@@ -75,6 +76,7 @@ const datasetLabelKeys: Record<string, TranslationKey> = {
   "heavy-access": "nearbyStations.neighborhoodScore.datasets.heavy-access",
   "gtfs-frequency": "nearbyStations.neighborhoodScore.datasets.gtfs-frequency",
   "service-quality": "nearbyStations.neighborhoodScore.datasets.service-quality",
+  "passenger-satisfaction": "nearbyStations.neighborhoodScore.datasets.passenger-satisfaction",
   "neighborhood-verdict": "nearbyStations.neighborhoodScore.datasets.neighborhood-verdict",
   "osm-places": "nearbyStations.neighborhoodScore.datasets.osm-places",
   "shopping-centres": "nearbyStations.neighborhoodScore.datasets.shopping-centres",
@@ -309,8 +311,13 @@ onBeforeUnmount(() => {
                   <small>{{ t(dataset.required ? "nearbyStations.neighborhoodScore.datasetRequirements.required" : "nearbyStations.neighborhoodScore.datasetRequirements.optional") }}</small>
                   <strong>{{ datasetStatusLabel(dataset.status) }}</strong>
                   <small v-if="dataset.durationMs !== undefined">{{ dataset.durationMs }} ms</small>
-                  <small v-if="dataset.source">{{ t(dataset.id === 'food-markets' ? 'nearbyStations.neighborhoodScore.venueAnalysis.marketSource' : 'nearbyStations.neighborhoodScore.venueAnalysis.cinemaSource') }}</small>
-                  <small v-if="dataset.error">{{ datasetStatusLabel('error') }}</small>
+                  <small v-if="dataset.id === 'passenger-satisfaction' && dataset.source"><a :href="dataset.source" target="_blank" rel="noopener noreferrer">{{ t('nearbyStations.neighborhoodScore.satisfaction.source') }}</a></small>
+                  <small v-else-if="dataset.source">{{ t(dataset.id === 'food-markets' ? 'nearbyStations.neighborhoodScore.venueAnalysis.marketSource' : 'nearbyStations.neighborhoodScore.venueAnalysis.cinemaSource') }}</small>
+                  <small v-if="dataset.satisfactionCoverage">
+                    {{ t('nearbyStations.neighborhoodScore.satisfaction.coverage', { covered: dataset.satisfactionCoverage.covered, total: dataset.satisfactionCoverage.total }) }}
+                    · {{ t(`nearbyStations.neighborhoodScore.satisfaction.${dataset.satisfactionCoverage.coverage}`) }}
+                  </small>
+                  <small v-if="dataset.error">{{ dataset.id === 'passenger-satisfaction' ? dataset.error : datasetStatusLabel('error') }}</small>
                 </li>
               </ul>
               <p v-else class="nearby-neighborhood-score-card__diagnostics-empty">
@@ -405,6 +412,7 @@ onBeforeUnmount(() => {
           </div>
         </header>
         <NeighborhoodTransportLoading v-if="category.id === 'transport'" :tasks="transportLoadingTasks ?? []" />
+        <slot v-if="category.id === 'transport'" name="transport-preview" />
         <p v-if="criterion?.datasets.some(dataset => dataset.status === 'loading' && (dataset.id === 'food-markets' || dataset.id === 'cinema-access'))"
           class="nearby-neighborhood-score-card__category-loading" role="status">
           {{ t(category.id === 'daily-life' ? 'nearbyStations.neighborhoodScore.venueAnalysis.marketLoading' : 'nearbyStations.neighborhoodScore.venueAnalysis.cinemaLoading') }}

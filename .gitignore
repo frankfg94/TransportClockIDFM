@@ -11,6 +11,7 @@ transport-clock-screenshot*.png
 .unlighthouse/
 reports/
 .data/map-isochrones/
+.data/station-walks/
 .env
 .env.*
 !.env.example

@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, readonly, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, readonly, ref, shallowRef, watch } from "vue";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { runNetworkTask } from "../../services/networkScheduler";
 import { NEIGHBORHOOD_TRANSPORT_TIMEOUT_MS } from "../../../shared/gtfs/neighborhoodTimeout";
@@ -89,6 +89,11 @@ export interface NearbyHeavyTransportResolverInput {
   futureProjects?: readonly PublicFutureGpeStation[];
   /** Cancels every network and walking probe started by this resolution. */
   signal?: AbortSignal;
+  /** Stop exploring new targets at the deadline and return accepted results. */
+  partialResultsDeadline?: AbortSignal;
+  /** Reports each eligible station/line access as its calculation finishes. */
+  onAccessResolved?: (candidate: NearbyHeavyTransportCandidate) => void;
+  onTargetsProgress?: (completed: number, total: number) => void;
 }
 
 export interface HeavyTransportResolver {
@@ -96,6 +101,11 @@ export interface HeavyTransportResolver {
 }
 
 export interface UseNearbyHeavyTransportsOptions {
+  /** Bound the search, including time waiting in a provider queue. */
+  partialResultsTimeoutMs?: number;
+  /** Keep a progressing batch alive, but still return partial results if it stalls. */
+  partialResultsIdleTimeoutMs?: number;
+  trackProgress?: boolean;
   gtfsVersion?: { readonly value: string };
   journeyProvider?: JourneyProvider;
   resolver?: HeavyTransportResolver;
@@ -122,7 +132,10 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
       input.activeModes.filter((mode) => NEARBY_HEAVY_TRANSPORT_MODES.includes(mode)
         || input.includeTramTargets && NEARBY_HEAVY_RELIABLE_FEEDER_MODES.includes(mode)),
     );
-    if (activeHeavyModes.size === 0) return [];
+    if (activeHeavyModes.size === 0) {
+      input.onTargetsProgress?.(0, 0);
+      return [];
+    }
 
     const resolveStationReference = input.batchQueries
       ? createNeighborhoodStationReferenceResolver(input.network.stations, HEAVY_HUB_STOP_MAX_DISTANCE_METERS)
@@ -147,6 +160,17 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
       }
       return pending;
     };
+    async function findAvailableJourneys(request: NearbyJourneyRequest): Promise<NearbyJourney[]> {
+      if (input.partialResultsDeadline?.aborted) return [];
+      try {
+        return await findJourneys(request);
+      } catch (cause) {
+        // The caller records failed probes separately from a successful empty response.
+        if (input.signal?.aborted) throw cause;
+        if (!input.partialResultsDeadline && (isAbortError(cause) || isNavitiaRateLimit(cause))) throw cause;
+        return [];
+      }
+    }
 
     function projectedStationLines(
       station: GlobalMapStation,
@@ -202,10 +226,10 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
       [...activeHeavyModes],
     );
 
-    const resolved = await mapWithConcurrency(
-      targets,
-      input.batchQueries ? Math.max(1, targets.length) : HEAVY_RESOLUTION_CONCURRENCY,
-      async ({ station, line, distanceMeters, futureProject }) => {
+    const resolveTarget = async ({ station, line, distanceMeters, futureProject }: NearbyHeavyTargetCandidate) => {
+        if (input.partialResultsDeadline?.aborted) return undefined;
+        const entry = createHeavyEntry(station, line, input.network, distanceMeters);
+        if (!input.includeLocalCandidates && existingIds.has(entry.id)) return undefined;
         const projectedLines = projectedStationLines(station, distanceMeters);
         const correspondenceLines = projectedLines.feederLines;
         const feederLines = mergeNearbyHeavyFeederLines(
@@ -227,20 +251,29 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
           ].filter((value): value is string => Boolean(value))),
         );
         const scheduledDateTime = input.journeyDateTime?.trim();
-        const journeys = await findJourneys({
+        const journeyRequest = findAvailableJourneys({
           purpose: "transport",
           origin: input.origin,
           destination: station,
           ...(input.batchQueries ? {
             destinationRef: resolveStationReference!(station),
             arrivalAtPlatform: true,
-            ...(!futureProject ? { destinationLineId: line.sourceLineId ?? line.id } : {}),
+            ...(!futureProject ? { destinationLineId: line.sourceLineId ?? line.id,
+              nearbyAccessFeeders: { lineIds: [...localLineIds], lineCodes: [...localLineCodes] } } : {}),
           } : {}),
           ...(scheduledDateTime ? { datetime: scheduledDateTime } : {}),
-        }).catch((cause: unknown) => {
-          if (input.signal?.aborted || isAbortError(cause) || isNavitiaRateLimit(cause)) throw cause;
-          return [];
         });
+        // Submit direct walks together from the same address, while the
+        // independent GTFS scan runs. Current rail uses its physical platform.
+        const directWalk = input.batchQueries && (futureProject || line.mode === "TRAM" || line.mode === "CABLE")
+          ? resolveDirectWalkingAccess(input.walkingRouteProvider, input.origin, station, input.signal, { mode: line.mode, datetime: scheduledDateTime })
+          : undefined;
+        const [journeys, batchWalkingAccess] = await Promise.all([journeyRequest, directWalk]);
+        if (batchWalkingAccess?.journey) {
+          const timetable = journeys.find(journey => journey.source === "gtfs");
+          batchWalkingAccess.journey.source = timetable?.source;
+          batchWalkingAccess.journey.datasetVersion = timetable?.datasetVersion;
+        }
         const rejected: { reason: string; count: number }[] = [];
         const onRejected = (reason: string) => {
           const entry = rejected.find(value => value.reason === reason);
@@ -276,14 +309,11 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
         // representative daytime window and retain both sets of feeders.
         const daytimeJourneys = scheduledDateTime
           ? []
-          : await findJourneys({
+          : await findAvailableJourneys({
             purpose: "transport",
             origin: input.origin,
             destination: station,
             datetime: representativeJourneyDateTime(),
-          }).catch((cause: unknown) => {
-            if (input.signal?.aborted || isAbortError(cause) || isNavitiaRateLimit(cause)) throw cause;
-            return [];
           });
         const daytimeAlternatives = listNearbyHeavyJourneyAlternatives(
           usefulJourneys(futureProject ? daytimeJourneys.map((journey) => trimCoLocatedFutureStationEgress(journey, futureProject)) : daytimeJourneys),
@@ -298,8 +328,7 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
         const currentAccess = currentAlternatives[0];
         // A rail platform's street coordinate is not an entrance. Batched
         // current-line queries already resolve its complete physical access.
-        const routedWalkingAccess = input.batchQueries && !futureProject && line.mode !== "TRAM" && line.mode !== "CABLE"
-          ? undefined : await resolveDirectWalkingAccess(input.walkingRouteProvider, input.origin, station, input.signal,
+        const routedWalkingAccess = input.batchQueries ? batchWalkingAccess : await resolveDirectWalkingAccess(input.walkingRouteProvider, input.origin, station, input.signal,
             { mode: line.mode, datetime: scheduledDateTime, template: journeys.find(journey => journey.source === "gtfs") });
         const accessAlternatives = currentAccess && isNoctilienAccess(currentAccess, feederLines)
           ? daytimeAlternatives.length > 0
@@ -326,8 +355,16 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
           accepted: Boolean(access), scoreSeconds: access && getNearbyHeavyAccessTravelSeconds(access) })("ready");
         if (!access) return undefined;
 
-        const entry = createHeavyEntry(station, line, input.network, distanceMeters);
-        if (!input.includeLocalCandidates && existingIds.has(entry.id)) return undefined;
+        input.signal?.throwIfAborted();
+        input.onAccessResolved?.({
+          id: entry.id, entry, station, lines: [line], distanceMeters, access,
+          accessByLine: { [line.id]: access },
+          accessAlternativesByLine: { [line.id]: accessAlternatives },
+          correspondenceLines,
+          coLocatedHeavyLines: futureProject ? projectedLines.heavyLines : [],
+          futureProjectsByLine: futureProject ? { [line.id]: futureProject } : undefined,
+          projected: distanceMeters > input.radiusMeters,
+        });
         return {
           entry,
           station,
@@ -339,6 +376,20 @@ export const defaultNearbyHeavyTransportResolver: HeavyTransportResolver = {
           coLocatedHeavyLines: futureProject ? projectedLines.heavyLines : [],
           futureProject,
         };
+    };
+    let completed = 0;
+    input.onTargetsProgress?.(completed, targets.length);
+    const resolved = await mapWithConcurrency(
+      targets,
+      input.batchQueries ? Math.max(1, targets.length) : HEAVY_RESOLUTION_CONCURRENCY,
+      async target => {
+        try {
+          return await resolveTarget(target);
+        } finally {
+          if (!input.signal?.aborted && !input.partialResultsDeadline?.aborted) {
+            input.onTargetsProgress?.(++completed, targets.length);
+          }
+        }
       },
       input.signal,
     );
@@ -425,6 +476,9 @@ export function useNearbyHeavyTransports(
   options: UseNearbyHeavyTransportsOptions = {},
 ) {
   const candidates = ref<NearbyHeavyTransportCandidate[]>([]);
+  const accessProgress = shallowRef<readonly NearbyHeavyTransportCandidate[]>([]);
+  const previewCandidates = shallowRef<NearbyHeavyTransportCandidate[]>();
+  const targetProgress = shallowRef<{ completed: number; total: number }>();
   const isLoading = ref(false);
   const error = ref<string>();
   const hiddenStationIds = ref<Set<string>>(new Set());
@@ -459,6 +513,9 @@ export function useNearbyHeavyTransports(
     requestController = undefined;
     const token = requestToken.value + 1;
     requestToken.value = token;
+    accessProgress.value = [];
+    previewCandidates.value = undefined;
+    targetProgress.value = undefined;
     const origin = source.origin.value;
     const network = source.network?.value;
     const journeyDateTime = resolveNearbyJourneyDateTime(options.journeyDateTime);
@@ -475,6 +532,33 @@ export function useNearbyHeavyTransports(
     }
 
     const controller = new AbortController();
+    const resolvedAccesses: NearbyHeavyTransportCandidate[] = [];
+    const accessPreviewInterval = 30;
+    let lastPreviewSize = 0;
+    let completedTargets = 0;
+    let totalTargets = 0;
+    let progressTimer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutMs = options.partialResultsIdleTimeoutMs ?? options.partialResultsTimeoutMs;
+    const deadline = timeoutMs === undefined ? undefined : new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onTimeout = () => {
+      const cause = new DOMException("Nearby transport search timed out", "TimeoutError");
+      if (requestController === controller) error.value = cause.message;
+      deadline?.abort(cause);
+    };
+    if (deadline) timer = setTimeout(onTimeout, timeoutMs);
+    const probeSignal = deadline ? AbortSignal.any([controller.signal, deadline.signal]) : controller.signal;
+    // Batched providers must all receive the same signal so requests can
+    // share work. Race their results against a single cancellation promise.
+    let rejectBatch: ((cause: unknown) => void) | undefined;
+    const cancelledBatch = options.batchQueries && deadline
+      ? new Promise<never>((_, reject) => { rejectBatch = reject; })
+      : undefined;
+    const cancelBatch = () => rejectBatch?.(probeSignal.reason);
+    if (cancelledBatch) {
+      void cancelledBatch.catch(() => {});
+      probeSignal.addEventListener("abort", cancelBatch, { once: true });
+    }
     requestController = controller;
     isLoading.value = true;
     error.value = undefined;
@@ -484,7 +568,10 @@ export function useNearbyHeavyTransports(
     const probe = async <T>(run: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal, task = "probe", details?: Record<string, unknown>): Promise<T> => {
       const finishProbe = beginVerdictDebugTask("heavy-subtasks", task, details);
       try {
-        const result = await (options.batchQueries ? run(signal ?? controller.signal) : runHeavyProbe(run, signal));
+        const providerSignal = signal ?? controller.signal;
+        providerSignal.throwIfAborted();
+        const pending = options.batchQueries ? run(providerSignal) : runHeavyProbe(run, providerSignal);
+        const result = await (cancelledBatch ? Promise.race([pending, cancelledBatch]) : pending);
         finishProbe("ready", Array.isArray(result) ? { journeys: result.length }
           : result && typeof result === "object" && "provider" in result ? {
             provider: result.provider, fallback: "fallback" in result ? result.fallback : undefined,
@@ -507,11 +594,11 @@ export function useNearbyHeavyTransports(
         activeModes: source.activeModes.value,
         radiusMeters: source.radius.value,
         journeyProvider: {
-          findJourneys: (request, signal) => probe((probeSignal) => journeyProvider.findJourneys(request, probeSignal), signal, "journey", { destination: request.destination.id, destinationRef: request.destinationRef, datetime: request.datetime }),
+          findJourneys: (request, signal) => probe((providerSignal) => journeyProvider.findJourneys(request, providerSignal), deadline ? probeSignal : signal, "journey", { destination: request.destination.id, destinationRef: request.destinationRef, datetime: request.datetime }),
         },
         journeyDateTime,
         walkingRouteProvider: options.walkingRouteProvider
-          ? (origin, destination, signal) => probe((probeSignal) => options.walkingRouteProvider!(origin, destination, probeSignal), signal, "walking-access", { destination })
+          ? (origin, destination, signal) => probe((providerSignal) => options.walkingRouteProvider!(origin, destination, providerSignal), deadline ? probeSignal : signal, "walking-access", { destination })
           : undefined,
         includeLocalCandidates: options.includeLocalCandidates,
         batchQueries: options.batchQueries,
@@ -520,6 +607,33 @@ export function useNearbyHeavyTransports(
         includeTramTargets: options.includeTramTargets,
         futureProjects: source.futureProjects?.value ?? [],
         signal: controller.signal,
+        partialResultsDeadline: deadline?.signal,
+        onAccessResolved: options.trackProgress ? (candidate) => {
+          if (token !== requestToken.value || controller.signal.aborted) return;
+          resolvedAccesses.push(candidate);
+        } : undefined,
+        onTargetsProgress: options.trackProgress || options.partialResultsIdleTimeoutMs !== undefined ? (completed, total) => {
+          if (token !== requestToken.value || controller.signal.aborted) return;
+          if (options.partialResultsIdleTimeoutMs !== undefined && completed > completedTargets) {
+            clearTimeout(timer);
+            timer = setTimeout(onTimeout, timeoutMs);
+          }
+          completedTargets = completed;
+          if (!options.trackProgress) return;
+          totalTargets = total;
+          if (completed === 0) targetProgress.value = { completed, total };
+          if (completed > 0 && completed % accessPreviewInterval === 0 && resolvedAccesses.length > lastPreviewSize) {
+            lastPreviewSize = resolvedAccesses.length;
+            previewCandidates.value = resolvedAccesses.slice();
+          }
+          // A GTFS batch can deliver many targets together. Update the counters once.
+          progressTimer ??= setTimeout(() => {
+            progressTimer = undefined;
+            if (token !== requestToken.value || controller.signal.aborted) return;
+            accessProgress.value = resolvedAccesses.slice();
+            targetProgress.value = { completed: completedTargets, total: totalTargets };
+          }, 100);
+        } : undefined,
       });
       if (token === requestToken.value && !controller.signal.aborted) { candidates.value = next; completedOriginKey = originKey; }
       finishDebug(controller.signal.aborted ? "cancelled" : "ready", { candidates: next.length, alternatives: next.reduce((count, candidate) => count + (candidate.accessAlternatives?.length ?? 0), 0) });
@@ -530,8 +644,17 @@ export function useNearbyHeavyTransports(
         error.value = cause instanceof Error ? cause.message : "heavy-transport-unavailable";
       }
     } finally {
+      if (progressTimer !== undefined) clearTimeout(progressTimer);
+      if (timer !== undefined) clearTimeout(timer);
+      probeSignal.removeEventListener("abort", cancelBatch);
+      controller.abort();
       if (requestController === controller) requestController = undefined;
-      if (token === requestToken.value) isLoading.value = false;
+      if (token === requestToken.value) {
+        isLoading.value = false;
+        accessProgress.value = [];
+        previewCandidates.value = undefined;
+        targetProgress.value = undefined;
+      }
     }
   }
 
@@ -562,17 +685,18 @@ export function useNearbyHeavyTransports(
   }
 
   watch(
-    () => [
-      source.origin.value?.lon,
-      source.origin.value?.lat,
-      source.network?.value,
-      source.activeModes.value.join(","),
-      source.stations.value.map((entry) => entry.id).join(","),
-      source.stationsLoading?.value ?? false,
-      source.futureProjects?.value.map((project) => `${project.id}:${project.line}:${project.lon}:${project.lat}`).join(",") ?? "",
-      source.futureProjectsReady?.value ?? true,
-      resolveNearbyJourneyDateTime(options.journeyDateTime),
-      options.gtfsVersion?.value,
+    [
+      () => source.origin.value?.lon,
+      () => source.origin.value?.lat,
+      () => source.network?.value,
+      () => source.radius.value,
+      () => source.activeModes.value.join(","),
+      () => JSON.stringify(source.stations.value.map(entry => [entry.id, entry.lines.map(line => [line.id, line.sourceLineId, line.code, line.label, line.mode, line.aliases])])),
+      () => source.stationsLoading?.value ?? false,
+      () => JSON.stringify(source.futureProjects?.value ?? []),
+      () => source.futureProjectsReady?.value ?? true,
+      () => resolveNearbyJourneyDateTime(options.journeyDateTime),
+      () => options.gtfsVersion?.value,
     ],
     refreshSoon,
     { immediate: true },
@@ -599,6 +723,9 @@ export function useNearbyHeavyTransports(
   }
 
   return {
+    accessProgress: computed(() => accessProgress.value),
+    previewCandidates: computed(() => previewCandidates.value),
+    targetProgress: computed(() => targetProgress.value),
     candidates: computed(() => candidates.value),
     visibleCandidates,
     hiddenStationIds: computed(() => hiddenStationIds.value),
