@@ -241,6 +241,19 @@
         @wheel="onWheel"
       />
 
+      <svg
+        v-if="selectedDirectionChevrons.length"
+        class="global-transport-plan__direction-chevrons"
+        aria-hidden="true"
+      >
+        <path
+          v-for="chevron in selectedDirectionChevrons"
+          :key="chevron.key"
+          d="M -2.5 -2.6 L 1 0 L -2.5 2.6"
+          :transform="`translate(${chevron.x} ${chevron.y}) rotate(${chevron.angleDeg})`"
+        />
+      </svg>
+
       <GlobalTransportItineraryOverlay
         :route="globalSelectedTravelRoute"
         :origin="globalItineraryOrigin"
@@ -1004,7 +1017,7 @@ import type {
   GlobalMapPath,
   GlobalMapStation,
 } from "../transport-map/contracts/manifest";
-import { GLOBAL_MAP_MODE_ORDER } from "../transport-map/contracts/manifest";
+import { GLOBAL_MAP_MODE_ORDER, getGlobalMapPathSubpathRanges, resolveGlobalMapVertex } from "../transport-map/contracts/manifest";
 import { createGlobalLineConnectionIconEntries } from "./globalLineConnectionIcons";
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../transport-map/config/globalTransportPlanConfig";
 import { PreparedWorldPathGeometryCache } from "../transport-map/render/preparedPathGeometry";
@@ -1061,6 +1074,7 @@ import GlobalMapLoadingCursor from "./GlobalMapLoadingCursor.vue";
 import GlobalTransportDebugPanel from "./GlobalTransportDebugPanel.vue";
 import GlobalTransportPlanLinePanel from "./GlobalTransportPlanLinePanel.vue";
 import IrisNeighborhoodOverlay from "../transport-map/overlays/IrisNeighborhoodOverlay.vue";
+import { createChevrons } from "../transport-map/overlays/ghostLineFlow";
 import { fetchIrisDataset, type IrisDataset } from "../transport-map/iris/irisApi";
 import {
   getDvfMapMetricRange,
@@ -2528,6 +2542,26 @@ const renderScene = computed<TransportMapRenderScene>(() => {
     ...(zones.length > 0 ? { servedCityZones: zones } : {}),
     ...(selectedLineLayout ? { selectedLineAnnotationLayout: selectedLineLayout } : {}),
   };
+});
+
+const selectedDirectionChevrons = computed(() => {
+  const path = busDirectionGeometryPaths.value[0];
+  const selection = busDirectionSelection.value;
+  const line = activeLine.value;
+  if (!path || !selection || !line || !directionFilterRequested.value || routePreviewActive.value
+    || !baseRenderScene.value.paths.includes(path)) return [];
+
+  return getGlobalMapPathSubpathRanges(path).flatMap(({ start, end }) => {
+    const points = path.vertices.slice(start, end).map((vertex) => {
+      const station = vertex.stationId ? network.value?.stationsById.get(vertex.stationId) : undefined;
+      return worldToScreen(resolveGlobalMapVertex(path, vertex, station, line.mode), camera.value);
+    });
+    const stationPoints = points.filter((_point, index) => path.vertices[start + index]?.stationId);
+    return createChevrons(points, `${path.id}:${start}`, selection.selectedDirectionId)
+      .filter(({ x, y }) => x >= 0 && y >= 0 && x <= camera.value.viewportWidthCssPx
+        && y <= camera.value.viewportHeightCssPx
+        && !stationPoints.some((station) => Math.hypot(station.x - x, station.y - y) < 8));
+  });
 });
 
 watch(
@@ -6101,6 +6135,19 @@ onBeforeUnmount(() => {
 }
 .global-transport-plan__canvas--next {
   background: transparent;
+}
+.global-transport-plan__direction-chevrons {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  fill: none;
+  stroke: rgb(255 255 255 / 64%);
+  stroke-width: 1.35px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .global-transport-plan__canvas--station-hover {
   cursor: pointer;

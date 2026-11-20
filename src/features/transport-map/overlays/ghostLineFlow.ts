@@ -391,7 +391,7 @@ function createPathData(points: readonly ScreenPoint[]): string {
     .join(" ");
 }
 
-function createChevrons(
+export function createChevrons(
   points: readonly ScreenPoint[],
   fragmentKey: string,
   directionId: string,
