@@ -4,7 +4,7 @@ import { nextTick, ref } from "vue";
 import type { UserGeolocationCoordinates } from "../src/services/userGeolocationRuntime";
 
 const mocks = vi.hoisted(() => ({
-  ask: vi.fn(), scan: vi.fn(), routes: vi.fn(), directions: vi.fn(), departures: vi.fn(),
+  ask: vi.fn(), refresh: vi.fn(), scan: vi.fn(), routes: vi.fn(), stations: vi.fn(), directions: vi.fn(), departures: vi.fn(),
 }));
 const coordinates = ref<UserGeolocationCoordinates>();
 const authorized = ref(false);
@@ -13,14 +13,14 @@ const stations = ref<any[]>([]);
 const scanError = ref();
 vi.mock("../src/composables/useUserGeolocation", () => ({
   useUserGeolocation: () => ({ coordinates, isAuthorized: authorized, permissionState: permission,
-    isStale: ref(false), isLoading: ref(false), askGeolocation: mocks.ask }),
+    isStale: ref(false), isLoading: ref(false), askGeolocation: mocks.ask, refresh: mocks.refresh }),
 }));
 vi.mock("../src/features/nearby-stations/useNearbyStations", () => ({
   useNearbyStations: () => ({ radius: ref(0), clusterGroupingDistanceMeters: ref(0), stations,
     error: scanError, selectPlace: mocks.scan }),
 }));
 vi.mock("../src/services/nearbyWalkingRoutes", () => ({ getNearbyWalkingRouteMatrix: mocks.routes }));
-vi.mock("../src/services/idfm", () => ({ fetchDirectionGroupsForStation: mocks.directions, fetchBoardDepartures: mocks.departures }));
+vi.mock("../src/services/idfm", () => ({ searchLineStations: mocks.stations, fetchDirectionGroupsForStation: mocks.directions, fetchBoardDepartures: mocks.departures }));
 vi.mock("../src/i18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 import AutoDashboard from "../src/features/auto-dashboard/AutoDashboard.vue";
 
@@ -30,7 +30,7 @@ function position(lat: number): UserGeolocationCoordinates {
 }
 function entry(id: string, lat: number) {
   return { lines: [{ id: `line-${id}`, mode: "BUS", code: id, label: id, color: "#000", textColor: "#fff" }],
-    memberStations: [{ id, lat, lon: 2, name: id, rawRefs: [`stop_area:${id}`], lineIds: [`line-${id}`] }] };
+    memberStations: [{ id, lat, lon: 2, name: id, rawRefs: ["station:FR::Quay:50221140:FR1"], lineIds: [`line-${id}`] }] };
 }
 function route(id: string, seconds = 300) {
   return { id, durationSeconds: seconds, distanceMeters: 200, provider: "openrouteservice", coordinates: [{ lat: 48, lon: 2 }, { lat: 48.001, lon: 2 }] };
@@ -46,12 +46,21 @@ beforeEach(() => {
   vi.clearAllMocks();
   coordinates.value = undefined;
   authorized.value = false;
-  permission.value = "prompt";
+  permission.value = "granted";
   scanError.value = undefined;
   stations.value = [entry("a", 48.001)];
   mocks.ask.mockImplementation(async () => { permission.value = "granted"; authorized.value = true; coordinates.value = position(48); return true; });
   mocks.scan.mockResolvedValue(undefined);
   mocks.routes.mockImplementation(async (_origin, destinations) => destinations.map((destination: { id: string }) => route(destination.id)));
+  mocks.stations.mockImplementation(async (line: { id: string }) => stations.value
+    .flatMap((station) => station.memberStations)
+    .filter((station) => station.lineIds.includes(line.id))
+    .map((station) => ({
+      label: station.name, lat: station.lat, lon: station.lon,
+      id: `stop_area:IDFM:${station.id}`,
+      monitoringRef: `STIF:StopArea:SP:${station.id}:`,
+      scheduleStopAreaRef: `stop_area:IDFM:${station.id}`,
+    })));
   mocks.directions.mockResolvedValue([]);
   mocks.departures.mockResolvedValue({ departures: [], directionGroups: [] });
 });
@@ -66,9 +75,23 @@ describe("AUTO dashboard", () => {
     expect(mocks.ask).toHaveBeenCalledOnce();
     expect(mocks.routes).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "preferred", { persistentCache: false });
     expect(wrapper.findAll("transit-board-stub")).toHaveLength(1);
+    expect(mocks.departures).toHaveBeenCalledWith(expect.objectContaining({
+      line: expect.objectContaining({ ref: "STIF:Line::line-a:" }),
+      schedule: { lineRef: "line-a", stopAreaRef: "stop_area:IDFM:a" },
+      monitoringPoints: [expect.objectContaining({ ref: "STIF:StopArea:SP:a:" })],
+    }), expect.anything());
     expect(wrapper.text()).toContain("autoDashboard.walkingDistance");
     await wrapper.findAll("button").at(-1)!.trigger("click");
     expect(wrapper.emitted("back")).toHaveLength(1);
+  });
+
+  it("waits for a tap before requesting browser permission", async () => {
+    permission.value = "prompt";
+    wrapper = mount(AutoDashboard, { global: { stubs: { TransitBoard: true } } });
+    await settle();
+    expect(mocks.ask).not.toHaveBeenCalled();
+    await wrapper.get(".auto-dashboard__status button").trigger("click");
+    expect(mocks.ask).toHaveBeenCalledOnce();
   });
 
   it("shows denial, clears cards on revocation and cancels work on unmount", async () => {

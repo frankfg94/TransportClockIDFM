@@ -4,11 +4,13 @@ import TransitBoard from "../../components/TransitBoard.vue";
 import { useUserGeolocation } from "../../composables/useUserGeolocation";
 import { useNearbyStations } from "../nearby-stations/useNearbyStations";
 import { createBoardFromDraft, createFallbackDirectionGroup } from "../../services/boardBuilder";
-import { fetchBoardDepartures, fetchDirectionGroupsForStation } from "../../services/idfm";
+import { fetchBoardDepartures, fetchDirectionGroupsForStation, searchLineStations } from "../../services/idfm";
+import { idfmLineToSiriRef } from "../../services/idfmStopReferences";
 import { getNearbyWalkingRouteMatrix } from "../../services/nearbyWalkingRoutes";
 import { getCoordinatesDistanceMeters } from "../../services/distance";
-import { toDashboardLineOption, toDashboardStationOption } from "../transport-map/adapters/dashboard";
-import type { TransitBoardConfig, BoardDeparturesResult, Departure, DirectionDepartureGroup } from "../../types/transit";
+import { toDashboardLineOption } from "../transport-map/adapters/dashboard";
+import { normalizeStationLabel } from "../nearby-stations/nearbyStationSchedules";
+import type { TransitBoardConfig, BoardDeparturesResult, Departure, DirectionDepartureGroup, StationSearchOption } from "../../types/transit";
 import type { NearbyWalkingRoute } from "../nearby-stations/nearbyWalkingRoutes";
 import { useI18n } from "../../i18n";
 import { filterTerminalOnly } from "../app-settings/appSettings";
@@ -50,6 +52,7 @@ let generation = 0;
 let controller: AbortController | undefined;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
+let positionTimer: ReturnType<typeof setInterval> | undefined;
 let lastScanAt = 0;
 let lastOrigin: { lat: number; lon: number } | undefined;
 let lastFixTimestamp = 0;
@@ -68,7 +71,9 @@ const validPosition = computed(() => {
 const message = computed(() => {
   if (location.permissionState.value === "unsupported") return t("autoDashboard.unsupported");
   if (location.permissionState.value === "denied") return t("autoDashboard.denied");
-  if (location.isLoading.value || location.permissionState.value === "checking") return t("autoDashboard.permissionLoading");
+  if (!validPosition.value && (location.isLoading.value || location.permissionState.value === "checking")) {
+    return t("autoDashboard.permissionLoading");
+  }
   if (
     location.permissionState.value === "prompt" ||
     location.permissionState.value === "unknown"
@@ -95,7 +100,7 @@ function scheduleScan(force = false): void {
   const moved = !lastOrigin || getCoordinatesDistanceMeters(lastOrigin.lat, lastOrigin.lon, point.lat, point.lon)
     >= Math.max(30, Math.min(100, point.accuracy ?? 30));
   if (loading.value && !moved) return;
-  if (!force && !moved && !stabilizer.hasPending) return;
+  if (!force && !moved && controller && !stabilizer.hasPending) return;
   if (!force && stabilizer.hasPending && !moved && point.timestamp === lastFixTimestamp) return;
   invalidate();
   const delay = Math.max(0, lastScanAt + 30_000 - Date.now());
@@ -155,6 +160,7 @@ async function scan(): Promise<void> {
       .sort((a, b) => routeFor(a)!.durationSeconds - routeFor(b)!.durationSeconds || a.key.localeCompare(b.key))
       .slice(0, 12);
     const next: Card[] = [];
+    const stationsByLine = new Map<string, Promise<StationSearchOption[]>>();
     // Direction discovery is bounded to three concurrent requests and cached in memory.
     let index = 0;
     await Promise.all(Array.from({ length: Math.min(3, selected.length) }, async () => {
@@ -162,14 +168,33 @@ async function scan(): Promise<void> {
         const candidate = selected[index++]!;
         const line = toDashboardLineOption(candidate.line);
         if (!line) continue;
-        const station = toDashboardStationOption(candidate.station);
         let board = boardCache.get(candidate.key);
         if (!board) {
+          let stations = stationsByLine.get(line.navitiaId);
+          if (!stations) {
+            stations = searchLineStations(line, "", { signal: currentController.signal });
+            stationsByLine.set(line.navitiaId, stations);
+          }
+          const source = candidate.station;
+          const label = normalizeStationLabel(source.name);
+          // Map quays and Navitia stop areas use different references.
+          // Only accept a single nearby stop with the same name on this line.
+          const matches = (await stations.catch(() => [])).filter((station) =>
+            station.scheduleStopAreaRef && station.lat !== undefined && station.lon !== undefined &&
+            normalizeStationLabel(station.label) === label &&
+            getCoordinatesDistanceMeters(source.lat, source.lon, station.lat, station.lon) <= 150,
+          );
+          if (!current()) return;
+          const station = matches.length === 1 ? matches[0] : undefined;
+          if (!station) {
+            partial.value = true;
+            continue;
+          }
           const groups = await fetchDirectionGroupsForStation(line, station, { signal: currentController.signal })
             .catch(() => { if (current()) partial.value = true; return [createFallbackDirectionGroup(station.label)]; });
           if (!current()) return;
           const resolvedGroups = groups.length ? groups : [createFallbackDirectionGroup(station.label)];
-          board = createBoardFromDraft({ family: line.family, line, station }, resolvedGroups.map((group) =>
+          board = createBoardFromDraft({ family: line.family, line: { ...line, ref: idfmLineToSiriRef(line.ref) }, station }, resolvedGroups.map((group) =>
             group.id === "all-directions" ? { ...group, label: t("autoDashboard.allDirections") } : group,
           ));
           board = { ...board, id: `auto-${board.id}` };
@@ -207,7 +232,12 @@ async function refreshDepartures(request = generation, signal = controller?.sign
       try {
         const board = typeof props.maxDeparturesPerDirection === "number"
           ? { ...card.board, maxDeparturesPerDirection: props.maxDeparturesPerDirection } : card.board;
-        const result = await fetchBoardDepartures(board, { signal });
+        const result = await fetchBoardDepartures(board, {
+          signal,
+          onUpdate: (update) => {
+            if (request === generation && !signal.aborted) card.result = update;
+          },
+        });
         if (request !== generation || signal.aborted) return;
         card.result = result;
         card.error = undefined;
@@ -257,11 +287,17 @@ onMounted(() => {
   document.addEventListener("visibilitychange", onVisibility);
   activate();
   refreshTimer = setInterval(() => { if (!loading.value) void refreshDepartures(); }, 60_000);
+  positionTimer = setInterval(() => {
+    if (document.hidden || !location.isAuthorized.value || location.isLoading.value) return;
+    const fix = location.coordinates.value;
+    if (!fix || Date.now() - fix.timestamp >= 30_000) void location.refresh();
+  }, 30_000);
 });
 onBeforeUnmount(() => {
   disposed = true;
   invalidate();
   if (refreshTimer !== undefined) clearInterval(refreshTimer);
+  if (positionTimer !== undefined) clearInterval(positionTimer);
   document.removeEventListener("visibilitychange", onVisibility);
   routeCache.clear();
 });
@@ -282,7 +318,12 @@ onBeforeUnmount(() => {
       >
         {{ t(location.permissionState.value === 'denied' ? "autoDashboard.retry" : "autoDashboard.requestLocation") }}
       </button>
-      <button v-if="validPosition && scanError" type="button" class="button-secondary" @click="scheduleScan(true)">{{ t("autoDashboard.retryScan") }}</button>
+      <button
+        v-if="validPosition && !loading && (scanError || (partial && !cards.length))"
+        type="button"
+        class="button-secondary"
+        @click="scheduleScan(true)"
+      >{{ t("autoDashboard.retryScan") }}</button>
       <button type="button" class="button-secondary" @click="emit('back')">{{ t("autoDashboard.back") }}</button>
     </div>
     <div v-if="validPosition" class="boards-grid" :class="{ 'boards-grid--list': displayMode === 'list' }">
