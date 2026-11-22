@@ -1,3 +1,4 @@
+import { isHighFidelityTransportPath, selectPreferredLinePaths } from "../../transport-map/data/pathPrecedence";
 import type { LonLatPoint } from "../../transport-map/geo/coordinateKernel";
 import type { NeighborhoodJourneyBenchmark } from "./contracts";
 import { chooseFastestJourney, summarizeJourney } from "./journeys";
@@ -23,7 +24,7 @@ function validPoint(point: LonLatPoint | undefined): point is LonLatPoint {
 export function createPreviewTransitPathResolver(network: TransportMapNetwork, paths: readonly GlobalMapPath[]) {
   const pathsByLine = new Map<string, GlobalMapPath[]>();
   for (const path of paths) {
-    if (path.geometrySource === "netex-schematic-fallback" || path.quality.fallback) continue;
+    if (!isHighFidelityTransportPath(path)) continue;
     const group = pathsByLine.get(path.lineId);
     if (group) group.push(path);
     else pathsByLine.set(path.lineId, [path]);
@@ -33,7 +34,7 @@ export function createPreviewTransitPathResolver(network: TransportMapNetwork, p
     if (section.type !== "public_transport" || !validPoint(section.fromPoint) || !validPoint(section.toPoint)) return;
     if (!cache.has(section)) {
       const line = (section.lineId && network.linesById.get(`line:${section.lineId}`)) || resolveGlobalTransportItineraryLine(section, network.lines);
-      const paths = line && pathsByLine.get(line.id);
+      const paths = line && selectPreferredLinePaths(pathsByLine.get(line.id) ?? [], [], line.id);
       cache.set(section, line && paths && clipGlobalTransportItineraryLine(paths, line, network.stationsById, section, section.fromPoint, section.toPoint));
     }
     return cache.get(section);
@@ -55,7 +56,8 @@ export function journeyPreviewRow(benchmark: NeighborhoodJourneyBenchmark, selec
       label: section.lineCode || section.lineId, mode: section.lineMode,
     } : undefined;
     if (badge) legs.push({ badge, from: section.fromName, to: section.toName });
-    const shape = section.geometry?.length ? section.geometry : transitPath?.(section);
+    const shape = (transit && journey?.source === "gtfs" ? transitPath?.(section) : undefined)
+      ?? (section.geometry?.length ? section.geometry : transitPath?.(section));
     if (shape && shape.length >= 2 && shape.every(validPoint)
       && section.walkingProvider !== "straight-line" && section.finalLineAccess?.status !== "estimated") {
       paths.push({ kind: transit ? "transit" : "walk", color: badge?.color ?? "#536579", coordinates: shape });

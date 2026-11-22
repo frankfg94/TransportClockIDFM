@@ -391,7 +391,7 @@ function createPathData(points: readonly ScreenPoint[]): string {
     .join(" ");
 }
 
-export function createChevrons(
+function createChevrons(
   points: readonly ScreenPoint[],
   fragmentKey: string,
   directionId: string,
@@ -415,6 +415,60 @@ export function createChevrons(
     });
   }
   return result;
+}
+
+export function prepareSelectedRoutePlayback(subpaths: readonly (readonly WorldPoint[])[]) {
+  const sections = subpaths.flatMap(points => {
+    const lengths = points.slice(1).map((point, index) => distance(points[index]!, point));
+    const length = lengths.reduce((sum, value) => sum + value, 0);
+    return length > 0 ? [{ points, lengths, length }] : [];
+  });
+  const length = sections.reduce((sum, section) => sum + section.length, 0);
+  if (!length) return undefined;
+  return {
+    length,
+    start: sections[0]!.points[0]!,
+    trace(from: number, to: number): WorldPoint[][] {
+      const fragments: WorldPoint[][] = [];
+      let distanceAlong = 0;
+      for (const section of sections) {
+        let fragment: WorldPoint[] | undefined;
+        for (let index = 0; index < section.lengths.length; index += 1) {
+          const segmentLength = section.lengths[index]!;
+          const end = distanceAlong + segmentLength;
+          const low = Math.max(from, distanceAlong);
+          const high = Math.min(to, end);
+          if (high > low) {
+            const start = section.points[index]!;
+            const target = section.points[index + 1]!;
+            const pointAt = (distance: number) => {
+              const ratio = (distance - distanceAlong) / segmentLength;
+              return { x: start.x + (target.x - start.x) * ratio, y: start.y + (target.y - start.y) * ratio };
+            };
+            if (!fragment) {
+              fragment = [pointAt(low)];
+              fragments.push(fragment);
+            }
+            fragment.push(pointAt(high));
+          }
+          distanceAlong = end;
+          if (end >= to) return fragments;
+        }
+      }
+      return fragments;
+    },
+    sample(progress: number): WorldPoint {
+      if (progress >= 1) return sections.at(-1)!.points.at(-1)!;
+      let remaining = Math.max(0, progress) * length;
+      for (const section of sections) {
+        if (remaining <= section.length) {
+          return samplePolyline(section.points, section.lengths, remaining)!.point;
+        }
+        remaining -= section.length;
+      }
+      return sections.at(-1)!.points.at(-1)!;
+    },
+  };
 }
 
 function createExitIndicators(

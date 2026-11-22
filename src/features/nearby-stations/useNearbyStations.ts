@@ -3,7 +3,7 @@ import type { GeocoderPoint, TransportMapGeocoder } from "../transport-map/contr
 import { GLOBAL_MAP_MODE_ORDER, type GlobalMapMode } from "../transport-map/contracts/manifest";
 import type { TransportMapNetwork, TransportMapViewportResult } from "../transport-map/contracts/network";
 import { TransportMapDataSource } from "../transport-map/data/createTransportMapDataSource";
-import type { CameraState } from "../transport-map/geo/camera";
+import { createCamera, type CameraState } from "../transport-map/geo/camera";
 import { GeocodingApiError, createIgnTransportMapGeocoder } from "./geocoding";
 import {
   NEARBY_MAP_MARGIN_METERS,
@@ -399,6 +399,31 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
     transportMapNetwork.value = undefined;
   });
 
+  let journeySource: TransportMapDataSource | undefined;
+  let journeyQueue = Promise.resolve();
+  const journeyDetail = new Map<string, Promise<import("../transport-map/contracts/manifest").GlobalMapPath[]>>();
+  function loadJourneyDetailPaths(lineId: string) {
+    const cached = journeyDetail.get(lineId);
+    if (cached) return cached;
+    const request = journeyQueue.then(async () => {
+      if (!journeySource) {
+        journeySource = new TransportMapDataSource();
+        await journeySource.initialize();
+      }
+      const result = await journeySource.queryViewport(createCamera({ zoom: 14.2 }), 0, 1, lineId, [lineId]);
+      return result.paths.filter(path => path.lineId === lineId);
+    }).catch(error => {
+      journeyDetail.delete(lineId);
+      journeySource?.dispose();
+      journeySource = undefined;
+      throw error;
+    });
+    journeyQueue = request.then(() => {}, () => {});
+    journeyDetail.set(lineId, request);
+    return request;
+  }
+  onBeforeUnmount(() => { void journeyQueue.then(() => journeySource?.dispose()); });
+
   return {
     query,
     suggestions,
@@ -423,6 +448,7 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
     useCoordinates,
     scanNearbyStations,
     queryTransportMapViewport,
+    loadJourneyDetailPaths,
     loadJourneyPreviewPaths: async (layer: "core" | "bus") => (await ensureSource()).ensureRegionalLayer(layer),
     toggleStation,
     toggleLine,

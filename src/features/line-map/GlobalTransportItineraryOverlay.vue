@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Clock3 } from "lucide-vue-next";
 import LineIconBadge from "../../components/LineIconBadge.vue";
 import {
@@ -64,6 +64,7 @@ const props = defineProps<{
   destination?: GeocoderPoint;
   segments?: readonly GlobalTransportItinerarySegment[];
   steps?: readonly GlobalTransportItineraryStep[];
+  pathsOnly?: boolean;
   camera: CameraState;
   getSectionExits?: (section: NearbyJourneySection) => readonly RouteExit[];
 }>();
@@ -108,7 +109,7 @@ const paths = computed<PreparedItineraryPath[]>(() => {
       return [];
     }
 
-    const iconPlacement = segment.kind === "transit"
+    const iconPlacement = !props.pathsOnly && (segment.kind === "transit" || segment.durationSeconds)
       ? findPathIconPlacement(worldPoints)
       : undefined;
     return [{
@@ -138,6 +139,39 @@ const projectedPaths = computed(() => paths.value.map((path) => ({
   ...path,
   d: createScreenPathData(path.worldPoints, props.camera),
 })));
+
+const durationsHovered = ref(false);
+const durationsTapped = ref(false);
+let durationTimer: ReturnType<typeof setTimeout> | undefined;
+
+function showTappedDurations(event: MouseEvent) {
+  const pointerType = "pointerType" in event ? event.pointerType : undefined;
+  if (pointerType ? pointerType === "mouse" : !window.matchMedia("(hover: none)").matches) return;
+  clearTimeout(durationTimer);
+  durationsTapped.value = true;
+  durationTimer = setTimeout(() => { durationsTapped.value = false; }, 10_000);
+}
+
+watch(() => props.route?.id, () => {
+  clearTimeout(durationTimer);
+  durationsHovered.value = false;
+  durationsTapped.value = false;
+});
+onBeforeUnmount(() => clearTimeout(durationTimer));
+
+const durationBadges = computed(() => paths.value.flatMap((path) => {
+  if (!durationsHovered.value && !durationsTapped.value) return [];
+  if (!path.iconWorldPoint || !path.durationSeconds || path.durationSeconds <= 0) return [];
+  const point = worldToScreen(path.iconWorldPoint, props.camera);
+  if (!isFiniteScreenPoint(point)) return [];
+  return [{
+    id: path.id,
+    kind: path.kind,
+    text: minutes(path.durationSeconds),
+    x: point.x + (path.iconOffset?.x ?? 0),
+    y: point.y + (path.iconOffset?.y ?? 0) + (path.line ? 29 : 0),
+  }];
+}));
 
 const endpointWorldNodes = computed(() => {
   const route = props.route;
@@ -338,6 +372,15 @@ function isFiniteScreenPoint(point: ScreenPoint): boolean {
             :d="path.d"
             :style="path.kind === 'transit' ? { stroke: path.color ?? '#5146ff' } : undefined"
           />
+          <path
+            v-if="!pathsOnly && path.durationSeconds && path.durationSeconds > 0"
+            class="global-transport-itinerary-overlay__duration-target"
+            :d="path.d"
+            :data-duration-target="path.kind"
+            @pointerenter="event => { if (event.pointerType === 'mouse') durationsHovered = true; }"
+            @pointerleave="event => { if (event.pointerType === 'mouse') durationsHovered = false; }"
+            @click="showTappedDurations"
+          />
         </g>
       </g>
       <g v-for="node in stepNodes" :key="node.step.id" v-bind="itineraryStepAttributes(node.step)">
@@ -348,8 +391,19 @@ function isFiniteScreenPoint(point: ScreenPoint): boolean {
           <text x="23" y="2">{{ minutes(node.step.durationSeconds) }}</text>
         </g>
       </g>
+      <g
+        v-for="badge in durationBadges"
+        :key="badge.id"
+        class="global-transport-itinerary-overlay__wait"
+        :data-duration-kind="badge.kind"
+        :transform="`translate(${badge.x - (32 + badge.text.length * 7) / 2} ${badge.y - 12})`"
+      >
+        <rect :width="32 + badge.text.length * 7" height="24" rx="8" />
+        <Clock3 x="7" y="5" :size="14" aria-hidden="true" />
+        <text x="25" y="16">{{ badge.text }}</text>
+      </g>
       <circle
-        v-for="node in endpointNodes"
+        v-for="node in pathsOnly ? [] : endpointNodes"
         :key="node.id"
         class="global-transport-itinerary-overlay__node"
         :class="node.className"
@@ -384,7 +438,7 @@ function isFiniteScreenPoint(point: ScreenPoint): boolean {
         >{{ exit.label }}</text>
       </g>
     </svg>
-    <div class="global-transport-itinerary-overlay__line-icons">
+    <div v-if="!pathsOnly" class="global-transport-itinerary-overlay__line-icons">
       <span
         v-for="path in lineIconPaths"
         :key="`${path.id}:icon`"
@@ -406,6 +460,7 @@ function isFiniteScreenPoint(point: ScreenPoint): boolean {
 <style scoped>
 .global-transport-itinerary-overlay { inset: 0; overflow: visible; pointer-events: none; position: absolute; width: 100%; height: 100%; z-index: 3; }
 .global-transport-itinerary-overlay > svg { inset: 0; overflow: visible; pointer-events: none; position: absolute; width: 100%; height: 100%; }
+.global-transport-itinerary-overlay__duration-target { fill: none; stroke: transparent; stroke-width: 22px; pointer-events: stroke; }
 .global-transport-itinerary-overlay__line-icons { inset: 0; overflow: visible; pointer-events: none; position: absolute; }
 .global-transport-itinerary-overlay__line-icon { align-items: center; display: inline-flex; position: absolute; transform: translate(-50%, -50%); padding: 2px 3px; border: 1px solid rgba(81, 70, 255, .18); border-radius: 9px; background: rgba(255, 255, 255, .96); box-shadow: 0 4px 12px rgba(15, 23, 42, .2); }
 .global-transport-itinerary-overlay__line-icon :deep(.line-icon-badge) { height: 27px; min-width: 38px; }

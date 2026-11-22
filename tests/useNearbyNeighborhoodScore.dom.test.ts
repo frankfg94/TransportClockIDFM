@@ -607,7 +607,9 @@ describe("useNearbyNeighborhoodScore", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     await flushPromises();
-    expect(placesProvider.searchNearby).toHaveBeenCalledTimes(1);
+    const directorySearches = () => vi.mocked(placesProvider.searchNearby).mock.calls
+      .filter(([request]) => request.radiusMeters === NEARBY_DIRECTORY_MAX_RADIUS_METERS);
+    expect(directorySearches()).toHaveLength(1);
 
     const line = createLine();
     network.value = createNetwork(line);
@@ -615,7 +617,7 @@ describe("useNearbyNeighborhoodScore", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     await flushPromises();
 
-    expect(placesProvider.searchNearby).toHaveBeenCalledTimes(1);
+    expect(directorySearches()).toHaveLength(1);
     await vi.waitFor(() => expect(travelRoutesProvider.findJourneys).toHaveBeenCalledTimes(1));
     expect(travelRoutesProvider.findJourneys).toHaveBeenCalledWith(expect.objectContaining({
       datetime: "20260902T090000",
@@ -984,3 +986,4 @@ describe("useNearbyNeighborhoodScore", () => {
     vi.unstubAllGlobals();
   });
 });
+import { NEARBY_DIRECTORY_MAX_RADIUS_METERS } from "../src/features/nearby-stations/nearbyPlacePresentation";

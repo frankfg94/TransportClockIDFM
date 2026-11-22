@@ -5,9 +5,10 @@ import { RULE_KEYS, SOURCE_KEYS } from "../i18nKeys";
 import { chooseFastestJourney, summarizeJourney } from "../journeys";
 import { formatPharmacyLabel, makePlaceFact, placeKind, scorePlaces } from "../places";
 import { clamp, saturatingNeighborhoodBonus } from "../primitives";
+import { HOSPITAL_ACCESS_RULE, qualifiesHospitalTransit } from "./hospitalAccessRules";
 
 const PHARMACY_LIST_MAX_WALKING_MINUTES = 10;
-export const HEALTH_SCORE_RULES = { missing: 2, base: 6, extraTarget: 3, extraMaximum: 2, hospitalMinutes: 30 } as const;
+export const HEALTH_SCORE_RULES = { missing: 2, base: 6, extraTarget: 3, extraMaximum: 2, hospitalMinutes: HOSPITAL_ACCESS_RULE.walkingMinutes } as const;
 
 export function buildHealthCategory(input: NeighborhoodScoreInput): NeighborhoodCategoryResult {
   const base = category("health");
@@ -21,7 +22,8 @@ export function buildHealthCategory(input: NeighborhoodScoreInput): Neighborhood
     };
   }
   const pharmacies = scorePlaces(input, (place) => PHARMACY_KINDS.has(placeKind(place)));
-  const hospitals = scorePlaces(input, (place) => HOSPITAL_KINDS.has(placeKind(place)), HEALTH_SCORE_RULES.hospitalMinutes);
+  const hospitals = scorePlaces({ ...input, places: input.hospitalPlaces ?? input.places },
+    (place) => HOSPITAL_KINDS.has(placeKind(place)), Infinity);
   const positiveFacts: NeighborhoodFact[] = [];
   const negativeFacts: NeighborhoodFact[] = [];
   const nearest = pharmacies[0];
@@ -76,8 +78,11 @@ export function buildHealthCategory(input: NeighborhoodScoreInput): Neighborhood
   }
 
   const hospital = hospitals
-    .map((candidate) => ({ candidate, journey: chooseFastestJourney(input.hospitalJourneys?.[candidate.place.id]) }))
-    .filter(({ candidate, journey }) => candidate.minutes <= HEALTH_SCORE_RULES.hospitalMinutes || (journey && journey.durationSeconds <= HEALTH_SCORE_RULES.hospitalMinutes * 60))
+    .map((candidate) => {
+      const journey = chooseFastestJourney(input.hospitalJourneys?.[candidate.place.id]?.filter(qualifiesHospitalTransit));
+      return { candidate, journey: journey && (!candidate.routed || journey.durationSeconds < candidate.minutes * 60) ? journey : undefined };
+    })
+    .filter(({ candidate, journey }) => candidate.minutes <= HEALTH_SCORE_RULES.hospitalMinutes || journey)
     .sort((left, right) => (left.journey?.durationSeconds ?? left.candidate.minutes * 60)
       - (right.journey?.durationSeconds ?? right.candidate.minutes * 60))[0];
   if (hospital) {
@@ -103,7 +108,7 @@ export function buildHealthCategory(input: NeighborhoodScoreInput): Neighborhood
       sourceKey: journeySummary ? SOURCE_KEYS.journeys : routedWalking ? SOURCE_KEYS.placesAndWalking : SOURCE_KEYS.places,
       proof: routed ? "direct" : "derived",
       ruleKey: RULE_KEYS.hospitalPresence,
-      ruleValues: { threshold: 30 },
+      ruleValues: { threshold: HOSPITAL_ACCESS_RULE.walkingMinutes },
       travel: hospital.journey ? { journey: hospital.journey } : undefined,
     }));
   }

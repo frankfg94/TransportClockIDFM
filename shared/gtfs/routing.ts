@@ -278,7 +278,7 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
   }
   if (serviceDate < manifest.routing.startDate || (serviceDate > manifest.routing.endDate
     && start > gtfsServiceEpoch(manifest.routing.endDate) + index.maxTimeSeconds)) return unavailable("out-of-coverage");
-  const key = JSON.stringify([versionKey, request.origin.lon, request.origin.lat, request.datetime, [...(request.allowedModes ?? [])].sort()]);
+  const key = JSON.stringify([versionKey, request.origin.lon, request.origin.lat, request.datetime, [...(request.allowedModes ?? [])].sort(), request.directOnly === true]);
   for (const [k, value] of trees) if (value.expires <= Date.now()) trees.delete(k);
   let entry = trees.get(key);
   const cacheHit = Boolean(entry), calculationStart = performance.now();
@@ -302,7 +302,8 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
       const { paths, margins, transferRule, context } = graph;
       return scanConnections(stream, access, paths, margins, transferRule, context,
         { arrival: start + NEIGHBORHOOD_ROUTING_HORIZON_SECONDS, walkingSeconds: 1200,
-          feederWalkingSeconds: NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS, feederTravelSeconds: NEIGHBORHOOD_ROUTING_HORIZON_SECONDS });
+          feederWalkingSeconds: NEARBY_HEAVY_FEEDER_WALK_MAX_SECONDS, feederTravelSeconds: NEIGHBORHOOD_ROUTING_HORIZON_SECONDS,
+          directOnly: request.directOnly });
     })();
     entry = { expires: Date.now() + 10 * 60_000, promise };
     trees.set(key, entry);
@@ -323,9 +324,12 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
       || line.id === destination.destinationLineId!.replace(/^line:/u, ""))?.id : undefined;
     const platformArrival = destination.arrivalAtPlatform === true && officialStops.length > 0;
     const stationCandidates = officialStops.length ? officialStops.map(id => ({ id, point: coordinate(index.stops[id]!)! })).filter(s => Boolean(s.point)) : nearbyStops(index, destination, 32);
-    const candidates = stationCandidates
-      .filter(s => (platformArrival ? tree.platformLabels : tree.labels).has(s.id))
-      .sort((a, b) => (platformArrival ? tree.platformLabels : tree.labels).get(a.id)!.arrival - (platformArrival ? tree.platformLabels : tree.labels).get(b.id)!.arrival).slice(0, 16);
+    const arrivals = platformArrival ? tree.platformLabels : request.directOnly ? tree.transitLabels : tree.labels;
+    const arrivalWithWalk = (stop: typeof stationCandidates[number]) => arrivals.get(stop.id)!.arrival
+      + (request.directOnly && !platformArrival ? createStraightLineWalkingRoute(stop.point, destination).durationSeconds : 0);
+    const candidates = stationCandidates.filter(s => arrivals.has(s.id))
+      .map(stop => ({ stop, rank: arrivalWithWalk(stop) }))
+      .sort((a, b) => a.rank - b.rank).slice(0, 16).map(({ stop }) => stop);
     // Matrix is directed: egress walks from each stop towards the destination.
     const egress = platformArrival || lineAccess ? [] : await runtime.matrix(event, destination, candidates.map(c => ({ ...c.point, id: String(c.id) })), { reverse: true });
     assertCurrent(event);
@@ -357,7 +361,7 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
     });
     const direct = createStraightLineWalkingRoute(request.origin, destination);
     // A direct walk is only offered for a genuinely nearby target, and is explicitly estimated.
-    if (!lineAccess && direct.distanceMeters <= WALK_RADIUS_METERS) {
+    if (!lineAccess && !request.directOnly && direct.distanceMeters <= WALK_RADIUS_METERS) {
       const route = (await runtime.matrix(event, request.origin, [{ ...destination, id: destination.id }]))[0]!;
       if (route.durationSeconds <= 20 * 60) routes.push({ arrival: start + route.durationSeconds, section: walkingSection(request.origin, destination, route.durationSeconds, route.fallback, route) });
     }
@@ -372,10 +376,11 @@ async function routeNeighborhoodJourneys(event: Context, request: NeighborhoodJo
       const sections = routingSections(node);
       // Only the reference preview needs street polylines for ordinary access
       // walks. Keep bulk station/venue results and final-line access as before.
-      if (request.purpose !== "transport-benchmark") {
+      if (request.purpose !== "transport-benchmark" && !request.directOnly) {
         for (const section of sections) if (section.type === "walking" && !section.finalLineAccess) delete section.geometry;
       }
       const transit = sections.filter(s => s.type === "public_transport");
+      if (request.directOnly && transit.length !== 1) continue;
       // Different boarding stops on the same lines can have very different
       // access walks. Preserve them until the nearest-access rule is applied.
       const first = transit[0], tramBoarding = first?.lineMode === "TRAM" || first?.lineMode === "CABLE";

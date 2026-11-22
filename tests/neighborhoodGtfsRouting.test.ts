@@ -362,6 +362,16 @@ describe("connection scan transfers and branches", () => {
     ({ from, to, departure: dep, arrival: arr, tripKey, routeId: tripKey, tripId: tripKey, pickup: 0, dropOff: 0, last: true,
       section: { type: "public_transport", lineId: tripKey, vehicleJourneyId: tripKey, durationSeconds: arr - dep } });
   async function* stream(values: RoutingConnection[]) { yield* values; }
+  it("finds the slower direct service when a connection would arrive earlier", async () => {
+    const values = [connection(0, 1, 10, 100, "a"), connection(0, 2, 30, 500, "direct"),
+      connection(1, 2, 250, 350, "b")];
+    const unrestricted = await scanConnections(stream(values), seed, new Map());
+    const direct = await scanConnections(stream(values), seed, new Map(), new Map(), undefined, undefined, { directOnly: true });
+    expect(unrestricted.transitLabels.get(2)?.arrival).toBe(350);
+    expect(direct.transitLabels.get(2)?.arrival).toBe(500);
+    expect(routingSections(direct.transitLabels.get(2)!).filter(section => section.type === "public_transport")
+      .map(section => section.lineId)).toEqual(["direct"]);
+  });
   it("uses explicit map access for an immediate tram before testing departure reachability, while retaining routed bus access", async () => {
     const access = new Map<number, RoutingNode>([[0, { arrival: 247, walkingSeconds: 247,
       section: { type: "walking", durationSeconds: 247, timingSource: "schedule", walkingProvider: "ign-bdtopo",

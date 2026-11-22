@@ -13,6 +13,10 @@ import type {
   NeighborhoodDatasetStatus,
 } from "./neighborhood/criterionRegistry";
 import NearbyNeighborhoodScoreFact from "./NearbyNeighborhoodScoreFact.vue";
+import NatureVerdictPanel from "./NatureVerdictPanel.vue";
+import { analyzeNearbyJourneyTiming } from "./nearbyJourneyTiming";
+import type { GreenSpaceTransitOptions } from "./useGreenSpaceTransit";
+import type { GreenMapReference, GreenPoint } from "../../../shared/natureInCity";
 import NeighborhoodScoreHelp from "./NeighborhoodScoreHelp.vue";
 import { getNeighborhoodFactMarker } from "./neighborhood/facts";
 import { transportSectionValues } from "./neighborhood/factPresentation";
@@ -26,6 +30,9 @@ import type { NearbyRealEstatePdfState } from "./neighborhoodScorePdf";
 const props = defineProps<{
   result: NeighborhoodScoreResult;
   educationPlaces?: readonly NearbyPlace[];
+  natureOrigin?: GreenPoint;
+  natureTransit?: GreenSpaceTransitOptions;
+  natureFocus?: string;
   educationWalkingRoutes?: Readonly<Record<string, NeighborhoodWalkingMetrics | undefined>>;
   originLabel?: string;
   workplaceLabel?: string;
@@ -43,14 +50,44 @@ const props = defineProps<{
 const emit = defineEmits<{
   "change-origin": [];
   "retry-source": [];
+  "prepare-nature": [focus: string];
+  "update:natureFocus": [focus: string | undefined];
 }>();
 
 const { d, t } = useI18n();
 const selectedFactId = ref<string>();
+const naturePanel = ref<InstanceType<typeof NatureVerdictPanel>[]>();
+const natureMapFacts = computed(() => props.result.categories
+  .flatMap(category => [...category.positiveFacts, ...category.negativeFacts, ...category.neutralFacts].filter(fact => fact.greenMap)));
+const natureSubsites = computed(() => new Map(props.natureTransit?.spaces?.map(space => [space.id, space.parkSubsites])));
+function factSubsites(fact: NeighborhoodScoreResult["positiveFacts"][number]) {
+  if (fact.greenMap?.scope !== "park") return undefined;
+  return props.natureTransit?.subsites?.get(fact.greenMap.id) ?? natureSubsites.value.get(fact.greenMap.id);
+}
+
+function factAccess(fact: NeighborhoodScoreResult["positiveFacts"][number]) {
+  const reference = fact.greenMap;
+  if (!reference || !("id" in reference)) return undefined;
+  const walking = props.natureTransit?.walkingMinutes?.get(reference.id);
+  const journey = props.natureTransit?.journeys?.get(reference.id);
+  const transit = journey ? Math.ceil(analyzeNearbyJourneyTiming(journey).elapsedSeconds / 60) : undefined;
+  const key = "nearbyStations.neighborhoodScore.natureMap" as const;
+  const walkLabel = walking === undefined || fact.greenSpaceAccess || fact.kind === "greenSpaceExceptional" || fact.kind === "remarkableGarden"
+    || fact.kind === "woodlandWalking" || fact.kind === "woodlandMainWalking"
+    ? undefined : `${t(`${key}.walk`)} · ${t(`${key}.minutes`, { minutes: Math.ceil(walking) })}`;
+  const transitLabel = transit === undefined || fact.travel ? undefined
+    : `${t(`${key}.transitToggle`)} · ${t(`${key}.transitMinutes`, { minutes: transit })}`;
+  return [walkLabel, transitLabel].filter(Boolean).join(" · ");
+}
+
+function expandGreenery(reference: GreenMapReference) {
+  naturePanel.value?.[0]?.show(reference);
+}
 const criteriaById = computed(() => new Map((props.criteria ?? []).map((criterion) => [criterion.id, criterion])));
 const summaryPositiveFacts = computed(() => props.result.positiveFacts.filter((fact) => fact.category !== "education"));
 const diagnosticsOpen = ref(false);
 const scoreHelpOpen = ref(false);
+const natureHelpOpen = ref(false);
 const diagnosticsDialog = ref<HTMLElement>();
 let previouslyFocused: HTMLElement | undefined;
 
@@ -84,6 +121,7 @@ const datasetLabelKeys: Record<string, TranslationKey> = {
   "cinema-access": "nearbyStations.neighborhoodScore.datasets.cinema-access",
   "supermarket-footprints": "nearbyStations.neighborhoodScore.datasets.supermarket-footprints",
   "neighborhood-green-spaces": "nearbyStations.neighborhoodScore.datasets.neighborhood-green-spaces",
+  "osm-green-space-footprints": "nearbyStations.neighborhoodScore.datasets.osm-green-space-footprints",
   "walking-routes": "nearbyStations.neighborhoodScore.datasets.walking-routes",
   "address-book": "nearbyStations.neighborhoodScore.personalJourneys.directoryDataset",
   "personal-addresses": "nearbyStations.neighborhoodScore.personalJourneys.addressesDataset",
@@ -283,7 +321,12 @@ onBeforeUnmount(() => {
               class="nearby-neighborhood-score-card__diagnostics-category"
             >
               <header>
-                <h3>{{ t(category.labelKey) }}</h3>
+                <div class="nearby-category-title">
+            <h3>{{ t(category.labelKey) }}</h3>
+            <button v-if="category.id === 'nature-leisure'" type="button" class="nearby-nature-help"
+              :aria-label="t('nearbyStations.neighborhoodScore.natureRules.title')" :aria-expanded="natureHelpOpen"
+              @click="natureHelpOpen = !natureHelpOpen"><CircleHelp :size="18" aria-hidden="true" /></button>
+          </div>
                 <span
                   v-if="criteriaById.get(category.id)"
                   class="nearby-neighborhood-score-card__diagnostic-status"
@@ -359,7 +402,7 @@ onBeforeUnmount(() => {
       }) }}
     </p>
 
-    <section v-if="summaryPositiveFacts.length || result.negativeFacts.length || result.neutralFacts.length" class="nearby-neighborhood-score-card__highlights">
+    <section v-if="summaryPositiveFacts.length || result.negativeFacts.length" class="nearby-neighborhood-score-card__highlights">
       <div v-if="summaryPositiveFacts.length" class="nearby-neighborhood-score-card__highlight nearby-neighborhood-score-card__highlight--positive">
         <h3>{{ t("nearbyStations.neighborhoodScore.positives") }}</h3>
         <p
@@ -382,35 +425,40 @@ onBeforeUnmount(() => {
           {{ factLabel(fact) }}
         </p>
       </div>
-      <div v-if="result.neutralFacts.length" class="nearby-neighborhood-score-card__highlight nearby-neighborhood-score-card__highlight--neutral">
-        <h3>{{ t("nearbyStations.neighborhoodScore.neutralFacts") }}</h3>
-        <p
-          v-for="fact in result.neutralFacts"
-          :key="`summary:${fact.id}`"
-          class="nearby-neighborhood-score-card__summary-fact"
-        >
-          <span aria-hidden="true">·</span>
-          {{ factLabel(fact) }}
-        </p>
-      </div>
     </section>
 
     <section class="nearby-neighborhood-score-card__categories" :aria-label="t('nearbyStations.neighborhoodScore.categoriesLabel')">
       <article v-for="category in result.categories" :key="category.id" class="nearby-neighborhood-score-card__category">
         <template v-for="criterion in [criteriaById.get(category.id)]" :key="`${category.id}:status`">
         <header class="nearby-neighborhood-score-card__category-header">
-          <h3>{{ t(category.labelKey) }}</h3>
+          <div class="nearby-category-title">
+            <h3>{{ t(category.labelKey) }}</h3>
+            <button v-if="category.id === 'nature-leisure'" type="button" class="nearby-nature-help"
+              :aria-label="t('nearbyStations.neighborhoodScore.natureRules.title')" :aria-expanded="natureHelpOpen"
+              @click="natureHelpOpen = !natureHelpOpen"><CircleHelp :size="18" aria-hidden="true" /></button>
+          </div>
           <div class="nearby-neighborhood-score-card__category-status">
-            <strong v-if="category.available">{{ category.displayScore }}/10</strong>
-            <span v-else>{{ t("nearbyStations.neighborhoodScore.categoryUnavailable") }}</span>
+            <strong v-if="category.available && category.displayScore !== undefined">{{ category.displayScore }}/10</strong>
+            <span v-else-if="!category.available && criterion?.status !== 'loading'">{{ t("nearbyStations.neighborhoodScore.categoryUnavailable") }}</span>
             <small v-if="criterion?.status === 'loading'" class="nearby-neighborhood-score-card__category-loading">
               {{ t("nearbyStations.neighborhoodScore.criterionLoading") }}
             </small>
-            <small v-else-if="criterion?.datasets.some((dataset) => dataset.status === 'error')" class="nearby-neighborhood-score-card__category-error">
+            <small v-else-if="criterion?.datasets.some(dataset => dataset.status === 'error' && (dataset.required || !category.available))"
+              class="nearby-neighborhood-score-card__category-error">
               {{ t("nearbyStations.neighborhoodScore.criterionError") }}
             </small>
+            <NatureVerdictPanel v-if="category.id === 'nature-leisure'" ref="naturePanel"
+              :facts="natureMapFacts" :origin="natureOrigin" :places="educationPlaces" :transit="natureTransit"
+              :focus="natureFocus" @prepare="emit('prepare-nature', $event)" @update:focus="emit('update:natureFocus', $event)" />
           </div>
         </header>
+        <aside v-if="category.id === 'nature-leisure' && natureHelpOpen" class="nearby-nature-explanation">
+          <h4>{{ t("nearbyStations.neighborhoodScore.natureRules.title") }}</h4>
+          <p>{{ t("nearbyStations.neighborhoodScore.natureRules.network") }}</p>
+          <p>{{ t("nearbyStations.neighborhoodScore.natureRules.levels") }}</p>
+          <p>{{ t("nearbyStations.neighborhoodScore.natureRules.surfaceFallback") }}</p>
+          <p>{{ t("nearbyStations.neighborhoodScore.natureRules.landmark") }}</p>
+        </aside>
         <NeighborhoodTransportLoading v-if="category.id === 'transport'" :tasks="transportLoadingTasks ?? []" />
         <slot v-if="category.id === 'transport'" name="transport-preview" />
         <p v-if="criterion?.datasets.some(dataset => dataset.status === 'loading' && (dataset.id === 'food-markets' || dataset.id === 'cinema-access'))"
@@ -418,7 +466,7 @@ onBeforeUnmount(() => {
           {{ t(category.id === 'daily-life' ? 'nearbyStations.neighborhoodScore.venueAnalysis.marketLoading' : 'nearbyStations.neighborhoodScore.venueAnalysis.cinemaLoading') }}
         </p>
         <slot v-if="category.id === 'transport'" name="personal-journeys" />
-        <p v-if="!category.available && !category.neutralFacts.length" class="nearby-neighborhood-score-card__category-empty">
+        <p v-if="!category.available && !category.neutralFacts.length && criterion?.status !== 'loading'" class="nearby-neighborhood-score-card__category-empty">
           {{ category.unavailableReasonKey ? t(category.unavailableReasonKey) : t("nearbyStations.neighborhoodScore.noData") }}
         </p>
         <div v-if="category.available || category.neutralFacts.length" class="nearby-neighborhood-score-card__facts">
@@ -443,8 +491,11 @@ onBeforeUnmount(() => {
               v-for="fact in category.positiveFacts"
               :key="fact.id"
               :fact="fact"
+              :subsites="factSubsites(fact)"
+              :access-summary="factAccess(fact)"
               :open="selectedFactId === fact.id"
               @toggle="toggleFact(fact.id)"
+              @expand-greenery="expandGreenery"
             />
           </div>
           <div
@@ -459,6 +510,7 @@ onBeforeUnmount(() => {
               :fact="fact"
               :open="selectedFactId === fact.id"
               @toggle="toggleFact(fact.id)"
+              @expand-greenery="expandGreenery"
             />
           </div>
           <div v-if="category.neutralFacts.length" class="nearby-neighborhood-score-card__fact-group nearby-neighborhood-score-card__fact-group--neutral">
@@ -467,8 +519,11 @@ onBeforeUnmount(() => {
               v-for="fact in category.neutralFacts"
               :key="fact.id"
               :fact="fact"
+              :subsites="factSubsites(fact)"
+              :access-summary="factAccess(fact)"
               :open="selectedFactId === fact.id"
               @toggle="toggleFact(fact.id)"
+              @expand-greenery="expandGreenery"
             />
           </div>
           <p v-if="category.id !== 'education' && !category.positiveFacts.length && !category.negativeFacts.length && !category.neutralFacts.length" class="nearby-neighborhood-score-card__category-empty">
@@ -524,6 +579,12 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.nearby-category-title { display: flex; align-items: center; gap: .4rem; }
+.nearby-nature-help { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 50%; background: transparent; color: var(--ink); cursor: pointer; }
+.nearby-nature-help[aria-expanded="true"], .nearby-nature-help:hover { background: var(--surface-soft); }
+.nearby-nature-explanation { margin: .65rem 0; padding: .75rem 1rem; border-left: 2px solid #176649; background: var(--surface-soft); font-size: .85rem; }
+.nearby-nature-explanation :is(h4, p) { margin: .35rem 0; }
+
 .nearby-neighborhood-score-card { background: #fff; border: 1px solid rgba(16,35,63,.12); border-radius: 20px; box-shadow: 0 16px 40px rgba(16,35,63,.08); overflow: visible; padding: 22px; }
 .nearby-neighborhood-score-card__header { align-items: flex-start; display: flex; gap: 20px; justify-content: space-between; }
 .nearby-neighborhood-score-card__eyebrow { color: #5146ff; font-size: .68rem; font-weight: 900; letter-spacing: .1em; margin: 0 0 5px; text-transform: uppercase; }
@@ -584,12 +645,10 @@ onBeforeUnmount(() => {
 .nearby-neighborhood-score-card__highlight { border-radius: 13px; padding: 10px 9px 8px; }
 .nearby-neighborhood-score-card__highlight--positive { background: #f1faf4; border: 1px solid rgba(23,134,76,.14); }
 .nearby-neighborhood-score-card__highlight--negative { background: #fff8f4; border: 1px solid rgba(183,75,36,.15); }
-.nearby-neighborhood-score-card__highlight--neutral { background: #f5f6fa; border: 1px solid rgba(93,105,130,.16); grid-column: 1 / -1; }
 .nearby-neighborhood-score-card__highlight h3, .nearby-neighborhood-score-card__fact-group > span { color: var(--muted); font-size: .68rem; font-weight: 900; letter-spacing: .05em; margin: 0 7px 4px; text-transform: uppercase; }
 .nearby-neighborhood-score-card__summary-fact { align-items: flex-start; color: var(--ink); display: flex; font-size: .78rem; gap: 7px; line-height: 1.35; margin: 0; padding: 5px 7px; }
 .nearby-neighborhood-score-card__highlight--positive .nearby-neighborhood-score-card__summary-fact > span { color: #17864c; font-weight: 950; }
 .nearby-neighborhood-score-card__highlight--negative .nearby-neighborhood-score-card__summary-fact > span { color: #b74b24; font-weight: 950; }
-.nearby-neighborhood-score-card__highlight--neutral .nearby-neighborhood-score-card__summary-fact > span { color: #64748b; font-weight: 950; }
 .nearby-neighborhood-score-card__categories { display: grid; gap: 9px; margin-top: 20px; }
 .nearby-neighborhood-score-card__category { background: #fbfcfe; border: 1px solid rgba(16,35,63,.1); border-radius: 13px; min-width: 0; padding: 12px 9px 9px; }
 .nearby-neighborhood-score-card__category-header { align-items: center; display: flex; gap: 10px; justify-content: space-between; padding: 0 7px 7px; }

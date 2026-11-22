@@ -279,6 +279,9 @@ describe("global transport itinerary geometry", () => {
       const clipped = clipGlobalTransportItineraryLine(paths, mapLine, network.stationsById, section, from!, to!);
       expect(clipped?.length).toBeGreaterThan(2);
       expect(paths.some(path => path.geometrySource === "gtfs")).toBe(true);
+      const leg = { ...section, type: "public_transport", fromPoint: from, toPoint: to };
+      expect(createPreviewTransitPathResolver(network, network.regionalPaths)(leg)).toBeUndefined();
+      expect(createPreviewTransitPathResolver(network, [...network.regionalPaths, ...detailed.paths])(leg)).toEqual(clipped);
     } finally { source.dispose(); }
   });
 
@@ -324,3 +327,4 @@ function makePath(id: string, vertices: GlobalMapPath["vertices"], source: Globa
     minX: 0, minY: 0, maxX: 1, maxY: 1, chunkIds: [],
   };
 }
+import { createPreviewTransitPathResolver } from "../src/features/nearby-stations/neighborhood/journeyPreview";

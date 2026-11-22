@@ -51,7 +51,9 @@ function parsePortion(portion: IgnPortion | undefined, from: NearbyJourneyPoint,
 export function createIgnWalkingMatrix(fetcher: typeof fetch = fetch) {
   type PairCache = Map<string, { expires: number; promise: Promise<DiagnosticWalkingRoute> }>;
   const sharedPairs: PairCache = new Map();
-  const instanceId = crypto.randomUUID();
+  // Workers initializes this matrix at module load, before Web Crypto can
+  // generate random values. Allocate the diagnostic ID on the first request.
+  let instanceId: string | undefined;
   let nextRequestId = 0;
   let cooldownDiagnostic: WalkingRouteDiagnostic | undefined;
   let nextRequestAt = 0, cooldownUntil = 0;
@@ -89,6 +91,7 @@ export function createIgnWalkingMatrix(fetcher: typeof fetch = fetch) {
       profile: "pedestrian", optimization: "fastest", geometryFormat: "geojson", getSteps: "true",
       getBbox: "false", distanceUnit: "meter", timeUnit: "second", crs: "EPSG:4326" }).toString();
     try {
+      instanceId ??= crypto.randomUUID();
       requestId = `${instanceId}:${++nextRequestId}`;
       const response = await fetchBufferedWithTimeout(url, { signal, headers: { accept: "application/json" } }, fetcher, 12_000);
       httpStatus = response.status;

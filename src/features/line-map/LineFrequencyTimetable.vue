@@ -506,72 +506,71 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
     :style="lineColorStyle"
     data-testid="line-frequency-timetable"
   >
-    <p v-if="timetable?.status === 'ready'" class="line-frequency-timetable__hint">{{ t(nextTimetable?.status === "ready" ? "globalMap.sidebar.gtfsFrequency.timetableOperatingDay" : "globalMap.sidebar.gtfsFrequency.timetableNextDayUnavailable") }}</p>
-    <p v-if="timetable" class="line-frequency-timetable__service-date">
-      {{
-        t("globalMap.sidebar.gtfsFrequency.serviceDate", {
-          date: formatServiceDate(timetable.serviceDate),
-        })
-      }}
-    </p>
+    <div class="line-frequency-timetable__filters">
+      <div class="line-frequency-timetable__filter-controls">
+        <slot name="service-day" />
+        <div v-if="hasSectionSelector && !selectedStationId" class="line-frequency-timetable__segment-picker">
+          <span class="line-frequency-timetable__segment-label">
+            {{ t("globalMap.sidebar.gtfsFrequency.timetableSegment") }}
+          </span>
+          <MaterialCombobox
+            v-model="selectedSectionKey"
+            :options="sectionOptions"
+            :aria-label="t('globalMap.sidebar.gtfsFrequency.timetableSegment')"
+            menu-class="line-frequency-timetable__segment-menu"
+            teleport
+            data-testid="line-frequency-timetable-segment"
+          >
+            <template #value="{ option }">
+              <span v-if="option" class="line-frequency-timetable__segment-option">
+                <span
+                  v-if="sectionOptionFor(option.id)?.isCentral"
+                  class="line-frequency-timetable__segment-chip"
+                >
+                  {{ t("globalMap.sidebar.gtfsFrequency.central") }}
+                </span>
+                <span class="line-frequency-timetable__segment-name">{{ option.label }}</span>
+              </span>
+            </template>
+            <template #option="{ option }">
+              <span class="line-frequency-timetable__segment-option">
+                <span
+                  v-if="sectionOptionFor(option.id)?.isCentral"
+                  class="line-frequency-timetable__segment-chip"
+                >
+                  {{ t("globalMap.sidebar.gtfsFrequency.central") }}
+                </span>
+                <span class="line-frequency-timetable__segment-name">{{ option.label }}</span>
+                <span
+                  v-if="sectionOptionFor(option.id)?.compassDirection"
+                  class="line-frequency-timetable__segment-compass"
+                >
+                  {{ sectionOptionFor(option.id)?.compassDirection }}
+                </span>
+              </span>
+            </template>
+          </MaterialCombobox>
+        </div>
 
-    <div v-if="hasSectionSelector && !selectedStationId" class="line-frequency-timetable__segment-picker">
-      <span class="line-frequency-timetable__segment-label">
-        {{ t("globalMap.sidebar.gtfsFrequency.timetableSegment") }}
-      </span>
-      <MaterialCombobox
-        v-model="selectedSectionKey"
-        :options="sectionOptions"
-        :aria-label="t('globalMap.sidebar.gtfsFrequency.timetableSegment')"
-        menu-class="line-frequency-timetable__segment-menu"
-        teleport
-        data-testid="line-frequency-timetable-segment"
-      >
-        <template #value="{ option }">
-          <span v-if="option" class="line-frequency-timetable__segment-option">
-            <span
-              v-if="sectionOptionFor(option.id)?.isCentral"
-              class="line-frequency-timetable__segment-chip"
-            >
-              {{ t("globalMap.sidebar.gtfsFrequency.central") }}
-            </span>
-            <span class="line-frequency-timetable__segment-name">{{ option.label }}</span>
-          </span>
+        <template v-if="timetable?.status === 'ready'">
+          <label class="line-frequency-timetable__segment-picker">
+            <span class="line-frequency-timetable__segment-label">{{ t('common.labels.station') }}</span>
+            <MaterialCombobox v-model="selectedStationId" :options="[{ id: '', label: t('app.allStations') }, ...stationOptions]" :aria-label="t('common.labels.station')" teleport data-testid="line-frequency-timetable-station" />
+          </label>
+          <label class="line-frequency-timetable__segment-picker">
+            <span class="line-frequency-timetable__segment-label">{{ t('board.direction') }}</span>
+            <MaterialCombobox v-model="selectedDirectionKey" :options="[{ id: 'all', label: t('settings.options.fullscreenPanel.allDirections') }, ...(directionDestinations?.length ? [{ id: 'context', label: directionDestinations.join(' / ') }] : []), ...allDirections.map(direction => ({ id: direction.key, label: direction.label }))]" :aria-label="t('board.direction')" teleport data-testid="line-frequency-timetable-direction" />
+          </label>
         </template>
-        <template #option="{ option }">
-          <span class="line-frequency-timetable__segment-option">
-            <span
-              v-if="sectionOptionFor(option.id)?.isCentral"
-              class="line-frequency-timetable__segment-chip"
-            >
-              {{ t("globalMap.sidebar.gtfsFrequency.central") }}
-            </span>
-            <span class="line-frequency-timetable__segment-name">{{ option.label }}</span>
-            <span
-              v-if="sectionOptionFor(option.id)?.compassDirection"
-              class="line-frequency-timetable__segment-compass"
-            >
-              {{ sectionOptionFor(option.id)?.compassDirection }}
-            </span>
-          </span>
-        </template>
-      </MaterialCombobox>
+      </div>
+      <p v-if="timetable" class="line-frequency-timetable__service-date">
+        {{ t("globalMap.sidebar.gtfsFrequency.serviceDate", { date: formatServiceDate(timetable.serviceDate) }) }}
+      </p>
     </div>
 
-    <p class="line-frequency-timetable__hint">
-      {{ t("globalMap.sidebar.gtfsFrequency.timetableHint") }}
+    <p v-if="timetable?.status === 'ready' && nextTimetable?.status !== 'ready'" class="line-frequency-timetable__notice" role="status">
+      {{ t("globalMap.sidebar.gtfsFrequency.timetableNextDayUnavailable") }}
     </p>
-
-    <div v-if="timetable?.status === 'ready'" class="line-frequency-timetable__context">
-      <label class="line-frequency-timetable__segment-picker">
-        <span class="line-frequency-timetable__segment-label">{{ t('common.labels.station') }}</span>
-        <MaterialCombobox v-model="selectedStationId" :options="[{ id: '', label: t('app.allStations') }, ...stationOptions]" :aria-label="t('common.labels.station')" teleport data-testid="line-frequency-timetable-station" />
-      </label>
-      <label class="line-frequency-timetable__segment-picker">
-        <span class="line-frequency-timetable__segment-label">{{ t('board.direction') }}</span>
-        <MaterialCombobox v-model="selectedDirectionKey" :options="[{ id: 'all', label: t('settings.options.fullscreenPanel.allDirections') }, ...(directionDestinations?.length ? [{ id: 'context', label: directionDestinations.join(' / ') }] : []), ...allDirections.map(direction => ({ id: direction.key, label: direction.label }))]" :aria-label="t('board.direction')" teleport data-testid="line-frequency-timetable-direction" />
-      </label>
-    </div>
 
     <p v-if="loading" role="status" data-testid="line-frequency-timetable-loading">
       {{ t("globalMap.sidebar.gtfsFrequency.timetableLoading") }}
@@ -621,10 +620,11 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
       v-else
       class="line-frequency-timetable__table-wrap"
       :class="{ 'line-frequency-timetable__table-wrap--compact': directions.length <= 2 }"
+      :tabindex="directions.length > 2 ? 0 : undefined"
       data-testid="line-frequency-timetable-table"
     >
       <table>
-        <caption>
+        <caption class="line-frequency-timetable__caption">
           {{
             t("globalMap.sidebar.gtfsFrequency.timetableTableCaption")
           }}
@@ -638,13 +638,13 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
           </tr>
         </thead>
         <tbody>
-          <tr data-testid="line-frequency-timetable-first-departure">
+          <tr class="line-frequency-timetable__boundary" data-testid="line-frequency-timetable-first-departure">
             <th scope="row">{{ t("globalMap.sidebar.gtfsFrequency.timetableFirstDeparture") }}</th>
             <td v-for="(bounds, index) in serviceBounds" :key="directions[index]?.key">
               {{ formatServiceTime(bounds?.firstDeparture, bounds?.approximate) }}
             </td>
           </tr>
-          <tr data-testid="line-frequency-timetable-last-departure">
+          <tr class="line-frequency-timetable__boundary" data-testid="line-frequency-timetable-last-departure">
             <th scope="row">{{ t("globalMap.sidebar.gtfsFrequency.timetableLastDeparture") }}</th>
             <td v-for="(bounds, index) in serviceBounds" :key="directions[index]?.key">
               {{ formatServiceTime(nextTimetable?.status === "ready" ? bounds?.lastDeparture : undefined, bounds?.approximate) }}
@@ -664,9 +664,16 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
         </tbody>
       </table>
     </div>
-    <p v-if="hasServiceBounds" data-testid="line-frequency-timetable-service-hint">
-      {{ t("globalMap.sidebar.gtfsFrequency.timetableServiceBoundsHint") }}
-    </p>
+    <details v-if="hasServiceBounds || hasIntervals" class="line-frequency-timetable__guide">
+      <summary>{{ t("globalMap.sidebar.gtfsFrequency.timetableGuide") }}</summary>
+      <p v-if="hasIntervals">{{ t("globalMap.sidebar.gtfsFrequency.timetableHint") }}</p>
+      <p v-if="hasServiceBounds" data-testid="line-frequency-timetable-service-hint">
+        {{ t("globalMap.sidebar.gtfsFrequency.timetableServiceBoundsHint") }}
+      </p>
+      <p v-if="hasServiceBounds && nextTimetable?.status === 'ready'">
+        {{ t("globalMap.sidebar.gtfsFrequency.timetableOperatingDay") }}
+      </p>
+    </details>
   </section>
 </template>
 
@@ -676,8 +683,6 @@ function formatInterval(interval: GtfsTimetableInterval | undefined): string {
   display: grid;
   gap: var(--space-3);
   min-width: 0;
-  border-top: 4px solid var(--line-frequency-color);
-  padding-top: var(--space-2);
 }
 
 p {
@@ -688,8 +693,7 @@ p {
 }
 
 .line-frequency-timetable__service-date {
-  color: var(--ink);
-  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .line-frequency-timetable__segment-picker {
@@ -698,20 +702,23 @@ p {
   min-width: 0;
 }
 
-.line-frequency-timetable__context {
+.line-frequency-timetable__filters {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
   gap: var(--space-2);
-}
-.line-frequency-timetable__context select {
-  background: var(--surface);
-  color: var(--ink);
+  padding: 12px;
+  background: var(--surface-soft);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  font: inherit;
-  min-width: 0;
-  min-height: 44px;
-  width: 100%;
+}
+.line-frequency-timetable__filter-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(148px, 100%), 1fr));
+  gap: var(--space-2);
+}
+.line-frequency-timetable__notice {
+  padding: 9px 12px;
+  border-inline-start: 3px solid var(--line-frequency-color);
+  background: var(--surface-soft);
 }
 :global(.line-frequency-timetable__segment-menu) {
   z-index: 12080;
@@ -721,7 +728,7 @@ p {
   display: block;
   min-width: 0;
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   font-weight: 700;
 }
 
@@ -797,15 +804,16 @@ table {
   min-width: 460px;
   border-collapse: collapse;
   color: var(--ink);
-  font-size: 0.74rem;
+  font-size: 0.8rem;
 }
 
-caption {
-  padding: var(--space-3) var(--space-3) var(--space-2);
-  color: var(--muted);
-  font-size: 0.72rem;
-  line-height: 1.4;
-  text-align: left;
+.line-frequency-timetable__caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 th,
@@ -818,7 +826,7 @@ td {
 
 thead th {
   border-top: 0;
-  border-bottom: 3px solid var(--line-frequency-color);
+  border-bottom: 2px solid var(--line-frequency-color);
   background: var(--surface-soft);
   color: var(--ink);
   font-weight: 800;
@@ -827,8 +835,7 @@ thead th {
 
 tbody th {
   min-width: 142px;
-  border-left: 4px solid var(--line-frequency-color);
-  background: var(--surface-soft);
+  background: var(--surface);
   font-weight: 700;
   text-align: left;
   white-space: nowrap;
@@ -843,13 +850,53 @@ tbody tr:nth-child(even) td {
   background: color-mix(in srgb, var(--surface-soft) 56%, transparent);
 }
 
+tbody tr.line-frequency-timetable__boundary > th,
+tbody tr.line-frequency-timetable__boundary > td {
+  background: color-mix(in srgb, var(--line-frequency-color) 9%, var(--surface));
+  font-weight: 800;
+}
+.line-frequency-timetable__table-wrap:not(.line-frequency-timetable__table-wrap--compact) th:first-child {
+  position: sticky;
+  inset-inline-start: 0;
+  box-shadow: 1px 0 var(--border);
+}
 tbody tr.line-frequency-timetable__current > th,
 tbody tr.line-frequency-timetable__current > td {
   background: color-mix(in srgb, var(--line-frequency-color, var(--idfm-blue)) 13%, var(--surface-soft));
 }
-.line-frequency-timetable__current-label { display: block; font-size: 0.65rem; }
+.line-frequency-timetable__current-label {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+.line-frequency-timetable__guide {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.line-frequency-timetable__guide summary {
+  width: fit-content;
+  min-height: 28px;
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+.line-frequency-timetable__guide p + p { margin-top: 5px; }
 
 @media (max-width: 520px) {
+  .line-frequency-timetable__filter-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .line-frequency-timetable__filter-controls > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .line-frequency-timetable__filters {
+    padding: 10px;
+  }
+  .line-frequency-timetable {
+    gap: var(--space-2);
+  }
+
   table {
     min-width: 420px;
   }
@@ -867,6 +914,9 @@ tbody tr.line-frequency-timetable__current > td {
     min-width: 0;
     white-space: normal;
     overflow-wrap: anywhere;
+  }
+  .line-frequency-timetable__table-wrap--compact thead th:first-child {
+    width: 36%;
   }
   .line-frequency-timetable__table-wrap--compact td {
     white-space: normal;

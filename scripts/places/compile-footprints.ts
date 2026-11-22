@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { normalizeCompiledPlace, type OverpassElement } from '../../src/services/places/compiledPlaces';
 import { elementFootprintRings, elementAreaSquareMeters } from '../../src/services/places/placeSurface';
 import { groupBuildingFootprints } from '../../src/services/places/buildingFootprintGroups';
+import { compileGreenSpaceFootprints, GREEN_SPACE_FOOTPRINTS_ASSET } from '../../src/services/places/greenSpaceFootprints';
 
 // Dedicated regional geometry pack: no general POI payload inflation.
 const root = resolve('public/data/place-footprints');
@@ -71,6 +72,7 @@ async function inventory(dir: string): Promise<{ path: string; bytes: number }[]
   return result;
 }
 const obsolete = (await readdir(root)).filter(name => /^[a-f0-9]{16}\.json$/.test(name) && !assets.some(asset => asset.asset === name));
+await writeFile(join(root, GREEN_SPACE_FOOTPRINTS_ASSET), JSON.stringify(compileGreenSpaceFootprints(places)));
 const files = (await inventory(resolve('public'))).filter(file => !obsolete.some(name => file.path === join(root, name)));
 if (files.length + 1 > 20_000 || files.some(file => file.bytes > 25 * 1024 ** 2)) throw new Error('Public assets exceed conservative Cloudflare Pages limits');
 const publicFileCount = files.filter(file => file.path !== join(root, 'manifest.json')).length + 1;

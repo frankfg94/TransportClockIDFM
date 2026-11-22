@@ -34,6 +34,8 @@ const sheetOpen = ref(false);
 const mobileDetails = ref(false);
 const mapPanel = ref<HTMLElement>();
 const fitAllVersion = ref(0);
+const showNetwork = ref(false);
+const focusedStationId = ref<string>();
 const optionRouteId = ref<string>();
 const showUltimate = ref(false);
 const lineQuery = ref("");
@@ -76,10 +78,10 @@ const searchLines = computed(() => {
   return matching.sort((a, b) => Number(b.label.toLowerCase() === query) - Number(a.label.toLowerCase() === query));
 });
 const selectedLine = computed(() => lineOptions.value.find((option) => option.id === line.value?.id));
-const ordered = computed(() => busy.value ? rows.value : rankStationAccessRows(rows.value));
+const ordered = computed(() => rankStationAccessRows(rows.value));
 const groups = computed(() => ([false, true] as const).map((future) => {
   const entries = ordered.value.filter(({ target }) => target.future === future);
-  const fastest = rankStationAccessRows(entries).find(hasTransitRecommendation);
+  const fastest = entries.find(hasTransitRecommendation);
   return { future, entries, fastest };
 }).filter(({ entries }) => entries.length));
 const ultimate = computed(() => selectedRow.value?.ultimate);
@@ -88,11 +90,16 @@ const selectedJourney = computed(() => showUltimate.value && ultimate.value?.sta
 const ultimateDate = computed(() => runStart.value === undefined ? "" :
   d(new Date(runStart.value), { day: "numeric", month: "long", timeZone: "Europe/Paris" }));
 const mapStations = computed(() => rows.value.map(({ target }) => target));
+const mapItineraries = computed(() => rows.value.flatMap(({ target, options }) =>
+  options[0] ? [{ stationId: target.id, itinerary: options[0].itinerary }] : []));
 const stationComparison = computed<TransportStationComparison | undefined>(() => runOrigin.value && ({
   origin: runOrigin.value,
   mode: line.value?.mode,
   stations: mapStations.value,
   activeId: selection.value,
+  itineraries: mapItineraries.value,
+  showNetwork: showNetwork.value,
+  focusJourney: focusedStationId.value !== undefined && focusedStationId.value === selection.value,
   fitAllVersion: fitAllVersion.value,
 }));
 const mobileDetailMode = computed(() => mobile.value && mobileDetails.value && Boolean(selectedRow.value));
@@ -101,6 +108,10 @@ watch([selection, departureMode, maxTransfers], () => {
   optionRouteId.value = undefined;
   showUltimate.value = false;
 });
+watch(busy, (loading) => {
+  if (!loading && mapItineraries.value.length) fitAllVersion.value++;
+});
+watch([runOrigin, departureMode], () => { focusedStationId.value = undefined; });
 watch(runOrigin, (value) => {
   if (!value) {
     sheetOpen.value = false;
@@ -114,6 +125,7 @@ function chooseLine(option?: LineSearchOption) {
   if (option) lineId.value = option.id;
 }
 function chooseStation(id: string) {
+  focusedStationId.value = id;
   selection.value = id;
   mobileDetails.value = true;
   sheetOpen.value = true;
@@ -131,10 +143,12 @@ function calculate() {
   void optimizer.calculate();
 }
 function selectUltimate(id: string) {
+  focusedStationId.value = id;
   showUltimate.value = true;
   void optimizer.searchUltimate(id);
 }
 function selectOption(id: string) {
+  focusedStationId.value = selection.value;
   showUltimate.value = false;
   optionRouteId.value = id;
 }
@@ -272,7 +286,7 @@ function timeBadge(row: StationAccessRow, fastest?: StationAccessRow) {
           <template v-if="!mobileDetailMode">
             <section v-for="group in groups" :key="String(group.future)" class="station-access__group">
               <h3>{{ t(group.future ? "stationAccess.futureStations" : "stationAccess.openStations") }}</h3>
-              <ul>
+              <TransitionGroup tag="ul" name="station-access-ranking">
                 <li v-for="row in group.entries" :key="row.target.id" class="station-access__row">
                   <button class="station-access__station" type="button" :aria-pressed="selection === row.target.id" @click="chooseStation(row.target.id)">
                     <span class="station-access__row-heading">
@@ -313,7 +327,7 @@ function timeBadge(row: StationAccessRow, fastest?: StationAccessRow) {
                     {{ t("common.actions.retry") }}
                   </button>
                 </li>
-              </ul>
+              </TransitionGroup>
             </section>
           </template>
           <section v-if="selectedRow && (!mobile || mobileDetailMode)" class="station-access__details">
@@ -380,8 +394,10 @@ function timeBadge(row: StationAccessRow, fastest?: StationAccessRow) {
       </DraggableBottomSheet>
       <section ref="mapPanel" class="station-access__map" :aria-label="t('lineOptimizer.journeyMap')">
         <div class="station-access__map-tools">
-          <span v-if="!selectedJourney">{{ t("stationAccess.pickStation") }}</span>
-          <button type="button" @click="fitAllVersion++">
+          <button type="button" :aria-pressed="showNetwork" @click="showNetwork = !showNetwork">
+            <MapIcon :size="16" aria-hidden="true" /> {{ t("stationAccess.networkLines") }}
+          </button>
+          <button type="button" @click="focusedStationId = undefined; fitAllVersion++">
             <GlobalTransportPlanModeIcon v-if="line" :mode="line.mode" :size="16" />
             {{ t("stationAccess.fitAll") }}
           </button>
@@ -428,6 +444,10 @@ function timeBadge(row: StationAccessRow, fastest?: StationAccessRow) {
 .station-access__results-header h2, .station-access__group h3, .station-access__details h3 { margin: 0; }
 .station-access__results-header p, .station-access__details p { margin: var(--space-1) 0; color: var(--muted); font-size: .875rem; }
 .station-access__group ul { display: grid; gap: var(--space-2); list-style: none; padding: 0; margin: var(--space-2) 0 0; }
+.station-access-ranking-move { transition: transform 200ms ease-in-out; }
+@media (prefers-reduced-motion: reduce) {
+  .station-access-ranking-move { transition: none; }
+}
 .station-access__row, .station-access__details { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .station-access__row-progress { padding: 0 var(--space-3) var(--space-2); }
 .station-access__station { display: grid; gap: 3px; width: 100%; padding: var(--space-3); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--ink); text-align: start; font: inherit; cursor: pointer; }
@@ -449,9 +469,9 @@ function timeBadge(row: StationAccessRow, fastest?: StationAccessRow) {
   width: auto;
   pointer-events: none;
 }
-.station-access__map { position: sticky; top: var(--space-3); display: grid; grid-template-rows: auto minmax(0, 1fr); height: min(74dvh, 57rem); min-height: 28rem; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
-.station-access__map-tools { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2); font-size: .85rem; }
-.station-access__map-tools button { margin-left: auto; }
+.station-access__map { position: sticky; top: var(--space-3); display: grid; grid-template-rows: minmax(0, 1fr); height: min(74dvh, 57rem); min-height: 28rem; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.station-access__map-tools { position: absolute; inset-block-start: var(--space-2); inset-inline-end: var(--space-2); z-index: 15; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); max-width: calc(100% - 2 * var(--space-2)); font-size: .85rem; }
+.station-access__map-tools button[aria-pressed="true"] { border-color: var(--idfm-blue); }
 .station-access__mobile-actions { display: none; }
 @media (max-width: 1060px) {
   .station-access__form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -463,7 +483,7 @@ function timeBadge(row: StationAccessRow, fastest?: StationAccessRow) {
   .station-access__mode label span { padding-inline: var(--space-2); }
   .station-access__comparison { display: block; }
   .station-access__mobile-actions { display: flex; justify-content: space-between; align-items: center; padding-bottom: var(--space-2); }
-  .station-access__map { position: static; height: 65dvh; }
+  .station-access__map { position: relative; top: auto; height: 65dvh; }
   .station-access__results { padding: var(--space-3); }
   .station-access__detail-actions { margin-bottom: var(--space-3); }
 }

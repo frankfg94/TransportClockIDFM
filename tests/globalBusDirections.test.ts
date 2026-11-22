@@ -116,12 +116,13 @@ describe("global bus direction adaptation", () => {
     ]);
   });
 
-  it("defaults fusion on for rail families and off for road night services", () => {
-    for (const mode of ["TRANSILIEN", "TRAIN", "RER", "METRO", "TRAM", "CABLE", "BIKE"]) {
-      expect(defaultGlobalDirectionMerge(mode)).toBe(true);
+  it("defaults to one direction for transit lines", () => {
+    for (const mode of ["TRANSILIEN", "TRAIN", "RER", "METRO", "TRAM", "CABLE"]) {
+      expect(defaultGlobalDirectionMerge(mode)).toBe(false);
     }
     expect(defaultGlobalDirectionMerge("BUS")).toBe(false);
     expect(defaultGlobalDirectionMerge("NOCTILIEN")).toBe(false);
+    expect(defaultGlobalDirectionMerge("BIKE")).toBe(true);
     expect(resolveGlobalDirection([])).toBeUndefined();
   });
 

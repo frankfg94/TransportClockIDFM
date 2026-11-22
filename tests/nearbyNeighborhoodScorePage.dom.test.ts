@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
     whenSettled: vi.fn(async () => undefined),
   },
   score: {
+    backendVerdict: { value: undefined },
     countStructuralLinesFor: vi.fn(() => 2),
     transportPending: { value: [] as string[] },
     result: { value: {} },
@@ -103,6 +104,24 @@ beforeEach(() => {
 });
 
 describe("NearbyNeighborhoodScorePage", () => {
+  it("passes the shared nature focus through and keeps the address when a different zone is selected", () => {
+    const query = { lat: "48.7814", lon: "2.1967", address: "Louvois", compare: "1", focus: "nature:park:sceaux" };
+    mocks.routeState.query = query;
+    mocks.useNearbyStations.mockReturnValue(mocks.nearby);
+    mocks.useNearbyHeavyTransports.mockReturnValue(mocks.heavy);
+    mocks.useNearbyNeighborhoodScore.mockReturnValue(mocks.score);
+    const wrapper = mount(NearbyNeighborhoodScorePage, { global: { stubs: {
+      NuxtLink: true, NearbyNeighborhoodScoreCard: true, NearbyRealEstateVerdict: true, VerdictScopeComparison: true,
+    } } });
+    try {
+      const card = wrapper.getComponent({ name: "NearbyNeighborhoodScoreCard" });
+      expect(card.props("natureFocus")).toBe(query.focus);
+      card.vm.$emit("update:natureFocus", "nature:woodland:Forêt de Meudon");
+      expect(mocks.router.replace).toHaveBeenLastCalledWith({ query: { ...query, focus: "nature:woodland:Forêt de Meudon" } });
+      card.vm.$emit("update:natureFocus", undefined);
+      expect(mocks.router.replace).toHaveBeenLastCalledWith({ query: { ...query, focus: undefined } });
+    } finally { wrapper.unmount(); }
+  });
   it("keeps the last dated timetable through a failed check and switches to the published HTTP calendar", async () => {
     vi.stubGlobal("Worker", undefined);
     let publication: "old" | "offline" | "new" = "old";
@@ -158,7 +177,7 @@ describe("NearbyNeighborhoodScorePage", () => {
       expect(mocks.score.refresh).not.toHaveBeenCalled();
     } finally { wrapper.unmount(); }
   });
-  it("opens comparison lazily for the selected address", async () => {
+  it("switches between the neighborhood and city comparison for the selected address", async () => {
     mocks.routeState.query = { lat: "48.7814", lon: "2.1967", address: "Louvois" };
     mocks.nearby.selectedPlace.value = { lat: 48.7814, lon: 2.1967, label: "Louvois" };
     mocks.useNearbyStations.mockReturnValue(mocks.nearby);
@@ -166,13 +185,16 @@ describe("NearbyNeighborhoodScorePage", () => {
     mocks.useNearbyNeighborhoodScore.mockReturnValue(mocks.score);
     const wrapper = mount(NearbyNeighborhoodScorePage, { global: { stubs: {
       NuxtLink: true, NearbyNeighborhoodScoreCard: true, NearbyRealEstateVerdict: true,
-      NeighborhoodComparison: { name: "NeighborhoodComparison", props: ["origin"], template: "<div data-testid='comparison-stub' />" },
+      VerdictScopeComparison: { name: "VerdictScopeComparison", props: ["origin", "scope"], template: "<div data-testid='comparison-stub' />" },
     } } });
-    expect(wrapper.find("[data-testid=comparison-stub]").exists()).toBe(false);
-    await wrapper.get("[data-testid=verdict-open-comparison]").trigger("click");
-    expect(wrapper.getComponent({ name: "NeighborhoodComparison" }).props("origin")).toMatchObject({ lat: 48.7814, lon: 2.1967 });
-    await wrapper.get("[data-testid=verdict-open-comparison]").trigger("click");
-    expect(wrapper.find("[data-testid=comparison-stub]").exists()).toBe(false);
+    const comparison = wrapper.getComponent({ name: "VerdictScopeComparison" });
+    expect(comparison.props("scope")).toBe("neighborhood");
+    await wrapper.get("#verdict-tab-rest").trigger("click");
+    expect(comparison.props("origin")).toMatchObject({ lat: 48.7814, lon: 2.1967 });
+    expect(comparison.props("scope")).toBe("rest");
+    expect(wrapper.findComponent({ name: "NearbyNeighborhoodScoreCard" }).exists()).toBe(false);
+    await wrapper.get("#verdict-tab-neighborhood").trigger("click");
+    expect(comparison.props("scope")).toBe("neighborhood");
     wrapper.unmount();
   });
   it("preserves the exact Fontenay reproduction coordinates and requests the complete benchmark catalogue", () => {

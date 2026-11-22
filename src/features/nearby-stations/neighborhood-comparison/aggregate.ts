@@ -2,12 +2,14 @@ import { isNearbyPlaceActivity, isNearbyPlaceCommerce, resolveNearbyPlaceGroupId
 import type { NearbyPlace } from "../nearbyPlaces";
 import type { CompiledPlaceRecord } from "../../../services/places/compiledPlaces";
 import type { TransportMapNetwork } from "../../transport-map/contracts/network";
-import { countIrisTransport, pointInIrisGeometry, transportStationsFromNetwork } from "../../transport-map/iris/irisGeometry";
+import { countIrisTransport, countIrisTransportInNeighborhoods, pointInIrisGeometry, transportStationsFromNetwork } from "../../transport-map/iris/irisGeometry";
 import type { ComparisonNeighborhood } from "./types";
+import { economyGroup, COMPARISON_EXCLUDED_TRANSPORT_MODES, type EconomyGroup } from "./neighborhoodComparisonRules";
+export { comparisonScope, perSquareKilometer, type EconomyGroup } from "./neighborhoodComparisonRules";
 import { geometryBounds, pointOnBoundary } from "./geometry";
 export { placesCityCode } from "./geometry";
 
-export type EconomyGroup = "commerce" | "offices" | "craft" | "health" | "other";
+
 export interface ComparisonPlaceCounts {
   commerce: number;
   commerceGroups: Partial<Record<NearbyPlaceGroupId, number>>;
@@ -23,18 +25,6 @@ export interface ComparisonPlaceAggregation {
 }
 export type ComparisonTheme = "commerce" | "economic" | "green" | "transport";
 export type ComparisonMeasure = "count" | "density" | "diversity" | "area" | "share" | "lines" | "stations";
-
-export function perSquareKilometer(count: number, areaM2: number): number | undefined {
-  return Number.isFinite(areaM2) && areaM2 > 0 ? count * 1_000_000 / areaM2 : undefined;
-}
-
-function economyGroup(place: CompiledPlaceRecord): EconomyGroup {
-  if (place.tags?.office) return "offices";
-  if (place.tags?.craft) return "craft";
-  if (place.tags?.healthcare || place.rankingCategory === "health") return "health";
-  if (isNearbyPlaceCommerce(place)) return "commerce";
-  return "other";
-}
 
 function createPlaceAggregator(neighborhoods: readonly ComparisonNeighborhood[]) {
   const counts: Record<string, ComparisonPlaceCounts> = {};
@@ -101,10 +91,17 @@ export async function aggregateComparisonPlacesAsync(neighborhoods: readonly Com
 }
 
 /** Uses the already-loaded catalogue; it never performs routing or timetable calls. */
-export function aggregateComparisonTransport(neighborhoods: readonly ComparisonNeighborhood[], network: TransportMapNetwork) {
-  const stations = transportStationsFromNetwork(network.stations, network.linesById).map(station => ({
+function comparisonStations(network: TransportMapNetwork) {
+  return transportStationsFromNetwork(network.stations, network.linesById).map(station => ({
     ...station,
-    lines: station.lines.filter(line => line.mode !== "BIKE"),
+    lines: station.lines.filter(line => !COMPARISON_EXCLUDED_TRANSPORT_MODES.has(line.mode)),
   })).filter(station => station.lines.length > 0);
-  return countIrisTransport(neighborhoods, stations);
+}
+
+export function aggregateComparisonTransport(neighborhoods: readonly ComparisonNeighborhood[], network: TransportMapNetwork) {
+  return countIrisTransport(neighborhoods, comparisonStations(network));
+}
+
+export function aggregateComparisonScopeTransport(neighborhoods: readonly ComparisonNeighborhood[], network: TransportMapNetwork) {
+  return countIrisTransportInNeighborhoods(neighborhoods, comparisonStations(network));
 }

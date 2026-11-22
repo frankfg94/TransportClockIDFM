@@ -32,7 +32,7 @@ vi.mock("../src/features/transport-map/data/createTransportMapDataSource", () =>
 }));
 vi.mock("../src/features/line-map/GlobalTransportPlanTravel.vue", () => ({
   __esModule: true,
-  default: { name: "GlobalTransportPlanTravel", template: "<div data-test='map' />" },
+  default: { name: "GlobalTransportPlanTravel", props: ["itinerary", "stationComparison"], template: "<div data-test='map' />" },
 }));
 
 const home = { id: "home", kind: "address", name: "Maison", address: "Châtenay-Malabry", lat: 48.765, lon: 2.26, isPrimary: true, icon: "home" };
@@ -216,10 +216,11 @@ describe("station access preset", () => {
     mocks.ultimate.mock.calls[1]![0].onProgress(65);
     await flushPromises();
     expect(cardBars().map((bar) => bar.attributes("aria-valuenow"))).toEqual(["30", "65"]);
-    finish[0]!();
-    await flushPromises();
-    expect(cardBars().map((bar) => bar.attributes("aria-valuenow"))).toEqual(["65"]);
     finish[1]!();
+    await flushPromises();
+    expect(cardBars().map((bar) => bar.attributes("aria-valuenow"))).toEqual(["30"]);
+    expect(wrapper.get(".station-access__station strong").text()).toBe("Villejuif–Gustave Roussy");
+    finish[0]!();
     await flushPromises();
 
     expect(cardBars()).toHaveLength(0);
@@ -227,6 +228,19 @@ describe("station access preset", () => {
       .toEqual(["Villejuif–Gustave Roussy", "Châtillon–Montrouge"]);
     expect(wrapper.get(".station-access__details").text()).toContain("Partir à 15:00");
     expect(wrapper.text()).not.toContain("Attendre le premier transport");
+    const map = wrapper.getComponent({ name: "GlobalTransportPlanTravel" });
+    expect(map.props("stationComparison")).toMatchObject({
+      showNetwork: false, focusJourney: false, itineraries: expect.arrayContaining([
+        expect.objectContaining({ itinerary: expect.objectContaining({ destination: expect.objectContaining({ label: "Châtillon–Montrouge" }) }) }),
+        expect.objectContaining({ itinerary: expect.objectContaining({ destination: expect.objectContaining({ label: "Villejuif–Gustave Roussy" }) }) }),
+      ]),
+    });
+    const networkToggle = wrapper.get(".station-access__map-tools button[aria-pressed]");
+    await networkToggle.trigger("click");
+    expect(map.props("stationComparison").showNetwork).toBe(true);
+    expect(map.props("stationComparison").itineraries).toHaveLength(2);
+    await wrapper.get(".station-access__station").trigger("click");
+    expect(map.props("stationComparison").focusJourney).toBe(true);
   });
 
   it("starts Ultimate when switching modes and resumes only unfinished stations", async () => {

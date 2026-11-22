@@ -5,6 +5,20 @@ const origin = { lon: 2.3, lat: 48.8 };
 const request = (id = "a") => ({ origin, destination: { id, lon: 2.4, lat: 48.9 }, datetime: "20261012T090000" });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe("verdict GTFS provider", () => {
+  it("separates and forwards direct-only requests for the same destination", async () => {
+    vi.spyOn(browserGtfs, "canUseBrowserNeighborhoodGtfs").mockReturnValue(true);
+    const router = vi.spyOn(browserGtfs, "routeBrowserNeighborhoodGtfs").mockImplementation(async batch => ({
+      source: "gtfs", serviceDate: "20261012", searchHorizonSeconds: 14400,
+      destinations: batch.destinations.map(destination => ({ id: destination.id, status: "ready",
+        journeys: [{ id: batch.directOnly ? "direct" : "any", durationSeconds: 600, sections: [] }] })),
+    }));
+    const provider = createGtfsNeighborhoodTravelRoutesProvider();
+    const [any, direct] = await Promise.all([
+      provider.findJourneys(request()), provider.findJourneys({ ...request(), maxTransfers: 0 }),
+    ]);
+    expect([any[0]?.id, direct[0]?.id]).toEqual(["any", "direct"]);
+    expect(router.mock.calls.map(([batch]) => batch.directOnly)).toEqual([undefined, true]);
+  });
   it("delivers a completed heavy-access batch while another is still waiting", async () => {
     vi.spyOn(browserGtfs, "canUseBrowserNeighborhoodGtfs").mockReturnValue(true);
     let release!: () => void;

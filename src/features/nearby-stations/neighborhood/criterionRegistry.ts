@@ -50,7 +50,6 @@ export const NEIGHBORHOOD_CRITERION_REGISTRY: readonly NeighborhoodCriterionDefi
       { id: "shopping-centres", required: false, maxAgeMs: 24 * 60 * 60_000 },
       { id: "food-markets", required: false },
       { id: "supermarket-footprints", required: false, maxAgeMs: 24 * 60 * 60_000 },
-      { id: "neighborhood-verdict", required: false, maxAgeMs: 24 * 60 * 60_000 },
     ],
   },
   {
@@ -58,6 +57,7 @@ export const NEIGHBORHOOD_CRITERION_REGISTRY: readonly NeighborhoodCriterionDefi
     datasets: [
       { id: "osm-places", required: true, maxAgeMs: 24 * 60 * 60_000 },
       { id: "neighborhood-green-spaces", required: false, maxAgeMs: 24 * 60 * 60_000 },
+      { id: "osm-green-space-footprints", required: false },
       { id: "cinema-access", required: false },
       { id: "neighborhood-verdict", required: false, maxAgeMs: 24 * 60 * 60_000 },
     ],
@@ -67,14 +67,12 @@ export const NEIGHBORHOOD_CRITERION_REGISTRY: readonly NeighborhoodCriterionDefi
     datasets: [
       { id: "osm-places", required: true, maxAgeMs: 24 * 60 * 60_000 },
       { id: "walking-routes", required: false, maxAgeMs: 24 * 60 * 60_000 },
-      { id: "neighborhood-verdict", required: false, maxAgeMs: 24 * 60 * 60_000 },
     ],
   },
   {
     id: "education",
     datasets: [
       { id: "osm-places", required: true, maxAgeMs: 24 * 60 * 60_000 },
-      { id: "neighborhood-verdict", required: false, maxAgeMs: 24 * 60 * 60_000 },
     ],
   },
   {

@@ -1,3 +1,4 @@
+import { getNatureDatasetInfo } from "./natureInCity";
 import { DATASET_FRESHNESS_POLICIES, datasetFreshness, sourceSnapshotFreshness } from "../../../shared/datasets/freshness";
 export { freshnessFromDate } from "../../../shared/datasets/freshness";
 import type { H3Event } from "h3";
@@ -181,7 +182,7 @@ export async function getDatasetManagerResponse(
   event?: H3Event,
 ): Promise<DatasetManagerResponse> {
   const runtimeEnv = getNetexRuntimeEnv(event);
-  const [netex, gtfs, bike, ridership, verdict, isochrones, globalMap, places, dvf] = await Promise.all([
+  const [netex, gtfs, bike, ridership, verdict, isochrones, globalMap, places, dvf, natureInCity] = await Promise.all([
     safeBuildDataset(CORE_DATASETS.netex, "unconfigured", () => buildNetexDataset(runtimeEnv)),
     safeBuildDataset(CORE_DATASETS.gtfs, "local", () => buildGtfsDataset(event)),
     safeBuildDataset(CORE_DATASETS["bike-network"], "local", () => buildBikeNetworkDataset(runtimeEnv)),
@@ -191,6 +192,7 @@ export async function getDatasetManagerResponse(
     safeBuildDataset(CORE_DATASETS["global-map"], "local", () => buildGlobalMapDataset(event)),
     safeBuildDataset(CORE_DATASETS.places, "local", () => buildPlacesDataset(event)),
     safeBuildDataset(CORE_DATASETS["dvf-property-market"], "local", () => buildDvfDataset(event)),
+    getNatureDatasetInfo(runtimeEnv),
   ]);
 
   const verdictSources = verdict.sources ?? [];
@@ -204,6 +206,7 @@ export async function getDatasetManagerResponse(
     globalMap,
     places,
     dvf,
+    natureInCity,
     ...verdictSources.map((source) => toSourceDataset(source)),
   ];
 

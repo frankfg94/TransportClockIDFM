@@ -18,6 +18,7 @@ import type {
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../transport-map/config/globalTransportPlanConfig";
 import { buildPathSpatialIndex, buildStationSpatialIndex } from "../transport-map/spatial/packedIndex";
 import { linePathsAreHighFidelity, selectPreferredLinePaths } from "../transport-map/data/pathPrecedence";
+import { createDirectionPathFromCompiledGtfs } from "./globalBusDirectionGeometry";
 import { filterPathsForGlobalBusDirection } from "./globalBusDirections";
 import { buildGlobalLineConnectionStations } from "./globalLineMetadata";
 import type { GlobalMapStationSearchGroup } from "../transport-map/search/globalMapSearch";
@@ -82,6 +83,7 @@ export interface UseGlobalTransportSceneOptions {
   getSelectedBusDirectionEdgeKeys: () => ReadonlySet<string> | undefined;
   getSelectedBusDirectionQuays: () => readonly GlobalMapQuayMarker[];
   getBusDirectionGeometryPaths: () => readonly GlobalMapPath[];
+  getSelectedDirectionId?: () => string | undefined;
   getUnavailableBusDirectionGeometryKey: () => string | undefined;
   getSelectedBusDirectionGeometryKey: () => string;
   getSelectedLineInteractionScene: () => TransportMapRenderScene | undefined;
@@ -472,9 +474,20 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
     );
   });
 
+  const compiledDirectionPath = computed(() => {
+    // The M14 direction-specific GTFS shapes omit curves on shared track.
+    // The compiled geometry used in the merged view has the more complete trace.
+    if (options.getActiveLine()?.id !== "line:IDFM:C01384") return;
+    const stationIds = options.getSelectedBusDirectionStationIds();
+    const directionId = options.getSelectedDirectionId?.();
+    if (!stationIds || !directionId) return;
+    return createDirectionPathFromCompiledGtfs(staticLineMetadataPaths.value, directionId, stationIds);
+  });
+
   const lineMetadataPaths = computed<GlobalMapPath[]>(() => {
     const startedAt = options.recordTiming ? nowMs() : Number.NaN;
     try {
+      if (compiledDirectionPath.value) return [compiledDirectionPath.value];
       const geometryPaths = options.getBusDirectionGeometryPaths();
       if (geometryPaths.length > 0) return [...geometryPaths];
       const selectedGeometryKey = options.getSelectedBusDirectionGeometryKey();
@@ -799,6 +812,7 @@ export function useGlobalTransportScene(options: UseGlobalTransportSceneOptions)
     activeConnectionStationIds,
     renderStations,
     staticLineMetadataPaths,
+    compiledDirectionPath,
     lineMetadataPaths,
     ghostLinePaths,
     renderPaths,

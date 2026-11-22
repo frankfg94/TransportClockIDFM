@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { CalendarDays, CircleHelp, Clapperboard, Footprints } from "lucide-vue-next";
+import { CalendarDays, CircleHelp, Clapperboard, Footprints, Maximize2 } from "lucide-vue-next";
 import { useRouter } from "#imports";
-import { computed } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, ref } from "vue";
 import { useI18n, type TranslationKey } from "../../i18n";
 import { foodMarketSchedule, transportSectionValues } from "./neighborhood/factPresentation";
 import { getNeighborhoodFactMarker, hasExceptionalFactMarker } from "./neighborhood/facts";
@@ -14,17 +14,41 @@ import { createLinePresentation } from "../../services/linePresentation";
 import type { TransitFamily } from "../../types/transit";
 import { formatServiceTime } from "./neighborhood/journeys";
 import { formatTransportLineName } from "./neighborhood/verdict-transport-facts/heavyTransports";
+import type { GreenMapReference } from "../../../shared/natureInCity";
 
 const props = defineProps<{
   fact: NeighborhoodFact;
   open?: boolean;
+  subsites?: readonly string[];
+  accessSummary?: string;
 }>();
 
 const emit = defineEmits<{
   toggle: [];
+  "expand-greenery": [reference: GreenMapReference];
 }>();
 
 const { d, n, t } = useI18n();
+const NeighborhoodGreeneryMap = defineAsyncComponent(() => import("./NeighborhoodGreeneryMap.vue"));
+const hovering = ref(false);
+const focused = ref(false);
+let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+function enterGreenery(event: PointerEvent) {
+  if (!props.fact.greenMap || event.pointerType === "touch") return;
+  if (hoverTimer) clearTimeout(hoverTimer);
+  hovering.value = true;
+}
+function leaveGreenery() {
+  if (!hovering.value) return;
+  hoverTimer = setTimeout(() => { hovering.value = false; }, 125);
+}
+function focusGreenery(event: FocusEvent) {
+  focused.value = event.target instanceof HTMLElement && event.target.matches(":focus-visible");
+}
+function blurGreenery(event: FocusEvent) {
+  if (!(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null)) focused.value = false;
+}
+onBeforeUnmount(() => { if (hoverTimer) clearTimeout(hoverTimer); });
 const cinemaSize = computed(() => {
   const values = props.fact.tooltipValues;
   if (props.fact.family !== "cinema" || typeof values?.area !== "number") return undefined;
@@ -200,9 +224,13 @@ function geographyLabel(): string {
 <template>
   <div
     class="nearby-neighborhood-score-fact"
+    @pointerenter="enterGreenery"
+    @pointerleave="leaveGreenery"
+    @focusin="focusGreenery"
+    @focusout="blurGreenery"
     :class="[
       `nearby-neighborhood-score-fact--${fact.polarity}`,
-      { 'nearby-neighborhood-score-fact--open': open },
+      { 'nearby-neighborhood-score-fact--open': open, 'nearby-neighborhood-score-fact--map-preview': fact.greenMap && (hovering || focused) },
     ]"
   >
     <button
@@ -219,7 +247,10 @@ function geographyLabel(): string {
       >
         {{ getNeighborhoodFactMarker(fact) }}
       </span>
-      <span>{{ factLabel() }}</span>
+      <span>{{ factLabel() }}<small v-if="subsites?.length" class="nearby-neighborhood-score-fact__subsites">
+        <strong>{{ t("nearbyStations.neighborhoodScore.natureMap.subsites") }}</strong>
+        <span v-for="site in subsites" :key="site" class="nearby-neighborhood-score-fact__subsite">{{ site }}</span>
+      </small><small v-if="accessSummary" class="nearby-neighborhood-score-fact__subsites">{{ accessSummary }}</small></span>
       <CircleHelp :size="15" aria-hidden="true" />
     </button>
     <ul v-if="fact.nearerStationAccesses?.length" class="nearby-neighborhood-score-fact__nearer-stations"
@@ -268,6 +299,22 @@ function geographyLabel(): string {
         </dl>
       </div>
       <strong v-else>{{ factTooltip() }}</strong>
+      <p v-if="fact.kind === 'remarkableGarden' && fact.tooltipValues?.km !== undefined">
+        {{ t("nearbyStations.neighborhoodScore.natureRules.gardenNetwork", fact.tooltipValues) }}
+      </p>
+      <p v-if="fact.kind === 'parkWalking'">{{ t("nearbyStations.neighborhoodScore.natureRules.levels") }}</p>
+      <p v-if="fact.kind === 'parkWalking'">{{ t(fact.tooltipValues?.picnic
+        ? "nearbyStations.neighborhoodScore.natureRules.picnicMapped"
+        : "nearbyStations.neighborhoodScore.natureRules.picnicUnknown") }}</p>
+      <div v-if="fact.greenMap && (open || hovering || focused)" class="nearby-neighborhood-score-fact__map">
+        <NeighborhoodGreeneryMap :key="JSON.stringify(fact.greenMap)" :reference="fact.greenMap" />
+        <button type="button" class="icon-button nearby-neighborhood-score-fact__expand-map"
+          :aria-label="t('nearbyStations.neighborhoodScore.natureMap.expand')"
+          aria-haspopup="dialog"
+          :title="t('nearbyStations.neighborhoodScore.natureMap.expand')" @click="emit('expand-greenery', fact.greenMap)">
+          <Maximize2 :size="16" aria-hidden="true" />
+        </button>
+      </div>
       <div v-if="cinemaSize" class="nearby-neighborhood-score-fact__cinema-size">
         <span class="nearby-neighborhood-score-fact__cinema-icon"><Clapperboard :size="19" aria-hidden="true" /></span>
         <div>
@@ -419,10 +466,14 @@ function geographyLabel(): string {
 </template>
 
 <style scoped>
+.nearby-neighborhood-score-fact__subsite { display: block; color: var(--ink); }
+.nearby-neighborhood-score-fact__subsites { display: block; margin-top: .2rem; color: var(--muted); font-weight: 500; }
 .nearby-neighborhood-score-fact { position: relative; }
 .nearby-neighborhood-score-fact__nearer-stations { margin: 0 0 6px 45px; padding-inline-start: 1em; color: var(--muted); font-size: .75rem; line-height: 1.45; }
 .nearby-neighborhood-score-fact__trigger { align-items: center; background: transparent; border-radius: 9px; color: var(--ink); display: grid; font-size: .8rem; gap: 7px; grid-template-columns: 31px minmax(0, 1fr) auto; justify-content: flex-start; line-height: 1.35; min-height: 35px; padding: 6px 7px; text-align: left; width: 100%; }
 .nearby-neighborhood-score-fact__trigger:hover, .nearby-neighborhood-score-fact__trigger:focus-visible { background: #f6f7fb; outline: 0; }
+.nearby-neighborhood-score-fact__map { position: relative; width: fit-content; }
+.nearby-neighborhood-score-fact__expand-map { position: absolute; top: .45rem; right: .45rem; background: var(--surface, white); }
 .nearby-neighborhood-score-fact__trigger > span:nth-child(2) { min-width: 0; }
 .nearby-neighborhood-score-fact__trigger > svg { color: #8490a4; flex: 0 0 auto; }
 .nearby-neighborhood-score-fact__marker { align-items: center; border-radius: 999px; display: inline-flex; font-size: .72rem; font-weight: 950; height: 19px; justify-content: center; justify-self: center; width: 19px; }
@@ -432,6 +483,7 @@ function geographyLabel(): string {
 .nearby-neighborhood-score-fact--neutral .nearby-neighborhood-score-fact__marker { background: #eef2f7; color: #64748b; }
 .nearby-neighborhood-score-fact__tooltip { background: #fff; border: 1px solid rgba(16,35,63,.16); border-radius: 11px; box-shadow: 0 14px 30px rgba(16,35,63,.16); color: #344054; left: 0; max-width: min(380px, calc(100vw - 42px)); opacity: 0; padding: 11px 12px; pointer-events: none; position: absolute; top: calc(100% + 4px); transform: translateY(-3px); transition: opacity .14s ease, transform .14s ease, visibility .14s ease; visibility: hidden; width: max-content; z-index: 8; }
 .nearby-neighborhood-score-fact:hover .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact:focus-within .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact--open .nearby-neighborhood-score-fact__tooltip { opacity: 1; pointer-events: auto; transform: translateY(0); visibility: visible; }
+.nearby-neighborhood-score-fact--map-preview > .nearby-neighborhood-score-fact__tooltip { opacity: 1; pointer-events: auto; transform: translateY(0); visibility: visible; }
 .nearby-neighborhood-score-fact__tooltip strong { color: var(--ink); display: block; font-size: .78rem; line-height: 1.35; max-width: 355px; }
 .nearby-neighborhood-score-fact__market { font-size: .74rem; }
 .nearby-neighborhood-score-fact__cinema-size { display: flex; align-items: center; gap: 10px; margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-soft); }
@@ -488,6 +540,6 @@ function geographyLabel(): string {
 @media (max-width: 680px) {
   .nearby-neighborhood-score-fact__tooltip { left: 0; max-width: calc(100vw - 42px); position: absolute; top: calc(100% + 4px); transform: none; width: calc(100vw - 42px); }
   .nearby-neighborhood-score-fact:hover .nearby-neighborhood-score-fact__tooltip, .nearby-neighborhood-score-fact:focus-within .nearby-neighborhood-score-fact__tooltip { opacity: 0; pointer-events: none; visibility: hidden; }
-  .nearby-neighborhood-score-fact.nearby-neighborhood-score-fact--open .nearby-neighborhood-score-fact__tooltip { opacity: 1; pointer-events: auto; position: relative; top: auto; visibility: visible; width: auto; }
+  .nearby-neighborhood-score-fact:is(.nearby-neighborhood-score-fact--open, .nearby-neighborhood-score-fact--map-preview) .nearby-neighborhood-score-fact__tooltip { opacity: 1; pointer-events: auto; position: relative; top: auto; visibility: visible; width: auto; }
 }
 </style>

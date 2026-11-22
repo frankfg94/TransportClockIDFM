@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { LineRouteSequence } from "../src/types/transit";
-import type { GlobalMapLine } from "../src/features/transport-map/contracts/manifest";
+import type { GlobalMapLine, GlobalMapPath } from "../src/features/transport-map/contracts/manifest";
 import {
   createGlobalBusDirectionGeometryPath,
+  createDirectionPathFromCompiledGtfs,
 } from "../src/features/line-map/globalBusDirectionGeometry";
 import { resolveGlobalBusDirection } from "../src/features/line-map/globalBusDirections";
 import type { LineGeometryResolution } from "../src/features/line-map/lineGeometry";
@@ -21,6 +22,48 @@ const line = {
   stationIds: ["station:a", "station:b", "station:c", "station:d"],
   geometryIds: [],
 } satisfies GlobalMapLine;
+
+describe("compiled GTFS direction geometry", () => {
+  const a = { x: 0.5, y: 0.51, stationId: "a" };
+  const curve = { x: 0.501, y: 0.506 };
+  const boundary = { x: 0.503, y: 0.505 };
+  const b = { x: 0.504, y: 0.5, stationId: "b" };
+  const c = { x: 0.504, y: 0.49, stationId: "c" };
+
+  function fragment(tile: string, vertices: GlobalMapPath["vertices"]): GlobalMapPath {
+    return {
+      id: `path:line:IDFM:C01384:segment:1#${tile}`,
+      lineId: "line:IDFM:C01384",
+      geometrySource: "gtfs",
+      sourceVersion: "gtfs:fixture",
+      quality: { complete: true, fallback: false, gapMeters: 0, stationDistanceMaxMeters: 0 },
+      stationIds: vertices.flatMap((vertex) => vertex.stationId ? [vertex.stationId] : []),
+      vertices,
+      chunkIds: [tile],
+      minX: 0.5, minY: 0.49, maxX: 0.504, maxY: 0.51,
+    };
+  }
+
+  it("keeps the curve across a tile boundary in either direction without moving station anchors", () => {
+    const fragments = [fragment("north", [boundary, b, c]), fragment("south", [a, curve, boundary])];
+
+    expect(createDirectionPathFromCompiledGtfs(fragments, "north", ["a", "b", "c"])?.vertices)
+      .toEqual([a, curve, boundary, b, c]);
+    expect(createDirectionPathFromCompiledGtfs(fragments, "south", ["c", "b", "a"])?.vertices)
+      .toEqual([c, b, boundary, curve, a]);
+  });
+
+  it("rejects missing geometry and a route with a different station order", () => {
+    const south = fragment("south", [a, curve, boundary]);
+    const north = fragment("north", [boundary, b, c]);
+    const brokenNorth = fragment("north", [{ x: 0.502, y: 0.505 }, b, c]);
+
+    expect(createDirectionPathFromCompiledGtfs([south, brokenNorth], "north", ["a", "b", "c"]))
+      .toBeUndefined();
+    expect(createDirectionPathFromCompiledGtfs([south, north], "north", ["a", "c"]))
+      .toBeUndefined();
+  });
+});
 
 function sequence(): LineRouteSequence {
   const stopIds = [

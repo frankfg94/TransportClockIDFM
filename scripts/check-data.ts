@@ -1,3 +1,5 @@
+import { getNatureDatasetInfo } from "../server/services/datasets/natureInCity";
+import { natureDatasetSource } from "../server/services/neighborhoodVerdict/natureInCity";
 import { datasetFreshness, sourceSnapshotFreshness, type DatasetFreshness } from "../shared/datasets/freshness";
 import { getNeighborhoodVerdictSource, loadCompiledNeighborhoodVerdictData } from "../server/services/neighborhoodVerdict/dataStore";
 import {
@@ -82,6 +84,7 @@ async function main(): Promise<void> {
     checkGlobalMap(),
     checkPlaces(),
     checkDvfRealEstate(),
+    checkNatureInCity(),
   ]);
 
   console.log("\nTransport data configuration\n");
@@ -97,6 +100,20 @@ export async function checkNeighborhoodVerdict(): Promise<DataCheckRow> {
     const data = await loadCompiledNeighborhoodVerdictData(env);
     return { ...row, Installed: "Yes", Freshness: datasetFreshness("neighborhood-verdict", data), Details: `${data.greenSpaces.length} green spaces · ${data.gpeStations.length} GPE stations · ${data.iris.neighborhoods.length} IRIS neighborhoods · ${data.sources.length} sources · air/noise grid ${data.airNoiseGrid ? "loaded" : "absent (optional)"} · service quality ${data.serviceQuality.lines.length} lines · generated ${data.generatedAt}` };
   } catch (error) { return { ...row, Details: String(error) }; }
+}
+
+export async function checkNatureInCity(): Promise<DataCheckRow> {
+  const env = getNetexRuntimeEnv();
+  const data = await getNatureDatasetInfo(env);
+  return {
+    Data: data.title,
+    Configured: data.storage === "local" ? "Auto" : "Yes",
+    Installed: data.state === "available" ? "Yes" : data.state === "partial" ? "Partial" : "No",
+    Mode: data.storage === "cloudflare-r2" ? "Online (Cloudflare R2)" : data.storage === "http" ? "Online (HTTP)" : "Local",
+    Location: natureDatasetSource(env),
+    Details: [data.referencePeriod, data.coveredCommunes === undefined ? undefined : `${data.coveredCommunes} communes`, data.details].filter(Boolean).join(" · "),
+    Freshness: data.freshness,
+  };
 }
 
 async function checkIrisNeighborhoods(): Promise<DataCheckRow> {

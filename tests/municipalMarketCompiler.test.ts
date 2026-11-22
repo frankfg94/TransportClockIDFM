@@ -41,11 +41,14 @@ describe("municipal market import", () => {
 
   it("qualifies a generated municipal market without a matching OSM element", () => {
     const [market] = foodMarketCandidates([], [{ distanceMeters: 100, place: {
-      id: "municipal-market:00000:42", name: "Marché des Halles", address: "5 rue de la République",
+      id: "municipal-market:00000:42", osmPlaceId: "way:42", name: "Marché des Halles", address: "5 rue de la République",
       city: "Ville exemple", cityCode: "00000", lon: 2, lat: 48, sessionsPerWeek: 2, sourceUrl: page.link,
     } }]);
     expect(scoreFoodMarkets([{ ...market!, walkSeconds: 180 }])).toMatchObject({
       points: 0.5, facts: [{ evidence: { sourceUrl: page.link }, labelValues: { name: "Marché des Halles", sessions: 2 } }],
+    });
+    expect(scoreFoodMarkets([{ ...market!, walkSeconds: 38 * 60 }])).toMatchObject({
+      points: 0, facts: [{ polarity: "neutral", labelValues: { minutes: 38 } }],
     });
   });
 });

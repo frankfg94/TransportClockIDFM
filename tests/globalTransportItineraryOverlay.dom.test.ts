@@ -4,6 +4,7 @@ import * as coordinateKernel from "../src/features/transport-map/geo/coordinateK
 import { lonLatToWorld, worldToScreen } from "../src/features/transport-map/geo/coordinateKernel";
 import GlobalTransportItineraryOverlay from "../src/features/line-map/GlobalTransportItineraryOverlay.vue";
 import type { GlobalTransportItineraryRoute } from "../src/features/line-map/globalTransportItineraryGeometry";
+import { createGlobalTransportItinerarySegments } from "../src/features/line-map/globalTransportItineraryGeometry";
 import { describe, expect, it, vi } from "vitest";
 
 const origin = { lon: 2.2, lat: 48.8 };
@@ -56,6 +57,43 @@ function createOverlayCamera(zoom = 8) {
 }
 
 describe("GlobalTransportItineraryOverlay", () => {
+  it("labels access walking, transit and final walking with their supplied durations", async () => {
+    const route = createOverlayRoute();
+    const end = { lon: 2.241, lat: 48.821 };
+    const sections = [...route.sections, {
+      type: "street_network", mode: "walking", durationSeconds: 120,
+      fromPoint: destination, toPoint: end, geometry: [destination, end],
+    }];
+    const segments = createGlobalTransportItinerarySegments({ ...route, sections }, origin, end, { preserveSections: true });
+    const wrapper = mount(GlobalTransportItineraryOverlay, {
+      props: { camera: createOverlayCamera(), segments },
+    });
+    expect(wrapper.find("[data-duration-kind]").exists()).toBe(false);
+    const displayedDurations = () => wrapper.findAll("[data-duration-kind]").map((node) => node.text());
+    for (const target of wrapper.findAll("[data-duration-target]")) {
+      await target.trigger("pointerenter", { pointerType: "mouse" });
+      expect(displayedDurations()).toEqual(["4 min", "10 min", "2 min"]);
+      await target.trigger("pointerleave", { pointerType: "mouse" });
+      expect(wrapper.find("[data-duration-kind]").exists()).toBe(false);
+    }
+    vi.useFakeTimers();
+    try {
+      const transit = wrapper.get("[data-duration-target=transit]");
+      transit.element.dispatchEvent(new PointerEvent("click", { pointerType: "touch", bubbles: true }));
+      await wrapper.vm.$nextTick();
+      expect(displayedDurations()).toEqual(["4 min", "10 min", "2 min"]);
+      await vi.advanceTimersByTimeAsync(9999);
+      expect(displayedDurations()).toHaveLength(3);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(wrapper.find("[data-duration-kind]").exists()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+    await wrapper.setProps({ pathsOnly: true });
+    expect(wrapper.find("[data-duration-kind]").exists()).toBe(false);
+    expect(wrapper.findAll(".global-transport-itinerary-overlay__path")).toHaveLength(3);
+  });
+
   it("renders colored transit paths and dotted walking paths", () => {
     const wrapper = mount(GlobalTransportItineraryOverlay, {
       props: {

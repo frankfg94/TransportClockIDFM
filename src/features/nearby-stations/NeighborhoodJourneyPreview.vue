@@ -7,12 +7,14 @@ import type { TransportMapNetwork } from "../transport-map/contracts/network";
 import type { GlobalMapPath } from "../transport-map/contracts/manifest";
 import { createPreviewTransitPathResolver, journeyPreviewRow, type JourneyPreviewRun, type MappedPreviewJourney } from "./neighborhood/journeyPreview";
 import type { NeighborhoodJourneyBenchmark } from "./neighborhood/contracts";
+import { resolveGlobalTransportItineraryLine } from "../line-map/globalTransportItineraryGeometry";
 import { summarizeJourney } from "./neighborhood/journeys";
 
 const props = defineProps<{
   run: JourneyPreviewRun;
   originLabel: string;
   network?: TransportMapNetwork;
+  loadDetailPaths?: (lineId: string) => Promise<GlobalMapPath[]>;
   loadPaths: (layer: "core" | "bus") => Promise<GlobalMapPath[]>;
 }>();
 const NeighborhoodJourneyMap = defineAsyncComponent(() => import("./NeighborhoodJourneyMap.vue"));
@@ -23,7 +25,8 @@ const choices = ref<Record<string, number>>({});
 const benchmark = computed(() => props.run.benchmarks.find(b => b.id === destinationId.value));
 const corePaths = shallowRef<GlobalMapPath[]>([]);
 const busPaths = shallowRef<GlobalMapPath[]>([]);
-const transitPath = computed(() => props.network && createPreviewTransitPathResolver(props.network, [...corePaths.value, ...busPaths.value]));
+const detailedPaths = shallowRef(new Map<string, GlobalMapPath[]>());
+const transitPath = computed(() => props.network && createPreviewTransitPathResolver(props.network, [...corePaths.value, ...busPaths.value, ...[...detailedPaths.value.values()].flat()]));
 function mapJourney(b: NeighborhoodJourneyBenchmark): MappedPreviewJourney {
   const choice = choices.value[b.id];
   return {
@@ -35,6 +38,27 @@ const mapped = computed(() => benchmark.value ? [mapJourney(benchmark.value)] : 
 const row = computed(() => benchmark.value ? mapped.value[0]?.row : undefined);
 const alternatives = computed(() => benchmark.value?.journeys.map(summarizeJourney) ?? []);
 const completed = computed(() => props.run.benchmarks.filter(b => b.status !== "loading").length);
+
+watch([benchmark, choices, () => props.network], async (_, __, onCleanup) => {
+  if (!props.network || !props.loadDetailPaths) return;
+  let stale = false;
+  onCleanup(() => { stale = true; });
+  const targets = benchmark.value ? [benchmark.value] : props.run.benchmarks;
+  const ids = new Set(targets.flatMap(item => {
+    const selected = mapJourney(item).row.selectedIndex;
+    return (item.journeys[selected]?.sections ?? []).flatMap(section => {
+      if (section.type !== "public_transport") return [];
+      const line = resolveGlobalTransportItineraryLine(section, props.network!.lines);
+      return line ? [line.id] : [];
+    });
+  }));
+  for (const id of ids) {
+    if (stale) return;
+    if (detailedPaths.value.has(id)) continue;
+    const paths = await props.loadDetailPaths(id).catch(() => []);
+    if (!stale && paths.length) detailedPaths.value = new Map(detailedPaths.value).set(id, paths);
+  }
+}, { immediate: true, deep: true });
 
 onMounted(() => {
   void props.loadPaths("core").then(paths => { corePaths.value = paths; }).catch(() => {});

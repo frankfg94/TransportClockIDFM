@@ -5,7 +5,59 @@ import type { NearbyPlace } from "../src/features/nearby-stations/nearbyPlaces";
 import { buildNeighborhoodScore, type NeighborhoodFact } from "../src/features/nearby-stations/neighborhood";
 
 describe("NearbyNeighborhoodScoreCard", () => {
-  it("names branches in the summary, category and tooltip, with neutral context beyond 30 minutes", () => {
+  it("opens the walking-method explanation from Nature & loisirs", async () => {
+    const result = buildNeighborhoodScore({ places: [], placesLoaded: false, stations: [], stationsLoaded: true });
+    const wrapper = mount(NearbyNeighborhoodScoreCard, { props: { result, directoryUrl: "/nearby-stations" },
+      global: { stubs: { NuxtLink: true } } });
+    const help = wrapper.get(".nearby-nature-help");
+    expect(help.attributes("aria-expanded")).toBe("false");
+    await help.trigger("click");
+    expect(wrapper.get(".nearby-nature-explanation").text()).toContain("Les circuits peuvent partager des tronçons");
+    expect(help.attributes("aria-expanded")).toBe("true");
+    wrapper.unmount();
+  });
+  it("keeps daily life in a loading state until places arrive and preserves the score if a supplementary source fails", async () => {
+    const input = { places: [], placesLoaded: false, stations: [], stationsLoaded: true };
+    const result = buildNeighborhoodScore(input);
+    const criterion = { id: "daily-life", status: "loading", confidence: 0, reasons: [],
+      datasets: [{ id: "osm-places", required: true, status: "loading" }] } as const;
+    const wrapper = mount(NearbyNeighborhoodScoreCard, { props: { result, directoryUrl: "/nearby-stations", criteria: [criterion] },
+      global: { stubs: { NuxtLink: true } } });
+    const dailyLife = () => wrapper.findAll(".nearby-neighborhood-score-card__category")
+      .find(item => item.get("h3").text() === "Vie quotidienne")!;
+    expect(dailyLife().text()).toContain("Chargement…");
+    expect(dailyLife().text()).not.toContain("Non disponible");
+    await wrapper.setProps({
+      result: buildNeighborhoodScore({ ...input, placesLoaded: true }),
+      criteria: [{ ...criterion, status: "degraded", datasets: [
+        { id: "osm-places", required: true, status: "ready" },
+        { id: "food-markets", required: false, status: "error" },
+      ] }],
+    });
+    expect(dailyLife().text()).toContain("2/10");
+    expect(dailyLife().text()).not.toContain("Chargement incomplet");
+    wrapper.unmount();
+  });
+  it("shows park subsites in the fact without opening the map", async () => {
+    const result = buildNeighborhoodScore({ places: [], placesLoaded: false, stations: [], stationsLoaded: true });
+    const category = result.categories.find(category => category.id === "nature-leisure")!;
+    category.available = true;
+    category.positiveFacts = [{ id: "park", kind: "external", category: "nature-leisure", polarity: "positive",
+      family: "park", priority: 1, label: "Domaine de la Vallée-aux-Loups", greenMap: { scope: "park", id: "park" },
+      evidence: { proof: "derived", observedAt: 1 } }];
+    const routing = { datetime: "20261121T090000", version: "test", probeJourneys: async () => [], loadPaths: async () => [],
+      spaces: [{ id: "park", parkSubsites: ["Arboretum"] }] };
+    const wrapper = mount(NearbyNeighborhoodScoreCard, { props: { result, directoryUrl: "/nearby-stations", natureTransit: routing },
+      global: { stubs: { NuxtLink: true } } });
+    expect(wrapper.text()).toContain("Sites dans le domaine");
+    expect(wrapper.text()).toContain("Arboretum");
+    await wrapper.setProps({ natureTransit: { ...routing, subsites: new Map([["park", ["Arboretum", "Maison de Chateaubriand"]]]) } });
+    expect(wrapper.findAll(".nearby-neighborhood-score-fact__subsite").map(site => site.text()))
+      .toEqual(["Arboretum", "Maison de Chateaubriand"]);
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+  it("names branches in the transport category and tooltip, with neutral context beyond 30 minutes", () => {
     const result = buildNeighborhoodScore({ places: [], placesLoaded: false, stations: [], stationsLoaded: true });
     const fact: NeighborhoodFact = { id: "section", kind: "transportLineNearby", category: "transport", polarity: "neutral",
       contributionWeight: 0, family: "transport-proximity:section", priority: 0,
@@ -20,11 +72,11 @@ describe("NearbyNeighborhoodScoreCard", () => {
     result.categories.find(category => category.id === "transport")!.negativeFacts = [];
     result.categories.find(category => category.id === "transport")!.neutralFacts = [fact];
     const wrapper = mount(NearbyNeighborhoodScoreCard, { props: { result, directoryUrl: "/nearby-stations" }, global: { stubs: { NuxtLink: true } } });
-    expect(wrapper.get(".nearby-neighborhood-score-card__summary-fact").text()).toContain("RER X — branche Terminus test");
+    expect(wrapper.find(".nearby-neighborhood-score-card__summary-fact").exists()).toBe(false);
     expect(wrapper.get(".nearby-neighborhood-score-fact__marker").text()).toBe("•");
     expect(wrapper.text()).toContain("Cet accès dépasse 30 min");
     expect(wrapper.text()).toContain("sans effet sur la note");
-    expect(wrapper.text().match(/RER X — branche Terminus test/gu)!.length).toBeGreaterThanOrEqual(3);
+    expect(wrapper.text().match(/RER X — branche Terminus test/gu)!.length).toBeGreaterThanOrEqual(2);
     wrapper.unmount();
   });
   it("updates the two access counters beside the transport spinner", async () => {

@@ -402,10 +402,11 @@ describe("GTFS frequency card", () => {
     expect(wrapper.get('[data-testid="frequency-compact"] h4').text()).toBe("Central section");
     expect(wrapper.get('[data-testid="frequency-compact"]').text()).not.toContain("branch origin");
     expect(wrapper.findAll("[data-frequency-section]")).toHaveLength(0);
+    const timetableButton = wrapper.get('[data-testid="gtfs-frequency-timetable"]').element;
     await expandFrequencyCard(wrapper);
     expect(wrapper.get('[data-testid="frequency-average"] strong').text()).toBe("12 min");
-    expect(wrapper.text()).toContain("View timetable");
-    expect(wrapper.find('[data-testid="gtfs-frequency-timetable"]').exists()).toBe(true);
+    expect(wrapper.get('[data-testid="gtfs-frequency-timetable"]').text()).toBe("Timetable");
+    expect(wrapper.get('[data-testid="gtfs-frequency-timetable"]').element).toBe(timetableButton);
     const sections = wrapper.findAll("[data-frequency-section]");
     expect(sections.map((item) => item.attributes("data-frequency-section"))).toEqual([
       "trunk",
@@ -534,13 +535,13 @@ describe("GTFS frequency card", () => {
     expect(details?.textContent).toContain("Coverage: 08/01/2026–09/30/2026");
   });
 
-  it("opens the timetable modal and requests the displayed service date", async () => {
+  it("opens the timetable from the collapsed card and requests the displayed service date", async () => {
     const request = vi
       .spyOn(timetableClient, "fetchGtfsLineTimetable")
       .mockResolvedValue(timetable());
     const wrapper = card();
 
-    await expandFrequencyCard(wrapper);
+    expect(wrapper.get('[data-testid="gtfs-frequency-toggle"]').attributes("aria-expanded")).toBe("false");
     await wrapper.get('[data-testid="gtfs-frequency-timetable"]').trigger("click");
     await flushPromises();
 

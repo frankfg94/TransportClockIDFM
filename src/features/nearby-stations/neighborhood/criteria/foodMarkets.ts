@@ -10,11 +10,8 @@ import { makeFact } from "../facts";
 import { directVenueTransitValues } from "../factPresentation";
 import { SOURCE_KEYS } from "../i18nKeys";
 import type { NeighborhoodQualification } from "../qualification";
-
-export const FOOD_MARKET_RULES = {
-  advantageMinutes: 15, contextMinutes: 30, bonus: 0.5, extendedBonus: 0.5, exceptionalBonus: 1.25,
-  premiumAreaM2: 2_500, premiumTraders: 100, exceptionalSessions: 3,
-} as const;
+import { FOOD_MARKET_RULES } from "./foodMarketRules";
+export { FOOD_MARKET_RULES } from "./foodMarketRules";
 
 const MARKET_SIZE = {
   mediumAreaM2: 1_000, largeAreaM2: 3_000, maximumLargeAreaM2: 8_000,
@@ -50,7 +47,7 @@ export function foodMarketCandidates(places: readonly NearbyPlace[],
     const duplicate = place.osmPlaceId ? byMarket.get(place.osmPlaceId) : [...byMarket.values()].find(candidate =>
       candidate.record?.sourceUrl === place.sourceUrl ||
       (normalizeCityName(candidate.place.name) === normalizeCityName(place.name) && placeDistanceMeters(candidate.place, place) <= 150));
-    if (duplicate?.record || (place.osmPlaceId && !duplicate)) continue;
+    if (duplicate?.record) continue;
     if (duplicate) byMarket.delete(duplicate.id);
     const id = place.osmPlaceId ?? place.id;
     byMarket.set(id, {
@@ -123,8 +120,9 @@ export function scoreFoodMarkets(markets: readonly FoodMarketAccess[] = [], tran
   for (const { market, journey } of transit) accesses.set(market.id, { market: accesses.get(market.id)?.market ?? market, journey });
   const durationLimit = FOOD_MARKET_RULES.contextMinutes * 60;
   const visible = [...accesses.values()].flatMap(({ market, journey: route }) => {
-    const walkSeconds = (market.walkSeconds ?? Infinity) < durationLimit ? market.walkSeconds : undefined;
-    const journey = route && route.durationSeconds < (walkSeconds ?? durationLimit) ? route : undefined;
+    const walkLimit = market.record ? FOOD_MARKET_RULES.documentedWalkingContextMinutes * 60 : durationLimit;
+    const walkSeconds = (market.walkSeconds ?? Infinity) < walkLimit ? market.walkSeconds : undefined;
+    const journey = route && route.durationSeconds < Math.min(walkSeconds ?? Infinity, durationLimit) ? route : undefined;
     if (walkSeconds === undefined && !journey) return [];
     const assessment = assessFoodMarket({ ...market, walkSeconds }, journey);
     const level = assessment.qualification.kind;

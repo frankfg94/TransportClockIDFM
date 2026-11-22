@@ -23,10 +23,12 @@ const props = defineProps<{
   line: LineIconLike;
   compact?: boolean;
   eager?: boolean;
+  fallbackUntilLoaded?: boolean;
 }>();
 const { t } = useI18n();
 
 const iconIndex = ref(0);
+const loadedIconUrl = ref<string>();
 const displayLabel = computed(
   () => props.line.label ?? props.line.shortName ?? "?",
 );
@@ -94,7 +96,7 @@ function getLineModeLabel(line: typeof props.line): string {
     :class="{ 'line-icon-badge--compact': compact }"
   >
     <span
-      v-if="!currentIconUrl"
+      v-if="!currentIconUrl || (fallbackUntilLoaded && loadedIconUrl !== currentIconUrl)"
       class="line-icon-badge__fallback"
       role="img"
       :aria-label="t('lineMap.lineAlt', { line: displayLabel })"
@@ -107,10 +109,12 @@ function getLineModeLabel(line: typeof props.line): string {
     </span>
     <img
       v-if="currentIconUrl"
+      v-show="!fallbackUntilLoaded || loadedIconUrl === currentIconUrl"
       :src="currentIconUrl"
       :alt="t('lineMap.lineAlt', { line: displayLabel })"
       :loading="eager ? 'eager' : 'lazy'"
       decoding="async"
+      @load="loadedIconUrl = ($event.target as HTMLImageElement).getAttribute('src') ?? undefined"
       @error="showNextIconCandidate"
     />
   </span>

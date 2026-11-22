@@ -28,6 +28,9 @@ export interface TransportStationComparison {
   mode?: GlobalMapMode;
   stations: readonly { id: string; point: GeocoderPoint & { label: string }; future: boolean }[];
   activeId?: string;
+  itineraries?: readonly { stationId: string; itinerary: GlobalTransportPlanItinerary }[];
+  showNetwork?: boolean;
+  focusJourney?: boolean;
   fitAllVersion: number;
 }
 

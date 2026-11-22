@@ -222,7 +222,7 @@ export function useGlobalLineDirections(options: UseGlobalLineDirectionsOptions)
 
       busDirectionSequences.value = sequences;
       busDirectionSelection.value = resolveGlobalDirection(sequences, selectedDirectionId);
-      if (supportsGlobalBusDirections(line) && directionFilterRequested.value) {
+      if (directionFilterRequested.value) {
         void resolveBusDirectionGeometry(line, busDirectionSelection.value);
       }
     } catch (error) {
@@ -258,9 +258,7 @@ export function useGlobalLineDirections(options: UseGlobalLineDirectionsOptions)
     directionFilterRequested.value = true;
     options.clearActiveTrafficDisruption();
     busDirectionSelection.value = selectionForDirection;
-    if (supportsGlobalBusDirections(line)) {
-      void resolveBusDirectionGeometry(line, selectionForDirection);
-    }
+    void resolveBusDirectionGeometry(line, selectionForDirection);
     options.syncRoute();
     options.draw();
   }
@@ -274,7 +272,7 @@ export function useGlobalLineDirections(options: UseGlobalLineDirectionsOptions)
     directionFilterRequested.value = !directionMergeEnabled.value;
     busDirectionSelection.value = resolveGlobalDirection(busDirectionSequences.value);
 
-    if (supportsGlobalBusDirections(line) && directionFilterRequested.value) {
+    if (directionFilterRequested.value) {
       void resolveBusDirectionGeometry(line, busDirectionSelection.value);
     } else {
       busDirectionGeometryRequestToken += 1;
@@ -343,7 +341,7 @@ export function useGlobalLineDirections(options: UseGlobalLineDirectionsOptions)
       options.getActiveLine()?.id === line.id &&
       busDirectionSelection.value?.selectedDirectionId === direction.selectedDirectionId
     ) {
-      unavailableBusDirectionGeometryKey.value = cacheKey;
+      if (supportsGlobalBusDirections(line)) unavailableBusDirectionGeometryKey.value = cacheKey;
       options.draw();
     }
   }

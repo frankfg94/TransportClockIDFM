@@ -1,3 +1,4 @@
+import type { GreenBoundary, GreenMapReference, GreenParkSubsite, GreenSpaceMapAccess } from "../../../../shared/natureInCity";
 import type { TranslationKey, TranslationParams } from "../../../i18n";
 import type { GtfsLineFrequencyResponse } from "../../../types/lineFrequency";
 import type { LineTopology } from "../../../../server/services/topology/types";
@@ -16,24 +17,7 @@ export const NEIGHBORHOOD_MAX_SCORE = 10;
 export const NEIGHBORHOOD_WALKING_LIMIT_MINUTES = 15;
 export const NEIGHBORHOOD_FREQUENCY_CONTEXT_MAX_SECONDS = 25 * 60;
 
-export type NeighborhoodExceptionalGreenSpaceAccess = "walking" | "transit";
-
-/**
- * Explicit barème for the exceptional green-space signal. Keeping the
- * thresholds together makes the surface/access rule inspectable and avoids
- * scattering park-specific exceptions through the score builder.
- */
-export const NEIGHBORHOOD_EXCEPTIONAL_GREEN_SPACE_RULES = [
-  { access: "walking", minSurfaceM2: 100_000, maxMinutesExclusive: 10 },
-  { access: "walking", minSurfaceM2: 200_000, maxMinutesExclusive: 15 },
-  { access: "transit", minSurfaceM2: 200_000, maxMinutesExclusive: 15 },
-  { access: "walking", minSurfaceM2: 50_000, maxMinutesExclusive: 5 },
-  { access: "walking", minSurfaceM2: 30_000, maxMinutesExclusive: 5 },
-] as const satisfies ReadonlyArray<{
-  access: NeighborhoodExceptionalGreenSpaceAccess;
-  minSurfaceM2: number;
-  maxMinutesExclusive: number;
-}>;
+export { NEIGHBORHOOD_EXCEPTIONAL_GREEN_SPACE_RULES, type NeighborhoodExceptionalGreenSpaceAccess } from "./criteria/greenSpaceFactRules";
 
 /** At least 5 courts/fields at 5 min, or at least 7 at 7 min. */
 export const NEIGHBORHOOD_MANY_SPORTS_RULES = [
@@ -95,6 +79,14 @@ export interface NeighborhoodFactGeography {
 }
 
 export type NeighborhoodFactKind =
+  | "woodlandNearby"
+  | "woodlandWalking"
+  | "woodlandMainWalking"
+  | "woodlandTransit"
+  | "woodlandMainTransit"
+  | "addressCanopy"
+  | "cityGreenDensity"
+  | "parkWalkingAccess"
   | "external"
   | "structuringTransportNearby"
   | "structuringTransportDistance"
@@ -113,6 +105,11 @@ export type NeighborhoodFactKind =
   | "employmentHubUnavailable"
   | "noctilienAtNight"
   | "greenSpaceExceptional"
+  | "greenSpaceFootprint"
+  | "greenSpaceCulturalSite"
+  | "greenSpaceSubsite"
+  | "remarkableGarden"
+  | "parkWalking"
   | "greenSpaceTransitNearby"
   | "chateletUnder30"
   | "chateletUnder45"
@@ -239,6 +236,8 @@ export type NeighborhoodFactTransportReliabilityLine = Pick<
 >;
 
 export interface NeighborhoodFact {
+  greenMap?: GreenMapReference;
+  greenSpaceAccess?: GreenSpaceMapAccess;
   id: string;
   transportSection?: NeighborhoodTransportSection;
   kind: NeighborhoodFactKind;
@@ -250,7 +249,7 @@ export interface NeighborhoodFact {
   /** Exceptional signals are promoted above ordinary strengths. */
   emphasis?: "exceptional";
   /** Presentation-only badge emphasis; defaults to `emphasis` without changing fact ordering. */
-  markerEmphasis?: "standard" | "exceptional";
+  markerEmphasis?: "standard" | "strong" | "exceptional";
   /** Relative positive contribution, defaulting to 1. */
   contributionWeight?: number;
   labelKey?: TranslationKey;
@@ -345,11 +344,19 @@ export interface NeighborhoodJourneyBenchmark {
 }
 
 export interface NeighborhoodGreenSpaceJourney {
+  woodlandMainTransit?: boolean;
+  parkWalking?: { profile?: import("../parkWalkingProfile").ParkWalkingProfile; accessMinutes: number };
+  garden?: { publicAccess: "open" | "closed" | "unknown"; entranceWalkSeconds?: number;
+    entranceRoute?: import("../nearbyWalkingRoutes").NearbyWalkingRoute };
+  transitComplete?: boolean;
+  fastestTransitSeconds?: number;
   greenSpace: PublicGreenSpaceAccess;
   journeys: readonly NearbyJourney[];
 }
 
 export interface NeighborhoodScoreInput {
+  greenSpaceSubsites?: ReadonlyMap<string, readonly GreenParkSubsite[]>;
+  greenSpaceSiteBoundaries?: ReadonlyMap<string, GreenBoundary>;
   personalJourneys?: readonly import("./personalJourneys").PersonalJourneyResult[];
   places: readonly NearbyPlace[];
   placesLoaded: boolean;
@@ -370,12 +377,14 @@ export interface NeighborhoodScoreInput {
   journeyBenchmarksLoading?: boolean;
   journeyDepartureTime?: string;
   greenSpaceJourneys?: readonly NeighborhoodGreenSpaceJourney[];
+  greenSpaceFootprints?: readonly import("../../../services/places/greenSpaceFootprints").NearbyGreenSpaceFootprint[];
   noctilienJourneys?: readonly NearbyJourney[];
   noctilienDepartureTime?: string;
   frequencyProfiles?: ReadonlyMap<string, GtfsLineFrequencyResponse | undefined>;
   lineTopologies?: ReadonlyMap<string, LineTopology | undefined>;
   lastServiceByLine?: ReadonlyMap<string, GtfsLastService | undefined>;
   hospitalJourneys?: Readonly<Record<string, readonly NearbyJourney[] | undefined>>;
+  hospitalPlaces?: readonly NearbyPlace[];
   serviceQuality?: PublicServiceQuality;
   passengerSatisfaction?: {
     observations?: readonly import("../../../../shared/passengerSatisfaction").PassengerSatisfactionObservation[];

@@ -112,6 +112,11 @@ export const FACT_KEYS: Record<NeighborhoodFactKind, { label: TranslationKey; to
     label: "nearbyStations.neighborhoodScore.facts.noctilienAtNight.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.noctilienAtNight.tooltip",
   },
+  woodlandNearby: { label: "nearbyStations.neighborhoodScore.facts.woodlandNearby.label", tooltip: "nearbyStations.neighborhoodScore.facts.woodlandNearby.tooltip" },
+  woodlandWalking: { label: "nearbyStations.neighborhoodScore.facts.woodlandWalking.label", tooltip: "nearbyStations.neighborhoodScore.facts.woodlandWalking.tooltip" },
+  woodlandMainWalking: { label: "nearbyStations.neighborhoodScore.facts.woodlandMainWalking.label", tooltip: "nearbyStations.neighborhoodScore.facts.woodlandMainWalking.tooltip" },
+  woodlandTransit: { label: "nearbyStations.neighborhoodScore.facts.woodlandTransit.label", tooltip: "nearbyStations.neighborhoodScore.facts.woodlandTransit.tooltip" },
+  woodlandMainTransit: { label: "nearbyStations.neighborhoodScore.facts.woodlandMainTransit.label", tooltip: "nearbyStations.neighborhoodScore.facts.woodlandMainTransit.tooltip" },
   greenSpaceTransitNearby: {
     label: "nearbyStations.neighborhoodScore.facts.greenSpaceTransitNearby.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.greenSpaceTransitNearby.tooltip",
@@ -119,6 +124,29 @@ export const FACT_KEYS: Record<NeighborhoodFactKind, { label: TranslationKey; to
   greenSpaceExceptional: {
     label: "nearbyStations.neighborhoodScore.facts.greenSpaceExceptional.label",
     tooltip: "nearbyStations.neighborhoodScore.facts.greenSpaceExceptional.tooltip",
+  },
+  addressCanopy: { label: "nearbyStations.neighborhoodScore.facts.addressCanopy.label", tooltip: "nearbyStations.neighborhoodScore.facts.addressCanopy.tooltip" },
+  cityGreenDensity: { label: "nearbyStations.neighborhoodScore.facts.cityGreenDensity.label", tooltip: "nearbyStations.neighborhoodScore.facts.cityGreenDensity.tooltip" },
+  parkWalkingAccess: { label: "nearbyStations.neighborhoodScore.facts.parkWalkingAccess.label", tooltip: "nearbyStations.neighborhoodScore.facts.parkWalkingAccess.tooltip" },
+  parkWalking: {
+    label: "nearbyStations.neighborhoodScore.facts.parkWalking.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.parkWalking.tooltip",
+  },
+  remarkableGarden: {
+    label: "nearbyStations.neighborhoodScore.facts.remarkableGarden.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.remarkableGarden.tooltip",
+  },
+  greenSpaceSubsite: {
+    label: "nearbyStations.neighborhoodScore.facts.greenSpaceSubsite.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.greenSpaceSubsite.tooltip",
+  },
+  greenSpaceCulturalSite: {
+    label: "nearbyStations.neighborhoodScore.facts.greenSpaceCulturalSite.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.greenSpaceCulturalSite.tooltip",
+  },
+  greenSpaceFootprint: {
+    label: "nearbyStations.neighborhoodScore.facts.greenSpaceFootprint.label",
+    tooltip: "nearbyStations.neighborhoodScore.facts.greenSpaceFootprint.tooltip",
   },
   chateletUnder30: {
     label: "nearbyStations.neighborhoodScore.facts.chateletUnder30.label",
@@ -376,6 +404,7 @@ export const RULE_KEYS = {
   lastService: "nearbyStations.neighborhoodScore.rules.lastService",
   leisurePresence: "nearbyStations.neighborhoodScore.rules.leisurePresence",
   educationPresence: "nearbyStations.neighborhoodScore.rules.educationPresence",
+  woodlandEdge: "nearbyStations.neighborhoodScore.rules.woodlandEdge",
   greenSpaceExceptional: "nearbyStations.neighborhoodScore.rules.greenSpaceExceptional",
   greenSpaceTransit: "nearbyStations.neighborhoodScore.rules.greenSpaceTransit",
   sportsFacilities: "nearbyStations.neighborhoodScore.rules.sportsFacilities",

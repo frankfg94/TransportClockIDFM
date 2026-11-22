@@ -1,3 +1,4 @@
+import type { GreenMapReference, GreenSpaceMapAccess, VerdictGreenery } from "../../../shared/natureInCity";
 import { runNetworkTask } from "../../services/networkScheduler";
 import { toServerApiUrl } from "../../services/serverApi";
 
@@ -7,6 +8,8 @@ export type PublicVerdictCategoryId = "transport" | "daily-life" | "nature-leisu
 export const PUBLIC_NEIGHBORHOOD_VERDICT_SCHEMA_VERSION = "1.3" as const;
 
 export interface PublicVerdictEvidence {
+  greenMap?: GreenMapReference;
+  greenSpaceAccess?: GreenSpaceMapAccess;
   id: string;
   category: PublicVerdictCategoryId;
   polarity: "positive" | "negative" | "neutral";
@@ -68,6 +71,12 @@ export interface PublicGreenSpaceRoutePoint {
 }
 
 export interface PublicGreenSpaceAccess {
+  parkMap?: Extract<GreenMapReference, { scope: "park" }>;
+  parkAliases?: string[];
+  parkSubsites?: string[];
+  woodlandMap?: Extract<GreenMapReference, { scope: "woodland" }>;
+  mainWalkingMinutes?: number;
+  mainSurfaceM2?: number;
   id: string;
   name: string;
   category?: string;
@@ -98,6 +107,7 @@ export interface PublicNeighborhoodVerdict {
   categories: PublicVerdictCategory[];
   futureProjects?: PublicFutureGpeStation[];
   nearbyGreenSpaces?: PublicGreenSpaceAccess[];
+  greenery?: VerdictGreenery;
   security?: {
     commune?: { localScore: number; availableWeight: number; indicators: Array<{ id: string; label: string; weight: number; percentile: number }> } | string;
     trend?: { deltaPercent: number; adjustment: number } | string;

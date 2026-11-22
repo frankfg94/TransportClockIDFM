@@ -6,8 +6,25 @@ import {
 } from "../src/features/transport-map/overlays/ghostLineDirections";
 import {
   createGhostLineFlowModel,
+  prepareSelectedRoutePlayback,
   type GhostLineFlowDirection,
 } from "../src/features/transport-map/overlays/ghostLineFlow";
+
+it("samples successive passes down the same street and keeps disconnected sections separate", () => {
+  const path = [[{ x: -100, y: 10 }, { x: 250, y: 10 }, { x: -100, y: 10 }]];
+  const playback = prepareSelectedRoutePlayback(path)!;
+  expect([0, 0.25, 0.5, 0.75, 1].map(progress => playback.sample(progress).x))
+    .toEqual([-100, 75, 250, 75, -100]);
+  const disconnected = prepareSelectedRoutePlayback([
+    [{ x: 0, y: 0 }, { x: 10, y: 0 }],
+    [{ x: 30, y: 0 }, { x: 40, y: 0 }],
+  ])!;
+  expect(disconnected.trace(5, 15)).toEqual([
+    [{ x: 5, y: 0 }, { x: 10, y: 0 }],
+    [{ x: 30, y: 0 }, { x: 35, y: 0 }],
+  ]);
+
+});
 import type {
   GlobalMapLine,
   GlobalMapPath,

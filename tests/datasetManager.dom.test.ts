@@ -60,7 +60,7 @@ describe("DatasetManagerModal", () => {
     });
     await flushPromises();
 
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith("/api/datasets", expect.objectContaining({ signal: expect.anything() }));
     expect(document.body.textContent).toContain("Géométrie et horaires GTFS");
     expect(document.body.textContent).toContain("Cloudflare R2");
     expect(document.body.textContent).toContain("Vieillissante");

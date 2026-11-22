@@ -12,7 +12,7 @@ export function createGtfsNeighborhoodTravelRoutesProvider(): TravelRoutesProvid
   const pending = new Map<string, Promise<NearbyJourney[]>>();
   const cache = new Map<string, { expires: number; journeys: NearbyJourney[] }>();
   let artifactVersion: string | undefined;
-  const requestKey = (request: NearbyJourneyRequest) => JSON.stringify([artifactVersion, request.origin.lon, request.origin.lat, request.destination.lon, request.destination.lat, request.destinationRef, request.arrivalAtPlatform, request.destinationLineId, request.nearbyAccessFeeders, request.datetime, [...(request.allowedModes ?? [])].sort(), request.purpose === "transport-benchmark"]);
+  const requestKey = (request: NearbyJourneyRequest) => JSON.stringify([artifactVersion, request.origin.lon, request.origin.lat, request.destination.lon, request.destination.lat, request.destinationRef, request.arrivalAtPlatform, request.destinationLineId, request.nearbyAccessFeeders, request.datetime, [...(request.allowedModes ?? [])].sort(), request.purpose === "transport-benchmark", request.maxTransfers === 0]);
   function flush(groupKey: string) {
     const subscribers = (groups.get(groupKey) ?? []).filter(s => !s.done);
     groups.delete(groupKey);
@@ -36,6 +36,7 @@ export function createGtfsNeighborhoodTravelRoutesProvider(): TravelRoutesProvid
     }
     void (async () => {
       const request = { origin: first.origin, purpose: first.purpose, datetime: first.datetime ?? getNearbyParisJourneyDateTime(9), allowedModes: first.allowedModes,
+        ...(first.maxTransfers === 0 ? { directOnly: true } : {}),
         destinations: unique.map((s, i) => ({ ...s.request.destination, id: String(i), destinationRef: s.request.destinationRef, arrivalAtPlatform: s.request.arrivalAtPlatform,
           destinationLineId: s.request.destinationLineId, nearbyAccessFeeders: s.request.nearbyAccessFeeders })) };
       const payload = canUseBrowserNeighborhoodGtfs()
@@ -84,7 +85,7 @@ export function createGtfsNeighborhoodTravelRoutesProvider(): TravelRoutesProvid
     // must not hold back an entire group of 64 otherwise usable destinations.
     const platformAccess = request.purpose === "transport" && request.arrivalAtPlatform === true;
     const batchSize = platformAccess ? 16 : 64;
-    const groupKey = JSON.stringify([request.origin.lon, request.origin.lat, request.datetime, [...(request.allowedModes ?? [])].sort(), request.purpose, independentDestination ? key : undefined, platformAccess]);
+    const groupKey = JSON.stringify([request.origin.lon, request.origin.lat, request.datetime, [...(request.allowedModes ?? [])].sort(), request.purpose, independentDestination ? key : undefined, platformAccess, request.maxTransfers === 0]);
     const promise = new Promise<NearbyJourney[]>((resolve, reject) => {
       const subscriber: Subscriber = { request, resolve, reject, signal, done: false, abort: () => {} };
       subscriber.abort = () => { subscriber.done = true; reject(signal?.reason); };

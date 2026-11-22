@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { culturalPlacesWithinGreenSpace } from "./greenSpaceMapData";
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "#imports";
 import { ArrowLeft, Download, Gauge } from "lucide-vue-next";
@@ -59,7 +60,7 @@ import {
 } from "./neighborhood/departureTimes";
 
 const route = useRoute();
-const NeighborhoodComparison = defineAsyncComponent(() => import("./neighborhood-comparison/NeighborhoodComparison.vue"));
+const VerdictScopeComparison = defineAsyncComponent(() => import("./neighborhood-comparison/VerdictScopeComparison.vue"));
 const loadJourneyPreview = () => import("./NeighborhoodJourneyPreview.vue");
 const NeighborhoodJourneyPreview = defineAsyncComponent(loadJourneyPreview);
 const router = useRouter();
@@ -92,12 +93,31 @@ function queryOrigin(): GeocoderPoint | undefined {
 }
 
 const initialOrigin = queryOrigin();
+const natureFocus = computed(() => {
+  const focus = queryString(route.query.focus);
+  return focus?.startsWith("nature:") ? focus : undefined;
+});
+
+function updateNatureFocus(focus?: string) {
+  if (focus === natureFocus.value) return;
+  void router.replace({ query: { ...route.query, focus } });
+}
 // On an opted-in page, load the view before routing saturates the local
 // connection pool with GTFS and walking requests.
 watch(showJourneyPreview, (on) => {
   if (on && initialOrigin) void loadJourneyPreview().catch(() => {});
 }, { immediate: true });
-const comparisonOpen = ref(queryString(route.query.compare) === "1");
+const verdictScope = ref<"neighborhood" | "rest">(!natureFocus.value && queryString(route.query.compare) === "1" ? "rest" : "neighborhood");
+watch(natureFocus, focus => { if (focus) verdictScope.value = "neighborhood"; });
+const verdictScopes = ["neighborhood", "rest"] as const;
+
+function moveScopeTab(event: KeyboardEvent) {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  verdictScope.value = event.key === "Home" ? "neighborhood"
+    : event.key === "End" ? "rest" : verdictScope.value === "rest" ? "neighborhood" : "rest";
+  document.getElementById(`verdict-tab-${verdictScope.value}`)?.focus();
+}
 if (isVerdictDebugEnabled()) verdictDebugTimeline.clear();
 const nearby = useNearbyStations(initialOrigin ? {
   // This page needs the complete station catalog for non-local benchmarks
@@ -235,7 +255,29 @@ const score = useNearbyNeighborhoodScore({
   fetchPassengerSatisfaction,
   initialSnapshot: isNeighborhoodGtfsColdStart() ? undefined : readNearbyNeighborhoodScoreSnapshot(initialOrigin),
 });
+watch(natureFocus, focus => score.prepareGreenSpaces?.(focus), { immediate: true });
 const journeyPreview = computed(() => showJourneyPreview.value ? score.journeyPreview?.value : undefined);
+const natureTransit = computed(() => ({
+  probeJourneys: routeComposer.probeJourneys,
+  datetime: journeyDateTime.value,
+  version: calendar.version.value,
+  spaces: score.backendVerdict.value?.nearbyGreenSpaces,
+  subsites: new Map(score.backendVerdict.value?.nearbyGreenSpaces?.flatMap(space => {
+    const boundary = score.greenSpaceSiteBoundaries?.value.get(space.id);
+    if (!boundary) return [];
+    const culturalPlaces = culturalPlacesWithinGreenSpace(score.places.value, boundary);
+    return [[space.id, [...new Set([...(space.parkSubsites ?? []), ...culturalPlaces.map(place => place.name)])]] as const];
+  })),
+  network: nearby.transportMapNetwork.value,
+  journeys: new Map(score.greenSpaceJourneys?.value.map(({ greenSpace, journeys }) =>
+    [greenSpace.woodlandMap?.id ?? greenSpace.id, journeys[0]])),
+  walkingMinutes: new Map(score.greenSpaceJourneys?.value.flatMap(({ greenSpace }) => greenSpace.walkingMinutes === undefined
+    ? [] : [[greenSpace.woodlandMap?.id ?? greenSpace.id, greenSpace.walkingMinutes] as const])),
+  gardenWalks: new Map(score.greenSpaceJourneys?.value.flatMap(({ greenSpace, garden }) => garden?.entranceRoute
+    ? [[greenSpace.id, garden.entranceRoute] as const] : [])),
+  loadPaths: nearby.loadJourneyPreviewPaths,
+  loadDetailPaths: nearby.loadJourneyDetailPaths,
+}));
 const passengerSurvey = computed(() => score.result.value.categories?.find(category => category.id === "transport")?.passengerSatisfaction);
 const transportLoadingTasks = computed(() => {
   const progress = heavy.isLoading.value ? heavy.accessProgress.value : undefined;
@@ -845,11 +887,24 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
       </NuxtLink>
     </section>
 
+    <div v-if="initialOrigin" class="verdict-scope-tabs" role="tablist" :aria-label="t('nearbyStations.comparison.title')" @keydown="moveScopeTab">
+      <button v-for="scope in verdictScopes" :key="scope" :id="`verdict-tab-${scope}`" type="button" role="tab"
+        :aria-selected="verdictScope === scope" :tabindex="verdictScope === scope ? 0 : -1" aria-controls="verdict-scope-panel"
+        @click="verdictScope = scope">
+        {{ t(scope === 'neighborhood' ? 'nearbyStations.comparison.scopeNeighborhood' : 'nearbyStations.comparison.scopeRest') }}
+      </button>
+    </div>
+    <div v-if="initialOrigin" id="verdict-scope-panel" role="tabpanel" :aria-labelledby="`verdict-tab-${verdictScope}`" tabindex="0">
+      <VerdictScopeComparison :origin="nearby.selectedPlace.value" :scope="verdictScope" :network="nearby.transportMapNetwork.value"
+        :transport-ready="!nearby.isScanning.value && !nearby.error.value" />
     <NearbyNeighborhoodScoreCard
-      v-if="initialOrigin"
+      v-if="verdictScope === 'neighborhood'"
       :result="cardResult"
       :education-places="score.places.value"
       :education-walking-routes="nearbyWalking.placeRoutes.value"
+      :nature-origin="nearby.selectedPlace.value"
+      :nature-transit="natureTransit"
+      :nature-focus="natureFocus"
       :origin-label="originLabel"
       :workplace-label="workplaceLabel"
       :loading="scoreLoading"
@@ -862,6 +917,8 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
       :transport-loading-tasks="transportLoadingTasks"
       :directory-url="directoryUrl"
       @change-origin="openAddressSelector"
+      @update:nature-focus="updateNatureFocus"
+      @prepare-nature="score.prepareGreenSpaces?.($event)"
       @retry-source="retryFailedSource"
     >
       <template #transport-preview>
@@ -871,7 +928,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
           {{ t('settings.display.verdictJourneyPreview') }}
         </label>
         <NeighborhoodJourneyPreview v-if="journeyPreview" :key="journeyPreview.token" :run="journeyPreview"
-          :origin-label="originLabel" :network="nearby.transportMapNetwork.value" :load-paths="nearby.loadJourneyPreviewPaths" />
+          :origin-label="originLabel" :network="nearby.transportMapNetwork.value" :load-paths="nearby.loadJourneyPreviewPaths" :load-detail-paths="nearby.loadJourneyDetailPaths" />
         <NeighborhoodPassengerSatisfaction :survey="passengerSurvey" />
       </template>
       <template #personal-journeys>
@@ -882,14 +939,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
         <VerdictPersonalJourneys :journeys="personalJourneys" />
       </template>
     </NearbyNeighborhoodScoreCard>
-    <template v-if="initialOrigin">
-      <button type="button" class="nearby-neighborhood-score-page__export-button" :aria-expanded="comparisonOpen" aria-controls="neighborhood-comparison-panel" data-testid="verdict-open-comparison" @click="comparisonOpen = !comparisonOpen">
-        {{ t(comparisonOpen ? 'nearbyStations.comparison.close' : 'nearbyStations.comparison.open') }}
-      </button>
-      <div v-if="comparisonOpen" id="neighborhood-comparison-panel">
-        <NeighborhoodComparison :origin="nearby.selectedPlace.value" :network="nearby.transportMapNetwork.value" :transport-ready="!nearby.isScanning.value && Boolean(nearby.transportMapNetwork.value)" :transport-error="Boolean(nearby.error?.value)" />
-      </div>
-    </template>
+    </div>
     <NeighborhoodTrafficAnnex
       v-if="realEstateOrigin"
       :line-refs="trafficLineRefs"
@@ -912,6 +962,9 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 </template>
 
 <style scoped>
+.verdict-scope-tabs { display: flex; gap: .35rem; align-items: center; flex-wrap: wrap; }
+.verdict-scope-tabs > button { border: 0; border-radius: .6rem; padding: .55rem .85rem; background: var(--surface-soft); color: var(--ink); font: inherit; cursor: pointer; }
+.verdict-scope-tabs > button[aria-selected="true"] { background: #5146d9; color: #fff; }
 .nearby-neighborhood-score-page__gtfs-warning { background: var(--surface-soft); border-inline-start: 3px solid var(--warning, #a66312); padding: 8px 12px; margin-block: 12px; }
 .nearby-neighborhood-score-page__gtfs-warning p { margin: 0 0 6px; }
 .nearby-neighborhood-score-page { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); margin: 0 auto; max-width: 920px; min-width: 0; padding: 28px 22px 118px; }

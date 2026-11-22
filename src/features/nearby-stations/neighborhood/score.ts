@@ -5,6 +5,9 @@ import { buildDailyLifeCategory } from "./criteria/dailyLife";
 import { buildEducationCategory } from "./criteria/education";
 import { buildHealthCategory } from "./criteria/health";
 import { buildNatureLeisureCategory } from "./criteria/natureLeisure";
+import { addAddressGreenery } from "./criteria/natureInCity";
+import { addCityGreenDensity } from "./criteria/cityGreenDensity";
+import { shouldHideSmallGreenSpaceFact } from "./criteria/greenSpaceFactRules";
 import { buildTransportCategory } from "./verdict-transport-facts";
 import { buildUnavailableCategory } from "./criteria/unavailable";
 import { category, compareFacts, externalFact, selectFacts, withFacts } from "./facts";
@@ -93,7 +96,23 @@ function aggregateNeighborhoodScoreInternal(
   localCategories: readonly NeighborhoodCategoryResult[],
   input: NeighborhoodScoreInput,
 ): NeighborhoodScoreResult {
-  const categories = mergeBackendVerdict([...localCategories], input.backendVerdict);
+  const greenery = input.backendVerdict?.greenery;
+  const hiddenParks = new Set((input.greenSpaceJourneys ?? []).filter(shouldHideSmallGreenSpaceFact)
+    .flatMap(({ greenSpace }) => [greenSpace.parkMap?.id ?? greenSpace.id, ...(greenSpace.parkAliases ?? [])]));
+  const categories = mergeBackendVerdict([...localCategories], input.backendVerdict).map(category => {
+    if (category.id === "nature-leisure") {
+      const nature = addCityGreenDensity(addAddressGreenery(category, greenery), greenery?.commune);
+      const visible = (fact: NeighborhoodFact) => fact.greenMap?.scope !== "park" || !hiddenParks.has(fact.greenMap.id);
+      const unconfirmedPublic = new Set(input.greenSpaceJourneys?.filter(item =>
+        item.garden && item.garden.publicAccess !== "open").map(item => item.greenSpace.id));
+      const walkingParks = new Set(nature.positiveFacts.flatMap(fact =>
+        fact.kind === "parkWalking" && fact.greenMap?.scope === "park" ? [fact.greenMap.id] : []));
+      return { ...nature, positiveFacts: nature.positiveFacts.filter(fact =>
+        visible(fact) && (fact.greenMap?.scope !== "park" || (!unconfirmedPublic.has(fact.greenMap.id)
+          && (fact.kind !== "external" || !walkingParks.has(fact.greenMap.id))))), neutralFacts: nature.neutralFacts.filter(visible) };
+    }
+    return category;
+  });
   const availableCategories = categories.filter(
     (category): category is NeighborhoodCategoryResult & { score: number } =>
       category.available && category.score !== undefined,
@@ -193,15 +212,24 @@ function mergeBackendVerdict(categories: NeighborhoodCategoryResult[], verdict: 
       2,
     );
     preservePersonalJourneyFacts(negativeFacts, local.negativeFacts);
-    const localMarketFacts = local.neutralFacts.filter(fact => fact.family === "food-market");
-    const otherNeutralFacts = [...local.neutralFacts, ...externalFacts].filter(fact => fact.family !== "food-market");
+    const allNeutralFacts = [...local.neutralFacts, ...externalFacts].filter(fact => fact.polarity === "neutral");
+    const keepMappedFact = (fact: NeighborhoodFact) => Boolean(fact.greenMap) || fact.kind === "greenSpaceCulturalSite";
+    const otherNeutralFacts = allNeutralFacts.filter(fact => !keepMappedFact(fact) && fact.family !== "food-market" && fact.family !== "cinema");
     const neutralFacts = preserveSelectedFamilyFact(
       selectFacts(otherNeutralFacts, "neutral", 4),
       otherNeutralFacts,
       "neutral",
       4,
     );
-    neutralFacts.push(...localMarketFacts);
+    const mappedParks = new Set(positiveFacts.flatMap(fact => fact.greenMap?.scope === "park" ? [fact.greenMap.id] : []));
+    for (const fact of allNeutralFacts.filter(keepMappedFact).sort(compareFacts)) {
+      if (fact.greenMap?.scope === "park") {
+        if (mappedParks.has(fact.greenMap.id)) continue;
+        mappedParks.add(fact.greenMap.id);
+      }
+      neutralFacts.push(fact);
+    }
+    neutralFacts.push(...local.neutralFacts.filter(fact => (fact.family === "food-market" || fact.family === "cinema") && !keepMappedFact(fact)));
     preserveJourneyBenchmarkFacts(neutralFacts, otherNeutralFacts);
     if (local.id === "transport" && external.scoreDelta !== undefined) {
       const score = local.score === undefined ? undefined : clamp(local.score + external.scoreDelta);

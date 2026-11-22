@@ -1,4 +1,5 @@
 import type { TranslationKey, TranslationParams } from "../../../i18n";
+import { legacyGreenSpaceId } from "../../../../shared/greenSpaceIdentity";
 import type { PublicVerdictEvidence, PublicVerdictSource } from "../neighborhoodVerdictApi";
 import type { NeighborhoodCategoryId, NeighborhoodCategoryResult, NeighborhoodFact, NeighborhoodFactAction, NeighborhoodFactKind, NeighborhoodFactPlace, NeighborhoodFactPolarity, NeighborhoodFactProof, NeighborhoodFactTransportReliabilityLine, NeighborhoodFactTravel } from "./contracts";
 import { NEIGHBORHOOD_CATEGORY_WEIGHTS } from "./contracts";
@@ -25,9 +26,12 @@ const gtfsRuleKeys: Partial<Record<TranslationKey, TranslationKey>> = {
 
 export function externalFact(fact: PublicVerdictEvidence, sources: PublicVerdictSource[]): NeighborhoodFact {
   const source = sources.find((candidate) => fact.sourceIds.includes(candidate.id));
+  const parkId = legacyGreenSpaceId(fact);
   return {
     id: `backend:${fact.id}`, kind: "external", category: fact.category, polarity: fact.polarity,
     family: fact.family, priority: fact.priority, label: fact.label, tooltip: fact.explanation,
+    greenMap: fact.greenMap ?? (parkId ? { scope: "park", id: parkId } : undefined),
+    ...(fact.greenSpaceAccess ? { greenSpaceAccess: fact.greenSpaceAccess } : {}),
     evidence: { proof: fact.proof, observedAt: Date.parse(fact.observedAt), rule: fact.rule, referencePeriod: fact.referencePeriod, value: fact.value, unit: fact.unit, geography: fact.geography, sourceName: source?.title ?? fact.sourceIds.join(", "), sourceUrl: source?.pageUrl, licence: source?.licence.label },
   };
 }
@@ -77,6 +81,7 @@ export function hasExceptionalFactMarker(fact: Pick<NeighborhoodFact, "emphasis"
 
 export function getNeighborhoodFactMarker(fact: Pick<NeighborhoodFact, "polarity" | "contributionWeight" | "emphasis" | "markerEmphasis">): string {
   if (hasExceptionalFactMarker(fact)) return "+++";
+  if (fact.polarity === "positive" && fact.markerEmphasis === "strong") return "++";
   if (fact.polarity === "positive") return fact.contributionWeight === 0.5 ? "½+" : "+";
   return fact.polarity === "negative" ? "−" : "•";
 }
@@ -95,8 +100,9 @@ export function makeFact(options: {
   ruleValues: TranslationParams;
   action?: NeighborhoodFactAction;
   emphasis?: "exceptional";
-  markerEmphasis?: "standard" | "exceptional";
+  markerEmphasis?: NeighborhoodFact["markerEmphasis"];
   contributionWeight?: number;
+  greenMap?: NeighborhoodFact["greenMap"];
   travel?: NeighborhoodFactTravel;
   places?: readonly NeighborhoodFactPlace[];
   transportReliabilityLines?: readonly NeighborhoodFactTransportReliabilityLine[];
@@ -113,6 +119,7 @@ export function makeFact(options: {
     emphasis: options.emphasis,
     markerEmphasis: options.markerEmphasis,
     contributionWeight: options.contributionWeight,
+    greenMap: options.greenMap,
     labelKey: keys.label,
     labelValues: options.values,
     tooltipKey: theoretical ? gtfsTooltipKeys[options.kind] ?? keys.tooltip : keys.tooltip,

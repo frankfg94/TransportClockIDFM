@@ -125,7 +125,7 @@ export type GlobalMapDirectionSelection = BusMapDirectionSelection;
 export const GLOBAL_MERGED_DIRECTION_ID = "global:merged";
 
 export function defaultGlobalDirectionMerge(mode: string): boolean {
-  return mode !== "BUS" && mode !== "NOCTILIEN";
+  return mode === "BIKE";
 }
 
 /**

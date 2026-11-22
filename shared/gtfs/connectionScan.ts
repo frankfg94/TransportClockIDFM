@@ -30,7 +30,7 @@ export async function scanConnections(
   sameStopMargins: ReadonlyMap<number, number> = new Map(),
   transferRule?: (from: TransitArrival, to: RoutingConnection) => number | undefined,
   transferContext: (from: TransitArrival) => string = from => String(from.stop),
-  limits: { arrival?: number; walkingSeconds?: number; feederWalkingSeconds?: number; feederTravelSeconds?: number } = {},
+  limits: { arrival?: number; walkingSeconds?: number; feederWalkingSeconds?: number; feederTravelSeconds?: number; directOnly?: boolean } = {},
 ): Promise<ConnectionScanResult> {
   const labels = new Map(access), onTrip = new Map<string, Map<string, RoutingNode>>();
   const transitLabels = new Map<number, RoutingNode>(), nightLabels = new Map<number, Map<string, RoutingNode>>();
@@ -182,6 +182,7 @@ export async function scanConnections(
       if (connection.pickup === 0) for (const rawCandidate of boarding.get(connection.from)?.values() ?? []) {
         const candidate = immediateAccess(rawCandidate, connection.section.lineMode);
         const origin = candidate.transferOrigin;
+        if (limits.directOnly && origin) continue;
         const margin = origin ? (transferRule?.(origin, connection) ?? (origin.stop === connection.from ? sameStopMargins.get(connection.from) ?? 120 : 0)) : 0;
         if (margin < 0 || candidate.arrival > connection.departure || origin && origin.arrival + margin > connection.departure) continue;
         const feeder = candidate.tramFeederLineId ?? (!origin && tramLike ? connection.section.lineId : undefined) ?? "";

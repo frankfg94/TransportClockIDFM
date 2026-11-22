@@ -78,6 +78,8 @@ export interface DatasetInfo {
   fetchedAt?: string;
   freshness: DatasetFreshness;
   metrics?: DatasetMetric[];
+  coveredCommunes?: number;
+  lastCheck?: { checkedAt: string; result: "updated" | "unchanged" | "error" };
   details?: string;
 }
 

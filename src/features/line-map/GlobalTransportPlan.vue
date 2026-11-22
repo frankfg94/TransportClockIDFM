@@ -242,18 +242,46 @@
       />
 
       <svg
-        v-if="selectedDirectionChevrons.length"
-        class="global-transport-plan__direction-chevrons"
+        v-if="directionDepartureArrow || directionArrival || directionPlaybackGlow.length"
+        class="global-transport-plan__direction-overlay"
         aria-hidden="true"
       >
         <path
-          v-for="chevron in selectedDirectionChevrons"
-          :key="chevron.key"
-          d="M -2.5 -2.6 L 1 0 L -2.5 2.6"
-          :transform="`translate(${chevron.x} ${chevron.y}) rotate(${chevron.angleDeg})`"
+          v-for="band in directionPlaybackGlow"
+          :key="band.key"
+          class="global-transport-plan__direction-glow"
+          :d="band.path"
+          :style="{ strokeWidth: band.width, opacity: band.opacity }"
         />
+        <g
+          v-if="directionDepartureArrow"
+          class="global-transport-plan__direction-departure"
+          :style="{ '--direction-line-color': activeLine?.color }"
+          :transform="`translate(${directionDepartureArrow.x} ${directionDepartureArrow.y}) rotate(${directionDepartureArrow.angle})`"
+        >
+          <circle r="11" />
+          <path d="M -5.2 0 H 5.2 M .9 -4.2 L 5.2 0 L .9 4.2" />
+        </g>
+        <g
+          v-if="directionArrival"
+          class="global-transport-plan__direction-arrival"
+          :style="{ '--direction-line-color': activeLine?.color }"
+          :transform="`translate(${directionArrival.x} ${directionArrival.y})`"
+        >
+          <circle r="11" />
+          <path d="M -5 6 V -5 H 5 V 2 H -5" />
+          <path class="global-transport-plan__direction-checkers" d="M -5 -5 H -1.67 V -1.5 H -5 Z M -1.67 -1.5 H 1.67 V 2 H -1.67 Z M 1.67 -5 H 5 V -1.5 H 1.67 Z" />
+        </g>
       </svg>
 
+      <GlobalTransportItineraryOverlay
+        v-for="journey in comparisonJourneys"
+        :key="journey.stationId"
+        :segments="journey.segments"
+        :camera="camera"
+        :style="{ opacity: props.stationComparison?.focusJourney && props.itinerary ? 0.25 : undefined }"
+        paths-only
+      />
       <GlobalTransportItineraryOverlay
         :route="globalSelectedTravelRoute"
         :origin="globalItineraryOrigin"
@@ -792,8 +820,8 @@
           @select-line="selectLineById"
           @change-line="openLineSelector"
           @view-line-schema="viewActiveLineSchema"
-          @change-direction="changeBusDirection"
-          @change-direction-variant="changeBusDirection"
+          @change-direction="selectSidebarDirection"
+          @change-direction-variant="selectSidebarDirection"
           @toggle-merge-directions="toggleMergedDirections"
           @focus-entrance="focusEntrance"
           @add-active-station="void addActiveStationToDashboard()"
@@ -1019,7 +1047,7 @@ import type {
 } from "../transport-map/contracts/manifest";
 import { GLOBAL_MAP_MODE_ORDER, getGlobalMapPathSubpathRanges, resolveGlobalMapVertex } from "../transport-map/contracts/manifest";
 import { createGlobalLineConnectionIconEntries } from "./globalLineConnectionIcons";
-import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../transport-map/config/globalTransportPlanConfig";
+import { GLOBAL_TRANSPORT_PLAN_CONFIG, globalTransportPlanLineWidth } from "../transport-map/config/globalTransportPlanConfig";
 import { PreparedWorldPathGeometryCache } from "../transport-map/render/preparedPathGeometry";
 import { buildStationCorrespondenceContext } from "../transport-map/spatial/stationCorrespondences";
 import type { TransportMapViewportResult } from "../transport-map/contracts/network";
@@ -1074,7 +1102,7 @@ import GlobalMapLoadingCursor from "./GlobalMapLoadingCursor.vue";
 import GlobalTransportDebugPanel from "./GlobalTransportDebugPanel.vue";
 import GlobalTransportPlanLinePanel from "./GlobalTransportPlanLinePanel.vue";
 import IrisNeighborhoodOverlay from "../transport-map/overlays/IrisNeighborhoodOverlay.vue";
-import { createChevrons } from "../transport-map/overlays/ghostLineFlow";
+import { prepareSelectedRoutePlayback } from "../transport-map/overlays/ghostLineFlow";
 import { fetchIrisDataset, type IrisDataset } from "../transport-map/iris/irisApi";
 import {
   getDvfMapMetricRange,
@@ -1237,7 +1265,6 @@ import {
 import type {
   TransportMapBasemapDebugMetrics,
 } from "./selectedLineZoomScenario";
-import { resolveTransitLonLat } from "../network-ghost/geoProjection";
 import {
   createTransportLineSearchOption,
   globalMapLineFamily,
@@ -1640,7 +1667,7 @@ const globalTransportHover = useGlobalTransportHover({
   getNetwork: () => network.value,
   getCamera: () => camera.value,
   hitTest: (point) => {
-    if (routePreviewActive.value) return { lines: [] };
+    if (routePreviewActive.value || props.stationComparison?.showNetwork === false) return { lines: [] };
     const startedAt = performanceTrace?.isRunning ? transportMapNowMs() : Number.NaN;
     try {
       return queryGlobalMapHitCandidates(point);
@@ -2171,11 +2198,12 @@ const globalTransportScene = useGlobalTransportScene({
   getSelectedBusDirectionEdgeKeys: () => selectedBusDirectionEdgeKeys.value,
   getSelectedBusDirectionQuays: () => selectedBusDirectionQuays.value,
   getBusDirectionGeometryPaths: () => busDirectionGeometryPaths.value,
+  getSelectedDirectionId: () => busDirectionSelection.value?.selectedDirectionId,
   getUnavailableBusDirectionGeometryKey: () => unavailableBusDirectionGeometryKey.value,
   getSelectedBusDirectionGeometryKey: () =>
     `${activeLine.value?.id}:${busDirectionSelection.value?.selectedDirectionId}`,
   getSelectedLineInteractionScene: () => selectedLineInteractionScene.value,
-  getItineraryPreviewActive: () => routePreviewActive.value,
+  getItineraryPreviewActive: () => transportLayersHidden.value,
   getWalkingIsochrones: () => globalMapIsochrones.surfaces.value,
   getHoveredIsochroneIds: () => hoveredFeature.value?.type === "isochrone"
     ? hoveredFeature.value.surfaces.map((surface) => surface.id)
@@ -2196,6 +2224,7 @@ const {
   activeConnectionStationIds,
   renderStations,
   staticLineMetadataPaths,
+  compiledDirectionPath,
   lineMetadataPaths,
   ghostLinePaths,
   renderPaths,
@@ -2544,24 +2573,114 @@ const renderScene = computed<TransportMapRenderScene>(() => {
   };
 });
 
-const selectedDirectionChevrons = computed(() => {
-  const path = busDirectionGeometryPaths.value[0];
+const directionChevronProgress = ref<number>();
+const pendingDirectionPlayback = shallowRef<{ lineId: string; directionId: string }>();
+let directionChevronFrame: number | undefined;
+
+function stopDirectionChevronAnimation(): void {
+  if (directionChevronFrame !== undefined) cancelAnimationFrame(directionChevronFrame);
+  directionChevronFrame = undefined;
+  directionChevronProgress.value = undefined;
+  pendingDirectionPlayback.value = undefined;
+}
+
+function selectSidebarDirection(directionId: string): void {
+  stopDirectionChevronAnimation();
+  changeBusDirection(directionId);
+  queueDirectionPlayback();
+}
+
+function queueDirectionPlayback(): void {
+  if (appSettings.value.reduceMotion || !directionFilterRequested.value) return;
+
+  const lineId = activeLine.value?.id;
+  const selectedId = busDirectionSelection.value?.selectedDirectionId;
+  if (!lineId || !selectedId) return;
+  pendingDirectionPlayback.value = { lineId, directionId: selectedId };
+}
+
+const selectedDirectionRoute = computed(() => {
+  const path = compiledDirectionPath.value ?? busDirectionGeometryPaths.value[0];
   const selection = busDirectionSelection.value;
   const line = activeLine.value;
   if (!path || !selection || !line || !directionFilterRequested.value || routePreviewActive.value
-    || !baseRenderScene.value.paths.includes(path)) return [];
+    || !baseRenderScene.value.paths.includes(path)) return;
 
-  return getGlobalMapPathSubpathRanges(path).flatMap(({ start, end }) => {
-    const points = path.vertices.slice(start, end).map((vertex) => {
-      const station = vertex.stationId ? network.value?.stationsById.get(vertex.stationId) : undefined;
-      return worldToScreen(resolveGlobalMapVertex(path, vertex, station, line.mode), camera.value);
-    });
-    const stationPoints = points.filter((_point, index) => path.vertices[start + index]?.stationId);
-    return createChevrons(points, `${path.id}:${start}`, selection.selectedDirectionId)
-      .filter(({ x, y }) => x >= 0 && y >= 0 && x <= camera.value.viewportWidthCssPx
-        && y <= camera.value.viewportHeightCssPx
-        && !stationPoints.some((station) => Math.hypot(station.x - x, station.y - y) < 8));
+  const points = path.vertices.map((vertex) => {
+    const station = vertex.stationId ? network.value?.stationsById.get(vertex.stationId) : undefined;
+    return resolveGlobalMapVertex(path, vertex, station, line.mode);
   });
+  return { lineId: line.id, directionId: selection.selectedDirectionId, path, points,
+    ranges: getGlobalMapPathSubpathRanges(path) };
+});
+
+const selectedRoutePlayback = computed(() => {
+  const route = selectedDirectionRoute.value;
+  return route && prepareSelectedRoutePlayback(route.ranges.map(({ start, end }) => route.points.slice(start, end)));
+});
+
+watch([pendingDirectionPlayback, selectedRoutePlayback], ([request, playback]) => {
+  const route = selectedDirectionRoute.value;
+  if (!request || !playback || route?.lineId !== request.lineId || route.directionId !== request.directionId) return;
+  pendingDirectionPlayback.value = undefined;
+  const duration = Math.max(650, playback.length / metersToWorldUnits(1_800, playback.start) * 1_000);
+  const start = performance.now();
+  directionChevronProgress.value = 0;
+  const animate = (now: number) => {
+    if (appSettings.value.reduceMotion || selectedDirectionRoute.value?.path !== route.path) {
+      stopDirectionChevronAnimation();
+      return;
+    }
+    if (directionChevronProgress.value === 1) {
+      stopDirectionChevronAnimation();
+      return;
+    }
+    directionChevronProgress.value = Math.min(1, (now - start) / duration);
+    directionChevronFrame = requestAnimationFrame(animate);
+  };
+  directionChevronFrame = requestAnimationFrame(animate);
+});
+
+const directionPlaybackGlow = computed(() => {
+  const progress = directionChevronProgress.value;
+  const playback = selectedRoutePlayback.value;
+  const line = activeLine.value;
+  if (progress === undefined || !playback || !line) return [];
+  const view = camera.value;
+  const scale = worldScaleAtZoom(view.zoom);
+  const width = globalTransportPlanLineWidth(line.mode, true, view.zoom) * .84;
+  const center = playback.length * progress;
+  return Array.from({ length: 7 }, (_, key) => {
+    const radius = (27 - key * 3.4) / scale;
+    const path = playback.trace(center - radius, center + radius).map(fragment =>
+      fragment.map((point, index) => {
+        const { x, y } = worldToScreen(point, view);
+        return `${index === 0 ? "M" : "L"} ${x} ${y}`;
+      }).join(" "),
+    ).join(" ");
+    return { key, path, width, opacity: key < 2 ? .045 : .065 };
+  });
+});
+
+const directionDepartureArrow = computed(() => {
+  const route = selectedDirectionRoute.value;
+  const first = route?.ranges[0];
+  if (!route || !first || first.end - first.start < 2) return;
+  const view = camera.value;
+  const origin = worldToScreen(route.points[first.start]!, view);
+  for (let index = first.start + 1; index < first.end; index += 1) {
+    const next = worldToScreen(route.points[index]!, view);
+    const dx = next.x - origin.x;
+    const dy = next.y - origin.y;
+    if (Math.hypot(dx, dy) > 0.1) {
+      return { ...origin, angle: Math.atan2(dy, dx) * 180 / Math.PI };
+    }
+  }
+});
+
+const directionArrival = computed(() => {
+  const playback = selectedRoutePlayback.value;
+  return playback ? worldToScreen(playback.sample(1), camera.value) : undefined;
 });
 
 watch(
@@ -2975,7 +3094,7 @@ function scheduleViewportRefresh(): void {
   // the network renderer. Querying viewport chunks during every pan only
   // burns CPU/network work that cannot be shown; refresh once the preview is
   // closed so the regular map is current again.
-  if (routePreviewActive.value) {
+  if (transportLayersHidden.value) {
     cancelScheduledViewportRefresh();
     return;
   }
@@ -3219,8 +3338,19 @@ const missingControlledTransitGeometry = computed(() => {
   return globalItinerarySegments.value.filter((segment) => segment.kind === "transit").length < expected;
 });
 
+const comparisonJourneys = computed(() => (props.stationComparison?.itineraries ?? []).flatMap(({ stationId, itinerary }) =>
+  props.itinerary && stationId === props.stationComparison?.activeId ? [] : [{
+    stationId,
+    segments: createGlobalTransportItinerarySegments(itinerary.route, itinerary.origin, itinerary.destination, {
+      preserveSections: true, resolveTransitGeometry: resolveItineraryLineGeometry,
+    }),
+  }]));
+
 /** During a route detail preview the renderer intentionally receives no map layers. */
 const routePreviewActive = computed(() => Boolean(globalSelectedTravelRoute.value));
+const transportLayersHidden = computed(() => props.stationComparison?.showNetwork === undefined
+  ? routePreviewActive.value
+  : !props.stationComparison.showNetwork);
 const showGhostLineIcons = ref(false);
 const showLineConnectionIcons = ref(false);
 const showBusCorrespondences = ref(false);
@@ -3826,7 +3956,8 @@ function fitStationComparison(all: boolean): void {
   if (!comparison) return;
   const selected = comparison.stations.find(({ id }) => id === comparison.activeId);
   const points = all || !selected ? comparison.stations.map(({ point }) => point) : [selected.point];
-  const bounds = getGlobalTransportItineraryBounds([], [comparison.origin, ...points]);
+  const segments = all ? [...comparisonJourneys.value.flatMap(({ segments }) => segments), ...globalItinerarySegments.value] : [];
+  const bounds = getGlobalTransportItineraryBounds(segments, [comparison.origin, ...points]);
   if (!bounds) return;
   const fitted = fitCameraToBounds(camera.value, bounds, 55,
     GLOBAL_TRANSPORT_PLAN_CONFIG.lineView.minZoom,
@@ -5510,6 +5641,7 @@ watch(
   () => activeLine.value?.id,
   (lineId, previousLineId) => {
     if (lineId !== previousLineId) {
+      stopDirectionChevronAnimation();
       showLineConnectionIcons.value = false;
       showBusCorrespondences.value = false;
       closeTrafficCalendar();
@@ -5525,7 +5657,9 @@ watch(
 
     const requestedDirectionId =
       queryString(route.query.line) === lineId ? queryString(route.query.direction) : undefined;
-    void loadBusDirection(lineId, requestedDirectionId);
+    void loadBusDirection(lineId, requestedDirectionId).then(() => {
+      if (activeLine.value?.id === lineId) queueDirectionPlayback();
+    });
   },
 );
 watch(
@@ -5557,8 +5691,12 @@ watch(() => props.stationComparison?.fitAllVersion, (version) => {
   if (version !== undefined) fitStationComparison(true);
 }, { flush: "post", immediate: true });
 watch(() => props.stationComparison?.activeId, (id) => {
-  if (id && !props.itinerary) fitStationComparison(false);
+  if (id && !props.itinerary && !props.stationComparison?.itineraries) fitStationComparison(false);
 }, { flush: "post" });
+watch(() => props.stationComparison?.showNetwork, () => {
+  draw();
+  scheduleViewportRefresh();
+});
 watch(
   [
     () => globalItineraryActive.value,
@@ -5581,7 +5719,7 @@ watch(
       return;
     }
     void nextTick(() => {
-      fitGlobalItineraryToRoute();
+      if (!props.stationComparison?.itineraries) fitGlobalItineraryToRoute();
       draw();
       if (!routePreviewActive.value) scheduleViewportRefresh();
     });
@@ -5952,7 +6090,9 @@ onMounted(async () => {
     if (!controlledView.value) restoreTemporaryMarkerFromUrl();
     await refreshViewport();
     coldRecorder?.mark("viewport-ready");
-    if (props.itinerary) {
+    if (props.stationComparison?.itineraries) {
+      fitStationComparison(true);
+    } else if (props.itinerary) {
       fitGlobalItineraryToRoute({ force: true });
     } else if (props.stationComparison) {
       fitStationComparison(true);
@@ -5973,6 +6113,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  stopDirectionChevronAnimation();
   if (perspectiveFrame !== undefined) cancelAnimationFrame(perspectiveFrame);
   mounted = false;
   document.removeEventListener("pointerdown", closeLineChoiceOnDocumentPointerDown, true);
@@ -6136,7 +6277,7 @@ onBeforeUnmount(() => {
 .global-transport-plan__canvas--next {
   background: transparent;
 }
-.global-transport-plan__direction-chevrons {
+.global-transport-plan__direction-overlay {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -6144,10 +6285,27 @@ onBeforeUnmount(() => {
   height: 100%;
   pointer-events: none;
   fill: none;
-  stroke: rgb(255 255 255 / 64%);
-  stroke-width: 1.35px;
+}
+.global-transport-plan__direction-glow {
+  stroke: white;
+  stroke-linecap: butt;
+}
+.global-transport-plan__direction-departure circle,
+.global-transport-plan__direction-arrival circle {
+  fill: white;
+  stroke: var(--direction-line-color);
+  stroke-width: 2px;
+}
+.global-transport-plan__direction-departure path,
+.global-transport-plan__direction-arrival path {
+  stroke: color-mix(in srgb, var(--direction-line-color) 85%, #272727);
+  stroke-width: 1.5px;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+.global-transport-plan__direction-arrival .global-transport-plan__direction-checkers {
+  fill: color-mix(in srgb, var(--direction-line-color) 85%, #272727);
+  stroke: none;
 }
 .global-transport-plan__canvas--station-hover {
   cursor: pointer;

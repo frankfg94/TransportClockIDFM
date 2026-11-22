@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { findNearbyGreenSpaceFootprints } from "../src/services/places/greenSpaceFootprints";
+import { remarkableGardenLevel, shouldHideSmallGreenSpaceFact } from "../src/features/nearby-stations/neighborhood/criteria/greenSpaceFactRules";
+import { analyzeParkWalking, classifyParkWalking } from "../src/features/nearby-stations/parkWalkingProfile";
 import type { GtfsLineFrequencyResponse } from "../src/types/lineFrequency";
 import type { GlobalMapLine, GlobalMapStation } from "../src/features/transport-map/contracts/manifest";
 import type { NearbyHeavyTransportCandidate } from "../src/features/nearby-stations/nearbyHeavyTransports";
@@ -17,6 +21,18 @@ import type { PublicServiceQuality } from "../src/features/nearby-stations/servi
 function place(id: string, kind: string, category: NearbyPlace["category"] = "shop", distanceMeters = 160): NearbyPlace {
   return { id, name: `${kind} ${id}`, kind, category, lon: 2.35, lat: 48.85, distanceMeters };
 }
+
+it("shows the mapped Saint-Cloud grounds at La Cristallerie without a documentary response", () => {
+  const { spaces } = JSON.parse(readFileSync(new URL("../public/data/place-footprints/green-spaces.json", import.meta.url), "utf8"));
+  const greenSpaceFootprints = findNearbyGreenSpaceFootprints({ lat: 48.826508, lon: 2.221803 }, spaces);
+  const result = buildNeighborhoodScore({ places: [], placesLoaded: false, stations: [], stationsLoaded: false, greenSpaceFootprints });
+  const nature = result.categories.find(category => category.id === "nature-leisure");
+  const fact = nature?.neutralFacts.find(item => item.labelValues?.name === "Domaine national de Saint-Cloud");
+  expect(fact).toMatchObject({ kind: "greenSpaceFootprint", labelValues: { meters: expect.any(Number) } });
+  expect(Number(fact?.labelValues?.meters)).toBeGreaterThan(0);
+  expect(Number(fact?.labelValues?.meters)).toBeLessThan(250);
+  expect(nature?.score).toBeUndefined();
+});
 
 function line(id: string, code: string, mode: GlobalMapLine["mode"]): GlobalMapLine {
   return {
@@ -122,6 +138,106 @@ function greenVerdict(
 }
 
 describe("neighborhood score", () => {
+  it("requires documented public access and checks remarkable garden thresholds on exact seconds", () => {
+    const level = (entranceWalkSeconds: number) => remarkableGardenLevel({ publicAccess: "open", entranceWalkSeconds });
+    expect([level(599), level(600), level(1020), level(1199), level(1200)]).toEqual([1, 1, 1, 1, 0]);
+    expect(remarkableGardenLevel({ publicAccess: "closed", entranceWalkSeconds: 300 })).toBe(0);
+    expect(remarkableGardenLevel({ publicAccess: "unknown", entranceWalkSeconds: 300 })).toBe(0);
+    expect(remarkableGardenLevel({ publicAccess: "open" })).toBe(0);
+  });
+  it.each([
+    [29_999, 1201, 1201, true, true],
+    [30_000, 1201, 1201, true, false],
+    [15_000, 1200, 1201, true, false],
+    [15_000, 1201, 1200, true, false],
+    [15_000, 1201, 1201, false, false],
+    [15_000, 1201, undefined, true, false],
+  ])("filters a small park only after both access modes exceed the threshold (%j %j %j %j)", (surfaceM2, walk, transit, complete, hidden) => {
+    const park = { id: "ipr:fixture", name: "Jardin test", lon: 2.35, lat: 48.85, distanceMeters: 1900,
+      parkMap: { scope: "park" as const, id: "ipr:fixture" }, estimatedWalkingMinutes: 22 };
+    const access = { greenSpace: { ...park, surfaceM2, walkingMinutes: walk / 60 },
+      journeys: [], transitComplete: complete, fastestTransitSeconds: transit };
+    expect(shouldHideSmallGreenSpaceFact(access)).toBe(hidden);
+    const score = buildNeighborhoodScore(input({ backendVerdict: greenVerdict([park]), greenSpaceJourneys: [access] }));
+    expect(score.categories.find(category => category.id === "nature-leisure")?.neutralFacts.some(fact =>
+      fact.greenMap?.scope === "park" && fact.greenMap.id === park.id)).toBe(!hidden);
+  });
+
+  it("gives a named parcel its own map and size without changing the grounds' bonus", () => {
+    const park = { id: "ipr:fixture", name: "Domaine test", lon: 2.35, lat: 48.85, distanceMeters: 180,
+      surfaceM2: 600_000, walkingMinutes: 12, estimatedWalkingMinutes: 3, parkMap: { scope: "park" as const, id: "ipr:fixture" } };
+    const site = { name: "Jardin botanique", surfaceM2: 130_000, boundary: { type: "Polygon" as const,
+      coordinates: [[[2.34, 48.84], [2.36, 48.84], [2.36, 48.86], [2.34, 48.84]]] } };
+    const score = buildNeighborhoodScore(input({
+      places: [], backendVerdict: greenVerdict([park]), greenSpaceSubsites: new Map([[park.id, [site]]]),
+      greenSpaceJourneys: [{ greenSpace: park, journeys: [], parkWalking: { accessMinutes: 12 } },
+        { greenSpace: { ...park, id: "ipr:fixture#Jardin%20botanique", name: site.name, walkingMinutes: 3,
+        parkMap: { scope: "park", id: "ipr:fixture#Jardin%20botanique" }, surfaceM2: site.surfaceM2 }, journeys: [] }],
+    }));
+    const nature = score.categories.find(category => category.id === "nature-leisure")!;
+    expect(nature.positiveFacts.filter(fact => fact.kind === "greenSpaceExceptional")).toMatchObject([
+      { emphasis: "exceptional", labelValues: { area: "60 ha" } },
+    ]);
+    expect(nature.neutralFacts.find(fact => fact.kind === "greenSpaceSubsite")).toMatchObject({
+      greenMap: { id: "ipr:fixture#Jardin%20botanique" }, labelValues: { name: site.name, areaLabel: " · 13 ha" },
+    });
+    const premium = buildNeighborhoodScore(input({
+      backendVerdict: greenVerdict([park]), greenSpaceSubsites: new Map([[park.id, [site]]]),
+      greenSpaceJourneys: [{ greenSpace: { ...park, id: "ipr:fixture#Jardin%20botanique", name: site.name,
+        parkMap: { scope: "park", id: "ipr:fixture#Jardin%20botanique" }, surfaceM2: site.surfaceM2 },
+        journeys: [], garden: { publicAccess: "open", entranceWalkSeconds: 17 * 60 } }],
+    })).categories.find(category => category.id === "nature-leisure")!;
+    expect(premium.positiveFacts.find(fact => fact.kind === "remarkableGarden")).toMatchObject({
+      polarity: "positive", labelValues: { minutes: 17 },
+    });
+    expect(premium.score).toBe(nature.score);
+  });
+
+  it.each([0, 2, 3])("uses one park fact when the walking network earns level %s", (level) => {
+    const park = { id: "ipr:fixture", name: "Domaine test", lon: 2.35, lat: 48.85, distanceMeters: 180,
+      surfaceM2: 600_000, walkingMinutes: 12, estimatedWalkingMinutes: 3, parkMap: { scope: "park" as const, id: "ipr:fixture" } };
+    const profile = { meters: level === 0 ? 600 : level === 2 ? 1800 : 3200, loops: level,
+      longestLoopMeters: level === 0 ? 0 : level === 2 ? 1300 : 1900,
+      features: 0, featureKinds: 0, featuresPerHectare: 0, picnic: false };
+    const nature = buildNeighborhoodScore(input({ backendVerdict: greenVerdict([park]),
+      greenSpaceJourneys: [{ greenSpace: park, journeys: [], parkWalking: { accessMinutes: 12, profile } }],
+    })).categories.find(category => category.id === "nature-leisure")!;
+    const facts = nature.positiveFacts.filter(fact => fact.greenMap?.scope === "park" && fact.greenMap.id === park.id);
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).toMatchObject(level === 0
+      ? { kind: "greenSpaceExceptional", emphasis: "exceptional", labelValues: { minutes: 12, area: "60 ha" } }
+      : { kind: "parkWalking", emphasis: level === 3 ? "exceptional" : undefined,
+        markerEmphasis: level === 2 ? "strong" : undefined });
+  });
+  it("requires a connected walking network even for a dense park and allows the rich route to exceptional", () => {
+    const profile = { meters: 2200, loops: 2, longestLoopMeters: 1250, features: 15, featureKinds: 3, featuresPerHectare: .3, picnic: true };
+    expect(classifyParkWalking(profile)).toBe(3);
+    expect(classifyParkWalking({ ...profile, featureKinds: 2 })).toBe(2);
+    expect(classifyParkWalking({ ...profile, loops: 1 })).toBe(0);
+    const nodes = [[0, 0], [.003, 0], [.003, .003], [.005, .005], [.009, .005], [.009, .009]]
+      .map(([lon, lat], id) => ({ id, lon: lon!, lat: lat! }));
+    const boundary = { type: "Polygon" as const, coordinates: [[[-.001, -.001], [.01, -.001], [.01, .01], [-.001, .01], [-.001, -.001]]] };
+    const connected = analyzeParkWalking({ nodes, paths: [[0, 1, 2, 0], [3, 4, 5, 3]], features: [] }, boundary, nodes[0]!);
+    expect(connected?.loops).toBe(1);
+    expect(connected?.meters).toBeLessThan(1200);
+  });
+  it("documents OSM museums inside a regional park and retains cinema context before routing", () => {
+    const park = { id: "ipr:fixture", name: "Domaine test", lon: 2.35, lat: 48.85, distanceMeters: 180,
+      estimatedWalkingMinutes: 3, parkMap: { scope: "park" as const, id: "ipr:fixture" } };
+    const result = buildNeighborhoodScore(input({
+      places: [place("way:50", "museum", "culture"), { ...place("way:51", "museum", "culture"), lon: 2.40 },
+        place("way:52", "cinema", "culture")],
+      backendVerdict: greenVerdict([park]),
+      greenSpaceSiteBoundaries: new Map([[park.id, { type: "Polygon",
+        coordinates: [[[2.34, 48.84], [2.36, 48.84], [2.36, 48.86], [2.34, 48.86], [2.34, 48.84]]] }]]),
+    }));
+    const facts = result.categories.find(category => category.id === "nature-leisure")!.neutralFacts;
+    expect(facts.filter(fact => fact.kind === "greenSpaceCulturalSite")).toMatchObject([
+      { labelValues: { name: "museum way:50", park: "Domaine test" },
+        evidence: { sourceUrl: "https://www.openstreetmap.org/way/50" } },
+    ]);
+    expect(facts.find(fact => fact.kind === "cinemaAccessUnknown")?.labelValues?.name).toBe("cinema way:52");
+  });
   it("adds nearby service reliability at 15% of the transport sub-score", () => {
     const metro = line("metro-1", "1", "METRO");
     const metro4 = line("metro-4", "4", "METRO");
@@ -220,6 +336,19 @@ describe("neighborhood score", () => {
     expect(fact?.labelValues).toMatchObject({ name: "hospital hospital", minutes: 29 });
     expect(fact?.evidence.proof).toBe("direct");
   });
+
+  it.each([[1799, 0, true], [1800, 0, false], [1200, 1, false]] as const)(
+    "scores a hospital beyond the walking perimeter only for qualifying direct transit (%s s, %s transfers)",
+    (durationSeconds, transferCount, expected) => {
+      const hospital = place("hospital", "hospital", "service", 3_000);
+      const score = buildNeighborhoodScore(input({ places: [], hospitalPlaces: [hospital],
+        hospitalJourneys: { [hospital.id]: [{ durationSeconds, transferCount,
+          sections: [{ type: "public_transport", durationSeconds, lineMode: "TRAM", lineCode: "T6" }] }] },
+      }));
+      expect(score.categories.find(category => category.id === "health")?.positiveFacts.some(fact =>
+        fact.kind === "hospitalNearby")).toBe(expected);
+    },
+  );
 
   it("uses the nearby education POI and its real walking route", () => {
     const school: NearbyPlace = {
@@ -1125,19 +1254,21 @@ describe("neighborhood score", () => {
   });
 
   it("turns a real non-bus journey under 15 minutes into a large green-space strength", () => {
-    const result = buildNeighborhoodScore(input({
-      greenSpaceJourneys: [{
-        greenSpace: {
+    const greenSpace = {
           id: "domaine-sceaux",
+          parkMap: { scope: "park" as const, id: "domaine-sceaux" },
           name: "Domaine de Sceaux",
           category: "Parc",
           surfaceM2: 1_654_972,
           lon: 2.28,
           lat: 48.7645,
           distanceMeters: 2_100,
-          walkingMinutes: 28,
-          estimatedWalkingMinutes: 28,
-        },
+          estimatedWalkingMinutes: 14,
+    };
+    const testInput = input({
+      backendVerdict: greenVerdict([greenSpace]),
+      greenSpaceJourneys: [{
+        greenSpace,
         journeys: [{
           id: "journey:domaine-t10",
           durationSeconds: 17 * 60,
@@ -1148,15 +1279,96 @@ describe("neighborhood score", () => {
           ],
         }],
       }],
-    }));
+    });
+    const result = buildNeighborhoodScore(testInput);
     const nature = result.categories.find((category) => category.id === "nature-leisure");
     const fact = nature?.positiveFacts.find((candidate) => candidate.kind === "greenSpaceTransitNearby");
 
     expect(nature?.available).toBe(true);
+    expect(fact?.emphasis).toBe("exceptional");
     expect(fact?.labelValues?.name).toBe("Domaine de Sceaux");
     expect(fact?.labelValues?.lines).toBe("Tramway T10");
     expect(fact?.labelValues?.minutes).toBe(14);
     expect(fact?.labelValues?.area).toBe("165 ha");
+    const measured = buildNeighborhoodScore({ ...testInput, greenSpaceJourneys: testInput.greenSpaceJourneys?.map(candidate => ({
+      ...candidate, parkWalking: { accessMinutes: 17, profile: {
+        meters: 5000, loops: 4, longestLoopMeters: 2000, features: 8, featureKinds: 3, featuresPerHectare: .1, picnic: true,
+      } },
+    })) }).categories.find(category => category.id === "nature-leisure")?.positiveFacts.find(item => item.kind === "parkWalking");
+    expect(measured?.labelKey).toBe(fact?.labelKey);
+    expect(measured?.labelValues).toEqual(fact?.labelValues);
+    expect(measured?.tooltipValues).toMatchObject({ km: 5, loops: 4, longest: 2000 });
+    expect(measured?.emphasis).toBe("exceptional");
+  });
+
+  it("keeps a regional woodland's walking and tram access as separate neutral facts", () => {
+    const greenSpace = {
+      id: "woodland:fixture", name: "Forêt domaniale de test", surfaceM2: 1_000_000,
+      lon: 2.26, lat: 48.79, distanceMeters: 1100, walkingMinutes: 25, estimatedWalkingMinutes: 14,
+      woodlandMap: { scope: "woodland" as const, id: "Forêt domaniale de test", lon: 2.28, lat: 48.8, version: "012345678901234567890123" },
+    };
+    const result = buildNeighborhoodScore(input({
+      backendVerdict: greenVerdict([greenSpace]),
+      greenSpaceJourneys: [{ greenSpace, journeys: [{
+        durationSeconds: 18 * 60,
+        sections: [
+          { type: "street_network", mode: "walking", durationSeconds: 300 },
+          { type: "waiting", durationSeconds: 180 },
+          { type: "public_transport", mode: "tram", durationSeconds: 600, lineCode: "T6", lineMode: "TRAM" },
+        ],
+      }] }],
+    }));
+    const nature = result.categories.find(category => category.id === "nature-leisure");
+    expect(nature?.neutralFacts.find(fact => fact.kind === "woodlandWalking")?.labelValues?.minutes).toBe(25);
+    expect(nature?.neutralFacts.find(fact => fact.kind === "woodlandTransit")?.labelValues).toMatchObject({ lines: "Tramway T6", minutes: 18 });
+    expect(nature?.positiveFacts.some(fact => fact.greenMap?.scope === "woodland")).toBe(false);
+    const nearbyWoodland = buildNeighborhoodScore(input({
+      backendVerdict: greenVerdict([{ ...greenSpace, walkingMinutes: 8, mainWalkingMinutes: 15 }]),
+    })).categories.find(category => category.id === "nature-leisure");
+    expect(nearbyWoodland?.positiveFacts).toContainEqual(expect.objectContaining({
+      kind: "woodlandMainWalking", markerEmphasis: "standard", greenMap: greenSpace.woodlandMap,
+      labelValues: expect.objectContaining({ edgeMinutes: 8, minutes: 15 }),
+    }));
+    expect(nearbyWoodland?.neutralFacts.some(fact => fact.kind === "woodlandWalking")).toBe(false);
+    const edgeOnly = buildNeighborhoodScore(input({
+      backendVerdict: greenVerdict([{ ...greenSpace, walkingMinutes: 8 }]),
+    })).categories.find(category => category.id === "nature-leisure");
+    expect(edgeOnly?.neutralFacts).toContainEqual(expect.objectContaining({ kind: "woodlandWalking" }));
+    expect(edgeOnly?.positiveFacts.some(fact => fact.greenMap?.scope === "woodland")).toBe(false);
+    const park = { ...greenSpace, woodlandMap: undefined, id: "ipr:12", name: "Jardin municipal",
+      parkMap: { ...greenSpace.woodlandMap, scope: "park" as const, id: "ipr:12" } };
+    const regional = buildNeighborhoodScore(input({
+      backendVerdict: greenVerdict([park]),
+    })).categories.find(category => category.id === "nature-leisure");
+    expect(regional?.neutralFacts).toContainEqual(expect.objectContaining({
+      kind: "greenSpaceFootprint", greenMap: park.parkMap, labelValues: { name: park.name, meters: park.distanceMeters },
+    }));
+  });
+
+  it.each([
+    [1_000_000, 20, undefined, false, "woodlandMainWalking"],
+    [1_000_000, 20.01, undefined, false, undefined],
+    [999_999, 20, undefined, false, undefined],
+    [1_000_000, undefined, 1200, true, "woodlandMainTransit"],
+    [1_000_000, undefined, 1201, true, undefined],
+    [1_000_000, undefined, 1200, false, undefined],
+    [1_000_000, 20, 1140, true, "woodlandMainWalking"],
+  ] as const)("qualifies access to a large main woodland (%s m², %s min, %s s, verified %s)", (
+    mainSurfaceM2, mainWalkingMinutes, durationSeconds, woodlandMainTransit, expected,
+  ) => {
+    const greenSpace = { id: "woodland:fixture", name: "Forêt test", surfaceM2: 5_000_000, mainSurfaceM2,
+      lon: 2.27, lat: 48.76, distanceMeters: 600, walkingMinutes: 8, estimatedWalkingMinutes: 7, mainWalkingMinutes,
+      woodlandMap: { scope: "woodland" as const, id: "Forêt test", lon: 2.27, lat: 48.76, version: "0".repeat(24) } };
+    const nature = buildNeighborhoodScore(input({ backendVerdict: greenVerdict([greenSpace]),
+      greenSpaceJourneys: [{ greenSpace, woodlandMainTransit, journeys: durationSeconds === undefined ? [] : [{
+        durationSeconds, sections: [{ type: "public_transport", lineCode: "T6", lineMode: "TRAM", durationSeconds }],
+      }] }],
+    })).categories.find(category => category.id === "nature-leisure")!;
+    const facts = nature.positiveFacts.filter(fact => fact.greenMap?.scope === "woodland");
+    expect(facts.map(fact => fact.kind)).toEqual(expected ? [expected] : []);
+    if (expected) expect(facts[0]).toMatchObject({ emphasis: undefined, evidence: {
+      ruleKey: "nearbyStations.neighborhoodScore.rules.woodlandLargeMain",
+    } });
   });
 
   it.each([

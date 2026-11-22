@@ -137,16 +137,6 @@ onBeforeUnmount(() => {
     @close="emit('close')"
   >
     <p v-if="contextLabel">{{ contextLabel }}</p>
-    <div class="line-frequency-timetable-modal__date">
-      <span>{{ t("globalMap.sidebar.gtfsFrequency.timetableChooseDate") }}</span>
-      <MaterialCombobox
-        v-model="selectedWeekday"
-        :options="weekdays"
-        :aria-label="t('globalMap.sidebar.gtfsFrequency.timetableChooseDate')"
-        teleport
-        data-testid="frequency-weekday"
-      />
-    </div>
     <LineFrequencyTimetable
       :profile="profile"
       :line-color="lineColor"
@@ -158,7 +148,20 @@ onBeforeUnmount(() => {
       :next-timetable="nextTimetable"
       :loading="loading || profileLoading"
       :error="error || profileError"
-    />
+    >
+      <template #service-day>
+        <div class="line-frequency-timetable-modal__date">
+          <span>{{ t("globalMap.sidebar.gtfsFrequency.timetableChooseDate") }}</span>
+          <MaterialCombobox
+            v-model="selectedWeekday"
+            :options="weekdays"
+            :aria-label="t('globalMap.sidebar.gtfsFrequency.timetableChooseDate')"
+            teleport
+            data-testid="frequency-weekday"
+          />
+        </div>
+      </template>
+    </LineFrequencyTimetable>
     <template v-if="loading || profileLoading" #footer>
       <LoadingBar
         class="line-frequency-timetable-modal__loading-bar"
@@ -172,8 +175,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 :global(.line-frequency-timetable-modal) {
-  width: min(760px, calc(100vw - 32px));
-  max-width: min(760px, calc(100vw - 32px));
+  width: min(820px, calc(100vw - 24px));
+  max-width: min(820px, calc(100vw - 24px));
   max-height: min(92dvh, 920px);
   overflow: hidden;
 }
@@ -188,7 +191,29 @@ onBeforeUnmount(() => {
   border-top: 0;
 }
 
-.line-frequency-timetable-modal__date { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); color: var(--ink); }
+.line-frequency-timetable-modal__date {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.line-frequency-timetable-modal__date :deep(.material-combobox) {
+  width: 100%;
+  min-width: 0;
+}
+.line-frequency-timetable-modal__date :deep(.material-combobox__value) {
+  font-size: 0.8rem;
+}
+@media (max-width: 520px) {
+  :global(.line-frequency-timetable-modal .modal-panel__header h2) {
+    font-size: 1.05rem;
+  }
+  :global(.line-frequency-timetable-modal .app-modal__body) {
+    padding: 12px;
+  }
+}
 .line-frequency-timetable-modal__loading-bar {
   width: 100%;
 }

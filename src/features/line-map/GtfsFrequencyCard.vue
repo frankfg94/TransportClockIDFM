@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { ChevronDown, Clock3, Search } from "lucide-vue-next";
+import { CalendarClock, ChevronDown, Clock3 } from "lucide-vue-next";
 import { useI18n, type TranslationKey } from "../../i18n";
 import type { GtfsLineFrequencyResponse } from "../../types/lineFrequency";
 import { getGtfsServiceDate } from "../../services/lineFrequency";
@@ -118,6 +118,18 @@ const datasetDate = computed(() => {
       >
         {{ t("globalMap.sidebar.gtfsFrequency.source") }}
       </button>
+      <button
+        v-if="!preview && !loading && profile?.status === 'ready'"
+        class="gtfs-frequency-card__timetable-trigger"
+        data-testid="gtfs-frequency-timetable"
+        type="button"
+        aria-haspopup="dialog"
+        :aria-expanded="timetableOpen"
+        @click="timetableOpen = true"
+      >
+        <CalendarClock :size="15" aria-hidden="true" />
+        {{ t("globalMap.sidebar.gtfsFrequency.timetableLink") }}
+      </button>
     </div>
     <template v-if="!frequencyExpanded">
       <p v-if="preview" role="status">
@@ -213,17 +225,6 @@ const datasetDate = computed(() => {
               })
             }}
           </p>
-          <button
-            class="gtfs-frequency-card__timetable-trigger"
-            data-testid="gtfs-frequency-timetable"
-            type="button"
-            aria-haspopup="dialog"
-            :aria-expanded="timetableOpen"
-            @click="timetableOpen = true"
-          >
-            <Search :size="14" aria-hidden="true" />
-            {{ t("globalMap.sidebar.gtfsFrequency.timetableLink") }}
-          </button>
           <p v-if="!profile.topologyAvailable" role="status">
             {{ t("globalMap.sidebar.gtfsFrequency.topologyMissing") }}
           </p>
@@ -337,6 +338,7 @@ const datasetDate = computed(() => {
   display: inline-flex;
   align-items: center;
   min-width: 0;
+  min-height: 32px;
   gap: var(--space-2);
   padding: 0;
   border: 0;
@@ -389,6 +391,7 @@ h3 {
   font-size: 0.78rem;
 }
 .gtfs-frequency-card__source-trigger {
+  margin-inline-start: auto;
   padding: 0;
   border: 0;
   background: transparent;
@@ -415,18 +418,25 @@ h3 {
   display: inline-flex;
   align-items: center;
   justify-self: start;
-  gap: var(--space-1);
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--idfm-blue);
+  gap: 6px;
+  min-height: 34px;
+  padding: 4px 9px;
+  border: 1px solid var(--sidebar-border, var(--border));
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--ink);
   font: inherit;
-  font-size: 0.68rem;
+  font-size: 0.72rem;
+  font-weight: 700;
   cursor: pointer;
 }
 .gtfs-frequency-card__timetable-trigger:hover {
-  color: var(--ink);
-  text-decoration: underline;
+  color: var(--idfm-blue);
+  background: color-mix(in srgb, var(--idfm-blue) 5%, var(--surface));
+}
+.gtfs-frequency-card__timetable-trigger > svg {
+  flex: none;
+  color: var(--idfm-blue);
 }
 .gtfs-frequency-card__timetable-trigger:focus-visible {
   outline: 2px solid var(--idfm-blue);

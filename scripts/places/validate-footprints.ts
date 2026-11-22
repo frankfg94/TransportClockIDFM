@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import type { CompiledPlaceRecord } from '../../src/services/places/compiledPlaces';
+import { compileGreenSpaceFootprints, GREEN_SPACE_FOOTPRINTS_ASSET } from '../../src/services/places/greenSpaceFootprints';
 
 const root = resolve('public/data/place-footprints');
 const manifest = JSON.parse(await readFile(resolve(root,'manifest.json'), 'utf8'));
@@ -15,6 +16,11 @@ for (const asset of manifest.assets) {
   places.push(...entries);
 }
 if (places.length !== manifest.withFootprint || new Set(places.map(place=>place.id)).size !== places.length) throw new Error('Invalid total count or duplicate ids');
+const greenSpaceFootprints = compileGreenSpaceFootprints(places);
+if (!greenSpaceFootprints.spaces.length
+  || await readFile(resolve(root, GREEN_SPACE_FOOTPRINTS_ASSET), 'utf8') !== JSON.stringify(greenSpaceFootprints)) {
+  throw new Error('Green-space footprints differ from the regional footprint pack');
+}
 const kinds = ['supermarket','hypermarket','mall','shopping_centre','park','garden','forest','wood'];
 for (const place of places) {
   if (!kinds.includes(place.kind) || !(place.areaM2! > 0) || !Number.isFinite(place.areaM2) || !place.footprintRings?.length) throw new Error(`Invalid place ${place.id}`);

@@ -205,6 +205,12 @@ describe("food market accessibility", () => {
 });
 
 describe("cinema accessibility", () => {
+  it("retains the direct cinema journey if pedestrian routing fails", async () => {
+    matrix.mockRejectedValueOnce(new Error("route unavailable"));
+    const analysis = await analyzeCinemas(origin, [cinema], async () => [directJourney], signal);
+    expect(analysis.items[0]?.transit).toEqual(directJourney);
+    expect(scoreCinemas(analysis.items).facts[0]?.kind).toBe("cinemaTransit");
+  });
   it("uses inclusive thresholds and grants a single bonus when both modes qualify", () => {
     expect(assessCinema({ place: cinema, walkSeconds: 600 }).qualification.kind).toBe("bonus");
     expect(assessCinema({ place: cinema, walkSeconds: 601, transit: directJourney }).mode).toBe("transit");

@@ -11,7 +11,7 @@ import { assessCinema, fastestCinemaTransit, isCinema, type CinemaAccess } from 
 import { loadMunicipalMarkets } from "./municipalMarketInventory";
 
 const MARKET_SEARCH_RADIUS_METERS = 4_000;
-const MARKET_WALK_RADIUS_METERS = FOOD_MARKET_RULES.contextMinutes * 95;
+const MARKET_WALK_METERS_PER_MINUTE = 95;
 type VenueJourneyProbe = (place: NearbyPlace, signal: AbortSignal) => Promise<NearbyJourney[]>;
 
 export interface VenueAnalysis<T> {
@@ -52,7 +52,8 @@ export async function loadFoodMarketCandidates(origin: GeocoderPoint, provider: 
 export async function analyzeFoodMarkets(origin: GeocoderPoint, markets: readonly FoodMarketCandidate[],
   signal: AbortSignal): Promise<VenueAnalysis<FoodMarketAccess>> {
   const source = "OSM · municipal inventories · pedestrian routing";
-  const walkCandidates = markets.filter(item => item.place.distanceMeters <= MARKET_WALK_RADIUS_METERS);
+  const walkCandidates = markets.filter(item => item.place.distanceMeters <= MARKET_WALK_METERS_PER_MINUTE
+    * (item.record ? FOOD_MARKET_RULES.documentedWalkingContextMinutes : FOOD_MARKET_RULES.contextMinutes));
   const walks = await documentedWalks(origin, walkCandidates.map(item => item.place), signal);
   const items = markets.map(item => {
     const walk = walks.get(item.place.id);
@@ -98,7 +99,10 @@ export async function analyzeCinemas(origin: GeocoderPoint, nearby: readonly Nea
     }
   }));
   const [walks, footprints, journeys] = await Promise.all([
-    documentedWalks(origin, candidates, signal),
+    documentedWalks(origin, candidates, signal).catch(() => {
+      signal.throwIfAborted();
+      return new Map<string, NearbyWalkingRoute>();
+    }),
     loadVenueFootprintAreas(CINEMA_FOOTPRINT_AREAS_FILE),
     transit,
   ]);

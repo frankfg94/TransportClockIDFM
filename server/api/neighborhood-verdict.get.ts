@@ -1,11 +1,15 @@
 import { createError, defineEventHandler, getQuery } from "h3";
 import type { NearbyJourneyPoint } from "../../src/features/nearby-stations/nearbyHeavyTransports";
 import { routeWalkingWithPreferredProvider } from "../services/walking/openRouteService";
-import { routeWalkingWithOpenRouteService, matrixWalkingWithOpenRouteService } from "../services/walking/openRouteService";
+import { routeWalkingWithOpenRouteService, matrixWalkingWithOpenRouteService, matrixWalkingForGtfs } from "../services/walking/openRouteService";
 import { findPointIrisNeighborhoods } from "../services/neighborhoodVerdict/irisPointLookup";
 import { resolveAdministrativeLocation } from "../services/neighborhoodVerdict/geoApi";
 import { getCompiledNeighborhoodVerdictData } from "../services/neighborhoodVerdict/dataStore";
 import { buildNeighborhoodVerdict } from "../services/neighborhoodVerdict/score";
+import { readCanopy, readNatureManifest, readNearbyRegionalGreenSpaces, readParkWalk, verifiedGreenSpaceWalkingTime } from "../services/neighborhoodVerdict/natureInCity";
+import { mergeRegionalParkEvidence } from "../services/neighborhoodVerdict/regionalParkEvidence";
+import type { GreenBoundary } from "../../shared/natureInCity";
+import { getNetexRuntimeEnv } from "../services/topology/netexCache";
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event);
@@ -46,12 +50,27 @@ export default defineEventHandler(async (event) => {
         distanceMeters: route.distanceMeters,
       };
     };
-    return await buildNeighborhoodVerdict(
-      data,
-      { lat, lon },
-      administrativeLocation,
-      query.includeWalking === "0" ? undefined : routeWalking,
-    );
+    const origin = { lat, lon };
+    const router = query.includeWalking === "0" ? undefined : routeWalking;
+    const env = getNetexRuntimeEnv(event);
+    const greenery = readNatureManifest(env).then(async manifest => {
+      const routeToParks = query.routingPolicy === "ors-only" ? matrixWalkingWithOpenRouteService : matrixWalkingForGtfs;
+      const walkingMatrix = (provider: typeof matrixWalkingForGtfs) => async ([lon, lat]: [number, number],
+        points: readonly [number, number][], endBoundaries?: readonly (GreenBoundary | undefined)[]) => {
+          const destinations = points.map(([lon, lat], index) => ({ id: String(index), lon, lat }));
+          const routes = await provider(event, { lon, lat }, destinations);
+          const verified = new Map(routes.map(route => [route.id, verifiedGreenSpaceWalkingTime(route, endBoundaries?.[Number(route.id)])]));
+          return destinations.map(destination => verified.get(destination.id));
+      };
+      const [canopy, parkAccess, regionalSpaces] = await Promise.all([
+        readCanopy(env, manifest, origin, administrativeLocation.commune.code),
+        router ? readParkWalk(env, manifest, origin, walkingMatrix(routeToParks)).catch(() => "unknown" as const) : undefined,
+        readNearbyRegionalGreenSpaces(env, manifest, origin, router ? walkingMatrix(matrixWalkingForGtfs) : undefined).catch(() => []),
+      ]);
+      return { greenery: { ...canopy, parkAccess }, regionalSpaces };
+    }).catch(() => ({ greenery: { parkAccess: router ? "unknown" as const : undefined }, regionalSpaces: [] }));
+    const [verdict, greenData] = await Promise.all([buildNeighborhoodVerdict(data, origin, administrativeLocation, router), greenery]);
+    return { ...mergeRegionalParkEvidence(verdict, greenData.regionalSpaces, data.greenSpaces), greenery: greenData.greenery };
   } catch (cause) {
     throw createError({ statusCode: 503, statusMessage: "Neighborhood verdict data unavailable", cause });
   }

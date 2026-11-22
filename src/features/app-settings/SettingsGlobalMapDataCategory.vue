@@ -5,6 +5,7 @@ import { useI18n } from "../../i18n";
 import type { GlobalMapManifest } from "../transport-map/contracts/manifest";
 import { GLOBAL_TRANSPORT_PLAN_CONFIG } from "../transport-map/config/globalTransportPlanConfig";
 import SettingsCategoryPanel from "./SettingsCategoryPanel.vue";
+import SettingsNatureInCity from "./SettingsNatureInCity.vue";
 import type { SettingsCategoryBaseProps } from "./settingsCategoryContract";
 
 type GlobalMapQualityLevel = "good" | "attention" | "limited" | "online";
@@ -64,6 +65,7 @@ const { n, t } = useI18n();
     @toggle="emit('toggle')"
   >
     <p class="settings-panel__description">{{ t("settings.globalMapData.description") }}</p>
+    <SettingsNatureInCity v-if="panelOpen" />
     <article
       class="settings-data-overview"
       data-global-map-pack-overview

@@ -12,6 +12,18 @@ function ignResponse(url: unknown) {
       duration: i % 2 ? 180 : 120, steps: [{ geometry: { type: "LineString", coordinates: [points[i], to] } }] })) });
 }
 describe("common IGN GTFS pedestrian matrix", () => {
+  it("generates diagnostic randomness only when a request runs", async () => {
+    const randomUUID = vi.spyOn(crypto, "randomUUID");
+    try {
+      const matrix = createIgnWalkingMatrix(async url => ignResponse(url));
+      expect(randomUUID).not.toHaveBeenCalled();
+      await matrix(origin, [destination]);
+      expect(randomUUID).toHaveBeenCalledTimes(1);
+    } finally {
+      randomUUID.mockRestore();
+    }
+  });
+
   it("expires verified walks 24 hours after calculation even after a recent hit", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {

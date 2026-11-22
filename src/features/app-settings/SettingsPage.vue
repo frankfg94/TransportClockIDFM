@@ -960,6 +960,13 @@ const settingsSearchEntries = computed<SettingsSearchEntry[]>(() => [
     "reseau donnees qualite pack hors connexion tuiles tracés couleurs",
   ),
   createSettingsSearchEntry(
+    "global-map-data.nature-in-city",
+    "global-map-data",
+    t("settings.natureInCity.title"),
+    t("settings.natureInCity.coverage", { count: "" }),
+    "dataset verdict canopée végétation tree cover",
+  ),
+  createSettingsSearchEntry(
     "panel:places",
     "places",
     t("settings.places.title"),

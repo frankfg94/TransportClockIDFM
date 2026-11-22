@@ -333,8 +333,10 @@ export function stationAccessComparisonTime(row: StationAccessRow): number {
 }
 
 export function rankStationAccessRows(rows: readonly StationAccessRow[]): StationAccessRow[] {
+  const pending = (row: StationAccessRow) => row.state === "queued" || row.state === "running";
   return [...rows].sort((a, b) =>
     Number(a.target.future) - Number(b.target.future) ||
+    Number(pending(a)) - Number(pending(b)) ||
     stationAccessComparisonTime(a) - stationAccessComparisonTime(b) ||
     Number(b.options.length > 0) - Number(a.options.length > 0) ||
     a.target.distanceMeters - b.target.distanceMeters);

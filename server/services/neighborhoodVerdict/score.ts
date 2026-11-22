@@ -51,7 +51,7 @@ export async function buildNeighborhoodVerdict(
   );
   const [transport, nature] = await Promise.all([
     transportSignal(data, point, routeWalking, stale),
-    natureSignal(data, point, admin, stale, routeWalking),
+    natureSignal(data, point, stale, routeWalking),
   ]);
   const categories: VerdictCategorySignal[] = [
     transport.signal,
@@ -214,7 +214,6 @@ const DEFAULT_GREEN_SPACE_SOURCE_ID = "hds-green-spaces";
 async function natureSignal(
   data: CompiledNeighborhoodVerdictData,
   point: { lat: number; lon: number },
-  admin: AdministrativeLocation,
   stale: Set<string>,
   routeWalking?: WalkingRouter,
 ): Promise<NatureSignalResult> {
@@ -315,6 +314,7 @@ async function natureSignal(
         family: `managed-green-space:${candidate.space.id}`,
         priority: positive ? 12 : 9,
         scoreImpact: positive ? 1 : 0,
+        greenSpaceAccess: { name: candidate.space.name, walkingMinutes: minutes, estimated: !candidate.routed },
         label: `${candidate.space.name} à ${timeLabel}${areaLabel}`,
         explanation: candidate.routed
           ? `Un itinéraire piéton réel vers le point d’accès géométrique le plus proche donne ${minutes} min ; l’emprise issue de la source représente ${area || "une surface non renseignée"}. La source ne garantit ni l’ouverture au public ni la qualité des aménagements.`
@@ -327,27 +327,6 @@ async function natureSignal(
         geography: { level: "point" },
         referencePeriod: greenSpaceReferencePeriod(data, candidate.space),
         sourceIds: [sourceId, ...(candidate.routed ? ["openstreetmap-routing"] : [])],
-      }),
-    );
-  }
-  if (distance > 1_500) {
-    facts.push(
-      evidence({
-        id: `green-far-${admin.commune.code}`,
-        category: "nature-leisure",
-        polarity: "negative",
-        family: "managed-green-space",
-        priority: 7,
-        scoreImpact: -1,
-        label: `Espace vert géré le plus proche à ${distance} m`,
-        explanation:
-          "Ce signal porte sur l’emprise verte compilée la plus proche ; il ne prétend pas recenser tous les espaces verts du quartier.",
-        rule: "Point faible documenté lorsque l’emprise gérée la plus proche est à plus de 1 500 m.",
-        value: distance,
-        unit: "m",
-        geography: { level: "commune", code: admin.commune.code, name: admin.commune.name },
-        referencePeriod: greenSpaceReferencePeriod(data, nearest.space),
-        sourceIds: [nearestSourceId],
       }),
     );
   }

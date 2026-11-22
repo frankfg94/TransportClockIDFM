@@ -5,6 +5,7 @@ import type {
   GlobalMapLine,
   GlobalMapPath,
   GlobalMapStation,
+  GlobalMapVertex,
 } from "../transport-map/contracts/manifest";
 import {
   getGlobalMapPathSubpathRanges,
@@ -16,6 +17,69 @@ import type { BusMapDirectionSelection } from "./lineMapData";
 const MAX_JOIN_DISTANCE_METERS = 80;
 const WORLD_CIRCUMFERENCE_METERS = 40_075_016.68557849;
 const ENDPOINT_PRECISION = 10_000_000;
+
+/** Reuse a compiled GTFS trace only when all of its fragments establish the selected route. */
+export function createDirectionPathFromCompiledGtfs(
+  paths: readonly GlobalMapPath[],
+  directionId: string,
+  stationIds: readonly string[],
+): GlobalMapPath | undefined {
+  const source = paths[0];
+  if (!source || stationIds.length < 2) return undefined;
+  const sourceId = source.id.split("#", 1)[0];
+  if (paths.some((path) => !isHighFidelityTransportPath(path) || !path.quality.complete ||
+    path.geometrySource !== "gtfs" || path.sourceVersion !== source.sourceVersion ||
+    path.id.split("#", 1)[0] !== sourceId)) return undefined;
+
+  // Clipping preserves the original order within each fragment and the exact
+  // point at each tile boundary. Join only at those shared points.
+  const endpointKey = ({ x, y }: GlobalMapVertex) => `${x}:${y}`;
+  const fragments = paths.flatMap((path) => getGlobalMapPathSubpathRanges(path)
+    .map(({ start, end }) => path.vertices.slice(start, end)));
+  const byStart = new Map(fragments.map((part) => [endpointKey(part[0]!), part]));
+  if (byStart.size !== fragments.length) return undefined;
+  const head = fragments.find(([first]) =>
+    first?.stationId === stationIds[0] || first?.stationId === stationIds.at(-1));
+  if (!head) return undefined;
+
+  const vertices: GlobalMapVertex[] = [...head];
+  let tail = head;
+  for (let index = 1; index < fragments.length; index += 1) {
+    byStart.delete(endpointKey(tail[0]!));
+    const next = byStart.get(endpointKey(tail.at(-1)!));
+    if (!next) return undefined;
+    if (next[0]!.stationId) vertices[vertices.length - 1] = next[0]!;
+    vertices.push(...next.slice(1));
+    tail = next;
+  }
+  if (vertices[0]!.stationId !== stationIds[0]) vertices.reverse();
+  const anchors = vertices.flatMap((vertex) => vertex.stationId ? [vertex.stationId] : []);
+  if (anchors.length !== stationIds.length || anchors.some((id, index) => id !== stationIds[index]) ||
+    vertices[0]!.stationId !== stationIds[0] || vertices.at(-1)!.stationId !== stationIds.at(-1)) {
+    return undefined;
+  }
+
+  return {
+    id: `path:${source.lineId}:direction:${directionId}:compiled`,
+    lineId: source.lineId,
+    geometrySource: source.geometrySource,
+    sourceVersion: source.sourceVersion,
+    quality: {
+      complete: true,
+      fallback: false,
+      gapMeters: Math.max(...paths.map((path) => path.quality.gapMeters)),
+      stationDistanceMaxMeters: Math.max(...paths.map((path) => path.quality.stationDistanceMaxMeters)),
+    },
+    stationIds: [...stationIds],
+    vertices,
+    renderStationAnchors: paths.flatMap((path) => path.renderStationAnchors ?? []),
+    minX: Math.min(...paths.map((path) => path.minX)),
+    minY: Math.min(...paths.map((path) => path.minY)),
+    maxX: Math.max(...paths.map((path) => path.maxX)),
+    maxY: Math.max(...paths.map((path) => path.maxY)),
+    chunkIds: [...new Set(paths.flatMap((path) => path.chunkIds))],
+  };
+}
 
 export function hasSingleConnectedGlobalMapPathGeometry(
   paths: readonly GlobalMapPath[],

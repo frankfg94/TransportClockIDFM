@@ -1,3 +1,11 @@
+import { PARK_WALKING_RULE } from "./neighborhood/criteria/greenSpaceFactRules";
+import { HOSPITAL_ACCESS_RULE } from "./neighborhood/criteria/hospitalAccessRules";
+import { loadParkWalkingProfile } from "./parkWalkingProfileClient";
+import { loadRemarkableGardens, mappedGardenEntrances, matchRemarkableGarden, remarkableGardenEntrance } from "./remarkableGardens";
+import { greenSpaceIdentity } from "../../../shared/greenSpaceIdentity";
+import { getGreenSpaceMapData, greenParkSubsiteId, greenParkSubsiteMap, greenSpaceTransitTarget } from "./greenSpaceMapData";
+import { probeGreenSpaceTransit } from "./useGreenSpaceTransit";
+import { routeToGreenSpace } from "./greenSpaceWalking";
 import { computed, onBeforeUnmount, readonly, ref, shallowReadonly, shallowRef, watch } from "vue";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { fetchGtfsLineFrequency } from "../../services/lineFrequency";
@@ -35,6 +43,7 @@ import {
 import { getNearbyWalkingRouteMatrix } from "../../services/nearbyWalkingRoutes";
 import type { NearbyWalkingRoutingPolicy } from "./nearbyWalkingRoutes";
 import { placeDistanceMeters } from "../../services/places/compiledPlaces";
+import { loadNearbyGreenSpaceFootprints, type NearbyGreenSpaceFootprint } from "../../services/places/greenSpaceFootprints";
 import {
   NEARBY_DIRECTORY_MAX_RADIUS_METERS,
 } from "./nearbyPlacePresentation";
@@ -160,6 +169,9 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const marketTransit = shallowRef<{ datetime: string; items: FoodMarketTransit[] }>();
   const cinemas = shallowRef<VenueAnalysis<CinemaAccess>>();
   let cinemaDate: string | undefined;
+  let greenSpaceController: AbortController | undefined;
+  let preferredGreenSpace: string | undefined;
+  let greenSpaceLoadToken = 0;
   let venuesController: AbortController | undefined;
   const datasetDurations = new Map<string, number>();
   let satisfactionController: AbortController | undefined;
@@ -173,13 +185,17 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const chateletJourneyStatus = ref<"loading" | "ready" | "unavailable">();
   const journeyBenchmarks = ref<NeighborhoodJourneyBenchmark[]>([]);
   const benchmarkRun = shallowRef<{ token: number; origin: GeocoderPoint; destinations: JourneyBenchmarkDestination[] }>();
-  const greenSpaceJourneys = ref<NeighborhoodGreenSpaceJourney[]>([]);
+  const greenSpaceJourneys = shallowRef<NeighborhoodGreenSpaceJourney[]>([]);
+  const greenSpaceSubsites = shallowRef(new Map<string, NonNullable<import("../../../shared/natureInCity").GreeneryMapData["subsites"]>>());
+  const greenSpaceSiteBoundaries = shallowRef(new Map<string, import("../../../shared/natureInCity").GreenBoundary>());
+  const greenSpaceFootprints = shallowRef<NearbyGreenSpaceFootprint[]>();
   const noctilienJourneys = ref<NearbyJourney[]>([]);
   let noctilienController: AbortController | undefined;
   const frequencyProfiles = shallowRef(new Map<string, GtfsLineFrequencyResponse | undefined>());
   const lineTopologies = shallowRef(new Map<string, LineTopology | undefined>());
   const lastServiceByLine = shallowRef(new Map<string, Awaited<ReturnType<typeof frequencyTimetable.getLastService>>>());
   const hospitalJourneys = ref<Record<string, NearbyJourney[] | undefined>>({});
+  const hospitalPlaces = shallowRef<NearbyPlace[]>();
   const backendVerdict = shallowRef<PublicNeighborhoodVerdict>();
   const isFutureGpeProject = computed(() => createFutureGpeProjectFilter(options.network.value));
   const effectiveBackendVerdict = computed(() => reconcileFutureGpeVerdict(backendVerdict.value, isFutureGpeProject.value));
@@ -269,12 +285,16 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       journeyBenchmarksLoading: [...pendingTasks].some((taskId) => taskId.startsWith("journey:")),
       journeyDepartureTime: options.journeyDepartureTime?.value ?? DEFAULT_NEIGHBORHOOD_DAY_DEPARTURE_TIME,
       greenSpaceJourneys: greenSpaceJourneys.value,
+      greenSpaceSiteBoundaries: greenSpaceSiteBoundaries.value,
+      greenSpaceSubsites: greenSpaceSubsites.value,
+      greenSpaceFootprints: greenSpaceFootprints.value,
       noctilienJourneys: noctilienJourneys.value,
       noctilienDepartureTime: options.nightDepartureTime?.value ?? DEFAULT_NEIGHBORHOOD_NIGHT_DEPARTURE_TIME,
       frequencyProfiles: frequencyProfiles.value,
       lineTopologies: lineTopologies.value,
       lastServiceByLine: lastServiceByLine.value,
       hospitalJourneys: hospitalJourneys.value,
+      hospitalPlaces: hospitalPlaces.value,
       serviceQuality: options.serviceQuality?.value,
       passengerSatisfaction: options.fetchPassengerSatisfaction && {
         observations: satisfactionObservations.value,
@@ -326,6 +346,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     const nightJourneyDateTime = resolveNearbyJourneyDateTime(options.nightJourneyDateTime)
       ?? defaultNightJourneyDateTime;
     const token = ++requestToken;
+    const changedOrigin = originKey !== activeOriginKey;
     resetOriginState(originKey);
     benchmarkRun.value = undefined;
     const packChanged = currentVersion !== options.gtfsVersion?.value;
@@ -353,11 +374,12 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     chateletJourneyStatus.value = origin ? "loading" : undefined;
     greenSpaceJourneys.value = [];
     hospitalJourneys.value = {};
+    hospitalPlaces.value = undefined;
     // A refresh replaces the current origin-scoped work. Abort in-flight
     // requests before creating the next batch; completed cache entries remain
     // available and are deliberately not reset for a refresh at the same
     // origin.
-    abortActiveRequests();
+    abortActiveRequests(changedOrigin);
     pendingTasks.clear();
     taskPromises.clear();
     activeCriteriaTasks.clear();
@@ -398,26 +420,20 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
             enriched => { backendVerdict.value = enriched; updatedAt.value = Date.now(); }, false, "verdict", ["transport", "nature-leisure"]);
         }
         updatedAt.value = Math.max(updatedAt.value, Date.parse(next.generatedAt) || Date.now());
-        const greenSpaceTargets = resolveGreenSpaceTransitTargets(next.nearbyGreenSpaces);
-        if (greenSpaceTargets.length > 0) {
-          trackTask(
-            "green-space-routes",
-            loadGreenSpaceJourneys(origin, greenSpaceTargets, originKey, journeyDateTime),
-            token,
-            (journeys) => {
-              greenSpaceJourneys.value = journeys;
-              updatedAt.value = Date.now();
-            },
-            false,
-            undefined,
-            ["nature-leisure"],
-          );
-        }
+        startGreenSpaceLoad(origin, next.nearbyGreenSpaces ?? [], journeyDateTime, token);
       },
       true,
       "verdict",
-      NEIGHBORHOOD_CATEGORY_IDS,
-    );
+      NEIGHBORHOOD_CRITERION_REGISTRY.filter(({ datasets }) =>
+        datasets.some(({ id }) => id === "neighborhood-verdict")).map(({ id }) => id),
+    ).then(() => {
+      if (token === requestToken && !backendVerdict.value) startGreenSpaceLoad(origin, [], journeyDateTime, token);
+    });
+
+    if (!greenSpaceFootprints.value) {
+      trackTask("osm-green-space-footprints", loadNearbyGreenSpaceFootprints(origin), token,
+        (spaces) => { greenSpaceFootprints.value = spaces; }, false, "places", ["nature-leisure"]);
+    }
 
     if (!placesLoaded.value) {
       trackTask(
@@ -691,11 +707,15 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     chateletJourneyStatus.value = undefined;
     journeyBenchmarks.value = [];
     greenSpaceJourneys.value = [];
+    greenSpaceSiteBoundaries.value = new Map();
+    greenSpaceSubsites.value = new Map();
+    greenSpaceFootprints.value = undefined;
     noctilienJourneys.value = [];
     frequencyProfiles.value = new Map();
     lineTopologies.value = new Map();
     lastServiceByLine.value = new Map();
     hospitalJourneys.value = {};
+    hospitalPlaces.value = undefined;
     frequencyResults.clear();
     lastServiceResults.clear();
     backendVerdict.value = undefined;
@@ -755,7 +775,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     const { signal } = controller;
     const probe = (place: NearbyPlace, requestSignal: AbortSignal) => {
       const request: NearbyJourneyRequest = {
-        purpose: "places", origin, destination: place, datetime, count: 3, includeGeoJson: false,
+        purpose: "places", origin, destination: place, datetime, count: 3, includeGeoJson: false, maxTransfers: 0,
       };
       return options.journeyProbe ? options.journeyProbe.probeJourneys(request, requestSignal)
         : travelRoutesProvider.findJourneys(request, requestSignal);
@@ -923,6 +943,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     datetime: string | undefined,
     journeyKey: string,
     priority = 0,
+    allowedModes?: NearbyJourneyRequest["allowedModes"],
+    maxTransfers?: NearbyJourneyRequest["maxTransfers"],
   ): Promise<NearbyJourney[]> {
     const cached = journeyResults.get(journeyKey);
     if (cached) return Promise.resolve([...cached]);
@@ -935,6 +957,8 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       origin,
       destination,
       count: 4,
+      ...(allowedModes ? { allowedModes } : {}),
+      ...(maxTransfers === undefined ? {} : { maxTransfers }),
       includeDisruptions: true,
       includeGeoJson: false,
       ...(destination.destinationRef ? { destinationRef: destination.destinationRef } : {}),
@@ -978,42 +1002,144 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     return promise;
   }
 
-  function loadGreenSpaceJourneys(
+  function startGreenSpaceLoad(origin: GeocoderPoint, spaces: readonly PublicGreenSpaceAccess[],
+    datetime: string | undefined, token: number): void {
+    if (disposed || greenSpaceLoadToken === token || pendingTasks.has("green-space-routes")) return;
+    const controller = new AbortController();
+    greenSpaceController = controller;
+    trackTask("green-space-routes",
+      loadGreenSpaceJourneys(origin, spaces, datetime, controller.signal), token,
+      journeys => {
+        greenSpaceLoadToken = token;
+        greenSpaceJourneys.value = journeys;
+        updatedAt.value = Date.now();
+      }, false, undefined, ["nature-leisure"]);
+  }
+
+  async function loadGreenSpaceJourneys(
     origin: Pick<GeocoderPoint, "lon" | "lat">,
-    targets: readonly PublicGreenSpaceAccess[],
-    originKey: string,
-    journeyDateTime?: string,
+    spaces: readonly PublicGreenSpaceAccess[],
+    datetime: string | undefined,
+    signal: AbortSignal,
   ): Promise<NeighborhoodGreenSpaceJourney[]> {
-    return Promise.all(targets.map(async (greenSpace): Promise<NeighborhoodGreenSpaceJourney> => {
-      const points = [
-        { lon: greenSpace.lon, lat: greenSpace.lat },
-        ...(greenSpace.transitPoints ?? []),
-      ].filter((point, index, all) => all.findIndex((candidate) =>
-        candidate.lon === point.lon && candidate.lat === point.lat) === index)
-        .slice(0, 6);
-      const journeys = (await Promise.all(points.map((point, index) => {
-        const destination = {
-          id: `green-space:${greenSpace.id}:${index}`,
-          lon: point.lon,
-          lat: point.lat,
-        };
-        const journeyKey = journeyCacheKey(
-          originKey,
-          `green-space:${greenSpace.id}:${index}`,
-          destination,
-          journeyDateTime,
-          "green-space",
-        );
-        return loadJourneyProbe(
-          origin,
-          destination,
-          journeyDateTime,
-          journeyKey,
-          2,
-        ).catch(() => []);
-      }))).flat();
-      return { greenSpace, journeys };
-    }));
+    const gardenRegister = loadRemarkableGardens();
+    const preparedGeometry = new Map<string, import("../../../shared/natureInCity").GreeneryMapData>();
+    const knownIds = new Set(spaces.flatMap(space => [space.id, ...(space.parkAliases ?? [])]));
+    const targets = [...spaces];
+    function registerSubsites(space: PublicGreenSpaceAccess, geometry: import("../../../shared/natureInCity").GreeneryMapData) {
+      if (!space.parkMap || !geometry.subsites?.length || signal.aborted) return;
+      greenSpaceSiteBoundaries.value = new Map(greenSpaceSiteBoundaries.value).set(space.id, geometry.boundary);
+      greenSpaceSubsites.value = new Map(greenSpaceSubsites.value).set(space.id, geometry.subsites);
+      for (const site of geometry.subsites) {
+        const id = greenParkSubsiteId(space.id, site.name);
+        if (knownIds.has(id)) continue;
+        knownIds.add(id);
+        preparedGeometry.set(id, greenParkSubsiteMap(geometry, site));
+        targets.push({ id, name: site.name, parkMap: { ...space.parkMap, id },
+          lon: space.lon, lat: space.lat, distanceMeters: space.distanceMeters,
+          estimatedWalkingMinutes: Infinity, surfaceM2: site.surfaceM2 });
+      }
+      markCriteriaDirty(["nature-leisure"]);
+      scheduleRecompute();
+    }
+    await Promise.all([
+      ...spaces.filter(space => space.parkMap && space.parkSubsites?.length).map(async space => {
+        const geometry = await getGreenSpaceMapData(space.parkMap!, origin, signal).catch(() => undefined);
+        if (!geometry || signal.aborted) return;
+        preparedGeometry.set(space.id, geometry);
+        registerSubsites(space, geometry);
+      }),
+      loadNearbyGreenSpaceFootprints(origin).catch(() => []).then(footprints => {
+        targets.push(...footprints.filter(space => !knownIds.has(space.id) && !spaces.some(park => park.parkMap
+          && greenSpaceIdentity(park.name) === greenSpaceIdentity(space.name) && Math.abs(park.distanceMeters - space.distanceMeters) <= 1200))
+          .map(space => ({ ...space, ...origin, estimatedWalkingMinutes: Infinity })));
+      }),
+    ]);
+    targets.sort((a, b) => (b.surfaceM2 ?? 0) - (a.surfaceM2 ?? 0) || a.distanceMeters - b.distanceMeters);
+    const routing = {
+      datetime, spaces, network: options.network.value,
+      probeJourneys: (request: NearbyJourneyRequest, requestSignal: AbortSignal) => options.journeyProbe
+        ? options.journeyProbe.probeJourneys(request, requestSignal)
+        : travelRoutesProvider.findJourneys(request, requestSignal),
+    };
+    function nextTarget() {
+      const index = targets.findIndex(space => (space.woodlandMap?.id ?? space.id) === preferredGreenSpace
+        || (preferredGreenSpace && space.parkAliases?.includes(preferredGreenSpace)));
+      return targets.splice(Math.max(0, index), 1)[0];
+    }
+    async function load() {
+      for (let space = nextTarget(); space && !signal.aborted; space = nextTarget()) {
+        const current = space;
+        const reference = current.woodlandMap ?? current.parkMap ?? { scope: "park" as const, id: current.id };
+        try {
+          const prefetched = preparedGeometry.get(current.id);
+          const geometry = prefetched ?? await getGreenSpaceMapData(reference, origin, signal);
+          if (signal.aborted) return;
+          if (!geometry) throw new Error("green-space-geometry-unavailable");
+          if (!prefetched) registerSubsites(current, geometry);
+          const garden = reference.scope === "park" ? matchRemarkableGarden(await gardenRegister, current.name, geometry.boundary) : undefined;
+          if (signal.aborted) return;
+          const [entrance, mappedEntrances] = garden?.publicAccess === "open" ? await Promise.all([
+            remarkableGardenEntrance(garden, geometry.boundary, signal),
+            mappedGardenEntrances(current.name, geometry.boundary, signal).catch(() => []),
+          ]) : [undefined, []];
+          const accessGeometry = entrance || mappedEntrances.length ? { ...geometry,
+            entrances: [...(entrance ? [entrance] : []), ...mappedEntrances, ...(geometry.entrances ?? [])] } : geometry;
+          const target = greenSpaceTransitTarget(reference, origin, accessGeometry);
+          const [walk, transit] = await Promise.allSettled([
+            (garden?.publicAccess === "open" || (current.mainWalkingMinutes ?? current.walkingMinutes) === undefined
+              || (reference.scope === "park" && (current.walkingMinutes ?? Infinity) <= PARK_WALKING_RULE.accessMinutes))
+              ? routeToGreenSpace(accessGeometry, reference, origin, current.name, signal) : undefined,
+            target && options.calendarReady?.value !== false ? probeGreenSpaceTransit({
+              ...target, ...(current.parkMap?.version && !current.id.includes("#")
+                ? { documentedApproach: { lon: current.lon, lat: current.lat } } : {}),
+            }, routing, signal) : undefined,
+          ]);
+          if (signal.aborted) return;
+          const measured = walk.status === "fulfilled" ? walk.value : undefined;
+          const walkingMinutes = measured?.access === "inside" ? 0 : measured?.route
+            ? measured.route.durationSeconds / 60 : current.mainWalkingMinutes ?? current.walkingMinutes;
+          const transitAccess = transit.status === "fulfilled" ? transit.value : undefined;
+          const best = transitAccess?.best;
+          const walkArrival = measured?.access === "inside" ? origin : measured?.route?.coordinates.at(-1);
+          const approaches = [...(transitAccess?.walkingApproaches ?? []),
+            ...(walkingMinutes !== undefined && walkArrival ? [{ minutes: walkingMinutes, point: walkArrival }] : []),
+          ].filter(({ minutes }) => minutes <= PARK_WALKING_RULE.accessMinutes).sort((a, b) => a.minutes - b.minutes);
+          const area = current.surfaceM2 ?? geometry.surfaceM2;
+          const walkingAccess = reference.scope === "park" && current.category !== "Espace vert géré"
+            && (!garden || garden.publicAccess === "open") ? approaches[0] : undefined;
+          const result: NeighborhoodGreenSpaceJourney = {
+            greenSpace: { ...current, ...(reference.scope === "park" ? { parkMap: reference } : {}),
+              walkingMinutes, surfaceM2: area },
+            journeys: best ? [best] : [],
+            woodlandMainTransit: transitAccess?.reachesMainWoodland,
+            parkWalking: walkingAccess ? { accessMinutes: walkingAccess.minutes! } : undefined,
+            ...(garden ? { garden: { publicAccess: garden.publicAccess, entranceWalkSeconds: measured?.access === "inside" ? 0
+              : measured?.access === "entrance" ? measured.route?.durationSeconds : undefined,
+              entranceRoute: measured?.access === "entrance" ? measured.route : undefined } } : {}),
+            transitComplete: transit.status === "fulfilled" && transit.value?.failed === false,
+            fastestTransitSeconds: transit.status === "fulfilled" ? transit.value?.fastestTransitSeconds : undefined,
+          };
+          greenSpaceJourneys.value = [...greenSpaceJourneys.value, result];
+          markCriteriaDirty(["nature-leisure"]);
+          scheduleRecompute();
+          if (!walkingAccess) continue;
+          const walkingProfile = await loadParkWalkingProfile(geometry.boundary,
+            approaches, area, signal).catch(() => undefined);
+          if (signal.aborted) return;
+          if (walkingProfile) {
+            greenSpaceJourneys.value = greenSpaceJourneys.value.map(item => item.greenSpace.id === current.id
+              ? { ...result, parkWalking: walkingProfile } : item);
+            markCriteriaDirty(["nature-leisure"]);
+            scheduleRecompute();
+          }
+        } catch {
+          if (!signal.aborted) greenSpaceJourneys.value = [...greenSpaceJourneys.value, { greenSpace: current, journeys: [] }];
+        }
+      }
+    }
+    await Promise.all([load(), load()]);
+    return greenSpaceJourneys.value;
   }
 
   function trackHospitalJourneys(
@@ -1023,19 +1149,26 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     token: number,
     journeyDateTime?: string,
   ): void {
-    const targets = sourcePlaces.filter((place) => normalizeScoreText(place.kind) === "hospital");
-    if (targets.length === 0) return;
-    const promise = Promise.all(targets.map(async (place) => {
-      const destination = { id: place.id, lon: place.lon, lat: place.lat };
-      const journeyKey = journeyCacheKey(originKey, place.id, destination, journeyDateTime, "hospital");
-      return [place.id, await loadJourneyProbe(origin, destination, journeyDateTime, journeyKey, 3)] as const;
-    })).then((entries) => Object.fromEntries(entries));
+    const isHospital = (place: NearbyPlace) => normalizeScoreText(place.kind) === "hospital";
+    const promise = (async () => {
+      const nearby = await placesProvider.searchNearby({ origin, radiusMeters: HOSPITAL_ACCESS_RULE.searchRadiusMeters }).catch(() => []);
+      const targets = [...new Map([...sourcePlaces, ...nearby].filter(isHospital).map(place => [place.id, place])).values()];
+      if (token !== requestToken) return { targets, journeys: {} };
+      const entries = await Promise.all(targets.map(async (place) => {
+        const destination = { id: place.id, lon: place.lon, lat: place.lat };
+        const journeyKey = journeyCacheKey(originKey, place.id, destination, journeyDateTime, "hospital");
+        const journeys = await loadJourneyProbe(origin, destination, journeyDateTime, journeyKey, 3, undefined, HOSPITAL_ACCESS_RULE.maxTransfers).catch(() => []);
+        return [place.id, journeys] as const;
+      }));
+      return { targets, journeys: Object.fromEntries(entries) };
+    })();
     trackTask(
       "hospital-routes",
       promise,
       token,
       (next) => {
-        hospitalJourneys.value = next;
+        hospitalPlaces.value = next.targets;
+        hospitalJourneys.value = next.journeys;
         updatedAt.value = Date.now();
       },
       false,
@@ -1244,6 +1377,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       return !options.network.value && options.stationsLoading?.value === true;
     }
     if (datasetId === "osm-places") return pendingTasks.has("places");
+    if (datasetId === "osm-green-space-footprints") return pendingTasks.has(datasetId);
     if (datasetId === "shopping-centres") return pendingTasks.has("shopping-centres");
     if (datasetId === "supermarket-footprints") return pendingTasks.has("supermarket-footprints");
     if (datasetId === "neighborhood-verdict") return pendingTasks.has("backend-verdict");
@@ -1267,6 +1401,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       return !options.network.value && options.failedCriteria?.value.includes(categoryId) === true;
     }
     if (datasetId === "osm-places") return taskErrors.has("places");
+    if (datasetId === "osm-green-space-footprints") return taskErrors.has(datasetId);
     if (datasetId === "shopping-centres") return taskErrors.has("shopping-centres");
     if (datasetId === "supermarket-footprints") return taskErrors.has("supermarket-footprints");
     if (datasetId === "neighborhood-verdict") return taskErrors.has("backend-verdict");
@@ -1297,6 +1432,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   }
 
   function datasetDiagnostics(datasetId: string, category?: NeighborhoodCategoryResult) {
+    if (datasetId === "neighborhood-verdict" || datasetId === "osm-green-space-footprints") {
+      const taskId = datasetId === "neighborhood-verdict" ? "backend-verdict" : datasetId;
+      return { error: taskErrors.get(taskId)?.cause.message };
+    }
     if (datasetId === "passenger-satisfaction") {
       const coverage = category?.passengerSatisfaction;
       return {
@@ -1339,6 +1478,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     }
     if (datasetId === "transport-bootstrap") return options.network.value ? "ready" : "missing";
     if (datasetId === "osm-places") return placesLoaded.value ? "ready" : "missing";
+    if (datasetId === "osm-green-space-footprints") return greenSpaceFootprints.value ? "ready" : "missing";
     if (datasetId === "shopping-centres") return shoppingCentresLoaded.value ? "ready" : "missing";
     if (datasetId === "supermarket-footprints") return supermarketFootprintsLoaded.value ? "ready" : "missing";
     if (datasetId === "neighborhood-green-spaces") {
@@ -1377,7 +1517,9 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     return "missing";
   }
 
-  function abortActiveRequests(): void {
+  function abortActiveRequests(abortOriginSources = true): void {
+    greenSpaceController?.abort();
+    greenSpaceController = undefined;
     venuesController?.abort();
     venuesController = undefined;
     noctilienController?.abort();
@@ -1386,13 +1528,15 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       request.controller.abort();
       topologyRequests.delete(key);
     }
-    for (const [key, request] of placeRequests) {
-      request.controller.abort();
-      placeRequests.delete(key);
-    }
-    for (const [key, request] of verdictRequests) {
-      request.controller.abort();
-      verdictRequests.delete(key);
+    if (abortOriginSources) {
+      for (const [key, request] of placeRequests) {
+        request.controller.abort();
+        placeRequests.delete(key);
+      }
+      for (const [key, request] of verdictRequests) {
+        request.controller.abort();
+        verdictRequests.delete(key);
+      }
     }
     for (const [key, request] of shoppingCentreRequests) {
       request.controller.abort();
@@ -1622,6 +1766,16 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     places: readonly(places),
     /** Public GPE metadata is also consumed by the heavy-access resolver. */
     backendVerdict: readonly(backendVerdict),
+    greenSpaceJourneys,
+    greenSpaceSiteBoundaries,
+    prepareGreenSpaces(focus: string | undefined) {
+      preferredGreenSpace = focus?.match(/^nature:(?:park|woodland):(.+)$/u)?.[1];
+      const origin = options.origin.value;
+      const verdict = backendVerdict.value;
+      if (focus && origin && backendVerdictReady.value && neighborhoodOriginKey(origin) === activeOriginKey) {
+        startGreenSpaceLoad(origin, verdict?.nearbyGreenSpaces ?? [], resolveNearbyJourneyDateTime(options.journeyDateTime), requestToken);
+      }
+    },
     backendVerdictReady: readonly(backendVerdictReady),
     isLoading: readonly(isLoading),
     error: readonly(error),
@@ -1721,23 +1875,6 @@ function resolveNoctilienTargets(
     .sort((left, right) => left.distance - right.distance || left.station.name.localeCompare(right.station.name, "fr"))
     .slice(0, NOCTILIEN_PROBE_LIMIT)
     .map(({ station }) => station);
-}
-
-const GREEN_SPACE_TRANSIT_MIN_SURFACE_M2 = 30_000;
-
-function resolveGreenSpaceTransitTargets(
-  spaces: readonly PublicGreenSpaceAccess[] | undefined,
-): PublicGreenSpaceAccess[] {
-  return [...(spaces ?? [])]
-    .filter((space) => (space.surfaceM2 ?? 0) >= GREEN_SPACE_TRANSIT_MIN_SURFACE_M2)
-    // A real walking route under 15 min is handled directly by the score;
-    // unknown walking access remains eligible for a transit probe.
-    .filter((space) => space.walkingMinutes === undefined || space.walkingMinutes > 15)
-    .sort((left, right) => (right.surfaceM2 ?? 0) - (left.surfaceM2 ?? 0)
-      || (left.walkingMinutes ?? left.estimatedWalkingMinutes)
-        - (right.walkingMinutes ?? right.estimatedWalkingMinutes)
-      || left.name.localeCompare(right.name, "fr-FR"))
-    .slice(0, 8);
 }
 
 function getDistanceMeters(

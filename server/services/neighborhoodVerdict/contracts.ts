@@ -1,3 +1,5 @@
+import type { GreenMapReference, GreenSpaceMapAccess } from "../../../shared/natureInCity";
+
 // Bump this whenever the compiled artifact or source identifiers change so
 // Nitro cannot silently consume an old neighborhood snapshot.
 export const VERDICT_SCHEMA_VERSION = "1.3" as const;
@@ -114,6 +116,8 @@ export interface VerdictSourceMetadata {
 }
 
 export interface VerdictEvidence {
+  greenMap?: GreenMapReference;
+  greenSpaceAccess?: GreenSpaceMapAccess;
   id: string;
   category: VerdictCategoryId;
   polarity: VerdictPolarity;

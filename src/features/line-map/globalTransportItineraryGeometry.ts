@@ -27,6 +27,7 @@ export interface GlobalTransportItinerarySegment {
   id: string;
   kind: GlobalTransportItinerarySegmentKind;
   coordinates: NearbyJourneyPoint[];
+  durationSeconds?: number;
   color?: string;
   textColor?: string;
   lineId?: string;
@@ -168,6 +169,7 @@ export function createGlobalTransportItinerarySegments(
       id: `${route.id}:${kind}:${index}`,
       kind,
       coordinates,
+      ...(options.preserveSections ? { durationSeconds: section.durationSeconds } : {}),
       ...(section.lineColor ? { color: section.lineColor } : {}),
       ...(section.lineTextColor ? { textColor: section.lineTextColor } : {}),
       ...(section.lineId ? { lineId: section.lineId } : {}),

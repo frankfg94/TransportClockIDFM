@@ -15,6 +15,7 @@ export interface NeighborhoodJourneysRequest {
   datetime: string;
   destinations: NeighborhoodJourneyDestination[];
   allowedModes?: readonly GlobalMapMode[];
+  directOnly?: boolean;
 }
 export type NeighborhoodJourneyStatus = "ready" | "partial" | "missing" | "out-of-coverage" | "outside-search-window";
 
