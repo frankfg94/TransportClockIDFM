@@ -4,8 +4,10 @@ AUTO is a transient Home view. It leaves manual preferences untouched and keeps
 the last manual place ID in session storage; positions, routes, and generated
 boards are held in memory only. AUTO also bypasses the shared server walking
 cache; its position is sent to the walking provider to calculate the routes.
-Selecting AUTO requests permission through
-`useUserGeolocation`; that composable stops its watch when hidden or unmounted.
+If location access is already granted, selecting AUTO loads the position
+automatically. Otherwise, AUTO shows an explicit button that calls
+`useUserGeolocation` from a user action so the browser can present its permission
+prompt; the composable stops its watch when hidden or unmounted.
 
 The existing spatial catalogue is queried within 1,500 m. At most 64 physical
 stops (previously displayed stops first, then nearest) are sent to the walking

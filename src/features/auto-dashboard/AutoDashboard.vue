@@ -69,6 +69,10 @@ const message = computed(() => {
   if (location.permissionState.value === "unsupported") return t("autoDashboard.unsupported");
   if (location.permissionState.value === "denied") return t("autoDashboard.denied");
   if (location.isLoading.value || location.permissionState.value === "checking") return t("autoDashboard.permissionLoading");
+  if (
+    location.permissionState.value === "prompt" ||
+    location.permissionState.value === "unknown"
+  ) return t("autoDashboard.permissionRequest");
   if (!validPosition.value) return t("autoDashboard.noPosition");
   if (scanError.value) return t("autoDashboard.scanError");
   if (loading.value) return t("autoDashboard.loading");
@@ -235,10 +239,14 @@ function onVisibility(): void {
 }
 function activate(): void {
   if (activationRequested || location.isLoading.value || location.permissionState.value === "checking") return;
-  activationRequested = true;
-  if (location.permissionState.value !== "denied" && location.permissionState.value !== "unsupported") {
+  if (location.permissionState.value === "granted") {
+    activationRequested = true;
     void location.askGeolocation();
   }
+}
+function requestLocation(): void {
+  activationRequested = true;
+  void location.askGeolocation();
 }
 watch(() => location.coordinates.value, () => scheduleScan());
 watch([() => location.permissionState.value, () => location.isLoading.value], activate);
@@ -266,7 +274,14 @@ onBeforeUnmount(() => {
       <p>{{ t("autoDashboard.explanation") }}</p>
       <p v-if="message" role="status">{{ message }}</p>
       <p v-if="partial && validPosition">{{ t("autoDashboard.partial") }}</p>
-      <button v-if="!validPosition && !location.isLoading.value && location.permissionState.value !== 'unsupported'" type="button" class="button-secondary" @click="location.askGeolocation()">{{ t("autoDashboard.retry") }}</button>
+      <button
+        v-if="!validPosition && !location.isLoading.value && location.permissionState.value !== 'unsupported'"
+        type="button"
+        class="button-secondary"
+        @click="requestLocation"
+      >
+        {{ t(location.permissionState.value === 'denied' ? "autoDashboard.retry" : "autoDashboard.requestLocation") }}
+      </button>
       <button v-if="validPosition && scanError" type="button" class="button-secondary" @click="scheduleScan(true)">{{ t("autoDashboard.retryScan") }}</button>
       <button type="button" class="button-secondary" @click="emit('back')">{{ t("autoDashboard.back") }}</button>
     </div>
