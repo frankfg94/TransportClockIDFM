@@ -5,7 +5,7 @@ import { loadRemarkableGardens, mappedGardenEntrances, matchRemarkableGarden, re
 import { greenSpaceIdentity } from "../../../shared/greenSpaceIdentity";
 import { getGreenSpaceMapData, greenParkSubsiteId, greenParkSubsiteMap, greenSpaceTransitTarget } from "./greenSpaceMapData";
 import { probeGreenSpaceTransit } from "./useGreenSpaceTransit";
-import { routeToGreenSpace } from "./greenSpaceWalking";
+import { routeToGreenSpace, routeToMainWoodland } from "./greenSpaceWalking";
 import { computed, onBeforeUnmount, readonly, ref, shallowReadonly, shallowRef, watch } from "vue";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import { fetchGtfsLineFrequency } from "../../services/lineFrequency";
@@ -196,6 +196,9 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   const lastServiceByLine = shallowRef(new Map<string, Awaited<ReturnType<typeof frequencyTimetable.getLastService>>>());
   const hospitalJourneys = ref<Record<string, NearbyJourney[] | undefined>>({});
   const hospitalPlaces = shallowRef<NearbyPlace[]>();
+  let hospitalResultKey: string | undefined;
+  let hospitalResultsComplete = false;
+  let hospitalDiscoveryController: AbortController | undefined;
   const backendVerdict = shallowRef<PublicNeighborhoodVerdict>();
   const isFutureGpeProject = computed(() => createFutureGpeProjectFilter(options.network.value));
   const effectiveBackendVerdict = computed(() => reconcileFutureGpeVerdict(backendVerdict.value, isFutureGpeProject.value));
@@ -373,8 +376,6 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     currentTimetableDate = options.timetableDate?.value;
     chateletJourneyStatus.value = origin ? "loading" : undefined;
     greenSpaceJourneys.value = [];
-    hospitalJourneys.value = {};
-    hospitalPlaces.value = undefined;
     // A refresh replaces the current origin-scoped work. Abort in-flight
     // requests before creating the next batch; completed cache entries remain
     // available and are deliberately not reset for a refresh at the same
@@ -443,17 +444,15 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
         (next) => {
           places.value = next;
           placesLoaded.value = true;
-          trackHospitalJourneys(origin, next, originKey, token, journeyDateTime);
           updatedAt.value = Date.now();
         },
         true,
         "places",
         PLACES_CRITERIA,
       );
-    } else {
-      trackHospitalJourneys(origin, places.value, originKey, token, journeyDateTime);
     }
 
+    trackHospitalJourneys(origin, originKey, token, journeyDateTime);
     trackVenueAnalysis(origin, originKey, journeyDateTime, token);
     if (!shoppingCentresLoaded.value || shoppingCentresJourneyDateTime.value !== journeyDateTime) {
       trackTask(
@@ -716,6 +715,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
     lastServiceByLine.value = new Map();
     hospitalJourneys.value = {};
     hospitalPlaces.value = undefined;
+    hospitalResultKey = undefined;
     frequencyResults.clear();
     lastServiceResults.clear();
     backendVerdict.value = undefined;
@@ -1086,19 +1086,22 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
           const accessGeometry = entrance || mappedEntrances.length ? { ...geometry,
             entrances: [...(entrance ? [entrance] : []), ...mappedEntrances, ...(geometry.entrances ?? [])] } : geometry;
           const target = greenSpaceTransitTarget(reference, origin, accessGeometry);
-          const [walk, transit] = await Promise.allSettled([
-            (garden?.publicAccess === "open" || (current.mainWalkingMinutes ?? current.walkingMinutes) === undefined
-              || (reference.scope === "park" && (current.walkingMinutes ?? Infinity) <= PARK_WALKING_RULE.accessMinutes))
+          const [walk, transit, mainWalk] = await Promise.allSettled([
+            reference.scope === "park" && (garden?.publicAccess === "open" || current.walkingMinutes === undefined
+              || current.walkingMinutes <= PARK_WALKING_RULE.accessMinutes)
               ? routeToGreenSpace(accessGeometry, reference, origin, current.name, signal) : undefined,
             target && options.calendarReady?.value !== false ? probeGreenSpaceTransit({
               ...target, ...(current.parkMap?.version && !current.id.includes("#")
                 ? { documentedApproach: { lon: current.lon, lat: current.lat } } : {}),
             }, routing, signal) : undefined,
+            reference.scope === "woodland" && current.mainWalkingMinutes === undefined && current.transitPoints?.length
+              ? routeToMainWoodland(accessGeometry, origin, current.transitPoints, signal) : undefined,
           ]);
           if (signal.aborted) return;
           const measured = walk.status === "fulfilled" ? walk.value : undefined;
+          const mainAccess = mainWalk.status === "fulfilled" ? mainWalk.value : undefined;
           const walkingMinutes = measured?.access === "inside" ? 0 : measured?.route
-            ? measured.route.durationSeconds / 60 : current.mainWalkingMinutes ?? current.walkingMinutes;
+            ? measured.route.durationSeconds / 60 : mainAccess?.minutes ?? current.mainWalkingMinutes ?? current.walkingMinutes;
           const transitAccess = transit.status === "fulfilled" ? transit.value : undefined;
           const best = transitAccess?.best;
           const walkArrival = measured?.access === "inside" ? origin : measured?.route?.coordinates.at(-1);
@@ -1110,6 +1113,10 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
             && (!garden || garden.publicAccess === "open") ? approaches[0] : undefined;
           const result: NeighborhoodGreenSpaceJourney = {
             greenSpace: { ...current, ...(reference.scope === "park" ? { parkMap: reference } : {}),
+              ...(reference.scope === "woodland" && mainAccess ? {
+                mainWalkingMinutes: mainAccess.minutes,
+                woodlandMap: mainAccess.point ? { ...reference, mainAccess: mainAccess.point } : reference,
+              } : {}),
               walkingMinutes, surfaceM2: area },
             journeys: best ? [best] : [],
             woodlandMainTransit: transitAccess?.reachesMainWoodland,
@@ -1144,23 +1151,33 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
 
   function trackHospitalJourneys(
     origin: Pick<GeocoderPoint, "lon" | "lat">,
-    sourcePlaces: readonly NearbyPlace[],
     originKey: string,
     token: number,
     journeyDateTime?: string,
   ): void {
+    const key = JSON.stringify([originKey, journeyDateTime, currentVersion]);
+    if (hospitalResultKey === key && hospitalResultsComplete) return;
+    hospitalDiscoveryController?.abort();
+    const controller = new AbortController();
+    hospitalDiscoveryController = controller;
+    if (hospitalResultKey !== key) {
+      hospitalJourneys.value = {};
+      hospitalResultsComplete = false;
+    }
+    hospitalResultKey = key;
     const isHospital = (place: NearbyPlace) => normalizeScoreText(place.kind) === "hospital";
     const promise = (async () => {
-      const nearby = await placesProvider.searchNearby({ origin, radiusMeters: HOSPITAL_ACCESS_RULE.searchRadiusMeters }).catch(() => []);
-      const targets = [...new Map([...sourcePlaces, ...nearby].filter(isHospital).map(place => [place.id, place])).values()];
-      if (token !== requestToken) return { targets, journeys: {} };
-      const entries = await Promise.all(targets.map(async (place) => {
+      const nearby = await placesProvider.searchNearby({ origin, radiusMeters: HOSPITAL_ACCESS_RULE.searchRadiusMeters }, controller.signal);
+      const targets = nearby.filter(isHospital);
+      if (token !== requestToken) return { targets, journeys: {}, complete: false };
+      const entries = await Promise.allSettled(targets.map(async (place) => {
         const destination = { id: place.id, lon: place.lon, lat: place.lat };
         const journeyKey = journeyCacheKey(originKey, place.id, destination, journeyDateTime, "hospital");
-        const journeys = await loadJourneyProbe(origin, destination, journeyDateTime, journeyKey, 3, undefined, HOSPITAL_ACCESS_RULE.maxTransfers).catch(() => []);
+        const journeys = await loadJourneyProbe(origin, destination, journeyDateTime, journeyKey, 3, undefined, HOSPITAL_ACCESS_RULE.maxTransfers);
         return [place.id, journeys] as const;
       }));
-      return { targets, journeys: Object.fromEntries(entries) };
+      return { targets, journeys: Object.fromEntries(entries.flatMap(entry => entry.status === "fulfilled" ? [entry.value] : [])),
+        complete: entries.every(entry => entry.status === "fulfilled") };
     })();
     trackTask(
       "hospital-routes",
@@ -1169,6 +1186,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
       (next) => {
         hospitalPlaces.value = next.targets;
         hospitalJourneys.value = next.journeys;
+        hospitalResultsComplete = next.complete;
         updatedAt.value = Date.now();
       },
       false,
@@ -1518,6 +1536,7 @@ export function useNearbyNeighborhoodScore(options: UseNearbyNeighborhoodScoreOp
   }
 
   function abortActiveRequests(abortOriginSources = true): void {
+    hospitalDiscoveryController?.abort();
     greenSpaceController?.abort();
     greenSpaceController = undefined;
     venuesController?.abort();

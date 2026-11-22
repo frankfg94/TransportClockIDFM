@@ -1,4 +1,5 @@
 export const GREEN_SPACE_ACCESS_RULES = {
+  mainWoodlandWalkingTargetLimit: 3,
   mainWalkingEntranceToleranceMeters: 15,
   duplicateWalkingEntranceMeters: 15,
   walkingArrivalToleranceMeters: 30,

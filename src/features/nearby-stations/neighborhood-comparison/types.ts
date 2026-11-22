@@ -1,4 +1,5 @@
 import type { IrisNeighborhood, IrisSourceMetadata } from "../../transport-map/iris/irisApi";
+import type { ComparisonPlaceAggregation } from "./aggregate";
 
 /** A statistical IRIS, not an address verdict or an administrative district. */
 export interface ComparisonNeighborhood extends IrisNeighborhood {
@@ -21,3 +22,17 @@ export interface NeighborhoodComparisonGeography {
 export type ComparisonSourceMetadata = IrisSourceMetadata & {
   freshness?: { status: "fresh" | "aging" | "stale"; checkedAt: string };
 };
+
+export interface VerdictScopeData {
+  originKey: string;
+  loading: boolean;
+  boundary?: boolean;
+  geography?: NeighborhoodComparisonGeography;
+  places?: ComparisonPlaceAggregation;
+  placesDate?: string;
+  green?: Readonly<Record<string, ComparisonGreen>>;
+}
+
+export function comparisonOriginKey(origin?: { lat: number; lon: number; code?: string }): string {
+  return origin ? JSON.stringify([origin.lat, origin.lon, origin.code]) : "";
+}

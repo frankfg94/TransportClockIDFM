@@ -2,6 +2,7 @@ import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { defineComponent, h, onMounted, ref } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import NearbyNeighborhoodScorePage from "../src/features/nearby-stations/NearbyNeighborhoodScorePage.vue";
+import { comparisonOriginKey } from "../src/features/nearby-stations/neighborhood-comparison/types";
 import { useI18n } from "../src/i18n";
 
 const mocks = vi.hoisted(() => ({
@@ -31,8 +32,9 @@ function fixture() {
     heavy: { visibleCandidates: ref([]), accessProgress: ref([]), isLoading: ref(false), error: ref(), refresh: vi.fn() },
     score: { result: ref({ categories: [{ id: "transport", labelKey: "nearbyStations.neighborhoodScore.categories.transport",
         available: true, displayScore: 7, positiveFacts: [{ family: "rail", label: "Métro accessible" }], negativeFacts: [], neutralFacts: [] }],
-      displayScore: 7, band: "good", availableCategoryCount: 7, totalCategoryCount: 7, generatedAt: "2026-10-24T08:00:00Z" }),
-      isLoading: ref(false), transportPending: ref<string[]>([]), backendVerdictReady: ref(true), places: ref([]),
+      displayScore: 7, band: "good", availableCategoryCount: 7, totalCategoryCount: 7, generatedAt: "2026-10-24T08:00:00Z",
+      positiveFacts: [{ family: "rail", label: "Métro accessible" }], negativeFacts: [], neutralFacts: [], sources: [], warnings: [] }),
+      isLoading: ref(false), transportPending: ref<string[]>([]), backendVerdictReady: ref(true), backendVerdict: ref(), places: ref([]),
       countStructuralLinesFor: vi.fn(() => 0),
       diagnostics: ref({ pendingTasks: [], frequencies: [] }), error: ref(), errorSource: ref(), gtfsCoverageMissing: ref(false),
       criteria: ref([{ id: "transport", status: "ready", datasets: [{ id: "gtfs", required: true, status: "ready" }] }]), refresh: vi.fn() },
@@ -43,6 +45,15 @@ function fixture() {
 }
 let state: ReturnType<typeof fixture>;
 let wrapper: VueWrapper | undefined;
+let comparisonLoading: boolean;
+const ComparisonStub = defineComponent({
+  name: "VerdictScopeComparison",
+  emits: ["report-state"],
+  setup(_, { emit }) {
+    onMounted(() => emit("report-state", { originKey: comparisonOriginKey(state.nearby.selectedPlace.value), loading: comparisonLoading }));
+    return () => h("div");
+  },
+});
 function sectionStub(name: string, title: string) {
   return defineComponent({ name, emits: ["export-state"], setup(_, { emit }) {
     onMounted(() => emit("export-state", { loading: false, section: { title, items: ["Résultat final"] } }));
@@ -52,6 +63,7 @@ function sectionStub(name: string, title: string) {
 async function openPage() {
   wrapper = mount(NearbyNeighborhoodScorePage, { global: { stubs: {
     NuxtLink: true, NearbyNeighborhoodScoreCard: true, VerdictPersonalJourneys: true, AdressBook: true,
+    VerdictScopeComparison: ComparisonStub,
     NearbyRealEstateVerdict: sectionStub("NearbyRealEstateVerdict", "Immobilier final"),
     NeighborhoodTrafficAnnex: sectionStub("NeighborhoodTrafficAnnex", "Trafic final"),
   } } });
@@ -61,6 +73,7 @@ async function openPage() {
 
 beforeEach(() => {
   state = fixture();
+  comparisonLoading = false;
   mocks.nearby.mockReturnValue(state.nearby); mocks.heavy.mockReturnValue(state.heavy);
   mocks.score.mockReturnValue(state.score); mocks.quality.mockReturnValue(state.quality);
   mocks.walking.mockReturnValue(state.walking); mocks.personal.mockReturnValue(state.personal);
@@ -68,7 +81,7 @@ beforeEach(() => {
   useI18n().setLanguage("fr");
   vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
 });
-afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.clearAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("Verdict PDF asynchronous export", () => {
   it("exports the dated historical warning in the transport section with its facts", async () => {
@@ -83,9 +96,10 @@ describe("Verdict PDF asynchronous export", () => {
       routing: { ...old, path: "routing/old", maxTimeSeconds: 90000 }, timetable: { ...old, path: "timetables/old" } } }));
     await vi.waitFor(() => expect(button.element.disabled).toBe(false));
     await button.trigger("click");
-    const [transport] = mocks.download.mock.calls[0]![0].sections;
-    expect(transport.items[0]).toMatch(/GTFS a expiré.*2019.*indicatifs/u);
-    expect(transport.items[1]).toContain("Métro accessible");
+    await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledOnce());
+    const transport = (mocks.download.mock.calls[0]![0] as HTMLElement).querySelector('[data-verdict-pdf-sheet="transport"]')!;
+    expect(transport.querySelector(".vr-notice")?.textContent).toMatch(/GTFS a expiré.*2019.*indicatifs/u);
+    expect(transport.textContent).toContain("Métro accessible");
   });
   it("keeps final document sections and prevents duplicate export while the picker is pending", async () => {
     let finish!: (value: { status: string }) => void;
@@ -96,18 +110,53 @@ describe("Verdict PDF asynchronous export", () => {
     expect(button.element.disabled).toBe(true);
     expect(button.attributes("aria-busy")).toBe("true");
     await button.trigger("click");
-    expect(mocks.download).toHaveBeenCalledOnce();
-    const [document, filename] = mocks.download.mock.calls[0]!;
-    expect(document.sections.map((section: { title: string }) => section.title)).toEqual([
-      "Transports", "Trafic final", "Immobilier final",
+    await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledOnce());
+    const [root, filename] = mocks.download.mock.calls[0]! as [HTMLElement, string];
+    expect(root.getAttribute("aria-hidden")).toBe("true");
+    const sheets = [...root.querySelectorAll("[data-verdict-pdf-sheet]")];
+    expect(sheets.map(sheet => sheet.querySelector("h2")?.textContent)).toEqual([
+      "Sommaire", "Verdict global", "La ville en quelques chiffres", "Transports", "Trafic final", "Immobilier final",
+      "Comparaison des quartiers", "Sources et limites", "Mot de la fin",
     ]);
-    expect(document.sections[0].items[0]).toContain("Métro accessible");
-    expect(document).not.toHaveProperty("diagnostics");
-    expect(document).not.toHaveProperty("algorithm");
+    expect(sheets[0]!.querySelector(".vr-contents li:last-child")?.textContent).toBe("Mot de la fin09");
+    expect(sheets[1]!.querySelector(".vr-score-hero strong")?.textContent).toBe("7 / 10");
+    expect(sheets[3]!.querySelector(".vr-score")?.textContent).toBe("7 / 10");
+    expect(sheets[3]!.textContent).toContain("Métro accessible");
+    expect(sheets.at(-1)?.querySelector(".vr-footer strong")?.textContent).toBe("Page 9 sur 9");
     expect(filename).toBe("score-quartier-adresse-de-test.pdf");
     finish({ status: "saved" }); await flushPromises();
     expect(button.element.disabled).toBe(false);
     expect(wrapper!.get('[data-testid="verdict-pdf-export-status"]').text()).toBe("PDF enregistré.");
+  });
+
+  it("exports the original score and completed comparison in English", async () => {
+    comparisonLoading = true;
+    useI18n().setLanguage("en");
+    const button = await openPage();
+    await button.trigger("click");
+    expect(mocks.download).not.toHaveBeenCalled();
+    state.score.result.value = { ...state.score.result.value, displayScore: 2 };
+    wrapper!.getComponent({ name: "VerdictScopeComparison" }).vm.$emit("report-state", {
+      originKey: comparisonOriginKey(state.nearby.selectedPlace.value), loading: false,
+    });
+    await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledOnce());
+    const root = mocks.download.mock.calls[0]![0] as HTMLElement;
+    expect(root.getAttribute("lang")).toBe("en");
+    expect(root.querySelector(".vr-score-hero strong")?.textContent).toBe("7 / 10");
+    expect(root.textContent).toContain("Final thoughts");
+  });
+
+  it("exports available figures after the ten-second comparison deadline", async () => {
+    comparisonLoading = true;
+    const button = await openPage();
+    vi.useFakeTimers();
+    await button.trigger("click");
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(mocks.download).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mocks.download).toHaveBeenCalledOnce();
+    const root = mocks.download.mock.calls[0]![0] as HTMLElement;
+    expect(root.querySelectorAll(".vr-metric")).toHaveLength(6);
   });
 
   it.each([

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { culturalPlacesWithinGreenSpace } from "./greenSpaceMapData";
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import { useRoute, useRouter } from "#imports";
 import { ArrowLeft, Download, Gauge } from "lucide-vue-next";
 import { useI18n } from "../../i18n";
@@ -26,7 +26,6 @@ import {
   NEARBY_SUPPORTED_MODES,
 } from "./nearbyStations";
 import type { NearbyPlace } from "./nearbyPlaces";
-import type { NeighborhoodFact } from "./neighborhood/contracts";
 import type { PublicFutureGpeStation } from "./neighborhoodVerdictApi";
 import { resolveNearbyPlaceGroupId } from "./nearbyPlacePresentation";
 import { readNearbyNeighborhoodScoreSnapshot } from "./nearbyNeighborhoodScoreSnapshot";
@@ -37,7 +36,9 @@ import { useNearbyStations } from "./useNearbyStations";
 import { useNearbyWalkingRoutes } from "./useNearbyWalkingRoutes";
 import { useTravelRoutes } from "./useTravelRoutes";
 import NearbyNeighborhoodScoreCard from "./NearbyNeighborhoodScoreCard.vue";
-import { transportSectionValues } from "./neighborhood/factPresentation";
+import VerdictPdfPreview from "./VerdictPdfPreview.vue";
+import { buildVerdictPdfReport, withVerdictPdfComparison, type VerdictPdfReport } from "./verdictPdfReport";
+import { comparisonOriginKey, type VerdictScopeData } from "./neighborhood-comparison/types";
 import {
   downloadNeighborhoodScorePdf,
   type NearbyRealEstatePdfState,
@@ -64,7 +65,7 @@ const VerdictScopeComparison = defineAsyncComponent(() => import("./neighborhood
 const loadJourneyPreview = () => import("./NeighborhoodJourneyPreview.vue");
 const NeighborhoodJourneyPreview = defineAsyncComponent(loadJourneyPreview);
 const router = useRouter();
-const { d, n, t } = useI18n();
+const { d, locale, t } = useI18n();
 const addressBook = useAddressBook();
 const appSettings = useAppSettings();
 const showJourneyPreview = computed(() => appSettings.settings.value.verdictJourneyPreviewEnabled);
@@ -437,6 +438,15 @@ const exportReady = computed(() => Boolean(initialOrigin
     && criterion.datasets.every(dataset => dataset.status !== "loading"))));
 const exportingPdf = ref(false);
 const pdfExportStatus = ref<"saved" | "cancelled" | "downloaded" | "error">();
+const pdfPreviewEnabled = computed(() => import.meta.dev === true && Object.prototype.hasOwnProperty.call(route.query, "pdf"));
+const captureReport = shallowRef<VerdictPdfReport>();
+const pdfCapture = ref<InstanceType<typeof VerdictPdfPreview>>();
+const pdfLifetime = new AbortController();
+onUnmounted(() => pdfLifetime.abort());
+const scopeData = shallowRef<VerdictScopeData>();
+const comparisonOrigin = computed(() => nearby.selectedPlace.value ?? initialOrigin);
+const reportScope = computed(() => scopeData.value?.originKey === comparisonOriginKey(comparisonOrigin.value) ? scopeData.value : undefined);
+const reportNetwork = computed(() => nearby.isScanning.value || nearby.error.value ? undefined : nearby.transportMapNetwork.value);
 const pdfExportMessage = computed(() => {
   const keys = {
     saved: "nearbyStations.neighborhoodScore.exportPdfSaved",
@@ -512,55 +522,46 @@ const scoreError = computed(() => {
   return score.error.value ? t("nearbyStations.neighborhoodScore.partialError") : undefined;
 });
 
-const scoreBandKeys = {
-  excellent: "nearbyStations.neighborhoodScore.bands.excellent",
-  good: "nearbyStations.neighborhoodScore.bands.good",
-  medium: "nearbyStations.neighborhoodScore.bands.medium",
-  weak: "nearbyStations.neighborhoodScore.bands.weak",
-  "very-weak": "nearbyStations.neighborhoodScore.bands.veryWeak",
-} as const;
+function createPdfReport(): VerdictPdfReport {
+  return buildVerdictPdfReport({
+    locale: locale.value,
+    result: score.result.value,
+    location: originLabel.value,
+    city: comparisonOrigin.value?.city,
+    gtfsWarning: gtfsWarning.value,
+    partialError: failedSource.value && failedSource.value !== "coverage" ? scoreError.value : undefined,
+    annexes: [trafficPdfSection.value, realEstatePdfSection.value],
+  });
+}
+
+const pdfPreviewReport = computed(() => pdfPreviewEnabled.value && exportReady.value
+  ? withVerdictPdfComparison(createPdfReport(), reportScope.value, reportNetwork.value)
+  : undefined);
+
+function waitForPdfComparison(signal: AbortSignal): Promise<void> {
+  if (reportScope.value?.loading === false || signal.aborted) return Promise.resolve();
+  return new Promise(resolve => {
+    const stop = watch(reportScope, state => { if (state?.loading === false) finish(); });
+    const timeout = setTimeout(finish, 10_000);
+    signal.addEventListener("abort", finish, { once: true });
+    function finish() {
+      stop();
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    }
+  });
+}
 
 async function exportScorePdf(): Promise<void> {
   if (!exportReady.value || exportingPdf.value) return;
   exportingPdf.value = true;
   pdfExportStatus.value = undefined;
   try {
-    const result = score.result.value;
-    const factLabel = (fact: NeighborhoodFact): string =>
-      fact.label ?? (fact.labelKey
-        ? t(fact.labelKey, transportSectionValues(fact, fact.labelValues, t))
-        : "");
-    const categorySections: NeighborhoodScorePdfSection[] = result.categories.map(category => {
-      const items = [
-        ...category.positiveFacts.map(fact => `${t("nearbyStations.neighborhoodScore.positives")} : ${factLabel(fact)}`),
-        ...category.negativeFacts.map(fact => `${t("nearbyStations.neighborhoodScore.negatives")} : ${factLabel(fact)}`),
-        ...category.neutralFacts.map(fact => `${t("nearbyStations.neighborhoodScore.neutralFacts")} : ${factLabel(fact)}`),
-      ].filter(item => !item.endsWith(" : "));
-      if (category.id === "transport" && gtfsWarning.value) items.unshift(gtfsWarning.value);
-      if (!items.length) {
-        items.push(t(category.available
-          ? "nearbyStations.neighborhoodScore.noDocumentedSignal"
-          : "nearbyStations.neighborhoodScore.categoryUnavailable"));
-      }
-      return {
-        title: t(category.labelKey),
-        value: category.available && typeof category.displayScore === "number"
-          ? `${n(category.displayScore, { maximumFractionDigits: 1 })} / 10`
-          : t("nearbyStations.neighborhoodScore.categoryUnavailable"),
-        items,
-      };
-    });
-    const bandLabel = result.band
-      ? t(scoreBandKeys[result.band])
-      : t("nearbyStations.neighborhoodScore.pdfScoreUnavailable");
-    const scoreValue = typeof result.displayScore === "number"
-      ? `${n(result.displayScore, { maximumFractionDigits: 1 })} / 10`
-      : t("nearbyStations.neighborhoodScore.pdfScoreUnavailable");
-    const sections = [
-      ...categorySections,
-      ...(trafficPdfSection.value ? [trafficPdfSection.value] : []),
-      ...(realEstatePdfSection.value ? [realEstatePdfSection.value] : []),
-    ];
+    const report = createPdfReport();
+    const originKey = comparisonOriginKey(comparisonOrigin.value);
+    const network = reportNetwork.value;
+    const { signal } = pdfLifetime;
     const fileAddress = (originLabel.value ?? "")
       .normalize("NFKD")
       .replace(/\p{M}/gu, "")
@@ -569,26 +570,19 @@ async function exportScorePdf(): Promise<void> {
       .replace(/^-|-$/g, "")
       .slice(0, 64);
 
-    const outcome = await downloadNeighborhoodScorePdf({
-      title: t("nearbyStations.neighborhoodScore.pageTitle"),
-      location: originLabel.value,
-      scoreLabel: t("nearbyStations.neighborhoodScore.pdfScoreLabel"),
-      scoreValue,
-      bandLabel,
-      coverageLine: t("nearbyStations.neighborhoodScore.coverage", {
-        available: result.availableCategoryCount,
-        total: result.totalCategoryCount,
-      }),
-      updatedLine: t("nearbyStations.neighborhoodScore.updatedAt", {
-        time: d(result.generatedAt, { dateStyle: "short", timeStyle: "short" }),
-      }),
-      sections,
-      pageLabel: (current, total) => t("nearbyStations.neighborhoodScore.pdfPage", { current, total }),
-    }, `score-quartier${fileAddress ? `-${fileAddress}` : ""}.pdf`);
+    await waitForPdfComparison(signal);
+    signal.throwIfAborted();
+    if (originKey !== comparisonOriginKey(comparisonOrigin.value)) throw new Error("Verdict address changed");
+    captureReport.value = withVerdictPdfComparison(report, reportScope.value, network);
+    await nextTick();
+    const root = await pdfCapture.value?.fitPages();
+    if (!root) throw new Error("Verdict PDF layout is unavailable");
+    const outcome = await downloadNeighborhoodScorePdf(root, `score-quartier${fileAddress ? `-${fileAddress}` : ""}.pdf`, report.title, signal);
     pdfExportStatus.value = outcome.status;
   } catch {
     pdfExportStatus.value = "error";
   } finally {
+    captureReport.value = undefined;
     exportingPdf.value = false;
   }
 }
@@ -801,7 +795,8 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
 </script>
 
 <template>
-  <main class="nearby-neighborhood-score-page" :aria-busy="scoreLoading">
+  <main v-show="!pdfPreviewReport" class="nearby-neighborhood-score-page" :aria-busy="scoreLoading">
+    <p v-if="pdfPreviewEnabled && initialOrigin" role="status">{{ t("nearbyStations.neighborhoodScore.pdfReport.previewLoading") }}</p>
     <section v-if="debugVerdict" class="nearby-neighborhood-score-page__debug-checks" data-testid="verdict-debug-checks">
       <p data-testid="verdict-debug-integrity" :data-status="debugIntegrity?.status">
         {{ t("nearbyStations.neighborhoodScore.debugIntegrityTitle") }} :
@@ -895,8 +890,8 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
       </button>
     </div>
     <div v-if="initialOrigin" id="verdict-scope-panel" role="tabpanel" :aria-labelledby="`verdict-tab-${verdictScope}`" tabindex="0">
-      <VerdictScopeComparison :origin="nearby.selectedPlace.value" :scope="verdictScope" :network="nearby.transportMapNetwork.value"
-        :transport-ready="!nearby.isScanning.value && !nearby.error.value" />
+      <VerdictScopeComparison :origin="comparisonOrigin" :scope="verdictScope" :network="nearby.transportMapNetwork.value"
+        :transport-ready="!nearby.isScanning.value && !nearby.error.value" @report-state="scopeData = $event" />
     <NearbyNeighborhoodScoreCard
       v-if="verdictScope === 'neighborhood'"
       :result="cardResult"
@@ -953,6 +948,10 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
       @export-state="updateRealEstateExportState"
     />
   </main>
+  <Teleport to="body">
+    <VerdictPdfPreview v-if="pdfPreviewReport" :report="pdfPreviewReport" preview />
+    <VerdictPdfPreview v-if="captureReport" ref="pdfCapture" :report="captureReport" />
+  </Teleport>
   <AdressBook
     :open="addressBookOpen"
     selection-mode

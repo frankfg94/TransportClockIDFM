@@ -5,6 +5,7 @@ import { aggregateComparisonPlaces, aggregateComparisonPlacesAsync, aggregateCom
 import type { ComparisonNeighborhood } from "../src/features/nearby-stations/neighborhood-comparison/types";
 import type { CompiledPlaceRecord } from "../src/services/places/compiledPlaces";
 import type { TransportMapNetwork } from "../src/features/transport-map/contracts/network";
+import { buildVerdictPdfReport, compareVerdictMetric, withVerdictPdfComparison } from "../src/features/nearby-stations/verdictPdfReport";
 
 function box(x: number, y: number, width = 1, height = 1): VerdictPolygonGeometry {
   return { type: "Polygon", coordinates: [[[x, y], [x + width, y], [x + width, y + height], [x, y + height], [x, y]]] };
@@ -90,5 +91,60 @@ describe("neighborhood comparison", () => {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 0);
     await expect(aggregateComparisonPlacesAsync(neighborhoods, places, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("Verdict PDF comparison", () => {
+  const report = buildVerdictPdfReport({
+    locale: "fr", annexes: [], result: {
+      categories: [], positiveFacts: [], negativeFacts: [], neutralFacts: [], sources: [], warnings: [],
+      totalCategoryCount: 0, availableCategoryCount: 0, coverageRatio: 0, generatedAt: 0,
+    },
+  });
+  const data = fixture();
+
+  it("calculates the peer median and rank with documented values, including true zeroes and ties", () => {
+    expect(compareVerdictMetric(8, [8, undefined, 12, 0, 3])).toEqual({ value: 8, median: 5.5, rank: 2, count: 5 });
+    expect(compareVerdictMetric(0, [undefined, 0])).toEqual({ value: 0, median: 0, rank: 1, count: 2 });
+    expect(compareVerdictMetric(undefined, [0])).toMatchObject({ median: 0, rank: undefined, count: 1 });
+  });
+
+  it("uses IRIS area and existing inventories without conflating missing coverage with zero", () => {
+    const geography = buildComparisonGeography(data, { lon: .5, lat: .5 });
+    const places = aggregateComparisonPlaces(geography.neighborhoods, []);
+    const withData = withVerdictPdfComparison(report, { originKey: "test", loading: false, geography, places,
+      green: { a: { status: "partial", areaM2: geography.neighborhoods[0]!.areaM2 * .08 } } });
+    expect(withData.pages.find(page => page.kind === "city")?.metrics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "areas", value: 2 }),
+      expect.objectContaining({ label: "shops", value: 0 }),
+      expect.objectContaining({ label: "parks", value: undefined }),
+    ]));
+    const comparison = withData.pages.find(page => page.kind === "comparison");
+    expect(comparison?.metrics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "shops", value: 0, median: 0, rank: 1, count: 2 }),
+      expect.objectContaining({ label: "parks", value: 8, median: undefined, rank: undefined, count: 1 }),
+    ]));
+    expect(comparison?.neighborhood).toBe("a");
+  });
+
+  it("keeps the comparison page with the correct explanation for ambiguous and undivided communes", () => {
+    for (const [lon, reason] of [[1, "scopeBoundary"], [2.5, "scopeNoRest"]] as const) {
+      const geography = buildComparisonGeography(data, { lon, lat: .5 });
+      const result = withVerdictPdfComparison(report, { originKey: "test", loading: false, geography });
+      expect(result.pages.find(page => page.kind === "comparison")).toMatchObject({
+        notice: `nearbyStations.comparison.${reason}`, metrics: [],
+      });
+    }
+  });
+
+  it("uses a common park inventory for all ranked areas", () => {
+    const geography = buildComparisonGeography(data, { lon: .5, lat: .5 });
+    const result = withVerdictPdfComparison(report, { originKey: "test", loading: false, geography, green: {
+      a: { status: "partial", publicParkAreaM2: 500, areaM2: 4000 },
+      b: { status: "partial", areaM2: 2000 },
+    } });
+    expect(result.pages.find(page => page.kind === "comparison")?.metrics).toContainEqual(
+      expect.objectContaining({ label: "parks", value: expect.closeTo(100 * 4000 / geography.neighborhoods[0]!.areaM2, 10), count: 2 }),
+    );
   });
 });

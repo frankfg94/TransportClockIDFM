@@ -12,7 +12,14 @@ export const HEALTH_SCORE_RULES = { missing: 2, base: 6, extraTarget: 3, extraMa
 
 export function buildHealthCategory(input: NeighborhoodScoreInput): NeighborhoodCategoryResult {
   const base = category("health");
-  if (!input.placesLoaded) {
+  const accessibleHospitals = scorePlaces({ ...input, places: input.hospitalPlaces ?? input.places },
+    (place) => HOSPITAL_KINDS.has(placeKind(place)), Infinity)
+    .map((candidate) => {
+      const journey = chooseFastestJourney(input.hospitalJourneys?.[candidate.place.id]?.filter(qualifiesHospitalTransit));
+      return { candidate, journey: journey && (!candidate.routed || journey.durationSeconds < candidate.minutes * 60) ? journey : undefined };
+    })
+    .filter(({ candidate, journey }) => candidate.minutes <= HEALTH_SCORE_RULES.hospitalMinutes || journey);
+  if (!input.placesLoaded && !accessibleHospitals.length) {
     return {
       ...base,
       available: false,
@@ -22,8 +29,6 @@ export function buildHealthCategory(input: NeighborhoodScoreInput): Neighborhood
     };
   }
   const pharmacies = scorePlaces(input, (place) => PHARMACY_KINDS.has(placeKind(place)));
-  const hospitals = scorePlaces({ ...input, places: input.hospitalPlaces ?? input.places },
-    (place) => HOSPITAL_KINDS.has(placeKind(place)), Infinity);
   const positiveFacts: NeighborhoodFact[] = [];
   const negativeFacts: NeighborhoodFact[] = [];
   const nearest = pharmacies[0];
@@ -61,7 +66,7 @@ export function buildHealthCategory(input: NeighborhoodScoreInput): Neighborhood
       ruleKey: RULE_KEYS.pharmacyPresence,
       ruleValues: { threshold: NEIGHBORHOOD_WALKING_LIMIT_MINUTES },
     }));
-  } else {
+  } else if (input.placesLoaded) {
     negativeFacts.push(makeFact({
       id: "no-pharmacy",
       kind: "noPharmacy",
@@ -77,15 +82,8 @@ export function buildHealthCategory(input: NeighborhoodScoreInput): Neighborhood
     }));
   }
 
-  const hospital = hospitals
-    .map((candidate) => {
-      const journey = chooseFastestJourney(input.hospitalJourneys?.[candidate.place.id]?.filter(qualifiesHospitalTransit));
-      return { candidate, journey: journey && (!candidate.routed || journey.durationSeconds < candidate.minutes * 60) ? journey : undefined };
-    })
-    .filter(({ candidate, journey }) => candidate.minutes <= HEALTH_SCORE_RULES.hospitalMinutes || journey)
-    .sort((left, right) => (left.journey?.durationSeconds ?? left.candidate.minutes * 60)
-      - (right.journey?.durationSeconds ?? right.candidate.minutes * 60))[0];
-  if (hospital) {
+  for (const hospital of accessibleHospitals) {
+    const factId = `hospital:${hospital.candidate.place.id}`;
     const journeySummary = hospital.journey ? summarizeJourney(hospital.journey) : undefined;
     const routedWalking = hospital.candidate.routed;
     const routed = Boolean(journeySummary) || routedWalking;
@@ -94,7 +92,7 @@ export function buildHealthCategory(input: NeighborhoodScoreInput): Neighborhood
       ? journeySummary.lines
       : undefined;
     positiveFacts.push(makeFact({
-      id: "hospital-nearby",
+      id: factId,
       kind: routed
         ? journeySummary?.transitSectionCount
           ? "hospitalNearby"
@@ -102,7 +100,7 @@ export function buildHealthCategory(input: NeighborhoodScoreInput): Neighborhood
         : "hospitalNearbyApprox",
       category: "health",
       polarity: "positive",
-      family: "hospital",
+      family: factId,
       priority: 9,
       values: { name: hospital.candidate.place.name, minutes, via },
       sourceKey: journeySummary ? SOURCE_KEYS.journeys : routedWalking ? SOURCE_KEYS.placesAndWalking : SOURCE_KEYS.places,
@@ -112,7 +110,7 @@ export function buildHealthCategory(input: NeighborhoodScoreInput): Neighborhood
       travel: hospital.journey ? { journey: hospital.journey } : undefined,
     }));
   }
-  const serviceCount = pharmacies.length + (hospital ? 1 : 0);
+  const serviceCount = pharmacies.length + Number(accessibleHospitals.length > 0);
   const baseScore = serviceCount ? HEALTH_SCORE_RULES.base : HEALTH_SCORE_RULES.missing;
   const bonus = serviceCount ? saturatingNeighborhoodBonus(serviceCount - 1, HEALTH_SCORE_RULES.extraTarget, HEALTH_SCORE_RULES.extraMaximum) : 0;
   const score = clamp(baseScore + bonus);

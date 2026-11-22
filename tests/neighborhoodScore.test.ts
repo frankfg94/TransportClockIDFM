@@ -341,7 +341,7 @@ describe("neighborhood score", () => {
     "scores a hospital beyond the walking perimeter only for qualifying direct transit (%s s, %s transfers)",
     (durationSeconds, transferCount, expected) => {
       const hospital = place("hospital", "hospital", "service", 3_000);
-      const score = buildNeighborhoodScore(input({ places: [], hospitalPlaces: [hospital],
+      const score = buildNeighborhoodScore(input({ places: [], placesLoaded: false, hospitalPlaces: [hospital],
         hospitalJourneys: { [hospital.id]: [{ durationSeconds, transferCount,
           sections: [{ type: "public_transport", durationSeconds, lineMode: "TRAM", lineCode: "T6" }] }] },
       }));
@@ -349,6 +349,24 @@ describe("neighborhood score", () => {
         fact.kind === "hospitalNearby")).toBe(expected);
     },
   );
+
+  it("keeps each qualifying hospital and its direct journey without adding another score contribution", () => {
+    const first = place("hospital-first", "hospital", "service", 2100);
+    const second = place("hospital-second", "hospital", "service", 2900);
+    const directTram = (durationSeconds: number) => ({
+      durationSeconds, transferCount: 0,
+      sections: [{ type: "public_transport", lineMode: "TRAM" as const, lineCode: "T10", durationSeconds }],
+    });
+    const hospitalJourneys = { [first.id]: [directTram(1080)], [second.id]: [directTram(1561)] };
+    const scoreFor = (hospitalPlaces: NearbyPlace[]) => buildNeighborhoodScore(input({ hospitalPlaces, hospitalJourneys }));
+    const result = scoreFor([first, second]);
+    const health = result.categories.find(category => category.id === "health");
+    const facts = health?.positiveFacts.filter(fact => fact.kind === "hospitalNearby") ?? [];
+    expect(facts.map(fact => fact.labelValues?.name)).toEqual([first.name, second.name]);
+    expect(facts.map(fact => fact.travel?.journey)).toEqual([hospitalJourneys[first.id]![0], hospitalJourneys[second.id]![0]]);
+    expect(result.positiveFacts.filter(fact => fact.kind === "hospitalNearby")).toHaveLength(2);
+    expect(health?.score).toBe(scoreFor([first]).categories.find(category => category.id === "health")?.score);
+  });
 
   it("uses the nearby education POI and its real walking route", () => {
     const school: NearbyPlace = {
@@ -1343,6 +1361,20 @@ describe("neighborhood score", () => {
     expect(regional?.neutralFacts).toContainEqual(expect.objectContaining({
       kind: "greenSpaceFootprint", greenMap: park.parkMap, labelValues: { name: park.name, meters: park.distanceMeters },
     }));
+  });
+
+  it("uses a verified background route when the documentary response only has edge access", () => {
+    const mainAccess = { lon: 2.27, lat: 48.76 };
+    const woodlandMap = { scope: "woodland" as const, id: "Forêt test", ...mainAccess, version: "0".repeat(24) };
+    const greenSpace = { id: "woodland:fixture", name: "Forêt test", mainSurfaceM2: 4_000_000,
+      ...mainAccess, distanceMeters: 600, walkingMinutes: 8, estimatedWalkingMinutes: 7, woodlandMap };
+    const nature = buildNeighborhoodScore(input({ backendVerdict: greenVerdict([greenSpace]),
+      greenSpaceJourneys: [{ greenSpace: { ...greenSpace, mainWalkingMinutes: 20,
+        woodlandMap: { ...woodlandMap, mainAccess } }, journeys: [] }],
+    })).categories.find(category => category.id === "nature-leisure")!;
+    expect(nature.positiveFacts).toContainEqual(expect.objectContaining({ kind: "woodlandMainWalking",
+      markerEmphasis: "standard", labelValues: expect.objectContaining({ edgeMinutes: 8, minutes: 20 }),
+      greenMap: expect.objectContaining({ mainAccess }) }));
   });
 
   it.each([

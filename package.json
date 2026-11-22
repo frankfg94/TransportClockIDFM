@@ -75,6 +75,8 @@
     "fast-xml-parser": "^5.11.2",
     "fflate": "^0.8.3",
     "fuse.js": "7.5.0",
+    "html2canvas": "1.4.1",
+    "jspdf": "4.2.1",
     "lucide-vue-next": "^1.0.0",
     "maplibre-gl": "^6.6.0",
     "node-html-parser": "^9.0.4",

@@ -627,6 +627,36 @@ describe("useNearbyNeighborhoodScore", () => {
     wrapper.unmount();
   });
 
+  it("publishes hospital access while the pedestrian directory is still loading", async () => {
+    const hospital = { id: "way:100", name: "Hôpital test", kind: "hospital", category: "service" as const,
+      lon: 2.28, lat: 48.8, distanceMeters: 2800 };
+    let score!: ReturnType<typeof useNearbyNeighborhoodScore>;
+    const findJourneys = vi.fn(async () => [{
+      durationSeconds: 1561, transferCount: 0,
+      sections: [{ type: "public_transport", durationSeconds: 900, lineMode: "TRAM" as const, lineCode: "T10" }],
+    }]);
+    const wrapper = mount(defineComponent({
+      setup() {
+        score = useNearbyNeighborhoodScore({
+          origin: ref({ lon: 2.3, lat: 48.82, label: "Origine" }), stations: ref([]),
+          network: ref(createNetwork(createLine())), journeyDateTime: "20260902T090000",
+          placesProvider: { searchDestinations: async () => [], searchNearby: async ({ radiusMeters }) =>
+            radiusMeters === NEARBY_DIRECTORY_MAX_RADIUS_METERS ? new Promise<NearbyPlace[]>(() => undefined) : [hospital] },
+          travelRoutesProvider: { findJourneys },
+        });
+        return () => null;
+      },
+    }));
+    try {
+      await vi.waitFor(() => expect(score.result.value.categories.find(category => category.id === "health")
+        ?.positiveFacts.some(fact => fact.kind === "hospitalNearby")).toBe(true));
+      expect(findJourneys).toHaveBeenCalledWith(expect.objectContaining({ destination: expect.objectContaining({ id: hospital.id }),
+        maxTransfers: 0 }), expect.any(AbortSignal));
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it("does not cache a failed journey probe as an empty result", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true,

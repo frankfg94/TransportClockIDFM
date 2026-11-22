@@ -8,6 +8,21 @@ import { haversineMeters, type NearbyWalkingRoute } from "./nearbyWalkingRoutes"
 
 export type GreenSpaceWalk = { access: "inside" | "entrance" | "edge" | "main" | "unavailable"; route?: NearbyWalkingRoute };
 
+export async function routeToMainWoodland(geometry: GreeneryMapData, origin: GreenPoint,
+  targets: readonly GreenPoint[], signal: AbortSignal): Promise<{ minutes: number; point?: GreenPoint } | undefined> {
+  const boundary = geometry.mainBoundary ?? geometry.boundary;
+  if (locateAtGreenBoundary(origin, boundary).inside) return { minutes: 0 };
+  const candidates = targets.filter(point => locateAtGreenBoundary(point, boundary).inside)
+    .slice(0, rules.mainWoodlandWalkingTargetLimit);
+  const results = await Promise.allSettled(candidates.map(async point => {
+    const walk = await walkTo(origin, point, "main", signal, boundary);
+    return walk.route && { minutes: walk.route.durationSeconds / 60, point };
+  }));
+  if (signal.aborted) return;
+  return results.flatMap(result => result.status === "fulfilled" && result.value ? [result.value] : [])
+    .sort((a, b) => a.minutes - b.minutes)[0];
+}
+
 async function getFootprintEntrances(center: GreenPoint, name: string, boundary: GreeneryMapData["boundary"], signal: AbortSignal) {
   const params = new URLSearchParams({ scope: "park-entrances", name, lat: String(center.lat), lon: String(center.lon) });
   const response = await fetch(toServerApiUrl(`/api/neighborhood-greenery-map?${params}`), { signal }).catch(() => undefined);
@@ -48,10 +63,11 @@ export async function routeToGreenSpace(next: GreeneryMapData, reference: GreenM
 }
 
 async function walkTo(origin: GreenPoint, destination: GreenPoint, access: "main" | "entrance" | "edge",
-  signal: AbortSignal): Promise<GreenSpaceWalk> {
+  signal: AbortSignal, requiredBoundary?: GreeneryMapData["boundary"]): Promise<GreenSpaceWalk> {
   if (signal.aborted) return { access: "unavailable" };
   const request = { origin, destination };
   const reachesDestination = (path: NearbyWalkingRoute) => isDetailedWalkingPath(path)
+    && (!requiredBoundary || locateAtGreenBoundary(path.coordinates.at(-2)!, requiredBoundary).inside)
     && (access !== "entrance" || haversineMeters(path.coordinates.at(-1)!, destination) <= rules.walkingArrivalToleranceMeters);
   let path = await getNearbyWalkingRoute(request, signal);
   if (!signal.aborted && !reachesDestination(path)) {

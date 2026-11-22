@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { exportPdf } from "../src/services/pdfExport";
-import { buildNeighborhoodScorePdf, downloadNeighborhoodScorePdf, type NeighborhoodScorePdfInput } from "../src/features/nearby-stations/neighborhoodScorePdf";
+import { downloadNeighborhoodScorePdf } from "../src/features/nearby-stations/neighborhoodScorePdf";
 
 const native = vi.hoisted(() => ({ platform: vi.fn(), save: vi.fn() }));
 vi.mock("@capacitor/core", () => ({
@@ -8,37 +8,34 @@ vi.mock("@capacitor/core", () => ({
   registerPlugin: () => ({ save: native.save }),
 }));
 
-const input: NeighborhoodScorePdfInput = {
-  title: "Résultats finaux", location: "Adresse de test", scoreLabel: "Score", scoreValue: "7 / 10",
-  bandLabel: "Bon", coverageLine: "7 indicateurs", updatedLine: "24/10/2026",
-  sections: [{ title: "Transports", items: ["Métro 13 · 01:05 (lendemain)", "Lien https://example.test/private supprimé"] }],
-  pageLabel: (current, total) => `${current}/${total}`,
-};
+const capture = vi.hoisted(() => vi.fn());
+vi.mock("html2canvas", () => ({ default: capture }));
+const pdfBytes = new TextEncoder().encode("%PDF-1.4\n%%EOF");
 
 beforeEach(() => { native.platform.mockReturnValue("android"); native.save.mockReset(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("PDF export platform boundary", () => {
-  it("preserves the sign of negative market changes in the exported PDF", () => {
-    const bytes = buildNeighborhoodScorePdf({ ...input, sections: [{ title: "Immobilier", items: ["Prix −12,9 % ; activité −4,3 %"] }] });
-    const pdf = new TextDecoder().decode(bytes);
-    const rendered = [...pdf.matchAll(/<([0-9a-f]+)> Tj/gi)].map(match => Buffer.from(match[1]!, "hex").toString("latin1")).join(" ");
-    expect(rendered).toContain("Prix -12,9 % ; activité -4,3 %");
-  });
-  it("passes the actual final document bytes and filename to Android", async () => {
+  it("passes the captured A4 document in sheet order to Android", async () => {
     native.save.mockResolvedValue({ status: "saved", uri: "content://qa/document/1", fileName: "resultats.pdf" });
-    await expect(downloadNeighborhoodScorePdf(input, "resultats.pdf")).resolves.toMatchObject({ status: "saved" });
+    const canvas = { width: 1, height: 1, toDataURL: () => "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC" };
+    capture.mockResolvedValue(canvas);
+    const sheets = [{ id: "contents" }, { id: "category" }, { id: "closing" }];
+    const root = { querySelectorAll: () => sheets } as unknown as HTMLElement;
+    await expect(downloadNeighborhoodScorePdf(root, "resultats.pdf", "Résultats finaux", new AbortController().signal)).resolves.toMatchObject({ status: "saved" });
+    expect(capture.mock.calls.map(([sheet]) => sheet)).toEqual(sheets);
+    expect(capture.mock.calls[0]?.[1]).toMatchObject({ scale: 2 });
+    expect(canvas).toMatchObject({ width: 0, height: 0 });
     const request = native.save.mock.calls[0]![0];
     expect(request.fileName).toBe("resultats.pdf");
     const bytes = Uint8Array.from(Buffer.from(request.base64, "base64"));
-    expect(bytes).toEqual(buildNeighborhoodScorePdf(input));
     const pdf = new TextDecoder().decode(bytes);
-    expect(pdf.startsWith("%PDF-1.4")).toBe(true);
+    expect(pdf.startsWith("%PDF-")).toBe(true);
     expect(pdf.endsWith("%%EOF")).toBe(true);
-    const rendered = [...pdf.matchAll(/<([0-9a-f]+)> Tj/gi)].map(match => Buffer.from(match[1]!, "hex").toString("latin1")).join(" ");
-    expect(rendered).toContain("Transports");
-    expect(rendered).not.toContain("https://");
-    expect(rendered).not.toContain("example.test");
+    expect(pdf.match(/\/Type \/Page\b/g)).toHaveLength(3);
+    const size = /\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/.exec(pdf);
+    expect(Number(size?.[1])).toBeCloseTo(595.28, 2);
+    expect(Number(size?.[2])).toBeCloseTo(841.89, 2);
   });
 
   it("preserves byte values across multiple base64 chunks", async () => {
@@ -53,19 +50,19 @@ describe("PDF export platform boundary", () => {
   it("returns cancellation without starting a browser fallback", async () => {
     native.save.mockResolvedValue({ status: "cancelled" });
     const create = vi.spyOn(URL, "createObjectURL");
-    await expect(exportPdf(buildNeighborhoodScorePdf(input), "test.pdf")).resolves.toEqual({ status: "cancelled" });
+    await expect(exportPdf(pdfBytes, "test.pdf")).resolves.toEqual({ status: "cancelled" });
     expect(create).not.toHaveBeenCalled();
   });
 
   it("propagates native failure for the caller to display and retry", async () => {
     const error = new Error("PDF_WRITE_FAILED");
     native.save.mockRejectedValue(error);
-    await expect(exportPdf(buildNeighborhoodScorePdf(input), "test.pdf")).rejects.toBe(error);
+    await expect(exportPdf(pdfBytes, "test.pdf")).rejects.toBe(error);
   });
 
   it("rejects a missing native completion status", async () => {
     native.save.mockResolvedValue({});
-    await expect(exportPdf(buildNeighborhoodScorePdf(input), "test.pdf")).rejects.toThrow("response");
+    await expect(exportPdf(pdfBytes, "test.pdf")).rejects.toThrow("response");
   });
 
   it("rejects invalid bytes before launching the Android picker", async () => {
@@ -81,7 +78,7 @@ describe("PDF export platform boundary", () => {
     vi.stubGlobal("document", { createElement: () => link, body: { append } });
     const create = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:qa");
     const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
-    await expect(exportPdf(buildNeighborhoodScorePdf(input), "web.pdf")).resolves.toEqual({ status: "downloaded" });
+    await expect(exportPdf(pdfBytes, "web.pdf")).resolves.toEqual({ status: "downloaded" });
     expect(create.mock.calls[0]![0]).toMatchObject({ type: "application/pdf" });
     expect(link.download).toBe("web.pdf");
     expect(link.click).toHaveBeenCalledOnce();

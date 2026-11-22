@@ -6,7 +6,7 @@ import type { TransportMapNetwork } from "../../transport-map/contracts/network"
 import { aggregateComparisonPlacesAsync, aggregateComparisonScopeTransport, comparisonScope, perSquareKilometer } from "./aggregate";
 import type { ComparisonPlaceAggregation } from "./aggregate";
 import { fetchComparisonGeography, fetchComparisonGreen, fetchComparisonPlaces } from "./api";
-import type { ComparisonGreen, NeighborhoodComparisonGeography } from "./types";
+import { comparisonOriginKey, type ComparisonGreen, type NeighborhoodComparisonGeography, type VerdictScopeData } from "./types";
 
 const props = defineProps<{
   origin?: { lat: number; lon: number; code?: string };
@@ -14,17 +14,21 @@ const props = defineProps<{
   network?: TransportMapNetwork;
   transportReady: boolean;
 }>();
+const emit = defineEmits<{ "report-state": [data: VerdictScopeData] }>();
 const { t, n } = useI18n();
 const NeighborhoodComparison = defineAsyncComponent(() => import("./NeighborhoodComparison.vue"));
 const showDetails = ref(false);
 const geography = shallowRef<NeighborhoodComparisonGeography>();
 const places = shallowRef<ComparisonPlaceAggregation>();
+const placesDate = shallowRef<string>();
 const green = shallowRef<Record<string, ComparisonGreen>>();
 const loading = shallowRef(false);
+const boundary = shallowRef(false);
 
 watch(() => [props.origin?.lat, props.origin?.lon, props.origin?.code] as const, async (_, __, onCleanup) => {
   const origin = props.origin;
-  geography.value = places.value = green.value = undefined;
+  geography.value = places.value = placesDate.value = green.value = undefined;
+  boundary.value = false;
   loading.value = Boolean(origin);
   if (!origin) return;
   const controller = new AbortController();
@@ -34,19 +38,35 @@ watch(() => [props.origin?.lat, props.origin?.lon, props.origin?.code] as const,
     const data = await fetchComparisonGeography(origin, signal);
     signal.throwIfAborted();
     geography.value = data;
-    if (!data.selectedCode) return;
     await Promise.allSettled([
       fetchComparisonPlaces(data.commune.code)
-        .then(({ city }) => aggregateComparisonPlacesAsync(data.neighborhoods, city.places, signal))
-        .then(value => { if (!signal.aborted) places.value = value; }),
+        .then(async ({ city, manifest }) => {
+          const value = await aggregateComparisonPlacesAsync(data.neighborhoods, city.places, signal);
+          if (!signal.aborted) {
+            places.value = value;
+            placesDate.value = manifest.generatedAt;
+          }
+        }),
       fetchComparisonGreen(data.commune.code, data.generatedAt, signal)
         .then(value => { if (!signal.aborted) green.value = value; }),
     ]);
-  } catch {
-    // Keep the local Verdict usable when the comparison is unavailable.
+  } catch (error) {
+    if (!signal.aborted) boundary.value = error instanceof Error && error.message === "409";
   } finally {
     if (!signal.aborted) loading.value = false;
   }
+}, { immediate: true });
+
+watch([loading, boundary, geography, places, placesDate, green], () => {
+  emit("report-state", {
+    originKey: comparisonOriginKey(props.origin),
+    loading: loading.value,
+    boundary: boundary.value,
+    geography: geography.value,
+    places: places.value,
+    placesDate: placesDate.value,
+    green: green.value,
+  });
 }, { immediate: true });
 
 const neighborhoods = computed(() => comparisonScope(geography.value?.neighborhoods ?? [], geography.value?.selectedCode, props.scope));

@@ -237,7 +237,7 @@ function buildWoodlandFacts(input: NeighborhoodScoreInput): NeighborhoodFact[] {
       category: "nature-leisure", polarity: "neutral", priority: 12,
       greenMap: space.woodlandMap, ruleKey: RULE_KEYS.woodlandEdge, ruleValues: {},
     } as const;
-    const main = space.mainWalkingMinutes;
+    const main = space.mainWalkingMinutes ?? candidate?.greenSpace.mainWalkingMinutes;
     const hasMain = main !== undefined && Number.isFinite(main) && main >= 0;
     const { strongWalkingBelowMinutes, walkingMaxMinutes, largeMainAreaM2, largeAccessMaxMinutes } = WOODLAND_ACCESS_RULE;
     const largeMain = (space.mainSurfaceM2 ?? 0) >= largeMainAreaM2;
@@ -248,6 +248,7 @@ function buildWoodlandFacts(input: NeighborhoodScoreInput): NeighborhoodFact[] {
     } as const;
     const walking = makeFact({
       ...base,
+      greenMap: space.woodlandMap.mainAccess ? space.woodlandMap : candidate?.greenSpace.woodlandMap ?? space.woodlandMap,
       ...(hasMain ? largeMain ? largeRule : {
         ruleKey: "nearbyStations.neighborhoodScore.rules.woodlandMain" as const,
         ruleValues: { minutes: walkingMaxMinutes, strongMinutes: strongWalkingBelowMinutes },
@@ -256,7 +257,7 @@ function buildWoodlandFacts(input: NeighborhoodScoreInput): NeighborhoodFact[] {
       markerEmphasis: walkingPositive && main < strongWalkingBelowMinutes ? "strong" : "standard",
       id: `${space.id}:walking`, family: `${space.id}:walking`,
       kind: hasMain ? "woodlandMainWalking" : space.walkingMinutes !== undefined ? "woodlandWalking" : "woodlandNearby",
-      values: { name: space.name, minutes: hasMain ? main : space.walkingMinutes ?? "",
+      values: { name: space.name, minutes: hasMain ? Math.ceil(main) : space.walkingMinutes ?? "",
         edgeMinutes: space.walkingMinutes ?? main ?? "", meters: space.distanceMeters },
       sourceKey: hasMain || space.walkingMinutes !== undefined ? SOURCE_KEYS.placesAndWalking : "nearbyStations.neighborhoodScore.datasets.ipr-public-parks",
       proof: "derived",
