@@ -33,6 +33,7 @@ export function useNearbyPlaces(options: {
   const resolvedCityRefs = computed<readonly NearbyPlaceCityRef[]>(() => options.cityRefs?.value ?? []);
 
   async function refresh(): Promise<void> {
+    clearRefreshTimer();
     const token = ++requestToken;
     controller?.abort();
     controller = undefined;
@@ -93,7 +94,10 @@ export function useNearbyPlaces(options: {
         error.value = cause instanceof Error ? cause : new Error("nearby-places-unavailable");
       }
     } finally {
-      if (token === requestToken) isLoading.value = false;
+      if (token === requestToken) {
+        controller = undefined;
+        isLoading.value = false;
+      }
     }
   }
 
@@ -126,17 +130,13 @@ export function useNearbyPlaces(options: {
       .map((origin) => `${origin.lat}:${origin.lon}`)
       .concat(resolvedCityRefs.value.map((city) => `${city.code ?? ""}:${city.name ?? ""}:${city.lat ?? ""}:${city.lon ?? ""}`))
       .join("|"),
-    () => {
-      clearRefreshTimer();
-      void refresh();
-    },
+    () => { void refresh(); },
     { immediate: true },
   );
   watch(
     () => [options.radius.value, options.enabled.value] as const,
     ([, enabled]) => {
       if (!enabled) {
-        clearRefreshTimer();
         void refresh();
         return;
       }
@@ -144,6 +144,7 @@ export function useNearbyPlaces(options: {
     },
   );
   onBeforeUnmount(() => {
+    requestToken += 1;
     clearRefreshTimer();
     controller?.abort();
   });

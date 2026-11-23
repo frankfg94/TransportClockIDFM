@@ -5,7 +5,7 @@ import { useI18n, type TranslationKey } from "../../../i18n";
 import type { TransportMapNetwork } from "../../transport-map/contracts/network";
 import { aggregateComparisonPlacesAsync, aggregateComparisonScopeTransport, comparisonScope, perSquareKilometer } from "./aggregate";
 import type { ComparisonPlaceAggregation } from "./aggregate";
-import { fetchComparisonGeography, fetchComparisonGreen, fetchComparisonPlaces } from "./api";
+import { fetchComparisonGeography, fetchComparisonGreenSnapshot, fetchComparisonPlaces } from "./api";
 import { comparisonOriginKey, type ComparisonGreen, type NeighborhoodComparisonGeography, type VerdictScopeData } from "./types";
 
 const props = defineProps<{
@@ -13,21 +13,27 @@ const props = defineProps<{
   scope: "neighborhood" | "rest";
   network?: TransportMapNetwork;
   transportReady: boolean;
+  transportError?: boolean;
 }>();
 const emit = defineEmits<{ "report-state": [data: VerdictScopeData] }>();
 const { t, n } = useI18n();
-const NeighborhoodComparison = defineAsyncComponent(() => import("./NeighborhoodComparison.vue"));
-const showDetails = ref(false);
+const RestOfCityComparison = defineAsyncComponent(() => import("./RestOfCityComparison.vue"));
 const geography = shallowRef<NeighborhoodComparisonGeography>();
 const places = shallowRef<ComparisonPlaceAggregation>();
 const placesDate = shallowRef<string>();
 const green = shallowRef<Record<string, ComparisonGreen>>();
+const greenMap = shallowRef<VerdictScopeData["greenMap"]>();
+const canopyCoverage = shallowRef<VerdictScopeData["canopyCoverage"]>();
+const placesStatus = ref<"loading" | "ready" | "error">("loading");
+const greenStatus = ref<"loading" | "ready" | "error" | "unavailable">("loading");
 const loading = shallowRef(false);
 const boundary = shallowRef(false);
 
 watch(() => [props.origin?.lat, props.origin?.lon, props.origin?.code] as const, async (_, __, onCleanup) => {
   const origin = props.origin;
   geography.value = places.value = placesDate.value = green.value = undefined;
+  greenMap.value = canopyCoverage.value = undefined;
+  placesStatus.value = greenStatus.value = "loading";
   boundary.value = false;
   loading.value = Boolean(origin);
   if (!origin) return;
@@ -45,10 +51,18 @@ watch(() => [props.origin?.lat, props.origin?.lon, props.origin?.code] as const,
           if (!signal.aborted) {
             places.value = value;
             placesDate.value = manifest.generatedAt;
+            placesStatus.value = "ready";
           }
-        }),
-      fetchComparisonGreen(data.commune.code, data.generatedAt, signal)
-        .then(value => { if (!signal.aborted) green.value = value; }),
+        }).catch(() => { if (!signal.aborted) placesStatus.value = "error"; }),
+      fetchComparisonGreenSnapshot(data.commune.code, data.generatedAt, signal)
+        .then(value => {
+          if (!signal.aborted) {
+            green.value = value.neighborhoods;
+            greenMap.value = value.greenMap;
+            canopyCoverage.value = value.canopyCoverage;
+            greenStatus.value = value.neighborhoods ? "ready" : "unavailable";
+          }
+        }).catch(() => { if (!signal.aborted) greenStatus.value = "error"; }),
     ]);
   } catch (error) {
     if (!signal.aborted) boundary.value = error instanceof Error && error.message === "409";
@@ -57,7 +71,7 @@ watch(() => [props.origin?.lat, props.origin?.lon, props.origin?.code] as const,
   }
 }, { immediate: true });
 
-watch([loading, boundary, geography, places, placesDate, green], () => {
+watch([loading, boundary, geography, places, placesDate, green, greenMap, canopyCoverage], () => {
   emit("report-state", {
     originKey: comparisonOriginKey(props.origin),
     loading: loading.value,
@@ -66,6 +80,8 @@ watch([loading, boundary, geography, places, placesDate, green], () => {
     places: places.value,
     placesDate: placesDate.value,
     green: green.value,
+    greenMap: greenMap.value,
+    canopyCoverage: canopyCoverage.value,
   });
 }, { immediate: true });
 
@@ -107,17 +123,16 @@ const sections = computed<{ title: TranslationKey; details: string[] }[]>(() => 
     <p v-else-if="!neighborhoods.length" role="status">{{ t(geography && !geography.selectedCode ? 'nearbyStations.comparison.scopeBoundary' : scope === 'rest' && geography?.selectedCode ? 'nearbyStations.comparison.scopeNoRest' : 'nearbyStations.comparison.unavailable') }}</p>
     <template v-else>
       <p class="verdict-scope__area">{{ scope === 'neighborhood' ? neighborhoods[0]?.name : geography?.commune.name }} · {{ format(area / 1_000_000) }} km²</p>
-      <div class="verdict-scope__cards">
+      <div v-if="scope !== 'rest'" class="verdict-scope__cards">
         <article v-for="section in sections" :key="section.title">
           <h3>{{ t(section.title) }}</h3>
           <p v-for="detail in section.details" :key="detail">{{ detail }}</p>
           <p v-if="!section.details.length">{{ t(loading ? 'nearbyStations.comparison.loadingValue' : 'nearbyStations.comparison.unavailable') }}</p>
         </article>
       </div>
-      <details v-if="scope === 'rest'" class="verdict-scope__details" @toggle="showDetails = ($event.currentTarget as HTMLDetailsElement).open">
-        <summary>{{ t('nearbyStations.comparison.irisDetails') }}</summary>
-        <NeighborhoodComparison v-if="showDetails" :origin="origin" :network="network" :transport-ready="transportReady" />
-      </details>
+      <RestOfCityComparison v-else-if="geography" :origin="origin" :geography="geography" :places="places" :places-date="placesDate" :places-status="placesStatus"
+        :green="green" :green-status="greenStatus" :green-map="greenMap" :canopy-coverage="canopyCoverage"
+        :network="network" :transport-ready="transportReady" :transport-error="transportError" />
     </template>
   </section>
 </template>
@@ -125,8 +140,6 @@ const sections = computed<{ title: TranslationKey; details: string[] }[]>(() => 
 <style scoped>
 .verdict-scope { margin-block: 1rem; }
 .verdict-scope__area { color: var(--muted); }
-.verdict-scope__details { margin-top: .9rem; }
-.verdict-scope__details summary { cursor: pointer; font-weight: 650; padding-block: .5rem; }
 .verdict-scope__cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: .75rem; }
 article { padding: .875rem; background: var(--surface-soft); border-radius: .75rem; }
 h3, p { margin: 0 0 .3rem; }

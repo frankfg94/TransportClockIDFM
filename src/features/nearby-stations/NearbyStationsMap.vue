@@ -1170,6 +1170,9 @@ const eligibleMapPlaces = computed(() => {
       && isNearbyPlaceVisibleOnMap(place, props.showNearbyBenches === true, props.showNearbyParkings === true);
   });
 });
+const compactDensePlaceOverview = computed(() =>
+  eligibleMapPlaces.value.length >= 250 && camera.value.zoom < zoomReference.value + 0.45,
+);
 watch([() => props.hideClosedPlaces, selectedMapPlace, openingStatus], ([hide, place, status]) => {
   if (!isPlacesPreview.value && hide && place && status(place.tags?.opening_hours) === "closed") emit("selectPlace", undefined);
 }, { immediate: true });
@@ -3353,10 +3356,31 @@ function changeZoom(direction: 1 | -1): void {
   keepInteractionActive();
 }
 
+function zoomToPlaceCluster(cluster: { x: number; y: number; placeId: string }): void {
+  if (!canInteractWithMap.value) {
+    emit("selectPlace", cluster.placeId);
+    return;
+  }
+  flushGestureCamera();
+  const nextZoom = clamp(camera.value.zoom + 1.2, zoomRange.value.min, zoomRange.value.max);
+  if (nextZoom === camera.value.zoom) {
+    emit("selectPlace", cluster.placeId);
+    return;
+  }
+  cancelCameraAnimation();
+  camera.value = clampNearbyCamera(updateCamera(camera.value, {
+    centerWorldX: cluster.x,
+    centerWorldY: cluster.y,
+    zoom: nextZoom,
+  }));
+  keepInteractionActive();
+}
+
 function handlePointerDown(event: PointerEvent): void {
   if (!canInteractWithMap.value) return;
   if (event.pointerType !== "touch" && event.button !== undefined && event.button !== 0) return;
-  const isPlaceHitTarget = event.target instanceof Element && Boolean(event.target.closest(".nearby-map__place"));
+  const isPlaceHitTarget = event.target instanceof Element
+    && Boolean(event.target.closest(".nearby-map__place, .nearby-map__place-cluster-target"));
   if (isInteractiveMapTarget(event.target) && !isMapGeometryTarget(event.target) && !isPlaceHitTarget) return;
   flushGestureCamera();
   const point = localScreenPoint(event.clientX, event.clientY);
@@ -5160,6 +5184,7 @@ function mix(from: number, to: number, progress: number): number {
       'nearby-map--interactive': canInteractWithMap,
       'nearby-map--dragging': mapDragging,
       'nearby-map--interacting': isMapInteracting,
+      'nearby-map--compact-dense-overview': compactDensePlaceOverview,
     }"
     :aria-label="t('nearbyStations.mapAria')"
       @pointercancel="handlePointerEnd"
@@ -6506,6 +6531,7 @@ function mix(from: number, to: number, progress: number): number {
         @visibility-change="placesVisible = $event"
         @hover-place="hoveredFootprintPlaceId = $event"
         @select-place="emit('selectPlace', $event)"
+        @zoom-to-cluster="zoomToPlaceCluster"
         @place-context-menu="openPlaceContextMenu"
       />
 
@@ -7388,6 +7414,11 @@ function mix(from: number, to: number, progress: number): number {
 .nearby-map__heavy-edge-line-icon :deep(.line-icon-badge__fallback) { align-items: center; background: transparent; border: 0; border-radius: 50%; color: #18233f; display: inline-flex; height: 25px; justify-content: center; min-width: 25px; width: 25px; }
 .nearby-map__heavy-edge-line-icon :deep(.line-icon-badge__label) { background: transparent; color: #18233f; font-size: .68rem; min-width: 25px; padding: 0; }
 .nearby-map__heavy-edge-access { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 680px), (pointer: coarse) {
+  .nearby-map--compact-dense-overview .nearby-map__heavy-edge-access { display: none; }
+  .nearby-map--compact-dense-overview .nearby-map__heavy-edge-label { gap: 2px; padding: 1px 2px; }
+  .nearby-map--compact-dense-overview .nearby-map__heavy-edge-label:focus-visible .nearby-map__heavy-edge-access { display: inline; }
+}
 .nearby-map__marker-anchor--projection-top .nearby-map__heavy-edge-label { bottom: auto; top: calc(100% + 7px); }
 .nearby-map__marker-anchor--projection-top-right .nearby-map__heavy-edge-label,
 .nearby-map__marker-anchor--projection-top-left .nearby-map__heavy-edge-label { bottom: auto; top: calc(100% + 7px); }

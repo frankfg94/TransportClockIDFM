@@ -464,6 +464,15 @@ export function makeTransportAccessFact(signal: NeighborhoodTransportAccessSigna
     } : undefined,
   });
   fact.transportSection = signal.section;
+  if (signal.station) {
+    fact.transportMapAccess = {
+      station: { name: signal.station.name, lon: signal.station.lon, lat: signal.station.lat },
+      lines: [signal.line],
+      minutes: signal.minutes,
+      via: signal.via,
+      estimated: signal.source === "map" || Boolean(finalStatus),
+    };
+  }
   if (signal.station && signal.source === "route" && !atAddress) {
     fact.labelKey = "nearbyStations.neighborhoodScore.facts.transportStationNearby.label";
   }

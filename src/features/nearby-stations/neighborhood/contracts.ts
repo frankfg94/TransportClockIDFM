@@ -240,6 +240,13 @@ export interface NeighborhoodFact {
   greenSpaceAccess?: GreenSpaceMapAccess;
   id: string;
   transportSection?: NeighborhoodTransportSection;
+  transportMapAccess?: {
+    station: { name: string; lon: number; lat: number };
+    lines: readonly GlobalMapLine[];
+    minutes: number;
+    via?: string;
+    estimated?: boolean;
+  };
   kind: NeighborhoodFactKind;
   category: NeighborhoodCategoryId;
   polarity: NeighborhoodFactPolarity;

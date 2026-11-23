@@ -52,6 +52,7 @@ const themeKeys: Record<ComparisonTheme, TranslationKey> = {
 const measureKeys: Record<ComparisonMeasure, TranslationKey> = {
   count: "nearbyStations.comparison.count", density: "nearbyStations.comparison.density", diversity: "nearbyStations.comparison.diversity",
   area: "nearbyStations.comparison.area", share: "nearbyStations.comparison.share", lines: "nearbyStations.comparison.lines", stations: "nearbyStations.comparison.stations",
+  canopy: "nearbyStations.comparison.canopy",
 };
 const measures = computed<ComparisonMeasure[]>(() => theme.value === "commerce" ? ["count", "density", "diversity"]
   : theme.value === "economic" ? ["count", "density"] : theme.value === "green" ? ["area", "share"] : ["lines", "stations"]);

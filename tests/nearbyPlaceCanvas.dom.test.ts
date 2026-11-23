@@ -1,6 +1,7 @@
 import { mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import NearbyPlaceCanvas from "../src/features/nearby-stations/NearbyPlaceCanvas.vue";
+import { clusterNearbyPlaceMarkers } from "../src/features/nearby-stations/nearbyPlaceClustering";
 import { createCamera } from "../src/features/transport-map/geo/camera";
 import { lonLatToWorld, worldScaleAtZoom } from "../src/features/transport-map/geo/coordinateKernel";
 import { nearbyPlacePop } from "../src/features/nearby-stations/nearbyPlacePop";
@@ -27,8 +28,9 @@ describe("nearby place canvas scheduling", () => {
       set src(_value: string) { images++; this.onload?.(); }
     });
     const drawImage = vi.fn();
+    const fillText = vi.fn();
     const context = { drawImage, scale: vi.fn(), setTransform: vi.fn(), clearRect: vi.fn(),
-      beginPath: vi.fn(), arc: vi.fn(), fill: vi.fn(), stroke: vi.fn() };
+      beginPath: vi.fn(), arc: vi.fn(), fill: vi.fn(), stroke: vi.fn(), fillText, save: vi.fn(), restore: vi.fn() };
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(context as unknown as CanvasRenderingContext2D);
     const styles = vi.spyOn(window, "getComputedStyle");
     const world = lonLatToWorld({ lon: 2.35, lat: 48.85 });
@@ -39,12 +41,13 @@ describe("nearby place canvas scheduling", () => {
     }));
     const wrapper = mount(NearbyPlaceCanvas, { props: { places, camera, radius: 600, city: false, preview: false, showNames: false, reducedMotion: false } });
     try {
-      expect(wrapper.findAll("button")).toHaveLength(1500);
+      expect(wrapper.findAll(".nearby-map__place")).toHaveLength(1500);
       tick(0); tick(300);
-      expect(frames.size).toBe(1);
+      expect(frames.size).toBe(0); // Count markers do not animate hundreds of shops one by one.
       tick(1000); tick(1016);
       expect(frames.size).toBe(0);
-      expect(images).toBe(1); // 1 category sprite, not 1 SVG decode per place.
+      expect(images).toBeLessThan(1500); // Dense places render as count markers, not one icon sprite each.
+      expect(fillText).toHaveBeenCalled();
       const first = wrapper.get("button").element;
       const firstStyle = first.getAttribute("style");
       const styleReads = styles.mock.calls.length;
@@ -56,16 +59,17 @@ describe("nearby place canvas scheduling", () => {
       expect(wrapper.get("button").element).toBe(first);
       expect(first.getAttribute("style")).toBe(firstStyle);
       expect(styles.mock.calls.length).toBe(styleReads);
-      expect(images).toBe(1);
+      expect(images).toBe(0); // Dense groups do not decode individual category icons.
       expect(frames.size).toBe(0);
-      expect(drawImage).toHaveBeenCalledTimes(15000);
+      expect(drawImage.mock.calls.length).toBeLessThan(15000);
       await wrapper.get("button").trigger("click");
       expect(wrapper.emitted("selectPlace")?.at(-1)).toEqual(["place:0"]);
       await wrapper.setProps({ places: [] });
       expect(wrapper.findAll("button")).toHaveLength(0);
       drawImage.mockClear();
       tick(1200);
-      expect(drawImage).toHaveBeenCalledTimes(1500); // Departing icons still animate.
+      expect(drawImage.mock.calls.length).toBeGreaterThanOrEqual(1500); // Departing icons and the active marker still paint.
+      expect(drawImage.mock.calls.length).toBeLessThan(1502);
       tick(1650);
       expect(frames.size).toBe(0);
     } finally { wrapper.unmount(); }
@@ -155,6 +159,65 @@ describe("nearby place canvas scheduling", () => {
       expect(frames.size).toBe(0);
     } finally {
       wrapper.unmount();
+    }
+  });
+
+  it("zooms into a dense place cluster when the canvas hit target is tapped", async () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let sequence = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.set(++sequence, callback);
+      return sequence;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    const tick = (time: number) => {
+      const scheduled = [...frames.values()];
+      frames.clear();
+      scheduled.forEach(callback => callback(time));
+    };
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      set src(_value: string) { this.onload?.(); }
+    });
+    const context = {
+      drawImage: vi.fn(), scale: vi.fn(), setTransform: vi.fn(), clearRect: vi.fn(),
+      beginPath: vi.fn(), arc: vi.fn(), fill: vi.fn(), stroke: vi.fn(), fillText: vi.fn(), save: vi.fn(), restore: vi.fn(),
+    };
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue(context as unknown as CanvasRenderingContext2D);
+    const world = lonLatToWorld({ lon: 2.35, lat: 48.85 });
+    const camera = createCamera({ centerWorldX: world.x, centerWorldY: world.y, zoom: 15, viewportWidthCssPx: 300, viewportHeightCssPx: 200 });
+    const places: NearbyPlace[] = [
+      { id: "place:a", name: "A", lon: 2.35, lat: 48.85, category: "shop", kind: "bakery", distanceMeters: 10 },
+      { id: "place:b", name: "B", lon: 2.350001, lat: 48.850001, category: "shop", kind: "bakery", distanceMeters: 11 },
+    ];
+    const wrapper = mount(NearbyPlaceCanvas, {
+      props: { places, camera, radius: 600, city: false, preview: false, showNames: false, reducedMotion: false, canvasHitTesting: true },
+    });
+    try {
+      tick(0);
+      const [group] = clusterNearbyPlaceMarkers(
+        [{ place: { id: places[0]!.id }, worldX: world.x, worldY: world.y, order: 0 },
+          { place: { id: places[1]!.id }, worldX: lonLatToWorld(places[1]!).x, worldY: lonLatToWorld(places[1]!).y, order: 1 }],
+        worldScaleAtZoom(camera.zoom),
+      );
+      expect(group?.kind).toBe("cluster");
+      if (!group || group.kind !== "cluster") throw new Error("Expected place cluster");
+      const scale = worldScaleAtZoom(camera.zoom);
+      await wrapper.get("canvas").trigger("click", {
+        clientX: (group.centerWorldX - camera.centerWorldX) * scale + camera.viewportWidthCssPx / 2,
+        clientY: (group.centerWorldY - camera.centerWorldY) * scale + camera.viewportHeightCssPx / 2,
+      });
+      expect(wrapper.emitted("zoomToCluster")?.[0]?.[0]).toMatchObject({ placeId: "place:a" });
+
+      const button = wrapper.get(".nearby-map__place-cluster-target");
+      expect(button.attributes("tabindex")).toBe("0");
+      expect(button.attributes("aria-hidden")).toBeUndefined();
+      await button.trigger("click");
+      expect(wrapper.emitted("zoomToCluster")?.[1]?.[0]).toMatchObject({ placeId: "place:a" });
+    } finally {
+      wrapper.unmount();
+      tick(16);
     }
   });
 });

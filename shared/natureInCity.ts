@@ -3,6 +3,7 @@ import type { MultiPolygon, Polygon } from "geojson";
 export type GreenBoundary = Polygon | MultiPolygon;
 export type GreenPoint = { lon: number; lat: number };
 export interface GreeneryMapData {
+  name?: string;
   boundary: GreenBoundary;
   canopy?: GreenBoundary;
   mainBoundary?: GreenBoundary;

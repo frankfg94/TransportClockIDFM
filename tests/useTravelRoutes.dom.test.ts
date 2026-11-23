@@ -29,14 +29,14 @@ describe("useTravelRoutes", () => {
     await travel.setDestination({ lon: 2.35, lat: 48.86, label: "Châtelet" });
     await flushPromises();
     expect(findJourneys).toHaveBeenCalledTimes(1);
-    expect(findJourneys).toHaveBeenLastCalledWith(expect.objectContaining({ allowedModes: ["BUS", "TRAM"] }));
+    expect(findJourneys).toHaveBeenLastCalledWith(expect.objectContaining({ allowedModes: ["BUS", "TRAM"] }), expect.any(AbortSignal));
 
     allowedModes.value = ["TRAM"];
     await nextTick();
     await flushPromises();
 
     expect(findJourneys).toHaveBeenCalledTimes(2);
-    expect(findJourneys).toHaveBeenLastCalledWith(expect.objectContaining({ allowedModes: ["TRAM"] }));
+    expect(findJourneys).toHaveBeenLastCalledWith(expect.objectContaining({ allowedModes: ["TRAM"] }), expect.any(AbortSignal));
     wrapper.unmount();
   });
 
@@ -60,7 +60,7 @@ describe("useTravelRoutes", () => {
     await travel.setDestination({ lon: 2.35, lat: 48.86, label: "Châtelet" });
     await flushPromises();
 
-    expect(findJourneys).toHaveBeenCalledWith(expect.objectContaining({ count: 8, includeDisruptions: true, includeGeoJson: true }));
+    expect(findJourneys).toHaveBeenCalledWith(expect.objectContaining({ count: 8, includeDisruptions: true, includeGeoJson: true }), expect.any(AbortSignal));
     expect(travel.routes.value.map((route) => route.id)).toEqual(["fast", "slow"]);
     expect(travel.selectedRouteId.value).toBe("fast");
     expect(travel.selectRoute("slow")?.transitSections[0]?.lineCode).toBe("194");
@@ -126,7 +126,7 @@ describe("useTravelRoutes", () => {
       count: 8,
       includeDisruptions: true,
       includeGeoJson: true,
-    }));
+    }), expect.any(AbortSignal));
     expect(travel.routes.value[0]?.sections).toHaveLength(4);
     expect(travel.routes.value[0]?.transitSections.map((section) => section.lineMode)).toEqual(["NOCTILIEN", "METRO"]);
     wrapper.unmount();
@@ -242,8 +242,33 @@ describe("useTravelRoutes", () => {
     expect(travelRoutesProvider.findJourneys).toHaveBeenCalledWith(expect.objectContaining({
       count: 8,
       includeDisruptions: true,
-    }));
+    }), expect.any(AbortSignal));
     expect(travel.routes.value[0]?.id).toBe("provider-route");
     wrapper.unmount();
+  });
+
+  it("cancels the pending route and clears loading when the origin disappears", async () => {
+    const origin = ref<{ lon: number; lat: number } | undefined>({ lon: 2.3, lat: 48.8 });
+    let release!: () => void;
+    const findJourneys = vi.fn<TravelRoutesProvider["findJourneys"]>(() =>
+      new Promise(resolve => { release = () => resolve([{ id: "old", durationSeconds: 900, sections: [] }]); }),
+    );
+    let travel!: ReturnType<typeof useTravelRoutes>;
+    const wrapper = mount(defineComponent({ setup() {
+      travel = useTravelRoutes({ origin, findJourneys });
+      return () => null;
+    } }));
+
+    try {
+      const request = travel.setDestination({ lon: 2.35, lat: 48.86 });
+      expect(travel.isLoading.value).toBe(true);
+      origin.value = undefined;
+      await nextTick();
+      expect(findJourneys.mock.calls[0]?.[1]?.aborted).toBe(true);
+      expect(travel.isLoading.value).toBe(false);
+      release();
+      await request;
+      expect(travel.routes.value).toEqual([]);
+    } finally { wrapper.unmount(); }
   });
 });

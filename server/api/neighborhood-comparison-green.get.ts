@@ -14,12 +14,22 @@ export default defineEventHandler(async event => {
       readNatureManifest(env).catch(() => undefined),
     ]);
     const neighborhoods = { ...buildComparisonGreen(data, code) };
-    const canopy = nature?.communes[natureCommuneCode(code)]?.iris;
+    const canonicalNatureCode = natureCommuneCode(code);
+    const canopy = nature?.communes[canonicalNatureCode]?.iris;
     const parks = nature ? await readPublicParkAreas(env, nature, code).catch(() => undefined) : undefined;
     for (const iris of Object.keys(neighborhoods)) {
       neighborhoods[iris] = { ...neighborhoods[iris]!, canopy: canopy?.[iris], publicParkAreaM2: parks?.[iris] };
     }
-    return { generatedAt: data.generatedAt, communeCode: code, neighborhoods };
+    const coveredIris = Object.keys(neighborhoods).filter(iris => neighborhoods[iris]?.canopy).length;
+    return {
+      generatedAt: data.generatedAt,
+      communeCode: code,
+      neighborhoods,
+      greenMap: nature?.communes[canonicalNatureCode]
+        ? { scope: "commune" as const, code: canonicalNatureCode, version: nature.version }
+        : undefined,
+      canopyCoverage: nature ? { period: nature.period, coveredIris, totalIris: Object.keys(neighborhoods).length } : undefined,
+    };
   } catch (cause) {
     if (cause instanceof ComparisonLocationError) throw createError({ statusCode: 404, statusMessage: "No neighborhoods" });
     throw createError({ statusCode: 503, statusMessage: "Green-space comparison unavailable", cause });

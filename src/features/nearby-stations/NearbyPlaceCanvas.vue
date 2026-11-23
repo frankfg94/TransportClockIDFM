@@ -6,7 +6,8 @@ import type { CameraState } from "../transport-map/geo/camera";
 import { screenToWorld, worldScaleAtZoom, worldToScreen } from "../transport-map/geo/coordinateKernel";
 import type { NearbyPlace } from "./nearbyPlaces";
 import type { NearbyWalkingRoute } from "./nearbyWalkingRoutes";
-import { nearbyPlaceWalkingDistanceMeters, nearbyPlaceWalkingMinutes, nearbyPlaceWheelchairAccess } from "./nearbyPlacePresentation";
+import { nearbyPlaceMarkerColor, nearbyPlaceWalkingDistanceMeters, nearbyPlaceWalkingMinutes, nearbyPlaceWheelchairAccess } from "./nearbyPlacePresentation";
+import { clusterNearbyPlaceMarkers, NEARBY_PLACE_CLUSTER_CELL_SIZE_CSS_PX, type NearbyPlaceMarkerGroup } from "./nearbyPlaceClustering";
 import { PLACE_ICON_COMPONENTS, useNearbyPlacePresenter } from "./useNearbyPlacePresenter";
 import { indexNearbyPlaceViewport, queryNearbyPlaceViewport } from "./nearbyPlaceViewport";
 import { nearbyPlacePop, NEARBY_PLACE_POP_MS } from "./nearbyPlacePop";
@@ -29,6 +30,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   selectPlace: [id?: string];
+  zoomToCluster: [cluster: { x: number; y: number; placeId: string }];
   placeContextMenu: [id: string, event: MouseEvent];
   visibilityChange: [visible: boolean];
   hoverPlace: [id?: string];
@@ -50,10 +52,29 @@ type Entry = Point & {
   enterAt: number;
   leaveAt?: number;
 };
+type MarkerGroup = NearbyPlaceMarkerGroup<Entry>;
+type ClusterTarget = {
+  key: string;
+  count: number;
+  x: number;
+  y: number;
+  centerWorldX: number;
+  centerWorldY: number;
+  placeId: string;
+};
 const canvas = ref<HTMLCanvasElement>();
 const targets = ref<HTMLElement>();
 const iconDefinitions = ref<SVGSVGElement>();
 const entries = shallowRef<Entry[]>([]);
+const markerGroups = shallowRef<MarkerGroup[]>([]);
+const clusterTargets = shallowRef<ClusterTarget[]>([]);
+const visibleClusterKeys = computed(() => {
+  const camera = props.camera;
+  return new Set(clusterTargets.value.filter(cluster => {
+    const point = worldToScreen({ x: cluster.centerWorldX, y: cluster.centerWorldY }, camera);
+    return point.x >= 0 && point.y >= 0 && point.x <= camera.viewportWidthCssPx && point.y <= camera.viewportHeightCssPx;
+  }).map(cluster => cluster.key));
+});
 const hoveredId = ref<string>();
 watch(hoveredId, id => emit('hoverPlace', id));
 const index = computed(() => indexNearbyPlaceViewport(props.places));
@@ -88,7 +109,7 @@ function rebuild(): void {
   const previous = entryById.value;
   const now = performance.now();
   reference = props.camera;
-  entries.value = queryNearbyPlaceViewport(index.value, reference, padding).map((point, order) => {
+  const nextEntries = queryNearbyPlaceViewport(index.value, reference, padding).map((point, order) => {
     const old = previous.get(point.place.id) ?? leaving.get(point.place.id);
     leaving.delete(point.place.id);
     const presentation = presentationFor(point.place);
@@ -116,6 +137,21 @@ function rebuild(): void {
       entry.targetWidth = Math.max(24, nameTile ? nameTile.width / ratio - 8 : 24);
     }
     return entry;
+  });
+  entries.value = nextEntries;
+  markerGroups.value = clusterNearbyPlaceMarkers(nextEntries, worldScaleAtZoom(reference.zoom));
+  clusterTargets.value = markerGroups.value.flatMap((group) => {
+    if (group.kind !== "cluster") return [];
+    const screen = worldToScreen({ x: group.centerWorldX, y: group.centerWorldY }, reference);
+    return [{
+      key: group.key,
+      count: group.items.length,
+      x: screen.x,
+      y: screen.y,
+      centerWorldX: group.centerWorldX,
+      centerWorldY: group.centerWorldY,
+      placeId: group.items[0]!.place.id,
+    }];
   });
   if (!props.reducedMotion) {
     for (const [id, old] of previous) {
@@ -155,11 +191,7 @@ function scheduleFrame(): void {
 }
 
 function color(category: NearbyPlace["category"], outside: boolean): string {
-  const rgb = category === "shop" ? [37, 99, 235]
-    : category === "food" ? [217, 119, 6]
-      : ["culture", "attraction"].includes(category) ? [124, 58, 237] : [71, 85, 105];
-  const gray = rgb[0]! * .2126 + rgb[1]! * .7152 + rgb[2]! * .0722;
-  return `rgb(${rgb.map(value => Math.round(outside ? value * .4 + gray * .6 : value)).join(",")})`;
+  return nearbyPlaceMarkerColor(category, outside);
 }
 
 // Bake the original Lucide drawing, white disc, fine border and shadow once
@@ -226,6 +258,17 @@ function label(entry: Entry): HTMLCanvasElement | undefined {
   return tile;
 }
 
+function syncEntryVisibility(entry: Entry, x: number, y: number): void {
+  const visible = x >= 0 && y >= 0 && x <= props.camera.viewportWidthCssPx && y <= props.camera.viewportHeightCssPx;
+  if (entry.inViewport === visible) return;
+  entry.inViewport = visible;
+  // Buffered offscreen targets must not take keyboard focus or scroll the map.
+  if (entry.target) {
+    entry.target.tabIndex = visible ? 0 : -1;
+    if (visible) entry.target.removeAttribute("aria-hidden"); else entry.target.setAttribute("aria-hidden", "true");
+  }
+}
+
 // At rest, only the former/new active markers change. Clip to their sprite
 // bounds and redraw overlapping neighbours in source order, preserving alpha
 // and shadows without visiting every hit target or repainting the whole map.
@@ -277,7 +320,8 @@ function paint(now: number): void {
   }
   const width = Math.round(camera.viewportWidthCssPx * ratio);
   const height = Math.round(camera.viewportHeightCssPx * ratio);
-  const fullPaint = fullPaintPending || node.width !== width || node.height !== height;
+  const fullPaint = fullPaintPending || node.width !== width || node.height !== height
+    || (dirtyPlaces.size > 0 && markerGroups.value.some(group => group.kind === "cluster"));
   fullPaintPending = false;
   if (node.width !== width) node.width = width;
   if (node.height !== height) node.height = height;
@@ -292,8 +336,10 @@ function paint(now: number): void {
     const y = (reference.centerWorldY - camera.centerWorldY) * scale + camera.viewportHeightCssPx / 2 - zoom * reference.viewportHeightCssPx / 2;
     const transform = `matrix(${zoom},0,0,${zoom},${x},${y})`;
     const inverse = `${1 / zoom}`;
-    if (transform !== lastTargetTransform) targets.value.style.transform = lastTargetTransform = transform;
-    if (inverse !== lastInverseScale) targets.value.style.setProperty("--place-inverse-scale", lastInverseScale = inverse);
+    if (transform !== lastTargetTransform || !targets.value.style.transform) targets.value.style.transform = lastTargetTransform = transform;
+    if (inverse !== lastInverseScale || !targets.value.style.getPropertyValue("--place-inverse-scale")) {
+      targets.value.style.setProperty("--place-inverse-scale", lastInverseScale = inverse);
+    }
   }
   let animating = false;
   const reducedMotion = props.reducedMotion || props.interactionActive === true;
@@ -308,15 +354,7 @@ function paint(now: number): void {
     }
     const x = (entry.worldX - camera.centerWorldX) * scale + camera.viewportWidthCssPx / 2;
     const y = (entry.worldY - camera.centerWorldY) * scale + camera.viewportHeightCssPx / 2;
-    const visible = x >= 0 && y >= 0 && x <= camera.viewportWidthCssPx && y <= camera.viewportHeightCssPx;
-    if (!isLeaving && entry.inViewport !== visible) {
-      entry.inViewport = visible;
-      // Buffered offscreen targets must not take keyboard focus or scroll the map.
-      if (entry.target) {
-        entry.target.tabIndex = visible ? 0 : -1;
-        if (visible) entry.target.removeAttribute("aria-hidden"); else entry.target.setAttribute("aria-hidden", "true");
-      }
-    }
+    if (!isLeaving) syncEntryVisibility(entry, x, y);
     if (x < -64 || y < -48 || x > camera.viewportWidthCssPx + 64 || y > camera.viewportHeightCssPx + 48) {
       if (isLeaving) leaving.delete(entry.place.id);
       return;
@@ -339,8 +377,42 @@ function paint(now: number): void {
     if (name) ctx.drawImage(name, x - name.width / ratio / 2 * size,
       y + (pose?.y ?? 0) + (10 - offset) * size, name.width / ratio * size, name.height / ratio * size);
   };
+  const drawCluster = (group: Extract<MarkerGroup, { kind: "cluster" }>) => {
+    const point = worldToScreen({ x: group.centerWorldX, y: group.centerWorldY }, camera);
+    if (point.x < -32 || point.y < -32 || point.x > camera.viewportWidthCssPx + 32 || point.y > camera.viewportHeightCssPx + 32) return;
+    for (const entry of group.items) {
+      const member = worldToScreen({ x: entry.worldX, y: entry.worldY }, camera);
+      syncEntryVisibility(entry, member.x, member.y);
+    }
+    ctx.save?.();
+    ctx.globalAlpha = 0.96;
+    ctx.shadowColor = "rgba(15, 23, 42, .24)";
+    ctx.shadowBlur = 5;
+    ctx.shadowOffsetY = 2;
+    ctx.fillStyle = "#5146ff";
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 17, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#ffffff";
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `800 10px ${fontFamily}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText?.(group.items.length > 99 ? "99+" : String(group.items.length), point.x, point.y + 0.5);
+    ctx.restore?.();
+  };
   if (fullPaint) for (const entry of leaving.values()) draw(entry);
-  for (const entry of redrawEntries) draw(entry);
+  if (fullPaint || markerGroups.value.some(group => group.kind === "cluster")) {
+    for (const group of markerGroups.value) {
+      if (group.kind === "cluster") drawCluster(group);
+      else draw(group.item);
+    }
+  } else {
+    for (const entry of redrawEntries) draw(entry);
+  }
   ctx.globalAlpha = 1;
   if (!fullPaint) ctx.restore();
   if (animating) schedule();
@@ -395,6 +467,18 @@ function hitTest(event: MouseEvent | PointerEvent): Entry | undefined {
   return closest?.entry;
 }
 
+function clusterHitTest(event: MouseEvent | PointerEvent): Extract<MarkerGroup, { kind: "cluster" }> | undefined {
+  const point = canvasPoint(event);
+  if (!point) return undefined;
+  const camera = props.camera;
+  for (const group of markerGroups.value) {
+    if (group.kind !== "cluster") continue;
+    const projected = worldToScreen({ x: group.centerWorldX, y: group.centerWorldY }, camera);
+    if (Math.hypot(projected.x - point.x, projected.y - point.y) <= 21) return group;
+  }
+  return undefined;
+}
+
 function handleCanvasPointerMove(event: PointerEvent): void {
   if (event.pointerType === "touch") return;
   hoveredId.value = hitTest(event)?.place.id;
@@ -405,6 +489,11 @@ function handleCanvasPointerLeave(): void {
 }
 
 function handleCanvasClick(event: MouseEvent): void {
+  const cluster = clusterHitTest(event);
+  if (cluster) {
+    emit("zoomToCluster", { x: cluster.centerWorldX, y: cluster.centerWorldY, placeId: cluster.items[0]!.place.id });
+    return;
+  }
   const entry = hitTest(event);
   if (!entry) return;
   const isSelected = props.selectedPlaceId === entry.place.id;
@@ -489,8 +578,10 @@ onBeforeUnmount(() => {
       @contextmenu.stop.prevent="handleCanvasContextMenu"
       @keydown="handleCanvasKeydown"
     />
-    <div v-if="!canvasHitTesting" v-memo="[entries, selectedPlaceId]" ref="targets" class="nearby-map__place-targets">
-      <button v-for="entry in entries" :key="entry.place.id"
+    <div v-if="!canvasHitTesting || clusterTargets.length" ref="targets" class="nearby-map__place-targets"
+      :class="{ 'nearby-map__place-targets--coarse': canvasHitTesting }">
+      <div v-if="!canvasHitTesting" v-memo="[entries, selectedPlaceId]" class="nearby-map__place-items">
+        <button v-for="entry in entries" :key="entry.place.id"
         :ref="element => { entry.target = element as HTMLButtonElement | undefined; }"
         v-memo="[entry, entry.place.id === selectedPlaceId]"
         class="nearby-map__place" :class="{ 'nearby-map__place--outside': entry.outside, 'nearby-map__place--active': entry.place.id === selectedPlaceId }"
@@ -502,7 +593,19 @@ onBeforeUnmount(() => {
         @click.stop="emit('selectPlace', selectedPlaceId === entry.place.id ? undefined : entry.place.id)"
         @contextmenu.stop.prevent="emit('placeContextMenu', entry.place.id, $event)">
         <span v-if="entry.name" class="nearby-map__place-name-accessible" aria-hidden="true">{{ entry.name }}</span>
-      </button>
+        </button>
+      </div>
+      <button
+        v-for="cluster in clusterTargets"
+        :key="`cluster:${cluster.key}`"
+        class="nearby-map__place-cluster-target"
+        :style="{ left: `${cluster.x}px`, top: `${cluster.y}px` }"
+        :aria-label="t('nearbyStations.placeClusterZoom', { count: cluster.count })"
+        :aria-hidden="visibleClusterKeys.has(cluster.key) ? undefined : true"
+        :tabindex="visibleClusterKeys.has(cluster.key) ? 0 : -1"
+        type="button"
+        @click.stop="emit('zoomToCluster', { x: cluster.centerWorldX, y: cluster.centerWorldY, placeId: cluster.placeId })"
+      />
     </div>
     <div v-for="{ key, entry, tooltip } in activeEntries" :key="key" class="nearby-map__place-active"
       :class="[`nearby-map__place--${entry.place.category}`, { 'nearby-map__place--outside': entry.outside, 'nearby-map__place-active--preview': preview }]"
@@ -522,6 +625,10 @@ onBeforeUnmount(() => {
 .nearby-map__place-canvas { inset: 0; height: 100%; width: 100%; position: absolute; pointer-events: none; z-index: 6; }
 .nearby-map__place-canvas--hit-test { pointer-events: auto; z-index: 4; }
 .nearby-map__place-targets { inset: 0; position: absolute; pointer-events: none; transform-origin: 0 0; z-index: 6; }
+.nearby-map__place-targets--coarse { z-index: 5; }
+.nearby-map__place-items { display: contents; }
+.nearby-map__place-cluster-target, .nearby-map__place-cluster-target:hover:not(:disabled) { background: transparent; border: 0; border-radius: 50%; height: 40px; min-height: 0; min-width: 0; padding: 0; position: absolute; pointer-events: auto; transform: translate(-50%, -50%) scale(var(--place-inverse-scale, 1)); transition: none; width: 40px; }
+.nearby-map__place-cluster-target:focus-visible { outline: 2px solid #3026c8; outline-offset: 2px; }
 /* Hit targets must stay fixed on hover: the global button transform/transition
    otherwise moves them under the pointer and repeatedly retriggers enter/leave. */
 .nearby-map__place, .nearby-map__place:hover:not(:disabled), .nearby-map__place:focus-visible { background: transparent; border: 0; min-height: 0; padding: 0; position: absolute; pointer-events: auto; transform: translate(-50%, -50%) scale(var(--place-inverse-scale, 1)); transition: none; }

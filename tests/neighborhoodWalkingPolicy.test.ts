@@ -14,6 +14,10 @@ vi.mock("../server/services/walking/openRouteService", () => ({
 vi.mock("../server/services/neighborhoodVerdict/dataStore", () => ({ getCompiledNeighborhoodVerdictData: mocks.compiled }));
 vi.mock("../server/services/neighborhoodVerdict/geoApi", () => ({ resolveAdministrativeLocation: mocks.geo }));
 vi.mock("../server/services/neighborhoodVerdict/score", () => ({ buildNeighborhoodVerdict: mocks.build }));
+vi.mock("../server/services/neighborhoodVerdict/natureInCity", async importOriginal => ({
+  ...await importOriginal<typeof import("../server/services/neighborhoodVerdict/natureInCity")>(),
+  readNatureManifest: async () => { throw new Error("No regional greenery fixture"); },
+}));
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.preferred.mockRejectedValue(new Error("PRIM forbidden")); mocks.preferredMatrix.mockRejectedValue(new Error("PRIM forbidden"));

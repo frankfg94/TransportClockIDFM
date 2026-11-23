@@ -518,6 +518,13 @@ function handleVisibilityChange(): void {
   visibility: hidden;
 }
 
+:global(body:has(.verdict-pdf--preview) .app-navigation) {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 18px);
+  visibility: hidden;
+}
+
 .app-navigation__link {
   align-items: center;
   background: transparent;

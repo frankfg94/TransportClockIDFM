@@ -24,7 +24,7 @@ export interface ComparisonPlaceAggregation {
   sample: number;
 }
 export type ComparisonTheme = "commerce" | "economic" | "green" | "transport";
-export type ComparisonMeasure = "count" | "density" | "diversity" | "area" | "share" | "lines" | "stations";
+export type ComparisonMeasure = "count" | "density" | "diversity" | "area" | "share" | "canopy" | "lines" | "stations";
 
 function createPlaceAggregator(neighborhoods: readonly ComparisonNeighborhood[]) {
   const counts: Record<string, ComparisonPlaceCounts> = {};

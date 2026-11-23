@@ -5,7 +5,9 @@ import { aggregateComparisonPlaces, aggregateComparisonPlacesAsync, aggregateCom
 import type { ComparisonNeighborhood } from "../src/features/nearby-stations/neighborhood-comparison/types";
 import type { CompiledPlaceRecord } from "../src/services/places/compiledPlaces";
 import type { TransportMapNetwork } from "../src/features/transport-map/contracts/network";
-import { buildVerdictPdfReport, compareVerdictMetric, withVerdictPdfComparison } from "../src/features/nearby-stations/verdictPdfReport";
+import type { NeighborhoodScoreResult } from "../src/features/nearby-stations/neighborhood/contracts";
+import { buildVerdictPdfReport, compareVerdictMetric, DEFAULT_VERDICT_PDF_OPTIONS, withVerdictPdfCommerceMaps, withVerdictPdfComparison } from "../src/features/nearby-stations/verdictPdfReport";
+import type { CityCommerceSnapshot } from "../src/features/nearby-stations/cityCommerceSnapshot";
 
 function box(x: number, y: number, width = 1, height = 1): VerdictPolygonGeometry {
   return { type: "Polygon", coordinates: [[[x, y], [x + width, y], [x + width, y + height], [x, y + height], [x, y]]] };
@@ -102,6 +104,111 @@ describe("Verdict PDF comparison", () => {
     },
   });
   const data = fixture();
+
+  it("keeps export sections enabled by default and separates dense bus legends after the map", () => {
+    expect(Object.values(DEFAULT_VERDICT_PDF_OPTIONS.sections).every(Boolean)).toBe(true);
+    expect(report.pages.filter(page => page.id === "city-transit-rail-map")).toHaveLength(1);
+    const lines = Array.from({ length: 8 }, (_, index) => ({ id: `bus-${index}`, mode: "BUS" }));
+    const network = {
+      stations: lines.map((line, index) => ({ id: `stop-${index}`, name: `Stop ${index}`, lat: 48.8, lon: 2.3 + index * .00005, lineIds: [line.id] })),
+      linesById: new Map(lines.map(line => [line.id, line])),
+    } as unknown as TransportMapNetwork;
+    const dense = withVerdictPdfComparison(report, undefined, network, { lat: 48.8, lon: 2.3 });
+    const mapIndex = dense.pages.findIndex(page => page.id === "neighborhood-transit-bus-map");
+    expect(dense.pages[mapIndex]).toMatchObject({ kind: "map", separateLegend: true });
+    expect(dense.pages[mapIndex + 1]).toMatchObject({ id: "neighborhood-transit-bus-legend", kind: "legend", legendFor: "bus" });
+  });
+
+  it("lets export callers disable individual sections without changing the defaults", () => {
+    const minimal = buildVerdictPdfReport({
+      locale: "fr", annexes: [], options: { sections: { cityTransitMap: false, comparison: false } }, result: {
+        categories: [], positiveFacts: [], negativeFacts: [], neutralFacts: [], sources: [], warnings: [],
+        totalCategoryCount: 0, availableCategoryCount: 0, coverageRatio: 0, generatedAt: 0,
+      },
+    });
+    expect(minimal.pages.some(page => page.id === "city-transit-rail-map" || page.id === "comparison")).toBe(false);
+    expect(minimal.options.sections.commerceMap).toBe(true);
+    expect(minimal.options.sections.commerceCitywideMap).toBe(true);
+  });
+
+  it("keeps a nearby commerce map and adds a separate full-commune map and legends in dense cities", () => {
+    const commerces = Array.from({ length: 120 }, (_, index) => ({
+      id: `shop-${index}`, lon: index < 80 ? 2.3 + (index % 10) * .0002 : 2.36 + (index % 10) * .0002,
+      lat: 48.8 + (index % 8) * .0001, name: `Commerce ${index}`, category: "shop", groupId: "groceries",
+      iconId: `icon-${index}`, color: "#225533", typeKey: `type-${index}`, place: {},
+    }));
+    const snapshot = {
+      commune: { code: "75056", name: "Paris", bbox: [2, 48, 3, 49] },
+      dataset: {}, places: [], commerces, recordedTotal: commerces.length, mappedTotal: commerces.length, unmappedTotal: 0,
+      categories: Array.from({ length: 120 }, (_, index) => ({ id: `type-${index}`, labelKey: `type-${index}`, iconId: `icon-${index}`, color: "#225533", count: 1 })),
+    } as unknown as CityCommerceSnapshot;
+    const dense = withVerdictPdfCommerceMaps(report, { status: "ready", snapshot }, { lat: 48.8, lon: 2.3 });
+    const mapPages = dense.pages.filter(page => page.kind === "map" && page.mapType === "commerce");
+    const legendPages = dense.pages.filter(page => page.kind === "legend" && page.legendFor === "commerce");
+    expect(mapPages.map(page => page.id)).toEqual(["commune-commerce-map", "commune-commerce-map-overview"]);
+    expect(mapPages.map(page => page.kind === "map" ? page.localCommerceFocus : undefined)).toEqual([true, false]);
+    expect(mapPages.map(page => page.kind === "map" ? page.separateLegend : undefined)).toEqual([true, true]);
+    expect(legendPages.map(page => [page.id, page.kind === "legend" ? page.localCommerceFocus : undefined,
+      page.kind === "legend" ? page.commerceLegendOffset : undefined, page.kind === "legend" ? page.commerceLegendPageCount : undefined]))
+      .toEqual([
+        ["nearby-commerce-legend-1", true, 0, 2], ["nearby-commerce-legend-2", true, 40, 2],
+        ["commune-commerce-legend-overview-1", false, 0, 3], ["commune-commerce-legend-overview-2", false, 40, 3],
+        ["commune-commerce-legend-overview-3", false, 80, 3],
+      ]);
+  });
+
+  it("splits long contents after map pages are added and assigns the final page numbers", () => {
+    const commerces = Array.from({ length: 120 }, (_, index) => ({
+      id: `shop-${index}`, lon: index < 80 ? 2.3 + (index % 10) * .0002 : 2.36 + (index % 10) * .0002,
+      lat: 48.8 + (index % 8) * .0001, name: `Commerce ${index}`, category: "shop", groupId: "groceries",
+      iconId: `icon-${index}`, color: "#225533", typeKey: `type-${index}`, place: {},
+    }));
+    const snapshot = {
+      commune: { code: "75056", name: "Paris", bbox: [2, 48, 3, 49] }, dataset: {}, places: [], commerces,
+      recordedTotal: commerces.length, mappedTotal: commerces.length, unmappedTotal: 0,
+      categories: Array.from({ length: 120 }, (_, index) => ({ id: `type-${index}`, labelKey: `type-${index}`, iconId: `icon-${index}`, color: "#225533", count: 1 })),
+    } as unknown as CityCommerceSnapshot;
+    const dense = withVerdictPdfCommerceMaps(report, { status: "ready", snapshot }, { lat: 48.8, lon: 2.3 });
+    const contents = dense.pages.filter(page => page.kind === "contents");
+    const contentPages = dense.pages.filter(page => page.kind !== "contents");
+    const entries = contents.flatMap(page => page.kind === "contents" ? page.entries : []);
+
+    expect(contents).toHaveLength(2);
+    expect(contents.map(page => page.title)).toEqual(["Sommaire · 1/2", "Sommaire · 2/2"]);
+    expect(entries).toHaveLength(contentPages.length);
+    expect(entries[0]).toEqual({ title: contentPages[0]!.title, page: 3 });
+    expect(entries.at(-1)).toEqual({ title: contentPages.at(-1)!.title, page: dense.pages.length });
+  });
+
+  it("keeps the single municipal view when the local area is not dense", () => {
+    const snapshot = {
+      commune: { code: "92020", name: "Montrouge", bbox: [2, 48, 3, 49] },
+      dataset: {}, commerces: [], categories: [], recordedTotal: 0, mappedTotal: 0, unmappedTotal: 0, places: [],
+    } as unknown as CityCommerceSnapshot;
+    const sparseReport = buildVerdictPdfReport({
+      locale: "fr", annexes: [], options: { maps: { commerceFocusPointThreshold: 1 } },
+      result: { categories: [], positiveFacts: [], negativeFacts: [], neutralFacts: [], sources: [], warnings: [], totalCategoryCount: 0, availableCategoryCount: 0, coverageRatio: 0, generatedAt: 0 },
+    });
+    const sparse = withVerdictPdfCommerceMaps(sparseReport, { status: "ready", snapshot }, { lat: 48.8, lon: 2.3 });
+    expect(sparse.pages.filter(page => page.kind === "map" && page.mapType === "commerce")).toHaveLength(1);
+    expect(sparse.pages.some(page => page.id === "commune-commerce-map-overview")).toBe(false);
+  });
+
+  it("orders school facts by institution type in the education section", () => {
+    const educationReport = buildVerdictPdfReport({ locale: "fr", annexes: [], result: {
+      categories: [{ id: "education", labelKey: "nearbyStations.neighborhoodScore.categories.education", available: true,
+        displayScore: 8, positiveFacts: [
+          { family: "education:high-school", label: "Lycée A" },
+          { family: "education:college", label: "Collège B" },
+          { family: "education:elementary", label: "École C" },
+        ], negativeFacts: [], neutralFacts: [] }],
+      positiveFacts: [], negativeFacts: [], neutralFacts: [], sources: [], warnings: [],
+      totalCategoryCount: 1, availableCategoryCount: 1, coverageRatio: 1, generatedAt: 0,
+    } as unknown as NeighborhoodScoreResult });
+    const educationPage = educationReport.pages.find(page => page.id === "education");
+    expect(educationPage?.kind === "category" ? educationPage.groups.map(group => group.title) : [])
+      .toEqual(["École primaire", "Collège", "Lycée"]);
+  });
 
   it("calculates the peer median and rank with documented values, including true zeroes and ties", () => {
     expect(compareVerdictMetric(8, [8, undefined, 12, 0, 3])).toEqual({ value: 8, median: 5.5, rank: 2, count: 5 });

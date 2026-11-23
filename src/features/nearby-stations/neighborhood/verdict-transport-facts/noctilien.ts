@@ -49,6 +49,7 @@ export function buildNoctilienFacts(
       .sort((left, right) => left.localeCompare(right, "fr-FR", { numeric: true }));
     return {
       line,
+      accessMinutes: access.minutes,
       journey: journeyToNoctilienLine(access.journey, line),
       direction: lineDirections.length === 2
         ? lineDirections.join(" ↔ ")

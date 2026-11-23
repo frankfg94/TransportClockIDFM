@@ -1,5 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { defineComponent, ref } from "vue";
+import { defineComponent, nextTick, ref } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import type { NearbyPlace, PlacesProvider } from "../src/features/nearby-stations/nearbyPlaces";
 import {
@@ -8,6 +8,30 @@ import {
 } from "../src/features/nearby-stations/useNearbyPlaces";
 
 describe("useNearbyPlaces", () => {
+  it("does not replay a scheduled refresh after a manual retry", async () => {
+    vi.useFakeTimers();
+    const radius = ref(600);
+    const searchNearby = vi.fn<PlacesProvider["searchNearby"]>(async () => []);
+    let nearby!: ReturnType<typeof useNearbyPlaces>;
+    const wrapper = mount(defineComponent({ setup() {
+      nearby = useNearbyPlaces({ origin: ref({ lon: 2.3, lat: 48.8 }), radius, enabled: ref(true),
+        provider: { searchNearby, searchDestinations: async () => [] } });
+      return () => null;
+    } }));
+
+    try {
+      radius.value = 1_200;
+      await nextTick();
+      await nearby.refresh();
+      await vi.advanceTimersByTimeAsync(NEARBY_PLACES_REFRESH_DEBOUNCE_MS);
+      expect(searchNearby).toHaveBeenCalledTimes(2);
+      expect(searchNearby.mock.calls[1]?.[0].radiusMeters).toBe(1_200);
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps loading through debounce and every anchor, ignoring a superseded response", async () => {
     vi.useFakeTimers();
     try {

@@ -1,5 +1,6 @@
 import type { IrisNeighborhood, IrisSourceMetadata } from "../../transport-map/iris/irisApi";
 import type { ComparisonPlaceAggregation } from "./aggregate";
+import type { GreenMapReference } from "../../../../shared/natureInCity";
 
 /** A statistical IRIS, not an address verdict or an administrative district. */
 export interface ComparisonNeighborhood extends IrisNeighborhood {
@@ -31,6 +32,8 @@ export interface VerdictScopeData {
   places?: ComparisonPlaceAggregation;
   placesDate?: string;
   green?: Readonly<Record<string, ComparisonGreen>>;
+  greenMap?: Extract<GreenMapReference, { scope: "commune" }>;
+  canopyCoverage?: { period: string; coveredIris: number; totalIris: number };
 }
 
 export function comparisonOriginKey(origin?: { lat: number; lon: number; code?: string }): string {

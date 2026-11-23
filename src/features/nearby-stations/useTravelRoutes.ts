@@ -52,7 +52,7 @@ export function useTravelRoutes(options: {
   const selectedRouteId = ref<string>();
   const isLoading = ref(false);
   const error = ref<Error>();
-  let requestToken = 0;
+  let activeRequest: AbortController | undefined;
   const defaults = createNearbyDataProviders();
   const travelRoutesProvider = options.travelRoutesProvider
     ?? (options.findJourneys ? { findJourneys: options.findJourneys } : defaults.travelRoutes);
@@ -85,15 +85,17 @@ export function useTravelRoutes(options: {
   }
 
   async function refresh(): Promise<void> {
+    cancelActiveRequest();
     turbo.reset();
     const origin = options.origin.value;
     const target = destination.value;
-    const token = ++requestToken;
     if (!origin || !target) {
       baseRoutes.value = [];
       selectedRouteId.value = undefined;
       return;
     }
+    const request = new AbortController();
+    activeRequest = request;
     isLoading.value = true;
     error.value = undefined;
     try {
@@ -105,17 +107,20 @@ export function useTravelRoutes(options: {
         includeDisruptions: true,
         includeGeoJson: true,
         allowedModes: options.allowedModes?.value,
-      });
-      if (token !== requestToken) return;
+      }, request.signal);
+      if (request.signal.aborted) return;
       baseRoutes.value = toTravelRoutes(journeys);
       selectedRouteId.value = routes.value[0]?.id;
     } catch (cause) {
-      if (token !== requestToken) return;
+      if (request.signal.aborted) return;
       baseRoutes.value = [];
       selectedRouteId.value = undefined;
       error.value = cause instanceof Error ? cause : new Error("travel-routes-unavailable");
     } finally {
-      if (token === requestToken) isLoading.value = false;
+      if (activeRequest === request) {
+        activeRequest = undefined;
+        isLoading.value = false;
+      }
     }
   }
 
@@ -137,15 +142,20 @@ export function useTravelRoutes(options: {
     return routes.value.find((route) => route.id === routeId);
   }
 
+  function cancelActiveRequest(): void {
+    activeRequest?.abort();
+    activeRequest = undefined;
+    isLoading.value = false;
+  }
+
   function clear(): void {
     turbo.reset();
-    requestToken += 1;
+    cancelActiveRequest();
     destination.value = undefined;
     departureDateTime.value = "";
     baseRoutes.value = [];
     selectedRouteId.value = undefined;
     error.value = undefined;
-    isLoading.value = false;
   }
 
   watch(
@@ -156,7 +166,7 @@ export function useTravelRoutes(options: {
     () => [...(options.allowedModes?.value ?? [])].sort().join("|"),
     () => { if (destination.value) void refresh(); },
   );
-  onBeforeUnmount(() => { requestToken += 1; });
+  onBeforeUnmount(cancelActiveRequest);
 
   return {
     turbo,

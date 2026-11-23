@@ -122,7 +122,7 @@ export function buildGpeExpressFacts(context: GpeExpressFactsContext) {
       : routeAccess?.source === "route" && routeAccess.via
       ? routeAccess.via
       : currentLineNames[0];
-    positiveFacts.push(makeFact({
+    const fact = makeFact({
       id: `transport-hub-${normalizeScoreText(project.id).replace(/[^a-z0-9]+/gu, "-")}`,
       kind: "transportHub",
       category: "transport",
@@ -149,7 +149,18 @@ export function buildGpeExpressFacts(context: GpeExpressFactsContext) {
         ? "standard"
         : undefined,
       travel: routeAccess?.journey ? { journey: routeAccess.journey } : undefined,
-    }));
+    });
+    // A line already ridden en route is a feeder, not an additional branch
+    // for which this hub provides independent access.
+    const arrivingBy = routeAccess?.journey?.sections.filter(isNearbyJourneyTransitSection) ?? [];
+    const destinationLines = currentLines.filter(line => !arrivingBy.some(section => journeySectionMatchesLine(section, line)));
+    fact.transportMapAccess = {
+      station: { name: project.name, lon: project.lon, lat: project.lat },
+      lines: futureAccess ? [...destinationLines, futureAccess.line] : destinationLines,
+      minutes,
+      via: walkingMinutes === undefined ? routeAccess?.via : undefined,
+    };
+    positiveFacts.push(fact);
   }
 
   return positiveFacts;

@@ -153,6 +153,13 @@ function buildWmsUrl(bounds: GlobalMapBounds, camera: CameraState): string {
   const pixelRatio = Math.max(0.25, Math.min(2, camera.pixelRatio || 1, maxPixelRatio));
   const width = Math.max(1, Math.round(cssWidth * pixelRatio));
   const height = Math.max(1, Math.round(cssHeight * pixelRatio));
+  return buildNearbyNoiseWmsUrl(bounds, width, height);
+}
+
+/** Build the same high-detail Bruitparif WMS request for a fixed report viewport. */
+export function buildNearbyNoiseWmsUrl(bounds: GlobalMapBounds, requestedWidth: number, requestedHeight: number): string {
+  const width = Math.max(1, Math.min(MAX_IMAGE_DIMENSION, Math.round(requestedWidth)));
+  const height = Math.max(1, Math.min(MAX_IMAGE_DIMENSION, Math.round(requestedHeight)));
   const metersPerWorldUnit = 2 * Math.PI * WEB_MERCATOR_EARTH_RADIUS_METERS;
   const minX = (bounds.minX - 0.5) * metersPerWorldUnit;
   const maxX = (bounds.maxX - 0.5) * metersPerWorldUnit;
@@ -165,7 +172,7 @@ function buildWmsUrl(bounds: GlobalMapBounds, camera: CameraState): string {
     LAYERS: NEARBY_NOISE_WMS_LAYER,
     STYLES: "default",
     CRS: "EPSG:3857",
-    BBOX: [minX, minY, maxX, maxY].map((value) => value.toFixed(2)).join(","),
+    BBOX: [minX, minY, maxX, maxY].map(value => value.toFixed(2)).join(","),
     WIDTH: String(width),
     HEIGHT: String(height),
     FORMAT: "image/png",

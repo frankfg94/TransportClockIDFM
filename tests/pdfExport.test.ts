@@ -21,7 +21,9 @@ describe("PDF export platform boundary", () => {
     const canvas = { width: 1, height: 1, toDataURL: () => "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC" };
     capture.mockResolvedValue(canvas);
     const sheets = [{ id: "contents" }, { id: "category" }, { id: "closing" }];
-    const root = { querySelectorAll: () => sheets } as unknown as HTMLElement;
+    const root = {
+      querySelectorAll: (selector: string) => selector === "[data-verdict-pdf-sheet]" ? sheets : [],
+    } as unknown as HTMLElement;
     await expect(downloadNeighborhoodScorePdf(root, "resultats.pdf", "Résultats finaux", new AbortController().signal)).resolves.toMatchObject({ status: "saved" });
     expect(capture.mock.calls.map(([sheet]) => sheet)).toEqual(sheets);
     expect(capture.mock.calls[0]?.[1]).toMatchObject({ scale: 2 });
@@ -36,6 +38,56 @@ describe("PDF export platform boundary", () => {
     const size = /\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/.exec(pdf);
     expect(Number(size?.[1])).toBeCloseTo(595.28, 2);
     expect(Number(size?.[2])).toBeCloseTo(841.89, 2);
+  });
+
+  it("exports with a readable text badge when a remote line pictogram fails", async () => {
+    const source = "https://www.ratp.fr/sites/default/files/lines-assets/4.svg";
+    const fallback = {
+      className: "",
+      style: {},
+      setAttribute: vi.fn(),
+      textContent: "",
+    };
+    const clonedImage = {
+      alt: "Ligne 4",
+      src: source,
+      currentSrc: source,
+      ownerDocument: { createElement: vi.fn(() => fallback) },
+      getAttribute: () => source,
+      setAttribute: vi.fn(),
+      replaceWith: vi.fn(),
+    };
+    const clonedSheet = {
+      querySelectorAll: () => [clonedImage],
+      closest: () => ({ style: {} }),
+    };
+    const canvas = {
+      width: 1,
+      height: 1,
+      toDataURL: () => "data:image/jpeg;base64,AA==",
+    };
+    capture.mockImplementation(async (_sheet, options) => {
+      options.onclone({}, clonedSheet);
+      return canvas;
+    });
+    native.save.mockResolvedValue({ status: "saved" });
+    vi.stubGlobal("location", { href: "http://localhost/", origin: "http://localhost" });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("proxy unavailable")));
+    const image = {
+      currentSrc: source,
+      src: source,
+      getAttribute: () => source,
+    };
+    const root = {
+      querySelectorAll: (selector: string) => selector === ".line-icon-badge img" ? [image] : [{ id: "page" }],
+    } as unknown as HTMLElement;
+
+    await expect(downloadNeighborhoodScorePdf(root, "resultats.pdf", "Résultats finaux", new AbortController().signal))
+      .resolves.toMatchObject({ status: "saved" });
+    expect(fallback.className).toBe("line-icon-badge__fallback");
+    expect(fallback.textContent).toBe("4");
+    expect(clonedImage.replaceWith).toHaveBeenCalledWith(fallback);
+    expect(native.save).toHaveBeenCalledOnce();
   });
 
   it("preserves byte values across multiple base64 chunks", async () => {

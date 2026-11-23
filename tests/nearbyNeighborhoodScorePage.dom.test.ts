@@ -75,6 +75,10 @@ vi.mock("../src/features/nearby-stations/useNearbyNeighborhoodScore", () => ({
 vi.mock("../src/features/nearby-stations/useServiceQuality", () => ({
   useServiceQuality: mocks.useServiceQuality,
 }));
+vi.mock("../src/features/nearby-stations/neighborhood-comparison/VerdictScopeComparison.vue", () => ({
+  __esModule: true,
+  default: { name: "VerdictScopeComparison", render: () => null },
+}));
 
 afterEach(() => {
   vi.unstubAllGlobals();

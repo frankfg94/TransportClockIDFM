@@ -31,7 +31,6 @@ import NearbyStationScheduleInline from "./NearbyStationScheduleInline.vue";
 import NearbyHeavyAccessGuide from "./NearbyHeavyAccessGuide.vue";
 import NearbyLineTraceModal from "./NearbyLineTraceModal.vue";
 import NearbyStationsMap from "./NearbyStationsMap.vue";
-import { placesCityCode } from "./neighborhood-comparison/geometry";
 import NearbyCityCityPicker from "./NearbyCityCityPicker.vue";
 import NearbyPlacesDirectoryOverlay from "./NearbyPlacesDirectoryOverlay.vue";
 import NearbyPlacesRankingModal from "./NearbyPlacesRankingModal.vue";
@@ -55,7 +54,6 @@ import { useNearbyPlaces } from "./useNearbyPlaces";
 import {
   nearbyPlaceDisplayName,
   nearbyPlaceGoogleMapsUrl,
-  isNearbyPlaceCommerce,
   isNearbyPlaceGreenSpace,
   walkingMinutesToMeters,
   type NearbyPlaceGroupId,
@@ -63,6 +61,7 @@ import {
 } from "./nearbyPlacePresentation";
 import { type NearbyPlace, type PlacesProvider } from "./nearbyPlaces";
 import { haversineMeters, type NearbyWalkingRoute } from "./nearbyWalkingRoutes";
+import { loadCityCommerceSnapshot, useCityCommerceSnapshot } from "./cityCommerceSnapshot";
 import { useNearbyWalkingRoutes } from "./useNearbyWalkingRoutes";
 import { saveNearbyNeighborhoodScoreSnapshot } from "./nearbyNeighborhoodScoreSnapshot";
 import { useTravelRoutes, type TravelRoute } from "./useTravelRoutes";
@@ -92,11 +91,7 @@ import { toServerApiUrl } from "../../services/serverApi";
 import type { NearbyCityComparisonPlaceCounts } from "./nearbyCityComparison";
 import { createNearbyDataProviders } from "../../services/nearbyDataProviders";
 import type { CompiledPlacesAccess } from "../../services/places/compiledPlacesProvider";
-import {
-  type CompiledPlacesCityFile,
-  type PlacesRankingDocument,
-  restoreCompiledPlaceName,
-} from "../../services/places/compiledPlaces";
+import type { PlacesRankingDocument } from "../../services/places/compiledPlaces";
 import { buildCitiesLinePatternCities, normalizeCityPatternLabel } from "../line-map/citiesLinePattern";
 import type { GlobalMapLine } from "../transport-map/contracts/manifest";
 import {
@@ -365,12 +360,33 @@ const nearbyPlaces = useNearbyPlaces({
   enabled: nearbyPlacesLoadEnabled,
   provider: nearbyDataProviders.places,
 });
-const cityViewPlaces = shallowRef<NearbyPlace[]>([]);
-const cityViewCommerceCounts = ref<Record<string, number>>({});
-const cityViewCommerceTotal = ref<number>();
-const cityViewCode = ref<string>();
-const cityViewName = ref<string>();
-const cityPlacesRequestToken = ref(0);
+const cityPlacesAccess = placesAccess.loadPlacesManifest && placesAccess.loadPlacesCity ? {
+  loadPlacesManifest: placesAccess.loadPlacesManifest.bind(placesAccess),
+  loadPlacesCity: placesAccess.loadPlacesCity.bind(placesAccess),
+} : undefined;
+const cityCommerceInventory = useCityCommerceSnapshot(
+  () => nearby.selectedPlace.value ? {
+    lat: nearby.selectedPlace.value.lat,
+    lon: nearby.selectedPlace.value.lon,
+    city: nearby.selectedPlace.value.city,
+    code: nearby.selectedPlace.value.code,
+  } : undefined,
+  true,
+  cityPlacesAccess,
+);
+const cityCommerce = computed(() => cityCommerceInventory.snapshot.value);
+const cityViewPlaces = computed((): NearbyPlace[] => {
+  const origin = nearby.selectedPlace.value;
+  if (!origin || !cityCommerce.value) return [];
+  return cityCommerce.value.places.map(place => ({
+    ...place,
+    distanceMeters: Math.round(haversineMeters(origin, place)),
+  }));
+});
+const cityViewCommerceCounts = computed(() => cityCommerce.value?.neighborhoodCommerceCounts ?? {});
+const cityViewCommerceTotal = computed(() => cityCommerce.value?.recordedTotal);
+const cityViewCode = computed(() => cityCommerce.value?.commune.code);
+const cityViewName = computed(() => cityCommerce.value?.commune.name);
 const placesRankingModalOpen = ref(false);
 const placesRanking = shallowRef<PlacesRankingDocument>();
 const placesRankingPopulationByCity = shallowRef<Readonly<Record<string, number>>>({});
@@ -385,65 +401,22 @@ const nearbyPlacesErrorMessage = computed(() => nearbyPlaces.error.value
   ? t("nearbyStations.directory.error")
   : "");
 
-async function loadSelectedCityPlaces(): Promise<void> {
-  const origin = nearby.selectedPlace.value;
-  const token = ++cityPlacesRequestToken.value;
-  cityViewPlaces.value = [];
-  cityViewCommerceCounts.value = {};
-  cityViewCommerceTotal.value = undefined;
-  cityViewCode.value = undefined;
-  cityViewName.value = undefined;
-  if (!origin || !placesAccess.loadPlacesCity) return;
-  try {
-    const cityFile: CompiledPlacesCityFile = await placesAccess.loadPlacesCity({
-      code: origin.code ? placesCityCode(origin.code) : undefined,
-      name: origin.city,
-      lat: origin.lat,
-      lon: origin.lon,
-    });
-    if (token !== cityPlacesRequestToken.value) return;
-    cityViewPlaces.value = cityFile.places.map((cityPlace) => ({
-      ...restoreCompiledPlaceName(cityPlace),
-      cityCode: cityPlace.cityCode ?? cityFile.city.code,
-      distanceMeters: Math.round(haversineMeters(origin, cityPlace)),
-    }));
-    cityViewCommerceCounts.value = { ...(cityFile.neighborhoodCommerceCounts ?? {}) };
-    // Use the same canonical predicate as the map and directory. This also
-    // counts restaurants/cafes/bars in existing assets generated before the
-    // food-amenity ranking rule was added.
-    cityViewCommerceTotal.value = cityFile.places.filter(isNearbyPlaceCommerce).length;
-    cityViewCode.value = cityFile.city.code;
-    cityViewName.value = cityFile.city.name;
-  } catch {
-    if (token !== cityPlacesRequestToken.value) return;
-    cityViewCommerceCounts.value = {};
-    cityViewCommerceTotal.value = undefined;
-    cityViewName.value = undefined;
-  }
-}
-
 async function loadCityViewComparisonPlaceCounts(city: { code: string; name: string; lat: number; lon: number }): Promise<NearbyCityComparisonPlaceCounts | undefined> {
-  if (!placesAccess.loadPlacesCity) return undefined;
-  const cityFile = await placesAccess.loadPlacesCity({
+  if (!cityPlacesAccess) return undefined;
+  const cityFile = await loadCityCommerceSnapshot({
     code: city.code,
-    name: city.name,
+    city: city.name,
     lat: city.lat,
     lon: city.lon,
-  });
+  }, cityPlacesAccess);
   // Keep the comparison aligned with map presentation: commerce uses the
   // canonical commerce predicate, while green spaces only include natural
   // spaces (parks, gardens, reserves and squares), never street furniture.
   return {
-    commerce: cityFile.places.filter(isNearbyPlaceCommerce).length,
+    commerce: cityFile.recordedTotal,
     greenSpaces: cityFile.places.filter(isNearbyPlaceGreenSpace).length,
   };
 }
-
-watch(
-  () => [nearby.selectedPlace.value?.city, nearby.selectedPlace.value?.lat, nearby.selectedPlace.value?.lon] as const,
-  () => void loadSelectedCityPlaces(),
-  { immediate: true },
-);
 
 async function loadPlacesRanking(): Promise<void> {
   if (!placesAccess.loadPlacesRanking || placesRankingLoading.value) return;

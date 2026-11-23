@@ -1,9 +1,11 @@
-import { mount } from "@vue/test-utils";
-import { describe, expect, it, vi } from "vitest";
+import { enableAutoUnmount, mount } from "@vue/test-utils";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import NearbyStationSchedulePanel from "../src/features/nearby-stations/NearbyStationSchedulePanel.vue";
 import TransitBoard from "../src/components/TransitBoard.vue";
 import type { NearbyStationScheduleItem } from "../src/features/nearby-stations/nearbyStationSchedules";
 import type { BoardTrafficAlert } from "../src/features/traffic";
+
+enableAutoUnmount(afterEach);
 
 const item = {
   id: "station:rer:line:rer:B",

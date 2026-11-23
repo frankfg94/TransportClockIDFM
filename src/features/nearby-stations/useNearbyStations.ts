@@ -79,6 +79,7 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
 
   watch(query, (value) => {
     if (selectedPlace.value?.label === value) return;
+    cancelStationScan();
     selectedPlace.value = undefined;
     stations.value = [];
     selections.value = [];
@@ -108,9 +109,7 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
   function scheduleStationScan(): void {
     // Invalidate the old request immediately, including during the debounce.
     // Otherwise a small-radius query can publish against a newly larger radius.
-    scanController?.abort();
-    isScanning.value = false;
-    if (scanTimer !== undefined) window.clearTimeout(scanTimer);
+    cancelStationScan();
     scanTimer = window.setTimeout(() => {
       scanTimer = undefined;
       void scanNearbyStations();
@@ -128,20 +127,22 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
   });
 
   function scheduleSuggestions(value: string): void {
-    if (suggestionTimer !== undefined) window.clearTimeout(suggestionTimer);
-    suggestionController?.abort();
+    cancelGeocoding();
     const normalized = value.trim().toLocaleLowerCase("fr-FR");
     if (!enabled.value || normalized.length < 3) {
       suggestions.value = [];
-      isSuggesting.value = false;
       return;
     }
     const cached = suggestionCache.get(normalized);
     if (cached) {
       suggestions.value = cached;
+      error.value = undefined;
       return;
     }
-    suggestionTimer = window.setTimeout(() => void loadSuggestions(value.trim(), normalized), 280);
+    suggestionTimer = window.setTimeout(() => {
+      suggestionTimer = undefined;
+      void loadSuggestions(value.trim(), normalized);
+    }, 280);
   }
 
   async function loadSuggestions(value: string, cacheKey: string): Promise<void> {
@@ -165,13 +166,14 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
 
   async function searchAddress(): Promise<boolean> {
     const value = query.value.trim();
-    if (value.length < 3) return false;
+    if (value.length < 3 || disposed) return false;
+    cancelGeocoding();
     const controller = new AbortController();
-    suggestionController?.abort();
     suggestionController = controller;
     isSuggesting.value = true;
     try {
       const result = (await geocoder.geocode(value, controller.signal))[0];
+      if (controller.signal.aborted || query.value.trim() !== value) return false;
       if (!result) {
         error.value = { type: "address_not_found", retryable: false };
         return false;
@@ -188,6 +190,8 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
   }
 
   async function selectPlace(place: GeocoderPoint): Promise<void> {
+    if (disposed) return;
+    cancelGeocoding();
     selectedPlace.value = place;
     query.value = place.label ?? query.value;
     suggestions.value = [];
@@ -196,20 +200,25 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
   }
 
   async function useCoordinates(point: Pick<GeocoderPoint, "lon" | "lat">): Promise<void> {
+    if (disposed) return;
+    cancelGeocoding();
+    const controller = new AbortController();
+    suggestionController = controller;
     let place: GeocoderPoint = { ...point, provider: "device" };
     if (geocoder.reverseGeocode) {
       try {
-        place = (await geocoder.reverseGeocode(point))[0] ?? place;
+        place = (await geocoder.reverseGeocode(point, controller.signal))[0] ?? place;
       } catch {
         // Coordinates are sufficient for the local station scan.
       }
     }
+    if (controller.signal.aborted) return;
     await selectPlace({ ...place, label: place.label ?? `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}` });
   }
 
   async function scanNearbyStations(): Promise<void> {
     const place = selectedPlace.value;
-    if (!place) return;
+    if (!place || disposed) return;
     if (scanTimer !== undefined) window.clearTimeout(scanTimer);
     scanTimer = undefined;
     const requestedRadius = radius.value;
@@ -328,6 +337,7 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
       detailLineId,
       forcedLineIds,
     );
+    if (disposed) throw new DOMException("Nearby station selector disposed", "AbortError");
     transportMapNetwork.value = dataSource.getNetwork();
     return result;
   }
@@ -356,6 +366,7 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
   }
 
   async function ensureSource(): Promise<TransportMapDataSource> {
+    if (disposed) throw new DOMException("Nearby station selector disposed", "AbortError");
     if (source) return source;
     if (sourcePromise) return sourcePromise;
     const next = options.createDataSource?.() ?? new TransportMapDataSource();
@@ -381,13 +392,25 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
     }
   }
 
-  function abortPending(): void {
+  function cancelGeocoding(): void {
     suggestionController?.abort();
-    scanController?.abort();
+    suggestionController = undefined;
     if (suggestionTimer !== undefined) window.clearTimeout(suggestionTimer);
-    if (scanTimer !== undefined) window.clearTimeout(scanTimer);
+    suggestionTimer = undefined;
     isSuggesting.value = false;
+  }
+
+  function cancelStationScan(): void {
+    scanController?.abort();
+    scanController = undefined;
+    if (scanTimer !== undefined) window.clearTimeout(scanTimer);
+    scanTimer = undefined;
     isScanning.value = false;
+  }
+
+  function abortPending(): void {
+    cancelGeocoding();
+    cancelStationScan();
   }
 
   onBeforeUnmount(() => {
@@ -406,6 +429,7 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
     const cached = journeyDetail.get(lineId);
     if (cached) return cached;
     const request = journeyQueue.then(async () => {
+      if (disposed) throw new DOMException("Nearby station selector disposed", "AbortError");
       if (!journeySource) {
         journeySource = new TransportMapDataSource();
         await journeySource.initialize();
@@ -422,7 +446,11 @@ export function useNearbyStations(options: UseNearbyStationsOptions = {}) {
     journeyDetail.set(lineId, request);
     return request;
   }
-  onBeforeUnmount(() => { void journeyQueue.then(() => journeySource?.dispose()); });
+  onBeforeUnmount(() => {
+    journeySource?.dispose();
+    journeySource = undefined;
+    journeyDetail.clear();
+  });
 
   return {
     query,

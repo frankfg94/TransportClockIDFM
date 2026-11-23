@@ -620,6 +620,16 @@ export function isNearbyPlaceCommerce(place: NearbyPlacePresentationSource): boo
     || (place.tags ? classifyPlacesRankingCategory({ ...place.tags }) === "commerce" : false);
 }
 
+/** The marker ink used by the communal Nearby map, also used by exports. */
+export function nearbyPlaceMarkerColor(category: NearbyPlacePresentationSource["category"], outside = false): string {
+  const rgb = category === "shop" ? [37, 99, 235]
+    : category === "food" ? [217, 119, 6]
+      : category === "culture" || category === "attraction" ? [124, 58, 237] : [71, 85, 105];
+  if (!outside) return `rgb(${rgb.join(",")})`;
+  const gray = rgb[0]! * .2126 + rgb[1]! * .7152 + rgb[2]! * .0722;
+  return `rgb(${rgb.map(value => Math.round(value * .4 + gray * .6)).join(",")})`;
+}
+
 /** Parks, gardens and other named natural spaces used by the city comparison. */
 export function isNearbyPlaceGreenSpace(place: NearbyPlacePresentationSource): boolean {
   const kind = normalizedPlaceKind(place);
@@ -921,7 +931,7 @@ export function countNearbyPlaces(places: readonly NearbyPlacePresentationSource
   };
 }
 
-export function resolveNearbyPlaceGroupId(place: NearbyPlace): NearbyPlaceGroupId {
+export function resolveNearbyPlaceGroupId(place: Omit<NearbyPlace, "distanceMeters">): NearbyPlaceGroupId {
   const kind = normalizeNearbyPlaceText(place.kind).replace(/\s+/g, "_");
   if (isNearbyPlaceGreenSpace(place)) return "green-spaces";
   for (const group of NEARBY_PLACE_GROUPS) {

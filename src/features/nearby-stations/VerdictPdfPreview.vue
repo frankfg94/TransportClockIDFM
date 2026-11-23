@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import type { Component } from "vue";
+import { Briefcase, Building2, Map as MapIcon, MapPin, ShoppingBag, TrainFront, TreePine } from "lucide-vue-next";
 import { translate } from "../../i18n";
 import { pdfLabel, pdfNumber, type PdfLabel, type VerdictPdfGroup, type VerdictPdfPage, type VerdictPdfReport } from "./verdictPdfReport";
+import VerdictPdfMap from "./VerdictPdfMap.vue";
 
 const props = defineProps<{ report: VerdictPdfReport; preview?: boolean }>();
 const root = ref<HTMLElement>();
@@ -13,6 +16,13 @@ const p = (key: PdfLabel, values?: Parameters<typeof pdfLabel>[2]) => pdfLabel(l
 const noValue = computed(() => translate(locale.value, "nearbyStations.neighborhoodScore.pdfScoreUnavailable"));
 let observer: ResizeObserver | undefined;
 let fitVersion = 0;
+const mapPages = new Map<string, { waitUntilReady: () => Promise<void> }>();
+
+function setMapPageRef(id: string, instance: unknown): void {
+  if (instance && typeof instance === "object" && "waitUntilReady" in instance) {
+    mapPages.set(id, instance as { waitUntilReady: () => Promise<void> });
+  } else mapPages.delete(id);
+}
 
 function groups(page: VerdictPdfPage): VerdictPdfGroup[] {
   return "groups" in page ? page.groups : [];
@@ -32,12 +42,24 @@ function metricValue(value?: number, unit?: string): string {
   return `${pdfNumber(locale.value, value)}${unit ? ` ${unit}` : ""}`;
 }
 
+const metricIcons: Record<string, Component> = {
+  area: MapIcon,
+  areas: MapPin,
+  shops: ShoppingBag,
+  businesses: Briefcase,
+  stations: TrainFront,
+  parks: TreePine,
+};
+
 async function fitPages(): Promise<HTMLElement | undefined> {
   const version = ++fitVersion;
   limits.value = {};
   await nextTick();
   await document.fonts?.ready;
   if (!root.value || version !== fitVersion) return;
+  await Promise.all([...mapPages.values()].map(page => page.waitUntilReady()));
+  if (version !== fitVersion) return;
+  await nextTick();
   const sheets = Array.from(root.value.querySelectorAll<HTMLElement>("[data-verdict-pdf-sheet]"));
   for (const [index, sheet] of sheets.entries()) {
     const page = props.report.pages[index]!;
@@ -96,17 +118,25 @@ defineExpose({ fitPages });
         <div class="vr-body" data-pdf-body>
           <div class="vr-flow">
             <template v-if="page.kind === 'contents'">
-              <div class="vr-cover">
+              <div v-if="page.contentsPage === 1" class="vr-cover">
                 <h1>{{ report.title }}</h1>
                 <p v-if="report.location">{{ report.location }}</p>
               </div>
               <h2>{{ page.title }}</h2>
               <ol class="vr-contents">
-                <li v-for="(entry, entryIndex) in report.pages.slice(1)" :key="entry.id">
-                  <span>{{ entry.title }}</span><b>{{ String(entryIndex + 2).padStart(2, '0') }}</b>
+                <li v-for="entry in page.entries" :key="entry.page">
+                  <span>{{ entry.title }}</span><b>{{ String(entry.page).padStart(2, '0') }}</b>
                 </li>
               </ol>
             </template>
+
+            <div v-else-if="page.kind === 'map' || page.kind === 'legend'" class="vr-map-flow"
+              :class="{ 'vr-map-flow--legend': page.kind === 'legend' }">
+              <h2>{{ page.title }}</h2>
+              <p class="vr-map-subtitle">{{ page.subtitle }}</p>
+              <VerdictPdfMap :ref="instance => setMapPageRef(page.id, instance)" :kind="page.mapType"
+                :page="page" :context="report.mapContext" :options="report.options" />
+            </div>
 
             <template v-else>
               <h2>{{ page.title }}</h2>
@@ -124,8 +154,9 @@ defineExpose({ fitPages });
                 <p v-if="page.city" class="vr-subtitle">{{ page.city }}</p>
                 <dl class="vr-metrics">
                   <div v-for="metric in page.metrics" :key="metric.label" class="vr-metric">
-                    <dt>{{ p(metric.label) }}</dt>
+                    <span class="vr-metric-icon" aria-hidden="true"><component :is="metricIcons[metric.label] ?? Building2" :size="23" :stroke-width="2.1" /></span>
                     <dd :class="{ 'vr-metric-missing': metric.value === undefined }">{{ metricValue(metric.value, metric.unit) }}</dd>
+                    <dt>{{ p(metric.label) }}</dt>
                   </div>
                 </dl>
               </template>
@@ -235,13 +266,19 @@ defineExpose({ fitPages });
 .vr-address { color: var(--vr-muted); font-size: 12px; max-width: 62%; text-align: end; }
 .vr-body { min-height: 0; overflow: hidden; }
 .vr-flow { padding: 32px 0 14px; }
+.vr-sheet--map .vr-body { display: flex; }
+.vr-sheet--map .vr-flow { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; padding: 22px 0 10px; }
+.vr-map-flow { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; gap: 12px; }
+.vr-map-flow h2 { flex: none; }
+.vr-map-subtitle { flex: none; color: var(--vr-muted); font-size: 13px; }
+.vr-map-flow :deep(.vr-map-figure) { flex: 1 1 auto; min-height: 0; }
 .vr-flow h1, .vr-flow h2 { font-weight: 820; letter-spacing: -.025em; line-height: 1.1; }
 .vr-flow h1 { font-size: 49px; }
 .vr-flow h2 { font-size: 37px; margin-bottom: 18px; }
 .vr-cover { margin-bottom: 28px; border-radius: 20px; padding: 25px 28px; background: #eeeaff; }
 .vr-cover p { margin-top: 10px; font-size: 17px; color: var(--vr-muted); }
 .vr-contents { padding: 0; list-style: none; }
-.vr-contents li { display: flex; justify-content: space-between; gap: 20px; padding: 8px 1px; border-bottom: 1px solid var(--vr-rule); font-weight: 650; }
+.vr-contents li { display: flex; justify-content: space-between; gap: 20px; padding: 5px 1px; border-bottom: 1px solid var(--vr-rule); font-size: 13px; font-weight: 650; }
 .vr-contents b { color: var(--vr-accent); font-variant-numeric: tabular-nums; }
 .vr-score-hero { display: grid; grid-template-columns: 1fr 1fr; align-items: end; gap: 24px; border-radius: 18px; padding: 24px; margin: 12px 0 25px; background: #4b36b4; color: #fff; }
 .vr-score-hero strong { display: block; font-size: 46px; line-height: 1.15; font-weight: 820; }
@@ -252,11 +289,12 @@ defineExpose({ fitPages });
 .vr-neighborhood span { color: var(--vr-muted); font-size: 12px; }
 .vr-neighborhood strong { color: var(--vr-accent); font-size: 20px; }
 .vr-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px; }
-.vr-metric { display: flex; flex-direction: column; justify-content: center; gap: 10px; min-height: 140px; padding: 19px; border-radius: 16px; border: 1px solid #ddd6fb; background: #f4f0ff; }
+.vr-metric { position: relative; display: grid; grid-template-columns: 38px minmax(0, 1fr); grid-template-rows: auto auto; align-content: center; align-items: center; column-gap: 12px; row-gap: 7px; min-height: 140px; padding: 19px; border-radius: 16px; border: 1px solid #ddd6fb; background: #f4f0ff; }
 .vr-metric:nth-child(3n+2) { background: #eef5fc; border-color: #d8e7f8; }
 .vr-metric:nth-child(3n) { background: #edf7f3; border-color: #d3eae1; }
-.vr-metric dt { order: 2; font-size: 14px; color: var(--vr-muted); font-weight: 650; }
-.vr-metric dd { color: #30265d; font-size: 34px; line-height: 1.1; font-weight: 820; font-variant-numeric: tabular-nums; }
+.vr-metric-icon { display: grid; grid-row: 1 / span 2; place-items: center; width: 38px; height: 38px; border-radius: 12px; color: #4936b8; background: #fff; box-shadow: 0 1px 3px #30265d18; }
+.vr-metric dt { grid-column: 2; grid-row: 2; font-size: 14px; color: var(--vr-muted); font-weight: 650; }
+.vr-metric dd { grid-column: 2; grid-row: 1; color: #30265d; font-size: 34px; line-height: 1.1; font-weight: 820; font-variant-numeric: tabular-nums; }
 .vr-metric dd.vr-metric-missing { font-size: 17px; color: var(--vr-muted); }
 .vr-comparison { border-collapse: collapse; table-layout: fixed; width: 100%; text-align: start; }
 .vr-comparison :is(th, td) { border-bottom: 1px solid var(--vr-rule); padding: 12px 10px; text-align: start; }

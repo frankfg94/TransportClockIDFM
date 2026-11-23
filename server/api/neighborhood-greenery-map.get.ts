@@ -31,7 +31,7 @@ export default defineEventHandler(async event => {
     const entrances = validOrigin
       ? await readMappedParkEntrances(env, parks[0]!.name, { lat, lon }, boundary).catch(() => undefined)
       : undefined;
-    return { boundary, surfaceM2, entrances };
+    return { name: parks[0]!.name, boundary, surfaceM2, entrances };
   }
   if (typeof version !== "string" || !/^[a-f0-9]{24}$/u.test(version)) throw createError({ statusCode: 400 });
   const reference = scope === "commune" && typeof code === "string" && /^\d{5}$/u.test(code)

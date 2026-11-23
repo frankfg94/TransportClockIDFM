@@ -2,12 +2,14 @@ import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { defineComponent, h, onMounted, ref } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import NearbyNeighborhoodScorePage from "../src/features/nearby-stations/NearbyNeighborhoodScorePage.vue";
+import VerdictPdfMap from "../src/features/nearby-stations/VerdictPdfMap.vue";
+import { resolveVerdictPdfOptions } from "../src/features/nearby-stations/verdictPdfReport";
 import { comparisonOriginKey } from "../src/features/nearby-stations/neighborhood-comparison/types";
 import { useI18n } from "../src/i18n";
 
 const mocks = vi.hoisted(() => ({
   nearby: vi.fn(), heavy: vi.fn(), score: vi.fn(), quality: vi.fn(), walking: vi.fn(), personal: vi.fn(),
-  download: vi.fn(), gpe: vi.fn(),
+  download: vi.fn(), gpe: vi.fn(), commerce: vi.fn(),
 }));
 vi.mock("#imports", async importOriginal => ({
   ...await importOriginal<typeof import("#imports")>(),
@@ -24,6 +26,10 @@ vi.mock("../src/features/nearby-stations/useVerdictPersonalJourneys", () => ({ u
 vi.mock("../src/features/nearby-stations/useTravelRoutes", () => ({ useTravelRoutes: () => ({ probeJourneys: vi.fn() }) }));
 vi.mock("../src/features/transport-map/gpeStationsApi", () => ({ fetchGpeStations: mocks.gpe }));
 vi.mock("../src/features/nearby-stations/neighborhoodScorePdf", () => ({ downloadNeighborhoodScorePdf: mocks.download }));
+vi.mock("../src/features/nearby-stations/cityCommerceSnapshot", async importOriginal => ({
+  ...await importOriginal<typeof import("../src/features/nearby-stations/cityCommerceSnapshot")>(),
+  loadCityCommerceSnapshot: mocks.commerce,
+}));
 
 function fixture() {
   return {
@@ -54,6 +60,10 @@ const ComparisonStub = defineComponent({
     return () => h("div");
   },
 });
+const PdfMapStub = defineComponent({ name: "VerdictPdfMap", setup(_, { expose }) {
+  expose({ waitUntilReady: async () => {} });
+  return () => h("div", { "data-testid": "verdict-pdf-map-stub" });
+} });
 function sectionStub(name: string, title: string) {
   return defineComponent({ name, emits: ["export-state"], setup(_, { emit }) {
     onMounted(() => emit("export-state", { loading: false, section: { title, items: ["Résultat final"] } }));
@@ -64,6 +74,7 @@ async function openPage() {
   wrapper = mount(NearbyNeighborhoodScorePage, { global: { stubs: {
     NuxtLink: true, NearbyNeighborhoodScoreCard: true, VerdictPersonalJourneys: true, AdressBook: true,
     VerdictScopeComparison: ComparisonStub,
+    VerdictPdfMap: PdfMapStub,
     NearbyRealEstateVerdict: sectionStub("NearbyRealEstateVerdict", "Immobilier final"),
     NeighborhoodTrafficAnnex: sectionStub("NeighborhoodTrafficAnnex", "Trafic final"),
   } } });
@@ -78,12 +89,60 @@ beforeEach(() => {
   mocks.score.mockReturnValue(state.score); mocks.quality.mockReturnValue(state.quality);
   mocks.walking.mockReturnValue(state.walking); mocks.personal.mockReturnValue(state.personal);
   mocks.gpe.mockResolvedValue([]); mocks.download.mockResolvedValue({ status: "saved" });
+  mocks.commerce.mockResolvedValue(undefined);
   useI18n().setLanguage("fr");
   vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
 });
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("Verdict PDF asynchronous export", () => {
+  it("settles the map page when WebGL is unavailable", async () => {
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const mapPage = mount(VerdictPdfMap, { props: {
+      kind: "commerce",
+      page: { id: "commerce", kind: "map", mapType: "commerce", title: "Commerces", subtitle: "" },
+      context: { areas: [], selectedCodes: [], greenReferences: [] },
+      options: resolveVerdictPdfOptions(),
+    } });
+    try {
+      await mapPage.vm.waitUntilReady();
+      expect(mapPage.get(".vr-map-notice").text()).toBe("La carte n’a pas pu être préparée.");
+      expect(mapPage.find(".vr-map-loading").exists()).toBe(false);
+    } finally {
+      mapPage.unmount();
+      getContext.mockRestore();
+    }
+  });
+
+  it("exports the focused commerce map and the separate full-commune pages for a dense inventory", async () => {
+    const commerceSnapshot = {
+      key: "75056|test",
+      commune: { code: "75056", name: "Paris", bbox: [2.2, 48.8, 2.5, 49] },
+      dataset: { id: "test", version: "1", generatedAt: "2026-11-23", schemaVersion: 1,
+        normalizationVersion: "1", attribution: "Test", license: "Test" },
+      places: [],
+      commerces: Array.from({ length: 120 }, (_, index) => ({ id: `shop-${index}`, lon: 2.35 + index * 0.000001,
+        lat: 48.85, name: `Commerce ${index}`, category: "commerce", groupId: "shop", iconId: "shop",
+        color: "#593cc3", typeKey: `nearbyCommerce.type${index}`, place: {} })),
+      categories: Array.from({ length: 120 }, (_, index) => ({ id: `type-${index}`, labelKey: `nearbyCommerce.type${index}`,
+        iconId: "shop", color: "#593cc3", count: 1 })),
+      recordedTotal: 120, mappedTotal: 120, unmappedTotal: 0, neighborhoodCommerceCounts: {},
+    };
+    mocks.commerce.mockResolvedValue(commerceSnapshot);
+    const button = await openPage();
+    await button.trigger("click");
+    await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledOnce());
+
+    const root = mocks.download.mock.calls[0]![0] as HTMLElement;
+    const sheets = [...root.querySelectorAll<HTMLElement>("[data-verdict-pdf-sheet]")];
+    const ids = sheets.map(sheet => sheet.dataset.verdictPdfSheet);
+    expect(sheets.find(sheet => sheet.dataset.verdictPdfSheet === "commune-commerce-map")?.querySelector("h2")?.textContent)
+      .toContain("Commerces à proximité de l’adresse");
+    expect(ids.filter(id => id?.startsWith("nearby-commerce-legend-"))).toHaveLength(3);
+    expect(ids).toContain("commune-commerce-map-overview");
+    expect(ids.filter(id => id?.startsWith("commune-commerce-legend-overview-"))).toHaveLength(3);
+  });
+
   it("exports the dated historical warning in the transport section with its facts", async () => {
     vi.stubGlobal("Worker", undefined);
     const old = { startDate: "20190501", endDate: "20190531" };
@@ -115,14 +174,15 @@ describe("Verdict PDF asynchronous export", () => {
     expect(root.getAttribute("aria-hidden")).toBe("true");
     const sheets = [...root.querySelectorAll("[data-verdict-pdf-sheet]")];
     expect(sheets.map(sheet => sheet.querySelector("h2")?.textContent)).toEqual([
-      "Sommaire", "Verdict global", "La ville en quelques chiffres", "Transports", "Trafic final", "Immobilier final",
-      "Comparaison des quartiers", "Sources et limites", "Mot de la fin",
+      "Sommaire", "Verdict global", "La ville en quelques chiffres", "Commerces de la commune", "Tous les transports de la ville · Métro, trains, tram et câble",
+      "Transports autour de l’adresse · Métro, trains, tram et câble", "Bus à proximité", "Noctiliens à proximité", "Parcs et espaces verts", "Bruit à l’échelle du quartier",
+      "Transports", "Trafic final", "Immobilier final", "Comparaison des quartiers", "Sources et limites", "Mot de la fin",
     ]);
-    expect(sheets[0]!.querySelector(".vr-contents li:last-child")?.textContent).toBe("Mot de la fin09");
+    expect(sheets[0]!.querySelector(".vr-contents li:last-child")?.textContent).toBe("Mot de la fin16");
     expect(sheets[1]!.querySelector(".vr-score-hero strong")?.textContent).toBe("7 / 10");
-    expect(sheets[3]!.querySelector(".vr-score")?.textContent).toBe("7 / 10");
-    expect(sheets[3]!.textContent).toContain("Métro accessible");
-    expect(sheets.at(-1)?.querySelector(".vr-footer strong")?.textContent).toBe("Page 9 sur 9");
+    expect(sheets[10]!.querySelector(".vr-score")?.textContent).toBe("7 / 10");
+    expect(sheets[10]!.textContent).toContain("Métro accessible");
+    expect(sheets.at(-1)?.querySelector(".vr-footer strong")?.textContent).toBe("Page 16 sur 16");
     expect(filename).toBe("score-quartier-adresse-de-test.pdf");
     finish({ status: "saved" }); await flushPromises();
     expect(button.element.disabled).toBe(false);
@@ -166,6 +226,17 @@ describe("Verdict PDF asynchronous export", () => {
     const button = await openPage(); await button.trigger("click"); await flushPromises();
     expect(button.element.disabled).toBe(false);
     expect(wrapper!.get('[data-testid="verdict-pdf-export-status"]').text()).toBe(message);
+  });
+
+  it("clears the previous export status when the analyzed address changes", async () => {
+    const button = await openPage();
+    await button.trigger("click"); await flushPromises();
+    expect(wrapper!.get('[data-testid="verdict-pdf-export-status"]').text()).toBe("PDF enregistré.");
+
+    state.nearby.selectedPlace.value = { lon: 2.28, lat: 48.76, label: "Nouvelle adresse" };
+    await flushPromises();
+
+    expect(wrapper!.find('[data-testid="verdict-pdf-export-status"]').exists()).toBe(false);
   });
 
   it("shows native errors and permits a successful retry", async () => {

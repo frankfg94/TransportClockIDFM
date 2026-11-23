@@ -2,6 +2,7 @@ import { toServerApiUrl } from "../../../services/serverApi";
 import { createCompiledPlacesProvider } from "../../../services/places/compiledPlacesProvider";
 import { placesCityCode } from "./geometry";
 import type { ComparisonGreen, NeighborhoodComparisonGeography } from "./types";
+import type { GreenMapReference } from "../../../../shared/natureInCity";
 import { GlobalMapAssetLoader } from "../../transport-map/data/assetLoader";
 
 let places = createCompiledPlacesProvider();
@@ -31,13 +32,23 @@ export async function fetchComparisonGeography(origin: { lat: number; lon: numbe
   return await response.json() as NeighborhoodComparisonGeography;
 }
 
-export async function fetchComparisonGreen(code: string, generatedAt: string, signal: AbortSignal): Promise<Record<string, ComparisonGreen>> {
+export interface ComparisonGreenSnapshot {
+  neighborhoods: Record<string, ComparisonGreen>;
+  greenMap?: Extract<GreenMapReference, { scope: "commune" }>;
+  canopyCoverage?: { period: string; coveredIris: number; totalIris: number };
+}
+
+export async function fetchComparisonGreenSnapshot(code: string, generatedAt: string, signal: AbortSignal): Promise<ComparisonGreenSnapshot> {
   const params = new URLSearchParams({ communeCode: code });
   const response = await fetch(toServerApiUrl(`/api/neighborhood-comparison-green?${params}`), { signal });
   if (!response.ok) throw new Error(String(response.status));
-  const payload = await response.json() as { communeCode: string; generatedAt: string; neighborhoods: Record<string, ComparisonGreen> };
+  const payload = await response.json() as { communeCode: string; generatedAt: string } & ComparisonGreenSnapshot;
   if (payload.communeCode !== code || payload.generatedAt !== generatedAt) throw new Error("Comparison dataset changed");
-  return payload.neighborhoods;
+  return { neighborhoods: payload.neighborhoods, greenMap: payload.greenMap, canopyCoverage: payload.canopyCoverage };
+}
+
+export async function fetchComparisonGreen(code: string, generatedAt: string, signal: AbortSignal): Promise<Record<string, ComparisonGreen>> {
+  return (await fetchComparisonGreenSnapshot(code, generatedAt, signal)).neighborhoods;
 }
 
 export async function fetchComparisonPlaces(communeCode: string) {

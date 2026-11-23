@@ -15,6 +15,7 @@ import { isNeighborhoodGtfsColdStart } from "../../services/travelRoutes/neighbo
 import { beginVerdictDebugTask, isVerdictDebugEnabled, verdictDebugTimeline } from "../../services/verdictDebugTimeline";
 import type { GeocoderPoint } from "../transport-map/contracts/geocoder";
 import { fetchGpeStations } from "../transport-map/gpeStationsApi";
+import type { GlobalMapBounds } from "../transport-map/contracts/manifest";
 import { createFutureGpeProjectFilter } from "./futureGpeProjects";
 import AdressBook from "../address-book/AdressBook.vue";
 import VerdictPersonalJourneys from "./VerdictPersonalJourneys.vue";
@@ -37,7 +38,9 @@ import { useNearbyWalkingRoutes } from "./useNearbyWalkingRoutes";
 import { useTravelRoutes } from "./useTravelRoutes";
 import NearbyNeighborhoodScoreCard from "./NearbyNeighborhoodScoreCard.vue";
 import VerdictPdfPreview from "./VerdictPdfPreview.vue";
-import { buildVerdictPdfReport, withVerdictPdfComparison, type VerdictPdfReport } from "./verdictPdfReport";
+import { buildVerdictPdfReport, resolveVerdictPdfOptions, withVerdictPdfCommerceMaps, withVerdictPdfComparison, type VerdictPdfPage, type VerdictPdfReport } from "./verdictPdfReport";
+import { boundsAroundPoint, boundsForGeometries, collectVerdictHeavyAccess, createVerdictPdfTransitViewport, type VerdictPdfMapContext } from "./verdictPdfMaps";
+import { loadCityCommerceSnapshot } from "./cityCommerceSnapshot";
 import { comparisonOriginKey, type VerdictScopeData } from "./neighborhood-comparison/types";
 import {
   downloadNeighborhoodScorePdf,
@@ -447,6 +450,23 @@ const scopeData = shallowRef<VerdictScopeData>();
 const comparisonOrigin = computed(() => nearby.selectedPlace.value ?? initialOrigin);
 const reportScope = computed(() => scopeData.value?.originKey === comparisonOriginKey(comparisonOrigin.value) ? scopeData.value : undefined);
 const reportNetwork = computed(() => nearby.isScanning.value || nearby.error.value ? undefined : nearby.transportMapNetwork.value);
+const pdfOptions = computed(() => resolveVerdictPdfOptions(nearby.clusterGroupingDistanceMeters ? {
+  transit: { stationGroupingDistanceMeters: nearby.clusterGroupingDistanceMeters.value },
+} : {}));
+type PdfTransitContext = NonNullable<VerdictPdfMapContext["transit"]>;
+const pdfTransitState = shallowRef<{ key: string; transit: PdfTransitContext }>();
+let pdfTransitLoadingKey = "";
+let pdfTransitLoading: Promise<PdfTransitContext> | undefined;
+let pdfTransitGeneration = 1_000_000;
+const pdfCommerceState = shallowRef<{ key: string; commerce: NonNullable<VerdictPdfMapContext["commerce"]> }>();
+let pdfCommerceLoadingKey = "";
+let pdfCommerceLoading: Promise<NonNullable<VerdictPdfMapContext["commerce"]>> | undefined;
+const pdfTransitKey = computed(() => {
+  const codes = reportScope.value?.geography?.neighborhoods.map(area => area.codeIris).sort().join(",") ?? "pending";
+  return `${comparisonOriginKey(comparisonOrigin.value)}|${codes}|${reportNetwork.value ? "network-ready" : "network-pending"}`;
+});
+const pdfCommerceKey = computed(() => comparisonOriginKey(comparisonOrigin.value));
+watch(pdfCommerceKey, () => { pdfExportStatus.value = undefined; });
 const pdfExportMessage = computed(() => {
   const keys = {
     saved: "nearbyStations.neighborhoodScore.exportPdfSaved",
@@ -531,12 +551,129 @@ function createPdfReport(): VerdictPdfReport {
     gtfsWarning: gtfsWarning.value,
     partialError: failedSource.value && failedSource.value !== "coverage" ? scoreError.value : undefined,
     annexes: [trafficPdfSection.value, realEstatePdfSection.value],
+    options: pdfOptions.value,
   });
 }
 
+async function ensurePdfTransit(signal: AbortSignal, waitForScope = true): Promise<PdfTransitContext> {
+  if (waitForScope && reportScope.value?.loading !== false && !signal.aborted) await waitForPdfComparison(signal);
+  signal.throwIfAborted();
+  const key = pdfTransitKey.value;
+  if (pdfTransitState.value?.key === key) return pdfTransitState.value.transit;
+  if (pdfTransitLoading && pdfTransitLoadingKey === key) return pdfTransitLoading;
+
+  pdfTransitLoadingKey = key;
+  pdfTransitLoading = (async () => {
+    const origin = comparisonOrigin.value;
+    const network = reportNetwork.value;
+    const areas = reportScope.value?.geography?.neighborhoods ?? [];
+    if (!origin || !network) return {};
+
+    const cityBounds: GlobalMapBounds = boundsForGeometries(areas.map(area => area.geometry))
+      ?? boundsAroundPoint({ lon: origin.lon, lat: origin.lat }, 4_000);
+    const localRadius = Math.max(1_000, pdfOptions.value.transit.busNearbyRadiusMeters);
+    const localBounds = boundsAroundPoint({ lon: origin.lon, lat: origin.lat }, localRadius);
+    // Keep the queries sequential: TransportMapDataSource intentionally
+    // cancels older viewport generations so rapid map gestures stay current.
+    const city = await nearby.queryTransportMapViewport(
+      createVerdictPdfTransitViewport(cityBounds, ++pdfTransitGeneration, 13),
+    );
+    signal.throwIfAborted();
+    const neighborhood = await nearby.queryTransportMapViewport(
+      createVerdictPdfTransitViewport(localBounds, ++pdfTransitGeneration, 16),
+    );
+    signal.throwIfAborted();
+    const railIds = [...new Set(city.paths.map(path => path.lineId)
+      .filter(id => network.linesById.get(id)?.mode === "RER"))];
+    const detailedRailPaths = (await Promise.all(railIds.map(id =>
+      nearby.loadJourneyDetailPaths(id).catch(() => [])))).flat();
+    signal.throwIfAborted();
+    return {
+      detailedRailPaths,
+      "city-transit": { paths: city.paths, stations: city.stations },
+      "neighborhood-transit": { paths: neighborhood.paths, stations: neighborhood.stations },
+    };
+  })();
+  try {
+    const transit = await pdfTransitLoading;
+    if (key === pdfTransitKey.value) pdfTransitState.value = { key, transit };
+    return transit;
+  } catch {
+    const transit: PdfTransitContext = {};
+    if (!signal.aborted && key === pdfTransitKey.value) pdfTransitState.value = { key, transit };
+    return transit;
+  } finally {
+    if (pdfTransitLoadingKey === key) {
+      pdfTransitLoadingKey = "";
+      pdfTransitLoading = undefined;
+    }
+  }
+}
+
+async function ensurePdfCommerce(signal: AbortSignal): Promise<NonNullable<VerdictPdfMapContext["commerce"]>> {
+  signal.throwIfAborted();
+  const key = pdfCommerceKey.value;
+  if (pdfCommerceState.value?.key === key) return pdfCommerceState.value.commerce;
+  if (pdfCommerceLoading && pdfCommerceLoadingKey === key) return pdfCommerceLoading;
+  const origin = comparisonOrigin.value;
+  pdfCommerceLoadingKey = key;
+  pdfCommerceLoading = (async () => {
+    if (!origin) return { status: "unavailable" as const };
+    try {
+      const snapshot = await loadCityCommerceSnapshot({
+        lat: origin.lat, lon: origin.lon, city: origin.city, code: origin.code,
+      });
+      return { status: "ready" as const, snapshot };
+    } catch {
+      return { status: "unavailable" as const };
+    }
+  })();
+  try {
+    const commerce = await pdfCommerceLoading;
+    signal.throwIfAborted();
+    if (key === pdfCommerceKey.value) pdfCommerceState.value = { key, commerce };
+    return commerce;
+  } finally {
+    if (pdfCommerceLoadingKey === key) {
+      pdfCommerceLoadingKey = "";
+      pdfCommerceLoading = undefined;
+    }
+  }
+}
+
+function enrichPdfMapContext(report: VerdictPdfReport, commerce?: NonNullable<VerdictPdfMapContext["commerce"]>): VerdictPdfReport {
+  const origin = comparisonOrigin.value;
+  const savedPlace = addressBook.entries.value.find(entry => origin
+    && Math.abs(entry.lat - origin.lat) < 0.0001 && Math.abs(entry.lon - origin.lon) < 0.0001);
+  const transport = score.result.value.categories.find(category => category.id === "transport");
+  const facts = transport?.positiveFacts ?? [];
+  report.mapContext.originIcon = savedPlace?.icon ?? "pin";
+  if (commerce) report.mapContext.commerce = commerce;
+  report.mapContext.heavyAccess = collectVerdictHeavyAccess(facts);
+  report.mapContext.nightAccess = facts.filter(fact => fact.kind === "noctilienAtNight")
+    .flatMap(fact => fact.travel?.routes ?? [])
+    .flatMap(({ line, accessMinutes, journey }) => {
+      const station = journey.sections.at(-1)?.fromName;
+      return accessMinutes !== undefined && station ? [{ code: line, minutes: accessMinutes, station }] : [];
+    });
+  return withVerdictPdfCommerceMaps(report, report.mapContext.commerce,
+    origin ? { lat: origin.lat, lon: origin.lon } : undefined);
+}
+
 const pdfPreviewReport = computed(() => pdfPreviewEnabled.value && exportReady.value
-  ? withVerdictPdfComparison(createPdfReport(), reportScope.value, reportNetwork.value)
+  && pdfTransitState.value?.key === pdfTransitKey.value
+  && pdfCommerceState.value?.key === pdfCommerceKey.value
+  ? enrichPdfMapContext(withVerdictPdfComparison(createPdfReport(), reportScope.value, reportNetwork.value,
+    comparisonOrigin.value ? { lat: comparisonOrigin.value.lat, lon: comparisonOrigin.value.lon } : undefined,
+    pdfTransitState.value.transit), pdfCommerceState.value.commerce)
   : undefined);
+
+watch([pdfPreviewEnabled, exportReady, pdfTransitKey, pdfCommerceKey, reportNetwork], ([preview, ready]) => {
+  if (preview && ready) {
+    void ensurePdfTransit(pdfLifetime.signal);
+    void ensurePdfCommerce(pdfLifetime.signal);
+  }
+}, { immediate: true });
 
 function waitForPdfComparison(signal: AbortSignal): Promise<void> {
   if (reportScope.value?.loading === false || signal.aborted) return Promise.resolve();
@@ -573,13 +710,21 @@ async function exportScorePdf(): Promise<void> {
     await waitForPdfComparison(signal);
     signal.throwIfAborted();
     if (originKey !== comparisonOriginKey(comparisonOrigin.value)) throw new Error("Verdict address changed");
-    captureReport.value = withVerdictPdfComparison(report, reportScope.value, network);
+    const transit = await ensurePdfTransit(signal, false);
+    const commerce = await ensurePdfCommerce(signal);
+    signal.throwIfAborted();
+    if (originKey !== comparisonOriginKey(comparisonOrigin.value)) throw new Error("Verdict address changed");
+    captureReport.value = withVerdictPdfComparison(report, reportScope.value, network,
+      comparisonOrigin.value ? { lat: comparisonOrigin.value.lat, lon: comparisonOrigin.value.lon } : undefined,
+      transit);
+    captureReport.value = enrichPdfMapContext(captureReport.value, commerce);
     await nextTick();
     const root = await pdfCapture.value?.fitPages();
     if (!root) throw new Error("Verdict PDF layout is unavailable");
     const outcome = await downloadNeighborhoodScorePdf(root, `score-quartier${fileAddress ? `-${fileAddress}` : ""}.pdf`, report.title, signal);
     pdfExportStatus.value = outcome.status;
-  } catch {
+  } catch (error) {
+    console.error("Verdict PDF export failed", error);
     pdfExportStatus.value = "error";
   } finally {
     captureReport.value = undefined;
@@ -891,7 +1036,7 @@ function selectWalkingPlaces(places: readonly NearbyPlace[]): NearbyPlace[] {
     </div>
     <div v-if="initialOrigin" id="verdict-scope-panel" role="tabpanel" :aria-labelledby="`verdict-tab-${verdictScope}`" tabindex="0">
       <VerdictScopeComparison :origin="comparisonOrigin" :scope="verdictScope" :network="nearby.transportMapNetwork.value"
-        :transport-ready="!nearby.isScanning.value && !nearby.error.value" @report-state="scopeData = $event" />
+        :transport-ready="!nearby.isScanning.value && !nearby.error.value" :transport-error="Boolean(nearby.error.value)" @report-state="scopeData = $event" />
     <NearbyNeighborhoodScoreCard
       v-if="verdictScope === 'neighborhood'"
       :result="cardResult"
