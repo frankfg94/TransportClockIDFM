@@ -6,9 +6,11 @@ import {
   createTransitPlace,
   loadTransitPresetState,
   saveTransitPresetState,
+  updateTransitPlacePreferences,
 } from "../src/storage/transitPreferences";
 import { transitBoards } from "../src/config/transitBoards";
 import type { Departure, DepartureCallingPattern, TransitBoardConfig } from "../src/types/transit";
+import { rerABoard, rerABranchTopology, rerADisruption, rerALineRef } from "./fixtures/dashboardTrafficBranches";
 
 let route: {
   path: string;
@@ -667,6 +669,59 @@ describe("dashboard presets", () => {
 
     wrapper.unmount();
   });
+
+  it("shows only the station's interruptions in the home modal and fullscreen panel", async () => {
+    const poissy = rerABoard("poissy");
+    const boissy = rerABoard("boissy");
+    const state = createDefaultTransitPresetState(transitBoards);
+    saveTransitPresetState(updateTransitPlacePreferences(state, "home", {
+      ...state.places.find(({ id }) => id === "home")!.preferences,
+      customBoards: [poissy, boissy],
+      visibleBoardIds: [poissy.id, boissy.id],
+      boardOrderIds: [poissy.id, boissy.id],
+    }));
+    installDashboardMocks({ place: "home", fullscreen: poissy.id }, {
+      trafficFilterByDashboardBranches: true,
+    }, { apiConfigured: true });
+    const disruptions = [
+      rerADisruption("cergy-works", "Le trafic est interrompu entre Maisons-Laffitte et Cergy le Haut."),
+      rerADisruption("poissy-works", "Le trafic est interrompu entre Maisons-Laffitte et Poissy."),
+      rerADisruption("poissy-incident", "Le trafic est interrompu entre Maisons-Laffitte et Poissy."),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/topology")) return Response.json(rerABranchTopology);
+      if (url.includes("/api/traffic")) return Response.json({
+        lines: [{ lineRef: rerALineRef, status: "disrupted", disruptions }],
+      });
+      return Response.json({ available: true });
+    }));
+
+    const { default: App } = await import("../src/App.vue");
+    const wrapper = mount(App, { attachTo: document.body });
+    try {
+      const fullscreenAlert = ".fullscreen-station-panel__alert";
+      await vi.waitFor(() => expect(document.body.querySelector(fullscreenAlert)).toBeTruthy());
+      document.body.querySelector<HTMLElement>(fullscreenAlert)!.click();
+      await vi.waitFor(() => expect(document.body.querySelectorAll(".traffic-alert-modal__stepper-dot")).toHaveLength(2));
+      expect(document.body.querySelector(".traffic-alert-modal__detail")?.textContent).toContain("Poissy");
+
+      route.query = { place: "home" };
+      await flushPromises();
+      const poissyCard = wrapper.get('[data-board-id="poissy"]');
+      expect(wrapper.get('[data-board-id="boissy"]').find(".mock-traffic").exists()).toBe(false);
+      await poissyCard.get(".mock-traffic").trigger("click");
+      expect(wrapper.findAll(".traffic-alert-modal__stepper-dot")).toHaveLength(2);
+      await wrapper.get(".traffic-alert-modal__go-to-traffic").trigger("click");
+      expect(router.push).toHaveBeenLastCalledWith({
+        path: "/traffic",
+        query: expect.objectContaining({ alertId: "poissy-works", place: "home", trafficTab: "current" }),
+      });
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it("creates a custom place from the switcher and navigates to it", async () => {
     installDashboardMocks({});
     const { default: App } = await import("../src/App.vue");

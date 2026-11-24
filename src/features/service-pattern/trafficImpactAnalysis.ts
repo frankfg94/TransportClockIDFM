@@ -251,6 +251,16 @@ export function getPatternTrafficEdgeKey(edge: PatternTrafficEdge): string {
   return [edge.source, edge.target].sort().join("--");
 }
 
+export function getTrafficSectionEvidence(disruption: TrafficDisruption) {
+  const text = getDisruptionText(disruption);
+  return {
+    sections: extractTrafficSections(text),
+    lineWide: /\b(?:(?:toute|ensemble de) la ligne|reste de la ligne|ligne entiere|(?:whole|entire|rest of the) line|line wide|all (?:branches|stations)|toutes les (?:branches|gares|stations))\b/u.test(
+      normalizeSearchText(text),
+    ),
+  };
+}
+
 function parseTrafficDisruption(
   disruption: TrafficDisruption,
 ): ParsedTrafficDisruption {

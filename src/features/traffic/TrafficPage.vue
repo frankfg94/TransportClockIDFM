@@ -8,12 +8,15 @@ import MaterialCombobox from "../../components/MaterialCombobox.vue";
 import { useI18n } from "../../i18n";
 import TrafficDisruptionCard from "./TrafficDisruptionCard.vue";
 import LineTrafficIcon from "./LineTrafficIcon.vue";
+import TrafficDashboardBranchToggle from "./TrafficDashboardBranchToggle.vue";
 import {
   trafficInfoDesignOptions,
   useAppSettings,
   type TrafficInfoDesign,
 } from "../app-settings/appSettings";
-import { getActiveTrafficLines } from "./activeTrafficLines";
+import { getActiveTrafficBoards, groupActiveTrafficLines } from "./activeTrafficLines";
+import { resolveBoardTrafficLineRef } from "./dashboardTrafficBranches";
+import { useDashboardTrafficBranches } from "./useDashboardTrafficBranches";
 import {
   fetchTransitFamilyOptions,
   searchTransitLines,
@@ -33,7 +36,7 @@ import {
   getTrafficAlertPresentation,
   type TrafficAlertPresentation,
 } from "./trafficPresentation";
-import type { LineSearchOption, TransitFamily } from "../../types/transit";
+import type { LineSearchOption, TransitBoardConfig, TransitFamily } from "../../types/transit";
 import type { TransitMode } from "../../types/transit";
 import type {
   ActiveTrafficLine,
@@ -51,7 +54,8 @@ import {
 
 type TrafficLineSymbol = TrafficAlertPresentation["symbol"] | "roadwork" | "";
 
-const activeLines = ref<ActiveTrafficLine[]>([]);
+const activeBoards = ref<TransitBoardConfig[]>([]);
+const activeLines = computed(() => groupActiveTrafficLines(activeBoards.value));
 const allTrafficLines = ref<ActiveTrafficLine[]>([]);
 const reports = ref<TrafficLineReport[]>([]);
 const generatedAt = ref("");
@@ -97,9 +101,35 @@ const allLinesError = computed(() => {
 });
 const allLinesRetryBlocked = computed(() => allLinesRateLimited.value && retrySeconds.value > 0);
 
-const reportByLineRef = computed(
+const rawReportByLineRef = computed(
   () => new Map(reports.value.map((report) => [report.lineRef, report])),
 );
+const boardsByLineRef = computed(() => {
+  const groups = new Map<string, TransitBoardConfig[]>();
+  for (const board of activeBoards.value) {
+    const lineRef = resolveBoardTrafficLineRef(board);
+    const boards = groups.get(lineRef) ?? [];
+    boards.push(board);
+    groups.set(lineRef, boards);
+  }
+  return groups;
+});
+const filterDashboardTrafficReport = useDashboardTrafficBranches(
+  computed(() => settings.value.trafficFilterByDashboardBranches),
+  activeBoards,
+  rawReportByLineRef,
+);
+const reportByLineRef = computed(() => new Map(reports.value.map((report) => [
+  report.lineRef,
+  filterDashboardTrafficReport(report, boardsByLineRef.value.get(report.lineRef) ?? []),
+])));
+const dashboardBranchFilter = computed({
+  get: () => settings.value.trafficFilterByDashboardBranches,
+  set: (value) => {
+    updateSettings({ trafficFilterByDashboardBranches: value });
+    scheduleTrafficDisruptionScrollReset();
+  },
+});
 const isRatpDesign = computed(
   () => settings.value.trafficInfoDesign === "ratp",
 );
@@ -170,7 +200,7 @@ const informationTime = computed(() => {
 });
 const disruptedLineCount = computed(
   () =>
-    reports.value.filter((report) =>
+    [...reportByLineRef.value.values()].filter((report) =>
       ["disrupted", "planned", "information"].includes(report.status),
     ).length,
 );
@@ -188,8 +218,13 @@ const trafficInfoDesignLocalizedOptions = computed(() =>
 );
 
 onMounted(() => {
-  activeLines.value = getActiveTrafficLines(getRoutePlaceId());
+  activeBoards.value = getActiveTrafficBoards(getRoutePlaceId());
   allLinesMode.value = settings.value.trafficInfoDefaultScope === "all";
+  void initializeTrafficPage();
+});
+
+watch(getRoutePlaceId, (placeId) => {
+  activeBoards.value = getActiveTrafficBoards(placeId);
   void initializeTrafficPage();
 });
 
@@ -459,6 +494,12 @@ function getLineReport(line: ActiveTrafficLine): TrafficLineReport {
       disruptions: [],
     }
   );
+}
+
+function getEmptyReportMessage(lineRef: string): string {
+  return rawReportByLineRef.value.get(lineRef)?.disruptions.length
+    ? t("traffic.noDashboardBranchDisruption")
+    : t("traffic.noDisruption");
 }
 
 function toggleLine(lineRef: string): void {
@@ -953,6 +994,7 @@ function getLineTone(
                     }}</span>
                   </div>
                 </header>
+                <TrafficDashboardBranchToggle v-model="dashboardBranchFilter" />
                 <p
                   v-if="selectedRatpDetail.report.error"
                   class="traffic-details__error"
@@ -963,7 +1005,7 @@ function getLineTone(
                   v-else-if="selectedRatpDetail.report.disruptions.length === 0"
                   class="traffic-details__normal"
                 >
-                  {{ t("traffic.noDisruption") }}
+                  {{ getEmptyReportMessage(selectedRatpDetail.line.navitiaLineRef) }}
                 </p>
                 <template v-else>
                   <div class="traffic-timing-tabs" role="tablist">
@@ -1194,6 +1236,7 @@ function getLineTone(
                   v-if="expandedLineRefs.has(line.navitiaLineRef)"
                   class="traffic-details"
                 >
+                  <TrafficDashboardBranchToggle v-model="dashboardBranchFilter" />
                   <p
                     v-if="getLineReport(line).error"
                     class="traffic-details__error"
@@ -1204,7 +1247,7 @@ function getLineTone(
                     v-else-if="getLineReport(line).disruptions.length === 0"
                     class="traffic-details__normal"
                   >
-                    {{ t("traffic.noDisruption") }}
+                    {{ getEmptyReportMessage(line.navitiaLineRef) }}
                   </p>
                   <template v-else>
                     <div class="traffic-timing-tabs" role="tablist">

@@ -102,6 +102,23 @@ const { n, t } = useI18n();
         @update:model-value="emit('update-default-scope', $event)"
       />
     </div>
+    <label v-if="isSettingVisible('traffic.dashboard-branches', 'traffic')" class="settings-toggle">
+      <input
+        type="checkbox"
+        :checked="settings.trafficFilterByDashboardBranches"
+        @change="
+          emit('update-settings', {
+            trafficFilterByDashboardBranches: ($event.target as HTMLInputElement).checked,
+          })
+        "
+      />
+      <span></span>
+      <div>
+        <strong>{{ t("traffic.dashboardBranches") }}</strong>
+        <small>{{ t("traffic.dashboardBranchesDescription") }}</small>
+      </div>
+    </label>
+
     <article
       v-if="isSettingVisible('traffic.cache', 'traffic')"
       class="traffic-cache-settings"

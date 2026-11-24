@@ -57,6 +57,7 @@ const baseSettings: AppSettings = {
   trafficCalendarImpactScope: "all-impacts",
   trafficInfoDesign: "ratp",
   trafficInfoDefaultScope: "optimized",
+  trafficFilterByDashboardBranches: true,
   trafficWarningLookaheadDays: 10,
   fullscreenStationPanelDesign: "all-directions",
   fullscreenStationPanelDarkTheme: false,

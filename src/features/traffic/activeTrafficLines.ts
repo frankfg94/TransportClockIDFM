@@ -5,23 +5,35 @@ import {
   loadTransitPreferences,
 } from "../../storage/transitPreferences";
 import type { TransitBoardConfig } from "../../types/transit";
-import { normalizeTrafficLineRef } from "./trafficNormalization";
+import { resolveBoardTrafficLineRef } from "./dashboardTrafficBranches";
 import type { ActiveTrafficLine } from "./types";
 
-export function getActiveTrafficLines(placeId?: string): ActiveTrafficLine[] {
+export function getActiveTrafficBoards(placeId?: string): TransitBoardConfig[] {
   const preferences =
     typeof window === "undefined"
       ? createDefaultPreferences(transitBoards)
       : loadTransitPreferences(transitBoards, placeId);
-  const boards = [...transitBoards, ...preferences.customBoards].filter(
-    (board) => preferences.visibleBoardIds.includes(board.id),
-  );
+  const visibleBoardIds = new Set(preferences.visibleBoardIds);
+  const order = new Map(preferences.boardOrderIds.map((id, index) => [id, index]));
+  return [...transitBoards, ...preferences.customBoards]
+    .filter((board) => visibleBoardIds.has(board.id))
+    .sort((left, right) =>
+      (order.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+      (order.get(right.id) ?? Number.MAX_SAFE_INTEGER),
+    );
+}
+
+export function getActiveTrafficLines(placeId?: string): ActiveTrafficLine[] {
+  return groupActiveTrafficLines(getActiveTrafficBoards(placeId));
+}
+
+export function groupActiveTrafficLines(boards: readonly TransitBoardConfig[]): ActiveTrafficLine[] {
   const linesByRef = new Map<string, ActiveTrafficLine>();
 
   boards
     .filter((board) => board.line.mode !== "bus")
     .forEach((board) => {
-      const navitiaLineRef = resolveBoardNavitiaLineRef(board);
+      const navitiaLineRef = resolveBoardTrafficLineRef(board);
       const existing = linesByRef.get(navitiaLineRef);
 
       if (existing) {
@@ -40,8 +52,4 @@ export function getActiveTrafficLines(placeId?: string): ActiveTrafficLine[] {
     });
 
   return Array.from(linesByRef.values());
-}
-
-function resolveBoardNavitiaLineRef(board: TransitBoardConfig): string {
-  return normalizeTrafficLineRef(board.schedule?.lineRef ?? board.line.ref);
 }

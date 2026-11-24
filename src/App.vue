@@ -43,9 +43,10 @@ import {
 import { clearNearbyStationsDraft } from "./features/nearby-stations/nearbyStationsDraft";
 import {
   getBoardTrafficAlertForReport,
-  normalizeTrafficLineRef,
   type BoardTrafficAlert,
 } from "./features/traffic";
+import { resolveBoardTrafficLineRef } from "./features/traffic/dashboardTrafficBranches";
+import { useDashboardTrafficBranches } from "./features/traffic/useDashboardTrafficBranches";
 import { createBoardFromDraft } from "./services/boardBuilder";
 import { transitModeToFamily } from "./services/linePresentation";
 import { fetchBoardDepartures, fetchDepartureCallingPattern, fetchDirectionGroupsForStation } from "./services/idfm";
@@ -232,10 +233,7 @@ const fullscreenPanelBoard = ref<TransitBoardConfig>();
 const fullscreenPanelPanamDirectionId = ref<string>();
 const fullscreenPanelRouteDesignOverride = ref<FullscreenStationPanelDesign>();
 const fullscreenPanelEnteredNativeFullscreen = ref(false);
-const homeTrafficModalTarget = ref<{
-  board: TransitBoardConfig;
-  alert: BoardTrafficAlert;
-}>();
+const homeTrafficModalTarget = ref<TransitBoardConfig>();
 const homeTrafficModalOpen = ref(false);
 const alarmTarget = ref<{
   board: TransitBoardConfig;
@@ -788,6 +786,24 @@ const navitiaRateLimitMessage = computed(() =>
 const trafficReportByLineRef = computed(
   () => new Map(trafficReports.value.map((report) => [report.lineRef, report])),
 );
+const dashboardTrafficBoards = computed(() => {
+  if (isAutoDashboard.value) return [];
+  const fullscreenBoard = fullscreenPanelBoard.value;
+  return fullscreenBoard && !visibleBoards.value.some((board) => board.id === fullscreenBoard.id)
+    ? [...visibleBoards.value, fullscreenBoard]
+    : visibleBoards.value;
+});
+const filterDashboardTrafficReport = useDashboardTrafficBranches(
+  computed(() => settings.value.trafficFilterByDashboardBranches),
+  dashboardTrafficBoards,
+  trafficReportByLineRef,
+);
+watch(
+  () => fullscreenPanelBoard.value && resolveBoardTrafficLineRef(fullscreenPanelBoard.value),
+  (lineRef) => {
+    if (lineRef && !trafficReportByLineRef.value.has(lineRef)) void refreshTrafficSummary();
+  },
+);
 const fullscreenPanelDirections = computed<FullscreenPanelDirection[]>(() =>
   fullscreenPanelBoard.value ? getFullscreenPanelDirections(fullscreenPanelBoard.value) : [],
 );
@@ -801,8 +817,11 @@ const fullscreenPanelTrafficAlert = computed(() => {
   return getTrafficAlertModalData(board, getBoardTrafficAlert(board));
 });
 const homeTrafficModalAlert = computed<TrafficAlertModalData | undefined>(() => {
-  const target = homeTrafficModalTarget.value;
-  return target ? getTrafficAlertModalData(target.board, target.alert) : undefined;
+  const board = homeTrafficModalTarget.value;
+  return board ? getTrafficAlertModalData(board, getBoardTrafficAlert(board)) : undefined;
+});
+watch(homeTrafficModalAlert, (alert) => {
+  if (!alert && homeTrafficModalOpen.value) closeHomeTrafficModal();
 });
 const fullscreenPanelUpdatedAtLabel = computed(() => {
   const board = fullscreenPanelBoard.value;
@@ -1051,7 +1070,7 @@ async function refreshTrafficSummary(): Promise<void> {
     return;
   }
 
-  const lineRefs = Array.from(new Set(visibleBoards.value.map(resolveBoardTrafficLineRef)));
+  const lineRefs = Array.from(new Set(dashboardTrafficBoards.value.map(resolveBoardTrafficLineRef)));
 
   if (lineRefs.length === 0) {
     if (requestId === trafficSummaryRequest) trafficReports.value = [];
@@ -1957,7 +1976,7 @@ function getTrafficAlertModalData(
     return undefined;
   }
 
-  const report = trafficReportByLineRef.value.get(resolveBoardTrafficLineRef(board));
+  const report = getDashboardTrafficReport(board);
   const targets = alert.targets?.length ? alert.targets : [alert.target];
   const disruptionsById = new Map(
     report?.disruptions.map((disruption) => [disruption.id, disruption]) ?? [],
@@ -1974,8 +1993,8 @@ function getTrafficAlertModalData(
   };
 }
 
-function openHomeTrafficModal(board: TransitBoardConfig, alert: BoardTrafficAlert): void {
-  homeTrafficModalTarget.value = { board, alert };
+function openHomeTrafficModal(board: TransitBoardConfig): void {
+  homeTrafficModalTarget.value = board;
   homeTrafficModalOpen.value = true;
 }
 
@@ -1985,14 +2004,15 @@ function closeHomeTrafficModal(): void {
 }
 
 function goToTrafficPageFromHome(): void {
-  const target = homeTrafficModalTarget.value;
+  const board = homeTrafficModalTarget.value;
 
-  if (!target) {
+  if (!board) {
     return;
   }
 
+  const alert = getBoardTrafficAlert(board);
   closeHomeTrafficModal();
-  openTrafficPage(target.board, target.alert);
+  openTrafficPage(board, alert);
 }
 
 function openTrafficPage(board: TransitBoardConfig, alert?: BoardTrafficAlert): void {
@@ -2028,7 +2048,7 @@ function createTrafficPageQuery(
 }
 
 function getBoardTrafficAlert(board: TransitBoardConfig): BoardTrafficAlert | undefined {
-  const report = trafficReportByLineRef.value.get(resolveBoardTrafficLineRef(board));
+  const report = getDashboardTrafficReport(board);
 
   if (!report) {
     return undefined;
@@ -2050,8 +2070,9 @@ function getBoardTrafficAlert(board: TransitBoardConfig): BoardTrafficAlert | un
   });
 }
 
-function resolveBoardTrafficLineRef(board: TransitBoardConfig): string {
-  return normalizeTrafficLineRef(board.schedule?.lineRef ?? board.line.ref);
+function getDashboardTrafficReport(board: TransitBoardConfig): TrafficLineReport | undefined {
+  const report = trafficReportByLineRef.value.get(resolveBoardTrafficLineRef(board));
+  return report && filterDashboardTrafficReport(report, [board]);
 }
 
 function toggleDirection(boardId: string, directionId: string): void {
@@ -3045,7 +3066,7 @@ onBeforeUnmount(() => {
                       updateHiddenDirectionIdsForBoard(board.id, $event)
                     "
                     @change-station="changeBoardStation(board, $event)"
-                    @open-traffic="(alert) => openHomeTrafficModal(board, alert)"
+                    @open-traffic="openHomeTrafficModal(board)"
                     @remove="removeCustomBoard(board.id)"
                     @open-line-page="openLinePage"
                     @open-news="openBoardNews"

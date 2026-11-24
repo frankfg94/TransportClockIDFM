@@ -118,6 +118,7 @@ export interface AppSettings {
   trafficCalendarImpactScope: TrafficCalendarImpactScope;
   trafficInfoDesign: TrafficInfoDesign;
   trafficInfoDefaultScope: TrafficInfoDefaultScope;
+  trafficFilterByDashboardBranches: boolean;
   trafficWarningLookaheadDays: TrafficWarningLookaheadDays;
   fullscreenStationPanelDesign: FullscreenStationPanelDesign;
   fullscreenStationPanelDarkTheme: boolean;
@@ -337,6 +338,7 @@ export function createDefaultAppSettings(): AppSettings {
     trafficCalendarImpactScope: "all-impacts",
     trafficInfoDesign: "ratp",
     trafficInfoDefaultScope: "optimized",
+    trafficFilterByDashboardBranches: true,
     trafficWarningLookaheadDays: TRAFFIC_WARNING_LOOKAHEAD_DAYS_DEFAULT,
     fullscreenStationPanelDesign: "all-directions",
     fullscreenStationPanelDarkTheme: false,
@@ -499,6 +501,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     trafficInfoDefaultScope: isTrafficInfoDefaultScope(value.trafficInfoDefaultScope)
       ? value.trafficInfoDefaultScope
       : defaults.trafficInfoDefaultScope,
+    trafficFilterByDashboardBranches: readBoolean(
+      value.trafficFilterByDashboardBranches,
+      defaults.trafficFilterByDashboardBranches,
+    ),
     trafficWarningLookaheadDays: parseTrafficWarningLookaheadDays(
       value.trafficWarningLookaheadDays,
     ),

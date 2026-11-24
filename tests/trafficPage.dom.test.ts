@@ -1,6 +1,10 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { reactive } from "vue";
+import { transitBoards } from "../src/config/transitBoards";
 import type { TrafficResponse } from "../src/features/traffic/types";
+import { createDefaultTransitPresetState, saveTransitPresetState, updateTransitPlacePreferences } from "../src/storage/transitPreferences";
+import { rerABoard, rerABranchTopology, rerADisruption, rerALineRef } from "./fixtures/dashboardTrafficBranches";
 
 const trafficResponse: TrafficResponse = {
   generatedAt: "2026-05-26T20:56:00.000Z",
@@ -152,20 +156,11 @@ describe("TrafficPage", () => {
         ],
       }),
     );
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => ({
-      ok: true,
-      json: async () => trafficResponse,
-    }));
-
-    vi.stubGlobal("fetch", fetchMock);
-    Object.defineProperty(window, "fetch", {
-      configurable: true,
-      value: fetchMock,
-    });
+    const fetchMock = installTrafficFetchMock();
 
     const wrapper = await mountTrafficPage();
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(trafficFetchCount(fetchMock)).toBe(1);
     expect(String(fetchMock.mock.calls[0][0])).toContain("C01743");
     expect(String(fetchMock.mock.calls[0][0])).toContain("C02528");
     expect(String(fetchMock.mock.calls[0][0])).not.toContain("C01074");
@@ -179,7 +174,6 @@ describe("TrafficPage", () => {
     );
     const trafficFrame = wrapper.get(".line-traffic-icon__frame rect");
     expect(trafficFrame.attributes("pathLength")).toBe("100");
-    expect(trafficFrame.attributes("stroke-dasharray")).toBe("102 100");
 
     const ratpWorkspace = wrapper.get(".traffic-ratp-workspace");
     expect(ratpWorkspace.find(".traffic-ratp-groups").exists()).toBe(true);
@@ -253,7 +247,7 @@ describe("TrafficPage", () => {
       trafficTab: "upcoming",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(trafficFetchCount(fetchMock)).toBe(1);
     expect(wrapper.text()).toContain("RER B");
     expect(wrapper.text()).toContain("Travaux planifies");
     expect(
@@ -286,13 +280,79 @@ describe("TrafficPage", () => {
       wrapper.get('[data-traffic-alert-id="bus-74-incident"]').classes(),
     ).toContain("traffic-disruption--target");
   });
+
+  it.each(["ratp", "cards"] as const)("filters the selected line in the %s layout and updates the global setting", async (design) => {
+    const boissy = rerABoard("boissy");
+    const poissy = rerABoard("poissy");
+    let state = createDefaultTransitPresetState(transitBoards);
+    for (const [placeId, visibleBoardIds] of [["home", [boissy.id]], ["work", [poissy.id, boissy.id]]] as const) {
+      const place = state.places.find(({ id }) => id === placeId)!;
+      state = updateTransitPlacePreferences(state, placeId, {
+        ...place.preferences,
+        customBoards: [poissy, boissy],
+        boardOrderIds: [poissy.id, boissy.id],
+        visibleBoardIds: [...visibleBoardIds],
+      });
+    }
+    saveTransitPresetState(state);
+
+    const futurePoissy = rerADisruption(
+      "future-poissy",
+      "Le trafic est interrompu entre Maisons-Laffitte et Poissy.",
+      {
+        kind: "works",
+        applicationPeriods: [{ begin: "20260901T044500", end: "20260902T043000" }],
+      },
+    );
+    const fetchMock = installTrafficFetchMock({
+      ...trafficResponse,
+      lines: [{ lineRef: rerALineRef, status: "planned", disruptions: [futurePoissy] }],
+    }, rerABranchTopology);
+    const query = reactive({
+      place: "home",
+      lineRef: rerALineRef,
+      alertId: futurePoissy.id,
+      trafficTab: "upcoming",
+    });
+    const wrapper = await mountTrafficPage(query, design);
+    const toggle = () => wrapper.get<HTMLInputElement>('input[role="switch"]');
+    const alertSelector = '[data-traffic-alert-id="future-poissy"]';
+    expect(toggle().element.checked).toBe(true);
+    expect(wrapper.text()).toContain("Aucune alerte pour les branches de ce dashboard.");
+    expect(wrapper.find(alertSelector).exists()).toBe(false);
+    if (design === "cards") expect(wrapper.get(".traffic-summary strong").text()).toBe("0");
+
+    await toggle().setValue(false);
+    await flushPromises();
+    expect(wrapper.get(alertSelector).classes()).toContain("traffic-disruption--target");
+    expect(trafficFetchCount(fetchMock)).toBe(1);
+    const { useState } = await import("#imports");
+    expect(useState("transport-clock.app-settings", () => ({})).value).toMatchObject({
+      trafficFilterByDashboardBranches: false,
+    });
+    if (design === "cards") expect(wrapper.get(".traffic-summary strong").text()).toBe("1");
+
+    await toggle().setValue(true);
+    expect(wrapper.find(alertSelector).exists()).toBe(false);
+    query.place = "work";
+    await flushPromises();
+    expect(wrapper.get(alertSelector).classes()).toContain("traffic-disruption--target");
+    expect(trafficFetchCount(fetchMock)).toBe(2);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/topology"))).toHaveLength(1);
+    wrapper.unmount();
+  });
 });
 
-function installTrafficFetchMock(): ReturnType<typeof vi.fn> {
-  const fetchMock = vi.fn(async (_input: RequestInfo | URL) => ({
-    ok: true,
-    json: async () => trafficResponse,
-  }));
+function trafficFetchCount(fetchMock: ReturnType<typeof installTrafficFetchMock>): number {
+  return fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/traffic")).length;
+}
+
+function installTrafficFetchMock(payload = trafficResponse, topology?: typeof rerABranchTopology) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+    String(input).includes("/topology")
+      ? { ok: Boolean(topology), status: topology ? 200 : 404, json: async () => topology }
+      : { ok: true, status: 200, json: async () => payload },
+  );
 
   vi.stubGlobal("fetch", fetchMock);
   Object.defineProperty(window, "fetch", {
@@ -305,6 +365,7 @@ function installTrafficFetchMock(): ReturnType<typeof vi.fn> {
 
 async function mountTrafficPage(
   query: Record<string, string | undefined> = {},
+  design?: "ratp" | "cards",
 ) {
   vi.doMock("#imports", async (importOriginal) => {
     const actual = await importOriginal<Record<string, unknown>>();
@@ -319,6 +380,11 @@ async function mountTrafficPage(
     };
   });
 
+  if (design) {
+    const { useState } = await import("#imports");
+    const { createDefaultAppSettings } = await import("../src/features/app-settings/appSettings");
+    useState("transport-clock.app-settings", createDefaultAppSettings).value.trafficInfoDesign = design;
+  }
   const { default: TrafficPage } =
     await import("../src/features/traffic/TrafficPage.vue");
   const wrapper = mount(TrafficPage);

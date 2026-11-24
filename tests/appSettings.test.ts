@@ -260,6 +260,12 @@ describe("app settings", () => {
     ).toBe(false);
   });
 
+  it("enables dashboard branch filtering for old settings and persists an explicit off choice", () => {
+    expect(normalizeAppSettings({ version: 1 }).trafficFilterByDashboardBranches).toBe(true);
+    const saved = JSON.stringify(normalizeAppSettings({ trafficFilterByDashboardBranches: false }));
+    expect(normalizeAppSettings(JSON.parse(saved)).trafficFilterByDashboardBranches).toBe(false);
+  });
+
   it("allows disabling user location while keeping it enabled by default", () => {
     expect(createDefaultAppSettings().showUserLocation).toBe(true);
     expect(normalizeAppSettings({ showUserLocation: false }).showUserLocation).toBe(false);

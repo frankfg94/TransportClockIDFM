@@ -1081,6 +1081,12 @@ const settingsSearchEntries = computed<SettingsSearchEntry[]>(() => [
     getSettingsOptionLabels(trafficInfoDefaultScopeLocalizedOptions.value),
   ),
   createSettingsSearchEntry(
+    "traffic.dashboard-branches",
+    "traffic",
+    t("traffic.dashboardBranches"),
+    t("traffic.dashboardBranchesDescription"),
+  ),
+  createSettingsSearchEntry(
     "traffic.cache",
     "traffic",
     t("settings.trafficCache.title"),

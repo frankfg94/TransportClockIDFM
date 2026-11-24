@@ -94,23 +94,30 @@ export function buildFrequencyGraph(topology: LineTopology): FrequencyGraph {
   // In a Y, the common arm also ends at a physical terminal. Identify it
   // using complete terminal-to-terminal topology paths. Intermediate short
   // workings are ignored; express calls cannot add edges or create sections.
+  const paths = getFrequencyTerminalPaths(topology, graph);
+  if (paths) {
+    for (const section of sections) {
+      if (paths.every(path => section.stationIds.every(id => path.includes(id)))) section.kind = "shared";
+    }
+  }
+  return graph;
+}
+
+export function getFrequencyTerminalPaths(
+  topology: LineTopology,
+  graph: FrequencyGraph,
+): string[][] | undefined {
   const terminalPairs = new Map<string, [string, string]>();
   for (const pattern of topology.patterns) {
     const from = pattern.stops[0], to = pattern.stops.at(-1);
-    if (!from || !to || from === to || !terminals.has(from) || !terminals.has(to)) continue;
+    if (!from || !to || from === to || !graph.terminals.has(from) || !graph.terminals.has(to)) continue;
     const pair = [from, to].sort() as [string, string];
     terminalPairs.set(JSON.stringify(pair), pair);
   }
   const coveredTerminals = new Set([...terminalPairs.values()].flat());
-  if (terminalPairs.size > 1 && coveredTerminals.size === terminals.size) {
-    const paths = [...terminalPairs.values()].map(([from, to]) => findFrequencyPath(graph, from, to));
-    if (paths.every((path): path is string[] => Boolean(path))) {
-      for (const section of sections) {
-        if (paths.every(path => section.stationIds.every(id => path.includes(id)))) section.kind = "shared";
-      }
-    }
-  }
-  return graph;
+  if (terminalPairs.size < 2 || coveredTerminals.size !== graph.terminals.size) return undefined;
+  const paths = [...terminalPairs.values()].map(([from, to]) => findFrequencyPath(graph, from, to));
+  return paths.every((path): path is string[] => Boolean(path)) ? paths : undefined;
 }
 
 /** Do not choose arbitrarily between equally plausible routes around a loop. */
